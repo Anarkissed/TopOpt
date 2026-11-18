@@ -1,9 +1,12 @@
 #ifndef TOPOPT_STRUT_STRENGTH_HPP
 #define TOPOPT_STRUT_STRENGTH_HPP
 
-// De-homogenized octet strut-strength REPORT (task 2026-07-31-lattice-strut-
-// strength-report). REPORT ONLY — nothing here feeds the acceptance gate;
-// `lattice_accepted` keeps meaning exactly what it meant before this file existed.
+// De-homogenized strut strength, PER TYPE (task 2026-07-31-lattice-strut-strength-
+// report; octet from PR 259, eight more types measured 2026-11-09, ruling 11-08 (B)).
+// What reads it: analyze_fixed_design reports it on every lattice posture, and folds
+// it into the gate only when gate_on_strut_strength is armed or no solid voxel carries
+// load (ruling 11-06 2(a)); the new engine's strength check also puts it in its verdict
+// (struts_pass, rule V5). Nothing here decides a verdict by itself.
 //
 // PR 259 (handoff 2026-07-31-lattice-dehomogenization-probe) measured the map from
 // a latticed voxel's MACRO stress tensor to the peak stress in its struts:
@@ -123,7 +126,8 @@ struct StrutStrengthReport {
 };
 
 // Evaluate the measured octet strut-strength law over one solved macro stress
-// field. REPORT ONLY — callers must not gate on the result (bar L1).
+// field. A report: the callers above decide whether a verdict reads it (bar L1 holds
+// for every caller that does not say otherwise).
 //
 //   stress_tensor_field — flattened grid-indexed (6·n), Voigt [xx,yy,zz,xy,yz,zx],
 //                         TRUE shear, MPa — FixedDesignAnalysis::stress_tensor_field.
@@ -173,6 +177,9 @@ StrutStrengthReport evaluate_strut_strength(
 // byte for byte; every other type names its own evidence folder and its own measured
 // bulk K_dev drift from vpc 32 to 48. Throws for a type with no table, like the above.
 std::string strut_law_source(LatticeTopology topo);
+// The density under which this type's law rests on a BULK-ONLY row (no boundary value measured there), so a strut
+// pass must not be given on it alone: 0.10 for octet (its 0.04959 row, 2026-11-17), 0 for every other type.
+double strut_law_bulk_only_below(LatticeTopology topo);
 std::string strut_law_resolution_note(LatticeTopology topo);
 
 }  // namespace topopt

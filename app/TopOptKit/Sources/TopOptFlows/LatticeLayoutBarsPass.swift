@@ -28,10 +28,18 @@ public struct LatticeLayoutBarsInputs: Equatable {
     public var solid: LatticeLayoutSolidGrid?
     /// One per bar, core's bar_flags (bit 16: a flat bridge, drawn SQUARE with a level underside, as the print writes it).
     public var flags: [UInt8]
-    public init(token: Int, bars: [Float], hidden: Bool = false, solid: LatticeLayoutSolidGrid? = nil, flags: [UInt8] = []) {
+    /// ★ Install 3: one colour per bar, the old preview's key (LatticeLayoutColours); empty = the one interior colour.
+    public var colours: [SIMD4<Float>] = []
+    /// Which colouring `colours` is (a new key uploads them; the bars stay).
+    public var colourKey: Int = 0
+    public init(token: Int, bars: [Float], hidden: Bool = false, solid: LatticeLayoutSolidGrid? = nil, flags: [UInt8] = [],
+                colours: [SIMD4<Float>] = [], colourKey: Int = 0) {
         self.token = token; self.bars = bars; self.hidden = hidden; self.solid = solid; self.flags = flags
+        self.colours = colours; self.colourKey = colourKey
     }
-    public static func == (a: Self, b: Self) -> Bool { a.token == b.token && a.hidden == b.hidden && a.solid?.token == b.solid?.token }
+    public static func == (a: Self, b: Self) -> Bool {
+        a.token == b.token && a.hidden == b.hidden && a.solid?.token == b.solid?.token && a.colourKey == b.colourKey
+    }
 }
 
 /// The engine's map for the solid view (LatticeLayoutSession.grid): 2 signed bytes per voxel (open, inside), x fastest;
@@ -149,7 +157,8 @@ struct BarGBuf {
 
 fragment BarGBuf bar_gbuffer(BarVOut in [[stage_in]],
                              const device float4* bars [[buffer(0)]],
-                             constant BarFrame& F [[buffer(1)]]) {
+                             constant BarFrame& F [[buffer(1)]],
+                             const device float4* colours [[buffer(2)]]) {
     float4 A = bars[2 * in.iid], B = bars[2 * in.iid + 1];
     float R = max(A.w, 1e-4);
     // this fragment's ray, from the inverse clip matrix: right for Orthographic and Perspective alike
@@ -190,7 +199,8 @@ fragment BarGBuf bar_gbuffer(BarVOut in [[stage_in]],
     BarGBuf o;
     o.eyeZ = -eyeP.z;
     o.enormal = float4(eyeN, 0.0);
-    o.albedo = float4(F.albedo.rgb, 1.0);
+    // ★ Install 3: albedo.w < 0 = one colour per bar (the old key's, LatticeLayoutColours)
+    o.albedo = float4(F.albedo.w < 0.0 ? colours[in.iid].rgb : F.albedo.rgb, 1.0);
     o.depth = clip.z / clip.w;
     return o;
 }
@@ -316,6 +326,9 @@ final class LatticeLayoutBarsPass {
     /// the Mac: 21 ms a frame without, 25–29 ms with). The tests' red control turns them off.
     static var drawWalls = true
     private(set) var buffer: MTLBuffer?
+    /// ★ Install 3: one colour per bar (float4), or nil = the one colour.
+    private(set) var colourBuffer: MTLBuffer?
+    private(set) var colourKey = -1
     private(set) var count = 0
     private(set) var token = -1
     var hidden = false
@@ -411,6 +424,16 @@ final class LatticeLayoutBarsPass {
         count = packed.count / 2
         buffer = packed.isEmpty ? nil : device.makeBuffer(bytes: packed, length: MemoryLayout<SIMD4<Float>>.stride * packed.count,
                                                           options: .storageModeShared)
+        uploadColours(inputs)
+    }
+
+    /// ★ Install 3: the bars' colours (one per bar), or none (the one colour). A count that is not the bars' is none.
+    func uploadColours(_ inputs: LatticeLayoutBarsInputs) {
+        colourKey = inputs.colourKey
+        colourBuffer = inputs.colours.count == count && count > 0
+            ? device.makeBuffer(bytes: inputs.colours, length: MemoryLayout<SIMD4<Float>>.stride * inputs.colours.count,
+                                options: .storageModeShared)
+            : nil
     }
 
     /// 7 floats per bar → two float4 per bar (radius = width / 2; the second's w = the bar's flags). Tests read it.
@@ -440,7 +463,7 @@ final class LatticeLayoutBarsPass {
         guard isDrawable, let buffer, enc.device === device else { return false }
         let c = Self.colour
         var f = Frame(clipFromModel: clipFromModel, modelFromClip: clipFromModel.inverse, eyeFromModel: eyeFromModel,
-                      eyeNormalBasis: eyeNormalBasis, albedo: SIMD4(Float(c.r), Float(c.g), Float(c.b), 1))
+                      eyeNormalBasis: eyeNormalBasis, albedo: SIMD4(Float(c.r), Float(c.g), Float(c.b), colourBuffer == nil ? 1 : -1))
         enc.setRenderPipelineState(pipeline)
         enc.setDepthStencilState(depthState)
         enc.setCullMode(.none)
@@ -448,6 +471,7 @@ final class LatticeLayoutBarsPass {
         enc.setVertexBytes(&f, length: MemoryLayout<Frame>.stride, index: 1)       // fixed size, never a growing list
         enc.setFragmentBuffer(buffer, offset: 0, index: 0)
         enc.setFragmentBytes(&f, length: MemoryLayout<Frame>.stride, index: 1)
+        enc.setFragmentBuffer(colourBuffer ?? buffer, offset: 0, index: 2)   // bound either way (read only when albedo.w < 0)
         enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 36, instanceCount: count)
         return true
     }
@@ -477,6 +501,7 @@ extension MeshRenderer {
         guard let pass = layoutBars else { return false }
         var changed = false
         if pass.token != inputs.token { pass.upload(inputs); changed = true }
+        else if pass.colourKey != inputs.colourKey { pass.uploadColours(inputs); changed = true }   // ★ Install 3
         if pass.hidden != inputs.hidden { pass.hidden = inputs.hidden; changed = true }
         if pass.gridToken != (inputs.solid?.token ?? -1) { pass.uploadGrid(inputs.solid); changed = true }
         return changed

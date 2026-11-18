@@ -12,31 +12,39 @@ namespace topopt {
 
 namespace {
 
-// OCTET strut-strength law — the `*_cert` columns of
-// evidence/2026-07-31-lattice-dehomogenization-probe/kfit.csv, VERBATIM (PR 259).
-// Per rho: the ENVELOPE over bulk (periodic interior), free-surface and cut-cell
-// strut populations of the exact worst-case amplifications
+// OCTET strut-strength law: the FULL octet (legs and octahedral braces, the production strut cell
+// lattice_strut_cell(Octet) the generator lays), the `*_cert` columns of
+// evidence/2026-11-17-octet-full-strut-law/octet/kfit.csv, VERBATIM. Measured 2026-11-17 by
+// tests/harness/lattice_dehomog_probe.cpp (TOPOPT_DEHOMOG_TYPE=octet) on the 11-09 recipe, exactly as
+// the other eight types (below); the FCC control reproduced the 11-09 evidence byte for byte. It
+// replaces PR 259's July table, which was measured on the legs-only octet (the FCC cell), a cell
+// nobody lays (the full octet's stiffness and density laws were re-measured on 2026-11-02).
+// Per rho: the ENVELOPE over bulk (periodic interior, vpc 48), free-surface and cut-cell strut
+// populations of the exact worst-case amplifications
 //   Kd  — strut vm per unit macro vm (deviatoric worst case, exact 5x5 eigen)
 //   Kv  — strut vm per unit macro |pressure| (hydrostatic ratio)
 //   Kild/Kilv — the layer-normal (interlayer) analogues, build dir on a cube axis.
-// Rows are keyed on the SAME rho scale the tensor library uses (each probe radius
-// was calibrated through the production octet_relative_density). Resolution
-// caveat (carried): the peak is a voxelized joint peak, ~log-divergent in micro
-// resolution; rows quote the finest measured vpc, and the band-floor row
-// (rho 0.048, wall 2 voxels at vpc48) is a still-rising LOWER bound.
+// Span 0.04959 .. 0.90027 == lattice_rho_min/max(Octet): no density in the band is clamped.
+// ★ THE LOWEST ROW (0.04959) IS BULK ONLY: every boundary fixture there failed the aliasing guard
+// (vpc24 fell apart, vpc32 read rho +26 %, vpc40 -16 %), and the cut layer read about 1.6x higher
+// (Kd ~172 against the row's 108.4), so the row is a LOWER bound. Until it has a boundary value a
+// strut pass is not given on it: strut_law_bulk_only_below(Octet) = 0.10 (the next row), and the
+// strength check marks its strut result out of regime below that.
+// Resolution caveat (carried from PR 259): the peak is a voxelized joint peak, ~log-divergent in
+// micro resolution; rows quote the finest measured vpc.
 struct LawRow {
   double rho, Kd, Kv, Kild, Kilv;
 };
 constexpr std::array<LawRow, 9> kOctetStrutLaw = {{
-    {0.04762, 124.0930, 60.6036, 90.9946, 66.0605},
-    {0.09505, 65.3739, 37.8932, 67.1207, 43.5009},
-    {0.15524, 38.7510, 20.5053, 30.6208, 20.8223},
-    {0.20414, 34.7623, 21.4607, 34.0004, 21.6227},
-    {0.31619, 20.6863, 13.3207, 17.5533, 11.8537},
-    {0.44394, 11.6092, 8.0827, 12.8386, 9.5626},
-    {0.60004, 9.3845, 6.4616, 6.9696, 6.3297},
-    {0.75210, 4.6847, 3.5686, 4.2797, 4.3419},
-    {0.89598, 3.6882, 2.8571, 3.2186, 2.8771},
+    {0.04959, 108.3685, 57.0626, 68.7590, 46.0341},  // vpc 48, wall 1.0 vox; BULK ONLY (a lower bound)
+    {0.10000, 78.7478, 42.7945, 59.6058, 35.0698},   // vpc 48, wall 4.0 vox
+    {0.15700, 55.9002, 27.6657, 35.1808, 24.1727},   // vpc 48, wall 4.0 vox
+    {0.20000, 38.7718, 22.8618, 24.4197, 15.9557},   // vpc 48, wall 6.0 vox
+    {0.31300, 23.5379, 15.4270, 13.6524, 10.2743},   // vpc 48, wall 8.0 vox
+    {0.45000, 14.7720, 10.6152, 9.9659, 6.8229},     // vpc 48, wall 10.0 vox
+    {0.60000, 9.9508, 8.1374, 7.0267, 5.1523},       // vpc 48, wall 12.0 vox
+    {0.75000, 8.4235, 5.8863, 4.1941, 3.4319},       // vpc 48, wall 15.0 vox
+    {0.90027, 6.3898, 3.7379, 2.3695, 2.1135},       // vpc 48, wall 18.0 vox
 }};
 
 // ── ★ THE OTHER EIGHT TYPES' LAWS (reviewer's ruling 11-08 (B), R10) ──────────────────────
@@ -200,6 +208,11 @@ double voigt_pressure(const double s[6]) { return (s[0] + s[1] + s[2]) / 3.0; }
 
 }  // namespace
 
+double strut_law_bulk_only_below(LatticeTopology topo) {
+  // The octet's lowest row (0.04959) is bulk only (see kOctetStrutLaw): a strut pass needs the next row.
+  return topo == LatticeTopology::Octet ? kOctetStrutLaw[1].rho : 0.0;
+}
+
 double strut_law_rho_min() { return kOctetStrutLaw.front().rho; }
 double strut_law_rho_max() { return kOctetStrutLaw.back().rho; }
 
@@ -249,10 +262,11 @@ StrutStrengthReport evaluate_strut_strength(
 std::string strut_law_source(LatticeTopology topo) {
   (void)law_table_or_throw(topo, "strut_law_source");
   if (topo == LatticeTopology::Octet)
-    return "PR 259 kfit *_cert envelope (bulk/free-surface/cut "
-           "populations), evidence/2026-07-31-lattice-dehomogenization-probe/"
-           "kfit.csv; strut_vm <= Kd(rho)*vm(Sigma) + Kv(rho)*|p(Sigma)|, "
-           "interlayer analogue Kild/Kilv";
+    return "the full octet's own law (legs and braces, the cell the generator lays), measured "
+           "2026-11-17 the PR 259 way: kfit *_cert envelope (bulk/free-surface/cut populations), "
+           "evidence/2026-11-17-octet-full-strut-law/octet/kfit.csv; strut_vm <= Kd(rho)*vm(Sigma) + "
+           "Kv(rho)*|p(Sigma)|, interlayer analogue Kild/Kilv; the 0.04959 row is bulk only (a lower "
+           "bound)";
   const std::string id = lattice_topology_name(topo);
   return id + "'s own law, measured the PR 259 way: kfit *_cert envelope "
               "(bulk/free-surface/cut populations), "
@@ -266,10 +280,7 @@ std::string strut_law_resolution_note(LatticeTopology topo) {
   // Bulk K_dev, vpc 32 -> 48, over each type's rows (its k_exact_bulk.csv).
   const char* drift = nullptr;
   switch (topo) {
-    case LatticeTopology::Octet:
-      return "joint-peak law rows are mesh-divergent "
-             "(~log in micro resolution, +10-18% per 32->48 step where measured); "
-             "the band-floor row is a still-rising lower bound";
+    case LatticeTopology::Octet:       drift = "+6% to +29%"; break;   // 2026-11-17, full octet
     case LatticeTopology::SimpleCubic: drift = "-11% to +50%"; break;
     case LatticeTopology::Bcc:         drift = "+5% to +47%"; break;
     case LatticeTopology::Fcc:         drift = "+8% to +20%"; break;

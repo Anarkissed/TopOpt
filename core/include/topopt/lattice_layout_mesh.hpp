@@ -25,7 +25,9 @@
 // false and `build_mesh` reports that and returns an empty mesh.
 #pragma once
 
+#include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstddef>
 #include <memory>
 #include <string>
@@ -97,6 +99,19 @@ struct MeshSpec {
   // Set, the work is given up between its steps and LayCancelled is thrown.
   const std::atomic<bool>* stop = nullptr;
 };
+
+// Is `bar` left out of the file for the layer check's place `s` (MeshSpec::drop_at)? Its LOWEST point is at `s`
+// (within 0.45 mm in z) and the bar passes within its own radius + 0.35 mm of it. The one rule the mesh writer leaves
+// struts out by; the strength check asks it too (a cell that lost a bar gets no credit).
+inline bool bar_left_out_at(const Bar& x, const Vec3& s) {
+  const double r = 0.5 * x.width;
+  const Vec3 d{x.b.x - x.a.x, x.b.y - x.a.y, x.b.z - x.a.z};
+  const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
+  if (std::fabs(std::min(x.a.z, x.b.z) - r - s.z) > 0.45) return false;
+  const double t = l2 > 0 ? std::clamp(((s.x - x.a.x) * d.x + (s.y - x.a.y) * d.y + (s.z - x.a.z) * d.z) / l2, 0.0, 1.0) : 0.0;
+  const double ex = x.a.x + t * d.x - s.x, ey = x.a.y + t * d.y - s.y, ez = x.a.z + t * d.z - s.z;
+  return std::sqrt(ex * ex + ey * ey + ez * ez) < r + 0.35;
+}
 
 struct MeshReport {
   bool ok = false;

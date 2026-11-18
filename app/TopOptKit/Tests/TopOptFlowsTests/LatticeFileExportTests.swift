@@ -60,6 +60,59 @@ final class LatticeFileExportTests: XCTestCase {
         XCTAssertEqual(refused.why, "Nothing to lattice")
     }
 
+    /// ★ Install 3, the strength check (LatticeReview's shape, 11-17): a Structural print file carries the Lattice run's own
+    /// job as `strength_job` once the core reads it; Aesthetic and Organic never do; production stays off until that core is
+    /// in (a core that does not know the key refuses the job). The report's `strength` block is read as the shape says, and
+    /// says in one line whether the part is strong enough.
+    func testTheStrengthCheckRidesAStructuralPrintFileAndIsRead() throws {
+        var l = LatticeSettings()
+        l.chooseLatticeType(.structural)
+        XCTAssertTrue(LatticeFileJob.checksStrength(l, wired: true), "★ Structural: the check rides the file")
+        XCTAssertTrue(LatticeFileJob.checksStrength(l), "★ production: on, the core that reads it is merged")
+        var a = LatticeSettings()
+        a.chooseLatticeType(.aesthetic)
+        XCTAssertFalse(LatticeFileJob.checksStrength(a, wired: true), "★ Aesthetic never sends it (U9)")
+        var o = l
+        o.algorithm = "organic"
+        XCTAssertFalse(LatticeFileJob.checksStrength(o, wired: true), "★ Organic never reaches the new engine's file")
+        var s = LatticeLayoutSession.Settings()
+        s.allLattice = true
+        let job = try XCTUnwrap(JSONSerialization.jsonObject(with: LatticeFileJob.build(s, modelName: "m.step",
+                                                                                       strengthJob: LatticeFileJob.strengthJobName)) as? [String: Any])
+        XCTAssertEqual(job["strength_job"] as? String, "strength_job.json", "★ the job names it")
+        let plain = try XCTUnwrap(JSONSerialization.jsonObject(with: LatticeFileJob.build(s, modelName: "m.step")) as? [String: Any])
+        XCTAssertNil(plain["strength_job"], "no check asked: no key (V2)")
+
+        let doc = #"{"ok": true, "layout": {"bars": 36}, "mesh": {"mm3": 452.9, "part_mm3": 1000}, "print_check": {"clean": true},"#
+            + #" "strength": {"accepted": true, "margin_worst_case": 1.84, "safety_margin": 1.5, "not_certified": false,"#
+            + #" "not_certified_reason": "", "mass_grams": 41.6, "max_effective_von_mises_mpa": 12.3, "cells_credited": 30,"#
+            + #" "cells_no_credit": 0, "voxel_mm": 0.5, "margin_in_plane": 2.1, "margin_interlayer": 1.84,"#
+            + #" "max_interlayer_tension_mpa": 3.1, "fields": "fields.bin", "strut": {"law": "octet"}, "ms": 900}}"#
+        let r = try XCTUnwrap(LatticeFileReport.parse(Data(doc.utf8)))
+        let st = try XCTUnwrap(r.strength, "★ the strength block is read")
+        XCTAssertTrue(st.accepted)
+        XCTAssertEqual(st.marginWorstCase, 1.84, accuracy: 1e-9)
+        XCTAssertEqual(st.massGrams, 41.6, accuracy: 1e-9)
+        XCTAssertEqual(st.marginInterlayer, 1.84, accuracy: 1e-9)
+        XCTAssertEqual(st.fields, "fields.bin")
+        XCTAssertEqual(st.line, "Strong enough · margin 1.8× · 42 g")
+        var weak = st
+        weak.accepted = false; weak.marginWorstCase = 0.72
+        XCTAssertEqual(weak.line, "Not strong enough · margin 0.7×, needs 1.5×")
+        var unjudged = st
+        unjudged.notCertified = true; unjudged.notCertifiedReason = "the struts are outside the law's range"
+        XCTAssertEqual(unjudged.line, "Strength not checked: the struts are outside the law's range")
+        XCTAssertNil(try XCTUnwrap(LatticeFileReport.parse(Data(#"{"ok": true}"#.utf8))).strength, "no block: no line")
+
+        // the page: the Lattice run's own job, and only what checksStrength allows
+        let src = try String(contentsOf: FlexibleHisProject.repoRoot
+            .appendingPathComponent("app/TopOptKit/Sources/TopOptFlows/WorkspacePlaceholder.swift"), encoding: .utf8)
+        XCTAssertTrue(src.contains("guard LatticeFileJob.checksStrength(project.lattice), let request = model.makeLatticeRunRequest() else { return nil }"))
+        XCTAssertTrue(src.contains("(try? RemoteRun.buildJobJSON(request)).map { StrengthSettings.shared.addTo(strengthJob: $0) }"),
+                      "★ the job a Lattice run writes today, with the values he changed in Settings")
+        XCTAssertEqual(src.components(separatedBy: "strengthJob: printFileStrengthJob()").count - 1, 2, "★ both Export paths send it")
+    }
+
     /// Core's 10 mm STEP cube, the whole part latticed (copied to a scratch folder: the job's model is beside the job).
     func cubeJob() throws -> (dir: URL, job: Data, model: String) {
         var root = URL(fileURLWithPath: #filePath)
@@ -99,7 +152,8 @@ final class LatticeFileExportTests: XCTestCase {
               let port = Int(hp[hp.index(after: colon)...]) else { throw XCTSkip("opt-in: LATTICE_FILE_WORKER=host:port") }
         let (_, job, model) = try cubeJob()
         let config = RemoteRunnerConfig(host: String(hp[..<colon]), port: port, expectedFingerprint: CoreFingerprint.value)
-        let (stl, r) = try LatticeFileRun.drive(config: config, modelPath: model, jobJSON: job, projectName: "Export test cube")
+        let made = try LatticeFileRun.drive(config: config, modelPath: model, jobJSON: job, projectName: "Export test cube")
+        let (stl, r) = (made.stl, made.report)
         print("LATTICE-FILE cube via the worker: \(r.line), \(stl.count) bytes")
         XCTAssertTrue(r.ok)
         XCTAssertGreaterThan(stl.count, 84)

@@ -5490,7 +5490,10 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// copied back. Returns the MODEL-space point of the strut surface, or nil when
     /// the pixel is not lattice — the caller then falls through to ordinary picking.
     func latticeProbe(atNormalizedPoint p: CGPoint, width: Int, height: Int) -> LatticeProbeHit? {
+        // ★ Install 3: the new engine's bars answer too (before the pinned line, which stays as Flexible's M4 wrote it)
+        if !(layoutBarsInFrame && vertexDrawCount > 0 && width > 0 && height > 0) {
         guard vertexDrawCount > 0, latticeInFrame || flexibleLatticeInFrame, width > 0, height > 0 else { return nil }   // Flexible (PR #362) M4: a tap on a Flexible wall is found too
+        }
         // ★ his pick 11-16 (B): the frame on screen already holds the lattice's layer for THIS camera and shape — read the
         // tap from it, never draw a second whole frame for one tap. Another camera, shape or size falls back to drawing one.
         if !LatticePreviewMode.controlTapDrawsWholeFrames, lastFrameHadLatticeGBuffer,
@@ -5959,6 +5962,9 @@ struct MeshViewInputs {
     var flexibleLattice: FlexibleLatticeLayerInputs? = nil
     /// The new engine's bars (#362, LatticeLayoutBarsPass; behind "New engine (test)"). nil = today's frame.
     var layoutBars: LatticeLayoutBarsInputs? = nil
+    /// ★ his 11-16/17 (Install 3): the Outlines view's whole line set, the faces as the app sends them (`PieceOutline`);
+    /// drawn in place of the part's edges + `extraLines` when it was made on this mesh. nil = the part's own edges.
+    var pieceOutline: PieceOutline.Drawing? = nil
 }
 
 /// ★ THE LATTICE AS A LAYER OF THE MESH VIEW, NOT A VIEW BESIDE IT.
@@ -6826,6 +6832,9 @@ extension MetalMeshView {
                 h.combine(inputs.previewLines.count)
                 for f in inputs.previewLines { h.combine(f) }
                 for set in inputs.weldedFaces { h.combine(set.sorted()) }
+                // ★ his 11-16/17 (Install 3): the faces as the app sends them, over the mesh it was made on
+                let outline = inputs.pieceOutline.flatMap { $0.signature == inputs.mesh?.signature ? $0 : nil }
+                h.combine(outline?.hash ?? 0)
                 let lineKey = h.finalize()
                 if dirty || !appliedWireframe || lineKey != appliedExtraLineCount {
                     appliedExtraLineCount = lineKey
@@ -6835,7 +6844,7 @@ extension MetalMeshView {
                     // is made"). Same buffer, same pass: a cut boundary IS an edge
                     // of the surface once it exists, so it belongs to the same
                     // line set as the B-rep edges rather than to a layer of its own.
-                    let base = inputs.mesh.map {
+                    let base = outline != nil ? [] : inputs.mesh.map {
                         SurfaceWireframe.edges(of: $0, welded: inputs.weldedFaces)
                     } ?? []
                     // ★ TWO BANDS: what EXISTS, and what is being DECIDED.
@@ -6844,7 +6853,7 @@ extension MetalMeshView {
                     // moment it is made. The pattern preview is the only thing on
                     // screen that has not happened yet, and it is the only thing
                     // that wears the accent.
-                    let structure = base + (inputs.extraLines ?? [])
+                    let structure = outline?.lines ?? (base + (inputs.extraLines ?? []))
                     renderer.setWireframe(
                         structure + inputs.previewLines,
                         // ★ DARK GREY, NOT BLUE. The stage tints faces blue, so a
@@ -7700,6 +7709,17 @@ extension MetalMeshView {
 #if canImport(MetalKit)
         var copy = self
         copy.inputs.onEmptyTap = action
+        return copy
+#else
+        self
+#endif
+    }
+
+    /// ★ his 11-16/17 (Install 3): the Outlines view's line set, the faces as the app sends them (`PieceOutline`).
+    public func pieceOutline(_ drawing: PieceOutline.Drawing?) -> MetalMeshView {
+#if canImport(MetalKit)
+        var copy = self
+        copy.inputs.pieceOutline = drawing
         return copy
 #else
         self

@@ -609,6 +609,10 @@ public struct WorkspacePlaceholder: View {
     @State private var nextVersionAsk = false   // Library (B3): Optimize on a version with results asks "Optimize as vN"
     @State private var macFinding = false        // ★ B1 (note 4): Optimize is looking for the remembered Mac
     @State private var macNotAnswering = false   // ★ B1 (note 4): it looked, and the Mac never answered
+    @State private var tinyPiece: TinyCutPiece.Hit?   // ★ his 11-16 (Install 3): the press stopped on a cut piece too small for core
+    /// ★ Install 3: a Lattice press waiting for the stress check it started (grading by stress needs it); it goes on when
+    /// the field lands, and stops with the check's words if the check fails.
+    @State private var latticeAfterStress: RunRequest?
     @State private var macRetryLattice = false   // ★ T5: the run the fix line's Try again starts again
     @State private var runCouldntFinish = false  // ★ B1 (O1): the last run failed with the engine's own text
     @State private var lastRunWasLattice = false // ★ B1 (O1): which button started it (Optimize, or Lattice)
@@ -1326,12 +1330,14 @@ public struct WorkspacePlaceholder: View {
                                                         || latticeSimIsRunning)
                               }
                               : nil,
-                          layoutBars: newEngineDrawn ? newEngine.bars : nil,   // ★ the new engine (test): its bars (LatticeLayoutPreview)
+                          layoutBars: newEngineDrawn ? newEngine.drawn(stressField: stressViewOn ? latticeStressField : nil,
+                                                                       stressKey: latticeStressFieldKey) : nil,   // ★ the new engine's bars, in the old preview's colour key (Install 3)
                           flexibleLattice: flexibleMain.layer(project, stage: stage, pageUp: fullScreenPageUp))   // Flexible (PR #362) H3: the main page's lattice + its squish loop (FlexibleMainStage.swift)
                 .onEmptyTap { emptyTapClears() }   // ★ his iPad 10-26 (5): a tap on empty space clears the selection
                 .onLatticeTurning { latticeTurningChanged($0) }   // ★ his pick 11-16 (A): chips and legends hide while he turns a lattice
                 .onTapRay(primitiveTapRay)   // ★ his iPad 10-28: a tap on a keep-clear volume picks it
                 .cutSibling(SurfaceTint.siblingShows(tool: surfaceTool))   // ★ his 11-14: the other half is tinted under Union only
+                .pieceOutline(outlineDrawing)   // ★ his 11-16/17 (Install 3): Outlines draw the faces as the app sends them
                 .overlay(alignment: .bottom) {
                     if newEngineDrawn {
                         VStack(spacing: 6) {
@@ -1346,7 +1352,34 @@ public struct WorkspacePlaceholder: View {
                     }
                     else if newEngineAsked { LatticeLayoutPreviewOneLine(text: LatticeLayoutPreview.organicLine).laneFoot("new-engine") }   // ★ Organic: said
                 }   // ★ the new engine (test): its lines
-                .onChange(of: newEngineOn) { on in newEngine.update(project: project, on: on, solid: !surfaceXrayOn, stress: newEngineStress) }
+                .onChange(of: newEngineOn) { on in
+                    newEngine.update(project: project, on: on, solid: !surfaceXrayOn, stress: newEngineStress)
+                    // ★ Install 3: under the new engine the old picture goes (memory, and no stale key or card); leaving it (the
+                    // lattice page, a variant, Organic) bakes it again
+                }
+                .onChange(of: newEngineOwnsPreview) { owns in
+                    // ★ Install 3: under the new engine the old picture goes (memory, and no stale key or card); where the old
+                    // engine draws again (the lattice page, Organic) it bakes again
+                    if owns, !LatticeLayoutPreview.controlOldBakeUnderNewEngine {
+                        strutScene = nil; latticeThinWalls = nil; latticeThinWallTints = []; latticeThinWallsPromptUp = false
+                    } else if !owns, showStrutPreview, latticeViewsUp, strutScene == nil { buildStrutScene() }
+                }
+                .onChange(of: newEngine.solidReason) { reason in
+                    // ★ Install 3: his 11-09 thin-wall pop-up on the new engine — once per project, by itself, on Structural,
+                    // when the engine leaves lattice solid because the walls are too thin (its own reason, not the old bake's)
+                    guard newEngineDrawn else { return }
+                    latticeThinWalls = Self.thinWalls(reason, project: project)
+                    if let thin = latticeThinWalls, LatticeThinWallPrompt.opensByItself(
+                        finding: thin, structural: project.lattice.stageMode == .structural,
+                        setupUp: latticeSetupUp, seen: project.lattice.thinWallsNoticeSeen) {
+                        latticeThinWallsPromptUp = true
+                    }
+                    if latticeThinWalls == nil { latticeThinWallsPromptUp = false }
+                }
+                .onChange(of: newEngine.laid) { _ in
+                    // ★ Install 3: the drawer's walls and cells are the new engine's — re-derive the cards when its layout lands
+                    if newEngineDrawn, Self.perRegionCellAlgorithms.contains(project.lattice.algorithm) { refreshLatticeFaceCards() }
+                }
                 .onChange(of: surfaceXrayOn) { x in if newEngineOn { newEngine.update(project: project, on: true, solid: !x, stress: newEngineStress) } }
                 .onChange(of: project.lattice, perform: { _ in if newEngineOn { newEngineSettingsChanged(); fileExport.settingsChanged() } })   // ★ 11-16: Live waits, Click to refresh holds   // (the rebake's lattice trigger stays the page's first: OrganicPreviewBakeInputsTests)
                 .ignoresSafeArea()
@@ -1533,9 +1566,11 @@ public struct WorkspacePlaceholder: View {
                 // legend as well"). With the strut preview up the LATTICE key carries
                 // the stress scale itself, so the standalone plot legend stands down
                 // rather than putting a second colour bar on the same edge.
+                if !(newEngineDrawn && newEngine.laid != nil) {   // ★ Install 3: the new engine's key carries the stress
                 if stressViewOn, latticeStressField != nil, latticeViewsUp,
                    !(showStrutPreview && strutScene != nil) {
                     stressLegend
+                }
                 }
                 if latticeLegendMounted {
                     latticeDensityLegend
@@ -1584,7 +1619,7 @@ public struct WorkspacePlaceholder: View {
             // over the SAME live stage — the workspace chrome above is hidden while
             // it is open, so exactly one set of controls exists at a time.
             if showLatticePage { latticePageOverlay }
-            if latticeThinWallGlowUp { latticeThinWallsPromptCard }   // ★ his 11-09: the glow's pop-up
+            if latticeThinWallGlowUp || latticeThinWallPopUpOnNewEngine { latticeThinWallsPromptCard }   // ★ his 11-09: the glow's pop-up
             // ★★★ THE MODE IS ASKED BEFORE THE STAGE IS USABLE (2026-08-21). It covers
             // everything and blurs it, it has no cancel, and answering it is the only
             // way out — because the two modes make DIFFERENT CLAIMS about the same
@@ -1928,12 +1963,14 @@ public struct WorkspacePlaceholder: View {
             model.toast = "Import a part and set a lattice region first."
             return
         }
+        if stoppedForTinyPiece(request) { return }   // ★ his 11-16 (Install 3)
         // ★ B4 (APP LIST 6): the LATTICE run's own re-run card — its first button starts this request
         // (startLatticeRequest), never Topology's Optimize run
         if let prompt = ResultsReplacementPrompt.forNewRun(existing: run.outcome) {
             pendingLatticeRerun = prompt
             return
         }
+        if latticeButtonOnNewEngine { startLatticeRun(request); return }   // ★ his yes 11-17
         runCouldntFinish = false; lastRunWasLattice = true   // ★ B1 (O1)
         run.start(request)
     }
@@ -1944,8 +1981,94 @@ public struct WorkspacePlaceholder: View {
             model.toast = "Import a part and set a lattice region first."
             return
         }
+        if stoppedForTinyPiece(request) { return }   // Install 3
+        if !latticeButtonOnNewEngine { runCouldntFinish = false; lastRunWasLattice = true; run.start(request); return }
+        startLatticeRun(request)   // ★ his yes 11-17: the new engine's file job
+    }
+
+    /// ★ HIS YES 11-17 (Install 3): a regular lattice on a STEP part goes to the new engine — the print file's job, with the
+    /// strength check on Structural (`LatticeFileButton`); Organic, STL parts and Flexible keep the old run. Where it runs is
+    /// Runs on's choice, as for Optimize: a chosen Mac (a remembered one not found yet is looked for first), else ★ this iPad
+    /// (his 11-17: "Not everyone will have a mac, definitely include an iPad only option"). The run's mode says which engine.
+    private func startLatticeRun(_ request: RunRequest) {
+        guard latticeButtonOnNewEngine else {
+            runCouldntFinish = false; lastRunWasLattice = true   // ★ B1 (O1)
+            run.start(request)
+            return
+        }
+        // a chosen Mac not found yet is looked for first; if it never answers, the button says so as Optimize's does
+        if compute.wantsRemote, compute.activeRemote == nil { findTheMac { startLatticeRun(request) }; return }
+        let strengthJob = LatticeFileJob.checksStrength(project.lattice, wired: LatticeFileButton.wired)
+            ? strengthJobJSON(request) : nil   // the Lattice run's own job, as Export sends it
+        let job: LatticeFileJob.ForPart
+        switch LatticeFileJob.forPart(project, stress: newEngineStress, strengthJob: strengthJob) {
+        case .success(let j): job = j
+        case .failure(let why):
+            // grading by stress with no stress result yet: one press runs the check first, then lattices
+            if why.line == LatticeFileExport.noStressLine, !model.makeLatticeSimContexts().isEmpty, latticeAfterStress == nil {
+                latticeAfterStress = request
+                runNewEngineStressCheck()
+                model.toast = LatticeFileButton.stressFirstLine
+                return
+            }
+            model.toast = why.line; return
+        }
         runCouldntFinish = false; lastRunWasLattice = true   // ★ B1 (O1)
-        run.start(request)
+        let density = model.densityGCm3(for: project.material)
+        // the old run's runner stays the run's own: this one is set for this start only (`start` takes it as it begins)
+        let before = run.runner
+        let fileRequest = request.withJobMode(LatticeFileButton.jobMode)
+        if let config = compute.activeRemote {
+            run.runner = LatticeFileButton.runner(config: config, job: job, projectName: project.name, strengthJob: strengthJob,
+                                                  densityGCm3: density)
+            run.start(fileRequest, remote: true, workerName: compute.selectedWorkerName)
+        } else {
+            run.runner = LatticeFileButton.deviceRunner(job: job, strengthJob: strengthJob, materialsPath: request.materialsPath,
+                                                        rulesPath: request.rulesPath, densityGCm3: density)
+            run.start(fileRequest)
+        }
+        run.runner = before
+    }
+
+    /// ★ Install 3: the thin-wall finding from the new engine's own reason — Structural, walls too thin for a whole cell or
+    /// too narrow for the cells across Structural needs, or (the whole part latticed) the part itself too shallow for them
+    /// (on his first A1 pad the engine says "the region is too shallow", 93 %); the thinnest wall it lattices is that many of
+    /// the smallest cell. A face prism too shallow is his depth, not a thin wall: its own line says so, no pop-up.
+    static func thinWalls(_ r: SolidReason?, project p: ProjectModel) -> LatticeStructuralThinWalls.Finding? {
+        guard let r, (p.lattice.stageMode ?? .structural) == .structural,
+              r.cause == .wallNarrow || r.cause == .tooFewAcross || (r.cause == .regionShallow && p.latticeStartsWhole)
+        else { return nil }
+        let s = LatticeLayoutPreview.settings(p, referenceMPa: 0)
+        let smallest = s.cellMinMM > 0 ? s.cellMinMM : s.cellMM
+        return .init(minWallMM: Double(Swift.max(1, s.minCellsAcross)) * smallest, share: r.share)
+    }
+
+    /// Whether the Lattice button sends the new engine's job for this part (`LatticeFileButton.takes`), never on Flexible.
+    private var latticeButtonOnNewEngine: Bool {
+        LatticeFileButton.takes(project.lattice, modelPath: project.importedFile?.path) && !flexibleMain.owns(project, stage)
+    }
+
+    /// ★ his 11-16 (Install 3): a cut piece the run uses that core would refuse as too small (`TinyCutPiece`) stops the press
+    /// here, before anything is sent; the corner's fix line says so with one tap that undoes its cuts.
+    private func stoppedForTinyPiece(_ request: RunRequest) -> Bool {
+        guard let mesh = project.viewerMesh,
+              let hit = TinyCutPiece.first(in: request, regions: project.faceRegions, mesh: mesh) else {
+            tinyPiece = nil
+            return false
+        }
+        tinyPiece = hit
+        return true
+    }
+
+    /// The stopped press's piece while it is still there (undoing its cuts in Edit faces clears the line too).
+    private var tinyPieceShown: TinyCutPiece.Hit? {
+        tinyPiece.flatMap { project.faceRegions.region($0.piece) != nil ? $0 : nil }
+    }
+
+    /// The line's one tap: the piece's cuts undone, the whole face in its group (`ProjectModel.surfaceMakeWhole`).
+    private func fixTinyPiece(_ hit: TinyCutPiece.Hit) {
+        tinyPiece = nil
+        if project.surfaceMakeWhole(hit.piece).isEmpty { model.toast = TinyCutPiece.toast }
     }
 
     private var latticeRerunBinding: Binding<Bool> {
@@ -1982,6 +2105,7 @@ public struct WorkspacePlaceholder: View {
         }
         if let no = StrengthenRoute.refusal(for: request, workerSelected: compute.wantsRemote) { model.toast = no; return }   // Flexible (PR #362) H56m: redesign to strengthen (overnight plan 2026-10-25) — no design box: one line, nothing sent
         if let no = LoadScenarioRule.refusal(for: request, workerSelected: compute.wantsRemote) { model.toast = no; return }   // ★ load scenarios: core's own words, before the send
+        if stoppedForTinyPiece(request) { return }   // ★ his 11-16 (Install 3): the fix line says it, with its one tap
         lastRunRequest = request   // Optimize greys out until the inputs change
         startedRunWithLattice = lattice   // ★ B3: a failed run's Try again keeps this run's flavour
         runCouldntFinish = false; lastRunWasLattice = false   // ★ B1 (O1)
@@ -3355,6 +3479,19 @@ public struct WorkspacePlaceholder: View {
             if showStrutPreview, project.lattice.enabled { buildStrutScene() }
             if newEngineOn { newEngine.update(project: project, on: true, solid: !surfaceXrayOn, stress: newEngineStress) }   // ★ Install 2: the field landed
         }
+        .onChange(of: latticeSim.phase) { phase in   // ★ Install 3: a Lattice press that started the stress check goes on
+            guard let waiting = latticeAfterStress else { return }
+            switch phase {
+            case .complete:
+                latticeAfterStress = nil
+                if latticeStressField != nil { startLatticeRun(waiting) }
+            case .failed(let why):
+                latticeAfterStress = nil
+                model.toast = FlexibleRowCopy.fit(why, 70)
+            case .idle, .running:
+                break
+            }
+        }
         .onAppear {
             syncLatticeProxy()
             // A reopened project already carries roles and depths — the cards
@@ -3841,6 +3978,7 @@ public struct WorkspacePlaceholder: View {
                 finishLines: LatticeReport.finishLines(receipt: result.receiptJSON)))   // ★ B7 slice 2 (ruling 3)
         }
         guard let request = model.makeRunRequest() else { return }
+        if stoppedForTinyPiece(request) { model.toast = TinyCutPiece.toast; return }   // ★ his 11-16 (Install 3): no fix line here
         closeLatticePage()
         run.start(request, remote: true, workerName: compute.selectedWorkerName)
     }
@@ -4344,9 +4482,11 @@ public struct WorkspacePlaceholder: View {
         if !latticeTurning || LatticePreviewMode.controlPageFollowsCamera { latticeDensityLegendShown }
     }
     @ViewBuilder private var latticeDensityLegendShown: some View {
-        let span = latticeProxy.params.densitySpan
-        let cell = latticeProxy.params.cellMM
-        let topo = latticeProxy.params.lattice
+        // ★ Install 3: on the new engine, the span its bars are drawn over and their median cell (LatticeLayoutColours)
+        let key = newEngineDrawn ? newEngine.keyScale() : nil
+        let span = key.map { (lo: $0.lo, hi: $0.hi) } ?? latticeProxy.params.densitySpan
+        let cell = key?.cellMM ?? latticeProxy.params.cellMM
+        let topo = newEngineDrawn ? project.lattice.lattice : latticeProxy.params.lattice
         LatticeLegendPanel(
             groups: latticeLegendGroups(),
             span: span,
@@ -4360,6 +4500,7 @@ public struct WorkspacePlaceholder: View {
             // the renderer is not painting would be worse than no scale.
             stress: latticeLegendStress())
             .latticeBandChipKeepOut()      // ★ the legend: no band chip under it
+            .background(CornerPairStyle.publish("latticeDensityLegend"))   // ★ Install 3: a test finds the key (the panel itself)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
             // ★ MINIMISED, IT SITS ON THE EDGE (maintainer: "attach the legend modal
             // to the very far right side of the screen") — the point of collapsing it
@@ -4382,6 +4523,7 @@ public struct WorkspacePlaceholder: View {
                                  // below for why this must come from the RENDERER's
                                  // field and not a re-bake.
                                  bakedDensity: Float = -1) {
+        if newEngineDrawn { setNewEngineProbe(at: point, world: world); return }   // ★ Install 3: the new engine's bars
         guard let scene = strutScene else { return }
         // ★★★ THE CELL THE BAKE LAID DOWN HERE, NOT THE ONE IN THE SETTINGS
         // (maintainer, 2026-08-22: "The legend is still saying it's 2.2mm cells - which
@@ -4510,6 +4652,20 @@ public struct WorkspacePlaceholder: View {
         }
     }
 
+    /// ★ Install 3 (the old preview retired where the part has its model file, every view kept): the card on the new engine's
+    /// bars — the bar under the tap, read from what the layout laid (`LatticeLayoutPreview.read`), the same numbers its colour
+    /// was made from; the stress as the old card reads it.
+    private func setNewEngineProbe(at point: SIMD3<Float>, world: SIMD3<Float>) {
+        guard let r = newEngine.read(at: point) else { latticeLegendProbe = nil; return }
+        var mpa: Double?
+        if stressViewOn, let f = latticeStressField {
+            mpa = LatticeLayoutColours.Stress(field: f).at(point)
+        }
+        latticeLegendProbe = LatticeLegendProbe(groupID: r.klass.id, density: r.density, mm: r.widthMM, worldPoint: world,
+                                                stressMPa: mpa, cellMM: r.cellMM)
+        if latticeLegendMode.groupID != r.klass.id { latticeLegendMode = .colour(r.klass.id) }
+    }
+
     /// ★ THE CALLOUT AT THE TAP, the other half of "Both": an arrow at the point he
     /// touched, labelled with the same two numbers the key's arrow is pointing at.
     /// ★ his pick 11-16 (A): hidden while he turns the view with a lattice drawn
@@ -4593,7 +4749,8 @@ public struct WorkspacePlaceholder: View {
     /// finish there is no rim to explain, and a key listing a colour that is not on
     /// screen is the same lie as a colour on screen with no key.
     private func latticeLegendGroups() -> [LatticeLegendGroup] {
-        let hasDressing = project.lattice.boundary.previewDressingLevel > 0
+        let hasDressing = newEngineDrawn ? newEngine.hasSkinBars   // ★ Install 3: the rim row when skin bars are drawn
+            : project.lattice.boundary.previewDressingLevel > 0
         // The rim row whenever there is boundary work on screen: a finish, or the
         // solid outline beam the shape grade draws (2026-09-17: "Where is the rim and
         // skin? You removed an entire piece of the legend").
@@ -4940,9 +5097,17 @@ public struct WorkspacePlaceholder: View {
         return s.partInteriorVoxelCount == 0 || s.interiorVoxelCount == 0
     }
 
-    /// ★ THE NEW ENGINE (test) is asked for: App settings' "New engine (test)" (OFF by default) on Lattice Setup with the
-    /// lattice view up. Off, nothing of the new engine runs and the page is today's.
-    private var newEngineAsked: Bool { appSettings.newEngineTest && latticeSetupUp && showStrutPreview && latticeViewsUp }
+    /// ★ THE NEW ENGINE is asked for: Lattice Setup with the lattice view up. ★ Install 3: "New engine (test)" retired — always,
+    /// except under the tests-only hook (`AppSettings.newEngineTest = false`: the old preview, as before Install 3).
+    private var newEngineAsked: Bool { newEngineOwnsPreview && latticeSetupUp && showStrutPreview && latticeViewsUp }
+    /// ★ Install 3: the new engine is the lattice's drawer on the Lattice stage for a part with its model file (STEP, or a mesh
+    /// core imports with the app's own pseudo-faces) — not on the lattice page (a variant has no model file: his "For now, use
+    /// the old engine"), and not for Organic (`LatticeLayoutPreview.draws`; his "keep it alive"). There the old engine's bake
+    /// never runs (`buildStrutScene`), even with Lattice Settings open over the page.
+    private var newEngineOwnsPreview: Bool {
+        appSettings.newEngineTest && stage == .lattice && !showLatticePage && !flexibleMain.owns(project, stage)
+            && project.importedFile != nil && LatticeLayoutPreview.draws(project.lattice)
+    }
     private var newEngineOn: Bool { newEngineAsked && LatticeLayoutPreview.draws(project.lattice) }   // ★ Organic: the old preview
     /// …and draws in the old engine's place (its bars, the body ghosted, its lines under the view).
     private var newEngineDrawn: Bool { newEngineOn }
@@ -4974,6 +5139,11 @@ public struct WorkspacePlaceholder: View {
     /// ★ his 11-09: the glow is up — the pop-up is open on Lattice Setup and the last bake found walls.
     private var latticeThinWallGlowUp: Bool {
         latticeThinWallsPromptUp && latticeSetupUp && !latticeThinWallTints.isEmpty
+    }
+
+    /// ★ Install 3: the pop-up on the new engine, from its own reason (no glow yet: the old bake's mask is not made there).
+    private var latticeThinWallPopUpOnNewEngine: Bool {
+        newEngineDrawn && latticeThinWallsPromptUp && latticeSetupUp && latticeThinWalls != nil
     }
 
     /// ★ WHERE THE LATTICE'S VIEWS MAY SHOW AT ALL (his 11-05: "When in the face cutting screen, sometimes the legend stays
@@ -5120,6 +5290,14 @@ public struct WorkspacePlaceholder: View {
         // (2026-09-23): it was recorded at 2 of the 16 call sites, so the wizard's
         // Exit — no change — compared against a stale record and force-baked.
         latticeInputsLastBaked = project.lattice.previewBakeInputs
+        // ★ Install 3 (the old preview retired where the part has its model file): where the new engine draws, the old
+        // engine's bake does not run — its picture, key, card and lines are the new engine's. RED CONTROL: the old bake still
+        // runs underneath (before Install 3).
+        if newEngineOwnsPreview, !LatticeLayoutPreview.controlOldBakeUnderNewEngine {
+            NSLog("DIAG lattice bake: none — the new engine draws this lattice")
+            return
+        }
+        LatticeLayoutPreview.oldEngineBakes += 1   // ★ Install 3: a test's count
         // ★ AN ORGANIC BAKE WITH NO TENSOR IS A STAND-IN, AND A STAND-IN ASKS FOR THE
         // SOLVE (2026-09-25, his 17:34 screenshot: octet drawn under "Organic" after a
         // relaunch, until he saved the settings). Idempotent: nothing happens when the
@@ -5596,6 +5774,8 @@ public struct WorkspacePlaceholder: View {
                     cancelledStages.value = true
                     return
                 }
+                // ★ Install 3: the new engine took over while it ran — its picture is not the one drawn
+                if newEngineOwnsPreview, !LatticeLayoutPreview.controlOldBakeUnderNewEngine { return }
                 strutScene = scene
                 latticeThinWalls = thinWalls
                 latticeThinWallTints = thinGlow
@@ -7045,6 +7225,15 @@ public struct WorkspacePlaceholder: View {
         return SurfaceCutLines.committed(regions: project.faceRegions, in: mesh)
     }
 
+    /// ★ his 11-16 ("Shouldn't the Outline view INCLUDE cuts and unions and patterns and such?") and 11-17 ("Start on the
+    /// Outline view showing cuts and patterns"), Install 3: with any face edits, the Outlines view draws the faces the way
+    /// the app sends them — every cut and pattern line, no line inside a union (`PieceOutline`, the tap's own rule). nil = no
+    /// edits: the part's own edges, as before.
+    private var outlineDrawing: PieceOutline.Drawing? {
+        guard visible.wireframe, surfaceWireframeOn, let mesh = viewerMesh, !project.faceRegions.isEmpty else { return nil }
+        return PieceOutline.drawing(regions: project.faceRegions, in: mesh)
+    }
+
     /// ★ THE GRID A PATTERN *WOULD* MAKE — the only thing on screen that has not
     /// happened yet, so the only thing drawn in the accent colour.
     /// ★ NOT GATED ON THE WIREFRAME TOGGLE. The wireframe is a VIEW; this is the
@@ -7764,7 +7953,12 @@ public struct WorkspacePlaceholder: View {
     /// lattice came back. The part now stays until the lattice is drawn — the body alpha and the
     /// band chips read this one value.
     private var latticeOnlyShowing: Bool {
-        LatticePreviewBodyAlpha.latticeOnlyShowing(viewOn: latticeOnlyViewOn,
+        if newEngineDrawn {   // ★ Install 3: the new engine's lattice is the layer, its bars what there is to draw
+            return LatticePreviewBodyAlpha.latticeOnlyShowing(viewOn: latticeOnlyViewOn, layerDrawn: true,
+                                                              simRunning: latticeSimIsRunning,
+                                                              nothingToDraw: (newEngine.laid?.barCount ?? 0) == 0)
+        }
+        return LatticePreviewBodyAlpha.latticeOnlyShowing(viewOn: latticeOnlyViewOn,
                                                    layerDrawn: latticeLayerIsDrawn,
                                                    simRunning: latticeSimIsRunning,
                                                    nothingToDraw: latticePreviewHasNothingToDraw)
@@ -7780,7 +7974,9 @@ public struct WorkspacePlaceholder: View {
     /// through this; the mode is also reset when the preview goes off. A MINIMIZED key is not
     /// drilled in either: its column carries no "Double-tap anywhere to go back", so the hides
     /// would again have no visible way out.
-    private var latticeLegendMounted: Bool { showStrutPreview && strutScene != nil && latticeViewsUp }
+    private var latticeLegendMounted: Bool {
+        showStrutPreview && (strutScene != nil || (newEngineDrawn && newEngine.laid != nil)) && latticeViewsUp   // ★ Install 3
+    }
     private var legendDrilledIn: Bool {
         latticeLegendMounted && !latticeLegendMinimized && latticeLegendMode.drilledIn
             || flexibleMain.keyDrilledIn(project, stage, mode: latticeLegendMode)   // Flexible (PR #362) H14: the Flexible key is the key on screen there (FlexibleMainStage+Views.swift)
@@ -7792,7 +7988,13 @@ public struct WorkspacePlaceholder: View {
     private var bandChipsAvailable: Bool {
         latticeOnlyShowing && visible.latticeControls && viewerMesh != nil
             && !legendDrilledIn
-            && !(strutScene?.bandDecisions.isEmpty ?? true)
+            && !bandDecisionsShown.isEmpty
+    }
+
+    /// ★ The chips to ask: where the new engine draws, its places (D23, his 11-17 "add a chip to ask what it should be");
+    /// elsewhere (a variant's page, Organic) the old preview's band, as before.
+    private var bandDecisionsShown: [LatticeBandDecision] {
+        newEngineDrawn ? LatticeLayoutPreview.chipDecisions(newEngine.places) : strutScene?.bandDecisions ?? []
     }
 
     /// ★ THE TRANSFORM THE PART IS DRAWN WITH, for the chips: the camera the viewer
@@ -7810,13 +8012,14 @@ public struct WorkspacePlaceholder: View {
     /// The chips themselves. Re-laid out on every render — `projection` is republished on
     /// every orbit, so each chip rides its face; placement is `LatticeBandChipLayout`.
     @ViewBuilder private var latticeBandChipsOverlay: some View {
-        if latticeOnlyShowing, !bandChipsHidden, let scene = strutScene, !scene.bandDecisions.isEmpty {
+        let decisions = bandDecisionsShown
+        if latticeOnlyShowing, !bandChipsHidden, !decisions.isEmpty {
             GeometryReader { geo in
                 // the keep-out frames are `.global`; this layer ignores the safe area like
                 // the MTKView, so the difference is the layer's own origin (0 full-screen)
                 let origin = geo.frame(in: .global).origin
                 let chips = LatticeBandChipLayout.layout(
-                    scene: scene, treatments: project.lattice.bandTreatments,
+                    decisions: decisions, treatments: project.lattice.bandTreatments,
                     frame: latticeBandChipFrame, latticeOnly: latticeOnlyShowing,
                     keepOut: bandChipKeepOut.map { $0.offsetBy(dx: -origin.x, dy: -origin.y) })
                 ZStack(alignment: .topLeading) {
@@ -10448,6 +10651,7 @@ public struct WorkspacePlaceholder: View {
     /// The banner the notice draws: production's switch and probe, the plan's own verdict.
     private var latticePreviewBanner: LatticePreviewBanner? {
         guard latticeViewsUp else { return nil }   // ★ his 11-05: the preview's line never comes through into Edit faces
+        guard !newEngineDrawn else { return nil }   // ★ Install 3: the new engine says its own lines (no "Building…" for a bake that never runs)
         return LatticePreviewBanner.make(previewOn: showStrutPreview,
                                   hasModel: viewerMesh != nil,
                                   scene: strutScene,
@@ -10503,7 +10707,7 @@ public struct WorkspacePlaceholder: View {
                 .accessibilityIdentifier("lattice-preview-notice")
             }
             // ★ his iPad notes 11-09: "there should be some kind of notice" — the walls Structural leaves solid
-            if latticePreviewBanner != nil, showStrutPreview, project.lattice.stageMode == .structural,
+            if latticePreviewBanner != nil || newEngineDrawn, showStrutPreview, project.lattice.stageMode == .structural,   // ★ Install 3: and on the new engine
                let thin = latticeThinWalls {
                 HStack(alignment: .firstTextBaseline, spacing: DS.Space.xs) {
                     // ★ his 11-09: a tap on the note re-opens the glow and the pop-up
@@ -12548,7 +12752,8 @@ public struct WorkspacePlaceholder: View {
         // ★★ ONE NUMBER, ONE SOURCE (maintainer, 2026-10-03, item 5): the wall the bake measured
         // and the cell it lays there, per drawer — nil (declared depth, core's derivation) with no
         // bake yet or under an algorithm whose bake does not derive region cells.
-        let baked = LatticeRegionCells.selectableCells(project: project, scene: strutScene)
+        let baked = newEngineDrawn ? newEngine.selectableCells()   // ★ Install 3: the new engine's own walls and cells
+            : LatticeRegionCells.selectableCells(project: project, scene: strutScene)
         let bakedCopy = keys.map { baked[$0] }
         // ★ batch E (#362, ported 2026-10-08): a cut piece holds only its SHARE of its face — the
         // card's held voxels (and so its grams) are the face's, scaled by that share; nil = whole
@@ -14080,10 +14285,25 @@ public struct WorkspacePlaceholder: View {
     /// found yet is looked for first, as Optimize does).
     private func exportPrintFile() {
         if compute.wantsRemote, compute.activeRemote == nil {
-            findTheMac { fileExport.make(project: project, config: compute.activeRemote, stress: newEngineStress) }
+            findTheMac { fileExport.make(project: project, config: compute.activeRemote, stress: newEngineStress,
+                                         strengthJob: printFileStrengthJob()) }
             return
         }
-        fileExport.make(project: project, config: compute.activeRemote, stress: newEngineStress)
+        fileExport.make(project: project, config: compute.activeRemote, stress: newEngineStress, strengthJob: printFileStrengthJob())
+    }
+
+    /// ★ Install 3, the strength check (LatticeReview's shape, 11-17): for a Structural lattice, the print file's job carries the
+    /// run job a Lattice run writes today (`lattice_part`), so the Mac checks the new layout against his loads, supports,
+    /// material and safety margin. nil: Aesthetic (U9), Organic, a core that does not read it yet, or no runnable request.
+    private func printFileStrengthJob() -> Data? {
+        guard LatticeFileJob.checksStrength(project.lattice), let request = model.makeLatticeRunRequest() else { return nil }
+        return strengthJobJSON(request)
+    }
+
+    /// The strength check's job: the Lattice run's own (`RemoteRun.buildJobJSON`), with ★ the values he changed in Settings
+    /// (`strength_settings`, his 11-17; none changed: the same bytes).
+    private func strengthJobJSON(_ request: RunRequest) -> Data? {
+        (try? RemoteRun.buildJobJSON(request)).map { StrengthSettings.shared.addTo(strengthJob: $0) }
     }
 
     private func findTheMac(then go: @escaping () -> Void) {
@@ -14499,6 +14719,8 @@ extension WorkspacePlaceholder {
         let line: (words: String, fix: String, info: String?, act: () -> Void)
         if let b = topologyBlock {
             line = (b.words, b.fix, b.info, { fixTopologyBlock(b) })
+        } else if let hit = tinyPieceShown {   // ★ his 11-16 (Install 3)
+            line = (TinyCutPiece.words, TinyCutPiece.fix, TinyCutPiece.info, { fixTinyPiece(hit) })
         } else if macNotAnswering {
             line = (Self.macNotAnsweringWords, "Try again", nil, {
                 macNotAnswering = false; runCouldntFinish = false; requestRun(lattice: macRetryLattice)

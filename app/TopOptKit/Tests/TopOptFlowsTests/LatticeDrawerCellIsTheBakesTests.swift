@@ -88,7 +88,8 @@ final class LatticeDrawerCellIsTheBakesTests: XCTestCase {
         XCTAssertTrue(cells.contains("let derived = regionCells(project: project, scene: scene, regions: regions,\n                                  widthPercentile: 0.5, quiltStep: true)"),
                       "the drawer reads the stepped bake's own inputs (p50, the quilt step)")
         let ws = try src("WorkspacePlaceholder.swift")
-        XCTAssertTrue(ws.contains("let baked = LatticeRegionCells.selectableCells(project: project, scene: strutScene)"))
+        // ★ Install 3: where the new engine draws, its own walls and cells; elsewhere the old bake's, as before
+        XCTAssertTrue(ws.contains("let baked = newEngineDrawn ? newEngine.selectableCells()   // ★ Install 3: the new engine's own walls and cells\n            : LatticeRegionCells.selectableCells(project: project, scene: strutScene)"))
         // (+ the job's cap since the E1 merge, 2026-10-08: the card's floors are the run's)
         XCTAssertTrue(ws.contains("memberWidthMM: bakedCopy[i]?.measuredWidthMM,\n                    cellMM: bakedCopy[i]?.cellMM,\n                    maxRelativeDensity: capCopy)"))
         XCTAssertTrue(ws.contains("if isLastStage, Self.perRegionCellAlgorithms.contains(project.lattice.algorithm) {\n                    refreshLatticeFaceCards()"),

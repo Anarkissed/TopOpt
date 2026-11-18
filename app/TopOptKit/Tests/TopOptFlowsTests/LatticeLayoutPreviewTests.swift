@@ -16,13 +16,17 @@ import simd
 @MainActor
 final class LatticeLayoutPreviewTests: XCTestCase {
 
-    func testTheSwitchIsOffByDefault() throws {
+    /// ★ Install 3 (his 11-17 "Implement it as soon as possible"): "New engine (test)" is retired — the new engine is on, an
+    /// Off stored on his iPad is not read, and App settings has no row for it.
+    func testTheSwitchIsRetired() throws {
         let suite = "LatticeLayoutPreviewTests-\(UUID().uuidString)"
         defer { UserDefaults().removePersistentDomain(forName: suite) }
-        let s = AppSettings(defaults: try XCTUnwrap(UserDefaults(suiteName: suite)))
-        XCTAssertFalse(s.newEngineTest, "★ New engine (test) is OFF until he turns it on")
-        s.newEngineTest = true
-        XCTAssertTrue(AppSettings(defaults: try XCTUnwrap(UserDefaults(suiteName: suite))).newEngineTest, "it is remembered")
+        let d = try XCTUnwrap(UserDefaults(suiteName: suite))
+        d.set(false, forKey: AppSettings.newEngineKey)   // his stored Off
+        XCTAssertTrue(AppSettings(defaults: d).newEngineTest, "★ the new engine is on whatever was stored")
+        let src = try String(contentsOf: FlexibleHisProject.repoRoot
+            .appendingPathComponent("app/TopOptKit/Sources/TopOptFlows/AppSettingsView.swift"), encoding: .utf8)
+        XCTAssertFalse(src.contains("row(\"New engine (test)\")"), "★ no App settings row")
     }
 
     func testPackHalvesTheWidthAndKeepsTheEnds() {

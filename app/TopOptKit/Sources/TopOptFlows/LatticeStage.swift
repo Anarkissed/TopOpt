@@ -527,6 +527,8 @@ public enum LatticeCellsRow: String, Equatable, Sendable, CaseIterable {
     /// ★ Install 2 (LatticeReview's design: "Structural in 2a is graded against the material but NOT checked afterwards. The
     /// page must not say it is."): under App settings' New engine (test), the line says no check is made yet.
     public static let strengthNewEngineLine = "Not checked yet with the new engine: its strength check comes in a later install."
+    /// ★ Install 3 (LatticeReview's strength check): where the check runs, once the core that reads it is in.
+    public static let strengthOnExportLine = "Checked on the Mac when the print file is made (Export): strong enough or not, and its weight."
     public static let tiesNotOrganic = "Ties are an organic setting: pick Organic under Grade style."
     public static let tiesOrganic = "Transfer ties, in Organic \u{203A} Fine-tune."
     public static let overhangsLine = "Printed as traced: core removed the flare stage (#358)."

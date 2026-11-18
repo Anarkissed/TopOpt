@@ -7342,7 +7342,207 @@ static void test_size_step() {
   block("9 threads and speed");
 }
 
+
+// ── D23: places (the faces a region's prism runs into that no rule decides) ─────────────────────────────────────────
+// A solid made of filled cells of a grid (xs, ys, zs), its boundary as quads of the grid, so the mesh has no
+// T-junction. A face is every quad of one oriented plane: its id is the order that plane is first met in.
+struct GridModel {
+  StepModel model;
+  std::map<std::array<long long, 3>, int> id;   // (axis, sign, coordinate in microns) -> face id
+  int face(int axis, int sign, double at) const {
+    const auto it = id.find({axis, sign, std::llround(at * 1e6)});
+    return it == id.end() ? -1 : it->second;
+  }
+};
+static GridModel grid_model(const std::vector<double>& xs, const std::vector<double>& ys,
+                            const std::vector<double>& zs, const std::function<bool(int, int, int)>& filled) {
+  GridModel g;
+  StepModel& m = g.model;
+  const int n[3] = {static_cast<int>(xs.size()) - 1, static_cast<int>(ys.size()) - 1, static_cast<int>(zs.size()) - 1};
+  const std::vector<double>* c[3] = {&xs, &ys, &zs};
+  auto full = [&](int i, int j, int k) {
+    return i >= 0 && j >= 0 && k >= 0 && i < n[0] && j < n[1] && k < n[2] && filled(i, j, k);
+  };
+  for (int i = 0; i < n[0]; ++i)
+    for (int j = 0; j < n[1]; ++j)
+      for (int k = 0; k < n[2]; ++k) {
+        if (!full(i, j, k)) continue;
+        const int ijk[3] = {i, j, k};
+        for (int axis = 0; axis < 3; ++axis)
+          for (int sign = -1; sign <= 1; sign += 2) {
+            int o[3] = {i, j, k};
+            o[axis] += sign;
+            if (full(o[0], o[1], o[2])) continue;
+            const double at = (*c[axis])[static_cast<std::size_t>(ijk[axis] + (sign > 0 ? 1 : 0))];
+            const std::array<long long, 3> key{axis, sign, std::llround(at * 1e6)};
+            auto it = g.id.find(key);
+            if (it == g.id.end()) {
+              it = g.id.emplace(key, m.face_count++).first;
+              StepFaceInfo info;
+              info.kind = StepSurfaceKind::Plane;
+              info.plane_normal = {axis == 0 ? double(sign) : 0.0, axis == 1 ? double(sign) : 0.0,
+                                   axis == 2 ? double(sign) : 0.0};
+              info.plane_origin = {axis == 0 ? at : 0.0, axis == 1 ? at : 0.0, axis == 2 ? at : 0.0};
+              m.faces.push_back(info);
+            }
+            const int a1 = (axis + 1) % 3, a2 = (axis + 2) % 3;
+            Vec3 q[4];
+            for (int v = 0; v < 4; ++v) {
+              double xyz[3];
+              xyz[axis] = at;
+              xyz[a1] = (*c[a1])[static_cast<std::size_t>(ijk[a1] + ((v == 1 || v == 2) ? 1 : 0))];
+              xyz[a2] = (*c[a2])[static_cast<std::size_t>(ijk[a2] + ((v >= 2) ? 1 : 0))];
+              q[v] = {xyz[0], xyz[1], xyz[2]};
+            }
+            // (a1, a2) is right-handed about +axis: flip for the -axis side.
+            if (sign < 0) std::swap(q[1], q[3]);
+            for (int t = 0; t < 2; ++t) {
+              const int b = static_cast<int>(m.mesh.vertices.size());
+              m.mesh.vertices.insert(m.mesh.vertices.end(), {q[0], q[t ? 2 : 1], q[t ? 3 : 2]});
+              m.mesh.triangles.push_back({b, b + 1, b + 2});
+              m.triangle_face.push_back(it->second);
+            }
+          }
+      }
+  m.solid_count = 1;
+  return g;
+}
+static bool same_places(const std::vector<Place>& a, const std::vector<Place>& b) {
+  if (a.size() != b.size()) return false;
+  for (std::size_t i = 0; i < a.size(); ++i)
+    if (a[i].region != b[i].region || a[i].faces != b[i].faces || a[i].area_mm2 != b[i].area_mm2 ||
+        a[i].now != b[i].now || a[i].point.x != b[i].point.x || a[i].point.y != b[i].point.y ||
+        a[i].point.z != b[i].point.z || a[i].normal.x != b[i].normal.x || a[i].normal.y != b[i].normal.y ||
+        a[i].normal.z != b[i].normal.z)
+      return false;
+  return true;
+}
+static void test_places() {
+  // A 60 x 60 x 20 block, lattice under its whole top face 18 mm deep. A tunnel x 20..40, y 0..30, z 5..12 runs in
+  // from the front (y = 0) under it: the prism crosses its floor, its two walls and its back.
+  const GridModel tunnel = grid_model({0, 20, 40, 60}, {0, 30, 60}, {0, 5, 12, 20},
+                                      [](int i, int j, int k) { return !(i == 1 && j == 0 && k == 1); });
+  const int top = tunnel.face(2, 1, 20), floor = tunnel.face(2, 1, 5), ceiling = tunnel.face(2, -1, 12);
+  const int wall_l = tunnel.face(0, 1, 20), wall_r = tunnel.face(0, -1, 40), back = tunnel.face(1, -1, 30);
+  CHECK(top >= 0 && floor >= 0 && ceiling >= 0 && wall_l >= 0 && wall_r >= 0 && back >= 0);
+  Settings st;
+  st.min_strut_lines = kFewestStrutLines;
+  st.regions = {{1, Role::Lattice, {top}, 18.0, 0.0}};
+  st.cells.cell_max_mm = 6;
+  // Places with every layout of a session (lay, then places) and the same bytes from a fresh one; the time of each.
+  const auto lay_and_place = [](const StepModel& model, const Settings& set, double* ms_lay = nullptr,
+                                double* ms_places = nullptr) {
+    Session one(model);
+    const auto t0 = std::chrono::steady_clock::now();
+    (void)one.lay(set);
+    const auto t1 = std::chrono::steady_clock::now();
+    std::vector<Place> got = one.places(set);
+    const auto t2 = std::chrono::steady_clock::now();
+    if (ms_lay) *ms_lay = std::chrono::duration<double, std::milli>(t1 - t0).count();
+    if (ms_places) *ms_places = std::chrono::duration<double, std::milli>(t2 - t1).count();
+    return got;
+  };
+  {
+    Session session(tunnel.model);
+    CHECK(session.open_edges() == 0);
+    struct { std::vector<Place> places; } o;
+    (void)session.lay(st);
+    o.places = session.places(st);
+    double ms_lay = 0.0, ms_places = 0.0;
+    (void)lay_and_place(tunnel.model, st, &ms_lay, &ms_places);
+    std::printf("[places] tunnel: %zu place(s); a fresh lay %.1f ms, its places %.1f ms\n", o.places.size(), ms_lay,
+                ms_places);
+    // Asked with other "where" settings than the last lay's: none.
+    Settings deeper_st = st;
+    deeper_st.regions[0].depth_mm = 17.0;
+    CHECK(session.places(deeper_st).empty());
+    CHECK(o.places.size() == 1);
+    if (o.places.size() == 1) {
+      const Place& p = o.places[0];
+      std::printf("[places]   faces");
+      for (int f : p.faces) std::printf(" %d", f);
+      std::printf(", %.2f mm2 at (%.2f, %.2f, %.2f) normal (%.2f, %.2f, %.2f), now %s\n", p.area_mm2, p.point.x,
+                  p.point.y, p.point.z, p.normal.x, p.normal.y, p.normal.z, p.now.c_str());
+      CHECK(p.region == 1);
+      // The floor, the two walls and the back are crossed deep: seeds, joined by their edges, one place. The ceiling
+      // faces the prism's own way (rule (a): latticed through); the top is the region's own.
+      std::vector<int> want{floor, wall_l, wall_r, back};
+      std::sort(want.begin(), want.end());
+      CHECK(p.faces == want);
+      CHECK(std::find(p.faces.begin(), p.faces.end(), ceiling) == p.faces.end());
+      // Area: floor 20 x 30 + two walls 30 x 7 + back 20 x 7 = 1160 mm2, within 2 %.
+      CHECK(std::fabs(p.area_mm2 - 1160.0) <= 0.02 * 1160.0);
+      // The point lies on one of its faces, and its normal is that face's outward one.
+      const bool on_floor = std::fabs(p.point.z - 5.0) < 1e-9 && std::fabs(p.normal.z - 1.0) < 1e-9;
+      const bool on_wall = (std::fabs(p.point.x - 20.0) < 1e-9 && p.normal.x > 0.999) ||
+                           (std::fabs(p.point.x - 40.0) < 1e-9 && p.normal.x < -0.999) ||
+                           (std::fabs(p.point.y - 30.0) < 1e-9 && p.normal.y < -0.999);
+      CHECK(on_floor || on_wall);
+      CHECK(p.now == "lattice");
+    }
+    // The same bytes twice (a fresh session).
+    CHECK(same_places(o.places, lay_and_place(tunnel.model, st)));
+    // Finish Covered: every surface the lattice meets is solid; no places.
+    Settings covered = st;
+    covered.cover_mm = -1.0;
+    CHECK(lay_and_place(tunnel.model, covered).empty());
+    // The answer "Solid" (a protect_chip entry on the place's faces): the place stays, now "solid", and the space
+    // under it is solid to the protect depth. The owner's own Protect skin on the same faces is a rule: no place.
+    if (o.places.size() == 1) {
+      Settings answered = st;
+      Settings::ProtectAsk chip;
+      chip.id = 7;
+      chip.faces = o.places[0].faces;
+      chip.depth_mm = 1.0;
+      chip.chip = true;
+      answered.protect = {chip};
+      Session with_chip(tunnel.model);
+      (void)with_chip.lay(answered);
+      struct { std::vector<Place> places; } a;
+      a.places = with_chip.places(answered);
+      CHECK(a.places.size() == 1);
+      if (a.places.size() == 1) {
+        CHECK(a.places[0].faces == o.places[0].faces && a.places[0].now == "solid");
+        CHECK(std::fabs(a.places[0].area_mm2 - o.places[0].area_mm2) <= 1e-6 * o.places[0].area_mm2);
+      }
+      const Domain::Probe probe = with_chip.domain()->probe();
+      const Where under = probe.where({30.0, 15.0, 4.5}), deeper = probe.where({30.0, 15.0, 3.5});
+      CHECK(under.why == Why::ProtectSkin && under.id == 7);   // 0.5 mm under the floor: the chip's solid
+      CHECK(deeper.lattice() && deeper.id == 1);               // 1.5 mm under it: the region's lattice again
+      Settings owned = answered;
+      owned.protect[0].chip = false;
+      CHECK(lay_and_place(tunnel.model, owned).empty());
+    }
+  }
+  {
+    // Through: a plain block, the prism deeper than the block. The bottom is straight opposite (latticed through),
+    // the sides are reached only along the outline: no place.
+    const GridModel block = grid_model({0, 60}, {0, 60}, {0, 20}, [](int, int, int) { return true; });
+    Settings through = st;
+    through.regions = {{1, Role::Lattice, {block.face(2, 1, 20)}, 25.0, 0.0}};
+    CHECK(lay_and_place(block.model, through).empty());
+  }
+  {
+    // A small crossed face: a 3 x 3 mm hole up from the bottom to z 10, crossed by the prism (to z 2): its walls are
+    // crossed deep over 4 x 3 x 8 = 96 mm2, under 100: no place (the rule keeps it lattice).
+    const GridModel hole = grid_model({0, 25, 28, 60}, {0, 25, 28, 60}, {0, 10, 20},
+                                      [](int i, int j, int k) { return !(i == 1 && j == 1 && k == 0); });
+    Settings small = st;
+    small.regions = {{1, Role::Lattice, {hole.face(2, 1, 20)}, 18.0, 0.0}};
+    CHECK(lay_and_place(hole.model, small).empty());
+    // The same hole 6 x 6 mm (192 mm2 of walls): one place of its four edge-joined walls.
+    const GridModel wide = grid_model({0, 25, 31, 60}, {0, 25, 31, 60}, {0, 10, 20},
+                                      [](int i, int j, int k) { return !(i == 1 && j == 1 && k == 0); });
+    small.regions = {{1, Role::Lattice, {wide.face(2, 1, 20)}, 18.0, 0.0}};
+    struct { std::vector<Place> places; } w;
+    w.places = lay_and_place(wide.model, small);
+    CHECK(w.places.size() == 1 && w.places[0].faces.size() == 4);
+    if (w.places.size() == 1) CHECK(std::fabs(w.places[0].area_mm2 - 192.0) <= 0.02 * 192.0);
+  }
+}
+
 int main() {
+  test_places();
   test_size_step();
   test_face_pieces();
   test_area_own();

@@ -2927,8 +2927,10 @@ public struct LatticeSetupWizard: View {
                             Text("density").dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
                         }
                     case .strength:
-                        shortNote(UserDefaults.standard.bool(forKey: AppSettings.newEngineKey)
-                                  ? LatticeCellsRow.strengthNewEngineLine : LatticeCellsRow.strengthLine)
+                        shortNote(!AppSettings.shared.newEngineTest   // ★ Install 3: the switch retired (on; false only in tests)
+                                  ? LatticeCellsRow.strengthLine
+                                  : LatticeFileJob.strengthWired ? LatticeCellsRow.strengthOnExportLine   // ★ Install 3: the check
+                                  : LatticeCellsRow.strengthNewEngineLine)
                     case .along, .ties, .overhangs:
                         EmptyView()   // ★ B7 slice 2: off the page (`LatticeCellsRow.rows` never lists them)
                     }

@@ -44,7 +44,9 @@ final class EditFacesNoLatticeViewsTests: XCTestCase {
 
     static let reads: [(String, String)] = [
         ("the layer", "showStrutPreview && !strutBakeInFlight\n            && latticeViewsUp"),
-        ("the key + the probe's callout + the drill-in", "private var latticeLegendMounted: Bool { showStrutPreview && strutScene != nil && latticeViewsUp }"),
+        // ★ Install 3: the key is up with either engine's lattice (the new engine's layout, or the old bake)
+        ("the key + the probe's callout + the drill-in",
+         "showStrutPreview && (strutScene != nil || (newEngineDrawn && newEngine.laid != nil)) && latticeViewsUp"),
         ("the Stress key", "if stressViewOn, latticeStressField != nil, latticeViewsUp,\n                   !(showStrutPreview && strutScene != nil) {"),
         ("the Stress wash", "if stressViewOn, latticeViewsUp { return stressSurfaceTints }"),
         ("the preview's line", "guard latticeViewsUp else { return nil }"),
@@ -60,7 +62,7 @@ final class EditFacesNoLatticeViewsTests: XCTestCase {
                       "★ so the drill-in (which swallows a tap) is off with the key")
         XCTAssertTrue(ws.contains("if latticeLegendMounted {\n                    latticeDensityLegend\n                    latticeProbeCallout"))
         // ★ RED CONTROL: today's key (the preview's flag alone) is caught
-        let today = ws.replacingOccurrences(of: "strutScene != nil && latticeViewsUp }", with: "strutScene != nil }")
+        let today = ws.replacingOccurrences(of: "newEngine.laid != nil)) && latticeViewsUp", with: "newEngine.laid != nil))")
         XCTAssertFalse(Self.reads.allSatisfy { today.contains($0.1) }, "★ RED CONTROL")
     }
 

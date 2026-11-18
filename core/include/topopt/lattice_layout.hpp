@@ -1166,6 +1166,9 @@ struct Settings {
     // D22: the skin under pieces of faces (pieces_mesh) in place of whole faces; when there
     // are any, `faces` is not read. Pieces pieces_mesh refuses give the skin no surface.
     std::vector<FacePiece> pieces;
+    // D23: this entry is a place's answer "Solid" (the job's protect_chip). In the layout it is
+    // any Protect skin; the place it answers stays listed (Outcome::places, now "solid").
+    bool chip = false;
   };
   // Where lattice goes.
   Start start = Start::AllSolid;
@@ -1202,6 +1205,33 @@ struct Settings {
   bool drop_loose = true;        // S4, Finish None's rule; then pieces adrift go too
 };
 
+// ── PLACES (rule D23) ─────────────────────────────────────────────────────────
+// A face a flat region's prism runs into that no rule decides, so the app can ask what it should be (a chip). For
+// each flat Lattice region made from faces or pieces (not a zone, not a shell) whose Finish is not Covered: every
+// model face that is not one of the region's own is sampled on the unwelded model mesh, and a sample is REACHED when
+// the point 0.05 mm inside the surface is lattice of the region (or is solid only because of a protect_chip entry).
+// Decided by rule, never a place: (a) the face straight opposite (outward normal within 30 degrees of the prism's
+// inward direction over at least half its area); (b) anything reached only near the prism's own boundary: a sample
+// is DEEP when it lies more than one of the region's own cells inside the prism's side outline and more than one
+// own cell below the mouth, and a face is a SEED only when at least half of its whole area is reached and deep.
+// Seeds joined across shared edges are one place; a face reached and deep over at least a quarter of its area joins
+// a neighbouring place but never starts one; a place whose seeds' reached area is under 100 mm2 is dropped.
+struct Place {
+  int region = 0;
+  std::vector<int> faces;      // raw face ids: the seeds (ascending), then the faces that joined (ascending)
+  Vec3 point{};                // on the surface: the reached, deep sample nearest the place's reached centre
+  Vec3 normal{};               // outward there
+  double area_mm2 = 0.0;       // reached area of all its faces
+  std::string now;             // "lattice", or "solid" when most of its reached area is under a protect_chip entry
+};
+inline constexpr double kPlaceMinMm2 = 100.0;
+// `without_chips`: the domain with the protect_chip entries left out (null when there are none).
+// `chip_ids`: those entries' ids. `asks`: the settings' regions (their faces / pieces / zones). Same input, same
+// bytes: ordered by region id, then by the lowest raw face id of the place.
+std::vector<Place> find_places(const StepModel& model, const Domain& domain, const Domain* without_chips,
+                               const std::vector<int>& chip_ids, const std::vector<Settings::RegionAsk>& asks,
+                               const Layout& layout, double fallback_cell_mm);
+
 struct Outcome {
   Layout layout;
   StrutReport struts;
@@ -1237,6 +1267,12 @@ class Session {
   Outcome lay(const Settings& settings, int threads = 0, const std::atomic<bool>* stop = nullptr);
   std::size_t open_edges() const { return open_edges_; }
   const PartMeasure& measure() const { return *measure_; }
+  // The part as it was opened (its unwelded triangles and their raw face ids): D23 reads its faces. Not a copy.
+  const StepModel& model() const { return model_; }
+  // D23: the places of the last lay() (find_places on its domain, its regions' own cells). A separate call: it reads
+  // every face the regions' prisms come near, which costs about as much as a layout, so a slider move need not pay
+  // for it. Asked with settings that are not the last lay()'s "where" settings, or before any lay(): none.
+  std::vector<Place> places(const Settings& settings) const;
   // The domain the last lay() was laid in: null before the first, REPLACED when a "where" setting changes. Read it after a
   // lay() and never hold it across the next one (362's bridge, the 4th call: a batch of points -> lattice / rim / solid).
   const Domain* domain() const { return domain_.get(); }
@@ -1247,6 +1283,9 @@ class Session {
   std::unique_ptr<PartMeasure> measure_;
   std::string where_;                  // the "where" settings the kept domain was made for
   std::unique_ptr<Domain> domain_;
+  std::unique_ptr<Domain> domain_no_chips_;   // D23: the domain with the protect_chip entries left out (null: none)
+  std::vector<int> chip_ids_;
+  Layout last_cells_;                         // D23: the last lay()'s regions (their own cells), nothing else
   bool unread_ = false;                // the kept domain has not been laid in once yet (its first lay was cancelled)
   std::vector<int> empty_regions_;
   // R17: the part's own stress reference, kept while the domain, the field and the percentile are the same (a slider

@@ -55,6 +55,9 @@ struct LatticeLayoutSettings {
   std::vector<double> protect_depth_mm;
   std::vector<int32_t> protect_face_counts;
   std::vector<int32_t> protect_faces;
+  // D23 (his 11-17 "add a chip to ask what it should be"): per Protect skin, 1 when it is a chip's answer "Solid" (its place
+  // stays listed, now "solid"); 0 his own skin. Empty: none.
+  std::vector<uint8_t> protect_chip;
   // Face cuts (core's rule D22, his ask 11-14: every Edit faces cut respected): pieces of faces in place of whole faces,
   // flattened. Region r has region_piece_counts[r] pieces (0: its faces as listed), Protect skin p protect_piece_counts[p];
   // either list may be empty (no pieces there). The pieces, the regions' first and then the skins', in order: piece k has
@@ -130,12 +133,21 @@ struct LatticeLayoutResult {
                                              // as a square bar, as wide and as tall as its width, its underside level
                                              // (core's bar_is_bridge, the writer's own test); every other bar is round
   std::vector<int32_t> bar_region;           // 1 per bar: its region, 0 = the whole part
+  std::vector<float> bar_cell;               // ★ Install 3: 1 per bar: the size of the cell it is a strut of, mm (core's Bar::cell)
   // The solid pieces the layout lists (D14: a cube tried and not fitted), each with its reason. Cubes sit on frames.
   std::vector<float> frames;                 // 12 per frame: origin xyz, then its three axes (unit) xyz each
   std::vector<float> solid_cubes;            // 4 per piece: low corner a b c (frame mm), size mm
   // Per laid cell, 5 each (LatticeReview's test 2, 11-13: what set this cell's size): size mm, own mm (the wall's or
   // region's own cell here), band (0 at the outline, 1 at the band's inner edge and beyond), finest (1/0), cut (1/0).
   std::vector<float> cell_info;
+  // ★ Install 3 (LatticeReview's answer 11-17, core's Cell): per laid cell, aligned with cell_info — its region (0 = the
+  // whole part), its wall (index into its frame's WallMap walls, -1 = the space no wall holds), its frame and its cube's low
+  // corner (a b c, frame mm; its size is cell_info's first). What the old engine's bake gave the drawer and the probe.
+  std::vector<int32_t> cell_region;
+  std::vector<int32_t> cell_wall;
+  std::vector<int32_t> cell_frame;
+  std::vector<float> cell_lo;                // 3 per cell
+  std::vector<float> cell_wall_mm;           // 1 per cell: its wall's width, mm (core's WallMap::Wall::width); 0 = no wall
   std::vector<int32_t> solid_frame;          // 1 per piece
   std::vector<int32_t> solid_region;         // 1 per piece
   std::vector<uint8_t> solid_why;            // 1 per piece: a LatticeLayoutWhy
@@ -212,8 +224,40 @@ struct LatticeLayoutDemand {
   int32_t nx = 0, ny = 0, nz = 0;
 };
 void lattice_layout_set_demand(int64_t session, const LatticeLayoutDemand& demand, BridgeError& err);
+// ★ THE CHIPS' PLACES (rule D23; his 11-17 "add a chip to ask what it should be"): the faces each region's prism runs into
+// that no rule decides, of the LAST layout — call it after `lattice_layout` with the SAME settings (other settings: none).
+// A separate call: it costs about as much as a layout. Place i: region[i], face_counts[i] raw faces of `faces` (seeds
+// first), point / normal (3 each, outward), area_mm2[i], solid_now[i] (1: a chip entry makes it solid now).
+struct LatticeLayoutPlaces {
+  std::vector<int32_t> region;
+  std::vector<int32_t> face_counts;
+  std::vector<int32_t> faces;
+  std::vector<float> point;
+  std::vector<float> normal;
+  std::vector<double> area_mm2;
+  std::vector<uint8_t> solid_now;
+  double ms = 0.0;
+};
+LatticeLayoutPlaces lattice_layout_places(int64_t session, const LatticeLayoutSettings& settings, BridgeError& err);
 // Every layout of `session` running now or waiting comes back cancelled. Safe from any thread.
 void lattice_layout_cancel(int64_t session);
 void lattice_layout_close(int64_t session);
+
+// ★ THE PRINT FILE ON THE iPAD (his 11-17: "Not everyone will have a mac, definitely include an iPad only option"): the
+// SAME lattice_file job the Mac's worker runs (`topopt-cli lattice-file`), through core's own `run_file_job` — one job
+// document, two executors, as the old Lattice run's `run_lattice_job`. `job_path` is the job.json, beside the model (its
+// `model`, `demand` and `strength_job` are bare names resolved there); `out_dir` (must exist) receives the STL and
+// lattice_file.json whatever happened. Blocking: call it off the main thread. `materials_path` / `rules_path` feed the
+// strength check once the linked core has one. A refusal is not an error: `ok` false with its code and plain line.
+struct LatticeFileJobResult {
+  bool ok = false;
+  int32_t exit_code = 1;
+  std::string code;   // "ok", or core's refusal word
+  std::string why;    // not ok: one plain line
+  std::string detail; // not ok: the technical message behind it (for the log)
+  double ms_total = 0.0;
+};
+LatticeFileJobResult lattice_file_job(const std::string& job_path, const std::string& out_dir,
+                                      const std::string& materials_path, const std::string& rules_path, BridgeError& err);
 
 }  // namespace topoptbridge

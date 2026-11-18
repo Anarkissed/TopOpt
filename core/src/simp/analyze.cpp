@@ -40,6 +40,12 @@ constexpr double kKnockdownFloor = 1e-3;
 // 191's ~59–98 mm crossover; at finer spacing the cutoff drops, which only makes
 // the thick-region gate MORE conservative.
 constexpr int kWidthAwareThicknessCapVoxels = 32;
+// Install 3: the strength check's knobs default to these constants, exactly.
+static_assert(AnalysisKnobs{}.thickness_cap_voxels == kWidthAwareThicknessCapVoxels);
+static_assert(AnalysisKnobs{}.sliding_share_max == kAnchorsSlidingShare);
+static_assert(AnalysisKnobs{}.contact_rounds == 6);
+static_assert(KnockdownSpec{}.infill_exponent == kKnockdownExponent);
+static_assert(KnockdownSpec{}.infill_floor == kKnockdownFloor);
 
 // Gather one element's 24 nodal displacements from the global solution, in the
 // hex8_stiffness DOF order (node-major interleaved). Same helper the recovery
@@ -57,10 +63,14 @@ std::array<double, 24> element_dofs(const VoxelGrid& grid, const FeaSolution& so
 }  // namespace
 
 double infill_margin_knockdown(double infill_percent) {
+  return infill_margin_knockdown(infill_percent, kKnockdownExponent, kKnockdownFloor);
+}
+
+double infill_margin_knockdown(double infill_percent, double exponent, double floor) {
   const double f = infill_percent / 100.0;
   if (f >= 1.0) return 1.0;  // solid / unset: exact 1.0, byte-identical gate
-  if (f <= 0.0) return kKnockdownFloor;
-  return std::max(std::pow(f, kKnockdownExponent), kKnockdownFloor);
+  if (f <= 0.0) return floor;
+  return std::max(std::pow(f, exponent), floor);
 }
 
 double margin_reproduction_relative_delta(double recorded, double reproduced) {
@@ -135,9 +145,15 @@ double wall_area_fraction(double member_width_mm, double wall_thickness_mm) {
 
 double width_aware_knockdown(double infill_percent, double member_width_mm,
                              double wall_thickness_mm) {
+  return width_aware_knockdown(infill_percent, member_width_mm, wall_thickness_mm,
+                               kKnockdownExponent, kKnockdownFloor);
+}
+
+double width_aware_knockdown(double infill_percent, double member_width_mm,
+                             double wall_thickness_mm, double exponent, double floor) {
   // The infill core term is the SAME Gibson-Ashby curve the scalar gate uses — ONE
   // definition of f^1.5 (bar K7). Solid infill → 1.0, so the composite is 1.0 too.
-  const double core = infill_margin_knockdown(infill_percent);
+  const double core = infill_margin_knockdown(infill_percent, exponent, floor);
   const double fw = wall_area_fraction(member_width_mm, wall_thickness_mm);
   const double k = fw + (1.0 - fw) * core;    // Voigt: walls in parallel with core
   return k > 1.0 ? 1.0 : k;                    // both terms in (0,1] → k in (0,1]
@@ -152,7 +168,8 @@ FixedDesignAnalysis analyze_fixed_design(
     bool load_path_ok, double part_solid, const LatticePosture* lattice,
     bool score_build_orientation, bool build_direction_inferred,
     bool auto_apply_build_orientation, double printed_iso,
-    bool gate_on_strut_strength) {
+    bool gate_on_strut_strength, const AnalysisKnobs* knobs) {
+  const AnalysisKnobs kn = knobs ? *knobs : AnalysisKnobs{};
   // THE PRINTED-SET THRESHOLD for this analysis. Shadows the file-scope M3.5
   // constant so every "is there material here" test in this function asks the
   // caller's question — 0.5 for every classic run (identical to the constant it
@@ -250,7 +267,7 @@ FixedDesignAnalysis analyze_fixed_design(
   // of each anchor presses is not known in advance, so solve, release the springs in
   // tension, and re-solve until the contact set stops changing, at most
   // kContactRounds solves. Glued anchors (no spring entry): one solve, as before.
-  constexpr int kContactRounds = 6;
+  const int kContactRounds = kn.contact_rounds;   // 6 unless the strength check's settings say otherwise
   const bool bearing = has_contact_springs(bcs);
   std::vector<DirichletBC> contact_bcs;
   if (bearing) contact_bcs = bcs;
@@ -356,7 +373,7 @@ FixedDesignAnalysis analyze_fixed_design(
     const double rt = std::sqrt(RT.x * RT.x + RT.y * RT.y + RT.z * RT.z);
     out.contact_tangent_share =
         rt > 0.0 ? std::sqrt(T.x * T.x + T.y * T.y + T.z * T.z) / rt : 0.0;
-    out.contact_held_by_sliding = out.contact_tangent_share > kAnchorsSlidingShare;
+    out.contact_held_by_sliding = out.contact_tangent_share > kn.sliding_share_max;
     for (const NodalLoad& l : loads)
       (l.component == 0 ? F.x : l.component == 1 ? F.y : F.z) += l.value;
     const double fm = std::sqrt(F.x * F.x + F.y * F.y + F.z * F.z);
@@ -390,15 +407,15 @@ FixedDesignAnalysis analyze_fixed_design(
   double max_von_mises_eff = 0.0;
   if (knockdown.width_aware)
     member_width_mm = local_member_thickness_mm(grid, density, kIso,
-                                                kWidthAwareThicknessCapVoxels);
+                                                kn.thickness_cap_voxels);
 
   // Lattice accounting (all inert when has_lattice is false). `effective_material`
   // is the mass-bearing volume in voxel-equivalents: a solid printed voxel counts 1,
   // a latticed printed voxel counts its relative density (the lattice fills only that
   // fraction of the envelope). A latticed voxel's stress is the EFFECTIVE (macro)
   // stress and is EXCLUDED from the solid strength maxima (max_von_mises,
-  // max_von_mises_eff) and from the interlayer field — its strut-level strength is not
-  // certifiable from the macro stress (Phase 2). It IS recorded in the fields.
+  // max_von_mises_eff) and from the interlayer field — its strut-level strength is read
+  // by the per-type strut law below, not from the macro stress. It IS recorded in the fields.
   double effective_material = 0.0;
   std::size_t lattice_voxels = 0;
   double lat_rho_lo = 1e300, lat_rho_hi = -1e300, lat_max_vm = 0.0;
@@ -447,7 +464,8 @@ FixedDesignAnalysis analyze_fixed_design(
             // so vm/k_v never divides by zero and only ever inflates the stress.
             const double k_v = width_aware_knockdown(
                 knockdown.infill_percent, member_width_mm[idx],
-                knockdown.wall_thickness_mm);
+                knockdown.wall_thickness_mm, knockdown.infill_exponent,
+                knockdown.infill_floor);
             const double vm_eff = st.von_mises / k_v;
             if (vm_eff > max_von_mises_eff) max_von_mises_eff = vm_eff;
             // Record the pair this max was taken over, so a diagnosis can reprice
@@ -528,8 +546,8 @@ FixedDesignAnalysis analyze_fixed_design(
 
   // Lattice reporting (all default when no posture was applied). `margin`/`accepted`
   // above are the SOLID region's strength over the real composite field; the lattice
-  // region contributed its true (softer) stiffness to that field but its strut-level
-  // strength is NOT gated here (Phase 2 de-homogenization). See FixedDesignAnalysis.
+  // region contributed its true (softer) stiffness to that field; its strut-level
+  // strength is the strut law's (below), gated only as FixedDesignAnalysis says.
   if (has_lattice) {
     out.lattice_certified = true;
     out.lattice_topology = lattice->topology;
@@ -568,7 +586,7 @@ FixedDesignAnalysis analyze_fixed_design(
         std::vector<double> guard_own;
         if (!own_widths)
           guard_own = lattice_member_width_mm(
-              grid, density, kIso, kWidthAwareThicknessCapVoxels,
+              grid, density, kIso, kn.thickness_cap_voxels,
               lattice_cells_per_member_min(lattice->topology) * lattice->cell_size_mm,
               lattice->cell_size_mm);
         const std::vector<double>& guard_width =

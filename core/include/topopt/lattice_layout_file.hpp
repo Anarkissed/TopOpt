@@ -16,6 +16,8 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
+#include <functional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -69,6 +71,61 @@ TriangleMesh make_file_mesh(const Session& session, const Outcome& outcome,
                             const FileOptions& options, FileReport& report,
                             const std::atomic<bool>* stop = nullptr);
 
+// ── THE STRENGTH CHECK (Install 3, rule V4) ──────────────────────────────────
+// The old engine's check of a regular lattice (run_job.cpp, certify_latticed_variant), fed from this layout. On the
+// strength job's voxel grid a voxel is lattice when its centre is lattice of a laid cell (cell_holds: the rule the file
+// is carved by, D14); its relative density is lattice_density_from_strut(type, cell, half the cell's strut), its cell
+// size the cell's. A cell gets NO credit (its voxels are void in the composite solve, as the old open finish treats
+// cut cells) when it is cut, when the file left out a bar of it (bar_left_out_at), or when the old band refuses its
+// type or density. Everything else in the part is solid.
+struct CreditGrid {
+  Vec3 origin{};          // the grid's low corner; voxel (i,j,k) is origin + spacing * (i..i+1, ...)
+  double spacing = 0.0;
+  int nx = 0, ny = 0, nz = 0;
+};
+struct LatticeCredit {
+  // Per voxel ((k * ny + j) * nx + i): the cell whose lattice holds its centre (-1: none), and whether it has credit.
+  std::vector<std::int32_t> cell;
+  std::vector<char> credited;
+  // Per layout cell.
+  std::vector<char> cell_credit;     // 1: credited
+  std::vector<double> cell_rho;      // its relative density (0 when the type has no law for it)
+  std::size_t cells_credited = 0, cells_no_credit = 0;
+  std::size_t cut = 0, lost_bar = 0, out_of_band = 0;   // why no credit (a cell counted under its first reason)
+};
+// `solid`, when given, names the voxels to read (the part's); the rest are left -1. `left_out_at` is the file's
+// FileReport::left_out_at (the places the mesh writer left bars out for). Same answer for any number of threads.
+LatticeCredit lattice_credit(const Layout& layout, const Domain& domain, const Bars& bars,
+                             const std::vector<Vec3>& left_out_at, const CreditGrid& grid,
+                             const std::vector<char>* solid = nullptr, int threads = 0);
+
+// What the file job hands the check, once its file is made.
+struct StrengthAsk {
+  const Session* session = nullptr;   // the one the outcome was laid by: its domain is the outcome's
+  const Outcome* outcome = nullptr;
+  const FileReport* made = nullptr;
+  std::string job_path;               // the strength job's file
+  std::string out_dir;                // where the file was written; the check's own files go beside it
+  Vec3 part_lo{}, part_hi{};          // the part's box as the file job opened it
+  int threads = 0;
+};
+struct StrengthDone {
+  bool ok = false;
+  std::string code;                   // not ok: the refusal's word
+  int exit_code = 1;
+  std::string why, detail;            // not ok: one plain line, and the technical message
+  std::string json;                   // ok (run): the `strength` block, an object
+  std::vector<std::string> files;     // ok (run): the files written into out_dir, by bare name
+  bool accepted = false;
+};
+// The check is the CLI's (run_job.cpp: lattice_file_strength_check): core's lattice layout is always built, and the
+// old check needs the solver and the importer. `before` reads the strength job (cheap; no solve) and may refuse it;
+// `run` makes the check on the laid lattice.
+struct StrengthCheck {
+  std::function<StrengthDone(const std::string& job_path)> before;
+  std::function<StrengthDone(const StrengthAsk& ask)> run;
+};
+
 // One job, as read from job.json.
 struct FileJob {
   std::string model;                    // the part's file; relative to the job file's folder
@@ -77,6 +134,10 @@ struct FileJob {
   // The stress result's file (key "demand"): a bare name, beside the job. Empty: none sent. run_file_job reads it
   // into settings.stress.demand; a caller of make_lattice_file puts the field there itself.
   std::string demand;
+  // The strength check's job (key "strength_job", V4): a bare name in job.json, of a run job beside it of the kind the
+  // old Lattice run takes ("mode": "lattice_part"). run_file_job makes it a path beside the job; a caller of
+  // make_lattice_file gives the path. Empty: no check, and the result names none (V2).
+  std::string strength_job;
   Settings settings;
   FileOptions options;
 };
@@ -128,6 +189,11 @@ struct FileResult {
   std::size_t at_light = 0, at_heavy = 0;
   // The mesh.
   FileReport made;
+  // The strength check (V4): ran, its `strength` block and whether it was accepted. Not run: nothing (V2).
+  bool strength_ran = false;
+  bool strength_accepted = false;
+  std::string strength_json;
+  double ms_strength = 0.0;
   // Where the time went, ms.
   double ms_import = 0.0, ms_measure = 0.0, ms_read = 0.0, ms_cells = 0.0, ms_bars = 0.0;
   double ms_write = 0.0, ms_total = 0.0;
@@ -136,16 +202,20 @@ struct FileResult {
 // The whole job for a part already in memory: checks it, lays it, makes the mesh, writes
 // the STL at `stl_path`. Never throws: every failure is a FileResult with its plain line.
 // `said`, when given, is called with a short line as each step starts (the CLI prints it).
+// With `job.strength_job`, the check (`strength`) reads it before the lattice is laid and checks the lattice once the
+// file is written; a check that was asked for and could not run fails the job and leaves no file (V2). Asked for with
+// no `strength` given: refused (strength_unavailable).
 FileResult make_lattice_file(StepModel model, const FileJob& job, const std::string& stl_path,
                              const std::atomic<bool>* stop = nullptr,
-                             void (*said)(const char*) = nullptr);
+                             void (*said)(const char*) = nullptr,
+                             const StrengthCheck* strength = nullptr);
 
 // The job as the CLI runs it: reads `job_path`, opens the model beside it (STEP, STL or
 // 3MF, with the face sidecar: the faces the app saw), runs make_lattice_file into
 // `out_dir` (which must exist), and writes `out_dir`/lattice_file.json whatever happened.
 // `threads` > 0 overrides the job's own. Never throws.
 FileResult run_file_job(const std::string& job_path, const std::string& out_dir, int threads = 0,
-                        void (*said)(const char*) = nullptr);
+                        void (*said)(const char*) = nullptr, const StrengthCheck* strength = nullptr);
 
 // The result file's name, and its text.
 inline constexpr const char* kFileResultName = "lattice_file.json";

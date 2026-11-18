@@ -654,16 +654,12 @@ bool lattice_type_numbers_measured(LatticeTopology topo) {
 
 double lattice_cells_per_member_min(LatticeTopology topo) {
   if (const TypeMeasurements* m = type_measured(topo)) return m->cells_per_member_min;
-  // MEASURED for octet (bending ceiling, handoff 2026-07-28-graded-cell-size-phase0
-  // C2b): the 2.4% band is crossed between 4 and 5 cells across, so 5. For the other
-  // certifiable topologies the bending floor is NOT independently measured here — that
-  // needs the PR 235 guided-cantilever finite-block study (handoff
-  // 2026-07-29-tensor-library-nine, T4). octet's 5 is forwarded as a documented
-  // placeholder; it is representative for the stretch-dominated lattices (fcc, rhombic)
-  // and is expected to be an UNDER-estimate for the bending-dominated ones (bcc, kelvin,
-  // diamond, sc), so re-measure before grading those. It is load-bearing only for the
-  // grading law, which is octet-only in production — no other topology is graded against
-  // it today. Change the number HERE, per topology, once measured (type_measured).
+  // A type with its own measurements returns its own measured floor (above, from
+  // type_measured: sc 4, fcc 5, kelvin 8, schwarz_d 9, rhombic, diamond, bcc and
+  // gyroid 10). Here: OCTET, measured (bending ceiling, handoff 2026-07-28-graded-cell-
+  // size-phase0 C2b: the 2.4% band is crossed between 4 and 5 cells across, so 5), and
+  // the types with no measurements (bccz, fccz, reentrant), which get octet's 5 as a
+  // stand-in; nothing certifies those types (they have no density or strut law).
   return 5.0;
 }
 

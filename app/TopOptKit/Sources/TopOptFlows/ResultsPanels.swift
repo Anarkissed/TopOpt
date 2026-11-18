@@ -139,7 +139,7 @@ public enum ResultsChecks {
     public static func checks(tab: ResultVariantVM?, margin: Double?, required: Double, safetyMargin: Double?,
                               scenarios: [ScenarioResult], thinJoints: Int, bridged: Bool,
                               pieces: StrengthenText.PiecesFlag? = nil, finish: FinishReport? = nil,
-                              weakest: SIMD3<Double>? = nil) -> [ResultsCheck] {
+                              weakest: SIMD3<Double>? = nil, struts: LatticeFileStrength? = nil) -> [ResultsCheck] {
         guard let tab else { return [] }
         var out: [ResultsCheck] = []
         if let m = margin, m > 0 {
@@ -151,6 +151,13 @@ public enum ResultsChecks {
                 : ResultsCheck(kind: .warn, title: "Not strong enough", detail: ResultsVersions.x(m) + " your load" + built,
                                places: weakest.map { [$0] } ?? [], more: weakest == nil ? nil : "The weakest point is lit on the part",
                                tab: .strength))
+        }
+        // ★ his ruling 11-17 ("Yes, but only in the structural lattice stage"): the struts must pass too — said right under the
+        // solid's line, the file made either way
+        if let s = struts, let line = s.strutsLine {
+            out.append(ResultsCheck(kind: s.strutsPass ? .ok : .warn,
+                                    title: s.strutsPass ? "Struts strong enough" : s.strutNoRule ? "Struts not checked" : "Struts not strong enough",
+                                    detail: line, tab: .strength))
         }
         if scenarios.count >= 2 {
             let unheld = scenarios.filter(\.unheld)
@@ -249,6 +256,7 @@ extension ResultsModel {
                 add("Verified margin", ResultsVersions.x(m) + (need.map { " (needs " + ResultsVersions.x($0) + ")" } ?? ""))
             }
             add("Version", version?.title)
+            add("Struts", reportBlocks?.latticeFile?.strutsLine)   // ★ his ruling 11-17: on Structural the struts must pass too
             if let tab { add("Plastic", tab.massLabel + " · " + (version?.headline ?? tab.headlineLabel)) }
             if isSelected { add("Mesh vs grid", selectedMassComparison.flatMap { $0.divergesBeyond1Percent || $0.meshIsEstimate ? $0.summary : nil }) }
             add("Stress scale", stressLegend.caption)

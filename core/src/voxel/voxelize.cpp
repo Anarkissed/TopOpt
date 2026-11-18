@@ -840,7 +840,12 @@ std::vector<double> lattice_member_width_mm(const VoxelGrid& grid,
 }
 
 LoadPathWalk walk_load_path(const VoxelGrid& grid,
-                            const std::vector<double>& density, double iso) {
+                            const std::vector<double>& density, double iso,
+                            int connectivity) {
+  if (connectivity != 6 && connectivity != 18 && connectivity != 26)
+    throw std::invalid_argument("walk_load_path: connectivity must be 6, 18 or 26");
+  // 26: every neighbour (as before); 18: faces and edges; 6: faces only.
+  const int most_axes = connectivity == 26 ? 3 : connectivity == 18 ? 2 : 1;
   if (density.size() != grid.voxel_count())
     throw std::invalid_argument(
         "walk_load_path: density size != grid.voxel_count()");
@@ -915,6 +920,7 @@ LoadPathWalk walk_load_path(const VoxelGrid& grid,
         for (int dj = -1; dj <= 1; ++dj)
           for (int di = -1; di <= 1; ++di) {
             if (di == 0 && dj == 0 && dk == 0) continue;
+            if ((di != 0) + (dj != 0) + (dk != 0) > most_axes) continue;
             const int ni = i + di, nj = j + dj, nk = k + dk;
             if (ni < 0 || nj < 0 || nk < 0 || ni >= nx || nj >= ny || nk >= nz)
               continue;
@@ -951,11 +957,12 @@ LoadPathWalk walk_load_path(const VoxelGrid& grid,
 }
 
 bool load_path_connected(const VoxelGrid& grid,
-                         const std::vector<double>& density, double iso) {
+                         const std::vector<double>& density, double iso,
+                         int connectivity) {
   if (density.size() != grid.voxel_count())
     throw std::invalid_argument(
         "load_path_connected: density size != grid.voxel_count()");
-  return walk_load_path(grid, density, iso).connected;
+  return walk_load_path(grid, density, iso, connectivity).connected;
 }
 
 // ── CORE LIST items 41 + 47: the printed material as bodies (voxel.hpp) ──────

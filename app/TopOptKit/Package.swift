@@ -191,7 +191,9 @@ var packageTargets: [Target] = [
         // sample is real traced geometry through the run's own preview path.
         // (The folder is NOT named "Resources": a shallow iOS bundle with a top-level
         // directory of that name fails CodeSign — "bundle format unrecognized".)
-        resources: [.copy("OrganicSample")],
+        // ★ Install 3 (his 11-17): the strength check's explainer — the repo's docs/strength-check files as bundled copies
+        // (StrengthCheckDocsTests holds them byte-equal), the page, KaTeX 0.16.11 and marked 12.0.2 (MIT; offline).
+        resources: [.copy("OrganicSample"), .copy("StrengthCheckWeb")],
         swiftSettings: [.interoperabilityMode(.Cxx)]
     ),
     .testTarget(

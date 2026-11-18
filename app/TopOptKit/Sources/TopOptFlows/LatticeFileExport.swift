@@ -33,6 +33,19 @@ public enum LatticeFileJob {
     /// The stress result's name beside the job (core's top-level "demand"; the demand file format of 04-layout-file-job.md).
     public static let demandName = "demand.bin"
 
+    /// ★ Install 3, the strength check (LatticeReview's shape, 11-17): beside the job, the run job a Lattice run writes today
+    /// (`lattice_part`: loads, supports, material, safety margin, build direction, voxel size), named by the job's
+    /// `strength_job`. Absent = no check and no block (rule V2); Aesthetic never sends it (U9); Organic never reaches here.
+    public static let strengthJobName = "strength_job.json"
+    /// ★ Whether the core the app and the Mac run reads `strength_job`: ON since LatticeReview's Install 3 core
+    /// (claude/install3-engine @ 61ac4291) is merged and vendored — the app and the Mac's worker go out together (a core that
+    /// does not know the key refuses the whole job, so the worker must be this core's: the fingerprint check stops any other).
+    public static let strengthWired = true
+    /// Whether a part's print file carries the strength check: Structural only (U9), on a core that reads it.
+    public static func checksStrength(_ l: LatticeSettings, wired: Bool = strengthWired) -> Bool {
+        wired && (l.stageMode ?? .structural) == .structural && l.resolvedAlgorithm != "organic"   // (LatticeLayoutPreview.draws)
+    }
+
     /// The stress result as core reads it (04-layout-file-job.md, the demand file): "TODEMAND", int32 version 1, int32 nx ny
     /// nz, float64 origin xyz (the grid's LOW CORNER), float64 spacing, then nx*ny*nz float32 von Mises MPa, x fastest;
     /// little-endian.
@@ -52,9 +65,36 @@ public enum LatticeFileJob {
         s.byStress || s.cellsByStress || s.regions.contains { $0.own.byStress == true || $0.own.cellsByStress == true }
     }
 
+    /// One part's job, as Export and the Lattice button send it: the preview's own settings, the stress result when the
+    /// settings grade by stress, and the strength check's run job when given.
+    public struct ForPart {
+        public var json: Data
+        public var modelPath: String
+        public var demand: Data?
+    }
+    /// Why a part's job cannot be written, in its one line.
+    public struct NoJob: Error, Equatable { public let line: String }
+
+    @MainActor
+    public static func forPart(_ p: ProjectModel, stress: LatticeLayoutPreview.Stress, strengthJob: Data?) -> Result<ForPart, NoJob> {
+        guard let path = p.importedFile?.path else { return .failure(NoJob(line: LatticeLayoutPreview.noPartLine)) }
+        let settings = LatticeLayoutPreview.settings(p, referenceMPa: stress.referenceMPa)
+        let needs = needsStress(settings)
+        var demand: Data?
+        if needs {
+            guard let f = stress.field else { return .failure(NoJob(line: LatticeFileExport.noStressLine)) }
+            demand = demandFile(f)
+        }
+        guard let json = try? build(settings, modelName: (path as NSString).lastPathComponent, demand: needs ? demandName : nil,
+                                    strengthJob: strengthJob == nil ? nil : strengthJobName) else {
+            return .failure(NoJob(line: "The job could not be written"))
+        }
+        return .success(ForPart(json: json, modelPath: path, demand: demand))
+    }
+
     /// The job document, keys sorted (the same settings give the same bytes).
     public static func build(_ s: LatticeLayoutSession.Settings, modelName: String, linearDeflection: Double = 0,
-                             demand: String? = nil) throws -> Data {
+                             demand: String? = nil, strengthJob: String? = nil) throws -> Data {
         var layout: [String: Any] = [
             "all_lattice": s.allLattice, "bead_mm": s.beadMM, "min_strut_lines": s.minStrutLines, "min_wall_mm": s.minWallMM,
             "rim_mm": s.rimMM, "cover_mm": s.coverMM,
@@ -85,6 +125,8 @@ public enum LatticeFileJob {
         }
         if s.regions.contains(where: { !$0.pieces.isEmpty }) { layout["region_pieces"] = s.regions.map { pieces($0.pieces) } }
         if s.protect.contains(where: { !$0.pieces.isEmpty }) { layout["protect_pieces"] = s.protect.map { pieces($0.pieces) } }
+        // ★ D23: a chip's answer "Solid" (only when some skin is one, so a job with none is the bytes it was)
+        if s.protect.contains(where: \.chip) { layout["protect_chip"] = s.protect.map { $0.chip ? 1 : 0 } }
         // Install 2: the stress keys, cell size by stress and the size step (core's defaults are the job's bytes as before
         // only by value: the keys are always written, as every other layout key is)
         layout["by_stress"] = s.byStress
@@ -149,6 +191,7 @@ public enum LatticeFileJob {
         var job: [String: Any] = ["mode": "lattice_file", "model": modelName, "output": outputName,
                                   "linear_deflection": linearDeflection, "threads": 0, "layout": layout]
         if let demand { job["demand"] = demand }
+        if let strengthJob { job["strength_job"] = strengthJob }   // ★ Install 3
         return try JSONSerialization.data(withJSONObject: job, options: [.sortedKeys])
     }
 }
@@ -162,6 +205,8 @@ public struct LatticeFileReport: Equatable, Sendable {
     public var partMM3: Double
     public var clean: Bool
     public var posts: Int
+    /// ★ Install 3: the strength check's result, when it ran (Structural).
+    public var strength: LatticeFileStrength? = nil
 
     public static func parse(_ d: Data) -> LatticeFileReport? {
         guard let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else { return nil }
@@ -169,13 +214,148 @@ public struct LatticeFileReport: Equatable, Sendable {
         let p = o["print_check"] as? [String: Any] ?? [:]
         return LatticeFileReport(ok: o["ok"] as? Bool ?? false, why: o["why"] as? String ?? "", bars: l["bars"] as? Int ?? 0,
                                  plasticMM3: m["mm3"] as? Double ?? 0, partMM3: m["part_mm3"] as? Double ?? 0,
-                                 clean: p["clean"] as? Bool ?? false, posts: (p["posts"] as? [Any])?.count ?? 0)
+                                 clean: p["clean"] as? Bool ?? false, posts: (p["posts"] as? [Any])?.count ?? 0,
+                                 strength: (o["strength"] as? [String: Any]).map(LatticeFileStrength.init(block:)))
     }
 
     /// One plain line: what was made.
     public var line: String {
         let share = partMM3 > 0 ? String(format: " · %.0f%% of the solid part", 100 * plasticMM3 / partMM3) : ""
         return "Print file ready · \(bars) bars\(share)\(clean ? " · layer check clean" : "")"
+    }
+}
+
+/// ★ Install 3: `lattice_file.json`'s `strength` block (LatticeReview's shape, 11-17: the old check fed from the new layout, the
+/// old receipt's names without their prefix), the few numbers the app shows, and its one line.
+public struct LatticeFileStrength: Equatable, Sendable {
+    public var accepted: Bool
+    public var marginWorstCase: Double
+    public var safetyMargin: Double
+    public var notCertified: Bool
+    public var notCertifiedReason: String
+    public var massGrams: Double
+    public var maxEffectiveVonMisesMPa: Double
+    public var marginInPlane: Double
+    public var marginInterlayer: Double
+    /// The check's own solve, beside the report (the stress and deflection views), or nil.
+    public var fields: String?
+    /// ★ Each load scenario's own views, beside the report, or nil (one scenario).
+    public var scenarioFields: String?
+    public var maxInterlayerTensionMPa: Double
+    /// The build direction the check judged the layers along, or nil.
+    public var buildDirection: SIMD3<Double>?
+    /// Why it gated as it did (core's own object), when not accepted.
+    public var diagnosis: GateDiagnosis?
+
+    /// ★ HIS RULING 11-17 ("Yes, but only in the structural lattice stage"): the struts must pass too. Three states, the file
+    /// made in all three: pass = the solid and the struts keep the safety margin; solid only = the solid does, the struts do
+    /// not; fail = the solid does not (`accepted` keeps the old gate's meaning).
+    public enum Verdict: String, Sendable { case pass, solidOnly = "solid_only", fail }
+    /// The `verdict` core sent, or nil (a core from before the ruling).
+    public var verdictSent: Verdict?
+    /// The three states; a core from before the ruling: the old gate's word alone.
+    public var verdict: Verdict { verdictSent ?? (accepted ? .pass : .fail) }
+    /// The type has a strut rule and its struts keep the safety margin (`struts_pass`).
+    public var strutsPass: Bool
+    /// The struts' own worst-case margin (`strut.margin_worst_case`), or nil.
+    public var strutMargin: Double?
+    /// This lattice type has no strut rule (`strut.uncertified`; its `strut.margin_*` are null).
+    public var strutNoRule: Bool
+
+    /// ★ Why a "fail" failed (LatticeReview 11-17): a load on OPEN lattice (cut cells, cells that lost a left-out bar) has no
+    /// load path whatever the solid's margin — the old open-finish rule.
+    public enum FailReason: String, Sendable { case loadOnOpenLattice = "load_on_open_lattice", noLoadPath = "no_load_path",
+                                                    solidMargin = "solid_margin" }
+    public var failReason: FailReason?
+    /// The load landing on cells that get no credit, and the whole load (N), where countable.
+    public var loadOnNoCreditN: Double?
+    public var loadTotalN: Double?
+
+    public init(block b: [String: Any]) {
+        func num(_ v: Any?) -> Double { (v as? NSNumber)?.doubleValue ?? 0 }
+        accepted = b["accepted"] as? Bool ?? false
+        marginWorstCase = num(b["margin_worst_case"])
+        safetyMargin = num(b["safety_margin"])
+        notCertified = b["not_certified"] as? Bool ?? false
+        notCertifiedReason = b["not_certified_reason"] as? String ?? ""
+        massGrams = num(b["mass_grams"])
+        maxEffectiveVonMisesMPa = num(b["max_effective_von_mises_mpa"])
+        marginInPlane = num(b["margin_in_plane"])
+        marginInterlayer = num(b["margin_interlayer"])
+        fields = b["fields"] as? String
+        scenarioFields = b["scenario_fields"] as? String
+        maxInterlayerTensionMPa = num(b["max_interlayer_tension_mpa"])
+        buildDirection = (b["build_direction"] as? [NSNumber]).flatMap {
+            $0.count == 3 ? SIMD3($0[0].doubleValue, $0[1].doubleValue, $0[2].doubleValue) : nil
+        }
+        diagnosis = (b["diagnosis"] as? [String: Any]).flatMap(GateDiagnosis.decode)
+        let strut = b["strut"] as? [String: Any] ?? [:]
+        strutMargin = (strut["margin_worst_case"] as? NSNumber)?.doubleValue
+        strutNoRule = strut["uncertified"] as? Bool ?? false
+        strutsPass = b["struts_pass"] as? Bool ?? false
+        verdictSent = (b["verdict"] as? String).flatMap(Verdict.init(rawValue:))
+        failReason = (b["fail_reason"] as? String).flatMap(FailReason.init(rawValue:))
+        loadOnNoCreditN = (b["load_on_no_credit_n"] as? NSNumber)?.doubleValue
+        loadTotalN = (b["load_total_n"] as? NSNumber)?.doubleValue
+    }
+
+    /// The one-tap fix for a load on open lattice (his words to come; the tap keeps the loaded face solid).
+    public static let protectLoadedFace = "Protect the loaded face to keep it solid, then Lattice again"
+
+    /// Why the solid fails, in plain words, when it is not the margin itself; nil for "solid_margin" or a core without it.
+    public var noPathLine: String? {
+        switch failReason {
+        case .loadOnOpenLattice?:
+            var share = ""
+            if let on = loadOnNoCreditN, let all = loadTotalN, all > 0, on > 0 {
+                share = String(format: " (%.0f%% of it)", Swift.min(100, 100 * on / all))
+            }
+            return "The load lands on open lattice\(share), so nothing carries it to the anchors. " + Self.protectLoadedFace + "."
+        case .noLoadPath?: return "Nothing carries the load to the anchors."
+        case .solidMargin?, nil: return nil
+        }
+    }
+
+    private static func x(_ m: Double) -> String { String(format: "%.1f×", m) }
+
+    /// The check's not-certified words, or a plain fallback when it gives none.
+    public static func notCertifiedLine(_ reason: String) -> String {
+        "The check could not certify it: " + (reason.isEmpty ? "it could not judge this part" : Self.reason(reason))
+    }
+
+    /// Core's reason without its own "Not certified:" lead (the line already says so), first letter as written after.
+    static func reason(_ r: String) -> String {
+        guard !r.isEmpty else { return "the check could not judge it" }
+        let lead = "not certified:"
+        guard r.lowercased().hasPrefix(lead) else { return r }
+        let rest = r.dropFirst(lead.count).trimmingCharacters(in: .whitespaces)
+        return rest.prefix(1).lowercased() + rest.dropFirst()
+    }
+
+    /// One plain line: whether the latticed part is strong enough for his loads at his safety margin.
+    public var line: String {
+        if notCertified { return "Strength not checked: " + Self.reason(notCertifiedReason) }
+        let mass = massGrams > 0 ? String(format: " · %.0f g", massGrams) : ""
+        let margin = Self.x(marginWorstCase)
+        switch verdict {
+        case .pass: return "Strong enough · margin \(margin)\(mass)"
+        case .solidOnly: return "Solid strong enough · margin \(margin) · struts: " + (strutsLine ?? Self.strutsNot).lowercased()
+        case .fail:
+            switch failReason {
+            case .loadOnOpenLattice?: return "Not strong enough · the load lands on open lattice"
+            case .noLoadPath?: return "Not strong enough · nothing carries the load"
+            case .solidMargin?, nil: return "Not strong enough · margin \(margin), needs \(Self.x(safetyMargin))"
+            }
+        }
+    }
+
+    static let strutsNot = "Do not keep the margin"
+
+    /// The struts in one line (Results' Strength tab, "Struts"), or nil when the check says nothing about them.
+    public var strutsLine: String? {
+        if strutNoRule { return "This lattice type has no strut rule" }
+        guard let m = strutMargin else { return nil }
+        return strutsPass ? "Keep the margin · \(Self.x(m))" : "\(Self.strutsNot) · \(Self.x(m)), needs \(Self.x(safetyMargin))"
     }
 }
 
@@ -190,13 +370,25 @@ public enum LatticeFileRun {
         public init(_ d: String) { description = d }
     }
 
+    /// What the Mac made: the file, its report, the strength check's views beside it (fields.bin, scenario_fields.bin; only
+    /// when the report names them) and the worker's own record of how long it took.
+    public struct Made {
+        public var stl: Data
+        public var report: LatticeFileReport
+        /// The report's whole JSON (the Results screen reads its `strength` block).
+        public var reportJSON: Data
+        public var fields: Data?
+        public var scenarioFields: Data?
+        public var timing: RunTiming?
+    }
+
     /// Submit, poll, fetch: blocking, so call it off the main thread. The worker's core must be the app's (a different core lays
     /// a different lattice than the preview drew).
     public static func drive(config: RemoteRunnerConfig, modelPath: String, jobJSON: Data, projectName: String,
-                             demand: Data? = nil,
+                             demand: Data? = nil, strengthJob: Data? = nil,
                              isCancelled: @escaping @Sendable () -> Bool = { false },
                              onState: @escaping @Sendable (_ state: String, _ position: Int?) -> Void = { _, _ in })
-        throws -> (stl: Data, report: LatticeFileReport) {
+        throws -> Made {
         let session = URLSession(configuration: {
             let c = URLSessionConfiguration.ephemeral
             c.timeoutIntervalForRequest = config.controlTimeout
@@ -231,6 +423,11 @@ public enum LatticeFileRun {
             parts.append(RemoteRun.UploadPart(name: "demand", filename: LatticeFileJob.demandName,
                                               contentType: "application/octet-stream", data: demand))
         }
+        // ★ Install 3: the run job the strength check reads (the worker saves the "strength_job" part as strength_job.json)
+        if let strengthJob {
+            parts.append(RemoteRun.UploadPart(name: "strength_job", filename: LatticeFileJob.strengthJobName,
+                                              contentType: "application/json", data: strengthJob))
+        }
         for p in parts {
             var head = "Content-Disposition: form-data; name=\"\(p.name)\""
             if let f = p.filename { head += "; filename=\"\(f)\"" }
@@ -253,6 +450,7 @@ public enum LatticeFileRun {
         let jobURL = base.appendingPathComponent("jobs").appendingPathComponent(jobID)
         let deadline = Date().addingTimeInterval(ceilingSeconds)
         var state = "queued"
+        var record: [String: Any] = [:]
         while Date() < deadline {
             if isCancelled() {
                 var del = URLRequest(url: jobURL)
@@ -265,6 +463,7 @@ public enum LatticeFileRun {
                 throw Failure("Lost the job on the Mac")
             }
             state = (o["state"] as? String) ?? "unknown"
+            record = o
             onState(state, o["position"] as? Int)   // queued (and how many ahead) or running
             if state == "done" { break }
             if state == "failed" || state == "error" || state == "cancelled" {
@@ -285,7 +484,177 @@ public enum LatticeFileRun {
         }
         guard report.ok else { throw Failure(report.why.isEmpty ? "The file could not be made" : report.why) }
         guard let stl = file(LatticeFileJob.outputName) else { throw Failure("The Mac made the file but it could not be fetched") }
-        return (stl, report)
+        // ★ Install 3: the strength check's views, by the names its block gives (bare names beside the report); enrichment —
+        // a missing one leaves the views gated, never the result
+        func named(_ n: String?) -> Data? { n.flatMap { $0.contains("/") || $0.contains("..") ? nil : file($0) } }
+        return Made(stl: stl, report: report, reportJSON: rd, fields: named(report.strength?.fields),
+                    scenarioFields: named(report.strength?.scenarioFields),
+                    timing: RunTiming.fromWorker(createdAt: record["created_at"] as? Double, startedAt: record["started_at"] as? Double,
+                                                 finishedAt: record["finished_at"] as? Double))
+    }
+}
+
+// MARK: the Lattice button on the new engine
+
+/// ★ HIS YES 11-17 ("Should the main Lattice button make the new engine's file and run the strength check?" → "1. Yes."): for
+/// a regular lattice on a part with its STEP file, the Lattice button sends the print file's job (with the strength check on
+/// Structural), made on the Mac, and its result is the Results screen's one result: the file's mesh, the check's numbers and
+/// views. Variants, Organic and STL parts keep the old run (his word via LatticeReview).
+public enum LatticeFileButton {
+    /// The same switch as the strength check: a core that reads `strength_job` (off until LatticeReview's core is merged; a
+    /// Structural lattice must not lose its check by moving).
+    public static var wired: Bool { testWired ?? LatticeFileJob.strengthWired }
+    /// Tests only: the switch as a test sets it. The app never sets it.
+    nonisolated(unsafe) public static var testWired: Bool?
+    /// Grading by stress with no stress result yet: the press runs the stress check first, then lattices.
+    public static let stressFirstLine = "Checking the stresses first, then latticing"
+    /// The run's mode on the new engine (the request the run carries says which engine made it).
+    public static let jobMode = "lattice_file"
+
+    /// Whether this part's Lattice goes to the new engine: a regular lattice (not Organic) on a STEP part, the switch on.
+    public static func takes(_ l: LatticeSettings, modelPath: String?, wired: Bool = wired) -> Bool {
+        guard wired, let p = modelPath?.lowercased(), p.hasSuffix(".step") || p.hasSuffix(".stp") else { return false }
+        return l.resolvedAlgorithm != "organic"   // (LatticeLayoutPreview.draws)
+    }
+
+    /// The Results screen's one result from what the Mac made. Structural: the strength check's verdict, margins, mass, views
+    /// (`accepted` is the old gate's: a "fail" lands as the not-strong-enough card, the file kept); its `strength` block rides as
+    /// the outcome's report, so the Strength tab says what the struts did. Aesthetic: never checked (U9) — nothing to refuse,
+    /// no margin claimed, the weight from the file's own volume.
+    public static func outcome(_ m: LatticeFileRun.Made, densityGCm3: Double) throws -> OptimizeOutcome {
+        let mesh = MeshExport.parseBinarySTL(m.stl)
+        guard !mesh.vertices.isEmpty, !mesh.indices.isEmpty else {
+            throw LatticeFileRun.Failure("The Mac made the file but it could not be read")
+        }
+        let s = m.report.strength
+        let fields = m.fields.flatMap(RemoteFieldsContainer.parse)
+        let block = fields?.variants.first
+        let fraction = m.report.partMM3 > 0 ? m.report.plasticMM3 / m.report.partMM3 : 0
+        let accepted = s?.accepted ?? true
+        let grams = s.flatMap { $0.massGrams > 0 ? $0.massGrams : nil } ?? m.report.plasticMM3 / 1000 * densityGCm3
+        // ★ a fail with no load path (a load on open lattice): the not-strong-enough card says so INSTEAD of a margin sentence
+        // (its load-path wording), with core's reason in plain words and the fix; a margin fail keeps core's own diagnosis
+        var diagnosis = s?.diagnosis
+        func said(_ binding: GateDiagnosis.Term, _ why: String, _ s: LatticeFileStrength) -> GateDiagnosis {
+            let d = s.diagnosis
+            return GateDiagnosis(binding: binding, bindingValue: d?.bindingValue ?? 0, requiredValue: s.safetyMargin,
+                                 ratio: d?.ratio ?? 0, marginWorstCaseRaw: s.marginWorstCase, marginInPlaneRaw: s.marginInPlane,
+                                 marginInterlayerRaw: s.marginInterlayer, marginEffective: s.marginWorstCase,
+                                 knockdownFactor: d?.knockdownFactor ?? 1, infillPercent: d?.infillPercent ?? 100,
+                                 minFeatureViolations: 0, inheritsUnsourcedZKnockdown: false, provenance: d?.provenance ?? "",
+                                 noSettingFixesThis: true, noFixReason: why, headroomMinInfillPercent: nil, recommendations: [])
+        }
+        if let s, !accepted, let why = s.noPathLine {
+            diagnosis = said(.loadPath, why, s)
+        } else if let s, !accepted, s.failReason == nil, s.notCertified, s.diagnosis == nil {
+            // ★ LatticeReview 11-17 18:34Z: a fail none of the three reasons covers (anchors held only by sliding; no solid
+            // carries load) has no fail_reason — the check's own not-certified words, in one plain line
+            diagnosis = said(.none, LatticeFileStrength.notCertifiedLine(s.notCertifiedReason), s)
+        }
+        var v = OptimizeVariant(
+            requestedVolumeFraction: fraction, achievedVolumeFraction: fraction,
+            massGrams: grams, supportVolumeVoxels: block?.supportVolumeVoxels ?? 0,
+            meshTriangleCount: mesh.indices.count / 3,
+            worstCaseMargin: s?.marginWorstCase ?? 0, accepted: accepted, v3Passes: accepted,
+            orientation: s?.buildDirection ?? SIMD3(0, 0, 1),
+            maxStressMPa: s?.maxEffectiveVonMisesMPa ?? 0, maxInterlayerTensionMPa: s?.maxInterlayerTensionMPa ?? 0,
+            inPlaneMargin: s?.marginInPlane ?? 0, interlayerMargin: s?.marginInterlayer ?? 0,
+            meshVertices: mesh.vertices, meshIndices: mesh.indices,
+            vonMisesField: block?.vonMises ?? [], displacementField: block?.displacement ?? [],
+            stressTensorField: block?.stressTensor ?? [], diagnosis: diagnosis)
+        if let sf = m.scenarioFields.flatMap(RemoteScenarioFields.parse),
+           sf.gridNx == fields?.gridNx, sf.gridNy == fields?.gridNy, sf.gridNz == fields?.gridNz {
+            v.scenarioFields = sf.blocks.first?.sets ?? []
+        }
+        return OptimizeOutcome(variants: [v], stoppedOnMargin: false, cancelled: false, acceptedCount: accepted ? 1 : 0,
+                               voxelVolumeMM3: fields?.voxelVolumeMM3 ?? 0,
+                               gridNx: fields?.gridNx ?? 0, gridNy: fields?.gridNy ?? 0, gridNz: fields?.gridNz ?? 0,
+                               gridOrigin: fields?.gridOrigin ?? .zero, spacing: fields?.spacing ?? 0,
+                               computedRemotely: true, timing: m.timing, reportJSON: m.reportJSON)
+    }
+
+    private final class Progress: @unchecked Sendable {
+        let call: (Int, Int, Int) -> Bool
+        init(_ c: @escaping (Int, Int, Int) -> Bool) { call = c }
+    }
+
+    /// The run the Lattice button starts: the job sent, polled and fetched on the Mac (a tap on the running card's cancel
+    /// deletes the Mac's job), then `outcome`.
+    public static func runner(config: RemoteRunnerConfig, job: LatticeFileJob.ForPart, projectName: String,
+                              strengthJob: Data?, densityGCm3: Double) -> RunModel.Runner {
+        { _, progress, _ in
+            let keepGoing = Progress(progress)
+            _ = keepGoing.call(0, 1, 0)
+            let made = try LatticeFileRun.drive(config: config, modelPath: job.modelPath, jobJSON: job.json, projectName: projectName,
+                                                demand: job.demand, strengthJob: strengthJob,
+                                                isCancelled: { !keepGoing.call(0, 1, 0) })
+            return try outcome(made, densityGCm3: densityGCm3)
+        }
+    }
+
+    /// ★ THE iPAD ONLY OPTION (his 11-17: "Not everyone will have a mac, definitely include an iPad only option"): with Runs on
+    /// set to this iPad, the same job runs here, through core's own `run_file_job` (`LatticeLayoutSession.runFileJob`), then
+    /// `outcome`. One coarse tick, as the old on-device Lattice: no fake progress.
+    public static func deviceRunner(job: LatticeFileJob.ForPart, strengthJob: Data?, materialsPath: String, rulesPath: String,
+                                    densityGCm3: Double) -> RunModel.Runner {
+        { _, progress, _ in
+            _ = progress(0, 1, 0)
+            let made = try runHere(job: job, strengthJob: strengthJob, materialsPath: materialsPath, rulesPath: rulesPath)
+            return try outcome(made, densityGCm3: densityGCm3)
+        }
+    }
+
+    /// The job made on this device. Its files go beside the model (its `model`, `demand` and `strength_job` are names resolved
+    /// there) under names of their own, so nothing of the project's is ever overwritten, and all of them are removed after; the
+    /// file and its report land in a temporary folder. Timing is the run's own (RunModel stamps a local run).
+    static func runHere(job: LatticeFileJob.ForPart, strengthJob: Data?, materialsPath: String, rulesPath: String) throws
+        -> LatticeFileRun.Made {
+        let fm = FileManager.default
+        let dir = URL(fileURLWithPath: job.modelPath).deletingLastPathComponent()
+        let tag = UUID().uuidString
+        let outDir = fm.temporaryDirectory.appendingPathComponent("lattice-file-\(tag)", isDirectory: true)
+        try fm.createDirectory(at: outDir, withIntermediateDirectories: true)
+        var written: [URL] = []
+        defer {
+            for u in written { try? fm.removeItem(at: u) }
+            try? fm.removeItem(at: outDir)
+        }
+        guard var doc = (try? JSONSerialization.jsonObject(with: job.json)) as? [String: Any] else {
+            throw LatticeFileRun.Failure("The job could not be written")
+        }
+        func beside(_ name: String, _ data: Data) throws {
+            let u = dir.appendingPathComponent(name)
+            try data.write(to: u, options: .withoutOverwriting)
+            written.append(u)
+        }
+        if let d = job.demand {
+            let name = "lattice_file_demand-\(tag).bin"
+            try beside(name, d)
+            doc["demand"] = name
+        }
+        if let s = strengthJob {
+            let name = "lattice_file_strength_job-\(tag).json"
+            try beside(name, s)
+            doc["strength_job"] = name
+        }
+        let jobName = "lattice_file_job-\(tag).json"
+        try beside(jobName, try JSONSerialization.data(withJSONObject: doc, options: [.sortedKeys]))
+        let r = try LatticeLayoutSession.runFileJob(jobPath: dir.appendingPathComponent(jobName).path, outDir: outDir.path,
+                                                    materialsPath: materialsPath, rulesPath: rulesPath)
+        func file(_ name: String) -> Data? {
+            guard !name.contains("/"), !name.contains(".."), let d = try? Data(contentsOf: outDir.appendingPathComponent(name)),
+                  !d.isEmpty else { return nil }
+            return d
+        }
+        let said = r.why.isEmpty ? "The file could not be made" : r.why
+        if !r.ok { NSLog("DIAG lattice file on this device: %@ (%@): %@", r.code, said, r.detail) }   // the why behind the line
+        guard let rd = file(LatticeFileJob.reportName), let report = LatticeFileReport.parse(rd) else {
+            throw LatticeFileRun.Failure(said)
+        }
+        guard report.ok else { throw LatticeFileRun.Failure(report.why.isEmpty ? said : report.why) }
+        guard let stl = file(LatticeFileJob.outputName) else { throw LatticeFileRun.Failure("The file was made but could not be read") }
+        return LatticeFileRun.Made(stl: stl, report: report, reportJSON: rd, fields: report.strength?.fields.flatMap(file),
+                                   scenarioFields: report.strength?.scenarioFields.flatMap(file), timing: nil)
     }
 }
 
@@ -320,32 +689,27 @@ public final class LatticeFileExport: ObservableObject {
     public init() {}
 
     /// Make the print file for this part, with the preview's own settings, on the chosen Mac.
-    public func make(project p: ProjectModel, config: RemoteRunnerConfig?, stress: LatticeLayoutPreview.Stress = .init()) {
+    public func make(project p: ProjectModel, config: RemoteRunnerConfig?, stress: LatticeLayoutPreview.Stress = .init(),
+                     strengthJob: Data? = nil) {
         needsStressCheck = false
         guard let config else { state = .failed(Self.noMacLine); return }
-        guard let path = p.importedFile?.path else { state = .failed(LatticeLayoutPreview.noPartLine); return }
-        let settings = LatticeLayoutPreview.settings(p, referenceMPa: stress.referenceMPa)
-        let needs = LatticeFileJob.needsStress(settings)
-        var demand: Data?
-        if needs {
-            guard let f = stress.field else { needsStressCheck = true; state = .failed(Self.noStressLine); return }
-            demand = LatticeFileJob.demandFile(f)
+        let job: LatticeFileJob.ForPart
+        switch LatticeFileJob.forPart(p, stress: stress, strengthJob: strengthJob) {
+        case .success(let j): job = j
+        case .failure(let why):
+            needsStressCheck = why.line == Self.noStressLine
+            state = .failed(why.line); return
         }
-        let job: Data
-        do {
-            job = try LatticeFileJob.build(settings, modelName: (path as NSString).lastPathComponent,
-                                           demand: needs ? LatticeFileJob.demandName : nil)
-        } catch {
-            state = .failed("The job could not be written"); return
-        }
+        let path = job.modelPath, demand = job.demand
         let name = p.name, f = Flag()
         flag = f
         token &+= 1
         let t = token
         state = .making(since: Date())
         Task.detached {
-            let outcome: Result<(stl: Data, report: LatticeFileReport), Error> = Result {
-                try LatticeFileRun.drive(config: config, modelPath: path, jobJSON: job, projectName: name, demand: demand,
+            let outcome: Result<LatticeFileRun.Made, Error> = Result {
+                try LatticeFileRun.drive(config: config, modelPath: path, jobJSON: job.json, projectName: name, demand: demand,
+                                         strengthJob: strengthJob,
                                          isCancelled: { f.get() },
                                          onState: { st, pos in
                                              Task { @MainActor [weak self] in
@@ -435,6 +799,9 @@ struct LatticeFileExportBar: View {
             case let .ready(_, r):
                 VStack(alignment: .leading, spacing: 0) {
                     said(r.line, key: "new-engine-export-ready")
+                    if let st = r.strength {   // ★ Install 3: the strength check, Structural
+                        said(st.line, warning: !st.accepted || st.notCertified, key: "new-engine-export-strength")
+                    }
                     said(LatticeFileExport.checkLine, key: "new-engine-export-check")
                 }
                 chip("Share", key: "new-engine-export-share", primary: true) { sharing = true }

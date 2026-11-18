@@ -20,11 +20,16 @@ public final class LatticeLayoutPreview: ObservableObject {
 
     /// What the 3D view draws (nil: nothing yet).
     @Published public private(set) var bars: LatticeLayoutBarsInputs?
+    /// ★ Install 3: what the layout on screen laid (bars and cells), for the colour key, the tap-to-read card and the drawer.
+    @Published public private(set) var laid: LatticeLayoutColours.Laid?
     /// One plain line under the preview: what is wrong, or nil.
     @Published public private(set) var problem: String?
     /// Core's numbers for the debug overlay (stage E's iPad timing): open, read, cells, bars, ms.
     @Published public private(set) var timing: Timing?
     @Published public private(set) var laying = false
+    /// ★ D23 (his 11-17): the chips' places of the last layout, and how long core took to find them.
+    @Published public private(set) var places: [LatticeLayoutSession.Place] = []
+    public private(set) var placesMS = 0.0
     /// One plain line: what these settings ask that the new engine does not do yet (nil: nothing).
     @Published public private(set) var notes: [String] = []
     /// ★ his rule 11-14: "recommend changing to a 0.2mm nozzle" when lattice cannot go where asked — one line, or nil.
@@ -141,6 +146,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         }
         lastSettings = s
         latticeAtLay = p.lattice
+        keysAtLay = Self.regionKeys(p)   // ★ Install 3: the drawer's rows, as this layout's regions
         task?.cancel()
         laying = true
         nozzleWanted = checkNozzle
@@ -170,7 +176,111 @@ public final class LatticeLayoutPreview: ObservableObject {
         nozzleTask?.cancel(); nozzleTask = nil; nozzleWanted = false; nozzleState = .notAsked
         nozzleSession?.close(); nozzleSession = nil; nozzlePath = nil; nozzleLine = nil; solidReason = nil
         session?.close(); session = nil; sessionPath = nil; lastSettings = nil; sessionStressKey = nil; nozzleStressKey = nil
-        bars = nil; problem = nil; timing = nil; laying = false
+        bars = nil; laid = nil; problem = nil; timing = nil; laying = false; places = []
+    }
+
+    // MARK: ★ Install 3 — the old preview's colour key on the new engine's bars
+
+    /// RED CONTROL (tests): the old engine's bake still runs under the new engine (before Install 3).
+    nonisolated(unsafe) public static var controlOldBakeUnderNewEngine = false
+    /// The old engine's bakes the page started (a test's count: none where the new engine draws).
+    nonisolated(unsafe) public static var oldEngineBakes = 0
+
+    private var keysAtLay: [Int32: String] = [:]
+    /// ★ Install 3: the cells drawer's numbers per face row, from the layout on screen.
+    public func selectableCells() -> [String: LatticeRegionCells.SelectableCell] {
+        guard let laid else { return [:] }
+        return Self.selectableCells(laid, keys: keysAtLay, algorithm: latticeAtLay.algorithm)
+    }
+
+    private var lookupCache: (token: Int, lookup: LatticeLayoutColours.CellLookup)?
+    private var drawnCache: (key: [Int], bars: LatticeLayoutBarsInputs)?
+
+    /// Which laid cell holds a point (the tap-to-read card, the drawer), for the layout on screen.
+    public func cellLookup() -> LatticeLayoutColours.CellLookup? {
+        guard let laid else { return nil }
+        if let c = lookupCache, c.token == laid.token { return c.lookup }
+        let l = LatticeLayoutColours.CellLookup(laid)
+        lookupCache = (laid.token, l)
+        return l
+    }
+
+    /// The span of relative density the bars are drawn over (the key's scale), and the median cell (its millimetres).
+    public func keyScale() -> (lo: Double, hi: Double, cellMM: Double)? {
+        guard let laid, laid.barCount > 0 else { return nil }
+        if let c = scaleCache, c.token == laid.token { return c.scale }
+        let rho = LatticeLayoutColours.densities(laid, type: latticeAtLay.lattice)
+        let cells = laid.barCell.sorted()
+        let scale = (lo: rho.min() ?? 0, hi: rho.max() ?? 0, cellMM: Double(cells.isEmpty ? 0 : cells[cells.count / 2]))
+        scaleCache = (laid.token, scale)
+        return scale
+    }
+    private var scaleCache: (token: Int, scale: (lo: Double, hi: Double, cellMM: Double))?
+
+    /// Whether any bar on screen is boundary work (the key's rim row).
+    public var hasSkinBars: Bool { laid?.barFlags.contains { LatticeLayoutColours.isSkin($0) } ?? false }
+
+    /// ★ The tap-to-read card's reading on the new engine: the bar nearest `p` (model mm) — its cell, width and density, what
+    /// it is (boundary work, the grade band, or fill) — from what the layout laid, the same numbers its colour was made from.
+    public struct Reading: Equatable {
+        public var cellMM: Double
+        public var widthMM: Double
+        public var density: Double
+        public var klass: LatticeStructureClass
+    }
+    public func read(at p: SIMD3<Float>) -> Reading? {
+        guard let laid else { return nil }
+        return Self.read(laid, at: p, lattice: latticeAtLay, lookup: latticeAtLay.gradingMode.fitsShape ? cellLookup() : nil)
+    }
+    /// The same, for a given layout and settings (tests read it directly).
+    static func read(_ laid: LatticeLayoutColours.Laid, at p: SIMD3<Float>, lattice latticeAtLay: LatticeSettings,
+                     lookup: LatticeLayoutColours.CellLookup?) -> Reading? {
+        guard laid.barCount > 0 else { return nil }
+        var best = -1
+        var bestD = Float.infinity
+        for i in 0..<laid.barCount {
+            let k = 7 * i
+            let a = SIMD3(laid.bars[k], laid.bars[k + 1], laid.bars[k + 2]), b = SIMD3(laid.bars[k + 3], laid.bars[k + 4], laid.bars[k + 5])
+            let ab = b - a, l2 = simd_length_squared(ab)
+            let t = l2 > 0 ? Swift.min(Swift.max(simd_dot(p - a, ab) / l2, 0), 1) : 0
+            let d = simd_length(a + ab * t - p) - laid.bars[k + 6] / 2
+            if d < bestD { bestD = d; best = i }
+        }
+        guard best >= 0 else { return nil }
+        let width = Double(laid.bars[7 * best + 6])
+        let cell = best < laid.barCell.count ? Double(laid.barCell[best]) : 0
+        var one = LatticeLayoutColours.Laid()
+        one.bars = Array(laid.bars[(7 * best)..<(7 * best + 7)]); one.barCell = [Float(cell)]
+        let rho = LatticeLayoutColours.densities(one, type: latticeAtLay.lattice).first ?? 0
+        var klass: LatticeStructureClass = .interior
+        if best < laid.barFlags.count, LatticeLayoutColours.isSkin(laid.barFlags[best]) {
+            klass = .rim
+        } else if latticeAtLay.gradingMode.fitsShape, let look = lookup {
+            let k = 7 * best
+            let mid = (SIMD3(laid.bars[k], laid.bars[k + 1], laid.bars[k + 2]) + SIMD3(laid.bars[k + 3], laid.bars[k + 4], laid.bars[k + 5])) / 2
+            if let c = look.cell(at: mid), laid.cellInfo[5 * c + 2] < 1 { klass = .grade }
+        }
+        return Reading(cellMM: cell, widthMM: width, density: rho, klass: klass)
+    }
+
+    /// The bars to draw, wearing the old preview's key (LatticeLayoutColours): by what each bar is and how much material it
+    /// holds, or by the stress (`stress`, the stress view with the lattice; `stressKey` names it). Worked out once per layout
+    /// and colouring.
+    public func drawn(stressField field: LatticeDemandField?, stressKey: Int) -> LatticeLayoutBarsInputs? {
+        guard var b = bars else { return nil }
+        guard let laid, laid.token == b.token else { return b }
+        let grade = latticeAtLay.gradingMode.fitsShape
+        let key = [b.token, field == nil ? 0 : stressKey, grade ? 1 : 0, latticeAtLay.topologyID.hashValue,
+                   LatticeLayoutColours.controlOneColour ? 1 : 0, b.solid?.token ?? -1, b.hidden ? 1 : 0]
+        if let c = drawnCache, c.key == key { return c.bars }
+        b.colours = LatticeLayoutColours.colours(laid, type: latticeAtLay.lattice, grade: grade,
+                                                 stress: field.map(LatticeLayoutColours.Stress.init(field:)),
+                                                 lookup: grade ? cellLookup() : nil)
+        var h = Hasher()
+        key.forEach { h.combine($0) }
+        b.colourKey = h.finalize()
+        drawnCache = (key, b)
+        return b
     }
 
     /// Layouts started, app-wide (a hosted test's count: Click to refresh lays none on a change; Live one per pause).
@@ -192,12 +302,19 @@ public final class LatticeLayoutPreview: ObservableObject {
             token &+= 1
             // the last map stays until this layout's own lands (no flash of a closed part on every change)
             bars = LatticeLayoutBarsInputs(token: token, bars: r.bars, solid: solidWanted ? bars?.solid : nil, flags: r.barFlags)
+            laid = LatticeLayoutColours.Laid(r, token: token)   // ★ Install 3
             timing = Timing(openMS: openMS, readMS: r.msRead, cellsMS: r.msCells, barsMS: r.msBars, bars: r.barCount)
             problem = r.barCount == 0 ? "New engine: no lattice fits these settings" : nil
             laying = false
             if solidWanted { await addMap() }
             nozzleTask?.cancel(); nozzleLine = nil; nozzleState = .notAsked
             await solidReasonCheck(lattice: latticeAtLay)   // ★ his ruling 11-14: why it is solid (one coarse map, cheap)
+            // ★ his 11-17 "add a chip to ask what it should be": the faces this layout's regions run into that no rule decides
+            // (D23), asked with the SAME settings it was laid with — a second call, so a dragged slider never waits on it
+            if !Task.isCancelled, let found = try? await session.places(s), !Task.isCancelled {
+                places = found.places
+                placesMS = found.ms
+            }
             // ★ his pick 11-16 (5): the nozzle check is a second full layout — only when asked (Refresh, or his tap)
             if LatticePreviewMode.nozzleAfterLay(asked: nozzleWanted), !Task.isCancelled {
                 nozzleWanted = false
@@ -582,9 +699,100 @@ public final class LatticeLayoutPreview: ObservableObject {
         // ★ 11-13: Protect skins of one depth go as ONE skin (the same solid, rule D5). The engine's reading asks every skin in
         // turn: his v4 stand's 26 skins of 4 mm took 289 s to lay on the Mac, one group of them 0.7 s, the lattice identical.
         s.protect = Self.mergedByDepth(s.protect)
+        // ★ D23 (his 11-17 "add a chip to ask what it should be"): every face a chip was answered "Solid" on, as ONE chip skin at
+        // depth 0 (core's D5 two line widths, LatticeReview 11-17: a thin skin with the lattice kept behind it), never merged
+        // with his own skins, so its place stays listed and the chip can be answered again
+        if let chip = Self.chipSkin(l, id: id) { s.protect.append(chip) }
         // Whole part ("In a part"), or no face asked for lattice: the whole part is lattice, less No lattice and Protect skins
         s.allLattice = l.wholePart || !s.regions.contains { !$0.noLattice }
         return s
+    }
+
+    /// ★ D23: the places as the chip overlay takes them — one chip per place, its faces its members ("face:<raw>", the old
+    /// chips' keys), Lattice by default (what the engine makes there), Solid when a chip's answer makes it so now.
+    public static func chipDecisions(_ places: [LatticeLayoutSession.Place]) -> [LatticeBandDecision] {
+        places.map { p in
+            let keys = p.faces.map { chipFaceKey + String($0) }
+            return LatticeBandDecision(key: keys.first ?? "place:\(p.region)", kind: .place,
+                                       label: LatticeBandChipText.placeTitle(faces: p.faces.count),
+                                       anchor: p.point, normal: p.normal, areaMM2: Float(p.areaMM2),
+                                       defaultSolid: false, solid: p.solidNow, memberKeys: keys)
+        }
+    }
+
+    /// The faces answered "Solid" on a chip (`bandTreatments` "face:<raw>" = true, the old chips' keys, so his answers carry
+    /// over), as one chip skin; nil when none.
+    static func chipSkin(_ l: LatticeSettings, id: Int32) -> LatticeLayoutSession.Protect? {
+        let faces = l.bandTreatments.compactMap { k, solid -> Int32? in
+            guard solid, k.hasPrefix(chipFaceKey) else { return nil }
+            return Int32(k.dropFirst(chipFaceKey.count))
+        }.sorted()
+        return faces.isEmpty ? nil : .init(id: id, faces: faces, depthMM: 0, chip: true)
+    }
+    static let chipFaceKey = "face:"
+}
+
+extension LatticeLayoutPreview {
+    /// ★ Install 3 (the cells drawer on the new engine): which face row each region `settings(_:)` sends is — region id →
+    /// the drawer's key (`LatticeSelectableRef.key`). Walks the rows exactly as `settings` does (the ids it gives); the test
+    /// holds the two to the same ids.
+    public static func regionKeys(_ p: ProjectModel) -> [Int32: String] {
+        let l = p.lattice
+        var out: [Int32: String] = [:]
+        var id: Int32 = 1
+        for g in p.latticeGroups {
+            let skinGroup = l.skinGroups.contains(g.id)
+            for ref in p.latticeSelectableRefs(g) {
+                let role = p.latticeSelectableRole(ref, in: g.id)
+                guard skinGroup || role != nil else { continue }
+                let hasFaces: Bool
+                switch ref {
+                case .face: hasFaces = true
+                case let .region(_, rid): hasFaces = !p.surfaceResolvedFaces(rid).isEmpty
+                case let .primitive(pid):
+                    guard !skinGroup, l.zoneGroups.contains(g.id), Self.zone(p, group: g.id, primitive: pid) != nil else { continue }
+                    if role != .exclude { out[id] = ref.key }
+                    id += 1
+                    continue
+                }
+                guard hasFaces else { continue }
+                if !skinGroup, role != .exclude { out[id] = ref.key }
+                id += 1
+            }
+        }
+        return out
+    }
+
+    /// ★ Install 3: the drawer's measured wall and cell per face row, from what the new engine laid there — the wall that
+    /// holds most of the row's cells (its width) and the cell it lays there (the wall's own), the row's cells' size range;
+    /// rows sharing a key keep the finer cell, as the old bake's drawer did. Stepped and Doubled only, as before.
+    static func selectableCells(_ laid: LatticeLayoutColours.Laid, keys: [Int32: String], algorithm: String)
+        -> [String: LatticeRegionCells.SelectableCell] {
+        guard ["stepped", "doubled"].contains(algorithm) else { return [:] }
+        var byRegion: [Int32: [Int]] = [:]
+        for c in 0..<Swift.min(laid.cellCount, laid.cellRegion.count) { byRegion[laid.cellRegion[c], default: []].append(c) }
+        var out: [String: LatticeRegionCells.SelectableCell] = [:]
+        for (rid, key) in keys.sorted(by: { $0.key < $1.key }) {
+            guard let cells = byRegion[rid], !cells.isEmpty else { continue }
+            var count: [SIMD2<Int32>: Int] = [:]
+            for c in cells where c < laid.cellWall.count && laid.cellWall[c] >= 0 {
+                count[SIMD2(laid.cellFrame[c], laid.cellWall[c]), default: 0] += 1
+            }
+            guard let wall = count.max(by: { $0.value < $1.value || ($0.value == $1.value && ($0.key.x, $0.key.y) > ($1.key.x, $1.key.y)) })?.key
+            else { continue }
+            let inWall = cells.filter { laid.cellFrame[$0] == wall.x && laid.cellWall[$0] == wall.y }
+            let width = Double(laid.cellWallMM[inWall[0]])
+            let owns = inWall.map { Double(laid.cellInfo[5 * $0 + 1]) }.sorted()
+            let cell = owns[owns.count / 2]
+            let sizes = cells.map { Double(laid.cellInfo[5 * $0]) }
+            let mine = LatticeRegionCells.SelectableCell(measuredWidthMM: width, cellMM: cell,
+                                                         cellRangeMM: (sizes.min() ?? cell)...(sizes.max() ?? cell))
+            guard let had = out[key] else { out[key] = mine; continue }
+            let span = Swift.min(had.cellRangeMM.lowerBound, mine.cellRangeMM.lowerBound)...Swift.max(had.cellRangeMM.upperBound, mine.cellRangeMM.upperBound)
+            let gov = mine.cellMM < had.cellMM ? mine : had
+            out[key] = LatticeRegionCells.SelectableCell(measuredWidthMM: gov.measuredWidthMM, cellMM: gov.cellMM, cellRangeMM: span)
+        }
+        return out
     }
 }
 

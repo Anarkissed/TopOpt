@@ -136,6 +136,10 @@ struct ProductionLoadCase {
   // REAL BOLTS (job loads.anchor_model "bearing"): every anchor is a compression-only,
   // frictionless normal spring (DirichletBC::spring), not a clamp. False = clamped.
   bool anchor_bearing = false;
+  // Install 3 (the strength check's settings): the bearing springs' steel stiffness through its 1 mm (MPa per mm of
+  // length, i.e. E / L) and the tangential share of a pressing spring. The defaults are the constants every run used.
+  double bearing_stiffness_mpa_per_mm = 200000.0;
+  double bearing_tangent_fraction = 1e-4;
 
   // The print/build direction (the interlayer-margin orientation). (0,0,0)
   // defaults to +Z. gravity_direction is set to its unit negation.
