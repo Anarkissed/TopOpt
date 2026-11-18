@@ -875,6 +875,43 @@ static void test_draft() {
   CHECK(!same_bars(exact.outcome.bars, draft.outcome.bars) && !draft.runs.empty());
 }
 
+// ── OL-SWEEP (brief L2, item 4): the Auto Sweep limits ────────────────────────────────────────────────────────────
+static void test_sweep_limits() {
+  // A 40 x 30 x 18 box, the weave under its top face the whole 18 mm: D = min(18, the mouth's narrowest 30) = 18.
+  const StepModel model = box_model(40, 30, 18);
+  const PartMeasure pm(weld_mesh(model.mesh));
+  DomainSpec ds;
+  ds.bead_mm = 0.45;
+  ds.min_strut_lines = 2.0;
+  bool ok = false;
+  ds.regions = {region_from_faces(model, {1}, 1, Role::Lattice, 18.0, 0.0, &ok)};
+  ds.regions[0].weave = true;
+  const Domain d(pm, ds);
+  const std::vector<SweepLimits> L = organic_sweep_limits(d, 0.45);
+  CHECK(ok && L.size() == 1);
+  if (L.size() != 1) return;
+  const SweepLimits& s = L[0];
+  std::printf("OL-SWEEP D %.3f (depth %.3f, mouth %.3f): strut %.2f to %.2f (Auto %.2f), cell %.2f to %.2f (Auto %.2f)\n",
+              s.d_mm, s.depth_mm, s.mouth_width_mm, s.strut_lower_mm, s.strut_upper_mm, s.strut_auto_mm, s.cell_lower_mm,
+              s.cell_upper_mm, s.cell_auto_mm);
+  auto near = [](double x, double y) { return std::fabs(x - y) < 1e-9; };
+  CHECK(s.measured && near(s.d_mm, 18.0) && near(s.mouth_width_mm, 30.0));
+  CHECK(near(s.strut_lower_mm, 0.9) && near(s.strut_upper_mm, 1.8) && near(s.strut_auto_mm, 1.35));
+  CHECK(near(s.cell_lower_mm, 2.0) && near(s.cell_upper_mm, 8.0) && near(s.cell_auto_mm, 5.0));
+  // The narrowest width over all directions, not an axis box: a square of side 10 turned 45 degrees in the plane (its
+  // box is 14.1 wide) under a 20 mm deep region: D = 10.
+  DomainSpec rs = ds;
+  rs.regions = {face_region(2, {20, 15, 18}, {0, 0, -1}, 10, 10, 20)};
+  rs.regions[0].weave = true;
+  const double h = 5.0 * std::sqrt(2.0);
+  rs.regions[0].prism.outline_uv = {{{0.0, -h}, {h, 0.0}, {0.0, h}, {-h, 0.0}}};
+  const Domain r(pm, rs);
+  const std::vector<SweepLimits> R = organic_sweep_limits(r, 0.45);
+  std::printf("OL-SWEEP turned square: mouth %.4f, D %.4f\n", R.empty() ? 0.0 : R[0].mouth_width_mm, R.empty() ? 0.0 : R[0].d_mm);
+  CHECK(R.size() == 1 && std::fabs(R[0].mouth_width_mm - 10.0) < 1e-9 && std::fabs(R[0].d_mm - 10.0) < 1e-9);
+  CHECK(kSweepStrutLower == 1.0 / 20.0 && kSweepStrutUpper == 1.0 / 10.0 && kSweepCellLower == 1.0 / 9.0 &&
+        kSweepCellUpper == 4.0 / 9.0);
+}
 
 int main() {
   test_s_cut_fix();
@@ -895,6 +932,7 @@ int main() {
   test_link_width_run();
   test_runs();
   test_draft();
+  test_sweep_limits();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }

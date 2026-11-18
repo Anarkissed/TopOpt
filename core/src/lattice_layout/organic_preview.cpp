@@ -133,4 +133,77 @@ std::vector<std::uint8_t> pack_weave_runs(const std::vector<WeaveRun>& runs) {
   return out;
 }
 
+namespace {
+// The least width over all directions of a set of points in a plane: the narrowest caliper of their convex hull.
+double narrowest_width(std::vector<std::array<double, 2>> p) {
+  std::sort(p.begin(), p.end());
+  p.erase(std::unique(p.begin(), p.end()), p.end());
+  if (p.size() < 3) return 0.0;
+  auto cross = [](const std::array<double, 2>& o, const std::array<double, 2>& a, const std::array<double, 2>& b) {
+    return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  };
+  std::vector<std::array<double, 2>> h(2 * p.size());
+  std::size_t k = 0;
+  for (std::size_t i = 0; i < p.size(); ++i) {
+    while (k >= 2 && cross(h[k - 2], h[k - 1], p[i]) <= 0.0) --k;
+    h[k++] = p[i];
+  }
+  for (std::size_t i = p.size() - 1, t = k + 1; i-- > 0;) {
+    while (k >= t && cross(h[k - 2], h[k - 1], p[i]) <= 0.0) --k;
+    h[k++] = p[i];
+  }
+  h.resize(k - 1);
+  if (h.size() < 3) return 0.0;
+  double best = std::numeric_limits<double>::infinity();
+  for (std::size_t i = 0; i < h.size(); ++i) {
+    const auto& a = h[i];
+    const auto& b = h[(i + 1) % h.size()];
+    const double len = std::hypot(b[0] - a[0], b[1] - a[1]);
+    if (!(len > 0.0)) continue;
+    double far = 0.0;
+    for (const auto& q : h) far = std::max(far, std::fabs(cross(a, b, q)) / len);
+    best = std::min(best, far);
+  }
+  return std::isfinite(best) ? best : 0.0;
+}
+}  // namespace
+
+std::vector<SweepLimits> organic_sweep_limits(const Domain& domain, double line_mm) {
+  std::vector<SweepLimits> out;
+  const double line = line_mm > 0.0 ? line_mm : domain.spec().bead_mm;
+  const double thinnest = 2.0 * line;
+  // The engine's smallest printable Organic spacing: the tracer's own print floor, t x sqrt(3 pi) / 2 with t the
+  // thinnest strut (organic_lattice.cpp, spacing_print_floor_mm). (The octet's open-look floor, C14, is a cube cell's,
+  // 4.74 mm at a 0.45 mm line: it would refuse the brief's own D = 18 example.)
+  const double floor_cell = 0.5 * thinnest * std::sqrt(3.0 * 3.14159265358979323846);
+  auto lines = [&](double x) { return std::max(1.0, std::round(x / line)) * line; };
+  auto half = [&](double x) { return std::max(std::round(x * 2.0) / 2.0, std::ceil(floor_cell * 2.0) / 2.0); };
+  for (const Region& r : domain.spec().regions) {
+    if (r.role != Role::Lattice || !r.weave) continue;
+    SweepLimits s;
+    s.region = r.id;
+    if (!r.is_shell()) {
+      const ClearanceGeometry& g = r.prism;
+      std::vector<std::array<double, 2>> pts;
+      for (const auto& loop : g.outline_uv)
+        for (const auto& q : loop) pts.push_back(q);
+      if (pts.empty()) pts = {{g.u_lo, g.w_lo}, {g.u_hi, g.w_lo}, {g.u_hi, g.w_hi}, {g.u_lo, g.w_hi}};
+      s.depth_mm = g.depth;
+      s.mouth_width_mm = narrowest_width(pts);
+      s.measured = s.depth_mm > 0.0 && s.mouth_width_mm > 0.0;
+    }
+    if (s.measured) {
+      s.d_mm = std::min(s.depth_mm, s.mouth_width_mm);
+      s.strut_lower_mm = lines(std::max(thinnest, s.d_mm * kSweepStrutLower));
+      s.strut_upper_mm = lines(std::max(s.strut_lower_mm, s.d_mm * kSweepStrutUpper));
+      s.strut_auto_mm = lines(0.5 * (s.strut_lower_mm + s.strut_upper_mm));
+      s.cell_lower_mm = half(s.d_mm * kSweepCellLower);
+      s.cell_upper_mm = half(s.d_mm * kSweepCellUpper);
+      s.cell_auto_mm = half(0.5 * (s.cell_lower_mm + s.cell_upper_mm));
+    }
+    out.push_back(s);
+  }
+  return out;
+}
+
 }  // namespace topopt::lattice_layout

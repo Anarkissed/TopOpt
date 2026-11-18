@@ -572,4 +572,24 @@ OrganicPreview lay_organic_preview(Session& session, const Settings& settings, c
                                    const OrganicAsk& ask, const OrganicPreviewAsk& preview, int threads = 0,
                                    const std::atomic<bool>* stop = nullptr);
 
+// Item 4, the Auto Sweep limits (the app's fields), per weave region of the domain. D = the smaller of the region's
+// depth and the narrowest width of its mouth outline in its own plane (the least width over all directions: the convex
+// outline's narrowest caliper, not an axis box). With `line_mm` the print line width: strut lower = max(2 lines,
+// D x kSweepStrutLower), upper = max(lower, D x kSweepStrutUpper), both rounded to whole lines; cell lower =
+// D x kSweepCellLower, upper = D x kSweepCellUpper, rounded to the nearest 0.5 mm and never under the engine's smallest
+// printable Organic spacing (the tracer's print floor, t x sqrt(3 pi) / 2, t the thinnest strut: 2 lines); Auto = the middle of each range, same rounding.
+// A region the weave cannot be measured on this way (a curved shell, or no outline): `measured` false, all 0.
+inline constexpr double kSweepStrutLower = 1.0 / 20.0;
+inline constexpr double kSweepStrutUpper = 1.0 / 10.0;
+inline constexpr double kSweepCellLower = 1.0 / 9.0;
+inline constexpr double kSweepCellUpper = 4.0 / 9.0;
+struct SweepLimits {
+  int region = 0;
+  bool measured = false;
+  double d_mm = 0.0, depth_mm = 0.0, mouth_width_mm = 0.0;
+  double strut_lower_mm = 0.0, strut_upper_mm = 0.0, strut_auto_mm = 0.0;
+  double cell_lower_mm = 0.0, cell_upper_mm = 0.0, cell_auto_mm = 0.0;
+};
+std::vector<SweepLimits> organic_sweep_limits(const Domain& domain, double line_mm);
+
 }  // namespace topopt::lattice_layout
