@@ -656,7 +656,7 @@ int main() {
     // one strut width is widened too.
     const std::string sweep = ", \"region_weave\": [true], \"organic_spacing_min_mm\": 3, \"organic_spacing_max_mm\": 6, "
                               "\"organic_width_mm\": 0.9, \"organic_width_heavy_mm\": 1.8";
-    const OrganicStrengthenResult ad = strengthen("additive", sweep, 6000.0, "{\"strengthen_rounds\": 2}");
+    const OrganicStrengthenResult ad = strengthen("additive", sweep, 6000.0, "{\"strengthen_rounds\": 3}");
     const std::string ajson = slurp(kDir + "/additive/strengthen.json");
     std::printf("%s\n", ajson.substr(0, 2400).c_str());
     CHECK(ad.ok && (ad.code == "done" || ad.code == "limit") && ad.rounds_fixed >= 1 && ad.old_bars_kept);

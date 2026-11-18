@@ -102,7 +102,8 @@ std::vector<std::vector<std::size_t>> pieces_on(const Bars& after, const std::ve
             if (A.link != B.link || A.strand != B.strand) continue;
             if (seg_dist(A.a, B.a, B.b, nullptr) > tol || seg_dist(A.b, B.a, B.b, nullptr) > tol) continue;
             const double la = std::sqrt((A.b.x - A.a.x) * (A.b.x - A.a.x) + (A.b.y - A.a.y) * (A.b.y - A.a.y) + (A.b.z - A.a.z) * (A.b.z - A.a.z));
-            if (!(la > tol)) continue;   // a piece of no length tells nothing
+            const double lb = std::sqrt((B.b.x - B.a.x) * (B.b.x - B.a.x) + (B.b.y - B.a.y) * (B.b.y - B.a.y) + (B.b.z - B.a.z) * (B.b.z - B.a.z));
+            if (!(la > tol) && lb > tol) continue;   // a piece of no length on a bar of some length tells nothing
             out[k].push_back(j);
           }
         }

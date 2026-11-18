@@ -16803,8 +16803,14 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
       round.ops.insert(round.ops.end(), widen.ops.begin(), widen.ops.end());
       round.hash = ll::bars_hash(bars);
       adds.rounds.push_back(round);
+      // OS12, against round 0 AND against the round before (every earlier round's widenings and braces stay in force:
+      // a bar widened in an earlier round is never thinner later).
       std::size_t split = 0;
-      const std::string kept = ll::old_bars_kept(bars0, bars, 1e-5, &split);
+      std::string kept = ll::old_bars_kept(bars0, bars, 1e-5, &split);
+      if (kept.empty()) {
+        const std::string since = ll::old_bars_kept(before_round, bars);
+        if (!since.empty()) kept = "against the round before: " + since;
+      }
       if (!kept.empty()) res.old_bars_kept = false;
       const double s_add = secs(t1);
       // The files: the additions so far and strengthened.json (version 2), in r<n+1>/.

@@ -1139,6 +1139,14 @@ static void test_additions() {
   CHECK(rep.braces > 0 && rep2.widened >= idx.size() && kept.empty() && split >= idx.size());
   CHECK(after.bars.size() > base.bars.bars.size());
   round.hash = bars_hash(after);
+  // A bar of (almost) no length is found too (the stand's lattice has some: shorter than the 1e-5 mm tolerance).
+  {
+    Bars tiny;
+    Bar t = base.bars.bars[idx[0]];
+    t.b = {t.a.x + 2e-6, t.a.y, t.a.z};
+    tiny.bars.push_back(t);
+    CHECK(old_bars_kept(tiny, tiny).empty());
+  }
   // The invariant catches a thinner bar and a moved end.
   {
     Bars thin = after;
@@ -1161,8 +1169,29 @@ static void test_additions() {
   CHECK(apply_add_round(after2, dom, second, c, nullptr, &why));
   second.hash = bars_hash(after2);
   CHECK(old_bars_kept(base.bars, after2).empty() && old_bars_kept(after, after2).empty());
+  // A third round: the bars widened in round 1 widened again; every earlier round's widths stay in force.
+  AddRound third;
+  {
+    const std::vector<std::vector<std::size_t>> on2 = pieces_on(after2, olds);
+    for (const auto& ps : on2)
+      for (std::size_t j : ps) {
+        const Bar& b = after2.bars[j];
+        third.ops.push_back({2, {b.a.x, b.a.y, b.a.z, b.b.x, b.b.y, b.b.z, 1.2 * b.width}});
+      }
+  }
+  Bars after3 = after2;
+  CHECK(apply_add_round(after3, dom, third, c, nullptr, &why));
+  third.hash = bars_hash(after3);
+  CHECK(old_bars_kept(base.bars, after3).empty() && old_bars_kept(after, after3).empty() &&
+        old_bars_kept(after2, after3).empty());
+  {   // a round-1 widening undone in round 3 is caught against round 1 (never thinner), though round 0 would pass it
+    Bars undone = after3;
+    const std::vector<std::vector<std::size_t>> on3 = pieces_on(undone, olds);
+    for (std::size_t j : on3[0]) undone.bars[j].width = base.bars.bars[idx[0]].width;
+    CHECK(old_bars_kept(base.bars, undone).empty() && !old_bars_kept(after, undone).empty());
+  }
   Additions adds;
-  adds.rounds = {round, second};
+  adds.rounds = {round, second, third};
   // Replayed after a new lay (through the ask, as the file job and the preview lay it): the same lattice.
   OrganicAsk b2 = a;
   b2.additions = adds;
@@ -1170,9 +1199,9 @@ static void test_additions() {
   const Outcome replay = s1.lay_organic(traced_settings(), f, b2, 3);
   std::printf("OL-ADD replay: %zu rounds, %s, hash %s\n", replay.additions_rounds,
               replay.additions_refused.empty() ? "applied" : replay.additions_refused.c_str(),
-              bars_hash(replay.bars) == second.hash ? "the same" : "DIFFERENT");
-  CHECK(replay.additions_refused.empty() && replay.additions_rounds == 2 && bars_hash(replay.bars) == second.hash &&
-        replay.bars.bars.size() == after2.bars.size());
+              bars_hash(replay.bars) == third.hash ? "the same" : "DIFFERENT");
+  CHECK(replay.additions_refused.empty() && replay.additions_rounds == 3 && bars_hash(replay.bars) == third.hash &&
+        replay.bars.bars.size() == after3.bars.size());
   // The file, and strengthened.json version 2.
   const std::string dir = std::string(ORGANIC_RULES_TMP_DIR) + "/ol_add";
   std::filesystem::create_directories(dir);
@@ -1180,18 +1209,18 @@ static void test_additions() {
   Strengthened st;
   st.version = 2;
   st.additions = "additions.bin";
-  CHECK(write_strengthened_file(dir + "/strengthened.json", st, "  \"rounds\": 2"));
+  CHECK(write_strengthened_file(dir + "/strengthened.json", st, "  \"rounds\": 3"));
   {
     TensorField keep = f;
     OrganicAsk r = a;
     CHECK(apply_strengthened(dir + "/strengthened.json", keep, r, &why));
-    CHECK(keep.voigt == f.voigt && r.additions.rounds.size() == 2 && r.additions.rounds[1].hash == second.hash &&
+    CHECK(keep.voigt == f.voigt && r.additions.rounds.size() == 3 && r.additions.rounds[1].hash == second.hash && r.additions.rounds[2].hash == third.hash &&
           r.additions.rounds[0].ops.size() == round.ops.size() && r.additions.rounds[0].ops[0].v == round.ops[0].v);
   }
   // Refused: a wrong hash; a bar not in the lattice; a kind not known.
   {
     OrganicAsk bad = b2;
-    bad.additions.rounds[1].hash ^= 1;
+    bad.additions.rounds[2].hash ^= 1;
     Session sx(model);
     const Outcome o = sx.lay_organic(traced_settings(), f, bad);
     CHECK(!o.additions_refused.empty() && o.bars.bars.empty());
