@@ -1343,6 +1343,33 @@ static void test_floor_from_ask() {
   }
 }
 
+// ── OL-SWEEP-FOR (OP10, brief C2, E4 and E7): a group's limits, the union over its measured regions ──────────────────
+static void test_sweep_limits_for() {
+  // A 40 x 30 x 18 box: region 1 under the top face 8 mm deep (D 8), region 2 under the +x side 20 mm deep (D = its
+  // mouth's narrowest, 18), region 9 on a face the part does not have (not built: not measured).
+  const StepModel model = box_model(40, 30, 18);
+  Settings st;
+  st.regions = {{1, Role::Lattice, {1}, 8.0, 0.0, true}, {2, Role::Lattice, {3}, 20.0, 0.0, true},
+                {9, Role::Lattice, {99}, 5.0, 0.0, true}};
+  Session s(model);
+  const std::vector<SweepLimits> each = s.sweep_limits(st, 0.45);
+  for (const SweepLimits& x : each)
+    std::printf("OL-SWEEP-FOR region %d: measured %d, D %.2f, strut %.2f to %.2f, cell %.2f to %.2f\n", x.region,
+                x.measured ? 1 : 0, x.d_mm, x.strut_lower_mm, x.strut_upper_mm, x.cell_lower_mm, x.cell_upper_mm);
+  const SweepLimitsUnion u = s.sweep_limits_for(st, {1, 2, 9}, 0.45);
+  std::printf("OL-SWEEP-FOR union of 1, 2, 9: measured %d (%zu measured, %zu not): strut %.2f to %.2f (Auto %.2f), cell "
+              "%.2f to %.2f (Auto %.2f)\n", u.measured ? 1 : 0, u.measured_regions.size(), u.unmeasured.size(),
+              u.strut_lower_mm, u.strut_upper_mm, u.strut_auto_mm, u.cell_lower_mm, u.cell_upper_mm, u.cell_auto_mm);
+  auto near = [](double x, double y) { return std::fabs(x - y) < 1e-9; };
+  CHECK(u.measured && u.measured_regions == std::vector<int>({1, 2}) && u.unmeasured == std::vector<int>({9}));
+  CHECK(near(u.strut_lower_mm, 0.9) && near(u.strut_upper_mm, 1.8) && near(u.strut_auto_mm, 1.35));
+  CHECK(near(u.cell_lower_mm, 1.5) && near(u.cell_upper_mm, 8.0) && near(u.cell_auto_mm, 5.0));
+  const SweepLimitsUnion one = s.sweep_limits_for(st, {1}, 0.45);
+  CHECK(one.measured && near(one.cell_lower_mm, 1.5) && near(one.cell_upper_mm, 3.5) && near(one.strut_upper_mm, 0.9));
+  const SweepLimitsUnion none = s.sweep_limits_for(st, {9}, 0.45);
+  CHECK(!none.measured && none.unmeasured.size() == 1 && none.cell_upper_mm == 0.0 && none.strut_auto_mm == 0.0);
+}
+
 int main() {
   test_s_cut_fix();
   test_k_floor();
@@ -1368,6 +1395,7 @@ int main() {
   test_validate();
   test_equal_ends();
   test_floor_from_ask();
+  test_sweep_limits_for();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }

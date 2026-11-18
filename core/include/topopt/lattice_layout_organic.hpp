@@ -627,5 +627,17 @@ struct SweepLimits {
   double cell_lower_mm = 0.0, cell_upper_mm = 0.0, cell_auto_mm = 0.0;
 };
 std::vector<SweepLimits> organic_sweep_limits(const Domain& domain, double line_mm);
+// OP10 (brief C2, E4, made per group by E7): Session::sweep_limits_for(settings, region ids, line_mm), the Auto Sweep
+// limits of a GROUP of weave regions (the whole part: every weave region's id): the union over the MEASURED regions
+// among those given (organic_sweep_limits' entries): cell lower = the smallest lower, upper = the largest upper; strut
+// the same; Auto = the middle of each, by the same rounding (whole lines; the nearest 0.5 mm, never under the smallest
+// printable cell). `measured_regions` / `unmeasured` list the ids given that were / were not measured (a curved shell,
+// no outline, or not a weave region the domain built). `measured` false (every number 0) when none was.
+struct SweepLimitsUnion {
+  bool measured = false;
+  std::vector<int> measured_regions, unmeasured;
+  double strut_lower_mm = 0.0, strut_upper_mm = 0.0, strut_auto_mm = 0.0;
+  double cell_lower_mm = 0.0, cell_upper_mm = 0.0, cell_auto_mm = 0.0;
+};
 
 }  // namespace topopt::lattice_layout

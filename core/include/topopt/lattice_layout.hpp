@@ -1443,6 +1443,7 @@ struct Outcome {
 };
 
 struct SweepLimits;   // lattice_layout_organic.hpp
+struct SweepLimitsUnion;
 
 class Session {
  public:
@@ -1474,6 +1475,9 @@ class Session {
   // lay() and lay_organic() make it (and kept for the next lay, as theirs is), nothing is laid, and the answer is
   // organic_sweep_limits(that domain, line_mm) (lattice_layout_organic.hpp; include it to read the result).
   std::vector<SweepLimits> sweep_limits(const Settings& settings, double line_mm);
+  // OP10 (brief C2, E4, E7): the limits of a group of weave regions, the union over the measured ones among `regions`
+  // (SweepLimitsUnion, lattice_layout_organic.hpp). Makes the domain as sweep_limits does; lays nothing.
+  SweepLimitsUnion sweep_limits_for(const Settings& settings, const std::vector<int>& regions, double line_mm);
   std::size_t open_edges() const { return open_edges_; }
   const PartMeasure& measure() const { return *measure_; }
   // The part as it was opened (its unwelded triangles and their raw face ids): D23 reads its faces. Not a copy.
