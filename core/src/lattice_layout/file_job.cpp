@@ -203,7 +203,8 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "organic_foot_gap", "organic_stress_goal",
        "organic_void_ratio", "organic_reseed_rounds", "organic_wall_connect", "organic_wall_gap",
        "organic_wall_cross", "organic_top_run", "organic_run_max", "organic_root_run", "organic_run_gap",
-       "organic_run_follow", "organic_run_pull", "organic_run_seek", "organic_run_min", "organic_root_gap"},
+       "organic_run_follow", "organic_run_pull", "organic_run_seek", "organic_run_min", "organic_root_gap",
+       "organic_auto", "organic_width_heavy_mm"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -487,6 +488,13 @@ OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::str
     std::snprintf(b, sizeof b, "is under the thinnest strut (%.9g mm: bead_mm x min_strut_lines); 0 gives the thinnest",
                   thinnest);
     json::fail(w + ".organic_width_mm", b);
+  }
+  a.auto_by_stress = flag(in, "organic_auto", a.auto_by_stress, w);   // I
+  a.width_heavy_mm = num(in, "organic_width_heavy_mm", a.width_heavy_mm, w);   // I
+  {
+    const double light = a.width_mm > 0.0 ? a.width_mm : thinnest;
+    if (!(std::isfinite(a.width_heavy_mm) && (a.width_heavy_mm == 0.0 || a.width_heavy_mm >= light)))
+      json::fail(w + ".organic_width_heavy_mm", "must be 0 (off) or at least the strand width");
   }
   return a;
 }

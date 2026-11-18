@@ -5,6 +5,7 @@
 // called. Nothing here decides an order by an unordered container, the clock or the thread count: the randomness is
 // the ask's fixed seed number.
 #include "topopt/lattice_layout_organic.hpp"
+#include "topopt/grading.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -332,6 +333,17 @@ class Grower {
     return std::fabs(ev[0]) > 0.0;
   }
   // G3: the major principal direction, turned to point up; false where there is no stress.
+  // I (brief G10): the stress share u(p), 0 .. 1, exactly O12's (organic_spacing): the von Mises of the tensor at p's
+  // voxel over sp_'s reference; 0 off the field or with a reference of 0.
+  double share(const Vec3& p) const {
+    int i, j, k;
+    if (!voxel(p, i, j, k)) return 0.0;
+    const double* t = &field_.voigt[6 * field_.index(i, j, k)];
+    const double a = t[0] - t[1], b = t[1] - t[2], d = t[2] - t[0];
+    const double vm =
+        std::sqrt(std::max(0.0, 0.5 * (a * a + b * b + d * d) + 3.0 * (t[3] * t[3] + t[4] * t[4] + t[5] * t[5])));
+    return grading_demand_fraction(GradingIntent::Aesthetic, vm, sp_.reference_mpa, 1.0);
+  }
   bool stress_dir(const Vec3& p, Vec3& f) const {
     double ev[3];
     Vec3 vec[3];
@@ -2299,6 +2311,12 @@ void Grower::runs() {
     const int n = 1 + static_cast<int>(std::floor(rnd(ask_.seed, kWhatN, li, kind, 0) * nmax));
     return std::min(nmax, std::max(1, n));
   };
+  // I2, I3: with auto_by_stress, n = round(run_max x u(at)), 0 to run_max, in place of the random draw.
+  auto count_n = [&](int li, int kind, const Vec3& at) {
+    if (!ask_.auto_by_stress) return draw_n(li, kind);
+    const long n = std::lround(static_cast<double>(nmax) * share(at));
+    return static_cast<int>(std::min<long>(nmax, std::max<long>(0, n)));
+  };
   auto turn = [&](const Vec3& v, double a) { return add(mul(v, std::cos(a)), mul(cross(up_, v), std::sin(a))); };
   if (ask_.top_run > 0.0) {
     Boxes mine = rec_;
@@ -2318,7 +2336,7 @@ void Grower::runs() {
       head = has_head ? unit(head) : u_;
       const double rise = h(b) - h(a);
       const Vec3 x = rise < r_ ? a : sub(b, mul(sub(b, a), r_ / rise));
-      const int n = draw_n(li, 0);
+      const int n = count_n(li, 0, top_ends_[e].second);
       ++rep_.top_n[static_cast<std::size_t>(n)];
       if (nmax > 1) head = turn(head, 2.0 * kPi * rnd(ask_.seed, kWhatA, li, 0, 0));
       bool split = false;
@@ -2372,7 +2390,7 @@ void Grower::runs() {
       const Vec3 a = lines_[li].pts[seg], b = lines_[li].pts[seg + 1];
       Vec3 head = level(unit(sub(b, a)));
       head = len(head) >= 0.2 ? unit(head) : u_;
-      const int n = draw_n(static_cast<int>(li), 1);
+      const int n = count_n(static_cast<int>(li), 1, lines_[li].floor_pt);
       ++rep_.root_n[static_cast<std::size_t>(n)];
       if (nmax > 1) head = turn(head, 2.0 * kPi * rnd(ask_.seed, kWhatA, static_cast<long long>(li), 1, 0));
       bool split = false;
@@ -2440,6 +2458,11 @@ bool Grower::setup() {
   const double thinnest = domain_.spec().bead_mm * domain_.spec().min_strut_lines;
   if (ask_.width_mm != 0.0 && !(ask_.width_mm >= thinnest - 1e-12))
     throw std::invalid_argument("grow_strands: the strut width is under the thinnest strut (G8)");
+  {
+    const double light = ask_.width_mm > 0.0 ? ask_.width_mm : thinnest;
+    if (!(std::isfinite(ask_.width_heavy_mm) && (ask_.width_heavy_mm == 0.0 || ask_.width_heavy_mm >= light - 1e-12)))
+      throw std::invalid_argument("grow_strands: width_heavy_mm must be 0 or at least the strand width");   // I
+  }
   sp_ = organic_spacing(domain_, region_, field_, ask_);
   if (sp_.candidates == 0) return false;
   up_ = unit(ask_.build_dir);
@@ -2545,6 +2568,11 @@ std::vector<Strand> Grower::run() {
   rep_.tips = tips_;
   rep_.grown_mm = laid_mm_;
   std::vector<Strand> out = strands();
+  // I1: strut thickness by stress, on the widths handed back only (the growth and its own pruning used width_).
+  if (ask_.width_heavy_mm > 0.0)
+    for (Strand& s : out)
+      for (std::size_t k = 0; k < s.points.size(); ++k)
+        s.width_mm[k] = width_ + (ask_.width_heavy_mm - width_) * share(s.points[k]);
   rep_.strands = out.size();
   return out;
 }

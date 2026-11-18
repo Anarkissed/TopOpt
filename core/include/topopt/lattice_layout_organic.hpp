@@ -109,6 +109,13 @@ struct OrganicAsk {
   double run_seek = 0.0;
   double run_min = 0.5;
   double root_gap = -1.0;
+  // I (brief G10, try keys): AUTO. u(p), the stress share 0 .. 1, is O12's: the von Mises at p's voxel over the
+  // spacing's reference (grading_demand_fraction, Aesthetic); 0 off the field or with a reference of 0.
+  // auto_by_stress: a top end makes round(run_max x u(end)) runs and a foot round(run_max x u(floor point)) roots
+  // (0 to run_max) in place of the random draw. width_heavy_mm above 0: every point handed back is
+  // w + (width_heavy_mm - w) x u(point) wide, w the light width (the growth itself uses w); 0: off.
+  bool auto_by_stress = false;
+  double width_heavy_mm = 0.0;
 };
 
 // O16, the net skin: Finish Skin (Settings::skin) on a weave region (the old finish step "Skin", organic_lattice.cpp,
