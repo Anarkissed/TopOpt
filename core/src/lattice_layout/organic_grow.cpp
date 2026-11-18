@@ -53,7 +53,7 @@ void GrowReport::add(const GrowReport& o) {
   ties_seeded += o.ties_seeded; ties_laid += o.ties_laid; ties_refused_minor += o.ties_refused_minor;
   ties_refused_reach += o.ties_refused_reach;
   tie_level = tie_level || o.tie_level;   // P
-  ties_level_refused_steep += o.ties_level_refused_steep; ties_level_cut_span += o.ties_level_cut_span;
+  ties_level_refused_steep += o.ties_level_refused_steep; ties_level_cut_span += o.ties_level_cut_span; ties_level_removed += o.ties_level_removed;
   tie_level_joints.insert(tie_level_joints.end(), o.tie_level_joints.begin(), o.tie_level_joints.end());
   tie_level_span_mm.insert(tie_level_span_mm.end(), o.tie_level_span_mm.begin(), o.tie_level_span_mm.end());
   tie_level_dz_max_mm = std::max(tie_level_dz_max_mm, o.tie_level_dz_max_mm);
@@ -1377,20 +1377,55 @@ void Grower::repeats() {
       if (was) need.push_back({l, end});
     }
   }
+  // P (the lead's ruling, 2026-11-18; the owner: flat ties are PERFECTLY flat): a level tie's ends are fixed in height.
+  // Its end is moved only within its own level plane: onto the point where another strand's segment crosses the tie's
+  // height (or the nearest point of a segment lying at that height), within the repeat distance; where there is none
+  // the tie is REMOVED (its length counted as cut by the repeats), never left off level.
+  std::vector<char> removed_tie(lines_.size(), 0);
+  bool any_removed = false;
   for (int round = 0; round < 8; ++round) {
     bool moved = false;
     for (const auto& ne : need) {
       Line& L = lines_[ne.first];
-      if (L.pts.size() < 2) continue;
+      if (L.pts.size() < 2 || removed_tie[ne.first]) continue;
       Vec3& e = ne.second ? L.pts.back() : L.pts.front();
       Near on;
+      const bool level = L.level_tie;
+      const double lh = L.level_h;
       boxes_.near(e, near_mm + ds_, [&](const Sample& x) {
         if (static_cast<std::size_t>(x.line) == ne.first || !current(x)) return;
+        if (removed_tie[static_cast<std::size_t>(x.line)]) return;
         const Line& O = lines_[static_cast<std::size_t>(x.line)];
-        const Vec3 c = closest_on(e, O.pts[static_cast<std::size_t>(x.seg)], O.pts[static_cast<std::size_t>(x.seg) + 1]);
+        const Vec3 a = O.pts[static_cast<std::size_t>(x.seg)], b = O.pts[static_cast<std::size_t>(x.seg) + 1];
+        Vec3 c;
+        if (!level) {
+          c = closest_on(e, a, b);
+        } else {
+          const double ha = h(a) - lh, hb = h(b) - lh;
+          if (std::fabs(ha) <= 1e-9 && std::fabs(hb) <= 1e-9) {
+            c = closest_on(e, a, b);
+          } else if ((ha > 0.0 && hb > 0.0) || (ha < 0.0 && hb < 0.0) || ha == hb) {
+            return;
+          } else {
+            c = add(a, mul(sub(b, a), ha / (ha - hb)));
+            c = sub(c, mul(up_, h(c) - lh));
+          }
+        }
         const double dd = dist(c, e);
         if (dd <= near_mm + 1e-6 && dd < on.d) { on.found = true; on.d = dd; on.hit = c; }
       });
+      if (level && !on.found) {
+        // P: no point at the tie's height to move its end to: the tie goes.
+        double len_mm = 0.0;
+        for (std::size_t k = 0; k + 1 < L.pts.size(); ++k)
+          if (!L.dead[k]) len_mm += dist(L.pts[k], L.pts[k + 1]);
+        rep_.cut_repeat_mm += len_mm;
+        ++rep_.ties_level_removed;
+        removed_tie[ne.first] = 1;
+        any_removed = true;
+        moved = true;
+        continue;
+      }
       if (on.found && on.d > 1e-9) {
         const Vec3 nb = ne.second ? L.pts[L.pts.size() - 2] : L.pts[1];
         laid_mm_ += dist(nb, on.hit) - dist(nb, e);   // the end moved onto the kept copy (G12: grown = kept + cuts)
@@ -1399,6 +1434,11 @@ void Grower::repeats() {
       }
     }
     if (!moved) break;
+    rebuild_boxes();
+  }
+  if (any_removed) {
+    for (std::size_t l = 0; l < lines_.size(); ++l)
+      if (removed_tie[l]) { lines_[l].pts.clear(); lines_[l].rec.clear(); lines_[l].dead.clear(); }
     rebuild_boxes();
   }
 }

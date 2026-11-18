@@ -461,6 +461,9 @@ struct GrowReport {
   // points that are not a recorded vertex used as it is (those may lie up to a quarter layer off).
   bool tie_level = false;
   std::size_t ties_level_refused_steep = 0, ties_level_cut_span = 0;
+  // P (the lead's ruling, 2026-11-18): level ties removed by the repeat merge, their end having no point at their own
+  // height to move to (a level tie is never left off level).
+  std::size_t ties_level_removed = 0;
   std::vector<std::size_t> tie_level_joints;
   std::vector<double> tie_level_span_mm;
   double tie_level_dz_max_mm = 0.0, tie_level_dz_max_unsnapped_mm = 0.0;
