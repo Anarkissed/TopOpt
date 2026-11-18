@@ -194,6 +194,31 @@ struct OrganicAsk {
   bool follow_stress = true;
 };
 
+// OP7 (brief C2, E1): every range and rule an Organic ask must keep, in one call, so the file job's parser and the
+// session path (Session::lay_organic, lay_organic_draft, lay_organic_preview) refuse exactly the same asks. Returns
+// every refusal (empty: the ask is valid), in a fixed order. The rules (the sheet's sections A to D):
+//   the cell size: spacing_mm 0 (the range) or above 0; with the range, spacing_min_mm above 0, spacing_max_mm at least
+//     it (equal is allowed: one spacing), spacing_exponent above 0; the small end (or the one size) at least the
+//     smallest printable cell, kSmallestCellFactor x the light width (OP7, both modes);
+//   the struts: the thinnest strut (bead_mm x min_strut_lines) above 0; width_mm 0 or at least it; width_heavy_mm 0 or
+//     at least the light width; link_width 0.5 to 2; unbraced_max 0 or 4 to 40;
+//   shape_reach, bed_floor_mm, part_reach_mm, part_support_mm 0 or above; tie_swirl 0 to 1; foot_gap, wall_gap,
+//     root_gap numbers; void_ratio above 0; reseed_rounds 0 to 100; wall_cross 0, 1 or 2; cross_gap above 0 (not 2.5
+//     only with wall_cross); cross_climb_max_deg 30 to 45 (not 45 only with wall_cross); tie_gap above 0; top_run,
+//     root_run, run_gap, run_pull, run_seek, run_min 0 or above; run_max 1 to 1,000,000; run_follow above 0;
+//     build_dir not zero; layer_mm and seed_stride above 0;
+//   the three heavy gaps: 0 or less is off; above 0 at most their light gap, and needs the cell size as a range
+//     (spacing_mm 0, spacing_max_mm above spacing_min_mm); wall_gap_heavy needs wall_gap above 0; cross_gap_heavy needs wall_cross;
+//   Grown only (as the Grower reads them): wall_cross needs walls_out and not wall_connect; tie_level, tie_gap not 1 and
+//     tie_gap_heavy above 0 need ties;
+//   `field` given (the session path): a weave region in `settings` and an empty field is refused (setting "stress").
+//     Null (the file job, whose own refusal for it is no_stress_result): not checked.
+// Every text is one plain sentence for the owner, naming the control and the number allowed, no key names.
+inline constexpr double kSmallestCellFactor = 1.5349900619197328;   // 0.5 x sqrt(3 pi): the tracer's print floor
+double organic_smallest_cell_mm(const Settings& settings, const OrganicAsk& ask);   // kSmallestCellFactor x light
+std::vector<OrganicRefusal> validate_organic(const Settings& settings, const OrganicAsk& ask,
+                                             const TensorField* field = nullptr);
+
 // J2 (brief G12), the pruning of a Grown area's weave bars, for each (region, median asked spacing) of `areas`:
 //   J2a, no end in the air: a weave bar (not a net strut) of the area with an end that is not Solid, not Surface, and not
 //     at a joint (a Node or Loose end: another kept bar ends at the same point, as drop_loose_bars reads a node; a

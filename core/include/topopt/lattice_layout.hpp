@@ -1386,6 +1386,20 @@ std::vector<Place> find_places(const StepModel& model, const Domain& domain, con
                                const std::vector<int>& chip_ids, const std::vector<Settings::RegionAsk>& asks,
                                const Layout& layout, double fallback_cell_mm);
 
+// OP7 (brief C2, E1): one refusal of an Organic ask (validate_organic, lattice_layout_organic.hpp). `setting` is a
+// stable name the app maps to its control: the OrganicAsk field's own name (spacing_min_mm, width_heavy_mm, ...), or
+// bead_mm, layer_mm, build_dir, seed_stride, stress (no stress input), foci or region (the synthetic stress call, E5).
+// `code` is a stable word for the rule; `text` one plain sentence for the owner (no key names). `given` is the value
+// refused; allowed_min / allowed_max the nearest allowed numbers where a number applies (has_min / has_max).
+struct OrganicRefusal {
+  std::string setting;
+  std::string code;
+  std::string text;
+  double given = 0.0;
+  bool has_min = false, has_max = false;
+  double allowed_min = 0.0, allowed_max = 0.0;
+};
+
 struct Outcome {
   Layout layout;
   StrutReport struts;
@@ -1420,6 +1434,9 @@ struct Outcome {
   // G1 (Organic, Grown; lay_organic with OrganicAsk::mode Grown): what the growth did, every weave region together;
   // null otherwise.
   std::shared_ptr<const GrowReport> grown;
+  // OP7 (brief C2, E1; lay_organic and lay_organic_draft only): the ask refused, every refusal validate_organic gave.
+  // When not empty nothing was laid, nothing else here is filled, and the session's kept domain was not touched.
+  std::vector<OrganicRefusal> refused;
 };
 
 struct SweepLimits;   // lattice_layout_organic.hpp

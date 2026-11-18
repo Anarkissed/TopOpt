@@ -7,6 +7,8 @@
 #include <map>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <string>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -588,6 +590,19 @@ Outcome Session::lay_organic_with(const Settings& settings, const TensorField& f
     none.cancelled = true;
     return none;
   }
+  // OP7 (brief C2, E1): an ask validate_organic refuses comes back refused, every refusal listed, before the domain is
+  // made (the kept domain, and what the caller holds of the last lay, stay as they were). With no weave region the ask
+  // is not read (it is lay()).
+  for (const Settings::RegionAsk& r : settings.regions)
+    if (r.weave && r.role == Role::Lattice) {
+      std::vector<OrganicRefusal> refused = validate_organic(settings, ask, &field);
+      if (!refused.empty()) {
+        Outcome no;
+        no.refused = std::move(refused);
+        return no;
+      }
+      break;
+    }
   // OR30: the Finish is the regular lattices' own. Rim and Covered are "where" settings of the domain the weave is
   // traced and laid in (their solid cuts the strands as any solid does); Skin lays the net skin (O16).
   ready_domain(settings);
@@ -1044,6 +1059,243 @@ std::vector<HoldPatchCount> hold_up_weave(Bars& bars, const Domain& domain, cons
     read_ends();
     for (std::size_t q = first; q < out.size(); ++q) out[q].ends_after = ends_under(A.patches[q - first]);
   }
+  return out;
+}
+
+// ── OP7 (brief C2, E1): one validation call for an Organic ask ─────────────────────────────────────────────────────
+namespace {
+// A number as the owner reads it: at most two decimals, no trailing zeros. `up`: rounded up to the hundredth (a
+// smallest allowed value, so the number shown is itself allowed).
+std::string plain_number(double x, bool up = false) {
+  if (up) x = std::ceil(x * 100.0 - 1e-9) / 100.0;
+  char b[48];
+  std::snprintf(b, sizeof b, "%.2f", x);
+  std::string t = b;
+  while (!t.empty() && t.back() == '0') t.pop_back();
+  if (!t.empty() && t.back() == '.') t.pop_back();
+  return t == "-0" ? "0" : t;
+}
+std::string spacings(double x) { return plain_number(x) + (plain_number(x) == "1" ? " spacing" : " spacings"); }
+bool any_weave(const Settings& s) {
+  for (const Settings::RegionAsk& r : s.regions)
+    if (r.weave && r.role == Role::Lattice) return true;
+  return false;
+}
+double light_width(const Settings& s, const OrganicAsk& a) {
+  const double thinnest = s.bead_mm * s.min_strut_lines;
+  return a.width_mm > 0.0 && std::isfinite(a.width_mm) && a.width_mm >= thinnest - 1e-9 ? a.width_mm : thinnest;
+}
+}  // namespace
+
+double organic_smallest_cell_mm(const Settings& settings, const OrganicAsk& ask) {
+  return kSmallestCellFactor * light_width(settings, ask);
+}
+
+std::vector<OrganicRefusal> validate_organic(const Settings& settings, const OrganicAsk& a, const TensorField* field) {
+  std::vector<OrganicRefusal> out;
+  auto refuse = [&](const char* setting, const char* code, const std::string& text, double given) -> OrganicRefusal& {
+    OrganicRefusal r;
+    r.setting = setting;
+    r.code = code;
+    r.text = text;
+    r.given = given;
+    out.push_back(r);
+    return out.back();
+  };
+  auto at_least = [](OrganicRefusal& r, double v) { r.has_min = true; r.allowed_min = v; };
+  auto at_most = [](OrganicRefusal& r, double v) { r.has_max = true; r.allowed_max = v; };
+  auto fin = [](double v) { return std::isfinite(v); };
+  const bool grown = a.mode == OrganicMode::Grown;
+  const double thinnest = settings.bead_mm * settings.min_strut_lines;
+  if (!(fin(thinnest) && thinnest > 0.0))
+    refuse("bead_mm", "no_thinnest_strut", "Line width: the printer's line width and strut lines must be above 0.",
+           settings.bead_mm);
+  // The cell size (O12).
+  const bool one = a.spacing_mm > 0.0 && fin(a.spacing_mm);
+  if (a.spacing_mm != 0.0 && !one)
+    at_least(refuse("spacing_mm", "not_above_zero", "Cell size: the size must be above 0 mm.", a.spacing_mm), 0.0);
+  bool range = false;
+  if (a.spacing_mm == 0.0) {
+    const bool lo_ok = fin(a.spacing_min_mm) && a.spacing_min_mm > 0.0;
+    if (!lo_ok)
+      at_least(refuse("spacing_min_mm", "not_above_zero", "Cell size: the small end must be above 0 mm.", a.spacing_min_mm),
+               0.0);
+    if (lo_ok && !(fin(a.spacing_max_mm) && a.spacing_max_mm >= a.spacing_min_mm))
+      at_least(refuse("spacing_max_mm", "under_other_end",
+                      "Cell size: the large end must be at least the small end (" + plain_number(a.spacing_min_mm) + " mm).",
+                      a.spacing_max_mm),
+               a.spacing_min_mm);
+    if (!(fin(a.spacing_exponent) && a.spacing_exponent > 0.0))
+      at_least(refuse("spacing_exponent", "not_above_zero", "Cell size: the grading strength must be above 0.",
+                      a.spacing_exponent),
+               0.0);
+    range = lo_ok && fin(a.spacing_max_mm) && a.spacing_max_mm > a.spacing_min_mm;
+  }
+  // The struts.
+  if (!(fin(a.width_mm) && a.width_mm >= 0.0))
+    at_least(refuse("width_mm", "below_zero", "Strut thickness: the thin end must be 0 (the thinnest strut) or more.",
+                    a.width_mm),
+             0.0);
+  else if (a.width_mm > 0.0 && thinnest > 0.0 && a.width_mm < thinnest - 1e-9)
+    at_least(refuse("width_mm", "under_thinnest_strut",
+                    "Strut thickness: the thin end must be at least " + plain_number(thinnest, true) +
+                        " mm, the thinnest strut this printer makes.",
+                    a.width_mm),
+             thinnest);
+  const double light = light_width(settings, a);
+  if (!(fin(a.width_heavy_mm) && (a.width_heavy_mm == 0.0 || a.width_heavy_mm >= light - 1e-9)))
+    at_least(refuse("width_heavy_mm", "under_other_end",
+                    "Strut thickness: the thick end must be at least the thin end (" + plain_number(light) + " mm).",
+                    a.width_heavy_mm),
+             light);
+  // OP7: the smallest printable cell, kSmallestCellFactor x the light width, in both modes (Traced raised it silently,
+  // Grown laid it).
+  {
+    const double small = one ? a.spacing_mm : a.spacing_min_mm;
+    const double floor_mm = kSmallestCellFactor * light;
+    if (light > 0.0 && (one || a.spacing_mm == 0.0) && fin(small) && small > 0.0 && small < floor_mm - 1e-9)
+      at_least(refuse(one ? "spacing_mm" : "spacing_min_mm", "under_smallest_cell",
+                      std::string(one ? "Cell size: the size" : "Cell size: the small end") + " must be at least " +
+                          plain_number(floor_mm, true) + " mm, the smallest cell a " + plain_number(light) +
+                          " mm strut can print.",
+                      small),
+               floor_mm);
+  }
+  if (!(fin(a.link_width) && a.link_width >= 0.5 && a.link_width <= 2.0)) {
+    OrganicRefusal& r = refuse("link_width", "out_of_range", "Link thickness: it must be from 0.5 to 2 times the thinner strut.",
+                               a.link_width);
+    at_least(r, 0.5);
+    at_most(r, 2.0);
+  }
+  if (!(fin(a.unbraced_max) && (a.unbraced_max == 0.0 || (a.unbraced_max >= 4.0 && a.unbraced_max <= 40.0)))) {
+    OrganicRefusal& r = refuse("unbraced_max", "out_of_range",
+                               "Longest strut without a joint: it must be 0 (off) or from 4 to 40 strut widths.",
+                               a.unbraced_max);
+    at_least(r, 4.0);
+    at_most(r, 40.0);
+  }
+  auto not_below_zero = [&](double v, const char* setting, const char* text) {
+    if (!(fin(v) && v >= 0.0)) at_least(refuse(setting, "below_zero", text, v), 0.0);
+  };
+  auto above_zero = [&](double v, const char* setting, const char* text) {
+    if (!(fin(v) && v > 0.0)) at_least(refuse(setting, "not_above_zero", text, v), 0.0);
+  };
+  auto a_number = [&](double v, const char* setting, const char* text) {
+    if (!fin(v)) refuse(setting, "not_a_number", text, v);
+  };
+  not_below_zero(a.shape_reach, "shape_reach", "Grade to shape reach: it must be 0 or more.");
+  not_below_zero(a.bed_floor_mm, "bed_floor_mm", "Flat floor: its height must be 0 (no floor) or more.");
+  not_below_zero(a.part_reach_mm, "part_reach_mm", "Floating parts: the reach must be 0 mm or more.");
+  not_below_zero(a.part_support_mm, "part_support_mm", "Floating parts: the support spacing must be 0 mm or more.");
+  if (!(a.tie_swirl >= 0.0 && a.tie_swirl <= 1.0)) {
+    OrganicRefusal& r = refuse("tie_swirl", "out_of_range", "Tie swirl: it must be from 0 to 1.", a.tie_swirl);
+    at_least(r, 0.0);
+    at_most(r, 1.0);
+  }
+  a_number(a.foot_gap, "foot_gap", "Seeds: the gap must be a number.");
+  above_zero(a.void_ratio, "void_ratio", "Re-seeding: the bare distance must be above 0 spacings.");
+  if (!(a.reseed_rounds >= 0 && a.reseed_rounds <= 100)) {
+    OrganicRefusal& r = refuse("reseed_rounds", "out_of_range", "Re-seeding: the rounds must be from 0 to 100.",
+                               a.reseed_rounds);
+    at_least(r, 0.0);
+    at_most(r, 100.0);
+  }
+  // The wall seeds' gap (M).
+  a_number(a.wall_gap, "wall_gap", "Wall seed gap: the light end must be a number.");
+  const std::string ranged = "needs the cell size as a range with two different ends.";
+  if (!fin(a.wall_gap_heavy)) {
+    refuse("wall_gap_heavy", "not_a_number", "Wall seed gap: the heavy end must be a number.", a.wall_gap_heavy);
+  } else if (a.wall_gap_heavy > 0.0) {
+    if (!(a.wall_gap > 0.0))
+      refuse("wall_gap_heavy", "needs_light_end", "Wall seed gap: the heavy end needs the light end above 0 spacings.",
+             a.wall_gap_heavy);
+    else if (a.wall_gap_heavy > a.wall_gap)
+      at_most(refuse("wall_gap_heavy", "over_light_end",
+                     "Wall seed gap: the heavy end must be at most the light end (" + spacings(a.wall_gap) + ").",
+                     a.wall_gap_heavy),
+              a.wall_gap);
+    if (!range) refuse("wall_gap_heavy", "needs_range", "Wall seed gap: the heavy end " + ranged, a.wall_gap_heavy);
+  }
+  // Crossing vines (F, N, O).
+  if (!(a.wall_cross == 0 || a.wall_cross == 1 || a.wall_cross == 2)) {
+    OrganicRefusal& r = refuse("wall_cross", "out_of_range",
+                               "Crossing vines: the choice must be off, after the floor vines or before them.", a.wall_cross);
+    at_least(r, 0.0);
+    at_most(r, 2.0);
+  }
+  if (grown && a.wall_cross != 0 && !a.walls_out)
+    refuse("wall_cross", "needs_wall_seeds", "Crossing vines need Wall seeds switched on.", a.wall_cross);
+  if (grown && a.wall_cross != 0 && a.wall_connect)
+    refuse("wall_cross", "with_wall_connect", "Crossing vines cannot be on while wall seeds join the vines.", a.wall_cross);
+  if (!(fin(a.cross_gap) && a.cross_gap > 0.0))
+    at_least(refuse("cross_gap", "not_above_zero", "Crossing gap: the light end must be above 0 spacings.", a.cross_gap),
+             0.0);
+  else if (a.cross_gap != 2.5 && a.wall_cross == 0)
+    refuse("cross_gap", "needs_crossing_vines", "Crossing gap: it needs Crossing vines switched on.", a.cross_gap);
+  if (!fin(a.cross_gap_heavy)) {
+    refuse("cross_gap_heavy", "not_a_number", "Crossing gap: the heavy end must be a number.", a.cross_gap_heavy);
+  } else if (a.cross_gap_heavy > 0.0) {
+    if (a.wall_cross == 0)
+      refuse("cross_gap_heavy", "needs_crossing_vines", "Crossing gap: the heavy end needs Crossing vines switched on.",
+             a.cross_gap_heavy);
+    if (fin(a.cross_gap) && a.cross_gap > 0.0 && a.cross_gap_heavy > a.cross_gap)
+      at_most(refuse("cross_gap_heavy", "over_light_end",
+                     "Crossing gap: the heavy end must be at most the light end (" + spacings(a.cross_gap) + ").",
+                     a.cross_gap_heavy),
+              a.cross_gap);
+    if (!range) refuse("cross_gap_heavy", "needs_range", "Crossing gap: the heavy end " + ranged, a.cross_gap_heavy);
+  }
+  if (!(fin(a.cross_climb_max_deg) && a.cross_climb_max_deg >= 30.0 && a.cross_climb_max_deg <= 45.0)) {
+    OrganicRefusal& r = refuse("cross_climb_max_deg", "out_of_range",
+                               "Steepest crossing climb: it must be from 30 to 45 degrees.", a.cross_climb_max_deg);
+    at_least(r, 30.0);
+    at_most(r, 45.0);
+  } else if (a.cross_climb_max_deg != 45.0 && a.wall_cross == 0) {
+    refuse("cross_climb_max_deg", "needs_crossing_vines", "Steepest crossing climb: it needs Crossing vines switched on.",
+           a.cross_climb_max_deg);
+  }
+  // Ties (G9, P).
+  if (grown && a.tie_level && !a.ties) refuse("tie_level", "needs_ties", "Flat ties need Ties switched on.", 1.0);
+  if (!(fin(a.tie_gap) && a.tie_gap > 0.0))
+    at_least(refuse("tie_gap", "not_above_zero", "Flat tie gap: the light end must be above 0 spacings.", a.tie_gap), 0.0);
+  else if (grown && a.tie_gap != 1.0 && !a.ties)
+    refuse("tie_gap", "needs_ties", "Flat tie gap: it needs Ties switched on.", a.tie_gap);
+  if (!fin(a.tie_gap_heavy)) {
+    refuse("tie_gap_heavy", "not_a_number", "Flat tie gap: the heavy end must be a number.", a.tie_gap_heavy);
+  } else if (a.tie_gap_heavy > 0.0) {
+    if (grown && !a.ties)
+      refuse("tie_gap_heavy", "needs_ties", "Flat tie gap: the heavy end needs Ties switched on.", a.tie_gap_heavy);
+    if (fin(a.tie_gap) && a.tie_gap > 0.0 && a.tie_gap_heavy > a.tie_gap)
+      at_most(refuse("tie_gap_heavy", "over_light_end",
+                     "Flat tie gap: the heavy end must be at most the light end (" + spacings(a.tie_gap) + ").",
+                     a.tie_gap_heavy),
+              a.tie_gap);
+    if (!range) refuse("tie_gap_heavy", "needs_range", "Flat tie gap: the heavy end " + ranged, a.tie_gap_heavy);
+  }
+  // Roots and top branches (G, H).
+  not_below_zero(a.top_run, "top_run", "Top branches: the length must be 0 (off) or more.");
+  not_below_zero(a.root_run, "root_run", "Roots: the length must be 0 (off) or more.");
+  not_below_zero(a.run_gap, "run_gap", "Roots and top branches: the gap between them must be 0 or more.");
+  if (!(a.run_max >= 1 && a.run_max <= 1000000)) {
+    OrganicRefusal& r = refuse("run_max", "out_of_range", "Runs per end: it must be a whole number, 1 or more.", a.run_max);
+    at_least(r, 1.0);
+    at_most(r, 1e6);
+  }
+  above_zero(a.run_follow, "run_follow", "Roots and top branches: how firmly they turn must be above 0.");
+  not_below_zero(a.run_pull, "run_pull", "Roots and top branches: the pull's reach must be 0 or more.");
+  not_below_zero(a.run_seek, "run_seek", "Roots and top branches: the drift toward stronger stress must be 0 or more.");
+  not_below_zero(a.run_min, "run_min", "Roots and top branches: the travel before they may join must be 0 or more.");
+  a_number(a.root_gap, "root_gap", "Roots: the gap between roots must be a number.");
+  // The print.
+  {
+    const double l = std::sqrt(a.build_dir.x * a.build_dir.x + a.build_dir.y * a.build_dir.y + a.build_dir.z * a.build_dir.z);
+    if (!(fin(l) && l > 1e-9)) refuse("build_dir", "zero_direction", "Build direction: it must not be zero.", l);
+  }
+  above_zero(a.layer_mm, "layer_mm", "Layer height: it must be above 0 mm.");
+  above_zero(a.seed_stride, "seed_stride", "Seeds: the seed spacing must be above 0.");
+  if (field && field->empty() && any_weave(settings))
+    refuse("stress", "no_stress_result",
+           "Organic follows the part's stress, and there is no stress result yet. Run the stress check first.", 0.0);
   return out;
 }
 

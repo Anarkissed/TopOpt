@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdio>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -1076,6 +1077,203 @@ static void test_follow_stress() {
   CHECK(!job.organic.follow_stress);
 }
 
+// ── OL-VALID (OP7, brief C2, E1): one validation call; the session path and the file job refuse alike ────────────────
+// The two judged Auto asks (the app's defaults, sheet H; his stand's limits 2 to 8 mm and 0.9 to 1.8 mm, layer 0.2).
+static OrganicAsk judged_ask(bool grown) {
+  OrganicAsk a;
+  a.mode = grown ? OrganicMode::Grown : OrganicMode::Traced;
+  a.follow_stress = true;
+  a.spacing_min_mm = 2.0;
+  a.spacing_max_mm = 8.0;
+  a.width_mm = 0.9;
+  a.width_heavy_mm = 1.8;
+  a.foot_gap = 2.5;
+  a.walls_out = grown;
+  a.wall_gap = grown ? 2.5 : 0.0;
+  a.wall_gap_heavy = grown ? 1.0 : 0.0;
+  a.wall_cross = grown ? 1 : 0;
+  a.cross_gap = 2.5;
+  a.cross_gap_heavy = grown ? 1.0 : 0.0;
+  a.stress_goal = grown;
+  a.ties = true;
+  a.tie_level = true;
+  a.tie_gap = 1.0;
+  a.tie_gap_heavy = 0.5;
+  a.shape_reach = 1.0;
+  a.shape_fit = true;
+  a.member_cap = false;
+  a.hold_parts = true;
+  a.part_to_floor = true;
+  a.part_reach_mm = 1.5 * 8.0;
+  a.part_support_mm = 0.75 * 2.0;
+  a.link_width = 1.0;
+  a.unbraced_max = 10.0;
+  a.prune = true;
+  a.run_max = 1;
+  a.bed_floor_mm = 4.0 * 0.2;
+  a.layer_mm = 0.2;
+  return a;
+}
+static bool has_refusal(const std::vector<OrganicRefusal>& r, const std::string& setting, const std::string& code) {
+  for (const OrganicRefusal& x : r)
+    if (x.setting == setting && x.code == code) return true;
+  return false;
+}
+static void test_validate() {
+  const Settings st = traced_settings();
+  const TensorField f = traced_field();
+  for (int g = 0; g < 2; ++g) {
+    const std::vector<OrganicRefusal> r = validate_organic(st, judged_ask(g == 1), &f);
+    std::printf("OL-VALID judged Auto ask, %s: %zu refusals\n", g ? "Grown" : "Traced", r.size());
+    for (const OrganicRefusal& x : r) std::printf("  (%s %s: %s)\n", x.setting.c_str(), x.code.c_str(), x.text.c_str());
+    CHECK(r.empty());
+  }
+  CHECK(validate_organic(st, traced_ask(), &f).empty());
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  struct Case {
+    bool grown;
+    std::function<void(Settings&, OrganicAsk&)> change;
+    const char* setting;
+    const char* code;
+  };
+  using S = Settings;
+  using A = OrganicAsk;
+  const std::vector<Case> cases = {
+      {true, [](S& s, A&) { s.bead_mm = 0.0; }, "bead_mm", "no_thinnest_strut"},
+      {true, [](S&, A& a) { a.spacing_mm = -1.0; }, "spacing_mm", "not_above_zero"},
+      {true, [](S&, A& a) { a.spacing_min_mm = 0.0; }, "spacing_min_mm", "not_above_zero"},
+      {true, [](S&, A& a) { a.spacing_max_mm = 1.5; }, "spacing_max_mm", "under_other_end"},
+      {true, [](S&, A& a) { a.spacing_exponent = 0.0; }, "spacing_exponent", "not_above_zero"},
+      {true, [](S&, A& a) { a.width_mm = -1.0; }, "width_mm", "below_zero"},
+      {true, [](S&, A& a) { a.width_mm = 0.6; }, "width_mm", "under_thinnest_strut"},
+      {true, [](S&, A& a) { a.width_heavy_mm = 0.5; }, "width_heavy_mm", "under_other_end"},
+      {true, [](S&, A& a) { a.spacing_min_mm = 1.0; }, "spacing_min_mm", "under_smallest_cell"},
+      {false, [](S&, A& a) { a.spacing_mm = 1.0; a.tie_gap_heavy = 0.0; }, "spacing_mm", "under_smallest_cell"},
+      {true, [](S&, A& a) { a.link_width = 3.0; }, "link_width", "out_of_range"},
+      {true, [](S&, A& a) { a.unbraced_max = 2.0; }, "unbraced_max", "out_of_range"},
+      {true, [](S&, A& a) { a.shape_reach = -1.0; }, "shape_reach", "below_zero"},
+      {true, [](S&, A& a) { a.bed_floor_mm = -1.0; }, "bed_floor_mm", "below_zero"},
+      {true, [](S&, A& a) { a.part_reach_mm = -1.0; }, "part_reach_mm", "below_zero"},
+      {true, [](S&, A& a) { a.part_support_mm = -1.0; }, "part_support_mm", "below_zero"},
+      {true, [](S&, A& a) { a.tie_swirl = 1.5; }, "tie_swirl", "out_of_range"},
+      {true, [nan](S&, A& a) { a.foot_gap = nan; }, "foot_gap", "not_a_number"},
+      {true, [](S&, A& a) { a.void_ratio = 0.0; }, "void_ratio", "not_above_zero"},
+      {true, [](S&, A& a) { a.reseed_rounds = 101; }, "reseed_rounds", "out_of_range"},
+      {true, [nan](S&, A& a) { a.wall_gap = nan; }, "wall_gap", "not_a_number"},
+      {true, [nan](S&, A& a) { a.wall_gap_heavy = nan; }, "wall_gap_heavy", "not_a_number"},
+      {true, [](S&, A& a) { a.wall_gap = 0.0; }, "wall_gap_heavy", "needs_light_end"},
+      {true, [](S&, A& a) { a.wall_gap_heavy = 3.0; }, "wall_gap_heavy", "over_light_end"},
+      {true, [](S&, A& a) { a.spacing_mm = 3.0; }, "wall_gap_heavy", "needs_range"},
+      {true, [](S&, A& a) { a.wall_cross = 3; }, "wall_cross", "out_of_range"},
+      {true, [](S&, A& a) { a.walls_out = false; }, "wall_cross", "needs_wall_seeds"},
+      {true, [](S&, A& a) { a.wall_connect = true; }, "wall_cross", "with_wall_connect"},
+      {true, [](S&, A& a) { a.cross_gap = 0.0; }, "cross_gap", "not_above_zero"},
+      {false, [](S&, A& a) { a.cross_gap = 2.0; }, "cross_gap", "needs_crossing_vines"},
+      {true, [nan](S&, A& a) { a.cross_gap_heavy = nan; }, "cross_gap_heavy", "not_a_number"},
+      {false, [](S&, A& a) { a.cross_gap_heavy = 1.0; }, "cross_gap_heavy", "needs_crossing_vines"},
+      {true, [](S&, A& a) { a.cross_gap_heavy = 3.0; }, "cross_gap_heavy", "over_light_end"},
+      {true, [](S&, A& a) { a.spacing_mm = 3.0; }, "cross_gap_heavy", "needs_range"},
+      {true, [](S&, A& a) { a.cross_climb_max_deg = 50.0; }, "cross_climb_max_deg", "out_of_range"},
+      {false, [](S&, A& a) { a.cross_climb_max_deg = 40.0; }, "cross_climb_max_deg", "needs_crossing_vines"},
+      {true, [](S&, A& a) { a.ties = false; }, "tie_level", "needs_ties"},
+      {true, [](S&, A& a) { a.tie_gap = 0.0; }, "tie_gap", "not_above_zero"},
+      {true, [](S&, A& a) { a.ties = false; a.tie_level = false; a.tie_gap = 0.8; }, "tie_gap", "needs_ties"},
+      {true, [nan](S&, A& a) { a.tie_gap_heavy = nan; }, "tie_gap_heavy", "not_a_number"},
+      {true, [](S&, A& a) { a.ties = false; a.tie_level = false; }, "tie_gap_heavy", "needs_ties"},
+      {true, [](S&, A& a) { a.tie_gap_heavy = 2.0; }, "tie_gap_heavy", "over_light_end"},
+      {false, [](S&, A& a) { a.spacing_mm = 3.0; }, "tie_gap_heavy", "needs_range"},
+      {true, [](S&, A& a) { a.top_run = -1.0; }, "top_run", "below_zero"},
+      {true, [](S&, A& a) { a.root_run = -1.0; }, "root_run", "below_zero"},
+      {true, [](S&, A& a) { a.run_gap = -1.0; }, "run_gap", "below_zero"},
+      {true, [](S&, A& a) { a.run_max = 0; }, "run_max", "out_of_range"},
+      {true, [](S&, A& a) { a.run_follow = 0.0; }, "run_follow", "not_above_zero"},
+      {true, [](S&, A& a) { a.run_pull = -1.0; }, "run_pull", "below_zero"},
+      {true, [](S&, A& a) { a.run_seek = -1.0; }, "run_seek", "below_zero"},
+      {true, [](S&, A& a) { a.run_min = -1.0; }, "run_min", "below_zero"},
+      {true, [nan](S&, A& a) { a.root_gap = nan; }, "root_gap", "not_a_number"},
+      {true, [](S&, A& a) { a.build_dir = {0, 0, 0}; }, "build_dir", "zero_direction"},
+      {true, [](S&, A& a) { a.layer_mm = 0.0; }, "layer_mm", "not_above_zero"},
+      {true, [](S&, A& a) { a.seed_stride = 0.0; }, "seed_stride", "not_above_zero"},
+  };
+  std::size_t hit = 0, plain = 0;
+  for (const Case& c : cases) {
+    Settings s = st;
+    OrganicAsk a = judged_ask(c.grown);
+    c.change(s, a);
+    const std::vector<OrganicRefusal> r = validate_organic(s, a, &f);
+    const bool found = has_refusal(r, c.setting, c.code);
+    hit += found;
+    bool clean = true;   // one sentence, no key name (no underscore), ends with a full stop
+    for (const OrganicRefusal& x : r) {
+      clean = clean && x.text.find('_') == std::string::npos && !x.text.empty() && x.text.back() == '.';
+      if (x.setting == c.setting && x.code == c.code)
+        std::printf("OL-VALID %-20s %-21s \"%s\"\n", x.setting.c_str(), x.code.c_str(), x.text.c_str());
+    }
+    plain += clean;
+    if (!found) std::printf("  (not refused: %s %s)\n", c.setting, c.code);
+  }
+  std::printf("OL-VALID %zu of %zu cases refused as named, %zu with plain texts\n", hit, cases.size(), plain);
+  CHECK(hit == cases.size() && plain == cases.size());
+  // The numbers: the smallest printable cell named and carried (0.9 mm strut: 1.38 mm, shown 1.39).
+  {
+    OrganicAsk a = judged_ask(false);
+    a.spacing_min_mm = 1.0;
+    const std::vector<OrganicRefusal> r = validate_organic(st, a, &f);
+    const bool num = !r.empty() && r[0].has_min && std::fabs(r[0].allowed_min - 0.9 * kSmallestCellFactor) < 1e-12 &&
+                     r[0].given == 1.0 && r[0].text.find("1.39 mm") != std::string::npos;
+    CHECK(num);
+    a.spacing_min_mm = 1.39;
+    CHECK(validate_organic(st, a, &f).empty());
+  }
+  // No stress input with a weave region (the session path's own rule).
+  {
+    const std::vector<OrganicRefusal> r = validate_organic(st, judged_ask(true), new TensorField());
+    CHECK(r.size() == 1 && has_refusal(r, "stress", "no_stress_result"));
+    CHECK(validate_organic(st, judged_ask(true), nullptr).empty());
+  }
+  // The session path: refused cleanly (no throw), nothing laid, the kept domain untouched; the preview the same.
+  {
+    const StepModel model = box_model(30, 30, 20);
+    Session s(model);
+    OrganicAsk a = judged_ask(true);
+    a.unbraced_max = 2.0;
+    a.link_width = 3.0;
+    bool threw = false;
+    Outcome o;
+    try { o = s.lay_organic(st, f, a); } catch (const std::exception&) { threw = true; }
+    CHECK(!threw && o.refused.size() == 2 && o.bars.bars.empty() && s.domain() == nullptr);
+    OrganicPreview p;
+    try { p = lay_organic_preview(s, st, f, a, OrganicPreviewAsk{}); } catch (const std::exception&) { threw = true; }
+    CHECK(!threw && p.outcome.refused.size() == 2 && p.runs.empty());
+    const Outcome none = s.lay_organic(st, TensorField{}, judged_ask(true));
+    CHECK(none.refused.size() == 1 && none.refused[0].setting == "stress");
+    // Width under the thinnest strut: Traced threw from the old tracer, Grown from the Grower; now a refusal.
+    a = traced_ask();
+    a.width_mm = 0.6;
+    try { o = s.lay_organic(st, f, a); } catch (const std::exception&) { threw = true; }
+    CHECK(!threw && has_refusal(o.refused, "width_mm", "under_thinnest_strut"));
+    std::printf("OL-VALID session path: refused without a throw %d\n", threw ? 0 : 1);
+  }
+  // The file job: the same rule, its key named in the detail, the plain sentence after it.
+  {
+    const std::string head = R"({"mode": "lattice_file", "model": "block.step", "layout": {
+      "min_strut_lines": 2, "bead_mm": 0.45, "region_ids": [1], "region_no_lattice": [0], "region_depth_mm": [16],
+      "region_expand_mm": [0], "region_face_counts": [1], "region_faces": [1], "region_weave": [true],
+      "organic_spacing_min_mm": )";
+    auto why = [&](const std::string& tail) {
+      try { (void)parse_file_job(head + tail); } catch (const std::exception& e) { return std::string(e.what()); }
+      return std::string();
+    };
+    const std::string small = why(R"(1, "organic_spacing_max_mm": 6}})");
+    const std::string link = why(R"(3, "organic_spacing_max_mm": 6, "organic_link_width": 3}})");
+    std::printf("OL-VALID file job: \"%s\"; \"%s\"\n", small.c_str(), link.c_str());
+    CHECK(small.find("organic_spacing_min_mm") != std::string::npos && small.find("1.39 mm") != std::string::npos);
+    CHECK(link.find("organic_link_width") != std::string::npos &&
+          link.find("Link thickness: it must be from 0.5 to 2") != std::string::npos);
+    CHECK(why(R"(3, "organic_spacing_max_mm": 6}})").empty());
+  }
+}
+
 int main() {
   test_s_cut_fix();
   test_k_floor();
@@ -1098,6 +1296,7 @@ int main() {
   test_sweep_limits();
   test_session_sweep_limits();
   test_follow_stress();
+  test_validate();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }
