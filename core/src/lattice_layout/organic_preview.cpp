@@ -66,10 +66,13 @@ void thin(WeaveRun& r, double tol) {
 }
 }  // namespace
 
-std::vector<WeaveRun> weave_runs(const Bars& bars, const std::vector<int>& weave_regions, double tolerance_mm) {
+std::vector<WeaveRun> weave_runs(const Bars& bars, const std::vector<int>& weave_regions, double tolerance_mm,
+                                 std::vector<std::vector<std::size_t>>* bar_of) {
   std::vector<WeaveRun> runs;
+  if (bar_of) bar_of->clear();
   const Bar* prev = nullptr;
   for (const Bar& b : bars.bars) {
+    const std::size_t at = static_cast<std::size_t>(&b - bars.bars.data());
     const bool weave = std::find(weave_regions.begin(), weave_regions.end(), b.region) != weave_regions.end();
     if (b.link || !weave) { prev = nullptr; continue; }
     const std::uint8_t m = marks_of(b);
@@ -81,6 +84,7 @@ std::vector<WeaveRun> weave_runs(const Bars& bars, const std::vector<int>& weave
       r.width_mm.push_back(b.width);
       r.spacing_mm.push_back(b.cell);
       r.end_b = b.end_b;
+      if (bar_of) bar_of->back().push_back(at);
     } else {
       WeaveRun r;
       r.region = b.region;
@@ -91,9 +95,11 @@ std::vector<WeaveRun> weave_runs(const Bars& bars, const std::vector<int>& weave
       r.width_mm = {b.width, b.width};
       r.spacing_mm = {b.cell, b.cell};
       runs.push_back(std::move(r));
+      if (bar_of) bar_of->push_back({at});
     }
     prev = &b;
   }
+  if (bar_of && tolerance_mm > 0.0) bar_of->clear();
   for (WeaveRun& r : runs) thin(r, tolerance_mm);
   return runs;
 }

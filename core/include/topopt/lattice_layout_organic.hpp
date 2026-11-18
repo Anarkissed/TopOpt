@@ -548,7 +548,10 @@ struct WeaveRun {
   std::vector<Vec3> points;
   std::vector<double> width_mm, spacing_mm;       // one per point
 };
-std::vector<WeaveRun> weave_runs(const Bars& bars, const std::vector<int>& weave_regions, double tolerance_mm = 0.1);
+// `bar_of`, when given (OF2, the file's tubes): per run, the place in `bars` of the bar each of its segments came from
+// (read with no thinning, `tolerance_mm` 0; with thinning it is left empty).
+std::vector<WeaveRun> weave_runs(const Bars& bars, const std::vector<int>& weave_regions, double tolerance_mm = 0.1,
+                                 std::vector<std::vector<std::size_t>>* bar_of = nullptr);
 // The runs packed for the app, little-endian: per run 12 bytes (point count u32, region i32, marks u8, end_a u8,
 // end_b u8 (Bar::End), one pad byte), then 20 bytes per point (x, y, z, width, spacing as float32).
 std::vector<std::uint8_t> pack_weave_runs(const std::vector<WeaveRun>& runs);

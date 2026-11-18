@@ -136,6 +136,15 @@ struct MeshSpec {
   // O18: a deeper sag with material straight below its low point gets a zig-zag leg, the old engine's shape, from that
   // material up to the low point. false = no leg (the sag is left to the layer check, as before).
   bool weave_sag_legs = true;
+  // OF4 (brief E1): how a weave's bars reach the file. Merged (the writer's own default, today's route): joined with the
+  // solid. Tubes: build_printable_mesh hands build_mesh no weave bar and writes them as closed shells of their own
+  // beside the solid (weave_shells), never joined. Read by build_printable_mesh only.
+  enum class WeaveMesh { Merged, Tubes };
+  WeaveMesh weave_mesh = WeaveMesh::Merged;
+  int tube_sides = 8;          // OF2: a weave tube's sides (of the same area as its round strut)
+  // OF4: every piece of the solid is kept (the tubes route: pieces the unmerged tubes tie together are not loose).
+  // false: the mesh as before.
+  bool keep_pieces = false;
   // Set, the work is given up between its steps and LayCancelled is thrown.
   const std::atomic<bool>* stop = nullptr;
 };
@@ -324,6 +333,45 @@ TriangleMesh build_mesh(const PartMeasure& part, const Domain& domain, const Lay
 TriangleMesh build_mesh(const PartMeasure& part, const Domain& domain, const Layout& layout,
                         const Bars& bars, const Carved& carved, const MeshSpec& spec = MeshSpec{},
                         MeshReport* report = nullptr);
+
+// ── THE FILE AS THE SOLID PLUS UNMERGED TUBES (brief E1, OF2, OF3) ─────────────
+// A weave's bars as closed, outward shells, each on its own vertices, never joined to each other or to the solid (a
+// slicer fills them by the nonzero rule: LayerSpec::Fill::NonZero reads them as it does).
+//   OF2 tubes: the strands come from weave_runs at tolerance 0 (links left out), of the bars `kept` (per bar, 1 = in the
+//     file; empty = all) of a weave region, less the shallow ones (below). One tube per run, `tube_sides` sides of the
+//     same area as the round strut, rings carried along by parallel transport, mitred in the bisecting plane at a turn;
+//     at a joint between two bars of a run the WIDER of the two. A turn sharper than 60 degrees is not mitred: the tube
+//     ends there and a new one starts. Ends: at a joint, a free end or a sharp-turn split, a half-sphere cap of the
+//     tube's own radius; in solid (Solid) run on by build_mesh's own run-on and capped flat; on the part's surface
+//     (Surface) capped flat there.
+//   The other shapes build_mesh gives a weave bar are shells of their own, from build_mesh's own shape code: a shallow
+//     bar (bar_is_bridge) its D section (O14) or square bar, with its run-on; the feet of every bar at a Solid end
+//     (O11); and every post of `spec.posts` (the layer check's posts and the O8 stands).
+//   OF3 trimmed (`trim`): every vertex more than 0.02 mm outside the part is moved onto its surface along
+//     PartMeasure::Probe::through. A shell no longer closed with a positive volume, or under 5 % of its volume before,
+//     is a tube made again from its run cut back where its line leaves the part (flat there), trimmed again; failing
+//     that (or any other shell) it is left out and counted.
+struct WeaveShells {
+  TriangleMesh mesh;                     // the shells one after another, each on its own vertices
+  std::vector<std::size_t> first_tri;    // per shell, its first triangle; one more at the end (= triangles)
+  std::size_t tubes = 0, sharp_splits = 0, bridges = 0, feet = 0, posts = 0;
+  std::size_t trimmed_vertices = 0, rebuilt = 0, left_out = 0;
+  double trimmed_largest_mm = 0.0;       // the farthest a vertex was moved onto the surface
+  double outside_largest_mm = 0.0;       // after trimming: the farthest any vertex lies outside the part (trim on)
+  double mm3 = 0.0;                      // the shells' own volumes, summed (overlaps counted twice)
+  double ms = 0.0;
+  std::size_t shells() const { return first_tri.empty() ? 0 : first_tri.size() - 1; }
+};
+WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const Layout& layout, const Bars& bars,
+                         const std::vector<char>& kept, const Carved& carved, const MeshSpec& spec, bool trim = true);
+// Used by weave_shells (build_mesh's own shape code, solid_mesh.cpp): per bar of `bars`, with `strut[i]` its strut and
+// with `feet[i]` its feet (O11) as build_mesh makes them; then every post of `spec.posts`. Each shape is appended to `out`
+// as a closed shell on its own vertices, its first triangle to `first_tri`. Counts go to `rep` (bridges, feet, posts).
+void weave_bar_shells(const Domain& domain, const Layout& layout, const Bars& bars, const std::vector<char>& strut,
+                      const std::vector<char>& feet, const Carved& carved, const MeshSpec& spec, TriangleMesh& out,
+                      std::vector<std::size_t>& first_tri, MeshReport& rep);
+// build_mesh's run-on past a strut's end (MeshSpec::strut_reach_mm, its default read from the carving).
+double strut_run_on_mm(const Carved& carved, const MeshSpec& spec);
 
 // ── HIS PRINT RULES, JUDGED LAYER BY LAYER (P8) ─────────────────────────────────
 // The mesh as a printer lays it, standing on its lowest z: one cross-section per layer,
