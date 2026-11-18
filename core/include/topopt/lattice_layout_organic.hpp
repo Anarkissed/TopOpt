@@ -172,6 +172,8 @@ struct OrganicAsk {
   // ties when not 1); tie_gap_heavy above 0: tie_gap + (tie_gap_heavy - tie_gap) x f, f O12's stress measure there
   // (as rule N). 0 or less: off. Needs ties, at most tie_gap, the spacing as a range. The "not within half a spacing
   // of another tie" test scales by the same factor.
+  // R (brief G26): Traced too (lay_traced_level_ties), where none of them needs ties (Grown's switch): the ties start on
+  // the traced curves only, at points where the curve climbs 30 degrees or more from level, with no swirl.
   bool tie_level = false;
   double tie_gap = 1.0;
   double tie_gap_heavy = 0.0;
@@ -318,6 +320,19 @@ struct OrganicTraceStats {
   // tight-cell zone, L2 b, is already in the spacing the tracer was given), handed to Session::lay_organic so that
   // hold_up_weave lays Grown's own supports under them over the traced strands. Empty when off.
   std::vector<OrganicSpacing::HoldPatch> hold_patches;
+  // R (brief G26), with OrganicAsk::tie_level only: the level ties (lay_traced_level_ties). Start points offered (every
+  // tie_gap x sep of a curve's length), of them refused because the curve there climbs under 30 degrees, lay within
+  // half a spacing (x the gap) of another tie, or the minor stress is under 0.10 of the major; ties tried (two per
+  // start), not started (the level part under 0.2), no weld and no solid end (or one joint), cut at a span over
+  // 10 mm, laid; per laid tie its joints, every flat span (mm); the largest height difference within one tie as laid
+  // (mm); the weld points put into another strand as a vertex.
+  bool tie_level = false;
+  std::size_t ties_level_starts = 0, ties_level_refused_flat = 0, ties_level_refused_near = 0,
+              ties_level_refused_minor = 0, ties_level_seeded = 0, ties_level_refused_steep = 0,
+              ties_level_refused_reach = 0, ties_level_cut_span = 0, ties_level_laid = 0, ties_level_vertices_put = 0;
+  std::vector<std::size_t> tie_level_joints;
+  std::vector<double> tie_level_span_mm;
+  double tie_level_dz_max_mm = 0.0;
 };
 
 // The Traced placement of one weave region, as strands. The candidate voxels are those whose CENTRE the domain says is
@@ -338,6 +353,21 @@ struct OrganicTraceStats {
 // `stats`, when given, receives the spacing used (OrganicTraceStats).
 std::vector<Strand> trace_strands(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask,
                                   OrganicTraceStats* stats = nullptr);
+// R (brief G26), the level ties for Traced (OrganicAsk::tie_level), P's rule by P's own walk (organic_grow.cpp):
+// along each of the first `curves` strands of `strands` (the traced curves; the connectors follow them), a start point
+// every tie_gap x sep(p) of its length (read every layer; tie_gap_heavy by stress as P), not where the curve there
+// climbs under 30 degrees from level, not within half a spacing (x the gap) of another tie, not where the minor stress
+// is under 0.10 of the major; from it both ways along the level part of the second principal direction (no swirl),
+// every point at its height, welding where another strand's segment (curve or connector, not a tie) crosses that height
+// or onto another tie's point at it, ending on its last weld or in the solid, cut at the joint before a span over
+// 10 mm, joint to joint straight; 8 spacings at most. sep and stress_f are the Grower's (`sp`, organic_spacing's answer
+// for this region). Each tie is appended as a strand (tie true, width `light_mm` at every point, spacing the curve's);
+// every tie point that lies on another strand's segment (its start, its welds) is put into that strand as a vertex
+// (its width read off the segment's two ends), so each is a joint in the bars. Throws std::invalid_argument for a
+// tie_gap not above 0, a tie_gap_heavy above tie_gap, or tie_gap_heavy on without the spacing as a range.
+void lay_traced_level_ties(const Domain& domain, int region, const TensorField& field, const OrganicAsk& ask,
+                           const OrganicSpacing& sp, std::size_t curves, double light_mm, std::vector<Strand>& strands,
+                           OrganicTraceStats* stats);
 
 // ── GROWN (G1 to G12, docs/design/lattice-rebuild/01-rules.md section 11) ─────
 // What one Grown placement did. Lengths are curve lengths, mm, measured the same way for "grown" and "kept": the

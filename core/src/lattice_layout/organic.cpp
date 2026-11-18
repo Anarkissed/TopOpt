@@ -496,12 +496,14 @@ std::vector<Strand> trace_strands(const Domain& domain, int region, const Tensor
     run_on(probe, region, s.points[last - 1], s.points[last], s.width_mm[last], s.spacing_mm);
     out.push_back(std::move(s));
   }
+  const std::size_t curves = out.size();   // R: the curves come first, then the connectors
   for (const OrganicConnector& cn : lat.connectors) out.push_back(strand_of({cn.a, cn.b}, cn.radius_mm));
+  // R: the light width (the tracer's own, before Q2), for the level ties.
+  const double light_w = out.empty() ? params.min_extrudable_width_mm : out.front().width_mm.front();
   // Q2 (brief G24): strut thickness by stress, I1's rule on every point handed back (the tracer, O3 and O4 used the
   // light width): w + (width_heavy_mm - w) x u(p), w the point's own width, u(p) O12's stress share at p's voxel over
   // the reference the spacing used (the Grower's share()); 0 off the field or with a reference of 0.
-  if (ask.width_heavy_mm > 0.0) {
-    auto share = [&](const Vec3& p) {
+  auto share = [&](const Vec3& p) {
       const int i = static_cast<int>(std::floor((p.x - field.origin.x) / field.spacing));
       const int j = static_cast<int>(std::floor((p.y - field.origin.y) / field.spacing));
       const int k = static_cast<int>(std::floor((p.z - field.origin.z) / field.spacing));
@@ -512,9 +514,20 @@ std::vector<Strand> trace_strands(const Domain& domain, int region, const Tensor
           std::sqrt(std::max(0.0, 0.5 * (a * a + b * b + d * d) + 3.0 * (t[3] * t[3] + t[4] * t[4] + t[5] * t[5])));
       return grading_demand_fraction(GradingIntent::Aesthetic, vm, asked.reference_mpa, 1.0);
     };
+  if (ask.width_heavy_mm > 0.0) {
     for (Strand& s : out)
       for (std::size_t q = 0; q < s.points.size(); ++q)
         s.width_mm[q] = s.width_mm[q] + (ask.width_heavy_mm - s.width_mm[q]) * share(s.points[q]);
+  }
+  // R (brief G26): the level ties, after the curves, connectors and Q2's widths, before Q3's supports and the path; each
+  // tie point gets the curves' width rule (Q2 when on, else the light width).
+  if (ask.tie_level) {
+    const std::size_t first_tie = out.size();
+    lay_traced_level_ties(domain, region, field, ask, asked, curves, light_w, out, stats);
+    if (ask.width_heavy_mm > 0.0)
+      for (std::size_t t = first_tie; t < out.size(); ++t)
+        for (std::size_t q = 0; q < out[t].points.size(); ++q)
+          out[t].width_mm[q] = out[t].width_mm[q] + (ask.width_heavy_mm - out[t].width_mm[q]) * share(out[t].points[q]);
   }
   if (stats && ask.hold_parts) stats->hold_patches = asked.hold_patches;   // Q3: for hold_up_weave (L2 d)
   return out;

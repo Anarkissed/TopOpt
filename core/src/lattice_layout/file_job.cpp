@@ -494,17 +494,18 @@ OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::str
     if (a.wall_cross == 0) json::fail(w + ".organic_cross_climb_max_deg", "needs organic_wall_cross on (1 or 2)");
   }
   // P (brief G23): level ties (off when not given), the tie gap in spacings (1 when not given), and by stress (0 or
-  // less, and not given: off).
+  // less, and not given: off). R (brief G26): a Traced job lays them too, with no need of organic_ties (Grown's switch).
+  const bool grown_ties = a.mode == OrganicMode::Grown && !a.ties;   // R: only Grown needs organic_ties on
   a.tie_level = flag(in, "organic_tie_level", a.tie_level, w);
-  if (a.tie_level && !a.ties) json::fail(w + ".organic_tie_level", "needs organic_ties on");
+  if (a.tie_level && grown_ties) json::fail(w + ".organic_tie_level", "needs organic_ties on");
   if (json::find(in, "organic_tie_gap")) {
     a.tie_gap = num(in, "organic_tie_gap", a.tie_gap, w);
     if (!(std::isfinite(a.tie_gap) && a.tie_gap > 0.0)) json::fail(w + ".organic_tie_gap", "must be above 0");
-    if (!a.ties) json::fail(w + ".organic_tie_gap", "needs organic_ties on");
+    if (grown_ties) json::fail(w + ".organic_tie_gap", "needs organic_ties on");
   }
   a.tie_gap_heavy = num(in, "organic_tie_gap_heavy", a.tie_gap_heavy, w);
   if (!std::isfinite(a.tie_gap_heavy)) json::fail(w + ".organic_tie_gap_heavy", "must be a number (0 or less: off)");
-  if (a.tie_gap_heavy > 0.0 && !a.ties) json::fail(w + ".organic_tie_gap_heavy", "needs organic_ties on");
+  if (a.tie_gap_heavy > 0.0 && grown_ties) json::fail(w + ".organic_tie_gap_heavy", "needs organic_ties on");
   if (a.tie_gap_heavy > 0.0 && a.tie_gap_heavy > a.tie_gap)
     json::fail(w + ".organic_tie_gap_heavy", "must be at most organic_tie_gap");
   if (a.tie_gap_heavy > 0.0 && (a.spacing_mm > 0.0 || !(a.spacing_max_mm > a.spacing_min_mm)))
