@@ -677,8 +677,9 @@ Outcome Session::lay_organic_with(const Settings& settings, const TensorField& f
     if (!ask.floors.empty() && ask.width_heavy_mm > 0.0)
       out.floors_widened = apply_width_floors(out.bars, ask.floors, ask.width_heavy_mm, finish.light_mm, ask.link_width,
                                               &out.floor_links_widened);
-    // Brief E3a: what strengthening by adding added, in order, each round's hash checked; a mismatch is refused.
-    if (!ask.additions.empty()) {
+    // Brief E3a: what strengthening by adding added, in order, each round's hash checked; a mismatch is refused. The
+    // draft (no cut at crossings) is not the lattice they were made on: it shows the lay without them.
+    if (!ask.additions.empty() && !draft) {
       AddContext c;
       c.light_mm = finish.light_mm;
       c.layer_mm = ask.layer_mm;
