@@ -1385,6 +1385,9 @@ public struct WorkspacePlaceholder: View {
                 }
                 .onChange(of: surfaceXrayOn) { x in if newEngineOn { newEngine.update(project: project, on: true, solid: !x, stress: newEngineStress) } }
                 .onChange(of: project.lattice, perform: { _ in if newEngineOn { newEngineSettingsChanged(); fileExport.settingsChanged() } })   // ★ 11-16: Live waits, Click to refresh holds   // (the rebake's lattice trigger stays the page's first: OrganicPreviewBakeInputsTests)
+                .onChange(of: newEngine.organicWallVerdicts) { v in   // ★ E5: core's word on each wall (Selections' foci row)
+                    if !v.isEmpty { project.recordLatticeWallVerdicts(v) }
+                }
                 .onChange(of: project.latticePageManual) { _ in   // ★ Organic: the page's Auto / Manual decides the ask (his 11-18)
                     if newEngineOn, LatticeLayoutPreview.organic(project.lattice) { newEngineSettingsChanged() }
                 }

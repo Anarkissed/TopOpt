@@ -2581,7 +2581,15 @@ public struct LatticeSetupWizard: View {
     /// bead, and (★ his iPad notes 11-10, img 6) the Grade's ends — graded from "to" up to "from", or one density when not
     /// graded (the chunk of cells shows "from").
     private var latticeSampleInputs: LatticeSampleView.Inputs {
-        Self.sampleInputs(model, beadMM: project.printParams.strutLineWidthMM)
+        var i = Self.sampleInputs(model, beadMM: project.printParams.strutLineWidthMM)
+        // ★ his 11-18: Organic's samples, from the open tab's Organic settings (a group's own, or the whole part's)
+        if model.cellTransition == .organicGrade, project.importedFile != nil {
+            let group = latticeTab.hasPrefix("area-") ? project.latticeAreaGroups.indices.contains(Int(latticeTab.dropFirst(5)) ?? -1)
+                ? project.latticeAreaGroups[Int(latticeTab.dropFirst(5))!].id : nil : nil
+            i.organic = project.lattice.organicLook(group: group).effective(pageManual: latticeManual)
+            i.layerMM = project.printParams.layerHeightMM > 0 ? project.printParams.layerHeightMM : 0.2
+        }
+        return i
     }
 
     static func sampleInputs(_ model: LatticeWizardModel, beadMM: Double) -> LatticeSampleView.Inputs {
@@ -2599,7 +2607,8 @@ public struct LatticeSetupWizard: View {
     private var latticeNotInSample: [String] {
         LatticeSampleView.notInSample(organic: model.cellTransition == .organicGrade, finish: model.boundary,
                                       shapeBand: model.gradingMode.fitsShape,
-                                      singleCell: model.singleCellMembers && (project.lattice.stageMode ?? .structural) == .aesthetic)
+                                      singleCell: model.singleCellMembers && (project.lattice.stageMode ?? .structural) == .aesthetic,
+                                      organicBuilt: project.importedFile != nil)
     }
 
     private func latticePanel(_ c: CellsPageContext, hug: Bool) -> some View {

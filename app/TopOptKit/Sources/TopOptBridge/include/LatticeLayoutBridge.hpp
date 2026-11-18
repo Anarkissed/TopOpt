@@ -281,6 +281,24 @@ struct LatticeLayoutOrganic {
   double layer_mm = 0.2;       // the printer's layer: Grown's step, level ties, braces, supports (sheet H2)
   uint64_t seed = 1;
 };
+// ★ E1 (LatticeReview's C2): one refusal, as core gives it — the group (its index in the list; -1 the list itself or the
+// stress), the OrganicAsk field (`setting`), a code, and a plain sentence to show whole; the allowed numbers where a number
+// applies.
+struct LatticeLayoutRefusal {
+  int32_t group = -1;
+  std::string setting, code, text;
+  double given = 0.0;
+  bool has_min = false, has_max = false;
+  double allowed_min = 0.0, allowed_max = 0.0;
+};
+// ★ E7, Organic per group (his 11-18: "whole part ONLY if the whole part is latticed. Otherwise, it is per Group"): group g
+// holds group_region_counts[g] region ids of group_regions (after the earlier groups') and lays with asks[g]; the preview's
+// quality and tolerance are asks[0]'s. One group of every weave region = the whole part.
+struct LatticeLayoutOrganicGroups {
+  std::vector<LatticeLayoutOrganic> asks;
+  std::vector<int32_t> group_region_counts;
+  std::vector<int32_t> group_regions;
+};
 // The weave's preview: the lay's counts (its bars are the weave's — draw `runs`), the runs packed as core packs them
 // (pack_weave_runs: per run 12 bytes, then 20 per point, float32, little-endian), what was laid, and the weave's numbers.
 struct LatticeLayoutOrganicResult {
@@ -290,7 +308,15 @@ struct LatticeLayoutOrganicResult {
   int64_t strands = 0, net_struts = 0;
   double spacing_smallest_mm = 0.0, spacing_largest_mm = 0.0, spacing_mean_mm = 0.0, ms_trace = 0.0, ms = 0.0;
   bool cancelled = false;
+  std::vector<LatticeLayoutRefusal> refused;   // ★ E1: not empty = nothing laid (no throw); show each `text` whole
+  std::vector<std::string> notes;              // ★ E2: plain sentences (equal cell ends)
+  int64_t cross_group_touches = 0;             // ★ E7: struts of different groups that touch (not joined)
 };
+LatticeLayoutOrganicResult lattice_layout_organic_groups(int64_t session, const LatticeLayoutSettings& settings,
+                                                         const LatticeLayoutOrganicGroups& groups, BridgeError& err);
+// ★ E1: every refusal of these groups' asks (and of the stress set, when one is), before a lay; empty = valid.
+std::vector<LatticeLayoutRefusal> lattice_layout_organic_validate(int64_t session, const LatticeLayoutSettings& settings,
+                                                                 const LatticeLayoutOrganicGroups& groups, BridgeError& err);
 LatticeLayoutOrganicResult lattice_layout_organic(int64_t session, const LatticeLayoutSettings& settings,
                                                   const LatticeLayoutOrganic& organic, BridgeError& err);
 // The stress TENSOR a weave follows (Voigt, 6 per voxel, x fastest; low corner `origin`, voxel edge `spacing`), kept by the
@@ -310,6 +336,28 @@ struct LatticeLayoutSweep {
 };
 LatticeLayoutSweep lattice_layout_sweep_limits(int64_t session, const LatticeLayoutSettings& settings, double line_mm,
                                                BridgeError& err);
+// Region ids (and, for the synthetic call, each one's number of foci): a struct, so Swift fills it member by member.
+struct LatticeLayoutIds {
+  std::vector<int32_t> ids;
+  std::vector<int32_t> foci;
+};
+// ★ E4 per group: the union of `regions.ids`' limits as ONE entry (region 0); `measured` 0 when none was measured.
+LatticeLayoutSweep lattice_layout_sweep_limits_for(int64_t session, const LatticeLayoutSettings& settings,
+                                                   const LatticeLayoutIds& regions, double line_mm, BridgeError& err);
+// ★ E5, "Simulate stresses on unstressed walls" and the samples' one focus: core fills the stress the session holds (the
+// last real one set) — or, `from_empty`, makes one with no solve — for the walls (region ids, their number of foci), and
+// keeps the filled field as the tensor the next Organic lay follows. An empty wall list (not from_empty) puts the real
+// stress back. Per weave region: whether core found it without stress, the foci used, the voxels filled.
+struct LatticeLayoutSynthetic {
+  std::vector<int32_t> region;
+  std::vector<uint8_t> without_stress;
+  std::vector<int32_t> foci;
+  std::vector<int64_t> filled;
+  std::vector<LatticeLayoutRefusal> refused;   // not empty: nothing made, the stress unchanged
+};
+LatticeLayoutSynthetic lattice_layout_synthetic(int64_t session, const LatticeLayoutSettings& settings,
+                                                const LatticeLayoutOrganicGroups& groups, const LatticeLayoutIds& walls,
+                                                bool from_empty, BridgeError& err);
 // Every layout of `session` running now or waiting comes back cancelled. Safe from any thread.
 void lattice_layout_cancel(int64_t session);
 void lattice_layout_close(int64_t session);

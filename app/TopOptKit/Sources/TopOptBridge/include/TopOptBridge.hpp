@@ -198,6 +198,9 @@ struct LatticeSampleResult {
 // ONE density (`rho_hi`, held into the band; <= 0 = the band's middle). false = the coupon (the sample part).
 LatticeSampleResult lattice_sample(const std::string& topology, double cell_mm, double bead_mm, double rho_lo,
                                    double rho_hi, bool cube, BridgeError& err);
+// ★ E8 (his 11-18: the Organic samples): the BARE sample body, no lattice — `cube` the 40 mm cube on its plate
+// (40 x 40 x 41.5), else the coupon (45 x 40 x 35) — for an Organic lay through a layout session.
+ImportedMesh lattice_sample_body(bool cube, BridgeError& err);
 
 // Write an ImportedMesh to an STL file (core write_stl_file; binary encoding).
 // This is the M6.1 STL export path exposed to the app; 3MF export (lib3mf) is

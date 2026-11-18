@@ -217,8 +217,7 @@ final class LatticeOrganicCut1Tests: XCTestCase {
         var equal = LatticeOrganicLook()
         equal.cell = .init(mode: .manualSweep, light: 3, heavy: 3)
         let q = equal.ask(limits: Self.stand)
-        XCTAssertEqual(q.wallGapHeavy, 0); XCTAssertEqual(q.crossGapHeavy, 0); XCTAssertEqual(q.tieGapHeavy, 0, "★ equal ends: no heavy gap sent")
-        XCTAssertEqual(LatticeOrganicLook().ask(limits: Self.stand).wallGapHeavy, 1, "RED CONTROL: a range keeps them")
+        XCTAssertEqual(q.spacingMinMM, 3); XCTAssertEqual(q.spacingMaxMM, 3, "★ equal ends are sent as typed (E2: the engine takes them)")
         var traced = LatticeOrganicLook()
         traced.mode = .traced
         XCTAssertEqual(traced.effective(pageManual: false).ask(limits: Self.stand).mode, .grown, "★ Auto: Look alone, the rest Auto")
@@ -261,6 +260,80 @@ final class LatticeOrganicCut1Tests: XCTestCase {
 
     /// ★ FOR REAL: Traced on a 30 x 30 x 20 block, its top face woven 15 mm deep, a uniform vertical compression — Exact and
     /// Draft through the bridge; runs come back; core measures Auto's numbers for the woven region.
+    /// ★ His 11-18 samples (LatticeReview's E5, E8, FOR REAL through the bridge): the bare 40 mm cube, one woven box region,
+    /// ONE stress focus made with no solve — Traced lays curves, Grown lays vines; core reports the region without stress
+    /// and filled. RED CONTROL: a count of foci outside 1 to 5 is refused in a plain sentence.
+    @MainActor
+    func testTheOrganicSampleCubeWithOneFocus() async throws {
+        let body = try TopOptKit.latticeSampleBody(cube: true)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("organic-test-cube-\(UUID().uuidString).stl")
+        try MeshExport.binarySTL(vertices: body.vertices, indices: body.indices, header: Data()).write(to: url)
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        let session = try await LatticeLayoutSession.open(path: url.path)
+        addTeardownBlock { session.close() }
+        let b = try XCTUnwrap(LatticeLayoutPreview.box(body.vertices))
+        XCTAssertEqual(Double(b.hi.x - b.lo.x), 40, accuracy: 0.01, "premise: the 40 mm cube")
+        var s = LatticeLayoutSession.Settings()
+        var r = LatticeLayoutSession.Region(id: 1, faces: [], depthMM: 0)
+        r.zone = .init(kind: .box, centre: SIMD3<Double>((b.lo + b.hi) / 2), axes: [SIMD3(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0, 0, 1)],
+                       half: SIMD3<Double>((b.hi - b.lo) / 2) + 1)
+        r.weave = true
+        s.regions = [r]
+        let lim = try await session.sweepLimits(s, regions: [1], lineMM: 0.45).map(LatticeOrganicLook.Limits.init)
+        for mode in [LatticeOrganicLook.Mode.traced, .grown] {
+            var look = LatticeOrganicLook()
+            look.mode = mode
+            let groups = [LatticeLayoutSession.OrganicGroup(regions: [1], ask: look.ask(limits: lim, layerMM: 0.2))]
+            let made = try await session.synthetic(s, groups: groups, walls: [(region: 1, foci: 1)], fromEmpty: true)
+            XCTAssertTrue(made.refused.isEmpty, "\(made.refused.map(\.text))")
+            XCTAssertEqual(made.withoutStress[1], true, "★ no solve: the region is without stress, and filled")
+            XCTAssertGreaterThan(made.filled[1] ?? 0, 0)
+            let laid = try await session.layOrganic(s, groups: groups)
+            XCTAssertTrue(laid.refused.isEmpty, "\(laid.refused.map(\.text))")
+            print("LATTICE-ORGANIC sample cube \(mode.title): \(laid.runs.count) runs, \(laid.segments) segments, "
+                  + String(format: "%.0f ms", laid.ms))
+            XCTAssertGreaterThan(laid.segments, 100, "★ \(mode.title): one focus lays a lattice in the cube")
+        }
+        let bad = try await session.synthetic(s, groups: [.init(regions: [1], ask: LatticeOrganicLook().ask(limits: lim))],
+                                              walls: [(region: 1, foci: 9)], fromEmpty: true)
+        XCTAssertFalse(bad.refused.isEmpty, "RED CONTROL: 9 foci is refused")
+    }
+
+    /// ★ Per group (his 11-18; E7, FOR REAL): two woven areas of a block, one Traced and one Grown, laid in one lay, each by
+    /// its own ask; a refused group says which. RED CONTROL: a cell end under the smallest printable cell is refused whole.
+    func testTwoGroupsLayEachByItsOwnSettings() async throws {
+        let (session, s0) = try await wovenBlock(depthMM: 12)
+        var s = s0
+        // a second woven area: a box zone low in the block (under the top area's 12 mm)
+        let n = (16, 16, 11)
+        var voigt: [Double] = []
+        for k in 0..<n.2 { for _ in 0..<(n.0 * n.1) { voigt += [-1, -1, -10 - Double(k), 0.5, 0.2, 0.1] } }
+        try await session.setTensor(voigt: voigt, nx: n.0, ny: n.1, nz: n.2, origin: SIMD3(-1, -1, -1), spacingMM: 2)
+        let side = LatticeLayoutSession.Region(id: 2, faces: [], depthMM: 0)
+        var z = side
+        z.zone = .init(kind: .box, centre: SIMD3(15, 15, 4), axes: [SIMD3(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0, 0, 1)], half: SIMD3(13, 13, 3))
+        z.weave = true
+        s.regions.append(z)
+        var traced = LatticeOrganicLook(); traced.mode = .traced
+        let grown = LatticeOrganicLook()
+        let lim = LatticeOrganicLook.Limits(strutLowerMM: 0.9, strutUpperMM: 1.35, strutAutoMM: 0.9, cellLowerMM: 2, cellUpperMM: 4,
+                                            cellAutoMM: 3)
+        let groups = [LatticeLayoutSession.OrganicGroup(regions: [1], ask: traced.ask(limits: lim)),
+                      LatticeLayoutSession.OrganicGroup(regions: [2], ask: grown.ask(limits: lim))]
+        let laid = try await session.layOrganic(s, groups: groups)
+        XCTAssertTrue(laid.refused.isEmpty, "\(laid.refused.map(\.text))")
+        let regions = Set(laid.runs.map(\.region))
+        print("LATTICE-ORGANIC two groups: \(laid.runs.count) runs in regions \(regions.sorted()), touches \(laid.crossGroupTouches)")
+        XCTAssertTrue(regions.contains(1) && regions.contains(2), "★ each group laid its own area")
+        var tiny = traced
+        tiny.cell = .init(mode: .manualSweep, light: 4, heavy: 1)
+        let refused = try await session.layOrganic(s, groups: [groups[0], .init(regions: [2], ask: tiny.ask(limits: lim))])
+        let r = try XCTUnwrap(refused.refused.first, "RED CONTROL: a 1 mm cell end is refused")
+        XCTAssertEqual(r.group, 1, "★ the refusal names the group")
+        XCTAssertEqual(r.code, "under_smallest_cell")
+        XCTAssertTrue(r.text.hasPrefix("Cell size:"), "a plain sentence, whole: \(r.text)")
+    }
+
     func testTracedOnABlockForRealExactAndDraft() async throws {
         let (session, s) = try await wovenBlock(depthMM: 15)
         // the stress: 2 mm voxels over the block, sigma_zz = -10 MPa with a little shear so directions are defined

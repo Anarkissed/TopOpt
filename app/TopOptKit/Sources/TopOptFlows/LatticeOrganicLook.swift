@@ -246,11 +246,6 @@ public struct LatticeOrganicLook: Codable, Equatable, Sendable {
             o.stressGoal = stressFollow ?? true
             o.prune = true
         }
-        // ★ rule e (sheet H6): equal cell ends (typed so, or a tiny region's collapsed limits) are one spacing, and the
-        // heavy gaps need a range: they do not act there, so they are not sent (until the engine accepts them: E2)
-        if o.spacingMMValueIsOne {
-            o.wallGapHeavy = 0; o.crossGapHeavy = 0; o.tieGapHeavy = 0
-        }
         // shape, floating parts, links, braces
         o.shapeFit = gradeToShapeValue
         o.shapeReach = shapeReach ?? 1

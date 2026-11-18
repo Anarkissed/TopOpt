@@ -55,6 +55,7 @@ struct LayoutSession {
   std::atomic<bool> stop{false};                   // core's own stop (Session::lay): a running layout gives up within one cell's work
   std::shared_ptr<const ll::DemandField> demand;  // Install 2: the stress result, one pointer between lays (set_demand)
   std::shared_ptr<const ll::TensorField> tensor;  // ★ Organic cut 1: the stress tensor a weave follows (set_tensor)
+  std::shared_ptr<const ll::TensorField> real_tensor;  // ★ E5: the stress as set (`tensor` may be its filled copy)
 };
 
 std::mutex& g_layout_mu = *new std::mutex;        // never destroyed (the scenes' rule, T1)
@@ -443,10 +444,25 @@ void lattice_layout_set_tensor(int64_t session, const LatticeLayoutTensor& t, Br
       field = std::move(f);
     }
     std::lock_guard<std::mutex> lock(s->mu);
+    s->real_tensor = field;
     s->tensor = std::move(field);
   });
   if (!why.empty()) failed(err, why);
 }
+
+namespace {
+std::vector<LatticeLayoutRefusal> refusals_out(const std::vector<ll::OrganicRefusal>& in) {
+  std::vector<LatticeLayoutRefusal> out;
+  out.reserve(in.size());
+  for (const ll::OrganicRefusal& r : in) {
+    LatticeLayoutRefusal o;
+    o.group = r.group; o.setting = r.setting; o.code = r.code; o.text = r.text; o.given = r.given;
+    o.has_min = r.has_min; o.has_max = r.has_max; o.allowed_min = r.allowed_min; o.allowed_max = r.allowed_max;
+    out.push_back(std::move(o));
+  }
+  return out;
+}
+}  // namespace
 
 static ll::OrganicAsk organic_from(const LatticeLayoutOrganic& o) {
   ll::OrganicAsk a;
@@ -518,6 +534,152 @@ LatticeLayoutOrganicResult lattice_layout_organic(int64_t session, const Lattice
   });
   if (!why.empty()) {
     o = LatticeLayoutOrganicResult{};
+    failed(err, why);
+  }
+  return o;
+}
+
+namespace {
+std::vector<ll::OrganicGroup> groups_from(const LatticeLayoutOrganicGroups& in) {
+  if (in.asks.empty()) throw std::invalid_argument("lattice layout organic: no group");
+  if (in.group_region_counts.size() != in.asks.size())
+    throw std::invalid_argument("lattice layout organic: group_region_counts is not one per group");
+  std::vector<ll::OrganicGroup> out;
+  std::size_t at = 0;
+  for (std::size_t g = 0; g < in.asks.size(); ++g) {
+    ll::OrganicGroup og;
+    og.ask = organic_from(in.asks[g]);
+    const int32_t n = in.group_region_counts[g];
+    if (n < 0 || at + static_cast<std::size_t>(n) > in.group_regions.size())
+      throw std::invalid_argument("lattice layout organic: the group region counts run past the regions listed");
+    for (int32_t k = 0; k < n; ++k) og.regions.push_back(in.group_regions[at++]);
+    out.push_back(std::move(og));
+  }
+  if (at != in.group_regions.size()) throw std::invalid_argument("lattice layout organic: regions listed that no group claims");
+  return out;
+}
+}  // namespace
+
+LatticeLayoutOrganicResult lattice_layout_organic_groups(int64_t session, const LatticeLayoutSettings& settings,
+                                                         const LatticeLayoutOrganicGroups& groups, BridgeError& err) {
+  LatticeLayoutOrganicResult o;
+  const std::string why = bridge_guard_run("lattice_layout_organic_groups", [&] {
+    auto s = layout_at(session);
+    const uint64_t gen = s->cancel_gen.load();
+    ll::Settings ask = settings_from(settings);
+    const std::vector<ll::OrganicGroup> gs = groups_from(groups);
+    ll::OrganicPreviewAsk pa;
+    pa.quality = groups.asks[0].quality == 1 ? ll::PreviewQuality::Draft : ll::PreviewQuality::Exact;
+    pa.tolerance_mm = groups.asks[0].tolerance_mm;
+    std::lock_guard<std::mutex> lock(s->mu);
+    ask.stress.demand = s->demand;
+    s->stop = false;
+    if (s->cancel_gen.load() != gen) { o.cancelled = true; return; }
+    if (!s->tensor) throw std::invalid_argument("Organic needs the stress check first (no stress result to follow)");
+    const auto t0 = std::chrono::steady_clock::now();
+    ll::OrganicPreview pv = ll::lay_organic_preview(*s->session, ask, *s->tensor, gs, pa, 0, &s->stop);
+    if (pv.outcome.cancelled) { s->solid_at.reset(); s->last.reset(); o.cancelled = true; return; }
+    if (!pv.outcome.refused.empty()) {   // E1: nothing laid, the domain untouched
+      o.refused = refusals_out(pv.outcome.refused);
+      return;
+    }
+    s->solid_at.reset();
+    o.runs = ll::pack_weave_runs(pv.runs);
+    o.quality = pv.quality == ll::PreviewQuality::Draft ? 1 : 0;
+    o.strands = static_cast<int64_t>(pv.outcome.strands);
+    o.net_struts = static_cast<int64_t>(pv.outcome.net_struts);
+    o.spacing_smallest_mm = pv.outcome.spacing_smallest_mm;
+    o.spacing_largest_mm = pv.outcome.spacing_largest_mm;
+    o.spacing_mean_mm = pv.outcome.spacing_mean_mm;
+    o.ms_trace = pv.outcome.ms_trace;
+    o.notes = pv.outcome.notes;
+    o.cross_group_touches = static_cast<int64_t>(pv.outcome.cross_group_touches);
+    s->last = std::make_unique<ll::Outcome>(std::move(pv.outcome));
+    if (s->cancel_gen.load() != gen) { o.cancelled = true; return; }
+    fill(o.layout, *s->last);
+    o.ms = ms_since(t0);
+  });
+  if (!why.empty()) {
+    o = LatticeLayoutOrganicResult{};
+    failed(err, why);
+  }
+  return o;
+}
+
+std::vector<LatticeLayoutRefusal> lattice_layout_organic_validate(int64_t session, const LatticeLayoutSettings& settings,
+                                                                 const LatticeLayoutOrganicGroups& groups, BridgeError& err) {
+  std::vector<LatticeLayoutRefusal> out;
+  const std::string why = bridge_guard_run("lattice_layout_organic_validate", [&] {
+    auto s = layout_at(session);
+    const ll::Settings st = settings_from(settings);
+    const std::vector<ll::OrganicGroup> gs = groups_from(groups);
+    std::lock_guard<std::mutex> lock(s->mu);
+    out = refusals_out(ll::validate_organic_groups(st, gs, s->tensor ? s->tensor.get() : nullptr));
+  });
+  if (!why.empty()) {
+    out.clear();
+    failed(err, why);
+  }
+  return out;
+}
+
+LatticeLayoutSweep lattice_layout_sweep_limits_for(int64_t session, const LatticeLayoutSettings& settings,
+                                                   const LatticeLayoutIds& regions, double line_mm, BridgeError& err) {
+  LatticeLayoutSweep o;
+  const std::string why = bridge_guard_run("lattice_layout_sweep_limits_for", [&] {
+    auto s = layout_at(session);
+    ll::Settings ask = settings_from(settings);
+    const std::vector<int> ids(regions.ids.begin(), regions.ids.end());
+    std::lock_guard<std::mutex> lock(s->mu);
+    ask.stress.demand = s->demand;
+    const ll::SweepLimitsUnion u = s->session->sweep_limits_for(ask, ids, line_mm);
+    o.region.push_back(0);
+    o.measured.push_back(u.measured ? 1 : 0);
+    o.d_mm.push_back(0.0);
+    o.strut_lower_mm.push_back(u.strut_lower_mm); o.strut_upper_mm.push_back(u.strut_upper_mm);
+    o.strut_auto_mm.push_back(u.strut_auto_mm);
+    o.cell_lower_mm.push_back(u.cell_lower_mm); o.cell_upper_mm.push_back(u.cell_upper_mm);
+    o.cell_auto_mm.push_back(u.cell_auto_mm);
+  });
+  if (!why.empty()) {
+    o = LatticeLayoutSweep{};
+    failed(err, why);
+  }
+  return o;
+}
+
+LatticeLayoutSynthetic lattice_layout_synthetic(int64_t session, const LatticeLayoutSettings& settings,
+                                                const LatticeLayoutOrganicGroups& groups, const LatticeLayoutIds& w,
+                                                bool from_empty, BridgeError& err) {
+  LatticeLayoutSynthetic o;
+  const std::string why = bridge_guard_run("lattice_layout_synthetic", [&] {
+    auto s = layout_at(session);
+    const std::vector<int32_t>& wall_regions = w.ids;
+    const std::vector<int32_t>& wall_foci = w.foci;
+    if (wall_regions.size() != wall_foci.size())
+      throw std::invalid_argument("lattice layout synthetic: wall_foci is not one per wall");
+    ll::Settings ask = settings_from(settings);
+    const std::vector<ll::OrganicGroup> gs = groups_from(groups);
+    std::vector<ll::SyntheticWall> walls;
+    for (std::size_t i = 0; i < wall_regions.size(); ++i) walls.push_back({wall_regions[i], wall_foci[i]});
+    std::lock_guard<std::mutex> lock(s->mu);
+    ask.stress.demand = s->demand;
+    if (!from_empty && walls.empty()) { s->tensor = s->real_tensor; return; }   // the real stress back
+    if (!from_empty && !s->real_tensor) throw std::invalid_argument("Organic needs the stress check first (no stress result to follow)");
+    const ll::TensorField empty;
+    ll::SyntheticStress r = ll::organic_synthetic_stress(*s->session, ask, from_empty ? empty : *s->real_tensor, walls, gs);
+    if (!r.refused.empty()) { o.refused = refusals_out(r.refused); return; }
+    for (const ll::SyntheticRegionReport& g : r.regions) {
+      o.region.push_back(g.region);
+      o.without_stress.push_back(g.without_stress ? 1 : 0);
+      o.foci.push_back(g.foci);
+      o.filled.push_back(static_cast<int64_t>(g.filled));
+    }
+    s->tensor = std::make_shared<const ll::TensorField>(std::move(r.field));
+    s->solid_at.reset();
+  });
+  if (!why.empty()) {
+    o = LatticeLayoutSynthetic{};
     failed(err, why);
   }
   return o;
