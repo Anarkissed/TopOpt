@@ -202,7 +202,8 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "organic_shape_fit", "organic_mode", "organic_walls_out", "organic_ties", "organic_tie_swirl",
        "organic_foot_gap", "organic_stress_goal",
        "organic_void_ratio", "organic_reseed_rounds", "organic_wall_connect", "organic_wall_gap",
-       "organic_wall_cross", "organic_top_run", "organic_run_max", "organic_root_run", "organic_run_gap"},
+       "organic_wall_cross", "organic_top_run", "organic_run_max", "organic_root_run", "organic_run_gap",
+       "organic_run_follow", "organic_run_pull", "organic_run_seek", "organic_run_min", "organic_root_gap"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -465,6 +466,17 @@ OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::str
   if (!(std::isfinite(rmax) && rmax >= 1.0 && rmax <= 1e6 && rmax == std::floor(rmax)))
     json::fail(w + ".organic_run_max", "must be a whole number, 1 or more");
   a.run_max = static_cast<int>(rmax);
+  // H (brief G9, try keys): how a run is steered and when it may end.
+  a.run_follow = num(in, "organic_run_follow", a.run_follow, w);
+  if (!(std::isfinite(a.run_follow) && a.run_follow > 0.0)) json::fail(w + ".organic_run_follow", "must be above 0");
+  a.run_pull = num(in, "organic_run_pull", a.run_pull, w);
+  if (!(std::isfinite(a.run_pull) && a.run_pull >= 0.0)) json::fail(w + ".organic_run_pull", "must be 0 or above");
+  a.run_seek = num(in, "organic_run_seek", a.run_seek, w);
+  if (!(std::isfinite(a.run_seek) && a.run_seek >= 0.0)) json::fail(w + ".organic_run_seek", "must be 0 or above");
+  a.run_min = num(in, "organic_run_min", a.run_min, w);
+  if (!(std::isfinite(a.run_min) && a.run_min >= 0.0)) json::fail(w + ".organic_run_min", "must be 0 or above");
+  a.root_gap = num(in, "organic_root_gap", a.root_gap, w);
+  if (!std::isfinite(a.root_gap)) json::fail(w + ".organic_root_gap", "must be a number (below 0: the run gap)");
   // G13: 0 or less: the feet do not compete.
   if (!std::isfinite(a.foot_gap)) json::fail(w + ".organic_foot_gap", "must be a number (0 or less: feet do not compete)");
   const double thinnest = s.bead_mm * s.min_strut_lines;

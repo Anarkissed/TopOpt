@@ -101,6 +101,14 @@ struct OrganicAsk {
   // G (follow-up): a run (root) is not started where a point of a run (root) made from another end lies within
   // run_gap x the local spacing of its start; 0: the test is off.
   double run_gap = 0.5;
+  // H (brief G9, try keys): how firmly a run turns to its target (above 0); the magnet's reach in local spacings
+  // (0: off); the drift toward stronger stress (0: off); the travel, in local spacings, before it may weld onto a
+  // strand (0 or above); the roots' own not-on-top distance (below 0: run_gap).
+  double run_follow = 1.0;
+  double run_pull = 0.0;
+  double run_seek = 0.0;
+  double run_min = 0.5;
+  double root_gap = -1.0;
 };
 
 // O16, the net skin: Finish Skin (Settings::skin) on a weave region (the old finish step "Skin", organic_lattice.cpp,
@@ -239,6 +247,10 @@ struct GrowReport {
   std::vector<double> root_run_mm;
   // the spread of n: how many ends drew 1, 2, ... runs (index n)
   std::vector<std::size_t> top_n, root_n;
+  // H (brief G9): steps on a followable direction, on the magnet, with no target; runs that used the magnet at least
+  // once (top runs, roots).
+  std::size_t top_steps_follow = 0, top_steps_magnet = 0, top_steps_none = 0, top_runs_magnet = 0;
+  std::size_t root_steps_follow = 0, root_steps_magnet = 0, root_steps_none = 0, root_runs_magnet = 0;
   // D2 (stress_goal): branches offered one spacing back from a side face, grown, refused, strands too short for one;
   // and every tip that ended by leaving the region, by its last voxel's wall site: +x, -x, +y, -y, +z, none.
   std::size_t d2_offered = 0, d2_grown = 0, d2_refused = 0, d2_short = 0;

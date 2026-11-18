@@ -2146,7 +2146,21 @@ std::size_t Grower::split_at(int li, std::size_t seg, const Vec3& x) {
 // made, it is a tie in every other respect (thinned as a tie, the tie flag); its points go into `mine` as end_id's.
 Grower::RunEnd Grower::make_run(int vine, const Vec3& start, Vec3 dir, double max_len, bool root, Boxes& mine,
                                 int end_id, double& mm) {
-  const double s0 = sep(start), w = layer_ / s0, wr = std::max(2.0 * r_, 0.75 * layer_);
+  const double s0 = sep(start), w = std::min(1.0, ask_.run_follow * layer_ / s0), wr = std::max(2.0 * r_, 0.75 * layer_);
+  // H (brief G9): followable stress at x: in the region, a frame, the level part of the major direction 0.2 long or
+  // more; its strength m = |ev0| x that length (0 where there is none).
+  auto strength = [&](const Vec3& x) {
+    if (!inreg(x)) return 0.0;
+    double ev[3];
+    Vec3 vec[3];
+    if (!frame(x, ev, vec)) return 0.0;
+    const double l = len(level(vec[0]));
+    return l >= 0.2 ? std::fabs(ev[0]) * l : 0.0;
+  };
+  bool used_magnet = false;
+  std::size_t& n_follow = root ? rep_.root_steps_follow : rep_.top_steps_follow;
+  std::size_t& n_magnet = root ? rep_.root_steps_magnet : rep_.top_steps_magnet;
+  std::size_t& n_none = root ? rep_.root_steps_none : rep_.top_steps_none;
   Vec3 q = start;
   double travelled = 0.0;
   std::vector<Vec3> path{start};
@@ -2165,14 +2179,46 @@ Grower::RunEnd Grower::make_run(int vine, const Vec3& start, Vec3 dir, double ma
       how = RDip;
       break;
     }
-    Vec3 f;
-    if (stress_dir(q, f)) {
-      Vec3 lf = level(f);
-      if (len(lf) >= 0.2) {
-        lf = unit(lf);
-        if (dot(lf, dir) < 0.0) lf = mul(lf, -1.0);
-        dir = unit(add(mul(dir, 1.0 - w), mul(lf, w)));
+    // H1: the target T at q.
+    Vec3 f, T{};
+    bool target = false;
+    if (inreg(q) && stress_dir(q, f) && len(level(f)) >= 0.2) {   // 1: q has a followable direction
+      Vec3 lf = unit(level(f));
+      if (dot(lf, dir) < 0.0) lf = mul(lf, -1.0);
+      T = lf;
+      if (ask_.run_seek > 0.0) {
+        const Vec3 n = cross(up_, lf);
+        const double a = strength(add(q, mul(n, s0 / 2.0))), b = strength(sub(q, mul(n, s0 / 2.0)));
+        if (a + b > 0.0) T = unit(add(lf, mul(n, ask_.run_seek * ((a - b) / (a + b)))));
       }
+      target = true;
+      ++n_follow;
+    } else if (ask_.run_pull > 0.0) {   // 2: the magnet, on rings round q at q's height
+      const int rings = static_cast<int>(std::floor(4.0 * ask_.run_pull + 1e-9));
+      for (int k = 1; k <= rings && !target; ++k) {
+        const double rad = k * s0 / 4.0;
+        double best = -2.0;
+        for (int j = 0; j < 16; ++j) {
+          const double ang = j * 22.5 * kPi / 180.0;
+          const Vec3 d = add(mul(u_, std::cos(ang)), mul(cross(up_, u_), std::sin(ang)));
+          if (strength(add(q, mul(d, rad))) <= 0.0) continue;
+          const double dd = dot(d, dir);
+          if (dd > best) { best = dd; T = d; target = true; }
+        }
+      }
+      if (target) {
+        ++n_magnet;
+        if (!used_magnet) ++(root ? rep_.root_runs_magnet : rep_.top_runs_magnet);   // every run tried, made or not
+        used_magnet = true;
+      }
+      else ++n_none;
+    } else {
+      ++n_none;
+    }
+    // H2: the turn.
+    if (target) {
+      const Vec3 s = add(mul(dir, 1.0 - w), mul(T, w));
+      if (len(s) >= 1e-9) dir = unit(s);
     }
     const Vec3 nq = add(q, mul(dir, layer_));
     if (!inreg(nq)) {
@@ -2188,7 +2234,7 @@ Grower::RunEnd Grower::make_run(int vine, const Vec3& start, Vec3 dir, double ma
     travelled += layer_;
     path.push_back(q);
     must.push_back(0);
-    if (travelled >= 0.5 * s0) {
+    if (travelled >= ask_.run_min * s0) {   // H3 (a)
       Near n;
       rec_.near(q, wr, [&](const Sample& s) {
         if (s.line == vine || !rec_current(s)) return;
@@ -2202,7 +2248,7 @@ Grower::RunEnd Grower::make_run(int vine, const Vec3& start, Vec3 dir, double ma
         break;
       }
     }
-    if (travelled >= s0) {
+    if (travelled >= std::max(1.0, ask_.run_min) * s0) {   // H3 (b)
       const double lim = kTestRatio * sep(q);
       bool found = false;
       double best = lim;
@@ -2333,9 +2379,10 @@ void Grower::runs() {
       Vec3 start = x;
       for (int k = 0; k < n; ++k) {
         bool ontop = false;
-        if (ask_.run_gap > 0.0)
-          mine.near(x, ask_.run_gap * sep(x), [&](const Sample& s) {
-            if (s.line != static_cast<int>(li) && dist(x, s.p) < ask_.run_gap * sep(x)) ontop = true;
+        const double gap = ask_.root_gap >= 0.0 ? ask_.root_gap : ask_.run_gap;   // H4: the roots' own gap
+        if (gap > 0.0)
+          mine.near(x, gap * sep(x), [&](const Sample& s) {
+            if (s.line != static_cast<int>(li) && dist(x, s.p) < gap * sep(x)) ontop = true;
           });
         if (ontop) { ++rep_.root_refused_ontop; continue; }
         if (!split) {
@@ -2381,6 +2428,15 @@ bool Grower::setup() {
   if (!(ask_.run_gap >= 0.0) || !std::isfinite(ask_.run_gap))
     throw std::invalid_argument("grow_strands: run_gap must be 0 or above");   // G
   if (ask_.run_max < 1) throw std::invalid_argument("grow_strands: run_max must be 1 or more");   // G
+  if (!(ask_.run_follow > 0.0) || !std::isfinite(ask_.run_follow))
+    throw std::invalid_argument("grow_strands: run_follow must be above 0");   // H
+  if (!(ask_.run_pull >= 0.0) || !std::isfinite(ask_.run_pull))
+    throw std::invalid_argument("grow_strands: run_pull must be 0 or above");   // H
+  if (!(ask_.run_seek >= 0.0) || !std::isfinite(ask_.run_seek))
+    throw std::invalid_argument("grow_strands: run_seek must be 0 or above");   // H
+  if (!(ask_.run_min >= 0.0) || !std::isfinite(ask_.run_min))
+    throw std::invalid_argument("grow_strands: run_min must be 0 or above");   // H
+  if (!std::isfinite(ask_.root_gap)) throw std::invalid_argument("grow_strands: root_gap must be a number");   // H
   const double thinnest = domain_.spec().bead_mm * domain_.spec().min_strut_lines;
   if (ask_.width_mm != 0.0 && !(ask_.width_mm >= thinnest - 1e-12))
     throw std::invalid_argument("grow_strands: the strut width is under the thinnest strut (G8)");
