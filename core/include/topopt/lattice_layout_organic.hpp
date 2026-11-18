@@ -149,6 +149,14 @@ struct OrganicAsk {
   // where it is heaviest. 0 or less: off (wall_gap everywhere, as before). Needs wall_gap on, at most wall_gap, and
   // the spacing as a range (O12's measure exists only then). Feet (foot_gap) and L2 c are not changed.
   double wall_gap_heavy = 0.0;
+  // N (brief G21, rule M's twin for the crossing vines): a wall seed becomes a crossing vine when no crossing vine
+  // already chosen stands within cross_gap x the local spacing of its wall point (2.5: F's gap, as before). Above 0;
+  // only with wall_cross on when not 2.5. cross_gap_heavy above 0: the gap there is
+  // cross_gap + (cross_gap_heavy - cross_gap) x f, f O12's stress measure at that wall point (as rule M reads it); so
+  // cross_gap where the stress is light, cross_gap_heavy where it is heaviest. 0 or less: off. Needs wall_cross on, at
+  // most cross_gap, and the spacing as a range. A crossing vine's heading, climb, ties and width are not changed.
+  double cross_gap = 2.5;
+  double cross_gap_heavy = 0.0;
 };
 
 // J2 (brief G12), the pruning of a Grown area's weave bars, for each (region, median asked spacing) of `areas`:
@@ -407,6 +415,13 @@ struct GrowReport {
     std::size_t roots[3] = {0, 0, 0}, kept_off[3] = {0, 0, 0}, kept_on[3] = {0, 0, 0};
   };
   std::vector<WallThirds> wall_thirds;
+  // N (brief G21): per area, the crossing vines chosen (seeded) by third of O12's measure f at the wall point (light,
+  // middle, heavy as for wall_thirds) and their total. Only with wall_cross on.
+  struct CrossThirds {
+    int region = 0;
+    std::size_t seeded[3] = {0, 0, 0}, total = 0;
+  };
+  std::vector<CrossThirds> cross_thirds;
   void add(const GrowReport& o);
 };
 

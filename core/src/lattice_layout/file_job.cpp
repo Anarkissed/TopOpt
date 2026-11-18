@@ -206,7 +206,8 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "organic_run_follow", "organic_run_pull", "organic_run_seek", "organic_run_min", "organic_root_gap",
        "organic_auto", "organic_width_heavy_mm", "organic_member_cap", "organic_prune", "organic_bed_floor_mm",
        "organic_shape_reach", "organic_hold_parts", "organic_part_reach_mm",
-       "organic_part_support_mm", "organic_part_to_floor", "organic_wall_gap_heavy"},
+       "organic_part_support_mm", "organic_part_to_floor", "organic_wall_gap_heavy", "organic_cross_gap",
+       "organic_cross_gap_heavy"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -468,6 +469,22 @@ OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::str
   const double cross = num(in, "organic_wall_cross", a.wall_cross, w);
   if (!(cross == 0.0 || cross == 1.0 || cross == 2.0)) json::fail(w + ".organic_wall_cross", "must be 0, 1 or 2");
   a.wall_cross = static_cast<int>(cross);
+  // N (brief G21): the crossing gap in spacings (2.5 when not given), and by stress (0 or less, and not given: off).
+  if (json::find(in, "organic_cross_gap")) {
+    a.cross_gap = num(in, "organic_cross_gap", a.cross_gap, w);
+    if (!(std::isfinite(a.cross_gap) && a.cross_gap > 0.0)) json::fail(w + ".organic_cross_gap", "must be above 0");
+    if (a.wall_cross == 0) json::fail(w + ".organic_cross_gap", "needs organic_wall_cross on (1 or 2)");
+  }
+  a.cross_gap_heavy = num(in, "organic_cross_gap_heavy", a.cross_gap_heavy, w);
+  if (!std::isfinite(a.cross_gap_heavy))
+    json::fail(w + ".organic_cross_gap_heavy", "must be a number (0 or less: off)");
+  if (a.cross_gap_heavy > 0.0 && a.wall_cross == 0)
+    json::fail(w + ".organic_cross_gap_heavy", "needs organic_wall_cross on (1 or 2)");
+  if (a.cross_gap_heavy > 0.0 && a.cross_gap_heavy > a.cross_gap)
+    json::fail(w + ".organic_cross_gap_heavy", "must be at most organic_cross_gap");
+  if (a.cross_gap_heavy > 0.0 && (a.spacing_mm > 0.0 || !(a.spacing_max_mm > a.spacing_min_mm)))
+    json::fail(w + ".organic_cross_gap_heavy", "needs the spacing as a range (organic_spacing_min_mm below "
+                                               "organic_spacing_max_mm): it follows that range's stress measure");
   // G (brief G8, try keys): top runs, roots (0 when not given: off), runs per end (1 when not given).
   a.top_run = num(in, "organic_top_run", a.top_run, w);
   if (!(std::isfinite(a.top_run) && a.top_run >= 0.0)) json::fail(w + ".organic_top_run", "must be 0 or above");
@@ -1560,6 +1577,21 @@ std::string file_result_json(const FileResult& r) {
                       i ? ", " : "", x.region, count(x.roots[0]), count(x.roots[1]), count(x.roots[2]),
                       count(x.kept_off[0]), count(x.kept_off[1]), count(x.kept_off[2]), count(x.kept_on[0]),
                       count(x.kept_on[1]), count(x.kept_on[2]));
+        wt += tb;
+      }
+      wt += "],\n    ";
+    }
+    if (!g.cross_thirds.empty()) {   // N: the crossing vines (seeded, grown), and per area those chosen by third
+      char cb[160];
+      std::snprintf(cb, sizeof cb, "\"cross_seeded\": %llu, \"cross_grown\": %llu, \"cross_thirds\": [",
+                    count(g.cross_seeded), count(g.cross_grown));
+      wt += cb;
+      for (std::size_t i = 0; i < g.cross_thirds.size(); ++i) {
+        const GrowReport::CrossThirds& x = g.cross_thirds[i];
+        char tb[200];
+        std::snprintf(tb, sizeof tb, "%s{\"area\": %d, \"seeded\": [%llu, %llu, %llu], \"total\": %llu}",
+                      i ? ", " : "", x.region, count(x.seeded[0]), count(x.seeded[1]), count(x.seeded[2]),
+                      count(x.total));
         wt += tb;
       }
       wt += "],\n    ";

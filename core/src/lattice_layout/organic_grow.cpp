@@ -62,6 +62,7 @@ void GrowReport::add(const GrowReport& o) {
   cut_repeat_mm += o.cut_repeat_mm;
   strands += o.strands; ms += o.ms;
   wall_thirds.insert(wall_thirds.end(), o.wall_thirds.begin(), o.wall_thirds.end());   // M
+  cross_thirds.insert(cross_thirds.end(), o.cross_thirds.begin(), o.cross_thirds.end());   // N
 }
 
 namespace {
@@ -735,6 +736,9 @@ void Grower::seeds(std::vector<Tip>& tips) {
         }
       }
   std::vector<Vec3> cross_kept;   // F: the wall points of the crossing vines made so far
+  GrowReport::CrossThirds cthirds;   // N: the crossing vines chosen, by third of O12's measure at the wall point
+  cthirds.region = region_;
+  const bool cross_by_stress = ask_.wall_cross != 0 && ask_.cross_gap_heavy > 0.0;   // N
   for (const auto& kv : cells) {
     const long long ck = std::get<0>(kv.first), ca = std::get<1>(kv.first), cb = std::get<2>(kv.first);
     const Vec3 pick = add(mul(up_, (ck + rnd(ask_.seed, 3, ca, cb, static_cast<int>(ck) * 3)) * stride),
@@ -766,9 +770,17 @@ void Grower::seeds(std::vector<Tip>& tips) {
     // competition after the growth can remove one): a wall seed with no crossing vine within kCrossGap x its local
     // spacing is one. Every other wall seed stays an ordinary wall vine, with every ordinary rule (they are what
     // draws the faces).
+    // N: the gap is cross_gap (kCrossGap when not given), or by stress at `on` (rule M's twin).
     bool cross = ask_.wall_cross != 0;
-    for (const Vec3& k : cross_kept) cross = cross && !(dist(k, on) < kCrossGap * sep(on));
-    if (cross) cross_kept.push_back(on);
+    const double cgap = cross_by_stress ? ask_.cross_gap + (ask_.cross_gap_heavy - ask_.cross_gap) * stress_f(on)
+                                        : ask_.cross_gap;
+    for (const Vec3& k : cross_kept) cross = cross && !(dist(k, on) < cgap * sep(on));
+    if (cross) {
+      cross_kept.push_back(on);
+      const double sf = stress_f(on);   // N: counted only
+      ++cthirds.seeded[sf < 1.0 / 3.0 ? 0 : (sf < 2.0 / 3.0 ? 1 : 2)];
+      ++cthirds.total;
+    }
     Tip t;
     t.kind = Tip::Wall;
     t.root = end_at_edge(w.c, w.w, at);
@@ -780,6 +792,7 @@ void Grower::seeds(std::vector<Tip>& tips) {
     tips.push_back(t);
     ++rep_.seeds_wall;
   }
+  if (ask_.wall_cross != 0) rep_.cross_thirds.push_back(cthirds);   // N
 }
 
 // G6, the original's branches: across the heading, along whichever of the two minor principal directions is least
@@ -2505,6 +2518,18 @@ bool Grower::setup() {
     throw std::invalid_argument("grow_strands: wall_cross needs walls_out");   // F
   if (ask_.wall_cross != 0 && ask_.wall_connect)
     throw std::invalid_argument("grow_strands: wall_cross and wall_connect cannot both be on");   // F
+  if (!(ask_.cross_gap > 0.0) || !std::isfinite(ask_.cross_gap))
+    throw std::invalid_argument("grow_strands: cross_gap must be above 0");   // N
+  if (ask_.cross_gap != kCrossGap && ask_.wall_cross == 0)
+    throw std::invalid_argument("grow_strands: cross_gap needs wall_cross");   // N
+  if (!std::isfinite(ask_.cross_gap_heavy))
+    throw std::invalid_argument("grow_strands: cross_gap_heavy must be a number (0 or less: off)");   // N
+  if (ask_.cross_gap_heavy > 0.0 && ask_.wall_cross == 0)
+    throw std::invalid_argument("grow_strands: cross_gap_heavy needs wall_cross");   // N
+  if (ask_.cross_gap_heavy > ask_.cross_gap)
+    throw std::invalid_argument("grow_strands: cross_gap_heavy must be at most cross_gap");   // N
+  if (ask_.cross_gap_heavy > 0.0 && (ask_.spacing_mm > 0.0 || !(ask_.spacing_max_mm > ask_.spacing_min_mm)))
+    throw std::invalid_argument("grow_strands: cross_gap_heavy needs the spacing as a range (O12's measure)");   // N
   if (!(ask_.top_run >= 0.0) || !std::isfinite(ask_.top_run))
     throw std::invalid_argument("grow_strands: top_run must be 0 or above");   // G
   if (!(ask_.root_run >= 0.0) || !std::isfinite(ask_.root_run))
