@@ -177,6 +177,8 @@ add_library(topopt
   src/lattice_layout/solid_mesh.cpp
   src/lattice_layout/print_check.cpp
   src/lattice_layout/weave_sags.cpp
+  # Brief L2: the Organic preview (runs, the draft lay, the Auto Sweep limits).
+  src/lattice_layout/organic_preview.cpp
   # The lattice file job (docs/design/lattice-rebuild/04-layout-file-job.md): job.json ->
   # layout -> mesh -> STL. `topopt-cli lattice-file` is its only caller in core.
   src/lattice_layout/file_job.cpp

@@ -4,6 +4,7 @@
 // after the trace in the old path is called: no clip at the edge, no repair loop, no mat, fill, trim, weld or mesher.
 #pragma once
 
+#include <cstdint>
 #include <vector>
 
 #include "topopt/lattice_layout.hpp"
@@ -528,5 +529,28 @@ Vec3 grown_light(const Domain& domain, int region, const TensorField& field, con
 // O3 alone, exposed for tests: the fewest of the strand's points that keep each of its points within `tolerance_mm`
 // of the line through the kept ones, both ends kept (the first of several equally short answers, by index).
 std::vector<std::size_t> straighten_points(const std::vector<Vec3>& points, double tolerance_mm);
+
+// ── ORGANIC PREVIEW (brief L2, items 2 to 4; organic_preview.cpp) ─────────────────────────────────────────────────
+// Item 2, RUNS: the lattice of the weave regions handed over as polylines. Bars are read in list order; a bar continues
+// the run before it when it is not a link, is of a weave region, has the same strand number, region and marks, and its
+// first end is the run's last point (within 1e-6 mm): consecutive bars of one strand joined end to end are one run, so
+// the cut at crossings' splits are undone. `link` bars are left out. A strand that branches, or is broken (by the
+// dropping, or by a bar of another strand between), gives several runs. Per point: its place, its width (at a joint the
+// mean of the two bars' widths, at an end its bar's) and its local spacing (the bar's `cell`, the strand's spacing).
+// Thinning to `tolerance_mm` (0 or less: none): a point is dropped when every original point between the kept ones lies
+// within the tolerance of the kept segment and its width within 5 % of the width interpolated there (by length); a
+// run's two ends are always kept, and a run's marks never change along it (a mark change starts a new run).
+enum WeaveRunMark : std::uint8_t { kRunLevelTie = 1, kRunBrace = 2, kRunSupport = 4, kRunNet = 8 };
+struct WeaveRun {
+  int region = 0;
+  std::uint8_t marks = 0;                          // WeaveRunMark bits
+  Bar::End end_a = Bar::End::Node, end_b = Bar::End::Node;   // the kinds of its two ends (its first and last bar's)
+  std::vector<Vec3> points;
+  std::vector<double> width_mm, spacing_mm;       // one per point
+};
+std::vector<WeaveRun> weave_runs(const Bars& bars, const std::vector<int>& weave_regions, double tolerance_mm = 0.1);
+// The runs packed for the app, little-endian: per run 12 bytes (point count u32, region i32, marks u8, end_a u8,
+// end_b u8 (Bar::End), one pad byte), then 20 bytes per point (x, y, z, width, spacing as float32).
+std::vector<std::uint8_t> pack_weave_runs(const std::vector<WeaveRun>& runs);
 
 }  // namespace topopt::lattice_layout

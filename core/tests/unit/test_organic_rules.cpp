@@ -781,6 +781,61 @@ static void test_link_width_run() {
   CHECK(refused);
 }
 
+// ── OL-RUN (brief L2, item 2): the weave handed over as runs ───────────────────────────────────────────────────────
+static double polyline_mm(const std::vector<Vec3>& p) {
+  double l = 0.0;
+  for (std::size_t k = 1; k < p.size(); ++k) l += dist(p[k - 1], p[k]);
+  return l;
+}
+static double to_polyline(const Vec3& q, const std::vector<Vec3>& p) {
+  double best = 1e300;
+  for (std::size_t k = 1; k < p.size(); ++k) {
+    const Vec3 a = p[k - 1], b = p[k];
+    const Vec3 d{b.x - a.x, b.y - a.y, b.z - a.z};
+    const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
+    const double t = l2 > 0 ? std::clamp(((q.x - a.x) * d.x + (q.y - a.y) * d.y + (q.z - a.z) * d.z) / l2, 0.0, 1.0) : 0.0;
+    best = std::min(best, dist(q, Vec3{a.x + d.x * t, a.y + d.y * t, a.z + d.z * t}));
+  }
+  return best;
+}
+static void test_runs() {
+  const StepModel model = box_model(30, 30, 20);
+  const TensorField f = traced_field();
+  OrganicAsk a = traced_ask();
+  a.width_heavy_mm = 1.6;   // widths that change along a run
+  a.tie_level = true;       // a mark (level ties)
+  a.unbraced_max = 8.0;     // another (braces)
+  Session s(model);
+  const Outcome o = s.lay_organic(traced_settings(), f, a);
+  const std::vector<int> regions{1};
+  double bars_mm = 0.0;
+  std::size_t weave_bars = 0;
+  for (const Bar& b : o.bars.bars)
+    if (!b.link && b.region == 1) { bars_mm += dist(b.a, b.b); ++weave_bars; }
+  const std::vector<WeaveRun> raw = weave_runs(o.bars, regions, 0.0);
+  const std::vector<WeaveRun> thin = weave_runs(o.bars, regions, 0.1);
+  double raw_mm = 0.0, worst = 0.0;
+  std::size_t raw_pts = 0, thin_pts = 0, marked = 0, bad_marks = 0, ends_moved = 0;
+  for (const WeaveRun& r : raw) { raw_mm += polyline_mm(r.points); raw_pts += r.points.size(); marked += r.marks != 0; }
+  bool same_count = raw.size() == thin.size();
+  for (std::size_t i = 0; same_count && i < raw.size(); ++i) {
+    thin_pts += thin[i].points.size();
+    for (const Vec3& q : raw[i].points) worst = std::max(worst, to_polyline(q, thin[i].points));
+    bad_marks += thin[i].marks != raw[i].marks || thin[i].region != raw[i].region;
+    ends_moved += dist(thin[i].points.front(), raw[i].points.front()) > 0.0 || dist(thin[i].points.back(), raw[i].points.back()) > 0.0;
+  }
+  const std::vector<std::uint8_t> packed = pack_weave_runs(thin);
+  std::printf("OL-RUN: %zu weave bars (links out), %.6f mm; runs %zu, %zu points (%zu segments), %.6f mm; thinned at 0.1 mm: "
+              "%zu points (%zu segments), farthest original point %.4f mm; %zu runs marked; packed %zu bytes\n",
+              weave_bars, bars_mm, raw.size(), raw_pts, raw_pts - raw.size(), raw_mm, thin_pts, thin_pts - thin.size(),
+              worst, marked, packed.size());
+  CHECK(!raw.empty() && raw.size() < weave_bars && std::fabs(raw_mm - bars_mm) <= 1e-6);
+  CHECK(same_count && worst <= 0.1 + 1e-9 && thin_pts < raw_pts && bad_marks == 0 && ends_moved == 0 && marked > 0);
+  CHECK(packed.size() == 12 * thin.size() + 20 * thin_pts);
+  for (const WeaveRun& r : thin) CHECK(r.points.size() >= 2 && r.width_mm.size() == r.points.size() && r.spacing_mm.size() == r.points.size());
+}
+
+
 int main() {
   test_s_cut_fix();
   test_k_floor();
@@ -798,6 +853,7 @@ int main() {
   test_t_brace();
   test_reference_stated_at_resolved();
   test_link_width_run();
+  test_runs();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }
