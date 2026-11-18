@@ -1084,6 +1084,1437 @@ static void test_skin_never_thinned() {
   CHECK(thin[1] == 0);
 }
 
+// ── ORGANIC (WEAVE), rules O1, O2: the file ──────────────────────────────────
+// The layout test's block (lattice_layout.cpp, weave_block): 40 x 14 x 20 with a half-round pocket (radius 6) in its
+// top edge along z; faces 0 the underside, 1 the pocket's wall, 2 the rest. The same made-up weave.
+static TriangleMesh prism_poly(const std::vector<std::array<double, 2>>& xy, double z0, double z1) {
+  const int n = static_cast<int>(xy.size());
+  auto turn = [&](int a, int b, int c) {
+    return (xy[b][0] - xy[a][0]) * (xy[c][1] - xy[a][1]) - (xy[b][1] - xy[a][1]) * (xy[c][0] - xy[a][0]);
+  };
+  std::vector<int> left(n);
+  for (int i = 0; i < n; ++i) left[i] = i;
+  std::vector<std::array<int, 3>> tris;
+  while (left.size() > 3) {
+    bool cut = false;
+    const int m = static_cast<int>(left.size());
+    for (int i = 0; i < m && !cut; ++i) {
+      const int a = left[(i + m - 1) % m], b = left[i], c = left[(i + 1) % m];
+      if (turn(a, b, c) <= 1e-12) continue;
+      bool empty = true;
+      for (int k : left)
+        if (k != a && k != b && k != c && turn(a, b, k) >= -1e-12 && turn(b, c, k) >= -1e-12 && turn(c, a, k) >= -1e-12) empty = false;
+      if (!empty) continue;
+      tris.push_back({a, b, c});
+      left.erase(left.begin() + i);
+      cut = true;
+    }
+    if (!cut) return {};
+  }
+  tris.push_back({left[0], left[1], left[2]});
+  MeshSink s;
+  auto P = [&](int i, double z) { return Vec3{xy[i % n][0], xy[i % n][1], z}; };
+  for (const auto& t : tris) {
+    s.add_triangle(P(t[0], z1), P(t[1], z1), P(t[2], z1));
+    s.add_triangle(P(t[0], z0), P(t[2], z0), P(t[1], z0));
+  }
+  for (int i = 0; i < n; ++i) {
+    s.add_triangle(P(i, z0), P(i + 1, z0), P(i + 1, z1));
+    s.add_triangle(P(i, z0), P(i + 1, z1), P(i, z1));
+  }
+  return s.mesh;
+}
+static StepModel weave_block() {
+  const double H = 14.0, cx = 20.0, R = 6.0;
+  std::vector<std::array<double, 2>> xy = {{0, 0}, {40, 0}, {40, H}, {cx + R, H}};
+  const int N = 48;
+  for (int i = 1; i < N; ++i) {
+    const double t = 3.14159265358979323846 * i / N;
+    xy.push_back({cx + R * std::cos(t), H - R * std::sin(t)});
+  }
+  xy.push_back({cx - R, H});
+  xy.push_back({0, H});
+  const TriangleMesh solid_mesh = prism_poly(xy, 0, 20);
+  StepModel model;
+  model.mesh = solid_mesh;
+  StepFaceInfo under, wall, rest;
+  under.kind = StepSurfaceKind::Plane;
+  under.plane_normal = {0, -1, 0};
+  under.plane_origin = {20, 0, 10};
+  wall.kind = StepSurfaceKind::Other;
+  rest.kind = StepSurfaceKind::Other;
+  model.faces = {under, wall, rest};
+  model.face_count = 3;
+  for (const auto& t : solid_mesh.triangles) {
+    const Vec3 &a = solid_mesh.vertices[static_cast<std::size_t>(t[0])], &b = solid_mesh.vertices[static_cast<std::size_t>(t[1])],
+               &c = solid_mesh.vertices[static_cast<std::size_t>(t[2])];
+    auto on_arc = [&](const Vec3& v) { return std::fabs(std::hypot(v.x - cx, v.y - H) - R) < 1e-6 && v.y < H + 1e-9; };
+    int f = 2;
+    if (a.y < 1e-9 && b.y < 1e-9 && c.y < 1e-9) f = 0;
+    else if (on_arc(a) && on_arc(b) && on_arc(c) && !(a.z == b.z && b.z == c.z)) f = 1;
+    model.triangle_face.push_back(f);
+  }
+  model.solid_count = 1;
+  return model;
+}
+static Vec3 round_pocket(double r, double deg, double z) {
+  const double t = deg * 3.14159265358979323846 / 180.0;
+  return {20.0 + r * std::cos(t), 14.0 - r * std::sin(t), z};
+}
+static Strand weave_strand(std::vector<Vec3> pts, int region = 1) {
+  Strand s;
+  s.width_mm.assign(pts.size(), 0.9);
+  s.points = std::move(pts);
+  s.region = region;
+  s.spacing_mm = 4.0;
+  return s;
+}
+static std::vector<Strand> made_up_weave() {   // as in the layout test
+  std::vector<Strand> w;
+  const double r = 7.75;
+  for (double z : {4.0, 8.0, 12.0}) {
+    std::vector<Vec3> p;
+    for (double t = -15; t <= 195 + 1e-9; t += 30) p.push_back(round_pocket(r, t, z));
+    w.push_back(weave_strand(p));
+  }
+  {
+    std::vector<Vec3> p;
+    for (double t = 45; t <= 135 + 1e-9; t += 30) p.push_back(round_pocket(r, t, 16.0));
+    w.push_back(weave_strand(p));
+  }
+  for (double t : {30.0, 60.0, 90.0, 120.0, 150.0}) {
+    std::vector<Vec3> p;
+    for (double z = -1; z <= 21 + 1e-9; z += 2) p.push_back(round_pocket(r, t, z));
+    w.push_back(weave_strand(p));
+  }
+  {
+    std::vector<Vec3> p;
+    for (double z = 6; z <= 14 + 1e-9; z += 2) p.push_back(round_pocket(r, 165.0, z));
+    w.push_back(weave_strand(p));
+  }
+  w.push_back(weave_strand({round_pocket(7.0, 60, 10), round_pocket(9.0, 60, 10), round_pocket(11.5, 60, 10)}));
+  w.push_back(weave_strand({round_pocket(9.0, 90, 6), round_pocket(4.5, 90, 6)}));
+  w.push_back(weave_strand({round_pocket(9.6, 45, 16), round_pocket(8.9, 45, 16)}));
+  return w;
+}
+static double to_segment(const Vec3& p, const Vec3& a, const Vec3& b) {
+  const Vec3 d{b.x - a.x, b.y - a.y, b.z - a.z};
+  const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
+  const double t = l2 > 0 ? std::clamp(((p.x - a.x) * d.x + (p.y - a.y) * d.y + (p.z - a.z) * d.z) / l2, 0.0, 1.0) : 0.0;
+  return std::hypot(p.x - a.x - d.x * t, std::hypot(p.y - a.y - d.y * t, p.z - a.z - d.z * t));
+}
+
+// O1, O2, the file of a weave: open between its struts, the struts one body with the part, nothing outside it, no
+// crust at the open surface, no slit against the solid (S11b); the layer check runs to its end.
+static void test_weave_file() {
+  const StepModel model = weave_block();
+  Session session(model);
+  Settings s;
+  s.regions = {{1, Role::Lattice, {1}, 4.0, 0.0, true}, {2, Role::Lattice, {0}, 3.0, 0.0, false}};
+  s.cells.cell_max_mm = 4;
+  s.cells.min_cells_across = 1;
+  s.struts.allow_quilt = true;
+  const Outcome out = session.lay_weave(s, made_up_weave());
+  const Domain& d = *session.domain();
+  auto pr = d.probe();
+  CHECK(!out.cancelled && out.layout.weave.size() == 1 && !out.bars.bars.empty());
+  const OpenSpace open = read_open_space(d, out.layout, 0.25), open1 = read_open_space(d, out.layout, 0.25, 1),
+                  open8 = read_open_space(d, out.layout, 0.25, 8);
+  CHECK(same_boxes(open, open1) && same_boxes(open, open8));
+  OpenSpace cells_only;   // the cells' boxes alone come first and are today's
+  {
+    Layout no_weave = out.layout;
+    no_weave.weave.clear();
+    cells_only = read_open_space(d, no_weave, 0.25);
+    bool first_same = cells_only.boxes.size() < open.boxes.size();
+    for (std::size_t i = 0; first_same && i < cells_only.boxes.size(); ++i) {
+      const OpenSpace::Box &x = cells_only.boxes[i], &y = open.boxes[i];
+      first_same = x.frame == y.frame && std::equal(x.lo, x.lo + 3, y.lo) && std::equal(x.hi, x.hi + 3, y.hi);
+    }
+    CHECK(first_same);
+  }
+  PrintableReport rep;
+  const TriangleMesh mesh = build_printable_mesh(session.measure(), d, out.layout, out.bars, open, PrintableSpec{}, &rep);
+  CHECK(rep.mesh.ok && !mesh.empty());
+  const Read r = read_mesh(mesh);
+  std::printf("weave file: %zu open boxes (%zu of the cells), %zu bars (%zu bridges), %zu triangles, %zu shells, %zu edges not twice; "
+              "%d builds, clean %d, found per pass %s; left out %zu bars, %zu posts; air pockets %zu, sealed %zu, loose bits %zu\n",
+              open.boxes.size(), cells_only.boxes.size(), rep.mesh.bars, rep.mesh.bridges, mesh.triangles.size(), r.shells,
+              r.edges_not_twice, rep.passes, rep.clean ? 1 : 0, [&] {
+                static char buf[128];
+                buf[0] = 0;
+                for (int f : rep.found_per_pass) std::snprintf(buf + std::strlen(buf), sizeof buf - std::strlen(buf), "%d ", f);
+                return buf;
+              }(), rep.mesh.bars_left_out, rep.posts.size(), rep.mesh.air_pockets, rep.mesh.sealed_spaces, rep.mesh.loose_bits);
+  CHECK(r.edges_not_twice == 0 && r.flat == 0);
+  CHECK(r.shells == 1);   // one body: the struts are joined to the part
+  CHECK(rep.passes >= 1 && rep.layers.layers > 0);   // the layer check ran to its end and reported
+  // Nothing outside the part.
+  long outside = 0;
+  for (const Vec3& v : mesh.vertices) outside += pr.part().depth(v) < -0.01;
+  CHECK(outside == 0);
+  // The mesh read back as a solid.
+  std::size_t open_edges = 0;
+  PartMeasure file(weld_mesh(mesh, 1e-6, &open_edges));
+  auto fp = file.probe();
+  auto far_from_struts = [&](const Vec3& p, double by) {
+    for (const Bar& b : out.bars.bars)
+      if (to_segment(p, b.a, b.b) < 0.5 * b.width + by) return false;
+    for (const MeshSpec::Post& q : rep.posts)
+      if (std::hypot(p.x - q.x, p.y - q.y) < 1.5 && p.z < q.z_top + 1.0) return false;
+    return true;
+  };
+  // (a) Open between the struts: points of the weave region away from every strut and from the region's edge.
+  // (b) No crust: the same a fifth of a millimetre under the pocket's wall. (c) No slit: just past the region's far
+  // edge, in the solid behind it.
+  long a_n = 0, a_full = 0, b_n = 0, b_full = 0, c_n = 0, c_empty = 0;
+  for (double z = 1.0; z < 19.5; z += 0.7)
+    for (double deg = 12; deg < 170; deg += 3.1) {
+      for (double rr : {7.0, 8.3, 9.2}) {
+        const Vec3 p = round_pocket(rr, deg, z);
+        const Where w = pr.where(p);
+        if (!w.lattice() || w.id != 1 || !far_from_struts(p, 0.6)) continue;
+        ++a_n;
+        a_full += fp.inside(p);
+      }
+      const Vec3 q = round_pocket(6.2, deg, z);
+      if (pr.where(q).lattice() && far_from_struts(q, 0.6)) { ++b_n; b_full += fp.inside(q); }
+      const Vec3 c = round_pocket(10.4, deg, z);
+      const Where wc = pr.where(c);
+      if (wc.why == Why::NotAsked && far_from_struts(c, 0.6)) { ++c_n; c_empty += !fp.inside(c); }
+    }
+  std::printf("weave file: in the region away from struts %ld points, %ld filled; under the pocket's wall %ld, %ld filled; "
+              "in the solid past the region %ld, %ld empty\n", a_n, a_full, b_n, b_full, c_n, c_empty);
+  CHECK(a_n > 300 && a_full == 0);
+  CHECK(b_n > 100 && b_full == 0);
+  CHECK(c_n > 100 && c_empty == 0);
+  // Left out as build_mesh leaves a strut out: its lowest point at a place the layer check found.
+  auto left_out_bar = [&](const Bar& b) {
+    const double rr = 0.5 * b.width;
+    for (const Vec3& sp : rep.drop_at) {
+      if (std::fabs(std::min(b.a.z, b.b.z) - rr - sp.z) > 0.45) continue;
+      if (to_segment(sp, b.a, b.b) < rr + 0.35) return true;
+    }
+    return false;
+  };
+  // The struts are in the file: the middle of every bar the layer check did not leave out is material.
+  long mids = 0, mids_full = 0;
+  for (const Bar& b : out.bars.bars) {
+    if (b.region != 1 || left_out_bar(b)) continue;
+    const Vec3 m{0.5 * (b.a.x + b.b.x), 0.5 * (b.a.y + b.b.y), 0.5 * (b.a.z + b.b.z)};
+    if (pr.part().depth(m) < 0.3) continue;
+    ++mids;
+    mids_full += fp.inside(m);
+  }
+  std::printf("weave file: %ld weave bars' middles inside the part, %ld of them material\n", mids, mids_full);
+  CHECK(mids > 30 && mids_full == mids);
+
+  // For the review: the weave's shallow bars (under 30 degrees from level), held at both ends, by length, and what the
+  // layer check did with them.
+  {
+    long shallow = 0, held_both = 0, band[4] = {0, 0, 0, 0}, kept = 0, left_out = 0, posted = 0;
+    auto lands = [](Bar::End e) { return e == Bar::End::Node || e == Bar::End::Solid || e == Bar::End::Joined; };
+    for (const Bar& b : out.bars.bars) {
+      if (b.region != 1 || !bar_is_bridge(b)) continue;
+      ++shallow;
+      held_both += lands(b.end_a) && lands(b.end_b);
+      const double len = std::sqrt((b.b.x - b.a.x) * (b.b.x - b.a.x) + (b.b.y - b.a.y) * (b.b.y - b.a.y) + (b.b.z - b.a.z) * (b.b.z - b.a.z));
+      ++band[len <= 5 ? 0 : len <= 10 ? 1 : len <= 20 ? 2 : 3];
+      const double rr = 0.5 * b.width;
+      const bool out_here = left_out_bar(b);
+      bool post_here = false;
+      for (const MeshSpec::Post& q : rep.posts)
+        post_here = post_here || to_segment(Vec3{q.x, q.y, q.z_top}, b.a, b.b) < rr + 0.5;
+      left_out += out_here;
+      posted += !out_here && post_here;
+      kept += !out_here && !post_here;
+    }
+    std::printf("weave shallow bars: %ld under 30 degrees, %ld held at both ends; lengths to 5 mm %ld, 5-10 %ld, 10-20 %ld, over 20 %ld; "
+                "layer check: kept %ld, left out %ld, post under %ld\n", shallow, held_both, band[0], band[1], band[2], band[3], kept,
+                left_out, posted);
+    CHECK(shallow > 0);
+  }
+}
+
+// O2: a sealed space smaller than one spacing cubed is filled; a larger one stays. Two weave regions under the top of
+// a block, sealed in by a Protect skin over the whole top: 3 x 3 x 3 mm (27 mm3, under 4 cubed) and 8 x 8 x 3 mm.
+static void test_weave_sealed() {
+  PartMeasure pm(weld_mesh(box(30, 30, 12)));
+  DomainSpec s;
+  s.min_strut_lines = 2.0;
+  s.regions = {face_region(1, {8, 8, 12}, {0, 0, -1}, 1.5, 1.5, 4.0, 0.0), face_region(2, {20, 20, 12}, {0, 0, -1}, 4, 4, 4.0, 0.0)};
+  for (Region& r : s.regions) r.weave = true;
+  ProtectSkin top;
+  top.id = 1;
+  {
+    MeshSink f;
+    f.add_triangle({0, 0, 12}, {30, 0, 12}, {30, 30, 12});
+    f.add_triangle({0, 0, 12}, {30, 30, 12}, {0, 30, 12});
+    top.face = f.mesh;
+  }
+  top.depth_mm = 1.0;
+  s.protect = {top};
+  Domain d(pm, s);
+  Layout layout = lay_cells(d, CellSpec{});
+  CHECK(layout.cells.empty() && layout.solid.empty() && layout.weave.size() == 2);
+  const std::vector<Strand> strands = {weave_strand({{8, 8, 11.9}, {8, 8, 7.2}}, 1), weave_strand({{20, 20, 11.9}, {20, 20, 7.2}}, 2)};
+  const Bars bars = weave_bars(d, strands);
+  CHECK(bars.bars.size() == 2);
+  for (const Bar& b : bars.bars) CHECK(b.end_a == Bar::End::Solid && b.end_b == Bar::End::Solid);
+  const OpenSpace open = read_open_space(d, layout, 0.25);
+  MeshReport none, spaced;
+  (void)build_mesh(pm, d, layout, bars, open, MeshSpec{}, &none);   // no spacing yet: the floor of 1 mm3
+  for (Layout::Weave& w : layout.weave) w.spacing_mm = 4.0;
+  const TriangleMesh mesh = build_mesh(pm, d, layout, bars, open, MeshSpec{}, &spaced);
+  std::printf("weave sealed: with no spacing filled under %.0f mm3: %zu filled, %zu kept; at 4 mm under %.0f: %zu filled (%.1f mm3), %zu kept\n",
+              none.filled_under_mm3, none.air_pockets, none.sealed_spaces, spaced.filled_under_mm3, spaced.air_pockets,
+              spaced.air_pockets_mm3, spaced.sealed_spaces);
+  CHECK(none.ok && spaced.ok);
+  CHECK(none.sealed_spaces == 2 && none.air_pockets == 0);
+  CHECK(spaced.filled_under_mm3 == 64.0 && spaced.air_pockets == 1 && spaced.sealed_spaces == 1);
+  CHECK(spaced.air_pockets_mm3 > 15.0 && spaced.air_pockets_mm3 < 27.5);
+  // The same for one thread and eight.
+  MeshSpec one, eight;
+  one.threads = 1;
+  eight.threads = 8;
+  CHECK(same_boxes(read_open_space(d, layout, 0.25, 1), read_open_space(d, layout, 0.25, 8)));
+  CHECK(same_mesh(build_mesh(pm, d, layout, bars, open, one), build_mesh(pm, d, layout, bars, open, eight)));
+  CHECK(same_mesh(mesh, build_mesh(pm, d, layout, bars, open, one)));
+}
+
+// ── The owner's bridge rules for a weave (O5 to O10) ──────────────────────────
+// A made-up 40 x 40 x 20 block, a weave region under its top face 30 x 30 (solid walls 5 mm thick all round), `depth`
+// deep: 20.5 runs through to the bed (nothing under the lattice), 14 leaves a solid floor 6 mm thick. Bars made from
+// made-up strands (weave_bars), or built by hand. `weave` false: the same block and open space, but the layout names
+// no weave region, so every bar is judged as a cube-lattice bar.
+struct BridgeBlock {
+  PartMeasure pm;
+  Domain d;
+  Layout layout;
+  OpenSpace open;
+  static DomainSpec spec(double depth) {
+    DomainSpec s;
+    s.min_strut_lines = 2.0;
+    s.regions = {face_region(1, {20, 20, 20}, {0, 0, -1}, 15, 15, depth, 0.0)};
+    s.regions[0].weave = true;
+    return s;
+  }
+  explicit BridgeBlock(double depth)
+      : pm(weld_mesh(box(40, 40, 20))), d(pm, spec(depth)), layout(lay_cells(d, CellSpec{})), open(read_open_space(d, layout, 0.25)) {
+    for (Layout::Weave& w : layout.weave) w.spacing_mm = 4.0;
+  }
+  Layout as_cube() const {
+    Layout l = layout;
+    l.weave.clear();
+    return l;
+  }
+};
+static Strand level_strand(Vec3 a, Vec3 b) { return weave_strand({a, b}, 1); }
+static Bar hand_bar(Vec3 a, Bar::End ea, Vec3 b, Bar::End eb, int into_b = -1) {
+  Bar x;
+  x.a = a; x.b = b; x.width = 0.9; x.cell = 4.0; x.region = 1; x.end_a = ea; x.end_b = eb; x.into_b = into_b;
+  return x;
+}
+static bool material_at(const TriangleMesh& mesh, const Vec3& p) {
+  PartMeasure file(weld_mesh(mesh, 1e-6));
+  return file.probe().inside(p);
+}
+static void say_bridges(const char* what, const PrintableReport& rep) {
+  std::printf("bridges %s: %zu bars written (%zu bridges), kept any length %zu, left unheld %zu, left out at places %zu; "
+              "%d builds, found per pass", what, rep.mesh.bars, rep.mesh.bridges, rep.mesh.kept_any_length,
+              rep.mesh.weave_left_unheld, rep.mesh.bars_left_out, rep.passes);
+  for (int f : rep.found_per_pass) std::printf(" %d", f);
+  std::printf("; posts %zu (stands %zu)", rep.posts.size(), rep.stands_added);
+  for (const MeshSpec::Post& p : rep.posts) std::printf(" [%.2f %.2f %.2f..%.2f]", p.x, p.y, p.z_bottom, p.z_top);
+  std::printf("; mid-air %zu, one-ended %zu, long bridges %zu, longest reach %.2f mm, clean %d\n", rep.layers.mid_air.size(),
+              rep.layers.one_ended.size(), rep.layers.long_bridges.size(), rep.layers.longest_reach_mm, rep.clean ? 1 : 0);
+}
+
+// O7, O8, O10 (tests 1, 6, 8): a level weave bar 30 mm long between the pocket's two walls, nothing under it, is kept
+// with no post; the same bar judged as a cube-lattice bar is not (the 5 mm reach rule still bites).
+static void test_weave_bridge_any_length() {
+  const BridgeBlock k(20.5);
+  const Bars bars = weave_bars(k.d, {level_strand({2, 20, 10}, {38, 20, 10})});
+  CHECK(bars.bars.size() == 1);
+  if (bars.bars.size() != 1) return;
+  CHECK(bars.bars[0].end_a == Bar::End::Solid && bars.bars[0].end_b == Bar::End::Solid);
+  // The same bar as a cube-lattice bar: today's rules, a bridge reaching 15 mm past what holds it.
+  PrintableReport cube;
+  (void)build_printable_mesh(k.pm, k.d, k.as_cube(), bars, k.open, PrintableSpec{}, &cube);
+  say_bridges("level 30 mm, as a cube bar", cube);
+  CHECK(cube.mesh.ok && !cube.found_per_pass.empty() && cube.found_per_pass[0] >= 1);
+  CHECK(cube.posts.size() + cube.mesh.bars_left_out >= 1);   // posted or left out
+  CHECK(cube.mesh.kept_any_length == 0 && cube.mesh.weave_left_unheld == 0 && cube.stands_added == 0);
+  // As a weave bar: kept at any length, no post (nothing below it), nothing found.
+  PrintableReport rep;
+  const TriangleMesh mesh = build_printable_mesh(k.pm, k.d, k.layout, bars, k.open, PrintableSpec{}, &rep);
+  say_bridges("level 30 mm, weave", rep);
+  CHECK(rep.mesh.ok && rep.clean && rep.passes == 1);
+  CHECK(rep.mesh.kept_any_length == 1 && rep.mesh.weave_left_unheld == 0 && rep.mesh.bars_left_out == 0);
+  CHECK(rep.mesh.bridges == 1 && rep.posts.empty() && rep.stands_added == 0);
+  CHECK(rep.layers.mid_air.empty() && rep.layers.one_ended.empty() && rep.layers.long_bridges.empty());
+  CHECK(rep.layers.longest_reach_mm > 10.0);   // the check still measures it
+  CHECK(material_at(mesh, {20, 20, 10}) && material_at(mesh, {8, 20, 10}) && !material_at(mesh, {20, 20, 5}));
+  CHECK(read_mesh(mesh).shells == 1);
+}
+
+// O5 (test 2): the same bar sloping at 10 and at 25 degrees between the walls: kept, and its underside in the mesh is
+// one flat plane along the bar (the downward faces over its middle share one normal within 1 degree, square to the
+// bar's own line and its level side).
+static void test_weave_bridge_flat_underside() {
+  const BridgeBlock k(20.5);
+  const double t10 = std::tan(10.0 * 3.14159265358979323846 / 180.0), t25 = std::tan(25.0 * 3.14159265358979323846 / 180.0);
+  const Bars bars = weave_bars(k.d, {level_strand({2, 12, 7}, {38, 12, 7 + 36 * t10}), level_strand({2, 28, 2}, {38, 28, 2 + 36 * t25})});
+  CHECK(bars.bars.size() == 2);
+  if (bars.bars.size() != 2) return;
+  PrintableReport rep;
+  const TriangleMesh mesh = build_printable_mesh(k.pm, k.d, k.layout, bars, k.open, PrintableSpec{}, &rep);
+  say_bridges("sloping 10 and 25 degrees, weave", rep);
+  CHECK(rep.mesh.ok && rep.clean && rep.mesh.kept_any_length == 2 && rep.mesh.bridges == 2 && rep.mesh.weave_left_unheld == 0);
+  CHECK(rep.posts.empty() && rep.layers.mid_air.empty());
+  for (int q = 0; q < 2; ++q) {
+    const Bar& b = bars.bars[static_cast<std::size_t>(q)];
+    const double y = q == 0 ? 12.0 : 28.0;
+    Vec3 d{b.b.x - b.a.x, b.b.y - b.a.y, b.b.z - b.a.z};
+    const double l = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+    d = {d.x / l, d.y / l, d.z / l};
+    const Vec3 want{d.z * (d.x > 0 ? 1.0 : -1.0), 0.0, -std::fabs(d.x)};   // square to the bar, in its upright plane, down
+    long faces = 0, off = 0;
+    double worst = 0.0;
+    for (const auto& t : mesh.triangles) {
+      const Vec3 &p = mesh.vertices[static_cast<std::size_t>(t[0])], &r = mesh.vertices[static_cast<std::size_t>(t[1])],
+                 &s = mesh.vertices[static_cast<std::size_t>(t[2])];
+      const Vec3 c{(p.x + r.x + s.x) / 3, (p.y + r.y + s.y) / 3, (p.z + r.z + s.z) / 3};
+      if (c.x < 12 || c.x > 28 || std::fabs(c.y - y) > 0.6) continue;
+      const Vec3 e1{r.x - p.x, r.y - p.y, r.z - p.z}, e2{s.x - p.x, s.y - p.y, s.z - p.z};
+      Vec3 n{e1.y * e2.z - e1.z * e2.y, e1.z * e2.x - e1.x * e2.z, e1.x * e2.y - e1.y * e2.x};
+      const double ln = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+      if (ln < 1e-12) continue;
+      n = {n.x / ln, n.y / ln, n.z / ln};
+      if (n.z > -0.05) continue;   // the faces that look down: the underside
+      ++faces;
+      const double deg = std::acos(std::clamp(n.x * want.x + n.y * want.y + n.z * want.z, -1.0, 1.0)) * 180.0 / 3.14159265358979323846;
+      worst = std::max(worst, deg);
+      off += deg > 1.0;
+    }
+    std::printf("bridges flat underside at %s degrees: %ld downward faces over its middle, worst %.4f degrees off one plane\n",
+                q == 0 ? "10" : "25", faces, worst);
+    CHECK(faces >= 2 && off == 0);
+  }
+}
+
+// O8 (test 3): the 30 mm level bar over a solid floor 6 mm below: one post at its middle with the default 20 mm; none
+// with 0; none when a kept crossing bar already stands under its middle.
+static void test_weave_bridge_stands() {
+  const BridgeBlock k(14.0);
+  const Bars bars = weave_bars(k.d, {level_strand({2, 20, 12.45}, {38, 20, 12.45})});
+  CHECK(bars.bars.size() == 1);
+  if (bars.bars.size() != 1) return;
+  {
+    PrintableReport rep;
+    const TriangleMesh mesh = build_printable_mesh(k.pm, k.d, k.layout, bars, k.open, PrintableSpec{}, &rep);
+    say_bridges("level 30 mm over a floor, stand every 20", rep);
+    CHECK(rep.mesh.ok && rep.clean && rep.mesh.kept_any_length == 1);
+    CHECK(rep.stands_added == 1 && rep.posts.size() == 1);
+    if (rep.posts.size() == 1) {
+      const MeshSpec::Post& p = rep.posts[0];
+      CHECK(std::fabs(p.x - 20.0) < 0.01 && std::fabs(p.y - 20.0) < 1e-9 && p.z_top == 12.45);
+      CHECK(p.z_bottom > 5.0 && p.z_bottom < 6.0);   // it starts on the floor
+    }
+    CHECK(rep.layers.mid_air.empty() && rep.layers.one_ended.empty() && rep.layers.long_bridges.empty());
+    CHECK(material_at(mesh, {20, 20, 9}) && !material_at(mesh, {12, 20, 9}));
+  }
+  {
+    PrintableSpec never;
+    never.mesh.weave_stand_every_mm = 0.0;
+    PrintableReport rep;
+    (void)build_printable_mesh(k.pm, k.d, k.layout, bars, k.open, never, &rep);
+    say_bridges("level 30 mm over a floor, stands off", rep);
+    CHECK(rep.mesh.ok && rep.clean && rep.posts.empty() && rep.stands_added == 0 && rep.layers.mid_air.empty());
+  }
+  {
+    // A strand rising from the floor through the bar's middle: the crossing is a stand, 15.9 mm from each end.
+    Bars crossed = weave_bars(k.d, {level_strand({2, 20, 12.45}, {38, 20, 12.45}), level_strand({20, 20, 3}, {20, 20, 21})});
+    const std::size_t joints = split_at_crossings(crossed);
+    CHECK(joints == 1 && crossed.bars.size() == 4);
+    PrintableReport rep;
+    (void)build_printable_mesh(k.pm, k.d, k.layout, crossed, k.open, PrintableSpec{}, &rep);
+    say_bridges("level 30 mm over a floor, crossed at its middle", rep);
+    CHECK(rep.mesh.ok && rep.clean && rep.mesh.kept_any_length == 2 && rep.posts.empty() && rep.stands_added == 0);
+    CHECK(rep.layers.mid_air.empty());
+  }
+}
+
+// O9 (tests 4, 5): a shallow bar held at one end only is left out before the check, counted, never posted; one whose
+// far end lands on a bar that is itself left out is left out too (held means held by something kept).
+static void test_weave_bridge_leads_to_nothing() {
+  const BridgeBlock k(20.5);
+  {
+    const Bars bars = weave_bars(k.d, {level_strand({2, 20, 10}, {15, 20, 10})});
+    CHECK(bars.bars.size() == 1 && bars.bars[0].end_a == Bar::End::Solid && bars.bars[0].end_b == Bar::End::Loose);
+    PrintableReport rep;
+    const TriangleMesh mesh = build_printable_mesh(k.pm, k.d, k.layout, bars, k.open, PrintableSpec{}, &rep);
+    say_bridges("held at one end", rep);
+    CHECK(rep.mesh.ok && rep.clean && rep.passes == 1 && rep.found_per_pass == std::vector<int>{0});
+    CHECK(rep.mesh.weave_left_unheld == 1 && rep.mesh.kept_any_length == 0 && rep.mesh.bars == 0 && rep.mesh.bars_left_out == 0);
+    CHECK(rep.posts.empty() && rep.stands_added == 0 && rep.layers.mid_air.empty());
+    CHECK(!material_at(mesh, {10, 20, 10}));
+  }
+  // By hand: bar 0 from the wall to the air (held at one end); bar 1 from the wall to a point of bar 0 (Joined in it).
+  auto pair = [](bool far_end_held) {
+    Bars b;
+    b.bars.push_back(hand_bar({4.1, 26, 10}, Bar::End::Solid, {far_end_held ? 35.9 : 15.0, 26, 10},
+                              far_end_held ? Bar::End::Solid : Bar::End::Loose));
+    b.bars.push_back(hand_bar({4.1, 20, 10}, Bar::End::Solid, {12, 26, 10}, Bar::End::Joined, 0));
+    return b;
+  };
+  {
+    PrintableReport rep;
+    const TriangleMesh mesh = build_printable_mesh(k.pm, k.d, k.layout, pair(false), k.open, PrintableSpec{}, &rep);
+    say_bridges("landing on a bar left out", rep);
+    CHECK(rep.mesh.ok && rep.clean && rep.found_per_pass == std::vector<int>{0});
+    CHECK(rep.mesh.weave_left_unheld == 2 && rep.mesh.kept_any_length == 0 && rep.mesh.bars == 0);
+    CHECK(rep.posts.empty() && rep.layers.mid_air.empty());
+    CHECK(!material_at(mesh, {8.05, 23, 10}) && !material_at(mesh, {10, 26, 10}));
+  }
+  {
+    PrintableReport rep;
+    (void)build_printable_mesh(k.pm, k.d, k.layout, pair(true), k.open, PrintableSpec{}, &rep);
+    say_bridges("landing on a bar held at both ends", rep);
+    CHECK(rep.mesh.ok && rep.mesh.weave_left_unheld == 0 && rep.mesh.kept_any_length == 2 && rep.mesh.bars == 2);
+    CHECK(rep.layers.mid_air.empty());
+  }
+  // The same three bars as cube-lattice bars: judged as today (the check finds them, nothing is left out before it).
+  {
+    PrintableReport rep;
+    (void)build_printable_mesh(k.pm, k.d, k.as_cube(), pair(false), k.open, PrintableSpec{}, &rep);
+    say_bridges("landing on a bar left out, as cube bars", rep);
+    CHECK(rep.mesh.ok && rep.mesh.weave_left_unheld == 0 && !rep.found_per_pass.empty() && rep.found_per_pass[0] >= 1);
+  }
+}
+
+// ── What holds a weave bar (O6, O9, O10; brief S6) ───────────────────────────
+static Bar hand_bar_w(Vec3 a, Bar::End ea, Vec3 b, Bar::End eb, double width, int into_b = -1) {
+  Bar x = hand_bar(a, ea, b, eb, into_b);
+  x.width = width;
+  return x;
+}
+static std::string flags(const std::vector<char>& v) {
+  std::string s;
+  for (char c : v) s += c ? '1' : '0';
+  return s;
+}
+
+// O6 (joints a hair apart, test 9): two level bars from wall to wall meeting at a joint whose two ends are 4e-6 mm
+// apart are one joint (as drop_loose_bars reads it): both held, both kept. 2e-5 mm apart they are two points, and
+// both lead to nothing.
+static void test_weave_joints_a_hair_apart() {
+  for (double gap : {4e-6, 2e-5}) {
+    Bars b;
+    b.bars.push_back(hand_bar({4.1, 20, 10}, Bar::End::Solid, {20, 20, 10}, Bar::End::Node));
+    b.bars.push_back(hand_bar({20 + gap, 20, 10}, Bar::End::Node, {35.9, 20, 10}, Bar::End::Solid));
+    const std::vector<std::size_t> j = end_joints(b);
+    const WeaveHolds h = weave_holds(b, {1});
+    std::printf("weave joint %.0e mm apart: one joint %d, kept any length %zu, left unheld %zu\n", gap, j[1] == j[2] ? 1 : 0,
+                h.kept_any_length, h.left_unheld);
+    if (gap < 1e-5) CHECK(j[1] == j[2] && h.kept_any_length == 2 && h.left_unheld == 0 && h.kept[0] && h.kept[1]);
+    else CHECK(j[1] != j[2] && h.kept_any_length == 0 && h.left_unheld == 2);
+  }
+}
+
+// O9 (every weave bar, test 10): a steep weave bar whose lowest end lands only on bars that are left out is left out
+// too, and counted with the shallow ones; one standing on the solid is kept; the two arms of a V hold each other (a V
+// bottom with nothing under it is the layer check's, as before). As cube-lattice bars nothing here is judged.
+static void test_weave_steep_unheld() {
+  Bars b;
+  b.bars.push_back(hand_bar({4.1, 20, 10}, Bar::End::Solid, {20, 20, 10}, Bar::End::Node));    // 0 level
+  b.bars.push_back(hand_bar({20, 20, 10}, Bar::End::Node, {35.9, 20, 10}, Bar::End::Solid));   // 1 level
+  b.bars.push_back(hand_bar({20, 20, 10}, Bar::End::Node, {22, 20, 19.9}, Bar::End::Solid));   // 2 steep, on 0 and 1
+  b.bars.push_back(hand_bar({10, 26, 4}, Bar::End::Node, {10, 30, 19.9}, Bar::End::Solid));    // 3 a V's arm
+  b.bars.push_back(hand_bar({10, 26, 4}, Bar::End::Node, {10, 22, 19.9}, Bar::End::Solid));    // 4 its other arm
+  b.bars.push_back(hand_bar({30, 26, 0.5}, Bar::End::Solid, {30, 28, 15}, Bar::End::Node));    // 5 steep, on the solid
+  const std::vector<char> gone01 = {0, 0, 1, 1, 1, 1};
+  const WeaveHolds all = weave_holds(b, {1}), without = weave_holds(b, {1}, gone01), cube = weave_holds(b, {}, gone01);
+  std::printf("weave steep bars: all present kept %s (unheld %zu); 0 and 1 left out: kept %s (unheld %zu); as cube bars %s\n",
+              flags(all.kept).c_str(), all.left_unheld, flags(without.kept).c_str(), without.left_unheld,
+              flags(cube.kept).c_str());
+  CHECK(flags(all.kept) == "111111" && all.left_unheld == 0 && all.kept_any_length == 2);
+  CHECK(flags(without.kept) == "000111" && without.left_unheld == 1 && without.kept_any_length == 0);
+  CHECK(flags(cube.kept) == "001111" && cube.left_unheld == 0);
+}
+
+// O10 (a finding at a held end, a level end; tests 11, 12): what a place of the layer check leaves out of a weave.
+// A busy node N on a strut standing on the floor: a place at N reaches the bar going up from it, whose lowest end is
+// held from below: kept. A place at a V's bottom (nothing under it) leaves both arms out. A strut standing on a bar
+// that a place leaves out is left out too. A near-level bar from N that sinks 0.12 mm to its tip T (under the 0.2 mm
+// layer) starts where it is held: kept, and so is the bar going up from T. Sinking 0.3 mm (over a layer): both left out.
+// As cube-lattice bars (or with the old reading) every bar a place reaches is left out, as before.
+static void test_weave_finding_at_a_held_end() {
+  Bars b;
+  b.bars.push_back(hand_bar({20, 20, 4}, Bar::End::Solid, {20, 20, 12}, Bar::End::Node));      // 0 D: N on the floor
+  b.bars.push_back(hand_bar({20, 20, 12}, Bar::End::Node, {21, 20, 19.5}, Bar::End::Solid));   // 1 S: up from N
+  b.bars.push_back(hand_bar({24, 20, 12}, Bar::End::Node, {26, 20, 19.5}, Bar::End::Solid));   // 2 a V's arm
+  b.bars.push_back(hand_bar({24, 20, 12}, Bar::End::Node, {22.5, 20, 19.5}, Bar::End::Solid)); // 3 its other arm
+  b.bars.push_back(hand_bar({30, 14, 8}, Bar::End::Node, {30, 14, 12}, Bar::End::Node));       // 4 hanging from 5
+  b.bars.push_back(hand_bar({30, 14, 12}, Bar::End::Node, {31, 14, 19.5}, Bar::End::Solid));   // 5 up from 4
+  b.bars.push_back(hand_bar({20, 20, 12}, Bar::End::Node, {17, 20, 11.88}, Bar::End::Node));   // 6 C: from N, sinks 0.12
+  b.bars.push_back(hand_bar({17, 20, 11.88}, Bar::End::Node, {16.5, 20, 19.5}, Bar::End::Solid)); // 7 up from C's tip
+  b.bars.push_back(hand_bar({12, 30, 4}, Bar::End::Solid, {12, 30, 12}, Bar::End::Node));      // 8 D': N' on the floor
+  b.bars.push_back(hand_bar({12, 30, 12}, Bar::End::Node, {15, 30, 11.7}, Bar::End::Node));    // 9 C': sinks 0.3
+  b.bars.push_back(hand_bar({15, 30, 11.7}, Bar::End::Node, {15.5, 30, 19.5}, Bar::End::Solid)); // 10 up from its tip
+  const double r = 0.45;
+  const std::vector<Vec3> places = {{20, 20, 12 - r}, {24, 20, 12 - r}, {30, 14, 8 - r}, {30, 14, 12 - r},
+                                    {17, 20, 11.88 - r}, {15, 30, 11.7 - r}};
+  std::vector<char> used;
+  const std::vector<char> weave = bars_present(b, places, {1}, 0.2, &used);
+  const std::vector<char> old = bars_present(b, places), cube = bars_present(b, places, {}, 0.2);
+  std::printf("weave places: present %s (places used %s); old reading %s; as cube bars %s\n", flags(weave).c_str(),
+              flags(used).c_str(), flags(old).c_str(), flags(cube).c_str());
+  CHECK(flags(weave) == "11000011100");
+  CHECK(flags(used) == "011101");
+  CHECK(flags(old) == "10000000100" && flags(cube) == flags(old));
+  // What the loop reads of each place: reached bars, of them held or at their level.
+  const std::vector<WeaveFinding> f = weave_findings(b, {1}, weave, places, 0.2);
+  CHECK(f.size() == places.size());
+  if (f.size() == places.size()) {
+    CHECK(f[0].reached == 2 && f[0].held == 1 && f[0].level == 1 && f[0].cube == 0);   // S held from below, C at its level
+    CHECK(f[4].reached == 2 && f[4].held == 1 && f[4].level == 1);
+    CHECK(f[1].reached == 0);   // the V's arms are left out: nothing present is reached
+    const WeaveFinding v = weave_findings(b, {1}, {}, places, 0.2)[1];
+    CHECK(v.reached == 2 && v.held == 0 && v.level == 0);
+    CHECK(weave_findings(b, {}, {}, places, 0.2)[0].cube == 2);
+  }
+}
+
+// O10 (test 13): the loop on a made-up part. On a strut standing on the floor, a near-level weave bar from its top
+// sinks 0.15 mm (under a layer) to a joint and rises again to the wall: the layer check finds the dip starting in
+// mid-air, but every bar there starts where it is held: no bar is left out, no post, clean. As cube-lattice bars the
+// same dip is found and answered as before.
+static void test_weave_level_end_in_the_loop() {
+  const BridgeBlock k(14.0);
+  Bars b;
+  b.bars.push_back(hand_bar({20, 20, 5.5}, Bar::End::Solid, {20, 20, 12}, Bar::End::Node));
+  b.bars.push_back(hand_bar({20, 20, 12}, Bar::End::Node, {24, 20, 11.85}, Bar::End::Node));
+  b.bars.push_back(hand_bar({24, 20, 11.85}, Bar::End::Node, {35.9, 20, 12}, Bar::End::Solid));
+  PrintableReport rep, cube;
+  const TriangleMesh mesh = build_printable_mesh(k.pm, k.d, k.layout, b, k.open, PrintableSpec{}, &rep);
+  (void)build_printable_mesh(k.pm, k.d, k.as_cube(), b, k.open, PrintableSpec{}, &cube);
+  say_bridges("a level end, weave", rep);
+  say_bridges("a level end, as cube bars", cube);
+  std::printf("level end: held starts ignored %zu, specks %zu\n", rep.weave_held_ignored, rep.weave_specks_ignored);
+  CHECK(rep.mesh.ok && rep.clean && rep.mesh.bars == 3 && rep.mesh.bars_left_out == 0 && rep.mesh.weave_left_unheld == 0);
+  CHECK(rep.posts.empty() && rep.weave_held_ignored >= 1 && rep.layers.mid_air.empty());
+  CHECK(material_at(mesh, {30, 20, 11.95}));
+  CHECK(cube.mesh.ok && !cube.found_per_pass.empty() && cube.found_per_pass[0] >= 1);
+  CHECK(cube.weave_held_ignored == 0 && cube.weave_specks_ignored == 0);
+}
+
+// O10 (specks, test 14): a V of two struts 0.1 mm wide hanging from a level bar between the walls: its bottom is an
+// island under half a line width both ways, which no printer lays down: not a finding for a weave, the V is kept. The
+// same V 0.9 mm wide is found and left out (a V bottom with nothing under it, as before). As cube-lattice bars the thin
+// V is found as before.
+static Bars thin_v(double w) {
+  Bars b;
+  b.bars.push_back(hand_bar({4.1, 20, 14}, Bar::End::Solid, {35.9, 20, 14}, Bar::End::Solid));
+  b.bars.push_back(hand_bar_w({20, 20, 9}, Bar::End::Node, {20, 20, 14}, Bar::End::Joined, w, 0));
+  b.bars.push_back(hand_bar_w({20, 20, 9}, Bar::End::Node, {20.8, 20, 14}, Bar::End::Joined, w, 0));
+  return b;
+}
+static void test_weave_specks() {
+  const BridgeBlock k(20.5);
+  PrintableReport thin, wide, cube;
+  (void)build_printable_mesh(k.pm, k.d, k.layout, thin_v(0.1), k.open, PrintableSpec{}, &thin);
+  (void)build_printable_mesh(k.pm, k.d, k.layout, thin_v(0.9), k.open, PrintableSpec{}, &wide);
+  (void)build_printable_mesh(k.pm, k.d, k.as_cube(), thin_v(0.1), k.open, PrintableSpec{}, &cube);
+  say_bridges("a thin V, weave", thin);
+  say_bridges("a 0.9 mm V, weave", wide);
+  say_bridges("a thin V, as cube bars", cube);
+  std::printf("specks ignored: thin %zu, wide %zu, cube %zu\n", thin.weave_specks_ignored, wide.weave_specks_ignored,
+              cube.weave_specks_ignored);
+  CHECK(thin.mesh.ok && thin.clean && thin.weave_specks_ignored >= 1 && thin.mesh.bars == 3 && thin.mesh.bars_left_out == 0);
+  CHECK(thin.posts.empty());
+  CHECK(wide.mesh.ok && wide.weave_specks_ignored == 0 && wide.mesh.bars_left_out == 2 && wide.mesh.bars == 1);
+  CHECK(cube.mesh.ok && cube.weave_specks_ignored == 0 && !cube.found_per_pass.empty() && cube.found_per_pass[0] >= 2);
+}
+
+// O10 (test 15): a job with no weave region is made exactly as before: three cube-lattice parts through the
+// make-check-make loop, each mesh and what the loop did held to the numbers taken on da5ffc1c.
+static unsigned long long mesh_hash(const TriangleMesh& m, const PrintableReport& r) {
+  unsigned long long h = 1469598103934665603ULL;
+  auto eat = [&](const void* p, std::size_t n) {
+    const unsigned char* c = static_cast<const unsigned char*>(p);
+    for (std::size_t i = 0; i < n; ++i) { h ^= c[i]; h *= 1099511628211ULL; }
+  };
+  for (const Vec3& v : m.vertices) { const double d[3] = {v.x, v.y, v.z}; eat(d, sizeof d); }
+  for (const auto& t : m.triangles) eat(t.data(), sizeof(t[0]) * 3);
+  const std::size_t n[5] = {r.mesh.bars, r.mesh.bars_left_out, r.mesh.drop_unanswered, r.posts.size(), r.drop_at.size()};
+  eat(n, sizeof n);
+  for (int f : r.found_per_pass) eat(&f, sizeof f);
+  return h;
+}
+static void test_cube_parts_as_before() {
+  unsigned long long got[3] = {0, 0, 0};
+  {  // the 30 x 30 x 12 block with a strut hanging from a node into open space
+    PartMeasure pm(weld_mesh(box(30, 30, 12)));
+    DomainSpec s;
+    s.min_strut_lines = 2.0;
+    s.regions = {face_region(1, {15, 15, 12}, {0, 0, -1}, 15, 15, 8, -2.0)};
+    Domain d(pm, s);
+    CellSpec cs;
+    cs.algorithm = Algorithm::Uniform;
+    cs.cell_max_mm = 8;
+    cs.min_cells_across = 1;
+    const Laid l = lay(d, cs);
+    const OpenSpace open = read_open_space(d, l.layout, 0.25);
+    Bars bad = l.bars;
+    for (const Bar& x : l.bars.bars) {
+      if (x.end_a != Bar::End::Node || std::fabs(x.a.x - 15) > 5 || std::fabs(x.a.y - 15) > 5 || x.a.z < 7 || x.a.z > 9) continue;
+      Bar hang = x;
+      hang.b = {x.a.x + 1.3, x.a.y + 0.9, x.a.z - 2.6};
+      hang.end_b = Bar::End::Loose;
+      hang.into_b = -1;
+      bad.bars.push_back(hang);
+      break;
+    }
+    PrintableReport r;
+    const TriangleMesh m = build_printable_mesh(pm, d, l.layout, bad, open, PrintableSpec{}, &r);
+    got[0] = mesh_hash(m, r);
+  }
+  const BridgeBlock k(20.5);
+  {  // a bar landing on a bar held at one end, as cube-lattice bars
+    Bars b;
+    b.bars.push_back(hand_bar({4.1, 26, 10}, Bar::End::Solid, {15.0, 26, 10}, Bar::End::Loose));
+    b.bars.push_back(hand_bar({4.1, 20, 10}, Bar::End::Solid, {12, 26, 10}, Bar::End::Joined, 0));
+    PrintableReport r;
+    const TriangleMesh m = build_printable_mesh(k.pm, k.d, k.as_cube(), b, k.open, PrintableSpec{}, &r);
+    got[1] = mesh_hash(m, r);
+  }
+  {  // the 0.9 mm V hanging from a level bar, as cube-lattice bars
+    PrintableReport r;
+    const TriangleMesh m = build_printable_mesh(k.pm, k.d, k.as_cube(), thin_v(0.9), k.open, PrintableSpec{}, &r);
+    got[2] = mesh_hash(m, r);
+  }
+  const unsigned long long want[3] = {0x35a7f225c66f0540ULL, 0xf0c261ac0bf71552ULL, 0xfc83ca98a6fda5a2ULL};
+  std::printf("cube parts as before: %016llx %016llx %016llx\n", got[0], got[1], got[2]);
+  for (int i = 0; i < 3; ++i) CHECK(got[i] == want[i]);
+}
+
+// ── O11, the blended foot where a weave strut meets a wall ─────────────────────
+// The mesh cut by the plane through `o` square to the unit `n`: its segments, each running so that the material lies on
+// its left seen from +n, in the plane's own axes (`e1`, `e2`), kept only within `within` of `o`.
+struct Cut {
+  std::vector<std::array<double, 4>> seg;   // x0 y0 x1 y1
+  double area() const {
+    double a = 0.0;
+    for (const auto& s : seg) a += 0.5 * (s[0] * s[3] - s[2] * s[1]);
+    return a;
+  }
+  double lo(int axis) const {
+    double v = 1e300;
+    for (const auto& s : seg) v = std::min({v, s[axis], s[axis + 2]});
+    return v;
+  }
+  double hi(int axis) const {
+    double v = -1e300;
+    for (const auto& s : seg) v = std::max({v, s[axis], s[axis + 2]});
+    return v;
+  }
+};
+static Cut cut_mesh(const TriangleMesh& m, const Vec3& o, const Vec3& n, const Vec3& e1, const Vec3& e2, double within) {
+  Cut c;
+  auto dot = [](const Vec3& a, const Vec3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; };
+  for (const auto& t : m.triangles) {
+    Vec3 p[3];
+    double d[3];
+    for (int q = 0; q < 3; ++q) {
+      const Vec3& v = m.vertices[static_cast<std::size_t>(t[static_cast<std::size_t>(q)])];
+      p[q] = {v.x - o.x, v.y - o.y, v.z - o.z};
+      d[q] = dot(p[q], n);
+    }
+    std::vector<Vec3> hit;
+    for (int q = 0; q < 3; ++q) {
+      const int r = (q + 1) % 3;
+      if ((d[q] < 0) != (d[r] < 0)) {
+        const double s = d[q] / (d[q] - d[r]);
+        hit.push_back({p[q].x + s * (p[r].x - p[q].x), p[q].y + s * (p[r].y - p[q].y), p[q].z + s * (p[r].z - p[q].z)});
+      }
+    }
+    if (hit.size() != 2) continue;
+    const Vec3 a{p[1].x - p[0].x, p[1].y - p[0].y, p[1].z - p[0].z}, b{p[2].x - p[0].x, p[2].y - p[0].y, p[2].z - p[0].z};
+    const Vec3 N{a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+    const Vec3 way{n.y * N.z - n.z * N.y, n.z * N.x - n.x * N.z, n.x * N.y - n.y * N.x};   // n x N: material on the left
+    Vec3 h0 = hit[0], h1 = hit[1];
+    if (dot(Vec3{h1.x - h0.x, h1.y - h0.y, h1.z - h0.z}, way) < 0) std::swap(h0, h1);
+    if (std::sqrt(dot(h0, h0)) > within || std::sqrt(dot(h1, h1)) > within) continue;
+    c.seg.push_back({dot(h0, e1), dot(h0, e2), dot(h1, e1), dot(h1, e2)});
+  }
+  return c;
+}
+// Across a round strut cut square to it: the width of the circle of the same area.
+static double round_width(const Cut& c) { return 2.0 * std::sqrt(std::max(0.0, c.area()) / 3.14159265358979323846); }
+
+// Test 1 (mesh): f = 0 (the writer's own default) is today's mesh on stage 2's test parts (triangle count and volume, as
+// the unchanged writer made them); the file job's default foot (below 0) changes them, and only where a weave bar runs
+// into the solid.
+static void test_weave_foot_off_is_today() {
+  const BridgeBlock k(20.5);
+  const double t10 = std::tan(10.0 * 3.14159265358979323846 / 180.0), t25 = std::tan(25.0 * 3.14159265358979323846 / 180.0);
+  const Bars level = weave_bars(k.d, {level_strand({2, 20, 10}, {38, 20, 10})});
+  const Bars sloping = weave_bars(k.d, {level_strand({2, 12, 7}, {38, 12, 7 + 36 * t10}), level_strand({2, 28, 2}, {38, 28, 2 + 36 * t25})});
+  const BridgeBlock floor(14.0);
+  const Bars upright = weave_bars(floor.d, {level_strand({20, 20, 19.9}, {20, 20, 3}), level_strand({12, 14, 19.9}, {14, 16, 3})});
+  struct Today { const char* what; const BridgeBlock* k; const Bars* bars; std::size_t feet, tri; double mm3; };
+  const Today today[3] = {{"level 30 mm", &k, &level, 2, 1656, 13975.088308262024},
+                          {"sloping 10 and 25", &k, &sloping, 4, 1686, 14002.311519950097},
+                          {"two upright over a floor", &floor, &upright, 2, 1372, 19365.685272698138}};
+  for (const Today& t : today) {
+    MeshSpec off, dflt;
+    off.weave_foot_mm = 0.0;
+    dflt.weave_foot_mm = -1.0;   // the file job's default
+    MeshReport r0, rd, rn;
+    const TriangleMesh m0 = build_mesh(t.k->pm, t.k->d, t.k->layout, *t.bars, t.k->open, off, &r0);
+    const TriangleMesh mn = build_mesh(t.k->pm, t.k->d, t.k->layout, *t.bars, t.k->open, MeshSpec{}, &rn);   // not asked
+    const TriangleMesh md = build_mesh(t.k->pm, t.k->d, t.k->layout, *t.bars, t.k->open, dflt, &rd);
+    const TriangleMesh mc = build_mesh(t.k->pm, t.k->d, t.k->as_cube(), *t.bars, t.k->open, dflt);
+    const TriangleMesh mc0 = build_mesh(t.k->pm, t.k->d, t.k->as_cube(), *t.bars, t.k->open, off);
+    std::printf("foot off, %s: f = 0 %zu triangles, %.17g mm3 (today %zu, %.17g); default foot %zu feet, %zu triangles, %.6f mm3, "
+                "feet add %.4f mm3\n", t.what, m0.triangles.size(), r0.mm3, t.tri, t.mm3, rd.feet, md.triangles.size(), rd.mm3,
+                rd.feet_mm3);
+    CHECK(r0.ok && rd.ok && r0.feet == 0 && r0.feet_mm3 == 0.0);
+    CHECK(m0.triangles.size() == t.tri && r0.mm3 == t.mm3);
+    CHECK(rn.feet == 0 && same_mesh(m0, mn));   // the writer's own default is no foot
+    CHECK(rd.feet == t.feet && rd.feet_held == 0 && rd.feet_mm3 > 0.0 && rd.mm3 > r0.mm3 && !same_mesh(m0, md));
+    CHECK(same_mesh(mc, mc0));   // cube-lattice bars: no foot at any setting
+  }
+}
+
+// Test 2: an upright round weave bar into the floor, r = 0.45, f = 0.3: 2 (r + f) across at the wall, 2 r from 3 f
+// up, never wider farther from the wall; one closed body.
+static void test_weave_foot_round() {
+  const BridgeBlock k(14.0);   // the floor's top at z = 6
+  const Bars bars = weave_bars(k.d, {level_strand({20, 20, 19.9}, {20, 20, 3})});
+  CHECK(bars.bars.size() == 1);
+  if (bars.bars.size() != 1) return;
+  CHECK(bars.bars[0].end_b == Bar::End::Solid);
+  MeshSpec spec;
+  spec.weave_foot_mm = 0.3;
+  MeshReport rep;
+  const TriangleMesh mesh = build_mesh(k.pm, k.d, k.layout, bars, k.open, spec, &rep);
+  const Read rd = read_mesh(mesh);
+  CHECK(rep.ok && rep.feet == 1 && rep.feet_held == 0 && rd.edges_not_twice == 0 && rd.shells == 1);
+  auto width_at = [&](double z) { return round_width(cut_mesh(mesh, {20, 20, z}, {0, 0, 1}, {1, 0, 0}, {0, 1, 0}, 2.0)); };
+  const double at_wall = width_at(6.001);
+  double grows = 0.0, prev = at_wall, worst_far = 0.0;
+  for (double z = 6.02; z < 6.9; z += 0.02) {
+    const double w = width_at(z);
+    grows = std::max(grows, w - prev);
+    prev = w;
+  }
+  for (double z = 6.9; z < 15.0; z += 0.37) worst_far = std::max(worst_far, std::fabs(width_at(z) - 0.9));
+  std::printf("foot round, r 0.45 f 0.3: across at the wall %.4f mm (want 1.5), most it grows going up %.5f mm, "
+              "from 3 f up worst off 0.9 %.5f mm; feet add %.4f mm3; %zu shells\n", at_wall, grows, worst_far, rep.feet_mm3, rd.shells);
+  CHECK(std::fabs(at_wall - 1.5) <= 0.03);
+  CHECK(grows <= 1e-6);
+  CHECK(worst_far <= 0.01);
+}
+
+// Test 3: a shallow weave bar at 10 degrees between the walls: its underside the same plane as at f = 0 right up to
+// each wall; a cut at the wall 2 f wider sideways and f taller (square to the bar) than at f = 0.
+static void test_weave_foot_shallow() {
+  const BridgeBlock k(20.5);   // the walls at x = 5 and x = 35
+  const double deg = 10.0 * 3.14159265358979323846 / 180.0, t10 = std::tan(deg);
+  const Bars bars = weave_bars(k.d, {level_strand({2, 12, 7}, {38, 12, 7 + 36 * t10})});
+  CHECK(bars.bars.size() == 1);
+  if (bars.bars.size() != 1) return;
+  MeshSpec off, on;
+  off.weave_foot_mm = 0.0;
+  on.weave_foot_mm = 0.3;
+  MeshReport r0, r1;
+  const TriangleMesh m0 = build_mesh(k.pm, k.d, k.layout, bars, k.open, off, &r0);
+  const TriangleMesh m1 = build_mesh(k.pm, k.d, k.layout, bars, k.open, on, &r1);
+  CHECK(r0.ok && r1.ok && r1.feet == 2 && r1.bridges == 1 && read_mesh(m1).shells == 1);
+  // The underside: the plane at f = 0 (its downward faces' normal and offset over the bar's middle).
+  const Vec3 want{std::sin(deg), 0.0, -std::cos(deg)};
+  auto downward = [&](const TriangleMesh& m, double x0, double x1, auto&& each) {
+    for (const auto& t : m.triangles) {
+      const Vec3 &p = m.vertices[static_cast<std::size_t>(t[0])], &q = m.vertices[static_cast<std::size_t>(t[1])],
+                 &s = m.vertices[static_cast<std::size_t>(t[2])];
+      const Vec3 c{(p.x + q.x + s.x) / 3, (p.y + q.y + s.y) / 3, (p.z + q.z + s.z) / 3};
+      if (c.x < x0 || c.x > x1 || std::fabs(c.y - 12.0) > 1.2 || c.z < 3.0) continue;
+      const Vec3 e1{q.x - p.x, q.y - p.y, q.z - p.z}, e2{s.x - p.x, s.y - p.y, s.z - p.z};
+      Vec3 n{e1.y * e2.z - e1.z * e2.y, e1.z * e2.x - e1.x * e2.z, e1.x * e2.y - e1.y * e2.x};
+      const double ln = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+      if (ln < 1e-12) continue;
+      n = {n.x / ln, n.y / ln, n.z / ln};
+      if (n.x * want.x + n.y * want.y + n.z * want.z < std::cos(3.14159265358979323846 / 4)) continue;   // its lowest faces
+      each(n, p, q, s);
+    }
+  };
+  double plane = 0.0;
+  long n0 = 0;
+  downward(m0, 12, 28, [&](const Vec3&, const Vec3& p, const Vec3&, const Vec3&) {
+    plane += p.x * want.x + p.y * want.y + p.z * want.z;
+    ++n0;
+  });
+  plane /= std::max(1L, n0);
+  long faces = 0, off_angle = 0, off_plane = 0;
+  double worst_deg = 0.0, worst_mm = 0.0;
+  downward(m1, 5.0, 35.0, [&](const Vec3& n, const Vec3& p, const Vec3& q, const Vec3& s) {
+    ++faces;
+    const double a = std::acos(std::clamp(n.x * want.x + n.y * want.y + n.z * want.z, -1.0, 1.0)) * 180.0 / 3.14159265358979323846;
+    worst_deg = std::max(worst_deg, a);
+    off_angle += a > 1.0;
+    for (const Vec3* v : {&p, &q, &s}) {
+      const double mm = std::fabs(v->x * want.x + v->y * want.y + v->z * want.z - plane);
+      worst_mm = std::max(worst_mm, mm);
+      off_plane += mm > 0.01;
+    }
+  });
+  // Sideways: a cut parallel to each wall, 0.02 mm out from it (the wall is not in it): 2 f wider than at f = 0.
+  // Taller: a cut square to the bar, as near each wall as its whole section is clear of the wall ((r + f) tan 10
+  // degrees + 0.02 mm along the bar): f taller than the bar's own section, less the taper over that distance.
+  const Vec3 d{std::cos(deg), 0.0, std::sin(deg)}, up{-std::sin(deg), 0.0, std::cos(deg)};
+  const double r = 0.45, f = 0.3, s0 = (r + f) * t10 + 0.02, g = 1.0 - s0 / (3.0 * f);
+  auto axis_at = [&](double x) { return Vec3{x, 12.0, 7.0 + (x - 2.0) * t10}; };
+  double worst_wide = 0.0, worst_tall = 0.0;
+  for (int end = 0; end < 2; ++end) {
+    const double xw = end == 0 ? 5.0 : 35.0, out = end == 0 ? 1.0 : -1.0;
+    const Cut w0 = cut_mesh(m0, axis_at(xw + 0.02 * out), {1, 0, 0}, {0, 1, 0}, {0, 0, 1}, 2.0),
+              w1 = cut_mesh(m1, axis_at(xw + 0.02 * out), {1, 0, 0}, {0, 1, 0}, {0, 0, 1}, 2.0);
+    const double wide = (w1.hi(0) - w1.lo(0)) - (w0.hi(0) - w0.lo(0));
+    const Vec3 o = axis_at(xw + out * s0 * std::cos(deg));
+    // Only the bar's own section: the wall's face crosses this plane 0.86 mm above the bar's line and higher.
+    auto bar_only = [](Cut c) {
+      Cut k;
+      for (const auto& g : c.seg)
+        if (std::fabs(g[1]) < 0.85 && std::fabs(g[3]) < 0.85) k.seg.push_back(g);
+      return k;
+    };
+    const Cut c0 = bar_only(cut_mesh(m0, o, d, {0, 1, 0}, up, 1.6)), c1 = bar_only(cut_mesh(m1, o, d, {0, 1, 0}, up, 1.6));
+    const double tall = (c1.hi(1) - c1.lo(1)) - (c0.hi(1) - c0.lo(1)), low = c1.lo(1) - c0.lo(1);
+    std::printf("foot shallow at the wall x %.0f: 0.02 mm out, %.4f wide at f = 0, %.4f at f = 0.3 (+%.4f); square to the bar "
+                "%.3f mm out, %.4f tall at f = 0, %.4f at f = 0.3 (+%.4f, the taper there %.4f), underside moved %.5f\n", xw,
+                w0.hi(0) - w0.lo(0), w1.hi(0) - w1.lo(0), wide, s0, c0.hi(1) - c0.lo(1), c1.hi(1) - c1.lo(1), tall, f * g, low);
+    worst_wide = std::max(worst_wide, std::fabs(wide - 2.0 * f));
+    worst_tall = std::max(worst_tall, std::fabs(tall - f * g));
+    CHECK(std::fabs(low) <= 0.01 && std::fabs(c0.hi(0) - c0.lo(0) - 2.0 * r) < 0.01);
+  }
+  std::printf("foot shallow, 10 degrees, f 0.3: %ld downward faces from wall to wall, worst %.4f degrees and %.5f mm off the "
+              "f = 0 underside (%ld f = 0 faces); at the walls: wider by 2 f within %.4f, taller by f (less its taper) within %.4f; "
+              "feet add %.4f mm3\n",
+              faces, worst_deg, worst_mm, n0, worst_wide, worst_tall, r1.feet_mm3);
+  CHECK(n0 >= 2 && faces >= 2 && off_angle == 0 && off_plane == 0);
+  CHECK(worst_wide <= 0.03 && worst_tall <= 0.01);
+}
+
+// Test 4: f larger than r is held at r and counted: the mesh is the one at f = r.
+static void test_weave_foot_held() {
+  const BridgeBlock k(14.0);
+  const Bars bars = weave_bars(k.d, {level_strand({20, 20, 19.9}, {20, 20, 3})});
+  MeshSpec big, at_r;
+  big.weave_foot_mm = 0.8;
+  at_r.weave_foot_mm = 0.45;
+  MeshReport rb, rr;
+  const TriangleMesh mb = build_mesh(k.pm, k.d, k.layout, bars, k.open, big, &rb);
+  const TriangleMesh mr = build_mesh(k.pm, k.d, k.layout, bars, k.open, at_r, &rr);
+  std::printf("foot held: f 0.8 on r 0.45: %zu feet, %zu held, the mesh at f = r %d\n", rb.feet, rb.feet_held, same_mesh(mb, mr) ? 1 : 0);
+  CHECK(rb.ok && rb.feet == 1 && rb.feet_held == 1 && rr.feet == 1 && rr.feet_held == 0 && same_mesh(mb, mr));
+  CHECK(rb.feet_mm3 == rr.feet_mm3);
+}
+
+// Test 5: a joint between two weave struts, and an end cut by the open surface, are as at f = 0.
+static void test_weave_foot_leaves_joints() {
+  const BridgeBlock k(14.0);
+  const Bars bars = weave_bars(k.d, {weave_strand({{20, 20, 19.9}, {20, 20, 12}, {24, 20, 3}}, 1)});
+  CHECK(bars.bars.size() == 2);
+  MeshSpec off, dflt;
+  off.weave_foot_mm = 0.0;
+  dflt.weave_foot_mm = -1.0;
+  MeshReport r0, rd;
+  const TriangleMesh m0 = build_mesh(k.pm, k.d, k.layout, bars, k.open, off, &r0);
+  const TriangleMesh md = build_mesh(k.pm, k.d, k.layout, bars, k.open, dflt, &rd);
+  double worst = 0.0;
+  long cuts = 0;
+  for (double z = 10.3; z < 19.95; z += 0.29) {   // the joint at z = 12, the cut end at the top surface
+    const Cut a = cut_mesh(m0, {20, 20, z}, {0, 0, 1}, {1, 0, 0}, {0, 1, 0}, 3.0), b = cut_mesh(md, {20, 20, z}, {0, 0, 1}, {1, 0, 0}, {0, 1, 0}, 3.0);
+    worst = std::max(worst, std::fabs(a.area() - b.area()));
+    ++cuts;
+  }
+  const double near_floor0 = cut_mesh(m0, {23.4, 20, 6.1}, {0, 0, 1}, {1, 0, 0}, {0, 1, 0}, 3.0).area(),
+               near_floor = cut_mesh(md, {23.4, 20, 6.1}, {0, 0, 1}, {1, 0, 0}, {0, 1, 0}, 3.0).area();
+  std::printf("foot leaves joints: %zu feet; %ld cuts from the joint to the open surface, worst area change %.2e mm2; "
+              "at the floor %.4f -> %.4f mm2\n", rd.feet, cuts, worst, near_floor0, near_floor);
+  CHECK(r0.ok && rd.ok && rd.feet == 1 && r0.feet == 0);
+  CHECK(worst <= 1e-4);
+  CHECK(near_floor > near_floor0 + 0.1);
+}
+
+// ── O14, a round top on a weave's shallow struts ──────────────────────────────
+// The mesh's lowest faces over x0 .. x1 near y (within 45 degrees of `want`, straight down from the bar).
+template <class Each>
+static void lowest_faces(const TriangleMesh& m, double x0, double x1, double y, const Vec3& want, Each&& each) {
+  for (const auto& t : m.triangles) {
+    const Vec3 &p = m.vertices[static_cast<std::size_t>(t[0])], &q = m.vertices[static_cast<std::size_t>(t[1])],
+               &s = m.vertices[static_cast<std::size_t>(t[2])];
+    const Vec3 c{(p.x + q.x + s.x) / 3, (p.y + q.y + s.y) / 3, (p.z + q.z + s.z) / 3};
+    if (c.x < x0 || c.x > x1 || std::fabs(c.y - y) > 1.2 || c.z < 1.0) continue;
+    const Vec3 e1{q.x - p.x, q.y - p.y, q.z - p.z}, e2{s.x - p.x, s.y - p.y, s.z - p.z};
+    Vec3 n{e1.y * e2.z - e1.z * e2.y, e1.z * e2.x - e1.x * e2.z, e1.x * e2.y - e1.y * e2.x};
+    const double ln = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+    if (ln < 1e-12) continue;
+    n = {n.x / ln, n.y / ln, n.z / ln};
+    if (n.x * want.x + n.y * want.y + n.z * want.z < std::cos(3.14159265358979323846 / 4)) continue;
+    each(n, p, q, s);
+  }
+}
+// Across a cut, at the height v (the cut's second axis): from the leftmost to the rightmost crossing of its outline.
+static double chord(const Cut& c, double v) {
+  double lo = 1e300, hi = -1e300;
+  for (const auto& s : c.seg) {
+    if ((s[1] - v) * (s[3] - v) > 0.0 || s[1] == s[3]) continue;
+    const double x = s[0] + (v - s[1]) / (s[3] - s[1]) * (s[2] - s[0]);
+    lo = std::min(lo, x);
+    hi = std::max(hi, x);
+  }
+  return hi > lo ? hi - lo : 0.0;
+}
+
+// O14 test 1: a level and a 10 degree weave bar between the walls: with the round top their lowest faces lie in the
+// plane they lie in with it off (within 1 degree and 0.01 mm), wall to wall; the mesh is not the square bar's and holds
+// less; the same bars as cube-lattice bars are the same mesh with the switch on and off.
+static void test_weave_round_top_underside() {
+  const BridgeBlock k(20.5);
+  const double deg10 = 10.0 * 3.14159265358979323846 / 180.0;
+  const Bars level = weave_bars(k.d, {level_strand({2, 20, 10}, {38, 20, 10})});
+  const Bars ten = weave_bars(k.d, {level_strand({2, 12, 7}, {38, 12, 7 + 36 * std::tan(deg10)})});
+  struct Case { const char* what; const Bars* bars; double y, deg; };
+  for (const Case& c : {Case{"level", &level, 20.0, 0.0}, Case{"10 degrees", &ten, 12.0, deg10}}) {
+    CHECK(c.bars->bars.size() == 1);
+    MeshSpec off, on;
+    on.weave_round_top = true;
+    MeshReport r0, r1;
+    const TriangleMesh m0 = build_mesh(k.pm, k.d, k.layout, *c.bars, k.open, off, &r0);
+    const TriangleMesh m1 = build_mesh(k.pm, k.d, k.layout, *c.bars, k.open, on, &r1);
+    const Vec3 want{std::sin(c.deg), 0.0, -std::cos(c.deg)};
+    double plane = 0.0;
+    long n0 = 0;
+    lowest_faces(m0, 12, 28, c.y, want, [&](const Vec3&, const Vec3& p, const Vec3&, const Vec3&) {
+      plane += p.x * want.x + p.y * want.y + p.z * want.z;
+      ++n0;
+    });
+    plane /= std::max(1L, n0);
+    long faces = 0, off_angle = 0, off_plane = 0;
+    double worst_deg = 0.0, worst_mm = 0.0;
+    lowest_faces(m1, 5.0, 35.0, c.y, want, [&](const Vec3& n, const Vec3& p, const Vec3& q, const Vec3& s) {
+      ++faces;
+      const double a = std::acos(std::clamp(n.x * want.x + n.y * want.y + n.z * want.z, -1.0, 1.0)) * 180.0 / 3.14159265358979323846;
+      worst_deg = std::max(worst_deg, a);
+      off_angle += a > 1.0;
+      for (const Vec3* v : {&p, &q, &s}) {
+        const double mm = std::fabs(v->x * want.x + v->y * want.y + v->z * want.z - plane);
+        worst_mm = std::max(worst_mm, mm);
+        off_plane += mm > 0.01;
+      }
+    });
+    const bool cube_same = same_mesh(build_mesh(k.pm, k.d, k.as_cube(), *c.bars, k.open, off),
+                                     build_mesh(k.pm, k.d, k.as_cube(), *c.bars, k.open, on));
+    std::printf("round top underside, %s: %ld lowest faces wall to wall, worst %.4f degrees and %.5f mm off the square bar's "
+                "underside (%ld faces); %.4f mm3 square, %.4f round; the mesh changed %d; as cube bars the same mesh %d\n", c.what,
+                faces, worst_deg, worst_mm, n0, r0.mm3, r1.mm3, same_mesh(m0, m1) ? 0 : 1, cube_same ? 1 : 0);
+    CHECK(r0.ok && r1.ok && r1.bridges == 1);
+    CHECK(n0 >= 2 && faces >= 2 && off_angle == 0 && off_plane == 0);
+    CHECK(!same_mesh(m0, m1) && r1.mm3 < r0.mm3);
+    CHECK(cube_same);
+  }
+}
+
+// O14 test 2: a cut square to the 10 degree weave bar at its middle: as wide and as tall as the strut (0.9), the full
+// width across its lower half, a rounded top (narrower near the top than a square), its area w^2 (1/2 + pi/8) within
+// 2 %; the body closed, one piece.
+static void test_weave_round_top_section() {
+  const BridgeBlock k(20.5);
+  const double deg = 10.0 * 3.14159265358979323846 / 180.0, t10 = std::tan(deg), w = 0.9;
+  const Bars bars = weave_bars(k.d, {level_strand({2, 12, 7}, {38, 12, 7 + 36 * t10})});
+  CHECK(bars.bars.size() == 1);
+  MeshSpec on;
+  on.weave_round_top = true;
+  MeshReport rep;
+  const TriangleMesh mesh = build_mesh(k.pm, k.d, k.layout, bars, k.open, on, &rep);
+  const Vec3 d{std::cos(deg), 0.0, std::sin(deg)}, up{-std::sin(deg), 0.0, std::cos(deg)};
+  const Cut c = cut_mesh(mesh, {20.0, 12.0, 7.0 + 18.0 * t10}, d, {0, 1, 0}, up, 1.6);
+  const double wide = c.hi(0) - c.lo(0), tall = c.hi(1) - c.lo(1), base = c.lo(1);
+  double worst_lower = 0.0;
+  for (double v = 0.01; v <= 0.5 * w - 0.01 + 1e-9; v += 0.01) worst_lower = std::max(worst_lower, std::fabs(chord(c, base + v) - w));
+  const double near_top = chord(c, base + 0.9 * w), want = w * w * (0.5 + 3.14159265358979323846 / 8.0);
+  const Read rd = read_mesh(mesh);
+  std::printf("round top section, 10 degrees: %.4f wide, %.4f tall, lower half worst %.5f off full width, across at 0.9 of its "
+              "height %.4f (a square %.4f), area %.5f mm2 (w^2 (1/2 + pi/8) %.5f, %.2f %% off); %zu shells, %zu open edges\n",
+              wide, tall, worst_lower, near_top, w, c.area(), want, 100.0 * (c.area() - want) / want, rd.shells, rd.edges_not_twice);
+  CHECK(rep.ok && rep.bridges == 1);
+  CHECK(std::fabs(wide - w) <= 0.01 && std::fabs(tall - w) <= 0.01);
+  CHECK(worst_lower <= 0.01);
+  CHECK(near_top < 0.75 * w);
+  CHECK(std::fabs(c.area() - want) <= 0.02 * want);
+  CHECK(rd.shells == 1 && rd.edges_not_twice == 0);
+}
+
+// O14 test 3: stage 2's test parts through the make-check-make loop with the round top off and on: the layer check
+// ends the same (the same kept, left out, posts, stands, findings); the mesh of every part with a kept shallow weave bar
+// is not the square bar's.
+static void test_weave_round_top_layers() {
+  const BridgeBlock k(20.5), floor(14.0);
+  const double t10 = std::tan(10.0 * 3.14159265358979323846 / 180.0), t25 = std::tan(25.0 * 3.14159265358979323846 / 180.0);
+  Bars crossed = weave_bars(floor.d, {level_strand({2, 20, 12.45}, {38, 20, 12.45}), level_strand({20, 20, 3}, {20, 20, 21})});
+  (void)split_at_crossings(crossed);
+  auto pair = [](bool far_end_held) {
+    Bars b;
+    b.bars.push_back(hand_bar({4.1, 26, 10}, Bar::End::Solid, {far_end_held ? 35.9 : 15.0, 26, 10},
+                              far_end_held ? Bar::End::Solid : Bar::End::Loose));
+    b.bars.push_back(hand_bar({4.1, 20, 10}, Bar::End::Solid, {12, 26, 10}, Bar::End::Joined, 0));
+    return b;
+  };
+  struct Part { const char* what; const BridgeBlock* k; Bars bars; bool kept_shallow; };
+  const Part parts[] = {
+      {"level 30 mm", &k, weave_bars(k.d, {level_strand({2, 20, 10}, {38, 20, 10})}), true},
+      {"sloping 10 and 25", &k, weave_bars(k.d, {level_strand({2, 12, 7}, {38, 12, 7 + 36 * t10}), level_strand({2, 28, 2}, {38, 28, 2 + 36 * t25})}), true},
+      {"level over a floor", &floor, weave_bars(floor.d, {level_strand({2, 20, 12.45}, {38, 20, 12.45})}), true},
+      {"crossed over a floor", &floor, crossed, true},
+      {"held at one end", &k, weave_bars(k.d, {level_strand({2, 20, 10}, {15, 20, 10})}), false},
+      {"landing on a bar left out", &k, pair(false), false},
+      {"landing on a bar held at both ends", &k, pair(true), true},
+  };
+  long differ = 0;
+  for (const Part& p : parts) {
+    PrintableSpec off, on;
+    on.mesh.weave_round_top = true;
+    PrintableReport r0, r1;
+    const TriangleMesh m0 = build_printable_mesh(p.k->pm, p.k->d, p.k->layout, p.bars, p.k->open, off, &r0);
+    const TriangleMesh m1 = build_printable_mesh(p.k->pm, p.k->d, p.k->layout, p.bars, p.k->open, on, &r1);
+    bool same_posts = r0.posts.size() == r1.posts.size();
+    for (std::size_t i = 0; same_posts && i < r0.posts.size(); ++i)
+      same_posts = std::fabs(r0.posts[i].x - r1.posts[i].x) < 1e-9 && std::fabs(r0.posts[i].y - r1.posts[i].y) < 1e-9 &&
+                   std::fabs(r0.posts[i].z_top - r1.posts[i].z_top) < 1e-9 && std::fabs(r0.posts[i].z_bottom - r1.posts[i].z_bottom) < 1e-9;
+    bool same_drop = r0.drop_at.size() == r1.drop_at.size();
+    for (std::size_t i = 0; same_drop && i < r0.drop_at.size(); ++i)
+      same_drop = std::fabs(r0.drop_at[i].x - r1.drop_at[i].x) < 1e-9 && std::fabs(r0.drop_at[i].y - r1.drop_at[i].y) < 1e-9 &&
+                  std::fabs(r0.drop_at[i].z - r1.drop_at[i].z) < 1e-9;
+    const bool changed = !same_mesh(m0, m1);
+    std::printf("round top layers, %s: ", p.what);
+    say_bridges("off", r0);
+    std::printf("round top layers, %s: ", p.what);
+    say_bridges("on ", r1);
+    CHECK(r0.mesh.ok && r1.mesh.ok && r0.clean == r1.clean && r0.passes == r1.passes && r0.found_per_pass == r1.found_per_pass);
+    CHECK(r0.mesh.kept_any_length == r1.mesh.kept_any_length && r0.mesh.weave_left_unheld == r1.mesh.weave_left_unheld);
+    CHECK(r0.mesh.bars == r1.mesh.bars && r0.mesh.bars_left_out == r1.mesh.bars_left_out && same_drop);
+    CHECK(same_posts && r0.stands_added == r1.stands_added);
+    CHECK(r0.layers.mid_air.size() == r1.layers.mid_air.size() && r0.layers.one_ended.size() == r1.layers.one_ended.size() &&
+          r0.layers.long_bridges.size() == r1.layers.long_bridges.size());
+    CHECK(changed == p.kept_shallow);
+    differ += changed;
+  }
+  CHECK(differ == 5);
+}
+
+// ── O17, O18: what happens to a sag (the owner's OR29; brief S7) ──────────────
+// A made-up 40 x 40 x 20 box as an imported model (faces 0 bottom, 1 top, 2..5 the sides), a weave region under its
+// top face pulled 5 mm in from the edge (solid walls 5 mm thick all round), `depth` deep: 20.5 runs through to the
+// bed (nothing under the lattice), 14 leaves a solid floor 6 mm thick. Strands laid through Session::lay_weave.
+static StepModel sag_box_model() {
+  const double x = 40, y = 40, z = 20;
+  StepModel m;
+  const Vec3 p[8] = {{0, 0, 0}, {x, 0, 0}, {x, y, 0}, {0, y, 0}, {0, 0, z}, {x, 0, z}, {x, y, z}, {0, y, z}};
+  const int q[6][4] = {{0, 3, 2, 1}, {4, 5, 6, 7}, {0, 1, 5, 4}, {1, 2, 6, 5}, {2, 3, 7, 6}, {3, 0, 4, 7}};
+  const Vec3 out[6] = {{0, 0, -1}, {0, 0, 1}, {0, -1, 0}, {1, 0, 0}, {0, 1, 0}, {-1, 0, 0}};
+  for (int f = 0; f < 6; ++f) {
+    StepFaceInfo info;
+    info.kind = StepSurfaceKind::Plane;
+    info.plane_normal = out[f];
+    info.plane_origin = p[q[f][0]];
+    m.faces.push_back(info);
+    for (int second = 0; second < 2; ++second) {
+      const int n = static_cast<int>(m.mesh.vertices.size());
+      m.mesh.vertices.insert(m.mesh.vertices.end(), {p[q[f][0]], p[q[f][second ? 2 : 1]], p[q[f][second ? 3 : 2]]});
+      m.mesh.triangles.push_back({n, n + 1, n + 2});
+      m.triangle_face.push_back(f);
+    }
+  }
+  m.face_count = 6;
+  m.solid_count = 1;
+  m.brep_volume = x * y * z;
+  return m;
+}
+struct SagBox {
+  Session session;
+  Outcome out;
+  OpenSpace open;
+  SagBox(double depth, const std::vector<Strand>& strands) : session(sag_box_model()) {
+    Settings s;
+    s.regions = {{1, Role::Lattice, {1}, depth, -5.0, true}};
+    out = session.lay_weave(s, strands, 1);
+    open = read_open_space(*session.domain(), out.layout, 0.25);
+  }
+  PrintableReport make(const PrintableSpec& spec, TriangleMesh* mesh = nullptr) const {
+    PrintableReport rep;
+    const TriangleMesh m = build_printable_mesh(session.measure(), *session.domain(), out.layout, out.bars, open, spec, &rep);
+    if (mesh) *mesh = m;
+    return rep;
+  }
+};
+static PrintableSpec sag_spec(double lift, bool legs) {
+  PrintableSpec s;
+  s.mesh.weave_sag_lift_mm = lift;
+  s.mesh.weave_sag_legs = legs;
+  return s;
+}
+// A strand from wall to wall along x at y, level at `held` except a U in its middle: down to `held - sag` at x = 20.
+static Strand u_strand(double y, double held, double sag) {
+  return weave_strand({{2, y, held}, {12, y, held}, {16, y, held - 0.5 * sag}, {20, y, held - sag}, {24, y, held - 0.5 * sag},
+                       {28, y, held}, {38, y, held}});
+}
+static void say_sags(const char* what, const PrintableReport& rep) {
+  const SagReport& s = rep.sags;
+  std::printf("sags %s: low nodes %zu, lifted %zu (largest move %.3f mm), too far %zu, legs %zu (%zu bars, %.3f mm, left out %zu), "
+              "unsupported %zu, not covered %zu, open arm %zu; bars changed %d\n", what, s.low_nodes, s.lifted, s.lift_largest_mm,
+              s.too_far, s.legs, s.leg_bars, s.legs_mm, s.legs_left_out, s.unsupported, s.not_covered, s.open_arm, rep.sagged ? 1 : 0);
+  say_bridges(what, rep);
+}
+
+// O17 (test 1): a U sagging 0.5 mm between two held nodes, nothing under it, with a tie from its low point to a level
+// strand beside it: lifted straight (every bar of the strand level at its held height), kept whole, the tie's end moved
+// with it; nothing left out, no post, nothing starts in mid-air.
+static void test_sag_lifted() {
+  const SagBox k(20.5, {u_strand(20, 12, 0.5), weave_strand({{2, 26, 12}, {38, 26, 12}}), weave_strand({{20, 20, 11.5}, {20, 26, 12}})});
+  TriangleMesh mesh;
+  const PrintableReport rep = k.make(PrintableSpec{}, &mesh);
+  say_sags("U 0.5 mm, nothing below", rep);
+  CHECK(rep.mesh.ok && rep.sags.low_nodes == 1 && rep.sags.lifted == 1 && rep.sags.legs == 0 && rep.sagged != nullptr);
+  CHECK(std::fabs(rep.sags.lift_largest_mm - 0.5) < 1e-9);
+  if (!rep.sagged) return;
+  long strand_bars = 0, level = 0, tie_at_low = 0;
+  for (const Bar& b : rep.sagged->bars) {
+    if (b.region != 1) continue;
+    if (std::fabs(b.a.y - 20) < 1e-9 && std::fabs(b.b.y - 20) < 1e-9) {
+      ++strand_bars;
+      level += b.a.z == 12.0 && b.b.z == 12.0;
+    }
+    for (const Vec3& p : {b.a, b.b})
+      if (std::fabs(b.a.x - 20) < 1e-9 && std::fabs(b.b.x - 20) < 1e-9 && std::fabs(p.y - 20) < 1e-9) tie_at_low += p.z == 12.0;
+  }
+  std::printf("sag lifted: %ld bars of the strand, %ld level at 12; the tie's end at the low point lifted %ld\n", strand_bars, level,
+              tie_at_low);
+  CHECK(strand_bars >= 4 && level == strand_bars && tie_at_low == 1);
+  CHECK(rep.sagged->bars.size() == k.out.bars.bars.size());
+  CHECK(rep.clean && rep.mesh.bars == k.out.bars.bars.size() && rep.mesh.bars_left_out == 0 && rep.mesh.weave_left_unheld == 0);
+  CHECK(rep.posts.empty() && rep.layers.mid_air.empty() && rep.drop_at.empty());
+  CHECK(material_at(mesh, {20, 20, 12.2}) && material_at(mesh, {20, 23, 12}) && !material_at(mesh, {20, 20, 11.3}));
+  // The bars handed in are not touched.
+  bool same_in = true;
+  for (const Bar& b : k.out.bars.bars)
+    if (std::fabs(b.a.x - 20) < 1e-9 && std::fabs(b.a.y - 20) < 1e-9) same_in = same_in && b.a.z == 11.5;
+  CHECK(same_in);
+}
+
+// O18 (test 2): a U sagging 3 mm, its low point 5 mm over a solid floor: a leg in the old engine's shape, from the floor
+// straight up to the low point (nothing to lean toward), its foot run into the floor; the leg is held piece by piece
+// from the floor up, nothing starts in mid-air, the arms are kept. With a strut standing on the floor 2 mm to the side,
+// the leg leans toward it at 50 degrees from level and lands in it.
+static void test_sag_leg() {
+  {
+    const SagBox k(14.0, {u_strand(20, 14, 3)});
+    TriangleMesh mesh;
+    const PrintableReport rep = k.make(PrintableSpec{}, &mesh);
+    say_sags("U 3 mm over a floor", rep);
+    CHECK(rep.mesh.ok && rep.sags.low_nodes == 1 && rep.sags.lifted == 0 && rep.sags.legs == 1 && rep.sags.leg_bars == 1);
+    CHECK(rep.sagged != nullptr);
+    if (!rep.sagged) return;
+    const Bar& leg = rep.sagged->bars.back();
+    std::printf("sag leg: from (%.3f %.3f %.3f) %d to (%.3f %.3f %.3f) %d, %.2f mm wide; %.3f mm\n", leg.a.x, leg.a.y, leg.a.z,
+                static_cast<int>(leg.end_a), leg.b.x, leg.b.y, leg.b.z, static_cast<int>(leg.end_b), leg.width, rep.sags.legs_mm);
+    CHECK(leg.end_a == Bar::End::Solid && leg.end_b == Bar::End::Node && leg.region == 1 && leg.width == 0.9);
+    CHECK(leg.a.x == 20 && leg.a.y == 20 && std::fabs(leg.a.z - (6.0 - 0.9)) < 1e-6);   // run 0.9 mm into the floor
+    CHECK(leg.b.x == 20 && leg.b.y == 20 && leg.b.z == 11);
+    CHECK(std::fabs(rep.sags.legs_mm - 5.9) < 1e-6);
+    const WeaveHolds h = weave_holds(*rep.sagged, {1});
+    CHECK(h.left_unheld == 0);
+    CHECK(rep.clean && rep.mesh.bars == rep.sagged->bars.size() && rep.mesh.bars_left_out == 0 && rep.mesh.weave_left_unheld == 0);
+    CHECK(rep.posts.empty() && rep.layers.mid_air.empty() && rep.drop_at.empty());
+    CHECK(material_at(mesh, {20, 20, 8}) && material_at(mesh, {20, 20, 11}) && material_at(mesh, {14, 20, 13.25}));
+  }
+  {
+    // The strut beside it: up from the floor at (20, 22), then on to the wall (both of its bars stand).
+    const SagBox k(14.0, {u_strand(20, 14, 3), weave_strand({{20, 22, 4}, {20, 22, 10}, {38, 22, 16}})});
+    const PrintableReport rep = k.make(PrintableSpec{});
+    say_sags("U 3 mm over a floor, a strut beside it", rep);
+    CHECK(rep.mesh.ok && rep.sags.legs == 1 && rep.sagged != nullptr);
+    if (!rep.sagged) return;
+    const std::size_t first = k.out.bars.bars.size();
+    double steepest_off = 0.0, most_lean = 0.0;
+    bool chained = true;
+    for (std::size_t i = first; i < rep.sagged->bars.size(); ++i) {
+      const Bar& b = rep.sagged->bars[i];
+      const double h = std::hypot(b.b.x - b.a.x, b.b.y - b.a.y), v = b.b.z - b.a.z;
+      steepest_off = std::max(steepest_off, 50.0 - std::atan2(v, h) * 180.0 / 3.14159265358979323846);
+      most_lean = std::max(most_lean, h / v);
+      if (i > first) chained = chained && b.a.x == rep.sagged->bars[i - 1].b.x && b.a.y == rep.sagged->bars[i - 1].b.y &&
+                                b.a.z == rep.sagged->bars[i - 1].b.z && b.end_a == Bar::End::Node;
+      std::printf("  leg bar %zu: (%.3f %.3f %.3f) %d -> (%.3f %.3f %.3f) %d, into %d\n", i - first, b.a.x, b.a.y, b.a.z,
+                  static_cast<int>(b.end_a), b.b.x, b.b.y, b.b.z, static_cast<int>(b.end_b), b.into_a);
+    }
+    const Bar& foot = rep.sagged->bars[first];
+    const Bar& top = rep.sagged->bars.back();
+    CHECK(foot.end_a == Bar::End::Joined && foot.into_a >= 0 && rep.sagged->bars[static_cast<std::size_t>(foot.into_a)].a.y == 22.0);
+    CHECK(top.b.x == 20 && top.b.y == 20 && top.b.z == 11 && chained);
+    CHECK(steepest_off < 1e-6 && most_lean > 0.8 && most_lean < std::tan(40.0 * 3.14159265358979323846 / 180.0) + 1e-9);
+    CHECK(weave_holds(*rep.sagged, {1}).left_unheld == 0);
+    CHECK(rep.clean && rep.mesh.bars_left_out == 0 && rep.mesh.weave_left_unheld == 0 && rep.posts.empty() && rep.layers.mid_air.empty());
+  }
+}
+
+// O18 (test 3): the same 3 mm sag with nothing below (the lattice runs through to the bed): no leg, counted, and left
+// to the layer check exactly as with both switches off.
+static void test_sag_unsupported() {
+  const SagBox k(20.5, {u_strand(20, 14, 3)});
+  TriangleMesh on, off;
+  const PrintableReport a = k.make(PrintableSpec{}, &on), b = k.make(sag_spec(0.0, false), &off);
+  say_sags("U 3 mm, nothing below", a);
+  say_sags("U 3 mm, nothing below, both switches off", b);
+  CHECK(a.mesh.ok && a.sags.low_nodes == 1 && a.sags.unsupported == 1 && a.sags.legs == 0 && a.sags.lifted == 0 && !a.sagged);
+  CHECK(b.sags.low_nodes == 0 && b.sags.unsupported == 0 && !b.sagged);
+  CHECK(same_mesh(on, off) && mesh_hash(on, a) == mesh_hash(off, b));
+  CHECK(a.mesh.bars_left_out + a.mesh.weave_left_unheld > 0);   // left out, as before
+}
+
+// O17, O18 (test 4): with both switches off the 0.5 mm U and the 3 mm U over the floor are judged as before: no bar
+// moved or added, and the sag is left out by the layer check; each switch alone does only its own rule.
+static void test_sag_switches_off() {
+  const SagBox small(20.5, {u_strand(20, 12, 0.5)}), deep(14.0, {u_strand(20, 14, 3)});
+  const PrintableReport s_off = small.make(sag_spec(0.0, false)), d_off = deep.make(sag_spec(0.0, false));
+  const PrintableReport s_legs = small.make(sag_spec(0.0, true)), d_lift = deep.make(sag_spec(0.9, false));
+  say_sags("U 0.5 mm, off", s_off);
+  say_sags("U 3 mm over a floor, off", d_off);
+  say_sags("U 0.5 mm, legs only", s_legs);
+  say_sags("U 3 mm over a floor, lift only", d_lift);
+  for (const PrintableReport* r : {&s_off, &d_off}) {
+    CHECK(r->mesh.ok && !r->sagged && r->sags.lifted == 0 && r->sags.legs == 0);
+    CHECK(r->mesh.bars_left_out + r->mesh.weave_left_unheld > 0);
+  }
+  CHECK(s_legs.sags.lifted == 0 && s_legs.sags.unsupported == 1 && !s_legs.sagged);   // nothing below the small one
+  CHECK(d_lift.sags.lifted == 0 && d_lift.sags.legs == 0 && !d_lift.sagged);           // too deep to lift, no legs
+}
+
+// O17, O18 (test 5): cube-lattice bars are never read: the same parts as test 15 made with the sag switches set every
+// way are the same, mesh and loop, and so are the 3 mm U's bars judged as cube-lattice bars.
+static void test_sag_cube_parts_as_before() {
+  const BridgeBlock k(20.5);
+  Bars landing;
+  landing.bars.push_back(hand_bar({4.1, 26, 10}, Bar::End::Solid, {15.0, 26, 10}, Bar::End::Loose));
+  landing.bars.push_back(hand_bar({4.1, 20, 10}, Bar::End::Solid, {12, 26, 10}, Bar::End::Joined, 0));
+  const SagBox u(14.0, {u_strand(20, 14, 3)});
+  Layout u_cube = u.out.layout;
+  u_cube.weave.clear();
+  const unsigned long long want[2] = {0xf0c261ac0bf71552ULL, 0xfc83ca98a6fda5a2ULL};
+  int same = 0, asked = 0;
+  for (const PrintableSpec& spec : {sag_spec(0.0, false), sag_spec(0.9, true), sag_spec(5.0, true), sag_spec(0.0, true)}) {
+    PrintableReport r1, r2, r3, r0;
+    const TriangleMesh m1 = build_printable_mesh(k.pm, k.d, k.as_cube(), landing, k.open, spec, &r1);
+    const TriangleMesh m2 = build_printable_mesh(k.pm, k.d, k.as_cube(), thin_v(0.9), k.open, spec, &r2);
+    const TriangleMesh m3 = build_printable_mesh(u.session.measure(), *u.session.domain(), u_cube, u.out.bars, u.open, spec, &r3);
+    const TriangleMesh m0 = build_printable_mesh(u.session.measure(), *u.session.domain(), u_cube, u.out.bars, u.open,
+                                                 sag_spec(0.0, false), &r0);
+    asked += 3;
+    same += mesh_hash(m1, r1) == want[0];
+    same += mesh_hash(m2, r2) == want[1];
+    same += mesh_hash(m3, r3) == mesh_hash(m0, r0) && !r3.sagged && r3.sags.low_nodes == 0;
+  }
+  std::printf("sags, cube parts as before: %d of %d the same\n", same, asked);
+  CHECK(same == asked);
+}
+
+// LatticeReview's rulings of 2026-11-15 on S7's first build (tests 6 to 9).
+// Ruling 1 (test 6): a U only 0.5 mm under its lower held node, whose line would move its low point 1.2 mm (its held
+// nodes at 12 and 13.4 mm), is not lifted: it gets a leg to the floor.
+static void test_sag_moves_too_far() {
+  const SagBox k(14.0, {weave_strand({{2, 20, 12}, {12, 20, 12}, {20, 20, 11.5}, {28, 20, 13.4}, {38, 20, 13.4}})});
+  const PrintableReport rep = k.make(PrintableSpec{});
+  say_sags("U whose line moves a node 1.2 mm", rep);
+  CHECK(rep.mesh.ok && rep.sags.low_nodes == 1 && rep.sags.lifted == 0 && rep.sags.too_far == 1 && rep.sags.legs == 1);
+  CHECK(rep.sags.lift_largest_mm == 0.0 && rep.sagged != nullptr);
+  if (!rep.sagged) return;
+  const Bar& leg = rep.sagged->bars.back();
+  CHECK(leg.b.x == 20 && leg.b.y == 20 && leg.b.z == 11.5 && leg.end_a == Bar::End::Solid);
+  CHECK(rep.clean && rep.mesh.bars_left_out == 0 && rep.mesh.weave_left_unheld == 0 && rep.posts.empty());
+}
+
+// Ruling 2 (test 7): a low point made of a curve's END and a tie (no strand passes through it): lifted when shallow
+// (0.5 mm, nothing below), a leg to the floor when deep (3 mm); kept whole either way.
+static void test_sag_curve_end_and_tie() {
+  {
+    const SagBox k(20.5, {weave_strand({{2, 20, 12}, {12, 20, 12}, {20, 20, 11.5}}), weave_strand({{2, 26, 12}, {38, 26, 12}}),
+                          weave_strand({{20, 20, 11.5}, {20, 26, 12}})});
+    const PrintableReport rep = k.make(PrintableSpec{});
+    say_sags("curve end and tie, 0.5 mm", rep);
+    CHECK(rep.mesh.ok && rep.sags.low_nodes == 1 && rep.sags.lifted == 1 && rep.sags.legs == 0 && rep.sagged != nullptr);
+    CHECK(std::fabs(rep.sags.lift_largest_mm - 0.5) < 1e-9);
+    long at_low = 0;
+    if (rep.sagged)
+      for (const Bar& b : rep.sagged->bars)
+        for (const Vec3& p : {b.a, b.b}) at_low += std::fabs(p.x - 20) < 1e-9 && std::fabs(p.y - 20) < 1e-9 && p.z == 12.0;
+    CHECK(at_low == 2);   // the curve's end and the tie's, both on the line
+    CHECK(rep.clean && rep.mesh.bars_left_out == 0 && rep.mesh.weave_left_unheld == 0 && rep.posts.empty());
+  }
+  {
+    const SagBox k(14.0, {weave_strand({{2, 20, 14}, {12, 20, 14}, {20, 20, 11}}), weave_strand({{2, 26, 14}, {38, 26, 14}}),
+                          weave_strand({{20, 20, 11}, {20, 26, 14}})});
+    const PrintableReport rep = k.make(PrintableSpec{});
+    say_sags("curve end and tie, 3 mm over a floor", rep);
+    CHECK(rep.mesh.ok && rep.sags.low_nodes == 1 && rep.sags.lifted == 0 && rep.sags.legs == 1 && rep.sagged != nullptr);
+    if (rep.sagged) CHECK(rep.sagged->bars.back().b.z == 11 && rep.sagged->bars.back().end_a == Bar::End::Solid);
+    CHECK(rep.clean && rep.mesh.bars_left_out == 0 && rep.mesh.weave_left_unheld == 0 && rep.posts.empty());
+  }
+}
+
+// Ruling 3 (test 8): a low point one of whose arms ends Loose with no held node on it: a leg to the floor.
+static void test_sag_open_arm() {
+  const BridgeBlock k(14.0);
+  Bars b;
+  b.bars.push_back(hand_bar({4.1, 20, 14}, Bar::End::Solid, {12, 20, 14}, Bar::End::Node));
+  b.bars.push_back(hand_bar({12, 20, 14}, Bar::End::Node, {20, 20, 11}, Bar::End::Node));
+  b.bars.push_back(hand_bar({20, 20, 11}, Bar::End::Node, {26, 20, 12.5}, Bar::End::Loose));
+  PrintableReport rep;
+  (void)build_printable_mesh(k.pm, k.d, k.layout, b, k.open, PrintableSpec{}, &rep);
+  say_sags("an open arm over a floor", rep);
+  CHECK(rep.mesh.ok && rep.sags.low_nodes == 1 && rep.sags.open_arm == 1 && rep.sags.legs == 1 && rep.sagged != nullptr);
+  if (!rep.sagged) return;
+  const Bar& leg = rep.sagged->bars.back();
+  CHECK(leg.b.x == 20 && leg.b.y == 20 && leg.b.z == 11 && leg.end_a == Bar::End::Solid);
+  const WeaveHolds h = weave_holds(*rep.sagged, {1});
+  CHECK(h.kept[0] && h.kept[1] && h.kept[3]);   // the held arm and the leg; the Loose arm leads to nothing
+}
+
+// Ruling 4 (test 9): a level bar 3 mm under the low point of a 3 mm U over the floor, held by nothing (both ends
+// Loose): the leg stops on it (Joined), never passing through. The hold rules then leave that bar out and the leg goes
+// with it: no leg, the sag unsupported.
+static void test_sag_leg_stops_on_a_bar() {
+  const BridgeBlock k(14.0);
+  Bars b;
+  b.bars.push_back(hand_bar({4.1, 20, 14}, Bar::End::Solid, {12, 20, 14}, Bar::End::Node));
+  b.bars.push_back(hand_bar({12, 20, 14}, Bar::End::Node, {20, 20, 11}, Bar::End::Node));
+  b.bars.push_back(hand_bar({20, 20, 11}, Bar::End::Node, {28, 20, 14}, Bar::End::Node));
+  b.bars.push_back(hand_bar({28, 20, 14}, Bar::End::Node, {35.9, 20, 14}, Bar::End::Solid));
+  b.bars.push_back(hand_bar({16, 20, 8}, Bar::End::Loose, {24, 20, 8}, Bar::End::Loose));
+  Bars s = b;
+  const SagReport r = lift_weave_sags(k.d, k.layout, s, 0.9, true, 0.2);
+  std::printf("sags: a bar under the low point: legs %zu, %zu bars; foot %d into %d at z %.3f\n", r.legs, r.leg_bars,
+              s.bars.size() > 5 ? static_cast<int>(s.bars[5].end_a) : -1, s.bars.size() > 5 ? s.bars[5].into_a : -9,
+              s.bars.size() > 5 ? s.bars[5].a.z : 0.0);
+  CHECK(r.legs == 1 && s.bars.size() == 6);
+  if (s.bars.size() == 6) CHECK(s.bars[5].end_a == Bar::End::Joined && s.bars[5].into_a == 4 && s.bars[5].a.z > 8.0 && s.bars[5].a.z <= 8.45);
+  PrintableReport rep;
+  (void)build_printable_mesh(k.pm, k.d, k.layout, b, k.open, PrintableSpec{}, &rep);
+  say_sags("a bar under the low point, through the loop", rep);
+  CHECK(rep.mesh.ok && rep.sags.legs == 0 && rep.sags.legs_left_out == 1 && rep.sags.unsupported == 1 && rep.sags.leg_bars == 0);
+}
+
 int main() {
   if (!mesh_available()) {
     MeshReport rep;
@@ -1094,6 +2525,18 @@ int main() {
     std::printf("no mesh library in this build: the writer says so (%d checks, %d failed)\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
   }
+  test_weave_bridge_any_length();
+  test_weave_bridge_flat_underside();
+  test_weave_bridge_stands();
+  test_weave_bridge_leads_to_nothing();
+  test_weave_joints_a_hair_apart();
+  test_weave_steep_unheld();
+  test_weave_finding_at_a_held_end();
+  test_weave_level_end_in_the_loop();
+  test_weave_specks();
+  test_cube_parts_as_before();
+  test_weave_sealed();
+  test_weave_file();
   test_block();
   test_whole_part();
   test_strut_reach_stays_in_the_part();
@@ -1103,6 +2546,23 @@ int main() {
   test_open_space_merged();
   test_layers();
   test_printable();
+  test_weave_foot_off_is_today();
+  test_weave_foot_round();
+  test_weave_foot_shallow();
+  test_weave_foot_held();
+  test_weave_foot_leaves_joints();
+  test_weave_round_top_underside();
+  test_weave_round_top_section();
+  test_weave_round_top_layers();
+  test_sag_lifted();
+  test_sag_leg();
+  test_sag_unsupported();
+  test_sag_switches_off();
+  test_sag_cube_parts_as_before();
+  test_sag_moves_too_far();
+  test_sag_curve_end_and_tie();
+  test_sag_open_arm();
+  test_sag_leg_stops_on_a_bar();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }

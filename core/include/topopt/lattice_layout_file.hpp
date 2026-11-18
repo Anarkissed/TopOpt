@@ -18,21 +18,32 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 #include "topopt/lattice_layout.hpp"
 #include "topopt/lattice_layout_mesh.hpp"
+#include "topopt/lattice_layout_organic.hpp"
 #include "topopt/mesh.hpp"
 #include "topopt/step.hpp"
 
 namespace topopt::lattice_layout {
 
+// The writer's settings a file job starts from: MeshSpec's, with the blended foot on (O11: half the bar's width, for
+// a weave's ends in the solid) and the round top on a weave's shallow struts (O14); nothing else changes.
+inline MeshSpec file_mesh_defaults() {
+  MeshSpec m;
+  m.weave_foot_mm = -1.0;
+  m.weave_round_top = true;
+  return m;
+}
+
 // How the mesh is made from a layout.
 struct FileOptions {
   double pitch_mm = 0.25;   // how finely each cell's shape is read (read_open_space)
-  MeshSpec mesh;            // its `threads` and `stop` are set from the two below
+  MeshSpec mesh = file_mesh_defaults();   // its `threads` and `stop` are set from the two below
   int threads = 0;          // 0 = every core
   // His print rules (P8): the mesh is made, checked layer by layer and made again until
   // nothing starts in mid-air (build_printable_mesh). A file that still has such a place
@@ -60,6 +71,12 @@ struct FileReport {
   std::vector<int> found_per_pass;   // mid-air starts + one-ended overhangs, pass by pass
   std::vector<Vec3> left_out_at;     // where struts were left out (the preview can mark them)
   std::vector<MeshSpec::Post> posts; // the posts added (the preview can draw them)
+  std::size_t stands_added = 0;      // of `posts`, those under a weave's long shallow runs (O8)
+  std::size_t weave_specks_ignored = 0, weave_held_ignored = 0;   // O10: PrintableReport's
+  // O17, O18: PrintableReport's: what the sag pass did, and the bars the file was made of when it changed any (null:
+  // the layout's own). `left_out_at` and `posts` are read against those.
+  SagReport sags;
+  std::shared_ptr<const Bars> sagged;
 };
 
 // THE ONE PLACE THE MESH IS MADE for a file: the open space of the layout's cells, then
@@ -138,6 +155,16 @@ struct FileJob {
   // old Lattice run takes ("mode": "lattice_part"). run_file_job makes it a path beside the job; a caller of
   // make_lattice_file gives the path. Empty: no check, and the result names none (V2).
   std::string strength_job;
+  // Organic, Traced (layout key "region_weave"): the stress tensor's file (key "tensor"), a bare name beside the job,
+  // as "demand". Empty: none sent. run_file_job reads it into `tensor_field`; a caller of make_lattice_file puts the
+  // field there itself. A job with a weave region and no field is refused (no_stress_result, OR14).
+  std::string tensor;
+  std::shared_ptr<const TensorField> tensor_field;
+  // The trace's ask (layout keys "organic_spacing_mm", or "organic_spacing_min_mm" with "organic_spacing_max_mm" and
+  // "organic_spacing_exponent" (O12); "organic_width_mm"; the reference is the layout's "reference_mpa" and
+  // "percentile"; "organic_shape_fit" (O13), true when not given); read only when a region is a weave. The Finish is
+  // the regular layout keys' (OR30: "rim_mm", "cover_mm", "skin", "skin_width_mm").
+  OrganicAsk organic;
   Settings settings;
   FileOptions options;
 };
@@ -151,6 +178,45 @@ inline constexpr int kDemandVersion = 1;
 bool read_demand_file(const std::string& path, DemandField& out, std::string* why = nullptr);
 // Writes one (for tests and tools; the app writes its own). False when the file cannot be written or the field is empty.
 bool write_demand_file(const std::string& path, const DemandField& field);
+
+// THE TENSOR FILE (a stress result for Organic, Traced: the full tensor, so the trace has directions), little-endian:
+//   8 bytes "TOTENSOR", int32 version (1), int32 nx, ny, nz, float64 origin x, y, z, float64 spacing,
+//   then 6 float32 per voxel in core's VoxelGrid order ((k * ny + j) * nx + i), each voxel's six in TensorField's
+//   order: xx, yy, zz, xy, yz, zx, MPa.
+// Reading refuses what read_demand_file refuses (a wrong magic, a version other than 1, a grid of no voxels, a file
+// not exactly the size its grid needs, any number that is not finite, a spacing not above 0); `why` says which.
+inline constexpr int kTensorVersion = 1;
+bool read_tensor_file(const std::string& path, TensorField& out, std::string* why = nullptr);
+// Writes one (for tests and tools). Each value is written as a float32. False when the file cannot be written or the
+// field is empty.
+bool write_tensor_file(const std::string& path, const TensorField& field);
+
+// THE SHALLOW-BAR TABLE of a weave (for the owner's bridge rules, OR8 to OR10): of the bars of `regions` (the weave
+// regions), those lying under 30 degrees (bar_is_bridge), how they are held, and their WHOLE runs.
+//   Held: an end is held when it is Node, Solid or Joined (on another bar or in the solid); Surface and Loose are not.
+//   A whole run: shallow bars chained through joints where EXACTLY two shallow bars end (at one point: ends within a
+//   hundredth of a micron are one, O6) and they
+//   go on in line within 15 degrees. A shallow bar that chains to nothing is a run of one. A run's length is the sum
+//   of its bars'.
+//   Bands of run length: to 5 mm, over 5 to 10, over 10 to 20, over 20.
+//   What the layer check did with each run (from the file's make-check-make loop): left out when any of its bars was
+//   left out (by a place of `drop_at`, read as the file writer reads it: bars_present with `regions` at `layer_mm`, O10;
+//   or by the owner's bridge rules: weave_holds after those places); else post when a post's top is within half the bar's width + 0.5 mm of
+//   one of its bars; else kept.
+//   The owner's bridge rules (O6 to O9, weave_holds after `drop_at`): `kept_any_length`, the shallow bars kept with
+//   both ends held, at any length; `weave_left_unheld`, those left out because an end leads to nothing.
+//   `stands_added` (O8) is not read from the bars: the file job fills it from the loop's report.
+struct ShallowTable {
+  std::size_t bars = 0;                        // shallow bars of the weave
+  std::size_t held_both = 0, held_one = 0, held_none = 0;
+  std::size_t runs = 0;
+  double longest_run_mm = 0.0;
+  struct Band { std::size_t runs = 0, kept = 0, left_out = 0, post = 0; };
+  Band bands[4];                               // to 5 mm, 5 to 10, 10 to 20, over 20
+  std::size_t kept_any_length = 0, weave_left_unheld = 0, stands_added = 0;
+};
+ShallowTable shallow_bar_table(const Bars& bars, const std::vector<int>& regions, const std::vector<Vec3>& drop_at,
+                               const std::vector<MeshSpec::Post>& posts, double layer_mm = 0.2);
 
 // A job that cannot be read. what() is the reader's own words (which key, what is wrong).
 class FileJobError : public std::runtime_error {
@@ -187,6 +253,18 @@ struct FileResult {
   bool by_stress = false;
   double reference_mpa = 0.0, highest_mpa = 0.0;
   std::size_t at_light = 0, at_heavy = 0;
+  // Organic, Traced: the weave regions laid, the strands traced for them, the bars of those regions, the trace's time,
+  // and the shallow-bar table (filled once the file is made).
+  std::size_t weave_regions = 0, strands = 0, weave_bars = 0;
+  double ms_trace = 0.0;
+  // O12: the spacing the trace used over the weave regions' candidates (Outcome::spacing_*), mm; 0 with no weave.
+  double spacing_smallest_mm = 0.0, spacing_largest_mm = 0.0, spacing_mean_mm = 0.0;
+  // O16: the net skin's struts laid (Finish Skin on a weave region) and their length, mm.
+  std::size_t net_struts = 0;
+  double net_mm = 0.0;
+  // G12: what Grown did (Outcome::grown); null for Traced and cube lattices (then not written).
+  std::shared_ptr<const GrowReport> grown;
+  ShallowTable shallow;
   // The mesh.
   FileReport made;
   // The strength check (V4): ran, its `strength` block and whether it was accepted. Not run: nothing (V2).

@@ -2496,6 +2496,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// rebakes like any other lattice setting.
     public var bandTreatments: [String: Bool] = [:]
 
+    /// ★ Organic cut 1 (his 11-18): his 13 Organic controls (`LatticeOrganicLook`); nil = every one at Auto.
+    public var organicLook: LatticeOrganicLook?
+
     /// ★ THE ENCLOSED-VOID RULE — the OFF control (task
     /// 2026-08-06-arm-projection-and-void-check, S2c). DEFAULT TRUE, matching
     /// core's own `lattice.require_lattice_void_reaches_exterior`.
@@ -2693,6 +2696,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         case gradingMode, gradeStepStyle, selectableCellMM
         // ★ the band chips' choices (2026-09-27) — absent ⇒ the band's own rules
         case bandTreatments
+        case organicLook   // ★ Organic cut 1
         // ★ ORGANIC (2026-09-02). Absent from every earlier snapshot ⇒ each decodes to
         // its own default ⇒ an existing project emits exactly the job it always has.
         case organicGrowth, organicStrutWidthMM, organicOverhangDeg
@@ -2878,6 +2882,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // cap takes the band's own rule, exactly as those projects always drew.
         bandTreatments = try c.decodeIfPresent([String: Bool].self,
                                                forKey: .bandTreatments) ?? [:]
+        organicLook = try c.decodeIfPresent(LatticeOrganicLook.self, forKey: .organicLook)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -2994,6 +2999,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         if !bandTreatments.isEmpty {
             try c.encode(bandTreatments, forKey: .bandTreatments)
         }
+        try c.encodeIfPresent(organicLook, forKey: .organicLook)   // ★ Organic cut 1 (absent: as before)
     }
 
     /// The starting cell size (mm): the octet cell PR-201 print-tested, reused from the

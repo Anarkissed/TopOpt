@@ -22,6 +22,7 @@
 #include "topopt/lattice_layout.hpp"
 #include "topopt/lattice_layout_file.hpp"   // run_file_job: the print file on the iPad
 #include "topopt/lattice_file_strength.hpp" // its strength check (Install 3)
+#include "topopt/lattice_layout_organic.hpp" // ★ Organic cut 1: the weave's preview lay, its runs, the sweep limits
 
 namespace topoptbridge {
 namespace {
@@ -53,6 +54,7 @@ struct LayoutSession {
   std::atomic<uint64_t> cancel_gen{0};
   std::atomic<bool> stop{false};                   // core's own stop (Session::lay): a running layout gives up within one cell's work
   std::shared_ptr<const ll::DemandField> demand;  // Install 2: the stress result, one pointer between lays (set_demand)
+  std::shared_ptr<const ll::TensorField> tensor;  // ★ Organic cut 1: the stress tensor a weave follows (set_tensor)
 };
 
 std::mutex& g_layout_mu = *new std::mutex;        // never destroyed (the scenes' rule, T1)
@@ -114,6 +116,7 @@ ll::Settings settings_from(const LatticeLayoutSettings& in) {
     a.faces = rf[r];
     a.depth_mm = in.region_depth_mm[r];
     a.expand_mm = in.region_expand_mm[r];
+    a.weave = r < in.region_weave.size() && in.region_weave[r] != 0;   // ★ Organic cut 1: filled by the weave, not cells
     s.regions.push_back(std::move(a));
   }
   const std::size_t np = in.protect_ids.size();
@@ -420,6 +423,119 @@ void lattice_layout_set_demand(int64_t session, const LatticeLayoutDemand& d, Br
     s->demand = std::move(field);
   });
   if (!why.empty()) failed(err, why);
+}
+
+void lattice_layout_set_tensor(int64_t session, const LatticeLayoutTensor& t, BridgeError& err) {
+  const std::string why = bridge_guard_run("lattice_layout_set_tensor", [&] {
+    auto s = layout_at(session);
+    std::shared_ptr<const ll::TensorField> field;
+    if (!t.voigt.empty()) {
+      const std::size_t n = static_cast<std::size_t>(t.nx) * static_cast<std::size_t>(t.ny) * static_cast<std::size_t>(t.nz);
+      if (t.nx <= 0 || t.ny <= 0 || t.nz <= 0 || !(t.spacing > 0.0) || t.voigt.size() != 6 * n)
+        throw std::invalid_argument("lattice layout: the stress tensor is not 6 x nx*ny*nz values on a spacing above 0");
+      auto f = std::make_shared<ll::TensorField>();
+      f->origin = {t.origin_x, t.origin_y, t.origin_z};
+      f->spacing = t.spacing;
+      f->nx = t.nx; f->ny = t.ny; f->nz = t.nz;
+      f->voigt.assign(t.voigt.begin(), t.voigt.end());
+      field = std::move(f);
+    }
+    std::lock_guard<std::mutex> lock(s->mu);
+    s->tensor = std::move(field);
+  });
+  if (!why.empty()) failed(err, why);
+}
+
+static ll::OrganicAsk organic_from(const LatticeLayoutOrganic& o) {
+  ll::OrganicAsk a;
+  a.mode = o.mode == 1 ? ll::OrganicMode::Grown : ll::OrganicMode::Traced;
+  a.spacing_mm = o.spacing_mm; a.spacing_min_mm = o.spacing_min_mm; a.spacing_max_mm = o.spacing_max_mm;
+  a.spacing_exponent = o.spacing_exponent;
+  a.width_mm = o.width_mm; a.width_heavy_mm = o.width_heavy_mm;
+  a.reference_mpa = o.reference_mpa; a.percentile = o.percentile;
+  a.shape_fit = o.shape_fit; a.member_cap = o.member_cap; a.shape_reach = o.shape_reach;
+  a.build_dir = {o.build_x, o.build_y, o.build_z};
+  a.walls_out = o.walls_out; a.ties = o.ties; a.tie_swirl = o.tie_swirl; a.foot_gap = o.foot_gap;
+  a.stress_goal = o.stress_goal; a.void_ratio = o.void_ratio; a.reseed_rounds = o.reseed_rounds;
+  a.wall_connect = o.wall_connect; a.wall_gap = o.wall_gap; a.wall_gap_heavy = o.wall_gap_heavy;
+  a.wall_cross = o.wall_cross; a.cross_gap = o.cross_gap; a.cross_gap_heavy = o.cross_gap_heavy;
+  a.cross_climb_max_deg = o.cross_climb_max_deg;
+  a.top_run = o.top_run; a.root_run = o.root_run; a.run_max = o.run_max; a.run_gap = o.run_gap;
+  a.run_follow = o.run_follow; a.run_pull = o.run_pull; a.run_seek = o.run_seek; a.run_min = o.run_min;
+  a.root_gap = o.root_gap;
+  a.auto_by_stress = o.auto_by_stress; a.prune = o.prune; a.bed_floor_mm = o.bed_floor_mm;
+  a.hold_parts = o.hold_parts; a.part_reach_mm = o.part_reach_mm; a.part_support_mm = o.part_support_mm;
+  a.part_to_floor = o.part_to_floor;
+  a.link_width = o.link_width; a.unbraced_max = o.unbraced_max;
+  a.tie_level = o.tie_level; a.tie_gap = o.tie_gap; a.tie_gap_heavy = o.tie_gap_heavy;
+  a.follow_stress = o.follow_stress;
+  a.seed = o.seed;
+  return a;
+}
+
+LatticeLayoutOrganicResult lattice_layout_organic(int64_t session, const LatticeLayoutSettings& settings,
+                                                  const LatticeLayoutOrganic& organic, BridgeError& err) {
+  LatticeLayoutOrganicResult o;
+  const std::string why = bridge_guard_run("lattice_layout_organic", [&] {
+    auto s = layout_at(session);
+    const uint64_t gen = s->cancel_gen.load();
+    ll::Settings ask = settings_from(settings);
+    const ll::OrganicAsk oa = organic_from(organic);
+    ll::OrganicPreviewAsk pa;
+    pa.quality = organic.quality == 1 ? ll::PreviewQuality::Draft : ll::PreviewQuality::Exact;
+    pa.tolerance_mm = organic.tolerance_mm;
+    std::lock_guard<std::mutex> lock(s->mu);
+    ask.stress.demand = s->demand;
+    s->stop = false;
+    if (s->cancel_gen.load() != gen) { o.cancelled = true; return; }
+    if (!s->tensor) throw std::invalid_argument("Organic needs the stress check first (no stress result to follow)");
+    const auto t0 = std::chrono::steady_clock::now();
+    ll::OrganicPreview pv = ll::lay_organic_preview(*s->session, ask, *s->tensor, oa, pa, 0, &s->stop);
+    if (pv.outcome.cancelled) { s->solid_at.reset(); s->last.reset(); o.cancelled = true; return; }
+    s->solid_at.reset();
+    o.runs = ll::pack_weave_runs(pv.runs);
+    o.quality = pv.quality == ll::PreviewQuality::Draft ? 1 : 0;
+    o.strands = static_cast<int64_t>(pv.outcome.strands);
+    o.net_struts = static_cast<int64_t>(pv.outcome.net_struts);
+    o.spacing_smallest_mm = pv.outcome.spacing_smallest_mm;
+    o.spacing_largest_mm = pv.outcome.spacing_largest_mm;
+    o.spacing_mean_mm = pv.outcome.spacing_mean_mm;
+    o.ms_trace = pv.outcome.ms_trace;
+    s->last = std::make_unique<ll::Outcome>(std::move(pv.outcome));
+    if (s->cancel_gen.load() != gen) { o.cancelled = true; return; }
+    fill(o.layout, *s->last);
+    o.ms = ms_since(t0);
+  });
+  if (!why.empty()) {
+    o = LatticeLayoutOrganicResult{};
+    failed(err, why);
+  }
+  return o;
+}
+
+LatticeLayoutSweep lattice_layout_sweep_limits(int64_t session, const LatticeLayoutSettings& settings, double line_mm,
+                                               BridgeError& err) {
+  LatticeLayoutSweep o;
+  const std::string why = bridge_guard_run("lattice_layout_sweep_limits", [&] {
+    auto s = layout_at(session);
+    ll::Settings ask = settings_from(settings);
+    std::lock_guard<std::mutex> lock(s->mu);
+    ask.stress.demand = s->demand;
+    for (const ll::SweepLimits& l : s->session->sweep_limits(ask, line_mm)) {
+      o.region.push_back(static_cast<int32_t>(l.region));
+      o.measured.push_back(l.measured ? 1 : 0);
+      o.d_mm.push_back(l.d_mm);
+      o.strut_lower_mm.push_back(l.strut_lower_mm); o.strut_upper_mm.push_back(l.strut_upper_mm);
+      o.strut_auto_mm.push_back(l.strut_auto_mm);
+      o.cell_lower_mm.push_back(l.cell_lower_mm); o.cell_upper_mm.push_back(l.cell_upper_mm);
+      o.cell_auto_mm.push_back(l.cell_auto_mm);
+    }
+  });
+  if (!why.empty()) {
+    o = LatticeLayoutSweep{};
+    failed(err, why);
+  }
+  return o;
 }
 
 LatticeLayoutPlaces lattice_layout_places(int64_t session, const LatticeLayoutSettings& settings, BridgeError& err) {

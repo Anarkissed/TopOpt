@@ -32,6 +32,8 @@ public struct LatticeLayoutBarsInputs: Equatable {
     public var colours: [SIMD4<Float>] = []
     /// Which colouring `colours` is (a new key uploads them; the bars stay).
     public var colourKey: Int = 0
+    /// ★ Organic cut 1: the bars from this index on are drawn by the light pass (plain tubes: Grown's net skin); .max = none.
+    public var lightFrom: Int = .max
     public init(token: Int, bars: [Float], hidden: Bool = false, solid: LatticeLayoutSolidGrid? = nil, flags: [UInt8] = [],
                 colours: [SIMD4<Float>] = [], colourKey: Int = 0) {
         self.token = token; self.bars = bars; self.hidden = hidden; self.solid = solid; self.flags = flags
@@ -305,6 +307,57 @@ fragment BarGBuf wall_gbuffer(WallVOut in [[stage_in]], constant WallFrame& F [[
     BarGBuf none;
     return none;
 }
+
+// ── THE LIGHT PASS (Organic cut 1, his 11-18: "There is no question, it will lag") ──
+// Grown's net skin (~23,000 short struts on his stand) as plain six-sided tubes drawn as geometry: no ray per pixel and no
+// depth written by the fragment, so the GPU's hidden-surface removal keeps them cheap. Each tube runs half a radius past
+// its ends, so a strand's joints close. Same G-buffer, so #354's shade, AO and creases light them as they light the rest.
+struct LightVOut {
+    float4 pos [[position]];
+    float3 en;
+    float  ez;
+    uint   iid [[flat]];
+};
+
+vertex LightVOut light_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
+                              const device float4* bars [[buffer(0)]],
+                              constant BarFrame& F [[buffer(1)]]) {
+    float4 A = bars[2 * iid], B = bars[2 * iid + 1];
+    float R = max(A.w, 1e-4);
+    float3 ax = B.xyz - A.xyz;
+    float len = length(ax);
+    float3 u = len > 1e-6 ? ax / len : float3(0.0, 0.0, 1.0);
+    float3 v, w;
+    bar_axes(u, false, v, w);
+    const int corner[6] = { 0, 1, 2, 2, 1, 3 };   // one side's quad: bit 1 = end B, bit 2 = the next edge
+    int c = corner[vid % 6];
+    float ang = float(int(vid / 6) + ((c & 2) ? 1 : 0)) * 1.0471975512;   // six sides
+    float3 radial = cos(ang) * v + sin(ang) * w;
+    float3 p = ((c & 1) ? (B.xyz + u * 0.5 * R) : (A.xyz - u * 0.5 * R)) + radial * R;
+    LightVOut o;
+    o.pos = F.clipFromModel * float4(p, 1.0);
+    o.ez = -(F.eyeFromModel * float4(p, 1.0)).z;
+    o.en = (F.eyeNormalBasis * float4(radial, 0.0)).xyz;
+    o.iid = iid;
+    return o;
+}
+
+struct LightGBuf {
+    float  eyeZ    [[color(0)]];
+    float4 enormal [[color(1)]];
+    float4 albedo  [[color(2)]];
+};
+
+fragment LightGBuf light_gbuffer(LightVOut in [[stage_in]], constant BarFrame& F [[buffer(1)]],
+                                 const device float4* colours [[buffer(2)]]) {
+    float3 n = normalize(in.en);
+    if (n.z < 0.0) { n = -n; }
+    LightGBuf o;
+    o.eyeZ = in.ez;
+    o.enormal = float4(n, 0.0);
+    o.albedo = float4(F.albedo.w < 0.0 ? colours[in.iid].rgb : F.albedo.rgb, 1.0);
+    return o;
+}
 """
 
 /// The bars, uploaded once per token, drawn into the G-buffer.
@@ -316,6 +369,7 @@ final class LatticeLayoutBarsPass {
     let device: MTLDevice
     let pipeline: MTLRenderPipelineState
     let wallsPipeline: MTLRenderPipelineState
+    let lightPipeline: MTLRenderPipelineState
     /// ★ THE SOLID VIEW: the engine's map as a 3D texture (rg8Snorm: open, inside), and where it sits.
     private(set) var gridTexture: MTLTexture?
     private(set) var grid: (origin: SIMD3<Float>, voxel: Float, dims: SIMD3<Int32>)?
@@ -331,6 +385,8 @@ final class LatticeLayoutBarsPass {
     private(set) var colourKey = -1
     private(set) var count = 0
     private(set) var token = -1
+    /// ★ Organic cut 1: the first bar the light pass draws (.max: none).
+    private(set) var lightFrom = Int.max
     var hidden = false
     var isDrawable: Bool { !hidden && count > 0 && buffer != nil }
 
@@ -354,6 +410,12 @@ final class LatticeLayoutBarsPass {
         d.vertexFunction = wv
         d.fragmentFunction = wf
         wallsPipeline = try device.makeRenderPipelineState(descriptor: d)
+        guard let lv = lib.makeFunction(name: "light_vertex"), let lf = lib.makeFunction(name: "light_gbuffer") else {
+            throw NSError(domain: "LatticeLayoutBarsPass", code: 3, userInfo: [NSLocalizedDescriptionKey: "light functions missing"])
+        }
+        d.vertexFunction = lv
+        d.fragmentFunction = lf
+        lightPipeline = try device.makeRenderPipelineState(descriptor: d)
     }
 
     /// The solid view's map into ONE 3D texture (P7: never inline). nil or a broken map: X-ray (no cut, no walls).
@@ -420,6 +482,7 @@ final class LatticeLayoutBarsPass {
     func upload(_ inputs: LatticeLayoutBarsInputs) {
         token = inputs.token
         hidden = inputs.hidden
+        lightFrom = inputs.lightFrom
         let packed = Self.pack(inputs.bars, flags: inputs.flags)
         count = packed.count / 2
         buffer = packed.isEmpty ? nil : device.makeBuffer(bytes: packed, length: MemoryLayout<SIMD4<Float>>.stride * packed.count,
@@ -472,7 +535,15 @@ final class LatticeLayoutBarsPass {
         enc.setFragmentBuffer(buffer, offset: 0, index: 0)
         enc.setFragmentBytes(&f, length: MemoryLayout<Frame>.stride, index: 1)
         enc.setFragmentBuffer(colourBuffer ?? buffer, offset: 0, index: 2)   // bound either way (read only when albedo.w < 0)
-        enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 36, instanceCount: count)
+        let cast = Swift.min(Swift.max(lightFrom, 0), count)
+        if cast > 0 { enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 36, instanceCount: cast) }
+        if cast < count {   // ★ Organic cut 1: the light pass, the same buffers from bar `cast` on
+            let s4 = MemoryLayout<SIMD4<Float>>.stride
+            enc.setRenderPipelineState(lightPipeline)
+            enc.setVertexBuffer(buffer, offset: 2 * s4 * cast, index: 0)
+            enc.setFragmentBuffer(colourBuffer ?? buffer, offset: colourBuffer == nil ? 0 : s4 * cast, index: 2)
+            enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 36, instanceCount: count - cast)
+        }
         return true
     }
 }

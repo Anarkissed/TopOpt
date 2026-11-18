@@ -91,6 +91,13 @@ Domain::Domain(const PartMeasure& measure, DomainSpec spec)
                    [](const Region& a, const Region& b) { return a.id < b.id; });
   std::stable_sort(spec_.protect.begin(), spec_.protect.end(),
                    [](const ProtectSkin& a, const ProtectSkin& b) { return a.id < b.id; });
+  // K1: the bed, read once (only when a floor is asked: with none, nothing here changes).
+  if (spec_.bed_floor_mm > 0.0) {
+    const double l = std::sqrt(dot(spec_.bed_up, spec_.bed_up));
+    spec_.bed_up = l > 0.0 ? Vec3{spec_.bed_up.x / l, spec_.bed_up.y / l, spec_.bed_up.z / l} : Vec3{0.0, 0.0, 1.0};
+    bed_level_ = std::numeric_limits<double>::infinity();
+    for (const Vec3& v : measure.mesh().vertices) bed_level_ = std::min(bed_level_, dot(v, spec_.bed_up));
+  }
   for (const ProtectSkin& s : spec_.protect) near_skin_.emplace_back(s.face, protect_depth_mm(s));
   for (std::size_t i = 0; i < spec_.protect.size(); ++i) {   // in id order: the same groups however the caller listed them
     const ProtectSkin& s = spec_.protect[i];
@@ -356,6 +363,12 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
   } else if (!part_.inside(p)) {
     return {Why::Outside, 0};
   }
+
+  // K1: the floor on the bed. A weave region's point less than bed_floor_mm above the bed (the plane through the
+  // part's lowest point along bed_up) is solid.
+  if (spec.bed_floor_mm > 0.0 && owner && owner->weave &&
+      dot(p, d_->spec_.bed_up) - d_->bed_level_ < spec.bed_floor_mm)
+    return {Why::BedFloor, id};
 
   // S1, S2, S10: the rim. Within its width of the owning region's own edge, where the
   // part's solid backs that edge: one step beyond the nearest point of the edge, at the

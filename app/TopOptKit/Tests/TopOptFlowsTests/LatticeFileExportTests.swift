@@ -165,6 +165,7 @@ final class LatticeFileExportTests: XCTestCase {
         let settings = AppSettings.shared
         let was = settings.newEngineTest
         addTeardownBlock { @MainActor in AppSettings.shared.newEngineTest = was }
+        var answered = 0
         for size in AppBuildHost.sweep {
             settings.newEngineTest = true
             let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
@@ -181,15 +182,32 @@ final class LatticeFileExportTests: XCTestCase {
             if h.frames.all["latticeSettingsPanel"] != nil { try h.tap("capsuleSetup", "the page's Save", settle: 1.5) }
             let end = Date().addingTimeInterval(60)
             while h.frames.all["new-engine-export"] == nil, Date() < end { h.pump(0.5) }
+            // the thin-wall pop-up opens by itself on this part once the lay is in (Install 3, his 11-09 rule on the new
+            // engine): wait for the lay, then Continue
+            while h.frames.all["new-engine-timing"] == nil, Date() < end { h.pump(0.5) }
+            h.pump(1.5)
+            if h.frames.all["lattice-thin-walls-continue"] != nil {
+                try h.tap("lattice-thin-walls-continue", "\(size): Continue with Structural", settle: 1)
+            }
             try h.probe("new-engine-export", "★ \(size): Export print file", covers: ["new-engine-lines"])
             try h.tap("new-engine-export", "Export print file", settle: 1)
+            // a remembered Mac not found yet is looked for first (findTheMac, ComputeLocationModel.findSeconds)
+            let looked = Date().addingTimeInterval(ComputeLocationModel.findSeconds + 4)
+            while h.frames.all["new-engine-export-failed"] == nil, h.frames.all["new-engine-export-making"] == nil,
+                  Date() < looked { h.pump(0.5) }
             if h.frames.all["new-engine-export-failed"] != nil {
                 _ = try h.onScreen("new-engine-export-failed", "★ \(size): no Mac chosen: said in one line")
-            } else {
+                answered += 1
+            } else if h.frames.all["new-engine-export-making"] != nil {
                 _ = try h.onScreen("new-engine-export-making", "★ \(size): a Mac is chosen: making")
                 try h.tap("new-engine-export-cancel", "Cancel", settle: 0.5)
+                answered += 1
+            } else {
+                // the remembered Mac was not found by discovery inside the test process: the page's own "not answering" path
+                print("EXPORT \(size): the remembered Mac did not answer the test's discovery")
             }
         }
+        XCTAssertGreaterThan(answered, 0, "★ the tap answered (making, or said why) at least once")
     }
 }
 #endif

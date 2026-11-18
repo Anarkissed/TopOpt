@@ -39,6 +39,12 @@ final class LatticeLayoutSwitchHostedTests: XCTestCase {
 
             let end = Date().addingTimeInterval(120)
             while h.frames.all["new-engine-timing"] == nil, Date() < end { h.pump(0.5) }
+            // the thin-wall pop-up opens by itself on this part a moment after the lay (Install 3, his 11-09 rule on the new
+            // engine): Continue first
+            h.pump(1.5)
+            if h.frames.all["lattice-thin-walls-continue"] != nil {
+                try h.tap("lattice-thin-walls-continue", "\(name): Continue with Structural", settle: 1)
+            }
             let lines = try h.onScreen("new-engine-lines", "★ \(name): by default — the new engine's lines")
             _ = try h.onScreen("new-engine-timing", "★ \(name): core's numbers came back (laid, bars handed over)")
             print("NEW-ENGINE \(name) \(Int(size.width))×\(Int(size.height)): lines at \(lines)")

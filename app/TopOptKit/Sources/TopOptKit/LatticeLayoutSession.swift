@@ -107,6 +107,8 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         public var own = AreaOwn()
         public var finish = RegionFinish()
         public var zone: Zone?
+        /// ★ Organic cut 1: the Organic weave fills this region, not cells (core's RegionAsk::weave).
+        public var weave = false
         public init(id: Int32, noLattice: Bool = false, faces: [Int32], depthMM: Double, expandMM: Double = 0,
                     pieces: [Piece] = []) {
             self.id = id; self.noLattice = noLattice; self.faces = faces; self.depthMM = depthMM; self.expandMM = expandMM
@@ -254,7 +256,7 @@ public final class LatticeLayoutSession: @unchecked Sendable {
 
     public let id: Int64
     public let info: OpenInfo
-    private let worker: LatticeLayoutWorker
+    let worker: LatticeLayoutWorker
     private let lock = NSLock()
     private var generation: UInt64 = 0
     private var closed = false
@@ -314,6 +316,16 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         return LatticeLayoutSession(id: raw.session,
                                     info: OpenInfo(faces: Int(raw.faces), openEdges: Int(raw.open_edges), msOpen: raw.ms_open),
                                     worker: worker)
+    }
+
+    /// A new lay's generation; the one running now comes back cancelled (latest wins). (`lay`, and Organic's `layOrganic`.)
+    func beginLay() -> UInt64 {
+        let mine: UInt64 = lock.withLock {
+            generation &+= 1
+            return generation
+        }
+        topoptbridge.lattice_layout_cancel(id)
+        return mine
     }
 
     /// Lays the lattice. Latest wins: an older `lay` still waiting or running throws CancellationError.
@@ -426,11 +438,11 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         worker.stop()
     }
 
-    private func isCurrent(_ gen: UInt64) -> Bool { lock.withLock { gen == generation && !closed } }
+    func isCurrent(_ gen: UInt64) -> Bool { lock.withLock { gen == generation && !closed } }
 
     // MARK: conversion
 
-    private func convert(_ s: Settings) -> topoptbridge.LatticeLayoutSettings {
+    func convert(_ s: Settings) -> topoptbridge.LatticeLayoutSettings {
         var o = topoptbridge.LatticeLayoutSettings()
         o.all_lattice = s.allLattice
         o.bead_mm = s.beadMM
@@ -453,6 +465,7 @@ public final class LatticeLayoutSession: @unchecked Sendable {
             for f in p.faces { o.protect_faces.push_back(f) }
         }
         if s.protect.contains(where: \.chip) { for p in s.protect { o.protect_chip.push_back(p.chip ? 1 : 0) } }   // D23
+        if s.regions.contains(where: \.weave) { for r in s.regions { o.region_weave.push_back(r.weave ? 1 : 0) } }   // Organic
         // D22: the cut pieces, the regions' first and then the skins' (the counts sent only when some piece exists)
         if s.regions.contains(where: { !$0.pieces.isEmpty }) || s.protect.contains(where: { !$0.pieces.isEmpty }) {
             for r in s.regions { o.region_piece_counts.push_back(Int32(r.pieces.count)) }
@@ -510,7 +523,7 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         return o
     }
 
-    private static func convert(_ r: topoptbridge.LatticeLayoutResult) -> Result {
+    static func convert(_ r: topoptbridge.LatticeLayoutResult) -> Result {
         var o = Result()
         o.bars = Array(r.bars)
         o.barEnds = Array(r.bar_ends)

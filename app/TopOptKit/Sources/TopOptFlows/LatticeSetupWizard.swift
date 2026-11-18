@@ -56,6 +56,14 @@ public struct LatticeSetupWizard: View {
         return copy
     }
 
+    /// ★ Organic cut 1: the Auto numbers the new engine is using (shown in the Organic controls' fields).
+    var organicLimits: LatticeOrganicLook.Limits?
+    func organicLimits(_ l: LatticeOrganicLook.Limits?) -> LatticeSetupWizard {
+        var copy = self
+        copy.organicLimits = l
+        return copy
+    }
+
     /// ★★ RULING 4 (item 6, 2026-09-30): wherever "nothing set to lattice" shows here, one tap
     /// takes him to where walls are marked. The wizard leaves by its ONE exit (Save & Exit —
     /// "your settings are saved whether or not you refresh") and then this runs. nil ⇒ no tap.
@@ -251,7 +259,14 @@ public struct LatticeSetupWizard: View {
             // ladder below is about cells, transitions and finishes that a traced or
             // grown lattice does not have. Nothing here is shared by accident.
             if model.stage == .lattice, model.cellTransition == .organicGrade {
-                organicRow
+                // ★ Organic cut 1 (his 11-18): on a part with its model file, the new engine's Organic and his 13 controls
+                if project.importedFile != nil {
+                    LatticeOrganicControls(look: Binding(get: { project.lattice.organicLook ?? LatticeOrganicLook() },
+                                                         set: { project.lattice.organicLook = $0 }),
+                                           limits: organicLimits)
+                } else {
+                    organicRow
+                }
             } else if model.stage == .lattice {
                 gradeToggleRow
                 if model.gradingMode != LatticeGradingMode.none { gradeTypeRow }
