@@ -347,3 +347,12 @@ speed lead, owed after cut 1.
 Also owed (OL-F1's finding, not this landing's to fix): the lattice changes by about 13 % in bar count (Traced 2,645
 against 2,303; Grown 1,882 against 1,838) when `reference_mpa` moves in its ninth digit (3.3995440870799 stated as
 3.39954409). The engine reads the resolved reference correctly; the lattice is that sensitive to it.
+
+## 13. Organic preview (brief L2), in `test_organic_rules`
+
+| Rule | Kind | Test |
+|---|---|---|
+| OP1 | L | OL-S (once): two 40 mm bars crossing at a shallow angle over many cells give one contact and one link. Identity, by a hash of every field of every bar (driver, not in the suite): the stand's Traced (134,452 bars) and Grown (318,118) jobs and two made parts unchanged; peaks 561 -> 186 MB and 1,514 -> 498 MB |
+| OP2 | L | OL-RUN: on a made Traced block (widths by stress, level ties, braces) the runs' length equals the non-link weave bars' to 1e-6 mm; thinned at 0.1 mm no original point is farther than 0.1 mm, ends and marks kept; packed bytes = 12 per run + 20 per point |
+| OP3 | L | OL-DRAFT: exact equals lay_organic bar for bar; the draft has no links and differs in length (-13.3 %), supports (10 -> 18) and net (1,544 -> 1,070) |
+| OP4 | L | OL-SWEEP: D = 18 gives strut 0.9 to 1.8 (Auto 1.35), cell 2.0 to 8.0 (Auto 5.0); a square of side 10 turned 45 degrees gives D = 10, not its box |
