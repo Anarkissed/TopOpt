@@ -188,6 +188,7 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         public var percentile = 0.95
         public var response = 1.0
         public var maxStep = 0.0                  // his switch "Never skip a cell size": 2 on Default Grade
+        public var bedFloorMM = 0.0               // ★ Organic: K1's flat floor under the weave (sheet H1); 0 none
         public init() {}
         public static func == (a: Settings, b: Settings) -> Bool {
             a.allLattice == b.allLattice && a.beadMM == b.beadMM && a.minStrutLines == b.minStrutLines && a.minWallMM == b.minWallMM
@@ -203,7 +204,7 @@ public final class LatticeLayoutSession: @unchecked Sendable {
                 && a.byStress == b.byStress && a.dialLight == b.dialLight && a.dialHeavy == b.dialHeavy
                 && a.widthLightMM == b.widthLightMM && a.widthHeavyMM == b.widthHeavyMM && a.cellsByStress == b.cellsByStress
                 && a.referenceMPa == b.referenceMPa && a.percentile == b.percentile && a.response == b.response
-                && a.maxStep == b.maxStep
+                && a.maxStep == b.maxStep && a.bedFloorMM == b.bedFloorMM
         }
     }
 
@@ -450,6 +451,7 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         o.min_wall_mm = s.minWallMM
         o.rim_mm = s.rimMM
         o.cover_mm = s.coverMM
+        o.bed_floor_mm = s.bedFloorMM
         for r in s.regions {
             o.region_ids.push_back(r.id)
             o.region_no_lattice.push_back(r.noLattice ? 1 : 0)

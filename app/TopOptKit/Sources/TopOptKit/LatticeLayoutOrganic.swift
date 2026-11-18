@@ -43,6 +43,9 @@ extension LatticeLayoutSession {
         public var tieLevel = false
         public var tieGap = 1.0, tieGapHeavy = 0.0
         public var followStress = true   // OP6 (his 11-18): false = shape only
+        public var layerMM = 0.2         // the printer's layer (sheet H2)
+        /// One spacing for every candidate: a single size, or a range whose two ends are equal (no heavy end acts).
+        public var spacingMMValueIsOne: Bool { spacingMM > 0 || spacingMaxMM <= spacingMinMM }
         public var seed: UInt64 = 1
         public init() {}
 
@@ -68,6 +71,7 @@ extension LatticeLayoutSession {
             o.link_width = linkWidth; o.unbraced_max = unbracedMax
             o.tie_level = tieLevel; o.tie_gap = tieGap; o.tie_gap_heavy = tieGapHeavy
             o.follow_stress = followStress
+            o.layer_mm = layerMM
             o.seed = seed
             return o
         }

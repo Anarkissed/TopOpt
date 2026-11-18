@@ -37,10 +37,13 @@ struct LatticeLayoutSettings {
   // ── where lattice goes (a change here reads the part again: a one-time wait) ──
   bool all_lattice = false;         // false: lattice only where a Lattice region asks (D12)
   double bead_mm = 0.45;
-  double min_strut_lines = 1.0;     // the thinnest strut, in line widths (R5); 2 for an all-smallest test piece
+  double min_strut_lines = 2.0;     // the thinnest strut, in line widths (R5): core's kMinStrutLines (sheet H16)
   double min_wall_mm = 0.0;         // D8; 0 = off
   double rim_mm = 0.0;              // Finish Rim: 0 none, < 0 two line widths
   double cover_mm = 0.0;            // Finish Covered: 0 none, < 0 two line widths
+  // K1, the flat floor on the bed under a weave region (core's Settings::bed_floor_mm, bed_up); 0 = none (sheet H1)
+  double bed_floor_mm = 0.0;
+  double bed_up_x = 0.0, bed_up_y = 0.0, bed_up_z = 1.0;
   // Regions, flattened: region r is region_ids[r] (> 0), region_no_lattice[r] (1 = No lattice), region_depth_mm[r],
   // region_expand_mm[r]; its faces are region_face_counts[r] entries of region_faces, after the earlier regions' faces.
   // Face numbers are the model's own (the app's FaceIDs for STEP, STL and 3MF alike).
@@ -275,6 +278,7 @@ struct LatticeLayoutOrganic {
   bool tie_level = false;
   double tie_gap = 1.0, tie_gap_heavy = 0.0;
   bool follow_stress = true;   // OP6 (his 11-18): true stress and shape, false shape only
+  double layer_mm = 0.2;       // the printer's layer: Grown's step, level ties, braces, supports (sheet H2)
   uint64_t seed = 1;
 };
 // The weave's preview: the lay's counts (its bars are the weave's — draw `runs`), the runs packed as core packs them

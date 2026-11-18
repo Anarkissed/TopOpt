@@ -42,7 +42,13 @@ public struct LatticeOrganicLook: Codable, Equatable, Sendable {
     /// ★ his 11-18: the gradient — stress and shape (nil / true), or shape alone (false)
     public var followStress: Bool?
     public var linkWidth: Double?, unbracedMax: Double?, spacingExponent: Double?
+    /// ★ Look, 1 to 100 % (nil = 50): this look's own (per group, or the whole part's).
+    public var lookPercent: Double?
+    /// ★ His 11-18: "Simulate stresses on unstressed walls" (Organic, Aesthetic only; nil = off). Each wall's number of
+    /// foci is set in Selections (LatticeSettings.selectableSyntheticFoci, default organicSyntheticFoci = 3).
+    public var syntheticStresses: Bool?
     public init() {}
+    public var lookPercentValue: Double { Swift.min(Swift.max(lookPercent ?? 50, 1), 100) }
 
     // MARK: the resolved values (nil = Auto, his judged stand jobs' values)
 
@@ -71,6 +77,17 @@ public struct LatticeOrganicLook: Codable, Equatable, Sendable {
     /// singular part. Please leave the other settings alone." Every setting is offered as designed; he tests them on the
     /// iPad (the Gradient line too, since the engine's organic_follow_stress, OP6, merged in 3aa1e8f1).
     public static func offered(_ o: Option) -> Bool { true }
+    /// The page's (i) on Look (Organic, Auto): his 11-18 "Look should change ALL the variables by messing with the cell range".
+    public static let lookInfo = "Look moves the whole cell range: 50 % is the range measured for your part, higher is "
+        + "finer (smaller cells), lower is more open. Everything counted in cells follows it; strut thickness does not. "
+        + "Manual shows every Organic setting, starting from the range Look gives."
+    /// ★ His 11-18 iPad notes: on the page's Auto only Look shows, and every other setting is Auto.
+    public func effective(pageManual: Bool) -> LatticeOrganicLook {
+        guard !pageManual else { return self }
+        var auto = LatticeOrganicLook()
+        auto.lookPercent = lookPercent   // Auto keeps its Look
+        return auto
+    }
     /// A swept setting's mode, one of the modes offered; Auto Sweep unless set.
     public func four(_ s: Swept?, offered: [Four] = otherModes) -> Four {
         let m = s?.mode ?? .autoSweep
@@ -99,6 +116,80 @@ public struct LatticeOrganicLook: Codable, Equatable, Sendable {
         public init(_ m: LatticeLayoutSession.SweepLimits) {
             self.init(strutLowerMM: m.strutLowerMM, strutUpperMM: m.strutUpperMM, strutAutoMM: m.strutAutoMM,
                       cellLowerMM: m.cellLowerMM, cellUpperMM: m.cellUpperMM, cellAutoMM: m.cellAutoMM, measured: m.measured)
+        }
+
+        /// ★ The whole part's limits (LatticeReview's ruling 3): the UNION over the measured regions — the smallest lower
+        /// end, the largest upper end, for cells and struts alike; Auto the middle (struts in whole lines, cells to 0.5 mm).
+        /// nil: no region measured (Auto is unavailable; Manual Sweep is typed).
+        public static func union(_ all: [Limits], lineMM: Double) -> Limits? {
+            let m = all.filter(\.measured)
+            guard let first = m.first else { return nil }
+            var u = first
+            for l in m.dropFirst() {
+                u.strutLowerMM = Swift.min(u.strutLowerMM, l.strutLowerMM); u.strutUpperMM = Swift.max(u.strutUpperMM, l.strutUpperMM)
+                u.cellLowerMM = Swift.min(u.cellLowerMM, l.cellLowerMM); u.cellUpperMM = Swift.max(u.cellUpperMM, l.cellUpperMM)
+            }
+            if m.count > 1 {
+                u.strutAutoMM = Check.lines((u.strutLowerMM + u.strutUpperMM) / 2, lineMM: lineMM)
+                u.cellAutoMM = Check.half((u.cellLowerMM + u.cellUpperMM) / 2)
+            }
+            return u
+        }
+
+        /// ★ LOOK (his 11-18: "Look should change ALL the variables by messing with the cell range"; LatticeReview's ruling
+        /// 2): both cell ends times one factor f — p <= 50: 2^((50 - p) / 49) (1 % gives 2); p >= 50: 2^(-(p - 50) / 50)
+        /// (100 % gives 0.5) — to the nearest 0.5 mm, the lower end never under the smallest printable cell (1.535 x the
+        /// thin strut), the upper never under the lower. Struts are not moved. At 50 % the measured limits themselves.
+        public func looked(percent p: Double) -> Limits {
+            let pc = Swift.min(Swift.max(p, 1), 100)
+            let f = pc <= 50 ? pow(2, (50 - pc) / 49) : pow(2, -(pc - 50) / 50)
+            var l = self
+            l.cellLowerMM = Swift.max(Check.half(cellLowerMM * f), Check.smallestCellMM(thinStrutMM: strutLowerMM))
+            l.cellUpperMM = Swift.max(l.cellLowerMM, Check.half(cellUpperMM * f))
+            l.cellAutoMM = Swift.max(l.cellLowerMM, Check.half((l.cellLowerMM + l.cellUpperMM) / 2))
+            return l
+        }
+    }
+
+    /// ★ What a typed number must be (LatticeReview's ruling 4, organic-app-rulings.md; the engine's own rules, sheet D):
+    /// one plain line, or nil when it is fine. The app refuses ONLY these. (The engine's own texts replace these when its
+    /// validation call lands: E1.)
+    public enum Check {
+        static func n(_ v: Double) -> String { StrengthCheckDocs.number(v) }
+        /// Whole printed lines, at least one.
+        public static func lines(_ v: Double, lineMM: Double) -> Double { Swift.max(1, (v / lineMM).rounded()) * lineMM }
+        /// To the nearest 0.5 mm.
+        public static func half(_ v: Double) -> Double { (v * 2).rounded() / 2 }
+        /// The smallest printable cell: 0.5 x sqrt(3 pi) x the thin strut (1.535 x), up to the next 0.5 mm (1.5 mm at 0.9).
+        public static func smallestCellMM(thinStrutMM t: Double) -> Double { (2 * 0.5 * (3 * Double.pi).squareRoot() * t).rounded(.up) / 2 }
+        /// Cell size, a Sweep (rule b, c): the small end above 0 and at least the smallest printable cell; large >= small.
+        public static func cell(small: Double, large: Double, thinStrutMM: Double) -> String? {
+            if !(small > 0) { return "Cell size: the small end must be above 0 mm" }
+            let floor = smallestCellMM(thinStrutMM: thinStrutMM)
+            if small < floor - 1e-9 { return "Cell size: at least \(n(floor)) mm, the smallest cell that prints with \(n(thinStrutMM)) mm struts" }
+            if large < small - 1e-9 { return "Cell size: the second number must be at least the first" }
+            return nil
+        }
+        /// Strut thickness (rule a): the thin end at least two printed lines; the thick end at least the thin end.
+        public static func strut(thin: Double, thick: Double?, thinnestMM: Double) -> String? {
+            if thin < thinnestMM - 1e-9 { return "Strut thickness: at least \(n(thinnestMM)) mm, two printed lines" }
+            if let k = thick, k < thin - 1e-9 { return "Strut thickness: the second number must be at least the first" }
+            return nil
+        }
+        /// A gap in local spacings (rule d): the wide end above 0; the close end 0 (off) or above 0 and up to the wide end.
+        public static func gap(_ name: String, close: Double?, wide: Double) -> String? {
+            if !(wide > 0) { return "\(name): must be above 0" }
+            if let c = close, c < 0 || c > wide + 1e-9 { return "\(name): the first number is 0 (off) or up to the second" }
+            return nil
+        }
+        /// Longest strut without a joint (rule f): 0 (off) or 4 to 40 strut widths.
+        public static func unbraced(_ v: Double) -> String? {
+            v == 0 || (4...40).contains(v) ? nil : "Longest strut without a joint: 0 (off) or 4 to 40 strut widths"
+        }
+        public static func link(_ v: Double) -> String? { (0.5...2).contains(v) ? nil : "Link thickness: 0.5 to 2 times the strut" }
+        public static func atLeastZero(_ name: String, _ v: Double) -> String? { v >= 0 ? nil : "\(name): 0 or above" }
+        public static func runsPerEnd(_ v: Double) -> String? {
+            v >= 1 && v == v.rounded() ? nil : "Runs per end: a whole number, 1 or more"
         }
     }
 
@@ -155,6 +246,11 @@ public struct LatticeOrganicLook: Codable, Equatable, Sendable {
             o.stressGoal = stressFollow ?? true
             o.prune = true
         }
+        // ★ rule e (sheet H6): equal cell ends (typed so, or a tiny region's collapsed limits) are one spacing, and the
+        // heavy gaps need a range: they do not act there, so they are not sent (until the engine accepts them: E2)
+        if o.spacingMMValueIsOne {
+            o.wallGapHeavy = 0; o.crossGapHeavy = 0; o.tieGapHeavy = 0
+        }
         // shape, floating parts, links, braces
         o.shapeFit = gradeToShapeValue
         o.shapeReach = shapeReach ?? 1
@@ -169,6 +265,7 @@ public struct LatticeOrganicLook: Codable, Equatable, Sendable {
         o.unbracedMax = unbracedMax ?? 10
         // always sent (LatticeReview): the flat floor, the stress reference
         o.bedFloorMM = 4 * layerMM
+        o.layerMM = layerMM   // ★ sheet H2: the printer's layer, not 0.2 always
         o.referenceMPa = 0
         o.percentile = 0.95
         return o

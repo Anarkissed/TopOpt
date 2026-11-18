@@ -104,6 +104,8 @@ ll::Settings settings_from(const LatticeLayoutSettings& in) {
   s.min_wall_mm = in.min_wall_mm;
   s.rim_mm = in.rim_mm;
   s.cover_mm = in.cover_mm;
+  s.bed_floor_mm = in.bed_floor_mm;   // K1 (sheet H1)
+  s.bed_up = {in.bed_up_x, in.bed_up_y, in.bed_up_z};
   const std::size_t nr = in.region_ids.size();
   if (in.region_no_lattice.size() != nr || in.region_depth_mm.size() != nr || in.region_expand_mm.size() != nr ||
       in.region_face_counts.size() != nr)
@@ -469,6 +471,7 @@ static ll::OrganicAsk organic_from(const LatticeLayoutOrganic& o) {
   a.link_width = o.link_width; a.unbraced_max = o.unbraced_max;
   a.tie_level = o.tie_level; a.tie_gap = o.tie_gap; a.tie_gap_heavy = o.tie_gap_heavy;
   a.follow_stress = o.follow_stress;
+  a.layer_mm = o.layer_mm;   // sheet H2
   a.seed = o.seed;
   return a;
 }
@@ -490,7 +493,14 @@ LatticeLayoutOrganicResult lattice_layout_organic(int64_t session, const Lattice
     if (s->cancel_gen.load() != gen) { o.cancelled = true; return; }
     if (!s->tensor) throw std::invalid_argument("Organic needs the stress check first (no stress result to follow)");
     const auto t0 = std::chrono::steady_clock::now();
-    ll::OrganicPreview pv = ll::lay_organic_preview(*s->session, ask, *s->tensor, oa, pa, 0, &s->stop);
+    ll::OrganicPreview pv;
+    try {
+      pv = ll::lay_organic_preview(*s->session, ask, *s->tensor, oa, pa, 0, &s->stop);
+    } catch (...) {   // sheet H17: a refused lay leaves no old outcome to be read against the new domain
+      s->solid_at.reset();
+      s->last.reset();
+      throw;
+    }
     if (pv.outcome.cancelled) { s->solid_at.reset(); s->last.reset(); o.cancelled = true; return; }
     s->solid_at.reset();
     o.runs = ll::pack_weave_runs(pv.runs);

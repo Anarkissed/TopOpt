@@ -182,6 +182,72 @@ final class LatticeOrganicCut1Tests: XCTestCase {
         XCTAssertNil(LatticeLayoutPreview.organicMemoryShort(mode: .traced, availableMB: 400), "Traced needs less")
     }
 
+    /// ★ LatticeReview's rulings 2, 3, 4 (organic-app-rulings.md) on his 11-18 iPad notes: Look moves both cell ends by one
+    /// factor (50 % = the measured range, never under the smallest printable cell, struts not moved); the whole part's
+    /// limits are the union of the measured areas; a typed number is refused only by the engine's own rules (his 2 to 8 is
+    /// taken); equal cell ends send no heavy gaps; the page's Auto is Look alone; the printer's layer is sent.
+    func testLookTheWholePartLimitsAndTheRules() {
+        typealias L = LatticeOrganicLook.Limits
+        typealias C = LatticeOrganicLook.Check
+        let mid = Self.stand.looked(percent: 50)
+        XCTAssertEqual(mid.cellLowerMM, 2); XCTAssertEqual(mid.cellUpperMM, 8, "★ 50 %: the measured range")
+        let open = Self.stand.looked(percent: 1)
+        XCTAssertEqual(open.cellLowerMM, 4); XCTAssertEqual(open.cellUpperMM, 16, "1 %: twice the range")
+        let fine = Self.stand.looked(percent: 100)
+        XCTAssertEqual(fine.cellLowerMM, 1.5, "100 %: half, never under the smallest printable cell (1.38 mm, to 1.5)")
+        XCTAssertEqual(fine.cellUpperMM, 4)
+        XCTAssertEqual(fine.strutLowerMM, 0.9); XCTAssertEqual(fine.strutUpperMM, 1.8, "★ struts are not moved by Look")
+        let shallow = L(strutLowerMM: 0.9, strutUpperMM: 0.9, strutAutoMM: 0.9, cellLowerMM: 1.5, cellUpperMM: 4, cellAutoMM: 3)
+        let shell = L(strutLowerMM: 0, strutUpperMM: 0, strutAutoMM: 0, cellLowerMM: 0, cellUpperMM: 0, cellAutoMM: 0, measured: false)
+        let u = try! XCTUnwrap(L.union([Self.stand, shallow, shell], lineMM: 0.45))
+        XCTAssertEqual(u.cellLowerMM, 1.5); XCTAssertEqual(u.cellUpperMM, 8, "★ the union of the measured areas")
+        XCTAssertEqual(u.strutLowerMM, 0.9); XCTAssertEqual(u.strutUpperMM, 1.8)
+        XCTAssertNil(L.union([shell], lineMM: 0.45), "RED CONTROL: nothing measured, no Auto")
+        XCTAssertNil(C.cell(small: 2, large: 8, thinStrutMM: 0.9), "★ his 2 to 8 is taken: no rule against a wall")
+        XCTAssertNotNil(C.cell(small: 1, large: 8, thinStrutMM: 0.9), "under the smallest printable cell")
+        XCTAssertNotNil(C.cell(small: 5, large: 3, thinStrutMM: 0.9))
+        XCTAssertNil(C.cell(small: 3, large: 3, thinStrutMM: 0.9), "equal ends are allowed")
+        XCTAssertNotNil(C.strut(thin: 0.45, thick: 1.8, thinnestMM: 0.9), "under two lines")
+        XCTAssertNotNil(C.strut(thin: 1.8, thick: 0.9, thinnestMM: 0.9))
+        XCTAssertNil(C.strut(thin: 0.9, thick: 1.8, thinnestMM: 0.9))
+        XCTAssertNil(C.gap("Wall seed gap", close: 1, wide: 2.5)); XCTAssertNil(C.gap("Wall seed gap", close: 0, wide: 2.5))
+        XCTAssertNotNil(C.gap("Wall seed gap", close: 3, wide: 2.5)); XCTAssertNotNil(C.gap("Wall seed gap", close: nil, wide: 0))
+        XCTAssertNil(C.unbraced(0)); XCTAssertNil(C.unbraced(10)); XCTAssertNotNil(C.unbraced(2)); XCTAssertNotNil(C.unbraced(41))
+        XCTAssertNotNil(C.link(3)); XCTAssertNil(C.link(1))
+        var equal = LatticeOrganicLook()
+        equal.cell = .init(mode: .manualSweep, light: 3, heavy: 3)
+        let q = equal.ask(limits: Self.stand)
+        XCTAssertEqual(q.wallGapHeavy, 0); XCTAssertEqual(q.crossGapHeavy, 0); XCTAssertEqual(q.tieGapHeavy, 0, "★ equal ends: no heavy gap sent")
+        XCTAssertEqual(LatticeOrganicLook().ask(limits: Self.stand).wallGapHeavy, 1, "RED CONTROL: a range keeps them")
+        var traced = LatticeOrganicLook()
+        traced.mode = .traced
+        XCTAssertEqual(traced.effective(pageManual: false).ask(limits: Self.stand).mode, .grown, "★ Auto: Look alone, the rest Auto")
+        XCTAssertEqual(traced.effective(pageManual: true).ask(limits: Self.stand).mode, .traced)
+        XCTAssertEqual(LatticeOrganicLook().ask(limits: Self.stand, layerMM: 0.28).layerMM, 0.28, "★ the printer's layer is sent")
+    }
+
+    /// ★ His 11-18 notes ("Please ensure ALL settings are followed"): an Organic control, Look and the page's Auto / Manual
+    /// re-lay (release 1 compared only the areas, so a control did not).
+    @MainActor
+    func testAnOrganicSettingReLays() throws {
+        let p = try FlexiblePressFixtures.a1Project(3, self, facePrism: false).project
+        p.lattice.algorithm = "organic"
+        p.latticePageManual = true
+        let k0 = try XCTUnwrap(LatticeLayoutPreview.organicKey(p))
+        var look = LatticeOrganicLook()
+        look.mode = .traced
+        p.lattice.organicLook = look
+        let k1 = LatticeLayoutPreview.organicKey(p)
+        XCTAssertNotEqual(k1, k0, "★ a control re-lays")
+        look.lookPercent = 70
+        p.lattice.organicLook = look
+        XCTAssertNotEqual(LatticeLayoutPreview.organicKey(p), k1, "★ Look re-lays")
+        p.latticePageManual = false
+        XCTAssertNotEqual(LatticeLayoutPreview.organicKey(p), k1, "★ the page's Auto re-lays")
+        p.lattice.algorithm = "stepped"
+        XCTAssertNil(LatticeLayoutPreview.organicKey(p), "RED CONTROL: not Organic, nothing more than the areas")
+    }
+
     func testAnOldProjectHasNoOrganicLookAndASavedOneRoundTrips() throws {
         let old = try JSONDecoder().decode(LatticeSettings.self, from: try JSONEncoder().encode(LatticeSettings()))
         XCTAssertNil(old.organicLook, "absent: every control at Auto")
@@ -214,6 +280,20 @@ final class LatticeOrganicCut1Tests: XCTestCase {
         XCTAssertEqual(exact.quality, .exact)
         XCTAssertGreaterThan(exact.runs.count, 0, "★ the weave's runs, made on this device")
         XCTAssertGreaterThan(exact.segments, 0)
+        // ★ his 11-18 iPad: the solid view's map is open where the weave is, so the body is cut open around it
+        let voxel: Float = 1
+        let dims = SIMD3<Int32>(34, 34, 24)
+        let map = try await session.grid(origin: SIMD3(-2, -2, -2), voxel: voxel, dims: dims)
+        var openIn = 0, openDeep = 0
+        for k in 0..<Int(dims.z) { for j in 0..<Int(dims.y) { for i in 0..<Int(dims.x) {
+            let n = (k * Int(dims.y) + j) * Int(dims.x) + i
+            guard map.rg[2 * n] > 0, map.rg[2 * n + 1] > 0 else { continue }
+            openIn += 1
+            if Float(k) * voxel - 2 < 20 - 16 { openDeep += 1 }   // below the 15 mm weave (z under 4 mm): RED CONTROL
+        } } }
+        print("LATTICE-ORGANIC block map: \(openIn) open voxels inside, \(openDeep) below the weave")
+        XCTAssertGreaterThan(openIn, 1_000, "★ the map is open where the weave is (the body is cut open around it)")
+        XCTAssertEqual(openDeep, 0, "RED CONTROL: nothing open below the woven 15 mm")
         ask.quality = .draft
         let draft = try await session.layOrganic(s, ask)
         XCTAssertEqual(draft.quality, .draft, "★ the draft is labelled (it is not what will be made)")

@@ -114,6 +114,8 @@ public final class LatticeLayoutPreview: ObservableObject {
     private var sessionPath: String?
     private var openMS = 0.0
     private var lastSettings: LatticeLayoutSession.Settings?
+    private var lastOrganicKey: String?   // ★ his Organic settings at the last lay (organicKey)
+    private var pageManualAtLay = false
     private var token = 0
     private var task: Task<Void, Never>?
     /// ★ THE SOLID VIEW (his ask 11-13): X-ray off draws the part solid, cut open where the lattice is (the engine's map).
@@ -129,11 +131,15 @@ public final class LatticeLayoutPreview: ObservableObject {
     // core measured for these regions and line (before the lay), what the last Organic lay was, and its numbers
     private var sessionTensorKey: Int?
     private var layerAtLay = 0.2
-    private var organicLimits: (key: LatticeLayoutSession.Settings, line: Double, limits: LatticeOrganicLook.Limits?)?
+    private var organicLimits: (key: LatticeLayoutSession.Settings, line: Double, limits: LatticeOrganicLook.Limits?,
+                                groups: [UUID: LatticeOrganicLook.Limits])?
+    private var groupsAtLay: [Int32: UUID] = [:]
     @Published public private(set) var organicQuality: LatticeLayoutSession.Organic.Quality?
     @Published public private(set) var organicNumbers: OrganicNumbers?
     /// The Auto numbers the last Organic lay used (core's once measured), for the controls' fields.
     @Published public private(set) var organicAutoLimits: LatticeOrganicLook.Limits?
+    /// ★ Each group's measured Auto Sweep limits (the union of its areas), before Look (per group, his 11-18).
+    @Published public private(set) var organicGroupLimits: [UUID: LatticeOrganicLook.Limits] = [:]
     public struct OrganicNumbers: Equatable { public var strands: Int, segments: Int, ms: Double, draft: Bool
         public var limitsMeasured: Bool }
     /// Organic's draft line (a dragged slider's quick lay is NOT what will be made).
@@ -149,6 +155,7 @@ public final class LatticeLayoutPreview: ObservableObject {
     public func isCurrent(project p: ProjectModel, stress: Stress = Stress()) -> Bool {
         guard let path = p.importedFile?.path else { return bars == nil }
         return path == sessionPath && Self.settings(p, referenceMPa: stress.referenceMPa) == lastSettings && stress.key == self.stress.key
+            && Self.organicKey(p) == lastOrganicKey
     }
 
     /// The page's one call, on every change of the part or its lattice settings (cheap when nothing changed).
@@ -165,15 +172,19 @@ public final class LatticeLayoutPreview: ObservableObject {
         let s = Self.settings(p, referenceMPa: stress.referenceMPa)
         let stressMoved = stress.key != self.stress.key
         self.stress = stress
-        if path == sessionPath, s == lastSettings, !stressMoved, task != nil || bars != nil {
+        let ok = Self.organicKey(p)
+        if path == sessionPath, s == lastSettings, ok == lastOrganicKey, !stressMoved, task != nil || bars != nil {
             if solidChanged, task == nil || bars != nil { solidToggled() }
             if checkNozzle, nozzleState == .notAsked, bars != nil { self.checkNozzle() }   // Refresh with nothing changed
             return
         }
         lastSettings = s
+        lastOrganicKey = ok
+        pageManualAtLay = p.latticePageManual
         latticeAtLay = p.lattice
         layerAtLay = p.printParams.layerHeightMM > 0 ? p.printParams.layerHeightMM : 0.2
         keysAtLay = Self.regionKeys(p)   // ★ Install 3: the drawer's rows, as this layout's regions
+        groupsAtLay = Self.regionGroups(p)   // ★ Organic per group: each region's group
         task?.cancel()
         laying = true
         nozzleWanted = checkNozzle
@@ -356,7 +367,8 @@ public final class LatticeLayoutPreview: ObservableObject {
         } catch is CancellationError {
             // a newer setting is laying
         } catch {
-            problem = FlexibleRowCopy.fit("New engine: \(error)", 60)
+            problem = Self.organic(latticeAtLay) ? "Organic: " + ((error as? TopOptError)?.message ?? "\(error)")   // whole (sheet H4)
+                : FlexibleRowCopy.fit("New engine: \(error)", 60)
             bars = nil
             laying = false
         }
@@ -366,23 +378,37 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// once per regions and line), the lay (Draft while a slider moves, then Exact), its runs as
     /// the bars pass's segments. No stress yet: one line (the page runs the stress check first).
     private func layOrganic(_ session: LatticeLayoutSession, path: String, _ s: LatticeLayoutSession.Settings, draft: Bool) async throws {
+        // ★ Auto's numbers first, measured by the engine for these areas before any lay or stress (his iPad notes 11-18: the
+        // fields showed 0) — once per "where" and line
+        let line = s.beadMM > 0 ? s.beadMM : 0.45   // the print line (the settings' bead)
+        if organicLimits == nil || !Self.sameWhere(organicLimits!.key, s) || organicLimits!.line != line {
+            let all = try await session.sweepLimits(s, lineMM: line)
+            guard !Task.isCancelled else { return }
+            let each = all.map { ($0.region, LatticeOrganicLook.Limits($0)) }
+            var groups: [UUID: LatticeOrganicLook.Limits] = [:]
+            for (g, regs) in Dictionary(grouping: each, by: { groupsAtLay[$0.0] }) {
+                guard let g else { continue }
+                groups[g] = LatticeOrganicLook.Limits.union(regs.map(\.1), lineMM: line) ?? regs.first?.1
+            }
+            organicLimits = (s, line, LatticeOrganicLook.Limits.union(each.map(\.1), lineMM: line) ?? each.first?.1, groups)
+        }
+        organicAutoLimits = organicLimits?.limits   // (before Look: the page applies each look's own)
+        organicGroupLimits = organicLimits?.groups ?? [:]
+        let look = (latticeAtLay.organicLook ?? LatticeOrganicLook()).effective(pageManual: pageManualAtLay)
+        // not measured (a curved shell): the controls say so; Auto takes core's defaults
+        let limits = organicLimits?.limits.map { $0.measured ? $0.looked(percent: look.lookPercentValue) : $0 }
         guard let f = stress.field, !f.stressTensor.isEmpty else {
             problem = Self.organicNeedsStressLine; bars = nil; laying = false; return
+        }
+        guard f.stressTensor.allSatisfy(\.isFinite) else {
+            problem = "The stress result holds a value that is not a number: run the stress check again"
+            bars = nil; laying = false; return
         }
         if sessionTensorKey != stress.key {
             try await session.setTensor(voigt: f.stressTensor, nx: f.nx, ny: f.ny, nz: f.nz, origin: f.origin, spacingMM: f.spacingMM)
             sessionTensorKey = stress.key
         }
-        let look = latticeAtLay.organicLook ?? LatticeOrganicLook()
-        let line = s.beadMM > 0 ? s.beadMM : 0.45   // the print line (the settings' bead)
-        if organicLimits == nil || !Self.sameWhere(organicLimits!.key, s) || organicLimits!.line != line {
-            let all = try await session.sweepLimits(s, lineMM: line)
-            guard !Task.isCancelled else { return }
-            organicLimits = (s, line, (all.first(where: \.measured) ?? all.first).map(LatticeOrganicLook.Limits.init))
-        }
-        let limits = organicLimits?.limits   // not measured (a curved shell): the controls say so; Auto takes core's defaults
         var ask = look.ask(limits: limits?.measured == true ? limits : nil, layerMM: layerAtLay)
-        organicAutoLimits = limits
         ask.quality = draft ? .draft : .exact
         if let short = Self.organicMemoryShort(mode: look.modeValue, availableMB: Self.availableMB()) {
             problem = short; bars = nil; laid = nil; laying = false; return   // ★ refused, never a crash
@@ -402,10 +428,15 @@ public final class LatticeLayoutPreview: ObservableObject {
         organicQuality = r.quality
         organicNumbers = OrganicNumbers(strands: r.strands, segments: seg.count, ms: r.ms, draft: r.quality == .draft,
                                         limitsMeasured: limits?.measured == true)
-        problem = seg.count == 0 ? "New engine: no Organic lattice fits these settings" : nil
+        let missing = r.layout.emptyRegions.count
+        problem = seg.count == 0 ? "New engine: no Organic lattice fits these settings"
+            : missing == 1 ? "An area points at faces this part does not have: pick its faces again"
+            : missing > 1 ? "\(missing) areas point at faces this part does not have: pick their faces again" : nil
         notes = Self.notes(latticeAtLay, hasStress: true) + (r.quality == .draft ? [Self.draftLine] : [])
         laying = false
         // a draft is followed by the exact lattice when nothing newer came
+        // ★ his 11-18 iPad (the body hid the weave): the solid view's map, cut open around Organic as around the regular lattice
+        if r.quality == .exact, solidWanted, !Task.isCancelled { await addMap() }
         if r.quality == .draft, !Task.isCancelled { try await layOrganic(session, path: path, s, draft: false) }
     }
 
@@ -439,6 +470,17 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// 32,433 on his stand, drawn round).
     static func organicLightFrom(grown: Bool, netFrom: Int, count: Int) -> Int {
         grown ? 0 : (netFrom < count ? netFrom : .max)
+    }
+
+    /// ★ What of his Organic settings the lay reads beyond the session Settings: the controls (Manual), Look, and the page's
+    /// Auto / Manual. nil: not Organic.
+    static func organicKey(_ p: ProjectModel) -> String? {
+        guard organic(p.lattice) else { return nil }
+        let look = (p.lattice.organicLook ?? LatticeOrganicLook()).effective(pageManual: p.latticePageManual)
+        let data = (try? JSONEncoder().encode(look)) ?? Data()
+        let groups = (try? JSONEncoder().encode(p.lattice.organicLooks ?? [:])) ?? Data()
+        return "\(p.latticePageManual) \(p.lattice.wholePart) " + String(decoding: data, as: UTF8.self)
+            + String(decoding: groups, as: UTF8.self)
     }
 
     /// The same regions and depths (the "where" Auto's numbers are measured on).
@@ -842,7 +884,11 @@ public final class LatticeLayoutPreview: ObservableObject {
         // turn: his v4 stand's 26 skins of 4 mm took 289 s to lay on the Mac, one group of them 0.7 s, the lattice identical.
         s.protect = Self.mergedByDepth(s.protect)
         // ★ Organic cut 1: every lattice region is woven, not filled with cells
-        if Self.organic(l) { for i in s.regions.indices where !s.regions[i].noLattice { s.regions[i].weave = true } }
+        if Self.organic(l) {
+            for i in s.regions.indices where !s.regions[i].noLattice { s.regions[i].weave = true }
+            let layer = p.printParams.layerHeightMM > 0 ? p.printParams.layerHeightMM : 0.2
+            s.bedFloorMM = 4 * layer   // ★ K1's flat floor under the weave (sheet H1; the ask's bed_floor_mm never reached it)
+        }
         // ★ D23 (his 11-17 "add a chip to ask what it should be"): every face a chip was answered "Solid" on, as ONE chip skin at
         // depth 0 (core's D5 two line widths, LatticeReview 11-17: a thin skin with the lattice kept behind it), never merged
         // with his own skins, so its place stays listed and the chip can be answered again
@@ -880,6 +926,34 @@ extension LatticeLayoutPreview {
     /// ★ Install 3 (the cells drawer on the new engine): which face row each region `settings(_:)` sends is — region id →
     /// the drawer's key (`LatticeSelectableRef.key`). Walks the rows exactly as `settings` does (the ids it gives); the test
     /// holds the two to the same ids.
+    /// ★ Organic per group: each lattice region's group, in the same order `settings` gives the regions their ids.
+    public static func regionGroups(_ p: ProjectModel) -> [Int32: UUID] {
+        let l = p.lattice
+        var out: [Int32: UUID] = [:]
+        var id: Int32 = 1
+        for g in p.latticeGroups {
+            let skinGroup = l.skinGroups.contains(g.id)
+            for ref in p.latticeSelectableRefs(g) {
+                let role = p.latticeSelectableRole(ref, in: g.id)
+                guard skinGroup || role != nil else { continue }
+                let hasFaces: Bool
+                switch ref {
+                case .face: hasFaces = true
+                case let .region(_, rid): hasFaces = !p.surfaceResolvedFaces(rid).isEmpty
+                case let .primitive(pid):
+                    guard !skinGroup, l.zoneGroups.contains(g.id), Self.zone(p, group: g.id, primitive: pid) != nil else { continue }
+                    if role != .exclude { out[id] = g.id }
+                    id += 1
+                    continue
+                }
+                guard hasFaces else { continue }
+                if !skinGroup, role != .exclude { out[id] = g.id }
+                id += 1
+            }
+        }
+        return out
+    }
+
     public static func regionKeys(_ p: ProjectModel) -> [Int32: String] {
         let l = p.lattice
         var out: [Int32: String] = [:]
@@ -961,6 +1035,7 @@ struct LatticeLayoutPreviewLines: View {
         VStack(spacing: 2) {
             if let p = preview.problem {
                 Text(p).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.warning.color)
+                    .lineLimit(3).fixedSize(horizontal: false, vertical: true)   // ★ said whole (sheet H4)
             } else if preview.laying, preview.bars == nil {
                 Text("New engine: laying the lattice…").font(.system(size: 12)).foregroundStyle(DS.Color.textSecondary.color)
             }

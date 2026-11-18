@@ -1385,6 +1385,9 @@ public struct WorkspacePlaceholder: View {
                 }
                 .onChange(of: surfaceXrayOn) { x in if newEngineOn { newEngine.update(project: project, on: true, solid: !x, stress: newEngineStress) } }
                 .onChange(of: project.lattice, perform: { _ in if newEngineOn { newEngineSettingsChanged(); fileExport.settingsChanged() } })   // ★ 11-16: Live waits, Click to refresh holds   // (the rebake's lattice trigger stays the page's first: OrganicPreviewBakeInputsTests)
+                .onChange(of: project.latticePageManual) { _ in   // ★ Organic: the page's Auto / Manual decides the ask (his 11-18)
+                    if newEngineOn, LatticeLayoutPreview.organic(project.lattice) { newEngineSettingsChanged() }
+                }
                 .ignoresSafeArea()
                 // ★ §6(g) — THE PENCIL HOVER, ON THE MESH VIEW ITSELF.
                 //
@@ -1733,6 +1736,7 @@ public struct WorkspacePlaceholder: View {
                     // octet bake behind the forced one on every Save & Exit.
                 }
                 .organicLimits(newEngine.organicAutoLimits)   // ★ Organic cut 1
+                .organicGroupLimits(newEngine.organicGroupLimits)   // ★ Organic per group (his 11-18)
                 .organicProbeDriver(makeOrganicProbeDriver())
                 // ★ ruling 4 (item 6): its "nothing set to lattice" lines leave by its own exit
                 .wallMarking { goToWallMarking() }
@@ -12617,14 +12621,14 @@ public struct WorkspacePlaceholder: View {
                     ?? String(format: "Auto · %.2f mm", card?.cellMM ?? 0))
                 : nil,
             expandMM: project.latticeExpandMM(ref),
-            syntheticFoci: latticeSyntheticFociRow(ref),
+            syntheticFoci: latticeSyntheticFociRow(ref, group: g.id),
             fociDisabled: project.latticeWallLoaded(ref) == true,
             // ★★ THE WORD AND THE OFFER READ ONE VALUE — core's verdict (ruling 1,
             // 2026-09-29): "Carries load" (no foci) or "Barely loaded — a made-up load
             // can be added". Unmeasured ⇒ no word. This retires Receipt C's precedence
             // in this row (the run's "carried load, untouched" line): the ruling names
             // the preview's core call, and the offer beside it reads that same verdict.
-            wallStress: latticeSyntheticFociRow(ref) == nil ? nil
+            wallStress: latticeSyntheticFociRow(ref, group: g.id) == nil ? nil
                 : project.latticeWallLoaded(ref).map(OrganicSyntheticStress.wallWord(loaded:)),
             // ★ Q2: a saved type core does not call live — its words lead the drawer
             typeRefusal: latticeTypeRefusal)
@@ -12680,9 +12684,11 @@ public struct WorkspacePlaceholder: View {
     /// lattice, under an Aesthetic stage, with synthetic stresses on. "Auto · 2"
     /// when the wall states nothing, its own count otherwise; "—" on a wall core found
     /// to carry load. The verdict's words are the row beneath it.
-    private func latticeSyntheticFociRow(_ ref: LatticeSelectableRef) -> String? {
+    private func latticeSyntheticFociRow(_ ref: LatticeSelectableRef, group: UUID) -> String? {
         let lat = project.lattice
-        guard lat.organicSyntheticStressesActive else { return nil }   // ruling 2
+        // ruling 2; ★ the new engine's Organic: the group's own switch (his 11-18)
+        guard project.importedFile != nil ? project.organicSyntheticOn(group: group) : lat.organicSyntheticStressesActive
+        else { return nil }
         if project.latticeWallLoaded(ref) == true { return "—" }
         return project.latticeSelectableSyntheticFoci(ref).map { "\($0)" }
             ?? "Auto · \(lat.organicSyntheticFoci)"

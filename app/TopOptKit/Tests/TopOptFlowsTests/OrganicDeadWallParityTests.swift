@@ -298,7 +298,7 @@ final class OrganicDeadWallParityTests: XCTestCase {
                       "the count is optional in the job")
         XCTAssertTrue(try flat("core/src/mesh/organic_lattice.cpp").contains("if (!rr.whole_region) { rep.per_region.push_back(rr); continue; }"),
                       "a flagged wall that carries load is skipped")
-        XCTAssertEqual(LatticeSettings().organicSyntheticFoci, 4, "the app's default is core's")
+        XCTAssertEqual(LatticeSettings().organicSyntheticFoci, 3, "his 11-18 default (the app sends every wall's count)")
     }
 
     /// ★ Ruling B: the (i) says what is applied, in his words.

@@ -58,6 +58,13 @@ public struct LatticeSetupWizard: View {
 
     /// ★ Organic cut 1: the Auto numbers the new engine is using (shown in the Organic controls' fields).
     var organicLimits: LatticeOrganicLook.Limits?
+    /// ★ Organic per group: each group's measured limits (before Look).
+    var organicGroupLimits: [UUID: LatticeOrganicLook.Limits] = [:]
+    func organicGroupLimits(_ g: [UUID: LatticeOrganicLook.Limits]) -> LatticeSetupWizard {
+        var copy = self
+        copy.organicGroupLimits = g
+        return copy
+    }
     func organicLimits(_ l: LatticeOrganicLook.Limits?) -> LatticeSetupWizard {
         var copy = self
         copy.organicLimits = l
@@ -771,6 +778,65 @@ public struct LatticeSetupWizard: View {
     private var organicManual: Bool {
         model.cellSizeMode == .fit
             && (model.organicPickedSeparationMM > 0 || model.organicPickedGradeMM.count == 2)
+    }
+
+    /// ★ Organic on the new engine: Look alone (Auto) or his controls (Manual), of `group` (nil: the whole part's).
+    private func organicSettings(group: UUID?) -> AnyView {
+        latticeManual ? AnyView(newOrganicControls(group: group)) : AnyView(organicLookRow(group: group))
+    }
+    private func organicLookBinding(group: UUID?) -> Binding<LatticeOrganicLook> {
+        Binding(get: { project.lattice.organicLook(group: group) }, set: { project.lattice.setOrganicLook($0, group: group) })
+    }
+    /// The measured limits of `group` (nil: the whole part's), as its Look leaves them.
+    private func organicLimits(group: UUID?) -> LatticeOrganicLook.Limits? {
+        let base = group.flatMap { project.lattice.wholePart ? nil : organicGroupLimits[$0] } ?? (group == nil ? organicLimits : nil)
+        return base.map { $0.measured ? $0.looked(percent: project.lattice.organicLook(group: group).lookPercentValue) : $0 }
+    }
+
+    /// ★ Organic on the new engine, Manual: his controls (LatticeOrganicControls).
+    private func newOrganicControls(group: UUID?) -> some View {
+        LatticeOrganicControls(look: organicLookBinding(group: group),
+                               limits: organicLimits(group: group),
+                               lineMM: project.printParams.strutLineWidthMM > 0 ? project.printParams.strutLineWidthMM : 0.45,
+                               aesthetic: (project.lattice.stageMode ?? .structural) == .aesthetic)
+            .onAppear {
+                _ = model.selectOrganic()
+                model.enforceOrganicSimOffRules()
+            }
+            .latticeID("lattice-organic-controls")
+    }
+
+    /// ★ Organic on the new engine, Auto: Look alone (his 11-18), 1 to 100 %, of `group`.
+    private func organicLookRow(group: UUID?) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: DS.Space.xs) {
+                Text("Look").dsStyle(DS.TypeScale.caption2).foregroundStyle(DS.Color.textTertiary.color)
+                infoButton("organic-look", LatticeOrganicLook.lookInfo)
+            }
+            HStack(spacing: DS.Space.s) {
+                Text("1%").dsStyle(DS.TypeScale.caption2).foregroundStyle(DS.Color.textQuaternary.color)
+                Slider(value: Binding(get: { project.lattice.organicLook(group: group).lookPercentValue },
+                                      set: { v in var l = project.lattice.organicLook(group: group); l.lookPercent = v
+                                             project.lattice.setOrganicLook(l, group: group) }),
+                       in: 1...100, step: 1)
+                    .tint(DS.Color.accent.color)
+                    .latticeID("lattice-organic-look")
+                Text("100%").dsStyle(DS.TypeScale.caption2).foregroundStyle(DS.Color.textQuaternary.color)
+                Text(String(format: "%.0f%%", project.lattice.organicLook(group: group).lookPercentValue))
+                    .dsStyle(DS.TypeScale.caption).monospacedDigit()
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .frame(minWidth: 38, alignment: .trailing)
+            }
+            .frame(minHeight: 44)
+            if let l = organicLimits(group: group), l.measured {   // what Look gives, in one line
+                shortNote(String(format: "Cells %@ to %@ mm", StrengthCheckDocs.number(l.cellLowerMM),
+                                 StrengthCheckDocs.number(l.cellUpperMM)))
+            }
+        }
+        .onAppear {
+            _ = model.selectOrganic()
+            model.enforceOrganicSimOffRules()
+        }
     }
 
     @ViewBuilder private var organicRow: some View {
@@ -2415,6 +2481,11 @@ public struct LatticeSetupWizard: View {
     }
     /// ★ E3: on an area's tab, which rows are its own (it replaces "These settings apply to every region today.")
     static let latticeAreaOwnLine = "The grade, its band and the finish are this area's; the other rows are the whole part's."
+    /// ★ Organic (LatticeReview's ruling 1): its settings are the whole part's, set on the Part tab; an area sets its finish.
+    static let organicAreaLine = "This area sets its finish; Organic's settings are the whole part's, on the Part tab."
+    static let organicPartLine = "Each group sets its own Organic settings on its tab."
+    static let organicWholePartLine = "The whole part is latticed: Organic's settings are the whole part's."
+    static let organicGroupLine = "This group's own Organic settings and finish."
     /// ★ Install 2: the Manual controls' headers — the part's (Part tab, beside areas) and an area's own (its tab)
     static let manualPartHeader = "Whole part"
     static let manualAreaHeader = "This area's own"
@@ -2680,8 +2751,14 @@ public struct LatticeSetupWizard: View {
         return AnyView(Group {
         if area == nil {
             AnyView(settingControl(.type, titled: true))
-            if latticeManual, !Self.controlHideSimulateStresses { AnyView(simulateStressesSwitch) }
-            if c.regions.isEmpty {
+            if latticeManual, !Self.controlHideSimulateStresses, !(organic && project.importedFile != nil) {
+                AnyView(simulateStressesSwitch)
+            }
+            if c.regions.isEmpty || (organic && project.importedFile != nil) {
+                if organic, project.importedFile != nil, !c.regions.isEmpty {
+                    shortNote(project.lattice.wholePart ? Self.organicWholePartLine : Self.organicPartLine)
+                        .latticeID("lattice-page-organic-part-note")
+                }
                 latticeAreaRows(organic: organic, structural: structural)
             } else {
                 shortNote(Self.latticePerAreaLine).latticeID("lattice-page-per-area-note")
@@ -2694,7 +2771,9 @@ public struct LatticeSetupWizard: View {
             Text(area.uppercased()).font(.system(size: 10.5, weight: .bold)).tracking(0.8)
                 .foregroundStyle(DS.Color.textTertiary.color)
             // ★ E3 (reviewer 2026-11-06): the grade is this area's own now; "These settings apply to every region today" goes
-            shortNote(Self.latticeAreaOwnLine).latticeID("lattice-page-area-own-note")
+            shortNote(organic && project.importedFile != nil
+                      ? (project.lattice.wholePart ? Self.organicAreaLine : Self.organicGroupLine) : Self.latticeAreaOwnLine)
+                .latticeID("lattice-page-area-own-note")
             if let part = latticePartGrade, c.regions.count > 1,
                part.gradingMode != model.gradingMode
                 || (model.gradingMode.fitsShape && part.shapeFitBandMM != model.shapeFitBandMM) {
@@ -2712,7 +2791,7 @@ public struct LatticeSetupWizard: View {
     /// — [None │ Rim │ Skin │ Covered] — sent as the pair core reads (`LatticeAreaGrading.ZoneFinish.words`). Core's refusals
     /// are greyed and said: Covered under the part's Skin (its woven finish is part-wide), Skin on a sheet type (R8), and
     /// Rim / Skin on an engine that takes no `regions[].skin`. Organic zones show the organic row instead (no zone skin).
-    private func zoneFinishRow(_ gid: UUID) -> AnyView {
+    private func zoneFinishRow(_ gid: UUID, organic: Bool = false) -> AnyView {
         let own = (latticeAreaEdits ?? project.lattice.areaGrading)[gid] ?? LatticeAreaGrading()
         let partOuter = model.boundary.zoneFinishWord   // nil: the part is on Skin (or Rim on an engine without it)
         let partSkin = model.boundary.jobSkinValue
@@ -2725,7 +2804,7 @@ public struct LatticeSetupWizard: View {
             case .none: return partOuter == nil && !partOnSkin
             case .covered: return partOuter == nil
             case .rim: return !skinWired
-            case .skin: return !skinWired || sheet
+            case .skin: return !skinWired || sheet || organic   // ★ the net skin is the part's (sheet E)
             }
         }
         let partName = ["None", "Rim", "Skin", "Covered"][boundaryIndex]
@@ -2789,8 +2868,20 @@ public struct LatticeSetupWizard: View {
     }
 
     private func latticeAreaRows(organic: Bool, structural: Bool, zone: UUID? = nil) -> AnyView {
-        AnyView(Group {
-        if organic {
+        let newOrganic = organic && project.importedFile != nil
+        return AnyView(Group {
+        if newOrganic {
+            // ★ his 11-18 iPad notes: "only those settings are visible when Organic is turned on. If on Auto, all but Look is
+            // invisible" — the new engine's Organic settings (Manual), or Look alone (Auto), on the Part tab; an area's tab
+            // has its Finish only (ruling 1)
+            // ★ his 11-18: "whole part ONLY if the whole part is latticed. Otherwise, it is per Group"
+            if let zone {
+                if TopOptKit.regionOuterFinishWired { zoneFinishRow(zone, organic: true) }
+                if !project.lattice.wholePart { organicSettings(group: zone) }
+            } else if project.lattice.wholePart || project.latticeAreaGroups.isEmpty {
+                organicSettings(group: nil)
+            }
+        } else if organic {
             AnyView(organicRow)
         } else {
             if let zone, TopOptKit.regionOuterFinishWired { zoneFinishRow(zone) }
@@ -2798,7 +2889,7 @@ public struct LatticeSetupWizard: View {
             AnyView(gradeToggleRow)
             if model.gradingMode != LatticeGradingMode.none { AnyView(gradeTypeRow) }
         }
-        if latticeManual {
+        if latticeManual, !newOrganic {   // ★ (his 11-18: no "Manual · this area" with nothing below it)
             Text(Self.latticeManualSection.uppercased()).font(.system(size: 10.5, weight: .bold)).tracking(0.8)
                 .foregroundStyle(DS.Color.accent.color)
                 .padding(.top, 4)
