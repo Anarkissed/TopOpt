@@ -238,6 +238,14 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 target_link_libraries(topopt PUBLIC Threads::Threads)
 
+# ★ ZLIB (brief E1, OF5): the streaming 3MF writer deflates its model part through the system zlib, which the macOS
+# and iOS SDKs both carry. Not found: the part is stored (uncompressed), and the file job's result says so.
+find_package(ZLIB QUIET)
+if(ZLIB_FOUND)
+  target_link_libraries(topopt PRIVATE ZLIB::ZLIB)
+  target_compile_definitions(topopt PRIVATE TOPOPT_HAVE_ZLIB)
+endif()
+
 # ★ ACCELERATE: the direct sparse Cholesky in src/fea/beam_network.cpp. The coupled
 # beam/shell/solid system is SPD once the corner-hinged solid islands are dropped,
 # and a supernodal direct factorisation is both exact and far faster than iterating
@@ -562,6 +570,10 @@ add_executable(test_lattice_layout_file tests/unit/test_lattice_layout_file.cpp)
 target_link_libraries(test_lattice_layout_file PRIVATE topopt)
 target_compile_definitions(test_lattice_layout_file PRIVATE
   LATTICE_FILE_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+if(ZLIB_FOUND)   # OF5: the test inflates the 3MF it reads back
+  target_link_libraries(test_lattice_layout_file PRIVATE ZLIB::ZLIB)
+  target_compile_definitions(test_lattice_layout_file PRIVATE TOPOPT_HAVE_ZLIB)
+endif()
 add_test(NAME lattice_layout_file COMMAND test_lattice_layout_file)
 # Organic cut 2 (brief E1, rules OF1..): the file as the solid plus unmerged closed tubes. The test makes its reference
 # unions with Manifold, so it is registered only where the writer has it.

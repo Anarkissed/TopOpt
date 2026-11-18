@@ -20,6 +20,11 @@
 #include "topopt/face_overrides.hpp"
 #include "topopt/lattice_layout_file.hpp"
 #include "topopt/stl.hpp"
+#include "topopt/threemf_stream.hpp"
+
+#ifdef TOPOPT_HAVE_ZLIB
+#include <zlib.h>
+#endif
 
 #ifndef LATTICE_FILE_TMP_DIR
 #define LATTICE_FILE_TMP_DIR "."
@@ -1511,6 +1516,85 @@ static void test_organic_job() {
     CHECK(has(text, "\"kept_any_length\": " + std::to_string(t.kept_any_length) + ", \"weave_left_unheld\": " +
                         std::to_string(t.weave_left_unheld) + ", \"stands_added\": " + std::to_string(r.made.stands_added)));
   }
+  // OF5: the same job with no mesh key takes the tubes route and writes a 3MF where the STL would be: ONE object of the
+  // solid and every shell, vertices shared within each, deflated where the build has zlib. Read back here (unzipped and
+  // parsed): its triangles and vertices as made, every shell closed (each edge once each way).
+  if (mesh_available()) {
+    write_job(R"("tensor": "lattice_file_pocket.tensor", )", weave);
+    const std::string three = kTmp + "/pocket_lattice.3mf";
+    std::remove(three.c_str());
+    const FileResult r = run_file_job(job_path, kTmp);
+    CHECK(r.ok && r.file == three && r.file_format == "3mf" && r.weave_mesh == "tubes" && r.made.tubes);
+    CHECK(r.compressed == StreamingThreeMfWriter::deflate_available());
+    const std::string text = slurp(result);
+    CHECK(has(text, "\"file_format\": \"3mf\", \"weave_mesh\": \"tubes\", \"shells\": " +
+                        std::to_string(r.made.shells.shells()) + ", \"shells_left_out\": " +
+                        std::to_string(r.made.shells.left_out) + ", \"compressed\": " + (r.compressed ? "true" : "false") +
+                        ", \"slicer_supports\": \"off\","));
+    const std::string zip = slurp(three);
+    CHECK(zip.size() == r.file_bytes && r.file_bytes > 0);
+    // The zip's model part.
+    std::string model;
+    for (std::size_t at = 0; at + 30 <= zip.size();) {
+      auto u16 = [&](std::size_t i) { return static_cast<unsigned>(static_cast<unsigned char>(zip[i])) | static_cast<unsigned>(static_cast<unsigned char>(zip[i + 1])) << 8; };
+      auto u32 = [&](std::size_t i) { return u16(i) | u16(i + 2) << 16; };
+      if (u32(at) != 0x04034b50u) break;
+      const unsigned method = u16(at + 8), csize = u32(at + 18), size = u32(at + 22), nl = u16(at + 26), xl = u16(at + 28);
+      const std::string name = zip.substr(at + 30, nl);
+      const std::string data = zip.substr(at + 30 + nl + xl, csize);
+      if (name == "3D/3dmodel.model") {
+        if (method == 0) model = data;
+#ifdef TOPOPT_HAVE_ZLIB
+        if (method == 8) {
+          model.assign(size, '\0');
+          z_stream zs;
+          std::memset(&zs, 0, sizeof zs);
+          inflateInit2(&zs, -15);
+          zs.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(data.data()));
+          zs.avail_in = static_cast<uInt>(data.size());
+          zs.next_out = reinterpret_cast<Bytef*>(&model[0]);
+          zs.avail_out = static_cast<uInt>(size);
+          const int rc = inflate(&zs, Z_FINISH);
+          inflateEnd(&zs);
+          if (rc != Z_STREAM_END || zs.total_out != size) model.clear();
+        }
+#endif
+        CHECK(method == (r.compressed ? 8u : 0u) && (method == 0 || csize < size / 2));
+      }
+      at += 30 + nl + xl + csize;
+    }
+    CHECK(!model.empty() && has(model, "<object id=\"1\" type=\"model\">") && has(model, "<item objectid=\"1\"/>"));
+    std::size_t nv = 0;
+    std::vector<std::array<unsigned long long, 3>> tris;
+    for (std::size_t at = model.find("<vertex "); at != std::string::npos; at = model.find("<vertex ", at + 1)) ++nv;
+    for (std::size_t at = model.find("<triangle "); at != std::string::npos; at = model.find("<triangle ", at + 1)) {
+      std::array<unsigned long long, 3> q{};
+      std::sscanf(model.c_str() + at, "<triangle v1=\"%llu\" v2=\"%llu\" v3=\"%llu\"", &q[0], &q[1], &q[2]);
+      tris.push_back(q);
+    }
+    CHECK(tris.size() == r.made.mesh.triangles && nv > 0 && nv < 3 * tris.size());
+    std::map<std::pair<unsigned long long, unsigned long long>, int> edges;
+    bool in_range = true;
+    for (const auto& q : tris)
+      for (int e = 0; e < 3; ++e) {
+        in_range = in_range && q[static_cast<std::size_t>(e)] < nv;
+        ++edges[{q[static_cast<std::size_t>(e)], q[static_cast<std::size_t>((e + 1) % 3)]}];
+      }
+    std::size_t bad = 0;
+    for (const auto& kv : edges) {
+      const auto back = edges.find({kv.first.second, kv.first.first});
+      bad += kv.second != 1 || back == edges.end() || back->second != 1;
+    }
+    std::printf("organic 3mf: %zu bytes (%s), %zu vertices, %zu triangles, %zu shells (%zu left out), %zu edges not once each way; "
+                "the solid made %d times over %d passes\n", r.file_bytes, r.compressed ? "deflated" : "stored", nv, tris.size(),
+                r.made.shells.shells(), r.made.shells.left_out, bad, r.made.base_builds, r.made.builds);
+    CHECK(in_range && bad == 0);
+    // Asked for an STL, the tubes route writes the STL (the unmerged shells as triangles); asked "merged", an STL as before.
+    write_job(R"("tensor": "lattice_file_pocket.tensor", "file_format": "stl", )", weave);
+    const FileResult rs = run_file_job(job_path, kTmp);
+    CHECK(rs.ok && rs.file == stl && rs.file_format == "stl" && rs.weave_mesh == "tubes" && read_stl_file(stl).mesh.triangles.size() == tris.size());
+    std::remove(three.c_str());
+  }
   for (const std::string& p : {model_path, face_overrides_sidecar_path(model_path), tensor_path, job_path, stl, result})
     std::remove(p.c_str());
 }
@@ -1919,9 +2003,9 @@ static void test_organic_finish_keys() {
     const std::string& out = n == 2 ? b : a;
     std::remove(out.c_str());
     (n == 0 ? none : n == 1 ? skin : rim) = make_lattice_file(box_model(30, 20, 16), j, out);
-    if (n == 0) std::rename(a.c_str(), (a + ".none").c_str());
+    if (n == 0) std::rename(none.file.c_str(), (a + ".none").c_str());   // the file as written (OF5: a 3MF by default)
   }
-  const bool rim_same = none.ok && rim.ok && !slurp(a + ".none").empty() && slurp(a + ".none") == slurp(b);
+  const bool rim_same = none.ok && rim.ok && !slurp(a + ".none").empty() && slurp(a + ".none") == slurp(rim.file);
   const std::string text = file_result_json(skin);
   char want[200];
   std::snprintf(want, sizeof want, "},\n    \"net_struts\": %llu, \"net_mm\": %.9g,",
@@ -1936,6 +2020,8 @@ static void test_organic_finish_keys() {
   std::remove(a.c_str());
   std::remove((a + ".none").c_str());
   std::remove(b.c_str());
+  std::remove(skin.file.c_str());
+  std::remove(rim.file.c_str());
 }
 
 // O6 (joints a hair apart, test 9): in the shallow-bar table two level bars in line whose joint's two ends are 4e-6 mm
@@ -2075,9 +2161,9 @@ static void test_cells_and_weave_job() {
                 r.ok ? 1 : 0, r.cells, r.weave_regions, r.strands, r.bars, r.weave_bars);
     cell_bars = r.bars - r.weave_bars;
     CHECK(r.ok && r.cells > 0 && r.weave_regions == 1 && r.strands > 0 && r.weave_bars > 0 && cell_bars > 0);
-    CHECK(r.ok && exists(path) && r.file_bytes > 0);
+    CHECK(r.ok && exists(r.file) && r.file_bytes > 0);   // OF5: a 3MF beside the asked-for name, by default
     CHECK(has(file_result_json(r), "\"weave_regions\": 1"));
-    std::remove(path.c_str());
+    std::remove(r.file.c_str());
   }
   // The strength check refused on it, before anything (the check is never asked).
   bool asked = false;

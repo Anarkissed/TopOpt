@@ -1,6 +1,7 @@
 // Lattice rebuild: the lattice file job. See lattice_layout_file.hpp and
 // docs/design/lattice-rebuild/04-layout-file-job.md.
 #include "topopt/lattice_layout_file.hpp"
+#include "topopt/threemf_stream.hpp"
 
 #include <algorithm>
 #include <array>
@@ -1036,7 +1037,7 @@ FileJob parse_file_job(const std::string& json_text) {
     const std::string w = "job.json";
     json::as_object(doc, w);
     json::reject_unknown(doc, {"mode", "model", "output", "linear_deflection", "threads", "layout", "mesh", "demand",
-                               "strength_job", "tensor"},
+                               "strength_job", "tensor", "file_format"},
                          w);
     const std::string mode = json::as_string(json::require(doc, "mode", w), w + ".mode");
     if (mode != "lattice_file") json::fail(w + ".mode", "must be \"lattice_file\", not \"" + mode + "\"");
@@ -1065,6 +1066,12 @@ FileJob parse_file_job(const std::string& json_text) {
         json::fail(w + ".strength_job", "must be a file name with no folder in it");
       if (job.strength_job == job.output || job.strength_job == kFileResultName)
         json::fail(w + ".strength_job", "is the name of a file the job writes");
+    }
+    // OF5: the file's format, "3mf" or "stl"; not given: 3MF for the tubes route, STL otherwise.
+    if (json::find(doc, "file_format")) {
+      job.file_format = text(doc, "file_format", "", w);
+      if (job.file_format != "3mf" && job.file_format != "stl")
+        json::fail(w + ".file_format", "must be \"3mf\" or \"stl\", not \"" + job.file_format + "\"");
     }
     // The stress tensor (Organic, Traced): a file beside the job, by its bare name.
     if (json::find(doc, "tensor")) {
@@ -1323,20 +1330,43 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     t0 = std::chrono::steady_clock::now();
     // Written beside its target and moved in only when whole: a failed job never leaves
     // half a file, nor replaces an earlier good one.
-    const std::string part = stl_path + ".part";
-    const std::size_t want = 84 + 50 * mesh.triangles.size();
+    // OF5: the format. "3mf" (default for the tubes route): ONE object of the solid and every shell, shared vertices,
+    // deflated where this build has zlib; written in place of a ".stl" name as ".3mf". "stl" (default otherwise): as
+    // before, byte for byte.
+    r.file_format = !job.file_format.empty() ? job.file_format : r.made.tubes ? "3mf" : "stl";
+    r.weave_mesh = r.made.tubes ? "tubes" : "merged";
+    std::string file_path = stl_path;
+    if (r.file_format == "3mf" && file_path.size() >= 4 && file_path.compare(file_path.size() - 4, 4, ".stl") == 0)
+      file_path.replace(file_path.size() - 4, 4, ".3mf");
+    const std::string part = file_path + ".part";
+    std::size_t want = 84 + 50 * mesh.triangles.size();
     bool written = false;
     std::string write_detail;
     try {
-      write_stl_file(part, mesh, StlFormat::Binary);
-      written = size_of_file(part) == want;
-      if (!written) write_detail = "the file is not the size its triangles need";
+      if (r.file_format == "3mf") {
+        StreamingThreeMfWriter::Options o;
+        o.indexed = true;
+        o.deflate = true;
+        StreamingThreeMfWriter w(part, o);
+        for (const Vec3& v : mesh.vertices) w.add_vertex(v);
+        for (const auto& t : mesh.triangles)
+          w.add_indexed(static_cast<std::uint64_t>(t[0]), static_cast<std::uint64_t>(t[1]), static_cast<std::uint64_t>(t[2]));
+        w.finish();
+        r.compressed = w.compressed();
+        want = size_of_file(part);
+        written = want > 0 && w.triangle_count() == mesh.triangles.size();
+        if (!written) write_detail = "the 3MF file came out empty";
+      } else {
+        write_stl_file(part, mesh, StlFormat::Binary);
+        written = size_of_file(part) == want;
+        if (!written) write_detail = "the file is not the size its triangles need";
+      }
     } catch (const std::exception& e) {
       write_detail = e.what();
     }
-    if (written && std::rename(part.c_str(), stl_path.c_str()) != 0) {
+    if (written && std::rename(part.c_str(), file_path.c_str()) != 0) {
       written = false;
-      write_detail = "cannot move the file into " + stl_path;
+      write_detail = "cannot move the file into " + file_path;
     }
     r.ms_write = ms_since(t0);
     if (!written) {
@@ -1371,7 +1401,7 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
       }
       r.ms_strength = ms_since(t0);
       if (!sd.ok) {
-        std::remove(stl_path.c_str());
+        std::remove(file_path.c_str());
         for (const std::string& f : sd.files) std::remove((ask.out_dir + "/" + f).c_str());
         r.ok = false;
         r.code = sd.code.empty() ? "strength_failed" : sd.code;
@@ -1384,7 +1414,7 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
       r.strength_accepted = sd.accepted;
       r.strength_json = sd.json;
     }
-    r.file = stl_path;
+    r.file = file_path;
     r.file_bytes = want;
     r.ok = true;
     r.code = "ok";
@@ -1496,6 +1526,14 @@ std::string file_result_json(const FileResult& r) {
   o += "  \"file\": \"" + escaped(base_name(r.file)) + "\",\n";
   std::snprintf(b, sizeof b, "  \"file_bytes\": %llu,\n", count(r.file_bytes));
   o += b;
+  if (r.weave_regions > 0 && !r.file_format.empty()) {   // OF5: only for a job with a weave region that made its file
+    std::snprintf(b, sizeof b,
+                  "  \"file_format\": \"%s\", \"weave_mesh\": \"%s\", \"shells\": %llu, \"shells_left_out\": %llu, "
+                  "\"compressed\": %s, \"slicer_supports\": \"off\",\n",
+                  r.file_format.c_str(), r.weave_mesh.c_str(), count(r.made.shells.shells()), count(r.made.shells.left_out),
+                  r.compressed ? "true" : "false");
+    o += b;
+  }
   std::snprintf(b, sizeof b, "  \"part\": {\"faces\": %d, \"triangles\": %llu, \"open_edges\": %llu},\n",
                 r.faces, count(r.part_triangles), count(r.open_edges));
   o += b;

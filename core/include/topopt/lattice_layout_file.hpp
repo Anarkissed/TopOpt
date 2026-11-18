@@ -171,6 +171,9 @@ struct FileJob {
   // field there itself. A job with a weave region and no field is refused (no_stress_result, OR14).
   std::string tensor;
   std::shared_ptr<const TensorField> tensor_field;
+  // OF5 (key "file_format"): "3mf" or "stl". Empty: 3MF when the file takes the tubes route (OF4), STL otherwise. A
+  // 3MF is written where the STL would be, its ".stl" name ending ".3mf".
+  std::string file_format;
   // The trace's ask (layout keys "organic_spacing_mm", or "organic_spacing_min_mm" with "organic_spacing_max_mm" and
   // "organic_spacing_exponent" (O12); "organic_width_mm"; the reference is the layout's "reference_mpa" and
   // "percentile"; "organic_shape_fit" (O13), true when not given); read only when a region is a weave. The Finish is
@@ -246,8 +249,13 @@ struct FileResult {
   std::string why;      // not ok: ONE plain line, for a maker
   std::string detail;   // not ok: the technical message behind it, if there is one (for a log)
   int exit_code = 1;    // 0 made, 3 refused (the part or the settings), 1 anything else
-  std::string file;     // the STL written
+  std::string file;     // the STL (or 3MF, OF5) written
   std::size_t file_bytes = 0;
+  // OF5: what was written: "3mf" or "stl", the route ("tubes" or "merged"), and whether the 3MF's model part was
+  // deflated. The result file carries them (with the shells, those left out, and slicer_supports "off": the app tells
+  // the owner to slice with supports off) for a job with a weave region only.
+  std::string file_format, weave_mesh;
+  bool compressed = false;
   // The part.
   int faces = 0;
   std::size_t part_triangles = 0, open_edges = 0;
