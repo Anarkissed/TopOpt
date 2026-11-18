@@ -663,4 +663,69 @@ struct SweepLimitsUnion {
   double cell_lower_mm = 0.0, cell_upper_mm = 0.0, cell_auto_mm = 0.0;
 };
 
+// ── OP12 (brief C2, E5; organic_synthetic.cpp): synthetic stress for the new engine ─────────────────────────────────
+// The owner: "Simulate stresses on unstressed walls" (Organic and Aesthetic only, a Number of foci per wall, 1 to 5)
+// and the samples that show ONE stress focus on a body with no solve. One call that takes the stress input and returns
+// it filled, with a report; the caller sets the filled field as the lay's tensor.
+//   `in` EMPTY (no solve): the field is made on a grid over the part's box, its voxel half the smallest spacing asked
+//     (over the groups' asks: spacing_mm, else spacing_min_mm), never over voxel_max_mm (1 mm); every weave region is
+//     without stress and filled, with its wall's count or kSyntheticFociDefault.
+//   Otherwise: only the regions listed in `walls` are considered. A voxel belongs to a weave region when its centre is
+//     lattice of it (as the spacing reads it). peak = the largest von Mises over every weave voxel; a listed region is
+//     WITHOUT STRESS when the 99th percentile of its von Mises (sorted, index round(0.99 (n - 1))) is at or under
+//     max(dead_fraction x peak, dead_floor_mpa) (the old rule, his ruling of 2026-09-07). A region with stress is left
+//     untouched (reported so).
+//   Foci (as the old engine places them): the region's box over its voxel centres, its two largest extents (axes a1,
+//     a2, half sizes h1, h2); focus q of n at angle 2 pi q / n + angle0_rad on the ellipse of `ellipse` (80 %) of h1, h2
+//     round the box centre (the third axis at the centre); weights alternate +1 (pull), -1 (push); soft = soft_fraction
+//     (a quarter) of the largest extent.
+//   The field (the lead's ruling: three distinct principal stresses, the minor at least 0.10 of the major for ties): at
+//     each voxel, for each focus, r the unit vector from it, t1 = unit(build direction x r) (any unit vector across r
+//     where that is zero), t2 = r x t1, g = w / (L^2 + soft^2): T += g (radial r r^T + across_build t1 t1^T +
+//     across_other t2 t2^T), the factors 1, -0.30, 0.12. The build direction is the region's group's ask's.
+//   Magnitude (the lead's ruling, confirmed by the owner: "Absolutely right. Full range"; it differs from the old engine
+//     on purpose): one factor per region so that its largest synthetic von Mises equals the reference its GROUP's lay
+//     will use for the real field: the group's stated reference_mpa, else its `percentile` of the real von Mises over
+//     the group's regions that HAVE stress; when none has (or `in` is empty), 1 MPa. The region's real values are
+//     replaced whole (a voxel whose T is zero keeps its value).
+//   Refused (E1's list, nothing made): a count not a whole number 1 to 5 (setting "foci"), a region that is not a weave
+//     region (setting "region").
+inline constexpr int kSyntheticFociDefault = 3;   // the owner, 2026-11-18: "Change the default to 3" (the OLD run keeps 4)
+inline constexpr int kSyntheticFociMin = 1, kSyntheticFociMax = 5;
+struct SyntheticStressAsk {
+  double dead_fraction = 0.02, dead_floor_mpa = 0.005;           // K2, the old run's numbers
+  double radial = 1.0, across_build = -0.30, across_other = 0.12;  // the field's three factors
+  double ellipse = 0.80, angle0_rad = 0.35, soft_fraction = 0.25;  // the old placing of the foci
+  double voxel_max_mm = 1.0;                                       // the made grid's largest voxel (no input)
+};
+struct SyntheticWall {
+  int region = 0;
+  int foci = kSyntheticFociDefault;   // 1 to 5; a wall that gives no count keeps the default
+};
+struct SyntheticRegionReport {
+  int region = 0, group = -1;      // its group's index in the list given (-1: in none)
+  bool flagged = false;            // listed in `walls` (every weave region with no input)
+  bool without_stress = false;
+  double p99_mpa = 0.0, threshold_mpa = 0.0;
+  int foci = 0;                    // used (0 when not flagged)
+  double soft_mm = 0.0;
+  std::size_t voxels = 0, filled = 0;
+  double reference_mpa = 0.0, factor = 0.0, peak_after_mpa = 0.0;   // filled only: the target, the factor, the peak
+};
+struct SyntheticStress {
+  TensorField field;               // the input, filled (or the made field)
+  std::vector<SyntheticRegionReport> regions;   // every weave region, in the domain's order
+  double peak_mpa = 0.0, threshold_mpa = 0.0;   // over the real weave voxels
+  bool from_empty = false;
+  std::vector<OrganicRefusal> refused;           // not empty: nothing made
+};
+SyntheticStress organic_synthetic_stress(const Domain& domain, const TensorField& in,
+                                         const std::vector<SyntheticWall>& walls,
+                                         const std::vector<OrganicGroup>& groups, const SyntheticStressAsk& how = {});
+// Bound to the session: the domain the lay will lay in (the settings' "where", with the first group's flat floor as
+// Session::lay_organic sets it), made and kept as Session::sweep_limits makes it.
+SyntheticStress organic_synthetic_stress(Session& session, const Settings& settings, const TensorField& in,
+                                         const std::vector<SyntheticWall>& walls,
+                                         const std::vector<OrganicGroup>& groups, const SyntheticStressAsk& how = {});
+
 }  // namespace topopt::lattice_layout

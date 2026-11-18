@@ -1472,6 +1472,110 @@ static void test_groups() {
   }
 }
 
+// ── OL-SYNTH (OP12, brief C2, E5): synthetic stress on walls without stress, and on a body with no solve ──────────────
+static void eigen3(const double* m, double ev[3]) {   // a symmetric 3 x 3 in Voigt order, by Jacobi; by |value|, down
+  double a[3][3] = {{m[0], m[3], m[5]}, {m[3], m[1], m[4]}, {m[5], m[4], m[2]}};
+  for (int sweep = 0; sweep < 30; ++sweep)
+    for (int p = 0; p < 2; ++p)
+      for (int q = p + 1; q < 3; ++q) {
+        if (std::fabs(a[p][q]) < 1e-300) continue;
+        const double th = 0.5 * (a[q][q] - a[p][p]) / a[p][q];
+        const double t = (th >= 0 ? 1.0 : -1.0) / (std::fabs(th) + std::sqrt(th * th + 1.0));
+        const double c = 1.0 / std::sqrt(t * t + 1.0), sn = t * c;
+        for (int k = 0; k < 3; ++k) { const double kp = a[k][p], kq = a[k][q]; a[k][p] = c * kp - sn * kq; a[k][q] = sn * kp + c * kq; }
+        for (int k = 0; k < 3; ++k) { const double pk = a[p][k], qk = a[q][k]; a[p][k] = c * pk - sn * qk; a[q][k] = sn * pk + c * qk; }
+      }
+  ev[0] = a[0][0]; ev[1] = a[1][1]; ev[2] = a[2][2];
+  std::sort(ev, ev + 3, [](double x, double y) { return std::fabs(x) > std::fabs(y); });
+}
+static double vm6(const double* t) {
+  const double a = t[0] - t[1], b = t[1] - t[2], d = t[2] - t[0];
+  return std::sqrt(std::max(0.0, 0.5 * (a * a + b * b + d * d) + 3.0 * (t[3] * t[3] + t[4] * t[4] + t[5] * t[5])));
+}
+static void test_synthetic() {
+  // A 30 x 30 x 40 box: region 1 under the top face (loaded: OL-Q's field above z 20), region 2 under the bottom face
+  // (no stress at all), 12 mm deep each. Both flagged with the default count: only region 2 is filled.
+  const StepModel model = box_model(30, 30, 40);
+  const TensorField in = make_field(30, 30, 40, [](const Vec3& p) {
+    return p.z > 20.0 ? std::array<double, 6>{0.4 + 0.02 * p.x, 0.1, 1.0 + 0.1 * p.x, 0.0, 0.0, 0.0} : std::array<double, 6>{};
+  });
+  Settings st;
+  st.regions = {{1, Role::Lattice, {1}, 12.0, 0.0, true}, {2, Role::Lattice, {0}, 12.0, 0.0, true}};
+  OrganicAsk ask = traced_ask();
+  const std::vector<OrganicGroup> one = {{{1, 2}, ask}};
+  Session s(model);
+  const SyntheticStress out = organic_synthetic_stress(s, st, in, {{1}, {2}}, one);
+  CHECK(out.refused.empty() && out.regions.size() == 2);
+  if (out.regions.size() != 2) return;
+  const SyntheticRegionReport& r1 = out.regions[0];
+  const SyntheticRegionReport& r2 = out.regions[1];
+  for (const SyntheticRegionReport& r : out.regions)
+    std::printf("OL-SYNTH region %d: flagged %d, without stress %d (p99 %.4f, threshold %.4f), foci %d, voxels %zu, filled "
+                "%zu, reference %.4f, factor %.4g, peak %.4f\n", r.region, r.flagged, r.without_stress, r.p99_mpa,
+                r.threshold_mpa, r.foci, r.voxels, r.filled, r.reference_mpa, r.factor, r.peak_after_mpa);
+  CHECK(!r1.without_stress && r1.filled == 0 && r2.without_stress && r2.filled > 0 && r2.foci == kSyntheticFociDefault);
+  // The reference the lay would use: the 95th percentile of region 1's real von Mises (the group's stressed regions).
+  const Domain::Probe probe = s.domain()->probe();
+  std::vector<double> seen;
+  std::size_t in2 = 0, distinct = 0, ties = 0, changed1 = 0;
+  double peak2 = 0.0;
+  for (int k = 0; k < in.nz; ++k)
+    for (int j = 0; j < in.ny; ++j)
+      for (int i = 0; i < in.nx; ++i) {
+        const Where w = probe.where({i + 0.5, j + 0.5, k + 0.5});
+        if (!w.lattice()) continue;
+        const std::size_t e = in.index(i, j, k);
+        const double* t = &out.field.voigt[6 * e];
+        if (w.id == 1) {
+          seen.push_back(vm6(&in.voigt[6 * e]));
+          for (int c = 0; c < 6; ++c) changed1 += t[c] != in.voigt[6 * e + static_cast<std::size_t>(c)];
+        } else if (w.id == 2) {
+          ++in2;
+          peak2 = std::max(peak2, vm6(t));
+          double ev[3];
+          eigen3(t, ev);
+          const double big = std::fabs(ev[0]);
+          distinct += big > 0.0 && std::fabs(ev[0] - ev[1]) > 1e-3 * big && std::fabs(ev[1] - ev[2]) > 1e-3 * big &&
+                      std::fabs(ev[0] - ev[2]) > 1e-3 * big;
+          ties += big > 0.0 && std::fabs(ev[1]) / big >= 0.10;
+        }
+      }
+  std::sort(seen.begin(), seen.end());
+  const double ref = seen.empty() ? 0.0 : seen[static_cast<std::size_t>(std::floor(0.95 * static_cast<double>(seen.size() - 1)))];
+  std::printf("OL-SYNTH region 2: %zu voxels, three distinct %zu, minor / major at least 0.10 %zu; peak %.6f, the "
+              "reference %.6f; region 1 values changed %zu\n", in2, distinct, ties, peak2, ref, changed1);
+  CHECK(in2 > 0 && distinct >= 0.95 * in2 && ties >= 0.95 * in2);
+  CHECK(std::fabs(peak2 - ref) < 1e-9 * std::max(1.0, ref) && std::fabs(r2.reference_mpa - ref) < 1e-12 && changed1 == 0);
+  // Refused: a count of 0 or 6, a region that is not a weave region.
+  {
+    const SyntheticStress bad = organic_synthetic_stress(s, st, in, {{2, 0}, {2, 6}, {9, 3}}, one);
+    for (const OrganicRefusal& x : bad.refused) std::printf("OL-SYNTH refused: %s %s \"%s\"\n", x.setting.c_str(), x.code.c_str(), x.text.c_str());
+    CHECK(bad.refused.size() == 3 && bad.field.empty() && bad.regions.empty());
+  }
+  // No input, one focus, a 30 mm cube latticed whole: Traced lays curves, Grown lays vines AND ties; the spacing varies.
+  const StepModel cube = box_model(30, 30, 30);
+  Settings cs;
+  cs.regions = {{1, Role::Lattice, {1}, 30.0, 0.0, true}};
+  for (int g = 0; g < 2; ++g) {
+    OrganicAsk a = traced_ask();
+    if (g) { a.mode = OrganicMode::Grown; a.layer_mm = 0.2; }
+    const std::vector<OrganicGroup> gs = {{{1}, a}};
+    Session c(cube);
+    const SyntheticStress made = organic_synthetic_stress(c, cs, TensorField{}, {{1, 1}}, gs);
+    const Outcome o = made.refused.empty() ? c.lay_organic(cs, made.field, gs) : Outcome{};
+    const std::size_t ties_laid = o.grown ? o.grown->ties_laid : 0;
+    std::printf("OL-SYNTH cube, no input, 1 focus, %s: grid %d x %d x %d at %.2f mm, filled %zu; %zu strands, %zu bars, "
+                "ties %zu; spacing %.2f to %.2f mm\n", g ? "Grown" : "Traced", made.field.nx, made.field.ny,
+                made.field.nz, made.field.spacing, made.regions.empty() ? 0 : made.regions[0].filled, o.strands,
+                o.bars.bars.size(), ties_laid, o.spacing_smallest_mm, o.spacing_largest_mm);
+    CHECK(made.from_empty && made.field.spacing == 1.0 && !made.regions.empty() && made.regions[0].foci == 1 &&
+          std::fabs(made.regions[0].peak_after_mpa - 1.0) < 1e-12);
+    CHECK(o.refused.empty() && o.strands > 0 && !o.bars.bars.empty() && o.spacing_largest_mm - o.spacing_smallest_mm > 0.5);
+    if (g) CHECK(ties_laid > 0);
+  }
+  CHECK(kSyntheticFociDefault == 3);
+}
+
 int main() {
   test_s_cut_fix();
   test_k_floor();
@@ -1499,6 +1603,7 @@ int main() {
   test_floor_from_ask();
   test_sweep_limits_for();
   test_groups();
+  test_synthetic();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }
