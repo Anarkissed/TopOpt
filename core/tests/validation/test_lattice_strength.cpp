@@ -592,7 +592,7 @@ int main() {
                   "\"minimize_plastic\": true, \"infill_percent\": 20, \"wall_loops\": 2, \"wall_line_width_mm\": 0.45,");
         return j;
       };
-      const std::string sb = block(run("organic_scalar", fj, sparse("")).json);
+      const std::string sb = block(run("organic_scalar", fj, sparse("{\"width_aware_knockdown\": false}")).json);
       const std::string wb2 = block(run("organic_wa", fj, sparse("{\"width_aware_knockdown\": true}")).json);
       std::printf("[organic width-aware] effective %.6g (scalar %.6g), passes at %.0f %% (scalar %.0f %%)\n",
                   num_after(wb2, "effective"), num_after(sb, "effective"), num_after(wb2, "passes_at_infill_percent"),
@@ -875,6 +875,15 @@ int main() {
     const double effw = num_after(wprobe, "effective");
     const std::string walls = spots_run("notch_walls", "notch1.stl", 1000.0 * effw / 1.2, 20.0, off, walls_print);
     CHECK(has(walls, "\"passes_with_walls_credited\": true") && has(walls, " Counting the printed walls as solid, it certifies.\""));
+    // Brief E4, item 5: the walls are credited by default. The same bar and load, the setting not stated: it certifies
+    // (no spots, no text); at a load where even with the walls it does not, the text says nothing about walls.
+    const std::string wdef = spots_run("notch_walls_default", "notch1.stl", 1000.0 * effw / 1.2, 20.0, "{}", walls_print);
+    std::printf("[walls default] effective %.6g, off %.6g\n", num_after(wdef, "effective"), num_after(walls, "effective"));
+    CHECK(num_after(wdef, "effective") >= 1.5 && num_after(walls, "effective") < 1.5 && !has(wdef, "\"spots\"") && !has(wdef, "\"text\""));
+    const double effon = num_after(spots_run("notch_won_probe", "notch1.stl", 1000.0, 20.0, "{}", walls_print), "effective");
+    const std::string won = spots_run("notch_walls_on", "notch1.stl", 1000.0 * effon / 1.2, 20.0, "{}", walls_print);
+    CHECK(num_after(won, "spots_total") >= 1.0 && has(won, "\"text\": ") && !has(won, "Counting the printed walls") &&
+          has(won, "\"passes_with_walls_credited\": false"));
     // The sentences alone.
     CHECK(organic_solid_text(50, 81, false, 3, 3) ==
           "The solid part does not certify at 50 % infill. It would certify at 81 % infill. The other way is to strengthen "
@@ -886,6 +895,26 @@ int main() {
     CHECK(organic_solid_text(37.5, 90, false, 20, 57) ==
           "The solid part does not certify at 37.5 % infill. It would certify at 90 % infill. The other way is to strengthen "
           "the 20 worst of 57 marked areas.");
+  }
+
+  // ── §13 (brief E4, item 5) Install 3's cube verdict credits the walls by default too: the light job's block at 20 %
+  // infill with two 0.45 mm walls, under the load at which the walls NOT credited leave the solid at 1.2 of margin:
+  // not stated, the setting is on (echoed) and the block is accepted; stated off, it fails on the solid's margin.
+  {
+    const auto at20 = [&](double newtons, const std::string& settings) {
+      std::string j = strength_job(f, newtons, "lattice_part", "block.stl", -1, settings);
+      j.replace(j.find("\"minimize_plastic\": true,"), 25,
+                "\"minimize_plastic\": true, \"infill_percent\": 20, \"wall_loops\": 2, \"wall_line_width_mm\": 0.45,");
+      return j;
+    };
+    const double N = 20.0 * num_after(lb, "margin_worst_case") * std::pow(0.2, 1.5) / 1.2;
+    const std::string on = block(run("cube_walls_default", file_job(f, ""), at20(N, "")).json);
+    const std::string off = block(run("cube_walls_off", file_job(f, ""), at20(N, "{\"width_aware_knockdown\": false}")).json);
+    std::printf("[cube walls] %.4g N: default %s / off %s\n", N, on.substr(on.find("\"verdict\""), 40).c_str(),
+                off.substr(off.find("\"verdict\""), 60).c_str());
+    CHECK(has(on, "\"width_aware_knockdown\": true") && has(off, "\"width_aware_knockdown\": false"));
+    CHECK(has(on, "\"accepted\": true") && !has(on, "\"fail_reason\": \"solid_margin\""));
+    CHECK(has(off, "\"accepted\": false") && has(off, "\"fail_reason\": \"solid_margin\""));
   }
 
   // ── §8 the octet's strut law is the full octet's (2026-11-17): its span is the octet band, so no density in the band

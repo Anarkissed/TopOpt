@@ -33,7 +33,7 @@ The load must reach the supports through material that counts. If it doesn't, th
 
 ## The solid's margin
 
-For the solid parts, the strength of the plastic is compared with the highest stress. Layers bond weaker than the plastic itself, so stress pulling layers apart is judged against {{z_knockdown}} of the strength. Infill under 100 % lowers this margin.
+For the solid parts, the strength of the plastic is compared with the highest stress. Layers bond weaker than the plastic itself, so stress pulling layers apart is judged against {{z_knockdown}} of the strength. Infill under 100 % lowers this margin. With {{width_aware_knockdown}} on (the default), the solid within the printed wall thickness of a surface counts at full strength, and only the inside takes the infill reduction.
 
 ## The struts' margin
 

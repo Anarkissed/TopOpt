@@ -15260,7 +15260,7 @@ const std::vector<StrengthSettingSpec>& strength_setting_specs() {
       {"safety_margin_floor", K::Number, 1.5, 1.0, 5.0, false, {}},
       {"infill_exponent", K::Number, 1.5, 1.0, 3.0, false, {}},
       {"infill_floor", K::Number, 1e-3, 1e-5, 0.1, false, {}},
-      {"width_aware_knockdown", K::Bool, 0.0, 0.0, 1.0, false, {}},
+      {"width_aware_knockdown", K::Bool, 1.0, 0.0, 1.0, false, {}},   // on by default (the owner, 2026-11-18; brief E4 item 5)
       {"thickness_cap_voxels", K::Integer, 32.0, 1.0, 256.0, false, {}},
       {"load_path_connectivity", K::Choice, 26.0, 6.0, 26.0, false, {6.0, 18.0, 26.0}},
       {"printed_threshold", K::Number, 0.5, 0.01, 0.99, false, {}},
@@ -15564,7 +15564,9 @@ ll::StrengthDone strength_setup(const ll::StrengthAsk& ask, const std::string& m
   // The settings that live on the options (each only when stated: the default is what the options hold).
   if (st.has("cg_tolerance")) options.simp.cg_tolerance = st.get("cg_tolerance");
   if (st.has("cg_max_iterations")) options.simp.cg_max_iterations = static_cast<int>(st.get("cg_max_iterations"));
-  if (st.has("width_aware_knockdown")) options.width_aware_knockdown = st.get("width_aware_knockdown") != 0.0;
+  // Brief E4, item 5 (the owner, 2026-11-18): the walls are credited unless the job turns the setting off; one setting
+  // for the Organic verdict and Install 3's cube verdict alike.
+  options.width_aware_knockdown = st.get("width_aware_knockdown") != 0.0;
   S.domain = resolve_design_domain(model_grid, bcs, options);
   ll::StrengthDone ok;
   ok.ok = true;

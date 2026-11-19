@@ -149,7 +149,7 @@ with $a$ = {{infill_exponent}}, $k_{\min}$ = {{infill_floor}}:
 
 $$M_{\text{eff}}=M\cdot k_{\text{inf}} .$$
 
-({{width_aware_knockdown}}: when on, the in-plane term instead uses $\max_e \sigma_{vm,e}/k_e$ with $k_e=f_w+(1-f_w)k_{\text{inf}}$, $f_w=4t(W_e-t)/W_e^2$, $t$ the wall ring from {{wall_loops}} and {{wall_line_width_mm}}; off in production.)
+({{width_aware_knockdown}}: when on, the in-plane term instead uses $\max_e \sigma_{vm,e}/k_e$ with $k_e=f_w+(1-f_w)k_{\text{inf}}$, $f_w=4t(W_e-t)/W_e^2$, $t$ the wall ring from {{wall_loops}} and {{wall_line_width_mm}}; ON by default (the owner, 2026-11-18), for the Organic verdict and the cube verdict alike: the solid within the printed wall thickness of a surface counts at full strength, only the inside takes the infill reduction. The interlayer term keeps $k_{\text{inf}}$.)
 
 $$\text{accepted}=\text{path\_ok}\ \wedge\ M_{\text{eff}}\ge S\ \wedge\ \neg\text{sliding}\ \wedge\ \text{every scenario accepted and none unheld}.$$
 
