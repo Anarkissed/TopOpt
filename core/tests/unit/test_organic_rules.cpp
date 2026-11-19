@@ -1147,6 +1147,18 @@ static void test_additions() {
     tiny.bars.push_back(t);
     CHECK(old_bars_kept(tiny, tiny).empty());
   }
+  // A thinner bar of the same strand lying along an old bar (a strand running back over itself) does not hide it.
+  {
+    Bars two;
+    Bar t = base.bars.bars[idx[0]];
+    two.bars.push_back(t);
+    Bar back = t;
+    std::swap(back.a, back.b);
+    back.width = 0.5 * t.width;
+    Bars with = two;
+    with.bars.insert(with.bars.begin(), back);
+    CHECK(old_bars_kept(two, with).empty());
+  }
   // The invariant catches a thinner bar and a moved end.
   {
     Bars thin = after;

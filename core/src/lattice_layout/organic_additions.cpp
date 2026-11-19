@@ -121,11 +121,14 @@ std::string old_bars_kept(const Bars& before, const Bars& after, double tol_mm, 
     const double L = std::sqrt((B.b.x - B.a.x) * (B.b.x - B.a.x) + (B.b.y - B.a.y) * (B.b.y - B.a.y) + (B.b.z - B.a.z) * (B.b.z - B.a.z));
     const std::string which = "bar " + std::to_string(i) + (B.link ? " (a link)" : "");
     if (on[i].empty()) return which + " is gone";
+    // Only pieces at least as wide count: another bar of its strand lying along it (a strand that runs back over
+    // itself) may be thinner, and is not it.
     bool whole = false;
+    double thinner = -1.0;
     std::vector<std::pair<double, double>> span;
     for (std::size_t j : on[i]) {
       const Bar& A = after.bars[j];
-      if (A.width < B.width - 1e-12) return which + " is thinner (" + std::to_string(A.width) + " < " + std::to_string(B.width) + ")";
+      if (A.width < B.width - 1e-12) { thinner = std::max(thinner, A.width); continue; }
       double ta = 0.0, tb = 0.0;
       seg_dist(A.a, B.a, B.b, &ta);
       seg_dist(A.b, B.a, B.b, &tb);
@@ -135,17 +138,19 @@ std::string old_bars_kept(const Bars& before, const Bars& after, double tol_mm, 
       whole = whole || same;
     }
     if (whole) continue;
-    if (B.link) return which + " was cut or moved";
+    const std::string thin = thinner >= 0.0 ? " (a thinner bar lies along it: " + std::to_string(thinner) + " < " + std::to_string(B.width) + ")" : "";
+    if (span.empty()) return which + (thinner >= 0.0 ? " is thinner" + thin : " is gone");
+    if (B.link) return which + " was cut or moved" + thin;
     if (!(L > 0.0)) continue;
     std::sort(span.begin(), span.end());
     const double gap = tol / L;
     double reach = 0.0;
-    if (span.front().first > gap) return which + " lost its a end";
+    if (span.front().first > gap) return which + " lost its a end" + thin;
     for (const auto& [s0, s1] : span) {
-      if (s0 > reach + gap) return which + " has a gap along it";
+      if (s0 > reach + gap) return which + " has a gap along it" + thin;
       reach = std::max(reach, s1);
     }
-    if (reach < 1.0 - gap) return which + " lost its b end";
+    if (reach < 1.0 - gap) return which + " lost its b end" + thin;
     if (split) ++*split;
   }
   return {};
