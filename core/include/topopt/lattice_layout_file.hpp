@@ -325,6 +325,10 @@ struct FileResult {
   double net_mm = 0.0;
   // G12: what Grown did (Outcome::grown); null for Traced and cube lattices (then not written).
   std::shared_ptr<const GrowReport> grown;
+  // OG1, OG2 (brief E6): the gap rule (points lowered, bars over their cap), its diagnosis, and the relief.
+  std::size_t gap_capped = 0, gap_broken = 0;
+  Outcome::Tight tight;
+  Outcome::Relief relief;
   ShallowTable shallow;
   // The mesh.
   FileReport made;

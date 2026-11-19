@@ -209,9 +209,11 @@ struct SweepRounding {
   double half(double x) const { return std::max(std::round(x * 2.0) / 2.0, std::ceil(floor_cell * 2.0) / 2.0); }
 };
 
-std::vector<SweepLimits> organic_sweep_limits(const Domain& domain, double line_mm) {
+std::vector<SweepLimits> organic_sweep_limits(const Domain& domain, double line_mm, double gap_lines) {
   std::vector<SweepLimits> out;
   const SweepRounding rd(domain, line_mm);
+  // OG1 (brief E6): the gap, gap_lines x the line; the cell's lower end at least the thin strut + the gap (up to 0.5 mm).
+  const double gap = gap_lines > 0.0 && std::isfinite(gap_lines) ? gap_lines * rd.line : 0.0;
   const double thinnest = rd.thinnest;
   auto lines = [&](double x) { return rd.lines(x); };
   auto half = [&](double x) { return rd.half(x); };
@@ -236,6 +238,15 @@ std::vector<SweepLimits> organic_sweep_limits(const Domain& domain, double line_
       s.strut_auto_mm = lines(0.5 * (s.strut_lower_mm + s.strut_upper_mm));
       s.cell_lower_mm = half(s.d_mm * kSweepCellLower);
       s.cell_upper_mm = half(s.d_mm * kSweepCellUpper);
+      if (gap > 0.0) {   // OG1
+        s.gap_mm = gap;
+        s.gap_cell_mm = std::ceil((s.strut_lower_mm + gap) * 2.0 - 1e-9) / 2.0;
+        if (s.cell_lower_mm < s.gap_cell_mm) {
+          s.cell_lower_mm = s.gap_cell_mm;
+          s.cell_lower_by_gap = true;
+        }
+        s.cell_upper_mm = std::max(s.cell_upper_mm, s.cell_lower_mm);
+      }
       s.cell_auto_mm = half(0.5 * (s.cell_lower_mm + s.cell_upper_mm));
     }
     out.push_back(s);
@@ -244,14 +255,15 @@ std::vector<SweepLimits> organic_sweep_limits(const Domain& domain, double line_
 }
 
 // OP5 (brief C1): the same limits before any lay, on the domain lay() would lay in.
-std::vector<SweepLimits> Session::sweep_limits(const Settings& settings, double line_mm) {
+std::vector<SweepLimits> Session::sweep_limits(const Settings& settings, double line_mm, double gap_lines) {
   ready_domain(settings);
-  return organic_sweep_limits(*domain_, line_mm);
+  return organic_sweep_limits(*domain_, line_mm, gap_lines);
 }
 
 // OP10 (brief C2, E4; E7: per group): the union of the measured regions' limits among `regions`.
-SweepLimitsUnion Session::sweep_limits_for(const Settings& settings, const std::vector<int>& regions, double line_mm) {
-  const std::vector<SweepLimits> all = sweep_limits(settings, line_mm);
+SweepLimitsUnion Session::sweep_limits_for(const Settings& settings, const std::vector<int>& regions, double line_mm,
+                                           double gap_lines) {
+  const std::vector<SweepLimits> all = sweep_limits(settings, line_mm, gap_lines);
   const SweepRounding rd(*domain_, line_mm);
   SweepLimitsUnion u;
   for (const int id : regions) {
@@ -273,6 +285,8 @@ SweepLimitsUnion Session::sweep_limits_for(const Settings& settings, const std::
     u.strut_upper_mm = std::max(u.strut_upper_mm, s->strut_upper_mm);
     u.cell_lower_mm = std::min(u.cell_lower_mm, s->cell_lower_mm);
     u.cell_upper_mm = std::max(u.cell_upper_mm, s->cell_upper_mm);
+    u.gap_mm = s->gap_mm;   // OG1
+    u.cell_lower_by_gap = u.cell_lower_by_gap || s->cell_lower_by_gap;
     u.measured_regions.push_back(id);
   }
   if (u.measured) {

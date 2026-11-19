@@ -127,6 +127,9 @@ double second_spread(const std::vector<Vec3>& pts) {
 
 // ── 1. THE FRAME (prototype steps 1 to 3, 6) ───────────────────────────────────────────────────────────────────────
 FrameModel build_frame(const Bars& bars, const Domain* domain, const FrameSettings& s) {
+  // OG2 (brief E6): a proud end's relief carries no load and is not judged (it ends free): the frame is built from the
+  // bars as they were, every end flush.
+  if (has_relief(bars)) return build_frame(without_relief(bars), domain, s);
   FrameModel f;
   const std::size_t nb = bars.bars.size();
   f.bars = nb;
@@ -265,6 +268,7 @@ FrameModel build_frame(const Bars& bars, const Domain* domain, const FrameSettin
 // ── 2. THE MATERIAL PER VOXEL (prototype R1, the lead's item 3) ────────────────────────────────────────────────────
 FrameMaterial frame_material(const Bars& bars, const Domain& domain, const VoxelGrid& grid, const FrameSettings& s,
                              int threads) {
+  if (has_relief(bars)) return frame_material(without_relief(bars), domain, grid, s, threads);   // OG2, as build_frame
   const auto t0 = std::chrono::steady_clock::now();
   FrameMaterial m;
   const std::size_t n = grid.voxel_count();

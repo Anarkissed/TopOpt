@@ -101,6 +101,83 @@ std::vector<std::size_t> straighten_points(const std::vector<Vec3>& points, doub
   return kept;
 }
 
+// OG1 (brief E6): the local spacing at each strand point, its reason, and the gap rule's cap.
+std::size_t organic_gap_cap(std::vector<Strand>& strands, std::size_t first, const TensorField& field,
+                            const std::vector<double>& spacing, const std::vector<std::uint8_t>& why, double gap_mm,
+                            double thinnest_mm) {
+  std::size_t lowered = 0;
+  const std::size_t n = static_cast<std::size_t>(std::max(0, field.nx)) * static_cast<std::size_t>(std::max(0, field.ny)) *
+                        static_cast<std::size_t>(std::max(0, field.nz));
+  const bool grid = !field.empty() && spacing.size() == n;
+  // The voxel of p (its spacing above 0), else the smallest spacing above 0 of the 26 around it; n when none.
+  auto voxel_of = [&](const Vec3& p) {
+    if (!grid) return n;
+    const int i = static_cast<int>(std::floor((p.x - field.origin.x) / field.spacing));
+    const int j = static_cast<int>(std::floor((p.y - field.origin.y) / field.spacing));
+    const int k = static_cast<int>(std::floor((p.z - field.origin.z) / field.spacing));
+    auto inside = [&](int a, int b, int c) { return a >= 0 && b >= 0 && c >= 0 && a < field.nx && b < field.ny && c < field.nz; };
+    if (inside(i, j, k) && spacing[field.index(i, j, k)] > 0.0) return field.index(i, j, k);
+    std::size_t best = n;
+    for (int dk = -1; dk <= 1; ++dk)
+      for (int dj = -1; dj <= 1; ++dj)
+        for (int di = -1; di <= 1; ++di) {
+          if (!inside(i + di, j + dj, k + dk)) continue;
+          const std::size_t e = field.index(i + di, j + dj, k + dk);
+          if (spacing[e] > 0.0 && (best == n || spacing[e] < spacing[best])) best = e;
+        }
+    return best;
+  };
+  for (std::size_t t = first; t < strands.size(); ++t) {
+    Strand& s = strands[t];
+    const std::size_t m = s.points.size();
+    s.local_mm.assign(m, 0.0);
+    s.local_why.assign(m, 0);
+    if (gap_mm > 0.0) s.cap_mm.assign(m, 0.0); else s.cap_mm.clear();
+    for (std::size_t q = 0; q < m; ++q) {
+      const std::size_t e = voxel_of(s.points[q]);
+      if (e < n) {
+        s.local_mm[q] = spacing[e];
+        s.local_why[q] = e < why.size() ? why[e] : 0;
+      } else {
+        s.local_mm[q] = s.spacing_mm;   // off the field: the strand's own spacing, reason not known
+      }
+      if (!(gap_mm > 0.0)) continue;
+      const double cap = std::max(thinnest_mm, s.local_mm[q] - gap_mm);
+      s.cap_mm[q] = cap;
+      if (q < s.width_mm.size() && s.width_mm[q] > cap) {
+        s.width_mm[q] = cap;
+        ++lowered;
+      }
+    }
+  }
+  return lowered;
+}
+
+std::size_t gap_broken(const Bars& bars) {
+  std::size_t n = 0;
+  for (const Bar& b : bars.bars) n += b.gap_cap_mm > 0.0 && b.width > b.gap_cap_mm + 1e-9;
+  return n;
+}
+
+bool has_relief(const Bars& bars) {
+  for (const Bar& b : bars.bars)
+    if (b.relief_a > 0.0 || b.relief_b > 0.0) return true;
+  return false;
+}
+
+Bars without_relief(const Bars& bars) {
+  Bars out = bars;
+  for (Bar& b : out.bars) {
+    const double L = dist(b.a, b.b);
+    if (!(L > 0.0)) continue;
+    const Vec3 d{(b.b.x - b.a.x) / L, (b.b.y - b.a.y) / L, (b.b.z - b.a.z) / L};
+    if (b.relief_a > 0.0) b.a = Vec3{b.a.x + d.x * b.relief_a, b.a.y + d.y * b.relief_a, b.a.z + d.z * b.relief_a};
+    if (b.relief_b > 0.0) b.b = Vec3{b.b.x - d.x * b.relief_b, b.b.y - d.y * b.relief_b, b.b.z - d.z * b.relief_b};
+    b.proud_a = b.proud_b = b.relief_a = b.relief_b = 0.0;
+  }
+  return out;
+}
+
 // O12 and O13: the old run's own spacing field for an ordinary Traced job (run_job.cpp, run_organic_step, with a cell
 // window; its density from grade_lattice, Aesthetic intent). What the old run does, step by step:
 //   1. grade_lattice gives each latticed voxel rho = lo + (hi - lo) * u^(g * w), u = von Mises / the 95th percentile
@@ -142,6 +219,10 @@ OrganicSpacing spacing_core(const Domain& domain, int region, const TensorField&
   out.candidate.assign(n, 0);
   out.spacing_mm.assign(n, 0.0);
   out.stress_f.assign(n, 0.0);   // M
+  out.why.assign(n, 0);          // OG1
+  constexpr std::uint8_t kUniform = static_cast<std::uint8_t>(SpacingWhy::Uniform),
+                         kStress = static_cast<std::uint8_t>(SpacingWhy::Stress),
+                         kShape = static_cast<std::uint8_t>(SpacingWhy::Shape);
   if (solid) solid->assign(n, 0);
   std::vector<char> weave_ids;   // by region id: is it a weave region
   for (const Region& r : domain.spec().regions)
@@ -179,12 +260,12 @@ OrganicSpacing spacing_core(const Domain& domain, int region, const TensorField&
   if (out.candidates == 0) return out;
   if (one || hi == lo) {
     for (std::size_t e = 0; e < n; ++e)
-      if (out.candidate[e]) out.spacing_mm[e] = lo;
+      if (out.candidate[e]) { out.spacing_mm[e] = lo; out.why[e] = kUniform; }
     return out;
   }
   if (!ask.follow_stress) {   // OP6, shape only: f = 0 and no reference (u = 0); O13 and L2 below as ever
     for (std::size_t e = 0; e < n; ++e)
-      if (out.candidate[e]) out.spacing_mm[e] = hi;
+      if (out.candidate[e]) { out.spacing_mm[e] = hi; out.why[e] = kUniform; }
   } else {
   // O12: the reference, then g per weave voxel and its least and greatest over the weave.
   double ref = ask.reference_mpa;
@@ -213,6 +294,7 @@ OrganicSpacing spacing_core(const Domain& domain, int region, const TensorField&
     f = std::pow(std::min(1.0, std::max(0.0, f)), kAestheticOpenExponent);   // run_organic_step's f_exponent, on
     out.spacing_mm[e] = hi - (hi - lo) * f;
     out.stress_f[e] = f;   // M: O12's measure, kept
+    out.why[e] = out.spacing_mm[e] < hi ? kStress : kUniform;   // OG1
   }
   }   // OP6
   if (!ask.shape_fit) return out;
@@ -266,6 +348,7 @@ OrganicSpacing spacing_core(const Domain& domain, int region, const TensorField&
     if (cap < lo) cap = lo;
     if (!(cap > 0.0) || !(cap < out.spacing_mm[e])) continue;
     out.spacing_mm[e] = cap;
+    out.why[e] = kShape;   // OG1
     ++out.shape_fit_tightened;
   }
   return out;
@@ -407,7 +490,12 @@ OrganicSpacing organic_spacing(const Domain& domain, int region, const TensorFie
             zone[e] = 1;
             ++out.hold_zone;
             ++P.zone;
-            if (out.spacing_mm[e] > tight) { out.spacing_mm[e] = tight; ++out.hold_tightened; ++P.tightened; }
+            if (out.spacing_mm[e] > tight) {
+              out.spacing_mm[e] = tight;
+              out.why[e] = static_cast<std::uint8_t>(SpacingWhy::Hold);   // OG1
+              ++out.hold_tightened;
+              ++P.tightened;
+            }
           }
     }
   return out;
@@ -539,6 +627,20 @@ std::vector<Strand> trace_strands(const Domain& domain, int region, const Tensor
           out[t].width_mm[q] = out[t].width_mm[q] + (ask.width_heavy_mm - out[t].width_mm[q]) * share(out[t].points[q]);
   }
   if (stats && ask.hold_parts) stats->hold_patches = asked.hold_patches;   // Q3: for hold_up_weave (L2 d)
+  // OG1 (brief E6): each point's local spacing (the spacing the tracer used there) and what set it (the asked spacing's
+  // reason, or the tracer's floor where it raised the asked spacing); with the gap on, the cap on every width (curves,
+  // connectors and level ties alike).
+  {
+    std::vector<std::uint8_t> why(n, 0);
+    for (std::size_t e = 0; e < n; ++e) {
+      if (!candidate[e]) continue;
+      why[e] = lat.spacing_used_mm[e] > spacing[e] + 1e-9 ? static_cast<std::uint8_t>(SpacingWhy::Floor) : asked.why[e];
+    }
+    const double gap = ask.gap_lines > 0.0 ? ask.gap_lines * domain.spec().bead_mm : 0.0;
+    const std::size_t lowered =
+        organic_gap_cap(out, 0, field, lat.spacing_used_mm, why, gap, domain.spec().bead_mm * domain.spec().min_strut_lines);
+    if (stats) stats->gap_capped = lowered;
+  }
   return out;
 }
 
@@ -632,6 +734,208 @@ std::size_t cross_group_touches(const Bars& bars, const std::vector<OrganicGroup
     }
   return n;
 }
+
+// OG2 (brief E6): the relief. Per weave bar (not a net strut) end of kind Surface whose group asks for it, in bar order.
+// The face there: the nearest triangle of the part as opened (its face id, StepModel::triangle_face); the outward normal:
+// minus the gradient of the part's depth at the end (central differences, 0.05 mm). Left flush, in this order: the face
+// is excluded; the normal points down against the build direction by more than 45 degrees; the end is 2 mm or less above
+// the bed (the part's lowest point along the build direction), or the proud tip, less its cap's radius, would reach it;
+// the bar leaves the surface at less than 20 degrees. Otherwise the end is carried on along its bar by p / cos, p =
+// face_relief_mm x u, u in (0, 1] fixed by (strand, region).
+struct TriFinder {
+  const TriangleMesh* m = nullptr;
+  Vec3 lo{};
+  double cell = 2.0;
+  int n[3] = {0, 0, 0};
+  std::vector<std::vector<std::uint32_t>> at;
+  explicit TriFinder(const TriangleMesh& mesh) : m(&mesh) {
+    if (mesh.vertices.empty()) return;
+    Vec3 hi = mesh.vertices.front();
+    lo = hi;
+    for (const Vec3& v : mesh.vertices) {
+      lo = {std::min(lo.x, v.x), std::min(lo.y, v.y), std::min(lo.z, v.z)};
+      hi = {std::max(hi.x, v.x), std::max(hi.y, v.y), std::max(hi.z, v.z)};
+    }
+    lo = {lo.x - 1.0, lo.y - 1.0, lo.z - 1.0};
+    n[0] = std::max(1, static_cast<int>(std::ceil((hi.x + 1.0 - lo.x) / cell)));
+    n[1] = std::max(1, static_cast<int>(std::ceil((hi.y + 1.0 - lo.y) / cell)));
+    n[2] = std::max(1, static_cast<int>(std::ceil((hi.z + 1.0 - lo.z) / cell)));
+    at.resize(static_cast<std::size_t>(n[0]) * n[1] * n[2]);
+    for (std::size_t t = 0; t < mesh.triangles.size(); ++t) {
+      Vec3 a = mesh.vertices[static_cast<std::size_t>(mesh.triangles[t][0])], b = a;
+      for (int k = 1; k < 3; ++k) {
+        const Vec3& v = mesh.vertices[static_cast<std::size_t>(mesh.triangles[t][static_cast<std::size_t>(k)])];
+        a = {std::min(a.x, v.x), std::min(a.y, v.y), std::min(a.z, v.z)};
+        b = {std::max(b.x, v.x), std::max(b.y, v.y), std::max(b.z, v.z)};
+      }
+      const int i0 = slot(a.x - lo.x, 0), i1 = slot(b.x - lo.x, 0), j0 = slot(a.y - lo.y, 1), j1 = slot(b.y - lo.y, 1),
+                k0 = slot(a.z - lo.z, 2), k1 = slot(b.z - lo.z, 2);
+      for (int k = k0; k <= k1; ++k)
+        for (int j = j0; j <= j1; ++j)
+          for (int i = i0; i <= i1; ++i) at[(static_cast<std::size_t>(k) * n[1] + j) * n[0] + i].push_back(static_cast<std::uint32_t>(t));
+    }
+  }
+  int slot(double x, int a) const { return std::clamp(static_cast<int>(std::floor(x / cell)), 0, n[a] - 1); }
+  static double to_tri(const Vec3& p, const Vec3& a, const Vec3& b, const Vec3& c) {
+    auto sub = [](const Vec3& u, const Vec3& v) { return Vec3{u.x - v.x, u.y - v.y, u.z - v.z}; };
+    auto dot = [](const Vec3& u, const Vec3& v) { return u.x * v.x + u.y * v.y + u.z * v.z; };
+    const Vec3 ab = sub(b, a), ac = sub(c, a), ap = sub(p, a);
+    const double d1 = dot(ab, ap), d2 = dot(ac, ap);
+    if (d1 <= 0 && d2 <= 0) return dist(p, a);
+    const Vec3 bp = sub(p, b);
+    const double d3 = dot(ab, bp), d4 = dot(ac, bp);
+    if (d3 >= 0 && d4 <= d3) return dist(p, b);
+    const double vc = d1 * d4 - d3 * d2;
+    if (vc <= 0 && d1 >= 0 && d3 <= 0) { const double v = d1 / (d1 - d3); return dist(p, Vec3{a.x + ab.x * v, a.y + ab.y * v, a.z + ab.z * v}); }
+    const Vec3 cp = sub(p, c);
+    const double d5 = dot(ab, cp), d6 = dot(ac, cp);
+    if (d6 >= 0 && d5 <= d6) return dist(p, c);
+    const double vb = d5 * d2 - d1 * d6;
+    if (vb <= 0 && d2 >= 0 && d6 <= 0) { const double w = d2 / (d2 - d6); return dist(p, Vec3{a.x + ac.x * w, a.y + ac.y * w, a.z + ac.z * w}); }
+    const double va = d3 * d6 - d5 * d4;
+    if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) {
+      const double w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+      return dist(p, Vec3{b.x + (c.x - b.x) * w, b.y + (c.y - b.y) * w, b.z + (c.z - b.z) * w});
+    }
+    const double den = 1.0 / (va + vb + vc), v = vb * den, w = vc * den;
+    return dist(p, Vec3{a.x + ab.x * v + ac.x * w, a.y + ab.y * v + ac.y * w, a.z + ab.z * v + ac.z * w});
+  }
+  // The nearest triangle to p among those in p's cell (an end on the surface lies in its triangle's cell); -1 for none.
+  long nearest(const Vec3& p) const {
+    if (at.empty()) return -1;
+    const std::size_t c = (static_cast<std::size_t>(slot(p.z - lo.z, 2)) * n[1] + slot(p.y - lo.y, 1)) * n[0] + slot(p.x - lo.x, 0);
+    long best = -1;
+    double bd = std::numeric_limits<double>::infinity();
+    for (std::uint32_t t : at[c]) {
+      const auto& q = m->triangles[t];
+      const double d = to_tri(p, m->vertices[static_cast<std::size_t>(q[0])], m->vertices[static_cast<std::size_t>(q[1])],
+                              m->vertices[static_cast<std::size_t>(q[2])]);
+      if (d < bd) { bd = d; best = static_cast<long>(t); }
+    }
+    return best;
+  }
+};
+
+double relief_share(int strand, int region) {   // u in (0, 1], fixed by the strand and its region (splitmix64)
+  std::uint64_t x = (static_cast<std::uint64_t>(static_cast<std::uint32_t>(strand)) << 32) ^
+                    static_cast<std::uint64_t>(static_cast<std::uint32_t>(region)) ^ 0x9E3779B97F4A7C15ULL;
+  x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ULL;
+  x = (x ^ (x >> 27)) * 0x94D049BB133111EBULL;
+  x ^= x >> 31;
+  return static_cast<double>((x >> 11) + 1) * (1.0 / 9007199254740992.0);
+}
+
+void lay_relief(Bars& bars, const StepModel& model, const PartMeasure& part, const std::vector<OrganicGroup>& groups,
+                const std::vector<std::size_t>& first_strand, Outcome::Relief& rep) {
+  rep = Outcome::Relief{};
+  const OrganicGroup* of_region_cache = nullptr;
+  auto group_of = [&](int region) -> const OrganicGroup* {
+    if (of_region_cache && std::find(of_region_cache->regions.begin(), of_region_cache->regions.end(), region) != of_region_cache->regions.end())
+      return of_region_cache;
+    for (const OrganicGroup& g : groups)
+      if (std::find(g.regions.begin(), g.regions.end(), region) != g.regions.end()) return of_region_cache = &g;
+    return nullptr;
+  };
+  bool any = false;
+  for (const OrganicGroup& g : groups) any = any || g.ask.face_relief_mm > 0.0;
+  if (!any) return;
+  rep.faces_known = model.triangle_face.size() == model.mesh.triangles.size() && !model.mesh.triangles.empty();
+  std::unique_ptr<TriFinder> finder;
+  std::map<const OrganicGroup*, double> beds;   // the bed along each group's build direction
+  const PartMeasure::Probe probe = part.probe();
+  const Vec3 plo = part.lo(), phi = part.hi();
+  const double kDown = std::cos(45.0 * 3.14159265358979323846 / 180.0), kAlong = std::sin(20.0 * 3.14159265358979323846 / 180.0);
+  for (Bar& b : bars.bars) {
+    if (b.net) continue;
+    for (int e = 0; e < 2; ++e) {
+      if ((e == 0 ? b.end_a : b.end_b) != Bar::End::Surface) continue;
+      const OrganicGroup* g = group_of(b.region);
+      if (!g || !(g->ask.face_relief_mm > 0.0)) continue;
+      const OrganicAsk& ask = g->ask;
+      ++rep.surface_ends;
+      Vec3& end = e == 0 ? b.a : b.b;
+      const Vec3& other = e == 0 ? b.b : b.a;
+      if (rep.faces_known && !ask.relief_exclude_faces.empty()) {
+        if (!finder) finder = std::make_unique<TriFinder>(model.mesh);
+        const long t = finder->nearest(end);
+        const int face = t >= 0 ? model.triangle_face[static_cast<std::size_t>(t)] : -1;
+        if (std::find(ask.relief_exclude_faces.begin(), ask.relief_exclude_faces.end(), face) != ask.relief_exclude_faces.end()) {
+          ++rep.flush_excluded;
+          continue;
+        }
+      }
+      const double h = 0.05;
+      Vec3 nrm{probe.depth(Vec3{end.x - h, end.y, end.z}) - probe.depth(Vec3{end.x + h, end.y, end.z}),
+               probe.depth(Vec3{end.x, end.y - h, end.z}) - probe.depth(Vec3{end.x, end.y + h, end.z}),
+               probe.depth(Vec3{end.x, end.y, end.z - h}) - probe.depth(Vec3{end.x, end.y, end.z + h})};
+      const double nl = std::sqrt(nrm.x * nrm.x + nrm.y * nrm.y + nrm.z * nrm.z);
+      const double ul = std::sqrt(ask.build_dir.x * ask.build_dir.x + ask.build_dir.y * ask.build_dir.y + ask.build_dir.z * ask.build_dir.z);
+      if (!(nl > 0.0) || !(ul > 0.0)) { ++rep.flush_along; continue; }
+      nrm = {nrm.x / nl, nrm.y / nl, nrm.z / nl};
+      const Vec3 up{ask.build_dir.x / ul, ask.build_dir.y / ul, ask.build_dir.z / ul};
+      if (nrm.x * up.x + nrm.y * up.y + nrm.z * up.z < -kDown) { ++rep.flush_down; continue; }
+      auto found = beds.find(g);
+      if (found == beds.end()) {
+        double lowest = std::numeric_limits<double>::infinity();
+        for (const Vec3& v : part.mesh().vertices) lowest = std::min(lowest, v.x * up.x + v.y * up.y + v.z * up.z);
+        found = beds.emplace(g, lowest).first;
+      }
+      const double bed = found->second;
+      const double height = end.x * up.x + end.y * up.y + end.z * up.z - bed;
+      if (!(height > 2.0)) { ++rep.flush_bed; continue; }
+      const double L = dist(end, other);
+      if (!(L > 0.0)) { ++rep.flush_along; continue; }
+      const Vec3 d{(end.x - other.x) / L, (end.y - other.y) / L, (end.z - other.z) / L};
+      const double c = d.x * nrm.x + d.y * nrm.y + d.z * nrm.z;
+      if (!(c >= kAlong)) { ++rep.flush_along; continue; }
+      // The strand's number within its group (OP11: a group laid alone or with others gives the same relief).
+      const std::size_t gi = static_cast<std::size_t>(g - groups.data());
+      const long first = gi < first_strand.size() ? static_cast<long>(first_strand[gi]) : 0L;
+      const double p = ask.face_relief_mm * relief_share(static_cast<int>(b.strand - first), b.region);
+      const double run = p / c;
+      const Vec3 tip{end.x + d.x * run, end.y + d.y * run, end.z + d.z * run};
+      const double r = 0.5 * b.width;
+      if (!(tip.x * up.x + tip.y * up.y + tip.z * up.z - r - bed > 0.0)) { ++rep.flush_bed; continue; }
+      end = tip;
+      (e == 0 ? b.proud_a : b.proud_b) = p;
+      (e == 0 ? b.relief_a : b.relief_b) = run;
+      ++rep.proud;
+      rep.largest_mm = std::max(rep.largest_mm, p);
+      rep.grew_mm[0] = std::max(rep.grew_mm[0], plo.x - (tip.x - r));
+      rep.grew_mm[1] = std::max(rep.grew_mm[1], tip.x + r - phi.x);
+      rep.grew_mm[2] = std::max(rep.grew_mm[2], plo.y - (tip.y - r));
+      rep.grew_mm[3] = std::max(rep.grew_mm[3], tip.y + r - phi.y);
+      rep.grew_mm[4] = std::max(rep.grew_mm[4], plo.z - (tip.z - r));
+      rep.grew_mm[5] = std::max(rep.grew_mm[5], tip.z + r - phi.z);
+    }
+  }
+}
+
+// OG1's diagnosis (Outcome::Tight) over the weave bars of `weave` (net struts left out).
+Outcome::Tight tight_of(const Bars& bars, const std::vector<int>& weave, double line_mm) {
+  Outcome::Tight t;
+  t.line_mm = line_mm;
+  for (const Bar& b : bars.bars) {
+    if (b.net || std::find(weave.begin(), weave.end(), b.region) == weave.end()) continue;
+    ++t.bars;
+    const bool known = b.local_mm > 0.0;
+    const double local = known ? b.local_mm : b.cell;
+    if (!(local - b.width < line_mm)) continue;
+    ++t.tight;
+    t.supports += b.support;
+    t.links += b.link;
+    t.braces += b.brace;
+    switch (known ? static_cast<SpacingWhy>(b.local_why) : (b.support ? SpacingWhy::Hold : SpacingWhy::None)) {
+      case SpacingWhy::Stress: ++t.stress; break;
+      case SpacingWhy::Shape: ++t.shape; break;
+      case SpacingWhy::Hold: ++t.hold; break;
+      case SpacingWhy::Floor: ++t.floor; break;
+      case SpacingWhy::Uniform: ++t.uniform; break;
+      default: ++t.unknown; break;
+    }
+  }
+  return t;
+}
 }  // namespace
 
 Outcome Session::lay_organic(const Settings& settings, const TensorField& field, const OrganicAsk& ask, int threads,
@@ -694,6 +998,7 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
   std::shared_ptr<GrowReport> grown;
   std::vector<std::string> notes;
   std::vector<std::pair<int, double>> all_references;   // brief E2: every weave region's O12 reference, group by group
+  std::size_t gap_capped = 0;                            // OG1
   // OP11 (brief C2, E7): each group in turn, on its own regions (in the domain's order) with its own ask; its spacing's
   // weave (the reference, the stretch, the outline) is its own regions only. One group: exactly the one-ask lay.
   for (const OrganicGroup& group : groups) {
@@ -730,6 +1035,7 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
       if (ask.mode == OrganicMode::Grown) {
         GrowReport one;
         traced = grow_strands(*domain_, r.id, field, ask, &one, &sp);   // T fix: the spacing computed once, above
+        gap_capped += one.gap_capped;   // OG1
         if (!grown) grown = std::make_shared<GrowReport>();
         grown->add(one);
         for (std::size_t e = 0; e < sp.candidate.size(); ++e) {
@@ -743,6 +1049,7 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
         if (st.candidates) st.spacing_mean_mm /= static_cast<double>(st.candidates);
       } else {
         traced = trace_strands(*domain_, r.id, field, ask, &st, pool);
+        gap_capped += st.gap_capped;   // OG1
       }
       const double reach = ask.mode == OrganicMode::Grown ? median : st.spacing_median_mm;
       if (settings.skin && reach > 0.0) finish.net_reach.push_back({r.id, reach});   // O16
@@ -786,6 +1093,11 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
   const double ms_trace = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
   Outcome out = lay_with(settings, &strands, threads, stop, &finish);
   if (!out.cancelled) {
+    // OG2 (brief E6): the ends carried proud of the open faces, on the bars as laid (before the floors and additions,
+    // which are made on these bars).
+    std::vector<std::size_t> firsts;
+    for (const WeaveFinish::Group& gf : finish.groups) firsts.push_back(gf.first);
+    lay_relief(out.bars, model_, *measure_, groups, firsts, out.relief);
     out.organic_references = all_references;   // brief E2
     // Brief E2 and E3a (the strength check's floors and additions) are made for ONE ask (the file job's, and a preview
     // of it): they are read from a lay of one group (OP11); a lay of several groups does not apply them.
@@ -826,6 +1138,12 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
     out.grown = grown;
     out.notes = std::move(notes);
     if (groups.size() > 1) out.cross_group_touches = cross_group_touches(out.bars, groups);   // OP11
+    // OG1 (brief E6): what the gap rule lowered, what the floors and additions broke of it, and the diagnosis.
+    out.gap_capped = gap_capped;
+    out.gap_broken = gap_broken(out.bars);
+    std::vector<int> weave;
+    for (const Layout::Weave& w : out.layout.weave) weave.push_back(w.region);
+    out.tight = tight_of(out.bars, weave, domain_->spec().bead_mm);
   }
   return out;
 }
@@ -1285,10 +1603,15 @@ std::vector<OrganicRefusal> validate_organic(const Settings& settings, const Org
              light);
   // OP7: the smallest printable cell, kSmallestCellFactor x the light width, in both modes (Traced raised it silently,
   // Grown laid it).
+  // OG1: with the gap rule on, the larger of this floor and the gap's is the one refused (one refusal, below).
+  const bool gap_on = fin(a.gap_lines) && a.gap_lines > 0.0 && a.gap_lines <= kOrganicGapLinesMax && fin(settings.bead_mm) &&
+                      settings.bead_mm > 0.0;
+  const double gap_floor_mm = gap_on ? light + a.gap_lines * settings.bead_mm : 0.0;
   {
     const double small = one ? a.spacing_mm : a.spacing_min_mm;
     const double floor_mm = kSmallestCellFactor * light;
-    if (light > 0.0 && (one || a.spacing_mm == 0.0) && fin(small) && small > 0.0 && small < floor_mm - 1e-9)
+    if (light > 0.0 && (one || a.spacing_mm == 0.0) && fin(small) && small > 0.0 && small < floor_mm - 1e-9 &&
+        !(gap_floor_mm > floor_mm))
       at_least(refuse(one ? "spacing_mm" : "spacing_min_mm", "under_smallest_cell",
                       std::string(one ? "Cell size: the size" : "Cell size: the small end") + " must be at least " +
                           plain_number(floor_mm, true) + " mm, the smallest cell a " + plain_number(light) +
@@ -1296,6 +1619,40 @@ std::vector<OrganicRefusal> validate_organic(const Settings& settings, const Org
                       small),
                floor_mm);
   }
+  // OG1 (brief E6): the gap rule. Its number of lines 0 (off) to 4; on, the small end of the cell size (or the one size)
+  // at least the light width + the gap: the smallest cell that leaves a printable gap between two light struts.
+  if (!(fin(a.gap_lines) && a.gap_lines >= 0.0 && a.gap_lines <= kOrganicGapLinesMax)) {
+    OrganicRefusal& r = refuse("gap_lines", "out_of_range",
+                               "Gap between struts: it must be from 0 (off) to 4 line widths.", a.gap_lines);
+    at_least(r, 0.0);
+    at_most(r, kOrganicGapLinesMax);
+  } else if (a.gap_lines > 0.0 && light > 0.0 && fin(settings.bead_mm) && settings.bead_mm > 0.0) {
+    const double small = one ? a.spacing_mm : a.spacing_min_mm;
+    const double gap = a.gap_lines * settings.bead_mm;
+    const double floor_mm = light + gap;
+    if ((one || a.spacing_mm == 0.0) && fin(small) && small > 0.0 && small < floor_mm - 1e-9 &&
+        floor_mm > kSmallestCellFactor * light)   // else the smallest printable cell is the larger, refused above
+      at_least(refuse(one ? "spacing_mm" : "spacing_min_mm", "under_gap_cell",
+                      std::string(one ? "Cell size: the size" : "Cell size: the small end") + " must be at least " +
+                          plain_number(floor_mm, true) + " mm, the smallest cell that leaves a " + plain_number(gap) +
+                          " mm gap between " + plain_number(light) + " mm struts.",
+                      small),
+               floor_mm);
+  }
+  // OG2 (brief E6): the relief, 0 (off) to 1 mm; the faces left flush are the part's face ids (0 or more).
+  if (!(fin(a.face_relief_mm) && a.face_relief_mm >= 0.0 && a.face_relief_mm <= kOrganicReliefMaxMm)) {
+    OrganicRefusal& r = refuse("face_relief_mm", "out_of_range",
+                               "Surface relief: it must be from 0 (off) to 1 mm.", a.face_relief_mm);
+    at_least(r, 0.0);
+    at_most(r, kOrganicReliefMaxMm);
+  }
+  for (const int f : a.relief_exclude_faces)
+    if (f < 0) {
+      at_least(refuse("relief_exclude_faces", "below_zero", "Surface relief: a face left flush must be one of the part's faces.",
+                      f),
+               0.0);
+      break;
+    }
   if (!(fin(a.link_width) && a.link_width >= 0.5 && a.link_width <= 2.0)) {
     OrganicRefusal& r = refuse("link_width", "out_of_range", "Link thickness: it must be from 0.5 to 2 times the thinner strut.",
                                a.link_width);

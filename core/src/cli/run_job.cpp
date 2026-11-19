@@ -16945,6 +16945,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
                       ", \"verdict\": " + json_str(cr.verdict) + ", \"fail_reason\": " + json_str(cr.fail_reason) +
                       ", \"bars\": " + std::to_string(bars.bars.size()) + ", \"hash\": " + json_str(hash_hex(ll::bars_hash(bars))) +
                       ", \"old_bars_kept\": " + (res.old_bars_kept ? "true" : "false") +
+                      ", \"gap_broken\": " + std::to_string(ll::gap_broken(bars)) +   // OG1 (brief E6)
                       ",\n     \"struts\": {\"judged\": " + std::to_string(c.judged) + ", \"under_safety\": " +
                       std::to_string(c.under_safety) + ", \"under_one\": " + std::to_string(c.under_one) +
                       ", \"smallest_margin\": " + json_num(c.judged ? c.smallest_margin : std::numeric_limits<double>::quiet_NaN()) +
@@ -17216,6 +17217,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
                     ", \"fail_reason\": " + json_str(cr.fail_reason) + ", \"bars\": " + std::to_string(out.bars.bars.size()) +
                     ", \"floors_widened\": " + std::to_string(out.floors_widened) +
                     ", \"floor_links_widened\": " + std::to_string(out.floor_links_widened) +
+                    ", \"gap_broken\": " + std::to_string(ll::gap_broken(pc.bars)) +   // OG1 (brief E6)
                     ",\n     \"struts\": {\"judged\": " + std::to_string(c.judged) + ", \"under_safety\": " +
                     std::to_string(c.under_safety) + ", \"under_one\": " + std::to_string(c.under_one) +
                     ", \"smallest_margin\": " + json_num(c.judged ? c.smallest_margin : std::numeric_limits<double>::quiet_NaN()) +

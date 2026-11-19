@@ -240,7 +240,35 @@ struct OrganicAsk {
   // (M, N, P) and Auto's runs per end (I) all read 0). The DIRECTIONS still come from the stress field (Traced's
   // curves, Grown's heading) and are not changed by it.
   bool follow_stress = true;
+  // OG1 (brief E6; the owner, 2026-11-19: "Yes, build it"), the gap rule: gap = gap_lines x the line width (bead_mm). At
+  // every point of a traced or grown strand the width is at most (the local spacing there - gap), never under the
+  // thinnest strut; it caps the by-stress heavy width and never widens anything. 0 = off (as before); 0 to 4.
+  // validate_organic refuses a cell size whose small end is under (the light width + gap).
+  double gap_lines = 1.5;
+  // OG2 (brief E6; the owner: "add material beyond the flat plane ... no more than 1mm variability in depth"): a weave
+  // bar's Surface end on an open face, where the face is not in relief_exclude_faces, its outward normal points down
+  // against build_dir by no more than 45 degrees, and the end is more than 2 mm above the bed, is carried on along its
+  // bar until it stands p beyond the surface (along the normal), p = face_relief_mm x a number 0 .. 1 fixed by its
+  // strand and region. 0 = off (every end flush, as before); 0 to 1. relief_exclude_faces: the part's face ids (the
+  // app: loaded and fixed faces) where no end stands proud.
+  double face_relief_mm = 1.0;
+  std::vector<int> relief_exclude_faces;
 };
+inline constexpr double kOrganicGapLinesDefault = 1.5;   // OG1
+inline constexpr double kOrganicGapLinesMax = 4.0;
+inline constexpr double kOrganicReliefMaxMm = 1.0;       // OG2
+
+// OG1: the strand points' local spacing and its reason, and (gap above 0) the cap: for each strand of `strands` from
+// `first` on, each point's local spacing is `spacing` (per voxel of `field`'s grid, 0 off the candidates) at its voxel,
+// else the smallest non-zero of the 26 around it, else the strand's own spacing_mm (reason None); `why` (per voxel,
+// SpacingWhy) its reason. With gap_mm above 0: cap = max(thinnest_mm, local - gap_mm), every width over it set to it
+// (Strand::cap_mm filled). Returns the points whose width was lowered.
+std::size_t organic_gap_cap(std::vector<Strand>& strands, std::size_t first, const TensorField& field,
+                            const std::vector<double>& spacing, const std::vector<std::uint8_t>& why, double gap_mm,
+                            double thinnest_mm);
+// OG1: the weave bars whose width is over their gap cap (Bar::gap_cap_mm above 0): what the strength loop's widening
+// (additive widening, the width floors) broke of the gap rule. Never silent: each round says it.
+std::size_t gap_broken(const Bars& bars);
 
 // Brief E2, item 9: the floors on laid bars (Session::lay_organic calls it last). Every non-link bar whose middle lies
 // in a floor's ball: w = max(w, min(floor, upper_mm)); then every link: S8's width from the struts at its two ends
@@ -452,6 +480,9 @@ struct OrganicSpacing {
   // M (brief G19): per voxel, O12's 0 .. 1 stress measure f for a candidate (the f the spacing hi - (hi - lo) x f was
   // made from, before O13 and L2 change the spacing); 0 elsewhere, and 0 everywhere with one spacing.
   std::vector<double> stress_f;
+  // OG1 (brief E6): per voxel, what set a candidate's spacing (SpacingWhy: Uniform, Stress, Shape, Hold; the last of
+  // O12, O13, L2 that changed it); 0 (None) elsewhere.
+  std::vector<std::uint8_t> why;
   // L2 a, b (OrganicAsk::hold_parts; all empty or 0 when off; brief G15). The FLOATING PIECES of the part, found layer
   // by layer from the bed on the field's grid (see organic_spacing): solid voxels not grounded, 26-connected, 20 mm3 or
   // more (smaller ones counted in hold_small_patches). Per kept piece: every voxel's centre, its volume and box; its
@@ -502,6 +533,7 @@ struct OrganicTraceStats {
   std::vector<std::size_t> tie_level_joints;
   std::vector<double> tie_level_span_mm;
   double tie_level_dz_max_mm = 0.0;
+  std::size_t gap_capped = 0;   // OG1 (brief E6): strand points whose width the gap rule lowered
 };
 
 // The Traced placement of one weave region, as strands. The candidate voxels are those whose CENTRE the domain says is
@@ -663,6 +695,7 @@ struct GrowReport {
     std::size_t seeded[3] = {0, 0, 0}, total = 0;
   };
   std::vector<CrossThirds> cross_thirds;
+  std::size_t gap_capped = 0;   // OG1 (brief E6): strand points whose width the gap rule lowered
   void add(const GrowReport& o);
 };
 
@@ -759,8 +792,14 @@ struct SweepLimits {
   double d_mm = 0.0, depth_mm = 0.0, mouth_width_mm = 0.0;
   double strut_lower_mm = 0.0, strut_upper_mm = 0.0, strut_auto_mm = 0.0;
   double cell_lower_mm = 0.0, cell_upper_mm = 0.0, cell_auto_mm = 0.0;
+  // OG1 (brief E6): the gap (gap_lines x the line) and the cell size it allows with the limits' thin strut (strut lower
+  // + gap, rounded UP to 0.5 mm); the cell's lower end is at least it (its upper end then at least the lower), and
+  // cell_lower_by_gap says the rule raised it. 0 / false with gap_lines 0.
+  double gap_mm = 0.0, gap_cell_mm = 0.0;
+  bool cell_lower_by_gap = false;
 };
-std::vector<SweepLimits> organic_sweep_limits(const Domain& domain, double line_mm);
+std::vector<SweepLimits> organic_sweep_limits(const Domain& domain, double line_mm,
+                                              double gap_lines = kOrganicGapLinesDefault);
 // OP10 (brief C2, E4, made per group by E7): Session::sweep_limits_for(settings, region ids, line_mm), the Auto Sweep
 // limits of a GROUP of weave regions (the whole part: every weave region's id): the union over the MEASURED regions
 // among those given (organic_sweep_limits' entries): cell lower = the smallest lower, upper = the largest upper; strut
@@ -772,6 +811,9 @@ struct SweepLimitsUnion {
   std::vector<int> measured_regions, unmeasured;
   double strut_lower_mm = 0.0, strut_upper_mm = 0.0, strut_auto_mm = 0.0;
   double cell_lower_mm = 0.0, cell_upper_mm = 0.0, cell_auto_mm = 0.0;
+  // OG1: as SweepLimits: the gap, and whether it raised the cell's lower end of any region taken.
+  double gap_mm = 0.0;
+  bool cell_lower_by_gap = false;
 };
 
 // ── OP12 (brief C2, E5; organic_synthetic.cpp): synthetic stress for the new engine ─────────────────────────────────

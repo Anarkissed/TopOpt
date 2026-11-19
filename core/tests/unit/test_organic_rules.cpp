@@ -17,6 +17,7 @@
 
 #include "topopt/lattice_layout.hpp"
 #include "topopt/lattice_layout_file.hpp"
+#include "topopt/lattice_layout_frame.hpp"
 #include "topopt/lattice_layout_mesh.hpp"
 #include "topopt/lattice_layout_organic.hpp"
 #include "topopt/lattice_sample.hpp"
@@ -963,6 +964,8 @@ static void test_session_sweep_limits() {
 static OrganicAsk follow_ask(bool grown) {
   OrganicAsk a = traced_ask();
   a.width_heavy_mm = 1.6;
+  a.gap_lines = 0.0;        // OG1, OG2 off: the hashes pinned here are the lays before them
+  a.face_relief_mm = 0.0;
   if (grown) {
     a.mode = OrganicMode::Grown;
     a.layer_mm = 0.2;
@@ -1317,8 +1320,9 @@ static void test_validate() {
       {true, [](S&, A& a) { a.width_mm = -1.0; }, "width_mm", "below_zero"},
       {true, [](S&, A& a) { a.width_mm = 0.6; }, "width_mm", "under_thinnest_strut"},
       {true, [](S&, A& a) { a.width_heavy_mm = 0.5; }, "width_heavy_mm", "under_other_end"},
-      {true, [](S&, A& a) { a.spacing_min_mm = 1.0; }, "spacing_min_mm", "under_smallest_cell"},
-      {false, [](S&, A& a) { a.spacing_mm = 1.0; a.tie_gap_heavy = 0.0; }, "spacing_mm", "under_smallest_cell"},
+      // (OG1's gap off: these pin the print floor; with the gap on its larger floor is the one refused, OL-OG1.)
+      {true, [](S&, A& a) { a.spacing_min_mm = 1.0; a.gap_lines = 0.0; }, "spacing_min_mm", "under_smallest_cell"},
+      {false, [](S&, A& a) { a.spacing_mm = 1.0; a.tie_gap_heavy = 0.0; a.gap_lines = 0.0; }, "spacing_mm", "under_smallest_cell"},
       {true, [](S&, A& a) { a.link_width = 3.0; }, "link_width", "out_of_range"},
       {true, [](S&, A& a) { a.unbraced_max = 2.0; }, "unbraced_max", "out_of_range"},
       {true, [](S&, A& a) { a.shape_reach = -1.0; }, "shape_reach", "below_zero"},
@@ -1388,6 +1392,7 @@ static void test_validate() {
   {
     OrganicAsk a = judged_ask(false);
     a.spacing_min_mm = 1.0;
+    a.gap_lines = 0.0;   // OG1 off: the print floor itself
     const std::vector<OrganicRefusal> r = validate_organic(st, a, &f);
     const bool num = !r.empty() && r[0].has_min && std::fabs(r[0].allowed_min - 0.9 * kSmallestCellFactor) < 1e-12 &&
                      r[0].given == 1.0 && r[0].text.find("1.39 mm") != std::string::npos;
@@ -1434,7 +1439,7 @@ static void test_validate() {
       try { (void)parse_file_job(head + tail); } catch (const std::exception& e) { return std::string(e.what()); }
       return std::string();
     };
-    const std::string small = why(R"(1, "organic_spacing_max_mm": 6}})");
+    const std::string small = why(R"(1, "organic_spacing_max_mm": 6, "organic_gap_lines": 0}})");   // OG1 off
     const std::string link = why(R"(3, "organic_spacing_max_mm": 6, "organic_link_width": 3}})");
     std::printf("OL-VALID file job: \"%s\"; \"%s\"\n", small.c_str(), link.c_str());
     CHECK(small.find("organic_spacing_min_mm") != std::string::npos && small.find("1.39 mm") != std::string::npos);
@@ -1522,11 +1527,12 @@ static void test_sweep_limits_for() {
   st.regions = {{1, Role::Lattice, {1}, 8.0, 0.0, true}, {2, Role::Lattice, {3}, 20.0, 0.0, true},
                 {9, Role::Lattice, {99}, 5.0, 0.0, true}};
   Session s(model);
-  const std::vector<SweepLimits> each = s.sweep_limits(st, 0.45);
+  // (OG1's gap off, 0 lines: these are the limits before it; OL-OG1 pins what the gap does to them.)
+  const std::vector<SweepLimits> each = s.sweep_limits(st, 0.45, 0.0);
   for (const SweepLimits& x : each)
     std::printf("OL-SWEEP-FOR region %d: measured %d, D %.2f, strut %.2f to %.2f, cell %.2f to %.2f\n", x.region,
                 x.measured ? 1 : 0, x.d_mm, x.strut_lower_mm, x.strut_upper_mm, x.cell_lower_mm, x.cell_upper_mm);
-  const SweepLimitsUnion u = s.sweep_limits_for(st, {1, 2, 9}, 0.45);
+  const SweepLimitsUnion u = s.sweep_limits_for(st, {1, 2, 9}, 0.45, 0.0);
   std::printf("OL-SWEEP-FOR union of 1, 2, 9: measured %d (%zu measured, %zu not): strut %.2f to %.2f (Auto %.2f), cell "
               "%.2f to %.2f (Auto %.2f)\n", u.measured ? 1 : 0, u.measured_regions.size(), u.unmeasured.size(),
               u.strut_lower_mm, u.strut_upper_mm, u.strut_auto_mm, u.cell_lower_mm, u.cell_upper_mm, u.cell_auto_mm);
@@ -1534,9 +1540,9 @@ static void test_sweep_limits_for() {
   CHECK(u.measured && u.measured_regions == std::vector<int>({1, 2}) && u.unmeasured == std::vector<int>({9}));
   CHECK(near(u.strut_lower_mm, 0.9) && near(u.strut_upper_mm, 1.8) && near(u.strut_auto_mm, 1.35));
   CHECK(near(u.cell_lower_mm, 1.5) && near(u.cell_upper_mm, 8.0) && near(u.cell_auto_mm, 5.0));
-  const SweepLimitsUnion one = s.sweep_limits_for(st, {1}, 0.45);
+  const SweepLimitsUnion one = s.sweep_limits_for(st, {1}, 0.45, 0.0);
   CHECK(one.measured && near(one.cell_lower_mm, 1.5) && near(one.cell_upper_mm, 3.5) && near(one.strut_upper_mm, 0.9));
-  const SweepLimitsUnion none = s.sweep_limits_for(st, {9}, 0.45);
+  const SweepLimitsUnion none = s.sweep_limits_for(st, {9}, 0.45, 0.0);
   CHECK(!none.measured && none.unmeasured.size() == 1 && none.cell_upper_mm == 0.0 && none.strut_auto_mm == 0.0);
 }
 
@@ -1844,6 +1850,441 @@ static void test_sample_bodies() {
   CHECK(threw);
 }
 
+
+// ── OL-OG1, OL-OG2 (brief E6): the gap between struts, and strut ends standing proud of an open face ───────────────────
+// The made parts: the 30 x 30 x 20 box, a field whose stress grows along x and y, the weave under one face.
+static TensorField gap_field() {
+  TensorField t;
+  t.nx = 30; t.ny = 30; t.nz = 20;
+  t.spacing = 1.0;
+  t.voigt.assign(6 * static_cast<std::size_t>(t.nx) * t.ny * t.nz, 0.0);
+  for (int k = 0; k < t.nz; ++k)
+    for (int j = 0; j < t.ny; ++j)
+      for (int i = 0; i < t.nx; ++i) {
+        const double x = i + 0.5, y = j + 0.5;
+        const double v[6] = {0.4 + 0.02 * x + 0.03 * y, 0.1, 1.0 + 0.1 * x, 0.05 * y / t.ny, 0.0, 0.0};
+        for (int c = 0; c < 6; ++c) t.voigt[6 * t.index(i, j, k) + static_cast<std::size_t>(c)] = v[c];
+      }
+  return t;
+}
+static OrganicAsk gap_ask(double heavy) {
+  OrganicAsk a;
+  a.spacing_min_mm = 2.0;
+  a.spacing_max_mm = 6.0;
+  a.width_mm = 0.9;
+  a.width_heavy_mm = heavy;
+  return a;
+}
+static OrganicAsk gap_judged(bool grown) {   // the Auto ask as judged (judged_ask's numbers)
+  OrganicAsk a = judged_ask(grown);
+  a.ties = true;
+  a.tie_level = true;
+  return a;
+}
+static Settings gap_settings(int face, double depth, bool drop) {
+  Settings s;
+  s.regions = {{1, Role::Lattice, {face}, depth, 0.0, true}};
+  s.drop_loose = drop;
+  return s;
+}
+static void test_og1_gap() {
+  const StepModel model = box_model(30, 30, 20);
+  const TensorField f = gap_field();
+  // 1. Off: the lays are the old engine's, bar for bar (bars_hash on the made parts, the values the engine at 844157dd
+  //    gives, before OG1 and OG2 existed), and the tubes file of one of them likewise.
+  {
+    struct Pin { int face; double depth; bool drop; OrganicAsk ask; std::uint64_t hash; };
+    OrganicAsk grown = judged_ask(true);
+    grown.ties = true;
+    const Pin pins[] = {{1, 16.0, true, gap_ask(1.8), 0x5329efc15073f757ULL},
+                        {1, 16.0, false, gap_ask(1.8), 0xd535900d484c8045ULL},
+                        {2, 12.0, false, gap_ask(1.6), 0x627813251bb9a6bfULL},
+                        {1, 16.0, true, gap_ask(0.0), 0x60471813348d58e7ULL}};
+    std::size_t same = 0, n = 0;
+    for (const Pin& p : pins) {
+      OrganicAsk a = p.ask;
+      a.gap_lines = 0.0;
+      a.face_relief_mm = 0.0;
+      Session session(model);
+      const Outcome o = session.lay_organic(gap_settings(p.face, p.depth, p.drop), f, a);
+      ++n;
+      same += bars_hash(o.bars) == p.hash && o.gap_capped == 0 && o.relief.proud == 0;
+      if (bars_hash(o.bars) != p.hash) std::printf("  OL-OG1 off: hash %016llx, the old engine's %016llx\n",
+                                                   static_cast<unsigned long long>(bars_hash(o.bars)),
+                                                   static_cast<unsigned long long>(p.hash));
+    }
+    std::printf("OL-OG1 off: %zu of %zu made lays bar for bar the old engine's\n", same, n);
+    CHECK(same == n);
+  }
+  // 2. On (the default, 1.5 lines): no strand point wider than (its local spacing - the gap), never under the thinnest
+  //    strut, never wider than it was with the rule off; Traced and Grown.
+  for (int g = 0; g < 2; ++g) {
+    const bool grown = g == 1;
+    DomainSpec ds;
+    ds.bead_mm = 0.45;
+    ds.min_strut_lines = 2.0;
+    bool ok = false;
+    ds.regions = {region_from_faces(model, {1}, 1, Role::Lattice, 16.0, 0.0, &ok)};
+    ds.regions[0].weave = true;
+    const PartMeasure pm(weld_mesh(model.mesh));
+    const Domain d(pm, ds);
+    OrganicAsk on = grown ? gap_judged(true) : gap_ask(1.8);
+    on.hold_parts = false;
+    OrganicAsk off = on;
+    off.gap_lines = 0.0;
+    CHECK(on.gap_lines == kOrganicGapLinesDefault);
+    GrowReport r1, r2;
+    OrganicTraceStats t1, t2;
+    const std::vector<Strand> a = grown ? grow_strands(d, 1, f, off, &r1) : trace_strands(d, 1, f, off, &t1);
+    const std::vector<Strand> b = grown ? grow_strands(d, 1, f, on, &r2) : trace_strands(d, 1, f, on, &t2);
+    const double gap = 1.5 * 0.45, thinnest = 0.9;
+    std::size_t points = 0, over = 0, wider = 0, under = 0, lowered = 0, moved = 0;
+    double worst = -1e9;
+    CHECK(a.size() == b.size());
+    for (std::size_t i = 0; i < std::min(a.size(), b.size()); ++i) {
+      CHECK(b[i].cap_mm.size() == b[i].points.size() && b[i].local_mm.size() == b[i].points.size() && a[i].cap_mm.empty());
+      for (std::size_t q = 0; q < std::min(b[i].points.size(), b[i].local_mm.size()); ++q) {
+        ++points;
+        const double w = b[i].width_mm[q], allowed = std::max(thinnest, b[i].local_mm[q] - gap);
+        worst = std::max(worst, w - allowed);
+        over += w > allowed + 1e-12;
+        wider += q < a[i].width_mm.size() && w > a[i].width_mm[q] + 1e-12;
+        under += w < thinnest - 1e-12;
+        lowered += q < a[i].width_mm.size() && w < a[i].width_mm[q] - 1e-12;
+        moved += q < a[i].points.size() && dist(a[i].points[q], b[i].points[q]) > 0.0;
+      }
+    }
+    const std::size_t said = grown ? r2.gap_capped : t2.gap_capped;
+    std::printf("OL-OG1 %s on: %zu points, %zu over (local spacing - gap) (worst %.2e mm), %zu wider than off, %zu under the "
+                "thinnest, %zu lowered (said %zu), %zu points moved\n",
+                grown ? "Grown" : "Traced", points, over, worst, wider, under, lowered, said, moved);
+    CHECK(ok && points > 0 && over == 0 && wider == 0 && under == 0 && lowered > 0 && lowered == said && moved == 0);
+  }
+  // 3. The two judged Auto asks are still valid with the gap on (the default); the refusal: a small end under the light
+  //    width + the gap names the smallest allowed cell; off, the same cell is allowed.
+  {
+    const Settings st = traced_settings();
+    for (int g = 0; g < 2; ++g) {
+      const std::vector<OrganicRefusal> r = validate_organic(st, judged_ask(g == 1), nullptr);
+      std::printf("OL-OG1 judged Auto ask, %s, gap on: %zu refusals\n", g ? "Grown" : "Traced", r.size());
+      CHECK(r.empty());
+    }
+    OrganicAsk a = gap_ask(1.8);
+    a.spacing_min_mm = 1.5;   // over the print floor (1.38 at 0.9) and under 0.9 + 0.675 = 1.575
+    const std::vector<OrganicRefusal> r = validate_organic(st, a, nullptr);
+    std::printf("OL-OG1 refusal: %s\n", r.empty() ? "(none)" : r.front().text.c_str());
+    CHECK(r.size() == 1 && has_refusal(r, "spacing_min_mm", "under_gap_cell") && r.front().has_min &&
+          std::fabs(r.front().allowed_min - 1.575) < 1e-9 && r.front().text.find("1.58 mm") != std::string::npos);
+    a.gap_lines = 0.0;
+    CHECK(validate_organic(st, a, nullptr).empty());
+    a.gap_lines = 1.5;
+    a.spacing_mm = 1.2;   // under both: one refusal, the larger floor's
+    const std::vector<OrganicRefusal> r2 = validate_organic(st, a, nullptr);
+    CHECK(r2.size() == 1 && has_refusal(r2, "spacing_mm", "under_gap_cell"));
+    a.spacing_mm = 0.0;
+    a.spacing_min_mm = 2.0;
+    for (double bad : {-0.5, 4.5}) {
+      a.gap_lines = bad;
+      CHECK(has_refusal(validate_organic(st, a, nullptr), "gap_lines", "out_of_range"));
+    }
+    a.gap_lines = 4.0;   // 0.9 + 1.8 = 2.7 > 2: refused
+    CHECK(has_refusal(validate_organic(st, a, nullptr), "spacing_min_mm", "under_gap_cell"));
+    // The session refuses the same ask before laying.
+    Session session(model);
+    const Outcome o = session.lay_organic(st, f, a);
+    CHECK(!o.refused.empty() && o.bars.bars.empty());
+  }
+  // 4. The Auto Sweep limits: the cell's lower end is at least the thin strut + the gap (up to 0.5 mm), said so; off,
+  //    the old numbers. A shallow region (D 5): 0.9 + 0.675 = 1.575 -> 2.0, over the old 1.5. The Auto and the Auto Sweep
+  //    asks made of them are valid.
+  {
+    const StepModel m5 = box_model(40, 30, 5);
+    const PartMeasure pm(weld_mesh(m5.mesh));
+    DomainSpec ds;
+    ds.bead_mm = 0.45;
+    ds.min_strut_lines = 2.0;
+    bool ok = false;
+    ds.regions = {region_from_faces(m5, {1}, 1, Role::Lattice, 5.0, 0.0, &ok)};
+    ds.regions[0].weave = true;
+    const Domain d(pm, ds);
+    const std::vector<SweepLimits> on = organic_sweep_limits(d, 0.45), off = organic_sweep_limits(d, 0.45, 0.0);
+    CHECK(ok && on.size() == 1 && off.size() == 1);
+    if (on.size() == 1 && off.size() == 1) {
+      const SweepLimits &x = on[0], &y = off[0];
+      std::printf("OL-OG1 sweep limits, D %.2f: gap on cell %.2f to %.2f (Auto %.2f), raised %d, gap %.3f; off cell %.2f to "
+                  "%.2f (Auto %.2f); strut %.2f to %.2f\n",
+                  x.d_mm, x.cell_lower_mm, x.cell_upper_mm, x.cell_auto_mm, x.cell_lower_by_gap ? 1 : 0, x.gap_mm,
+                  y.cell_lower_mm, y.cell_upper_mm, y.cell_auto_mm, x.strut_lower_mm, x.strut_upper_mm);
+      CHECK(x.cell_lower_by_gap && std::fabs(x.cell_lower_mm - 2.0) < 1e-9 && x.cell_lower_mm >= x.strut_lower_mm + x.gap_mm &&
+            std::fabs(y.cell_lower_mm - 1.5) < 1e-9 && !y.cell_lower_by_gap && y.gap_mm == 0.0 && x.cell_upper_mm >= x.cell_lower_mm);
+      Settings st;
+      st.regions = {{1, Role::Lattice, {1}, 5.0, 0.0, true}};
+      OrganicAsk a1;   // Auto: one number each
+      a1.spacing_mm = x.cell_auto_mm;
+      a1.width_mm = x.strut_auto_mm;
+      OrganicAsk a2;   // Auto Sweep: the ranges
+      a2.spacing_min_mm = x.cell_lower_mm;
+      a2.spacing_max_mm = x.cell_upper_mm;
+      a2.width_mm = x.strut_lower_mm;
+      a2.width_heavy_mm = x.strut_upper_mm;
+      CHECK(validate_organic(st, a1, nullptr).empty() && validate_organic(st, a2, nullptr).empty());
+      // The old limits with the gap on would be refused (that is what the rule changes).
+      a2.spacing_min_mm = y.cell_lower_mm;
+      CHECK(has_refusal(validate_organic(st, a2, nullptr), "spacing_min_mm", "under_gap_cell"));
+    }
+    // The session's union says it too.
+    Session session(m5);
+    Settings st;
+    st.regions = {{1, Role::Lattice, {1}, 5.0, 0.0, true}};
+    const SweepLimitsUnion u = session.sweep_limits_for(st, {1}, 0.45);
+    CHECK(u.measured && u.cell_lower_by_gap && u.gap_mm > 0.0 && u.cell_lower_mm >= u.strut_lower_mm + u.gap_mm);
+  }
+  // 5. The strength loop may go over the cap; it is counted (gap_broken), never silent: the width floors at 1.8 mm over
+  //    the whole block widen bars past their cap, and Outcome::gap_broken counts exactly those.
+  {
+    OrganicAsk a = gap_ask(1.8);
+    Session s1(model);
+    const Outcome plain = s1.lay_organic(gap_settings(1, 16.0, true), f, a);
+    a.floors = {{Vec3{15, 15, 10}, 100.0, 1.8}};
+    Session s2(model);
+    const Outcome widened = s2.lay_organic(gap_settings(1, 16.0, true), f, a);
+    std::size_t over = 0;
+    for (const Bar& b : widened.bars.bars) over += b.gap_cap_mm > 0.0 && b.width > b.gap_cap_mm + 1e-9;
+    std::printf("OL-OG1 gap broken: laid %zu (capped points %zu); after floors of 1.8 mm %zu bars widened, %zu over their cap, "
+                "said %zu\n",
+                plain.gap_broken, plain.gap_capped, widened.floors_widened, over, widened.gap_broken);
+    CHECK(plain.gap_broken == 0 && plain.gap_capped > 0 && widened.floors_widened > 0 && over > 0 &&
+          widened.gap_broken == over && gap_broken(widened.bars) == over);
+    // An additive widening (kind 2) of one capped bar over its cap counts it.
+    Bars b = plain.bars;
+    std::size_t at = b.bars.size();
+    for (std::size_t i = 0; i < b.bars.size() && at == b.bars.size(); ++i)
+      if (b.bars[i].gap_cap_mm > 0.0 && !b.bars[i].link) at = i;
+    CHECK(at < b.bars.size());
+    if (at < b.bars.size()) {
+      const Bar& x = b.bars[at];
+      AddRound round;
+      round.ops.push_back({2, {x.a.x, x.a.y, x.a.z, x.b.x, x.b.y, x.b.z, x.gap_cap_mm + 0.3}});
+      AddContext c;
+      c.light_mm = 0.9;
+      std::string why;
+      CHECK(apply_add_round(b, *s1.domain(), round, c, nullptr, &why) && gap_broken(b) == 1);
+    }
+  }
+  // 6. The diagnosis, `tight`: (local spacing - width) under one line width, by what set the spacing; its parts add up.
+  //    On the judged Traced ask the gap rule leaves fewer tight bars than off.
+  {
+    OrganicAsk on = gap_judged(false), off = on;
+    off.gap_lines = 0.0;
+    off.face_relief_mm = on.face_relief_mm = 0.0;
+    Session s1(model), s2(model);
+    const Outcome a = s1.lay_organic(traced_settings(), f, off), b = s2.lay_organic(traced_settings(), f, on);
+    auto sum = [](const Outcome::Tight& t) { return t.stress + t.shape + t.hold + t.floor + t.uniform + t.unknown; };
+    auto show = [](const char* w, const Outcome::Tight& t) {
+      std::printf("OL-OG1 tight, %s: %zu of %zu weave bars (stress %zu, shape %zu, floating parts %zu, tracer floor %zu, "
+                  "uniform %zu, not known %zu; supports %zu, links %zu, braces %zu)\n",
+                  w, t.tight, t.bars, t.stress, t.shape, t.hold, t.floor, t.uniform, t.unknown, t.supports, t.links, t.braces);
+    };
+    show("gap off", a.tight);
+    show("gap on", b.tight);
+    std::size_t direct = 0;
+    for (const Bar& x : a.bars.bars)
+      direct += !x.net && x.region == 1 && (x.local_mm > 0.0 ? x.local_mm : x.cell) - x.width < 0.45;
+    CHECK(a.tight.bars > 0 && a.tight.tight > 0 && sum(a.tight) == a.tight.tight && sum(b.tight) == b.tight.tight &&
+          direct == a.tight.tight && b.tight.tight < a.tight.tight && a.tight.line_mm == 0.45);
+  }
+}
+
+// OL-OG2: ends proud of the open faces. One made box, four lays: the weave under the top face, under a side face, under
+// the bottom face (its normal points straight down), and under the top face with that face excluded. Drop loose off, so
+// the Surface ends stay (with it on, Traced keeps none: drop_loose_bars takes every Surface end it did not see arrive).
+static void test_og2_relief() {
+  const StepModel model = box_model(30, 30, 20);
+  const TensorField f = gap_field();
+  struct Case { const char* name; int face; double depth; std::vector<int> exclude; };
+  const Case cases[] = {{"top", 1, 16.0, {}}, {"side", 2, 12.0, {}}, {"bottom", 0, 12.0, {}}, {"top, excluded", 1, 16.0, {1}}};
+  const double relief = 0.8;
+  for (const Case& c : cases) {
+    OrganicAsk a = gap_ask(1.6);
+    a.face_relief_mm = relief;
+    a.relief_exclude_faces = c.exclude;
+    const Settings st = gap_settings(c.face, c.depth, false);
+    Session session(model);
+    const Outcome o = session.lay_organic(st, f, a);
+    OrganicAsk flat = a;
+    flat.face_relief_mm = 0.0;
+    Session plain(model);
+    const Outcome p = plain.lay_organic(st, f, flat);
+    const Outcome::Relief& r = o.relief;
+    const PartMeasure::Probe pr = session.measure().probe();
+    // Every proud end: on a face allowed, above the bed, at most the setting beyond the surface (measured from the part),
+    // its bar the flush bar carried on along its own line; nothing below the bed.
+    std::size_t proud = 0, bad = 0, low = 0, off_line = 0;
+    double most = 0.0, most_out = 0.0;
+    for (std::size_t i = 0; i < o.bars.bars.size(); ++i) {
+      const Bar& x = o.bars.bars[i];
+      for (int e = 0; e < 2; ++e) {
+        const double pm = e == 0 ? x.proud_a : x.proud_b;
+        const Vec3& end = e == 0 ? x.a : x.b;
+        if (!(pm > 0.0)) continue;
+        ++proud;
+        if (end.z - 0.5 * x.width < -1e-9) ++low;   // the proud tip with its round cap: never below the bed
+        // Never on an excluded face: the end carried back lies on no face of the list (top z 20, bottom z 0).
+        const Bar flushed = without_relief(Bars{{x}}).bars.front();
+        const double zb = e == 0 ? flushed.a.z : flushed.b.z;
+        for (int ex : c.exclude) bad += (ex == 1 && std::fabs(zb - 20.0) < 1e-6) || (ex == 0 && std::fabs(zb) < 1e-6);
+        most = std::max(most, pm);
+        const double out = -pr.depth(end);
+        most_out = std::max(most_out, out);
+        bad += (e == 0 ? x.end_a : x.end_b) != Bar::End::Surface || pm > relief + 1e-12 || std::fabs(out - pm) > 0.02 ||
+               end.z <= 2.0 || x.net;
+      }
+      if (i < p.bars.bars.size()) {
+        const Bar& y = p.bars.bars[i];   // the same bar laid flush: the proud one lies on its line, past its end
+        const Bar back = without_relief(Bars{{x}}).bars.front();
+        off_line += dist(back.a, y.a) > 1e-9 || dist(back.b, y.b) > 1e-9 || x.width != y.width;
+      }
+    }
+    // The runs (the preview) are the bars: every proud tip is a run's end, exactly.
+    const std::vector<WeaveRun> runs = weave_runs(o.bars, {1}, 0.0);
+    std::size_t tips_in_runs = 0;
+    for (const Bar& x : o.bars.bars)
+      for (int e = 0; e < 2; ++e) {
+        if (!((e == 0 ? x.proud_a : x.proud_b) > 0.0)) continue;
+        const Vec3& end = e == 0 ? x.a : x.b;
+        bool found = false;
+        for (const WeaveRun& w : runs)
+          found = found || (!w.points.empty() && (dist(w.points.front(), end) == 0.0 || dist(w.points.back(), end) == 0.0));
+        tips_in_runs += found;
+      }
+    // The frame check reads the bars flush: the same frame as the flush lay's.
+    const FrameModel fa = build_frame(o.bars, session.domain()), fb = build_frame(p.bars, plain.domain());
+    bool same_frame = fa.nodes.size() == fb.nodes.size() && fa.pieces.size() == fb.pieces.size();
+    for (std::size_t k = 0; same_frame && k < fa.nodes.size(); ++k) same_frame = dist(fa.nodes[k], fb.nodes[k]) < 1e-9;
+    std::printf("OL-OG2 %s: %zu Surface ends, %zu proud (largest %.3f mm, %.3f mm outside measured), flush: excluded %zu, "
+                "down %zu, bed %zu, along %zu; bad %zu, below the bed %zu, off the flush line %zu, tips in runs %zu; box grew "
+                "%.2f %.2f %.2f %.2f %.2f %.2f; frame as flush %d\n",
+                c.name, r.surface_ends, r.proud, r.largest_mm, most_out, r.flush_excluded, r.flush_down, r.flush_bed,
+                r.flush_along, bad, low, off_line, tips_in_runs, r.grew_mm[0], r.grew_mm[1], r.grew_mm[2], r.grew_mm[3],
+                r.grew_mm[4], r.grew_mm[5], same_frame ? 1 : 0);
+    CHECK(o.refused.empty() && r.surface_ends > 0 && proud == r.proud && bad == 0 && low == 0 && off_line == 0 &&
+          tips_in_runs == proud && most <= relief + 1e-12 && same_frame && o.bars.bars.size() == p.bars.bars.size());
+    CHECK(r.surface_ends == r.proud + r.flush_excluded + r.flush_down + r.flush_bed + r.flush_along);
+    for (double g : r.grew_mm) CHECK(g <= relief + 0.5 * 1.6 + 1e-9);
+    if (c.face == 1 && c.exclude.empty()) CHECK(r.proud > 0 && r.grew_mm[5] > 0.0 && r.flush_down == 0);
+    if (c.face == 2) CHECK(r.proud > 0 && r.grew_mm[2] > 0.0);
+    if (c.face == 0) CHECK(r.flush_down > 0);   // its bottom face's ends stay flush; its open sides may stand proud
+    if (!c.exclude.empty()) CHECK(r.flush_excluded > 0 && r.grew_mm[5] < 0.5 * 1.6 + 1e-9);
+    // The file: the print check still clean, every shell closed and outward, the proud ends round, the trim leaving
+    // their tubes out (within proud + one radius) and nothing else.
+    if (c.face == 1 || c.face == 2) {
+      FileOptions opt = file_options_for(FileOptions{}, true);
+      opt.threads = 4;
+      FileReport rep;
+      const TriangleMesh mesh = make_file_mesh(session, o, opt, rep);
+      const Domain& d = *session.domain();
+      const OpenSpace open = read_open_space(d, o.layout, 0.25);
+      const Carved carved = carve_part(session.measure(), o.layout, open);
+      MeshSpec spec = file_mesh_defaults();
+      spec.weave_mesh = MeshSpec::WeaveMesh::Tubes;
+      const WeaveShells w = weave_shells(session.measure(), d, o.layout, o.bars, {}, carved, spec, true);
+      std::size_t closed = 0;
+      for (std::size_t sh = 0; sh < w.shells(); ++sh) {
+        TriangleMesh one;
+        int lo = 1 << 30, hi = -1;
+        for (std::size_t t = w.first_tri[sh]; t < w.first_tri[sh + 1]; ++t)
+          for (int k = 0; k < 3; ++k) { lo = std::min(lo, w.mesh.triangles[t][static_cast<std::size_t>(k)]); hi = std::max(hi, w.mesh.triangles[t][static_cast<std::size_t>(k)]); }
+        one.vertices.assign(w.mesh.vertices.begin() + lo, w.mesh.vertices.begin() + hi + 1);
+        for (std::size_t t = w.first_tri[sh]; t < w.first_tri[sh + 1]; ++t)
+          one.triangles.push_back({w.mesh.triangles[t][0] - lo, w.mesh.triangles[t][1] - lo, w.mesh.triangles[t][2] - lo});
+        double v = 0.0;
+        closed += closed_outward(one, &v) && v > 0.0;
+      }
+      double out_most = 0.0, z_low = 1e9;
+      for (const Vec3& v : w.mesh.vertices) { out_most = std::max(out_most, -pr.depth(v)); z_low = std::min(z_low, v.z); }
+      std::printf("OL-OG2 %s file: print check clean %d (%d passes); tubes: %zu shells, %zu closed and outward, %zu proud "
+                  "ends, %zu vertices left outside (farthest %.3f mm; anything else %.4f mm), lowest z %.3f\n",
+                  c.name, rep.print_clean ? 1 : 0, rep.builds, w.shells(), closed, w.proud_ends, w.proud_vertices,
+                  w.proud_outside_mm, w.outside_largest_mm, z_low);
+      CHECK(!mesh.empty() && rep.print_clean && closed == w.shells() && w.proud_ends > 0 && w.proud_vertices > 0 &&
+            w.proud_outside_mm <= relief + 0.5 * 1.6 * 1.42 + 1e-6 && w.outside_largest_mm <= 0.05 && z_low >= 0.0 &&
+            out_most <= relief + 0.5 * 1.6 * 1.42 + 1e-6);
+    }
+  }
+  // The keys: the settings' ranges (the relief 0 to 1 mm, a face id 0 or more).
+  {
+    const Settings st = traced_settings();
+    OrganicAsk a = gap_ask(1.8);
+    CHECK(a.face_relief_mm == 1.0 && a.relief_exclude_faces.empty());
+    for (double bad : {-0.1, 1.2}) {
+      a.face_relief_mm = bad;
+      CHECK(has_refusal(validate_organic(st, a, nullptr), "face_relief_mm", "out_of_range"));
+    }
+    a.face_relief_mm = 1.0;
+    a.relief_exclude_faces = {3, -1};
+    CHECK(has_refusal(validate_organic(st, a, nullptr), "relief_exclude_faces", "below_zero"));
+  }
+  // OP11 with both rules on (the defaults): two groups laid together give each region the bars it has laid alone (the
+  // relief is fixed by the strand's number within its group). Drop loose off, so both regions keep Surface ends.
+  {
+    const StepModel model2 = box_model(30, 30, 40);
+    const TensorField f2 = traced_field(30, 30, 40);
+    Settings both;
+    both.regions = {{1, Role::Lattice, {1}, 12.0, 0.0, true}, {2, Role::Lattice, {0}, 12.0, 0.0, true}};
+    both.drop_loose = false;
+    Settings only1 = both, only2 = both;
+    only1.regions = {both.regions[0]};
+    only2.regions = {both.regions[1]};
+    OrganicAsk traced = traced_ask(), grown = follow_ask(true);
+    grown.gap_lines = traced.gap_lines = kOrganicGapLinesDefault;
+    grown.face_relief_mm = traced.face_relief_mm = 1.0;
+    Session s(model2), s1(model2), s2(model2);
+    const Outcome o = s.lay_organic(both, f2, std::vector<OrganicGroup>{{{1}, traced}, {{2}, grown}});
+    const Outcome a1 = s1.lay_organic(only1, f2, traced);
+    const Outcome a2 = s2.lay_organic(only2, f2, grown);
+    std::printf("OL-OG2 two groups, both rules on: proud %zu (alone %zu + %zu); region 1 the same %d, region 2 the same %d\n",
+                o.relief.proud, a1.relief.proud, a2.relief.proud, region_fnv(o, 1) == region_fnv(a1, 1) ? 1 : 0,
+                region_fnv(o, 2) == region_fnv(a2, 2) ? 1 : 0);
+    CHECK(o.relief.proud > 0 && o.relief.proud == a1.relief.proud + a2.relief.proud &&
+          region_fnv(o, 1) == region_fnv(a1, 1) && region_fnv(o, 2) == region_fnv(a2, 2));
+  }
+  // The job keys (OG1, OG2): absent, the defaults (1.5 lines, 1 mm, no face); given, read; out of range, refused by name.
+  // A file job with them: the result says the gap, the diagnosis and the relief.
+  {
+    const std::string head = R"({"mode": "lattice_file", "model": "block.step", "layout": {
+      "min_strut_lines": 2, "bead_mm": 0.45, "region_ids": [1], "region_no_lattice": [0], "region_depth_mm": [16],
+      "region_expand_mm": [0], "region_face_counts": [1], "region_faces": [1], "region_weave": [true], "drop_loose": false,
+      "organic_spacing_min_mm": 2, "organic_spacing_max_mm": 6, "organic_width_mm": 0.9, "organic_width_heavy_mm": 1.6)";
+    const FileJob plain = parse_file_job(head + "}}");
+    CHECK(plain.organic.gap_lines == 1.5 && plain.organic.face_relief_mm == 1.0 && plain.organic.relief_exclude_faces.empty());
+    FileJob job = parse_file_job(head + R"(, "organic_gap_lines": 2, "organic_face_relief_mm": 0.5,
+      "organic_relief_exclude_faces": [0, 2]}})");
+    CHECK(job.organic.gap_lines == 2.0 && job.organic.face_relief_mm == 0.5 &&
+          job.organic.relief_exclude_faces == std::vector<int>({0, 2}));
+    for (const char* bad : {R"(, "organic_gap_lines": 5)", R"(, "organic_face_relief_mm": 1.5)",
+                            R"(, "organic_relief_exclude_faces": [-2])"}) {
+      std::string why;
+      try { (void)parse_file_job(head + bad + "}}"); } catch (const std::exception& e) { why = e.what(); }
+      CHECK(why.find(std::string(bad).substr(3, 14)) != std::string::npos);
+    }
+    if (mesh_available()) {
+      job.tensor_field = std::make_shared<TensorField>(f);
+      const std::string path = std::string(ORGANIC_RULES_TMP_DIR) + "/organic_relief.stl";
+      const FileResult r = make_lattice_file(box_model(30, 30, 20), job, path);
+      const std::string js = file_result_json(r);
+      std::printf("OL-OG2 file job: ok %d (%s), relief proud %zu of %zu Surface ends, tubes proud %zu, gap capped %zu, tight "
+                  "%zu of %zu; result names them %d\n",
+                  r.ok ? 1 : 0, r.code.c_str(), r.relief.proud, r.relief.surface_ends, r.made.shells.proud_ends, r.gap_capped,
+                  r.tight.tight, r.tight.bars,
+                  js.find("\"relief\"") != std::string::npos && js.find("\"tight\"") != std::string::npos ? 1 : 0);
+      CHECK(r.ok && r.relief.proud > 0 && r.made.shells.proud_ends > 0 && r.gap_capped > 0 && r.tight.bars > 0 &&
+            js.find("\"relief\"") != std::string::npos && js.find("\"tight\"") != std::string::npos &&
+            js.find("\"box_grew_mm\"") != std::string::npos);
+      std::remove(path.c_str());
+    }
+  }
+}
+
 int main() {
   test_s_cut_fix();
   test_k_floor();
@@ -1874,6 +2315,8 @@ int main() {
   test_groups();
   test_synthetic();
   test_sample_bodies();
+  test_og1_gap();
+  test_og2_relief();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }

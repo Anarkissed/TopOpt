@@ -209,7 +209,8 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "organic_shape_reach", "organic_hold_parts", "organic_part_reach_mm",
        "organic_part_support_mm", "organic_part_to_floor", "organic_wall_gap_heavy", "organic_cross_gap",
        "organic_cross_gap_heavy", "organic_cross_climb_max_deg", "organic_tie_level", "organic_tie_gap",
-       "organic_tie_gap_heavy", "organic_link_width", "organic_unbraced_max", "organic_follow_stress"},
+       "organic_tie_gap_heavy", "organic_link_width", "organic_unbraced_max", "organic_follow_stress",
+       "organic_gap_lines", "organic_face_relief_mm", "organic_relief_exclude_faces"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -493,6 +494,11 @@ OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::str
   a.part_support_mm = num(in, "organic_part_support_mm", a.part_support_mm, w);
   a.part_to_floor = flag(in, "organic_part_to_floor", a.part_to_floor, w);
   a.width_heavy_mm = num(in, "organic_width_heavy_mm", a.width_heavy_mm, w);   // I
+  // OG1, OG2 (brief E6): the gap between struts in line widths (1.5 when not given; 0 off), the surface relief in mm (1
+  // when not given; 0 off) and the faces left flush (none when not given). Their ranges are validate_organic's.
+  a.gap_lines = num(in, "organic_gap_lines", a.gap_lines, w);
+  a.face_relief_mm = num(in, "organic_face_relief_mm", a.face_relief_mm, w);
+  a.relief_exclude_faces = wholes(in, "organic_relief_exclude_faces", w);
   return a;
 }
 
@@ -1283,6 +1289,10 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     r.net_struts = out.net_struts;
     r.net_mm = out.net_mm;
     r.grown = out.grown;
+    r.gap_capped = out.gap_capped;   // OG1, OG2 (brief E6)
+    r.gap_broken = out.gap_broken;
+    r.tight = out.tight;
+    r.relief = out.relief;
     for (const Bar& b : out.bars.bars)
       r.weave_bars += std::find(weave_regions.begin(), weave_regions.end(), b.region) != weave_regions.end();
     if (!out.empty_regions.empty()) {
@@ -1699,6 +1709,29 @@ std::string file_result_json(const FileResult& r) {
                     "\"sags_unsupported\": %llu",
                     count(r.made.sags.lifted), r.made.sags.lift_largest_mm, count(r.made.sags.legs), r.made.sags.legs_mm,
                     count(r.made.sags.unsupported));
+      o += b;
+      // OG1 (brief E6): the gap rule and its diagnosis; OG2: the relief, and the tubes' proud ends.
+      const Outcome::Tight& tt = r.tight;
+      std::snprintf(b, sizeof b,
+                    ",\n    \"gap\": {\"capped_points\": %llu, \"broken\": %llu},"
+                    "\n    \"tight\": {\"line_mm\": %.9g, \"bars\": %llu, \"tight\": %llu, \"by\": {\"stress\": %llu, "
+                    "\"shape\": %llu, \"hold\": %llu, \"floor\": %llu, \"uniform\": %llu, \"unknown\": %llu}, "
+                    "\"supports\": %llu, \"links\": %llu, \"braces\": %llu}",
+                    count(r.gap_capped), count(r.gap_broken), tt.line_mm, count(tt.bars), count(tt.tight), count(tt.stress),
+                    count(tt.shape), count(tt.hold), count(tt.floor), count(tt.uniform), count(tt.unknown),
+                    count(tt.supports), count(tt.links), count(tt.braces));
+      o += b;
+      const Outcome::Relief& rl = r.relief;
+      std::snprintf(b, sizeof b,
+                    ",\n    \"relief\": {\"surface_ends\": %llu, \"proud\": %llu, \"largest_mm\": %.9g, \"flush\": "
+                    "{\"excluded_face\": %llu, \"down_facing\": %llu, \"near_bed\": %llu, \"along_surface\": %llu}, "
+                    "\"faces_known\": %s, \"box_grew_mm\": {\"-x\": %.9g, \"+x\": %.9g, \"-y\": %.9g, \"+y\": %.9g, "
+                    "\"-z\": %.9g, \"+z\": %.9g},\n      \"tube_proud_ends\": %llu, \"tube_proud_vertices\": %llu, "
+                    "\"tube_proud_outside_mm\": %.9g}",
+                    count(rl.surface_ends), count(rl.proud), rl.largest_mm, count(rl.flush_excluded), count(rl.flush_down),
+                    count(rl.flush_bed), count(rl.flush_along), rl.faces_known ? "true" : "false", rl.grew_mm[0],
+                    rl.grew_mm[1], rl.grew_mm[2], rl.grew_mm[3], rl.grew_mm[4], rl.grew_mm[5],
+                    count(r.made.shells.proud_ends), count(r.made.shells.proud_vertices), r.made.shells.proud_outside_mm);
       o += b;
     }
     o += "},\n";

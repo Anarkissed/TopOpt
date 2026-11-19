@@ -857,6 +857,13 @@ Bars weave_bars(const Domain& domain, const std::vector<Strand>& strands, int th
         bar.region = st.region;
         bar.strand = static_cast<int>(si);
         bar.level_tie = st.level_tie;   // S (brief G28)
+        // OG1 (brief E6): the gap cap (the mean of the two points', as the width is) and the local spacing (the smaller).
+        if (st.cap_mm.size() == st.points.size()) bar.gap_cap_mm = 0.5 * (st.cap_mm[k] + st.cap_mm[k + 1]);
+        if (st.local_mm.size() == st.points.size() && st.local_why.size() == st.points.size()) {
+          const std::size_t at = st.local_mm[k + 1] < st.local_mm[k] ? k + 1 : k;
+          bar.local_mm = st.local_mm[at];
+          bar.local_why = st.local_why[at];
+        }
         const int n = std::max(2, static_cast<int>(std::ceil(line.length / kStep)));
         std::vector<char> in(static_cast<std::size_t>(n) + 1);
         for (int i = 0; i <= n; ++i) in[static_cast<std::size_t>(i)] = held(static_cast<double>(i) / n);
@@ -1079,6 +1086,12 @@ std::size_t split_at_crossings(Bars& bars, double light_mm, double layer_mm, Cro
       l.into_a = l.into_b = -1;
       l.piece = false; l.skin = false; l.net = false; l.support = false; l.level_tie = false;
       l.link = true;
+      // OG1 (brief E6): a link takes its width from the struts it joins (S8, at most the thicker), so its cap is the
+      // larger of theirs: only a later widening (the strength loop) can take it over. A link to a bar the rule does not
+      // cap (a brace, a support) is not capped either (0).
+      l.gap_cap_mm = x.gap_cap_mm > 0.0 && y.gap_cap_mm > 0.0 ? std::max(x.gap_cap_mm, y.gap_cap_mm) : 0.0;
+      l.local_mm = 0.0;
+      l.local_why = 0;
       l.strand = next_strand++;   // S7: its own strand (the region is the lower-numbered bar's)
       links.push_back(l);
       if (stats) {
@@ -1224,6 +1237,8 @@ std::size_t merge_repeated_bars(Bars& bars, const std::vector<int>& regions) {
       (e == 0 ? kept.into_a : kept.into_b) = best == Bar::End::Joined ? best_into : -1;
     }
     for (std::size_t q = 1; q < g.size(); ++q) kept.width = std::max(kept.width, bars.bars[g[q]].width);
+    // OG1 (brief E6): the gap cap of the widest's (each repeat's width was within its own cap).
+    for (std::size_t q = 1; q < g.size(); ++q) kept.gap_cap_mm = std::max(kept.gap_cap_mm, bars.bars[g[q]].gap_cap_mm);
     bars.bars[g[0]] = kept;
   }
   std::vector<char> keep(n, 1);

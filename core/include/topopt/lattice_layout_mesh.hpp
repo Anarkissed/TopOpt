@@ -360,6 +360,11 @@ struct WeaveShells {
   std::size_t cut_at_bed = 0;            // shells cut flat at the bed plane
   double trimmed_largest_mm = 0.0;       // the farthest a vertex was moved onto the surface
   double outside_largest_mm = 0.0;       // after trimming: the farthest any vertex lies outside the part (trim on)
+  // OG2 (brief E6): run ends standing proud of an open face (a round tube's with a half-sphere cap; a shallow run's keeps
+  // its flat end), the vertices the trim left outside as their proud part (each within proud_mm + one radius, a shallow
+  // section's corner, of the surface), and the farthest of them outside, mm.
+  std::size_t proud_ends = 0, proud_vertices = 0;
+  double proud_outside_mm = 0.0;
   double mm3 = 0.0;                      // the shells' own volumes, summed (overlaps counted twice)
   double ms = 0.0;
   std::size_t shells() const { return first_tri.empty() ? 0 : first_tri.size() - 1; }

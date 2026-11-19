@@ -50,6 +50,10 @@ struct Piece {
   std::vector<double> r;   // per point
   Cap cap_a = Cap::Round, cap_b = Cap::Round;
   int kind = 0;
+  // OG2 (brief E6): a proud end's tube, from the point before it to its tip: the trim leaves the vertices outside the part
+  // that lie within this tube (radius x 1.16, a mitred ring's widest) and no more than `out` (proud + radius) outside.
+  struct Proud { Vec3 from{}, tip{}; double r = 0.0, out = 0.0; };
+  std::vector<Proud> proud;
 };
 
 // A shallow run swept with its own section (the D of O14, or the square bar), the section's frame fixed by the build
@@ -274,6 +278,9 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
     }
     if (pts.size() < 2) continue;
     const Bar::End ea = woven.bars[segs.front()].end_a, eb = woven.bars[segs.back()].end_b;
+    // OG2: a Surface end standing proud of the face (its bar's own proud_a / proud_b).
+    const double proud_a = ea == Bar::End::Surface ? woven.bars[segs.front()].proud_a : 0.0;
+    const double proud_b = eb == Bar::End::Surface ? woven.bars[segs.back()].proud_b : 0.0;
     std::size_t start = 0;
     for (std::size_t k = 1; k <= w.size(); ++k) {
       const bool last = k == w.size();
@@ -292,9 +299,25 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
         // Ends: in solid, run on and flat; on the surface, flat there; else (a joint, a free end, a split) round.
         pc.cap_a = outer_a && (ea == Bar::End::Solid || ea == Bar::End::Surface) ? Cap::Flat : Cap::Round;
         pc.cap_b = outer_b && (eb == Bar::End::Solid || eb == Bar::End::Surface) ? Cap::Flat : Cap::Round;
+        // OG2: a proud end is a half-sphere cap, its tube left outside the part by the trim.
+        if (outer_a && proud_a > 0.0) {
+          pc.cap_a = Cap::Round;
+          pc.proud.push_back({pc.p[1], pc.p[0], pc.r.front(), proud_a + pc.r.front()});
+          ++out.proud_ends;
+        }
+        if (outer_b && proud_b > 0.0) {
+          pc.cap_b = Cap::Round;
+          pc.proud.push_back({pc.p[pc.p.size() - 2], pc.p.back(), pc.r.back(), proud_b + pc.r.back()});
+          ++out.proud_ends;
+        }
       } else {
         // Flat at both ends; run on as build_mesh runs a shallow bar on, except on the surface (flat there).
         pc.cap_a = pc.cap_b = Cap::Flat;
+        // OG2: a shallow run's proud end keeps its flat end (its section has no round cap); its proud part is left out
+        // of the trim as a tube's is (the section's corner, r x sqrt 2, from its line).
+        const double rs = 1.41421356237 * pc.r.front(), re = 1.41421356237 * pc.r.back();
+        if (outer_a && proud_a > 0.0) { pc.proud.push_back({pc.p[1], pc.p[0], rs, proud_a + rs}); ++out.proud_ends; }
+        if (outer_b && proud_b > 0.0) { pc.proud.push_back({pc.p[pc.p.size() - 2], pc.p.back(), re, proud_b + re}); ++out.proud_ends; }
       }
       const bool on_a = pc.kind == 0 ? outer_a && ea == Bar::End::Solid : !(outer_a && ea == Bar::End::Surface);
       const bool on_b = pc.kind == 0 ? outer_b && eb == Bar::End::Solid : !(outer_b && eb == Bar::End::Surface);
@@ -353,6 +376,8 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
     for (const Vec3& v : part.mesh().vertices) bed = std::min(bed, v.z);
     std::vector<double> moved_most(shells.size(), 0.0), outside_most(shells.size(), 0.0);
     std::vector<std::size_t> moved(shells.size(), 0);
+    std::vector<std::size_t> proud_left(shells.size(), 0);   // OG2
+    std::vector<double> proud_most(shells.size(), 0.0);
     std::vector<char> rebuilt(shells.size(), 0), bed_cut(shells.size(), 0);
     // Trims one shell in place; true when it is still closed (by index, untouched) with a positive volume of at
     // least 5 % of what it was.
@@ -364,10 +389,32 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
       const double before = volume_of(m, 0, m.triangles.size());
       std::size_t n = 0;
       double most = 0.0, outside = 0.0;
+      // OG2: the proud tubes of this shell's piece (none for a shape of build_mesh's).
+      const std::vector<Piece::Proud>* proud =
+          made_from[s] >= 0 && !pieces[static_cast<std::size_t>(made_from[s])].proud.empty()
+              ? &pieces[static_cast<std::size_t>(made_from[s])].proud
+              : nullptr;
+      auto in_proud = [&](const Vec3& v, double out_by) {
+        for (const Piece::Proud& z : *proud) {
+          if (out_by > z.out + 1e-6) continue;
+          const Vec3 ab = sub(z.tip, z.from);
+          const double l2 = dot(ab, ab);
+          const double t = l2 > 0.0 ? std::clamp(dot(sub(v, z.from), ab) / l2, 0.0, 1.0) : 0.0;
+          if (len(sub(v, add(z.from, mul(ab, t)))) <= 1.16 * z.r + 1e-6) return true;
+        }
+        return false;
+      };
+      std::size_t kept_out = 0;
+      double kept_most = 0.0;
       for (Vec3& v : m.vertices) {
         if (v.z < bed) { v.z = bed; ++n; }
         if (pr.inside(v)) continue;
         double d = pr.depth(v);
+        if (proud && in_proud(v, -d)) {
+          ++kept_out;
+          kept_most = std::max(kept_most, -d);
+          continue;
+        }
         if (d >= -over) { outside = std::max(outside, -d); continue; }
         const Vec3 was = v;
         for (int it = 0; it < 4 && d < -1e-4; ++it) {
@@ -383,6 +430,8 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
       moved[s] = n;
       moved_most[s] = most;
       outside_most[s] = outside;
+      proud_left[s] = kept_out;
+      proud_most[s] = kept_most;
       return after > 0.0 && after >= 0.05 * before;
     };
     // A tube made again from its run cut back where its line leaves the part: the longest stretch of its centre line
@@ -487,6 +536,8 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
       out.trimmed_vertices += moved[s];
       out.trimmed_largest_mm = std::max(out.trimmed_largest_mm, moved_most[s]);
       out.outside_largest_mm = std::max(out.outside_largest_mm, outside_most[s]);
+      out.proud_vertices += proud_left[s];
+      out.proud_outside_mm = std::max(out.proud_outside_mm, proud_most[s]);
     }
   }
   for (std::size_t s = 0; s < shells.size(); ++s) {

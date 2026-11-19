@@ -24,6 +24,7 @@ namespace topopt::lattice_layout {
 
 void GrowReport::add(const GrowReport& o) {
   seeds_floor += o.seeds_floor; seeds_wall += o.seeds_wall; seeds_refused_support += o.seeds_refused_support;
+  gap_capped += o.gap_capped;   // OG1
   strands_grown += o.strands_grown; steps += o.steps; clamped += o.clamped;
   ended_edge += o.ended_edge; ended_unsupported += o.ended_unsupported; ended_joins += o.ended_joins;
   floor_stepped += o.floor_stepped; floor_ended_edge += o.floor_ended_edge;
@@ -2952,6 +2953,10 @@ std::vector<Strand> Grower::run() {
     for (Strand& s : out)
       for (std::size_t k = 0; k < s.points.size(); ++k)
         s.width_mm[k] = width_ + (ask_.width_heavy_mm - width_) * share(s.points[k]);
+  // OG1 (brief E6): each point's local spacing (O12, O13, L2's) and its reason; with the gap on, the cap on every width.
+  rep_.gap_capped = organic_gap_cap(out, 0, field_, spacing().spacing_mm, spacing().why,
+                                    ask_.gap_lines > 0.0 ? ask_.gap_lines * domain_.spec().bead_mm : 0.0,
+                                    domain_.spec().bead_mm * domain_.spec().min_strut_lines);
   rep_.strands = out.size();
   if (ask_.tie_level) {   // P: the largest height difference within one level tie, as the growth ends
     rep_.tie_level = true;

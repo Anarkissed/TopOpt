@@ -1005,6 +1005,28 @@ struct Bar {
   bool link = false;
   // T (brief G30): a BRACE laid by brace_weave from a brace point of a too-long strut (its own strand number).
   bool brace = false;
+  // OG1 (brief E6): the gap rule's cap on this bar's width (the mean of its strand's two points' caps: the local spacing
+  // there less the gap, never under the thinnest strut); 0 where the rule is off or the bar came from no capped strand
+  // (links, braces, supports, net struts, cells). Not in bars_hash.
+  double gap_cap_mm = 0.0;
+  // OG1's diagnosis (Outcome::tight): the local spacing at this bar (the smaller of its strand's two points'), and what
+  // set it (SpacingWhy); 0 / None where the bar came from no traced or grown strand point.
+  double local_mm = 0.0;
+  std::uint8_t local_why = 0;
+  // OG2 (brief E6): an end standing proud of an open face. proud_*: how far the end stands beyond the part's surface,
+  // along the surface's normal there; relief_*: how far the end was carried on along the bar to get there. 0: flush (as
+  // every end was before). The end keeps its kind (Surface). Not in bars_hash.
+  double proud_a = 0.0, proud_b = 0.0;
+  double relief_a = 0.0, relief_b = 0.0;
+};
+// OG1: what set the local spacing at a strand point (Bar::local_why, Outcome::tight).
+enum class SpacingWhy : std::uint8_t {
+  None = 0,      // not known: the point lies on no candidate voxel (nor beside one)
+  Uniform = 1,   // the widest spacing (one spacing, a uniform stress, shape only): nothing tightened it
+  Stress = 2,    // O12: the stress grading
+  Shape = 3,     // O13: the shape fit
+  Hold = 4,      // L2: the floating parts' reach
+  Floor = 5,     // Traced only: the tracer raised the asked spacing to its print or resolution floor
 };
 
 // Preview is the spec (reviewer, 2026-11-12): a bar lying flatter than 30 degrees is written to the file as a BRIDGE,
@@ -1028,6 +1050,11 @@ struct Bars {
   struct CutEnd { Vec3 at{}; int region = 0; double cell = 0.0; };
   std::vector<CutEnd> cut_in_air;
 };
+// OG2: `bars` with every proud end carried back onto the part's surface (each end moved back along its bar by its
+// relief_*, proud_* and relief_* set to 0): the bars as they were before OG2. The frame check reads these (the proud
+// part carries no load and is not judged: it ends free).
+Bars without_relief(const Bars& bars);
+bool has_relief(const Bars& bars);
 
 // S4: "where a stepped edge is left, the app points at it and says Rim or Skin will fix
 // this". The cut ends drop_loose_bars removed, gathered into edges: ends within one and a
@@ -1055,6 +1082,12 @@ struct Strand {
   bool tie = false;   // G9: a Grown transfer tie (read by its tests; the path lays it as any strand)
   // S (brief G28): a level tie (P, R): every point at one height. split_at_crossings never moves it (Bar::level_tie).
   bool level_tie = false;
+  // OG1 (brief E6), one per point when given (else empty): the local spacing at the point and what set it
+  // (SpacingWhy), and the gap rule's cap on its width (empty when the rule is off). weave_bars carries them onto the
+  // bars (Bar::local_mm, local_why, gap_cap_mm).
+  std::vector<double> local_mm;
+  std::vector<std::uint8_t> local_why;
+  std::vector<double> cap_mm;
 };
 // L2 (brief G14): what the supports of one Grown area need (hold_up_weave): the kept patches' bottoms and the area's
 // own numbers.
@@ -1473,6 +1506,31 @@ struct Outcome {
   // OP11 (brief C2, E7; a lay of two groups or more): weave bar pairs of different groups closer than the sum of their
   // half widths (the cut at crossings does not join them in this version). 0 for one group.
   std::size_t cross_group_touches = 0;
+  // OG1 (brief E6; lay_organic and lay_organic_draft only). gap_capped: strand points whose width the gap rule lowered.
+  // gap_broken: weave bars wider than their gap cap after the width floors and additions (gap_broken(), organic header).
+  std::size_t gap_capped = 0, gap_broken = 0;
+  // OG1's diagnosis, `tight`: over the weave bars (net struts left out), how many have (local spacing - width) under one
+  // line width (bead_mm), and for those what set the local spacing (Bar::local_why; a bar with none, a link, brace or
+  // support, is read at its `cell`, the strand's spacing, and counted `unknown`, but a support is counted `hold`); of
+  // them the supports, links and braces.
+  struct Tight {
+    double line_mm = 0.0;
+    std::size_t bars = 0, tight = 0;
+    std::size_t stress = 0, shape = 0, hold = 0, floor = 0, uniform = 0, unknown = 0;
+    std::size_t supports = 0, links = 0, braces = 0;
+  } tight;
+  // OG2 (brief E6; lay_organic and lay_organic_draft only): the ends carried proud of an open face, the largest proud
+  // (mm, along the normal), the Surface ends of weave bars left flush and why (excluded face, outward normal down more
+  // than 45 degrees, within 2 mm of the bed (or the proud tip would reach it), end direction within 20 degrees of the
+  // surface), and how far each side of the part's box moved out (-x, +x, -y, +y, -z, +z; the tips with their round
+  // cap's radius). faces_known false: the part had no face ids, so no face could be excluded.
+  struct Relief {
+    std::size_t surface_ends = 0, proud = 0;
+    double largest_mm = 0.0;
+    std::size_t flush_excluded = 0, flush_down = 0, flush_bed = 0, flush_along = 0;
+    double grew_mm[6] = {0, 0, 0, 0, 0, 0};
+    bool faces_known = true;
+  } relief;
 };
 
 struct SweepLimits;   // lattice_layout_organic.hpp
@@ -1520,10 +1578,13 @@ class Session {
   // OP5 (brief C1): the Auto Sweep limits before any lay. The domain for these settings' "where" is made exactly as
   // lay() and lay_organic() make it (and kept for the next lay, as theirs is), nothing is laid, and the answer is
   // organic_sweep_limits(that domain, line_mm) (lattice_layout_organic.hpp; include it to read the result).
-  std::vector<SweepLimits> sweep_limits(const Settings& settings, double line_mm);
+  // OG1 (brief E6): `gap_lines` the gap rule's (OrganicAsk::gap_lines): the cell's lower end is at least the thin strut
+  // plus the gap.
+  std::vector<SweepLimits> sweep_limits(const Settings& settings, double line_mm, double gap_lines = 1.5);
   // OP10 (brief C2, E4, E7): the limits of a group of weave regions, the union over the measured ones among `regions`
   // (SweepLimitsUnion, lattice_layout_organic.hpp). Makes the domain as sweep_limits does; lays nothing.
-  SweepLimitsUnion sweep_limits_for(const Settings& settings, const std::vector<int>& regions, double line_mm);
+  SweepLimitsUnion sweep_limits_for(const Settings& settings, const std::vector<int>& regions, double line_mm,
+                                    double gap_lines = 1.5);
   std::size_t open_edges() const { return open_edges_; }
   const PartMeasure& measure() const { return *measure_; }
   // The part as it was opened (its unwelded triangles and their raw face ids): D23 reads its faces. Not a copy.
