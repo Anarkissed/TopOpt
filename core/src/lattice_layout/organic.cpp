@@ -1775,10 +1775,10 @@ std::vector<OrganicRefusal> validate_organic(const Settings& settings, const Org
     at_least(r, 0.5);
     at_most(r, 1.0);
   }
-  // OG2 (brief E6): the relief, 0 (off) to 5 mm; the faces left flush are the part's face ids (0 or more).
+  // OG2 (brief E6): the relief, 0 (off) to 1 mm; the faces left flush are the part's face ids (0 or more).
   if (!(fin(a.face_relief_mm) && a.face_relief_mm >= 0.0 && a.face_relief_mm <= kOrganicReliefMaxMm)) {
     OrganicRefusal& r = refuse("face_relief_mm", "out_of_range",
-                               "Surface relief: it must be from 0 (off) to 5 mm.", a.face_relief_mm);
+                               "Surface relief: it must be from 0 (off) to 1 mm.", a.face_relief_mm);
     at_least(r, 0.0);
     at_most(r, kOrganicReliefMaxMm);
   }

@@ -2107,7 +2107,7 @@ static void test_og2_relief() {
   const TensorField f = gap_field();
   struct Case { const char* name; int face; double depth; std::vector<int> exclude; };
   const Case cases[] = {{"top", 1, 16.0, {}}, {"side", 2, 12.0, {}}, {"bottom", 0, 12.0, {}}, {"top, excluded", 1, 16.0, {1}}};
-  // The owner, 2026-11-19 ("a 5mm ceiling is best"): every case at 0.8 mm and at the ceiling, 5 mm.
+  // Every case at 0.8 mm and at the ceiling, 1 mm (the owner, 2026-11-19: on/off, "limits to 1mm"; 5 mm withdrawn).
   for (const double relief : {0.8, kOrganicReliefMaxMm})
   for (const Case& c : cases) {
     OrganicAsk a = gap_ask(1.6);
@@ -2272,7 +2272,7 @@ static void test_og2_relief() {
     const Settings st = traced_settings();
     OrganicAsk a = gap_ask(1.8);
     CHECK(a.face_relief_mm == 1.0 && a.relief_exclude_faces.empty());
-    for (double bad : {-0.1, 5.1}) {
+    for (double bad : {-0.1, 1.1}) {
       a.face_relief_mm = bad;
       CHECK(has_refusal(validate_organic(st, a, nullptr), "face_relief_mm", "out_of_range"));
     }
@@ -2353,7 +2353,7 @@ static void test_og2_relief() {
       "organic_relief_exclude_faces": [0, 2]}})");
     CHECK(job.organic.gap_lines == 2.0 && job.organic.face_relief_mm == 0.5 &&
           job.organic.relief_exclude_faces == std::vector<int>({0, 2}));
-    for (const char* bad : {R"(, "organic_gap_lines": 5)", R"(, "organic_face_relief_mm": 5.5)",
+    for (const char* bad : {R"(, "organic_gap_lines": 5)", R"(, "organic_face_relief_mm": 1.5)",
                             R"(, "organic_relief_exclude_faces": [-2])"}) {
       std::string why;
       try { (void)parse_file_job(head + bad + "}}"); } catch (const std::exception& e) { why = e.what(); }
