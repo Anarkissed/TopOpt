@@ -194,6 +194,10 @@ struct Region {
   // cover makes solid ITS lattice within that distance of the part's surface, and its cells
   // start behind it. Neither acts on another region's lattice.
   std::optional<double> rim_mm, cover_mm;
+  // Leg J item 2 (OJ2, the Organic Finish Solid): the cover closes only the region's OPEN face, its own faces (the
+  // depth below them, as owner_of reads it, within the cover's thickness), not every face the region meets. Set by the
+  // session for a weave region made from faces or pieces; a zone's region keeps the cover on every face in the zone.
+  bool cover_open_face = false;
 };
 
 // The region under one or more faces of the model, from the faces themselves (rule D10:
@@ -497,6 +501,7 @@ class Domain {
   };
   std::vector<Sure> sure_;         // one per region (empty where it does not apply)
   bool own_cover_ = false;         // some region states its own cover (S13)
+  bool any_open_face_cover_ = false;   // OJ2: some region's cover closes only its open face
   // region_contains(spec_.regions[i], p), by the squares where they are sure.
   bool region_holds(std::size_t i, const Vec3& p) const;
 

@@ -915,7 +915,7 @@ double relief_share(int strand, int region) {   // u in (0, 1], fixed by the str
 }
 
 void lay_relief(Bars& bars, const StepModel& model, const PartMeasure& part, const std::vector<OrganicGroup>& groups,
-                const std::vector<std::size_t>& first_strand, Outcome::Relief& rep) {
+                const std::vector<std::size_t>& first_strand, Outcome::Relief& rep, const std::vector<int>& covered = {}) {
   rep = Outcome::Relief{};
   const OrganicGroup* of_region_cache = nullptr;
   auto group_of = [&](int region) -> const OrganicGroup* {
@@ -942,6 +942,7 @@ void lay_relief(Bars& bars, const StepModel& model, const PartMeasure& part, con
   // bars' own depths. The bar is not moved.
   for (Bar& b : bars.bars) {
     if (b.net) continue;
+    if (std::find(covered.begin(), covered.end(), b.region) != covered.end()) continue;   // OJ2: Solid: no relief
     const OrganicGroup* g = group_of(b.region);
     if (!g || !(g->ask.face_relief_mm > 0.0)) continue;
     const OrganicAsk& ask = g->ask;
@@ -993,6 +994,7 @@ void lay_relief(Bars& bars, const StepModel& model, const PartMeasure& part, con
     if (b.net) continue;
     for (int e = 0; e < 2; ++e) {
       if ((e == 0 ? b.end_a : b.end_b) != Bar::End::Surface) continue;
+      if (std::find(covered.begin(), covered.end(), b.region) != covered.end()) continue;   // OJ2
       const OrganicGroup* g = group_of(b.region);
       if (!g || !(g->ask.face_relief_mm > 0.0)) continue;
       const OrganicAsk& ask = g->ask;
@@ -1250,7 +1252,10 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
     // which are made on these bars).
     std::vector<std::size_t> firsts;
     for (const WeaveFinish::Group& gf : finish.groups) firsts.push_back(gf.first);
-    lay_relief(out.bars, model_, *measure_, groups, firsts, out.relief);
+    std::vector<int> covered;   // OJ2 (ruling 2): depth variation is off on a face with a Solid finish
+    for (const Region& rg : domain_->spec().regions)
+      if (rg.weave && domain_->cover_depth_mm(&rg) > 0.0) covered.push_back(rg.id);
+    lay_relief(out.bars, model_, *measure_, groups, firsts, out.relief, covered);
     out.organic_references = all_references;   // brief E2
     // Brief E2 and E3a (the strength check's floors and additions) are made for ONE ask (the file job's, and a preview
     // of it): they are read from a lay of one group (OP11); a lay of several groups does not apply them.

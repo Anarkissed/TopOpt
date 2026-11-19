@@ -2876,7 +2876,43 @@ static void test_finish_per_region() {
   CHECK(!r.refused.empty() && r.refused[0].code == "rim_under_organic" && r.refused[0].setting == "rim_mm");
 }
 
+// ── OL-SOLID (leg J item 2, OJ2): an Organic area's Solid closes its open face only; depth variation off there.
+static void test_solid_open_face() {
+  const StepModel model = box_model(30, 30, 20);
+  const TensorField f = gap_field();
+  OrganicAsk a = gap_ask(1.6);
+  a.face_relief_mm = 1.0;
+  Settings st = gap_settings(1, 8.0, false);   // the weave under the top face (z = 20), 8 mm deep
+  st.regions[0].cover_mm = 1.2;               // Solid, 1.2 mm
+  Session s(model);
+  const Outcome o = s.lay_organic(st, f, a);
+  const Domain::Probe pr = s.domain()->probe();
+  // Under the open face: solid within 1.2 mm; the side walls the area meets: lattice up to the face.
+  const Where under = pr.where({15.0, 15.0, 19.5}), deeper = pr.where({15.0, 15.0, 18.0}), side = pr.where({0.5, 15.0, 15.0});
+  std::size_t in_cover = 0, along = 0, proud = 0, bars1 = 0;
+  double top_z = 0.0;
+  for (const Bar& b : o.bars.bars) {
+    if (b.region != 1) continue;
+    ++bars1;
+    // An end that meets the cover ends in it as in any solid (run on up to its radius, O4): none reaches further.
+    for (const Vec3& p : {b.a, b.b}) { in_cover += p.z > 20.0 - 1.2 + 0.5 * b.width + 1e-6; top_z = std::max(top_z, p.z); }
+    along += b.along_proud > 0.0;
+    proud += b.proud_a > 0.0 || b.proud_b > 0.0;
+  }
+  // The same area without the Solid: relief laid (the switch is the cover's, not the relief's).
+  Settings open = gap_settings(1, 8.0, false);
+  Session s2(model);
+  const Outcome o2 = s2.lay_organic(open, f, a);
+  std::printf("OL-SOLID: 0.5 mm under the open face %s, 2 mm under it %s, 0.5 mm in from a side wall %s; area 1 bars %zu, "
+              "ends more than a radius inside the cover %zu (highest end z %.4f), along-face relief %zu, proud ends %zu; without Solid: along %zu, proud %zu\n",
+              under.why == Why::Cover ? "cover" : "not cover", deeper.lattice() ? "lattice" : "not lattice",
+              side.lattice() ? "lattice" : "not lattice", bars1, in_cover, top_z, along, proud, o2.relief.along, o2.relief.proud);
+  CHECK(o.refused.empty() && under.why == Why::Cover && deeper.lattice() && side.lattice() && bars1 > 0 && in_cover == 0 &&
+        along == 0 && proud == 0 && o2.relief.along + o2.relief.proud > 0);
+}
+
 int main() {
+  test_solid_open_face();
   test_finish_per_region();
   test_og5_inside();
   test_s_cut_fix();

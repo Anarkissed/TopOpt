@@ -108,6 +108,7 @@ void Session::ready_domain(const Settings& settings) {
       region.rim_mm = r.rim_mm;       // S13: its own, else the part's
       region.cover_mm = r.cover_mm;
       region.weave = r.weave;
+      region.cover_open_face = r.weave && !zone;   // OJ2: an Organic area's Solid closes its open face only
       spec.regions.push_back(std::move(region));
     }
     for (const Settings::ProtectAsk& p : settings.protect)

@@ -962,6 +962,26 @@ int main() {
     }
   }
 
+  // ── OJ2 (leg J item 2; the owner, 2026-11-19: "yes, a solid finish can sit on a loaded face if chosen by the user in
+  // the settings"): the weave under the LOADED top face with a Solid finish (1.2 mm): the check runs, the cover is
+  // solid in it, and the load reaches the lattice through the cover (frame nodes driven, the load on the frame).
+  {
+    const std::string fj = file_job(f, ", \"region_weave\": [true], \"organic_spacing_mm\": 4, \"organic_width_mm\": 0.9, "
+                                       "\"region_finish\": [{\"cover_mm\": 1.2}]");
+    std::string fjt = fj;
+    fjt.replace(fjt.find("\"layout\""), 8, "\"tensor\": \"stress.tensor\", \"layout\"");
+    const Run sol = run("solid_loaded", fjt, strength_job(f, 200.0, "lattice_part", "block.stl", f.top));
+    const std::string b = block(sol.json);
+    const std::size_t fr = b.find("\"frame\"");
+    const std::size_t sr = b.find("\"struts\"");
+    std::printf("[solid loaded] ok %d, strength ran %d, verdict %s; frame: solved %s, driven nodes %.0f, load %.4g N, on frame nodes %.4g N "
+                "(the rest reaches the lattice through the cover); struts judged %.0f, smallest margin %.4g\n", sol.r.ok, sol.r.strength_ran,
+                has(b, "\"verdict\": \"pass\"") ? "pass" : "not pass", has(b, "\"solved\": true") ? "yes" : "no", num_after(b, "driven", fr),
+                num_after(b, "load_total_n", fr), num_after(b, "load_on_frame_n", fr), num_after(b, "judged", sr), num_after(b, "smallest_margin", sr));
+    CHECK(sol.r.ok && sol.r.strength_ran && fr != std::string::npos && has(b, "\"solved\": true") && num_after(b, "driven", fr) > 0 &&
+          num_after(b, "load_total_n", fr) == 200.0 && num_after(b, "load_on_frame_n", fr) == 0.0 && num_after(b, "judged", sr) > 0);
+  }
+
   // ── §12 (brief E4, item 2) the solid's weak spots, on made notched bars 40 x 10 x 12 (held on the x = 0 end, pulled
   // along x on the x = 40 end, an Organic weave 2 mm deep under the bottom face): one notch from the top gives one spot
   // at the notch, two notches two spots; a light load none; the plain text in each case.

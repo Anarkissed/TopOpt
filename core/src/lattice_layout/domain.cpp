@@ -116,6 +116,7 @@ Domain::Domain(const PartMeasure& measure, DomainSpec spec)
   }
   for (const Region& r : spec_.regions) near_shell_.emplace_back(r.shell, r.shell_depth_mm);
   for (const Region& r : spec_.regions) own_cover_ = own_cover_ || (r.role == Role::Lattice && r.cover_mm);
+  for (const Region& r : spec_.regions) any_open_face_cover_ = any_open_face_cover_ || (r.role == Role::Lattice && r.cover_open_face);
   sure_.resize(spec_.regions.size());
   for (std::size_t i = 0; i < spec_.regions.size(); ++i) {
     const Region& r = spec_.regions[i];
@@ -210,9 +211,11 @@ Domain::Probe::Probe(const Domain& d) : d_(&d), part_(d.measure_->probe()) {
 }
 
 double Domain::Probe::cover_at(const Vec3& p) const {
-  if (!d_->own_cover_) return d_->cover_depth_mm();
   double best = 0.0;
-  return d_->cover_depth_mm(owner_of(p, &best));
+  const Region* owner = d_->own_cover_ || d_->any_open_face_cover_ ? owner_of(p, &best) : nullptr;
+  if (!d_->own_cover_ && !owner) return d_->cover_depth_mm();
+  const double c = d_->cover_depth_mm(owner);
+  return owner && owner->cover_open_face && best > c ? 0.0 : c;   // OJ2: only under its open face
 }
 
 double Domain::Probe::skin_gap(const Vec3& p) const { return skin_gap(p, cover_at(p)); }
@@ -403,7 +406,9 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
   // S9: Finish Covered. Lattice within the cover's thickness of the part's surface is
   // the solid shell instead.
   const double cover = d_->cover_depth_mm(owner);   // S13: the owner's own, else the part's
-  if (cover > 0.0 && part_.depth_up_to(p, cover * (1.0 + 1e-9) + 1e-9) <= cover) return {Why::Cover, id};
+  // OJ2: an Organic area's cover closes only its open face (the depth below its own face within the cover).
+  const bool cover_here = !(owner && owner->cover_open_face) || best <= cover * (1.0 + 1e-9) + 1e-9;
+  if (cover > 0.0 && cover_here && part_.depth_up_to(p, cover * (1.0 + 1e-9) + 1e-9) <= cover) return {Why::Cover, id};
 
   if (wall_wanted) {
     double wall = 0.0;
