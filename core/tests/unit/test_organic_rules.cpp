@@ -2145,6 +2145,35 @@ static void test_og2_relief() {
         off_line += dist(back.a, y.a) > 1e-9 || dist(back.b, y.b) > 1e-9 || x.width != y.width;
       }
     }
+    // OG2b (leg B): the bars along an allowed open face: given the setting (the cap), never on an excluded face, a face
+    // whose normal points down more than 45 degrees, or within 2 mm of the bed (read where the bar comes nearest the
+    // surface); never moved (the flush lay's bars, end relief carried back); the runs carry it.
+    std::size_t along = 0, along_bad = 0;
+    for (std::size_t i = 0; i < o.bars.bars.size(); ++i) {
+      const Bar& x = o.bars.bars[i];
+      if (!(x.along_proud > 0.0)) continue;
+      ++along;
+      const Bar back = without_relief(Bars{{x}}).bars.front();
+      double least = 1e9;
+      Vec3 at{};
+      for (int q = 0; q <= 40; ++q) {
+        const Vec3 pt{back.a.x + (back.b.x - back.a.x) * q / 40.0, back.a.y + (back.b.y - back.a.y) * q / 40.0,
+                      back.a.z + (back.b.z - back.a.z) * q / 40.0};
+        const double dd = pr.depth(pt);
+        if (dd < least) { least = dd; at = pt; }
+      }
+      // The face nearest (the box's): the top when 20 - z is the depth, the bottom when z is, else a side.
+      const bool top = std::fabs(20.0 - at.z - least) < 1e-3, bottom = std::fabs(at.z - least) < 1e-3;
+      along_bad += x.along_proud != relief || !(least < 0.5 * x.width + 1e-6) || bottom ||
+                   (!top && at.z <= 2.0) ||
+                   (!c.exclude.empty() && top &&   // at the top's edge a side face is as near: either may be read
+                    std::fabs(std::min({at.x, 30.0 - at.x, at.y, 30.0 - at.y}) - least) > 0.05);
+    }
+    std::size_t run_marked = 0;
+    for (const WeaveRun& w : weave_runs(o.bars, {1}, 0.0)) run_marked += w.proud_mm > 0.0;
+    std::printf("OL-OG2b %s: %zu bars along an open face (setting %.2f), %zu not as the rule says; %zu runs carry it\n", c.name,
+                along, relief, along_bad, run_marked);
+    CHECK(along_bad == 0 && (c.face == 0 || along > 0) && (along == 0) == (run_marked == 0));
     // The runs (the preview) are the bars: every proud tip is a run's end, exactly.
     const std::vector<WeaveRun> runs = weave_runs(o.bars, {1}, 0.0);
     std::size_t tips_in_runs = 0;
@@ -2203,9 +2232,12 @@ static void test_og2_relief() {
       double out_most = 0.0, z_low = 1e9;
       for (const Vec3& v : w.mesh.vertices) { out_most = std::max(out_most, -pr.depth(v)); z_low = std::min(z_low, v.z); }
       std::printf("OL-OG2 %s file: print check clean %d (%d passes); tubes: %zu shells, %zu closed and outward, %zu proud "
-                  "ends, %zu vertices left outside (farthest %.3f mm; anything else %.4f mm), lowest z %.3f\n",
+                  "ends, %zu vertices left outside (farthest %.3f mm; anything else %.4f mm), lowest z %.3f; along the face "
+                  "%zu bars, %zu vertices out (farthest %.3f mm); box grew %.2f %.2f %.2f %.2f %.2f %.2f\n",
                   c.name, rep.print_clean ? 1 : 0, rep.builds, w.shells(), closed, w.proud_ends, w.proud_vertices,
-                  w.proud_outside_mm, w.outside_largest_mm, z_low);
+                  w.proud_outside_mm, w.outside_largest_mm, z_low, w.along_bars, w.along_vertices, w.along_outside_mm,
+                  w.grew_mm[0], w.grew_mm[1], w.grew_mm[2], w.grew_mm[3], w.grew_mm[4], w.grew_mm[5]);
+      CHECK(w.along_bars > 0 && w.along_vertices > 0 && w.along_outside_mm > 0.05 && w.along_outside_mm <= relief + 1e-3);
       CHECK(!mesh.empty() && rep.print_clean && closed == w.shells() && w.proud_ends > 0 && w.proud_vertices > 0 &&
             w.proud_outside_mm <= relief + 0.5 * 1.6 * 1.42 + 1e-6 && w.outside_largest_mm <= 0.05 && z_low >= 0.0 &&
             out_most <= relief + 0.5 * 1.6 * 1.42 + 1e-6);

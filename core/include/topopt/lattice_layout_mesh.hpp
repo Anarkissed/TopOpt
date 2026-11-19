@@ -365,6 +365,12 @@ struct WeaveShells {
   // section's corner, of the surface), and the farthest of them outside, mm.
   std::size_t proud_ends = 0, proud_vertices = 0;
   double proud_outside_mm = 0.0;
+  // OG2b (brief E6, leg B): bars of the runs whose tubes may stand out where they run along an open face
+  // (Bar::along_proud), the vertices left outside for them (each no more than face_relief_mm out, never moved out), the
+  // farthest; and how far the shells reach past each side of the part's box (-x, +x, -y, +y, -z, +z), after the trim.
+  std::size_t along_bars = 0, along_vertices = 0;
+  double along_outside_mm = 0.0;
+  double grew_mm[6] = {0, 0, 0, 0, 0, 0};
   double mm3 = 0.0;                      // the shells' own volumes, summed (overlaps counted twice)
   double ms = 0.0;
   std::size_t shells() const { return first_tri.empty() ? 0 : first_tri.size() - 1; }

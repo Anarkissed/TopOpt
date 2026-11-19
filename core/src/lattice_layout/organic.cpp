@@ -845,6 +845,59 @@ void lay_relief(Bars& bars, const StepModel& model, const PartMeasure& part, con
   const PartMeasure::Probe probe = part.probe();
   const Vec3 plo = part.lo(), phi = part.hi();
   const double kDown = std::cos(45.0 * 3.14159265358979323846 / 180.0), kAlong = std::sin(20.0 * 3.14159265358979323846 / 180.0);
+  // OG2b (brief E6, leg B; the owner: "Depth variation means to not cut entirely along the plane!"): a weave bar (strands,
+  // links, level ties, braces and supports alike; not a net strut) whose tube reaches the part's surface (the depth
+  // along its line, read every 0.25 mm, under its radius) where the face is not excluded, its outward normal not down
+  // more than 45 degrees and the place more than 2 mm above the bed, gets along_proud = face_relief_mm: its tube keeps
+  // its own bulge out of the surface, cut only where it would stand more than that. No hash: the heights come from the
+  // bars' own depths. The bar is not moved.
+  for (Bar& b : bars.bars) {
+    if (b.net) continue;
+    const OrganicGroup* g = group_of(b.region);
+    if (!g || !(g->ask.face_relief_mm > 0.0)) continue;
+    const OrganicAsk& ask = g->ask;
+    const double r = 0.5 * b.width, L = dist(b.a, b.b);
+    const Vec3 mid{0.5 * (b.a.x + b.b.x), 0.5 * (b.a.y + b.b.y), 0.5 * (b.a.z + b.b.z)};
+    if (probe.depth(mid) > 0.5 * L + r) continue;   // nowhere on it within r of the surface
+    const int k = std::max(1, static_cast<int>(std::ceil(L / 0.25)));
+    double least = std::numeric_limits<double>::infinity();
+    Vec3 at{};
+    for (int q = 0; q <= k; ++q) {
+      const double t = static_cast<double>(q) / k;
+      const Vec3 p{b.a.x + (b.b.x - b.a.x) * t, b.a.y + (b.b.y - b.a.y) * t, b.a.z + (b.b.z - b.a.z) * t};
+      const double d = probe.depth(p);
+      if (d < least) { least = d; at = p; }
+    }
+    if (!(least < r)) continue;
+    const double h = 0.05;
+    Vec3 nrm{probe.depth(Vec3{at.x - h, at.y, at.z}) - probe.depth(Vec3{at.x + h, at.y, at.z}),
+             probe.depth(Vec3{at.x, at.y - h, at.z}) - probe.depth(Vec3{at.x, at.y + h, at.z}),
+             probe.depth(Vec3{at.x, at.y, at.z - h}) - probe.depth(Vec3{at.x, at.y, at.z + h})};
+    const double nl = std::sqrt(nrm.x * nrm.x + nrm.y * nrm.y + nrm.z * nrm.z);
+    const double ul = std::sqrt(ask.build_dir.x * ask.build_dir.x + ask.build_dir.y * ask.build_dir.y + ask.build_dir.z * ask.build_dir.z);
+    if (!(nl > 0.0) || !(ul > 0.0)) continue;
+    nrm = {nrm.x / nl, nrm.y / nl, nrm.z / nl};
+    const Vec3 up{ask.build_dir.x / ul, ask.build_dir.y / ul, ask.build_dir.z / ul};
+    if (nrm.x * up.x + nrm.y * up.y + nrm.z * up.z < -kDown) continue;
+    auto found = beds.find(g);
+    if (found == beds.end()) {
+      double lowest = std::numeric_limits<double>::infinity();
+      for (const Vec3& v : part.mesh().vertices) lowest = std::min(lowest, v.x * up.x + v.y * up.y + v.z * up.z);
+      found = beds.emplace(g, lowest).first;
+    }
+    const Vec3 on{at.x + nrm.x * least, at.y + nrm.y * least, at.z + nrm.z * least};   // the surface there
+    if (!(on.x * up.x + on.y * up.y + on.z * up.z - found->second > 2.0)) continue;
+    if (rep.faces_known && !ask.relief_exclude_faces.empty()) {
+      if (!finder) finder = std::make_unique<TriFinder>(model.mesh);
+      const long t = finder->nearest(on);
+      const int face = t >= 0 ? model.triangle_face[static_cast<std::size_t>(t)] : -1;
+      if (std::find(ask.relief_exclude_faces.begin(), ask.relief_exclude_faces.end(), face) != ask.relief_exclude_faces.end())
+        continue;
+    }
+    b.along_proud = ask.face_relief_mm;
+    ++rep.along;
+    rep.along_largest_mm = std::max(rep.along_largest_mm, b.along_proud);
+  }
   for (Bar& b : bars.bars) {
     if (b.net) continue;
     for (int e = 0; e < 2; ++e) {

@@ -1018,6 +1018,10 @@ struct Bar {
   // every end was before). The end keeps its kind (Surface). Not in bars_hash.
   double proud_a = 0.0, proud_b = 0.0;
   double relief_a = 0.0, relief_b = 0.0;
+  // OG2b (brief E6, leg B): how far this bar's tube may stand out of the part's surface where it reaches an open face
+  // (face_relief_mm: its own bulge, cut only beyond that); the bar itself is not moved, only the file's trim reads it.
+  // 0: trimmed flush (as before).
+  double along_proud = 0.0;
 };
 // OG1: what set the local spacing at a strand point (Bar::local_why, Outcome::tight).
 enum class SpacingWhy : std::uint8_t {
@@ -1527,6 +1531,10 @@ struct Outcome {
   struct Relief {
     std::size_t surface_ends = 0, proud = 0;
     double largest_mm = 0.0;
+    // OG2b (leg B): strand bars whose tube reaches an open face where OG2's conditions hold, given `along_proud`, and the
+    // largest of it (the box's growth from them is the file's: WeaveShells::grew_mm).
+    std::size_t along = 0;
+    double along_largest_mm = 0.0;
     std::size_t flush_excluded = 0, flush_down = 0, flush_bed = 0, flush_along = 0;
     double grew_mm[6] = {0, 0, 0, 0, 0, 0};
     bool faces_known = true;

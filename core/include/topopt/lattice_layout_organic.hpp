@@ -742,6 +742,9 @@ struct WeaveRun {
   Bar::End end_a = Bar::End::Node, end_b = Bar::End::Node;   // the kinds of its two ends (its first and last bar's)
   std::vector<Vec3> points;
   std::vector<double> width_mm, spacing_mm;       // one per point
+  // OG2b (brief E6, leg B): how far the run's tube may stand out where it runs along an open face (the largest
+  // Bar::along_proud of its bars). In the struct only: pack_weave_runs does not carry it yet.
+  double proud_mm = 0.0;
 };
 // `bar_of`, when given (OF2, the file's tubes): per run, the place in `bars` of the bar each of its segments came from
 // (read with no thinning, `tolerance_mm` 0; with thinning it is left empty).

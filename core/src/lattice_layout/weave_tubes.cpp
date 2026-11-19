@@ -52,7 +52,9 @@ struct Piece {
   int kind = 0;
   // OG2 (brief E6): a proud end's tube, from the point before it to its tip: the trim leaves the vertices outside the part
   // that lie within this tube (radius x 1.16, a mitred ring's widest) and no more than `out` (proud + radius) outside.
-  struct Proud { Vec3 from{}, tip{}; double r = 0.0, out = 0.0; };
+  // OG2b (leg B): `along` true: a bar along an open face; a vertex within it may stand out of the surface by no more than
+  // `out` (its strand's p): one farther out is brought back to `out`, never pushed out.
+  struct Proud { Vec3 from{}, tip{}; double r = 0.0, out = 0.0; bool along = false; };
   std::vector<Proud> proud;
 };
 
@@ -269,10 +271,12 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
     std::vector<Vec3> pts{woven.bars[segs[0]].a};
     std::vector<double> w;   // per segment
     std::vector<int> kind;   // per segment
+    std::vector<double> along;   // per segment: OG2b's along_proud of its bar
     for (std::size_t s : segs) {
       const Bar& b = woven.bars[s];
       if (len(sub(b.b, pts.back())) < 1e-9) continue;
       pts.push_back(b.b);
+      along.push_back(b.along_proud);
       w.push_back(b.width);
       kind.push_back(kind_of(b));
     }
@@ -326,6 +330,14 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
         const std::size_t e = pc.p.size() - 1;
         pc.p[e] = add(pc.p[e], mul(unit(sub(pc.p[e], pc.p[e - 1])), run_on));
       }
+      // OG2b: the piece's bars that run along an open face.
+      for (std::size_t j = start; j < k; ++j) {
+        if (!(along[j] > 0.0)) continue;
+        const double rr = pc.r[j - start] > pc.r[j - start + 1] ? pc.r[j - start] : pc.r[j - start + 1];
+        const double rz = pc.kind == 0 ? rr : 1.41421356237 * rr;
+        pc.proud.push_back({pts[j], pts[j + 1], rz, along[j], true});
+        ++out.along_bars;
+      }
       out.sharp_splits += turn_split;
       pieces.push_back(std::move(pc));
       start = k;
@@ -378,6 +390,8 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
     std::vector<std::size_t> moved(shells.size(), 0);
     std::vector<std::size_t> proud_left(shells.size(), 0);   // OG2
     std::vector<double> proud_most(shells.size(), 0.0);
+    std::vector<std::size_t> along_left(shells.size(), 0);   // OG2b
+    std::vector<double> along_most(shells.size(), 0.0);
     std::vector<char> rebuilt(shells.size(), 0), bed_cut(shells.size(), 0);
     // Trims one shell in place; true when it is still closed (by index, untouched) with a positive volume of at
     // least 5 % of what it was.
@@ -396,7 +410,7 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
               : nullptr;
       auto in_proud = [&](const Vec3& v, double out_by) {
         for (const Piece::Proud& z : *proud) {
-          if (out_by > z.out + 1e-6) continue;
+          if (z.along || out_by > z.out + 1e-6) continue;
           const Vec3 ab = sub(z.tip, z.from);
           const double l2 = dot(ab, ab);
           const double t = l2 > 0.0 ? std::clamp(dot(sub(v, z.from), ab) / l2, 0.0, 1.0) : 0.0;
@@ -404,8 +418,20 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
         }
         return false;
       };
-      std::size_t kept_out = 0;
-      double kept_most = 0.0;
+      // OG2b: the largest p of the along-face bars whose tube holds v (0: none).
+      auto along_p = [&](const Vec3& v) {
+        double p = 0.0;
+        for (const Piece::Proud& z : *proud) {
+          if (!z.along || !(z.out > p)) continue;
+          const Vec3 ab = sub(z.tip, z.from);
+          const double l2 = dot(ab, ab);
+          const double t = l2 > 0.0 ? std::clamp(dot(sub(v, z.from), ab) / l2, 0.0, 1.0) : 0.0;
+          if (len(sub(v, add(z.from, mul(ab, t)))) <= 1.16 * z.r + 1e-6) p = z.out;
+        }
+        return p;
+      };
+      std::size_t kept_out = 0, along_out = 0;
+      double kept_most = 0.0, along_far = 0.0;
       for (Vec3& v : m.vertices) {
         if (v.z < bed) { v.z = bed; ++n; }
         if (pr.inside(v)) continue;
@@ -413,6 +439,16 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
         if (proud && in_proud(v, -d)) {
           ++kept_out;
           kept_most = std::max(kept_most, -d);
+          continue;
+        }
+        if (const double p = proud ? along_p(v) : 0.0; p > 0.0) {   // OG2b: out by no more than p
+          for (int it = 0; it < 4 && d < -p - 1e-4; ++it) {
+            v = add(v, mul(pr.through(v), -d - p));
+            d = pr.depth(v);
+          }
+          if (v.z < bed) v.z = bed;
+          ++along_out;
+          along_far = std::max(along_far, -d);
           continue;
         }
         if (d >= -over) { outside = std::max(outside, -d); continue; }
@@ -432,6 +468,8 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
       outside_most[s] = outside;
       proud_left[s] = kept_out;
       proud_most[s] = kept_most;
+      along_left[s] = along_out;
+      along_most[s] = along_far;
       return after > 0.0 && after >= 0.05 * before;
     };
     // A tube made again from its run cut back where its line leaves the part: the longest stretch of its centre line
@@ -538,6 +576,8 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
       out.outside_largest_mm = std::max(out.outside_largest_mm, outside_most[s]);
       out.proud_vertices += proud_left[s];
       out.proud_outside_mm = std::max(out.proud_outside_mm, proud_most[s]);
+      out.along_vertices += along_left[s];
+      out.along_outside_mm = std::max(out.along_outside_mm, along_most[s]);
     }
   }
   for (std::size_t s = 0; s < shells.size(); ++s) {
@@ -549,6 +589,17 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
     out.mm3 += volume_of(shells[s], 0, shells[s].triangles.size());
   }
   out.first_tri.push_back(out.mesh.triangles.size());
+  {   // OG2b: how far the shells reach past the part's box
+    const Vec3 lo = part.lo(), hi = part.hi();
+    for (const Vec3& v : out.mesh.vertices) {
+      out.grew_mm[0] = std::max(out.grew_mm[0], lo.x - v.x);
+      out.grew_mm[1] = std::max(out.grew_mm[1], v.x - hi.x);
+      out.grew_mm[2] = std::max(out.grew_mm[2], lo.y - v.y);
+      out.grew_mm[3] = std::max(out.grew_mm[3], v.y - hi.y);
+      out.grew_mm[4] = std::max(out.grew_mm[4], lo.z - v.z);
+      out.grew_mm[5] = std::max(out.grew_mm[5], v.z - hi.z);
+    }
+  }
   out.ms = ms_since(t0);
   return out;
 }

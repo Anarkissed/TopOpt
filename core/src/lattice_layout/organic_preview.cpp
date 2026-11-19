@@ -57,6 +57,7 @@ void thin(WeaveRun& r, double tol) {
   }
   WeaveRun t;
   t.region = r.region; t.marks = r.marks; t.end_a = r.end_a; t.end_b = r.end_b;
+  t.proud_mm = r.proud_mm;   // OG2b
   for (std::size_t k = 0; k < n; ++k)
     if (keep[k]) {
       t.points.push_back(r.points[k]);
@@ -85,6 +86,7 @@ std::vector<WeaveRun> weave_runs(const Bars& bars, const std::vector<int>& weave
       r.width_mm.push_back(b.width);
       r.spacing_mm.push_back(b.cell);
       r.end_b = b.end_b;
+      r.proud_mm = std::max(r.proud_mm, b.along_proud);   // OG2b
       if (bar_of) bar_of->back().push_back(at);
     } else {
       WeaveRun r;
@@ -95,6 +97,7 @@ std::vector<WeaveRun> weave_runs(const Bars& bars, const std::vector<int>& weave
       r.points = {b.a, b.b};
       r.width_mm = {b.width, b.width};
       r.spacing_mm = {b.cell, b.cell};
+      r.proud_mm = b.along_proud;   // OG2b
       runs.push_back(std::move(r));
       if (bar_of) bar_of->push_back({at});
     }
