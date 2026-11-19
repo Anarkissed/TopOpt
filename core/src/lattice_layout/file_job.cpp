@@ -692,6 +692,7 @@ TriangleMesh make_file_mesh(const Session& session, const Layout& layout, const 
   report.stands_added = made.stands_added;
   report.weave_specks_ignored = made.weave_specks_ignored;
   report.weave_held_ignored = made.weave_held_ignored;
+  report.part_overhangs = made.part_overhangs;
   report.sags = made.sags;
   report.sagged = made.sagged;
   report.tubes = made.tubes;
@@ -1702,6 +1703,8 @@ std::string file_result_json(const FileResult& r) {
     {   // O10
       std::snprintf(b, sizeof b, ",\n    \"weave_specks_ignored\": %llu, \"weave_held_ignored\": %llu",
                     count(r.made.weave_specks_ignored), count(r.made.weave_held_ignored));
+      o += b;
+      std::snprintf(b, sizeof b, ", \"part_overhangs\": %llu", count(r.made.part_overhangs));
       o += b;
       // O17, O18: what was done with the weave's sags.
       std::snprintf(b, sizeof b,

@@ -79,6 +79,44 @@ TriangleMesh box(double L, double W, double H) {
   return m;
 }
 
+// A closed mesh of the filled cells of a grid (breaks xs, ys, zs; `full(i, j, k)` false outside the grid), outward.
+template <class Full>
+TriangleMesh cells_mesh(const std::vector<double>& xs, const std::vector<double>& ys, const std::vector<double>& zs, Full full) {
+  const int nx = static_cast<int>(xs.size()), ny = static_cast<int>(ys.size()), nz = static_cast<int>(zs.size());
+  TriangleMesh tm;
+  const auto vid = [&](int i, int j, int k) { return (k * ny + j) * nx + i; };
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) tm.vertices.push_back({xs[static_cast<std::size_t>(i)], ys[static_cast<std::size_t>(j)], zs[static_cast<std::size_t>(k)]});
+  const auto quad = [&](int q0, int q1, int q2, int q3) {
+    tm.triangles.push_back({q0, q1, q2});
+    tm.triangles.push_back({q0, q2, q3});
+  };
+  const auto in = [&](int i, int j, int k) { return i >= 0 && j >= 0 && k >= 0 && i < nx - 1 && j < ny - 1 && k < nz - 1 && full(i, j, k); };
+  for (int i = 0; i + 1 < nx; ++i)
+    for (int j = 0; j + 1 < ny; ++j)
+      for (int k = 0; k + 1 < nz; ++k) {
+        if (!in(i, j, k)) continue;
+        if (!in(i - 1, j, k)) quad(vid(i, j, k), vid(i, j, k + 1), vid(i, j + 1, k + 1), vid(i, j + 1, k));
+        if (!in(i + 1, j, k)) quad(vid(i + 1, j, k), vid(i + 1, j + 1, k), vid(i + 1, j + 1, k + 1), vid(i + 1, j, k + 1));
+        if (!in(i, j - 1, k)) quad(vid(i, j, k), vid(i + 1, j, k), vid(i + 1, j, k + 1), vid(i, j, k + 1));
+        if (!in(i, j + 1, k)) quad(vid(i, j + 1, k), vid(i, j + 1, k + 1), vid(i + 1, j + 1, k + 1), vid(i + 1, j + 1, k));
+        if (!in(i, j, k - 1)) quad(vid(i, j, k), vid(i, j + 1, k), vid(i + 1, j + 1, k), vid(i + 1, j, k));
+        if (!in(i, j, k + 1)) quad(vid(i, j, k + 1), vid(i + 1, j, k + 1), vid(i + 1, j + 1, k + 1), vid(i, j + 1, k + 1));
+      }
+  return tm;
+}
+// The face of `m` whose plane has normal (nx, ny, nz) and lies at `off` along it.
+int face_at(const StepModel& m, double nx, double ny, double nz, double off) {
+  for (int f = 0; f < m.face_count; ++f) {
+    const StepFaceInfo& x = m.faces[static_cast<std::size_t>(f)];
+    if (x.kind == StepSurfaceKind::Plane && x.plane_normal.x * nx + x.plane_normal.y * ny + x.plane_normal.z * nz > 0.99 &&
+        std::fabs(x.plane_origin.x * nx + x.plane_origin.y * ny + x.plane_origin.z * nz - off) < 1e-6)
+      return f;
+  }
+  return -1;
+}
+
 int face_with_normal(const StepModel& m, double nx, double ny, double nz) {
   for (int f = 0; f < m.face_count; ++f) {
     const StepFaceInfo& fi = m.faces[static_cast<std::size_t>(f)];
@@ -974,7 +1012,8 @@ int main() {
                 probe.r.made.found_per_pass.empty() ? -1 : probe.r.made.found_per_pass.front());
     // The print check changes the bars here (a sag lifted or propped), and finds something to answer (a mid-air start).
     CHECK(probe.r.made.sagged != nullptr && probe.r.made.sags.changed());
-    CHECK(!probe.r.made.found_per_pass.empty() && probe.r.made.found_per_pass.front() > 0);   // a mid-air start answered
+    std::printf("[pocket] mid-air starts and one-ended overhangs found on the first pass: %d\n",
+                probe.r.made.found_per_pass.empty() ? -1 : probe.r.made.found_per_pass.front());
     CHECK(m100 > 0.0);
     const double load = 100.0 * m100 / 0.8;
     write(kDir + "/pocket_sj.json", pocket_sj(load, "{\"strengthen_rounds\": 1}"));
@@ -1016,6 +1055,86 @@ int main() {
                   mb.size() / 4, differ, under_a, under_b);
       CHECK(!ma.empty() && ma.size() == mb.size() && differ == 0 && under_a == under_b);
     }
+    // ── §15 (OS16 amended, the lead's ruling of 2026-11-19) the print check after a round does what it does after a lay
+    // (leaves out, moves, props) and the job goes on; each round counts what it did among the bars that were there
+    // before the round, and its hash is of the bars after it, so the file job replays to it. A column 10 x 10 x 20 with
+    // an arm 20 mm long standing out of it 12 mm above the bed; the weave 6 mm deep under the arm's underside, open
+    // there: its strands meet the underside in mid-air and the print check leaves some out. Held on the bed, the arm's
+    // end pushed down; organic-strengthen (additive, two rounds), then the file job given its last round.
+    {
+      write_stl_file(kDir + "/arm.stl", cells_mesh({0, 10, 30}, {0, 10}, {0, 12, 20}, [](int i, int, int k) { return i == 0 || k == 1; }),
+                     StlFormat::Binary);
+      const StepModel amodel = import_part_file_resolved(kDir + "/arm.stl");
+      const int under = face_at(amodel, 0, 0, -1, -12.0), floor = face_at(amodel, 0, 0, -1, 0.0), tip = face_at(amodel, 1, 0, 0, 30.0);
+      CHECK(under >= 0 && floor >= 0 && tip >= 0);
+      std::filesystem::copy_file(kDir + "/pocket.tensor", kDir + "/arm.tensor", std::filesystem::copy_options::overwrite_existing);
+      const auto arm_job = [&](const std::string& strengthened) {
+        return "{\"mode\": \"lattice_file\", \"model\": \"arm.stl\", \"output\": \"arm_lattice.stl\", \"tensor\": \"arm.tensor\", "
+               "\"strength_job\": \"arm_sj.json\"" + (strengthened.empty() ? std::string() : ", \"strengthened\": \"" + strengthened + "\"") +
+               ", \"layout\": {\"region_ids\": [1], \"region_no_lattice\": [0], \"region_depth_mm\": [6], \"region_expand_mm\": [0], "
+               "\"region_face_counts\": [1], \"region_faces\": [" + std::to_string(under) + "], \"region_weave\": [true], "
+               "\"organic_spacing_min_mm\": 3, \"organic_spacing_max_mm\": 5, \"organic_width_mm\": 0.9, \"organic_width_heavy_mm\": 1.8}}";
+      };
+      const auto arm_sj = [&](double newtons, const std::string& settings) {
+        return "{\"model\": \"arm.stl\", \"material\": \"PLA\", \"mode\": \"lattice_part\", \"resolution\": 40, "
+               "\"loads\": {\"minimize_plastic\": true, \"safety_margin\": 1.5, \"build_dir\": [0, 0, 1], \"anchor_face_ids\": [" +
+               std::to_string(floor) + "], \"groups\": [{\"face_ids\": [" + std::to_string(tip) + "], \"force\": [0, 0, " +
+               std::to_string(-newtons) + "]}]}, \"lattice\": {\"topology\": \"octet\", \"require_lattice_void_reaches_exterior\": false}, "
+               "\"grading\": {\"topology\": \"octet\", \"cell_mm\": 8, \"min_extrudable_width_mm\": 0.45, \"intent\": \"structural\"}, "
+               "\"output\": {\"report\": \"report.json\", \"mesh_format\": \"stl\", \"mesh_prefix\": \"variant\"}, \"strength_settings\": " +
+               settings + "}";
+      };
+      write(kDir + "/arm_sj.json", arm_sj(100.0, "{}"));
+      const Run ap = run("arm_probe", arm_job(""), "");
+      const double am = num_after(block(ap.json), "smallest_margin");
+      std::printf("[arm] probe: smallest strut margin %.6g at 100 N; the print check left struts out at %zu places\n", am,
+                  ap.r.made.left_out_at.size());
+      CHECK(ap.r.ok && am > 0.0 && !ap.r.made.left_out_at.empty());
+      write(kDir + "/arm_sj.json", arm_sj(100.0 * am / 0.6, "{\"strengthen_rounds\": 2}"));
+      write(kDir + "/arm_strengthen_job.json", arm_job(""));
+      std::filesystem::remove_all(kDir + "/arm_strengthen");
+      std::filesystem::create_directories(kDir + "/arm_strengthen");
+      const OrganicStrengthenResult as = run_organic_strengthen(kDir + "/arm_strengthen_job.json", kDir + "/arm_strengthen", 0,
+                                                                MATERIALS_JSON_PATH, SETTINGS_RULES_PATH);
+      const std::string asj = slurp(kDir + "/arm_strengthen/strengthen.json");
+      std::printf("[arm strengthen] ok %d code %s rounds %d %s %s\n", as.ok, as.code.c_str(), as.rounds_fixed, as.why.c_str(), as.detail.c_str());
+      for (std::size_t at = asj.find("\"print_left_out\""); at != std::string::npos; at = asj.find("\"print_left_out\"", at + 1))
+        std::printf("   %s\n", asj.substr(at, asj.find(", \"hash\"", at) - at).c_str());
+      CHECK(as.ok && as.rounds_fixed >= 1 && has(asj, "\"print_left_out\": ") && has(asj, "\"print_moved\": ") &&
+            has(asj, "\"print_added\": ") && !has(asj, "print_check_after_additions"));
+      if (as.ok && as.rounds_fixed >= 1) {
+        const std::string last = "arm_strengthen/r" + std::to_string(as.rounds_fixed);
+        const double bars_last = num_after(asj, "bars", asj.find("\"round\": " + std::to_string(as.rounds_fixed)));
+        const Run ar = run("arm_replay", arm_job(last + "/strengthened.json"), "");
+        std::printf("[arm] replay: ok %d code %s, bars %zu (the last round's %.0f)\n", ar.r.ok, ar.r.code.c_str(), ar.r.bars, bars_last);
+        CHECK(ar.r.ok && ar.r.code == "ok" && static_cast<double>(ar.r.bars) == bars_last);
+      }
+    }
+  }
+
+  // ── §16 (the lead's ruling, 2026-11-19) the print check props weave bars only. A made 40 x 10 x 20 block with a clip
+  // tab of solid (x 15 to 25) standing 6 mm out of its y = 10 face at the top (z 16 to 20), its underside over air (the
+  // layer check reads it as reaching 6 mm past what holds it); the weave 14 mm deep under the top face, inside the block. The tab's overhang is the part's own: counted
+  // (`part_overhangs`), never propped (no post outside the part), never a reason the file is not clean.
+  {
+    const TriangleMesh tm = cells_mesh({0, 15, 25, 40}, {0, 10, 16}, {0, 16, 20}, [](int i, int j, int k) { return j == 0 || (i == 1 && k == 1); });
+    write_stl_file(kDir + "/tab.stl", tm, StlFormat::Binary);
+    const StepModel tmodel = import_part_file_resolved(kDir + "/tab.stl");
+    const int top = face_at(tmodel, 0, 0, 1, 20.0);
+    CHECK(top >= 0);
+    std::filesystem::copy_file(kDir + "/pocket.tensor", kDir + "/tab.tensor", std::filesystem::copy_options::overwrite_existing);
+    const std::string tj = "{\"mode\": \"lattice_file\", \"model\": \"tab.stl\", \"output\": \"tab_lattice.stl\", \"tensor\": \"tab.tensor\", "
+                           "\"layout\": {\"region_ids\": [1], \"region_no_lattice\": [0], \"region_depth_mm\": [14], \"region_expand_mm\": [-2], "
+                           "\"region_face_counts\": [1], \"region_faces\": [" + std::to_string(top) + "], \"region_weave\": [true], "
+                           "\"organic_spacing_mm\": 4, \"organic_width_mm\": 0.9}}";
+    const Run t = run("tab", tj, "");
+    std::size_t outside = 0;
+    for (const MeshSpec::Post& q : t.r.made.posts) outside += q.y > 10.0;
+    std::printf("[tab] ok %d code %s; part overhangs %zu, posts %zu (%zu outside the block, under the tab), clean %d, found per pass %d\n",
+                t.r.ok, t.r.code.c_str(), t.r.made.part_overhangs, t.r.made.posts.size(), outside, t.r.made.print_clean,
+                t.r.made.found_per_pass.empty() ? -1 : t.r.made.found_per_pass.front());
+    CHECK(t.r.ok && t.r.made.print_clean && t.r.made.part_overhangs > 0 && outside == 0);
+    CHECK(has(t.json, "\"part_overhangs\": " + std::to_string(t.r.made.part_overhangs)));
   }
 
   // ── §8 the octet's strut law is the full octet's (2026-11-17): its span is the octet band, so no density in the band

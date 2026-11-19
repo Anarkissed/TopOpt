@@ -16097,36 +16097,55 @@ struct OrganicCheckRun {
   int passes_at_infill_percent = -1;      // the lowest whole infill percent at which the solid passes; -1: none
 };
 
-// OS16 (brief E4, leg 2): a bar of `after` the print check leaves out (`after_kept` 0) that lies on a bar of `before`
-// it kept (`before_kept` 1), both its ends within `tol` of that bar's line: where, in one plain line; "" when none.
-std::string old_bar_left_out(const ll::Bars& before, const std::vector<char>& before_kept, const ll::Bars& after,
-                             const std::vector<char>& after_kept, double tol = 1e-5) {
-  const auto on = [&](const Vec3& p, const ll::Bar& b) {
-    const Vec3 d{b.b.x - b.a.x, b.b.y - b.a.y, b.b.z - b.a.z};
-    const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
-    const double u = l2 > 0.0 ? std::clamp(((p.x - b.a.x) * d.x + (p.y - b.a.y) * d.y + (p.z - b.a.z) * d.z) / l2, 0.0, 1.0) : 0.0;
-    const double x = b.a.x + d.x * u - p.x, y = b.a.y + d.y * u - p.y, z = b.a.z + d.z * u - p.z;
-    return x * x + y * y + z * z <= tol * tol;
+// OS16 amended (the lead, 2026-11-19): what a print check after a round did among the bars that were there before the
+// round (`before`, with `before_kept` the file's of them). `added` the bars after the round's additions, `after` and
+// `after_kept` the print check's (its sag pass keeps every bar's place in the list and appends what it lays). Counted:
+// pieces of old bars the file kept that it now leaves out (`print_left_out`), of which those the round widened
+// (`print_left_out_widened`); pieces of old bars it moved (`print_moved`); the bars it added (`print_added`); each with
+// up to five places (a bar's middle, mm). As JSON keys, for a round's result. `moved_any`: set when it moved one.
+std::string print_check_counts(const ll::Bars& before, const std::vector<char>& before_kept, const ll::Bars& added,
+                               const ll::Bars& after, const std::vector<char>& after_kept, bool* moved_any) {
+  const std::vector<std::vector<std::size_t>> on = ll::pieces_on(added, before.bars);
+  std::vector<int> old_of(added.bars.size(), -1);
+  for (std::size_t k = 0; k < on.size(); ++k)
+    for (std::size_t j : on[k]) old_of[j] = static_cast<int>(k);
+  std::size_t left = 0, left_widened = 0, moved = 0;
+  std::string left_at, widened_at, moved_at, added_at;
+  const auto mid = [](const ll::Bar& b) {
+    return "[" + json_num(std::round(500.0 * (b.a.x + b.b.x)) / 1000.0) + ", " + json_num(std::round(500.0 * (b.a.y + b.b.y)) / 1000.0) +
+           ", " + json_num(std::round(500.0 * (b.a.z + b.b.z)) / 1000.0) + "]";
   };
-  for (std::size_t j = 0; j < after.bars.size(); ++j) {
-    if (j < after_kept.size() && after_kept[j]) continue;
-    const ll::Bar& q = after.bars[j];
-    for (std::size_t i = 0; i < before.bars.size(); ++i) {
-      if (i >= before_kept.size() || !before_kept[i]) continue;
-      const ll::Bar& b = before.bars[i];
-      if (std::min(q.a.x, q.b.x) < std::min(b.a.x, b.b.x) - tol || std::max(q.a.x, q.b.x) > std::max(b.a.x, b.b.x) + tol ||
-          std::min(q.a.y, q.b.y) < std::min(b.a.y, b.b.y) - tol || std::max(q.a.y, q.b.y) > std::max(b.a.y, b.b.y) + tol ||
-          std::min(q.a.z, q.b.z) < std::min(b.a.z, b.b.z) - tol || std::max(q.a.z, q.b.z) > std::max(b.a.z, b.b.z) + tol)
-        continue;
-      if (on(q.a, b) && on(q.b, b)) {
-        char w[200];
-        std::snprintf(w, sizeof w, "the strut from (%.2f, %.2f, %.2f) to (%.2f, %.2f, %.2f) mm would be left out", q.a.x, q.a.y,
-                      q.a.z, q.b.x, q.b.y, q.b.z);
-        return w;
+  const auto note = [&](std::string& list, std::size_t count, const ll::Bar& b) {
+    if (count <= 5) list += std::string(list.empty() ? "" : ", ") + mid(b);
+  };
+  for (std::size_t j = 0; j < added.bars.size() && j < after.bars.size(); ++j) {
+    const int k = old_of[j];
+    if (k < 0) continue;
+    const ll::Bar& x = added.bars[j];
+    const ll::Bar& y = after.bars[j];
+    if (x.a.x != y.a.x || x.a.y != y.a.y || x.a.z != y.a.z || x.b.x != y.b.x || x.b.y != y.b.y || x.b.z != y.b.z) {
+      ++moved;
+      note(moved_at, moved, x);
+    }
+    const bool was = static_cast<std::size_t>(k) < before_kept.size() && before_kept[static_cast<std::size_t>(k)];
+    const bool now = j < after_kept.size() && after_kept[j];
+    if (was && !now) {
+      ++left;
+      note(left_at, left, x);
+      if (x.width > before.bars[static_cast<std::size_t>(k)].width + 1e-12) {
+        ++left_widened;
+        note(widened_at, left_widened, x);
       }
     }
   }
-  return {};
+  const std::size_t extra = after.bars.size() > added.bars.size() ? after.bars.size() - added.bars.size() : 0;
+  for (std::size_t j = added.bars.size(); j < after.bars.size() && j < added.bars.size() + 5; ++j)
+    added_at += std::string(added_at.empty() ? "" : ", ") + mid(after.bars[j]);
+  if (moved_any && moved > 0) *moved_any = true;
+  return "\"print_left_out\": " + std::to_string(left) + ", \"print_left_out_at\": [" + left_at +
+         "], \"print_left_out_widened\": " + std::to_string(left_widened) + ", \"print_left_out_widened_at\": [" + widened_at +
+         "], \"print_moved\": " + std::to_string(moved) + ", \"print_moved_at\": [" + moved_at +
+         "], \"print_added\": " + std::to_string(extra) + ", \"print_added_at\": [" + added_at + "]";
 }
 
 // Brief E3a, item 1: every judged strut under `watch`, what strengthening by adding reads of it: its bars in the
@@ -16926,6 +16945,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
     ll::Bars bars = pc.bars;                  // the bars the file writes, and which of them it keeps
     std::vector<char> in_file = pc.kept;
     const ll::Bars bars0 = bars;              // round 0's lattice: every round must keep it (OS12)
+    bool moved_by_print = false;              // a print check after a round has moved a bar that was there before it
     ll::Additions adds = ask.additions;       // a job laid with additions goes on from them
     res.old_bars_kept = true;
     for (int n = 0;; ++n) {
@@ -17098,26 +17118,24 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
       round.ops.insert(round.ops.end(), widen.ops.begin(), widen.ops.end());
       // OS12, against round 0 AND against the round before (every earlier round's widenings and braces stay in force:
       // a bar widened in an earlier round is never thinner later).
+      // OS16 amended (the lead, 2026-11-19): the print check may move a bar of round 0 (a sag lifted), so the additions
+      // are held to OS12 against round 0 only while no print check has moved one, and always against the round before.
       std::size_t split = 0;
-      std::string kept = ll::old_bars_kept(bars0, bars, 1e-5, &split);
+      std::string kept = moved_by_print ? std::string() : ll::old_bars_kept(bars0, bars, 1e-5, &split);
       if (kept.empty()) {
-        const std::string since = ll::old_bars_kept(before_round, bars);
+        const std::string since = ll::old_bars_kept(before_round, bars, 1e-5, moved_by_print ? &split : nullptr);
         if (!since.empty()) kept = "against the round before: " + since;
       }
       if (!kept.empty()) res.old_bars_kept = false;
-      // OS16 (brief E4, leg 2): the print check again (the new braces and wider struts are new shells). It may lift or
-      // prop what the round added, never move or leave out a bar that was there before the round: that stops the job.
+      // OS16 (brief E4, leg 2; amended by the lead, 2026-11-19): the print check again (the new braces and wider struts
+      // are new shells). It does what it does after a lay (leaves out, moves, props) and the job goes on: the next check
+      // judges the bars as written. What it did among the bars that were there before the round is counted.
       say("round " + std::to_string(n) + ": checking the lattice prints");
       const auto tp = std::chrono::steady_clock::now();
       ll::PrintChecked pc2 = ll::print_check_bars(session, out.layout, bars, file_options, stop);
       if (!pc2.ok)
         return finish(false, "print_check_failed", 1, "The lattice's file could not be put together, so its strength cannot be judged.", pc2.why);
-      std::string moved = kept.empty() ? ll::old_bars_kept(before_round, pc2.bars) : std::string();
-      if (moved.empty()) moved = old_bar_left_out(before_round, in_file, pc2.bars, pc2.kept);
-      if (!moved.empty())
-        return finish(false, "print_check_after_additions", 1,
-                      "After round " + std::to_string(n + 1) + "'s additions, the print check would move or leave out a "
-                      "strut that was there before them, so strengthening stopped.", moved);
+      const std::string printed = print_check_counts(before_round, in_file, bars, pc2.bars, pc2.kept, &moved_by_print);
       bars = std::move(pc2.bars);
       in_file = std::move(pc2.kept);
       s_pc = secs(tp);
@@ -17149,7 +17167,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
                      ", \"struts_at_cap\": " + std::to_string(struts_at_cap) + ", \"cap_mm\": " + json_num(cap) +
                      ", \"old_bars_split\": " + std::to_string(split) + ", \"old_bars_kept\": " + (kept.empty() ? "true" : "false") +
                      (kept.empty() ? std::string() : ", \"old_bars_broken\": " + json_str(kept)) +
-                     ", \"hash\": " + json_str(hash_hex(round.hash)) + ", \"seconds\": " + json_num(std::round(s_add * 10) / 10) + "}}";
+                     ", " + printed + ", \"hash\": " + json_str(hash_hex(round.hash)) + ", \"seconds\": " + json_num(std::round(s_add * 10) / 10) + "}}";
     }
   }
   // What follows the stress: a strut width on a Sweep, a spacing range, Grown's runs by stress.

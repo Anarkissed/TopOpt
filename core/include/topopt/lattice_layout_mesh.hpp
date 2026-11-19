@@ -486,6 +486,11 @@ struct PrintableReport {
   // half a line width both ways, on a weave bar, reaching no cube-lattice bar), and a held start (a place that would
   // leave out no bar: every bar it reaches is a weave bar that starts where it is held, WeaveFinding held + level).
   std::size_t weave_specks_ignored = 0, weave_held_ignored = 0;
+  // The lead's ruling (2026-11-19): with a weave region the print check judges and props weave bars only. A mid-air
+  // start, an overhang held at one end or a bridge too long of the PART'S OWN solid (it reaches no bar, lies on no weave
+  // bar, and right under it, a layer down, is outside the part) is the slicer's business: counted here, all passes
+  // together, never left out, never propped, never a reason the file is not clean.
+  std::size_t part_overhangs = 0;
   // O17, O18: what the sag pass did (once, before the first pass), and, when it changed a bar, the bars every pass
   // was made of (the layout's own otherwise: null). `drop_at` and `posts` are read against those.
   SagReport sags;

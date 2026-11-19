@@ -678,6 +678,23 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
         still.push_back(m);
       }
       rep.layers.mid_air.swap(still);
+      // The part's own overhangs (the lead's ruling, 2026-11-19): reaching no bar, on no weave bar, and outside the part
+      // right under it. Counted, never answered.
+      {
+        const Domain::Probe probe = domain.probe();
+        const double layer = 2.0 * half_layer;
+        const auto own = [&](double x, double y, double z) {
+          const WeaveFinding f = weave_findings(bars, weave_regions, holds.kept, {{x, y, z - half_layer}}, ms.layer_mm).front();
+          return f.reached == 0 && !f.on_weave && probe.where({x, y, z - layer}).why == Why::Outside;
+        };
+        const std::size_t before = rep.layers.mid_air.size() + rep.layers.one_ended.size() + rep.layers.long_bridges.size();
+        rep.layers.mid_air.erase(std::remove_if(rep.layers.mid_air.begin(), rep.layers.mid_air.end(),
+                                                [&](const LayerReport::MidAir& m) { return own(m.x, m.y, m.z); }),
+                                 rep.layers.mid_air.end());
+        for (std::vector<LayerReport::OneEnded>* v : {&rep.layers.one_ended, &rep.layers.long_bridges})
+          v->erase(std::remove_if(v->begin(), v->end(), [&](const LayerReport::OneEnded& o) { return own(o.x, o.y, o.z); }), v->end());
+        rep.part_overhangs += before - (rep.layers.mid_air.size() + rep.layers.one_ended.size() + rep.layers.long_bridges.size());
+      }
       // A speck held by nothing below is also seen as an overhang held at one place: the same island, in the same
       // layer within half a line width of the speck's middle, is not a finding either.
       auto at_speck = [&](const LayerReport::OneEnded& o) {
