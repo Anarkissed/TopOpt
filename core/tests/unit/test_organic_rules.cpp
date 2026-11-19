@@ -2824,7 +2824,60 @@ static void test_og5_inside() {
   }
 }
 
+// ── OL-FIN (leg J item 1; the owner: the Finish per group "should just be None/Skin/Solid. Rim should be hidden."):
+// each weave region's own Skin and width; Rim refused on an Organic area.
+static void test_finish_per_region() {
+  const StepModel model = box_model(30, 30, 20);
+  const TensorField f = gap_field();
+  OrganicAsk a = gap_ask(1.6);
+  Settings st;
+  st.regions = {{1, Role::Lattice, {1}, 8.0, 0.0, true}, {2, Role::Lattice, {2}, 8.0, 0.0, true}};
+  st.drop_loose = false;
+  st.skin = true;   // the part's Skin: on
+  const std::vector<OrganicGroup> gs = {{{1, 2}, a}};
+  auto nets = [](const Outcome& o, int region, double* wmin, double* wmax) {
+    std::size_t n = 0;
+    *wmin = 1e9; *wmax = 0.0;
+    for (const Bar& b : o.bars.bars)
+      if (b.net && b.region == region) { ++n; *wmin = std::min(*wmin, b.width); *wmax = std::max(*wmax, b.width); }
+    return n;
+  };
+  double lo1, hi1, lo2, hi2;
+  Session s0(model);
+  const Outcome both = s0.lay_organic(st, f, gs);
+  const std::size_t b1 = nets(both, 1, &lo1, &hi1), b2 = nets(both, 2, &lo2, &hi2);
+  Settings own = st;
+  own.regions[0].skin = true;
+  own.regions[0].skin_width_mm = 0.8;
+  own.regions[1].skin = false;   // area 2: None
+  Session s1(model);
+  const Outcome o = s1.lay_organic(own, f, gs);
+  double w1lo, w1hi, w2lo, w2hi;
+  const std::size_t n1 = nets(o, 1, &w1lo, &w1hi), n2 = nets(o, 2, &w2lo, &w2hi);
+  std::printf("OL-FIN part Skin, both areas: net struts %zu and %zu; area 1 Skin 0.8 mm, area 2 None: %zu (widths %.3f to %.3f) and %zu\n",
+              b1, b2, n1, w1lo, w1hi, n2);
+  CHECK(both.refused.empty() && o.refused.empty() && b1 > 0 && b2 > 0 && n1 > 0 && n2 == 0 && w1lo == 0.8 && w1hi == 0.8);
+  // The part's Skin off, area 2's own Skin on: a net on area 2 only.
+  Settings only2 = st;
+  only2.skin = false;
+  only2.regions[1].skin = true;
+  Session s2(model);
+  const Outcome o2 = s2.lay_organic(only2, f, gs);
+  const std::size_t m1 = nets(o2, 1, &w1lo, &w1hi), m2 = nets(o2, 2, &w2lo, &w2hi);
+  std::printf("OL-FIN part Skin off, area 2 Skin: net struts %zu and %zu\n", m1, m2);
+  CHECK(o2.refused.empty() && m1 == 0 && m2 > 0);
+  // Rim on an Organic area: refused, by name.
+  Settings rim = st;
+  rim.regions[0].rim_mm = 1.0;
+  Session s3(model);
+  const Outcome r = s3.lay_organic(rim, f, gs);
+  std::printf("OL-FIN Rim on area 1: %s (%s)\n", r.refused.empty() ? "laid" : r.refused[0].code.c_str(),
+              r.refused.empty() ? "" : r.refused[0].text.c_str());
+  CHECK(!r.refused.empty() && r.refused[0].code == "rim_under_organic" && r.refused[0].setting == "rim_mm");
+}
+
 int main() {
+  test_finish_per_region();
   test_og5_inside();
   test_s_cut_fix();
   test_k_floor();

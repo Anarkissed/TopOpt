@@ -516,9 +516,10 @@ std::vector<HoldPatchCount> hold_up_weave(Bars& bars, const Domain& domain, cons
 // A join is a weave bar (`net`): as wide as the thinner landing (or `width_mm` when above 0: SkinSpec::width_mm), `cell` the reach, its ends Node exactly at the two
 // landings; a landing that is a cut end on the surface (Surface) has landed (Joined into the net strut). Nothing is
 // pruned here: drop_loose_bars and the writer's bridge rules (O6 to O10) judge net struts as every bar.
+// Leg J item 1: `widths`, when given, one per `reach` entry: that region's width (in place of width_mm).
 // Returns the number of net struts laid. The same for any number of threads (it runs on one).
 std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std::pair<int, double>>& reach,
-                         double width_mm = 0.0);
+                         double width_mm = 0.0, const std::vector<double>* widths = nullptr);
 
 // O12: the spacing handed to the tracer, one per voxel of the field's grid (0 off the candidates), with the candidates
 // (voxels whose CENTRE is lattice of `region`). It is the old run's field for an ordinary Traced job (run_job.cpp,

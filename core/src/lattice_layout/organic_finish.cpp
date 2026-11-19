@@ -39,7 +39,7 @@ Key key_of(const Vec3& p) { return {p.x, p.y, p.z}; }
 }  // namespace
 
 std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std::pair<int, double>>& reach_of,
-                         double width_mm) {
+                         double width_mm, const std::vector<double>* widths) {
   const Domain::Probe probe = domain.probe();
   const PartMeasure::Probe& part = probe.part();
   // The surface's inward normal at `p`: the depth's gradient, read `h` either side (the old sdf_normal at 2 r).
@@ -66,7 +66,9 @@ std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std
   };
   for (const Bar& b : bars.bars) joined.insert(pair_of(b.a, b.b));
   std::size_t made = 0;
-  for (const std::pair<int, double>& asked : reach_of) {
+  for (std::size_t ri = 0; ri < reach_of.size(); ++ri) {
+    const std::pair<int, double>& asked = reach_of[ri];
+    const double width_here = widths && ri < widths->size() ? (*widths)[ri] : width_mm;   // leg J item 1
     const int region = asked.first;
     const double reach = asked.second;
     if (!(reach > 0.0)) continue;
@@ -168,7 +170,7 @@ std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std
       Bar net;
       net.a = L[i].p;
       net.b = L[j].p;
-      net.width = width_mm > 0.0 ? width_mm : std::min(L[i].width, L[j].width);
+      net.width = width_here > 0.0 ? width_here : std::min(L[i].width, L[j].width);
       net.cell = reach;
       net.region = region;
       net.net = true;

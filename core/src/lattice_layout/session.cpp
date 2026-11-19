@@ -271,12 +271,15 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
       }
       if (any_skin) lay_skin(out.bars, *domain_, skin);
       domain_->check_stop();
-      if (settings.skin && finish && !draft && !finish->net_reach.empty() && !finish->prune.empty())
+      // Leg J item 1: Skin is each weave region's own (else the part's): `net_on` when any weave region's is Skin.
+      const bool net_on = finish ? finish->net_on : settings.skin;
+      if (net_on && finish && !draft && !finish->net_reach.empty() && !finish->prune.empty())
         prune_weave(out.bars, finish->prune);   // J2: the weave pruned before the net skin is laid on it
-      if (settings.skin && finish && !finish->hold.empty())   // L2 d: after the growth and J2, before the net skin
+      if (net_on && finish && !finish->hold.empty())   // L2 d: after the growth and J2, before the net skin
         hold_up_weave(out.bars, *domain_, finish->hold);
-      if (settings.skin && finish && !finish->net_reach.empty())   // O16: Finish Skin on a weave region
-        lay_net_skin(out.bars, *domain_, finish->net_reach, settings.skin_spec.width_mm);
+      if (net_on && finish && !finish->net_reach.empty())   // O16: Finish Skin on a weave region, its own width
+        lay_net_skin(out.bars, *domain_, finish->net_reach, settings.skin_spec.width_mm,
+                     finish->net_width.size() == finish->net_reach.size() ? &finish->net_width : nullptr);
       domain_->check_stop();
       // OG5 (brief E9): no weave bar outside the part or through protected solid, before the drop (which then takes what
       // the guard left hanging).
@@ -291,7 +294,7 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
       } else {
         out.pieces = count_pieces(out.bars, *domain_, nullptr, nullptr, &out.layout);
       }
-      if (!settings.skin && finish && !finish->hold.empty()) {   // L2 d: Skin off, after the growth and J2
+      if (!net_on && finish && !finish->hold.empty()) {   // L2 d: Skin off, after the growth and J2
         hold_up_weave(out.bars, *domain_, finish->hold);
         guard_bars(out.bars, *domain_, weave_ids, domain_->spec().bead_mm, &out.guard);   // OG5: the supports too
       }

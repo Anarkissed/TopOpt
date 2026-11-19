@@ -1632,6 +1632,11 @@ class Session {
   // O16: what lay_organic adds with Finish Skin on: per weave region, the net skin's reach.
   struct WeaveFinish {
     std::vector<std::pair<int, double>> net_reach;   // (region, reach mm); empty: no net skin
+    // Leg J item 1 (the owner: the Finish per group "should just be None/Skin/Solid"): per net_reach entry, its region's
+    // own Skin width (Settings::RegionAsk::skin_width_mm, else the part's; 0: as wide as the thinner landing), and
+    // whether any weave region's Finish is Skin (its own, else the part's): the order of the weave's finish steps.
+    std::vector<double> net_width;
+    bool net_on = false;
     std::vector<int> arrived;   // G11 (Grown only): weave regions whose vines that reach the surface have arrived
     std::vector<std::pair<int, double>> prune;   // J2 (brief G12): (Grown region, median asked spacing); empty: off
     std::vector<WeaveHold> hold;   // L2 (brief G14): Grown areas with floating parts' undersides; empty: off

@@ -1196,7 +1196,16 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
         gap_capped += st.gap_capped;   // OG1
       }
       const double reach = ask.mode == OrganicMode::Grown ? median : st.spacing_median_mm;
-      if (settings.skin && reach > 0.0) finish.net_reach.push_back({r.id, reach});   // O16
+      // O16, per region (leg J item 1): the region's own Skin and width, else the part's.
+      const Settings::RegionAsk* own = nullptr;
+      for (const Settings::RegionAsk& ra : settings.regions)
+        if (ra.id == r.id) own = &ra;
+      const bool skin_here = own && own->skin ? *own->skin : settings.skin;
+      finish.net_on = finish.net_on || skin_here;
+      if (skin_here && reach > 0.0) {
+        finish.net_reach.push_back({r.id, reach});
+        finish.net_width.push_back(own && own->skin_width_mm ? *own->skin_width_mm : settings.skin_spec.width_mm);
+      }
       if (ask.mode == OrganicMode::Grown) finish.arrived.push_back(r.id);   // G11: a vine that reached the surface
       if (ask.mode == OrganicMode::Grown && ask.prune) finish.prune.push_back({r.id, median});   // J2
       // L2 d; Q3 (brief G24): Traced lays the same supports, from the floating pieces its own trace's spacing found.
@@ -1973,6 +1982,12 @@ std::vector<OrganicRefusal> validate_organic_groups(const Settings& settings, co
       if (r.id == id && r.weave && r.role == Role::Lattice) return true;
     return false;
   };
+  // Leg J item 1 (the owner: "Rim should be hidden"): an Organic area's own Finish is None, Skin or Solid, never Rim.
+  for (const Settings::RegionAsk& r : settings.regions)
+    if (r.weave && r.role == Role::Lattice && r.rim_mm && *r.rim_mm != 0.0)
+      refuse(-1, "rim_under_organic",
+             "Organic area " + std::to_string(r.id) + " asks for a Rim finish; an Organic area's finish is None, Skin or Solid.",
+             *r.rim_mm, "rim_mm");
   for (const Settings::RegionAsk& r : settings.regions) {
     if (!(r.weave && r.role == Role::Lattice)) continue;
     std::size_t in = 0;
