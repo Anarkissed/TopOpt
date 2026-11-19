@@ -962,6 +962,67 @@ int main() {
     }
   }
 
+  // ── OJ5 (leg J item 5): the strength loop with two Organic groups (the top face, upper width 1.2; a side face, 1.8):
+  // each group's limit is its own (no watched strut of a group over its own limit unless named past it); every old
+  // bar kept; the file job given round 1's strengthened.json lays round 1's bars; the rebuild mode refused by name.
+  {
+    namespace sj = topopt::flexible::json;
+    const std::string two = "{\"mode\": \"lattice_file\", \"model\": \"block.stl\", \"output\": \"block_lattice.stl\", "
+        "\"strength_job\": \"strength_job.json\", \"tensor\": \"stress.tensor\", \"layout\": {\"min_strut_lines\": 2, "
+        "\"region_ids\": [1, 2], \"region_no_lattice\": [0, 0], \"region_depth_mm\": [8, 8], \"region_expand_mm\": [-2, -2], "
+        "\"region_face_counts\": [1, 1], \"region_faces\": [" + std::to_string(f.top) + ", " + std::to_string(f.side) + "], "
+        "\"topology\": \"octet\", \"algorithm\": \"uniform\", \"cell_max_mm\": 8, \"min_cells_across\": 1, "
+        "\"region_weave\": [true, true], \"organic_spacing_min_mm\": 5, \"organic_spacing_max_mm\": 8, \"organic_width_mm\": 0.9, "
+        "\"organic_strand_keep\": 0.5, \"organic_groups\": [{\"regions\": [1], \"organic_width_heavy_mm\": 1.2}, "
+        "{\"regions\": [2], \"organic_width_heavy_mm\": 1.8}]}";
+    write(kDir + "/groups_job.json", two + "}");
+    write(kDir + "/strength_job.json", strength_job(f, 6000.0, "lattice_part", "block.stl", -1, "{\"strengthen_rounds\": 2}"));
+    std::filesystem::remove_all(kDir + "/groups");
+    std::filesystem::create_directories(kDir + "/groups");
+    const OrganicStrengthenResult gr = run_organic_strengthen(kDir + "/groups_job.json", kDir + "/groups", 0, MATERIALS_JSON_PATH, SETTINGS_RULES_PATH);
+    std::printf("[groups] ok %d code %s rounds %d %s %s\n", gr.ok, gr.code.c_str(), gr.rounds_fixed, gr.why.c_str(), gr.detail.c_str());
+    std::size_t over1 = 0, over2 = 0, between = 0, watched1 = 0, watched2 = 0;
+    double past = 0.0;
+    const sj::Value doc = sj::parse(slurp(kDir + "/groups/strengthen.json"), "strengthen.json");
+    const sj::Value* rounds = sj::find(doc, "rounds");
+    for (std::size_t n = 0; rounds && n < rounds->arr.size(); ++n) {
+      const sj::Value* added = sj::find(rounds->arr[n], "added");
+      const sj::Value* paths = added ? sj::find(*added, "paths") : nullptr;
+      const sj::Value* pl = paths ? sj::find(*paths, "past_limit") : nullptr;
+      if (pl) past += sj::find(*pl, "struts")->num;
+      const sj::Value su = sj::parse(slurp(kDir + "/groups/r" + std::to_string(n) + "/struts_under.json"), "struts_under.json");
+      for (const sj::Value& st : sj::find(su, "struts")->arr) {
+        const sj::Value* rg = sj::find(st, "region");
+        const double w = sj::find(st, "width_max_mm")->num;
+        if (!rg) continue;
+        if (rg->num == 1) { ++watched1; over1 += w > 1.2 + 1e-6; }
+        if (rg->num == 2) { ++watched2; over2 += w > 1.8 + 1e-6; between += w > 1.2 + 1e-6 && w <= 1.8 + 1e-6; }
+      }
+    }
+    std::printf("[groups] watched struts: area 1 %zu (over its 1.2 %zu), area 2 %zu (over its 1.8 %zu, between 1.2 and 1.8 %zu); "
+                "struts named past a limit %.0f\n", watched1, over1, watched2, over2, between, past);
+    CHECK(gr.ok && gr.old_bars_kept && watched1 > 0 && watched2 > 0 && static_cast<double>(over1 + over2) <= past);
+    // Replay: the file job given round 1's strengthened.json lays round 1's bars.
+    if (gr.ok && gr.rounds_fixed >= 1) {
+      std::string j = two + ", \"strengthened\": \"groups/r1/strengthened.json\"}";
+      j.erase(j.find("\"strength_job\": \"strength_job.json\", "), std::string("\"strength_job\": \"strength_job.json\", ").size());   // the file alone
+      write(kDir + "/groups_replay_job.json", j);
+      std::filesystem::remove_all(kDir + "/groups_replay");
+      std::filesystem::create_directories(kDir + "/groups_replay");
+      const FileResult rr = run_file_job(kDir + "/groups_replay_job.json", kDir + "/groups_replay");
+      const std::size_t r1 = slurp(kDir + "/groups/strengthen.json").find("\"round\": 1");
+      const double bars1 = num_after(slurp(kDir + "/groups/strengthen.json"), "bars", r1);
+      std::printf("[groups replay] ok %d code %s bars %zu (round 1: %.0f) %s\n", rr.ok, rr.code.c_str(), rr.bars, bars1, rr.detail.c_str());
+      CHECK(rr.ok && static_cast<double>(rr.bars) == bars1);
+    }
+    write(kDir + "/strength_job.json", strength_job(f, 6000.0, "lattice_part", "block.stl", -1, "{\"strengthen_rounds\": 1, \"strengthen_mode\": \"rebuild\"}"));
+    std::filesystem::remove_all(kDir + "/groups_rebuild");
+    std::filesystem::create_directories(kDir + "/groups_rebuild");
+    const OrganicStrengthenResult rb = run_organic_strengthen(kDir + "/groups_job.json", kDir + "/groups_rebuild", 0, MATERIALS_JSON_PATH, SETTINGS_RULES_PATH);
+    std::printf("[groups rebuild] ok %d code %s %s\n", rb.ok, rb.code.c_str(), rb.why.c_str());
+    CHECK(!rb.ok && rb.code == "rebuild_one_group");
+  }
+
   // ── OJ2 (leg J item 2; the owner, 2026-11-19: "yes, a solid finish can sit on a loaded face if chosen by the user in
   // the settings"): the weave under the LOADED top face with a Solid finish (1.2 mm): the check runs, the cover is
   // solid in it, and the load reaches the lattice through the cover (frame nodes driven, the load on the frame).

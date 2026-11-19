@@ -16160,7 +16160,8 @@ std::string print_check_counts(const ll::Bars& before, const std::vector<char>& 
 // layout's order (in piece order, each once), the limit that failed, its margins, the compression its buckling used,
 // whether bending led its stress, its widths and length, whether it is at `cap` (its widest bar at least cap; 0: not
 // told), whether it carries the load, and its two ends. The weakest first.
-std::string struts_under_json(const OrganicCheckRun& cr, double watch, double cap, const std::vector<std::string>* classes = nullptr) {
+std::string struts_under_json(const OrganicCheckRun& cr, double watch, double cap, const std::vector<std::string>* classes = nullptr,
+                              const ll::Bars* layout_bars = nullptr) {
   const ll::FrameCheck& c = cr.check;
   std::vector<int> order;
   for (std::size_t i = 0; i < c.struts.size(); ++i)
@@ -16199,7 +16200,9 @@ std::string struts_under_json(const OrganicCheckRun& cr, double watch, double ca
          ", \"loaded\": " + (sn.loaded ? "true" : "false") + ", \"at\": " + v3(sn.at) + ",\n     \"ends\": [" + ends +
          "], \"bars\": [" + bl + "]" +
          (classes && static_cast<std::size_t>(order[q]) < classes->size()
-              ? ", \"class\": " + json_str((*classes)[static_cast<std::size_t>(order[q])]) : std::string()) + "}";
+              ? ", \"class\": " + json_str((*classes)[static_cast<std::size_t>(order[q])]) : std::string()) +
+         (layout_bars && !bars.empty() && bars.front() >= 0 && static_cast<std::size_t>(bars.front()) < layout_bars->bars.size()
+              ? ", \"region\": " + std::to_string(layout_bars->bars[static_cast<std::size_t>(bars.front())].region) : std::string()) + "}";
   }
   s += std::string(order.empty() ? "" : "\n  ") + "]\n}\n";
   return s;
@@ -16920,7 +16923,14 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
     if (!bad.ok) return finish(false, bad.code, bad.exit_code, bad.why, bad.detail);
   }
   ll::OrganicAsk ask = job.organic;
+  // OJ5 (leg J item 5): a job of several Organic groups: each group laid by its own ask; per region its group's light
+  // and upper widths (the OS18 limit and the cap), gap and layer. The first group's ask stands for the job's own.
+  std::vector<ll::OrganicGroup> groups = job.organic_groups;
+  if (!groups.empty()) ask = groups.front().ask;
   const bool grown = ask.mode == ll::OrganicMode::Grown;
+  if (groups.size() > 1 && S.st.get("strengthen_mode") != 0.0)
+    return finish(false, "rebuild_one_group", 3,
+                  "The rebuild mode of strengthening lays one Organic group, and this job has several; use the additive mode.");
   limit = static_cast<int>(S.st.get("strengthen_rounds"));
   // 0: the default. Additive (brief E4, item 1): six rounds (it stops as soon as nothing is under the safety margin);
   // rebuild: 2 for Traced, 3 for Grown.
@@ -16949,7 +16959,9 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
     // the print check between rounds (as the file job does); the lay is then print-checked before the first check.
     const ll::FileOptions file_options = ll::file_options_for(job.options, true);
     if (!ask.additions.empty()) ask.print_check = ll::print_check_hook(session, file_options, stop);
-    const ll::Outcome out = session.lay_organic(job.settings, *job.tensor_field, ask, job.options.threads, stop);
+    if (!groups.empty()) groups.front().ask.print_check = ask.print_check;   // OJ5
+    const ll::Outcome out = groups.empty() ? session.lay_organic(job.settings, *job.tensor_field, ask, job.options.threads, stop)
+                                           : session.lay_organic(job.settings, *job.tensor_field, groups, job.options.threads, stop);
     const double s_lay0 = secs(t0);
     if (out.cancelled) return finish(false, "cancelled", 1, "Stopped before the strengthening was finished.");
     if (!out.additions_refused.empty())
@@ -16958,13 +16970,27 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
                     out.additions_refused);
     for (const auto& [region, ref] : out.organic_references) reference = std::max(reference, ref);
     const ll::Domain& domain = *session.domain();
-    const double light = ask.width_mm > 0.0 ? ask.width_mm : domain.spec().bead_mm * domain.spec().min_strut_lines;
+    double light = ask.width_mm > 0.0 ? ask.width_mm : domain.spec().bead_mm * domain.spec().min_strut_lines;
     const double upper = ask.width_heavy_mm > 0.0 ? ask.width_heavy_mm : light;
     const double cap = cap_x * upper;
     ll::AddContext ctx;
     ctx.light_mm = light;
     ctx.layer_mm = ask.layer_mm;
     ctx.link_width = ask.link_width;
+    // OJ5: per region, its group's {light, upper, gap}; the check reads the thinnest light width of the job.
+    std::map<int, std::array<double, 3>> per_region;
+    for (const ll::OrganicGroup& g : groups) {
+      const double l = g.ask.width_mm > 0.0 ? g.ask.width_mm : domain.spec().bead_mm * domain.spec().min_strut_lines;
+      const double u = g.ask.width_heavy_mm > 0.0 ? g.ask.width_heavy_mm : l;
+      const double gp = g.ask.gap_lines > 0.0 ? g.ask.gap_lines * domain.spec().bead_mm : domain.spec().bead_mm;
+      for (int rid : g.regions) {
+        per_region[rid] = {l, u, gp};
+        if (groups.size() > 1) ctx.per_region[rid] = {l, g.ask.layer_mm, g.ask.link_width};
+      }
+      light = std::min(light, l);
+    }
+    const auto lim_r = [&](int region) { const auto it = per_region.find(region); return it == per_region.end() ? upper : it->second[1]; };
+    const auto cap_r = [&](int region) { return cap_x * lim_r(region); };
     for (const ll::Layout::Weave& w : out.layout.weave) ctx.weave_regions.push_back(w.region);   // OG5
     ctx.line_mm = domain.spec().bead_mm;
     say("checking the lattice prints (round 0)");
@@ -17017,6 +17043,11 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
       std::filesystem::create_directories(rdir, ec);
       say("round " + std::to_string(n) + ": checking its strength");
       OrganicCheckRun cr = organic_frame_check(S, domain, bars, &in_file, light, rdir, job.options.threads);
+      const auto reg = [&](const ll::FrameStrut& sn) {   // OJ5: a strut's region (its first bar's)
+        if (sn.pieces.empty()) return 0;
+        const int fb = cr.frame.pieces[static_cast<std::size_t>(sn.pieces.front())].bar;
+        return fb >= 0 && static_cast<std::size_t>(fb) < cr.bar_of.size() ? bars.bars[static_cast<std::size_t>(cr.bar_of[static_cast<std::size_t>(fb)])].region : 0;
+      };
       if (!cr.done.ok) return finish(false, cr.done.code, cr.done.exit_code, cr.done.why, cr.done.detail);
       std::ofstream(join_path(rdir, "strength.json")) << cr.done.json << "\n";
       const ll::FrameCheck& c = cr.check;
@@ -17059,9 +17090,9 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
           new_pieces_under += under && !vine && !brace && cut && newly;
         }
       }
-      std::ofstream(join_path(rdir, "struts_under.json")) << struts_under_json(cr, ss.watch_margin, cap, &strut_class);
+      std::ofstream(join_path(rdir, "struts_under.json")) << struts_under_json(cr, ss.watch_margin, cap, &strut_class, &bars);
       std::size_t at_cap_left = 0;
-      for (const ll::FrameStrut& sn : c.struts) at_cap_left += sn.judged && sn.margin < S.options.margin_stop && sn.width_max >= cap - 1e-9;
+      for (const ll::FrameStrut& sn : c.struts) at_cap_left += sn.judged && sn.margin < S.options.margin_stop && sn.width_max >= cap_r(reg(sn)) - 1e-9;
       std::string r = std::string(rounds_json.empty() ? "\n    " : ",\n    ") + "{\"round\": " + std::to_string(n) +
                       ", \"verdict\": " + json_str(cr.verdict) + ", \"fail_reason\": " + json_str(cr.fail_reason) +
                       ", \"bars\": " + std::to_string(bars.bars.size()) + ", \"hash\": " + json_str(hash_hex(ll::bars_hash(bars))) +
@@ -17262,7 +17293,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
           if (!(sn.margin < S.options.margin_stop)) continue;             // only watched: thickened within the limit
           if (brace_ops_of[wi].second > brace_ops_of[wi].first) continue; // braced along its length this round (B)
           const double f = a_factor(sn);
-          if (!(sn.width_max * std::max(1.0, f) > limit_w + 1e-12)) { ++c_within; continue; }   // 1. within the limit
+          if (!(sn.width_max * std::max(1.0, f) > lim_r(reg(sn)) + 1e-12)) { ++c_within; continue; }   // 1. within the limit
           if (vines_of[strut_key(sn.at)] >= per_strut) { past_now.insert(&sn); ++c_exhausted; continue; }   // its twins laid
           std::vector<int> ch = chain_of(sn);
           if (ch.empty()) { past_now.insert(&sn); ++c_not_run; continue; }   // not one run joint to joint
@@ -17359,6 +17390,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
       std::vector<ll::Bar> olds;
       std::vector<double> factor;
       std::vector<double> ceil_of;                     // OS18 amended: per old bar, the widest it may go this round
+      std::vector<double> lim_of;                      // OJ5: and its group's limit
       std::vector<const ll::FrameStrut*> strut_of;     // and its strut
       std::size_t struts_widened = 0, struts_braced = 0, struts_at_cap = 0;
       std::set<StrutKey> widened_now;   // OS18
@@ -17382,9 +17414,10 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
           seen.push_back(lb);
           olds.push_back(before_round.bars[static_cast<std::size_t>(lb)]);
           factor.push_back(f);
-          ceil_of.push_back(!paths_on || past_now.count(&sn) ? cap : limit_w);   // OS18 amended
+          ceil_of.push_back(!paths_on || past_now.count(&sn) ? cap_r(reg(sn)) : lim_r(reg(sn)));   // OS18 amended; OJ5
+          lim_of.push_back(lim_r(reg(sn)));
           strut_of.push_back(&sn);
-          capped = capped || olds.back().width * f > cap + 1e-12;
+          capped = capped || olds.back().width * f > cap_r(reg(sn)) + 1e-12;
           any = true;
         }
         struts_widened += any;
@@ -17404,7 +17437,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
             if (!(w > b.width)) continue;
             done.insert(j);
             widen.ops.push_back({2, {b.a.x, b.a.y, b.a.z, b.b.x, b.b.y, b.b.z, w}});
-            if (ceil_of[k] > limit_w && w > limit_w + 1e-12) past_widest = std::max(past_widest, w);
+            if (ceil_of[k] > lim_of[k] && w > lim_of[k] + 1e-12) past_widest = std::max(past_widest, w);
           }
       }
       ll::AddReport wrep;
@@ -17427,14 +17460,23 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
         ll::TwinAsk ta;
         ta.gap_mm = ask.gap_lines > 0.0 ? ask.gap_lines * domain.spec().bead_mm : domain.spec().bead_mm;
         if (!stretches.empty()) {
-          const ll::TwinVineMaker maker(bars, domain, *job.tensor_field, ta);
+          std::map<long long, std::unique_ptr<ll::TwinVineMaker>> makers;   // OJ5: one per gap
           for (const Stretch& st : stretches) {
             std::vector<Vec3> avoid;
             for (const ll::FrameStrut* q : st.struts)
               for (const Vec3& v : sides_of[strut_key(q->at)]) avoid.push_back(v);
-            double st_width = limit_w;   // the stretch's width as it now stands (a strut widened past the limit before: wider)
+            const double lim_here = lim_r(st.region);   // OJ5: the stretch's group's limit and gap
+            double st_width = lim_here;   // the stretch's width as it now stands (a strut widened past the limit before: wider)
             for (const ll::FrameStrut* q : st.struts) st_width = std::max(st_width, q->width_max);
-            const ll::TwinVine tw = maker.make(st.line, st.region, st_width, limit_w, st.spacing, avoid);
+            const auto pg = per_region.find(st.region);
+            const double gap_here = pg == per_region.end() ? ta.gap_mm : pg->second[2];
+            auto& mk = makers[std::llround(gap_here * 1e6)];
+            if (!mk) {
+              ll::TwinAsk tg = ta;
+              tg.gap_mm = gap_here;
+              mk = std::make_unique<ll::TwinVineMaker>(bars, domain, *job.tensor_field, tg);
+            }
+            const ll::TwinVine tw = mk->make(st.line, st.region, st_width, lim_here, st.spacing, avoid);
             if (tw.laid) {
               vines.ops.push_back(tw.op);
               c_cross_joined += tw.cross_joined;
@@ -17489,7 +17531,8 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
                 if (y.relief && y.strand == b.strand) { ++cnt[key5(y.a)].first; cnt[key5(y.a)].second = y.a; ++cnt[key5(y.b)].first; cnt[key5(y.b)].second = y.b; }
               for (const auto& kv : cnt) if (kv.second.first == 1) joints_of.push_back(kv.second.second);
             }
-            const double lead = 3.0 * (limit_w + ta.gap_mm);   // 3 s: the eye converging on its joint
+            const auto pg = per_region.find(b.region);   // OJ5
+            const double lead = 3.0 * (lim_r(b.region) + (pg == per_region.end() ? ta.gap_mm : pg->second[2]));   // 3 s
             const double L = std::sqrt((b.b.x - b.a.x) * (b.b.x - b.a.x) + (b.b.y - b.a.y) * (b.b.y - b.a.y) + (b.b.z - b.a.z) * (b.b.z - b.a.z));
             c_vine_mm += L;
             c_vine_mm3 += L * M_PI * 0.25 * b.width * b.width;
@@ -17546,11 +17589,11 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
           for (std::size_t j : on[k]) {
             if (done.count(j)) continue;
             const ll::Bar& b = bars.bars[j];
-            const double w = std::min(cap, std::max(b.width, olds2[k].width * f2[k]));
+            const double w = std::min(cap_r(olds2[k].region), std::max(b.width, olds2[k].width * f2[k]));
             if (!(w > b.width)) continue;
             done.insert(j);
             widen2.ops.push_back({2, {b.a.x, b.a.y, b.a.z, b.b.x, b.b.y, b.b.z, w}});
-            if (w > limit_w + 1e-12) past_widest = std::max(past_widest, w);
+            if (w > lim_r(olds2[k].region) + 1e-12) past_widest = std::max(past_widest, w);
           }
         ll::AddReport w2rep;
         if (!widen2.ops.empty() && !ll::apply_add_round(bars, domain, widen2, ctx, &w2rep, &why))
