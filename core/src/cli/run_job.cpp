@@ -15313,14 +15313,9 @@ const std::vector<StrengthSettingSpec>& strength_setting_specs() {
       // Brief E8 (rule OS18): relief vines where widening is not enough.
       {"strengthen_paths", K::Choice, 1.0, 0.0, 1.0, false, {0.0, 1.0}},
       {"strengthen_paths_max", K::Integer, 200.0, 0.0, 10000.0, false, {}},
-      {"strengthen_path_min_gain", K::Number, 0.02, 0.0, 1.0, false, {}},
-      {"strengthen_path_brace_min_mm", K::Number, 4.0, 0.0, 100.0, false, {}},
       {"strengthen_path_max_spacings", K::Number, 6.0, 1.0, 50.0, false, {}},
-      {"strengthen_path_parallel_deg", K::Number, 20.0, 5.0, 45.0, false, {}},
       // OS18 amended (the owner, 2026-11-19): at most this many relief vines per strut over the whole job.
       {"strengthen_paths_per_strut", K::Integer, 2.0, 1.0, 100.0, false, {}},
-      // Leg I (OS18b): a relief vine's landing moved to a joint within this x the spacing (0: lands mid-bar).
-      {"strengthen_path_snap_spacings", K::Number, 0.5, 0.0, 2.0, false, {}},
       // Brief E4: the solid's weak spots (Organic results).
       {"solid_spots_max", K::Integer, 20.0, 1.0, 1000.0, false, {}},
       {"solid_spot_near_voxels", K::Number, 3.0, 0.0, 20.0, false, {}},
@@ -16985,15 +16980,13 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
     // their margin last round, whether they were widened, whether a mid-span brace was tried.
     const bool paths_on = S.st.get("strengthen_paths") != 0.0;
     const std::size_t paths_max = static_cast<std::size_t>(S.st.get("strengthen_paths_max"));
-    const double path_min_gain = S.st.get("strengthen_path_min_gain"), path_brace_min = S.st.get("strengthen_path_brace_min_mm"),
-                 path_max_spacings = S.st.get("strengthen_path_max_spacings"),
-                 path_parallel_cos = std::cos(S.st.get("strengthen_path_parallel_deg") * M_PI / 180.0);
+    const double path_max_spacings = S.st.get("strengthen_path_max_spacings");
     using StrutKey = std::array<long long, 3>;
     auto strut_key = [](const Vec3& p) {
       return StrutKey{std::llround(p.x / 0.25), std::llround(p.y / 0.25), std::llround(p.z / 0.25)};
     };
     std::map<StrutKey, double> margin_before;
-    std::set<StrutKey> widened_before, mid_braced;
+    std::set<StrutKey> widened_before;
     // OS18 amended (the owner, 2026-11-19: "thicken to the limit, add vines, and only at the end if it is impossible,
     // thicken passed the limit"): the limit is the upper strut width; the vines laid per strut over the job; the vines
     // laid in the round before (the strut's middle and margin), read back in the next check.
@@ -17011,10 +17004,11 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
     };
     std::map<EndsKey, double> prev_margin_of;              // a bar of the check before: its strut's margin (judged)
     std::vector<std::pair<ll::Bar, double>> prev_bars;     // the same bars, for "a piece of which old bar"
-    struct Landing { Vec3 p; double before; double share; std::string by; bool bending; Vec3 vine_mid; };
-    std::vector<Landing> landings_last;
-    (void)path_min_gain;   // OS18 amended: no longer read (every strut needing more than the limit gets a relief step)
-    std::vector<std::pair<Vec3, double>> vines_last;
+    // OS18 twin (the owner, 2026-11-19: "Yes, build it that way"): the twins laid in the round before, each its
+    // stretch's struts (middle, margin, axial force), read back in the next check; the sides each strut's twins took.
+    struct TwinMemo { std::vector<Vec3> at; std::vector<double> margin, axial; Vec3 from, to; };
+    std::vector<TwinMemo> twins_last;
+    std::map<StrutKey, std::vector<Vec3>> sides_of;
     res.old_bars_kept = true;
     for (int n = 0;; ++n) {
       if (stop && stop->load()) return finish(false, "cancelled", 1, "Stopped before the strengthening was finished.");
@@ -17087,23 +17081,30 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
                       "}, \"memory_mb\": {\"after_voxel_solve\": " + json_num(std::round(cr.mb_voxel)) + ", \"after_frame\": " +
                       json_num(std::round(cr.mb_frame)) + ", \"peak\": " + json_num(std::round(process_memory().peak_rss_mb)) +
                       "}, \"check\": " + json_str("r" + std::to_string(n) + "/strength.json");
-      // OS18 amended: each relief vine laid in the round before, its strut's margin then and now (the judged strut whose
-      // middle lies nearest, within 1 mm; null when none: no longer judged there).
+      // OS18 twin: each twin laid in the round before, its stretch's struts' margins and axial forces then and now (the
+      // judged strut whose middle lies within 0.25 mm; null when none).
       if (paths_on && n > 0) {
-        r += ", \"vine_results\": [";
-        for (std::size_t q = 0; q < vines_last.size(); ++q) {
-          double best = 1.0, now = std::numeric_limits<double>::quiet_NaN();
-          for (const ll::FrameStrut& sn : c.struts) {
-            if (!sn.judged) continue;
-            const double dd = std::sqrt((sn.at.x - vines_last[q].first.x) * (sn.at.x - vines_last[q].first.x) +
-                                        (sn.at.y - vines_last[q].first.y) * (sn.at.y - vines_last[q].first.y) +
-                                        (sn.at.z - vines_last[q].first.z) * (sn.at.z - vines_last[q].first.z));
-            if (dd <= best) { best = dd; now = sn.margin; }
+        r += ", \"twin_results\": [";
+        for (std::size_t q = 0; q < twins_last.size(); ++q) {
+          const TwinMemo& t = twins_last[q];
+          char b[200];
+          std::snprintf(b, sizeof b, "%s{\"from\": [%.3f, %.3f, %.3f], \"to\": [%.3f, %.3f, %.3f], \"struts\": [", q ? ", " : "",
+                        t.from.x, t.from.y, t.from.z, t.to.x, t.to.y, t.to.z);
+          r += b;
+          for (std::size_t k = 0; k < t.at.size(); ++k) {
+            double best = 0.25, now = std::numeric_limits<double>::quiet_NaN(), ax = std::numeric_limits<double>::quiet_NaN();
+            for (const ll::FrameStrut& sn : c.struts) {
+              if (!sn.judged) continue;
+              const double dd = std::sqrt((sn.at.x - t.at[k].x) * (sn.at.x - t.at[k].x) + (sn.at.y - t.at[k].y) * (sn.at.y - t.at[k].y) +
+                                          (sn.at.z - t.at[k].z) * (sn.at.z - t.at[k].z));
+              if (dd <= best) { best = dd; now = sn.margin; ax = sn.axial_n; }
+            }
+            char c2[200];
+            std::snprintf(c2, sizeof c2, "%s{\"at\": [%.3f, %.3f, %.3f], \"before\": %.6g, \"axial_before_n\": %.6g, \"after\": ",
+                          k ? ", " : "", t.at[k].x, t.at[k].y, t.at[k].z, t.margin[k], t.axial[k]);
+            r += std::string(c2) + json_num(now) + ", \"axial_after_n\": " + json_num(ax) + "}";
           }
-          char b[160];
-          std::snprintf(b, sizeof b, "%s{\"at\": [%.3f, %.3f, %.3f], \"before\": %.6g, \"after\": ", q ? ", " : "",
-                        vines_last[q].first.x, vines_last[q].first.y, vines_last[q].first.z, vines_last[q].second);
-          r += std::string(b) + json_num(now) + "}";
+          r += "]}";
         }
         r += "]";
       }
@@ -17117,75 +17118,6 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
           first = false;
         }
         r += ", \"under_only_because_of_new_pieces\": " + std::to_string(new_pieces_under) + "}";
-        // The landings of the round before: the struts that now end at each landing (the landed-on strut's two halves)
-        // and the vine's own struts: margin, what limits them.
-        if (n > 0 && !landings_last.empty()) {
-          std::size_t worse = 0, halves = 0, h_tension = 0, h_compression = 0, h_buckling = 0, h_bending = 0, near_joint = 0;
-          std::size_t v_struts = 0, v_under = 0, v_bending = 0, v_tension = 0, v_compression = 0, v_buckling = 0;
-          double share_sum = 0.0;
-          std::string list;
-          std::size_t listed = 0;
-          for (const Landing& L : landings_last) {
-            share_sum += L.share;
-            near_joint += L.share < 0.15;
-            double after = std::numeric_limits<double>::infinity();
-            std::string by_after;
-            bool bend_after = false;
-            for (const ll::FrameStrut& sn : c.struts) {
-              if (!sn.judged) continue;
-              bool ends_here = false;
-              for (int e = 0; e < 2; ++e) {
-                if (sn.end_node[e] < 0) continue;
-                const Vec3& q = cr.frame.nodes[static_cast<std::size_t>(sn.end_node[e])];
-                ends_here = ends_here || std::sqrt((q.x - L.p.x) * (q.x - L.p.x) + (q.y - L.p.y) * (q.y - L.p.y) + (q.z - L.p.z) * (q.z - L.p.z)) < 1e-3;
-              }
-              if (!ends_here) continue;
-              bool is_vine = false;
-              for (int pi : sn.pieces) {
-                const int fb = cr.frame.pieces[static_cast<std::size_t>(pi)].bar;
-                if (fb >= 0 && static_cast<std::size_t>(fb) < cr.bar_of.size() && bars.bars[static_cast<std::size_t>(cr.bar_of[static_cast<std::size_t>(fb)])].relief) is_vine = true;
-              }
-              if (is_vine) continue;
-              ++halves;
-              h_tension += sn.by == "tension"; h_compression += sn.by == "compression"; h_buckling += sn.by == "buckling";
-              h_bending += sn.bending_led;
-              if (sn.margin < after) { after = sn.margin; by_after = sn.by; bend_after = sn.bending_led; }
-            }
-            const bool got_worse = std::isfinite(after) && after < L.before;
-            worse += got_worse;
-            if (listed < 40) {
-              char b[320];
-              std::snprintf(b, sizeof b, "%s{\"at\": [%.3f, %.3f, %.3f], \"share\": %.3f, \"before\": ",
-                            listed ? ", " : "", L.p.x, L.p.y, L.p.z, L.share);
-              list += std::string(b) + json_num(std::isfinite(L.before) ? L.before : std::numeric_limits<double>::quiet_NaN()) +
-                      ", \"before_by\": " + json_str(L.by + (L.bending ? ", bending" : "")) + ", \"after\": " + json_num(std::isfinite(after) ? after : std::numeric_limits<double>::quiet_NaN()) +
-                      ", \"after_by\": " + json_str(by_after + (bend_after ? ", bending" : "")) + "}";
-              ++listed;
-            }
-          }
-          for (const ll::FrameStrut& sn : c.struts) {
-            if (!sn.judged) continue;
-            bool is_vine = false;
-            for (int pi : sn.pieces) {
-              const int fb = cr.frame.pieces[static_cast<std::size_t>(pi)].bar;
-              if (fb >= 0 && static_cast<std::size_t>(fb) < cr.bar_of.size() && bars.bars[static_cast<std::size_t>(cr.bar_of[static_cast<std::size_t>(fb)])].relief) is_vine = true;
-            }
-            if (!is_vine) continue;
-            ++v_struts;
-            v_under += sn.margin < S.options.margin_stop;
-            v_bending += sn.bending_led;
-            v_tension += sn.by == "tension"; v_compression += sn.by == "compression"; v_buckling += sn.by == "buckling";
-          }
-          r += ", \"landings\": {\"count\": " + std::to_string(landings_last.size()) + ", \"landed_on_worse\": " + std::to_string(worse) +
-               ", \"share_mean\": " + json_num(share_sum / static_cast<double>(landings_last.size())) +
-               ", \"within_0_15_of_a_joint\": " + std::to_string(near_joint) + ", \"halves\": {\"count\": " + std::to_string(halves) +
-               ", \"tension\": " + std::to_string(h_tension) + ", \"compression\": " + std::to_string(h_compression) +
-               ", \"buckling\": " + std::to_string(h_buckling) + ", \"bending_led\": " + std::to_string(h_bending) +
-               "}, \"vine_struts\": {\"count\": " + std::to_string(v_struts) + ", \"under\": " + std::to_string(v_under) +
-               ", \"tension\": " + std::to_string(v_tension) + ", \"compression\": " + std::to_string(v_compression) +
-               ", \"buckling\": " + std::to_string(v_buckling) + ", \"bending_led\": " + std::to_string(v_bending) +
-               "}, \"list\": [" + list + "]}";
-        }
       }
       // Leg I: remember this check's bars and their struts' margins for the next round's classes.
       prev_margin_of.clear();
@@ -17200,7 +17132,6 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
           prev_bars.push_back({b, m});
         }
       for (const ll::Bar& b : bars.bars) if (!prev_margin_of.count(ends_key(b.a, b.b))) prev_margin_of[ends_key(b.a, b.b)] = std::numeric_limits<double>::infinity();
-      landings_last.clear();
       const bool clean = c.solved && c.under_safety == 0;
       if (clean || n >= limit || !c.solved) {
         rounds_json += r + "}";
@@ -17282,82 +17213,139 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
         }
         brace_ops_of[wi].second = round.ops.size();
       }
-      // (C) OS18 (brief E8): the struts under the safety factor that widening can no longer help: at the width cap, or
-      // widened last round and their margin rose by less than strengthen_path_min_gain; worst first, at most
-      // strengthen_paths_max. One limited by bending first gets a brace at mid-span (B's maker) when it is longer than
-      // strengthen_path_brace_min_mm and none was tried there before; the rest get a relief vine after the widening.
-      struct ToC { const ll::FrameStrut* sn; std::size_t brace_op = static_cast<std::size_t>(-1); };
-      std::vector<ToC> to_c;
-      // OS18 amended: A's factor of a watched strut (as the widening reads it below), and per watched strut how far it
-      // may be widened this round: the limit (the upper strut width), or the cap once no relief step is possible.
+      // OS18 (amended; the twin, the owner 2026-11-19: "Yes, build it that way"): A's factor of a watched strut (as the
+      // widening reads it below); per watched strut how far it may be widened this round (the limit, or the cap once no
+      // relief step is possible); the weak STRETCHES: along one strand, maximal runs of consecutive judged struts (joint
+      // to joint) that each need more than the limit this round, split at a joint past strengthen_path_max_spacings x
+      // the local spacing; worst first, at most strengthen_paths_max a round (the rest wait at the limit).
       const auto a_factor = [&](const ll::FrameStrut& sn) {
         return sn.by == "buckling" ? std::pow(ss.target_margin / sn.buckling_margin, 1.0 / p_buckle)
                                    : std::pow(ss.target_margin / sn.stress_margin, 1.0 / (sn.bending_led ? p_bend : p_axial));
       };
-      std::map<const ll::FrameStrut*, double> ceiling;   // paths on: per watched strut, the widest it may go this round
       std::set<const ll::FrameStrut*> past_now;          // paths on: past the limit this round (no relief step possible)
-      std::size_t c_within = 0, c_waiting = 0, c_exhausted = 0;
+      std::size_t c_within = 0, c_waiting = 0, c_exhausted = 0, c_not_run = 0;
+      struct Stretch { std::vector<const ll::FrameStrut*> struts; std::vector<Vec3> line; double worst = 0.0; int region = 0; double spacing = 0.0; };
+      std::vector<Stretch> stretches;
+      std::size_t c_stretch_struts = 0;
       if (paths_on) {
-        for (std::size_t wi = 0; wi < watched.size(); ++wi) {
-          const ll::FrameStrut& sn = *watched[wi].sn;
-          ceiling[&sn] = limit_w;
-          if (!(sn.margin < S.options.margin_stop)) continue;            // only watched: thickened within the limit
-          if (brace_ops_of[wi].second > brace_ops_of[wi].first) continue; // braced along its length this round (B)
-          const double f = a_factor(sn);
-          if (!(sn.width_max * std::max(1.0, f) > limit_w + 1e-12)) { ++c_within; continue; }   // 1. within the limit
-          const StrutKey k = strut_key(sn.at);
-          const bool can_brace = sn.bending_led && sn.length_mm > path_brace_min && !mid_braced.count(k);
-          const bool can_vine = vines_of[k] < per_strut;
-          if (!can_brace && !can_vine) { past_now.insert(&sn); ++c_exhausted; continue; }   // 3. past the limit
-          to_c.push_back({&sn});
-        }
-        std::sort(to_c.begin(), to_c.end(), [](const ToC& x, const ToC& y) { return x.sn->margin < y.sn->margin; });
-        if (to_c.size() > paths_max) { c_waiting = to_c.size() - paths_max; to_c.resize(paths_max); }   // to the limit
-        for (ToC& t : to_c) {
-          const ll::FrameStrut& sn = *t.sn;
-          if (!sn.bending_led || !(sn.length_mm > path_brace_min) || mid_braced.count(strut_key(sn.at))) continue;
-          // The strut's pieces in order from one end (as for buckling), and the point at half its length.
+        // The strut's node chain from one end (its pieces end to end); empty when it is not one run.
+        const auto chain_of = [&](const ll::FrameStrut& sn) {
+          std::vector<int> nodes;
           std::map<int, std::vector<int>> at;
           for (int pi : sn.pieces) {
             at[cr.frame.pieces[static_cast<std::size_t>(pi)].a].push_back(pi);
             at[cr.frame.pieces[static_cast<std::size_t>(pi)].b].push_back(pi);
           }
-          int node = sn.end_node[0] >= 0 ? sn.end_node[0] : cr.frame.pieces[static_cast<std::size_t>(sn.pieces.front())].a;
+          if (sn.end_node[0] < 0 || sn.end_node[1] < 0) return nodes;
+          int node = sn.end_node[0];
           std::set<int> used;
-          std::vector<int> chain;
+          nodes.push_back(node);
           for (;;) {
             int next = -1;
             for (int pi : at[node]) if (!used.count(pi)) { next = pi; break; }
             if (next < 0) break;
             used.insert(next);
-            chain.push_back(next);
             const ll::FramePiece& fp = cr.frame.pieces[static_cast<std::size_t>(next)];
             node = fp.a == node ? fp.b : fp.a;
+            nodes.push_back(node);
           }
-          mid_braced.insert(strut_key(sn.at));
-          if (chain.size() != sn.pieces.size()) continue;   // not one run end to end: a relief vine instead
-          node = sn.end_node[0] >= 0 ? sn.end_node[0] : cr.frame.pieces[static_cast<std::size_t>(chain.front())].a;
-          double walked = 0.0;
-          const double want = 0.5 * sn.length_mm;
-          for (std::size_t k = 0; k < chain.size(); ++k) {
-            const ll::FramePiece& fp = cr.frame.pieces[static_cast<std::size_t>(chain[k])];
-            const Vec3 A = cr.frame.nodes[static_cast<std::size_t>(fp.a == node ? fp.a : fp.b)];
-            const Vec3 B = cr.frame.nodes[static_cast<std::size_t>(fp.a == node ? fp.b : fp.a)];
-            const double l = std::sqrt((B.x - A.x) * (B.x - A.x) + (B.y - A.y) * (B.y - A.y) + (B.z - A.z) * (B.z - A.z));
-            if (walked + l >= want || k + 1 == chain.size()) {
-              const double tt = l > 0.0 ? std::clamp((want - walked) / l, 0.0, 1.0) : 0.0;
-              const Vec3 X{A.x + (B.x - A.x) * tt, A.y + (B.y - A.y) * tt, A.z + (B.z - A.z) * tt};
-              const ll::Bar& hb = bars.bars[static_cast<std::size_t>(layout_bar(chain[k]))];
-              const Vec3 d{hb.b.x - hb.a.x, hb.b.y - hb.a.y, hb.b.z - hb.a.z};
-              const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
-              const double u = l2 > 0.0 ? ((X.x - hb.a.x) * d.x + (X.y - hb.a.y) * d.y + (X.z - hb.a.z) * d.z) / l2 : 0.5;
-              t.brace_op = round.ops.size();
-              round.ops.push_back({1, {hb.a.x, hb.a.y, hb.a.z, hb.b.x, hb.b.y, hb.b.z, std::clamp(u, 0.0, 1.0), hb.width}});
-              break;
+          if (used.size() != sn.pieces.size() || nodes.back() != sn.end_node[1]) nodes.clear();
+          return nodes;
+        };
+        const auto bar_of_strut = [&](const ll::FrameStrut& sn) -> const ll::Bar& {
+          return bars.bars[static_cast<std::size_t>(layout_bar(sn.pieces.front()))];
+        };
+        std::vector<const ll::FrameStrut*> needy;
+        std::map<const ll::FrameStrut*, std::vector<int>> chains;
+        for (std::size_t wi = 0; wi < watched.size(); ++wi) {
+          const ll::FrameStrut& sn = *watched[wi].sn;
+          if (!(sn.margin < S.options.margin_stop)) continue;             // only watched: thickened within the limit
+          if (brace_ops_of[wi].second > brace_ops_of[wi].first) continue; // braced along its length this round (B)
+          const double f = a_factor(sn);
+          if (!(sn.width_max * std::max(1.0, f) > limit_w + 1e-12)) { ++c_within; continue; }   // 1. within the limit
+          if (vines_of[strut_key(sn.at)] >= per_strut) { past_now.insert(&sn); ++c_exhausted; continue; }   // its twins laid
+          std::vector<int> ch = chain_of(sn);
+          if (ch.empty()) { past_now.insert(&sn); ++c_not_run; continue; }   // not one run joint to joint
+          chains[&sn] = std::move(ch);
+          needy.push_back(&sn);
+        }
+        // Join needy struts of one strand that share an end joint (exactly two at that joint) into stretches.
+        std::map<std::pair<int, int>, std::vector<const ll::FrameStrut*>> by_node;   // (node, strand)
+        for (const ll::FrameStrut* sp : needy)
+          for (int e = 0; e < 2; ++e) by_node[{sp->end_node[e], bar_of_strut(*sp).strand}].push_back(sp);
+        std::set<const ll::FrameStrut*> done;
+        for (const ll::FrameStrut* sp : needy) {
+          if (done.count(sp)) continue;
+          const int strand = bar_of_strut(*sp).strand;
+          // Walk to one end of its run, then collect along it.
+          const ll::FrameStrut* cur = sp;
+          int from = sp->end_node[0];
+          std::set<const ll::FrameStrut*> guard{cur};
+          for (;;) {
+            const auto& list = by_node[{from, strand}];
+            if (list.size() != 2) break;
+            const ll::FrameStrut* other = list[0] == cur ? list[1] : list[0];
+            if (guard.count(other)) break;
+            guard.insert(other);
+            from = other->end_node[0] == from ? other->end_node[1] : other->end_node[0];
+            cur = other;
+          }
+          // `from` is the far end of `cur`'s run; collect from there.
+          std::vector<const ll::FrameStrut*> run;
+          std::vector<int> nodes;
+          int node = from;
+          const ll::FrameStrut* x = cur;
+          std::set<const ll::FrameStrut*> seen;
+          while (x && !seen.count(x)) {
+            seen.insert(x);
+            std::vector<int> ch = chains[x];
+            if (ch.front() != node) std::reverse(ch.begin(), ch.end());
+            if (ch.front() != node) break;
+            if (!nodes.empty()) nodes.pop_back();
+            nodes.insert(nodes.end(), ch.begin(), ch.end());
+            run.push_back(x);
+            node = ch.back();
+            const auto& list = by_node[{node, strand}];
+            x = nullptr;
+            if (list.size() == 2) {
+              const ll::FrameStrut* nx = list[0] == run.back() ? list[1] : list[0];
+              if (!seen.count(nx)) x = nx;
             }
-            walked += l;
-            node = fp.a == node ? fp.b : fp.a;
           }
+          for (const ll::FrameStrut* q : run) done.insert(q);
+          // Split at joints past strengthen_path_max_spacings x the local spacing.
+          const double spacing = bar_of_strut(*run.front()).cell > 0.0 ? bar_of_strut(*run.front()).cell : 2.0;
+          const double longest = path_max_spacings * spacing;
+          Stretch st;
+          std::size_t at_node = 0;
+          double len = 0.0;
+          const auto flush = [&] {
+            if (st.struts.empty()) return;
+            st.region = bar_of_strut(*st.struts.front()).region;
+            st.spacing = spacing;
+            st.worst = 1e300;
+            for (const ll::FrameStrut* q : st.struts) st.worst = std::min(st.worst, q->margin);
+            c_stretch_struts += st.struts.size();
+            stretches.push_back(st);
+            st = Stretch{};
+            len = 0.0;
+          };
+          for (const ll::FrameStrut* q : run) {
+            std::vector<int> ch = chains[q];
+            if (ch.front() != nodes[at_node]) std::reverse(ch.begin(), ch.end());
+            if (!st.struts.empty() && len + q->length_mm > longest) flush();
+            if (st.line.empty()) st.line.push_back(cr.frame.nodes[static_cast<std::size_t>(ch.front())]);
+            for (std::size_t k = 1; k < ch.size(); ++k) st.line.push_back(cr.frame.nodes[static_cast<std::size_t>(ch[k])]);
+            st.struts.push_back(q);
+            len += q->length_mm;
+            at_node += ch.size() - 1;
+          }
+          flush();
+        }
+        std::sort(stretches.begin(), stretches.end(), [](const Stretch& x, const Stretch& y) { return x.worst < y.worst; });
+        if (stretches.size() > paths_max) {
+          for (std::size_t q = paths_max; q < stretches.size(); ++q) c_waiting += stretches[q].struts.size();
+          stretches.resize(paths_max);
         }
       }
       const ll::Bars before_round = bars;   // the bars the check numbered
@@ -17423,132 +17411,58 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
       if (!widen.ops.empty() && !ll::apply_add_round(bars, domain, widen, ctx, &wrep, &why))
         return finish(false, "strengthen_failed", 1, "A round of strengthening could not be added.", why);
       round.ops.insert(round.ops.end(), widen.ops.begin(), widen.ops.end());
-      // (C) OS18, the relief vines: for each strut handed to C whose mid-span brace was not laid (or that had none):
-      // a seed beside its middle, s = its width + the gap (the vine is as wide) out along one of the two principal
-      // directions across it (both senses, the most free room first); from the seed both ways along the principal
-      // direction nearest the strut's axis, the tracer's step (kOrganicStepRatio x the local spacing), until each half
-      // lands on a bar of another strand (within the light width) or in the solid. A candidate is dropped when its seed
-      // is not in the region's lattice or lies within the gap of a bar, or a half leaves the lattice, turns back, runs
-      // within the gap of a bar near-parallel (strengthen_path_parallel_deg) for more than one spacing, or runs longer
-      // than strengthen_path_max_spacings x the spacing. No landing on either side: no_room.
-      std::size_t c_handed = to_c.size(), c_mid_braces = 0, c_vines = 0, c_vine_bars = 0, c_tried = 0, c_no_room = 0;
-      std::size_t c_snapped = 0, c_snap_dropped = 0;   // Leg I (OS18b)
-      std::size_t c_seed_off = 0, c_seed_crowded = 0, c_half_left = 0, c_half_turned = 0, c_half_beside = 0, c_half_long = 0,
-                  c_half_no_field = 0;
+      // OS18 twin: for each stretch (worst first), after the widening: a twin vine from J0 to Jn beside it (TwinVineMaker),
+      // its width the limit; laid: kind 3; none: no_room with its reason and place, and its struts go past the limit.
+      std::size_t c_handed = c_stretch_struts, c_vines = 0, c_vine_bars = 0, c_no_room = 0, c_cross_joined = 0;
+      std::map<std::string, std::size_t> no_room_why;
       double c_vine_mm = 0.0, c_vine_mm3 = 0.0;
-      std::vector<Vec3> no_room_at;
-      std::vector<std::pair<Vec3, double>> vines_at;   // the struts given a vine: their middle and margin (at most 20)
-      std::vector<std::pair<Vec3, double>> vines_now;  // OS18 amended: every strut given a vine this round
-      std::vector<const ll::FrameStrut*> past_late;    // OS18 amended: no_room (or out of vines) this round
-      std::vector<Landing> landings_now;               // Leg I: this round's vine landings
+      std::vector<std::pair<Vec3, std::string>> no_room_at;
+      std::vector<std::string> twins_json;             // at most 20
+      std::vector<TwinMemo> twins_now;
+      std::vector<const ll::FrameStrut*> past_late;    // no_room this round: past the limit (below)
       std::set<int> vine_strands_before;
+      std::size_t c_twin_beside = 0;
       {
         ll::AddRound vines;
-        ll::ReliefVineAsk va;
-        va.gap_mm = ask.gap_lines > 0.0 ? ask.gap_lines * domain.spec().bead_mm : domain.spec().bead_mm;
-        va.light_mm = ctx.light_mm;
-        va.step_ratio = kOrganicStepRatio;
-        va.max_spacings = path_max_spacings;
-        va.parallel_deg = S.st.get("strengthen_path_parallel_deg");
-        va.snap_spacings = S.st.get("strengthen_path_snap_spacings");   // Leg I (OS18b)
-        if (!to_c.empty()) {
-          const ll::ReliefVineMaker maker(bars, domain, *job.tensor_field, va);
-          for (const ToC& t : to_c) {
-            if (t.brace_op != static_cast<std::size_t>(-1) && t.brace_op < brep.braces_at.size() && brep.braces_at[t.brace_op] > 0) {
-              ++c_mid_braces;
-              continue;
-            }
-            const ll::FrameStrut& sn = *t.sn;
-            // Its bar nearest the middle of its worst piece (as the bars now stand: the check's bar, cut or widened in
-            // this round, is found on its line), and its strands (never landed on).
-            std::size_t hb = static_cast<std::size_t>(-1);
-            double best = 1e300;
-            std::vector<int> own;
-            for (int pi : sn.pieces) {
-              const std::size_t lb = static_cast<std::size_t>(layout_bar(pi));
-              if (lb >= before_round.bars.size()) continue;
-              own.push_back(before_round.bars[lb].strand);
-            }
-            for (std::size_t i = 0; i < bars.bars.size(); ++i) {
-              const ll::Bar& b = bars.bars[i];
-              if (std::find(own.begin(), own.end(), b.strand) == own.end() || b.link) continue;
-              const Vec3 d{b.b.x - b.a.x, b.b.y - b.a.y, b.b.z - b.a.z};
-              const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
-              const double tt = l2 > 0.0 ? std::clamp(((sn.at.x - b.a.x) * d.x + (sn.at.y - b.a.y) * d.y + (sn.at.z - b.a.z) * d.z) / l2, 0.0, 1.0) : 0.0;
-              const double ex = b.a.x + d.x * tt - sn.at.x, ey = b.a.y + d.y * tt - sn.at.y, ez = b.a.z + d.z * tt - sn.at.z;
-              const double dd = ex * ex + ey * ey + ez * ez;
-              if (dd < best) { best = dd; hb = i; }
-            }
-            if (hb == static_cast<std::size_t>(-1)) continue;
-            const ll::Bar host = bars.bars[hb];
-            // OS18 amended: the vine is as wide as the strut, at most the limit (the strut was widened to it).
-            const double w = std::min(limit_w, std::max(sn.width_max, host.width));
-            if (vines_of[strut_key(sn.at)] >= per_strut) { past_late.push_back(&sn); continue; }   // its brace failed
-            const ll::ReliefVine v = maker.make(host, sn.at, own, w);
-            c_tried += v.tried;
-            c_seed_off += v.seed_off; c_seed_crowded += v.seed_crowded; c_half_left += v.half_left;
-            c_half_turned += v.half_turned; c_half_beside += v.half_beside; c_half_long += v.half_long;
-            c_half_no_field += v.half_no_field;
-            c_snapped += v.snapped; c_snap_dropped += v.snap_dropped;   // Leg I
-            if (v.laid) {
-              // Leg I: its two landings (not those in the solid): the strut of this check it lands on, that strut's
-              // margin, and how far along it from its nearer end joint (a share of its length).
-              for (int e = 0; e < 2 && !v.points.empty(); ++e) {
-                if (e == 0 ? v.solid_a : v.solid_b) continue;
-                const Vec3 p = e == 0 ? v.points.front() : v.points.back();
-                double bestd = 1e300;
-                const ll::FrameStrut* on = nullptr;
-                for (const ll::FrameStrut& s2 : c.struts)
-                  for (int pi : s2.pieces) {
-                    const ll::FramePiece& fp = cr.frame.pieces[static_cast<std::size_t>(pi)];
-                    const Vec3 A = cr.frame.nodes[static_cast<std::size_t>(fp.a)], B = cr.frame.nodes[static_cast<std::size_t>(fp.b)];
-                    const Vec3 d{B.x - A.x, B.y - A.y, B.z - A.z};
-                    const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
-                    const double t = l2 > 0 ? std::clamp(((p.x - A.x) * d.x + (p.y - A.y) * d.y + (p.z - A.z) * d.z) / l2, 0.0, 1.0) : 0.0;
-                    const double ex = A.x + d.x * t - p.x, ey = A.y + d.y * t - p.y, ez = A.z + d.z * t - p.z;
-                    const double dd = ex * ex + ey * ey + ez * ez;
-                    if (dd < bestd) { bestd = dd; on = &s2; }
-                  }
-                if (!on) continue;
-                // Along the strut from its first end: walk its pieces in order.
-                std::map<int, std::vector<int>> at;
-                for (int pi : on->pieces) {
-                  at[cr.frame.pieces[static_cast<std::size_t>(pi)].a].push_back(pi);
-                  at[cr.frame.pieces[static_cast<std::size_t>(pi)].b].push_back(pi);
-                }
-                int node = on->end_node[0] >= 0 ? on->end_node[0] : cr.frame.pieces[static_cast<std::size_t>(on->pieces.front())].a;
-                std::set<int> used;
-                double walked = 0.0, along = -1.0, total = 0.0, best_here = 1e300;
-                for (;;) {
-                  int next = -1;
-                  for (int pi : at[node]) if (!used.count(pi)) { next = pi; break; }
-                  if (next < 0) break;
-                  used.insert(next);
-                  const ll::FramePiece& fp = cr.frame.pieces[static_cast<std::size_t>(next)];
-                  const int other = fp.a == node ? fp.b : fp.a;
-                  const Vec3 A = cr.frame.nodes[static_cast<std::size_t>(node)], B = cr.frame.nodes[static_cast<std::size_t>(other)];
-                  const Vec3 d{B.x - A.x, B.y - A.y, B.z - A.z};
-                  const double l = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
-                  const double t = l > 0 ? std::clamp(((p.x - A.x) * d.x + (p.y - A.y) * d.y + (p.z - A.z) * d.z) / (l * l), 0.0, 1.0) : 0.0;
-                  const double ex = A.x + d.x * t - p.x, ey = A.y + d.y * t - p.y, ez = A.z + d.z * t - p.z;
-                  const double dd = ex * ex + ey * ey + ez * ez;
-                  if (dd < best_here) { best_here = dd; along = walked + t * l; }
-                  walked += l;
-                  node = other;
-                }
-                total = walked;
-                const double share = total > 0.0 && along >= 0.0 ? std::min(along, total - along) / total : 0.0;
-                landings_now.push_back({p, on->judged ? on->margin : std::numeric_limits<double>::infinity(), share, on->by, on->bending_led, sn.at});
+        ll::TwinAsk ta;
+        ta.gap_mm = ask.gap_lines > 0.0 ? ask.gap_lines * domain.spec().bead_mm : domain.spec().bead_mm;
+        if (!stretches.empty()) {
+          const ll::TwinVineMaker maker(bars, domain, *job.tensor_field, ta);
+          for (const Stretch& st : stretches) {
+            std::vector<Vec3> avoid;
+            for (const ll::FrameStrut* q : st.struts)
+              for (const Vec3& v : sides_of[strut_key(q->at)]) avoid.push_back(v);
+            double st_width = limit_w;   // the stretch's width as it now stands (a strut widened past the limit before: wider)
+            for (const ll::FrameStrut* q : st.struts) st_width = std::max(st_width, q->width_max);
+            const ll::TwinVine tw = maker.make(st.line, st.region, st_width, limit_w, st.spacing, avoid);
+            if (tw.laid) {
+              vines.ops.push_back(tw.op);
+              c_cross_joined += tw.cross_joined;
+              TwinMemo memo;
+              memo.from = st.line.front();
+              memo.to = st.line.back();
+              for (const ll::FrameStrut* q : st.struts) {
+                ++vines_of[strut_key(q->at)];
+                sides_of[strut_key(q->at)].push_back(tw.side);
+                memo.at.push_back(q->at);
+                memo.margin.push_back(q->margin);
+                memo.axial.push_back(q->axial_n);
               }
-              vines.ops.push_back(v.op);
-              ++vines_of[strut_key(sn.at)];
-              vines_now.push_back({sn.at, sn.margin});
-              if (vines_at.size() < 20) vines_at.push_back({sn.at, sn.margin});
+              twins_now.push_back(memo);
+              if (twins_json.size() < 20) {
+                char b[320];
+                std::snprintf(b, sizeof b, "{\"from\": [%.4f, %.4f, %.4f], \"to\": [%.4f, %.4f, %.4f], \"struts\": %zu, \"points\": %zu, "
+                              "\"cross_joined\": %zu, \"offset_mm\": %.4f, \"worst\": %.6g}", st.line.front().x, st.line.front().y,
+                              st.line.front().z, st.line.back().x, st.line.back().y, st.line.back().z, st.struts.size(),
+                              tw.points.size(), tw.cross_joined, tw.offset_mm, st.worst);
+                twins_json.push_back(b);
+              }
               continue;
             }
             ++c_no_room;
-            past_late.push_back(&sn);   // OS18 amended: no relief step possible: past the limit (below)
-            if (no_room_at.size() < 20) no_room_at.push_back(v.mid);
+            ++no_room_why[tw.no_room];
+            for (const ll::FrameStrut* q : st.struts) past_late.push_back(q);
+            if (no_room_at.size() < 20) no_room_at.push_back({tw.mid, tw.no_room});
           }
         }
         for (const ll::Bar& b : bars.bars) if (b.relief) vine_strands_before.insert(b.strand);
@@ -17559,18 +17473,49 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
           c_vines = vrep.relief_vines;
           c_vine_bars = vrep.relief_bars;
           round.ops.insert(round.ops.end(), vines.ops.begin(), vines.ops.end());
+          // The twins' bars: their length and volume, and any within the gap of a bar they do not share an end with.
+          const auto key5 = [](const Vec3& p) { return std::array<long long, 3>{std::llround(p.x * 1e5), std::llround(p.y * 1e5), std::llround(p.z * 1e5)}; };
+          std::map<int, std::set<std::array<long long, 3>>> twin_ends;   // per new twin strand: every end of its bars
+          for (const ll::Bar& b : bars.bars)
+            if (b.relief && !vine_strands_before.count(b.strand)) { twin_ends[b.strand].insert(key5(b.a)); twin_ends[b.strand].insert(key5(b.b)); }
           for (const ll::Bar& b : bars.bars) {
             if (!b.relief || vine_strands_before.count(b.strand)) continue;
+            const auto& te = twin_ends[b.strand];
+            // Its two joints J0, Jn (the ends that only one of its bars has), and the lead 2 s + a width round them.
+            std::vector<Vec3> joints_of;
+            {
+              std::map<std::array<long long, 3>, std::pair<int, Vec3>> cnt;
+              for (const ll::Bar& y : bars.bars)
+                if (y.relief && y.strand == b.strand) { ++cnt[key5(y.a)].first; cnt[key5(y.a)].second = y.a; ++cnt[key5(y.b)].first; cnt[key5(y.b)].second = y.b; }
+              for (const auto& kv : cnt) if (kv.second.first == 1) joints_of.push_back(kv.second.second);
+            }
+            const double lead = 3.0 * (limit_w + ta.gap_mm);   // 3 s: the eye converging on its joint
             const double L = std::sqrt((b.b.x - b.a.x) * (b.b.x - b.a.x) + (b.b.y - b.a.y) * (b.b.y - b.a.y) + (b.b.z - b.a.z) * (b.b.z - b.a.z));
             c_vine_mm += L;
             c_vine_mm3 += L * M_PI * 0.25 * b.width * b.width;
+            for (const ll::Bar& x : bars.bars) {
+              if (&x == &b || (x.relief && x.strand == b.strand) || x.link) continue;
+              if (te.count(key5(x.a)) || te.count(key5(x.b))) continue;   // joined to the twin (at J0, Jn or a cross joint)
+              double least = 1e300;
+              for (int q = 0; q <= 20; ++q) {
+                const Vec3 pq{b.a.x + (b.b.x - b.a.x) * q / 20.0, b.a.y + (b.b.y - b.a.y) * q / 20.0, b.a.z + (b.b.z - b.a.z) * q / 20.0};
+                const Vec3 d{x.b.x - x.a.x, x.b.y - x.a.y, x.b.z - x.a.z};
+                const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
+                const double t = l2 > 0 ? std::clamp(((pq.x - x.a.x) * d.x + (pq.y - x.a.y) * d.y + (pq.z - x.a.z) * d.z) / l2, 0.0, 1.0) : 0.0;
+                const double ex = x.a.x + d.x * t - pq.x, ey = x.a.y + d.y * t - pq.y, ez = x.a.z + d.z * t - pq.z;
+                bool by_joint = false;
+                for (const Vec3& jp : joints_of)
+                  by_joint = by_joint || std::sqrt((pq.x - jp.x) * (pq.x - jp.x) + (pq.y - jp.y) * (pq.y - jp.y) + (pq.z - jp.z) * (pq.z - jp.z)) < lead;
+                if (by_joint) continue;   // the eye converging on J0 or Jn
+                least = std::min(least, std::sqrt(ex * ex + ey * ey + ez * ez));
+              }
+              if (least - 0.5 * (b.width + x.width) < ta.gap_mm - 1e-3) { ++c_twin_beside; break; }
+            }
           }
         }
         margin_before.clear();
         for (const ll::FrameStrut& sn : c.struts) if (sn.judged) margin_before[strut_key(sn.at)] = sn.margin;
-        widened_before = widened_now;
-        vines_last = vines_now;
-        landings_last = landings_now;
+        twins_last = twins_now;
       }
       // OS18 amended, step 3: the struts for which no relief step was possible this round (no_room, or out of vines
       // after a failed brace) are widened past the limit by A's rule, up to the cap, on their own bars as they now are.
@@ -17653,36 +17598,27 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
         c_vines_left_out = out_strands.size();
       }
       std::string paths_json = "\"paths\": {\"on\": " + std::string(paths_on ? "true" : "false") + ", \"struts_handed\": " +
-                               std::to_string(c_handed) + ", \"mid_span_braces\": " + std::to_string(c_mid_braces) +
-                               ", \"relief_vines\": " + std::to_string(c_vines) + ", \"relief_bars\": " + std::to_string(c_vine_bars) +
-                               ", \"relief_mm\": " + json_num(std::round(c_vine_mm * 10) / 10) + ", \"relief_mm3\": " +
-                               json_num(std::round(c_vine_mm3 * 10) / 10) + ", \"candidates_tried\": " + std::to_string(c_tried) +
-                               ", \"dropped\": {\"seed_off_lattice\": " + std::to_string(c_seed_off) +
-                               ", \"seed_crowded\": " + std::to_string(c_seed_crowded) + ", \"left_lattice\": " +
-                               std::to_string(c_half_left) + ", \"turned_back\": " + std::to_string(c_half_turned) +
-                               ", \"beside_a_bar\": " + std::to_string(c_half_beside) + ", \"too_long\": " +
-                               std::to_string(c_half_long) + ", \"no_stress\": " + std::to_string(c_half_no_field) +
-                               ", \"snap_broke_a_rule\": " + std::to_string(c_snap_dropped) + "}" +
-                               ", \"landings_at_a_joint\": " + std::to_string(c_snapped) +
-                               ", \"no_room\": " + std::to_string(c_no_room) + ", \"no_room_at\": [";
-      for (std::size_t q = 0; q < no_room_at.size(); ++q) {
-        char b[96];
-        std::snprintf(b, sizeof b, "%s[%.3f, %.3f, %.3f]", q ? ", " : "", no_room_at[q].x, no_room_at[q].y, no_room_at[q].z);
-        paths_json += b;
-      }
-      paths_json += "], \"vines_at\": [";
-      for (std::size_t q = 0; q < vines_at.size(); ++q) {
-        char b[128];
-        std::snprintf(b, sizeof b, "%s{\"at\": [%.3f, %.3f, %.3f], \"margin\": %.6g}", q ? ", " : "", vines_at[q].first.x,
-                      vines_at[q].first.y, vines_at[q].first.z, vines_at[q].second);
-        paths_json += b;
-      }
-      paths_json += "], \"print_left_out\": " + std::to_string(c_vines_left_out);
-      if (paths_on) {   // OS18 amended: the order's counts
-        paths_json += ", \"limit_mm\": " + json_num(limit_w) + ", \"within_limit\": " + std::to_string(c_within) +
-                      ", \"at_limit_vine\": " + std::to_string(c_vines) + ", \"at_limit_brace\": " + std::to_string(c_mid_braces) +
-                      ", \"at_limit_no_room\": " + std::to_string(c_no_room) + ", \"waiting\": " + std::to_string(c_waiting) +
-                      ", \"out_of_vines\": " + std::to_string(c_exhausted) + ", \"past_limit\": {\"struts\": " +
+                               std::to_string(c_handed) + ", \"relief_vines\": " + std::to_string(c_vines);
+      if (paths_on) {   // OS18 twin: the order's counts
+        paths_json += ", \"stretches\": " + std::to_string(stretches.size()) + ", \"stretch_struts\": " +
+                      std::to_string(c_stretch_struts) + ", \"twins\": {\"laid\": " + std::to_string(c_vines) + ", \"bars\": " +
+                      std::to_string(c_vine_bars) + ", \"mm\": " + json_num(std::round(c_vine_mm * 10) / 10) + ", \"mm3\": " +
+                      json_num(std::round(c_vine_mm3 * 10) / 10) + ", \"cross_joined\": " + std::to_string(c_cross_joined) +
+                      ", \"beside_a_bar\": " + std::to_string(c_twin_beside) + ", \"print_left_out\": " + std::to_string(c_vines_left_out) +
+                      ", \"list\": [";
+        for (std::size_t q = 0; q < twins_json.size(); ++q) paths_json += (q ? ", " : "") + twins_json[q];
+        paths_json += "]}, \"no_room\": {\"stretches\": " + std::to_string(c_no_room) + ", \"too_short\": " +
+                      std::to_string(no_room_why["too_short"]) + ", \"no_free_side\": " + std::to_string(no_room_why["no_free_side"]) +
+                      ", \"outside_lattice\": " + std::to_string(no_room_why["outside_lattice"]) + ", \"at\": [";
+        for (std::size_t q = 0; q < no_room_at.size(); ++q) {
+          char b[128];
+          std::snprintf(b, sizeof b, "%s{\"at\": [%.3f, %.3f, %.3f], \"why\": \"%s\"}", q ? ", " : "", no_room_at[q].first.x,
+                        no_room_at[q].first.y, no_room_at[q].first.z, no_room_at[q].second.c_str());
+          paths_json += b;
+        }
+        paths_json += "]}, \"limit_mm\": " + json_num(limit_w) + ", \"within_limit\": " + std::to_string(c_within) +
+                      ", \"waiting\": " + std::to_string(c_waiting) + ", \"out_of_twins\": " + std::to_string(c_exhausted) +
+                      ", \"not_one_run\": " + std::to_string(c_not_run) + ", \"past_limit\": {\"struts\": " +
                       std::to_string(c_past) + ", \"widest_mm\": " + json_num(past_widest) + ", \"at\": [";
         for (std::size_t q = 0; q < past_at.size(); ++q) {
           char b[96];

@@ -349,54 +349,44 @@ double solid_run_on(const Domain::Probe& probe, const Vec3& entry, const Vec3& d
 // `between`, when given: run after each round's operations, before its hash (OS16); a non-empty answer refuses.
 bool apply_additions(Bars& bars, const Domain& domain, const Additions& adds, const AddContext& c, std::string* why = nullptr,
                      const std::function<std::string(Bars&)>& between = {});
-// OS18 (brief E8): the RELIEF VINE maker (one for Traced and Grown). Built once on the bars of a round (a 2 mm grid of
-// them); make() for one strut: its bar `host` at the point `at` (the middle of its worst piece), its strands `own`
-// (never landed on), the vine's `width`. A seed beside the strut, s = (host width + width) / 2 + gap, along each of the
-// two principal stress directions across the strut there, both senses, the one with the most free room first; a seed
-// must lie in the host's region's lattice with no bar within the gap (surface to surface). From the seed both ways
-// along the principal direction nearest the heading (the strut's axis at first), steps of step_ratio x the local
-// spacing (the host's `cell`), until a half comes within the gap of a bar of another strand that it crosses (more than
-// parallel_deg off it): it ends ON that bar's line (the closest point; Node), or enters the solid (its edge; Solid).
-// A half is dropped when it leaves the region's lattice, turns back (against its first heading), runs within the gap
-// of a bar near-parallel for more than one spacing, or runs longer than max_spacings x the spacing. Both halves must
-// land; else the next seed; none: no_room. The op is kind 3 (region, width, cell, end kinds, points).
-struct ReliefVineAsk {
+// OS18 (amended 2026-11-19, the owner: "Yes, build it that way"): the TWIN VINE maker (one for Traced and Grown). Built
+// once on the bars of a round (a 2 mm grid of them). make() for one weak STRETCH: its centre line `line` from joint J0
+// to joint Jn (every vertex, in order), its region, the stretch's width and the twin's, the local spacing, and the sides
+// a twin already took for any of its struts (`avoid`). The twin leaves J0, reaches the sideways offset
+// s = (stretch width + twin width) / 2 + gap over a lead of 2 s along the stretch, keeps that offset parallel to the
+// stretch's centre line, and returns to Jn the same way: its end points are EXACTLY J0 and Jn. The side: the two
+// principal stress directions across the stretch at its middle (the field's voxel there), both senses, the most free
+// room first, one side for the whole stretch (a side within 45 degrees of one in `avoid` is not tried). A bar ending on
+// the stretch between J0 and Jn (a cross vine, or a brace) that leaves toward the twin's side (its direction's share
+// along the offset over 0.3) is JOINED: the twin passes through the point of that bar at the offset (the crossing cut
+// then makes the joint); every other bar not ending at J0 or Jn and not on the stretch must stay at least the gap
+// away, surface to surface (read every 0.1 mm). Every point (but within a width of J0 and Jn) lies in the region's
+// lattice. A stretch shorter than 4 s: no_room "too_short"; no side passes: "no_free_side" (a bar within the gap) or
+// "outside_lattice". The op is kind 3 (region, width, cell, Node ends, points).
+struct TwinAsk {
   double gap_mm = 0.675;          // OG1's gap (one line width with the gap rule off)
-  double light_mm = 0.9;
-  double step_ratio = 0.35;       // the tracer's kOrganicStepRatio
-  double max_spacings = 6.0;      // strengthen_path_max_spacings
-  double parallel_deg = 20.0;     // strengthen_path_parallel_deg
-  // Leg I (OS18b): a landing is moved to a joint of the bar's strand (bar ends where 3 or more ends, or 2 strands, meet)
-  // within this x the spacing of the landing point; the half's last piece re-aimed at it (dropped when that piece then
-  // comes within the gap of a bar not at the joint, leaves the region's lattice, or runs within the parallel angle of a
-  // bar at the joint). 0: off (lands mid-bar, as before). strengthen_path_snap_spacings.
-  double snap_spacings = 0.0;
 };
-struct ReliefVine {
+struct TwinVine {
   bool laid = false;
-  std::size_t tried = 0;          // seeds tried
-  Vec3 mid{};                     // the strut's middle (its place, for no_room)
+  std::string no_room;            // "too_short", "no_free_side", "outside_lattice" (not laid)
+  Vec3 mid{};                     // the stretch's middle (its place)
+  Vec3 side{};                    // the side taken (unit)
   std::vector<Vec3> points;
-  bool solid_a = false, solid_b = false;
+  std::size_t sides_tried = 0, cross_joined = 0;
+  double offset_mm = 0.0;
   AddOp op;                       // kind 3, when laid
-  // Why seeds and halves were dropped: a seed off the region's lattice, a seed within the gap of a bar; a half that left
-  // the region's lattice, turned back, ran beside a bar, ran too long, or met no stress.
-  std::size_t seed_off = 0, seed_crowded = 0, half_left = 0, half_turned = 0, half_beside = 0, half_long = 0, half_no_field = 0;
-  // Leg I (OS18b): landings moved to a joint; halves dropped because the re-aimed piece broke a rule.
-  std::size_t snapped = 0, snap_dropped = 0;
 };
-class ReliefVineMaker {
+class TwinVineMaker {
  public:
-  ReliefVineMaker(const Bars& bars, const Domain& domain, const TensorField& field, const ReliefVineAsk& ask);
-  ReliefVine make(const Bar& host, const Vec3& at, const std::vector<int>& own, double width) const;
+  TwinVineMaker(const Bars& bars, const Domain& domain, const TensorField& field, const TwinAsk& ask);
+  TwinVine make(const std::vector<Vec3>& line, int region, double stretch_width, double width, double spacing,
+                const std::vector<Vec3>& avoid) const;
  private:
   const Bars& bars_;
   const Domain& domain_;
   const TensorField& field_;
-  ReliefVineAsk ask_;
+  TwinAsk ask_;
   std::map<std::array<long long, 3>, std::vector<std::size_t>> grid_;
-  struct Joint { Vec3 p; std::size_t ends = 0; std::vector<int> strands; };
-  std::map<std::array<long long, 3>, Joint> ends_;   // Leg I: every bar end (to 1e-4 mm), how many ends, which strands
 };
 
 // The additions file, little-endian: 8 bytes "TOADDS\0\0", int32 version (1), int32 rounds; per round: uint64 hash,

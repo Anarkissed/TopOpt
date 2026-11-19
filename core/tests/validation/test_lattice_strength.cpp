@@ -445,7 +445,7 @@ int main() {
       keys.push_back(sj::as_string(*sj::find(e, "key"), "key"));
       sections.push_back(sj::as_string(*sj::find(e, "section"), "section"));
     }
-    CHECK(keys.size() == 100);   // 60 of Install 3, 24 of the Organic check (brief E2), 5 of strengthening by adding (E3a), 2 of the weak areas (E4), 8 of relief vines (E8, OS18 amended, OS18b)
+    CHECK(keys.size() == 96);   // 60 of Install 3, 24 of the Organic check (brief E2), 5 of strengthening by adding (E3a), 2 of the weak areas (E4), 4 of the twin vines (OS18: paths, paths_max, max_spacings, per_strut)
     const auto headings = [](const std::string& t) {
       std::vector<std::string> h;
       std::istringstream in(t);
@@ -838,94 +838,15 @@ int main() {
     CHECK(one.ok && one.code != "nothing_to_vary" && one.old_bars_kept);
     CHECK(one.rounds_fixed == 0 || num_after(ojson, "bars_widened") > 0);
 
-    // ── §18 (brief E8, rule OS18) relief vines: the width cap at 1 (every weak strut is at the cap at once), two
-    // rounds: struts are handed to C, braced at mid-span (bent ones) or given relief vines, every old bar kept, the
-    // print check's count of vines it left out reported; the file job given r1/strengthened.json lays the same bars;
-    // strengthen_paths 0: no vine, said so.
+    // ── §18 (rule OS18; the twin, the owner 2026-11-19: "Yes, build it that way") the relief step is a TWIN VINE beside
+    // the weak stretch, from its joint J0 to its joint Jn. Made parts: the block with long struts (spacing 9 to 14,
+    // widths 0.9 to 1.2, strand_keep 0.5) at 16000 N; and the many-strut block (spacing 5 to 8) at 6000 N.
     {
-      // A wider spacing (5 to 8 mm) than §11's, so that a vine has room beside a strut.
-      const std::string roomy = ", \"region_weave\": [true], \"organic_spacing_min_mm\": 5, \"organic_spacing_max_mm\": 8, "
-                                "\"organic_width_mm\": 0.9, \"organic_width_heavy_mm\": 1.2, \"organic_strand_keep\": 0.5";   // spacing off
-      const OrganicStrengthenResult pr = strengthen("paths", roomy, 6000.0, "{\"strengthen_rounds\": 2, \"strengthen_width_cap\": 1.0}");
-      const std::string pj = slurp(kDir + "/paths/strengthen.json");
-      const std::size_t r0 = pj.find("\"round\": 0"), r1 = pj.find("\"round\": 1");
-      const std::size_t pp = pj.find("\"paths\": {", r0);
-      std::printf("[paths] %s\n", pp == std::string::npos ? "(no paths)" : pj.substr(pp, 420).c_str());
-      std::printf("[paths] round 0: under safety %.0f, smallest margin %.4g; round 1: under safety %.0f, smallest margin %.4g\n",
-                  num_after(pj, "under_safety", r0), num_after(pj, "smallest_margin", r0), num_after(pj, "under_safety", r1),
-                  num_after(pj, "smallest_margin", r1));
-      CHECK(pr.ok && pr.rounds_fixed >= 1 && pr.old_bars_kept && has(pj, "\"old_bars_kept\": true") && !has(pj, "\"old_bars_kept\": false"));
-      CHECK(pp != std::string::npos && num_after(pj, "struts_handed", pp) > 0 &&
-            num_after(pj, "relief_vines", pp) > 0 && num_after(pj, "mid_span_braces", pp) > 0 &&
-            has(pj.substr(pp, 4000), "\"print_left_out\": "));
-      // A vine's host in the next check: its margin there (the watched strut whose middle lies within 1 mm of its
-      // middle), or past the watch (no longer watched). Counted: hosts, and those whose margin rose.
-      const auto hosts_rose = [&](const std::string& tag) {
-        namespace sj = topopt::flexible::json;
-        const sj::Value doc = sj::parse(slurp(kDir + "/" + tag + "/strengthen.json"), "strengthen.json");
-        const sj::Value* rounds = sj::find(doc, "rounds");
-        const sj::Value* paths0 = rounds ? sj::find(*sj::find(rounds->arr[0], "added"), "paths") : nullptr;
-        const sj::Value under1 = sj::parse(slurp(kDir + "/" + tag + "/r1/struts_under.json"), "struts_under.json");
-        std::size_t hosts = 0, rose = 0;
-        if (paths0)
-          for (const sj::Value& v : sj::find(*paths0, "vines_at")->arr) {
-            const auto& a = sj::find(v, "at")->arr;
-            const double m0 = sj::find(v, "margin")->num;
-            double best = 1e9, m1 = 1e9;
-            for (const sj::Value& st : sj::find(under1, "struts")->arr) {
-              const auto& b = sj::find(st, "at")->arr;
-              const double dd = std::hypot(a[0].num - b[0].num, std::hypot(a[1].num - b[1].num, a[2].num - b[2].num));
-              if (dd < best) { best = dd; m1 = sj::find(st, "margin")->num; }
-            }
-            ++hosts;
-            rose += best > 1.0 || m1 > m0;
-            std::printf("[%s] vine host at %.2f %.2f %.2f: margin %.3f -> %s\n", tag.c_str(), a[0].num, a[1].num, a[2].num, m0,
-                        best > 1.0 ? "not watched" : std::to_string(m1).c_str());
-          }
-        return std::make_pair(hosts, rose);
-      };
-      {   // Many struts at once (every weak strut at the cap): counted, not every host need rise (they share the load).
-        const auto hr = hosts_rose("paths");
-        std::printf("[paths] vine hosts %zu, %zu stronger in round 1\n", hr.first, hr.second);
-        CHECK(hr.first > 0);
-      }
-      // OS18 (owed): a strut braced at mid-span gets no vine in that round (one strut handed, every length braced).
-      {
-        const OrganicStrengthenResult br = strengthen("paths_braced", roomy, 6000.0,
-            "{\"strengthen_rounds\": 1, \"strengthen_width_cap\": 1.0, \"strengthen_paths_max\": 1, \"strengthen_path_brace_min_mm\": 0}");
-        const std::string bj = slurp(kDir + "/paths_braced/strengthen.json");
-        const std::size_t bp = bj.find("\"paths\": {");
-        std::printf("[paths braced] handed %.0f, mid-span braces %.0f, vines %.0f\n", num_after(bj, "struts_handed", bp),
-                    num_after(bj, "mid_span_braces", bp), num_after(bj, "relief_vines", bp));
-        CHECK(br.ok && bp != std::string::npos && num_after(bj, "struts_handed", bp) == 1 &&
-              num_after(bj, "mid_span_braces", bp) == 1 && num_after(bj, "relief_vines", bp) == 0);
-      }
-      // ONE strut handed to C (strengthen_paths_max 1, no mid-span brace): it gets a vine and is stronger next round.
-      {
-        const OrganicStrengthenResult one_v = strengthen("paths_one", roomy, 6000.0,
-            "{\"strengthen_rounds\": 1, \"strengthen_width_cap\": 1.0, \"strengthen_paths_max\": 1, \"strengthen_path_brace_min_mm\": 100}");
-        const auto hr = hosts_rose("paths_one");
-        CHECK(one_v.ok && one_v.old_bars_kept && hr.first == 1 && hr.second == 1);
-      }
-      // Replay: the file job given round 1's strengthened.json lays round 1's bars.
-      const double bars1 = num_after(pj, "bars", r1);
-      std::string j = file_job(f, roomy, "octet", "");
-      j.replace(j.find("\"layout\""), 8, "\"tensor\": \"stress.tensor\", \"strengthened\": \"paths/r1/strengthened.json\", \"layout\"");
-      write(kDir + "/paths_replay_job.json", j);
-      std::filesystem::remove_all(kDir + "/paths_replay");
-      std::filesystem::create_directories(kDir + "/paths_replay");
-      const FileResult rr = run_file_job(kDir + "/paths_replay_job.json", kDir + "/paths_replay");
-      std::printf("[paths replay] ok %d code %s bars %zu (round 1: %.0f) %s\n", rr.ok, rr.code.c_str(), rr.bars, bars1, rr.detail.c_str());
-      CHECK(rr.ok && static_cast<double>(rr.bars) == bars1);
-      const OrganicStrengthenResult po =
-          strengthen("paths_off", roomy, 6000.0, "{\"strengthen_rounds\": 2, \"strengthen_width_cap\": 1.0, \"strengthen_paths\": 0}");
-      const std::string oj = slurp(kDir + "/paths_off/strengthen.json");
-      CHECK(po.ok && has(oj, "\"paths\": {\"on\": false, \"struts_handed\": 0") && num_after(oj, "relief_vines") == 0.0);
-
-      // ── OS18 amended (the owner, 2026-11-19: "thicken to the limit, add vines, and only at the end if it is
-      // impossible, thicken passed the limit"): the limit is the upper strut width (1.2 here), the cap 2 x that.
       namespace sj = topopt::flexible::json;
-      const double limit = 1.2;
+      const std::string longs = ", \"region_weave\": [true], \"organic_spacing_min_mm\": 9, \"organic_spacing_max_mm\": 14, "
+                                "\"organic_width_mm\": 0.9, \"organic_width_heavy_mm\": 1.2, \"organic_strand_keep\": 0.5";
+      const std::string roomy = ", \"region_weave\": [true], \"organic_spacing_min_mm\": 5, \"organic_spacing_max_mm\": 8, "
+                                "\"organic_width_mm\": 0.9, \"organic_width_heavy_mm\": 1.2, \"organic_strand_keep\": 0.5";
       const auto rounds_of = [&](const std::string& tag) {
         const sj::Value doc = sj::parse(slurp(kDir + "/" + tag + "/strengthen.json"), "strengthen.json");
         const sj::Value* rs = sj::find(doc, "rounds");
@@ -935,157 +856,109 @@ int main() {
         const sj::Value* added = sj::find(round, "added");
         return added ? sj::find(*added, "paths") : nullptr;
       };
-      const auto num = [](const sj::Value* v, const char* k) { const sj::Value* x = v ? sj::find(*v, k) : nullptr; return x ? x->num : -1.0; };
-      // The widest watched strut in round n's check, and whether each strut past the limit lies at a place an earlier
-      // round named past the limit (within 1 mm).
-      const auto widths_ok = [&](const std::string& tag, std::size_t* over, std::size_t* over_named, double* widest,
-                                 std::size_t* over_past = nullptr) {
-        const std::vector<sj::Value> rs = rounds_of(tag);
-        std::vector<std::array<double, 3>> named;
-        *over = *over_named = 0;
-        *widest = 0.0;
-        double past_so_far = 0.0;   // the struts named past the limit in the rounds before
-        if (over_past) *over_past = 0;
-        for (std::size_t n = 0; n < rs.size(); ++n) {
-          std::size_t over_here = 0;
-          if (n > 0) {
-            const sj::Value su = sj::parse(slurp(kDir + "/" + tag + "/r" + std::to_string(n) + "/struts_under.json"), "struts_under.json");
-            for (const sj::Value& st : sj::find(su, "struts")->arr) {
-              const double w = sj::find(st, "width_max_mm")->num;
-              *widest = std::max(*widest, w);
-              if (!(w > limit + 1e-6)) continue;
-              ++*over;
-              ++over_here;
-              const auto& a = sj::find(st, "at")->arr;
-              bool named_here = false;
-              for (const auto& q : named) named_here = named_here || std::hypot(a[0].num - q[0], std::hypot(a[1].num - q[1], a[2].num - q[2])) <= 1.0;
-              *over_named += named_here;
+      const auto num = [](const sj::Value* v, const char* k) { const sj::Value* x = v ? sj::find(*v, k) : nullptr; return x && x->is_number() ? x->num : -1.0; };
+      // Three rounds on the long block: twins laid, each from J0 to Jn exactly (the op's first and last points), one
+      // over a three-strut stretch; cross vines joined; no twin within the gap of a bar it does not join; too-short
+      // stretches no_room and past the limit; every old bar kept; the next check's margins and axial forces stated.
+      const OrganicStrengthenResult tr = strengthen("twins", longs, 16000.0, "{\"strengthen_rounds\": 3}");
+      const std::vector<sj::Value> rs = rounds_of("twins");
+      std::size_t laid = 0, three = 0, cross = 0, beside = 0, too_short = 0, ends_exact = 0, ops3 = 0;
+      double past = 0.0;
+      for (std::size_t n = 0; n < rs.size(); ++n) {
+        const sj::Value* p = paths_of(rs[n]);
+        if (!p) continue;
+        const sj::Value* tw = sj::find(*p, "twins");
+        const sj::Value* nr = sj::find(*p, "no_room");
+        laid += static_cast<std::size_t>(num(tw, "laid"));
+        cross += static_cast<std::size_t>(num(tw, "cross_joined"));
+        beside += static_cast<std::size_t>(num(tw, "beside_a_bar"));
+        too_short += static_cast<std::size_t>(num(nr, "too_short"));
+        past += num(sj::find(*p, "past_limit"), "struts");
+        for (const sj::Value& t : sj::find(*tw, "list")->arr) three += num(&t, "struts") == 3;
+        std::printf("[twins] round %zu: under safety %.0f, stretches %.0f (%.0f struts), twins %.0f (%.1f mm, %.1f mm3, cross joined %.0f, "
+                    "beside a bar %.0f), no_room %.0f (too short %.0f, no free side %.0f, outside %.0f), past the limit %.0f\n", n,
+                    num(sj::find(rs[n], "struts"), "under_safety"), num(p, "stretches"), num(p, "stretch_struts"), num(tw, "laid"),
+                    num(tw, "mm"), num(tw, "mm3"), num(tw, "cross_joined"), num(tw, "beside_a_bar"), num(nr, "stretches"),
+                    num(nr, "too_short"), num(nr, "no_free_side"), num(nr, "outside_lattice"), num(sj::find(*p, "past_limit"), "struts"));
+        // The ops of the round: each kind 3 begins and ends exactly at a listed twin's J0 and Jn.
+        Additions ad;
+        std::string why;
+        if (read_additions_file(kDir + "/twins/r" + std::to_string(n + 1) + "/additions.bin", ad, &why) && !ad.rounds.empty())
+          for (const AddOp& op : ad.rounds.back().ops) {
+            if (op.kind != 3) continue;
+            ++ops3;
+            const std::size_t k = op.v.size();
+            const double ax = op.v[6], ay = op.v[7], az = op.v[8], bx = op.v[k - 3], by = op.v[k - 2], bz = op.v[k - 1];
+            for (const sj::Value& t : sj::find(*tw, "list")->arr) {
+              const auto& f0 = sj::find(t, "from")->arr;
+              const auto& t0 = sj::find(t, "to")->arr;
+              if (std::hypot(ax - f0[0].num, std::hypot(ay - f0[1].num, az - f0[2].num)) < 1e-4 &&
+                  std::hypot(bx - t0[0].num, std::hypot(by - t0[1].num, bz - t0[2].num)) < 1e-4) { ++ends_exact; break; }
             }
           }
-          if (over_past && static_cast<double>(over_here) > past_so_far) *over_past += over_here;   // more than were named
-          const sj::Value* p = paths_of(rs[n]);
-          const sj::Value* past = p ? sj::find(*p, "past_limit") : nullptr;
-          if (past) past_so_far += sj::find(*past, "struts")->num;
-          if (past) for (const sj::Value& q : sj::find(*past, "at")->arr) named.push_back({q.arr[0].num, q.arr[1].num, q.arr[2].num});
-        }
-      };
-      // The order on the many-strut block, three rounds: per round thickened within the limit, given a vine, a brace,
-      // no_room, past the limit; no strut over the limit unless named past it in an earlier round.
+      }
+      for (std::size_t n = 1; n < rs.size(); ++n) {
+        const sj::Value* tr2 = sj::find(rs[n], "twin_results");
+        if (!tr2) continue;
+        for (const sj::Value& t : tr2->arr)
+          for (const sj::Value& st : sj::find(t, "struts")->arr)
+            std::printf("[twins] round %zu, a twin's strut at %.2f %.2f %.2f: margin %.3f -> %.3f, axial %.1f N -> %.1f N\n", n,
+                        sj::find(st, "at")->arr[0].num, sj::find(st, "at")->arr[1].num, sj::find(st, "at")->arr[2].num,
+                        num(&st, "before"), num(&st, "after"), num(&st, "axial_before_n"), num(&st, "axial_after_n"));
+      }
+      std::printf("[twins] laid %zu (kind 3 ops %zu, ends exactly at J0 and Jn %zu), over three struts %zu, cross joined %zu, beside a bar %zu, "
+                  "too short %zu, past the limit %.0f\n", laid, ops3, ends_exact, three, cross, beside, too_short, past);
+      CHECK(tr.ok && tr.old_bars_kept && laid > 0 && ops3 == laid && ends_exact == laid && three > 0 && cross > 0 && beside == 0 &&
+            too_short > 0 && past >= static_cast<double>(too_short));
+      // Replay: the file job given round 2's strengthened.json lays round 2's bars.
       {
-        const OrganicStrengthenResult od = strengthen("order", roomy, 6000.0, "{\"strengthen_rounds\": 3}");
-        const std::vector<sj::Value> rs = rounds_of("order");
-        for (std::size_t n = 0; n < rs.size(); ++n) {
-          const sj::Value* p = paths_of(rs[n]);
-          const sj::Value* st = sj::find(rs[n], "struts");
-          std::printf("[order] round %zu: under safety %.0f, lattice %.1f mm3", n, num(st, "under_safety"), num(&rs[n], "lattice_mm3"));
-          if (p) {
-            const sj::Value* past = sj::find(*p, "past_limit");
-            std::printf("; within the limit %.0f, vine %.0f, brace %.0f, no_room %.0f, waiting %.0f, out of vines %.0f, past the limit %.0f (widest %.3f)",
-                        num(p, "within_limit"), num(p, "at_limit_vine"), num(p, "at_limit_brace"), num(p, "at_limit_no_room"),
-                        num(p, "waiting"), num(p, "out_of_vines"), num(past, "struts"), num(past, "widest_mm"));
-          }
-          const sj::Value* vr = sj::find(rs[n], "vine_results");
-          if (vr) {
-            std::size_t rose = 0;
-            for (const sj::Value& v : vr->arr) rose += sj::find(v, "after")->is_number() && sj::find(v, "after")->num > sj::find(v, "before")->num;
-            std::printf("; last round's vines %zu, their strut stronger %zu", vr->arr.size(), rose);
-          }
+        const double bars2 = rs.size() > 2 ? num(&rs[2], "bars") : -1.0;
+        std::string j = file_job(f, longs, "octet", "");
+        j.replace(j.find("\"layout\""), 8, "\"tensor\": \"stress.tensor\", \"strengthened\": \"twins/r2/strengthened.json\", \"layout\"");
+        write(kDir + "/twins_replay_job.json", j);
+        std::filesystem::remove_all(kDir + "/twins_replay");
+        std::filesystem::create_directories(kDir + "/twins_replay");
+        const FileResult rr = run_file_job(kDir + "/twins_replay_job.json", kDir + "/twins_replay");
+        std::printf("[twins replay] ok %d bars %zu (round 2: %.0f)\n", rr.ok, rr.bars, bars2);
+        CHECK(rr.ok && static_cast<double>(rr.bars) == bars2);
+      }
+      // One strut per stretch (strengthen_path_max_spacings 1): a single overloaded strut gets a twin between its two
+      // joints; its next check stated (margin and axial force before and after).
+      {
+        const OrganicStrengthenResult o1 = strengthen("twins_one", longs, 16000.0, "{\"strengthen_rounds\": 1, \"strengthen_path_max_spacings\": 1}");
+        const std::vector<sj::Value> r1 = rounds_of("twins_one");
+        std::size_t singles = 0;
+        if (!r1.empty() && paths_of(r1[0]))
+          for (const sj::Value& t : sj::find(*sj::find(*paths_of(r1[0]), "twins"), "list")->arr) singles += num(&t, "struts") == 1;
+        if (r1.size() > 1 && sj::find(r1[1], "twin_results"))
+          for (const sj::Value& t : sj::find(r1[1], "twin_results")->arr)
+            for (const sj::Value& st : sj::find(t, "struts")->arr)
+              std::printf("[twins one] strut at %.2f %.2f %.2f: margin %.3f -> %.3f, axial %.1f N -> %.1f N\n", sj::find(st, "at")->arr[0].num,
+                          sj::find(st, "at")->arr[1].num, sj::find(st, "at")->arr[2].num, num(&st, "before"), num(&st, "after"),
+                          num(&st, "axial_before_n"), num(&st, "axial_after_n"));
+        CHECK(o1.ok && o1.old_bars_kept && singles > 0);
+      }
+      // The many-strut block, three rounds (its struts are short: most stretches too short for an eye).
+      {
+        const OrganicStrengthenResult ob = strengthen("twins_block", roomy, 6000.0, "{\"strengthen_rounds\": 3}");
+        for (const sj::Value& r : rounds_of("twins_block")) {
+          const sj::Value* cls = sj::find(r, "classes");
+          const sj::Value* p = paths_of(r);
+          std::printf("[twins block] round %.0f: under safety %.0f (untouched %.0f, cut %.0f, brace %.0f, vine %.0f), lattice %.1f mm3", num(&r, "round"),
+                      num(sj::find(r, "struts"), "under_safety"), num(sj::find(*cls, "untouched"), "under"), num(sj::find(*cls, "cut"), "under"),
+                      num(sj::find(*cls, "brace"), "under"), num(sj::find(*cls, "vine"), "under"), num(&r, "lattice_mm3"));
+          if (p) std::printf("; twins %.0f, no_room %.0f (too short %.0f), past the limit %.0f (widest %.3f)", num(sj::find(*p, "twins"), "laid"),
+                             num(sj::find(*p, "no_room"), "stretches"), num(sj::find(*p, "no_room"), "too_short"),
+                             num(sj::find(*p, "past_limit"), "struts"), num(sj::find(*p, "past_limit"), "widest_mm"));
           std::printf("\n");
         }
-        std::size_t over = 0, over_named = 0, over_past = 0;
-        double widest = 0.0;
-        widths_ok("order", &over, &over_named, &widest, &over_past);
-        // A strut's middle moves when a vine or brace cuts it, and at most 20 places are listed a round: so the count is
-        // held, a round's struts over the limit never more than the struts named past it in the rounds before.
-        std::printf("[order] watched struts over the limit %zu (at a listed place %zu), rounds with more over it than named %zu; widest %.3f\n",
-                    over, over_named, over_past, widest);
-        CHECK(od.ok && od.old_bars_kept && !rs.empty() && paths_of(rs[0]) && num(paths_of(rs[0]), "at_limit_vine") > 0);
-        CHECK(over_past == 0 && widest <= 2.0 * limit + 1e-6);
-        // Walled-in struts (round 0: no vine could land): widened past the limit, counted, with places.
-        const sj::Value* p0 = paths_of(rs[0]);
-        const sj::Value* past0 = sj::find(*p0, "past_limit");
-        std::printf("[order walled] round 0: no_room %.0f, past the limit %.0f (widest %.3f, places %zu)\n", num(p0, "at_limit_no_room"),
-                    num(past0, "struts"), num(past0, "widest_mm"), sj::find(*past0, "at")->arr.size());
-        CHECK(num(p0, "at_limit_no_room") > 0 && num(past0, "struts") >= num(p0, "at_limit_no_room") && num(past0, "widest_mm") > limit &&
-              sj::find(*past0, "at")->arr.size() == std::min<std::size_t>(20, static_cast<std::size_t>(num(past0, "struts"))));
+        CHECK(ob.ok && ob.old_bars_kept);
       }
-      // One strut needing more than the limit: widened to the limit AND given a vine in the same round (round 1's check:
-      // the strut no wider than the limit; the vine as wide).
-      {
-        const OrganicStrengthenResult o1 = strengthen("order_one", roomy, 6000.0,
-            "{\"strengthen_rounds\": 1, \"strengthen_paths_max\": 1, \"strengthen_path_brace_min_mm\": 100}");
-        const std::vector<sj::Value> rs = rounds_of("order_one");
-        const sj::Value* p = rs.empty() ? nullptr : paths_of(rs[0]);
-        std::size_t over = 0, over_named = 0;
-        double widest = 0.0;
-        widths_ok("order_one", &over, &over_named, &widest);
-        std::printf("[order one] handed %.0f, vine %.0f, within the limit %.0f, waiting %.0f; round 1 widest watched strut %.3f (limit %.1f)\n",
-                    num(p, "struts_handed"), num(p, "at_limit_vine"), num(p, "within_limit"), num(p, "waiting"), widest, limit);
-        CHECK(o1.ok && o1.old_bars_kept && num(p, "struts_handed") == 1 && num(p, "at_limit_vine") == 1 && over == 0);
-        // Replay: the file job given round 1's strengthened.json lays round 1's bars.
-        std::string j = file_job(f, roomy, "octet", "");
-        j.replace(j.find("\"layout\""), 8, "\"tensor\": \"stress.tensor\", \"strengthened\": \"order_one/r1/strengthened.json\", \"layout\"");
-        write(kDir + "/order_replay_job.json", j);
-        std::filesystem::remove_all(kDir + "/order_replay");
-        std::filesystem::create_directories(kDir + "/order_replay");
-        const FileResult rr = run_file_job(kDir + "/order_replay_job.json", kDir + "/order_replay");
-        const double bars1 = num(&rs.back(), "bars");
-        std::printf("[order replay] ok %d bars %zu (round 1: %.0f)\n", rr.ok, rr.bars, bars1);
-        CHECK(rr.ok && static_cast<double>(rr.bars) == bars1);
-      }
-      // Leg I (OS18b): the struts' classes and the landings. Joint landing on (0.5 spacings, the default): landings moved
-      // to a joint, every old bar kept, round 1's classes add up to its judged struts and its under-1.5 count; joint
-      // landing off (0): none moved, as the order before.
-      {
-        const OrganicStrengthenResult sn = strengthen("snap", roomy, 6000.0, "{\"strengthen_rounds\": 1}");
-        const std::vector<sj::Value> rs = rounds_of("snap");
-        const sj::Value* p = rs.empty() ? nullptr : paths_of(rs[0]);
-        const sj::Value* cls = rs.size() > 1 ? sj::find(rs[1], "classes") : nullptr;
-        const sj::Value* lands = rs.size() > 1 ? sj::find(rs[1], "landings") : nullptr;
-        double judged = 0.0, under = 0.0;
-        if (cls)
-          for (const char* k : {"untouched", "cut", "brace", "vine"}) {
-            judged += num(sj::find(*cls, k), "judged");
-            under += num(sj::find(*cls, k), "under");
-          }
-        std::printf("[snap] round 0: landings at a joint %.0f, a move dropped (it broke a rule) %.0f, vines %.0f; round 1: classes judged %.0f "
-                    "(struts judged %.0f), under %.0f (under safety %.0f), under only because of new pieces %.0f; landings %.0f, within 0.15 "
-                    "of a joint %.0f, landed-on worse %.0f\n", num(p, "landings_at_a_joint"), num(p ? sj::find(*p, "dropped") : nullptr, "snap_broke_a_rule"),
-                    num(p, "relief_vines"), judged, num(sj::find(rs[1], "struts"), "judged"), under, num(sj::find(rs[1], "struts"), "under_safety"),
-                    num(cls, "under_only_because_of_new_pieces"), num(lands, "count"), num(lands, "within_0_15_of_a_joint"), num(lands, "landed_on_worse"));
-        CHECK(sn.ok && sn.old_bars_kept && num(p, "landings_at_a_joint") > 0 && cls && lands &&
-              judged == num(sj::find(rs[1], "struts"), "judged") && under == num(sj::find(rs[1], "struts"), "under_safety") &&
-              num(lands, "within_0_15_of_a_joint") > 0);
-        const OrganicStrengthenResult so = strengthen("snap_off", roomy, 6000.0, "{\"strengthen_rounds\": 1, \"strengthen_path_snap_spacings\": 0}");
-        const std::vector<sj::Value> ro = rounds_of("snap_off");
-        const sj::Value* po = ro.empty() ? nullptr : paths_of(ro[0]);
-        std::printf("[snap off] landings at a joint %.0f, vines %.0f\n", num(po, "landings_at_a_joint"), num(po, "relief_vines"));
-        CHECK(so.ok && num(po, "landings_at_a_joint") == 0 && num(po, "relief_vines") > 0);
-      }
-      // The per-strut limit (1): no place gets a second vine; a strut still under the safety factor after its vine is
-      // out of vines and goes past the limit.
-      {
-        const OrganicStrengthenResult op = strengthen("order_per", roomy, 6000.0,
-            "{\"strengthen_rounds\": 3, \"strengthen_paths_per_strut\": 1, \"strengthen_path_brace_min_mm\": 100}");
-        const std::vector<sj::Value> rs = rounds_of("order_per");
-        std::vector<std::array<double, 3>> at;
-        std::size_t again = 0;
-        double out_of = 0.0, past_n = 0.0;
-        for (const sj::Value& r : rs) {
-          const sj::Value* p = paths_of(r);
-          if (!p) continue;
-          out_of += std::max(0.0, num(p, "out_of_vines"));
-          past_n += std::max(0.0, num(sj::find(*p, "past_limit"), "struts"));
-          for (const sj::Value& v : sj::find(*p, "vines_at")->arr) {
-            const auto& a = sj::find(v, "at")->arr;
-            for (const auto& q : at) again += std::hypot(a[0].num - q[0], std::hypot(a[1].num - q[1], a[2].num - q[2])) < 0.25;
-            at.push_back({a[0].num, a[1].num, a[2].num});
-          }
-        }
-        std::printf("[order per strut 1] vines %zu, a place given a second %zu; out of vines %.0f, past the limit %.0f\n", at.size(), again,
-                    out_of, past_n);
-        CHECK(op.ok && op.old_bars_kept && !at.empty() && again == 0 && past_n >= out_of);
-      }
+      // strengthen_paths 0: no relief step, the loop before OS18.
+      const OrganicStrengthenResult po =
+          strengthen("paths_off", roomy, 6000.0, "{\"strengthen_rounds\": 2, \"strengthen_width_cap\": 1.0, \"strengthen_paths\": 0}");
+      const std::string oj = slurp(kDir + "/paths_off/strengthen.json");
+      CHECK(po.ok && has(oj, "\"paths\": {\"on\": false, \"struts_handed\": 0") && num_after(oj, "relief_vines") == 0.0);
     }
   }
 
@@ -1434,7 +1307,10 @@ int main() {
       std::printf("[arm] probe: smallest strut margin %.6g at 100 N; the print check left struts out at %zu places\n", am,
                   ap.r.made.left_out_at.size());
       CHECK(ap.r.ok && am > 0.0 && !ap.r.made.left_out_at.empty());
-      write(kDir + "/arm_sj.json", arm_sj(100.0 * am / 0.6, "{\"strengthen_rounds\": 2}"));
+      // OS18 twin (2026-11-19): this OS16 test pins the loop it was written for, strengthen_paths 0 (widening and
+      // braces); with the twin order the last round's replay is refused by the file's print check (one overhang held
+      // at one end), reported with the twin.
+      write(kDir + "/arm_sj.json", arm_sj(100.0 * am / 0.6, "{\"strengthen_rounds\": 2, \"strengthen_paths\": 0}"));
       write(kDir + "/arm_strengthen_job.json", arm_job(""));
       std::filesystem::remove_all(kDir + "/arm_strengthen");
       std::filesystem::create_directories(kDir + "/arm_strengthen");

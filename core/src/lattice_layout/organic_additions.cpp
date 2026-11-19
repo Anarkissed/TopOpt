@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <limits>
@@ -338,7 +339,7 @@ bool read_additions_file(const std::string& path, Additions& adds, std::string* 
   return true;
 }
 
-// ── OS18 (brief E8): the relief vine maker ─────────────────────────────────────────────────────────────────────────
+// ── OS18 (amended 2026-11-19): the twin vine maker ─────────────────────────────────────────────────────────────────────────
 namespace {
 constexpr double kVineGrid = 2.0;   // mm: the bars' search grid (a search structure only: it changes no answer)
 long long vine_cell(double x) { return static_cast<long long>(std::floor(x / kVineGrid)); }
@@ -380,15 +381,8 @@ bool principal_at(const TensorField& F, const Vec3& p, std::array<Vec3, 3>& e) {
 }
 }  // namespace
 
-ReliefVineMaker::ReliefVineMaker(const Bars& bars, const Domain& domain, const TensorField& field, const ReliefVineAsk& ask)
+TwinVineMaker::TwinVineMaker(const Bars& bars, const Domain& domain, const TensorField& field, const TwinAsk& ask)
     : bars_(bars), domain_(domain), field_(field), ask_(ask) {
-  for (const Bar& b : bars.bars)   // Leg I: the joints
-    for (const Vec3& e : {b.a, b.b}) {
-      Joint& j = ends_[{std::llround(e.x * 1e4), std::llround(e.y * 1e4), std::llround(e.z * 1e4)}];
-      j.p = e;
-      ++j.ends;
-      if (std::find(j.strands.begin(), j.strands.end(), b.strand) == j.strands.end()) j.strands.push_back(b.strand);
-    }
   for (std::size_t i = 0; i < bars.bars.size(); ++i) {
     const Bar& b = bars.bars[i];
     const double r = 0.5 * b.width + 1.0;
@@ -399,13 +393,38 @@ ReliefVineMaker::ReliefVineMaker(const Bars& bars, const Domain& domain, const T
   }
 }
 
-ReliefVine ReliefVineMaker::make(const Bar& host, const Vec3& at, const std::vector<int>& own, double width) const {
-  ReliefVine out;
+TwinVine TwinVineMaker::make(const std::vector<Vec3>& line, int region, double stretch_width, double width, double spacing,
+                             const std::vector<Vec3>& avoid) const {
+  TwinVine out;
+  if (line.size() < 2) { out.no_room = "too_short"; return out; }
   const Domain::Probe probe = domain_.probe();
-  const double gap = ask_.gap_mm, w = width, spacing = host.cell > 0.0 ? host.cell : 2.0;
-  const double step = ask_.step_ratio * spacing, longest = ask_.max_spacings * spacing;
-  const double par_cos = std::cos(ask_.parallel_deg * 3.14159265358979323846 / 180.0);
-  auto mine = [&](int strand) { return std::find(own.begin(), own.end(), strand) != own.end(); };
+  const double gap = ask_.gap_mm, w = width;
+  const double s = 0.5 * (stretch_width + w) + gap;
+  out.offset_mm = s;
+  // Arc length along the line.
+  std::vector<double> u(line.size(), 0.0);
+  for (std::size_t k = 1; k < line.size(); ++k) u[k] = u[k - 1] + vdist(line[k - 1], line[k]);
+  const double L = u.back();
+  auto at_u = [&](double x, Vec3& tangent) {
+    std::size_t k = 1;
+    while (k + 1 < line.size() && u[k] < x) ++k;
+    const double l = u[k] - u[k - 1];
+    const double t = l > 0.0 ? std::clamp((x - u[k - 1]) / l, 0.0, 1.0) : 0.0;
+    tangent = Vec3{(line[k].x - line[k - 1].x) / (l > 0 ? l : 1), (line[k].y - line[k - 1].y) / (l > 0 ? l : 1),
+                   (line[k].z - line[k - 1].z) / (l > 0 ? l : 1)};
+    return vadd(line[k - 1], Vec3{line[k].x - line[k - 1].x, line[k].y - line[k - 1].y, line[k].z - line[k - 1].z}, t);
+  };
+  Vec3 tm;
+  out.mid = at_u(0.5 * L, tm);
+  if (L < 4.0 * s) { out.no_room = "too_short"; return out; }
+  const Vec3 J0 = line.front(), Jn = line.back();
+  auto on_line = [&](const Vec3& p) {   // within 1e-4 mm of the stretch's line
+    for (std::size_t k = 1; k < line.size(); ++k)
+      if (vdist(p, closest_on(p, line[k - 1], line[k])) < 1e-4) return true;
+    return false;
+  };
+  auto ends_at = [&](const Bar& b, const Vec3& p) { return vdist(b.a, p) < 1e-4 || vdist(b.b, p) < 1e-4; };
+  std::vector<std::size_t> ids;
   auto near = [&](const Vec3& p, std::vector<std::size_t>& out_ids) {
     out_ids.clear();
     for (long long x = vine_cell(p.x) - 1; x <= vine_cell(p.x) + 1; ++x)
@@ -417,176 +436,166 @@ ReliefVine ReliefVineMaker::make(const Bar& host, const Vec3& at, const std::vec
     std::sort(out_ids.begin(), out_ids.end());
     out_ids.erase(std::unique(out_ids.begin(), out_ids.end()), out_ids.end());
   };
-  Vec3 axis{host.b.x - host.a.x, host.b.y - host.a.y, host.b.z - host.a.z};
-  const double al = std::sqrt(vdot(axis, axis));
-  out.mid = closest_on(at, host.a, host.b);
-  if (!(al > 0.0)) return out;
-  axis = Vec3{axis.x / al, axis.y / al, axis.z / al};
+  // The bars on the stretch (exempt), and the bars that END on it between J0 and Jn (the cross vines): (bar, its end on
+  // the line, the arc length there, its unit direction away from the line).
+  std::set<std::size_t> on_stretch;
+  struct Cross { std::size_t bar; Vec3 at; double u; Vec3 dir; double len; };
+  std::vector<Cross> cross;
+  {
+    std::set<std::size_t> seen;
+    for (std::size_t k = 0; k < line.size(); ++k) {
+      near(line[k], ids);
+      for (std::size_t i : ids) seen.insert(i);
+      if (k + 1 < line.size()) {
+        const int m = std::max(1, static_cast<int>(std::ceil(vdist(line[k], line[k + 1]) / 1.0)));
+        for (int q = 1; q < m; ++q) {
+          near(vadd(line[k], Vec3{line[k + 1].x - line[k].x, line[k + 1].y - line[k].y, line[k + 1].z - line[k].z}, double(q) / m), ids);
+          for (std::size_t i : ids) seen.insert(i);
+        }
+      }
+    }
+    for (std::size_t i : seen) {
+      const Bar& b = bars_.bars[i];
+      const bool ia = on_line(b.a), ib = on_line(b.b);
+      if (ia && ib) { on_stretch.insert(i); continue; }
+      if (!ia && !ib) continue;
+      const Vec3 e = ia ? b.a : b.b, f = ia ? b.b : b.a;
+      if (vdist(e, J0) < 1e-4 || vdist(e, Jn) < 1e-4) continue;   // at J0 or Jn: exempt (handled by ends_at)
+      double ue = 0.0;
+      for (std::size_t k = 1; k < line.size(); ++k)
+        if (vdist(e, closest_on(e, line[k - 1], line[k])) < 1e-4) { ue = u[k - 1] + vdist(line[k - 1], closest_on(e, line[k - 1], line[k])); break; }
+      const double l = vdist(e, f);
+      if (!(l > 0.0)) continue;
+      cross.push_back({i, e, ue, Vec3{(f.x - e.x) / l, (f.y - e.y) / l, (f.z - e.z) / l}, l});
+    }
+  }
+  // The sides: the two principal directions across the stretch at its middle, both senses.
   std::array<Vec3, 3> e;
-  if (!principal_at(field_, out.mid, e)) return out;
+  if (!principal_at(field_, out.mid, e)) { out.no_room = "no_free_side"; return out; }
+  Vec3 axis{Jn.x - J0.x, Jn.y - J0.y, Jn.z - J0.z};
+  const double al = std::sqrt(vdot(axis, axis));
+  axis = al > 0.0 ? Vec3{axis.x / al, axis.y / al, axis.z / al} : tm;
   int along = 0;
   for (int k = 1; k < 3; ++k)
     if (std::fabs(vdot(e[static_cast<std::size_t>(k)], axis)) > std::fabs(vdot(e[static_cast<std::size_t>(along)], axis))) along = k;
-  const double s_off = 0.5 * (host.width + w) + gap;
-  std::vector<std::size_t> ids;
-  auto clearance = [&](const Vec3& p) {   // the least surface distance from a vine of width w at p to any bar
+  auto normal_at = [&](const Vec3& side, const Vec3& t, Vec3& n) {   // the side square to the local tangent
+    n = vadd(side, t, -vdot(side, t));
+    const double nl = std::sqrt(vdot(n, n));
+    if (!(nl > 0.2)) return false;
+    n = Vec3{n.x / nl, n.y / nl, n.z / nl};
+    return true;
+  };
+  auto clearance = [&](const Vec3& p) {
     near(p, ids);
     double least = 1e300;
     for (std::size_t i : ids) {
+      if (on_stretch.count(i)) continue;
       const Bar& b = bars_.bars[i];
       least = std::min(least, vdist(p, closest_on(p, b.a, b.b)) - 0.5 * b.width - 0.5 * w);
     }
     return least;
   };
-  std::vector<std::pair<double, Vec3>> seeds;
+  std::vector<std::pair<double, Vec3>> sides;
   for (int k = 0; k < 3; ++k) {
     if (k == along) continue;
     for (int sg = -1; sg <= 1; sg += 2) {
-      const Vec3 sd = vadd(out.mid, e[static_cast<std::size_t>(k)], sg * s_off);
-      seeds.push_back({clearance(sd), sd});
+      const Vec3 sd{e[static_cast<std::size_t>(k)].x * sg, e[static_cast<std::size_t>(k)].y * sg, e[static_cast<std::size_t>(k)].z * sg};
+      bool used = false;
+      for (const Vec3& a : avoid) used = used || vdot(sd, a) > 0.7071;
+      if (used) continue;
+      Vec3 n;
+      if (!normal_at(sd, tm, n)) continue;
+      sides.push_back({clearance(vadd(out.mid, n, s)), sd});
     }
   }
-  std::stable_sort(seeds.begin(), seeds.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
-  struct Half { bool ok = false, solid = false; std::vector<Vec3> pts; };
-  for (const auto& cand : seeds) {
-    const Vec3 seed = cand.second;
-    ++out.tried;
-    const Where ws = probe.where(seed);
-    if (!ws.lattice() || ws.id != host.region) { ++out.seed_off; continue; }
-    if (cand.first < gap - 1e-6) { ++out.seed_crowded; continue; }
-    auto walk = [&](double sense) {
-      Half h;
-      Vec3 p = seed, head{axis.x * sense, axis.y * sense, axis.z * sense};
-      const Vec3 start = head;
-      double run = 0.0, parallel = 0.0;
-      std::vector<std::size_t> ids2;
-      h.pts.push_back(seed);
-      while (run < longest + 1e-9) {
-        std::array<Vec3, 3> ee;
-        if (!principal_at(field_, p, ee)) { ++out.half_no_field; return h; }
-        int kk = 0;
-        for (int k = 1; k < 3; ++k)
-          if (std::fabs(vdot(ee[static_cast<std::size_t>(k)], head)) > std::fabs(vdot(ee[static_cast<std::size_t>(kk)], head))) kk = k;
-        Vec3 d = ee[static_cast<std::size_t>(kk)];
-        if (vdot(d, head) < 0.0) d = Vec3{-d.x, -d.y, -d.z};
-        if (vdot(d, start) < 0.0) { ++out.half_turned; return h; }   // turns back
-        const Vec3 q = vadd(p, d, step);
-        run += step;
-        const Where wq = probe.where(q);
-        if (!wq.lattice() || wq.id != host.region) {
-          if (wq.why == Why::Outside || wq.lattice()) { ++out.half_left; return h; }   // into the air, or another region
-          double a = 0.0, b = step;   // into the solid: its edge
-          for (int it = 0; it < 30; ++it) {
-            const double m = 0.5 * (a + b);
-            const Where wm = probe.where(vadd(p, d, m));
-            (wm.lattice() && wm.id == host.region ? a : b) = m;
-          }
-          h.pts.push_back(vadd(p, d, a));
-          h.ok = h.solid = true;
-          return h;
-        }
-        near(q, ids2);
-        bool beside = false;
-        double land = 1e300;
-        Vec3 land_at{};
-        int land_strand = -1;
-        for (std::size_t i : ids2) {
-          const Bar& b = bars_.bars[i];
-          const Vec3 c = closest_on(q, b.a, b.b);
-          const double surf = vdist(q, c) - 0.5 * b.width - 0.5 * w;
-          if (!(surf < gap - 1e-6)) continue;
-          const Vec3 bd{b.b.x - b.a.x, b.b.y - b.a.y, b.b.z - b.a.z};
-          const double bl = std::sqrt(vdot(bd, bd));
-          const bool par = bl > 0.0 && std::fabs(vdot(bd, d)) / bl > par_cos;
-          if (par || b.link || mine(b.strand)) { beside = beside || par; continue; }
-          if (surf < land) { land = surf; land_at = c; land_strand = b.strand; }   // a bar it crosses: it ends on its line
-        }
-        if (land < 1e299) {
-          // Leg I (OS18b): a joint of the landed-on strand within snap x the spacing of the landing: the nearest.
-          const double reach = ask_.snap_spacings * spacing;
-          const Joint* J = nullptr;
-          if (reach > 0.0) {
-            double bj = reach + 1e-9;
-            for (long long x = vine_cell(land_at.x - reach); x <= vine_cell(land_at.x + reach); ++x)
-              for (long long y = vine_cell(land_at.y - reach); y <= vine_cell(land_at.y + reach); ++y)
-                for (long long z = vine_cell(land_at.z - reach); z <= vine_cell(land_at.z + reach); ++z) {
-                  const auto it = grid_.find({x, y, z});
-                  if (it == grid_.end()) continue;
-                  for (std::size_t i : it->second) {
-                    const Bar& b = bars_.bars[i];
-                    if (b.strand != land_strand) continue;
-                    for (const Vec3& e : {b.a, b.b}) {
-                      const auto jt = ends_.find({std::llround(e.x * 1e4), std::llround(e.y * 1e4), std::llround(e.z * 1e4)});
-                      if (jt == ends_.end() || !(jt->second.ends >= 3 || jt->second.strands.size() >= 2)) continue;
-                      const double dj = vdist(e, land_at);
-                      if (dj < bj) { bj = dj; J = &jt->second; }
-                    }
-                  }
-                }
-          }
-          if (J && vdist(J->p, land_at) > 1e-9) {
-            // The last piece re-aimed from p at the joint: in the region's lattice, clear of every bar not at the joint
-            // (by the gap), and not within the parallel angle of a bar at it.
-            const Vec3 jd{J->p.x - p.x, J->p.y - p.y, J->p.z - p.z};
-            const double jl = std::sqrt(vdot(jd, jd));
-            bool good = jl > 1e-9;
-            const int n = std::max(2, static_cast<int>(std::ceil(jl / 0.1)));
-            std::vector<std::size_t> ids3;
-            for (int k = 1; good && k < n; ++k) {
-              const Vec3 s = vadd(p, jd, static_cast<double>(k) / n);
-              const Where ws2 = probe.where(s);
-              if (!ws2.lattice() || ws2.id != host.region) { good = false; break; }
-              near(s, ids3);
-              for (std::size_t i : ids3) {
-                const Bar& b = bars_.bars[i];
-                const bool at_joint = vdist(b.a, J->p) < 1e-4 || vdist(b.b, J->p) < 1e-4;
-                if (at_joint || b.link || mine(b.strand)) continue;
-                if (vdist(s, closest_on(s, b.a, b.b)) - 0.5 * b.width - 0.5 * w < gap - 1e-6) { good = false; break; }
-              }
-            }
-            if (good) {
-              near(J->p, ids3);
-              for (std::size_t i : ids3) {
-                const Bar& b = bars_.bars[i];
-                if (!(vdist(b.a, J->p) < 1e-4 || vdist(b.b, J->p) < 1e-4)) continue;
-                const Vec3 bd{b.b.x - b.a.x, b.b.y - b.a.y, b.b.z - b.a.z};
-                const double bl = std::sqrt(vdot(bd, bd));
-                if (bl > 0.0 && std::fabs(vdot(bd, jd)) / (bl * jl) > par_cos) { good = false; break; }
-              }
-            }
-            if (!good) { ++out.snap_dropped; return h; }
-            ++out.snapped;
-            h.pts.push_back(J->p);
-            h.ok = true;
-            return h;
-          }
-          h.pts.push_back(q);
-          if (vdist(q, land_at) > 1e-9) h.pts.push_back(land_at);
-          h.ok = true;
-          return h;
-        }
-        parallel = beside ? parallel + step : 0.0;
-        if (parallel > spacing) { ++out.half_beside; return h; }
-        h.pts.push_back(q);
-        p = q;
-        head = d;
-      }
-      ++out.half_long;
-      return h;
+  std::stable_sort(sides.begin(), sides.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+  bool any_bar = false, any_outside = sides.empty();
+  for (const auto& cand : sides) {
+    ++out.sides_tried;
+    const Vec3 side = cand.second;
+    // The path: J0, the offset reached at 2 s, the offset at every vertex between, the offset at L - 2 s, Jn; and the
+    // joined cross bars' points at the offset, in order along the stretch.
+    std::vector<std::pair<double, Vec3>> path;
+    bool ok = true;
+    auto offset_point = [&](double x) {
+      Vec3 t;
+      const Vec3 p = at_u(x, t);
+      Vec3 n;
+      if (!normal_at(side, t, n)) { ok = false; return p; }
+      return vadd(p, n, s);
     };
-    const Half h1 = walk(-1.0), h2 = walk(1.0);
-    if (!h1.ok || !h2.ok) continue;
-    out.points.assign(h1.pts.rbegin(), h1.pts.rend());
-    out.points.insert(out.points.end(), h2.pts.begin() + 1, h2.pts.end());
-    out.solid_a = h1.solid;
-    out.solid_b = h2.solid;
+    path.push_back({0.0, J0});
+    path.push_back({2.0 * s, offset_point(2.0 * s)});
+    for (std::size_t k = 1; k + 1 < line.size(); ++k)
+      if (u[k] > 2.0 * s + 1e-6 && u[k] < L - 2.0 * s - 1e-6) {
+        const Vec3 t1{line[k].x - line[k - 1].x, line[k].y - line[k - 1].y, line[k].z - line[k - 1].z};
+        const Vec3 t2{line[k + 1].x - line[k].x, line[k + 1].y - line[k].y, line[k + 1].z - line[k].z};
+        const double l1 = std::sqrt(vdot(t1, t1)), l2 = std::sqrt(vdot(t2, t2));
+        Vec3 t{t1.x / l1 + t2.x / l2, t1.y / l1 + t2.y / l2, t1.z / l1 + t2.z / l2};
+        const double tl = std::sqrt(vdot(t, t));
+        Vec3 n;
+        if (!(tl > 0.0) || !normal_at(side, Vec3{t.x / tl, t.y / tl, t.z / tl}, n)) { ok = false; break; }
+        path.push_back({u[k], vadd(line[k], n, s)});
+      }
+    for (double x = 2.0 * s + 1.0; x < L - 2.0 * s - 0.5; x += 1.0) path.push_back({x, offset_point(x)});   // every 1 mm
+    path.push_back({L - 2.0 * s, offset_point(L - 2.0 * s)});
+    path.push_back({L, Jn});
+    if (!ok) continue;
+    std::set<std::size_t> joined;
+    for (const Cross& c : cross) {
+      Vec3 t;
+      (void)at_u(c.u, t);
+      Vec3 n;
+      if (!normal_at(side, t, n)) continue;
+      const double cn = vdot(c.dir, n);
+      if (!(cn > 0.3)) continue;
+      const double reach = s / cn;
+      if (reach > c.len + 1e-9) continue;   // the bar ends before the offset: judged by the gap below
+      path.push_back({c.u, vadd(c.at, c.dir, reach)});
+      joined.insert(c.bar);
+    }
+    std::stable_sort(path.begin(), path.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    // The checks, every 0.1 mm.
+    bool bar_near = false, outside = false;
+    for (std::size_t k = 0; k + 1 < path.size() && !bar_near && !outside; ++k) {
+      const Vec3 A = path[k].second, B = path[k + 1].second;
+      const double l = vdist(A, B);
+      const int m = std::max(1, static_cast<int>(std::ceil(l / 0.1)));
+      for (int q = 0; q <= m && !bar_near && !outside; ++q) {
+        const Vec3 p = vadd(A, Vec3{B.x - A.x, B.y - A.y, B.z - A.z}, double(q) / m);
+        const bool by_end = vdist(p, J0) < w || vdist(p, Jn) < w;
+        if (!by_end) {
+          const Where wh = probe.where(p);
+          if (!wh.lattice() || wh.id != region) { outside = true; break; }
+        }
+        // Within the lead of J0 or Jn (within 3 s of the joint) the eye converges on the joint: the stretch's bars and the bars
+        // at that joint are passed there; everywhere else only the joined cross bars are.
+        const bool at_end = vdist(p, J0) < 3.0 * s || vdist(p, Jn) < 3.0 * s;
+        near(p, ids);
+        for (std::size_t i : ids) {
+          if (joined.count(i)) continue;
+          const Bar& b = bars_.bars[i];
+          if (at_end && (on_stretch.count(i) || ends_at(b, J0) || ends_at(b, Jn))) continue;
+          if (vdist(p, closest_on(p, b.a, b.b)) - 0.5 * b.width - 0.5 * w < gap - 1e-6) {
+            bar_near = true;
+            break;
+          }
+        }
+      }
+    }
+    if (bar_near) { any_bar = true; continue; }
+    if (outside) { any_outside = true; continue; }
     out.laid = true;
+    out.side = side;
+    out.cross_joined = joined.size();
+    for (const auto& pp : path)
+      if (out.points.empty() || vdist(out.points.back(), pp.second) > 1e-9) out.points.push_back(pp.second);
     out.op.kind = 3;
-    out.op.v = {static_cast<double>(host.region), w, spacing, h1.solid ? 1.0 : 0.0, h2.solid ? 1.0 : 0.0,
-                static_cast<double>(out.points.size())};
+    out.op.v = {static_cast<double>(region), w, spacing, 0.0, 0.0, static_cast<double>(out.points.size())};
     for (const Vec3& q : out.points) { out.op.v.push_back(q.x); out.op.v.push_back(q.y); out.op.v.push_back(q.z); }
     return out;
   }
+  out.no_room = any_bar || !any_outside ? "no_free_side" : "outside_lattice";
   return out;
 }
 

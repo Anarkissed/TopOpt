@@ -2561,69 +2561,56 @@ static void test_og2_relief() {
 }
 
 
-// ── OL-OS18 (brief E8): the relief vine maker and its addition (kind 3) on a made lay ───────────────────────────────
+// ── OL-OS18 (the twin, the owner 2026-11-19: "Yes, build it that way"): the twin vine maker and its addition (kind 3)
 static void test_os18_relief_vines() {
   const StepModel model = box_model(30, 30, 20);
   const TensorField f = gap_field();
   Session session(model);
-  OrganicAsk base = gap_ask(1.6);
+  OrganicAsk base = gap_ask(1.2);
   base.strand_keep = 0.5;   // the owner: vine spacing off is the main case
-  // OS18 (owed): Grown through the same maker: a vine laid beside a grown strut, both ends joined, old bars kept.
-  {
-    OrganicAsk g = judged_ask(true);
-    Session gs(model);
-    const Outcome go = gs.lay_organic(traced_settings(), f, g);
-    ReliefVineAsk gva;
-    gva.gap_mm = 1.5 * 0.45;
-    const ReliefVineMaker gm(go.bars, *gs.domain(), f, gva);
-    ReliefVine gv;
-    for (const Bar& b : go.bars.bars) {
-      const Vec3 m{0.5 * (b.a.x + b.b.x), 0.5 * (b.a.y + b.b.y), 0.5 * (b.a.z + b.b.z)};
-      if (b.link || b.brace || b.level_tie || b.support || dist(b.a, b.b) < 1.0 || m.z < 6 || m.z > 16) continue;
-      gv = gm.make(b, m, {b.strand}, b.width);
-      if (gv.laid) break;
-    }
-    Bars after = go.bars;
-    AddRound rd;
-    rd.ops.push_back(gv.op);
-    AddContext gc;
-    gc.light_mm = 0.9;
-    std::string w;
-    const bool ok = gv.laid && apply_add_round(after, *gs.domain(), rd, gc, nullptr, &w);
-    std::printf("OL-OS18 Grown: vine laid %d (%zu points), applied %d, old bars kept %s\n", gv.laid ? 1 : 0, gv.points.size(),
-                ok ? 1 : 0, ok && old_bars_kept(go.bars, after).empty() ? "yes" : "no");
-    CHECK(ok && old_bars_kept(go.bars, after).empty());
-  }
+  base.spacing_min_mm = 8.0;   // long struts: room for the eye (4 s)
+  base.spacing_max_mm = 12.0;
   const Outcome o = session.lay_organic(gap_settings(1, 16.0, true), f, base);
   CHECK(o.refused.empty() && !o.bars.bars.empty());
   if (o.bars.bars.empty()) return;
   const Domain& d = *session.domain();
-  ReliefVineAsk va;
-  va.gap_mm = 1.5 * 0.45;
-  va.light_mm = 0.9;
-  const ReliefVineMaker maker(o.bars, d, f, va);
-  // Hosts: strand bars (not links, braces, ties) longer than 1 mm in the middle of the block.
-  std::size_t host = o.bars.bars.size();
-  ReliefVine v;
-  std::size_t tried_hosts = 0;
-  for (std::size_t i = 0; i < o.bars.bars.size() && tried_hosts < 60; ++i) {
-    const Bar& b = o.bars.bars[i];
-    const Vec3 m{0.5 * (b.a.x + b.b.x), 0.5 * (b.a.y + b.b.y), 0.5 * (b.a.z + b.b.z)};
-    if (b.link || b.brace || b.level_tie || dist(b.a, b.b) < 1.0 || m.x < 8 || m.x > 22 || m.y < 8 || m.y > 22 || m.z < 8 || m.z > 16)
-      continue;
-    ++tried_hosts;
-    v = maker.make(b, m, {b.strand}, b.width);
-    if (v.laid) { host = i; break; }
+  TwinAsk ta;
+  ta.gap_mm = 1.5 * 0.45;
+  const TwinVineMaker maker(o.bars, d, f, ta);
+  // Stretches: the weave's struts (joint to joint), the longest first; the first one that takes a twin.
+  std::vector<WeaveStrut> struts = weave_struts(o.bars);
+  std::stable_sort(struts.begin(), struts.end(), [](const WeaveStrut& x, const WeaveStrut& y) { return x.length_mm > y.length_mm; });
+  auto line_of = [&](const WeaveStrut& st) {
+    std::vector<Vec3> line;
+    for (std::size_t k = 0; k < st.bars.size(); ++k) {
+      const Bar& b = o.bars.bars[st.bars[k]];
+      const Vec3 a = st.flipped[k] ? b.b : b.a, e = st.flipped[k] ? b.a : b.b;
+      if (line.empty()) line.push_back(a);
+      line.push_back(e);
+    }
+    return line;
+  };
+  TwinVine tw;
+  std::vector<Vec3> line;
+  std::size_t tried = 0;
+  for (const WeaveStrut& st : struts) {
+    if (tried >= 60) break;
+    const Bar& b0 = o.bars.bars[st.bars.front()];
+    if (b0.link || b0.brace || b0.level_tie || b0.support) continue;
+    ++tried;
+    line = line_of(st);
+    tw = maker.make(line, st.region, st.thinnest_mm, st.thinnest_mm, b0.cell, {});
+    if (tw.laid) break;
   }
-  std::printf("OL-OS18 maker: %zu hosts tried, laid %d (%zu points, ends %s / %s, %zu seeds tried)\n", tried_hosts, v.laid ? 1 : 0,
-              v.points.size(), v.solid_a ? "solid" : "on a bar", v.solid_b ? "solid" : "on a bar", v.tried);
-  CHECK(host < o.bars.bars.size() && v.laid && v.points.size() >= 3 && v.op.kind == 3);
-  if (host >= o.bars.bars.size()) return;
-  // The addition: laid, the old bars kept (OS12), both ends joined (on a bar's line: a joint after the cut, or in the
-  // solid), nothing near-parallel within the gap of a bar it does not join; the same op twice gives the same hash.
+  std::printf("OL-OS18 twin: %zu stretches tried, laid %d (%zu points, offset %.3f mm, cross joined %zu, sides tried %zu)\n", tried,
+              tw.laid ? 1 : 0, tw.points.size(), tw.offset_mm, tw.cross_joined, tw.sides_tried);
+  CHECK(tw.laid && tw.op.kind == 3 && tw.points.size() >= 4 && dist(tw.points.front(), line.front()) == 0.0 &&
+        dist(tw.points.back(), line.back()) == 0.0);
+  if (!tw.laid) return;
+  // The addition: laid, old bars kept (OS12), its ends exactly the stretch's joints; the same op twice: the same hash.
   Bars after = o.bars;
   AddRound round;
-  round.ops.push_back(v.op);
+  round.ops.push_back(tw.op);
   AddContext c;
   c.light_mm = 0.9;
   AddReport rep;
@@ -2632,67 +2619,28 @@ static void test_os18_relief_vines() {
   Bars again = o.bars;
   CHECK(apply_add_round(again, d, round, c, nullptr, &why) && bars_hash(again) == bars_hash(after));
   const std::string kept = old_bars_kept(o.bars, after);
-  std::size_t relief = 0, joined_ends = 0, near_parallel = 0;
-  auto key = [](const Vec3& p) { return std::array<long long, 3>{std::llround(p.x / 1e-5), std::llround(p.y / 1e-5), std::llround(p.z / 1e-5)}; };
-  std::map<std::array<long long, 3>, int> at;
-  for (const Bar& b : after.bars) { ++at[key(b.a)]; ++at[key(b.b)]; }
-  const Vec3 va_end = v.points.front(), vb_end = v.points.back();
+  std::size_t at_j0 = 0, at_jn = 0, relief = 0;
   for (const Bar& b : after.bars) {
     if (!b.relief) continue;
     ++relief;
-    for (int e = 0; e < 2; ++e) {
-      const Vec3& p = e ? b.b : b.a;
-      if (dist(p, va_end) > 1e-6 && dist(p, vb_end) > 1e-6) continue;
-      joined_ends += (e ? b.end_b : b.end_a) == Bar::End::Solid || at[key(p)] >= 2;
-    }
-    for (const Bar& x : after.bars) {
-      if (x.relief || x.link) continue;
-      if (key(x.a) == key(b.a) || key(x.a) == key(b.b) || key(x.b) == key(b.a) || key(x.b) == key(b.b)) continue;
-      const Vec3 d1{b.b.x - b.a.x, b.b.y - b.a.y, b.b.z - b.a.z}, d2{x.b.x - x.a.x, x.b.y - x.a.y, x.b.z - x.a.z};
-      const double l1 = std::hypot(d1.x, std::hypot(d1.y, d1.z)), l2 = std::hypot(d2.x, std::hypot(d2.y, d2.z));
-      if (!(l1 > 0 && l2 > 0) || std::fabs(d1.x * d2.x + d1.y * d2.y + d1.z * d2.z) / (l1 * l2) < std::cos(20.0 * M_PI / 180.0)) continue;
-      // the closest approach of the two segments, sampled
-      double least = 1e9;
-      for (int q = 0; q <= 20; ++q) {
-        const Vec3 p{b.a.x + d1.x * q / 20.0, b.a.y + d1.y * q / 20.0, b.a.z + d1.z * q / 20.0};
-        const double t = std::clamp(((p.x - x.a.x) * d2.x + (p.y - x.a.y) * d2.y + (p.z - x.a.z) * d2.z) / (l2 * l2), 0.0, 1.0);
-        least = std::min(least, dist(p, Vec3{x.a.x + d2.x * t, x.a.y + d2.y * t, x.a.z + d2.z * t}));
-      }
-      near_parallel += least - 0.5 * (b.width + x.width) < va.gap_mm - 1e-3;
-    }
+    at_j0 += dist(b.a, line.front()) == 0.0 || dist(b.b, line.front()) == 0.0;
+    at_jn += dist(b.a, line.back()) == 0.0 || dist(b.b, line.back()) == 0.0;
   }
-  std::printf("OL-OS18 laid: %zu relief bars (said %zu, %zu vine), old bars kept: %s; ends joined %zu of 2; near-parallel within the gap %zu\n",
-              relief, rep.relief_bars, rep.relief_vines, kept.empty() ? "yes" : kept.c_str(), joined_ends, near_parallel);
-  CHECK(relief > 0 && rep.relief_vines == 1 && kept.empty() && joined_ends == 2 && near_parallel == 0);
-  // Walled in: twelve bars of another strand round the host at under its seed distance: no seed has room.
+  std::printf("OL-OS18 twin laid: %zu bars, old bars kept: %s; a bar ends exactly at J0 %zu, at Jn %zu\n", relief,
+              kept.empty() ? "yes" : kept.c_str(), at_j0, at_jn);
+  CHECK(relief > 0 && rep.relief_vines == 1 && kept.empty() && at_j0 >= 1 && at_jn >= 1);
+  // Too short for the eye (under 4 s): no_room "too_short"; a side already taken is not tried again.
   {
-    const Bar& h = o.bars.bars[host];
-    Bars walled = o.bars;
-    const Vec3 ax{h.b.x - h.a.x, h.b.y - h.a.y, h.b.z - h.a.z};
-    const double al = std::hypot(ax.x, std::hypot(ax.y, ax.z));
-    const Vec3 u{ax.x / al, ax.y / al, ax.z / al};
-    Vec3 p1 = std::fabs(u.z) < 0.9 ? Vec3{-u.y, u.x, 0} : Vec3{1, 0, 0};
-    const double pl = std::hypot(p1.x, std::hypot(p1.y, p1.z));
-    p1 = {p1.x / pl, p1.y / pl, p1.z / pl};
-    const Vec3 p2{u.y * p1.z - u.z * p1.y, u.z * p1.x - u.x * p1.z, u.x * p1.y - u.y * p1.x};
-    const double rad = 0.5 * (h.width + h.width) + va.gap_mm * 0.5;
-    for (int k = 0; k < 12; ++k) {
-      const double th = 2.0 * M_PI * k / 12.0;
-      const Vec3 off{(p1.x * std::cos(th) + p2.x * std::sin(th)) * rad, (p1.y * std::cos(th) + p2.y * std::sin(th)) * rad,
-                     (p1.z * std::cos(th) + p2.z * std::sin(th)) * rad};
-      Bar wbar = h;
-      wbar.a = {h.a.x + off.x, h.a.y + off.y, h.a.z + off.z};
-      wbar.b = {h.b.x + off.x, h.b.y + off.y, h.b.z + off.z};
-      wbar.strand = 900000 + k;
-      walled.bars.push_back(wbar);
-    }
-    const ReliefVineMaker m2(walled, d, f, va);
-    const Vec3 mid{0.5 * (h.a.x + h.b.x), 0.5 * (h.a.y + h.b.y), 0.5 * (h.a.z + h.b.z)};
-    const ReliefVine nv = m2.make(h, mid, {h.strand}, h.width);
-    std::printf("OL-OS18 walled in: laid %d, %zu seeds tried, place %.2f %.2f %.2f\n", nv.laid ? 1 : 0, nv.tried, nv.mid.x, nv.mid.y, nv.mid.z);
-    CHECK(!nv.laid && nv.tried == 4 && dist(nv.mid, mid) < 1e-9);
+    const std::vector<Vec3> short_line{line.front(), Vec3{line.front().x + 1.0, line.front().y, line.front().z}};
+    const TwinVine ts = maker.make(short_line, 1, 1.6, 1.6, 4.0, {});
+    const TwinVine ta2 = maker.make(line, 1, 1.6, 1.6, 4.0, {tw.side});
+    std::printf("OL-OS18 too short: laid %d, why %s; the same stretch with its side taken: laid %d, side %s\n", ts.laid ? 1 : 0,
+                ts.no_room.c_str(), ta2.laid ? 1 : 0,
+                ta2.laid ? (ta2.side.x * tw.side.x + ta2.side.y * tw.side.y + ta2.side.z * tw.side.z < 0.71 ? "another" : "the same") : ta2.no_room.c_str());
+    CHECK(!ts.laid && ts.no_room == "too_short");
+    CHECK(!ta2.laid || ta2.side.x * tw.side.x + ta2.side.y * tw.side.y + ta2.side.z * tw.side.z < 0.71);
   }
-  // The additions file carries kind 3 (written, read back, the same numbers).
+  // The additions file carries kind 3 (written, read back, the same numbers), replayed to the same hash.
   {
     Additions adds;
     round.hash = bars_hash(after);
@@ -2700,7 +2648,7 @@ static void test_os18_relief_vines() {
     const std::string path = std::string(ORGANIC_RULES_TMP_DIR) + "/os18_additions.bin";
     Additions back;
     CHECK(write_additions_file(path, adds) && read_additions_file(path, back) && back.rounds.size() == 1 &&
-          back.rounds[0].ops.size() == 1 && back.rounds[0].ops[0].kind == 3 && back.rounds[0].ops[0].v == v.op.v);
+          back.rounds[0].ops.size() == 1 && back.rounds[0].ops[0].kind == 3 && back.rounds[0].ops[0].v == tw.op.v);
     Bars replay = o.bars;
     CHECK(apply_additions(replay, d, back, c, &why) && bars_hash(replay) == bars_hash(after));
     std::remove(path.c_str());
