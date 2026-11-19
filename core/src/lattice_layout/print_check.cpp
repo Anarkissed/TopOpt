@@ -798,6 +798,7 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
         Bar& x = again.bars[i];
         if (x.relief_a > 0.0 || x.relief_b > 0.0) x = without_relief(Bars{{x}}).bars.front();
         x.along_proud = 0.0;
+        x.along_face = -1;
       }
       PrintableReport sub;
       TriangleMesh m2 = build_printable_mesh(part, domain, layout, again, open, spec, &sub);

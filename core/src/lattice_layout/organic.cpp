@@ -963,14 +963,16 @@ void lay_relief(Bars& bars, const StepModel& model, const PartMeasure& part, con
     }
     const Vec3 on{at.x + nrm.x * least, at.y + nrm.y * least, at.z + nrm.z * least};   // the surface there
     if (!(on.x * up.x + on.y * up.y + on.z * up.z - found->second > 2.0)) continue;
-    if (rep.faces_known && !ask.relief_exclude_faces.empty()) {
+    int face = -1;   // leg H: the face it lies along, for the app's drawing (read whenever the model carries faces)
+    if (rep.faces_known) {
       if (!finder) finder = std::make_unique<TriFinder>(model.mesh);
       const long t = finder->nearest(on);
-      const int face = t >= 0 ? model.triangle_face[static_cast<std::size_t>(t)] : -1;
+      face = t >= 0 ? model.triangle_face[static_cast<std::size_t>(t)] : -1;
       if (std::find(ask.relief_exclude_faces.begin(), ask.relief_exclude_faces.end(), face) != ask.relief_exclude_faces.end())
         continue;
     }
     b.along_proud = ask.face_relief_mm;
+    b.along_face = face;
     ++rep.along;
     rep.along_largest_mm = std::max(rep.along_largest_mm, b.along_proud);
   }

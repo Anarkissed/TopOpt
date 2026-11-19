@@ -791,7 +791,10 @@ std::vector<std::size_t> straighten_points(const std::vector<Vec3>& points, doub
 // Thinning to `tolerance_mm` (0 or less: none): a point is dropped when every original point between the kept ones lies
 // within the tolerance of the kept segment and its width within 5 % of the width interpolated there (by length); a
 // run's two ends are always kept, and a run's marks never change along it (a mark change starts a new run).
-enum WeaveRunMark : std::uint8_t { kRunLevelTie = 1, kRunBrace = 2, kRunSupport = 4, kRunNet = 8 };
+// kRunAlong (leg H): the run lies along an allowed open face (its bars have Bar::along_proud: OG2b keeps their bulge),
+// set only when weave_runs is asked for it (`relief_marks`, the preview); the bit 16 was held for the cancelled band
+// (OG4), which nothing shipped reads.
+enum WeaveRunMark : std::uint8_t { kRunLevelTie = 1, kRunBrace = 2, kRunSupport = 4, kRunNet = 8, kRunAlong = 16 };
 struct WeaveRun {
   int region = 0;
   std::uint8_t marks = 0;                          // WeaveRunMark bits
@@ -799,16 +802,28 @@ struct WeaveRun {
   std::vector<Vec3> points;
   std::vector<double> width_mm, spacing_mm;       // one per point
   // OG2b (brief E6, leg B): how far the run's tube may stand out where it runs along an open face (the largest
-  // Bar::along_proud of its bars). In the struct only: pack_weave_runs does not carry it yet.
+  // Bar::along_proud of its bars). Packed in version 2 only.
   double proud_mm = 0.0;
+  // Leg H: how far each end stands proud of the open face (OG2: its first bar's proud_a when end_a is Surface, its last
+  // bar's proud_b when end_b is), 0 when flush; and the model face the run lies along (the first of its bars with
+  // Bar::along_face; -1 when none or the model has no faces). Packed in version 2 only.
+  double proud_a_mm = 0.0, proud_b_mm = 0.0;
+  int along_face = -1;
 };
 // `bar_of`, when given (OF2, the file's tubes): per run, the place in `bars` of the bar each of its segments came from
 // (read with no thinning, `tolerance_mm` 0; with thinning it is left empty).
+// `relief_marks` (leg H, the preview): a run also ends where its bars start or stop lying along an open face or change the
+// face they lie along, and carries kRunAlong there. Off (the file's tubes, and every caller before): as before.
 std::vector<WeaveRun> weave_runs(const Bars& bars, const std::vector<int>& weave_regions, double tolerance_mm = 0.1,
-                                 std::vector<std::vector<std::size_t>>* bar_of = nullptr);
-// The runs packed for the app, little-endian: per run 12 bytes (point count u32, region i32, marks u8, end_a u8,
-// end_b u8 (Bar::End), one pad byte), then 20 bytes per point (x, y, z, width, spacing as float32).
-std::vector<std::uint8_t> pack_weave_runs(const std::vector<WeaveRun>& runs);
+                                 std::vector<std::vector<std::size_t>>* bar_of = nullptr, bool relief_marks = false);
+// The runs packed for the app, little-endian.
+// Version 1 (the shipped reader's): per run 12 bytes (point count u32, region i32, marks u8, end_a u8, end_b u8
+// (Bar::End), one pad byte), then 20 bytes per point (x, y, z, width, spacing as float32).
+// Version 2 (leg H): first 8 bytes, "WRN2" and u32 2; then per run 28 bytes (point count u32, region i32, marks u8,
+// end_a u8, end_b u8, a pad byte, proud_a_mm f32, proud_b_mm f32, along_face i32, proud_mm f32), then the same 20 bytes
+// per point. The version 1 reader given version 2 reads "WRN2" as a point count of 843,993,687 and returns nil (the
+// bytes do not add up): it refuses, it never misdraws.
+std::vector<std::uint8_t> pack_weave_runs(const std::vector<WeaveRun>& runs, int version = 1);
 
 // Item 3, two qualities of an Organic lay for the preview. Exact: Session::lay_organic as it is (the picture is what
 // will be made), then the runs. Draft (for dragging a slider; NOT what will be made): the same trace or growth, then

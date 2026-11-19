@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <stdexcept>
 #include <utility>
 
 #include "topopt/lattice_layout_file.hpp"   // OS16: the print check between rounds
@@ -15,9 +16,10 @@ namespace {
 double dist3(const Vec3& a, const Vec3& b) {
   return std::sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z));
 }
-std::uint8_t marks_of(const Bar& b) {
+std::uint8_t marks_of(const Bar& b, bool relief) {
   return static_cast<std::uint8_t>((b.level_tie ? kRunLevelTie : 0) | (b.brace ? kRunBrace : 0) |
-                                   (b.support ? kRunSupport : 0) | (b.net ? kRunNet : 0));
+                                   (b.support ? kRunSupport : 0) | (b.net ? kRunNet : 0) |
+                                   (relief && b.along_proud > 0.0 ? kRunAlong : 0));
 }
 // Item 2's thinning, one run: Douglas-Peucker on the points, a point kept when an original point between two kept ones
 // lies further than `tol` from their segment or its width is more than 5 % off the width interpolated there.
@@ -58,6 +60,7 @@ void thin(WeaveRun& r, double tol) {
   WeaveRun t;
   t.region = r.region; t.marks = r.marks; t.end_a = r.end_a; t.end_b = r.end_b;
   t.proud_mm = r.proud_mm;   // OG2b
+  t.proud_a_mm = r.proud_a_mm; t.proud_b_mm = r.proud_b_mm; t.along_face = r.along_face;   // leg H
   for (std::size_t k = 0; k < n; ++k)
     if (keep[k]) {
       t.points.push_back(r.points[k]);
@@ -69,7 +72,7 @@ void thin(WeaveRun& r, double tol) {
 }  // namespace
 
 std::vector<WeaveRun> weave_runs(const Bars& bars, const std::vector<int>& weave_regions, double tolerance_mm,
-                                 std::vector<std::vector<std::size_t>>* bar_of) {
+                                 std::vector<std::vector<std::size_t>>* bar_of, bool relief_marks) {
   std::vector<WeaveRun> runs;
   if (bar_of) bar_of->clear();
   const Bar* prev = nullptr;
@@ -77,15 +80,17 @@ std::vector<WeaveRun> weave_runs(const Bars& bars, const std::vector<int>& weave
     const std::size_t at = static_cast<std::size_t>(&b - bars.bars.data());
     const bool weave = std::find(weave_regions.begin(), weave_regions.end(), b.region) != weave_regions.end();
     if (b.link || !weave) { prev = nullptr; continue; }
-    const std::uint8_t m = marks_of(b);
+    const std::uint8_t m = marks_of(b, relief_marks);
     if (prev && prev->strand == b.strand && prev->region == b.region && runs.back().marks == m &&
-        dist3(runs.back().points.back(), b.a) < 1e-6) {
+        (!relief_marks || prev->along_face == b.along_face) && dist3(runs.back().points.back(), b.a) < 1e-6) {
       WeaveRun& r = runs.back();
       r.width_mm.back() = 0.5 * (r.width_mm.back() + b.width);
       r.points.push_back(b.b);
       r.width_mm.push_back(b.width);
       r.spacing_mm.push_back(b.cell);
       r.end_b = b.end_b;
+      r.proud_b_mm = b.end_b == Bar::End::Surface ? b.proud_b : 0.0;   // leg H
+      if (r.along_face < 0) r.along_face = b.along_face;
       r.proud_mm = std::max(r.proud_mm, b.along_proud);   // OG2b
       if (bar_of) bar_of->back().push_back(at);
     } else {
@@ -98,6 +103,9 @@ std::vector<WeaveRun> weave_runs(const Bars& bars, const std::vector<int>& weave
       r.width_mm = {b.width, b.width};
       r.spacing_mm = {b.cell, b.cell};
       r.proud_mm = b.along_proud;   // OG2b
+      r.proud_a_mm = b.end_a == Bar::End::Surface ? b.proud_a : 0.0;   // leg H
+      r.proud_b_mm = b.end_b == Bar::End::Surface ? b.proud_b : 0.0;
+      r.along_face = b.along_face;
       runs.push_back(std::move(r));
       if (bar_of) bar_of->push_back({at});
     }
@@ -123,7 +131,7 @@ OrganicPreview lay_organic_preview(Session& session, const Settings& settings, c
   if (out.outcome.cancelled) return out;
   std::vector<int> regions;
   for (const Layout::Weave& w : out.outcome.layout.weave) regions.push_back(w.region);
-  out.runs = weave_runs(out.outcome.bars, regions, preview.tolerance_mm);
+  out.runs = weave_runs(out.outcome.bars, regions, preview.tolerance_mm, nullptr, true);   // leg H: the relief marks
   return out;
 }
 
@@ -138,21 +146,32 @@ OrganicPreview lay_organic_preview(Session& session, const Settings& settings, c
   if (out.outcome.cancelled) return out;
   std::vector<int> regions;
   for (const Layout::Weave& w : out.outcome.layout.weave) regions.push_back(w.region);
-  out.runs = weave_runs(out.outcome.bars, regions, preview.tolerance_mm);
+  out.runs = weave_runs(out.outcome.bars, regions, preview.tolerance_mm, nullptr, true);   // leg H: the relief marks
   return out;
 }
 
-std::vector<std::uint8_t> pack_weave_runs(const std::vector<WeaveRun>& runs) {
-  std::size_t bytes = 0;
-  for (const WeaveRun& r : runs) bytes += 12 + 20 * r.points.size();
+std::vector<std::uint8_t> pack_weave_runs(const std::vector<WeaveRun>& runs, int version) {
+  if (version != 1 && version != 2) throw std::invalid_argument("pack_weave_runs: version is 1 or 2");
+  const bool v2 = version == 2;
+  std::size_t bytes = v2 ? 8 : 0;
+  for (const WeaveRun& r : runs) bytes += (v2 ? 28 : 12) + 20 * r.points.size();
   std::vector<std::uint8_t> out(bytes, 0);
   std::size_t at = 0;
   auto put = [&](const void* p, std::size_t n) { std::memcpy(out.data() + at, p, n); at += n; };
+  if (v2) {
+    const std::uint32_t ver = 2;
+    put("WRN2", 4); put(&ver, 4);
+  }
   for (const WeaveRun& r : runs) {
     const std::uint32_t n = static_cast<std::uint32_t>(r.points.size());
     const std::int32_t region = r.region;
     const std::uint8_t head[4] = {r.marks, static_cast<std::uint8_t>(r.end_a), static_cast<std::uint8_t>(r.end_b), 0};
     put(&n, 4); put(&region, 4); put(head, 4);
+    if (v2) {   // leg H
+      const float pa = static_cast<float>(r.proud_a_mm), pb = static_cast<float>(r.proud_b_mm), pm = static_cast<float>(r.proud_mm);
+      const std::int32_t face = r.along_face;
+      put(&pa, 4); put(&pb, 4); put(&face, 4); put(&pm, 4);
+    }
     for (std::size_t k = 0; k < r.points.size(); ++k) {
       const float v[5] = {static_cast<float>(r.points[k].x), static_cast<float>(r.points[k].y),
                           static_cast<float>(r.points[k].z), static_cast<float>(r.width_mm[k]),

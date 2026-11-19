@@ -1024,6 +1024,9 @@ struct Bar {
   // (face_relief_mm: its own bulge, cut only beyond that); the bar itself is not moved, only the file's trim reads it.
   // 0: trimmed flush (as before).
   double along_proud = 0.0;
+  // Leg H (the app's drawing): the model face (StepModel::triangle_face) nearest where the bar's tube reaches that open
+  // face, when along_proud is set and the model carries its faces; -1 otherwise. Not in bars_hash.
+  int along_face = -1;
 };
 // OG1: what set the local spacing at a strand point (Bar::local_why, Outcome::tight).
 enum class SpacingWhy : std::uint8_t {

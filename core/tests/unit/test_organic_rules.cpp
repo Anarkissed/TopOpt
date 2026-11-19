@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <functional>
 #include <limits>
+#include <cstring>
 #include <map>
 #include <memory>
 #include <stdexcept>
@@ -838,6 +839,29 @@ static void test_runs() {
   CHECK(!raw.empty() && raw.size() < weave_bars && std::fabs(raw_mm - bars_mm) <= 1e-6);
   CHECK(same_count && worst <= 0.1 + 1e-9 && thin_pts < raw_pts && bad_marks == 0 && ends_moved == 0 && marked > 0);
   CHECK(packed.size() == 12 * thin.size() + 20 * thin_pts);
+  // Leg H: version 2, the 8-byte head and 28 bytes per run; version 1 unchanged; another version refused.
+  {
+    const std::vector<std::uint8_t> v2 = pack_weave_runs(thin, 2);
+    bool same_points = v2.size() == 8 + 28 * thin.size() + 20 * thin_pts && std::memcmp(v2.data(), "WRN2", 4) == 0;
+    std::size_t a1 = 0, a2 = 8;
+    for (const WeaveRun& r : thin) {   // each run's 12-byte head and its points as version 1's; then the 16 new bytes
+      if (!same_points) break;
+      same_points = std::memcmp(v2.data() + a2, packed.data() + a1, 12) == 0 &&
+                    std::memcmp(v2.data() + a2 + 28, packed.data() + a1 + 12, 20 * r.points.size()) == 0;
+      std::int32_t face = 0;
+      float pa = -1.0f;
+      std::memcpy(&pa, v2.data() + a2 + 12, 4);
+      std::memcpy(&face, v2.data() + a2 + 20, 4);
+      same_points = same_points && pa == static_cast<float>(r.proud_a_mm) && face == r.along_face;
+      a1 += 12 + 20 * r.points.size();
+      a2 += 28 + 20 * r.points.size();
+    }
+    bool threw = false;
+    try { (void)pack_weave_runs(thin, 3); } catch (const std::invalid_argument&) { threw = true; }
+    std::printf("OL-RUN version 2: %zu bytes, heads and points as version 1's %d; version 3 refused %d\n", v2.size(),
+                same_points ? 1 : 0, threw ? 1 : 0);
+    CHECK(same_points && threw);
+  }
   for (const WeaveRun& r : thin) CHECK(r.points.size() >= 2 && r.width_mm.size() == r.points.size() && r.spacing_mm.size() == r.points.size());
 }
 
@@ -2376,6 +2400,41 @@ static void test_og2_relief() {
                   w.proud_outside_mm, w.outside_largest_mm, z_low, w.along_bars, w.along_vertices, w.along_outside_mm,
                   w.grew_mm[0], w.grew_mm[1], w.grew_mm[2], w.grew_mm[3], w.grew_mm[4], w.grew_mm[5]);
       CHECK(w.along_bars > 0 && w.along_vertices > 0 && w.along_outside_mm > 0.05 && w.along_outside_mm <= relief + 1e-3);
+      // Leg H: the preview's runs (relief marks on) carry what the tubes route reads: a run is marked kRunAlong exactly
+      // where its bars have along_proud (the tubes' `along`), the marked runs' bars are the tubes' along bars, the runs'
+      // proud ends are the tubes' proud ends, and every marked run names the face it lies along.
+      {
+        std::vector<std::vector<std::size_t>> rb;
+        const std::vector<WeaveRun> runs_h = weave_runs(o.bars, {1}, 0.0, &rb, true);
+        std::size_t marked_bars = 0, wrong = 0, proud_run_ends = 0, faceless = 0, marked_runs = 0, off_face = 0;
+        for (std::size_t q = 0; q < runs_h.size(); ++q) {
+          const bool m = (runs_h[q].marks & kRunAlong) != 0;
+          marked_runs += m;
+          faceless += m && runs_h[q].along_face < 0;
+          proud_run_ends += (runs_h[q].proud_a_mm > 0.0) + (runs_h[q].proud_b_mm > 0.0);
+          for (std::size_t i : rb[q]) {
+            const Bar& x = o.bars.bars[i];
+            wrong += (x.along_proud > 0.0) != m;
+            off_face += m && x.along_face != runs_h[q].along_face;
+            marked_bars += m && dist(x.a, x.b) >= 1e-9;
+          }
+        }
+        std::printf("OL-OG2 %s, %.1f mm, runs (leg H): %zu marked along a face (%zu bars; tubes %zu), %zu not as the bars, "
+                    "%zu with no face, %zu off their face; proud run ends %zu (tubes %zu)\n", c.name, relief, marked_runs,
+                    marked_bars, w.along_bars, wrong, faceless, off_face, proud_run_ends, w.proud_ends);
+        CHECK(marked_runs > 0 && wrong == 0 && faceless == 0 && off_face == 0 && marked_bars == w.along_bars &&
+              proud_run_ends == w.proud_ends);
+        // Relief 0 (the same part laid flush): no mark, no proud length, no face; the runs as without the marks.
+        const std::vector<WeaveRun> flat_runs = weave_runs(p.bars, {1}, 0.0, nullptr, true),
+                                    old_runs = weave_runs(p.bars, {1}, 0.0);
+        std::size_t any = 0;
+        for (const WeaveRun& x : flat_runs)
+          any += (x.marks & kRunAlong) != 0 || x.proud_a_mm != 0.0 || x.proud_b_mm != 0.0 || x.proud_mm != 0.0 || x.along_face != -1;
+        const bool same = pack_weave_runs(flat_runs, 2) == pack_weave_runs(old_runs, 2);
+        std::printf("OL-OG2 %s, relief 0, runs (leg H): %zu runs, %zu carry a relief fact; as without the marks %d\n", c.name,
+                    flat_runs.size(), any, same ? 1 : 0);
+        CHECK(any == 0 && same);
+      }
       std::printf("OL-OG2 %s, %.1f mm, print check: clean %d, %zu bars made flush in %d rounds (OG2c), %zu findings left\n",
                   c.name, relief, rep.print_clean ? 1 : 0, rep.relief_flushed, rep.relief_rounds, rep.findings_at.size());
       CHECK((rep.print_clean || !rep.findings_at.empty()) && closed == w.shells() && w.proud_ends > 0 && w.proud_vertices > 0 &&
