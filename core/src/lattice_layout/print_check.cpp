@@ -803,6 +803,7 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
       PrintableReport sub;
       TriangleMesh m2 = build_printable_mesh(part, domain, layout, again, open, spec, &sub);
       sub.relief_flushed += flush.size();
+      for (std::size_t i : flush) sub.relief_flushed_at.push_back({bars.bars[i].a, bars.bars[i].b});   // OJ6
       sub.relief_rounds += 1;
       sub.ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
       if (report) *report = sub;

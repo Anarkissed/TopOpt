@@ -694,6 +694,7 @@ TriangleMesh make_file_mesh(const Session& session, const Layout& layout, const 
   report.stands_added = made.stands_added;
   report.findings_at = made.findings_at;   // OG2c
   report.relief_flushed = made.relief_flushed;
+  report.relief_flushed_at = made.relief_flushed_at;   // OJ6
   report.relief_rounds = made.relief_rounds;
   report.weave_specks_ignored = made.weave_specks_ignored;
   report.weave_held_ignored = made.weave_held_ignored;

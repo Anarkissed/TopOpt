@@ -644,6 +644,30 @@ static void test_relief_findings() {
   CHECK(!r0.clean && !r0.findings_at.empty() && r0.relief_flushed == 0);
   CHECK(on_v > 0 && r1.relief_flushed > 0 && r1.relief_rounds >= 1 && !r1.findings_at.empty());
   CHECK(r2.relief_flushed == 0 && r2.relief_rounds == 0);
+  // OJ6 (leg J item 6): the preview draws the bars the check made flush flush: their runs carry no along-face mark.
+  {
+    const auto dist = [](const Vec3& a, const Vec3& b) { return std::sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z)); };
+    Bars shown = v_proud;
+    const std::size_t cleared = clear_flushed_relief(shown, r1.relief_flushed_at);
+    std::size_t still = 0;
+    for (const Bar& b : shown.bars) still += b.along_proud > 0.0;
+    std::vector<std::vector<std::size_t>> bar_of;
+    const std::vector<WeaveRun> runs = weave_runs(shown, {1}, 0.0, &bar_of, true);
+    std::size_t marked_bars = 0, marked_flushed = 0;
+    for (std::size_t q = 0; q < runs.size(); ++q) {
+      if (!(runs[q].marks & kRunAlong)) continue;
+      for (std::size_t i : bar_of[q]) {
+        ++marked_bars;
+        for (const auto& f : r1.relief_flushed_at)
+          marked_flushed += (dist(shown.bars[i].a, f[0]) < 1e-9 && dist(shown.bars[i].b, f[1]) < 1e-9) ||
+                            (dist(shown.bars[i].a, f[1]) < 1e-9 && dist(shown.bars[i].b, f[0]) < 1e-9);
+      }
+    }
+    std::printf("OJ6: the check made %zu flush (%zu ends listed); cleared %zu; bars still along a face %zu; marked runs' bars %zu, of them flushed %zu\n",
+                r1.relief_flushed, r1.relief_flushed_at.size(), cleared, still, marked_bars, marked_flushed);
+    CHECK(r1.relief_flushed_at.size() == r1.relief_flushed && cleared == r1.relief_flushed && marked_flushed == 0 &&
+          marked_bars == still && still == on_v - cleared);
+  }
 }
 
 int main() {

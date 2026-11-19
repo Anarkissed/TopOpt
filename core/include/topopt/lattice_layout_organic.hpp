@@ -862,7 +862,14 @@ struct OrganicPreview {
   PreviewQuality quality = PreviewQuality::Exact;   // what was laid: say it on screen when Draft
   Outcome outcome;                                   // the lay itself (its bars, counts, Grown's report)
   std::vector<WeaveRun> runs;                        // the weave regions' runs (item 2)
+  // OJ6 (leg J item 6): Exact, with relief laid: the file's print check is run and the bars it makes flush (OG2c) are
+  // drawn flush: their runs carry no along-face mark and no proud length. How many; the runs are read from those bars
+  // (`outcome.bars` stays the lay's). Draft: not run (0).
+  std::size_t relief_flushed = 0;
 };
+// OJ6: in `bars`, each bar whose two ends are one of `flushed` (either order) is made flush: its end relief carried
+// back (without_relief), along_proud 0, along_face -1. Returns how many.
+std::size_t clear_flushed_relief(Bars& bars, const std::vector<std::array<Vec3, 2>>& flushed);
 OrganicPreview lay_organic_preview(Session& session, const Settings& settings, const TensorField& field,
                                    const OrganicAsk& ask, const OrganicPreviewAsk& preview, int threads = 0,
                                    const std::atomic<bool>* stop = nullptr);

@@ -486,6 +486,8 @@ struct PrintableReport {
   std::vector<Vec3> findings_at;
   std::size_t relief_flushed = 0;
   int relief_rounds = 0;
+  // OJ6 (leg J item 6): the two ends of each bar made flush, as it was given (so the preview can clear its relief).
+  std::vector<std::array<Vec3, 2>> relief_flushed_at;
   std::vector<MeshSpec::Post> posts;
   std::size_t stands_added = 0;      // O8: of `posts`, those put under a weave's long shallow runs
   // O10, mid-air findings that are not findings for a weave, all passes together: a speck (an island smaller than

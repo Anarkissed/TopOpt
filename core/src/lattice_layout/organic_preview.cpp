@@ -69,7 +69,34 @@ void thin(WeaveRun& r, double tol) {
     }
   r = std::move(t);
 }
+// OJ6: Exact with relief laid: the bars as the file makes them flush (the print check run once); else the lay's.
+Bars flushed_as_the_file(Session& session, OrganicPreview& out, const std::atomic<bool>* stop) {
+  Bars shown = out.outcome.bars;
+  if (out.quality == PreviewQuality::Draft) return shown;
+  bool any = false;
+  for (const Bar& b : shown.bars) any = any || b.along_proud > 0.0 || b.proud_a > 0.0 || b.proud_b > 0.0;
+  if (!any) return shown;
+  const PrintChecked pc = print_check_bars(session, out.outcome.layout, shown, file_options_for(FileOptions{}, true), stop);
+  if (pc.ok) out.relief_flushed = clear_flushed_relief(shown, pc.made.relief_flushed_at);
+  return shown;
+}
 }  // namespace
+
+std::size_t clear_flushed_relief(Bars& bars, const std::vector<std::array<Vec3, 2>>& flushed) {
+  std::size_t n = 0;
+  for (const auto& f : flushed)
+    for (Bar& b : bars.bars) {
+      const bool same = (dist3(b.a, f[0]) < 1e-12 && dist3(b.b, f[1]) < 1e-12) || (dist3(b.a, f[1]) < 1e-12 && dist3(b.b, f[0]) < 1e-12);
+      if (!same || !(b.along_proud > 0.0 || b.proud_a > 0.0 || b.proud_b > 0.0)) continue;
+      if (b.relief_a > 0.0 || b.relief_b > 0.0) b = without_relief(Bars{{b}}).bars.front();
+      b.along_proud = 0.0;
+      b.along_face = -1;
+      b.proud_a = b.proud_b = 0.0;
+      ++n;
+      break;
+    }
+  return n;
+}
 
 std::vector<WeaveRun> weave_runs(const Bars& bars, const std::vector<int>& weave_regions, double tolerance_mm,
                                  std::vector<std::vector<std::size_t>>* bar_of, bool relief_marks) {
@@ -131,7 +158,8 @@ OrganicPreview lay_organic_preview(Session& session, const Settings& settings, c
   if (out.outcome.cancelled) return out;
   std::vector<int> regions;
   for (const Layout::Weave& w : out.outcome.layout.weave) regions.push_back(w.region);
-  out.runs = weave_runs(out.outcome.bars, regions, preview.tolerance_mm, nullptr, true);   // leg H: the relief marks
+  const Bars shown = flushed_as_the_file(session, out, stop);   // OJ6
+  out.runs = weave_runs(shown, regions, preview.tolerance_mm, nullptr, true);   // leg H: the relief marks
   return out;
 }
 
@@ -140,13 +168,19 @@ OrganicPreview lay_organic_preview(Session& session, const Settings& settings, c
                                    int threads, const std::atomic<bool>* stop) {
   OrganicPreview out;
   out.quality = preview.quality;
+  // OJ6: Exact replays a group list's additions with the file's print check between rounds, as the one-ask form does.
+  std::vector<OrganicGroup> exact = groups;
+  if (preview.quality != PreviewQuality::Draft && !exact.empty() && !exact.front().ask.additions.empty() &&
+      !exact.front().ask.print_check)
+    exact.front().ask.print_check = print_check_hook(session, file_options_for(FileOptions{}, true), stop);
   out.outcome = preview.quality == PreviewQuality::Draft
                     ? session.lay_organic_draft(settings, field, groups, threads, stop)
-                    : session.lay_organic(settings, field, groups, threads, stop);
+                    : session.lay_organic(settings, field, exact, threads, stop);
   if (out.outcome.cancelled) return out;
   std::vector<int> regions;
   for (const Layout::Weave& w : out.outcome.layout.weave) regions.push_back(w.region);
-  out.runs = weave_runs(out.outcome.bars, regions, preview.tolerance_mm, nullptr, true);   // leg H: the relief marks
+  const Bars shown = flushed_as_the_file(session, out, stop);   // OJ6
+  out.runs = weave_runs(shown, regions, preview.tolerance_mm, nullptr, true);   // leg H: the relief marks
   return out;
 }
 
