@@ -167,9 +167,41 @@ final class LatticePageParityHostedTests: XCTestCase {
         "lattice-cells-along-load": "round 2 (N5c): Along removed",
         "wizard-organic-show-repairs": "plan §B7 Removed: Show print repairs (hidden)",
         "wizard-info-repairs": "plan §B7 Removed: Show print repairs' (i), with it",
-    ].merging(["bcc", "bccz", "diamond", "fcc", "fccz", "gyroid", "kelvin", "reentrant", "rhombic", "sc", "schwarz_d"]
+    ].merging(LatticePageParityHostedTests.oldOrganicRow.map { ($0, "his 11-18 iPad notes: under Organic only the new engine's Organic settings show "
+                                          + "(Auto: Look alone); LatticeOrganicPageHostedTests holds those") },
+              uniquingKeysWith: { a, _ in a })
+    .merging(["bcc", "bccz", "diamond", "fcc", "fccz", "gyroid", "kelvin", "reentrant", "rhombic", "sc", "schwarz_d"]
         .map { ("wizard-type-\($0)", "plan §B7 Type: unready types are hidden (each shows with its B7.n batch)") },
         uniquingKeysWith: { a, _ in a })
+
+    /// ★ The old organic row (`organicRow`): replaced on an imported part by the new engine's Organic settings.
+    static let oldOrganicRow: [String] = [
+        "wizard-field-organicScale",
+        "wizard-field-organicStrut",
+        "wizard-field-organicTieSwirl",
+        "wizard-info-cell-size",
+        "wizard-info-density",
+        "wizard-info-fit-to-shape",
+        "wizard-info-look",
+        "wizard-info-organic-band",
+        "wizard-info-solid-rim",
+        "wizard-info-spacing-scale",
+        "wizard-info-synthetic",
+        "wizard-info-synthetic-map",
+        "wizard-info-traced-grown",
+        "wizard-info-transfer-ties",
+        "wizard-info-wizard-organic-band-strength",
+        "wizard-organic-band-band-slider",
+        "wizard-organic-band-strength-slider",
+        "wizard-organic-fine-tune",
+        "wizard-organic-look",
+        "wizard-organic-shape-band",
+        "wizard-organic-shape-fit-only",
+        "wizard-organic-solid-rim",
+        "wizard-organic-synthetic",
+        "wizard-organic-transfer-ties",
+        "wizard-seg-sim",
+    ]
 
     /// Controls that moved → what replaced each.
     static let moved: [String: String] = [

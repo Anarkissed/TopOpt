@@ -52,7 +52,7 @@ final class LatticeVariantFaceWallsTests: XCTestCase {
                 let faceWire = wire.filter { $0["kind"] as? String == "face" }
                 XCTAssertEqual(faceWire.count, 3, label)
                 XCTAssertTrue(faceWire.allSatisfy { $0["synthetic_stress"] as? Bool == true }, "★ \(label)")
-                XCTAssertEqual(faceWire.compactMap { $0["synthetic_foci"] as? Int }.sorted(), [2, 2, 4], label)
+                XCTAssertEqual(faceWire.compactMap { $0["synthetic_foci"] as? Int }.sorted(), [2, 2, 3], label)  // his 11-19: the default foci is 3
             }
         }
         // the gate is the stage's: the simulation off flags nothing, on the variant as on the stage

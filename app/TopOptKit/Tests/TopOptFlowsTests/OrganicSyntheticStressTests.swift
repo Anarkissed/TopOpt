@@ -110,17 +110,17 @@ final class OrganicSyntheticStressTests: XCTestCase {
     func testSettingsRoundTripAndDefaults() throws {
         var l = LatticeSettings()
         XCTAssertFalse(l.organicSyntheticStresses)
-        XCTAssertEqual(l.organicSyntheticFoci, 4, "core's measured recipe")
+        XCTAssertEqual(l.organicSyntheticFoci, 3, "★ his default (11-19)")
         XCTAssertTrue(l.selectableSyntheticFoci.isEmpty)
         XCTAssertTrue(l.selectableWallCoreDead.isEmpty)
         l.organicSyntheticStresses = true
-        l.organicSyntheticFoci = 3
+        l.organicSyntheticFoci = 5
         l.selectableSyntheticFoci["f:a:1"] = 5
         l.selectableWallCoreDead["f:a:1"] = true
         let data = try JSONEncoder().encode(l)
         let back = try JSONDecoder().decode(LatticeSettings.self, from: data)
         XCTAssertTrue(back.organicSyntheticStresses)
-        XCTAssertEqual(back.organicSyntheticFoci, 3)
+        XCTAssertEqual(back.organicSyntheticFoci, 5)
         XCTAssertEqual(back.selectableSyntheticFoci["f:a:1"], 5)
         XCTAssertEqual(back.selectableWallCoreDead["f:a:1"], true)
         var obj = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -131,7 +131,7 @@ final class OrganicSyntheticStressTests: XCTestCase {
         let old = try JSONDecoder().decode(LatticeSettings.self,
                                            from: JSONSerialization.data(withJSONObject: obj))
         XCTAssertFalse(old.organicSyntheticStresses)
-        XCTAssertEqual(old.organicSyntheticFoci, 4)
+        XCTAssertEqual(old.organicSyntheticFoci, 3)
         XCTAssertTrue(old.selectableSyntheticFoci.isEmpty)
         XCTAssertTrue(old.selectableWallCoreDead.isEmpty)
     }
@@ -206,11 +206,11 @@ final class OrganicSyntheticStressTests: XCTestCase {
         p.writeLatticeSyntheticFoci(dead, foci: 2)
         let flags = try XCTUnwrap(p.latticeSyntheticFlags(), "switch on ⇒ flags")
         XCTAssertEqual(flags.foci(for: dead.key), 2, "its own count")
-        XCTAssertEqual(flags.foci(for: live.key), 4, "★ a loaded wall is flagged too — core leaves it alone")
-        XCTAssertEqual(flags.foci(for: unmeasured.key), 4, "★ and one never measured")
-        XCTAssertEqual(flags.foci(for: nil), 4, "a wall with no selectable: the default")
-        p.lattice.organicSyntheticFoci = 3
-        XCTAssertEqual(p.latticeSyntheticFlags()?.foci(for: live.key), 3, "the lattice default")
+        XCTAssertEqual(flags.foci(for: live.key), 3, "★ a loaded wall is flagged too — core leaves it alone")
+        XCTAssertEqual(flags.foci(for: unmeasured.key), 3, "★ and one never measured")
+        XCTAssertEqual(flags.foci(for: nil), 3, "a wall with no selectable: the default")
+        p.lattice.organicSyntheticFoci = 5
+        XCTAssertEqual(p.latticeSyntheticFlags()?.foci(for: live.key), 5, "the lattice default")
         p.lattice.stageMode = .structural
         XCTAssertNil(p.latticeSyntheticFlags(), "never under Structural")
         p.lattice.stageMode = .aesthetic
@@ -264,7 +264,7 @@ final class OrganicSyntheticStressTests: XCTestCase {
         XCTAssertEqual(includes.count, 2, "the placed bolt and the legacy include")
         XCTAssertEqual(excludes.count, 1)
         XCTAssertTrue(includes.allSatisfy(\.syntheticStress), "★ every include wall is flagged")
-        XCTAssertEqual(includes.compactMap(\.syntheticFoci).sorted(), [2, 4], "its own count, else the default")
+        XCTAssertEqual(includes.compactMap(\.syntheticFoci).sorted(), [2, 3], "its own count, else the default (3)")
         XCTAssertFalse(excludes[0].syntheticStress, "★ never an exclude wall")
         XCTAssertNil(excludes[0].syntheticFoci)
         if TopOptKit.organicSyntheticStressWired {
@@ -332,7 +332,9 @@ final class OrganicSyntheticStressTests: XCTestCase {
         let ws = try src("WorkspacePlaceholder.swift"), pm = try src("ProjectModel.swift")
         XCTAssertTrue(ws.contains("let synthOn = project.lattice.organicSyntheticStressesActive && organicForBake != nil"),
                       "the preview's synthesis")
-        XCTAssertTrue(ws.contains("guard lat.organicSyntheticStressesActive else { return nil }"), "the Selections row")
+        // ★ 11-18: on an imported part the new engine's Organic reads the group's own switch, shown only in Organic + Aesthetic + Manual
+        XCTAssertTrue(ws.contains("guard project.importedFile != nil ? project.organicSyntheticOn(group: group) : lat.organicSyntheticStressesActive"),
+                      "the Selections row")
         XCTAssertTrue(pm.contains("guard lattice.organicSyntheticStressesActive else { return nil }"), "the job")
         XCTAssertFalse(ws.contains("lattice.organicSyntheticStresses\n") || ws.contains("lat.organicSyntheticStresses,"),
                        "no raw read of the toggle acts")
