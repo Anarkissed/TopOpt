@@ -76,6 +76,14 @@ If nothing in the job follows the stress (one spacing, one strut width), there i
 
 In the Add mode ({{strengthen_mode}} 0, the default) the lattice is laid once and never laid again: nothing that is there is moved or removed. Each round widens every strut under {{strengthen_watch_margin}} where it stands, by how short it falls of {{strengthen_target_margin}}: a strut mostly pulled or pushed by (aim / margin) to the power 1 / {{strengthen_power_axial}}, a strut mostly bent by the power 1 / {{strengthen_power_bending}}, never thinner and never past {{strengthen_width_cap}} times your widest strut width. A strut that buckles gets braces from rule T's brace maker, enough of them that its free length can carry the aim at its width; only where a brace cannot be placed is it widened instead (power 1 / {{strengthen_power_buckling}}). What a round added is saved as a list, with a check number of the whole lattice after each round; the file job and the preview lay your lattice again and add the list, and refuse if the lattice they reach is not exactly the one the rounds were made on. In the Lay again mode ({{strengthen_mode}} 1) each round works as described above.
 
+## Organic: the solid's weak areas
+
+When the solid part does not certify, the check says where. Every small cube of the solid that the verdict judges gets its own margin, worked out exactly as the verdict works out the solid's (the infill reduction as set, the walls counted or not as set). The cubes under the safety margin that touch each other make one weak area. Up to {{solid_spots_max}} of them are listed, the worst first, and marked on the part.
+
+For each area you are told where its worst cube is, where its middle is and how big it is; its margin before and after the infill reduction; whether it fails along the layers or across them; the infill at which this area alone would certify; whether counting the printed walls as solid would certify it; and how far it is from the nearest fixing, the nearest place the load presses and the nearest open lattice. An area whose worst cube is within {{solid_spot_near_voxels}} cubes of a fixing is beside a fixing, then of the load, then of the lattice; otherwise it is inside the solid. Each kind has one piece of advice: keep more solid round the fixing; keep more solid where the load presses; keep the lattice further away (a deeper protected skin, or a keep-clear area); or make that part of the model thicker, or print it denser.
+
+The result then says, in plain words, the infill at which the solid would certify (or that even printed solid it would not) and that the other way is to strengthen the marked areas. The margin of every judged cube is written beside the file, so the app can colour the weak places.
+
 ## What it does not cover
 
 - Struts that buckle, wear out from repeated loads, or creep.

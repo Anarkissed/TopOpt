@@ -127,6 +127,15 @@ int write_fields_file(const std::string& path,
                       const VoxelGrid& solved_grid,
                       bool accepted_only = true);
 
+// Brief E4 (Organic strength): ONE more block in fields.bin's own v1 layout, appended to a file write_fields_file
+// wrote: variant_count goes up by one and a block follows the others with requested_volume_fraction = `marker`,
+// mass_grams 0, support_volume_voxels 0, von_mises_count = grid.voxel_count() holding `values` (float32, grid-indexed),
+// stress_tensor_count 0 and displacement_count 0. The Organic check writes the SOLID's EFFECTIVE margin per voxel this
+// way (marker -1; NaN where the solid is not judged). Throws FieldsError when the file is not a v1 container of `grid`
+// or `values` is not one per voxel. Published atomically, as the writer does.
+void append_fields_block(const std::string& path, const VoxelGrid& grid, double marker,
+                         const std::vector<float>& values);
+
 // LOAD SCENARIOS — every scenario's OWN fields (out/scenario_fields.bin; his "the
 // scenario selector changes the views", 2026-10-27). fields.bin carries the GOVERNING
 // scenario's fields only, and stays exactly that; this sibling carries each

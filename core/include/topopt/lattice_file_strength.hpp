@@ -52,4 +52,11 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
                                                void (*said)(const char*) = nullptr,
                                                const std::atomic<bool>* stop = nullptr);
 
+// Brief E4, item 2: the plain sentences of an Organic result whose solid does not certify (`solid_margin.text`).
+// `infill_percent` the job's; `passes_at` the least whole infill at which the solid certifies (-1: none);
+// `walls_certify` true when counting the printed walls as solid would certify it (said only then); `shown` the spots
+// listed, `total` all of them.
+std::string organic_solid_text(double infill_percent, int passes_at, bool walls_certify, std::size_t shown,
+                               std::size_t total);
+
 }  // namespace topopt

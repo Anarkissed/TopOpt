@@ -407,7 +407,7 @@ int main() {
       keys.push_back(sj::as_string(*sj::find(e, "key"), "key"));
       sections.push_back(sj::as_string(*sj::find(e, "section"), "section"));
     }
-    CHECK(keys.size() == 89);   // 60 of Install 3, 24 of the Organic check (brief E2), 5 of strengthening by adding (E3a)
+    CHECK(keys.size() == 91);   // 60 of Install 3, 24 of the Organic check (brief E2), 5 of strengthening by adding (E3a), 2 of the weak areas (E4)
     const auto headings = [](const std::string& t) {
       std::vector<std::string> h;
       std::istringstream in(t);
@@ -705,6 +705,187 @@ int main() {
     const std::string ojson = slurp(kDir + "/additive_one/strengthen.json");
     CHECK(one.ok && one.code != "nothing_to_vary" && one.old_bars_kept);
     CHECK(one.rounds_fixed == 0 || num_after(ojson, "bars_widened") > 0);
+  }
+
+  // ── §12 (brief E4, item 2) the solid's weak spots, on made notched bars 40 x 10 x 12 (held on the x = 0 end, pulled
+  // along x on the x = 40 end, an Organic weave 2 mm deep under the bottom face): one notch from the top gives one spot
+  // at the notch, two notches two spots; a light load none; the plain text in each case.
+  {
+    // A closed mesh of the cells of a grid (x breaks, y 0..10, z breaks 0, 6, 12) less the cells named open.
+    const auto notched = [](const std::vector<double>& xs, const std::vector<int>& open_x) {
+      const std::vector<double> ys{0, 10}, zs{0, 6, 12};
+      const int NX = static_cast<int>(xs.size()) - 1, NZ = 2;
+      const auto full = [&](int i, int k) {
+        if (i < 0 || i >= NX || k < 0 || k >= NZ) return false;
+        return !(k == 1 && std::find(open_x.begin(), open_x.end(), i) != open_x.end());
+      };
+      TriangleMesh m;
+      const auto vid = [&](int i, int j, int k) { return (k * 2 + j) * static_cast<int>(xs.size()) + i; };
+      for (int k = 0; k < 3; ++k)
+        for (int j = 0; j < 2; ++j)
+          for (std::size_t i = 0; i < xs.size(); ++i) m.vertices.push_back({xs[i], ys[static_cast<std::size_t>(j)], zs[static_cast<std::size_t>(k)]});
+      const auto quad = [&](int a, int b, int c, int d) {   // counter-clockwise seen from outside
+        m.triangles.push_back({a, b, c});
+        m.triangles.push_back({a, c, d});
+      };
+      for (int i = 0; i < NX; ++i)
+        for (int k = 0; k < NZ; ++k) {
+          if (!full(i, k)) continue;
+          quad(vid(i, 0, k), vid(i + 1, 0, k), vid(i + 1, 0, k + 1), vid(i, 0, k + 1));          // y = 0
+          quad(vid(i, 1, k), vid(i, 1, k + 1), vid(i + 1, 1, k + 1), vid(i + 1, 1, k));          // y = 10
+          if (!full(i - 1, k)) quad(vid(i, 0, k), vid(i, 0, k + 1), vid(i, 1, k + 1), vid(i, 1, k));   // -x
+          if (!full(i + 1, k)) quad(vid(i + 1, 0, k), vid(i + 1, 1, k), vid(i + 1, 1, k + 1), vid(i + 1, 0, k + 1));   // +x
+          if (!full(i, k - 1)) quad(vid(i, 0, k), vid(i, 1, k), vid(i + 1, 1, k), vid(i + 1, 0, k));   // -z
+          if (!full(i, k + 1)) quad(vid(i, 0, k + 1), vid(i + 1, 0, k + 1), vid(i + 1, 1, k + 1), vid(i, 1, k + 1));   // +z
+        }
+      return m;
+    };
+    write_stl_file(kDir + "/notch1.stl", notched({0, 18, 22, 40}, {1}), StlFormat::Binary);
+    write_stl_file(kDir + "/notch2.stl", notched({0, 10, 14, 26, 30, 40}, {1, 3}), StlFormat::Binary);
+    TensorField tf;
+    tf.spacing = 1.0;
+    tf.nx = 40; tf.ny = 10; tf.nz = 12;
+    tf.voigt.assign(6 * 40 * 10 * 12, 0.0);
+    for (std::size_t e = 0; e < 40 * 10 * 12; ++e) { tf.voigt[6 * e] = 3.0; tf.voigt[6 * e + 2] = 1.0; }
+    CHECK(write_tensor_file(kDir + "/notch.tensor", tf));
+    const auto face_at = [](const StepModel& m, Vec3 n, double off) {
+      for (int fi = 0; fi < m.face_count; ++fi) {
+        const StepFaceInfo& x = m.faces[static_cast<std::size_t>(fi)];
+        if (x.kind == StepSurfaceKind::Plane && x.plane_normal.x * n.x + x.plane_normal.y * n.y + x.plane_normal.z * n.z > 0.99 &&
+            std::fabs(x.plane_origin.x * n.x + x.plane_origin.y * n.y + x.plane_origin.z * n.z - off) < 1e-6)
+          return fi;
+      }
+      return -1;
+    };
+    // The solid's block of a run of `model` pulled with `newtons` at `infill` %, with `settings` (strength_settings).
+    const auto spots_run = [&](const std::string& tag, const std::string& model, double newtons, double infill,
+                               const std::string& settings, const std::string& print = "") {
+      const StepModel m = import_part_file_resolved(kDir + "/" + model);
+      const int held = face_at(m, {-1, 0, 0}, 0.0), pulled = face_at(m, {1, 0, 0}, 40.0), bottom = face_at(m, {0, 0, -1}, 0.0);
+      CHECK(held >= 0 && pulled >= 0 && bottom >= 0);
+      const std::string fj =
+          "{\"mode\": \"lattice_file\", \"model\": \"" + model + "\", \"output\": \"notch_lattice.stl\", \"strength_job\": \"" +
+          tag + "_sj.json\", \"tensor\": \"notch.tensor\", \"layout\": {\"min_strut_lines\": 2, \"region_ids\": [1], "
+          "\"region_no_lattice\": [0], \"region_depth_mm\": [2], \"region_expand_mm\": [-2], \"region_face_counts\": [1], "
+          "\"region_faces\": [" + std::to_string(bottom) + "], \"topology\": \"octet\", \"algorithm\": \"uniform\", "
+          "\"cell_max_mm\": 8, \"min_cells_across\": 1, \"region_weave\": [true], \"organic_spacing_mm\": 4, "
+          "\"organic_width_mm\": 0.9}}";
+      char inf[32];
+      std::snprintf(inf, sizeof inf, "%g", infill);
+      const std::string sj =
+          "{\"model\": \"" + model + "\", \"material\": \"PLA\", \"mode\": \"lattice_part\", \"resolution\": 40, "
+          "\"loads\": {\"minimize_plastic\": true, \"safety_margin\": 1.5, \"build_dir\": [0, 0, 1], \"infill_percent\": " +
+          std::string(inf) + print + ", \"anchor_face_ids\": [" + std::to_string(held) + "], \"groups\": [{\"face_ids\": [" +
+          std::to_string(pulled) + "], \"force\": [" + std::to_string(newtons) + ", 0, 0]}]}, "
+          "\"lattice\": {\"topology\": \"octet\", \"require_lattice_void_reaches_exterior\": false}, "
+          "\"grading\": {\"topology\": \"octet\", \"cell_mm\": 8, \"min_extrudable_width_mm\": 0.45, \"intent\": \"structural\"}, "
+          "\"output\": {\"report\": \"report.json\", \"mesh_format\": \"stl\", \"mesh_prefix\": \"variant\"}, "
+          "\"strength_settings\": " + settings + "}";
+      write(kDir + "/" + tag + "_sj.json", sj);
+      const Run x = run(tag, fj, "");
+      CHECK(x.r.ok && x.r.strength_ran);
+      const std::string b = block(x.json);
+      const std::size_t a0 = b.find("\"solid_margin\": {");
+      const std::size_t a1 = b.find("\n    \"margin_worst_case\"", a0);
+      const std::string sm = a0 == std::string::npos ? std::string() : b.substr(a0, a1 - a0);
+      std::printf("[%s] %s\n", tag.c_str(), sm.substr(0, 1500).c_str());
+      return sm;
+    };
+    const std::string off = "{\"width_aware_knockdown\": false}";
+    // A probe load; the margins are linear in it, so the loads below are set from it.
+    const std::string probe = spots_run("notch_probe", "notch1.stl", 1000.0, 50.0, off);
+    const double eff0 = num_after(probe, "effective"), raw0 = num_after(probe, "worst_case");
+    CHECK(eff0 > 0.0 && raw0 > 0.0);
+    // One notch, the worst place at 1.2 of effective margin (under 1.5): one spot, at the notch.
+    const std::string one = spots_run("notch_one", "notch1.stl", 1000.0 * eff0 / 1.2, 50.0, off);
+    CHECK(num_after(one, "spots_total") == 1.0);
+    const double wx = num_after(one, "worst_at");
+    {
+      const std::size_t w = one.find("\"worst_at\": [");
+      const double x = w == std::string::npos ? -1.0 : std::strtod(one.c_str() + w + 13, nullptr);
+      std::printf("[notch_one] worst at x %.3g\n", x);
+      CHECK(x > 16.0 && x < 24.0);   // at the notch (18 to 22)
+    }
+    (void)wx;
+    CHECK(has(one, "\"kind\": \"inside_the_solid\"") && has(one, "\"advice\": \"Make this part of the model thicker, or print it denser.\""));
+    const std::size_t sp1 = one.find("\"spots\": [");
+    CHECK(sp1 != std::string::npos && num_after(one, "passes_at_infill_percent", sp1) == num_after(one, "passes_at_infill_percent"));
+    CHECK(num_after(one, "effective_margin") == num_after(one, "effective"));   // the worst spot's worst voxel IS the solid's margin
+    CHECK(has(one, "\"governs\": \"in_plane\"") && has(one, "\"passes_with_walls_credited\": "));
+    CHECK(has(one, "\"field\": {\"file\": \"fields.bin\", \"block\": 2"));
+    {
+      char want[200];
+      std::snprintf(want, sizeof want, "\"text\": \"The solid part does not certify at 50 %% infill. It would certify at %.0f %% infill. "
+                    "The other way is to strengthen the marked area.\"", num_after(one, "passes_at_infill_percent"));
+      CHECK(has(one, want));
+    }
+    // fields.bin's second block: the solid's effective margin per voxel; its least is the solid's margin.
+    {
+      const std::string fb = slurp(kDir + "/notch_one/fields.bin");
+      std::int32_t dims[3], count = 0;
+      std::memcpy(dims, fb.data() + 4, 12);
+      std::memcpy(&count, fb.data() + 56, 4);
+      const std::size_t nv = static_cast<std::size_t>(dims[0]) * dims[1] * dims[2];
+      const std::size_t nn = static_cast<std::size_t>(dims[0] + 1) * (dims[1] + 1) * (dims[2] + 1);
+      const std::size_t b2 = 64 + 48 + 4 * nv + 4 * 3 * nn;   // after the header and the first block
+      CHECK(count == 2 && fb.size() == b2 + 48 + 4 * nv);
+      double marker = 0.0;
+      std::int64_t n = 0;
+      std::memcpy(&marker, fb.data() + b2, 8);
+      std::memcpy(&n, fb.data() + b2 + 24, 8);
+      float least = std::numeric_limits<float>::infinity();
+      for (std::size_t e = 0; e < nv && fb.size() >= b2 + 48 + 4 * nv; ++e) {
+        float v;
+        std::memcpy(&v, fb.data() + b2 + 48 + 4 * e, 4);
+        if (!std::isnan(v)) least = std::min(least, v);
+      }
+      std::printf("[notch_one] fields.bin block 2: marker %g, %lld values, least %.6g\n", marker, static_cast<long long>(n), least);
+      CHECK(marker == -1.0 && n == static_cast<std::int64_t>(nv));
+      CHECK(std::fabs(least - num_after(one, "effective")) <= 1e-5 * num_after(one, "effective"));
+    }
+    // A light load: the solid certifies; no spots, no text.
+    const std::string light2 = spots_run("notch_light", "notch1.stl", 1000.0 * eff0 / 3.0, 50.0, off);
+    CHECK(!has(light2, "\"spots\"") && !has(light2, "\"text\"") && !has(light2, "spots_total") && has(light2, "\"field\": {"));
+    // Two notches: two spots, one at each; with one shown: "the 1 worst of 2 marked areas".
+    const std::string probe2 = spots_run("notch2_probe", "notch2.stl", 1000.0, 50.0, off);
+    const double eff2 = num_after(probe2, "effective");
+    const std::string two = spots_run("notch_two", "notch2.stl", 1000.0 * eff2 / 1.2, 50.0, off);
+    CHECK(num_after(two, "spots_total") == 2.0 && has(two, "strengthen the 2 marked areas."));
+    {
+      std::vector<double> xs;
+      for (std::size_t w = two.find("\"worst_at\": ["); w != std::string::npos; w = two.find("\"worst_at\": [", w + 1))
+        xs.push_back(std::strtod(two.c_str() + w + 13, nullptr));
+      std::sort(xs.begin(), xs.end());
+      CHECK(xs.size() == 2 && xs.size() == 2 && xs[0] > 8 && xs[0] < 16 && xs[1] > 24 && xs[1] < 32);
+    }
+    const std::string two1 = spots_run("notch_two_one", "notch2.stl", 1000.0 * eff2 / 1.2, 50.0,
+                                       "{\"width_aware_knockdown\": false, \"solid_spots_max\": 1}");
+    CHECK(num_after(two1, "spots_total") == 2.0 && has(two1, "strengthen the 1 worst of 2 marked areas."));
+    // No infill certifies it (the worst place at 1.0 of margin printed solid).
+    const std::string heavy2 = spots_run("notch_heavy", "notch1.stl", 1000.0 * raw0 / 1.0, 50.0, off);
+    {
+      const double n = num_after(heavy2, "spots_total");
+      CHECK(n >= 1.0 && has(heavy2, "\"text\": \"The solid part does not certify, even printed solid. Strengthen the " +
+                                        (n == 1.0 ? std::string("marked area.") : std::to_string(static_cast<int>(n)) + " marked areas.") + "\""));
+    }
+    CHECK(has(heavy2, "\"passes_at_infill_percent\": null"));
+    // At 20 % infill with two 0.45 mm walls and the walls not credited: crediting them certifies it, said once.
+    const std::string walls_print = ", \"wall_loops\": 2, \"wall_line_width_mm\": 0.45";
+    const std::string wprobe = spots_run("notch_wprobe", "notch1.stl", 1000.0, 20.0, off, walls_print);
+    const double effw = num_after(wprobe, "effective");
+    const std::string walls = spots_run("notch_walls", "notch1.stl", 1000.0 * effw / 1.2, 20.0, off, walls_print);
+    CHECK(has(walls, "\"passes_with_walls_credited\": true") && has(walls, " Counting the printed walls as solid, it certifies.\""));
+    // The sentences alone.
+    CHECK(organic_solid_text(50, 81, false, 3, 3) ==
+          "The solid part does not certify at 50 % infill. It would certify at 81 % infill. The other way is to strengthen "
+          "the 3 marked areas.");
+    CHECK(organic_solid_text(50, -1, false, 3, 3) == "The solid part does not certify, even printed solid. Strengthen the 3 marked areas.");
+    CHECK(organic_solid_text(50, 81, true, 1, 1) ==
+          "The solid part does not certify at 50 % infill. It would certify at 81 % infill. The other way is to strengthen "
+          "the marked area. Counting the printed walls as solid, it certifies.");
+    CHECK(organic_solid_text(37.5, 90, false, 20, 57) ==
+          "The solid part does not certify at 37.5 % infill. It would certify at 90 % infill. The other way is to strengthen "
+          "the 20 worst of 57 marked areas.");
   }
 
   // ── §8 the octet's strut law is the full octet's (2026-11-17): its span is the octet band, so no density in the band

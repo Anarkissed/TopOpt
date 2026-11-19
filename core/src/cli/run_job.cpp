@@ -15309,6 +15309,9 @@ const std::vector<StrengthSettingSpec>& strength_setting_specs() {
       {"strengthen_power_axial", K::Number, 2.0, 1.0, 6.0, false, {}},
       {"strengthen_power_bending", K::Number, 3.0, 1.0, 6.0, false, {}},
       {"strengthen_power_buckling", K::Number, 4.0, 1.0, 6.0, false, {}},
+      // Brief E4: the solid's weak spots (Organic results).
+      {"solid_spots_max", K::Integer, 20.0, 1.0, 1000.0, false, {}},
+      {"solid_spot_near_voxels", K::Number, 3.0, 0.0, 20.0, false, {}},
   };
   return specs;
 }
@@ -16245,15 +16248,18 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
   double solid_vm = 0.0;
   std::size_t solid_voxels = 0;
   std::vector<double> s_vm, s_width;   // per solid voxel: von Mises, member width (width-aware only)
+  std::vector<double> width;           // per voxel: the solid share's member width (width-aware, or for the spots)
+  const auto measure_width = [&] {
+    if (!width.empty()) return;
+    const std::size_t nv = cert_grid.voxel_count();
+    std::vector<double> solid_share(nv, 0.0);
+    for (std::size_t e = 0; e < nv; ++e) solid_share[e] = in_part[e] ? static_cast<double>(fm.solid[e]) : 0.0;
+    width = local_member_thickness_mm(cert_grid, solid_share, printed_iso, knobs.thickness_cap_voxels);
+  };
   {
     const std::size_t nv = cert_grid.voxel_count();
     std::vector<std::array<double, 6>> sig(nv, std::array<double, 6>{0.0, 0.0, 0.0, 0.0, 0.0, 0.0});
-    std::vector<double> width;
-    if (knockdown.width_aware) {
-      std::vector<double> solid_share(nv, 0.0);
-      for (std::size_t e = 0; e < nv; ++e) solid_share[e] = in_part[e] ? static_cast<double>(fm.solid[e]) : 0.0;
-      width = local_member_thickness_mm(cert_grid, solid_share, printed_iso, knobs.thickness_cap_voxels);
-    }
+    if (knockdown.width_aware) measure_width();
     for (std::size_t e = 0; e < nv; ++e) {
       if (!in_part[e] || !(static_cast<double>(fm.solid[e]) >= printed_iso)) continue;
       ++solid_voxels;
@@ -16288,6 +16294,224 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
     if (effective_at(pc) >= options.margin_stop) R.passes_at_infill_percent = pc;
   R.solid_vm = solid_vm;
   R.solid_voxels = solid_voxels;
+  // ── Brief E4, item 2: the solid's weak spots. Every voxel the solid verdict judges, with its EFFECTIVE margin exactly
+  // as the verdict computes it (gate_margin_effective on the voxel's own von Mises, member width and layer tension: the
+  // whole solid's margin is the least of these); the voxels under the safety margin, joined by touching
+  // (load_path_connectivity), are the spots.
+  const std::size_t nvox = cert_grid.voxel_count();
+  std::vector<float> margin_field(nvox, std::numeric_limits<float>::quiet_NaN());
+  std::vector<double> margin_of(nvox, std::numeric_limits<double>::quiet_NaN());
+  std::string spots_json;
+  {
+    const double Y = material.yield_strength_mpa, zk = material.z_knockdown, S_ = options.margin_stop;
+    const double bl = std::sqrt(build_dir.x * build_dir.x + build_dir.y * build_dir.y + build_dir.z * build_dir.z);
+    const Vec3 up{build_dir.x / bl, build_dir.y / bl, build_dir.z / bl};
+    const auto spec_at = [&](double infill, bool walls) {
+      KnockdownSpec k = knockdown;
+      k.width_aware = walls;
+      k.infill_percent = infill;
+      k.infill_knockdown = infill_margin_knockdown(infill, k.infill_exponent, k.infill_floor);
+      return k;
+    };
+    const auto vm_of = [&](std::size_t e) { return e < a.von_mises_field.size() ? a.von_mises_field[e] : 0.0; };
+    const auto tension_of = [&](std::size_t e) {
+      if (6 * e + 5 >= a.stress_tensor_field.size()) return 0.0;
+      const double* q = &a.stress_tensor_field[6 * e];
+      const double t = up.x * up.x * q[0] + up.y * up.y * q[1] + up.z * up.z * q[2] + 2.0 * up.x * up.y * q[3] +
+                       2.0 * up.y * up.z * q[4] + 2.0 * up.z * up.x * q[5];
+      return t > 0.0 ? t : 0.0;
+    };
+    // The voxel's effective in-plane and layer terms (their least is its effective margin, as the gate has it).
+    const auto terms = [&](std::size_t e, const KnockdownSpec& k) {
+      const double vm = vm_of(e), t = tension_of(e);
+      if (k.width_aware) {
+        const double vme = vm / width_aware_knockdown(k.infill_percent, width[e], k.wall_thickness_mm, k.infill_exponent,
+                                                      k.infill_floor);
+        return compute_stress_margin(Y, zk, vme, k.infill_knockdown > 0.0 ? t / k.infill_knockdown : t);
+      }
+      StressMargin m = compute_stress_margin(Y, zk, vm, t);
+      m.in_plane *= k.infill_knockdown;
+      m.interlayer *= k.infill_knockdown;
+      m.worst_case *= k.infill_knockdown;
+      return m;
+    };
+    const auto eff = [&](std::size_t e, const KnockdownSpec& k) {
+      const double vm = vm_of(e), t = tension_of(e);
+      const double vme = k.width_aware ? vm / width_aware_knockdown(k.infill_percent, width[e], k.wall_thickness_mm,
+                                                                    k.infill_exponent, k.infill_floor)
+                                       : vm;
+      return gate_margin_effective(Y, zk, vm, vme, t, k);
+    };
+    const KnockdownSpec job_k = spec_at(knockdown.infill_percent, knockdown.width_aware);
+    std::vector<std::size_t> judged;
+    for (std::size_t e = 0; e < nvox; ++e)
+      if (in_part[e] && static_cast<double>(fm.solid[e]) >= printed_iso) judged.push_back(e);
+    std::vector<char> under(nvox, 0);
+    for (const std::size_t e : judged) {
+      const double m = eff(e, job_k);
+      margin_of[e] = m;
+      margin_field[e] = static_cast<float>(m);
+      under[e] = m < S_;
+    }
+    // The spots: the voxels under, joined by touching.
+    std::vector<std::array<int, 3>> nb;
+    for (int dk = -1; dk <= 1; ++dk)
+      for (int dj = -1; dj <= 1; ++dj)
+        for (int di = -1; di <= 1; ++di) {
+          const int nz = (di != 0) + (dj != 0) + (dk != 0);
+          if (nz == 0 || (connectivity == 6 && nz > 1) || (connectivity == 18 && nz > 2)) continue;
+          nb.push_back({di, dj, dk});
+        }
+    struct Spot { std::vector<std::size_t> v; std::size_t worst = 0; double worst_eff = 0.0; };
+    std::vector<Spot> spots;
+    std::vector<char> seen(nvox, 0);
+    const int nx = cert_grid.nx, ny = cert_grid.ny, nz = cert_grid.nz;
+    const auto ijk = [&](std::size_t e) {
+      const int i = static_cast<int>(e % static_cast<std::size_t>(nx));
+      const int j = static_cast<int>((e / static_cast<std::size_t>(nx)) % static_cast<std::size_t>(ny));
+      const int k = static_cast<int>(e / (static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny)));
+      return std::array<int, 3>{i, j, k};
+    };
+    for (const std::size_t e0 : judged) {
+      if (!under[e0] || seen[e0]) continue;
+      Spot sp;
+      std::vector<std::size_t> stack{e0};
+      seen[e0] = 1;
+      while (!stack.empty()) {
+        const std::size_t e = stack.back();
+        stack.pop_back();
+        sp.v.push_back(e);
+        const auto c = ijk(e);
+        for (const auto& d : nb) {
+          const int i = c[0] + d[0], j = c[1] + d[1], k = c[2] + d[2];
+          if (i < 0 || j < 0 || k < 0 || i >= nx || j >= ny || k >= nz) continue;
+          const std::size_t f = cert_grid.index(i, j, k);
+          if (under[f] && !seen[f]) {
+            seen[f] = 1;
+            stack.push_back(f);
+          }
+        }
+      }
+      std::sort(sp.v.begin(), sp.v.end());
+      sp.worst = sp.v.front();
+      sp.worst_eff = margin_of[sp.worst];
+      for (const std::size_t e : sp.v)
+        if (margin_of[e] < sp.worst_eff) { sp.worst_eff = margin_of[e]; sp.worst = e; }
+      spots.push_back(std::move(sp));
+    }
+    std::sort(spots.begin(), spots.end(), [](const Spot& x, const Spot& y) {
+      return x.worst_eff != y.worst_eff ? x.worst_eff < y.worst_eff : x.v.front() < y.v.front();
+    });
+    if (!spots.empty()) {
+      measure_width();   // the walls credited (a measure of the grid, no new solve)
+      const KnockdownSpec walls_k = spec_at(knockdown.infill_percent, true);
+      bool walls_all = true;
+      for (const std::size_t e : judged)
+        if (eff(e, walls_k) < S_) { walls_all = false; break; }
+      const std::size_t shown = std::min<std::size_t>(spots.size(), static_cast<std::size_t>(st.get("solid_spots_max")));
+      const double h = cert_grid.spacing, near = st.get("solid_spot_near_voxels") * h;
+      // The held and loaded voxels (a corner node held or loaded), and the open lattice's voxels.
+      const std::size_t nn = static_cast<std::size_t>(nx + 1) * static_cast<std::size_t>(ny + 1) * static_cast<std::size_t>(nz + 1);
+      std::vector<char> held_node(nn, 0), loaded_node(nn, 0);
+      for (const DirichletBC& b : domain.bcs)
+        if (!b.released && b.node >= 0 && static_cast<std::size_t>(b.node) < nn) held_node[static_cast<std::size_t>(b.node)] = 1;
+      for (const NodalLoad& l : loads)
+        if (l.value != 0.0 && l.node >= 0 && static_cast<std::size_t>(l.node) < nn) loaded_node[static_cast<std::size_t>(l.node)] = 1;
+      std::vector<std::size_t> held_v, loaded_v, lattice_v;
+      for (std::size_t e = 0; e < nvox; ++e) {
+        if (!in_part[e]) continue;
+        const auto c = ijk(e);
+        bool hv = false, lv = false;
+        for (int q = 0; q < 8; ++q) {
+          const std::size_t node = static_cast<std::size_t>(
+              fea_node_index(cert_grid, c[0] + (q & 1), c[1] + ((q >> 1) & 1), c[2] + ((q >> 2) & 1)));
+          hv = hv || held_node[node];
+          lv = lv || loaded_node[node];
+        }
+        if (hv) held_v.push_back(e);
+        if (lv) loaded_v.push_back(e);
+        if (fm.lattice[e] > 0.0f) lattice_v.push_back(e);
+      }
+      const auto centre = [&](std::size_t e) {
+        const auto c = ijk(e);
+        return cert_grid.voxel_center(c[0], c[1], c[2]);
+      };
+      const auto nearest = [&](const Vec3& p, const std::vector<std::size_t>& list, std::size_t* which) {
+        double best = std::numeric_limits<double>::infinity();
+        for (const std::size_t e : list) {
+          const Vec3 q = centre(e);
+          const double d = (q.x - p.x) * (q.x - p.x) + (q.y - p.y) * (q.y - p.y) + (q.z - p.z) * (q.z - p.z);
+          if (d < best) { best = d; if (which) *which = e; }
+        }
+        return std::sqrt(best);
+      };
+      const ll::Domain::Probe probe = ldomain.probe();
+      const auto v3 = [](const Vec3& p) { return "[" + json_num(p.x) + ", " + json_num(p.y) + ", " + json_num(p.z) + "]"; };
+      const auto dist = [](double d) { return std::isfinite(d) ? json_num(d) : std::string("null"); };
+      std::string list;
+      for (std::size_t q = 0; q < shown; ++q) {
+        const Spot& sp = spots[q];
+        Vec3 lo{1e300, 1e300, 1e300}, hi{-1e300, -1e300, -1e300}, sum{0.0, 0.0, 0.0};
+        double raw = std::numeric_limits<double>::infinity();
+        bool walls = true;
+        for (const std::size_t e : sp.v) {
+          const Vec3 c = centre(e);
+          sum = {sum.x + c.x, sum.y + c.y, sum.z + c.z};
+          lo = {std::min(lo.x, c.x - 0.5 * h), std::min(lo.y, c.y - 0.5 * h), std::min(lo.z, c.z - 0.5 * h)};
+          hi = {std::max(hi.x, c.x + 0.5 * h), std::max(hi.y, c.y + 0.5 * h), std::max(hi.z, c.z + 0.5 * h)};
+          raw = std::min(raw, compute_stress_margin(Y, zk, vm_of(e), tension_of(e)).worst_case);
+          walls = walls && eff(e, walls_k) >= S_;
+        }
+        const double nvs = static_cast<double>(sp.v.size());
+        int pass_at = -1;
+        for (int pc = 1; pc <= 100 && pass_at < 0; ++pc) {
+          const KnockdownSpec k = spec_at(pc, knockdown.width_aware);
+          bool ok = true;
+          for (const std::size_t e : sp.v)
+            if (eff(e, k) < S_) { ok = false; break; }
+          if (ok) pass_at = pc;
+        }
+        const StressMargin wt = terms(sp.worst, job_k);
+        const Vec3 w = centre(sp.worst);
+        std::size_t lat_e = 0;
+        const double d_held = nearest(w, held_v, nullptr), d_load = nearest(w, loaded_v, nullptr),
+                     d_lat = nearest(w, lattice_v, &lat_e);
+        std::string region = "null";
+        if (std::isfinite(d_lat)) {
+          const auto c = ijk(lat_e);
+          const Vec3 o{cert_grid.origin.x + c[0] * h, cert_grid.origin.y + c[1] * h, cert_grid.origin.z + c[2] * h};
+          for (int s3 = 0; s3 < 27 && region == "null"; ++s3) {
+            const int ai = s3 == 0 ? 1 : (s3 % 3), bi = s3 == 0 ? 1 : ((s3 / 3) % 3), ci = s3 == 0 ? 1 : (s3 / 9);
+            const ll::Where wh = probe.where({o.x + (ai + 0.5) * h / 3, o.y + (bi + 0.5) * h / 3, o.z + (ci + 0.5) * h / 3});
+            if (wh.lattice()) region = std::to_string(wh.id);
+          }
+        }
+        const char* kind = d_held <= near ? "beside_a_fixing"
+                           : d_load <= near ? "beside_the_load"
+                           : d_lat <= near ? "beside_the_lattice"
+                                           : "inside_the_solid";
+        const std::string k(kind);
+        const char* advice = k == "beside_a_fixing" ? "Keep more solid around this fixing."
+                             : k == "beside_the_load" ? "Keep more solid where the load presses here."
+                             : k == "beside_the_lattice"
+                                 ? "Keep the lattice further from this area: a deeper protected skin, or a keep-clear area."
+                                 : "Make this part of the model thicker, or print it denser.";
+        list += std::string(q ? "," : "") + "\n      {\"worst_at\": " + v3(w) + ", \"centroid\": " +
+                v3({sum.x / nvs, sum.y / nvs, sum.z / nvs}) + ", \"box\": {\"lo\": " + v3(lo) + ", \"hi\": " + v3(hi) +
+                "}, \"voxels\": " + std::to_string(sp.v.size()) + ", \"mm3\": " + json_num(nvs * h * h * h) +
+                ", \"raw_margin\": " + json_num(raw) + ", \"effective_margin\": " + json_num(sp.worst_eff) +
+                ", \"governs\": " + json_str(wt.in_plane <= wt.interlayer ? "in_plane" : "interlayer") +
+                ", \"passes_at_infill_percent\": " + (pass_at < 0 ? std::string("null") : std::to_string(pass_at)) +
+                ", \"passes_with_walls_credited\": " + (walls ? "true" : "false") +
+                ",\n       \"to_held_mm\": " + dist(d_held) + ", \"to_load_mm\": " + dist(d_load) +
+                ", \"to_lattice_mm\": " + dist(d_lat) + ", \"lattice_region\": " + region + ", \"kind\": " + json_str(k) +
+                ", \"advice\": " + json_str(advice) + "}";
+      }
+      spots_json = ", \"spots_total\": " + std::to_string(spots.size()) + ", \"spots\": [" + list + "\n    ], \"text\": " +
+                   json_str(organic_solid_text(knockdown.infill_percent, R.passes_at_infill_percent,
+                                               !knockdown.width_aware && walls_all, shown, spots.size()));
+    }
+  }
   // ── the verdict (V5's three states).
   if (c.load_on_open_lattice) {
     R.verdict = "fail";
@@ -16327,6 +16551,7 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
     fv.support_volume_voxels = a.support_volume_voxels;
     fr.evaluated.push_back(std::move(fv));
     write_fields_file(join_path(out_dir, "fields.bin"), fr, cert_grid, /*accepted_only=*/false);
+    append_fields_block(join_path(out_dir, "fields.bin"), cert_grid, -1.0, margin_field);   // brief E4: the solid's margin
     done.files.push_back("fields.bin");
     std::vector<float> m(layout_bars.bars.size(), std::numeric_limits<float>::quiet_NaN());
     for (std::size_t i = 0; i < R.bar_of.size() && i < c.bar_margin.size(); ++i)
@@ -16360,7 +16585,8 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
        ", \"von_mises_mpa\": " + num(R.solid_vm) + ", \"interlayer_tension_mpa\": " + num(R.solid_tension) +
        ", \"voxels\": " + std::to_string(R.solid_voxels) + ", \"passes_at_infill_percent\": " +
        (R.passes_at_infill_percent < 0 ? std::string("null") : std::to_string(R.passes_at_infill_percent)) +
-       ", \"voxel_load_path\": " + std::string(load_path_ok ? "true" : "false") + "},\n";
+       ", \"voxel_load_path\": " + std::string(load_path_ok ? "true" : "false") +
+       ", \"field\": {\"file\": \"fields.bin\", \"block\": 2, \"requested_volume_fraction\": -1}" + spots_json + "},\n";
   s += "    \"margin_worst_case\": " + num(a.margin.worst_case) + ",\n";
   s += "    \"margin_in_plane\": " + num(a.margin.in_plane) + ",\n";
   s += "    \"margin_interlayer\": " + num(a.margin.interlayer) + ",\n";
@@ -16509,6 +16735,28 @@ lattice_layout::StrengthCheck lattice_file_strength_check(const std::string& mat
     }
   };
   return check;
+}
+
+std::string organic_solid_text(double infill_percent, int passes_at, bool walls_certify, std::size_t shown,
+                               std::size_t total) {
+  const auto pc = [](double p) {
+    char b[32];
+    if (std::fabs(p - std::round(p)) < 1e-9) std::snprintf(b, sizeof b, "%.0f", p);
+    else std::snprintf(b, sizeof b, "%g", p);
+    return std::string(b);
+  };
+  const std::string areas = total == 1 ? "the marked area"
+                            : shown < total ? "the " + std::to_string(shown) + " worst of " + std::to_string(total) + " marked areas"
+                                            : "the " + std::to_string(total) + " marked areas";
+  std::string t;
+  if (passes_at < 0) {
+    t = "The solid part does not certify, even printed solid. Strengthen " + areas + ".";
+  } else {
+    t = "The solid part does not certify at " + pc(infill_percent) + " % infill. It would certify at " +
+        std::to_string(passes_at) + " % infill. The other way is to strengthen " + areas + ".";
+  }
+  if (walls_certify) t += " Counting the printed walls as solid, it certifies.";
+  return t;
 }
 
 // ══ BRIEF E2, ITEM 12: THE STRENGTHEN ROUNDS AS ONE JOB (`topopt-cli organic-strengthen`) ══════════════════════════
