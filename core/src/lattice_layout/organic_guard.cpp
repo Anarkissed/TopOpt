@@ -43,7 +43,7 @@ double solid_run_on(const Domain::Probe& probe, const Vec3& entry, const Vec3& d
 }
 
 std::size_t guard_bars(Bars& bars, const Domain& domain, const std::vector<int>& weave_regions, double line_mm,
-                       GuardReport* report) {
+                       GuardReport* report, bool drop_cut_free) {
   GuardReport rep;
   const Domain::Probe probe = domain.probe();
   const double step = 0.1, tol = 1e-3;
@@ -190,16 +190,21 @@ std::size_t guard_bars(Bars& bars, const Domain& domain, const std::vector<int>&
       }
       return x;
     };
-    bars.bars[i] = make(pieces[0]);
-    for (std::size_t k = 1; k < pieces.size(); ++k) {
-      Bar x = make(pieces[k]);
-      if (pieces[k].t0 > 1e-9) { x.into_a = -1; }
-      extra.push_back(x);
+    // After additions: a piece left with a free end by the cut (a new end in no solid) is not kept.
+    std::vector<Bar> made;
+    for (const Piece& p : pieces) {
+      Bar x = make(p);
+      const bool free_end = (p.ext0 && x.end_a == Bar::End::Surface) || (p.ext1 && x.end_b == Bar::End::Surface);
+      if (drop_cut_free && free_end) { ++rep.cut_dropped; continue; }
+      made.push_back(x);
     }
+    if (made.empty()) { keep[i] = 0; continue; }
+    bars.bars[i] = made[0];
+    for (std::size_t k = 1; k < made.size(); ++k) extra.push_back(made[k]);
   }
   // A bar removed whole leaves its neighbours ending where it began: an end of theirs at that point, in solid, is now an
   // end in the solid (Solid), not a joint left alone (which the drop would eat back).
-  if (rep.in_solid_removed > 0) {
+  if (std::find(keep.begin(), keep.end(), 0) != keep.end()) {
     std::map<std::array<double, 3>, char> gone_ends;
     for (std::size_t i = 0; i < n0; ++i)
       if (!keep[i]) {
@@ -216,7 +221,9 @@ std::size_t guard_bars(Bars& bars, const Domain& domain, const std::vector<int>&
   }
   // Removed bars out, with every Joined end that pointed at a bar moved to its new place (or nowhere).
   std::size_t removed = 0;
-  if (rep.in_solid_removed > 0 || !extra.empty()) {
+  bool any_removed = false;
+  for (char k : keep) any_removed = any_removed || !k;
+  if (any_removed || !extra.empty()) {
     std::vector<int> now(n0, -1);
     std::vector<Bar> out;
     out.reserve(n0 + extra.size());
@@ -235,12 +242,13 @@ std::size_t guard_bars(Bars& bars, const Domain& domain, const std::vector<int>&
     report->in_solid_cut += rep.in_solid_cut;
     report->in_solid_removed += rep.in_solid_removed;
     report->ends_moved_in += rep.ends_moved_in;
+    report->cut_dropped += rep.cut_dropped;
     for (const auto& [k, v] : rep.by_kind) report->by_kind[k] += v;
     for (const Vec3& p : rep.outside_at) if (report->outside_at.size() < 20) report->outside_at.push_back(p);
     for (const Vec3& p : rep.in_solid_at) if (report->in_solid_at.size() < 20) report->in_solid_at.push_back(p);
     for (const Vec3& p : rep.removed_at) if (report->removed_at.size() < 20) report->removed_at.push_back(p);
   }
-  return rep.outside_cut + rep.in_solid_cut + rep.in_solid_removed + rep.ends_moved_in;
+  return rep.outside_cut + rep.in_solid_cut + rep.in_solid_removed + rep.ends_moved_in + rep.cut_dropped;
 }
 
 }  // namespace topopt::lattice_layout

@@ -259,6 +259,8 @@ $$\text{verdict}=\begin{cases}\text{fail} & L_{\text{unheld}}\text{ too large},\
 
 `accepted` is the voxel solve's own gate (the solid's margin as above, on the material $\rho$). Written: Install 3's keys, `struts` {judged, under_safety, under_one, smallest_margin, buckling_failures, stubs, unjudged_mm, load_unheld_n}, the {{frame_weakest}} weakest (middle of the worst piece, width, length, margin, which limit), and `strut_margins.bin`: one float32 per bar in the layout's order, the least margin of the struts its pieces belong to, NaN where not judged.
 
+**The bars judged lie in the part (OG5).** For every weave bar with centre line $\mathbf a+t\,\mathbf d$, $0\le t\le L$ (OG2's relief at an open face excepted): no $t$ with the point outside the part (to $10^{-3}$ mm); a span in solid only at an end, entered from the lattice at $t_e$, of length at most $\min\big(w,\ T-r-\ell\big)^+$, $T$ the solid's thickness along $\mathbf d$ from $t_e$, $r=w/2$, $\ell$ the line width, and inside a Protect skin no point with $\delta(\mathbf x)-r<\ell$ ($\delta$ the depth below the part's surface). A bar breaking this is cut into its lattice spans (each run on by that rule), a bar with no lattice span removed; after a strengthening round a piece the cut leaves with a free end is dropped.
+
 ## Organic: strengthen
 
 `topopt-cli organic-strengthen`: check; stop when no judged strut has $m<S$, or after $N$ = {{strengthen_rounds}} rounds (0: 6 in the additive mode; 2 Traced, 3 Grown in the rebuild mode); else one round, lay again, check again. For every judged strut with $m<m_w$ = {{strengthen_watch_margin}}, $P_s$ its piece ends and middles, $r_s=r$ = {{strengthen_reach}} $\times$ the mean spacing in use in the weave (`spacing_used_mm.mean`):

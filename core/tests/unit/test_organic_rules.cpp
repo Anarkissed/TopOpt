@@ -2758,6 +2758,27 @@ static void test_og5_inside() {
                     "mid-bar solid %zu, within a line of a protected face %zu\n", rd.ops.size(), g2.in_solid_cut, g2.outside_cut, ok ? 1 : 0,
                     why.c_str(), c2.outside, c2.mid_solid, c2.near_face);
         CHECK(!rd.ops.empty() && ok && c2.outside == 0 && c2.mid_solid == 0 && c2.near_face == 0);
+        // After additions the guard also drops what its cut leaves hanging (apply_additions and the strengthen job pass
+        // drop_cut_free): a bar run out through the open top is cut at the part; the piece left with a free end is kept
+        // at the lay (its drop follows) and dropped after additions.
+        Bars poke = o.bars;
+        Bar x = poke.bars.front();
+        x.a = {15, 15, 10};
+        x.b = {15, 15, 23};
+        x.end_a = x.end_b = Bar::End::Node;
+        x.relief_a = x.relief_b = 0.0;
+        x.region = 1;
+        x.net = x.support = x.link = x.level_tie = x.brace = false;
+        x.width = 0.9;
+        poke.bars.push_back(x);
+        Bars kept_poke = poke, dropped_poke = poke;
+        GuardReport gk, gd;
+        guard_bars(kept_poke, *s.domain(), {1}, s.domain()->spec().bead_mm, &gk, false);
+        guard_bars(dropped_poke, *s.domain(), {1}, s.domain()->spec().bead_mm, &gd, true);
+        std::printf("OG5 cut and dropped: at the lay %zu bars (outside cut %zu, dropped %zu); after additions %zu bars (outside cut %zu, "
+                    "dropped %zu)\n", kept_poke.bars.size(), gk.outside_cut, gk.cut_dropped, dropped_poke.bars.size(), gd.outside_cut, gd.cut_dropped);
+        CHECK(gk.outside_cut == 1 && gk.cut_dropped == 0 && kept_poke.bars.size() == poke.bars.size());
+        CHECK(gd.cut_dropped == 1 && dropped_poke.bars.size() == poke.bars.size() - 1);
       }
     }
   // A concave (L-shaped) part: the weave under the top of an L, where a straight link or tie could chord the solid corner.

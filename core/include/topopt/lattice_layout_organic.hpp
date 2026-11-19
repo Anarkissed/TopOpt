@@ -346,8 +346,10 @@ bool apply_add_round(Bars& bars, const Domain& domain, const AddRound& round, co
 // ended by that rule), a bar wholly out of the lattice is removed. OG2's relief at an open face is not judged. A new
 // end lying in solid is Solid, else Surface; drop_loose_bars and drop_adrift_bars follow it at the lay. Returns the
 // bars cut or removed; `report` gathers them.
+// `drop_cut_free` (after a strengthening round's additions, where the lay's drop does not follow): a piece the cut left
+// with a free end (its new end in no solid) is not kept (GuardReport::cut_dropped).
 std::size_t guard_bars(Bars& bars, const Domain& domain, const std::vector<int>& weave_regions, double line_mm,
-                       GuardReport* report = nullptr);
+                       GuardReport* report = nullptr, bool drop_cut_free = false);
 // OG5 at source: how far a weave bar entering solid at `entry`, going `dir`, runs on into it: min(its width (S11), the
 // solid's thickness along `dir` there less its radius less `line_mm`), never under 0.
 double solid_run_on(const Domain::Probe& probe, const Vec3& entry, const Vec3& dir, double width, double line_mm);

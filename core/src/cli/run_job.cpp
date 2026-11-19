@@ -17618,7 +17618,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
       ll::GuardReport round_guard;
       // What it cut changes bars that were there before: OS12 against round 0 is then held as after a print check that
       // moved one (against the round before only).
-      if (ll::guard_bars(bars, domain, ctx.weave_regions, ctx.line_mm, &round_guard) > 0) moved_by_print = true;
+      if (ll::guard_bars(bars, domain, ctx.weave_regions, ctx.line_mm, &round_guard, /*drop_cut_free=*/true) > 0) moved_by_print = true;
       say("round " + std::to_string(n) + ": checking the lattice prints");
       const auto tp = std::chrono::steady_clock::now();
       ll::PrintChecked pc2 = ll::print_check_bars(session, out.layout, bars, file_options, stop);

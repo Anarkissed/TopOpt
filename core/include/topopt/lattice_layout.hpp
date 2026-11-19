@@ -1481,6 +1481,7 @@ struct OrganicRefusal {
 struct GuardReport {
   std::size_t outside_cut = 0, in_solid_cut = 0, in_solid_removed = 0;
   std::size_t ends_moved_in = 0;   // joints or landings a hair outside the part, moved in with every bar ending there
+  std::size_t cut_dropped = 0;     // after additions: pieces a cut left with a free end, not kept
   std::map<std::string, std::size_t> by_kind;
   std::vector<Vec3> outside_at, in_solid_at, removed_at;
 };

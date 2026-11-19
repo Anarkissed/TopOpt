@@ -297,7 +297,7 @@ bool apply_additions(Bars& bars, const Domain& domain, const Additions& adds, co
       if (why) *why = "round " + std::to_string(r + 1) + ": " + w;
       return false;
     }
-    if (c.line_mm > 0.0) guard_bars(bars, domain, c.weave_regions, c.line_mm, c.guard);   // OG5
+    if (c.line_mm > 0.0) guard_bars(bars, domain, c.weave_regions, c.line_mm, c.guard, true);   // OG5, cut free pieces dropped
     if (between) {
       w = between(bars);
       if (!w.empty()) {
