@@ -34,6 +34,10 @@ public struct LatticeLayoutBarsInputs: Equatable {
     public var colourKey: Int = 0
     /// ★ Organic cut 1: the bars from this index on are drawn by the light pass (plain tubes: Grown's net skin); .max = none.
     public var lightFrom: Int = .max
+    /// ★ His 11-19 note and verdict ("The organic looks great now!"): Organic's vines as OrganicVineShape draws them (smooth
+    /// round tubes, round ends, blended joints). When set, the pass draws these instead of the bars (the bars stay for the
+    /// key, the card and picking).
+    public var vines: OrganicVineShape?
     public init(token: Int, bars: [Float], hidden: Bool = false, solid: LatticeLayoutSolidGrid? = nil, flags: [UInt8] = [],
                 colours: [SIMD4<Float>] = [], colourKey: Int = 0) {
         self.token = token; self.bars = bars; self.hidden = hidden; self.solid = solid; self.flags = flags
@@ -52,8 +56,38 @@ public struct LatticeLayoutSolidGrid: Equatable {
     public var voxel: Float
     public var dims: SIMD3<Int32>
     public var rg: [Int8]
-    public init(token: Int, origin: SIMD3<Float>, voxel: Float, dims: SIMD3<Int32>, rg: [Int8]) {
-        self.token = token; self.origin = origin; self.voxel = voxel; self.dims = dims; self.rg = rg
+    /// ★ his 11-19 note ("They have VERY hard edges and stair-step. It should be a single straight or curved line"): the map
+    /// softened (`smoothed`), read with linear filtering so the cut follows a smooth line between voxels (Organic).
+    public var smooth = false
+    public init(token: Int, origin: SIMD3<Float>, voxel: Float, dims: SIMD3<Int32>, rg: [Int8], smooth: Bool = false) {
+        self.token = token; self.origin = origin; self.voxel = voxel; self.dims = dims; self.rg = rg; self.smooth = smooth
+    }
+    /// Both channels blurred by [1 4 6 4 1] / 16 along each axis (about one voxel): the zero crossing of the result is a
+    /// smooth surface through the stair-steps of the engine's yes/no voxels, so straight cuts read straight and curved cuts
+    /// curved.
+    public static func smoothed(_ rg: [Int8], dims: SIMD3<Int32>) -> [Int8] {
+        let nx = Int(dims.x), ny = Int(dims.y), nz = Int(dims.z), n = nx * ny * nz
+        guard n > 0, rg.count == 2 * n else { return rg }
+        var a = [Float](repeating: 0, count: 2 * n), b = a
+        for i in 0..<(2 * n) { a[i] = Float(rg[i]) }
+        let w: [Float] = [1, 4, 6, 4, 1].map { $0 / 16 }
+        for (axis, len) in [(0, nx), (1, ny), (2, nz)] {
+            let st = axis == 0 ? 1 : (axis == 1 ? nx : nx * ny)
+            for idx in 0..<n {
+                let c: Int
+                switch axis { case 0: c = idx % nx; case 1: c = (idx / nx) % ny; default: c = idx / (nx * ny) }
+                for ch in 0..<2 {
+                    var s: Float = 0
+                    for k in -2...2 {
+                        let cc = Swift.min(Swift.max(c + k, 0), len - 1)
+                        s += w[k + 2] * a[2 * (idx + (cc - c) * st) + ch]
+                    }
+                    b[2 * idx + ch] = s
+                }
+            }
+            swap(&a, &b)
+        }
+        return a.map { Int8(Swift.max(-127, Swift.min(127, $0.rounded()))) }
     }
     public static func == (a: Self, b: Self) -> Bool { a.token == b.token }
     public var isWhole: Bool { dims.x > 0 && dims.y > 0 && dims.z > 0 && rg.count == 2 * Int(dims.x) * Int(dims.y) * Int(dims.z) }
@@ -372,6 +406,7 @@ final class LatticeLayoutBarsPass {
     let lightPipeline: MTLRenderPipelineState
     /// ★ THE SOLID VIEW: the engine's map as a 3D texture (rg8Snorm: open, inside), and where it sits.
     private(set) var gridTexture: MTLTexture?
+    var gridSmooth = false
     private(set) var grid: (origin: SIMD3<Float>, voxel: Float, dims: SIMD3<Int32>)?
     private(set) var gridToken = -1
     /// The cut walls' colour: the body's own grey, so a cut reads as the same material.
@@ -387,6 +422,8 @@ final class LatticeLayoutBarsPass {
     private(set) var token = -1
     /// ★ Organic cut 1: the first bar the light pass draws (.max: none).
     private(set) var lightFrom = Int.max
+    /// ★ His 11-19: Organic's vines (nil: the bars draw).
+    private(set) var vinePass: OrganicVinePass?
     var hidden = false
     var isDrawable: Bool { !hidden && count > 0 && buffer != nil }
 
@@ -435,6 +472,7 @@ final class LatticeLayoutBarsPass {
         }
         gridTexture = t
         grid = (g.origin, g.voxel, g.dims)
+        gridSmooth = g.smooth
     }
 
     /// The shell clip that cuts the body's surface open where the map says open lattice (ShellClip mode 2: the cell field,
@@ -445,7 +483,7 @@ final class LatticeLayoutBarsPass {
         u.grid = SIMD4(g.origin, 1)
         u.spacing = SIMD4(g.voxel, g.voxel, g.voxel, 0)
         u.dims = SIMD4(Float(g.dims.x), Float(g.dims.y), Float(g.dims.z), 0)
-        u.gate = SIMD4(-2, 2, 0, 0)
+        u.gate = SIMD4(gridSmooth ? 3 : -2, 2, 0, 0)   // x = 3: a softened map, read linear (MetalMeshView's mode 2)
         return u
     }
 
@@ -483,6 +521,17 @@ final class LatticeLayoutBarsPass {
         token = inputs.token
         hidden = inputs.hidden
         lightFrom = inputs.lightFrom
+        if let v = inputs.vines {
+            if vinePass == nil {
+                do { vinePass = try OrganicVinePass(device: device); OrganicVinePass.lastInitError = nil } catch {
+                    OrganicVinePass.lastInitError = "\(error)"   // the bars draw instead; a test reads this
+                    NSLog("DIAG organic vines: %@", "\(error)")
+                }
+            }
+            vinePass?.upload(v)
+        } else {
+            vinePass = nil
+        }
         let packed = Self.pack(inputs.bars, flags: inputs.flags)
         count = packed.count / 2
         buffer = packed.isEmpty ? nil : device.makeBuffer(bytes: packed, length: MemoryLayout<SIMD4<Float>>.stride * packed.count,
@@ -522,9 +571,14 @@ final class LatticeLayoutBarsPass {
 
     /// Bars into the prepass's G-buffer (its encoder, attachments and .less + write depth state).
     func encodeGBuffer(_ enc: MTLRenderCommandEncoder, depthState: MTLDepthStencilState,
-                       clipFromModel: simd_float4x4, eyeFromModel: simd_float4x4, eyeNormalBasis: simd_float4x4) -> Bool {
+                       clipFromModel: simd_float4x4, eyeFromModel: simd_float4x4, eyeNormalBasis: simd_float4x4,
+                       turning: Bool = false) -> Bool {
         guard isDrawable, let buffer, enc.device === device else { return false }
         let c = Self.colour
+        if let vp = vinePass, vp.isDrawable {   // ★ his 11-19: Organic's vines, one colour
+            return vp.encode(enc, depthState: depthState, clipFromModel: clipFromModel, eyeFromModel: eyeFromModel,
+                             eyeNormalBasis: eyeNormalBasis, albedo: SIMD4(Float(c.r), Float(c.g), Float(c.b), 1), turning: turning)
+        }
         var f = Frame(clipFromModel: clipFromModel, modelFromClip: clipFromModel.inverse, eyeFromModel: eyeFromModel,
                       eyeNormalBasis: eyeNormalBasis, albedo: SIMD4(Float(c.r), Float(c.g), Float(c.b), colourBuffer == nil ? 1 : -1))
         enc.setRenderPipelineState(pipeline)

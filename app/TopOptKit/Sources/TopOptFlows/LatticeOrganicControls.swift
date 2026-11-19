@@ -98,6 +98,20 @@ struct LatticeOrganicControls: View {
                 .accessibilityIdentifier("organic-Simulate stresses on unstressed walls")
                 if look.syntheticStresses ?? false { say("Number of foci: per wall, in Selections") }
             }
+            if LatticeOrganicLook.cut2Wired {   // ★ cut 2 (his 11-19): depth variation and extra spacing, each one switch
+                row("Depth variation") {
+                    Toggle("", isOn: Binding(get: { look.depthVariationValue }, set: { look.depthVariation = $0 }))
+                        .labelsHidden().toggleStyle(.switch)
+                }
+                .accessibilityIdentifier("organic-Depth variation")
+                say(look.depthVariationValue ? "Up to 1 mm out at open faces" : "Cut flush at every face")
+                row("Extra spacing between vines") {
+                    Toggle("", isOn: Binding(get: { look.extraSpacingValue(aesthetic: aesthetic) }, set: { look.extraSpacing = $0 }))
+                        .labelsHidden().toggleStyle(.switch)
+                }
+                .accessibilityIdentifier("organic-Extra spacing between vines")
+                if look.extraSpacingValue(aesthetic: aesthetic) { say("Will likely lose strength") }
+            }
             if on(.linkWidth) { number("Link thickness", "× strut", \.linkWidth, auto: 1) { LatticeOrganicLook.Check.link($0) } }
             if on(.unbracedOther) {
                 number("Longest strut without a joint", "widths", \.unbracedMax, auto: 10) { LatticeOrganicLook.Check.unbraced($0) }

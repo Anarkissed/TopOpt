@@ -4503,7 +4503,11 @@ public struct WorkspacePlaceholder: View {
     /// which is the quantity a person can measure on the print.
     /// ★ his pick 11-16 (A): hidden while he turns the view with a lattice drawn
     @ViewBuilder private var latticeDensityLegend: some View {
-        if !latticeTurning || LatticePreviewMode.controlPageFollowsCamera { latticeDensityLegendShown }
+        // ★ his 11-19 note: "The colour legend doesn't really work for Organic ... It should be a singular colour": no key for
+        // Organic on the new engine (the stress view keeps its own scale)
+        if newEngineDrawn, project.lattice.isOrganic, latticeLegendStress() == nil {
+            EmptyView()
+        } else if !latticeTurning || LatticePreviewMode.controlPageFollowsCamera { latticeDensityLegendShown }
     }
     @ViewBuilder private var latticeDensityLegendShown: some View {
         // ★ Install 3: on the new engine, the span its bars are drawn over and their median cell (LatticeLayoutColours)

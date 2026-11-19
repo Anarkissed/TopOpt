@@ -318,12 +318,13 @@ public final class LatticeLayoutPreview: ObservableObject {
         guard var b = bars else { return nil }
         guard let laid, laid.token == b.token else { return b }
         let grade = latticeAtLay.gradingMode.fitsShape
-        let key = [b.token, field == nil ? 0 : stressKey, grade ? 1 : 0, latticeAtLay.topologyID.hashValue,
+        let organic = latticeAtLay.isOrganic
+        let key = [b.token, field == nil ? 0 : stressKey, grade ? 1 : 0, latticeAtLay.topologyID.hashValue, organic ? 1 : 0,
                    LatticeLayoutColours.controlOneColour ? 1 : 0, b.solid?.token ?? -1, b.hidden ? 1 : 0]
         if let c = drawnCache, c.key == key { return c.bars }
         b.colours = LatticeLayoutColours.colours(laid, type: Self.lawType(latticeAtLay), grade: grade,
                                                  stress: field.map(LatticeLayoutColours.Stress.init(field:)),
-                                                 lookup: grade ? cellLookup() : nil)
+                                                 lookup: grade ? cellLookup() : nil, oneColour: organic)
         var h = Hasher()
         key.forEach { h.combine($0) }
         b.colourKey = h.finalize()
@@ -471,8 +472,13 @@ public final class LatticeLayoutPreview: ObservableObject {
         organicRefusals = []
         token &+= 1
         let seg = Self.segments(r.runs)
+        // ★ his 11-19 note and verdict: the vines smooth, round and blended where they meet (built off the main thread)
+        let runs = r.runs
+        let vines = await Task.detached(priority: .userInitiated) { OrganicVineShape(runs: runs) }.value
+        guard !Task.isCancelled else { return }
         var drawn = LatticeLayoutBarsInputs(token: token, bars: seg.bars, solid: nil, flags: seg.flags)
         drawn.lightFrom = Self.organicLightFrom(grown: grown, netFrom: seg.lightFrom, count: seg.count)
+        drawn.vines = vines
         bars = drawn
         var l = LatticeLayoutColours.Laid()   // no cells: the key and card read each strut's width and its cell size
         l.bars = seg.bars; l.barFlags = seg.skin; l.barCell = seg.cell; l.barRegion = seg.region; l.token = token
@@ -680,7 +686,7 @@ public final class LatticeLayoutPreview: ObservableObject {
     private func addMap() async {
         guard let session, let box, let b = bars, b.solid?.token != b.token else { return }
         do {
-            let m = try await Self.map(session, box, token: b.token)
+            let m = try await Self.map(session, box, token: b.token, smooth: latticeAtLay.isOrganic)
             guard !Task.isCancelled, solidWanted, var now = bars, now.token == b.token else { return }
             now.solid = m.grid
             bars = now
@@ -703,15 +709,17 @@ public final class LatticeLayoutPreview: ObservableObject {
 
     /// The engine's map over the part's box with a voxel of air all round: about a million voxels at most, never finer than
     /// 0.35 mm.
-    static func map(_ s: LatticeLayoutSession, _ box: (lo: SIMD3<Float>, hi: SIMD3<Float>), token: Int) async throws
-        -> (grid: LatticeLayoutSolidGrid, ms: Double) {
+    static func map(_ s: LatticeLayoutSession, _ box: (lo: SIMD3<Float>, hi: SIMD3<Float>), token: Int,
+                    smooth: Bool = false) async throws -> (grid: LatticeLayoutSolidGrid, ms: Double) {
         let ext = simd_max(box.hi - box.lo, SIMD3(repeating: 0.1))
         let voxel = Swift.max(0.35, Float(cbrt(Double(ext.x * ext.y * ext.z) / 1_000_000)))
         let dims = SIMD3<Int32>(Int32((ext.x / voxel).rounded(.up)) + 3, Int32((ext.y / voxel).rounded(.up)) + 3,
                                 Int32((ext.z / voxel).rounded(.up)) + 3)
         let origin = box.lo - SIMD3(repeating: voxel)
         let r = try await s.grid(origin: origin, voxel: voxel, dims: dims)
-        return (LatticeLayoutSolidGrid(token: token, origin: origin, voxel: voxel, dims: dims, rg: r.rg), r.ms)
+        // ★ his 11-19 note: Organic's cut edges are smooth lines, not the voxels' stair-steps
+        let rg = smooth ? LatticeLayoutSolidGrid.smoothed(r.rg, dims: dims) : r.rg
+        return (LatticeLayoutSolidGrid(token: token, origin: origin, voxel: voxel, dims: dims, rg: rg, smooth: smooth), r.ms)
     }
 
     // MARK: the page's settings, as core reads them

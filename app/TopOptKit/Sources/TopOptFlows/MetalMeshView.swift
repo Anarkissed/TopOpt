@@ -296,7 +296,9 @@ inline bool shell_is_latticed(float3 mpos, float3 mnormal, constant ShellClip& c
         if (any(gc < float3(-0.5)) || any(gc > c.dims.xyz - float3(0.5))) { return false; }
         float3 cuv = (gc + 0.5) / max(c.dims.xyz, float3(1.0));
         constexpr sampler cs(coord::normalized, filter::nearest, address::clamp_to_edge);
-        return regionTex.sample(cs, cuv).r >= 0.0;
+        // ★ gate.x > 2.5: the new engine's softened map (his 11-19: no stair-steps) is read linear, its zero a smooth line
+        constexpr sampler cl(coord::normalized, filter::linear, address::clamp_to_edge);
+        return (c.gate.x > 2.5 ? regionTex.sample(cl, cuv).r : regionTex.sample(cs, cuv).r) >= 0.0;
     }
     int n = int(c.dims.w + 0.5);
     if (n <= 0) { return false; }
@@ -4884,7 +4886,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // the new engine's bars (#362): the fourth writer — same encoder, attachments and .less + write depth state
         if layoutBarsInFrame, let bars = layoutBars,
            bars.encodeGBuffer(penc, depthState: depthState, clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView,
-                              eyeNormalBasis: uniforms.normalMatrix) {
+                              eyeNormalBasis: uniforms.normalMatrix, turning: turning) {
             frameDrawCalls += 1; frameVertices += 36 * bars.count }
         // ★ the solid view's cut walls (his ask 11-13): after the bars, the same encoder and depth state
         if layoutBarsInFrame, let bars = layoutBars,

@@ -47,6 +47,33 @@ public struct LatticeOrganicLook: Codable, Equatable, Sendable {
     /// ★ His 11-18: "Simulate stresses on unstressed walls" (Organic, Aesthetic only; nil = off). Each wall's number of
     /// foci is set in Selections (LatticeSettings.selectableSyntheticFoci, default organicSyntheticFoci = 3).
     public var syntheticStresses: Bool?
+    /// ★ His 11-19 note: an Organic group's finish is "None/Skin/Solid. Rim should be hidden." (nil = the part's finish)
+    public enum Finish: String, Codable, CaseIterable, Sendable {
+        case none, skin, solid
+        public var title: String { switch self { case .none: return "None"; case .skin: return "Skin"; case .solid: return "Solid" } }
+    }
+    public var finish: Finish?
+    /// ★ Cut 2 (his 11-19, via LatticeReview 19:51Z): depth variation, "a single on/off that limits to 1mm". On sends
+    /// `organic_face_relief_mm` 1.0 (vines keep their round tops up to 1 mm outside an open face), off sends 0 (every vine
+    /// cut flush at the face). "Default is not flush" (on). Loaded and fixed faces stay flush whatever it says.
+    public var depthVariation: Bool?
+    public var depthVariationValue: Bool { depthVariation ?? true }
+    /// ★ Cut 2 (his 11-19): "Make the extra spacing between vines an on/off check as well with an (i) that notes it will likely
+    /// lose strength." On sends `organic_strand_keep` 0.9, off 0.5. His default: "On in Aesthetic only".
+    public var extraSpacing: Bool?
+    public func extraSpacingValue(aesthetic: Bool) -> Bool { extraSpacing ?? aesthetic }
+    public static let faceReliefOnMM = 1.0, strandKeepOn = 0.9, strandKeepOff = 0.5
+    /// ★ Whether the engine takes the cut 2 keys (LatticeReview's claude/organic-engine, not merged): until then the two
+    /// rows are not offered and nothing is sent (an unknown key is refused by the engine; a control that does nothing is what
+    /// he flagged in Rim).
+    nonisolated(unsafe) public static var cut2Wired = false
+    public static let depthVariationInfo = "On: vines keep their round tops up to 1 mm outside an open face. Off: every vine "
+        + "is cut flush at the face. Faces that carry a load or are fixed are always flush."
+    public static let extraSpacingInfo = "Leaves more room between the vines. It will likely lose strength: fine for "
+        + "Aesthetic, and it may still work in Structural if there is strength to spare."
+    /// ★ Whether the engine takes a group's own Organic finish (LatticeReview's keys, owed): until then the row is not
+    /// offered (a control that does nothing is what he flagged in Rim).
+    nonisolated(unsafe) public static var finishWired = false
     public init() {}
     public var lookPercentValue: Double { Swift.min(Swift.max(lookPercent ?? 50, 1), 100) }
 
