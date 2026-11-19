@@ -995,7 +995,7 @@ static void test_follow_stress() {
   {
     const StepModel model = box_model(30, 30, 20);
     const TensorField f = traced_field();
-    const std::uint64_t today[2] = {0x9a119fd417d400d7ULL, 0x235c732cf4f2f269ULL};
+    const std::uint64_t today[2] = {0x9a119fd417d400d7ULL, 0xe8c60d9cd768769bULL};  // G11 amended 2026-11-19: hashed re-seed places (was 0x235c732cf4f2f269)
     for (int g = 0; g < 2; ++g) {
       OrganicAsk a = follow_ask(g == 1);
       Session s1(model), s2(model);
@@ -1481,7 +1481,7 @@ static void test_equal_ends() {
     CHECK(!threw);
   }
   // Ends that differ: nothing changes (the bars of OL-FOLLOW's two made lays, today's hashes from before OP6), no note.
-  const std::uint64_t today[2] = {0x9a119fd417d400d7ULL, 0x235c732cf4f2f269ULL};
+  const std::uint64_t today[2] = {0x9a119fd417d400d7ULL, 0xe8c60d9cd768769bULL};  // G11 amended 2026-11-19: hashed re-seed places (was 0x235c732cf4f2f269)
   for (int g = 0; g < 2; ++g) {
     Session s(model);
     const Outcome o = s.lay_organic(st, f, follow_ask(g == 1));
@@ -1567,7 +1567,7 @@ static void test_groups() {
   {
     const StepModel model = box_model(30, 30, 20);
     const TensorField f = traced_field();
-    const std::uint64_t today[2] = {0x9a119fd417d400d7ULL, 0x235c732cf4f2f269ULL};
+    const std::uint64_t today[2] = {0x9a119fd417d400d7ULL, 0xe8c60d9cd768769bULL};  // G11 amended 2026-11-19: hashed re-seed places (was 0x235c732cf4f2f269)
     for (int g = 0; g < 2; ++g) {
       Session s(model);
       const Outcome o = s.lay_organic(traced_settings(), f, std::vector<OrganicGroup>{{{1}, follow_ask(g == 1)}});
@@ -1855,6 +1855,127 @@ static void test_sample_bodies() {
   CHECK(threw);
 }
 
+// ── OL-G11 (G11 amended, the lead 2026-11-19): the re-seed's bare places and first steps are hashed, no repeating pattern ──
+// The sample bodies (cube, coupon) laid Grown with the app's sample ask at Look 50 (362's probe's ask). Each stride cell's bare place is the candidate nearest
+// a point placed in the cell by the hash (seed, region, cell), and a walked stub's first step is picked by the same hash
+// among the descending neighbours within 20 % of the steepest. Kept: every bare place within 1.5 spacings is still filled,
+// so the bare share after the re-seed is no worse than before the amendment, within 5 % (before: the pins below, read
+// from the tip 2847ca91). The pattern gone: no more than 10 % of the stubs' nearest-neighbour distances within 5 % of the
+// stride or of a whole multiple of it, and no more than 10 % of the stubs share a shape (a stub from a kept vertex: its
+// vector to 0.5 mm; a walked stub: its first three voxel steps) with another.
+static void test_g11_reseed_pattern() {
+  struct Pin { const char* kind; double bare_after; std::size_t on_grid, shared; };
+  const Pin before[2] = {{"cube", 0.0165, 36, 37}, {"coupon", 0.0241, 21, 17}};
+  for (const Pin& pin : before) {
+    LatticeSampleSpec spec;
+    spec.shape = pin.kind;
+    spec.topology = "octet";
+    const TriangleMesh body = lattice_sample_body(spec);
+    Settings st = whole_body_weave(body);
+    st.bead_mm = 0.45;
+    st.min_strut_lines = 2;
+    Session s(one_face_model(body));
+    // The app's sample ask at Look 50 (362's OrganicVineRunsProbe: the engine's limits, Auto Sweep, vine spacing off)
+    const SweepLimitsUnion L = s.sweep_limits_for(st, {1}, 0.45);
+    const auto half = [](double v) { return std::round(v * 2.0) / 2.0; };
+    const double cl = std::max(half(L.cell_lower_mm), std::ceil(2.0 * 0.5 * std::sqrt(3.0 * M_PI) * L.strut_lower_mm) / 2.0);
+    const double cu = std::max(cl, half(L.cell_upper_mm));
+    OrganicAsk a;
+    a.mode = OrganicMode::Grown;
+    a.follow_stress = true;
+    a.spacing_min_mm = cl;
+    a.spacing_max_mm = cu;
+    a.width_mm = L.strut_lower_mm;
+    a.width_heavy_mm = L.strut_upper_mm;
+    a.walls_out = true;
+    a.wall_gap = 2.5;
+    a.wall_gap_heavy = 1.0;
+    a.wall_cross = 1;
+    a.cross_gap = 2.5;
+    a.cross_gap_heavy = 1.0;
+    a.tie_level = true;
+    a.ties = true;
+    a.tie_gap = 1.0;
+    a.tie_gap_heavy = 0.5;
+    a.foot_gap = 2.5;
+    a.root_run = 0;
+    a.top_run = 0;
+    a.run_max = 1;
+    a.stress_goal = true;
+    a.prune = true;
+    a.shape_fit = true;
+    a.shape_reach = 1;
+    a.member_cap = false;
+    a.hold_parts = true;
+    a.part_to_floor = true;
+    a.part_reach_mm = 1.5 * cu;
+    a.part_support_mm = 0.75 * cl;
+    a.link_width = 1;
+    a.unbraced_max = 10;
+    a.bed_floor_mm = 0.8;
+    a.layer_mm = 0.2;
+    a.percentile = 0.95;
+    a.strand_keep = 0.5;
+    const std::vector<OrganicGroup> gs = {{{1}, a}};
+    const SyntheticStress made = organic_synthetic_stress(s, st, TensorField{}, {{1, 1}}, gs);
+    CHECK(made.refused.empty());
+    const Outcome o = s.lay_organic(st, made.field, gs);
+    CHECK(o.refused.empty() && o.grown);
+    if (!o.grown) continue;
+    const GrowReport& g = *o.grown;
+    const double hv = made.field.spacing;
+    std::vector<double> spf;
+    {
+      const OrganicSpacing sp = organic_spacing(*s.domain(), 1, made.field, a);
+      for (std::size_t e = 0; e < sp.candidate.size(); ++e)
+        if (sp.candidate[e]) spf.push_back(sp.spacing_mm[e]);
+    }
+    std::sort(spf.begin(), spf.end());
+    const double S = std::max(1, static_cast<int>(0.5 * (spf.empty() ? 0.0 : spf[spf.size() / 2]) / hv)) * hv;
+    std::size_t on_grid = 0;
+    for (std::size_t i = 0; i < g.stubs.size(); ++i) {
+      double b = 1e300;
+      for (std::size_t j = 0; j < g.stubs.size(); ++j)
+        if (j != i) b = std::min(b, dist(g.stubs[i].top, g.stubs[j].top));
+      const double m = std::round(b / S);
+      on_grid += m >= 1 && std::fabs(b - m * S) <= 0.05 * S;
+    }
+    std::map<std::string, int> shapes;
+    for (const GrowReport::Stub& u : g.stubs) {
+      char buf[128];
+      if (u.from_vertex || u.pts.size() < 4) {
+        std::snprintf(buf, sizeof buf, "v%ld,%ld,%ld", std::lround(2 * (u.top.x - u.root.x)),
+                      std::lround(2 * (u.top.y - u.root.y)), std::lround(2 * (u.top.z - u.root.z)));
+      } else {
+        const std::size_t n = u.pts.size();
+        long q[9];
+        for (int k = 0; k < 3; ++k) {
+          const Vec3& p = u.pts[n - 1 - k];
+          const Vec3& r = u.pts[n - 2 - k];
+          q[3 * k] = std::lround((r.x - p.x) / hv);
+          q[3 * k + 1] = std::lround((r.y - p.y) / hv);
+          q[3 * k + 2] = std::lround((r.z - p.z) / hv);
+        }
+        std::snprintf(buf, sizeof buf, "w%ld,%ld,%ld;%ld,%ld,%ld;%ld,%ld,%ld", q[0], q[1], q[2], q[3], q[4], q[5], q[6],
+                      q[7], q[8]);
+      }
+      ++shapes[buf];
+    }
+    std::size_t shared = 0;
+    for (const auto& kv : shapes)
+      if (kv.second > 1) shared += static_cast<std::size_t>(kv.second);
+    const std::size_t n = g.stubs.size();
+    std::printf("OL-G11 %s: stubs %zu (voids %zu, landed %zu, failed %zu); stride %.2f mm; nearest-neighbour distances on "
+                "the stride grid %zu (before %zu); stubs sharing a shape %zu, %zu distinct (before %zu sharing); bare "
+                "%.4f before re-seeding, %.4f after (before the amendment %.4f)\n",
+                pin.kind, n, g.reseed_voids, g.reseed_landed, g.reseed_failed, S, on_grid, pin.on_grid, shared,
+                shapes.size(), pin.shared, g.bare_before, g.bare_after, pin.bare_after);
+    CHECK(n > 0);
+    CHECK(10 * on_grid <= n);
+    CHECK(10 * shared <= n);
+    CHECK(g.bare_after <= 1.05 * pin.bare_after + 1e-12);
+  }
+}
 
 // ── OL-OG1, OL-OG2 (brief E6): the gap between struts, and strut ends standing proud of an open face ───────────────────
 // The made parts: the 30 x 30 x 20 box, a field whose stress grows along x and y, the weave under one face.
@@ -2557,6 +2678,7 @@ int main() {
   test_groups();
   test_synthetic();
   test_sample_bodies();
+  test_g11_reseed_pattern();
   test_og1_gap();
   test_og2_relief();
   test_os18_relief_vines();

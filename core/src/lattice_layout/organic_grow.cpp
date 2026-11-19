@@ -267,6 +267,7 @@ std::uint64_t mix(std::uint64_t x) {
   x = (x ^ (x >> 27)) * 0x94D049BB133111EBULL;
   return x ^ (x >> 31);
 }
+constexpr std::uint64_t kWhatReseed = 0x6703;   // G11 amended: the re-seed's bare places and first steps
 double rnd(std::uint64_t seed, std::uint64_t what, long long a, long long b, int k) {
   std::uint64_t h = mix(seed);
   h = mix(h ^ what);
@@ -2001,20 +2002,43 @@ void Grower::account(const Fate& f) {
 void Grower::reseed(std::vector<Tip>& tips) {
   const double hv = field_.spacing;
   const int stride = std::max(1, static_cast<int>(0.5 * median_ / hv));
+  // G11 amended (the owner, 2026-11-19: "there is a repeating pattern in the back ... Is there a solve for that?"): a
+  // bare place is no longer a voxel on a fixed lattice of the stride: each stride cell takes the candidate voxel nearest
+  // a point placed in the cell by a hash of the job's seed, the region and the cell (as the floor and wall seeds are),
+  // so neighbouring places are not one stride apart and their stubs do not repeat.
+  const std::uint64_t what = kWhatReseed ^ (static_cast<std::uint64_t>(static_cast<std::uint32_t>(region_)) << 20);
   std::vector<std::array<int, 3>> voids;
+  std::vector<std::array<int, 3>> void_cell;   // the stride cell each came from (the hash's key for its first step)
   std::vector<Vec3> at;
-  for (int k = 0; k < field_.nz; k += stride)
-    for (int j = 0; j < field_.ny; j += stride)
-      for (int i = 0; i < field_.nx; i += stride) {
-        const std::size_t e = field_.index(i, j, k);
-        if (!spacing().candidate[e]) continue;
-        const Vec3 q = centre(i, j, k);
+  for (int k0 = 0; k0 < field_.nz; k0 += stride)
+    for (int j0 = 0; j0 < field_.ny; j0 += stride)
+      for (int i0 = 0; i0 < field_.nx; i0 += stride) {
+        const int ck = k0 / stride, cj = j0 / stride, ci = i0 / stride;
+        const Vec3 pick{field_.origin.x + (i0 + rnd(ask_.seed, what, ci, cj, 3 * ck)) * hv * 1.0 +
+                            (stride - 1) * hv * rnd(ask_.seed, what, ci, cj, 3 * ck),
+                        field_.origin.y + (j0 + rnd(ask_.seed, what, ci, cj, 3 * ck + 1)) * hv * 1.0 +
+                            (stride - 1) * hv * rnd(ask_.seed, what, ci, cj, 3 * ck + 1),
+                        field_.origin.z + (k0 + rnd(ask_.seed, what, ci, cj, 3 * ck + 2)) * hv * 1.0 +
+                            (stride - 1) * hv * rnd(ask_.seed, what, ci, cj, 3 * ck + 2)};
+        int bi = -1, bj = -1, bk = -1;
+        double bd = std::numeric_limits<double>::infinity();
+        for (int k = k0; k < std::min(field_.nz, k0 + stride); ++k)
+          for (int j = j0; j < std::min(field_.ny, j0 + stride); ++j)
+            for (int i = i0; i < std::min(field_.nx, i0 + stride); ++i) {
+              if (!spacing().candidate[field_.index(i, j, k)]) continue;
+              const double d = dist(centre(i, j, k), pick);
+              if (d < bd) { bd = d; bi = i; bj = j; bk = k; }
+            }
+        if (bi < 0) continue;
+        const std::size_t e = field_.index(bi, bj, bk);
+        const Vec3 q = centre(bi, bj, bk);
         const double lim = ask_.void_ratio * spacing().spacing_mm[e];   // E: G11's kVoidRatio unless asked
         if (live_within(q, lim)) continue;
         bool near = false;
         for (const Vec3& o : at) near = near || dist(o, q) < lim;
         if (near) continue;
-        voids.push_back({i, j, k});
+        voids.push_back({bi, bj, bk});
+        void_cell.push_back({ci, cj, ck});
         at.push_back(q);
       }
   rep_.reseed_voids += voids.size();
@@ -2080,6 +2104,7 @@ void Grower::reseed(std::vector<Tip>& tips) {
       if (stress_dir(q, f)) f = mul(f, -1.0);   // the stress, turned to point down
       int bi = -1, bj = -1, bk = -1;
       double best = std::numeric_limits<double>::infinity();
+      std::vector<std::pair<double, std::array<int, 3>>> down_nb;   // G11 amended: the descending neighbours and scores
       for (int dk = -1; dk <= 1; ++dk)
         for (int dj = -1; dj <= 1; ++dj)
           for (int di = -1; di <= 1; ++di) {
@@ -2090,8 +2115,24 @@ void Grower::reseed(std::vector<Tip>& tips) {
             if (!spacing().candidate[e2] || visited.count(e2)) continue;
             const Vec3 o{static_cast<double>(di), static_cast<double>(dj), static_cast<double>(dk)};
             const double score = dot(o, up_) * 10.0 - dot(o, f) + 0.1 * (std::abs(di) + std::abs(dj) + std::abs(dk));
+            if (dot(o, up_) < 0.0) down_nb.push_back({score, {i2, j2, k2}});
             if (score < best) { best = score; bi = i2; bj = j2; bk = k2; }
           }
+      // G11 amended: the FIRST step is any descending neighbour within 20 % of the steepest (its descent, -score, at
+      // least 0.8 of the best's), chosen by the same hash (seed, region, the place's stride cell); later steps as before.
+      if (w == 0 && bi >= 0 && !down_nb.empty() && -best > 0.0) {
+        std::vector<std::array<int, 3>> near_best;
+        for (const auto& nb : down_nb)
+          if (-nb.first >= 0.8 * -best) near_best.push_back(nb.second);
+        if (near_best.size() > 1) {
+          const std::array<int, 3>& c3 = void_cell[vi];
+          const std::size_t pickn = std::min(near_best.size() - 1, static_cast<std::size_t>(
+              std::floor(rnd(ask_.seed, what ^ 1ULL, c3[0], c3[1], c3[2]) * static_cast<double>(near_best.size()))));
+          bi = near_best[pickn][0];
+          bj = near_best[pickn][1];
+          bk = near_best[pickn][2];
+        }
+      }
       if (bi < 0) break;   // boxed in
       ci = bi; cj = bj; ck = bk;
       visited.insert(field_.index(ci, cj, ck));

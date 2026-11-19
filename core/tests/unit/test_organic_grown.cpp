@@ -461,8 +461,8 @@ static void test_notch() {
   std::printf("G-4 points outside the model: %zu, in the slot: %zu; strands ended at the edge %zu\n", outside, in_slot,
               rep.ended_edge);
   CHECK(rep.ended_edge > 0);
-  KNOWN_FAULT(0, 19, outside, "G-4 strand points outside the model");
-  KNOWN_FAULT(0, 18, in_slot, "G-4 strand points in the slot of air");
+  KNOWN_FAULT(0, 22, outside, "G-4 strand points outside the model");  // G11 amended 2026-11-19: was 19
+  KNOWN_FAULT(0, 21, in_slot, "G-4 strand points in the slot of air");  // G11 amended 2026-11-19: was 18
   std::size_t loose = 0;
   for (std::size_t i = 0; i < ss.size(); ++i)
     loose += !end_held(pr, ss, i, ss[i].points.front()) + !end_held(pr, ss, i, ss[i].points.back());
