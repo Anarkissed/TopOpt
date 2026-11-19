@@ -16571,7 +16571,7 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
   if (c.load_on_open_lattice) {
     R.verdict = "fail";
     R.fail_reason = "load_on_open_lattice";
-  } else if (c.loaded_nodes_undriven > 0) {
+  } else if (c.no_load_path) {   // OS9 amended: the load handed no one (unheld, or only near adrift parts) over the share
     R.verdict = "fail";
     R.fail_reason = "no_load_path";
   } else if (R.solid_margin_effective < options.margin_stop) {
@@ -16697,7 +16697,16 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
        }() + "]" +
        ", \"load_total_n\": " + num(c.load_total_n) + ", \"load_share\": " + num(c.load_share) + ", \"load_on_frame_n\": " + num(c.load_on_frame_n) +
        ", \"frame_nodes_loaded\": " + std::to_string(c.frame_nodes_loaded) +
-       ", \"loaded_nodes_undriven\": " + std::to_string(c.loaded_nodes_undriven) + ", \"strut_mm\": " + num(c.strut_mm) +
+       ", \"loaded_nodes_undriven\": " + std::to_string(c.loaded_nodes_undriven) +
+       ", \"load_on_adrift_n\": " + num(c.load_on_adrift_n) + ", \"adrift_total\": " + std::to_string(c.adrift_total) +
+       ", \"adrift_parts\": [" + [&] {
+         std::string t;
+         for (const ll::FrameCheck::Adrift& d : c.adrift)
+           t += std::string(t.empty() ? "" : ", ") + "{\"centre\": [" + num(d.centre.x) + ", " + num(d.centre.y) + ", " + num(d.centre.z) +
+                "], \"bars\": " + std::to_string(d.bars) + ", \"length_mm\": " + num(d.length_mm) + ", \"loaded_nodes\": " +
+                std::to_string(d.loaded_nodes) + ", \"load_n\": " + num(d.load_n) + "}";
+         return t;
+       }() + "]" + ", \"strut_mm\": " + num(c.strut_mm) +
        ", \"solved\": " + std::string(c.solved ? "true" : "false") + ", \"dofs\": " + std::to_string(c.dofs) +
        ", \"solver\": " + json_str(c.solver) + ", \"factor_gb\": " + num(c.factor_gb) + ", \"residual\": " + num(c.residual) + "},\n";
   s += "    \"material\": {\"lattice_mm3\": " + num(fm.lattice_mm3) + ", \"lattice_outside_solid_mm3\": " + num(fm.lattice_open_mm3) +

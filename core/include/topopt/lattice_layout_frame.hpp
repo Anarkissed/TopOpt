@@ -135,6 +135,19 @@ struct FrameCheck {
   std::size_t loaded_nodes_undriven = 0;   // nodes within the load's reach on a piece of the frame with no driven node
                                            // (Organic: the load has no path, the lead's ruling of 2026-11-18)
   bool load_on_open_lattice = false;
+  // OS9 amended (the lead, 2026-11-19): a part of the frame with no driven node (adrift) carries nothing and is never by
+  // itself a reason to fail. `load_on_adrift_n`: the load the frame hands no one because it lands only near adrift
+  // nodes: the lattice's share of the load on every loaded grid node that has an adrift frame node in its reach and no
+  // node of a driven part (the solve hands adrift nodes nothing, the share goes to the driven parts' loaded nodes).
+  // `no_load_path`: (load_unheld_n + load_on_adrift_n) / load_total_n above load_unheld_share.
+  double load_on_adrift_n = 0.0;
+  bool no_load_path = false;
+  // Every adrift part (at most 20 listed, the longest first; `adrift_total` all of them): the middle of its nodes' box,
+  // its bars, its length, its nodes within the load's reach, the load landing only near it (each grid node's share
+  // split equally among the adrift parts in its reach).
+  struct Adrift { Vec3 centre{}; std::size_t bars = 0, loaded_nodes = 0; double length_mm = 0.0, load_n = 0.0; };
+  std::vector<Adrift> adrift;
+  std::size_t adrift_total = 0;
   double strut_mm = 0.0, unjudged_mm = 0.0;
   bool too_unjudged = false;
   std::size_t judged = 0, under_safety = 0, under_one = 0, buckling_failures = 0, stubs = 0;

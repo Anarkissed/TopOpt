@@ -524,6 +524,7 @@ FrameCheck check_frame(const FrameModel& f, const FrameVoxelSolve& vs, const Fra
     std::array<double, 3> total{0.0, 0.0, 0.0};
     double lat = 0.0, all = 0.0;
     std::vector<char> seen_voxel(g.voxel_count(), 0), loaded(nn, 0);
+    std::vector<std::pair<double, std::vector<int>>> adrift_only;   // per loaded grid node with only adrift nodes near: |f|, their parts
     for (const auto& [node, fv] : force) {
       const double mag = std::sqrt(fv[0] * fv[0] + fv[1] * fv[1] + fv[2] * fv[2]);
       if (!(mag > 0.0)) continue;
@@ -542,15 +543,23 @@ FrameCheck check_frame(const FrameModel& f, const FrameVoxelSolve& vs, const Fra
           }
       const Vec3 P{g.origin.x + a * h, g.origin.y + b * h, g.origin.z + c * h};
       const CellKey ck = cell_of(P, R);
+      bool any_driven_side = false;
+      std::vector<int> parts;   // the adrift parts with a node in reach
       for (long long dx = -1; dx <= 1; ++dx)
         for (long long dy = -1; dy <= 1; ++dy)
           for (long long dz = -1; dz <= 1; ++dz) {
             const auto it = near.find({ck[0] + dx, ck[1] + dy, ck[2] + dz});
             if (it == near.end()) continue;
             for (int n : it->second)
-              if (len3(sub3(f.nodes[static_cast<std::size_t>(n)], P)) <= R)
-                (comp_in[static_cast<std::size_t>(comp[static_cast<std::size_t>(n)])] ? loaded : lost)[static_cast<std::size_t>(n)] = 1;
+              if (len3(sub3(f.nodes[static_cast<std::size_t>(n)], P)) <= R) {
+                const int cn = comp[static_cast<std::size_t>(n)];
+                const bool in = comp_in[static_cast<std::size_t>(cn)];
+                (in ? loaded : lost)[static_cast<std::size_t>(n)] = 1;
+                any_driven_side = any_driven_side || in;
+                if (!in && std::find(parts.begin(), parts.end(), cn) == parts.end()) parts.push_back(cn);
+              }
           }
+      if (!any_driven_side && !parts.empty()) adrift_only.push_back({mag, std::move(parts)});
     }
     out.load_total_n = std::sqrt(total[0] * total[0] + total[1] * total[1] + total[2] * total[2]);
     const double share = all > 0.0 ? lat / all : 0.0;
@@ -570,6 +579,53 @@ FrameCheck check_frame(const FrameModel& f, const FrameVoxelSolve& vs, const Fra
       out.load_on_frame_n = on;
     }
     out.load_on_open_lattice = out.load_unheld_n > 0.0 && share > s.load_unheld_share;
+    // OS9 amended: the adrift parts, and the load that lands only near them.
+    {
+      std::unordered_map<int, std::size_t> slot;   // adrift part -> its place in out.adrift
+      for (std::size_t n = 0; n < nn; ++n) {
+        if (!used[n] || comp_in[static_cast<std::size_t>(comp[n])]) continue;
+        const int cn = comp[n];
+        auto it = slot.find(cn);
+        if (it == slot.end()) {
+          it = slot.emplace(cn, out.adrift.size()).first;
+          out.adrift.push_back({});
+          out.adrift.back().centre = f.nodes[n];
+        }
+        FrameCheck::Adrift& d = out.adrift[it->second];
+        d.loaded_nodes += lost[n];
+      }
+      // Box per part (centre: its middle), bars and length.
+      std::vector<Vec3> lo(out.adrift.size(), Vec3{1e300, 1e300, 1e300}), hi(out.adrift.size(), Vec3{-1e300, -1e300, -1e300});
+      for (std::size_t n = 0; n < nn; ++n) {
+        if (!used[n] || comp_in[static_cast<std::size_t>(comp[n])]) continue;
+        const std::size_t k = slot[comp[n]];
+        const Vec3& X = f.nodes[n];
+        lo[k] = {std::min(lo[k].x, X.x), std::min(lo[k].y, X.y), std::min(lo[k].z, X.z)};
+        hi[k] = {std::max(hi[k].x, X.x), std::max(hi[k].y, X.y), std::max(hi[k].z, X.z)};
+      }
+      std::vector<std::vector<int>> bars_of(out.adrift.size());
+      for (const FramePiece& p : f.pieces) {
+        const int cn = comp[static_cast<std::size_t>(p.a)];
+        if (comp_in[static_cast<std::size_t>(cn)]) continue;
+        const std::size_t k = slot[cn];
+        out.adrift[k].length_mm += len3(sub3(f.nodes[static_cast<std::size_t>(p.b)], f.nodes[static_cast<std::size_t>(p.a)]));
+        if (std::find(bars_of[k].begin(), bars_of[k].end(), p.bar) == bars_of[k].end()) bars_of[k].push_back(p.bar);
+      }
+      for (std::size_t k = 0; k < out.adrift.size(); ++k) {
+        out.adrift[k].centre = {0.5 * (lo[k].x + hi[k].x), 0.5 * (lo[k].y + hi[k].y), 0.5 * (lo[k].z + hi[k].z)};
+        out.adrift[k].bars = bars_of[k].size();
+      }
+      for (const auto& [mag, parts] : adrift_only) {
+        out.load_on_adrift_n += share * mag;
+        for (int cn : parts) out.adrift[slot[cn]].load_n += share * mag / static_cast<double>(parts.size());
+      }
+      out.adrift_total = out.adrift.size();
+      std::stable_sort(out.adrift.begin(), out.adrift.end(),
+                       [](const FrameCheck::Adrift& x, const FrameCheck::Adrift& y) { return x.length_mm > y.length_mm; });
+      if (out.adrift.size() > 20) out.adrift.resize(20);
+      out.no_load_path = out.load_total_n > 0.0 &&
+                         (out.load_unheld_n + out.load_on_adrift_n) / out.load_total_n > s.load_unheld_share;
+    }
   }
   out.ms_drive = ms_since(t0);
 

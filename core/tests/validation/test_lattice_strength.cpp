@@ -645,6 +645,69 @@ int main() {
       CHECK(has(hb2, "\"passes_at_infill_percent\": null"));   // not even solid infill holds 2e6 N
     }
 
+    // ── §17 (OS9 amended, the lead's ruling of 2026-11-19) an adrift part of the frame (no driven node) carries nothing
+    // and is never by itself a reason to fail. The organic block's own lattice, checked with (a) one extra loose bar
+    // lying 0.5 mm outside the loaded x = 30 face (near the load, adrift): no fail for it, listed with its place; and
+    // (b) under a load on the top face, a lattice of loose bars only under it (adrift), with one strut from the floor
+    // to one corner of the face: the load lands only near adrift nodes: no_load_path.
+    {
+      StepModel m = import_part_file_resolved(kDir + "/block.stl");
+      Session session(std::move(m));
+      const FileJob job = parse_file_job(fj);
+      TensorField t17 = tf;
+      const Outcome lay = session.lay_organic(job.settings, t17, job.organic, 0);
+      const StrengthCheck check = lattice_file_strength_check(MATERIALS_JSON_PATH, SETTINGS_RULES_PATH);
+      const auto check_with = [&](const std::string& tag, const Bars& bars, const std::string& sj) {
+        write(kDir + "/strength_job.json", sj);
+        StrengthAsk ask;
+        ask.session = &session;
+        ask.outcome = &lay;
+        ask.job_path = kDir + "/strength_job.json";
+        ask.out_dir = kDir + "/" + tag;
+        std::filesystem::create_directories(ask.out_dir);
+        ask.part_lo = {0, 0, 0};
+        ask.part_hi = {30, 30, 12};
+        ask.bars = &bars;
+        ask.light_width_mm = 0.9;
+        const StrengthDone d = check.run_organic(ask);
+        CHECK(d.ok);
+        return d.json;
+      };
+      const auto loose = [](Vec3 a, Vec3 b) {
+        Bar x;
+        x.a = a;
+        x.b = b;
+        x.width = 0.9;
+        x.end_a = x.end_b = Bar::End::Loose;
+        x.region = 1;
+        return x;
+      };
+      Bars with_extra = lay.bars;
+      with_extra.bars.push_back(loose({30.5, 10, 4}, {30.5, 15, 4}));
+      with_extra.bars.push_back(loose({30.5, 15, 4}, {30.5, 20, 4}));
+      const std::string ja = check_with("adrift_a", with_extra, strength_job(f, 20.0));
+      const std::size_t fr = ja.find("\"adrift_parts\": [");
+      std::printf("[adrift a] %s | %s\n", ja.substr(ja.find("\"verdict\""), 20).c_str(),
+                  fr == std::string::npos ? "-" : ja.substr(fr, 220).c_str());
+      CHECK(!has(ja, "\"fail_reason\": \"no_load_path\"") && num_after(ja, "adrift_total") >= 1.0 && fr != std::string::npos &&
+            has(ja.substr(fr, 200), "\"centre\": [30.5, 15, 4]"));
+      Bars only_adrift;
+      for (double y = 3.0; y <= 27.0; y += 3.0)
+        for (double x = 3.0; x < 27.0; x += 0.6) only_adrift.bars.push_back(loose({x, y, 11.6}, {x + 0.6, y, 11.6}));
+      Bar post;
+      post.a = {27.0, 27.0, 1.0};
+      post.b = {27.0, 27.0, 11.6};
+      post.width = 0.9;
+      post.end_a = Bar::End::Solid;
+      post.end_b = Bar::End::Loose;
+      post.region = 1;
+      only_adrift.bars.push_back(post);
+      const std::string jb = check_with("adrift_b", only_adrift, strength_job(f, 20.0, "lattice_part", "block.stl", f.top));
+      std::printf("[adrift b] %s; load on adrift %.4g N of %.4g N, loaded nodes undriven %.0f\n", jb.substr(jb.find("\"verdict\""), 60).c_str(),
+                  num_after(jb, "load_on_adrift_n"), num_after(jb, "load_total_n"), num_after(jb, "loaded_nodes_undriven"));
+      CHECK(has(jb, "\"fail_reason\": \"no_load_path\"") && num_after(jb, "load_on_adrift_n") > 0.01 * num_after(jb, "load_total_n"));
+    }
+
     // ── §10 (brief E2, item 12) the strengthen rounds as one job: a heavy load (struts under the safety margin), the
     // width on a Sweep and the spacing a range; one round allowed. Then a job with nothing that follows the stress.
     const auto strengthen = [&](const std::string& tag, const std::string& extra, double newtons, const std::string& settings) {
@@ -1047,7 +1110,7 @@ int main() {
         // The same struts judged, the same under the margin, each margin the same to float32's last places (the two
         // solves sum in another order: 1e-7 apart).
         differ += std::isnan(x) != std::isnan(y) || (x < 1.5f) != (y < 1.5f) ||
-                  (!std::isnan(x) && std::fabs(x - y) > 1e-5f * std::fabs(x));
+                  (!std::isnan(x) && x < 1e6f && std::fabs(x - y) > 1e-5f * std::fabs(x));   // above 1e6: an unstressed strut, noise
         under_a += x < 1.5f;
         under_b += y < 1.5f;
       }
