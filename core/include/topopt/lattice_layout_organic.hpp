@@ -253,7 +253,14 @@ struct OrganicAsk {
   // app: loaded and fixed faces) where no end stands proud.
   double face_relief_mm = 1.0;
   std::vector<int> relief_exclude_faces;
+  // OG3 (brief E6, leg D), Traced: no point of a traced curve is laid closer than strand_keep x the local spacing,
+  // centre line to centre line, to a curve of the same direction family it does not end on; a curve that comes that
+  // close ENDS there (the tracer's d_test, OrganicParams::test_ratio) and joins by the existing rules. Seeding stays at
+  // the spacing; the thinning test stays at the tracer's 0.5. 0.5 to 1; 0.5 = the tracer's old constant
+  // (kOrganicTestRatio), the old lay bar for bar. Grown does not read it.
+  double strand_keep = 0.9;
 };
+inline constexpr double kOrganicStrandKeepDefault = 0.9;   // OG3
 inline constexpr double kOrganicGapLinesDefault = 1.5;   // OG1
 inline constexpr double kOrganicGapLinesMax = 4.0;
 inline constexpr double kOrganicReliefMaxMm = 1.0;       // OG2
@@ -534,6 +541,9 @@ struct OrganicTraceStats {
   std::vector<double> tie_level_span_mm;
   double tie_level_dz_max_mm = 0.0;
   std::size_t gap_capped = 0;   // OG1 (brief E6): strand points whose width the gap rule lowered
+  // OG3 (brief E6, leg D): level-tie segments taken out (near-parallel within the gap of a strand they do not join),
+  // and those kept.
+  std::size_t og3_tie_segments_cut = 0, og3_tie_segments_kept = 0;
 };
 
 // The Traced placement of one weave region, as strands. The candidate voxels are those whose CENTRE the domain says is

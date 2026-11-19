@@ -557,7 +557,8 @@ static void test_whole_run() {
   const StepModel model = pocket_block();
   Session session(model);
   const TensorField field = diagonal_field();
-  const OrganicAsk ask{5.0, 0.9, {0, 0, 1}};
+  OrganicAsk ask{5.0, 0.9, {0, 0, 1}};
+  ask.strand_keep = 0.5;   // OG3 at the tracer's old constant: this pins the old trace's level line
   const Outcome out = session.lay_organic(pocket_settings(), field, ask);
   const Domain& d = *session.domain();
   const std::vector<Strand> strands = trace_strands(d, 1, field, ask);

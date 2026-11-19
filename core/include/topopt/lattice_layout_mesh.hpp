@@ -480,6 +480,12 @@ struct PrintableReport {
   bool clean = false;  // the loop ended because the check was clean (not because it ran out of passes)
   std::vector<int> found_per_pass;   // mid-air starts + one-ended overhangs, pass by pass
   std::vector<Vec3> drop_at;         // what the loop ended with: the same call with these gives the mesh in one pass
+  // OG2c (brief E6, leg C): where the final check's findings lie (mid-air starts, one-ended overhangs, long bridges;
+  // empty when clean), the bars whose relief was cut back flush because a finding lay on their proud part, and how many
+  // times the whole loop was run again for that.
+  std::vector<Vec3> findings_at;
+  std::size_t relief_flushed = 0;
+  int relief_rounds = 0;
   std::vector<MeshSpec::Post> posts;
   std::size_t stands_added = 0;      // O8: of `posts`, those put under a weave's long shallow runs
   // O10, mid-air findings that are not findings for a weave, all passes together: a speck (an island smaller than

@@ -574,6 +574,7 @@ static void test_r_traced_ties() {
   const Domain d(pm, ds);
   const TensorField f = traced_field();
   OrganicAsk a = traced_ask();
+  a.strand_keep = 0.5;   // OG3 at the tracer's old constant: R's own ties, every one laid (OL-OG3 cuts them)
   OrganicTraceStats off, on;
   const std::vector<Strand> plain = trace_strands(d, 1, f, a, &off);
   a.tie_level = true;
@@ -964,8 +965,9 @@ static void test_session_sweep_limits() {
 static OrganicAsk follow_ask(bool grown) {
   OrganicAsk a = traced_ask();
   a.width_heavy_mm = 1.6;
-  a.gap_lines = 0.0;        // OG1, OG2 off: the hashes pinned here are the lays before them
+  a.gap_lines = 0.0;        // OG1, OG2 off, OG3 at the tracer's old 0.5: the hashes pinned here are the lays before them
   a.face_relief_mm = 0.0;
+  a.strand_keep = 0.5;
   if (grown) {
     a.mode = OrganicMode::Grown;
     a.layer_mm = 0.2;
@@ -1905,6 +1907,7 @@ static void test_og1_gap() {
       OrganicAsk a = p.ask;
       a.gap_lines = 0.0;
       a.face_relief_mm = 0.0;
+      a.strand_keep = 0.5;   // OG3 at the tracer's old constant
       Session session(model);
       const Outcome o = session.lay_organic(gap_settings(p.face, p.depth, p.drop), f, a);
       ++n;
@@ -2136,7 +2139,7 @@ static void test_og2_relief() {
         most = std::max(most, pm);
         const double out = -pr.depth(end);
         most_out = std::max(most_out, out);
-        bad += (e == 0 ? x.end_a : x.end_b) != Bar::End::Surface || pm > relief + 1e-12 || std::fabs(out - pm) > 0.02 ||
+        bad += (e == 0 ? x.end_a : x.end_b) != Bar::End::Surface || pm > relief + 1e-12 || out > pm + 0.02 ||
                end.z <= 2.0 || x.net;
       }
       if (i < p.bars.bars.size()) {
@@ -2280,6 +2283,40 @@ static void test_og2_relief() {
     CHECK(o.relief.proud > 0 && o.relief.proud == a1.relief.proud + a2.relief.proud &&
           region_fnv(o, 1) == region_fnv(a1, 1) && region_fnv(o, 2) == region_fnv(a2, 2));
   }
+  // OG3 (leg D): the strand distance. At the tracer's old 0.5 the lay is the old one (OL-OG1's pins); at the default
+  // 0.9 a Traced lay has fewer bars and its level ties lose the segments lying along a strand within the gap; Grown is
+  // not changed; the range 0.5 to 1 is refused outside, by name; the job key is read.
+  {
+    const TensorField f2 = traced_field();
+    OrganicAsk old = judged_ask(false), on = old;
+    old.strand_keep = 0.5;
+    CHECK(on.strand_keep == kOrganicStrandKeepDefault && kOrganicStrandKeepDefault == 0.9);
+    Session s1(model), s2(model);
+    const Outcome a = s1.lay_organic(traced_settings(), f2, old), b = s2.lay_organic(traced_settings(), f2, on);
+    DomainSpec ds;
+    ds.bead_mm = 0.45;
+    ds.min_strut_lines = 2.0;
+    bool ok = false;
+    ds.regions = {region_from_faces(model, {1}, 1, Role::Lattice, 16.0, 0.0, &ok)};
+    ds.regions[0].weave = true;
+    const PartMeasure pm(weld_mesh(model.mesh));
+    const Domain d(pm, ds);
+    OrganicTraceStats st;
+    (void)trace_strands(d, 1, f2, on, &st);
+    OrganicAsk g1 = judged_ask(true), g2 = g1;
+    g1.strand_keep = 0.5;
+    Session s3(model), s4(model);
+    const Outcome ga = s3.lay_organic(traced_settings(), f2, g1), gb = s4.lay_organic(traced_settings(), f2, g2);
+    std::printf("OL-OG3 judged Traced: %zu bars at 0.5, %zu at 0.9; level-tie segments taken out %zu (kept %zu); Grown "
+                "the same %d\n", a.bars.bars.size(), b.bars.bars.size(), st.og3_tie_segments_cut, st.og3_tie_segments_kept,
+                bars_hash(ga.bars) == bars_hash(gb.bars) ? 1 : 0);
+    CHECK(ok && b.bars.bars.size() < a.bars.bars.size() && st.og3_tie_segments_cut > 0 && bars_hash(ga.bars) == bars_hash(gb.bars));
+    for (double bad : {0.4, 1.1}) {
+      OrganicAsk x = on;
+      x.strand_keep = bad;
+      CHECK(has_refusal(validate_organic(traced_settings(), x, nullptr), "strand_keep", "out_of_range"));
+    }
+  }
   // The job keys (OG1, OG2): absent, the defaults (1.5 lines, 1 mm, no face); given, read; out of range, refused by name.
   // A file job with them: the result says the gap, the diagnosis and the relief.
   {
@@ -2288,7 +2325,9 @@ static void test_og2_relief() {
       "region_expand_mm": [0], "region_face_counts": [1], "region_faces": [1], "region_weave": [true], "drop_loose": false,
       "organic_spacing_min_mm": 2, "organic_spacing_max_mm": 6, "organic_width_mm": 0.9, "organic_width_heavy_mm": 1.6)";
     const FileJob plain = parse_file_job(head + "}}");
-    CHECK(plain.organic.gap_lines == 1.5 && plain.organic.face_relief_mm == 1.0 && plain.organic.relief_exclude_faces.empty());
+    CHECK(plain.organic.gap_lines == 1.5 && plain.organic.face_relief_mm == 1.0 && plain.organic.relief_exclude_faces.empty() &&
+          plain.organic.strand_keep == 0.9);
+    CHECK(parse_file_job(head + R"(, "organic_strand_keep": 0.5}})").organic.strand_keep == 0.5);   // OG3
     FileJob job = parse_file_job(head + R"(, "organic_gap_lines": 2, "organic_face_relief_mm": 0.5,
       "organic_relief_exclude_faces": [0, 2]}})");
     CHECK(job.organic.gap_lines == 2.0 && job.organic.face_relief_mm == 0.5 &&

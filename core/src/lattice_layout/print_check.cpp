@@ -527,6 +527,14 @@ LayerReport check_layers(const TriangleMesh& mesh, const LayerSpec& spec) {
   return rep;
 }
 
+namespace {
+bool has_any_relief(const Bars& bars) {   // OG2c: any bar with a proud end or a bulge along a face
+  for (const Bar& b : bars.bars)
+    if (b.along_proud > 0.0 || b.proud_a > 0.0 || b.proud_b > 0.0) return true;
+  return false;
+}
+}  // namespace
+
 TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain, const Layout& layout, const Bars& laid,
                                   const OpenSpace& open, const PrintableSpec& spec, PrintableReport* report) {
   const auto t0 = std::chrono::steady_clock::now();
@@ -758,6 +766,46 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
         const Bar& x = bars.bars[i];
         rep.sags.legs_mm -= std::sqrt((x.b.x - x.a.x) * (x.b.x - x.a.x) + (x.b.y - x.a.y) * (x.b.y - x.a.y) + (x.b.z - x.a.z) * (x.b.z - x.a.z));
       }
+    }
+  }
+  // OG2c (brief E6, leg C): a bulge the check flags is not worth a refusal. The final findings' places; a bar whose
+  // relief (along an open face, OG2b, or a proud end, OG2) has a finding on or within one radius of its proud part
+  // (the place no deeper than its radius into the part, and within two radii of its line) is cut flush as before the
+  // rule, that bar only, and the whole loop is run again; until clean, or no proud bar is near a finding.
+  for (const LayerReport::MidAir& m : rep.layers.mid_air) rep.findings_at.push_back({m.x, m.y, m.z});
+  for (const LayerReport::OneEnded& o : rep.layers.one_ended) rep.findings_at.push_back({o.x, o.y, o.z});
+  for (const LayerReport::OneEnded& o : rep.layers.long_bridges) rep.findings_at.push_back({o.x, o.y, o.z});
+  if (!rep.clean && !rep.findings_at.empty() && has_any_relief(laid)) {
+    const PartMeasure::Probe pr = part.probe();
+    std::vector<std::size_t> flush;
+    for (std::size_t i = 0; i < bars.bars.size() && i < laid.bars.size(); ++i) {
+      const Bar& x = bars.bars[i];
+      if (!(x.along_proud > 0.0 || x.proud_a > 0.0 || x.proud_b > 0.0)) continue;
+      const double r = 0.5 * x.width;
+      const Vec3 d{x.b.x - x.a.x, x.b.y - x.a.y, x.b.z - x.a.z};
+      const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
+      bool near = false;
+      for (const Vec3& f : rep.findings_at) {
+        const double t = l2 > 0 ? std::clamp(((f.x - x.a.x) * d.x + (f.y - x.a.y) * d.y + (f.z - x.a.z) * d.z) / l2, 0.0, 1.0) : 0.0;
+        const double ex = x.a.x + t * d.x - f.x, ey = x.a.y + t * d.y - f.y, ez = x.a.z + t * d.z - f.z;
+        if (std::sqrt(ex * ex + ey * ey + ez * ez) <= 2.0 * r && pr.depth(f) <= r) { near = true; break; }
+      }
+      if (near) flush.push_back(i);
+    }
+    if (!flush.empty()) {
+      Bars again = laid;
+      for (std::size_t i : flush) {
+        Bar& x = again.bars[i];
+        if (x.relief_a > 0.0 || x.relief_b > 0.0) x = without_relief(Bars{{x}}).bars.front();
+        x.along_proud = 0.0;
+      }
+      PrintableReport sub;
+      TriangleMesh m2 = build_printable_mesh(part, domain, layout, again, open, spec, &sub);
+      sub.relief_flushed += flush.size();
+      sub.relief_rounds += 1;
+      sub.ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+      if (report) *report = sub;
+      return m2;
     }
   }
   rep.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();

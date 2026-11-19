@@ -596,6 +596,53 @@ static void test_flat_bottom() {
   CHECK(rt.layers.bed_flat() && rt.layers.bed_mm2 <= rt.layers.first_layer_mm2);
 }
 
+
+// OG2c (brief E6, leg C): a finding on a proud bar is not worth a refusal. The weave block with the V hanging in the open
+// lattice (a start in mid-air), one pass only so the finding stays: the report says where it is. With the V's bars
+// standing proud (along_proud), they are made flush and the check runs again (the finding is not theirs: it stays, and
+// the file is refused as today, but the bars were tried); with only a far bar proud, nothing is made flush.
+static void test_relief_findings() {
+  const StepModel model = weave_block();
+  Session session(model);
+  Settings s;
+  s.regions = {{1, Role::Lattice, {1}, 4.0, 0.0, true}, {2, Role::Lattice, {0}, 3.0, 0.0, false}};
+  s.cells.cell_max_mm = 4;
+  s.cells.min_cells_across = 1;
+  s.struts.allow_quilt = true;
+  std::vector<Strand> strands = made_up_weave();
+  strands.erase(strands.begin());
+  // The V's foot 0.3 mm inside the pocket's wall (the open face): its finding lies on the tube's part out of the wall.
+  strands.push_back(weave_strand({round_pocket(9.0, 100, 15.0), round_pocket(6.3, 105, 11.0), round_pocket(9.0, 110, 15.0)}));
+  const int v = static_cast<int>(strands.size()) - 1;
+  const Outcome out = session.lay_weave(s, strands);
+  const Domain& d = *session.domain();
+  const OpenSpace open = read_open_space(d, out.layout, 0.25);
+  PrintableSpec spec;
+  spec.mesh = file_mesh_defaults();
+  spec.mesh.weave_sag_lift_mm = 0.0;
+  spec.mesh.weave_sag_legs = false;
+  spec.mesh.weave_mesh = MeshSpec::WeaveMesh::Tubes;
+  spec.most_passes = 1;
+  PrintableReport r0, r1, r2;
+  (void)build_printable_mesh(session.measure(), d, out.layout, out.bars, open, spec, &r0);
+  Bars v_proud = out.bars, far_proud = out.bars;
+  std::size_t on_v = 0;
+  for (Bar& b : v_proud.bars)
+    if (b.strand == v) { b.along_proud = 0.5; ++on_v; }
+  for (Bar& b : far_proud.bars)
+    if (b.strand == 0) b.along_proud = 0.5;
+  (void)build_printable_mesh(session.measure(), d, out.layout, v_proud, open, spec, &r1);
+  (void)build_printable_mesh(session.measure(), d, out.layout, far_proud, open, spec, &r2);
+  std::printf("OG2c: no relief: clean %d, findings at %zu places (first %.2f %.2f %.2f); V proud (%zu bars): %zu made flush in "
+              "%d rounds, clean %d, findings %zu; a far strand proud: %zu made flush\n",
+              r0.clean ? 1 : 0, r0.findings_at.size(), r0.findings_at.empty() ? 0.0 : r0.findings_at[0].x,
+              r0.findings_at.empty() ? 0.0 : r0.findings_at[0].y, r0.findings_at.empty() ? 0.0 : r0.findings_at[0].z, on_v,
+              r1.relief_flushed, r1.relief_rounds, r1.clean ? 1 : 0, r1.findings_at.size(), r2.relief_flushed);
+  CHECK(!r0.clean && !r0.findings_at.empty() && r0.relief_flushed == 0);
+  CHECK(on_v > 0 && r1.relief_flushed > 0 && r1.relief_rounds >= 1 && !r1.findings_at.empty());
+  CHECK(r2.relief_flushed == 0 && r2.relief_rounds == 0);
+}
+
 int main() {
   if (!mesh_available()) {
     std::printf("no mesh library in this build (%d checks, %d failed)\n", g_checks, g_fail);
@@ -606,6 +653,7 @@ int main() {
   test_trimmed_to_part();
   test_tubes_route();
   test_flat_bottom();
+  test_relief_findings();
   std::printf("weave tubes: %d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }

@@ -73,6 +73,10 @@ struct FileReport {
   bool print_clean = false;          // nothing starts in mid-air, nothing is held at one end only
   std::vector<int> found_per_pass;   // mid-air starts + one-ended overhangs, pass by pass
   std::vector<Vec3> left_out_at;     // where struts were left out (the preview can mark them)
+  // OG2c (brief E6, leg C): PrintableReport's findings_at, relief_flushed, relief_rounds.
+  std::vector<Vec3> findings_at;
+  std::size_t relief_flushed = 0;
+  int relief_rounds = 0;
   std::vector<MeshSpec::Post> posts; // the posts added (the preview can draw them)
   std::size_t stands_added = 0;      // of `posts`, those under a weave's long shallow runs (O8)
   std::size_t weave_specks_ignored = 0, weave_held_ignored = 0;   // O10: PrintableReport's

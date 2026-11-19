@@ -210,7 +210,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "organic_part_support_mm", "organic_part_to_floor", "organic_wall_gap_heavy", "organic_cross_gap",
        "organic_cross_gap_heavy", "organic_cross_climb_max_deg", "organic_tie_level", "organic_tie_gap",
        "organic_tie_gap_heavy", "organic_link_width", "organic_unbraced_max", "organic_follow_stress",
-       "organic_gap_lines", "organic_face_relief_mm", "organic_relief_exclude_faces"},
+       "organic_gap_lines", "organic_face_relief_mm", "organic_relief_exclude_faces", "organic_strand_keep"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -499,6 +499,7 @@ OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::str
   a.gap_lines = num(in, "organic_gap_lines", a.gap_lines, w);
   a.face_relief_mm = num(in, "organic_face_relief_mm", a.face_relief_mm, w);
   a.relief_exclude_faces = wholes(in, "organic_relief_exclude_faces", w);
+  a.strand_keep = num(in, "organic_strand_keep", a.strand_keep, w);   // OG3 (0.9 when not given)
   return a;
 }
 
@@ -690,6 +691,9 @@ TriangleMesh make_file_mesh(const Session& session, const Layout& layout, const 
   report.left_out_at = made.drop_at;
   report.posts = made.posts;
   report.stands_added = made.stands_added;
+  report.findings_at = made.findings_at;   // OG2c
+  report.relief_flushed = made.relief_flushed;
+  report.relief_rounds = made.relief_rounds;
   report.weave_specks_ignored = made.weave_specks_ignored;
   report.weave_held_ignored = made.weave_held_ignored;
   report.part_overhangs = made.part_overhangs;
@@ -1338,7 +1342,14 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
                     "held at one end only and %zu bridge%s longer than a printer can span. No file was made. A larger cell "
                     "or a Protect skin near those places usually fixes it.",
                     r.made.builds, mid, mid == 1 ? "" : "s", one, one == 1 ? "" : "s", far, far == 1 ? "" : "s");
-      refuse(r, kWouldNotPrint, line);
+      // OG2c (brief E6, leg C): a refusal says where (x, y, z mm, each finding).
+      std::string where = "at";
+      for (const Vec3& p : r.made.findings_at) {
+        char b[96];
+        std::snprintf(b, sizeof b, " (%.2f, %.2f, %.2f)", p.x, p.y, p.z);
+        where += b;
+      }
+      refuse(r, kWouldNotPrint, line, r.made.findings_at.empty() ? std::string() : where);
       return done();
     }
 
@@ -1658,6 +1669,16 @@ std::string file_result_json(const FileResult& r) {
     for (std::size_t i = 0; i < r.made.found_per_pass.size(); ++i) {
       std::snprintf(b, sizeof b, "%s%d", i ? ", " : "", r.made.found_per_pass[i]);
       o += b;
+    }
+    {   // OG2c (brief E6, leg C)
+      std::snprintf(b, sizeof b, "],\n    \"relief_flushed\": %llu, \"relief_rounds\": %d, \"findings_at\": [",
+                    count(r.made.relief_flushed), r.made.relief_rounds);
+      o += b;
+      for (std::size_t i = 0; i < r.made.findings_at.size(); ++i) {
+        const Vec3& p = r.made.findings_at[i];
+        std::snprintf(b, sizeof b, "%s[%.4f, %.4f, %.4f]", i ? ", " : "", p.x, p.y, p.z);
+        o += b;
+      }
     }
     o += "],\n    \"left_out_at\": [";
     for (std::size_t i = 0; i < r.made.left_out_at.size(); ++i) {

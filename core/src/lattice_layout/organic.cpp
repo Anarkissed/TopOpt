@@ -66,6 +66,7 @@ void run_on(const Domain::Probe& probe, int region, const Vec3& from, Vec3& end,
   }
 }
 
+double segments_apart(const Vec3& p1, const Vec3& q1, const Vec3& p2, const Vec3& q2);   // below (OP11)
 }  // namespace
 
 bool TensorField::empty() const {
@@ -537,6 +538,7 @@ std::vector<Strand> trace_strands(const Domain& domain, int region, const Tensor
   // (organic_overhang_angle_deg 0), ties transferred with full swirl (read by Grown only), curve ends that leave the
   // region anchored (anchor_at_region_boundary, the tracer's default), families, ratios and limits the tracer's own.
   params.overhang_angle_deg = 0.0;
+  params.test_ratio = ask.strand_keep;   // OG3 (brief E6, leg D): 0.5 = the tracer's own kOrganicTestRatio
   params.transfer_ties = true;
   params.tie_swirl = 1.0;
   const OrganicLattice lat = trace_organic_lattice(grid, candidate, field.voigt, spacing, nullptr, params);
@@ -618,6 +620,7 @@ std::vector<Strand> trace_strands(const Domain& domain, int region, const Tensor
   }
   // R (brief G26): the level ties, after the curves, connectors and Q2's widths, before Q3's supports and the path; each
   // tie point gets the curves' width rule (Q2 when on, else the light width).
+  std::size_t first_tie_of_traced = out.size();   // OG3: where the level ties begin
   if (ask.tie_level) {
     const std::size_t first_tie = out.size();
     lay_traced_level_ties(domain, region, field, ask, asked, curves, light_w, out, stats);
@@ -627,6 +630,79 @@ std::vector<Strand> trace_strands(const Domain& domain, int region, const Tensor
           out[t].width_mm[q] = out[t].width_mm[q] + (ask.width_heavy_mm - out[t].width_mm[q]) * share(out[t].points[q]);
   }
   if (stats && ask.hold_parts) stats->hold_patches = asked.hold_patches;   // Q3: for hold_up_weave (L2 d)
+  // OG3 (brief E6, leg D), with strand_keep above the tracer's old 0.5: a level tie is not laid where its tube would lie
+  // within the gap (OG1's, gap_lines x the line; 1.5 lines when the gap is off) of a strand segment it does not join
+  // (shares no point with) and under 20 degrees to it. Such tie segments are taken out; what is left of a tie stays as
+  // ties (each stretch of two points or more). Links (made later, by the cut at crossings) stay as they are.
+  if (ask.tie_level && ask.strand_keep > kOrganicTestRatio + 1e-12) {
+    const double gap = (ask.gap_lines > 0.0 ? ask.gap_lines : kOrganicGapLinesDefault) * domain.spec().bead_mm;
+    const double cos20 = std::cos(20.0 * 3.14159265358979323846 / 180.0);
+    struct Seg { Vec3 a, b; double r; std::size_t strand; };
+    std::vector<Seg> segs;
+    for (std::size_t t = 0; t < out.size(); ++t)
+      for (std::size_t q = 0; q + 1 < out[t].points.size(); ++q)
+        segs.push_back({out[t].points[q], out[t].points[q + 1], 0.25 * (out[t].width_mm[q] + out[t].width_mm[q + 1]), t});
+    const double cell = 4.0;
+    std::map<std::array<long long, 3>, std::vector<std::size_t>> grid;
+    auto cell_of = [&](double x) { return static_cast<long long>(std::floor(x / cell)); };
+    for (std::size_t i = 0; i < segs.size(); ++i) {
+      const Seg& g = segs[i];
+      for (long long x = cell_of(std::min(g.a.x, g.b.x)); x <= cell_of(std::max(g.a.x, g.b.x)); ++x)
+        for (long long y = cell_of(std::min(g.a.y, g.b.y)); y <= cell_of(std::max(g.a.y, g.b.y)); ++y)
+          for (long long z = cell_of(std::min(g.a.z, g.b.z)); z <= cell_of(std::max(g.a.z, g.b.z)); ++z) grid[{x, y, z}].push_back(i);
+    }
+    auto same = [](const Vec3& p, const Vec3& q) { return dist(p, q) < 1e-6; };
+    std::vector<Strand> kept(out.begin(), out.begin() + static_cast<std::ptrdiff_t>(first_tie_of_traced));
+    for (std::size_t t = first_tie_of_traced; t < out.size(); ++t) {
+      const Strand& tie = out[t];
+      const std::size_t m = tie.points.size();
+      std::vector<char> bad(m > 0 ? m - 1 : 0, 0);
+      for (std::size_t q = 0; q + 1 < m; ++q) {
+        const Vec3 &a = tie.points[q], &b = tie.points[q + 1];
+        const double r = 0.25 * (tie.width_mm[q] + tie.width_mm[q + 1]);
+        const Vec3 d1{b.x - a.x, b.y - a.y, b.z - a.z};
+        const double l1 = std::sqrt(d1.x * d1.x + d1.y * d1.y + d1.z * d1.z);
+        if (!(l1 > 0.0)) continue;
+        const double reach = r + gap + 2.0;   // the widest a neighbour may be (its radius, under 2 mm)
+        std::vector<std::size_t> near;
+        for (long long x = cell_of(std::min(a.x, b.x) - reach); x <= cell_of(std::max(a.x, b.x) + reach); ++x)
+          for (long long y = cell_of(std::min(a.y, b.y) - reach); y <= cell_of(std::max(a.y, b.y) + reach); ++y)
+            for (long long z = cell_of(std::min(a.z, b.z) - reach); z <= cell_of(std::max(a.z, b.z) + reach); ++z) {
+              auto it = grid.find({x, y, z});
+              if (it != grid.end()) near.insert(near.end(), it->second.begin(), it->second.end());
+            }
+        std::sort(near.begin(), near.end());
+        near.erase(std::unique(near.begin(), near.end()), near.end());
+        for (std::size_t i : near) {
+          const Seg& g = segs[i];
+          if (g.strand == t) continue;
+          if (same(g.a, a) || same(g.a, b) || same(g.b, a) || same(g.b, b)) continue;   // it joins it there
+          const Vec3 d2{g.b.x - g.a.x, g.b.y - g.a.y, g.b.z - g.a.z};
+          const double l2 = std::sqrt(d2.x * d2.x + d2.y * d2.y + d2.z * d2.z);
+          if (!(l2 > 0.0) || std::fabs(d1.x * d2.x + d1.y * d2.y + d1.z * d2.z) / (l1 * l2) < cos20) continue;
+          if (segments_apart(a, b, g.a, g.b) - r - g.r < gap) { bad[q] = 1; break; }
+        }
+      }
+      Strand piece = tie;
+      piece.points.clear();
+      piece.width_mm.clear();
+      auto flush_piece = [&] {
+        if (piece.points.size() >= 2) kept.push_back(piece);
+        piece.points.clear();
+        piece.width_mm.clear();
+      };
+      for (std::size_t q = 0; q + 1 < m; ++q) {
+        if (bad[q]) { flush_piece(); continue; }
+        if (piece.points.empty()) { piece.points.push_back(tie.points[q]); piece.width_mm.push_back(tie.width_mm[q]); }
+        piece.points.push_back(tie.points[q + 1]);
+        piece.width_mm.push_back(tie.width_mm[q + 1]);
+        if (stats) ++stats->og3_tie_segments_kept;
+      }
+      flush_piece();
+      if (stats) for (char x : bad) stats->og3_tie_segments_cut += x;
+    }
+    out.swap(kept);
+  }
   // OG1 (brief E6): each point's local spacing (the spacing the tracer used there) and what set it (the asked spacing's
   // reason, or the tracer's floor where it raised the asked spacing); with the gap on, the cap on every width (curves,
   // connectors and level ties alike).
@@ -1691,6 +1767,13 @@ std::vector<OrganicRefusal> validate_organic(const Settings& settings, const Org
                           " mm gap between " + plain_number(light) + " mm struts.",
                       small),
                floor_mm);
+  }
+  // OG3 (brief E6, leg D): how close a traced curve may come to another of its family, 0.5 to 1 spacing.
+  if (!(fin(a.strand_keep) && a.strand_keep >= 0.5 && a.strand_keep <= 1.0)) {
+    OrganicRefusal& r = refuse("strand_keep", "out_of_range",
+                               "Strand distance: it must be from 0.5 to 1 times the cell size.", a.strand_keep);
+    at_least(r, 0.5);
+    at_most(r, 1.0);
   }
   // OG2 (brief E6): the relief, 0 (off) to 1 mm; the faces left flush are the part's face ids (0 or more).
   if (!(fin(a.face_relief_mm) && a.face_relief_mm >= 0.0 && a.face_relief_mm <= kOrganicReliefMaxMm)) {
