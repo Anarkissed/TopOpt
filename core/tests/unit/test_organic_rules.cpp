@@ -2386,7 +2386,9 @@ static void test_os18_relief_vines() {
   const StepModel model = box_model(30, 30, 20);
   const TensorField f = gap_field();
   Session session(model);
-  const Outcome o = session.lay_organic(gap_settings(1, 16.0, true), f, gap_ask(1.6));
+  OrganicAsk base = gap_ask(1.6);
+  base.strand_keep = 0.5;   // the owner: vine spacing off is the main case
+  const Outcome o = session.lay_organic(gap_settings(1, 16.0, true), f, base);
   CHECK(o.refused.empty() && !o.bars.bars.empty());
   if (o.bars.bars.empty()) return;
   const Domain& d = *session.domain();

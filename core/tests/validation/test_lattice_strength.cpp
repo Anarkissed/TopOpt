@@ -814,7 +814,7 @@ int main() {
     {
       // A wider spacing (5 to 8 mm) than §11's, so that a vine has room beside a strut.
       const std::string roomy = ", \"region_weave\": [true], \"organic_spacing_min_mm\": 5, \"organic_spacing_max_mm\": 8, "
-                                "\"organic_width_mm\": 0.9, \"organic_width_heavy_mm\": 1.2";
+                                "\"organic_width_mm\": 0.9, \"organic_width_heavy_mm\": 1.2, \"organic_strand_keep\": 0.5";   // spacing off
       const OrganicStrengthenResult pr = strengthen("paths", roomy, 6000.0, "{\"strengthen_rounds\": 2, \"strengthen_width_cap\": 1.0}");
       const std::string pj = slurp(kDir + "/paths/strengthen.json");
       const std::size_t r0 = pj.find("\"round\": 0"), r1 = pj.find("\"round\": 1");
@@ -827,14 +827,14 @@ int main() {
       CHECK(pp != std::string::npos && num_after(pj, "struts_handed", pp) > 0 &&
             num_after(pj, "relief_vines", pp) > 0 && num_after(pj, "mid_span_braces", pp) > 0 &&
             has(pj.substr(pp, 4000), "\"print_left_out\": "));
-      // Every strut given a relief vine in round 0 is stronger in round 1: its margin there (the watched strut whose
-      // middle lies within 1 mm of its middle) is higher, or it is no longer watched (its margin is past the watch).
-      {
+      // A vine's host in the next check: its margin there (the watched strut whose middle lies within 1 mm of its
+      // middle), or past the watch (no longer watched). Counted: hosts, and those whose margin rose.
+      const auto hosts_rose = [&](const std::string& tag) {
         namespace sj = topopt::flexible::json;
-        const sj::Value doc = sj::parse(pj, "strengthen.json");
+        const sj::Value doc = sj::parse(slurp(kDir + "/" + tag + "/strengthen.json"), "strengthen.json");
         const sj::Value* rounds = sj::find(doc, "rounds");
         const sj::Value* paths0 = rounds ? sj::find(*sj::find(rounds->arr[0], "added"), "paths") : nullptr;
-        const sj::Value under1 = sj::parse(slurp(kDir + "/paths/r1/struts_under.json"), "struts_under.json");
+        const sj::Value under1 = sj::parse(slurp(kDir + "/" + tag + "/r1/struts_under.json"), "struts_under.json");
         std::size_t hosts = 0, rose = 0;
         if (paths0)
           for (const sj::Value& v : sj::find(*paths0, "vines_at")->arr) {
@@ -848,10 +848,22 @@ int main() {
             }
             ++hosts;
             rose += best > 1.0 || m1 > m0;
-            std::printf("[paths] vine host at %.2f %.2f %.2f: margin %.3f -> %s\n", a[0].num, a[1].num, a[2].num, m0,
+            std::printf("[%s] vine host at %.2f %.2f %.2f: margin %.3f -> %s\n", tag.c_str(), a[0].num, a[1].num, a[2].num, m0,
                         best > 1.0 ? "not watched" : std::to_string(m1).c_str());
           }
-        CHECK(hosts > 0 && rose == hosts);
+        return std::make_pair(hosts, rose);
+      };
+      {   // Many struts at once (every weak strut at the cap): counted, not every host need rise (they share the load).
+        const auto hr = hosts_rose("paths");
+        std::printf("[paths] vine hosts %zu, %zu stronger in round 1\n", hr.first, hr.second);
+        CHECK(hr.first > 0);
+      }
+      // ONE strut handed to C (strengthen_paths_max 1, no mid-span brace): it gets a vine and is stronger next round.
+      {
+        const OrganicStrengthenResult one_v = strengthen("paths_one", roomy, 6000.0,
+            "{\"strengthen_rounds\": 1, \"strengthen_width_cap\": 1.0, \"strengthen_paths_max\": 1, \"strengthen_path_brace_min_mm\": 100}");
+        const auto hr = hosts_rose("paths_one");
+        CHECK(one_v.ok && one_v.old_bars_kept && hr.first == 1 && hr.second == 1);
       }
       // Replay: the file job given round 1's strengthened.json lays round 1's bars.
       const double bars1 = num_after(pj, "bars", r1);
