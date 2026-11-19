@@ -1262,10 +1262,21 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
     const OrganicAsk ask = groups.empty() ? OrganicAsk{} : groups.front().ask;
     const double light_mm = finish.groups.empty() ? 0.0 : finish.groups.front().light_mm;
     const bool one = groups.size() == 1;
-    // Brief E2, item 9: the width floors, last, only with the strut width on a Sweep.
+    // Brief E2, item 9: the width floors, last, only with the strut width on a Sweep. OJ4 (leg J item 4): the floors
+    // (the first group's list: the strengthen job makes one for the whole lay) applied group by group, each to its own
+    // regions with its own upper and light widths.
     if (one && !ask.floors.empty() && ask.width_heavy_mm > 0.0)
       out.floors_widened = apply_width_floors(out.bars, ask.floors, ask.width_heavy_mm, light_mm, ask.link_width,
                                               &out.floor_links_widened);
+    if (!one && !ask.floors.empty())
+      for (std::size_t g = 0; g < groups.size() && g < finish.groups.size(); ++g) {
+        const OrganicAsk& ga = groups[g].ask;
+        if (!(ga.width_heavy_mm > 0.0)) continue;
+        std::size_t links = 0;
+        out.floors_widened += apply_width_floors(out.bars, ask.floors, ga.width_heavy_mm, finish.groups[g].light_mm,
+                                                 ga.link_width, &links, &groups[g].regions);
+        out.floor_links_widened += links;
+      }
     // OG5 (brief E9): the lay's bars were guarded before its drop (Session::lay_with); the floors may widen a bar, so
     // they are guarded again when they did (nothing is dropped here: a widened bar's run-on is only cut back).
     std::vector<int> weave_ids;
@@ -1274,11 +1285,15 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
     if (out.floors_widened > 0) guard_bars(out.bars, *domain_, weave_ids, line_mm, &out.guard);
     // Brief E3a: what strengthening by adding added, in order, each round's hash checked; a mismatch is refused. The
     // draft (no cut at crossings) is not the lattice they were made on: it shows the lay without them.
-    if (one && !ask.additions.empty() && !draft) {
+    if (!ask.additions.empty() && !draft) {
       AddContext c;
       c.light_mm = light_mm;
       c.layer_mm = ask.layer_mm;
       c.link_width = ask.link_width;
+      if (!one)   // OJ4: each region with its group's widths
+        for (std::size_t g = 0; g < groups.size() && g < finish.groups.size(); ++g)
+          for (int rid : groups[g].regions)
+            c.per_region[rid] = {finish.groups[g].light_mm, groups[g].ask.layer_mm, groups[g].ask.link_width};
       c.weave_regions = weave_ids;   // OG5: each round's bars guarded before its print check and hash
       c.line_mm = line_mm;
       c.guard = &out.guard;

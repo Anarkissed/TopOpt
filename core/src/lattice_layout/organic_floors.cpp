@@ -32,7 +32,8 @@ std::string folder_of(const std::string& path) {
 }  // namespace
 
 std::size_t apply_width_floors(Bars& bars, const std::vector<WidthFloor>& floors, double upper_mm, double light_mm,
-                               double link_width, std::size_t* links) {
+                               double link_width, std::size_t* links, const std::vector<int>* regions) {
+  auto mine = [&](const Bar& b) { return !regions || std::find(regions->begin(), regions->end(), b.region) != regions->end(); };
   if (links) *links = 0;
   if (floors.empty() || bars.bars.empty()) return 0;
   // The floors in a hash of cells as wide as the largest ball.
@@ -47,7 +48,7 @@ std::size_t apply_width_floors(Bars& bars, const std::vector<WidthFloor>& floors
   for (std::size_t i = 0; i < floors.size(); ++i) grid[cell_of(floors[i].centre)].push_back(i);
   std::size_t widened = 0;
   for (Bar& b : bars.bars) {
-    if (b.link) continue;
+    if (b.link || !mine(b)) continue;
     const Vec3 m{0.5 * (b.a.x + b.b.x), 0.5 * (b.a.y + b.b.y), 0.5 * (b.a.z + b.b.z)};
     const Key k = cell_of(m);
     double least = 0.0;
@@ -78,7 +79,7 @@ std::size_t apply_width_floors(Bars& bars, const std::vector<WidthFloor>& floors
     }
   }
   for (Bar& l : bars.bars) {
-    if (!l.link) continue;
+    if (!l.link || !mine(l)) continue;
     const auto ia = widest.find(end_key(l.a)), ib = widest.find(end_key(l.b));
     const double x = ia == widest.end() ? 0.0 : ia->second, y = ib == widest.end() ? 0.0 : ib->second;
     if (x <= 0.0 && y <= 0.0) continue;

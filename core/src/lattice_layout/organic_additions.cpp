@@ -189,13 +189,46 @@ bool apply_add_round(Bars& bars, const Domain& domain, const AddRound& round, co
       const bool flipped = !(bits(b.a.x) == bits(op.v[0]) && bits(b.a.y) == bits(op.v[1]) && bits(b.a.z) == bits(op.v[2]));
       pts.push_back({it->second, flipped ? 1.0 - op.v[6] : op.v[6], op.v[7]});
     }
-    if (!pts.empty()) {
+    if (!pts.empty() && c.per_region.empty()) {
       WeaveBraceAsk ask;
       ask.light_mm = c.light_mm;
       ask.layer_mm = c.layer_mm;
       ask.link_width = c.link_width;
       rep.brace_points = pts.size();
       rep.braces = lay_braces(bars, domain, pts, ask, nullptr, &rep.braces_at);
+    } else if (!pts.empty()) {   // OJ4: the points of each region with its group's widths, region by region
+      rep.brace_points = pts.size();
+      rep.braces_at.assign(pts.size(), 0);
+      std::map<int, std::vector<std::size_t>> by_region;
+      for (std::size_t q = 0; q < pts.size(); ++q) by_region[bars.bars[pts[q].bar].region].push_back(q);
+      // The bars of later regions' points move when earlier braces cut bars: their points are found again by their
+      // bar's two ends (as the ops name them), region by region.
+      std::vector<std::pair<Ends, std::pair<double, double>>> named;
+      for (const BracePoint& p : pts) {
+        const Bar& b = bars.bars[p.bar];
+        named.push_back({ends_of(b.a, b.b), {p.u, p.width}});
+      }
+      for (const auto& [region, idx] : by_region) {
+        const std::map<Ends, std::size_t> at2 = by_ends(bars);
+        std::vector<BracePoint> mine;
+        std::vector<std::size_t> back;
+        for (std::size_t q : idx) {
+          const auto it = at2.find(named[q].first);
+          if (it == at2.end()) continue;
+          BracePoint bp = pts[q];
+          bp.bar = it->second;
+          mine.push_back(bp);
+          back.push_back(q);
+        }
+        const auto pr = c.per_region.find(region);
+        WeaveBraceAsk ask;
+        ask.light_mm = pr != c.per_region.end() ? pr->second[0] : c.light_mm;
+        ask.layer_mm = pr != c.per_region.end() ? pr->second[1] : c.layer_mm;
+        ask.link_width = pr != c.per_region.end() ? pr->second[2] : c.link_width;
+        std::vector<int> laid_at;
+        rep.braces += lay_braces(bars, domain, mine, ask, nullptr, &laid_at);
+        for (std::size_t k = 0; k < back.size() && k < laid_at.size(); ++k) rep.braces_at[back[k]] = laid_at[k];
+      }
     }
   }
   // 2. The widenings, then the links at the widened bars' ends (S8, only wider).
@@ -228,7 +261,9 @@ bool apply_add_round(Bars& bars, const Domain& domain, const AddRound& round, co
         }
         if (x <= 0.0 && y <= 0.0) continue;
         const double thin = x > 0.0 && y > 0.0 ? std::min(x, y) : std::max(x, y), thick = std::max(x, y);
-        const double w = std::max(c.light_mm, std::min(c.link_width * thin, thick));
+        const auto pr = c.per_region.find(l.region);   // OJ4
+        const double lm = pr != c.per_region.end() ? pr->second[0] : c.light_mm, lw = pr != c.per_region.end() ? pr->second[2] : c.link_width;
+        const double w = std::max(lm, std::min(lw * thin, thick));
         if (w > l.width + 1e-12) {
           l.width = w;
           ++rep.links_widened;
@@ -244,9 +279,10 @@ bool apply_add_round(Bars& bars, const Domain& domain, const AddRound& round, co
     for (std::size_t k = 0; k < n; ++k) pts.push_back({op.v[6 + 3 * k], op.v[7 + 3 * k], op.v[8 + 3 * k]});
     auto kind = [](double x) { return x > 0.5 ? Bar::End::Solid : Bar::End::Node; };
     WeaveBraceAsk ask;
-    ask.light_mm = c.light_mm;
-    ask.layer_mm = c.layer_mm;
-    ask.link_width = c.link_width;
+    const auto pr = c.per_region.find(static_cast<int>(op.v[0]));   // OJ4: the twin's region's group
+    ask.light_mm = pr != c.per_region.end() ? pr->second[0] : c.light_mm;
+    ask.layer_mm = pr != c.per_region.end() ? pr->second[1] : c.layer_mm;
+    ask.link_width = pr != c.per_region.end() ? pr->second[2] : c.link_width;
     rep.relief_bars += lay_relief_vine(bars, pts, op.v[1], op.v[2], static_cast<int>(op.v[0]), kind(op.v[3]), kind(op.v[4]), ask);
     ++rep.relief_vines;
   }

@@ -285,8 +285,10 @@ std::size_t gap_broken(const Bars& bars);
 // in a floor's ball: w = max(w, min(floor, upper_mm)); then every link: S8's width from the struts at its two ends
 // (link_width x the thinner, between light_mm and the thicker), where that is wider than it is. Returns the bars
 // widened; `links`, when given, the links widened.
+// OJ4 (leg J item 4): `regions`, when given, only the bars (and links) of those regions are floored: a lay of several
+// groups floors each group's regions with its own upper and light widths.
 std::size_t apply_width_floors(Bars& bars, const std::vector<WidthFloor>& floors, double upper_mm, double light_mm,
-                               double link_width, std::size_t* links = nullptr);
+                               double link_width, std::size_t* links = nullptr, const std::vector<int>* regions = nullptr);
 
 // Brief E2, items 10 and 11: the files a strengthen round writes.
 // The floors file, little-endian: 8 bytes "TOFLOORS", int32 version (1), int32 count, then per floor five float64:
@@ -317,6 +319,9 @@ std::uint64_t bars_hash(const Bars& bars);
 // The numbers additions are applied with: the job's light width (S), layer and link width (S8).
 struct AddContext {
   double light_mm = 0.0, layer_mm = 0.2, link_width = 1.0;
+  // OJ4 (leg J item 4): a lay of several groups: per region, its group's {light, layer, link width}, read for the
+  // braces, links and twins of that region (a brace by the region of the bar it is on). Empty: the three above for all.
+  std::map<int, std::array<double, 3>> per_region;
   // OG5 (brief E9): with `line_mm` above 0, apply_additions guards each round's bars (guard_bars) after its operations,
   // before its print check and hash; the strengthen job does the same after a round's two steps.
   std::vector<int> weave_regions;

@@ -2948,7 +2948,63 @@ static void test_file_groups() {
   }
 }
 
+// ── OL-GROUPS-ADD (leg J item 4, OJ4): floors and additions on a lay of two groups.
+static void test_groups_floors_additions() {
+  const StepModel model = box_model(30, 30, 20);
+  const TensorField f = gap_field();
+  Settings st;
+  st.regions = {{1, Role::Lattice, {1}, 8.0, 0.0, true}, {2, Role::Lattice, {2}, 8.0, 0.0, true}};
+  st.drop_loose = false;
+  OrganicAsk a1 = gap_ask(1.2), a2 = gap_ask(1.8);
+  a2.width_mm = 1.0;
+  std::vector<OrganicGroup> gs = {{{1}, a1}, {{2}, a2}};
+  // Floors over the whole box at 5 mm: each group's bars floored to its own upper width.
+  gs[0].ask.floors = {{{15.0, 15.0, 10.0}, 40.0, 5.0}};
+  Session s(model);
+  const Outcome o = s.lay_organic(st, f, gs);
+  double w1 = 0.0, w2 = 0.0, w1min = 1e9, w2min = 1e9;
+  for (const Bar& b : o.bars.bars) {
+    if (b.link || b.net) continue;
+    if (b.region == 1) { w1 = std::max(w1, b.width); w1min = std::min(w1min, b.width); }
+    if (b.region == 2) { w2 = std::max(w2, b.width); w2min = std::min(w2min, b.width); }
+  }
+  std::printf("OL-GROUPS-ADD floors: %zu bars widened (%zu links); area 1 widths %.3f to %.3f (its upper 1.2), area 2 %.3f to %.3f (its upper 1.8)\n",
+              o.floors_widened, o.floor_links_widened, w1min, w1, w2min, w2);
+  CHECK(o.refused.empty() && o.floors_widened > 0 && std::fabs(w1 - 1.2) < 1e-9 && std::fabs(w1min - 1.2) < 1e-9 &&
+        std::fabs(w2 - 1.8) < 1e-9 && std::fabs(w2min - 1.8) < 1e-9);
+  // Additions on the two-group lay: a widening of one bar in each area, replayed with the round's hash.
+  gs[0].ask.floors.clear();
+  Session s0(model);
+  const Outcome plain = s0.lay_organic(st, f, gs);
+  AddRound round;
+  for (int want : {1, 2})
+    for (const Bar& b : plain.bars.bars)
+      if (b.region == want && !b.link && !b.net && dist(b.a, b.b) > 1.0) {
+        round.ops.push_back({2, {b.a.x, b.a.y, b.a.z, b.b.x, b.b.y, b.b.z, b.width + 0.3}});
+        break;
+      }
+  round.hash = 0;
+  gs[0].ask.additions.rounds = {round};
+  Session s1(model);
+  const Outcome first = s1.lay_organic(st, f, gs);
+  const std::size_t at = first.additions_refused.find("hash is ");
+  CHECK(at != std::string::npos);
+  if (at == std::string::npos) return;
+  gs[0].ask.additions.rounds[0].hash = std::stoull(first.additions_refused.substr(at + 8, 16), nullptr, 16);
+  Session s2(model);
+  const Outcome again = s2.lay_organic(st, f, gs);
+  std::size_t widened = 0;
+  for (const AddOp& op : round.ops)
+    for (const Bar& b : again.bars.bars)
+      widened += dist(b.a, Vec3{op.v[0], op.v[1], op.v[2]}) < 1e-9 && dist(b.b, Vec3{op.v[3], op.v[4], op.v[5]}) < 1e-9 &&
+                 std::fabs(b.width - op.v[6]) < 1e-12;
+  std::printf("OL-GROUPS-ADD additions: refused first with the wrong hash (%s); replayed: %zu round(s), refused '%s', the two widenings laid %zu\n",
+              first.additions_refused.substr(0, 40).c_str(), again.additions_rounds, again.additions_refused.c_str(), widened);
+  CHECK(again.additions_rounds == 1 && again.additions_refused.empty() && widened == 2);
+}
+
 int main() {
+  test_groups_floors_additions();
   test_file_groups();
   test_solid_open_face();
   test_finish_per_region();

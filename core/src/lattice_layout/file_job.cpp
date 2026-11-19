@@ -1272,10 +1272,13 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     const FileOptions options = file_options_for(job.options, any_weave);
     OrganicAsk organic = job.organic;
     if (any_weave && !organic.additions.empty()) organic.print_check = print_check_hook(session, options, stop);
+    std::vector<OrganicGroup> groups = job.organic_groups;   // OJ3
+    if (any_weave && !groups.empty() && !groups.front().ask.additions.empty())   // OJ4
+      groups.front().ask.print_check = print_check_hook(session, options, stop);
     const Outcome out = !any_weave ? session.lay(job.settings, job.options.threads, stop)
-                        : job.organic_groups.empty()
+                        : groups.empty()
                             ? session.lay_organic(job.settings, *job.tensor_field, organic, job.options.threads, stop)
-                            : session.lay_organic(job.settings, *job.tensor_field, job.organic_groups, job.options.threads, stop);   // OJ3
+                            : session.lay_organic(job.settings, *job.tensor_field, groups, job.options.threads, stop);
     if (out.cancelled) {
       refuse(r, kCancelled, "Stopped before the lattice file was finished. Nothing was made.");
       return done();
@@ -1549,7 +1552,8 @@ bool load_file_job(const std::string& job_path, int threads, FileJob& job, StepM
       // (version 2, brief E3a: the job's own stress stays; version 1 replaces it)
       auto field = job.tensor_field ? std::make_shared<TensorField>(*job.tensor_field) : std::make_shared<TensorField>();
       std::string why;
-      if (!apply_strengthened(sp, *field, job.organic, &why)) {
+      if (!apply_strengthened(sp, *field, job.organic, &why) ||
+          (!job.organic_groups.empty() && !apply_strengthened(sp, *field, job.organic_groups.front().ask, &why))) {   // OJ4
         refuse(r, kStrengthenedUnreadable,
                "The strengthened stress sent with the lattice job could not be read, so nothing was made.", why);
         return false;
