@@ -2101,12 +2101,14 @@ static void test_og1_gap() {
 // OL-OG2: ends proud of the open faces. One made box, four lays: the weave under the top face, under a side face, under
 // the bottom face (its normal points straight down), and under the top face with that face excluded. Drop loose off, so
 // the Surface ends stay (with it on, Traced keeps none: drop_loose_bars takes every Surface end it did not see arrive).
+static const std::uint64_t kDefaultLayHash = 0xc95c22baf294709aULL;   // OG2: the default lay at the tip e3640d24
 static void test_og2_relief() {
   const StepModel model = box_model(30, 30, 20);
   const TensorField f = gap_field();
   struct Case { const char* name; int face; double depth; std::vector<int> exclude; };
   const Case cases[] = {{"top", 1, 16.0, {}}, {"side", 2, 12.0, {}}, {"bottom", 0, 12.0, {}}, {"top, excluded", 1, 16.0, {1}}};
-  const double relief = 0.8;
+  // The owner, 2026-11-19 ("a 5mm ceiling is best"): every case at 0.8 mm and at the ceiling, 5 mm.
+  for (const double relief : {0.8, kOrganicReliefMaxMm})
   for (const Case& c : cases) {
     OrganicAsk a = gap_ask(1.6);
     a.face_relief_mm = relief;
@@ -2135,9 +2137,18 @@ static void test_og2_relief() {
         // Never on an excluded face: the end carried back lies on no face of the list (top z 20, bottom z 0).
         const Bar flushed = without_relief(Bars{{x}}).bars.front();
         const double zb = e == 0 ? flushed.a.z : flushed.b.z;
-        for (int ex : c.exclude) bad += (ex == 1 && std::fabs(zb - 20.0) < 1e-6) || (ex == 0 && std::fabs(zb) < 1e-6);
+        const Vec3 bk = e == 0 ? flushed.a : flushed.b;   // the end carried back onto the surface
+        const bool edge = std::min({bk.x, 30.0 - bk.x, bk.y, 30.0 - bk.y}) < 1e-3;   // on a side face too: read either
+        for (int ex : c.exclude) bad += !edge && ((ex == 1 && std::fabs(zb - 20.0) < 1e-6) || (ex == 0 && std::fabs(zb) < 1e-6));
         most = std::max(most, pm);
-        const double out = -pr.depth(end);
+        // How far the tip stands out ALONG the surface's normal where the end was (the depth's gradient there): p. (Its
+        // straight distance to the part can exceed p only past an edge, where the nearest surface is another face.)
+        const double hh = 0.05;
+        Vec3 nn{pr.depth({bk.x - hh, bk.y, bk.z}) - pr.depth({bk.x + hh, bk.y, bk.z}),
+                pr.depth({bk.x, bk.y - hh, bk.z}) - pr.depth({bk.x, bk.y + hh, bk.z}),
+                pr.depth({bk.x, bk.y, bk.z - hh}) - pr.depth({bk.x, bk.y, bk.z + hh})};
+        const double nl = std::hypot(nn.x, std::hypot(nn.y, nn.z));
+        const double out = nl > 0.0 ? ((end.x - bk.x) * nn.x + (end.y - bk.y) * nn.y + (end.z - bk.z) * nn.z) / nl : 0.0;
         most_out = std::max(most_out, out);
         bad += (e == 0 ? x.end_a : x.end_b) != Bar::End::Surface || pm > relief + 1e-12 || out > pm + 0.02 ||
                end.z <= 2.0 || x.net;
@@ -2174,8 +2185,8 @@ static void test_og2_relief() {
     }
     std::size_t run_marked = 0;
     for (const WeaveRun& w : weave_runs(o.bars, {1}, 0.0)) run_marked += w.proud_mm > 0.0;
-    std::printf("OL-OG2b %s: %zu bars along an open face (setting %.2f), %zu not as the rule says; %zu runs carry it\n", c.name,
-                along, relief, along_bad, run_marked);
+    std::printf("OL-OG2b %s, %.1f mm: %zu bars along an open face (setting %.2f), %zu not as the rule says; %zu runs carry it\n", c.name,
+                relief, along, relief, along_bad, run_marked);
     CHECK(along_bad == 0 && (c.face == 0 || along > 0) && (along == 0) == (run_marked == 0));
     // The runs (the preview) are the bars: every proud tip is a run's end, exactly.
     const std::vector<WeaveRun> runs = weave_runs(o.bars, {1}, 0.0);
@@ -2241,17 +2252,27 @@ static void test_og2_relief() {
                   w.proud_outside_mm, w.outside_largest_mm, z_low, w.along_bars, w.along_vertices, w.along_outside_mm,
                   w.grew_mm[0], w.grew_mm[1], w.grew_mm[2], w.grew_mm[3], w.grew_mm[4], w.grew_mm[5]);
       CHECK(w.along_bars > 0 && w.along_vertices > 0 && w.along_outside_mm > 0.05 && w.along_outside_mm <= relief + 1e-3);
-      CHECK(!mesh.empty() && rep.print_clean && closed == w.shells() && w.proud_ends > 0 && w.proud_vertices > 0 &&
+      std::printf("OL-OG2 %s, %.1f mm, print check: clean %d, %zu bars made flush in %d rounds (OG2c), %zu findings left\n",
+                  c.name, relief, rep.print_clean ? 1 : 0, rep.relief_flushed, rep.relief_rounds, rep.findings_at.size());
+      CHECK((rep.print_clean || !rep.findings_at.empty()) && closed == w.shells() && w.proud_ends > 0 && w.proud_vertices > 0 &&
             w.proud_outside_mm <= relief + 0.5 * 1.6 * 1.42 + 1e-6 && w.outside_largest_mm <= 0.05 && z_low >= 0.0 &&
             out_most <= relief + 0.5 * 1.6 * 1.42 + 1e-6);
     }
   }
-  // The keys: the settings' ranges (the relief 0 to 1 mm, a face id 0 or more).
+  // The default lay (relief 1 mm, every rule at its default) is the tip e3640d24's, bar for bar: the 5 mm ceiling only
+  // widens what validation allows.
+  {
+    Session sd(model);
+    const Outcome od = sd.lay_organic(gap_settings(1, 16.0, false), f, gap_ask(1.6));
+    std::printf("OL-OG2 default lay: hash %016llx\n", static_cast<unsigned long long>(bars_hash(od.bars)));
+    CHECK(bars_hash(od.bars) == kDefaultLayHash);
+  }
+  // The keys: the settings' ranges (the relief 0 to 5 mm, a face id 0 or more).
   {
     const Settings st = traced_settings();
     OrganicAsk a = gap_ask(1.8);
     CHECK(a.face_relief_mm == 1.0 && a.relief_exclude_faces.empty());
-    for (double bad : {-0.1, 1.2}) {
+    for (double bad : {-0.1, 5.1}) {
       a.face_relief_mm = bad;
       CHECK(has_refusal(validate_organic(st, a, nullptr), "face_relief_mm", "out_of_range"));
     }
@@ -2332,7 +2353,7 @@ static void test_og2_relief() {
       "organic_relief_exclude_faces": [0, 2]}})");
     CHECK(job.organic.gap_lines == 2.0 && job.organic.face_relief_mm == 0.5 &&
           job.organic.relief_exclude_faces == std::vector<int>({0, 2}));
-    for (const char* bad : {R"(, "organic_gap_lines": 5)", R"(, "organic_face_relief_mm": 1.5)",
+    for (const char* bad : {R"(, "organic_gap_lines": 5)", R"(, "organic_face_relief_mm": 5.5)",
                             R"(, "organic_relief_exclude_faces": [-2])"}) {
       std::string why;
       try { (void)parse_file_job(head + bad + "}}"); } catch (const std::exception& e) { why = e.what(); }

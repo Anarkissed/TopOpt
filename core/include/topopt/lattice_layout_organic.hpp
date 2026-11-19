@@ -249,7 +249,8 @@ struct OrganicAsk {
   // bar's Surface end on an open face, where the face is not in relief_exclude_faces, its outward normal points down
   // against build_dir by no more than 45 degrees, and the end is more than 2 mm above the bed, is carried on along its
   // bar until it stands p beyond the surface (along the normal), p = face_relief_mm x a number 0 .. 1 fixed by its
-  // strand and region. 0 = off (every end flush, as before); 0 to 1. relief_exclude_faces: the part's face ids (the
+  // strand and region. 0 = off (every end flush, as before); 0 to 5 (the owner, 2026-11-19: "I think actually a 5mm
+  // ceiling is best"; default 1, "Default is not flush"). relief_exclude_faces: the part's face ids (the
   // app: loaded and fixed faces) where no end stands proud.
   double face_relief_mm = 1.0;
   std::vector<int> relief_exclude_faces;
@@ -263,7 +264,7 @@ struct OrganicAsk {
 inline constexpr double kOrganicStrandKeepDefault = 0.9;   // OG3
 inline constexpr double kOrganicGapLinesDefault = 1.5;   // OG1
 inline constexpr double kOrganicGapLinesMax = 4.0;
-inline constexpr double kOrganicReliefMaxMm = 1.0;       // OG2
+inline constexpr double kOrganicReliefMaxMm = 5.0;       // OG2 (the owner, 2026-11-19: "a 5mm ceiling is best")
 
 // OG1: the strand points' local spacing and its reason, and (gap above 0) the cap: for each strand of `strands` from
 // `first` on, each point's local spacing is `spacing` (per voxel of `field`'s grid, 0 off the candidates) at its voxel,
