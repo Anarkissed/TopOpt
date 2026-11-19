@@ -226,6 +226,10 @@ struct FileJob {
   // "percentile"; "organic_shape_fit" (O13), true when not given); read only when a region is a weave. The Finish is
   // the regular layout keys' (OR30: "rim_mm", "cover_mm", "skin", "skin_width_mm").
   OrganicAsk organic;
+  // Leg J item 3 (OJ3): the layout key "organic_groups", a list of {"regions": [ids], any organic_* key}: each group its
+  // own ask (the layout's organic_* keys, then the group's own over them). Empty: one ask for every weave region
+  // (`organic`), as before. Laid by Session::lay_organic with the groups (OP11).
+  std::vector<OrganicGroup> organic_groups;
   Settings settings;
   FileOptions options;
 };

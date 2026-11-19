@@ -2911,7 +2911,45 @@ static void test_solid_open_face() {
         along == 0 && proud == 0 && o2.relief.along + o2.relief.proud > 0);
 }
 
+// ── OL-GROUPS-FILE (leg J item 3, OJ3): the file job's organic_groups, each group its own ask.
+static void test_file_groups() {
+  const std::string head = R"({"mode": "lattice_file", "model": "block.step", "layout": {
+      "min_strut_lines": 2, "bead_mm": 0.45, "region_ids": [1, 2], "region_no_lattice": [0, 0], "region_depth_mm": [8, 8],
+      "region_expand_mm": [0, 0], "region_face_counts": [1, 1], "region_faces": [1, 2], "region_weave": [true, true],
+      "drop_loose": false, "organic_spacing_min_mm": 3, "organic_spacing_max_mm": 6, "organic_width_mm": 0.9)";
+  const FileJob job = parse_file_job(head + R"(, "organic_groups": [{"regions": [1]},
+      {"regions": [2], "organic_spacing_min_mm": 5, "organic_spacing_max_mm": 8, "organic_width_mm": 1.2}]}})");
+  const bool parsed = job.organic_groups.size() == 2 && job.organic_groups[0].regions == std::vector<int>{1} &&
+                      job.organic_groups[0].ask.spacing_min_mm == 3.0 && job.organic_groups[1].ask.spacing_min_mm == 5.0 &&
+                      job.organic_groups[1].ask.spacing_max_mm == 8.0 && job.organic_groups[1].ask.width_mm == 1.2 &&
+                      job.organic_groups[1].ask.layer_mm == job.organic.layer_mm;
+  std::string bad_key, bad_value;
+  try { (void)parse_file_job(head + R"(, "organic_groups": [{"regions": [1]}, {"regions": [2], "cell_mm": 4}]}})"); }
+  catch (const std::exception& e) { bad_key = e.what(); }
+  try { (void)parse_file_job(head + R"(, "organic_groups": [{"regions": [1]}, {"regions": [2], "organic_spacing_min_mm": 9, "organic_spacing_max_mm": 5}]}})"); }
+  catch (const std::exception& e) { bad_value = e.what(); }
+  std::printf("OL-GROUPS-FILE parsed %d; a foreign key: %s; a bad value: %s\n", parsed ? 1 : 0, bad_key.c_str(), bad_value.c_str());
+  CHECK(parsed && bad_key.find("organic_groups[1].cell_mm") != std::string::npos &&
+        bad_value.find("organic_groups[1]") != std::string::npos);
+  // The file job lays what Session::lay_organic lays with the same groups.
+  if (mesh_available()) {
+    FileJob j2 = job;
+    j2.tensor_field = std::make_shared<TensorField>(gap_field());
+    const std::string path = std::string(ORGANIC_RULES_TMP_DIR) + "/organic_groups.stl";
+    const FileResult r = make_lattice_file(box_model(30, 30, 20), j2, path);
+    Session s(box_model(30, 30, 20));
+    const Outcome o = s.lay_organic(job.settings, gap_field(), job.organic_groups);
+    std::size_t w1 = 0, w2 = 0;
+    for (const Bar& b : o.bars.bars) { w1 += b.region == 1; w2 += b.region == 2; }
+    std::printf("OL-GROUPS-FILE file job: ok %d (%s), bars %zu; the session's lay: %zu bars (area 1 %zu, area 2 %zu)\n", r.ok ? 1 : 0,
+                r.code.c_str(), r.bars, o.bars.bars.size(), w1, w2);
+    CHECK(r.ok && r.bars == o.bars.bars.size() && w1 > 0 && w2 > 0);
+    std::remove(path.c_str());
+  }
+}
+
 int main() {
+  test_file_groups();
   test_solid_open_face();
   test_finish_per_region();
   test_og5_inside();

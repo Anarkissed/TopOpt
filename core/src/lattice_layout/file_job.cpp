@@ -210,7 +210,8 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "organic_part_support_mm", "organic_part_to_floor", "organic_wall_gap_heavy", "organic_cross_gap",
        "organic_cross_gap_heavy", "organic_cross_climb_max_deg", "organic_tie_level", "organic_tie_gap",
        "organic_tie_gap_heavy", "organic_link_width", "organic_unbraced_max", "organic_follow_stress",
-       "organic_gap_lines", "organic_face_relief_mm", "organic_relief_exclude_faces", "organic_strand_keep"},
+       "organic_gap_lines", "organic_face_relief_mm", "organic_relief_exclude_faces", "organic_strand_keep",
+       "organic_groups"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -1065,6 +1066,30 @@ FileJob parse_file_job(const std::string& json_text) {
     if (const json::Value* v = json::find(doc, "layout")) {
       job.settings = settings_from(json::as_object(*v, w + ".layout"), w + ".layout");
       job.organic = organic_from(*v, job.settings, w + ".layout");
+      // OJ3: per group, the layout's organic_* keys with the group's own over them.
+      if (const json::Value* gl = json::find(*v, "organic_groups")) {
+        const std::string at = w + ".layout.organic_groups";
+        const auto& list = json::as_array(*gl, at).arr;
+        for (std::size_t g = 0; g < list.size(); ++g) {
+          const std::string ga = at + "[" + std::to_string(g) + "]";
+          const json::Value& go = json::as_object(list[g], ga);
+          json::Value merged = *v;
+          for (const auto& [k, val] : go.obj) {
+            if (k == "regions") continue;
+            if (k.rfind("organic_", 0) != 0 || k == "organic_groups")
+              json::fail(ga + "." + k, "is not an Organic setting a group can hold (a group holds \"regions\" and organic_* keys)");
+            bool found = false;
+            for (auto& kv : merged.obj)
+              if (kv.first == k) { kv.second = val; found = true; }
+            if (!found) merged.obj.push_back({k, val});
+          }
+          OrganicGroup og;
+          og.regions = wholes(go, "regions", ga);
+          if (og.regions.empty()) json::fail(ga + ".regions", "must name the group's Organic areas");
+          og.ask = organic_from(merged, job.settings, ga);
+          job.organic_groups.push_back(std::move(og));
+        }
+      }
       // K1: the floor lives in the domain (where), so the growth, the path, the net skin, the print check and the
       // file all see it. Q1 (brief G24): a Traced job's weave regions as a Grown job's (the owner, 2026-11-17: "generate
       // a version with the flat floor"); a traced strand that meets it ends in it as in any solid (O4, finish_bar_ends).
@@ -1076,6 +1101,7 @@ FileJob parse_file_job(const std::string& json_text) {
     if (const json::Value* v = json::find(doc, "mesh"))
       job.options = options_from(json::as_object(*v, w + ".mesh"), w + ".mesh");
     job.organic.layer_mm = job.options.layers.layer_mm;   // G1: Grown grows one printed layer per step
+    for (OrganicGroup& g : job.organic_groups) g.ask.layer_mm = job.options.layers.layer_mm;   // OJ3
     // OP7 (brief C2, E1): the ask's ranges and rules, as the session path checks them (validate_organic); the first
     // refusal is the job's (job_unreadable, as before), its key named in the detail, its plain sentence after it. The
     // stress input is the job's own refusal (no_stress_result), so it is not asked here. With no weave region the
@@ -1084,7 +1110,9 @@ FileJob parse_file_job(const std::string& json_text) {
     {
       bool weave = false;
       for (const Settings::RegionAsk& r : job.settings.regions) weave = weave || (r.weave && r.role == Role::Lattice);
-      std::vector<OrganicRefusal> refused = validate_organic(job.settings, job.organic, nullptr);
+      std::vector<OrganicRefusal> refused = job.organic_groups.empty()
+                                                ? validate_organic(job.settings, job.organic, nullptr)
+                                                : validate_organic_groups(job.settings, job.organic_groups, nullptr);   // OJ3
       if (!weave)
         refused.erase(std::remove_if(refused.begin(), refused.end(),
                                      [](const OrganicRefusal& x) { return x.setting == "bead_mm"; }),
@@ -1095,7 +1123,9 @@ FileJob parse_file_job(const std::string& json_text) {
                                : k == "bead_mm"                                     ? w + ".layout.bead_mm"
                                : (k == "build_dir" || k == "seed_stride") ? w + ".layout"
                                                                                     : w + ".layout.organic_" + k;
-        json::fail(at, refused.front().text);
+        const int g = refused.front().group;   // OJ3: a group's own refusal names the group
+        json::fail(!job.organic_groups.empty() && g >= 0 ? w + ".layout.organic_groups[" + std::to_string(g) + "].organic_" + k : at,
+                   refused.front().text);
       }
     }
     job.options.threads = whole(doc, "threads", 0, w);
@@ -1242,9 +1272,10 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     const FileOptions options = file_options_for(job.options, any_weave);
     OrganicAsk organic = job.organic;
     if (any_weave && !organic.additions.empty()) organic.print_check = print_check_hook(session, options, stop);
-    const Outcome out = any_weave ? session.lay_organic(job.settings, *job.tensor_field, organic,
-                                                        job.options.threads, stop)
-                                  : session.lay(job.settings, job.options.threads, stop);
+    const Outcome out = !any_weave ? session.lay(job.settings, job.options.threads, stop)
+                        : job.organic_groups.empty()
+                            ? session.lay_organic(job.settings, *job.tensor_field, organic, job.options.threads, stop)
+                            : session.lay_organic(job.settings, *job.tensor_field, job.organic_groups, job.options.threads, stop);   // OJ3
     if (out.cancelled) {
       refuse(r, kCancelled, "Stopped before the lattice file was finished. Nothing was made.");
       return done();
