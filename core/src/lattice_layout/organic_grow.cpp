@@ -591,7 +591,10 @@ class Grower {
   // weave_bars finds the end Solid with its run-in made.
   Vec3 end_at_edge(const Vec3& in, const Vec3& d, double at) const {
     const bool past_solid = solid(add(in, mul(d, at + 3.0 * 0.02)));
-    return add(in, mul(d, past_solid ? at + width_ : at));
+    // OG5: on into the solid by its width, never past the solid's thickness less the radius less a line width.
+    // (at least 5 microns in, so the end lies in the solid it ends on)
+    return add(in, mul(d, past_solid ? at + std::max(0.005, solid_run_on(probe_, add(in, mul(d, at)), d, width_, domain_.spec().bead_mm))
+                                     : at));
   }
 
   void lighting();
@@ -736,7 +739,11 @@ void Grower::seeds(std::vector<Tip>& tips) {
       t.kind = Tip::Floor;
       t.dir = cap(2, a, b);
       // Its foot leaves the floor on that heading; its root runs back along it into the solid by its width (S4).
-      t.root = at < 0.0 ? c : solid(sub(on, mul(t.dir, width_ + 0.06))) ? sub(on, mul(t.dir, width_)) : on;
+      // OG5: never deeper than the solid's thickness there less the radius less a line width (a thin bed floor).
+      t.root = at < 0.0 ? c
+               : solid(sub(on, mul(t.dir, width_ + 0.06)))
+                   ? sub(on, mul(t.dir, std::max(0.005, solid_run_on(probe_, on, mul(t.dir, -1.0), width_, domain_.spec().bead_mm))))
+                   : on;
       t.from = on;
       t.seed_no = static_cast<int>(rep_.seeds_floor);
       tips.push_back(t);

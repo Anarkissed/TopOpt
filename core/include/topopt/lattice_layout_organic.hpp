@@ -317,6 +317,11 @@ std::uint64_t bars_hash(const Bars& bars);
 // The numbers additions are applied with: the job's light width (S), layer and link width (S8).
 struct AddContext {
   double light_mm = 0.0, layer_mm = 0.2, link_width = 1.0;
+  // OG5 (brief E9): with `line_mm` above 0, apply_additions guards each round's bars (guard_bars) after its operations,
+  // before its print check and hash; the strengthen job does the same after a round's two steps.
+  std::vector<int> weave_regions;
+  double line_mm = 0.0;
+  GuardReport* guard = nullptr;
 };
 struct AddReport {
   std::size_t brace_points = 0, braces = 0, widened = 0, links_widened = 0;
@@ -328,6 +333,19 @@ struct AddReport {
 bool apply_add_round(Bars& bars, const Domain& domain, const AddRound& round, const AddContext& c, AddReport* report = nullptr,
                      std::string* why = nullptr);
 // Every round in order, each round's hash checked. False (with `why`) at the first that fails.
+// Rule OG5 (brief E9; the owner, 2026-11-19: "That CAN'T happen"): every bar of a weave (every kind: strands, links,
+// ties, net-skin bars, braces, supports, relief vines) keeps its centre line in the part (1e-3 mm), and lies in solid
+// only as an END run-on entered from the lattice, at most min(its width, the solid's thickness along it there less its
+// radius less `line_mm`), never under 0 and never mid-bar (and, in a Protect skin, never with its tube within `line_mm`
+// of the part's surface): a bar through solid is cut into its lattice parts (each
+// ended by that rule), a bar wholly out of the lattice is removed. OG2's relief at an open face is not judged. A new
+// end lying in solid is Solid, else Surface; drop_loose_bars and drop_adrift_bars follow it at the lay. Returns the
+// bars cut or removed; `report` gathers them.
+std::size_t guard_bars(Bars& bars, const Domain& domain, const std::vector<int>& weave_regions, double line_mm,
+                       GuardReport* report = nullptr);
+// OG5 at source: how far a weave bar entering solid at `entry`, going `dir`, runs on into it: min(its width (S11), the
+// solid's thickness along `dir` there less its radius less `line_mm`), never under 0.
+double solid_run_on(const Domain::Probe& probe, const Vec3& entry, const Vec3& dir, double width, double line_mm);
 // `between`, when given: run after each round's operations, before its hash (OS16); a non-empty answer refuses.
 bool apply_additions(Bars& bars, const Domain& domain, const Additions& adds, const AddContext& c, std::string* why = nullptr,
                      const std::function<std::string(Bars&)>& between = {});

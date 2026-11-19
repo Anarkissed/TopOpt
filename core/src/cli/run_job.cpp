@@ -16970,6 +16970,8 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
     ctx.light_mm = light;
     ctx.layer_mm = ask.layer_mm;
     ctx.link_width = ask.link_width;
+    for (const ll::Layout::Weave& w : out.layout.weave) ctx.weave_regions.push_back(w.region);   // OG5
+    ctx.line_mm = domain.spec().bead_mm;
     say("checking the lattice prints (round 0)");
     ll::PrintChecked pc = ll::print_check_bars(session, out.layout, out.bars, file_options, stop);
     if (!pc.ok) return finish(false, "print_check_failed", 1, "The lattice's file could not be put together, so its strength cannot be judged.", pc.why);
@@ -17624,6 +17626,11 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
       // OS16 (brief E4, leg 2; amended by the lead, 2026-11-19): the print check again (the new braces and wider struts
       // are new shells). It does what it does after a lay (leaves out, moves, props) and the job goes on: the next check
       // judges the bars as written. What it did among the bars that were there before the round is counted.
+      // OG5 (brief E9): the round's bars guarded, as apply_additions guards them when the round is replayed.
+      ll::GuardReport round_guard;
+      // What it cut changes bars that were there before: OS12 against round 0 is then held as after a print check that
+      // moved one (against the round before only).
+      if (ll::guard_bars(bars, domain, ctx.weave_regions, ctx.line_mm, &round_guard) > 0) moved_by_print = true;
       say("round " + std::to_string(n) + ": checking the lattice prints");
       const auto tp = std::chrono::steady_clock::now();
       ll::PrintChecked pc2 = ll::print_check_bars(session, out.layout, bars, file_options, stop);
@@ -17713,7 +17720,9 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
                      ", \"struts_at_cap\": " + std::to_string(struts_at_cap) + ", \"cap_mm\": " + json_num(cap) +
                      ", \"old_bars_split\": " + std::to_string(split) + ", \"old_bars_kept\": " + (kept.empty() ? "true" : "false") +
                      (kept.empty() ? std::string() : ", \"old_bars_broken\": " + json_str(kept)) +
-                     ", " + printed + ", " + paths_json + ", \"hash\": " + json_str(hash_hex(round.hash)) + ", \"seconds\": " + json_num(std::round(s_add * 10) / 10) + "}}";
+                     ", " + printed + ", " + paths_json + ", \"guard_outside_cut\": " + std::to_string(round_guard.outside_cut) +
+                     ", \"guard_in_solid_cut\": " + std::to_string(round_guard.in_solid_cut) +
+                     ", \"guard_in_solid_removed\": " + std::to_string(round_guard.in_solid_removed) + ", \"hash\": " + json_str(hash_hex(round.hash)) + ", \"seconds\": " + json_num(std::round(s_add * 10) / 10) + "}}";
     }
   }
   // What follows the stress: a strut width on a Sweep, a spacing range, Grown's runs by stress.

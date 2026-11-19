@@ -39,7 +39,8 @@ double to_segment(const Vec3& p, const Vec3& a, const Vec3& b) {
 // more (S11), so that weave_bars, whose end function (finish_bar_ends) tags it, finds it Solid with its run-in made.
 // Past the edge the part's surface (Surface: on the surface) or another region's lattice (Loose) leaves it at the
 // edge. With no edge within one spacing the end is left where it is. The end never leaves the part.
-void run_on(const Domain::Probe& probe, int region, const Vec3& from, Vec3& end, double width, double spacing) {
+void run_on(const Domain::Probe& probe, int region, const Vec3& from, Vec3& end, double width, double spacing,
+            double line_mm) {
   const double len = dist(from, end);
   if (!(len > 0.0) || !(spacing > 0.0)) return;
   const Vec3 d{(end.x - from.x) / len, (end.y - from.y) / len, (end.z - from.z) / len};
@@ -61,7 +62,7 @@ void run_on(const Domain::Probe& probe, int region, const Vec3& from, Vec3& end,
     }
     const Where past = probe.where(at(in + 3.0 * 0.02));   // as finish_bar_ends reads past an end
     const bool solid = past.why != Why::Outside && !past.lattice();
-    end = at(solid ? in + width : in);
+    end = at(solid ? in + solid_run_on(probe, at(in), d, width, line_mm) : in);   // OG5: within the solid's thickness
     return;
   }
 }
@@ -588,12 +589,24 @@ std::vector<Strand> trace_strands(const Domain& domain, int region, const Tensor
   };
   for (const OrganicCurve& cv : lat.curves) {
     if (cv.points.size() < 2) continue;
-    Strand s = strand_of(cv.points, cv.radius_mm);
-    // O4: both free ends run on.
-    const std::size_t last = s.points.size() - 1;
-    run_on(probe, region, s.points[1], s.points[0], s.width_mm[0], s.spacing_mm);
-    run_on(probe, region, s.points[last - 1], s.points[last], s.width_mm[last], s.spacing_mm);
-    out.push_back(std::move(s));
+    // OG5 at source (brief E9): the tracer reads its candidates at voxel centres, so a curve can wander past the region's
+    // true edge into solid (or out of the part). It is cut there: each run of its points that lie in the region's
+    // lattice is a strand of its own (a run of one point is none); a curve wholly inside is as before.
+    std::vector<std::vector<Vec3>> runs(1);
+    for (const Vec3& p : cv.points) {
+      const Where w = probe.where(p);
+      if (w.lattice() && w.id == region) runs.back().push_back(p);
+      else if (!runs.back().empty()) runs.emplace_back();
+    }
+    for (const std::vector<Vec3>& pts : runs) {
+      if (pts.size() < 2) continue;
+      Strand s = strand_of(pts, cv.radius_mm);
+      // O4: both free ends run on.
+      const std::size_t last = s.points.size() - 1;
+      run_on(probe, region, s.points[1], s.points[0], s.width_mm[0], s.spacing_mm, domain.spec().bead_mm);
+      run_on(probe, region, s.points[last - 1], s.points[last], s.width_mm[last], s.spacing_mm, domain.spec().bead_mm);
+      out.push_back(std::move(s));
+    }
   }
   const std::size_t curves = out.size();   // R: the curves come first, then the connectors
   for (const OrganicConnector& cn : lat.connectors) out.push_back(strand_of({cn.a, cn.b}, cn.radius_mm));
@@ -1239,6 +1252,12 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
     if (one && !ask.floors.empty() && ask.width_heavy_mm > 0.0)
       out.floors_widened = apply_width_floors(out.bars, ask.floors, ask.width_heavy_mm, light_mm, ask.link_width,
                                               &out.floor_links_widened);
+    // OG5 (brief E9): the lay's bars were guarded before its drop (Session::lay_with); the floors may widen a bar, so
+    // they are guarded again when they did (nothing is dropped here: a widened bar's run-on is only cut back).
+    std::vector<int> weave_ids;
+    for (const Layout::Weave& w : out.layout.weave) weave_ids.push_back(w.region);
+    const double line_mm = domain_->spec().bead_mm;
+    if (out.floors_widened > 0) guard_bars(out.bars, *domain_, weave_ids, line_mm, &out.guard);
     // Brief E3a: what strengthening by adding added, in order, each round's hash checked; a mismatch is refused. The
     // draft (no cut at crossings) is not the lattice they were made on: it shows the lay without them.
     if (one && !ask.additions.empty() && !draft) {
@@ -1246,6 +1265,9 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
       c.light_mm = light_mm;
       c.layer_mm = ask.layer_mm;
       c.link_width = ask.link_width;
+      c.weave_regions = weave_ids;   // OG5: each round's bars guarded before its print check and hash
+      c.line_mm = line_mm;
+      c.guard = &out.guard;
       std::string why;
       // OS16: the print check before the first round, and (apply_additions) after each.
       if (ask.print_check) {

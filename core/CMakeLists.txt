@@ -195,6 +195,8 @@ add_library(topopt
   src/lattice_layout/organic_floors.cpp
   # Brief E3a: strengthening by adding (the additions, their file and replay, the old-bar invariant).
   src/lattice_layout/organic_additions.cpp
+  # Brief E9, rule OG5: no Organic bar outside the part or through protected solid.
+  src/lattice_layout/organic_guard.cpp
   # Install 3, rule D23: the faces a region runs into that no rule decides (places).
   src/lattice_layout/places.cpp
   src/orient/orient.cpp

@@ -494,7 +494,7 @@ static void test_ties() {
   const Domain::Probe pr = b.d.probe();
   const std::size_t bad = unsupported_strands(pr, with);
   std::printf("G-5 ties laid %zu; strands whose lowest point stands on nothing: %zu\n", on.ties_laid, bad);
-  KNOWN_FAULT(0, 16, bad, "G-5 strands whose lowest point stands on nothing");
+  KNOWN_FAULT(0, 17, bad, "G-5 strands whose lowest point stands on nothing");   // 16 before OG5 (brief E9): the run-ons into solid follow its depth rule
   // The gate not met: sigma2 a twentieth of sigma1.
   Part c(box(24, 24, 24), 24, 24, 24, 3, [](const Vec3&) { return std::array<double, 6>{0.05, 0.0, 1.0, 0, 0, 0}; });
   c.ask.reference_mpa = 2.0;

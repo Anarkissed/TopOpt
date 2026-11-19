@@ -1298,6 +1298,7 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     r.gap_broken = out.gap_broken;
     r.tight = out.tight;
     r.relief = out.relief;
+    r.guard = out.guard;   // OG5 (brief E9)
     for (const Bar& b : out.bars.bars)
       r.weave_bars += std::find(weave_regions.begin(), weave_regions.end(), b.region) != weave_regions.end();
     if (!out.empty_regions.empty()) {
@@ -1734,6 +1735,28 @@ std::string file_result_json(const FileResult& r) {
                     count(r.made.sags.lifted), r.made.sags.lift_largest_mm, count(r.made.sags.legs), r.made.sags.legs_mm,
                     count(r.made.sags.unsupported));
       o += b;
+      {   // OG5 (brief E9): what the guard pass cut or removed (no bar outside the part or through protected solid)
+        const auto places = [&](const std::vector<Vec3>& v) {
+          std::string t;
+          char q[96];
+          for (const Vec3& p : v) {
+            std::snprintf(q, sizeof q, "%s[%.9g, %.9g, %.9g]", t.empty() ? "" : ", ", p.x, p.y, p.z);
+            t += q;
+          }
+          return t;
+        };
+        std::snprintf(b, sizeof b, ",\n    \"guard\": {\"ends_moved_in\": %llu, \"outside_cut\": %llu, \"in_solid_cut\": %llu, "
+                      "\"in_solid_removed\": %llu, \"by_kind\": {", count(r.guard.ends_moved_in), count(r.guard.outside_cut),
+                      count(r.guard.in_solid_cut), count(r.guard.in_solid_removed));
+        o += b;
+        bool first = true;
+        for (const auto& [k, v] : r.guard.by_kind) {
+          o += std::string(first ? "" : ", ") + "\"" + k + "\": " + std::to_string(v);
+          first = false;
+        }
+        o += "}, \"outside_at\": [" + places(r.guard.outside_at) + "], \"in_solid_at\": [" + places(r.guard.in_solid_at) +
+             "], \"removed_at\": [" + places(r.guard.removed_at) + "]}";
+      }
       // OG1 (brief E6): the gap rule and its diagnosis; OG2: the relief, and the tubes' proud ends.
       const Outcome::Tight& tt = r.tight;
       std::snprintf(b, sizeof b,

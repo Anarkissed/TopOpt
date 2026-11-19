@@ -1,5 +1,6 @@
 // Lattice rebuild, stage D: the bars (rules S4, S11). See lattice_layout.hpp.
 #include "topopt/lattice_layout.hpp"
+#include "topopt/lattice_layout_organic.hpp"
 
 #include <algorithm>
 #include <array>
@@ -391,7 +392,11 @@ std::size_t join_loose_bars(Bars& bars, const Domain& domain, int threads, const
           stop = in;
         } else {
           kind = Bar::End::Solid;
-          stop = in + me.width;   // S11: on into the solid by its own width
+          // S11: on into the solid by its own width; OG5 (a weave bar): never past the solid's thickness less its
+          // radius less a line width.
+          stop = in + (me.strand >= 0 ? solid_run_on(probe, Vec3{p.x + d.x * in + lift.x, p.y + d.y * in + lift.y, p.z + d.z * in + lift.z},
+                                                     d, me.width, domain.spec().bead_mm)
+                                      : me.width);
         }
         break;
       }

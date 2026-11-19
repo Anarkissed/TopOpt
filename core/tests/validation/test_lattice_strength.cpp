@@ -1332,7 +1332,7 @@ int main() {
     const auto pocket_job = [&](const std::string& strengthened) {
       return "{\"mode\": \"lattice_file\", \"model\": \"pocket.stl\", \"output\": \"pocket_lattice.stl\", \"tensor\": \"pocket.tensor\", "
              "\"strength_job\": \"pocket_sj.json\"" + (strengthened.empty() ? std::string() : ", \"strengthened\": \"" + strengthened + "\"") +
-             ", \"layout\": {\"region_ids\": [1], \"region_no_lattice\": [0], \"region_depth_mm\": [4], \"region_expand_mm\": [0], "
+             ", \"layout\": {\"region_ids\": [1], \"region_no_lattice\": [0], \"region_depth_mm\": [14], \"region_expand_mm\": [-2], "
              "\"region_face_counts\": [1], \"region_faces\": [" + std::to_string(wall) + "], \"region_weave\": [true], "
              "\"organic_spacing_min_mm\": 3, \"organic_spacing_max_mm\": 5, \"organic_width_mm\": 0.9, \"organic_width_heavy_mm\": 1.8}}";
     };

@@ -1469,6 +1469,17 @@ struct OrganicRefusal {
   double allowed_min = 0.0, allowed_max = 0.0;
 };
 
+// Rule OG5 (brief E9): what the guard pass (guard_bars) cut or removed of an Organic lay's bars: bars cut because their
+// centre line left the part (`outside_cut`), cut because they lay in solid beyond an end's run-on (`in_solid_cut`),
+// removed because nothing of them lay in the lattice (`in_solid_removed`); by kind (strand, link, tie, net, brace,
+// support); and at most 20 places of each (a bar's middle, mm).
+struct GuardReport {
+  std::size_t outside_cut = 0, in_solid_cut = 0, in_solid_removed = 0;
+  std::size_t ends_moved_in = 0;   // joints or landings a hair outside the part, moved in with every bar ending there
+  std::map<std::string, std::size_t> by_kind;
+  std::vector<Vec3> outside_at, in_solid_at, removed_at;
+};
+
 struct Outcome {
   Layout layout;
   StrutReport struts;
@@ -1497,6 +1508,7 @@ struct Outcome {
   // is emptied; nothing is drawn or written from it.
   std::size_t additions_rounds = 0;
   std::string additions_refused;
+  GuardReport guard;   // OG5: what the guard pass cut or removed (the lay, then each round of additions replayed)
   // C24: the part's size-step limit this layout kept (step_held of the part's cells: a value under the ladder's
   // smallest step is held there, 2 on Default Grade); 0 when none was asked. A region's own limit is not reported here.
   double step_held_at = 0.0;

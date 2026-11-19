@@ -278,6 +278,11 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
       if (settings.skin && finish && !finish->net_reach.empty())   // O16: Finish Skin on a weave region
         lay_net_skin(out.bars, *domain_, finish->net_reach, settings.skin_spec.width_mm);
       domain_->check_stop();
+      // OG5 (brief E9): no weave bar outside the part or through protected solid, before the drop (which then takes what
+      // the guard left hanging).
+      std::vector<int> weave_ids;
+      for (const Layout::Weave& w : out.layout.weave) weave_ids.push_back(w.region);
+      if (strands) guard_bars(out.bars, *domain_, weave_ids, domain_->spec().bead_mm, &out.guard);
       if (settings.drop_loose && !draft) {
         drop_loose_bars(out.bars, finish && !finish->arrived.empty() ? &finish->arrived : nullptr);   // G11
         out.stepped_edges = stepped_edges(out.bars);
@@ -286,8 +291,10 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
       } else {
         out.pieces = count_pieces(out.bars, *domain_, nullptr, nullptr, &out.layout);
       }
-      if (!settings.skin && finish && !finish->hold.empty())   // L2 d: Skin off, after the growth and J2
+      if (!settings.skin && finish && !finish->hold.empty()) {   // L2 d: Skin off, after the growth and J2
         hold_up_weave(out.bars, *domain_, finish->hold);
+        guard_bars(out.bars, *domain_, weave_ids, domain_->spec().bead_mm, &out.guard);   // OG5: the supports too
+      }
       for (const Bar& b : out.bars.bars)
         if (b.net) {
           ++out.net_struts;

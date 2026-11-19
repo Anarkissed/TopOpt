@@ -332,6 +332,7 @@ struct FileResult {
   std::shared_ptr<const GrowReport> grown;
   // OG1, OG2 (brief E6): the gap rule (points lowered, bars over their cap), its diagnosis, and the relief.
   std::size_t gap_capped = 0, gap_broken = 0;
+  GuardReport guard;   // OG5 (brief E9): Outcome::guard
   Outcome::Tight tight;
   Outcome::Relief relief;
   ShallowTable shallow;

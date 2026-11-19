@@ -1019,7 +1019,7 @@ static void test_follow_stress() {
   {
     const StepModel model = box_model(30, 30, 20);
     const TensorField f = traced_field();
-    const std::uint64_t today[2] = {0x9a119fd417d400d7ULL, 0xe8c60d9cd768769bULL};  // G11 amended 2026-11-19: hashed re-seed places (was 0x235c732cf4f2f269)
+    const std::uint64_t today[2] = {0x9a119fd417d400d7ULL, 0x033117e5fef14428ULL};  // G11 amended 2026-11-19 (was 0x235c732cf4f2f269, then 0xe8c60d9cd768769b); OG5 (brief E9): its roots' run-on into the floor
     for (int g = 0; g < 2; ++g) {
       OrganicAsk a = follow_ask(g == 1);
       Session s1(model), s2(model);
@@ -1505,7 +1505,7 @@ static void test_equal_ends() {
     CHECK(!threw);
   }
   // Ends that differ: nothing changes (the bars of OL-FOLLOW's two made lays, today's hashes from before OP6), no note.
-  const std::uint64_t today[2] = {0x9a119fd417d400d7ULL, 0xe8c60d9cd768769bULL};  // G11 amended 2026-11-19: hashed re-seed places (was 0x235c732cf4f2f269)
+  const std::uint64_t today[2] = {0x9a119fd417d400d7ULL, 0x033117e5fef14428ULL};  // G11 amended 2026-11-19 (was 0x235c732cf4f2f269, then 0xe8c60d9cd768769b); OG5 (brief E9): its roots' run-on into the floor
   for (int g = 0; g < 2; ++g) {
     Session s(model);
     const Outcome o = s.lay_organic(st, f, follow_ask(g == 1));
@@ -1591,7 +1591,7 @@ static void test_groups() {
   {
     const StepModel model = box_model(30, 30, 20);
     const TensorField f = traced_field();
-    const std::uint64_t today[2] = {0x9a119fd417d400d7ULL, 0xe8c60d9cd768769bULL};  // G11 amended 2026-11-19: hashed re-seed places (was 0x235c732cf4f2f269)
+    const std::uint64_t today[2] = {0x9a119fd417d400d7ULL, 0x033117e5fef14428ULL};  // G11 amended 2026-11-19 (was 0x235c732cf4f2f269, then 0xe8c60d9cd768769b); OG5 (brief E9): its roots' run-on into the floor
     for (int g = 0; g < 2; ++g) {
       Session s(model);
       const Outcome o = s.lay_organic(traced_settings(), f, std::vector<OrganicGroup>{{{1}, follow_ask(g == 1)}});
@@ -2048,7 +2048,7 @@ static void test_og1_gap() {
     grown.ties = true;
     const Pin pins[] = {{1, 16.0, true, gap_ask(1.8), 0x5329efc15073f757ULL},
                         {1, 16.0, false, gap_ask(1.8), 0xd535900d484c8045ULL},
-                        {2, 12.0, false, gap_ask(1.6), 0x627813251bb9a6bfULL},
+                        {2, 12.0, false, gap_ask(1.6), 0x1ef42835dc6f6173ULL},   // OG5 (brief E9): bars cut to the part
                         {1, 16.0, true, gap_ask(0.0), 0x60471813348d58e7ULL}};
     std::size_t same = 0, n = 0;
     for (const Pin& p : pins) {
@@ -2707,7 +2707,177 @@ static void test_os18_relief_vines() {
   }
 }
 
+// ── OG5 (brief E9; the owner, 2026-11-19: "That CAN'T happen"): no Organic bar outside the part or through protected
+// solid. What a lay's bars break of it: centre-line points outside the part (relief ends aside); points in solid that
+// are not part of an end's run-on (mid-bar solid); points in protected skin whose tube surface comes within one line
+// width of the part's outer surface.
+struct Og5Count { std::size_t outside = 0, mid_solid = 0, near_face = 0, bars = 0, run_pts_outside = 0; };
+static Og5Count og5_count(const Session& s, const Bars& bars, const std::vector<int>& regions) {
+  Og5Count c;
+  const Domain::Probe probe = s.domain()->probe();
+  const double line = s.domain()->spec().bead_mm;
+  for (const Bar& b : bars.bars) {
+    if (!(b.net || b.support || std::find(regions.begin(), regions.end(), b.region) != regions.end())) continue;
+    ++c.bars;
+    const double L = dist(b.a, b.b);
+    if (!(L > 0.0)) continue;
+    const double t0 = std::min(b.relief_a, L), t1 = std::max(t0, L - b.relief_b);
+    const int n = std::max(2, static_cast<int>(std::ceil((t1 - t0) / 0.05)));
+    std::string seq;
+    for (int k = 0; k <= n; ++k) {
+      const double t = t0 + (t1 - t0) * k / n;
+      const Vec3 p{b.a.x + (b.b.x - b.a.x) * t / L, b.a.y + (b.b.y - b.a.y) * t / L, b.a.z + (b.b.z - b.a.z) * t / L};
+      const Where w = probe.where(p);
+      const char ch = w.lattice() ? 'L' : w.why == Why::Outside ? 'O' : 'S';
+      if (seq.empty() || seq.back() != ch) seq.push_back(ch);
+      if (ch == 'O') { ++c.outside; }
+      // Rule 3 on the run-on: a point of the bar inside protected skin (the end itself aside: with a skin thinner than
+      // the radius plus a line, the end stops at the skin, run-on 0) keeps its tube a line width off the outer face.
+      const bool at_end = t < 0.02 || t > L - 0.02;
+      if (!at_end && w.why == Why::ProtectSkin && probe.part().depth(p) - 0.5 * b.width < line - 2e-3) ++c.near_face;
+    }
+    // solid only at the ends: the run of letters is S?L..L S? with no S between two L
+    const std::size_t first_l = seq.find('L'), last_l = seq.rfind('L');
+    if (first_l != std::string::npos && seq.substr(first_l, last_l - first_l + 1).find('S') != std::string::npos) ++c.mid_solid;
+  }
+  std::vector<Vec3> relief_ends;   // OG2's ends carried proud of an open face on purpose
+  for (const Bar& b : bars.bars) {
+    if (b.relief_a > 0.0) relief_ends.push_back(b.a);
+    if (b.relief_b > 0.0) relief_ends.push_back(b.b);
+  }
+  for (const WeaveRun& r : weave_runs(bars, regions, 0.0))
+    for (const Vec3& q : r.points) {
+      if (probe.where(q).why != Why::Outside) continue;
+      bool relief = false;
+      for (const Vec3& e : relief_ends) relief = relief || dist(e, q) < 1e-9;
+      c.run_pts_outside += !relief;
+    }
+  return c;
+}
+
+static void test_og5_inside() {
+  // A 30 x 30 x 20 block, the weave under its top face (open) 20 mm deep; a 0.8 mm Protect skin on its bottom (the bed
+  // floor) and a 4 mm one on a side; Traced and Grown, the net skin off and on.
+  const StepModel model = box_model(30, 30, 20);
+  const TensorField f = traced_field();
+  for (const bool grown : {false, true})
+    for (const bool net : {false, true}) {
+      Settings st;
+      st.regions = {{1, Role::Lattice, {1}, 20.0, 0.0, true}};
+      Settings::ProtectAsk floor, side;
+      floor.id = 2; floor.faces = {0}; floor.depth_mm = 0.8;
+      side.id = 3; side.faces = {3}; side.depth_mm = 4.0;
+      st.protect = {floor, side};
+      st.skin = net;
+      OrganicAsk a = traced_ask();
+      if (grown) a.mode = OrganicMode::Grown;
+      Session s(model);
+      const Outcome o = s.lay_organic(st, f, a);
+      const Og5Count c = og5_count(s, o.bars, {1});
+      std::printf("OG5 %s net %d: %zu weave bars; outside %zu, mid-bar solid %zu, within a line of a protected face %zu, run points "
+                  "outside %zu; guard: moved in %zu, outside cut %zu, in solid cut %zu, removed %zu\n", grown ? "Grown" : "Traced",
+                  net ? 1 : 0, c.bars, c.outside, c.mid_solid, c.near_face, c.run_pts_outside, o.guard.ends_moved_in,
+                  o.guard.outside_cut, o.guard.in_solid_cut, o.guard.in_solid_removed);
+      CHECK(c.bars > 0 && c.outside == 0 && c.mid_solid == 0 && c.near_face == 0 && c.run_pts_outside == 0);
+      if (!grown && !net) {
+        // The strengthen additions case: a round widening every strut ending in the floor skin to 3 x its width, replayed
+        // with the guard (AddContext::line_mm): the run-ons are cut back to the rule.
+        Bars bars = o.bars;
+        AddRound rd;
+        for (const Bar& b : bars.bars)
+          if (b.region == 1 && !b.link && (b.end_a == Bar::End::Solid || b.end_b == Bar::End::Solid) && std::min(b.a.z, b.b.z) < 1.0)
+            rd.ops.push_back({2, {b.a.x, b.a.y, b.a.z, b.b.x, b.b.y, b.b.z, 3.0 * b.width}});
+        Bars probe_bars = bars;
+        CHECK(apply_add_round(probe_bars, *s.domain(), rd, AddContext{}));
+        rd.hash = bars_hash(probe_bars);   // the hash without the guard: a mismatch would refuse; set it after the guard
+        AddContext ctx;
+        ctx.light_mm = 0.9;
+        ctx.weave_regions = {1};
+        ctx.line_mm = s.domain()->spec().bead_mm;
+        GuardReport g;
+        ctx.guard = &g;
+        Bars guarded = probe_bars;
+        guard_bars(guarded, *s.domain(), ctx.weave_regions, ctx.line_mm, &g);
+        rd.hash = bars_hash(guarded);
+        Additions adds;
+        adds.rounds.push_back(rd);
+        GuardReport g2;
+        ctx.guard = &g2;
+        std::string why;
+        const bool ok = apply_additions(bars, *s.domain(), adds, ctx, &why);
+        const Og5Count c2 = og5_count(s, bars, {1});
+        std::printf("OG5 additions: %zu floor struts widened 3x; guard cut %zu in solid, %zu outside; replayed %d (%s); outside %zu, "
+                    "mid-bar solid %zu, within a line of a protected face %zu\n", rd.ops.size(), g2.in_solid_cut, g2.outside_cut, ok ? 1 : 0,
+                    why.c_str(), c2.outside, c2.mid_solid, c2.near_face);
+        CHECK(!rd.ops.empty() && ok && c2.outside == 0 && c2.mid_solid == 0 && c2.near_face == 0);
+      }
+    }
+  // A concave (L-shaped) part: the weave under the top of an L, where a straight link or tie could chord the solid corner.
+  {
+    StepModel m;
+    const std::vector<std::array<double, 2>> xy = {{0, 0}, {30, 0}, {30, 12}, {12, 12}, {12, 30}, {0, 30}};
+    const int n = static_cast<int>(xy.size());
+    auto add_face = [&](const std::vector<Vec3>& poly, Vec3 normal, int face) {
+      StepFaceInfo info;
+      info.kind = StepSurfaceKind::Plane;
+      info.plane_normal = normal;
+      info.plane_origin = poly[0];
+      m.faces.push_back(info);
+      for (std::size_t k = 1; k + 1 < poly.size(); ++k) {
+        const int v = static_cast<int>(m.mesh.vertices.size());
+        m.mesh.vertices.insert(m.mesh.vertices.end(), {poly[0], poly[k], poly[k + 1]});
+        m.mesh.triangles.push_back({v, v + 1, v + 2});
+        m.triangle_face.push_back(face);
+      }
+    };
+    // bottom (as two convex pieces' fan from the inner corner), top, sides
+    const std::vector<Vec3> bot1{{12, 12, 0}, {12, 0, 0}, {0, 0, 0}, {0, 30, 0}, {12, 30, 0}};
+    const std::vector<Vec3> bot2{{12, 12, 0}, {30, 12, 0}, {30, 0, 0}, {12, 0, 0}};
+    const std::vector<Vec3> top1{{12, 12, 20}, {12, 30, 20}, {0, 30, 20}, {0, 0, 20}, {12, 0, 20}};
+    const std::vector<Vec3> top2{{12, 12, 20}, {12, 0, 20}, {30, 0, 20}, {30, 12, 20}};
+    add_face(bot1, {0, 0, -1}, 0);
+    {   // the second bottom piece is the same face 0
+      for (std::size_t k = 1; k + 1 < bot2.size(); ++k) {
+        const int v = static_cast<int>(m.mesh.vertices.size());
+        m.mesh.vertices.insert(m.mesh.vertices.end(), {bot2[0], bot2[k], bot2[k + 1]});
+        m.mesh.triangles.push_back({v, v + 1, v + 2});
+        m.triangle_face.push_back(0);
+      }
+    }
+    add_face(top1, {0, 0, 1}, 1);
+    for (std::size_t k = 1; k + 1 < top2.size(); ++k) {
+      const int v = static_cast<int>(m.mesh.vertices.size());
+      m.mesh.vertices.insert(m.mesh.vertices.end(), {top2[0], top2[k], top2[k + 1]});
+      m.mesh.triangles.push_back({v, v + 1, v + 2});
+      m.triangle_face.push_back(1);
+    }
+    for (int i = 0; i < n; ++i) {
+      const auto& p = xy[static_cast<std::size_t>(i)];
+      const auto& q = xy[static_cast<std::size_t>((i + 1) % n)];
+      const double dx = q[0] - p[0], dy = q[1] - p[1], l = std::hypot(dx, dy);
+      add_face({{p[0], p[1], 0}, {q[0], q[1], 0}, {q[0], q[1], 20}, {p[0], p[1], 20}}, {dy / l, -dx / l, 0}, 2 + i);
+    }
+    m.face_count = 2 + n;
+    m.solid_count = 1;
+    m.brep_volume = (30.0 * 30.0 - 18.0 * 18.0) * 20.0;
+    for (const bool tie : {false, true}) {
+      Settings st;
+      st.regions = {{1, Role::Lattice, {1}, 20.0, 0.0, true}};
+      OrganicAsk a = traced_ask();
+      a.tie_level = tie;
+      Session s(m);
+      const Outcome o = s.lay_organic(st, f, a);
+      const Og5Count c = og5_count(s, o.bars, {1});
+      std::printf("OG5 L-shaped, ties %d: %zu weave bars; outside %zu, mid-bar solid %zu, run points outside %zu; guard: moved in %zu, "
+                  "outside cut %zu, in solid cut %zu, removed %zu\n", tie ? 1 : 0, c.bars, c.outside, c.mid_solid, c.run_pts_outside,
+                  o.guard.ends_moved_in, o.guard.outside_cut, o.guard.in_solid_cut, o.guard.in_solid_removed);
+      CHECK(c.bars > 0 && c.outside == 0 && c.mid_solid == 0 && c.run_pts_outside == 0);
+    }
+  }
+}
+
 int main() {
+  test_og5_inside();
   test_s_cut_fix();
   test_k_floor();
   test_j_prune_and_cap();

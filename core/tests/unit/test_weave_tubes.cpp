@@ -433,8 +433,10 @@ static void test_trimmed_to_part() {
               "after %.4f mm (reported %.4f); %zu vertices moved, %.3f mm at most; %zu made again, %zu left out; lowest z %.4f\n",
               w.shells(), w.tubes, w.bridges, w.feet, raw.shells(), worst_raw, worst, w.outside_largest_mm, w.trimmed_vertices,
               w.trimmed_largest_mm, w.rebuilt, w.left_out, z_low);
-  CHECK(worst_raw > 0.1);                      // there was something to trim
-  CHECK(w.trimmed_vertices > 0 && worst <= 0.05);
+  // OG5 (brief E9): the bars no longer leave the part, so the tubes seldom stand out of it; where they do, the trim
+  // takes them back in.
+  CHECK(worst_raw <= 0.1 || w.trimmed_vertices > 0);
+  CHECK(worst <= 0.05);
   CHECK(std::fabs(w.outside_largest_mm - worst) < 1e-3);
   CHECK(z_low >= 0.0);                         // the bed is the part's lowest z, 0: nothing under it at all
   CHECK(good == w.shells() && least > 0.0);
@@ -590,7 +592,8 @@ static void test_flat_bottom() {
               "%zu shells (%zu feet), %zu cut at the bed; lowest z %.6f\n", rm.layers.bed_mm2, rm.layers.first_layer_mm2,
               rm.layers.sloped_mm2, rm.layers.bed_flat() ? 1 : 0, rt.layers.bed_mm2, rt.layers.first_layer_mm2, rt.layers.sloped_mm2,
               rt.layers.bed_flat() ? 1 : 0, rt.shells.shells(), rt.shells.feet, rt.shells.cut_at_bed, z_low);
-  CHECK(rt.mesh.ok && rt.shells.feet > 0 && rt.shells.cut_at_bed > 0);
+  // OG5 (brief E9): no bar runs on through the bed floor any more, so no foot reaches the bed to be cut there.
+  CHECK(rt.mesh.ok && (rt.shells.cut_at_bed == 0 || rt.shells.feet > 0));
   CHECK(z_low >= 0.0);
   CHECK(rm.layers.bed_flat());
   CHECK(rt.layers.bed_flat() && rt.layers.bed_mm2 <= rt.layers.first_layer_mm2);
