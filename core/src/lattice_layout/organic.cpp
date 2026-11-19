@@ -804,7 +804,14 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
       c.layer_mm = ask.layer_mm;
       c.link_width = ask.link_width;
       std::string why;
-      if (apply_additions(out.bars, *domain_, ask.additions, c, &why)) {
+      // OS16: the print check before the first round, and (apply_additions) after each.
+      if (ask.print_check) {
+        const std::string w = ask.print_check(out.layout, out.bars);
+        if (!w.empty()) why = "before round 1: " + w;
+      }
+      std::function<std::string(Bars&)> between;
+      if (ask.print_check) between = [&](Bars& b) { return ask.print_check(out.layout, b); };
+      if (why.empty() && apply_additions(out.bars, *domain_, ask.additions, c, &why, between)) {
         out.additions_rounds = ask.additions.rounds.size();
       } else {
         out.additions_refused = why;

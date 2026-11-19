@@ -7,6 +7,7 @@
 #include <limits>
 #include <utility>
 
+#include "topopt/lattice_layout_file.hpp"   // OS16: the print check between rounds
 #include "topopt/lattice_layout_organic.hpp"
 
 namespace topopt::lattice_layout {
@@ -109,8 +110,13 @@ OrganicPreview lay_organic_preview(Session& session, const Settings& settings, c
                                    const std::atomic<bool>* stop) {
   OrganicPreview out;
   out.quality = preview.quality;
+  // OS16 (brief E4, leg 2): Exact replays additions with the file's print check between rounds, as the file job does
+  // (the file's own print settings, the tubes route; a job that states others is replayed by the file job with those).
+  OrganicAsk exact = ask;
+  if (preview.quality != PreviewQuality::Draft && !exact.additions.empty() && !exact.print_check)
+    exact.print_check = print_check_hook(session, file_options_for(FileOptions{}, true), stop);
   out.outcome = preview.quality == PreviewQuality::Draft ? session.lay_organic_draft(settings, field, ask, threads, stop)
-                                                         : session.lay_organic(settings, field, ask, threads, stop);
+                                                         : session.lay_organic(settings, field, exact, threads, stop);
   if (out.outcome.cancelled) return out;
   std::vector<int> regions;
   for (const Layout::Weave& w : out.outcome.layout.weave) regions.push_back(w.region);

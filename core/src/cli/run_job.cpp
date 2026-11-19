@@ -16097,6 +16097,38 @@ struct OrganicCheckRun {
   int passes_at_infill_percent = -1;      // the lowest whole infill percent at which the solid passes; -1: none
 };
 
+// OS16 (brief E4, leg 2): a bar of `after` the print check leaves out (`after_kept` 0) that lies on a bar of `before`
+// it kept (`before_kept` 1), both its ends within `tol` of that bar's line: where, in one plain line; "" when none.
+std::string old_bar_left_out(const ll::Bars& before, const std::vector<char>& before_kept, const ll::Bars& after,
+                             const std::vector<char>& after_kept, double tol = 1e-5) {
+  const auto on = [&](const Vec3& p, const ll::Bar& b) {
+    const Vec3 d{b.b.x - b.a.x, b.b.y - b.a.y, b.b.z - b.a.z};
+    const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
+    const double u = l2 > 0.0 ? std::clamp(((p.x - b.a.x) * d.x + (p.y - b.a.y) * d.y + (p.z - b.a.z) * d.z) / l2, 0.0, 1.0) : 0.0;
+    const double x = b.a.x + d.x * u - p.x, y = b.a.y + d.y * u - p.y, z = b.a.z + d.z * u - p.z;
+    return x * x + y * y + z * z <= tol * tol;
+  };
+  for (std::size_t j = 0; j < after.bars.size(); ++j) {
+    if (j < after_kept.size() && after_kept[j]) continue;
+    const ll::Bar& q = after.bars[j];
+    for (std::size_t i = 0; i < before.bars.size(); ++i) {
+      if (i >= before_kept.size() || !before_kept[i]) continue;
+      const ll::Bar& b = before.bars[i];
+      if (std::min(q.a.x, q.b.x) < std::min(b.a.x, b.b.x) - tol || std::max(q.a.x, q.b.x) > std::max(b.a.x, b.b.x) + tol ||
+          std::min(q.a.y, q.b.y) < std::min(b.a.y, b.b.y) - tol || std::max(q.a.y, q.b.y) > std::max(b.a.y, b.b.y) + tol ||
+          std::min(q.a.z, q.b.z) < std::min(b.a.z, b.b.z) - tol || std::max(q.a.z, q.b.z) > std::max(b.a.z, b.b.z) + tol)
+        continue;
+      if (on(q.a, b) && on(q.b, b)) {
+        char w[200];
+        std::snprintf(w, sizeof w, "the strut from (%.2f, %.2f, %.2f) to (%.2f, %.2f, %.2f) mm would be left out", q.a.x, q.a.y,
+                      q.a.z, q.b.x, q.b.y, q.b.z);
+        return w;
+      }
+    }
+  }
+  return {};
+}
+
 // Brief E3a, item 1: every judged strut under `watch`, what strengthening by adding reads of it: its bars in the
 // layout's order (in piece order, each once), the limit that failed, its margins, the compression its buckling used,
 // whether bending led its stress, its widths and length, whether it is at `cap` (its widest bar at least cap; 0: not
@@ -16867,6 +16899,10 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
     };
     say("laying the lattice (once)");
     auto t0 = std::chrono::steady_clock::now();
+    // OS16 (brief E4, leg 2): the bars judged are the bars the file writes. A job laid with additions replays them with
+    // the print check between rounds (as the file job does); the lay is then print-checked before the first check.
+    const ll::FileOptions file_options = ll::file_options_for(job.options, true);
+    if (!ask.additions.empty()) ask.print_check = ll::print_check_hook(session, file_options, stop);
     const ll::Outcome out = session.lay_organic(job.settings, *job.tensor_field, ask, job.options.threads, stop);
     const double s_lay0 = secs(t0);
     if (out.cancelled) return finish(false, "cancelled", 1, "Stopped before the strengthening was finished.");
@@ -16883,8 +16919,13 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
     ctx.light_mm = light;
     ctx.layer_mm = ask.layer_mm;
     ctx.link_width = ask.link_width;
-    ll::Bars bars = out.bars;
-    const ll::Bars bars0 = out.bars;          // round 0's lattice: every round must keep it (OS12)
+    say("checking the lattice prints (round 0)");
+    ll::PrintChecked pc = ll::print_check_bars(session, out.layout, out.bars, file_options, stop);
+    if (!pc.ok) return finish(false, "print_check_failed", 1, "The lattice's file could not be put together, so its strength cannot be judged.", pc.why);
+    double s_pc = secs(t0) - s_lay0;
+    ll::Bars bars = pc.bars;                  // the bars the file writes, and which of them it keeps
+    std::vector<char> in_file = pc.kept;
+    const ll::Bars bars0 = bars;              // round 0's lattice: every round must keep it (OS12)
     ll::Additions adds = ask.additions;       // a job laid with additions goes on from them
     res.old_bars_kept = true;
     for (int n = 0;; ++n) {
@@ -16893,7 +16934,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
       std::error_code ec;
       std::filesystem::create_directories(rdir, ec);
       say("round " + std::to_string(n) + ": checking its strength");
-      OrganicCheckRun cr = organic_frame_check(S, domain, bars, nullptr, light, rdir, job.options.threads);
+      OrganicCheckRun cr = organic_frame_check(S, domain, bars, &in_file, light, rdir, job.options.threads);
       if (!cr.done.ok) return finish(false, cr.done.code, cr.done.exit_code, cr.done.why, cr.done.detail);
       std::ofstream(join_path(rdir, "strength.json")) << cr.done.json << "\n";
       std::ofstream(join_path(rdir, "struts_under.json")) << struts_under_json(cr, ss.watch_margin, cap);
@@ -16911,7 +16952,8 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
                       ", \"under_safety_at_cap\": " + std::to_string(at_cap_left) +
                       ", \"unjudged_mm\": " + json_num(c.unjudged_mm) + ", \"load_unheld_n\": " + json_num(c.load_unheld_n) + "}" +
                       ",\n     \"lattice_mm3\": " + json_num(cr.lattice_mm3) +
-                      ", \"seconds\": {\"lay\": " + json_num(n == 0 ? std::round(s_lay0 * 10) / 10 : 0.0) + ", \"material\": " +
+                      ", \"seconds\": {\"lay\": " + json_num(n == 0 ? std::round(s_lay0 * 10) / 10 : 0.0) +
+                      ", \"print_check\": " + json_num(std::round(s_pc * 10) / 10) + ", \"material\": " +
                       json_num(std::round(cr.ms_material / 100) / 10) + ", \"voxel_solve\": " +
                       json_num(std::round(cr.ms_voxel / 100) / 10) + ", \"frame\": " + json_num(std::round(cr.ms_frame / 100) / 10) +
                       "}, \"memory_mb\": {\"after_voxel_solve\": " + json_num(std::round(cr.mb_voxel)) + ", \"after_frame\": " +
@@ -17053,8 +17095,6 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
       if (!widen.ops.empty() && !ll::apply_add_round(bars, domain, widen, ctx, &wrep, &why))
         return finish(false, "strengthen_failed", 1, "A round of strengthening could not be added.", why);
       round.ops.insert(round.ops.end(), widen.ops.begin(), widen.ops.end());
-      round.hash = ll::bars_hash(bars);
-      adds.rounds.push_back(round);
       // OS12, against round 0 AND against the round before (every earlier round's widenings and braces stay in force:
       // a bar widened in an earlier round is never thinner later).
       std::size_t split = 0;
@@ -17064,6 +17104,24 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
         if (!since.empty()) kept = "against the round before: " + since;
       }
       if (!kept.empty()) res.old_bars_kept = false;
+      // OS16 (brief E4, leg 2): the print check again (the new braces and wider struts are new shells). It may lift or
+      // prop what the round added, never move or leave out a bar that was there before the round: that stops the job.
+      say("round " + std::to_string(n) + ": checking the lattice prints");
+      const auto tp = std::chrono::steady_clock::now();
+      ll::PrintChecked pc2 = ll::print_check_bars(session, out.layout, bars, file_options, stop);
+      if (!pc2.ok)
+        return finish(false, "print_check_failed", 1, "The lattice's file could not be put together, so its strength cannot be judged.", pc2.why);
+      std::string moved = kept.empty() ? ll::old_bars_kept(before_round, pc2.bars) : std::string();
+      if (moved.empty()) moved = old_bar_left_out(before_round, in_file, pc2.bars, pc2.kept);
+      if (!moved.empty())
+        return finish(false, "print_check_after_additions", 1,
+                      "After round " + std::to_string(n + 1) + "'s additions, the print check would move or leave out a "
+                      "strut that was there before them, so strengthening stopped.", moved);
+      bars = std::move(pc2.bars);
+      in_file = std::move(pc2.kept);
+      s_pc = secs(tp);
+      round.hash = ll::bars_hash(bars);
+      adds.rounds.push_back(round);
       const double s_add = secs(t1);
       // The files: the additions so far and strengthened.json (version 2), in r<n+1>/.
       const std::string ndir = join_path(out_dir, "r" + std::to_string(n + 1));
@@ -17113,10 +17171,15 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
     if (n == 0)
       for (const auto& [region, ref] : out.organic_references) reference = std::max(reference, ref);
     if (stop && stop->load()) return finish(false, "cancelled", 1, "Stopped before the strengthening was finished.");
+    // OS16 (brief E4, leg 2): the print check after each lay, so the bars judged are the bars the file writes.
+    say("round " + std::to_string(n) + ": checking the lattice prints");
+    const ll::PrintChecked pc = ll::print_check_bars(session, out.layout, out.bars, ll::file_options_for(job.options, true), stop);
+    if (!pc.ok)
+      return finish(false, "print_check_failed", 1, "The lattice's file could not be put together, so its strength cannot be judged.", pc.why);
     say("round " + std::to_string(n) + ": checking its strength");
     const ll::Domain& domain = *session.domain();
     const double light = ask.width_mm > 0.0 ? ask.width_mm : domain.spec().bead_mm * domain.spec().min_strut_lines;
-    OrganicCheckRun cr = organic_frame_check(S, domain, out.bars, nullptr, light, rdir, job.options.threads);
+    OrganicCheckRun cr = organic_frame_check(S, domain, pc.bars, &pc.kept, light, rdir, job.options.threads);
     if (!cr.done.ok) return finish(false, cr.done.code, cr.done.exit_code, cr.done.why, cr.done.detail);
     std::ofstream(join_path(rdir, "strength.json")) << cr.done.json << "\n";
     // Brief E3a, item 1: the struts under the watch margin, as strengthening by adding reads them.
@@ -17187,7 +17250,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
     ss.reach_mm = S.st.get("strengthen_reach") * out.spacing_mean_mm;   // the result's spacing_used_mm.mean
     const ll::StrengthenRound sr = ll::strengthen_round(cr.frame, cr.check, [&] {
       ll::Bars b;
-      for (int i : cr.bar_of) b.bars.push_back(out.bars.bars[static_cast<std::size_t>(i)]);
+      for (int i : cr.bar_of) b.bars.push_back(pc.bars.bars[static_cast<std::size_t>(i)]);
       return b;
     }(), boosted, ss);
     std::vector<ll::WidthFloor> floors = base_floors;

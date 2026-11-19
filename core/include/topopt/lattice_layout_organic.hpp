@@ -5,6 +5,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -227,6 +228,11 @@ struct OrganicAsk {
   // Brief E3a: what strengthening by adding added (a strengthened.json of version 2), applied after the lay and the
   // floors, each round's hash checked (apply_additions). Empty: none.
   Additions additions;
+  // Brief E4, leg 2 (OS16): with additions, the file's print check (print_check_hook, lattice_layout_file.hpp), run
+  // after the lay and the floors and after each round's operations, before that round's hash is checked: its bars
+  // replace the bars (a sag lifted, a leg laid). Empty: none (the additions are applied to the bars as laid). A non-empty
+  // answer is a refusal (Outcome::additions_refused). The file job and the preview's Exact set it.
+  std::function<std::string(const Layout&, Bars&)> print_check;
   // OP6 (brief C1; the owner, 2026-11-18: "It should be a choice between stress and shape gradient or shape gradient
   // alone."). true (the default): as before. false, "shape only": O12's stress shares are 0 everywhere for every SIZE
   // rule: f (organic_spacing gives every candidate the widest spacing, spacing_max_mm, before O13's shape fit and L2;
@@ -282,7 +288,9 @@ struct AddReport {
 bool apply_add_round(Bars& bars, const Domain& domain, const AddRound& round, const AddContext& c, AddReport* report = nullptr,
                      std::string* why = nullptr);
 // Every round in order, each round's hash checked. False (with `why`) at the first that fails.
-bool apply_additions(Bars& bars, const Domain& domain, const Additions& adds, const AddContext& c, std::string* why = nullptr);
+// `between`, when given: run after each round's operations, before its hash (OS16); a non-empty answer refuses.
+bool apply_additions(Bars& bars, const Domain& domain, const Additions& adds, const AddContext& c, std::string* why = nullptr,
+                     const std::function<std::string(Bars&)>& between = {});
 // The additions file, little-endian: 8 bytes "TOADDS\0\0", int32 version (1), int32 rounds; per round: uint64 hash,
 // int32 operations; per operation: int32 kind, int32 count, count float64.
 bool write_additions_file(const std::string& path, const Additions& adds);

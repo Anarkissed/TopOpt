@@ -649,13 +649,18 @@ void say(void (*said)(const char*), const char* line) {
 // (LatticeReview's build-and-check-the-layers loop replaces this body.)
 TriangleMesh make_file_mesh(const Session& session, const Outcome& outcome, const FileOptions& options,
                             FileReport& report, const std::atomic<bool>* stop) {
+  return make_file_mesh(session, outcome.layout, outcome.bars, options, report, stop);
+}
+
+TriangleMesh make_file_mesh(const Session& session, const Layout& layout, const Bars& bars, const FileOptions& options,
+                            FileReport& report, const std::atomic<bool>* stop) {
   report = FileReport{};
   const Domain* domain = session.domain();
   if (!domain) {
     report.mesh.why = "The lattice was not laid before its file was asked for.";
     return TriangleMesh{};
   }
-  const OpenSpace open = read_open_space(*domain, outcome.layout, options.pitch_mm, options.threads, stop);
+  const OpenSpace open = read_open_space(*domain, layout, options.pitch_mm, options.threads, stop);
   report.open_boxes = open.boxes.size();
   report.ms_open_space = open.ms;
   // Made, checked layer by layer, and made again until it prints (P8).
@@ -669,7 +674,7 @@ TriangleMesh make_file_mesh(const Session& session, const Outcome& outcome, cons
   spec.most_passes = options.most_passes;
   spec.leave_out = options.leave_out;
   PrintableReport made;
-  TriangleMesh mesh = build_printable_mesh(session.measure(), *domain, outcome.layout, outcome.bars, open, spec, &made);
+  TriangleMesh mesh = build_printable_mesh(session.measure(), *domain, layout, bars, open, spec, &made);
   report.mesh = made.mesh;
   report.builds = made.passes;
   report.ms_carve = made.ms_carve;
@@ -695,6 +700,46 @@ TriangleMesh make_file_mesh(const Session& session, const Outcome& outcome, cons
     report.midair_starts = static_cast<int>(made.layers.mid_air.size());
   }
   return mesh;
+}
+
+// ── BRIEF E4, LEG 2 (OS16): THE PRINT CHECK, ITS BARS ───────────────────────────
+std::vector<char> bars_in_file(const Bars& made_bars, const FileReport& made, const std::vector<int>& weave_regions,
+                               const FileOptions& options) {
+  const double layer = options.layers.layer_mm > 0.0 ? options.layers.layer_mm : 0.2;
+  const std::vector<char> present = bars_present(made_bars, made.left_out_at, weave_regions, layer);
+  return weave_holds(made_bars, weave_regions, present, options.mesh.bridge_rise).kept;
+}
+
+FileOptions file_options_for(const FileOptions& asked, bool weave) {
+  FileOptions o = asked;
+  if (weave && !o.weave_mesh_asked) o.mesh.weave_mesh = MeshSpec::WeaveMesh::Tubes;
+  return o;
+}
+
+PrintChecked print_check_bars(const Session& session, const Layout& layout, const Bars& bars, const FileOptions& options,
+                              const std::atomic<bool>* stop) {
+  PrintChecked p;
+  const TriangleMesh mesh = make_file_mesh(session, layout, bars, options, p.made, stop);
+  if (!p.made.mesh.ok || mesh.empty()) {
+    p.why = p.made.mesh.why.empty() ? "the lattice's mesh could not be made" : p.made.mesh.why;
+    return p;
+  }
+  p.bars = p.made.sagged ? *p.made.sagged : bars;
+  std::vector<int> weave_regions;
+  for (const Layout::Weave& w : layout.weave) weave_regions.push_back(w.region);
+  p.kept = bars_in_file(p.bars, p.made, weave_regions, options);
+  p.ok = true;
+  return p;
+}
+
+std::function<std::string(const Layout&, Bars&)> print_check_hook(const Session& session, const FileOptions& options,
+                                                                   const std::atomic<bool>* stop) {
+  return [&session, options, stop](const Layout& layout, Bars& bars) -> std::string {
+    PrintChecked p = print_check_bars(session, layout, bars, options, stop);
+    if (!p.ok) return "the print check could not be made: " + p.why;
+    bars = std::move(p.bars);
+    return {};
+  };
 }
 
 // ── THE DEMAND FILE ───────────────────────────────────────────────────────────
@@ -1181,7 +1226,12 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     }
 
     say(said, "laying the lattice");
-    const Outcome out = any_weave ? session.lay_organic(job.settings, *job.tensor_field, job.organic,
+    // OS16 (brief E4, leg 2): strengthening's additions are replayed with the file's print check before the first
+    // round and after each, as the strengthen job made them.
+    const FileOptions options = file_options_for(job.options, any_weave);
+    OrganicAsk organic = job.organic;
+    if (any_weave && !organic.additions.empty()) organic.print_check = print_check_hook(session, options, stop);
+    const Outcome out = any_weave ? session.lay_organic(job.settings, *job.tensor_field, organic,
                                                         job.options.threads, stop)
                                   : session.lay(job.settings, job.options.threads, stop);
     if (out.cancelled) {
@@ -1255,9 +1305,7 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     }
 
     say(said, "making the file");
-    FileOptions options = job.options;
-    // OF4: a job with a weave region takes the tubes route unless it asked for one.
-    if (!weave_regions.empty() && !options.weave_mesh_asked) options.mesh.weave_mesh = MeshSpec::WeaveMesh::Tubes;
+    // OF4: a job with a weave region takes the tubes route unless it asked for one (file_options_for, above).
     const TriangleMesh mesh = make_file_mesh(session, out, options, r.made, stop);
     if (!r.made.mesh.ok || mesh.empty()) {
       refuse(r, kMeshFailed,
@@ -1351,9 +1399,7 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
       std::vector<char> kept;
       if (any_weave) {
         const Bars& made = r.made.sagged ? *r.made.sagged : out.bars;
-        const double layer = job.options.layers.layer_mm > 0.0 ? job.options.layers.layer_mm : 0.2;
-        const std::vector<char> present = bars_present(made, r.made.left_out_at, weave_regions, layer);
-        kept = weave_holds(made, weave_regions, present, options.mesh.bridge_rise).kept;
+        kept = bars_in_file(made, r.made, weave_regions, options);
         ask.bars = &made;
         ask.kept = &kept;
         ask.light_width_mm = job.organic.width_mm > 0.0

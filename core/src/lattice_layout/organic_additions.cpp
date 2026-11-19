@@ -235,12 +235,20 @@ bool apply_add_round(Bars& bars, const Domain& domain, const AddRound& round, co
   return true;
 }
 
-bool apply_additions(Bars& bars, const Domain& domain, const Additions& adds, const AddContext& c, std::string* why) {
+bool apply_additions(Bars& bars, const Domain& domain, const Additions& adds, const AddContext& c, std::string* why,
+                     const std::function<std::string(Bars&)>& between) {
   for (std::size_t r = 0; r < adds.rounds.size(); ++r) {
     std::string w;
     if (!apply_add_round(bars, domain, adds.rounds[r], c, nullptr, &w)) {
       if (why) *why = "round " + std::to_string(r + 1) + ": " + w;
       return false;
+    }
+    if (between) {
+      w = between(bars);
+      if (!w.empty()) {
+        if (why) *why = "round " + std::to_string(r + 1) + ": " + w;
+        return false;
+      }
     }
     const std::uint64_t h = bars_hash(bars);
     if (h != adds.rounds[r].hash) {

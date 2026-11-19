@@ -99,6 +99,33 @@ struct FileReport {
 TriangleMesh make_file_mesh(const Session& session, const Outcome& outcome,
                             const FileOptions& options, FileReport& report,
                             const std::atomic<bool>* stop = nullptr);
+// The same, of `bars` laid in `layout` (make_file_mesh reads only the outcome's layout and bars).
+TriangleMesh make_file_mesh(const Session& session, const Layout& layout, const Bars& bars,
+                            const FileOptions& options, FileReport& report,
+                            const std::atomic<bool>* stop = nullptr);
+
+// Brief E4, leg 2 (rule OS16): THE PRINT CHECK of the file, as the file job runs it (make_file_mesh: the solid carved,
+// the sags lifted or given legs, made, checked layer by layer and made again), its mesh dropped. `bars` the bars the
+// file is made of (the sag pass's when it changed any, else those given); `kept` per bar of them: in the file (not
+// left out by the layer check's places, bars_present, nor by the owner's hold rules, weave_holds) — the bars the
+// Organic strength check judges. Not ok: `why` (the mesh could not be made).
+struct PrintChecked {
+  bool ok = false;
+  std::string why;
+  FileReport made;
+  Bars bars;
+  std::vector<char> kept;
+};
+PrintChecked print_check_bars(const Session& session, const Layout& layout, const Bars& bars, const FileOptions& options,
+                              const std::atomic<bool>* stop = nullptr);
+// Of a print check's bars, which are in the file (the file job's own reading; `made` the check's report).
+std::vector<char> bars_in_file(const Bars& made_bars, const FileReport& made, const std::vector<int>& weave_regions,
+                               const FileOptions& options);
+// The options a job's file is made with: OF4, the tubes route for a job with a weave region unless it asked.
+FileOptions file_options_for(const FileOptions& asked, bool weave);
+// OrganicAsk::print_check for `session` with `options`: the print check, its bars in place of those given.
+std::function<std::string(const Layout&, Bars&)> print_check_hook(const Session& session, const FileOptions& options,
+                                                                   const std::atomic<bool>* stop = nullptr);
 
 // ── THE STRENGTH CHECK (Install 3, rule V4) ──────────────────────────────────
 // The old engine's check of a regular lattice (run_job.cpp, certify_latticed_variant), fed from this layout. On the

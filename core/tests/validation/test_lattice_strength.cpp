@@ -917,6 +917,107 @@ int main() {
     CHECK(has(off, "\"accepted\": false") && has(off, "\"fail_reason\": \"solid_margin\""));
   }
 
+  // ── §14 (brief E4 leg 2, rule OS16) the strengthen job judges the bars the file writes. A made 40 x 10 x 20 block, the
+  // weave 14 mm deep under its top face, the stress running round an axis 25 mm above the top (along y): its strands
+  // are arches turned upside down, each dipping to a low point that would start in mid-air, which the print check
+  // props with a leg (a sag); held on its bottom, pushed down on its x = 40 end. organic-strengthen (additive, one
+  // round) and then the file job replaying its last additions: the last check of the one and the check of the other
+  // agree strut for strut.
+  {
+    write_stl_file(kDir + "/pocket.stl", box(40, 10, 20), StlFormat::Binary);
+    const StepModel pmodel = import_part_file_resolved(kDir + "/pocket.stl");
+    const int wall = face_with_normal(pmodel, 0, 0, 1), bottom = face_with_normal(pmodel, 0, 0, -1),
+              end = face_with_normal(pmodel, 1, 0, 0);
+    CHECK(wall >= 0 && bottom >= 0 && end >= 0);
+    {
+      TensorField hf;
+      hf.spacing = 0.5;
+      hf.nx = 80; hf.ny = 20; hf.nz = 40;
+      hf.voigt.assign(6 * static_cast<std::size_t>(hf.nx) * hf.ny * hf.nz, 0.0);
+      for (int k = 0; k < hf.nz; ++k)
+        for (int j = 0; j < hf.ny; ++j)
+          for (int i = 0; i < hf.nx; ++i) {
+            const double x = (i + 0.5) * hf.spacing - 20.0, z = (k + 0.5) * hf.spacing - 45.0, r = std::hypot(x, z);
+            const double rx = x / r, rz = z / r, tx = -rz, tz = rx;
+            double* v = &hf.voigt[6 * hf.index(i, j, k)];
+            v[0] = 10 * tx * tx + rx * rx;
+            v[1] = 1.0;
+            v[2] = 10 * tz * tz + rz * rz;
+            v[5] = 10 * tz * tx + rz * rx;
+          }
+      CHECK(write_tensor_file(kDir + "/pocket.tensor", hf));
+    }
+    const auto pocket_job = [&](const std::string& strengthened) {
+      return "{\"mode\": \"lattice_file\", \"model\": \"pocket.stl\", \"output\": \"pocket_lattice.stl\", \"tensor\": \"pocket.tensor\", "
+             "\"strength_job\": \"pocket_sj.json\"" + (strengthened.empty() ? std::string() : ", \"strengthened\": \"" + strengthened + "\"") +
+             ", \"layout\": {\"region_ids\": [1], \"region_no_lattice\": [0], \"region_depth_mm\": [4], \"region_expand_mm\": [0], "
+             "\"region_face_counts\": [1], \"region_faces\": [" + std::to_string(wall) + "], \"region_weave\": [true], "
+             "\"organic_spacing_min_mm\": 3, \"organic_spacing_max_mm\": 5, \"organic_width_mm\": 0.9, \"organic_width_heavy_mm\": 1.8}}";
+    };
+    const auto pocket_sj = [&](double newtons, const std::string& settings) {
+      return "{\"model\": \"pocket.stl\", \"material\": \"PLA\", \"mode\": \"lattice_part\", \"resolution\": 40, "
+             "\"loads\": {\"minimize_plastic\": true, \"safety_margin\": 1.5, \"build_dir\": [0, 0, 1], \"anchor_face_ids\": [" +
+             std::to_string(bottom) + "], \"groups\": [{\"face_ids\": [" + std::to_string(end) + "], \"force\": [0, 0, " +
+             std::to_string(-newtons) + "]}]}, \"lattice\": {\"topology\": \"octet\", \"require_lattice_void_reaches_exterior\": false}, "
+             "\"grading\": {\"topology\": \"octet\", \"cell_mm\": 8, \"min_extrudable_width_mm\": 0.45, \"intent\": \"structural\"}, "
+             "\"output\": {\"report\": \"report.json\", \"mesh_format\": \"stl\", \"mesh_prefix\": \"variant\"}, \"strength_settings\": " +
+             settings + "}";
+    };
+    // A probe: the file job at 100 N; the struts' margins are linear in the load, so the load below puts the weakest at 0.8.
+    write(kDir + "/pocket_sj.json", pocket_sj(100.0, "{}"));
+    const Run probe = run("pocket_probe", pocket_job(""), "");
+    const std::string pb = block(probe.json);
+    const double m100 = num_after(pb, "smallest_margin");
+    std::printf("[pocket] probe: smallest strut margin %.6g at 100 N; sags lifted %zu, legs %zu, left out at %zu places, posts %zu, "
+                "mid-air starts found per pass %d\n", m100, probe.r.made.sags.lifted, probe.r.made.sags.legs,
+                probe.r.made.left_out_at.size(), probe.r.made.posts.size(),
+                probe.r.made.found_per_pass.empty() ? -1 : probe.r.made.found_per_pass.front());
+    // The print check changes the bars here (a sag lifted or propped), and finds something to answer (a mid-air start).
+    CHECK(probe.r.made.sagged != nullptr && probe.r.made.sags.changed());
+    CHECK(!probe.r.made.found_per_pass.empty() && probe.r.made.found_per_pass.front() > 0);   // a mid-air start answered
+    CHECK(m100 > 0.0);
+    const double load = 100.0 * m100 / 0.8;
+    write(kDir + "/pocket_sj.json", pocket_sj(load, "{\"strengthen_rounds\": 1}"));
+    write(kDir + "/pocket_strengthen_job.json", pocket_job(""));
+    std::filesystem::remove_all(kDir + "/pocket_strengthen");
+    std::filesystem::create_directories(kDir + "/pocket_strengthen");
+    const OrganicStrengthenResult ps = run_organic_strengthen(kDir + "/pocket_strengthen_job.json", kDir + "/pocket_strengthen", 0,
+                                                              MATERIALS_JSON_PATH, SETTINGS_RULES_PATH);
+    const std::string psj = slurp(kDir + "/pocket_strengthen/strengthen.json");
+    std::printf("[pocket strengthen] ok %d code %s rounds %d %s %s\n", ps.ok, ps.code.c_str(), ps.rounds_fixed, ps.why.c_str(),
+                ps.detail.c_str());
+    CHECK(ps.ok && ps.rounds_fixed >= 1 && has(psj, "\"print_check\": "));
+    if (ps.ok && ps.rounds_fixed >= 1) {
+      const int last = ps.rounds_fixed;   // its last check, of the bars after the last round's additions and print check
+      const std::string lastdir = kDir + "/pocket_strengthen/r" + std::to_string(last);
+      const Run rep = run("pocket_replay", pocket_job("pocket_strengthen/r" + std::to_string(last) + "/strengthened.json"), "");
+      CHECK(rep.r.ok && rep.r.strength_ran);
+      const std::string a = slurp(lastdir + "/strength.json"), b = block(rep.json);
+      const double ja = num_after(a, "judged"), jb = num_after(b, "judged"), sa = num_after(a, "smallest_margin"),
+                   sb = num_after(b, "smallest_margin"), ua = num_after(a, "under_safety"), ub = num_after(b, "under_safety");
+      std::printf("[pocket] strengthen's last check: judged %.0f, smallest %.12g, under %.0f; the file's: judged %.0f, smallest %.12g, under %.0f\n",
+                  ja, sa, ua, jb, sb, ub);
+      CHECK(ja == jb && ua == ub && std::fabs(sa - sb) <= 1e-9 * std::fabs(sa));
+      // Strut for strut: every bar's margin (strut_margins.bin, one per bar of the bars the file is made of) the same.
+      const std::string ma = slurp(lastdir + "/strut_margins.bin"), mb = slurp(rep.out + "/strut_margins.bin");
+      std::size_t differ = 0, under_a = 0, under_b = 0;
+      for (std::size_t i = 0; i + 4 <= ma.size() && ma.size() == mb.size(); i += 4) {
+        float x, y;
+        std::memcpy(&x, ma.data() + i, 4);
+        std::memcpy(&y, mb.data() + i, 4);
+        // The same struts judged, the same under the margin, each margin the same to float32's last places (the two
+        // solves sum in another order: 1e-7 apart).
+        differ += std::isnan(x) != std::isnan(y) || (x < 1.5f) != (y < 1.5f) ||
+                  (!std::isnan(x) && std::fabs(x - y) > 1e-5f * std::fabs(x));
+        under_a += x < 1.5f;
+        under_b += y < 1.5f;
+      }
+      std::printf("[pocket] strut_margins.bin: %zu bars each (%zu), %zu differ; under the margin %zu and %zu\n", ma.size() / 4,
+                  mb.size() / 4, differ, under_a, under_b);
+      CHECK(!ma.empty() && ma.size() == mb.size() && differ == 0 && under_a == under_b);
+    }
+  }
+
   // ── §8 the octet's strut law is the full octet's (2026-11-17): its span is the octet band, so no density in the band
   // is clamped; its lowest row is bulk only, so a credited cell under 0.10 gets no strut pass, with a plain note.
   {
