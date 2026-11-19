@@ -15285,6 +15285,7 @@ const std::vector<StrengthSettingSpec>& strength_setting_specs() {
       {"frame_link_stiffness", K::Number, 1e4, 1.0, 1e8, false, {}},
       {"frame_drive_ball_voxels", K::Number, 2.0, 0.5, 6.0, false, {}},
       {"frame_drive_share", K::Number, 0.5, 0.01, 0.99, false, {}},
+      {"frame_drive_reach_voxels", K::Number, 4.0, 0.5, 20.0, false, {}},   // OS4 amended (the lead, 2026-11-19)
       {"frame_collinear_tol_mm", K::Number, 1e-6, 1e-9, 0.01, false, {}},
       {"frame_collinear_max_driven", K::Integer, 50.0, 2.0, 10000.0, false, {}},
       {"frame_floor_shift_voxels", K::Number, 0.0, 0.0, 10.0, false, {}},
@@ -16069,6 +16070,7 @@ ll::FrameSettings frame_settings_of(const StrengthSettingsAsked& st) {
   f.link_stiffness = st.get("frame_link_stiffness");
   f.drive_ball_voxels = st.get("frame_drive_ball_voxels");
   f.drive_share = st.get("frame_drive_share");
+  f.drive_reach_voxels = st.get("frame_drive_reach_voxels");
   f.collinear_tol_mm = st.get("frame_collinear_tol_mm");
   f.collinear_max_driven = static_cast<int>(st.get("frame_collinear_max_driven"));
   f.floor_shift_voxels = st.get("frame_floor_shift_voxels");
@@ -16685,6 +16687,14 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
        ", \"driven\": " + std::to_string(c.driven) + ", \"frame_parts\": " + std::to_string(c.pieces_of_frame) +
        ", \"undriven_parts\": " + std::to_string(c.undriven_pieces) + ", \"rotations_held\": " + std::to_string(c.rotations_held) +
        ", \"drive_voxels_median\": " + num(c.drive_voxels_median) + ", \"drive_fallback\": " + std::to_string(c.drive_fallback) +
+       ", \"drive_normal\": " + std::to_string(c.drive_normal) + ", \"drive_trilinear\": " + std::to_string(c.drive_trilinear) + ", \"drive_grown\": " + std::to_string(c.drive_grown) +
+       ", \"drive_grown_reach_voxels\": " + num(c.drive_grown_reach_voxels) + ", \"drive_no_material\": " +
+       std::to_string(c.drive_no_material) + ", \"drive_no_material_at\": [" + [&] {
+         std::string t;
+         for (const Vec3& p : c.drive_no_material_at)
+           t += std::string(t.empty() ? "" : ", ") + "[" + num(p.x) + ", " + num(p.y) + ", " + num(p.z) + "]";
+         return t;
+       }() + "]" +
        ", \"load_total_n\": " + num(c.load_total_n) + ", \"load_share\": " + num(c.load_share) + ", \"load_on_frame_n\": " + num(c.load_on_frame_n) +
        ", \"frame_nodes_loaded\": " + std::to_string(c.frame_nodes_loaded) +
        ", \"loaded_nodes_undriven\": " + std::to_string(c.loaded_nodes_undriven) + ", \"strut_mm\": " + num(c.strut_mm) +

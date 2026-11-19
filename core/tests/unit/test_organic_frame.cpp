@@ -306,9 +306,101 @@ void test_bed_floor() {
   }
 }
 
+// §10 (OS4 amended, the lead's ruling of 2026-11-19): a check with no empty drive ball is the same to the last digit as
+// before the ruling. A 10 mm strut and a 6 mm strut meeting at a joint, all ends solid, in a field that stretches x and
+// shears y: the margins as they were.
+double pin_no_fallback() {
+  ll::Bars bars;
+  bars.bars.push_back(bar({0, 0, 0}, {10, 0, 0}, ll::Bar::End::Solid, ll::Bar::End::Solid));
+  bars.bars.push_back(bar({5, 0, 0}, {5, 0, 4}, ll::Bar::End::Joined, ll::Bar::End::Solid));
+  Field f({-3.0, -3.0, -3.0}, 32, 12, 18);
+  for (int c = 0; c <= f.grid.nz; ++c)
+    for (int b = 0; b <= f.grid.ny; ++b)
+      for (int a = 0; a <= f.grid.nx; ++a) {
+        const double x = f.grid.origin.x + a * f.grid.spacing, z = f.grid.origin.z + c * f.grid.spacing;
+        f.u[3 * static_cast<std::size_t>(f.node(a, b, c))] = 1e-3 * x;
+        f.u[3 * static_cast<std::size_t>(f.node(a, b, c)) + 1] = 4e-4 * z;
+      }
+  const ll::FrameCheck c = run(bars, f, {});
+  std::printf("§10 pin: smallest margin %.17g, drive fallback %zu\n", c.smallest_margin, c.drive_fallback);
+  return c.smallest_margin;
+}
+
+// §11 (OS4 amended): a strut's driven end just outside the voxelised solid on a face that moves. The solid is the voxels
+// with centres below x = 8.6 (the face at x = 8.75); the strut runs from x = 0 to x = 10, both ends solid (as the exact
+// part says), so its end B lies 1.25 mm outside the voxels (1.75 mm from the nearest voxel's centre, none of its grid corners in
+// the solve): its 2-voxel ball (1 mm) holds none. The whole part moves
+// 0.01 mm along x (a rigid move: statics gives the strut no force). The grid nodes not in the solve stay at zero, as
+// the voxel solve leaves them. Before the ruling B read those zero nodes: 0.01 mm of shortening, a force E A 1e-3 that
+// grows with the strut's area. Now B's ball grows (to 4 voxels, 2 mm) and B moves with the wall: no force at either width.
+// With the reach cut to the ball (no growth) B is not driven, counted with its place, and the strut is a cantilever of
+// one driven end carrying nothing.
+void test_drive_reach() {
+  const auto field = [] {
+    Field f({-3.0, -3.0, -3.0}, 32, 12, 12);
+    for (int k = 0; k < f.grid.nz; ++k)
+      for (int j = 0; j < f.grid.ny; ++j)
+        for (int i = 0; i < f.grid.nx; ++i) {
+          const std::size_t e = f.grid.index(i, j, k);
+          const bool in = f.grid.origin.x + (i + 0.5) * f.grid.spacing < 8.6;
+          f.mat.solid[e] = in ? 1.0f : 0.0f;
+          f.grid.tags[e] = in ? topopt::VoxelTag::Interior : topopt::VoxelTag::Empty;
+        }
+    for (int c = 0; c <= f.grid.nz; ++c)
+      for (int b = 0; b <= f.grid.ny; ++b)
+        for (int a = 0; a <= f.grid.nx; ++a) {
+          bool in_solve = false;   // a corner of a voxel of the part
+          for (int dc = -1; dc <= 0; ++dc)
+            for (int db = -1; db <= 0; ++db)
+              for (int da = -1; da <= 0; ++da) {
+                const int i = a + da, j = b + db, k = c + dc;
+                if (i >= 0 && j >= 0 && k >= 0 && i < f.grid.nx && j < f.grid.ny && k < f.grid.nz)
+                  in_solve = in_solve || f.grid.solid(i, j, k);
+              }
+          f.u[3 * static_cast<std::size_t>(f.node(a, b, c))] = in_solve ? 0.01 : 0.0;
+        }
+    return f;
+  };
+  for (const double w : {0.9, 1.8}) {
+    ll::Bars bars;
+    bars.bars.push_back(bar({0, 0, 0}, {10, 0, 0}, ll::Bar::End::Solid, ll::Bar::End::Solid, w));
+    Field f = field();
+    const ll::FrameCheck c = run(bars, f, {});
+    const double N = c.judged == 1 ? c.struts[0].axial_n : std::nan("");
+    std::printf("§11 drive reach, width %.1f: axial %.3g N (E A 1e-3 would be %.4g N); drives normal %zu, grown %zu (reach %.0f), "
+                "not driven %zu, first ball empty %zu\n", w, N, kE * M_PI * 0.25 * w * w * 1e-3, c.drive_normal, c.drive_grown,
+                c.drive_grown_reach_voxels, c.drive_no_material, c.drive_fallback);
+    CHECK(c.solved && c.judged == 1 && c.driven == 2, "both ends driven");
+    CHECK(c.drive_normal == 1 && c.drive_grown == 1 && c.drive_grown_reach_voxels == 4.0 && c.drive_no_material == 0 &&
+              c.drive_fallback == 1 && c.drive_trilinear == 0, "the end outside the voxels (no grid corner of it in the solve) takes a ball grown to 4 voxels");
+    CHECK(std::fabs(N) < 1e-6, "it moves with the wall: a rigid move puts no force in the strut, at either width");
+  }
+  {
+    ll::Bars bars;
+    bars.bars.push_back(bar({0, 0, 0}, {10, 0, 0}, ll::Bar::End::Solid, ll::Bar::End::Solid));
+    Field f = field();
+    const ll::FrameModel m = ll::build_frame(bars, nullptr);
+    ll::FrameVoxelSolve vs;
+    vs.grid = &f.grid;
+    vs.displacement = &f.u;
+    vs.material = &f.mat;
+    ll::FrameSettings st;
+    st.drive_reach_voxels = 2.0;   // the ball's own size: no growth
+    const ll::FrameCheck c = ll::check_frame(m, vs, strength(), st);
+    std::printf("§11 no reach: driven %zu, not driven %zu at x %.2f; axial %.3g N\n", c.driven, c.drive_no_material,
+                c.drive_no_material_at.empty() ? -1.0 : c.drive_no_material_at[0].x, c.judged ? c.struts[0].axial_n : -1.0);
+    CHECK(c.solved && c.driven == 1 && c.drive_no_material == 1 && c.drive_no_material_at.size() == 1 &&
+              std::fabs(c.drive_no_material_at[0].x - 10.0) < 1e-9, "no material within the reach: not driven, counted, its place");
+    CHECK(c.judged == 1 && std::fabs(c.struts[0].axial_n) < 1e-9, "a strut of one driven end carries nothing");
+  }
+}
+
 }  // namespace
 
 int main() {
+  // §10: the pin (before the ruling: 23.750000000000004, no empty ball).
+  CHECK(pin_no_fallback() == 23.750000000000004, "a check with no empty drive ball is unchanged to the last digit");
+  test_drive_reach();
   test_pulled_strut();
   test_cantilever();
   test_buckling();

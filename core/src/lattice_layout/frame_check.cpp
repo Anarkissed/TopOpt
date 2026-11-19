@@ -367,6 +367,116 @@ FrameCheck check_frame(const FrameModel& f, const FrameVoxelSolve& vs, const Fra
       ++comp_driven[static_cast<std::size_t>(comp[i])];
     }
   }
+  // ── 4. The drive (OS4, amended by the lead 2026-11-19): each driven node, the mean displacement of the material voxels
+  // whose centres lie within the ball. An empty ball grows one voxel at a time up to frame_drive_reach_voxels; a node
+  // with no material voxel within that reach is not driven (left free, counted). It never reads grid nodes that are not
+  // in the voxel solve (a material voxel is a voxel of the part, so its eight corners are in the solve).
+  std::vector<std::array<double, 3>> ud(nn, {0.0, 0.0, 0.0});
+  std::vector<Vec3> read_at(nn, Vec3{0.0, 0.0, 0.0});
+  {
+    auto corner_u = [&](int a, int b, int c, int comp_) { return U[3 * node_index(a, b, c) + static_cast<std::size_t>(comp_)]; };
+    auto voxel_u = [&](int i, int j, int k, std::array<double, 3>& u) {
+      u = {0.0, 0.0, 0.0};
+      for (int dc = 0; dc < 2; ++dc)
+        for (int db = 0; db < 2; ++db)
+          for (int da = 0; da < 2; ++da)
+            for (int q = 0; q < 3; ++q) u[static_cast<std::size_t>(q)] += 0.125 * corner_u(i + da, j + db, k + dc, q);
+    };
+    std::vector<double> counts;
+    for (std::size_t n = 0; n < nn; ++n) {
+      if (!driven[n]) continue;
+      // frame_floor_shift_voxels (the prototype's --floor-shift): a bed-floor node reads its drive that far up.
+      Vec3 X = f.nodes[n];
+      if (n < f.floor.size() && f.floor[n] && s.floor_shift_voxels != 0.0) {
+        const double d = s.floor_shift_voxels * h;
+        X = {X.x + d * up.x, X.y + d * up.y, X.z + d * up.z};
+      }
+      read_at[n] = X;
+      const int bi = static_cast<int>(std::floor((X.x - g.origin.x) / h)), bj = static_cast<int>(std::floor((X.y - g.origin.y) / h)),
+                bk = static_cast<int>(std::floor((X.z - g.origin.z) / h));
+      std::array<double, 3> acc{0.0, 0.0, 0.0}, u{};
+      int cnt = 0;
+      const auto ball = [&](double R) {
+        acc = {0.0, 0.0, 0.0};
+        cnt = 0;
+        const int reach = static_cast<int>(std::ceil(R / h)) + 1;
+        for (int dk = -reach; dk <= reach; ++dk)
+          for (int dj = -reach; dj <= reach; ++dj)
+            for (int di = -reach; di <= reach; ++di) {
+              const int i = bi + di, j = bj + dj, k = bk + dk;
+              if (i < 0 || j < 0 || k < 0 || i >= g.nx || j >= g.ny || k >= g.nz) continue;
+              const Vec3 ctr{g.origin.x + (i + 0.5) * h, g.origin.y + (j + 0.5) * h, g.origin.z + (k + 0.5) * h};
+              if (len3(sub3(ctr, X)) > R) continue;
+              const std::size_t e = g.index(i, j, k);
+              if (!(mat.solid[e] + mat.lattice[e] > s.drive_share)) continue;
+              voxel_u(i, j, k, u);
+              for (int q = 0; q < 3; ++q) acc[static_cast<std::size_t>(q)] += u[static_cast<std::size_t>(q)];
+              ++cnt;
+            }
+      };
+      double R = s.drive_ball_voxels;
+      ball(R * h);
+      if (cnt == 0) {
+        ++out.drive_fallback;
+        // (b) the displacement at the point, trilinear between the grid's corners that are in the solve (a corner of a
+        // voxel of the part), the weights renormalised over them.
+        const double fx = (X.x - g.origin.x) / h, fy = (X.y - g.origin.y) / h, fz = (X.z - g.origin.z) / h;
+        const int i0 = std::clamp(static_cast<int>(std::floor(fx)), 0, g.nx - 1), j0 = std::clamp(static_cast<int>(std::floor(fy)), 0, g.ny - 1),
+                  k0 = std::clamp(static_cast<int>(std::floor(fz)), 0, g.nz - 1);
+        const double tx = fx - i0, ty = fy - j0, tz = fz - k0;
+        const auto in_solve = [&](int a, int b, int c) {
+          for (int dc = -1; dc <= 0; ++dc)
+            for (int db = -1; db <= 0; ++db)
+              for (int da = -1; da <= 0; ++da) {
+                const int i = a + da, j = b + db, k = c + dc;
+                if (i >= 0 && j >= 0 && k >= 0 && i < g.nx && j < g.ny && k < g.nz && g.solid(i, j, k)) return true;
+              }
+          return false;
+        };
+        double wsum = 0.0;
+        std::array<double, 3> t{0.0, 0.0, 0.0};
+        for (int dc = 0; dc < 2; ++dc)
+          for (int db = 0; db < 2; ++db)
+            for (int da = 0; da < 2; ++da) {
+              if (!in_solve(i0 + da, j0 + db, k0 + dc)) continue;
+              const double w = (da ? tx : 1 - tx) * (db ? ty : 1 - ty) * (dc ? tz : 1 - tz);
+              wsum += w;
+              for (int q = 0; q < 3; ++q) t[static_cast<std::size_t>(q)] += w * corner_u(i0 + da, j0 + db, k0 + dc, q);
+            }
+        if (wsum > 0.0) {
+          ++out.drive_trilinear;
+          counts.push_back(0);
+          for (int q = 0; q < 3; ++q) ud[n][static_cast<std::size_t>(q)] = t[static_cast<std::size_t>(q)] / wsum;
+          continue;
+        }
+        // (a) no corner in the solve: the ball grows one voxel at a time.
+        while (cnt == 0 && R + 1.0 <= s.drive_reach_voxels + 1e-9) {
+          R += 1.0;
+          ball(R * h);
+        }
+      }
+      if (cnt == 0) {   // no material within the reach: not driven
+        driven[n] = 0;
+        --out.driven;
+        --comp_driven[static_cast<std::size_t>(comp[n])];
+        ++out.drive_no_material;
+        if (out.drive_no_material_at.size() < 10) out.drive_no_material_at.push_back(f.nodes[n]);
+        continue;
+      }
+      if (R > s.drive_ball_voxels) {
+        ++out.drive_grown;
+        out.drive_grown_reach_voxels = std::max(out.drive_grown_reach_voxels, R);
+      } else {
+        ++out.drive_normal;
+      }
+      counts.push_back(cnt);
+      for (int q = 0; q < 3; ++q) ud[n][static_cast<std::size_t>(q)] = acc[static_cast<std::size_t>(q)] / cnt;
+    }
+    if (!counts.empty()) {
+      std::nth_element(counts.begin(), counts.begin() + static_cast<long>(counts.size() / 2), counts.end());
+      out.drive_voxels_median = counts[counts.size() / 2];
+    }
+  }
   std::vector<char> comp_real(nn, 0), comp_in(nn, 0), fixrot(nn, 0);
   for (std::size_t i = 0; i < nn; ++i)
     if (used[i]) comp_real[static_cast<std::size_t>(comp[i])] = 1;
@@ -396,69 +506,6 @@ FrameCheck check_frame(const FrameModel& f, const FrameVoxelSolve& vs, const Fra
     for (std::size_t c = 0; c < nn; ++c) out.rotations_held += fixrot[c];
   }
 
-  // ── 4. The drive: each driven node, the mean displacement of the material voxels whose centres lie within the ball.
-  std::vector<std::array<double, 3>> ud(nn, {0.0, 0.0, 0.0});
-  std::vector<Vec3> read_at(nn, Vec3{0.0, 0.0, 0.0});
-  {
-    auto corner_u = [&](int a, int b, int c, int comp_) { return U[3 * node_index(a, b, c) + static_cast<std::size_t>(comp_)]; };
-    auto voxel_u = [&](int i, int j, int k, std::array<double, 3>& u) {
-      u = {0.0, 0.0, 0.0};
-      for (int dc = 0; dc < 2; ++dc)
-        for (int db = 0; db < 2; ++db)
-          for (int da = 0; da < 2; ++da)
-            for (int q = 0; q < 3; ++q) u[static_cast<std::size_t>(q)] += 0.125 * corner_u(i + da, j + db, k + dc, q);
-    };
-    const double R = s.drive_ball_voxels * h;
-    const int reach = static_cast<int>(std::ceil(R / h)) + 1;
-    std::vector<double> counts;
-    for (std::size_t n = 0; n < nn; ++n) {
-      if (!driven[n] || !comp_in[static_cast<std::size_t>(comp[n])]) continue;
-      // frame_floor_shift_voxels (the prototype's --floor-shift): a bed-floor node reads its drive that far up.
-      Vec3 X = f.nodes[n];
-      if (n < f.floor.size() && f.floor[n] && s.floor_shift_voxels != 0.0) {
-        const double d = s.floor_shift_voxels * h;
-        X = {X.x + d * up.x, X.y + d * up.y, X.z + d * up.z};
-      }
-      read_at[n] = X;
-      const int bi = static_cast<int>(std::floor((X.x - g.origin.x) / h)), bj = static_cast<int>(std::floor((X.y - g.origin.y) / h)),
-                bk = static_cast<int>(std::floor((X.z - g.origin.z) / h));
-      std::array<double, 3> acc{0.0, 0.0, 0.0}, u{};
-      int cnt = 0;
-      for (int dk = -reach; dk <= reach; ++dk)
-        for (int dj = -reach; dj <= reach; ++dj)
-          for (int di = -reach; di <= reach; ++di) {
-            const int i = bi + di, j = bj + dj, k = bk + dk;
-            if (i < 0 || j < 0 || k < 0 || i >= g.nx || j >= g.ny || k >= g.nz) continue;
-            const Vec3 ctr{g.origin.x + (i + 0.5) * h, g.origin.y + (j + 0.5) * h, g.origin.z + (k + 0.5) * h};
-            if (len3(sub3(ctr, X)) > R) continue;
-            const std::size_t e = g.index(i, j, k);
-            if (!(mat.solid[e] + mat.lattice[e] > s.drive_share)) continue;
-            voxel_u(i, j, k, u);
-            for (int q = 0; q < 3; ++q) acc[static_cast<std::size_t>(q)] += u[static_cast<std::size_t>(q)];
-            ++cnt;
-          }
-      counts.push_back(cnt);
-      if (cnt > 0) {
-        for (int q = 0; q < 3; ++q) ud[n][static_cast<std::size_t>(q)] = acc[static_cast<std::size_t>(q)] / cnt;
-      } else {   // no material voxel in the ball: the displacement at the point, trilinear between the grid's corners
-        ++out.drive_fallback;
-        const double fx = (X.x - g.origin.x) / h, fy = (X.y - g.origin.y) / h, fz = (X.z - g.origin.z) / h;
-        const int i0 = std::clamp(static_cast<int>(std::floor(fx)), 0, g.nx - 1), j0 = std::clamp(static_cast<int>(std::floor(fy)), 0, g.ny - 1),
-                  k0 = std::clamp(static_cast<int>(std::floor(fz)), 0, g.nz - 1);
-        const double tx = fx - i0, ty = fy - j0, tz = fz - k0;
-        for (int dc = 0; dc < 2; ++dc)
-          for (int db = 0; db < 2; ++db)
-            for (int da = 0; da < 2; ++da) {
-              const double w = (da ? tx : 1 - tx) * (db ? ty : 1 - ty) * (dc ? tz : 1 - tz);
-              for (int q = 0; q < 3; ++q) ud[n][static_cast<std::size_t>(q)] += w * corner_u(i0 + da, j0 + db, k0 + dc, q);
-            }
-      }
-    }
-    if (!counts.empty()) {
-      std::nth_element(counts.begin(), counts.begin() + static_cast<long>(counts.size() / 2), counts.end());
-      out.drive_voxels_median = counts[counts.size() / 2];
-    }
-  }
 
   // ── 5. The load on the frame (the lead's ruling of 2026-11-18, the prototype's rule for any part): the lattice's share
   // of the WHOLE load = the lattice material share of the voxels touching the loaded grid nodes over their whole material

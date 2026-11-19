@@ -31,6 +31,7 @@ struct FrameSettings {
   double link_stiffness = 1e4;         // frame_link_stiffness: a link is a beam of its own section, this many times stiffer
   double drive_ball_voxels = 2.0;      // frame_drive_ball_voxels: the drive ball's radius, in voxels
   double drive_share = 0.5;            // frame_drive_share: a voxel drives when its material share is above this
+  double drive_reach_voxels = 4.0;     // frame_drive_reach_voxels (OS4 amended): an empty ball grows a voxel at a time to this
   double collinear_tol_mm = 1e-6;      // frame_collinear_tol_mm: a piece of the frame lying on one line (rotations held)
   int collinear_max_driven = 50;       // frame_collinear_max_driven: ... looked for when it has fewer driven nodes
   double floor_shift_voxels = 0.0;     // frame_floor_shift_voxels: a bed-floor node reads its drive this many voxels up
@@ -120,7 +121,15 @@ struct FrameCheck {
   double factor_gb = 0.0, residual = 0.0;
   std::string solver;
   double drive_voxels_median = 0.0;
-  std::size_t drive_fallback = 0;
+  // OS4 amended (the lead, 2026-11-19): the drives by branch. `drive_normal`: the ball held material voxels.
+  // `drive_fallback`: the driven nodes whose ball held none (as before); of them `drive_trilinear` read the point
+  // trilinearly between the grid corners that are in the voxel solve (weights renormalised), `drive_grown` (no such
+  // corner) took the material of a ball grown a voxel at a time (the largest radius used, `drive_grown_reach_voxels`),
+  // and `drive_no_material` found none within frame_drive_reach_voxels and were left free (not driven), with the first
+  // few places. A driven node never reads grid nodes that are not in the voxel solve.
+  std::size_t drive_fallback = 0, drive_normal = 0, drive_trilinear = 0, drive_grown = 0, drive_no_material = 0;
+  double drive_grown_reach_voxels = 0.0;
+  std::vector<Vec3> drive_no_material_at;
   double load_total_n = 0.0, load_on_frame_n = 0.0, load_unheld_n = 0.0, load_share = 0.0;
   std::size_t frame_nodes_loaded = 0;
   std::size_t loaded_nodes_undriven = 0;   // nodes within the load's reach on a piece of the frame with no driven node
