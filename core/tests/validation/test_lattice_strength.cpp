@@ -445,7 +445,7 @@ int main() {
       keys.push_back(sj::as_string(*sj::find(e, "key"), "key"));
       sections.push_back(sj::as_string(*sj::find(e, "section"), "section"));
     }
-    CHECK(keys.size() == 99);   // 60 of Install 3, 24 of the Organic check (brief E2), 5 of strengthening by adding (E3a), 2 of the weak areas (E4), 7 of relief vines (E8, OS18 amended)
+    CHECK(keys.size() == 100);   // 60 of Install 3, 24 of the Organic check (brief E2), 5 of strengthening by adding (E3a), 2 of the weak areas (E4), 8 of relief vines (E8, OS18 amended, OS18b)
     const auto headings = [](const std::string& t) {
       std::vector<std::string> h;
       std::istringstream in(t);
@@ -1032,6 +1032,35 @@ int main() {
         const double bars1 = num(&rs.back(), "bars");
         std::printf("[order replay] ok %d bars %zu (round 1: %.0f)\n", rr.ok, rr.bars, bars1);
         CHECK(rr.ok && static_cast<double>(rr.bars) == bars1);
+      }
+      // Leg I (OS18b): the struts' classes and the landings. Joint landing on (0.5 spacings, the default): landings moved
+      // to a joint, every old bar kept, round 1's classes add up to its judged struts and its under-1.5 count; joint
+      // landing off (0): none moved, as the order before.
+      {
+        const OrganicStrengthenResult sn = strengthen("snap", roomy, 6000.0, "{\"strengthen_rounds\": 1}");
+        const std::vector<sj::Value> rs = rounds_of("snap");
+        const sj::Value* p = rs.empty() ? nullptr : paths_of(rs[0]);
+        const sj::Value* cls = rs.size() > 1 ? sj::find(rs[1], "classes") : nullptr;
+        const sj::Value* lands = rs.size() > 1 ? sj::find(rs[1], "landings") : nullptr;
+        double judged = 0.0, under = 0.0;
+        if (cls)
+          for (const char* k : {"untouched", "cut", "brace", "vine"}) {
+            judged += num(sj::find(*cls, k), "judged");
+            under += num(sj::find(*cls, k), "under");
+          }
+        std::printf("[snap] round 0: landings at a joint %.0f, a move dropped (it broke a rule) %.0f, vines %.0f; round 1: classes judged %.0f "
+                    "(struts judged %.0f), under %.0f (under safety %.0f), under only because of new pieces %.0f; landings %.0f, within 0.15 "
+                    "of a joint %.0f, landed-on worse %.0f\n", num(p, "landings_at_a_joint"), num(p ? sj::find(*p, "dropped") : nullptr, "snap_broke_a_rule"),
+                    num(p, "relief_vines"), judged, num(sj::find(rs[1], "struts"), "judged"), under, num(sj::find(rs[1], "struts"), "under_safety"),
+                    num(cls, "under_only_because_of_new_pieces"), num(lands, "count"), num(lands, "within_0_15_of_a_joint"), num(lands, "landed_on_worse"));
+        CHECK(sn.ok && sn.old_bars_kept && num(p, "landings_at_a_joint") > 0 && cls && lands &&
+              judged == num(sj::find(rs[1], "struts"), "judged") && under == num(sj::find(rs[1], "struts"), "under_safety") &&
+              num(lands, "within_0_15_of_a_joint") > 0);
+        const OrganicStrengthenResult so = strengthen("snap_off", roomy, 6000.0, "{\"strengthen_rounds\": 1, \"strengthen_path_snap_spacings\": 0}");
+        const std::vector<sj::Value> ro = rounds_of("snap_off");
+        const sj::Value* po = ro.empty() ? nullptr : paths_of(ro[0]);
+        std::printf("[snap off] landings at a joint %.0f, vines %.0f\n", num(po, "landings_at_a_joint"), num(po, "relief_vines"));
+        CHECK(so.ok && num(po, "landings_at_a_joint") == 0 && num(po, "relief_vines") > 0);
       }
       // The per-strut limit (1): no place gets a second vine; a strut still under the safety factor after its vine is
       // out of vines and goes past the limit.

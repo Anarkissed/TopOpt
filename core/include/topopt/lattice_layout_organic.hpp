@@ -348,6 +348,11 @@ struct ReliefVineAsk {
   double step_ratio = 0.35;       // the tracer's kOrganicStepRatio
   double max_spacings = 6.0;      // strengthen_path_max_spacings
   double parallel_deg = 20.0;     // strengthen_path_parallel_deg
+  // Leg I (OS18b): a landing is moved to a joint of the bar's strand (bar ends where 3 or more ends, or 2 strands, meet)
+  // within this x the spacing of the landing point; the half's last piece re-aimed at it (dropped when that piece then
+  // comes within the gap of a bar not at the joint, leaves the region's lattice, or runs within the parallel angle of a
+  // bar at the joint). 0: off (lands mid-bar, as before). strengthen_path_snap_spacings.
+  double snap_spacings = 0.0;
 };
 struct ReliefVine {
   bool laid = false;
@@ -359,6 +364,8 @@ struct ReliefVine {
   // Why seeds and halves were dropped: a seed off the region's lattice, a seed within the gap of a bar; a half that left
   // the region's lattice, turned back, ran beside a bar, ran too long, or met no stress.
   std::size_t seed_off = 0, seed_crowded = 0, half_left = 0, half_turned = 0, half_beside = 0, half_long = 0, half_no_field = 0;
+  // Leg I (OS18b): landings moved to a joint; halves dropped because the re-aimed piece broke a rule.
+  std::size_t snapped = 0, snap_dropped = 0;
 };
 class ReliefVineMaker {
  public:
@@ -370,6 +377,8 @@ class ReliefVineMaker {
   const TensorField& field_;
   ReliefVineAsk ask_;
   std::map<std::array<long long, 3>, std::vector<std::size_t>> grid_;
+  struct Joint { Vec3 p; std::size_t ends = 0; std::vector<int> strands; };
+  std::map<std::array<long long, 3>, Joint> ends_;   // Leg I: every bar end (to 1e-4 mm), how many ends, which strands
 };
 
 // The additions file, little-endian: 8 bytes "TOADDS\0\0", int32 version (1), int32 rounds; per round: uint64 hash,

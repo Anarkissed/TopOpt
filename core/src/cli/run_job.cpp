@@ -15319,6 +15319,8 @@ const std::vector<StrengthSettingSpec>& strength_setting_specs() {
       {"strengthen_path_parallel_deg", K::Number, 20.0, 5.0, 45.0, false, {}},
       // OS18 amended (the owner, 2026-11-19): at most this many relief vines per strut over the whole job.
       {"strengthen_paths_per_strut", K::Integer, 2.0, 1.0, 100.0, false, {}},
+      // Leg I (OS18b): a relief vine's landing moved to a joint within this x the spacing (0: lands mid-bar).
+      {"strengthen_path_snap_spacings", K::Number, 0.5, 0.0, 2.0, false, {}},
       // Brief E4: the solid's weak spots (Organic results).
       {"solid_spots_max", K::Integer, 20.0, 1.0, 1000.0, false, {}},
       {"solid_spot_near_voxels", K::Number, 3.0, 0.0, 20.0, false, {}},
@@ -16163,7 +16165,7 @@ std::string print_check_counts(const ll::Bars& before, const std::vector<char>& 
 // layout's order (in piece order, each once), the limit that failed, its margins, the compression its buckling used,
 // whether bending led its stress, its widths and length, whether it is at `cap` (its widest bar at least cap; 0: not
 // told), whether it carries the load, and its two ends. The weakest first.
-std::string struts_under_json(const OrganicCheckRun& cr, double watch, double cap) {
+std::string struts_under_json(const OrganicCheckRun& cr, double watch, double cap, const std::vector<std::string>* classes = nullptr) {
   const ll::FrameCheck& c = cr.check;
   std::vector<int> order;
   for (std::size_t i = 0; i < c.struts.size(); ++i)
@@ -16200,7 +16202,9 @@ std::string struts_under_json(const OrganicCheckRun& cr, double watch, double ca
          ", \"width_max_mm\": " + json_num(sn.width_max) + ", \"length_mm\": " + json_num(sn.length_mm) +
          ", \"at_cap\": " + (cap > 0.0 && sn.width_max >= cap - 1e-9 ? "true" : "false") +
          ", \"loaded\": " + (sn.loaded ? "true" : "false") + ", \"at\": " + v3(sn.at) + ",\n     \"ends\": [" + ends +
-         "], \"bars\": [" + bl + "]}";
+         "], \"bars\": [" + bl + "]" +
+         (classes && static_cast<std::size_t>(order[q]) < classes->size()
+              ? ", \"class\": " + json_str((*classes)[static_cast<std::size_t>(order[q])]) : std::string()) + "}";
   }
   s += std::string(order.empty() ? "" : "\n  ") + "]\n}\n";
   return s;
@@ -16994,6 +16998,19 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
     const double limit_w = upper;
     const std::size_t per_strut = static_cast<std::size_t>(S.st.get("strengthen_paths_per_strut"));
     std::map<StrutKey, std::size_t> vines_of;
+    // Leg I (diagnosis): the bars of the check before (ends to 1e-4 mm) with their strut's margin, and the landings of
+    // the vines laid in the round before (where, the strut landed on, its margin then, how far from its nearer joint).
+    using EndsKey = std::array<long long, 6>;
+    const auto ends_key = [](const Vec3& a, const Vec3& b) {
+      EndsKey k1{std::llround(a.x * 1e4), std::llround(a.y * 1e4), std::llround(a.z * 1e4), std::llround(b.x * 1e4),
+                 std::llround(b.y * 1e4), std::llround(b.z * 1e4)};
+      EndsKey k2{k1[3], k1[4], k1[5], k1[0], k1[1], k1[2]};
+      return std::min(k1, k2);
+    };
+    std::map<EndsKey, double> prev_margin_of;              // a bar of the check before: its strut's margin (judged)
+    std::vector<std::pair<ll::Bar, double>> prev_bars;     // the same bars, for "a piece of which old bar"
+    struct Landing { Vec3 p; double before; double share; std::string by; bool bending; Vec3 vine_mid; };
+    std::vector<Landing> landings_last;
     (void)path_min_gain;   // OS18 amended: no longer read (every strut needing more than the limit gets a relief step)
     std::vector<std::pair<Vec3, double>> vines_last;
     res.old_bars_kept = true;
@@ -17006,8 +17023,47 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
       OrganicCheckRun cr = organic_frame_check(S, domain, bars, &in_file, light, rdir, job.options.threads);
       if (!cr.done.ok) return finish(false, cr.done.code, cr.done.exit_code, cr.done.why, cr.done.detail);
       std::ofstream(join_path(rdir, "strength.json")) << cr.done.json << "\n";
-      std::ofstream(join_path(rdir, "struts_under.json")) << struts_under_json(cr, ss.watch_margin, cap);
       const ll::FrameCheck& c = cr.check;
+      // Leg I (diagnosis): each judged strut's class against the check before: "vine" (a relief vine's bar), "brace" (a
+      // new brace bar), "cut" (a new piece of an old bar, cut by a landing or a brace), else "untouched" (its bars all
+      // there before, widened or not). Under the safety factor per class, and the cut ones whose old bar's strut was at
+      // or above it (under only because of new pieces).
+      std::vector<std::string> strut_class(c.struts.size(), "untouched");
+      std::map<std::string, std::array<std::size_t, 2>> by_class;   // judged, under
+      std::size_t new_pieces_under = 0;
+      {
+        for (std::size_t si = 0; si < c.struts.size(); ++si) {
+          const ll::FrameStrut& sn = c.struts[si];
+          bool vine = false, brace = false, cut = false, newly = false;
+          for (int pi : sn.pieces) {
+            const int fb = cr.frame.pieces[static_cast<std::size_t>(pi)].bar;
+            if (fb < 0 || static_cast<std::size_t>(fb) >= cr.bar_of.size()) continue;
+            const ll::Bar& b = bars.bars[static_cast<std::size_t>(cr.bar_of[static_cast<std::size_t>(fb)])];
+            if (b.relief) { vine = true; continue; }
+            if (n == 0 || prev_margin_of.count(ends_key(b.a, b.b))) continue;
+            if (b.brace) { brace = true; continue; }
+            cut = true;
+            for (const auto& [ob, om] : prev_bars) {   // the old bar it lies on
+              const Vec3 d{ob.b.x - ob.a.x, ob.b.y - ob.a.y, ob.b.z - ob.a.z};
+              const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
+              auto off = [&](const Vec3& q) {
+                const double t = l2 > 0 ? std::clamp(((q.x - ob.a.x) * d.x + (q.y - ob.a.y) * d.y + (q.z - ob.a.z) * d.z) / l2, 0.0, 1.0) : 0.0;
+                const double ex = ob.a.x + d.x * t - q.x, ey = ob.a.y + d.y * t - q.y, ez = ob.a.z + d.z * t - q.z;
+                return std::sqrt(ex * ex + ey * ey + ez * ez);
+              };
+              if (off(b.a) < 1e-4 && off(b.b) < 1e-4) { newly = newly || om >= S.options.margin_stop; break; }
+            }
+          }
+          strut_class[si] = vine ? "vine" : brace ? "brace" : cut ? "cut" : "untouched";
+          if (!sn.judged) continue;
+          auto& e = by_class[strut_class[si]];
+          ++e[0];
+          const bool under = sn.margin < S.options.margin_stop;
+          e[1] += under;
+          new_pieces_under += under && !vine && !brace && cut && newly;
+        }
+      }
+      std::ofstream(join_path(rdir, "struts_under.json")) << struts_under_json(cr, ss.watch_margin, cap, &strut_class);
       std::size_t at_cap_left = 0;
       for (const ll::FrameStrut& sn : c.struts) at_cap_left += sn.judged && sn.margin < S.options.margin_stop && sn.width_max >= cap - 1e-9;
       std::string r = std::string(rounds_json.empty() ? "\n    " : ",\n    ") + "{\"round\": " + std::to_string(n) +
@@ -17049,6 +17105,100 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
         }
         r += "]";
       }
+      {   // Leg I (diagnosis)
+        r += ", \"classes\": {";
+        bool first = true;
+        for (const char* k : {"untouched", "cut", "brace", "vine"}) {
+          const auto it = by_class.find(k);
+          const std::size_t j = it == by_class.end() ? 0 : it->second[0], u = it == by_class.end() ? 0 : it->second[1];
+          r += std::string(first ? "" : ", ") + "\"" + k + "\": {\"judged\": " + std::to_string(j) + ", \"under\": " + std::to_string(u) + "}";
+          first = false;
+        }
+        r += ", \"under_only_because_of_new_pieces\": " + std::to_string(new_pieces_under) + "}";
+        // The landings of the round before: the struts that now end at each landing (the landed-on strut's two halves)
+        // and the vine's own struts: margin, what limits them.
+        if (n > 0 && !landings_last.empty()) {
+          std::size_t worse = 0, halves = 0, h_tension = 0, h_compression = 0, h_buckling = 0, h_bending = 0, near_joint = 0;
+          std::size_t v_struts = 0, v_under = 0, v_bending = 0, v_tension = 0, v_compression = 0, v_buckling = 0;
+          double share_sum = 0.0;
+          std::string list;
+          std::size_t listed = 0;
+          for (const Landing& L : landings_last) {
+            share_sum += L.share;
+            near_joint += L.share < 0.15;
+            double after = std::numeric_limits<double>::infinity();
+            std::string by_after;
+            bool bend_after = false;
+            for (const ll::FrameStrut& sn : c.struts) {
+              if (!sn.judged) continue;
+              bool ends_here = false;
+              for (int e = 0; e < 2; ++e) {
+                if (sn.end_node[e] < 0) continue;
+                const Vec3& q = cr.frame.nodes[static_cast<std::size_t>(sn.end_node[e])];
+                ends_here = ends_here || std::sqrt((q.x - L.p.x) * (q.x - L.p.x) + (q.y - L.p.y) * (q.y - L.p.y) + (q.z - L.p.z) * (q.z - L.p.z)) < 1e-3;
+              }
+              if (!ends_here) continue;
+              bool is_vine = false;
+              for (int pi : sn.pieces) {
+                const int fb = cr.frame.pieces[static_cast<std::size_t>(pi)].bar;
+                if (fb >= 0 && static_cast<std::size_t>(fb) < cr.bar_of.size() && bars.bars[static_cast<std::size_t>(cr.bar_of[static_cast<std::size_t>(fb)])].relief) is_vine = true;
+              }
+              if (is_vine) continue;
+              ++halves;
+              h_tension += sn.by == "tension"; h_compression += sn.by == "compression"; h_buckling += sn.by == "buckling";
+              h_bending += sn.bending_led;
+              if (sn.margin < after) { after = sn.margin; by_after = sn.by; bend_after = sn.bending_led; }
+            }
+            const bool got_worse = std::isfinite(after) && after < L.before;
+            worse += got_worse;
+            if (listed < 40) {
+              char b[320];
+              std::snprintf(b, sizeof b, "%s{\"at\": [%.3f, %.3f, %.3f], \"share\": %.3f, \"before\": ",
+                            listed ? ", " : "", L.p.x, L.p.y, L.p.z, L.share);
+              list += std::string(b) + json_num(std::isfinite(L.before) ? L.before : std::numeric_limits<double>::quiet_NaN()) +
+                      ", \"before_by\": " + json_str(L.by + (L.bending ? ", bending" : "")) + ", \"after\": " + json_num(std::isfinite(after) ? after : std::numeric_limits<double>::quiet_NaN()) +
+                      ", \"after_by\": " + json_str(by_after + (bend_after ? ", bending" : "")) + "}";
+              ++listed;
+            }
+          }
+          for (const ll::FrameStrut& sn : c.struts) {
+            if (!sn.judged) continue;
+            bool is_vine = false;
+            for (int pi : sn.pieces) {
+              const int fb = cr.frame.pieces[static_cast<std::size_t>(pi)].bar;
+              if (fb >= 0 && static_cast<std::size_t>(fb) < cr.bar_of.size() && bars.bars[static_cast<std::size_t>(cr.bar_of[static_cast<std::size_t>(fb)])].relief) is_vine = true;
+            }
+            if (!is_vine) continue;
+            ++v_struts;
+            v_under += sn.margin < S.options.margin_stop;
+            v_bending += sn.bending_led;
+            v_tension += sn.by == "tension"; v_compression += sn.by == "compression"; v_buckling += sn.by == "buckling";
+          }
+          r += ", \"landings\": {\"count\": " + std::to_string(landings_last.size()) + ", \"landed_on_worse\": " + std::to_string(worse) +
+               ", \"share_mean\": " + json_num(share_sum / static_cast<double>(landings_last.size())) +
+               ", \"within_0_15_of_a_joint\": " + std::to_string(near_joint) + ", \"halves\": {\"count\": " + std::to_string(halves) +
+               ", \"tension\": " + std::to_string(h_tension) + ", \"compression\": " + std::to_string(h_compression) +
+               ", \"buckling\": " + std::to_string(h_buckling) + ", \"bending_led\": " + std::to_string(h_bending) +
+               "}, \"vine_struts\": {\"count\": " + std::to_string(v_struts) + ", \"under\": " + std::to_string(v_under) +
+               ", \"tension\": " + std::to_string(v_tension) + ", \"compression\": " + std::to_string(v_compression) +
+               ", \"buckling\": " + std::to_string(v_buckling) + ", \"bending_led\": " + std::to_string(v_bending) +
+               "}, \"list\": [" + list + "]}";
+        }
+      }
+      // Leg I: remember this check's bars and their struts' margins for the next round's classes.
+      prev_margin_of.clear();
+      prev_bars.clear();
+      for (const ll::FrameStrut& sn : c.struts)
+        for (int pi : sn.pieces) {
+          const int fb = cr.frame.pieces[static_cast<std::size_t>(pi)].bar;
+          if (fb < 0 || static_cast<std::size_t>(fb) >= cr.bar_of.size()) continue;
+          const ll::Bar& b = bars.bars[static_cast<std::size_t>(cr.bar_of[static_cast<std::size_t>(fb)])];
+          const double m = sn.judged ? sn.margin : std::numeric_limits<double>::infinity();
+          prev_margin_of[ends_key(b.a, b.b)] = m;
+          prev_bars.push_back({b, m});
+        }
+      for (const ll::Bar& b : bars.bars) if (!prev_margin_of.count(ends_key(b.a, b.b))) prev_margin_of[ends_key(b.a, b.b)] = std::numeric_limits<double>::infinity();
+      landings_last.clear();
       const bool clean = c.solved && c.under_safety == 0;
       if (clean || n >= limit || !c.solved) {
         rounds_json += r + "}";
@@ -17280,6 +17430,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
       // within the gap of a bar near-parallel (strengthen_path_parallel_deg) for more than one spacing, or runs longer
       // than strengthen_path_max_spacings x the spacing. No landing on either side: no_room.
       std::size_t c_handed = to_c.size(), c_mid_braces = 0, c_vines = 0, c_vine_bars = 0, c_tried = 0, c_no_room = 0;
+      std::size_t c_snapped = 0, c_snap_dropped = 0;   // Leg I (OS18b)
       std::size_t c_seed_off = 0, c_seed_crowded = 0, c_half_left = 0, c_half_turned = 0, c_half_beside = 0, c_half_long = 0,
                   c_half_no_field = 0;
       double c_vine_mm = 0.0, c_vine_mm3 = 0.0;
@@ -17287,6 +17438,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
       std::vector<std::pair<Vec3, double>> vines_at;   // the struts given a vine: their middle and margin (at most 20)
       std::vector<std::pair<Vec3, double>> vines_now;  // OS18 amended: every strut given a vine this round
       std::vector<const ll::FrameStrut*> past_late;    // OS18 amended: no_room (or out of vines) this round
+      std::vector<Landing> landings_now;               // Leg I: this round's vine landings
       std::set<int> vine_strands_before;
       {
         ll::AddRound vines;
@@ -17296,6 +17448,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
         va.step_ratio = kOrganicStepRatio;
         va.max_spacings = path_max_spacings;
         va.parallel_deg = S.st.get("strengthen_path_parallel_deg");
+        va.snap_spacings = S.st.get("strengthen_path_snap_spacings");   // Leg I (OS18b)
         if (!to_c.empty()) {
           const ll::ReliefVineMaker maker(bars, domain, *job.tensor_field, va);
           for (const ToC& t : to_c) {
@@ -17334,7 +17487,57 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
             c_seed_off += v.seed_off; c_seed_crowded += v.seed_crowded; c_half_left += v.half_left;
             c_half_turned += v.half_turned; c_half_beside += v.half_beside; c_half_long += v.half_long;
             c_half_no_field += v.half_no_field;
+            c_snapped += v.snapped; c_snap_dropped += v.snap_dropped;   // Leg I
             if (v.laid) {
+              // Leg I: its two landings (not those in the solid): the strut of this check it lands on, that strut's
+              // margin, and how far along it from its nearer end joint (a share of its length).
+              for (int e = 0; e < 2 && !v.points.empty(); ++e) {
+                if (e == 0 ? v.solid_a : v.solid_b) continue;
+                const Vec3 p = e == 0 ? v.points.front() : v.points.back();
+                double bestd = 1e300;
+                const ll::FrameStrut* on = nullptr;
+                for (const ll::FrameStrut& s2 : c.struts)
+                  for (int pi : s2.pieces) {
+                    const ll::FramePiece& fp = cr.frame.pieces[static_cast<std::size_t>(pi)];
+                    const Vec3 A = cr.frame.nodes[static_cast<std::size_t>(fp.a)], B = cr.frame.nodes[static_cast<std::size_t>(fp.b)];
+                    const Vec3 d{B.x - A.x, B.y - A.y, B.z - A.z};
+                    const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
+                    const double t = l2 > 0 ? std::clamp(((p.x - A.x) * d.x + (p.y - A.y) * d.y + (p.z - A.z) * d.z) / l2, 0.0, 1.0) : 0.0;
+                    const double ex = A.x + d.x * t - p.x, ey = A.y + d.y * t - p.y, ez = A.z + d.z * t - p.z;
+                    const double dd = ex * ex + ey * ey + ez * ez;
+                    if (dd < bestd) { bestd = dd; on = &s2; }
+                  }
+                if (!on) continue;
+                // Along the strut from its first end: walk its pieces in order.
+                std::map<int, std::vector<int>> at;
+                for (int pi : on->pieces) {
+                  at[cr.frame.pieces[static_cast<std::size_t>(pi)].a].push_back(pi);
+                  at[cr.frame.pieces[static_cast<std::size_t>(pi)].b].push_back(pi);
+                }
+                int node = on->end_node[0] >= 0 ? on->end_node[0] : cr.frame.pieces[static_cast<std::size_t>(on->pieces.front())].a;
+                std::set<int> used;
+                double walked = 0.0, along = -1.0, total = 0.0, best_here = 1e300;
+                for (;;) {
+                  int next = -1;
+                  for (int pi : at[node]) if (!used.count(pi)) { next = pi; break; }
+                  if (next < 0) break;
+                  used.insert(next);
+                  const ll::FramePiece& fp = cr.frame.pieces[static_cast<std::size_t>(next)];
+                  const int other = fp.a == node ? fp.b : fp.a;
+                  const Vec3 A = cr.frame.nodes[static_cast<std::size_t>(node)], B = cr.frame.nodes[static_cast<std::size_t>(other)];
+                  const Vec3 d{B.x - A.x, B.y - A.y, B.z - A.z};
+                  const double l = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+                  const double t = l > 0 ? std::clamp(((p.x - A.x) * d.x + (p.y - A.y) * d.y + (p.z - A.z) * d.z) / (l * l), 0.0, 1.0) : 0.0;
+                  const double ex = A.x + d.x * t - p.x, ey = A.y + d.y * t - p.y, ez = A.z + d.z * t - p.z;
+                  const double dd = ex * ex + ey * ey + ez * ez;
+                  if (dd < best_here) { best_here = dd; along = walked + t * l; }
+                  walked += l;
+                  node = other;
+                }
+                total = walked;
+                const double share = total > 0.0 && along >= 0.0 ? std::min(along, total - along) / total : 0.0;
+                landings_now.push_back({p, on->judged ? on->margin : std::numeric_limits<double>::infinity(), share, on->by, on->bending_led, sn.at});
+              }
               vines.ops.push_back(v.op);
               ++vines_of[strut_key(sn.at)];
               vines_now.push_back({sn.at, sn.margin});
@@ -17365,6 +17568,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
         for (const ll::FrameStrut& sn : c.struts) if (sn.judged) margin_before[strut_key(sn.at)] = sn.margin;
         widened_before = widened_now;
         vines_last = vines_now;
+        landings_last = landings_now;
       }
       // OS18 amended, step 3: the struts for which no relief step was possible this round (no_room, or out of vines
       // after a failed brace) are widened past the limit by A's rule, up to the cap, on their own bars as they now are.
@@ -17450,7 +17654,9 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
                                ", \"seed_crowded\": " + std::to_string(c_seed_crowded) + ", \"left_lattice\": " +
                                std::to_string(c_half_left) + ", \"turned_back\": " + std::to_string(c_half_turned) +
                                ", \"beside_a_bar\": " + std::to_string(c_half_beside) + ", \"too_long\": " +
-                               std::to_string(c_half_long) + ", \"no_stress\": " + std::to_string(c_half_no_field) + "}" +
+                               std::to_string(c_half_long) + ", \"no_stress\": " + std::to_string(c_half_no_field) +
+                               ", \"snap_broke_a_rule\": " + std::to_string(c_snap_dropped) + "}" +
+                               ", \"landings_at_a_joint\": " + std::to_string(c_snapped) +
                                ", \"no_room\": " + std::to_string(c_no_room) + ", \"no_room_at\": [";
       for (std::size_t q = 0; q < no_room_at.size(); ++q) {
         char b[96];

@@ -381,6 +381,13 @@ bool principal_at(const TensorField& F, const Vec3& p, std::array<Vec3, 3>& e) {
 
 ReliefVineMaker::ReliefVineMaker(const Bars& bars, const Domain& domain, const TensorField& field, const ReliefVineAsk& ask)
     : bars_(bars), domain_(domain), field_(field), ask_(ask) {
+  for (const Bar& b : bars.bars)   // Leg I: the joints
+    for (const Vec3& e : {b.a, b.b}) {
+      Joint& j = ends_[{std::llround(e.x * 1e4), std::llround(e.y * 1e4), std::llround(e.z * 1e4)}];
+      j.p = e;
+      ++j.ends;
+      if (std::find(j.strands.begin(), j.strands.end(), b.strand) == j.strands.end()) j.strands.push_back(b.strand);
+    }
   for (std::size_t i = 0; i < bars.bars.size(); ++i) {
     const Bar& b = bars.bars[i];
     const double r = 0.5 * b.width + 1.0;
@@ -481,6 +488,7 @@ ReliefVine ReliefVineMaker::make(const Bar& host, const Vec3& at, const std::vec
         bool beside = false;
         double land = 1e300;
         Vec3 land_at{};
+        int land_strand = -1;
         for (std::size_t i : ids2) {
           const Bar& b = bars_.bars[i];
           const Vec3 c = closest_on(q, b.a, b.b);
@@ -490,9 +498,67 @@ ReliefVine ReliefVineMaker::make(const Bar& host, const Vec3& at, const std::vec
           const double bl = std::sqrt(vdot(bd, bd));
           const bool par = bl > 0.0 && std::fabs(vdot(bd, d)) / bl > par_cos;
           if (par || b.link || mine(b.strand)) { beside = beside || par; continue; }
-          if (surf < land) { land = surf; land_at = c; }   // a bar it crosses: it ends on its line
+          if (surf < land) { land = surf; land_at = c; land_strand = b.strand; }   // a bar it crosses: it ends on its line
         }
         if (land < 1e299) {
+          // Leg I (OS18b): a joint of the landed-on strand within snap x the spacing of the landing: the nearest.
+          const double reach = ask_.snap_spacings * spacing;
+          const Joint* J = nullptr;
+          if (reach > 0.0) {
+            double bj = reach + 1e-9;
+            for (long long x = vine_cell(land_at.x - reach); x <= vine_cell(land_at.x + reach); ++x)
+              for (long long y = vine_cell(land_at.y - reach); y <= vine_cell(land_at.y + reach); ++y)
+                for (long long z = vine_cell(land_at.z - reach); z <= vine_cell(land_at.z + reach); ++z) {
+                  const auto it = grid_.find({x, y, z});
+                  if (it == grid_.end()) continue;
+                  for (std::size_t i : it->second) {
+                    const Bar& b = bars_.bars[i];
+                    if (b.strand != land_strand) continue;
+                    for (const Vec3& e : {b.a, b.b}) {
+                      const auto jt = ends_.find({std::llround(e.x * 1e4), std::llround(e.y * 1e4), std::llround(e.z * 1e4)});
+                      if (jt == ends_.end() || !(jt->second.ends >= 3 || jt->second.strands.size() >= 2)) continue;
+                      const double dj = vdist(e, land_at);
+                      if (dj < bj) { bj = dj; J = &jt->second; }
+                    }
+                  }
+                }
+          }
+          if (J && vdist(J->p, land_at) > 1e-9) {
+            // The last piece re-aimed from p at the joint: in the region's lattice, clear of every bar not at the joint
+            // (by the gap), and not within the parallel angle of a bar at it.
+            const Vec3 jd{J->p.x - p.x, J->p.y - p.y, J->p.z - p.z};
+            const double jl = std::sqrt(vdot(jd, jd));
+            bool good = jl > 1e-9;
+            const int n = std::max(2, static_cast<int>(std::ceil(jl / 0.1)));
+            std::vector<std::size_t> ids3;
+            for (int k = 1; good && k < n; ++k) {
+              const Vec3 s = vadd(p, jd, static_cast<double>(k) / n);
+              const Where ws2 = probe.where(s);
+              if (!ws2.lattice() || ws2.id != host.region) { good = false; break; }
+              near(s, ids3);
+              for (std::size_t i : ids3) {
+                const Bar& b = bars_.bars[i];
+                const bool at_joint = vdist(b.a, J->p) < 1e-4 || vdist(b.b, J->p) < 1e-4;
+                if (at_joint || b.link || mine(b.strand)) continue;
+                if (vdist(s, closest_on(s, b.a, b.b)) - 0.5 * b.width - 0.5 * w < gap - 1e-6) { good = false; break; }
+              }
+            }
+            if (good) {
+              near(J->p, ids3);
+              for (std::size_t i : ids3) {
+                const Bar& b = bars_.bars[i];
+                if (!(vdist(b.a, J->p) < 1e-4 || vdist(b.b, J->p) < 1e-4)) continue;
+                const Vec3 bd{b.b.x - b.a.x, b.b.y - b.a.y, b.b.z - b.a.z};
+                const double bl = std::sqrt(vdot(bd, bd));
+                if (bl > 0.0 && std::fabs(vdot(bd, jd)) / (bl * jl) > par_cos) { good = false; break; }
+              }
+            }
+            if (!good) { ++out.snap_dropped; return h; }
+            ++out.snapped;
+            h.pts.push_back(J->p);
+            h.ok = true;
+            return h;
+          }
           h.pts.push_back(q);
           if (vdist(q, land_at) > 1e-9) h.pts.push_back(land_at);
           h.ok = true;
