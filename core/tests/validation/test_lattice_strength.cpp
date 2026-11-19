@@ -800,6 +800,32 @@ int main() {
       std::printf("[mismatch] ok %d code %s %s\n", mm.ok, mm.code.c_str(), mm.detail.c_str());
       CHECK(!mm.ok && mm.code == "strengthened_mismatch" && !exists(kDir + "/mismatch/block_lattice.stl"));
     }
+    // OS18 (brief E8, owed): strengthen_paths 0 lays what §11's additive job (paths on) lays while C hands it nothing:
+    // round 0's hash the same, and round 0's additions the same operations (kinds, counts) with every number within
+    // 1e-9 (the strength solve is not repeatable to the last bit from run to run: two equal runs' widths differ by about
+    // 3e-13 mm, so the next hashes cannot be pinned across runs).
+    {
+      const OrganicStrengthenResult off = strengthen("additive_paths_off", sweep, 6000.0, "{\"strengthen_rounds\": 1, \"strengthen_paths\": 0}");
+      const std::string oj = slurp(kDir + "/additive_paths_off/strengthen.json");
+      const std::size_t a0 = ajson.find("\"round\": 0, \"verdict\""), o0 = oj.find("\"round\": 0, \"verdict\"");
+      const std::size_t pa = ajson.find("\"paths\": {", a0);
+      const bool handed0 = num_after(ajson, "struts_handed", pa) > 0;
+      const bool same0 = ajson.substr(ajson.find("\"hash\": \"", a0), 28) == oj.substr(oj.find("\"hash\": \"", o0), 28);
+      Additions a, b;
+      std::string why;
+      const bool read = read_additions_file(kDir + "/additive/r1/additions.bin", a, &why) &&
+                        read_additions_file(kDir + "/additive_paths_off/r1/additions.bin", b, &why);
+      bool ops_same = read && !a.rounds.empty() && !b.rounds.empty() && a.rounds[0].ops.size() == b.rounds[0].ops.size();
+      double most = 0.0;
+      for (std::size_t k = 0; ops_same && k < a.rounds[0].ops.size(); ++k) {
+        const AddOp &x = a.rounds[0].ops[k], &y = b.rounds[0].ops[k];
+        ops_same = x.kind == y.kind && x.v.size() == y.v.size();
+        for (std::size_t q = 0; ops_same && q < x.v.size(); ++q) most = std::max(most, std::fabs(x.v[q] - y.v[q]));
+      }
+      std::printf("[paths off] §11 handed to C in round 0: %d; round 0 hash the same %d; round 0 ops the same %d (most apart %.3g)\n",
+                  handed0 ? 1 : 0, same0 ? 1 : 0, ops_same ? 1 : 0, most);
+      CHECK(off.ok && !handed0 && same0 && ops_same && most < 1e-9);
+    }
     const OrganicStrengthenResult one =
         strengthen("additive_one", ", \"region_weave\": [true], \"organic_spacing_mm\": 4, \"organic_width_mm\": 0.9", 6000.0,
                    "{\"strengthen_rounds\": 1}");
@@ -857,6 +883,17 @@ int main() {
         const auto hr = hosts_rose("paths");
         std::printf("[paths] vine hosts %zu, %zu stronger in round 1\n", hr.first, hr.second);
         CHECK(hr.first > 0);
+      }
+      // OS18 (owed): a strut braced at mid-span gets no vine in that round (one strut handed, every length braced).
+      {
+        const OrganicStrengthenResult br = strengthen("paths_braced", roomy, 6000.0,
+            "{\"strengthen_rounds\": 1, \"strengthen_width_cap\": 1.0, \"strengthen_paths_max\": 1, \"strengthen_path_brace_min_mm\": 0}");
+        const std::string bj = slurp(kDir + "/paths_braced/strengthen.json");
+        const std::size_t bp = bj.find("\"paths\": {");
+        std::printf("[paths braced] handed %.0f, mid-span braces %.0f, vines %.0f\n", num_after(bj, "struts_handed", bp),
+                    num_after(bj, "mid_span_braces", bp), num_after(bj, "relief_vines", bp));
+        CHECK(br.ok && bp != std::string::npos && num_after(bj, "struts_handed", bp) == 1 &&
+              num_after(bj, "mid_span_braces", bp) == 1 && num_after(bj, "relief_vines", bp) == 0);
       }
       // ONE strut handed to C (strengthen_paths_max 1, no mid-span brace): it gets a vine and is stronger next round.
       {

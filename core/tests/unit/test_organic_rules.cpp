@@ -2388,6 +2388,32 @@ static void test_os18_relief_vines() {
   Session session(model);
   OrganicAsk base = gap_ask(1.6);
   base.strand_keep = 0.5;   // the owner: vine spacing off is the main case
+  // OS18 (owed): Grown through the same maker: a vine laid beside a grown strut, both ends joined, old bars kept.
+  {
+    OrganicAsk g = judged_ask(true);
+    Session gs(model);
+    const Outcome go = gs.lay_organic(traced_settings(), f, g);
+    ReliefVineAsk gva;
+    gva.gap_mm = 1.5 * 0.45;
+    const ReliefVineMaker gm(go.bars, *gs.domain(), f, gva);
+    ReliefVine gv;
+    for (const Bar& b : go.bars.bars) {
+      const Vec3 m{0.5 * (b.a.x + b.b.x), 0.5 * (b.a.y + b.b.y), 0.5 * (b.a.z + b.b.z)};
+      if (b.link || b.brace || b.level_tie || b.support || dist(b.a, b.b) < 1.0 || m.z < 6 || m.z > 16) continue;
+      gv = gm.make(b, m, {b.strand}, b.width);
+      if (gv.laid) break;
+    }
+    Bars after = go.bars;
+    AddRound rd;
+    rd.ops.push_back(gv.op);
+    AddContext gc;
+    gc.light_mm = 0.9;
+    std::string w;
+    const bool ok = gv.laid && apply_add_round(after, *gs.domain(), rd, gc, nullptr, &w);
+    std::printf("OL-OS18 Grown: vine laid %d (%zu points), applied %d, old bars kept %s\n", gv.laid ? 1 : 0, gv.points.size(),
+                ok ? 1 : 0, ok && old_bars_kept(go.bars, after).empty() ? "yes" : "no");
+    CHECK(ok && old_bars_kept(go.bars, after).empty());
+  }
   const Outcome o = session.lay_organic(gap_settings(1, 16.0, true), f, base);
   CHECK(o.refused.empty() && !o.bars.bars.empty());
   if (o.bars.bars.empty()) return;
