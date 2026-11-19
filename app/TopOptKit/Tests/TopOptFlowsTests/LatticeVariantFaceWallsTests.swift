@@ -39,7 +39,7 @@ final class LatticeVariantFaceWallsTests: XCTestCase {
         let faces = variant.filter { $0.kind == .face }
         XCTAssertEqual(faces.count, 3, "face 1 and the region's two member faces")
         XCTAssertTrue(variant.allSatisfy(\.syntheticStress), "★ every include wall, the face walls included")
-        XCTAssertEqual(faces.filter { $0.rawFaceID == 1 }.compactMap(\.syntheticFoci), [4], "the default")
+        XCTAssertEqual(faces.filter { $0.rawFaceID == 1 }.compactMap(\.syntheticFoci), [3], "the default (his 11-18: 3)")
         XCTAssertEqual(faces.filter { $0.rawFaceID != 1 }.compactMap(\.syntheticFoci), [2, 2],
                        "★ the region's own count, on each member face")
         XCTAssertEqual(variant.map(\.syntheticFoci), p.latticeJobRegions().regions.map(\.syntheticFoci),
@@ -52,7 +52,7 @@ final class LatticeVariantFaceWallsTests: XCTestCase {
                 let faceWire = wire.filter { $0["kind"] as? String == "face" }
                 XCTAssertEqual(faceWire.count, 3, label)
                 XCTAssertTrue(faceWire.allSatisfy { $0["synthetic_stress"] as? Bool == true }, "★ \(label)")
-                XCTAssertEqual(faceWire.compactMap { $0["synthetic_foci"] as? Int }.sorted(), [2, 2, 4], label)
+                XCTAssertEqual(faceWire.compactMap { $0["synthetic_foci"] as? Int }.sorted(), [2, 2, 3], label)  // his 11-19: the default foci is 3
             }
         }
         // the gate is the stage's: the simulation off flags nothing, on the variant as on the stage

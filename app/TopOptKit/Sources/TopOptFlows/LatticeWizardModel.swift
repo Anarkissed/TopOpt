@@ -236,7 +236,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
     public var organicShapeFitOnly: Bool = false
     /// ★ Synthetic stresses on unloaded walls (Aesthetic only, 2026-09-05).
     public var organicSyntheticStresses: Bool = false
-    public var organicSyntheticFoci: Int = 4
+    public var organicSyntheticFoci: Int = 3   // ★ his 11-18: "Change the default to 3"
     /// ★ PR 355 keys (2026-09-06).
     public var organicTransferTies: Bool = true
     /// ★ Preview-only depth-stagger TEST (2026-09-08). See `OrganicDepthStagger`.

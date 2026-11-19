@@ -854,6 +854,14 @@ LatticeSampleResult lattice_sample(const std::string& topology, double cell_mm, 
   });
 }
 
+ImportedMesh lattice_sample_body(bool cube, BridgeError& err) {
+  return guarded_err("lattice_sample_body", err, [&]() -> ImportedMesh {
+    topopt::LatticeSampleSpec spec;
+    spec.shape = cube ? "cube" : "coupon";
+    return to_imported(topopt::lattice_sample_body(spec), nullptr, 0);
+  });
+}
+
 ImportedMesh import_step(const std::string& path, double linear_deflection,
                          BridgeError& err) {
 #ifdef TOPOPT_BRIDGE_HAS_OCCT

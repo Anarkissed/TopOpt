@@ -200,7 +200,7 @@ final class OrganicAutoGradeAndFreezeTests: XCTestCase {
         p.lattice.organicSyntheticStresses = true
         p.writeLatticeSyntheticFoci(ref, foci: 3)
         XCTAssertNil(p.latticeSelectableSyntheticFoci(ref), "★ no foci on a wall core says carries load")
-        XCTAssertEqual(p.latticeSyntheticFlags()?.foci(for: ref.key), 4,
+        XCTAssertEqual(p.latticeSyntheticFlags()?.foci(for: ref.key), 3,   // the default (his 11-19)
                        "★ but the job still asks core about it (ruling 2) — core leaves it alone")
     }
 

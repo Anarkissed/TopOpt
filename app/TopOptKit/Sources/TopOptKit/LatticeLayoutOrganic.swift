@@ -43,6 +43,9 @@ extension LatticeLayoutSession {
         public var tieLevel = false
         public var tieGap = 1.0, tieGapHeavy = 0.0
         public var followStress = true   // OP6 (his 11-18): false = shape only
+        public var layerMM = 0.2         // the printer's layer (sheet H2)
+        /// One spacing for every candidate: a single size, or a range whose two ends are equal (no heavy end acts).
+        public var spacingMMValueIsOne: Bool { spacingMM > 0 || spacingMaxMM <= spacingMinMM }
         public var seed: UInt64 = 1
         public init() {}
 
@@ -68,6 +71,7 @@ extension LatticeLayoutSession {
             o.link_width = linkWidth; o.unbraced_max = unbracedMax
             o.tie_level = tieLevel; o.tie_gap = tieGap; o.tie_gap_heavy = tieGapHeavy
             o.follow_stress = followStress
+            o.layer_mm = layerMM
             o.seed = seed
             return o
         }
@@ -98,8 +102,133 @@ extension LatticeLayoutSession {
         public var strands: Int, netStruts: Int
         public var spacingSmallestMM: Double, spacingLargestMM: Double, spacingMeanMM: Double
         public var msTrace: Double, ms: Double
+        /// ★ E1: not empty = nothing laid; each says what and why, whole.
+        public var refused: [Refusal] = []
+        /// ★ E2: plain sentences (equal cell ends).
+        public var notes: [String] = []
+        /// ★ E7: struts of different groups that touch (not joined).
+        public var crossGroupTouches = 0
         /// Segments drawn: one per pair of neighbouring points of every run.
         public var segments: Int { runs.reduce(0) { $0 + Swift.max(0, $1.points.count - 1) } }
+    }
+
+    /// ★ E1 (LatticeReview's C2): one refusal as core gives it — which group (-1: the list itself, or the stress), which
+    /// setting (the engine's field name), a code, and a plain sentence to show whole; the allowed numbers where one applies.
+    public struct Refusal: Sendable, Equatable {
+        public var group: Int
+        public var setting: String, code: String, text: String
+        public var given: Double
+        public var allowedMin: Double?, allowedMax: Double?
+        init(_ r: topoptbridge.LatticeLayoutRefusal) {
+            group = Int(r.group); setting = String(r.setting); code = String(r.code); text = String(r.text); given = r.given
+            allowedMin = r.has_min ? r.allowed_min : nil; allowedMax = r.has_max ? r.allowed_max : nil
+        }
+    }
+
+    /// ★ E7, Organic per group (his 11-18): each group's weave region ids and its own ask.
+    public struct OrganicGroup: Sendable {
+        public var regions: [Int32]
+        public var ask: Organic
+        public init(regions: [Int32], ask: Organic) { self.regions = regions; self.ask = ask }
+    }
+
+    static func raw(_ groups: [OrganicGroup]) -> topoptbridge.LatticeLayoutOrganicGroups {
+        var g = topoptbridge.LatticeLayoutOrganicGroups()
+        for one in groups {
+            g.asks.push_back(one.ask.raw)
+            g.group_region_counts.push_back(Int32(one.regions.count))
+            for r in one.regions { g.group_regions.push_back(r) }
+        }
+        return g
+    }
+
+    /// Lays the weave's preview group by group (latest wins). Needs the stress tensor set first (`setTensor`, `synthetic`).
+    public func layOrganic(_ settings: Settings, groups: [OrganicGroup]) async throws -> OrganicResult {
+        let mine = beginLay()
+        let raw = convert(settings), gs = Self.raw(groups)
+        let sid = id
+        return try await withTaskCancellationHandler {
+            try await worker.run { [weak self] () throws -> OrganicResult in
+                guard let self, self.isCurrent(mine) else { throw CancellationError() }
+                var err = topoptbridge.BridgeError()
+                let r = topoptbridge.lattice_layout_organic_groups(sid, raw, gs, &err)
+                if !err.ok { throw TopOptError(message: String(err.message)) }
+                if r.cancelled || !self.isCurrent(mine) { throw CancellationError() }
+                let refused = r.refused.map(Refusal.init)
+                guard let runs = refused.isEmpty ? Self.runs(packed: Array(r.runs)) : [] else {
+                    throw TopOptError(message: "the Organic preview's runs could not be read")
+                }
+                var o = OrganicResult(quality: Organic.Quality(rawValue: r.quality) ?? .exact, runs: runs,
+                                      layout: Self.convert(r.layout), strands: Int(r.strands), netStruts: Int(r.net_struts),
+                                      spacingSmallestMM: r.spacing_smallest_mm, spacingLargestMM: r.spacing_largest_mm,
+                                      spacingMeanMM: r.spacing_mean_mm, msTrace: r.ms_trace, ms: r.ms)
+                o.refused = refused
+                o.notes = r.notes.map { String($0) }
+                o.crossGroupTouches = Int(r.cross_group_touches)
+                return o
+            }
+        } onCancel: { [weak self] in
+            self?.cancel()
+        }
+    }
+
+    /// ★ E1: every refusal of these groups' asks (and of the stress the session holds), before a lay; empty = valid.
+    public func validateOrganic(_ settings: Settings, groups: [OrganicGroup]) async throws -> [Refusal] {
+        let raw = convert(settings), gs = Self.raw(groups), sid = id
+        return try await worker.run {
+            var err = topoptbridge.BridgeError()
+            let r = topoptbridge.lattice_layout_organic_validate(sid, raw, gs, &err)
+            if !err.ok { throw TopOptError(message: String(err.message)) }
+            return r.map(Refusal.init)
+        }
+    }
+
+    /// ★ E4 per group: the union of these regions' Auto Sweep limits (nil: none measured).
+    public func sweepLimits(_ settings: Settings, regions: [Int32], lineMM: Double) async throws -> SweepLimits? {
+        let raw = convert(settings), sid = id
+        var ids = topoptbridge.LatticeLayoutIds()
+        for r in regions { ids.ids.push_back(r) }
+        let idsCopy = ids
+        return try await worker.run {
+            var err = topoptbridge.BridgeError()
+            let r = topoptbridge.lattice_layout_sweep_limits_for(sid, raw, idsCopy, lineMM, &err)
+            if !err.ok { throw TopOptError(message: String(err.message)) }
+            guard let m = Array(r.measured).first, m != 0 else { return nil }
+            return SweepLimits(region: 0, measured: true, dMM: 0, strutLowerMM: Array(r.strut_lower_mm)[0],
+                               strutUpperMM: Array(r.strut_upper_mm)[0], strutAutoMM: Array(r.strut_auto_mm)[0],
+                               cellLowerMM: Array(r.cell_lower_mm)[0], cellUpperMM: Array(r.cell_upper_mm)[0],
+                               cellAutoMM: Array(r.cell_auto_mm)[0])
+        }
+    }
+
+    /// ★ E5: what core found of each weave region's stress, and how it filled the walls.
+    public struct Synthetic: Sendable {
+        public var withoutStress: [Int32: Bool] = [:]
+        public var foci: [Int32: Int] = [:]
+        public var filled: [Int32: Int] = [:]
+        public var refused: [Refusal] = []
+    }
+    /// ★ E5, "Simulate stresses on unstressed walls" (his 11-18) and the samples' one focus: core fills the stress the
+    /// session holds for the walls (region, foci) — or, `fromEmpty`, makes one with no solve — and the next Organic lay
+    /// follows it. No walls (and not fromEmpty): the real stress back.
+    public func synthetic(_ settings: Settings, groups: [OrganicGroup], walls: [(region: Int32, foci: Int)],
+                          fromEmpty: Bool = false) async throws -> Synthetic {
+        let raw = convert(settings), gs = Self.raw(groups), sid = id
+        var wl = topoptbridge.LatticeLayoutIds()
+        for w in walls { wl.ids.push_back(w.region); wl.foci.push_back(Int32(w.foci)) }
+        let wallsCopy = wl
+        return try await worker.run {
+            var err = topoptbridge.BridgeError()
+            let r = topoptbridge.lattice_layout_synthetic(sid, raw, gs, wallsCopy, fromEmpty, &err)
+            if !err.ok { throw TopOptError(message: String(err.message)) }
+            var o = Synthetic()
+            o.refused = r.refused.map(Refusal.init)
+            let ids = Array(r.region), w = Array(r.without_stress), f = Array(r.foci), n = Array(r.filled)
+            for i in ids.indices {
+                o.withoutStress[ids[i]] = w[i] != 0; o.foci[ids[i]] = Int(f[i]); o.filled[ids[i]] = Int(n[i])
+            }
+            return o
+        }
     }
 
     /// core's pack_weave_runs, read back: per run 12 bytes (point count u32, region i32, marks u8, end_a u8, end_b u8, pad),

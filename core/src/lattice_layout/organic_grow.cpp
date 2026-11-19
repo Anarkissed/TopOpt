@@ -2778,7 +2778,7 @@ bool Grower::setup() {
     throw std::invalid_argument("grow_strands: wall_gap_heavy needs wall_gap");   // M
   if (ask_.wall_gap_heavy > ask_.wall_gap && ask_.wall_gap > 0.0)
     throw std::invalid_argument("grow_strands: wall_gap_heavy must be at most wall_gap");   // M
-  if (ask_.wall_gap_heavy > 0.0 && (ask_.spacing_mm > 0.0 || !(ask_.spacing_max_mm > ask_.spacing_min_mm)))
+  if (ask_.wall_gap_heavy > 0.0 && ask_.spacing_mm > 0.0)
     throw std::invalid_argument("grow_strands: wall_gap_heavy needs the spacing as a range (O12's measure)");   // M
   if (!(ask_.void_ratio > 0.0) || !std::isfinite(ask_.void_ratio))
     throw std::invalid_argument("grow_strands: void_ratio must be above 0");   // E
@@ -2798,7 +2798,7 @@ bool Grower::setup() {
     throw std::invalid_argument("grow_strands: cross_gap_heavy needs wall_cross");   // N
   if (ask_.cross_gap_heavy > ask_.cross_gap)
     throw std::invalid_argument("grow_strands: cross_gap_heavy must be at most cross_gap");   // N
-  if (ask_.cross_gap_heavy > 0.0 && (ask_.spacing_mm > 0.0 || !(ask_.spacing_max_mm > ask_.spacing_min_mm)))
+  if (ask_.cross_gap_heavy > 0.0 && ask_.spacing_mm > 0.0)
     throw std::invalid_argument("grow_strands: cross_gap_heavy needs the spacing as a range (O12's measure)");   // N
   if (!(ask_.cross_climb_max_deg >= kConeDeg && ask_.cross_climb_max_deg <= 45.0))
     throw std::invalid_argument("grow_strands: cross_climb_max_deg must be from 30 to 45");   // O
@@ -2814,7 +2814,7 @@ bool Grower::setup() {
     throw std::invalid_argument("grow_strands: tie_gap_heavy needs ties");   // P
   if (ask_.tie_gap_heavy > ask_.tie_gap)
     throw std::invalid_argument("grow_strands: tie_gap_heavy must be at most tie_gap");   // P
-  if (ask_.tie_gap_heavy > 0.0 && (ask_.spacing_mm > 0.0 || !(ask_.spacing_max_mm > ask_.spacing_min_mm)))
+  if (ask_.tie_gap_heavy > 0.0 && ask_.spacing_mm > 0.0)
     throw std::invalid_argument("grow_strands: tie_gap_heavy needs the spacing as a range (O12's measure)");   // P
   if (!(ask_.top_run >= 0.0) || !std::isfinite(ask_.top_run))
     throw std::invalid_argument("grow_strands: top_run must be 0 or above");   // G
@@ -3006,7 +3006,7 @@ void lay_traced_level_ties(const Domain& domain, int region, const TensorField& 
     throw std::invalid_argument("trace_strands: tie_gap_heavy must be a number (0 or less: off)");
   if (ask.tie_gap_heavy > ask.tie_gap)
     throw std::invalid_argument("trace_strands: tie_gap_heavy must be at most tie_gap");
-  if (ask.tie_gap_heavy > 0.0 && (ask.spacing_mm > 0.0 || !(ask.spacing_max_mm > ask.spacing_min_mm)))
+  if (ask.tie_gap_heavy > 0.0 && ask.spacing_mm > 0.0)
     throw std::invalid_argument("trace_strands: tie_gap_heavy needs the spacing as a range (O12's measure)");
   if (!(len(ask.build_dir) > 1e-9) || !(ask.layer_mm > 0.0) || !std::isfinite(ask.layer_mm))
     throw std::invalid_argument("trace_strands: level ties need a build direction and a layer above 0");

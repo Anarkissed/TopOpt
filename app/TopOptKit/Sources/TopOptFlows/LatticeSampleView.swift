@@ -68,6 +68,10 @@ struct LatticeSampleView: View {
         var shape: Shape = .part
         let topology: String; let typeName: String; let cellMM: Double; let beadMM: Double
         var rhoLo: Double = 0; var rhoHi: Double = 0
+        /// ★ his 11-18: Organic's samples — "Cells" a cube of organic tendrils, "In a part" the sample part graded to shape,
+        /// each with ONE stress focus — from these Organic settings (the open tab's) and the printer's layer. nil: not Organic.
+        var organic: LatticeOrganicLook? = nil
+        var layerMM: Double = 0.2
     }
     let inputs: Inputs
     /// ★ his iPad notes 11-10 (img 6): the settings he has on that core's sample block can't show yet — said in one line.
@@ -77,6 +81,7 @@ struct LatticeSampleView: View {
     @State private var mesh: ViewerMesh?
     @State private var caption = LatticeSampleView.building
     @State private var failed = false
+    @State private var organicBars: LatticeLayoutBarsInputs?
 
     static let building = "Building the sample\u{2026}"
 
@@ -84,7 +89,12 @@ struct LatticeSampleView: View {
         ZStack(alignment: .bottom) {
             DS.Color.background.color
             if let mesh {
-                MetalMeshView(mesh: mesh, camera: camera, settleRotation: Self.settleZUp)
+                if let organicBars {   // ★ Organic: the engine's struts in the bare body, seen through it
+                    MetalMeshView(mesh: mesh, camera: camera, settleRotation: Self.settleZUp,
+                                  bodyAlpha: LatticeLayoutPreview.ghostAlpha, layoutBars: organicBars)
+                } else {
+                    MetalMeshView(mesh: mesh, camera: camera, settleRotation: Self.settleZUp)
+                }
             }
             VStack(spacing: DS.Space.s) {
                 if let line = Self.notInSampleLine(notInSample) {
@@ -132,6 +142,8 @@ struct LatticeSampleView: View {
     private func build() async {
         caption = Self.building; failed = false
         let i = inputs
+        if let look = i.organic { return await buildOrganic(look, i) }
+        organicBars = nil
         if FlexibleSaid.recording { Self.recordedAsks.append(i) }
         Self.say(tag, "ask \(i.shape) \(i.topology) cell \(i.cellMM) rho \(i.rhoLo)-\(i.rhoHi) bead \(i.beadMM)")
         try? await Task.sleep(nanoseconds: Self.settleNanos)
@@ -162,6 +174,61 @@ struct LatticeSampleView: View {
         case .failure(let e):
             mesh = nil; failed = true
             caption = "The engine can't build this type's sample: \(e.localizedDescription)"
+        }
+    }
+
+    /// ★ Organic's sample (his 11-18; LatticeReview's C2, E5 and E8): the bare body (the cube, or the coupon) through a layout
+    /// session — ONE woven region from a box zone round it, Auto's limits for it moved by Look, the made-up stress of ONE
+    /// focus (no solve), the lay exact — drawn as the preview draws Organic.
+    private func buildOrganic(_ look: LatticeOrganicLook, _ i: Inputs) async {
+        try? await Task.sleep(nanoseconds: Self.settleNanos)
+        guard !Task.isCancelled else { return }
+        do {
+            let cube = i.shape == .cells
+            let body = try TopOptKit.latticeSampleBody(cube: cube)
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(cube ? "organic-sample-cube.stl" : "organic-sample-part.stl")
+            try MeshExport.binarySTL(vertices: body.vertices, indices: body.indices, header: Data()).write(to: url)
+            let session = try await LatticeLayoutSession.open(path: url.path)
+            defer { session.close() }
+            var s = LatticeLayoutSession.Settings()
+            s.beadMM = i.beadMM > 0 ? i.beadMM : 0.45
+            s.minStrutLines = 2
+            guard let b = LatticeLayoutPreview.box(body.vertices) else { throw TopOptError(message: "the sample body is empty") }
+            var r = LatticeLayoutSession.Region(id: 1, faces: [], depthMM: 0)
+            r.zone = .init(kind: .box, centre: SIMD3<Double>((b.lo + b.hi) / 2),
+                           axes: [SIMD3(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0, 0, 1)], half: SIMD3<Double>((b.hi - b.lo) / 2) + 1)
+            r.weave = true
+            s.regions = [r]
+            let lim = try await session.sweepLimits(s, regions: [1], lineMM: s.beadMM).map(LatticeOrganicLook.Limits.init)
+            let looked = lim.map { $0.looked(percent: look.lookPercentValue) }
+            var ask = look.ask(limits: looked, layerMM: i.layerMM)
+            ask.quality = .exact
+            let groups = [LatticeLayoutSession.OrganicGroup(regions: [1], ask: ask)]
+            let made = try await session.synthetic(s, groups: groups, walls: [(region: 1, foci: 1)], fromEmpty: true)
+            if let why = made.refused.first { throw TopOptError(message: why.text) }
+            let laid = try await session.layOrganic(s, groups: groups)
+            if let why = laid.refused.first { throw TopOptError(message: why.text) }
+            guard !Task.isCancelled else { return }
+            let seg = LatticeLayoutPreview.segments(laid.runs)
+            var l = LatticeLayoutColours.Laid()
+            l.bars = seg.bars; l.barFlags = seg.skin; l.barCell = seg.cell; l.barRegion = seg.region; l.token = 1
+            var bars = LatticeLayoutBarsInputs(token: Int.random(in: 1...Int.max), bars: seg.bars, flags: seg.flags,
+                                               colours: LatticeLayoutColours.colours(l, type: nil, grade: false), colourKey: 1)
+            bars.lightFrom = LatticeLayoutPreview.organicLightFrom(grown: look.modeValue == .grown, netFrom: seg.lightFrom,
+                                                                   count: seg.count)
+            let m = ViewerMesh(vertices: body.vertices, indices: body.indices,
+                               faceIDs: [Int32](repeating: 1, count: body.indices.count / 3))
+            organicBars = bars
+            mesh = m
+            camera.reframe(m.bounds)
+            let size = cube ? "40 mm cube" : "Sample part · 45 × 40 × 35 mm"
+            let cells = looked.map { String(format: " · cells %@ to %@ mm", StrengthCheckDocs.number($0.cellLowerMM),
+                                            StrengthCheckDocs.number($0.cellUpperMM)) } ?? ""
+            caption = "\(size) · Organic \(look.modeValue.title) · one stress focus\(cells) · built by the engine"
+        } catch is CancellationError {
+        } catch {
+            mesh = nil; organicBars = nil; failed = true
+            caption = "The engine can't build the Organic sample: \((error as? TopOptError)?.message ?? "\(error)")"
         }
     }
 
@@ -204,6 +271,11 @@ struct LatticeSampleView: View {
 
     /// The page's settings the coupon can't show (core's sample takes the type, the cell and the grade only): Organic, the
     /// finish, the shape band, single-cell members — each named only while it is on.
+    static func notInSample(organic: Bool, finish: LatticeBoundaryTreatment, shapeBand: Bool, singleCell: Bool,
+                            organicBuilt: Bool) -> [String] {
+        if organic && organicBuilt { return [] }   // ★ his 11-18: Organic's own samples show it
+        return notInSample(organic: organic, finish: finish, shapeBand: shapeBand, singleCell: singleCell)
+    }
     static func notInSample(organic: Bool, finish: LatticeBoundaryTreatment, shapeBand: Bool, singleCell: Bool) -> [String] {
         var out: [String] = []
         if organic { out.append("Organic") }

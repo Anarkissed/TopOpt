@@ -221,10 +221,33 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
       out.bars = lay_bars(out.layout, *domain_, threads);
       if (strands) {   // O2: the weave's bars, cut at their crossings, after the cells'
         Bars weave = weave_bars(*domain_, *strands, threads);
-        if (!(finish && finish->draft))   // brief L2, item 3: the draft has no cut at crossings (no links)
-          split_at_crossings(weave, finish ? finish->light_mm : 0.0, finish ? finish->layer_mm : 0.2, nullptr,
-                             finish ? finish->link_width : 1.0);   // S, S8
-        if (finish && finish->brace.unbraced_max > 0.0) brace_weave(weave, *domain_, finish->brace);   // T
+        const bool cut = !(finish && finish->draft);   // brief L2, item 3: the draft has no cut at crossings (no links)
+        const auto cut_and_brace = [&](Bars& part, const WeaveFinish::Group& g) {
+          if (cut) split_at_crossings(part, g.light_mm, g.layer_mm, nullptr, g.link_width);   // S, S8
+          if (g.brace.unbraced_max > 0.0) brace_weave(part, *domain_, g.brace);              // T
+        };
+        if (!finish || finish->groups.size() <= 1) {
+          cut_and_brace(weave, finish && !finish->groups.empty() ? finish->groups.front() : WeaveFinish::Group{});
+        } else {   // OP11 (brief C2, E7): each group's bars (by their strand) cut and braced alone, then in group order
+          Bars all;
+          all.stubs = weave.stubs;
+          for (const WeaveFinish::Group& g : finish->groups) {
+            Bars part;
+            for (const Bar& b : weave.bars)
+              if (b.strand >= 0 && static_cast<std::size_t>(b.strand) >= g.first &&
+                  static_cast<std::size_t>(b.strand) < g.first + g.count)
+                part.bars.push_back(b);
+            cut_and_brace(part, g);
+            const int at = static_cast<int>(all.bars.size());
+            for (Bar& b : part.bars) {
+              if (b.into_a >= 0) b.into_a += at;
+              if (b.into_b >= 0) b.into_b += at;
+            }
+            all.stubs += part.stubs;
+            all.bars.insert(all.bars.end(), part.bars.begin(), part.bars.end());
+          }
+          weave = std::move(all);
+        }
         out.bars.stubs += weave.stubs;
         out.bars.bars.insert(out.bars.bars.end(), weave.bars.begin(), weave.bars.end());
       }

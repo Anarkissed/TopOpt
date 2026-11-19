@@ -28,6 +28,7 @@ public enum LatticeFileJob {
         "byStress": "by_stress", "dialLight": "dial_light", "dialHeavy": "dial_heavy", "widthLightMM": "width_light_mm",
         "widthHeavyMM": "width_heavy_mm", "cellsByStress": "cells_by_stress", "referenceMPa": "reference_mpa",
         "percentile": "percentile", "response": "response", "maxStep": "max_step",
+        "bedFloorMM": "organic_bed_floor_mm",   // the flat floor (Organic only; written only when on)
     ]
 
     /// The stress result's name beside the job (core's top-level "demand"; the demand file format of 04-layout-file-job.md).
@@ -139,6 +140,8 @@ public enum LatticeFileJob {
         layout["percentile"] = s.percentile
         layout["response"] = s.response
         layout["max_step"] = s.maxStep
+        // the flat floor (K1): Organic's ask; written only when on, so every other job is the bytes it was
+        if s.bedFloorMM > 0 { layout["organic_bed_floor_mm"] = s.bedFloorMM }
         if s.byStress { layout["per_region"] = false }   // core refuses By stress with Per region
         // an area's own settings (C23), its Finish (S13), zones (D21): one entry per region, null where it states nothing
         func own(_ o: LatticeLayoutSession.AreaOwn) -> Any {

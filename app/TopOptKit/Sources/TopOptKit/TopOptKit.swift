@@ -2781,6 +2781,14 @@ public enum TopOptKit {
     }
     /// `rhoLo`/`rhoHi` (> 0): the coupon graded between the page's Grade ends, held inside the type's band.
     /// `cube`: core's chunk of cells instead (whole cells, ~40 mm, one density `rhoHi`).
+    /// ★ E8 (his 11-18, the Organic samples): the bare sample body, no lattice — the 40 mm cube on its plate, or the coupon.
+    public static func latticeSampleBody(cube: Bool) throws -> ImportedMesh {
+        var err = topoptbridge.BridgeError()
+        let m = topoptbridge.lattice_sample_body(cube, &err)
+        try throwIfFailed(err)
+        return convert(m)
+    }
+
     public static func latticeSampleBlock(topology: String, cellMM: Double = 0, beadMM: Double = 0,
                                           rhoLo: Double = 0, rhoHi: Double = 0, cube: Bool = false) throws -> LatticeSampleBlock {
         var err = topoptbridge.BridgeError()

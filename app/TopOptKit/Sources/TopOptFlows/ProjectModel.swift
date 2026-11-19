@@ -1110,6 +1110,13 @@ public final class ProjectModel: ObservableObject {
     /// so an unmeasured wall is asked about too. nil ⇒ nothing flagged.
     /// ★ AND ONLY WITH THE SIMULATION ON (ruling 2, 2026-09-29): a saved "on" with the
     /// simulation off flags nothing (`organicSyntheticStressesActive`).
+    /// ★ The new engine's Organic (his 11-18): a group's walls get made-up stresses when its Organic settings say so —
+    /// Organic, Aesthetic, the page in Manual, and the group's switch on.
+    public func organicSyntheticOn(group: UUID) -> Bool {
+        importedFile != nil && lattice.isOrganic && (lattice.stageMode ?? .structural) == .aesthetic && latticePageManual
+            && lattice.organicLook(group: group).syntheticStresses == true
+    }
+
     public func latticeSyntheticFlags() -> OrganicSyntheticStress.SyntheticFlags? {
         guard lattice.organicSyntheticStressesActive else { return nil }
         return .init(defaultFoci: lattice.organicSyntheticFoci, stated: lattice.selectableSyntheticFoci)

@@ -134,7 +134,7 @@ final class LatticeAreaGradingHostedTests: XCTestCase {
         let r = try XCTUnwrap(src.range(of: "private func latticeTabBody(_ c: CellsPageContext) -> AnyView {"))
         let body = String(src[r.upperBound...].prefix(2400))
         XCTAssertFalse(body.contains("LatticeCellsRow.tabsNote"), "★ the until-E3 line is gone from the area tab")
-        XCTAssertTrue(body.contains("shortNote(Self.latticeAreaOwnLine)"))
+        XCTAssertTrue(body.contains(": Self.latticeAreaOwnLine)"), "the area's own line (Organic on an imported part: its group's line, 11-18)")
         XCTAssertTrue(src.contains("pick: { id in withAnimation(.easeInOut(duration: 0.15)) { openLatticeTab(id, c) } }"),
                       "★ a tab opens through the swap that keeps each area's grade")
         XCTAssertEqual(LatticeSetupWizard.shapeGradeRunLine,

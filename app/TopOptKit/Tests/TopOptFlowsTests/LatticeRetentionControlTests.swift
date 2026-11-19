@@ -276,7 +276,7 @@ final class LatticeRetentionControlTests: XCTestCase {
             let exc = regions.filter { $0["role"] as? String == "exclude" }
             XCTAssertEqual(inc.count, 1, label); XCTAssertEqual(exc.count, 1, label)
             XCTAssertEqual(inc.first?["synthetic_stress"] as? Bool, true, "★ \(label): the include wall is flagged")
-            XCTAssertEqual(inc.first?["synthetic_foci"] as? Int, 4, label)
+            XCTAssertEqual(inc.first?["synthetic_foci"] as? Int, 3, label)  // his 11-19: the default foci is 3
             XCTAssertNil(exc.first?["synthetic_stress"], "★ \(label): never the exclude wall")
             XCTAssertNil(TopOptKit.jobSchemaError(doc), "core refused the \(label) document the app built")
         }

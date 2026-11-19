@@ -1263,7 +1263,7 @@ public struct LatticeSpec: Equatable, Sendable {
     }
     /// ★ UNLOADED WALLS get synthetic stresses (Aesthetic only, 2026-09-05).
     public var organicSyntheticStresses: Bool = false
-    public var organicSyntheticFoci: Int = 4
+    public var organicSyntheticFoci: Int = 3   // ★ his 11-18: "Change the default to 3"
     /// ★ PR 355 keys (2026-09-06): Michell second-family ties on the GROWN path
     /// (default on), how much they wander (0 = straight), the grade-to-solid ring
     /// inside the face outline (−1 = one base cell, 0 = none).
@@ -1871,7 +1871,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     public var organicSyntheticStresses: Bool = false
     /// The count an unloaded wall gets when it states none — 4, core's measured recipe and
     /// core's own default for a flagged wall with no count (`synthetic_foci = 4`, job.hpp).
-    public var organicSyntheticFoci: Int = 4
+    public var organicSyntheticFoci: Int = 3   // ★ his 11-18: "Change the default to 3"
     public var selectableSyntheticFoci: [String: Int] = [:]
     /// ★ PR 355 keys (2026-09-06): grown-path transfer ties and their swirl, the solid
     /// rim inside the outline (−1 = one base cell), and the Aesthetic LOOK target for
@@ -2498,6 +2498,20 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
 
     /// ★ Organic cut 1 (his 11-18): his 13 Organic controls (`LatticeOrganicLook`); nil = every one at Auto.
     public var organicLook: LatticeOrganicLook?
+    /// ★ His 11-18: "whole part ONLY if the whole part is latticed. Otherwise, it is per Group" — each group's own Organic
+    /// settings, by its id (absent: every group at Auto). The whole part's are `organicLook`.
+    public var organicLooks: [String: LatticeOrganicLook]?
+    /// The Organic settings of `group` (nil, or the whole part latticed: the whole part's).
+    public func organicLook(group: UUID?) -> LatticeOrganicLook {
+        guard let g = group, !wholePart else { return organicLook ?? LatticeOrganicLook() }
+        return organicLooks?[g.uuidString] ?? LatticeOrganicLook()
+    }
+    public mutating func setOrganicLook(_ l: LatticeOrganicLook, group: UUID?) {
+        guard let g = group, !wholePart else { organicLook = l; return }
+        var m = organicLooks ?? [:]
+        m[g.uuidString] = l
+        organicLooks = m
+    }
 
     /// ★ THE ENCLOSED-VOID RULE — the OFF control (task
     /// 2026-08-06-arm-projection-and-void-check, S2c). DEFAULT TRUE, matching
@@ -2697,6 +2711,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // ★ the band chips' choices (2026-09-27) — absent ⇒ the band's own rules
         case bandTreatments
         case organicLook   // ★ Organic cut 1
+        case organicLooks   // ★ per group (his 11-18)
         // ★ ORGANIC (2026-09-02). Absent from every earlier snapshot ⇒ each decodes to
         // its own default ⇒ an existing project emits exactly the job it always has.
         case organicGrowth, organicStrutWidthMM, organicOverhangDeg
@@ -2750,7 +2765,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // Absent from every earlier snapshot ⇒ off ⇒ the job it always emitted.
         organicSyntheticStresses = try c.decodeIfPresent(Bool.self, forKey: .organicSyntheticStresses) ?? false
         organicSyntheticFoci = OrganicSyntheticStress.clampFoci(
-            try c.decodeIfPresent(Int.self, forKey: .organicSyntheticFoci) ?? 4)
+            try c.decodeIfPresent(Int.self, forKey: .organicSyntheticFoci) ?? 3)
         selectableSyntheticFoci = (try c.decodeIfPresent([String: Int].self, forKey: .selectableSyntheticFoci) ?? [:])
             .filter { OrganicSyntheticStress.fociRange.contains($0.value) }
         selectableWallCoreDead = try c.decodeIfPresent([String: Bool].self, forKey: .selectableWallCoreDead) ?? [:]
@@ -2883,6 +2898,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         bandTreatments = try c.decodeIfPresent([String: Bool].self,
                                                forKey: .bandTreatments) ?? [:]
         organicLook = try c.decodeIfPresent(LatticeOrganicLook.self, forKey: .organicLook)
+        organicLooks = try c.decodeIfPresent([String: LatticeOrganicLook].self, forKey: .organicLooks)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -3000,6 +3016,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             try c.encode(bandTreatments, forKey: .bandTreatments)
         }
         try c.encodeIfPresent(organicLook, forKey: .organicLook)   // ★ Organic cut 1 (absent: as before)
+        try c.encodeIfPresent(organicLooks, forKey: .organicLooks)
     }
 
     /// The starting cell size (mm): the octet cell PR-201 print-tested, reused from the

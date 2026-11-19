@@ -91,7 +91,8 @@ final class IPadNotes1110HostedTests: XCTestCase {
         func natural(_ s: String) -> CGFloat { (s as NSString).size(withAttributes: [.font: font]).width }
         let cases: [(prefix: String, band: String, set: (ProjectModel) -> Void)] = [
             ("wizard-shape-band", LatticeSetupWizard.shapeBand.brief, { $0.lattice.gradingMode = .full }),
-            ("wizard-organic-band", LatticeSetupWizard.organicBand.brief, { $0.lattice.cellTransition = .organicGrade }),
+            // (Organic's band left this page: on a part with its model file the new engine's Organic settings show, with no
+            // band and no Strength — his 11-18 iPad notes, LatticeOrganicPageHostedTests)
         ]
         for c in cases {
             for size in [AppBuildHost.landscape13, CGSize(width: 820, height: 1180)] {

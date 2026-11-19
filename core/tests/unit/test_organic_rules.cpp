@@ -7,6 +7,8 @@
 #include <cmath>
 #include <cstdio>
 #include <functional>
+#include <limits>
+#include <map>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -16,6 +18,7 @@
 #include "topopt/lattice_layout_file.hpp"
 #include "topopt/lattice_layout_mesh.hpp"
 #include "topopt/lattice_layout_organic.hpp"
+#include "topopt/lattice_sample.hpp"
 
 using namespace topopt;
 using namespace topopt::lattice_layout;
@@ -1076,6 +1079,603 @@ static void test_follow_stress() {
   CHECK(!job.organic.follow_stress);
 }
 
+// ── OL-VALID (OP7, brief C2, E1): one validation call; the session path and the file job refuse alike ────────────────
+// The two judged Auto asks (the app's defaults, sheet H; his stand's limits 2 to 8 mm and 0.9 to 1.8 mm, layer 0.2).
+static OrganicAsk judged_ask(bool grown) {
+  OrganicAsk a;
+  a.mode = grown ? OrganicMode::Grown : OrganicMode::Traced;
+  a.follow_stress = true;
+  a.spacing_min_mm = 2.0;
+  a.spacing_max_mm = 8.0;
+  a.width_mm = 0.9;
+  a.width_heavy_mm = 1.8;
+  a.foot_gap = 2.5;
+  a.walls_out = grown;
+  a.wall_gap = grown ? 2.5 : 0.0;
+  a.wall_gap_heavy = grown ? 1.0 : 0.0;
+  a.wall_cross = grown ? 1 : 0;
+  a.cross_gap = 2.5;
+  a.cross_gap_heavy = grown ? 1.0 : 0.0;
+  a.stress_goal = grown;
+  a.ties = true;
+  a.tie_level = true;
+  a.tie_gap = 1.0;
+  a.tie_gap_heavy = 0.5;
+  a.shape_reach = 1.0;
+  a.shape_fit = true;
+  a.member_cap = false;
+  a.hold_parts = true;
+  a.part_to_floor = true;
+  a.part_reach_mm = 1.5 * 8.0;
+  a.part_support_mm = 0.75 * 2.0;
+  a.link_width = 1.0;
+  a.unbraced_max = 10.0;
+  a.prune = true;
+  a.run_max = 1;
+  a.bed_floor_mm = 4.0 * 0.2;
+  a.layer_mm = 0.2;
+  return a;
+}
+static bool has_refusal(const std::vector<OrganicRefusal>& r, const std::string& setting, const std::string& code) {
+  for (const OrganicRefusal& x : r)
+    if (x.setting == setting && x.code == code) return true;
+  return false;
+}
+static void test_validate() {
+  const Settings st = traced_settings();
+  const TensorField f = traced_field();
+  for (int g = 0; g < 2; ++g) {
+    const std::vector<OrganicRefusal> r = validate_organic(st, judged_ask(g == 1), &f);
+    std::printf("OL-VALID judged Auto ask, %s: %zu refusals\n", g ? "Grown" : "Traced", r.size());
+    for (const OrganicRefusal& x : r) std::printf("  (%s %s: %s)\n", x.setting.c_str(), x.code.c_str(), x.text.c_str());
+    CHECK(r.empty());
+  }
+  CHECK(validate_organic(st, traced_ask(), &f).empty());
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  struct Case {
+    bool grown;
+    std::function<void(Settings&, OrganicAsk&)> change;
+    const char* setting;
+    const char* code;
+  };
+  using S = Settings;
+  using A = OrganicAsk;
+  const std::vector<Case> cases = {
+      {true, [](S& s, A&) { s.bead_mm = 0.0; }, "bead_mm", "no_thinnest_strut"},
+      {true, [](S&, A& a) { a.spacing_mm = -1.0; }, "spacing_mm", "not_above_zero"},
+      {true, [](S&, A& a) { a.spacing_min_mm = 0.0; }, "spacing_min_mm", "not_above_zero"},
+      {true, [](S&, A& a) { a.spacing_max_mm = 1.5; }, "spacing_max_mm", "under_other_end"},
+      {true, [](S&, A& a) { a.spacing_exponent = 0.0; }, "spacing_exponent", "not_above_zero"},
+      {true, [](S&, A& a) { a.width_mm = -1.0; }, "width_mm", "below_zero"},
+      {true, [](S&, A& a) { a.width_mm = 0.6; }, "width_mm", "under_thinnest_strut"},
+      {true, [](S&, A& a) { a.width_heavy_mm = 0.5; }, "width_heavy_mm", "under_other_end"},
+      {true, [](S&, A& a) { a.spacing_min_mm = 1.0; }, "spacing_min_mm", "under_smallest_cell"},
+      {false, [](S&, A& a) { a.spacing_mm = 1.0; a.tie_gap_heavy = 0.0; }, "spacing_mm", "under_smallest_cell"},
+      {true, [](S&, A& a) { a.link_width = 3.0; }, "link_width", "out_of_range"},
+      {true, [](S&, A& a) { a.unbraced_max = 2.0; }, "unbraced_max", "out_of_range"},
+      {true, [](S&, A& a) { a.shape_reach = -1.0; }, "shape_reach", "below_zero"},
+      {true, [](S&, A& a) { a.bed_floor_mm = -1.0; }, "bed_floor_mm", "below_zero"},
+      {true, [](S&, A& a) { a.part_reach_mm = -1.0; }, "part_reach_mm", "below_zero"},
+      {true, [](S&, A& a) { a.part_support_mm = -1.0; }, "part_support_mm", "below_zero"},
+      {true, [](S&, A& a) { a.tie_swirl = 1.5; }, "tie_swirl", "out_of_range"},
+      {true, [nan](S&, A& a) { a.foot_gap = nan; }, "foot_gap", "not_a_number"},
+      {true, [](S&, A& a) { a.void_ratio = 0.0; }, "void_ratio", "not_above_zero"},
+      {true, [](S&, A& a) { a.reseed_rounds = 101; }, "reseed_rounds", "out_of_range"},
+      {true, [nan](S&, A& a) { a.wall_gap = nan; }, "wall_gap", "not_a_number"},
+      {true, [nan](S&, A& a) { a.wall_gap_heavy = nan; }, "wall_gap_heavy", "not_a_number"},
+      {true, [](S&, A& a) { a.wall_gap = 0.0; }, "wall_gap_heavy", "needs_light_end"},
+      {true, [](S&, A& a) { a.wall_gap_heavy = 3.0; }, "wall_gap_heavy", "over_light_end"},
+      {true, [](S&, A& a) { a.spacing_mm = 3.0; }, "wall_gap_heavy", "needs_range"},
+      {true, [](S&, A& a) { a.wall_cross = 3; }, "wall_cross", "out_of_range"},
+      {true, [](S&, A& a) { a.walls_out = false; }, "wall_cross", "needs_wall_seeds"},
+      {true, [](S&, A& a) { a.wall_connect = true; }, "wall_cross", "with_wall_connect"},
+      {true, [](S&, A& a) { a.cross_gap = 0.0; }, "cross_gap", "not_above_zero"},
+      {false, [](S&, A& a) { a.cross_gap = 2.0; }, "cross_gap", "needs_crossing_vines"},
+      {true, [nan](S&, A& a) { a.cross_gap_heavy = nan; }, "cross_gap_heavy", "not_a_number"},
+      {false, [](S&, A& a) { a.cross_gap_heavy = 1.0; }, "cross_gap_heavy", "needs_crossing_vines"},
+      {true, [](S&, A& a) { a.cross_gap_heavy = 3.0; }, "cross_gap_heavy", "over_light_end"},
+      {true, [](S&, A& a) { a.spacing_mm = 3.0; }, "cross_gap_heavy", "needs_range"},
+      {true, [](S&, A& a) { a.cross_climb_max_deg = 50.0; }, "cross_climb_max_deg", "out_of_range"},
+      {false, [](S&, A& a) { a.cross_climb_max_deg = 40.0; }, "cross_climb_max_deg", "needs_crossing_vines"},
+      {true, [](S&, A& a) { a.ties = false; }, "tie_level", "needs_ties"},
+      {true, [](S&, A& a) { a.tie_gap = 0.0; }, "tie_gap", "not_above_zero"},
+      {true, [](S&, A& a) { a.ties = false; a.tie_level = false; a.tie_gap = 0.8; }, "tie_gap", "needs_ties"},
+      {true, [nan](S&, A& a) { a.tie_gap_heavy = nan; }, "tie_gap_heavy", "not_a_number"},
+      {true, [](S&, A& a) { a.ties = false; a.tie_level = false; }, "tie_gap_heavy", "needs_ties"},
+      {true, [](S&, A& a) { a.tie_gap_heavy = 2.0; }, "tie_gap_heavy", "over_light_end"},
+      {false, [](S&, A& a) { a.spacing_mm = 3.0; }, "tie_gap_heavy", "needs_range"},
+      {true, [](S&, A& a) { a.top_run = -1.0; }, "top_run", "below_zero"},
+      {true, [](S&, A& a) { a.root_run = -1.0; }, "root_run", "below_zero"},
+      {true, [](S&, A& a) { a.run_gap = -1.0; }, "run_gap", "below_zero"},
+      {true, [](S&, A& a) { a.run_max = 0; }, "run_max", "out_of_range"},
+      {true, [](S&, A& a) { a.run_follow = 0.0; }, "run_follow", "not_above_zero"},
+      {true, [](S&, A& a) { a.run_pull = -1.0; }, "run_pull", "below_zero"},
+      {true, [](S&, A& a) { a.run_seek = -1.0; }, "run_seek", "below_zero"},
+      {true, [](S&, A& a) { a.run_min = -1.0; }, "run_min", "below_zero"},
+      {true, [nan](S&, A& a) { a.root_gap = nan; }, "root_gap", "not_a_number"},
+      {true, [](S&, A& a) { a.build_dir = {0, 0, 0}; }, "build_dir", "zero_direction"},
+      {true, [](S&, A& a) { a.layer_mm = 0.0; }, "layer_mm", "not_above_zero"},
+      {true, [](S&, A& a) { a.seed_stride = 0.0; }, "seed_stride", "not_above_zero"},
+  };
+  std::size_t hit = 0, plain = 0;
+  for (const Case& c : cases) {
+    Settings s = st;
+    OrganicAsk a = judged_ask(c.grown);
+    c.change(s, a);
+    const std::vector<OrganicRefusal> r = validate_organic(s, a, &f);
+    const bool found = has_refusal(r, c.setting, c.code);
+    hit += found;
+    bool clean = true;   // one sentence, no key name (no underscore), ends with a full stop
+    for (const OrganicRefusal& x : r) {
+      clean = clean && x.text.find('_') == std::string::npos && !x.text.empty() && x.text.back() == '.';
+      if (x.setting == c.setting && x.code == c.code)
+        std::printf("OL-VALID %-20s %-21s \"%s\"\n", x.setting.c_str(), x.code.c_str(), x.text.c_str());
+    }
+    plain += clean;
+    if (!found) std::printf("  (not refused: %s %s)\n", c.setting, c.code);
+  }
+  std::printf("OL-VALID %zu of %zu cases refused as named, %zu with plain texts\n", hit, cases.size(), plain);
+  CHECK(hit == cases.size() && plain == cases.size());
+  // The numbers: the smallest printable cell named and carried (0.9 mm strut: 1.38 mm, shown 1.39).
+  {
+    OrganicAsk a = judged_ask(false);
+    a.spacing_min_mm = 1.0;
+    const std::vector<OrganicRefusal> r = validate_organic(st, a, &f);
+    const bool num = !r.empty() && r[0].has_min && std::fabs(r[0].allowed_min - 0.9 * kSmallestCellFactor) < 1e-12 &&
+                     r[0].given == 1.0 && r[0].text.find("1.39 mm") != std::string::npos;
+    CHECK(num);
+    a.spacing_min_mm = 1.39;
+    CHECK(validate_organic(st, a, &f).empty());
+  }
+  // No stress input with a weave region (the session path's own rule).
+  {
+    const std::vector<OrganicRefusal> r = validate_organic(st, judged_ask(true), new TensorField());
+    CHECK(r.size() == 1 && has_refusal(r, "stress", "no_stress_result"));
+    CHECK(validate_organic(st, judged_ask(true), nullptr).empty());
+  }
+  // The session path: refused cleanly (no throw), nothing laid, the kept domain untouched; the preview the same.
+  {
+    const StepModel model = box_model(30, 30, 20);
+    Session s(model);
+    OrganicAsk a = judged_ask(true);
+    a.unbraced_max = 2.0;
+    a.link_width = 3.0;
+    bool threw = false;
+    Outcome o;
+    try { o = s.lay_organic(st, f, a); } catch (const std::exception&) { threw = true; }
+    CHECK(!threw && o.refused.size() == 2 && o.bars.bars.empty() && s.domain() == nullptr);
+    OrganicPreview p;
+    try { p = lay_organic_preview(s, st, f, a, OrganicPreviewAsk{}); } catch (const std::exception&) { threw = true; }
+    CHECK(!threw && p.outcome.refused.size() == 2 && p.runs.empty());
+    const Outcome none = s.lay_organic(st, TensorField{}, judged_ask(true));
+    CHECK(none.refused.size() == 1 && none.refused[0].setting == "stress");
+    // Width under the thinnest strut: Traced threw from the old tracer, Grown from the Grower; now a refusal.
+    a = traced_ask();
+    a.width_mm = 0.6;
+    try { o = s.lay_organic(st, f, a); } catch (const std::exception&) { threw = true; }
+    CHECK(!threw && has_refusal(o.refused, "width_mm", "under_thinnest_strut"));
+    std::printf("OL-VALID session path: refused without a throw %d\n", threw ? 0 : 1);
+  }
+  // The file job: the same rule, its key named in the detail, the plain sentence after it.
+  {
+    const std::string head = R"({"mode": "lattice_file", "model": "block.step", "layout": {
+      "min_strut_lines": 2, "bead_mm": 0.45, "region_ids": [1], "region_no_lattice": [0], "region_depth_mm": [16],
+      "region_expand_mm": [0], "region_face_counts": [1], "region_faces": [1], "region_weave": [true],
+      "organic_spacing_min_mm": )";
+    auto why = [&](const std::string& tail) {
+      try { (void)parse_file_job(head + tail); } catch (const std::exception& e) { return std::string(e.what()); }
+      return std::string();
+    };
+    const std::string small = why(R"(1, "organic_spacing_max_mm": 6}})");
+    const std::string link = why(R"(3, "organic_spacing_max_mm": 6, "organic_link_width": 3}})");
+    std::printf("OL-VALID file job: \"%s\"; \"%s\"\n", small.c_str(), link.c_str());
+    CHECK(small.find("organic_spacing_min_mm") != std::string::npos && small.find("1.39 mm") != std::string::npos);
+    CHECK(link.find("organic_link_width") != std::string::npos &&
+          link.find("Link thickness: it must be from 0.5 to 2") != std::string::npos);
+    CHECK(why(R"(3, "organic_spacing_max_mm": 6}})").empty());
+  }
+}
+
+// ── OL-EQUAL (OP8, brief C2, E2): equal cell ends are accepted; the heavy ends then do not act, and a note says so ────
+static void test_equal_ends() {
+  const StepModel model = box_model(30, 30, 20);
+  const TensorField f = traced_field();
+  const Settings st = traced_settings();
+  for (int g = 0; g < 2; ++g) {
+    OrganicAsk heavy = judged_ask(g == 1);
+    heavy.spacing_min_mm = heavy.spacing_max_mm = 4.0;
+    OrganicAsk light = heavy;
+    light.width_heavy_mm = light.wall_gap_heavy = light.cross_gap_heavy = light.tie_gap_heavy = 0.0;
+    const std::vector<OrganicRefusal> r = validate_organic(st, heavy, &f);
+    Session s1(model), s2(model);
+    const Outcome a = s1.lay_organic(st, f, heavy);
+    const Outcome b = s2.lay_organic(st, f, light);
+    std::printf("OL-EQUAL %s, cell 4 to 4 with every heavy end set: %zu refusals, %zu bars (hash %016llx), without the "
+                "heavy ends %zu bars (hash %016llx); notes %zu / %zu: \"%s\"\n", g ? "Grown" : "Traced", r.size(),
+                a.bars.bars.size(), static_cast<unsigned long long>(bars_fnv(a)), b.bars.bars.size(),
+                static_cast<unsigned long long>(bars_fnv(b)), a.notes.size(), b.notes.size(),
+                a.notes.empty() ? "" : a.notes[0].c_str());
+    CHECK(r.empty() && a.refused.empty() && !a.bars.bars.empty() && bars_fnv(a) == bars_fnv(b));
+    CHECK(a.notes.size() == 1 && a.notes[0] == kNoteEqualEnds && b.notes.empty());
+    // A grower or a level-tie walk given the same ask directly does not throw either.
+    bool threw = false;
+    try { (void)grow_strands(*s1.domain(), 1, f, heavy); } catch (const std::exception&) { threw = true; }
+    CHECK(!threw);
+  }
+  // Ends that differ: nothing changes (the bars of OL-FOLLOW's two made lays, today's hashes from before OP6), no note.
+  const std::uint64_t today[2] = {0x9a119fd417d400d7ULL, 0x235c732cf4f2f269ULL};
+  for (int g = 0; g < 2; ++g) {
+    Session s(model);
+    const Outcome o = s.lay_organic(st, f, follow_ask(g == 1));
+    std::printf("OL-EQUAL ends differ, %s: hash %016llx (today's %016llx), notes %zu\n", g ? "Grown" : "Traced",
+                static_cast<unsigned long long>(bars_fnv(o)), static_cast<unsigned long long>(today[g]), o.notes.size());
+    CHECK(bars_fnv(o) == today[g] && o.notes.empty());
+  }
+}
+
+// ── OL-FLOOR-ASK (OP9, brief C2, E3): the session lays the flat floor from the ask, as the file job does ──────────────
+static void test_floor_from_ask() {
+  const StepModel model = box_model(30, 30, 20);
+  const TensorField f = traced_field();
+  const std::string job = R"({"mode": "lattice_file", "model": "block.step", "layout": {
+      "min_strut_lines": 2, "bead_mm": 0.45, "region_ids": [1], "region_no_lattice": [0], "region_depth_mm": [14],
+      "region_expand_mm": [0], "region_face_counts": [1], "region_faces": [0], "region_weave": [true],
+      "organic_spacing_min_mm": 3, "organic_spacing_max_mm": 6, "organic_shape_fit": false, "organic_width_mm": 0.9,
+      "organic_bed_floor_mm": 2, "organic_mode": ")";
+  for (int g = 0; g < 2; ++g) {
+    const FileJob fj = parse_file_job(job + (g ? "grown" : "traced") + "\"}}");
+    Settings plain = fj.settings;
+    plain.bed_floor_mm = 0.0;   // what the app's bridge sends: no floor in the settings, the floor in the ask
+    Session by_job(model), by_ask(model), none(model);
+    const Outcome a = by_job.lay_organic(fj.settings, f, fj.organic);
+    const Outcome b = by_ask.lay_organic(plain, f, fj.organic);
+    OrganicAsk off = fj.organic;
+    off.bed_floor_mm = 0.0;
+    const Outcome c = none.lay_organic(plain, f, off);
+    double low = 1e300, low_none = 1e300;
+    for (const Bar& x : b.bars.bars) low = std::min({low, x.a.z, x.b.z});
+    for (const Bar& x : c.bars.bars) low_none = std::min({low_none, x.a.z, x.b.z});
+    std::printf("OL-FLOOR-ASK %s, floor 2 mm in the ask only: %zu bars, hash %016llx; the file job's settings: %zu bars, "
+                "hash %016llx; lowest bar point %.3f mm (no floor %.3f mm)\n", g ? "Grown" : "Traced",
+                b.bars.bars.size(), static_cast<unsigned long long>(bars_fnv(b)), a.bars.bars.size(),
+                static_cast<unsigned long long>(bars_fnv(a)), low, low_none);
+    // A bar that ends in the floor runs on into it by its own width (S11, a Solid end): 0.9 mm here (as OL-Q1).
+    CHECK(fj.settings.bed_floor_mm == 2.0 && !b.bars.bars.empty() && bars_fnv(a) == bars_fnv(b));
+    CHECK(low >= 2.0 - 0.9 - 1e-6 && low_none < 2.0 - 0.9 - 0.1);
+  }
+}
+
+// ── OL-SWEEP-FOR (OP10, brief C2, E4 and E7): a group's limits, the union over its measured regions ──────────────────
+static void test_sweep_limits_for() {
+  // A 40 x 30 x 18 box: region 1 under the top face 8 mm deep (D 8), region 2 under the +x side 20 mm deep (D = its
+  // mouth's narrowest, 18), region 9 on a face the part does not have (not built: not measured).
+  const StepModel model = box_model(40, 30, 18);
+  Settings st;
+  st.regions = {{1, Role::Lattice, {1}, 8.0, 0.0, true}, {2, Role::Lattice, {3}, 20.0, 0.0, true},
+                {9, Role::Lattice, {99}, 5.0, 0.0, true}};
+  Session s(model);
+  const std::vector<SweepLimits> each = s.sweep_limits(st, 0.45);
+  for (const SweepLimits& x : each)
+    std::printf("OL-SWEEP-FOR region %d: measured %d, D %.2f, strut %.2f to %.2f, cell %.2f to %.2f\n", x.region,
+                x.measured ? 1 : 0, x.d_mm, x.strut_lower_mm, x.strut_upper_mm, x.cell_lower_mm, x.cell_upper_mm);
+  const SweepLimitsUnion u = s.sweep_limits_for(st, {1, 2, 9}, 0.45);
+  std::printf("OL-SWEEP-FOR union of 1, 2, 9: measured %d (%zu measured, %zu not): strut %.2f to %.2f (Auto %.2f), cell "
+              "%.2f to %.2f (Auto %.2f)\n", u.measured ? 1 : 0, u.measured_regions.size(), u.unmeasured.size(),
+              u.strut_lower_mm, u.strut_upper_mm, u.strut_auto_mm, u.cell_lower_mm, u.cell_upper_mm, u.cell_auto_mm);
+  auto near = [](double x, double y) { return std::fabs(x - y) < 1e-9; };
+  CHECK(u.measured && u.measured_regions == std::vector<int>({1, 2}) && u.unmeasured == std::vector<int>({9}));
+  CHECK(near(u.strut_lower_mm, 0.9) && near(u.strut_upper_mm, 1.8) && near(u.strut_auto_mm, 1.35));
+  CHECK(near(u.cell_lower_mm, 1.5) && near(u.cell_upper_mm, 8.0) && near(u.cell_auto_mm, 5.0));
+  const SweepLimitsUnion one = s.sweep_limits_for(st, {1}, 0.45);
+  CHECK(one.measured && near(one.cell_lower_mm, 1.5) && near(one.cell_upper_mm, 3.5) && near(one.strut_upper_mm, 0.9));
+  const SweepLimitsUnion none = s.sweep_limits_for(st, {9}, 0.45);
+  CHECK(!none.measured && none.unmeasured.size() == 1 && none.cell_upper_mm == 0.0 && none.strut_auto_mm == 0.0);
+}
+
+// ── OL-GROUPS (OP11, brief C2, E7): Organic settings per group of weave regions ───────────────────────────────────────
+static std::uint64_t region_fnv(const Outcome& o, int region) {
+  std::uint64_t h = 1469598103934665603ULL;
+  for (const Bar& b : o.bars.bars) {
+    if (b.region != region) continue;
+    const double v[7] = {b.a.x, b.a.y, b.a.z, b.b.x, b.b.y, b.b.z, b.width};
+    const unsigned char* c = reinterpret_cast<const unsigned char*>(v);
+    for (std::size_t i = 0; i < sizeof v; ++i) { h ^= c[i]; h *= 1099511628211ULL; }
+  }
+  return h;
+}
+static void test_groups() {
+  // One group holding every weave region: today's one-ask lay, bar for bar (OL-FOLLOW's hashes).
+  {
+    const StepModel model = box_model(30, 30, 20);
+    const TensorField f = traced_field();
+    const std::uint64_t today[2] = {0x9a119fd417d400d7ULL, 0x235c732cf4f2f269ULL};
+    for (int g = 0; g < 2; ++g) {
+      Session s(model);
+      const Outcome o = s.lay_organic(traced_settings(), f, std::vector<OrganicGroup>{{{1}, follow_ask(g == 1)}});
+      std::printf("OL-GROUPS one group, %s: hash %016llx (today's %016llx), touches %zu\n", g ? "Grown" : "Traced",
+                  static_cast<unsigned long long>(bars_fnv(o)), static_cast<unsigned long long>(today[g]),
+                  o.cross_group_touches);
+      CHECK(bars_fnv(o) == today[g] && o.cross_group_touches == 0 && o.refused.empty());
+    }
+  }
+  // Two groups on a 30 x 30 x 40 box: region 1 under the top face, region 2 under the bottom face, 12 mm deep each (16
+  // mm of solid between). Group 0 = {1} Traced, group 1 = {2} Grown, in one lay. Each region's bars are those of a lay
+  // of that region alone with its group's ask.
+  const StepModel model = box_model(30, 30, 40);
+  const TensorField f = traced_field(30, 30, 40);
+  Settings both;
+  both.regions = {{1, Role::Lattice, {1}, 12.0, 0.0, true}, {2, Role::Lattice, {0}, 12.0, 0.0, true}};
+  Settings only1 = both, only2 = both;
+  only1.regions = {both.regions[0]};
+  only2.regions = {both.regions[1]};
+  const OrganicAsk traced = traced_ask(), grown = follow_ask(true);
+  const std::vector<OrganicGroup> groups = {{{1}, traced}, {{2}, grown}};
+  Session s(model), s1(model), s2(model);
+  const Outcome o = s.lay_organic(both, f, groups);
+  const Outcome a1 = s1.lay_organic(only1, f, traced);
+  const Outcome a2 = s2.lay_organic(only2, f, grown);
+  std::size_t n1 = 0, n2 = 0;
+  for (const Bar& b : o.bars.bars) { n1 += b.region == 1; n2 += b.region == 2; }
+  std::printf("OL-GROUPS two groups (Traced {1}, Grown {2}): %zu bars in 1, %zu in 2 (alone: %zu, %zu); region 1 the "
+              "same %d, region 2 the same %d; grown report %d; touches %zu; refusals %zu\n", n1, n2, a1.bars.bars.size(),
+              a2.bars.bars.size(), region_fnv(o, 1) == region_fnv(a1, 1) ? 1 : 0,
+              region_fnv(o, 2) == region_fnv(a2, 2) ? 1 : 0, o.grown ? 1 : 0, o.cross_group_touches, o.refused.size());
+  CHECK(o.refused.empty() && n1 > 0 && n2 > 0 && o.grown != nullptr);
+  CHECK(region_fnv(o, 1) == region_fnv(a1, 1) && region_fnv(o, 2) == region_fnv(a2, 2));
+  CHECK(o.cross_group_touches == 0);
+  // The preview takes the groups: its runs carry both regions.
+  {
+    Session p(model);
+    const OrganicPreview pv = lay_organic_preview(p, both, f, groups, OrganicPreviewAsk{});
+    bool r1 = false, r2 = false;
+    for (const WeaveRun& r : pv.runs) { r1 = r1 || r.region == 1; r2 = r2 || r.region == 2; }
+    CHECK(r1 && r2 && bars_fnv(pv.outcome) == bars_fnv(o));
+  }
+  // Two touching regions (each 20 mm deep, meeting half way): the pairs of different groups that touch, reported.
+  {
+    Settings touch = both;
+    touch.regions[0].depth_mm = touch.regions[1].depth_mm = 20.0;
+    Session t(model);
+    const Outcome ot = t.lay_organic(touch, f, groups);
+    std::printf("OL-GROUPS two touching regions: %zu bars, cross-group touches %zu\n", ot.bars.bars.size(),
+                ot.cross_group_touches);
+    CHECK(ot.refused.empty() && !ot.bars.bars.empty());
+  }
+  // The list's own refusals, and a group's ask refused with its group named.
+  {
+    auto refusals = [&](const std::vector<OrganicGroup>& gs) { return validate_organic_groups(both, gs, &f); };
+    auto has_group = [](const std::vector<OrganicRefusal>& r, const char* code, int group) {
+      for (const OrganicRefusal& x : r)
+        if (x.code == code && x.group == group) return true;
+      return false;
+    };
+    OrganicAsk bad = grown;
+    bad.link_width = 3.0;
+    OrganicAsk floor2 = grown;
+    floor2.bed_floor_mm = 2.0;
+    const auto r1 = refusals({{{1}, traced}});
+    const auto r2 = refusals({{{1, 2}, traced}, {{2}, grown}});
+    const auto r3 = refusals({{{1, 7}, traced}, {{2}, grown}});
+    const auto r4 = refusals({{{1}, traced}, {{2}, bad}});
+    const auto r5 = refusals({{{1}, traced}, {{2}, floor2}});
+    const auto r6 = refusals({{{1}, traced}, {{2}, grown}, {{}, grown}});
+    for (const auto* r : {&r1, &r2, &r3, &r4, &r5, &r6})
+      for (const OrganicRefusal& x : *r)
+        std::printf("OL-GROUPS refused: group %d, %s %s \"%s\"\n", x.group, x.setting.c_str(), x.code.c_str(), x.text.c_str());
+    CHECK(r1.size() == 1 && has_group(r1, "region_without_group", -1));
+    CHECK(r2.size() == 1 && has_group(r2, "region_in_two_groups", -1));
+    CHECK(r3.size() == 1 && has_group(r3, "not_a_weave_region", 0));
+    CHECK(r4.size() == 1 && has_group(r4, "out_of_range", 1) && r4[0].setting == "link_width");
+    CHECK(r5.size() == 1 && has_group(r5, "floors_differ", 1));
+    CHECK(r6.size() == 1 && has_group(r6, "empty_group", 2));
+    Session z(model);
+    const Outcome no = z.lay_organic(both, f, std::vector<OrganicGroup>{{{1}, traced}});
+    CHECK(no.refused.size() == 1 && no.bars.bars.empty() && z.domain() == nullptr);
+  }
+}
+
+// ── OL-SYNTH (OP12, brief C2, E5): synthetic stress on walls without stress, and on a body with no solve ──────────────
+static void eigen3(const double* m, double ev[3]) {   // a symmetric 3 x 3 in Voigt order, by Jacobi; by |value|, down
+  double a[3][3] = {{m[0], m[3], m[5]}, {m[3], m[1], m[4]}, {m[5], m[4], m[2]}};
+  for (int sweep = 0; sweep < 30; ++sweep)
+    for (int p = 0; p < 2; ++p)
+      for (int q = p + 1; q < 3; ++q) {
+        if (std::fabs(a[p][q]) < 1e-300) continue;
+        const double th = 0.5 * (a[q][q] - a[p][p]) / a[p][q];
+        const double t = (th >= 0 ? 1.0 : -1.0) / (std::fabs(th) + std::sqrt(th * th + 1.0));
+        const double c = 1.0 / std::sqrt(t * t + 1.0), sn = t * c;
+        for (int k = 0; k < 3; ++k) { const double kp = a[k][p], kq = a[k][q]; a[k][p] = c * kp - sn * kq; a[k][q] = sn * kp + c * kq; }
+        for (int k = 0; k < 3; ++k) { const double pk = a[p][k], qk = a[q][k]; a[p][k] = c * pk - sn * qk; a[q][k] = sn * pk + c * qk; }
+      }
+  ev[0] = a[0][0]; ev[1] = a[1][1]; ev[2] = a[2][2];
+  std::sort(ev, ev + 3, [](double x, double y) { return std::fabs(x) > std::fabs(y); });
+}
+static double vm6(const double* t) {
+  const double a = t[0] - t[1], b = t[1] - t[2], d = t[2] - t[0];
+  return std::sqrt(std::max(0.0, 0.5 * (a * a + b * b + d * d) + 3.0 * (t[3] * t[3] + t[4] * t[4] + t[5] * t[5])));
+}
+static void test_synthetic() {
+  // A 30 x 30 x 40 box: region 1 under the top face (loaded: OL-Q's field above z 20), region 2 under the bottom face
+  // (no stress at all), 12 mm deep each. Both flagged with the default count: only region 2 is filled.
+  const StepModel model = box_model(30, 30, 40);
+  const TensorField in = make_field(30, 30, 40, [](const Vec3& p) {
+    return p.z > 20.0 ? std::array<double, 6>{0.4 + 0.02 * p.x, 0.1, 1.0 + 0.1 * p.x, 0.0, 0.0, 0.0} : std::array<double, 6>{};
+  });
+  Settings st;
+  st.regions = {{1, Role::Lattice, {1}, 12.0, 0.0, true}, {2, Role::Lattice, {0}, 12.0, 0.0, true}};
+  OrganicAsk ask = traced_ask();
+  const std::vector<OrganicGroup> one = {{{1, 2}, ask}};
+  Session s(model);
+  const SyntheticStress out = organic_synthetic_stress(s, st, in, {{1}, {2}}, one);
+  CHECK(out.refused.empty() && out.regions.size() == 2);
+  if (out.regions.size() != 2) return;
+  const SyntheticRegionReport& r1 = out.regions[0];
+  const SyntheticRegionReport& r2 = out.regions[1];
+  for (const SyntheticRegionReport& r : out.regions)
+    std::printf("OL-SYNTH region %d: flagged %d, without stress %d (p99 %.4f, threshold %.4f), foci %d, voxels %zu, filled "
+                "%zu, reference %.4f, factor %.4g, peak %.4f\n", r.region, r.flagged, r.without_stress, r.p99_mpa,
+                r.threshold_mpa, r.foci, r.voxels, r.filled, r.reference_mpa, r.factor, r.peak_after_mpa);
+  CHECK(!r1.without_stress && r1.filled == 0 && r2.without_stress && r2.filled > 0 && r2.foci == kSyntheticFociDefault);
+  // The reference the lay would use: the 95th percentile of region 1's real von Mises (the group's stressed regions).
+  const Domain::Probe probe = s.domain()->probe();
+  std::vector<double> seen;
+  std::size_t in2 = 0, distinct = 0, ties = 0, changed1 = 0;
+  double peak2 = 0.0;
+  for (int k = 0; k < in.nz; ++k)
+    for (int j = 0; j < in.ny; ++j)
+      for (int i = 0; i < in.nx; ++i) {
+        const Where w = probe.where({i + 0.5, j + 0.5, k + 0.5});
+        if (!w.lattice()) continue;
+        const std::size_t e = in.index(i, j, k);
+        const double* t = &out.field.voigt[6 * e];
+        if (w.id == 1) {
+          seen.push_back(vm6(&in.voigt[6 * e]));
+          for (int c = 0; c < 6; ++c) changed1 += t[c] != in.voigt[6 * e + static_cast<std::size_t>(c)];
+        } else if (w.id == 2) {
+          ++in2;
+          peak2 = std::max(peak2, vm6(t));
+          double ev[3];
+          eigen3(t, ev);
+          const double big = std::fabs(ev[0]);
+          distinct += big > 0.0 && std::fabs(ev[0] - ev[1]) > 1e-3 * big && std::fabs(ev[1] - ev[2]) > 1e-3 * big &&
+                      std::fabs(ev[0] - ev[2]) > 1e-3 * big;
+          ties += big > 0.0 && std::fabs(ev[1]) / big >= 0.10;
+        }
+      }
+  std::sort(seen.begin(), seen.end());
+  const double ref = seen.empty() ? 0.0 : seen[static_cast<std::size_t>(std::floor(0.95 * static_cast<double>(seen.size() - 1)))];
+  std::printf("OL-SYNTH region 2: %zu voxels, three distinct %zu, minor / major at least 0.10 %zu; peak %.6f, the "
+              "reference %.6f; region 1 values changed %zu\n", in2, distinct, ties, peak2, ref, changed1);
+  CHECK(in2 > 0 && distinct >= 0.95 * in2 && ties >= 0.95 * in2);
+  CHECK(std::fabs(peak2 - ref) < 1e-9 * std::max(1.0, ref) && std::fabs(r2.reference_mpa - ref) < 1e-12 && changed1 == 0);
+  // Refused: a count of 0 or 6, a region that is not a weave region.
+  {
+    const SyntheticStress bad = organic_synthetic_stress(s, st, in, {{2, 0}, {2, 6}, {9, 3}}, one);
+    for (const OrganicRefusal& x : bad.refused) std::printf("OL-SYNTH refused: %s %s \"%s\"\n", x.setting.c_str(), x.code.c_str(), x.text.c_str());
+    CHECK(bad.refused.size() == 3 && bad.field.empty() && bad.regions.empty());
+  }
+  // No input, one focus, a 30 mm cube latticed whole: Traced lays curves, Grown lays vines AND ties; the spacing varies.
+  const StepModel cube = box_model(30, 30, 30);
+  Settings cs;
+  cs.regions = {{1, Role::Lattice, {1}, 30.0, 0.0, true}};
+  for (int g = 0; g < 2; ++g) {
+    OrganicAsk a = traced_ask();
+    if (g) { a.mode = OrganicMode::Grown; a.layer_mm = 0.2; }
+    const std::vector<OrganicGroup> gs = {{{1}, a}};
+    Session c(cube);
+    const SyntheticStress made = organic_synthetic_stress(c, cs, TensorField{}, {{1, 1}}, gs);
+    const Outcome o = made.refused.empty() ? c.lay_organic(cs, made.field, gs) : Outcome{};
+    const std::size_t ties_laid = o.grown ? o.grown->ties_laid : 0;
+    std::printf("OL-SYNTH cube, no input, 1 focus, %s: grid %d x %d x %d at %.2f mm, filled %zu; %zu strands, %zu bars, "
+                "ties %zu; spacing %.2f to %.2f mm\n", g ? "Grown" : "Traced", made.field.nx, made.field.ny,
+                made.field.nz, made.field.spacing, made.regions.empty() ? 0 : made.regions[0].filled, o.strands,
+                o.bars.bars.size(), ties_laid, o.spacing_smallest_mm, o.spacing_largest_mm);
+    CHECK(made.from_empty && made.field.spacing == 1.0 && !made.regions.empty() && made.regions[0].foci == 1 &&
+          std::fabs(made.regions[0].peak_after_mpa - 1.0) < 1e-12);
+    CHECK(o.refused.empty() && o.strands > 0 && !o.bars.bars.empty() && o.spacing_largest_mm - o.spacing_smallest_mm > 0.5);
+    if (g) CHECK(ties_laid > 0);
+  }
+  CHECK(kSyntheticFociDefault == 3);
+}
+
+// ── OL-BODY (brief C2, E8): the bare sample bodies, and a WHOLE body laid as weave (one box-zone region) ──────────────
+static bool closed_outward(const TriangleMesh& m, double* volume) {
+  std::map<std::pair<int, int>, int> edges;   // directed edge -> count
+  double v = 0.0;
+  for (const auto& t : m.triangles) {
+    for (int k = 0; k < 3; ++k) ++edges[{t[static_cast<std::size_t>(k)], t[static_cast<std::size_t>((k + 1) % 3)]}];
+    const Vec3 &a = m.vertices[static_cast<std::size_t>(t[0])], &b = m.vertices[static_cast<std::size_t>(t[1])],
+               &c = m.vertices[static_cast<std::size_t>(t[2])];
+    v += (a.x * (b.y * c.z - b.z * c.y) - a.y * (b.x * c.z - b.z * c.x) + a.z * (b.x * c.y - b.y * c.x)) / 6.0;
+  }
+  bool ok = !edges.empty();
+  for (const auto& e : edges) ok = ok && e.second == 1 && edges.count({e.first.second, e.first.first}) == 1;
+  if (volume) *volume = v;
+  return ok;
+}
+static void box_of(const TriangleMesh& m, Vec3& lo, Vec3& hi) {
+  lo = {1e300, 1e300, 1e300};
+  hi = {-1e300, -1e300, -1e300};
+  for (const Vec3& p : m.vertices) {
+    lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
+    hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+  }
+}
+// The whole body as ONE weave region: a box zone round the body's box, 1 mm margin (no face ids needed).
+static Settings whole_body_weave(const TriangleMesh& body) {
+  Vec3 lo, hi;
+  box_of(body, lo, hi);
+  Settings s;
+  Settings::RegionAsk r;
+  r.id = 1;
+  r.role = Role::Lattice;
+  r.weave = true;
+  r.zone.kind = Zone::Kind::Box;
+  r.zone.centre = {0.5 * (lo.x + hi.x), 0.5 * (lo.y + hi.y), 0.5 * (lo.z + hi.z)};
+  r.zone.axis[0] = {1, 0, 0};
+  r.zone.axis[1] = {0, 1, 0};
+  r.zone.axis[2] = {0, 0, 1};
+  r.zone.half[0] = 0.5 * (hi.x - lo.x) + 1.0;
+  r.zone.half[1] = 0.5 * (hi.y - lo.y) + 1.0;
+  r.zone.half[2] = 0.5 * (hi.z - lo.z) + 1.0;
+  s.regions = {r};
+  return s;
+}
+static StepModel one_face_model(const TriangleMesh& mesh) {   // the body as a model with one face (no face is read)
+  StepModel m;
+  m.mesh = mesh;
+  m.triangle_face.assign(mesh.triangles.size(), 0);
+  m.faces.resize(1);
+  m.face_count = 1;
+  m.solid_count = 1;
+  return m;
+}
+static void test_sample_bodies() {
+  for (const char* kind : {"cube", "coupon"}) {
+    LatticeSampleSpec spec;
+    spec.shape = kind;
+    spec.topology = "octet";
+    const TriangleMesh body = lattice_sample_body(spec);
+    double vol = 0.0;
+    const bool closed = closed_outward(body, &vol);
+    Vec3 lo, hi, slo, shi;
+    box_of(body, lo, hi);
+    LatticeSampleReceipt rec;
+    const TriangleMesh sample = lattice_sample_mesh(spec, &rec);
+    box_of(sample, slo, shi);
+    if (std::string(kind) == "cube") {   // its struts' round ends stand proud of the cube: the box as stated
+      slo = {0.0, 0.0, 0.0};
+      shi = {rec.size_mm, rec.size_mm, rec.plate_mm + rec.size_mm};
+    }
+    const double off = std::max({std::fabs(lo.x - slo.x), std::fabs(lo.y - slo.y), std::fabs(lo.z - slo.z),
+                                 std::fabs(hi.x - shi.x), std::fabs(hi.y - shi.y), std::fabs(hi.z - shi.z)});
+    std::printf("OL-BODY %s: %zu triangles, closed and outward %d, volume %.1f mm3, box %.2f x %.2f x %.2f (the "
+                "sample's %.2f x %.2f x %.2f, apart %.4f mm)\n", kind, body.triangles.size(), closed ? 1 : 0, vol,
+                hi.x - lo.x, hi.y - lo.y, hi.z - lo.z, shi.x - slo.x, shi.y - slo.y, shi.z - slo.z, off);
+    CHECK(closed && vol > 0.0 && off < 0.05);
+    // The whole body laid as weave from no stress input, one focus: Traced curves, Grown vines and ties.
+    const Settings st = whole_body_weave(body);
+    for (int g = 0; g < 2; ++g) {
+      OrganicAsk a = traced_ask();
+      if (g) { a.mode = OrganicMode::Grown; a.layer_mm = 0.2; }
+      const std::vector<OrganicGroup> gs = {{{1}, a}};
+      Session s(one_face_model(body));
+      const SyntheticStress made = organic_synthetic_stress(s, st, TensorField{}, {{1, 1}}, gs);
+      const Outcome o = made.refused.empty() ? s.lay_organic(st, made.field, gs) : Outcome{};
+      const std::size_t ties = o.grown ? o.grown->ties_laid : 0;
+      std::printf("OL-BODY %s whole-body weave, %s: filled %zu voxels, %zu strands, %zu bars, ties %zu, spacing %.2f to "
+                  "%.2f, empty regions %zu\n", kind, g ? "Grown" : "Traced", made.regions.empty() ? 0 : made.regions[0].filled,
+                  o.strands, o.bars.bars.size(), ties, o.spacing_smallest_mm, o.spacing_largest_mm, o.empty_regions.size());
+      CHECK(made.refused.empty() && !made.regions.empty() && made.regions[0].filled > 0);
+      CHECK(o.refused.empty() && o.empty_regions.empty() && o.strands > 0 && !o.bars.bars.empty());
+      if (g) CHECK(ties > 0);
+    }
+  }
+  bool threw = false;
+  try { LatticeSampleSpec bad; bad.shape = "sphere"; (void)lattice_sample_body(bad); } catch (const std::invalid_argument&) { threw = true; }
+  CHECK(threw);
+}
+
 int main() {
   test_s_cut_fix();
   test_k_floor();
@@ -1098,6 +1698,13 @@ int main() {
   test_sweep_limits();
   test_session_sweep_limits();
   test_follow_stress();
+  test_validate();
+  test_equal_ends();
+  test_floor_from_ask();
+  test_sweep_limits_for();
+  test_groups();
+  test_synthetic();
+  test_sample_bodies();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }
