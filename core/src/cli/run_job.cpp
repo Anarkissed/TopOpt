@@ -16513,7 +16513,7 @@ lattice_layout::StrengthCheck lattice_file_strength_check(const std::string& mat
 
 // ══ BRIEF E2, ITEM 12: THE STRENGTHEN ROUNDS AS ONE JOB (`topopt-cli organic-strengthen`) ══════════════════════════
 // The lattice-file job (read as the file job reads it) and its strength job; no file is meshed. Check; stop when no
-// judged strut is under the safety margin, or after strengthen_rounds rounds (0: 2 Traced, 3 Grown); else a round
+// judged strut is under the safety margin, or after strengthen_rounds rounds (0: additive 6; rebuild 2 Traced, 3 Grown); else a round
 // (strengthen_round: the boosted copy of the stress input, the floors, strengthened.json, in r<N+1>/), lay again, check
 // again. Nothing in the job follows the stress: nothing_to_vary after the first check.
 OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, const std::string& out_dir, int threads,
@@ -16594,7 +16594,9 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
   ll::OrganicAsk ask = job.organic;
   const bool grown = ask.mode == ll::OrganicMode::Grown;
   limit = static_cast<int>(S.st.get("strengthen_rounds"));
-  if (limit == 0) limit = grown ? 3 : 2;
+  // 0: the default. Additive (brief E4, item 1): six rounds (it stops as soon as nothing is under the safety margin);
+  // rebuild: 2 for Traced, 3 for Grown.
+  if (limit == 0) limit = S.st.get("strengthen_mode") == 0.0 ? 6 : grown ? 3 : 2;
   ll::StrengthenSettings ss;
   ss.watch_margin = S.st.get("strengthen_watch_margin");
   ss.boost_max = S.st.get("strengthen_boost_max");

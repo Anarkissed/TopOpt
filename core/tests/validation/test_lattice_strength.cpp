@@ -649,6 +649,16 @@ int main() {
         strengthen("nothing", ", \"region_weave\": [true], \"organic_spacing_mm\": 4, \"organic_width_mm\": 0.9", 2500.0,
                    "{\"strengthen_mode\": 1}");
     CHECK(nv.ok && nv.code == "nothing_to_vary" && nv.rounds_fixed == 0);
+    // Brief E4, item 1: strengthen_rounds 0 (the default) is 2 rounds for Traced in the rebuild mode, and SIX in the
+    // additive mode (stopping as soon as nothing is under the safety margin: a light load stops at round 0).
+    CHECK(num_after(slurp(kDir + "/nothing/strengthen.json"), "rounds_limit") == 2.0);
+    {
+      const OrganicStrengthenResult dr =
+          strengthen("additive_default", ", \"region_weave\": [true], \"organic_spacing_mm\": 4, \"organic_width_mm\": 0.9", 20.0, "");
+      const std::string dj = slurp(kDir + "/additive_default/strengthen.json");
+      std::printf("[additive_default] rounds_limit %.0f\n", num_after(dj, "rounds_limit"));
+      CHECK(dr.ok && has(dj, "\"mode\": \"additive\"") && num_after(dj, "rounds_limit") == 6.0);
+    }
 
     // ── §11 (brief E3a) the additive mode, the default: the lattice is laid ONCE; each round adds (widening in place,
     // braces) and checks again; every bar of round 0 is kept (OS12); r<n>/strengthened.json (version 2) and its

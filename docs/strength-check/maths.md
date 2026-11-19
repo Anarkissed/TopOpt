@@ -261,7 +261,7 @@ $$\text{verdict}=\begin{cases}\text{fail} & L_{\text{unheld}}\text{ too large},\
 
 ## Organic: strengthen
 
-`topopt-cli organic-strengthen`: check; stop when no judged strut has $m<S$, or after $N$ = {{strengthen_rounds}} rounds (0: 2 Traced, 3 Grown); else one round, lay again, check again. For every judged strut with $m<m_w$ = {{strengthen_watch_margin}}, $P_s$ its piece ends and middles, $r_s=r$ = {{strengthen_reach}} $\times$ the mean spacing in use in the weave (`spacing_used_mm.mean`):
+`topopt-cli organic-strengthen`: check; stop when no judged strut has $m<S$, or after $N$ = {{strengthen_rounds}} rounds (0: 6 in the additive mode; 2 Traced, 3 Grown in the rebuild mode); else one round, lay again, check again. For every judged strut with $m<m_w$ = {{strengthen_watch_margin}}, $P_s$ its piece ends and middles, $r_s=r$ = {{strengthen_reach}} $\times$ the mean spacing in use in the weave (`spacing_used_mm.mean`):
 
 $$b_v=\max_{s:\ \min_{\mathbf p\in P_s}|\mathbf c_v-\mathbf p|\le r_s}\ \min\!\Big(b_{\max},\Big(\frac{m_w}{m_s}\Big)^{q}\Big)\qquad(1\ \text{elsewhere})$$
 

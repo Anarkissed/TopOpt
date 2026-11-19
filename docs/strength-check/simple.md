@@ -67,7 +67,7 @@ The solid is judged by its stress alone, in the cubes that are at least {{printe
 
 ## Organic: strengthen
 
-The strengthen job checks the lattice, then lays it again where it was weak, and checks again, up to {{strengthen_rounds}} times (0 means 2 for Traced and 3 for Grown). It stops as soon as nothing is under the safety margin.
+The strengthen job checks the lattice, then lays it again where it was weak, and checks again, up to {{strengthen_rounds}} times (0 means six when it strengthens by adding, and 2 for Traced and 3 for Grown when it lays the lattice again). It stops as soon as nothing is under the safety margin.
 
 In each round, every strut with a margin under {{strengthen_watch_margin}} raises the stress the lattice is laid from, within {{strengthen_reach}} times the weave's mean spacing of it, by up to {{strengthen_boost_max}} times (more for a weaker strut, by the power {{strengthen_boost_power}}), so the next lay puts more, wider struts there. It also sets a least width there (over the same reach), aimed at a margin of {{strengthen_target_margin}}, never wider than your own widest strut. Your own files are never changed: each round writes its own copy.
 
