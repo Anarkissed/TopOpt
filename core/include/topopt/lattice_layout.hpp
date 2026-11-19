@@ -1005,6 +1005,8 @@ struct Bar {
   bool link = false;
   // T (brief G30): a BRACE laid by brace_weave from a brace point of a too-long strut (its own strand number).
   bool brace = false;
+  // OS18 (brief E8): a bar of a relief vine the strengthen loop laid (not in bars_hash; the hash reads its geometry).
+  bool relief = false;
   // OG1 (brief E6): the gap rule's cap on this bar's width (the mean of its strand's two points' caps: the local spacing
   // there less the gap, never under the thinnest strut); 0 where the rule is off or the bar came from no capped strand
   // (links, braces, supports, net struts, cells). Not in bars_hash.
@@ -1191,6 +1193,12 @@ struct BracePoint {
 };
 std::size_t lay_braces(Bars& bars, const Domain& domain, const std::vector<BracePoint>& points, const WeaveBraceAsk& ask,
                        WeaveBraceStats* stats = nullptr, std::vector<int>* laid = nullptr);
+// OS18 (brief E8): a RELIEF VINE laid onto final bars: one new strand (its own new strand number) through `points`, every
+// segment one bar of `width`, `cell`, `region` (Bar::relief), its ends tagged `end_a` / `end_b` (Node where it lands on
+// a bar, Solid where it ends in the solid), its inner joints Node; then split_at_crossings over the new bars only (old
+// bars are cut only on their own line), Joined ends remapped as lay_braces does. Returns the bars laid.
+std::size_t lay_relief_vine(Bars& bars, const std::vector<Vec3>& points, double width, double cell, int region,
+                            Bar::End end_a, Bar::End end_b, const WeaveBraceAsk& ask);
 // Rule O2 (one bar per two points): of the bars of `regions` (a weave's), two with the same two ends (each within a
 // hundredth of a micron, either order) are ONE bar, of the wider width. The first in list order is kept, at the widest
 // width of its repeats; each of its ends takes the best-landed tag any of them has there (Solid, then Joined into a bar

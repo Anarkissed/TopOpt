@@ -1086,6 +1086,7 @@ std::size_t split_at_crossings(Bars& bars, double light_mm, double layer_mm, Cro
       l.into_a = l.into_b = -1;
       l.piece = false; l.skin = false; l.net = false; l.support = false; l.level_tie = false;
       l.link = true;
+      l.relief = false;   // OS18: a link is a link, whatever it joins
       // OG1 (brief E6): a link takes its width from the struts it joins (S8, at most the thicker), so its cap is the
       // larger of theirs: only a later widening (the strength loop) can take it over. A link to a bar the rule does not
       // cap (a brace, a support) is not capped either (0).
@@ -1560,6 +1561,34 @@ std::size_t lay_braces(Bars& weave, const Domain& domain, const std::vector<Brac
     split_at_crossings(weave, ask.light_mm, ask.layer_mm, nullptr, ask.link_width, first_new, &first);   // T4
     if (!first.empty()) remap_joined(weave, first, n1, 0, weave.bars.size());
   }
+  return laid;
+}
+
+std::size_t lay_relief_vine(Bars& bars, const std::vector<Vec3>& points, double width, double cell, int region,
+                            Bar::End end_a, Bar::End end_b, const WeaveBraceAsk& ask) {
+  if (points.size() < 2) return 0;
+  int next_strand = -1;
+  for (const Bar& b : bars.bars) next_strand = std::max(next_strand, b.strand);
+  ++next_strand;
+  const std::size_t first_new = bars.bars.size();
+  for (std::size_t k = 0; k + 1 < points.size(); ++k) {
+    Bar b;
+    b.a = points[k];
+    b.b = points[k + 1];
+    b.width = width;
+    b.cell = cell;
+    b.region = region;
+    b.strand = next_strand;
+    b.relief = true;
+    b.end_a = k == 0 ? end_a : Bar::End::Node;
+    b.end_b = k + 2 == points.size() ? end_b : Bar::End::Node;
+    bars.bars.push_back(b);
+  }
+  const std::size_t laid = bars.bars.size() - first_new;
+  const std::size_t n1 = bars.bars.size();
+  std::vector<std::size_t> first;
+  split_at_crossings(bars, ask.light_mm, ask.layer_mm, nullptr, ask.link_width, first_new, &first);
+  if (!first.empty()) remap_joined(bars, first, n1, 0, bars.bars.size());
   return laid;
 }
 

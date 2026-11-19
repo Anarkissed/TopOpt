@@ -168,7 +168,10 @@ bool apply_add_round(Bars& bars, const Domain& domain, const AddRound& round, co
   for (const AddOp& op : round.ops) {
     if (op.kind == 1 && op.v.size() != 8) return no("a brace point has " + std::to_string(op.v.size()) + " numbers, not 8");
     if (op.kind == 2 && op.v.size() != 7) return no("a widening has " + std::to_string(op.v.size()) + " numbers, not 7");
-    if (op.kind != 1 && op.kind != 2) return no("an addition of kind " + std::to_string(op.kind) + " is not one this engine knows");
+    if (op.kind == 3 && (op.v.size() < 12 || op.v.size() != 6 + 3 * static_cast<std::size_t>(std::max(0.0, op.v[5]))))
+      return no("a relief vine's numbers do not match its point count");
+    if (op.kind != 1 && op.kind != 2 && op.kind != 3)
+      return no("an addition of kind " + std::to_string(op.kind) + " is not one this engine knows");
     for (double x : op.v)
       if (!std::isfinite(x)) return no("an addition holds a number that is not finite");
   }
@@ -231,6 +234,20 @@ bool apply_add_round(Bars& bars, const Domain& domain, const AddRound& round, co
         }
       }
     }
+  }
+  // 3. OS18 (brief E8): the relief vines, in op order, each laid onto the bars as they now are (lay_relief_vine).
+  for (const AddOp& op : round.ops) {
+    if (op.kind != 3) continue;
+    const std::size_t n = static_cast<std::size_t>(op.v[5]);
+    std::vector<Vec3> pts;
+    for (std::size_t k = 0; k < n; ++k) pts.push_back({op.v[6 + 3 * k], op.v[7 + 3 * k], op.v[8 + 3 * k]});
+    auto kind = [](double x) { return x > 0.5 ? Bar::End::Solid : Bar::End::Node; };
+    WeaveBraceAsk ask;
+    ask.light_mm = c.light_mm;
+    ask.layer_mm = c.layer_mm;
+    ask.link_width = c.link_width;
+    rep.relief_bars += lay_relief_vine(bars, pts, op.v[1], op.v[2], static_cast<int>(op.v[0]), kind(op.v[3]), kind(op.v[4]), ask);
+    ++rep.relief_vines;
   }
   return true;
 }
@@ -318,6 +335,192 @@ bool read_additions_file(const std::string& path, Additions& adds, std::string* 
   if (f.peek() != EOF) return no("the additions file is longer than its count");
   adds = std::move(out);
   return true;
+}
+
+// ── OS18 (brief E8): the relief vine maker ─────────────────────────────────────────────────────────────────────────
+namespace {
+constexpr double kVineGrid = 2.0;   // mm: the bars' search grid (a search structure only: it changes no answer)
+long long vine_cell(double x) { return static_cast<long long>(std::floor(x / kVineGrid)); }
+double vdot(const Vec3& a, const Vec3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+Vec3 vadd(const Vec3& a, const Vec3& b, double k) { return Vec3{a.x + b.x * k, a.y + b.y * k, a.z + b.z * k}; }
+Vec3 closest_on(const Vec3& p, const Vec3& a, const Vec3& b) {
+  const Vec3 d{b.x - a.x, b.y - a.y, b.z - a.z};
+  const double l2 = vdot(d, d);
+  const double t = l2 > 0.0 ? std::clamp(vdot(Vec3{p.x - a.x, p.y - a.y, p.z - a.z}, d) / l2, 0.0, 1.0) : 0.0;
+  return vadd(a, d, t);
+}
+double vdist(const Vec3& a, const Vec3& b) { return std::sqrt(vdot(Vec3{a.x - b.x, a.y - b.y, a.z - b.z}, Vec3{a.x - b.x, a.y - b.y, a.z - b.z})); }
+// The principal directions at p (its voxel's tensor, Jacobi), by |eigenvalue| down (ties by index); false off the grid
+// or where the tensor is zero.
+bool principal_at(const TensorField& F, const Vec3& p, std::array<Vec3, 3>& e) {
+  const int I = static_cast<int>(std::floor((p.x - F.origin.x) / F.spacing)), J = static_cast<int>(std::floor((p.y - F.origin.y) / F.spacing)),
+            K = static_cast<int>(std::floor((p.z - F.origin.z) / F.spacing));
+  if (F.empty() || I < 0 || J < 0 || K < 0 || I >= F.nx || J >= F.ny || K >= F.nz) return false;
+  const double* t = &F.voigt[6 * F.index(I, J, K)];
+  double norm = 0.0;
+  for (int q = 0; q < 6; ++q) norm += t[q] * t[q];
+  if (!(norm > 0.0)) return false;
+  double A[3][3] = {{t[0], t[3], t[5]}, {t[3], t[1], t[4]}, {t[5], t[4], t[2]}}, V[3][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+  for (int sweep = 0; sweep < 50; ++sweep)
+    for (int a = 0; a < 3; ++a)
+      for (int b = a + 1; b < 3; ++b) {
+        if (std::fabs(A[a][b]) < 1e-18) continue;
+        const double th = 0.5 * std::atan2(2 * A[a][b], A[b][b] - A[a][a]), cs = std::cos(th), sn = std::sin(th);
+        for (int k = 0; k < 3; ++k) { const double x = A[k][a], y = A[k][b]; A[k][a] = cs * x - sn * y; A[k][b] = sn * x + cs * y; }
+        for (int k = 0; k < 3; ++k) { const double x = A[a][k], y = A[b][k]; A[a][k] = cs * x - sn * y; A[b][k] = sn * x + cs * y; }
+        for (int k = 0; k < 3; ++k) { const double x = V[k][a], y = V[k][b]; V[k][a] = cs * x - sn * y; V[k][b] = sn * x + cs * y; }
+      }
+  int o[3] = {0, 1, 2};
+  std::sort(o, o + 3, [&](int i, int j) {
+    return std::fabs(A[i][i]) > std::fabs(A[j][j]) || (std::fabs(A[i][i]) == std::fabs(A[j][j]) && i < j);
+  });
+  for (int k = 0; k < 3; ++k) e[static_cast<std::size_t>(k)] = Vec3{V[0][o[k]], V[1][o[k]], V[2][o[k]]};
+  return true;
+}
+}  // namespace
+
+ReliefVineMaker::ReliefVineMaker(const Bars& bars, const Domain& domain, const TensorField& field, const ReliefVineAsk& ask)
+    : bars_(bars), domain_(domain), field_(field), ask_(ask) {
+  for (std::size_t i = 0; i < bars.bars.size(); ++i) {
+    const Bar& b = bars.bars[i];
+    const double r = 0.5 * b.width + 1.0;
+    for (long long x = vine_cell(std::min(b.a.x, b.b.x) - r); x <= vine_cell(std::max(b.a.x, b.b.x) + r); ++x)
+      for (long long y = vine_cell(std::min(b.a.y, b.b.y) - r); y <= vine_cell(std::max(b.a.y, b.b.y) + r); ++y)
+        for (long long z = vine_cell(std::min(b.a.z, b.b.z) - r); z <= vine_cell(std::max(b.a.z, b.b.z) + r); ++z)
+          grid_[{x, y, z}].push_back(i);
+  }
+}
+
+ReliefVine ReliefVineMaker::make(const Bar& host, const Vec3& at, const std::vector<int>& own, double width) const {
+  ReliefVine out;
+  const Domain::Probe probe = domain_.probe();
+  const double gap = ask_.gap_mm, w = width, spacing = host.cell > 0.0 ? host.cell : 2.0;
+  const double step = ask_.step_ratio * spacing, longest = ask_.max_spacings * spacing;
+  const double par_cos = std::cos(ask_.parallel_deg * 3.14159265358979323846 / 180.0);
+  auto mine = [&](int strand) { return std::find(own.begin(), own.end(), strand) != own.end(); };
+  auto near = [&](const Vec3& p, std::vector<std::size_t>& out_ids) {
+    out_ids.clear();
+    for (long long x = vine_cell(p.x) - 1; x <= vine_cell(p.x) + 1; ++x)
+      for (long long y = vine_cell(p.y) - 1; y <= vine_cell(p.y) + 1; ++y)
+        for (long long z = vine_cell(p.z) - 1; z <= vine_cell(p.z) + 1; ++z) {
+          const auto it = grid_.find({x, y, z});
+          if (it != grid_.end()) out_ids.insert(out_ids.end(), it->second.begin(), it->second.end());
+        }
+    std::sort(out_ids.begin(), out_ids.end());
+    out_ids.erase(std::unique(out_ids.begin(), out_ids.end()), out_ids.end());
+  };
+  Vec3 axis{host.b.x - host.a.x, host.b.y - host.a.y, host.b.z - host.a.z};
+  const double al = std::sqrt(vdot(axis, axis));
+  out.mid = closest_on(at, host.a, host.b);
+  if (!(al > 0.0)) return out;
+  axis = Vec3{axis.x / al, axis.y / al, axis.z / al};
+  std::array<Vec3, 3> e;
+  if (!principal_at(field_, out.mid, e)) return out;
+  int along = 0;
+  for (int k = 1; k < 3; ++k)
+    if (std::fabs(vdot(e[static_cast<std::size_t>(k)], axis)) > std::fabs(vdot(e[static_cast<std::size_t>(along)], axis))) along = k;
+  const double s_off = 0.5 * (host.width + w) + gap;
+  std::vector<std::size_t> ids;
+  auto clearance = [&](const Vec3& p) {   // the least surface distance from a vine of width w at p to any bar
+    near(p, ids);
+    double least = 1e300;
+    for (std::size_t i : ids) {
+      const Bar& b = bars_.bars[i];
+      least = std::min(least, vdist(p, closest_on(p, b.a, b.b)) - 0.5 * b.width - 0.5 * w);
+    }
+    return least;
+  };
+  std::vector<std::pair<double, Vec3>> seeds;
+  for (int k = 0; k < 3; ++k) {
+    if (k == along) continue;
+    for (int sg = -1; sg <= 1; sg += 2) {
+      const Vec3 sd = vadd(out.mid, e[static_cast<std::size_t>(k)], sg * s_off);
+      seeds.push_back({clearance(sd), sd});
+    }
+  }
+  std::stable_sort(seeds.begin(), seeds.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+  struct Half { bool ok = false, solid = false; std::vector<Vec3> pts; };
+  for (const auto& cand : seeds) {
+    const Vec3 seed = cand.second;
+    ++out.tried;
+    const Where ws = probe.where(seed);
+    if (!ws.lattice() || ws.id != host.region) { ++out.seed_off; continue; }
+    if (cand.first < gap - 1e-6) { ++out.seed_crowded; continue; }
+    auto walk = [&](double sense) {
+      Half h;
+      Vec3 p = seed, head{axis.x * sense, axis.y * sense, axis.z * sense};
+      const Vec3 start = head;
+      double run = 0.0, parallel = 0.0;
+      std::vector<std::size_t> ids2;
+      h.pts.push_back(seed);
+      while (run < longest + 1e-9) {
+        std::array<Vec3, 3> ee;
+        if (!principal_at(field_, p, ee)) { ++out.half_no_field; return h; }
+        int kk = 0;
+        for (int k = 1; k < 3; ++k)
+          if (std::fabs(vdot(ee[static_cast<std::size_t>(k)], head)) > std::fabs(vdot(ee[static_cast<std::size_t>(kk)], head))) kk = k;
+        Vec3 d = ee[static_cast<std::size_t>(kk)];
+        if (vdot(d, head) < 0.0) d = Vec3{-d.x, -d.y, -d.z};
+        if (vdot(d, start) < 0.0) { ++out.half_turned; return h; }   // turns back
+        const Vec3 q = vadd(p, d, step);
+        run += step;
+        const Where wq = probe.where(q);
+        if (!wq.lattice() || wq.id != host.region) {
+          if (wq.why == Why::Outside || wq.lattice()) { ++out.half_left; return h; }   // into the air, or another region
+          double a = 0.0, b = step;   // into the solid: its edge
+          for (int it = 0; it < 30; ++it) {
+            const double m = 0.5 * (a + b);
+            const Where wm = probe.where(vadd(p, d, m));
+            (wm.lattice() && wm.id == host.region ? a : b) = m;
+          }
+          h.pts.push_back(vadd(p, d, a));
+          h.ok = h.solid = true;
+          return h;
+        }
+        near(q, ids2);
+        bool beside = false;
+        double land = 1e300;
+        Vec3 land_at{};
+        for (std::size_t i : ids2) {
+          const Bar& b = bars_.bars[i];
+          const Vec3 c = closest_on(q, b.a, b.b);
+          const double surf = vdist(q, c) - 0.5 * b.width - 0.5 * w;
+          if (!(surf < gap - 1e-6)) continue;
+          const Vec3 bd{b.b.x - b.a.x, b.b.y - b.a.y, b.b.z - b.a.z};
+          const double bl = std::sqrt(vdot(bd, bd));
+          const bool par = bl > 0.0 && std::fabs(vdot(bd, d)) / bl > par_cos;
+          if (par || b.link || mine(b.strand)) { beside = beside || par; continue; }
+          if (surf < land) { land = surf; land_at = c; }   // a bar it crosses: it ends on its line
+        }
+        if (land < 1e299) {
+          h.pts.push_back(q);
+          if (vdist(q, land_at) > 1e-9) h.pts.push_back(land_at);
+          h.ok = true;
+          return h;
+        }
+        parallel = beside ? parallel + step : 0.0;
+        if (parallel > spacing) { ++out.half_beside; return h; }
+        h.pts.push_back(q);
+        p = q;
+        head = d;
+      }
+      ++out.half_long;
+      return h;
+    };
+    const Half h1 = walk(-1.0), h2 = walk(1.0);
+    if (!h1.ok || !h2.ok) continue;
+    out.points.assign(h1.pts.rbegin(), h1.pts.rend());
+    out.points.insert(out.points.end(), h2.pts.begin() + 1, h2.pts.end());
+    out.solid_a = h1.solid;
+    out.solid_b = h2.solid;
+    out.laid = true;
+    out.op.kind = 3;
+    out.op.v = {static_cast<double>(host.region), w, spacing, h1.solid ? 1.0 : 0.0, h2.solid ? 1.0 : 0.0,
+                static_cast<double>(out.points.size())};
+    for (const Vec3& q : out.points) { out.op.v.push_back(q.x); out.op.v.push_back(q.y); out.op.v.push_back(q.z); }
+    return out;
+  }
+  return out;
 }
 
 }  // namespace topopt::lattice_layout

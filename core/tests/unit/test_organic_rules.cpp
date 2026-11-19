@@ -1247,8 +1247,11 @@ static void test_additions() {
     Bars x = base.bars;
     CHECK(!apply_add_round(x, dom, none, c, nullptr, &why) && why.find("not in the lattice") != std::string::npos);
     AddRound unknown;
-    unknown.ops.push_back({3, {0.0}});
-    CHECK(!apply_add_round(x, dom, unknown, c, nullptr, &why) && why.find("kind 3") != std::string::npos);
+    unknown.ops.push_back({4, {0.0}});   // (kind 3 is OS18's relief vine since brief E8: 4 is unknown)
+    CHECK(!apply_add_round(x, dom, unknown, c, nullptr, &why) && why.find("kind 4") != std::string::npos);
+    AddRound short3;   // a relief vine whose numbers do not match its point count
+    short3.ops.push_back({3, {1.0, 0.9, 2.0, 0.0, 0.0, 3.0, 0, 0, 0}});
+    CHECK(!apply_add_round(x, dom, short3, c, nullptr, &why) && why.find("relief vine") != std::string::npos);
   }
 }
 
@@ -2377,6 +2380,125 @@ static void test_og2_relief() {
   }
 }
 
+
+// ── OL-OS18 (brief E8): the relief vine maker and its addition (kind 3) on a made lay ───────────────────────────────
+static void test_os18_relief_vines() {
+  const StepModel model = box_model(30, 30, 20);
+  const TensorField f = gap_field();
+  Session session(model);
+  const Outcome o = session.lay_organic(gap_settings(1, 16.0, true), f, gap_ask(1.6));
+  CHECK(o.refused.empty() && !o.bars.bars.empty());
+  if (o.bars.bars.empty()) return;
+  const Domain& d = *session.domain();
+  ReliefVineAsk va;
+  va.gap_mm = 1.5 * 0.45;
+  va.light_mm = 0.9;
+  const ReliefVineMaker maker(o.bars, d, f, va);
+  // Hosts: strand bars (not links, braces, ties) longer than 1 mm in the middle of the block.
+  std::size_t host = o.bars.bars.size();
+  ReliefVine v;
+  std::size_t tried_hosts = 0;
+  for (std::size_t i = 0; i < o.bars.bars.size() && tried_hosts < 60; ++i) {
+    const Bar& b = o.bars.bars[i];
+    const Vec3 m{0.5 * (b.a.x + b.b.x), 0.5 * (b.a.y + b.b.y), 0.5 * (b.a.z + b.b.z)};
+    if (b.link || b.brace || b.level_tie || dist(b.a, b.b) < 1.0 || m.x < 8 || m.x > 22 || m.y < 8 || m.y > 22 || m.z < 8 || m.z > 16)
+      continue;
+    ++tried_hosts;
+    v = maker.make(b, m, {b.strand}, b.width);
+    if (v.laid) { host = i; break; }
+  }
+  std::printf("OL-OS18 maker: %zu hosts tried, laid %d (%zu points, ends %s / %s, %zu seeds tried)\n", tried_hosts, v.laid ? 1 : 0,
+              v.points.size(), v.solid_a ? "solid" : "on a bar", v.solid_b ? "solid" : "on a bar", v.tried);
+  CHECK(host < o.bars.bars.size() && v.laid && v.points.size() >= 3 && v.op.kind == 3);
+  if (host >= o.bars.bars.size()) return;
+  // The addition: laid, the old bars kept (OS12), both ends joined (on a bar's line: a joint after the cut, or in the
+  // solid), nothing near-parallel within the gap of a bar it does not join; the same op twice gives the same hash.
+  Bars after = o.bars;
+  AddRound round;
+  round.ops.push_back(v.op);
+  AddContext c;
+  c.light_mm = 0.9;
+  AddReport rep;
+  std::string why;
+  CHECK(apply_add_round(after, d, round, c, &rep, &why));
+  Bars again = o.bars;
+  CHECK(apply_add_round(again, d, round, c, nullptr, &why) && bars_hash(again) == bars_hash(after));
+  const std::string kept = old_bars_kept(o.bars, after);
+  std::size_t relief = 0, joined_ends = 0, near_parallel = 0;
+  auto key = [](const Vec3& p) { return std::array<long long, 3>{std::llround(p.x / 1e-5), std::llround(p.y / 1e-5), std::llround(p.z / 1e-5)}; };
+  std::map<std::array<long long, 3>, int> at;
+  for (const Bar& b : after.bars) { ++at[key(b.a)]; ++at[key(b.b)]; }
+  const Vec3 va_end = v.points.front(), vb_end = v.points.back();
+  for (const Bar& b : after.bars) {
+    if (!b.relief) continue;
+    ++relief;
+    for (int e = 0; e < 2; ++e) {
+      const Vec3& p = e ? b.b : b.a;
+      if (dist(p, va_end) > 1e-6 && dist(p, vb_end) > 1e-6) continue;
+      joined_ends += (e ? b.end_b : b.end_a) == Bar::End::Solid || at[key(p)] >= 2;
+    }
+    for (const Bar& x : after.bars) {
+      if (x.relief || x.link) continue;
+      if (key(x.a) == key(b.a) || key(x.a) == key(b.b) || key(x.b) == key(b.a) || key(x.b) == key(b.b)) continue;
+      const Vec3 d1{b.b.x - b.a.x, b.b.y - b.a.y, b.b.z - b.a.z}, d2{x.b.x - x.a.x, x.b.y - x.a.y, x.b.z - x.a.z};
+      const double l1 = std::hypot(d1.x, std::hypot(d1.y, d1.z)), l2 = std::hypot(d2.x, std::hypot(d2.y, d2.z));
+      if (!(l1 > 0 && l2 > 0) || std::fabs(d1.x * d2.x + d1.y * d2.y + d1.z * d2.z) / (l1 * l2) < std::cos(20.0 * M_PI / 180.0)) continue;
+      // the closest approach of the two segments, sampled
+      double least = 1e9;
+      for (int q = 0; q <= 20; ++q) {
+        const Vec3 p{b.a.x + d1.x * q / 20.0, b.a.y + d1.y * q / 20.0, b.a.z + d1.z * q / 20.0};
+        const double t = std::clamp(((p.x - x.a.x) * d2.x + (p.y - x.a.y) * d2.y + (p.z - x.a.z) * d2.z) / (l2 * l2), 0.0, 1.0);
+        least = std::min(least, dist(p, Vec3{x.a.x + d2.x * t, x.a.y + d2.y * t, x.a.z + d2.z * t}));
+      }
+      near_parallel += least - 0.5 * (b.width + x.width) < va.gap_mm - 1e-3;
+    }
+  }
+  std::printf("OL-OS18 laid: %zu relief bars (said %zu, %zu vine), old bars kept: %s; ends joined %zu of 2; near-parallel within the gap %zu\n",
+              relief, rep.relief_bars, rep.relief_vines, kept.empty() ? "yes" : kept.c_str(), joined_ends, near_parallel);
+  CHECK(relief > 0 && rep.relief_vines == 1 && kept.empty() && joined_ends == 2 && near_parallel == 0);
+  // Walled in: twelve bars of another strand round the host at under its seed distance: no seed has room.
+  {
+    const Bar& h = o.bars.bars[host];
+    Bars walled = o.bars;
+    const Vec3 ax{h.b.x - h.a.x, h.b.y - h.a.y, h.b.z - h.a.z};
+    const double al = std::hypot(ax.x, std::hypot(ax.y, ax.z));
+    const Vec3 u{ax.x / al, ax.y / al, ax.z / al};
+    Vec3 p1 = std::fabs(u.z) < 0.9 ? Vec3{-u.y, u.x, 0} : Vec3{1, 0, 0};
+    const double pl = std::hypot(p1.x, std::hypot(p1.y, p1.z));
+    p1 = {p1.x / pl, p1.y / pl, p1.z / pl};
+    const Vec3 p2{u.y * p1.z - u.z * p1.y, u.z * p1.x - u.x * p1.z, u.x * p1.y - u.y * p1.x};
+    const double rad = 0.5 * (h.width + h.width) + va.gap_mm * 0.5;
+    for (int k = 0; k < 12; ++k) {
+      const double th = 2.0 * M_PI * k / 12.0;
+      const Vec3 off{(p1.x * std::cos(th) + p2.x * std::sin(th)) * rad, (p1.y * std::cos(th) + p2.y * std::sin(th)) * rad,
+                     (p1.z * std::cos(th) + p2.z * std::sin(th)) * rad};
+      Bar wbar = h;
+      wbar.a = {h.a.x + off.x, h.a.y + off.y, h.a.z + off.z};
+      wbar.b = {h.b.x + off.x, h.b.y + off.y, h.b.z + off.z};
+      wbar.strand = 900000 + k;
+      walled.bars.push_back(wbar);
+    }
+    const ReliefVineMaker m2(walled, d, f, va);
+    const Vec3 mid{0.5 * (h.a.x + h.b.x), 0.5 * (h.a.y + h.b.y), 0.5 * (h.a.z + h.b.z)};
+    const ReliefVine nv = m2.make(h, mid, {h.strand}, h.width);
+    std::printf("OL-OS18 walled in: laid %d, %zu seeds tried, place %.2f %.2f %.2f\n", nv.laid ? 1 : 0, nv.tried, nv.mid.x, nv.mid.y, nv.mid.z);
+    CHECK(!nv.laid && nv.tried == 4 && dist(nv.mid, mid) < 1e-9);
+  }
+  // The additions file carries kind 3 (written, read back, the same numbers).
+  {
+    Additions adds;
+    round.hash = bars_hash(after);
+    adds.rounds.push_back(round);
+    const std::string path = std::string(ORGANIC_RULES_TMP_DIR) + "/os18_additions.bin";
+    Additions back;
+    CHECK(write_additions_file(path, adds) && read_additions_file(path, back) && back.rounds.size() == 1 &&
+          back.rounds[0].ops.size() == 1 && back.rounds[0].ops[0].kind == 3 && back.rounds[0].ops[0].v == v.op.v);
+    Bars replay = o.bars;
+    CHECK(apply_additions(replay, d, back, c, &why) && bars_hash(replay) == bars_hash(after));
+    std::remove(path.c_str());
+  }
+}
+
 int main() {
   test_s_cut_fix();
   test_k_floor();
@@ -2409,6 +2531,7 @@ int main() {
   test_sample_bodies();
   test_og1_gap();
   test_og2_relief();
+  test_os18_relief_vines();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }

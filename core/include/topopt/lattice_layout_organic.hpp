@@ -61,6 +61,8 @@ struct WidthFloor {
 //     points of a round are laid in one call of lay_braces (rule T's brace maker), before the round's widenings.
 //   kind 2, a widening: v = the bar's a (x, y, z), b (x, y, z), its new width (never thinner). Links ending where a
 //     widened bar ends then follow S8 (only wider).
+//   kind 3 (OS18, brief E8), a relief vine: v = region, width, cell, end_a (0 Node: on a bar; 1 Solid), end_b, n, then n
+//     points (x, y, z). Laid after the round's braces and widenings, in op order, by lay_relief_vine.
 // A later engine may add kinds; the file carries each operation's kind and length, and an engine meeting a kind it
 // does not know refuses the list.
 struct AddOp {
@@ -318,6 +320,7 @@ struct AddContext {
 };
 struct AddReport {
   std::size_t brace_points = 0, braces = 0, widened = 0, links_widened = 0;
+  std::size_t relief_vines = 0, relief_bars = 0;   // OS18 (brief E8): kind 3
   std::vector<int> braces_at;   // per brace point of the round, in op order: braces laid there
 };
 // One round's operations on `bars` (no hash check). False (with `why`) when an operation names a bar the lattice does
@@ -328,6 +331,47 @@ bool apply_add_round(Bars& bars, const Domain& domain, const AddRound& round, co
 // `between`, when given: run after each round's operations, before its hash (OS16); a non-empty answer refuses.
 bool apply_additions(Bars& bars, const Domain& domain, const Additions& adds, const AddContext& c, std::string* why = nullptr,
                      const std::function<std::string(Bars&)>& between = {});
+// OS18 (brief E8): the RELIEF VINE maker (one for Traced and Grown). Built once on the bars of a round (a 2 mm grid of
+// them); make() for one strut: its bar `host` at the point `at` (the middle of its worst piece), its strands `own`
+// (never landed on), the vine's `width`. A seed beside the strut, s = (host width + width) / 2 + gap, along each of the
+// two principal stress directions across the strut there, both senses, the one with the most free room first; a seed
+// must lie in the host's region's lattice with no bar within the gap (surface to surface). From the seed both ways
+// along the principal direction nearest the heading (the strut's axis at first), steps of step_ratio x the local
+// spacing (the host's `cell`), until a half comes within the gap of a bar of another strand that it crosses (more than
+// parallel_deg off it): it ends ON that bar's line (the closest point; Node), or enters the solid (its edge; Solid).
+// A half is dropped when it leaves the region's lattice, turns back (against its first heading), runs within the gap
+// of a bar near-parallel for more than one spacing, or runs longer than max_spacings x the spacing. Both halves must
+// land; else the next seed; none: no_room. The op is kind 3 (region, width, cell, end kinds, points).
+struct ReliefVineAsk {
+  double gap_mm = 0.675;          // OG1's gap (one line width with the gap rule off)
+  double light_mm = 0.9;
+  double step_ratio = 0.35;       // the tracer's kOrganicStepRatio
+  double max_spacings = 6.0;      // strengthen_path_max_spacings
+  double parallel_deg = 20.0;     // strengthen_path_parallel_deg
+};
+struct ReliefVine {
+  bool laid = false;
+  std::size_t tried = 0;          // seeds tried
+  Vec3 mid{};                     // the strut's middle (its place, for no_room)
+  std::vector<Vec3> points;
+  bool solid_a = false, solid_b = false;
+  AddOp op;                       // kind 3, when laid
+  // Why seeds and halves were dropped: a seed off the region's lattice, a seed within the gap of a bar; a half that left
+  // the region's lattice, turned back, ran beside a bar, ran too long, or met no stress.
+  std::size_t seed_off = 0, seed_crowded = 0, half_left = 0, half_turned = 0, half_beside = 0, half_long = 0, half_no_field = 0;
+};
+class ReliefVineMaker {
+ public:
+  ReliefVineMaker(const Bars& bars, const Domain& domain, const TensorField& field, const ReliefVineAsk& ask);
+  ReliefVine make(const Bar& host, const Vec3& at, const std::vector<int>& own, double width) const;
+ private:
+  const Bars& bars_;
+  const Domain& domain_;
+  const TensorField& field_;
+  ReliefVineAsk ask_;
+  std::map<std::array<long long, 3>, std::vector<std::size_t>> grid_;
+};
+
 // The additions file, little-endian: 8 bytes "TOADDS\0\0", int32 version (1), int32 rounds; per round: uint64 hash,
 // int32 operations; per operation: int32 kind, int32 count, count float64.
 bool write_additions_file(const std::string& path, const Additions& adds);

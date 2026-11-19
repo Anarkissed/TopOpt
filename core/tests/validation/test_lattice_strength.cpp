@@ -445,7 +445,7 @@ int main() {
       keys.push_back(sj::as_string(*sj::find(e, "key"), "key"));
       sections.push_back(sj::as_string(*sj::find(e, "section"), "section"));
     }
-    CHECK(keys.size() == 92);   // 60 of Install 3, 24 of the Organic check (brief E2), 5 of strengthening by adding (E3a), 2 of the weak areas (E4)
+    CHECK(keys.size() == 98);   // 60 of Install 3, 24 of the Organic check (brief E2), 5 of strengthening by adding (E3a), 2 of the weak areas (E4), 6 of relief vines (E8)
     const auto headings = [](const std::string& t) {
       std::vector<std::string> h;
       std::istringstream in(t);
@@ -806,6 +806,68 @@ int main() {
     const std::string ojson = slurp(kDir + "/additive_one/strengthen.json");
     CHECK(one.ok && one.code != "nothing_to_vary" && one.old_bars_kept);
     CHECK(one.rounds_fixed == 0 || num_after(ojson, "bars_widened") > 0);
+
+    // ── §18 (brief E8, rule OS18) relief vines: the width cap at 1 (every weak strut is at the cap at once), two
+    // rounds: struts are handed to C, braced at mid-span (bent ones) or given relief vines, every old bar kept, the
+    // print check's count of vines it left out reported; the file job given r1/strengthened.json lays the same bars;
+    // strengthen_paths 0: no vine, said so.
+    {
+      // A wider spacing (5 to 8 mm) than §11's, so that a vine has room beside a strut.
+      const std::string roomy = ", \"region_weave\": [true], \"organic_spacing_min_mm\": 5, \"organic_spacing_max_mm\": 8, "
+                                "\"organic_width_mm\": 0.9, \"organic_width_heavy_mm\": 1.2";
+      const OrganicStrengthenResult pr = strengthen("paths", roomy, 6000.0, "{\"strengthen_rounds\": 2, \"strengthen_width_cap\": 1.0}");
+      const std::string pj = slurp(kDir + "/paths/strengthen.json");
+      const std::size_t r0 = pj.find("\"round\": 0"), r1 = pj.find("\"round\": 1");
+      const std::size_t pp = pj.find("\"paths\": {", r0);
+      std::printf("[paths] %s\n", pp == std::string::npos ? "(no paths)" : pj.substr(pp, 420).c_str());
+      std::printf("[paths] round 0: under safety %.0f, smallest margin %.4g; round 1: under safety %.0f, smallest margin %.4g\n",
+                  num_after(pj, "under_safety", r0), num_after(pj, "smallest_margin", r0), num_after(pj, "under_safety", r1),
+                  num_after(pj, "smallest_margin", r1));
+      CHECK(pr.ok && pr.rounds_fixed >= 1 && pr.old_bars_kept && has(pj, "\"old_bars_kept\": true") && !has(pj, "\"old_bars_kept\": false"));
+      CHECK(pp != std::string::npos && num_after(pj, "struts_handed", pp) > 0 &&
+            num_after(pj, "relief_vines", pp) > 0 && num_after(pj, "mid_span_braces", pp) > 0 &&
+            has(pj.substr(pp, 4000), "\"print_left_out\": "));
+      // Every strut given a relief vine in round 0 is stronger in round 1: its margin there (the watched strut whose
+      // middle lies within 1 mm of its middle) is higher, or it is no longer watched (its margin is past the watch).
+      {
+        namespace sj = topopt::flexible::json;
+        const sj::Value doc = sj::parse(pj, "strengthen.json");
+        const sj::Value* rounds = sj::find(doc, "rounds");
+        const sj::Value* paths0 = rounds ? sj::find(*sj::find(rounds->arr[0], "added"), "paths") : nullptr;
+        const sj::Value under1 = sj::parse(slurp(kDir + "/paths/r1/struts_under.json"), "struts_under.json");
+        std::size_t hosts = 0, rose = 0;
+        if (paths0)
+          for (const sj::Value& v : sj::find(*paths0, "vines_at")->arr) {
+            const auto& a = sj::find(v, "at")->arr;
+            const double m0 = sj::find(v, "margin")->num;
+            double best = 1e9, m1 = 1e9;
+            for (const sj::Value& st : sj::find(under1, "struts")->arr) {
+              const auto& b = sj::find(st, "at")->arr;
+              const double dd = std::hypot(a[0].num - b[0].num, std::hypot(a[1].num - b[1].num, a[2].num - b[2].num));
+              if (dd < best) { best = dd; m1 = sj::find(st, "margin")->num; }
+            }
+            ++hosts;
+            rose += best > 1.0 || m1 > m0;
+            std::printf("[paths] vine host at %.2f %.2f %.2f: margin %.3f -> %s\n", a[0].num, a[1].num, a[2].num, m0,
+                        best > 1.0 ? "not watched" : std::to_string(m1).c_str());
+          }
+        CHECK(hosts > 0 && rose == hosts);
+      }
+      // Replay: the file job given round 1's strengthened.json lays round 1's bars.
+      const double bars1 = num_after(pj, "bars", r1);
+      std::string j = file_job(f, roomy, "octet", "");
+      j.replace(j.find("\"layout\""), 8, "\"tensor\": \"stress.tensor\", \"strengthened\": \"paths/r1/strengthened.json\", \"layout\"");
+      write(kDir + "/paths_replay_job.json", j);
+      std::filesystem::remove_all(kDir + "/paths_replay");
+      std::filesystem::create_directories(kDir + "/paths_replay");
+      const FileResult rr = run_file_job(kDir + "/paths_replay_job.json", kDir + "/paths_replay");
+      std::printf("[paths replay] ok %d code %s bars %zu (round 1: %.0f) %s\n", rr.ok, rr.code.c_str(), rr.bars, bars1, rr.detail.c_str());
+      CHECK(rr.ok && static_cast<double>(rr.bars) == bars1);
+      const OrganicStrengthenResult po =
+          strengthen("paths_off", roomy, 6000.0, "{\"strengthen_rounds\": 2, \"strengthen_width_cap\": 1.0, \"strengthen_paths\": 0}");
+      const std::string oj = slurp(kDir + "/paths_off/strengthen.json");
+      CHECK(po.ok && has(oj, "\"paths\": {\"on\": false, \"struts_handed\": 0") && num_after(oj, "relief_vines") == 0.0);
+    }
   }
 
   // ── §12 (brief E4, item 2) the solid's weak spots, on made notched bars 40 x 10 x 12 (held on the x = 0 end, pulled
