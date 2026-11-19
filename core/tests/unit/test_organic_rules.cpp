@@ -3003,7 +3003,67 @@ static void test_groups_floors_additions() {
   CHECK(again.additions_rounds == 1 && again.additions_refused.empty() && widened == 2);
 }
 
+// ── OL-NET-APART (leg J, OJ7; the lead's ruling 6: the net skin kept apart): no net strut passes through another.
+static std::size_t net_crossings(const Bars& bars, double extra) {
+  std::vector<const Bar*> net;
+  for (const Bar& b : bars.bars) if (b.net) net.push_back(&b);
+  auto key = [](const Vec3& p) { return std::array<double, 3>{p.x, p.y, p.z}; };
+  std::size_t n = 0;
+  for (std::size_t i = 0; i < net.size(); ++i)
+    for (std::size_t j = i + 1; j < net.size(); ++j) {
+      const Bar &x = *net[i], &y = *net[j];
+      if (key(x.a) == key(y.a) || key(x.a) == key(y.b) || key(x.b) == key(y.a) || key(x.b) == key(y.b)) continue;
+      const double lim = 0.5 * (x.width + y.width) + extra;
+      if (std::min(x.a.x, x.b.x) - lim > std::max(y.a.x, y.b.x) || std::min(y.a.x, y.b.x) - lim > std::max(x.a.x, x.b.x) ||
+          std::min(x.a.y, x.b.y) - lim > std::max(y.a.y, y.b.y) || std::min(y.a.y, y.b.y) - lim > std::max(x.a.y, x.b.y) ||
+          std::min(x.a.z, x.b.z) - lim > std::max(y.a.z, y.b.z) || std::min(y.a.z, y.b.z) - lim > std::max(x.a.z, x.b.z))
+        continue;
+      double least = 1e9;
+      for (int q = 0; q <= 40; ++q) {
+        const Vec3 p{x.a.x + (x.b.x - x.a.x) * q / 40.0, x.a.y + (x.b.y - x.a.y) * q / 40.0, x.a.z + (x.b.z - x.a.z) * q / 40.0};
+        const Vec3 d{y.b.x - y.a.x, y.b.y - y.a.y, y.b.z - y.a.z};
+        const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
+        const double t = l2 > 0 ? std::clamp(((p.x - y.a.x) * d.x + (p.y - y.a.y) * d.y + (p.z - y.a.z) * d.z) / l2, 0.0, 1.0) : 0.0;
+        least = std::min(least, dist(p, Vec3{y.a.x + d.x * t, y.a.y + d.y * t, y.a.z + d.z * t}));
+      }
+      n += least < lim - 1e-6;
+    }
+  return n;
+}
+static void test_net_kept_apart() {
+  const StepModel model = box_model(30, 30, 20);
+  const TensorField f = gap_field();
+  Settings st;
+  st.regions = {{1, Role::Lattice, {1}, 8.0, 0.0, true}};
+  st.drop_loose = false;
+  st.skin = false;
+  for (int grown = 0; grown < 2; ++grown) {
+    OrganicAsk a = gap_ask(1.6);
+    if (grown) { a.mode = OrganicMode::Grown; a.layer_mm = 0.2; }
+    Session s(model);
+    const Outcome o = s.lay_organic(st, f, a);
+    const double gap = 1.5 * 0.45;
+    Bars before = o.bars, after = o.bars;
+    std::size_t refused = 0;
+    const std::size_t made0 = lay_net_skin(before, *s.domain(), {{1, 4.0}}, 0.0, nullptr, nullptr, false);
+    const std::vector<double> gaps{gap};
+    const std::size_t made1 = lay_net_skin(after, *s.domain(), {{1, 4.0}}, 0.0, nullptr, &gaps, true, &refused);
+    const std::size_t c0 = net_crossings(before, 0.0), c1 = net_crossings(after, 0.0), g1 = net_crossings(after, gap);
+    // Through the session (Skin on): kept apart by default.
+    Settings sk = st;
+    sk.skin = true;
+    Session s2(model);
+    const Outcome o2 = s2.lay_organic(sk, f, a);
+    const std::size_t c2 = net_crossings(o2.bars, 0.0), g2 = net_crossings(o2.bars, gap);
+    std::printf("OL-NET-APART %s: net struts %zu before (passing through one another %zu), %zu kept apart (%zu joins not laid; "
+                "through %zu, within the gap %zu); the session's Skin: %zu net struts, %zu kept apart, through %zu, within the gap %zu\n",
+                grown ? "Grown" : "Traced", made0, c0, made1, refused, c1, g1, o2.net_struts, o2.net_kept_apart, c2, g2);
+    CHECK(made0 > 0 && made1 > 0 && c1 == 0 && g1 == 0 && c2 == 0 && g2 == 0 && o2.net_struts > 0 && refused > 0);
+  }
+}
+
 int main() {
+  test_net_kept_apart();
   test_groups_floors_additions();
   test_file_groups();
   test_solid_open_face();

@@ -1207,6 +1207,7 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
       if (skin_here && reach > 0.0) {
         finish.net_reach.push_back({r.id, reach});
         finish.net_width.push_back(own && own->skin_width_mm ? *own->skin_width_mm : settings.skin_spec.width_mm);
+        finish.net_gap.push_back(ask.gap_lines > 0.0 ? ask.gap_lines * domain_->spec().bead_mm : domain_->spec().bead_mm);   // OJ7
       }
       if (ask.mode == OrganicMode::Grown) finish.arrived.push_back(r.id);   // G11: a vine that reached the surface
       if (ask.mode == OrganicMode::Grown && ask.prune) finish.prune.push_back({r.id, median});   // J2

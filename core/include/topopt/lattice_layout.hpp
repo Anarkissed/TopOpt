@@ -1525,6 +1525,7 @@ struct Outcome {
   double spacing_smallest_mm = 0.0, spacing_largest_mm = 0.0, spacing_mean_mm = 0.0;
   // O16 (lay_organic only): the net skin's struts in `bars` and their length, mm.
   std::size_t net_struts = 0;
+  std::size_t net_kept_apart = 0;   // OJ7: net joins not laid because they would pass within the gap of the net laid
   double net_mm = 0.0;
   // G1 (Organic, Grown; lay_organic with OrganicAsk::mode Grown): what the growth did, every weave region together;
   // null otherwise.
@@ -1641,6 +1642,7 @@ class Session {
     // own Skin width (Settings::RegionAsk::skin_width_mm, else the part's; 0: as wide as the thinner landing), and
     // whether any weave region's Finish is Skin (its own, else the part's): the order of the weave's finish steps.
     std::vector<double> net_width;
+    std::vector<double> net_gap;   // OJ7: per net_reach entry, its group's OG1 gap (the net kept that far apart)
     bool net_on = false;
     std::vector<int> arrived;   // G11 (Grown only): weave regions whose vines that reach the surface have arrived
     std::vector<std::pair<int, double>> prune;   // J2 (brief G12): (Grown region, median asked spacing); empty: off

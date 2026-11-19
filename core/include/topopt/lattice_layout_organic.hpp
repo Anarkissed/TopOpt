@@ -524,7 +524,12 @@ std::vector<HoldPatchCount> hold_up_weave(Bars& bars, const Domain& domain, cons
 // Leg J item 1: `widths`, when given, one per `reach` entry: that region's width (in place of width_mm).
 // Returns the number of net struts laid. The same for any number of threads (it runs on one).
 std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std::pair<int, double>>& reach,
-                         double width_mm = 0.0, const std::vector<double>* widths = nullptr);
+                         double width_mm = 0.0, const std::vector<double>* widths = nullptr,
+                         const std::vector<double>* gaps = nullptr, bool keep_apart = true, std::size_t* kept_apart = nullptr);
+// OJ7 (leg J, the lead's ruling 6: the net skin kept apart): the joins are laid shortest first (the pairs wanted both
+// ways, then the 1-then-2 fallback, each trying its partners nearest first), and a join whose centre line comes within
+// the two half widths + the region's gap (`gaps`, one per `reach` entry: OG1's gap; none: one line width) of a net strut already laid, other than one
+// sharing a landing with it, is not laid (`kept_apart` counts them). `keep_apart` false: the order and joins as before.
 
 // O12: the spacing handed to the tracer, one per voxel of the field's grid (0 off the candidates), with the candidates
 // (voxels whose CENTRE is lattice of `region`). It is the old run's field for an ordinary Traced job (run_job.cpp,

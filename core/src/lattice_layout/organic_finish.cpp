@@ -39,7 +39,9 @@ Key key_of(const Vec3& p) { return {p.x, p.y, p.z}; }
 }  // namespace
 
 std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std::pair<int, double>>& reach_of,
-                         double width_mm, const std::vector<double>* widths) {
+                         double width_mm, const std::vector<double>* widths, const std::vector<double>* gaps,
+                         bool keep_apart, std::size_t* kept_apart) {
+  if (kept_apart) *kept_apart = 0;
   const Domain::Probe probe = domain.probe();
   const PartMeasure::Probe& part = probe.part();
   // The surface's inward normal at `p`: the depth's gradient, read `h` either side (the old sdf_normal at 2 r).
@@ -69,6 +71,7 @@ std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std
   for (std::size_t ri = 0; ri < reach_of.size(); ++ri) {
     const std::pair<int, double>& asked = reach_of[ri];
     const double width_here = widths && ri < widths->size() ? (*widths)[ri] : width_mm;   // leg J item 1
+    const double gap = gaps && ri < gaps->size() ? (*gaps)[ri] : domain.spec().bead_mm;   // OJ7
     const int region = asked.first;
     const double reach = asked.second;
     if (!(reach > 0.0)) continue;
@@ -166,6 +169,45 @@ std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std
     };
     std::vector<int> deg(L.size(), 0);
     std::vector<int> into(L.size(), -1);   // the first net strut at each landing
+    // OJ7: the net struts laid in this region, by place, and whether a new join would come too near one of them.
+    std::map<std::array<long long, 3>, std::vector<std::size_t>> net_grid;
+    const double ncell = std::max(reach, 0.5);
+    auto nslot = [&](double x) { return static_cast<long long>(std::floor(x / ncell)); };
+    auto seg_dist = [](const Vec3& p1, const Vec3& q1, const Vec3& p2, const Vec3& q2) {
+      const Vec3 d1{q1.x - p1.x, q1.y - p1.y, q1.z - p1.z}, d2{q2.x - p2.x, q2.y - p2.y, q2.z - p2.z}, r{p1.x - p2.x, p1.y - p2.y, p1.z - p2.z};
+      const double a = d1.x * d1.x + d1.y * d1.y + d1.z * d1.z, e = d2.x * d2.x + d2.y * d2.y + d2.z * d2.z;
+      const double f2 = d2.x * r.x + d2.y * r.y + d2.z * r.z, c = d1.x * r.x + d1.y * r.y + d1.z * r.z, b = d1.x * d2.x + d1.y * d2.y + d1.z * d2.z;
+      double s = 0.0, t = 0.0;
+      const double den = a * e - b * b;
+      if (den > 1e-12) s = std::clamp((b * f2 - c * e) / den, 0.0, 1.0);
+      t = e > 0.0 ? (b * s + f2) / e : 0.0;
+      if (t < 0.0) { t = 0.0; s = a > 0.0 ? std::clamp(-c / a, 0.0, 1.0) : 0.0; }
+      else if (t > 1.0) { t = 1.0; s = a > 0.0 ? std::clamp((b - c) / a, 0.0, 1.0) : 0.0; }
+      const Vec3 x{p1.x + d1.x * s - p2.x - d2.x * t, p1.y + d1.y * s - p2.y - d2.y * t, p1.z + d1.z * s - p2.z - d2.z * t};
+      return std::sqrt(x.x * x.x + x.y * x.y + x.z * x.z);
+    };
+    auto too_near = [&](std::size_t i, std::size_t j, double w) {
+      if (!keep_apart) return false;
+      const Vec3 &P = L[i].p, &Q = L[j].p;
+      std::set<std::size_t> seen;
+      const int n = std::max(1, static_cast<int>(std::ceil(dist(P, Q) / (0.5 * ncell))));   // samples half a cell apart
+      for (int k = 0; k <= n; ++k) {
+        const Vec3 s = lerp(P, Q, static_cast<double>(k) / n);
+        for (long long x = nslot(s.x) - 1; x <= nslot(s.x) + 1; ++x)
+          for (long long y = nslot(s.y) - 1; y <= nslot(s.y) + 1; ++y)
+            for (long long z = nslot(s.z) - 1; z <= nslot(s.z) + 1; ++z) {
+              const auto it = net_grid.find({x, y, z});
+              if (it == net_grid.end()) continue;
+              for (std::size_t m : it->second) {
+                if (!seen.insert(m).second) continue;
+                const Bar& o = bars.bars[m];
+                if (key_of(o.a) == key_of(P) || key_of(o.a) == key_of(Q) || key_of(o.b) == key_of(P) || key_of(o.b) == key_of(Q)) continue;
+                if (seg_dist(P, Q, o.a, o.b) < 0.5 * (w + o.width) + gap - 1e-9) return true;
+              }
+            }
+      }
+      return false;
+    };
     auto join = [&](std::size_t i, std::size_t j) {
       Bar net;
       net.a = L[i].p;
@@ -175,14 +217,28 @@ std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std
       net.region = region;
       net.net = true;
       net.end_a = net.end_b = Bar::End::Node;
+      if (too_near(i, j, net.width)) {   // OJ7: kept a gap apart from the net already laid
+        if (kept_apart) ++*kept_apart;
+        return false;
+      }
       const int at_bar = static_cast<int>(bars.bars.size());
       bars.bars.push_back(net);
+      if (keep_apart) {
+        const int n = std::max(1, static_cast<int>(std::ceil(dist(net.a, net.b) / (0.5 * ncell))));
+        std::set<std::array<long long, 3>> cells;
+        for (int k = 0; k <= n; ++k) {
+          const Vec3 s = lerp(net.a, net.b, static_cast<double>(k) / n);
+          cells.insert({nslot(s.x), nslot(s.y), nslot(s.z)});
+        }
+        for (const auto& cl : cells) net_grid[cl].push_back(static_cast<std::size_t>(at_bar));
+      }
       joined.insert(pair_of(L[i].p, L[j].p));
       for (std::size_t k : {i, j}) {
         ++deg[k];
         if (into[k] < 0) into[k] = at_bar;
       }
       ++made;
+      return true;
     };
     // Each landing's own shortlist: its 3 nearest partners, nearest first (ties by place order).
     std::vector<std::vector<std::size_t>> want(L.size());
@@ -194,26 +250,39 @@ std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std
       if (cand.size() > static_cast<std::size_t>(kNetDegree)) cand.resize(kNetDegree);
       for (const auto& c : cand) want[i].push_back(c.second);
     }
-    // Mutual: a pair wanted both ways.
-    for (std::size_t i = 0; i < L.size(); ++i)
-      for (std::size_t j : want[i]) {
-        if (j < i) continue;
-        if (std::find(want[j].begin(), want[j].end(), i) == want[j].end()) continue;
+    // Mutual: a pair wanted both ways (OJ7: shortest first when kept apart).
+    {
+      std::vector<std::pair<std::size_t, std::size_t>> mutual;
+      for (std::size_t i = 0; i < L.size(); ++i)
+        for (std::size_t j : want[i]) {
+          if (j < i) continue;
+          if (std::find(want[j].begin(), want[j].end(), i) == want[j].end()) continue;
+          mutual.push_back({i, j});
+        }
+      if (keep_apart)
+        std::stable_sort(mutual.begin(), mutual.end(), [&](const auto& x, const auto& y) {
+          return dist(L[x.first].p, L[x.second].p) < dist(L[y.first].p, L[y.second].p);
+        });
+      for (const auto& [i, j] : mutual) {
         if (joined.count(pair_of(L[i].p, L[j].p))) continue;
         join(i, j);
       }
+    }
     // Every landing short of one join, then of two, takes its nearest partner within 1.5 reach.
     for (int need = 1; need <= 2; ++need)
       for (std::size_t i = 0; i < L.size(); ++i) {
         if (deg[i] >= need) continue;
-        double best_d = 0.0;
-        std::size_t best = L.size();
+        std::vector<std::pair<double, std::size_t>> cands;
         for (std::size_t j : near(i, 2)) {
           if (!fits(i, j, kOrganicFinishMinSpanRatio * reach, kNetFallbackReach * reach * (1.0 - 1e-12))) continue;
-          const double d = dist(L[i].p, L[j].p);
-          if (best == L.size() || d < best_d) { best = j; best_d = d; }
+          cands.push_back({dist(L[i].p, L[j].p), j});
         }
-        if (best < L.size()) join(i, best);
+        std::stable_sort(cands.begin(), cands.end(), [](const auto& x, const auto& y) { return x.first < y.first; });
+        // The nearest; kept apart (OJ7): the nearest that does not come too near the net already laid.
+        for (const auto& cj : cands) {
+          if (join(i, cj.second)) break;
+          if (!keep_apart) break;
+        }
       }
     // A cut end on the surface that a net strut reaches has landed.
     for (std::size_t i = 0; i < L.size(); ++i) {

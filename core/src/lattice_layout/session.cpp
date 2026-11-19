@@ -280,7 +280,8 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
         hold_up_weave(out.bars, *domain_, finish->hold);
       if (net_on && finish && !finish->net_reach.empty())   // O16: Finish Skin on a weave region, its own width
         lay_net_skin(out.bars, *domain_, finish->net_reach, settings.skin_spec.width_mm,
-                     finish->net_width.size() == finish->net_reach.size() ? &finish->net_width : nullptr);
+                     finish->net_width.size() == finish->net_reach.size() ? &finish->net_width : nullptr,
+                     finish->net_gap.size() == finish->net_reach.size() ? &finish->net_gap : nullptr, true, &out.net_kept_apart);
       domain_->check_stop();
       // OG5 (brief E9): no weave bar outside the part or through protected solid, before the drop (which then takes what
       // the guard left hanging).
