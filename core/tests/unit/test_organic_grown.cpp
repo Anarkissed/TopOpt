@@ -391,6 +391,7 @@ static void test_ramp() {
   Part b(box(30, 24, 24), 30, 24, 24, 3, [](const Vec3& p) { return along({0, 0, 1}, p.x / 30.0); });
   b.ask.reference_mpa = 1.0;   // hot end 3 mm, cold end 8 mm
   b.ask.shape_fit = false;     // re-pinned (corrected O12, O13): the fit would pull this 30 mm block toward 3 mm everywhere
+  b.ask.wall_reach = 0.0;      // OG6 off: this judges the growth's density by stress (OG6's branches go to the cold walls)
   GrowReport rep;
   const std::vector<Strand> ss = grow_strands(b.d, 1, b.field, b.ask, &rep);
   print_report("G-2 ramp", rep);
@@ -511,6 +512,7 @@ static void test_walls_out() {
   b.ask.reference_mpa = 2.0;
   at_5_5(b.ask);
   b.ask.walls_out = true;
+  b.ask.wall_reach = 0.0;   // OG6 off: this judges the wall seeds' growth (OG6's branches may start on a vine at a wall)
   GrowReport rep;
   const std::vector<Strand> ss = grow_strands(b.d, 1, b.field, b.ask, &rep);
   print_report("G-6 walls out", rep);

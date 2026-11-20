@@ -1878,6 +1878,8 @@ std::vector<OrganicRefusal> validate_organic(const Settings& settings, const Org
   }
   a_number(a.foot_gap, "foot_gap", "Seeds: the gap must be a number.");
   above_zero(a.void_ratio, "void_ratio", "Re-seeding: the bare distance must be above 0 spacings.");
+  above_zero(a.wall_bare_mm, "wall_bare_mm", "Reach the walls: the bare distance must be above 0 mm.");   // OG6
+  not_below_zero(a.wall_reach, "wall_reach", "Reach the walls: the reach must be 0 spacings or more.");   // OG6
   if (!(a.reseed_rounds >= 0 && a.reseed_rounds <= 100)) {
     OrganicRefusal& r = refuse("reseed_rounds", "out_of_range", "Re-seeding: the rounds must be from 0 to 100.",
                                a.reseed_rounds);

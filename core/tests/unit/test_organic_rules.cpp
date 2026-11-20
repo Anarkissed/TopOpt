@@ -1019,7 +1019,7 @@ static void test_follow_stress() {
   {
     const StepModel model = box_model(30, 30, 20);
     const TensorField f = traced_field();
-    const std::uint64_t today[2] = {0x9a119fd417d400d7ULL, 0x033117e5fef14428ULL};  // G11 amended 2026-11-19 (was 0x235c732cf4f2f269, then 0xe8c60d9cd768769b); OG5 (brief E9): its roots' run-on into the floor
+    const std::uint64_t today[2] = {0x9a119fd417d400d7ULL, 0x740590c9a631521aULL};  // G11 amended 2026-11-19 (was 0x235c732cf4f2f269, then 0xe8c60d9cd768769b); OG5 (brief E9): its roots' run-on into the floor (0x033117e5fef14428); OG6 (brief E10): branches to its bare walls
     for (int g = 0; g < 2; ++g) {
       OrganicAsk a = follow_ask(g == 1);
       Session s1(model), s2(model);
@@ -1029,6 +1029,14 @@ static void test_follow_stress() {
       std::printf("OL-FOLLOW true, %s: %zu bars, hash %016llx (today's %016llx)\n", g ? "Grown" : "Traced",
                   on.bars.bars.size(), static_cast<unsigned long long>(bars_fnv(on)), static_cast<unsigned long long>(today[g]));
       CHECK(bars_fnv(dflt) == today[g] && bars_fnv(on) == today[g]);
+      if (g == 1) {   // OG6's wall_reach 0: no branch, the lay as before OG6, bit for bit
+        a.wall_reach = 0.0;
+        Session s3(model);
+        const Outcome off = s3.lay_organic(traced_settings(), f, a);
+        std::printf("OL-FOLLOW Grown, wall_reach 0: hash %016llx (before OG6 033117e5fef14428)\n",
+                    static_cast<unsigned long long>(bars_fnv(off)));
+        CHECK(bars_fnv(off) == 0x033117e5fef14428ULL);
+      }
     }
   }
   // False, the spacing: the widest everywhere, then only where the shape fit tightens it.
@@ -1362,6 +1370,8 @@ static void test_validate() {
       {true, [nan](S&, A& a) { a.foot_gap = nan; }, "foot_gap", "not_a_number"},
       {true, [](S&, A& a) { a.void_ratio = 0.0; }, "void_ratio", "not_above_zero"},
       {true, [](S&, A& a) { a.reseed_rounds = 101; }, "reseed_rounds", "out_of_range"},
+      {true, [](S&, A& a) { a.wall_bare_mm = 0.0; }, "wall_bare_mm", "not_above_zero"},
+      {true, [](S&, A& a) { a.wall_reach = -1.0; }, "wall_reach", "below_zero"},
       {true, [nan](S&, A& a) { a.wall_gap = nan; }, "wall_gap", "not_a_number"},
       {true, [nan](S&, A& a) { a.wall_gap_heavy = nan; }, "wall_gap_heavy", "not_a_number"},
       {true, [](S&, A& a) { a.wall_gap = 0.0; }, "wall_gap_heavy", "needs_light_end"},
@@ -1505,7 +1515,7 @@ static void test_equal_ends() {
     CHECK(!threw);
   }
   // Ends that differ: nothing changes (the bars of OL-FOLLOW's two made lays, today's hashes from before OP6), no note.
-  const std::uint64_t today[2] = {0x9a119fd417d400d7ULL, 0x033117e5fef14428ULL};  // G11 amended 2026-11-19 (was 0x235c732cf4f2f269, then 0xe8c60d9cd768769b); OG5 (brief E9): its roots' run-on into the floor
+  const std::uint64_t today[2] = {0x9a119fd417d400d7ULL, 0x740590c9a631521aULL};  // G11 amended 2026-11-19 (was 0x235c732cf4f2f269, then 0xe8c60d9cd768769b); OG5 (brief E9): its roots' run-on into the floor (0x033117e5fef14428); OG6 (brief E10): branches to its bare walls
   for (int g = 0; g < 2; ++g) {
     Session s(model);
     const Outcome o = s.lay_organic(st, f, follow_ask(g == 1));
@@ -1591,7 +1601,7 @@ static void test_groups() {
   {
     const StepModel model = box_model(30, 30, 20);
     const TensorField f = traced_field();
-    const std::uint64_t today[2] = {0x9a119fd417d400d7ULL, 0x033117e5fef14428ULL};  // G11 amended 2026-11-19 (was 0x235c732cf4f2f269, then 0xe8c60d9cd768769b); OG5 (brief E9): its roots' run-on into the floor
+    const std::uint64_t today[2] = {0x9a119fd417d400d7ULL, 0x740590c9a631521aULL};  // G11 amended 2026-11-19 (was 0x235c732cf4f2f269, then 0xe8c60d9cd768769b); OG5 (brief E9): its roots' run-on into the floor (0x033117e5fef14428); OG6 (brief E10): branches to its bare walls
     for (int g = 0; g < 2; ++g) {
       Session s(model);
       const Outcome o = s.lay_organic(traced_settings(), f, std::vector<OrganicGroup>{{{1}, follow_ask(g == 1)}});
@@ -2771,6 +2781,106 @@ static void test_og5_inside() {
   }
 }
 
+// ── OG6 (brief E10; the owner, 2026-11-19: "The vines should be RIGHT UP NEXT TO the edge of the solid outline. There
+// should be no space in between them whatsoever -- in any direction."): Grown reaches its walls. On a box zone (the weave
+// 3 mm in from a 30 x 30 x 20 block's sides and 4 mm above its floor: solid sides and floor, the open top) and on a
+// block with a pocket (a 10 x 12 mm notch through its height, the weave all but its 4 mm floor: the pocket's walls open
+// faces),
+// the share of wall places with no vine within 1.5 mm of its surface, without the branches (wall_reach 0) and with
+// them (the default); OG5 still holds and the print check is still clean.
+static StepModel pocket_part() {
+  StepModel m;
+  // the outline with a vertex wherever the top's rectangles meet it (so no edge of the surface ends mid-edge)
+  const std::vector<std::array<double, 2>> xy = {{0, 0},   {10, 0},  {20, 0},  {30, 0},  {30, 18}, {30, 30},
+                                                 {20, 30}, {20, 18}, {10, 18}, {10, 30}, {0, 30},  {0, 18}};
+  const int n = static_cast<int>(xy.size());
+  auto add_face = [&](const std::vector<Vec3>& poly, Vec3 normal, int face) {
+    if (static_cast<int>(m.faces.size()) <= face) {
+      StepFaceInfo info;
+      info.kind = StepSurfaceKind::Plane;
+      info.plane_normal = normal;
+      info.plane_origin = poly[0];
+      m.faces.push_back(info);
+    }
+    for (std::size_t k = 1; k + 1 < poly.size(); ++k) {
+      const int v = static_cast<int>(m.mesh.vertices.size());
+      m.mesh.vertices.insert(m.mesh.vertices.end(), {poly[0], poly[k], poly[k + 1]});
+      m.mesh.triangles.push_back({v, v + 1, v + 2});
+      m.triangle_face.push_back(face);
+    }
+  };
+  // bottom (face 0) and top (face 1) as five rectangles each (x0, x1, y0, y1): three below the pocket, two beside it
+  const double rx[5][4] = {{0, 10, 0, 18}, {10, 20, 0, 18}, {20, 30, 0, 18}, {0, 10, 18, 30}, {20, 30, 18, 30}};
+  for (const auto& r : rx)
+    add_face({{r[0], r[3], 0}, {r[1], r[3], 0}, {r[1], r[2], 0}, {r[0], r[2], 0}}, {0, 0, -1}, 0);
+  for (const auto& r : rx)
+    add_face({{r[0], r[2], 20}, {r[1], r[2], 20}, {r[1], r[3], 20}, {r[0], r[3], 20}}, {0, 0, 1}, 1);
+  for (int i = 0; i < n; ++i) {
+    const auto& p = xy[static_cast<std::size_t>(i)];
+    const auto& q = xy[static_cast<std::size_t>((i + 1) % n)];
+    const double dx = q[0] - p[0], dy = q[1] - p[1], l = std::hypot(dx, dy);
+    add_face({{p[0], p[1], 0}, {q[0], q[1], 0}, {q[0], q[1], 20}, {p[0], p[1], 20}}, {dy / l, -dx / l, 0}, 2 + i);
+  }
+  m.face_count = 2 + n;
+  m.solid_count = 1;
+  m.brep_volume = (30.0 * 30.0 - 10.0 * 12.0) * 20.0;
+  return m;
+}
+static void test_og6_walls_reached() {
+  const TensorField f = traced_field();
+  struct Case { const char* name; StepModel model; Settings::RegionAsk region; };
+  const Case cases[2] = {{"box zone", box_model(30, 30, 20), {1, Role::Lattice, {1}, 16.0, -3.0, true}},
+                         {"pocket", pocket_part(), {1, Role::Lattice, {1}, 16.0, 0.0, true}}};
+  for (const Case& c : cases) {
+    double share[2] = {0.0, 0.0};
+    std::size_t thin[2] = {0, 0};
+    for (const bool reach : {false, true}) {
+      Settings st;
+      st.regions = {c.region};
+      OrganicAsk a = traced_ask();
+      a.mode = OrganicMode::Grown;
+      if (!reach) a.wall_reach = 0.0;
+      Session s(c.model);
+      const Outcome o = s.lay_organic(st, f, a);
+      CHECK(o.refused.empty() && o.grown != nullptr);
+      if (!o.grown) continue;
+      const GrowReport& g = *o.grown;
+      share[reach] = g.wall_places ? static_cast<double>(g.wall_bare_after) / static_cast<double>(g.wall_places) : 1.0;
+      const Og5Count k = og5_count(s, o.bars, {1});
+      FileOptions opt = file_options_for(FileOptions{}, true);
+      opt.threads = 4;
+      const PrintChecked pc = print_check_bars(s, o.layout, o.bars, opt);
+      const LayerReport& L = pc.made.layers;
+      thin[reach] = L.thin_islands;
+      std::printf("OL-OG6 %s, reach %d: %zu bars; wall places %zu, bare %zu, branches %zu (%.1f mm), refused: reach %zu, cone %zu, "
+                  "region %zu; bare when final %zu (%.1f %%); OG5: outside %zu, mid-bar solid %zu, run points outside %zu; "
+                  "print check ok %d (%s), mid-air %zu, one-ended %zu, long bridges %zu, thin islands %zu\n",
+                  c.name, reach ? 1 : 0, o.bars.bars.size(), g.wall_places, g.wall_bare, g.wall_branches, g.wall_branch_mm,
+                  g.wall_refused_reach, g.wall_refused_cone, g.wall_refused_region, g.wall_bare_after, 100.0 * share[reach],
+                  k.outside, k.mid_solid, k.run_pts_outside, pc.ok ? 1 : 0, pc.why.c_str(), L.mid_air.size(), L.one_ended.size(),
+                  L.long_bridges.size(), L.thin_islands);
+      CHECK(g.wall_places > 0 && g.wall_bare <= g.wall_places && g.wall_bare_after <= g.wall_places);
+      CHECK(g.wall_refused_at.size() <= 20);
+      if (reach) {
+        CHECK(g.wall_branches > 0 && g.wall_branch_mm > 0.0);
+        CHECK(g.wall_branches + g.wall_refused_reach + g.wall_refused_cone + g.wall_refused_region == g.wall_bare);
+      } else {
+        CHECK(g.wall_branches == 0 && g.wall_refused_reach + g.wall_refused_cone + g.wall_refused_region == 0);
+      }
+      CHECK(k.bars > 0 && k.outside == 0 && k.mid_solid == 0 && k.run_pts_outside == 0);
+      CHECK(pc.ok && L.mid_air.empty() && L.one_ended.empty() && L.long_bridges.empty());
+    }
+    std::printf("OL-OG6 %s: wall bare %.1f %% before, %.1f %% after; thin islands %zu before, %zu after\n", c.name,
+                100.0 * share[0], 100.0 * share[1], thin[0], thin[1]);
+    CHECK(share[1] < share[0]);
+  }
+  {   // the two settings are refused out of range by the Grower itself
+    Part b(24, 24, 24, 3, ramp_up(24), 3.0);
+    CHECK(throws([&] { OrganicAsk a = b.ask; a.wall_bare_mm = 0.0; (void)grow_strands(b.d, 1, b.field, a); }));
+    CHECK(throws([&] { OrganicAsk a = b.ask; a.wall_reach = -1.0; (void)grow_strands(b.d, 1, b.field, a); }));
+  }
+}
+
 // ── OL-FIN (leg J item 1; the owner: the Finish per group "should just be None/Skin/Solid. Rim should be hidden."):
 // each weave region's own Skin and width; Rim refused on an Organic area.
 static void test_finish_per_region() {
@@ -3029,6 +3139,7 @@ int main() {
   test_solid_open_face();
   test_finish_per_region();
   test_og5_inside();
+  test_og6_walls_reached();
   test_s_cut_fix();
   test_k_floor();
   test_j_prune_and_cap();

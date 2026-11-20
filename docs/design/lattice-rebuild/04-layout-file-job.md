@@ -180,8 +180,10 @@ While it works the CLI prints one line per step (`lattice-file: opening the part
   `GrowReport` (rule G12): the strands returned, the length grown and kept (curve length, mm; grown = kept + every
   cut), the length cut by reason, then the seeds, steps, tip ends, branches and their refusals by cause, links,
   GR-REWIND (`rewinds`, `rewind_places` and how each place ended: `rewind_grew_on`, `rewind_joined`,
-  `rewind_ended_on_joint`, `taken_back_mm`), thinning, regrowth (`holes`, `regrow_landed`, `regrow_failed`), ties
-  and the time, ms.
+  `rewind_ended_on_joint`, `taken_back_mm`), thinning, regrowth (`holes`, `regrow_landed`, `regrow_failed`), ties,
+  the walls reached (OG6: `wall_places`, `wall_bare`, `wall_branches`, `wall_branch_mm`, `wall_refused_reach`,
+  `wall_refused_cone`, `wall_refused_region`, `wall_bare_after`, `wall_bare_share`, and `wall_refused_at`: the first
+  20 bare places given no branch, each `{"at": [x, y, z], "why": "reach" | "cone" | "region"}`) and the time, ms.
   `thin_solid`: cut cells print rule P8 (f) made solid (a cut piece thinner than its own strut, lying against solid); they are counted in `solid_pieces` too.
   `cells_by_stress`: cell size by stress (C22) was applied to the layout (false when it was not asked for, or one of its OFF cases holds).
   `step_held_at`: the part's size-step limit the layout kept (C24, `max_step` held at the ladder's smallest step: 1.5 on Default Grade is kept as 2); 0 when none was asked. A region's own `max_step` is not reported here.

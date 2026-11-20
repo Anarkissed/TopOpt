@@ -202,7 +202,8 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "organic_width_mm", "organic_spacing_min_mm", "organic_spacing_max_mm", "organic_spacing_exponent",
        "organic_shape_fit", "organic_mode", "organic_walls_out", "organic_ties", "organic_tie_swirl",
        "organic_foot_gap", "organic_stress_goal",
-       "organic_void_ratio", "organic_reseed_rounds", "organic_wall_connect", "organic_wall_gap",
+       "organic_void_ratio", "organic_reseed_rounds", "organic_wall_bare_mm", "organic_wall_reach",
+       "organic_wall_connect", "organic_wall_gap",
        "organic_wall_cross", "organic_top_run", "organic_run_max", "organic_root_run", "organic_run_gap",
        "organic_run_follow", "organic_run_pull", "organic_run_seek", "organic_run_min", "organic_root_gap",
        "organic_auto", "organic_width_heavy_mm", "organic_member_cap", "organic_prune", "organic_bed_floor_mm",
@@ -454,6 +455,10 @@ OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::str
   a.void_ratio = num(in, "organic_void_ratio", a.void_ratio, w);
   a.reseed_rounds = whole_of("organic_reseed_rounds", num(in, "organic_reseed_rounds", a.reseed_rounds, w),
                              "must be a whole number, 0 to 100");
+  // OG6: vines reach the walls: the bare distance (1.5 mm when not given) and the branches' reach (4 spacings when not
+  // given; 0: no branches).
+  a.wall_bare_mm = num(in, "organic_wall_bare_mm", a.wall_bare_mm, w);
+  a.wall_reach = num(in, "organic_wall_reach", a.wall_reach, w);
   a.wall_connect = flag(in, "organic_wall_connect", a.wall_connect, w);   // E (off when not given)
   a.wall_gap = num(in, "organic_wall_gap", a.wall_gap, w);   // E: 0 or less (and when not given): off
   a.wall_gap_heavy = num(in, "organic_wall_gap_heavy", a.wall_gap_heavy, w);   // M: 0 or less (and when not given): off
@@ -1902,6 +1907,27 @@ std::string file_result_json(const FileResult& r) {
                     count(g.ties_level_refused_steep), count(g.ties_level_cut_span), count(nj), jmed, smed, sbig,
                     g.tie_level_dz_max_mm, g.tie_level_dz_max_unsnapped_mm);
       wt += lb;
+    }
+    {   // OG6: the walls reached (the places, bare, branches laid and refused by reason, bare when final; the first
+        // refused places)
+      char ob[700];
+      const double share = g.wall_places ? static_cast<double>(g.wall_bare_after) / static_cast<double>(g.wall_places) : 0.0;
+      std::snprintf(ob, sizeof ob,
+                    "\"wall_places\": %llu, \"wall_bare\": %llu, \"wall_branches\": %llu, \"wall_branch_mm\": %.9g, "
+                    "\"wall_refused_reach\": %llu, \"wall_refused_cone\": %llu, \"wall_refused_region\": %llu, "
+                    "\"wall_bare_after\": %llu, \"wall_bare_share\": %.9g, \"wall_refused_at\": [",
+                    count(g.wall_places), count(g.wall_bare), count(g.wall_branches), g.wall_branch_mm,
+                    count(g.wall_refused_reach), count(g.wall_refused_cone), count(g.wall_refused_region),
+                    count(g.wall_bare_after), share);
+      wt += ob;
+      static const char* const kWhy[3] = {"reach", "cone", "region"};
+      for (std::size_t i = 0; i < g.wall_refused_at.size(); ++i) {
+        const GrowReport::WallRefused& x = g.wall_refused_at[i];
+        std::snprintf(ob, sizeof ob, "%s{\"at\": [%.9g, %.9g, %.9g], \"why\": \"%s\"}", i ? ", " : "", x.at.x, x.at.y,
+                      x.at.z, kWhy[std::min(2, std::max(0, x.why))]);
+        wt += ob;
+      }
+      wt += "],\n    ";
     }
     std::vector<char> gbuf(4096 + wt.size());   // O: room for the per-area counts, however many areas
     char* gb = gbuf.data();

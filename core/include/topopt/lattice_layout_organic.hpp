@@ -116,6 +116,16 @@ struct OrganicAsk {
   // pruning, stubs, the new tips grown, pruned again) is done reseed_rounds times (G11: once; 0: none).
   double void_ratio = 1.5;   // > 0
   int reseed_rounds = 1;     // >= 0
+  // OG6 (brief E10; the owner, 2026-11-19: "The vines should be RIGHT UP NEXT TO the edge of the solid outline. There
+  // should be no space in between them whatsoever -- in any direction."): vines reach the walls. After the pruning,
+  // every place on the region's walls (its open faces, protected skins, solid sides and floor; one per 1.5 mm cell)
+  // with no kept vine within `wall_bare_mm` of the vine's surface is BARE; to each, a branch is laid from the nearest
+  // point of a kept vine within `wall_reach` x the local spacing whose straight line climbs to the place at the cone
+  // or steeper and stays inside the region; it ends on the wall as a vine ends there (in the solid by its
+  // width where solid lies past it, OG5). Then the pruning again. wall_reach 0: no branches are laid (the bare places
+  // are still counted).
+  double wall_bare_mm = 1.5;   // > 0
+  double wall_reach = 4.0;     // >= 0, local spacings
   // E (the owner on walls-out seeds: "I'd say their goal is to connect as many vines as possible"): a wall seed's tip
   // is grown after every floor seed's tip and its descendants, aims at the nearest kept strand it has not joined that
   // rises at the cone or steeper from it (within 4 spacings), stays on each joint it makes, and offers no branches.
@@ -392,8 +402,8 @@ std::vector<OrganicRefusal> validate_organic_groups(const Settings& settings, co
 //   the struts: the thinnest strut (bead_mm x min_strut_lines) above 0; width_mm 0 or at least it; width_heavy_mm 0 or
 //     at least the light width; link_width 0.5 to 2; unbraced_max 0 or 4 to 40;
 //   shape_reach, bed_floor_mm, part_reach_mm, part_support_mm 0 or above; tie_swirl 0 to 1; foot_gap, wall_gap,
-//     root_gap numbers; void_ratio above 0; reseed_rounds 0 to 100; wall_cross 0, 1 or 2; cross_gap above 0 (not 2.5
-//     only with wall_cross); cross_climb_max_deg 30 to 45 (not 45 only with wall_cross); tie_gap above 0; top_run,
+//     root_gap numbers; void_ratio above 0; reseed_rounds 0 to 100; wall_bare_mm above 0; wall_reach 0 or above;
+//     wall_cross 0, 1 or 2; cross_gap above 0 (not 2.5 only with wall_cross); cross_climb_max_deg 30 to 45 (not 45 only with wall_cross); tie_gap above 0; top_run,
 //     root_run, run_gap, run_pull, run_seek, run_min 0 or above; run_max 1 to 1,000,000; run_follow above 0;
 //     build_dir not zero; layer_mm and seed_stride above 0;
 //   the three heavy gaps: 0 or less is off; above 0 at most their light gap, and needs the cell size as a range
@@ -655,6 +665,18 @@ struct GrowReport {
   // at the bare place).
   std::size_t reseed_from_vertex = 0;
   std::vector<std::size_t> reseed_voids_round;   // E: the bare places found, per re-seed round
+  // OG6 (brief E10): the region's walls reached. The wall places (`wall_places`), those found bare after the pruning
+  // (`wall_bare`: no kept vine within wall_bare_mm of its surface), the branches laid to them (`wall_branches`, their
+  // length `wall_branch_mm`), the bare places given none and why: no kept vine point within the reach
+  // (`wall_refused_reach`), none whose line to the place climbs at the cone (`wall_refused_cone`), none whose line stays
+  // inside the region (`wall_refused_region`); the first 20 such places (`wall_refused_at`, with the reason: 0 reach,
+  // 1 cone, 2 region); and the places still bare when the vines are final (`wall_bare_after`; the share is
+  // wall_bare_after / wall_places).
+  std::size_t wall_places = 0, wall_bare = 0, wall_branches = 0, wall_bare_after = 0;
+  std::size_t wall_refused_reach = 0, wall_refused_cone = 0, wall_refused_region = 0;
+  double wall_branch_mm = 0.0;
+  struct WallRefused { Vec3 at; int why = 0; };
+  std::vector<WallRefused> wall_refused_at;   // at most 20
   // E, wall_connect: wall tips grown, the joins they made, the distinct lines each joined; how they ended.
   std::size_t wall_grown = 0, wall_joins = 0, wall_ended_edge = 0, wall_ended_unsupported = 0, wall_ended_joins = 0;
   std::vector<std::size_t> wall_lines_joined;

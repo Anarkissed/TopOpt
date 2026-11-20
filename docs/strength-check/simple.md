@@ -67,6 +67,8 @@ The solid is judged by its stress alone, in the cubes that are at least {{printe
 
 The struts it judges never leave your part and never pass through protected solid. Where a strut ends in solid it reaches in only a little: no deeper than its own width, and never so deep that its round end comes within one printed line of the far side of the solid; in a protected skin, never within one line of your part's outer surface. A strut that would cross solid is cut where it meets it, and a strut lying wholly in solid is left out. So nothing of the lattice can show through a protected face. The same holds after each round of strengthening.
 
+In Grown, the vines reach the walls of the area. After the vines are grown and trimmed, every place on the area's walls (its open faces, protected skins, solid sides and floor, one place every 1.5 mm) with no vine within 1.5 mm of it gets a branch from the nearest vine within four cell sizes, climbing to the wall at 30 degrees or steeper so it prints held from below; it ends on the wall, in the solid where there is solid. A wall place no vine can reach that way is counted with the reason. The vines are then trimmed again. On your stand this leaves about one wall place in fifty bare, where it was one in twelve, for about 2 % more plastic in the lattice.
+
 ## Organic: strengthen
 
 The strengthen job checks the lattice, then lays it again where it was weak, and checks again, up to {{strengthen_rounds}} times (0 means six when it strengthens by adding, and 2 for Traced and 3 for Grown when it lays the lattice again). It stops as soon as nothing is under the safety margin.

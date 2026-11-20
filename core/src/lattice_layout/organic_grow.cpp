@@ -37,6 +37,12 @@ void GrowReport::add(const GrowReport& o) {
   reseed_voids += o.reseed_voids; reseed_landed += o.reseed_landed; reseed_failed += o.reseed_failed;
   reseed_mm += o.reseed_mm;
   reseed_from_vertex += o.reseed_from_vertex;
+  wall_places += o.wall_places; wall_bare += o.wall_bare; wall_branches += o.wall_branches;   // OG6
+  wall_bare_after += o.wall_bare_after; wall_branch_mm += o.wall_branch_mm;
+  wall_refused_reach += o.wall_refused_reach; wall_refused_cone += o.wall_refused_cone;
+  wall_refused_region += o.wall_refused_region;
+  for (const WallRefused& x : o.wall_refused_at)
+    if (wall_refused_at.size() < 20) wall_refused_at.push_back(x);
   reseed_voids_round.insert(reseed_voids_round.end(), o.reseed_voids_round.begin(), o.reseed_voids_round.end());
   wall_grown += o.wall_grown; wall_joins += o.wall_joins; wall_ended_edge += o.wall_ended_edge;
   wall_ended_unsupported += o.wall_ended_unsupported; wall_ended_joins += o.wall_ended_joins;
@@ -616,6 +622,8 @@ class Grower {
   double bare() const;
   void account(const Fate& f);
   void reseed(std::vector<Tip>& tips);
+  std::vector<Vec3> wall_places() const;            // OG6
+  void reach_walls(const std::vector<Vec3>& places);   // OG6
   void ties(std::size_t from);
   // G (brief G8): top runs and roots, once, after ties(0) and before the pruning.
   void runs();
@@ -1998,6 +2006,91 @@ void Grower::account(const Fate& f) {
   }
 }
 
+// OG6 (brief E10): the region's walls reached. A wall place: where a candidate voxel's centre, read along one of the six
+// axis directions toward a voxel that is not a candidate, meets the region's edge within two voxels (one place per
+// 1.5 mm cell, first found). It is bare when no vine the path keeps lies within its radius plus wall_bare_mm.
+std::vector<Vec3> Grower::wall_places() const {
+  constexpr double kCellMm = 1.5;
+  const double hv = field_.spacing;
+  std::set<std::array<long long, 3>> taken;
+  const int di6[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+  std::vector<Vec3> places;
+  for (int k = 0; k < field_.nz; ++k)
+    for (int j = 0; j < field_.ny; ++j)
+      for (int i = 0; i < field_.nx; ++i) {
+        if (!spacing().candidate[field_.index(i, j, k)]) continue;
+        const Vec3 c = centre(i, j, k);
+        for (const auto& d6 : di6) {
+          const int i2 = i + d6[0], j2 = j + d6[1], k2 = k + d6[2];
+          const bool out = i2 < 0 || j2 < 0 || k2 < 0 || i2 >= field_.nx || j2 >= field_.ny || k2 >= field_.nz;
+          if (!out && spacing().candidate[field_.index(i2, j2, k2)]) continue;
+          const Vec3 d{static_cast<double>(d6[0]), static_cast<double>(d6[1]), static_cast<double>(d6[2])};
+          const double e = edge(c, d, 2.0 * hv);
+          if (e < 0.0) continue;
+          const Vec3 w = add(c, mul(d, e));
+          const std::array<long long, 3> key{static_cast<long long>(std::floor(w.x / kCellMm)),
+                                             static_cast<long long>(std::floor(w.y / kCellMm)),
+                                             static_cast<long long>(std::floor(w.z / kCellMm))};
+          if (taken.insert(key).second) places.push_back(w);
+        }
+      }
+  return places;
+}
+
+// To each bare wall place, from the nearest vertex of a kept vine within wall_reach x the local spacing whose straight
+// line CLIMBS to the place at the cone or steeper (so the branch starts on its vine and is held from below as it
+// prints; a branch down to a wall would start in the air at the wall: on the stand those took posts and were cut by
+// the layer check), at least two radii long, and stays on the region's candidates to a voxel short of the edge, a
+// branch is laid, ended at the edge as a strand ends there (end_at_edge: on into the solid by OG5's run-on). A bare
+// place given none is counted by the furthest test any vertex passed (none in reach; none climbing at the cone; none
+// staying on the region, or no edge found along its line).
+void Grower::reach_walls(const std::vector<Vec3>& places) {
+  const double hv = field_.spacing;
+  const double bare_r = r_ + ask_.wall_bare_mm;
+  rep_.wall_places += places.size();
+  for (const Vec3& w : places) {
+    if (live_within(w, bare_r)) continue;
+    ++rep_.wall_bare;
+    const double reach = ask_.wall_reach * sep(w);
+    if (!(reach > 0.0)) continue;
+    int why = 0;   // the furthest test any vertex passed: 0 none in reach, 1 at the cone, 2 on the region
+    bool found = false;
+    double bd = std::numeric_limits<double>::infinity();
+    Vec3 bx{};
+    boxes_.near(w, reach + ds_, [&](const Sample& s) {
+      if (!live(s)) return;
+      const Line& L = lines_[static_cast<std::size_t>(s.line)];
+      for (std::size_t end = 0; end < 2; ++end) {
+        const Vec3 x = L.pts[static_cast<std::size_t>(s.seg) + end];
+        const double d = dist(x, w);
+        if (!(d <= reach) || d < 2.0 * r_ || !(d < bd)) continue;
+        why = std::max(why, 1);
+        if (dot(sub(w, x), up_) < cone_sin_ * d) continue;
+        why = std::max(why, 2);
+        const Vec3 u = mul(sub(w, x), 1.0 / d);
+        if (!on_candidates(x, add(x, mul(u, std::max(0.0, d - hv))))) continue;
+        found = true;
+        bd = d;
+        bx = x;
+      }
+    });
+    const Vec3 u = found ? mul(sub(w, bx), 1.0 / bd) : Vec3{};
+    const double e = found ? edge(bx, u, bd + 2.0 * hv) : -1.0;
+    if (e < 0.0) {
+      if (found) why = 2;
+      std::size_t& n = why == 0 ? rep_.wall_refused_reach : why == 1 ? rep_.wall_refused_cone : rep_.wall_refused_region;
+      ++n;
+      if (rep_.wall_refused_at.size() < 20) rep_.wall_refused_at.push_back({w, why});
+      continue;
+    }
+    const int li = new_line(bx, -1, 0);
+    const Vec3 end = end_at_edge(bx, u, e);
+    lay(li, end, true);
+    ++rep_.wall_branches;
+    rep_.wall_branch_mm += dist(bx, end);
+  }
+}
+
 // G11, the original's void re-seeding (1.5), run ONCE after the first pruning (the owner, 2026-11-15: "then pruning
 // and a round of re-seeding in bare areas"). Bare places: candidate voxel centres on a stride of half the median
 // spacing with no strand the path keeps within 1.5 x their spacing, no two within that distance (first come). From
@@ -2831,6 +2924,10 @@ bool Grower::setup() {
     throw std::invalid_argument("grow_strands: wall_gap_heavy needs the spacing as a range (O12's measure)");   // M
   if (!(ask_.void_ratio > 0.0) || !std::isfinite(ask_.void_ratio))
     throw std::invalid_argument("grow_strands: void_ratio must be above 0");   // E
+  if (!(ask_.wall_bare_mm > 0.0) || !std::isfinite(ask_.wall_bare_mm))
+    throw std::invalid_argument("grow_strands: wall_bare_mm must be above 0");   // OG6
+  if (!(ask_.wall_reach >= 0.0) || !std::isfinite(ask_.wall_reach))
+    throw std::invalid_argument("grow_strands: wall_reach must be 0 or more");   // OG6
   if (ask_.wall_cross < 0 || ask_.wall_cross > 2)
     throw std::invalid_argument("grow_strands: wall_cross must be 0, 1 or 2");   // F
   if (ask_.wall_cross != 0 && !ask_.walls_out)
@@ -2989,9 +3086,26 @@ std::vector<Strand> Grower::run() {
     settle();
     f = pass();
   }
+  // OG6 (brief E10; the owner, 2026-11-19: "The vines should be RIGHT UP NEXT TO the edge of the solid outline. There
+  // should be no space in between them whatsoever -- in any direction."): bare places on the region's walls get a
+  // branch from the nearest vine, then the path's pruning again.
+  const std::vector<Vec3> walls = wall_places();
+  {
+    for (std::size_t l = 0; l < lines_.size(); ++l)
+      for (std::size_t k = 0; k < f.seg[l].size(); ++k) lines_[l].dead[k] = f.seg[l][k] != 0;
+    rebuild_rec();
+    const std::size_t before = rep_.wall_branches;
+    reach_walls(walls);
+    if (rep_.wall_branches > before) {
+      repeats();
+      settle();
+      f = pass();
+    }
+  }
   account(f);
   for (std::size_t l = 0; l < lines_.size(); ++l)
     for (std::size_t k = 0; k < f.seg[l].size(); ++k) lines_[l].dead[k] = f.seg[l][k] != 0;
+  for (const Vec3& w : walls) rep_.wall_bare_after += !live_within(w, r_ + ask_.wall_bare_mm);   // OG6
   rep_.bare_after = bare();
   rep_.tips = tips_;
   rep_.grown_mm = laid_mm_;
