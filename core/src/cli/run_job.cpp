@@ -17281,6 +17281,8 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
           }
       }
       ll::AddReport wrep;
+      const ll::Bars pre_widen = bars;               // OS16 fix: the round's bars before its widenings
+      const std::size_t brace_ops = round.ops.size();
       if (!widen.ops.empty() && !ll::apply_add_round(bars, domain, widen, ctx, &wrep, &why))
         return finish(false, "strengthen_failed", 1, "A round of strengthening could not be added.", why);
       round.ops.insert(round.ops.end(), widen.ops.begin(), widen.ops.end());
@@ -17305,15 +17307,53 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
       // judges the bars as written. What it did among the bars that were there before the round is counted.
       // OG5 (brief E9): the round's bars guarded, as apply_additions guards them when the round is replayed.
       ll::GuardReport round_guard;
-      // What it cut changes bars that were there before: OS12 against round 0 is then held as after a print check that
-      // moved one (against the round before only).
-      if (ll::guard_bars(bars, domain, ctx.weave_regions, ctx.line_mm, &round_guard, /*drop_cut_free=*/true) > 0) moved_by_print = true;
-      say("round " + std::to_string(n) + ": checking the lattice prints");
+      // OS16 (fix 2026-11-19): the file job refuses a lattice its print check cannot make clean (would_not_print), so a
+      // round must end clean too, one rule for both: when the round's print check is not clean, the round's widenings
+      // within reach of a finding (the place within the bar's width + 1 mm of its line) are taken back, the round laid
+      // again from its bars before the widenings, and checked again (at most 5 times). Still not clean: the
+      // strengthening stops, and the last round written is the last that prints.
+      ll::PrintChecked pc2;
       const auto tp = std::chrono::steady_clock::now();
-      ll::PrintChecked pc2 = ll::print_check_bars(session, out.layout, bars, file_options, stop);
-      if (!pc2.ok)
-        return finish(false, "print_check_failed", 1, "The lattice's file could not be put together, so its strength cannot be judged.", pc2.why);
-      const std::string printed = print_check_counts(before_round, in_file, bars, pc2.bars, pc2.kept, &moved_by_print);
+      std::size_t widen_taken_back = 0;
+      for (int pass = 0;; ++pass) {
+        if (ll::guard_bars(bars, domain, ctx.weave_regions, ctx.line_mm, &round_guard, /*drop_cut_free=*/true) > 0) moved_by_print = true;
+        say("round " + std::to_string(n) + ": checking the lattice prints");
+        pc2 = ll::print_check_bars(session, out.layout, bars, file_options, stop);
+        if (!pc2.ok)
+          return finish(false, "print_check_failed", 1, "The lattice's file could not be put together, so its strength cannot be judged.", pc2.why);
+        if (pc2.made.print_clean || pass >= 5 || pc2.made.findings_at.empty()) break;
+        std::vector<ll::AddOp> keep;
+        std::size_t dropped = 0;
+        for (const ll::AddOp& op : widen.ops) {
+          const Vec3 a{op.v[0], op.v[1], op.v[2]}, b{op.v[3], op.v[4], op.v[5]};
+          const Vec3 d{b.x - a.x, b.y - a.y, b.z - a.z};
+          const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
+          bool near = false;
+          for (const Vec3& f : pc2.made.findings_at) {
+            const double t = l2 > 0.0 ? std::clamp(((f.x - a.x) * d.x + (f.y - a.y) * d.y + (f.z - a.z) * d.z) / l2, 0.0, 1.0) : 0.0;
+            const double ex = a.x + d.x * t - f.x, ey = a.y + d.y * t - f.y, ez = a.z + d.z * t - f.z;
+            near = near || std::sqrt(ex * ex + ey * ey + ez * ez) <= op.v[6] + 1.0;
+          }
+          if (near) ++dropped; else keep.push_back(op);
+        }
+        if (dropped == 0) break;
+        widen_taken_back += dropped;
+        widen.ops = keep;
+        bars = pre_widen;
+        if (!widen.ops.empty() && !ll::apply_add_round(bars, domain, widen, ctx, &wrep, &why))
+          return finish(false, "strengthen_failed", 1, "A round of strengthening could not be added.", why);
+        round.ops.resize(brace_ops);
+        round.ops.insert(round.ops.end(), widen.ops.begin(), widen.ops.end());
+        round_guard = ll::GuardReport{};
+      }
+      if (!pc2.made.print_clean)
+        return finish(false, "would_not_print", 1,
+                      "After round " + std::to_string(n + 1) + " the lattice would not print (an overhang or a start in mid-air), "
+                      "and taking back that round's widenings near those places did not fix it, so the strengthening stopped. "
+                      "The last round written is the last that prints.");
+      const std::string printed = print_check_counts(before_round, in_file, bars, pc2.bars, pc2.kept, &moved_by_print) +
+                                  ", \"print_clean\": " + (pc2.made.print_clean ? "true" : "false") +
+                                  ", \"widenings_taken_back\": " + std::to_string(widen_taken_back);
       bars = std::move(pc2.bars);
       in_file = std::move(pc2.kept);
       s_pc = secs(tp);

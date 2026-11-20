@@ -1345,11 +1345,11 @@ int main() {
         const double bars_last = num_after(asj, "bars", asj.find("\"round\": " + std::to_string(as.rounds_fixed)));
         const Run ar = run("arm_replay", arm_job(last + "/strengthened.json"), "");
         std::printf("[arm] replay: ok %d code %s, bars %zu (the last round's %.0f)\n", ar.r.ok, ar.r.code.c_str(), ar.r.bars, bars_last);
-        // OS11 (2026-11-19): with the order (limit first, past it a round later) the last round's lattice is refused by
-        // the file's print check (one overhang held at one end only); the replay still lays the round's bars. Reported
-        // to the lead; pinned so a change shows.
-        CHECK((ar.r.ok && ar.r.code == "ok" && static_cast<double>(ar.r.bars) == bars_last) ||
-              (ar.r.code == "would_not_print" && static_cast<double>(ar.r.bars) == bars_last));
+        // OS16 (fix 2026-11-19): a round ends print-clean (its widenings near a finding taken back), so the file job
+        // replays the loop's last round and makes its file.
+        std::printf("[arm] rounds print clean: %s; widenings taken back %.0f\n", has(asj, "\"print_clean\": false") ? "no" : "yes",
+                    most_after(asj, "widenings_taken_back"));
+        CHECK(ar.r.ok && ar.r.code == "ok" && static_cast<double>(ar.r.bars) == bars_last && !has(asj, "\"print_clean\": false"));
       }
     }
   }
