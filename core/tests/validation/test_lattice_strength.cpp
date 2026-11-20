@@ -846,8 +846,9 @@ int main() {
     // ── §18 (rule OS11, the order; the owner, 2026-11-19: "we DON'T want to thicken beyond the limit. That's why it's
     // the limit. So thicken to the limit ... and only at the end if it is impossible, thicken passed the limit"; the
     // new-vine step removed: "Yes, remove it."). The many-strut block (spacing 5 to 8, widths 0.9 to 1.2, strand_keep
-    // 0.5), 6000 N, up to 6 rounds: round 0 widens no bar past the limit 1.2; a strut still under the safety factor at
-    // the limit goes past it one round later and is counted; every old bar kept; the replay lays round 1's bars.
+    // 0.5), 6000 N, up to 6 rounds: every weak strut is at the limit 1.2 when first found, so it goes past it in that
+    // same round (counted; no round lost: round 1 has fewer under the safety factor); every old bar kept; the replay
+    // lays round 1's bars.
     {
       namespace sj = topopt::flexible::json;
       const std::string roomy = ", \"region_weave\": [true], \"organic_spacing_min_mm\": 5, \"organic_spacing_max_mm\": 8, "
@@ -856,7 +857,7 @@ int main() {
       const OrganicStrengthenResult od = strengthen("order", roomy, 6000.0, "{\"strengthen_rounds\": 6}");
       const sj::Value doc = sj::parse(slurp(kDir + "/order/strengthen.json"), "strengthen.json");
       const sj::Value* rounds = sj::find(doc, "rounds");
-      double r0_widest_op = 0.0, past1 = 0.0, widest_watched_r1 = 0.0, widest_after = 0.0;
+      double r0_widest_op = 0.0, past1 = 0.0, widest_watched_r1 = 0.0, widest_after = 0.0, past0 = -1.0, under0 = -1.0, under1 = -1.0;
       for (std::size_t n = 0; rounds && n < rounds->arr.size(); ++n) {
         const sj::Value& r = rounds->arr[n];
         const sj::Value* added = sj::find(r, "added");
@@ -866,7 +867,8 @@ int main() {
         const sj::Value su = sj::parse(slurp(kDir + "/order/r" + std::to_string(n) + "/struts_under.json"), "struts_under.json");
         double widest = 0.0;
         for (const sj::Value& st : sj::find(su, "struts")->arr) widest = std::max(widest, sj::find(st, "width_max_mm")->num);
-        if (n == 1) { widest_watched_r1 = widest; past1 = pl ? sj::find(*pl, "struts")->num : 0.0; }
+        if (n == 0) { past0 = pl ? sj::find(*pl, "struts")->num : 0.0; under0 = sj::find(*sj::find(r, "struts"), "under_safety")->num; }
+        if (n == 1) { widest_watched_r1 = widest; past1 = pl ? sj::find(*pl, "struts")->num : 0.0; under1 = sj::find(*sj::find(r, "struts"), "under_safety")->num; }
         if (n >= 2) widest_after = std::max(widest_after, widest);
         std::printf("[order] round %zu: under safety %.0f (untouched %.0f, cut %.0f, brace %.0f), lattice %.1f mm3, widest watched %.3f",
                     n, sj::find(*sj::find(r, "struts"), "under_safety")->num, sj::find(*sj::find(*cls, "untouched"), "under")->num,
@@ -884,8 +886,8 @@ int main() {
       std::printf("[order] %s after %d rounds; round 0's widest widening %.3f (limit %.1f); round 1: widest watched %.3f, past the "
                   "limit %.0f; later rounds' widest watched %.3f\n", od.code.c_str(), od.rounds_fixed, r0_widest_op, limit,
                   widest_watched_r1, past1, widest_after);
-      CHECK(od.ok && od.old_bars_kept && r0_widest_op <= limit + 1e-9 && widest_watched_r1 <= limit + 1e-6 &&
-            past1 > 0 && widest_after > limit + 1e-6);
+      std::printf("[order] round 0: under %.0f, past the limit at once %.0f; round 1: under %.0f\n", under0, past0, under1);
+      CHECK(od.ok && od.old_bars_kept && past0 == under0 && under1 < under0 && r0_widest_op > limit && widest_after > limit + 1e-6);
       // Replay: the file job given round 1's strengthened.json lays round 1's bars.
       const std::string oj = slurp(kDir + "/order/strengthen.json");
       const double bars1 = num_after(oj, "bars", oj.find("\"round\": 1"));

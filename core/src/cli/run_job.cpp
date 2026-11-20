@@ -17005,10 +17005,9 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
     std::set<StrutKey> widened_before;
     // OS11 (the order; the owner, 2026-11-19: "we DON'T want to thicken beyond the limit. That's why it's the limit. So
     // thicken to the limit ... and only at the end if it is impossible, thicken passed the limit"): the limit is the
-    // group's upper strut width; a strut may pass it only once checked at the limit in a later round and still under
-    // the safety factor (`under_before`: the struts under it in the check before).
+    // group's upper strut width; a strut goes past it once a check has judged it AT the limit and found it under the
+    // safety factor (that check may be the one that first finds it).
     const double limit_w = upper;
-    std::set<StrutKey> under_before;
     // Leg I (diagnosis): the bars of the check before (ends to 1e-4 mm) with their strut's margin, and the landings of
     // the vines laid in the round before (where, the strut landed on, its margin then, how far from its nearer joint).
     using EndsKey = std::array<long long, 6>;
@@ -17215,7 +17214,9 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
       for (std::size_t wi = 0; wi < watched.size(); ++wi) {
         const ll::FrameStrut& sn = *watched[wi].sn;
         if (!(sn.margin < S.options.margin_stop)) continue;
-        if (sn.width_max >= lim_r(reg(sn)) - 1e-9 && under_before.count(strut_key(sn.at))) past_now.insert(&sn);
+        // A check has judged it AT the limit and found it under the safety factor: this one (fix 2026-11-19: a strut
+        // already at the limit when first found goes past it in the same round, no round lost).
+        if (sn.width_max >= lim_r(reg(sn)) - 1e-9) past_now.insert(&sn);
         else ++c_within;
       }
       const ll::Bars before_round = bars;   // the bars the check numbered
@@ -17285,9 +17286,6 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
       round.ops.insert(round.ops.end(), widen.ops.begin(), widen.ops.end());
       margin_before.clear();
       for (const ll::FrameStrut& sn : c.struts) if (sn.judged) margin_before[strut_key(sn.at)] = sn.margin;
-      under_before.clear();   // OS11: the struts under the safety factor in this check
-      for (const ll::FrameStrut& sn : c.struts)
-        if (sn.judged && sn.margin < S.options.margin_stop) under_before.insert(strut_key(sn.at));
       std::vector<Vec3> past_at;   // OS11: the struts past the limit this round
       const std::size_t c_past = past_now.size();
       for (const ll::FrameStrut* sp : past_now) if (past_at.size() < 20) past_at.push_back(sp->at);
