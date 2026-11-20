@@ -1273,9 +1273,9 @@ static void test_additions() {
     AddRound unknown;
     unknown.ops.push_back({4, {0.0}});   // (kind 3 is OS18's relief vine since brief E8: 4 is unknown)
     CHECK(!apply_add_round(x, dom, unknown, c, nullptr, &why) && why.find("kind 4") != std::string::npos);
-    AddRound short3;   // a relief vine whose numbers do not match its point count
+    AddRound short3;   // a new vine (kind 3): refused since OS18 was withdrawn (2026-11-19)
     short3.ops.push_back({3, {1.0, 0.9, 2.0, 0.0, 0.0, 3.0, 0, 0, 0}});
-    CHECK(!apply_add_round(x, dom, short3, c, nullptr, &why) && why.find("relief vine") != std::string::npos);
+    CHECK(!apply_add_round(x, dom, short3, c, nullptr, &why) && why.find("new vines") != std::string::npos);
   }
 }
 
@@ -2561,98 +2561,24 @@ static void test_og2_relief() {
 }
 
 
-// ── OL-OS18 (the twin, the owner 2026-11-19: "Yes, build it that way"): the twin vine maker and its addition (kind 3)
+// ── OL-OS18 (withdrawn, the owner 2026-11-19: "Yes, remove it."): an addition of kind 3 (a new vine) is refused.
 static void test_os18_relief_vines() {
   const StepModel model = box_model(30, 30, 20);
-  const TensorField f = gap_field();
   Session session(model);
-  OrganicAsk base = gap_ask(1.2);
-  base.strand_keep = 0.5;   // the owner: vine spacing off is the main case
-  base.spacing_min_mm = 8.0;   // long struts: room for the eye (4 s)
-  base.spacing_max_mm = 12.0;
-  const Outcome o = session.lay_organic(gap_settings(1, 16.0, true), f, base);
-  CHECK(o.refused.empty() && !o.bars.bars.empty());
-  if (o.bars.bars.empty()) return;
-  const Domain& d = *session.domain();
-  TwinAsk ta;
-  ta.gap_mm = 1.5 * 0.45;
-  const TwinVineMaker maker(o.bars, d, f, ta);
-  // Stretches: the weave's struts (joint to joint), the longest first; the first one that takes a twin.
-  std::vector<WeaveStrut> struts = weave_struts(o.bars);
-  std::stable_sort(struts.begin(), struts.end(), [](const WeaveStrut& x, const WeaveStrut& y) { return x.length_mm > y.length_mm; });
-  auto line_of = [&](const WeaveStrut& st) {
-    std::vector<Vec3> line;
-    for (std::size_t k = 0; k < st.bars.size(); ++k) {
-      const Bar& b = o.bars.bars[st.bars[k]];
-      const Vec3 a = st.flipped[k] ? b.b : b.a, e = st.flipped[k] ? b.a : b.b;
-      if (line.empty()) line.push_back(a);
-      line.push_back(e);
-    }
-    return line;
-  };
-  TwinVine tw;
-  std::vector<Vec3> line;
-  std::size_t tried = 0;
-  for (const WeaveStrut& st : struts) {
-    if (tried >= 60) break;
-    const Bar& b0 = o.bars.bars[st.bars.front()];
-    if (b0.link || b0.brace || b0.level_tie || b0.support) continue;
-    ++tried;
-    line = line_of(st);
-    tw = maker.make(line, st.region, st.thinnest_mm, st.thinnest_mm, b0.cell, {});
-    if (tw.laid) break;
-  }
-  std::printf("OL-OS18 twin: %zu stretches tried, laid %d (%zu points, offset %.3f mm, cross joined %zu, sides tried %zu)\n", tried,
-              tw.laid ? 1 : 0, tw.points.size(), tw.offset_mm, tw.cross_joined, tw.sides_tried);
-  CHECK(tw.laid && tw.op.kind == 3 && tw.points.size() >= 4 && dist(tw.points.front(), line.front()) == 0.0 &&
-        dist(tw.points.back(), line.back()) == 0.0);
-  if (!tw.laid) return;
-  // The addition: laid, old bars kept (OS12), its ends exactly the stretch's joints; the same op twice: the same hash.
+  const Outcome o = session.lay_organic(gap_settings(1, 16.0, true), gap_field(), gap_ask(1.6));
   Bars after = o.bars;
   AddRound round;
-  round.ops.push_back(tw.op);
+  AddOp v;
+  v.kind = 3;
+  v.v = {1, 0.9, 4, 0, 0, 2, 10, 10, 10, 12, 12, 12};
+  round.ops.push_back(v);
   AddContext c;
   c.light_mm = 0.9;
-  AddReport rep;
   std::string why;
-  CHECK(apply_add_round(after, d, round, c, &rep, &why));
-  Bars again = o.bars;
-  CHECK(apply_add_round(again, d, round, c, nullptr, &why) && bars_hash(again) == bars_hash(after));
-  const std::string kept = old_bars_kept(o.bars, after);
-  std::size_t at_j0 = 0, at_jn = 0, relief = 0;
-  for (const Bar& b : after.bars) {
-    if (!b.relief) continue;
-    ++relief;
-    at_j0 += dist(b.a, line.front()) == 0.0 || dist(b.b, line.front()) == 0.0;
-    at_jn += dist(b.a, line.back()) == 0.0 || dist(b.b, line.back()) == 0.0;
-  }
-  std::printf("OL-OS18 twin laid: %zu bars, old bars kept: %s; a bar ends exactly at J0 %zu, at Jn %zu\n", relief,
-              kept.empty() ? "yes" : kept.c_str(), at_j0, at_jn);
-  CHECK(relief > 0 && rep.relief_vines == 1 && kept.empty() && at_j0 >= 1 && at_jn >= 1);
-  // Too short for the eye (under 4 s): no_room "too_short"; a side already taken is not tried again.
-  {
-    const std::vector<Vec3> short_line{line.front(), Vec3{line.front().x + 1.0, line.front().y, line.front().z}};
-    const TwinVine ts = maker.make(short_line, 1, 1.6, 1.6, 4.0, {});
-    const TwinVine ta2 = maker.make(line, 1, 1.6, 1.6, 4.0, {tw.side});
-    std::printf("OL-OS18 too short: laid %d, why %s; the same stretch with its side taken: laid %d, side %s\n", ts.laid ? 1 : 0,
-                ts.no_room.c_str(), ta2.laid ? 1 : 0,
-                ta2.laid ? (ta2.side.x * tw.side.x + ta2.side.y * tw.side.y + ta2.side.z * tw.side.z < 0.71 ? "another" : "the same") : ta2.no_room.c_str());
-    CHECK(!ts.laid && ts.no_room == "too_short");
-    CHECK(!ta2.laid || ta2.side.x * tw.side.x + ta2.side.y * tw.side.y + ta2.side.z * tw.side.z < 0.71);
-  }
-  // The additions file carries kind 3 (written, read back, the same numbers), replayed to the same hash.
-  {
-    Additions adds;
-    round.hash = bars_hash(after);
-    adds.rounds.push_back(round);
-    const std::string path = std::string(ORGANIC_RULES_TMP_DIR) + "/os18_additions.bin";
-    Additions back;
-    CHECK(write_additions_file(path, adds) && read_additions_file(path, back) && back.rounds.size() == 1 &&
-          back.rounds[0].ops.size() == 1 && back.rounds[0].ops[0].kind == 3 && back.rounds[0].ops[0].v == tw.op.v);
-    Bars replay = o.bars;
-    CHECK(apply_additions(replay, d, back, c, &why) && bars_hash(replay) == bars_hash(after));
-    std::remove(path.c_str());
-  }
+  const bool applied = apply_add_round(after, *session.domain(), round, c, nullptr, &why);
+  std::printf("OL-OS18 a new vine (kind 3): applied %d, why: %s; the bars unchanged %d\n", applied ? 1 : 0, why.c_str(),
+              bars_hash(after) == bars_hash(o.bars) ? 1 : 0);
+  CHECK(!applied && why.find("new vines") != std::string::npos && bars_hash(after) == bars_hash(o.bars));
 }
 
 // ── OG5 (brief E9; the owner, 2026-11-19: "That CAN'T happen"): no Organic bar outside the part or through protected

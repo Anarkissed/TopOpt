@@ -585,6 +585,8 @@ constexpr Refusal kStrengthUnavailable{"strength_unavailable", 1};
 constexpr Refusal kStrengthMixed{"strength_mixed", 1};
 // Brief E2, item 11: the job's "strengthened" file (or what it names) could not be read.
 constexpr Refusal kStrengthenedUnreadable{"strengthened_unreadable", 1};
+// OS18 withdrawn (the owner, 2026-11-19: "Yes, remove it."): a strengthening that holds new vines (additions kind 3).
+constexpr Refusal kStrengthenedHasVines{"strengthened_has_vines", 1};
 // Brief E3a: the lay does not give the lattice its additions were made on (a round's hash, or a bar they name).
 constexpr Refusal kStrengthenedMismatch{"strengthened_mismatch", 1};
 constexpr Refusal kCancelled{"cancelled", 1};
@@ -1559,6 +1561,15 @@ bool load_file_job(const std::string& job_path, int threads, FileJob& job, StepM
                "The strengthened stress sent with the lattice job could not be read, so nothing was made.", why);
         return false;
       }
+      // OS18 withdrawn: the additions file still reads a new vine (kind 3); a strengthening holding one is refused.
+      for (const AddRound& rd : job.organic.additions.rounds)
+        for (const AddOp& op : rd.ops)
+          if (op.kind == 3) {
+            refuse(r, kStrengthenedHasVines,
+                   "The strengthening sent with the lattice job holds new vines, which strengthening no longer lays, so "
+                   "nothing was made. Strengthen the lattice again.");
+            return false;
+          }
       job.tensor_field = std::move(field);
     }
     const std::string model_path =

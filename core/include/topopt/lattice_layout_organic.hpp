@@ -61,7 +61,7 @@ struct WidthFloor {
 //     points of a round are laid in one call of lay_braces (rule T's brace maker), before the round's widenings.
 //   kind 2, a widening: v = the bar's a (x, y, z), b (x, y, z), its new width (never thinner). Links ending where a
 //     widened bar ends then follow S8 (only wider).
-//   kind 3 (OS18, brief E8), a relief vine: v = region, width, cell, end_a (0 Node: on a bar; 1 Solid), end_b, n, then n
+//   kind 3 (OS18, brief E8; WITHDRAWN 2026-11-19, applying one is refused), a relief vine: v = region, width, cell, end_a (0 Node: on a bar; 1 Solid), end_b, n, then n
 //     points (x, y, z). Laid after the round's braces and widenings, in op order, by lay_relief_vine.
 // A later engine may add kinds; the file carries each operation's kind and length, and an engine meeting a kind it
 // does not know refuses the list.
@@ -356,45 +356,6 @@ double solid_run_on(const Domain::Probe& probe, const Vec3& entry, const Vec3& d
 // `between`, when given: run after each round's operations, before its hash (OS16); a non-empty answer refuses.
 bool apply_additions(Bars& bars, const Domain& domain, const Additions& adds, const AddContext& c, std::string* why = nullptr,
                      const std::function<std::string(Bars&)>& between = {});
-// OS18 (amended 2026-11-19, the owner: "Yes, build it that way"): the TWIN VINE maker (one for Traced and Grown). Built
-// once on the bars of a round (a 2 mm grid of them). make() for one weak STRETCH: its centre line `line` from joint J0
-// to joint Jn (every vertex, in order), its region, the stretch's width and the twin's, the local spacing, and the sides
-// a twin already took for any of its struts (`avoid`). The twin leaves J0, reaches the sideways offset
-// s = (stretch width + twin width) / 2 + gap over a lead of 2 s along the stretch, keeps that offset parallel to the
-// stretch's centre line, and returns to Jn the same way: its end points are EXACTLY J0 and Jn. The side: the two
-// principal stress directions across the stretch at its middle (the field's voxel there), both senses, the most free
-// room first, one side for the whole stretch (a side within 45 degrees of one in `avoid` is not tried). A bar ending on
-// the stretch between J0 and Jn (a cross vine, or a brace) that leaves toward the twin's side (its direction's share
-// along the offset over 0.3) is JOINED: the twin passes through the point of that bar at the offset (the crossing cut
-// then makes the joint); every other bar not ending at J0 or Jn and not on the stretch must stay at least the gap
-// away, surface to surface (read every 0.1 mm). Every point (but within a width of J0 and Jn) lies in the region's
-// lattice. A stretch shorter than 4 s: no_room "too_short"; no side passes: "no_free_side" (a bar within the gap) or
-// "outside_lattice". The op is kind 3 (region, width, cell, Node ends, points).
-struct TwinAsk {
-  double gap_mm = 0.675;          // OG1's gap (one line width with the gap rule off)
-};
-struct TwinVine {
-  bool laid = false;
-  std::string no_room;            // "too_short", "no_free_side", "outside_lattice" (not laid)
-  Vec3 mid{};                     // the stretch's middle (its place)
-  Vec3 side{};                    // the side taken (unit)
-  std::vector<Vec3> points;
-  std::size_t sides_tried = 0, cross_joined = 0;
-  double offset_mm = 0.0;
-  AddOp op;                       // kind 3, when laid
-};
-class TwinVineMaker {
- public:
-  TwinVineMaker(const Bars& bars, const Domain& domain, const TensorField& field, const TwinAsk& ask);
-  TwinVine make(const std::vector<Vec3>& line, int region, double stretch_width, double width, double spacing,
-                const std::vector<Vec3>& avoid) const;
- private:
-  const Bars& bars_;
-  const Domain& domain_;
-  const TensorField& field_;
-  TwinAsk ask_;
-  std::map<std::array<long long, 3>, std::vector<std::size_t>> grid_;
-};
 
 // The additions file, little-endian: 8 bytes "TOADDS\0\0", int32 version (1), int32 rounds; per round: uint64 hash,
 // int32 operations; per operation: int32 kind, int32 count, count float64.
