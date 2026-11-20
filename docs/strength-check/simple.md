@@ -104,3 +104,7 @@ The result then says, in plain words, the infill at which the solid would certif
 - Bolt friction, and cracks starting at sharp corners.
 - How tough the material is: we use one strength value per material.
 - Every strut individually: we use measured averages per cell.
+
+## The Organic skin (2026-11-19)
+
+When an Organic area's finish is Skin, the skin is a web of thin struts laid ON the open face: every node of the lattice close under the face gets a short stem straight up to the face, and the stems' feet are joined to their nearest neighbours. The face's plane cuts the web flat, which gives the Organic skin its look. You can set how thick the skin struts are (0 means as thick as the vines) and how many neighbours each foot joins (1 to 6), and how far below the face the web sits (0 on the face, cut flat; 1 just touching the face from inside). The strength check judges the skin like any other strut.

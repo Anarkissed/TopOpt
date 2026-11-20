@@ -1210,6 +1210,8 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
         finish.net_reach.push_back({r.id, reach});
         finish.net_width.push_back(own && own->skin_width_mm ? *own->skin_width_mm : settings.skin_spec.width_mm);
         finish.net_gap.push_back(ask.gap_lines > 0.0 ? ask.gap_lines * domain_->spec().bead_mm : domain_->spec().bead_mm);   // OJ7
+        finish.net_density.push_back(own && own->skin_density ? *own->skin_density : settings.skin_density);   // OJ8
+        finish.net_sink.push_back(own && own->skin_sink ? *own->skin_sink : settings.skin_sink);
       }
       if (ask.mode == OrganicMode::Grown) finish.arrived.push_back(r.id);   // G11: a vine that reached the surface
       if (ask.mode == OrganicMode::Grown && ask.prune) finish.prune.push_back({r.id, median});   // J2
@@ -1258,6 +1260,7 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
     std::vector<int> covered;   // OJ2 (ruling 2): depth variation is off on a face with a Solid finish
     for (const Region& rg : domain_->spec().regions)
       if (rg.weave && domain_->cover_depth_mm(&rg) > 0.0) covered.push_back(rg.id);
+    for (const auto& nr : finish.net_reach) covered.push_back(nr.first);   // OJ8: depth variation off on a Skin face
     lay_relief(out.bars, model_, *measure_, groups, firsts, out.relief, covered);
     out.organic_references = all_references;   // brief E2
     // Brief E2 and E3a (the strength check's floors and additions) are made for ONE ask (the file job's, and a preview
@@ -2027,6 +2030,21 @@ std::vector<OrganicRefusal> validate_organic_groups(const Settings& settings, co
       if (r.id == id && r.weave && r.role == Role::Lattice) return true;
     return false;
   };
+  // OJ8 (leg M): the skin's manual variables, each Organic area's own else the part's: thickness (skin_width_mm) 0 to
+  // 3 mm (0: the thinner vine's width), density (skin_density) 1 to 6, sink (skin_sink) 0 to 1.
+  for (const Settings::RegionAsk& r : settings.regions) {
+    if (!(r.weave && r.role == Role::Lattice)) continue;
+    const double w = r.skin_width_mm ? *r.skin_width_mm : settings.skin_spec.width_mm;
+    const int dn = r.skin_density ? *r.skin_density : settings.skin_density;
+    const double sk = r.skin_sink ? *r.skin_sink : settings.skin_sink;
+    const std::string area = "Organic area " + std::to_string(r.id);
+    if (!(w >= 0.0 && w <= 3.0))
+      refuse(-1, "skin_width_range", area + "'s skin thickness is " + std::to_string(w) + " mm; it must be 0 (as thick as the vines) to 3 mm.", w, "skin_width_mm");
+    if (dn < 1 || dn > 6)
+      refuse(-1, "skin_density_range", area + "'s skin density is " + std::to_string(dn) + "; it must be 1 to 6 joins per landing.", dn, "skin_density");
+    if (!(sk >= 0.0 && sk <= 1.0))
+      refuse(-1, "skin_sink_range", area + "'s skin sink is " + std::to_string(sk) + "; it must be 0 (on the face, cut flat) to 1 (one radius in).", sk, "skin_sink");
+  }
   // Leg J item 1 (the owner: "Rim should be hidden"): an Organic area's own Finish is None, Skin or Solid, never Rim.
   for (const Settings::RegionAsk& r : settings.regions)
     if (r.weave && r.role == Role::Lattice && r.rim_mm && *r.rim_mm != 0.0)

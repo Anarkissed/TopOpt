@@ -52,6 +52,7 @@ std::size_t guard_bars(Bars& bars, const Domain& domain, const std::vector<int>&
   std::vector<char> keep(n0, 1);
   std::vector<Bar> extra;
   auto weave = [&](const Bar& b) {
+    if (b.face_skin) return false;   // OJ8: the net on an open face (and its stems) is inside: not moved, not cut
     return b.net || b.support || std::find(weave_regions.begin(), weave_regions.end(), b.region) != weave_regions.end();
   };
   // (0) A joint or landing a hair outside the part (within 1.5 mm): moved in, toward the mean of its bars' other ends,

@@ -2634,6 +2634,7 @@ static Og5Count og5_count(const Session& s, const Bars& bars, const std::vector<
   const double line = s.domain()->spec().bead_mm;
   for (const Bar& b : bars.bars) {
     if (!(b.net || b.support || std::find(regions.begin(), regions.end(), b.region) != regions.end())) continue;
+    if (b.face_skin) continue;   // OJ8: the net on an open Skin face and its stems are inside (as the guard reads them)
     ++c.bars;
     const double L = dist(b.a, b.b);
     if (!(L > 0.0)) continue;
@@ -2663,6 +2664,7 @@ static Og5Count og5_count(const Session& s, const Bars& bars, const std::vector<
   }
   for (const WeaveRun& r : weave_runs(bars, regions, 0.0))
     for (const Vec3& q : r.points) {
+      if (r.marks & kRunNet) break;   // OJ8: the net's runs lie on the face
       if (probe.where(q).why != Why::Outside) continue;
       bool relief = false;
       for (const Vec3& e : relief_ends) relief = relief || dist(e, q) < 1e-9;
@@ -2927,8 +2929,8 @@ static void test_finish_per_region() {
   auto nets = [](const Outcome& o, int region, double* wmin, double* wmax) {
     std::size_t n = 0;
     *wmin = 1e9; *wmax = 0.0;
-    for (const Bar& b : o.bars.bars)
-      if (b.net && b.region == region) { ++n; *wmin = std::min(*wmin, b.width); *wmax = std::max(*wmax, b.width); }
+    for (const Bar& b : o.bars.bars)   // (OJ8: a stem is as wide as its node's vine: not counted here)
+      if (b.net && b.region == region && !b.stem) { ++n; *wmin = std::min(*wmin, b.width); *wmax = std::max(*wmax, b.width); }
     return n;
   };
   double lo1, hi1, lo2, hi2;
@@ -3132,35 +3134,105 @@ static std::size_t net_crossings(const Bars& bars, double extra) {
     }
   return n;
 }
-static void test_net_kept_apart() {
+static std::size_t net_mid_crossings(const Bars& bars) {   // OJ8: net struts whose centre lines cross mid-bar
+  std::vector<const Bar*> net;
+  for (const Bar& b : bars.bars) if (b.face_skin && !b.stem) net.push_back(&b);
+  std::size_t n = 0;
+  for (std::size_t i = 0; i < net.size(); ++i)
+    for (std::size_t j = i + 1; j < net.size(); ++j) {
+      const Bar &x = *net[i], &y = *net[j];
+      if (std::max(x.a.x, x.b.x) + 0.1 < std::min(y.a.x, y.b.x) || std::max(y.a.x, y.b.x) + 0.1 < std::min(x.a.x, x.b.x) ||
+          std::max(x.a.y, x.b.y) + 0.1 < std::min(y.a.y, y.b.y) || std::max(y.a.y, y.b.y) + 0.1 < std::min(x.a.y, x.b.y) ||
+          std::max(x.a.z, x.b.z) + 0.1 < std::min(y.a.z, y.b.z) || std::max(y.a.z, y.b.z) + 0.1 < std::min(x.a.z, x.b.z))
+        continue;
+      double least = 1e9;
+      Vec3 at{};
+      for (int q = 0; q <= 40; ++q) {
+        const Vec3 p{x.a.x + (x.b.x - x.a.x) * q / 40.0, x.a.y + (x.b.y - x.a.y) * q / 40.0, x.a.z + (x.b.z - x.a.z) * q / 40.0};
+        const Vec3 d{y.b.x - y.a.x, y.b.y - y.a.y, y.b.z - y.a.z};
+        const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
+        const double t = l2 > 0 ? std::clamp(((p.x - y.a.x) * d.x + (p.y - y.a.y) * d.y + (p.z - y.a.z) * d.z) / l2, 0.0, 1.0) : 0.0;
+        const double dd = dist(p, Vec3{y.a.x + d.x * t, y.a.y + d.y * t, y.a.z + d.z * t});
+        if (dd < least) { least = dd; at = p; }
+      }
+      n += least < 0.01 && dist(at, x.a) > 0.05 && dist(at, x.b) > 0.05 && dist(at, y.a) > 0.05 && dist(at, y.b) > 0.05;
+    }
+  return n;
+}
+static void test_net_kept_apart() {   // OJ8 (leg M): the net ON the open face, crossings made joints
   const StepModel model = box_model(30, 30, 20);
   const TensorField f = gap_field();
-  Settings st;
-  st.regions = {{1, Role::Lattice, {1}, 8.0, 0.0, true}};
-  st.drop_loose = false;
-  st.skin = false;
-  for (int grown = 0; grown < 2; ++grown) {
-    OrganicAsk a = gap_ask(1.6);
-    if (grown) { a.mode = OrganicMode::Grown; a.layer_mm = 0.2; }
-    Session s(model);
-    const Outcome o = s.lay_organic(st, f, a);
-    const double gap = 1.5 * 0.45;
-    Bars before = o.bars, after = o.bars;
-    std::size_t refused = 0;
-    const std::size_t made0 = lay_net_skin(before, *s.domain(), {{1, 4.0}}, 0.0, nullptr, nullptr, false);
-    const std::vector<double> gaps{gap};
-    const std::size_t made1 = lay_net_skin(after, *s.domain(), {{1, 4.0}}, 0.0, nullptr, &gaps, true, &refused);
-    const std::size_t c0 = net_crossings(before, 0.0), c1 = net_crossings(after, 0.0), g1 = net_crossings(after, gap);
-    // Through the session (Skin on): kept apart by default.
-    Settings sk = st;
-    sk.skin = true;
-    Session s2(model);
-    const Outcome o2 = s2.lay_organic(sk, f, a);
-    const std::size_t c2 = net_crossings(o2.bars, 0.0), g2 = net_crossings(o2.bars, gap);
-    std::printf("OL-NET-APART %s: net struts %zu before (passing through one another %zu), %zu kept apart (%zu joins not laid; "
-                "through %zu, within the gap %zu); the session's Skin: %zu net struts, %zu kept apart, through %zu, within the gap %zu\n",
-                grown ? "Grown" : "Traced", made0, c0, made1, refused, c1, g1, o2.net_struts, o2.net_kept_apart, c2, g2);
-    CHECK(made0 > 0 && made1 > 0 && c1 == 0 && g1 == 0 && c2 == 0 && g2 == 0 && o2.net_struts > 0 && refused > 0);
+  for (int grown = 0; grown < 2; ++grown)
+    for (int face : {1, 2}) {   // the top face (z = 20) and a side face
+      OrganicAsk a = gap_ask(1.6);
+      if (grown) { a.mode = OrganicMode::Grown; a.layer_mm = 0.2; }
+      Settings st;
+      st.regions = {{1, Role::Lattice, {face}, 8.0, -2.0, true}};   // pulled in 2 mm: its one open face
+      st.drop_loose = true;
+      st.skin = true;
+      Session s(model);
+      const Outcome o = s.lay_organic(st, f, a);
+      const PartMeasure::Probe pr = s.measure().probe();
+      std::size_t struts = 0, on = 0, pts = 0, stems = 0;
+      for (const Bar& b : o.bars.bars) {
+        if (!b.face_skin) continue;
+        const bool ea = std::fabs(pr.depth(b.a)) <= 0.05, eb = std::fabs(pr.depth(b.b)) <= 0.05;
+        if (b.stem) { ++stems; continue; }
+        ++struts;
+        pts += 2;
+        on += ea + eb;
+      }
+      const std::size_t through = net_mid_crossings(o.bars);
+      std::printf("OL-NET-FACE %s, %s face: net struts %zu, points on the face %zu of %zu, stems %zu (said %zu, longest %.3f), crossings "
+                  "made joints %zu, joins not laid %zu, net struts crossing mid-bar without a joint %zu; OG5 outside cut "
+                  "%zu, in solid cut %zu removed %zu\n", grown ? "Grown" : "Traced", face == 1 ? "top" : "side", struts, on, pts,
+                  stems, o.net_stems, o.net_stem_longest_mm, o.net_crossing_joints, o.net_kept_apart, through, o.guard.outside_cut,
+                  o.guard.in_solid_cut, o.guard.in_solid_removed);
+      // (every net point on the face but where a foot sits on an edge of the open face, read along its nearer face)
+      CHECK(o.refused.empty() && struts > 0 && on >= 0.95 * pts && stems == o.net_stems && through == 0);
+    }
+  // The two manual variables and the sink act; out of range: refused by name.
+  {
+    Settings st;
+    st.regions = {{1, Role::Lattice, {1}, 8.0, -2.0, true}};
+    st.drop_loose = true;
+    st.skin = true;
+    auto lay = [&](int density, double sink, double width) {
+      Settings x = st;
+      x.regions[0].skin_density = density;
+      x.regions[0].skin_sink = sink;
+      x.regions[0].skin_width_mm = width;
+      Session s(model);
+      return s.lay_organic(x, f, gap_ask(1.6));
+    };
+    const Outcome d1 = lay(1, 0.0, 0.0), d3 = lay(3, 0.0, 0.0), d6 = lay(6, 0.0, 0.0), k1 = lay(3, 1.0, 0.0), w9 = lay(3, 0.0, 0.9);
+    auto net_mm = [](const Outcome& o) { double l = 0.0; for (const Bar& b : o.bars.bars) if (b.face_skin && !b.stem) l += dist(b.a, b.b); return l; };
+    double sunk = 0.0, wmin = 1e9, wmax = 0.0;
+    std::size_t sunk_n = 0;
+    for (const Bar& b : k1.bars.bars)
+      if (b.face_skin && !b.stem) { sunk = std::max(sunk, std::fabs(20.0 - b.a.z - 0.5 * b.width)); ++sunk_n; }
+    for (const Bar& b : w9.bars.bars)
+      if (b.face_skin && !b.stem) { wmin = std::min(wmin, b.width); wmax = std::max(wmax, b.width); }
+    Settings bad = st;
+    bad.regions[0].skin_density = 7;
+    Session sb(model);
+    const Outcome r1 = sb.lay_organic(bad, f, gap_ask(1.6));
+    bad.regions[0].skin_density = 3;
+    bad.regions[0].skin_sink = 1.5;
+    const Outcome r2 = sb.lay_organic(bad, f, gap_ask(1.6));
+    bad.regions[0].skin_sink = 0.0;
+    bad.regions[0].skin_width_mm = 4.0;
+    const Outcome r3 = sb.lay_organic(bad, f, gap_ask(1.6));
+    std::printf("OL-NET-FACE net length at density 1 %.1f, 3 %.1f, 6 %.1f mm; ", net_mm(d1), net_mm(d3), net_mm(d6));
+    std::printf("OL-NET-FACE density 1: %zu net struts, density 6: %zu; sink 1: %zu flat net struts, centre lines one radius under the "
+                "face to %.4f mm; thickness 0.9: net widths %.3f to %.3f; refused: %s / %s / %s\n", d1.net_struts, d6.net_struts,
+                sunk_n, sunk, wmin, wmax, r1.refused.empty() ? "-" : r1.refused[0].code.c_str(),
+                r2.refused.empty() ? "-" : r2.refused[0].code.c_str(), r3.refused.empty() ? "-" : r3.refused[0].code.c_str());
+    // (sink 1: a foot sinks by its own landing's radius; a strut between two landings of different widths is as wide
+    // as the thinner, so its centre line is within half the width difference of one radius under the face)
+    CHECK(net_mm(d3) > 1.33 * net_mm(d1) && net_mm(d6) > 1.33 * net_mm(d3) && sunk_n > 0 && sunk < 0.25 && std::fabs(wmin - 0.9) < 1e-9 && std::fabs(wmax - 0.9) < 1e-9);
+    CHECK(!r1.refused.empty() && r1.refused[0].code == "skin_density_range" && !r2.refused.empty() &&
+          r2.refused[0].code == "skin_sink_range" && !r3.refused.empty() && r3.refused[0].code == "skin_width_range");
   }
 }
 

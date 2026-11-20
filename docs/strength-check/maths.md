@@ -309,3 +309,8 @@ Per judged voxel $v$ (solid share $\ge$ {{printed_threshold}}), with its own $\s
 ### References the code cites
 
 Gibson-Ashby $f^{1.5}$ (`analyze.hpp`:521); Onck, Andrews & Gibson 2001, *Int. J. Mech. Sci.* 43(3), doi:10.1016/S0020-7403(00)00042-4 and 00043-6 (cut-cell no-credit rule, `run_job.cpp`:4326-4334); internal evidence: PR 198/237/246 tensor sweeps, PR 259 de-homogenisation probe, `evidence/2026-11-09-lattice-type-strut-laws`, `evidence/2026-11-01-lattice-types-k1`, `2026-07-28-graded-cell-size-phase0` (C2b), `2026-08-08-lattice-variant-margin-tolerance`.
+
+## The Organic skin (2026-11-19)
+
+Landings: every node of the finished lattice with depth $d\le r+\tfrac12$ reach below the region's open face (the vine ends cut at the face among them, kept by the drop). A landing's foot is $\mathbf p-\mathbf n_{in}\,(d-s\,r)$ with $s=$ `skin_sink` $\in[0,1]$ and $r$ its strut's radius; feet within a quarter width of each other are one. Each landing asks for its `skin_density` $k\in[1,6]$ nearest partners between $0.55$ and $\rho_k$ reaches, $\rho_k=1+(k-3)/6$ for $k\le3$ and $1+(k-3)/2$ above; up to 3 a pair must be wanted both ways, above 3 by either; the fallback within $1.5\,\rho_k$ reaches. A join is skipped when within $20^\circ$ of, and within the half widths plus the gap of, a net strut it does not join (from one foot: within $20\cdot3/k$ degrees above density 3). Crossings become joints; one left mid-bar takes out the later join. The joins lie between feet; stems join each landing to its foot.
+

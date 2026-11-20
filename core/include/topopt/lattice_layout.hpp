@@ -1032,6 +1032,10 @@ struct Bar {
   // Leg H (the app's drawing): the model face (StepModel::triangle_face) nearest where the bar's tube reaches that open
   // face, when along_proud is set and the model carries its faces; -1 otherwise. Not in bars_hash.
   int along_face = -1;
+  // OJ8 (leg M): a net-skin bar or stem laid on an open face (its centre line in the face's plane, or ending on it): the
+  // file cuts it flat at the face; OG5's guard reads it as inside and does not move it. Not in bars_hash.
+  bool face_skin = false;
+  bool stem = false;   // OJ8: of those, a stem (from a landing node to its foot on the face); not in bars_hash
 };
 // OG1: what set the local spacing at a strand point (Bar::local_why, Outcome::tight).
 enum class SpacingWhy : std::uint8_t {
@@ -1414,6 +1418,10 @@ struct Settings {
     std::optional<double> rim_mm, cover_mm;
     std::optional<bool> skin;
     std::optional<double> skin_width_mm, skin_reach_cells;
+    // OJ8 (leg M): an Organic area's net skin: joins per landing (1 to 6) and the sink of its centre line below the face
+    // in net radii (0 to 1); unstated: the part's.
+    std::optional<int> skin_density;
+    std::optional<double> skin_sink;
     // D22: pieces of faces in place of whole faces (region_from_pieces). When there are any,
     // `faces` is not read. An ask with pieces and a zone is left out and listed.
     std::vector<FacePiece> pieces;
@@ -1463,6 +1471,11 @@ struct Settings {
   bool join_loose = true;        // S5
   bool skin = false;             // Finish Skin (S3)
   SkinSpec skin_spec;
+  // OJ8 (leg M; the owner: "skin thickness and density of skin tendrils should be added as manual variables"): the
+  // Organic net skin's joins per landing (1 to 6, 3 as before) and its sink below the open face in net radii (0: the
+  // centre line on the face, cut flat; 1: one radius in, touching, the old engine's). Region's own over these.
+  int skin_density = 3;
+  double skin_sink = 0.0;
   bool drop_loose = true;        // S4, Finish None's rule; then pieces adrift go too
 };
 
@@ -1563,7 +1576,9 @@ struct Outcome {
   double spacing_smallest_mm = 0.0, spacing_largest_mm = 0.0, spacing_mean_mm = 0.0;
   // O16 (lay_organic only): the net skin's struts in `bars` and their length, mm.
   std::size_t net_struts = 0;
-  std::size_t net_kept_apart = 0;   // OJ7: net joins not laid because they would pass within the gap of the net laid
+  std::size_t net_kept_apart = 0;   // OJ7, OJ8: net joins not laid (OJ8: only near-parallel within the gap of a net strut)
+  std::size_t net_stems = 0, net_crossing_joints = 0;   // OJ8: stems to the face; crossings made joints
+  double net_stem_longest_mm = 0.0;
   double net_mm = 0.0;
   // G1 (Organic, Grown; lay_organic with OrganicAsk::mode Grown): what the growth did, every weave region together;
   // null otherwise.
@@ -1681,6 +1696,8 @@ class Session {
     // whether any weave region's Finish is Skin (its own, else the part's): the order of the weave's finish steps.
     std::vector<double> net_width;
     std::vector<double> net_gap;   // OJ7: per net_reach entry, its group's OG1 gap (the net kept that far apart)
+    std::vector<int> net_density;    // OJ8: per net_reach entry, the joins each landing asks for (skin_density, 1 to 6)
+    std::vector<double> net_sink;    // OJ8: per net_reach entry, skin_sink (0 to 1)
     bool net_on = false;
     std::vector<int> arrived;   // G11 (Grown only): weave regions whose vines that reach the surface have arrived
     std::vector<std::pair<int, double>> prune;   // J2 (brief G12): (Grown region, median asked spacing); empty: off

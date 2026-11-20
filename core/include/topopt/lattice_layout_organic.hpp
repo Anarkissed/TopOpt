@@ -498,11 +498,25 @@ std::vector<HoldPatchCount> hold_up_weave(Bars& bars, const Domain& domain, cons
 // A join is a weave bar (`net`): as wide as the thinner landing (or `width_mm` when above 0: SkinSpec::width_mm), `cell` the reach, its ends Node exactly at the two
 // landings; a landing that is a cut end on the surface (Surface) has landed (Joined into the net strut). Nothing is
 // pruned here: drop_loose_bars and the writer's bridge rules (O6 to O10) judge net struts as every bar.
+// OJ8 (leg M; the owner, 2026-11-19: "What is important ... is the cutting along the plane that happens for them. That's
+// what gives it's unique feel. The check to place them inside the lattice shouldn't happen until AFTER we flatten out
+// the skin."): the net lies ON the open face. Landings as before (every node within r + 0.5 x reach of the region's open
+// face); each joined landing gets a STEM along the face's normal to its FOOT on the face (sunk by `sinks` x the net's
+// radius: 0 the centre line on the face, 1 one radius in); the joins run between feet; `densities` (one per entry, 1 to 6;
+// none: 3) is the joins each landing asks for; a join is skipped only when it runs near-parallel (under 20 degrees) within
+// the gap of a net strut it does not join; then every crossing becomes a joint (split_at_crossings). Net struts and stems
+// are Bar::face_skin (OG5 reads them as inside). `report`: what was laid.
+struct NetSkinReport {
+  std::size_t landings = 0, struts = 0, stems = 0, joints_at_crossings = 0, skipped_parallel = 0;
+  double stem_longest_mm = 0.0;
+};
 // Leg J item 1: `widths`, when given, one per `reach` entry: that region's width (in place of width_mm).
 // Returns the number of net struts laid. The same for any number of threads (it runs on one).
 std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std::pair<int, double>>& reach,
                          double width_mm = 0.0, const std::vector<double>* widths = nullptr,
-                         const std::vector<double>* gaps = nullptr, bool keep_apart = true, std::size_t* kept_apart = nullptr);
+                         const std::vector<double>* gaps = nullptr, bool keep_apart = true, std::size_t* kept_apart = nullptr,
+                         const std::vector<int>* densities = nullptr, const std::vector<double>* sinks = nullptr,
+                         NetSkinReport* report = nullptr);
 // OJ7 (leg J, the lead's ruling 6: the net skin kept apart): the joins are laid shortest first (the pairs wanted both
 // ways, then the 1-then-2 fallback, each trying its partners nearest first), and a join whose centre line comes within
 // the two half widths + the region's gap (`gaps`, one per `reach` entry: OG1's gap; none: one line width) of a net strut already laid, other than one

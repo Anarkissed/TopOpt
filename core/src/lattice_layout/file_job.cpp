@@ -196,7 +196,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "protect_face_counts", "protect_faces", "protect_pieces", "protect_chip", "topology", "algorithm", "cell_mm", "cell_max_mm",
        "cell_min_mm", "min_cells_across", "grade_to_shape", "band_mm", "band_cell_mm",
        "per_region", "dial", "dial_region", "dial_value", "strut_width_mm", "allow_quilt",
-       "strength", "small_cells_in_thin_walls", "one_grid", "cells_by_stress", "bars", "join_loose", "skin",
+       "strength", "small_cells_in_thin_walls", "one_grid", "cells_by_stress", "bars", "join_loose", "skin", "skin_density", "skin_sink",
        "skin_width_mm", "skin_reach_cells", "drop_loose", "by_stress", "dial_light", "dial_heavy", "width_light_mm",
        "width_heavy_mm", "reference_mpa", "percentile", "response", "region_own", "max_step", "region_weave", "organic_spacing_mm",
        "organic_width_mm", "organic_spacing_min_mm", "organic_spacing_max_mm", "organic_spacing_exponent",
@@ -223,6 +223,8 @@ Settings settings_from(const json::Value& in, const std::string& w) {
   s.min_wall_mm = num(in, "min_wall_mm", s.min_wall_mm, w);
   s.rim_mm = num(in, "rim_mm", s.rim_mm, w);
   s.cover_mm = num(in, "cover_mm", s.cover_mm, w);
+  s.skin_density = static_cast<int>(std::lround(num(in, "skin_density", 3.0, w)));   // OJ8
+  s.skin_sink = num(in, "skin_sink", 0.0, w);
 
   const std::vector<int> ids = wholes(in, "region_ids", w);
   const std::vector<bool> no_lattice = flags(in, "region_no_lattice", w);
@@ -309,13 +311,15 @@ Settings settings_from(const json::Value& in, const std::string& w) {
     for (std::size_t r = 0; r < nr; ++r) {
       if (list[r].is_null()) continue;
       const json::Value& o = json::as_object(list[r], at);
-      json::reject_unknown(o, {"rim_mm", "cover_mm", "skin", "skin_width_mm", "skin_reach_cells"}, at);
+      json::reject_unknown(o, {"rim_mm", "cover_mm", "skin", "skin_width_mm", "skin_reach_cells", "skin_density", "skin_sink"}, at);
       Settings::RegionAsk& a = s.regions[r];
       if (json::find(o, "rim_mm")) a.rim_mm = num(o, "rim_mm", 0.0, at);
       if (json::find(o, "cover_mm")) a.cover_mm = num(o, "cover_mm", 0.0, at);
       if (json::find(o, "skin")) a.skin = flag(o, "skin", false, at);
       if (json::find(o, "skin_width_mm")) a.skin_width_mm = num(o, "skin_width_mm", 0.0, at);
       if (json::find(o, "skin_reach_cells")) a.skin_reach_cells = num(o, "skin_reach_cells", 0.0, at);
+      if (json::find(o, "skin_density")) a.skin_density = static_cast<int>(std::lround(num(o, "skin_density", 3.0, at)));   // OJ8
+      if (json::find(o, "skin_sink")) a.skin_sink = num(o, "skin_sink", 0.0, at);
     }
   }
   const std::vector<int> pids = wholes(in, "protect_ids", w);

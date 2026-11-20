@@ -1186,7 +1186,7 @@ static void test_net_skin() {
   const Outcome thick = w.lay_organic(wide, field, ask);
   std::size_t thick_nets = 0, thick_wrong = 0;
   for (const Bar& x : thick.bars.bars)
-    if (x.net) { ++thick_nets; thick_wrong += x.width != 1.1; }
+    if (x.net && !x.stem) { ++thick_nets; thick_wrong += x.width != 1.1; }   // (OJ8: a stem is as wide as its vine)
   // The file, made as the file job makes it.
   const Domain& d = *c.domain();
   const OpenSpace open = read_open_space(d, net.layout, 0.25);
