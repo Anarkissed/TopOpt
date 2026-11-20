@@ -4,8 +4,12 @@
 //     (no crack, no twist), its normal smooth around and along: ordinary triangles, so the depth test rejects hidden ones
 //     before they are shaded (the ray-cast bars' impostors could not, which is what lagged past ~37k bars);
 //   * ROUND ENDS: every run end a sphere of its radius (an analytic impostor; a few per vine);
-//   * JOINTS: where vines meet, the vines there blended by a polynomial smooth-min (a short march inside the joint's sphere).
-// All three write the prepass G-buffer the bars write (eye z, normal, albedo, depth), so the deferred shading, the solid view's
+//   * JOINTS: where vines meet, the vines there blended by a polynomial smooth-min (a short march inside the joint's sphere);
+//   * BRIDGES (11-20): a run flatter than 30 degrees in the print file's own section, the D (flat level underside, round top)
+//     or the square bar;
+//   * THE FLAT CUT (11-20): pieces and round ends that reach the part's surface are cut there, the cut face drawn in the
+//     vine's colour (their own two pipelines; the rest keep the fast ones).
+// All of them write the prepass G-buffer the bars write (eye z, normal, albedo, depth), so the deferred shading, the solid view's
 // cut walls and the body treat the vines as they treat bars. Built once per lay (`upload`), drawn every frame (`encode`).
 import Foundation
 import Metal
@@ -21,7 +25,7 @@ struct VineFrame {
     float4x4 eyeFromModel;
     float4x4 eyeNormalBasis;
     float4   albedo;
-    float4   blend;        // x = the joints' smooth-min k (mm)
+    float4   blend;        // x = the joints' smooth-min k (mm); y = 1: the flat cut's face drawn (0: the tests' red control)
 };
 struct VineGBuf {
     float  eyeZ    [[color(0)]];
@@ -45,27 +49,67 @@ struct TubeVOut {
     float  ez;
     float3 en;
 };
-vertex TubeVOut tube_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
-                            const device float4* P [[buffer(0)]], constant VineFrame& F [[buffer(1)]]) {
-    const device float4* q = P + 6 * iid;
+// ── a bridge's section (core weave_tubes.cpp sweep_section; OrganicVineShape.sectionPoint / sectionFrame are the same) ──
+constant float kPi = 3.14159265358979;
+static void sec_frame(float3 t, float3 fallback, thread float3& side, thread float3& up) {
+    float3 sd = float3(-t.y, t.x, 0.0);
+    if (length(sd) < 1e-6) { sd = fallback; }
+    sd = normalize(sd);
+    float3 u = cross(t, sd);
+    if (u.z < 0.0) { u = -u; sd = -sd; }
+    side = sd;
+    up = u;
+}
+// outline point j at half width r: the D (1) two bottom corners then its round top in kSides - 3 facets; the square (2)
+static float2 sec_point(int sec, int j, float r) {
+    j = j % kSides;
+    if (sec == 1) {
+        if (j == 0) { return float2(-r, -r); }
+        if (j == 1) { return float2(r, -r); }
+        float a = kPi * float(j - 2) / float(kSides - 3);
+        return float2(r * cos(a), r * sin(a));
+    }
+    int per = kSides / 4, sd = j / per;
+    float f = float(j % per) / float(per);
+    if (sd == 0) { return float2(-r + 2.0 * r * f, -r); }
+    if (sd == 1) { return float2(r, -r + 2.0 * r * f); }
+    if (sd == 2) { return float2(r - 2.0 * r * f, r); }
+    return float2(-r, r - 2.0 * r * f);
+}
+// the outward normal on facet `quad` (from point quad to quad + 1) at point j: flat faces flat, the D's round top smooth
+static float2 sec_normal(int sec, int quad, int j) {
+    j = j % kSides;
+    if (sec == 1) {
+        if (quad == 0) { return float2(0.0, -1.0); }
+        if (quad == 1) { return float2(1.0, 0.0); }
+        if (quad == kSides - 1) { return float2(-1.0, 0.0); }
+        float a = kPi * float(j - 2) / float(kSides - 3);
+        return float2(cos(a), sin(a));
+    }
+    int sd = quad / (kSides / 4);
+    return sd == 0 ? float2(0.0, -1.0) : sd == 1 ? float2(1.0, 0.0) : sd == 2 ? float2(0.0, 1.0) : float2(-1.0, 0.0);
+}
+struct TubePt { float3 p; float3 n; };   // a vertex in the model's space: where, and the outward normal
+// One piece (q: (a, ra) (b, rb) (ta, flat a) (tb, flat b) (va, section) (vb, -)): the side, 6 x kSides vertices; then a
+// flat end disc at a (3 x kSides) and at b (3 x kSides), drawn only where the file closes the tube flat (q[2].w / q[3].w
+// = 1: into the solid, cut by the part's surface, or any end of a bridge).
+static TubePt tube_point(uint vid, const device float4* q) {
     const int ring[6] = { 0, 1, 0, 0, 1, 1 };
     const int step[6] = { 0, 0, 1, 1, 0, 1 };
-    // the side: 6 x kSides vertices; then a flat end disc at a (3 x kSides) and at b (3 x kSides), drawn only where the
-    // file closes the tube flat (q[2].w / q[3].w = 1: into the solid, or cut by the part's surface)
     int side = 6 * kSides;
     bool disc = int(vid) >= side;
-    int r, k;
-    float ang;
+    int r, k, j, quad = 0;
     if (!disc) {
-        int quad = int(vid) / 6, corner = int(vid) % 6;
+        quad = int(vid) / 6;
+        int corner = int(vid) % 6;
         r = ring[corner];
-        ang = float(quad + step[corner]) * (6.283185307 / float(kSides));
+        j = quad + step[corner];
         k = 1;
     } else {
         int d = int(vid) - side;
         r = d / (3 * kSides);
         int tri = (d % (3 * kSides)) / 3, corner = d % 3;
-        ang = float(tri + (corner == 2 ? 1 : 0)) * (6.283185307 / float(kSides));
+        j = tri + (corner == 2 ? 1 : 0);
         bool on = (r == 0 ? q[2].w : q[3].w) > 0.5;
         k = (!on || corner == 0) ? 0 : 1;   // corner 0 the centre; an end not closed: every corner at the centre (no area)
     }
@@ -79,15 +123,45 @@ vertex TubeVOut tube_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
     float3 n = r == 0 ? q[2].xyz : q[3].xyz;
     float3 v = r == 0 ? q[4].xyz : q[5].xyz;
     v = normalize(v - dot(v, t) * t);
-    float3 w = cross(t, v);
-    float3 radial = cos(ang) * v + sin(ang) * w;
-    float3 off = radial * (rad * kRingScale) * float(k);
+    int sec = int(q[4].w + 0.5);
     float dn = dot(t, n);
-    float3 p = c + off + t * (abs(dn) > 1e-3 ? -dot(off, n) / dn : 0.0);
+    TubePt o;
+    if (sec == 0) {
+        float3 w = cross(t, v);
+        float ang = float(j) * (6.283185307 / float(kSides));
+        float3 radial = cos(ang) * v + sin(ang) * w;
+        float3 off = radial * (rad * kRingScale) * float(k);
+        o.p = c + off + t * (abs(dn) > 1e-3 ? -dot(off, n) / dn : 0.0);
+        o.n = disc ? (r == 0 ? -t : t) : radial;
+        return o;
+    }
+    // ★ a bridge (packed version 2's section): the file's D or square bar, its side level, its flat side down; at a mitre
+    // the mean of this bar's section and the neighbour's (the neighbour's direction: the plane's mirror of this one)
+    float3 sd, up;
+    sec_frame(t, v, sd, up);
+    float2 xy = sec_point(sec, j, rad) * float(k);
+    float3 off = sd * xy.x + up * xy.y;
+    o.p = c + off + t * (abs(dn) > 1e-3 ? -dot(off, n) / dn : 0.0);
+    float3 t2 = 2.0 * dn * n - t;
+    if (dot(t2, t) < 0.99999 && length(t2) > 0.5) {
+        t2 = normalize(t2);
+        float3 sd2, up2;
+        sec_frame(t2, v, sd2, up2);
+        float3 off2 = sd2 * xy.x + up2 * xy.y;
+        float dn2 = dot(t2, n);
+        o.p = 0.5 * (o.p + c + off2 + t2 * (abs(dn2) > 1e-3 ? -dot(off2, n) / dn2 : 0.0));
+    }
+    float2 nn = sec_normal(sec, quad, j);
+    o.n = disc ? (r == 0 ? -t : t) : sd * nn.x + up * nn.y;
+    return o;
+}
+vertex TubeVOut tube_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
+                            const device float4* P [[buffer(0)]], constant VineFrame& F [[buffer(1)]]) {
+    TubePt t = tube_point(vid, P + 6 * iid);
     TubeVOut o;
-    o.pos = F.clipFromModel * float4(p, 1.0);
-    o.ez = -(F.eyeFromModel * float4(p, 1.0)).z;
-    o.en = (F.eyeNormalBasis * float4(disc ? (r == 0 ? -t : t) : radial, 0.0)).xyz;
+    o.pos = F.clipFromModel * float4(t.p, 1.0);
+    o.ez = -(F.eyeFromModel * float4(t.p, 1.0)).z;
+    o.en = (F.eyeNormalBasis * float4(t.n, 0.0)).xyz;
     return o;
 }
 fragment VineGBuf tube_gbuffer(TubeVOut in [[stage_in]], constant VineFrame& F [[buffer(1)]]) {
@@ -133,6 +207,121 @@ static VineGBufDepth vine_out(float3 p, float3 n, constant VineFrame& F) {
     return o;
 }
 
+// ── ★ THE FLAT CUT (his 11-20 skin note: "the cutting along the plane ... gives it its unique feel"): the print file trims
+// every tube to the part, so a piece that reaches the part's surface carries that surface where it lies: every facet plane
+// of the part's mesh within its reach (OrganicVineShape.Cut; 7 float4 a piece: the six above, then (first, count, union)
+// into the plane list). Convex there, the part is inside them all; concave, inside any: the part's own faceted surface, so
+// overlapping pieces are cut alike. Its fragments outside are dropped; where the ray enters the part INSIDE the tube (seen
+// through the opening, on the tube's far side) the surface itself is drawn there, in the vine's colour, with its own
+// depth: the cut face. ──
+struct VineGBufCut {
+    float  eyeZ    [[color(0)]];
+    float4 enormal [[color(1)]];
+    float4 albedo  [[color(2)]];
+    float  depth   [[depth(less)]];   // the cut face lies in front of the far side it is drawn for
+};
+struct TubeCutVOut {
+    float4 pos [[position]];
+    float4 cpos;
+    float3 mp;
+    float3 mn;
+    uint   iid [[flat]];
+};
+// outside the part a cut's planes bound (OrganicVineShape.Cut.outside is the same): outside any (convex), all (concave)
+static bool cut_outside(float3 p, const device float4* pl, int n, bool un) {
+    for (int i = 0; i < n && i < 16; ++i) {
+        bool o = dot(pl[i].xyz, p) + pl[i].w > 1e-4;
+        if (un && !o) { return false; }
+        if (!un && o) { return true; }
+    }
+    return un;
+}
+// where the ray enters the part the planes bound (t, and the plane's normal there), or 1e20: never, or the eye already
+// inside (then no cut face shows on this ray). Convex: the last plane it enters, if before the first it leaves; concave:
+// the first it enters.
+static float cut_entry(float3 ro, float3 rd, const device float4* pl, int n, bool un, thread float3& nrm) {
+    float tIn = un ? 1e20 : -1e20, tOut = 1e20;
+    bool entered = false;
+    for (int i = 0; i < n && i < 16; ++i) {
+        float d0 = dot(pl[i].xyz, ro) + pl[i].w, dn = dot(pl[i].xyz, rd);
+        if (un) {
+            if (d0 <= 0.0) { return 1e20; }
+            if (dn < -1e-9) { float t = -d0 / dn; if (t < tIn) { tIn = t; nrm = pl[i].xyz; entered = true; } }
+        } else {
+            if (abs(dn) < 1e-9) { if (d0 > 0.0) { return 1e20; } continue; }
+            float t = -d0 / dn;
+            if (dn < 0.0) { if (t > tIn) { tIn = t; nrm = pl[i].xyz; entered = true; } }
+            else { tOut = min(tOut, t); }
+        }
+    }
+    if (!entered || tIn < 0.0 || (!un && tIn > tOut)) { return 1e20; }
+    return tIn;
+}
+// x inside piece q's own shape: within its section, between its end planes where the tube is closed flat; past an open
+// end (a round end, or a joint with the next piece of the run) up to one radius on (what lies there is the next piece or
+// the ball: a ray seen through one piece's cut may leave by its neighbour's far side)
+static bool vine_in_piece(float3 x, const device float4* q) {
+    float3 a = q[0].xyz, ab = q[1].xyz - a;
+    float L = length(ab);
+    if (L < 1e-6) { return false; }
+    float3 t = ab / L;
+    float along = dot(x - a, t);
+    if (q[2].w > 0.5 ? dot(x - a, q[2].xyz) < -2e-3 : along < -q[0].w) { return false; }
+    if (q[3].w > 0.5 ? dot(x - q[1].xyz, q[3].xyz) > 2e-3 : along > L + q[1].w) { return false; }
+    float r = mix(q[0].w, q[1].w, clamp(along / L, 0.0, 1.0)) + 2e-3;
+    float3 d = (x - a) - t * along;
+    int sec = int(q[4].w + 0.5);
+    if (sec == 0) { return length(d) <= r * kRingScale; }
+    float3 sd, up;
+    sec_frame(t, normalize(q[4].xyz), sd, up);
+    float X = dot(d, sd), Y = dot(d, up);
+    if (sec == 1) { return Y <= 0.0 ? (abs(X) <= r && Y >= -r) : (X * X + Y * Y <= r * r); }
+    return abs(X) <= r && abs(Y) <= r;
+}
+static VineGBufCut vine_cut_out(float3 p, float3 n, float depth, constant VineFrame& F) {
+    float3 eyeP = (F.eyeFromModel * float4(p, 1.0)).xyz;
+    float3 eyeN = normalize((F.eyeNormalBasis * float4(n, 0.0)).xyz);
+    if (eyeN.z < 0.0) { eyeN = -eyeN; }
+    VineGBufCut o;
+    o.eyeZ = -eyeP.z;
+    o.enormal = float4(eyeN, 0.0);
+    o.albedo = float4(F.albedo.rgb, 1.0);
+    o.depth = depth;
+    return o;
+}
+vertex TubeCutVOut tube_cut_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
+                                   const device float4* P [[buffer(0)]], constant VineFrame& F [[buffer(1)]]) {
+    TubePt t = tube_point(vid, P + 7 * iid);
+    TubeCutVOut o;
+    o.pos = F.clipFromModel * float4(t.p, 1.0);
+    o.cpos = o.pos;
+    o.mp = t.p;
+    o.mn = t.n;
+    o.iid = iid;
+    return o;
+}
+fragment VineGBufCut tube_cut_gbuffer(TubeCutVOut in [[stage_in]], const device float4* P [[buffer(0)]],
+                                      constant VineFrame& F [[buffer(1)]], const device float4* planes [[buffer(2)]]) {
+    const device float4* q = P + 7 * in.iid;
+    const device float4* pl = planes + int(q[6].x + 0.5);
+    int n = int(q[6].y + 0.5);
+    bool un = q[6].z > 0.5;
+    if (cut_outside(in.mp, pl, n, un)) { discard_fragment(); }
+    float3 ro, rd;
+    vine_ray(in.cpos, F, ro, rd);
+    if (dot(in.mn, rd) <= 0.0) { return vine_cut_out(in.mp, in.mn, in.pos.z, F); }   // the near side, inside the part
+    // the far side: only as the cut face, where the ray enters the part inside the tube before this point
+    if (F.blend.y < 0.5) { discard_fragment(); }
+    float tp = dot(in.mp - ro, rd);
+    float3 bn = float3(0.0);
+    float tf = cut_entry(ro, rd, pl, n, un, bn);
+    if (tf > tp + 1e-4) { discard_fragment(); }
+    float3 f = ro + rd * tf;
+    if (!vine_in_piece(f, q)) { discard_fragment(); }
+    float4 clip = F.clipFromModel * float4(f, 1.0);
+    return vine_cut_out(f, bn, min(clip.z / clip.w, in.pos.z), F);
+}
+
 // ── the round ends: a sphere per run end (xyz, r) ──
 vertex BoxVOut cap_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
                           const device float4* caps [[buffer(0)]], constant VineFrame& F [[buffer(1)]]) {
@@ -154,6 +343,37 @@ fragment VineGBufDepth cap_gbuffer(BoxVOut in [[stage_in]], const device float4*
     if (t < 0.0) { discard_fragment(); }
     float3 p = ro + rd * t;
     return vine_out(p, normalize(p - S.xyz), F);
+}
+// ★ the flat cut on a round end (2 float4 per end: (xyz, r), then (first, count, union) into the plane list): the sphere
+// inside the part, and the cut face where the ray enters the part inside it
+vertex BoxVOut cap_cut_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
+                              const device float4* caps [[buffer(0)]], constant VineFrame& F [[buffer(1)]]) {
+    BoxVOut o;
+    o.pos = box_corner(vid, caps[2 * iid], F);
+    o.cpos = o.pos;
+    o.iid = iid;
+    return o;
+}
+fragment VineGBufDepth cap_cut_gbuffer(BoxVOut in [[stage_in]], const device float4* caps [[buffer(0)]],
+                                       constant VineFrame& F [[buffer(1)]], const device float4* planes [[buffer(2)]]) {
+    float4 S = caps[2 * in.iid], m = caps[2 * in.iid + 1];
+    const device float4* pl = planes + int(m.x + 0.5);
+    int n = int(m.y + 0.5);
+    bool un = m.z > 0.5;
+    float3 ro, rd;
+    vine_ray(in.cpos, F, ro, rd);
+    float3 oc = ro - S.xyz;
+    float b = dot(rd, oc), h = b * b - (dot(oc, oc) - S.w * S.w);
+    if (h < 0.0) { discard_fragment(); }
+    float sh = sqrt(h), t0 = -b - sh, t1 = -b + sh;
+    if (t1 < 0.0) { discard_fragment(); }
+    float3 p = ro + rd * t0;
+    if (t0 >= 0.0 && !cut_outside(p, pl, n, un)) { return vine_out(p, normalize(p - S.xyz), F); }
+    if (F.blend.y < 0.5) { discard_fragment(); }
+    float3 bn = float3(0.0);
+    float tf = cut_entry(ro, rd, pl, n, un, bn);
+    if (tf < max(t0, 0.0) || tf > t1) { discard_fragment(); }
+    return vine_out(ro + rd * tf, bn, F);
 }
 
 // ── the joints: inside each joint's sphere, its vines blended (plain union within a vine, smooth-min across vines) ──
@@ -303,17 +523,27 @@ final class OrganicVinePass {
     nonisolated(unsafe) static var lastInitError: String?
     /// Timing switches (the frame-time probe turns passes off one at a time).
     nonisolated(unsafe) static var drawTubes = true, drawCaps = true, drawJoints = true
+    /// The flat cut's face (the tests' red control turns it off: the cut tubes are then hollow).
+    nonisolated(unsafe) static var drawCutFace = true
     let device: MTLDevice
     let tubePipeline: MTLRenderPipelineState
     let capPipeline: MTLRenderPipelineState
     let jointPipeline: MTLRenderPipelineState
+    /// ★ The flat cut: the pieces and round ends that reach the part's surface, cut there (their own buffers).
+    let tubeCutPipeline: MTLRenderPipelineState
+    let capCutPipeline: MTLRenderPipelineState
     private(set) var pieceBuffer: MTLBuffer?
     private(set) var capBuffer: MTLBuffer?
+    private(set) var cutPieceBuffer: MTLBuffer?
+    private(set) var cutCapBuffer: MTLBuffer?
+    private(set) var cutPlaneBuffer: MTLBuffer?
     private(set) var vineOfBuffer: MTLBuffer?
     private(set) var jointBuffer: MTLBuffer?
     private(set) var listBuffer: MTLBuffer?
     private(set) var pieceCount = 0
     private(set) var capCount = 0
+    private(set) var cutPieceCount = 0
+    private(set) var cutCapCount = 0
     private(set) var jointCount = 0
     private(set) var blendMM: Float = 0
 
@@ -346,23 +576,49 @@ final class OrganicVinePass {
         tubePipeline = try pipe("tube_vertex", "tube_gbuffer")
         capPipeline = try pipe("cap_vertex", "cap_gbuffer")
         jointPipeline = try pipe("joint_vertex", "joint_gbuffer")
+        tubeCutPipeline = try pipe("tube_cut_vertex", "tube_cut_gbuffer")
+        capCutPipeline = try pipe("cap_cut_vertex", "cap_cut_gbuffer")
     }
 
-    /// Six float4 per piece: (a, ra) (b, rb) (ta, flat a) (tb, flat b) (va) (vb); ta / tb = the normal of the plane each end's
-    /// ring lies on; flat = 1 where the file closes that end with a flat disc.
-    static func pack(_ s: OrganicVineShape) -> [SIMD4<Float>] {
+    /// Six float4 per piece: (a, ra) (b, rb) (ta, flat a) (tb, flat b) (va, section) (vb); ta / tb = the normal of the plane
+    /// each end's ring lies on; flat = 1 where the file closes that end with a flat disc; section the file's (0 round, 1 the
+    /// D, 2 the square bar). `cut` true: seven, the seventh (first, count, union) into `planes`, where the piece's cut planes
+    /// are appended.
+    static func pack(_ s: OrganicVineShape, cut: Bool? = nil, planes: inout [SIMD4<Float>]) -> [SIMD4<Float>] {
         var out = [SIMD4<Float>]()
-        out.reserveCapacity(6 * s.pieces.count)
-        for q in s.pieces {
+        out.reserveCapacity((cut == true ? 7 : 6) * s.pieces.count)
+        for q in s.pieces where cut == nil || q.isCut == cut {
             out.append(SIMD4(q.a, q.ra)); out.append(SIMD4(q.b, q.rb))
             out.append(SIMD4(q.ta, q.flatA ? 1 : 0)); out.append(SIMD4(q.tb, q.flatB ? 1 : 0))
-            out.append(SIMD4(q.va, 0)); out.append(SIMD4(q.vb, 0))
+            out.append(SIMD4(q.va, Float(q.section))); out.append(SIMD4(q.vb, 0))
+            if cut == true, let c = q.cut { out.append(Self.meta(c, &planes)) }
         }
         return out
     }
+    static func pack(_ s: OrganicVineShape) -> [SIMD4<Float>] {
+        var none: [SIMD4<Float>] = []
+        return pack(s, cut: nil, planes: &none)
+    }
+    /// A cut's planes appended to `planes` (at most OrganicVineShape.maxCutPlanes), and its (first, count, union, 0).
+    static func meta(_ c: OrganicVineShape.Cut, _ planes: inout [SIMD4<Float>]) -> SIMD4<Float> {
+        let first = planes.count
+        planes += c.planes.prefix(OrganicVineShape.maxCutPlanes)
+        return SIMD4(Float(first), Float(planes.count - first), c.union ? 1 : 0, 0)
+    }
 
     func upload(_ s: OrganicVineShape) {
-        let packed = Self.pack(s)
+        // the cut pieces and ends draw by their own pipelines (a joint's list indexes the one buffer: none cut with joints)
+        let split = s.joints.isEmpty && s.pieces.contains(where: \.isCut)
+        var planes: [SIMD4<Float>] = []
+        let packed = Self.pack(s, cut: split ? false : nil, planes: &planes)
+        let cutPacked = split ? Self.pack(s, cut: true, planes: &planes) : []
+        var caps = s.caps, cutCaps: [SIMD4<Float>] = []
+        if s.joints.isEmpty, s.capCuts.count == s.caps.count, !s.caps.isEmpty {
+            caps = []
+            for (k, c) in s.caps.enumerated() {
+                if let cut = s.capCuts[k] { cutCaps += [c, Self.meta(cut, &planes)] } else { caps.append(c) }
+            }
+        }
         let vineOf = s.pieces.map { UInt32(bitPattern: $0.vine) }
         var joints = [GPUJoint](), list = [UInt32]()
         for j in s.joints {
@@ -373,33 +629,52 @@ final class OrganicVinePass {
         func buf<T>(_ a: [T]) -> MTLBuffer? {
             a.isEmpty ? nil : device.makeBuffer(bytes: a, length: MemoryLayout<T>.stride * a.count, options: .storageModeShared)
         }
-        pieceBuffer = buf(packed); capBuffer = buf(s.caps); vineOfBuffer = buf(vineOf); jointBuffer = buf(joints); listBuffer = buf(list)
-        pieceCount = pieceBuffer == nil ? 0 : s.pieces.count
-        capCount = capBuffer == nil ? 0 : s.caps.count
+        pieceBuffer = buf(packed); capBuffer = buf(caps); vineOfBuffer = buf(vineOf); jointBuffer = buf(joints); listBuffer = buf(list)
+        cutPieceBuffer = buf(cutPacked); cutCapBuffer = buf(cutCaps); cutPlaneBuffer = buf(planes)
+        pieceCount = pieceBuffer == nil ? 0 : packed.count / 6
+        capCount = capBuffer == nil ? 0 : caps.count
+        cutPieceCount = cutPieceBuffer == nil || cutPlaneBuffer == nil ? 0 : cutPacked.count / 7
+        cutCapCount = cutCapBuffer == nil || cutPlaneBuffer == nil ? 0 : cutCaps.count / 2
         jointCount = pieceBuffer == nil ? 0 : joints.count
         blendMM = s.params.blendMM
     }
 
-    var isDrawable: Bool { pieceCount > 0 }
+    var isDrawable: Bool { pieceCount + cutPieceCount > 0 }
 
     /// `turning`: a camera gesture is down (his picks 11-16, lighter while turning): the joints' blends wait for the frame at rest.
     func encode(_ enc: MTLRenderCommandEncoder, depthState: MTLDepthStencilState, clipFromModel: simd_float4x4,
                 eyeFromModel: simd_float4x4, eyeNormalBasis: simd_float4x4, albedo: SIMD4<Float>, turning: Bool = false) -> Bool {
-        guard isDrawable, let pieceBuffer, enc.device === device else { return false }
+        guard isDrawable, enc.device === device else { return false }
         var f = Frame(clipFromModel: clipFromModel, modelFromClip: clipFromModel.inverse, eyeFromModel: eyeFromModel,
-                      eyeNormalBasis: eyeNormalBasis, albedo: albedo, blend: SIMD4(blendMM, 0, 0, 0))
+                      eyeNormalBasis: eyeNormalBasis, albedo: albedo, blend: SIMD4(blendMM, Self.drawCutFace ? 1 : 0, 0, 0))
         enc.setDepthStencilState(depthState)
         enc.setCullMode(.none)
-        enc.setRenderPipelineState(tubePipeline)
-        enc.setVertexBuffer(pieceBuffer, offset: 0, index: 0)
         enc.setVertexBytes(&f, length: MemoryLayout<Frame>.stride, index: 1)
         enc.setFragmentBytes(&f, length: MemoryLayout<Frame>.stride, index: 1)
-        if Self.drawTubes { enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 12 * Self.sides, instanceCount: pieceCount) }
+        if Self.drawTubes, pieceCount > 0, let pieceBuffer {
+            enc.setRenderPipelineState(tubePipeline)
+            enc.setVertexBuffer(pieceBuffer, offset: 0, index: 0)
+            enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 12 * Self.sides, instanceCount: pieceCount)
+        }
+        if Self.drawTubes, cutPieceCount > 0, let cutPieceBuffer {   // ★ the flat cut
+            enc.setRenderPipelineState(tubeCutPipeline)
+            enc.setVertexBuffer(cutPieceBuffer, offset: 0, index: 0)
+            enc.setFragmentBuffer(cutPieceBuffer, offset: 0, index: 0)
+            enc.setFragmentBuffer(cutPlaneBuffer, offset: 0, index: 2)
+            enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 12 * Self.sides, instanceCount: cutPieceCount)
+        }
         if Self.drawCaps, capCount > 0, let capBuffer {
             enc.setRenderPipelineState(capPipeline)
             enc.setVertexBuffer(capBuffer, offset: 0, index: 0)
             enc.setFragmentBuffer(capBuffer, offset: 0, index: 0)
             enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 36, instanceCount: capCount)
+        }
+        if Self.drawCaps, cutCapCount > 0, let cutCapBuffer {   // ★ the flat cut on round ends
+            enc.setRenderPipelineState(capCutPipeline)
+            enc.setVertexBuffer(cutCapBuffer, offset: 0, index: 0)
+            enc.setFragmentBuffer(cutCapBuffer, offset: 0, index: 0)
+            enc.setFragmentBuffer(cutPlaneBuffer, offset: 0, index: 2)
+            enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 36, instanceCount: cutCapCount)
         }
         if Self.drawJoints, !turning, jointCount > 0, let jointBuffer, let listBuffer, let vineOfBuffer {
             enc.setRenderPipelineState(jointPipeline)

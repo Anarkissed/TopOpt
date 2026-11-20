@@ -583,6 +583,8 @@ public struct LatticeSetupWizard: View {
     /// True once this sheet reset an inherited swept/fit window to Auto for organic,
     /// so the pane can SAY it happened instead of the job quietly changing.
     @State private var organicWindowReset = false
+    /// ★ His 11-20 skin rows: the last skin thickness the engine would refuse, said under the row.
+    @State private var organicSkinRefusal: String?
     private var organicDensityIndex: Int {
         if model.organicStrutWidthMM > 0 { return model.simulateStresses ? 2 : 1 }
         return (model.simulateStresses && model.densityMode == .sim) ? 1 : 0
@@ -828,7 +830,46 @@ public struct LatticeSetupWizard: View {
                 }
             }
             .modifier(LatticeSegmentTrack())
+            if shown == .skin, latticeManual { organicSkinRows(group: group, look: look) }
         })
+    }
+
+    /// ★ His 11-20 skin note: "skin thickness and density of skin tendrils should be added as manual variables" (Manual
+    /// only; Auto sends the engine's Auto). Thickness: 0 (Auto) to 3 mm, typed; density: 1 to 6, 3 the usual.
+    @ViewBuilder
+    private func organicSkinRows(group: UUID, look: LatticeOrganicLook) -> some View {
+        HStack(spacing: DS.Space.s) {
+            Text("Skin thickness").dsStyle(DS.TypeScale.caption).fontWeight(.semibold).lineLimit(1)
+            Spacer(minLength: DS.Space.xs)
+            OrganicNumberField(value: (look.skinWidthMM ?? 0) > 0 ? look.skinWidthMM : nil, auto: nil, unit: "mm",
+                               placeholder: "Auto") { v in
+                if let v, let why = LatticeOrganicLook.Check.skinWidth(v) { organicSkinRefusal = why; return }
+                organicSkinRefusal = nil
+                var l = project.lattice.organicLook(group: group)
+                l.skinWidthMM = v.flatMap { $0 > 0 ? $0 : nil }
+                project.lattice.setOrganicLook(l, group: group)
+                rebuild()
+            }
+        }
+        .frame(minHeight: 44)
+        .latticeID("lattice-organic-skin-thickness")
+        if let why = organicSkinRefusal {
+            Text(why).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.warning.color).lineLimit(2)
+        }
+        Text("Skin density").font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)
+            .foregroundStyle(DS.Color.textTertiary.color)
+        HStack(spacing: 4) {
+            ForEach(Array(LatticeOrganicLook.skinDensityRange), id: \.self) { k in
+                segmentButton("\(k)", on: look.skinDensityValue == k, greyed: false) {
+                    var l = project.lattice.organicLook(group: group)
+                    l.skinDensity = k == LatticeOrganicLook.skinDensityAuto ? nil : k
+                    project.lattice.setOrganicLook(l, group: group)
+                    rebuild()
+                }
+                .latticeID("lattice-organic-skin-density-\(k)")
+            }
+        }
+        .modifier(LatticeSegmentTrack())
     }
 
     /// ★ His 11-19 note: Traced or Grown in Auto, on the Part tab, for the whole part (every group).

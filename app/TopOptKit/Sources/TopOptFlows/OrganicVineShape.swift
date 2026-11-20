@@ -36,6 +36,13 @@ public struct OrganicVineShape: Equatable, Sendable {
         public var ta = SIMD3<Float>(0, 0, 1), tb = SIMD3<Float>(0, 0, 1), va = SIMD3<Float>(1, 0, 0), vb = SIMD3<Float>(1, 0, 0)
         /// The file closes this end with a flat disc (a run end into the solid or cut by the part's surface).
         public var flatA = false, flatB = false
+        /// The print file's section (the run's): 0 round; 1 a bridge's D (flat level underside, round top); 2 a square bar.
+        public var section: UInt8 = 0
+        /// ★ The flat cut (his 11-20 skin note, "the cutting along the plane ... gives it its unique feel"): the part's
+        /// surface where this piece reaches it (nil: it does not). The print file trims every tube to the part, so the
+        /// drawing cuts it there and paints the cut face in the vine's colour.
+        public var cut: Cut?
+        public var isCut: Bool { cut != nil }
         public init(a: SIMD3<Float>, ra: Float, b: SIMD3<Float>, rb: Float, vine: Int32) {
             self.a = a; self.ra = ra; self.b = b; self.rb = rb; self.vine = vine
         }
@@ -48,6 +55,26 @@ public struct OrganicVineShape: Equatable, Sendable {
     public var joints: [Joint] = []
     /// The round ends: every run end, a sphere of its radius (xyz, r).
     public var caps: [SIMD4<Float>] = []
+    /// `tubes(runs:)`: the run each cap ends (one per cap).
+    public var capVines: [Int32] = []
+    /// `cut(runs:surface:)`: each cap's cut (as Piece.cut), or empty (none cut).
+    public var capCuts: [Cut?] = []
+    /// ★ The part's surface near a piece, as the drawing cuts it: EVERY facet plane of the part's mesh within the piece's
+    /// reach, (outward normal, w); a point x is outside a plane where dot(n, x) + w > 0. Convex there (`union` false): the
+    /// part is inside them all; concave (true): inside any. Either way it is the part's own faceted surface where the piece
+    /// lies, so two pieces that overlap are cut by the same facets (no step where one meets the other).
+    public struct Cut: Equatable, Sendable {
+        public var planes: [SIMD4<Float>]
+        public var union: Bool
+        public init(planes: [SIMD4<Float>], union: Bool) { self.planes = planes; self.union = union }
+        /// Whether `p` is outside the part, as the shader reads it (cut_outside).
+        public func outside(_ p: SIMD3<Float>) -> Bool {
+            func out(_ P: SIMD4<Float>) -> Bool { simd_dot(SIMD3(P.x, P.y, P.z), p) + P.w > 1e-4 }
+            return union ? planes.allSatisfy(out) : planes.contains(where: out)
+        }
+    }
+    /// The most facets one cut holds (the shader's loop bound); a piece with more keeps the nearest.
+    public static let maxCutPlanes = 16
     public var params = Params()
     public init() {}
 
@@ -63,7 +90,11 @@ public struct OrganicVineShape: Equatable, Sendable {
     ///     them, so the tube bends with a clean elbow of its own width, no ball;
     ///   * a sharper turn ends the tube and starts it again: square ends, a round ball there;
     ///   * a run end is square, with a round half-sphere at a node, a loose or joined end; flat (no ball) where it runs
-    ///     into the solid or is cut by the part's surface.
+    ///     into the solid or is cut by the part's surface;
+    ///   * a BRIDGE run (packed version 2's section, a run lying flatter than 30 degrees) is swept with its own section, the
+    ///     file's D (a level flat underside, a round top) or square bar, its side level and its flat side down at every bar;
+    ///     at an inner point the ring is the mean of where the two bars' sections meet the bisecting plane; both ends flat,
+    ///     never a ball. (The file runs a bridge's end on by a fraction of a millimetre into whatever it meets; not drawn.)
     /// Ring side vectors are carried round each bend by the rotation that turns one bar onto the next, so the two rings
     /// at a mitre are the same ring point for point (no crack). Drawn by `OrganicVinePass` (its tube shader puts each ring
     /// on its end's plane: `tubeRingPoint` is the same arithmetic).
@@ -76,6 +107,8 @@ public struct OrganicVineShape: Equatable, Sendable {
         }
         for (vi, r) in runs.enumerated() where r.points.count >= 2 {
             let n = r.points.count
+            let bridge = r.section == 1 || r.section == 2
+            func ball(_ c: SIMD3<Float>, _ rad: Float) { s.caps.append(SIMD4(c, rad)); s.capVines.append(Int32(vi)) }
             var u = [SIMD3<Float>](), keep = [Int]()
             for k in 0..<(n - 1) {
                 let d = r.points[k + 1] - r.points[k]
@@ -101,19 +134,26 @@ public struct OrganicVineShape: Equatable, Sendable {
                 let (na, splitA) = plane(prevBar, outgoing: false)
                 let (nb, splitB) = plane(nextBar, outgoing: true)
                 q.ta = na; q.tb = nb
-                s.pieces.append(q)
-                if splitA { s.caps.append(SIMD4(a, ra)) }
-                if splitB { s.caps.append(SIMD4(b, rb)) }
+                q.section = bridge ? r.section : 0
+                if bridge {   // a bridge's every end is flat: a split is two flat ends, no ball
+                    q.flatA = splitA; q.flatB = splitB
+                    s.pieces.append(q)
+                } else {
+                    s.pieces.append(q)
+                    if splitA { ball(a, ra) }
+                    if splitB { ball(b, rb) }
+                }
                 // carry the side vector onto the next bar: the rotation turning this bar onto it
                 if let o = nextBar { v = Self.carried(v, from: u[bi], to: o) }
                 else if bi + 1 < u.count { v = Self.carried(v, from: u[bi], to: u[bi + 1]) }
             }
             // the run's own ends: a round half-sphere unless it runs into the solid or is cut by the part's surface
-            func rounded(_ e: UInt8) -> Bool { e != 1 && e != 2 }   // core's Bar::End: Node, Solid, Surface, Loose, Joined
+            // a proud Surface end (OG2: proud_a / proud_b > 0) is round too; a bridge's ends are always flat
+            func rounded(_ e: UInt8, proud: Float) -> Bool { !bridge && ((e != 1 && e != 2) || (e == 2 && proud > 0)) }
             let first = s.pieces.count - keep.count, last = s.pieces.count - 1
-            if rounded(r.endA) { s.caps.append(SIMD4(r.points[0], r.widthMM[0] / 2)) }
+            if rounded(r.endA, proud: r.proudA) { ball(r.points[0], r.widthMM[0] / 2) }
             else if keep.first == 0 { s.pieces[first].flatA = true }
-            if rounded(r.endB) { s.caps.append(SIMD4(r.points[n - 1], r.widthMM[n - 1] / 2)) }
+            if rounded(r.endB, proud: r.proudB) { ball(r.points[n - 1], r.widthMM[n - 1] / 2) }
             else if keep.last == n - 2 { s.pieces[last].flatB = true }
         }
         return s
@@ -149,6 +189,207 @@ public struct OrganicVineShape: Equatable, Sendable {
         let dn = simd_dot(t, n)
         let sAlong = abs(dn) > 1e-3 ? -simd_dot(off, n) / dn : 0
         return c + off + t * sAlong
+    }
+
+    // ── the bridges' sections (core weave_tubes.cpp sweep_section, kinds 1 and 2), as the tube shader draws them ──
+
+    /// A bridge's frame on a bar of direction `t` (the file's): its side level, square to the bar; up = t x side, upward.
+    public static func sectionFrame(_ t: SIMD3<Float>, fallback v: SIMD3<Float>) -> (side: SIMD3<Float>, up: SIMD3<Float>) {
+        var sd = SIMD3<Float>(-t.y, t.x, 0)
+        if simd_length(sd) < 1e-6 { sd = v }
+        sd = simd_normalize(sd)
+        var up = simd_cross(t, sd)
+        if up.z < 0 { up = -up; sd = -sd }
+        return (sd, up)
+    }
+
+    /// The section's outline point `j` (0 ..< sides, in order round it) at half width r, in (side, up). The D (section 1):
+    /// its two bottom corners, then its round top from (r, 0) over to (-r, 0) in sides - 3 facets. The square (2): four points
+    /// a side from its bottom-left corner.
+    public static func sectionPoint(_ section: UInt8, _ j: Int, _ r: Float, sides: Int = 16) -> SIMD2<Float> {   // the pass's sides
+        let j = j % sides
+        if section == 1 {
+            if j == 0 { return SIMD2(-r, -r) }
+            if j == 1 { return SIMD2(r, -r) }
+            let a = Float.pi * Float(j - 2) / Float(sides - 3)
+            return SIMD2(r * cos(a), r * sin(a))
+        }
+        let per = sides / 4, f = Float(j % per) / Float(per), sideNo = j / per
+        switch sideNo {
+        case 0: return SIMD2(-r + 2 * r * f, -r)
+        case 1: return SIMD2(r, -r + 2 * r * f)
+        case 2: return SIMD2(r - 2 * r * f, r)
+        default: return SIMD2(-r, r - 2 * r * f)
+        }
+    }
+
+    /// A bridge's ring point exactly as the tube shader places it: outline point `j` at end `atB` of piece `q`, on that end's
+    /// plane; at a mitre the mean of this bar's section and the neighbouring bar's, each pushed along its own bar onto the
+    /// plane (the file's rule). The neighbour's direction is the plane's mirror of this one (the plane bisects the two).
+    public static func sectionRingPoint(_ q: Piece, atB: Bool, _ j: Int) -> SIMD3<Float> {
+        let d = q.b - q.a
+        let t = simd_length(d) > 1e-9 ? simd_normalize(d) : SIMD3<Float>(0, 0, 1)
+        let c = atB ? q.b : q.a, rad = atB ? q.rb : q.ra
+        let n = atB ? q.tb : q.ta
+        let xy = sectionPoint(q.section, j, rad)
+        func pushed(_ t: SIMD3<Float>) -> SIMD3<Float> {
+            let f = sectionFrame(t, fallback: q.va)
+            let off = f.side * xy.x + f.up * xy.y
+            let dn = simd_dot(t, n)
+            return c + off + t * (abs(dn) > 1e-3 ? -simd_dot(off, n) / dn : 0)
+        }
+        let dn = simd_dot(t, n)
+        let t2 = 2 * dn * n - t
+        if simd_dot(t2, t) < 0.99999, simd_length(t2) > 0.5 { return 0.5 * (pushed(t) + pushed(simd_normalize(t2))) }
+        return pushed(t)
+    }
+
+    // ── the flat cut (his 11-20 skin note) ──
+
+    /// The part's surface, for cutting the vines flat where they cross it (the print file trims every tube to the part:
+    /// core weave_tubes.cpp, OF3). Triangles with their planes (outward), found by a 2 mm hash.
+    public struct CutSurface: Sendable {
+        struct Tri: Sendable { var a, b, c: SIMD3<Float>; var plane: SIMD4<Float>; var face: Int32 }
+        var tris: [Tri] = []
+        var hash: [SIMD3<Int32>: [Int32]] = [:]
+        static let cell: Float = 2
+        static func key(_ p: SIMD3<Float>) -> SIMD3<Int32> { SIMD3<Int32>((p / cell).rounded(.down)) }
+
+        /// `vertices` xyz, `indices` three per triangle, `faceIDs` one per triangle (optional). Outward is read from the
+        /// mesh's signed volume, so either winding works.
+        public init(vertices: [Float], indices: [Int32], faceIDs: [Int32] = []) {
+            let nt = indices.count / 3
+            func v(_ i: Int32) -> SIMD3<Float> { let k = 3 * Int(i); return SIMD3(vertices[k], vertices[k + 1], vertices[k + 2]) }
+            var vol: Float = 0
+            for t in 0..<nt {
+                let a = v(indices[3 * t]), b = v(indices[3 * t + 1]), c = v(indices[3 * t + 2])
+                vol += simd_dot(a, simd_cross(b, c))
+            }
+            let sign: Float = vol < 0 ? -1 : 1
+            tris.reserveCapacity(nt)
+            for t in 0..<nt {
+                let a = v(indices[3 * t]), b = v(indices[3 * t + 1]), c = v(indices[3 * t + 2])
+                let cr = simd_cross(b - a, c - a)
+                let l = simd_length(cr)
+                guard l > 1e-12 else { continue }
+                let n = sign * cr / l
+                let k = Int32(tris.count)
+                tris.append(Tri(a: a, b: b, c: c, plane: SIMD4(n, -simd_dot(n, a)), face: t < faceIDs.count ? faceIDs[t] : -1))
+                let lo = Self.key(simd_min(a, simd_min(b, c))), hi = Self.key(simd_max(a, simd_max(b, c)))
+                for z in lo.z...hi.z { for y in lo.y...hi.y { for x in lo.x...hi.x { hash[SIMD3(x, y, z), default: []].append(k) } } }
+            }
+        }
+
+        /// The nearest point of triangle t to p (Ericson, Real-Time Collision Detection 5.1.5).
+        static func closest(_ p: SIMD3<Float>, _ t: Tri) -> SIMD3<Float> {
+            let a = t.a, b = t.b, c = t.c
+            let ab = b - a, ac = c - a, ap = p - a
+            let d1 = simd_dot(ab, ap), d2 = simd_dot(ac, ap)
+            if d1 <= 0 && d2 <= 0 { return a }
+            let bp = p - b
+            let d3 = simd_dot(ab, bp), d4 = simd_dot(ac, bp)
+            if d3 >= 0 && d4 <= d3 { return b }
+            let vc = d1 * d4 - d3 * d2
+            if vc <= 0 && d1 >= 0 && d3 <= 0 { return a + ab * (d1 / (d1 - d3)) }
+            let cp = p - c
+            let d5 = simd_dot(ab, cp), d6 = simd_dot(ac, cp)
+            if d6 >= 0 && d5 <= d6 { return c }
+            let vb = d5 * d2 - d1 * d6
+            if vb <= 0 && d2 >= 0 && d6 <= 0 { return a + ac * (d2 / (d2 - d6)) }
+            let va = d3 * d6 - d5 * d4
+            if va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0 { return b + (c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6))) }
+            let den = 1 / (va + vb + vc)
+            return a + ab * (vb * den) + ac * (vc * den)
+        }
+
+        /// The triangles within `reach` of any of `pts`, nearest first.
+        func near(_ pts: [SIMD3<Float>], reach: Float) -> [(d: Float, t: Int32)] {
+            guard !tris.isEmpty, let first = pts.first else { return [] }
+            var lo = first, hi = first
+            for p in pts { lo = simd_min(lo, p); hi = simd_max(hi, p) }
+            let kl = Self.key(lo - reach), kh = Self.key(hi + reach)
+            var seen = Set<Int32>()
+            var out: [(d: Float, t: Int32)] = []
+            for z in kl.z...kh.z { for y in kl.y...kh.y { for x in kl.x...kh.x {
+                for t in hash[SIMD3(x, y, z)] ?? [] where seen.insert(t).inserted {
+                    let tri = tris[Int(t)]
+                    var d = Float.greatestFiniteMagnitude
+                    for p in pts { d = Swift.min(d, simd_length(p - Self.closest(p, tri))) }
+                    if d <= reach { out.append((d, t)) }
+                }
+            } } }
+            return out.sorted { $0.d < $1.d }
+        }
+
+        /// Whether triangle j lies behind (or on) triangle i's plane: the pair is CONVEX there (the part is the two
+        /// half-spaces' common part); in front, CONCAVE (their union).
+        func convex(_ i: Int32, _ j: Int32) -> Bool {
+            let p = tris[Int(i)].plane, q = tris[Int(j)]
+            return simd_dot(SIMD3(p.x, p.y, p.z), (q.a + q.b + q.c) / 3) + p.w <= 1e-4
+        }
+        func samePlane(_ i: Int32, _ j: Int32) -> Bool {
+            let p = tris[Int(i)].plane, q = tris[Int(j)].plane
+            return simd_dot(SIMD3(p.x, p.y, p.z), SIMD3(q.x, q.y, q.z)) > 0.99999 && abs(p.w - q.w) < 1e-4
+        }
+        /// Every distinct facet plane within `reach` of `pts`, nearest first, as one Cut: the nearest facet, then each further
+        /// facet that keeps the set of one kind (each convex to all the others: the part inside them all; each concave to all
+        /// the others: inside any), at most `maxCutPlanes`. nil when the surface is not within reach.
+        func cut(near pts: [SIMD3<Float>], reach: Float) -> Cut? {
+            let all = near(pts, reach: reach)
+            guard let first = all.first?.t else { return nil }
+            var chosen: [Int32] = [first]
+            var union: Bool?
+            for c in all.dropFirst() where chosen.count < OrganicVineShape.maxCutPlanes {
+                guard !chosen.contains(where: { samePlane($0, c.t) }) else { continue }
+                let conv = chosen.allSatisfy { convex($0, c.t) && convex(c.t, $0) }
+                let conc = chosen.allSatisfy { !convex($0, c.t) && !convex(c.t, $0) }
+                if let u = union {
+                    if u ? !conc : !conv { continue }
+                } else if conv {
+                    union = false
+                } else if conc {
+                    union = true
+                } else {
+                    continue
+                }
+                chosen.append(c.t)
+            }
+            return Cut(planes: chosen.map { tris[Int($0)].plane }, union: union ?? false)
+        }
+    }
+
+    /// ★ The flat cut: every piece and round end that reaches the part's surface gets that surface's plane(s), so the drawing
+    /// cuts it there and paints the cut face in the vine's colour, as the print file trims it. A run the file lets stand
+    /// proud (OG2: a proud end, or a run along an open face with depth variation) is left whole.
+    public mutating func cut(runs: [LatticeLayoutSession.Run], surface: CutSurface) {
+        func free(_ vine: Int32) -> Bool {
+            let i = Int(vine)
+            return i < 0 || i >= runs.count || runs[i].standsProud || runs[i].marks.contains(.along)
+        }
+        for i in pieces.indices {
+            let q = pieces[i]
+            pieces[i].cut = nil
+            guard !free(q.vine) else { continue }
+            // its reach: the widest its section gets from the centre line (the square bar's corner), and past an open end
+            // the radius on (the next piece or the ball there: the shader takes the cut face one radius past such an end)
+            let widest = Swift.max(q.ra, q.rb) * (q.section == 0 ? 1.02 : 1.4143)
+            let len = simd_length(q.b - q.a)
+            let m = Swift.max(1, Int((len / 0.5).rounded(.up)))
+            var pts = (0...m).map { q.a + (q.b - q.a) * (Float($0) / Float(m)) }
+            if len > 1e-6 {
+                let t = (q.b - q.a) / len
+                if !q.flatA { pts.insert(q.a - t * q.ra, at: 0) }
+                if !q.flatB { pts.append(q.b + t * q.rb) }
+            }
+            pieces[i].cut = surface.cut(near: pts, reach: widest + 0.5 * len / Float(m) + 0.01)
+        }
+        capCuts = []
+        guard capVines.count == caps.count else { return }
+        var out = [Cut?](repeating: nil, count: caps.count)
+        for (k, c) in caps.enumerated() where !free(capVines[k]) {
+            out[k] = surface.cut(near: [SIMD3(c.x, c.y, c.z)], reach: c.w + 0.01)
+        }
+        if out.contains(where: { $0 != nil }) { capCuts = out }
     }
 
     /// Release (10)'s drawing (option A of LatticeReview's sheet for him): kept so it can be shown and compared.

@@ -144,6 +144,37 @@ final class LatticeOrganicCut1Tests: XCTestCase {
         XCTAssertNil(LatticeLayoutSession.runs(packed: Array(b.prefix(30))), "RED CONTROL: a short packet is refused")
     }
 
+    /// ★ Packed version 2 (the cut 2 engine; LatticeReview 11-20 03:54Z, final for the skin leg): "WRN2", u32 2, then per run
+    /// 28 bytes (the pad now the section; proud_a, proud_b, along_face, proud_mm), per point the file's ring width.
+    @MainActor
+    func testVersionTwoRunsReadBack() throws {
+        var b: [UInt8] = Array("WRN2".utf8)
+        func u32(_ v: UInt32) { withUnsafeBytes(of: v.littleEndian) { b.append(contentsOf: $0) } }
+        func f(_ v: Float) { u32(v.bitPattern) }
+        u32(2)
+        u32(2); u32(7); b.append(contentsOf: [8, 0, 2, 1])   // 2 points, region 7, the net, Node / Surface, the D
+        f(0); f(0.4); u32(UInt32(bitPattern: 20)); f(0.6)
+        for p: [Float] in [[0, 0, 0, 1.2, 4], [1, 2, 3, 1.4, 5]] { p.forEach(f) }
+        u32(1); u32(9); b.append(contentsOf: [16, 1, 1, 2 | 4 | 8])   // bit 2 swept (OV1), bit 3 held: neither is the section
+        f(0); f(0); u32(UInt32(bitPattern: -1)); f(0)
+        [5, 5, 5, 0.9, 3].forEach { f(Float($0)) }
+        let runs = try XCTUnwrap(LatticeLayoutSession.runs(packed: b), "★ version 2 reads")
+        XCTAssertEqual(runs.count, 2)
+        XCTAssertEqual(runs[0].marks, .net); XCTAssertEqual(runs[0].endB, 2)
+        XCTAssertEqual(runs[0].section, 1, "★ the section byte")
+        XCTAssertEqual(runs[0].proudA, 0); XCTAssertEqual(runs[0].proudB, 0.4, accuracy: 1e-6)
+        XCTAssertEqual(runs[0].alongFace, 20); XCTAssertEqual(runs[0].proudMM, 0.6, accuracy: 1e-6)
+        XCTAssertTrue(runs[0].standsProud)
+        XCTAssertEqual(runs[0].widthMM, [1.2, 1.4], "the file's ring widths"); XCTAssertEqual(runs[0].spacingMM, [4, 5])
+        XCTAssertEqual(runs[1].marks, .along); XCTAssertEqual(runs[1].section, 2); XCTAssertEqual(runs[1].alongFace, -1)
+        XCTAssertTrue(runs[1].swept, "★ bit 2: the file's swept centre line (OV1)"); XCTAssertFalse(runs[0].swept)
+        XCTAssertFalse(runs[1].standsProud)
+        var bad = b
+        bad[4] = 3
+        XCTAssertNil(LatticeLayoutSession.runs(packed: bad), "RED CONTROL: another version is refused, never misread")
+        XCTAssertNil(LatticeLayoutSession.runs(packed: Array(b.prefix(40))), "RED CONTROL: a short packet is refused")
+    }
+
     /// ★ The key and the card read Organic's struts (no cells): the net skin is boundary work (the rim blue), a strut's
     /// density is its width over its cell size (no strut type's law), and the lay time is on screen.
     @MainActor

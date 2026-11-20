@@ -271,13 +271,15 @@ struct OrganicNumberField: View {
     let auto: Double?
     let unit: String
     var locked = false
+    /// What the empty field shows in place of `auto`'s number (e.g. "Auto" where the engine works the number out).
+    var placeholder: String? = nil
     let apply: (Double?) -> Void
     @State private var text = ""
     @State private var editing = false
 
     var body: some View {
         HStack(spacing: 4) {
-            TextField(auto.map(StrengthCheckDocs.number) ?? "–",
+            TextField(placeholder ?? auto.map(StrengthCheckDocs.number) ?? "–",
                       text: Binding(get: { editing ? text : value.map(StrengthCheckDocs.number) ?? "" },
                                     set: { text = $0; editing = true }))
                 .textFieldStyle(.roundedBorder)

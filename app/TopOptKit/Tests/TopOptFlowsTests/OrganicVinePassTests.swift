@@ -98,6 +98,67 @@ final class OrganicVinePassTests: XCTestCase {
         }
     }
 
+    /// ★ The flat cut on the app's renderer (his 11-20 skin note, "the cutting along the plane ... gives it its unique feel"):
+    /// a vine lying ON a box's face (as the skin's net does), seen edge-on, loses the half outside the part; seen from
+    /// outside, the cut face is drawn where the tube was (no hole). RED CONTROLS: uncut, the outside half is there; with the
+    /// cut face off, the cut tube is hollow.
+    func testTheFlatCutOnTheRenderer() throws {
+        guard let device = MTLCreateSystemDefaultDevice(),
+              let r = MeshRenderer(device: device, sampleCount: 1) else { throw XCTSkip("no renderer: \(MeshRenderer.lastInitError ?? "?")") }
+        // the box 0..20 x 0..10 x 0..20 (y up on screen), a round vine and a D bridge on its face y = 10
+        let v: [Float] = [0, 0, 0, 20, 0, 0, 20, 10, 0, 0, 10, 0, 0, 0, 20, 20, 0, 20, 20, 10, 20, 0, 10, 20]
+        let idx: [Int32] = [0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 3, 7, 6, 3, 6, 2, 0, 4, 7, 0, 7, 3, 1, 2, 6, 1, 6, 5]
+        func run(_ pts: [SIMD3<Float>], _ section: UInt8) -> LatticeLayoutSession.Run {
+            var x = LatticeLayoutSession.Run(region: 1, marks: .net, endA: 0, endB: 0, points: pts,
+                                             widthMM: [Float](repeating: 2, count: pts.count), spacingMM: [Float](repeating: 4, count: pts.count))
+            x.section = section
+            return x
+        }
+        let runs = [run([SIMD3(3, 10, 6), SIMD3(10, 10, 6), SIMD3(17, 10, 6)], 0), run([SIMD3(3, 10, 14), SIMD3(17, 10, 14)], 1)]
+        let whole = OrganicVineShape.tubes(runs: runs)
+        var cut = whole
+        cut.cut(runs: runs, surface: OrganicVineShape.CutSurface(vertices: v, indices: idx))
+        XCTAssertTrue(cut.pieces.allSatisfy(\.isCut), "premise: both lie on the face")
+        r.setMesh(ViewerMesh(vertices: v, indices: idx, faceIDs: [Int32](repeating: 1, count: idx.count / 3)))
+        r.setBodyAlpha(0)
+        let clear = MTLClearColor(red: 0.07, green: 0.07, blue: 0.09, alpha: 1)
+        let seg = LatticeLayoutPreview.segments(runs)
+        // the camera turns about a point ON the face (y = 10): at elevation 0 the eye is in the face's plane, truly edge-on
+        r.camera.target = SIMD3(10, 10, 10)
+        var token = 10
+        let shots = ProcessInfo.processInfo.environment["VINE_SHOT_DIR"]
+        if let shots { try FileManager.default.createDirectory(atPath: shots, withIntermediateDirectories: true) }
+        func covered(_ shape: OrganicVineShape, azimuth: Float, elevation: Float, face: Bool = true, name: String) throws -> Int {
+            OrganicVinePass.drawCutFace = face
+            defer { OrganicVinePass.drawCutFace = true }
+            r.camera.setOrientation(azimuth: azimuth, elevation: elevation)
+            token += 1
+            var bars = LatticeLayoutBarsInputs(token: token, bars: seg.bars, flags: seg.flags)
+            bars.vines = shape
+            XCTAssertTrue(r.applyLayoutBars(bars, device: device))
+            XCTAssertNil(OrganicVinePass.lastInitError, "★ the cut's shaders build")
+            let f = try XCTUnwrap(r.renderOffscreen(width: 600, height: 600, clear: clear, stage: false))
+            if let shots { try LatticeLayoutStandProbe.png(f, 600, 600, to: (shots as NSString).appendingPathComponent("vine-cut-\(name).png")) }
+            let bg = Array(f[0..<4])
+            return stride(from: 0, to: f.count, by: 4).filter { Array(f[$0..<$0 + 4]) != bg }.count
+        }
+        // edge-on (the face seen as a line): half of each vine is outside the part
+        let sideWhole = try covered(whole, azimuth: 0, elevation: 0, name: "side-whole")
+        let sideCut = try covered(cut, azimuth: 0, elevation: 0, name: "side-cut")
+        // from outside, straight down onto the face: the cut face fills the tube's outline
+        let topWhole = try covered(whole, azimuth: 0, elevation: 1.5, name: "top-whole")
+        let topCut = try covered(cut, azimuth: 0, elevation: 1.5, name: "top-cut")
+        let topHollow = try covered(cut, azimuth: 0, elevation: 1.5, face: false, name: "top-hollow")
+        _ = try covered(whole, azimuth: 0.5, elevation: 0.6, name: "whole")
+        _ = try covered(cut, azimuth: 0.5, elevation: 0.6, name: "cut")
+        print("VINE CUT: edge-on \(sideCut) of \(sideWhole) pixels; from above \(topCut) of \(topWhole) (hollow \(topHollow))")
+        XCTAssertGreaterThan(sideWhole, 2_000, "premise: the vines are on screen")
+        XCTAssertLessThan(Double(sideCut), 0.6 * Double(sideWhole), "★ edge-on, the half outside the part is gone")
+        XCTAssertGreaterThan(Double(sideCut), 0.4 * Double(sideWhole), "★ and the half inside stays")
+        XCTAssertGreaterThan(Double(topCut), 0.95 * Double(topWhole), "★ from outside, the cut face is drawn where the tube was")
+        XCTAssertLessThan(Double(topHollow), 0.5 * Double(topCut), "RED CONTROL: without the cut face the cut tube is hollow")
+    }
+
     /// OPT-IN timing on a .vrun (his stand's runs): the vines at 2048 x 1536, ten frames, the time per frame.
     func testTheVinesFrameTimeOnHisStand() throws {
         guard let path = ProcessInfo.processInfo.environment["VINE_RUNS_FILE"] else { throw XCTSkip("opt-in: VINE_RUNS_FILE") }

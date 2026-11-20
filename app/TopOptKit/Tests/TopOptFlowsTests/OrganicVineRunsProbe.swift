@@ -27,6 +27,98 @@ final class OrganicVineRunsProbe: XCTestCase {
         try b.write(to: url.deletingPathExtension().appendingPathExtension("box"))
     }
 
+    /// A .vrun read back (version 1 as written above; version 2 as LatticeReview writes the cut 2 engine's: per run 28 bytes,
+    /// the pad the section, then proud_a, proud_b, along_face, proud_mm; per point x y z and the file's ring width), and its
+    /// .box beside it. Spacing is not in the file (0).
+    static func read(_ url: URL) throws -> (runs: [LatticeLayoutSession.Run], lo: SIMD3<Float>, hi: SIMD3<Float>) {
+        let d = [UInt8](try Data(contentsOf: url))
+        var i = 0
+        func u32() throws -> UInt32 {
+            guard i + 4 <= d.count else { throw NSError(domain: "vrun", code: 1) }
+            defer { i += 4 }
+            return UInt32(d[i]) | UInt32(d[i + 1]) << 8 | UInt32(d[i + 2]) << 16 | UInt32(d[i + 3]) << 24
+        }
+        func f32() throws -> Float { Float(bitPattern: try u32()) }
+        guard d.count >= 12, String(bytes: d[0..<4], encoding: .ascii) == "VRUN" else { throw NSError(domain: "vrun", code: 2) }
+        i = 4
+        let ver = try u32(), n = try u32()
+        var runs: [LatticeLayoutSession.Run] = []
+        for _ in 0..<n {
+            let m = Int(try u32()), region = Int32(bitPattern: try u32())
+            guard i + 4 <= d.count else { throw NSError(domain: "vrun", code: 3) }
+            var r = LatticeLayoutSession.Run(region: region, marks: .init(rawValue: d[i]), endA: d[i + 1], endB: d[i + 2],
+                                             points: [], widthMM: [], spacingMM: [])
+            if ver >= 2 { r.section = d[i + 3] & 3; r.swept = d[i + 3] & 4 != 0 }   // bits 0-1; bit 2 swept (OV1)
+            i += 4
+            if ver >= 2 {
+                r.proudA = try f32(); r.proudB = try f32(); r.alongFace = Int32(bitPattern: try u32()); r.proudMM = try f32()
+            }
+            for _ in 0..<m {
+                r.points.append(SIMD3(try f32(), try f32(), try f32())); r.widthMM.append(try f32()); r.spacingMM.append(0)
+            }
+            runs.append(r)
+        }
+        guard i == d.count else { throw NSError(domain: "vrun", code: 4) }
+        let b = [UInt8](try Data(contentsOf: url.deletingPathExtension().appendingPathExtension("box")))
+        var f: [Float] = []
+        for k in 0..<6 {
+            var bits = UInt32(b[4 * k])
+            bits |= UInt32(b[4 * k + 1]) << 8
+            bits |= UInt32(b[4 * k + 2]) << 16
+            bits |= UInt32(b[4 * k + 3]) << 24
+            f.append(Float(bitPattern: bits))
+        }
+        return (runs, SIMD3(f[0], f[1], f[2]), SIMD3(f[3], f[4], f[5]))
+    }
+
+    /// OPT-IN (VINE_V2_DIR = LatticeReview's cut 2 runs, version 2, e.g. runs362/out5; VINE_SHOT_DIR = where the pictures go,
+    /// outside the repo): his 11-20 skin note drawn on the app's renderer, on the samples' own bodies. "before" = today's
+    /// drawing (every run round, nothing cut); "after" = the print file's sections and the flat cut. Counts printed.
+    @MainActor
+    func testTheSkinsFlatCutOnTheSamples() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let src = env["VINE_V2_DIR"], let dir = env["VINE_SHOT_DIR"] else { throw XCTSkip("opt-in: VINE_V2_DIR and VINE_SHOT_DIR") }
+        guard let device = MTLCreateSystemDefaultDevice() else { throw XCTSkip("no Metal device") }
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let files = try FileManager.default.contentsOfDirectory(atPath: src).filter { $0.hasSuffix(".vrun") }.sorted()
+        XCTAssertFalse(files.isEmpty, "premise: runs to draw")
+        for name in files {
+            let (runs, _, _) = try Self.read(URL(fileURLWithPath: src).appendingPathComponent(name))
+            let body = try TopOptKit.latticeSampleBody(cube: name.hasPrefix("cube"))
+            let mesh = ViewerMesh(vertices: body.vertices, indices: body.indices, faceIDs: [Int32](repeating: 1, count: body.indices.count / 3))
+            var round = runs
+            for i in round.indices { round[i].section = 0 }
+            let before = OrganicVineShape.tubes(runs: round)
+            let t0 = Date()
+            var after = OrganicVineShape.tubes(runs: runs)
+            after.cut(runs: runs, surface: OrganicVineShape.CutSurface(vertices: body.vertices, indices: body.indices))
+            let ms = Date().timeIntervalSince(t0) * 1000
+            let net = runs.filter { $0.marks.contains(.net) }
+            let netCut = after.pieces.filter { $0.isCut && runs[Int($0.vine)].marks.contains(.net) }.count
+            let netPieces = after.pieces.filter { runs[Int($0.vine)].marks.contains(.net) }.count
+            print(String(format: "VINE-CUT %@: %d runs (%d net), %d pieces, %d cut (%d of %d net pieces), %d bridges; built and cut in %.0f ms",
+                         name, runs.count, net.count, after.pieces.count, after.pieces.filter(\.isCut).count, netCut, netPieces,
+                         after.pieces.filter { $0.section != 0 }.count, ms))
+            let seg = LatticeLayoutPreview.segments(runs)
+            for (tag, shape) in [("before", before), ("after", after)] {
+                for (view, az, el, zoom) in [("whole", Float(0.55), Float(0.35), Float(1)), ("top", Float(0.4), Float(1.05), Float(0.45))] {
+                    guard let rr = MeshRenderer(device: device, sampleCount: 4) else { throw XCTSkip("renderer") }
+                    rr.setMesh(mesh)
+                    rr.setBodyAlpha(LatticeLayoutPreview.ghostAlpha)
+                    var inputs = LatticeLayoutBarsInputs(token: 1, bars: seg.bars, flags: seg.flags)
+                    inputs.vines = shape
+                    XCTAssertTrue(rr.applyLayoutBars(inputs, device: device))
+                    rr.camera.setOrientation(azimuth: az, elevation: el)
+                    if zoom != 1 { rr.camera.zoom(zoom) }
+                    let px = try XCTUnwrap(rr.renderOffscreen(width: 1200, height: 900,
+                                                              clear: MTLClearColor(red: 0.07, green: 0.07, blue: 0.09, alpha: 1)))
+                    let stem = (name as NSString).deletingPathExtension
+                    try LatticeLayoutStandProbe.png(px, 1200, 900, to: (dir as NSString).appendingPathComponent("\(stem)-\(view)-\(tag).png"))
+                }
+            }
+        }
+    }
+
     @MainActor
     func testWriteTheSamplesRuns() async throws {
         guard let dir = ProcessInfo.processInfo.environment["VINE_RUNS_DIR"] else { throw XCTSkip("opt-in: VINE_RUNS_DIR") }

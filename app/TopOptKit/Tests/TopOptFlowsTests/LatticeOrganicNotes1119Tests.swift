@@ -55,6 +55,30 @@ final class LatticeOrganicNotes1119Tests: XCTestCase {
         XCTAssertEqual(LatticeOrganicLook.strandKeepOff, 0.5)
     }
 
+    /// ★ His 11-20 skin note: "skin thickness and density of skin tendrils should be added as manual variables". Auto by
+    /// default (thickness Auto, density 3), the engine's ranges (OJ8: 0 to 3 mm; 1 to 6), saved with the project, an untouched
+    /// look writes neither, and not offered until the engine takes a group's finish.
+    func testTheSkinsTwoManualVariables() throws {
+        var l = LatticeOrganicLook()
+        XCTAssertNil(l.skinWidthMM, "★ thickness Auto")
+        XCTAssertEqual(l.skinDensityValue, 3, "★ density 3, the usual")
+        XCTAssertEqual(Array(LatticeOrganicLook.skinDensityRange), [1, 2, 3, 4, 5, 6])
+        XCTAssertNil(LatticeOrganicLook.Check.skinWidth(0), "0 = Auto")
+        XCTAssertNil(LatticeOrganicLook.Check.skinWidth(1.2))
+        XCTAssertNil(LatticeOrganicLook.Check.skinWidth(3))
+        XCTAssertNotNil(LatticeOrganicLook.Check.skinWidth(3.5), "★ past the engine's 3 mm: refused in a plain line")
+        XCTAssertNotNil(LatticeOrganicLook.Check.skinWidth(-1))
+        l.skinWidthMM = 1.2
+        l.skinDensity = 5
+        let back = try JSONDecoder().decode(LatticeOrganicLook.self, from: JSONEncoder().encode(l))
+        XCTAssertEqual(back, l, "saved with the project")
+        let fresh = String(decoding: try JSONEncoder().encode(LatticeOrganicLook()), as: UTF8.self)
+        XCTAssertFalse(fresh.contains("skinWidth") || fresh.contains("skinDensity"), "★ an untouched look writes no key")
+        let old = try JSONDecoder().decode(LatticeOrganicLook.self, from: Data(#"{"lookPercent": 40}"#.utf8))
+        XCTAssertNil(old.skinDensity, "an older project reads")
+        XCTAssertFalse(LatticeOrganicLook.finishWired, "★ not offered until the engine takes a group's finish")
+    }
+
     func testOrganicIsOneColourAndTheRegularLatticeKeepsItsKey() {
         var l = LatticeLayoutColours.Laid()
         // two bars: one plain, one flagged skin (bit 1)

@@ -53,6 +53,17 @@ public struct LatticeOrganicLook: Codable, Equatable, Sendable {
         public var title: String { switch self { case .none: return "None"; case .skin: return "Skin"; case .solid: return "Solid" } }
     }
     public var finish: Finish?
+    /// ★ His 11-20 skin note (via LatticeReview 01:49Z): "skin thickness and density of skin tendrils should be added as
+    /// manual variables". The engine's OJ8 keys: `skin_width_mm` 0 to 3 mm (nil or 0 = Auto: the thinner vine's width) and
+    /// `skin_density` a whole number 1 to 6 (nil = 3, the old engine's joining; 1 nearest neighbours only, 6 the widest).
+    /// Shown in Manual under a Skin finish; Auto sends neither.
+    public var skinWidthMM: Double?
+    public var skinDensity: Int?
+    public var skinDensityValue: Int { skinDensity ?? Self.skinDensityAuto }
+    public static let skinDensityAuto = 3, skinDensityRange = 1...6, skinWidthMaxMM = 3.0
+    public static let skinWidthInfo = "How thick the skin's strands are. Auto makes them as thick as the thinner vine they join."
+    public static let skinDensityInfo = "How many strands each landing on the face joins: 1 joins only nearest neighbours, "
+        + "6 the most. 3 is the usual."
     /// ★ Cut 2 (his 11-19, via LatticeReview 19:51Z): depth variation, "a single on/off that limits to 1mm". On sends
     /// `organic_face_relief_mm` 1.0 (vines keep their round tops up to 1 mm outside an open face), off sends 0 (every vine
     /// cut flush at the face). "Default is not flush" (on). Loaded and fixed faces stay flush whatever it says.
@@ -217,6 +228,10 @@ public struct LatticeOrganicLook: Codable, Equatable, Sendable {
         public static func atLeastZero(_ name: String, _ v: Double) -> String? { v >= 0 ? nil : "\(name): 0 or above" }
         public static func runsPerEnd(_ v: Double) -> String? {
             v >= 1 && v == v.rounded() ? nil : "Runs per end: a whole number, 1 or more"
+        }
+        /// ★ OJ8: skin thickness 0 (Auto) to 3 mm, the engine's range (skin_width_range).
+        public static func skinWidth(_ v: Double) -> String? {
+            (0...LatticeOrganicLook.skinWidthMaxMM).contains(v) ? nil : "Skin thickness: 0 (Auto) to \(n(LatticeOrganicLook.skinWidthMaxMM)) mm"
         }
     }
 

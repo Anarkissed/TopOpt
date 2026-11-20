@@ -84,13 +84,30 @@ extension LatticeLayoutSession {
             public init(rawValue: UInt8) { self.rawValue = rawValue }
             public static let levelTie = Marks(rawValue: 1), brace = Marks(rawValue: 2), support = Marks(rawValue: 4)
             public static let net = Marks(rawValue: 8)
+            /// Leg H: the run lies along an allowed open face (its bars may stand proud by `proudMM`).
+            public static let along = Marks(rawValue: 16)
         }
         public var region: Int32
         public var marks: Marks
         public var endA: UInt8, endB: UInt8   // core's Bar::End
         public var points: [SIMD3<Float>]
+        /// Version 1: each point's width (at an inner point the mean of its two bars). Version 2: the print file's RING width
+        /// (the end bar's at the run's ends, the larger of the two bars at an inner point).
         public var widthMM: [Float]
         public var spacingMM: [Float]
+        /// Packed version 2 (the cut 2 engine). The run's section as the print file sweeps it: 0 round, 1 a bridge with a
+        /// round top (its flat underside level), 2 a square bridge. Runs break where it changes.
+        public var section: UInt8 = 0
+        /// Packed version 2, bit 2 of the section byte (OV1, his 11-20 "Definitely curved"): the points are the print file's
+        /// SWEPT centre line, each with its ring width; drawn as they are (short mitred pieces), no curve of the app's own.
+        public var swept = false
+        /// How far each end stands proud of the open face (0 = flush), the model face the run lies along (-1 none), and how
+        /// far its tube may stand out where it runs along that face (0 none).
+        public var proudA: Float = 0, proudB: Float = 0
+        public var alongFace: Int32 = -1
+        public var proudMM: Float = 0
+        /// The print file lets this run stand out of the part's surface (it is not cut flat there).
+        public var standsProud: Bool { proudA > 0 || proudB > 0 || proudMM > 0 }
     }
 
     /// The weave's preview: what was laid, its runs, the lay's own result (counts, timings; its bars are the weave's —
@@ -231,8 +248,12 @@ extension LatticeLayoutSession {
         }
     }
 
-    /// core's pack_weave_runs, read back: per run 12 bytes (point count u32, region i32, marks u8, end_a u8, end_b u8, pad),
-    /// then 20 bytes per point (x, y, z, width, spacing, float32), little-endian. nil when the bytes do not add up.
+    /// core's pack_weave_runs, read back, little-endian; nil when the bytes do not add up.
+    /// Version 1: per run 12 bytes (point count u32, region i32, marks u8, end_a u8, end_b u8, pad), then 20 bytes per point
+    /// (x, y, z, width, spacing, float32).
+    /// Version 2 (the cut 2 engine, LatticeReview 11-20 03:54Z, "final for this leg"): "WRN2" and u32 2 first; per run 28 bytes
+    /// (the same 12, the pad now the SECTION byte: bits 0-1 the section, bit 2 a swept centre line (OV1), bits 3-7 held; then
+    /// proud_a f32, proud_b f32, along_face i32, proud_mm f32); per point the same 20 bytes, the width now the file's ring width.
     public static func runs(packed b: [UInt8]) -> [Run]? {
         var out: [Run] = []
         var i = 0
@@ -242,10 +263,21 @@ extension LatticeLayoutSession {
             return UInt32(b[i]) | UInt32(b[i + 1]) << 8 | UInt32(b[i + 2]) << 16 | UInt32(b[i + 3]) << 24
         }
         func f32() -> Float? { u32().map { Float(bitPattern: $0) } }
+        let v2 = b.count >= 8 && b[0] == 0x57 && b[1] == 0x52 && b[2] == 0x4E && b[3] == 0x32   // "WRN2"
+        if v2 {
+            i = 4
+            guard u32() == 2 else { return nil }
+        }
         while i < b.count {
             guard let n = u32(), let region = u32(), i + 4 <= b.count else { return nil }
-            let marks = b[i], ea = b[i + 1], eb = b[i + 2]
+            // the section is bits 0-1 of that byte; bit 2 a swept centre line (OV1); bits 3-7 held
+            let marks = b[i], ea = b[i + 1], eb = b[i + 2], section = v2 ? b[i + 3] & 3 : 0, swept = v2 && b[i + 3] & 4 != 0
             i += 4
+            var pa: Float = 0, pb: Float = 0, face: Int32 = -1, pm: Float = 0
+            if v2 {
+                guard let a = f32(), let bb = f32(), let f = u32(), let m = f32() else { return nil }
+                pa = a; pb = bb; face = Int32(bitPattern: f); pm = m
+            }
             guard Int(n) <= (b.count - i) / 20 else { return nil }
             var pts: [SIMD3<Float>] = [], w: [Float] = [], sp: [Float] = []
             pts.reserveCapacity(Int(n)); w.reserveCapacity(Int(n)); sp.reserveCapacity(Int(n))
@@ -254,7 +286,8 @@ extension LatticeLayoutSession {
                 pts.append(SIMD3(x, y, z)); w.append(wd); sp.append(s)
             }
             out.append(Run(region: Int32(bitPattern: region), marks: Run.Marks(rawValue: marks), endA: ea, endB: eb,
-                           points: pts, widthMM: w, spacingMM: sp))
+                           points: pts, widthMM: w, spacingMM: sp, section: section, swept: swept, proudA: pa, proudB: pb,
+                           alongFace: face, proudMM: pm))
         }
         return out
     }

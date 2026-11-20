@@ -121,6 +121,10 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// ★ THE SOLID VIEW (his ask 11-13): X-ray off draws the part solid, cut open where the lattice is (the engine's map).
     private var solidWanted = false
     private var box: (lo: SIMD3<Float>, hi: SIMD3<Float>)?
+    /// ★ The flat cut (his 11-20 skin note): the part's surface the vines are cut at, and the mesh it is built from (once
+    /// per part, off the main thread, at the first Organic lay).
+    private var cutMesh: ImportedMesh?
+    private var cutSurface: (path: String, surface: OrganicVineShape.CutSurface)?
     private var mapTask: Task<Void, Never>?
     private var nozzleSession: LatticeLayoutSession?
     private var latticeAtLay = LatticeSettings()
@@ -173,6 +177,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         guard on else { clear(); return }
         guard let path = p.importedFile?.path else { problem = Self.noPartLine; bars = nil; return }
         if path != sessionPath || box == nil { box = Self.box(p.importedMesh?.vertices ?? []) }
+        if path != cutSurface?.path { cutMesh = p.importedMesh }
         let solidChanged = solid != solidWanted
         solidWanted = solid
         notes = Self.notes(p.lattice, hasStress: stress.field != nil)
@@ -473,10 +478,19 @@ public final class LatticeLayoutPreview: ObservableObject {
         token &+= 1
         let seg = Self.segments(r.runs)
         // ★ his 11-19 rule ("The drawing follows the print file. Always."): every vine, Grown and the net skin too, as the
-        // print file's tubes make them (built off the main thread)
+        // print file's tubes make them (built off the main thread), cut flat where they reach the part's surface (his 11-20
+        // skin note: the file trims every tube to the part)
         let runs = r.runs
-        let vines = await Task.detached(priority: .userInitiated) { OrganicVineShape.tubes(runs: runs) }.value
+        let known = cutSurface?.path == path ? cutSurface?.surface : nil
+        let mesh = known == nil ? cutMesh.map { ($0.vertices, $0.indices, $0.faceIDs) } : nil
+        let (vines, surface) = await Task.detached(priority: .userInitiated) { () -> (OrganicVineShape, OrganicVineShape.CutSurface?) in
+            var v = OrganicVineShape.tubes(runs: runs)
+            let surface = known ?? mesh.map { OrganicVineShape.CutSurface(vertices: $0.0, indices: $0.1, faceIDs: $0.2) }
+            if let surface { v.cut(runs: runs, surface: surface) }
+            return (v, surface)
+        }.value
         guard !Task.isCancelled else { return }
+        if known == nil, let surface { cutSurface = (path, surface); cutMesh = nil }
         var drawn = LatticeLayoutBarsInputs(token: token, bars: seg.bars, solid: nil, flags: seg.flags)
         drawn.lightFrom = Self.organicLightFrom(grown: grown, netFrom: seg.lightFrom, count: seg.count)
         drawn.vines = vines
