@@ -1,6 +1,7 @@
 // Lattice rebuild: the lattice file job. See lattice_layout_file.hpp and
 // docs/design/lattice-rebuild/04-layout-file-job.md.
 #include "topopt/lattice_layout_file.hpp"
+#include "topopt/threemf_stream.hpp"
 
 #include <algorithm>
 #include <array>
@@ -195,20 +196,25 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "protect_face_counts", "protect_faces", "protect_pieces", "protect_chip", "topology", "algorithm", "cell_mm", "cell_max_mm",
        "cell_min_mm", "min_cells_across", "grade_to_shape", "band_mm", "band_cell_mm",
        "per_region", "dial", "dial_region", "dial_value", "strut_width_mm", "allow_quilt",
-       "strength", "small_cells_in_thin_walls", "one_grid", "cells_by_stress", "bars", "join_loose", "skin",
+       "strength", "small_cells_in_thin_walls", "one_grid", "cells_by_stress", "bars", "join_loose", "skin", "skin_density", "skin_sink",
        "skin_width_mm", "skin_reach_cells", "drop_loose", "by_stress", "dial_light", "dial_heavy", "width_light_mm",
        "width_heavy_mm", "reference_mpa", "percentile", "response", "region_own", "max_step", "region_weave", "organic_spacing_mm",
        "organic_width_mm", "organic_spacing_min_mm", "organic_spacing_max_mm", "organic_spacing_exponent",
        "organic_shape_fit", "organic_mode", "organic_walls_out", "organic_ties", "organic_tie_swirl",
        "organic_foot_gap", "organic_stress_goal",
-       "organic_void_ratio", "organic_reseed_rounds", "organic_wall_connect", "organic_wall_gap",
+       "organic_void_ratio", "organic_reseed_rounds", "organic_wall_bare_mm", "organic_wall_reach",
+       "organic_wall_connect", "organic_wall_gap",
        "organic_wall_cross", "organic_top_run", "organic_run_max", "organic_root_run", "organic_run_gap",
        "organic_run_follow", "organic_run_pull", "organic_run_seek", "organic_run_min", "organic_root_gap",
        "organic_auto", "organic_width_heavy_mm", "organic_member_cap", "organic_prune", "organic_bed_floor_mm",
        "organic_shape_reach", "organic_hold_parts", "organic_part_reach_mm",
        "organic_part_support_mm", "organic_part_to_floor", "organic_wall_gap_heavy", "organic_cross_gap",
        "organic_cross_gap_heavy", "organic_cross_climb_max_deg", "organic_tie_level", "organic_tie_gap",
-       "organic_tie_gap_heavy", "organic_link_width", "organic_unbraced_max", "organic_follow_stress"},
+       "organic_tie_gap_heavy", "organic_link_width", "organic_unbraced_max", "organic_follow_stress",
+       "organic_gap_lines", "organic_face_relief_mm", "organic_relief_exclude_faces", "organic_strand_keep",
+       "organic_sweep", "organic_sweep_max_offset_mm", "organic_sweep_max_turn_deg", "organic_sweep_max_piece_mm",
+       "organic_sweep_min_turn_deg", "organic_sweep_min_radius",
+       "organic_groups"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -217,6 +223,8 @@ Settings settings_from(const json::Value& in, const std::string& w) {
   s.min_wall_mm = num(in, "min_wall_mm", s.min_wall_mm, w);
   s.rim_mm = num(in, "rim_mm", s.rim_mm, w);
   s.cover_mm = num(in, "cover_mm", s.cover_mm, w);
+  s.skin_density = static_cast<int>(std::lround(num(in, "skin_density", 3.0, w)));   // OJ8
+  s.skin_sink = num(in, "skin_sink", 0.0, w);
 
   const std::vector<int> ids = wholes(in, "region_ids", w);
   const std::vector<bool> no_lattice = flags(in, "region_no_lattice", w);
@@ -303,13 +311,15 @@ Settings settings_from(const json::Value& in, const std::string& w) {
     for (std::size_t r = 0; r < nr; ++r) {
       if (list[r].is_null()) continue;
       const json::Value& o = json::as_object(list[r], at);
-      json::reject_unknown(o, {"rim_mm", "cover_mm", "skin", "skin_width_mm", "skin_reach_cells"}, at);
+      json::reject_unknown(o, {"rim_mm", "cover_mm", "skin", "skin_width_mm", "skin_reach_cells", "skin_density", "skin_sink"}, at);
       Settings::RegionAsk& a = s.regions[r];
       if (json::find(o, "rim_mm")) a.rim_mm = num(o, "rim_mm", 0.0, at);
       if (json::find(o, "cover_mm")) a.cover_mm = num(o, "cover_mm", 0.0, at);
       if (json::find(o, "skin")) a.skin = flag(o, "skin", false, at);
       if (json::find(o, "skin_width_mm")) a.skin_width_mm = num(o, "skin_width_mm", 0.0, at);
       if (json::find(o, "skin_reach_cells")) a.skin_reach_cells = num(o, "skin_reach_cells", 0.0, at);
+      if (json::find(o, "skin_density")) a.skin_density = static_cast<int>(std::lround(num(o, "skin_density", 3.0, at)));   // OJ8
+      if (json::find(o, "skin_sink")) a.skin_sink = num(o, "skin_sink", 0.0, at);
     }
   }
   const std::vector<int> pids = wholes(in, "protect_ids", w);
@@ -451,6 +461,10 @@ OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::str
   a.void_ratio = num(in, "organic_void_ratio", a.void_ratio, w);
   a.reseed_rounds = whole_of("organic_reseed_rounds", num(in, "organic_reseed_rounds", a.reseed_rounds, w),
                              "must be a whole number, 0 to 100");
+  // OG6: vines reach the walls: the bare distance (1.5 mm when not given) and the branches' reach (4 spacings when not
+  // given; 0: no branches).
+  a.wall_bare_mm = num(in, "organic_wall_bare_mm", a.wall_bare_mm, w);
+  a.wall_reach = num(in, "organic_wall_reach", a.wall_reach, w);
   a.wall_connect = flag(in, "organic_wall_connect", a.wall_connect, w);   // E (off when not given)
   a.wall_gap = num(in, "organic_wall_gap", a.wall_gap, w);   // E: 0 or less (and when not given): off
   a.wall_gap_heavy = num(in, "organic_wall_gap_heavy", a.wall_gap_heavy, w);   // M: 0 or less (and when not given): off
@@ -492,6 +506,24 @@ OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::str
   a.part_support_mm = num(in, "organic_part_support_mm", a.part_support_mm, w);
   a.part_to_floor = flag(in, "organic_part_to_floor", a.part_to_floor, w);
   a.width_heavy_mm = num(in, "organic_width_heavy_mm", a.width_heavy_mm, w);   // I
+  // OG1, OG2 (brief E6): the gap between struts in line widths (1.5 when not given; 0 off), the surface relief in mm (1
+  // when not given; 0 off) and the faces left flush (none when not given). Their ranges are validate_organic's.
+  a.gap_lines = num(in, "organic_gap_lines", a.gap_lines, w);
+  a.face_relief_mm = num(in, "organic_face_relief_mm", a.face_relief_mm, w);
+  a.relief_exclude_faces = wholes(in, "organic_relief_exclude_faces", w);
+  a.strand_keep = num(in, "organic_strand_keep", a.strand_keep, w);   // OG3 (0.9 when not given)
+  // OV1: the swept vines (on when not given) and their numbers; ranges are validate_organic's.
+  if (const json::Value* sv = json::find(in, "organic_sweep"); sv && sv->is_number()) {   // 1 on, 0 off (or true / false)
+    const double v = json::as_number(*sv, w + ".organic_sweep");
+    if (v != 0.0 && v != 1.0) json::fail(w + ".organic_sweep", "must be 1 (on) or 0 (off)");
+    a.sweep.on = v == 1.0;
+  } else
+    a.sweep.on = flag(in, "organic_sweep", a.sweep.on, w);
+  a.sweep.max_offset_mm = num(in, "organic_sweep_max_offset_mm", a.sweep.max_offset_mm, w);
+  a.sweep.max_turn_deg = num(in, "organic_sweep_max_turn_deg", a.sweep.max_turn_deg, w);
+  a.sweep.max_piece_mm = num(in, "organic_sweep_max_piece_mm", a.sweep.max_piece_mm, w);
+  a.sweep.min_turn_deg = num(in, "organic_sweep_min_turn_deg", a.sweep.min_turn_deg, w);
+  a.sweep.min_radius = num(in, "organic_sweep_min_radius", a.sweep.min_radius, w);
   return a;
 }
 
@@ -500,7 +532,7 @@ FileOptions options_from(const json::Value& in, const std::string& w) {
                        {"pitch_mm", "bar_sides", "block_mm", "grow_mm", "clean_mm", "part_mm",
                         "fill_under_mm3", "bridge_rise", "post_mm", "layer_mm", "pixel_mm", "most_passes",
                         "leave_out", "keep_if_not_clean", "weave_stand_every_mm", "weave_foot_mm", "weave_round_top",
-                        "weave_sag_lift_mm", "weave_sag_legs"},
+                        "weave_sag_lift_mm", "weave_sag_legs", "weave_mesh", "tube_sides"},
                        w);
   FileOptions o;
   o.pitch_mm = num(in, "pitch_mm", o.pitch_mm, w);
@@ -519,6 +551,15 @@ FileOptions options_from(const json::Value& in, const std::string& w) {
   o.mesh.weave_sag_lift_mm = num(in, "weave_sag_lift_mm", o.mesh.weave_sag_lift_mm, w);   // O17: 0 = never lift
   if (!(o.mesh.weave_sag_lift_mm >= 0.0)) json::fail(w + ".weave_sag_lift_mm", "must be 0 (never) or more");
   o.mesh.weave_sag_legs = flag(in, "weave_sag_legs", o.mesh.weave_sag_legs, w);   // O18: false = no leg
+  if (json::find(in, "weave_mesh")) {   // OF4
+    const std::string m = text(in, "weave_mesh", "", w);
+    if (m == "tubes") o.mesh.weave_mesh = MeshSpec::WeaveMesh::Tubes;
+    else if (m == "merged") o.mesh.weave_mesh = MeshSpec::WeaveMesh::Merged;
+    else json::fail(w + ".weave_mesh", "must be \"tubes\" or \"merged\", not \"" + m + "\"");
+    o.weave_mesh_asked = true;
+  }
+  o.mesh.tube_sides = whole(in, "tube_sides", o.mesh.tube_sides, w);   // OF2
+  if (o.mesh.tube_sides < 3) json::fail(w + ".tube_sides", "must be 3 or more");
   o.layers.layer_mm = num(in, "layer_mm", o.layers.layer_mm, w);
   o.layers.pixel_mm = num(in, "pixel_mm", o.layers.pixel_mm, w);
   o.most_passes = whole(in, "most_passes", o.most_passes, w);
@@ -562,9 +603,15 @@ constexpr Refusal kTensorUnreadable{"tensor_unreadable", 1};
 constexpr Refusal kCannotWrite{"cannot_write", 1};
 // V4: a strength check was asked for and this build has none to make.
 constexpr Refusal kStrengthUnavailable{"strength_unavailable", 1};
-// V4 (Install 3, owed): the strength check reads cells, and an Organic (weave) region has none: a strength job on a job
-// with a weave region is refused.
-constexpr Refusal kStrengthOrganic{"strength_organic", 1};
+// Brief E2: a strength job on a job whose lattice regions are both weave and cells: the two checks judge differently
+// and are not made into one verdict.
+constexpr Refusal kStrengthMixed{"strength_mixed", 1};
+// Brief E2, item 11: the job's "strengthened" file (or what it names) could not be read.
+constexpr Refusal kStrengthenedUnreadable{"strengthened_unreadable", 1};
+// OS18 withdrawn (the owner, 2026-11-19: "Yes, remove it."): a strengthening that holds new vines (additions kind 3).
+constexpr Refusal kStrengthenedHasVines{"strengthened_has_vines", 1};
+// Brief E3a: the lay does not give the lattice its additions were made on (a round's hash, or a bar they name).
+constexpr Refusal kStrengthenedMismatch{"strengthened_mismatch", 1};
 constexpr Refusal kCancelled{"cancelled", 1};
 constexpr Refusal kError{"error", 1};
 
@@ -635,13 +682,18 @@ void say(void (*said)(const char*), const char* line) {
 // (LatticeReview's build-and-check-the-layers loop replaces this body.)
 TriangleMesh make_file_mesh(const Session& session, const Outcome& outcome, const FileOptions& options,
                             FileReport& report, const std::atomic<bool>* stop) {
+  return make_file_mesh(session, outcome.layout, outcome.bars, options, report, stop);
+}
+
+TriangleMesh make_file_mesh(const Session& session, const Layout& layout, const Bars& bars, const FileOptions& options,
+                            FileReport& report, const std::atomic<bool>* stop) {
   report = FileReport{};
   const Domain* domain = session.domain();
   if (!domain) {
     report.mesh.why = "The lattice was not laid before its file was asked for.";
     return TriangleMesh{};
   }
-  const OpenSpace open = read_open_space(*domain, outcome.layout, options.pitch_mm, options.threads, stop);
+  const OpenSpace open = read_open_space(*domain, layout, options.pitch_mm, options.threads, stop);
   report.open_boxes = open.boxes.size();
   report.ms_open_space = open.ms;
   // Made, checked layer by layer, and made again until it prints (P8).
@@ -655,7 +707,7 @@ TriangleMesh make_file_mesh(const Session& session, const Outcome& outcome, cons
   spec.most_passes = options.most_passes;
   spec.leave_out = options.leave_out;
   PrintableReport made;
-  TriangleMesh mesh = build_printable_mesh(session.measure(), *domain, outcome.layout, outcome.bars, open, spec, &made);
+  TriangleMesh mesh = build_printable_mesh(session.measure(), *domain, layout, bars, open, spec, &made);
   report.mesh = made.mesh;
   report.builds = made.passes;
   report.ms_carve = made.ms_carve;
@@ -665,15 +717,67 @@ TriangleMesh make_file_mesh(const Session& session, const Outcome& outcome, cons
   report.left_out_at = made.drop_at;
   report.posts = made.posts;
   report.stands_added = made.stands_added;
+  report.findings_at = made.findings_at;   // OG2c
+  report.relief_flushed = made.relief_flushed;
+  report.relief_flushed_at = made.relief_flushed_at;   // OJ6
+  report.relief_rounds = made.relief_rounds;
   report.weave_specks_ignored = made.weave_specks_ignored;
   report.weave_held_ignored = made.weave_held_ignored;
+  report.part_overhangs = made.part_overhangs;
   report.sags = made.sags;
   report.sagged = made.sagged;
+  report.tubes = made.tubes;
+  report.shells = made.shells;
+  report.base_triangles = made.base_triangles;
+  report.shell_first_tri = made.shell_first_tri;
+  report.base_builds = made.base_builds;
+  report.ms_shells = made.ms_shells;
+  report.pass_ms = made.pass_ms;
   if (made.mesh.ok) {
     report.bed_contact_mm2 = made.layers.bed_mm2;
     report.midair_starts = static_cast<int>(made.layers.mid_air.size());
   }
   return mesh;
+}
+
+// ── BRIEF E4, LEG 2 (OS16): THE PRINT CHECK, ITS BARS ───────────────────────────
+std::vector<char> bars_in_file(const Bars& made_bars, const FileReport& made, const std::vector<int>& weave_regions,
+                               const FileOptions& options) {
+  const double layer = options.layers.layer_mm > 0.0 ? options.layers.layer_mm : 0.2;
+  const std::vector<char> present = bars_present(made_bars, made.left_out_at, weave_regions, layer);
+  return weave_holds(made_bars, weave_regions, present, options.mesh.bridge_rise).kept;
+}
+
+FileOptions file_options_for(const FileOptions& asked, bool weave) {
+  FileOptions o = asked;
+  if (weave && !o.weave_mesh_asked) o.mesh.weave_mesh = MeshSpec::WeaveMesh::Tubes;
+  return o;
+}
+
+PrintChecked print_check_bars(const Session& session, const Layout& layout, const Bars& bars, const FileOptions& options,
+                              const std::atomic<bool>* stop) {
+  PrintChecked p;
+  const TriangleMesh mesh = make_file_mesh(session, layout, bars, options, p.made, stop);
+  if (!p.made.mesh.ok || mesh.empty()) {
+    p.why = p.made.mesh.why.empty() ? "the lattice's mesh could not be made" : p.made.mesh.why;
+    return p;
+  }
+  p.bars = p.made.sagged ? *p.made.sagged : bars;
+  std::vector<int> weave_regions;
+  for (const Layout::Weave& w : layout.weave) weave_regions.push_back(w.region);
+  p.kept = bars_in_file(p.bars, p.made, weave_regions, options);
+  p.ok = true;
+  return p;
+}
+
+std::function<std::string(const Layout&, Bars&)> print_check_hook(const Session& session, const FileOptions& options,
+                                                                   const std::atomic<bool>* stop) {
+  return [&session, options, stop](const Layout& layout, Bars& bars) -> std::string {
+    PrintChecked p = print_check_bars(session, layout, bars, options, stop);
+    if (!p.ok) return "the print check could not be made: " + p.why;
+    bars = std::move(p.bars);
+    return {};
+  };
 }
 
 // ── THE DEMAND FILE ───────────────────────────────────────────────────────────
@@ -938,7 +1042,7 @@ FileJob parse_file_job(const std::string& json_text) {
     const std::string w = "job.json";
     json::as_object(doc, w);
     json::reject_unknown(doc, {"mode", "model", "output", "linear_deflection", "threads", "layout", "mesh", "demand",
-                               "strength_job", "tensor"},
+                               "strength_job", "tensor", "file_format", "strengthened"},
                          w);
     const std::string mode = json::as_string(json::require(doc, "mode", w), w + ".mode");
     if (mode != "lattice_file") json::fail(w + ".mode", "must be \"lattice_file\", not \"" + mode + "\"");
@@ -968,7 +1072,17 @@ FileJob parse_file_job(const std::string& json_text) {
       if (job.strength_job == job.output || job.strength_job == kFileResultName)
         json::fail(w + ".strength_job", "is the name of a file the job writes");
     }
+    // OF5: the file's format, "3mf" or "stl"; not given: 3MF for the tubes route, STL otherwise.
+    if (json::find(doc, "file_format")) {
+      job.file_format = text(doc, "file_format", "", w);
+      if (job.file_format != "3mf" && job.file_format != "stl")
+        json::fail(w + ".file_format", "must be \"3mf\" or \"stl\", not \"" + job.file_format + "\"");
+    }
     // The stress tensor (Organic, Traced): a file beside the job, by its bare name.
+    if (json::find(doc, "strengthened")) {
+      job.strengthened = text(doc, "strengthened", "", w);
+      if (job.strengthened.empty()) throw FileJobError("\"strengthened\" must name a strengthened.json");
+    }
     if (json::find(doc, "tensor")) {
       job.tensor = text(doc, "tensor", "", w);
       if (job.tensor.empty() || job.tensor == "." || job.tensor == ".." ||
@@ -978,6 +1092,30 @@ FileJob parse_file_job(const std::string& json_text) {
     if (const json::Value* v = json::find(doc, "layout")) {
       job.settings = settings_from(json::as_object(*v, w + ".layout"), w + ".layout");
       job.organic = organic_from(*v, job.settings, w + ".layout");
+      // OJ3: per group, the layout's organic_* keys with the group's own over them.
+      if (const json::Value* gl = json::find(*v, "organic_groups")) {
+        const std::string at = w + ".layout.organic_groups";
+        const auto& list = json::as_array(*gl, at).arr;
+        for (std::size_t g = 0; g < list.size(); ++g) {
+          const std::string ga = at + "[" + std::to_string(g) + "]";
+          const json::Value& go = json::as_object(list[g], ga);
+          json::Value merged = *v;
+          for (const auto& [k, val] : go.obj) {
+            if (k == "regions") continue;
+            if (k.rfind("organic_", 0) != 0 || k == "organic_groups")
+              json::fail(ga + "." + k, "is not an Organic setting a group can hold (a group holds \"regions\" and organic_* keys)");
+            bool found = false;
+            for (auto& kv : merged.obj)
+              if (kv.first == k) { kv.second = val; found = true; }
+            if (!found) merged.obj.push_back({k, val});
+          }
+          OrganicGroup og;
+          og.regions = wholes(go, "regions", ga);
+          if (og.regions.empty()) json::fail(ga + ".regions", "must name the group's Organic areas");
+          og.ask = organic_from(merged, job.settings, ga);
+          job.organic_groups.push_back(std::move(og));
+        }
+      }
       // K1: the floor lives in the domain (where), so the growth, the path, the net skin, the print check and the
       // file all see it. Q1 (brief G24): a Traced job's weave regions as a Grown job's (the owner, 2026-11-17: "generate
       // a version with the flat floor"); a traced strand that meets it ends in it as in any solid (O4, finish_bar_ends).
@@ -989,6 +1127,8 @@ FileJob parse_file_job(const std::string& json_text) {
     if (const json::Value* v = json::find(doc, "mesh"))
       job.options = options_from(json::as_object(*v, w + ".mesh"), w + ".mesh");
     job.organic.layer_mm = job.options.layers.layer_mm;   // G1: Grown grows one printed layer per step
+    job.options.mesh.sweep = job.organic.sweep;   // OV1: the file's tubes (and every print check of this job) swept so
+    for (OrganicGroup& g : job.organic_groups) g.ask.layer_mm = job.options.layers.layer_mm;   // OJ3
     // OP7 (brief C2, E1): the ask's ranges and rules, as the session path checks them (validate_organic); the first
     // refusal is the job's (job_unreadable, as before), its key named in the detail, its plain sentence after it. The
     // stress input is the job's own refusal (no_stress_result), so it is not asked here. With no weave region the
@@ -997,7 +1137,9 @@ FileJob parse_file_job(const std::string& json_text) {
     {
       bool weave = false;
       for (const Settings::RegionAsk& r : job.settings.regions) weave = weave || (r.weave && r.role == Role::Lattice);
-      std::vector<OrganicRefusal> refused = validate_organic(job.settings, job.organic, nullptr);
+      std::vector<OrganicRefusal> refused = job.organic_groups.empty()
+                                                ? validate_organic(job.settings, job.organic, nullptr)
+                                                : validate_organic_groups(job.settings, job.organic_groups, nullptr);   // OJ3
       if (!weave)
         refused.erase(std::remove_if(refused.begin(), refused.end(),
                                      [](const OrganicRefusal& x) { return x.setting == "bead_mm"; }),
@@ -1008,7 +1150,9 @@ FileJob parse_file_job(const std::string& json_text) {
                                : k == "bead_mm"                                     ? w + ".layout.bead_mm"
                                : (k == "build_dir" || k == "seed_stride") ? w + ".layout"
                                                                                     : w + ".layout.organic_" + k;
-        json::fail(at, refused.front().text);
+        const int g = refused.front().group;   // OJ3: a group's own refusal names the group
+        json::fail(!job.organic_groups.empty() && g >= 0 ? w + ".layout.organic_groups[" + std::to_string(g) + "].organic_" + k : at,
+                   refused.front().text);
       }
     }
     job.options.threads = whole(doc, "threads", 0, w);
@@ -1101,13 +1245,15 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     }
     // V4: the strength job is read before the long work, and refused now if it cannot be checked.
     if (!job.strength_job.empty()) {
-      if (any_weave) {
-        refuse(r, kStrengthOrganic,
-               "The strength check cannot check an Organic lattice yet, so no file was made. Turn the strength check "
-               "off for this part, or use a cell lattice in every region.");
+      bool any_cells = job.settings.regions.empty();
+      for (const Settings::RegionAsk& a : job.settings.regions) any_cells = any_cells || (a.role == Role::Lattice && !a.weave);
+      if (any_weave && any_cells) {
+        refuse(r, kStrengthMixed,
+               "The strength check judges an Organic lattice and a cell lattice in different ways and cannot check a "
+               "part that has both, so no file was made. Use one kind in every region, or turn the strength check off.");
         return done();
       }
-      if (!strength || !strength->before || !strength->run) {
+      if (!strength || !strength->before || !(any_weave ? strength->run_organic : strength->run)) {
         refuse(r, kStrengthUnavailable,
                "This worker cannot check a lattice's strength, so no file was made. Update the worker.");
         return done();
@@ -1148,11 +1294,27 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     }
 
     say(said, "laying the lattice");
-    const Outcome out = any_weave ? session.lay_organic(job.settings, *job.tensor_field, job.organic,
-                                                        job.options.threads, stop)
-                                  : session.lay(job.settings, job.options.threads, stop);
+    // OS16 (brief E4, leg 2): strengthening's additions are replayed with the file's print check before the first
+    // round and after each, as the strengthen job made them.
+    const FileOptions options = file_options_for(job.options, any_weave);
+    OrganicAsk organic = job.organic;
+    if (any_weave && !organic.additions.empty()) organic.print_check = print_check_hook(session, options, stop);
+    std::vector<OrganicGroup> groups = job.organic_groups;   // OJ3
+    if (any_weave && !groups.empty() && !groups.front().ask.additions.empty())   // OJ4
+      groups.front().ask.print_check = print_check_hook(session, options, stop);
+    const Outcome out = !any_weave ? session.lay(job.settings, job.options.threads, stop)
+                        : groups.empty()
+                            ? session.lay_organic(job.settings, *job.tensor_field, organic, job.options.threads, stop)
+                            : session.lay_organic(job.settings, *job.tensor_field, groups, job.options.threads, stop);
     if (out.cancelled) {
       refuse(r, kCancelled, "Stopped before the lattice file was finished. Nothing was made.");
+      return done();
+    }
+    if (!out.additions_refused.empty()) {
+      refuse(r, kStrengthenedMismatch,
+             "The strengthening sent with the lattice job was made on a different lattice than this lay gives, so "
+             "nothing was made.",
+             out.additions_refused);
       return done();
     }
     r.cells = out.layout.cells.size();
@@ -1193,6 +1355,11 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     r.net_struts = out.net_struts;
     r.net_mm = out.net_mm;
     r.grown = out.grown;
+    r.gap_capped = out.gap_capped;   // OG1, OG2 (brief E6)
+    r.gap_broken = out.gap_broken;
+    r.tight = out.tight;
+    r.relief = out.relief;
+    r.guard = out.guard;   // OG5 (brief E9)
     for (const Bar& b : out.bars.bars)
       r.weave_bars += std::find(weave_regions.begin(), weave_regions.end(), b.region) != weave_regions.end();
     if (!out.empty_regions.empty()) {
@@ -1215,7 +1382,8 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     }
 
     say(said, "making the file");
-    const TriangleMesh mesh = make_file_mesh(session, out, job.options, r.made, stop);
+    // OF4: a job with a weave region takes the tubes route unless it asked for one (file_options_for, above).
+    const TriangleMesh mesh = make_file_mesh(session, out, options, r.made, stop);
     if (!r.made.mesh.ok || mesh.empty()) {
       refuse(r, kMeshFailed,
              r.made.mesh.why.empty() ? "The lattice file could not be put together. Nothing was made."
@@ -1236,7 +1404,14 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
                     "held at one end only and %zu bridge%s longer than a printer can span. No file was made. A larger cell "
                     "or a Protect skin near those places usually fixes it.",
                     r.made.builds, mid, mid == 1 ? "" : "s", one, one == 1 ? "" : "s", far, far == 1 ? "" : "s");
-      refuse(r, kWouldNotPrint, line);
+      // OG2c (brief E6, leg C): a refusal says where (x, y, z mm, each finding).
+      std::string where = "at";
+      for (const Vec3& p : r.made.findings_at) {
+        char b[96];
+        std::snprintf(b, sizeof b, " (%.2f, %.2f, %.2f)", p.x, p.y, p.z);
+        where += b;
+      }
+      refuse(r, kWouldNotPrint, line, r.made.findings_at.empty() ? std::string() : where);
       return done();
     }
 
@@ -1244,20 +1419,44 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     t0 = std::chrono::steady_clock::now();
     // Written beside its target and moved in only when whole: a failed job never leaves
     // half a file, nor replaces an earlier good one.
-    const std::string part = stl_path + ".part";
-    const std::size_t want = 84 + 50 * mesh.triangles.size();
+    // OF5: the format. "3mf" (default for the tubes route): ONE object of the solid and every shell, shared vertices,
+    // deflated where this build has zlib; written in place of a ".stl" name as ".3mf". "stl" (default otherwise): as
+    // before, byte for byte.
+    r.file_format = !job.file_format.empty() ? job.file_format : r.made.tubes ? "3mf" : "stl";
+    r.weave_mesh = r.made.tubes ? "tubes" : "merged";
+    r.sweep_on = r.made.tubes && job.options.mesh.sweep.on;
+    std::string file_path = stl_path;
+    if (r.file_format == "3mf" && file_path.size() >= 4 && file_path.compare(file_path.size() - 4, 4, ".stl") == 0)
+      file_path.replace(file_path.size() - 4, 4, ".3mf");
+    const std::string part = file_path + ".part";
+    std::size_t want = 84 + 50 * mesh.triangles.size();
     bool written = false;
     std::string write_detail;
     try {
-      write_stl_file(part, mesh, StlFormat::Binary);
-      written = size_of_file(part) == want;
-      if (!written) write_detail = "the file is not the size its triangles need";
+      if (r.file_format == "3mf") {
+        StreamingThreeMfWriter::Options o;
+        o.indexed = true;
+        o.deflate = true;
+        StreamingThreeMfWriter w(part, o);
+        for (const Vec3& v : mesh.vertices) w.add_vertex(v);
+        for (const auto& t : mesh.triangles)
+          w.add_indexed(static_cast<std::uint64_t>(t[0]), static_cast<std::uint64_t>(t[1]), static_cast<std::uint64_t>(t[2]));
+        w.finish();
+        r.compressed = w.compressed();
+        want = size_of_file(part);
+        written = want > 0 && w.triangle_count() == mesh.triangles.size();
+        if (!written) write_detail = "the 3MF file came out empty";
+      } else {
+        write_stl_file(part, mesh, StlFormat::Binary);
+        written = size_of_file(part) == want;
+        if (!written) write_detail = "the file is not the size its triangles need";
+      }
     } catch (const std::exception& e) {
       write_detail = e.what();
     }
-    if (written && std::rename(part.c_str(), stl_path.c_str()) != 0) {
+    if (written && std::rename(part.c_str(), file_path.c_str()) != 0) {
       written = false;
-      write_detail = "cannot move the file into " + stl_path;
+      write_detail = "cannot move the file into " + file_path;
     }
     r.ms_write = ms_since(t0);
     if (!written) {
@@ -1281,9 +1480,20 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
       ask.part_lo = part_lo;
       ask.part_hi = part_hi;
       ask.threads = job.options.threads;
+      // Brief E2, item 7: Organic is checked on the FINAL bars, as the file holds them.
+      std::vector<char> kept;
+      if (any_weave) {
+        const Bars& made = r.made.sagged ? *r.made.sagged : out.bars;
+        kept = bars_in_file(made, r.made, weave_regions, options);
+        ask.bars = &made;
+        ask.kept = &kept;
+        ask.light_width_mm = job.organic.width_mm > 0.0
+                                 ? job.organic.width_mm
+                                 : session.domain()->spec().bead_mm * session.domain()->spec().min_strut_lines;
+      }
       StrengthDone sd;
       try {
-        sd = strength->run(ask);
+        sd = any_weave ? strength->run_organic(ask) : strength->run(ask);
       } catch (const std::exception& e) {
         sd = StrengthDone{};
         sd.code = "strength_failed";
@@ -1292,7 +1502,7 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
       }
       r.ms_strength = ms_since(t0);
       if (!sd.ok) {
-        std::remove(stl_path.c_str());
+        std::remove(file_path.c_str());
         for (const std::string& f : sd.files) std::remove((ask.out_dir + "/" + f).c_str());
         r.ok = false;
         r.code = sd.code.empty() ? "strength_failed" : sd.code;
@@ -1305,7 +1515,7 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
       r.strength_accepted = sd.accepted;
       r.strength_json = sd.json;
     }
-    r.file = stl_path;
+    r.file = file_path;
     r.file_bytes = want;
     r.ok = true;
     r.code = "ok";
@@ -1320,18 +1530,17 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
   return done();
 }
 
-FileResult run_file_job(const std::string& job_path, const std::string& out_dir, int threads,
-                        void (*said)(const char*), const StrengthCheck* strength) {
-  FileResult r;
-  const auto t_all = std::chrono::steady_clock::now();
-  const auto run = [&] {
-    FileJob job;
+// Brief E2: what run_file_job reads before it makes anything (the job, its stress files, its "strengthened", the
+// part), so the strengthen job reads a job exactly as the file job does. Not ok: `r` holds the refusal.
+bool load_file_job(const std::string& job_path, int threads, FileJob& job, StepModel& model, FileResult& r,
+                   void (*said)(const char*)) {
+  const auto run = [&]() -> bool {
     {
       std::ifstream f(job_path, std::ios::binary);
       if (!f) {
         refuse(r, kJobUnreadable, "The lattice job could not be opened on the Mac, so nothing was made.",
                "cannot open " + job_path);
-        return;
+        return false;
       }
       std::ostringstream all;
       all << f.rdbuf();
@@ -1340,7 +1549,7 @@ FileResult run_file_job(const std::string& job_path, const std::string& out_dir,
       } catch (const std::exception& e) {
         refuse(r, kJobUnreadable,
                "The lattice job sent to the Mac could not be read, so nothing was made.", e.what());
-        return;
+        return false;
       }
     }
     if (threads > 0) job.options.threads = threads;
@@ -1351,7 +1560,7 @@ FileResult run_file_job(const std::string& job_path, const std::string& out_dir,
       if (!read_demand_file(folder_of(job_path) + "/" + job.demand, *field, &why)) {
         refuse(r, kDemandUnreadable, "The stress result sent with the lattice job could not be read, so nothing was made.",
                why);
-        return;
+        return false;
       }
       job.settings.stress.demand = std::move(field);
     }
@@ -1361,15 +1570,37 @@ FileResult run_file_job(const std::string& job_path, const std::string& out_dir,
       if (!read_tensor_file(folder_of(job_path) + "/" + job.tensor, *field, &why)) {
         refuse(r, kTensorUnreadable,
                "The stress tensor sent with the lattice job could not be read, so nothing was made.", why);
-        return;
+        return false;
       }
+      job.tensor_field = std::move(field);
+    }
+    // Brief E2, item 11: a strengthen round's stress input, reference and floors in place of the job's own.
+    if (!job.strengthened.empty()) {
+      const std::string sp = job.strengthened[0] == '/' ? job.strengthened : folder_of(job_path) + "/" + job.strengthened;
+      // (version 2, brief E3a: the job's own stress stays; version 1 replaces it)
+      auto field = job.tensor_field ? std::make_shared<TensorField>(*job.tensor_field) : std::make_shared<TensorField>();
+      std::string why;
+      if (!apply_strengthened(sp, *field, job.organic, &why) ||
+          (!job.organic_groups.empty() && !apply_strengthened(sp, *field, job.organic_groups.front().ask, &why))) {   // OJ4
+        refuse(r, kStrengthenedUnreadable,
+               "The strengthened stress sent with the lattice job could not be read, so nothing was made.", why);
+        return false;
+      }
+      // OS18 withdrawn: the additions file still reads a new vine (kind 3); a strengthening holding one is refused.
+      for (const AddRound& rd : job.organic.additions.rounds)
+        for (const AddOp& op : rd.ops)
+          if (op.kind == 3) {
+            refuse(r, kStrengthenedHasVines,
+                   "The strengthening sent with the lattice job holds new vines, which strengthening no longer lays, so "
+                   "nothing was made. Strengthen the lattice again.");
+            return false;
+          }
       job.tensor_field = std::move(field);
     }
     const std::string model_path =
         !job.model.empty() && job.model[0] == '/' ? job.model : folder_of(job_path) + "/" + job.model;
     say(said, "opening the part");
     const auto t0 = std::chrono::steady_clock::now();
-    StepModel model;
     try {
       StepTessellation tess;
       if (job.linear_deflection > 0.0) tess.linear_deflection = job.linear_deflection;
@@ -1377,13 +1608,27 @@ FileResult run_file_job(const std::string& job_path, const std::string& out_dir,
     } catch (const std::exception& e) {
       refuse(r, kModelUnreadable,
              "The part's file could not be opened on the Mac, so no lattice file was made.", e.what());
-      return;
+      return false;
     } catch (...) {
       refuse(r, kModelUnreadable,
              "The part's file could not be opened on the Mac, so no lattice file was made.");
-      return;
+      return false;
     }
-    const double ms_import = ms_since(t0);
+    r.ms_import = ms_since(t0);
+    return true;
+  };
+  return run();
+}
+
+FileResult run_file_job(const std::string& job_path, const std::string& out_dir, int threads,
+                        void (*said)(const char*), const StrengthCheck* strength) {
+  FileResult r;
+  const auto t_all = std::chrono::steady_clock::now();
+  const auto run = [&] {
+    FileJob job;
+    StepModel model;
+    if (!load_file_job(job_path, threads, job, model, r, said)) return;
+    const double ms_import = r.ms_import;
     r = make_lattice_file(std::move(model), job, out_dir + "/" + job.output, nullptr, said, strength);
     r.ms_import = ms_import;
   };
@@ -1417,6 +1662,30 @@ std::string file_result_json(const FileResult& r) {
   o += "  \"file\": \"" + escaped(base_name(r.file)) + "\",\n";
   std::snprintf(b, sizeof b, "  \"file_bytes\": %llu,\n", count(r.file_bytes));
   o += b;
+  if (r.weave_regions > 0 && !r.file_format.empty()) {   // OF5: only for a job with a weave region that made its file
+    std::snprintf(b, sizeof b,
+                  "  \"file_format\": \"%s\", \"weave_mesh\": \"%s\", \"shells\": %llu, \"shells_left_out\": %llu, "
+                  "\"compressed\": %s, \"slicer_supports\": \"off\",\n",
+                  r.file_format.c_str(), r.weave_mesh.c_str(), count(r.made.shells.shells()), count(r.made.shells.left_out),
+                  r.compressed ? "true" : "false");
+    o += b;
+    // OV1: the swept vines (all 0 with organic_sweep off).
+    const WeaveShells& ws = r.made.shells;
+    std::snprintf(b, sizeof b,
+                  "  \"sweep\": {\"on\": %s, \"pieces_before\": %llu, \"pieces_after\": %llu, \"spans_curved\": %llu, "
+                  "\"mitre\": {\"small_turn\": %llu, \"tight\": %llu, \"straight_end\": %llu}, \"largest_offset_mm\": %.6g, "
+                  "\"tight_at\": [",
+                  r.sweep_on ? "true" : "false", count(ws.sweep_pieces_before), count(ws.sweep_pieces_after),
+                  count(ws.sweep_spans_curved), count(ws.sweep_mitre_small_turn), count(ws.sweep_mitre_tight),
+                  count(ws.sweep_mitre_straight_end), ws.sweep_largest_offset_mm);
+    o += b;
+    for (std::size_t q = 0; q < ws.sweep_tight_at.size(); ++q) {
+      std::snprintf(b, sizeof b, "%s[%.4f, %.4f, %.4f]", q ? ", " : "", ws.sweep_tight_at[q].x, ws.sweep_tight_at[q].y,
+                    ws.sweep_tight_at[q].z);
+      o += b;
+    }
+    o += "]},\n";
+  }
   std::snprintf(b, sizeof b, "  \"part\": {\"faces\": %d, \"triangles\": %llu, \"open_edges\": %llu},\n",
                 r.faces, count(r.part_triangles), count(r.open_edges));
   o += b;
@@ -1490,6 +1759,16 @@ std::string file_result_json(const FileResult& r) {
       std::snprintf(b, sizeof b, "%s%d", i ? ", " : "", r.made.found_per_pass[i]);
       o += b;
     }
+    {   // OG2c (brief E6, leg C)
+      std::snprintf(b, sizeof b, "],\n    \"relief_flushed\": %llu, \"relief_rounds\": %d, \"findings_at\": [",
+                    count(r.made.relief_flushed), r.made.relief_rounds);
+      o += b;
+      for (std::size_t i = 0; i < r.made.findings_at.size(); ++i) {
+        const Vec3& p = r.made.findings_at[i];
+        std::snprintf(b, sizeof b, "%s[%.4f, %.4f, %.4f]", i ? ", " : "", p.x, p.y, p.z);
+        o += b;
+      }
+    }
     o += "],\n    \"left_out_at\": [";
     for (std::size_t i = 0; i < r.made.left_out_at.size(); ++i) {
       const Vec3& p = r.made.left_out_at[i];
@@ -1535,12 +1814,64 @@ std::string file_result_json(const FileResult& r) {
       std::snprintf(b, sizeof b, ",\n    \"weave_specks_ignored\": %llu, \"weave_held_ignored\": %llu",
                     count(r.made.weave_specks_ignored), count(r.made.weave_held_ignored));
       o += b;
+      std::snprintf(b, sizeof b, ", \"part_overhangs\": %llu", count(r.made.part_overhangs));
+      o += b;
       // O17, O18: what was done with the weave's sags.
       std::snprintf(b, sizeof b,
                     ",\n    \"sags_lifted\": %llu, \"sag_lift_largest_mm\": %.9g, \"sag_legs\": %llu, \"sag_legs_mm\": %.9g, "
                     "\"sags_unsupported\": %llu",
                     count(r.made.sags.lifted), r.made.sags.lift_largest_mm, count(r.made.sags.legs), r.made.sags.legs_mm,
                     count(r.made.sags.unsupported));
+      o += b;
+      {   // OG5 (brief E9): what the guard pass cut or removed (no bar outside the part or through protected solid)
+        const auto places = [&](const std::vector<Vec3>& v) {
+          std::string t;
+          char q[96];
+          for (const Vec3& p : v) {
+            std::snprintf(q, sizeof q, "%s[%.9g, %.9g, %.9g]", t.empty() ? "" : ", ", p.x, p.y, p.z);
+            t += q;
+          }
+          return t;
+        };
+        std::snprintf(b, sizeof b, ",\n    \"guard\": {\"ends_moved_in\": %llu, \"outside_cut\": %llu, \"in_solid_cut\": %llu, "
+                      "\"in_solid_removed\": %llu, \"by_kind\": {", count(r.guard.ends_moved_in), count(r.guard.outside_cut),
+                      count(r.guard.in_solid_cut), count(r.guard.in_solid_removed));
+        o += b;
+        bool first = true;
+        for (const auto& [k, v] : r.guard.by_kind) {
+          o += std::string(first ? "" : ", ") + "\"" + k + "\": " + std::to_string(v);
+          first = false;
+        }
+        o += "}, \"outside_at\": [" + places(r.guard.outside_at) + "], \"in_solid_at\": [" + places(r.guard.in_solid_at) +
+             "], \"removed_at\": [" + places(r.guard.removed_at) + "]}";
+      }
+      // OG1 (brief E6): the gap rule and its diagnosis; OG2: the relief, and the tubes' proud ends.
+      const Outcome::Tight& tt = r.tight;
+      std::snprintf(b, sizeof b,
+                    ",\n    \"gap\": {\"capped_points\": %llu, \"broken\": %llu},"
+                    "\n    \"tight\": {\"line_mm\": %.9g, \"bars\": %llu, \"tight\": %llu, \"by\": {\"stress\": %llu, "
+                    "\"shape\": %llu, \"hold\": %llu, \"floor\": %llu, \"uniform\": %llu, \"unknown\": %llu}, "
+                    "\"supports\": %llu, \"links\": %llu, \"braces\": %llu}",
+                    count(r.gap_capped), count(r.gap_broken), tt.line_mm, count(tt.bars), count(tt.tight), count(tt.stress),
+                    count(tt.shape), count(tt.hold), count(tt.floor), count(tt.uniform), count(tt.unknown),
+                    count(tt.supports), count(tt.links), count(tt.braces));
+      o += b;
+      const Outcome::Relief& rl = r.relief;
+      std::snprintf(b, sizeof b,
+                    ",\n    \"relief\": {\"surface_ends\": %llu, \"proud\": %llu, \"largest_mm\": %.9g, \"flush\": "
+                    "{\"excluded_face\": %llu, \"down_facing\": %llu, \"near_bed\": %llu, \"along_surface\": %llu}, "
+                    "\"faces_known\": %s, \"box_grew_mm\": {\"-x\": %.9g, \"+x\": %.9g, \"-y\": %.9g, \"+y\": %.9g, "
+                    "\"-z\": %.9g, \"+z\": %.9g},\n      \"tube_proud_ends\": %llu, \"tube_proud_vertices\": %llu, "
+                    "\"tube_proud_outside_mm\": %.9g,\n      \"along\": %llu, \"along_largest_mm\": %.9g, \"tube_along_bars\": %llu, "
+                    "\"tube_along_vertices\": %llu, \"tube_along_outside_mm\": %.9g, \"file_box_grew_mm\": {\"-x\": %.9g, "
+                    "\"+x\": %.9g, \"-y\": %.9g, \"+y\": %.9g, \"-z\": %.9g, \"+z\": %.9g}}",
+                    count(rl.surface_ends), count(rl.proud), rl.largest_mm, count(rl.flush_excluded), count(rl.flush_down),
+                    count(rl.flush_bed), count(rl.flush_along), rl.faces_known ? "true" : "false", rl.grew_mm[0],
+                    rl.grew_mm[1], rl.grew_mm[2], rl.grew_mm[3], rl.grew_mm[4], rl.grew_mm[5],
+                    count(r.made.shells.proud_ends), count(r.made.shells.proud_vertices), r.made.shells.proud_outside_mm,
+                    count(rl.along), rl.along_largest_mm, count(r.made.shells.along_bars), count(r.made.shells.along_vertices),
+                    r.made.shells.along_outside_mm, r.made.shells.grew_mm[0], r.made.shells.grew_mm[1], r.made.shells.grew_mm[2],
+                    r.made.shells.grew_mm[3], r.made.shells.grew_mm[4], r.made.shells.grew_mm[5]);
       o += b;
     }
     o += "},\n";
@@ -1613,6 +1944,27 @@ std::string file_result_json(const FileResult& r) {
                     g.tie_level_dz_max_mm, g.tie_level_dz_max_unsnapped_mm);
       wt += lb;
     }
+    {   // OG6: the walls reached (the places, bare, branches laid and refused by reason, bare when final; the first
+        // refused places)
+      char ob[700];
+      const double share = g.wall_places ? static_cast<double>(g.wall_bare_after) / static_cast<double>(g.wall_places) : 0.0;
+      std::snprintf(ob, sizeof ob,
+                    "\"wall_places\": %llu, \"wall_bare\": %llu, \"wall_branches\": %llu, \"wall_branch_mm\": %.9g, "
+                    "\"wall_refused_reach\": %llu, \"wall_refused_cone\": %llu, \"wall_refused_region\": %llu, "
+                    "\"wall_bare_after\": %llu, \"wall_bare_share\": %.9g, \"wall_refused_at\": [",
+                    count(g.wall_places), count(g.wall_bare), count(g.wall_branches), g.wall_branch_mm,
+                    count(g.wall_refused_reach), count(g.wall_refused_cone), count(g.wall_refused_region),
+                    count(g.wall_bare_after), share);
+      wt += ob;
+      static const char* const kWhy[3] = {"reach", "cone", "region"};
+      for (std::size_t i = 0; i < g.wall_refused_at.size(); ++i) {
+        const GrowReport::WallRefused& x = g.wall_refused_at[i];
+        std::snprintf(ob, sizeof ob, "%s{\"at\": [%.9g, %.9g, %.9g], \"why\": \"%s\"}", i ? ", " : "", x.at.x, x.at.y,
+                      x.at.z, kWhy[std::min(2, std::max(0, x.why))]);
+        wt += ob;
+      }
+      wt += "],\n    ";
+    }
     std::vector<char> gbuf(4096 + wt.size());   // O: room for the per-area counts, however many areas
     char* gb = gbuf.data();
     std::snprintf(gb, gbuf.size(),
@@ -1642,10 +1994,21 @@ std::string file_result_json(const FileResult& r) {
   std::snprintf(b, sizeof b,
                 "  \"ms\": {\"import\": %.1f, \"measure\": %.1f, \"read\": %.1f, \"cells\": %.1f, "
                 "\"bars\": %.1f, \"open_space\": %.1f, \"carve\": %.1f, \"struts\": %.1f, \"solid\": %.1f, "
-                "\"finish\": %.1f, \"write\": %.1f, \"total\": %.1f}\n",
+                "\"finish\": %.1f, \"write\": %.1f, \"total\": %.1f",
                 r.ms_import, r.ms_measure, r.ms_read, r.ms_cells, r.ms_bars, r.made.ms_open_space, r.made.ms_carve,
                 m.ms_struts, m.ms_solid, m.ms_finish, r.ms_write, r.ms_total);
   o += b;
+  if (r.made.tubes) {   // OF4: every pass of the tubes route (written only on that route: a cube job's result unchanged)
+    o += ", \"passes\": [";
+    for (std::size_t i = 0; i < r.made.pass_ms.size(); ++i) {
+      const PrintableReport::PassTime& p = r.made.pass_ms[i];
+      std::snprintf(b, sizeof b, "%s{\"shells\": %.1f, \"layers\": %.1f, \"solid\": %.1f}", i ? ", " : "", p.shells_ms,
+                    p.layers_ms, p.solid_ms);
+      o += b;
+    }
+    o += "]";
+  }
+  o += "}\n";
   o += "}\n";
   return o;
 }

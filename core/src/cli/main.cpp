@@ -14,6 +14,8 @@
 // solver did not converge" — report.json says so and names the job; no result).
 
 #include <algorithm>
+#include <atomic>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
@@ -121,6 +123,13 @@ int usage(const char* argv0) {
                "         block): per loaded face, SVG heat maps + a CSV of columns, and\n"
                "         run_info.json with the `flexible` receipt. Exit 0 = ran,\n"
                "         3 = the stage REFUSED (reason printed and in the receipt).\n",
+               argv0);
+  std::fprintf(stderr,
+               "       %s organic-strengthen <job.json> [--out DIR] [--threads N]\n"
+               "         THE ORGANIC STRENGTHEN ROUNDS (brief E2): a lattice-file job whose\n"
+               "         every region is Organic, with its strength job: check, then lay\n"
+               "         again stronger where weak, and check again (no file is meshed).\n"
+               "         Writes strengthen.json and r<N>/ to --out. Exit 0 = ran.\n",
                argv0);
   std::fprintf(stderr,
                "       %s lattice-file <job.json> [--out DIR] [--threads N]\n"
@@ -541,6 +550,54 @@ static int run_lattice_sample(int argc, char** argv) {
 // (lattice_layout_file.hpp); this parses the flags, makes --out, and says what happened.
 // --materials / --rules (the worker passes them to every job) are read only by the strength
 // check, when the job asks for one ("strength_job", V4). Exit 0 = made, 3 = refused, 1 = error, 2 = usage.
+// `organic-strengthen` (brief E2, item 12): the rounds as one job. Ctrl-C (or SIGTERM) stops it between steps.
+static std::atomic<bool> g_strengthen_stop{false};
+static int run_organic_strengthen_cli(int argc, char** argv, const std::string& materials_default,
+                                      const std::string& rules_default) {
+  if (argc < 3) return usage(argv[0]);
+  const std::string job_path = argv[2];
+  std::string out_dir = ".";
+  std::string materials_path = materials_default, rules_path = rules_default;
+  int threads = 0;
+  for (int i = 3; i < argc; ++i) {
+    const std::string arg = argv[i];
+    if (i + 1 >= argc) return usage(argv[0]);
+    if (arg == "--out") {
+      out_dir = argv[++i];
+    } else if (arg == "--threads") {
+      threads = std::atoi(argv[++i]);
+      if (threads < 1) return usage(argv[0]);
+    } else if (arg == "--materials") {
+      materials_path = argv[++i];
+    } else if (arg == "--rules") {
+      rules_path = argv[++i];
+    } else {
+      return usage(argv[0]);
+    }
+  }
+  std::error_code ec;
+  std::filesystem::create_directories(out_dir, ec);
+  std::signal(SIGINT, [](int) { g_strengthen_stop = true; });
+  std::signal(SIGTERM, [](int) { g_strengthen_stop = true; });
+  const topopt::OrganicStrengthenResult r = topopt::run_organic_strengthen(
+      job_path, out_dir, threads, materials_path, rules_path,
+      [](const char* step) {
+        std::printf("organic-strengthen: %s\n", step);
+        std::fflush(stdout);
+      },
+      &g_strengthen_stop);
+  if (r.ok) {
+    std::printf("organic-strengthen: %s after %d round%s of strengthening; %s\n", r.code.c_str(), r.rounds_fixed,
+                r.rounds_fixed == 1 ? "" : "s", r.passing ? "PASSING" : "NOT PASSING");
+  } else {
+    std::printf("organic-strengthen: FAILED (%s): %s\n", r.code.c_str(), r.why.c_str());
+    if (!r.detail.empty()) std::fprintf(stderr, "topopt-cli: organic-strengthen: %s\n", r.detail.c_str());
+    std::fprintf(stderr, "%s\n", r.why.c_str());
+  }
+  std::printf("result: %s/strengthen.json\n", out_dir.c_str());
+  return r.exit_code;
+}
+
 static int run_lattice_file(int argc, char** argv, const std::string& materials_default,
                             const std::string& rules_default) {
   if (argc < 3) return usage(argv[0]);
@@ -681,6 +738,8 @@ int main(int argc, char** argv) {
   if (argc >= 2 && std::string(argv[1]) == "lattice-sample")
     return run_lattice_sample(argc, argv);
   if (argc >= 2 && std::string(argv[1]) == "lattice-file") return run_lattice_file(argc, argv, TOPOPT_CLI_DEFAULT_MATERIALS, TOPOPT_CLI_DEFAULT_RULES);
+  if (argc >= 2 && std::string(argv[1]) == "organic-strengthen")
+    return run_organic_strengthen_cli(argc, argv, TOPOPT_CLI_DEFAULT_MATERIALS, TOPOPT_CLI_DEFAULT_RULES);
   if (argc < 3 || std::string(argv[1]) != "run") return usage(argv[0]);
   const std::string job_path = argv[2];
   std::string out_dir = ".";

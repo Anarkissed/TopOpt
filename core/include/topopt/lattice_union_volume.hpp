@@ -28,6 +28,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 #include "topopt/organic_lattice.hpp"
@@ -67,6 +68,13 @@ struct LatticeUnionVolume {
 // lattice_union_volume(), which shares no code path with it.
 std::vector<double> lattice_union_voxel_volume(const std::vector<OrganicSpan>& spans,
                                                const VoxelGrid& grid, int subdiv = 6);
+// Brief E2, item 3 (the Organic frame check's material): the same sweep, with some sub-points left out. `skip(e, s)`
+// true: sub-point s of voxel e (s = (a k + b) k + c; a along x, b along y, c along z, the points at
+// lo + (a + 0.5) h / k, ...) is not counted. `skipped`, when given, receives per voxel the mm3 of the skipped sub-points
+// that ARE in the union. With no skip it is the call above, value for value.
+std::vector<double> lattice_union_voxel_volume(const std::vector<OrganicSpan>& spans, const VoxelGrid& grid,
+                                               int subdiv, const std::function<bool(std::size_t, int)>& skip,
+                                               std::vector<double>* skipped = nullptr);
 
 LatticeUnionVolume lattice_union_volume(const std::vector<OrganicSpan>& spans,
                                         std::size_t samples = 4000000,

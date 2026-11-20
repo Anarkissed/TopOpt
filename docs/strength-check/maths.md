@@ -149,7 +149,7 @@ with $a$ = {{infill_exponent}}, $k_{\min}$ = {{infill_floor}}:
 
 $$M_{\text{eff}}=M\cdot k_{\text{inf}} .$$
 
-({{width_aware_knockdown}}: when on, the in-plane term instead uses $\max_e \sigma_{vm,e}/k_e$ with $k_e=f_w+(1-f_w)k_{\text{inf}}$, $f_w=4t(W_e-t)/W_e^2$, $t$ the wall ring from {{wall_loops}} and {{wall_line_width_mm}}; off in production.)
+({{width_aware_knockdown}}: when on, the in-plane term instead uses $\max_e \sigma_{vm,e}/k_e$ with $k_e=f_w+(1-f_w)k_{\text{inf}}$, $f_w=4t(W_e-t)/W_e^2$, $t$ the wall ring from {{wall_loops}} and {{wall_line_width_mm}}; ON by default (the owner, 2026-11-18), for the Organic verdict and the cube verdict alike: the solid within the printed wall thickness of a surface counts at full strength, only the inside takes the infill reduction. The interlayer term keeps $k_{\text{inf}}$.)
 
 $$\text{accepted}=\text{path\_ok}\ \wedge\ M_{\text{eff}}\ge S\ \wedge\ \neg\text{sliding}\ \wedge\ \text{every scenario accepted and none unheld}.$$
 
@@ -203,6 +203,91 @@ The file is made in all three cases. A fail carries `fail_reason`: `load_on_open
 
 Model frame, v1: grid header; one block of float32 von Mises per voxel (MPa: true in solid voxels, smeared in lattice voxels, 0 where empty), no tensor, float32 displacement per node (mm), mass, support count. Written even on fail. `scenario_fields.bin`: the same per scenario.
 
+## Organic: the frame of beams
+
+A job whose every lattice region is a weave (Organic) is checked by `check_frame` (`core/include/topopt/lattice_layout_frame.hpp`) on the bars the file holds (the sag lift's, less what the writer left out), on the strength job's own grid and load case (as above; scenarios are refused).
+
+### The material per voxel
+
+With $k$ = {{frame_material_subdiv}} and the $k^3$ sub-points $\mathbf x_{e,s}$ of voxel $e$ (centres of a $k^3$ sub-grid), $D(\mathbf x)$ the domain's answer and $C_b$ the capsule of bar $b$ (radius $w_b/2$; links and stubs in):
+
+$$\phi^{\text{sol}}_e=\frac{1}{k^3}\#\{s:\ D(\mathbf x_{e,s})\notin\{\text{Lattice},\text{Outside}\}\},\qquad \phi^{\text{lat}}_e=\frac{1}{k^3}\#\{s:\ D(\mathbf x_{e,s})\in\{\text{Lattice},\text{Outside}\}\wedge \mathbf x_{e,s}\in\textstyle\bigcup_b C_b\}$$
+
+on the part's voxels; $\rho_e=\phi^{\text{sol}}_e+\phi^{\text{lat}}_e\le1$. One solve, $E_e=E\max(\rho_e,\rho_{\min})$ with penalty 1 and $\rho_{\min}$ = {{frame_void_floor}}, gives the nodal displacements $\mathbf U$; $\bar{\mathbf u}_e$ is the mean of voxel $e$'s eight corners.
+
+### The frame
+
+Nodes: bar ends within {{frame_node_weld_mm}} mm, joined transitively. A node is solid when an end there is of kind Solid or $D$ at an end is neither Lattice nor Outside. T-join: a node with one bar that lies inside another bar $ab$ ($t=\frac{(\mathbf x-\mathbf a)\cdot(\mathbf b-\mathbf a)}{|\mathbf b-\mathbf a|^2}\in(10^{-6},1-10^{-6})$, distance to the line under {{frame_tjoin_off_line_mm}} mm, looked for within {{frame_tjoin_reach_mm}} mm) splits it. Pieces shorter than {{frame_zero_piece_mm}} mm are left out. A connected part of the frame with no solid node is left out of the solve and the verdict; one with one solid node, or with fewer than {{frame_collinear_max_driven}} whose nodes have a second singular value of their centred positions under {{frame_collinear_tol_mm}} mm, has its solid nodes' rotations held.
+
+### The drive
+
+A solid node at $\mathbf X$, $R=$ {{frame_drive_ball_voxels}} $h$:
+
+$$\mathbf u(\mathbf X)=\frac{1}{|V|}\sum_{e\in V}\bar{\mathbf u}_e,\qquad V=\{e:\ |\mathbf c_e-\mathbf X|\le R,\ \rho_e>\rho_{\text{drive}}\}$$
+
+($\rho_{\text{drive}}$ = {{frame_drive_share}}). When $V$ is empty: $\mathbf U$ trilinear at $\mathbf X$ over the corners of its grid cell that are in the voxel solve (corners of a voxel of the part), the weights renormalised over them; with no such corner, $R$ grows by $h$ at a time up to {{frame_drive_reach_voxels}} $h$ until $V$ is not empty; with $V$ still empty the node is not driven (free in the frame). A grid node outside the solve is never read. Its translations are fixed to it. A node with an end on the bed floor (the domain says BedFloor there) reads at $\mathbf X+$ {{frame_floor_shift_voxels}} $h\,\mathbf n$ instead; with {{frame_floor_free}} it is not a solid node.
+
+**The Organic verdict.** The solid: $M=\min\!\big(\sigma_y/\max\sigma_{vm},\ k_z\sigma_y/\max t\big)$ over the voxels with solid share $\ge$ {{printed_threshold}}, $M_{\text{eff}}$ by Install 3's gate (the infill curve; with {{width_aware_knockdown}} the per-voxel wall rescue on the member width of the solid share); fail `solid_margin` when $M_{\text{eff}}<S$. `passes_at_infill_percent`: the least whole infill $p\le100$ with $M_{\text{eff}}(p)\ge S$, the other print settings unchanged (null: none). Install 3's voxel load-path test is not applied (written as `voxel_load_path`). The load path (OS9 amended, 2026-11-19): a part of the frame with no driven node (adrift) is handed no load and carries nothing. $F_{\text{adrift}}$ = `load_on_adrift_n` $=\sum s\,|\mathbf f_P|$ over the loaded grid nodes $P$ with an adrift frame node within the load reach and no node of a driven part; fail `no_load_path` when $(F_{\text{unheld}}+F_{\text{adrift}})/|\mathbf F|>$ {{load_unheld_share}}. `loaded_nodes_undriven` stays a count; `adrift_parts` lists each adrift part (centre, bars, length, loaded nodes, load).
+
+### The load on the frame
+
+Over the loaded grid nodes $G$ (forces $\mathbf f_g$, the voxel solve's) and the voxels $E_G$ touching any of them (each once):
+
+$$s=\frac{\sum_{e\in E_G}\phi^{\text{lat}}_e}{\sum_{e\in E_G}\rho_e},\qquad \mathbf F=\sum_g\mathbf f_g,\qquad N=\{n\ \text{not solid, in the solve}:\ \min_g|\mathbf X_n-\mathbf x_g|\le\max(w_{\text{light}},h)\}$$
+
+$s\,\mathbf F/|N|$ goes on each $n\in N$. When $N=\varnothing$, $L_{\text{unheld}}=s|\mathbf F|$ (else 0); fail (`load_on_open_lattice`) when $L_{\text{unheld}}>0$ and $s>$ {{load_unheld_share}}.
+
+### Assembly and solve
+
+Each piece: a 2-node Timoshenko beam (`frame2_stiffness`) of a round section, $d=w$: $A=\pi d^2/4$, $I=\pi d^4/64$, $J=2I$, $G=E/2(1+\nu)$, $\kappa=6(1+\nu)/(7+6\nu)$; a link's matrix times {{frame_link_stiffness}}. Local axes: $\mathbf e_x$ along the piece, $\mathbf e_y=\mathbf r\times\mathbf e_x$ normalised ($\mathbf r=\mathbf z$ unless $|e_{x,z}|\ge0.9$, then $\mathbf x$), $\mathbf e_z=\mathbf e_x\times\mathbf e_y$. $K_{ff}\mathbf u_f=\mathbf F_f-K_{fc}\mathbf u_c$ is solved by `sparse_ldlt_solve` (LDLT, AMD order; refused when the predicted factor passes {{frame_solve_memory_gb}} GB; kept when $\|\mathbf b-K\mathbf u\|/\|\mathbf b\|<10^{-6}$).
+
+### The struts' stress
+
+Per piece, end forces $\mathbf f=k\,T\mathbf u_e$ (the link factor not in $k$): $N=f_7$ (tension +), $M=\max\big(\sqrt{f_5^2+f_6^2},\sqrt{f_{11}^2+f_{12}^2}\big)$,
+
+$$\sigma_t=\frac NA+\frac{M d}{2I},\qquad \sigma_c=-\frac NA+\frac{M d}{2I},\qquad \sin\theta=\frac{|(\mathbf b-\mathbf a)\cdot\mathbf n|}{L}$$
+
+$$m_t=\frac{\sigma_y\cos^2\theta+k_z\sigma_y\sin^2\theta}{\sigma_t},\qquad m_c=\frac{\sigma_y}{\sigma_c}$$
+
+($+\infty$ when the stress is not positive). A strut: non-link pieces joined through nodes with exactly two non-link pieces that are not solid. Its stress margin $m_s=\min(m_t,m_c)$ over its pieces with $L\ge$ {{frame_min_piece}} $w$; buckling (pinned) $m_b=\pi^2E\,I(w_{\min})/(L_s^2\,|N_{\min}|)$ when its most compressive piece has $N_{\min}<0$; margin $m=\min(m_s,m_b)$. A strut with $L_s<w_{\max}$ (a stub) has no margin. Judged: in the solve and not a stub.
+
+### The verdict
+
+$$\text{verdict}=\begin{cases}\text{fail} & L_{\text{unheld}}\text{ too large},\ \neg\text{accepted (solid)},\ \text{or solved}\wedge\exists\ \text{judged}\ m<S\\ \text{solid\_only} & \neg\text{solved, or}\ \textstyle\sum_{\text{undriven}}L_s>u\sum L_s\\ \text{pass} & \text{otherwise}\end{cases}$$
+
+($u$ = {{frame_unjudged_share}}.)
+
+`accepted` is the voxel solve's own gate (the solid's margin as above, on the material $\rho$). Written: Install 3's keys, `struts` {judged, under_safety, under_one, smallest_margin, buckling_failures, stubs, unjudged_mm, load_unheld_n}, the {{frame_weakest}} weakest (middle of the worst piece, width, length, margin, which limit), and `strut_margins.bin`: one float32 per bar in the layout's order, the least margin of the struts its pieces belong to, NaN where not judged.
+
+**The bars judged lie in the part (OG5).** For every weave bar with centre line $\mathbf a+t\,\mathbf d$, $0\le t\le L$ (OG2's relief at an open face excepted): no $t$ with the point outside the part (to $10^{-3}$ mm); a span in solid only at an end, entered from the lattice at $t_e$, of length at most $\min\big(w,\ T-r-\ell\big)^+$, $T$ the solid's thickness along $\mathbf d$ from $t_e$, $r=w/2$, $\ell$ the line width, and inside a Protect skin no point with $\delta(\mathbf x)-r<\ell$ ($\delta$ the depth below the part's surface). A bar breaking this is cut into its lattice spans (each run on by that rule), a bar with no lattice span removed; after a strengthening round a piece the cut leaves with a free end is dropped.
+
+## Organic: strengthen
+
+`topopt-cli organic-strengthen`: check; stop when no judged strut has $m<S$, or after $N$ = {{strengthen_rounds}} rounds (0: 6 in the additive mode; 2 Traced, 3 Grown in the rebuild mode); else one round, lay again, check again. For every judged strut with $m<m_w$ = {{strengthen_watch_margin}}, $P_s$ its piece ends and middles, $r_s=r$ = {{strengthen_reach}} $\times$ the mean spacing in use in the weave (`spacing_used_mm.mean`):
+
+$$b_v=\max_{s:\ \min_{\mathbf p\in P_s}|\mathbf c_v-\mathbf p|\le r_s}\ \min\!\Big(b_{\max},\Big(\frac{m_w}{m_s}\Big)^{q}\Big)\qquad(1\ \text{elsewhere})$$
+
+with $b_{\max}$ = {{strengthen_boost_max}}, $q$ = {{strengthen_boost_power}}; every component of the stress input's voxel $v$ times $b_v$. A floor per such strut: centre each $\mathbf p\in P_s$, radius $r_s$, least width $w_{\max,s}\,m_t/m_s$, $m_t$ = {{strengthen_target_margin}}. After the lay, every non-link bar whose middle lies in a floor's ball gets $w\leftarrow\min\big(\max(w,w_{\text{floor}}),w_{\text{upper}}\big)$ ($w_{\text{upper}}$: the job's own upper strut width; not applied when the width is one number); links then take the thinner of the struts at their two ends (S8) where that rose. The reference stress is stated at the value resolved for the original input, so the boost does not move it.
+
+
+**Additive mode** ({{strengthen_mode}} $=0$, the default). The lay is done once; round $n$ checks, then adds. For a watched strut ($m<m_w$) failing by buckling, with $N_{\min}<0$ its most compressive axial force and $w_{\min}$ its thinnest width, $I=\pi w_{\min}^4/64$:
+$$L_{\text{allow}}=\pi\sqrt{\frac{E\,I}{|N_{\min}|\,m_t}},\qquad n_b=\Big\lceil \frac{L}{L_{\text{allow}}}\Big\rceil-1$$
+brace points evenly along it (rule T's brace maker at named points, each brace as wide as the bar it starts on). A strut failing by stress, or by buckling with a point where no brace could be laid, has each of its own bars (as they are after the round's braces) widened
+$$w\leftarrow\min\Big(w_{\text{cap}},\ \max\big(w,\ w\,(m_t/m)^{1/p}\big)\Big),\qquad w_{\text{cap}}=c\,w_{\text{upper}}$$
+with $m$ its stress margin and $p$ = {{strengthen_power_axial}} when $|N|/A\ge Mr/I$ at the piece that set it, else {{strengthen_power_bending}}; for buckling $m$ its buckling margin and $p$ = {{strengthen_power_buckling}}; $c$ = {{strengthen_width_cap}}, $w_{\text{upper}}$ the job's upper strut width (its one width without a range). Links at a widened bar's ends take S8 again (only wider). Every bar of round 0 must remain whole or as pieces on its own line (ends within $10^{-5}$ mm), never thinner. The round's operations are saved in order (`additions.bin`) with the 64-bit FNV-1a hash of the bars after it; a lay with them that does not reach each hash is refused (`strengthened_mismatch`). With {{strengthen_mode}} $=1$ the rounds are as above.
+
+**The bars judged (OS16).** Let $P(\mathcal B)$ be the file's print check of bars $\mathcal B$ (make-check-make, tubes route; its bars $\mathcal B'$, the sag pass's, and the kept set $K(\mathcal B')$: present after the layer check's places and the hold rules). Additive: $\mathcal B_0=P(\text{lay})$; round $n$ checks $(\mathcal B_{n},K_n)$, adds ($\mathcal A_n$), then $\mathcal B_{n+1}=P(\mathcal A_n(\mathcal B_n))$, with the pieces of bars of $\mathcal B_n$ that $P$ leaves out (of those in $K_n$), moves, and the bars it adds counted per round (`print_left_out`, `print_left_out_widened`, `print_moved`, `print_added`); the round's hash is $h(\mathcal B_{n+1})$. The file job and the preview's Exact replay the same sequence. Rebuild: each round checks $P(\text{lay})$.
+
+**The order (OS11; the new-vine step OS18 withdrawn 2026-11-19).** Let $w_L$ be each strut's group's upper strut width (the limit; `organic_width_heavy_mm`, else the light width) and $w_{\text{cap}}=$ {{strengthen_width_cap}} $\times w_L$. In every additive round, a judged strut with $m<S$ is widened by A ($f$ as above, never thinner) up to $w_L$, never above it, in the round it is found. It goes past $w_L$ only in a LATER round: when this check finds it at $w_L$ ($w_{\max}\ge w_L$) and the check before also had it under $S$ (a strut known by the middle of its worst piece to 0.25 mm); then A applies up to $w_{\text{cap}}$ and it is counted `past_limit`. A strut with $S\le m<$ {{strengthen_watch_margin}} is widened by A up to $w_L$ and never past it. Buckling braces (B) are as before.
+
+## Organic: curved vines
+
+The file's round tubes are swept along a curve (rule OV1, `sweep_centre_line`): per piece of a run with points $\mathbf p_0..\mathbf p_n$, each span $[\mathbf p_j,\mathbf p_{j+1}]$ beside a curved point is the centripetal Catmull-Rom segment (knots $t_{k+1}=t_k+\lVert\mathbf p_{k+1}-\mathbf p_k\rVert^{1/2}$), its samples $\mathbf q$ pulled by one factor $\phi_j=\min(1,\delta/\max_{\mathbf q}d(\mathbf q,[\mathbf p_j,\mathbf p_{j+1}]))$ toward their nearest bar points, so every point of the curve lies within $\delta$ (`organic_sweep_max_offset_mm`, 0.2 mm) of its own straight bar and $\mathbf p_j$ never moves. The check keeps judging the straight bars $[\mathbf p_j,\mathbf p_{j+1}]$ with their widths (the frame of beams above); the curve's length differs from the bar's by at most $\lVert\mathbf p_{j+1}-\mathbf p_j\rVert(\sqrt{1+(2\delta/\ell)^2}-1)$ per span ($\ell$ the bar's length), at $\delta=0.2$ mm under 1 % for $\ell\ge3$ mm and about 2 % at $\ell=2$ mm (a bound: the curve is shorter than that zig-zag), and its section is the bar's. Accepted (the lead's ruling R6): the margins are the bars'.
+
+## Organic: the solid's weak areas
+
+Per judged voxel $v$ (solid share $\ge$ {{printed_threshold}}), with its own $\sigma_{vm,v}$, layer tension $t_v=\max(0,\mathbf n^\top\boldsymbol\sigma_v\mathbf n)$ and member width $W_v$: the effective margin $M_{\text{eff},v}$ = `gate_margin_effective`$(\sigma_y,k_z,\sigma_{vm,v},\sigma_{vm,v}/k(W_v),t_v)$ at the job's knockdown (scalar: $\min(\sigma_y/\sigma_{vm,v},k_z\sigma_y/t_v)\,f^{1.5}$; width-aware: $\min\big(\sigma_y k(W_v)/\sigma_{vm,v},\ k_z\sigma_y f^{1.5}/t_v\big)$). Then $M_{\text{eff}}=\min_v M_{\text{eff},v}$ exactly. The spots are the connected sets ({{load_path_connectivity}}-connectivity) of voxels with $M_{\text{eff},v}<S$, ordered by their least $M_{\text{eff},v}$; at most {{solid_spots_max}} are written (`solid_margin.spots`, with `spots_total`). Per spot: `worst_at` (the centre of its least voxel), `centroid` (mean of the voxel centres), `box` (the voxels' extent), `voxels`, `mm3`; `raw_margin` $=\min_v\min(\sigma_y/\sigma_{vm,v},k_z\sigma_y/t_v)$; `effective_margin`; `governs` (`in_plane` when the in-plane term is the smaller at the worst voxel, else `interlayer`); `passes_at_infill_percent` = the least whole $p\le100$ with $\min_{v\in\text{spot}}M_{\text{eff},v}(p)\ge S$ (null: none; with one spot it is the whole solid's); `passes_with_walls_credited`: the same at the job's infill with the width-aware wall rescue on (wall thickness from the print settings; a measure of the grid, no new solve). Distances from the worst voxel's centre to the nearest voxel centre that is held (a corner node supported), loaded (a corner node loaded) and of open lattice (lattice share outside the solid $>0$; `lattice_region` the weave region found there): `to_held_mm`, `to_load_mm`, `to_lattice_mm` (null: none). `kind`: `beside_a_fixing`, `beside_the_load`, `beside_the_lattice` when that distance is $\le$ {{solid_spot_near_voxels}} $\times h$, in that order, else `inside_the_solid`; `advice` one sentence per kind. `text`: the plain sentences built from $p_{\text{job}}$, `passes_at_infill_percent` and the spot counts; "Counting the printed walls as solid, it certifies." only when the job does not credit the walls and crediting them makes $\min_v M_{\text{eff},v}\ge S$. Nothing of this is written when the solid passes. `solid_margin.field`: fields.bin's block 2 (`requested_volume_fraction` $-1$): $M_{\text{eff},v}$ as float32 in the von Mises slot, NaN where not judged, no tensor, no displacement.
+
 ## What it does not cover
 
 - Buckling of struts or thin walls (linear statics only), fatigue, creep, temperature, moisture, UV.
@@ -224,3 +309,8 @@ Model frame, v1: grid header; one block of float32 von Mises per voxel (MPa: tru
 ### References the code cites
 
 Gibson-Ashby $f^{1.5}$ (`analyze.hpp`:521); Onck, Andrews & Gibson 2001, *Int. J. Mech. Sci.* 43(3), doi:10.1016/S0020-7403(00)00042-4 and 00043-6 (cut-cell no-credit rule, `run_job.cpp`:4326-4334); internal evidence: PR 198/237/246 tensor sweeps, PR 259 de-homogenisation probe, `evidence/2026-11-09-lattice-type-strut-laws`, `evidence/2026-11-01-lattice-types-k1`, `2026-07-28-graded-cell-size-phase0` (C2b), `2026-08-08-lattice-variant-margin-tolerance`.
+
+## The Organic skin (2026-11-19)
+
+Landings: every node of the finished lattice with depth $d\le r+\tfrac12$ reach below the region's open face (the vine ends cut at the face among them, kept by the drop). A landing's foot is $\mathbf p-\mathbf n_{in}\,(d-s\,r)$ with $s=$ `skin_sink` $\in[0,1]$ and $r$ its strut's radius; feet within a quarter width of each other are one. Each landing asks for its `skin_density` $k\in[1,6]$ nearest partners between $0.55$ and $\rho_k$ reaches, $\rho_k=1+(k-3)/6$ for $k\le3$ and $1+(k-3)/2$ above; up to 3 a pair must be wanted both ways, above 3 by either; the fallback within $1.5\,\rho_k$ reaches. A join is skipped when within $20^\circ$ of, and within the half widths plus the gap of, a net strut it does not join (from one foot: within $20\cdot3/k$ degrees above density 3). Crossings become joints; one left mid-bar takes out the later join. The joins lie between feet; stems join each landing to its foot.
+

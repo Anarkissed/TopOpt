@@ -24,6 +24,7 @@ namespace topopt::lattice_layout {
 
 void GrowReport::add(const GrowReport& o) {
   seeds_floor += o.seeds_floor; seeds_wall += o.seeds_wall; seeds_refused_support += o.seeds_refused_support;
+  gap_capped += o.gap_capped;   // OG1
   strands_grown += o.strands_grown; steps += o.steps; clamped += o.clamped;
   ended_edge += o.ended_edge; ended_unsupported += o.ended_unsupported; ended_joins += o.ended_joins;
   floor_stepped += o.floor_stepped; floor_ended_edge += o.floor_ended_edge;
@@ -36,6 +37,12 @@ void GrowReport::add(const GrowReport& o) {
   reseed_voids += o.reseed_voids; reseed_landed += o.reseed_landed; reseed_failed += o.reseed_failed;
   reseed_mm += o.reseed_mm;
   reseed_from_vertex += o.reseed_from_vertex;
+  wall_places += o.wall_places; wall_bare += o.wall_bare; wall_branches += o.wall_branches;   // OG6
+  wall_bare_after += o.wall_bare_after; wall_branch_mm += o.wall_branch_mm;
+  wall_refused_reach += o.wall_refused_reach; wall_refused_cone += o.wall_refused_cone;
+  wall_refused_region += o.wall_refused_region;
+  for (const WallRefused& x : o.wall_refused_at)
+    if (wall_refused_at.size() < 20) wall_refused_at.push_back(x);
   reseed_voids_round.insert(reseed_voids_round.end(), o.reseed_voids_round.begin(), o.reseed_voids_round.end());
   wall_grown += o.wall_grown; wall_joins += o.wall_joins; wall_ended_edge += o.wall_ended_edge;
   wall_ended_unsupported += o.wall_ended_unsupported; wall_ended_joins += o.wall_ended_joins;
@@ -266,6 +273,7 @@ std::uint64_t mix(std::uint64_t x) {
   x = (x ^ (x >> 27)) * 0x94D049BB133111EBULL;
   return x ^ (x >> 31);
 }
+constexpr std::uint64_t kWhatReseed = 0x6703;   // G11 amended: the re-seed's bare places and first steps
 double rnd(std::uint64_t seed, std::uint64_t what, long long a, long long b, int k) {
   std::uint64_t h = mix(seed);
   h = mix(h ^ what);
@@ -589,7 +597,10 @@ class Grower {
   // weave_bars finds the end Solid with its run-in made.
   Vec3 end_at_edge(const Vec3& in, const Vec3& d, double at) const {
     const bool past_solid = solid(add(in, mul(d, at + 3.0 * 0.02)));
-    return add(in, mul(d, past_solid ? at + width_ : at));
+    // OG5: on into the solid by its width, never past the solid's thickness less the radius less a line width.
+    // (at least 5 microns in, so the end lies in the solid it ends on)
+    return add(in, mul(d, past_solid ? at + std::max(0.005, solid_run_on(probe_, add(in, mul(d, at)), d, width_, domain_.spec().bead_mm))
+                                     : at));
   }
 
   void lighting();
@@ -611,6 +622,8 @@ class Grower {
   double bare() const;
   void account(const Fate& f);
   void reseed(std::vector<Tip>& tips);
+  std::vector<Vec3> wall_places() const;            // OG6
+  void reach_walls(const std::vector<Vec3>& places);   // OG6
   void ties(std::size_t from);
   // G (brief G8): top runs and roots, once, after ties(0) and before the pruning.
   void runs();
@@ -734,7 +747,11 @@ void Grower::seeds(std::vector<Tip>& tips) {
       t.kind = Tip::Floor;
       t.dir = cap(2, a, b);
       // Its foot leaves the floor on that heading; its root runs back along it into the solid by its width (S4).
-      t.root = at < 0.0 ? c : solid(sub(on, mul(t.dir, width_ + 0.06))) ? sub(on, mul(t.dir, width_)) : on;
+      // OG5: never deeper than the solid's thickness there less the radius less a line width (a thin bed floor).
+      t.root = at < 0.0 ? c
+               : solid(sub(on, mul(t.dir, width_ + 0.06)))
+                   ? sub(on, mul(t.dir, std::max(0.005, solid_run_on(probe_, on, mul(t.dir, -1.0), width_, domain_.spec().bead_mm))))
+                   : on;
       t.from = on;
       t.seed_no = static_cast<int>(rep_.seeds_floor);
       tips.push_back(t);
@@ -1989,6 +2006,91 @@ void Grower::account(const Fate& f) {
   }
 }
 
+// OG6 (brief E10): the region's walls reached. A wall place: where a candidate voxel's centre, read along one of the six
+// axis directions toward a voxel that is not a candidate, meets the region's edge within two voxels (one place per
+// 1.5 mm cell, first found). It is bare when no vine the path keeps lies within its radius plus wall_bare_mm.
+std::vector<Vec3> Grower::wall_places() const {
+  constexpr double kCellMm = 1.5;
+  const double hv = field_.spacing;
+  std::set<std::array<long long, 3>> taken;
+  const int di6[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+  std::vector<Vec3> places;
+  for (int k = 0; k < field_.nz; ++k)
+    for (int j = 0; j < field_.ny; ++j)
+      for (int i = 0; i < field_.nx; ++i) {
+        if (!spacing().candidate[field_.index(i, j, k)]) continue;
+        const Vec3 c = centre(i, j, k);
+        for (const auto& d6 : di6) {
+          const int i2 = i + d6[0], j2 = j + d6[1], k2 = k + d6[2];
+          const bool out = i2 < 0 || j2 < 0 || k2 < 0 || i2 >= field_.nx || j2 >= field_.ny || k2 >= field_.nz;
+          if (!out && spacing().candidate[field_.index(i2, j2, k2)]) continue;
+          const Vec3 d{static_cast<double>(d6[0]), static_cast<double>(d6[1]), static_cast<double>(d6[2])};
+          const double e = edge(c, d, 2.0 * hv);
+          if (e < 0.0) continue;
+          const Vec3 w = add(c, mul(d, e));
+          const std::array<long long, 3> key{static_cast<long long>(std::floor(w.x / kCellMm)),
+                                             static_cast<long long>(std::floor(w.y / kCellMm)),
+                                             static_cast<long long>(std::floor(w.z / kCellMm))};
+          if (taken.insert(key).second) places.push_back(w);
+        }
+      }
+  return places;
+}
+
+// To each bare wall place, from the nearest vertex of a kept vine within wall_reach x the local spacing whose straight
+// line CLIMBS to the place at the cone or steeper (so the branch starts on its vine and is held from below as it
+// prints; a branch down to a wall would start in the air at the wall: on the stand those took posts and were cut by
+// the layer check), at least two radii long, and stays on the region's candidates to a voxel short of the edge, a
+// branch is laid, ended at the edge as a strand ends there (end_at_edge: on into the solid by OG5's run-on). A bare
+// place given none is counted by the furthest test any vertex passed (none in reach; none climbing at the cone; none
+// staying on the region, or no edge found along its line).
+void Grower::reach_walls(const std::vector<Vec3>& places) {
+  const double hv = field_.spacing;
+  const double bare_r = r_ + ask_.wall_bare_mm;
+  rep_.wall_places += places.size();
+  for (const Vec3& w : places) {
+    if (live_within(w, bare_r)) continue;
+    ++rep_.wall_bare;
+    const double reach = ask_.wall_reach * sep(w);
+    if (!(reach > 0.0)) continue;
+    int why = 0;   // the furthest test any vertex passed: 0 none in reach, 1 at the cone, 2 on the region
+    bool found = false;
+    double bd = std::numeric_limits<double>::infinity();
+    Vec3 bx{};
+    boxes_.near(w, reach + ds_, [&](const Sample& s) {
+      if (!live(s)) return;
+      const Line& L = lines_[static_cast<std::size_t>(s.line)];
+      for (std::size_t end = 0; end < 2; ++end) {
+        const Vec3 x = L.pts[static_cast<std::size_t>(s.seg) + end];
+        const double d = dist(x, w);
+        if (!(d <= reach) || d < 2.0 * r_ || !(d < bd)) continue;
+        why = std::max(why, 1);
+        if (dot(sub(w, x), up_) < cone_sin_ * d) continue;
+        why = std::max(why, 2);
+        const Vec3 u = mul(sub(w, x), 1.0 / d);
+        if (!on_candidates(x, add(x, mul(u, std::max(0.0, d - hv))))) continue;
+        found = true;
+        bd = d;
+        bx = x;
+      }
+    });
+    const Vec3 u = found ? mul(sub(w, bx), 1.0 / bd) : Vec3{};
+    const double e = found ? edge(bx, u, bd + 2.0 * hv) : -1.0;
+    if (e < 0.0) {
+      if (found) why = 2;
+      std::size_t& n = why == 0 ? rep_.wall_refused_reach : why == 1 ? rep_.wall_refused_cone : rep_.wall_refused_region;
+      ++n;
+      if (rep_.wall_refused_at.size() < 20) rep_.wall_refused_at.push_back({w, why});
+      continue;
+    }
+    const int li = new_line(bx, -1, 0);
+    const Vec3 end = end_at_edge(bx, u, e);
+    lay(li, end, true);
+    ++rep_.wall_branches;
+    rep_.wall_branch_mm += dist(bx, end);
+  }
+}
+
 // G11, the original's void re-seeding (1.5), run ONCE after the first pruning (the owner, 2026-11-15: "then pruning
 // and a round of re-seeding in bare areas"). Bare places: candidate voxel centres on a stride of half the median
 // spacing with no strand the path keeps within 1.5 x their spacing, no two within that distance (first come). From
@@ -2000,20 +2102,43 @@ void Grower::account(const Fate& f) {
 void Grower::reseed(std::vector<Tip>& tips) {
   const double hv = field_.spacing;
   const int stride = std::max(1, static_cast<int>(0.5 * median_ / hv));
+  // G11 amended (the owner, 2026-11-19: "there is a repeating pattern in the back ... Is there a solve for that?"): a
+  // bare place is no longer a voxel on a fixed lattice of the stride: each stride cell takes the candidate voxel nearest
+  // a point placed in the cell by a hash of the job's seed, the region and the cell (as the floor and wall seeds are),
+  // so neighbouring places are not one stride apart and their stubs do not repeat.
+  const std::uint64_t what = kWhatReseed ^ (static_cast<std::uint64_t>(static_cast<std::uint32_t>(region_)) << 20);
   std::vector<std::array<int, 3>> voids;
+  std::vector<std::array<int, 3>> void_cell;   // the stride cell each came from (the hash's key for its first step)
   std::vector<Vec3> at;
-  for (int k = 0; k < field_.nz; k += stride)
-    for (int j = 0; j < field_.ny; j += stride)
-      for (int i = 0; i < field_.nx; i += stride) {
-        const std::size_t e = field_.index(i, j, k);
-        if (!spacing().candidate[e]) continue;
-        const Vec3 q = centre(i, j, k);
+  for (int k0 = 0; k0 < field_.nz; k0 += stride)
+    for (int j0 = 0; j0 < field_.ny; j0 += stride)
+      for (int i0 = 0; i0 < field_.nx; i0 += stride) {
+        const int ck = k0 / stride, cj = j0 / stride, ci = i0 / stride;
+        const Vec3 pick{field_.origin.x + (i0 + rnd(ask_.seed, what, ci, cj, 3 * ck)) * hv * 1.0 +
+                            (stride - 1) * hv * rnd(ask_.seed, what, ci, cj, 3 * ck),
+                        field_.origin.y + (j0 + rnd(ask_.seed, what, ci, cj, 3 * ck + 1)) * hv * 1.0 +
+                            (stride - 1) * hv * rnd(ask_.seed, what, ci, cj, 3 * ck + 1),
+                        field_.origin.z + (k0 + rnd(ask_.seed, what, ci, cj, 3 * ck + 2)) * hv * 1.0 +
+                            (stride - 1) * hv * rnd(ask_.seed, what, ci, cj, 3 * ck + 2)};
+        int bi = -1, bj = -1, bk = -1;
+        double bd = std::numeric_limits<double>::infinity();
+        for (int k = k0; k < std::min(field_.nz, k0 + stride); ++k)
+          for (int j = j0; j < std::min(field_.ny, j0 + stride); ++j)
+            for (int i = i0; i < std::min(field_.nx, i0 + stride); ++i) {
+              if (!spacing().candidate[field_.index(i, j, k)]) continue;
+              const double d = dist(centre(i, j, k), pick);
+              if (d < bd) { bd = d; bi = i; bj = j; bk = k; }
+            }
+        if (bi < 0) continue;
+        const std::size_t e = field_.index(bi, bj, bk);
+        const Vec3 q = centre(bi, bj, bk);
         const double lim = ask_.void_ratio * spacing().spacing_mm[e];   // E: G11's kVoidRatio unless asked
         if (live_within(q, lim)) continue;
         bool near = false;
         for (const Vec3& o : at) near = near || dist(o, q) < lim;
         if (near) continue;
-        voids.push_back({i, j, k});
+        voids.push_back({bi, bj, bk});
+        void_cell.push_back({ci, cj, ck});
         at.push_back(q);
       }
   rep_.reseed_voids += voids.size();
@@ -2079,6 +2204,7 @@ void Grower::reseed(std::vector<Tip>& tips) {
       if (stress_dir(q, f)) f = mul(f, -1.0);   // the stress, turned to point down
       int bi = -1, bj = -1, bk = -1;
       double best = std::numeric_limits<double>::infinity();
+      std::vector<std::pair<double, std::array<int, 3>>> down_nb;   // G11 amended: the descending neighbours and scores
       for (int dk = -1; dk <= 1; ++dk)
         for (int dj = -1; dj <= 1; ++dj)
           for (int di = -1; di <= 1; ++di) {
@@ -2089,8 +2215,24 @@ void Grower::reseed(std::vector<Tip>& tips) {
             if (!spacing().candidate[e2] || visited.count(e2)) continue;
             const Vec3 o{static_cast<double>(di), static_cast<double>(dj), static_cast<double>(dk)};
             const double score = dot(o, up_) * 10.0 - dot(o, f) + 0.1 * (std::abs(di) + std::abs(dj) + std::abs(dk));
+            if (dot(o, up_) < 0.0) down_nb.push_back({score, {i2, j2, k2}});
             if (score < best) { best = score; bi = i2; bj = j2; bk = k2; }
           }
+      // G11 amended: the FIRST step is any descending neighbour within 20 % of the steepest (its descent, -score, at
+      // least 0.8 of the best's), chosen by the same hash (seed, region, the place's stride cell); later steps as before.
+      if (w == 0 && bi >= 0 && !down_nb.empty() && -best > 0.0) {
+        std::vector<std::array<int, 3>> near_best;
+        for (const auto& nb : down_nb)
+          if (-nb.first >= 0.8 * -best) near_best.push_back(nb.second);
+        if (near_best.size() > 1) {
+          const std::array<int, 3>& c3 = void_cell[vi];
+          const std::size_t pickn = std::min(near_best.size() - 1, static_cast<std::size_t>(
+              std::floor(rnd(ask_.seed, what ^ 1ULL, c3[0], c3[1], c3[2]) * static_cast<double>(near_best.size()))));
+          bi = near_best[pickn][0];
+          bj = near_best[pickn][1];
+          bk = near_best[pickn][2];
+        }
+      }
       if (bi < 0) break;   // boxed in
       ci = bi; cj = bj; ck = bk;
       visited.insert(field_.index(ci, cj, ck));
@@ -2782,6 +2924,10 @@ bool Grower::setup() {
     throw std::invalid_argument("grow_strands: wall_gap_heavy needs the spacing as a range (O12's measure)");   // M
   if (!(ask_.void_ratio > 0.0) || !std::isfinite(ask_.void_ratio))
     throw std::invalid_argument("grow_strands: void_ratio must be above 0");   // E
+  if (!(ask_.wall_bare_mm > 0.0) || !std::isfinite(ask_.wall_bare_mm))
+    throw std::invalid_argument("grow_strands: wall_bare_mm must be above 0");   // OG6
+  if (!(ask_.wall_reach >= 0.0) || !std::isfinite(ask_.wall_reach))
+    throw std::invalid_argument("grow_strands: wall_reach must be 0 or more");   // OG6
   if (ask_.wall_cross < 0 || ask_.wall_cross > 2)
     throw std::invalid_argument("grow_strands: wall_cross must be 0, 1 or 2");   // F
   if (ask_.wall_cross != 0 && !ask_.walls_out)
@@ -2940,9 +3086,26 @@ std::vector<Strand> Grower::run() {
     settle();
     f = pass();
   }
+  // OG6 (brief E10; the owner, 2026-11-19: "The vines should be RIGHT UP NEXT TO the edge of the solid outline. There
+  // should be no space in between them whatsoever -- in any direction."): bare places on the region's walls get a
+  // branch from the nearest vine, then the path's pruning again.
+  const std::vector<Vec3> walls = wall_places();
+  {
+    for (std::size_t l = 0; l < lines_.size(); ++l)
+      for (std::size_t k = 0; k < f.seg[l].size(); ++k) lines_[l].dead[k] = f.seg[l][k] != 0;
+    rebuild_rec();
+    const std::size_t before = rep_.wall_branches;
+    reach_walls(walls);
+    if (rep_.wall_branches > before) {
+      repeats();
+      settle();
+      f = pass();
+    }
+  }
   account(f);
   for (std::size_t l = 0; l < lines_.size(); ++l)
     for (std::size_t k = 0; k < f.seg[l].size(); ++k) lines_[l].dead[k] = f.seg[l][k] != 0;
+  for (const Vec3& w : walls) rep_.wall_bare_after += !live_within(w, r_ + ask_.wall_bare_mm);   // OG6
   rep_.bare_after = bare();
   rep_.tips = tips_;
   rep_.grown_mm = laid_mm_;
@@ -2952,6 +3115,10 @@ std::vector<Strand> Grower::run() {
     for (Strand& s : out)
       for (std::size_t k = 0; k < s.points.size(); ++k)
         s.width_mm[k] = width_ + (ask_.width_heavy_mm - width_) * share(s.points[k]);
+  // OG1 (brief E6): each point's local spacing (O12, O13, L2's) and its reason; with the gap on, the cap on every width.
+  rep_.gap_capped = organic_gap_cap(out, 0, field_, spacing().spacing_mm, spacing().why,
+                                    ask_.gap_lines > 0.0 ? ask_.gap_lines * domain_.spec().bead_mm : 0.0,
+                                    domain_.spec().bead_mm * domain_.spec().min_strut_lines);
   rep_.strands = out.size();
   if (ask_.tie_level) {   // P: the largest height difference within one level tie, as the growth ends
     rep_.tie_level = true;

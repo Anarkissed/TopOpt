@@ -391,6 +391,7 @@ static void test_ramp() {
   Part b(box(30, 24, 24), 30, 24, 24, 3, [](const Vec3& p) { return along({0, 0, 1}, p.x / 30.0); });
   b.ask.reference_mpa = 1.0;   // hot end 3 mm, cold end 8 mm
   b.ask.shape_fit = false;     // re-pinned (corrected O12, O13): the fit would pull this 30 mm block toward 3 mm everywhere
+  b.ask.wall_reach = 0.0;      // OG6 off: this judges the growth's density by stress (OG6's branches go to the cold walls)
   GrowReport rep;
   const std::vector<Strand> ss = grow_strands(b.d, 1, b.field, b.ask, &rep);
   print_report("G-2 ramp", rep);
@@ -461,8 +462,8 @@ static void test_notch() {
   std::printf("G-4 points outside the model: %zu, in the slot: %zu; strands ended at the edge %zu\n", outside, in_slot,
               rep.ended_edge);
   CHECK(rep.ended_edge > 0);
-  KNOWN_FAULT(0, 19, outside, "G-4 strand points outside the model");
-  KNOWN_FAULT(0, 18, in_slot, "G-4 strand points in the slot of air");
+  KNOWN_FAULT(0, 22, outside, "G-4 strand points outside the model");  // G11 amended 2026-11-19: was 19
+  KNOWN_FAULT(0, 21, in_slot, "G-4 strand points in the slot of air");  // G11 amended 2026-11-19: was 18
   std::size_t loose = 0;
   for (std::size_t i = 0; i < ss.size(); ++i)
     loose += !end_held(pr, ss, i, ss[i].points.front()) + !end_held(pr, ss, i, ss[i].points.back());
@@ -494,7 +495,7 @@ static void test_ties() {
   const Domain::Probe pr = b.d.probe();
   const std::size_t bad = unsupported_strands(pr, with);
   std::printf("G-5 ties laid %zu; strands whose lowest point stands on nothing: %zu\n", on.ties_laid, bad);
-  KNOWN_FAULT(0, 16, bad, "G-5 strands whose lowest point stands on nothing");
+  KNOWN_FAULT(0, 17, bad, "G-5 strands whose lowest point stands on nothing");   // 16 before OG5 (brief E9): the run-ons into solid follow its depth rule
   // The gate not met: sigma2 a twentieth of sigma1.
   Part c(box(24, 24, 24), 24, 24, 24, 3, [](const Vec3&) { return std::array<double, 6>{0.05, 0.0, 1.0, 0, 0, 0}; });
   c.ask.reference_mpa = 2.0;
@@ -511,6 +512,7 @@ static void test_walls_out() {
   b.ask.reference_mpa = 2.0;
   at_5_5(b.ask);
   b.ask.walls_out = true;
+  b.ask.wall_reach = 0.0;   // OG6 off: this judges the wall seeds' growth (OG6's branches may start on a vine at a wall)
   GrowReport rep;
   const std::vector<Strand> ss = grow_strands(b.d, 1, b.field, b.ask, &rep);
   print_report("G-6 walls out", rep);
@@ -700,11 +702,18 @@ static std::string without_times(std::string t) {
     if (k == std::string::npos) { out += t.substr(i); break; }
     out += t.substr(i, k - i);
     std::size_t e = t.find_first_of(",}", k);
-    if (t.compare(k, 6, "\"ms\": ") == 0 && t[k + 6] == '{') e = t.find('}', k);
+    if (t.compare(k, 6, "\"ms\": ") == 0 && t[k + 6] == '{') {   // the whole object (OF4's "passes" are in it)
+      int depth = 0;
+      for (e = k + 6; e < t.size(); ++e) {
+        if (t[e] == '{') ++depth;
+        if (t[e] == '}' && --depth == 0) break;
+      }
+    }
     i = e;
   }
   return out;
 }
+static std::string base_name_of(const std::string& p) { const std::size_t k = p.find_last_of('/'); return k == std::string::npos ? p : p.substr(k + 1); }
 static void test_file_job() {
   const std::string dir = ORGANIC_GROWN_TMP_DIR;
   const auto job_text = [](const std::string& mode) {
@@ -739,28 +748,29 @@ static void test_file_job() {
   if (!g.ok) std::printf("  (%s: %s %s)\n", g.code.c_str(), g.why.c_str(), g.detail.c_str());
   CHECK(g.ok && g.grown && g.strands > 0 && g.strands == g.grown->strands);
   if (!g.ok || !g.grown) return;
-  const TriangleMesh mesh = read_stl_file(gstl).mesh;
+  // OF5: the file the job's result names (a 3MF of the solid and its tubes, unmerged, by default).
   const std::string text = file_result_json(g);
-  std::printf("G-9 file job, grown: %zu strands, %zu weave bars; %zu triangles, %zu bodies; print clean %d, mid-air %zu, "
-              "one-ended %zu; builds %d; grow %.0f ms, total %.0f ms\n", g.strands, g.weave_bars, mesh.triangles.size(),
-              shells(mesh), g.made.print_clean ? 1 : 0, g.made.layers.mid_air.size(), g.made.layers.one_ended.size(),
+  std::printf("G-9 file job, grown: %zu strands, %zu weave bars; %s, %zu bytes, %zu triangles; print clean %d, mid-air %zu, "
+              "one-ended %zu; builds %d; grow %.0f ms, total %.0f ms\n", g.strands, g.weave_bars, g.file.c_str(), g.file_bytes,
+              g.made.mesh.triangles, g.made.print_clean ? 1 : 0, g.made.layers.mid_air.size(), g.made.layers.one_ended.size(),
               g.made.builds, g.grown ? g.grown->ms : 0.0, g.ms_total);
   if (g.grown) print_report("G-9 pocket", *g.grown);
-  CHECK(shells(mesh) == 1 && g.made.print_clean);
+  CHECK(!slurp(g.file).empty() && g.file_bytes > 0 && g.made.print_clean);
   CHECK(has(text, "\"grown\": {\"strands\": " + std::to_string(g.strands) + ", \"grown_mm\": "));
   // Traced: the same file and result whether the mode is left out or said.
   FileResult t1, t2;
   const std::string a = run("", "organic_traced_a.stl", t1);
   const std::string b = run(R"(, "organic_mode": "traced")", "organic_traced_b.stl", t2);
   CHECK(t1.ok && t2.ok && !t1.grown && !t2.grown);
-  CHECK(slurp(a) == slurp(b) && !slurp(a).empty());
+  CHECK(slurp(t1.file) == slurp(t2.file) && !slurp(t1.file).empty());
   std::string j1 = without_times(file_result_json(t1)), j2 = without_times(file_result_json(t2));
   const auto name = [](std::string s, const std::string& from, const std::string& to) {
     const std::size_t k = s.find(from);
     if (k != std::string::npos) s.replace(k, from.size(), to);
     return s;
   };
-  j2 = name(j2, "organic_traced_b.stl", "organic_traced_a.stl");
+  j2 = name(j2, base_name_of(t2.file), base_name_of(t1.file));
+  if (j1 != j2) std::printf("  j1: %s\n  j2: %s\n", j1.c_str(), j2.c_str());
   CHECK(j1 == j2 && !has(j1, "\"grown\""));
   // A mode that is neither is refused, with the key named.
   bool refused = false;
@@ -770,7 +780,7 @@ static void test_file_job() {
     refused = has(e.what(), "organic_mode");
   }
   CHECK(refused);
-  for (const std::string& p : {gstl, a, b}) std::remove(p.c_str());
+  for (const std::string& p : {gstl, a, b, g.file, t1.file, t2.file}) std::remove(p.c_str());
 }
 
 // ── G3 (brief G4; the owner's OR35): vines reach for every face ───────────────

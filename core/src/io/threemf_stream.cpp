@@ -8,6 +8,10 @@
 #include <cstring>
 #include <vector>
 
+#ifdef TOPOPT_HAVE_ZLIB
+#include <zlib.h>
+#endif
+
 namespace topopt {
 namespace {
 
@@ -56,7 +60,9 @@ struct ZipEntry {
   std::string name;
   std::string data;   // empty for the streamed model part (copied from temp)
   std::uint32_t crc = 0;
-  std::uint64_t size = 0;  // == compressed size (stored)
+  std::uint64_t size = 0;  // uncompressed size
+  std::uint64_t csize = 0;   // compressed size (== size when stored)
+  std::uint16_t method = 0;  // 0 stored, 8 deflated (OF5)
   std::uint32_t offset = 0;  // local-header offset, filled during write
   bool from_temp = false;    // model part: data lives in the temp file
 };
@@ -66,11 +72,11 @@ std::string local_header(const ZipEntry& e) {
   le32(h, 0x04034b50u);        // local file header signature
   le16(h, 20);                 // version needed to extract (2.0)
   le16(h, 0);                  // general purpose flags (none; sizes known)
-  le16(h, 0);                  // compression method 0 = store
+  le16(h, e.method);           // compression method 0 = store, 8 = deflate
   le16(h, 0);                  // mod time (fixed -> deterministic)
   le16(h, 0);                  // mod date (fixed -> deterministic)
   le32(h, e.crc);
-  le32(h, static_cast<std::uint32_t>(e.size));   // compressed size
+  le32(h, static_cast<std::uint32_t>(e.csize));  // compressed size
   le32(h, static_cast<std::uint32_t>(e.size));   // uncompressed size
   le16(h, static_cast<std::uint16_t>(e.name.size()));
   le16(h, 0);                  // extra field length
@@ -84,11 +90,11 @@ std::string central_header(const ZipEntry& e) {
   le16(h, 20);                 // version made by
   le16(h, 20);                 // version needed
   le16(h, 0);                  // flags
-  le16(h, 0);                  // method (store)
+  le16(h, e.method);           // method (store or deflate)
   le16(h, 0);                  // mod time
   le16(h, 0);                  // mod date
   le32(h, e.crc);
-  le32(h, static_cast<std::uint32_t>(e.size));
+  le32(h, static_cast<std::uint32_t>(e.csize));
   le32(h, static_cast<std::uint32_t>(e.size));
   le16(h, static_cast<std::uint16_t>(e.name.size()));
   le16(h, 0);                  // extra length
@@ -127,10 +133,26 @@ const char* kModelHead =
 }  // namespace
 
 StreamingThreeMfWriter::StreamingThreeMfWriter(const std::string& path)
-    : path_(path), tmp_path_(path + ".model.tmp") {
+    : StreamingThreeMfWriter(path, Options{}) {}
+
+bool StreamingThreeMfWriter::deflate_available() {
+#ifdef TOPOPT_HAVE_ZLIB
+  return true;
+#else
+  return false;
+#endif
+}
+
+StreamingThreeMfWriter::StreamingThreeMfWriter(const std::string& path, const Options& options)
+    : path_(path), tmp_path_(path + ".model.tmp"), options_(options) {
   model_.open(tmp_path_, std::ios::binary);
   if (!model_)
     throw ThreeMfStreamError("cannot open 3MF model temp file: " + tmp_path_);
+  if (options_.indexed) {
+    tris_path_ = path + ".tris.tmp";
+    tris_.open(tris_path_, std::ios::binary);
+    if (!tris_) throw ThreeMfStreamError("cannot open 3MF triangle temp file: " + tris_path_);
+  }
   // Fail fast if the final path is unwritable, before streaming a large temp.
   {
     std::ofstream probe(path_, std::ios::binary);
@@ -150,10 +172,39 @@ void StreamingThreeMfWriter::put(const char* s, std::size_t n) {
 
 void StreamingThreeMfWriter::put(const std::string& s) { put(s.data(), s.size()); }
 
+std::uint64_t StreamingThreeMfWriter::add_vertex(const Vec3& v) {
+  if (finished_ || !options_.indexed)
+    throw ThreeMfStreamError("StreamingThreeMfWriter: add_vertex needs an indexed writer not yet finished");
+  char buf[192];
+  const int n = std::snprintf(buf, sizeof(buf), "     <vertex x=\"%.6f\" y=\"%.6f\" z=\"%.6f\"/>\r\n", v.x, v.y, v.z);
+  put(buf, static_cast<std::size_t>(n));
+  return vert_count_++;
+}
+
+void StreamingThreeMfWriter::add_indexed(std::uint64_t a, std::uint64_t b, std::uint64_t c) {
+  if (finished_ || !options_.indexed)
+    throw ThreeMfStreamError("StreamingThreeMfWriter: add_indexed needs an indexed writer not yet finished");
+  if (a >= vert_count_ || b >= vert_count_ || c >= vert_count_)
+    throw ThreeMfStreamError("StreamingThreeMfWriter: a triangle names a vertex not yet added");
+  char buf[128];
+  const int n = std::snprintf(buf, sizeof(buf), "     <triangle v1=\"%llu\" v2=\"%llu\" v3=\"%llu\"/>\r\n",
+                              static_cast<unsigned long long>(a), static_cast<unsigned long long>(b),
+                              static_cast<unsigned long long>(c));
+  tris_.write(buf, n);
+  if (!tris_) throw ThreeMfStreamError("failed writing 3MF triangle temp: " + tris_path_);
+  tris_len_ += static_cast<std::uint64_t>(n);
+  ++tri_count_;
+}
+
 void StreamingThreeMfWriter::add_triangle(const Vec3& a, const Vec3& b,
                                           const Vec3& c) {
   if (finished_)
     throw ThreeMfStreamError("StreamingThreeMfWriter: add_triangle after finish()");
+  if (options_.indexed) {
+    const std::uint64_t i = add_vertex(a), j = add_vertex(b), k = add_vertex(c);
+    add_indexed(i, j, k);
+    return;
+  }
   char buf[192];
   const Vec3* vs[3] = {&a, &b, &c};
   for (const Vec3* v : vs) {
@@ -174,7 +225,22 @@ void StreamingThreeMfWriter::finish() {
   // Close vertices, emit the triangle refs (implicit soup indices), close model.
   put("    </vertices>\r\n    <triangles>\r\n");
   char buf[128];
-  for (std::uint64_t i = 0; i < tri_count_; ++i) {
+  if (options_.indexed) {
+    tris_.flush();
+    tris_.close();
+    if (!tris_) throw ThreeMfStreamError("failed finalizing 3MF triangle temp: " + tris_path_);
+    std::ifstream in(tris_path_, std::ios::binary);
+    if (!in) throw ThreeMfStreamError("cannot re-open 3MF triangle temp: " + tris_path_);
+    std::vector<char> chunk(1 << 16);
+    while (in) {
+      in.read(chunk.data(), static_cast<std::streamsize>(chunk.size()));
+      const std::streamsize got = in.gcount();
+      if (got > 0) put(chunk.data(), static_cast<std::size_t>(got));
+    }
+    in.close();
+    std::remove(tris_path_.c_str());
+  }
+  for (std::uint64_t i = 0; !options_.indexed && i < tri_count_; ++i) {
     const unsigned long long b = 3ull * i;
     const int n = std::snprintf(
         buf, sizeof(buf), "     <triangle v1=\"%llu\" v2=\"%llu\" v3=\"%llu\"/>\r\n",
@@ -205,11 +271,15 @@ void StreamingThreeMfWriter::finish() {
   entries[2].name = "3D/3dmodel.model";
   entries[2].from_temp = true;
   entries[2].size = model_len_;
+  entries[2].csize = model_len_;
   entries[2].crc = model_crc;
   entries[0].crc = crc32_of(entries[0].data);
-  entries[0].size = entries[0].data.size();
+  entries[0].size = entries[0].csize = entries[0].data.size();
   entries[1].crc = crc32_of(entries[1].data);
-  entries[1].size = entries[1].data.size();
+  entries[1].size = entries[1].csize = entries[1].data.size();
+#ifdef TOPOPT_HAVE_ZLIB
+  if (options_.deflate) entries[2].method = 8;
+#endif
 
   std::ofstream zip(path_, std::ios::binary | std::ios::trunc);
   if (!zip) throw ThreeMfStreamError("cannot open 3MF file for writing: " + path_);
@@ -220,7 +290,49 @@ void StreamingThreeMfWriter::finish() {
     const std::string lh = local_header(e);
     zip.write(lh.data(), static_cast<std::streamsize>(lh.size()));
     offset += static_cast<std::uint32_t>(lh.size());
-    if (e.from_temp) {
+    if (e.from_temp && e.method == 8) {
+#ifdef TOPOPT_HAVE_ZLIB
+      // OF5: deflated as it is copied; the compressed size is written back into the local header after.
+      std::ifstream in(tmp_path_, std::ios::binary);
+      if (!in) throw ThreeMfStreamError("cannot re-open 3MF model temp: " + tmp_path_);
+      z_stream zs;
+      std::memset(&zs, 0, sizeof zs);
+      if (deflateInit2(&zs, 6, Z_DEFLATED, -15, 8, Z_DEFAULT_STRATEGY) != Z_OK)
+        throw ThreeMfStreamError("cannot start deflating the 3MF model");
+      std::vector<unsigned char> src(1 << 16), dst(1 << 16);
+      std::uint64_t written = 0;
+      bool more = true;
+      while (more) {
+        in.read(reinterpret_cast<char*>(src.data()), static_cast<std::streamsize>(src.size()));
+        const std::streamsize got = in.gcount();
+        more = static_cast<bool>(in) && got > 0;
+        zs.next_in = src.data();
+        zs.avail_in = static_cast<uInt>(got);
+        const int flush = more ? Z_NO_FLUSH : Z_FINISH;
+        int rc = Z_OK;
+        do {
+          zs.next_out = dst.data();
+          zs.avail_out = static_cast<uInt>(dst.size());
+          rc = deflate(&zs, flush);
+          if (rc == Z_STREAM_ERROR) { deflateEnd(&zs); throw ThreeMfStreamError("deflating the 3MF model failed"); }
+          const std::size_t have = dst.size() - zs.avail_out;
+          zip.write(reinterpret_cast<const char*>(dst.data()), static_cast<std::streamsize>(have));
+          written += have;
+        } while (zs.avail_out == 0);
+        if (!more && rc != Z_STREAM_END) { deflateEnd(&zs); throw ThreeMfStreamError("deflating the 3MF model did not end"); }
+      }
+      deflateEnd(&zs);
+      e.csize = written;
+      const std::streampos end = zip.tellp();
+      zip.seekp(static_cast<std::streamoff>(e.offset) + 18);   // the local header's compressed size
+      std::string cs;
+      le32(cs, static_cast<std::uint32_t>(e.csize));
+      zip.write(cs.data(), 4);
+      zip.seekp(end);
+      offset += static_cast<std::uint32_t>(e.csize);
+      compressed_ = true;
+#endif
+    } else if (e.from_temp) {
       std::ifstream in(tmp_path_, std::ios::binary);
       if (!in) throw ThreeMfStreamError("cannot re-open 3MF model temp: " + tmp_path_);
       char chunk[1 << 16];
@@ -262,7 +374,11 @@ void StreamingThreeMfWriter::finish() {
 
 StreamingThreeMfWriter::~StreamingThreeMfWriter() {
   if (model_.is_open()) model_.close();
-  if (!finished_) std::remove(tmp_path_.c_str());  // clean a half-written temp
+  if (tris_.is_open()) tris_.close();
+  if (!finished_) {   // clean a half-written temp
+    std::remove(tmp_path_.c_str());
+    if (!tris_path_.empty()) std::remove(tris_path_.c_str());
+  }
 }
 
 }  // namespace topopt

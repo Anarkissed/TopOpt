@@ -3,6 +3,7 @@
 #include "topopt/lattice_layout_organic.hpp"
 
 #include <algorithm>
+#include <set>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -108,6 +109,7 @@ void Session::ready_domain(const Settings& settings) {
       region.rim_mm = r.rim_mm;       // S13: its own, else the part's
       region.cover_mm = r.cover_mm;
       region.weave = r.weave;
+      region.cover_open_face = r.weave && !zone;   // OJ2: an Organic area's Solid closes its open face only
       spec.regions.push_back(std::move(region));
     }
     for (const Settings::ProtectAsk& p : settings.protect)
@@ -271,13 +273,32 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
       }
       if (any_skin) lay_skin(out.bars, *domain_, skin);
       domain_->check_stop();
-      if (settings.skin && finish && !draft && !finish->net_reach.empty() && !finish->prune.empty())
+      // Leg J item 1: Skin is each weave region's own (else the part's): `net_on` when any weave region's is Skin.
+      const bool net_on = finish ? finish->net_on : settings.skin;
+      if (net_on && finish && !draft && !finish->net_reach.empty() && !finish->prune.empty())
         prune_weave(out.bars, finish->prune);   // J2: the weave pruned before the net skin is laid on it
-      if (settings.skin && finish && !finish->hold.empty())   // L2 d: after the growth and J2, before the net skin
+      if (net_on && finish && !finish->hold.empty())   // L2 d: after the growth and J2, before the net skin
         hold_up_weave(out.bars, *domain_, finish->hold);
-      if (settings.skin && finish && !finish->net_reach.empty())   // O16: Finish Skin on a weave region
-        lay_net_skin(out.bars, *domain_, finish->net_reach, settings.skin_spec.width_mm);
       domain_->check_stop();
+      // OG5 (brief E9): no weave bar outside the part or through protected solid, before the drop (which then takes what
+      // the guard left hanging).
+      std::vector<int> weave_ids;
+      for (const Layout::Weave& w : out.layout.weave) weave_ids.push_back(w.region);
+      if (strands) guard_bars(out.bars, *domain_, weave_ids, domain_->spec().bead_mm, &out.guard);
+      // OJ8 (the lead's ruling, leg M): on a Skin region the vine ends cut at the open face are landings: the drop keeps
+      // them (held as if in solid for the drop only, given back their Surface kind after it).
+      std::vector<std::pair<std::size_t, int>> held_surface;
+      if (net_on && finish && !finish->net_reach.empty() && settings.drop_loose && !draft)
+        for (std::size_t i = 0; i < out.bars.bars.size(); ++i) {
+          Bar& b = out.bars.bars[i];
+          bool skin_region = false;
+          for (const auto& nr : finish->net_reach) skin_region = skin_region || nr.first == b.region;
+          if (!skin_region || b.net) continue;
+          if (b.end_a == Bar::End::Surface) { b.end_a = Bar::End::Solid; held_surface.push_back({i, 0}); }
+          if (b.end_b == Bar::End::Surface) { b.end_b = Bar::End::Solid; held_surface.push_back({i, 1}); }
+        }
+      std::vector<std::pair<Vec3, Vec3>> held_at;   // the held ends, by place (the drop renumbers bars)
+      for (const auto& [i, e] : held_surface) held_at.push_back({e ? out.bars.bars[i].b : out.bars.bars[i].a, e ? out.bars.bars[i].a : out.bars.bars[i].b});
       if (settings.drop_loose && !draft) {
         drop_loose_bars(out.bars, finish && !finish->arrived.empty() ? &finish->arrived : nullptr);   // G11
         out.stepped_edges = stepped_edges(out.bars);
@@ -286,8 +307,48 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
       } else {
         out.pieces = count_pieces(out.bars, *domain_, nullptr, nullptr, &out.layout);
       }
-      if (!settings.skin && finish && !finish->hold.empty())   // L2 d: Skin off, after the growth and J2
+      if (!held_at.empty()) {   // OJ8: the held ends are Surface ends again
+        std::set<std::array<double, 6>> held;
+        for (const auto& [p, q] : held_at) held.insert({p.x, p.y, p.z, q.x, q.y, q.z});
+        for (Bar& b : out.bars.bars) {
+          if (b.end_a == Bar::End::Solid && held.count({b.a.x, b.a.y, b.a.z, b.b.x, b.b.y, b.b.z})) b.end_a = Bar::End::Surface;
+          if (b.end_b == Bar::End::Solid && held.count({b.b.x, b.b.y, b.b.z, b.a.x, b.a.y, b.a.z})) b.end_b = Bar::End::Surface;
+        }
+      }
+      // OJ8 (leg M; the owner: "The check to place them inside the lattice shouldn't happen until AFTER we flatten out
+      // the skin"): the net is laid after the prune and the drop, on the open face (its landings: the nodes of the
+      // finished lattice near the face, as the old engine took them); then the inside check (OG5) runs, and reads the
+      // net and its stems as inside.
+      if (net_on && finish && !finish->net_reach.empty()) {   // O16: Finish Skin on a weave region, its own width
+        NetSkinReport nr;
+        const std::size_t n_ask = finish->net_reach.size();
+        lay_net_skin(out.bars, *domain_, finish->net_reach, settings.skin_spec.width_mm,
+                     finish->net_width.size() == n_ask ? &finish->net_width : nullptr,
+                     finish->net_gap.size() == n_ask ? &finish->net_gap : nullptr, true, &out.net_kept_apart,
+                     finish->net_density.size() == n_ask ? &finish->net_density : nullptr,
+                     finish->net_sink.size() == n_ask ? &finish->net_sink : nullptr, &nr);
+        out.net_stems = nr.stems;
+        out.net_stem_longest_mm = nr.stem_longest_mm;
+        out.net_crossing_joints = nr.joints_at_crossings;
+        if (strands) guard_bars(out.bars, *domain_, weave_ids, domain_->spec().bead_mm, &out.guard);   // OG5, after
+        // The Skin face's vine ends the net did not join are dropped now, as any loose end.
+        if (settings.drop_loose && !draft && !held_at.empty())
+          drop_loose_bars(out.bars, finish && !finish->arrived.empty() ? &finish->arrived : nullptr);
+        // The stems as they stand in the finished lattice (the guard or the drop may have taken one).
+        out.net_stems = 0;
+        out.net_stem_longest_mm = 0.0;
+        for (const Bar& b : out.bars.bars)
+          if (b.stem)
+            ++out.net_stems, out.net_stem_longest_mm =
+                                 std::max(out.net_stem_longest_mm, std::sqrt((b.b.x - b.a.x) * (b.b.x - b.a.x) +
+                                                                             (b.b.y - b.a.y) * (b.b.y - b.a.y) +
+                                                                             (b.b.z - b.a.z) * (b.b.z - b.a.z)));
+        domain_->check_stop();
+      }
+      if (!net_on && finish && !finish->hold.empty()) {   // L2 d: Skin off, after the growth and J2
         hold_up_weave(out.bars, *domain_, finish->hold);
+        guard_bars(out.bars, *domain_, weave_ids, domain_->spec().bead_mm, &out.guard);   // OG5: the supports too
+      }
       for (const Bar& b : out.bars.bars)
         if (b.net) {
           ++out.net_struts;
