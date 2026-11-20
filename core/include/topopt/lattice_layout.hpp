@@ -194,6 +194,10 @@ struct Region {
   // cover makes solid ITS lattice within that distance of the part's surface, and its cells
   // start behind it. Neither acts on another region's lattice.
   std::optional<double> rim_mm, cover_mm;
+  // Leg J item 2 (OJ2, the Organic Finish Solid): the cover closes only the region's OPEN face, its own faces (the
+  // depth below them, as owner_of reads it, within the cover's thickness), not every face the region meets. Set by the
+  // session for a weave region made from faces or pieces; a zone's region keeps the cover on every face in the zone.
+  bool cover_open_face = false;
 };
 
 // The region under one or more faces of the model, from the faces themselves (rule D10:
@@ -389,6 +393,9 @@ class Domain {
     // skins or the cover take of that same line. With neither, it is the thickness.
     // `at_least` as for thickness.
     double room_through(const Vec3& p, double at_least = 0.0) const;
+    // OJ8: the distance from `p` to the nearest PROTECTED face itself (a Protect skin's own triangles, measured as the
+    // skin is), +infinity when the part has none.
+    double protect_face_distance(const Vec3& p) const;
     const PartMeasure::Probe& part() const { return part_; }
 
    private:
@@ -497,6 +504,7 @@ class Domain {
   };
   std::vector<Sure> sure_;         // one per region (empty where it does not apply)
   bool own_cover_ = false;         // some region states its own cover (S13)
+  bool any_open_face_cover_ = false;   // OJ2: some region's cover closes only its open face
   // region_contains(spec_.regions[i], p), by the squares where they are sure.
   bool region_holds(std::size_t i, const Vec3& p) const;
 
@@ -1005,7 +1013,79 @@ struct Bar {
   bool link = false;
   // T (brief G30): a BRACE laid by brace_weave from a brace point of a too-long strut (its own strand number).
   bool brace = false;
+  // OS18 (brief E8): a bar of a relief vine the strengthen loop laid (not in bars_hash; the hash reads its geometry).
+  bool relief = false;
+  // OG1 (brief E6): the gap rule's cap on this bar's width (the mean of its strand's two points' caps: the local spacing
+  // there less the gap, never under the thinnest strut); 0 where the rule is off or the bar came from no capped strand
+  // (links, braces, supports, net struts, cells). Not in bars_hash.
+  double gap_cap_mm = 0.0;
+  // OG1's diagnosis (Outcome::tight): the local spacing at this bar (the smaller of its strand's two points'), and what
+  // set it (SpacingWhy); 0 / None where the bar came from no traced or grown strand point.
+  double local_mm = 0.0;
+  std::uint8_t local_why = 0;
+  // OG2 (brief E6): an end standing proud of an open face. proud_*: how far the end stands beyond the part's surface,
+  // along the surface's normal there; relief_*: how far the end was carried on along the bar to get there. 0: flush (as
+  // every end was before). The end keeps its kind (Surface). Not in bars_hash.
+  double proud_a = 0.0, proud_b = 0.0;
+  double relief_a = 0.0, relief_b = 0.0;
+  // OG2b (brief E6, leg B): how far this bar's tube may stand out of the part's surface where it reaches an open face
+  // (face_relief_mm: its own bulge, cut only beyond that); the bar itself is not moved, only the file's trim reads it.
+  // 0: trimmed flush (as before).
+  double along_proud = 0.0;
+  // Leg H (the app's drawing): the model face (StepModel::triangle_face) nearest where the bar's tube reaches that open
+  // face, when along_proud is set and the model carries its faces; -1 otherwise. Not in bars_hash.
+  int along_face = -1;
+  // OJ8 (leg M): a net-skin bar or stem laid on an open face (its centre line in the face's plane, or ending on it): the
+  // file cuts it flat at the face; OG5's guard reads it as inside and does not move it. Not in bars_hash.
+  bool face_skin = false;
+  bool stem = false;   // OJ8: of those, a stem (from a landing node to its foot on the face); not in bars_hash
 };
+// OG1: what set the local spacing at a strand point (Bar::local_why, Outcome::tight).
+enum class SpacingWhy : std::uint8_t {
+  None = 0,      // not known: the point lies on no candidate voxel (nor beside one)
+  Uniform = 1,   // the widest spacing (one spacing, a uniform stress, shape only): nothing tightened it
+  Stress = 2,    // O12: the stress grading
+  Shape = 3,     // O13: the shape fit
+  Hold = 4,      // L2: the floating parts' reach
+  Floor = 5,     // Traced only: the tracer raised the asked spacing to its print or resolution floor
+};
+
+// ── OV1: A VINE IS A SWEPT CURVE ─────────────────────────────────────────────────────
+// The owner, 2026-11-19: "The drawing follows the print file. Always. However, I am asking for bends in the actual
+// lines." and, on the two pictures, "Definitely curved". One function gives the curve the print file's tubes are swept
+// along and the preview draws: per piece of a run (the tubes route's pieces: split at a change of section and at a turn
+// sharper than 60 degrees, which stays a corner), the centripetal Catmull-Rom curve through its points. The checks
+// (print, strength) judge the straight bars; the curve stays within `max_offset_mm` of them.
+struct SweepAsk {
+  bool on = false;                // the writer's own default: off (today's straight tubes, every result as before)
+  double max_offset_mm = 0.2;     // a span's curve departs at most this far from its straight bar
+  double max_turn_deg = 8.0;      // no piece of the curve turns more than this
+  double max_piece_mm = 1.5;      // no piece of a span that turns is longer than this (a straight span stays one piece)
+  double min_turn_deg = 3.0;      // a point turning less than this stays a plain mitre (no curve through it)
+  double min_radius = 1.25;       // a point whose curve would bend tighter than this x its tube's radius stays a mitre
+};
+// What sweep_centre_line hands back: the curve's points (the piece's own points among them, never moved), each point's
+// tube radius, and for each point the span it lies on (-1: one of the piece's own points).
+struct SweptLine {
+  std::vector<Vec3> p;
+  std::vector<double> r;
+  std::vector<int> span;                 // -1: one of the piece's own points; else the span (0 .. n-2) a sample lies on
+  std::size_t spans = 0, spans_curved = 0;
+  std::size_t mitre_small_turn = 0;      // inner points turning under min_turn_deg (kept a mitre)
+  std::size_t mitre_tight = 0;           // inner points whose curve would bend tighter than min_radius x r (kept a mitre)
+  std::size_t mitre_straight_end = 0;    // inner points kept a mitre because a span beside them is held straight
+  std::vector<Vec3> tight_at;            // the tight points (all of them; the caller keeps at most 20)
+  double largest_offset_mm = 0.0;        // the farthest any point lies from its straight bar
+};
+// `p` the piece's points (2 or more), `r` the tube radius at each (the file's ring rule); `straight` (optional, one per
+// span): a span held straight (a span ending in solid, R4). A point is curved through when it turns at least
+// min_turn_deg, both spans beside it are free, and the curve there is no tighter than min_radius x the larger radius of
+// its spans; else it stays a mitre (the curve leaves it along the span's own line). A span between two mitres is one
+// straight piece. A curved span is sampled so no piece turns more than max_turn_deg or is longer than max_piece_mm
+// (at most 64 pieces), then pulled toward its bar by one factor so no sample departs more than max_offset_mm.
+// With `ask.on` false: the points as given.
+SweptLine sweep_centre_line(const std::vector<Vec3>& p, const std::vector<double>& r, const SweepAsk& ask,
+                            const std::vector<char>* straight = nullptr);
 
 // Preview is the spec (reviewer, 2026-11-12): a bar lying flatter than 30 degrees is written to the file as a BRIDGE,
 // a square bar with a level underside (his print rule P8 c), not a round one. `up` is the print direction (the part
@@ -1028,6 +1108,11 @@ struct Bars {
   struct CutEnd { Vec3 at{}; int region = 0; double cell = 0.0; };
   std::vector<CutEnd> cut_in_air;
 };
+// OG2: `bars` with every proud end carried back onto the part's surface (each end moved back along its bar by its
+// relief_*, proud_* and relief_* set to 0): the bars as they were before OG2. The frame check reads these (the proud
+// part carries no load and is not judged: it ends free).
+Bars without_relief(const Bars& bars);
+bool has_relief(const Bars& bars);
 
 // S4: "where a stepped edge is left, the app points at it and says Rim or Skin will fix
 // this". The cut ends drop_loose_bars removed, gathered into edges: ends within one and a
@@ -1055,6 +1140,12 @@ struct Strand {
   bool tie = false;   // G9: a Grown transfer tie (read by its tests; the path lays it as any strand)
   // S (brief G28): a level tie (P, R): every point at one height. split_at_crossings never moves it (Bar::level_tie).
   bool level_tie = false;
+  // OG1 (brief E6), one per point when given (else empty): the local spacing at the point and what set it
+  // (SpacingWhy), and the gap rule's cap on its width (empty when the rule is off). weave_bars carries them onto the
+  // bars (Bar::local_mm, local_why, gap_cap_mm).
+  std::vector<double> local_mm;
+  std::vector<std::uint8_t> local_why;
+  std::vector<double> cap_mm;
 };
 // L2 (brief G14): what the supports of one Grown area need (hold_up_weave): the kept patches' bottoms and the area's
 // own numbers.
@@ -1110,8 +1201,11 @@ struct CrossingCutStats {
 // counted: links at the light width, wider, and the widest.
 // T4 (brief G30): `first_new` above 0: only pairs with at least one bar at or after that index are tried (the cut run
 // again over new bars only, against everything).
+// Brief E3a: `first_piece`, when given and a joint was made: n + 1 entries, the place of bar i's first piece in the new
+// list (its pieces are consecutive, up to entry i + 1; entry n: where the links begin). Left empty when nothing was cut.
 std::size_t split_at_crossings(Bars& bars, double light_mm = 0.0, double layer_mm = 0.2,
-                               CrossingCutStats* stats = nullptr, double link_width = 1.0, std::size_t first_new = 0);
+                               CrossingCutStats* stats = nullptr, double link_width = 1.0, std::size_t first_new = 0,
+                               std::vector<std::size_t>* first_piece = nullptr);
 // T (brief G30), no strut runs too far without a joint. A STRUT is the run of one strand's non-link bars between two
 // real joints (a point where three or more non-link bars meet, or an end tagged Solid) or the strand's own ends.
 struct WeaveStrut {
@@ -1138,6 +1232,25 @@ struct WeaveBraceStats {
 // Each brace: width_at's mean of its two ends, `brace`, its own new strand number. Then split_at_crossings runs once
 // more over the new bars only. Returns the braces laid.
 std::size_t brace_weave(Bars& weave, const Domain& domain, const WeaveBraceAsk& ask, WeaveBraceStats* stats = nullptr);
+// Brief E3a (strengthening by adding; rule T's brace maker split): braces at named points. Each point: bar `bar` at `u`
+// along it from its a (strictly inside: the bar is cut there, exactly on its line; at an end: that end), the braces'
+// strand excluded from landing being the bar's own; `width` above 0: the braces' width (else width_at's mean, else
+// light_mm). Then split_at_crossings over the new bars only. A Joined end (into_a / into_b) that pointed at a bar cut
+// here or by that split points at the piece of it nearest the end. `laid`, when given: per point, the braces laid there.
+// Returns the braces laid. brace_weave picks its points and calls this.
+struct BracePoint {
+  std::size_t bar = 0;
+  double u = 0.5;
+  double width = 0.0;
+};
+std::size_t lay_braces(Bars& bars, const Domain& domain, const std::vector<BracePoint>& points, const WeaveBraceAsk& ask,
+                       WeaveBraceStats* stats = nullptr, std::vector<int>* laid = nullptr);
+// OS18 (brief E8): a RELIEF VINE laid onto final bars: one new strand (its own new strand number) through `points`, every
+// segment one bar of `width`, `cell`, `region` (Bar::relief), its ends tagged `end_a` / `end_b` (Node where it lands on
+// a bar, Solid where it ends in the solid), its inner joints Node; then split_at_crossings over the new bars only (old
+// bars are cut only on their own line), Joined ends remapped as lay_braces does. Returns the bars laid.
+std::size_t lay_relief_vine(Bars& bars, const std::vector<Vec3>& points, double width, double cell, int region,
+                            Bar::End end_a, Bar::End end_b, const WeaveBraceAsk& ask);
 // Rule O2 (one bar per two points): of the bars of `regions` (a weave's), two with the same two ends (each within a
 // hundredth of a micron, either order) are ONE bar, of the wider width. The first in list order is kept, at the widest
 // width of its repeats; each of its ends takes the best-landed tag any of them has there (Solid, then Joined into a bar
@@ -1308,6 +1421,10 @@ struct Settings {
     std::optional<double> rim_mm, cover_mm;
     std::optional<bool> skin;
     std::optional<double> skin_width_mm, skin_reach_cells;
+    // OJ8 (leg M): an Organic area's net skin: joins per landing (1 to 6) and the sink of its centre line below the face
+    // in net radii (0 to 1); unstated: the part's.
+    std::optional<int> skin_density;
+    std::optional<double> skin_sink;
     // D22: pieces of faces in place of whole faces (region_from_pieces). When there are any,
     // `faces` is not read. An ask with pieces and a zone is left out and listed.
     std::vector<FacePiece> pieces;
@@ -1357,6 +1474,11 @@ struct Settings {
   bool join_loose = true;        // S5
   bool skin = false;             // Finish Skin (S3)
   SkinSpec skin_spec;
+  // OJ8 (leg M; the owner: "skin thickness and density of skin tendrils should be added as manual variables"): the
+  // Organic net skin's joins per landing (1 to 6, 3 as before) and its sink below the open face in net radii (0: the
+  // centre line on the face, cut flat; 1: one radius in, touching, the old engine's). Region's own over these.
+  int skin_density = 3;
+  double skin_sink = 0.0;
   bool drop_loose = true;        // S4, Finish None's rule; then pieces adrift go too
 };
 
@@ -1405,6 +1527,18 @@ struct OrganicRefusal {
   double allowed_min = 0.0, allowed_max = 0.0;
 };
 
+// Rule OG5 (brief E9): what the guard pass (guard_bars) cut or removed of an Organic lay's bars: bars cut because their
+// centre line left the part (`outside_cut`), cut because they lay in solid beyond an end's run-on (`in_solid_cut`),
+// removed because nothing of them lay in the lattice (`in_solid_removed`); by kind (strand, link, tie, net, brace,
+// support); and at most 20 places of each (a bar's middle, mm).
+struct GuardReport {
+  std::size_t outside_cut = 0, in_solid_cut = 0, in_solid_removed = 0;
+  std::size_t ends_moved_in = 0;   // joints or landings a hair outside the part, moved in with every bar ending there
+  std::size_t cut_dropped = 0;     // after additions: pieces a cut left with a free end, not kept
+  std::map<std::string, std::size_t> by_kind;
+  std::vector<Vec3> outside_at, in_solid_at, removed_at;
+};
+
 struct Outcome {
   Layout layout;
   StrutReport struts;
@@ -1424,6 +1558,16 @@ struct Outcome {
   // The one stress reference resolved for this lay (the stated one or the part's own), read by the cells and the
   // struts alike; 0 when neither asked for one (no field, or neither by stress) or the part's own is 0.
   double stress_reference_mpa = 0.0;
+  // Brief E2 (lay_organic only): each weave region's O12 reference as resolved (region, MPa), and what the width
+  // floors did (OrganicAsk::floors): the bars and the links widened.
+  std::vector<std::pair<int, double>> organic_references;
+  std::size_t floors_widened = 0, floor_links_widened = 0;
+  // Brief E3a (lay_organic only, OrganicAsk::additions): the rounds of additions applied, and why they could not be (a
+  // round names a bar the lay does not hold, or the lay does not reach a round's hash). Not empty: refused, and `bars`
+  // is emptied; nothing is drawn or written from it.
+  std::size_t additions_rounds = 0;
+  std::string additions_refused;
+  GuardReport guard;   // OG5: what the guard pass cut or removed (the lay, then each round of additions replayed)
   // C24: the part's size-step limit this layout kept (step_held of the part's cells: a value under the ladder's
   // smallest step is held there, 2 on Default Grade); 0 when none was asked. A region's own limit is not reported here.
   double step_held_at = 0.0;
@@ -1435,6 +1579,9 @@ struct Outcome {
   double spacing_smallest_mm = 0.0, spacing_largest_mm = 0.0, spacing_mean_mm = 0.0;
   // O16 (lay_organic only): the net skin's struts in `bars` and their length, mm.
   std::size_t net_struts = 0;
+  std::size_t net_kept_apart = 0;   // OJ7, OJ8: net joins not laid (OJ8: only near-parallel within the gap of a net strut)
+  std::size_t net_stems = 0, net_crossing_joints = 0;   // OJ8: stems to the face; crossings made joints
+  double net_stem_longest_mm = 0.0;
   double net_mm = 0.0;
   // G1 (Organic, Grown; lay_organic with OrganicAsk::mode Grown): what the growth did, every weave region together;
   // null otherwise.
@@ -1448,6 +1595,35 @@ struct Outcome {
   // OP11 (brief C2, E7; a lay of two groups or more): weave bar pairs of different groups closer than the sum of their
   // half widths (the cut at crossings does not join them in this version). 0 for one group.
   std::size_t cross_group_touches = 0;
+  // OG1 (brief E6; lay_organic and lay_organic_draft only). gap_capped: strand points whose width the gap rule lowered.
+  // gap_broken: weave bars wider than their gap cap after the width floors and additions (gap_broken(), organic header).
+  std::size_t gap_capped = 0, gap_broken = 0;
+  // OG1's diagnosis, `tight`: over the weave bars (net struts left out), how many have (local spacing - width) under one
+  // line width (bead_mm), and for those what set the local spacing (Bar::local_why; a bar with none, a link, brace or
+  // support, is read at its `cell`, the strand's spacing, and counted `unknown`, but a support is counted `hold`); of
+  // them the supports, links and braces.
+  struct Tight {
+    double line_mm = 0.0;
+    std::size_t bars = 0, tight = 0;
+    std::size_t stress = 0, shape = 0, hold = 0, floor = 0, uniform = 0, unknown = 0;
+    std::size_t supports = 0, links = 0, braces = 0;
+  } tight;
+  // OG2 (brief E6; lay_organic and lay_organic_draft only): the ends carried proud of an open face, the largest proud
+  // (mm, along the normal), the Surface ends of weave bars left flush and why (excluded face, outward normal down more
+  // than 45 degrees, within 2 mm of the bed (or the proud tip would reach it), end direction within 20 degrees of the
+  // surface), and how far each side of the part's box moved out (-x, +x, -y, +y, -z, +z; the tips with their round
+  // cap's radius). faces_known false: the part had no face ids, so no face could be excluded.
+  struct Relief {
+    std::size_t surface_ends = 0, proud = 0;
+    double largest_mm = 0.0;
+    // OG2b (leg B): strand bars whose tube reaches an open face where OG2's conditions hold, given `along_proud`, and the
+    // largest of it (the box's growth from them is the file's: WeaveShells::grew_mm).
+    std::size_t along = 0;
+    double along_largest_mm = 0.0;
+    std::size_t flush_excluded = 0, flush_down = 0, flush_bed = 0, flush_along = 0;
+    double grew_mm[6] = {0, 0, 0, 0, 0, 0};
+    bool faces_known = true;
+  } relief;
 };
 
 struct SweepLimits;   // lattice_layout_organic.hpp
@@ -1495,10 +1671,13 @@ class Session {
   // OP5 (brief C1): the Auto Sweep limits before any lay. The domain for these settings' "where" is made exactly as
   // lay() and lay_organic() make it (and kept for the next lay, as theirs is), nothing is laid, and the answer is
   // organic_sweep_limits(that domain, line_mm) (lattice_layout_organic.hpp; include it to read the result).
-  std::vector<SweepLimits> sweep_limits(const Settings& settings, double line_mm);
+  // OG1 (brief E6): `gap_lines` the gap rule's (OrganicAsk::gap_lines): the cell's lower end is at least the thin strut
+  // plus the gap.
+  std::vector<SweepLimits> sweep_limits(const Settings& settings, double line_mm, double gap_lines = 1.5);
   // OP10 (brief C2, E4, E7): the limits of a group of weave regions, the union over the measured ones among `regions`
   // (SweepLimitsUnion, lattice_layout_organic.hpp). Makes the domain as sweep_limits does; lays nothing.
-  SweepLimitsUnion sweep_limits_for(const Settings& settings, const std::vector<int>& regions, double line_mm);
+  SweepLimitsUnion sweep_limits_for(const Settings& settings, const std::vector<int>& regions, double line_mm,
+                                    double gap_lines = 1.5);
   std::size_t open_edges() const { return open_edges_; }
   const PartMeasure& measure() const { return *measure_; }
   // The part as it was opened (its unwelded triangles and their raw face ids): D23 reads its faces. Not a copy.
@@ -1515,6 +1694,14 @@ class Session {
   // O16: what lay_organic adds with Finish Skin on: per weave region, the net skin's reach.
   struct WeaveFinish {
     std::vector<std::pair<int, double>> net_reach;   // (region, reach mm); empty: no net skin
+    // Leg J item 1 (the owner: the Finish per group "should just be None/Skin/Solid"): per net_reach entry, its region's
+    // own Skin width (Settings::RegionAsk::skin_width_mm, else the part's; 0: as wide as the thinner landing), and
+    // whether any weave region's Finish is Skin (its own, else the part's): the order of the weave's finish steps.
+    std::vector<double> net_width;
+    std::vector<double> net_gap;   // OJ7: per net_reach entry, its group's OG1 gap (the net kept that far apart)
+    std::vector<int> net_density;    // OJ8: per net_reach entry, the joins each landing asks for (skin_density, 1 to 6)
+    std::vector<double> net_sink;    // OJ8: per net_reach entry, skin_sink (0 to 1)
+    bool net_on = false;
     std::vector<int> arrived;   // G11 (Grown only): weave regions whose vines that reach the surface have arrived
     std::vector<std::pair<int, double>> prune;   // J2 (brief G12): (Grown region, median asked spacing); empty: off
     std::vector<WeaveHold> hold;   // L2 (brief G14): Grown areas with floating parts' undersides; empty: off

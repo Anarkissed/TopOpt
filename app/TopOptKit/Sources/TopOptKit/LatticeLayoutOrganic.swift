@@ -47,6 +47,15 @@ extension LatticeLayoutSession {
         /// One spacing for every candidate: a single size, or a range whose two ends are equal (no heavy end acts).
         public var spacingMMValueIsOne: Bool { spacingMM > 0 || spacingMaxMM <= spacingMinMM }
         public var seed: UInt64 = 1
+        /// ★ Cut 2 (organic-cut2-handover.md, a), core's defaults. The app sends faceReliefMM (his "Depth variation": on 1,
+        /// off 0), reliefExcludeFaces (the loaded and fixed faces, always flush) and strandKeep (his "Extra spacing between
+        /// vines": on 0.9, off 0.5).
+        public var gapLines = 1.5
+        public var faceReliefMM = 1.0
+        public var reliefExcludeFaces: [Int32] = []
+        public var strandKeep = 0.9
+        public var wallBareMM = 1.5, wallReach = 4.0
+        public var sweep = true
         public init() {}
 
         var raw: topoptbridge.LatticeLayoutOrganic {
@@ -73,6 +82,9 @@ extension LatticeLayoutSession {
             o.follow_stress = followStress
             o.layer_mm = layerMM
             o.seed = seed
+            o.gap_lines = gapLines; o.face_relief_mm = faceReliefMM; o.strand_keep = strandKeep
+            for f in reliefExcludeFaces { o.relief_exclude_faces.push_back(f) }
+            o.wall_bare_mm = wallBareMM; o.wall_reach = wallReach; o.sweep = sweep
             return o
         }
     }
@@ -84,13 +96,30 @@ extension LatticeLayoutSession {
             public init(rawValue: UInt8) { self.rawValue = rawValue }
             public static let levelTie = Marks(rawValue: 1), brace = Marks(rawValue: 2), support = Marks(rawValue: 4)
             public static let net = Marks(rawValue: 8)
+            /// Leg H: the run lies along an allowed open face (its bars may stand proud by `proudMM`).
+            public static let along = Marks(rawValue: 16)
         }
         public var region: Int32
         public var marks: Marks
         public var endA: UInt8, endB: UInt8   // core's Bar::End
         public var points: [SIMD3<Float>]
+        /// Version 1: each point's width (at an inner point the mean of its two bars). Version 2: the print file's RING width
+        /// (the end bar's at the run's ends, the larger of the two bars at an inner point).
         public var widthMM: [Float]
         public var spacingMM: [Float]
+        /// Packed version 2 (the cut 2 engine). The run's section as the print file sweeps it: 0 round, 1 a bridge with a
+        /// round top (its flat underside level), 2 a square bridge. Runs break where it changes.
+        public var section: UInt8 = 0
+        /// Packed version 2, bit 2 of the section byte (OV1, his 11-20 "Definitely curved"): the points are the print file's
+        /// SWEPT centre line, each with its ring width; drawn as they are (short mitred pieces), no curve of the app's own.
+        public var swept = false
+        /// How far each end stands proud of the open face (0 = flush), the model face the run lies along (-1 none), and how
+        /// far its tube may stand out where it runs along that face (0 none).
+        public var proudA: Float = 0, proudB: Float = 0
+        public var alongFace: Int32 = -1
+        public var proudMM: Float = 0
+        /// The print file lets this run stand out of the part's surface (it is not cut flat there).
+        public var standsProud: Bool { proudA > 0 || proudB > 0 || proudMM > 0 }
     }
 
     /// The weave's preview: what was laid, its runs, the lay's own result (counts, timings; its bars are the weave's —
@@ -108,6 +137,8 @@ extension LatticeLayoutSession {
         public var notes: [String] = []
         /// ★ E7: struts of different groups that touch (not joined).
         public var crossGroupTouches = 0
+        /// ★ Cut 2 (OJ6): bulges the print check made flush so the part prints (said on screen when above 0).
+        public var reliefFlushed = 0
         /// Segments drawn: one per pair of neighbouring points of every run.
         public var segments: Int { runs.reduce(0) { $0 + Swift.max(0, $1.points.count - 1) } }
     }
@@ -165,6 +196,7 @@ extension LatticeLayoutSession {
                 o.refused = refused
                 o.notes = r.notes.map { String($0) }
                 o.crossGroupTouches = Int(r.cross_group_touches)
+                o.reliefFlushed = Int(r.relief_flushed)
                 return o
             }
         } onCancel: { [weak self] in
@@ -197,7 +229,7 @@ extension LatticeLayoutSession {
             return SweepLimits(region: 0, measured: true, dMM: 0, strutLowerMM: Array(r.strut_lower_mm)[0],
                                strutUpperMM: Array(r.strut_upper_mm)[0], strutAutoMM: Array(r.strut_auto_mm)[0],
                                cellLowerMM: Array(r.cell_lower_mm)[0], cellUpperMM: Array(r.cell_upper_mm)[0],
-                               cellAutoMM: Array(r.cell_auto_mm)[0])
+                               cellAutoMM: Array(r.cell_auto_mm)[0], gapMM: Array(r.gap_mm).first ?? 0)
         }
     }
 
@@ -231,8 +263,12 @@ extension LatticeLayoutSession {
         }
     }
 
-    /// core's pack_weave_runs, read back: per run 12 bytes (point count u32, region i32, marks u8, end_a u8, end_b u8, pad),
-    /// then 20 bytes per point (x, y, z, width, spacing, float32), little-endian. nil when the bytes do not add up.
+    /// core's pack_weave_runs, read back, little-endian; nil when the bytes do not add up.
+    /// Version 1: per run 12 bytes (point count u32, region i32, marks u8, end_a u8, end_b u8, pad), then 20 bytes per point
+    /// (x, y, z, width, spacing, float32).
+    /// Version 2 (the cut 2 engine, LatticeReview 11-20 03:54Z, "final for this leg"): "WRN2" and u32 2 first; per run 28 bytes
+    /// (the same 12, the pad now the SECTION byte: bits 0-1 the section, bit 2 a swept centre line (OV1), bits 3-7 held; then
+    /// proud_a f32, proud_b f32, along_face i32, proud_mm f32); per point the same 20 bytes, the width now the file's ring width.
     public static func runs(packed b: [UInt8]) -> [Run]? {
         var out: [Run] = []
         var i = 0
@@ -242,10 +278,21 @@ extension LatticeLayoutSession {
             return UInt32(b[i]) | UInt32(b[i + 1]) << 8 | UInt32(b[i + 2]) << 16 | UInt32(b[i + 3]) << 24
         }
         func f32() -> Float? { u32().map { Float(bitPattern: $0) } }
+        let v2 = b.count >= 8 && b[0] == 0x57 && b[1] == 0x52 && b[2] == 0x4E && b[3] == 0x32   // "WRN2"
+        if v2 {
+            i = 4
+            guard u32() == 2 else { return nil }
+        }
         while i < b.count {
             guard let n = u32(), let region = u32(), i + 4 <= b.count else { return nil }
-            let marks = b[i], ea = b[i + 1], eb = b[i + 2]
+            // the section is bits 0-1 of that byte; bit 2 a swept centre line (OV1); bits 3-7 held
+            let marks = b[i], ea = b[i + 1], eb = b[i + 2], section = v2 ? b[i + 3] & 3 : 0, swept = v2 && b[i + 3] & 4 != 0
             i += 4
+            var pa: Float = 0, pb: Float = 0, face: Int32 = -1, pm: Float = 0
+            if v2 {
+                guard let a = f32(), let bb = f32(), let f = u32(), let m = f32() else { return nil }
+                pa = a; pb = bb; face = Int32(bitPattern: f); pm = m
+            }
             guard Int(n) <= (b.count - i) / 20 else { return nil }
             var pts: [SIMD3<Float>] = [], w: [Float] = [], sp: [Float] = []
             pts.reserveCapacity(Int(n)); w.reserveCapacity(Int(n)); sp.reserveCapacity(Int(n))
@@ -254,7 +301,8 @@ extension LatticeLayoutSession {
                 pts.append(SIMD3(x, y, z)); w.append(wd); sp.append(s)
             }
             out.append(Run(region: Int32(bitPattern: region), marks: Run.Marks(rawValue: marks), endA: ea, endB: eb,
-                           points: pts, widthMM: w, spacingMM: sp))
+                           points: pts, widthMM: w, spacingMM: sp, section: section, swept: swept, proudA: pa, proudB: pb,
+                           alongFace: face, proudMM: pm))
         }
         return out
     }
@@ -301,6 +349,20 @@ extension LatticeLayoutSession {
         }
     }
 
+    /// ★ Organic cut 2 (the export): the stress the next lay follows — as set, or as the synthetic stress filled it — as core's
+    /// TOTENSOR file, the lattice file job's `tensor`. Throws when the session holds none.
+    public func tensorFile() async throws -> Data {
+        let sid = id
+        return try await worker.run {
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("organic-tensor-\(UUID().uuidString).bin")
+            defer { try? FileManager.default.removeItem(at: url) }
+            var err = topoptbridge.BridgeError()
+            _ = topoptbridge.lattice_layout_write_tensor(sid, std.string(url.path), &err)
+            if !err.ok { throw TopOptError(message: String(err.message)) }
+            return try Data(contentsOf: url)
+        }
+    }
+
     /// The Auto Sweep limits of one weave region (LatticeReview's organic_sweep_limits; its fractions core's constants).
     public struct SweepLimits: Sendable, Equatable {
         public var region: Int32
@@ -308,6 +370,8 @@ extension LatticeLayoutSession {
         public var dMM: Double
         public var strutLowerMM: Double, strutUpperMM: Double, strutAutoMM: Double
         public var cellLowerMM: Double, cellUpperMM: Double, cellAutoMM: Double
+        /// ★ Cut 2, OG1: the gap the engine keeps between struts (0: off); a cell under the thin strut + it is refused.
+        public var gapMM: Double = 0
     }
 
     /// The Auto Sweep limits of these settings' weave regions, before any lay (core's Session::sweep_limits, OP5).
@@ -319,10 +383,11 @@ extension LatticeLayoutSession {
             if !err.ok { throw TopOptError(message: String(err.message)) }
             let region = Array(r.region), m = Array(r.measured), d = Array(r.d_mm)
             let sl = Array(r.strut_lower_mm), su = Array(r.strut_upper_mm), sa = Array(r.strut_auto_mm)
-            let cl = Array(r.cell_lower_mm), cu = Array(r.cell_upper_mm), ca = Array(r.cell_auto_mm)
+            let cl = Array(r.cell_lower_mm), cu = Array(r.cell_upper_mm), ca = Array(r.cell_auto_mm), g = Array(r.gap_mm)
             return region.indices.map {
                 SweepLimits(region: region[$0], measured: m[$0] != 0, dMM: d[$0], strutLowerMM: sl[$0], strutUpperMM: su[$0],
-                            strutAutoMM: sa[$0], cellLowerMM: cl[$0], cellUpperMM: cu[$0], cellAutoMM: ca[$0])
+                            strutAutoMM: sa[$0], cellLowerMM: cl[$0], cellUpperMM: cu[$0], cellAutoMM: ca[$0],
+                            gapMM: $0 < g.count ? g[$0] : 0)
             }
         }
     }

@@ -583,6 +583,8 @@ public struct LatticeSetupWizard: View {
     /// True once this sheet reset an inherited swept/fit window to Auto for organic,
     /// so the pane can SAY it happened instead of the job quietly changing.
     @State private var organicWindowReset = false
+    /// ★ His 11-20 skin rows: the last skin thickness the engine would refuse, said under the row.
+    @State private var organicSkinRefusal: String?
     private var organicDensityIndex: Int {
         if model.organicStrutWidthMM > 0 { return model.simulateStresses ? 2 : 1 }
         return (model.simulateStresses && model.densityMode == .sim) ? 1 : 0
@@ -807,6 +809,83 @@ public struct LatticeSetupWizard: View {
     }
 
     /// ★ Organic on the new engine, Auto: Look alone (his 11-18), 1 to 100 %, of `group`.
+    /// ★ His 11-19 note: an Organic group's Finish, "None/Skin/Solid", Rim hidden. Offered once the engine takes it
+    /// (`LatticeOrganicLook.finishWired`); its own, else the part's.
+    private func organicFinishRow(group: UUID) -> AnyView {
+        let look = project.lattice.organicLook(group: group)
+        let partSkin = model.boundary == .fullSkin
+        let shown = look.finish ?? (partSkin ? .skin : (model.boundary.zoneFinishWord == "shell" ? .solid : LatticeOrganicLook.Finish.none))
+        return AnyView(VStack(alignment: .leading, spacing: 5) {
+            Text("Finish").font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)
+                .foregroundStyle(DS.Color.textTertiary.color)
+            HStack(spacing: 4) {
+                ForEach(LatticeOrganicLook.Finish.allCases, id: \.self) { f in
+                    segmentButton(f.title, on: shown == f, greyed: false) {
+                        var l = project.lattice.organicLook(group: group)
+                        l.finish = f
+                        project.lattice.setOrganicLook(l, group: group)
+                        rebuild()
+                    }
+                    .latticeID("lattice-organic-finish-\(f.rawValue)")
+                }
+            }
+            .modifier(LatticeSegmentTrack())
+            if shown == .skin, latticeManual { organicSkinRows(group: group, look: look) }
+        })
+    }
+
+    /// ★ His 11-20 skin note: "skin thickness and density of skin tendrils should be added as manual variables" (Manual
+    /// only; Auto sends the engine's Auto). Thickness: 0 (Auto) to 3 mm, typed; density: 1 to 6, 3 the usual.
+    @ViewBuilder
+    private func organicSkinRows(group: UUID, look: LatticeOrganicLook) -> some View {
+        HStack(spacing: DS.Space.s) {
+            Text("Skin thickness").dsStyle(DS.TypeScale.caption).fontWeight(.semibold).lineLimit(1)
+            Spacer(minLength: DS.Space.xs)
+            OrganicNumberField(value: (look.skinWidthMM ?? 0) > 0 ? look.skinWidthMM : nil, auto: nil, unit: "mm",
+                               placeholder: "Auto") { v in
+                if let v, let why = LatticeOrganicLook.Check.skinWidth(v) { organicSkinRefusal = why; return }
+                organicSkinRefusal = nil
+                var l = project.lattice.organicLook(group: group)
+                l.skinWidthMM = v.flatMap { $0 > 0 ? $0 : nil }
+                project.lattice.setOrganicLook(l, group: group)
+                rebuild()
+            }
+        }
+        .frame(minHeight: 44)
+        .latticeID("lattice-organic-skin-thickness")
+        if let why = organicSkinRefusal {
+            Text(why).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.warning.color).lineLimit(2)
+        }
+        Text("Skin density").font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)
+            .foregroundStyle(DS.Color.textTertiary.color)
+        HStack(spacing: 4) {
+            ForEach(Array(LatticeOrganicLook.skinDensityRange), id: \.self) { k in
+                segmentButton("\(k)", on: look.skinDensityValue == k, greyed: false) {
+                    var l = project.lattice.organicLook(group: group)
+                    l.skinDensity = k == LatticeOrganicLook.skinDensityAuto ? nil : k
+                    project.lattice.setOrganicLook(l, group: group)
+                    rebuild()
+                }
+                .latticeID("lattice-organic-skin-density-\(k)")
+            }
+        }
+        .modifier(LatticeSegmentTrack())
+    }
+
+    /// ★ His 11-19 note: Traced or Grown in Auto, on the Part tab, for the whole part (every group).
+    private var organicPartModeRow: some View {
+        let groups = project.latticeAreaGroups.map(\.id)
+        return HStack(spacing: DS.Space.s) {
+            Text("Organic").dsStyle(DS.TypeScale.caption2).foregroundStyle(DS.Color.textTertiary.color)
+            Spacer(minLength: DS.Space.xs)
+            SegmentedGlass(LatticeOrganicLook.Mode.allCases.map { .init($0, $0.title) },
+                           selection: Binding(get: { project.lattice.organicModeForThePart(groups: groups) },
+                                              set: { project.lattice.setOrganicModeForThePart($0, groups: groups) }), small: true)
+                .latticeID("lattice-organic-part-mode")
+        }
+        .frame(minHeight: 44)
+    }
+
     private func organicLookRow(group: UUID?) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: DS.Space.xs) {
@@ -828,10 +907,7 @@ public struct LatticeSetupWizard: View {
                     .frame(minWidth: 38, alignment: .trailing)
             }
             .frame(minHeight: 44)
-            if let l = organicLimits(group: group), l.measured {   // what Look gives, in one line
-                shortNote(String(format: "Cells %@ to %@ mm", StrengthCheckDocs.number(l.cellLowerMM),
-                                 StrengthCheckDocs.number(l.cellUpperMM)))
-            }
+            // ★ his 11-19 note: "The look shouldn't show the range of mm because it should be based on the actual model itself"
         }
         .onAppear {
             _ = model.selectOrganic()
@@ -2764,6 +2840,7 @@ public struct LatticeSetupWizard: View {
                 AnyView(simulateStressesSwitch)
             }
             if c.regions.isEmpty || (organic && project.importedFile != nil) {
+                if organic, project.importedFile != nil, !latticeManual { organicPartModeRow }
                 if organic, project.importedFile != nil, !c.regions.isEmpty {
                     shortNote(project.lattice.wholePart ? Self.organicWholePartLine : Self.organicPartLine)
                         .latticeID("lattice-page-organic-part-note")
@@ -2821,7 +2898,8 @@ public struct LatticeSetupWizard: View {
             Text("Finish").font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)
                 .foregroundStyle(DS.Color.textTertiary.color)
             HStack(spacing: 4) {
-                ForEach(LatticeAreaGrading.ZoneFinish.allCases, id: \.self) { f in
+                // ★ his 11-19 note: "Rim should be hidden" under Organic (the engine has no Organic rim)
+                ForEach(LatticeAreaGrading.ZoneFinish.allCases.filter { !(organic && $0 == .rim) }, id: \.self) { f in
                     segmentButton(f.title, on: shown == f, greyed: greyed(f)) {
                         if latticeAreaEdits == nil { latticeAreaEdits = project.lattice.areaGrading }
                         var g = latticeAreaEdits?[gid] ?? LatticeAreaGrading()
@@ -2885,7 +2963,8 @@ public struct LatticeSetupWizard: View {
             // has its Finish only (ruling 1)
             // ★ his 11-18: "whole part ONLY if the whole part is latticed. Otherwise, it is per Group"
             if let zone {
-                if TopOptKit.regionOuterFinishWired { zoneFinishRow(zone, organic: true) }
+                if LatticeOrganicLook.finishWired { organicFinishRow(group: zone) }
+                else if TopOptKit.regionOuterFinishWired { zoneFinishRow(zone, organic: true) }
                 if !project.lattice.wholePart { organicSettings(group: zone) }
             } else if project.lattice.wholePart || project.latticeAreaGroups.isEmpty {
                 organicSettings(group: nil)

@@ -21,6 +21,12 @@ import Foundation
 final class StubWorker {
     /// Every request the client made, in order, as "METHOD /path".
     private(set) var requestLog: [String] = []
+    /// ★ Organic cut 2: every POST's body, in order (the multipart a job was sent with).
+    private var postBodies: [Data] = []
+    func posts() -> [Data] {
+        logLock.lock(); defer { logLock.unlock() }
+        return postBodies
+    }
     private let logLock = NSLock()
 
     let port: UInt16
@@ -141,16 +147,16 @@ final class StubWorker {
             .first { $0.lowercased().hasPrefix("content-length:") }
             .flatMap { Int($0.split(separator: ":")[1]
                 .trimmingCharacters(in: .whitespaces)) } ?? 0
-        var bodyRead = buffered.count - headerBytes
-        while bodyRead < contentLength {
+        var body = headerBytes <= buffered.count ? Array(buffered[headerBytes...]) : []
+        while body.count < contentLength {
             let n = read(client, &scratch, scratch.count)
             if n <= 0 { break }
-            bodyRead += n
+            body.append(contentsOf: scratch[0..<n])
         }
         let parts = requestLine.split(separator: " ")
         guard parts.count >= 2 else { return }
         let method = String(parts[0]), path = String(parts[1])
-        logLock.lock(); requestLog.append("\(method) \(path)"); logLock.unlock()
+        logLock.lock(); requestLog.append("\(method) \(path)"); if method == "POST" { postBodies.append(Data(body)) }; logLock.unlock()
 
         func send(_ status: String, _ body: Data,
                   contentType: String = "application/json",

@@ -296,7 +296,9 @@ inline bool shell_is_latticed(float3 mpos, float3 mnormal, constant ShellClip& c
         if (any(gc < float3(-0.5)) || any(gc > c.dims.xyz - float3(0.5))) { return false; }
         float3 cuv = (gc + 0.5) / max(c.dims.xyz, float3(1.0));
         constexpr sampler cs(coord::normalized, filter::nearest, address::clamp_to_edge);
-        return regionTex.sample(cs, cuv).r >= 0.0;
+        // ★ gate.x > 2.5: the new engine's softened map (his 11-19: no stair-steps) is read linear, its zero a smooth line
+        constexpr sampler cl(coord::normalized, filter::linear, address::clamp_to_edge);
+        return (c.gate.x > 2.5 ? regionTex.sample(cl, cuv).r : regionTex.sample(cs, cuv).r) >= 0.0;
     }
     int n = int(c.dims.w + 0.5);
     if (n <= 0) { return false; }
@@ -1883,6 +1885,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     // Flexible (#362) R6 (A2): an item with its own alphas (FAINT) and a surface-only glass (GLASS, front faces only)
     private var clearanceFaintBuffer: MTLBuffer?; private var clearanceFaintCount = 0
     private var clearanceGlassBuffer: MTLBuffer?; private var clearanceGlassCount = 0
+    /// ★ Organic cut 2 (his certify wizard): the weak area's outline tubes (`setSpotFaces`), drawn with the volumes.
+    private(set) var spotFaceBuffer: MTLBuffer?; private(set) var spotFaceCount = 0
 
     static let colorFormat: MTLPixelFormat = .bgra8Unorm
     static let depthFormat: MTLPixelFormat = .depth32Float
@@ -2831,6 +2835,13 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// A `.cylinder` becomes a capped tube of radius = bore + margin over [tLo, tHi];
     /// a `.slab` becomes the outline rectangle extruded by depth; a `.degenerate`
     /// region draws NOTHING filled — an honest hollow. Selected volumes brighten.
+    /// ★ Organic cut 2: upload the certify wizard's outline (position + premultiplied rgba, stride 7; empty clears it).
+    func setSpotFaces(_ faces: [Float]) {
+        spotFaceCount = faces.count / 7
+        spotFaceBuffer = spotFaceCount > 0
+            ? faces.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: []) } : nil
+    }
+
     func setClearanceVolumes(_ items: [ClearanceRenderItem]) {
         clearanceFaceBuffer = nil; clearanceFaceCount = 0
         clearanceLineBuffer = nil; clearanceLineCount = 0
@@ -3712,6 +3723,9 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         encodeVolume(enc: enc, mvp: uniforms.mvp, faceBuffer: clearanceGlassBuffer, faceCount: clearanceGlassCount,
                      lineBuffer: nil, lineCount: 0, sceneDepthTex: nil)
         enc.setCullMode(.none)
+        // ★ Organic cut 2 (his certify wizard): the weak area's outline — depth-tested like the part, so it hides with it
+        encodeVolume(enc: enc, mvp: uniforms.mvp, faceBuffer: spotFaceBuffer, faceCount: spotFaceCount,
+                     lineBuffer: nil, lineCount: 0, sceneDepthTex: nil)
         // Round-2 L21: the x-ray edge pass — depth-ALWAYS, low alpha — so a primitive
         // buried inside the opaque body (fresh primitives spawn at the model centre)
         // still reads as a ghost wireframe instead of rendering as nothing.
@@ -4884,7 +4898,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // the new engine's bars (#362): the fourth writer — same encoder, attachments and .less + write depth state
         if layoutBarsInFrame, let bars = layoutBars,
            bars.encodeGBuffer(penc, depthState: depthState, clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView,
-                              eyeNormalBasis: uniforms.normalMatrix) {
+                              eyeNormalBasis: uniforms.normalMatrix, turning: turning) {
             frameDrawCalls += 1; frameVertices += 36 * bars.count }
         // ★ the solid view's cut walls (his ask 11-13): after the bars, the same encoder and depth state
         if layoutBarsInFrame, let bars = layoutBars,
@@ -5965,6 +5979,11 @@ struct MeshViewInputs {
     /// ★ his 11-16/17 (Install 3): the Outlines view's whole line set, the faces as the app sends them (`PieceOutline`);
     /// drawn in place of the part's edges + `extraLines` when it was made on this mesh. nil = the part's own edges.
     var pieceOutline: PieceOutline.Drawing? = nil
+    /// ★ Organic cut 2 (his certify wizard): the weak area's outline — tube faces in model mm (position + premultiplied rgba,
+    /// stride 7), drawn depth-tested like the part (a covered outline is hidden, never seen through); `spotKey` changes with
+    /// them. nil = none.
+    var spotFaces: [Float]? = nil
+    var spotKey: Int = 0
 }
 
 /// ★ THE LATTICE AS A LAYER OF THE MESH VIEW, NOT A VIEW BESIDE IT.
@@ -6158,7 +6177,8 @@ public struct MetalMeshView: UIViewRepresentable {
                 inputDiscipline: SurfaceInputDiscipline = .off,
                 onPencilSeen: (() -> Void)? = nil,
                 latticeLayer: LatticeLayerInputs? = nil,
-                layoutBars: LatticeLayoutBarsInputs? = nil, flexibleLattice: FlexibleLatticeLayerInputs? = nil) {
+                layoutBars: LatticeLayoutBarsInputs? = nil, flexibleLattice: FlexibleLatticeLayerInputs? = nil,
+                spotFaces: [Float]? = nil, spotKey: Int = 0) {
         inputs = MeshViewInputs(mesh: mesh, camera: camera, selection: selection, faceTints: faceTints,
                                 vertexTints: vertexTints, extraLines: extraLines,
                                 cutRibbon: cutRibbon,
@@ -6183,6 +6203,7 @@ public struct MetalMeshView: UIViewRepresentable {
             onBrushRefused: onBrushRefused,
             inputDiscipline: inputDiscipline, onPencilSeen: onPencilSeen,
             latticeLayer: latticeLayer, flexibleLattice: flexibleLattice, layoutBars: layoutBars)
+        inputs.spotFaces = spotFaces; inputs.spotKey = spotKey   // ★ Organic cut 2: the certify wizard's outline
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -6323,7 +6344,8 @@ public struct MetalMeshView: NSViewRepresentable {
                 inputDiscipline: SurfaceInputDiscipline = .off,
                 onPencilSeen: (() -> Void)? = nil,
                 latticeLayer: LatticeLayerInputs? = nil,
-                layoutBars: LatticeLayoutBarsInputs? = nil, flexibleLattice: FlexibleLatticeLayerInputs? = nil) {
+                layoutBars: LatticeLayoutBarsInputs? = nil, flexibleLattice: FlexibleLatticeLayerInputs? = nil,
+                spotFaces: [Float]? = nil, spotKey: Int = 0) {
         inputs = MeshViewInputs(mesh: mesh, camera: camera, selection: selection, faceTints: faceTints,
                                 vertexTints: vertexTints, extraLines: extraLines,
                                 cutRibbon: cutRibbon,
@@ -6348,6 +6370,7 @@ public struct MetalMeshView: NSViewRepresentable {
             onBrushRefused: onBrushRefused,
             inputDiscipline: inputDiscipline, onPencilSeen: onPencilSeen,
             latticeLayer: latticeLayer, flexibleLattice: flexibleLattice, layoutBars: layoutBars)
+        inputs.spotFaces = spotFaces; inputs.spotKey = spotKey   // ★ Organic cut 2: the certify wizard's outline
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -6502,6 +6525,7 @@ extension MetalMeshView {
         private var appliedLatticeToken: Int = -1
         private var appliedLatticeTints: [FaceID: SIMD4<Float>]? = nil
         private var appliedClearanceSet = false
+        private var appliedSpotKey = 0   // ★ Organic cut 2: the certify wizard's outline
         private var lastPublished: CameraProjection?
         private var faceToolActive = false
         private var onPickFace: ((FaceID) -> Void)?
@@ -6972,6 +6996,11 @@ extension MetalMeshView {
                 appliedClearanceSet = true
                 appliedClearanceVolumes = inputs.clearanceVolumes
                 renderer.setClearanceVolumes(inputs.clearanceVolumes)
+                dirty = true
+            }
+            if inputs.spotKey != appliedSpotKey {   // ★ Organic cut 2: the certify wizard's outline, on its own key
+                appliedSpotKey = inputs.spotKey
+                renderer.setSpotFaces(inputs.spotFaces ?? [])
                 dirty = true
             }
 
@@ -7624,7 +7653,7 @@ public struct MetalMeshView: View {
                 brushRequiresPencil: Bool = false,
                 onBrushRefused: ((BrushInput) -> Void)? = nil,
                 inputDiscipline: SurfaceInputDiscipline = .off,
-                onPencilSeen: (() -> Void)? = nil) {}
+                onPencilSeen: (() -> Void)? = nil, spotFaces: [Float]? = nil, spotKey: Int = 0) {}
     // ★ NO `latticeLayer:` HERE, AND IT IS NOT AN OVERSIGHT. `LatticeLayerInputs`
     // carries a `LatticeSDFScene`, which is itself MetalKit-only, so the parameter
     // cannot be mirrored into this branch the way `DetentPulse` and `BrushPhase`

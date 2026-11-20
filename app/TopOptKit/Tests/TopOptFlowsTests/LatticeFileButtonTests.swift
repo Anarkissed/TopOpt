@@ -178,7 +178,8 @@ final class LatticeFileButtonTests: XCTestCase {
         XCTAssertTrue(LatticeFileButton.takes(aesthetic, modelPath: "/a/p.step", wired: true), "Aesthetic too (never checked)")
         var organic = l
         organic.algorithm = "organic"
-        XCTAssertFalse(LatticeFileButton.takes(organic, modelPath: "/a/p.step", wired: true), "RED CONTROL: Organic keeps the old run")
+        XCTAssertTrue(LatticeFileButton.takes(organic, modelPath: "/a/p.step", wired: true),
+                      "★ Organic cut 2: Organic is made by the new engine too (on a Mac)")
         XCTAssertFalse(LatticeFileButton.takes(l, modelPath: "/a/model.stl", wired: true), "RED CONTROL: an STL part keeps the old run")
         XCTAssertFalse(LatticeFileButton.takes(l, modelPath: nil, wired: true))
         XCTAssertFalse(LatticeFileButton.takes(l, modelPath: "/a/p.step", wired: false), "RED CONTROL: the switch off")

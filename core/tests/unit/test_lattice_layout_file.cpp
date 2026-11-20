@@ -20,6 +20,11 @@
 #include "topopt/face_overrides.hpp"
 #include "topopt/lattice_layout_file.hpp"
 #include "topopt/stl.hpp"
+#include "topopt/threemf_stream.hpp"
+
+#ifdef TOPOPT_HAVE_ZLIB
+#include <zlib.h>
+#endif
 
 #ifndef LATTICE_FILE_TMP_DIR
 #define LATTICE_FILE_TMP_DIR "."
@@ -1436,8 +1441,8 @@ static void test_organic_job() {
     check_refused(r, "job_unreadable", 1, stl);
     CHECK(has(r.detail, "organic_spacing_mm"));
   }
-  // 2: made.
-  write_job(R"("tensor": "lattice_file_pocket.tensor", )", weave);
+  // 2: made (the merged route: one body; OF4's tubes route is test_weave_tubes').
+  write_job(R"("tensor": "lattice_file_pocket.tensor", "mesh": {"weave_mesh": "merged"}, )", weave);
   const FileResult r = run_file_job(job_path, kTmp);
   if (!mesh_available()) {
     check_refused(r, "mesh_unavailable", 3, stl);
@@ -1510,6 +1515,85 @@ static void test_organic_job() {
     CHECK(r.shallow.kept_any_length == t.kept_any_length && r.shallow.weave_left_unheld == t.weave_left_unheld);
     CHECK(has(text, "\"kept_any_length\": " + std::to_string(t.kept_any_length) + ", \"weave_left_unheld\": " +
                         std::to_string(t.weave_left_unheld) + ", \"stands_added\": " + std::to_string(r.made.stands_added)));
+  }
+  // OF5: the same job with no mesh key takes the tubes route and writes a 3MF where the STL would be: ONE object of the
+  // solid and every shell, vertices shared within each, deflated where the build has zlib. Read back here (unzipped and
+  // parsed): its triangles and vertices as made, every shell closed (each edge once each way).
+  if (mesh_available()) {
+    write_job(R"("tensor": "lattice_file_pocket.tensor", )", weave);
+    const std::string three = kTmp + "/pocket_lattice.3mf";
+    std::remove(three.c_str());
+    const FileResult r = run_file_job(job_path, kTmp);
+    CHECK(r.ok && r.file == three && r.file_format == "3mf" && r.weave_mesh == "tubes" && r.made.tubes);
+    CHECK(r.compressed == StreamingThreeMfWriter::deflate_available());
+    const std::string text = slurp(result);
+    CHECK(has(text, "\"file_format\": \"3mf\", \"weave_mesh\": \"tubes\", \"shells\": " +
+                        std::to_string(r.made.shells.shells()) + ", \"shells_left_out\": " +
+                        std::to_string(r.made.shells.left_out) + ", \"compressed\": " + (r.compressed ? "true" : "false") +
+                        ", \"slicer_supports\": \"off\","));
+    const std::string zip = slurp(three);
+    CHECK(zip.size() == r.file_bytes && r.file_bytes > 0);
+    // The zip's model part.
+    std::string model;
+    for (std::size_t at = 0; at + 30 <= zip.size();) {
+      auto u16 = [&](std::size_t i) { return static_cast<unsigned>(static_cast<unsigned char>(zip[i])) | static_cast<unsigned>(static_cast<unsigned char>(zip[i + 1])) << 8; };
+      auto u32 = [&](std::size_t i) { return u16(i) | u16(i + 2) << 16; };
+      if (u32(at) != 0x04034b50u) break;
+      const unsigned method = u16(at + 8), csize = u32(at + 18), size = u32(at + 22), nl = u16(at + 26), xl = u16(at + 28);
+      const std::string name = zip.substr(at + 30, nl);
+      const std::string data = zip.substr(at + 30 + nl + xl, csize);
+      if (name == "3D/3dmodel.model") {
+        if (method == 0) model = data;
+#ifdef TOPOPT_HAVE_ZLIB
+        if (method == 8) {
+          model.assign(size, '\0');
+          z_stream zs;
+          std::memset(&zs, 0, sizeof zs);
+          inflateInit2(&zs, -15);
+          zs.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(data.data()));
+          zs.avail_in = static_cast<uInt>(data.size());
+          zs.next_out = reinterpret_cast<Bytef*>(&model[0]);
+          zs.avail_out = static_cast<uInt>(size);
+          const int rc = inflate(&zs, Z_FINISH);
+          inflateEnd(&zs);
+          if (rc != Z_STREAM_END || zs.total_out != size) model.clear();
+        }
+#endif
+        CHECK(method == (r.compressed ? 8u : 0u) && (method == 0 || csize < size / 2));
+      }
+      at += 30 + nl + xl + csize;
+    }
+    CHECK(!model.empty() && has(model, "<object id=\"1\" type=\"model\">") && has(model, "<item objectid=\"1\"/>"));
+    std::size_t nv = 0;
+    std::vector<std::array<unsigned long long, 3>> tris;
+    for (std::size_t at = model.find("<vertex "); at != std::string::npos; at = model.find("<vertex ", at + 1)) ++nv;
+    for (std::size_t at = model.find("<triangle "); at != std::string::npos; at = model.find("<triangle ", at + 1)) {
+      std::array<unsigned long long, 3> q{};
+      std::sscanf(model.c_str() + at, "<triangle v1=\"%llu\" v2=\"%llu\" v3=\"%llu\"", &q[0], &q[1], &q[2]);
+      tris.push_back(q);
+    }
+    CHECK(tris.size() == r.made.mesh.triangles && nv > 0 && nv < 3 * tris.size());
+    std::map<std::pair<unsigned long long, unsigned long long>, int> edges;
+    bool in_range = true;
+    for (const auto& q : tris)
+      for (int e = 0; e < 3; ++e) {
+        in_range = in_range && q[static_cast<std::size_t>(e)] < nv;
+        ++edges[{q[static_cast<std::size_t>(e)], q[static_cast<std::size_t>((e + 1) % 3)]}];
+      }
+    std::size_t bad = 0;
+    for (const auto& kv : edges) {
+      const auto back = edges.find({kv.first.second, kv.first.first});
+      bad += kv.second != 1 || back == edges.end() || back->second != 1;
+    }
+    std::printf("organic 3mf: %zu bytes (%s), %zu vertices, %zu triangles, %zu shells (%zu left out), %zu edges not once each way; "
+                "the solid made %d times over %d passes\n", r.file_bytes, r.compressed ? "deflated" : "stored", nv, tris.size(),
+                r.made.shells.shells(), r.made.shells.left_out, bad, r.made.base_builds, r.made.builds);
+    CHECK(in_range && bad == 0);
+    // Asked for an STL, the tubes route writes the STL (the unmerged shells as triangles); asked "merged", an STL as before.
+    write_job(R"("tensor": "lattice_file_pocket.tensor", "file_format": "stl", )", weave);
+    const FileResult rs = run_file_job(job_path, kTmp);
+    CHECK(rs.ok && rs.file == stl && rs.file_format == "stl" && rs.weave_mesh == "tubes" && read_stl_file(stl).mesh.triangles.size() == tris.size());
+    std::remove(three.c_str());
   }
   for (const std::string& p : {model_path, face_overrides_sidecar_path(model_path), tensor_path, job_path, stl, result})
     std::remove(p.c_str());
@@ -1618,8 +1702,9 @@ static void test_organic_foot() {
     m.mesh = read_stl_file(stl).mesh;
     return m;
   };
-  const Made off = make(R"("mesh": {"weave_foot_mm": 0}, )");
-  const Made on = make("");
+  // The merged route (one body; OF4 keeps it): the feet are judged joined to the solid.
+  const Made off = make(R"("mesh": {"weave_foot_mm": 0, "weave_mesh": "merged"}, )");
+  const Made on = make(R"("mesh": {"weave_mesh": "merged"}, )");
   CHECK(off.r.ok && on.r.ok);
   if (!off.r.ok || !on.r.ok) return;
   // The bars the job laid (lay_organic directly, as test_organic_job reads them).
@@ -1749,8 +1834,9 @@ static void test_organic_round_top() {
     m.mesh = read_stl_file(stl).mesh;
     return m;
   };
-  const Made off = make(R"("mesh": {"weave_round_top": false}, )");
-  const Made on = make("");
+  // The merged route (one body; OF4 keeps it).
+  const Made off = make(R"("mesh": {"weave_round_top": false, "weave_mesh": "merged"}, )");
+  const Made on = make(R"("mesh": {"weave_mesh": "merged"}, )");
   CHECK(off.r.ok && on.r.ok);
   if (!off.r.ok || !on.r.ok) return;
   const auto& a = off.r.made;
@@ -1917,9 +2003,9 @@ static void test_organic_finish_keys() {
     const std::string& out = n == 2 ? b : a;
     std::remove(out.c_str());
     (n == 0 ? none : n == 1 ? skin : rim) = make_lattice_file(box_model(30, 20, 16), j, out);
-    if (n == 0) std::rename(a.c_str(), (a + ".none").c_str());
+    if (n == 0) std::rename(none.file.c_str(), (a + ".none").c_str());   // the file as written (OF5: a 3MF by default)
   }
-  const bool rim_same = none.ok && rim.ok && !slurp(a + ".none").empty() && slurp(a + ".none") == slurp(b);
+  const bool rim_same = none.ok && rim.ok && !slurp(a + ".none").empty() && slurp(a + ".none") == slurp(rim.file);
   const std::string text = file_result_json(skin);
   char want[200];
   std::snprintf(want, sizeof want, "},\n    \"net_struts\": %llu, \"net_mm\": %.9g,",
@@ -1934,6 +2020,8 @@ static void test_organic_finish_keys() {
   std::remove(a.c_str());
   std::remove((a + ".none").c_str());
   std::remove(b.c_str());
+  std::remove(skin.file.c_str());
+  std::remove(rim.file.c_str());
 }
 
 // O6 (joints a hair apart, test 9): in the shallow-bar table two level bars in line whose joint's two ends are 4e-6 mm
@@ -2044,9 +2132,9 @@ static void test_sag_keys() {
 }
 
 // L1 (brief L1, item 6): one job with a cell region AND an Organic (weave) region is laid and made: the top face's region
-// is the weave, the bottom face's region cells. And a strength job on a job with an Organic region is refused
-// (strength_organic) before any work, with one plain line, no file; the same job with no weave region is not refused
-// for it (it goes on to the check's own reading of its job).
+// is the weave, the bottom face's region cells. And a strength job on a job with an Organic region AND a cell region is
+// refused (strength_mixed, brief E2) before any work, with one plain line, no file; the same job with no weave region,
+// or with every region a weave, is not refused for it (it goes on to the check's own reading of its job).
 static void test_cells_and_weave_job() {
   std::string text = R"({"mode": "lattice_file", "model": "block.step", "layout": {
     "min_strut_lines": 2, "bead_mm": 0.45,
@@ -2073,9 +2161,9 @@ static void test_cells_and_weave_job() {
                 r.ok ? 1 : 0, r.cells, r.weave_regions, r.strands, r.bars, r.weave_bars);
     cell_bars = r.bars - r.weave_bars;
     CHECK(r.ok && r.cells > 0 && r.weave_regions == 1 && r.strands > 0 && r.weave_bars > 0 && cell_bars > 0);
-    CHECK(r.ok && exists(path) && r.file_bytes > 0);
+    CHECK(r.ok && exists(r.file) && r.file_bytes > 0);   // OF5: a 3MF beside the asked-for name, by default
     CHECK(has(file_result_json(r), "\"weave_regions\": 1"));
-    std::remove(path.c_str());
+    std::remove(r.file.c_str());
   }
   // The strength check refused on it, before anything (the check is never asked).
   bool asked = false;
@@ -2088,9 +2176,30 @@ static void test_cells_and_weave_job() {
   CHECK(sj.strength_job == "strength.json");
   sj.tensor_field = field;
   const FileResult s = make_lattice_file(box_model(30, 30, 24), sj, path, nullptr, nullptr, &check);
-  std::printf("strength job with an Organic region: %s: %s\n", s.code.c_str(), s.why.c_str());
-  check_refused(s, "strength_organic", 1, path);
-  CHECK(!asked && has(file_result_json(s), "\"code\": \"strength_organic\""));
+  std::printf("strength job with an Organic region and a cell region: %s: %s\n", s.code.c_str(), s.why.c_str());
+  check_refused(s, "strength_mixed", 1, path);
+  CHECK(!asked && has(file_result_json(s), "\"code\": \"strength_mixed\""));
+  // Every region a weave: not refused for it; a build with no Organic check is (strength_unavailable), before any work.
+  {
+    std::string weave_only = with_strength;
+    weave_only.replace(weave_only.find("[true, false]"), 13, "[true, true]");
+    FileJob wj = parse_file_job(weave_only);
+    wj.tensor_field = field;
+    const FileResult w = make_lattice_file(box_model(30, 30, 24), wj, path, nullptr, nullptr, &check);
+    CHECK(!asked && w.code == "strength_unavailable");
+    StrengthCheck organic = check;
+    organic.before = [&](const std::string&) {
+      asked = true;
+      StrengthDone d;
+      d.code = "strength_job_unreadable";
+      d.why = "made up";
+      return d;
+    };
+    organic.run_organic = organic.run;
+    const FileResult w2 = make_lattice_file(box_model(30, 30, 24), wj, path, nullptr, nullptr, &organic);
+    CHECK(asked && w2.code == "strength_job_unreadable");
+    asked = false;
+  }
   // No weave region: not refused for it (the check's own `before` is asked).
   std::string cells_only = with_strength;
   cells_only.replace(cells_only.find("[true, false]"), 13, "[false, false]");
@@ -2109,7 +2218,150 @@ static void test_cells_and_weave_job() {
   std::remove(path.c_str());
 }
 
+// Brief E2, items 9 and 11: the width floors and the job key "strengthened". The file job's own lay (as its strength
+// check is handed it) and lay_organic_preview Exact are the same lattice, bar for bar: with floors (the strut width on a
+// Sweep: bars in the floor's ball widened, never above the upper width; a single width: not applied), and with a
+// strengthened.json (a boosted stress input, the stated reference, floors) read by the file job from its job key and by
+// the preview through apply_strengthened. The reference reads back as the same double.
+static bool same_bars(const Bars& x, const Bars& y) {
+  if (x.bars.size() != y.bars.size()) return false;
+  for (std::size_t i = 0; i < x.bars.size(); ++i) {
+    const Bar& a = x.bars[i];
+    const Bar& b = y.bars[i];
+    if (a.a.x != b.a.x || a.a.y != b.a.y || a.a.z != b.a.z || a.b.x != b.b.x || a.b.y != b.b.y || a.b.z != b.b.z ||
+        a.width != b.width || a.link != b.link)
+      return false;
+  }
+  return true;
+}
+static void test_floors_and_strengthened() {
+  if (!mesh_available()) return;
+  const std::string dir = kTmp + "/e2_floors";
+  std::system(("mkdir -p " + dir + "/s").c_str());
+  write_stl_file(dir + "/block.stl", box_model(30, 30, 24).mesh);
+  int top = -1;
+  {
+    const StepModel m = import_part_file_resolved(dir + "/block.stl");
+    for (int f = 0; f < m.face_count; ++f)
+      if (m.faces[static_cast<std::size_t>(f)].kind == StepSurfaceKind::Plane && m.faces[static_cast<std::size_t>(f)].plane_normal.z > 0.99) top = f;
+  }
+  CHECK(top >= 0);
+  TensorField f;
+  f.spacing = 1.0;
+  f.nx = 30; f.ny = 30; f.nz = 24;
+  f.voigt.assign(6 * 30 * 30 * 24, 0.0);
+  for (int k = 0; k < 24; ++k)
+    for (int j = 0; j < 30; ++j)
+      for (int i = 0; i < 30; ++i) {
+        const std::size_t e = f.index(i, j, k);
+        f.voigt[6 * e + 2] = 0.5 + 3.0 * i / 29.0;
+        f.voigt[6 * e + 0] = 1.0;
+      }
+  CHECK(write_tensor_file(dir + "/stress.tensor", f));
+  const auto job_text = [&](const std::string& extra, double heavy) {
+    char h[32];
+    std::snprintf(h, sizeof h, "%g", heavy);
+    return std::string(R"({"mode": "lattice_file", "model": "block.stl", "tensor": "stress.tensor", "strength_job": "none.json")") + extra +
+           R"(, "layout": {"min_strut_lines": 2, "bead_mm": 0.45, "region_ids": [1], "region_no_lattice": [0],
+             "region_depth_mm": [10], "region_expand_mm": [-2], "region_face_counts": [1], "region_faces": [)" +
+           std::to_string(top) + R"(], "region_weave": [true], "organic_spacing_min_mm": 3, "organic_spacing_max_mm": 6,
+             "organic_width_mm": 0.9, "organic_width_heavy_mm": )" + h + "}}";
+  };
+  // The file job's own lay, as handed to its (Organic) strength check.
+  const auto file_lay = [&](const std::string& path, const std::vector<WidthFloor>& floors, Bars& got) {
+    FileJob job;
+    StepModel model;
+    FileResult r;
+    if (!load_file_job(path, 0, job, model, r)) {
+      std::printf("  (%s: %s %s)\n", r.code.c_str(), r.why.c_str(), r.detail.c_str());
+      return job;
+    }
+    job.organic.floors.insert(job.organic.floors.end(), floors.begin(), floors.end());
+    StrengthCheck cap;
+    cap.before = [](const std::string&) { StrengthDone d; d.ok = true; return d; };
+    cap.run = [](const StrengthAsk&) { StrengthDone d; d.ok = true; d.json = "{}"; return d; };
+    cap.run_organic = [&](const StrengthAsk& ask) {
+      got = ask.outcome->bars;
+      StrengthDone d;
+      d.ok = true;
+      d.json = "{}";
+      return d;
+    };
+    const FileResult made = make_lattice_file(std::move(model), job, dir + "/out.stl", nullptr, nullptr, &cap);
+    if (!made.ok) std::printf("  (%s: %s %s)\n", made.code.c_str(), made.why.c_str(), made.detail.c_str());
+    CHECK(made.ok && made.strength_ran);
+    std::remove(made.file.c_str());
+    return job;
+  };
+  const WidthFloor floor{{15.0, 15.0, 19.0}, 6.0, 1.6};
+  // Item 9: with the width on a Sweep.
+  {
+    std::ofstream(dir + "/job.json") << job_text("", 1.8);
+    Bars got;
+    const FileJob job = file_lay(dir + "/job.json", {floor}, got);
+    Session s(import_part_file_resolved(dir + "/block.stl"));
+    OrganicPreviewAsk pa;
+    pa.quality = PreviewQuality::Exact;
+    const OrganicPreview pv = lay_organic_preview(s, job.settings, *job.tensor_field, job.organic, pa);
+    std::size_t at_floor = 0;
+    for (const Bar& b : pv.outcome.bars.bars) at_floor += !b.link && b.width == 1.6;
+    std::printf("floors (Sweep): file %zu bars, preview %zu; widened %zu (links %zu), at the floor %zu\n", got.bars.size(),
+                pv.outcome.bars.bars.size(), pv.outcome.floors_widened, pv.outcome.floor_links_widened, at_floor);
+    CHECK(!got.bars.empty() && same_bars(got, pv.outcome.bars));
+    CHECK(pv.outcome.floors_widened > 0 && at_floor > 0);
+    for (const Bar& b : pv.outcome.bars.bars) CHECK(b.width <= 1.8 + 1e-12);
+    // The same job with no floors: the bars the floor's ball holds are thinner.
+    Session s2(import_part_file_resolved(dir + "/block.stl"));
+    FileJob plain = job;
+    plain.organic.floors.clear();
+    const OrganicPreview p0 = lay_organic_preview(s2, plain.settings, *plain.tensor_field, plain.organic, pa);
+    CHECK(p0.outcome.floors_widened == 0 && p0.outcome.bars.bars.size() == pv.outcome.bars.bars.size());
+    // Item 11: a strengthened.json (a boosted stress input, the reference the plain lay resolved, the floor).
+    double ref = 0.0;
+    for (const auto& r : p0.outcome.organic_references) ref = std::max(ref, r.second);
+    CHECK(ref > 0.0);
+    TensorField boosted = f;
+    for (std::size_t e = 0; e < boosted.voigt.size() / 6; ++e)
+      if (e % 3 == 0)
+        for (int q = 0; q < 6; ++q) boosted.voigt[6 * e + q] *= 3.0;
+    CHECK(write_tensor_file(dir + "/s/stress.tensor", boosted));
+    CHECK(write_floors_file(dir + "/s/floors.bin", {floor}));
+    Strengthened st;
+    st.stress_input = "stress.tensor";
+    st.floors = "floors.bin";
+    st.reference_mpa = ref * (1.0 + 1e-13) / 3.0;   // any double: it must read back the same
+    CHECK(write_strengthened_file(dir + "/s/strengthened.json", st, "  \"round\": 1"));
+    std::ofstream(dir + "/job_s.json") << job_text(R"(, "strengthened": "s/strengthened.json")", 1.8);
+    Bars got_s;
+    const FileJob js = file_lay(dir + "/job_s.json", {}, got_s);
+    CHECK(js.organic.reference_mpa == st.reference_mpa && js.organic.floors.size() == 1);
+    TensorField pf;
+    OrganicAsk pask = plain.organic;
+    std::string why;
+    CHECK(apply_strengthened(dir + "/s/strengthened.json", pf, pask, &why));
+    CHECK(pask.reference_mpa == st.reference_mpa);
+    Session s3(import_part_file_resolved(dir + "/block.stl"));
+    const OrganicPreview ps = lay_organic_preview(s3, plain.settings, pf, pask, pa);
+    std::printf("strengthened: file %zu bars, preview %zu; widened %zu\n", got_s.bars.size(), ps.outcome.bars.bars.size(),
+                ps.outcome.floors_widened);
+    CHECK(!got_s.bars.empty() && same_bars(got_s, ps.outcome.bars));
+    CHECK(!same_bars(got_s, pv.outcome.bars));   // the boosted input and the stated reference changed the lattice
+  }
+  // Item 9: a single width (no Sweep): the floors are not applied.
+  {
+    std::ofstream(dir + "/job1.json") << job_text("", 0.0);
+    Bars got;
+    const FileJob job = file_lay(dir + "/job1.json", {floor}, got);
+    Session s(import_part_file_resolved(dir + "/block.stl"));
+    OrganicPreviewAsk pa;
+    const OrganicPreview pv = lay_organic_preview(s, job.settings, *job.tensor_field, job.organic, pa);
+    CHECK(same_bars(got, pv.outcome.bars) && pv.outcome.floors_widened == 0);
+    for (const Bar& b : pv.outcome.bars.bars) CHECK(b.link || b.width == 0.9);
+  }
+}
+
 int main() {
+  test_floors_and_strengthened();
   test_cells_and_weave_job();
   test_max_step_key();
   test_pieces_key();

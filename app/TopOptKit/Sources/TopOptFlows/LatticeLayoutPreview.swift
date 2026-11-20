@@ -111,6 +111,8 @@ public final class LatticeLayoutPreview: ObservableObject {
     public static let ghostAlpha: Float = 0.2
 
     private var session: LatticeLayoutSession?
+    /// ★ Organic cut 2: the groups the last EXACT Organic lay laid (nil: none, a draft, or refused).
+    private var organicLaidGroups: [LatticeLayoutSession.OrganicGroup]?
     private var sessionPath: String?
     private var openMS = 0.0
     private var lastSettings: LatticeLayoutSession.Settings?
@@ -121,6 +123,12 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// ★ THE SOLID VIEW (his ask 11-13): X-ray off draws the part solid, cut open where the lattice is (the engine's map).
     private var solidWanted = false
     private var box: (lo: SIMD3<Float>, hi: SIMD3<Float>)?
+    /// ★ The flat cut (his 11-20 skin note): the part's surface the vines are cut at, and the mesh it is built from (once
+    /// per part, off the main thread, at the first Organic lay).
+    private var cutMesh: ImportedMesh?
+    private var cutSurface: (path: String, surface: OrganicVineShape.CutSurface)?
+    /// ★ Cut 2: the loaded and fixed faces at the lay (kept flush whatever depth variation says).
+    private var flushAtLay: [Int32] = []
     private var mapTask: Task<Void, Never>?
     private var nozzleSession: LatticeLayoutSession?
     private var latticeAtLay = LatticeSettings()
@@ -151,6 +159,10 @@ public final class LatticeLayoutPreview: ObservableObject {
         public var limitsMeasured: Bool }
     /// Organic's draft line (a dragged slider's quick lay is NOT what will be made).
     public static let draftLine = "Draft while you change it \u{00B7} the exact lattice follows"
+    /// ★ Cut 2 (OJ6, the hand-over sheet's own words): bulges the print check made flush.
+    public static func reliefFlushedLine(_ n: Int) -> String {
+        n == 1 ? "1 bulge made flush so the part prints" : "\(n) bulges made flush so the part prints"
+    }
     /// Organic needs the stress check (its weave follows the stress's directions).
     public static let organicNeedsStressLine = "Organic follows the stress: the stress check runs first"
     private var nozzleStressKey: Int?
@@ -165,6 +177,16 @@ public final class LatticeLayoutPreview: ObservableObject {
             && Self.organicKey(p) == lastOrganicKey
     }
 
+    /// ★ Organic cut 2 (the export, handover f): what the print file is made from — the SAME groups the exact preview laid for
+    /// these inputs, and the stress that lay followed (as set, or as the synthetic stress filled it) as core's file. nil: no
+    /// exact lay of these inputs yet (the page lays it first), or still laying.
+    public func organicFileInputs(project p: ProjectModel, stress: Stress = Stress())
+        async throws -> (groups: [LatticeLayoutSession.OrganicGroup], tensor: Data)? {
+        guard !laying, let groups = organicLaidGroups, let session, isCurrent(project: p, stress: stress) else { return nil }
+        let tensor = try await session.tensorFile()
+        return (groups, tensor)
+    }
+
     /// The page's one call, on every change of the part or its lattice settings (cheap when nothing changed).
     /// ★ his picks 11-16: `delay` — Live preview lays half a second after the last change (a newer change cancels the wait);
     /// `checkNozzle` — Refresh also runs the 0.2 mm nozzle check after the layout.
@@ -173,6 +195,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         guard on else { clear(); return }
         guard let path = p.importedFile?.path else { problem = Self.noPartLine; bars = nil; return }
         if path != sessionPath || box == nil { box = Self.box(p.importedMesh?.vertices ?? []) }
+        if path != cutSurface?.path { cutMesh = p.importedMesh }
         let solidChanged = solid != solidWanted
         solidWanted = solid
         notes = Self.notes(p.lattice, hasStress: stress.field != nil)
@@ -189,6 +212,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         lastOrganicKey = ok
         pageManualAtLay = p.latticePageManual
         latticeAtLay = p.lattice
+        flushAtLay = Self.flushFaces(p)   // ★ cut 2: the loaded and fixed faces, always flush
         layerAtLay = p.printParams.layerHeightMM > 0 ? p.printParams.layerHeightMM : 0.2
         keysAtLay = Self.regionKeys(p)   // ★ Install 3: the drawer's rows, as this layout's regions
         groupsAtLay = Self.regionGroups(p)   // ★ Organic per group: each region's group
@@ -224,6 +248,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         nozzleSession?.close(); nozzleSession = nil; nozzlePath = nil; nozzleLine = nil; solidReason = nil
         session?.close(); session = nil; sessionPath = nil; lastSettings = nil; sessionStressKey = nil; nozzleStressKey = nil
         sessionTensorKey = nil; organicLimits = nil; organicQuality = nil; organicNumbers = nil   // ★ Organic cut 1
+        organicLaidGroups = nil   // ★ cut 2
         bars = nil; laid = nil; problem = nil; timing = nil; laying = false; places = []
     }
 
@@ -318,12 +343,13 @@ public final class LatticeLayoutPreview: ObservableObject {
         guard var b = bars else { return nil }
         guard let laid, laid.token == b.token else { return b }
         let grade = latticeAtLay.gradingMode.fitsShape
-        let key = [b.token, field == nil ? 0 : stressKey, grade ? 1 : 0, latticeAtLay.topologyID.hashValue,
+        let organic = latticeAtLay.isOrganic
+        let key = [b.token, field == nil ? 0 : stressKey, grade ? 1 : 0, latticeAtLay.topologyID.hashValue, organic ? 1 : 0,
                    LatticeLayoutColours.controlOneColour ? 1 : 0, b.solid?.token ?? -1, b.hidden ? 1 : 0]
         if let c = drawnCache, c.key == key { return c.bars }
         b.colours = LatticeLayoutColours.colours(laid, type: Self.lawType(latticeAtLay), grade: grade,
                                                  stress: field.map(LatticeLayoutColours.Stress.init(field:)),
-                                                 lookup: grade ? cellLookup() : nil)
+                                                 lookup: grade ? cellLookup() : nil, oneColour: organic)
         var h = Hasher()
         key.forEach { h.combine($0) }
         b.colourKey = h.finalize()
@@ -422,7 +448,8 @@ public final class LatticeLayoutPreview: ObservableObject {
         // group's own settings (Auto: Look alone), its own limits moved by its own Look
         func ask(_ look: LatticeOrganicLook, _ lim: LatticeOrganicLook.Limits?) -> LatticeLayoutSession.Organic {
             let l = lim.map { $0.measured ? $0.looked(percent: look.lookPercentValue) : $0 }
-            var a = look.ask(limits: l?.measured == true ? l : nil, layerMM: layerAtLay)
+            var a = look.ask(limits: l?.measured == true ? l : nil, layerMM: layerAtLay,
+                             aesthetic: (latticeAtLay.stageMode ?? .structural) == .aesthetic, flushFaces: flushAtLay)
             a.quality = draft ? .draft : .exact
             return a
         }
@@ -467,12 +494,29 @@ public final class LatticeLayoutPreview: ObservableObject {
         }
         let r = try await session.layOrganic(s, groups: groups)
         guard !Task.isCancelled else { return }
-        if !r.refused.isEmpty { return refuse(r.refused, groupIDs) }
+        if !r.refused.isEmpty { organicLaidGroups = nil; return refuse(r.refused, groupIDs) }
         organicRefusals = []
+        // ★ cut 2: the groups the EXACT lay laid (the file is that lattice); a draft is not what will be made
+        organicLaidGroups = r.quality == .exact ? groups : nil
         token &+= 1
         let seg = Self.segments(r.runs)
+        // ★ his 11-19 rule ("The drawing follows the print file. Always."): every vine, Grown and the net skin too, as the
+        // print file's tubes make them (built off the main thread), cut flat where they reach the part's surface (his 11-20
+        // skin note: the file trims every tube to the part)
+        let runs = r.runs
+        let known = cutSurface?.path == path ? cutSurface?.surface : nil
+        let mesh = known == nil ? cutMesh.map { ($0.vertices, $0.indices, $0.faceIDs) } : nil
+        let (vines, surface) = await Task.detached(priority: .userInitiated) { () -> (OrganicVineShape, OrganicVineShape.CutSurface?) in
+            var v = OrganicVineShape.tubes(runs: runs)
+            let surface = known ?? mesh.map { OrganicVineShape.CutSurface(vertices: $0.0, indices: $0.1, faceIDs: $0.2) }
+            if let surface { v.cut(runs: runs, surface: surface) }
+            return (v, surface)
+        }.value
+        guard !Task.isCancelled else { return }
+        if known == nil, let surface { cutSurface = (path, surface); cutMesh = nil }
         var drawn = LatticeLayoutBarsInputs(token: token, bars: seg.bars, solid: nil, flags: seg.flags)
         drawn.lightFrom = Self.organicLightFrom(grown: grown, netFrom: seg.lightFrom, count: seg.count)
+        drawn.vines = vines
         bars = drawn
         var l = LatticeLayoutColours.Laid()   // no cells: the key and card read each strut's width and its cell size
         l.bars = seg.bars; l.barFlags = seg.skin; l.barCell = seg.cell; l.barRegion = seg.region; l.token = token
@@ -488,6 +532,7 @@ public final class LatticeLayoutPreview: ObservableObject {
             : missing == 1 ? "An area points at faces this part does not have: pick its faces again"
             : missing > 1 ? "\(missing) areas point at faces this part does not have: pick their faces again" : nil
         notes = Self.notes(latticeAtLay, hasStress: true) + (r.quality == .draft ? [Self.draftLine] : []) + r.notes
+            + (r.reliefFlushed > 0 ? [Self.reliefFlushedLine(r.reliefFlushed)] : [])   // ★ cut 2 (OJ6)
         laying = false
         // a draft is followed by the exact lattice when nothing newer came
         // ★ his 11-18 iPad (the body hid the weave): the solid view's map, cut open around Organic as around the regular lattice
@@ -680,7 +725,7 @@ public final class LatticeLayoutPreview: ObservableObject {
     private func addMap() async {
         guard let session, let box, let b = bars, b.solid?.token != b.token else { return }
         do {
-            let m = try await Self.map(session, box, token: b.token)
+            let m = try await Self.map(session, box, token: b.token, smooth: latticeAtLay.isOrganic)
             guard !Task.isCancelled, solidWanted, var now = bars, now.token == b.token else { return }
             now.solid = m.grid
             bars = now
@@ -703,15 +748,17 @@ public final class LatticeLayoutPreview: ObservableObject {
 
     /// The engine's map over the part's box with a voxel of air all round: about a million voxels at most, never finer than
     /// 0.35 mm.
-    static func map(_ s: LatticeLayoutSession, _ box: (lo: SIMD3<Float>, hi: SIMD3<Float>), token: Int) async throws
-        -> (grid: LatticeLayoutSolidGrid, ms: Double) {
+    static func map(_ s: LatticeLayoutSession, _ box: (lo: SIMD3<Float>, hi: SIMD3<Float>), token: Int,
+                    smooth: Bool = false) async throws -> (grid: LatticeLayoutSolidGrid, ms: Double) {
         let ext = simd_max(box.hi - box.lo, SIMD3(repeating: 0.1))
         let voxel = Swift.max(0.35, Float(cbrt(Double(ext.x * ext.y * ext.z) / 1_000_000)))
         let dims = SIMD3<Int32>(Int32((ext.x / voxel).rounded(.up)) + 3, Int32((ext.y / voxel).rounded(.up)) + 3,
                                 Int32((ext.z / voxel).rounded(.up)) + 3)
         let origin = box.lo - SIMD3(repeating: voxel)
         let r = try await s.grid(origin: origin, voxel: voxel, dims: dims)
-        return (LatticeLayoutSolidGrid(token: token, origin: origin, voxel: voxel, dims: dims, rg: r.rg), r.ms)
+        // ★ his 11-19 note: Organic's cut edges are smooth lines, not the voxels' stair-steps
+        let rg = smooth ? LatticeLayoutSolidGrid.smoothed(r.rg, dims: dims) : r.rg
+        return (LatticeLayoutSolidGrid(token: token, origin: origin, voxel: voxel, dims: dims, rg: rg, smooth: smooth), r.ms)
     }
 
     // MARK: the page's settings, as core reads them
@@ -970,6 +1017,16 @@ public final class LatticeLayoutPreview: ObservableObject {
                 s.regions.append(r)
                 s.allLattice = false
             }
+            // ★ Cut 2 (OJ1/OJ2/OJ8; his 11-19 "None/Skin/Solid. Rim should be hidden"): every Organic area's finish, sent
+            // always: its group's own, else the part's, as the Finish row shows it
+            if LatticeOrganicLook.finishWired {
+                let groupOf = Self.regionGroups(p)
+                for i in s.regions.indices where s.regions[i].weave {
+                    let g = l.wholePart ? nil : groupOf[s.regions[i].id]
+                    let look = l.organicLook(group: g).effective(pageManual: p.latticePageManual)
+                    s.regions[i].finish = Self.organicFinish(look, l, coverMM: cover)
+                }
+            }
             let layer = p.printParams.layerHeightMM > 0 ? p.printParams.layerHeightMM : 0.2
             s.bedFloorMM = 4 * layer   // ★ K1's flat floor under the weave (sheet H1; the ask's bed_floor_mm never reached it)
         }
@@ -1012,6 +1069,40 @@ extension LatticeLayoutPreview {
     /// the drawer's key (`LatticeSelectableRef.key`). Walks the rows exactly as `settings` does (the ids it gives); the test
     /// holds the two to the same ids.
     /// ★ Organic per group: each lattice region's group, in the same order `settings` gives the regions their ids.
+    /// ★ Cut 2: an Organic area's finish for the engine (OJ1 None / Skin, OJ2 Solid, OJ8 the skin's numbers): `look`'s own,
+    /// else the part's (Skin for a part skin, Solid for a part shell, else None). Rim is refused under Organic
+    /// (rim_under_organic), so it goes as 0 whatever the part says; skin_sink is not offered (core's 0).
+    static func organicFinish(_ look: LatticeOrganicLook, _ l: LatticeSettings, coverMM: Double) -> LatticeLayoutSession.RegionFinish {
+        let shown = look.finish ?? (l.boundary == .fullSkin ? .skin : (l.boundary.zoneFinishWord == "shell" ? .solid : .none))
+        var f = LatticeLayoutSession.RegionFinish()
+        f.rimMM = 0
+        switch shown {
+        case .none:
+            f.skin = false; f.coverMM = 0
+        case .skin:
+            f.skin = true; f.coverMM = 0
+            f.skinWidthMM = look.skinWidthMM ?? 0   // 0 = Auto: as thick as the thinner vine
+            f.skinDensity = look.skinDensityValue
+        case .solid:
+            f.skin = false; f.coverMM = coverMM
+        }
+        return f
+    }
+
+    /// ★ Cut 2 (his 11-19 depth variation): the loaded and fixed faces stay flush whatever the switch says (they mate with
+    /// other parts): every face of a load or fixture group, in the lattice's own face numbers (a face as it is, a painted
+    /// region as its faces).
+    static func flushFaces(_ p: ProjectModel) -> [Int32] {
+        var out = Set<Int32>()
+        for g in p.selection.groups {
+            let kind = p.force.kind(for: g.id)
+            guard kind.isAnchor || kind.isLoad else { continue }
+            for f in g.faces where f >= 0 { out.insert(Int32(f)) }
+            for r in g.regionIDs { for f in p.surfaceResolvedFaces(r) where f >= 0 { out.insert(Int32(f)) } }
+        }
+        return out.sorted()
+    }
+
     public static func regionGroups(_ p: ProjectModel) -> [Int32: UUID] {
         let l = p.lattice
         var out: [Int32: UUID] = [:]

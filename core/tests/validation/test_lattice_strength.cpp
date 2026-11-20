@@ -14,9 +14,11 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -78,6 +80,44 @@ TriangleMesh box(double L, double W, double H) {
   return m;
 }
 
+// A closed mesh of the filled cells of a grid (breaks xs, ys, zs; `full(i, j, k)` false outside the grid), outward.
+template <class Full>
+TriangleMesh cells_mesh(const std::vector<double>& xs, const std::vector<double>& ys, const std::vector<double>& zs, Full full) {
+  const int nx = static_cast<int>(xs.size()), ny = static_cast<int>(ys.size()), nz = static_cast<int>(zs.size());
+  TriangleMesh tm;
+  const auto vid = [&](int i, int j, int k) { return (k * ny + j) * nx + i; };
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) tm.vertices.push_back({xs[static_cast<std::size_t>(i)], ys[static_cast<std::size_t>(j)], zs[static_cast<std::size_t>(k)]});
+  const auto quad = [&](int q0, int q1, int q2, int q3) {
+    tm.triangles.push_back({q0, q1, q2});
+    tm.triangles.push_back({q0, q2, q3});
+  };
+  const auto in = [&](int i, int j, int k) { return i >= 0 && j >= 0 && k >= 0 && i < nx - 1 && j < ny - 1 && k < nz - 1 && full(i, j, k); };
+  for (int i = 0; i + 1 < nx; ++i)
+    for (int j = 0; j + 1 < ny; ++j)
+      for (int k = 0; k + 1 < nz; ++k) {
+        if (!in(i, j, k)) continue;
+        if (!in(i - 1, j, k)) quad(vid(i, j, k), vid(i, j, k + 1), vid(i, j + 1, k + 1), vid(i, j + 1, k));
+        if (!in(i + 1, j, k)) quad(vid(i + 1, j, k), vid(i + 1, j + 1, k), vid(i + 1, j + 1, k + 1), vid(i + 1, j, k + 1));
+        if (!in(i, j - 1, k)) quad(vid(i, j, k), vid(i + 1, j, k), vid(i + 1, j, k + 1), vid(i, j, k + 1));
+        if (!in(i, j + 1, k)) quad(vid(i, j + 1, k), vid(i, j + 1, k + 1), vid(i + 1, j + 1, k + 1), vid(i + 1, j + 1, k));
+        if (!in(i, j, k - 1)) quad(vid(i, j, k), vid(i, j + 1, k), vid(i + 1, j + 1, k), vid(i + 1, j, k));
+        if (!in(i, j, k + 1)) quad(vid(i, j, k + 1), vid(i + 1, j, k + 1), vid(i + 1, j + 1, k + 1), vid(i, j + 1, k + 1));
+      }
+  return tm;
+}
+// The face of `m` whose plane has normal (nx, ny, nz) and lies at `off` along it.
+int face_at(const StepModel& m, double nx, double ny, double nz, double off) {
+  for (int f = 0; f < m.face_count; ++f) {
+    const StepFaceInfo& x = m.faces[static_cast<std::size_t>(f)];
+    if (x.kind == StepSurfaceKind::Plane && x.plane_normal.x * nx + x.plane_normal.y * ny + x.plane_normal.z * nz > 0.99 &&
+        std::fabs(x.plane_origin.x * nx + x.plane_origin.y * ny + x.plane_origin.z * nz - off) < 1e-6)
+      return f;
+  }
+  return -1;
+}
+
 int face_with_normal(const StepModel& m, double nx, double ny, double nz) {
   for (int f = 0; f < m.face_count; ++f) {
     const StepFaceInfo& fi = m.faces[static_cast<std::size_t>(f)];
@@ -92,6 +132,13 @@ struct Faces { int top = -1, bottom = -1, side = -1; };
 
 void write(const std::string& path, const std::string& text) { std::ofstream(path) << text; }
 
+// The largest value of `key` over every occurrence in `text` (every round of a strengthen.json).
+double most_after(const std::string& text, const std::string& key) {
+  double most = 0.0;
+  for (std::size_t at = text.find("\"" + key + "\""); at != std::string::npos; at = text.find("\"" + key + "\"", at + 1))
+    most = std::max(most, num_after(text, key, at));
+  return most;
+}
 std::string file_job(const Faces& f, const std::string& extra, const std::string& topology = "octet",
                      const std::string& strength_job = "strength_job.json") {
   return "{\"mode\": \"lattice_file\", \"model\": \"block.stl\", \"output\": \"block_lattice.stl\"" +
@@ -406,7 +453,7 @@ int main() {
       keys.push_back(sj::as_string(*sj::find(e, "key"), "key"));
       sections.push_back(sj::as_string(*sj::find(e, "section"), "section"));
     }
-    CHECK(keys.size() == 60);
+    CHECK(keys.size() == 92);   // 60 of Install 3, 24 of the Organic check (brief E2), 5 of strengthening by adding (E3a), 2 of the weak areas (E4); OS18's withdrawn
     const auto headings = [](const std::string& t) {
       std::vector<std::string> h;
       std::istringstream in(t);
@@ -517,9 +564,13 @@ int main() {
         }
         ++echoed;
       }
-      CHECK(echoed == strength_setting_specs().size());
-      CHECK(got->obj.size() == 60);   // every variable of the docs, editable or not
-      for (const std::string& k : keys) CHECK(sj::find(*got, k) != nullptr);
+      // Install 3's settings are its own; the Organic check's (sections "Organic: ...") are not read by it.
+      std::size_t organic = 0;
+      for (std::size_t i = 0; i < keys.size(); ++i) organic += sections[i].rfind("Organic", 0) == 0;
+      CHECK(echoed + organic == strength_setting_specs().size());
+      CHECK(got->obj.size() == 60);   // every variable of Install 3's docs, editable or not
+      for (std::size_t i = 0; i < keys.size(); ++i)
+        if (sections[i].rfind("Organic", 0) != 0) CHECK(sj::find(*got, keys[i]) != nullptr);
     }
     // The layer factor reaches the margin: 0.5 in place of PLA's 0.55 scales the layer margin by 0.5 / 0.55.
     const double il = num_after(lb, "margin_interlayer"), il2 = num_after(block(set.json), "margin_interlayer");
@@ -537,6 +588,842 @@ int main() {
       CHECK(has(x.r.why, word) && x.r.why.find('\n') == std::string::npos);
       CHECK(!exists(x.out + "/block_lattice.stl"));
     }
+  }
+
+  // ── §9 (brief E2, item 7) Organic: every lattice region a weave, checked as a frame of beams on the bars the file
+  // holds; Install 3's block keys, the struts' numbers, the weakest struts, and strut_margins.bin (a float32 per bar).
+  {
+    TensorField tf;
+    tf.spacing = 1.0;
+    tf.nx = 30; tf.ny = 30; tf.nz = 12;
+    tf.voigt.assign(6 * 30 * 30 * 12, 0.0);
+    for (std::size_t e = 0; e < 30 * 30 * 12; ++e) { tf.voigt[6 * e + 2] = 3.0; tf.voigt[6 * e] = 1.0; }
+    CHECK(write_tensor_file(kDir + "/stress.tensor", tf));
+    std::string fj = file_job(f, ", \"region_weave\": [true], \"organic_spacing_mm\": 4, \"organic_width_mm\": 0.9");
+    fj.replace(fj.find("\"layout\""), 8, "\"tensor\": \"stress.tensor\", \"layout\"");
+    const Run org = run("organic", fj, strength_job(f, 20.0));
+    CHECK(org.r.ok && org.r.strength_ran);
+    const std::string b = block(org.json);
+    check_block_names(b);
+    for (const char* k : {"\"struts\": {\"judged\": ", "\"under_safety\": ", "\"under_one\": ", "\"smallest_margin\": ",
+                          "\"buckling_failures\": ", "\"stubs\": ", "\"unjudged_mm\": ", "\"load_unheld_n\": ",
+                          "\"weakest\": [", "\"strut_margins\": \"strut_margins.bin\"", "\"frame_link_stiffness\": "})
+      CHECK(has(b, k));
+    const std::string verdict = b.substr(b.find("\"verdict\": \"") + 12, 12);
+    std::printf("[organic] verdict %s judged %.0f under_safety %.0f smallest %.4g\n", verdict.substr(0, verdict.find('"')).c_str(),
+                num_after(b, "judged"), num_after(b, "under_safety"), num_after(b, "smallest_margin"));
+    CHECK(has(verdict, "pass\"") || has(verdict, "fail\"") || has(verdict, "solid_only\""));
+    CHECK(num_after(b, "judged") > 0);
+    const std::string mb = slurp(org.out + "/strut_margins.bin");
+    std::size_t judged_bars = 0;
+    for (std::size_t i = 0; i + 4 <= mb.size(); i += 4) {
+      float v;
+      std::memcpy(&v, mb.data() + i, 4);
+      judged_bars += !std::isnan(v);
+    }
+    std::printf("[organic] strut_margins.bin: %zu bars, %zu judged; file bars %zu\n", mb.size() / 4, judged_bars, org.r.bars);
+    CHECK(mb.size() % 4 == 0 && mb.size() / 4 >= org.r.bars && judged_bars > 0);
+    CHECK(exists(org.out + "/fields.bin"));
+    // The Organic verdict (the lead's ruling of 2026-11-18): the solid's stress margin over its solid voxels; the load path
+    // judged on the frame (Install 3's voxel load-path test not applied); each weakest strut says what drives its ends.
+    CHECK(has(b, "\"solid_margin\": {\"worst_case\": ") && has(b, "\"loaded_nodes_undriven\": 0") && has(b, "\"ends\": [{\"at\": "));
+    CHECK(!has(b, "\"fail_reason\": \"no_load_path\""));
+    // passes_at_infill_percent: the lowest whole infill at which the solid's effective margin reaches the safety margin.
+    CHECK(has(b, "\"passes_at_infill_percent\": ") && !has(b, "\"passes_at_infill_percent\": null"));
+    {   // width_aware_knockdown is honoured as Install 3 honours it: at 20 % infill with two 0.45 mm walls the setting
+        // changes the solid's effective margin (the walls rescue thin members).
+      const auto sparse = [&](const std::string& settings) {
+        std::string j = strength_job(f, 20.0, "lattice_part", "block.stl", -1, settings);
+        j.replace(j.find("\"minimize_plastic\": true,"), 25,
+                  "\"minimize_plastic\": true, \"infill_percent\": 20, \"wall_loops\": 2, \"wall_line_width_mm\": 0.45,");
+        return j;
+      };
+      const std::string sb = block(run("organic_scalar", fj, sparse("{\"width_aware_knockdown\": false}")).json);
+      const std::string wb2 = block(run("organic_wa", fj, sparse("{\"width_aware_knockdown\": true}")).json);
+      std::printf("[organic width-aware] effective %.6g (scalar %.6g), passes at %.0f %% (scalar %.0f %%)\n",
+                  num_after(wb2, "effective"), num_after(sb, "effective"), num_after(wb2, "passes_at_infill_percent"),
+                  num_after(sb, "passes_at_infill_percent"));
+      CHECK(has(wb2, "\"width_aware_knockdown\": 1") && num_after(wb2, "effective") > num_after(sb, "effective"));
+    }
+    {
+      const Run heavy = run("organic_heavy", fj, strength_job(f, 2.0e6));
+      const std::string hb2 = block(heavy.json);
+      std::printf("[organic heavy] %s\n", hb2.substr(hb2.find("\"verdict\""), 120).c_str());
+      CHECK(heavy.r.ok && has(hb2, "\"verdict\": \"fail\"") && has(hb2, "\"fail_reason\": \"solid_margin\""));
+      CHECK(has(hb2, "\"passes_at_infill_percent\": null"));   // not even solid infill holds 2e6 N
+    }
+
+    // ── §17 (OS9 amended, the lead's ruling of 2026-11-19) an adrift part of the frame (no driven node) carries nothing
+    // and is never by itself a reason to fail. The organic block's own lattice, checked with (a) one extra loose bar
+    // lying 0.5 mm outside the loaded x = 30 face (near the load, adrift): no fail for it, listed with its place; and
+    // (b) under a load on the top face, a lattice of loose bars only under it (adrift), with one strut from the floor
+    // to one corner of the face: the load lands only near adrift nodes: no_load_path.
+    {
+      StepModel m = import_part_file_resolved(kDir + "/block.stl");
+      Session session(std::move(m));
+      const FileJob job = parse_file_job(fj);
+      TensorField t17 = tf;
+      const Outcome lay = session.lay_organic(job.settings, t17, job.organic, 0);
+      const StrengthCheck check = lattice_file_strength_check(MATERIALS_JSON_PATH, SETTINGS_RULES_PATH);
+      const auto check_with = [&](const std::string& tag, const Bars& bars, const std::string& sj) {
+        write(kDir + "/strength_job.json", sj);
+        StrengthAsk ask;
+        ask.session = &session;
+        ask.outcome = &lay;
+        ask.job_path = kDir + "/strength_job.json";
+        ask.out_dir = kDir + "/" + tag;
+        std::filesystem::create_directories(ask.out_dir);
+        ask.part_lo = {0, 0, 0};
+        ask.part_hi = {30, 30, 12};
+        ask.bars = &bars;
+        ask.light_width_mm = 0.9;
+        const StrengthDone d = check.run_organic(ask);
+        CHECK(d.ok);
+        return d.json;
+      };
+      const auto loose = [](Vec3 a, Vec3 b) {
+        Bar x;
+        x.a = a;
+        x.b = b;
+        x.width = 0.9;
+        x.end_a = x.end_b = Bar::End::Loose;
+        x.region = 1;
+        return x;
+      };
+      Bars with_extra = lay.bars;
+      with_extra.bars.push_back(loose({30.5, 10, 4}, {30.5, 15, 4}));
+      with_extra.bars.push_back(loose({30.5, 15, 4}, {30.5, 20, 4}));
+      const std::string ja = check_with("adrift_a", with_extra, strength_job(f, 20.0));
+      const std::size_t fr = ja.find("\"adrift_parts\": [");
+      std::printf("[adrift a] %s | %s\n", ja.substr(ja.find("\"verdict\""), 20).c_str(),
+                  fr == std::string::npos ? "-" : ja.substr(fr, 220).c_str());
+      CHECK(!has(ja, "\"fail_reason\": \"no_load_path\"") && num_after(ja, "adrift_total") >= 1.0 && fr != std::string::npos &&
+            has(ja.substr(fr, 200), "\"centre\": [30.5, 15, 4]"));
+      Bars only_adrift;
+      for (double y = 3.0; y <= 27.0; y += 3.0)
+        for (double x = 3.0; x < 27.0; x += 0.6) only_adrift.bars.push_back(loose({x, y, 11.6}, {x + 0.6, y, 11.6}));
+      Bar post;
+      post.a = {27.0, 27.0, 1.0};
+      post.b = {27.0, 27.0, 11.6};
+      post.width = 0.9;
+      post.end_a = Bar::End::Solid;
+      post.end_b = Bar::End::Loose;
+      post.region = 1;
+      only_adrift.bars.push_back(post);
+      const std::string jb = check_with("adrift_b", only_adrift, strength_job(f, 20.0, "lattice_part", "block.stl", f.top));
+      std::printf("[adrift b] %s; load on adrift %.4g N of %.4g N, loaded nodes undriven %.0f\n", jb.substr(jb.find("\"verdict\""), 60).c_str(),
+                  num_after(jb, "load_on_adrift_n"), num_after(jb, "load_total_n"), num_after(jb, "loaded_nodes_undriven"));
+      CHECK(has(jb, "\"fail_reason\": \"no_load_path\"") && num_after(jb, "load_on_adrift_n") > 0.01 * num_after(jb, "load_total_n"));
+    }
+
+    // ── §10 (brief E2, item 12) the strengthen rounds as one job: a heavy load (struts under the safety margin), the
+    // width on a Sweep and the spacing a range; one round allowed. Then a job with nothing that follows the stress.
+    const auto strengthen = [&](const std::string& tag, const std::string& extra, double newtons, const std::string& settings) {
+      std::string j = file_job(f, extra);
+      j.replace(j.find("\"layout\""), 8, "\"tensor\": \"stress.tensor\", \"layout\"");
+      write(kDir + "/" + tag + "_job.json", j);
+      write(kDir + "/strength_job.json", strength_job(f, newtons, "lattice_part", "block.stl", -1, settings));
+      const std::string out = kDir + "/" + tag;
+      std::filesystem::remove_all(out);
+      std::filesystem::create_directories(out);
+      const OrganicStrengthenResult r =
+          run_organic_strengthen(kDir + "/" + tag + "_job.json", out, 0, MATERIALS_JSON_PATH, SETTINGS_RULES_PATH);
+      std::printf("[%s] ok %d code %s rounds %d passing %d %s %s\n", tag.c_str(), r.ok, r.code.c_str(), r.rounds_fixed,
+                  r.passing, r.why.c_str(), r.detail.c_str());
+      return r;
+    };
+    const OrganicStrengthenResult sr =
+        strengthen("strengthen", ", \"region_weave\": [true], \"organic_spacing_min_mm\": 3, \"organic_spacing_max_mm\": 6, "
+                                 "\"organic_width_mm\": 0.9, \"organic_width_heavy_mm\": 1.8",
+                   6000.0, "{\"strengthen_rounds\": 1, \"strengthen_mode\": \"rebuild\"}");
+    const std::string sjson = slurp(kDir + "/strengthen/strengthen.json");
+    std::printf("%s\n", sjson.substr(0, 1400).c_str());
+    CHECK(sr.ok && (sr.code == "done" || sr.code == "limit"));
+    CHECK(sr.rounds_fixed == 1 && sr.last_strengthened == "r1/strengthened.json");
+    for (const char* x : {"/r0/strength.json", "/r0/strut_margins.bin", "/r0/fields.bin", "/r1/strengthened.json",
+                          "/r1/stress.tensor", "/r1/floors.bin", "/r1/strength.json"})
+      CHECK(exists(kDir + "/strengthen" + x));
+    CHECK(has(sjson, "\"round\": 0") && has(sjson, "\"round\": 1") && has(sjson, "\"wrote\": {\"strengthened\": \"r1/strengthened.json\""));
+    CHECK(num_after(sjson, "under_safety") > 0);   // round 0 had struts under the safety margin
+    CHECK(has(sjson, "\"bars_geometry\": \"") && has(sjson, "\"struts_at_upper_width\": "));
+    // The reference stated is the one the first lay resolved, and reads back as the same double.
+    {
+      TensorField back;
+      OrganicAsk a;
+      std::string why;
+      CHECK(apply_strengthened(kDir + "/strengthen/r1/strengthened.json", back, a, &why));
+      CHECK(a.reference_mpa > 0.0 && a.reference_mpa == num_after(sjson, "reference_mpa") && !a.floors.empty());
+    }
+    const OrganicStrengthenResult nv =
+        strengthen("nothing", ", \"region_weave\": [true], \"organic_spacing_mm\": 4, \"organic_width_mm\": 0.9", 2500.0,
+                   "{\"strengthen_mode\": 1}");
+    CHECK(nv.ok && nv.code == "nothing_to_vary" && nv.rounds_fixed == 0);
+    // Brief E4, item 1: strengthen_rounds 0 (the default) is 2 rounds for Traced in the rebuild mode, and SIX in the
+    // additive mode (stopping as soon as nothing is under the safety margin: a light load stops at round 0).
+    CHECK(num_after(slurp(kDir + "/nothing/strengthen.json"), "rounds_limit") == 2.0);
+    {
+      const OrganicStrengthenResult dr =
+          strengthen("additive_default", ", \"region_weave\": [true], \"organic_spacing_mm\": 4, \"organic_width_mm\": 0.9", 20.0, "");
+      const std::string dj = slurp(kDir + "/additive_default/strengthen.json");
+      std::printf("[additive_default] rounds_limit %.0f\n", num_after(dj, "rounds_limit"));
+      CHECK(dr.ok && has(dj, "\"mode\": \"additive\"") && num_after(dj, "rounds_limit") == 6.0);
+    }
+
+    // ── §11 (brief E3a) the additive mode, the default: the lattice is laid ONCE; each round adds (widening in place,
+    // braces) and checks again; every bar of round 0 is kept (OS12); r<n>/strengthened.json (version 2) and its
+    // additions.bin, given to the file job, lay the same lattice (its hash checked: a mismatch is refused); a job with
+    // one strut width is widened too.
+    const std::string sweep = ", \"region_weave\": [true], \"organic_spacing_min_mm\": 3, \"organic_spacing_max_mm\": 6, "
+                              "\"organic_width_mm\": 0.9, \"organic_width_heavy_mm\": 1.8";
+    const OrganicStrengthenResult ad = strengthen("additive", sweep, 6000.0, "{\"strengthen_rounds\": 3}");
+    const std::string ajson = slurp(kDir + "/additive/strengthen.json");
+    std::printf("%s\n", ajson.substr(0, 2400).c_str());
+    CHECK(ad.ok && (ad.code == "done" || ad.code == "limit") && ad.rounds_fixed >= 1 && ad.old_bars_kept);
+    CHECK(has(ajson, "\"mode\": \"additive\"") && has(ajson, "\"old_bars_kept\": true") && !has(ajson, "\"old_bars_kept\": false"));
+    // OS11 (the order): a strut already at the limit in round 0 is widened past it only from round 1.
+    CHECK(has(ajson, "\"added\": {\"strengthened\": \"r1/strengthened.json\"") && most_after(ajson, "bars_widened") > 0);
+    for (const char* x : {"/r0/strength.json", "/r0/struts_under.json", "/r1/strengthened.json", "/r1/additions.bin", "/r1/strength.json"})
+      CHECK(exists(kDir + "/additive" + x));
+    CHECK(!exists(kDir + "/additive/r1/stress.tensor") && !exists(kDir + "/additive/r1/floors.bin"));
+    CHECK(has(slurp(kDir + "/additive/r0/struts_under.json"), "\"bars\": ["));
+    {
+      // Round 1's lattice in the check had this many bars; the file job given r1/strengthened.json lays the same.
+      const std::size_t r1 = ajson.find("\"round\": 1");
+      const double bars1 = num_after(ajson, "bars", r1);
+      std::string j = file_job(f, sweep, "octet", "");
+      j.replace(j.find("\"layout\""), 8, "\"tensor\": \"stress.tensor\", \"strengthened\": \"additive/r1/strengthened.json\", \"layout\"");
+      write(kDir + "/replay_job.json", j);
+      std::filesystem::remove_all(kDir + "/replay");
+      std::filesystem::create_directories(kDir + "/replay");
+      const FileResult rr = run_file_job(kDir + "/replay_job.json", kDir + "/replay");
+      std::printf("[replay] ok %d code %s bars %zu (round 1: %.0f) %s\n", rr.ok, rr.code.c_str(), rr.bars, bars1, rr.detail.c_str());
+      CHECK(rr.ok && static_cast<double>(rr.bars) == bars1);
+      // The same additions on another lattice (a narrower spacing range): refused, nothing made.
+      std::string k = file_job(f, ", \"region_weave\": [true], \"organic_spacing_min_mm\": 3, \"organic_spacing_max_mm\": 5, "
+                                  "\"organic_width_mm\": 0.9, \"organic_width_heavy_mm\": 1.8", "octet", "");
+      k.replace(k.find("\"layout\""), 8, "\"tensor\": \"stress.tensor\", \"strengthened\": \"additive/r1/strengthened.json\", \"layout\"");
+      write(kDir + "/mismatch_job.json", k);
+      std::filesystem::remove_all(kDir + "/mismatch");
+      std::filesystem::create_directories(kDir + "/mismatch");
+      const FileResult mm = run_file_job(kDir + "/mismatch_job.json", kDir + "/mismatch");
+      std::printf("[mismatch] ok %d code %s %s\n", mm.ok, mm.code.c_str(), mm.detail.c_str());
+      CHECK(!mm.ok && mm.code == "strengthened_mismatch" && !exists(kDir + "/mismatch/block_lattice.stl"));
+    }
+    // OS18 withdrawn (the owner, 2026-11-19: "Yes, remove it."): a strengthening holding a new vine (kind 3) is refused
+    // by the file job in a plain sentence; a job stating a removed setting is refused as an unknown setting.
+    {
+      Additions a;
+      std::string why;
+      CHECK(read_additions_file(kDir + "/additive/r1/additions.bin", a, &why) && !a.rounds.empty());
+      AddOp v;
+      v.kind = 3;
+      v.v = {1, 0.9, 4, 0, 0, 2, 1, 1, 1, 2, 2, 2};
+      a.rounds[0].ops.push_back(v);
+      std::filesystem::create_directories(kDir + "/vines");
+      CHECK(write_additions_file(kDir + "/vines/additions.bin", a));
+      std::string sj = slurp(kDir + "/additive/r1/strengthened.json");
+      write(kDir + "/vines/strengthened.json", sj);
+      std::string j = file_job(f, sweep, "octet", "");
+      j.replace(j.find("\"layout\""), 8, "\"tensor\": \"stress.tensor\", \"strengthened\": \"vines/strengthened.json\", \"layout\"");
+      write(kDir + "/vines_job.json", j);
+      std::filesystem::remove_all(kDir + "/vines_out");
+      std::filesystem::create_directories(kDir + "/vines_out");
+      const FileResult vr = run_file_job(kDir + "/vines_job.json", kDir + "/vines_out");
+      std::printf("[vines] ok %d code %s: %s\n", vr.ok, vr.code.c_str(), vr.why.c_str());
+      CHECK(!vr.ok && vr.code == "strengthened_has_vines");
+      const OrganicStrengthenResult gone = strengthen("paths_gone", sweep, 6000.0, "{\"strengthen_rounds\": 1, \"strengthen_paths\": 1}");
+      std::printf("[paths gone] ok %d code %s: %s\n", gone.ok, gone.code.c_str(), gone.why.c_str());
+      CHECK(!gone.ok && gone.why.find("strengthen_paths") != std::string::npos);
+    }
+    const OrganicStrengthenResult one =
+        strengthen("additive_one", ", \"region_weave\": [true], \"organic_spacing_mm\": 4, \"organic_width_mm\": 0.9", 6000.0,
+                   "{\"strengthen_rounds\": 1}");
+    const std::string ojson = slurp(kDir + "/additive_one/strengthen.json");
+    CHECK(one.ok && one.code != "nothing_to_vary" && one.old_bars_kept);
+    // One strut width (the limit is the light width): round 0 widens nothing (every strut is at the limit); one round
+    // is all this job is given, so nothing passes the limit yet (OS11).
+    CHECK(one.rounds_fixed == 0 || num_after(ojson, "struts_watched") > 0);
+
+    // ── §18 (rule OS11, the order; the owner, 2026-11-19: "we DON'T want to thicken beyond the limit. That's why it's
+    // the limit. So thicken to the limit ... and only at the end if it is impossible, thicken passed the limit"; the
+    // new-vine step removed: "Yes, remove it."). The many-strut block (spacing 5 to 8, widths 0.9 to 1.2, strand_keep
+    // 0.5), 6000 N, up to 6 rounds: every weak strut is at the limit 1.2 when first found, so it goes past it in that
+    // same round (counted; no round lost: round 1 has fewer under the safety factor); every old bar kept; the replay
+    // lays round 1's bars.
+    {
+      namespace sj = topopt::flexible::json;
+      const std::string roomy = ", \"region_weave\": [true], \"organic_spacing_min_mm\": 5, \"organic_spacing_max_mm\": 8, "
+                                "\"organic_width_mm\": 0.9, \"organic_width_heavy_mm\": 1.2, \"organic_strand_keep\": 0.5";
+      const double limit = 1.2;
+      const OrganicStrengthenResult od = strengthen("order", roomy, 6000.0, "{\"strengthen_rounds\": 6}");
+      const sj::Value doc = sj::parse(slurp(kDir + "/order/strengthen.json"), "strengthen.json");
+      const sj::Value* rounds = sj::find(doc, "rounds");
+      double r0_widest_op = 0.0, past1 = 0.0, widest_watched_r1 = 0.0, widest_after = 0.0, past0 = -1.0, under0 = -1.0, under1 = -1.0;
+      for (std::size_t n = 0; rounds && n < rounds->arr.size(); ++n) {
+        const sj::Value& r = rounds->arr[n];
+        const sj::Value* added = sj::find(r, "added");
+        const sj::Value* lim = added ? sj::find(*added, "limit") : nullptr;
+        const sj::Value* pl = lim ? sj::find(*lim, "past_limit") : nullptr;
+        const sj::Value* cls = sj::find(r, "classes");
+        const sj::Value su = sj::parse(slurp(kDir + "/order/r" + std::to_string(n) + "/struts_under.json"), "struts_under.json");
+        double widest = 0.0;
+        for (const sj::Value& st : sj::find(su, "struts")->arr) widest = std::max(widest, sj::find(st, "width_max_mm")->num);
+        if (n == 0) { past0 = pl ? sj::find(*pl, "struts")->num : 0.0; under0 = sj::find(*sj::find(r, "struts"), "under_safety")->num; }
+        if (n == 1) { widest_watched_r1 = widest; past1 = pl ? sj::find(*pl, "struts")->num : 0.0; under1 = sj::find(*sj::find(r, "struts"), "under_safety")->num; }
+        if (n >= 2) widest_after = std::max(widest_after, widest);
+        std::printf("[order] round %zu: under safety %.0f (untouched %.0f, cut %.0f, brace %.0f), lattice %.1f mm3, widest watched %.3f",
+                    n, sj::find(*sj::find(r, "struts"), "under_safety")->num, sj::find(*sj::find(*cls, "untouched"), "under")->num,
+                    sj::find(*sj::find(*cls, "cut"), "under")->num, sj::find(*sj::find(*cls, "brace"), "under")->num,
+                    sj::find(r, "lattice_mm3")->num, widest);
+        if (lim) std::printf("; within the limit %.0f, past it %.0f (widest %.3f)", sj::find(*lim, "within_limit")->num,
+                             sj::find(*pl, "struts")->num, sj::find(*pl, "widest_mm")->num);
+        std::printf("\n");
+      }
+      Additions a;
+      std::string why;
+      if (read_additions_file(kDir + "/order/r1/additions.bin", a, &why) && !a.rounds.empty())
+        for (const AddOp& op : a.rounds[0].ops)
+          if (op.kind == 2) r0_widest_op = std::max(r0_widest_op, op.v[6]);
+      std::printf("[order] %s after %d rounds; round 0's widest widening %.3f (limit %.1f); round 1: widest watched %.3f, past the "
+                  "limit %.0f; later rounds' widest watched %.3f\n", od.code.c_str(), od.rounds_fixed, r0_widest_op, limit,
+                  widest_watched_r1, past1, widest_after);
+      std::printf("[order] round 0: under %.0f, past the limit at once %.0f; round 1: under %.0f\n", under0, past0, under1);
+      CHECK(od.ok && od.old_bars_kept && past0 == under0 && under1 < under0 && r0_widest_op > limit && widest_after > limit + 1e-6);
+      // Replay: the file job given round 1's strengthened.json lays round 1's bars.
+      const std::string oj = slurp(kDir + "/order/strengthen.json");
+      const double bars1 = num_after(oj, "bars", oj.find("\"round\": 1"));
+      std::string j = file_job(f, roomy, "octet", "");
+      j.replace(j.find("\"layout\""), 8, "\"tensor\": \"stress.tensor\", \"strengthened\": \"order/r1/strengthened.json\", \"layout\"");
+      write(kDir + "/order_replay_job.json", j);
+      std::filesystem::remove_all(kDir + "/order_replay");
+      std::filesystem::create_directories(kDir + "/order_replay");
+      const FileResult rr = run_file_job(kDir + "/order_replay_job.json", kDir + "/order_replay");
+      std::printf("[order replay] ok %d bars %zu (round 1: %.0f)\n", rr.ok, rr.bars, bars1);
+      CHECK(rr.ok && static_cast<double>(rr.bars) == bars1);
+    }
+  }
+
+  // ── OJ5 (leg J item 5): the strength loop with two Organic groups (the top face, upper width 1.2; a side face, 1.8):
+  // each group's limit is its own (no watched strut of a group over its own limit unless named past it); every old
+  // bar kept; the file job given round 1's strengthened.json lays round 1's bars; the rebuild mode refused by name.
+  {
+    namespace sj = topopt::flexible::json;
+    const std::string two = "{\"mode\": \"lattice_file\", \"model\": \"block.stl\", \"output\": \"block_lattice.stl\", "
+        "\"strength_job\": \"strength_job.json\", \"tensor\": \"stress.tensor\", \"layout\": {\"min_strut_lines\": 2, "
+        "\"region_ids\": [1, 2], \"region_no_lattice\": [0, 0], \"region_depth_mm\": [8, 8], \"region_expand_mm\": [-2, -2], "
+        "\"region_face_counts\": [1, 1], \"region_faces\": [" + std::to_string(f.top) + ", " + std::to_string(f.side) + "], "
+        "\"topology\": \"octet\", \"algorithm\": \"uniform\", \"cell_max_mm\": 8, \"min_cells_across\": 1, "
+        "\"region_weave\": [true, true], \"organic_spacing_min_mm\": 5, \"organic_spacing_max_mm\": 8, \"organic_width_mm\": 0.9, "
+        "\"organic_strand_keep\": 0.5, \"organic_groups\": [{\"regions\": [1], \"organic_width_heavy_mm\": 1.2}, "
+        "{\"regions\": [2], \"organic_width_heavy_mm\": 1.8}]}";
+    write(kDir + "/groups_job.json", two + "}");
+    write(kDir + "/strength_job.json", strength_job(f, 6000.0, "lattice_part", "block.stl", -1, "{\"strengthen_rounds\": 2}"));
+    std::filesystem::remove_all(kDir + "/groups");
+    std::filesystem::create_directories(kDir + "/groups");
+    const OrganicStrengthenResult gr = run_organic_strengthen(kDir + "/groups_job.json", kDir + "/groups", 0, MATERIALS_JSON_PATH, SETTINGS_RULES_PATH);
+    std::printf("[groups] ok %d code %s rounds %d %s %s\n", gr.ok, gr.code.c_str(), gr.rounds_fixed, gr.why.c_str(), gr.detail.c_str());
+    std::size_t over1 = 0, over2 = 0, between = 0, watched1 = 0, watched2 = 0;
+    double past = 0.0;
+    const sj::Value doc = sj::parse(slurp(kDir + "/groups/strengthen.json"), "strengthen.json");
+    const sj::Value* rounds = sj::find(doc, "rounds");
+    for (std::size_t n = 0; rounds && n < rounds->arr.size(); ++n) {
+      const sj::Value* added = sj::find(rounds->arr[n], "added");
+      const sj::Value* paths = added ? sj::find(*added, "limit") : nullptr;   // OS11
+      const sj::Value* pl = paths ? sj::find(*paths, "past_limit") : nullptr;
+      if (pl) past += sj::find(*pl, "struts")->num;
+      const sj::Value su = sj::parse(slurp(kDir + "/groups/r" + std::to_string(n) + "/struts_under.json"), "struts_under.json");
+      for (const sj::Value& st : sj::find(su, "struts")->arr) {
+        const sj::Value* rg = sj::find(st, "region");
+        const double w = sj::find(st, "width_max_mm")->num;
+        if (!rg) continue;
+        if (rg->num == 1) { ++watched1; over1 += w > 1.2 + 1e-6; }
+        if (rg->num == 2) { ++watched2; over2 += w > 1.8 + 1e-6; between += w > 1.2 + 1e-6 && w <= 1.8 + 1e-6; }
+      }
+    }
+    std::printf("[groups] watched struts: area 1 %zu (over its 1.2 %zu), area 2 %zu (over its 1.8 %zu, between 1.2 and 1.8 %zu); "
+                "struts named past a limit %.0f\n", watched1, over1, watched2, over2, between, past);
+    CHECK(gr.ok && gr.old_bars_kept && watched1 > 0 && watched2 > 0 && static_cast<double>(over1 + over2) <= past);
+    // Replay: the file job given round 1's strengthened.json lays round 1's bars.
+    if (gr.ok && gr.rounds_fixed >= 1) {
+      std::string j = two + ", \"strengthened\": \"groups/r1/strengthened.json\"}";
+      j.erase(j.find("\"strength_job\": \"strength_job.json\", "), std::string("\"strength_job\": \"strength_job.json\", ").size());   // the file alone
+      write(kDir + "/groups_replay_job.json", j);
+      std::filesystem::remove_all(kDir + "/groups_replay");
+      std::filesystem::create_directories(kDir + "/groups_replay");
+      const FileResult rr = run_file_job(kDir + "/groups_replay_job.json", kDir + "/groups_replay");
+      const std::size_t r1 = slurp(kDir + "/groups/strengthen.json").find("\"round\": 1");
+      const double bars1 = num_after(slurp(kDir + "/groups/strengthen.json"), "bars", r1);
+      std::printf("[groups replay] ok %d code %s bars %zu (round 1: %.0f) %s\n", rr.ok, rr.code.c_str(), rr.bars, bars1, rr.detail.c_str());
+      CHECK(rr.ok && static_cast<double>(rr.bars) == bars1);
+    }
+    write(kDir + "/strength_job.json", strength_job(f, 6000.0, "lattice_part", "block.stl", -1, "{\"strengthen_rounds\": 1, \"strengthen_mode\": \"rebuild\"}"));
+    std::filesystem::remove_all(kDir + "/groups_rebuild");
+    std::filesystem::create_directories(kDir + "/groups_rebuild");
+    const OrganicStrengthenResult rb = run_organic_strengthen(kDir + "/groups_job.json", kDir + "/groups_rebuild", 0, MATERIALS_JSON_PATH, SETTINGS_RULES_PATH);
+    std::printf("[groups rebuild] ok %d code %s %s\n", rb.ok, rb.code.c_str(), rb.why.c_str());
+    CHECK(!rb.ok && rb.code == "rebuild_one_group");
+  }
+
+  // ── OJ2 (leg J item 2; the owner, 2026-11-19: "yes, a solid finish can sit on a loaded face if chosen by the user in
+  // the settings"): the weave under the LOADED top face with a Solid finish (1.2 mm): the check runs, the cover is
+  // solid in it, and the load reaches the lattice through the cover (frame nodes driven, the load on the frame).
+  {
+    const std::string fj = file_job(f, ", \"region_weave\": [true], \"organic_spacing_mm\": 4, \"organic_width_mm\": 0.9, "
+                                       "\"region_finish\": [{\"cover_mm\": 1.2}]");
+    std::string fjt = fj;
+    fjt.replace(fjt.find("\"layout\""), 8, "\"tensor\": \"stress.tensor\", \"layout\"");
+    const Run sol = run("solid_loaded", fjt, strength_job(f, 200.0, "lattice_part", "block.stl", f.top));
+    const std::string b = block(sol.json);
+    const std::size_t fr = b.find("\"frame\"");
+    const std::size_t sr = b.find("\"struts\"");
+    std::printf("[solid loaded] ok %d, strength ran %d, verdict %s; frame: solved %s, driven nodes %.0f, load %.4g N, on frame nodes %.4g N "
+                "(the rest reaches the lattice through the cover); struts judged %.0f, smallest margin %.4g\n", sol.r.ok, sol.r.strength_ran,
+                has(b, "\"verdict\": \"pass\"") ? "pass" : "not pass", has(b, "\"solved\": true") ? "yes" : "no", num_after(b, "driven", fr),
+                num_after(b, "load_total_n", fr), num_after(b, "load_on_frame_n", fr), num_after(b, "judged", sr), num_after(b, "smallest_margin", sr));
+    CHECK(sol.r.ok && sol.r.strength_ran && fr != std::string::npos && has(b, "\"solved\": true") && num_after(b, "driven", fr) > 0 &&
+          num_after(b, "load_total_n", fr) == 200.0 && num_after(b, "load_on_frame_n", fr) == 0.0 && num_after(b, "judged", sr) > 0);
+  }
+
+  // ── §12 (brief E4, item 2) the solid's weak spots, on made notched bars 40 x 10 x 12 (held on the x = 0 end, pulled
+  // along x on the x = 40 end, an Organic weave 2 mm deep under the bottom face): one notch from the top gives one spot
+  // at the notch, two notches two spots; a light load none; the plain text in each case.
+  {
+    // A closed mesh of the cells of a grid (x breaks, y 0..10, z breaks 0, 6, 12) less the cells named open.
+    const auto notched = [](const std::vector<double>& xs, const std::vector<int>& open_x) {
+      const std::vector<double> ys{0, 10}, zs{0, 6, 12};
+      const int NX = static_cast<int>(xs.size()) - 1, NZ = 2;
+      const auto full = [&](int i, int k) {
+        if (i < 0 || i >= NX || k < 0 || k >= NZ) return false;
+        return !(k == 1 && std::find(open_x.begin(), open_x.end(), i) != open_x.end());
+      };
+      TriangleMesh m;
+      const auto vid = [&](int i, int j, int k) { return (k * 2 + j) * static_cast<int>(xs.size()) + i; };
+      for (int k = 0; k < 3; ++k)
+        for (int j = 0; j < 2; ++j)
+          for (std::size_t i = 0; i < xs.size(); ++i) m.vertices.push_back({xs[i], ys[static_cast<std::size_t>(j)], zs[static_cast<std::size_t>(k)]});
+      const auto quad = [&](int a, int b, int c, int d) {   // counter-clockwise seen from outside
+        m.triangles.push_back({a, b, c});
+        m.triangles.push_back({a, c, d});
+      };
+      for (int i = 0; i < NX; ++i)
+        for (int k = 0; k < NZ; ++k) {
+          if (!full(i, k)) continue;
+          quad(vid(i, 0, k), vid(i + 1, 0, k), vid(i + 1, 0, k + 1), vid(i, 0, k + 1));          // y = 0
+          quad(vid(i, 1, k), vid(i, 1, k + 1), vid(i + 1, 1, k + 1), vid(i + 1, 1, k));          // y = 10
+          if (!full(i - 1, k)) quad(vid(i, 0, k), vid(i, 0, k + 1), vid(i, 1, k + 1), vid(i, 1, k));   // -x
+          if (!full(i + 1, k)) quad(vid(i + 1, 0, k), vid(i + 1, 1, k), vid(i + 1, 1, k + 1), vid(i + 1, 0, k + 1));   // +x
+          if (!full(i, k - 1)) quad(vid(i, 0, k), vid(i, 1, k), vid(i + 1, 1, k), vid(i + 1, 0, k));   // -z
+          if (!full(i, k + 1)) quad(vid(i, 0, k + 1), vid(i + 1, 0, k + 1), vid(i + 1, 1, k + 1), vid(i, 1, k + 1));   // +z
+        }
+      return m;
+    };
+    write_stl_file(kDir + "/notch1.stl", notched({0, 18, 22, 40}, {1}), StlFormat::Binary);
+    write_stl_file(kDir + "/notch2.stl", notched({0, 10, 14, 26, 30, 40}, {1, 3}), StlFormat::Binary);
+    TensorField tf;
+    tf.spacing = 1.0;
+    tf.nx = 40; tf.ny = 10; tf.nz = 12;
+    tf.voigt.assign(6 * 40 * 10 * 12, 0.0);
+    for (std::size_t e = 0; e < 40 * 10 * 12; ++e) { tf.voigt[6 * e] = 3.0; tf.voigt[6 * e + 2] = 1.0; }
+    CHECK(write_tensor_file(kDir + "/notch.tensor", tf));
+    const auto face_at = [](const StepModel& m, Vec3 n, double off) {
+      for (int fi = 0; fi < m.face_count; ++fi) {
+        const StepFaceInfo& x = m.faces[static_cast<std::size_t>(fi)];
+        if (x.kind == StepSurfaceKind::Plane && x.plane_normal.x * n.x + x.plane_normal.y * n.y + x.plane_normal.z * n.z > 0.99 &&
+            std::fabs(x.plane_origin.x * n.x + x.plane_origin.y * n.y + x.plane_origin.z * n.z - off) < 1e-6)
+          return fi;
+      }
+      return -1;
+    };
+    // The solid's block of a run of `model` pulled with `newtons` at `infill` %, with `settings` (strength_settings).
+    const auto spots_run = [&](const std::string& tag, const std::string& model, double newtons, double infill,
+                               const std::string& settings, const std::string& print = "") {
+      const StepModel m = import_part_file_resolved(kDir + "/" + model);
+      const int held = face_at(m, {-1, 0, 0}, 0.0), pulled = face_at(m, {1, 0, 0}, 40.0), bottom = face_at(m, {0, 0, -1}, 0.0);
+      CHECK(held >= 0 && pulled >= 0 && bottom >= 0);
+      const std::string fj =
+          "{\"mode\": \"lattice_file\", \"model\": \"" + model + "\", \"output\": \"notch_lattice.stl\", \"strength_job\": \"" +
+          tag + "_sj.json\", \"tensor\": \"notch.tensor\", \"layout\": {\"min_strut_lines\": 2, \"region_ids\": [1], "
+          "\"region_no_lattice\": [0], \"region_depth_mm\": [2], \"region_expand_mm\": [-2], \"region_face_counts\": [1], "
+          "\"region_faces\": [" + std::to_string(bottom) + "], \"topology\": \"octet\", \"algorithm\": \"uniform\", "
+          "\"cell_max_mm\": 8, \"min_cells_across\": 1, \"region_weave\": [true], \"organic_spacing_mm\": 4, "
+          "\"organic_width_mm\": 0.9}}";
+      char inf[32];
+      std::snprintf(inf, sizeof inf, "%g", infill);
+      const std::string sj =
+          "{\"model\": \"" + model + "\", \"material\": \"PLA\", \"mode\": \"lattice_part\", \"resolution\": 40, "
+          "\"loads\": {\"minimize_plastic\": true, \"safety_margin\": 1.5, \"build_dir\": [0, 0, 1], \"infill_percent\": " +
+          std::string(inf) + print + ", \"anchor_face_ids\": [" + std::to_string(held) + "], \"groups\": [{\"face_ids\": [" +
+          std::to_string(pulled) + "], \"force\": [" + std::to_string(newtons) + ", 0, 0]}]}, "
+          "\"lattice\": {\"topology\": \"octet\", \"require_lattice_void_reaches_exterior\": false}, "
+          "\"grading\": {\"topology\": \"octet\", \"cell_mm\": 8, \"min_extrudable_width_mm\": 0.45, \"intent\": \"structural\"}, "
+          "\"output\": {\"report\": \"report.json\", \"mesh_format\": \"stl\", \"mesh_prefix\": \"variant\"}, "
+          "\"strength_settings\": " + settings + "}";
+      write(kDir + "/" + tag + "_sj.json", sj);
+      const Run x = run(tag, fj, "");
+      CHECK(x.r.ok && x.r.strength_ran);
+      const std::string b = block(x.json);
+      const std::size_t a0 = b.find("\"solid_margin\": {");
+      const std::size_t a1 = b.find("\n    \"margin_worst_case\"", a0);
+      const std::string sm = a0 == std::string::npos ? std::string() : b.substr(a0, a1 - a0);
+      std::printf("[%s] %s\n", tag.c_str(), sm.substr(0, 1500).c_str());
+      return sm;
+    };
+    const std::string off = "{\"width_aware_knockdown\": false}";
+    // A probe load; the margins are linear in it, so the loads below are set from it.
+    const std::string probe = spots_run("notch_probe", "notch1.stl", 1000.0, 50.0, off);
+    const double eff0 = num_after(probe, "effective"), raw0 = num_after(probe, "worst_case");
+    CHECK(eff0 > 0.0 && raw0 > 0.0);
+    // One notch, the worst place at 1.2 of effective margin (under 1.5): one spot, at the notch.
+    const std::string one = spots_run("notch_one", "notch1.stl", 1000.0 * eff0 / 1.2, 50.0, off);
+    CHECK(num_after(one, "spots_total") == 1.0);
+    const double wx = num_after(one, "worst_at");
+    {
+      const std::size_t w = one.find("\"worst_at\": [");
+      const double x = w == std::string::npos ? -1.0 : std::strtod(one.c_str() + w + 13, nullptr);
+      std::printf("[notch_one] worst at x %.3g\n", x);
+      CHECK(x > 16.0 && x < 24.0);   // at the notch (18 to 22)
+    }
+    (void)wx;
+    CHECK(has(one, "\"kind\": \"inside_the_solid\"") && has(one, "\"advice\": \"Make this part of the model thicker, or print it denser.\""));
+    const std::size_t sp1 = one.find("\"spots\": [");
+    CHECK(sp1 != std::string::npos && num_after(one, "passes_at_infill_percent", sp1) == num_after(one, "passes_at_infill_percent"));
+    CHECK(num_after(one, "effective_margin") == num_after(one, "effective"));   // the worst spot's worst voxel IS the solid's margin
+    CHECK(has(one, "\"governs\": \"in_plane\"") && has(one, "\"passes_with_walls_credited\": "));
+    CHECK(has(one, "\"field\": {\"file\": \"fields.bin\", \"block\": 2"));
+    {
+      char want[200];
+      std::snprintf(want, sizeof want, "\"text\": \"The solid part does not certify at 50 %% infill. It would certify at %.0f %% infill. "
+                    "The other way is to strengthen the marked area.\"", num_after(one, "passes_at_infill_percent"));
+      CHECK(has(one, want));
+    }
+    // fields.bin's second block: the solid's effective margin per voxel; its least is the solid's margin.
+    {
+      const std::string fb = slurp(kDir + "/notch_one/fields.bin");
+      std::int32_t dims[3], count = 0;
+      std::memcpy(dims, fb.data() + 4, 12);
+      std::memcpy(&count, fb.data() + 56, 4);
+      const std::size_t nv = static_cast<std::size_t>(dims[0]) * dims[1] * dims[2];
+      const std::size_t nn = static_cast<std::size_t>(dims[0] + 1) * (dims[1] + 1) * (dims[2] + 1);
+      const std::size_t b2 = 64 + 48 + 4 * nv + 4 * 3 * nn;   // after the header and the first block
+      CHECK(count == 3 && fb.size() == b2 + 2 * (48 + 4 * nv));   // OS15: the spots' ids, a third block
+      double marker = 0.0;
+      std::int64_t n = 0;
+      std::memcpy(&marker, fb.data() + b2, 8);
+      std::memcpy(&n, fb.data() + b2 + 24, 8);
+      float least = std::numeric_limits<float>::infinity();
+      for (std::size_t e = 0; e < nv && fb.size() >= b2 + 48 + 4 * nv; ++e) {
+        float v;
+        std::memcpy(&v, fb.data() + b2 + 48 + 4 * e, 4);
+        if (!std::isnan(v)) least = std::min(least, v);
+      }
+      std::printf("[notch_one] fields.bin block 2: marker %g, %lld values, least %.6g\n", marker, static_cast<long long>(n), least);
+      CHECK(marker == -1.0 && n == static_cast<std::int64_t>(nv));
+      CHECK(std::fabs(least - num_after(one, "effective")) <= 1e-5 * num_after(one, "effective"));
+    }
+    // OS15 (the app's certify wizard): each listed spot has an id (1.. in the listed order) and an issue (its kind);
+    // fields.bin's third block (marker -2, one float32 per voxel) gives each voxel the id of its spot (0: none): the
+    // voxels carrying an id are exactly that spot's, its worst place among them; the field names the block.
+    const auto spot_ids = [&](const std::string& tag) {
+      const std::string fb = slurp(kDir + "/" + tag + "/fields.bin");
+      std::int32_t dims[3], count = 0;
+      std::memcpy(dims, fb.data() + 4, 12);
+      std::memcpy(&count, fb.data() + 56, 4);
+      const std::size_t nv = static_cast<std::size_t>(dims[0]) * dims[1] * dims[2];
+      const std::size_t nn = static_cast<std::size_t>(dims[0] + 1) * (dims[1] + 1) * (dims[2] + 1);
+      const std::size_t b3 = 64 + 48 + 4 * nv + 4 * 3 * nn + 48 + 4 * nv;
+      std::map<int, std::size_t> n_of;
+      double marker = 0.0;
+      std::int64_t n = 0;
+      bool whole = count == 3 && fb.size() == b3 + 48 + 4 * nv;
+      if (whole) {
+        std::memcpy(&marker, fb.data() + b3, 8);
+        std::memcpy(&n, fb.data() + b3 + 24, 8);
+        for (std::size_t e = 0; e < nv; ++e) {
+          float v;
+          std::memcpy(&v, fb.data() + b3 + 48 + 4 * e, 4);
+          whole = whole && v >= 0.0f && v == std::floor(v);
+          if (v > 0.0f) ++n_of[static_cast<int>(v)];
+        }
+      }
+      std::printf("[%s] fields.bin block 3: marker %g, %lld values, voxels by id:", tag.c_str(), marker, static_cast<long long>(n));
+      for (const auto& [id, c] : n_of) std::printf(" %d: %zu", id, c);
+      std::printf("\n");
+      CHECK(whole && marker == -2.0 && n == static_cast<std::int64_t>(nv));
+      return n_of;
+    };
+    {
+      const auto ids = spot_ids("notch_one");
+      CHECK(has(one, "\"spot_ids\": {\"block\": 3, \"requested_volume_fraction\": -2}"));
+      CHECK(has(one, "{\"id\": 1, \"issue\": \"inside_the_solid\", \"worst_at\": ") && !has(one, "\"id\": 2"));
+      CHECK(ids.size() == 1 && ids.count(1) && static_cast<double>(ids.at(1)) == num_after(one, "voxels", one.find("\"id\": 1")));
+    }
+    // A light load: the solid certifies; no spots, no text.
+    const std::string light2 = spots_run("notch_light", "notch1.stl", 1000.0 * eff0 / 3.0, 50.0, off);
+    CHECK(spot_ids("notch_light").empty());
+    CHECK(!has(light2, "\"spots\"") && !has(light2, "\"text\"") && !has(light2, "spots_total") && has(light2, "\"field\": {"));
+    // Two notches: two spots, one at each; with one shown: "the 1 worst of 2 marked areas".
+    const std::string probe2 = spots_run("notch2_probe", "notch2.stl", 1000.0, 50.0, off);
+    const double eff2 = num_after(probe2, "effective");
+    const std::string two = spots_run("notch_two", "notch2.stl", 1000.0 * eff2 / 1.2, 50.0, off);
+    CHECK(num_after(two, "spots_total") == 2.0 && has(two, "strengthen the 2 marked areas."));
+    {
+      std::vector<double> xs;
+      for (std::size_t w = two.find("\"worst_at\": ["); w != std::string::npos; w = two.find("\"worst_at\": [", w + 1))
+        xs.push_back(std::strtod(two.c_str() + w + 13, nullptr));
+      std::sort(xs.begin(), xs.end());
+      CHECK(xs.size() == 2 && xs.size() == 2 && xs[0] > 8 && xs[0] < 16 && xs[1] > 24 && xs[1] < 32);
+    }
+    {   // two spots: two ids, each on its own spot's voxels
+      const auto ids = spot_ids("notch_two");
+      const std::size_t i1 = two.find("{\"id\": 1, \"issue\": "), i2 = two.find("{\"id\": 2, \"issue\": ");
+      CHECK(i1 != std::string::npos && i2 != std::string::npos && i1 < i2);
+      CHECK(ids.size() == 2 && ids.count(1) && ids.count(2) &&
+            static_cast<double>(ids.at(1)) == num_after(two, "voxels", i1) &&
+            static_cast<double>(ids.at(2)) == num_after(two, "voxels", i2));
+    }
+    const std::string two1 = spots_run("notch_two_one", "notch2.stl", 1000.0 * eff2 / 1.2, 50.0,
+                                       "{\"width_aware_knockdown\": false, \"solid_spots_max\": 1}");
+    CHECK(num_after(two1, "spots_total") == 2.0 && has(two1, "strengthen the 1 worst of 2 marked areas."));
+    // No infill certifies it (the worst place at 1.0 of margin printed solid).
+    const std::string heavy2 = spots_run("notch_heavy", "notch1.stl", 1000.0 * raw0 / 1.0, 50.0, off);
+    {
+      const double n = num_after(heavy2, "spots_total");
+      CHECK(n >= 1.0 && has(heavy2, "\"text\": \"The solid part does not certify, even printed solid. Strengthen the " +
+                                        (n == 1.0 ? std::string("marked area.") : std::to_string(static_cast<int>(n)) + " marked areas.") + "\""));
+    }
+    CHECK(has(heavy2, "\"passes_at_infill_percent\": null"));
+    // At 20 % infill with two 0.45 mm walls and the walls not credited: crediting them certifies it, said once.
+    const std::string walls_print = ", \"wall_loops\": 2, \"wall_line_width_mm\": 0.45";
+    const std::string wprobe = spots_run("notch_wprobe", "notch1.stl", 1000.0, 20.0, off, walls_print);
+    const double effw = num_after(wprobe, "effective");
+    const std::string walls = spots_run("notch_walls", "notch1.stl", 1000.0 * effw / 1.2, 20.0, off, walls_print);
+    CHECK(has(walls, "\"passes_with_walls_credited\": true") && has(walls, " Counting the printed walls as solid, it certifies.\""));
+    // Brief E4, item 5: the walls are credited by default. The same bar and load, the setting not stated: it certifies
+    // (no spots, no text); at a load where even with the walls it does not, the text says nothing about walls.
+    const std::string wdef = spots_run("notch_walls_default", "notch1.stl", 1000.0 * effw / 1.2, 20.0, "{}", walls_print);
+    std::printf("[walls default] effective %.6g, off %.6g\n", num_after(wdef, "effective"), num_after(walls, "effective"));
+    CHECK(num_after(wdef, "effective") >= 1.5 && num_after(walls, "effective") < 1.5 && !has(wdef, "\"spots\"") && !has(wdef, "\"text\""));
+    const double effon = num_after(spots_run("notch_won_probe", "notch1.stl", 1000.0, 20.0, "{}", walls_print), "effective");
+    const std::string won = spots_run("notch_walls_on", "notch1.stl", 1000.0 * effon / 1.2, 20.0, "{}", walls_print);
+    CHECK(num_after(won, "spots_total") >= 1.0 && has(won, "\"text\": ") && !has(won, "Counting the printed walls") &&
+          has(won, "\"passes_with_walls_credited\": false"));
+    // The sentences alone.
+    CHECK(organic_solid_text(50, 81, false, 3, 3) ==
+          "The solid part does not certify at 50 % infill. It would certify at 81 % infill. The other way is to strengthen "
+          "the 3 marked areas.");
+    CHECK(organic_solid_text(50, -1, false, 3, 3) == "The solid part does not certify, even printed solid. Strengthen the 3 marked areas.");
+    CHECK(organic_solid_text(50, 81, true, 1, 1) ==
+          "The solid part does not certify at 50 % infill. It would certify at 81 % infill. The other way is to strengthen "
+          "the marked area. Counting the printed walls as solid, it certifies.");
+    CHECK(organic_solid_text(37.5, 90, false, 20, 57) ==
+          "The solid part does not certify at 37.5 % infill. It would certify at 90 % infill. The other way is to strengthen "
+          "the 20 worst of 57 marked areas.");
+  }
+
+  // ── §13 (brief E4, item 5) Install 3's cube verdict credits the walls by default too: the light job's block at 20 %
+  // infill with two 0.45 mm walls, under the load at which the walls NOT credited leave the solid at 1.2 of margin:
+  // not stated, the setting is on (echoed) and the block is accepted; stated off, it fails on the solid's margin.
+  {
+    const auto at20 = [&](double newtons, const std::string& settings) {
+      std::string j = strength_job(f, newtons, "lattice_part", "block.stl", -1, settings);
+      j.replace(j.find("\"minimize_plastic\": true,"), 25,
+                "\"minimize_plastic\": true, \"infill_percent\": 20, \"wall_loops\": 2, \"wall_line_width_mm\": 0.45,");
+      return j;
+    };
+    const double N = 20.0 * num_after(lb, "margin_worst_case") * std::pow(0.2, 1.5) / 1.2;
+    const std::string on = block(run("cube_walls_default", file_job(f, ""), at20(N, "")).json);
+    const std::string off = block(run("cube_walls_off", file_job(f, ""), at20(N, "{\"width_aware_knockdown\": false}")).json);
+    std::printf("[cube walls] %.4g N: default %s / off %s\n", N, on.substr(on.find("\"verdict\""), 40).c_str(),
+                off.substr(off.find("\"verdict\""), 60).c_str());
+    CHECK(has(on, "\"width_aware_knockdown\": true") && has(off, "\"width_aware_knockdown\": false"));
+    CHECK(has(on, "\"accepted\": true") && !has(on, "\"fail_reason\": \"solid_margin\""));
+    CHECK(has(off, "\"accepted\": false") && has(off, "\"fail_reason\": \"solid_margin\""));
+  }
+
+  // ── §14 (brief E4 leg 2, rule OS16) the strengthen job judges the bars the file writes. A made 40 x 10 x 20 block, the
+  // weave 14 mm deep under its top face, the stress running round an axis 25 mm above the top (along y): its strands
+  // are arches turned upside down, each dipping to a low point that would start in mid-air, which the print check
+  // props with a leg (a sag); held on its bottom, pushed down on its x = 40 end. organic-strengthen (additive, one
+  // round) and then the file job replaying its last additions: the last check of the one and the check of the other
+  // agree strut for strut.
+  {
+    write_stl_file(kDir + "/pocket.stl", box(40, 10, 20), StlFormat::Binary);
+    const StepModel pmodel = import_part_file_resolved(kDir + "/pocket.stl");
+    const int wall = face_with_normal(pmodel, 0, 0, 1), bottom = face_with_normal(pmodel, 0, 0, -1),
+              end = face_with_normal(pmodel, 1, 0, 0);
+    CHECK(wall >= 0 && bottom >= 0 && end >= 0);
+    {
+      TensorField hf;
+      hf.spacing = 0.5;
+      hf.nx = 80; hf.ny = 20; hf.nz = 40;
+      hf.voigt.assign(6 * static_cast<std::size_t>(hf.nx) * hf.ny * hf.nz, 0.0);
+      for (int k = 0; k < hf.nz; ++k)
+        for (int j = 0; j < hf.ny; ++j)
+          for (int i = 0; i < hf.nx; ++i) {
+            const double x = (i + 0.5) * hf.spacing - 20.0, z = (k + 0.5) * hf.spacing - 45.0, r = std::hypot(x, z);
+            const double rx = x / r, rz = z / r, tx = -rz, tz = rx;
+            double* v = &hf.voigt[6 * hf.index(i, j, k)];
+            v[0] = 10 * tx * tx + rx * rx;
+            v[1] = 1.0;
+            v[2] = 10 * tz * tz + rz * rz;
+            v[5] = 10 * tz * tx + rz * rx;
+          }
+      CHECK(write_tensor_file(kDir + "/pocket.tensor", hf));
+    }
+    const auto pocket_job = [&](const std::string& strengthened) {
+      return "{\"mode\": \"lattice_file\", \"model\": \"pocket.stl\", \"output\": \"pocket_lattice.stl\", \"tensor\": \"pocket.tensor\", "
+             "\"strength_job\": \"pocket_sj.json\"" + (strengthened.empty() ? std::string() : ", \"strengthened\": \"" + strengthened + "\"") +
+             ", \"layout\": {\"region_ids\": [1], \"region_no_lattice\": [0], \"region_depth_mm\": [14], \"region_expand_mm\": [-2], "
+             "\"region_face_counts\": [1], \"region_faces\": [" + std::to_string(wall) + "], \"region_weave\": [true], "
+             "\"organic_spacing_min_mm\": 3, \"organic_spacing_max_mm\": 5, \"organic_width_mm\": 0.9, \"organic_width_heavy_mm\": 1.8}}";
+    };
+    const auto pocket_sj = [&](double newtons, const std::string& settings) {
+      return "{\"model\": \"pocket.stl\", \"material\": \"PLA\", \"mode\": \"lattice_part\", \"resolution\": 40, "
+             "\"loads\": {\"minimize_plastic\": true, \"safety_margin\": 1.5, \"build_dir\": [0, 0, 1], \"anchor_face_ids\": [" +
+             std::to_string(bottom) + "], \"groups\": [{\"face_ids\": [" + std::to_string(end) + "], \"force\": [0, 0, " +
+             std::to_string(-newtons) + "]}]}, \"lattice\": {\"topology\": \"octet\", \"require_lattice_void_reaches_exterior\": false}, "
+             "\"grading\": {\"topology\": \"octet\", \"cell_mm\": 8, \"min_extrudable_width_mm\": 0.45, \"intent\": \"structural\"}, "
+             "\"output\": {\"report\": \"report.json\", \"mesh_format\": \"stl\", \"mesh_prefix\": \"variant\"}, \"strength_settings\": " +
+             settings + "}";
+    };
+    // A probe: the file job at 100 N; the struts' margins are linear in the load, so the load below puts the weakest at 0.8.
+    write(kDir + "/pocket_sj.json", pocket_sj(100.0, "{}"));
+    const Run probe = run("pocket_probe", pocket_job(""), "");
+    const std::string pb = block(probe.json);
+    const double m100 = num_after(pb, "smallest_margin");
+    std::printf("[pocket] probe: smallest strut margin %.6g at 100 N; sags lifted %zu, legs %zu, left out at %zu places, posts %zu, "
+                "mid-air starts found per pass %d\n", m100, probe.r.made.sags.lifted, probe.r.made.sags.legs,
+                probe.r.made.left_out_at.size(), probe.r.made.posts.size(),
+                probe.r.made.found_per_pass.empty() ? -1 : probe.r.made.found_per_pass.front());
+    // The print check changes the bars here (a sag lifted or propped), and finds something to answer (a mid-air start).
+    CHECK(probe.r.made.sagged != nullptr && probe.r.made.sags.changed());
+    std::printf("[pocket] mid-air starts and one-ended overhangs found on the first pass: %d\n",
+                probe.r.made.found_per_pass.empty() ? -1 : probe.r.made.found_per_pass.front());
+    CHECK(m100 > 0.0);
+    const double load = 100.0 * m100 / 0.8;
+    write(kDir + "/pocket_sj.json", pocket_sj(load, "{\"strengthen_rounds\": 1}"));
+    write(kDir + "/pocket_strengthen_job.json", pocket_job(""));
+    std::filesystem::remove_all(kDir + "/pocket_strengthen");
+    std::filesystem::create_directories(kDir + "/pocket_strengthen");
+    const OrganicStrengthenResult ps = run_organic_strengthen(kDir + "/pocket_strengthen_job.json", kDir + "/pocket_strengthen", 0,
+                                                              MATERIALS_JSON_PATH, SETTINGS_RULES_PATH);
+    const std::string psj = slurp(kDir + "/pocket_strengthen/strengthen.json");
+    std::printf("[pocket strengthen] ok %d code %s rounds %d %s %s\n", ps.ok, ps.code.c_str(), ps.rounds_fixed, ps.why.c_str(),
+                ps.detail.c_str());
+    CHECK(ps.ok && ps.rounds_fixed >= 1 && has(psj, "\"print_check\": "));
+    if (ps.ok && ps.rounds_fixed >= 1) {
+      const int last = ps.rounds_fixed;   // its last check, of the bars after the last round's additions and print check
+      const std::string lastdir = kDir + "/pocket_strengthen/r" + std::to_string(last);
+      const Run rep = run("pocket_replay", pocket_job("pocket_strengthen/r" + std::to_string(last) + "/strengthened.json"), "");
+      CHECK(rep.r.ok && rep.r.strength_ran);
+      const std::string a = slurp(lastdir + "/strength.json"), b = block(rep.json);
+      const double ja = num_after(a, "judged"), jb = num_after(b, "judged"), sa = num_after(a, "smallest_margin"),
+                   sb = num_after(b, "smallest_margin"), ua = num_after(a, "under_safety"), ub = num_after(b, "under_safety");
+      std::printf("[pocket] strengthen's last check: judged %.0f, smallest %.12g, under %.0f; the file's: judged %.0f, smallest %.12g, under %.0f\n",
+                  ja, sa, ua, jb, sb, ub);
+      CHECK(ja == jb && ua == ub && std::fabs(sa - sb) <= 1e-9 * std::fabs(sa));
+      // Strut for strut: every bar's margin (strut_margins.bin, one per bar of the bars the file is made of) the same.
+      const std::string ma = slurp(lastdir + "/strut_margins.bin"), mb = slurp(rep.out + "/strut_margins.bin");
+      std::size_t differ = 0, under_a = 0, under_b = 0;
+      for (std::size_t i = 0; i + 4 <= ma.size() && ma.size() == mb.size(); i += 4) {
+        float x, y;
+        std::memcpy(&x, ma.data() + i, 4);
+        std::memcpy(&y, mb.data() + i, 4);
+        // The same struts judged, the same under the margin, each margin the same to float32's last places (the two
+        // solves sum in another order: 1e-7 apart).
+        differ += std::isnan(x) != std::isnan(y) || (x < 1.5f) != (y < 1.5f) ||
+                  (!std::isnan(x) && x < 1e6f && std::fabs(x - y) > 1e-5f * std::fabs(x));   // above 1e6: an unstressed strut, noise
+        under_a += x < 1.5f;
+        under_b += y < 1.5f;
+      }
+      std::printf("[pocket] strut_margins.bin: %zu bars each (%zu), %zu differ; under the margin %zu and %zu\n", ma.size() / 4,
+                  mb.size() / 4, differ, under_a, under_b);
+      CHECK(!ma.empty() && ma.size() == mb.size() && differ == 0 && under_a == under_b);
+    }
+    // ── §15 (OS16 amended, the lead's ruling of 2026-11-19) the print check after a round does what it does after a lay
+    // (leaves out, moves, props) and the job goes on; each round counts what it did among the bars that were there
+    // before the round, and its hash is of the bars after it, so the file job replays to it. A column 10 x 10 x 20 with
+    // an arm 20 mm long standing out of it 12 mm above the bed; the weave 6 mm deep under the arm's underside, open
+    // there: its strands meet the underside in mid-air and the print check leaves some out. Held on the bed, the arm's
+    // end pushed down; organic-strengthen (additive, two rounds), then the file job given its last round.
+    {
+      write_stl_file(kDir + "/arm.stl", cells_mesh({0, 10, 30}, {0, 10}, {0, 12, 20}, [](int i, int, int k) { return i == 0 || k == 1; }),
+                     StlFormat::Binary);
+      const StepModel amodel = import_part_file_resolved(kDir + "/arm.stl");
+      const int under = face_at(amodel, 0, 0, -1, -12.0), floor = face_at(amodel, 0, 0, -1, 0.0), tip = face_at(amodel, 1, 0, 0, 30.0);
+      CHECK(under >= 0 && floor >= 0 && tip >= 0);
+      std::filesystem::copy_file(kDir + "/pocket.tensor", kDir + "/arm.tensor", std::filesystem::copy_options::overwrite_existing);
+      const auto arm_job = [&](const std::string& strengthened) {
+        return "{\"mode\": \"lattice_file\", \"model\": \"arm.stl\", \"output\": \"arm_lattice.stl\", \"tensor\": \"arm.tensor\", "
+               "\"strength_job\": \"arm_sj.json\"" + (strengthened.empty() ? std::string() : ", \"strengthened\": \"" + strengthened + "\"") +
+               ", \"layout\": {\"region_ids\": [1], \"region_no_lattice\": [0], \"region_depth_mm\": [6], \"region_expand_mm\": [0], "
+               "\"region_face_counts\": [1], \"region_faces\": [" + std::to_string(under) + "], \"region_weave\": [true], "
+               "\"organic_spacing_min_mm\": 3, \"organic_spacing_max_mm\": 5, \"organic_width_mm\": 0.9, \"organic_width_heavy_mm\": 1.8}}";
+      };
+      const auto arm_sj = [&](double newtons, const std::string& settings) {
+        return "{\"model\": \"arm.stl\", \"material\": \"PLA\", \"mode\": \"lattice_part\", \"resolution\": 40, "
+               "\"loads\": {\"minimize_plastic\": true, \"safety_margin\": 1.5, \"build_dir\": [0, 0, 1], \"anchor_face_ids\": [" +
+               std::to_string(floor) + "], \"groups\": [{\"face_ids\": [" + std::to_string(tip) + "], \"force\": [0, 0, " +
+               std::to_string(-newtons) + "]}]}, \"lattice\": {\"topology\": \"octet\", \"require_lattice_void_reaches_exterior\": false}, "
+               "\"grading\": {\"topology\": \"octet\", \"cell_mm\": 8, \"min_extrudable_width_mm\": 0.45, \"intent\": \"structural\"}, "
+               "\"output\": {\"report\": \"report.json\", \"mesh_format\": \"stl\", \"mesh_prefix\": \"variant\"}, \"strength_settings\": " +
+               settings + "}";
+      };
+      write(kDir + "/arm_sj.json", arm_sj(100.0, "{}"));
+      const Run ap = run("arm_probe", arm_job(""), "");
+      const double am = num_after(block(ap.json), "smallest_margin");
+      std::printf("[arm] probe: smallest strut margin %.6g at 100 N; the print check left struts out at %zu places\n", am,
+                  ap.r.made.left_out_at.size());
+      CHECK(ap.r.ok && am > 0.0 && !ap.r.made.left_out_at.empty());
+      write(kDir + "/arm_sj.json", arm_sj(100.0 * am / 0.6, "{\"strengthen_rounds\": 2}"));
+      write(kDir + "/arm_strengthen_job.json", arm_job(""));
+      std::filesystem::remove_all(kDir + "/arm_strengthen");
+      std::filesystem::create_directories(kDir + "/arm_strengthen");
+      const OrganicStrengthenResult as = run_organic_strengthen(kDir + "/arm_strengthen_job.json", kDir + "/arm_strengthen", 0,
+                                                                MATERIALS_JSON_PATH, SETTINGS_RULES_PATH);
+      const std::string asj = slurp(kDir + "/arm_strengthen/strengthen.json");
+      std::printf("[arm strengthen] ok %d code %s rounds %d %s %s\n", as.ok, as.code.c_str(), as.rounds_fixed, as.why.c_str(), as.detail.c_str());
+      for (std::size_t at = asj.find("\"print_left_out\""); at != std::string::npos; at = asj.find("\"print_left_out\"", at + 1))
+        std::printf("   %s\n", asj.substr(at, asj.find(", \"hash\"", at) - at).c_str());
+      CHECK(as.ok && as.rounds_fixed >= 1 && has(asj, "\"print_left_out\": ") && has(asj, "\"print_moved\": ") &&
+            has(asj, "\"print_added\": ") && !has(asj, "print_check_after_additions"));
+      if (as.ok && as.rounds_fixed >= 1) {
+        const std::string last = "arm_strengthen/r" + std::to_string(as.rounds_fixed);
+        const double bars_last = num_after(asj, "bars", asj.find("\"round\": " + std::to_string(as.rounds_fixed)));
+        const Run ar = run("arm_replay", arm_job(last + "/strengthened.json"), "");
+        std::printf("[arm] replay: ok %d code %s, bars %zu (the last round's %.0f)\n", ar.r.ok, ar.r.code.c_str(), ar.r.bars, bars_last);
+        // OS16 (fix 2026-11-19): a round ends print-clean (its widenings near a finding taken back), so the file job
+        // replays the loop's last round and makes its file.
+        std::printf("[arm] rounds print clean: %s; widenings taken back %.0f\n", has(asj, "\"print_clean\": false") ? "no" : "yes",
+                    most_after(asj, "widenings_taken_back"));
+        CHECK(ar.r.ok && ar.r.code == "ok" && static_cast<double>(ar.r.bars) == bars_last && !has(asj, "\"print_clean\": false"));
+      }
+    }
+  }
+
+  // ── §16 (the lead's ruling, 2026-11-19) the print check props weave bars only. A made 40 x 10 x 20 block with a clip
+  // tab of solid (x 15 to 25) standing 6 mm out of its y = 10 face at the top (z 16 to 20), its underside over air (the
+  // layer check reads it as reaching 6 mm past what holds it); the weave 14 mm deep under the top face, inside the block. The tab's overhang is the part's own: counted
+  // (`part_overhangs`), never propped (no post outside the part), never a reason the file is not clean.
+  {
+    const TriangleMesh tm = cells_mesh({0, 15, 25, 40}, {0, 10, 16}, {0, 16, 20}, [](int i, int j, int k) { return j == 0 || (i == 1 && k == 1); });
+    write_stl_file(kDir + "/tab.stl", tm, StlFormat::Binary);
+    const StepModel tmodel = import_part_file_resolved(kDir + "/tab.stl");
+    const int top = face_at(tmodel, 0, 0, 1, 20.0);
+    CHECK(top >= 0);
+    std::filesystem::copy_file(kDir + "/pocket.tensor", kDir + "/tab.tensor", std::filesystem::copy_options::overwrite_existing);
+    const std::string tj = "{\"mode\": \"lattice_file\", \"model\": \"tab.stl\", \"output\": \"tab_lattice.stl\", \"tensor\": \"tab.tensor\", "
+                           "\"layout\": {\"region_ids\": [1], \"region_no_lattice\": [0], \"region_depth_mm\": [14], \"region_expand_mm\": [-2], "
+                           "\"region_face_counts\": [1], \"region_faces\": [" + std::to_string(top) + "], \"region_weave\": [true], "
+                           "\"organic_spacing_mm\": 4, \"organic_width_mm\": 0.9}}";
+    const Run t = run("tab", tj, "");
+    std::size_t outside = 0;
+    for (const MeshSpec::Post& q : t.r.made.posts) outside += q.y > 10.0;
+    std::printf("[tab] ok %d code %s; part overhangs %zu, posts %zu (%zu outside the block, under the tab), clean %d, found per pass %d\n",
+                t.r.ok, t.r.code.c_str(), t.r.made.part_overhangs, t.r.made.posts.size(), outside, t.r.made.print_clean,
+                t.r.made.found_per_pass.empty() ? -1 : t.r.made.found_per_pass.front());
+    CHECK(t.r.ok && t.r.made.print_clean && t.r.made.part_overhangs > 0 && outside == 0);
+    CHECK(has(t.json, "\"part_overhangs\": " + std::to_string(t.r.made.part_overhangs)));
   }
 
   // ── §8 the octet's strut law is the full octet's (2026-11-17): its span is the octet band, so no density in the band

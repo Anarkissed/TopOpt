@@ -5,6 +5,8 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
+#include <string>
 #include <vector>
 
 #include "topopt/lattice_layout.hpp"
@@ -40,6 +42,42 @@ struct TensorField {
 // G1: Organic's two placements, the owner's OR25 and OR26. Traced (trace_strands) is stage 1b's; Grown (grow_strands)
 // is the rewrite of 2026-11-15 in this engine (organic_grow.cpp).
 enum class OrganicMode : std::uint8_t { Traced, Grown };
+// Brief E2, item 9: a least strut width over a ball (from a strengthen round, organic_strengthen). After the lay, every
+// non-link bar whose middle lies within `radius_mm` of `centre` is at least `width_mm` wide, never above the job's own
+// upper strut width (OrganicAsk::width_heavy_mm); links then follow S8 where that rose. Applied only when the strut
+// width is on a Sweep (width_heavy_mm above 0): a single width is the owner's own number.
+struct WidthFloor {
+  Vec3 centre{};
+  double radius_mm = 0.0;
+  double width_mm = 0.0;
+};
+
+// ── Brief E3a: STRENGTHENING BY ADDING (rules OS10 to OS14) ──────────────────────────────────────────────────────────
+// A strengthen round in the additive mode never lays the lattice again: it adds to the lattice as laid, and nothing that
+// exists is moved or removed (a bar may be cut into pieces on its own line, never thinner). What a round added is kept
+// as a list of operations (AddOp), applied in order after the lay of the job's own inputs; after each round the bars'
+// hash (bars_hash) is stated, and a lay that does not reach it is refused (never a silent difference).
+//   kind 1, a brace point: v = the host bar's a (x, y, z), b (x, y, z), u along it from a, the braces' width. All brace
+//     points of a round are laid in one call of lay_braces (rule T's brace maker), before the round's widenings.
+//   kind 2, a widening: v = the bar's a (x, y, z), b (x, y, z), its new width (never thinner). Links ending where a
+//     widened bar ends then follow S8 (only wider).
+//   kind 3 (OS18, brief E8; WITHDRAWN 2026-11-19, applying one is refused), a relief vine: v = region, width, cell, end_a (0 Node: on a bar; 1 Solid), end_b, n, then n
+//     points (x, y, z). Laid after the round's braces and widenings, in op order, by lay_relief_vine.
+// A later engine may add kinds; the file carries each operation's kind and length, and an engine meeting a kind it
+// does not know refuses the list.
+struct AddOp {
+  int kind = 0;
+  std::vector<double> v;
+};
+struct AddRound {
+  std::vector<AddOp> ops;
+  std::uint64_t hash = 0;   // bars_hash after this round
+};
+struct Additions {
+  std::vector<AddRound> rounds;
+  bool empty() const { return rounds.empty(); }
+};
+
 struct OrganicAsk {
   double spacing_mm = 0.0;        // > 0: one spacing everywhere (both ends of the range); 0: the range below
   double width_mm = 0.0;          // the strut diameter; 0 = the generator's own: the minimum extrudable width
@@ -78,6 +116,16 @@ struct OrganicAsk {
   // pruning, stubs, the new tips grown, pruned again) is done reseed_rounds times (G11: once; 0: none).
   double void_ratio = 1.5;   // > 0
   int reseed_rounds = 1;     // >= 0
+  // OG6 (brief E10; the owner, 2026-11-19: "The vines should be RIGHT UP NEXT TO the edge of the solid outline. There
+  // should be no space in between them whatsoever -- in any direction."): vines reach the walls. After the pruning,
+  // every place on the region's walls (its open faces, protected skins, solid sides and floor; one per 1.5 mm cell)
+  // with no kept vine within `wall_bare_mm` of the vine's surface is BARE; to each, a branch is laid from the nearest
+  // point of a kept vine within `wall_reach` x the local spacing whose straight line climbs to the place at the cone
+  // or steeper and stays inside the region; it ends on the wall as a vine ends there (in the solid by its
+  // width where solid lies past it, OG5). Then the pruning again. wall_reach 0: no branches are laid (the bare places
+  // are still counted).
+  double wall_bare_mm = 1.5;   // > 0
+  double wall_reach = 4.0;     // >= 0, local spacings
   // E (the owner on walls-out seeds: "I'd say their goal is to connect as many vines as possible"): a wall seed's tip
   // is grown after every floor seed's tip and its descendants, aims at the nearest kept strand it has not joined that
   // rises at the cone or steeper from it (within 4 spacings), stays on each joint it makes, and offers no branches.
@@ -186,6 +234,17 @@ struct OrganicAsk {
   bool tie_level = false;
   double tie_gap = 1.0;
   double tie_gap_heavy = 0.0;
+  // Brief E2, item 9: the width floors (WidthFloor). Empty: none (as before). The file job, the preview and the
+  // strengthen job take them from a strengthened.json (apply_strengthened).
+  std::vector<WidthFloor> floors;
+  // Brief E3a: what strengthening by adding added (a strengthened.json of version 2), applied after the lay and the
+  // floors, each round's hash checked (apply_additions). Empty: none.
+  Additions additions;
+  // Brief E4, leg 2 (OS16): with additions, the file's print check (print_check_hook, lattice_layout_file.hpp), run
+  // after the lay and the floors and after each round's operations, before that round's hash is checked: its bars
+  // replace the bars (a sag lifted, a leg laid). Empty: none (the additions are applied to the bars as laid). A non-empty
+  // answer is a refusal (Outcome::additions_refused). The file job and the preview's Exact set it.
+  std::function<std::string(const Layout&, Bars&)> print_check;
   // OP6 (brief C1; the owner, 2026-11-18: "It should be a choice between stress and shape gradient or shape gradient
   // alone."). true (the default): as before. false, "shape only": O12's stress shares are 0 everywhere for every SIZE
   // rule: f (organic_spacing gives every candidate the widest spacing, spacing_max_mm, before O13's shape fit and L2;
@@ -193,28 +252,137 @@ struct OrganicAsk {
   // (M, N, P) and Auto's runs per end (I) all read 0). The DIRECTIONS still come from the stress field (Traced's
   // curves, Grown's heading) and are not changed by it.
   bool follow_stress = true;
+  // OG1 (brief E6; the owner, 2026-11-19: "Yes, build it"), the gap rule: gap = gap_lines x the line width (bead_mm). At
+  // every point of a traced or grown strand the width is at most (the local spacing there - gap), never under the
+  // thinnest strut; it caps the by-stress heavy width and never widens anything. 0 = off (as before); 0 to 4.
+  // validate_organic refuses a cell size whose small end is under (the light width + gap).
+  double gap_lines = 1.5;
+  // OG2 (brief E6; the owner: "add material beyond the flat plane ... no more than 1mm variability in depth"): a weave
+  // bar's Surface end on an open face, where the face is not in relief_exclude_faces, its outward normal points down
+  // against build_dir by no more than 45 degrees, and the end is more than 2 mm above the bed, is carried on along its
+  // bar until it stands p beyond the surface (along the normal), p = face_relief_mm x a number 0 .. 1 fixed by its
+  // strand and region. 0 = off (every end flush, as before); 0 to 1 (default 1, "Default is not flush"). The owner,
+  // 2026-11-19: "Let's just make it a single "on/off" that limits to 1mm" (the app's switch: on 1, off 0); the 5 mm
+  // ceiling of earlier that day is withdrawn. relief_exclude_faces: the part's face ids (the
+  // app: loaded and fixed faces) where no end stands proud.
+  double face_relief_mm = 1.0;
+  std::vector<int> relief_exclude_faces;
+  // OG3 (brief E6, leg D), Traced: no point of a traced curve is laid closer than strand_keep x the local spacing,
+  // centre line to centre line, to a curve of the same direction family it does not end on; a curve that comes that
+  // close ENDS there (the tracer's d_test, OrganicParams::test_ratio) and joins by the existing rules. Seeding stays at
+  // the spacing; the thinning test stays at the tracer's 0.5. 0.5 to 1; 0.5 = the tracer's old constant
+  // (kOrganicTestRatio), the old lay bar for bar. Grown does not read it.
+  double strand_keep = 0.9;
+  // OV1 (the owner, 2026-11-19: "Definitely curved"): a round vine's tube is swept along a curve through its points
+  // (sweep_centre_line). On by default for the file and the preview; off (organic_sweep 0) = the straight tubes, every
+  // result as before. Read for the whole part (a group's own value is not read). The numbers are SweepAsk's.
+  SweepAsk sweep = [] { SweepAsk s; s.on = true; return s; }();
 };
+inline constexpr double kOrganicStrandKeepDefault = 0.9;   // OG3
+inline constexpr double kOrganicGapLinesDefault = 1.5;   // OG1
+inline constexpr double kOrganicGapLinesMax = 4.0;
+inline constexpr double kOrganicReliefMaxMm = 1.0;       // OG2 (the owner, 2026-11-19: on/off, "limits to 1mm")
 
-// OP7 (brief C2, E1): every range and rule an Organic ask must keep, in one call, so the file job's parser and the
-// session path (Session::lay_organic, lay_organic_draft, lay_organic_preview) refuse exactly the same asks. Returns
-// every refusal (empty: the ask is valid), in a fixed order. The rules (the sheet's sections A to D):
-//   the cell size: spacing_mm 0 (the range) or above 0; with the range, spacing_min_mm above 0, spacing_max_mm at least
-//     it (equal is allowed: one spacing), spacing_exponent above 0; the small end (or the one size) at least the
-//     smallest printable cell, kSmallestCellFactor x the light width (OP7, both modes);
-//   the struts: the thinnest strut (bead_mm x min_strut_lines) above 0; width_mm 0 or at least it; width_heavy_mm 0 or
-//     at least the light width; link_width 0.5 to 2; unbraced_max 0 or 4 to 40;
-//   shape_reach, bed_floor_mm, part_reach_mm, part_support_mm 0 or above; tie_swirl 0 to 1; foot_gap, wall_gap,
-//     root_gap numbers; void_ratio above 0; reseed_rounds 0 to 100; wall_cross 0, 1 or 2; cross_gap above 0 (not 2.5
-//     only with wall_cross); cross_climb_max_deg 30 to 45 (not 45 only with wall_cross); tie_gap above 0; top_run,
-//     root_run, run_gap, run_pull, run_seek, run_min 0 or above; run_max 1 to 1,000,000; run_follow above 0;
-//     build_dir not zero; layer_mm and seed_stride above 0;
-//   the three heavy gaps: 0 or less is off; above 0 at most their light gap, and needs the cell size as a range
-//     (spacing_mm 0; OP8: its two ends may be equal, the heavy ends then do not act); wall_gap_heavy needs wall_gap above 0; cross_gap_heavy needs wall_cross;
-//   Grown only (as the Grower reads them): wall_cross needs walls_out and not wall_connect; tie_level, tie_gap not 1 and
-//     tie_gap_heavy above 0 need ties;
-//   `field` given (the session path): a weave region in `settings` and an empty field is refused (setting "stress").
-//     Null (the file job, whose own refusal for it is no_stress_result): not checked.
-// Every text is one plain sentence for the owner, naming the control and the number allowed, no key names.
+// OG1: the strand points' local spacing and its reason, and (gap above 0) the cap: for each strand of `strands` from
+// `first` on, each point's local spacing is `spacing` (per voxel of `field`'s grid, 0 off the candidates) at its voxel,
+// else the smallest non-zero of the 26 around it, else the strand's own spacing_mm (reason None); `why` (per voxel,
+// SpacingWhy) its reason. With gap_mm above 0: cap = max(thinnest_mm, local - gap_mm), every width over it set to it
+// (Strand::cap_mm filled). Returns the points whose width was lowered.
+std::size_t organic_gap_cap(std::vector<Strand>& strands, std::size_t first, const TensorField& field,
+                            const std::vector<double>& spacing, const std::vector<std::uint8_t>& why, double gap_mm,
+                            double thinnest_mm);
+// OG1: the weave bars whose width is over their gap cap (Bar::gap_cap_mm above 0): what the strength loop's widening
+// (additive widening, the width floors) broke of the gap rule. Never silent: each round says it.
+std::size_t gap_broken(const Bars& bars);
+
+// Brief E2, item 9: the floors on laid bars (Session::lay_organic calls it last). Every non-link bar whose middle lies
+// in a floor's ball: w = max(w, min(floor, upper_mm)); then every link: S8's width from the struts at its two ends
+// (link_width x the thinner, between light_mm and the thicker), where that is wider than it is. Returns the bars
+// widened; `links`, when given, the links widened.
+// OJ4 (leg J item 4): `regions`, when given, only the bars (and links) of those regions are floored: a lay of several
+// groups floors each group's regions with its own upper and light widths.
+std::size_t apply_width_floors(Bars& bars, const std::vector<WidthFloor>& floors, double upper_mm, double light_mm,
+                               double link_width, std::size_t* links = nullptr, const std::vector<int>* regions = nullptr);
+
+// Brief E2, items 10 and 11: the files a strengthen round writes.
+// The floors file, little-endian: 8 bytes "TOFLOORS", int32 version (1), int32 count, then per floor five float64:
+// centre x, y, z, radius mm, width mm.
+bool write_floors_file(const std::string& path, const std::vector<WidthFloor>& floors);
+bool read_floors_file(const std::string& path, std::vector<WidthFloor>& floors, std::string* why = nullptr);
+// strengthened.json: {"version": 1, "stress_input": NAME, "floors": NAME, "reference_mpa": X, ...}; the two names are
+// files beside it. `reference_mpa` is the reference the engine resolved for the ORIGINAL stress input, written with 17
+// digits so that it reads back as the same double.
+struct Strengthened {
+  std::string stress_input, floors;   // file names, beside the strengthened.json
+  double reference_mpa = 0.0;
+  // Brief E3a: version 2, the additive mode: {"version": 2, "mode": "additive", "additions": NAME, ...}; the job's own
+  // stress input and floors are kept, and the additions file (beside it) is applied after the lay.
+  int version = 1;
+  std::string additions;
+};
+bool write_strengthened_file(const std::string& path, const Strengthened& s, const std::string& more_json = {});
+// The job key "strengthened" (file job and preview alike): reads it, replaces `field` with its stress input, states
+// its reference in `ask` and adds its floors to `ask`. False (with `why`) when anything cannot be read.
+// Version 2 (brief E3a): `field` is left as it is; `ask.additions` takes the additions file's list.
+bool apply_strengthened(const std::string& path, TensorField& field, OrganicAsk& ask, std::string* why = nullptr);
+
+// Brief E3a. The bars' hash: FNV-1a (64 bits) over every bar in order: its ends and width (their IEEE bits), its end
+// kinds, strand, region and flags (link, brace, net, skin, support, level_tie). Two lays are the same lattice, bar for
+// bar, exactly when their hashes agree (to a 64-bit hash's chance).
+std::uint64_t bars_hash(const Bars& bars);
+// The numbers additions are applied with: the job's light width (S), layer and link width (S8).
+struct AddContext {
+  double light_mm = 0.0, layer_mm = 0.2, link_width = 1.0;
+  // OJ4 (leg J item 4): a lay of several groups: per region, its group's {light, layer, link width}, read for the
+  // braces, links and twins of that region (a brace by the region of the bar it is on). Empty: the three above for all.
+  std::map<int, std::array<double, 3>> per_region;
+  // OG5 (brief E9): with `line_mm` above 0, apply_additions guards each round's bars (guard_bars) after its operations,
+  // before its print check and hash; the strengthen job does the same after a round's two steps.
+  std::vector<int> weave_regions;
+  double line_mm = 0.0;
+  GuardReport* guard = nullptr;
+};
+struct AddReport {
+  std::size_t brace_points = 0, braces = 0, widened = 0, links_widened = 0;
+  std::size_t relief_vines = 0, relief_bars = 0;   // OS18 (brief E8): kind 3
+  std::vector<int> braces_at;   // per brace point of the round, in op order: braces laid there
+};
+// One round's operations on `bars` (no hash check). False (with `why`) when an operation names a bar the lattice does
+// not hold, or is of a kind this engine does not know.
+bool apply_add_round(Bars& bars, const Domain& domain, const AddRound& round, const AddContext& c, AddReport* report = nullptr,
+                     std::string* why = nullptr);
+// Every round in order, each round's hash checked. False (with `why`) at the first that fails.
+// Rule OG5 (brief E9; the owner, 2026-11-19: "That CAN'T happen"): every bar of a weave (every kind: strands, links,
+// ties, net-skin bars, braces, supports, relief vines) keeps its centre line in the part (1e-3 mm), and lies in solid
+// only as an END run-on entered from the lattice, at most min(its width, the solid's thickness along it there less its
+// radius less `line_mm`), never under 0 and never mid-bar (and, in a Protect skin, never with its tube within `line_mm`
+// of the part's surface): a bar through solid is cut into its lattice parts (each
+// ended by that rule), a bar wholly out of the lattice is removed. OG2's relief at an open face is not judged. A new
+// end lying in solid is Solid, else Surface; drop_loose_bars and drop_adrift_bars follow it at the lay. Returns the
+// bars cut or removed; `report` gathers them.
+// `drop_cut_free` (after a strengthening round's additions, where the lay's drop does not follow): a piece the cut left
+// with a free end (its new end in no solid) is not kept (GuardReport::cut_dropped).
+std::size_t guard_bars(Bars& bars, const Domain& domain, const std::vector<int>& weave_regions, double line_mm,
+                       GuardReport* report = nullptr, bool drop_cut_free = false);
+// OG5 at source: how far a weave bar entering solid at `entry`, going `dir`, runs on into it: min(its width (S11), the
+// solid's thickness along `dir` there less its radius less `line_mm`), never under 0.
+double solid_run_on(const Domain::Probe& probe, const Vec3& entry, const Vec3& dir, double width, double line_mm);
+// `between`, when given: run after each round's operations, before its hash (OS16); a non-empty answer refuses.
+bool apply_additions(Bars& bars, const Domain& domain, const Additions& adds, const AddContext& c, std::string* why = nullptr,
+                     const std::function<std::string(Bars&)>& between = {});
+
+// The additions file, little-endian: 8 bytes "TOADDS\0\0", int32 version (1), int32 rounds; per round: uint64 hash,
+// int32 operations; per operation: int32 kind, int32 count, count float64.
+bool write_additions_file(const std::string& path, const Additions& adds);
+bool read_additions_file(const std::string& path, Additions& adds, std::string* why = nullptr);
+// The old-bar invariant (OS12): every bar of `before` is in `after` whole, or as pieces lying on its line (each end
+// within tol_mm of it) that cover it end to end, of its strand and never thinner; links may only widen. "" when it
+// holds, else what broke first; `split`, when given: the old bars found cut into pieces.
+// The bars of `after` lying on each bar of `olds` (both ends within tol_mm of it, of its strand and link kind, longer
+// than tol_mm), in list order: where an old bar went when bars were cut.
+std::vector<std::vector<std::size_t>> pieces_on(const Bars& after, const std::vector<Bar>& olds, double tol_mm = 1e-5);
+std::string old_bars_kept(const Bars& before, const Bars& after, double tol_mm = 1e-5, std::size_t* split = nullptr);
+
 // OP11 (brief C2, E7): a group of weave regions and its own ask (Session::lay_organic's group list). The app names
 // the groups; the whole part latticed is one group holding every weave region (the one-ask calls mean exactly that).
 struct OrganicGroup {
@@ -229,6 +397,26 @@ struct OrganicGroup {
 // first); then, `field` given, the stress input (as validate_organic). Empty: valid.
 std::vector<OrganicRefusal> validate_organic_groups(const Settings& settings, const std::vector<OrganicGroup>& groups,
                                                     const TensorField* field = nullptr);
+// OP7 (brief C2, E1): every range and rule an Organic ask must keep, in one call, so the file job's parser and the
+// session path (Session::lay_organic, lay_organic_draft, lay_organic_preview) refuse exactly the same asks. Returns
+// every refusal (empty: the ask is valid), in a fixed order. The rules (the sheet's sections A to D):
+//   the cell size: spacing_mm 0 (the range) or above 0; with the range, spacing_min_mm above 0, spacing_max_mm at least
+//     it (equal is allowed: one spacing), spacing_exponent above 0; the small end (or the one size) at least the
+//     smallest printable cell, kSmallestCellFactor x the light width (OP7, both modes);
+//   the struts: the thinnest strut (bead_mm x min_strut_lines) above 0; width_mm 0 or at least it; width_heavy_mm 0 or
+//     at least the light width; link_width 0.5 to 2; unbraced_max 0 or 4 to 40;
+//   shape_reach, bed_floor_mm, part_reach_mm, part_support_mm 0 or above; tie_swirl 0 to 1; foot_gap, wall_gap,
+//     root_gap numbers; void_ratio above 0; reseed_rounds 0 to 100; wall_bare_mm above 0; wall_reach 0 or above;
+//     wall_cross 0, 1 or 2; cross_gap above 0 (not 2.5 only with wall_cross); cross_climb_max_deg 30 to 45 (not 45 only with wall_cross); tie_gap above 0; top_run,
+//     root_run, run_gap, run_pull, run_seek, run_min 0 or above; run_max 1 to 1,000,000; run_follow above 0;
+//     build_dir not zero; layer_mm and seed_stride above 0;
+//   the three heavy gaps: 0 or less is off; above 0 at most their light gap, and needs the cell size as a range
+//     (spacing_mm 0; OP8: its two ends may be equal, the heavy ends then do not act); wall_gap_heavy needs wall_gap above 0; cross_gap_heavy needs wall_cross;
+//   Grown only (as the Grower reads them): wall_cross needs walls_out and not wall_connect; tie_level, tie_gap not 1 and
+//     tie_gap_heavy above 0 need ties;
+//   `field` given (the session path): a weave region in `settings` and an empty field is refused (setting "stress").
+//     Null (the file job, whose own refusal for it is no_stress_result): not checked.
+// Every text is one plain sentence for the owner, naming the control and the number allowed, no key names.
 // OP8 (brief C2, E2): the note Outcome::notes carries when the cell size's two ends are equal and a heavy end is set.
 inline constexpr const char* kNoteEqualEnds =
     "The cell size has one value, so the thick end of the strut thickness and the heavy ends of the gaps do nothing.";
@@ -310,9 +498,32 @@ std::vector<HoldPatchCount> hold_up_weave(Bars& bars, const Domain& domain, cons
 // A join is a weave bar (`net`): as wide as the thinner landing (or `width_mm` when above 0: SkinSpec::width_mm), `cell` the reach, its ends Node exactly at the two
 // landings; a landing that is a cut end on the surface (Surface) has landed (Joined into the net strut). Nothing is
 // pruned here: drop_loose_bars and the writer's bridge rules (O6 to O10) judge net struts as every bar.
+// OJ8 (leg M; the owner, 2026-11-19: "What is important ... is the cutting along the plane that happens for them. That's
+// what gives it's unique feel. The check to place them inside the lattice shouldn't happen until AFTER we flatten out
+// the skin."): the net lies ON the open face. Landings as before (every node within r + 0.5 x reach of the region's open
+// face); each joined landing gets a STEM along the face's normal to its FOOT on the face (sunk by `sinks` x the net's
+// radius: 0 the centre line on the face, 1 one radius in); the joins run between feet; `densities` (one per entry, 1 to 6;
+// none: 3) is the joins each landing asks for; a join is skipped only when it runs near-parallel (under 20 degrees) within
+// the gap of a net strut it does not join; then every crossing becomes a joint (split_at_crossings). Net struts and stems
+// are Bar::face_skin (OG5 reads them as inside). `report`: what was laid.
+struct NetSkinReport {
+  std::size_t landings = 0, struts = 0, stems = 0, joints_at_crossings = 0, skipped_parallel = 0;
+  // OJ8 (the lead, 2026-11-19): landings whose stem would leave the region's outline or come within a line of a
+  // protected face (not used), and joins that would (not laid).
+  std::size_t landings_not_used = 0, joins_not_clear = 0;
+  double stem_longest_mm = 0.0;
+};
+// Leg J item 1: `widths`, when given, one per `reach` entry: that region's width (in place of width_mm).
 // Returns the number of net struts laid. The same for any number of threads (it runs on one).
 std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std::pair<int, double>>& reach,
-                         double width_mm = 0.0);
+                         double width_mm = 0.0, const std::vector<double>* widths = nullptr,
+                         const std::vector<double>* gaps = nullptr, bool keep_apart = true, std::size_t* kept_apart = nullptr,
+                         const std::vector<int>* densities = nullptr, const std::vector<double>* sinks = nullptr,
+                         NetSkinReport* report = nullptr);
+// OJ7 (leg J, the lead's ruling 6: the net skin kept apart): the joins are laid shortest first (the pairs wanted both
+// ways, then the 1-then-2 fallback, each trying its partners nearest first), and a join whose centre line comes within
+// the two half widths + the region's gap (`gaps`, one per `reach` entry: OG1's gap; none: one line width) of a net strut already laid, other than one
+// sharing a landing with it, is not laid (`kept_apart` counts them). `keep_apart` false: the order and joins as before.
 
 // O12: the spacing handed to the tracer, one per voxel of the field's grid (0 off the candidates), with the candidates
 // (voxels whose CENTRE is lattice of `region`). It is the old run's field for an ordinary Traced job (run_job.cpp,
@@ -344,6 +555,9 @@ struct OrganicSpacing {
   // M (brief G19): per voxel, O12's 0 .. 1 stress measure f for a candidate (the f the spacing hi - (hi - lo) x f was
   // made from, before O13 and L2 change the spacing); 0 elsewhere, and 0 everywhere with one spacing.
   std::vector<double> stress_f;
+  // OG1 (brief E6): per voxel, what set a candidate's spacing (SpacingWhy: Uniform, Stress, Shape, Hold; the last of
+  // O12, O13, L2 that changed it); 0 (None) elsewhere.
+  std::vector<std::uint8_t> why;
   // L2 a, b (OrganicAsk::hold_parts; all empty or 0 when off; brief G15). The FLOATING PIECES of the part, found layer
   // by layer from the bed on the field's grid (see organic_spacing): solid voxels not grounded, 26-connected, 20 mm3 or
   // more (smaller ones counted in hold_small_patches). Per kept piece: every voxel's centre, its volume and box; its
@@ -394,6 +608,10 @@ struct OrganicTraceStats {
   std::vector<std::size_t> tie_level_joints;
   std::vector<double> tie_level_span_mm;
   double tie_level_dz_max_mm = 0.0;
+  std::size_t gap_capped = 0;   // OG1 (brief E6): strand points whose width the gap rule lowered
+  // OG3 (brief E6, leg D): level-tie segments taken out (near-parallel within the gap of a strand they do not join),
+  // and those kept.
+  std::size_t og3_tie_segments_cut = 0, og3_tie_segments_kept = 0;
 };
 
 // The Traced placement of one weave region, as strands. The candidate voxels are those whose CENTRE the domain says is
@@ -468,6 +686,18 @@ struct GrowReport {
   // at the bare place).
   std::size_t reseed_from_vertex = 0;
   std::vector<std::size_t> reseed_voids_round;   // E: the bare places found, per re-seed round
+  // OG6 (brief E10): the region's walls reached. The wall places (`wall_places`), those found bare after the pruning
+  // (`wall_bare`: no kept vine within wall_bare_mm of its surface), the branches laid to them (`wall_branches`, their
+  // length `wall_branch_mm`), the bare places given none and why: no kept vine point within the reach
+  // (`wall_refused_reach`), none whose line to the place climbs at the cone (`wall_refused_cone`), none whose line stays
+  // inside the region (`wall_refused_region`); the first 20 such places (`wall_refused_at`, with the reason: 0 reach,
+  // 1 cone, 2 region); and the places still bare when the vines are final (`wall_bare_after`; the share is
+  // wall_bare_after / wall_places).
+  std::size_t wall_places = 0, wall_bare = 0, wall_branches = 0, wall_bare_after = 0;
+  std::size_t wall_refused_reach = 0, wall_refused_cone = 0, wall_refused_region = 0;
+  double wall_branch_mm = 0.0;
+  struct WallRefused { Vec3 at; int why = 0; };
+  std::vector<WallRefused> wall_refused_at;   // at most 20
   // E, wall_connect: wall tips grown, the joins they made, the distinct lines each joined; how they ended.
   std::size_t wall_grown = 0, wall_joins = 0, wall_ended_edge = 0, wall_ended_unsupported = 0, wall_ended_joins = 0;
   std::vector<std::size_t> wall_lines_joined;
@@ -555,6 +785,7 @@ struct GrowReport {
     std::size_t seeded[3] = {0, 0, 0}, total = 0;
   };
   std::vector<CrossThirds> cross_thirds;
+  std::size_t gap_capped = 0;   // OG1 (brief E6): strand points whose width the gap rule lowered
   void add(const GrowReport& o);
 };
 
@@ -594,18 +825,52 @@ std::vector<std::size_t> straighten_points(const std::vector<Vec3>& points, doub
 // Thinning to `tolerance_mm` (0 or less: none): a point is dropped when every original point between the kept ones lies
 // within the tolerance of the kept segment and its width within 5 % of the width interpolated there (by length); a
 // run's two ends are always kept, and a run's marks never change along it (a mark change starts a new run).
-enum WeaveRunMark : std::uint8_t { kRunLevelTie = 1, kRunBrace = 2, kRunSupport = 4, kRunNet = 8 };
+// kRunAlong (leg H): the run lies along an allowed open face (its bars have Bar::along_proud: OG2b keeps their bulge),
+// set only when weave_runs is asked for it (`relief_marks`, the preview); the bit 16 was held for the cancelled band
+// (OG4), which nothing shipped reads.
+enum WeaveRunMark : std::uint8_t { kRunLevelTie = 1, kRunBrace = 2, kRunSupport = 4, kRunNet = 8, kRunAlong = 16 };
 struct WeaveRun {
   int region = 0;
   std::uint8_t marks = 0;                          // WeaveRunMark bits
   Bar::End end_a = Bar::End::Node, end_b = Bar::End::Node;   // the kinds of its two ends (its first and last bar's)
   std::vector<Vec3> points;
   std::vector<double> width_mm, spacing_mm;       // one per point
+  // OG2b (brief E6, leg B): how far the run's tube may stand out where it runs along an open face (the largest
+  // Bar::along_proud of its bars). Packed in version 2 only.
+  double proud_mm = 0.0;
+  // Leg H: how far each end stands proud of the open face (OG2: its first bar's proud_a when end_a is Surface, its last
+  // bar's proud_b when end_b is), 0 when flush; and the model face the run lies along (the first of its bars with
+  // Bar::along_face; -1 when none or the model has no faces). Packed in version 2 only.
+  double proud_a_mm = 0.0, proud_b_mm = 0.0;
+  int along_face = -1;
+  // Leg M (the owner: "The drawing follows the print file. Always."): per point the FILE's ring width (the tubes
+  // route's rule: at the first and last point the end bar's width, at an inner point the larger of the two bars meeting
+  // there), and the run's section as the tubes route sweeps it (0 a round tube; 1 a bridge with a round top; 2 a flat
+  // bridge, bar_is_bridge at the file's defaults). Filled always; a run is split at a change of section and the thinning
+  // keeps every point where the ring width changes or the run turns sharper than 60 degrees only with `relief_marks`.
+  std::vector<double> ring_mm;
+  std::uint8_t section = 0;   // bits 0-1 the section kind; bit 2 (kSectionSwept, OV1): the points are the swept centre line
 };
-std::vector<WeaveRun> weave_runs(const Bars& bars, const std::vector<int>& weave_regions, double tolerance_mm = 0.1);
-// The runs packed for the app, little-endian: per run 12 bytes (point count u32, region i32, marks u8, end_a u8,
-// end_b u8 (Bar::End), one pad byte), then 20 bytes per point (x, y, z, width, spacing as float32).
-std::vector<std::uint8_t> pack_weave_runs(const std::vector<WeaveRun>& runs);
+inline constexpr std::uint8_t kSectionSwept = 4;   // OV1 (ruling R9): bit 2 of WeaveRun::section and the packed section byte
+// OV1 (ruling R9): the runs as the print file sweeps them (the tubes route's pieces, each round one swept by
+// sweep_centre_line, split again where the preview's relief marks split a run); the preview's runs when the ask's sweep
+// is on (Exact and Draft alike). Not thinned: every point is a ring of the file's tube.
+std::vector<WeaveRun> swept_runs(const Bars& bars, const std::vector<int>& weave_regions, const SweepAsk& sweep);
+// `bar_of`, when given (OF2, the file's tubes): per run, the place in `bars` of the bar each of its segments came from
+// (read with no thinning, `tolerance_mm` 0; with thinning it is left empty).
+// `relief_marks` (leg H, the preview): a run also ends where its bars start or stop lying along an open face or change the
+// face they lie along, and carries kRunAlong there. Off (the file's tubes, and every caller before): as before.
+std::vector<WeaveRun> weave_runs(const Bars& bars, const std::vector<int>& weave_regions, double tolerance_mm = 0.1,
+                                 std::vector<std::vector<std::size_t>>* bar_of = nullptr, bool relief_marks = false);
+// The runs packed for the app, little-endian.
+// Version 1 (the shipped reader's): per run 12 bytes (point count u32, region i32, marks u8, end_a u8, end_b u8
+// (Bar::End), one pad byte), then 20 bytes per point (x, y, z, width, spacing as float32).
+// Version 2 (leg H): first 8 bytes, "WRN2" and u32 2; then per run 28 bytes (point count u32, region i32, marks u8,
+// end_a u8, end_b u8, section u8 (leg M: 0 round, 1 round-top bridge, 2 flat bridge; was a pad byte, 0), proud_a_mm f32,
+// proud_b_mm f32, along_face i32, proud_mm f32), then 20 bytes per point: x, y, z, the FILE's ring width (leg M: in place
+// of the mean width; WeaveRun::ring_mm), spacing, as float32. The version 1 reader given version 2 reads "WRN2" as a point count of 843,993,687 and returns nil (the
+// bytes do not add up): it refuses, it never misdraws.
+std::vector<std::uint8_t> pack_weave_runs(const std::vector<WeaveRun>& runs, int version = 1);
 
 // Item 3, two qualities of an Organic lay for the preview. Exact: Session::lay_organic as it is (the picture is what
 // will be made), then the runs. Draft (for dragging a slider; NOT what will be made): the same trace or growth, then
@@ -621,7 +886,14 @@ struct OrganicPreview {
   PreviewQuality quality = PreviewQuality::Exact;   // what was laid: say it on screen when Draft
   Outcome outcome;                                   // the lay itself (its bars, counts, Grown's report)
   std::vector<WeaveRun> runs;                        // the weave regions' runs (item 2)
+  // OJ6 (leg J item 6): Exact, with relief laid: the file's print check is run and the bars it makes flush (OG2c) are
+  // drawn flush: their runs carry no along-face mark and no proud length. How many; the runs are read from those bars
+  // (`outcome.bars` stays the lay's). Draft: not run (0).
+  std::size_t relief_flushed = 0;
 };
+// OJ6: in `bars`, each bar whose two ends are one of `flushed` (either order) is made flush: its end relief carried
+// back (without_relief), along_proud 0, along_face -1. Returns how many.
+std::size_t clear_flushed_relief(Bars& bars, const std::vector<std::array<Vec3, 2>>& flushed);
 OrganicPreview lay_organic_preview(Session& session, const Settings& settings, const TensorField& field,
                                    const OrganicAsk& ask, const OrganicPreviewAsk& preview, int threads = 0,
                                    const std::atomic<bool>* stop = nullptr);
@@ -648,8 +920,14 @@ struct SweepLimits {
   double d_mm = 0.0, depth_mm = 0.0, mouth_width_mm = 0.0;
   double strut_lower_mm = 0.0, strut_upper_mm = 0.0, strut_auto_mm = 0.0;
   double cell_lower_mm = 0.0, cell_upper_mm = 0.0, cell_auto_mm = 0.0;
+  // OG1 (brief E6): the gap (gap_lines x the line) and the cell size it allows with the limits' thin strut (strut lower
+  // + gap, rounded UP to 0.5 mm); the cell's lower end is at least it (its upper end then at least the lower), and
+  // cell_lower_by_gap says the rule raised it. 0 / false with gap_lines 0.
+  double gap_mm = 0.0, gap_cell_mm = 0.0;
+  bool cell_lower_by_gap = false;
 };
-std::vector<SweepLimits> organic_sweep_limits(const Domain& domain, double line_mm);
+std::vector<SweepLimits> organic_sweep_limits(const Domain& domain, double line_mm,
+                                              double gap_lines = kOrganicGapLinesDefault);
 // OP10 (brief C2, E4, made per group by E7): Session::sweep_limits_for(settings, region ids, line_mm), the Auto Sweep
 // limits of a GROUP of weave regions (the whole part: every weave region's id): the union over the MEASURED regions
 // among those given (organic_sweep_limits' entries): cell lower = the smallest lower, upper = the largest upper; strut
@@ -661,6 +939,9 @@ struct SweepLimitsUnion {
   std::vector<int> measured_regions, unmeasured;
   double strut_lower_mm = 0.0, strut_upper_mm = 0.0, strut_auto_mm = 0.0;
   double cell_lower_mm = 0.0, cell_upper_mm = 0.0, cell_auto_mm = 0.0;
+  // OG1: as SweepLimits: the gap, and whether it raised the cell's lower end of any region taken.
+  double gap_mm = 0.0;
+  bool cell_lower_by_gap = false;
 };
 
 // ── OP12 (brief C2, E5; organic_synthetic.cpp): synthetic stress for the new engine ─────────────────────────────────

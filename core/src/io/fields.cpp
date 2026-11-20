@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -136,6 +137,51 @@ int write_fields_file(const std::string& path,
     throw FieldsError("failed publishing fields file: " + path);
   }
   return static_cast<int>(accepted.size());
+}
+
+void append_fields_block(const std::string& path, const VoxelGrid& grid, double marker,
+                         const std::vector<float>& values) {
+  if (values.size() != grid.voxel_count())
+    throw FieldsError("fields.bin: an appended block must hold one value per voxel");
+  std::vector<std::uint8_t> bytes;
+  {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) throw FieldsError("cannot open fields file to append to: " + path);
+    bytes.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+  }
+  // The run header: u8 version, 3 pad, 3 i32 dims, 5 f64, then i32 variant_count at byte 56.
+  constexpr std::size_t kCountAt = 4 + 3 * 4 + 5 * 8;
+  if (bytes.size() < kCountAt + 8 || bytes[0] != kFieldsFormatVersion)
+    throw FieldsError("fields.bin: not a v1 container: " + path);
+  std::int32_t dims[3], count = 0;
+  std::memcpy(dims, bytes.data() + 4, sizeof dims);
+  if (dims[0] != grid.nx || dims[1] != grid.ny || dims[2] != grid.nz)
+    throw FieldsError("fields.bin: the grid of " + path + " is not the grid of the appended block");
+  std::memcpy(&count, bytes.data() + kCountAt, sizeof count);
+  ++count;
+  std::memcpy(bytes.data() + kCountAt, &count, sizeof count);
+  LEWriter w;
+  w.bytes = std::move(bytes);
+  w.f64(marker);
+  w.f64(0.0);
+  w.i32(0);
+  w.i32(0);
+  w.i64(static_cast<std::int64_t>(values.size()));
+  w.i64(0);
+  w.i64(0);
+  for (const float x : values) w.f32(x);
+  const std::string tmp = path + ".part";
+  {
+    std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+    if (!out) throw FieldsError("cannot open fields file for writing: " + tmp);
+    out.write(reinterpret_cast<const char*>(w.bytes.data()), static_cast<std::streamsize>(w.bytes.size()));
+    out.flush();
+    if (!out) throw FieldsError("failed writing fields file: " + tmp);
+  }
+  if (std::rename(tmp.c_str(), path.c_str()) != 0) {
+    std::remove(tmp.c_str());
+    throw FieldsError("failed publishing fields file: " + path);
+  }
 }
 
 int write_scenario_fields_file(const std::string& path,

@@ -23,6 +23,8 @@ struct LatticeOrganicControls: View {
     private var grown: Bool { look.modeValue == .grown }
     private func on(_ o: LatticeOrganicLook.Option) -> Bool { LatticeOrganicLook.offered(o) }
     private var thinnestMM: Double { 2 * lineMM }
+    /// ★ Cut 2, OG1: the gap the engine keeps between struts (its measured value, else 1.5 printed lines).
+    private var gapMM: Double { limits?.gapMM ?? LatticeOrganicLook.Check.gapLines * lineMM }
 
     /// The thin strut in force (the cell's smallest printable size follows it).
     private var thinStrutMM: Double {
@@ -52,8 +54,8 @@ struct LatticeOrganicControls: View {
             }
             swept("Cell size", "mm", \.cell, auto: limits.map { ($0.cellAutoMM, $0.cellLowerMM, $0.cellUpperMM) },
                   lightIsSmall: false, step: 0.5, offered: LatticeOrganicLook.cellModes,
-                  pair: { a, b in LatticeOrganicLook.Check.cell(small: a, large: b, thinStrutMM: thinStrutMM) },
-                  one: { v in LatticeOrganicLook.Check.cell(small: v, large: v, thinStrutMM: thinStrutMM) })
+                  pair: { a, b in LatticeOrganicLook.Check.cell(small: a, large: b, thinStrutMM: thinStrutMM, gapMM: gapMM) },
+                  one: { v in LatticeOrganicLook.Check.cell(small: v, large: v, thinStrutMM: thinStrutMM, gapMM: gapMM) })
             swept("Strut thickness", "mm", \.strut, auto: limits.map { ($0.strutAutoMM, $0.strutLowerMM, $0.strutUpperMM) },
                   lightIsSmall: true, step: lineMM,
                   pair: { a, b in LatticeOrganicLook.Check.strut(thin: a, thick: b, thinnestMM: thinnestMM) },
@@ -97,6 +99,20 @@ struct LatticeOrganicControls: View {
                 }
                 .accessibilityIdentifier("organic-Simulate stresses on unstressed walls")
                 if look.syntheticStresses ?? false { say("Number of foci: per wall, in Selections") }
+            }
+            if LatticeOrganicLook.cut2Wired {   // ★ cut 2 (his 11-19): depth variation and extra spacing, each one switch
+                row("Depth variation") {
+                    Toggle("", isOn: Binding(get: { look.depthVariationValue }, set: { look.depthVariation = $0 }))
+                        .labelsHidden().toggleStyle(.switch)
+                }
+                .accessibilityIdentifier("organic-Depth variation")
+                say(look.depthVariationValue ? "Up to 1 mm out at open faces" : "Cut flush at every face")
+                row("Extra spacing between vines") {
+                    Toggle("", isOn: Binding(get: { look.extraSpacingValue(aesthetic: aesthetic) }, set: { look.extraSpacing = $0 }))
+                        .labelsHidden().toggleStyle(.switch)
+                }
+                .accessibilityIdentifier("organic-Extra spacing between vines")
+                if look.extraSpacingValue(aesthetic: aesthetic) { say("Will likely lose strength") }
             }
             if on(.linkWidth) { number("Link thickness", "× strut", \.linkWidth, auto: 1) { LatticeOrganicLook.Check.link($0) } }
             if on(.unbracedOther) {
@@ -257,13 +273,15 @@ struct OrganicNumberField: View {
     let auto: Double?
     let unit: String
     var locked = false
+    /// What the empty field shows in place of `auto`'s number (e.g. "Auto" where the engine works the number out).
+    var placeholder: String? = nil
     let apply: (Double?) -> Void
     @State private var text = ""
     @State private var editing = false
 
     var body: some View {
         HStack(spacing: 4) {
-            TextField(auto.map(StrengthCheckDocs.number) ?? "–",
+            TextField(placeholder ?? auto.map(StrengthCheckDocs.number) ?? "–",
                       text: Binding(get: { editing ? text : value.map(StrengthCheckDocs.number) ?? "" },
                                     set: { text = $0; editing = true }))
                 .textFieldStyle(.roundedBorder)

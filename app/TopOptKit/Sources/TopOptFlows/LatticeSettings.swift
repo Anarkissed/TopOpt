@@ -2506,6 +2506,23 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         guard let g = group, !wholePart else { return organicLook ?? LatticeOrganicLook() }
         return organicLooks?[g.uuidString] ?? LatticeOrganicLook()
     }
+    /// ★ His 11-19 note: "Auto should also have a selection for Traced vs Grown. This should be in 'Part'". In Auto the Part
+    /// tab's one choice sets the whole part's Organic mode and every group's (each group keeps its own in Manual).
+    public mutating func setOrganicModeForThePart(_ m: LatticeOrganicLook.Mode, groups: [UUID]) {
+        var p = organicLook ?? LatticeOrganicLook()
+        p.mode = m
+        organicLook = p
+        guard !groups.isEmpty else { return }
+        var map = organicLooks ?? [:]
+        for g in groups { var l = map[g.uuidString] ?? LatticeOrganicLook(); l.mode = m; map[g.uuidString] = l }
+        organicLooks = map
+    }
+    /// The Part tab's mode in Auto: the groups' when they all agree, else the whole part's.
+    public func organicModeForThePart(groups: [UUID]) -> LatticeOrganicLook.Mode {
+        let modes = Set(groups.map { (organicLooks?[$0.uuidString] ?? LatticeOrganicLook()).modeValue })
+        if !wholePart, modes.count == 1, let m = modes.first { return m }
+        return (organicLook ?? LatticeOrganicLook()).modeValue
+    }
     public mutating func setOrganicLook(_ l: LatticeOrganicLook, group: UUID?) {
         guard let g = group, !wholePart else { organicLook = l; return }
         var m = organicLooks ?? [:]

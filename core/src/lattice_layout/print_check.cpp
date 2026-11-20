@@ -53,8 +53,10 @@ bool any_in(const Section& s, const Grid& g, int r0, int r1, int c0, int c1) {
 }
 
 // The cross-section of `mesh` at height z, from the triangles listed.
+// NonZero (OF1): each crossing is kept as 2 * column + (1 when it enters, the triangle's normal facing back along the
+// row), and the flips are where the running sum of +1 / -1 rises above 0 or falls back to it.
 Section cut(const TriangleMesh& mesh, const std::vector<std::uint32_t>& tris, double z, const Grid& g,
-            std::vector<std::vector<int>>& rows) {
+            std::vector<std::vector<int>>& rows, bool nonzero = false) {
   for (auto& r : rows) r.clear();
   for (std::uint32_t ti : tris) {
     const auto& t = mesh.triangles[ti];
@@ -74,6 +76,11 @@ Section cut(const TriangleMesh& mesh, const std::vector<std::uint32_t>& tris, do
       py[e] = a.y + s * (b.y - a.y);
     }
     if (count != 2) continue;
+    int enter = 0;
+    if (nonzero) {
+      const double nx = (v[1]->y - v[0]->y) * (v[2]->z - v[0]->z) - (v[1]->z - v[0]->z) * (v[2]->y - v[0]->y);
+      enter = nx < 0.0 ? 1 : 0;
+    }
     const int ia = cross[0] ? 0 : 1, ib = cross[2] ? 2 : 1;
     const double ya = (py[ia] - g.y0) / g.px - 0.5, yb = (py[ib] - g.y0) / g.px - 0.5;
     const int r0 = static_cast<int>(std::ceil(std::min(ya, yb))), r1 = static_cast<int>(std::ceil(std::max(ya, yb))) - 1;
@@ -81,7 +88,22 @@ Section cut(const TriangleMesh& mesh, const std::vector<std::uint32_t>& tris, do
       const double s = (r - ya) / (yb - ya);
       const double x = px[ia] + s * (px[ib] - px[ia]);
       const int c = std::max(0, static_cast<int>(std::ceil((x - g.x0) / g.px - 0.5)));
-      if (c < g.W) rows[static_cast<std::size_t>(r)].push_back(c);
+      if (c < g.W) rows[static_cast<std::size_t>(r)].push_back(nonzero ? 2 * c + enter : c);
+    }
+  }
+  if (nonzero) {
+    // The crossings as flips of "the sum is above 0": the rest reads them as before.
+    for (auto& row : rows) {
+      std::sort(row.begin(), row.end());
+      std::vector<int> flips;
+      int sum = 0;
+      for (std::size_t i = 0; i < row.size();) {
+        const int c = row[i] >> 1;
+        const bool was = sum > 0;
+        for (; i < row.size() && (row[i] >> 1) == c; ++i) sum += (row[i] & 1) ? 1 : -1;
+        if ((sum > 0) != was) flips.push_back(c);
+      }
+      row.swap(flips);
     }
   }
   Section out;
@@ -395,7 +417,8 @@ LayerReport check_layers(const TriangleMesh& mesh, const LayerSpec& spec) {
     auto work = [&] {
       std::vector<std::vector<int>> rows(static_cast<std::size_t>(g.H));
       for (int k = next.fetch_add(1); k < nl && !asked(spec.stop); k = next.fetch_add(1))
-        sections[static_cast<std::size_t>(k)] = cut(mesh, through[static_cast<std::size_t>(k)], z_of(k), g, rows);
+        sections[static_cast<std::size_t>(k)] = cut(mesh, through[static_cast<std::size_t>(k)], z_of(k), g, rows,
+                                                    spec.fill == LayerSpec::Fill::NonZero);
     };
     std::vector<std::thread> pool;
     for (int t = 1; t < nt; ++t) pool.emplace_back(work);
@@ -411,6 +434,55 @@ LayerReport check_layers(const TriangleMesh& mesh, const LayerSpec& spec) {
     std::size_t n = 0;
     for (unsigned char c : first) n += c;
     rep.first_layer_mm2 = n * PX * PX;
+    if (spec.fill == LayerSpec::Fill::NonZero) {
+      // OF1 with the owner's flat bottom (the lead's ruling, 2026-11-18): overlapping shells are counted once, on the
+      // filled first layer. Bed contact: the pixels of the first layer under a triangle lying flat on the bed. Sloped:
+      // the footprint of the downward faces within the first layer that are not flat on it, less the pixels resting on
+      // the bed (a face over material on the bed is inside the material, not an underside).
+      std::vector<unsigned char> on_bed(first.size(), 0), down(first.size(), 0);
+      for (const auto& t : mesh.triangles) {
+        const Vec3 &a = mesh.vertices[static_cast<std::size_t>(t[0])], &b = mesh.vertices[static_cast<std::size_t>(t[1])],
+                   &c = mesh.vertices[static_cast<std::size_t>(t[2])];
+        const bool flat = std::fabs(a.z - zmin) < 1e-4 && std::fabs(b.z - zmin) < 1e-4 && std::fabs(c.z - zmin) < 1e-4;
+        const double nz = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+        if (!flat && !(std::min(a.z, std::min(b.z, c.z)) < zmin + L && nz < -1e-12)) continue;
+        std::vector<unsigned char>& into = flat ? on_bed : down;
+        const int c0 = std::max(0, static_cast<int>(std::floor((std::min(a.x, std::min(b.x, c.x)) - g.x0) / PX)));
+        const int c1 = std::min(g.W - 1, static_cast<int>(std::ceil((std::max(a.x, std::max(b.x, c.x)) - g.x0) / PX)));
+        const int r0 = std::max(0, static_cast<int>(std::floor((std::min(a.y, std::min(b.y, c.y)) - g.y0) / PX)));
+        const int r1 = std::min(g.H - 1, static_cast<int>(std::ceil((std::max(a.y, std::max(b.y, c.y)) - g.y0) / PX)));
+        if (std::fabs(nz) < 1e-18) continue;
+        for (int r = r0; r <= r1; ++r)
+          for (int col = c0; col <= c1; ++col) {
+            const double x = g.x0 + (col + 0.5) * PX, y = g.y0 + (r + 0.5) * PX;
+            const double w0 = ((b.x - x) * (c.y - y) - (b.y - y) * (c.x - x)) / nz;
+            const double w1 = ((c.x - x) * (a.y - y) - (c.y - y) * (a.x - x)) / nz;
+            const double w2 = 1.0 - w0 - w1;
+            if (w0 >= -1e-9 && w1 >= -1e-9 && w2 >= -1e-9) into[static_cast<std::size_t>(r) * g.W + col] = 1;
+          }
+      }
+      std::size_t nb = 0, ns = 0;
+      for (std::size_t i = 0; i < first.size(); ++i) {
+        const bool bed_here = on_bed[i] && first[i];
+        nb += bed_here;
+        ns += down[i] && !on_bed[i];
+      }
+      rep.bed_mm2 = nb * PX * PX;
+      rep.sloped_mm2 = ns * PX * PX;
+    }
+  }
+  if (spec.layer_areas) {
+    rep.layer_mm2.assign(static_cast<std::size_t>(nl), 0.0);
+    for (int k = 0; k < nl; ++k) {
+      const Section& s = sections[static_cast<std::size_t>(k)];
+      long n = 0;
+      if (!s.start.empty())
+        for (int r = 0; r < g.H; ++r)
+          for (int i = s.start[static_cast<std::size_t>(r)]; i < s.start[static_cast<std::size_t>(r) + 1]; i += 2)
+            n += (i + 1 < s.start[static_cast<std::size_t>(r) + 1] ? s.cols[static_cast<std::size_t>(i) + 1] : g.W) -
+                 s.cols[static_cast<std::size_t>(i)];
+      rep.layer_mm2[static_cast<std::size_t>(k)] = n * PX * PX;
+    }
   }
   const int grow_px = std::max(1, static_cast<int>(std::lround(L / PX)));
   std::vector<LayerFound> found(static_cast<std::size_t>(nl));
@@ -455,6 +527,14 @@ LayerReport check_layers(const TriangleMesh& mesh, const LayerSpec& spec) {
   return rep;
 }
 
+namespace {
+bool has_any_relief(const Bars& bars) {   // OG2c: any bar with a proud end or a bulge along a face
+  for (const Bar& b : bars.bars)
+    if (b.along_proud > 0.0 || b.proud_a > 0.0 || b.proud_b > 0.0) return true;
+  return false;
+}
+}  // namespace
+
 TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain, const Layout& layout, const Bars& laid,
                                   const OpenSpace& open, const PrintableSpec& spec, PrintableReport* report) {
   const auto t0 = std::chrono::steady_clock::now();
@@ -481,18 +561,79 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
   std::vector<int> weave_regions;
   for (const Layout::Weave& w : layout.weave) weave_regions.push_back(w.region);
   std::vector<Vec3> stands_asked;   // O8: the middles of long stretches already asked about (posted or not)
+  // OF4, the tubes route: the solid, with any cube lattice joined to it, is made apart from the weave's shells.
+  rep.tubes = spec.mesh.weave_mesh == MeshSpec::WeaveMesh::Tubes && !weave_regions.empty();
+  Bars cube_bars;
+  TriangleMesh base;
+  MeshReport base_rep;
+  std::vector<char> base_present, base_slivers;
+  if (rep.tubes)
+    for (const Bar& x : bars.bars)
+      if (std::find(weave_regions.begin(), weave_regions.end(), x.region) == weave_regions.end()) cube_bars.bars.push_back(x);
   for (int pass = 1; pass <= most; ++pass) {
     rep.passes = pass;
-    mesh = build_mesh(part, domain, layout, bars, carved, ms, &rep.mesh);
-    if (!rep.mesh.ok) { mesh = TriangleMesh{}; break; }
     LayerSpec layers = spec.layers;
     WeaveHolds holds;
     std::vector<char> present;
     std::vector<WeaveStand> stands;
     if (!weave_regions.empty()) {
-      // The bars the writer kept on this pass (weave_holds after `drop_at`), and their runs' long stretches.
+      // The bars the writer keeps on this pass (weave_holds after `drop_at`).
       present = bars_present(bars, ms.drop_at, weave_regions, ms.layer_mm);
       holds = weave_holds(bars, weave_regions, present, ms.bridge_rise);
+    }
+    if (rep.tubes) {
+      // The solid again only when the cube bars left in, or the slivers left out, changed.
+      const std::vector<char> cp = bars_present(cube_bars, ms.drop_at), sl = solid_slivers_left_out(carved, ms.drop_at);
+      rep.pass_ms.push_back({});
+      if (rep.base_builds == 0 || cp != base_present || sl != base_slivers) {
+        const auto ts = std::chrono::steady_clock::now();
+        MeshSpec bs = ms;
+        bs.posts.clear();
+        bs.keep_pieces = true;
+        base = build_mesh(part, domain, layout, cube_bars, carved, bs, &base_rep);
+        base_present = cp;
+        base_slivers = sl;
+        ++rep.base_builds;
+        rep.pass_ms.back().solid_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - ts).count();
+      }
+      rep.mesh = base_rep;
+      if (!rep.mesh.ok) { mesh = TriangleMesh{}; break; }
+      // The weave's shells from the bars as they now stand (OF2, OF3), and the posts.
+      rep.shells = weave_shells(part, domain, layout, bars, holds.kept, carved, ms, true);
+      rep.ms_shells += rep.shells.ms;
+      rep.pass_ms.back().shells_ms = rep.shells.ms;
+      mesh = base;
+      rep.base_triangles = base.triangles.size();
+      rep.shell_first_tri.clear();
+      const int vb = static_cast<int>(mesh.vertices.size());
+      mesh.vertices.insert(mesh.vertices.end(), rep.shells.mesh.vertices.begin(), rep.shells.mesh.vertices.end());
+      for (const auto& t : rep.shells.mesh.triangles) mesh.triangles.push_back({t[0] + vb, t[1] + vb, t[2] + vb});
+      for (std::size_t f : rep.shells.first_tri) rep.shell_first_tri.push_back(rep.base_triangles + f);
+      rep.shells.mesh = TriangleMesh{};
+      // The writer's counts for the whole file: the weave bars left out, the shells' shapes, the triangles.
+      for (std::size_t i = 0; i < bars.bars.size(); ++i) {
+        const Bar& x = bars.bars[i];
+        if (std::find(weave_regions.begin(), weave_regions.end(), x.region) == weave_regions.end() || present[i]) continue;
+        ++rep.mesh.bars_left_out;
+        rep.mesh.bars_left_out_mm += std::sqrt((x.b.x - x.a.x) * (x.b.x - x.a.x) + (x.b.y - x.a.y) * (x.b.y - x.a.y) + (x.b.z - x.a.z) * (x.b.z - x.a.z));
+      }
+      rep.mesh.kept_any_length = holds.kept_any_length;
+      rep.mesh.weave_left_unheld = holds.left_unheld;
+      rep.mesh.bridges += rep.shells.bridges;
+      rep.mesh.feet = rep.shells.feet;
+      rep.mesh.posts = rep.shells.posts;
+      rep.mesh.posts_mm = 0.0;
+      for (const MeshSpec::Post& p : ms.posts)
+        if (p.z_top > p.z_bottom) rep.mesh.posts_mm += p.z_top - p.z_bottom;
+      rep.mesh.triangles = mesh.triangles.size();
+      rep.mesh.mm3 += rep.shells.mm3;
+      layers.fill = LayerSpec::Fill::NonZero;
+    } else {
+      mesh = build_mesh(part, domain, layout, bars, carved, ms, &rep.mesh);
+      if (!rep.mesh.ok) { mesh = TriangleMesh{}; break; }
+    }
+    if (!weave_regions.empty()) {
+      // Their runs' long stretches.
       for (const WeaveStand& w : weave_stands_wanted(bars, weave_regions, holds.kept, ms.weave_stand_every_mm, ms.bridge_rise)) {
         bool before = false;
         for (const Vec3& p : stands_asked) before = before || (p.x == w.at.x && p.y == w.at.y && p.z == w.at.z);
@@ -501,7 +642,9 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
         layers.below_of.push_back({w.at.x, w.at.y, w.below_z});
       }
     }
+    const auto tl = std::chrono::steady_clock::now();
     rep.layers = check_layers(mesh, layers);
+    if (rep.tubes) rep.pass_ms.back().layers_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tl).count();
     const std::vector<LayerReport::Below> below = std::move(rep.layers.below);
     rep.layers.below.clear();
     if (!weave_regions.empty()) {
@@ -543,6 +686,23 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
         still.push_back(m);
       }
       rep.layers.mid_air.swap(still);
+      // The part's own overhangs (the lead's ruling, 2026-11-19): reaching no bar, on no weave bar, and outside the part
+      // right under it. Counted, never answered.
+      {
+        const Domain::Probe probe = domain.probe();
+        const double layer = 2.0 * half_layer;
+        const auto own = [&](double x, double y, double z) {
+          const WeaveFinding f = weave_findings(bars, weave_regions, holds.kept, {{x, y, z - half_layer}}, ms.layer_mm).front();
+          return f.reached == 0 && !f.on_weave && probe.where({x, y, z - layer}).why == Why::Outside;
+        };
+        const std::size_t before = rep.layers.mid_air.size() + rep.layers.one_ended.size() + rep.layers.long_bridges.size();
+        rep.layers.mid_air.erase(std::remove_if(rep.layers.mid_air.begin(), rep.layers.mid_air.end(),
+                                                [&](const LayerReport::MidAir& m) { return own(m.x, m.y, m.z); }),
+                                 rep.layers.mid_air.end());
+        for (std::vector<LayerReport::OneEnded>* v : {&rep.layers.one_ended, &rep.layers.long_bridges})
+          v->erase(std::remove_if(v->begin(), v->end(), [&](const LayerReport::OneEnded& o) { return own(o.x, o.y, o.z); }), v->end());
+        rep.part_overhangs += before - (rep.layers.mid_air.size() + rep.layers.one_ended.size() + rep.layers.long_bridges.size());
+      }
       // A speck held by nothing below is also seen as an overhang held at one place: the same island, in the same
       // layer within half a line width of the speck's middle, is not a finding either.
       auto at_speck = [&](const LayerReport::OneEnded& o) {
@@ -606,6 +766,48 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
         const Bar& x = bars.bars[i];
         rep.sags.legs_mm -= std::sqrt((x.b.x - x.a.x) * (x.b.x - x.a.x) + (x.b.y - x.a.y) * (x.b.y - x.a.y) + (x.b.z - x.a.z) * (x.b.z - x.a.z));
       }
+    }
+  }
+  // OG2c (brief E6, leg C): a bulge the check flags is not worth a refusal. The final findings' places; a bar whose
+  // relief (along an open face, OG2b, or a proud end, OG2) has a finding on or within one radius of its proud part
+  // (the place no deeper than its radius into the part, and within two radii of its line) is cut flush as before the
+  // rule, that bar only, and the whole loop is run again; until clean, or no proud bar is near a finding.
+  for (const LayerReport::MidAir& m : rep.layers.mid_air) rep.findings_at.push_back({m.x, m.y, m.z});
+  for (const LayerReport::OneEnded& o : rep.layers.one_ended) rep.findings_at.push_back({o.x, o.y, o.z});
+  for (const LayerReport::OneEnded& o : rep.layers.long_bridges) rep.findings_at.push_back({o.x, o.y, o.z});
+  if (!rep.clean && !rep.findings_at.empty() && has_any_relief(laid)) {
+    const PartMeasure::Probe pr = part.probe();
+    std::vector<std::size_t> flush;
+    for (std::size_t i = 0; i < bars.bars.size() && i < laid.bars.size(); ++i) {
+      const Bar& x = bars.bars[i];
+      if (!(x.along_proud > 0.0 || x.proud_a > 0.0 || x.proud_b > 0.0)) continue;
+      const double r = 0.5 * x.width;
+      const Vec3 d{x.b.x - x.a.x, x.b.y - x.a.y, x.b.z - x.a.z};
+      const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
+      bool near = false;
+      for (const Vec3& f : rep.findings_at) {
+        const double t = l2 > 0 ? std::clamp(((f.x - x.a.x) * d.x + (f.y - x.a.y) * d.y + (f.z - x.a.z) * d.z) / l2, 0.0, 1.0) : 0.0;
+        const double ex = x.a.x + t * d.x - f.x, ey = x.a.y + t * d.y - f.y, ez = x.a.z + t * d.z - f.z;
+        if (std::sqrt(ex * ex + ey * ey + ez * ez) <= 2.0 * r && pr.depth(f) <= r) { near = true; break; }
+      }
+      if (near) flush.push_back(i);
+    }
+    if (!flush.empty()) {
+      Bars again = laid;
+      for (std::size_t i : flush) {
+        Bar& x = again.bars[i];
+        if (x.relief_a > 0.0 || x.relief_b > 0.0) x = without_relief(Bars{{x}}).bars.front();
+        x.along_proud = 0.0;
+        x.along_face = -1;
+      }
+      PrintableReport sub;
+      TriangleMesh m2 = build_printable_mesh(part, domain, layout, again, open, spec, &sub);
+      sub.relief_flushed += flush.size();
+      for (std::size_t i : flush) sub.relief_flushed_at.push_back({bars.bars[i].a, bars.bars[i].b});   // OJ6
+      sub.relief_rounds += 1;
+      sub.ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+      if (report) *report = sub;
+      return m2;
     }
   }
   rep.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();

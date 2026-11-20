@@ -140,12 +140,14 @@ public enum LatticeLayoutColours {
 
     /// One colour per bar (rgb, alpha 1), the old key's rules (see the header). `grade` = grade to shape is on.
     public static func colours(_ laid: Laid, type: LatticeType?, grade: Bool, stress: Stress? = nil,
-                               lookup: CellLookup? = nil) -> [SIMD4<Float>] {
+                               lookup: CellLookup? = nil, oneColour: Bool = false) -> [SIMD4<Float>] {
         let n = laid.barCount
         func rgb(_ c: RGBAColor) -> SIMD3<Float> { SIMD3(Float(c.r), Float(c.g), Float(c.b)) }
         let interior = rgb(LatticeStructureColour.interior), rim = rgb(LatticeStructureColour.rim)
         let pale = rgb(LatticeStructureColour.pale), teal = rgb(LatticeStructureColour.grade)
         if controlOneColour { return Array(repeating: SIMD4(interior, 1), count: n) }
+        // ★ his 11-19 note: Organic is one colour (no key: its vines are fill, rim and grade at once); the stress view still paints
+        if oneColour, stress == nil || (stress?.peakMPa ?? 0) <= 0 { return Array(repeating: SIMD4(interior, 1), count: n) }
         if let s = stress, s.peakMPa > 0 {
             return (0..<n).map { i in
                 let k = 7 * i

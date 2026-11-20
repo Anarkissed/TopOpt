@@ -50,11 +50,18 @@ final class LatticeOrganicStandProbe: XCTestCase {
             print("ORGANIC-STAND " + LatticeLayoutPreview.organicTimeLine(mode: mode, draft: false, ms: r.ms, struts: seg.count)
                   + " · \(seg.count - Swift.min(LatticeLayoutPreview.organicLightFrom(grown: mode == .grown, netFrom: seg.lightFrom, count: seg.count), seg.count)) by the light pass · \(r.strands) strands")
             XCTAssertGreaterThan(seg.count, 1_000, "★ \(mode.title): his stand's weave")
+            // his 11-19 vines note: the runs for the look's prototype (outside the repo; only the lay's centre lines)
+            if let vr = env["VINE_RUNS_DIR"], let box = LatticeLayoutPreview.box(m.vertices) {
+                try FileManager.default.createDirectory(atPath: vr, withIntermediateDirectories: true)
+                try OrganicVineRunsProbe.write(r.runs, lo: SIMD3<Float>(box.lo), hi: SIMD3<Float>(box.hi),
+                                               to: URL(fileURLWithPath: vr).appendingPathComponent("stand-\(mode.rawValue).vrun"))
+            }
             var laid = LatticeLayoutColours.Laid()
             laid.bars = seg.bars; laid.barFlags = seg.skin; laid.barCell = seg.cell; laid.barRegion = seg.region; laid.token = 1
             var inputs = LatticeLayoutBarsInputs(token: 1, bars: seg.bars, flags: seg.flags,
                                                  colours: LatticeLayoutColours.colours(laid, type: nil, grade: false), colourKey: 1)
             inputs.lightFrom = LatticeLayoutPreview.organicLightFrom(grown: mode == .grown, netFrom: seg.lightFrom, count: seg.count)
+            inputs.vines = OrganicVineShape.tubes(runs: r.runs)   // ★ his 11-19 rule: the vines as the print file makes them
             for (win, size) in windows {
                 guard let rr = MeshRenderer(device: device, sampleCount: 4) else { throw XCTSkip("renderer") }
                 rr.setMesh(mesh)
@@ -65,6 +72,86 @@ final class LatticeOrganicStandProbe: XCTestCase {
                 let px = try XCTUnwrap(rr.renderOffscreen(width: w, height: h,
                                                           clear: MTLClearColor(red: 0.07, green: 0.07, blue: 0.09, alpha: 1)))
                 try LatticeLayoutStandProbe.png(px, w, h, to: (dir as NSString).appendingPathComponent("organic-\(mode.rawValue)-\(win).png"))
+            }
+            // ★ his 11-19 gap note, measured in the app's own view (LatticeReview asked): the solid view's map at the app's
+            // voxel; every CUT-WALL voxel (inside the part, not open, a face-neighbour open and inside) and its distance to the
+            // nearest vine surface; and the open voxels with no vine within 1.5 mm (holes)
+            if env["VINE_RUNS_DIR"] != nil, let box = LatticeLayoutPreview.box(m.vertices) {
+                let mp = try await LatticeLayoutPreview.map(session, box, token: 1)
+                let g = mp.grid
+                let nx = Int(g.dims.x), ny = Int(g.dims.y), nz = Int(g.dims.z)
+                func at(_ x: Int, _ y: Int, _ z: Int) -> (open: Bool, inside: Bool) {
+                    let i = (z * ny + y) * nx + x
+                    return (g.rg[2 * i] > 0, g.rg[2 * i + 1] > 0)
+                }
+                // the bars by a 2 mm hash
+                let cellMM: Float = 2
+                var hash: [SIMD3<Int32>: [Int]] = [:]
+                let nb = seg.bars.count / 7
+                for i in 0..<nb {
+                    let k = 7 * i
+                    let a = SIMD3(seg.bars[k], seg.bars[k + 1], seg.bars[k + 2]), b = SIMD3(seg.bars[k + 3], seg.bars[k + 4], seg.bars[k + 5])
+                    let r = seg.bars[k + 6] / 2
+                    let lo = SIMD3<Int32>(((simd_min(a, b) - r - 2) / cellMM).rounded(.down))
+                    let hi = SIMD3<Int32>(((simd_max(a, b) + r + 2) / cellMM).rounded(.down))
+                    for z in lo.z...hi.z { for y in lo.y...hi.y { for x in lo.x...hi.x { hash[SIMD3(x, y, z), default: []].append(i) } } }
+                }
+                func gap(_ p: SIMD3<Float>) -> Float {   // to the nearest vine SURFACE (0 inside a vine), capped at 4 mm
+                    var best: Float = 4
+                    for i in hash[SIMD3<Int32>((p / cellMM).rounded(.down))] ?? [] {
+                        let k = 7 * i
+                        let a = SIMD3(seg.bars[k], seg.bars[k + 1], seg.bars[k + 2]), b = SIMD3(seg.bars[k + 3], seg.bars[k + 4], seg.bars[k + 5])
+                        let ab = b - a
+                        let t = Swift.min(Swift.max(simd_dot(p - a, ab) / Swift.max(simd_dot(ab, ab), 1e-12), 0), 1)
+                        best = Swift.min(best, Swift.max(0, simd_length(p - (a + t * ab)) - seg.bars[k + 6] / 2))
+                    }
+                    return best
+                }
+                var wall: [Float] = [], openFar = 0, openAll = 0
+                for z in 1..<(nz - 1) { for y in 1..<(ny - 1) { for x in 1..<(nx - 1) {
+                    let c = at(x, y, z)
+                    let p = g.origin + SIMD3(Float(x), Float(y), Float(z)) * g.voxel
+                    if c.open && c.inside {
+                        openAll += 1
+                        if gap(p) > 1.5 { openFar += 1 }
+                        continue
+                    }
+                    guard c.inside, !c.open else { continue }
+                    let ns = [at(x + 1, y, z), at(x - 1, y, z), at(x, y + 1, z), at(x, y - 1, z), at(x, y, z + 1), at(x, y, z - 1)]
+                    if ns.contains(where: { $0.open && $0.inside }) { wall.append(gap(p)) }
+                } } }
+                wall.sort()
+                func pct(_ q: Double) -> Float { wall.isEmpty ? 0 : wall[Swift.min(wall.count - 1, Int(Double(wall.count) * q))] }
+                print(String(format: "ORGANIC-GAP %@: voxel %.2f mm; %d cut-wall voxels: from the wall voxel's centre to the nearest vine surface median %.2f, p75 %.2f, p90 %.2f, p99 %.2f mm, %.1f %% over 1.5 mm; open voxels %d, %.1f %% with no vine within 1.5 mm",
+                             mode.title, g.voxel, wall.count, pct(0.5), pct(0.75), pct(0.9), pct(0.99),
+                             100 * Double(wall.filter { $0 > 1.5 }.count) / Double(Swift.max(wall.count, 1)), openAll,
+                             100 * Double(openFar) / Double(Swift.max(openAll, 1))))
+            }
+            // his 11-19 vines note: close-ups at the 13" window, release (10)'s drawing against the vines, solid body and
+            // X-ray, for him to see before anything ships
+            if env["VINE_RUNS_DIR"] != nil {
+                var before = inputs
+                before.vines = nil
+                before.token = inputs.token + 1000
+                // ★ his 11-19 pick: release (10)'s ROUND drawing (ray-cast capsules) for every bar, the look the vines now copy
+                var round = before
+                round.lightFrom = .max
+                round.token = inputs.token + 2000
+                for (name, inp) in [("release10", before), ("release10round", round), ("vines", inputs)] {
+                    for (zoom, tag) in [(Float(0.42), "near"), (Float(0.2), "close")] {
+                        guard let rr = MeshRenderer(device: device, sampleCount: 4) else { throw XCTSkip("renderer") }
+                        rr.setMesh(mesh)
+                        rr.setBodyAlpha(LatticeLayoutPreview.ghostAlpha)
+                        XCTAssertTrue(rr.applyLayoutBars(inp, device: device))
+                        rr.camera.setOrientation(azimuth: 0.55, elevation: 0.35)
+                        rr.camera.zoom(zoom)
+                        let (w, h) = (Int(AppBuildHost.landscape13.width), Int(AppBuildHost.landscape13.height))
+                        let px = try XCTUnwrap(rr.renderOffscreen(width: w, height: h,
+                                                                  clear: MTLClearColor(red: 0.07, green: 0.07, blue: 0.09, alpha: 1)))
+                        try LatticeLayoutStandProbe.png(px, w, h, to: (dir as NSString)
+                            .appendingPathComponent("organic-\(mode.rawValue)-\(tag)-\(name).png"))
+                    }
+                }
             }
         }
     }

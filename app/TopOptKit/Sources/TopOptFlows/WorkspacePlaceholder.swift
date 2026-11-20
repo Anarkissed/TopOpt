@@ -516,6 +516,10 @@ public struct WorkspacePlaceholder: View {
     /// and carries the ladder, the sim and the receipt, which the wizard
     /// deliberately does not.
     @State private var showLatticeWizard = false
+    /// ★ Organic cut 2 (his certify wizard, 11-19): the walk through an Organic result's pop-ups — kept here, so Solve can
+    /// leave Results for the page that fixes it and the next pop-up is up on coming back; done, the re-check question takes
+    /// the Lattice button's place until he answers it.
+    @State var certifyWalk: OrganicCertify.Walk?
     /// ★ his iPad notes 11-10 (img 3): the Lattice page's Sample is up — the part is covered (`LatticeSampleShowingKey`).
     @State private var latticeSampleUp = false
 
@@ -1848,8 +1852,11 @@ public struct WorkspacePlaceholder: View {
                               pickedVariant: ResultsPick.accepted(model.library.chosenResult(folder: project.id), in: outcome),   // ★ the part's chosen
                               onPick: model.library.version(project.id) == nil ? nil : { v in
                                   if let r = ResultsPick.all(v, in: outcome) { model.library.pick(folder: project.id, result: r) }
-                              })
+                              },
+                              certify: certifyCard)   // ★ Organic cut 2: his certify wizard
                     .ignoresSafeArea()
+                    .onAppear { startCertifyWalk() }
+                    .onChange(of: outcome.reportJSON) { _ in startCertifyWalk() }
             }
             // ★ NO "See Results" CHIP (his 11-05: "I don't think that's necessary anymore … Please have that removed"): Results
             // is Topology's page, reached from its capsule and its "Open Results" line.
@@ -2011,6 +2018,22 @@ public struct WorkspacePlaceholder: View {
         if compute.wantsRemote, compute.activeRemote == nil { findTheMac { startLatticeRun(request) }; return }
         let strengthJob = LatticeFileJob.checksStrength(project.lattice, wired: LatticeFileButton.wired)
             ? strengthJobJSON(request) : nil   // the Lattice run's own job, as Export sends it
+        // ★ Organic cut 2: made on a Mac, from the preview's own exact lay (the same groups, the stress it followed)
+        if LatticeLayoutPreview.organic(project.lattice) {
+            guard let config = compute.activeRemote else { model.toast = LatticeFileExport.organicNeedsMacLine; return }
+            let stress = newEngineStress
+            Task { @MainActor in
+                guard let inputs = try? await newEngine.organicFileInputs(project: project, stress: stress) else {
+                    model.toast = LatticeFileExport.organicNoLayLine; return
+                }
+                switch LatticeFileJob.forOrganic(project, groups: inputs.groups, tensor: inputs.tensor,
+                                                 referenceMPa: stress.referenceMPa, strengthJob: strengthJob) {
+                case .failure(let why): model.toast = why.line
+                case .success(let job): launchFileRun(request, job: job, strengthJob: strengthJob, config: config, organic: true)
+                }
+            }
+            return
+        }
         let job: LatticeFileJob.ForPart
         switch LatticeFileJob.forPart(project, stress: newEngineStress, strengthJob: strengthJob) {
         case .success(let j): job = j
@@ -2024,14 +2047,24 @@ public struct WorkspacePlaceholder: View {
             }
             model.toast = why.line; return
         }
+        launchFileRun(request, job: job, strengthJob: strengthJob, config: compute.activeRemote)
+    }
+
+    /// The print file's run, started: on the chosen Mac, else this iPad (a regular lattice only: Organic needs a Mac).
+    /// ★ Organic cut 2: `organic` strengthens first in Structural (LatticeFileButton.organicRunner).
+    private func launchFileRun(_ request: RunRequest, job: LatticeFileJob.ForPart, strengthJob: Data?, config: RemoteRunnerConfig?,
+                               organic: Bool = false) {
         runCouldntFinish = false; lastRunWasLattice = true   // ★ B1 (O1)
         let density = model.densityGCm3(for: project.material)
         // the old run's runner stays the run's own: this one is set for this start only (`start` takes it as it begins)
         let before = run.runner
         let fileRequest = request.withJobMode(LatticeFileButton.jobMode)
-        if let config = compute.activeRemote {
-            run.runner = LatticeFileButton.runner(config: config, job: job, projectName: project.name, strengthJob: strengthJob,
+        if let config {
+            run.runner = organic
+                ? LatticeFileButton.organicRunner(config: config, job: job, projectName: project.name, strengthJob: strengthJob,
                                                   densityGCm3: density)
+                : LatticeFileButton.runner(config: config, job: job, projectName: project.name, strengthJob: strengthJob,
+                                           densityGCm3: density)
             run.start(fileRequest, remote: true, workerName: compute.selectedWorkerName)
         } else {
             run.runner = LatticeFileButton.deviceRunner(job: job, strengthJob: strengthJob, materialsPath: request.materialsPath,
@@ -2060,11 +2093,11 @@ public struct WorkspacePlaceholder: View {
             && !(newEngineOwnsPreview && LatticeLayoutPreview.organic(project.lattice)
                  && (project.lattice.organicLook?.modeValue ?? .grown) == .grown)
     }
-    /// ★ Organic cut 1 (his 11-18 "Off until cut 2"): the Lattice button is off for Organic on the new engine.
-    static let organicMakesNextInstall = "Making an Organic part comes with the next install"
+    /// ★ Organic cut 2 (his 11-18 "Export as its own install"; his 11-17 "Preview only for now"): the Lattice button makes an
+    /// Organic part on a Mac; with this iPad as Runs on, one line says it needs one.
     private var organicButtonRefusal: String? {
         project.importedFile != nil && LatticeLayoutPreview.organic(project.lattice) && project.lattice.flexible == nil
-            ? Self.organicMakesNextInstall : nil
+            && !compute.wantsRemote ? LatticeFileExport.organicNeedsMacLine : nil
     }
 
     /// Whether the Lattice button sends the new engine's job for this part (`LatticeFileButton.takes`), never on Flexible.
@@ -3599,6 +3632,9 @@ public struct WorkspacePlaceholder: View {
             // A run that FAILED produced nothing, so its inputs never count as "already run": Optimize stays live for Try
             // again (the stall card's Try Again re-entered startRun and met the same-inputs grey-out — a dead button).
             if ph == .failed { lastRunRequest = nil }
+            // ★ Organic cut 2 (his certify wizard): an Organic part that does not certify opens on Results, where it is walked through
+            if ph == .succeeded, lastRunWasLattice, OrganicCertify.opensResults(organic: LatticeLayoutPreview.organic(project.lattice),
+                                                                            reportJSON: run.outcome?.reportJSON) { viewOriginal = false }
             guard ph == .failed, run.failureShowsOnButton else { return }
             runCouldntFinish = true
             run.dismissFailure()
@@ -4503,7 +4539,11 @@ public struct WorkspacePlaceholder: View {
     /// which is the quantity a person can measure on the print.
     /// ★ his pick 11-16 (A): hidden while he turns the view with a lattice drawn
     @ViewBuilder private var latticeDensityLegend: some View {
-        if !latticeTurning || LatticePreviewMode.controlPageFollowsCamera { latticeDensityLegendShown }
+        // ★ his 11-19 note: "The colour legend doesn't really work for Organic ... It should be a singular colour": no key for
+        // Organic on the new engine (the stress view keeps its own scale)
+        if newEngineDrawn, project.lattice.isOrganic, latticeLegendStress() == nil {
+            EmptyView()
+        } else if !latticeTurning || LatticePreviewMode.controlPageFollowsCamera { latticeDensityLegendShown }
     }
     @ViewBuilder private var latticeDensityLegendShown: some View {
         // ★ Install 3: on the new engine, the span its bars are drawn over and their median cell (LatticeLayoutColours)
@@ -14312,16 +14352,29 @@ public struct WorkspacePlaceholder: View {
     /// found yet is looked for first, as Optimize does).
     private func exportPrintFile() {
         if compute.wantsRemote, compute.activeRemote == nil {
-            findTheMac { fileExport.make(project: project, config: compute.activeRemote, stress: newEngineStress,
-                                         strengthJob: printFileStrengthJob()) }
+            findTheMac { makePrintFile() }
             return
         }
-        fileExport.make(project: project, config: compute.activeRemote, stress: newEngineStress, strengthJob: printFileStrengthJob())
+        makePrintFile()
+    }
+
+    /// The print file: a regular lattice from the preview's settings; ★ Organic cut 2: from the preview's own exact lay.
+    private func makePrintFile() {
+        let stress = newEngineStress, strengthJob = printFileStrengthJob()
+        guard LatticeLayoutPreview.organic(project.lattice) else {
+            fileExport.make(project: project, config: compute.activeRemote, stress: stress, strengthJob: strengthJob)
+            return
+        }
+        Task { @MainActor in
+            let inputs = try? await newEngine.organicFileInputs(project: project, stress: stress)
+            fileExport.make(project: project, config: compute.activeRemote, stress: stress, strengthJob: strengthJob,
+                            organic: inputs ?? ([], Data()))
+        }
     }
 
     /// ★ Install 3, the strength check (LatticeReview's shape, 11-17): for a Structural lattice, the print file's job carries the
     /// run job a Lattice run writes today (`lattice_part`), so the Mac checks the new layout against his loads, supports,
-    /// material and safety margin. nil: Aesthetic (U9), Organic, a core that does not read it yet, or no runnable request.
+    /// material and safety margin (Organic too, cut 2). nil: Aesthetic (U9), a core that does not read it yet, or no runnable request.
     private func printFileStrengthJob() -> Data? {
         guard LatticeFileJob.checksStrength(project.lattice), let request = model.makeLatticeRunRequest() else { return nil }
         return strengthJobJSON(request)
@@ -15573,7 +15626,8 @@ extension WorkspacePlaceholder {
         // ★ B2 (Q3 (c)) → B6: what the lattice builds on ("on −35 %") is ⌃'s to say now, under the result it came from
         let builtOn = LatticeStageCopy.builtOn(achievedVolumeFraction: latticeVariantContext?.achievedVolumeFraction)
         return HStack(spacing: DSParts.cornerGap) {   // §4.18, 12 pt apart
-            latticeRunButton
+            // ★ Organic cut 2 (his certify wizard): once every pop-up has gone through, his re-check question is asked here
+            if let w = certifyWalk, w.asksRecheck(on: project.id) { certifyRecheck } else { latticeRunButton }
             DSSplitButton(key: "latticeSplitMore") {   // §4.6's 64 pt ⌃
                 Button { requestLatticeRun() } label: {
                     Text(LatticeSetupCopy.original)
@@ -15732,4 +15786,66 @@ enum LatticeRegionCellMemo {
     // would thrash between the two and memoise nothing.
     @MainActor static var token = ""
     @MainActor static var byKey: [String: [LatticeRegionCells.RegionCell]] = [:]
+}
+
+
+// MARK: - ★ Organic cut 2: his certify wizard (11-19) — the walk, Solve, and the re-check where Lattice is
+extension WorkspacePlaceholder {
+    /// A new Organic result that does not certify starts its walk; the result already walked keeps its place.
+    func startCertifyWalk() {
+        guard LatticeLayoutPreview.organic(project.lattice), let o = run.outcome else { return }
+        let key = o.reportJSON?.hashValue ?? 0
+        if let w = certifyWalk, w.version == project.id, w.key == key { return }
+        certifyWalk = OrganicCertify.walk(version: project.id, reportJSON: o.reportJSON,
+                                          infillNow: project.printParams.infillPercent)
+    }
+
+    /// The open pop-up for this version's result (nil: none, or every one has gone through).
+    var certifyCard: OrganicCertifyCard? {
+        guard let w = certifyWalk, w.version == project.id, let issue = w.current else { return nil }
+        return OrganicCertifyCard(issue: issue, step: w.step, grid: w.grid, solvedLines: w.currentSolved ? w.infillLines : nil,
+                                  next: { certifyAdvance() }, skip: { certifyAdvance() }, solve: { certifySolve(issue) })
+    }
+
+    /// Next or Skip. After the last pop-up the part's Lattice stage shows, where his re-check question is.
+    func certifyAdvance() {
+        certifyWalk?.next()
+        if certifyWalk?.done == true {
+            viewOriginal = true
+            if stage != .lattice { goToStage(.lattice) }
+        }
+    }
+
+    /// Solve: the infill is set here (the lowest that passes) and saved as the next version — the version that ran keeps its
+    /// own — and the card says so; a lattice setting opens the Lattice settings, where it is changed (the next pop-up waits on
+    /// Results).
+    func certifySolve(_ issue: OrganicCertify.Issue) {
+        guard let solve = issue.solve else { return }
+        certifyWalk?.markSolved()
+        if case .infill(let to) = solve {
+            let from = project.printParams.infillPercent
+            project.printParams.infillPercent = to
+            model.persistCurrentProject()   // a version with results: written to its draft, the next version
+            certifyWalk?.infillLines = OrganicCertify.infillLines(
+                from: from, to: to, layerMM: project.printParams.layerHeightMM, walls: project.printParams.wallLoops,
+                newVersion: model.nextVersionPreview().map { "v\($0.number)" }, ranVersion: versionLabel)
+            return
+        }
+        certifyWalk?.next()
+        viewOriginal = true
+        goToLatticeType()
+    }
+
+    /// His re-check question in the Lattice button's place: Check again runs Lattice as the button does (a version with
+    /// results makes the next version); Not now gives the button back.
+    var certifyRecheck: some View {
+        HStack(spacing: DSParts.cornerGap) {
+            PillButton(OrganicCertify.recheckNo, style: .secondary) { certifyWalk?.answered = true }
+                .accessibilityIdentifier("certify-recheck-no")
+            DSRunButton(OrganicCertify.recheckYes, subtitle: OrganicCertify.recheckLine, state: .ready, key: "certifyRecheck") {
+                certifyWalk?.answered = true
+                requestLatticeRun()
+            }
+        }
+    }
 }

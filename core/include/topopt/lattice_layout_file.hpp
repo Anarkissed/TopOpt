@@ -52,6 +52,9 @@ struct FileOptions {
   int most_passes = 10;
   bool leave_out = true;
   bool keep_if_not_clean = false;
+  // OF4: mesh key "weave_mesh" ("tubes" or "merged"). Not given: Tubes for a job with a weave region (make_lattice_file
+  // sets mesh.weave_mesh), the writer's own Merged otherwise (a job with no weave region is never changed by it).
+  bool weave_mesh_asked = false;
 };
 
 // What making the mesh found.
@@ -70,13 +73,28 @@ struct FileReport {
   bool print_clean = false;          // nothing starts in mid-air, nothing is held at one end only
   std::vector<int> found_per_pass;   // mid-air starts + one-ended overhangs, pass by pass
   std::vector<Vec3> left_out_at;     // where struts were left out (the preview can mark them)
+  // OG2c (brief E6, leg C): PrintableReport's findings_at, relief_flushed, relief_rounds.
+  std::vector<Vec3> findings_at;
+  std::size_t relief_flushed = 0;
+  int relief_rounds = 0;
+  std::vector<std::array<Vec3, 2>> relief_flushed_at;   // OJ6: the bars made flush (their ends as given)
   std::vector<MeshSpec::Post> posts; // the posts added (the preview can draw them)
   std::size_t stands_added = 0;      // of `posts`, those under a weave's long shallow runs (O8)
   std::size_t weave_specks_ignored = 0, weave_held_ignored = 0;   // O10: PrintableReport's
+  std::size_t part_overhangs = 0;   // PrintableReport's: the part's own overhangs, counted, never propped
   // O17, O18: PrintableReport's: what the sag pass did, and the bars the file was made of when it changed any (null:
   // the layout's own). `left_out_at` and `posts` are read against those.
   SagReport sags;
   std::shared_ptr<const Bars> sagged;
+  // OF4: PrintableReport's: the tubes route was taken, its shells' counts, where the solid's triangles end and each
+  // shell's first triangle in the mesh returned, how often the solid was made.
+  bool tubes = false;
+  WeaveShells shells;
+  std::size_t base_triangles = 0;
+  std::vector<std::size_t> shell_first_tri;
+  int base_builds = 0;
+  double ms_shells = 0.0;
+  std::vector<PrintableReport::PassTime> pass_ms;   // OF4: per pass of the tubes route
 };
 
 // THE ONE PLACE THE MESH IS MADE for a file: the open space of the layout's cells, then
@@ -87,6 +105,33 @@ struct FileReport {
 TriangleMesh make_file_mesh(const Session& session, const Outcome& outcome,
                             const FileOptions& options, FileReport& report,
                             const std::atomic<bool>* stop = nullptr);
+// The same, of `bars` laid in `layout` (make_file_mesh reads only the outcome's layout and bars).
+TriangleMesh make_file_mesh(const Session& session, const Layout& layout, const Bars& bars,
+                            const FileOptions& options, FileReport& report,
+                            const std::atomic<bool>* stop = nullptr);
+
+// Brief E4, leg 2 (rule OS16): THE PRINT CHECK of the file, as the file job runs it (make_file_mesh: the solid carved,
+// the sags lifted or given legs, made, checked layer by layer and made again), its mesh dropped. `bars` the bars the
+// file is made of (the sag pass's when it changed any, else those given); `kept` per bar of them: in the file (not
+// left out by the layer check's places, bars_present, nor by the owner's hold rules, weave_holds) — the bars the
+// Organic strength check judges. Not ok: `why` (the mesh could not be made).
+struct PrintChecked {
+  bool ok = false;
+  std::string why;
+  FileReport made;
+  Bars bars;
+  std::vector<char> kept;
+};
+PrintChecked print_check_bars(const Session& session, const Layout& layout, const Bars& bars, const FileOptions& options,
+                              const std::atomic<bool>* stop = nullptr);
+// Of a print check's bars, which are in the file (the file job's own reading; `made` the check's report).
+std::vector<char> bars_in_file(const Bars& made_bars, const FileReport& made, const std::vector<int>& weave_regions,
+                               const FileOptions& options);
+// The options a job's file is made with: OF4, the tubes route for a job with a weave region unless it asked.
+FileOptions file_options_for(const FileOptions& asked, bool weave);
+// OrganicAsk::print_check for `session` with `options`: the print check, its bars in place of those given.
+std::function<std::string(const Layout&, Bars&)> print_check_hook(const Session& session, const FileOptions& options,
+                                                                   const std::atomic<bool>* stop = nullptr);
 
 // ── THE STRENGTH CHECK (Install 3, rule V4) ──────────────────────────────────
 // The old engine's check of a regular lattice (run_job.cpp, certify_latticed_variant), fed from this layout. On the
@@ -125,6 +170,12 @@ struct StrengthAsk {
   std::string out_dir;                // where the file was written; the check's own files go beside it
   Vec3 part_lo{}, part_hi{};          // the part's box as the file job opened it
   int threads = 0;
+  // Brief E2 (Organic: every lattice region a weave): the bars the file was made of, in the layout's order (the sag
+  // lift's when it changed any), and per bar whether the file holds it (the writer's own rules: what the layer check
+  // left out and the bridge rules); the job's light strut width. Null for a cell lattice.
+  const Bars* bars = nullptr;
+  const std::vector<char>* kept = nullptr;
+  double light_width_mm = 0.0;
 };
 struct StrengthDone {
   bool ok = false;
@@ -138,9 +189,13 @@ struct StrengthDone {
 // The check is the CLI's (run_job.cpp: lattice_file_strength_check): core's lattice layout is always built, and the
 // old check needs the solver and the importer. `before` reads the strength job (cheap; no solve) and may refuse it;
 // `run` makes the check on the laid lattice.
+// `run_organic` (brief E2, Part A) is the Organic check, a frame of beams (lattice_layout_frame.hpp), asked when every
+// lattice region of the job is a weave; a job with weave AND cell regions and a strength job is refused
+// (strength_mixed).
 struct StrengthCheck {
   std::function<StrengthDone(const std::string& job_path)> before;
   std::function<StrengthDone(const StrengthAsk& ask)> run;
+  std::function<StrengthDone(const StrengthAsk& ask)> run_organic;
 };
 
 // One job, as read from job.json.
@@ -160,11 +215,22 @@ struct FileJob {
   // field there itself. A job with a weave region and no field is refused (no_stress_result, OR14).
   std::string tensor;
   std::shared_ptr<const TensorField> tensor_field;
+  // Brief E2, item 11 (key "strengthened"): a strengthen round's strengthened.json, by a path from the job's folder
+  // (or a whole path). run_file_job reads it (apply_strengthened): its stress input replaces the tensor, its reference is
+  // stated, its floors are added. Empty: none.
+  std::string strengthened;
+  // OF5 (key "file_format"): "3mf" or "stl". Empty: 3MF when the file takes the tubes route (OF4), STL otherwise. A
+  // 3MF is written where the STL would be, its ".stl" name ending ".3mf".
+  std::string file_format;
   // The trace's ask (layout keys "organic_spacing_mm", or "organic_spacing_min_mm" with "organic_spacing_max_mm" and
   // "organic_spacing_exponent" (O12); "organic_width_mm"; the reference is the layout's "reference_mpa" and
   // "percentile"; "organic_shape_fit" (O13), true when not given); read only when a region is a weave. The Finish is
   // the regular layout keys' (OR30: "rim_mm", "cover_mm", "skin", "skin_width_mm").
   OrganicAsk organic;
+  // Leg J item 3 (OJ3): the layout key "organic_groups", a list of {"regions": [ids], any organic_* key}: each group its
+  // own ask (the layout's organic_* keys, then the group's own over them). Empty: one ask for every weave region
+  // (`organic`), as before. Laid by Session::lay_organic with the groups (OP11).
+  std::vector<OrganicGroup> organic_groups;
   Settings settings;
   FileOptions options;
 };
@@ -235,8 +301,14 @@ struct FileResult {
   std::string why;      // not ok: ONE plain line, for a maker
   std::string detail;   // not ok: the technical message behind it, if there is one (for a log)
   int exit_code = 1;    // 0 made, 3 refused (the part or the settings), 1 anything else
-  std::string file;     // the STL written
+  std::string file;     // the STL (or 3MF, OF5) written
   std::size_t file_bytes = 0;
+  // OF5: what was written: "3mf" or "stl", the route ("tubes" or "merged"), and whether the 3MF's model part was
+  // deflated. The result file carries them (with the shells, those left out, and slicer_supports "off": the app tells
+  // the owner to slice with supports off) for a job with a weave region only.
+  std::string file_format, weave_mesh;
+  bool sweep_on = false;   // OV1: the tubes were swept (organic_sweep)
+  bool compressed = false;
   // The part.
   int faces = 0;
   std::size_t part_triangles = 0, open_edges = 0;
@@ -264,6 +336,11 @@ struct FileResult {
   double net_mm = 0.0;
   // G12: what Grown did (Outcome::grown); null for Traced and cube lattices (then not written).
   std::shared_ptr<const GrowReport> grown;
+  // OG1, OG2 (brief E6): the gap rule (points lowered, bars over their cap), its diagnosis, and the relief.
+  std::size_t gap_capped = 0, gap_broken = 0;
+  GuardReport guard;   // OG5 (brief E9): Outcome::guard
+  Outcome::Tight tight;
+  Outcome::Relief relief;
   ShallowTable shallow;
   // The mesh.
   FileReport made;
@@ -294,6 +371,12 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
 // `threads` > 0 overrides the job's own. Never throws.
 FileResult run_file_job(const std::string& job_path, const std::string& out_dir, int threads = 0,
                         void (*said)(const char*) = nullptr, const StrengthCheck* strength = nullptr);
+
+// Brief E2: what run_file_job reads before it makes anything: the job at `job_path` (`threads` > 0 overrides its own),
+// its demand and tensor files, its "strengthened" (apply_strengthened), and the part beside it. False: `r` holds the
+// refusal (as run_file_job would write it). Never throws.
+bool load_file_job(const std::string& job_path, int threads, FileJob& job, StepModel& model, FileResult& r,
+                   void (*said)(const char*) = nullptr);
 
 // The result file's name, and its text.
 inline constexpr const char* kFileResultName = "lattice_file.json";

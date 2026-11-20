@@ -44,7 +44,8 @@ public enum LatticeFileJob {
     public static let strengthWired = true
     /// Whether a part's print file carries the strength check: Structural only (U9), on a core that reads it.
     public static func checksStrength(_ l: LatticeSettings, wired: Bool = strengthWired) -> Bool {
-        wired && (l.stageMode ?? .structural) == .structural && l.resolvedAlgorithm != "organic"   // (LatticeLayoutPreview.draws)
+        // ★ Organic cut 2 (OS2): the check now judges an Organic lattice too (a frame of beams); Aesthetic never (U9)
+        wired && (l.stageMode ?? .structural) == .structural
     }
 
     /// The stress result as core reads it (04-layout-file-job.md, the demand file): "TODEMAND", int32 version 1, int32 nx ny
@@ -72,6 +73,66 @@ public enum LatticeFileJob {
         public var json: Data
         public var modelPath: String
         public var demand: Data?
+        /// ★ Organic cut 2: the stress the weave follows (core's TOTENSOR file), sent beside the job as its `tensor`.
+        public var tensor: Data? = nil
+    }
+
+    /// ★ Organic cut 2: the stress file's name beside the job (core's top-level `tensor`).
+    public static let tensorName = "tensor.bin"
+    /// ★ Organic cut 2 (handover OF4: the file is separate closed tubes): what the slicer must be told.
+    public static let supportsOffLine = "Slice it with supports off"
+
+    /// ★ Organic cut 2 (organic-cut2-handover.md, f): an Organic part's job — the preview's own settings and the SAME groups the
+    /// preview laid (so the file is the lattice drawn), the stress it followed, and the strength check's run job when given
+    /// (Structural). The file is a 3MF of separate closed tubes.
+    @MainActor
+    public static func forOrganic(_ p: ProjectModel, groups: [LatticeLayoutSession.OrganicGroup], tensor: Data,
+                                  referenceMPa: Double, strengthJob: Data?) -> Result<ForPart, NoJob> {
+        guard let path = p.importedFile?.path else { return .failure(NoJob(line: LatticeLayoutPreview.noPartLine)) }
+        guard !groups.isEmpty else { return .failure(NoJob(line: LatticeFileExport.organicNoLayLine)) }
+        let settings = LatticeLayoutPreview.settings(p, referenceMPa: referenceMPa)
+        guard let json = try? build(settings, modelName: (path as NSString).lastPathComponent,
+                                    strengthJob: strengthJob == nil ? nil : strengthJobName, organic: groups,
+                                    tensor: tensorName) else {
+            return .failure(NoJob(line: "The job could not be written"))
+        }
+        return .success(ForPart(json: json, modelPath: path, demand: nil, tensor: tensor))
+    }
+
+    /// ★ Organic cut 2: one Organic ask under the lattice file job's keys (core's file_job.cpp `organic_from`; the
+    /// preview's `raw` sends the same fields to the session). The flat floor rides the layout's own `organic_bed_floor_mm`.
+    public static func organicKeys(_ o: LatticeLayoutSession.Organic) -> [String: Any] {
+        var d: [String: Any] = [
+            "organic_mode": o.mode == .grown ? "grown" : "traced",
+            "organic_width_mm": o.widthMM, "organic_width_heavy_mm": o.widthHeavyMM,
+            "organic_follow_stress": o.followStress, "organic_shape_fit": o.shapeFit, "organic_member_cap": o.memberCap,
+            "organic_shape_reach": o.shapeReach, "organic_walls_out": o.wallsOut, "organic_ties": o.ties,
+            "organic_tie_swirl": o.tieSwirl, "organic_foot_gap": o.footGap, "organic_stress_goal": o.stressGoal,
+            "organic_void_ratio": o.voidRatio, "organic_reseed_rounds": Int(o.reseedRounds),
+            "organic_wall_connect": o.wallConnect, "organic_wall_gap": o.wallGap, "organic_wall_gap_heavy": o.wallGapHeavy,
+            "organic_wall_cross": Int(o.wallCross), "organic_cross_gap": o.crossGap, "organic_cross_gap_heavy": o.crossGapHeavy,
+            "organic_cross_climb_max_deg": o.crossClimbMaxDeg, "organic_top_run": o.topRun, "organic_root_run": o.rootRun,
+            "organic_run_max": Int(o.runMax), "organic_run_gap": o.runGap, "organic_run_follow": o.runFollow,
+            "organic_run_pull": o.runPull, "organic_run_seek": o.runSeek, "organic_run_min": o.runMin,
+            "organic_root_gap": o.rootGap, "organic_auto": o.autoByStress, "organic_prune": o.prune,
+            "organic_hold_parts": o.holdParts, "organic_part_reach_mm": o.partReachMM,
+            "organic_part_support_mm": o.partSupportMM, "organic_part_to_floor": o.partToFloor,
+            "organic_link_width": o.linkWidth, "organic_unbraced_max": o.unbracedMax, "organic_tie_level": o.tieLevel,
+            "organic_tie_gap": o.tieGap, "organic_tie_gap_heavy": o.tieGapHeavy,
+            // cut 2 (handover a)
+            "organic_gap_lines": o.gapLines, "organic_face_relief_mm": o.faceReliefMM,
+            "organic_relief_exclude_faces": o.reliefExcludeFaces.map { Int($0) }, "organic_strand_keep": o.strandKeep,
+            "organic_wall_bare_mm": o.wallBareMM, "organic_wall_reach": o.wallReach, "organic_sweep": o.sweep ? 1 : 0,
+        ]
+        // the spacing: one size, or the range (core refuses both together)
+        if o.spacingMM > 0 {
+            d["organic_spacing_mm"] = o.spacingMM
+        } else {
+            d["organic_spacing_min_mm"] = o.spacingMinMM
+            d["organic_spacing_max_mm"] = o.spacingMaxMM
+            d["organic_spacing_exponent"] = o.spacingExponent
+        }
+        return d
     }
     /// Why a part's job cannot be written, in its one line.
     public struct NoJob: Error, Equatable { public let line: String }
@@ -95,7 +156,8 @@ public enum LatticeFileJob {
 
     /// The job document, keys sorted (the same settings give the same bytes).
     public static func build(_ s: LatticeLayoutSession.Settings, modelName: String, linearDeflection: Double = 0,
-                             demand: String? = nil, strengthJob: String? = nil) throws -> Data {
+                             demand: String? = nil, strengthJob: String? = nil,
+                             organic: [LatticeLayoutSession.OrganicGroup]? = nil, tensor: String? = nil) throws -> Data {
         var layout: [String: Any] = [
             "all_lattice": s.allLattice, "bead_mm": s.beadMM, "min_strut_lines": s.minStrutLines, "min_wall_mm": s.minWallMM,
             "rim_mm": s.rimMM, "cover_mm": s.coverMM,
@@ -177,6 +239,8 @@ public enum LatticeFileJob {
             if let v = f.skin { d["skin"] = v }
             if let v = f.skinWidthMM { d["skin_width_mm"] = v }
             if let v = f.skinReachCells { d["skin_reach_cells"] = v }
+            if let v = f.skinDensity { d["skin_density"] = v }   // ★ cut 2 (OJ8)
+            if let v = f.skinSink { d["skin_sink"] = v }
             return d
         }
         func zone(_ z: LatticeLayoutSession.Zone?) -> Any {
@@ -191,8 +255,29 @@ public enum LatticeFileJob {
         if s.regions.contains(where: { $0.own.any }) { layout["region_own"] = s.regions.map { own($0.own) } }
         if s.regions.contains(where: { $0.finish.any }) { layout["region_finish"] = s.regions.map { finish($0.finish) } }
         if s.regions.contains(where: { $0.zone != nil }) { layout["region_zones"] = s.regions.map { zone($0.zone) } }
+        // ★ Organic cut 2 (handover a, f): the woven areas, the first group's settings over the layout, every group's own in
+        // organic_groups when there are several (core lays each group by its own); the stress beside the job; a 3MF
+        var top: [String: Any] = [:]
+        if let organic, let first = organic.first {
+            layout["region_weave"] = s.regions.map(\.weave)
+            for (k, v) in organicKeys(first.ask) { layout[k] = v }
+            // the weave's stress reference is the ASK's (the preview lays with it: 0 = the percentile of the weave's own
+            // stress); the layout's own reference is the cell lattice's and would lay a different lattice
+            layout["reference_mpa"] = first.ask.referenceMPa
+            layout["percentile"] = first.ask.percentile
+            if organic.count > 1 {
+                layout["organic_groups"] = organic.map { g -> [String: Any] in
+                    var d = organicKeys(g.ask)
+                    d["regions"] = g.regions.map { Int($0) }
+                    return d
+                }
+            }
+            if let tensor { top["tensor"] = tensor }
+            top["file_format"] = "3mf"
+        }
         var job: [String: Any] = ["mode": "lattice_file", "model": modelName, "output": outputName,
                                   "linear_deflection": linearDeflection, "threads": 0, "layout": layout]
+        for (k, v) in top { job[k] = v }
         if let demand { job["demand"] = demand }
         if let strengthJob { job["strength_job"] = strengthJob }   // ★ Install 3
         return try JSONSerialization.data(withJSONObject: job, options: [.sortedKeys])
@@ -210,21 +295,32 @@ public struct LatticeFileReport: Equatable, Sendable {
     public var posts: Int
     /// ★ Install 3: the strength check's result, when it ran (Structural).
     public var strength: LatticeFileStrength? = nil
+    /// ★ Organic cut 2 (OF5): the file written (its bare name: lattice.3mf for an Organic part), and the slicer's word on
+    /// supports ("off" for separate tubes), as lattice_file.json gives them.
+    public var file: String? = nil
+    public var slicerSupports: String? = nil
 
     public static func parse(_ d: Data) -> LatticeFileReport? {
         guard let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else { return nil }
         let l = o["layout"] as? [String: Any] ?? [:], m = o["mesh"] as? [String: Any] ?? [:]
         let p = o["print_check"] as? [String: Any] ?? [:]
+        let file = (o["file"] as? String).flatMap { $0.isEmpty ? nil : ($0 as NSString).lastPathComponent }
         return LatticeFileReport(ok: o["ok"] as? Bool ?? false, why: o["why"] as? String ?? "", bars: l["bars"] as? Int ?? 0,
                                  plasticMM3: m["mm3"] as? Double ?? 0, partMM3: m["part_mm3"] as? Double ?? 0,
                                  clean: p["clean"] as? Bool ?? false, posts: (p["posts"] as? [Any])?.count ?? 0,
-                                 strength: (o["strength"] as? [String: Any]).map(LatticeFileStrength.init(block:)))
+                                 strength: (o["strength"] as? [String: Any]).map(LatticeFileStrength.init(block:)),
+                                 file: file, slicerSupports: o["slicer_supports"] as? String)
     }
+
+    /// The file's name: the one the report gives (a 3MF for Organic), else the job's own output.
+    public var fileName: String { file ?? LatticeFileJob.outputName }
+    public var isThreeMF: Bool { fileName.lowercased().hasSuffix(".3mf") }
 
     /// One plain line: what was made.
     public var line: String {
         let share = partMM3 > 0 ? String(format: " · %.0f%% of the solid part", 100 * plasticMM3 / partMM3) : ""
-        return "Print file ready · \(bars) bars\(share)\(clean ? " · layer check clean" : "")"
+        let supports = slicerSupports == "off" ? " · " + LatticeFileJob.supportsOffLine.lowercased() : ""
+        return "Print file ready · \(bars) bars\(share)\(clean ? " · layer check clean" : "")\(supports)"
     }
 }
 
@@ -268,7 +364,11 @@ public struct LatticeFileStrength: Equatable, Sendable {
     /// ★ Why a "fail" failed (LatticeReview 11-17): a load on OPEN lattice (cut cells, cells that lost a left-out bar) has no
     /// load path whatever the solid's margin — the old open-finish rule.
     public enum FailReason: String, Sendable { case loadOnOpenLattice = "load_on_open_lattice", noLoadPath = "no_load_path",
-                                                    solidMargin = "solid_margin" }
+                                                    solidMargin = "solid_margin",
+                                                    // ★ Organic cut 2 (handover b): the struts short (fail); the frame of beams
+                                                    // not solved, or too little of it judged (solid only)
+                                                    strutMargin = "strut_margin", frameNotSolved = "frame_not_solved",
+                                                    frameUnjudged = "frame_unjudged" }
     public var failReason: FailReason?
     /// The load landing on cells that get no credit, and the whole load (N), where countable.
     public var loadOnNoCreditN: Double?
@@ -293,7 +393,9 @@ public struct LatticeFileStrength: Equatable, Sendable {
         }
         diagnosis = (b["diagnosis"] as? [String: Any]).flatMap(GateDiagnosis.decode)
         let strut = b["strut"] as? [String: Any] ?? [:]
+        // ★ Organic cut 2: a frame of beams gives its struts' smallest margin under `struts` (handover b)
         strutMargin = (strut["margin_worst_case"] as? NSNumber)?.doubleValue
+            ?? ((b["struts"] as? [String: Any])?["smallest_margin"] as? NSNumber)?.doubleValue
         strutNoRule = strut["uncertified"] as? Bool ?? false
         strutsPass = b["struts_pass"] as? Bool ?? false
         verdictSent = (b["verdict"] as? String).flatMap(Verdict.init(rawValue:))
@@ -315,7 +417,7 @@ public struct LatticeFileStrength: Equatable, Sendable {
             }
             return "The load lands on open lattice\(share), so nothing carries it to the anchors. " + Self.protectLoadedFace + "."
         case .noLoadPath?: return "Nothing carries the load to the anchors."
-        case .solidMargin?, nil: return nil
+        case .solidMargin?, .strutMargin?, .frameNotSolved?, .frameUnjudged?, nil: return nil
         }
     }
 
@@ -342,12 +444,20 @@ public struct LatticeFileStrength: Equatable, Sendable {
         let margin = Self.x(marginWorstCase)
         switch verdict {
         case .pass: return "Strong enough · margin \(margin)\(mass)"
-        case .solidOnly: return "Solid strong enough · margin \(margin) · struts: " + (strutsLine ?? Self.strutsNot).lowercased()
+        case .solidOnly:
+            // ★ Organic cut 2: the frame of beams could not be solved, or too little of it was judged
+            switch failReason {
+            case .frameNotSolved?: return "Solid strong enough · margin \(margin) · the struts could not be judged"
+            case .frameUnjudged?: return "Solid strong enough · margin \(margin) · too few struts could be judged"
+            default: return "Solid strong enough · margin \(margin) · struts: " + (strutsLine ?? Self.strutsNot).lowercased()
+            }
         case .fail:
             switch failReason {
             case .loadOnOpenLattice?: return "Not strong enough · the load lands on open lattice"
             case .noLoadPath?: return "Not strong enough · nothing carries the load"
-            case .solidMargin?, nil: return "Not strong enough · margin \(margin), needs \(Self.x(safetyMargin))"
+            case .strutMargin?: return "Not strong enough · struts: " + (strutsLine ?? Self.strutsNot).lowercased()
+            case .solidMargin?, .frameNotSolved?, .frameUnjudged?, nil:
+                return "Not strong enough · margin \(margin), needs \(Self.x(safetyMargin))"
             }
         }
     }
@@ -376,6 +486,7 @@ public enum LatticeFileRun {
     /// What the Mac made: the file, its report, the strength check's views beside it (fields.bin, scenario_fields.bin; only
     /// when the report names them) and the worker's own record of how long it took.
     public struct Made {
+        /// The file's bytes: an STL, or (Organic, `report.isThreeMF`) core's 3MF.
         public var stl: Data
         public var report: LatticeFileReport
         /// The report's whole JSON (the Results screen reads its `strength` block).
@@ -385,18 +496,23 @@ public enum LatticeFileRun {
         public var timing: RunTiming?
     }
 
-    /// Submit, poll, fetch: blocking, so call it off the main thread. The worker's core must be the app's (a different core lays
-    /// a different lattice than the preview drew).
-    public static func drive(config: RemoteRunnerConfig, modelPath: String, jobJSON: Data, projectName: String,
-                             demand: Data? = nil, strengthJob: Data? = nil,
-                             isCancelled: @escaping @Sendable () -> Bool = { false },
-                             onState: @escaping @Sendable (_ state: String, _ position: Int?) -> Void = { _, _ in })
-        throws -> Made {
-        let session = URLSession(configuration: {
-            let c = URLSessionConfiguration.ephemeral
-            c.timeoutIntervalForRequest = config.controlTimeout
-            return c
-        }())
+    /// The strengthening's ceiling: six rounds of a lay, a solve and a frame check (his stand: about 40 to 45 minutes).
+    public static let strengthenCeilingSeconds: TimeInterval = 4 * 3600
+
+    /// One conversation with the Mac's worker: blocking, so call it off the main thread.
+    struct Worker {
+        let config: RemoteRunnerConfig
+        let session: URLSession
+
+        init(_ config: RemoteRunnerConfig) {
+            self.config = config
+            session = URLSession(configuration: {
+                let c = URLSessionConfiguration.ephemeral
+                c.timeoutIntervalForRequest = config.controlTimeout
+                return c
+            }())
+        }
+
         func send(_ req: URLRequest) throws -> (Data, Int) {
             var out: (Data, URLResponse)?
             var err: Error?
@@ -409,17 +525,85 @@ public enum LatticeFileRun {
             guard let out else { throw Failure("The Mac did not answer (\(err?.localizedDescription ?? "no response"))") }
             return (out.0, (out.1 as? HTTPURLResponse)?.statusCode ?? 0)
         }
-        let base = config.baseURL
-        let (hd, hc) = try send(URLRequest(url: base.appendingPathComponent("health")))
-        guard hc == 200, let h = (try? JSONSerialization.jsonObject(with: hd)) as? [String: Any] else {
-            throw Failure("The Mac's worker did not answer")
-        }
-        let fp = (h["fingerprint"] as? String) ?? "unknown"
-        guard fp == config.expectedFingerprint else { throw Failure("The Mac runs a different engine: update it first") }
 
+        /// The worker's core must be the app's (a different core lays a different lattice than the preview drew).
+        func checkEngine() throws {
+            let (hd, hc) = try send(URLRequest(url: config.baseURL.appendingPathComponent("health")))
+            guard hc == 200, let h = (try? JSONSerialization.jsonObject(with: hd)) as? [String: Any] else {
+                throw Failure("The Mac's worker did not answer")
+            }
+            let fp = (h["fingerprint"] as? String) ?? "unknown"
+            guard fp == config.expectedFingerprint else { throw Failure("The Mac runs a different engine: update it first") }
+        }
+
+        /// The job sent with its parts; its URL on the Mac.
+        func submit(_ parts: [RemoteRun.UploadPart]) throws -> URL {
+            let boundary = "topopt-\(UUID().uuidString)"
+            var body = Data()
+            for p in parts {
+                var head = "Content-Disposition: form-data; name=\"\(p.name)\""
+                if let f = p.filename { head += "; filename=\"\(f)\"" }
+                if let t = p.contentType { head += "\r\nContent-Type: \(t)" }
+                body.append(Data("--\(boundary)\r\n\(head)\r\n\r\n".utf8))
+                body.append(p.data)
+                body.append(Data("\r\n".utf8))
+            }
+            body.append(Data("--\(boundary)--\r\n".utf8))
+            var post = URLRequest(url: config.baseURL.appendingPathComponent("jobs"))
+            post.httpMethod = "POST"
+            post.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+            post.httpBody = body
+            let (pd, pc) = try send(post)
+            guard pc == 202, let posted = (try? JSONSerialization.jsonObject(with: pd)) as? [String: Any],
+                  let jobID = posted["job_id"] as? String else {
+                throw Failure("The Mac refused the job: \(String(data: pd, encoding: .utf8)?.prefix(120) ?? "")")
+            }
+            return config.baseURL.appendingPathComponent("jobs").appendingPathComponent(jobID)
+        }
+
+        /// Polls the job to its end; its last record. A cancel deletes the Mac's job; a failure says the CLI's last line.
+        func wait(_ jobURL: URL, ceiling: TimeInterval, failed: String, isCancelled: @Sendable () -> Bool,
+                  onState: @Sendable (_ state: String, _ position: Int?) -> Void) throws -> [String: Any] {
+            let deadline = Date().addingTimeInterval(ceiling)
+            var record: [String: Any] = [:]
+            while Date() < deadline {
+                if isCancelled() {
+                    var del = URLRequest(url: jobURL)
+                    del.httpMethod = "DELETE"
+                    _ = try? send(del)
+                    throw Failure("Cancelled")
+                }
+                let (d, code) = try send(URLRequest(url: jobURL))
+                guard code == 200, let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else {
+                    throw Failure("Lost the job on the Mac")
+                }
+                let state = (o["state"] as? String) ?? "unknown"
+                record = o
+                onState(state, o["position"] as? Int)   // queued (and how many ahead) or running
+                if state == "done" { return record }
+                if state == "failed" || state == "error" || state == "cancelled" {
+                    // the CLI's last line carries the same plain why as its report (the contract)
+                    let why = ((o["message"] as? String) ?? "").split(separator: "\n").last.map(String.init) ?? ""
+                    throw Failure(why.isEmpty ? failed : why)
+                }
+                Thread.sleep(forTimeInterval: pollSeconds)
+            }
+            throw Failure("The Mac did not finish within \(Int(ceiling / 60)) minutes")
+        }
+
+        /// One of the job's files (`name` may be a round's: "r3/strengthened.json"), or nil.
+        func file(_ jobURL: URL, _ name: String) -> Data? {
+            var url = jobURL.appendingPathComponent("files")
+            for c in name.split(separator: "/") { url = url.appendingPathComponent(String(c)) }
+            guard let (d, c) = try? send(URLRequest(url: url)), c == 200, !d.isEmpty else { return nil }
+            return d
+        }
+    }
+
+    /// The parts every lattice file job sends: the model and job, and the files beside it.
+    static func parts(modelPath: String, jobJSON: Data, projectName: String, demand: Data?, strengthJob: Data?, tensor: Data?,
+                      strengthened: Strengthened.Files?) throws -> [RemoteRun.UploadPart] {
         let model = try Data(contentsOf: URL(fileURLWithPath: modelPath))
-        let boundary = "topopt-\(UUID().uuidString)"
-        var body = Data()
         var parts = RemoteRun.uploadParts(modelPath: modelPath, model: model, jobJSON: jobJSON, projectName: projectName)
         // ★ Install 2: the stress result beside the job (the worker saves the "demand" part as demand.bin)
         if let demand {
@@ -431,69 +615,127 @@ public enum LatticeFileRun {
             parts.append(RemoteRun.UploadPart(name: "strength_job", filename: LatticeFileJob.strengthJobName,
                                               contentType: "application/json", data: strengthJob))
         }
-        for p in parts {
-            var head = "Content-Disposition: form-data; name=\"\(p.name)\""
-            if let f = p.filename { head += "; filename=\"\(f)\"" }
-            if let t = p.contentType { head += "\r\nContent-Type: \(t)" }
-            body.append(Data("--\(boundary)\r\n\(head)\r\n\r\n".utf8))
-            body.append(p.data)
-            body.append(Data("\r\n".utf8))
+        // ★ Organic cut 2: the stress the weave follows (the worker saves the "tensor" part as tensor.bin)
+        if let tensor {
+            parts.append(RemoteRun.UploadPart(name: "tensor", filename: LatticeFileJob.tensorName,
+                                              contentType: "application/octet-stream", data: tensor))
         }
-        body.append(Data("--\(boundary)--\r\n".utf8))
-        var post = URLRequest(url: base.appendingPathComponent("jobs"))
-        post.httpMethod = "POST"
-        post.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        post.httpBody = body
-        let (pd, pc) = try send(post)
-        guard pc == 202, let posted = (try? JSONSerialization.jsonObject(with: pd)) as? [String: Any],
-              let jobID = posted["job_id"] as? String else {
-            throw Failure("The Mac refused the job: \(String(data: pd, encoding: .utf8)?.prefix(120) ?? "")")
+        // ★ Organic cut 2 (handover f4): the strengthened lattice to make, its two files (the worker names them in the job)
+        if let s = strengthened {
+            parts.append(RemoteRun.UploadPart(name: "strengthened", filename: "strengthened.json",
+                                              contentType: "application/json", data: s.json))
+            parts.append(RemoteRun.UploadPart(name: "strengthened_additions", filename: s.additionsName,
+                                              contentType: "application/octet-stream", data: s.additions))
         }
+        return parts
+    }
 
-        let jobURL = base.appendingPathComponent("jobs").appendingPathComponent(jobID)
-        let deadline = Date().addingTimeInterval(ceilingSeconds)
-        var state = "queued"
-        var record: [String: Any] = [:]
-        while Date() < deadline {
-            if isCancelled() {
-                var del = URLRequest(url: jobURL)
-                del.httpMethod = "DELETE"
-                _ = try? send(del)
-                throw Failure("Cancelled")
-            }
-            let (d, code) = try send(URLRequest(url: jobURL))
-            guard code == 200, let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else {
-                throw Failure("Lost the job on the Mac")
-            }
-            state = (o["state"] as? String) ?? "unknown"
-            record = o
-            onState(state, o["position"] as? Int)   // queued (and how many ahead) or running
-            if state == "done" { break }
-            if state == "failed" || state == "error" || state == "cancelled" {
-                // the CLI's last line carries the same plain why as lattice_file.json (the contract)
-                let why = ((o["message"] as? String) ?? "").split(separator: "\n").last.map(String.init) ?? ""
-                throw Failure(why.isEmpty ? "The file could not be made" : why)
-            }
-            Thread.sleep(forTimeInterval: pollSeconds)
-        }
-        guard state == "done" else { throw Failure("The file was not made within \(Int(ceilingSeconds / 60)) minutes") }
-        func file(_ name: String) -> Data? {
-            guard let (d, c) = try? send(URLRequest(url: jobURL.appendingPathComponent("files").appendingPathComponent(name))),
-                  c == 200, !d.isEmpty else { return nil }
-            return d
-        }
-        guard let rd = file(LatticeFileJob.reportName), let report = LatticeFileReport.parse(rd) else {
+    /// Submit, poll, fetch: blocking, so call it off the main thread. The worker's core must be the app's (a different core lays
+    /// a different lattice than the preview drew). ★ Organic cut 2: `strengthened` = the strengthening's last round, replayed.
+    public static func drive(config: RemoteRunnerConfig, modelPath: String, jobJSON: Data, projectName: String,
+                             demand: Data? = nil, strengthJob: Data? = nil, tensor: Data? = nil,
+                             strengthened: Strengthened.Files? = nil,
+                             isCancelled: @escaping @Sendable () -> Bool = { false },
+                             onState: @escaping @Sendable (_ state: String, _ position: Int?) -> Void = { _, _ in })
+        throws -> Made {
+        let w = Worker(config)
+        try w.checkEngine()
+        let jobURL = try w.submit(try parts(modelPath: modelPath, jobJSON: jobJSON, projectName: projectName, demand: demand,
+                                            strengthJob: strengthJob, tensor: tensor, strengthened: strengthened))
+        let record = try w.wait(jobURL, ceiling: ceilingSeconds, failed: "The file could not be made", isCancelled: isCancelled,
+                                onState: onState)
+        guard let rd = w.file(jobURL, LatticeFileJob.reportName), let report = LatticeFileReport.parse(rd) else {
             throw Failure("The Mac made the file but its report could not be read")
         }
         guard report.ok else { throw Failure(report.why.isEmpty ? "The file could not be made" : report.why) }
-        guard let stl = file(LatticeFileJob.outputName) else { throw Failure("The Mac made the file but it could not be fetched") }
+        // the file by the name the report gives (Organic: lattice.3mf), else the job's own output
+        guard let stl = w.file(jobURL, report.fileName) else { throw Failure("The Mac made the file but it could not be fetched") }
         // ★ Install 3: the strength check's views, by the names its block gives (bare names beside the report); enrichment —
         // a missing one leaves the views gated, never the result
-        func named(_ n: String?) -> Data? { n.flatMap { $0.contains("/") || $0.contains("..") ? nil : file($0) } }
+        func named(_ n: String?) -> Data? { n.flatMap { $0.contains("/") || $0.contains("..") ? nil : w.file(jobURL, $0) } }
         return Made(stl: stl, report: report, reportJSON: rd, fields: named(report.strength?.fields),
                     scenarioFields: named(report.strength?.scenarioFields),
                     timing: RunTiming.fromWorker(createdAt: record["created_at"] as? Double, startedAt: record["started_at"] as? Double,
                                                  finishedAt: record["finished_at"] as? Double))
+    }
+
+    /// ★ Organic cut 2 (handover f3; his 11-18 "Strengthen by adding ... Yes, absolutely"): what the strengthening did
+    /// (`strengthen.json`), and its last round's lattice to make (strengthened.json and the additions it names).
+    public struct Strengthened: Sendable {
+        public struct Files: Sendable, Equatable {
+            public var json: Data
+            public var additionsName: String
+            public var additions: Data
+        }
+        /// done (passes), limit (rounds used up), nothing_to_vary, frame_not_solved: core's word.
+        public var code: String
+        public var why: String
+        public var passing: Bool
+        public var rounds: Int
+        /// Struts widened past his upper width (the cap's doing), the widest: say it whenever above 0.
+        public var pastLimitStruts: Int
+        public var pastLimitWidestMM: Double
+        public var files: Files?
+        public var summaryJSON: Data
+
+        /// strengthen.json read (the files fetched apart). nil: not core's strengthen.json.
+        public static func parse(_ d: Data) -> (summary: Strengthened, lastRound: String?)? {
+            guard let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any], o["code"] != nil else { return nil }
+            let rounds = o["rounds"] as? [[String: Any]] ?? []
+            var past = 0
+            var widest = 0.0
+            for r in rounds {
+                let lim = ((r["added"] as? [String: Any])?["limit"] as? [String: Any])?["past_limit"] as? [String: Any]
+                past = Swift.max(past, (lim?["struts"] as? NSNumber)?.intValue ?? 0)
+                widest = Swift.max(widest, (lim?["widest_mm"] as? NSNumber)?.doubleValue ?? 0)
+            }
+            let s = Strengthened(code: o["code"] as? String ?? "", why: o["why"] as? String ?? "",
+                                 passing: o["passing"] as? Bool ?? false, rounds: rounds.count, pastLimitStruts: past,
+                                 pastLimitWidestMM: widest, files: nil, summaryJSON: d)
+            return (s, o["strengthened"] as? String)
+        }
+
+        /// One plain line: what the strengthening did.
+        public var line: String {
+            let r = rounds == 1 ? "1 round" : "\(rounds) rounds"
+            var out = passing ? "Strengthened in \(r): the struts keep the margin" : "Strengthened \(r): some struts still short"
+            if pastLimitStruts > 0 {
+                out += String(format: " · %d past your thickest strut (up to %.2f mm)", pastLimitStruts, pastLimitWidestMM)
+            }
+            return out
+        }
+    }
+
+    /// ★ Organic cut 2 (handover f3): the strengthening on the Mac — the SAME lattice_file job through `organic-strengthen`
+    /// (the worker's `run` field) — then its last round's two files fetched for the file job to replay. Blocking.
+    public static func strengthen(config: RemoteRunnerConfig, modelPath: String, jobJSON: Data, projectName: String,
+                                  strengthJob: Data, tensor: Data?,
+                                  isCancelled: @escaping @Sendable () -> Bool = { false },
+                                  onState: @escaping @Sendable (_ state: String, _ position: Int?) -> Void = { _, _ in })
+        throws -> Strengthened {
+        let w = Worker(config)
+        try w.checkEngine()
+        var p = try parts(modelPath: modelPath, jobJSON: jobJSON, projectName: projectName, demand: nil, strengthJob: strengthJob,
+                          tensor: tensor, strengthened: nil)
+        p.append(RemoteRun.UploadPart(name: "run", filename: nil, contentType: nil, data: Data("organic-strengthen".utf8)))
+        let jobURL = try w.submit(p)
+        _ = try w.wait(jobURL, ceiling: strengthenCeilingSeconds, failed: "The lattice could not be strengthened",
+                       isCancelled: isCancelled, onState: onState)
+        guard let sd = w.file(jobURL, "strengthen.json"), let read = Strengthened.parse(sd) else {
+            throw Failure("The Mac strengthened the lattice but its report could not be read")
+        }
+        var s = read.summary
+        // the last round's lattice: strengthened.json and the additions it names (bare names, beside it)
+        if let last = read.lastRound, !last.contains(".."), let json = w.file(jobURL, last),
+           let doc = (try? JSONSerialization.jsonObject(with: json)) as? [String: Any],
+           let name = doc["additions"] as? String, !name.contains("/"), !name.contains("..") {
+            let folder = (last as NSString).deletingLastPathComponent
+            guard let adds = w.file(jobURL, folder.isEmpty ? name : folder + "/" + name) else {
+                throw Failure("The Mac strengthened the lattice but its additions could not be fetched")
+            }
+            s.files = Strengthened.Files(json: json, additionsName: name, additions: adds)
+        }
+        return s
     }
 }
 
@@ -514,18 +756,30 @@ public enum LatticeFileButton {
     /// The run's mode on the new engine (the request the run carries says which engine made it).
     public static let jobMode = "lattice_file"
 
-    /// Whether this part's Lattice goes to the new engine: a regular lattice (not Organic) on a STEP part, the switch on.
+    /// Whether this part's Lattice goes to the new engine: a regular lattice, or (★ Organic cut 2, his 11-18 "Export as its own
+    /// install") an Organic one, on a STEP part, the switch on.
     public static func takes(_ l: LatticeSettings, modelPath: String?, wired: Bool = wired) -> Bool {
         guard wired, let p = modelPath?.lowercased(), p.hasSuffix(".step") || p.hasSuffix(".stp") else { return false }
-        return l.resolvedAlgorithm != "organic"   // (LatticeLayoutPreview.draws)
+        return true
     }
 
     /// The Results screen's one result from what the Mac made. Structural: the strength check's verdict, margins, mass, views
     /// (`accepted` is the old gate's: a "fail" lands as the not-strong-enough card, the file kept); its `strength` block rides as
     /// the outcome's report, so the Strength tab says what the struts did. Aesthetic: never checked (U9) — nothing to refuse,
     /// no margin claimed, the weight from the file's own volume.
-    public static func outcome(_ m: LatticeFileRun.Made, densityGCm3: Double) throws -> OptimizeOutcome {
-        let mesh = MeshExport.parseBinarySTL(m.stl)
+    ///
+    /// ★ Organic cut 2 (his certify wizard, 11-19): an Organic part that does not certify is SHOWN, not refused — the Results
+    /// screen walks him through why, pinned to the part (`OrganicCertify`). Its verdict stays its own (`v3Passes`, the checks'
+    /// "Not strong enough"); the weak spots' voxels (fields.bin block 3) ride in the report for the wizard's colour and outline.
+    public static func outcome(_ m: LatticeFileRun.Made, densityGCm3: Double, organic: Bool = false) throws -> OptimizeOutcome {
+        // ★ Organic cut 2: core's 3MF read back by its own small reader; an STL as before
+        let mesh: (vertices: [Float], indices: [Int32])
+        if m.report.isThreeMF {
+            do { mesh = try CoreThreeMF.mesh(m.stl) } catch { throw LatticeFileRun.Failure("\(error)") }
+        } else {
+            let s = MeshExport.parseBinarySTL(m.stl)
+            mesh = (s.vertices, s.indices)
+        }
         guard !mesh.vertices.isEmpty, !mesh.indices.isEmpty else {
             throw LatticeFileRun.Failure("The Mac made the file but it could not be read")
         }
@@ -533,7 +787,9 @@ public enum LatticeFileButton {
         let fields = m.fields.flatMap(RemoteFieldsContainer.parse)
         let block = fields?.variants.first
         let fraction = m.report.partMM3 > 0 ? m.report.plasticMM3 / m.report.partMM3 : 0
-        let accepted = s?.accepted ?? true
+        let passes = s?.accepted ?? true
+        let accepted = organic || passes
+        let reportJSON = organic ? withSpots(m.reportJSON, fields: fields) : m.reportJSON
         let grams = s.flatMap { $0.massGrams > 0 ? $0.massGrams : nil } ?? m.report.plasticMM3 / 1000 * densityGCm3
         // ★ a fail with no load path (a load on open lattice): the not-strong-enough card says so INSTEAD of a margin sentence
         // (its load-path wording), with core's reason in plain words and the fix; a margin fail keeps core's own diagnosis
@@ -547,9 +803,9 @@ public enum LatticeFileButton {
                                  minFeatureViolations: 0, inheritsUnsourcedZKnockdown: false, provenance: d?.provenance ?? "",
                                  noSettingFixesThis: true, noFixReason: why, headroomMinInfillPercent: nil, recommendations: [])
         }
-        if let s, !accepted, let why = s.noPathLine {
+        if let s, !passes, let why = s.noPathLine {
             diagnosis = said(.loadPath, why, s)
-        } else if let s, !accepted, s.failReason == nil, s.notCertified, s.diagnosis == nil {
+        } else if let s, !passes, s.failReason == nil, s.notCertified, s.diagnosis == nil {
             // ★ LatticeReview 11-17 18:34Z: a fail none of the three reasons covers (anchors held only by sliding; no solid
             // carries load) has no fail_reason — the check's own not-certified words, in one plain line
             diagnosis = said(.none, LatticeFileStrength.notCertifiedLine(s.notCertifiedReason), s)
@@ -558,7 +814,7 @@ public enum LatticeFileButton {
             requestedVolumeFraction: fraction, achievedVolumeFraction: fraction,
             massGrams: grams, supportVolumeVoxels: block?.supportVolumeVoxels ?? 0,
             meshTriangleCount: mesh.indices.count / 3,
-            worstCaseMargin: s?.marginWorstCase ?? 0, accepted: accepted, v3Passes: accepted,
+            worstCaseMargin: s?.marginWorstCase ?? 0, accepted: accepted, v3Passes: passes,
             orientation: s?.buildDirection ?? SIMD3(0, 0, 1),
             maxStressMPa: s?.maxEffectiveVonMisesMPa ?? 0, maxInterlayerTensionMPa: s?.maxInterlayerTensionMPa ?? 0,
             inPlaneMargin: s?.marginInPlane ?? 0, interlayerMargin: s?.marginInterlayer ?? 0,
@@ -573,7 +829,20 @@ public enum LatticeFileButton {
                                voxelVolumeMM3: fields?.voxelVolumeMM3 ?? 0,
                                gridNx: fields?.gridNx ?? 0, gridNy: fields?.gridNy ?? 0, gridNz: fields?.gridNz ?? 0,
                                gridOrigin: fields?.gridOrigin ?? .zero, spacing: fields?.spacing ?? 0,
-                               computedRemotely: true, timing: m.timing, reportJSON: m.reportJSON)
+                               computedRemotely: true, timing: m.timing, reportJSON: reportJSON)
+    }
+
+    /// ★ Organic cut 2: the report with the listed weak spots' voxels (`OrganicSpotGrid`, from fields.bin's spot-id block,
+    /// requested_volume_fraction -2) — kept with the result, so the wizard colours and outlines them whenever it is opened.
+    static func withSpots(_ report: Data, fields: RemoteFieldsContainer?) -> Data {
+        guard let f = fields, let ids = f.variants.first(where: { $0.requestedVF == -2 })?.vonMises,
+              var o = (try? JSONSerialization.jsonObject(with: report)) as? [String: Any],
+              let solid = (o["strength"] as? [String: Any])?["solid_margin"] as? [String: Any] else { return report }
+        let listed = Set((solid["spots"] as? [[String: Any]] ?? []).compactMap { ($0["id"] as? NSNumber)?.intValue })
+        guard let g = OrganicSpotGrid.from(ids: ids, nx: f.gridNx, ny: f.gridNy, nz: f.gridNz, origin: f.gridOrigin,
+                                            spacing: f.spacing, listed: listed) else { return report }
+        o[OrganicSpotGrid.reportKey] = g.json
+        return (try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys])) ?? report
     }
 
     private final class Progress: @unchecked Sendable {
@@ -589,10 +858,46 @@ public enum LatticeFileButton {
             let keepGoing = Progress(progress)
             _ = keepGoing.call(0, 1, 0)
             let made = try LatticeFileRun.drive(config: config, modelPath: job.modelPath, jobJSON: job.json, projectName: projectName,
-                                                demand: job.demand, strengthJob: strengthJob,
+                                                demand: job.demand, strengthJob: strengthJob, tensor: job.tensor,
                                                 isCancelled: { !keepGoing.call(0, 1, 0) })
             return try outcome(made, densityGCm3: densityGCm3)
         }
+    }
+
+    /// ★ ORGANIC CUT 2 (handover f; his 11-18: "Strengthen by adding ... Yes, absolutely", the additive loop the default): an
+    /// Organic part on the Mac. Structural (the check sent): the lattice is STRENGTHENED first (`organic-strengthen`), then the
+    /// file is made from its last round (replayed) with the check, so the verdict is the strengthened file's own; Aesthetic: the
+    /// file alone. The strengthening's summary rides in the result's report as its `organic_strengthen` block (the Results
+    /// screen and the certify wizard read it). Two coarse ticks: strengthening, then making.
+    public static func organicRunner(config: RemoteRunnerConfig, job: LatticeFileJob.ForPart, projectName: String,
+                                     strengthJob: Data?, densityGCm3: Double) -> RunModel.Runner {
+        { _, progress, _ in
+            let keepGoing = Progress(progress)
+            let steps = strengthJob == nil ? 1 : 2
+            _ = keepGoing.call(0, steps, 0)
+            var strengthened: LatticeFileRun.Strengthened?
+            if let strengthJob {
+                strengthened = try LatticeFileRun.strengthen(config: config, modelPath: job.modelPath, jobJSON: job.json,
+                                                             projectName: projectName, strengthJob: strengthJob, tensor: job.tensor,
+                                                             isCancelled: { !keepGoing.call(0, steps, 0) })
+                _ = keepGoing.call(1, steps, 0)
+            }
+            var made = try LatticeFileRun.drive(config: config, modelPath: job.modelPath, jobJSON: job.json, projectName: projectName,
+                                                strengthJob: strengthJob, tensor: job.tensor, strengthened: strengthened?.files,
+                                                isCancelled: { !keepGoing.call(steps - 1, steps, 0) })
+            if let s = strengthened { made.reportJSON = withStrengthen(made.reportJSON, s) }
+            return try outcome(made, densityGCm3: densityGCm3, organic: true)
+        }
+    }
+
+    /// The file's report with the strengthening's summary added as `organic_strengthen` (an app-side block; core's keys
+    /// untouched; NOT `strengthen`, which the Results screen reads as Flexible's redesign-to-strengthen block).
+    public static let strengthenKey = "organic_strengthen"
+    static func withStrengthen(_ report: Data, _ s: LatticeFileRun.Strengthened) -> Data {
+        guard var o = (try? JSONSerialization.jsonObject(with: report)) as? [String: Any],
+              let sum = try? JSONSerialization.jsonObject(with: s.summaryJSON) else { return report }
+        o[strengthenKey] = sum
+        return (try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys])) ?? report
     }
 
     /// ★ THE iPAD ONLY OPTION (his 11-17: "Not everyone will have a mac, definitely include an iPad only option"): with Runs on
@@ -640,6 +945,11 @@ public enum LatticeFileButton {
             try beside(name, s)
             doc["strength_job"] = name
         }
+        if let t = job.tensor {   // ★ Organic cut 2 (the app makes Organic on a Mac; the tests make it here)
+            let name = "lattice_file_tensor-\(tag).bin"
+            try beside(name, t)
+            doc["tensor"] = name
+        }
         let jobName = "lattice_file_job-\(tag).json"
         try beside(jobName, try JSONSerialization.data(withJSONObject: doc, options: [.sortedKeys]))
         let r = try LatticeLayoutSession.runFileJob(jobPath: dir.appendingPathComponent(jobName).path, outDir: outDir.path,
@@ -655,7 +965,7 @@ public enum LatticeFileButton {
             throw LatticeFileRun.Failure(said)
         }
         guard report.ok else { throw LatticeFileRun.Failure(report.why.isEmpty ? said : report.why) }
-        guard let stl = file(LatticeFileJob.outputName) else { throw LatticeFileRun.Failure("The file was made but could not be read") }
+        guard let stl = file(report.fileName) else { throw LatticeFileRun.Failure("The file was made but could not be read") }
         return LatticeFileRun.Made(stl: stl, report: report, reportJSON: rd, fields: report.strength?.fields.flatMap(file),
                                    scenarioFields: report.strength?.scenarioFields.flatMap(file), timing: nil)
     }
@@ -676,6 +986,11 @@ public final class LatticeFileExport: ObservableObject {
     @Published public private(set) var onMac: (state: String, ahead: Int?)?
     public static let noMacLine = "Choose a Mac to make the print file"
     public static let checkLine = "Check it in your slicer before printing"
+    public static let supportsOffLine = LatticeFileJob.supportsOffLine
+    /// ★ Organic cut 2: the file is the lattice the preview laid; none laid yet, nothing to make.
+    public static let organicNoLayLine = "Let the Organic preview finish first: the file is the lattice it shows"
+    /// ★ His 11-17 ("Preview only for now"): an Organic part is made on a Mac.
+    public static let organicNeedsMacLine = "Making an Organic part needs a Mac: choose one in Runs on"
     /// ★ Install 2: By stress with no stress result — one line, and the bar offers the check itself.
     public static let noStressLine = "Grading by stress needs the stress check first"
     @Published public private(set) var needsStressCheck = false
@@ -692,18 +1007,24 @@ public final class LatticeFileExport: ObservableObject {
     public init() {}
 
     /// Make the print file for this part, with the preview's own settings, on the chosen Mac.
+    /// ★ Organic cut 2: `organic` = the groups the preview's exact lay laid and the stress it followed (none laid: empty).
     public func make(project p: ProjectModel, config: RemoteRunnerConfig?, stress: LatticeLayoutPreview.Stress = .init(),
-                     strengthJob: Data? = nil) {
+                     strengthJob: Data? = nil,
+                     organic: (groups: [LatticeLayoutSession.OrganicGroup], tensor: Data)? = nil) {
         needsStressCheck = false
-        guard let config else { state = .failed(Self.noMacLine); return }
+        guard let config else { state = .failed(organic == nil ? Self.noMacLine : Self.organicNeedsMacLine); return }
         let job: LatticeFileJob.ForPart
-        switch LatticeFileJob.forPart(p, stress: stress, strengthJob: strengthJob) {
+        let built = organic.map {
+            LatticeFileJob.forOrganic(p, groups: $0.groups, tensor: $0.tensor, referenceMPa: stress.referenceMPa,
+                                      strengthJob: strengthJob)
+        } ?? LatticeFileJob.forPart(p, stress: stress, strengthJob: strengthJob)
+        switch built {
         case .success(let j): job = j
         case .failure(let why):
             needsStressCheck = why.line == Self.noStressLine
             state = .failed(why.line); return
         }
-        let path = job.modelPath, demand = job.demand
+        let path = job.modelPath, demand = job.demand, tensor = job.tensor
         let name = p.name, f = Flag()
         flag = f
         token &+= 1
@@ -712,7 +1033,7 @@ public final class LatticeFileExport: ObservableObject {
         Task.detached {
             let outcome: Result<LatticeFileRun.Made, Error> = Result {
                 try LatticeFileRun.drive(config: config, modelPath: path, jobJSON: job.json, projectName: name, demand: demand,
-                                         strengthJob: strengthJob,
+                                         strengthJob: strengthJob, tensor: tensor,
                                          isCancelled: { f.get() },
                                          onState: { st, pos in
                                              Task { @MainActor [weak self] in
@@ -724,7 +1045,8 @@ public final class LatticeFileExport: ObservableObject {
             var saved: Result<URL, Error>?
             if case let .success(r) = outcome {
                 let safe = name.replacingOccurrences(of: "/", with: "-").trimmingCharacters(in: .whitespaces)
-                let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(safe.isEmpty ? "Part" : safe) lattice.stl")
+                let ext = r.report.isThreeMF ? "3mf" : "stl"   // ★ Organic cut 2: core's 3MF
+                let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(safe.isEmpty ? "Part" : safe) lattice.\(ext)")
                 saved = Result { try r.stl.write(to: url, options: .atomic); return url }
             }
             await MainActor.run { [weak self] in

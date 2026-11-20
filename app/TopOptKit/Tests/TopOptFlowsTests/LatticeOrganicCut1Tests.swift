@@ -37,8 +37,20 @@ final class LatticeOrganicCut1Tests: XCTestCase {
         s9.regions[0].depthMM = 9
         let all9 = try await session.sweepLimits(s9, lineMM: 0.45)
         let small = LatticeOrganicLook.Limits(try XCTUnwrap(all9.first))
-        XCTAssertEqual(small.cellLowerMM, 1.5, accuracy: 1e-6, "never under Organic's print floor (1.38 mm at a 0.45 line)")
+        // cut 2 (OG1, the gap rule): never under the cell that leaves 1.5 lines (0.675 mm) between 0.9 mm struts, 2 mm
+        // (the print floor, 1.5 mm, is under it)
+        XCTAssertEqual(small.gapMM, 0.675, accuracy: 1e-6, "★ the engine's gap between struts")
+        XCTAssertEqual(small.cellLowerMM, 2, accuracy: 1e-6, "★ never under the cell that leaves the gap")
         XCTAssertEqual(small.cellUpperMM, 4, accuracy: 1e-6)
+        // ★ Look at 100 % halves the range but never goes under the engine's floor (it would refuse the Auto lay)
+        XCTAssertEqual(small.looked(percent: 100).cellLowerMM, 2, accuracy: 1e-6, "★ Look keeps the gap floor")
+        var noGap = small
+        noGap.gapMM = 0
+        XCTAssertEqual(noGap.looked(percent: 100).cellLowerMM, 1.5, accuracy: 1e-6, "RED CONTROL: without the gap, the print floor")
+        XCTAssertNotNil(LatticeOrganicLook.Check.cell(small: 1.5, large: 4, thinStrutMM: 0.9, gapMM: 0.675),
+                        "★ a typed 1.5 mm is refused as the engine refuses it (under_gap_cell)")
+        XCTAssertNil(LatticeOrganicLook.Check.cell(small: 2, large: 4, thinStrutMM: 0.9, gapMM: 0.675))
+        XCTAssertNil(LatticeOrganicLook.Check.cell(small: 1.5, large: 4, thinStrutMM: 0.9), "RED CONTROL: no gap rule, 1.5 prints")
     }
 
     /// ★ His 11-18 "a choice between stress and shape gradient or shape gradient alone": the Gradient line is shown and
@@ -142,6 +154,37 @@ final class LatticeOrganicCut1Tests: XCTestCase {
         XCTAssertEqual(Array(seg.bars), [0, 0, 0, 1, 2, 3, 1.3])
         XCTAssertEqual(seg.cell, [4.5], "a strut's cell size: its points' spacing"); XCTAssertEqual(seg.region, [7])
         XCTAssertNil(LatticeLayoutSession.runs(packed: Array(b.prefix(30))), "RED CONTROL: a short packet is refused")
+    }
+
+    /// ★ Packed version 2 (the cut 2 engine; LatticeReview 11-20 03:54Z, final for the skin leg): "WRN2", u32 2, then per run
+    /// 28 bytes (the pad now the section; proud_a, proud_b, along_face, proud_mm), per point the file's ring width.
+    @MainActor
+    func testVersionTwoRunsReadBack() throws {
+        var b: [UInt8] = Array("WRN2".utf8)
+        func u32(_ v: UInt32) { withUnsafeBytes(of: v.littleEndian) { b.append(contentsOf: $0) } }
+        func f(_ v: Float) { u32(v.bitPattern) }
+        u32(2)
+        u32(2); u32(7); b.append(contentsOf: [8, 0, 2, 1])   // 2 points, region 7, the net, Node / Surface, the D
+        f(0); f(0.4); u32(UInt32(bitPattern: 20)); f(0.6)
+        for p: [Float] in [[0, 0, 0, 1.2, 4], [1, 2, 3, 1.4, 5]] { p.forEach(f) }
+        u32(1); u32(9); b.append(contentsOf: [16, 1, 1, 2 | 4 | 8])   // bit 2 swept (OV1), bit 3 held: neither is the section
+        f(0); f(0); u32(UInt32(bitPattern: -1)); f(0)
+        [5, 5, 5, 0.9, 3].forEach { f(Float($0)) }
+        let runs = try XCTUnwrap(LatticeLayoutSession.runs(packed: b), "★ version 2 reads")
+        XCTAssertEqual(runs.count, 2)
+        XCTAssertEqual(runs[0].marks, .net); XCTAssertEqual(runs[0].endB, 2)
+        XCTAssertEqual(runs[0].section, 1, "★ the section byte")
+        XCTAssertEqual(runs[0].proudA, 0); XCTAssertEqual(runs[0].proudB, 0.4, accuracy: 1e-6)
+        XCTAssertEqual(runs[0].alongFace, 20); XCTAssertEqual(runs[0].proudMM, 0.6, accuracy: 1e-6)
+        XCTAssertTrue(runs[0].standsProud)
+        XCTAssertEqual(runs[0].widthMM, [1.2, 1.4], "the file's ring widths"); XCTAssertEqual(runs[0].spacingMM, [4, 5])
+        XCTAssertEqual(runs[1].marks, .along); XCTAssertEqual(runs[1].section, 2); XCTAssertEqual(runs[1].alongFace, -1)
+        XCTAssertTrue(runs[1].swept, "★ bit 2: the file's swept centre line (OV1)"); XCTAssertFalse(runs[0].swept)
+        XCTAssertFalse(runs[1].standsProud)
+        var bad = b
+        bad[4] = 3
+        XCTAssertNil(LatticeLayoutSession.runs(packed: bad), "RED CONTROL: another version is refused, never misread")
+        XCTAssertNil(LatticeLayoutSession.runs(packed: Array(b.prefix(40))), "RED CONTROL: a short packet is refused")
     }
 
     /// ★ The key and the card read Organic's struts (no cells): the net skin is boundary work (the rim blue), a strut's
@@ -330,7 +373,7 @@ final class LatticeOrganicCut1Tests: XCTestCase {
         let refused = try await session.layOrganic(s, groups: [groups[0], .init(regions: [2], ask: tiny.ask(limits: lim))])
         let r = try XCTUnwrap(refused.refused.first, "RED CONTROL: a 1 mm cell end is refused")
         XCTAssertEqual(r.group, 1, "★ the refusal names the group")
-        XCTAssertEqual(r.code, "under_smallest_cell")
+        XCTAssertEqual(r.code, "under_gap_cell", "cut 2 (OG1): a 1 mm cell cannot leave the gap between 0.9 mm struts")
         XCTAssertTrue(r.text.hasPrefix("Cell size:"), "a plain sentence, whole: \(r.text)")
     }
 

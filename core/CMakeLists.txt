@@ -155,6 +155,8 @@ add_library(topopt
   src/simp/observability.cpp
   src/fea/hex_element.cpp
   src/fea/beam_network.cpp
+  # Brief E2, item 1: the sparse symmetric solve as one call (Accelerate LDLT, Eigen SimplicialLDLT elsewhere).
+  src/fea/sparse_ldlt.cpp
   src/fea/lattice.cpp
   src/fea/strut_cell.cpp
   src/fea/lattice_types.cpp
@@ -173,18 +175,29 @@ add_library(topopt
   src/lattice_layout/session.cpp
   src/lattice_layout/organic.cpp
   src/lattice_layout/organic_finish.cpp
+  src/lattice_layout/organic_sweep.cpp
   src/lattice_layout/organic_grow.cpp
   src/lattice_layout/solid_mesh.cpp
   src/lattice_layout/print_check.cpp
   src/lattice_layout/weave_sags.cpp
   # Brief L2: the Organic preview (runs, the draft lay, the Auto Sweep limits).
   src/lattice_layout/organic_preview.cpp
+  # Organic cut 2 (brief E1): the weave as closed shells beside the solid, never joined (OF2, OF3).
+  src/lattice_layout/weave_tubes.cpp
   src/lattice_layout/organic_synthetic.cpp
   # The lattice file job (docs/design/lattice-rebuild/04-layout-file-job.md): job.json ->
   # layout -> mesh -> STL. `topopt-cli lattice-file` is its only caller in core.
   src/lattice_layout/file_job.cpp
   # Install 3: the lattice the strength check sees (rule V4); the check itself is run_job.cpp's.
   src/lattice_layout/strength.cpp
+  # Brief E2, Part A: the Organic strength check, a frame of beams (lattice_layout_frame.hpp).
+  src/lattice_layout/frame_check.cpp
+  # Brief E2, Part B: the width floors, their file and strengthened.json (the job key "strengthened").
+  src/lattice_layout/organic_floors.cpp
+  # Brief E3a: strengthening by adding (the additions, their file and replay, the old-bar invariant).
+  src/lattice_layout/organic_additions.cpp
+  # Brief E9, rule OG5: no Organic bar outside the part or through protected solid.
+  src/lattice_layout/organic_guard.cpp
   # Install 3, rule D23: the faces a region runs into that no rule decides (places).
   src/lattice_layout/places.cpp
   src/orient/orient.cpp
@@ -236,6 +249,14 @@ endif()
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 target_link_libraries(topopt PUBLIC Threads::Threads)
+
+# ★ ZLIB (brief E1, OF5): the streaming 3MF writer deflates its model part through the system zlib, which the macOS
+# and iOS SDKs both carry. Not found: the part is stored (uncompressed), and the file job's result says so.
+find_package(ZLIB QUIET)
+if(ZLIB_FOUND)
+  target_link_libraries(topopt PRIVATE ZLIB::ZLIB)
+  target_compile_definitions(topopt PRIVATE TOPOPT_HAVE_ZLIB)
+endif()
 
 # ★ ACCELERATE: the direct sparse Cholesky in src/fea/beam_network.cpp. The coupled
 # beam/shell/solid system is SPD once the corner-hinged solid islands are dropped,
@@ -345,6 +366,8 @@ if(Eigen3_FOUND)
   # driver. CI has Eigen (DEPS=ON), so it always builds in CI.
   target_sources(topopt PRIVATE src/simp/production.cpp)
   target_link_libraries(topopt PRIVATE Eigen3::Eigen)
+  # Brief E2, item 1: sparse_ldlt.cpp's Eigen SimplicialLDLT (the solve where Accelerate is absent, or asked).
+  target_compile_definitions(topopt PRIVATE TOPOPT_HAVE_EIGEN)
 endif()
 
 # 3MF export/import (M6.1) requires lib3mf. Compile it into the library and link
@@ -561,7 +584,20 @@ add_executable(test_lattice_layout_file tests/unit/test_lattice_layout_file.cpp)
 target_link_libraries(test_lattice_layout_file PRIVATE topopt)
 target_compile_definitions(test_lattice_layout_file PRIVATE
   LATTICE_FILE_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+if(ZLIB_FOUND)   # OF5: the test inflates the 3MF it reads back
+  target_link_libraries(test_lattice_layout_file PRIVATE ZLIB::ZLIB)
+  target_compile_definitions(test_lattice_layout_file PRIVATE TOPOPT_HAVE_ZLIB)
+endif()
 add_test(NAME lattice_layout_file COMMAND test_lattice_layout_file)
+# Organic cut 2 (brief E1, rules OF1..): the file as the solid plus unmerged closed tubes. The test makes its reference
+# unions with Manifold, so it is registered only where the writer has it.
+if(manifold_FOUND)
+  add_executable(test_weave_tubes tests/unit/test_weave_tubes.cpp)
+  target_link_libraries(test_weave_tubes PRIVATE topopt manifold::manifold)
+  target_compile_definitions(test_weave_tubes PRIVATE
+    WEAVE_TUBES_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME weave_tubes COMMAND test_weave_tubes)
+endif()
 
 # Harness-side lattice material model C(rho) (multiscale-lattice-feasibility
 # probe, 2026-07-31). The model itself lives in tests/harness/
@@ -691,6 +727,17 @@ add_test(NAME frame_element COMMAND test_frame_element)
 add_executable(test_beam_network tests/unit/test_beam_network.cpp)
 target_link_libraries(test_beam_network PRIVATE topopt)
 add_test(NAME beam_network COMMAND test_beam_network)
+
+# Brief E2, item 1: the sparse symmetric solve as one call; Accelerate and Eigen agree on a 20,000-beam frame.
+add_executable(test_sparse_ldlt tests/unit/test_sparse_ldlt.cpp)
+target_link_libraries(test_sparse_ldlt PRIVATE topopt)
+add_test(NAME sparse_ldlt COMMAND test_sparse_ldlt)
+
+# Brief E2, item 8: the Organic strength check's frame of beams on made frames (pulled, cantilever, buckling, T-join,
+# link, load on open lattice).
+add_executable(test_organic_frame tests/unit/test_organic_frame.cpp)
+target_link_libraries(test_organic_frame PRIVATE topopt)
+add_test(NAME organic_frame COMMAND test_organic_frame)
 
 # The DKT plate-bending triangle. Pure C++/std: rigid-body modes, the
 # constant-curvature patch test, and the paper's own plate benchmarks.
@@ -2993,3 +3040,15 @@ endif()
 # Evidence: core's lookup against Iacob 2024 Table 2, as a Markdown table.
 add_executable(flexible_spot_table EXCLUDE_FROM_ALL tests/tools/flexible_spot_table.cpp)
 target_link_libraries(flexible_spot_table PRIVATE topopt)
+# `ctest -R cli` runs 13 tests (the cli_* tests, and lattice_clip_shell, krylov_recycling and owner_clip, whose names
+# hold "cli"); a build of only topopt_cli leaves 10 of them "Not Run". `cmake --build <dir> --target cli_suite` builds
+# every program they run (each only when this configuration has it).
+set(_cli_suite_programs)
+foreach(_t topopt_cli test_lattice_clip_shell test_recycle test_cli test_organic_dead_parity test_empty_post_beam_mask
+           test_slot_origin test_region_ownership test_plan_is_the_design test_owner_clip test_outline_clip
+           test_run_info_fingerprint)
+  if(TARGET ${_t})
+    list(APPEND _cli_suite_programs ${_t})
+  endif()
+endforeach()
+add_custom_target(cli_suite DEPENDS ${_cli_suite_programs})

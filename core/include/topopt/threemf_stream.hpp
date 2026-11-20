@@ -44,10 +44,28 @@ class ThreeMfStreamError : public std::runtime_error {
 
 class StreamingThreeMfWriter : public TriangleSink {
  public:
+  // OF5 (brief E1, the Organic file): two choices, both off by default (the writer as it always was).
+  //   indexed: vertices are written once and shared by index (add_vertex, add_indexed); add_triangle still writes
+  //     three fresh ones. The triangles stream to a second temp file (`path` + ".tris.tmp") and follow the vertices.
+  //   deflate: the model part is DEFLATED (zip method 8) through the system zlib, when this build has it
+  //     (deflate_available()); without it the part is stored as before, and compressed() says which.
+  struct Options {
+    bool indexed = false;
+    bool deflate = false;
+  };
   // Open `path` (the .3mf) and begin the model part in a sibling temp file
   // (`path` + ".model.tmp"). Throws ThreeMfStreamError if either cannot be opened.
   explicit StreamingThreeMfWriter(const std::string& path);
-  ~StreamingThreeMfWriter() override;  // removes the temp file if still present
+  StreamingThreeMfWriter(const std::string& path, const Options& options);
+  ~StreamingThreeMfWriter() override;  // removes the temp files if still present
+
+  static bool deflate_available();
+  // Indexed only: one vertex, its index (from 0, in order); a triangle of three indices already added.
+  std::uint64_t add_vertex(const Vec3& v);
+  void add_indexed(std::uint64_t a, std::uint64_t b, std::uint64_t c);
+  std::uint64_t vertex_count() const { return vert_count_; }
+  // After finish(): whether the model part was deflated.
+  bool compressed() const { return compressed_; }
 
   StreamingThreeMfWriter(const StreamingThreeMfWriter&) = delete;
   StreamingThreeMfWriter& operator=(const StreamingThreeMfWriter&) = delete;
@@ -68,6 +86,12 @@ class StreamingThreeMfWriter : public TriangleSink {
   std::string path_;
   std::string tmp_path_;
   std::ofstream model_;        // the streamed 3D/3dmodel.model part
+  Options options_;
+  std::string tris_path_;      // indexed: the triangles, streamed beside the vertices
+  std::ofstream tris_;
+  std::uint64_t tris_len_ = 0;
+  std::uint64_t vert_count_ = 0;
+  bool compressed_ = false;
   std::uint64_t tri_count_ = 0;
   std::uint64_t model_len_ = 0;
   std::uint32_t model_crc_ = 0xFFFFFFFFu;  // in-progress CRC-32 (pre-final XOR)
