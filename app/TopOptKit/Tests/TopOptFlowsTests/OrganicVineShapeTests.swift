@@ -1,6 +1,8 @@
 // OrganicVineShapeTests — the vines as the preview draws them (his 11-19 note; LatticeReview's conditions 21:56Z): smooth
 // through the engine's points, never further than 0.2 mm from its bars, the bar ends never moved, joints where vines meet
 // (end-end and T, never a near-miss found by the app). RED CONTROL: the clamp off lets the curve swing further.
+// His later pick 11-19: the app draws `capsules(runs:)` (release (10)'s round struts); the smooth shape is parked for v2 and
+// keeps its tests so it can come back.
 import XCTest
 import simd
 @testable import TopOptFlows
@@ -58,5 +60,32 @@ final class OrganicVineShapeTests: XCTestCase {
         }
         var off = OrganicVineShape.Params(); off.blendMM = 0
         XCTAssertTrue(OrganicVineShape(runs: [a, b, c], params: off).joints.isEmpty, "RED CONTROL: no blend, no joints")
+    }
+
+    /// ★ His pick 11-19 ("I prefer release 10's ... more like vines and less like 'goo'"): release (10)'s round struts.
+    @MainActor
+    func testCapsulesAreReleaseTensRoundStruts() {
+        // a bent run whose widths change point to point, and a T landing on it
+        var a = run([SIMD3(0, 0, 0), SIMD3(4, 3, 0), SIMD3(8, 0, 0)])
+        a.widthMM = [1.0, 2.0, 1.2]
+        let b = run([SIMD3(4, 9, 0), SIMD3(4, 3, 0)], width: 0.8)
+        let s = OrganicVineShape.capsules(runs: [a, b])
+        XCTAssertEqual(s.pieces.count, 3, "★ one straight piece per bar, nothing curved")
+        let bars = LatticeLayoutPreview.segments([a, b])
+        for (k, q) in s.pieces.enumerated() {
+            XCTAssertEqual(q.ra, q.rb, "★ one width along a bar")
+            XCTAssertEqual(q.ra, 0.5 * bars.bars[7 * k + 6], accuracy: 1e-6, "★ the width release (10) drew: the two points' mean")
+            XCTAssertEqual(simd_length(q.a - SIMD3(bars.bars[7 * k], bars.bars[7 * k + 1], bars.bars[7 * k + 2])), 0, accuracy: 1e-6)
+            XCTAssertEqual(simd_length(q.b - SIMD3(bars.bars[7 * k + 3], bars.bars[7 * k + 4], bars.bars[7 * k + 5])), 0, accuracy: 1e-6)
+            let d = simd_normalize(q.b - q.a)
+            XCTAssertEqual(simd_dot(q.ta, d), 1, accuracy: 1e-5, "both rings square to the bar: a plain cylinder")
+            XCTAssertEqual(simd_dot(q.tb, d), 1, accuracy: 1e-5)
+        }
+        XCTAssertEqual(s.caps.count, 3 + 2, "★ a round ball at every point")
+        XCTAssertEqual(s.caps[1].w, 0.8, accuracy: 1e-6,   // bars there: 0.75 (1.0 to 2.0) and 0.8 (2.0 to 1.2)
+                       "★ the bend's ball as wide as the widest bar there: a round knuckle")
+        XCTAssertTrue(s.joints.isEmpty, "★ nothing blended: a plain union")
+        XCTAssertEqual(s.params.blendMM, 0)
+        XCTAssertFalse(OrganicVineShape(runs: [a, b]).joints.isEmpty, "RED CONTROL: the parked smooth shape blends the T")
     }
 }

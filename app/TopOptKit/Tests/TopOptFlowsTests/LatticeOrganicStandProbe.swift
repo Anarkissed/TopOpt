@@ -61,7 +61,7 @@ final class LatticeOrganicStandProbe: XCTestCase {
             var inputs = LatticeLayoutBarsInputs(token: 1, bars: seg.bars, flags: seg.flags,
                                                  colours: LatticeLayoutColours.colours(laid, type: nil, grade: false), colourKey: 1)
             inputs.lightFrom = LatticeLayoutPreview.organicLightFrom(grown: mode == .grown, netFrom: seg.lightFrom, count: seg.count)
-            inputs.vines = OrganicVineShape(runs: r.runs)   // ★ his 11-19: the vines as the app now draws them
+            inputs.vines = OrganicVineShape.capsules(runs: r.runs)   // ★ his 11-19 pick: the vines as the app now draws them
             for (win, size) in windows {
                 guard let rr = MeshRenderer(device: device, sampleCount: 4) else { throw XCTSkip("renderer") }
                 rr.setMesh(mesh)
@@ -133,7 +133,11 @@ final class LatticeOrganicStandProbe: XCTestCase {
                 var before = inputs
                 before.vines = nil
                 before.token = inputs.token + 1000
-                for (name, inp) in [("release10", before), ("vines", inputs)] {
+                // ★ his 11-19 pick: release (10)'s ROUND drawing (ray-cast capsules) for every bar, the look the vines now copy
+                var round = before
+                round.lightFrom = .max
+                round.token = inputs.token + 2000
+                for (name, inp) in [("release10", before), ("release10round", round), ("vines", inputs)] {
                     for (zoom, tag) in [(Float(0.42), "near"), (Float(0.2), "close")] {
                         guard let rr = MeshRenderer(device: device, sampleCount: 4) else { throw XCTSkip("renderer") }
                         rr.setMesh(mesh)

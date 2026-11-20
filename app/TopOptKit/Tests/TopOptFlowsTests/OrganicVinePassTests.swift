@@ -2,7 +2,9 @@
 // now!"): the engine's Organic sample cube laid for real, drawn by OrganicVinePass (smooth round tubes, round ends, blended
 // joints) instead of the bars. Pictures with VINE_SHOT_DIR (outside the repo). OPT-IN timing: VINE_RUNS_FILE = a .vrun (his
 // stand's, from LatticeOrganicStandProbe) drawn at 2048 x 1536, the time per frame printed.
-// RED CONTROL: without vines the same inputs draw the bars, a different frame.
+// His later pick 11-19 ("I prefer release 10's ... more like vines and less like 'goo'"): the vines are release (10)'s round
+// struts (OrganicVineShape.capsules), so they must cover the same pixels as release (10)'s ray-cast capsules.
+// RED CONTROL: the parked smooth blended shape lands further from that outline.
 #if canImport(AppKit) && canImport(MetalKit)
 import XCTest
 import MetalKit
@@ -41,10 +43,10 @@ final class OrganicVinePassTests: XCTestCase {
               let r = MeshRenderer(device: device, sampleCount: 1) else { throw XCTSkip("no renderer: \(MeshRenderer.lastInitError ?? "?")") }
         let (runs, mesh) = try await sampleCubeRuns()
         let seg = LatticeLayoutPreview.segments(runs)
-        let shape = OrganicVineShape(runs: runs)
-        XCTAssertGreaterThan(shape.pieces.count, seg.count / 2, "premise: the vines are made")
-        XCTAssertFalse(shape.joints.isEmpty, "premise: the vines meet")
-        XCTAssertEqual(shape.caps.count, 2 * runs.filter { $0.points.count >= 2 }.count, "★ a round end at each run end")
+        let shape = OrganicVineShape.capsules(runs: runs)   // ★ his 11-19 pick: release (10)'s round struts
+        XCTAssertEqual(shape.pieces.count, seg.count, "★ one round strut per bar")
+        XCTAssertEqual(shape.caps.count, runs.filter { $0.points.count >= 2 }.reduce(0) { $0 + $1.points.count },
+                       "★ a round ball at every point")
         r.setMesh(mesh)
         r.camera.setOrientation(azimuth: 0.6, elevation: 0.4)
         r.setBodyAlpha(LatticeLayoutPreview.ghostAlpha)
@@ -62,10 +64,27 @@ final class OrganicVinePassTests: XCTestCase {
         func covered(_ f: [UInt8]) -> Int { stride(from: 0, to: f.count, by: 4).filter { f[$0..<$0 + 4] != bare[$0..<$0 + 4] }.count }
         let cb = covered(barFrame), cv = covered(vineFrame)
         print("VINE PASS: bars cover \(cb) pixels, vines \(cv); \(shape.pieces.count) pieces, \(shape.caps.count) ends, \(shape.joints.count) joints")
+        // ★ his 11-19 pick: the vines ARE release (10)'s round drawing (its ray-cast capsules, the bars here), drawn faster
+        var odd = 0
+        for i in stride(from: 0, to: bare.count, by: 4) {
+            let inBars = barFrame[i..<i + 4] != bare[i..<i + 4], inVines = vineFrame[i..<i + 4] != bare[i..<i + 4]
+            if inBars != inVines { odd += 1 }
+        }
+        print("VINE PASS: \(odd) pixels covered by one drawing and not the other (\(String(format: "%.2f", 100 * Double(odd) / Double(Swift.max(cb, 1)))) % of the bars')")
         XCTAssertGreaterThan(cv, 20_000, "★ the vines are on screen")
-        XCTAssertGreaterThan(Double(cv), 0.7 * Double(cb), "★ about where the bars are")
-        XCTAssertLessThan(Double(cv), 1.4 * Double(cb), "★ and no fatter")
-        XCTAssertNotEqual(vineFrame, barFrame, "RED CONTROL: without vines the bars draw, a different frame")
+        XCTAssertGreaterThan(Double(cv), 0.97 * Double(cb), "★ where release (10)'s round struts are")
+        XCTAssertLessThan(Double(cv), 1.03 * Double(cb), "★ and no fatter")
+        XCTAssertLessThan(Double(odd), 0.03 * Double(cb), "★ the same outline as release (10)'s round struts")
+        let goo = OrganicVineShape(runs: runs)
+        bars.token = 3
+        bars.vines = goo
+        XCTAssertTrue(r.applyLayoutBars(bars, device: device))
+        let gooFrame = try frame()
+        var gooOdd = 0
+        for i in stride(from: 0, to: bare.count, by: 4)
+        where (barFrame[i..<i + 4] != bare[i..<i + 4]) != (gooFrame[i..<i + 4] != bare[i..<i + 4]) { gooOdd += 1 }
+        print("VINE PASS: the parked smooth shape differs at \(gooOdd) pixels")
+        XCTAssertGreaterThan(gooOdd, odd, "RED CONTROL: the parked smooth blended shape is further from release (10)'s outline")
         if let dir = ProcessInfo.processInfo.environment["VINE_SHOT_DIR"] {
             try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
             try LatticeLayoutStandProbe.png(vineFrame, 800, 600, to: (dir as NSString).appendingPathComponent("vine-pass-cube.png"))
@@ -94,7 +113,7 @@ final class OrganicVinePassTests: XCTestCase {
                               spacingMM: [Float](repeating: 4, count: m)))
         }
         let t0 = Date()
-        let shape = OrganicVineShape(runs: runs)
+        let shape = OrganicVineShape.capsules(runs: runs)
         let buildMS = Date().timeIntervalSince(t0) * 1000
         let seg = LatticeLayoutPreview.segments(runs)
         var lo = SIMD3<Float>(repeating: .greatestFiniteMagnitude), hi = -lo

@@ -215,7 +215,7 @@ struct LatticeSampleView: View {
             var bars = LatticeLayoutBarsInputs(token: Int.random(in: 1...Int.max), bars: seg.bars, flags: seg.flags,
                                                colours: LatticeLayoutColours.colours(l, type: nil, grade: false, oneColour: true), colourKey: 1)
             let runs = laid.runs
-            bars.vines = await Task.detached(priority: .userInitiated) { OrganicVineShape(runs: runs) }.value   // ★ his 11-19
+            bars.vines = await Task.detached(priority: .userInitiated) { OrganicVineShape.capsules(runs: runs) }.value   // ★ his 11-19 pick
             bars.lightFrom = LatticeLayoutPreview.organicLightFrom(grown: look.modeValue == .grown, netFrom: seg.lightFrom,
                                                                    count: seg.count)
             let m = ViewerMesh(vertices: body.vertices, indices: body.indices,

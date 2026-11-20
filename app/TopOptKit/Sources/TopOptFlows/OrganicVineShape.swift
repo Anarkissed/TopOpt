@@ -7,7 +7,9 @@
 //   * each piece a ROUND CONE (round in section, round at its ends): a vine is the plain union of its pieces;
 //   * where vines meet (a run end shared by runs, or an end landing on another vine), a JOINT: the vines there blend by a
 //     polynomial smooth-min of `blendMM` (a vine with itself stays a plain union, so nothing bulges along a vine).
-// Prototype and pictures: agent-scratch/organic1/vines/vinelook.swift (styles today / grown).
+// Prototype and pictures: agent-scratch/organic1/vines/vinelook.swift (styles today / grown / capsule).
+// ★ HIS PICK 11-19 (later): the app draws `capsules(runs:)`, release (10)'s round struts; the smooth blended shape below is
+// kept, unused, for v2 (his "ideas for v2" sheet). It is no longer a reference for core.
 import Foundation
 import simd
 import TopOptKit
@@ -48,6 +50,34 @@ public struct OrganicVineShape: Equatable, Sendable {
 
     /// The most pieces one joint blends (the shader's loop bound); a joint with more keeps the nearest.
     public static let maxJointPieces = 12
+
+    /// ★ HIS PICK 11-19, the look the app draws: "I prefer release 10's. It feels more like vines and less like 'goo'."
+    /// Release (10)'s round struts: each bar straight, ONE width (its two points' mean, as `LatticeLayoutPreview.segments`),
+    /// a round ball at every point (the widest bar there), a plain union, nothing blended, nothing curved. It is the shape of
+    /// today's print file. Drawn by `OrganicVinePass`'s fast tubes and sphere ends, so Grown and the net skin get it too
+    /// (release (10) gave them six-sided tubes with flat ends). The smooth blended look (`init(runs:)`) is parked for v2 (his
+    /// sheet "TopOpt: ideas for v2", row "Smooth, blended Organic vines").
+    public static func capsules(runs: [LatticeLayoutSession.Run]) -> OrganicVineShape {
+        var s = OrganicVineShape()
+        s.params.blendMM = 0
+        for (vi, r) in runs.enumerated() where r.points.count >= 2 {
+            let n = r.points.count
+            var ball = [Float](repeating: 0, count: n)
+            for i in 0..<(n - 1) {
+                let a = r.points[i], b = r.points[i + 1]
+                let rad = 0.25 * (r.widthMM[i] + r.widthMM[i + 1])
+                var q = Piece(a: a, ra: rad, b: b, rb: rad, vine: Int32(vi))
+                let d = b - a
+                let t = simd_length(d) > 1e-9 ? simd_normalize(d) : SIMD3<Float>(0, 0, 1)
+                let v = simd_normalize(simd_cross(t, abs(t.x) < 0.9 ? SIMD3<Float>(1, 0, 0) : SIMD3<Float>(0, 1, 0)))
+                q.ta = t; q.tb = t; q.va = v; q.vb = v   // a plain cylinder: both rings square to the bar
+                s.pieces.append(q)
+                ball[i] = Swift.max(ball[i], rad); ball[i + 1] = Swift.max(ball[i + 1], rad)
+            }
+            for i in 0..<n { s.caps.append(SIMD4(r.points[i], ball[i])) }
+        }
+        return s
+    }
 
     public init(runs original: [LatticeLayoutSession.Run], params p: Params = Params()) {
         params = p

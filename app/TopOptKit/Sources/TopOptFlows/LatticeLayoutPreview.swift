@@ -472,9 +472,9 @@ public final class LatticeLayoutPreview: ObservableObject {
         organicRefusals = []
         token &+= 1
         let seg = Self.segments(r.runs)
-        // ★ his 11-19 note and verdict: the vines smooth, round and blended where they meet (built off the main thread)
+        // ★ his 11-19 pick: release (10)'s round struts for every vine, Grown and the net skin too (built off the main thread)
         let runs = r.runs
-        let vines = await Task.detached(priority: .userInitiated) { OrganicVineShape(runs: runs) }.value
+        let vines = await Task.detached(priority: .userInitiated) { OrganicVineShape.capsules(runs: runs) }.value
         guard !Task.isCancelled else { return }
         var drawn = LatticeLayoutBarsInputs(token: token, bars: seg.bars, solid: nil, flags: seg.flags)
         drawn.lightFrom = Self.organicLightFrom(grown: grown, netFrom: seg.lightFrom, count: seg.count)
