@@ -44,6 +44,7 @@ const OrganicGroup* group_of(const std::vector<OrganicGroup>& groups, int region
 SyntheticStress organic_synthetic_stress(const Domain& domain, const TensorField& in,
                                          const std::vector<SyntheticWall>& walls,
                                          const std::vector<OrganicGroup>& groups, const SyntheticStressAsk& how) {
+  try {   // SB1: nothing but a std::exception or a refusal leaves this call
   SyntheticStress out;
   std::vector<int> weave;   // the domain's weave regions, in its order
   for (const Region& r : domain.spec().regions)
@@ -234,11 +235,19 @@ SyntheticStress organic_synthetic_stress(const Domain& domain, const TensorField
     rep.peak_after_mpa = rep.factor * top;
   }
   return out;
+  } catch (const std::exception&) {
+    throw;
+  } catch (...) {
+    SyntheticStress none;
+    none.refused.push_back(core_stopped("The made-up stress could not be made"));
+    return none;
+  }
 }
 
 SyntheticStress organic_synthetic_stress(Session& session, const Settings& settings, const TensorField& in,
                                          const std::vector<SyntheticWall>& walls,
                                          const std::vector<OrganicGroup>& groups, const SyntheticStressAsk& how) {
+  try {   // SB1: nothing but a std::exception or a refusal leaves this call
   // The domain the lay will lay in (with the groups' flat floor, as Session::lay_organic sets it), made and kept.
   Settings s = settings;
   if (!groups.empty() && groups.front().ask.bed_floor_mm > 0.0) {
@@ -247,6 +256,13 @@ SyntheticStress organic_synthetic_stress(Session& session, const Settings& setti
   }
   (void)session.sweep_limits(s, 0.0);
   return organic_synthetic_stress(*session.domain(), in, walls, groups, how);
+  } catch (const std::exception&) {
+    throw;
+  } catch (...) {
+    SyntheticStress none;
+    none.refused.push_back(core_stopped("The made-up stress could not be made"));
+    return none;
+  }
 }
 
 }  // namespace topopt::lattice_layout

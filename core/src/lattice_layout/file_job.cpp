@@ -1524,8 +1524,8 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     refuse(r, kCancelled, "Stopped before the lattice file was finished. Nothing was made.");
   } catch (const std::exception& e) {
     refuse(r, kError, "Something went wrong while making the lattice file, and nothing was made.", e.what());
-  } catch (...) {
-    refuse(r, kError, "Something went wrong while making the lattice file, and nothing was made.");
+  } catch (...) {   // SB1: the type named for the log
+    refuse(r, kError, "Something went wrong while making the lattice file, and nothing was made.", core_stopped("").detail);
   }
   return done();
 }

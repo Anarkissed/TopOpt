@@ -27,6 +27,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -1525,6 +1526,19 @@ struct OrganicRefusal {
   double given = 0.0;
   bool has_min = false, has_max = false;
   double allowed_min = 0.0, allowed_max = 0.0;
+  std::string detail;   // SB1: the technical detail behind it, for the log (empty for a setting's refusal)
+};
+// Rule SB1 (leg Q, 2026-11-20; the owner's iPad: "core stopped with an exception that is not a std::exception"): no call
+// of the Session API (lay, the Organic lays and previews, the limits, validation, the synthetic stress) lets anything
+// but a std::exception or a refusal out. A stop asked during the call answers "cancelled"; anything else that is not a
+// std::exception becomes a refusal `core_stopped` whose text says in plain words what could not be done, with the
+// thrown type in `detail` for the log. `core_stopped` reads the exception being handled: call it inside a catch.
+OrganicRefusal core_stopped(const std::string& what_could_not_be_done);
+// The same for a call whose answer has no refusal list (the Sweep limits): thrown, a std::exception with the plain text
+// as what() and the detail beside it.
+struct SessionRefused : std::runtime_error {
+  OrganicRefusal refusal;
+  explicit SessionRefused(OrganicRefusal r) : std::runtime_error(r.text), refusal(std::move(r)) {}
 };
 
 // Rule OG5 (brief E9): what the guard pass (guard_bars) cut or removed of an Organic lay's bars: bars cut because their

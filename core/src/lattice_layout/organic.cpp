@@ -1106,6 +1106,7 @@ Outcome Session::lay_organic_draft(const Settings& settings, const TensorField& 
 
 Outcome Session::lay_organic_with(const Settings& asked, const TensorField& field, const std::vector<OrganicGroup>& groups,
                                   int threads, const std::atomic<bool>* stop, bool draft) {
+  try {   // SB1: nothing but a std::exception or a refusal leaves this call
   if (stop && stop->load(std::memory_order_relaxed)) {
     Outcome none;
     none.cancelled = true;
@@ -1334,6 +1335,17 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
     out.tight = tight_of(out.bars, weave, domain_->spec().bead_mm);
   }
   return out;
+  } catch (const LayCancelled&) {
+    Outcome none;
+    none.cancelled = true;
+    return none;
+  } catch (const std::exception&) {
+    throw;
+  } catch (...) {
+    Outcome none;
+    none.refused.push_back(core_stopped("The Organic lattice could not be laid"));
+    return none;
+  }
 }
 
 
@@ -1731,6 +1743,7 @@ double organic_smallest_cell_mm(const Settings& settings, const OrganicAsk& ask)
 }
 
 std::vector<OrganicRefusal> validate_organic(const Settings& settings, const OrganicAsk& a, const TensorField* field) {
+  try {   // SB1: nothing but a std::exception or a refusal leaves this call
   std::vector<OrganicRefusal> out;
   auto refuse = [&](const char* setting, const char* code, const std::string& text, double given) -> OrganicRefusal& {
     OrganicRefusal r;
@@ -2006,10 +2019,16 @@ std::vector<OrganicRefusal> validate_organic(const Settings& settings, const Org
     refuse("stress", "no_stress_result",
            "Organic follows the part's stress, and there is no stress result yet. Run the stress check first.", 0.0);
   return out;
+  } catch (const std::exception&) {
+    throw;
+  } catch (...) {
+    return {core_stopped("The Organic settings could not be checked")};
+  }
 }
 
 std::vector<OrganicRefusal> validate_organic_groups(const Settings& settings, const std::vector<OrganicGroup>& groups,
                                                     const TensorField* field) {
+  try {   // SB1: nothing but a std::exception or a refusal leaves this call
   std::vector<OrganicRefusal> out;
   for (std::size_t g = 0; g < groups.size(); ++g)
     for (OrganicRefusal r : validate_organic(settings, groups[g].ask, nullptr)) {
@@ -2080,6 +2099,11 @@ std::vector<OrganicRefusal> validate_organic_groups(const Settings& settings, co
            "Organic follows the part's stress, and there is no stress result yet. Run the stress check first.", 0.0,
            "stress");
   return out;
+  } catch (const std::exception&) {
+    throw;
+  } catch (...) {
+    return {core_stopped("The Organic settings could not be checked")};
+  }
 }
 
 }  // namespace topopt::lattice_layout

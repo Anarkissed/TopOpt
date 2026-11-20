@@ -270,6 +270,7 @@ std::vector<WeaveRun> swept_runs(const Bars& bars, const std::vector<int>& regio
 OrganicPreview lay_organic_preview(Session& session, const Settings& settings, const TensorField& field,
                                    const OrganicAsk& ask, const OrganicPreviewAsk& preview, int threads,
                                    const std::atomic<bool>* stop) {
+  try {   // SB1: a stop during the print check answers "cancelled"; nothing non-std leaves
   OrganicPreview out;
   out.quality = preview.quality;
   // OS16 (brief E4, leg 2): Exact replays additions with the file's print check between rounds, as the file job does
@@ -286,11 +287,25 @@ OrganicPreview lay_organic_preview(Session& session, const Settings& settings, c
   out.runs = ask.sweep.on ? swept_runs(shown, regions, ask.sweep)   // OV1: the file's swept centre lines
                           : weave_runs(shown, regions, preview.tolerance_mm, nullptr, true);   // leg H: the relief marks
   return out;
+  } catch (const LayCancelled&) {
+    OrganicPreview none;
+    none.quality = preview.quality;
+    none.outcome.cancelled = true;
+    return none;
+  } catch (const std::exception&) {
+    throw;
+  } catch (...) {
+    OrganicPreview none;
+    none.quality = preview.quality;
+    none.outcome.refused.push_back(core_stopped("The Organic preview could not be made"));
+    return none;
+  }
 }
 
 OrganicPreview lay_organic_preview(Session& session, const Settings& settings, const TensorField& field,
                                    const std::vector<OrganicGroup>& groups, const OrganicPreviewAsk& preview,
                                    int threads, const std::atomic<bool>* stop) {
+  try {   // SB1: a stop during the print check answers "cancelled"; nothing non-std leaves
   OrganicPreview out;
   out.quality = preview.quality;
   // OJ6: Exact replays a group list's additions with the file's print check between rounds, as the one-ask form does.
@@ -310,6 +325,19 @@ OrganicPreview lay_organic_preview(Session& session, const Settings& settings, c
   out.runs = sweep.on ? swept_runs(shown, regions, sweep)
                       : weave_runs(shown, regions, preview.tolerance_mm, nullptr, true);   // leg H: the relief marks
   return out;
+  } catch (const LayCancelled&) {
+    OrganicPreview none;
+    none.quality = preview.quality;
+    none.outcome.cancelled = true;
+    return none;
+  } catch (const std::exception&) {
+    throw;
+  } catch (...) {
+    OrganicPreview none;
+    none.quality = preview.quality;
+    none.outcome.refused.push_back(core_stopped("The Organic preview could not be made"));
+    return none;
+  }
 }
 
 std::vector<std::uint8_t> pack_weave_runs(const std::vector<WeaveRun>& runs, int version) {
@@ -442,13 +470,20 @@ std::vector<SweepLimits> organic_sweep_limits(const Domain& domain, double line_
 
 // OP5 (brief C1): the same limits before any lay, on the domain lay() would lay in.
 std::vector<SweepLimits> Session::sweep_limits(const Settings& settings, double line_mm, double gap_lines) {
+  try {   // SB1: nothing but a std::exception or a refusal leaves this call
   ready_domain(settings);
   return organic_sweep_limits(*domain_, line_mm, gap_lines);
+  } catch (const std::exception&) {
+    throw;
+  } catch (...) {   // LayCancelled too: no stop is watched here, so it cannot be one asked for
+    throw SessionRefused(core_stopped("The Organic size limits could not be measured"));
+  }
 }
 
 // OP10 (brief C2, E4; E7: per group): the union of the measured regions' limits among `regions`.
 SweepLimitsUnion Session::sweep_limits_for(const Settings& settings, const std::vector<int>& regions, double line_mm,
                                            double gap_lines) {
+  try {   // SB1: nothing but a std::exception or a refusal leaves this call
   const std::vector<SweepLimits> all = sweep_limits(settings, line_mm, gap_lines);
   const SweepRounding rd(*domain_, line_mm);
   SweepLimitsUnion u;
@@ -480,6 +515,11 @@ SweepLimitsUnion Session::sweep_limits_for(const Settings& settings, const std::
     u.cell_auto_mm = rd.half(0.5 * (u.cell_lower_mm + u.cell_upper_mm));
   }
   return u;
+  } catch (const std::exception&) {
+    throw;
+  } catch (...) {   // LayCancelled too: no stop is watched here, so it cannot be one asked for
+    throw SessionRefused(core_stopped("The Organic size limits could not be measured"));
+  }
 }
 
 }  // namespace topopt::lattice_layout

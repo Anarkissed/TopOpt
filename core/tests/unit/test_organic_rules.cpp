@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <thread>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <functional>
@@ -3311,6 +3313,76 @@ static void test_net_outline() {
     CHECK(n_bars > 0 && least >= line - 2e-3);
   }
 }
+// SB1 (leg Q, 2026-11-20; the owner's iPad, the Organic sample: "core stopped with an exception that is not a
+// std::exception"): a stop asked while the Exact preview runs the file's print check (OJ6, depth variation on) used to
+// throw LayCancelled out of lay_organic_preview. Now: whatever moment the stop comes, the call returns (cancelled or
+// whole), never throws. And anything thrown that is not a std::exception comes back as a refusal `core_stopped` in
+// plain words, its type in `detail`; a LayCancelled from inside the lay answers "cancelled".
+static void test_session_boundary() {
+  const StepModel model = box_model(30, 30, 20);
+  const TensorField f = traced_field();
+  Settings st;
+  st.regions = {{1, Role::Lattice, {1}, 12.0, 0.0, true}};
+  st.drop_loose = true;
+  OrganicAsk a = traced_ask();   // depth variation on (face_relief_mm 1, the default)
+  OrganicPreviewAsk pa;
+  pa.quality = PreviewQuality::Exact;
+  double whole_ms = 0.0;
+  std::size_t flushed_check_bars = 0;
+  {
+    Session s(model);
+    const auto t0 = std::chrono::steady_clock::now();
+    const OrganicPreview pv = lay_organic_preview(s, st, f, a, pa);
+    whole_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    for (const Bar& b : pv.outcome.bars.bars) flushed_check_bars += b.along_proud > 0.0 || b.proud_a > 0.0 || b.proud_b > 0.0;
+    CHECK(!pv.outcome.cancelled && pv.outcome.refused.empty() && flushed_check_bars > 0);   // the print check does run
+  }
+  std::size_t threw = 0, cancelled = 0, whole = 0;
+  for (const double share : {0.2, 0.4, 0.6, 0.75, 0.85, 0.92, 0.97}) {
+    Session s(model);
+    std::atomic<bool> stop{false};
+    std::thread canceller([&] {
+      std::this_thread::sleep_for(std::chrono::microseconds(static_cast<long long>(share * whole_ms * 1000.0)));
+      stop = true;   // as the app's cancel does
+    });
+    try {
+      const OrganicPreview pv = lay_organic_preview(s, st, f, a, pa, 0, &stop);
+      ++(pv.outcome.cancelled ? cancelled : whole);
+    } catch (...) {
+      ++threw;
+    }
+    canceller.join();
+  }
+  std::printf("SB1 Exact preview (%zu bars with depth variation, %.0f ms whole) stopped at 7 moments: threw %zu, cancelled %zu, "
+              "whole %zu\n", flushed_check_bars, whole_ms, threw, cancelled, whole);
+  CHECK(threw == 0 && cancelled > 0);
+  // Thrown from inside the lay (the print check hook runs there when a strengthening is replayed): a stop answers
+  // "cancelled"; an int is refused in plain words, its type in the detail.
+  for (int kind = 0; kind < 2; ++kind) {
+    Session s(model);
+    OrganicAsk b = a;
+    b.additions.rounds.push_back(AddRound{});
+    b.print_check = [kind](const Layout&, Bars&) -> std::string {
+      if (kind == 0) throw LayCancelled{};
+      throw 42;
+    };
+    bool out = false;
+    Outcome o;
+    try {
+      o = s.lay_organic(st, f, b);
+    } catch (...) {
+      out = true;
+    }
+    const std::string text = o.refused.empty() ? "" : o.refused.front().text, detail = o.refused.empty() ? "" : o.refused.front().detail;
+    std::printf("SB1 %s thrown in the lay: threw out %d, cancelled %d, refused %s: \"%s\" (detail: %s)\n", kind ? "an int" : "LayCancelled",
+                out ? 1 : 0, o.cancelled ? 1 : 0, o.refused.empty() ? "-" : o.refused.front().code.c_str(), text.c_str(), detail.c_str());
+    if (kind == 0) CHECK(!out && o.cancelled && o.refused.empty());
+    else
+      CHECK(!out && !o.cancelled && o.refused.size() == 1 && o.refused.front().code == "core_stopped" &&
+            text.find("could not be laid") != std::string::npos && text.find("std::") == std::string::npos &&
+            text.find("lay_organic") == std::string::npos && detail.find("int") != std::string::npos);
+  }
+}
 static void test_net_kept_apart() {   // OJ8 (leg M): the net ON the open face, crossings made joints
   const StepModel model = box_model(30, 30, 20);
   const TensorField f = gap_field();
@@ -3389,6 +3461,7 @@ static void test_net_kept_apart() {   // OJ8 (leg M): the net ON the open face, 
 }
 
 int main() {
+  test_session_boundary();
   test_net_kept_apart();
   test_net_outline();
   test_groups_floors_additions();
