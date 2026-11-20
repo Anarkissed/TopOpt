@@ -380,6 +380,8 @@ struct WeaveShells {
   std::size_t sweep_pieces_before = 0, sweep_pieces_after = 0, sweep_spans_curved = 0;
   std::size_t sweep_mitre_small_turn = 0, sweep_mitre_tight = 0, sweep_mitre_straight_end = 0;
   std::vector<Vec3> sweep_tight_at;
+  // OV1: every swept piece's centre line as swept (its solid ends after the run-on), for the preview's test.
+  std::vector<std::vector<Vec3>> swept_lines;
   double sweep_largest_offset_mm = 0.0;
   double mm3 = 0.0;                      // the shells' own volumes, summed (overlaps counted twice)
   double ms = 0.0;

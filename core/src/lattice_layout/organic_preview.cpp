@@ -161,6 +161,112 @@ std::vector<WeaveRun> weave_runs(const Bars& bars, const std::vector<int>& weave
   return runs;
 }
 
+
+// OV1 (ruling R9): the runs as the file sweeps them. The file's runs (no thinning, no relief split), cut into the tubes
+// route's pieces exactly (weave_tubes.cpp: a change of section, a turn sharper than 60 degrees; zero-length segments
+// dropped; the ring rule; the equal-area radius the file sweeps with), each round piece swept by sweep_centre_line (the
+// span ending in solid held straight), then split where the preview's relief marks split a run (leg H: the along-face
+// mark, the face). A swept run's section byte carries bit 2 (kSectionSwept); its points are the file's rings, not thinned.
+std::vector<WeaveRun> swept_runs(const Bars& bars, const std::vector<int>& regions, const SweepAsk& sweep) {
+  std::vector<std::vector<std::size_t>> bar_of;
+  const std::vector<WeaveRun> file_runs = weave_runs(bars, regions, 0.0, &bar_of, false);
+  const MeshSpec spec = file_mesh_defaults();
+  const int sides = std::max(3, spec.tube_sides);
+  const double kPi = 3.14159265358979323846;
+  const double k_round = std::sqrt(2.0 * kPi / (sides * std::sin(2.0 * kPi / sides)));
+  const double sharp = std::cos(60.0 * kPi / 180.0);
+  auto unit = [](const Vec3& v) {
+    const double l = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+    return l > 0.0 ? Vec3{v.x / l, v.y / l, v.z / l} : Vec3{0, 0, 0};
+  };
+  auto sub = [](const Vec3& a, const Vec3& b) { return Vec3{a.x - b.x, a.y - b.y, a.z - b.z}; };
+  auto dot = [](const Vec3& a, const Vec3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; };
+  std::vector<WeaveRun> out;
+  for (std::size_t q = 0; q < file_runs.size() && q < bar_of.size(); ++q) {
+    const std::vector<std::size_t>& segs = bar_of[q];
+    if (segs.empty()) continue;
+    std::vector<Vec3> pts{bars.bars[segs[0]].a};
+    std::vector<double> w;
+    std::vector<int> kind;
+    std::vector<std::size_t> seg_bar;   // per kept segment, its bar
+    for (std::size_t s : segs) {
+      const Bar& b = bars.bars[s];
+      if (dist3(b.b, pts.back()) < 1e-9) continue;
+      pts.push_back(b.b);
+      w.push_back(b.width);
+      kind.push_back(!bar_is_bridge(b, spec.bridge_rise) ? 0 : spec.weave_round_top ? 1 : 2);
+      seg_bar.push_back(s);
+    }
+    if (pts.size() < 2) continue;
+    const Bar::End ea = file_runs[q].end_a, eb = file_runs[q].end_b;
+    std::size_t start = 0;
+    for (std::size_t k = 1; k <= w.size(); ++k) {
+      const bool last = k == w.size();
+      const bool turn_split = !last && dot(unit(sub(pts[k], pts[k - 1])), unit(sub(pts[k + 1], pts[k]))) < sharp;
+      const bool kind_split = !last && kind[k] != kind[k - 1];
+      if (!last && !turn_split && !kind_split) continue;
+      // The piece: points start..k, the file's ring widths.
+      std::vector<Vec3> pp(pts.begin() + static_cast<std::ptrdiff_t>(start), pts.begin() + static_cast<std::ptrdiff_t>(k) + 1);
+      std::vector<double> ring;
+      for (std::size_t j = start; j <= k; ++j) ring.push_back(j == start ? w[start] : j == k ? w[k - 1] : std::max(w[j - 1], w[j]));
+      const bool swept = kind[start] == 0 && sweep.on;
+      std::vector<Vec3> line = pp;
+      std::vector<double> line_ring = ring;
+      std::vector<std::size_t> at(pp.size());   // each piece point's place in `line`
+      for (std::size_t i = 0; i < pp.size(); ++i) at[i] = i;
+      if (swept && pp.size() >= 3) {
+        std::vector<double> r;
+        for (double x : ring) r.push_back(0.5 * x * k_round);
+        std::vector<char> held(pp.size() - 1, 0);
+        if (start == 0 && ea == Bar::End::Solid) held.front() = 1;
+        if (last && eb == Bar::End::Solid) held.back() = 1;
+        const SweptLine sl = sweep_centre_line(pp, r, sweep, &held);
+        line = sl.p;
+        line_ring.clear();
+        for (double x : sl.r) line_ring.push_back(2.0 * x / k_round);
+        std::size_t i = 0;
+        for (std::size_t m = 0; m < sl.span.size(); ++m)
+          if (sl.span[m] < 0) at[i++] = m;
+      }
+      // Split where the preview's relief marks split a run (the along-face mark and the face, per bar).
+      std::size_t a = 0;
+      for (std::size_t b = 1; b < pp.size(); ++b) {
+        const Bar& here = bars.bars[seg_bar[start + b - 1]];
+        const bool end = b + 1 == pp.size();
+        if (!end) {
+          const Bar& next = bars.bars[seg_bar[start + b]];
+          if (marks_of(here, true) == marks_of(next, true) && here.along_face == next.along_face) continue;
+        }
+        const Bar& first = bars.bars[seg_bar[start + a]];
+        WeaveRun r;
+        r.region = first.region;
+        r.marks = marks_of(first, true);
+        r.section = static_cast<std::uint8_t>(kind[start] | (swept ? kSectionSwept : 0));
+        const bool run_start = start + a == 0, run_end = last && end;
+        r.end_a = run_start ? ea : Bar::End::Node;
+        r.end_b = run_end ? eb : Bar::End::Node;
+        r.proud_a_mm = run_start && ea == Bar::End::Surface ? first.proud_a : 0.0;
+        r.proud_b_mm = run_end && eb == Bar::End::Surface ? here.proud_b : 0.0;
+        r.along_face = first.along_face;
+        for (std::size_t j = a; j < b; ++j) r.proud_mm = std::max(r.proud_mm, bars.bars[seg_bar[start + j]].along_proud);
+        for (std::size_t m = at[a]; m <= at[b]; ++m) {
+          r.points.push_back(line[m]);
+          r.ring_mm.push_back(line_ring[m]);
+          r.width_mm.push_back(line_ring[m]);
+          // the spacing of the bar the point lies on (a piece point: the bar after it, the last the bar before)
+          std::size_t j = a;
+          while (j + 1 < b && at[j + 1] <= m) ++j;
+          r.spacing_mm.push_back(bars.bars[seg_bar[start + j]].cell);
+        }
+        out.push_back(std::move(r));
+        a = b;
+      }
+      start = k;
+    }
+  }
+  return out;
+}
+
 OrganicPreview lay_organic_preview(Session& session, const Settings& settings, const TensorField& field,
                                    const OrganicAsk& ask, const OrganicPreviewAsk& preview, int threads,
                                    const std::atomic<bool>* stop) {
@@ -177,7 +283,8 @@ OrganicPreview lay_organic_preview(Session& session, const Settings& settings, c
   std::vector<int> regions;
   for (const Layout::Weave& w : out.outcome.layout.weave) regions.push_back(w.region);
   const Bars shown = flushed_as_the_file(session, out, stop);   // OJ6
-  out.runs = weave_runs(shown, regions, preview.tolerance_mm, nullptr, true);   // leg H: the relief marks
+  out.runs = ask.sweep.on ? swept_runs(shown, regions, ask.sweep)   // OV1: the file's swept centre lines
+                          : weave_runs(shown, regions, preview.tolerance_mm, nullptr, true);   // leg H: the relief marks
   return out;
 }
 
@@ -198,7 +305,10 @@ OrganicPreview lay_organic_preview(Session& session, const Settings& settings, c
   std::vector<int> regions;
   for (const Layout::Weave& w : out.outcome.layout.weave) regions.push_back(w.region);
   const Bars shown = flushed_as_the_file(session, out, stop);   // OJ6
-  out.runs = weave_runs(shown, regions, preview.tolerance_mm, nullptr, true);   // leg H: the relief marks
+  // OV1: the sweep is the part's (the first group's ask, as the file job reads the job's own).
+  const SweepAsk sweep = groups.empty() ? SweepAsk{} : groups.front().ask.sweep;
+  out.runs = sweep.on ? swept_runs(shown, regions, sweep)
+                      : weave_runs(shown, regions, preview.tolerance_mm, nullptr, true);   // leg H: the relief marks
   return out;
 }
 

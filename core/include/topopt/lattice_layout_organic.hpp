@@ -846,8 +846,13 @@ struct WeaveRun {
   // bridge, bar_is_bridge at the file's defaults). Filled always; a run is split at a change of section and the thinning
   // keeps every point where the ring width changes or the run turns sharper than 60 degrees only with `relief_marks`.
   std::vector<double> ring_mm;
-  std::uint8_t section = 0;
+  std::uint8_t section = 0;   // bits 0-1 the section kind; bit 2 (kSectionSwept, OV1): the points are the swept centre line
 };
+inline constexpr std::uint8_t kSectionSwept = 4;   // OV1 (ruling R9): bit 2 of WeaveRun::section and the packed section byte
+// OV1 (ruling R9): the runs as the print file sweeps them (the tubes route's pieces, each round one swept by
+// sweep_centre_line, split again where the preview's relief marks split a run); the preview's runs when the ask's sweep
+// is on (Exact and Draft alike). Not thinned: every point is a ring of the file's tube.
+std::vector<WeaveRun> swept_runs(const Bars& bars, const std::vector<int>& weave_regions, const SweepAsk& sweep);
 // `bar_of`, when given (OF2, the file's tubes): per run, the place in `bars` of the bar each of its segments came from
 // (read with no thinning, `tolerance_mm` 0; with thinning it is left empty).
 // `relief_marks` (leg H, the preview): a run also ends where its bars start or stop lying along an open face or change the

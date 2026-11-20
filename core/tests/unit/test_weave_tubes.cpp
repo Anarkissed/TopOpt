@@ -812,6 +812,42 @@ static void test_sweep_tubes() {
   CHECK(sw.sweep_largest_offset_mm > 0.0 && sw.sweep_largest_offset_mm <= 0.2 + 1e-9);
   CHECK(sw.mesh.triangles.size() > off_bent.mesh.triangles.size());
   CHECK(sw.sweep_tight_at.size() <= 20);
+  // R9: the preview's runs (swept_runs) are the file's swept centre lines point for point: every point of a swept run
+  // (section bit 2) is a point of a file line, every inner point of a file line one of the preview's; the file's own
+  // run-on (a solid end moved along its bar) is the one difference.
+  {
+    const WeaveShells all = weave_shells(pm, d, job.out.layout, bent, {}, carved, on, true);
+    const std::vector<WeaveRun> pr = swept_runs(bent, job.regions, on.sweep);
+    auto key = [](const Vec3& v) { return std::to_string(std::llround(v.x * 1e6)) + "," + std::to_string(std::llround(v.y * 1e6)) + "," + std::to_string(std::llround(v.z * 1e6)); };
+    std::map<std::string, int> file_pts, prev_pts;
+    for (const auto& l : all.swept_lines)
+      for (std::size_t k = 1; k + 1 < l.size(); ++k) ++file_pts[key(l[k])];
+    std::size_t swept_runs_n = 0, prev_inner = 0, missing = 0;
+    for (const WeaveRun& r : pr) {
+      if (!(r.section & kSectionSwept)) continue;
+      ++swept_runs_n;
+      CHECK(r.ring_mm.size() == r.points.size() && (r.section & 3) == 0);
+      for (std::size_t k = 0; k < r.points.size(); ++k) {
+        ++prev_pts[key(r.points[k])];
+        if (k > 0 && k + 1 < r.points.size()) { ++prev_inner; missing += file_pts.count(key(r.points[k])) ? 0 : 1; }
+      }
+    }
+    std::size_t file_missing = 0;
+    for (const auto& kv : file_pts) file_missing += prev_pts.count(kv.first) ? 0 : 1;
+    std::printf("sweep preview: %zu swept runs, %zu inner points (%zu not in the file's lines); file inner points %zu (%zu not "
+                "in the preview)\n", swept_runs_n, prev_inner, missing, file_pts.size(), file_missing);
+    CHECK(swept_runs_n > 0 && prev_inner > 0 && missing == 0 && file_missing == 0);
+    // Packed in version 2: the section byte carries bit 2.
+    const std::vector<std::uint8_t> packed = pack_weave_runs(pr, 2);
+    std::size_t at = 8, flagged = 0;
+    for (const WeaveRun& r : pr) {
+      flagged += (packed[at + 11] & kSectionSwept) ? 1 : 0;
+      at += 28 + 20 * r.points.size();
+    }
+    CHECK(flagged == swept_runs_n && at == packed.size());
+    // Off: the preview's runs as before.
+    CHECK(swept_runs(bent, job.regions, SweepAsk{}).size() > 0);
+  }
   // The keys: organic_sweep on when not given; 0 off; the numbers held to their ranges, by name.
   {
     auto job_with = [](const std::string& layout) {

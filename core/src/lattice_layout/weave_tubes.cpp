@@ -358,6 +358,7 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
         out.sweep_largest_offset_mm = std::max(out.sweep_largest_offset_mm, sl.largest_offset_mm);
         pc.p = std::move(sl.p);
         pc.r = std::move(sl.r);
+        out.swept_lines.push_back(pc.p);
         pc.slack = spec.sweep.max_offset_mm;
         out.sweep_pieces_after += pc.p.size() - 1;
       } else if (pc.kind == 0 && spec.sweep.on) {
