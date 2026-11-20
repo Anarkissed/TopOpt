@@ -51,7 +51,7 @@ final class OrganicCertifyTests: XCTestCase {
         XCTAssertEqual(Set(infill.spotIDs), [1, 2, 3, 4])
         XCTAssertNil(issues[3].solve, "★ a model change: Next")
         XCTAssertEqual(issues[3].text, "advice for beside_a_fixing")
-        XCTAssertEqual(OrganicCertify.infillLines(from: 50, to: 81, layerMM: 0.2, walls: 6, newVersion: 4, ranVersion: 3),
+        XCTAssertEqual(OrganicCertify.infillLines(from: 50, to: 81, layerMM: 0.2, walls: 6, newVersion: "v4", ranVersion: "v3"),
                        ["Infill 50% → 81%", "Layers 0.2 mm · 6 walls", "Made as v4 · v3 keeps 50%"],
                        "★ the print settings shown, and the new version said")
     }

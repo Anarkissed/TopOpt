@@ -139,6 +139,13 @@ public enum OrganicCertify {
             out.append(Issue(id: key, stage: .model, title: plural(group.count, title), text: w.advice, spotIDs: group.map(\.id),
                              at: w.worstAt, solve: nil, worst: w.effectiveMargin))
         }
+        // ── a fail none of the above covers (nothing carries the load; the check's own words): one pop-up says why ──
+        if out.isEmpty, verdict == "fail" {
+            let f = LatticeFileStrength(block: s)
+            out.append(Issue(id: "not_certified", stage: .model, title: "It does not certify",
+                             text: f.noPathLine ?? (f.notCertified ? LatticeFileStrength.notCertifiedLine(f.notCertifiedReason) : f.line),
+                             spotIDs: [], at: nil, solve: nil, worst: 0))
+        }
         return out.enumerated().sorted { a, b in
             a.element.stage != b.element.stage ? a.element.stage < b.element.stage : a.offset < b.offset
         }.map(\.element)
@@ -147,14 +154,74 @@ public enum OrganicCertify {
     static func plural(_ n: Int, _ what: String) -> String { n == 1 ? "1 \(what)" : "\(n) \(what.replacingOccurrences(of: "area", with: "areas"))" }
 
     /// The infill card's own lines (his: "with a notification and the print parameters shown"; the version made says so).
-    public static func infillLines(from: Int, to: Int, layerMM: Double, walls: Int, newVersion: Int?, ranVersion: Int?) -> [String] {
+    /// `newVersion`/`ranVersion`: the versions' labels ("v4"), nil outside the Library.
+    public static func infillLines(from: Int, to: Int, layerMM: Double, walls: Int, newVersion: String?, ranVersion: String?) -> [String] {
         var out = ["Infill \(from)% → \(to)%", String(format: "Layers %.2g mm · %d walls", layerMM, walls)]
         if let n = newVersion {
-            out.append("Made as v\(n)" + (ranVersion.map { " · v\($0) keeps \(from)%" } ?? ""))
+            out.append("Made as \(n)" + (ranVersion.map { " · \($0) keeps \(from)%" } ?? ""))
         }
         return out
     }
 
     /// His re-check question, asked where Lattice is once every pop-up has gone through.
     public static let recheckLine = "Check it again with the changes?"
+    public static let recheckYes = "Check again"
+    public static let recheckNo = "Not now"
+
+    /// The pop-up's own label for its stage (his order, said on the card).
+    public static func stageLabel(_ s: Stage) -> String {
+        switch s {
+        case .lattice: return "Lattice settings"
+        case .infill: return "Infill"
+        case .model: return "Change the part"
+        }
+    }
+
+    /// ★ The wizard's walk through one result's pop-ups. The workspace keeps it: Solve leaves Results for the page that fixes
+    /// it, and coming back the next pop-up is up. Once every pop-up has gone through, the re-check question takes the Lattice
+    /// button's place until he answers it.
+    public struct Walk: Equatable, Sendable {
+        /// The version whose result it walks, and that result (its report's hash: a new run starts a new walk).
+        public let version: UUID
+        public let key: Int
+        public let issues: [Issue]
+        public let grid: OrganicSpotGrid?
+        public var index = 0
+        /// The issues he solved in the app (their ids).
+        public var solved: [String] = []
+        /// The infill Solve's lines once it is done (the card then says what changed, and Next goes on).
+        public var infillLines: [String]? = nil
+        public var answered = false
+
+        public init(version: UUID, key: Int, issues: [Issue], grid: OrganicSpotGrid?) {
+            self.version = version; self.key = key; self.issues = issues; self.grid = grid
+        }
+
+        public var current: Issue? { issues.indices.contains(index) ? issues[index] : nil }
+        public var done: Bool { index >= issues.count }
+        public var step: String { "\(Swift.min(index + 1, issues.count)) of \(issues.count)" }
+        /// Whether the open pop-up was solved and now only says what changed (the infill's).
+        public var currentSolved: Bool { current.map { solved.contains($0.id) } ?? false }
+        /// The re-check question is up (where Lattice is) on this version.
+        public func asksRecheck(on id: UUID) -> Bool { version == id && done && !answered }
+
+        public mutating func skip() { index += 1 }
+        public mutating func next() { index += 1 }
+        public mutating func markSolved() {
+            if let c = current, !solved.contains(c.id) { solved.append(c.id) }
+        }
+    }
+
+    /// Whether a landed Lattice run opens on Results by itself: an Organic part that does not certify (its walk starts there).
+    public static func opensResults(organic: Bool, reportJSON: Data?) -> Bool {
+        organic && walk(version: UUID(), reportJSON: reportJSON, infillNow: 100) != nil
+    }
+
+    /// The walk for a result, or nil when it certifies (no pop-ups).
+    public static func walk(version: UUID, reportJSON: Data?, infillNow: Int) -> Walk? {
+        guard let d = reportJSON, let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else { return nil }
+        let list = issues(report: o, infillNow: infillNow)
+        guard !list.isEmpty else { return nil }
+        return Walk(version: version, key: d.hashValue, issues: list, grid: OrganicSpotGrid(json: o[OrganicSpotGrid.reportKey]))
+    }
 }

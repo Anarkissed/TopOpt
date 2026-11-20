@@ -767,7 +767,11 @@ public enum LatticeFileButton {
     /// (`accepted` is the old gate's: a "fail" lands as the not-strong-enough card, the file kept); its `strength` block rides as
     /// the outcome's report, so the Strength tab says what the struts did. Aesthetic: never checked (U9) — nothing to refuse,
     /// no margin claimed, the weight from the file's own volume.
-    public static func outcome(_ m: LatticeFileRun.Made, densityGCm3: Double) throws -> OptimizeOutcome {
+    ///
+    /// ★ Organic cut 2 (his certify wizard, 11-19): an Organic part that does not certify is SHOWN, not refused — the Results
+    /// screen walks him through why, pinned to the part (`OrganicCertify`). Its verdict stays its own (`v3Passes`, the checks'
+    /// "Not strong enough"); the weak spots' voxels (fields.bin block 3) ride in the report for the wizard's colour and outline.
+    public static func outcome(_ m: LatticeFileRun.Made, densityGCm3: Double, organic: Bool = false) throws -> OptimizeOutcome {
         // ★ Organic cut 2: core's 3MF read back by its own small reader; an STL as before
         let mesh: (vertices: [Float], indices: [Int32])
         if m.report.isThreeMF {
@@ -783,7 +787,9 @@ public enum LatticeFileButton {
         let fields = m.fields.flatMap(RemoteFieldsContainer.parse)
         let block = fields?.variants.first
         let fraction = m.report.partMM3 > 0 ? m.report.plasticMM3 / m.report.partMM3 : 0
-        let accepted = s?.accepted ?? true
+        let passes = s?.accepted ?? true
+        let accepted = organic || passes
+        let reportJSON = organic ? withSpots(m.reportJSON, fields: fields) : m.reportJSON
         let grams = s.flatMap { $0.massGrams > 0 ? $0.massGrams : nil } ?? m.report.plasticMM3 / 1000 * densityGCm3
         // ★ a fail with no load path (a load on open lattice): the not-strong-enough card says so INSTEAD of a margin sentence
         // (its load-path wording), with core's reason in plain words and the fix; a margin fail keeps core's own diagnosis
@@ -797,9 +803,9 @@ public enum LatticeFileButton {
                                  minFeatureViolations: 0, inheritsUnsourcedZKnockdown: false, provenance: d?.provenance ?? "",
                                  noSettingFixesThis: true, noFixReason: why, headroomMinInfillPercent: nil, recommendations: [])
         }
-        if let s, !accepted, let why = s.noPathLine {
+        if let s, !passes, let why = s.noPathLine {
             diagnosis = said(.loadPath, why, s)
-        } else if let s, !accepted, s.failReason == nil, s.notCertified, s.diagnosis == nil {
+        } else if let s, !passes, s.failReason == nil, s.notCertified, s.diagnosis == nil {
             // ★ LatticeReview 11-17 18:34Z: a fail none of the three reasons covers (anchors held only by sliding; no solid
             // carries load) has no fail_reason — the check's own not-certified words, in one plain line
             diagnosis = said(.none, LatticeFileStrength.notCertifiedLine(s.notCertifiedReason), s)
@@ -808,7 +814,7 @@ public enum LatticeFileButton {
             requestedVolumeFraction: fraction, achievedVolumeFraction: fraction,
             massGrams: grams, supportVolumeVoxels: block?.supportVolumeVoxels ?? 0,
             meshTriangleCount: mesh.indices.count / 3,
-            worstCaseMargin: s?.marginWorstCase ?? 0, accepted: accepted, v3Passes: accepted,
+            worstCaseMargin: s?.marginWorstCase ?? 0, accepted: accepted, v3Passes: passes,
             orientation: s?.buildDirection ?? SIMD3(0, 0, 1),
             maxStressMPa: s?.maxEffectiveVonMisesMPa ?? 0, maxInterlayerTensionMPa: s?.maxInterlayerTensionMPa ?? 0,
             inPlaneMargin: s?.marginInPlane ?? 0, interlayerMargin: s?.marginInterlayer ?? 0,
@@ -823,7 +829,20 @@ public enum LatticeFileButton {
                                voxelVolumeMM3: fields?.voxelVolumeMM3 ?? 0,
                                gridNx: fields?.gridNx ?? 0, gridNy: fields?.gridNy ?? 0, gridNz: fields?.gridNz ?? 0,
                                gridOrigin: fields?.gridOrigin ?? .zero, spacing: fields?.spacing ?? 0,
-                               computedRemotely: true, timing: m.timing, reportJSON: m.reportJSON)
+                               computedRemotely: true, timing: m.timing, reportJSON: reportJSON)
+    }
+
+    /// ★ Organic cut 2: the report with the listed weak spots' voxels (`OrganicSpotGrid`, from fields.bin's spot-id block,
+    /// requested_volume_fraction -2) — kept with the result, so the wizard colours and outlines them whenever it is opened.
+    static func withSpots(_ report: Data, fields: RemoteFieldsContainer?) -> Data {
+        guard let f = fields, let ids = f.variants.first(where: { $0.requestedVF == -2 })?.vonMises,
+              var o = (try? JSONSerialization.jsonObject(with: report)) as? [String: Any],
+              let solid = (o["strength"] as? [String: Any])?["solid_margin"] as? [String: Any] else { return report }
+        let listed = Set((solid["spots"] as? [[String: Any]] ?? []).compactMap { ($0["id"] as? NSNumber)?.intValue })
+        guard let g = OrganicSpotGrid.from(ids: ids, nx: f.gridNx, ny: f.gridNy, nz: f.gridNz, origin: f.gridOrigin,
+                                            spacing: f.spacing, listed: listed) else { return report }
+        o[OrganicSpotGrid.reportKey] = g.json
+        return (try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys])) ?? report
     }
 
     private final class Progress: @unchecked Sendable {
@@ -867,7 +886,7 @@ public enum LatticeFileButton {
                                                 strengthJob: strengthJob, tensor: job.tensor, strengthened: strengthened?.files,
                                                 isCancelled: { !keepGoing.call(steps - 1, steps, 0) })
             if let s = strengthened { made.reportJSON = withStrengthen(made.reportJSON, s) }
-            return try outcome(made, densityGCm3: densityGCm3)
+            return try outcome(made, densityGCm3: densityGCm3, organic: true)
         }
     }
 

@@ -179,7 +179,8 @@ public struct ResultsScreen: View {
                 resultsModel: ResultsModel? = nil,
                 takeOpenOn: (() -> Int?)? = nil,
                 version: String? = nil, pickedVariant: Int? = nil, onPick: ((Int) -> Void)? = nil,
-                printOrientation: ResultsPrintOrientation? = nil) {
+                printOrientation: ResultsPrintOrientation? = nil,
+                certify: OrganicCertifyCard? = nil) {
         // `resultsModel` is a TEST SEAM (the M7 /app/ house style — the run is tested
         // through an injected scheduler / runner / notifier the same way). The screen
         // owns its ResultsModel as a @StateObject, so a test hosting this view has no
@@ -210,10 +211,38 @@ public struct ResultsScreen: View {
         self.version = version; self.pickedVariant = pickedVariant; self.onPick = onPick
         self.takeOpenOn = takeOpenOn
         self.printOrientation = printOrientation
+        self.certify = certify
     }
 
     /// ★ B4 (note 12, Q9): the orientation line's source; nil draws no line.
     let printOrientation: ResultsPrintOrientation?
+
+    /// ★ Organic cut 2 (his certify wizard, 11-19): the open pop-up (the workspace keeps the walk); nil: none.
+    let certify: OrganicCertifyCard?
+    @StateObject private var spotMemo = OrganicSpotPaintMemo()
+    /// The pop-up's frame (global), where its line starts.
+    @State private var certifyCardFrame: CGRect = .zero
+
+    /// The open pop-up's weak areas painted on the shown part (one paint per issue and mesh); nil: none to paint.
+    private var certifyPaint: OrganicSpotPaint.Result? {
+        guard let c = certify, let g = c.grid, !c.issue.spotIDs.isEmpty, let mesh = viewerMesh else { return nil }
+        let r = spotMemo.paint(issue: c.issue.id, ids: c.issue.spotIDs, grid: g, mesh: mesh)
+        return r.painted > 0 ? r : nil
+    }
+
+    /// ★ his design: the card, and its line straight to the area, staying on it however he turns the part.
+    @ViewBuilder private func certifyLayer(_ c: OrganicCertifyCard) -> some View {
+        let target = c.issue.at.flatMap { projection?.project(SIMD3<Float>($0)) }
+        OrganicCertifyLeader(from: certifyCardFrame, to: target).ignoresSafeArea()
+        OrganicCertifyCardView(card: c)
+            .background(GeometryReader { g in
+                Color.clear.onAppear { certifyCardFrame = g.frame(in: .global) }
+                    .onChange(of: g.frame(in: .global)) { f in certifyCardFrame = f }
+            })
+            .padding(.top, PageChrome.panelTop).padding(.leading, PageChrome.edge)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .zIndex(3)
+    }
     @State private var orientPhase: PrintOrientationPhase = .ours
     /// The page's controls the line keeps clear of, and its own size (it changes with its state).
     @StateObject private var orientControls = LaneControls()
@@ -266,7 +295,8 @@ public struct ResultsScreen: View {
                           loadFlowVertices: loadFlowVertices,
                           loadFlowKey: loadFlowKey,
                           loadFlowGuides: loadFlowGuides,
-                          bodyAlpha: bodyAlpha)
+                          bodyAlpha: bodyAlpha,
+                          spotFaces: certifyPaint?.outline, spotKey: certifyPaint?.key ?? 0)
                 // ★ tap-to-explore, the Lattice key's process (his iPad 2026-10-27): while the key is open a tap on the
                 // part reads the stress there (an arrow on the part, an arrow on the key); a double tap anywhere leaves
                 .onSurfacePoint { p in if exploring, let p { stressProbe = p } }
@@ -293,6 +323,7 @@ public struct ResultsScreen: View {
             // 2026-10-27: the scenario dots and rings "make no sense" — gone.)
             if legendShown, layers.motion == nil, stressProbe == nil { hotSpotMarker.ignoresSafeArea() }
             checkMarkers.ignoresSafeArea()   // ★ B4 (note 14): the open check's places
+            if let c = certify { certifyLayer(c) }   // ★ Organic cut 2: his certify wizard's pop-up and its line
             if layers.motion == .breakIt { failureMarker.ignoresSafeArea() }   // ★ Break: where it yields, and at what load
             versionsColumn
             rightColumn
@@ -644,6 +675,8 @@ public struct ResultsScreen: View {
     /// recomputed on each body eval while the overlay is on; memoize on
     /// `selectedIndex` if a scrub-with-stress hitch shows up on device.
     private var stressTints: [SIMD4<Float>]? {
+        // ★ Organic cut 2 (his certify wizard): while a pop-up is up, its weak areas are coloured on the part
+        if let p = certifyPaint { return p.tints }
         // In load-path FLOW mode the flow's Body segment owns the body appearance: the
         // "Stress" body paints the static field with the MOVING epicenters blended in
         // (a bloom following each arrow); x-ray / solid paint plain clay (nil tints).
