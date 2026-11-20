@@ -1204,7 +1204,9 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
         if (ra.id == r.id) own = &ra;
       const bool skin_here = own && own->skin ? *own->skin : settings.skin;
       finish.net_on = finish.net_on || skin_here;
-      if (skin_here && reach > 0.0) {
+      // A face closed by a cover (the area's Solid, or the part's Covered) carries no net: the cover is the finish there
+      // (leg J fix: OJ2's open-face cover left the side walls open, and the net landed on them).
+      if (skin_here && reach > 0.0 && !(domain_->cover_depth_mm(&r) > 0.0)) {
         finish.net_reach.push_back({r.id, reach});
         finish.net_width.push_back(own && own->skin_width_mm ? *own->skin_width_mm : settings.skin_spec.width_mm);
         finish.net_gap.push_back(ask.gap_lines > 0.0 ? ask.gap_lines * domain_->spec().bead_mm : domain_->spec().bead_mm);   // OJ7

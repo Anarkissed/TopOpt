@@ -2887,6 +2887,19 @@ static void test_finish_per_region() {
   const std::size_t m1 = nets(o2, 1, &w1lo, &w1hi), m2 = nets(o2, 2, &w2lo, &w2hi);
   std::printf("OL-FIN part Skin off, area 2 Skin: net struts %zu and %zu\n", m1, m2);
   CHECK(o2.refused.empty() && m1 == 0 && m2 > 0);
+  // Area 1 Skin, area 2 Solid (its cover): the net on area 1 only; the part's Covered: no net at all.
+  Settings mixed = st;
+  mixed.regions[0].skin = true;
+  mixed.regions[1].cover_mm = 1.2;
+  Session s4(model);
+  const Outcome o4 = s4.lay_organic(mixed, f, gs);
+  const std::size_t k1 = nets(o4, 1, &w1lo, &w1hi), k2 = nets(o4, 2, &w2lo, &w2hi);
+  Settings covered = st;
+  covered.cover_mm = -1.0;
+  Session s5(model);
+  const Outcome o5 = s5.lay_organic(covered, f, gs);
+  std::printf("OL-FIN area 1 Skin, area 2 Solid: net struts %zu and %zu; the part Covered (Skin on): %zu\n", k1, k2, o5.net_struts);
+  CHECK(o4.refused.empty() && k1 > 0 && k2 == 0 && o5.refused.empty() && o5.net_struts == 0);
   // Rim on an Organic area: refused, by name.
   Settings rim = st;
   rim.regions[0].rim_mm = 1.0;
