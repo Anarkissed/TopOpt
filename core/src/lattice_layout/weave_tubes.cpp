@@ -56,6 +56,8 @@ struct Piece {
   // `out` (its strand's p): one farther out is brought back to `out`, never pushed out.
   struct Proud { Vec3 from{}, tip{}; double r = 0.0, out = 0.0; bool along = false; };
   std::vector<Proud> proud;
+  // OV1: how far the swept centre line may lie from the bars the proud tubes are read along (0: not swept).
+  double slack = 0.0;
 };
 
 // A shallow run swept with its own section (the D of O14, or the square bar), the section's frame fixed by the build
@@ -338,6 +340,30 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
         pc.proud.push_back({pts[j], pts[j + 1], rz, along[j], true});
         ++out.along_bars;
       }
+      // OV1: a round tube's centre line swept as a curve (a shallow run's section stays straight, R5; the span that ends
+      // in solid stays straight with its run-on, R4). Its proud and along tubes keep their bars; the trim reads them
+      // max_offset_mm wider (the curve is within that of its bars).
+      if (pc.kind == 0 && spec.sweep.on && pc.p.size() >= 3) {
+        std::vector<char> held(pc.p.size() - 1, 0);
+        if (outer_a && ea == Bar::End::Solid) held.front() = 1;
+        if (outer_b && eb == Bar::End::Solid) held.back() = 1;
+        out.sweep_pieces_before += pc.p.size() - 1;
+        SweptLine sl = sweep_centre_line(pc.p, pc.r, spec.sweep, &held);
+        out.sweep_spans_curved += sl.spans_curved;
+        out.sweep_mitre_small_turn += sl.mitre_small_turn;
+        out.sweep_mitre_tight += sl.mitre_tight;
+        out.sweep_mitre_straight_end += sl.mitre_straight_end;
+        for (const Vec3& q : sl.tight_at)
+          if (out.sweep_tight_at.size() < 20) out.sweep_tight_at.push_back(q);
+        out.sweep_largest_offset_mm = std::max(out.sweep_largest_offset_mm, sl.largest_offset_mm);
+        pc.p = std::move(sl.p);
+        pc.r = std::move(sl.r);
+        pc.slack = spec.sweep.max_offset_mm;
+        out.sweep_pieces_after += pc.p.size() - 1;
+      } else if (pc.kind == 0 && spec.sweep.on) {
+        out.sweep_pieces_before += pc.p.size() - 1;
+        out.sweep_pieces_after += pc.p.size() - 1;
+      }
       out.sharp_splits += turn_split;
       pieces.push_back(std::move(pc));
       start = k;
@@ -408,13 +434,14 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
           made_from[s] >= 0 && !pieces[static_cast<std::size_t>(made_from[s])].proud.empty()
               ? &pieces[static_cast<std::size_t>(made_from[s])].proud
               : nullptr;
+      const double slack = made_from[s] >= 0 ? pieces[static_cast<std::size_t>(made_from[s])].slack : 0.0;   // OV1
       auto in_proud = [&](const Vec3& v, double out_by) {
         for (const Piece::Proud& z : *proud) {
           if (z.along || out_by > z.out + 1e-6) continue;
           const Vec3 ab = sub(z.tip, z.from);
           const double l2 = dot(ab, ab);
           const double t = l2 > 0.0 ? std::clamp(dot(sub(v, z.from), ab) / l2, 0.0, 1.0) : 0.0;
-          if (len(sub(v, add(z.from, mul(ab, t)))) <= 1.16 * z.r + 1e-6) return true;
+          if (len(sub(v, add(z.from, mul(ab, t)))) <= 1.16 * z.r + slack + 1e-6) return true;
         }
         return false;
       };
@@ -426,7 +453,7 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
           const Vec3 ab = sub(z.tip, z.from);
           const double l2 = dot(ab, ab);
           const double t = l2 > 0.0 ? std::clamp(dot(sub(v, z.from), ab) / l2, 0.0, 1.0) : 0.0;
-          if (len(sub(v, add(z.from, mul(ab, t)))) <= 1.16 * z.r + 1e-6) p = z.out;
+          if (len(sub(v, add(z.from, mul(ab, t)))) <= 1.16 * z.r + slack + 1e-6) p = z.out;
         }
         return p;
       };

@@ -212,6 +212,8 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "organic_cross_gap_heavy", "organic_cross_climb_max_deg", "organic_tie_level", "organic_tie_gap",
        "organic_tie_gap_heavy", "organic_link_width", "organic_unbraced_max", "organic_follow_stress",
        "organic_gap_lines", "organic_face_relief_mm", "organic_relief_exclude_faces", "organic_strand_keep",
+       "organic_sweep", "organic_sweep_max_offset_mm", "organic_sweep_max_turn_deg", "organic_sweep_max_piece_mm",
+       "organic_sweep_min_turn_deg", "organic_sweep_min_radius",
        "organic_groups"},
       w);
   Settings s;
@@ -506,6 +508,18 @@ OrganicAsk organic_from(const json::Value& in, const Settings& s, const std::str
   a.face_relief_mm = num(in, "organic_face_relief_mm", a.face_relief_mm, w);
   a.relief_exclude_faces = wholes(in, "organic_relief_exclude_faces", w);
   a.strand_keep = num(in, "organic_strand_keep", a.strand_keep, w);   // OG3 (0.9 when not given)
+  // OV1: the swept vines (on when not given) and their numbers; ranges are validate_organic's.
+  if (const json::Value* sv = json::find(in, "organic_sweep"); sv && sv->is_number()) {   // 1 on, 0 off (or true / false)
+    const double v = json::as_number(*sv, w + ".organic_sweep");
+    if (v != 0.0 && v != 1.0) json::fail(w + ".organic_sweep", "must be 1 (on) or 0 (off)");
+    a.sweep.on = v == 1.0;
+  } else
+    a.sweep.on = flag(in, "organic_sweep", a.sweep.on, w);
+  a.sweep.max_offset_mm = num(in, "organic_sweep_max_offset_mm", a.sweep.max_offset_mm, w);
+  a.sweep.max_turn_deg = num(in, "organic_sweep_max_turn_deg", a.sweep.max_turn_deg, w);
+  a.sweep.max_piece_mm = num(in, "organic_sweep_max_piece_mm", a.sweep.max_piece_mm, w);
+  a.sweep.min_turn_deg = num(in, "organic_sweep_min_turn_deg", a.sweep.min_turn_deg, w);
+  a.sweep.min_radius = num(in, "organic_sweep_min_radius", a.sweep.min_radius, w);
   return a;
 }
 
@@ -1109,6 +1123,7 @@ FileJob parse_file_job(const std::string& json_text) {
     if (const json::Value* v = json::find(doc, "mesh"))
       job.options = options_from(json::as_object(*v, w + ".mesh"), w + ".mesh");
     job.organic.layer_mm = job.options.layers.layer_mm;   // G1: Grown grows one printed layer per step
+    job.options.mesh.sweep = job.organic.sweep;   // OV1: the file's tubes (and every print check of this job) swept so
     for (OrganicGroup& g : job.organic_groups) g.ask.layer_mm = job.options.layers.layer_mm;   // OJ3
     // OP7 (brief C2, E1): the ask's ranges and rules, as the session path checks them (validate_organic); the first
     // refusal is the job's (job_unreadable, as before), its key named in the detail, its plain sentence after it. The
@@ -1405,6 +1420,7 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     // before, byte for byte.
     r.file_format = !job.file_format.empty() ? job.file_format : r.made.tubes ? "3mf" : "stl";
     r.weave_mesh = r.made.tubes ? "tubes" : "merged";
+    r.sweep_on = r.made.tubes && job.options.mesh.sweep.on;
     std::string file_path = stl_path;
     if (r.file_format == "3mf" && file_path.size() >= 4 && file_path.compare(file_path.size() - 4, 4, ".stl") == 0)
       file_path.replace(file_path.size() - 4, 4, ".3mf");
@@ -1649,6 +1665,22 @@ std::string file_result_json(const FileResult& r) {
                   r.file_format.c_str(), r.weave_mesh.c_str(), count(r.made.shells.shells()), count(r.made.shells.left_out),
                   r.compressed ? "true" : "false");
     o += b;
+    // OV1: the swept vines (all 0 with organic_sweep off).
+    const WeaveShells& ws = r.made.shells;
+    std::snprintf(b, sizeof b,
+                  "  \"sweep\": {\"on\": %s, \"pieces_before\": %llu, \"pieces_after\": %llu, \"spans_curved\": %llu, "
+                  "\"mitre\": {\"small_turn\": %llu, \"tight\": %llu, \"straight_end\": %llu}, \"largest_offset_mm\": %.6g, "
+                  "\"tight_at\": [",
+                  r.sweep_on ? "true" : "false", count(ws.sweep_pieces_before), count(ws.sweep_pieces_after),
+                  count(ws.sweep_spans_curved), count(ws.sweep_mitre_small_turn), count(ws.sweep_mitre_tight),
+                  count(ws.sweep_mitre_straight_end), ws.sweep_largest_offset_mm);
+    o += b;
+    for (std::size_t q = 0; q < ws.sweep_tight_at.size(); ++q) {
+      std::snprintf(b, sizeof b, "%s[%.4f, %.4f, %.4f]", q ? ", " : "", ws.sweep_tight_at[q].x, ws.sweep_tight_at[q].y,
+                    ws.sweep_tight_at[q].z);
+      o += b;
+    }
+    o += "]},\n";
   }
   std::snprintf(b, sizeof b, "  \"part\": {\"faces\": %d, \"triangles\": %llu, \"open_edges\": %llu},\n",
                 r.faces, count(r.part_triangles), count(r.open_edges));

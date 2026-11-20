@@ -670,6 +670,174 @@ static void test_relief_findings() {
   }
 }
 
+// OV1 (the owner, 2026-11-19: "Definitely curved"): sweep_centre_line on made lines.
+static double turn_deg(const Vec3& a, const Vec3& b, const Vec3& c) {
+  const Vec3 u{b.x - a.x, b.y - a.y, b.z - a.z}, v{c.x - b.x, c.y - b.y, c.z - b.z};
+  const double lu = std::sqrt(u.x * u.x + u.y * u.y + u.z * u.z), lv = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+  return std::acos(std::clamp((u.x * v.x + u.y * v.y + u.z * v.z) / (lu * lv), -1.0, 1.0)) * 180.0 / 3.14159265358979323846;
+}
+static double seg_dist(const Vec3& q, const Vec3& a, const Vec3& b) {
+  const Vec3 ab{b.x - a.x, b.y - a.y, b.z - a.z};
+  const double l2 = ab.x * ab.x + ab.y * ab.y + ab.z * ab.z;
+  const double t = l2 > 0 ? std::clamp(((q.x - a.x) * ab.x + (q.y - a.y) * ab.y + (q.z - a.z) * ab.z) / l2, 0.0, 1.0) : 0.0;
+  const double dx = a.x + t * ab.x - q.x, dy = a.y + t * ab.y - q.y, dz = a.z + t * ab.z - q.z;
+  return std::sqrt(dx * dx + dy * dy + dz * dz);
+}
+static void test_sweep_line() {
+  SweepAsk on;
+  on.on = true;
+  // A quarter circle of radius 10 in 6 bars (15 degrees a point), a 0.9 mm tube.
+  std::vector<Vec3> arc;
+  for (int k = 0; k <= 6; ++k) {
+    const double t = k * 3.14159265358979323846 / 12.0;
+    arc.push_back({10.0 * std::cos(t), 10.0 * std::sin(t), 5.0});
+  }
+  const std::vector<double> rr(arc.size(), 0.45);
+  const SweptLine sl = sweep_centre_line(arc, rr, on);
+  CHECK(sl.p.size() > arc.size() && sl.p.size() == sl.r.size() && sl.p.size() == sl.span.size());
+  // The bar points are kept exactly, in order; every sample within 0.2 mm of its own bar.
+  std::size_t at = 0;
+  bool kept = true, near = true;
+  for (std::size_t k = 0; k < sl.p.size(); ++k) {
+    if (sl.span[k] < 0) {
+      kept = kept && at < arc.size() && sl.p[k].x == arc[at].x && sl.p[k].y == arc[at].y && sl.p[k].z == arc[at].z;
+      ++at;
+    } else {
+      const std::size_t j = static_cast<std::size_t>(sl.span[k]);
+      near = near && seg_dist(sl.p[k], arc[j], arc[j + 1]) <= 0.2 + 1e-9;
+    }
+  }
+  CHECK(kept && at == arc.size() && near && sl.largest_offset_mm <= 0.2 + 1e-9 && sl.largest_offset_mm > 0.0);
+  // No piece turns more than 8 degrees (no mitre on a smooth arc) and none is longer than 1.5 mm.
+  double most_turn = 0.0, longest = 0.0;
+  for (std::size_t k = 1; k + 1 < sl.p.size(); ++k) most_turn = std::max(most_turn, turn_deg(sl.p[k - 1], sl.p[k], sl.p[k + 1]));
+  for (std::size_t k = 1; k < sl.p.size(); ++k) longest = std::max(longest, seg_dist(sl.p[k], sl.p[k - 1], sl.p[k - 1]));
+  std::printf("sweep: quarter arc, %zu points -> %zu (%zu spans curved), most turn %.2f deg, longest piece %.3f mm, "
+              "largest offset %.4f mm\n", arc.size(), sl.p.size(), sl.spans_curved, most_turn, longest, sl.largest_offset_mm);
+  CHECK(most_turn <= 8.0 + 1e-6 && longest <= 1.5 + 1e-9 && sl.spans_curved == 6 && sl.mitre_tight == 0);
+  // Radii: linear between the two rings of a span.
+  bool lin = true;
+  for (std::size_t k = 0; k < sl.p.size(); ++k) lin = lin && std::fabs(sl.r[k] - 0.45) < 1e-12;
+  CHECK(lin);
+  // Off: the points as given. A straight run: one piece per span, unchanged.
+  const SweptLine off = sweep_centre_line(arc, rr, SweepAsk{});
+  CHECK(off.p.size() == arc.size() && off.spans_curved == 0);
+  const std::vector<Vec3> line = {{0, 0, 0}, {3, 0, 0}, {6, 0, 0}, {9, 0, 0}};
+  const SweptLine st = sweep_centre_line(line, {0.45, 0.45, 0.45, 0.45}, on);
+  CHECK(st.p.size() == 4 && st.spans_curved == 0 && st.mitre_small_turn == 2);
+  // A point turning under 3 degrees stays a mitre; one turning more is curved through.
+  const std::vector<Vec3> gentle = {{0, 0, 0}, {3, 0, 0}, {6, 6 * std::tan(2.0 * 3.14159265358979323846 / 180.0) * 0.5, 0}};
+  const SweptLine g2 = sweep_centre_line(gentle, {0.45, 0.45, 0.45}, on);
+  CHECK(g2.p.size() == 3 && g2.mitre_small_turn == 1 && g2.spans_curved == 0);
+  // The tightest curve: a 55-degree turn between 1.2 mm bars of a 3.6 mm tube would bend tighter than 1.25 x r: kept a
+  // mitre (its point keeps its own turn), counted, its place listed.
+  const double t55 = 55.0 * 3.14159265358979323846 / 180.0;
+  const std::vector<Vec3> tight = {{0, 0, 0}, {1.2, 0, 0}, {1.2 + 1.2 * std::cos(t55), 1.2 * std::sin(t55), 0}};
+  const SweptLine tl = sweep_centre_line(tight, {1.8, 1.8, 1.8}, on);
+  CHECK(tl.mitre_tight == 1 && tl.tight_at.size() == 1 && tl.p.size() == 3 && tl.spans_curved == 0);
+  // A gentler turn (30 degrees between 2 mm bars) on a thin tube (0.45) is curved.
+  const double t30 = 30.0 * 3.14159265358979323846 / 180.0;
+  const std::vector<Vec3> soft = {{0, 0, 0}, {2.0, 0, 0}, {2.0 + 2.0 * std::cos(t30), 2.0 * std::sin(t30), 0}};
+  const SweptLine tt = sweep_centre_line(soft, {0.45, 0.45, 0.45}, on);
+  CHECK(tt.mitre_tight == 0 && tt.spans_curved == 2);
+  // A span held straight (it ends in solid, R4): no samples on it; the point beside it is a mitre.
+  const std::vector<char> held = {1, 0, 0, 0, 0, 0};
+  const SweptLine hl = sweep_centre_line(arc, rr, on, &held);
+  bool none_on_0 = true;
+  for (int sp : hl.span) none_on_0 = none_on_0 && sp != 0;
+  CHECK(none_on_0 && hl.mitre_straight_end == 1 && hl.spans_curved == 5);
+  // Radii change linearly along a span between a 0.45 and a 0.9 ring.
+  const SweptLine wl = sweep_centre_line(arc, {0.45, 0.9, 0.45, 0.9, 0.45, 0.9, 0.45}, on);
+  bool between = true;
+  for (std::size_t k = 0; k < wl.p.size(); ++k) between = between && wl.r[k] >= 0.45 - 1e-12 && wl.r[k] <= 0.9 + 1e-12;
+  CHECK(between);
+}
+
+// OV1 in the tubes route: the made weave block's tubes swept: every shell closed and outward, more pieces, counted;
+// off (the writer's default) the mesh as before, to the bit.
+static void test_sweep_tubes() {
+  WeaveJob job;
+  const Domain& d = *job.session.domain();
+  const PartMeasure& pm = job.session.measure();
+  const OpenSpace open = read_open_space(d, job.out.layout, 0.25);
+  const Carved carved = carve_part(pm, job.out.layout, open);
+  const MeshSpec spec = file_mesh_defaults();
+  const std::vector<char> present = bars_present(job.weave, {}, job.regions, spec.layer_mm);
+  const WeaveHolds holds = weave_holds(job.weave, job.regions, present, spec.bridge_rise);
+  CHECK(!spec.sweep.on);   // the writer's own default
+  const WeaveShells off = weave_shells(pm, d, job.out.layout, job.weave, holds.kept, carved, spec, true);
+  MeshSpec off2 = spec;
+  off2.sweep.max_turn_deg = 12.0;   // numbers read only when on
+  const WeaveShells off_b = weave_shells(pm, d, job.out.layout, job.weave, holds.kept, carved, off2, true);
+  bool same = off.mesh.triangles == off_b.mesh.triangles && off.mesh.vertices.size() == off_b.mesh.vertices.size();
+  for (std::size_t i = 0; same && i < off.mesh.vertices.size(); ++i)
+    same = off.mesh.vertices[i].x == off_b.mesh.vertices[i].x && off.mesh.vertices[i].y == off_b.mesh.vertices[i].y &&
+           off.mesh.vertices[i].z == off_b.mesh.vertices[i].z;
+  CHECK(same && off.sweep_pieces_before == 0 && off.sweep_pieces_after == 0);
+  MeshSpec on = spec;
+  on.sweep.on = true;
+  // The made weave's own strands turn under 3 degrees a point (they stay mitres); add one that bends: a steep arc (a
+  // round tube, not a shallow bar) of radius 4 in an upright plane, 20 degrees a point.
+  Bars bent = job.weave;
+  std::vector<char> kept = holds.kept;
+  const Vec3 foot = round_pocket(8.0, 90, 4.0);
+  auto arc_at = [&](int k) {
+    const double t = (-50.0 + 20.0 * k) * 3.14159265358979323846 / 180.0;
+    return Vec3{foot.x + 4.0 * (1.0 - std::cos(t)), foot.y, 6.0 + 4.0 * std::sin(t)};
+  };
+  for (int k = 0; k < 5; ++k) {
+    Bar x;
+    x.a = arc_at(k);
+    x.b = arc_at(k + 1);
+    x.width = 0.9;
+    x.region = job.regions.front();
+    x.strand = 900;
+    x.end_a = k == 0 ? Bar::End::Loose : Bar::End::Node;
+    x.end_b = k == 4 ? Bar::End::Loose : Bar::End::Node;
+    bent.bars.push_back(x);
+    kept.push_back(1);
+  }
+  const WeaveShells off_bent = weave_shells(pm, d, job.out.layout, bent, kept, carved, spec, true);
+  const WeaveShells sw = weave_shells(pm, d, job.out.layout, bent, kept, carved, on, true);
+  double least = 0.0;
+  const std::size_t good = shells_closed_outward(sw, &least);
+  std::printf("sweep tubes: %zu shells (%zu tubes), %zu -> %zu triangles; pieces %zu -> %zu, %zu spans curved; mitres: "
+              "%zu small turn, %zu tight, %zu beside solid; largest offset %.4f mm; closed and outward %zu, least %.4f mm3\n",
+              sw.shells(), sw.tubes, off_bent.mesh.triangles.size(), sw.mesh.triangles.size(), sw.sweep_pieces_before,
+              sw.sweep_pieces_after, sw.sweep_spans_curved, sw.sweep_mitre_small_turn, sw.sweep_mitre_tight,
+              sw.sweep_mitre_straight_end, sw.sweep_largest_offset_mm, good, least);
+  CHECK(sw.shells() == off_bent.shells() && sw.tubes == off_bent.tubes && sw.bridges == off_bent.bridges);
+  CHECK(good == sw.shells() && least > 0.0);
+  CHECK(sw.sweep_pieces_after > sw.sweep_pieces_before && sw.sweep_spans_curved > 0);
+  CHECK(sw.sweep_largest_offset_mm > 0.0 && sw.sweep_largest_offset_mm <= 0.2 + 1e-9);
+  CHECK(sw.mesh.triangles.size() > off_bent.mesh.triangles.size());
+  CHECK(sw.sweep_tight_at.size() <= 20);
+  // The keys: organic_sweep on when not given; 0 off; the numbers held to their ranges, by name.
+  {
+    auto job_with = [](const std::string& layout) {
+      return R"({"mode": "lattice_file", "model": "a.step", "layout": {)" + layout + "}}";
+    };
+    const FileJob plain = parse_file_job(job_with(""));
+    CHECK(plain.organic.sweep.on && plain.options.mesh.sweep.on && plain.options.mesh.sweep.max_offset_mm == 0.2 &&
+          plain.options.mesh.sweep.max_turn_deg == 8.0 && plain.options.mesh.sweep.max_piece_mm == 1.5 &&
+          plain.options.mesh.sweep.min_turn_deg == 3.0 && plain.options.mesh.sweep.min_radius == 1.25);
+    const FileJob zero = parse_file_job(job_with(R"("organic_sweep": 0)"));
+    CHECK(!zero.organic.sweep.on && !zero.options.mesh.sweep.on);
+    const FileJob twelve = parse_file_job(job_with(R"("organic_sweep_max_turn_deg": 12)"));
+    CHECK(twelve.options.mesh.sweep.on && twelve.options.mesh.sweep.max_turn_deg == 12.0);
+    for (const char* bad : {R"("organic_sweep_max_offset_mm": 0)", R"("organic_sweep_max_turn_deg": 40)",
+                            R"("organic_sweep_max_piece_mm": 0.1)", R"("organic_sweep_min_turn_deg": 9)",
+                            R"("organic_sweep_min_radius": 0.5)"}) {
+      bool refused = false;
+      try { (void)parse_file_job(job_with(bad)); } catch (const FileJobError& e) {
+        const std::string key = std::string(bad).substr(1, std::string(bad).find('"', 1) - 1);
+        refused = std::string(e.what()).find(key) != std::string::npos;
+      }
+      CHECK(refused);
+    }
+  }
+}
+
 int main() {
   if (!mesh_available()) {
     std::printf("no mesh library in this build (%d checks, %d failed)\n", g_checks, g_fail);
@@ -681,6 +849,8 @@ int main() {
   test_tubes_route();
   test_flat_bottom();
   test_relief_findings();
+  test_sweep_line();
+  test_sweep_tubes();
   std::printf("weave tubes: %d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }

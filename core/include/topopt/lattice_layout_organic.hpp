@@ -273,6 +273,10 @@ struct OrganicAsk {
   // the spacing; the thinning test stays at the tracer's 0.5. 0.5 to 1; 0.5 = the tracer's old constant
   // (kOrganicTestRatio), the old lay bar for bar. Grown does not read it.
   double strand_keep = 0.9;
+  // OV1 (the owner, 2026-11-19: "Definitely curved"): a round vine's tube is swept along a curve through its points
+  // (sweep_centre_line). On by default for the file and the preview; off (organic_sweep 0) = the straight tubes, every
+  // result as before. Read for the whole part (a group's own value is not read). The numbers are SweepAsk's.
+  SweepAsk sweep = [] { SweepAsk s; s.on = true; return s; }();
 };
 inline constexpr double kOrganicStrandKeepDefault = 0.9;   // OG3
 inline constexpr double kOrganicGapLinesDefault = 1.5;   // OG1

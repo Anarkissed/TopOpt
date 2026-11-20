@@ -307,6 +307,7 @@ struct FileResult {
   // deflated. The result file carries them (with the shells, those left out, and slicer_supports "off": the app tells
   // the owner to slice with supports off) for a job with a weave region only.
   std::string file_format, weave_mesh;
+  bool sweep_on = false;   // OV1: the tubes were swept (organic_sweep)
   bool compressed = false;
   // The part.
   int faces = 0;

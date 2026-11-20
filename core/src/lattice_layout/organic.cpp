@@ -1831,6 +1831,26 @@ std::vector<OrganicRefusal> validate_organic(const Settings& settings, const Org
     at_least(r, 0.5);
     at_most(r, 1.0);
   }
+  // OV1: the swept vines' numbers (read whether the sweep is on or not, so a job that turns it on later is valid).
+  {
+    auto range = [&](const char* setting, double v, double lo, double hi, bool lo_open, const char* text) {
+      if (!(fin(v) && (lo_open ? v > lo : v >= lo) && v <= hi)) {
+        OrganicRefusal& r = refuse(setting, "out_of_range", text, v);
+        at_least(r, lo);
+        at_most(r, hi);
+      }
+    };
+    range("sweep_max_offset_mm", a.sweep.max_offset_mm, 0.0, 1.0, true,
+          "Curved vines: the farthest a curve may lie from its straight strut must be above 0 and at most 1 mm.");
+    range("sweep_max_turn_deg", a.sweep.max_turn_deg, 1.0, 30.0, false,
+          "Curved vines: the most one piece of a curve may turn must be from 1 to 30 degrees.");
+    range("sweep_max_piece_mm", a.sweep.max_piece_mm, 0.2, 10.0, false,
+          "Curved vines: the longest piece of a curve must be from 0.2 to 10 mm.");
+    range("sweep_min_turn_deg", a.sweep.min_turn_deg, 0.0, std::isfinite(a.sweep.max_turn_deg) ? a.sweep.max_turn_deg : 30.0, false,
+          "Curved vines: a bend left as a corner must be under the most one piece may turn (0 to that many degrees).");
+    range("sweep_min_radius", a.sweep.min_radius, 1.0, 5.0, false,
+          "Curved vines: the tightest curve must be from 1 to 5 times the vine's radius.");
+  }
   // OG2 (brief E6): the relief, 0 (off) to 1 mm; the faces left flush are the part's face ids (0 or more).
   if (!(fin(a.face_relief_mm) && a.face_relief_mm >= 0.0 && a.face_relief_mm <= kOrganicReliefMaxMm)) {
     OrganicRefusal& r = refuse("face_relief_mm", "out_of_range",

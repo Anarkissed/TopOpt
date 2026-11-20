@@ -175,6 +175,7 @@ add_library(topopt
   src/lattice_layout/session.cpp
   src/lattice_layout/organic.cpp
   src/lattice_layout/organic_finish.cpp
+  src/lattice_layout/organic_sweep.cpp
   src/lattice_layout/organic_grow.cpp
   src/lattice_layout/solid_mesh.cpp
   src/lattice_layout/print_check.cpp

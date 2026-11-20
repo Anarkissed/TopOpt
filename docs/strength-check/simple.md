@@ -84,6 +84,10 @@ The strengthen job judges exactly the struts that the file will hold: after layi
 
 A weak strut is made wider, up to the upper strut width you set (the limit) and never more, in the round it is found. Only when the next check finds it at the limit and still weak is it made wider than the limit, up to the cap; every such strut is counted and placed in the report, so it is never silent. A strut that is only being watched (strong enough, but close) never goes past the limit. When the part has several Organic groups, each strut follows its own group's limit.
 
+## Organic: curved vines
+
+The print file sweeps each round vine along a smooth curve through its points (rule OV1), so the bends are curves, not corners. The check still judges the straight struts between those points: the curve never lies more than 0.2 mm from them, and the struts' widths are the same, so the margins are the struts' margins. Flat bridges, the struts that end in solid, and the net skin stay straight.
+
 ## Organic: the solid's weak areas
 
 When the solid part does not certify, the check says where. Every small cube of the solid that the verdict judges gets its own margin, worked out exactly as the verdict works out the solid's (the infill reduction as set, the walls counted or not as set). The cubes under the safety margin that touch each other make one weak area. Up to {{solid_spots_max}} of them are listed, the worst first, and marked on the part.

@@ -142,6 +142,9 @@ struct MeshSpec {
   enum class WeaveMesh { Merged, Tubes };
   WeaveMesh weave_mesh = WeaveMesh::Merged;
   int tube_sides = 8;          // OF2: a weave tube's sides (of the same area as its round strut)
+  // OV1: a round weave tube's centre line swept as a curve through its points (sweep_centre_line). Off here (the
+  // writer's own default: every caller that does not ask is unchanged); the file job turns it on (organic_sweep).
+  SweepAsk sweep{};
   // OF4: every piece of the solid is kept (the tubes route: pieces the unmerged tubes tie together are not loose).
   // false: the mesh as before.
   bool keep_pieces = false;
@@ -371,6 +374,13 @@ struct WeaveShells {
   std::size_t along_bars = 0, along_vertices = 0;
   double along_outside_mm = 0.0;
   double grew_mm[6] = {0, 0, 0, 0, 0, 0};
+  // OV1: the round tubes' centre-line pieces before and after the sweep, the spans curved, the inner points kept a
+  // mitre by reason (a turn under min_turn_deg; a curve tighter than min_radius x r, its first 20 places; beside a span
+  // held straight in solid), and the farthest the curve lies from its bars. All 0 with the sweep off.
+  std::size_t sweep_pieces_before = 0, sweep_pieces_after = 0, sweep_spans_curved = 0;
+  std::size_t sweep_mitre_small_turn = 0, sweep_mitre_tight = 0, sweep_mitre_straight_end = 0;
+  std::vector<Vec3> sweep_tight_at;
+  double sweep_largest_offset_mm = 0.0;
   double mm3 = 0.0;                      // the shells' own volumes, summed (overlaps counted twice)
   double ms = 0.0;
   std::size_t shells() const { return first_tri.empty() ? 0 : first_tri.size() - 1; }

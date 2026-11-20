@@ -1043,6 +1043,43 @@ enum class SpacingWhy : std::uint8_t {
   Floor = 5,     // Traced only: the tracer raised the asked spacing to its print or resolution floor
 };
 
+// ── OV1: A VINE IS A SWEPT CURVE ─────────────────────────────────────────────────────
+// The owner, 2026-11-19: "The drawing follows the print file. Always. However, I am asking for bends in the actual
+// lines." and, on the two pictures, "Definitely curved". One function gives the curve the print file's tubes are swept
+// along and the preview draws: per piece of a run (the tubes route's pieces: split at a change of section and at a turn
+// sharper than 60 degrees, which stays a corner), the centripetal Catmull-Rom curve through its points. The checks
+// (print, strength) judge the straight bars; the curve stays within `max_offset_mm` of them.
+struct SweepAsk {
+  bool on = false;                // the writer's own default: off (today's straight tubes, every result as before)
+  double max_offset_mm = 0.2;     // a span's curve departs at most this far from its straight bar
+  double max_turn_deg = 8.0;      // no piece of the curve turns more than this
+  double max_piece_mm = 1.5;      // no piece of a span that turns is longer than this (a straight span stays one piece)
+  double min_turn_deg = 3.0;      // a point turning less than this stays a plain mitre (no curve through it)
+  double min_radius = 1.25;       // a point whose curve would bend tighter than this x its tube's radius stays a mitre
+};
+// What sweep_centre_line hands back: the curve's points (the piece's own points among them, never moved), each point's
+// tube radius, and for each point the span it lies on (-1: one of the piece's own points).
+struct SweptLine {
+  std::vector<Vec3> p;
+  std::vector<double> r;
+  std::vector<int> span;                 // -1: one of the piece's own points; else the span (0 .. n-2) a sample lies on
+  std::size_t spans = 0, spans_curved = 0;
+  std::size_t mitre_small_turn = 0;      // inner points turning under min_turn_deg (kept a mitre)
+  std::size_t mitre_tight = 0;           // inner points whose curve would bend tighter than min_radius x r (kept a mitre)
+  std::size_t mitre_straight_end = 0;    // inner points kept a mitre because a span beside them is held straight
+  std::vector<Vec3> tight_at;            // the tight points (all of them; the caller keeps at most 20)
+  double largest_offset_mm = 0.0;        // the farthest any point lies from its straight bar
+};
+// `p` the piece's points (2 or more), `r` the tube radius at each (the file's ring rule); `straight` (optional, one per
+// span): a span held straight (a span ending in solid, R4). A point is curved through when it turns at least
+// min_turn_deg, both spans beside it are free, and the curve there is no tighter than min_radius x the larger radius of
+// its spans; else it stays a mitre (the curve leaves it along the span's own line). A span between two mitres is one
+// straight piece. A curved span is sampled so no piece turns more than max_turn_deg or is longer than max_piece_mm
+// (at most 64 pieces), then pulled toward its bar by one factor so no sample departs more than max_offset_mm.
+// With `ask.on` false: the points as given.
+SweptLine sweep_centre_line(const std::vector<Vec3>& p, const std::vector<double>& r, const SweepAsk& ask,
+                            const std::vector<char>* straight = nullptr);
+
 // Preview is the spec (reviewer, 2026-11-12): a bar lying flatter than 30 degrees is written to the file as a BRIDGE,
 // a square bar with a level underside (his print rule P8 c), not a round one. `up` is the print direction (the part
 // stands on its lowest z). The file writer and whoever draws the bars ask this one function.
