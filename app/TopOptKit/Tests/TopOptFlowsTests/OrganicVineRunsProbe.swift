@@ -91,8 +91,14 @@ final class OrganicVineRunsProbe: XCTestCase {
             let before = OrganicVineShape.tubes(runs: round)
             let t0 = Date()
             var after = OrganicVineShape.tubes(runs: runs)
-            after.cut(runs: runs, surface: OrganicVineShape.CutSurface(vertices: body.vertices, indices: body.indices))
+            let t1 = Date()
+            let surface = OrganicVineShape.CutSurface(vertices: body.vertices, indices: body.indices)
+            let t2 = Date()
+            after.cut(runs: runs, surface: surface)
             let ms = Date().timeIntervalSince(t0) * 1000
+            print(String(format: "VINE-CUT TIME %@: tubes %.0f ms, surface %.0f ms (%d triangles), cut %.0f ms", name,
+                         t1.timeIntervalSince(t0) * 1000, t2.timeIntervalSince(t1) * 1000, body.indices.count / 3,
+                         Date().timeIntervalSince(t2) * 1000))
             let net = runs.filter { $0.marks.contains(.net) }
             let netCut = after.pieces.filter { $0.isCut && runs[Int($0.vine)].marks.contains(.net) }.count
             let netPieces = after.pieces.filter { runs[Int($0.vine)].marks.contains(.net) }.count

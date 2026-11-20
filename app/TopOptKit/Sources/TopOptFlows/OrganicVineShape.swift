@@ -249,7 +249,11 @@ public struct OrganicVineShape: Equatable, Sendable {
     /// The part's surface, for cutting the vines flat where they cross it (the print file trims every tube to the part:
     /// core weave_tubes.cpp, OF3). Triangles with their planes (outward), found by a 2 mm hash.
     public struct CutSurface: Sendable {
-        struct Tri: Sendable { var a, b, c: SIMD3<Float>; var plane: SIMD4<Float>; var face: Int32 }
+        struct Tri: Sendable {
+            var a, b, c: SIMD3<Float>; var plane: SIMD4<Float>; var face: Int32
+            var lo: SIMD3<Float> { simd_min(a, simd_min(b, c)) }
+            var hi: SIMD3<Float> { simd_max(a, simd_max(b, c)) }
+        }
         var tris: [Tri] = []
         var hash: [SIMD3<Int32>: [Int32]] = [:]
         static let cell: Float = 2
@@ -307,17 +311,29 @@ public struct OrganicVineShape: Equatable, Sendable {
             guard !tris.isEmpty, let first = pts.first else { return [] }
             var lo = first, hi = first
             for p in pts { lo = simd_min(lo, p); hi = simd_max(hi, p) }
-            let kl = Self.key(lo - reach), kh = Self.key(hi + reach)
-            var seen = Set<Int32>()
-            var out: [(d: Float, t: Int32)] = []
+            let boxLo = lo - reach, boxHi = hi + reach
+            let kl = Self.key(boxLo), kh = Self.key(boxHi)
+            var cand: [Int32] = []
             for z in kl.z...kh.z { for y in kl.y...kh.y { for x in kl.x...kh.x {
-                for t in hash[SIMD3(x, y, z)] ?? [] where seen.insert(t).inserted {
-                    let tri = tris[Int(t)]
-                    var d = Float.greatestFiniteMagnitude
-                    for p in pts { d = Swift.min(d, simd_length(p - Self.closest(p, tri))) }
-                    if d <= reach { out.append((d, t)) }
-                }
+                if let ts = hash[SIMD3(x, y, z)] { cand += ts }
             } } }
+            guard !cand.isEmpty else { return [] }
+            cand.sort()
+            var out: [(d: Float, t: Int32)] = []
+            var last: Int32 = -1
+            for t in cand where t != last {
+                last = t
+                let tri = tris[Int(t)]
+                // cheap rejects first: the triangle's box, then its plane (a lower bound on the distance to it)
+                if any(tri.lo .> boxHi) || any(tri.hi .< boxLo) { continue }
+                let n = SIMD3(tri.plane.x, tri.plane.y, tri.plane.z)
+                var bound = Float.greatestFiniteMagnitude
+                for p in pts { bound = Swift.min(bound, abs(simd_dot(n, p) + tri.plane.w)) }
+                if bound > reach { continue }
+                var d = Float.greatestFiniteMagnitude
+                for p in pts { d = Swift.min(d, simd_length(p - Self.closest(p, tri))) }
+                if d <= reach { out.append((d, t)) }
+            }
             return out.sorted { $0.d < $1.d }
         }
 
