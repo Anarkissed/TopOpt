@@ -16361,6 +16361,9 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
   const std::size_t nvox = cert_grid.voxel_count();
   std::vector<float> margin_field(nvox, std::numeric_limits<float>::quiet_NaN());
   std::vector<double> margin_of(nvox, std::numeric_limits<double>::quiet_NaN());
+  // OS15 (the app's certify wizard): per voxel, the id of the weak spot it belongs to (1.. in the listed order, every
+  // spot numbered, the listed ones first; 0: none), fields.bin's third block.
+  std::vector<float> spot_id_field(nvox, 0.0f);
   std::string spots_json;
   {
     const double Y = material.yield_strength_mpa, zk = material.z_knockdown, S_ = options.margin_stop;
@@ -16462,6 +16465,8 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
     std::sort(spots.begin(), spots.end(), [](const Spot& x, const Spot& y) {
       return x.worst_eff != y.worst_eff ? x.worst_eff < y.worst_eff : x.v.front() < y.v.front();
     });
+    for (std::size_t q = 0; q < spots.size(); ++q)
+      for (const std::size_t e : spots[q].v) spot_id_field[e] = static_cast<float>(q + 1);
     if (!spots.empty()) {
       measure_width();   // the walls credited (a measure of the grid, no new solve)
       const KnockdownSpec walls_k = spec_at(knockdown.infill_percent, true);
@@ -16556,7 +16561,8 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
                              : k == "beside_the_lattice"
                                  ? "Keep the lattice further from this area: a deeper protected skin, or a keep-clear area."
                                  : "Make this part of the model thicker, or print it denser.";
-        list += std::string(q ? "," : "") + "\n      {\"worst_at\": " + v3(w) + ", \"centroid\": " +
+        list += std::string(q ? "," : "") + "\n      {\"id\": " + std::to_string(q + 1) + ", \"issue\": " + json_str(k) +
+                ", \"worst_at\": " + v3(w) + ", \"centroid\": " +
                 v3({sum.x / nvs, sum.y / nvs, sum.z / nvs}) + ", \"box\": {\"lo\": " + v3(lo) + ", \"hi\": " + v3(hi) +
                 "}, \"voxels\": " + std::to_string(sp.v.size()) + ", \"mm3\": " + json_num(nvs * h * h * h) +
                 ", \"raw_margin\": " + json_num(raw) + ", \"effective_margin\": " + json_num(sp.worst_eff) +
@@ -16612,6 +16618,7 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
     fr.evaluated.push_back(std::move(fv));
     write_fields_file(join_path(out_dir, "fields.bin"), fr, cert_grid, /*accepted_only=*/false);
     append_fields_block(join_path(out_dir, "fields.bin"), cert_grid, -1.0, margin_field);   // brief E4: the solid's margin
+    append_fields_block(join_path(out_dir, "fields.bin"), cert_grid, -2.0, spot_id_field);  // OS15: the spots' ids
     done.files.push_back("fields.bin");
     std::vector<float> m(layout_bars.bars.size(), std::numeric_limits<float>::quiet_NaN());
     for (std::size_t i = 0; i < R.bar_of.size() && i < c.bar_margin.size(); ++i)
@@ -16646,7 +16653,8 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
        ", \"voxels\": " + std::to_string(R.solid_voxels) + ", \"passes_at_infill_percent\": " +
        (R.passes_at_infill_percent < 0 ? std::string("null") : std::to_string(R.passes_at_infill_percent)) +
        ", \"voxel_load_path\": " + std::string(load_path_ok ? "true" : "false") +
-       ", \"field\": {\"file\": \"fields.bin\", \"block\": 2, \"requested_volume_fraction\": -1}" + spots_json + "},\n";
+       ", \"field\": {\"file\": \"fields.bin\", \"block\": 2, \"requested_volume_fraction\": -1, \"spot_ids\": "
+       "{\"block\": 3, \"requested_volume_fraction\": -2}}" + spots_json + "},\n";
   s += "    \"margin_worst_case\": " + num(a.margin.worst_case) + ",\n";
   s += "    \"margin_in_plane\": " + num(a.margin.in_plane) + ",\n";
   s += "    \"margin_interlayer\": " + num(a.margin.interlayer) + ",\n";

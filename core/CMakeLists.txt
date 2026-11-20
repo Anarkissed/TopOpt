@@ -3040,3 +3040,15 @@ endif()
 # Evidence: core's lookup against Iacob 2024 Table 2, as a Markdown table.
 add_executable(flexible_spot_table EXCLUDE_FROM_ALL tests/tools/flexible_spot_table.cpp)
 target_link_libraries(flexible_spot_table PRIVATE topopt)
+# `ctest -R cli` runs 13 tests (the cli_* tests, and lattice_clip_shell, krylov_recycling and owner_clip, whose names
+# hold "cli"); a build of only topopt_cli leaves 10 of them "Not Run". `cmake --build <dir> --target cli_suite` builds
+# every program they run (each only when this configuration has it).
+set(_cli_suite_programs)
+foreach(_t topopt_cli test_lattice_clip_shell test_recycle test_cli test_organic_dead_parity test_empty_post_beam_mask
+           test_slot_origin test_region_ownership test_plan_is_the_design test_owner_clip test_outline_clip
+           test_run_info_fingerprint)
+  if(TARGET ${_t})
+    list(APPEND _cli_suite_programs ${_t})
+  endif()
+endforeach()
+add_custom_target(cli_suite DEPENDS ${_cli_suite_programs})
