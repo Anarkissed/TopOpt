@@ -115,6 +115,7 @@ struct LatticeSampleView: View {
             .padding(.bottom, DS.Space.l)
         }
         .task(id: inputs) { await build() }
+        .onChange(of: caption) { c in if FlexibleSaid.recording { Self.recordedCaptions.append(c) } }
         .onAppear { if FlexibleSaid.recording { Self.recordedAppears += 1 }; Self.say(tag, "appear") }
         .onDisappear { Self.say(tag, "disappear") }
     }
@@ -131,6 +132,7 @@ struct LatticeSampleView: View {
     /// Test hooks, kept only while a test records (FlexibleSaid.recording): each sample asked for, each time a view came up.
     nonisolated(unsafe) static var recordedAsks: [Inputs] = []
     nonisolated(unsafe) static var recordedAppears = 0
+    nonisolated(unsafe) static var recordedCaptions: [String] = []
 
     /// Core's sample is Z-up (printed as it stands); the viewer is Y-up — the map the workspace applies to a part.
     static let settleZUp = simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0))
