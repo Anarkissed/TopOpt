@@ -826,6 +826,13 @@ struct WeaveRun {
   // Bar::along_face; -1 when none or the model has no faces). Packed in version 2 only.
   double proud_a_mm = 0.0, proud_b_mm = 0.0;
   int along_face = -1;
+  // Leg M (the owner: "The drawing follows the print file. Always."): per point the FILE's ring width (the tubes
+  // route's rule: at the first and last point the end bar's width, at an inner point the larger of the two bars meeting
+  // there), and the run's section as the tubes route sweeps it (0 a round tube; 1 a bridge with a round top; 2 a flat
+  // bridge, bar_is_bridge at the file's defaults). Filled always; a run is split at a change of section and the thinning
+  // keeps every point where the ring width changes or the run turns sharper than 60 degrees only with `relief_marks`.
+  std::vector<double> ring_mm;
+  std::uint8_t section = 0;
 };
 // `bar_of`, when given (OF2, the file's tubes): per run, the place in `bars` of the bar each of its segments came from
 // (read with no thinning, `tolerance_mm` 0; with thinning it is left empty).
@@ -837,8 +844,9 @@ std::vector<WeaveRun> weave_runs(const Bars& bars, const std::vector<int>& weave
 // Version 1 (the shipped reader's): per run 12 bytes (point count u32, region i32, marks u8, end_a u8, end_b u8
 // (Bar::End), one pad byte), then 20 bytes per point (x, y, z, width, spacing as float32).
 // Version 2 (leg H): first 8 bytes, "WRN2" and u32 2; then per run 28 bytes (point count u32, region i32, marks u8,
-// end_a u8, end_b u8, a pad byte, proud_a_mm f32, proud_b_mm f32, along_face i32, proud_mm f32), then the same 20 bytes
-// per point. The version 1 reader given version 2 reads "WRN2" as a point count of 843,993,687 and returns nil (the
+// end_a u8, end_b u8, section u8 (leg M: 0 round, 1 round-top bridge, 2 flat bridge; was a pad byte, 0), proud_a_mm f32,
+// proud_b_mm f32, along_face i32, proud_mm f32), then 20 bytes per point: x, y, z, the FILE's ring width (leg M: in place
+// of the mean width; WeaveRun::ring_mm), spacing, as float32. The version 1 reader given version 2 reads "WRN2" as a point count of 843,993,687 and returns nil (the
 // bytes do not add up): it refuses, it never misdraws.
 std::vector<std::uint8_t> pack_weave_runs(const std::vector<WeaveRun>& runs, int version = 1);
 

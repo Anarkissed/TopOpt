@@ -846,8 +846,11 @@ static void test_runs() {
     std::size_t a1 = 0, a2 = 8;
     for (const WeaveRun& r : thin) {   // each run's 12-byte head and its points as version 1's; then the 16 new bytes
       if (!same_points) break;
-      same_points = std::memcmp(v2.data() + a2, packed.data() + a1, 12) == 0 &&
-                    std::memcmp(v2.data() + a2 + 28, packed.data() + a1 + 12, 20 * r.points.size()) == 0;
+      // (leg M: byte 11 of the head is the section and a point's width is the file's ring width in version 2)
+      same_points = std::memcmp(v2.data() + a2, packed.data() + a1, 11) == 0;
+      for (std::size_t k = 0; same_points && k < r.points.size(); ++k)
+        same_points = std::memcmp(v2.data() + a2 + 28 + 20 * k, packed.data() + a1 + 12 + 20 * k, 12) == 0 &&
+                      std::memcmp(v2.data() + a2 + 28 + 20 * k + 16, packed.data() + a1 + 12 + 20 * k + 16, 4) == 0;
       std::int32_t face = 0;
       float pa = -1.0f;
       std::memcpy(&pa, v2.data() + a2 + 12, 4);
@@ -858,6 +861,29 @@ static void test_runs() {
     }
     bool threw = false;
     try { (void)pack_weave_runs(thin, 3); } catch (const std::invalid_argument&) { threw = true; }
+    // Leg M: the file's ring width per point and the section per run (the preview's call: relief marks on).
+    {
+      std::vector<std::vector<std::size_t>> bof;
+      const std::vector<WeaveRun> rr = weave_runs(o.bars, regions, 0.0, &bof, true);
+      std::size_t ring_bad = 0, sec_bad = 0, pts = 0, bridges = 0;
+      for (std::size_t q = 0; q < rr.size(); ++q) {
+        const auto& ids = bof[q];
+        for (std::size_t k = 0; k < rr[q].points.size(); ++k) {
+          ++pts;
+          const double want = k == 0 ? o.bars.bars[ids.front()].width
+                              : k + 1 == rr[q].points.size() ? o.bars.bars[ids.back()].width
+                                                              : std::max(o.bars.bars[ids[k - 1]].width, o.bars.bars[ids[k]].width);
+          ring_bad += rr[q].ring_mm.size() != rr[q].points.size() || rr[q].ring_mm[k] != want;
+        }
+        for (std::size_t i : ids)
+          sec_bad += (!bar_is_bridge(o.bars.bars[i], file_mesh_defaults().bridge_rise) ? 0 : file_mesh_defaults().weave_round_top ? 1 : 2) != rr[q].section;
+        bridges += rr[q].section != 0;
+      }
+      const std::vector<std::uint8_t> p2 = pack_weave_runs(weave_runs(o.bars, regions, 0.1, nullptr, true), 2);
+      std::printf("OL-RUN leg M: %zu runs, %zu points: ring width not the file's %zu; a run's bars of another section %zu (bridge runs %zu); "
+                  "version 2 packed %zu bytes\n", rr.size(), pts, ring_bad, sec_bad, bridges, p2.size());
+      CHECK(ring_bad == 0 && sec_bad == 0 && !p2.empty());
+    }
     std::printf("OL-RUN version 2: %zu bytes, heads and points as version 1's %d; version 3 refused %d\n", v2.size(),
                 same_points ? 1 : 0, threw ? 1 : 0);
     CHECK(same_points && threw);
@@ -2440,7 +2466,13 @@ static void test_og2_relief() {
         std::size_t any = 0;
         for (const WeaveRun& x : flat_runs)
           any += (x.marks & kRunAlong) != 0 || x.proud_a_mm != 0.0 || x.proud_b_mm != 0.0 || x.proud_mm != 0.0 || x.along_face != -1;
-        const bool same = pack_weave_runs(flat_runs, 2) == pack_weave_runs(old_runs, 2);
+        // (leg M: with the marks the runs also split where the section changes, so they are compared segment by segment:
+        // the same segments, as many and as long)
+        std::size_t seg_f = 0, seg_o = 0;
+        double len_f = 0.0, len_o = 0.0;
+        for (const WeaveRun& x : flat_runs) for (std::size_t k = 1; k < x.points.size(); ++k) { ++seg_f; len_f += dist(x.points[k - 1], x.points[k]); }
+        for (const WeaveRun& x : old_runs) for (std::size_t k = 1; k < x.points.size(); ++k) { ++seg_o; len_o += dist(x.points[k - 1], x.points[k]); }
+        const bool same = seg_f == seg_o && std::fabs(len_f - len_o) < 1e-6;
         std::printf("OL-OG2 %s, relief 0, runs (leg H): %zu runs, %zu carry a relief fact; as without the marks %d\n", c.name,
                     flat_runs.size(), any, same ? 1 : 0);
         CHECK(any == 0 && same);

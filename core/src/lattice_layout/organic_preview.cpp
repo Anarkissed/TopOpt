@@ -61,11 +61,23 @@ void thin(WeaveRun& r, double tol) {
   t.region = r.region; t.marks = r.marks; t.end_a = r.end_a; t.end_b = r.end_b;
   t.proud_mm = r.proud_mm;   // OG2b
   t.proud_a_mm = r.proud_a_mm; t.proud_b_mm = r.proud_b_mm; t.along_face = r.along_face;   // leg H
+  t.section = r.section;   // leg M
+  // Leg M: every point where the file's ring width changes, or where the file splits the tube (a turn sharper than 60
+  // degrees), is kept.
+  if (r.ring_mm.size() == n)
+    for (std::size_t k = 1; k + 1 < n; ++k) {
+      if (r.ring_mm[k] != r.ring_mm[k - 1] || r.ring_mm[k] != r.ring_mm[k + 1]) keep[k] = 1;
+      const Vec3 u{r.points[k].x - r.points[k - 1].x, r.points[k].y - r.points[k - 1].y, r.points[k].z - r.points[k - 1].z};
+      const Vec3 v{r.points[k + 1].x - r.points[k].x, r.points[k + 1].y - r.points[k].y, r.points[k + 1].z - r.points[k].z};
+      const double lu = std::sqrt(u.x * u.x + u.y * u.y + u.z * u.z), lv = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+      if (lu > 0.0 && lv > 0.0 && (u.x * v.x + u.y * v.y + u.z * v.z) / (lu * lv) < 0.5) keep[k] = 1;
+    }
   for (std::size_t k = 0; k < n; ++k)
     if (keep[k]) {
       t.points.push_back(r.points[k]);
       t.width_mm.push_back(r.width_mm[k]);
       t.spacing_mm.push_back(r.spacing_mm[k]);
+      if (r.ring_mm.size() == n) t.ring_mm.push_back(r.ring_mm[k]);
     }
   r = std::move(t);
 }
@@ -108,12 +120,16 @@ std::vector<WeaveRun> weave_runs(const Bars& bars, const std::vector<int>& weave
     const bool weave = std::find(weave_regions.begin(), weave_regions.end(), b.region) != weave_regions.end();
     if (b.link || !weave) { prev = nullptr; continue; }
     const std::uint8_t m = marks_of(b, relief_marks);
+    const std::uint8_t sec = !bar_is_bridge(b, file_mesh_defaults().bridge_rise) ? 0 : file_mesh_defaults().weave_round_top ? 1 : 2;
     if (prev && prev->strand == b.strand && prev->region == b.region && runs.back().marks == m &&
-        (!relief_marks || prev->along_face == b.along_face) && dist3(runs.back().points.back(), b.a) < 1e-6) {
+        (!relief_marks || (prev->along_face == b.along_face && runs.back().section == sec)) &&
+        dist3(runs.back().points.back(), b.a) < 1e-6) {
       WeaveRun& r = runs.back();
       r.width_mm.back() = 0.5 * (r.width_mm.back() + b.width);
+      r.ring_mm.back() = std::max(r.ring_mm.back(), b.width);   // leg M: the file's ring at an inner point
       r.points.push_back(b.b);
       r.width_mm.push_back(b.width);
+      r.ring_mm.push_back(b.width);
       r.spacing_mm.push_back(b.cell);
       r.end_b = b.end_b;
       r.proud_b_mm = b.end_b == Bar::End::Surface ? b.proud_b : 0.0;   // leg H
@@ -128,6 +144,8 @@ std::vector<WeaveRun> weave_runs(const Bars& bars, const std::vector<int>& weave
       r.end_b = b.end_b;
       r.points = {b.a, b.b};
       r.width_mm = {b.width, b.width};
+      r.ring_mm = {b.width, b.width};   // leg M
+      r.section = sec;
       r.spacing_mm = {b.cell, b.cell};
       r.proud_mm = b.along_proud;   // OG2b
       r.proud_a_mm = b.end_a == Bar::End::Surface ? b.proud_a : 0.0;   // leg H
@@ -199,7 +217,8 @@ std::vector<std::uint8_t> pack_weave_runs(const std::vector<WeaveRun>& runs, int
   for (const WeaveRun& r : runs) {
     const std::uint32_t n = static_cast<std::uint32_t>(r.points.size());
     const std::int32_t region = r.region;
-    const std::uint8_t head[4] = {r.marks, static_cast<std::uint8_t>(r.end_a), static_cast<std::uint8_t>(r.end_b), 0};
+    const std::uint8_t head[4] = {r.marks, static_cast<std::uint8_t>(r.end_a), static_cast<std::uint8_t>(r.end_b),
+                                  static_cast<std::uint8_t>(v2 ? r.section : 0)};   // leg M: the section (version 2)
     put(&n, 4); put(&region, 4); put(head, 4);
     if (v2) {   // leg H
       const float pa = static_cast<float>(r.proud_a_mm), pb = static_cast<float>(r.proud_b_mm), pm = static_cast<float>(r.proud_mm);
@@ -207,8 +226,9 @@ std::vector<std::uint8_t> pack_weave_runs(const std::vector<WeaveRun>& runs, int
       put(&pa, 4); put(&pb, 4); put(&face, 4); put(&pm, 4);
     }
     for (std::size_t k = 0; k < r.points.size(); ++k) {
+      const double wk = v2 && r.ring_mm.size() == r.points.size() ? r.ring_mm[k] : r.width_mm[k];   // leg M: the file's ring
       const float v[5] = {static_cast<float>(r.points[k].x), static_cast<float>(r.points[k].y),
-                          static_cast<float>(r.points[k].z), static_cast<float>(r.width_mm[k]),
+                          static_cast<float>(r.points[k].z), static_cast<float>(wk),
                           static_cast<float>(r.spacing_mm[k])};
       put(v, sizeof v);
     }
