@@ -508,6 +508,9 @@ std::vector<HoldPatchCount> hold_up_weave(Bars& bars, const Domain& domain, cons
 // are Bar::face_skin (OG5 reads them as inside). `report`: what was laid.
 struct NetSkinReport {
   std::size_t landings = 0, struts = 0, stems = 0, joints_at_crossings = 0, skipped_parallel = 0;
+  // OJ8 (the lead, 2026-11-19): landings whose stem would leave the region's outline or come within a line of a
+  // protected face (not used), and joins that would (not laid).
+  std::size_t landings_not_used = 0, joins_not_clear = 0;
   double stem_longest_mm = 0.0;
 };
 // Leg J item 1: `widths`, when given, one per `reach` entry: that region's width (in place of width_mm).

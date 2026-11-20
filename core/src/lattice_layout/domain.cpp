@@ -220,6 +220,12 @@ double Domain::Probe::cover_at(const Vec3& p) const {
 
 double Domain::Probe::skin_gap(const Vec3& p) const { return skin_gap(p, cover_at(p)); }
 
+double Domain::Probe::protect_face_distance(const Vec3& p) const {
+  double d = std::numeric_limits<double>::infinity();
+  for (const MeshDistance& s : skins_) d = std::min(d, s.unsigned_distance(p));
+  return d;
+}
+
 double Domain::Probe::skin_gap(const Vec3& p, double cover) const {
   double g = std::numeric_limits<double>::infinity();
   for (std::size_t i = 0; i < skin_groups_.size(); ++i)   // one question per depth, not per skin

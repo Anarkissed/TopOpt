@@ -156,6 +156,28 @@ std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std
         if (!merged) fg[k].push_back(i);
       }
     }
+    // OJ8 (the lead, 2026-11-19): a net strut and a stem stay within the region's own open face and a line width off
+    // every PROTECTED face. `clear(a, b, w, n_in)`: every point of the centre line a to b (each 0.1 mm), read a hair
+    // inside the face along `n_in`, is lattice of the region, and the tube (half of `w`) stays a line width from the
+    // nearest protected face (by the distance to its own triangles). A landing whose stem is not clear is not used
+    // (its foot is not); a join that is not clear is not laid.
+    const double line = domain.spec().bead_mm;
+    auto clear = [&](const Vec3& a, const Vec3& b, double w, const Vec3& n_in) {
+      const int n = std::max(1, static_cast<int>(std::ceil(dist(a, b) / 0.1)));
+      for (int k = 0; k <= n; ++k) {
+        const Vec3 s = lerp(a, b, static_cast<double>(k) / n);
+        const Vec3 q{s.x + n_in.x * kHair, s.y + n_in.y * kHair, s.z + n_in.z * kHair};
+        const Where wq = probe.where(q);
+        if (!(wq.lattice() && wq.id == region)) return false;
+        if (probe.protect_face_distance(s) - 0.5 * w < line - 1e-9) return false;
+      }
+      return true;
+    };
+    std::vector<char> usable(L.size(), 1);
+    for (std::size_t i = 0; i < L.size(); ++i) {
+      const double w = L[i].width;
+      if (!clear(L[i].p, foot[i], w, L[i].n)) { usable[i] = 0; ++rep.landings_not_used; }
+    }
     // The bars by place, for "buried" (the old test: every one of 7 points along the join inside an existing bar).
     const double cell = std::max(reach, 0.5);
     auto slot = [&](double x) { return static_cast<long long>(std::floor(x / cell)); };
@@ -196,6 +218,7 @@ std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std
       return true;
     };
     auto fits = [&](std::size_t i, std::size_t j, double lo, double hi) {
+      if (!usable[i] || !usable[j]) return false;          // OJ8: its stem would not be clear
       if (dist(foot[i], foot[j]) < 1e-9) return false;   // one foot (OJ8)
       const double d = dist(L[i].p, L[j].p);
       if (d < lo || d > hi) return false;
@@ -290,6 +313,15 @@ std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std
       net.region = region;
       net.net = true;
       net.end_a = net.end_b = Bar::End::Node;
+      {   // OJ8: the join stays within the region's outline on the face and a line off every protected face
+        Vec3 nm{L[i].n.x + L[j].n.x, L[i].n.y + L[j].n.y, L[i].n.z + L[j].n.z};
+        const double nl = std::sqrt(nm.x * nm.x + nm.y * nm.y + nm.z * nm.z);
+        if (nl > 1e-12) nm = {nm.x / nl, nm.y / nl, nm.z / nl};
+        if (!clear(foot[i], foot[j], net.width, nm)) {
+          ++rep.joins_not_clear;
+          return false;
+        }
+      }
       if (too_near(i, j, net.width)) {   // OJ7: kept a gap apart from the net already laid
         if (kept_apart) ++*kept_apart;
         return false;

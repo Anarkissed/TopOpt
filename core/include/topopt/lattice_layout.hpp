@@ -393,6 +393,9 @@ class Domain {
     // skins or the cover take of that same line. With neither, it is the thickness.
     // `at_least` as for thickness.
     double room_through(const Vec3& p, double at_least = 0.0) const;
+    // OJ8: the distance from `p` to the nearest PROTECTED face itself (a Protect skin's own triangles, measured as the
+    // skin is), +infinity when the part has none.
+    double protect_face_distance(const Vec3& p) const;
     const PartMeasure::Probe& part() const { return part_; }
 
    private:

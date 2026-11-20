@@ -3159,6 +3159,158 @@ static std::size_t net_mid_crossings(const Bars& bars) {   // OJ8: net struts wh
     }
   return n;
 }
+// OJ8 (the lead, 2026-11-19: a net strut and a stem stay within the region's own open face: no part of a centre line
+// over solid or outside the region's outline on the face). The top face's region pulled in 2 mm on the pictures' block
+// (40 x 30 x 20) and on an L-shaped part (its open face concave), Traced and Grown, density 3 and 6: every point of
+// every net strut and stem (each 0.05 mm; a point on the face read a hair inside) is lattice of the region. And beside
+// a PROTECTED face (a 4 mm skin on a side, a 0.8 mm floor, the region to the part's edge): every tube of the net and
+// its stems at least one line width from the protected outer faces, by the direct distance to their triangles.
+static StepModel l_part() {
+  StepModel m;
+  const std::vector<std::array<double, 2>> xy = {{0, 0}, {30, 0}, {30, 12}, {12, 12}, {12, 30}, {0, 30}};
+  const int n = static_cast<int>(xy.size());
+  auto tri_fan = [&](const std::vector<Vec3>& poly, int face) {
+    for (std::size_t k = 1; k + 1 < poly.size(); ++k) {
+      const int v = static_cast<int>(m.mesh.vertices.size());
+      m.mesh.vertices.insert(m.mesh.vertices.end(), {poly[0], poly[k], poly[k + 1]});
+      m.mesh.triangles.push_back({v, v + 1, v + 2});
+      m.triangle_face.push_back(face);
+    }
+  };
+  auto info = [&](Vec3 normal, Vec3 origin) {
+    StepFaceInfo f;
+    f.kind = StepSurfaceKind::Plane;
+    f.plane_normal = normal;
+    f.plane_origin = origin;
+    m.faces.push_back(f);
+  };
+  info({0, 0, -1}, {0, 0, 0});
+  tri_fan({{12, 12, 0}, {12, 0, 0}, {0, 0, 0}, {0, 30, 0}, {12, 30, 0}}, 0);
+  tri_fan({{12, 12, 0}, {30, 12, 0}, {30, 0, 0}, {12, 0, 0}}, 0);
+  info({0, 0, 1}, {0, 0, 20});
+  tri_fan({{12, 12, 20}, {12, 30, 20}, {0, 30, 20}, {0, 0, 20}, {12, 0, 20}}, 1);
+  tri_fan({{12, 12, 20}, {12, 0, 20}, {30, 0, 20}, {30, 12, 20}}, 1);
+  for (int i = 0; i < n; ++i) {
+    const auto& p = xy[static_cast<std::size_t>(i)];
+    const auto& q = xy[static_cast<std::size_t>((i + 1) % n)];
+    const double dx = q[0] - p[0], dy = q[1] - p[1], l = std::hypot(dx, dy);
+    info({dy / l, -dx / l, 0}, {p[0], p[1], 0});
+    tri_fan({{p[0], p[1], 0}, {q[0], q[1], 0}, {q[0], q[1], 20}, {p[0], p[1], 20}}, 2 + i);
+  }
+  m.face_count = 2 + n;
+  m.solid_count = 1;
+  m.brep_volume = (30.0 * 30.0 - 18.0 * 18.0) * 20.0;
+  return m;
+}
+static double tri_distance(const Vec3& p, const Vec3& a, const Vec3& b, const Vec3& c) {   // Ericson 5.1.5
+  auto sub = [](const Vec3& u, const Vec3& v) { return Vec3{u.x - v.x, u.y - v.y, u.z - v.z}; };
+  auto dot = [](const Vec3& u, const Vec3& v) { return u.x * v.x + u.y * v.y + u.z * v.z; };
+  auto at = [](const Vec3& o, const Vec3& d, double t) { return Vec3{o.x + d.x * t, o.y + d.y * t, o.z + d.z * t}; };
+  const Vec3 ab = sub(b, a), ac = sub(c, a), ap = sub(p, a);
+  const double d1 = dot(ab, ap), d2 = dot(ac, ap);
+  if (d1 <= 0 && d2 <= 0) return dist(p, a);
+  const Vec3 bp = sub(p, b);
+  const double d3 = dot(ab, bp), d4 = dot(ac, bp);
+  if (d3 >= 0 && d4 <= d3) return dist(p, b);
+  const double vc = d1 * d4 - d3 * d2;
+  if (vc <= 0 && d1 >= 0 && d3 <= 0) return dist(p, at(a, ab, d1 / (d1 - d3)));
+  const Vec3 cp = sub(p, c);
+  const double d5 = dot(ab, cp), d6 = dot(ac, cp);
+  if (d6 >= 0 && d5 <= d6) return dist(p, c);
+  const double vb = d5 * d2 - d1 * d6;
+  if (vb <= 0 && d2 >= 0 && d6 <= 0) return dist(p, at(a, ac, d2 / (d2 - d6)));
+  const double va = d3 * d6 - d5 * d4;
+  if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) return dist(p, at(b, sub(c, b), (d4 - d3) / ((d4 - d3) + (d5 - d6))));
+  const double den = 1.0 / (va + vb + vc);
+  const Vec3 q = at(at(a, ab, vb * den), ac, vc * den);
+  return dist(p, q);
+}
+static void test_net_outline() {
+  for (int part = 0; part < 2; ++part)
+    for (int grown = 0; grown < 2; ++grown)
+      for (int density : {3, 6}) {
+        const StepModel model = part ? l_part() : box_model(40, 30, 20);
+        const TensorField f = traced_field(part ? 30 : 40, 30, 20);
+        Settings st;
+        st.regions = {{1, Role::Lattice, {1}, 12.0, -2.0, true}};   // pulled in 2 mm (the pictures' block)
+        st.regions[0].skin = true;
+        st.regions[0].skin_density = density;
+        st.drop_loose = true;
+        st.skin = true;
+        OrganicAsk a = traced_ask();
+        if (grown) { a.mode = OrganicMode::Grown; a.layer_mm = 0.2; }
+        Session s(model);
+        const Outcome o = s.lay_organic(st, f, a);
+        const Domain::Probe probe = s.domain()->probe();
+        std::size_t struts = 0, stems = 0, pts = 0, out = 0;
+        Vec3 first{};
+        for (const Bar& b : o.bars.bars) {
+          if (!b.face_skin) continue;
+          ++(b.stem ? stems : struts);
+          const double L = dist(b.a, b.b);
+          const int n = std::max(1, static_cast<int>(std::ceil(L / 0.05)));
+          for (int k = 0; k <= n; ++k) {
+            Vec3 q{b.a.x + (b.b.x - b.a.x) * k / n, b.a.y + (b.b.y - b.a.y) * k / n, b.a.z + (b.b.z - b.a.z) * k / n};
+            q.z = std::min(q.z, 20.0 - 0.02);   // a point on the face, a hair inside
+            ++pts;
+            const Where w = probe.where(q);
+            if (!(w.lattice() && w.id == 1)) {
+              if (!out) first = q;
+              ++out;
+            }
+          }
+        }
+        std::printf("OL-NET-OUTLINE %s, %s, density %d: net struts %zu, stems %zu; points %zu, outside the region's outline "
+                    "%zu (first at %.2f %.2f %.2f)\n", part ? "L-shaped" : "block", grown ? "Grown" : "Traced", density, struts,
+                    stems, pts, out, first.x, first.y, first.z);
+        CHECK(o.refused.empty() && struts > 0 && out == 0);
+      }
+  // Beside a PROTECTED face.
+  for (int grown = 0; grown < 2; ++grown) {
+    const StepModel model = box_model(30, 30, 20);
+    Settings st;
+    st.regions = {{1, Role::Lattice, {1}, 20.0, 0.0, true}};
+    Settings::ProtectAsk floor, side;
+    floor.id = 2; floor.faces = {0}; floor.depth_mm = 0.8;
+    side.id = 3; side.faces = {3}; side.depth_mm = 4.0;
+    st.protect = {floor, side};
+    st.skin = true;
+    st.drop_loose = true;
+    OrganicAsk a = traced_ask();
+    if (grown) { a.mode = OrganicMode::Grown; a.layer_mm = 0.2; }
+    Session s(model);
+    const Outcome o = s.lay_organic(st, traced_field(), a);
+    const double line = s.domain()->spec().bead_mm;
+    double least = 1e9;
+    std::size_t n_bars = 0;
+    const Bar* worst = nullptr;
+    int worst_face = -1;
+    for (const Bar& b : o.bars.bars) {
+      if (!b.face_skin) continue;
+      ++n_bars;
+      const double L = dist(b.a, b.b);
+      const int n = std::max(1, static_cast<int>(std::ceil(L / 0.05)));
+      for (int k = 0; k <= n; ++k) {
+        const Vec3 q{b.a.x + (b.b.x - b.a.x) * k / n, b.a.y + (b.b.y - b.a.y) * k / n, b.a.z + (b.b.z - b.a.z) * k / n};
+        for (std::size_t t = 0; t < model.mesh.triangles.size(); ++t) {
+          const int face = model.triangle_face[t];
+          if (face != 0 && face != 3) continue;
+          const auto& tr = model.mesh.triangles[t];
+          const double d = tri_distance(q, model.mesh.vertices[static_cast<std::size_t>(tr[0])],
+                                        model.mesh.vertices[static_cast<std::size_t>(tr[1])],
+                                        model.mesh.vertices[static_cast<std::size_t>(tr[2])]) - 0.5 * b.width;
+          if (d < least) { least = d; worst = &b; worst_face = face; }
+        }
+      }
+    }
+    std::printf("OL-NET-OUTLINE protected side and floor, %s: net bars %zu; nearest tube to a protected outer face %.3f mm "
+                "(a line: %.2f; face %d, %s %.2f %.2f %.2f to %.2f %.2f %.2f, width %.2f)\n", grown ? "Grown" : "Traced", n_bars,
+                least, line, worst_face, worst && worst->stem ? "stem" : "strut", worst ? worst->a.x : 0.0, worst ? worst->a.y : 0.0,
+                worst ? worst->a.z : 0.0, worst ? worst->b.x : 0.0, worst ? worst->b.y : 0.0, worst ? worst->b.z : 0.0,
+                worst ? worst->width : 0.0);
+    CHECK(n_bars > 0 && least >= line - 2e-3);
+  }
+}
 static void test_net_kept_apart() {   // OJ8 (leg M): the net ON the open face, crossings made joints
   const StepModel model = box_model(30, 30, 20);
   const TensorField f = gap_field();
@@ -3238,6 +3390,7 @@ static void test_net_kept_apart() {   // OJ8 (leg M): the net ON the open face, 
 
 int main() {
   test_net_kept_apart();
+  test_net_outline();
   test_groups_floors_additions();
   test_file_groups();
   test_solid_open_face();
