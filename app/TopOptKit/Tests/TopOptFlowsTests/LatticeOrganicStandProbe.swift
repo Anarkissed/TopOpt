@@ -61,7 +61,7 @@ final class LatticeOrganicStandProbe: XCTestCase {
             var inputs = LatticeLayoutBarsInputs(token: 1, bars: seg.bars, flags: seg.flags,
                                                  colours: LatticeLayoutColours.colours(laid, type: nil, grade: false), colourKey: 1)
             inputs.lightFrom = LatticeLayoutPreview.organicLightFrom(grown: mode == .grown, netFrom: seg.lightFrom, count: seg.count)
-            inputs.vines = OrganicVineShape.capsules(runs: r.runs)   // ★ his 11-19 pick: the vines as the app now draws them
+            inputs.vines = OrganicVineShape.tubes(runs: r.runs)   // ★ his 11-19 rule: the vines as the print file makes them
             for (win, size) in windows {
                 guard let rr = MeshRenderer(device: device, sampleCount: 4) else { throw XCTSkip("renderer") }
                 rr.setMesh(mesh)

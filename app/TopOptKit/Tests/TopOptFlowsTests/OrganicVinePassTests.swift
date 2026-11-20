@@ -2,9 +2,10 @@
 // now!"): the engine's Organic sample cube laid for real, drawn by OrganicVinePass (smooth round tubes, round ends, blended
 // joints) instead of the bars. Pictures with VINE_SHOT_DIR (outside the repo). OPT-IN timing: VINE_RUNS_FILE = a .vrun (his
 // stand's, from LatticeOrganicStandProbe) drawn at 2048 x 1536, the time per frame printed.
-// His later pick 11-19 ("I prefer release 10's ... more like vines and less like 'goo'"): the vines are release (10)'s round
-// struts (OrganicVineShape.capsules), so they must cover the same pixels as release (10)'s ray-cast capsules.
-// RED CONTROL: the parked smooth blended shape lands further from that outline.
+// His rule 11-19 ("The drawing follows the print file. Always."): the vines are the print file's tubes (OrganicVineShape.tubes).
+// The pass first draws release (10)'s round struts and must match its ray-cast capsules to the pixel (so the pass draws
+// shapes truly); the file's tubes then sit where the struts are, never fatter.
+// RED CONTROLS: the file's tubes differ from release (10)'s balls; the parked smooth shape lands further from the outline.
 #if canImport(AppKit) && canImport(MetalKit)
 import XCTest
 import MetalKit
@@ -43,10 +44,11 @@ final class OrganicVinePassTests: XCTestCase {
               let r = MeshRenderer(device: device, sampleCount: 1) else { throw XCTSkip("no renderer: \(MeshRenderer.lastInitError ?? "?")") }
         let (runs, mesh) = try await sampleCubeRuns()
         let seg = LatticeLayoutPreview.segments(runs)
-        let shape = OrganicVineShape.capsules(runs: runs)   // ★ his 11-19 pick: release (10)'s round struts
-        XCTAssertEqual(shape.pieces.count, seg.count, "★ one round strut per bar")
-        XCTAssertEqual(shape.caps.count, runs.filter { $0.points.count >= 2 }.reduce(0) { $0 + $1.points.count },
-                       "★ a round ball at every point")
+        let round10 = OrganicVineShape.capsules(runs: runs)   // release (10)'s drawing: proves the pass draws what the bars do
+        XCTAssertEqual(round10.pieces.count, seg.count, "premise: one round strut per bar")
+        let shape = OrganicVineShape.tubes(runs: runs)   // ★ his 11-19 rule: the print file's tubes
+        XCTAssertEqual(shape.pieces.count, seg.count, "★ one tube piece per bar")
+        XCTAssertLessThan(shape.caps.count, round10.caps.count, "★ round ends only where the file puts them, not at every point")
         r.setMesh(mesh)
         r.camera.setOrientation(azimuth: 0.6, elevation: 0.4)
         r.setBodyAlpha(LatticeLayoutPreview.ghostAlpha)
@@ -57,24 +59,28 @@ final class OrganicVinePassTests: XCTestCase {
         XCTAssertTrue(r.applyLayoutBars(bars, device: device))
         let barFrame = try frame()
         bars.token = 2
-        bars.vines = shape
+        bars.vines = round10
         XCTAssertTrue(r.applyLayoutBars(bars, device: device))
         XCTAssertNil(OrganicVinePass.lastInitError, "★ the vines' shaders build")
+        let roundFrame = try frame()
+        bars.token = 4
+        bars.vines = shape
+        XCTAssertTrue(r.applyLayoutBars(bars, device: device))
         let vineFrame = try frame()
         func covered(_ f: [UInt8]) -> Int { stride(from: 0, to: f.count, by: 4).filter { f[$0..<$0 + 4] != bare[$0..<$0 + 4] }.count }
-        let cb = covered(barFrame), cv = covered(vineFrame)
-        print("VINE PASS: bars cover \(cb) pixels, vines \(cv); \(shape.pieces.count) pieces, \(shape.caps.count) ends, \(shape.joints.count) joints")
-        // ★ his 11-19 pick: the vines ARE release (10)'s round drawing (its ray-cast capsules, the bars here), drawn faster
-        var odd = 0
-        for i in stride(from: 0, to: bare.count, by: 4) {
-            let inBars = barFrame[i..<i + 4] != bare[i..<i + 4], inVines = vineFrame[i..<i + 4] != bare[i..<i + 4]
-            if inBars != inVines { odd += 1 }
+        let cb = covered(barFrame), cr = covered(roundFrame), cv = covered(vineFrame)
+        func differ(_ x: [UInt8], _ y: [UInt8]) -> Int {
+            stride(from: 0, to: bare.count, by: 4).filter { (x[$0..<$0 + 4] != bare[$0..<$0 + 4]) != (y[$0..<$0 + 4] != bare[$0..<$0 + 4]) }.count
         }
-        print("VINE PASS: \(odd) pixels covered by one drawing and not the other (\(String(format: "%.2f", 100 * Double(odd) / Double(Swift.max(cb, 1)))) % of the bars')")
+        let odd = differ(barFrame, roundFrame), tubeOdd = differ(roundFrame, vineFrame)
+        print("VINE PASS: bars cover \(cb) pixels, release (10)'s drawing by the pass \(cr) (\(odd) differ), the file's tubes \(cv) "
+              + "(\(tubeOdd) differ from release (10)); \(shape.pieces.count) pieces, \(shape.caps.count) round ends")
+        // the pass draws release (10)'s round struts to the pixel: so what it draws for the file's rule is the file's rule
+        XCTAssertLessThan(Double(odd), 0.03 * Double(cb), "★ the pass draws the same outline as release (10)'s ray-cast capsules")
         XCTAssertGreaterThan(cv, 20_000, "★ the vines are on screen")
-        XCTAssertGreaterThan(Double(cv), 0.97 * Double(cb), "★ where release (10)'s round struts are")
-        XCTAssertLessThan(Double(cv), 1.03 * Double(cb), "★ and no fatter")
-        XCTAssertLessThan(Double(odd), 0.03 * Double(cb), "★ the same outline as release (10)'s round struts")
+        XCTAssertGreaterThan(Double(cv), 0.85 * Double(cb), "★ about where the struts are")
+        XCTAssertLessThan(Double(cv), 1.02 * Double(cb), "★ and never fatter (balls only where the file has them)")
+        XCTAssertGreaterThan(tubeOdd, 0, "RED CONTROL: the file's tubes are not release (10)'s balls at every point")
         let goo = OrganicVineShape(runs: runs)
         bars.token = 3
         bars.vines = goo
@@ -113,7 +119,7 @@ final class OrganicVinePassTests: XCTestCase {
                               spacingMM: [Float](repeating: 4, count: m)))
         }
         let t0 = Date()
-        let shape = OrganicVineShape.capsules(runs: runs)
+        let shape = OrganicVineShape.tubes(runs: runs)
         let buildMS = Date().timeIntervalSince(t0) * 1000
         let seg = LatticeLayoutPreview.segments(runs)
         var lo = SIMD3<Float>(repeating: .greatestFiniteMagnitude), hi = -lo

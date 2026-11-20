@@ -8,8 +8,9 @@
 //   * where vines meet (a run end shared by runs, or an end landing on another vine), a JOINT: the vines there blend by a
 //     polynomial smooth-min of `blendMM` (a vine with itself stays a plain union, so nothing bulges along a vine).
 // Prototype and pictures: agent-scratch/organic1/vines/vinelook.swift (styles today / grown / capsule).
-// ★ HIS PICK 11-19 (later): the app draws `capsules(runs:)`, release (10)'s round struts; the smooth blended shape below is
-// kept, unused, for v2 (his "ideas for v2" sheet). It is no longer a reference for core.
+// ★ HIS RULE 11-19 (later): "The drawing follows the print file. Always." The app draws `tubes(runs:)`, the print file's own
+// tube rule. `capsules(runs:)` (release (10)'s balls at every point) is kept for comparison; the smooth blended shape below
+// is kept, unused, for v2 (his "ideas for v2" sheet). Neither is a reference for core.
 import Foundation
 import simd
 import TopOptKit
@@ -33,6 +34,8 @@ public struct OrganicVineShape: Equatable, Sendable {
         /// The tube's frame at each end: the curve's tangent there and a side vector carried along the vine (parallel
         /// transport), the SAME at a point two pieces share, so their rings meet exactly (no crack, no twist).
         public var ta = SIMD3<Float>(0, 0, 1), tb = SIMD3<Float>(0, 0, 1), va = SIMD3<Float>(1, 0, 0), vb = SIMD3<Float>(1, 0, 0)
+        /// The file closes this end with a flat disc (a run end into the solid or cut by the part's surface).
+        public var flatA = false, flatB = false
         public init(a: SIMD3<Float>, ra: Float, b: SIMD3<Float>, rb: Float, vine: Int32) {
             self.a = a; self.ra = ra; self.b = b; self.rb = rb; self.vine = vine
         }
@@ -51,7 +54,104 @@ public struct OrganicVineShape: Equatable, Sendable {
     /// The most pieces one joint blends (the shader's loop bound); a joint with more keeps the nearest.
     public static let maxJointPieces = 12
 
-    /// ★ HIS PICK 11-19, the look the app draws: "I prefer release 10's. It feels more like vines and less like 'goo'."
+    /// ★ HIS RULE 11-19: "The drawing follows the print file. Always." The vines as the print file's tubes route makes them
+    /// (core weave_tubes.cpp, read out by LatticeReview 01:39Z at 0ed96521):
+    ///   * each run one tube; the ring at a point has that point's width (core's weave_runs gives the two bars' mean at an
+    ///     inner point where the file takes the larger: the one place the drawing can differ, by half a width step);
+    ///     between rings the tube tapers straight;
+    ///   * a point inside a run whose turn is at most 60 degrees is a MITRE: both bars' rings lie on the plane bisecting
+    ///     them, so the tube bends with a clean elbow of its own width, no ball;
+    ///   * a sharper turn ends the tube and starts it again: square ends, a round ball there;
+    ///   * a run end is square, with a round half-sphere at a node, a loose or joined end; flat (no ball) where it runs
+    ///     into the solid or is cut by the part's surface.
+    /// Ring side vectors are carried round each bend by the rotation that turns one bar onto the next, so the two rings
+    /// at a mitre are the same ring point for point (no crack). Drawn by `OrganicVinePass` (its tube shader puts each ring
+    /// on its end's plane: `tubeRingPoint` is the same arithmetic).
+    public static func tubes(runs: [LatticeLayoutSession.Run], mitreLimitDeg: Float = 60) -> OrganicVineShape {
+        var s = OrganicVineShape()
+        s.params.blendMM = 0
+        let cosLimit = cos(mitreLimitDeg * .pi / 180)
+        func perp(_ t: SIMD3<Float>) -> SIMD3<Float> {
+            simd_normalize(simd_cross(t, abs(t.x) < 0.9 ? SIMD3<Float>(1, 0, 0) : SIMD3<Float>(0, 1, 0)))
+        }
+        for (vi, r) in runs.enumerated() where r.points.count >= 2 {
+            let n = r.points.count
+            var u = [SIMD3<Float>](), keep = [Int]()
+            for k in 0..<(n - 1) {
+                let d = r.points[k + 1] - r.points[k]
+                if simd_length(d) > 1e-6 { u.append(simd_normalize(d)); keep.append(k) }
+            }
+            guard !u.isEmpty else { continue }
+            // per kept bar k: points keep[k] and keep[k]+1
+            var v = perp(u[0])
+            for (bi, k) in keep.enumerated() {
+                let a = r.points[k], b = r.points[k + 1]
+                let ra = r.widthMM[k] / 2, rb = r.widthMM[k + 1] / 2
+                var q = Piece(a: a, ra: ra, b: b, rb: rb, vine: Int32(vi))
+                q.va = v; q.vb = v
+                // the plane each end's ring lies on: a mitre with a gentle neighbour, else square
+                func plane(_ other: SIMD3<Float>?, outgoing: Bool) -> (SIMD3<Float>, Bool) {
+                    guard let o = other else { return (u[bi], false) }
+                    let c = simd_dot(outgoing ? u[bi] : o, outgoing ? o : u[bi])
+                    if c >= cosLimit { return (simd_normalize(u[bi] + o), false) }
+                    return (u[bi], true)   // a split: square, a ball
+                }
+                let prevBar = bi > 0 && keep[bi - 1] + 1 == k ? u[bi - 1] : nil
+                let nextBar = bi + 1 < keep.count && keep[bi + 1] == k + 1 ? u[bi + 1] : nil
+                let (na, splitA) = plane(prevBar, outgoing: false)
+                let (nb, splitB) = plane(nextBar, outgoing: true)
+                q.ta = na; q.tb = nb
+                s.pieces.append(q)
+                if splitA { s.caps.append(SIMD4(a, ra)) }
+                if splitB { s.caps.append(SIMD4(b, rb)) }
+                // carry the side vector onto the next bar: the rotation turning this bar onto it
+                if let o = nextBar { v = Self.carried(v, from: u[bi], to: o) }
+                else if bi + 1 < u.count { v = Self.carried(v, from: u[bi], to: u[bi + 1]) }
+            }
+            // the run's own ends: a round half-sphere unless it runs into the solid or is cut by the part's surface
+            func rounded(_ e: UInt8) -> Bool { e != 1 && e != 2 }   // core's Bar::End: Node, Solid, Surface, Loose, Joined
+            let first = s.pieces.count - keep.count, last = s.pieces.count - 1
+            if rounded(r.endA) { s.caps.append(SIMD4(r.points[0], r.widthMM[0] / 2)) }
+            else if keep.first == 0 { s.pieces[first].flatA = true }
+            if rounded(r.endB) { s.caps.append(SIMD4(r.points[n - 1], r.widthMM[n - 1] / 2)) }
+            else if keep.last == n - 2 { s.pieces[last].flatB = true }
+        }
+        return s
+    }
+
+    /// `v` turned by the rotation that takes unit `a` onto unit `b` (about a x b): parallel transport round a bend.
+    static func carried(_ v: SIMD3<Float>, from a: SIMD3<Float>, to b: SIMD3<Float>) -> SIMD3<Float> {
+        let axis = simd_cross(a, b)
+        let sn = simd_length(axis), cs = simd_dot(a, b)
+        var out: SIMD3<Float>
+        if sn < 1e-6 {
+            out = v
+        } else {
+            let k = axis / sn
+            out = v * cs + simd_cross(k, v) * sn + k * simd_dot(k, v) * (1 - cs)
+        }
+        out -= simd_dot(out, b) * b
+        if simd_length(out) < 1e-5 { out = simd_cross(b, abs(b.x) < 0.9 ? SIMD3<Float>(1, 0, 0) : SIMD3<Float>(0, 1, 0)) }
+        return simd_normalize(out)
+    }
+
+    /// A ring point exactly as `OrganicVinePass`'s tube shader places it (without its 16-gon scale): end `atB` of piece `q`
+    /// at angle `ang`: the bar's own circle, pushed along the bar onto that end's plane.
+    public static func tubeRingPoint(_ q: Piece, atB: Bool, angle ang: Float) -> SIMD3<Float> {
+        let d = q.b - q.a
+        let t = simd_length(d) > 1e-9 ? simd_normalize(d) : SIMD3<Float>(0, 0, 1)
+        let c = atB ? q.b : q.a, rad = atB ? q.rb : q.ra
+        let n = atB ? q.tb : q.ta
+        var v = atB ? q.vb : q.va
+        v = simd_normalize(v - simd_dot(v, t) * t)
+        let w = simd_cross(t, v)
+        let off = (cos(ang) * v + sin(ang) * w) * rad
+        let dn = simd_dot(t, n)
+        let sAlong = abs(dn) > 1e-3 ? -simd_dot(off, n) / dn : 0
+        return c + off + t * sAlong
+    }
+
+    /// Release (10)'s drawing (option A of LatticeReview's sheet for him): kept so it can be shown and compared.
     /// Release (10)'s round struts: each bar straight, ONE width (its two points' mean, as `LatticeLayoutPreview.segments`),
     /// a round ball at every point (the widest bar there), a plain union, nothing blended, nothing curved. It is the shape of
     /// today's print file. Drawn by `OrganicVinePass`'s fast tubes and sphere ends, so Grown and the net skin get it too

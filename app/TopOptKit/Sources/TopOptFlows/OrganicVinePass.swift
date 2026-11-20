@@ -50,20 +50,44 @@ vertex TubeVOut tube_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
     const device float4* q = P + 6 * iid;
     const int ring[6] = { 0, 1, 0, 0, 1, 1 };
     const int step[6] = { 0, 0, 1, 1, 0, 1 };
-    int quad = int(vid) / 6, corner = int(vid) % 6;
-    int r = ring[corner];
-    float ang = float(quad + step[corner]) * (6.283185307 / float(kSides));
+    // the side: 6 x kSides vertices; then a flat end disc at a (3 x kSides) and at b (3 x kSides), drawn only where the
+    // file closes the tube flat (q[2].w / q[3].w = 1: into the solid, or cut by the part's surface)
+    int side = 6 * kSides;
+    bool disc = int(vid) >= side;
+    int r, k;
+    float ang;
+    if (!disc) {
+        int quad = int(vid) / 6, corner = int(vid) % 6;
+        r = ring[corner];
+        ang = float(quad + step[corner]) * (6.283185307 / float(kSides));
+        k = 1;
+    } else {
+        int d = int(vid) - side;
+        r = d / (3 * kSides);
+        int tri = (d % (3 * kSides)) / 3, corner = d % 3;
+        ang = float(tri + (corner == 2 ? 1 : 0)) * (6.283185307 / float(kSides));
+        bool on = (r == 0 ? q[2].w : q[3].w) > 0.5;
+        k = (!on || corner == 0) ? 0 : 1;   // corner 0 the centre; an end not closed: every corner at the centre (no area)
+    }
+    // ★ his rule 11-19, "The drawing follows the print file. Always.": the file's tube rule. Each ring is the bar's own
+    // circle pushed along the bar onto its end's plane (q[2] / q[3]: the bar itself = a square end, the bisector of two
+    // bars = a mitre), so two bars' rings at a mitre are one ring (OrganicVineShape.tubeRingPoint is the same arithmetic)
     float3 c = r == 0 ? q[0].xyz : q[1].xyz;
     float rad = r == 0 ? q[0].w : q[1].w;
-    float3 t = normalize(r == 0 ? q[2].xyz : q[3].xyz);
-    float3 v = normalize(r == 0 ? q[4].xyz : q[5].xyz);
+    float3 bar = q[1].xyz - q[0].xyz;
+    float3 t = length(bar) > 1e-9 ? normalize(bar) : float3(0, 0, 1);
+    float3 n = r == 0 ? q[2].xyz : q[3].xyz;
+    float3 v = r == 0 ? q[4].xyz : q[5].xyz;
+    v = normalize(v - dot(v, t) * t);
     float3 w = cross(t, v);
     float3 radial = cos(ang) * v + sin(ang) * w;
-    float3 p = c + radial * (rad * kRingScale);
+    float3 off = radial * (rad * kRingScale) * float(k);
+    float dn = dot(t, n);
+    float3 p = c + off + t * (abs(dn) > 1e-3 ? -dot(off, n) / dn : 0.0);
     TubeVOut o;
     o.pos = F.clipFromModel * float4(p, 1.0);
     o.ez = -(F.eyeFromModel * float4(p, 1.0)).z;
-    o.en = (F.eyeNormalBasis * float4(radial, 0.0)).xyz;
+    o.en = (F.eyeNormalBasis * float4(disc ? (r == 0 ? -t : t) : radial, 0.0)).xyz;
     return o;
 }
 fragment VineGBuf tube_gbuffer(TubeVOut in [[stage_in]], constant VineFrame& F [[buffer(1)]]) {
@@ -324,13 +348,15 @@ final class OrganicVinePass {
         jointPipeline = try pipe("joint_vertex", "joint_gbuffer")
     }
 
-    /// Six float4 per piece: (a, ra) (b, rb) (ta) (tb) (va) (vb).
+    /// Six float4 per piece: (a, ra) (b, rb) (ta, flat a) (tb, flat b) (va) (vb); ta / tb = the normal of the plane each end's
+    /// ring lies on; flat = 1 where the file closes that end with a flat disc.
     static func pack(_ s: OrganicVineShape) -> [SIMD4<Float>] {
         var out = [SIMD4<Float>]()
         out.reserveCapacity(6 * s.pieces.count)
         for q in s.pieces {
             out.append(SIMD4(q.a, q.ra)); out.append(SIMD4(q.b, q.rb))
-            out.append(SIMD4(q.ta, 0)); out.append(SIMD4(q.tb, 0)); out.append(SIMD4(q.va, 0)); out.append(SIMD4(q.vb, 0))
+            out.append(SIMD4(q.ta, q.flatA ? 1 : 0)); out.append(SIMD4(q.tb, q.flatB ? 1 : 0))
+            out.append(SIMD4(q.va, 0)); out.append(SIMD4(q.vb, 0))
         }
         return out
     }
@@ -368,7 +394,7 @@ final class OrganicVinePass {
         enc.setVertexBuffer(pieceBuffer, offset: 0, index: 0)
         enc.setVertexBytes(&f, length: MemoryLayout<Frame>.stride, index: 1)
         enc.setFragmentBytes(&f, length: MemoryLayout<Frame>.stride, index: 1)
-        if Self.drawTubes { enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6 * Self.sides, instanceCount: pieceCount) }
+        if Self.drawTubes { enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 12 * Self.sides, instanceCount: pieceCount) }
         if Self.drawCaps, capCount > 0, let capBuffer {
             enc.setRenderPipelineState(capPipeline)
             enc.setVertexBuffer(capBuffer, offset: 0, index: 0)
