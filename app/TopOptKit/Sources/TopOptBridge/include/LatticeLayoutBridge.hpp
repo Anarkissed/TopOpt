@@ -339,6 +339,10 @@ struct LatticeLayoutTensor {
   int32_t nx = 0, ny = 0, nz = 0;
 };
 void lattice_layout_set_tensor(int64_t session, const LatticeLayoutTensor& tensor, BridgeError& err);
+// ★ Organic cut 2 (the export, handover f and g): the stress the session's next lay follows — as set, or as the synthetic
+// stress filled it ("Simulate stresses on unstressed walls") — written to `path` as core's TOTENSOR file, the lattice file
+// job's `tensor`. False (err set) when the session holds none.
+bool lattice_layout_write_tensor(int64_t session, const std::string& path, BridgeError& err);
 // The Auto Sweep limits per weave region of the domain `settings` lay in, before any lay (Session::sweep_limits, OP5; the
 // domain is kept for the next lay; LatticeReview's rule, its four fractions core's named constants). `measured` 0: a region core cannot measure (a curved shell): no Auto there.
 struct LatticeLayoutSweep {

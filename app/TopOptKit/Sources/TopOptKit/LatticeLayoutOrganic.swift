@@ -349,6 +349,20 @@ extension LatticeLayoutSession {
         }
     }
 
+    /// ★ Organic cut 2 (the export): the stress the next lay follows — as set, or as the synthetic stress filled it — as core's
+    /// TOTENSOR file, the lattice file job's `tensor`. Throws when the session holds none.
+    public func tensorFile() async throws -> Data {
+        let sid = id
+        return try await worker.run {
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("organic-tensor-\(UUID().uuidString).bin")
+            defer { try? FileManager.default.removeItem(at: url) }
+            var err = topoptbridge.BridgeError()
+            _ = topoptbridge.lattice_layout_write_tensor(sid, std.string(url.path), &err)
+            if !err.ok { throw TopOptError(message: String(err.message)) }
+            return try Data(contentsOf: url)
+        }
+    }
+
     /// The Auto Sweep limits of one weave region (LatticeReview's organic_sweep_limits; its fractions core's constants).
     public struct SweepLimits: Sendable, Equatable {
         public var region: Int32

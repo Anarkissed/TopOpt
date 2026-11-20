@@ -74,7 +74,10 @@ final class LatticeFileExportTests: XCTestCase {
         XCTAssertFalse(LatticeFileJob.checksStrength(a, wired: true), "★ Aesthetic never sends it (U9)")
         var o = l
         o.algorithm = "organic"
-        XCTAssertFalse(LatticeFileJob.checksStrength(o, wired: true), "★ Organic never reaches the new engine's file")
+        XCTAssertTrue(LatticeFileJob.checksStrength(o, wired: true), "★ cut 2 (OS2): an Organic file is checked too, Structural")
+        var oa = a
+        oa.algorithm = "organic"
+        XCTAssertFalse(LatticeFileJob.checksStrength(oa, wired: true), "★ never in Aesthetic (U9), Organic or not")
         var s = LatticeLayoutSession.Settings()
         s.allLattice = true
         let job = try XCTUnwrap(JSONSerialization.jsonObject(with: LatticeFileJob.build(s, modelName: "m.step",
@@ -110,7 +113,10 @@ final class LatticeFileExportTests: XCTestCase {
         XCTAssertTrue(src.contains("guard LatticeFileJob.checksStrength(project.lattice), let request = model.makeLatticeRunRequest() else { return nil }"))
         XCTAssertTrue(src.contains("(try? RemoteRun.buildJobJSON(request)).map { StrengthSettings.shared.addTo(strengthJob: $0) }"),
                       "★ the job a Lattice run writes today, with the values he changed in Settings")
-        XCTAssertEqual(src.components(separatedBy: "strengthJob: printFileStrengthJob()").count - 1, 2, "★ both Export paths send it")
+        // ★ cut 2: one Export path made from the preview's settings, or (Organic) its own exact lay — both send the check
+        XCTAssertTrue(src.contains("let stress = newEngineStress, strengthJob = printFileStrengthJob()"), "★ the check, once")
+        XCTAssertEqual(src.components(separatedBy: "stress: stress, strengthJob: strengthJob").count - 1, 2,
+                       "★ both Export paths send it (regular and Organic)")
     }
 
     /// Core's 10 mm STEP cube, the whole part latticed (copied to a scratch folder: the job's model is beside the job).

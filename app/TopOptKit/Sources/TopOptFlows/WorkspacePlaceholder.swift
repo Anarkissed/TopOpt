@@ -2011,6 +2011,22 @@ public struct WorkspacePlaceholder: View {
         if compute.wantsRemote, compute.activeRemote == nil { findTheMac { startLatticeRun(request) }; return }
         let strengthJob = LatticeFileJob.checksStrength(project.lattice, wired: LatticeFileButton.wired)
             ? strengthJobJSON(request) : nil   // the Lattice run's own job, as Export sends it
+        // ★ Organic cut 2: made on a Mac, from the preview's own exact lay (the same groups, the stress it followed)
+        if LatticeLayoutPreview.organic(project.lattice) {
+            guard let config = compute.activeRemote else { model.toast = LatticeFileExport.organicNeedsMacLine; return }
+            let stress = newEngineStress
+            Task { @MainActor in
+                guard let inputs = try? await newEngine.organicFileInputs(project: project, stress: stress) else {
+                    model.toast = LatticeFileExport.organicNoLayLine; return
+                }
+                switch LatticeFileJob.forOrganic(project, groups: inputs.groups, tensor: inputs.tensor,
+                                                 referenceMPa: stress.referenceMPa, strengthJob: strengthJob) {
+                case .failure(let why): model.toast = why.line
+                case .success(let job): launchFileRun(request, job: job, strengthJob: strengthJob, config: config)
+                }
+            }
+            return
+        }
         let job: LatticeFileJob.ForPart
         switch LatticeFileJob.forPart(project, stress: newEngineStress, strengthJob: strengthJob) {
         case .success(let j): job = j
@@ -2024,12 +2040,17 @@ public struct WorkspacePlaceholder: View {
             }
             model.toast = why.line; return
         }
+        launchFileRun(request, job: job, strengthJob: strengthJob, config: compute.activeRemote)
+    }
+
+    /// The print file's run, started: on the chosen Mac, else this iPad (a regular lattice only: Organic needs a Mac).
+    private func launchFileRun(_ request: RunRequest, job: LatticeFileJob.ForPart, strengthJob: Data?, config: RemoteRunnerConfig?) {
         runCouldntFinish = false; lastRunWasLattice = true   // ★ B1 (O1)
         let density = model.densityGCm3(for: project.material)
         // the old run's runner stays the run's own: this one is set for this start only (`start` takes it as it begins)
         let before = run.runner
         let fileRequest = request.withJobMode(LatticeFileButton.jobMode)
-        if let config = compute.activeRemote {
+        if let config {
             run.runner = LatticeFileButton.runner(config: config, job: job, projectName: project.name, strengthJob: strengthJob,
                                                   densityGCm3: density)
             run.start(fileRequest, remote: true, workerName: compute.selectedWorkerName)
@@ -2060,11 +2081,11 @@ public struct WorkspacePlaceholder: View {
             && !(newEngineOwnsPreview && LatticeLayoutPreview.organic(project.lattice)
                  && (project.lattice.organicLook?.modeValue ?? .grown) == .grown)
     }
-    /// ★ Organic cut 1 (his 11-18 "Off until cut 2"): the Lattice button is off for Organic on the new engine.
-    static let organicMakesNextInstall = "Making an Organic part comes with the next install"
+    /// ★ Organic cut 2 (his 11-18 "Export as its own install"; his 11-17 "Preview only for now"): the Lattice button makes an
+    /// Organic part on a Mac; with this iPad as Runs on, one line says it needs one.
     private var organicButtonRefusal: String? {
         project.importedFile != nil && LatticeLayoutPreview.organic(project.lattice) && project.lattice.flexible == nil
-            ? Self.organicMakesNextInstall : nil
+            && !compute.wantsRemote ? LatticeFileExport.organicNeedsMacLine : nil
     }
 
     /// Whether the Lattice button sends the new engine's job for this part (`LatticeFileButton.takes`), never on Flexible.
@@ -14316,16 +14337,29 @@ public struct WorkspacePlaceholder: View {
     /// found yet is looked for first, as Optimize does).
     private func exportPrintFile() {
         if compute.wantsRemote, compute.activeRemote == nil {
-            findTheMac { fileExport.make(project: project, config: compute.activeRemote, stress: newEngineStress,
-                                         strengthJob: printFileStrengthJob()) }
+            findTheMac { makePrintFile() }
             return
         }
-        fileExport.make(project: project, config: compute.activeRemote, stress: newEngineStress, strengthJob: printFileStrengthJob())
+        makePrintFile()
+    }
+
+    /// The print file: a regular lattice from the preview's settings; ★ Organic cut 2: from the preview's own exact lay.
+    private func makePrintFile() {
+        let stress = newEngineStress, strengthJob = printFileStrengthJob()
+        guard LatticeLayoutPreview.organic(project.lattice) else {
+            fileExport.make(project: project, config: compute.activeRemote, stress: stress, strengthJob: strengthJob)
+            return
+        }
+        Task { @MainActor in
+            let inputs = try? await newEngine.organicFileInputs(project: project, stress: stress)
+            fileExport.make(project: project, config: compute.activeRemote, stress: stress, strengthJob: strengthJob,
+                            organic: inputs ?? ([], Data()))
+        }
     }
 
     /// ★ Install 3, the strength check (LatticeReview's shape, 11-17): for a Structural lattice, the print file's job carries the
     /// run job a Lattice run writes today (`lattice_part`), so the Mac checks the new layout against his loads, supports,
-    /// material and safety margin. nil: Aesthetic (U9), Organic, a core that does not read it yet, or no runnable request.
+    /// material and safety margin (Organic too, cut 2). nil: Aesthetic (U9), a core that does not read it yet, or no runnable request.
     private func printFileStrengthJob() -> Data? {
         guard LatticeFileJob.checksStrength(project.lattice), let request = model.makeLatticeRunRequest() else { return nil }
         return strengthJobJSON(request)

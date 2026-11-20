@@ -453,6 +453,23 @@ void lattice_layout_set_tensor(int64_t session, const LatticeLayoutTensor& t, Br
   if (!why.empty()) failed(err, why);
 }
 
+bool lattice_layout_write_tensor(int64_t session, const std::string& path, BridgeError& err) {
+  bool ok = false;
+  const std::string why = bridge_guard_run("lattice_layout_write_tensor", [&] {
+    auto s = layout_at(session);
+    std::shared_ptr<const ll::TensorField> field;
+    {
+      std::lock_guard<std::mutex> lock(s->mu);
+      field = s->tensor;
+    }
+    if (!field || field->empty()) throw std::invalid_argument("the session holds no stress to write");
+    if (!ll::write_tensor_file(path, *field)) throw std::runtime_error("the stress file could not be written");
+    ok = true;
+  });
+  if (!why.empty()) failed(err, why);
+  return ok;
+}
+
 namespace {
 std::vector<LatticeLayoutRefusal> refusals_out(const std::vector<ll::OrganicRefusal>& in) {
   std::vector<LatticeLayoutRefusal> out;
@@ -689,6 +706,11 @@ LatticeLayoutSynthetic lattice_layout_synthetic(int64_t session, const LatticeLa
       o.foci.push_back(g.foci);
       o.filled.push_back(static_cast<int64_t>(g.filled));
     }
+    // ★ Organic cut 2 (the export): the print file's job reads this stress from core's TOTENSOR file, which holds each value
+    // as a float32; the real stress arrives as float32 already, the synthetic is filled in double. The preview lays on the
+    // file's own numbers (his rule: the drawing follows the print file), or a lattice this sensitive differs by a few bars
+    // (measured on the sample cube: 4,647 laid, 4,645 in the file).
+    for (double& v : r.field.voigt) v = static_cast<double>(static_cast<float>(v));
     s->tensor = std::make_shared<const ll::TensorField>(std::move(r.field));
     s->solid_at.reset();
   });

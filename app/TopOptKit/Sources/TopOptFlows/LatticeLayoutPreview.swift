@@ -111,6 +111,8 @@ public final class LatticeLayoutPreview: ObservableObject {
     public static let ghostAlpha: Float = 0.2
 
     private var session: LatticeLayoutSession?
+    /// ★ Organic cut 2: the groups the last EXACT Organic lay laid (nil: none, a draft, or refused).
+    private var organicLaidGroups: [LatticeLayoutSession.OrganicGroup]?
     private var sessionPath: String?
     private var openMS = 0.0
     private var lastSettings: LatticeLayoutSession.Settings?
@@ -175,6 +177,16 @@ public final class LatticeLayoutPreview: ObservableObject {
             && Self.organicKey(p) == lastOrganicKey
     }
 
+    /// ★ Organic cut 2 (the export, handover f): what the print file is made from — the SAME groups the exact preview laid for
+    /// these inputs, and the stress that lay followed (as set, or as the synthetic stress filled it) as core's file. nil: no
+    /// exact lay of these inputs yet (the page lays it first), or still laying.
+    public func organicFileInputs(project p: ProjectModel, stress: Stress = Stress())
+        async throws -> (groups: [LatticeLayoutSession.OrganicGroup], tensor: Data)? {
+        guard !laying, let groups = organicLaidGroups, let session, isCurrent(project: p, stress: stress) else { return nil }
+        let tensor = try await session.tensorFile()
+        return (groups, tensor)
+    }
+
     /// The page's one call, on every change of the part or its lattice settings (cheap when nothing changed).
     /// ★ his picks 11-16: `delay` — Live preview lays half a second after the last change (a newer change cancels the wait);
     /// `checkNozzle` — Refresh also runs the 0.2 mm nozzle check after the layout.
@@ -236,6 +248,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         nozzleSession?.close(); nozzleSession = nil; nozzlePath = nil; nozzleLine = nil; solidReason = nil
         session?.close(); session = nil; sessionPath = nil; lastSettings = nil; sessionStressKey = nil; nozzleStressKey = nil
         sessionTensorKey = nil; organicLimits = nil; organicQuality = nil; organicNumbers = nil   // ★ Organic cut 1
+        organicLaidGroups = nil   // ★ cut 2
         bars = nil; laid = nil; problem = nil; timing = nil; laying = false; places = []
     }
 
@@ -481,8 +494,10 @@ public final class LatticeLayoutPreview: ObservableObject {
         }
         let r = try await session.layOrganic(s, groups: groups)
         guard !Task.isCancelled else { return }
-        if !r.refused.isEmpty { return refuse(r.refused, groupIDs) }
+        if !r.refused.isEmpty { organicLaidGroups = nil; return refuse(r.refused, groupIDs) }
         organicRefusals = []
+        // ★ cut 2: the groups the EXACT lay laid (the file is that lattice); a draft is not what will be made
+        organicLaidGroups = r.quality == .exact ? groups : nil
         token &+= 1
         let seg = Self.segments(r.runs)
         // ★ his 11-19 rule ("The drawing follows the print file. Always."): every vine, Grown and the net skin too, as the
