@@ -106,6 +106,11 @@ public final class AppModel: ObservableObject {
     static let resultsQueue = DispatchQueue(label: "app.topopt.results", qos: .utility)
     /// Non-nil shows a transient toast (the design pill); the view clears it.
     @Published public var toast: String?
+    /// ★ Organic cut 2 (his certify wizard): the walk through an Organic result's pop-ups. HERE, not as the workspace's @State:
+    /// every byte added to WorkspacePlaceholder is paid once per copy of it on the iPad's small main-thread stack (its size is
+    /// only known at run time, so each copy is a run-time stack allocation) — a 170-byte @State crashed opening his older
+    /// versions with load scenarios (11-20).
+    @Published public var certifyWalk: OrganicCertify.Walk?
 
     // MARK: Cold-launch remote re-attach (handoff 119)
 
