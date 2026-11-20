@@ -2022,7 +2022,7 @@ public struct WorkspacePlaceholder: View {
                 switch LatticeFileJob.forOrganic(project, groups: inputs.groups, tensor: inputs.tensor,
                                                  referenceMPa: stress.referenceMPa, strengthJob: strengthJob) {
                 case .failure(let why): model.toast = why.line
-                case .success(let job): launchFileRun(request, job: job, strengthJob: strengthJob, config: config)
+                case .success(let job): launchFileRun(request, job: job, strengthJob: strengthJob, config: config, organic: true)
                 }
             }
             return
@@ -2044,15 +2044,20 @@ public struct WorkspacePlaceholder: View {
     }
 
     /// The print file's run, started: on the chosen Mac, else this iPad (a regular lattice only: Organic needs a Mac).
-    private func launchFileRun(_ request: RunRequest, job: LatticeFileJob.ForPart, strengthJob: Data?, config: RemoteRunnerConfig?) {
+    /// ★ Organic cut 2: `organic` strengthens first in Structural (LatticeFileButton.organicRunner).
+    private func launchFileRun(_ request: RunRequest, job: LatticeFileJob.ForPart, strengthJob: Data?, config: RemoteRunnerConfig?,
+                               organic: Bool = false) {
         runCouldntFinish = false; lastRunWasLattice = true   // ★ B1 (O1)
         let density = model.densityGCm3(for: project.material)
         // the old run's runner stays the run's own: this one is set for this start only (`start` takes it as it begins)
         let before = run.runner
         let fileRequest = request.withJobMode(LatticeFileButton.jobMode)
         if let config {
-            run.runner = LatticeFileButton.runner(config: config, job: job, projectName: project.name, strengthJob: strengthJob,
+            run.runner = organic
+                ? LatticeFileButton.organicRunner(config: config, job: job, projectName: project.name, strengthJob: strengthJob,
                                                   densityGCm3: density)
+                : LatticeFileButton.runner(config: config, job: job, projectName: project.name, strengthJob: strengthJob,
+                                           densityGCm3: density)
             run.start(fileRequest, remote: true, workerName: compute.selectedWorkerName)
         } else {
             run.runner = LatticeFileButton.deviceRunner(job: job, strengthJob: strengthJob, materialsPath: request.materialsPath,

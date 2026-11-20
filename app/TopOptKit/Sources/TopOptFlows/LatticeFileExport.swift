@@ -364,7 +364,11 @@ public struct LatticeFileStrength: Equatable, Sendable {
     /// ★ Why a "fail" failed (LatticeReview 11-17): a load on OPEN lattice (cut cells, cells that lost a left-out bar) has no
     /// load path whatever the solid's margin — the old open-finish rule.
     public enum FailReason: String, Sendable { case loadOnOpenLattice = "load_on_open_lattice", noLoadPath = "no_load_path",
-                                                    solidMargin = "solid_margin" }
+                                                    solidMargin = "solid_margin",
+                                                    // ★ Organic cut 2 (handover b): the struts short (fail); the frame of beams
+                                                    // not solved, or too little of it judged (solid only)
+                                                    strutMargin = "strut_margin", frameNotSolved = "frame_not_solved",
+                                                    frameUnjudged = "frame_unjudged" }
     public var failReason: FailReason?
     /// The load landing on cells that get no credit, and the whole load (N), where countable.
     public var loadOnNoCreditN: Double?
@@ -389,7 +393,9 @@ public struct LatticeFileStrength: Equatable, Sendable {
         }
         diagnosis = (b["diagnosis"] as? [String: Any]).flatMap(GateDiagnosis.decode)
         let strut = b["strut"] as? [String: Any] ?? [:]
+        // ★ Organic cut 2: a frame of beams gives its struts' smallest margin under `struts` (handover b)
         strutMargin = (strut["margin_worst_case"] as? NSNumber)?.doubleValue
+            ?? ((b["struts"] as? [String: Any])?["smallest_margin"] as? NSNumber)?.doubleValue
         strutNoRule = strut["uncertified"] as? Bool ?? false
         strutsPass = b["struts_pass"] as? Bool ?? false
         verdictSent = (b["verdict"] as? String).flatMap(Verdict.init(rawValue:))
@@ -411,7 +417,7 @@ public struct LatticeFileStrength: Equatable, Sendable {
             }
             return "The load lands on open lattice\(share), so nothing carries it to the anchors. " + Self.protectLoadedFace + "."
         case .noLoadPath?: return "Nothing carries the load to the anchors."
-        case .solidMargin?, nil: return nil
+        case .solidMargin?, .strutMargin?, .frameNotSolved?, .frameUnjudged?, nil: return nil
         }
     }
 
@@ -438,12 +444,20 @@ public struct LatticeFileStrength: Equatable, Sendable {
         let margin = Self.x(marginWorstCase)
         switch verdict {
         case .pass: return "Strong enough · margin \(margin)\(mass)"
-        case .solidOnly: return "Solid strong enough · margin \(margin) · struts: " + (strutsLine ?? Self.strutsNot).lowercased()
+        case .solidOnly:
+            // ★ Organic cut 2: the frame of beams could not be solved, or too little of it was judged
+            switch failReason {
+            case .frameNotSolved?: return "Solid strong enough · margin \(margin) · the struts could not be judged"
+            case .frameUnjudged?: return "Solid strong enough · margin \(margin) · too few struts could be judged"
+            default: return "Solid strong enough · margin \(margin) · struts: " + (strutsLine ?? Self.strutsNot).lowercased()
+            }
         case .fail:
             switch failReason {
             case .loadOnOpenLattice?: return "Not strong enough · the load lands on open lattice"
             case .noLoadPath?: return "Not strong enough · nothing carries the load"
-            case .solidMargin?, nil: return "Not strong enough · margin \(margin), needs \(Self.x(safetyMargin))"
+            case .strutMargin?: return "Not strong enough · struts: " + (strutsLine ?? Self.strutsNot).lowercased()
+            case .solidMargin?, .frameNotSolved?, .frameUnjudged?, nil:
+                return "Not strong enough · margin \(margin), needs \(Self.x(safetyMargin))"
             }
         }
     }
@@ -482,18 +496,23 @@ public enum LatticeFileRun {
         public var timing: RunTiming?
     }
 
-    /// Submit, poll, fetch: blocking, so call it off the main thread. The worker's core must be the app's (a different core lays
-    /// a different lattice than the preview drew).
-    public static func drive(config: RemoteRunnerConfig, modelPath: String, jobJSON: Data, projectName: String,
-                             demand: Data? = nil, strengthJob: Data? = nil, tensor: Data? = nil,
-                             isCancelled: @escaping @Sendable () -> Bool = { false },
-                             onState: @escaping @Sendable (_ state: String, _ position: Int?) -> Void = { _, _ in })
-        throws -> Made {
-        let session = URLSession(configuration: {
-            let c = URLSessionConfiguration.ephemeral
-            c.timeoutIntervalForRequest = config.controlTimeout
-            return c
-        }())
+    /// The strengthening's ceiling: six rounds of a lay, a solve and a frame check (his stand: about 40 to 45 minutes).
+    public static let strengthenCeilingSeconds: TimeInterval = 4 * 3600
+
+    /// One conversation with the Mac's worker: blocking, so call it off the main thread.
+    struct Worker {
+        let config: RemoteRunnerConfig
+        let session: URLSession
+
+        init(_ config: RemoteRunnerConfig) {
+            self.config = config
+            session = URLSession(configuration: {
+                let c = URLSessionConfiguration.ephemeral
+                c.timeoutIntervalForRequest = config.controlTimeout
+                return c
+            }())
+        }
+
         func send(_ req: URLRequest) throws -> (Data, Int) {
             var out: (Data, URLResponse)?
             var err: Error?
@@ -506,17 +525,85 @@ public enum LatticeFileRun {
             guard let out else { throw Failure("The Mac did not answer (\(err?.localizedDescription ?? "no response"))") }
             return (out.0, (out.1 as? HTTPURLResponse)?.statusCode ?? 0)
         }
-        let base = config.baseURL
-        let (hd, hc) = try send(URLRequest(url: base.appendingPathComponent("health")))
-        guard hc == 200, let h = (try? JSONSerialization.jsonObject(with: hd)) as? [String: Any] else {
-            throw Failure("The Mac's worker did not answer")
-        }
-        let fp = (h["fingerprint"] as? String) ?? "unknown"
-        guard fp == config.expectedFingerprint else { throw Failure("The Mac runs a different engine: update it first") }
 
+        /// The worker's core must be the app's (a different core lays a different lattice than the preview drew).
+        func checkEngine() throws {
+            let (hd, hc) = try send(URLRequest(url: config.baseURL.appendingPathComponent("health")))
+            guard hc == 200, let h = (try? JSONSerialization.jsonObject(with: hd)) as? [String: Any] else {
+                throw Failure("The Mac's worker did not answer")
+            }
+            let fp = (h["fingerprint"] as? String) ?? "unknown"
+            guard fp == config.expectedFingerprint else { throw Failure("The Mac runs a different engine: update it first") }
+        }
+
+        /// The job sent with its parts; its URL on the Mac.
+        func submit(_ parts: [RemoteRun.UploadPart]) throws -> URL {
+            let boundary = "topopt-\(UUID().uuidString)"
+            var body = Data()
+            for p in parts {
+                var head = "Content-Disposition: form-data; name=\"\(p.name)\""
+                if let f = p.filename { head += "; filename=\"\(f)\"" }
+                if let t = p.contentType { head += "\r\nContent-Type: \(t)" }
+                body.append(Data("--\(boundary)\r\n\(head)\r\n\r\n".utf8))
+                body.append(p.data)
+                body.append(Data("\r\n".utf8))
+            }
+            body.append(Data("--\(boundary)--\r\n".utf8))
+            var post = URLRequest(url: config.baseURL.appendingPathComponent("jobs"))
+            post.httpMethod = "POST"
+            post.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+            post.httpBody = body
+            let (pd, pc) = try send(post)
+            guard pc == 202, let posted = (try? JSONSerialization.jsonObject(with: pd)) as? [String: Any],
+                  let jobID = posted["job_id"] as? String else {
+                throw Failure("The Mac refused the job: \(String(data: pd, encoding: .utf8)?.prefix(120) ?? "")")
+            }
+            return config.baseURL.appendingPathComponent("jobs").appendingPathComponent(jobID)
+        }
+
+        /// Polls the job to its end; its last record. A cancel deletes the Mac's job; a failure says the CLI's last line.
+        func wait(_ jobURL: URL, ceiling: TimeInterval, failed: String, isCancelled: @Sendable () -> Bool,
+                  onState: @Sendable (_ state: String, _ position: Int?) -> Void) throws -> [String: Any] {
+            let deadline = Date().addingTimeInterval(ceiling)
+            var record: [String: Any] = [:]
+            while Date() < deadline {
+                if isCancelled() {
+                    var del = URLRequest(url: jobURL)
+                    del.httpMethod = "DELETE"
+                    _ = try? send(del)
+                    throw Failure("Cancelled")
+                }
+                let (d, code) = try send(URLRequest(url: jobURL))
+                guard code == 200, let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else {
+                    throw Failure("Lost the job on the Mac")
+                }
+                let state = (o["state"] as? String) ?? "unknown"
+                record = o
+                onState(state, o["position"] as? Int)   // queued (and how many ahead) or running
+                if state == "done" { return record }
+                if state == "failed" || state == "error" || state == "cancelled" {
+                    // the CLI's last line carries the same plain why as its report (the contract)
+                    let why = ((o["message"] as? String) ?? "").split(separator: "\n").last.map(String.init) ?? ""
+                    throw Failure(why.isEmpty ? failed : why)
+                }
+                Thread.sleep(forTimeInterval: pollSeconds)
+            }
+            throw Failure("The Mac did not finish within \(Int(ceiling / 60)) minutes")
+        }
+
+        /// One of the job's files (`name` may be a round's: "r3/strengthened.json"), or nil.
+        func file(_ jobURL: URL, _ name: String) -> Data? {
+            var url = jobURL.appendingPathComponent("files")
+            for c in name.split(separator: "/") { url = url.appendingPathComponent(String(c)) }
+            guard let (d, c) = try? send(URLRequest(url: url)), c == 200, !d.isEmpty else { return nil }
+            return d
+        }
+    }
+
+    /// The parts every lattice file job sends: the model and job, and the files beside it.
+    static func parts(modelPath: String, jobJSON: Data, projectName: String, demand: Data?, strengthJob: Data?, tensor: Data?,
+                      strengthened: Strengthened.Files?) throws -> [RemoteRun.UploadPart] {
         let model = try Data(contentsOf: URL(fileURLWithPath: modelPath))
-        let boundary = "topopt-\(UUID().uuidString)"
-        var body = Data()
         var parts = RemoteRun.uploadParts(modelPath: modelPath, model: model, jobJSON: jobJSON, projectName: projectName)
         // ★ Install 2: the stress result beside the job (the worker saves the "demand" part as demand.bin)
         if let demand {
@@ -533,70 +620,122 @@ public enum LatticeFileRun {
             parts.append(RemoteRun.UploadPart(name: "tensor", filename: LatticeFileJob.tensorName,
                                               contentType: "application/octet-stream", data: tensor))
         }
-        for p in parts {
-            var head = "Content-Disposition: form-data; name=\"\(p.name)\""
-            if let f = p.filename { head += "; filename=\"\(f)\"" }
-            if let t = p.contentType { head += "\r\nContent-Type: \(t)" }
-            body.append(Data("--\(boundary)\r\n\(head)\r\n\r\n".utf8))
-            body.append(p.data)
-            body.append(Data("\r\n".utf8))
+        // ★ Organic cut 2 (handover f4): the strengthened lattice to make, its two files (the worker names them in the job)
+        if let s = strengthened {
+            parts.append(RemoteRun.UploadPart(name: "strengthened", filename: "strengthened.json",
+                                              contentType: "application/json", data: s.json))
+            parts.append(RemoteRun.UploadPart(name: "strengthened_additions", filename: s.additionsName,
+                                              contentType: "application/octet-stream", data: s.additions))
         }
-        body.append(Data("--\(boundary)--\r\n".utf8))
-        var post = URLRequest(url: base.appendingPathComponent("jobs"))
-        post.httpMethod = "POST"
-        post.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        post.httpBody = body
-        let (pd, pc) = try send(post)
-        guard pc == 202, let posted = (try? JSONSerialization.jsonObject(with: pd)) as? [String: Any],
-              let jobID = posted["job_id"] as? String else {
-            throw Failure("The Mac refused the job: \(String(data: pd, encoding: .utf8)?.prefix(120) ?? "")")
-        }
+        return parts
+    }
 
-        let jobURL = base.appendingPathComponent("jobs").appendingPathComponent(jobID)
-        let deadline = Date().addingTimeInterval(ceilingSeconds)
-        var state = "queued"
-        var record: [String: Any] = [:]
-        while Date() < deadline {
-            if isCancelled() {
-                var del = URLRequest(url: jobURL)
-                del.httpMethod = "DELETE"
-                _ = try? send(del)
-                throw Failure("Cancelled")
-            }
-            let (d, code) = try send(URLRequest(url: jobURL))
-            guard code == 200, let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else {
-                throw Failure("Lost the job on the Mac")
-            }
-            state = (o["state"] as? String) ?? "unknown"
-            record = o
-            onState(state, o["position"] as? Int)   // queued (and how many ahead) or running
-            if state == "done" { break }
-            if state == "failed" || state == "error" || state == "cancelled" {
-                // the CLI's last line carries the same plain why as lattice_file.json (the contract)
-                let why = ((o["message"] as? String) ?? "").split(separator: "\n").last.map(String.init) ?? ""
-                throw Failure(why.isEmpty ? "The file could not be made" : why)
-            }
-            Thread.sleep(forTimeInterval: pollSeconds)
-        }
-        guard state == "done" else { throw Failure("The file was not made within \(Int(ceilingSeconds / 60)) minutes") }
-        func file(_ name: String) -> Data? {
-            guard let (d, c) = try? send(URLRequest(url: jobURL.appendingPathComponent("files").appendingPathComponent(name))),
-                  c == 200, !d.isEmpty else { return nil }
-            return d
-        }
-        guard let rd = file(LatticeFileJob.reportName), let report = LatticeFileReport.parse(rd) else {
+    /// Submit, poll, fetch: blocking, so call it off the main thread. The worker's core must be the app's (a different core lays
+    /// a different lattice than the preview drew). ★ Organic cut 2: `strengthened` = the strengthening's last round, replayed.
+    public static func drive(config: RemoteRunnerConfig, modelPath: String, jobJSON: Data, projectName: String,
+                             demand: Data? = nil, strengthJob: Data? = nil, tensor: Data? = nil,
+                             strengthened: Strengthened.Files? = nil,
+                             isCancelled: @escaping @Sendable () -> Bool = { false },
+                             onState: @escaping @Sendable (_ state: String, _ position: Int?) -> Void = { _, _ in })
+        throws -> Made {
+        let w = Worker(config)
+        try w.checkEngine()
+        let jobURL = try w.submit(try parts(modelPath: modelPath, jobJSON: jobJSON, projectName: projectName, demand: demand,
+                                            strengthJob: strengthJob, tensor: tensor, strengthened: strengthened))
+        let record = try w.wait(jobURL, ceiling: ceilingSeconds, failed: "The file could not be made", isCancelled: isCancelled,
+                                onState: onState)
+        guard let rd = w.file(jobURL, LatticeFileJob.reportName), let report = LatticeFileReport.parse(rd) else {
             throw Failure("The Mac made the file but its report could not be read")
         }
         guard report.ok else { throw Failure(report.why.isEmpty ? "The file could not be made" : report.why) }
         // the file by the name the report gives (Organic: lattice.3mf), else the job's own output
-        guard let stl = file(report.fileName) else { throw Failure("The Mac made the file but it could not be fetched") }
+        guard let stl = w.file(jobURL, report.fileName) else { throw Failure("The Mac made the file but it could not be fetched") }
         // ★ Install 3: the strength check's views, by the names its block gives (bare names beside the report); enrichment —
         // a missing one leaves the views gated, never the result
-        func named(_ n: String?) -> Data? { n.flatMap { $0.contains("/") || $0.contains("..") ? nil : file($0) } }
+        func named(_ n: String?) -> Data? { n.flatMap { $0.contains("/") || $0.contains("..") ? nil : w.file(jobURL, $0) } }
         return Made(stl: stl, report: report, reportJSON: rd, fields: named(report.strength?.fields),
                     scenarioFields: named(report.strength?.scenarioFields),
                     timing: RunTiming.fromWorker(createdAt: record["created_at"] as? Double, startedAt: record["started_at"] as? Double,
                                                  finishedAt: record["finished_at"] as? Double))
+    }
+
+    /// ★ Organic cut 2 (handover f3; his 11-18 "Strengthen by adding ... Yes, absolutely"): what the strengthening did
+    /// (`strengthen.json`), and its last round's lattice to make (strengthened.json and the additions it names).
+    public struct Strengthened: Sendable {
+        public struct Files: Sendable, Equatable {
+            public var json: Data
+            public var additionsName: String
+            public var additions: Data
+        }
+        /// done (passes), limit (rounds used up), nothing_to_vary, frame_not_solved: core's word.
+        public var code: String
+        public var why: String
+        public var passing: Bool
+        public var rounds: Int
+        /// Struts widened past his upper width (the cap's doing), the widest: say it whenever above 0.
+        public var pastLimitStruts: Int
+        public var pastLimitWidestMM: Double
+        public var files: Files?
+        public var summaryJSON: Data
+
+        /// strengthen.json read (the files fetched apart). nil: not core's strengthen.json.
+        public static func parse(_ d: Data) -> (summary: Strengthened, lastRound: String?)? {
+            guard let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any], o["code"] != nil else { return nil }
+            let rounds = o["rounds"] as? [[String: Any]] ?? []
+            var past = 0
+            var widest = 0.0
+            for r in rounds {
+                let lim = ((r["added"] as? [String: Any])?["limit"] as? [String: Any])?["past_limit"] as? [String: Any]
+                past = Swift.max(past, (lim?["struts"] as? NSNumber)?.intValue ?? 0)
+                widest = Swift.max(widest, (lim?["widest_mm"] as? NSNumber)?.doubleValue ?? 0)
+            }
+            let s = Strengthened(code: o["code"] as? String ?? "", why: o["why"] as? String ?? "",
+                                 passing: o["passing"] as? Bool ?? false, rounds: rounds.count, pastLimitStruts: past,
+                                 pastLimitWidestMM: widest, files: nil, summaryJSON: d)
+            return (s, o["strengthened"] as? String)
+        }
+
+        /// One plain line: what the strengthening did.
+        public var line: String {
+            let r = rounds == 1 ? "1 round" : "\(rounds) rounds"
+            var out = passing ? "Strengthened in \(r): the struts keep the margin" : "Strengthened \(r): some struts still short"
+            if pastLimitStruts > 0 {
+                out += String(format: " · %d past your thickest strut (up to %.2f mm)", pastLimitStruts, pastLimitWidestMM)
+            }
+            return out
+        }
+    }
+
+    /// ★ Organic cut 2 (handover f3): the strengthening on the Mac — the SAME lattice_file job through `organic-strengthen`
+    /// (the worker's `run` field) — then its last round's two files fetched for the file job to replay. Blocking.
+    public static func strengthen(config: RemoteRunnerConfig, modelPath: String, jobJSON: Data, projectName: String,
+                                  strengthJob: Data, tensor: Data?,
+                                  isCancelled: @escaping @Sendable () -> Bool = { false },
+                                  onState: @escaping @Sendable (_ state: String, _ position: Int?) -> Void = { _, _ in })
+        throws -> Strengthened {
+        let w = Worker(config)
+        try w.checkEngine()
+        var p = try parts(modelPath: modelPath, jobJSON: jobJSON, projectName: projectName, demand: nil, strengthJob: strengthJob,
+                          tensor: tensor, strengthened: nil)
+        p.append(RemoteRun.UploadPart(name: "run", filename: nil, contentType: nil, data: Data("organic-strengthen".utf8)))
+        let jobURL = try w.submit(p)
+        _ = try w.wait(jobURL, ceiling: strengthenCeilingSeconds, failed: "The lattice could not be strengthened",
+                       isCancelled: isCancelled, onState: onState)
+        guard let sd = w.file(jobURL, "strengthen.json"), let read = Strengthened.parse(sd) else {
+            throw Failure("The Mac strengthened the lattice but its report could not be read")
+        }
+        var s = read.summary
+        // the last round's lattice: strengthened.json and the additions it names (bare names, beside it)
+        if let last = read.lastRound, !last.contains(".."), let json = w.file(jobURL, last),
+           let doc = (try? JSONSerialization.jsonObject(with: json)) as? [String: Any],
+           let name = doc["additions"] as? String, !name.contains("/"), !name.contains("..") {
+            let folder = (last as NSString).deletingLastPathComponent
+            guard let adds = w.file(jobURL, folder.isEmpty ? name : folder + "/" + name) else {
+                throw Failure("The Mac strengthened the lattice but its additions could not be fetched")
+            }
+            s.files = Strengthened.Files(json: json, additionsName: name, additions: adds)
+        }
+        return s
     }
 }
 
@@ -704,6 +843,42 @@ public enum LatticeFileButton {
                                                 isCancelled: { !keepGoing.call(0, 1, 0) })
             return try outcome(made, densityGCm3: densityGCm3)
         }
+    }
+
+    /// ★ ORGANIC CUT 2 (handover f; his 11-18: "Strengthen by adding ... Yes, absolutely", the additive loop the default): an
+    /// Organic part on the Mac. Structural (the check sent): the lattice is STRENGTHENED first (`organic-strengthen`), then the
+    /// file is made from its last round (replayed) with the check, so the verdict is the strengthened file's own; Aesthetic: the
+    /// file alone. The strengthening's summary rides in the result's report as its `organic_strengthen` block (the Results
+    /// screen and the certify wizard read it). Two coarse ticks: strengthening, then making.
+    public static func organicRunner(config: RemoteRunnerConfig, job: LatticeFileJob.ForPart, projectName: String,
+                                     strengthJob: Data?, densityGCm3: Double) -> RunModel.Runner {
+        { _, progress, _ in
+            let keepGoing = Progress(progress)
+            let steps = strengthJob == nil ? 1 : 2
+            _ = keepGoing.call(0, steps, 0)
+            var strengthened: LatticeFileRun.Strengthened?
+            if let strengthJob {
+                strengthened = try LatticeFileRun.strengthen(config: config, modelPath: job.modelPath, jobJSON: job.json,
+                                                             projectName: projectName, strengthJob: strengthJob, tensor: job.tensor,
+                                                             isCancelled: { !keepGoing.call(0, steps, 0) })
+                _ = keepGoing.call(1, steps, 0)
+            }
+            var made = try LatticeFileRun.drive(config: config, modelPath: job.modelPath, jobJSON: job.json, projectName: projectName,
+                                                strengthJob: strengthJob, tensor: job.tensor, strengthened: strengthened?.files,
+                                                isCancelled: { !keepGoing.call(steps - 1, steps, 0) })
+            if let s = strengthened { made.reportJSON = withStrengthen(made.reportJSON, s) }
+            return try outcome(made, densityGCm3: densityGCm3)
+        }
+    }
+
+    /// The file's report with the strengthening's summary added as `organic_strengthen` (an app-side block; core's keys
+    /// untouched; NOT `strengthen`, which the Results screen reads as Flexible's redesign-to-strengthen block).
+    public static let strengthenKey = "organic_strengthen"
+    static func withStrengthen(_ report: Data, _ s: LatticeFileRun.Strengthened) -> Data {
+        guard var o = (try? JSONSerialization.jsonObject(with: report)) as? [String: Any],
+              let sum = try? JSONSerialization.jsonObject(with: s.summaryJSON) else { return report }
+        o[strengthenKey] = sum
+        return (try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys])) ?? report
     }
 
     /// ★ THE iPAD ONLY OPTION (his 11-17: "Not everyone will have a mac, definitely include an iPad only option"): with Runs on

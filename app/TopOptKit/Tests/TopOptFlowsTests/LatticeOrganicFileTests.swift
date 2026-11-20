@@ -89,6 +89,83 @@ final class LatticeOrganicFileTests: XCTestCase {
         XCTAssertThrowsError(try CoreThreeMF.mesh(Self.zip([("3D/3dmodel.model", bad, false)])), "a triangle naming a missing point")
     }
 
+    // MARK: the strengthening chain, over the wire
+
+    /// ★ His 11-18 "Strengthen by adding ... Yes, absolutely" (handover f3, f4): on a Structural Organic part the Lattice button
+    /// sends the job through `organic-strengthen` first (the worker's `run` field), fetches its last round's strengthened.json
+    /// and the additions it names, then sends the file job WITH them (and the check); the result carries the strengthening's
+    /// summary. Against the in-process worker, which records every request and post. RED CONTROL: Aesthetic (no check)
+    /// strengthens nothing and sends no strengthened lattice.
+    func testTheStrengtheningChainOnTheWorker() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("organic-chain-\(UUID().uuidString)")
+        let files = dir.appendingPathComponent("out", isDirectory: true)
+        try FileManager.default.createDirectory(at: files.appendingPathComponent("r3"), withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        func put(_ name: String, _ d: Data) throws { try d.write(to: files.appendingPathComponent(name)) }
+        let summary: [String: Any] = [
+            "ok": true, "code": "done", "why": "", "passing": true, "strengthened": "r3/strengthened.json",
+            "rounds": [["round": 1], ["round": 2],
+                       ["round": 3, "added": ["limit": ["limit_mm": 1.8, "past_limit": ["struts": 2, "widest_mm": 2.18]]]]]]
+        try put("strengthen.json", try JSONSerialization.data(withJSONObject: summary))
+        let sj = Data(#"{"version": 2, "additions": "additions.bin"}"#.utf8)
+        try put("r3/strengthened.json", sj)
+        try put("r3/additions.bin", Data([7, 7, 7, 7]))
+        let tet = Self.model([SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0, 0, 1)], [(0, 1, 2), (0, 1, 3), (0, 2, 3), (1, 2, 3)])
+        try put("lattice.3mf", Self.zip([("3D/3dmodel.model", tet, true)]))
+        let report = #"{"ok": true, "file": "lattice.3mf", "slicer_supports": "off", "layout": {"bars": 10}, "#
+            + #""mesh": {"mm3": 100, "part_mm3": 1000}, "print_check": {"clean": true}, "strength": {"accepted": true, "#
+            + #""verdict": "pass", "struts_pass": true, "margin_worst_case": 1.7, "safety_margin": 1.5, "mass_grams": 12, "#
+            + #""struts": {"smallest_margin": 1.62}}}"#
+        try put(LatticeFileJob.reportName, Data(report.utf8))
+        let model = dir.appendingPathComponent("p.step")
+        try Data("ISO-10303-21;".utf8).write(to: model)
+        let w = try StubWorker(filesDir: files, events: [], fingerprint: CoreFingerprint.value)
+        defer { w.stop() }
+        let config = RemoteRunnerConfig(host: "127.0.0.1", port: Int(w.port), expectedFingerprint: CoreFingerprint.value)
+        let job = LatticeFileJob.ForPart(json: Data(#"{"mode": "lattice_file"}"#.utf8), modelPath: model.path, demand: nil,
+                                         tensor: Data("TOTENSOR".utf8))
+        let req = RunRequest(modelPath: model.path, material: "PLA", materialsPath: "", rulesPath: "", resolution: 64,
+                             projectName: "chain")
+        var ticks: [Int] = []
+        let o = try LatticeFileButton.organicRunner(config: config, job: job, projectName: "chain",
+                                                    strengthJob: Data(#"{"mode": "lattice_part"}"#.utf8), densityGCm3: 1.24)(
+            req, { r, _, _ in ticks.append(r); return true }, { _ in })
+        let posts = w.posts().map { String(decoding: $0, as: UTF8.self) }
+        XCTAssertEqual(posts.count, 2, "★ two jobs: the strengthening, then the file")
+        XCTAssertTrue(posts[0].contains("name=\"run\"") && posts[0].contains("organic-strengthen"), "★ the first is the strengthening")
+        XCTAssertTrue(posts[0].contains("name=\"strength_job\"") && posts[0].contains("name=\"tensor\""), "with the check and the stress")
+        XCTAssertFalse(posts[1].contains("name=\"run\""), "★ the second is the file job itself")
+        XCTAssertTrue(posts[1].contains("name=\"strengthened\"") && posts[1].contains(#""additions": "additions.bin""#),
+                      "★ it sends the last round's strengthened.json")
+        XCTAssertTrue(posts[1].contains("name=\"strengthened_additions\"; filename=\"additions.bin\""),
+                      "★ and the additions under the name it gives")
+        for f in ["strengthen.json", "r3/strengthened.json", "r3/additions.bin", LatticeFileJob.reportName, "lattice.3mf"] {
+            XCTAssertTrue(w.requested(suffix: "/files/\(f)"), "fetched \(f)")
+        }
+        XCTAssertEqual(o.variants.first?.meshIndices.count, 12, "★ the file read back as the Results mesh")
+        XCTAssertEqual(o.variants.first?.accepted, true)
+        let rep = try XCTUnwrap(o.reportJSON.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+        XCTAssertEqual((rep[LatticeFileButton.strengthenKey] as? [String: Any])?["code"] as? String, "done",
+                       "★ the strengthening rides the result")
+        XCTAssertNil(rep["strengthen"], "★ never as `strengthen`: the Results screen reads that as Flexible's redesign block")
+        XCTAssertNotNil(rep["strength"], "core's own block kept")
+        let s = try XCTUnwrap(LatticeFileRun.Strengthened.parse(try JSONSerialization.data(withJSONObject: summary))).summary
+        XCTAssertEqual(s.line, "Strengthened in 3 rounds: the struts keep the margin · 2 past your thickest strut (up to 2.18 mm)",
+                       "★ struts past his upper width are said (handover: whenever above 0)")
+        XCTAssertEqual(ticks.first, 0); XCTAssertTrue(ticks.contains(1), "two coarse ticks: strengthening, then making")
+
+        // RED CONTROL: Aesthetic sends no check: no strengthening, no strengthened lattice
+        let w2 = try StubWorker(filesDir: files, events: [], fingerprint: CoreFingerprint.value)
+        defer { w2.stop() }
+        let c2 = RemoteRunnerConfig(host: "127.0.0.1", port: Int(w2.port), expectedFingerprint: CoreFingerprint.value)
+        _ = try LatticeFileButton.organicRunner(config: c2, job: job, projectName: "chain", strengthJob: nil, densityGCm3: 1.24)(
+            req, { _, _, _ in true }, { _ in })
+        let posts2 = w2.posts().map { String(decoding: $0, as: UTF8.self) }
+        XCTAssertEqual(posts2.count, 1, "RED CONTROL: Aesthetic, the file alone")
+        XCTAssertFalse(posts2[0].contains("name=\"strengthened\"") || posts2[0].contains("name=\"run\""))
+        XCTAssertFalse(w2.requested(suffix: "/files/strengthen.json"))
+    }
+
     // MARK: the Organic file, made for real
 
     /// The sample cube woven whole (a box zone, Grown, its synthetic stress), laid EXACT through the session as the preview lays
