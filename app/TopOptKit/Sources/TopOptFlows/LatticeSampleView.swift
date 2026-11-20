@@ -180,6 +180,14 @@ struct LatticeSampleView: View {
     /// ★ Organic's sample (his 11-18; LatticeReview's C2, E5 and E8): the bare body (the cube, or the coupon) through a layout
     /// session — ONE woven region from a box zone round it, Auto's limits for it moved by Look, the made-up stress of ONE
     /// focus (no solve), the lay exact — drawn as the preview draws Organic.
+    /// The sample's vines as the print file makes them (his 11-19 rule), cut flat at the body (11-20). Nonisolated: it runs off
+    /// the main actor, as part of the caller's task.
+    nonisolated static func sampleVines(runs: [LatticeLayoutSession.Run], vertices: [Float], indices: [Int32]) async -> OrganicVineShape {
+        var v = OrganicVineShape.tubes(runs: runs)
+        v.cut(runs: runs, surface: OrganicVineShape.CutSurface(vertices: vertices, indices: indices))
+        return v
+    }
+
     private func buildOrganic(_ look: LatticeOrganicLook, _ i: Inputs) async {
         try? await Task.sleep(nanoseconds: Self.settleNanos)
         guard !Task.isCancelled else { return }
@@ -216,11 +224,9 @@ struct LatticeSampleView: View {
                                                colours: LatticeLayoutColours.colours(l, type: nil, grade: false, oneColour: true), colourKey: 1)
             let runs = laid.runs
             let (bv, bi) = (body.vertices, body.indices)
-            bars.vines = await Task.detached(priority: .userInitiated) { () -> OrganicVineShape in
-                var v = OrganicVineShape.tubes(runs: runs)   // ★ his 11-19 rule: the print file
-                v.cut(runs: runs, surface: OrganicVineShape.CutSurface(vertices: bv, indices: bi))   // ★ 11-20: cut flat at the body
-                return v
-            }.value
+            // off the main thread, but IN this task (never detached): leaving the page cancels it with the rest
+            bars.vines = await Self.sampleVines(runs: runs, vertices: bv, indices: bi)
+            guard !Task.isCancelled else { return }
             bars.lightFrom = LatticeLayoutPreview.organicLightFrom(grown: look.modeValue == .grown, netFrom: seg.lightFrom,
                                                                    count: seg.count)
             let m = ViewerMesh(vertices: body.vertices, indices: body.indices,
