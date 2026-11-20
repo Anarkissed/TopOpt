@@ -49,8 +49,13 @@ Endpoints:
                                done/error/cancelled. Replays from the start on
                                (re)connect, so a dropped connection never loses a
                                finished run.
-  GET    /jobs/{id}/result     application/zip of the job's output directory.
+  GET    /jobs/{id}/result     application/zip of the job's output directory (its round
+                               folders too, at their own paths).
   GET    /jobs/{id}/files/{n}  a single output artifact (progressive mesh fetch).
+  GET    /jobs/{id}/files/rN/{n}  a file of the strengthening's round N (Organic cut 2).
+  POST multipart extras (Organic cut 2): `tensor` (tensor.bin, the job's `tensor`), `strengthened` +
+                               `strengthened_additions` (the job's `strengthened`), `run` = organic-strengthen
+                               (the same lattice_file job through `topopt-cli organic-strengthen`).
   POST   /jobs/{id}/front      move a QUEUED job to the front of the queue.
   POST   /jobs/{id}/pause      pause a RUNNING solve (SIGSTOP the child).
   POST   /jobs/{id}/resume     resume a paused solve (SIGCONT the child).
@@ -66,6 +71,7 @@ import errno
 import io
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -97,6 +103,8 @@ WORKER_LOG_BACKUPS = int(os.environ.get("TOPOPT_WORKER_LOG_BACKUPS", "1"))
 # Overridable via env for the E2E harness (which drives a fast heartbeat so the
 # slow-sparse liveness path is provable in seconds, not minutes).
 HEARTBEAT_SECONDS = float(os.environ.get("TOPOPT_HEARTBEAT_SECONDS", "20"))
+# ★ Organic cut 2: the strengthening's round folders (r1, r2, ...), the only sub-folders a file may be fetched from.
+_ROUND_DIR = re.compile(r"^r[0-9]{1,3}$")
 
 # ---------------------------------------------------------------------------
 # Configuration, resolved once at startup.
@@ -709,6 +717,8 @@ class Handler(BaseHTTPRequestHandler):
                 # would be a guess. Those still 404, honestly.
                 if len(parts) == 4 and parts[2] == "files":
                     return self._file_from_disk(parts[1], parts[3])
+                if len(parts) == 5 and parts[2] == "files" and _ROUND_DIR.match(parts[3]):   # ★ cut 2: a round's file
+                    return self._file_from_disk(parts[1], parts[4], sub=parts[3])
                 return self._not_found("no such job")
             if len(parts) == 3 and parts[2] == "events":
                 return self._events(job)
@@ -716,6 +726,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._result_zip(job)
             if len(parts) == 4 and parts[2] == "files":
                 return self._file(job, parts[3])
+            if len(parts) == 5 and parts[2] == "files" and _ROUND_DIR.match(parts[3]):   # ★ cut 2: a round's file (r3/x)
+                return self._file(job, parts[4], sub=parts[3])
+            if len(parts) > 2 and parts[2] == "files":   # any other files path: nothing to serve
+                return self._not_found("no such artifact")
             return self._json(200, self._single_job(job))
         return self._not_found()
 
@@ -867,6 +881,35 @@ class Handler(BaseHTTPRequestHandler):
             with open(os.path.join(tmpdir, "strength_job.json"), "w") as f:
                 json.dump(strength_doc, f)
             job_doc["strength_job"] = "strength_job.json"
+        # ★ ORGANIC CUT 2 (organic-cut2-handover.md): the STRESS TENSOR an Organic weave follows (core's TOTENSOR file),
+        # uploaded as the multipart field "tensor", saved beside the model as tensor.bin and named by the job's `tensor`.
+        # No field, no key (core refuses a weave with no stress: no_stress_result).
+        if "tensor" in fields:
+            with open(os.path.join(tmpdir, "tensor.bin"), "wb") as f:
+                f.write(fields["tensor"]["data"])
+            job_doc["tensor"] = "tensor.bin"
+        # ★ ORGANIC CUT 2 (handover f4): a STRENGTHENED lattice to make: the strengthening's last round's strengthened.json
+        # (multipart "strengthened", the additive mode: version 2) and the file it names (multipart "strengthened_additions",
+        # saved under the bare name the json gives), beside the model; named by the job's `strengthened`.
+        if "strengthened" in fields:
+            try:
+                sdoc = json.loads(fields["strengthened"]["data"].decode("utf-8"))
+            except (ValueError, UnicodeDecodeError) as e:
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                return self._json(400, {"error": f"strengthened is not valid JSON: {e}"})
+            adds = sdoc.get("additions") if isinstance(sdoc, dict) else None
+            if not isinstance(adds, str) or adds in ("", ".", "..", "strengthened.json") or os.path.basename(adds) != adds:
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                return self._json(400, {"error": "strengthened must be the additive strengthening's file, naming its "
+                                                 "additions by a bare name"})
+            if "strengthened_additions" not in fields:
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                return self._json(400, {"error": f"strengthened names {adds} but no 'strengthened_additions' was sent"})
+            with open(os.path.join(tmpdir, adds), "wb") as f:
+                f.write(fields["strengthened_additions"]["data"])
+            with open(os.path.join(tmpdir, "strengthened.json"), "wb") as f:
+                f.write(fields["strengthened"]["data"])
+            job_doc["strengthened"] = "strengthened.json"
         job_path = os.path.join(tmpdir, "job.json")
         with open(job_path, "w") as f:
             json.dump(job_doc, f)
@@ -913,6 +956,18 @@ class Handler(BaseHTTPRequestHandler):
         _MODE_SUBCMD = {"analyze": "analyze", "lattice_variant": "lattice-variant",
                         "lattice_part": "lattice-variant", "lattice_file": "lattice-file"}
         subcmd = _MODE_SUBCMD.get(job_doc.get("mode"), "run")
+        # ★ ORGANIC CUT 2 (handover f3): the STRENGTHENING runs on the SAME lattice_file job (`topopt-cli organic-strengthen
+        # <job.json> --out DIR`), asked for by the worker-level multipart field "run" (never a job key: the CLI's job schema
+        # is strict). Only that one command, only on a lattice_file job; anything else is refused here.
+        if "run" in fields:
+            try:
+                run = fields["run"]["data"].decode("utf-8").strip()
+            except UnicodeDecodeError:
+                run = None
+            if run != "organic-strengthen" or job_doc.get("mode") != "lattice_file":
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                return self._json(400, {"error": "run must be organic-strengthen, on a lattice_file job"})
+            subcmd = "organic-strengthen"
         cmd = [CFG.cli, subcmd, job_path, "--out", out_dir]
         if CFG.materials:
             cmd += ["--materials", CFG.materials]
@@ -971,8 +1026,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._not_found("no output yet")
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-            for name in sorted(os.listdir(job.out_dir)):
-                z.write(os.path.join(job.out_dir, name), name)
+            # ★ Organic cut 2: the strengthening writes a folder per round (r1/, r2/, ...): every file, at its own path
+            for root, dirs, files in os.walk(job.out_dir):
+                dirs.sort()
+                for name in sorted(files):
+                    full = os.path.join(root, name)
+                    z.write(full, os.path.relpath(full, job.out_dir))
         data = buf.getvalue()
         self.send_response(200)
         self.send_header("Content-Type", "application/zip")
@@ -982,7 +1041,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _file_from_disk(self, job_id, name):
+    def _file_from_disk(self, job_id, name, sub=None):
         """Serve an artifact of a job THIS process never ran, from its workdir.
 
         The id is used only as a directory name and is confined to the workdir:
@@ -992,16 +1051,17 @@ class Handler(BaseHTTPRequestHandler):
         job_id = os.path.basename(job_id)
         name = os.path.basename(name)
         root = os.path.realpath(CFG.workdir)
-        path = os.path.realpath(os.path.join(root, job_id, "out", name))
+        path = os.path.realpath(os.path.join(root, job_id, "out", name) if sub is None
+                                else os.path.join(root, job_id, "out", os.path.basename(sub), name))
         if not (path == root or path.startswith(root + os.sep)):
             return self._not_found("no such job")
         if not os.path.isfile(path):
             return self._not_found("no such job")
         self._send_file(path)
 
-    def _file(self, job, name):
+    def _file(self, job, name, sub=None):
         name = os.path.basename(name)
-        path = os.path.join(job.out_dir, name)
+        path = os.path.join(job.out_dir, name) if sub is None else os.path.join(job.out_dir, os.path.basename(sub), name)
         if not os.path.isfile(path):
             return self._not_found("no such artifact")
         self._send_file(path)

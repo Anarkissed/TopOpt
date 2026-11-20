@@ -35,10 +35,11 @@ final class StrengthCheckDocsTests: XCTestCase {
 
     func testEveryValueAndSectionIsThere() throws {
         let vs = StrengthCheckDocs.variables
-        XCTAssertEqual(vs.count, 60, "every value the check uses")
+        // cut 2 (the engine's 11-20 docs): Organic's frame of beams, its strengthening and the solid's weak areas join
+        XCTAssertEqual(vs.count, 92, "every value the check uses")
         XCTAssertEqual(Set(vs.map(\.key)).count, vs.count, "one row per key")
         let editable = vs.filter(\.editable)
-        XCTAssertEqual(editable.count, 21, "the values we chose with nothing behind them")
+        XCTAssertEqual(editable.count, 53, "the values we chose with nothing behind them")
         XCTAssertTrue(editable.allSatisfy { $0.source == .chosen }, "only chosen values are editable")
         for v in editable {
             switch v.kind {
@@ -89,8 +90,10 @@ final class StrengthCheckDocsTests: XCTestCase {
         let conn = try XCTUnwrap(StrengthCheckDocs.variable("load_path_connectivity"))
         XCTAssertNotNil(s.set(.number(7), for: conn), "not one of the choices")
         XCTAssertNil(s.set(.number(18), for: conn))
+        // cut 2 made the walls count at full strength by default (width_aware_knockdown 0 -> 1): turning it OFF is the change
         let walls = try XCTUnwrap(StrengthCheckDocs.variable("width_aware_knockdown"))
-        XCTAssertNil(s.set(.bool(true), for: walls))
+        XCTAssertEqual(walls.defaultValue, .bool(true), "★ the engine's cut 2 default: on")
+        XCTAssertNil(s.set(.bool(false), for: walls))
         let z = try XCTUnwrap(StrengthCheckDocs.variable("z_knockdown"))
         XCTAssertNil(s.set(material: "PLA", 0.6, for: z))
         XCTAssertEqual(s.set(material: "PETG", 1.4, for: z), "At most 1")
@@ -101,7 +104,7 @@ final class StrengthCheckDocsTests: XCTestCase {
         let block = try XCTUnwrap(sent["strength_settings"] as? [String: Any], "★ the job carries the changed values")
         XCTAssertEqual(Set(block.keys), ["infill_exponent", "load_path_connectivity", "width_aware_knockdown", "z_knockdown"])
         XCTAssertEqual(block["infill_exponent"] as? Double, 2)
-        XCTAssertEqual(block["width_aware_knockdown"] as? Bool, true)
+        XCTAssertEqual(block["width_aware_knockdown"] as? Bool, false)
         let zs = try XCTUnwrap(block["z_knockdown"] as? [String: Double])
         XCTAssertEqual(zs["PLA"], 0.6)
         XCTAssertEqual(zs["PETG"], 0.7, "the other materials keep their default in the one object")

@@ -49,7 +49,16 @@ final class LatticeOrganicNotes1119Tests: XCTestCase {
         XCTAssertFalse(back.extraSpacingValue(aesthetic: false) == false, "his choice beats the mode's default")
         XCTAssertFalse(String(decoding: try JSONEncoder().encode(LatticeOrganicLook()), as: UTF8.self).contains("depthVariation"),
                        "★ an untouched look writes no key (older bytes unchanged)")
-        XCTAssertFalse(LatticeOrganicLook.cut2Wired, "★ not offered until the engine takes organic_face_relief_mm and organic_strand_keep")
+        XCTAssertTrue(LatticeOrganicLook.cut2Wired, "★ offered: the merged engine takes organic_face_relief_mm and organic_strand_keep")
+        // ★ always sent (his "ALWAYS send both keys"): on 1 mm / 0.9 in Aesthetic, off 0 / 0.5; the loaded and fixed faces flush
+        let lim = LatticeOrganicLook.Limits(strutLowerMM: 0.9, strutUpperMM: 1.8, strutAutoMM: 1.35, cellLowerMM: 2, cellUpperMM: 8,
+                                            cellAutoMM: 5)
+        let aOn = LatticeOrganicLook().ask(limits: lim, aesthetic: true, flushFaces: [3, 7])
+        XCTAssertEqual(aOn.faceReliefMM, 1); XCTAssertEqual(aOn.strandKeep, 0.9); XCTAssertEqual(aOn.reliefExcludeFaces, [3, 7])
+        let sDefault = LatticeOrganicLook().ask(limits: lim, aesthetic: false)
+        XCTAssertEqual(sDefault.strandKeep, 0.5, "★ off in Structural by default")
+        XCTAssertEqual(l.ask(limits: lim, aesthetic: true).faceReliefMM, 0, "★ depth variation off: flush")
+        XCTAssertEqual(l.ask(limits: lim, aesthetic: false).strandKeep, 0.9, "★ his choice beats the mode's default")
         XCTAssertEqual(LatticeOrganicLook.faceReliefOnMM, 1.0)
         XCTAssertEqual(LatticeOrganicLook.strandKeepOn, 0.9)
         XCTAssertEqual(LatticeOrganicLook.strandKeepOff, 0.5)
@@ -76,7 +85,22 @@ final class LatticeOrganicNotes1119Tests: XCTestCase {
         XCTAssertFalse(fresh.contains("skinWidth") || fresh.contains("skinDensity"), "★ an untouched look writes no key")
         let old = try JSONDecoder().decode(LatticeOrganicLook.self, from: Data(#"{"lookPercent": 40}"#.utf8))
         XCTAssertNil(old.skinDensity, "an older project reads")
-        XCTAssertFalse(LatticeOrganicLook.finishWired, "★ not offered until the engine takes a group's finish")
+        XCTAssertTrue(LatticeOrganicLook.finishWired, "★ offered: the merged engine takes a group's finish (OJ1/OJ2/OJ8)")
+        // ★ what reaches the engine for an Organic area (rim never: refused under Organic)
+        var part = LatticeSettings()
+        let skin = LatticeLayoutPreview.organicFinish(l.effective(pageManual: true).with(finish: .skin), part, coverMM: 0.9)
+        XCTAssertEqual(skin.skin, true); XCTAssertEqual(skin.rimMM, 0); XCTAssertEqual(skin.skinWidthMM, 1.2)
+        XCTAssertEqual(skin.skinDensity, 5)
+        let auto = LatticeLayoutPreview.organicFinish(l.with(finish: .skin).effective(pageManual: false), part, coverMM: 0.9)
+        XCTAssertEqual(auto.skin, true, "★ Auto keeps the Finish")
+        XCTAssertEqual(auto.skinWidthMM, 0, "★ Auto: thickness Auto (0)"); XCTAssertEqual(auto.skinDensity, 3, "★ and density 3")
+        let solid = LatticeLayoutPreview.organicFinish(LatticeOrganicLook().with(finish: .solid), part, coverMM: 0.9)
+        XCTAssertEqual(solid.coverMM, 0.9); XCTAssertEqual(solid.skin, false); XCTAssertEqual(solid.rimMM, 0)
+        let none = LatticeLayoutPreview.organicFinish(LatticeOrganicLook(), part, coverMM: 0.9)
+        XCTAssertEqual(none.skin, false); XCTAssertEqual(none.coverMM, 0, "no finish of its own, a bare part: None")
+        part.boundary = .fullSkin
+        XCTAssertEqual(LatticeLayoutPreview.organicFinish(LatticeOrganicLook(), part, coverMM: 0.9).skin, true,
+                       "★ no finish of its own: the part's (a skinned part: Skin)")
     }
 
     func testOrganicIsOneColourAndTheRegularLatticeKeepsItsKey() {
@@ -162,5 +186,10 @@ final class LatticeOrganicNotes1119Tests: XCTestCase {
         p.latticePageManual = true
         XCTAssertNil(visit(area: false).all["lattice-organic-part-mode"], "RED CONTROL: Manual sets the mode per group")
     }
+}
+
+private extension LatticeOrganicLook {
+    /// The same look with this Finish (for the tests).
+    func with(finish f: Finish) -> LatticeOrganicLook { var c = self; c.finish = f; return c }
 }
 #endif

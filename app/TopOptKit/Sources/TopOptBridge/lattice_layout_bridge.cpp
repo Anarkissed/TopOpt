@@ -205,15 +205,18 @@ ll::Settings settings_from(const LatticeLayoutSettings& in) {
     }
   }
   if (!in.region_finish.empty()) {
-    if (in.region_finish.size() != 5 * nr) throw std::invalid_argument("lattice layout: region_finish is not 5 per region");
+    // ★ cut 2 (OJ8): 7 per region, the skin's density and sink after the five of before
+    if (in.region_finish.size() != 7 * nr) throw std::invalid_argument("lattice layout: region_finish is not 7 per region");
     for (std::size_t r = 0; r < nr; ++r) {
-      const double* v = &in.region_finish[5 * r];
+      const double* v = &in.region_finish[7 * r];
       ll::Settings::RegionAsk& a = s.regions[r];
       if (stated(v[0])) a.rim_mm = v[0];
       if (stated(v[1])) a.cover_mm = v[1];
       if (stated(v[2])) a.skin = v[2] != 0.0;
       if (stated(v[3])) a.skin_width_mm = v[3];
       if (stated(v[4])) a.skin_reach_cells = v[4];
+      if (stated(v[5])) a.skin_density = static_cast<int>(v[5]);
+      if (stated(v[6])) a.skin_sink = v[6];
     }
   }
   if (!in.region_zone.empty()) {
@@ -489,6 +492,14 @@ static ll::OrganicAsk organic_from(const LatticeLayoutOrganic& o) {
   a.follow_stress = o.follow_stress;
   a.layer_mm = o.layer_mm;   // sheet H2
   a.seed = o.seed;
+  // ★ cut 2 (organic-cut2-handover.md, a)
+  a.gap_lines = o.gap_lines;
+  a.face_relief_mm = o.face_relief_mm;
+  a.relief_exclude_faces.assign(o.relief_exclude_faces.begin(), o.relief_exclude_faces.end());
+  a.strand_keep = o.strand_keep;
+  a.wall_bare_mm = o.wall_bare_mm;
+  a.wall_reach = o.wall_reach;
+  a.sweep.on = o.sweep;
   return a;
 }
 
@@ -519,7 +530,8 @@ LatticeLayoutOrganicResult lattice_layout_organic(int64_t session, const Lattice
     }
     if (pv.outcome.cancelled) { s->solid_at.reset(); s->last.reset(); o.cancelled = true; return; }
     s->solid_at.reset();
-    o.runs = ll::pack_weave_runs(pv.runs);
+    o.runs = ll::pack_weave_runs(pv.runs, 2);   // ★ cut 2: version 2 (sections, swept, proud, the file's ring)
+    o.relief_flushed = static_cast<int64_t>(pv.relief_flushed);
     o.quality = pv.quality == ll::PreviewQuality::Draft ? 1 : 0;
     o.strands = static_cast<int64_t>(pv.outcome.strands);
     o.net_struts = static_cast<int64_t>(pv.outcome.net_struts);
@@ -584,7 +596,8 @@ LatticeLayoutOrganicResult lattice_layout_organic_groups(int64_t session, const 
       return;
     }
     s->solid_at.reset();
-    o.runs = ll::pack_weave_runs(pv.runs);
+    o.runs = ll::pack_weave_runs(pv.runs, 2);   // ★ cut 2: version 2 (sections, swept, proud, the file's ring)
+    o.relief_flushed = static_cast<int64_t>(pv.relief_flushed);
     o.quality = pv.quality == ll::PreviewQuality::Draft ? 1 : 0;
     o.strands = static_cast<int64_t>(pv.outcome.strands);
     o.net_struts = static_cast<int64_t>(pv.outcome.net_struts);
@@ -640,6 +653,7 @@ LatticeLayoutSweep lattice_layout_sweep_limits_for(int64_t session, const Lattic
     o.strut_auto_mm.push_back(u.strut_auto_mm);
     o.cell_lower_mm.push_back(u.cell_lower_mm); o.cell_upper_mm.push_back(u.cell_upper_mm);
     o.cell_auto_mm.push_back(u.cell_auto_mm);
+    o.gap_mm.push_back(u.gap_mm);
   });
   if (!why.empty()) {
     o = LatticeLayoutSweep{};
@@ -701,6 +715,7 @@ LatticeLayoutSweep lattice_layout_sweep_limits(int64_t session, const LatticeLay
       o.strut_auto_mm.push_back(l.strut_auto_mm);
       o.cell_lower_mm.push_back(l.cell_lower_mm); o.cell_upper_mm.push_back(l.cell_upper_mm);
       o.cell_auto_mm.push_back(l.cell_auto_mm);
+      o.gap_mm.push_back(l.gap_mm);
     }
   });
   if (!why.empty()) {

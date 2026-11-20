@@ -37,8 +37,20 @@ final class LatticeOrganicCut1Tests: XCTestCase {
         s9.regions[0].depthMM = 9
         let all9 = try await session.sweepLimits(s9, lineMM: 0.45)
         let small = LatticeOrganicLook.Limits(try XCTUnwrap(all9.first))
-        XCTAssertEqual(small.cellLowerMM, 1.5, accuracy: 1e-6, "never under Organic's print floor (1.38 mm at a 0.45 line)")
+        // cut 2 (OG1, the gap rule): never under the cell that leaves 1.5 lines (0.675 mm) between 0.9 mm struts, 2 mm
+        // (the print floor, 1.5 mm, is under it)
+        XCTAssertEqual(small.gapMM, 0.675, accuracy: 1e-6, "★ the engine's gap between struts")
+        XCTAssertEqual(small.cellLowerMM, 2, accuracy: 1e-6, "★ never under the cell that leaves the gap")
         XCTAssertEqual(small.cellUpperMM, 4, accuracy: 1e-6)
+        // ★ Look at 100 % halves the range but never goes under the engine's floor (it would refuse the Auto lay)
+        XCTAssertEqual(small.looked(percent: 100).cellLowerMM, 2, accuracy: 1e-6, "★ Look keeps the gap floor")
+        var noGap = small
+        noGap.gapMM = 0
+        XCTAssertEqual(noGap.looked(percent: 100).cellLowerMM, 1.5, accuracy: 1e-6, "RED CONTROL: without the gap, the print floor")
+        XCTAssertNotNil(LatticeOrganicLook.Check.cell(small: 1.5, large: 4, thinStrutMM: 0.9, gapMM: 0.675),
+                        "★ a typed 1.5 mm is refused as the engine refuses it (under_gap_cell)")
+        XCTAssertNil(LatticeOrganicLook.Check.cell(small: 2, large: 4, thinStrutMM: 0.9, gapMM: 0.675))
+        XCTAssertNil(LatticeOrganicLook.Check.cell(small: 1.5, large: 4, thinStrutMM: 0.9), "RED CONTROL: no gap rule, 1.5 prints")
     }
 
     /// ★ His 11-18 "a choice between stress and shape gradient or shape gradient alone": the Gradient line is shown and
@@ -361,7 +373,7 @@ final class LatticeOrganicCut1Tests: XCTestCase {
         let refused = try await session.layOrganic(s, groups: [groups[0], .init(regions: [2], ask: tiny.ask(limits: lim))])
         let r = try XCTUnwrap(refused.refused.first, "RED CONTROL: a 1 mm cell end is refused")
         XCTAssertEqual(r.group, 1, "★ the refusal names the group")
-        XCTAssertEqual(r.code, "under_smallest_cell")
+        XCTAssertEqual(r.code, "under_gap_cell", "cut 2 (OG1): a 1 mm cell cannot leave the gap between 0.9 mm struts")
         XCTAssertTrue(r.text.hasPrefix("Cell size:"), "a plain sentence, whole: \(r.text)")
     }
 

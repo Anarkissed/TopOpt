@@ -74,17 +74,14 @@ public struct LatticeOrganicLook: Codable, Equatable, Sendable {
     public var extraSpacing: Bool?
     public func extraSpacingValue(aesthetic: Bool) -> Bool { extraSpacing ?? aesthetic }
     public static let faceReliefOnMM = 1.0, strandKeepOn = 0.9, strandKeepOff = 0.5
-    /// ★ Whether the engine takes the cut 2 keys (LatticeReview's claude/organic-engine, not merged): until then the two
-    /// rows are not offered and nothing is sent (an unknown key is refused by the engine; a control that does nothing is what
-    /// he flagged in Rim).
-    nonisolated(unsafe) public static var cut2Wired = false
+    /// ★ Whether the engine takes the cut 2 keys: ON since claude/organic-engine is merged (11-20); the two rows are offered.
+    nonisolated(unsafe) public static var cut2Wired = true
     public static let depthVariationInfo = "On: vines keep their round tops up to 1 mm outside an open face. Off: every vine "
         + "is cut flush at the face. Faces that carry a load or are fixed are always flush."
     public static let extraSpacingInfo = "Leaves more room between the vines. It will likely lose strength: fine for "
         + "Aesthetic, and it may still work in Structural if there is strength to spare."
-    /// ★ Whether the engine takes a group's own Organic finish (LatticeReview's keys, owed): until then the row is not
-    /// offered (a control that does nothing is what he flagged in Rim).
-    nonisolated(unsafe) public static var finishWired = false
+    /// ★ Whether the engine takes a group's own Organic finish (OJ1/OJ2/OJ8): ON since claude/organic-engine is merged (11-20).
+    nonisolated(unsafe) public static var finishWired = true
     public init() {}
     public var lookPercentValue: Double { Swift.min(Swift.max(lookPercent ?? 50, 1), 100) }
 
@@ -124,6 +121,7 @@ public struct LatticeOrganicLook: Codable, Equatable, Sendable {
         guard !pageManual else { return self }
         var auto = LatticeOrganicLook()
         auto.lookPercent = lookPercent   // Auto keeps its Look
+        auto.finish = finish             // ★ cut 2: and its Finish (the row shows in Auto too); the skin's numbers are Manual's
         return auto
     }
     /// A swept setting's mode, one of the modes offered; Auto Sweep unless set.
@@ -144,16 +142,19 @@ public struct LatticeOrganicLook: Codable, Equatable, Sendable {
         public var strutLowerMM: Double, strutUpperMM: Double, strutAutoMM: Double
         public var cellLowerMM: Double, cellUpperMM: Double, cellAutoMM: Double
         public var measured: Bool
+        /// ★ Cut 2, OG1: the gap the engine keeps between struts (0: off). No cell may be smaller than the thin strut plus it.
+        public var gapMM: Double = 0
         public init(strutLowerMM: Double, strutUpperMM: Double, strutAutoMM: Double, cellLowerMM: Double, cellUpperMM: Double,
-                    cellAutoMM: Double, measured: Bool = true) {
+                    cellAutoMM: Double, measured: Bool = true, gapMM: Double = 0) {
             self.strutLowerMM = strutLowerMM; self.strutUpperMM = strutUpperMM; self.strutAutoMM = strutAutoMM
             self.cellLowerMM = cellLowerMM; self.cellUpperMM = cellUpperMM; self.cellAutoMM = cellAutoMM
-            self.measured = measured
+            self.measured = measured; self.gapMM = gapMM
         }
         /// One region's limits as core measured them.
         public init(_ m: LatticeLayoutSession.SweepLimits) {
             self.init(strutLowerMM: m.strutLowerMM, strutUpperMM: m.strutUpperMM, strutAutoMM: m.strutAutoMM,
-                      cellLowerMM: m.cellLowerMM, cellUpperMM: m.cellUpperMM, cellAutoMM: m.cellAutoMM, measured: m.measured)
+                      cellLowerMM: m.cellLowerMM, cellUpperMM: m.cellUpperMM, cellAutoMM: m.cellAutoMM, measured: m.measured,
+                      gapMM: m.gapMM)
         }
 
         /// ★ The whole part's limits (LatticeReview's ruling 3): the UNION over the measured regions — the smallest lower
@@ -166,6 +167,7 @@ public struct LatticeOrganicLook: Codable, Equatable, Sendable {
             for l in m.dropFirst() {
                 u.strutLowerMM = Swift.min(u.strutLowerMM, l.strutLowerMM); u.strutUpperMM = Swift.max(u.strutUpperMM, l.strutUpperMM)
                 u.cellLowerMM = Swift.min(u.cellLowerMM, l.cellLowerMM); u.cellUpperMM = Swift.max(u.cellUpperMM, l.cellUpperMM)
+                u.gapMM = Swift.max(u.gapMM, l.gapMM)
             }
             if m.count > 1 {
                 u.strutAutoMM = Check.lines((u.strutLowerMM + u.strutUpperMM) / 2, lineMM: lineMM)
@@ -177,12 +179,13 @@ public struct LatticeOrganicLook: Codable, Equatable, Sendable {
         /// ★ LOOK (his 11-18: "Look should change ALL the variables by messing with the cell range"; LatticeReview's ruling
         /// 2): both cell ends times one factor f — p <= 50: 2^((50 - p) / 49) (1 % gives 2); p >= 50: 2^(-(p - 50) / 50)
         /// (100 % gives 0.5) — to the nearest 0.5 mm, the lower end never under the smallest printable cell (1.535 x the
-        /// thin strut), the upper never under the lower. Struts are not moved. At 50 % the measured limits themselves.
+        /// thin strut) nor, cut 2's gap rule (OG1), under the thin strut plus the gap (up to 0.5 mm: the engine refuses less),
+        /// the upper never under the lower. Struts are not moved. At 50 % the measured limits themselves.
         public func looked(percent p: Double) -> Limits {
             let pc = Swift.min(Swift.max(p, 1), 100)
             let f = pc <= 50 ? pow(2, (50 - pc) / 49) : pow(2, -(pc - 50) / 50)
             var l = self
-            l.cellLowerMM = Swift.max(Check.half(cellLowerMM * f), Check.smallestCellMM(thinStrutMM: strutLowerMM))
+            l.cellLowerMM = Swift.max(Check.half(cellLowerMM * f), Check.smallestCellMM(thinStrutMM: strutLowerMM, gapMM: gapMM))
             l.cellUpperMM = Swift.max(l.cellLowerMM, Check.half(cellUpperMM * f))
             l.cellAutoMM = Swift.max(l.cellLowerMM, Check.half((l.cellLowerMM + l.cellUpperMM) / 2))
             return l
@@ -200,11 +203,26 @@ public struct LatticeOrganicLook: Codable, Equatable, Sendable {
         public static func half(_ v: Double) -> Double { (v * 2).rounded() / 2 }
         /// The smallest printable cell: 0.5 x sqrt(3 pi) x the thin strut (1.535 x), up to the next 0.5 mm (1.5 mm at 0.9).
         public static func smallestCellMM(thinStrutMM t: Double) -> Double { (2 * 0.5 * (3 * Double.pi).squareRoot() * t).rounded(.up) / 2 }
-        /// Cell size, a Sweep (rule b, c): the small end above 0 and at least the smallest printable cell; large >= small.
-        public static func cell(small: Double, large: Double, thinStrutMM: Double) -> String? {
+        /// ★ Cut 2, OG1: and the smallest cell that leaves `gapMM` between struts of the thin width (core's gap_cell_mm: the
+        /// thin strut + the gap, up to the next 0.5 mm; 2 mm at 0.9 mm and a 0.675 mm gap). The larger of the two.
+        public static func gapCellMM(thinStrutMM t: Double, gapMM g: Double) -> Double {
+            g > 0 ? ((t + g) * 2 - 1e-9).rounded(.up) / 2 : 0
+        }
+        public static func smallestCellMM(thinStrutMM t: Double, gapMM g: Double) -> Double {
+            Swift.max(smallestCellMM(thinStrutMM: t), gapCellMM(thinStrutMM: t, gapMM: g))
+        }
+        /// The engine's gap between struts (organic_gap_lines 1.5, the app sends no other): 1.5 printed lines.
+        public static let gapLines = 1.5
+        /// Cell size, a Sweep (rule b, c): the small end above 0 and at least the smallest printable cell, and (cut 2) at
+        /// least the cell that leaves the gap between struts (`gapMM`, 0: no gap rule); large >= small.
+        public static func cell(small: Double, large: Double, thinStrutMM: Double, gapMM: Double = 0) -> String? {
             if !(small > 0) { return "Cell size: the small end must be above 0 mm" }
-            let floor = smallestCellMM(thinStrutMM: thinStrutMM)
-            if small < floor - 1e-9 { return "Cell size: at least \(n(floor)) mm, the smallest cell that prints with \(n(thinStrutMM)) mm struts" }
+            let printFloor = smallestCellMM(thinStrutMM: thinStrutMM), gapFloor = gapCellMM(thinStrutMM: thinStrutMM, gapMM: gapMM)
+            if small < Swift.max(printFloor, gapFloor) - 1e-9 {
+                return gapFloor > printFloor
+                    ? "Cell size: at least \(n(gapFloor)) mm, the smallest cell that leaves a \(n(gapMM)) mm gap between \(n(thinStrutMM)) mm struts"
+                    : "Cell size: at least \(n(printFloor)) mm, the smallest cell that prints with \(n(thinStrutMM)) mm struts"
+            }
             if large < small - 1e-9 { return "Cell size: the second number must be at least the first" }
             return nil
         }
@@ -237,7 +255,8 @@ public struct LatticeOrganicLook: Codable, Equatable, Sendable {
 
     /// ★ The engine's ask, from his controls (LatticeReview 11-18 08:54Z). `limits` nil (a region core cannot measure, a
     /// curved shell): Auto falls back to Manual's typed numbers or core's defaults, and the page says why.
-    public func ask(limits: Limits?, layerMM: Double = 0.2) -> LatticeLayoutSession.Organic {
+    public func ask(limits: Limits?, layerMM: Double = 0.2, aesthetic: Bool = false,
+                    flushFaces: [Int32] = []) -> LatticeLayoutSession.Organic {
         var o = LatticeLayoutSession.Organic()
         let grown = modeValue == .grown
         o.mode = grown ? .grown : .traced
@@ -305,6 +324,11 @@ public struct LatticeOrganicLook: Codable, Equatable, Sendable {
         o.layerMM = layerMM   // ★ sheet H2: the printer's layer, not 0.2 always
         o.referenceMPa = 0
         o.percentile = 0.95
+        // ★ Cut 2 (his 11-19 switches; "ALWAYS send both keys"): depth variation (on 1 mm, off flush), the loaded and fixed
+        // faces always flush, and the extra spacing between vines (on 0.9, off 0.5; on in Aesthetic only by default)
+        o.faceReliefMM = depthVariationValue ? Self.faceReliefOnMM : 0
+        o.reliefExcludeFaces = flushFaces
+        o.strandKeep = extraSpacingValue(aesthetic: aesthetic) ? Self.strandKeepOn : Self.strandKeepOff
         return o
     }
 }

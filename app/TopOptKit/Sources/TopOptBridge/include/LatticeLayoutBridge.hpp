@@ -119,8 +119,8 @@ struct LatticeLayoutSettings {
   //   dial_heavy, width_mm, width_light_mm, width_heavy_mm, strength, response, reference_mpa, max_step.
   // Empty: no region states anything.
   std::vector<double> region_own;
-  // An area's own Finish (S13): 5 per region, NaN = the part's: rim_mm, cover_mm, skin (0/1), skin_width_mm,
-  // skin_reach_cells. Empty: none.
+  // An area's own Finish (S13): 7 per region, NaN = the part's: rim_mm, cover_mm, skin (0/1), skin_width_mm,
+  // skin_reach_cells, skin_density (cut 2, OJ8: 1 to 6), skin_sink (OJ8: 0 to 1). Empty: none.
   std::vector<double> region_finish;
   // A zone in place of a region's faces (D21): 16 per region: kind (0 none, 1 box, 2 cylinder), centre xyz, axis 0 xyz,
   // axis 1 xyz, axis 2 xyz, half xyz (core's Zone: a cylinder's axis is axis 2, its radius half x, its half length
@@ -280,6 +280,16 @@ struct LatticeLayoutOrganic {
   bool follow_stress = true;   // OP6 (his 11-18): true stress and shape, false shape only
   double layer_mm = 0.2;       // the printer's layer: Grown's step, level ties, braces, supports (sheet H2)
   uint64_t seed = 1;
+  // ★ CUT 2 (organic-cut2-handover.md, a): core's defaults; the app sends face_relief_mm (his "Depth variation": on 1, off
+  // 0), relief_exclude_faces (the loaded and fixed faces: always flush) and strand_keep (his "Extra spacing between vines":
+  // on 0.9, off 0.5).
+  double gap_lines = 1.5;          // OG1: the gap between struts, in line widths (0 off)
+  double face_relief_mm = 1.0;     // OG2/OG2b: depth variation, 0 to 1 mm
+  std::vector<int32_t> relief_exclude_faces;   // OG2: faces kept flush
+  double strand_keep = 0.9;        // OG3, Traced: 0.5 to 1 x the local spacing
+  double wall_bare_mm = 1.5;       // OG6, Grown
+  double wall_reach = 4.0;         // OG6, Grown: local spacings, 0 = no branches
+  bool sweep = true;               // OV1: the vines swept as curves (the file's), at core's limits
 };
 // ★ E1 (LatticeReview's C2): one refusal, as core gives it — the group (its index in the list; -1 the list itself or the
 // stress), the OrganicAsk field (`setting`), a code, and a plain sentence to show whole; the allowed numbers where a number
@@ -300,7 +310,8 @@ struct LatticeLayoutOrganicGroups {
   std::vector<int32_t> group_regions;
 };
 // The weave's preview: the lay's counts (its bars are the weave's — draw `runs`), the runs packed as core packs them
-// (pack_weave_runs: per run 12 bytes, then 20 per point, float32, little-endian), what was laid, and the weave's numbers.
+// (pack_weave_runs version 2, cut 2: "WRN2", u32 2, per run 28 bytes, then 20 per point, float32, little-endian), what
+// was laid, and the weave's numbers.
 struct LatticeLayoutOrganicResult {
   LatticeLayoutResult layout;
   std::vector<uint8_t> runs;
@@ -311,6 +322,7 @@ struct LatticeLayoutOrganicResult {
   std::vector<LatticeLayoutRefusal> refused;   // ★ E1: not empty = nothing laid (no throw); show each `text` whole
   std::vector<std::string> notes;              // ★ E2: plain sentences (equal cell ends)
   int64_t cross_group_touches = 0;             // ★ E7: struts of different groups that touch (not joined)
+  int64_t relief_flushed = 0;                  // ★ cut 2, OJ6: bulges the print check made flush (say it when above 0)
 };
 LatticeLayoutOrganicResult lattice_layout_organic_groups(int64_t session, const LatticeLayoutSettings& settings,
                                                          const LatticeLayoutOrganicGroups& groups, BridgeError& err);
@@ -333,6 +345,9 @@ struct LatticeLayoutSweep {
   std::vector<int32_t> region;
   std::vector<uint8_t> measured;
   std::vector<double> d_mm, strut_lower_mm, strut_upper_mm, strut_auto_mm, cell_lower_mm, cell_upper_mm, cell_auto_mm;
+  // ★ Cut 2, OG1: the gap between struts (gap_lines x the line; 0 when off). A cell under the thin strut + the gap is
+  // refused (under_gap_cell); the limits' own lower end already respects it.
+  std::vector<double> gap_mm;
 };
 LatticeLayoutSweep lattice_layout_sweep_limits(int64_t session, const LatticeLayoutSettings& settings, double line_mm,
                                                BridgeError& err);

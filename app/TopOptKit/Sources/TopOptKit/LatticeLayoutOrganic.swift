@@ -47,6 +47,15 @@ extension LatticeLayoutSession {
         /// One spacing for every candidate: a single size, or a range whose two ends are equal (no heavy end acts).
         public var spacingMMValueIsOne: Bool { spacingMM > 0 || spacingMaxMM <= spacingMinMM }
         public var seed: UInt64 = 1
+        /// ★ Cut 2 (organic-cut2-handover.md, a), core's defaults. The app sends faceReliefMM (his "Depth variation": on 1,
+        /// off 0), reliefExcludeFaces (the loaded and fixed faces, always flush) and strandKeep (his "Extra spacing between
+        /// vines": on 0.9, off 0.5).
+        public var gapLines = 1.5
+        public var faceReliefMM = 1.0
+        public var reliefExcludeFaces: [Int32] = []
+        public var strandKeep = 0.9
+        public var wallBareMM = 1.5, wallReach = 4.0
+        public var sweep = true
         public init() {}
 
         var raw: topoptbridge.LatticeLayoutOrganic {
@@ -73,6 +82,9 @@ extension LatticeLayoutSession {
             o.follow_stress = followStress
             o.layer_mm = layerMM
             o.seed = seed
+            o.gap_lines = gapLines; o.face_relief_mm = faceReliefMM; o.strand_keep = strandKeep
+            for f in reliefExcludeFaces { o.relief_exclude_faces.push_back(f) }
+            o.wall_bare_mm = wallBareMM; o.wall_reach = wallReach; o.sweep = sweep
             return o
         }
     }
@@ -125,6 +137,8 @@ extension LatticeLayoutSession {
         public var notes: [String] = []
         /// ★ E7: struts of different groups that touch (not joined).
         public var crossGroupTouches = 0
+        /// ★ Cut 2 (OJ6): bulges the print check made flush so the part prints (said on screen when above 0).
+        public var reliefFlushed = 0
         /// Segments drawn: one per pair of neighbouring points of every run.
         public var segments: Int { runs.reduce(0) { $0 + Swift.max(0, $1.points.count - 1) } }
     }
@@ -182,6 +196,7 @@ extension LatticeLayoutSession {
                 o.refused = refused
                 o.notes = r.notes.map { String($0) }
                 o.crossGroupTouches = Int(r.cross_group_touches)
+                o.reliefFlushed = Int(r.relief_flushed)
                 return o
             }
         } onCancel: { [weak self] in
@@ -214,7 +229,7 @@ extension LatticeLayoutSession {
             return SweepLimits(region: 0, measured: true, dMM: 0, strutLowerMM: Array(r.strut_lower_mm)[0],
                                strutUpperMM: Array(r.strut_upper_mm)[0], strutAutoMM: Array(r.strut_auto_mm)[0],
                                cellLowerMM: Array(r.cell_lower_mm)[0], cellUpperMM: Array(r.cell_upper_mm)[0],
-                               cellAutoMM: Array(r.cell_auto_mm)[0])
+                               cellAutoMM: Array(r.cell_auto_mm)[0], gapMM: Array(r.gap_mm).first ?? 0)
         }
     }
 
@@ -341,6 +356,8 @@ extension LatticeLayoutSession {
         public var dMM: Double
         public var strutLowerMM: Double, strutUpperMM: Double, strutAutoMM: Double
         public var cellLowerMM: Double, cellUpperMM: Double, cellAutoMM: Double
+        /// ★ Cut 2, OG1: the gap the engine keeps between struts (0: off); a cell under the thin strut + it is refused.
+        public var gapMM: Double = 0
     }
 
     /// The Auto Sweep limits of these settings' weave regions, before any lay (core's Session::sweep_limits, OP5).
@@ -352,10 +369,11 @@ extension LatticeLayoutSession {
             if !err.ok { throw TopOptError(message: String(err.message)) }
             let region = Array(r.region), m = Array(r.measured), d = Array(r.d_mm)
             let sl = Array(r.strut_lower_mm), su = Array(r.strut_upper_mm), sa = Array(r.strut_auto_mm)
-            let cl = Array(r.cell_lower_mm), cu = Array(r.cell_upper_mm), ca = Array(r.cell_auto_mm)
+            let cl = Array(r.cell_lower_mm), cu = Array(r.cell_upper_mm), ca = Array(r.cell_auto_mm), g = Array(r.gap_mm)
             return region.indices.map {
                 SweepLimits(region: region[$0], measured: m[$0] != 0, dMM: d[$0], strutLowerMM: sl[$0], strutUpperMM: su[$0],
-                            strutAutoMM: sa[$0], cellLowerMM: cl[$0], cellUpperMM: cu[$0], cellAutoMM: ca[$0])
+                            strutAutoMM: sa[$0], cellLowerMM: cl[$0], cellUpperMM: cu[$0], cellAutoMM: ca[$0],
+                            gapMM: $0 < g.count ? g[$0] : 0)
             }
         }
     }

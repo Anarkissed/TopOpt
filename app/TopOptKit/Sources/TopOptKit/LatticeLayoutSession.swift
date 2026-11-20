@@ -70,10 +70,13 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         public var rimMM: Double?, coverMM: Double?
         public var skin: Bool?
         public var skinWidthMM: Double?, skinReachCells: Double?
+        /// ★ Cut 2 (OJ8): the skin's density (1 to 6) and sink (0 to 1).
+        public var skinDensity: Int?, skinSink: Double?
         public init() {}
         public var any: Bool { self != RegionFinish() }
         var wire: [Double] {
-            [rimMM ?? .nan, coverMM ?? .nan, skin.map { $0 ? 1 : 0 } ?? .nan, skinWidthMM ?? .nan, skinReachCells ?? .nan]
+            [rimMM ?? .nan, coverMM ?? .nan, skin.map { $0 ? 1 : 0 } ?? .nan, skinWidthMM ?? .nan, skinReachCells ?? .nan,
+             skinDensity.map(Double.init) ?? .nan, skinSink ?? .nan]
         }
     }
 

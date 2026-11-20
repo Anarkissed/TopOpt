@@ -146,6 +146,10 @@ var packageTargets: [Target] = [
             // CI app-macos failed to link TopOptKitPackageTests on
             // `_SparseFactor` and friends.
             .linkedFramework("Accelerate"),
+            // ★ ZLIB (Organic cut 2, OF5): the core's streaming 3MF writer deflates through the system zlib
+            // (threemf_stream.cpp); a static archive cannot carry `-lz`, so whoever links libtopopt names it (libz is
+            // in every Apple SDK, macOS and iOS).
+            .linkedLibrary("z"),
         ] + macOSLib3mfLinkerFlags
     ),
     .testTarget(
@@ -170,7 +174,7 @@ var packageTargets: [Target] = [
         // `swift test` could not link at all with lib3mf present, and 8 3MF tests
         // failed with "not available in this build" when it was absent. Gated on
         // the same disk presence, so an OCCT/3MF-free checkout is unchanged.
-        linkerSettings: [.linkedFramework("Accelerate")] + macOSLib3mfLinkerFlags
+        linkerSettings: [.linkedFramework("Accelerate"), .linkedLibrary("z")] + macOSLib3mfLinkerFlags
     ),
     // M7.2 design system: SwiftUI-only, no C++ interop (so it needs none of
     // the bridge's Cxx build settings and stays cross-platform).
@@ -213,7 +217,7 @@ var packageTargets: [Target] = [
         // `swift test` could not link at all with lib3mf present, and 8 3MF tests
         // failed with "not available in this build" when it was absent. Gated on
         // the same disk presence, so an OCCT/3MF-free checkout is unchanged.
-        linkerSettings: [.linkedFramework("Accelerate")] + macOSLib3mfLinkerFlags
+        linkerSettings: [.linkedFramework("Accelerate"), .linkedLibrary("z")] + macOSLib3mfLinkerFlags
     ),
     // Carrier for the iOS OCCT/lib3mf frameworks. The app's xcodeproj links the
     // `TopOptOCCT` product; the shim keeps that product valid on an OCCT-free

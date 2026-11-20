@@ -177,6 +177,8 @@ public enum LatticeFileJob {
             if let v = f.skin { d["skin"] = v }
             if let v = f.skinWidthMM { d["skin_width_mm"] = v }
             if let v = f.skinReachCells { d["skin_reach_cells"] = v }
+            if let v = f.skinDensity { d["skin_density"] = v }   // ★ cut 2 (OJ8)
+            if let v = f.skinSink { d["skin_sink"] = v }
             return d
         }
         func zone(_ z: LatticeLayoutSession.Zone?) -> Any {
