@@ -3383,6 +3383,92 @@ static void test_session_boundary() {
             text.find("lay_organic") == std::string::npos && detail.find("int") != std::string::npos);
   }
 }
+static std::string plain_number_for_test(double v) {   // as the refusals print a whole number
+  char b[32];
+  std::snprintf(b, sizeof b, "%g", v);
+  return b;
+}
+// UL1 (leg R, 2026-11-20; the owner: "Can I put 789293?"): every number the app shows has an upper limit. Per limit: at
+// the limit valid, just over it refused `over_upper_limit` with the allowed range filled (the app clamps its field to it),
+// a huge number refused the same; the judged Auto asks (Traced and Grown) and the app's Auto values stay valid.
+static void test_upper_limits() {
+  Settings st;
+  st.regions = {{1, Role::Lattice, {1}, 12.0, 0.0, true}};
+  struct Lim { const char* setting; double limit; std::function<void(OrganicAsk&, double)> set; bool grown; };
+  const auto range = [](OrganicAsk& a) { a.spacing_mm = 0.0; a.spacing_min_mm = 3.0; a.spacing_max_mm = 6.0; };
+  const std::vector<Lim> lims = {
+      {"spacing_mm", kOrganicCellMaxMm, [](OrganicAsk& a, double v) { a.spacing_mm = v; }, false},
+      {"spacing_min_mm", kOrganicCellMaxMm, [](OrganicAsk& a, double v) { a.spacing_mm = 0; a.spacing_min_mm = v; a.spacing_max_mm = v; }, false},
+      {"spacing_max_mm", kOrganicCellMaxMm, [&](OrganicAsk& a, double v) { range(a); a.spacing_max_mm = v; }, false},
+      {"width_mm", kOrganicStrutMaxMm, [&](OrganicAsk& a, double v) { range(a); a.spacing_min_mm = 200; a.spacing_max_mm = 200; a.width_mm = v; }, false},
+      {"width_heavy_mm", kOrganicStrutMaxMm, [&](OrganicAsk& a, double v) { range(a); a.width_heavy_mm = v; }, false},
+      {"foot_gap", kOrganicSpacingsMax, [](OrganicAsk& a, double v) { a.foot_gap = v; }, true},
+      {"wall_gap", kOrganicSpacingsMax, [](OrganicAsk& a, double v) { a.walls_out = true; a.wall_gap = v; }, true},
+      {"wall_gap_heavy", kOrganicSpacingsMax, [&](OrganicAsk& a, double v) { range(a); a.walls_out = true; a.wall_gap = v; a.wall_gap_heavy = v; }, true},
+      {"cross_gap", kOrganicSpacingsMax, [](OrganicAsk& a, double v) { a.walls_out = true; a.wall_cross = 1; a.cross_gap = v; }, true},
+      {"cross_gap_heavy", kOrganicSpacingsMax, [&](OrganicAsk& a, double v) { range(a); a.walls_out = true; a.wall_cross = 1; a.cross_gap = v; a.cross_gap_heavy = v; }, true},
+      {"tie_gap", kOrganicSpacingsMax, [](OrganicAsk& a, double v) { a.tie_level = true; a.tie_gap = v; }, false},
+      {"tie_gap_heavy", kOrganicSpacingsMax, [&](OrganicAsk& a, double v) { range(a); a.tie_level = true; a.tie_gap = v; a.tie_gap_heavy = v; }, false},
+      {"root_run", kOrganicSpacingsMax, [](OrganicAsk& a, double v) { a.root_run = v; }, true},
+      {"top_run", kOrganicSpacingsMax, [](OrganicAsk& a, double v) { a.top_run = v; }, true},
+      {"shape_reach", kOrganicShapeReachMax, [](OrganicAsk& a, double v) { a.shape_fit = true; a.shape_reach = v; }, false},
+  };
+  std::size_t ok = 0;
+  for (const Lim& l : lims) {
+    std::string said;
+    bool good = true;
+    for (const double v : {l.limit, l.limit + 0.01, 789293.0}) {
+      OrganicAsk a = traced_ask();
+      if (l.grown) { a.mode = OrganicMode::Grown; a.ties = true; }
+      l.set(a, v);
+      const std::vector<OrganicRefusal> r = validate_organic(st, a, nullptr);
+      const OrganicRefusal* mine = nullptr;
+      for (const OrganicRefusal& x : r)
+        if (x.code == "over_upper_limit" && x.setting == l.setting) mine = &x;
+      if (v == l.limit) {
+        bool any_upper = false;
+        for (const OrganicRefusal& x : r) any_upper = any_upper || x.code == "over_upper_limit";
+        good = good && !any_upper;
+      } else {
+        good = good && mine && mine->has_max && mine->allowed_max == l.limit && mine->has_min && !mine->text.empty() &&
+               mine->text.find(plain_number_for_test(l.limit)) != std::string::npos;
+        if (mine) said = mine->text;
+      }
+    }
+    std::printf("UL1 %s: at %g valid, over it refused: \"%s\"%s\n", l.setting, l.limit, said.c_str(), good ? "" : "  <-- WRONG");
+    ok += good;
+    CHECK(good);
+  }
+  // The judged Auto asks and the app's Auto numbers stay valid.
+  for (const bool grown : {false, true}) {
+    OrganicAsk a = gap_judged(grown);
+    std::size_t upper = 0;
+    for (const OrganicRefusal& x : validate_organic(st, a, nullptr)) upper += x.code == "over_upper_limit";
+    CHECK(upper == 0);
+  }
+  // Below the lower end too: every refusal that binds one of these numbers carries both ends of its range.
+  {
+    std::size_t both = 0, n = 0;
+    auto look = [&](const std::vector<OrganicRefusal>& r, const char* setting) {
+      for (const OrganicRefusal& x : r)
+        if (x.setting == setting) { ++n; both += x.has_min && x.has_max && x.allowed_max > x.allowed_min; }
+    };
+    OrganicAsk a = traced_ask(); range(a); a.spacing_max_mm = 2.0; look(validate_organic(st, a, nullptr), "spacing_max_mm");
+    a = traced_ask(); range(a); a.width_heavy_mm = 0.5; look(validate_organic(st, a, nullptr), "width_heavy_mm");
+    a = traced_ask(); a.width_mm = 0.3; look(validate_organic(st, a, nullptr), "width_mm");
+    a = traced_ask(); a.tie_gap = 0.0; look(validate_organic(st, a, nullptr), "tie_gap");
+    a = traced_ask(); a.mode = OrganicMode::Grown; a.root_run = -1; look(validate_organic(st, a, nullptr), "root_run");
+    a = traced_ask(); a.shape_reach = -1; look(validate_organic(st, a, nullptr), "shape_reach");
+    a = traced_ask(); range(a); a.tie_level = true; a.tie_gap = 1.0; a.tie_gap_heavy = 2.0; look(validate_organic(st, a, nullptr), "tie_gap_heavy");
+    Settings sk = st;
+    sk.regions[0].skin = true;
+    sk.regions[0].skin_density = 9;
+    look(validate_organic_groups(sk, {{{1}, traced_ask()}}, nullptr), "skin_density");
+    std::printf("UL1: refusals below the lower end carry both ends of the range: %zu of %zu\n", both, n);
+    CHECK(n == 8 && both == n);
+  }
+  std::printf("UL1: %zu of %zu limits as asked; the judged Auto asks (Traced, Grown) valid\n", ok, lims.size());
+}
 static void test_net_kept_apart() {   // OJ8 (leg M): the net ON the open face, crossings made joints
   const StepModel model = box_model(30, 30, 20);
   const TensorField f = gap_field();
@@ -3462,6 +3548,7 @@ static void test_net_kept_apart() {   // OJ8 (leg M): the net ON the open face, 
 
 int main() {
   test_session_boundary();
+  test_upper_limits();
   test_net_kept_apart();
   test_net_outline();
   test_groups_floors_additions();

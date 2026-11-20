@@ -1754,8 +1754,8 @@ std::vector<OrganicRefusal> validate_organic(const Settings& settings, const Org
     out.push_back(r);
     return out.back();
   };
-  auto at_least = [](OrganicRefusal& r, double v) { r.has_min = true; r.allowed_min = v; };
-  auto at_most = [](OrganicRefusal& r, double v) { r.has_max = true; r.allowed_max = v; };
+  auto at_least = [](OrganicRefusal& r, double v) -> OrganicRefusal& { r.has_min = true; r.allowed_min = v; return r; };
+  auto at_most = [](OrganicRefusal& r, double v) -> OrganicRefusal& { r.has_max = true; r.allowed_max = v; return r; };
   auto fin = [](double v) { return std::isfinite(v); };
   const bool grown = a.mode == OrganicMode::Grown;
   const double thinnest = settings.bead_mm * settings.min_strut_lines;
@@ -1932,10 +1932,10 @@ std::vector<OrganicRefusal> validate_organic(const Settings& settings, const Org
       refuse("wall_gap_heavy", "needs_light_end", "Wall seed gap: the heavy end needs the light end above 0 spacings.",
              a.wall_gap_heavy);
     else if (a.wall_gap_heavy > a.wall_gap)
-      at_most(refuse("wall_gap_heavy", "over_light_end",
+      at_least(at_most(refuse("wall_gap_heavy", "over_light_end",
                      "Wall seed gap: the heavy end must be at most the light end (" + spacings(a.wall_gap) + ").",
                      a.wall_gap_heavy),
-              a.wall_gap);
+              a.wall_gap), 0.0);
     if (!range) refuse("wall_gap_heavy", "needs_range", "Wall seed gap: the heavy end " + ranged, a.wall_gap_heavy);
   }
   // Crossing vines (F, N, O).
@@ -1961,10 +1961,10 @@ std::vector<OrganicRefusal> validate_organic(const Settings& settings, const Org
       refuse("cross_gap_heavy", "needs_crossing_vines", "Crossing gap: the heavy end needs Crossing vines switched on.",
              a.cross_gap_heavy);
     if (fin(a.cross_gap) && a.cross_gap > 0.0 && a.cross_gap_heavy > a.cross_gap)
-      at_most(refuse("cross_gap_heavy", "over_light_end",
+      at_least(at_most(refuse("cross_gap_heavy", "over_light_end",
                      "Crossing gap: the heavy end must be at most the light end (" + spacings(a.cross_gap) + ").",
                      a.cross_gap_heavy),
-              a.cross_gap);
+              a.cross_gap), 0.0);
     if (!range) refuse("cross_gap_heavy", "needs_range", "Crossing gap: the heavy end " + ranged, a.cross_gap_heavy);
   }
   if (!(fin(a.cross_climb_max_deg) && a.cross_climb_max_deg >= 30.0 && a.cross_climb_max_deg <= 45.0)) {
@@ -1988,10 +1988,10 @@ std::vector<OrganicRefusal> validate_organic(const Settings& settings, const Org
     if (grown && !a.ties)
       refuse("tie_gap_heavy", "needs_ties", "Flat tie gap: the heavy end needs Ties switched on.", a.tie_gap_heavy);
     if (fin(a.tie_gap) && a.tie_gap > 0.0 && a.tie_gap_heavy > a.tie_gap)
-      at_most(refuse("tie_gap_heavy", "over_light_end",
+      at_least(at_most(refuse("tie_gap_heavy", "over_light_end",
                      "Flat tie gap: the heavy end must be at most the light end (" + spacings(a.tie_gap) + ").",
                      a.tie_gap_heavy),
-              a.tie_gap);
+              a.tie_gap), 0.0);
     if (!range) refuse("tie_gap_heavy", "needs_range", "Flat tie gap: the heavy end " + ranged, a.tie_gap_heavy);
   }
   // Roots and top branches (G, H).
@@ -2015,6 +2015,58 @@ std::vector<OrganicRefusal> validate_organic(const Settings& settings, const Org
   }
   above_zero(a.layer_mm, "layer_mm", "Layer height: it must be above 0 mm.");
   above_zero(a.seed_stride, "seed_stride", "Seeds: the seed spacing must be above 0.");
+  // UL1 (leg R): the upper limits (the lower ones above are unchanged); a refusal names the whole allowed range.
+  {
+    auto upper = [&](double v, double lo, double hi, const char* setting, const std::string& text) {
+      if (fin(v) && v > hi + 1e-9) {
+        OrganicRefusal& r = refuse(setting, "over_upper_limit", text, v);
+        at_least(r, lo);
+        at_most(r, hi);
+      }
+    };
+    const std::string cell_max = plain_number(kOrganicCellMaxMm), strut_max = plain_number(kOrganicStrutMaxMm);
+    if (one) upper(a.spacing_mm, 0.0, kOrganicCellMaxMm, "spacing_mm", "Cell size: the size must be above 0 and at most " + cell_max + " mm.");
+    if (a.spacing_mm == 0.0) {
+      upper(a.spacing_min_mm, 0.0, kOrganicCellMaxMm, "spacing_min_mm",
+            "Cell size: the small end must be above 0 and at most " + cell_max + " mm.");
+      upper(a.spacing_max_mm, 0.0, kOrganicCellMaxMm, "spacing_max_mm",
+            "Cell size: the large end must be at most " + cell_max + " mm.");
+    }
+    upper(a.width_mm, thinnest, kOrganicStrutMaxMm, "width_mm",
+          "Strut thickness: the thin end must be at most " + strut_max + " mm.");
+    upper(a.width_heavy_mm, light, kOrganicStrutMaxMm, "width_heavy_mm",
+          "Strut thickness: the thick end must be at most " + strut_max + " mm.");
+    const std::string sp = plain_number(kOrganicSpacingsMax);
+    upper(a.foot_gap, 0.0, kOrganicSpacingsMax, "foot_gap", "Seeds (feet apart): it must be at most " + sp + " spacings (0 is off).");
+    upper(a.wall_gap, 0.0, kOrganicSpacingsMax, "wall_gap", "Wall seed gap: it must be at most " + sp + " spacings.");
+    upper(a.wall_gap_heavy, 0.0, kOrganicSpacingsMax, "wall_gap_heavy", "Wall seed gap: it must be at most " + sp + " spacings.");
+    upper(a.cross_gap, 0.0, kOrganicSpacingsMax, "cross_gap", "Crossing gap: it must be above 0 and at most " + sp + " spacings.");
+    upper(a.cross_gap_heavy, 0.0, kOrganicSpacingsMax, "cross_gap_heavy", "Crossing gap: it must be at most " + sp + " spacings.");
+    upper(a.tie_gap, 0.0, kOrganicSpacingsMax, "tie_gap", "Flat tie gap: it must be above 0 and at most " + sp + " spacings.");
+    upper(a.tie_gap_heavy, 0.0, kOrganicSpacingsMax, "tie_gap_heavy", "Flat tie gap: it must be at most " + sp + " spacings.");
+    upper(a.root_run, 0.0, kOrganicSpacingsMax, "root_run", "Roots: it must be from 0 (off) to " + sp + " spacings.");
+    upper(a.top_run, 0.0, kOrganicSpacingsMax, "top_run", "Top branches: it must be from 0 (off) to " + sp + " spacings.");
+    upper(a.shape_reach, 0.0, kOrganicShapeReachMax, "shape_reach",
+          "Grade to shape reach: it must be from 0 (off) to " + plain_number(kOrganicShapeReachMax) + " times.");
+  }
+  // UL1 (leg R): every refusal that binds one of the app's numbers carries its whole allowed range (the app clamps the
+  // field to it and shows it): the end a refusal did not state is filled from the setting's own limits.
+  {
+    struct Span { const char* setting; double lo, hi; };
+    const Span spans[] = {{"spacing_mm", 0.0, kOrganicCellMaxMm}, {"spacing_min_mm", 0.0, kOrganicCellMaxMm},
+                          {"spacing_max_mm", 0.0, kOrganicCellMaxMm}, {"width_mm", thinnest, kOrganicStrutMaxMm},
+                          {"width_heavy_mm", light, kOrganicStrutMaxMm}, {"wall_gap_heavy", 0.0, kOrganicSpacingsMax},
+                          {"cross_gap", 0.0, kOrganicSpacingsMax}, {"cross_gap_heavy", 0.0, kOrganicSpacingsMax},
+                          {"tie_gap", 0.0, kOrganicSpacingsMax}, {"tie_gap_heavy", 0.0, kOrganicSpacingsMax},
+                          {"root_run", 0.0, kOrganicSpacingsMax}, {"top_run", 0.0, kOrganicSpacingsMax},
+                          {"shape_reach", 0.0, kOrganicShapeReachMax}};
+    for (OrganicRefusal& r : out)
+      for (const Span& sp : spans)
+        if (r.setting == sp.setting && (r.has_min || r.has_max)) {
+          if (!r.has_min) at_least(r, sp.lo);
+          if (!r.has_max) at_most(r, sp.hi);
+        }
+  }
   if (field && field->empty() && any_weave(settings))
     refuse("stress", "no_stress_result",
            "Organic follows the part's stress, and there is no stress result yet. Run the stress check first.", 0.0);
@@ -2057,12 +2109,18 @@ std::vector<OrganicRefusal> validate_organic_groups(const Settings& settings, co
     const int dn = r.skin_density ? *r.skin_density : settings.skin_density;
     const double sk = r.skin_sink ? *r.skin_sink : settings.skin_sink;
     const std::string area = "Organic area " + std::to_string(r.id);
-    if (!(w >= 0.0 && w <= 3.0))
+    if (!(w >= 0.0 && w <= 3.0)) {
       refuse(-1, "skin_width_range", area + "'s skin thickness is " + std::to_string(w) + " mm; it must be 0 (as thick as the vines) to 3 mm.", w, "skin_width_mm");
-    if (dn < 1 || dn > 6)
+      out.back().has_min = out.back().has_max = true, out.back().allowed_min = 0.0, out.back().allowed_max = 3.0;
+    }
+    if (dn < 1 || dn > 6) {
       refuse(-1, "skin_density_range", area + "'s skin density is " + std::to_string(dn) + "; it must be 1 to 6 joins per landing.", dn, "skin_density");
-    if (!(sk >= 0.0 && sk <= 1.0))
+      out.back().has_min = out.back().has_max = true, out.back().allowed_min = 1.0, out.back().allowed_max = 6.0;
+    }
+    if (!(sk >= 0.0 && sk <= 1.0)) {
       refuse(-1, "skin_sink_range", area + "'s skin sink is " + std::to_string(sk) + "; it must be 0 (on the face, cut flat) to 1 (one radius in).", sk, "skin_sink");
+      out.back().has_min = out.back().has_max = true, out.back().allowed_min = 0.0, out.back().allowed_max = 1.0;
+    }
   }
   // Leg J item 1 (the owner: "Rim should be hidden"): an Organic area's own Finish is None, Skin or Solid, never Rim.
   for (const Settings::RegionAsk& r : settings.regions)
