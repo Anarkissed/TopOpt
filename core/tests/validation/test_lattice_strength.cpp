@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -1104,7 +1105,7 @@ int main() {
       const std::size_t nv = static_cast<std::size_t>(dims[0]) * dims[1] * dims[2];
       const std::size_t nn = static_cast<std::size_t>(dims[0] + 1) * (dims[1] + 1) * (dims[2] + 1);
       const std::size_t b2 = 64 + 48 + 4 * nv + 4 * 3 * nn;   // after the header and the first block
-      CHECK(count == 2 && fb.size() == b2 + 48 + 4 * nv);
+      CHECK(count == 3 && fb.size() == b2 + 2 * (48 + 4 * nv));   // OS15: the spots' ids, a third block
       double marker = 0.0;
       std::int64_t n = 0;
       std::memcpy(&marker, fb.data() + b2, 8);
@@ -1119,8 +1120,46 @@ int main() {
       CHECK(marker == -1.0 && n == static_cast<std::int64_t>(nv));
       CHECK(std::fabs(least - num_after(one, "effective")) <= 1e-5 * num_after(one, "effective"));
     }
+    // OS15 (the app's certify wizard): each listed spot has an id (1.. in the listed order) and an issue (its kind);
+    // fields.bin's third block (marker -2, one float32 per voxel) gives each voxel the id of its spot (0: none): the
+    // voxels carrying an id are exactly that spot's, its worst place among them; the field names the block.
+    const auto spot_ids = [&](const std::string& tag) {
+      const std::string fb = slurp(kDir + "/" + tag + "/fields.bin");
+      std::int32_t dims[3], count = 0;
+      std::memcpy(dims, fb.data() + 4, 12);
+      std::memcpy(&count, fb.data() + 56, 4);
+      const std::size_t nv = static_cast<std::size_t>(dims[0]) * dims[1] * dims[2];
+      const std::size_t nn = static_cast<std::size_t>(dims[0] + 1) * (dims[1] + 1) * (dims[2] + 1);
+      const std::size_t b3 = 64 + 48 + 4 * nv + 4 * 3 * nn + 48 + 4 * nv;
+      std::map<int, std::size_t> n_of;
+      double marker = 0.0;
+      std::int64_t n = 0;
+      bool whole = count == 3 && fb.size() == b3 + 48 + 4 * nv;
+      if (whole) {
+        std::memcpy(&marker, fb.data() + b3, 8);
+        std::memcpy(&n, fb.data() + b3 + 24, 8);
+        for (std::size_t e = 0; e < nv; ++e) {
+          float v;
+          std::memcpy(&v, fb.data() + b3 + 48 + 4 * e, 4);
+          whole = whole && v >= 0.0f && v == std::floor(v);
+          if (v > 0.0f) ++n_of[static_cast<int>(v)];
+        }
+      }
+      std::printf("[%s] fields.bin block 3: marker %g, %lld values, voxels by id:", tag.c_str(), marker, static_cast<long long>(n));
+      for (const auto& [id, c] : n_of) std::printf(" %d: %zu", id, c);
+      std::printf("\n");
+      CHECK(whole && marker == -2.0 && n == static_cast<std::int64_t>(nv));
+      return n_of;
+    };
+    {
+      const auto ids = spot_ids("notch_one");
+      CHECK(has(one, "\"spot_ids\": {\"block\": 3, \"requested_volume_fraction\": -2}"));
+      CHECK(has(one, "{\"id\": 1, \"issue\": \"inside_the_solid\", \"worst_at\": ") && !has(one, "\"id\": 2"));
+      CHECK(ids.size() == 1 && ids.count(1) && static_cast<double>(ids.at(1)) == num_after(one, "voxels", one.find("\"id\": 1")));
+    }
     // A light load: the solid certifies; no spots, no text.
     const std::string light2 = spots_run("notch_light", "notch1.stl", 1000.0 * eff0 / 3.0, 50.0, off);
+    CHECK(spot_ids("notch_light").empty());
     CHECK(!has(light2, "\"spots\"") && !has(light2, "\"text\"") && !has(light2, "spots_total") && has(light2, "\"field\": {"));
     // Two notches: two spots, one at each; with one shown: "the 1 worst of 2 marked areas".
     const std::string probe2 = spots_run("notch2_probe", "notch2.stl", 1000.0, 50.0, off);
@@ -1133,6 +1172,14 @@ int main() {
         xs.push_back(std::strtod(two.c_str() + w + 13, nullptr));
       std::sort(xs.begin(), xs.end());
       CHECK(xs.size() == 2 && xs.size() == 2 && xs[0] > 8 && xs[0] < 16 && xs[1] > 24 && xs[1] < 32);
+    }
+    {   // two spots: two ids, each on its own spot's voxels
+      const auto ids = spot_ids("notch_two");
+      const std::size_t i1 = two.find("{\"id\": 1, \"issue\": "), i2 = two.find("{\"id\": 2, \"issue\": ");
+      CHECK(i1 != std::string::npos && i2 != std::string::npos && i1 < i2);
+      CHECK(ids.size() == 2 && ids.count(1) && ids.count(2) &&
+            static_cast<double>(ids.at(1)) == num_after(two, "voxels", i1) &&
+            static_cast<double>(ids.at(2)) == num_after(two, "voxels", i2));
     }
     const std::string two1 = spots_run("notch_two_one", "notch2.stl", 1000.0 * eff2 / 1.2, 50.0,
                                        "{\"width_aware_knockdown\": false, \"solid_spots_max\": 1}");
