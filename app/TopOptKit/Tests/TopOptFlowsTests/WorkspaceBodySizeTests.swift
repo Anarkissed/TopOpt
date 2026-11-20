@@ -18,6 +18,27 @@ final class WorkspaceBodySizeTests: XCTestCase {
         XCTAssertLessThan(size, 1024, "the workspace body value is \(size) bytes; keep its children in AnyView chunks (H58)")
     }
 
+    /// ★ 11-20 (his iPad crashed opening any older CarriageArms version, the ones with load scenarios): the workspace VIEW
+    /// itself must not grow. Its size is known only at run time (SwiftUI's State is resilient), so every copy of it on the
+    /// main thread is a run-time stack allocation of its whole size, and the scenario folders' path makes many: Organic cut 2's
+    /// 170-byte `@State certifyWalk` was enough to run off the stack. New state goes in a reference (the app model, a
+    /// StateObject), never as another @State here. RED CONTROL: with the walk as @State, this was over the ceiling.
+    func testTheWorkspaceViewItselfDoesNotGrow() {
+        let size = MemoryLayout<WorkspacePlaceholder>.size
+        let results = MemoryLayout<ResultsScreen>.size
+        print("WORKSPACE STRUCT: WorkspacePlaceholder \(size) bytes, ResultsScreen \(results) bytes, the walk as @State "
+              + "\(MemoryLayout<State<OrganicCertify.Walk?>>.size) bytes, the card as a struct would be about "
+              + "\(MemoryLayout<OrganicCertify.Issue>.size + MemoryLayout<OrganicSpotGrid?>.size + 64) bytes")
+        XCTAssertLessThanOrEqual(size, Self.workspaceCeiling,
+                                 "WorkspacePlaceholder is \(size) bytes: move the new state into a reference, not a @State")
+        XCTAssertLessThanOrEqual(results, Self.resultsCeiling,
+                                 "ResultsScreen is \(results) bytes: move the new state into a reference, not a @State")
+    }
+    /// Release (10)'s size, measured on the Mac (it opened every version on his iPad; release (11) at 22,120, the walk's 152
+    /// bytes more, did not), and Results' after cut 2 with its additions held by reference. Do not raise these: make room.
+    static let workspaceCeiling = 21_968
+    static let resultsCeiling = 1_632
+
     /// H57 and H58 are in place, each its own chunk boundary.
     func testTheChunkHooksArePinned() throws {
         let ws = try String(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent()

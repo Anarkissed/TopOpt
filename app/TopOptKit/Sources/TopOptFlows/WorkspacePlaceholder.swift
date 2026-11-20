@@ -516,10 +516,6 @@ public struct WorkspacePlaceholder: View {
     /// and carries the ladder, the sim and the receipt, which the wizard
     /// deliberately does not.
     @State private var showLatticeWizard = false
-    /// ★ Organic cut 2 (his certify wizard, 11-19): the walk through an Organic result's pop-ups — kept here, so Solve can
-    /// leave Results for the page that fixes it and the next pop-up is up on coming back; done, the re-check question takes
-    /// the Lattice button's place until he answers it.
-    @State var certifyWalk: OrganicCertify.Walk?
     /// ★ his iPad notes 11-10 (img 3): the Lattice page's Sample is up — the part is covered (`LatticeSampleShowingKey`).
     @State private var latticeSampleUp = false
 
@@ -15627,7 +15623,7 @@ extension WorkspacePlaceholder {
         let builtOn = LatticeStageCopy.builtOn(achievedVolumeFraction: latticeVariantContext?.achievedVolumeFraction)
         return HStack(spacing: DSParts.cornerGap) {   // §4.18, 12 pt apart
             // ★ Organic cut 2 (his certify wizard): once every pop-up has gone through, his re-check question is asked here
-            if let w = certifyWalk, w.asksRecheck(on: project.id) { certifyRecheck } else { latticeRunButton }
+            if let w = model.certifyWalk, w.asksRecheck(on: project.id) { certifyRecheck } else { latticeRunButton }
             DSSplitButton(key: "latticeSplitMore") {   // §4.6's 64 pt ⌃
                 Button { requestLatticeRun() } label: {
                     Text(LatticeSetupCopy.original)
@@ -15795,22 +15791,22 @@ extension WorkspacePlaceholder {
     func startCertifyWalk() {
         guard LatticeLayoutPreview.organic(project.lattice), let o = run.outcome else { return }
         let key = o.reportJSON?.hashValue ?? 0
-        if let w = certifyWalk, w.version == project.id, w.key == key { return }
-        certifyWalk = OrganicCertify.walk(version: project.id, reportJSON: o.reportJSON,
+        if let w = model.certifyWalk, w.version == project.id, w.key == key { return }
+        model.certifyWalk = OrganicCertify.walk(version: project.id, reportJSON: o.reportJSON,
                                           infillNow: project.printParams.infillPercent)
     }
 
     /// The open pop-up for this version's result (nil: none, or every one has gone through).
     var certifyCard: OrganicCertifyCard? {
-        guard let w = certifyWalk, w.version == project.id, let issue = w.current else { return nil }
+        guard let w = model.certifyWalk, w.version == project.id, let issue = w.current else { return nil }
         return OrganicCertifyCard(issue: issue, step: w.step, grid: w.grid, solvedLines: w.currentSolved ? w.infillLines : nil,
                                   next: { certifyAdvance() }, skip: { certifyAdvance() }, solve: { certifySolve(issue) })
     }
 
     /// Next or Skip. After the last pop-up the part's Lattice stage shows, where his re-check question is.
     func certifyAdvance() {
-        certifyWalk?.next()
-        if certifyWalk?.done == true {
+        model.certifyWalk?.next()
+        if model.certifyWalk?.done == true {
             viewOriginal = true
             if stage != .lattice { goToStage(.lattice) }
         }
@@ -15821,17 +15817,17 @@ extension WorkspacePlaceholder {
     /// Results).
     func certifySolve(_ issue: OrganicCertify.Issue) {
         guard let solve = issue.solve else { return }
-        certifyWalk?.markSolved()
+        model.certifyWalk?.markSolved()
         if case .infill(let to) = solve {
             let from = project.printParams.infillPercent
             project.printParams.infillPercent = to
             model.persistCurrentProject()   // a version with results: written to its draft, the next version
-            certifyWalk?.infillLines = OrganicCertify.infillLines(
+            model.certifyWalk?.infillLines = OrganicCertify.infillLines(
                 from: from, to: to, layerMM: project.printParams.layerHeightMM, walls: project.printParams.wallLoops,
                 newVersion: model.nextVersionPreview().map { "v\($0.number)" }, ranVersion: versionLabel)
             return
         }
-        certifyWalk?.next()
+        model.certifyWalk?.next()
         viewOriginal = true
         goToLatticeType()
     }
@@ -15840,10 +15836,10 @@ extension WorkspacePlaceholder {
     /// results makes the next version); Not now gives the button back.
     var certifyRecheck: some View {
         HStack(spacing: DSParts.cornerGap) {
-            PillButton(OrganicCertify.recheckNo, style: .secondary) { certifyWalk?.answered = true }
+            PillButton(OrganicCertify.recheckNo, style: .secondary) { model.certifyWalk?.answered = true }
                 .accessibilityIdentifier("certify-recheck-no")
             DSRunButton(OrganicCertify.recheckYes, subtitle: OrganicCertify.recheckLine, state: .ready, key: "certifyRecheck") {
-                certifyWalk?.answered = true
+                model.certifyWalk?.answered = true
                 requestLatticeRun()
             }
         }

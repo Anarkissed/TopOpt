@@ -220,8 +220,6 @@ public struct ResultsScreen: View {
     /// ★ Organic cut 2 (his certify wizard, 11-19): the open pop-up (the workspace keeps the walk); nil: none.
     let certify: OrganicCertifyCard?
     @StateObject private var spotMemo = OrganicSpotPaintMemo()
-    /// The pop-up's frame (global), where its line starts.
-    @State private var certifyCardFrame: CGRect = .zero
 
     /// The open pop-up's weak areas painted on the shown part (one paint per issue and mesh); nil: none to paint.
     private var certifyPaint: OrganicSpotPaint.Result? {
@@ -233,11 +231,11 @@ public struct ResultsScreen: View {
     /// ★ his design: the card, and its line straight to the area, staying on it however he turns the part.
     @ViewBuilder private func certifyLayer(_ c: OrganicCertifyCard) -> some View {
         let target = c.issue.at.flatMap { projection?.project(SIMD3<Float>($0)) }
-        OrganicCertifyLeader(from: certifyCardFrame, to: target).ignoresSafeArea()
+        OrganicCertifyLeader(from: spotMemo.cardFrame, to: target).ignoresSafeArea()
         OrganicCertifyCardView(card: c)
             .background(GeometryReader { g in
-                Color.clear.onAppear { certifyCardFrame = g.frame(in: .global) }
-                    .onChange(of: g.frame(in: .global)) { f in certifyCardFrame = f }
+                Color.clear.onAppear { spotMemo.cardFrame = g.frame(in: .global) }
+                    .onChange(of: g.frame(in: .global)) { f in if spotMemo.cardFrame != f { spotMemo.cardFrame = f } }
             })
             .padding(.top, PageChrome.panelTop).padding(.leading, PageChrome.edge)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

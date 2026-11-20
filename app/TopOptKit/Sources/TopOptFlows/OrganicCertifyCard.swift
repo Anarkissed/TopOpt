@@ -6,8 +6,9 @@ import SwiftUI
 import simd
 import TopOptDesign
 
-/// What the Results screen needs to draw one pop-up.
-public struct OrganicCertifyCard {
+/// What the Results screen needs to draw one pop-up. A CLASS: the Results screen holds a reference (8 bytes), not the card —
+/// a SwiftUI view struct is copied many times over on the iPad's small main-thread stack.
+public final class OrganicCertifyCard {
     public var issue: OrganicCertify.Issue
     /// "2 of 5"
     public var step: String
