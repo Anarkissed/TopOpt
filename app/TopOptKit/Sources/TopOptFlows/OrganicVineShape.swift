@@ -57,6 +57,11 @@ public struct OrganicVineShape: Equatable, Sendable {
     public var caps: [SIMD4<Float>] = []
     /// `tubes(runs:)`: the run each cap ends (one per cap).
     public var capVines: [Int32] = []
+    /// `tubes(runs:)` (OS1 B): per cap, true where it is a bridge's puck top: the upper half of the ball only (the puck's wall,
+    /// from the bar's underside up to the ball's centre, is a vertical piece of `pieces`).
+    public var capDomes: [Bool] = []
+    /// `tubes(runs:)` (OS1 B): how many of `pieces`, at its end, are the pucks' vertical pieces.
+    public var pucks = 0
     /// `cut(runs:surface:)`: each cap's cut (as Piece.cut), or empty (none cut).
     public var capCuts: [Cut?] = []
     /// ★ The part's surface near a piece, as the drawing cuts it: EVERY facet plane of the part's mesh within the piece's
@@ -81,8 +86,15 @@ public struct OrganicVineShape: Equatable, Sendable {
     /// The most pieces one joint blends (the shader's loop bound); a joint with more keeps the nearest.
     public static let maxJointPieces = 12
 
+    /// OS1 F (packed version 2): a run end that is not an end of the file's tube: the next run (at end B) or the previous run
+    /// (at end A) continues the same tube there. No ball, no flat end: the two runs' rings meet as one mitre.
+    public static let endContinues: UInt8 = 5
+    /// OS1 B as the engine's file makes it (`weave_bridge_domes`, file_mesh_defaults): true, a bridge's rounded end is a puck;
+    /// false, every bridge end flat (release 12's shape). Follows the engine taken for the install.
+    public static let bridgeDomes = true
+
     /// ★ HIS RULE 11-19: "The drawing follows the print file. Always." The vines as the print file's tubes route makes them
-    /// (core weave_tubes.cpp, read out by LatticeReview 01:39Z at 0ed96521):
+    /// (core weave_tubes.cpp, read out by LatticeReview 01:39Z at 0ed96521; OS1 at e95b7852):
     ///   * each run one tube; the ring at a point has that point's width (core's weave_runs gives the two bars' mean at an
     ///     inner point where the file takes the larger: the one place the drawing can differ, by half a width step);
     ///     between rings the tube tapers straight;
@@ -90,33 +102,71 @@ public struct OrganicVineShape: Equatable, Sendable {
     ///     them, so the tube bends with a clean elbow of its own width, no ball;
     ///   * a sharper turn ends the tube and starts it again: square ends, a round ball there;
     ///   * a run end is square, with a round half-sphere at a node, a loose or joined end; flat (no ball) where it runs
-    ///     into the solid or is cut by the part's surface;
+    ///     into the solid or is cut by the part's surface; OPEN where the run CONTINUES (OS1 F, end kind 5): the next or
+    ///     previous run is the same tube, its ring the same mitre ring;
     ///   * a BRIDGE run (packed version 2's section, a run lying flatter than 30 degrees) is swept with its own section, the
     ///     file's D (a level flat underside, a round top) or square bar, its side level and its flat side down at every bar;
-    ///     at an inner point the ring is the mean of where the two bars' sections meet the bisecting plane; both ends flat,
-    ///     never a ball. (The file runs a bridge's end on by a fraction of a millimetre into whatever it meets; not drawn.)
+    ///     at an inner point the ring is the mean of where the two bars' sections meet the bisecting plane; its pieces end
+    ///     flat. OS1 B: wherever a round tube's end would get a half-sphere (a node, a loose or joined end, a proud end, a
+    ///     split at a sharp turn), the file adds a PUCK there: the section revolved about the vertical through the end point,
+    ///     its underside one level disc at the bar's own underside height (c.z - r up.z, up.z the bar's horizontal share),
+    ///     its side straight up to c.z, its top the D's round top revolved (a half-sphere; the square bar's top flat at
+    ///     the bar's top height). One puck per place, the wider kept (a corner). Drawn as a vertical piece (its bottom flat)
+    ///     and, for the D, the upper half of a ball (`capDomes`). (The file runs a flat end on by a fraction of a
+    ///     millimetre into whatever it meets: not drawn.) A dome the print check held flat (R2) is drawn flat where the
+    ///     Exact preview lists it (`heldFlat`); the Draft has no list.
     /// Ring side vectors are carried round each bend by the rotation that turns one bar onto the next, so the two rings
-    /// at a mitre are the same ring point for point (no crack). Drawn by `OrganicVinePass` (its tube shader puts each ring
-    /// on its end's plane: `tubeRingPoint` is the same arithmetic).
-    public static func tubes(runs: [LatticeLayoutSession.Run], mitreLimitDeg: Float = 60) -> OrganicVineShape {
+    /// at a mitre are the same ring point for point (no crack), across a continuing run too. Drawn by `OrganicVinePass`
+    /// (its tube shader puts each ring on its end's plane: `tubeRingPoint` is the same arithmetic).
+    public static func tubes(runs: [LatticeLayoutSession.Run], mitreLimitDeg: Float = 60,
+                             heldFlat: [SIMD3<Float>] = []) -> OrganicVineShape {
         var s = OrganicVineShape()
         s.params.blendMM = 0
         let cosLimit = cos(mitreLimitDeg * .pi / 180)
         func perp(_ t: SIMD3<Float>) -> SIMD3<Float> {
             simd_normalize(simd_cross(t, abs(t.x) < 0.9 ? SIMD3<Float>(1, 0, 0) : SIMD3<Float>(0, 1, 0)))
         }
-        for (vi, r) in runs.enumerated() where r.points.count >= 2 {
+        func dir(_ a: SIMD3<Float>, _ b: SIMD3<Float>) -> SIMD3<Float>? {
+            let d = b - a
+            return simd_length(d) > 1e-6 ? simd_normalize(d) : nil
+        }
+        // OS1 B: the pucks, one per place (the file's map keyed at 1e-5 mm; the wider kept), in the order first met
+        struct Puck { var c: SIMD3<Float>; var r: Float; var upZ: Float; var section: UInt8; var vine: Int32 }
+        var pucks: [Puck] = [], puckAt: [SIMD3<Int64>: Int] = [:]
+        // R2 (LatticeReview's ruling 11-21): the Exact preview lists the points where the print check held a dome flat
+        func held(_ c: SIMD3<Float>) -> Bool { heldFlat.contains { simd_length($0 - c) < 1e-4 } }
+        func puck(_ c: SIMD3<Float>, _ rad: Float, along t: SIMD3<Float>, section: UInt8, vine: Int32) {
+            guard bridgeDomes, !held(c) else { return }   // flat there: the bar's own flat end, no puck
+            let key = SIMD3<Int64>(Int64((c.x * 1e5).rounded()), Int64((c.y * 1e5).rounded()), Int64((c.z * 1e5).rounded()))
+            let p = Puck(c: c, r: rad, upZ: (t.x * t.x + t.y * t.y).squareRoot(), section: section, vine: vine)
+            if let i = puckAt[key] { if pucks[i].r < rad { pucks[i] = p } } else { puckAt[key] = pucks.count; pucks.append(p) }
+        }
+        // where the previous run's tube goes on into this one (OS1 F): its last side vector and direction
+        var carry: (v: SIMD3<Float>, u: SIMD3<Float>, at: SIMD3<Float>)?
+        for (vi, r) in runs.enumerated() {
+            guard r.points.count >= 2 else { carry = nil; continue }
             let n = r.points.count
             let bridge = r.section == 1 || r.section == 2
-            func ball(_ c: SIMD3<Float>, _ rad: Float) { s.caps.append(SIMD4(c, rad)); s.capVines.append(Int32(vi)) }
+            func ball(_ c: SIMD3<Float>, _ rad: Float) {
+                s.caps.append(SIMD4(c, rad)); s.capVines.append(Int32(vi)); s.capDomes.append(false)
+            }
             var u = [SIMD3<Float>](), keep = [Int]()
             for k in 0..<(n - 1) {
-                let d = r.points[k + 1] - r.points[k]
-                if simd_length(d) > 1e-6 { u.append(simd_normalize(d)); keep.append(k) }
+                if let d = dir(r.points[k], r.points[k + 1]) { u.append(d); keep.append(k) }
             }
-            guard !u.isEmpty else { continue }
+            guard !u.isEmpty else { carry = nil; continue }
+            // OS1 F: the runs this one continues (end A) and goes on into (end B), when they meet it there
+            var prevU: SIMD3<Float>?, nextU: SIMD3<Float>?
+            if r.endA == endContinues, keep.first == 0, let c = carry, simd_length(c.at - r.points[0]) < 1e-4 { prevU = c.u }
+            if r.endB == endContinues, keep.last == n - 2, vi + 1 < runs.count {
+                let nx = runs[vi + 1]
+                if nx.endA == endContinues, nx.points.count >= 2, simd_length(nx.points[0] - r.points[n - 1]) < 1e-4 {
+                    nextU = (1..<nx.points.count).lazy.compactMap { dir(nx.points[0], nx.points[$0]) }.first
+                }
+            }
             // per kept bar k: points keep[k] and keep[k]+1
             var v = perp(u[0])
+            if let p = prevU, let c = carry { v = Self.carried(c.v, from: p, to: u[0]) }
             for (bi, k) in keep.enumerated() {
                 let a = r.points[k], b = r.points[k + 1]
                 let ra = r.widthMM[k] / 2, rb = r.widthMM[k + 1] / 2
@@ -129,15 +179,19 @@ public struct OrganicVineShape: Equatable, Sendable {
                     if c >= cosLimit { return (simd_normalize(u[bi] + o), false) }
                     return (u[bi], true)   // a split: square, a ball
                 }
-                let prevBar = bi > 0 && keep[bi - 1] + 1 == k ? u[bi - 1] : nil
-                let nextBar = bi + 1 < keep.count && keep[bi + 1] == k + 1 ? u[bi + 1] : nil
-                let (na, splitA) = plane(prevBar, outgoing: false)
-                let (nb, splitB) = plane(nextBar, outgoing: true)
+                let prevBar = bi > 0 ? (keep[bi - 1] + 1 == k ? u[bi - 1] : nil) : prevU
+                let nextBar = bi + 1 < keep.count ? (keep[bi + 1] == k + 1 ? u[bi + 1] : nil) : nextU
+                var (na, splitA) = plane(prevBar, outgoing: false)
+                var (nb, splitB) = plane(nextBar, outgoing: true)
+                if bi == 0, prevU != nil, splitA { na = u[bi]; splitA = false }   // the file's tube goes on: never a ball
+                if bi + 1 == keep.count, nextU != nil, splitB { nb = u[bi]; splitB = false }
                 q.ta = na; q.tb = nb
                 q.section = bridge ? r.section : 0
-                if bridge {   // a bridge's every end is flat: a split is two flat ends, no ball
+                if bridge {   // a bridge's piece ends flat; a split gets a puck (OS1 B)
                     q.flatA = splitA; q.flatB = splitB
                     s.pieces.append(q)
+                    if splitA { puck(a, ra, along: u[bi], section: r.section, vine: Int32(vi)) }
+                    if splitB { puck(b, rb, along: u[bi], section: r.section, vine: Int32(vi)) }
                 } else {
                     s.pieces.append(q)
                     if splitA { ball(a, ra) }
@@ -147,14 +201,36 @@ public struct OrganicVineShape: Equatable, Sendable {
                 if let o = nextBar { v = Self.carried(v, from: u[bi], to: o) }
                 else if bi + 1 < u.count { v = Self.carried(v, from: u[bi], to: u[bi + 1]) }
             }
-            // the run's own ends: a round half-sphere unless it runs into the solid or is cut by the part's surface
-            // a proud Surface end (OG2: proud_a / proud_b > 0) is round too; a bridge's ends are always flat
-            func rounded(_ e: UInt8, proud: Float) -> Bool { !bridge && ((e != 1 && e != 2) || (e == 2 && proud > 0)) }
+            // the run's own ends: rounded (a ball, or a bridge's puck) unless it runs into the solid, is cut flush by the
+            // part's surface, or goes on in the next run; a proud Surface end (OG2: proud_a / proud_b > 0) is rounded too
+            // (core's Bar::End: 0 node, 1 solid, 2 surface, 3 loose, 4 joined, 5 continues; LatticeReview 11-21: any other
+            // kind is flat, e.g. a dome the print check holds flat)
+            func rounded(_ e: UInt8, proud: Float) -> Bool { e == 0 || e == 3 || e == 4 || (e == 2 && proud > 0) }
             let first = s.pieces.count - keep.count, last = s.pieces.count - 1
-            if rounded(r.endA, proud: r.proudA) { ball(r.points[0], r.widthMM[0] / 2) }
-            else if keep.first == 0 { s.pieces[first].flatA = true }
-            if rounded(r.endB, proud: r.proudB) { ball(r.points[n - 1], r.widthMM[n - 1] / 2) }
-            else if keep.last == n - 2 { s.pieces[last].flatB = true }
+            if keep.first == 0 {
+                if rounded(r.endA, proud: r.proudA) {
+                    if bridge { s.pieces[first].flatA = true; puck(r.points[0], r.widthMM[0] / 2, along: u[0], section: r.section, vine: Int32(vi)) }
+                    else { ball(r.points[0], r.widthMM[0] / 2) }
+                } else if prevU == nil { s.pieces[first].flatA = true }
+            }
+            if keep.last == n - 2 {
+                if rounded(r.endB, proud: r.proudB) {
+                    if bridge { s.pieces[last].flatB = true; puck(r.points[n - 1], r.widthMM[n - 1] / 2, along: u[u.count - 1], section: r.section, vine: Int32(vi)) }
+                    else { ball(r.points[n - 1], r.widthMM[n - 1] / 2) }
+                } else if nextU == nil { s.pieces[last].flatB = true }
+            }
+            carry = nextU != nil ? (s.pieces[last].vb, u[u.count - 1], r.points[n - 1]) : nil   // the last piece's own side
+        }
+        // OS1 B: each puck, a vertical piece from its underside (its bottom flat) and, for the D, the upper half of a ball
+        let up = SIMD3<Float>(0, 0, 1)
+        for p in pucks where p.r > 0 {
+            let zb = p.c.z - p.r * p.upZ
+            let top = p.section == 1 ? p.c.z : zb + 2 * p.r * p.upZ
+            var q = Piece(a: SIMD3(p.c.x, p.c.y, zb), ra: p.r, b: SIMD3(p.c.x, p.c.y, top), rb: p.r, vine: p.vine)
+            q.ta = up; q.tb = up
+            q.flatA = true; q.flatB = p.section != 1
+            if top - zb > 1e-6 { s.pieces.append(q); s.pucks += 1 }
+            if p.section == 1 { s.caps.append(SIMD4(p.c, p.r)); s.capVines.append(p.vine); s.capDomes.append(true) }
         }
         return s
     }

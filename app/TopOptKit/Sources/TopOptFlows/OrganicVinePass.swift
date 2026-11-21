@@ -184,7 +184,8 @@ static float4 box_corner(uint vid, float4 S, constant VineFrame& F) {
     const int idx[36] = { 0,1,2, 2,1,3, 4,6,5, 5,6,7, 0,4,1, 1,4,5,
                           2,3,6, 6,3,7, 0,2,4, 4,2,6, 1,5,3, 3,5,7 };
     int c = idx[vid % 36];
-    float3 p = S.xyz + float3((c & 1) ? S.w : -S.w, (c & 2) ? S.w : -S.w, (c & 4) ? S.w : -S.w);
+    float w = abs(S.w);   // a dome's radius comes negative (OS1 B)
+    float3 p = S.xyz + float3((c & 1) ? w : -w, (c & 2) ? w : -w, (c & 4) ? w : -w);
     return F.clipFromModel * float4(p, 1.0);
 }
 static void vine_ray(float4 cpos, constant VineFrame& F, thread float3& ro, thread float3& rd) {
@@ -334,6 +335,8 @@ vertex BoxVOut cap_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
 fragment VineGBufDepth cap_gbuffer(BoxVOut in [[stage_in]], const device float4* caps [[buffer(0)]],
                                    constant VineFrame& F [[buffer(1)]]) {
     float4 S = caps[in.iid];
+    bool dome = S.w < 0.0;   // OS1 B: a bridge's puck top, its upper half only (its wall below is a piece)
+    S.w = abs(S.w);
     float3 ro, rd;
     vine_ray(in.cpos, F, ro, rd);
     float3 oc = ro - S.xyz;
@@ -342,6 +345,7 @@ fragment VineGBufDepth cap_gbuffer(BoxVOut in [[stage_in]], const device float4*
     float t = -b - sqrt(h);
     if (t < 0.0) { discard_fragment(); }
     float3 p = ro + rd * t;
+    if (dome && p.z < S.z) { discard_fragment(); }
     return vine_out(p, normalize(p - S.xyz), F);
 }
 // ★ the flat cut on a round end (2 float4 per end: (xyz, r), then (first, count, union) into the plane list): the sphere
@@ -357,6 +361,8 @@ vertex BoxVOut cap_cut_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
 fragment VineGBufDepth cap_cut_gbuffer(BoxVOut in [[stage_in]], const device float4* caps [[buffer(0)]],
                                        constant VineFrame& F [[buffer(1)]], const device float4* planes [[buffer(2)]]) {
     float4 S = caps[2 * in.iid], m = caps[2 * in.iid + 1];
+    bool dome = S.w < 0.0;   // OS1 B: a puck top, its upper half only
+    S.w = abs(S.w);
     const device float4* pl = planes + int(m.x + 0.5);
     int n = int(m.y + 0.5);
     bool un = m.z > 0.5;
@@ -368,11 +374,14 @@ fragment VineGBufDepth cap_cut_gbuffer(BoxVOut in [[stage_in]], const device flo
     float sh = sqrt(h), t0 = -b - sh, t1 = -b + sh;
     if (t1 < 0.0) { discard_fragment(); }
     float3 p = ro + rd * t0;
-    if (t0 >= 0.0 && !cut_outside(p, pl, n, un)) { return vine_out(p, normalize(p - S.xyz), F); }
+    if (t0 >= 0.0 && !cut_outside(p, pl, n, un)) {
+        if (dome && p.z < S.z) { discard_fragment(); }
+        return vine_out(p, normalize(p - S.xyz), F);
+    }
     if (F.blend.y < 0.5) { discard_fragment(); }
     float3 bn = float3(0.0);
     float tf = cut_entry(ro, rd, pl, n, un, bn);
-    if (tf < max(t0, 0.0) || tf > t1) { discard_fragment(); }
+    if (tf < max(t0, 0.0) || tf > t1 || (dome && (ro + rd * tf).z < S.z)) { discard_fragment(); }
     return vine_out(ro + rd * tf, bn, F);
 }
 
@@ -606,16 +615,23 @@ final class OrganicVinePass {
         return SIMD4(Float(first), Float(planes.count - first), c.union ? 1 : 0, 0)
     }
 
+    /// The round ends as the GPU reads them: a bridge's puck top (OS1 B, `capDomes`) carries its radius negative, and the
+    /// shader draws its upper half only.
+    static func signedCaps(_ s: OrganicVineShape) -> [SIMD4<Float>] {
+        s.caps.enumerated().map { k, c in k < s.capDomes.count && s.capDomes[k] ? SIMD4(c.x, c.y, c.z, -c.w) : c }
+    }
+
     func upload(_ s: OrganicVineShape) {
         // the cut pieces and ends draw by their own pipelines (a joint's list indexes the one buffer: none cut with joints)
         let split = s.joints.isEmpty && s.pieces.contains(where: \.isCut)
         var planes: [SIMD4<Float>] = []
         let packed = Self.pack(s, cut: split ? false : nil, planes: &planes)
         let cutPacked = split ? Self.pack(s, cut: true, planes: &planes) : []
-        var caps = s.caps, cutCaps: [SIMD4<Float>] = []
+        let signed = Self.signedCaps(s)
+        var caps = signed, cutCaps: [SIMD4<Float>] = []
         if s.joints.isEmpty, s.capCuts.count == s.caps.count, !s.caps.isEmpty {
             caps = []
-            for (k, c) in s.caps.enumerated() {
+            for (k, c) in signed.enumerated() {
                 if let cut = s.capCuts[k] { cutCaps += [c, Self.meta(cut, &planes)] } else { caps.append(c) }
             }
         }
