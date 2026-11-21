@@ -1774,6 +1774,12 @@ std::vector<std::string> refinish_job(const JobDescription& job, const std::stri
                                       const MaterialLibrary& materials,
                                       const SettingsRules& rules, bool export_only = false);
 
+// KEEP REGIONS, EXACTLY: the exported mesh with each keep region replaced by the part's own
+// solid there (the export cut by the regions, the part's share fused back in), by Manifold.
+// What every export with keep regions goes through; here so a test can reach it.
+TriangleMesh fuse_keep_regions(const TriangleMesh& exported, const TriangleMesh& part,
+                               const std::vector<KeepRegion>& keeps, double min_piece_mm3);
+
 // KEEP CLEAR, EXACTLY (reviewer's ruling 2026-11-03 19:55): `file` cut out of every Keep
 // clear of `job` (its declared primitives and its keep regions' reach), minus the part's
 // own solid (`model.mesh`), by Manifold. Every finished export goes through it; a file
