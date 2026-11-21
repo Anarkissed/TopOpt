@@ -86,7 +86,7 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// One plain line each for what the new engine leaves out for these settings.
     public static func notes(_ l: LatticeSettings, hasStress: Bool = false) -> [String] {
         var out: [String] = []
-        if needsStress(l), !hasStress { out.append(byStressLine) }
+        if needsStress(l), !hasStress, !organic(l) { out.append(byStressLine) }   // ★ 11-20: Organic runs its check itself
         return out
     }
     public static func note(_ l: LatticeSettings) -> String? { notes(l).first }
@@ -172,7 +172,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         n == 1 ? "1 bulge made flush so the part prints" : "\(n) bulges made flush so the part prints"
     }
     /// Organic needs the stress check (its weave follows the stress's directions).
-    public static let organicNeedsStressLine = "Organic follows the stress: the stress check runs first"
+    public static let organicNeedsStressLine = "Checking the stresses first, then the lattice"
     private var nozzleStressKey: Int?
 
     public init() {}
