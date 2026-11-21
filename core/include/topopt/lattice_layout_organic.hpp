@@ -281,6 +281,14 @@ struct OrganicAsk {
 inline constexpr double kOrganicStrandKeepDefault = 0.9;   // OG3
 inline constexpr double kOrganicGapLinesDefault = 1.5;   // OG1
 inline constexpr double kOrganicGapLinesMax = 4.0;
+// UL1 (leg R, 2026-11-20; the owner: "Can I put 789293?"): the upper limits of the numbers the app shows, each the largest
+// that still means something on a part a printer can make (a 400 mm bed): the cell size 200 mm (Auto's upper end is 4/9
+// of the area's narrowest width, 178 mm at 400), the strut 50 mm (Auto's thick end is a tenth of it, 40 mm at 400), and
+// the counts in spacings (seeds, gaps, roots, top branches) 20, Grade to shape reach 10.
+inline constexpr double kOrganicCellMaxMm = 200.0;
+inline constexpr double kOrganicStrutMaxMm = 50.0;
+inline constexpr double kOrganicSpacingsMax = 20.0;
+inline constexpr double kOrganicShapeReachMax = 10.0;
 inline constexpr double kOrganicReliefMaxMm = 1.0;       // OG2 (the owner, 2026-11-19: on/off, "limits to 1mm")
 
 // OG1: the strand points' local spacing and its reason, and (gap above 0) the cap: for each strand of `strands` from

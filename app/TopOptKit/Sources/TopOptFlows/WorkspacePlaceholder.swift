@@ -1345,7 +1345,6 @@ public struct WorkspacePlaceholder: View {
                                 LatticeSolidReasonBar(reason: why, apply: { fix in SolidReason.apply(fix, to: &project.lattice) },
                                                       checkNozzle: newEngine.nozzleState == .notAsked ? { newEngine.checkNozzle() } : nil)   // ★ 11-16
                             }
-                            LatticeFileExportBar(export: fileExport, make: exportPrintFile, runStressCheck: runNewEngineStressCheck)   // ★ his go 11-13: Export, on the Mac
                             LatticeLayoutPreviewLines(preview: newEngine)
                         }
                         .laneFoot("new-engine")   // ★ his pick 11-15: very bottom in landscape, just above Settings in portrait
@@ -2016,15 +2015,19 @@ public struct WorkspacePlaceholder: View {
             ? strengthJobJSON(request) : nil   // the Lattice run's own job, as Export sends it
         // ★ Organic cut 2: made on a Mac, from the preview's own exact lay (the same groups, the stress it followed)
         if LatticeLayoutPreview.organic(project.lattice) {
-            guard let config = compute.activeRemote else { model.toast = LatticeFileExport.organicNeedsMacLine; return }
-            let stress = newEngineStress
+            guard let config = compute.activeRemote else {
+                AppPopups.shared.show(LatticeFileExport.organicCantMakeTitle, LatticeFileExport.organicNeedsMacLine); return
+            }
             Task { @MainActor in
-                guard let inputs = try? await newEngine.organicFileInputs(project: project, stress: stress) else {
-                    model.toast = LatticeFileExport.organicNoLayLine; return
+                let stress = newEngineStress
+                let inputs: (groups: [LatticeLayoutSession.OrganicGroup], tensor: Data)
+                do { inputs = try await organicInputsWhenReady() } catch {
+                    AppPopups.shared.show(LatticeFileExport.organicCantMakeTitle, LatticeFileExport.organicPlain(error), log: "\(error)")
+                    return
                 }
                 switch LatticeFileJob.forOrganic(project, groups: inputs.groups, tensor: inputs.tensor,
                                                  referenceMPa: stress.referenceMPa, strengthJob: strengthJob) {
-                case .failure(let why): model.toast = why.line
+                case .failure(let why): AppPopups.shared.show(LatticeFileExport.organicCantMakeTitle, why.line)
                 case .success(let job): launchFileRun(request, job: job, strengthJob: strengthJob, config: config, organic: true)
                 }
             }
@@ -14662,8 +14665,11 @@ extension WorkspacePlaceholder {
         let line = runs ? RunProgressReadout.buttonLine(run)
             : notSet ? LatticeSetupCopy.saveFirst
             : ok && tabs > 0 && !(runCouldntFinish && lastRunWasLattice)
-                ? LatticeSetupCopy.ready(type: LatticeType.displayName(forID: project.lattice.topologyID),
-                                         groups: Swift.max(0, tabs - zones), zones: zones)
+                ? (LatticeLayoutPreview.organic(project.lattice)   // ★ his 11-20: never "Octet truss" on Organic
+                    ? LatticeSetupCopy.ready(type: LatticeLayoutPreview.organicButtonType(project),
+                                             groups: Swift.max(1, project.latticeAreaGroups.count), zones: zones)
+                    : LatticeSetupCopy.ready(type: LatticeType.displayName(forID: project.lattice.topologyID),
+                                             groups: Swift.max(0, tabs - zones), zones: zones))
             : summary
         let state: DSRunButton.State = runs ? .running(line) : ok ? .ready : notSet || marks || opensType ? .grey(line) : .disabled(line)
         // ★ his pick 11-16: under Click to refresh, an out-of-date preview turns the button into Refresh Lattice
@@ -15843,5 +15849,27 @@ extension WorkspacePlaceholder {
                 requestLatticeRun()
             }
         }
+    }
+}
+
+
+// MARK: - ★ his 11-20: the Lattice button makes the Organic print file from the preview, finishing the preview first if needed
+extension WorkspacePlaceholder {
+    /// The preview's own exact lay of the settings as they are now: taken at once when it is current; when it is still laying,
+    /// or the settings moved since (Click to refresh), the preview is made first (the same lay he would refresh to), then the
+    /// file follows from it. Never "let the preview finish" when it has.
+    func organicInputsWhenReady() async throws -> (groups: [LatticeLayoutSession.OrganicGroup], tensor: Data) {
+        for attempt in 0..<2 {
+            do { return try await newEngine.organicFileInputs(project: project, stress: newEngineStress) }
+            catch let wait as LatticeLayoutPreview.OrganicFileWait {
+                guard attempt == 0 else { throw wait }
+                if wait != .laying { refreshLatticePreview(checkNozzle: false) }
+                model.toast = LatticeFileExport.organicPreviewFirstLine
+                let end = Date().addingTimeInterval(LatticeFileExport.organicPreviewWaitSeconds)
+                try await Task.sleep(nanoseconds: 300_000_000)
+                while newEngine.laying, Date() < end { try await Task.sleep(nanoseconds: 300_000_000) }
+            }
+        }
+        throw LatticeLayoutPreview.OrganicFileWait.notLaid
     }
 }

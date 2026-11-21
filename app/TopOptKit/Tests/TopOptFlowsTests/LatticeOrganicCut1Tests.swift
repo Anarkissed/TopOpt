@@ -232,13 +232,18 @@ final class LatticeOrganicCut1Tests: XCTestCase {
     func testLookTheWholePartLimitsAndTheRules() {
         typealias L = LatticeOrganicLook.Limits
         typealias C = LatticeOrganicLook.Check
-        let mid = Self.stand.looked(percent: 50)
-        XCTAssertEqual(mid.cellLowerMM, 2); XCTAssertEqual(mid.cellUpperMM, 8, "★ 50 %: the measured range")
+        // ★ his rule 11-19, kept 11-20: "1 = barely any; 100 = almost solid"; Look starts at 15
         let open = Self.stand.looked(percent: 1)
-        XCTAssertEqual(open.cellLowerMM, 4); XCTAssertEqual(open.cellUpperMM, 16, "1 %: twice the range")
+        XCTAssertEqual(open.cellLowerMM, 2); XCTAssertEqual(open.cellUpperMM, 8, "★ 1: the measured range (U/4 to U), the old 50 %")
+        let start = Self.stand.looked(percent: LatticeOrganicLook.lookDefault)
+        XCTAssertEqual(LatticeOrganicLook.lookDefault, 15)
+        XCTAssertEqual(start.cellLowerMM, 2); XCTAssertEqual(start.cellUpperMM, 6.5, "★ 15, the start: close to the old look")
+        let mid = Self.stand.looked(percent: 50)
+        XCTAssertEqual(mid.cellLowerMM, 1.5); XCTAssertEqual(mid.cellUpperMM, 3.5, "50: denser")
         let fine = Self.stand.looked(percent: 100)
-        XCTAssertEqual(fine.cellLowerMM, 1.5, "100 %: half, never under the smallest printable cell (1.38 mm, to 1.5)")
-        XCTAssertEqual(fine.cellUpperMM, 4)
+        XCTAssertEqual(fine.cellLowerMM, 1.5, "★ 100: the smallest printable cell (1.38 mm, to 1.5) everywhere: almost solid")
+        XCTAssertEqual(fine.cellUpperMM, 1.5)
+        XCTAssertEqual(LatticeOrganicLook().lookPercentValue, 15, "★ a new group starts at 15")
         XCTAssertEqual(fine.strutLowerMM, 0.9); XCTAssertEqual(fine.strutUpperMM, 1.8, "★ struts are not moved by Look")
         let shallow = L(strutLowerMM: 0.9, strutUpperMM: 0.9, strutAutoMM: 0.9, cellLowerMM: 1.5, cellUpperMM: 4, cellAutoMM: 3)
         let shell = L(strutLowerMM: 0, strutUpperMM: 0, strutAutoMM: 0, cellLowerMM: 0, cellUpperMM: 0, cellAutoMM: 0, measured: false)

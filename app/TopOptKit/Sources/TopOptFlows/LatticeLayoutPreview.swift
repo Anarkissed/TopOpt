@@ -25,8 +25,16 @@ public final class LatticeLayoutPreview: ObservableObject {
     @Published public private(set) var bars: LatticeLayoutBarsInputs?
     /// ★ Install 3: what the layout on screen laid (bars and cells), for the colour key, the tap-to-read card and the drawer.
     @Published public private(set) var laid: LatticeLayoutColours.Laid?
-    /// One plain line under the preview: what is wrong, or nil.
-    @Published public private(set) var problem: String?
+    /// One plain line under the preview: what is wrong, or nil. ★ his 11-20: a new one is also raised as a centred pop-up.
+    @Published public private(set) var problem: String? {
+        didSet { if let p = problem, p != oldValue, Self.popsUp(p) { AppPopups.shared.show(Self.problemTitle, p) } }
+    }
+    static let problemTitle = "The lattice preview couldn’t be made"
+    /// A problem that is the page's state rather than an error (no part yet) stays a line.
+    static func popsUp(_ p: String) -> Bool { p != noPartLine && p != organicNeedsStressLine }
+    /// ★ his 11-20: the engine's own words never reach the page; this plain sentence does, the words go to the log.
+    static let failedPlainLine = "These settings didn’t make a lattice. Try changing one of them; if it keeps happening, tell us."
+
     /// Core's numbers for the debug overlay (stage E's iPad timing): open, read, cells, bars, ms.
     @Published public private(set) var timing: Timing?
     @Published public private(set) var laying = false
@@ -181,10 +189,21 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// these inputs, and the stress that lay followed (as set, or as the synthetic stress filled it) as core's file. nil: no
     /// exact lay of these inputs yet (the page lays it first), or still laying.
     public func organicFileInputs(project p: ProjectModel, stress: Stress = Stress())
-        async throws -> (groups: [LatticeLayoutSession.OrganicGroup], tensor: Data)? {
-        guard !laying, let groups = organicLaidGroups, let session, isCurrent(project: p, stress: stress) else { return nil }
+        async throws -> (groups: [LatticeLayoutSession.OrganicGroup], tensor: Data) {
+        if laying { throw OrganicFileWait.laying }
+        guard let groups = organicLaidGroups, let session else { throw OrganicFileWait.notLaid }
+        guard isCurrent(project: p, stress: stress) else { throw OrganicFileWait.outOfDate }
         let tensor = try await session.tensorFile()
         return (groups, tensor)
+    }
+    /// Why the file can't be made from the preview yet: it is laying, nothing exact is laid, or the settings moved since.
+    public enum OrganicFileWait: Error, Equatable { case laying, notLaid, outOfDate }
+
+    /// ★ his 11-20: the Lattice button's type on Organic — "Organic Traced", "Organic Grown", or "Organic" when groups differ.
+    public static func organicButtonType(_ p: ProjectModel) -> String {
+        let groups = p.lattice.wholePart || p.latticeAreaGroups.isEmpty ? [nil] : p.latticeAreaGroups.map { Optional($0.id) }
+        let modes = Set(groups.map { p.lattice.organicLook(group: $0).modeValue })
+        return modes.count == 1 ? "Organic " + modes.first!.title : "Organic"
     }
 
     /// The page's one call, on every change of the part or its lattice settings (cheap when nothing changed).
@@ -402,8 +421,8 @@ public final class LatticeLayoutPreview: ObservableObject {
         } catch is CancellationError {
             // a newer setting is laying
         } catch {
-            problem = Self.organic(latticeAtLay) ? "Organic: " + ((error as? TopOptError)?.message ?? "\(error)")   // whole (sheet H4)
-                : FlexibleRowCopy.fit("New engine: \(error)", 60)
+            NSLog("TopOpt preview failed: %@", (error as? TopOptError)?.message ?? "\(error)")   // the words: the log only
+            problem = Self.failedPlainLine
             bars = nil
             laying = false
         }
@@ -596,8 +615,11 @@ public final class LatticeLayoutPreview: ObservableObject {
     static func organicKey(_ p: ProjectModel) -> String? {
         guard organic(p.lattice) else { return nil }
         let look = (p.lattice.organicLook ?? LatticeOrganicLook()).effective(pageManual: p.latticePageManual)
-        let data = (try? JSONEncoder().encode(look)) ?? Data()
-        let groups = (try? JSONEncoder().encode(p.lattice.organicLooks ?? [:])) ?? Data()
+        // ★ 11-20: sorted keys — a dictionary's own order may differ between two equal settings (the export read that as
+        // "the settings moved since the preview" and refused a finished preview)
+        let enc = JSONEncoder(); enc.outputFormatting = [.sortedKeys]
+        let data = (try? enc.encode(look)) ?? Data()
+        let groups = (try? enc.encode(p.lattice.organicLooks ?? [:])) ?? Data()
         return "\(p.latticePageManual) \(p.lattice.wholePart) " + String(decoding: data, as: UTF8.self)
             + String(decoding: groups, as: UTF8.self)
     }
@@ -1222,7 +1244,6 @@ struct LatticeLayoutPreviewLines: View {
                 Text(z).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                     .background(CornerPairStyle.publish("new-engine-nozzle"))
             }
-            Text(LatticeLayoutPreview.roundBarsLine).font(.system(size: 12)).foregroundStyle(DS.Color.textSecondary.color)
             if let t = preview.timing {
                 Text(t.line).font(.system(size: 11, design: .monospaced)).foregroundStyle(DS.Color.textTertiary.color)
                     .accessibilityIdentifier("new-engine-timing")

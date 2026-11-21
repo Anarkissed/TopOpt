@@ -103,7 +103,7 @@ final class LatticeOrganicPageHostedTests: XCTestCase {
             p.lattice.setOrganicLook(mine, group: g)
             XCTAssertEqual(p.lattice.organicLook(group: g).modeValue, .traced)
             XCTAssertEqual(p.lattice.organicLook(group: nil).modeValue, .grown, "RED CONTROL: the whole part's is its own")
-            XCTAssertEqual(p.lattice.organicLook(group: UUID()).lookPercentValue, 50, "another group: Auto")
+            XCTAssertEqual(p.lattice.organicLook(group: UUID()).lookPercentValue, 15, "another group: Auto (his start, 15)")
             let back = try JSONDecoder().decode(LatticeSettings.self, from: JSONEncoder().encode(p.lattice))
             XCTAssertEqual(back.organicLook(group: g), mine, "★ saved with the project")
             // ★ his 11-18: "Simulate stresses on unstressed walls ... ONLY in organic and in aesthetic"; foci per wall

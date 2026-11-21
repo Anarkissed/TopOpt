@@ -72,6 +72,13 @@ struct LatticeSampleView: View {
         /// each with ONE stress focus — from these Organic settings (the open tab's) and the printer's layer. nil: not Organic.
         var organic: LatticeOrganicLook? = nil
         var layerMM: Double = 0.2
+        /// The printer's wall ring (a Solid finish's cover); -1 none.
+        var coverMM: Double = -1
+        /// ★ his pick 11-20 ("Use my struts"): the group's own Auto struts as his part measured them (thin, thick, one);
+        /// empty: the sample's. A typed (Manual) thickness is in `organic` already.
+        var partStruts: [Double] = []
+        /// Aesthetic (Extra spacing's default is on there).
+        var aesthetic = false
     }
     let inputs: Inputs
     /// ★ his iPad notes 11-10 (img 6): the settings he has on that core's sample block can't show yet — said in one line.
@@ -208,10 +215,16 @@ struct LatticeSampleView: View {
             r.zone = .init(kind: .box, centre: SIMD3<Double>((b.lo + b.hi) / 2),
                            axes: [SIMD3(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0, 0, 1)], half: SIMD3<Double>((b.hi - b.lo) / 2) + 1)
             r.weave = true
+            // his 11-20 (img6: finish Skin, density 5): the group's own finish, as his part gets it
+            if LatticeOrganicLook.finishWired { r.finish = LatticeLayoutPreview.organicFinish(look, LatticeSettings(), coverMM: i.coverMM) }
             s.regions = [r]
-            let lim = try await session.sweepLimits(s, regions: [1], lineMM: s.beadMM).map(LatticeOrganicLook.Limits.init)
+            var lim = try await session.sweepLimits(s, regions: [1], lineMM: s.beadMM).map(LatticeOrganicLook.Limits.init)
+            if i.partStruts.count == 3, var l = lim {   // ★ his pick 11-20: the group's struts, as his part gets them
+                l.strutLowerMM = i.partStruts[0]; l.strutUpperMM = i.partStruts[1]; l.strutAutoMM = i.partStruts[2]
+                lim = l
+            }
             let looked = lim.map { $0.looked(percent: look.lookPercentValue) }
-            var ask = look.ask(limits: looked, layerMM: i.layerMM)
+            var ask = look.ask(limits: looked, layerMM: i.layerMM, aesthetic: i.aesthetic)
             ask.quality = .exact
             let groups = [LatticeLayoutSession.OrganicGroup(regions: [1], ask: ask)]
             let made = try await session.synthetic(s, groups: groups, walls: [(region: 1, foci: 1)], fromEmpty: true)
@@ -237,15 +250,25 @@ struct LatticeSampleView: View {
             mesh = m
             camera.reframe(m.bounds)
             let size = cube ? "40 mm cube" : "Sample part · 45 × 40 × 35 mm"
-            let cells = looked.map { String(format: " · cells %@ to %@ mm", StrengthCheckDocs.number($0.cellLowerMM),
-                                            StrengthCheckDocs.number($0.cellUpperMM)) } ?? ""
+            // his 11-20 (img6): the cells the sample was asked for, his Manual numbers when he set them, never Auto's
+            let lo = ask.spacingMM > 0 ? ask.spacingMM : ask.spacingMinMM, hi = ask.spacingMM > 0 ? ask.spacingMM : ask.spacingMaxMM
+            let cells = lo > 0 && hi > 0
+                ? (lo == hi ? String(format: " · cells %@ mm", StrengthCheckDocs.number(lo))
+                            : String(format: " · cells %@ to %@ mm", StrengthCheckDocs.number(lo), StrengthCheckDocs.number(hi)))
+                : ""
             caption = "\(size) · Organic \(look.modeValue.title) · one stress focus\(cells) · built by the engine"
         } catch is CancellationError {
         } catch {
+            guard !Task.isCancelled else { return }   // the page moved on: nothing to say
             mesh = nil; organicBars = nil; failed = true
-            caption = "The engine can't build the Organic sample: \((error as? TopOptError)?.message ?? "\(error)")"
+            // his 11-20: a centred pop-up in plain English; the engine's own words to the log only
+            caption = Self.organicFailedCaption
+            AppPopups.shared.show(Self.organicFailedTitle, Self.organicFailedText, log: (error as? TopOptError)?.message ?? "\(error)")
         }
     }
+    static let organicFailedCaption = "The sample couldn’t be built with these settings"
+    static let organicFailedTitle = "The sample couldn’t be built"
+    static let organicFailedText = "These settings didn’t make a sample. Try changing one of them; if it keeps happening, tell us."
 
     /// "Sample block · 45 × 40 × 35 mm · Octet truss · density 20 → 35 % · built by the engine, as in your part" (R3.3's
     /// words; ★ his iPad notes 11-10: the grade it was built with, and "held to the type's band" when his ends were moved).

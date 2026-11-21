@@ -74,8 +74,7 @@ final class NewEngineStackPlacementHostedTests: XCTestCase {
             for (f, what) in [(hint, "the hint"), (set, "Settings"), (lat, "Lattice")] {
                 XCTAssertFalse(stack.intersects(f), "★ \(name): the stack \(stack) is clear of \(what) \(f)")
             }
-            let export = try h.probe("new-engine-export", "★ \(name): Export, a 44 x 44 target")
-            XCTAssertTrue(stack.insetBy(dx: -0.5, dy: -0.5).contains(export), "\(name): Export is in the stack")
+            XCTAssertNil(h.frames.all["new-engine-export"], "★ \(name): his 11-20: the temporary Export bar is gone (Lattice exports)")
             if name == "13L" {   // RED CONTROL: the old place
                 // the control is a static, not a state: a 1 pt nudge of the window makes the page place the stack again (it
                 // used to ride on the nozzle check's redraw after every layout, which runs only when asked since 11-16)

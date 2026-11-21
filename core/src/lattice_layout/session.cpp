@@ -7,8 +7,35 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <exception>
+#include <typeinfo>
+#if defined(__has_include)
+#if __has_include(<cxxabi.h>)
+#include <cxxabi.h>
+#define TOPOPT_SB1_CXXABI 1
+#endif
+#endif
 
 namespace topopt::lattice_layout {
+
+// SB1 (leg Q): the refusal for an exception that is not a std::exception, its type named for the log.
+OrganicRefusal core_stopped(const std::string& what) {
+  OrganicRefusal r;
+  r.code = "core_stopped";
+  r.text = what + ": the engine stopped on an internal error. Try again; if it happens again, the log says what it was.";
+  std::string type = "an exception of a type that cannot be named";
+#ifdef TOPOPT_SB1_CXXABI
+  if (const std::type_info* t = abi::__cxa_current_exception_type()) {
+    int st = 0;
+    char* d = abi::__cxa_demangle(t->name(), nullptr, nullptr, &st);
+    type = std::string("a ") + (d ? d : t->name());
+    std::free(d);
+  }
+#endif
+  r.detail = type + " was thrown and is not a std::exception";
+  return r;
+}
 namespace {
 double ms_since(std::chrono::steady_clock::time_point t0) {
   return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
@@ -76,7 +103,19 @@ Session::Session(StepModel model) : model_(std::move(model)) {
 }
 
 Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bool>* stop) {
+  try {   // SB1: nothing but a std::exception or a refusal leaves this call
   return lay_with(settings, nullptr, threads, stop);
+  } catch (const LayCancelled&) {
+    Outcome none;
+    none.cancelled = true;
+    return none;
+  } catch (const std::exception&) {
+    throw;
+  } catch (...) {
+    Outcome none;
+    none.refused.push_back(core_stopped("The lattice could not be laid out"));
+    return none;
+  }
 }
 
 Outcome Session::lay_weave(const Settings& settings, const std::vector<Strand>& strands, int threads,
