@@ -734,9 +734,13 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
       for (const LayerReport::MidAir& m : rep.layers.mid_air) on_dome(m.x, m.y, m.z);
       for (std::vector<LayerReport::OneEnded>* v : {&rep.layers.one_ended, &rep.layers.long_bridges})
         for (const LayerReport::OneEnded& o : *v) on_dome(o.x, o.y, o.z);
-      if (flattened > before && pass < most) {
+      // Leg T (OS1 R2 completed, the lead's ruling 2026-11-21): a round that flattens domes is not one of the check's
+      // passes: the passes left to leave out and post are as many as with no domes (it converges where it converged
+      // without them, release 12); at most `most` such rounds.
+      if (flattened > before && rep.dome_rounds < most) {
         rep.domes_flattened += flattened - before;
         ++rep.dome_rounds;
+        --pass;
         continue;
       }
     }
