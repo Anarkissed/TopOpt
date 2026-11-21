@@ -96,18 +96,12 @@ Bars flushed_as_the_file(Session& session, OrganicPreview& out, const std::atomi
   const PrintChecked pc = print_check_bars(session, out.outcome.layout, shown, fo, stop);
   if (pc.ok) {
     if (any) out.relief_flushed = clear_flushed_relief(shown, pc.made.relief_flushed_at);
-    // The file's held-flat ends are read on the bars it made (the sag pass may have lifted a joint, O17: those bars keep
-    // their places in the list, legs come after): each is given back at the same bar end of the bars the runs are made
-    // of, so it is a point of a run.
-    for (const Vec3& f : pc.made.flat_domes_at) {
-      Vec3 at = f;
-      for (std::size_t i = 0; i < pc.bars.bars.size() && i < shown.bars.size(); ++i) {
-        const Bar& b = pc.bars.bars[i];
-        if (b.a.x == f.x && b.a.y == f.y && b.a.z == f.z) { at = shown.bars[i].a; break; }
-        if (b.b.x == f.x && b.b.y == f.y && b.b.z == f.z) { at = shown.bars[i].b; break; }
-      }
-      out.flat_ends.push_back(at);
-    }
+    // Leg V (the drawing follows the print file): when the check's sag pass lifted joints or laid legs (O17, O18), the
+    // runs are drawn from the bars the file is made of (lifted, legs after, the relief already made flush as the file
+    // makes it), so a bar the lift made shallow is drawn as the file's bridge. The file's held-flat ends are then points
+    // of those runs as they stand.
+    if (pc.made.sagged) shown = *pc.made.sagged;
+    out.flat_ends = pc.made.flat_domes_at;
   }
   return shown;
 }
