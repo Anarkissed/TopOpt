@@ -130,6 +130,8 @@ public final class LatticeSimModel: ObservableObject {
         /// so a load painted as a region reaches the stage's solve too.
         public let faceRegions: [TopOptKit.FaceRegionSpec]
         public let anchorRegionIDs: [Int]
+        /// ★ 11-21: the load scenario this solve is (its name, said if it cannot be solved); nil: the part has one.
+        public var scenarioName: String? = nil
 
         public init(modelPath: String, material: String, materialsPath: String,
                     rulesPath: String, resolution: Int, anchorFaceIDs: [Int],
@@ -177,6 +179,9 @@ public final class LatticeSimModel: ObservableObject {
     }
 
     @Published public private(set) var phase: Phase = .idle
+    /// ★ 11-21 (his 2040 stand: one scenario could not be solved and sank them all): the scenarios the last check could not
+    /// solve, by name. The field is the worst of the others.
+    public private(set) var unsolved: [String] = []
     /// The completed sim's field (nil unless `phase == .complete`).
     @Published public private(set) var field: LatticeDemandField?
     /// The fingerprint the field was computed under.
@@ -255,15 +260,21 @@ public final class LatticeSimModel: ObservableObject {
         let runner = self.runner
         let fp = Self.fingerprint(of: ctxs)
         Task.detached(priority: .userInitiated) { [weak self] in
-            let outcome: Result<[TopOptKit.SimAnalysisResult], Error> =
-                Result { try ctxs.map { c in try FlexibleCoreGate.whileInCore { try runner(c) } } }
+            // ★ 11-21: each scenario on its own — one that cannot be solved no longer sinks the others
+            let each: [Result<TopOptKit.SimAnalysisResult, Error>] = ctxs.map { c in
+                Result { try FlexibleCoreGate.whileInCore { try runner(c) } }
+            }
+            let (solved, unsolved) = Self.split(each, names: ctxs.map { $0.scenarioName ?? "a load scenario" })
+            let outcome: Result<[TopOptKit.SimAnalysisResult], Error> = solved.isEmpty
+                ? .failure(each.compactMap { if case .failure(let e) = $0 { return e } else { return nil } }.first
+                           ?? TopOptError(message: "The sim could not converge at this resolution — no field was produced."))
+                : .success(solved)
             await MainActor.run { [weak self] in
                 guard let self, self.generation == gen else { return }  // cancelled/superseded
+                self.unsolved = solved.isEmpty ? [] : unsolved
                 switch outcome {
                 case .failure(let e):
                     self.phase = .failed(String(describing: e))
-                case .success(let rs) where rs.contains(where: \.nonConvergent):
-                    self.phase = .failed("The sim could not converge at this resolution — no field was produced.")
                 case .success(let rs):
                     let r = Self.worstOf(rs)
                     let summary = Summary(maxDisplacementMM: r.maxDisplacementMM,
@@ -280,6 +291,16 @@ public final class LatticeSimModel: ObservableObject {
                 }
             }
         }
+    }
+
+    /// The solves that gave a field (converged), and the names of those that did not.
+    nonisolated static func split(_ each: [Result<TopOptKit.SimAnalysisResult, Error>], names: [String])
+        -> (solved: [TopOptKit.SimAnalysisResult], unsolved: [String]) {
+        var solved: [TopOptKit.SimAnalysisResult] = [], unsolved: [String] = []
+        for (i, r) in each.enumerated() {
+            if case .success(let s) = r, !s.nonConvergent { solved.append(s) } else { unsolved.append(names[i]) }
+        }
+        return (solved, unsolved)
     }
 
     /// The worst of several solves on one grid: at each voxel the highest von Mises and that solve's own six stresses; the

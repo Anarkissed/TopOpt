@@ -134,4 +134,26 @@ final class IPadNotes1120Tests: XCTestCase {
         l.densityMode = .sim
         XCTAssertEqual(LatticeLayoutPreview.note(l), LatticeLayoutPreview.byStressLine, "RED CONTROL: the regular lattice keeps its line")
     }
+
+    /// ★ his 11-21: several scenarios are combined — the worst at each place of those solved; one that fails is named and no
+    /// longer sinks the others (RED CONTROL: all failing still fails). And the bottom stack never draws a problem or a note.
+    func testTheScenariosCombineAndOneFailureDoesNotSinkThem() throws {
+        func solve(_ vm: [Float]) -> TopOptKit.SimAnalysisResult {
+            .init(accepted: true, nonConvergent: false, maxStressMPa: Double(vm.max() ?? 0), marginWorstCase: 2, marginRequired: 1.5,
+                  maxDisplacementMM: 0.1, vonMisesField: vm, gridNX: 2, gridNY: 1, gridNZ: 1, gridOrigin: .zero, spacingMM: 1)
+        }
+        struct Boom: Error {}
+        let (ok, bad) = LatticeSimModel.split([.success(solve([1, 5])), .failure(Boom()), .success(solve([3, 2]))],
+                                               names: ["Scenario 1", "Scenario 2", "Scenario 3"])
+        XCTAssertEqual(bad, ["Scenario 2"], "★ the one that failed is named")
+        XCTAssertEqual(LatticeSimModel.worstOf(ok).vonMisesField, [3, 5], "★ the others combine: the worst at each place")
+        XCTAssertEqual(LatticeSimModel.split([.failure(Boom())], names: ["Scenario 1"]).solved.count, 0, "RED CONTROL: none solved")
+        XCTAssertTrue(StressCheckCopy.someText(["Scenario 2"]).hasPrefix("Scenario 2 couldn’t be worked out"))
+        let src = try String(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("../../Sources/TopOptFlows/LatticeLayoutPreview.swift").standardizedFileURL, encoding: .utf8)
+        let lines = try XCTUnwrap(src.range(of: "struct LatticeLayoutPreviewLines: View {"))
+        let body = String(src[lines.upperBound...].prefix(1400))
+        XCTAssertFalse(body.contains("preview.problem"), "★ his 11-21: never the bottom note — no problem drawn there")
+        XCTAssertFalse(body.contains("preview.notes"), "★ nor the notes")
+    }
 }
