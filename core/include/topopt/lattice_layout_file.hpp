@@ -37,6 +37,9 @@ inline MeshSpec file_mesh_defaults() {
   MeshSpec m;
   m.weave_foot_mm = -1.0;
   m.weave_round_top = true;
+  m.weave_bridge_domes = true;   // OS1 B
+  m.tube_facet_mm = 0.03;        // OS1 A (his ruling R1)
+  m.weave_fold_split = true;     // OS1 D
   return m;
 }
 
@@ -78,6 +81,8 @@ struct FileReport {
   std::size_t relief_flushed = 0;
   int relief_rounds = 0;
   std::vector<std::array<Vec3, 2>> relief_flushed_at;   // OJ6: the bars made flush (their ends as given)
+  std::size_t domes_flattened = 0;   // OS1 B (ruling R2): PrintableReport's
+  int dome_rounds = 0;
   std::vector<MeshSpec::Post> posts; // the posts added (the preview can draw them)
   std::size_t stands_added = 0;      // of `posts`, those under a weave's long shallow runs (O8)
   std::size_t weave_specks_ignored = 0, weave_held_ignored = 0;   // O10: PrintableReport's

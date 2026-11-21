@@ -88,6 +88,10 @@ A weak strut is made wider, up to the upper strut width you set (the limit) and 
 
 The print file sweeps each round vine along a smooth curve through its points (rule OV1), so the bends are curves, not corners. The check still judges the straight struts between those points: the curve never lies more than 0.2 mm from them, and the struts' widths are the same, so the margins are the struts' margins. Flat bridges, the struts that end in solid, and the net skin stay straight.
 
+## Organic: the vine's shape in the file
+
+The print file's round vines have more flat sides on thick vines (as many as keep each flat side within 0.03 mm of a true circle), so they print round, not faceted. A flat bridge (a strut lying flatter than 30 degrees) now has rounded ends wherever a round vine has one: rounded in plan only, so its underside stays one flat level plane right to the tip, and two bridges meeting at a corner turn smoothly seen from above. A bend so sharp that the tube would fold through itself is ended there with a rounded end instead. None of this changes the struts the check judges.
+
 ## Organic: the solid's weak areas
 
 When the solid part does not certify, the check says where. Every small cube of the solid that the verdict judges gets its own margin, worked out exactly as the verdict works out the solid's (the infill reduction as set, the walls counted or not as set). The cubes under the safety margin that touch each other make one weak area. Up to {{solid_spots_max}} of them are listed, the worst first, and marked on the part.

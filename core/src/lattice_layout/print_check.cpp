@@ -713,6 +713,33 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
       rep.layers.one_ended.erase(std::remove_if(rep.layers.one_ended.begin(), rep.layers.one_ended.end(), at_speck),
                                  rep.layers.one_ended.end());
     }
+    // OS1 B (his ruling R2): a finding on a shallow run's rounded end (within its half width + 0.35 mm of its place in
+    // plan, from a layer under its underside to its top) is not answered by leaving bars out: that end is made flat
+    // again (MeshSpec::flat_domes_at) and the pass made again; counted.
+    if (rep.tubes && !rep.shells.dome_ends.empty()) {
+      std::size_t flattened = 0;
+      auto on_dome = [&](double x, double y, double z) {
+        for (const auto& d : rep.shells.dome_ends) {
+          const double r = d[3];
+          if (std::hypot(x - d[0], y - d[1]) > r + 0.35 || z < d[2] - r - 2.0 * half_layer || z > d[2] + r + 2.0 * half_layer) continue;
+          const Vec3 at{d[0], d[1], d[2]};
+          bool listed = false;
+          for (const Vec3& f : ms.flat_domes_at) listed = listed || (f.x == at.x && f.y == at.y && f.z == at.z);
+          if (!listed) { ms.flat_domes_at.push_back(at); ++flattened; }
+          return true;
+        }
+        return false;
+      };
+      const std::size_t before = flattened;
+      for (const LayerReport::MidAir& m : rep.layers.mid_air) on_dome(m.x, m.y, m.z);
+      for (std::vector<LayerReport::OneEnded>* v : {&rep.layers.one_ended, &rep.layers.long_bridges})
+        for (const LayerReport::OneEnded& o : *v) on_dome(o.x, o.y, o.z);
+      if (flattened > before && pass < most) {
+        rep.domes_flattened += flattened - before;
+        ++rep.dome_rounds;
+        continue;
+      }
+    }
     // O8: a post at the middle of each long stretch that has material straight below it, from that material up into
     // the bar. With nothing below, the run stands as it is.
     std::vector<MeshSpec::Post> stand_posts;

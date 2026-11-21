@@ -532,7 +532,8 @@ FileOptions options_from(const json::Value& in, const std::string& w) {
                        {"pitch_mm", "bar_sides", "block_mm", "grow_mm", "clean_mm", "part_mm",
                         "fill_under_mm3", "bridge_rise", "post_mm", "layer_mm", "pixel_mm", "most_passes",
                         "leave_out", "keep_if_not_clean", "weave_stand_every_mm", "weave_foot_mm", "weave_round_top",
-                        "weave_sag_lift_mm", "weave_sag_legs", "weave_mesh", "tube_sides"},
+                        "weave_sag_lift_mm", "weave_sag_legs", "weave_mesh", "tube_sides", "tube_facet_mm",
+                        "weave_bridge_domes", "weave_fold_split"},
                        w);
   FileOptions o;
   o.pitch_mm = num(in, "pitch_mm", o.pitch_mm, w);
@@ -560,6 +561,12 @@ FileOptions options_from(const json::Value& in, const std::string& w) {
   }
   o.mesh.tube_sides = whole(in, "tube_sides", o.mesh.tube_sides, w);   // OF2
   if (o.mesh.tube_sides < 3) json::fail(w + ".tube_sides", "must be 3 or more");
+  // OS1: the vine shape (the file's defaults on; false / 0 the file as before).
+  o.mesh.tube_facet_mm = num(in, "tube_facet_mm", o.mesh.tube_facet_mm, w);   // A (ruling R1)
+  if (!(o.mesh.tube_facet_mm == 0.0 || (o.mesh.tube_facet_mm >= 0.005 && o.mesh.tube_facet_mm <= 0.5)))
+    json::fail(w + ".tube_facet_mm", "must be 0 (every tube tube_sides sides) or 0.005 to 0.5 mm");
+  o.mesh.weave_bridge_domes = flag(in, "weave_bridge_domes", o.mesh.weave_bridge_domes, w);   // B
+  o.mesh.weave_fold_split = flag(in, "weave_fold_split", o.mesh.weave_fold_split, w);         // D
   o.layers.layer_mm = num(in, "layer_mm", o.layers.layer_mm, w);
   o.layers.pixel_mm = num(in, "pixel_mm", o.layers.pixel_mm, w);
   o.most_passes = whole(in, "most_passes", o.most_passes, w);
@@ -721,6 +728,8 @@ TriangleMesh make_file_mesh(const Session& session, const Layout& layout, const 
   report.relief_flushed = made.relief_flushed;
   report.relief_flushed_at = made.relief_flushed_at;   // OJ6
   report.relief_rounds = made.relief_rounds;
+  report.domes_flattened = made.domes_flattened;   // OS1 B
+  report.dome_rounds = made.dome_rounds;
   report.weave_specks_ignored = made.weave_specks_ignored;
   report.weave_held_ignored = made.weave_held_ignored;
   report.part_overhangs = made.part_overhangs;
@@ -1685,6 +1694,16 @@ std::string file_result_json(const FileResult& r) {
       o += b;
     }
     o += "]},\n";
+    // OS1: the vine shape (all 0 with its settings off).
+    std::snprintf(b, sizeof b,
+                  "  \"shape\": {\"bridge_domes\": %llu, \"domes_flattened\": %llu, \"dome_rounds\": %d, "
+                  "\"fold_splits\": %llu, \"tube_sides\": [%d, %d], \"tubes\": %llu, \"bridges\": %llu, "
+                  "\"sharp_splits\": %llu, \"bridge_underside_mm2\": {\"level\": %.6g, \"own_bottom\": %.6g, "
+                  "\"curved_or_sloped\": %.6g}},\n",
+                  count(ws.bridge_domes), count(r.made.domes_flattened), r.made.dome_rounds, count(ws.fold_splits),
+                  ws.tube_sides_least, ws.tube_sides_most, count(ws.tubes), count(ws.bridges), count(ws.sharp_splits),
+                  ws.bridge_under_level_mm2, ws.bridge_under_own_mm2, ws.bridge_under_other_mm2);
+    o += b;
   }
   std::snprintf(b, sizeof b, "  \"part\": {\"faces\": %d, \"triangles\": %llu, \"open_edges\": %llu},\n",
                 r.faces, count(r.part_triangles), count(r.open_edges));
