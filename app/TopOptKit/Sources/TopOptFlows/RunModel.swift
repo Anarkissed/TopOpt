@@ -1099,6 +1099,8 @@ public final class RunModel: ObservableObject {
     /// the design box, the confirmed on-device stall trigger). Cleared when the run
     /// resolves.
     private var runningRequest: RunRequest?
+    /// ★ his 11-21 ("Change the words"): the running request's mode, so the run card names what runs (`RunCardWords`).
+    public var runningJobMode: String? { runningRequest?.jobMode }
     /// Whether the in-flight run is REMOTE (set per run in `start`). A remote run does
     /// NOT arm the local setup-stall watchdog: its liveness — queue-awareness and the
     /// heartbeat/probe loop — is owned by `RemoteRun` (handoff 129).

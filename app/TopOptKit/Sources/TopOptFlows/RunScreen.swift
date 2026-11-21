@@ -100,7 +100,7 @@ public struct RunScreen: View {
 
     private var runningCardBody: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Optimizing" + (version.map { " \($0)" } ?? ""))
+            Text(RunCardWords.title(model.runningJobMode) + (version.map { " \($0)" } ?? ""))   // ★ his 11-21
                 .font(.system(size: 11, weight: .bold)).tracking(0.8).textCase(.uppercase)
                 .foregroundStyle(DS.Color.accent.color)
                 .opacity(pulse ? 1 : 0.65)

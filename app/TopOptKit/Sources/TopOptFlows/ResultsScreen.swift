@@ -1318,7 +1318,8 @@ public struct ResultsScreen: View {
                                     pieces: model.selected.flatMap { model.piecesFlag($0) },
                                     finish: selectedFinish,   // ★ B4: E1's finishing
                                     weakest: model.hotSpot.map { SIMD3<Double>($0.position) },
-                                    struts: blocks?.latticeFile)   // ★ his ruling 11-17: a new-engine Lattice run's struts
+                                    struts: blocks?.latticeFile,   // ★ his ruling 11-17: a new-engine Lattice run's struts
+                                    printFile: blocks?.printFile)   // ★ his 11-21: its file, strengthening and layers
     }
 
     /// Bottom left: the streaming pill, a latticed version's mesh state, then the Versions panel.

@@ -756,6 +756,13 @@ public enum LatticeFileButton {
     /// The run's mode on the new engine (the request the run carries says which engine made it).
     public static let jobMode = "lattice_file"
 
+    /// ★ HIS 11-21 ("have it spit out an actual result in the app - because NOTHING happens in app"): a Lattice run that lands
+    /// opens its result on Results. Before, only an Organic part that did not certify opened there (his certify wizard), so a
+    /// passing print file landed unseen behind the Lattice stage (which has no landed-run notice).
+    public static func opensResults(succeeded: Bool, byLattice: Bool, outcome: OptimizeOutcome?) -> Bool {
+        succeeded && byLattice && (outcome?.variants.contains { $0.accepted } ?? false)
+    }
+
     /// Whether this part's Lattice goes to the new engine: a regular lattice, or (★ Organic cut 2, his 11-18 "Export as its own
     /// install") an Organic one, on a STEP part, the switch on.
     public static func takes(_ l: LatticeSettings, modelPath: String?, wired: Bool = wired) -> Bool {
@@ -786,7 +793,7 @@ public enum LatticeFileButton {
         let s = m.report.strength
         let fields = m.fields.flatMap(RemoteFieldsContainer.parse)
         let block = fields?.variants.first
-        let fraction = m.report.partMM3 > 0 ? m.report.plasticMM3 / m.report.partMM3 : 0
+        let fraction = plasticShare(m.report, organic: organic, densityGCm3: densityGCm3)
         let passes = s?.accepted ?? true
         let accepted = organic || passes
         let reportJSON = organic ? withSpots(m.reportJSON, fields: fields) : m.reportJSON
@@ -830,6 +837,15 @@ public enum LatticeFileButton {
                                gridNx: fields?.gridNx ?? 0, gridNy: fields?.gridNy ?? 0, gridNz: fields?.gridNz ?? 0,
                                gridOrigin: fields?.gridOrigin ?? .zero, spacing: fields?.spacing ?? 0,
                                computedRemotely: true, timing: m.timing, reportJSON: reportJSON)
+    }
+
+    /// The plastic as a share of the solid part. ★ his stand 11-21: an Organic file's bodies overlap (struts through struts and
+    /// the skin), so its mesh volume counts the overlaps twice (122,777 of a 109,783 mm³ part read "112 %"); there the strength
+    /// check's mass is the plastic's own.
+    static func plasticShare(_ r: LatticeFileReport, organic: Bool, densityGCm3: Double) -> Double {
+        guard r.partMM3 > 0 else { return 0 }
+        if organic, let g = r.strength?.massGrams, g > 0, densityGCm3 > 0 { return g / (r.partMM3 / 1000 * densityGCm3) }
+        return r.plasticMM3 / r.partMM3
     }
 
     /// ★ Organic cut 2: the report with the listed weak spots' voxels (`OrganicSpotGrid`, from fields.bin's spot-id block,

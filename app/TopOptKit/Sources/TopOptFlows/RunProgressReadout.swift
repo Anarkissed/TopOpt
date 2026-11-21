@@ -20,6 +20,26 @@
 import SwiftUI
 import TopOptDesign
 
+/// ★ HIS 11-21 ("Change the words"): the run card never says "Optimizing" for a Lattice run. The print file's run
+/// (`LatticeFileButton`) names its steps: Organic on Structural strengthens the struts first, then makes the file.
+public enum RunCardWords {
+    public static let optimizing = "Optimizing"
+    public static let latticing = "Latticing"
+    public static let strengthening = "Strengthening the struts"
+    public static let making = "Making the print file"
+
+    /// A Lattice run's mode (the old engine's lattice_part / lattice_variant, the new engine's lattice_file).
+    public static func isLattice(_ mode: String?) -> Bool { mode?.hasPrefix("lattice") ?? false }
+    public static func title(_ mode: String?) -> String { isLattice(mode) ? latticing : optimizing }
+
+    /// The print file's step ("Strengthening the struts · 1 of 2"); nil for any other run (its results and iterations).
+    public static func step(_ mode: String?, _ p: RunProgress) -> String? {
+        guard mode == LatticeFileButton.jobMode else { return nil }
+        guard p.rungCount > 1 else { return making }
+        return (p.rung == 0 ? strengthening : making) + " \u{00B7} \(p.rung + 1) of \(p.rungCount)"
+    }
+}
+
 public struct RunProgressReadout: View {
     @ObservedObject var model: RunModel
     /// Voxel resolution + material for the "SIMP · NN³ · MATERIAL" footer.
@@ -77,12 +97,14 @@ public struct RunProgressReadout: View {
     /// ★ T5 (U4: "result", never "variant"): which of the results is being made.
     private var variantLine: String {
         let p = snapshot
-        return p.rungCount > 1 ? "Result \(p.rung + 1) of \(p.rungCount)" : "Optimizing"
+        if let s = RunCardWords.step(model.runningJobMode, p) { return s }   // ★ his 11-21: the print file's own steps
+        return p.rungCount > 1 ? "Result \(p.rung + 1) of \(p.rungCount)" : RunCardWords.title(model.runningJobMode)
     }
 
     /// ★ T5: the run card's Step row — the result and its iteration (the mockup's "Scenario 2 of 3 · iteration 34").
     private var stepLine: String {
         let p = snapshot
+        if let s = RunCardWords.step(model.runningJobMode, p) { return s }   // ★ his 11-21: the print file's own steps
         return p.rungCount > 1 ? "Result \(p.rung + 1) of \(p.rungCount) \u{00B7} iteration \(p.iteration)" : "Iteration \(p.iteration)"
     }
 
@@ -112,7 +134,8 @@ public struct RunProgressReadout: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 ProgressView().controlSize(.small).tint(DS.Color.accent.color)
-                Text("Optimizing").font(.system(size: 20, weight: .bold)).foregroundStyle(DS.Color.textPrimary.color)
+                Text(RunCardWords.title(model.runningJobMode)).font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(DS.Color.textPrimary.color)
             }
             let eta = etaDisplay(now)
             statRow(label: "Step", value: stepLine)

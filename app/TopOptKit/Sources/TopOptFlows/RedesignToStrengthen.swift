@@ -192,6 +192,8 @@ public struct RunReportBlocks: Equatable, Sendable {
     /// ★ Install 3: a Lattice run on the new engine — its report is `lattice_file.json`, whose `strength` block is the check
     /// (the struts' verdict among it). nil on every other run.
     public var latticeFile: LatticeFileStrength? = nil
+    /// ★ his 11-21 ("show all the information associated to the final result"): that run's print file, strengthening and checks.
+    public var printFile: LatticeFileFacts? = nil
 
     public static func decode(reportJSON: Data) -> RunReportBlocks? {
         guard let r = (try? JSONSerialization.jsonObject(with: reportJSON)) as? [String: Any] else { return nil }
@@ -217,7 +219,7 @@ public struct RunReportBlocks: Equatable, Sendable {
         if strengthen?.safetyMargin == nil { strengthen?.safetyMargin = margin }
         return RunReportBlocks(strengthen: strengthen,
                                rows: rows("variants", accepted: true) + rows("rejected_variants", accepted: false),
-                               safetyMargin: margin, latticeFile: latticeFile)
+                               safetyMargin: margin, latticeFile: latticeFile, printFile: LatticeFileFacts.decode(r))
     }
 }
 

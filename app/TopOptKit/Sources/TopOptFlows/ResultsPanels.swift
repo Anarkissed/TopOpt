@@ -139,7 +139,8 @@ public enum ResultsChecks {
     public static func checks(tab: ResultVariantVM?, margin: Double?, required: Double, safetyMargin: Double?,
                               scenarios: [ScenarioResult], thinJoints: Int, bridged: Bool,
                               pieces: StrengthenText.PiecesFlag? = nil, finish: FinishReport? = nil,
-                              weakest: SIMD3<Double>? = nil, struts: LatticeFileStrength? = nil) -> [ResultsCheck] {
+                              weakest: SIMD3<Double>? = nil, struts: LatticeFileStrength? = nil,
+                              printFile: LatticeFileFacts? = nil) -> [ResultsCheck] {
         guard let tab else { return [] }
         var out: [ResultsCheck] = []
         if let m = margin, m > 0 {
@@ -159,6 +160,8 @@ public enum ResultsChecks {
                                     title: s.strutsPass ? "Struts strong enough" : s.strutNoRule ? "Struts not checked" : "Struts not strong enough",
                                     detail: line, tab: .strength))
         }
+        // ★ his 11-21 ("show all the information associated to the final result"): the strengthening, the file, its layers
+        if let f = printFile { out += f.checks }
         if scenarios.count >= 2 {
             let unheld = scenarios.filter(\.unheld)
             if let u = unheld.first {
@@ -305,6 +308,8 @@ extension ResultsModel {
                 for n in LatticeReport.finishLines(receipt: selectedLattice?.receiptJSON) { add("Lattice", n) }
             }
         }
+        // ★ his 11-21: a Lattice run's print file, strengthening and checks, every number in words
+        if let f = reportBlocks?.printFile { r += f.rows(t) }
         return r
     }
 }
