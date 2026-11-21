@@ -1,0 +1,33 @@
+M2 stand, Gyroid (jobs from make_stand_jobs.py gyroid <dir> --fixed 4: one fixed 4 mm cell, since a sheet refuses the committed jobs' swept ladder (R5); binary: the pipeline's frozen archive build of ccf0e03b).
+
+analyze struct {"topology": "gyroid", "intent": "structural", "band_rho_min": 0.1501, "band_rho_max": 0.60069, "cells_per_member_floor": 10, "cell_size_mm": 4, "rho_min_used": 0.3194468961, "rho_max_used": 0.3194468961, "latticed_voxels": 44966, "recertified_margin": 352.9491959, "recertified_accepted": true}
+analyze aes    {"topology": "gyroid", "intent": "aesthetic", "band_rho_min": 0.1501, "band_rho_max": 0.60069, "cells_per_member_floor": 10, "cell_size_mm": 4, "rho_min_used": 0.3194468961, "rho_max_used": 0.5192532428, "latticed_voxels": 44966, "recertified_margin": null, "recertified_accepted": null}
+run struct    [lattice] vf=0.68 NO LATTICE EMITTED: the void space inside this lattice does not reach the exterior (one sealed cavity, 595.070 mm^3)
+run struct    LATTICE vf=0.520000 topology=gyroid cell_mm=4 graded=1 rho_min=0.319447 rho_max=0.541127 cells=33 tris=527072 lattice_margin=1765.51 lattice_accepted=1
+run struct    LATTICE vf=0.380000 topology=gyroid cell_mm=4 graded=1 rho_min=0.346418 rho_max=0.51492 cells=4 tris=55780 lattice_margin=1686.08 lattice_accepted=1
+run struct    [lattice] vf=0.26 NO LATTICE EMITTED: no member wide enough (the widest is 20.46335163 mm; 10 cells of 4 mm need 40 mm)
+run aes    [lattice] vf=0.68 NO LATTICE EMITTED: the void space inside this lattice does not reach the exterior (one sealed cavity, 595.070 mm^3)
+run aes    LATTICE vf=0.520000 topology=gyroid cell_mm=4 graded=1 rho_min=0.319447 rho_max=0.6 cells=33 tris=526704 lattice_margin=1765.51 lattice_accepted=1
+run aes    LATTICE vf=0.380000 topology=gyroid cell_mm=4 graded=1 rho_min=0.6 rho_max=0.6 cells=4 tris=16208 lattice_margin=1686.08 lattice_accepted=1
+run aes    [lattice] vf=0.26 NO LATTICE EMITTED: no member wide enough (the widest is 20.46335163 mm; 10 cells of 4 mm need 40 mm)
+
+lattice-variant (rung 0.38 of the Structural run, out_lv_gyroid):
+  reproduction: recorded margin 1686.08 == reproduced 1686.08 (enforced)
+  lattice: graded cell 4 mm, rho 0.3464..0.5149 over 5 voxels
+  solid margin 1686 -> latticed margin 1686 (effective 349.1)
+  verdict: ACCEPTED
+lattice-variant (rung 0.52 of the Structural run, out_lv1_gyroid):
+  reproduction: recorded margin 1765.24 == reproduced 1765.24 (enforced)
+  lattice: graded cell 4 mm, rho 0.3194..0.5411 over 44 voxels
+  solid margin 1765 -> latticed margin 1766 (effective 365.6)
+  verdict: ACCEPTED
+
+Receipts name the type: every run report says "topology": "gyroid"; a sheet carries no directional_note (not directional).
+
+Octet on the same fixed 4 mm cell (out_run_struct_octet_fixed, the pipeline's FIXED_MM run), for the triangle cost:
+run struct LATTICE vf=0.680000 topology=octet cell_mm=4 graded=1 rho_min=0.0647532 rho_max=0.897987 cells=93 tris=95456 lattice_margin=1834.03 lattice_accepted=1
+run struct LATTICE vf=0.520000 topology=octet cell_mm=4 graded=1 rho_min=0.0647532 rho_max=0.893212 cells=78 tris=80316 lattice_margin=1768.59 lattice_accepted=1
+run struct [lattice] vf=0.38 NO LATTICE EMITTED: the void space inside this lattice does not reach the exterior (one sealed cavity, 79.343 mm^3)
+run struct LATTICE vf=0.260000 topology=octet cell_mm=4 graded=1 rho_min=0.274833 rho_max=0.857512 cells=18 tris=18132 lattice_margin=1650.62 lattice_accepted=1
+
+Triangles per cell on rung 0.52 (33 cells each sheet): gyroid 527,072 / 33 = 15,972; Schwarz-D (schwarz_d_stand_certificate.txt) 634,768 / 33 = 19,235; octet 80,316 / 78 = 1,030 (15.5x and 18.7x).

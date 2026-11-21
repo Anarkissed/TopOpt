@@ -114,10 +114,7 @@ final class NumberPadEvidenceCaptureTests: XCTestCase {
             XCTFail("ImageRenderer produced no image for \(name)")
             return
         }
-        var dir = URL(fileURLWithPath: #filePath)
-        for _ in 0..<5 { dir.deleteLastPathComponent() }   // → worktree root
-        dir.appendPathComponent("evidence/2026-07-25-numeric-input", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dir = EvidenceOut.dir("evidence/2026-07-25-numeric-input")   // never the tracked copy unless asked (11-06)
         let url = dir.appendingPathComponent(name)
         guard let dest = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) else {
             XCTFail("could not create destination for \(name)")

@@ -1,0 +1,247 @@
+// FlexibleJob — the app's writer for core's `flexible` job block (F11; task
+// 2026-09-29-flexible-screens S5). The schema is core's (job_block.hpp); the round-trip
+// test reads every document written here back through core's own `parse_job`.
+//
+// Two documents come out of one encoder:
+//   * the RUN job: exactly what the user set (loaded + resting faces, stamps), refused
+//     here with core's words when a loaded face is missing a required value;
+//   * the SCENE job: the same part, grid, placement and face regions, used only to open
+//     a FlexibleScene before any face is loaded. Core's block needs one loaded face to
+//     parse, and the scene reads none of the faces, so a scene job states the first
+//     declared face as loaded with a unit map. It is never saved or run.
+
+import Foundation
+import simd
+import TopOptKit
+
+public enum FlexibleJob {
+
+    /// Face region id for B-rep / pseudo face `face` (one declared region per face, so a
+    /// tapped face and the stack's linked other end are both named by core). The id IS the
+    /// face id, so core's own sentences ("face 12: …") name the face the app shows.
+    public static let regionBase = 0
+    public static func regionID(face: Int) -> Int { regionBase + face }
+    public static func face(regionID: Int) -> Int { regionID - regionBase }
+
+    public struct Inputs {
+        public var modelPath: String
+        public var resolution: Int
+        /// The bead the other stages send as `min_extrudable_width_mm` (PrintParams.strutLineWidthMM).
+        public var beadWidthMM: Double
+        public var faceCount: Int
+        public var settings: FlexibleStageSettings
+        /// The placement: the lattice stage's own include/exclude regions (M10), as
+        /// `LatticeRegionSpec.wireDictionary` values. Empty ⇒ core lattices the whole part — ★ ROUND 7, M1: which the
+        /// Flexible stage never SENDS (FlexibleCoreRun refuses `.noFacePrism`; the stage builds no lattice without one).
+        public var regions: [[String: Any]]
+        /// Rasterised stamps by placement id (FlexibleStamps), for the run job.
+        public var stampGrids: [UUID: FlexStamp]
+        /// The split sectors' `loads.face_regions` entries (FlexibleRegions.wire).
+        public var sectorRegions: [[String: Any]] = []
+        /// ★ ROUND 3 (item 1.2): the main run's `loads.build_dir` (−gravity, "up in service")
+        /// and root `build_direction` (the plate normal, only when declared) — without them
+        /// core assumed +Z, so a part whose gravity is not −Z got the wrong side faces.
+        public var buildDir: SIMD3<Double>?
+        public var plateDir: SIMD3<Double>?
+        /// ★ D2 REVIEW: the PINCHES among the pressed faces (two faces of one squeeze group on one
+        /// stack — FlexibleSqueezeGroups.pinches over core's stack conflicts), each as [a, b]. A
+        /// run job with any is refused HERE (core refuses one stack pressed from both ends), not
+        /// only in the model's wrapper — every caller that builds Inputs must fill it.
+        public var pinches: [[Int]] = []
+        /// ★ R7-E2: the edge and corner presses IN THE JOB (FlexiblePressSupport's gate), each written AFTER the face entries as one
+        /// loaded entry: face_region_ids (its pieces, member order) + press_direction (its stored bits). Empty ⇒ the job is
+        /// byte-identical to before (every face entry is).
+        public var presses: [PressEntry] = []
+
+        public init(modelPath: String, resolution: Int, beadWidthMM: Double, faceCount: Int,
+                    settings: FlexibleStageSettings, regions: [[String: Any]] = [],
+                    stampGrids: [UUID: FlexStamp] = [:]) {
+            self.modelPath = modelPath; self.resolution = resolution; self.beadWidthMM = beadWidthMM
+            self.faceCount = faceCount; self.settings = settings; self.regions = regions
+            self.stampGrids = stampGrids
+        }
+    }
+
+    /// ★ R7-E2: one edge or corner press as the job states it (core's C1 addendum keys).
+    public struct PressEntry: Equatable, Sendable {
+        public let id: UUID
+        /// Its pieces, in member order (core names the press by the first).
+        public let regions: [Int]
+        /// press.direction, its stored bits (core normalises it once, press_unit).
+        public let direction: SIMD3<Double>
+        public let weightN: Double
+        /// The map core is sent (FlexiblePressShape.map — the same the design used): mode, curves, deepest squish.
+        public let map: FlexMap
+        public init(id: UUID, regions: [Int], direction: SIMD3<Double>, weightN: Double, map: FlexMap) {
+            self.id = id; self.regions = regions; self.direction = direction; self.weightN = weightN; self.map = map
+        }
+    }
+
+    /// ★ RED CONTROL only (FlexibleR7E2Tests): the press's pieces written as plain face entries (no face_region_ids, no
+    /// press_direction) — core would design each piece along its own normal.
+    nonisolated(unsafe) static var controlPressAsFaces = false
+
+    public enum EncodeError: Error, Equatable, CustomStringConvertible {
+        case noFilament
+        case noLoadedFace
+        /// ★ C2 VERIFICATION: the project has no imported file (C2 said "press a face first").
+        case noPart
+        case missingStampGrid(UUID)
+        /// ★ ROUND 4 (D2): two or more squeeze groups — core designs one squeeze (core brief).
+        case squeezeGroups
+        /// ★ ROUND 4 (D2): a pinch (two faces of one group on one stack) — core designs one
+        /// profile per stack (core brief).
+        case pinch
+        /// ★ ROUND 7, M1 (ruling 4: "The Flexible job builder must NEVER send a job with no include region"): nothing is set
+        /// to Lattice — core would lattice the WHOLE part. Thrown by the SEND gate (FlexibleCoreRun), never by the pure
+        /// encoder below (its bytes are the goldens').
+        case noFacePrism
+        public var description: String {
+            switch self {
+            case .noFilament: return "Pick a filament first."
+            case .noLoadedFace: return "Mark at least one face as carrying weight."
+            case .noPart: return "The part's file is missing \u{2014} import it again."
+            case .missingStampGrid: return "A stamp has not been laid on its face yet."
+            case .squeezeGroups: return "Squeeze groups are the app's preview for now: core designs one squeeze at a time."
+            case .pinch: return "A pinch is the app's preview for now: core designs one squish profile per stack."
+            case .noFacePrism: return "No face is set to Lattice in Selections. With none, core would lattice the whole part; only a face-prism makes lattice."
+            }
+        }
+    }
+
+    // MARK: documents
+
+    public static func runJobJSON(_ i: Inputs) throws -> String {
+        guard let material = i.settings.materialID else { throw EncodeError.noFilament }
+        // ★ R7-E2: an edges group sent on its own is something loaded
+        guard !i.settings.loadedFaces.isEmpty || !i.presses.isEmpty else { throw EncodeError.noLoadedFace }
+        // ★ ROUND 4 (D2): core designs ONE squeeze (core brief: load cases)
+        // ★ AP1: only groups with something SENT count — ★ R7-E2: the presses in the job (Inputs.presses)
+        guard FlexibleSqueezeGroups.groups(i.settings, sent: Set(i.presses.map(\.id))).count <= 1 else { throw EncodeError.squeezeGroups }
+        guard i.pinches.isEmpty else { throw EncodeError.pinch }
+        var faces: [[String: Any]] = []
+        let finish = i.settings.finishMode
+        for f in i.settings.faces { faces.append(try faceEntry(f, finish: finish, stamps: i.stampGrids)) }
+        // ★ R7-E2: each press AFTER the face entries (every face entry byte-identical)
+        for p in i.presses { faces += pressEntries(p, finish: finish) }
+        var block = header(i, material: material)
+        block["faces"] = faces
+        let checks = try i.settings.checkStamps.map { c -> [String: Any] in
+            guard let g = i.stampGrids[c.stamp.id] else { throw EncodeError.missingStampGrid(c.stamp.id) }
+            var e = stampEntry(g)
+            e["face_region_id"] = c.faceRegionID
+            return e
+        }
+        if !checks.isEmpty { block["check_stamps"] = checks }
+        return try document(i, material: material, block: block)
+    }
+
+    /// The scene-opening document (see the file comment). `material` falls back to any
+    /// catalogue id: the scene never reads it.
+    public static func sceneJobJSON(_ i: Inputs, fallbackMaterial: String) throws -> String {
+        let material = i.settings.materialID ?? fallbackMaterial
+        var block = header(i, material: material)
+        let first = i.settings.loadedFaces.first?.faceRegionID ?? regionID(face: 0)
+        block["faces"] = [[
+            "face_region_id": first, "role": "loaded", "skin_on": true, "weight_n": 1.0,
+            "deepest_squish_mm": 1.0, "mode": "centre_edge", "curve_centre_edge": [[0.0, 1.0], [1.0, 1.0]],
+        ] as [String: Any]]
+        return try document(i, material: material, block: block)
+    }
+
+    // MARK: pieces
+
+    static func header(_ i: Inputs, material: String) -> [String: Any] {
+        var b: [String: Any] = [
+            "material_id": material,
+            "nozzle_temp_c": i.settings.nozzleTempC.map { $0 as Any } ?? "auto",
+            "topology": i.settings.topology,
+            "feel": i.settings.feel,
+            "beads_per_wall": i.settings.beadsPerWall,
+            "min_extrudable_width_mm": i.beadWidthMM,
+        ]
+        if !i.regions.isEmpty { b["regions"] = i.regions }
+        return b
+    }
+
+    /// ★ ROUND 4 (D1): `skin_on` is the MODEL-WIDE finish's (only Covered is a skin core can
+    /// be told about — core brief), and the face's SHAPE decides the rest: Curves sends the
+    /// drawn curves and never a stored stamp; Stamp sends flat curves and its one stamp.
+    static func faceEntry(_ f: FlexibleFaceSettings, finish: FlexibleFinish, stamps: [UUID: FlexStamp]) throws -> [String: Any] {
+        var e: [String: Any] = ["face_region_id": f.faceRegionID, "role": f.role, "skin_on": finish.jobSkinOn]
+        guard f.isLoaded else { return e }
+        if f.rotationDeg != 0 { e["frame_rotation_deg"] = f.rotationDeg }
+        let map = f.map
+        e["weight_n"] = f.weightN
+        e["deepest_squish_mm"] = map.deepestMM
+        e["mode"] = map.mode
+        if map.mode == "centre_edge" {
+            e["curve_centre_edge"] = pairs(map.centreEdge)
+        } else {
+            e["curve_x"] = pairs(map.x)
+            e["curve_y"] = pairs(map.y)
+        }
+        if let s = f.activeStamp {
+            guard let g = stamps[s.id] else { throw EncodeError.missingStampGrid(s.id) }
+            e["design_stamp"] = stampEntry(g)
+        }
+        return e
+    }
+
+    /// ★ R7-E2: an edge or corner press as core's C1 addendum states it — ONE loaded entry: face_region_ids (its pieces, member
+    /// order), press_direction (its stored bits), the group's weight, the map core is sent (FlexiblePressShape.map) and its deepest
+    /// squish. (RED CONTROL `controlPressAsFaces`: each piece a plain face entry, no direction.)
+    static func pressEntries(_ p: PressEntry, finish: FlexibleFinish) -> [[String: Any]] {
+        func body(_ e: inout [String: Any]) {
+            e["role"] = "loaded"
+            e["skin_on"] = finish.jobSkinOn
+            e["weight_n"] = p.weightN
+            e["deepest_squish_mm"] = p.map.deepestMM
+            e["mode"] = p.map.mode
+            if p.map.mode == "centre_edge" {
+                e["curve_centre_edge"] = pairs(p.map.centreEdge)
+            } else {
+                e["curve_x"] = pairs(p.map.x)
+                e["curve_y"] = pairs(p.map.y)
+            }
+        }
+        if controlPressAsFaces {
+            return p.regions.map { r in var e: [String: Any] = ["face_region_id": r]; body(&e); return e }
+        }
+        var e: [String: Any] = p.regions.count >= 2 ? ["face_region_ids": p.regions] : ["face_region_id": p.regions.first ?? -1]
+        e["press_direction"] = [p.direction.x, p.direction.y, p.direction.z]
+        body(&e)
+        return [e]
+    }
+
+    static func pairs(_ c: FlexCurve) -> [[Double]] { zip(c.x, c.y).map { [$0, $1] } }
+
+    static func stampEntry(_ g: FlexStamp) -> [String: Any] {
+        ["name": g.name, "mode": g.rigid ? "rigid" : "soft", "force_n": g.forceN,
+         "origin_mm": [g.originU, g.originV], "cell_mm": g.cellMM, "nu": g.nu, "nv": g.nv,
+         "values_mpa": g.valuesMPa]
+    }
+
+    static func document(_ i: Inputs, material: String, block: [String: Any]) throws -> String {
+        let regions: [[String: Any]] = (0..<max(0, i.faceCount)).map { f in
+            ["id": regionID(face: f), "name": "face \(f)", "add": [f]]
+        } + i.sectorRegions
+        var loads: [String: Any] = ["face_regions": regions]
+        if let b = i.buildDir { loads["build_dir"] = [b.x, b.y, b.z] }
+        var job: [String: Any] = [
+            "model": i.modelPath,
+            "material": material,
+            // core's schema still requires these; the Flexible runner does not read them
+            // (C1 problem #9)
+            "mode": "analyze",
+            "resolution": i.resolution,
+            "output": ["report": "report.json", "mesh_format": "stl", "mesh_prefix": "unused"],
+            "loads": loads,
+            "flexible": block,
+        ]
+        // the plate normal at the ROOT, only when declared (RemoteRunner's rule)
+        if let p = i.plateDir, p != SIMD3<Double>(0, 0, 0) { job["build_direction"] = [p.x, p.y, p.z] }
+        let data = try JSONSerialization.data(withJSONObject: job, options: [.sortedKeys, .prettyPrinted])
+        return String(decoding: data, as: UTF8.self)
+    }
+}

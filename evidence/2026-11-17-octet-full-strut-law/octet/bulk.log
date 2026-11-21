@@ -1,0 +1,36 @@
+LATTICE DE-HOMOGENIZATION PROBE — octet band [0.04959, 0.90027] (read from core)
+
+===== BULK LAW — periodic cell, band sweep (J2/J3/J5) =====
+EXPECTATION STATED BEFORE MEASURING (J2): PR 247 measured the uniaxial
+strut/macro concentration at ~25x (rho 0.31) and ~44x (rho 0.20) on
+voxelized joint peaks at vpc32. If K ~ A/rho that implies A ~ 8:
+  expected K(uni) ~ 160 at rho 0.05, ~ 8-13 at rho 0.60-0.90.
+Shear states are expected WORSE per unit macro vm for a stretch-
+dominated lattice; hydrostatic macro vm is 0, so K_vm(hydro) = inf —
+the vol term must be reported per unit pressure instead.
+  rho 0.050 vpc 16 (wall 1 vox, 0.0s): K_dev=104.5 K_vol=64.4  
+  rho 0.050 vpc 24 (wall 1 vox, 0.1s): K_dev=98.5 K_vol=58.0  
+  rho 0.050 vpc 32 (wall 2 vox, 0.3s): K_dev=102.5 K_vol=58.2  
+  rho 0.050 vpc 40 (wall 2 vox, 0.6s): K_dev=98.0 K_vol=55.9  
+  rho 0.050 vpc 48 (wall 1 vox, 1.4s): K_dev=108.4 K_vol=57.1  
+  rho 0.100 vpc 32 (wall 2 vox, 0.3s): K_dev=45.4 K_vol=25.8  
+  rho 0.100 vpc 48 (wall 4 vox, 1.5s): K_dev=58.5 K_vol=27.0  
+  rho 0.157 vpc 32 (wall 3 vox, 0.5s): K_dev=32.4 K_vol=16.6  
+  rho 0.157 vpc 48 (wall 4 vox, 1.8s): K_dev=37.6 K_vol=16.8  
+  rho 0.200 vpc 32 (wall 4 vox, 0.5s): K_dev=27.4 K_vol=12.6  
+  rho 0.200 vpc 48 (wall 6 vox, 2.2s): K_dev=31.7 K_vol=15.3  
+  rho 0.313 vpc 16 (wall 2 vox, 0.0s): K_dev=11.8 K_vol=7.0  
+  rho 0.313 vpc 24 (wall 5 vox, 0.2s): K_dev=16.2 K_vol=8.1  
+  rho 0.313 vpc 32 (wall 4 vox, 0.7s): K_dev=16.4 K_vol=7.5  
+  rho 0.313 vpc 40 (wall 6 vox, 1.7s): K_dev=17.4 K_vol=8.5  
+  rho 0.313 vpc 48 (wall 8 vox, 2.9s): K_dev=18.5 K_vol=9.5  
+  rho 0.450 vpc 32 (wall 6 vox, 1.0s): K_dev=10.0 K_vol=5.1  
+  rho 0.450 vpc 48 (wall 10 vox, 3.9s): K_dev=12.1 K_vol=7.1  
+  rho 0.600 vpc 32 (wall 8 vox, 1.2s): K_dev=6.6 K_vol=4.3  
+  rho 0.600 vpc 48 (wall 12 vox, 5.2s): K_dev=7.7 K_vol=5.4  
+  rho 0.750 vpc 32 (wall 10 vox, 1.5s): K_dev=3.8 K_vol=2.8  
+  rho 0.750 vpc 48 (wall 15 vox, 6.1s): K_dev=4.6 K_vol=3.6  
+  rho 0.900 vpc 32 (wall 12 vox, 1.7s): K_dev=2.3 K_vol=1.5  
+  rho 0.900 vpc 48 (wall 18 vox, 6.7s): K_dev=2.5 K_vol=1.9  
+
+DONE (rc=0).

@@ -1,0 +1,17 @@
+H56 redesign to strengthen (overnight plan 2026-10-25) — test record. swift test --scratch-path /tmp/r7x20b-build.
+All runs used vendor/include -> a snapshot of 0912c48c's core/include (the prebuilt TopOptCore.xcframework, built
+2026-10-24 21:13 after fd34340e, predates the TO-core merge 63850aa5; bridge.cpp against the merged headers would not
+match its layout: JobLoadCase gained a std::string). The symlink was restored to core/include afterwards.
+
+RED  (red_run.log): RedesignToStrengthenTests + LatticeStaleTypeTests, shared wiring absent, model stubbed:
+     18 tests, 13 failures — 9 of the 12 new tests red. Passed by design: testAGateRemovedCopyGoesRed (red control),
+     testRejectedOnMarginWithAHeldBridgeIsNotItem47 and testNoFaceNumberReachesALine (negative cases).
+     (testEveryOtherRequest… also showed JSONSerialization key order unstable between two dictionaries; the test
+     now compares sorted-key bytes.)
+GREEN (green_run.log): RedesignToStrengthenTests 12/12 + LatticeStaleTypeTests 6/6 + SeveralRolesOnOneFaceTests 9/9 = 27/27.
+GOLDENS: FlexibleAngledGoldenTests 13/13 + LatticeStaleTypeTests 6/6, SWIFT_DETERMINISTIC_HASHING=1 (goldens_seeded.log)
+     and unseeded (goldens_unseeded.log): 19/19 each.
+NEIGHBOURS (neighbours.log): GrowthLadderTests, JobJSONEquivalenceTests, ParametricArmingTests, DesignPrimitivesTests,
+     DefaultArmingTests + LatticeStaleTypeTests: 45/45.
+STAGE JOB HASHES: angled_presses/stage_job_hashes.sh (SWIFT_TEST_ARGS="--scratch-path /tmp/r7x20b-build") ->
+     stage_job_hashes_h56.txt; diff vs sync354_89af86dd/stage_job_hashes_sync354.txt: IDENTICAL (all 16 rows).

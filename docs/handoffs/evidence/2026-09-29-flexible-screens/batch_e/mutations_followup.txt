@@ -1,0 +1,2 @@
+D1-handle-whole-face: Executed 17 tests, with 1 failure (0 unexpected) in 1.253 (1.256) seconds · error: -[TopOptFlowsTests.LatticeSectorOutlineTests testTheRowsDepthPrimitiveSitsOverThePiece] 
+D2-no-outline-clipped-away: Executed 17 tests, with 1 failure (0 unexpected) in 1.258 (1.260) seconds · error: -[TopOptFlowsTests.LatticeSectorOutlineTests testAMemberWithNoOutlineIsStillCountedSkipped] 

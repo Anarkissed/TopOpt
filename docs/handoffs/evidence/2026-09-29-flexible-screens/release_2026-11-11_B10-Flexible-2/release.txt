@@ -1,0 +1,17 @@
+# Release dc5e8c36 — 2026-11-11 B10-Flexible-2 (B10 Flexible part 2, 3e258dd9), app only
+# Core and worker unchanged: fingerprint 54d2ce825a74; "fingerprint": "54d2ce825a74"
+# Merged onto a9c13b05; the merged app tree equals B10-Flexible-2's, so its gate applies unchanged.
+# Commits (first parent of B10-Flexible-2 since the release tip):
+#   cfd83a34 B10 Flexible part 2 (#362): every Flexible target is 44 pt at the six windows; the group colour is one chip (his pick)
+#   9490056a B10 Flexible part 2 (#362): merge the release tip a9c13b05 (be0bc728 Upload new version + evidence)
+#   3e258dd9 B10 Flexible part 2 (#362): merge UI-Notes' B10 twins evidence de21babc (docs only, evidence/2026-11-11-one-app)
+# Gates:
+#   B10 Flexible part 2 (cfd83a34): the 17 touched classes green; all 36 hosted Flexible / Squish classes 148 passed, 1 red (the U21B 3D table's red control, a 2 pt hair-trigger after the 2D │ 3D chips grew: re-pinned, FlexibleU2Tests re-run 13/0). Merged with the release tip a9c13b05 (Upload new version) and UI-Notes' de21babc (docs): UploadNewVersion + its hosted test, FlexibleB10SweepHostedTests, BannedWordsTests, FlexiblePlainNamesTests on the merged tree (see release log).
+#   23:19 evidence a9c13b05 pushed; release be0bc728 DONE
+#   23:32 checks ok: B10-Flexible-2 3e258dd9, 4 commit(s), app-only, onto a9c13b05, fingerprint 54d2ce825a74
+#   23:32 merged dc5e8c36; app tree == B10-Flexible-2's, fingerprint 54d2ce825a74
+#   23:32 waiting for HEAVY.lock (free)
+#   23:32 lock taken (31 GB free)
+#   23:37 iPad device build green; lock released
+#   23:37 pushed dc5e8c36
+#   23:37 worker /health "fingerprint": "54d2ce825a74" (unchanged, no swap)

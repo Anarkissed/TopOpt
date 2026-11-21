@@ -1,0 +1,49 @@
+MANUAL P1 run, 2026-10-23, at 122191ff + working tree, scratch-path /tmp/r7x20b-build
+Classes (18, the ones that touch or pin the changed files):
+FlexibleManualP1Tests FlexibleM1ManualTests FlexibleManualFollowUpTests FlexibleM2PredictTests FlexibleLatticePassTests FlexibleLatticeFieldTests FlexibleLatticeGradingTests FlexibleR7U21EdgeLookTests FlexibleTopLayerTests FlexibleR7E1FollowUpTests FlexibleU1Tests FlexibleSettingsRound4Tests FlexibleSquishCoarsenTests FlexibleFEFieldTests FlexibleI1HoldTests FlexibleI3LinkSimTests FlexibleSquishCopyTests FlexibleSettingsPageHostedTests
+
+runner.log:
+start 00:56:08 122191ff + working tree
+build exit 0 00:56:11
+chunk_aa exit 0 00:57:09
+chunk_ab exit 0 00:57:43
+chunk_ac exit 1 01:00:11
+chunk_ad exit 0 01:04:03
+chunk_ae exit 1 01:06:36
+renders exit 0 01:07:51
+golden det exit 0 01:08:09
+golden unseeded exit 0 01:08:25
+hashes exit 0 01:09:24
+hashes cmp vs manual_followup (whole file): identical
+ALLDONE 01:09:24
+
+Per chunk (passed failed skipped):
+chunk_aa.log 19 0 0
+chunk_ab.log 22 0 1
+chunk_ac.log 26 1 1
+chunk_ad.log 21 0 0
+chunk_ae.log 3 1 0
+Total: 91 passed, 2 failed, 2 skipped
+
+Failures:
+Test Case '-[TopOptFlowsTests.FlexibleSettingsRound4Tests testTheFinishShapesTheLatticeField]' failed (5.076 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleSettingsPageHostedTests testTheSelectedFacesRowsAreOnThePanelOnHisProject]' failed (144.438 seconds).
+  - FlexibleSettingsRound4Tests: a SOURCE pin (the text 'skinOffFaces: [], finish: finish)' in FlexibleStageModel.swift); the P1 arguments moved before skinOffFaces (no behaviour change). Re-run of the class after the fix: 14 passed, 0 failed.
+  - FlexibleSettingsPageHostedTests 11l 'as opened': the known batch I failure (card 566.0 + 246.0, the same numbers).
+
+Goldens: deterministic 38 identical / 0 DIFFERS; unseeded 32 identical / 0 DIFFERS / 1 PART-SKIP
+Stage-job hashes (16): cmp-identical (whole file) to round7/manual_followup/stage_job_hashes_mf.txt
+Renders: FlexibleManualP1FramesProbe (3 at 13" portrait on his pad) exit 0
+
+Printed by FlexibleManualP1Tests in this run:
+FLEX-P1 his pad: gyroid 20 % → cell 6.96 mm at 1 bead, 13.91 mm at 2 beads
+FLEX-P1 his l-bracket: gyroid 20 % → cell 6.96 mm at 1 bead, 13.91 mm at 2 beads
+FLEX-P1 his pad: group voxels 109189 · part voxels 11081 · card d 7.200 mm · drawn − card 0.00e+00 mm · probe SIMD3<Float>(2.6041665, 2.6041665, 2.6041665)
+FLEX-P1 the fitted exponent below the data ≈ 7.09 (Gibson–Ashby's textbook: 2); the solver's floor 0.0050 MPa
+FLEX-P1 extrapolation (gyroid 190 °C, ε 0.1): rows 0.143–0.362 · E(0.05) 0.0050 · E(0.10) 0.0290 · E(0.143) 0.3662 · E(0.50) 6.7465 MPa; slopes at lo 16.674/18.147
+FLEX-P1 his pad facts: ["9.9 cells across the depth · walls 0.45 mm", "Estimate past tested data (14–36 %)"]
+FLEX-P1 GPU manual: max |gpu − swift| = 0.00097084045 mm over 400 points (185 gyroid side, 215 honeycomb side); RED control (grids dropped) 16.914642 mm
+FLEX-P1 his pad · part: depth 27.58 mm · 4.0 cells across the depth · walls 0.90 mm | Estimate past tested data (14–36 %)
+FLEX-P1 his pad · group 1: depth 68.68 mm · 4.0 cells across the depth · walls 0.90 mm | Data covers 14–36 %
+FLEX-P1 his l-bracket · part: depth 25.00 mm · 4.0 cells across the depth · walls 0.90 mm | Estimate past tested data (14–36 %)
+FLEX-P1 his l-bracket · group 1: depth 25.00 mm · 4.0 cells across the depth · walls 0.90 mm | Estimate past tested data (14–36 %)

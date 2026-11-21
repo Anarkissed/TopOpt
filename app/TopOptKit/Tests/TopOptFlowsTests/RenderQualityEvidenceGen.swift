@@ -76,9 +76,18 @@ final class RenderQualityEvidenceGen: XCTestCase {
         model.stage = .lattice
         model.cellMM = 2.0                     // ★ his 2 mm cell (job.json grading.cell_mm)
         let t0 = CFAbsoluteTimeGetCurrent()
-        let mesh = model.stageMesh()
+        let mesh = Self.blockMesh(model)
         let ms = (CFAbsoluteTimeGetCurrent() - t0) * 1000
         return (mesh, mesh.indices.count / 3, ms)
+    }
+
+    /// ★ B8: the wizard's sample (`stageMesh`) is deleted with the full-screen page; the same tiled block, built here
+    /// as it built it (cells across a 60 mm sample, at most 5; struts clamped to 0.35 for legibility).
+    static func blockMesh(_ m: LatticeWizardModel) -> ViewerMesh {
+        let cells = Swift.min(5, Swift.max(1, Int((60.0 / Swift.max(0.5, m.cellMM)).rounded())))
+        return LatticeSamplePatch.mesh(lattice: m.lattice ?? .octet, cellMM: m.cellMM, cells: cells,
+                                       relativeDensity: Swift.min(0.35, m.relativeDensity), boundary: m.boundary,
+                                       transition: m.cellTransition, steppedCoarsePerHalf: nil, dyadicSteps: false)
     }
 
     private func stl(_ url: URL) throws -> ViewerMesh {
@@ -762,7 +771,7 @@ final class RenderQualityEvidenceGen: XCTestCase {
         try XCTSkipUnless(r.aoPipelinesDidBuild, "SSAO pipelines unavailable on this GPU")
         var model = LatticeWizardModel(settings: LatticeSettings())
         model.stage = .lattice
-        r.setMesh(model.stageMesh())
+        r.setMesh(RenderQualityEvidenceGen.blockMesh(model))
 
         func draws(_ q: MeshRenderer.Quality) -> Int {
             r.quality = q
@@ -872,7 +881,7 @@ final class RenderQualityLiveViewTests: XCTestCase {
         }
         var model = LatticeWizardModel(settings: LatticeSettings())
         model.stage = .lattice
-        r.setMesh(model.stageMesh())
+        r.setMesh(RenderQualityEvidenceGen.blockMesh(model))
         r.quality = .all
 
         let view = MTKView(frame: CGRect(x: 0, y: 0, width: 512, height: 384), device: device)

@@ -152,8 +152,8 @@ final class ForceModelTests: XCTestCase {
         XCTAssertEqual(fm.formattedWeight(kg: 2.5), "2.5 kg")
         XCTAssertEqual(fm.formattedWeight(kg: 12.4), "12 kg")
         fm.unit = .lbs
-        XCTAssertEqual(fm.formattedWeight(kg: 1), "2.2 lbs")           // 1 kg → 2.20462 lb
-        XCTAssertEqual(fm.formattedWeight(kg: 10), "22 lbs")          // 22.0462 → 22
+        XCTAssertEqual(fm.formattedWeight(kg: 1), "2.2 lb")            // 1 kg → 2.20462 lb
+        XCTAssertEqual(fm.formattedWeight(kg: 10), "22 lb")           // 22.0462 → 22
     }
 
     func testScrubStepsInDisplayUnitAndClamps() {

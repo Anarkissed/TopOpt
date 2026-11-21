@@ -1,0 +1,4 @@
+case,primitives,components,strut_ends,dangling_ends,verdict
+uniform_4x4x4,425,1,600,0,PASS
+doubled_S|S/2,506,1,708,0,PASS
+stepped_S|2S/3,289,1,396,0,PASS

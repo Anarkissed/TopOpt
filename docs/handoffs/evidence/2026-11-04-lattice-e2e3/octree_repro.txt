@@ -1,0 +1,7 @@
+TO-core's repro of the swept cell plan's mixed block (2026-11-04 20:37), before and after 6c6102bc.
+Fixture: test_designbox_graded_lattice's thick_plate_bore.stl (60 x 48 x 40 mm, 4 mm bore, made with
+Manifold by that test; not committed). Job: e_octree_swept_part.json. before = topopt-cli at 3f3851a2;
+after = at 6c6102bc.
+
+before: topopt-cli: plan_cell_sizes: level assignment is not an aligned octree
+after: exit 0; latticed_voxels 26682, rho 0.0496-0.5096, lattice_accepted True, lattice margin 10919.8779

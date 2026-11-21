@@ -1,0 +1,105 @@
+import XCTest
+import simd
+@testable import TopOptFlows
+
+/// ★★ THE SOLID BEYOND A FACE PRISM'S CAP (his 2026-09-18): the cap mesh, and the shader
+/// rule that draws it only where the part continues past the cap.
+final class LatticeRegionCapTests: XCTestCase {
+    func testEarClippingCoversTheLoopExactly() {
+        let square: [SIMD2<Double>] = [SIMD2(0, 0), SIMD2(10, 0), SIMD2(10, 10), SIMD2(0, 10)]
+        let tris = LatticeRegionCap.triangulate(square)
+        XCTAssertEqual(tris.count, 2)
+        // an L: 6 vertices, 4 triangles, area 300 — concave, either winding
+        let L: [SIMD2<Double>] = [SIMD2(0, 0), SIMD2(20, 0), SIMD2(20, 10), SIMD2(10, 10), SIMD2(10, 20), SIMD2(0, 20)]
+        for loop in [L, L.reversed()] {
+            let t = LatticeRegionCap.triangulate(loop)
+            XCTAssertEqual(t.count, 4, "\(t)")
+            var area = 0.0
+            for (a, b, c) in t {
+                let p = loop[a], q = loop[b], r = loop[c]
+                area += abs((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x)) * 0.5
+            }
+            XCTAssertEqual(area, 300, accuracy: 1e-9)
+        }
+    }
+
+    /// ★ HIS OUTLINE: every cap triangle's centroid lies INSIDE the loop, and the
+    /// triangles cover the loop's area (a fan fallback fails both on a concave U).
+    func testHisOutlineTriangulatesInsideItself() throws {
+        let mesh = try LatticePreviewConfettiTests.hisMesh()
+        guard let plane = LatticeRegionEmission.planeFor(face: FaceID(15), in: mesh),
+              let r = LatticeRegionEmission.spec(for: plane, role: .include, depthMM: 12, faceID: 15),
+              let loop = r.outlineLoops.first else { throw XCTSkip("no outline") }
+        let tris = LatticeRegionCap.triangulate(loop)
+        XCTAssertEqual(tris.count, loop.count - 2, "n − 2 triangles for a simple loop of \(loop.count)")
+        var area = 0.0, polyArea = 0.0, outside = 0
+        for i in 0..<loop.count { let a = loop[i], b = loop[(i + 1) % loop.count]; polyArea += a.x * b.y - b.x * a.y }
+        polyArea = abs(polyArea) * 0.5
+        for (a, b, c) in tris {
+            let p = loop[a], q = loop[b], w = loop[c]
+            area += abs((q.x - p.x) * (w.y - p.y) - (q.y - p.y) * (w.x - p.x)) * 0.5
+            let cen = (p + q + w) / 3
+            if LatticeFaceOutline.signedDistance(cen, loops: [loop]) > 1e-6 { outside += 1 }
+        }
+        XCTAssertEqual(area, polyArea, accuracy: 1e-6 * polyArea, "the triangles cover the loop exactly")
+        XCTAssertEqual(outside, 0, "★ \(outside) of \(tris.count) cap triangles lie outside his outline")
+    }
+
+    func testTheCapSitsAtTheDepthAndFacesBackOut() {
+        var r = LatticeRegionSpec(role: .include, kind: .face)
+        r.origin = SIMD3(1, 2, 3); r.normal = SIMD3(0, 1, 0); r.depthMM = 12
+        r.halfUMM = 20; r.halfWMM = 20
+        r.outlineLoops = [[SIMD2(-5, -5), SIMD2(5, -5), SIMD2(5, 5), SIMD2(-5, 5)]]
+        let m = LatticeRegionCap.build(regions: [r])
+        XCTAssertEqual(m.triangleCount, 2)
+        for v in 0..<m.vertexCount {
+            XCTAssertEqual(m.interleaved[6 * v + 1], 2 + 12, accuracy: 1e-5, "every cap vertex is 12 mm in along +y")
+            XCTAssertEqual(m.interleaved[6 * v + 4], -1, accuracy: 1e-6, "the cap faces back toward the open face")
+        }
+        var e = LatticeRegionSpec(role: .exclude, kind: .face)
+        e.origin = r.origin; e.normal = r.normal; e.depthMM = r.depthMM; e.outlineLoops = r.outlineLoops
+        XCTAssertEqual(LatticeRegionCap.build(regions: [e]).vertexCount, 0, "exclude regions have no cap")
+    }
+
+    /// ★ ALL THREE CORNERS (2026-09-22): one measured corner used to draw the whole
+    /// triangle, so a fanned outline put a plate across the open face.
+    func testATriangleWithOneCornerOverAirIsNotBuilt() {
+        var r = LatticeRegionSpec(role: .include, kind: .face)
+        r.origin = SIMD3(0, 0, 0); r.normal = SIMD3(0, 1, 0); r.depthMM = 4
+        r.halfUMM = 20; r.halfWMM = 20
+        r.outlineLoops = [[SIMD2(-5, -5), SIMD2(5, -5), SIMD2(5, 5), SIMD2(-5, 5)]]
+        // material only where x < 0 (in world): every triangle of the square has a corner at x > 0
+        let none = LatticeRegionCap.build(regions: [r]) { _, p in p.x < 0 }
+        XCTAssertEqual(none.triangleCount, 0, "a triangle with a corner over air is not a wall")
+        let all = LatticeRegionCap.build(regions: [r]) { _, _ in true }
+        XCTAssertEqual(all.triangleCount, 2)
+    }
+
+    /// ★ NO CAP INSIDE ANOTHER LATTICED PRISM: where a second prism continues past this
+    /// one's end, the end is lattice (the pocket rule), never a plate.
+    func testTheCapIsSkippedWhereAnotherIncludePrismContinues() {
+        var r = LatticeRegionSpec(role: .include, kind: .face)
+        r.origin = SIMD3(0, 0, 0); r.normal = SIMD3(0, 1, 0); r.depthMM = 4
+        r.halfUMM = 20; r.halfWMM = 20
+        r.outlineLoops = [[SIMD2(-5, -5), SIMD2(5, -5), SIMD2(5, 5), SIMD2(-5, 5)]]
+        var o = r; o.depthMM = 12          // the same mouth, deeper: it continues past r's end
+        XCTAssertEqual(LatticeRegionCap.build(regions: [r, o]) { _, _ in true }.triangleCount, 2,
+                       "only the DEEPER prism's end (at 12) is capped; r's end at 4 sits inside o")
+        var far = r; far.origin = SIMD3(100, 0, 0)
+        XCTAssertEqual(LatticeRegionCap.build(regions: [r, far]) { _, _ in true }.triangleCount, 4,
+                       "two prisms apart each keep their cap")
+    }
+
+    func testTheShaderDrawsTheCapOnlyWhereThePartContinues() throws {
+        let src = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("Sources/TopOptFlows/MetalMeshView.swift")
+        let s = try String(contentsOf: src, encoding: .utf8)
+        XCTAssertTrue(s.contains("float3 p = in.mpos + inward * c.margin.x;"), "★ the sample is taken PAST the cap")
+        XCTAssertTrue(s.contains("if (solidTex.sample(s, uvw).r < 0.5) { discard_fragment(); }"), "★ no material beyond ⇒ no cap — asked of the WHOLE part's occupancy")
+        XCTAssertTrue(s.contains("let sdf = lattice.solidOccupancyTexture, let g = lattice.solidOccupancyGrid"), "★ …bound from the unclipped occupancy, never the region-clipped SDF")
+        XCTAssertTrue(s.contains("o.albedo = float4(u.tint.xyz, 1.0);\n    return o;\n}\n\"\"\""), "★ the cap writes a PAINTED albedo — zero was invisible")
+        XCTAssertTrue(s.contains("du.tint = LatticeRegionCap.wallTint"), "★ …in the body's grey")
+        XCTAssertTrue(s.contains("margin: SIMD4(1.5 * voxel, 0, 0, 0)"), "★ a voxel and a half beyond the cap")
+        XCTAssertTrue(s.contains("if let lattice, bodyAlpha > 0.5, let cpipe = regionCapPipeline"), "★ the cap is the body: hidden with it")
+    }
+}

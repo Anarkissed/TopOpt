@@ -1,0 +1,55 @@
+# Round 7 · T1+T2 installer run (2026-10-23) at a40f0194, cache /tmp/r7x20b-build
+start 07:29:46 a40f0194 + working tree
+build exit 0 07:29:48
+chunk_aa exit 0 07:39:32
+chunk_ab exit 0 07:46:55
+chunk_ac exit 1 07:49:39
+chunk_ad exit 0 07:50:48
+chunk_ae exit 0 07:54:36
+chunk_af exit 0 07:55:00
+chunk_ag exit 0 07:56:44
+chunk_ah exit 0 07:58:56
+chunk_ai exit 0 08:02:02
+chunk_kit exit 0 08:03:43
+chunk_3mf exit 1 08:03:45
+golden det exit 0 08:04:01
+golden unseeded exit 0 08:04:17
+hashes exit 0 08:05:15
+hashes cmp vs nozzle_grade (whole file): identical
+TESTSDONE 08:05:15
+xcodebuild exit 0 08:05:34
+XDONE
+
+## per chunk (classes in 4s, order of classes.txt)
+FlexibleBatchNVerifyTests FlexibleRound7ViewsHostedTests FlexibleMergeR5SMTests FlexibleSqueezeGroupsReviewUITests FlexibleSquishVerifyGTests FlexibleFlatPrismEngineTests FlexibleMeetTests FlexibleMeetReviewTests LatticeStaleTypeTests LatticeSlotOriginTests LatticeSimSolveTriggerTests FlexibleSettingsPageHostedTests FlexibleSquishPlayerTests FlexibleSqueezeGroupsUITests FlexibleBatchBReviewUXTests FlexibleR7D2ReviewTests FlexibleManualT2Tests FlexibleManualP2Tests FlexibleManualP1Tests FlexibleM1ManualTests FlexibleLatticeFieldTests FlexibleLatticePassTests FlexibleLatticeGradingTests FlexibleLatticePassPerfTests FlexibleInPassCompositeTests FlexibleR7U21EdgeLookTests FlexibleR7E1FollowUpTests FlexibleTopLayerTests FlexibleSquishTests FlexibleFEPassTests FlexibleBatchCHookTests FlexibleBatchBReviewTests FlexibleBatchMXrayTests FlexibleAutoFloorShapeTests FlexibleSquishCopyTests
+chunk_3mf.log: Executed 2 tests, with 6 failures (0 unexpected) in 0.069 (0.069) seconds
+Test Case '-[TopOptFlowsTests.AppModelTests testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance]' failed
+Test Case '-[TopOptFlowsTests.AppModelTests testThreeMFImportOptimisesOnDeviceEndToEnd]' failed
+chunk_aa.log: Executed 19 tests, with 0 failures (0 unexpected) in 581.906 (581.910) seconds
+chunk_ab.log: Executed 30 tests, with 0 failures (0 unexpected) in 440.796 (440.800) seconds
+chunk_ac.log: Executed 15 tests, with 6 failures (0 unexpected) in 162.303 (162.305) seconds
+Test Case '-[TopOptFlowsTests.FlexibleSettingsPageHostedTests testTheSelectedFacesRowsAreOnThePanelOnHisProject]' failed
+Test Case '-[TopOptFlowsTests.LatticeSimSolveTriggerTests testTheTriggerRefusesOnAllThreeGrounds]' failed
+Test Case '-[TopOptFlowsTests.LatticeSlotOriginTests testTheAppWithholdsExactlyWhatCoreRefuses]' failed
+chunk_ad.log: Executed 36 tests, with 0 failures (0 unexpected) in 66.698 (66.701) seconds
+chunk_ae.log: Executed 20 tests, with 0 failures (0 unexpected) in 226.461 (226.464) seconds
+chunk_af.log: Executed 20 tests, with 1 test skipped and 0 failures (0 unexpected) in 21.806 (21.809) seconds
+chunk_ag.log: Executed 23 tests, with 1 test skipped and 0 failures (0 unexpected) in 101.709 (101.712) seconds
+chunk_ah.log: Executed 30 tests, with 0 failures (0 unexpected) in 129.842 (129.845) seconds
+chunk_ai.log: Executed 8 tests, with 0 failures (0 unexpected) in 184.403 (184.404) seconds
+chunk_kit.log: Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+
+## proof lines
+FLEX-R7V-RH5 Play icon: working ring 406 px (idle 0) · failed dot 180 px (idle 0) · control ring 0 dot 0
+FLEX-P2 STEPPED SEAMS fragments over 557 lines: P2 band 1 of 850 runs over 1671.6 mm = 0.0006 /mm; control 56 of 462 over 1632.0 mm = 0.0343 /mm · P1 band 1754 of 2483 runs over 1671.6 mm = 1.0493 /mm; control 227 of 661 over 1632.0 mm = 0.1391 /mm
+FLEX-T2 STEPPED BAND EDGES (2 bands) over 567 lines: T2 band 0 of 799 runs over 1702.5 mm = 0.0000 /mm; control 26 of 424 over 1687.5 mm = 0.0154 /mm · RED CONTROL (sheet blend) band 217 of 812 runs over 1702.5 mm = 0.1275 /mm; control 39 of 424 over 1687.5 mm = 0.0231 /mm · the Stepped group's own edge (549 lines, a seam wall too) band 0 of 852 runs over 1647.6 mm = 0.0000 /mm; control 49 of 45
+FLEX-T2 MANUAL honeycomb 2 beads (0.9 mm), 109189 group voxels, grid 1.0416666 mm: T2 clip band 0 thin of 1500 solid samples = 0.0000; away 0 of 1500 = 0.0000 (floor 1/N 0.0007); thin by term region/part/skin 0/0/0 of 233/1267/0 · RED CONTROL (clip at the point) clip band 87 thin of 1500 solid samples = 0.0580; away 0 of 1500 = 0.0000 (floor 1/N 0.0007); thin by term region/part/skin 38/49/0 of 3
+FLEX-T2 AUTO honeycomb (wall 0.45 mm, cell 5.442588 mm): T2 clip band 0 thin of 1500 solid samples = 0.0000; away 0 of 1500 = 0.0000 (floor 1/N 0.0007); thin by term region/part/skin 0/0/0 of 129/1371/0 · RED CONTROL (clip at the point) clip band 39 thin of 1500 solid samples = 0.0260; away 0 of 1500 = 0.0000 (floor 1/N 0.0007); thin by term region/part/skin 0/39/0 of 124/1376/0
+FLEX-EXIT 16 children with 4 bridge threads in flight at exit: ["exit 0", "exit 0", "exit 0", "exit 0", "exit 0", "exit 0", "exit 0", "exit 0", "exit 0", "exit 0", "exit 0", "exit 0", "exit 0", "exit 0", "exit 0", "exit 0"]
+
+goldens: det 38 identical / 0 DIFFERS; unseeded 32 identical / 0 DIFFERS / 1 PART-SKIP line(s)
+
+## iOS
+
+pgrep TopOpt.app/TopOpt: none (not running) 08:06:09
+simctl install 147E56A1… 08:06:15, NOT launched; installed TopOpt.debug.dylib cmp-identical to built, sha256 27aac44e5b7dde06e7c8b25f4c2a47bae55f1b1e865425175ce8d7a08f48148b (98,674,912 bytes)

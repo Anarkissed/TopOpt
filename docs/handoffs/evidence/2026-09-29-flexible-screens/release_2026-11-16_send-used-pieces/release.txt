@@ -1,0 +1,16 @@
+# Release 77de729a — 2026-11-16 send-used-pieces (his failed runs of 11-16: only the pieces a run uses are sent, 90a6139d), app only
+# Core and worker unchanged: fingerprint 85d25b639dee
+# Merged onto 42a2aa4e; the merged app tree equals send-used-pieces's, so its gate applies unchanged.
+# Commits (first parent of send-used-pieces since the release tip):
+#   90a6139d Runs send only the pieces they use (362): his 11-16 runs were refused over a leftover cut piece no group used
+# Gates:
+#   claude/send-used-pieces 90a6139d (on release 42a2aa4e), built against core 85d25b639dee:
+#   run 1: 146/150 - the four reds pinned the old send-every-piece behaviour (FaceRegionTests, FlexibleBatchCVerifyTests, FlexibleBatchMStressTests, SurfaceUnionDefectControlTests); each now states the new rule with the old behaviour as its red control
+#   run 2: 165/165 across 19 face-region, job, sim, Flexible, Surface and banned-words classes
+#   16:13 checks ok: send-used-pieces 90a6139d, 1 commit(s), app-only, onto 42a2aa4e, fingerprint 85d25b639dee
+#   16:13 merged 77de729a; app tree == send-used-pieces's, fingerprint 85d25b639dee
+#   16:13 waiting for HEAVY.lock (free)
+#   16:13 lock taken (38 GB free)
+#   16:19 iPad device build green; lock released
+#   16:19 pushed 77de729a
+#   16:19 worker /health fingerprint 85d25b639dee (unchanged, no swap)

@@ -1,0 +1,57 @@
+# U21 batch D FIX ROUND 1 runs (app/TopOptKit, --scratch-path /tmp/r7x20b-build) — b70922dc + the working tree
+### new / changed tests first (red controls asserted inside)
+Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testFaceTakeOutAsksFirst]' passed (1.961 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testGroupTrashThenUndoReopensTheGroup]' passed (4.891 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testLatticeCalloutAndPressRowRemoveAskFirst]' passed (1.823 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testOneToolbarUndoRestoresTheTrashedGroup]' passed (6.487 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testPopupRemoveAsksFirst]' passed (1.815 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testPressTrashAsksFirst]' passed (3.535 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testResetAllThenUndoReopensTheGroup]' passed (6.700 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testTakeOutIsItsOwnUndoStep]' passed (4.116 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testTakeOutOnlyFaceThenUndoReopensItsGroup]' passed (2.721 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testTakeOutQuestionNamesTheFaceOnly]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testTakeOutSelectedFaceThenUndoReselectsIt]' passed (5.058 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU2Tests testU21ConfirmKeepSitsOnTheTappedControl]' passed (63.733 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU2Tests testU21DeleteLatticeSheetCancelOnTheButton]' failed (16.756 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU2Tests testU21FixRowsRemoveAskInPlace]' failed (77.764 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU2Tests testU21TakeOutAskFitsThePanelOnHisLBracket]' passed (16.323 seconds).
+Tests/TopOptFlowsTests/FlexibleU2Tests.swift:490: error: -[TopOptFlowsTests.FlexibleU2Tests testU21DeleteLatticeSheetCancelOnTheButton] : XCTUnwrap failed: expected non-nil value of type "CGRect" - [Cancel]
+Tests/TopOptFlowsTests/FlexibleU2Tests.swift:416: error: -[TopOptFlowsTests.FlexibleU2Tests testU21FixRowsRemoveAskInPlace] : XCTAssertTrue failed - ★ [Remove]: Edge 12 goes
+(run1 failures were the two NEW hosted tests' harness, not the app: the sheet was hosted at its ideal size (19,308 pt tall, so
+the click's y missed) and the warning row's async strip removal was pumped on a nested run loop, which never runs main-actor jobs.)
+run2 (sheet hosted at 1032 x 1376): testU21DeleteLatticeSheetCancelOnTheButton passed; testU21FixRowsRemoveAskInPlace still
+  failed at "Edge 12 goes", with the new line "after the [Remove] click: ask nil" (the click landed; the removal was still pumped).
+run3 (the removal awaited): testU21FixRowsRemoveAskInPlace passed (18.7 s).
+### runner.log
+start 18:07:39 b70922dc + working tree
+build exit 0 18:07:40
+golden det exit 0 18:07:57
+golden unseeded exit 0 18:08:13
+hashes exit 0 18:09:14
+hashes cmp vs x20b (non-comment lines): identical
+hashes cmp vs x20b (whole file): identical
+chunk_aa exit 0 18:26:37
+chunk_ab exit 0 18:34:59
+chunk_ac exit 0 18:46:45
+chunk_ad exit 1 19:07:26
+chunk_ae exit 0 19:11:11
+chunk_af exit 0 19:13:01
+ALLDONE 19:13:01
+### classes (67 = batch D's 60 + the 7 that pin the files this round touched, chunks of 12)
+FlexibleU21DeleteUndoTests FlexibleU2Tests FlexibleRound7SelectionsHostedTests FlexibleR7FTests FlexibleR7RHostedTests FlexibleR7D2ReviewHostedTests FlexibleRound5SettingsHostedTests FlexibleR7SettingsHostedTests FlexibleSqueezeGroupsUITests FlexibleSqueezeGroupsReviewUITests FlexibleSquishCopyTests LatticeStaleTypeTests FlexibleBatchBReviewUXTests FlexibleBatchVHostedTests FlexibleEdgeGroupsHostedTests FlexibleEdgeGroupsTests FlexibleFaceCommitTests FlexibleFlatPrismHostedTests FlexibleLatticeSectionsTests FlexibleLatticeUnderReviewTests FlexibleLatticeUnderTests FlexibleMainPageLoadsTests FlexiblePressAimTests FlexiblePressReviewTests FlexiblePressSaveTests FlexibleR7E1ReviewHostedTests FlexibleR7E1bTests FlexibleR7E2HostedTests FlexibleR7E2ParkTests FlexibleR7E2Tests FlexibleR7E3Tests FlexibleR7E5Tests FlexibleR7EveningAnswersTests FlexibleR7MergeTests FlexibleR7RTests FlexibleR7SettingsTests FlexibleR7X1Tests FlexibleR7X1VerifyTests FlexibleReadinessTests FlexibleRound5SettingsTests FlexibleRound5SettingsVerifyTests FlexibleRound6HostedTests FlexibleRound6Tests FlexibleRound7D1ReviewTests FlexibleRound7DesignIntegrationTests FlexibleRound7ViewsHostedTests FlexibleRound7ViewsReviewHostedTests FlexibleRound7ViewsTests FlexibleRowCopyTests FlexibleSelectionsListTests FlexibleSettingsPageHostedTests FlexibleSettingsRound4Tests FlexibleSettingsVerifyD1Tests FlexibleShownValuesTests FlexibleSqueezeGroupsModelTests FlexibleSqueezeGroupsReviewTests FlexibleSqueezeGroupsReviewUXTests FlexibleU1Tests FlexibleX20bHostedTests FlexibleStageTests FlexibleChromeStateTests FlexibleCornerPairTests FlexiblePressCurveTests FlexibleRound7CalloutHostedTests FlexibleRound7D1ReviewHostedTests FlexibleRound7FitHostedTests FlexibleRound7ScreenHookTests 
+### goldens
+golden_det: identical 38 · DIFFERS 0 · PART-SKIP 0 · Executed 13 tests, with 0 failures (0 unexpected) in 14.429 (14.432) seconds
+golden_unseeded: identical 32 · DIFFERS 0 · PART-SKIP 1 · Executed 13 tests, with 0 failures (0 unexpected) in 13.972 (13.975) seconds
+### chunks
+chunk_aa.log: Executed 63 tests, with 0 failures (0 unexpected) in 1040.828 (1040.840) seconds
+chunk_ab.log: Executed 100 tests, with 1 test skipped and 0 failures (0 unexpected) in 499.725 (499.737) seconds
+chunk_ac.log: Executed 63 tests, with 0 failures (0 unexpected) in 703.833 (703.843) seconds
+chunk_ad.log: Executed 106 tests, with 1 failure (0 unexpected) in 1237.955 (1237.968) seconds
+chunk_ae.log: Executed 78 tests, with 0 failures (0 unexpected) in 223.175 (223.185) seconds
+chunk_af.log: Executed 30 tests, with 0 failures (0 unexpected) in 107.686 (107.691) seconds
+### failures (all chunks)
+Tests/TopOptFlowsTests/FlexibleRound7ViewsReviewHostedTests.swift:323: error: -[TopOptFlowsTests.FlexibleRound7ViewsHostedTests testThePlayIconsRingAndDotAreSeenWithPlayOff] : XCTAssertGreaterThan failed: ("22") is not greater than ("120") - ★ the sims running: an accent ring on the Play icon (22 px, idle 0)
+signal lines: 0
+### re-runs (the flake the check saw: FlexibleU21DeleteUndoTests twice more)
+Executed 11 tests, with 0 failures (0 unexpected) in 38.238 (38.241) seconds
+Executed 11 tests, with 0 failures (0 unexpected) in 38.581 (38.583) seconds

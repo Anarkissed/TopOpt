@@ -1,0 +1,90 @@
+# Round 6 batch V — TESTS FIRST: the red run against the stubs (FlexibleMainViewSettings: kept nowhere, changes nothing; FlexibleStagePage.chromeClip: []; FlexibleMainViewToggles.settingsFrame: .null; no chips).
+# swift test --skip-build --filter 'TopOptFlowsTests\.FlexibleBatchVHostedTests/' (FLEX_BV_EVIDENCE_DIR set), this Mac, 2026-10-10, built at the S3 head 202a39e1 + the stubs and tests.
+# Every failure, with its message (the file and line prefix cut):
+testNothingDrawnOnThePartShowsInsideThePanelOrTheLegend: XCTAssertEqual failed: ("1796") is not equal to ("0") - ★ A1_0003 13p · Rests: 1796 pixels drawn on the part show inside the legend
+testNothingDrawnOnThePartShowsInsideThePanelOrTheLegend: XCTAssertEqual failed: ("3471") is not equal to ("0") - ★ A1_0003 13p · Rests: 3471 pixels drawn on the part show inside the panel
+testNothingDrawnOnThePartShowsInsideThePanelOrTheLegend: XCTAssertEqual failed: ("2118") is not equal to ("0") - ★ A1_0003 13p · Group 2 · face 4: 2118 pixels drawn on the part show inside the legend
+testNothingDrawnOnThePartShowsInsideThePanelOrTheLegend: XCTAssertEqual failed: ("6221") is not equal to ("0") - ★ A1_0003 13p · Group 3 · face 3: 6221 pixels drawn on the part show inside the panel
+testNothingDrawnOnThePartShowsInsideThePanelOrTheLegend: XCTAssertEqual failed: ("4273") is not equal to ("0") - ★ A1_0003 13p · both views: 4273 pixels drawn on the part show inside the legend
+testNothingDrawnOnThePartShowsInsideThePanelOrTheLegend: XCTAssertEqual failed: ("3555") is not equal to ("0") - ★ A1_0003 13p · both views: 3555 pixels drawn on the part show inside the panel
+testNothingDrawnOnThePartShowsInsideThePanelOrTheLegend: XCTAssertEqual failed: ("241") is not equal to ("0") - ★ A1_0003 11l · Rests: 241 pixels drawn on the part show inside the legend
+testNothingDrawnOnThePartShowsInsideThePanelOrTheLegend: XCTAssertEqual failed: ("4498") is not equal to ("0") - ★ A1_0003 11l · Rests: 4498 pixels drawn on the part show inside the panel
+testNothingDrawnOnThePartShowsInsideThePanelOrTheLegend: XCTAssertEqual failed: ("985") is not equal to ("0") - ★ A1_0003 11l · Group 2 · face 4: 985 pixels drawn on the part show inside the legend
+testNothingDrawnOnThePartShowsInsideThePanelOrTheLegend: XCTAssertEqual failed: ("4510") is not equal to ("0") - ★ A1_0003 11l · Group 3 · face 3: 4510 pixels drawn on the part show inside the panel
+testNothingDrawnOnThePartShowsInsideThePanelOrTheLegend: XCTAssertEqual failed: ("1131") is not equal to ("0") - ★ A1_0003 11l · both views: 1131 pixels drawn on the part show inside the legend
+testNothingDrawnOnThePartShowsInsideThePanelOrTheLegend: XCTAssertEqual failed: ("7526") is not equal to ("0") - ★ A1_0003 11l · both views: 7526 pixels drawn on the part show inside the panel
+testNothingDrawnOnThePartShowsInsideThePanelOrTheLegend: XCTAssertEqual failed: ("1711") is not equal to ("0") - ★ r5 13p · curves · region 1000104: 1711 pixels drawn on the part show inside the legend
+testNothingDrawnOnThePartShowsInsideThePanelOrTheLegend: XCTAssertEqual failed: ("930") is not equal to ("0") - ★ r5 11l · curves · region 1000104: 930 pixels drawn on the part show inside the legend
+testNothingDrawnOnThePartShowsInsideThePanelOrTheLegend: XCTAssertEqual failed: ("2599") is not equal to ("0") - ★ r5 11l · curves · region 1000104: 2599 pixels drawn on the part show inside the popup
+testPrismAfterAPickShowsNothingOnOpenThenThePickedGroupsPrismAndNumber: XCTAssertEqual failed: ("[1]") is not equal to ("[]") - ★ on open: no prism (the Top is active, but he has not picked it)
+testPrismAfterAPickShowsNothingOnOpenThenThePickedGroupsPrismAndNumber: XCTAssertEqual failed: ("[1]") is not equal to ("[]") - ★ on open: no number
+testPrismAfterAPickShowsNothingOnOpenThenThePickedGroupsPrismAndNumber: XCTAssertEqual failed: ("[1]") is not equal to ("[]") - ON again: none until a pick
+testPrismAfterAPickShowsNothingOnOpenThenThePickedGroupsPrismAndNumber: XCTAssertTrue failed - his tap on the Top's row
+testPrismAfterAPickShowsNothingOnOpenThenThePickedGroupsPrismAndNumber: XCTAssertEqual failed: ("[3]") is not equal to ("[]") - ★ a Pending group: no prism
+testPrismAfterAPickShowsNothingOnOpenThenThePickedGroupsPrismAndNumber: XCTAssertEqual failed: ("[3]") is not equal to ("[]") - ★ …and no number
+testRoleColoursOffKeepsEveryRoleColourOffTheMainModelAndOffBringsThemBack: XCTAssertEqual failed: ("[SIMD4<Float>(0.39215687, 0.8235294, 1.0, 0.25)]") is not equal to ("[SIMD4<Float>(0.0, 0.0, 0.0, 0.0)]") - ★ ON: his resting bottom wears no mark
+testRoleColoursOffKeepsEveryRoleColourOffTheMainModelAndOffBringsThemBack: XCTAssertEqual failed: ("49152") is not equal to ("0") - ★ ON: no role mark anywhere on the model
+testRoleColoursOffKeepsEveryRoleColourOffTheMainModelAndOffBringsThemBack: XCTAssertEqual failed: ("[SIMD4<Float>(0.39215687, 0.8235294, 1.0, 0.25)]") is not equal to ("[SIMD4<Float>(0.0, 0.0, 0.0, 0.0)]") - ON again: none
+testRoleColoursOffKeepsEveryRoleColourOffTheMainModelAndOffBringsThemBack: XCTAssertTrue failed - ★ ON, the model: no role colour on face 0
+testRoleColoursOffKeepsEveryRoleColourOffTheMainModelAndOffBringsThemBack: XCTAssertEqual failed: ("49152") is not equal to ("0") - ★ ON, the model: no role colour on the model
+testRoleColoursOffKeepsEveryRoleColourOffTheMainModelAndOffBringsThemBack: XCTAssertTrue failed - ★ ON, the model, heat on: no role colour on face 0
+testRoleColoursOffKeepsEveryRoleColourOffTheMainModelAndOffBringsThemBack: XCTAssertEqual failed: ("49152") is not equal to ("0") - ★ ON, the model, heat on: no role colour on the model
+testRoleColoursOffKeepsEveryRoleColourOffTheMainModelAndOffBringsThemBack: XCTAssertTrue failed - ★ ON, Lattice: no role colour on face 0
+testRoleColoursOffKeepsEveryRoleColourOffTheMainModelAndOffBringsThemBack: XCTAssertEqual failed: ("49152") is not equal to ("0") - ★ ON, Lattice: no role colour on the model
+testTheClipIsEveryPieceOfTheChromeInTheStagesFrame: XCTAssertTrue failed - exitRow is clipped, in the stage's frame
+testTheClipIsEveryPieceOfTheChromeInTheStagesFrame: XCTAssertTrue failed - legend is clipped, in the stage's frame
+testTheClipIsEveryPieceOfTheChromeInTheStagesFrame: XCTAssertTrue failed - notice is clipped, in the stage's frame
+testTheClipIsEveryPieceOfTheChromeInTheStagesFrame: XCTAssertTrue failed - panel is clipped, in the stage's frame
+testTheClipIsEveryPieceOfTheChromeInTheStagesFrame: XCTAssertTrue failed - playerCapsule is clipped, in the stage's frame
+testTheClipIsEveryPieceOfTheChromeInTheStagesFrame: XCTAssertTrue failed - playerTopRow is clipped, in the stage's frame
+testTheClipIsEveryPieceOfTheChromeInTheStagesFrame: XCTAssertTrue failed - popup is clipped, in the stage's frame
+testTheClipIsEveryPieceOfTheChromeInTheStagesFrame: XCTAssertTrue failed - toast is clipped, in the stage's frame
+testTheClipIsEveryPieceOfTheChromeInTheStagesFrame: XCTAssertTrue failed - viewButtons is clipped, in the stage's frame
+testTheClipIsEveryPieceOfTheChromeInTheStagesFrame: XCTAssertTrue failed - the gizmo, moved from the page's frame into the stage's
+testTheClipIsEveryPieceOfTheChromeInTheStagesFrame: XCTAssertTrue failed - the keep-out (24.0, 700.0, 400.0, 600.0) is clipped
+testTheClipIsEveryPieceOfTheChromeInTheStagesFrame: XCTAssertTrue failed - the keep-out (760.0, 600.0, 260.0, 120.0) is clipped
+testTheClipIsEveryPieceOfTheChromeInTheStagesFrame: XCTAssertTrue failed - the keep-out (920.0, 260.0, 88.0, 40.0) is clipped
+testTheClipIsEveryPieceOfTheChromeInTheStagesFrame: XCTAssertTrue failed - the keep-out (500.0, 1230.0, 200.0, 30.0) is clipped
+testTheClipIsEveryPieceOfTheChromeInTheStagesFrame: XCTAssertTrue failed - the keep-out (460.0, 1262.0, 280.0, 50.0) is clipped
+testTheTwoSettingsAreKeptPerProjectAndNeverTouchTheProject: XCTAssertEqual failed: ("FlexibleMainViewSettings(roleColoursOff: true, prismAfterPick: true)") is not equal to ("FlexibleMainViewSettings(roleColoursOff: false, prismAfterPick: false)") - ★ kept under his project
+testTheTwoSettingsAreKeptPerProjectAndNeverTouchTheProject: XCTAssertEqual failed: ("FlexibleMainViewSettings(roleColoursOff: true, prismAfterPick: true)") is not equal to ("FlexibleMainViewSettings(roleColoursOff: false, prismAfterPick: false)") - ★ read back for his project
+testTheTwoSettingsAreKeptPerProjectAndNeverTouchTheProject: XCTAssertEqual failed: ("FlexibleMainViewSettings(roleColoursOff: false, prismAfterPick: false)") is not equal to ("FlexibleMainViewSettings(roleColoursOff: true, prismAfterPick: true)") - the stage on the other project: both ON
+testTheTwoSettingsAreOneLineEachUnderTheViewButtonsClearOfEverything: failed - 11l: Role colours off is on the page
+testTheTwoSettingsAreOneLineEachUnderTheViewButtonsClearOfEverything: failed - 11l: Prism after a pick is on the page
+testTheTwoSettingsAreOneLineEachUnderTheViewButtonsClearOfEverything: failed - 11p: Role colours off is on the page
+testTheTwoSettingsAreOneLineEachUnderTheViewButtonsClearOfEverything: failed - 11p: Prism after a pick is on the page
+testTheTwoSettingsAreOneLineEachUnderTheViewButtonsClearOfEverything: failed - 13p: Role colours off is on the page
+testTheTwoSettingsAreOneLineEachUnderTheViewButtonsClearOfEverything: failed - 13p: Prism after a pick is on the page
+testTheTwoSettingsAreOneLineEachUnderTheViewButtonsClearOfEverything: failed - 13l: Role colours off is on the page
+testTheTwoSettingsAreOneLineEachUnderTheViewButtonsClearOfEverything: failed - 13l: Prism after a pick is on the page
+testTheTwoSettingsAreOneLineEachUnderTheViewButtonsClearOfEverything: failed - mini: Role colours off is on the page
+testTheTwoSettingsAreOneLineEachUnderTheViewButtonsClearOfEverything: failed - mini: Prism after a pick is on the page
+
+	 Executed 6 tests, with 58 failures (0 unexpected) in 344.953 (344.954) seconds
+	 Executed 6 tests, with 58 failures (0 unexpected) in 344.953 (344.955) seconds
+Test Case '-[TopOptFlowsTests.FlexibleBatchVHostedTests testNothingDrawnOnThePartShowsInsideThePanelOrTheLegend]' failed (286.731 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleBatchVHostedTests testPrismAfterAPickShowsNothingOnOpenThenThePickedGroupsPrismAndNumber]' failed (5.589 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleBatchVHostedTests testRoleColoursOffKeepsEveryRoleColourOffTheMainModelAndOffBringsThemBack]' failed (36.763 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleBatchVHostedTests testTheClipIsEveryPieceOfTheChromeInTheStagesFrame]' failed (0.004 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleBatchVHostedTests testTheTwoSettingsAreKeptPerProjectAndNeverTouchTheProject]' failed (8.721 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleBatchVHostedTests testTheTwoSettingsAreOneLineEachUnderTheViewButtonsClearOfEverything]' failed (7.144 seconds).
+
+FLEX-BV-2a (pixels of the page with the part's overlays vs without, inside each piece of chrome; 0 = nothing shows there)
+  A1_0003 13p · Rests: inside exitRow 0, legend 1796, notice 0, panel 3471, viewButtons 0 · noise  · player 0 · the whole page 21219
+  A1_0003 13p · Group 2 · face 4: inside exitRow 0, legend 2118, notice 0, panel 0, viewButtons 0 · noise  · player 0 · the whole page 17944
+  A1_0003 13p · Group 3 · face 3: inside exitRow 0, legend 0, notice 0, panel 6221, viewButtons 0 · noise  · player 0 · the whole page 17046
+  A1_0003 13p · both views: inside exitRow 0, legend 4273, notice 0, panel 3555, viewButtons 0 · noise  · player 0 · the whole page 75997
+  A1_0003 11l · Rests: inside exitRow 0, legend 241, notice 0, panel 4498, viewButtons 0 · noise  · player 0 · the whole page 13406
+  A1_0003 11l · Group 2 · face 4: inside exitRow 0, legend 985, notice 0, panel 0, viewButtons 0 · noise  · player 0 · the whole page 14254
+  A1_0003 11l · Group 3 · face 3: inside exitRow 0, legend 0, notice 0, panel 4510, viewButtons 0 · noise  · player 0 · the whole page 13155
+  A1_0003 11l · both views: inside exitRow 0, legend 1131, notice 0, panel 7526, viewButtons 0 · noise  · player 0 · the whole page 46408
+  r5 13p · curves · region 1000104: inside exitRow 0, legend 1711, notice 0, panel 0, popup 0, viewButtons 0 · noise  · player 0 · the whole page 46533
+  r5 11l · curves · region 1000104: inside exitRow 0, legend 930, notice 0, panel 0, popup 2599, viewButtons 0 · noise  · player 0 · the whole page 27474
+  states with an overlay inside the chrome: 15
+FLEX-BV-1b saved active group: Group C
+FLEX-BV-1b on open (Top active): ON [1] · OFF [1] · after his pick: Top [1] · Group C [] · [Prisms] [1, 2, 3, 4, 5]
+FLEX-BV-1b saved active group: Group C
+FLEX-BV-1b on open (Top active): ON [1] · OFF [1] · after his pick: Top [1] · Group C [] · [Prisms] [1, 2, 3, 4, 5]
+FLEX-BV-1a
+FLEX-BV-1c kept under flexible.mainViewSettings.A1000001-0000-4000-8000-000000000003 · undo 0→0
+FLEX-BV-1d 

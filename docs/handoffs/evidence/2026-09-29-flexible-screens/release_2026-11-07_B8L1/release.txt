@@ -1,0 +1,16 @@
+# Release 2a7c7bd8 — 2026-11-07 B8L1 (UI-Notes' app batch eaa1518d), app only
+# Core and worker unchanged: fingerprint db2cc34ef3fe; "fingerprint": "db2cc34ef3fe"
+# Merged onto 9aa3050a; the merged app tree equals B8L1's, so the builder's tests and the reviewer's code check apply unchanged.
+# Commits:
+#   6b92bb1d B8 look slice 1 (WIP, not for release): Edit faces on the §4 parts — the empty corner (row 35), the rail (mockup .rail), Outlines · X-ray in the view corner (R0), Topology's Selections view only with a lit row (row 34; both panels from Lattice), the foot hint; CutLookHostedTests (reds saved), ParityCutShots
+#   af044940 Merge branch 'claude/app-build-parts' into claude/app-build-b8
+#   fdabecc0 B8 look slice 1: green on the narrow set; the reshaped edits keep #362's hook anchors
+#   eaa1518d Merge commit '9aa3050a' into claude/app-build-b8
+# Gates:
+#   23:07 checks ok: B8L1 eaa1518d, 4 commit(s), app-only, base 9aa3050a, onto 9aa3050a, fingerprint db2cc34ef3fe
+#   23:07 merged 2a7c7bd8; app tree == B8L1's, fingerprint db2cc34ef3fe
+#   23:07 waiting for HEAVY.lock (free)
+#   23:07 lock taken
+#   23:13 iPad device build green; lock released
+#   23:13 pushed 2a7c7bd8
+#   23:13 worker /health "fingerprint": "db2cc34ef3fe" (unchanged, no swap)

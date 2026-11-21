@@ -1,0 +1,4 @@
+[Done] ["Edge 14"]: stored
+sent: ["Edge 14 in the job"]
+shared: Edge 14 and Face 3 share 85 mm² · fixes ["Face 3 rests", "Remove Edge 14"]
+E01_13p_shared_footprint_words_and_fixes.png: marks ["flatArrow-Edge 14", "flatDepthChip-Edge 14", "flatKnob-Edge 14", "flatPrism-Edge 14", "flatTiltBox-Edge 14", "flatTwistBox-Edge 14"] · solid ["Edge 14": false, "Edge 16": false] · toast -

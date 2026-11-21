@@ -26,15 +26,24 @@ final class PageLeftModalPlacementTests: XCTestCase {
     /// geometry the modifier now derives — and the file's own body applies the
     /// paddings before the expanding frame.
     func testMinimizedLiftsAboveTheCornerInPortraitOnly() {
-        // PORTRAIT — the action row now carries BOTH Lattice and Optimize, so the
-        // corner is occupied and the panel rests above it.
+        // ★★ THIS ASSERTION IS REPLACED, NOT WEAKENED (maintainer, 2026-08-19:
+        // "The selections does not drop all the way to the bottom of the screen").
+        //
+        // ★ IT PINNED A LIFT THAT EXISTED FOR A REASON THAT NO LONGER HOLDS. The
+        // 76 pt portrait lift was added because a MINIMIZED panel still carried
+        // the EXPANDED panel's 348 pt width, so it reached across the bottom of
+        // the screen and collided with the action row (Lattice + Optimize). The
+        // collapsed panel now sizes to its own content — a chevron, a word and a
+        // count — and sits in the left corner, well clear of a centred action
+        // row. The premise is gone, so the rule it justified goes with it.
+        //
+        // Portrait and landscape now agree: the corner itself, both ways.
         let portrait = PageLeftModal(canvasHeight: 1300, minimized: true,
                                      canvasWidth: 1000)
         XCTAssertFalse(portrait.isLandscape)
-        XCTAssertEqual(portrait.minimizedBottomInset,
-                       PageChrome.edge + PageLeftModal.minimizedPortraitLift,
+        XCTAssertEqual(portrait.minimizedBottomInset, PageChrome.edge,
                        accuracy: 0.001,
-                       "★ portrait: just above the corner, with clearance")
+                       "★ portrait: the corner itself — the pill is narrow now")
 
         // LANDSCAPE — "there should be more than enough room for it to be at the
         // bottom-left corner".
@@ -64,12 +73,14 @@ final class PageLeftModalPlacementTests: XCTestCase {
                        "★ a spacer below — even minLength 0 — is flexible and "
                        + "splits the free height, which centres the panel")
 
-        // OPEN keeps his §6 standard: a spacer on both sides ⇒ centred in the band.
+        // ★ RE-PINNED (B2, U1, approved design 2026-11-02 §4.1 / §4.3): OPEN starts 12 pt under the stage row
+        // (PageChrome.panelTop) — a spacer BELOW only; it never touches the bottom (PageChrome.panelBottom). It was centred
+        // (a spacer on both sides, his 08-14 §6 standard).
         let open = PageLeftModal(canvasHeight: 1300, minimized: false,
                                  canvasWidth: 1000)
-        XCTAssertTrue(open.hasSpacerAbove)
+        XCTAssertFalse(open.hasSpacerAbove, "★ open is top-aligned under the stage row")
         XCTAssertTrue(open.hasSpacerBelow,
-                      "★ open is centre-left and never touches top or bottom")
+                      "★ open never touches the bottom")
     }
 
     /// An OPEN panel is unaffected in either orientation — his earlier standard
@@ -98,8 +109,8 @@ final class LatticeActionBarTests: XCTestCase {
                       "★ Topology keeps it — it is how a new user learns to select")
         XCTAssertFalse(WorkspaceStageVisibility.of(.lattice).showsSelectionHint,
                        "★ gone from Lattice")
-        XCTAssertFalse(WorkspaceStageVisibility.of(.surface).showsSelectionHint,
-                       "★ gone from Surface")
+        XCTAssertFalse(WorkspaceStageVisibility.editingFaces.showsSelectionHint,
+                       "★ gone from Edit faces (the Surface stage's column)")
     }
 
     /// ★★ AND IT RUNS ON DEVICE (maintainer, 2026-08-17: "Can you please make it

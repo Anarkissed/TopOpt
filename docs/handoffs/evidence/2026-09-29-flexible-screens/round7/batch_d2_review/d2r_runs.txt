@@ -1,0 +1,110 @@
+# The review of R7-D2 — the runs, raw counts. swift test --skip-build --scratch-path /tmp/r7d-build; counts from Test Case lines.
+
+## 1. RED (stubs: d2r_make_stubs.py.txt from 828d352c) — d2r_red_run.txt
+FlexibleR7D2ReviewHostedTests testANumberBoxTakesATapAcross44Points failed (26.256 seconds).
+FlexibleR7D2ReviewHostedTests testTheLayerPassesTapsThroughWithAFacePicked passed (4.211 seconds).
+FlexibleR7D2ReviewHostedTests testTheReviewFindingsOnHisPad11Landscape failed (70.101 seconds).
+FlexibleR7D2ReviewHostedTests testTheReviewFindingsOnHisPad11Portrait failed (70.130 seconds).
+FlexibleR7D2ReviewHostedTests testTheReviewFindingsOnHisPad13Landscape failed (70.139 seconds).
+FlexibleR7D2ReviewHostedTests testTheReviewFindingsOnHisPad13Portrait failed (70.229 seconds).
+FlexibleR7D2ReviewTests testAPrismNumberUnderAPanelMovesToAnotherSpotOfItsPrism failed (0.015 seconds).
+FlexibleR7D2ReviewTests testTheAutoSpotKeepsOffTheFacesOwnOutline failed (0.000 seconds).
+FlexibleR7D2ReviewTests testTheChipsInfoCardSitsBelowTheChipNeverOnIt failed (0.003 seconds).
+FlexibleR7D2ReviewTests testTheDeleteQuestionAndItsMessageFitOneLineWhateverTheName failed (0.001 seconds).
+FlexibleR7D2ReviewTests testTheDeleteQuestionNeverWidensItsPanel failed (0.001 seconds).
+FlexibleR7D2ReviewTests testTheHeldLatticeLineSaysTheTwoTapRoute failed (0.001 seconds).
+FlexibleR7D2ReviewTests testTheInfoReadsTheFlexibleLatticeDrawnInsideThatFace failed (0.005 seconds).
+FlexibleR7D2ReviewTests testTheJoinOffersOnlyAGroupThatHasALatticeFace failed (0.020 seconds).
+FlexibleR7D2ReviewTests testTheMainPagesNumberBoxesHaveA44PointTarget failed (0.003 seconds).
+FlexibleR7D2ReviewTests testTheMessageSitsAboveThePlayerWhenPlayIsOn failed (0.001 seconds).
+FlexibleR7D2ReviewTests testTheWeightsReadInTheFlexibleUnitAndANewLoadPointsToTheSquishPage failed (0.012 seconds).
+RED CONTROL assertion failures in the red run: 0
+
+## 2. GREEN at 850c802a — the review's classes + the D2 classes they touch
+FlexibleFaceChipTests testADraggedChipKeepsItsSpotForThatFaceAndTheLeaderReAims passed (0.003 seconds).
+FlexibleFaceChipTests testAutoPlacementOrderAndTheKeepOuts passed (0.001 seconds).
+FlexibleFaceChipTests testTheDragGestureWritesTheSpotLiveAndLetsGoClear passed (0.002 seconds).
+FlexibleFaceChipTests testTheInfoShowsOnlyHisFourRowsFromTheDrawersOwnNumbers passed (0.002 seconds).
+FlexibleFaceChipTests testTheJoinIsAFilledButtonWithItsExactLabel passed (0.002 seconds).
+FlexibleR7D2ReviewHostedTests testANumberBoxTakesATapAcross44Points passed (26.058 seconds).
+FlexibleR7D2ReviewHostedTests testTheLayerPassesTapsThroughWithAFacePicked passed (4.249 seconds).
+FlexibleR7D2ReviewHostedTests testTheReviewFindingsOnHisPad11Landscape passed (57.384 seconds).
+FlexibleR7D2ReviewHostedTests testTheReviewFindingsOnHisPad11Portrait passed (58.973 seconds).
+FlexibleR7D2ReviewHostedTests testTheReviewFindingsOnHisPad13Landscape passed (57.544 seconds).
+FlexibleR7D2ReviewHostedTests testTheReviewFindingsOnHisPad13Portrait passed (57.517 seconds).
+FlexibleR7D2ReviewTests testAPrismNumberUnderAPanelMovesToAnotherSpotOfItsPrism passed (0.011 seconds).
+FlexibleR7D2ReviewTests testTheAutoSpotKeepsOffTheFacesOwnOutline passed (0.002 seconds).
+FlexibleR7D2ReviewTests testTheChipsInfoCardSitsBelowTheChipNeverOnIt passed (0.000 seconds).
+FlexibleR7D2ReviewTests testTheDeleteQuestionAndItsMessageFitOneLineWhateverTheName passed (0.000 seconds).
+FlexibleR7D2ReviewTests testTheDeleteQuestionNeverWidensItsPanel passed (0.001 seconds).
+FlexibleR7D2ReviewTests testTheHeldLatticeLineSaysTheTwoTapRoute passed (0.000 seconds).
+FlexibleR7D2ReviewTests testTheInfoReadsTheFlexibleLatticeDrawnInsideThatFace passed (0.046 seconds).
+FlexibleR7D2ReviewTests testTheJoinOffersOnlyAGroupThatHasALatticeFace passed (0.010 seconds).
+FlexibleR7D2ReviewTests testTheMainPagesNumberBoxesHaveA44PointTarget passed (0.003 seconds).
+FlexibleR7D2ReviewTests testTheMessageSitsAboveThePlayerWhenPlayIsOn passed (0.000 seconds).
+FlexibleR7D2ReviewTests testTheWeightsReadInTheFlexibleUnitAndANewLoadPointsToTheSquishPage passed (0.008 seconds).
+FlexibleR7D2ReviewTests testWhenNoSpotIsClearOfTheFaceTheChromeStillWins passed (0.092 seconds).
+FlexibleRound7SelectionsHookTests testEachHookOnceAtItsAnchorWithItsGateAndRemovingAGateGoesRed passed (1.089 seconds).
+FlexibleRound7SelectionsHookTests testH35IsHeldProjectModelHasNoLatticeOnlyLine passed (0.033 seconds).
+FlexibleRound7SelectionsHookTests testTheNewFlexibleFilesExist passed (0.003 seconds).
+FlexibleRound7SelectionsHookTests testTheOldLinesAreGoneAndNothingElseOfOursIsInThoseSpots passed (0.222 seconds).
+FlexibleRound7SelectionsHostedTests testAMovedChipStaysWhereHeLeftItForThatFace passed (24.426 seconds).
+FlexibleRound7SelectionsHostedTests testTheHandlesNumberIsTheListsAndTheInfoOpensHisFour passed (24.486 seconds).
+FlexibleRound7SelectionsHostedTests testTheLayerIsHitTransparent passed (1.409 seconds).
+FlexibleRound7SelectionsHostedTests testTheListTheChipAndTheFilledJoinButton passed (44.911 seconds).
+FlexibleRound7SelectionsHostedTests testTheTrashAsksFirstAndUndoBringsTheGroupBack passed (26.927 seconds).
+	 Executed 6 tests, with 0 failures (0 unexpected) in 261.725 (261.726) seconds
+FLEX-R7D2R-R3 11l (i) ["Cell 8.7 mm · Gyroid", "Density 16%", "Strut 0.45 mm", "Cells across 2.9"] · legend 15% · ≈8.7 mm … 21% · ≈6.7 mm
+FLEX-R7D2R 11l chip (550.1640394287745, 94.71202712525874, 404.0, 132.0) · outline (596.9999389648438, 377.8227844238281, 340.37640380859375, 342.8046569824219) · card (550.1640394287745, 234.71202712525871, 280.0, 160.0) · list (24.0, 380.0, 348.0, 417.0)
+FLEX-R7D2R-R3 11p (i) ["Cell 8.7 mm · Gyroid", "Density 16%", "Strut 0.45 mm", "Cells across 2.9"] · legend 15% · ≈8.7 mm … 21% · ≈6.7 mm
+FLEX-R7D2R 11p chip (414.0, 812.0321655273438, 404.0, 132.0) · outline (416.99993896484375, 540.9117431640625, 487.30133056640625, 490.77783203125) · card (466.5, 632.0321655273438, 280.0, 160.0) · list (24.0, 467.5, 348.0, 417.0)
+FLEX-R7D2R-R3 13l (i) ["Cell 8.7 mm · Gyroid", "Density 16%", "Strut 0.45 mm", "Cells across 2.9"] · legend 15% · ≈8.7 mm … 21% · ≈6.7 mm
+FLEX-R7D2R 13l chip (684.9768138926866, 326.44835761905904, 404.0, 132.0) · outline (687.9999389648438, 467.521728515625, 421.18511962890625, 424.18988037109375) · card (737.4768138926866, 466.44835761905904, 280.0, 160.0) · list (24.0, 386.5, 348.0, 417.0)
+FLEX-R7D2R-R3 13p (i) ["Cell 8.7 mm · Gyroid", "Density 16%", "Strut 0.45 mm", "Cells across 2.9"] · legend 15% · ≈8.7 mm … 21% · ≈6.7 mm
+FLEX-R7D2R 13p chip (612.0, 483.2832644578921, 404.0, 132.0) · outline (515.9999389648438, 623.3623046875, 561.5802612304688, 565.5865478515625) · card (664.5, 623.2832644578921, 280.0, 160.0) · list (24.0, 558.5, 348.0, 417.0)
+Also green before the last look-and-fix (green2.log): FlexibleRound5SettingsHostedTests, FlexibleMainPageLoadsTests (the Squish page's number boxes and FlexibleNumberBox's source pins).
+
+## 3. THE TARGETED SUITE at 850c802a (07:10–08:55): 237 classes (R7-D2's 234 — every Flexible* class, every class that source-pins a touched file incl. the WorkspacePlaceholder / ProjectModel pinners, the goldens, LatticeStaleTypeTests, the listed #354 classes — + FlexibleR7D2ReviewTests, FlexibleR7D2ReviewHostedTests, FlexibleR7D2ReviewEvidenceProbe), 20 chunks of 12, one process per chunk
+=== chunk 1 rc 0 passed 69 failed 0 skipped 13 sigmentions 0 start 07:10:00 end 07:14:28
+=== chunk 2 rc 1 passed 37 failed 1 skipped 13 sigmentions 0 start 07:14:28 end 07:38:45
+=== chunk 3 rc 0 passed 71 failed 0 skipped 2 sigmentions 0 start 07:38:45 end 07:43:22
+=== chunk 4 rc 0 passed 45 failed 0 skipped 3 sigmentions 0 start 07:43:22 end 07:45:36
+=== chunk 5 rc 1 passed 51 failed 0 skipped 2 sigmentions 1 start 07:45:36 end 07:46:57
+=== chunk 6 rc 0 passed 82 failed 0 skipped 0 sigmentions 0 start 07:46:57 end 07:49:30
+=== chunk 7 rc 0 passed 71 failed 0 skipped 4 sigmentions 0 start 07:49:30 end 07:54:17
+=== chunk 8 rc 0 passed 43 failed 0 skipped 9 sigmentions 0 start 07:54:17 end 07:57:40
+=== chunk 9 rc 0 passed 43 failed 0 skipped 5 sigmentions 0 start 07:57:40 end 08:12:17
+=== chunk 10 rc 0 passed 65 failed 0 skipped 11 sigmentions 0 start 08:12:17 end 08:18:50
+=== chunk 11 rc 1 passed 48 failed 1 skipped 20 sigmentions 0 start 08:18:50 end 08:33:19
+=== chunk 12 rc 0 passed 65 failed 0 skipped 1 sigmentions 0 start 08:33:19 end 08:38:21
+=== chunk 13 rc 0 passed 47 failed 0 skipped 5 sigmentions 0 start 08:38:21 end 08:40:21
+=== chunk 14 rc 0 passed 100 failed 0 skipped 0 sigmentions 0 start 08:40:21 end 08:48:14
+=== chunk 15 rc 0 passed 70 failed 0 skipped 0 sigmentions 0 start 08:48:14 end 08:48:23
+=== chunk 16 rc 1 passed 98 failed 1 skipped 1 sigmentions 0 start 08:48:23 end 08:49:13
+=== chunk 17 rc 0 passed 91 failed 0 skipped 1 sigmentions 0 start 08:49:13 end 08:49:26
+=== chunk 18 rc 0 passed 108 failed 0 skipped 2 sigmentions 0 start 08:49:26 end 08:53:43
+=== chunk 19 rc 0 passed 115 failed 0 skipped 0 sigmentions 0 start 08:53:43 end 08:53:47
+=== chunk 20 rc 0 passed 106 failed 0 skipped 2 sigmentions 0 start 08:53:47 end 08:55:21
+DONE
+TOTAL: 1522 test cases: 1425 passed, 94 skipped, 3 failed
+Failures (all on the known list):
+   8 FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker
+   1 FlexibleRound7ViewsHostedTests testThePlayIconsRingAndDotAreSeenWithPlayOff
+   1 LatticeSimSolveTriggerTests testTheTriggerRefusesOnAllThreeGrounds
+Chunk 5: 'exited with unexpected signal code 11' AFTER every one of its 12 suites passed (the last, FlexibleLegendPlacementTests, passed at 07:46:57) — the known exit race (F15: a scheduled FlexibleStageModel.scheduleDesigns task in FlexibleCore.strainUnder → topoptbridge::set_for while exit() runs __cxa_finalize_ranges on the static FlexibleData cache; ~/Library/Logs/DiagnosticReports/xctest-2026-10-18-051922.ips, confirmed).
+LatticeStaleTypeTests: 6/6 passed.
+
+## 4. GOLDENS (FlexibleAngledGoldenTests) at 850c802a
+SWIFT_DETERMINISTIC_HASHING=1: 38 identical, 0 DIFFERS, 0 PART-SKIP · Executed 13 tests, with 0 failures (0 unexpected) in 13.437 (13.439) seconds
+unseeded: 32 identical, 0 DIFFERS, 1 PART-SKIP · Executed 13 tests, with 0 failures (0 unexpected) in 13.372 (13.373) seconds
+
+## 5. THE 16 STAGE-JOB HASHES at 850c802a
+stage_job_hashes.sh (angled_presses/, SWIFT_TEST_ARGS='--scratch-path /tmp/r7d-build') → stage_job_hashes_d2r.txt: cmp with round7/batch_d2/stage_job_hashes_d2.txt → byte-identical (whole file)
+
+## 6. THE OTHER STAGES (condition e) — other_stages/compare.txt
+13 images, 0 differ
+
+## 7. iOS
+xcodebuild -project app/TopOpt.xcodeproj -scheme TopOpt -configuration Debug -destination id=147E56A1-C8CA-4B9D-BE6C-CF230589A83A -derivedDataPath ~/Library/Developer/Xcode/DerivedData/flexA1 build: BUILD SUCCEEDED (09:02)
+install rule: the simulator Booted; launchctl list | grep com.nadim.topopt → nothing (the app was NOT running), so nothing was terminated; simctl install rc 0 at 09:02:56; NOT launched; launchctl after: not running.
+installed TopOpt.debug.dylib: 87 441 952 bytes, mtime 09:02, sha256 3a84ca41aeb2918a… == the built one; carries 'For lattice now: tap Protect, then Lattice', 'Delete this group here and in Topology?', 'weight: Squish page'.

@@ -1,0 +1,17 @@
+# Topology / Structural / Aesthetic / Surface chrome (FlexibleRound7OtherStagesProbe, 13 frames: the whole app page hosted, each stage by its own navigation), one environment:
+#   BEFORE = the R7-D2 head 828d352c, rendered by the review at 04:58; AFTER = 850c802a (this step: Flexible files only), rendered 09:01.
+
+11l_flexiblePad0003_surface.png: IDENTICAL (0 px differ)
+11l_flexiblePad0003_topology.png: IDENTICAL (0 px differ)
+11l_structural3418_lattice.png: IDENTICAL (0 px differ)
+11l_structural3418_surface.png: IDENTICAL (0 px differ)
+11l_structural3418_topology.png: IDENTICAL (0 px differ)
+13p_aesthetic68BF_lattice.png: IDENTICAL (0 px differ)
+13p_aesthetic68BF_topology.png: IDENTICAL (0 px differ)
+13p_flexiblePad0003_surface.png: IDENTICAL (0 px differ)
+13p_flexiblePad0003_topology.png: IDENTICAL (0 px differ)
+13p_plain887A_topology.png: IDENTICAL (0 px differ)
+13p_structural3418_lattice.png: IDENTICAL (0 px differ)
+13p_structural3418_surface.png: IDENTICAL (0 px differ)
+13p_structural3418_topology.png: IDENTICAL (0 px differ)
+13 images, 0 differ

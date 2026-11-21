@@ -1,0 +1,4 @@
+Img9 7 mm: chip (499.0, 1009.0, 131.0, 45.0) '0.6 of 7.0 mm' · bend tag none · within 12 pt of the chip false · card 'Reaches 0.6 of 7.0 mm · 4549 columns short' · prisms tag -
+RED (today) 7 mm: chip (499.0, 1020.0, 131.0, 45.0) '0.6 of 7.0 mm' · bend tag (532.0, 1018.0, 66.0, 26.0) · within 12 pt of the chip true · card 'Reaches 0.6 of 7.0 mm · 4549 columns short' · prisms tag -
+Img8 3 mm: chip (499.0, 1012.0, 131.0, 45.0) '0.6 of 3.0 mm' · bend tag none · within 12 pt of the chip false · card 'Reaches 0.6 of 3.0 mm · 4336 columns short' · prisms tag -
+3 mm, no face selected: chip - '0.6 of 3.0 mm' · bend tag (532.0, 1021.0, 66.0, 26.0) · within 12 pt of the chip false · card 'Reaches 0.6 of 3.0 mm · 4336 columns short' · prisms tag -

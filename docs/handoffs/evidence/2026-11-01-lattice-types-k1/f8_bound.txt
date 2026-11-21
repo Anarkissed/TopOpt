@@ -1,0 +1,10 @@
+gyroid L 8 rho 0.375 wall 0.992 eps 0.020: wall area 371.0 mm2 per cell (both faces), lower bound 2301 triangles per cell
+schwarz_d L 8 rho 0.400 wall 0.855 eps 0.020: wall area 454.7 mm2 per cell (both faces), lower bound 3613 triangles per cell
+gyroid L 8 rho 0.375 wall 0.992 eps 0.030: wall area 371.0 mm2 per cell (both faces), lower bound 1534 triangles per cell
+schwarz_d L 8 rho 0.400 wall 0.855 eps 0.030: wall area 454.7 mm2 per cell (both faces), lower bound 2409 triangles per cell
+schwarz_d L 6 rho 0.400 wall 0.642 eps 0.020: wall area 255.8 mm2 per cell (both faces), lower bound 2710 triangles per cell
+gyroid L 4 rho 0.375 wall 0.496 eps 0.020: wall area 92.8 mm2 per cell (both faces), lower bound 1150 triangles per cell
+schwarz_d L 4 rho 0.400 wall 0.428 eps 0.020: wall area 113.7 mm2 per cell (both faces), lower bound 1806 triangles per cell
+schwarz_d L 5 rho 0.400 wall 0.535 eps 0.020: wall area 177.6 mm2 per cell (both faces), lower bound 2258 triangles per cell
+gyroid L 8 rho 0.250 wall 0.653 eps 0.020: wall area 385.1 mm2 per cell (both faces), lower bound 2347 triangles per cell
+schwarz_d L 8 rho 0.250 wall 0.526 eps 0.020: wall area 477.6 mm2 per cell (both faces), lower bound 3700 triangles per cell

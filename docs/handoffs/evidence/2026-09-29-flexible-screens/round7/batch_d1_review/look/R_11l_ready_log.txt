@@ -1,0 +1,8 @@
+[11l_ready] the Squish page opened by itself: false (H37: never)
+status 'Ready' tone ready · groups [[1]]
+wrote R_11l_ready_R10_main_ready.png
+  tap the ⌃ (look, never send) [latticeMore (1126,746 44x64) at 1148,778]
+  R11: player none · legend (922,292 248x124) · panel latticeCard (750,450 420x284) · nothing touches
+card on Ready · sent 0 · job 'Group 1 · 22 lb · 1 face · bead 0.45 mm'
+wrote R_11l_ready_R11_card_ready.png
+touches: 0

@@ -1,0 +1,7 @@
+his live pad: lattice gen 2 · Group 2 ["Edge 14", "Edge 16"] · sim landed scale 0.05618856211325271 maxSafe 1.0 · sent 0
+E3_tmp_rest.png: marks ["flatArrow-Edge 14", "flatDepthChip-Edge 14", "flatKnob-Edge 14", "flatPrism-Edge 14", "flatTiltBox-Edge 14", "flatTwistBox-Edge 14"] · solid ["Edge 14": false, "Edge 16": false] · toast -
+squish page: playing group Group 2 · note 'Lattice not tuned for this press yet' · lit false · picker 0
+E3_tmp_full.png: marks ["flatArrow-Edge 14", "flatDepthChip-Edge 14", "flatKnob-Edge 14", "flatPrism-Edge 14", "flatTiltBox-Edge 14", "flatTwistBox-Edge 14"] · solid ["Edge 14": false, "Edge 16": false] · toast -
+[+] on: lit ["corner 1", "corner 3", "corner 5", "corner 7", "edge 9", "edge 9", "edge 10", "edge 11", "edge 12", "edge 12", "edge 13", "edge 15", "edge 17", "edge 17", "edge 18", "edge 19", "edge 20", "edge 20"] · press names ["Edge 14", "Edge 16"]
+E3_02_13p_plus_lit_one_number.png: marks ["flatArrow-Edge 14", "flatDepthChip-Edge 14", "flatKnob-Edge 14", "flatPrism-Edge 14", "flatTiltBox-Edge 14", "flatTwistBox-Edge 14"] · solid ["Edge 14": false, "Edge 16": false] · toast -
+main card: choices ["All (one after another)", "Group 1", "Group 2"] · picked group-2 · chip 'Lattice not tuned for this press yet' · shown true · sims ["group-1", "group-2", "all"]

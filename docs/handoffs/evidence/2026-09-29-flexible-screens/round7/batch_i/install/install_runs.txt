@@ -1,0 +1,58 @@
+Batch I install run (I1 + I2 + I3 together) at 0fbbd82a, 2026-10-22, scratch-path /tmp/r7x20b-build
+Classes (     102 TopOptFlowsTests classes, the union of the three parts' classes and pins incl. FlexibleSquishCopyTests, + kit FlexibleSquishFETests):
+FlexibleI2WallsProbe FlexibleI2AttachTests FlexibleI2AttachHostedTests FlexibleBatchBReviewUXTests FlexibleBatchCHookTests FlexibleBatchCVerifyTests FlexibleBatchMLegendTests FlexibleBatchMXrayTests FlexibleBatchMStressTests FlexibleBatchMVerifyTests FlexibleBatchNVerifyTests FlexibleBatchVHostedTests FlexibleChromeLayoutTests FlexibleEdgeGroupsTests FlexibleFaceChipTests FlexibleFaceCommitTests FlexibleFacePickTests FlexibleH40ShadowTests FlexibleLatticeIsProtectedHostedTests FlexibleLatticeIsProtectedTests FlexibleMainPageLoadsTests FlexibleLatticeHandlesTests FlexibleMainPrismEqualityTests FlexibleLatticeSectionsTests FlexibleLatticeSectionsHostedTests FlexibleLegendPlacementTests FlexibleMainPageRound4HostedTests FlexibleMainPageHookTests FlexibleMainPageRound4Tests FlexibleMainPageRound4VerifyTests FlexibleMainViewsTests FlexibleR7E1FollowUpHostedTests FlexiblePressSaveTests FlexiblePressReviewTests FlexibleR7D2ReviewTests FlexibleR7E1FollowUpTests FlexibleR7D2ReviewHostedTests FlexibleR7E2Tests FlexibleR7E2ParkTests FlexibleR7EveningAnswersTests FlexibleR7FTests FlexibleR7RTests FlexibleR7M1Tests FlexibleR7M1VerifyTests FlexibleR7U21EdgeLookTests FlexibleR7SettingsHostedTests FlexibleR7X1HostedTests FlexibleR7SettingsTests FlexibleR7U21CHandlesHostedTests FlexibleR7X1VerifyHostedTests FlexibleR7U21CHandlesTests FlexibleR7X1VerifyTests FlexibleR7U21NewModelTests FlexibleR7X1Tests FlexibleRound5SettingsVerifyTests FlexibleRound6Tests FlexibleRound5SettingsTests FlexibleRound7D1ReviewHostedTests FlexibleRound7DesignIntegrationHostedTests FlexibleRound6HostedTests FlexibleRound7SelectionsHookTests FlexibleRound7ViewsHostedTests FlexibleRound7ScreenHostedTests FlexibleRound7D1ReviewTests FlexibleSectorStoreTests FlexibleRound7ViewsTests FlexibleRound7DesignIntegrationTests FlexibleRound7ScreenHookTests FlexibleS1bMainTagsTests FlexibleSelectionsListTests FlexibleRound7SelectionsHostedTests FlexibleSqueezeGroupsUITests FlexibleSettingsRound4Tests FlexibleSqueezeGroupsReviewUITests FlexibleSquishCopyTests FlexibleTopLayerTests FlexibleSquishVerifyGTests FlexibleU21DeleteUndoTests FlexibleU2Tests FlexibleSquishTests FlexibleU21OneLatticeRuleTests LatticePageRound2Tests LatticeProxyTests LatticeStressTintTests FlexibleI3LinkSimTests FlexibleI1HoldTests FlexibleFEFieldTests FlexibleFEVerifyGTests FlexibleX20bTests FlexibleRowCopyTests FlexibleU21BendTests FlexibleBatchNRefineTests FlexibleSquishSolverTests FlexibleR7E3Tests FlexibleU21RTests FlexibleSquishPerfProbe FlexibleSqueezeGroupsReviewTests FlexibleRound7FitHostedTests FlexibleI1R2FramesProbe FlexibleI3FramesProbe FlexibleRound7CardMessagesTests FlexibleStageCapsuleTests
+
+runner.log:
+start 14:01:01 0fbbd82a
+build exit 0 14:01:04
+kit FlexibleSquishFETests exit 0 14:01:34
+chunk_aa exit 0 14:05:32
+chunk_ab exit 1 14:27:29
+chunk_ac exit 0 14:28:26
+chunk_ad exit 0 14:29:40
+chunk_ae exit 0 14:31:43
+chunk_af exit 0 14:32:43
+chunk_ag exit 0 14:39:16
+chunk_ah exit 0 14:47:42
+chunk_ai exit 0 14:56:35
+chunk_aj exit 0 15:09:04
+chunk_ak exit 0 15:21:51
+chunk_al exit 0 15:27:56
+chunk_am exit 0 15:37:11
+chunk_an exit 0 15:41:31
+chunk_ao exit 0 15:46:00
+chunk_ap exit 0 15:53:23
+chunk_aq exit 0 15:56:31
+golden det exit 0 15:56:48
+golden unseeded exit 0 15:57:04
+hashes exit 0 15:58:06
+hashes cmp vs round7/batch_i/i3/stage_job_hashes_i3.txt (whole file): identical
+hashes cmp vs round7/batch_i/i2/stage_job_hashes_i2.txt (whole file): identical
+hashes cmp vs round7/batch_u21_integ2/stage_job_hashes_u21_integ2.txt (whole file): identical
+ALLDONE 15:58:06
+
+Per chunk (passed failed skipped):
+kit_fe.log 19 0 0
+chunk_aa.log 70 0 0
+chunk_ab.log 37 4 1
+chunk_ac.log 50 0 0
+chunk_ad.log 46 0 0
+chunk_ae.log 43 0 0
+chunk_af.log 59 0 0
+chunk_ag.log 56 0 0
+chunk_ah.log 45 0 1
+chunk_ai.log 46 0 0
+chunk_aj.log 67 0 0
+chunk_ak.log 53 0 0
+chunk_al.log 40 0 1
+chunk_am.log 52 0 0
+chunk_an.log 83 0 1
+chunk_ao.log 40 0 0
+chunk_ap.log 44 0 2
+chunk_aq.log 34 0 0
+TOTAL 676 passed, 1 failed, 6 skipped. The failure: FlexibleBatchNVerifyTests.testEveryRefineLineIsWholeBesideTheLivePlayAllPicker (known refine-line x8). No signal lines.
+Goldens: deterministic 38 identical / 0 DIFFERS / 0 PART-SKIP; unseeded 32 identical / 0 DIFFERS / 1 PART-SKIP
+
+iOS: xcodebuild Debug, destination 147E56A1, derivedData flexA1: BUILD SUCCEEDED at 0fbbd82a. App not running; installed 16:00:03; NOT launched.
+Installed TopOpt.debug.dylib == built (cmp identical), sha256 09dc4a99f3045a08a39aea991fa4e7a74225bde4425427fb77c84252669a265b
+Strings in the installed dylib: "Held by Topology's fixed faces", "linked wall", "fixed on Topology", "Not attached", "Curved lattice · Attach not yet", "Attach to the", "Held by the presses against each other"

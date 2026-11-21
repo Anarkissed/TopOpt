@@ -292,6 +292,33 @@ int main() {
     CHECK(holeB == 1, "l-bracket hole B axis at (9, 0)");
   }
 
+  // === sphere_r10.step: a pole slivers, the import repairs it ==============
+  // A synthetic r = 10 mm sphere (OCCT BRepPrimAPI_MakeSphere, no user data). Its
+  // face carries two DEGENERATED edges (the poles); BRepMesh gives each pole two
+  // nodes at the same 3D point, which weld into repeated-index slivers: before the
+  // repair (core 9082fd6a) this import had 2 boundary + 2 non-manifold edges and
+  // was "not watertight" (his 2040 Extrusion Stand's corners, 2026-10-29).
+  // B-rep volume 4/3·pi·1000 = 4188.790 mm^3.
+  {
+    StepModel m = import_step_file(fixture("sphere_r10.step"));
+    CHECK(m.solid_count == 1 && m.face_count == 1, "sphere has 1 solid, 1 face");
+    WatertightReport r = check_watertight(m.mesh);
+    CHECK(r.watertight, "sphere mesh is watertight after the pole repair");
+    CHECK(r.boundary_edges == 0 && r.non_manifold_edges == 0,
+          "sphere mesh has no boundary or non-manifold edge");
+    int repeated = 0;
+    for (const auto& t : m.mesh.triangles)
+      if (t[0] == t[1] || t[1] == t[2] || t[0] == t[2]) ++repeated;
+    CHECK(repeated == 0, "no repeated-index (zero-area) triangle survives");
+    CHECK(m.triangle_face.size() == m.mesh.triangles.size(),
+          "every kept triangle keeps its face id");
+    // Inscribed in the sphere at 0.5 rad angular deflection, so a little UNDER the
+    // B-rep volume (measured 4128.7 mm^3, -1.4 %): closed, and within 3 %.
+    const double vol = signed_volume(m.mesh);
+    CHECK(vol > 0.97 * 4188.790 && vol < 4188.790,
+          "sphere mesh encloses (just under) the B-rep volume");
+  }
+
   // === Missing file is a StepError, not a crash ============================
   {
     bool threw = false;

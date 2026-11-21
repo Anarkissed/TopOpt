@@ -1,0 +1,72 @@
+Diagrid skin connectivity per strut type (found while putting SC live, 2026-11-02).
+
+Probe: diagrid_skin_connectivity_probe.cpp (this folder), built against core/build/libtopopt.a:
+  c++ -std=c++17 -O2 -I core/include -I /opt/homebrew/include/eigen3 diagrid_skin_connectivity_probe.cpp core/build/libtopopt.a
+A 6x6x6 block of 8 mm cells at the band middle, clipped by a box whose x-min face sits at c cells
+(c = 0.05 .. 0.95), Diagrid skin. Each entry is c:<pieces>/<anchors>: how many separate pieces the
+skin leaves among the anchors on that face's interior (one cell in from its edges). 1 = connected.
+
+Cause, from each type's canonical cell (crossing_node_gap in lattice_gen.cpp): near a plane of nodes
+the landings bunch around the nodes that send a strut ACROSS it, and the diagrid must bridge the
+gap between those nodes. Octet's link radius, 0.72 cell, is 1.8 % over octet's gap.
+  octet    S 2  crossing-node gap 0.7071 cells (axis 0, plane 0/2)  link 0.72 bridges it
+  fcc      S 2  crossing-node gap 1.0000 cells (axis 0, plane 0/2)  link 0.72 DOES NOT bridge it
+  kelvin   S 4  crossing-node gap 0.7071 cells (axis 0, plane 1/4)  link 0.72 bridges it
+  rhombic  S 4  crossing-node gap 0.7071 cells (axis 0, plane 0/4)  link 0.72 bridges it
+  diamond  S 4  crossing-node gap 0.7071 cells (axis 0, plane 0/4)  link 0.72 bridges it
+  bcc      S 2  crossing-node gap 1.0000 cells (axis 0, plane 0/2)  link 0.72 DOES NOT bridge it
+  sc       S 2  crossing-node gap 1.0000 cells (axis 0, plane 0/2)  link 0.72 DOES NOT bridge it
+
+BEFORE (link 0.72 cell for every type; SC applied in the worktree for the measurement):
+  octet (r 0.600 mm): c0.05:1/112 c0.10:1/112 c0.15:1/112 c0.20:1/112 c0.25:1/112 c0.30:1/112 c0.35:1/112 c0.40:1/104 c0.45:1/104 c0.50:1/112 c0.55:1/112 c0.60:1/112 c0.65:1/112 c0.70:1/112 c0.75:1/112 c0.80:1/112 c0.85:1/112 c0.90:1/106 c0.95:1/106
+    -> worst 1 components (at c 0.05)
+  fcc (r 1.063 mm): c0.05:1/48 c0.10:1/48 c0.15:1/48 c0.20:1/48 c0.25:1/48 c0.30:1/48 c0.35:1/48 c0.40:1/48 c0.45:1/48 c0.50:1/48 c0.55:1/48 c0.60:1/48 c0.65:1/48 c0.70:1/48 c0.75:21/48 c0.80:21/48 c0.85:15/42 c0.90:15/42 c0.95:21/48
+    -> worst 21 components (at c 0.75)
+  kelvin (r 1.002 mm): c0.05:1/64 c0.10:1/56 c0.15:1/48 c0.20:1/48 c0.25:1/48 c0.30:1/48 c0.35:1/48 c0.40:1/48 c0.45:1/48 c0.50:1/48 c0.55:1/48 c0.60:1/48 c0.65:1/56 c0.70:1/64 c0.75:1/64 c0.80:1/64 c0.85:1/64 c0.90:1/64 c0.95:1/64
+    -> worst 1 components (at c 0.05)
+  rhombic (r 0.838 mm): c0.05:1/128 c0.10:1/128 c0.15:1/128 c0.20:1/128 c0.25:1/128 c0.30:1/128 c0.35:1/128 c0.40:1/113 c0.45:1/128 c0.50:1/128 c0.55:1/128 c0.60:1/128 c0.65:1/128 c0.70:1/128 c0.75:1/128 c0.80:1/128 c0.85:1/128 c0.90:1/112 c0.95:1/128
+    -> worst 1 components (at c 0.05)
+  diamond (r 1.234 mm): c0.05:1/64 c0.10:1/64 c0.15:1/64 c0.20:1/64 c0.25:1/64 c0.30:1/64 c0.35:1/56 c0.40:1/64 c0.45:1/64 c0.50:1/64 c0.55:1/64 c0.60:1/64 c0.65:1/64 c0.70:1/64 c0.75:1/64 c0.80:1/64 c0.85:1/57 c0.90:1/64 c0.95:1/64
+    -> worst 1 components (at c 0.05)
+  bcc (r 1.290 mm): c0.05:1/64 c0.10:1/64 c0.15:1/64 c0.20:16/64 c0.25:16/64 c0.30:16/64 c0.35:16/64 c0.40:16/64 c0.45:16/64 c0.50:1/64 c0.55:1/64 c0.60:1/64 c0.65:1/64 c0.70:25/64 c0.75:25/64 c0.80:25/64 c0.85:16/49 c0.90:25/64 c0.95:25/64
+    -> worst 25 components (at c 0.70)
+  sc (r 1.615 mm): c0.05:9/9 c0.10:9/9 c0.15:9/9 c0.20:9/9 c0.25:9/9 c0.30:9/9 c0.35:9/9 c0.40:9/9 c0.45:9/9 c0.50:9/9 c0.55:9/9 c0.60:9/9 c0.65:9/9 c0.70:9/9 c0.75:9/9 c0.80:9/9 c0.85:9/9 c0.90:9/9 c0.95:9/9
+    -> worst 9 components (at c 0.05)
+
+AFTER (link = 0.72 x gap / 0.7071 cell: sqrt 2 x octet's for FCC, BCC and SC; unchanged for the rest):
+  octet (r 0.600 mm): c0.05:1/112 c0.10:1/112 c0.15:1/112 c0.20:1/112 c0.25:1/112 c0.30:1/112 c0.35:1/112 c0.40:1/104 c0.45:1/104 c0.50:1/112 c0.55:1/112 c0.60:1/112 c0.65:1/112 c0.70:1/112 c0.75:1/112 c0.80:1/112 c0.85:1/112 c0.90:1/106 c0.95:1/106
+    -> worst 1 components (at c 0.05)
+  fcc (r 1.063 mm): c0.05:1/48 c0.10:1/48 c0.15:1/48 c0.20:1/48 c0.25:1/48 c0.30:1/48 c0.35:1/48 c0.40:1/48 c0.45:1/48 c0.50:1/48 c0.55:1/48 c0.60:1/48 c0.65:1/48 c0.70:1/48 c0.75:1/48 c0.80:1/48 c0.85:1/42 c0.90:1/42 c0.95:1/48
+    -> worst 1 components (at c 0.05)
+  kelvin (r 1.002 mm): c0.05:1/64 c0.10:1/56 c0.15:1/48 c0.20:1/48 c0.25:1/48 c0.30:1/48 c0.35:1/48 c0.40:1/48 c0.45:1/48 c0.50:1/48 c0.55:1/48 c0.60:1/48 c0.65:1/56 c0.70:1/64 c0.75:1/64 c0.80:1/64 c0.85:1/64 c0.90:1/64 c0.95:1/64
+    -> worst 1 components (at c 0.05)
+  rhombic (r 0.838 mm): c0.05:1/128 c0.10:1/128 c0.15:1/128 c0.20:1/128 c0.25:1/128 c0.30:1/128 c0.35:1/128 c0.40:1/113 c0.45:1/128 c0.50:1/128 c0.55:1/128 c0.60:1/128 c0.65:1/128 c0.70:1/128 c0.75:1/128 c0.80:1/128 c0.85:1/128 c0.90:1/112 c0.95:1/128
+    -> worst 1 components (at c 0.05)
+  diamond (r 1.234 mm): c0.05:1/64 c0.10:1/64 c0.15:1/64 c0.20:1/64 c0.25:1/64 c0.30:1/64 c0.35:1/56 c0.40:1/64 c0.45:1/64 c0.50:1/64 c0.55:1/64 c0.60:1/64 c0.65:1/64 c0.70:1/64 c0.75:1/64 c0.80:1/64 c0.85:1/57 c0.90:1/64 c0.95:1/64
+    -> worst 1 components (at c 0.05)
+  bcc (r 1.290 mm): c0.05:1/64 c0.10:1/64 c0.15:1/64 c0.20:1/64 c0.25:1/64 c0.30:1/64 c0.35:1/64 c0.40:1/64 c0.45:1/64 c0.50:1/64 c0.55:1/64 c0.60:1/64 c0.65:1/64 c0.70:1/64 c0.75:1/64 c0.80:1/64 c0.85:1/49 c0.90:1/64 c0.95:1/64
+    -> worst 1 components (at c 0.05)
+  SC, measured with its go-live commit:
+  sc (r 1.615 mm): c0.05:1/9 c0.10:1/9 c0.15:1/9 c0.20:1/9 c0.25:1/9 c0.30:1/9 c0.35:1/9 c0.40:1/9 c0.45:1/9 c0.50:1/9 c0.55:1/9 c0.60:1/9 c0.65:1/9 c0.70:1/9 c0.75:1/9 c0.80:1/9 c0.85:1/9 c0.90:1/9 c0.95:1/9
+    -> worst 1 components (at c 0.05)
+
+Byte identity of the skinned blocks (19 offsets x 2 box shapes per type, FNV-1a over every triangle):
+  before = the frozen gate build of 9e4484be, after = this commit
+  OLD
+    octet    1f0d017c8ac5017a  12758320 triangles
+    fcc      183f2617e650eae5  4917204 triangles
+    kelvin   15302fd0bd97fa99  9255268 triangles
+    rhombic  1b6790d6cb932dd4  16400832 triangles
+    diamond  926b933a7eeccaf2  7461164 triangles
+  NEW
+    octet    1f0d017c8ac5017a  12758320 triangles
+    fcc      af4ed2ac69778b7d  6352308 triangles
+    kelvin   15302fd0bd97fa99  9255268 triangles
+    rhombic  1b6790d6cb932dd4  16400832 triangles
+    diamond  926b933a7eeccaf2  7461164 triangles
+    bcc      86adea18a0aecd7d  5811412 triangles
+  octet, kelvin, rhombic, diamond identical; fcc changes (its skin now links), bcc was not in that build.
+
+Regression test: test_lattice_types, per live type, a face with its landings 0.95 cell off a node
+plane must give one piece. Positive control (scaling disabled): fcc 12 pieces over 24 anchors, bcc 16
+over 36 -> FAIL; with the scaling: PASS.

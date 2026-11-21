@@ -1,0 +1,17 @@
+PERC diamond: vpc16, S=5 mm, 4 cells long, 6-connected, placements x=y in {0, .25, .5, .75} cell; band [0.1571, 0.5920]
+  [writing ../docs/handoffs/evidence/2026-11-01-lattice-types-k1/diamond_perc.csv]
+  rho 0.1571  0.50 cells: no | off0.00:6 NOT SPANNING(debris 75.0%) off0.25:5 NOT SPANNING(debris 75.0%) off0.50:6 NOT SPANNING(debris 75.0%) off0.75:5 NOT SPANNING(debris 75.0%)
+  rho 0.1571  0.75 cells: PERCOLATES | off0.00:2(debris 0.3%) off0.25:2(debris 0.3%) off0.50:2(debris 0.3%) off0.75:2(debris 0.3%)
+  rho 0.1571  1.00 cells: PERCOLATES | off0.00:5(debris 0.6%) off0.25:1(debris 0.0%) off0.50:5(debris 0.6%) off0.75:1(debris 0.0%)
+  rho 0.1571  1.50 cells: PERCOLATES | off0.00:3(debris 0.1%) off0.25:1(debris 0.0%) off0.50:3(debris 0.1%) off0.75:1(debris 0.0%)
+  rho 0.1571  2.00 cells: PERCOLATES | off0.00:5(debris 0.1%) off0.25:1(debris 0.0%) off0.50:5(debris 0.1%) off0.75:1(debris 0.0%)
+  rho 0.3746  0.50 cells: no | off0.00:6 NOT SPANNING(debris 75.0%) off0.25:5 NOT SPANNING(debris 75.0%) off0.50:6 NOT SPANNING(debris 75.0%) off0.75:5 NOT SPANNING(debris 75.0%)
+  rho 0.3746  0.75 cells: PERCOLATES | off0.00:2(debris 0.5%) off0.25:2(debris 0.5%) off0.50:2(debris 0.5%) off0.75:2(debris 0.5%)
+  rho 0.3746  1.00 cells: PERCOLATES | off0.00:5(debris 1.2%) off0.25:1(debris 0.0%) off0.50:5(debris 1.2%) off0.75:1(debris 0.0%)
+  rho 0.3746  1.50 cells: PERCOLATES | off0.00:3(debris 0.3%) off0.25:1(debris 0.0%) off0.50:3(debris 0.3%) off0.75:1(debris 0.0%)
+  rho 0.3746  2.00 cells: PERCOLATES | off0.00:5(debris 0.3%) off0.25:1(debris 0.0%) off0.50:5(debris 0.3%) off0.75:1(debris 0.0%)
+  rho 0.5920  0.50 cells: no | off0.00:6 NOT SPANNING(debris 75.0%) off0.25:5 NOT SPANNING(debris 75.0%) off0.50:6 NOT SPANNING(debris 75.0%) off0.75:5 NOT SPANNING(debris 75.0%)
+  rho 0.5920  0.75 cells: PERCOLATES | off0.00:2(debris 0.8%) off0.25:2(debris 0.8%) off0.50:2(debris 0.8%) off0.75:2(debris 0.8%)
+  rho 0.5920  1.00 cells: PERCOLATES | off0.00:5(debris 1.8%) off0.25:1(debris 0.0%) off0.50:5(debris 1.8%) off0.75:1(debris 0.0%)
+  rho 0.5920  1.50 cells: PERCOLATES | off0.00:3(debris 0.4%) off0.25:1(debris 0.0%) off0.50:3(debris 0.4%) off0.75:1(debris 0.0%)
+  rho 0.5920  2.00 cells: PERCOLATES | off0.00:5(debris 0.5%) off0.25:1(debris 0.0%) off0.50:5(debris 0.5%) off0.75:1(debris 0.0%)

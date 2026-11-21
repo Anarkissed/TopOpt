@@ -1,0 +1,2 @@
+now: 536408 vertices on another triangle's edge (0 inside an edge: T-junctions, worst 0.0000 mm), worst 0.0000 mm, 0 over 0.01 mm
+before (controlCornerBlend): 536408 (0 T-junctions, worst 0.0000 mm), worst 0.0000 mm, 0 over 0.01 mm

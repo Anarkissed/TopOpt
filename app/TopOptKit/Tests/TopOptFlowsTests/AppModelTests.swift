@@ -344,6 +344,8 @@ final class AppModelTests: XCTestCase {
         let thumb = try! XCTUnwrap(m.thumbnails[id], "imported mesh should render a thumbnail")
         XCTAssertGreaterThan(thumb.width, 0)
         XCTAssertGreaterThan(thumb.height, 0)
+        // ★ B5: it is the Library's original-model picture too, so clear around the part (mockup #lib-project)
+        XCTAssertEqual(LibraryClearPicturesTests.alphas(thumb).corners, [0, 0, 0, 0])
     }
 
     func testRenameRecentUpdatesGridAndSnapshot() {

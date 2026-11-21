@@ -243,6 +243,99 @@ int main() {
           "why reading them together said '21 faces frozen'");
   }
 
+  // ── E4 (k) — THE SAME TIE, KEYED BY REGION (ruling 2026-11-07 19:55, item 4) ──
+  //
+  // A cut piece is a face REGION: protected by {"region_id": R} and latticed by a
+  // {"kind": "region", "region_id": R} region. They are the same slab as a face's, so
+  // the same rule holds: the deepest region lattice region on R equals R's protection.
+  // Before E4 only face ids were tied, and his stand sent 20 mm against 24.15 mm.
+  {
+    const std::string named = "\"name\": \"Left drum, top half\"";
+    auto region_job = [&](const std::string& protection, const std::string& regions,
+                          bool name_it) {
+      return std::string(
+                 "{\"model\": \"p.step\", \"material\": \"PLA\", "
+                 "\"mode\": \"minimize_plastic\", \"resolution\": 32, "
+                 "\"output\": {\"report\": \"r.json\", \"mesh_format\": \"stl\", "
+                 "\"mesh_prefix\": \"v\"}, "
+                 "\"loads\": {\"anchor_face_ids\": [1], "
+                 "\"groups\": [{\"face_ids\": [2], \"force\": [0, 0, -1]}], "
+                 "\"face_regions\": [{\"id\": 107, ") +
+             (name_it ? named + ", " : std::string()) +
+             "\"add\": [16], \"cuts\": [{\"point\": [0, 0, 0], \"normal\": [1, 0, 0]}]}], "
+             "\"face_protections\": [" + protection + "]}, "
+             "\"lattice\": {\"topology\": \"octet\", \"cell_mm\": 2, "
+             "\"strut_radius_mm\": 0.3, \"regions\": [" + regions + "]}}";
+    };
+    auto region_lattice = [](double depth_mm) {
+      return "{\"role\": \"include\", \"kind\": \"region\", \"region_id\": 107, "
+             "\"geometry\": {\"depth_mm\": " + std::to_string(depth_mm) + "}}";
+    };
+    const std::string prot20 = "{\"region_id\": 107, \"depth_mm\": 20}";
+
+    // His stand's numbers: 20 mm of protection under a 24.15 mm lattice region.
+    CHECK(refuses_with(region_job(prot20, region_lattice(24.15), true), "20.000000",
+                       "24.150000"),
+          "E4 (k): a region protected at 20 mm and latticed at 24.15 mm is REFUSED, "
+          "with both depths");
+    // In his words: the piece by its name, never a number.
+    bool says_name = false, says_number = true;
+    try {
+      topopt::parse_job(region_job(prot20, region_lattice(24.15), true));
+    } catch (const JobError& e) {
+      const std::string m = e.what();
+      says_name = m.find("Left drum, top half") != std::string::npos;
+      says_number = m.find("107") != std::string::npos;
+    } catch (...) {
+    }
+    CHECK(says_name && !says_number,
+          "E4 (k): the refusal names the piece, not its number");
+
+    // The positive control: matched depths parse.
+    bool matched = true;
+    try {
+      topopt::parse_job(region_job(prot20, region_lattice(20.0), true));
+    } catch (...) { matched = false; }
+    CHECK(matched, "E4 (k): matched region depths parse");
+
+    // E2.5's rule holds by region too: the DEEPEST region on R is the one tied; a
+    // shallower one lies inside that slab.
+    bool two_deep = true;
+    try {
+      topopt::parse_job(region_job(prot20, region_lattice(20.0) + ", " +
+                                                region_lattice(6.0), true));
+    } catch (...) { two_deep = false; }
+    CHECK(two_deep, "E4 (k): a shallower second region on the piece is not tied");
+    CHECK(refuses_with(region_job(prot20, region_lattice(6.0) + ", " +
+                                              region_lattice(24.15), true),
+                       "20.000000", "24.150000"),
+          "E4 (k): the deepest region on the piece is the one tied");
+
+    // No per-region depth: the protection is the global one (core's default here).
+    CHECK(refuses_with(region_job("{\"region_id\": 107}", region_lattice(7.0), true),
+                       "5.000000", "7.000000"),
+          "E4 (k): a region protection with no depth ties at the global depth");
+
+    // Ids match within their kind: a FACE protection on the piece's parent face is a
+    // different selection from the piece, so nothing ties across the two.
+    bool cross = true;
+    try {
+      topopt::parse_job(region_job("{\"face_id\": 16, \"depth_mm\": 20}",
+                                   region_lattice(24.15), true));
+    } catch (...) { cross = false; }
+    CHECK(cross, "E4 (k): a face protection does not tie to a region lattice region");
+
+    // An unnamed piece still reads as words.
+    bool plain = false;
+    try {
+      topopt::parse_job(region_job(prot20, region_lattice(24.15), false));
+    } catch (const JobError& e) {
+      plain = std::string(e.what()).find("107") == std::string::npos;
+    } catch (...) {
+    }
+    CHECK(plain, "E4 (k): an unnamed piece is refused without its number");
+  }
+
   std::printf("%d/%d checks passed\n", g_checks - g_failures, g_checks);
   return g_failures == 0 ? 0 : 1;
 }

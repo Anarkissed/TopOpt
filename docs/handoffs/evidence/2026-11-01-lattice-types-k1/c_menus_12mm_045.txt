@@ -1,0 +1,16 @@
+octet    after : 12 9.6 9 8 7.2 6 4.8 4 3 2.4
+octet    before: 12 8 6 4   tiles: 6 4 3 2.4   | rho of a bead-wide strut at 0.1898 of the tile: 0.3487
+fcc      after : 12 9.6 9 8 7.2 6 4.8 4 3 2.4
+fcc      before: 12 9.6 9 8 7.2 6 4.8 4 3 2.4   tiles: 6 4 3 2.4   | rho of a bead-wide strut at 0.1898 of the tile: 0.1937
+kelvin   after : 12 9.6 9 8 7.2 6 4.8 4 3 2.4
+kelvin   before: 12 9.6 9 8 7.2 6 4.8 4 3 2.4   tiles: 6 4 3 2.4   | rho of a bead-wide strut at 0.1898 of the tile: 0.1889
+rhombic  after : 12 9.6 9 8 7.2 6 4.8 4 3 2.4
+rhombic  before: 12 9 8 6 4 3   tiles: 6 4 3 2.4   | rho of a bead-wide strut at 0.1898 of the tile: 0.2920
+diamond  after : 12 9.6 9 8 7.2 6 4.8 4 3 2.4
+diamond  before: 12 9.6 9 8 7.2 6 4.8 4 3 2.4   tiles: 6 4 3 2.4   | rho of a bead-wide strut at 0.1898 of the tile: 0.1630
+bcc      after : 12 9.6 9 8 7.2 6 4.8 4 3 2.4
+bcc      before: 12 9.6 9 8 7.2 6 4.8 4 3 2.4   tiles: 6 4 3 2.4   | rho of a bead-wide strut at 0.1898 of the tile: 0.1630
+sc       after : 12 9.6 9 8 7.2 6 4.8 4 3 2.4
+sc       before: 12 10 9.6 9 8 7.2 6 4.8 4 3 2.4 2   tiles: 6 4 3 2.4   | rho of a bead-wide strut at 0.1898 of the tile: 0.0756
+octet at the OLD light floor 4.931378 mm, 0.45 mm strut: rho 0.0965 (claimed 0.05)
+octet NEW light floor: 7.0266 mm

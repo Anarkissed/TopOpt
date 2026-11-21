@@ -94,11 +94,9 @@ final class VariantEntryGatingTests: XCTestCase {
     /// the green path is asserted first and explicitly.
     func testAHealthyWorkerRunEnablesBothEntries() {
         let f = healthy()
-        XCTAssertTrue(VariantEntry.smoothing(f).enabled,
-                      "blocks: \(VariantEntry.smoothingBlocks(f))")
+        // ★ RE-PINNED (UI-Notes B4, plan.md §B4: "The Smooth page is deleted"; core finishes every result, E1): the Lattice entry alone
         XCTAssertTrue(VariantEntry.lattice(f).enabled,
                       "blocks: \(VariantEntry.latticeBlocks(f))")
-        XCTAssertNil(VariantEntry.smoothing(f).reason)
         XCTAssertNil(VariantEntry.lattice(f).reason)
     }
 
@@ -117,19 +115,13 @@ final class VariantEntryGatingTests: XCTestCase {
     /// configuration. Neither has any claim on the Mac.
     func testAStreamedVariantIsFullyUsableWhileTheLadderIsStillRunning() {
         let mid = healthy(runInFlight: true)
-        XCTAssertTrue(VariantEntry.smoothing(mid).enabled,
-                      "smoothing runs on THIS device and must not wait for the "
-                      + "Mac: \(VariantEntry.smoothingBlocks(mid))")
         XCTAssertTrue(VariantEntry.lattice(mid).enabled,
                       "lattice SETUP is zero compute and must not wait for the "
                       + "Mac: \(VariantEntry.latticeBlocks(mid))")
-        XCTAssertNil(VariantEntry.smoothing(mid).reason)
         XCTAssertNil(VariantEntry.lattice(mid).reason)
 
         // …and the verdicts are IDENTICAL to the idle case, so "a run is going" is
         // not quietly changing some other reason either.
-        XCTAssertEqual(VariantEntry.smoothingBlocks(mid),
-                       VariantEntry.smoothingBlocks(healthy()))
         XCTAssertEqual(VariantEntry.latticeBlocks(mid),
                        VariantEntry.latticeBlocks(healthy()))
     }
@@ -170,36 +162,6 @@ final class VariantEntryGatingTests: XCTestCase {
         let mustSay: [String]
     }
 
-    // "a job is already running" is NOT in either table any more (task
-    // 2026-08-03-variant-postprocessing-concurrency). It used to head both, and
-    // that is what made a four-hour ladder freeze every variant it had already
-    // produced. The replacement is STRONGER, not absent: two explicit tests below
-    // assert both entries stay USABLE mid-run, and that the lattice ACTION — the
-    // only part that needs the Mac — queues with its own sentence.
-    private var smoothingCases: [Case] {
-        [
-            Case(name: "the rung produced no geometry",
-                 facts: healthy(hasGeometry: false),
-                 mustSay: ["no geometry"]),
-            Case(name: "the run generated a lattice (pipeline order)",
-                 facts: healthy(latticed: true),
-                 mustSay: ["lattice", "struts"]),
-            Case(name: "the model file is gone",
-                 facts: healthy(modelPath: nil),
-                 mustSay: ["model file is missing"]),
-            Case(name: "the run was solved ON DEVICE",
-                 facts: healthy(machine: .thisDevice, retainedJob: Data(),
-                                retainedDesign: Data()),
-                 mustSay: ["on this device", "Mac worker"]),
-            Case(name: "the run predates job/design retention",
-                 facts: healthy(machine: .worker(name: "Mac mini"),
-                                retainedJob: Data(), retainedDesign: Data()),
-                 mustSay: ["before results kept"]),
-            Case(name: "the retained job declared no load case (self-weight)",
-                 facts: healthy(retainedJob: job(selfWeight: true)),
-                 mustSay: ["self-weight"]),
-        ]
-    }
 
     private var latticeCases: [Case] {
         [
@@ -244,25 +206,7 @@ final class VariantEntryGatingTests: XCTestCase {
         ]
     }
 
-    func testEveryBlockingPreconditionDisablesSmoothingWithItsOwnReason() throws {
-        var seen = Set<String>()
-        for c in smoothingCases {
-            let v = VariantEntry.smoothing(c.facts)
-            XCTAssertFalse(v.enabled, "AJ2: \(c.name) must DISABLE the Smooth entry")
-            let reason = try XCTUnwrap(v.reason, "AJ2: \(c.name) must carry a reason")
-            XCTAssertFalse(reason.isEmpty)
-            for word in c.mustSay {
-                XCTAssertTrue(reason.localizedCaseInsensitiveContains(word),
-                              "AJ2: \(c.name)'s reason must say “\(word)” — got: \(reason)")
-            }
-            XCTAssertFalse(reason.localizedCaseInsensitiveContains("not available"),
-                           "AJ2: a generic message does not satisfy this bar")
-            XCTAssertTrue(seen.insert(reason).inserted,
-                          "AJ2: \(c.name) must have its OWN reason, not one shared "
-                          + "with another condition")
-            XCTAssertEqual(v.accessibilityLabel, "Smooth, unavailable: \(reason)")
-        }
-    }
+    // ★ RE-PINNED (UI-Notes B4, plan.md §B4: "The Smooth page is deleted"; core finishes every result, E1): the Smooth entry's reasons went with it.
 
     func testEveryBlockingPreconditionDisablesLatticeWithItsOwnReason() throws {
         var seen = Set<String>()
@@ -290,11 +234,7 @@ final class VariantEntryGatingTests: XCTestCase {
             .jobDocumentNotRecorded, .noGeometry, .designBoxRun, .noWorkerSelected,
             .modelFileMissing,
         ]
-        let smooth: [SmoothUnavailable] = [
-            .noRetainedJob, .computedOnDevice, .selfWeightRun, .alreadyLatticed,
-            .noGeometry, .modelFileMissing,
-        ]
-        let all = relattice.map(\.reason) + smooth.map(\.reason)
+        let all = relattice.map(\.reason)   // ★ RE-PINNED (UI-Notes B4, plan.md §B4: "The Smooth page is deleted"; core finishes every result, E1)
         XCTAssertEqual(Set(all).count, all.count,
                        "AJ2: no two conditions may share a sentence")
         for r in all {
@@ -325,14 +265,8 @@ final class VariantEntryGatingTests: XCTestCase {
         let ws = try String(contentsOf: sourceURL("WorkspacePlaceholder.swift"),
                             encoding: .utf8)
 
-        let smooth = try XCTUnwrap(ws.range(of: "private func openSmoothingPage"))
-        let smoothBody = String(ws[smooth.lowerBound...].prefix(700))
-        XCTAssertTrue(smoothBody.contains("smoothEntry(variantIndex)"),
-                      "AJ2: the smoothing opener must consult the gate")
-        XCTAssertTrue(smoothBody.contains("guard gate.enabled else"),
-                      "AJ2: …and RETURN rather than open a page that refuses")
-        XCTAssertTrue(smoothBody.contains("gate.reason"),
-                      "AJ2: …stating which condition blocked it")
+        // ★ RE-PINNED (UI-Notes B4, plan.md §B4: "The Smooth page is deleted"; core finishes every result, E1): no Smooth opener
+        XCTAssertFalse(ws.contains("private func openSmoothingPage"))
 
         let lattice = try XCTUnwrap(ws.range(of: "private func openLatticePage"))
         let latticeBody = String(ws[lattice.lowerBound...].prefix(900))
@@ -344,16 +278,14 @@ final class VariantEntryGatingTests: XCTestCase {
     /// firing unconditionally, as they did before this task.
     func testTheResultsEntryControlsAreGated() throws {
         let rs = try String(contentsOf: sourceURL("ResultsScreen.swift"), encoding: .utf8)
-        XCTAssertTrue(rs.contains("verdict: smoothVerdict"))
-        XCTAssertTrue(rs.contains("verdict: latticeVerdict"))
-        XCTAssertTrue(rs.contains(".disabled(!verdict.enabled)"),
-                      "AJ2: the control is DISABLED, not merely dimmed")
-        XCTAssertTrue(rs.contains("if let why = verdict.reason"),
-                      "AJ2: and it renders the reason beside itself")
+        // ★ the Smooth entry is GONE from Results (his note 2026-10-27: "remove the Smooth area"), and so is the
+        // leftover Lattice button and its text (his iPad 2026-10-27) — the stage menu reaches Lattice, gated there
+        XCTAssertFalse(rs.contains("verdict: smoothVerdict"), "no Smooth button on Results")
+        XCTAssertFalse(rs.contains("verdict: latticeVerdict"), "★ no Lattice button on Results")
 
         let ws = try String(contentsOf: sourceURL("WorkspacePlaceholder.swift"),
                             encoding: .utf8)
-        XCTAssertTrue(ws.contains("smoothEntry: { smoothEntry($0) }"))
+        XCTAssertFalse(ws.contains("smoothEntry:"), "★ RE-PINNED (UI-Notes B4, plan.md §B4: \"The Smooth page is deleted\"; core finishes every result, E1)")
         XCTAssertTrue(ws.contains("latticeEntry: { latticeEntry($0) }"))
     }
 
@@ -371,45 +303,56 @@ final class VariantEntryGatingTests: XCTestCase {
         XCTAssertFalse(v.allReasons.contains(RelatticeUnavailable.designBoxRun.reason))
     }
 
-    /// Narrowed to core's actual remaining rule (device-failure task): it is
-    /// GRADING plus a design box that is refused, not a design box plus lattice.
+    /// Narrowed to core's actual remaining rule (device-failure task, then TO-core's
+    /// 4e7648d8): it is the graded ORGANIC lattice plus a design box that is refused —
+    /// not a design box plus lattice, and no longer every graded lattice.
     func testAGradedLatticeRunWithADesignBoxIsRefusedAtTheBUTTON() throws {
         XCTAssertNil(LatticeCoreCapability.liveConflict(latticeEnabled: false,
                                                         designBoxActive: true,
-                                                        graded: true),
+                                                        graded: true, organic: true),
                      "a design box alone is fine — it is the COMBINATION core refuses")
         XCTAssertNil(LatticeCoreCapability.liveConflict(latticeEnabled: true,
                                                         designBoxActive: false,
-                                                        graded: true))
+                                                        graded: true, organic: true))
         XCTAssertNil(LatticeCoreCapability.liveConflict(latticeEnabled: true,
                                                         designBoxActive: true,
-                                                        graded: false),
+                                                        graded: false, organic: false),
                      "UNIFORM lattice under a design box is what PR 285 BUILT — "
                      + "refusing it is the device failure this task exists for")
+        XCTAssertNil(LatticeCoreCapability.liveConflict(latticeEnabled: true,
+                                                        designBoxActive: true,
+                                                        graded: true, organic: false),
+                     "★ a GRADED Default Grade / Stepped lattice runs with a design box "
+                     + "since 4e7648d8 — refusing it would repeat the device failure")
         let why = try XCTUnwrap(
-            LatticeCoreCapability.liveConflict(latticeEnabled: true,
-                                               designBoxActive: true, graded: true))
-        XCTAssertTrue(why.contains("design box"))
-        XCTAssertTrue(why.contains("grading law"), "it says WHY, not just no")
+            LatticeCoreCapability.liveConflict(latticeEnabled: true, designBoxActive: true,
+                                               graded: true, organic: true))
+        XCTAssertTrue(why.hasPrefix("The organic lattice can't be used with a design box"),
+                      "core's own words (kOrganicDesignBoxRefusal), ASCII apostrophe")
+        XCTAssertTrue(why.contains("lays its struts before"), "it says WHY, not just no")
+        XCTAssertFalse(why.contains("doubled"), "the app's names, not core's: " + why)
 
         // The lattice page's own Optimize surface carries it, disabled — on AUTO
-        // density, which is what ships a `grading` block.
+        // density with the organic lattice, which is what core refuses.
         let surface = LatticeOptimizeSurface.compute(
             baseCanOptimize: true, baseSummary: "1 anchor · 1 load",
             latticeEnabled: true, densityMode: .sim,
             topologyDisplayName: "Octet", cellMM: 5, bounds: nil, running: false,
-            lineWidthMM: 0.4, designBoxActive: true)
+            lineWidthMM: 0.4, designBoxActive: true, organic: true)
         XCTAssertFalse(surface.enabled,
                        "failure B: the button that would submit a refused job is off")
         XCTAssertEqual(surface.sub, why)
 
-        // …and UNIFORM density under the same box is offered, because core runs it.
-        let ok = LatticeOptimizeSurface.compute(
-            baseCanOptimize: true, baseSummary: "1 anchor · 1 load",
-            latticeEnabled: true, densityMode: .uniform,
-            topologyDisplayName: "Octet", cellMM: 5, bounds: nil, running: false,
-            lineWidthMM: 0.4, designBoxActive: true)
-        XCTAssertTrue(ok.enabled)
+        // …and a graded Default Grade lattice, or UNIFORM density, under the same box
+        // is offered, because core runs both.
+        for mode in [LatticeDensityMode.sim, .uniform] {
+            let ok = LatticeOptimizeSurface.compute(
+                baseCanOptimize: true, baseSummary: "1 anchor · 1 load",
+                latticeEnabled: true, densityMode: mode,
+                topologyDisplayName: "Octet", cellMM: 5, bounds: nil, running: false,
+                lineWidthMM: 0.4, designBoxActive: true)
+            XCTAssertTrue(ok.enabled, "\(mode): " + ok.sub)
+        }
     }
 
     /// THE GATE MIRRORS CORE, AND SAYS SO — IN BOTH DIRECTIONS.
@@ -435,9 +378,11 @@ final class VariantEntryGatingTests: XCTestCase {
                        + "\(LatticeCoreCapability.designBoxRefused).")
 
         XCTAssertTrue(
-            src.contains(LatticeCoreCapability.gradedDesignBoxRefusalPhrase),
-            "core's REMAINING rule — grading with a design box — is what the live "
-            + "conflict now mirrors; if core drops that too, drop the live conflict")
+            src.contains(LatticeCoreCapability.organicDesignBoxRefusalPhrase),
+            "core's REMAINING rule — the organic lattice with a design box — is what the "
+            + "live conflict now mirrors; if core drops that too, drop the live conflict")
+        XCTAssertFalse(src.contains("block is not yet supported together with a"),
+                       "premise: core dropped the graded-with-a-design-box refusal (4e7648d8)")
     }
 
     // MARK: - DEFECT 4 · "Rim only" cannot emit on a voxel-derived part
@@ -464,6 +409,10 @@ final class VariantEntryGatingTests: XCTestCase {
             // The definitions themselves live in lattice_boundary.cpp; every OTHER
             // mention in core/src would be a caller.
             if f.lastPathComponent == "lattice_boundary.cpp" { continue }
+            // ★ RE-PINNED (release (2), K1): lattice_sample.cpp boxes the CLI's `lattice-sample` block (R13, a printable
+            // sample of one type, reached only from main.cpp's run_lattice_sample) — not a job's boundary, so a rim on a
+            // job still has no plane to ride
+            if f.lastPathComponent == "lattice_sample.cpp" { continue }
             guard let text = try? String(contentsOf: f, encoding: .utf8) else { continue }
             if text.contains("add_half_space(") || text.contains("add_box(") {
                 callers.append(f.lastPathComponent)
@@ -649,12 +598,9 @@ final class VariantEntryGatingTests: XCTestCase {
     // MARK: - AJ7 · determinism
 
     func testTheGateIsDeterministic() {
-        for c in smoothingCases + latticeCases {
-            let a = (VariantEntry.smoothing(c.facts), VariantEntry.lattice(c.facts))
-            for _ in 0..<20 {
-                XCTAssertEqual(VariantEntry.smoothing(c.facts), a.0)
-                XCTAssertEqual(VariantEntry.lattice(c.facts), a.1)
-            }
+        for c in latticeCases {   // ★ RE-PINNED (UI-Notes B4, plan.md §B4: "The Smooth page is deleted"; core finishes every result, E1)
+            let a = VariantEntry.lattice(c.facts)
+            for _ in 0..<20 { XCTAssertEqual(VariantEntry.lattice(c.facts), a) }
         }
     }
 

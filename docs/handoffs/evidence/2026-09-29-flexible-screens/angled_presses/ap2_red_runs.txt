@@ -1,0 +1,80 @@
+# Angled presses (task 2026-10-07), batch AP2 "Which faces meet": the TESTS-FIRST red run.
+# The AP2 tests-first commit carries FlexibleMeetTests (10 tests) and the app code with every rule as the spec's RED
+# variant (app/TopOptKit/Sources/TopOptFlows, the lines marked "AP2 RED STUB"):
+#   1 the shared-edge map keyed by vertex INDEX (FaceTopology.adjacency's rule)
+#   2 no sector clipping (a sector touches every neighbour of its face, face-level as core's `touches`)
+#   3 no cut line (two sectors of one face never meet)       4 no blend chain
+#   5 the anchor = the footprint's area centroid             6 handles sized as a 4 mm target, projected
+#   7 a region's frame from ViewerMesh.faceNormal (Float)     8 no seam normal read from core, nothing wraps
+#   9 candidates: every seam an edge (no 15° rule), every meeting point a corner, no blend, nothing refused,
+#     numbered in the order the seams are first met in the triangle list
+# The bridge pass-throughs (flexible_scene_face_adjacency / _region_frame / _triangle_loads, under bridge.cpp's one
+# guard via bridge_guard_run) and their Swift wrappers (TopOptKit/FlexibleKit+Meet.swift) are REAL in this commit:
+# they are thin copies of core with no rule to stub. Expected green here: the guard test, which pins them.
+# Command (app/TopOptKit of this worktree, built with swift build --build-tests, no SWIFT_DETERMINISTIC_HASHING):
+#   swift test --skip-build --filter TopOptFlowsTests.FlexibleMeetTests
+# The next commit replaces every stub with its rule; the same 10 tests are then green (ap2_suite.txt).
+
+FAILED FlexibleMeetTests.testAFilletChainIsFound  (9 failure(s))
+         - XCTAssertTrue failed - core flags the flat + fillet + flat face
+         - XCTAssertTrue failed
+         - XCTAssertFalse failed - nothing of the wrapped face is offered
+         - XCTAssertEqual failed: ("9") is not equal to ("5") - top–3, top–4, bottom–3, bottom–4, 3–4
+         - XCTAssertEqual failed: ("6") is not equal to ("2") - the sharp −X−Y corner, top and bottom
+         - XCTAssertTrue failed
+         - XCTAssertEqual failed: ("2") is not equal to ("0") - the rounded slab offers no edge
+         - XCTAssertEqual failed: ("nil") is not equal to ("Optional([61])") - the bottom and the −Y wall meet through the r 3 fillet, whole
+         … 1 more of the same kind
+FAILED FlexibleMeetTests.testCoreAndAppAgreeWhichFacesTouch  (1 failure(s))
+         - XCTAssertEqual failed: ("0") is not equal to ("12") - the position-keyed map finds the box's 12 edges
+FAILED FlexibleMeetTests.testCornersOfABox  (4 failure(s))
+         - XCTAssertTrue failed - his r5: three regions at each
+         - XCTAssertEqual failed: ("[2, 3, 1000103, 1000104]") is not equal to ("[1000103, 3, 2]")
+         - XCTAssertEqual failed: ("8") is not equal to ("10") - control: 3+ regions also meet at the cut's two ends
+         - XCTAssertTrue failed
+FAILED FlexibleMeetTests.testEveryEdgeAndCornerOfThePartWithTheFifteenDegreeRule  (4 failure(s))
+         - XCTAssertEqual failed: ("16") is not equal to ("14") - his r5: edges
+         - XCTAssertEqual failed: ("24") is not equal to ("22") - his r5: every one offered
+         - XCTAssertGreaterThan failed: ("0") is not greater than ("0") - premise: the stand has tangent seams
+         - XCTAssertGreaterThan failed: ("209") is not greater than ("209") - control: no 15° rule offers the tangent seams
+FAILED FlexibleMeetTests.testHandlesAreSizedInPoints  (162 failure(s))
+         - XCTAssertGreaterThanOrEqual failed: ("42.28641193997623") is less than ("44.0") - corner 3 at 90.0 mm
+         - XCTAssertGreaterThanOrEqual failed: ("42.28641193997623") is less than ("44.0") - corner 3 at 90.0 mm
+         - XCTAssertGreaterThanOrEqual failed: ("22.2046770498651") is less than ("44.0") - corner 1 at 250.0 mm
+         - XCTAssertGreaterThanOrEqual failed: ("22.2046770498651") is less than ("44.0") - corner 1 at 250.0 mm
+         - XCTAssertGreaterThanOrEqual failed: ("29.973487619001073") is less than ("44.0") - corner 2 at 250.0 mm
+         - XCTAssertGreaterThanOrEqual failed: ("29.973487619001073") is less than ("44.0") - corner 2 at 250.0 mm
+         - XCTAssertGreaterThanOrEqual failed: ("22.52490198122517") is less than ("44.0") - corner 3 at 250.0 mm
+         - XCTAssertGreaterThanOrEqual failed: ("22.52490198122517") is less than ("44.0") - corner 3 at 250.0 mm
+         … 154 more of the same kind
+FAILED FlexibleMeetTests.testNumbersAreStableAcrossOpens  (3 failure(s))
+         - XCTAssertEqual failed: ("["#1 corner [1, 2, 4] [0, 0, 4633641066610819072]", "#2 corner [1, 2, 5] [4633641066610819072, 0, 4633641066610819072]", "#3 corner [1, 3, 4] [0, 4633641066610819072, 4633641066610819072]", "#4 corner [1, 3, 5] [4633641066610819072, 46
+         - XCTAssertEqual failed: ("[[0, 600000, 300000], [0, 300000, 0], [0, 0, 300000], [0, 300000, 600000], [-600000, 300000, 600000], [-600000, 0, 300000], [-600000, 600000, 300000], [-600000, 300000, 0], [-300000, 0, 600000], [-300000, 0, 0], [-300000, 600000, 0], [
+         - XCTAssertEqual failed: ("["#1 corner [1, 2, 4]", "#2 corner [1, 2, 5]", "#3 corner [1, 3, 4]", "#4 corner [1, 3, 5]", "#5 corner [0, 2, 4]", "#6 corner [0, 2, 5]", "#7 corner [0, 3, 4]", "#8 corner [0, 3, 5]", "#9 edge [2, 5]", "#10 edge [1, 5]", "#11 edge [0,
+FAILED FlexibleMeetTests.testRegionFramesAreCoresStackLoads  (40 failure(s))
+         - XCTAssertEqual failed: ("[0, 0, 4607182418800017408]") is not equal to ("[9223372036854775808, 9223372036854775808, 4607182418800017408]") - C1 pad split at 99.5 region 0: core's load, bit for bit
+         - XCTAssertEqual failed: ("[0, 0, 0]") is not equal to ("[4632233691727265793, 4632233691727265793, 0]") - C1 pad split at 99.5 region 0: centroid
+         - XCTAssertEqual failed: ("[0, 0, 13830554455654793216]") is not equal to ("[9223372036854775808, 9223372036854775808, 13830554455654793216]") - C1 pad split at 99.5 region 1: core's load, bit for bit
+         - XCTAssertEqual failed: ("[0, 0, 0]") is not equal to ("[4632233691727265793, 4632233691727265793, 4626322717216342016]") - C1 pad split at 99.5 region 1: centroid
+         - XCTAssertEqual failed: ("[0, 4607182418800017408, 0]") is not equal to ("[9223372036854775808, 4607182418800017408, 9223372036854775808]") - C1 pad split at 99.5 region 2: core's load, bit for bit
+         - XCTAssertEqual failed: ("[0, 0, 0]") is not equal to ("[4632233691727265791, 0, 4621819117588971520]") - C1 pad split at 99.5 region 2: centroid
+         - XCTAssertEqual failed: ("false") is not equal to ("true")
+         - XCTAssertEqual failed: ("0") is not equal to ("4636033603912859648")
+         … 32 more of the same kind
+FAILED FlexibleMeetTests.testSectorsTouchOnlyWhereTheirCutsReachTheEdge  (7 failure(s))
+         - XCTAssertFalse failed - Top B stops at x = 50: it never reaches face 3
+         - XCTAssertTrue failed - the two sectors meet along their cut
+         - XCTAssertEqual failed: ("nil") is not equal to ("Optional(TopOptFlows.FlexibleMeet.SeamKind.cut)")
+         - XCTAssertEqualWithAccuracy failed: ("0.0") is not equal to ("100.0") +/- ("0.001") - the cut runs across the top
+         - XCTAssertEqualWithAccuracy failed: ("100.0") is not equal to ("50.0") +/- ("0.001")
+         - XCTAssertEqualWithAccuracy failed: ("100.0") is not equal to ("50.0") +/- ("0.001")
+         - XCTAssertFalse failed
+FAILED FlexibleMeetTests.testTheAnchorSitsOnTheFaces  (5 failure(s))
+         - XCTAssertLessThan failed: ("15.0") is not less than ("1e-06") - cube edge: on the faces
+         - XCTAssertLessThan failed: ("20.0") is not less than ("1e-06") - cube corner: on the faces
+         - XCTAssertLessThan failed: ("1.6666666666666679") is not less than ("1e-06") - r5 edge: on the faces
+         - XCTAssertLessThan failed: ("2.8571428571428577") is not less than ("1e-06") - r5 corner: on the faces
+         - XCTAssertLessThan failed: ("50.00000000000001") is not less than ("50.0") - the ray lands on Top B, not on Top A
+PASSED FlexibleMeetTests.testThePassThroughsRunUnderTheOneGuard
+
+RAW Executed 10 tests, with 235 failures (0 unexpected) in 8.286 (8.287) seconds

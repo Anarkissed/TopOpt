@@ -1,0 +1,41 @@
+Links+Rests / Manual follow-up INSTALL run at cdb64af5, 2026-10-22, scratch-path /tmp/r7x20b-build
+Classes (the batch's 16 incl. FlexibleSquishCopyTests; goldens separately):
+FlexibleManualFollowUpTests FlexibleI3LinkSimTests FlexibleI1HoldTests FlexibleM1ManualTests FlexibleM2PredictTests FlexibleMainPrismEqualityTests FlexibleR7M1Tests FlexibleS1bMainTagsTests FlexibleRound7ViewsReviewTests FlexibleBatchVHostedTests FlexibleRound6HostedTests FlexibleSquishCopyTests FlexibleSettingsPageHostedTests FlexibleM1ManualFramesProbe FlexibleI1R2FramesProbe FlexibleR7M1EvidenceProbe
+
+runner.log:
+start 20:41:48 cdb64af5 + working tree
+build exit 0 20:42:03
+chunk_aa exit 0 20:43:56
+chunk_ab exit 0 20:46:57
+chunk_ac exit 0 20:57:05
+chunk_ad exit 1 21:00:22
+golden det exit 0 21:00:39
+golden unseeded exit 0 21:00:55
+hashes exit 0 21:01:56
+hashes cmp vs manual_install (whole file): identical
+hashes cmp vs manual_followup (whole file): identical
+ios build exit 0 21:02:44
+ALLDONE 21:02:44
+install exit 0 21:03:06
+cmp identical
+
+Per chunk (passed failed skipped):
+chunk_aa.log 17 0 0
+chunk_ab.log 21 0 1
+chunk_ac.log 29 0 0
+chunk_ad.log 2 1 7
+TOTAL 69 passed, 1 failed, 8 skipped. The failure: FlexibleSettingsPageHostedTests.testTheSelectedFacesRowsAreOnThePanelOnHisProject 11l 'as opened' (card 566-812 vs scroll 202-796) — the known batch I one. No signal lines. Skips = picture probes without their env.
+FLEX-LR group-1 today: pressed [5, 3] rests [2000021, 2000020]: bc rest · far anvils 0 · exits held true | pressed [5, 3] rests [2000020]: bc rest · far anvils 0 · exits held true | pressed [5, 3] rests [2000021]: bc rest · far anvils 0 · exits held true | pressed [5] rests [2000021, 2000020]: bc rest · far anvils 1 · exits held true
+FLEX-LR group-1 pressed [5] rests [2000021, 2000020] + 1 link: bc rest · wall nodes [1078] · far anvils 1 (today 1) · exits held true · pinned 5390 (today 2206, kept 2205) · max|u| 4.4075 (today 7.1766)
+FLEX-LR held nodes: 3185 (today 2156, kept 2156) · free modes 0 (today 1)
+FLEX-LR RED (links replace the far anvil): far anvils 0 · exits held false · today's held nodes kept 1666/2156
+FLEX-MF main page face 5: estimate 2.768 mm · stored Deepest squish 5.500 mm
+FLEX-MF prism reach: drawn 5.537 · estimate's 5.537 · stored's 11.000 (k 2.00)
+FLEX-MF heat top: Manual 2.7684 mm (the estimate 2.7684) · the calibrated route's 2.1332 (control)
+Goldens: deterministic 38 identical / 0 DIFFERS / 0 PART-SKIP; unseeded 32 identical / 0 DIFFERS / 1 PART-SKIP
+Hashes: stage_job_hashes_finst.txt cmp-identical (whole file) to manual_followup/stage_job_hashes_mf.txt and manual_install/stage_job_hashes_minst.txt
+
+iOS: xcodebuild Debug, destination 147E56A1, derivedData flexA1: BUILD SUCCEEDED at cdb64af5.
+the app was NOT running (launchctl list: no com.nadim.topopt; pgrep: none). install exit 0 21:03:06, NOT launched.
+installed TopOpt.debug.dylib == built: cmp identical; sha256 31624e355ada8a11b7abb1365e233d880bd34444b33510f7666ea1376fa08f28 (both).
+new strings in the installed dylib: 'Type and cell follow the part' 1, 'Save & Exit to see it' 1, 'linked wall' 2.

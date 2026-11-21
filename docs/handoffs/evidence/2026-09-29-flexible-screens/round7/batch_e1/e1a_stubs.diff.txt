@@ -1,0 +1,82 @@
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleFaceChip.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleFaceChip.swift
+index 9255eca7..aa310cfc 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleFaceChip.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleFaceChip.swift
+@@ -251,6 +251,7 @@ struct FlexibleFaceChip: View {
+                         if b == .load, !wasLoad, !hadWeight, let kg = project.force.kind(for: g.id).weightKg { ui.unweighed[g.id] = kg }
+                         cardsChanged()
+                     case .refused: ui.roleOpen = nil
++                    case .locked: break   // ★ R7-E1 STUB
+                     }
+                 }
+             }
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleFaceCommits.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleFaceCommits.swift
+index 8ba14028..deb296ea 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleFaceCommits.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleFaceCommits.swift
+@@ -32,7 +32,7 @@ public enum FlexibleGroupRoleButton: String, CaseIterable, Sendable { case ancho
+ public enum FlexibleJoinAlso: Equatable, Sendable { case none, load, anchor }
+ 
+ /// A role tap's answer: done, or "Keep clear removes this lattice" must be asked first.
+-public enum FlexibleRoleAnswer: Equatable, Sendable { case done, asksFirst, refused }
++public enum FlexibleRoleAnswer: Equatable, Sendable { case done, asksFirst, refused, locked }
+ 
+ /// Every word the Selections half says (his rule: one visible line per setting, ≤ 44 characters).
+ public enum FlexibleSelectionsCopy {
+@@ -85,6 +85,8 @@ public enum FlexibleSelectionsCopy {
+     public static let depthCaption = "Depth mm"
+     public static let expandCaption = "Expand mm"
+     public static let setRole = "Set role"
++    /// ★ R7-E1 STUB (his answer 2026-10-18 ~15:50): Protect is locked on while a face of the group is Lattice.
++    public static let protectLocked = "Protect stays on while a face is Lattice"
+     public static func allFaces(_ n: Int) -> String { "All \(n)" }
+     public static func kindWord(_ k: FlexibleNewFaceKind) -> String {
+         switch k {
+@@ -102,6 +104,11 @@ enum FlexibleFaceCommits {
+ 
+     /// ★ RED CONTROL only (FlexibleLatticeIsProtectedTests): R7-D2's hold put back — `newGroup(.lattice, …)` refuses.
+     static var controlLatticeHeld = false
++    /// ★ R7-E1 STUB — RED CONTROL only: Protect toggles off on a Lattice group (the rule before his 2026-10-18 answer).
++    static var controlProtectUnlocked = false
++
++    /// ★ R7-E1 STUB: is Protect locked on for this group (it reads Lattice)?
++    static func protectLocked(_ id: UUID, _ p: ProjectModel) -> Bool { false }
+ 
+     /// ★ HIS RULING 2026-10-18 ("These two things should behave the same way"): a group reads "Lattice" — in the chip's role
+     /// capsule and on the list's line, the shield beside it — when it is Protected (no Anchor, no Load, no Keep clear) and
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleFaceStatsPopover.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleFaceStatsPopover.swift
+index ac21aa8d..34dabb63 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleFaceStatsPopover.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleFaceStatsPopover.swift
+@@ -36,7 +36,7 @@ public enum FlexibleFaceStats {
+     /// ★ ROUND 7: a voxel whose centre is outside the part is not counted (the mask now reaches past the surface);
+     /// `countOutside` is a test's control only (the rule before).
+     public static func rows(lattice f: FlexibleLatticeInputs, regions: [LatticeRegionSpec], depthMM: Double,
+-                            countOutside: Bool = false) -> Rows? {
++                            countOutside: Bool = false, outsideBySDF: Bool = false) -> Rows? {
+         guard !regions.isEmpty else { return nil }
+         let m = f.mask
+         let same = m.nx == f.rho.nx && m.ny == f.rho.ny && m.nz == f.rho.nz
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleLatticeField.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleLatticeField.swift
+index ed06b9fd..2e8b0325 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleLatticeField.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleLatticeField.swift
+@@ -117,6 +117,8 @@ public struct FlexibleLatticeInputs: Equatable, Sendable {
+     public var skinDist: FlexGrid     // mm, unsigned distance to the skinned surfaces
+     public var boundsMin: SIMD3<Float>
+     public var boundsMax: SIMD3<Float>
++    /// ★ R7-E1 STUB: the mask voxels whose centre core's own rule (coreEncloses) puts OUTSIDE the part.
++    public var coreOutside: Set<Int> = []
+ }
+ 
+ public enum FlexibleLatticeField {
+@@ -385,7 +387,8 @@ public enum FlexibleLatticeBuilder {
+                               finish: FlexibleFinish = .covered,
+                               skinMM: Float = FlexibleLatticeField.defaultSkinMM,
+                               sdfMaxDim: Int = 128,
+-                              maskToSurface: Bool = true) throws -> FlexibleLatticeInputs {
++                              maskToSurface: Bool = true,
++                              cornerRule: Bool = true) throws -> FlexibleLatticeInputs {
+         guard field.nx > 1, field.ny > 1, field.nz > 1, field.density.count == field.nx * field.ny * field.nz
+         else { throw Refusal(description: "The density field is empty — design a face first.") }
+         let n = field.density.count

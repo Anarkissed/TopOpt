@@ -234,8 +234,7 @@ BuildOrientationReport score_build_orientations(
   // The strut criteria need BOTH a posture and a topology with a measured law.
   const bool has_lattice =
       facts.lattice != nullptr && facts.lattice_mask != nullptr &&
-      facts.lattice_voxels > 0 &&
-      facts.lattice->topology == LatticeTopology::Octet;
+      facts.lattice_voxels > 0 && strut_law_measured(facts.lattice->topology);
 
   // S-e's instrument: ONE generator tap for the whole report, not one per
   // candidate. Timed separately from the sweep so bar U3's comparison against
@@ -285,7 +284,7 @@ BuildOrientationReport score_build_orientations(
     // field (its bar L8). NOT reimplemented here.
     if (has_lattice) {
       const StrutStrengthReport sr = evaluate_strut_strength(
-          facts.stress_tensor_field, *facts.lattice_mask,
+          facts.lattice->topology, facts.stress_tensor_field, *facts.lattice_mask,
           facts.lattice->relative_density, n, material.yield_strength_mpa,
           material.z_knockdown);
       r.strut_evaluated = sr.evaluated;

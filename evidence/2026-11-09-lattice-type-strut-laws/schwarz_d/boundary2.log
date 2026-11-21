@@ -1,0 +1,18 @@
+LATTICE DE-HOMOGENIZATION PROBE — schwarz_d band [0.20038, 0.60012] (read from core)
+
+===== BOUNDARY POPULATIONS — free surfaces and cut cells (J4) =====
+  sandwich rho 0.200 N4 vpc16: K_dev free=0.0 interior=0.0 dropped=57600 (1s, cg<=97)
+    rho_meas 0.0146 is -92.7% off rho_lib 0.2004 (aliased): re-measuring at N3 vpc24
+  cut rho 0.200 N4 vpc16: K_dev free=0.0 interior=0.0 dropped=66600 (1s, cg<=112)
+    rho_meas 0.0146 is -92.7% off rho_lib 0.2004 (aliased): re-measuring at N3 vpc24
+  sandwich rho 0.313 N4 vpc16: K_dev free=9.9 interior=7.6 dropped=0 (75s, cg<=806)
+  cut rho 0.313 N4 vpc16: K_dev free=9.9 interior=8.0 dropped=0 (92s, cg<=888)
+  sandwich rho 0.450 N4 vpc16: K_dev free=6.5 interior=4.8 dropped=0 (94s, cg<=667)
+  cut rho 0.450 N4 vpc16: K_dev free=6.5 interior=5.0 dropped=0 (123s, cg<=799)
+  sandwich rho 0.600 N4 vpc16: K_dev free=4.0 interior=3.3 dropped=0 (109s, cg<=615)
+  cut rho 0.600 N4 vpc16: K_dev free=4.0 interior=3.4 dropped=0 (151s, cg<=745)
+  sandwich rho 0.200 N3 vpc24: K_dev free=18.3 interior=15.2 dropped=0 (90s, cg<=1038)
+  cut rho 0.200 N3 vpc24: K_dev free=18.6 interior=15.6 dropped=0 (122s, cg<=1215)
+
+DONE (rc=0).
+exit 0

@@ -1,0 +1,18 @@
+# Release ef7caa10 — 2026-11-16 edit-faces-t (his T in Edit faces, 1c48800d), app only
+# Core and worker unchanged: fingerprint 85d25b639dee
+# Merged onto 09ecb0b2; the merged app tree equals edit-faces-t's, so its gate applies unchanged.
+# Commits (first parent of edit-faces-t since the release tip):
+#   1c48800d Edit faces (362): his 11-16 "T" - taking a cut back takes back both halves, a tap where no piece lies is the bare face, a one-tap repair, the open rail a squircle
+# Gates:
+#   claude/edit-faces-t 1c48800d (on 90a6139d = release 77de729a's app tree), built against core 85d25b639dee:
+#   run 1: 146/148 across 25 Edit faces / Surface / Flexible / cut-rail classes - my repair line placed off-screen (fixed: to the rail's left) and FlexibleSectorStoreTests' I2-route control (it needed the old send-every-piece wire)
+#   run 2: 10/10 (EditFacesHalfInAUnionTests, FlexibleSectorStoreTests, CutLook, CutRulings, AppAsks1114)
+#   run 3: the other 85 face-region classes 414/415 - FlexibleSectorMigrationTests' leak premise and control (same cause); restated
+#   run 4: 11/11 (FlexibleSectorMigrationTests, FlexibleSectorStoreTests, EditFacesHalfInAUnionTests)
+#   16:54 checks ok: edit-faces-t 1c48800d, 1 commit(s), app-only, onto 09ecb0b2, fingerprint 85d25b639dee
+#   16:54 merged ef7caa10; app tree == edit-faces-t's, fingerprint 85d25b639dee
+#   16:54 waiting for HEAVY.lock (free)
+#   16:54 lock taken (38 GB free)
+#   17:00 iPad device build green; lock released
+#   17:00 pushed ef7caa10
+#   17:00 worker /health fingerprint 85d25b639dee (unchanged, no swap)

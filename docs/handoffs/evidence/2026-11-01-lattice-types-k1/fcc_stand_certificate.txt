@@ -1,0 +1,26 @@
+M2 stand (evidence/2026-08-20-lattice-only-grading/jobs/structural_on.json and aes_bandB_on.json,
+res 128, mode analyze, grading cell_mode swept / algorithm doubled), topology swapped to fcc in BOTH
+lattice and grading for the fcc rows. Binary: this branch's topopt-cli (frozen copy). Every field is
+run_info.json's "grading" object, verbatim.
+
+field                         octet structural    fcc structural      octet aesthetic     fcc aesthetic       
+topology                      octet               fcc                 octet               fcc                 
+intent                        structural          structural          aesthetic           aesthetic           
+algorithm                     doubled             doubled             doubled             doubled             
+band_rho_min                  0.05047             0.09505             0.05047             0.09505             
+band_rho_max                  0.89988             0.59093             0.89988             0.59093             
+cells_per_member_floor        5                   5                   5                   5                   
+cell_size_mm                  8                   4                   4                   4                   
+printability_floor_mm         4.602619932         3.230693123         4.602619932         3.230693123         
+rho_min_used                  0.05047             0.09505             0.2                 0.2                 
+rho_max_used                  0.05047             0.09505             0.6                 0.59093             
+latticed_voxels               28344               78568               91575               91493               
+recertified_latticed          True                True                None                None                
+recertified_margin            239.6482035         66.18735069         None                None                
+recertified_accepted          True                True                None                None                
+solid_margin                  671.3553909         671.3553909         None                None                
+min_cells_per_member          5.115837908         5.115837908         5.115837908         5.115837908         
+min_strut_diameter_mm         0.730019            0.52001225          0.4200080538        0.4200012355        
+max_strut_diameter_mm         0.730019            0.52001225          1.515580538         1.500005522         
+lattice_solid_volume_mm3      7093.833762         37032.61517         127615.5763         126683.4376         
+recommended_layer_height_mm   0.18250475          0.1300030625        0.1050020134        0.1050003089        

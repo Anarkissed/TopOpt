@@ -1,0 +1,29 @@
+# Release 5541d83e514a - 2026-11-21: release (12), his iPad notes on release 11 - claude/organic-1 cd1b864d, one worker swap (34c39df96ffd -> 5541d83e514a)
+# Errors as centred plain pop-ups; Lattice makes the print file; help under every Organic setting; his Look rule; the sample.
+# Core: LatticeReview's bc34b79c (claude/organic-engine, by commit). LatticeTypes' 181deb12 is NOT in this release.
+# Gates in the gate tree (b9-screens-362, its own vendor): the whole app suite in three runs; targeted classes after each fix.
+# Commits:
+#   03dcf9a3 Organic SB1 (leg Q; the owner's iPad, release 11, the Organic sample: "core stopped with an exception that is not a std::exception"): nothing but a refusal leaves a Session call. The fault: the Exact preview runs the file's pri
+#   bc34b79c Organic UL1 (leg R; the owner, 2026-11-20: "Can I put 789293?"): every number the app shows has an upper limit. validate_organic (and the groups form) refuses over_upper_limit, a sentence naming the whole range, allowed_min / a
+#   47edc9ca His iPad notes on release (11), 11-20: errors as centred pop-ups, Lattice exports, help under every Organic setting, his Look
+#   93cf63b8 His 11-20 refinement: "(0 = off)" beside the setting's name, in italics and the detail line's grey
+#   cd1b864d Merge LatticeReview's engine bc34b79c (claude/organic-engine): the sample's cancel answered as cancelled (03dcf9a3), every Session call caught at its boundary with a plain refusal (SB1), the upper limits on every Organic number
+#   7702fdae Release (12) 2026-11-21: merge claude/organic-1 cd1b864d - his iPad notes on release (11): every error a centred pop-up in plain English, the Lattice button makes the print file (the temporary Export bar and preview line gone, 
+# Gates (this tree):
+#   22:42 his uncommitted files (left alone): app/TopOpt-Info.plist app/TopOpt.xcodeproj/project.pbxproj app/TopOpt.xcodeproj/xcshareddata/xcschemes/TopOpt.xcscheme 
+#   22:42 preflight job: /Users/nadim/.topopt-worker/d5af229ca8ee4a8f (his newest optimisation job the installed worker passes; read only)
+#   22:42 merged organic-1 as 7702fdae (local); app + core + tools == its; fingerprint 5541d83e514a
+#   ==> Manifold: /Users/nadim/dev/TopOpt/TopOpt/.vcpkg/installed-manifold (KEEP regions exported exactly)
+#   ==> building macOS slice (Eigen + OCCT, arm64)
+#   ==> building iOS simulator slice (Eigen + OCCT + lib3mf, arm64)
+#   ==> building iOS device slice (Eigen + OCCT + lib3mf, arm64)
+#   22:45 build_core green: topopt_vendored_core_5541d83e514a + the Install 3 entry points + lay_organic_preview and Session::sweep_limits in every slice and arch
+#   22:45 worker CLI built: topopt-cli: core 5541d83e514a (dirty=false), built Nov 20 2026 22:45:53; 3 data paths, all under the release worktree
+#   22:52 core suites passed: 100% tests passed out of 9 Total Test time (real) = 352.49 sec 
+#   22:58 iPad device build green (this tree's own pair)
+#   22:58 preflight on his job: preflight: load path CONNECTED
+#   22:58 pushed 7702fdae
+#   22:58 worker script unchanged (release 11's)
+#   22:58 worker swapped: /health "fingerprint": "5541d83e514a"; data paths under the release worktree; preflight again OK; old CLI kept as build-fix/topopt-cli.34c39df96ffd-replaced-20261121
+#   22:59 route, demand, strength_job and organic cut 2 tests vs the INSTALLED script: ALL PASS
+#   22:59 the app_release scripts now expect 5541d83e514a

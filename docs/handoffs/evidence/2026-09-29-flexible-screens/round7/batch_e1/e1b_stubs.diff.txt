@@ -1,0 +1,176 @@
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleEdgePickViews.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleEdgePickViews.swift
+index 0c61c15e..2930ce9e 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleEdgePickViews.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleEdgePickViews.swift
+@@ -191,7 +191,7 @@ struct FlexibleEdgeGroupRows: View {
+                 FlexRow(st.kind == .corner ? FlexibleRowCopy.patchSizeRow : FlexibleRowCopy.stripWidthRow,
+                         info: FlexibleRowCopy.Info.stripWidth, id: "flexible-row-strip-width") {
+                     FlexNumberBox(key: "strip-\(p.id.uuidString)", title: st.label + " \u{00B7} " + FlexibleRowCopy.stripWidthRow,
+-                                  spec: FlexNumberSpec(value: st.widthMM, unit: "mm", step: 0.5,
++                                  spec: FlexNumberSpec(value: st.widthMM ?? 0, unit: "mm", step: 0.5,
+                                                        range: FlexibleEdgeStrips.minWidthMM...max(FlexibleEdgeStrips.minWidthMM, st.capMM),
+                                                        decimals: 1),
+                                   padTarget: $padTarget, onNote: { model.toast = $0 }) { v in
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleEdgeStrips.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleEdgeStrips.swift
+index ef5cb8e4..3800259a 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleEdgeStrips.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleEdgeStrips.swift
+@@ -51,25 +51,30 @@ public struct FlexibleStrip: Codable, Equatable, Hashable, Sendable {
+         public var span: [Double]?
+         /// Half the face's extent across the edge (each edge, for a corner): the width's cap on this face.
+         public var capMM: Double
++        /// ★ R7-E1 STUB: a corner face's two edge directions from the corner.
++        public var edges: [SIMD3<Double>]?
+ 
+         public init(face: Int, root: Int, origin: SIMD3<Double>, away: [SIMD3<Double>], along: SIMD3<Double>? = nil,
+-                    span: [Double]? = nil, capMM: Double) {
++                    span: [Double]? = nil, capMM: Double, edges: [SIMD3<Double>]? = nil) {
+             self.face = face; self.root = root; self.origin = origin; self.away = away
+-            self.along = along; self.span = span; self.capMM = capMM
++            self.along = along; self.span = span; self.capMM = capMM; self.edges = edges
+         }
+     }
+ 
+     public var kind: Kind
+     /// "Edge 3" / "Corner 1" — its number in the list it was picked from (the list renumbers after a cut).
+     public var label: String
+-    /// The strip's width / the patch's side (mm).
+-    public var widthMM: Double
++    /// The strip's width / the patch's side (mm). ★ R7-E1 STUB: optional.
++    public var widthMM: Double?
+     /// Pick order, across every edges/corners group (the first pick keeps a shared corner square).
+     public var order: Int
+     public var members: [Member]
++    /// ★ R7-E1 STUB: core's halfway over the whole members at pick time.
++    public var halfway: SIMD3<Double>?
+ 
+-    public init(kind: Kind, label: String, widthMM: Double, order: Int, members: [Member]) {
++    public init(kind: Kind, label: String, widthMM: Double? = nil, order: Int, members: [Member], halfway: SIMD3<Double>? = nil) {
+         self.kind = kind; self.label = label; self.widthMM = widthMM; self.order = order; self.members = members
++        self.halfway = halfway
+     }
+ 
+     /// The width's cap: half the narrowest member face's extent across its edge — a face group always keeps a rest.
+@@ -234,7 +239,7 @@ public enum FlexibleEdgeStrips {
+ 
+     /// ★ A member's AREA as half-spaces (each kept where dot(p − point, normal) ≥ 0, as a RegionCut): within `w` of
+     /// each edge (its plane parallel to the edge, its normal in the face), and an edge's start and end along it.
+-    public static func halfSpaces(_ m: FlexibleStrip.Member, width w: Double) -> [RegionCut] {
++    public static func legacyHalfSpaces(_ m: FlexibleStrip.Member, width w: Double) -> [RegionCut] {
+         var out = m.away.map { u in RegionCut(point: m.origin + u * w, normal: -u) }
+         if let e = m.along, let s = m.span, s.count == 2 {
+             out.append(RegionCut(point: m.origin + e * s[0], normal: e))
+@@ -282,7 +287,11 @@ public enum FlexibleEdgeStrips {
+         public let id: UUID
+         public var strip: FlexibleStrip
+         public var regions: [Int]?
+-        public init(id: UUID, strip: FlexibleStrip, regions: [Int]?) { self.id = id; self.strip = strip; self.regions = regions }
++        /// ★ R7-E1 STUB: the flat prism's plane (nil: M2's width).
++        public var cut: FlexibleFlatPrism.Cut?
++        public init(id: UUID, strip: FlexibleStrip, regions: [Int]?, cut: FlexibleFlatPrism.Cut? = nil) {
++            self.id = id; self.strip = strip; self.regions = regions; self.cut = cut
++        }
+     }
+ 
+     /// The regions after a change, and what each piece is.
+@@ -363,7 +372,7 @@ public enum FlexibleEdgeStrips {
+             }
+             var free: [Int] = [root]
+             for p in picks {
+-                let h = halfSpaces(p.strip.members[p.k], width: p.strip.widthMM)
++                let h = legacyHalfSpaces(p.strip.members[p.k], width: p.strip.widthMM ?? 0)
+                 // the free piece the pick's area lies in; where it reaches two (a strip wider than the corner patch
+                 // beside it: the strip less the patch is an L, and a sector is one convex piece — core refuses two
+                 // sectors of one face in a press), it takes the piece holding most of it and the sliver stays the rest
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleRowCopy+Edges.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleRowCopy+Edges.swift
+index 462aece9..eb60b9ac 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleRowCopy+Edges.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleRowCopy+Edges.swift
+@@ -94,4 +94,18 @@ extension FlexibleRowCopy {
+     public static let patchSizeRow = "Patch size"
+     /// A press is saved, never sent until core builds press stacks (AP9).
+     public static let pressNotSent = "Set up \u{00B7} core support pending"
++
++    // MARK: ★ R7-E1 STUB — the flat prism's words
++    public static let insideEdge = "An inside edge \u{00B7} no flat prism"
++    public static let insideCorner = "An inside corner \u{00B7} no flat prism"
++    public static let flatFarEnd = "Stops here \u{00B7} the far end reaches 0 mm"
++    public static let flatShallowest = "Stops here \u{00B7} 0.5 mm is the least"
++    public static func flatCrossAll(_ n: Int) -> String { "The flat prism must cross all \(n) faces" }
++    public static func flatLatticeEnds(_ mm: Double) -> String { fit("Stops at " + String(format: "%.1f", mm) + " mm \u{00B7} the lattice ends there") }
++    public static let stripsAreFlatNow = "Edge strips are flat prisms now \u{00B7} same reach"
++    public static let flatDeepestRow = "Deepest squish"
++    public static func flatTiltRow(toward face: String) -> String { fit("Tilt toward \(face)") }
++    public static func flatTwistRow(end: String) -> String { fit("Twist \(end) deeper") }
++    public static func flatUpDownRow(into face: String) -> String { fit("Up/down more into \(face)") }
++    public static func flatLeftRightRow(toward face: String) -> String { fit("Left/right toward \(face)") }
+ }
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleSectors.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleSectors.swift
+index 40180953..9921b0a4 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleSectors.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleSectors.swift
+@@ -149,8 +149,8 @@ public enum FlexibleSectors {
+     /// `includes`: Selections' include specs (the face-prisms). `strips`: every edge/corner press's area, in pick order of
+     /// storage. `newPicks`: picks being made now — refused where they cannot be cut (D6); a kept strip is clipped and noted.
+     static func resolve(mesh: ViewerMesh, faceRegions: FaceRegionModel, includes: [LatticeRegionSpec],
+-                        strips: [(id: UUID, strip: FlexibleStrip)], newPicks: Set<UUID> = [],
+-                        numbers: FlexibleSectorNumbers) -> FlexibleSectorSet {
++                        strips: [(id: UUID, strip: FlexibleStrip)], cuts: [UUID: FlexibleFlatPrism.Cut] = [:],
++                        newPicks: Set<UUID> = [], numbers: FlexibleSectorNumbers) -> FlexibleSectorSet {
+         var out = FlexibleSectorSet()
+         var scratch = faceRegions
+         let roots = Self.roots(mesh: mesh, faceRegions: faceRegions)
+@@ -235,7 +235,7 @@ public enum FlexibleSectors {
+             var st = strip
+             var refusal: String?
+             for (k, mb) in strip.members.enumerated() {
+-                let h = FlexibleEdgeStrips.halfSpaces(mb, width: strip.widthMM)
++                let h = FlexibleEdgeStrips.legacyHalfSpaces(mb, width: strip.widthMM ?? 0)
+                 let fe = Swift.max(1e-6, 1e-7 * area(mb.face, []))
+                 var cands: [(chain: String, scratch: RegionID?, root: Root, section: String?, a: Double)] = []
+                 for r in roots where r.faces.contains(mb.face) {
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleStageModel.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleStageModel.swift
+index a2cefafe..428a2b00 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleStageModel.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleStageModel.swift
+@@ -171,6 +171,10 @@ public final class FlexibleStageModel: ObservableObject {
+     @Published public var selectedRegion: Int? { didSet { if oldValue != selectedRegion { selectionChanged() } } }
+     /// ★ ANGLED PRESSES (AP1): the press whose card is open (FlexiblePress id); nil ⇒ none.
+     @Published public var selectedPress: UUID?
++    /// ★ R7-E1 STUB: the flat prism's drag preview, the last stop, the camera request.
++    @Published public internal(set) var flatPreview: FlexibleFlatPreview?
++    @Published public internal(set) var lastFlatStop: FlexibleFlatStop?
++    @Published public internal(set) var flatCameraRequest: UUID?
+     /// ★ ROUND 6 ITEM 2: [+ New] → [Edges/corners] — pick mode (FlexibleEdgePick); nil when not picking. Nothing is
+     /// stored in the project until [Done].
+     @Published public var edgePick: FlexibleEdgePick?
+diff --git a/app/TopOptKit/Sources/TopOptKit/FlexibleKit+Meet.swift b/app/TopOptKit/Sources/TopOptKit/FlexibleKit+Meet.swift
+index 1f59da80..9f64f9c4 100644
+--- a/app/TopOptKit/Sources/TopOptKit/FlexibleKit+Meet.swift
++++ b/app/TopOptKit/Sources/TopOptKit/FlexibleKit+Meet.swift
+@@ -134,4 +134,12 @@ extension FlexibleScene {
+         return FlexPressVerdict(accepted: r.accepted, reason: String(r.reason), load: FlexConv.v3(r.load),
+                                 buildAngleDeg: r.build_angle_deg, side: r.side, columns: Int(r.columns))
+     }
++
++    /// ★ R7-E1 STUB: register a press (footprint + direction) on the open scene; its synthetic id.
++    public func registerPress(_ footprint: [Int], direction: SIMD3<Double>) throws -> Int {
++        throw TopOptError(message: "R7-E1 stub: no press registration yet")
++    }
++
++    /// ★ R7-E1 STUB: core's press API version.
++    public static var pressApiVersion: Int { 0 }
+ }
+diff --git a/app/TopOptKit/Sources/TopOptKit/FlexibleKit.swift b/app/TopOptKit/Sources/TopOptKit/FlexibleKit.swift
+index 04588b82..a5990a6f 100644
+--- a/app/TopOptKit/Sources/TopOptKit/FlexibleKit.swift
++++ b/app/TopOptKit/Sources/TopOptKit/FlexibleKit.swift
+@@ -204,6 +204,8 @@ public struct FlexStackInfo: Equatable, Sendable {
+     /// ★ S1 (#361's 254cb137 — the spec's V2): a SECTOR's ownership is core's own, asked once (see
+     /// FlexSectorVerdict). nil: a stack without cuts (core owns every voxel its columns hold).
+     public var sector: FlexSectorVerdict? = nil
++    /// ★ R7-E1 STUB: the regions whose union is the footprint (core's Stack.footprint_region_ids).
++    public var footprintRegionIDs: [Int] = []
+ 
+     /// ★ ROUND 7, M1 (his img1, 2026-10-14: "ONLY the face-prism creates the lattice structure in any area"): this stack
+     /// as the app keeps it when NO face-prism is set — core's frame, columns and entries unchanged, but no lattice on any

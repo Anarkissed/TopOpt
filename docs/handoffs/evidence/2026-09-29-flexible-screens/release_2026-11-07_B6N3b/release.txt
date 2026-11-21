@@ -1,0 +1,13 @@
+# Release d597d254 — 2026-11-07 B6N3b (UI-Notes' app batch 397a67f5), app only
+# Core and worker unchanged: fingerprint 8902d87b88ba; "fingerprint": "8902d87b88ba"
+# Merged onto 4e136424; the merged app tree equals B6N3b's, so the builder's tests and the reviewer's code check apply unchanged.
+# Commits:
+#   397a67f5 B6 his iPad note 3b (11-07): press an eye and drag — each row passed flips, both ways, the list scrolls at its edges
+# Gates:
+#   20:41 checks ok: B6N3b 397a67f5, 1 commit(s), app-only, base e0fb99ce, onto 4e136424, fingerprint 8902d87b88ba
+#   20:41 merged d597d254; app tree == B6N3b's, fingerprint 8902d87b88ba
+#   20:41 waiting for HEAVY.lock (362 release (3) gates B merged: app classes in B9 (pid 15131) 20:40 EST)
+#   21:15 lock taken
+#   21:20 iPad device build green; lock released
+#   21:20 pushed d597d254
+#   21:20 worker /health "fingerprint": "8902d87b88ba" (unchanged, no swap)

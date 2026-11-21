@@ -1,0 +1,49 @@
+# U21 batch G runs (app/TopOptKit, --scratch-path /tmp/r7x20b-build) — f1928c96 + the working tree
+### new tests (FlexibleU21BendTests, red controls asserted inside)
+Test Case '-[TopOptFlowsTests.FlexibleU21BendTests testAnEdgesGroupBendsAfterAnEdit]' passed (22.354 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21BendTests testAnEdgesGroupBendsWithNoLattice]' passed (4.523 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21BendTests testAStampPartlyOffTheFaceHasNoStep]' passed (4.006 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21BendTests testNoCrackBetweenCoincidentEdges]' passed (4.927 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21BendTests testOffTheFacePointsKeepTheNearestVertexRule]' passed (5.418 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21BendTests testPosedIndentSitsOnTheBentSquares]' passed (2.333 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21BendTests testProbeTheFarEdgeGate]' passed (2.879 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21BendTests testProbeWhyFace6WentDeeperAfterTheDeleteAndUndo]' passed (1.550 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21BendTests testTheEditedPressIsNotCalibratedToTheOldBuild]' passed (7.217 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21BendTests testTheIndentOutlineFollowsTheBendWithoutSpikes]' passed (5.253 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21BendTests testTheLegendSaysTunedOrInterim]' passed (0.005 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21BendTests testTheSkinsMeetTheSideOnHisPad]' passed (4.919 seconds).
+### runner.log
+start 21:21:09 f1928c96 + working tree
+build exit 0 21:21:11
+new exit 0 21:22:19
+golden det exit 0 21:22:36
+golden unseeded exit 0 21:22:53
+hashes exit 0 21:23:52
+hashes cmp vs round7/batch_x20b/stage_job_hashes_x20b.txt (whole file): identical
+hashes cmp vs round7/batch_u21_d/stage_job_hashes_u21d_fix2.txt (whole file): identical
+chunk_aa exit 0 21:46:28
+chunk_ab exit 0 21:54:56
+chunk_ac exit 0 22:04:40
+chunk_ad exit 0 22:17:18
+chunk_ae exit 1 22:34:41
+chunk_af exit 0 22:46:08
+ALLDONE 22:46:08
+### classes (56: the classes that name the touched files' types — FlexibleOverlayMesh, FlexibleSettingsSquish, FlexibleBendPose / bendPose, the press-sim and note API, FlexibleStagePage(…) — plus the pose / X20b pins, FlexibleSquishCopyTests, LatticeStaleTypeTests; evidence probes left out), chunks of 10
+FlexibleBatchCVerifyTests FlexibleBatchM2Tests FlexibleBatchMDentTests FlexibleBatchMGroupTests FlexibleBatchMVerifyTests FlexibleBatchNRefineTests FlexibleBatchVHostedTests FlexibleC1Tests FlexibleEdgeGroupsHostedTests FlexibleFEFieldTests FlexibleFEPassTests FlexibleFlatPrismHostedTests FlexibleGroupPaletteHostedTests FlexibleLatticeSectionsHostedTests FlexibleLatticeSectionsTests FlexibleMainPageHookTests FlexibleMergeR5SMTests FlexibleOverlayClipTests FlexibleOverlaySeamTests FlexibleR7E1ReviewHostedTests FlexibleR7E1ReviewTests FlexibleR7E2HostedTests FlexibleR7E3Tests FlexibleR7E5Tests FlexibleR7FTests FlexibleR7MergeTests FlexibleR7RHostedTests FlexibleR7RTests FlexibleR7SettingsHostedTests FlexibleR7SettingsTests FlexibleR7X1Tests FlexibleR7X1VerifyTests FlexibleRegionsTests FlexibleRound5SettingsHostedTests FlexibleRound5SettingsVerifyTests FlexibleRound5SquishExitTests FlexibleRound6HostedTests FlexibleRound6Tests FlexibleRound7ScreenHookTests FlexibleRound7ScreenHostedTests FlexibleRound7ViewsHostedTests FlexibleRound7ViewsTests FlexibleRowCopyTests FlexibleSettingsPageHostedTests FlexibleSettingsVerifyD1Tests FlexibleSqueezeGroupsModelTests FlexibleSqueezeGroupsReviewUITests FlexibleSqueezeGroupsUITests FlexibleSquishCopyTests FlexibleSquishTests FlexibleSquishVerifyGTests FlexibleU1Tests FlexibleU21BendTests FlexibleU2Tests FlexibleX20bTests LatticeStaleTypeTests 
+### goldens
+golden_det: identical 38 · DIFFERS 0 · PART-SKIP 0 · Executed 13 tests, with 0 failures (0 unexpected) in 14.073 (14.075) seconds
+golden_unseeded: identical 32 · DIFFERS 0 · PART-SKIP 1 · Executed 13 tests, with 0 failures (0 unexpected) in 14.037 (14.039) seconds
+### chunks
+chunk_aa.log: Executed 58 tests, with 2 tests skipped and 0 failures (0 unexpected) in 1353.096 (1353.103) seconds
+chunk_ab.log: Executed 34 tests, with 0 failures (0 unexpected) in 506.188 (506.193) seconds
+chunk_ac.log: Executed 50 tests, with 0 failures (0 unexpected) in 581.612 (581.620) seconds
+chunk_ad.log: Executed 68 tests, with 0 failures (0 unexpected) in 756.020 (756.029) seconds
+chunk_ae.log: Executed 67 tests, with 1 failure (0 unexpected) in 1040.853 (1040.862) seconds
+chunk_af.log: Executed 41 tests, with 1 test skipped and 0 failures (0 unexpected) in 685.089 (685.096) seconds
+### failures (all chunks)
+Tests/TopOptFlowsTests/FlexibleRound7ViewsReviewHostedTests.swift:323: error: -[TopOptFlowsTests.FlexibleRound7ViewsHostedTests testThePlayIconsRingAndDotAreSeenWithPlayOff] : XCTAssertGreaterThan failed: ("22") is not greater than ("120") - ★ the sims running: an accent ring on the Play icon (22 px, idle 0)
+### skipped
+Test Case '-[TopOptFlowsTests.FlexibleBatchMVerifyTests testHisImg6RowsAtTheDevicesPixelCount]' skipped (0.002 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsHostedTests testEvidenceOnHisPad]' skipped (0.001 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU1Tests testU21BendPictures]' skipped (0.004 seconds).
+signal lines: 0

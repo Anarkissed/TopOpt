@@ -1,0 +1,256 @@
+# Round 6 (task 2026-09-29-flexible-screens; the maintainer's tasks of 2026-10-08, items 1 and 3): the RED runs, raw.
+# (1) TESTS FIRST (fbb55f59), SWIFT_DETERMINISTIC_HASHING=1, swift test --skip-build --filter
+#     'TopOptFlowsTests\.(FlexibleRound6Tests|FlexibleRound6HostedTests)/|…FlexibleDepthPrismTests/testThePageDrawsThePrismAndMountsTheChip|…FlexibleGroupPaletteHostedTests/testNineGroups…'
+#     Positive controls (his screenshots reproduced FIRST): img1 — the main page, Lattice on, heat off, round 5's frames:
+#     7992 frame vertices checked, 0 wrong (MergeR5SM's frameCheck); img2 — the Settings page at the probe's iso camera: round 5's
+#     frames change 30424 pixels of the render.
+FlexibleDepthPrismTests.swift:284: error: -[TopOptFlowsTests.FlexibleDepthPrismTests testThePageDrawsThePrismAndMountsTheChip] : XCTAssertTrue failed
+FlexibleDepthPrismTests.swift:286: error: -[TopOptFlowsTests.FlexibleDepthPrismTests testThePageDrawsThePrismAndMountsTheChip] : XCTAssertTrue failed
+Test Case '-[TopOptFlowsTests.FlexibleDepthPrismTests testThePageDrawsThePrismAndMountsTheChip]' failed (1.238 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleGroupPaletteHostedTests testNineGroupsNumberTheSharedColourOnTheRailAndOnTheirOwnFaces]' passed (15.175 seconds).
+FlexibleRound6HostedTests.swift:492: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testOneLegendCardCarriesTheViewRows] : XCTAssertTrue failed - a view on with no dent: the card
+FlexibleRound6HostedTests.swift:493: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testOneLegendCardCarriesTheViewRows] : XCTAssertTrue failed
+FlexibleRound6HostedTests.swift:497: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testOneLegendCardCarriesTheViewRows] : XCTAssertFalse failed
+FlexibleRound6HostedTests.swift:497: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testOneLegendCardCarriesTheViewRows] : XCTAssertFalse failed
+FlexibleRound6HostedTests.swift:497: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testOneLegendCardCarriesTheViewRows] : XCTAssertFalse failed
+FlexibleRound6HostedTests.swift:503: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testOneLegendCardCarriesTheViewRows] : XCTAssertTrue failed - the page reads the rule
+FlexibleRound6HostedTests.swift:514: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testOneLegendCardCarriesTheViewRows] : XCTUnwrap failed: expected non-nil value of type "CGRect" - 11l: legendPrismsRow
+Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testOneLegendCardCarriesTheViewRows]' failed (7.152 seconds).
+FlexibleRound6HostedTests.swift:311: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testPastEightGroupsTheNumberRidesTheWallInTheGroupsView] : XCTAssertEqual failed: ("[]") is not equal to ("[1, 9]") - the shared colour's groups only
+FlexibleRound6HostedTests.swift:312: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testPastEightGroupsTheNumberRidesTheWallInTheGroupsView] : XCTAssertEqual failed: ("0") is not equal to ("2") - one per member (each group has one face)
+FlexibleRound6HostedTests.swift:340: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testPastEightGroupsTheNumberRidesTheWallInTheGroupsView] : XCTAssertEqual failed: ("44") is not equal to ("0") - no digit painted on the heat
+FlexibleRound6HostedTests.swift:349: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testPastEightGroupsTheNumberRidesTheWallInTheGroupsView] : XCTAssertEqual failed: ("[]") is not equal to ("[4, 2, 3, 6, 8, 5, 9, 1, 7]") - control: the count rule numbers every group
+Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testPastEightGroupsTheNumberRidesTheWallInTheGroupsView]' failed (7.018 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testPrismsTurnsTheLatticeViewOnItself]' skipped (0.036 seconds).
+FlexibleRound6HostedTests.swift:362: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testSelectingAPressedFaceShowsItsPrismAndNumberAtOnce] : XCTAssertEqual failed: ("0") is not equal to ("1") - at rest: face 2's prism
+FlexibleRound6HostedTests.swift:363: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testSelectingAPressedFaceShowsItsPrismAndNumberAtOnce] : XCTUnwrap failed: expected non-nil value of type "ClearanceRenderItem"
+Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testSelectingAPressedFaceShowsItsPrismAndNumberAtOnce]' failed (2.306 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testTheFourMainButtonsClearTheNoteLegendAndPlayer]' skipped (0.035 seconds).
+FlexibleRound6HostedTests.swift:535: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageDrawsTheActiveGroupsPrismsAndThePrismsView] : XCTAssertEqual failed: ("[]") is not equal to ("[1]") - the active group Top: face 1's prism
+FlexibleRound6HostedTests.swift:536: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageDrawsTheActiveGroupsPrismsAndThePrismsView] : XCTAssertNotNil failed - faint
+FlexibleRound6HostedTests.swift:539: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageDrawsTheActiveGroupsPrismsAndThePrismsView] : XCTAssertEqual failed: ("[]") is not equal to ("[1, 2, 3, 5, 4]") - the Prisms view: every pressed face
+Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageDrawsTheActiveGroupsPrismsAndThePrismsView]' failed (4.202 seconds).
+FlexibleRound6HostedTests.swift:193: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageWearsNoGroupColourInAnyViewOrTurn] : XCTAssertEqual failed: ("7992") is not equal to ("0") - heat off, group-1's turn: no group colour on the model
+FlexibleRound6HostedTests.swift:193: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageWearsNoGroupColourInAnyViewOrTurn] : XCTAssertEqual failed: ("7992") is not equal to ("0") - heat off, group-2's turn: no group colour on the model
+FlexibleRound6HostedTests.swift:193: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageWearsNoGroupColourInAnyViewOrTurn] : XCTAssertEqual failed: ("7992") is not equal to ("0") - heat off, group-3's turn: no group colour on the model
+FlexibleRound6HostedTests.swift:196: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageWearsNoGroupColourInAnyViewOrTurn] : XCTAssertEqual failed: ("7992") is not equal to ("0") - heat off: the composed tints
+FlexibleRound6HostedTests.swift:193: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageWearsNoGroupColourInAnyViewOrTurn] : XCTAssertEqual failed: ("7992") is not equal to ("0") - heat on, group-1's turn: no group colour on the model
+FlexibleRound6HostedTests.swift:193: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageWearsNoGroupColourInAnyViewOrTurn] : XCTAssertEqual failed: ("7992") is not equal to ("0") - heat on, group-2's turn: no group colour on the model
+FlexibleRound6HostedTests.swift:193: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageWearsNoGroupColourInAnyViewOrTurn] : XCTAssertEqual failed: ("7992") is not equal to ("0") - heat on, group-3's turn: no group colour on the model
+FlexibleRound6HostedTests.swift:196: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageWearsNoGroupColourInAnyViewOrTurn] : XCTAssertEqual failed: ("7992") is not equal to ("0") - heat on: the composed tints
+FlexibleRound6HostedTests.swift:193: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageWearsNoGroupColourInAnyViewOrTurn] : XCTAssertEqual failed: ("7992") is not equal to ("0") - Stress, group-1's turn: no group colour on the model
+FlexibleRound6HostedTests.swift:193: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageWearsNoGroupColourInAnyViewOrTurn] : XCTAssertEqual failed: ("7992") is not equal to ("0") - Stress, group-2's turn: no group colour on the model
+FlexibleRound6HostedTests.swift:193: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageWearsNoGroupColourInAnyViewOrTurn] : XCTAssertEqual failed: ("7992") is not equal to ("0") - Stress, group-3's turn: no group colour on the model
+FlexibleRound6HostedTests.swift:196: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageWearsNoGroupColourInAnyViewOrTurn] : XCTAssertEqual failed: ("7992") is not equal to ("0") - Stress: the composed tints
+FlexibleRound6HostedTests.swift:213: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageWearsNoGroupColourInAnyViewOrTurn] : XCTAssertEqual failed: ("[SIMD4<Float>(0.95686275, 0.627451, 0.73333335, 0.35)]") is not equal to ("[SIMD4<Float>(0.1882353, 0.81960785, 0.34509805, 0.35)]") - group-2·stepped's turn: face 0 pressed, no map — the plain pressed colour
+FlexibleRound6HostedTests.swift:213: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageWearsNoGroupColourInAnyViewOrTurn] : XCTAssertEqual failed: ("[SIMD4<Float>(0.95686275, 0.627451, 0.73333335, 0.35)]") is not equal to ("[SIMD4<Float>(0.1882353, 0.81960785, 0.34509805, 0.35)]") - group-1·stepped's turn: face 0 pressed, no map — the plain pressed colour
+FlexibleRound6HostedTests.swift:213: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageWearsNoGroupColourInAnyViewOrTurn] : XCTAssertEqual failed: ("[SIMD4<Float>(0.95686275, 0.627451, 0.73333335, 0.35)]") is not equal to ("[SIMD4<Float>(0.1882353, 0.81960785, 0.34509805, 0.35)]") - group-3·stepped's turn: face 0 pressed, no map — the plain pressed colour
+FlexibleRound6HostedTests.swift:216: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageWearsNoGroupColourInAnyViewOrTurn] : XCTAssertEqual failed: ("[SIMD4<Float>(0.95686275, 0.627451, 0.73333335, 0.35)]") is not equal to ("[SIMD4<Float>(0.1882353, 0.81960785, 0.34509805, 0.35)]") - the refresh: the plain pressed colour
+Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageWearsNoGroupColourInAnyViewOrTurn]' failed (112.382 seconds).
+FlexibleRound6HostedTests.swift:414: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testThePrismsViewDrawsEveryPressedFacesPrismWithItsNumber] : XCTAssertEqual failed: ("[]") is not equal to ("[1, 2, 3, 5, 4]") - every pressed face
+FlexibleRound6HostedTests.swift:415: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testThePrismsViewDrawsEveryPressedFacesPrismWithItsNumber] : XCTAssertEqual failed: ("0") is not equal to ("5")
+FlexibleRound6HostedTests.swift:430: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testThePrismsViewDrawsEveryPressedFacesPrismWithItsNumber] : XCTAssertGreaterThanOrEqual failed: ("0") is less than ("2") - the other faces' tags (overlaps dropped)
+FlexibleRound6HostedTests.swift:447: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testThePrismsViewDrawsEveryPressedFacesPrismWithItsNumber] : XCTAssertEqual failed: ("0") is not equal to ("1") - control: without the view, one prism
+Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testThePrismsViewDrawsEveryPressedFacesPrismWithItsNumber]' failed (2.264 seconds).
+FlexibleRound6HostedTests.swift:240: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheSettingsPageWallsTheOpenGroupOnly] : XCTAssertEqual failed: ("[]") is not equal to ("[4, 2]") - .group(2): its members
+FlexibleRound6HostedTests.swift:249: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheSettingsPageWallsTheOpenGroupOnly] : XCTAssertEqual failed: ("[]") is not equal to ("[5, 3]") - .group(3)
+FlexibleRound6HostedTests.swift:254: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheSettingsPageWallsTheOpenGroupOnly] : XCTAssertEqual failed: ("[]") is not equal to ("[0]") - .rests
+FlexibleRound6HostedTests.swift:255: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheSettingsPageWallsTheOpenGroupOnly] : XCTAssertEqual failed: ("nil") is not equal to ("Optional(SIMD3<Float>(0.39215687, 0.8235294, 1.0))") - Rests in cyan
+FlexibleRound6HostedTests.swift:261: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheSettingsPageWallsTheOpenGroupOnly] : XCTAssertEqual failed: ("[]") is not equal to ("[4, 2]") - [Model] + face 2: its group
+FlexibleRound6HostedTests.swift:269: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheSettingsPageWallsTheOpenGroupOnly] : XCTAssertEqual failed: ("[]") is not equal to ("[1, 2, 0, 3, 5, 4]") - the Groups view: every group and Rests
+FlexibleRound6HostedTests.swift:282: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheSettingsPageWallsTheOpenGroupOnly] : XCTAssertEqual failed: ("7992") is not equal to ("0") - the Settings body wears no group colour
+FlexibleRound6HostedTests.swift:283: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheSettingsPageWallsTheOpenGroupOnly] : XCTAssertEqual failed: ("12") is not equal to ("0") - …nor the map-less body
+FlexibleRound6HostedTests.swift:292: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheSettingsPageWallsTheOpenGroupOnly] : XCTAssertTrue failed - control: group 1's glass on .group(2)
+Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testTheSettingsPageWallsTheOpenGroupOnly]' failed (5.936 seconds).
+FlexibleRound6HostedTests.swift:462: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheSettingsTogglesSitUnderTheGizmoClearOfEverything] : XCTUnwrap failed: expected non-nil value of type "CGRect" - 11l: the view buttons are on the page
+Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testTheSettingsTogglesSitUnderTheGizmoClearOfEverything]' failed (7.272 seconds).
+FlexibleRound6Tests.swift:85: error: -[TopOptFlowsTests.FlexibleRound6Tests testAWallIsItsRegionsOwnOutlineProudOfTheFace] : XCTUnwrap failed: expected non-nil value of type "FaceOffsetShell" - cube top
+Test Case '-[TopOptFlowsTests.FlexibleRound6Tests testAWallIsItsRegionsOwnOutlineProudOfTheFace]' failed (0.004 seconds).
+FlexibleRound6Tests.swift:417: error: -[TopOptFlowsTests.FlexibleRound6Tests testNoPageCallsTheFramePainterOutsideItsControl] : XCTAssertTrue failed - FlexibleMainStage.swift:640 paints the frames outside the control:         FlexibleGroupFrames.paint(&c.tints, overlay: overlay, model: m)   
+FlexibleRound6Tests.swift:429: error: -[TopOptFlowsTests.FlexibleRound6Tests testNoPageCallsTheFramePainterOutsideItsControl] : XCTAssertTrue failed - FlexibleMainStage.swift: a channels call tints the body by group: FlexiblePageChannels.channels(model: m, overlay: overlay, xray: false, drawnLattice: drawn, heat: heat,
+FlexibleRound6Tests.swift:417: error: -[TopOptFlowsTests.FlexibleRound6Tests testNoPageCallsTheFramePainterOutsideItsControl] : XCTAssertTrue failed - FlexibleMainStage+Views.swift:145 paints the frames outside the control:             if let m = model { FlexibleGroupFrames.paint(&composed, overlay: overlay, model: m) }   
+FlexibleRound6Tests.swift:417: error: -[TopOptFlowsTests.FlexibleRound6Tests testNoPageCallsTheFramePainterOutsideItsControl] : XCTAssertTrue failed - FlexibleMainStage+Views.swift:164 paints the frames outside the control:                 for id in Array(per.keys) { FlexibleGroupFrames.paint(&per[id], overlay: overlay, model: m) }
+FlexibleRound6Tests.swift:429: error: -[TopOptFlowsTests.FlexibleRound6Tests testNoPageCallsTheFramePainterOutsideItsControl] : XCTAssertTrue failed - FlexibleMainStage+Squish.swift: a channels call tints the body by group: FlexiblePageChannels.channels(model: m, overlay: overlay, xray: false, drawnLattice: d, heat: heat,
+FlexibleRound6Tests.swift:417: error: -[TopOptFlowsTests.FlexibleRound6Tests testNoPageCallsTheFramePainterOutsideItsControl] : XCTAssertTrue failed - FlexibleStagePage.swift:303 paints the frames outside the control:         FlexibleGroupFrames.paint(&c.tints, overlay: overlay, model: model)
+FlexibleRound6Tests.swift:429: error: -[TopOptFlowsTests.FlexibleRound6Tests testNoPageCallsTheFramePainterOutsideItsControl] : XCTAssertTrue failed - FlexibleStagePage.swift: a channels call tints the body by group: FlexiblePageChannels.channels(model: model, overlay: overlay, xray: true, drawnLattice: nil)
+FlexibleRound6Tests.swift:436: error: -[TopOptFlowsTests.FlexibleRound6Tests testNoPageCallsTheFramePainterOutsideItsControl] : XCTAssertTrue failed - the page draws the ONE clearance list
+Test Case '-[TopOptFlowsTests.FlexibleRound6Tests testNoPageCallsTheFramePainterOutsideItsControl]' failed (0.017 seconds).
+FlexibleRound6Tests.swift:490: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheStampTurnRowSaysItTurnsTheStamp] : XCTAssertEqual failed: ("Turn") is not equal to ("Stamp turn")
+Test Case '-[TopOptFlowsTests.FlexibleRound6Tests testTheStampTurnRowSaysItTurnsTheStamp]' failed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound6Tests testTheViewsAreNeverASettingAndNeverABuild]' passed (0.411 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound6Tests testTheWorkspaceHandsTheMainPagesPrismsToTheViewer]' skipped (0.036 seconds).
+FlexibleRound6Tests.swift:292: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertEqual failed: ("[]") is not equal to ("[4, 2]") - Group 2's two members
+FlexibleRound6Tests.swift:296: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTUnwrap failed: expected non-nil value of type "Int"
+Test Case '-[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad]' failed (6.791 seconds).
+FLEX-R6-1e discs [] · digits lit 44 (control 44) · count rule []
+FLEX-R6 SKIP -[FlexibleRound6HostedTests testPrismsTurnsTheLatticeViewOnItself]: the base is not S1 — the main page's [Prisms] button waits (step 6)
+FLEX-R6 SKIP -[FlexibleRound6HostedTests testTheFourMainButtonsClearTheNoteLegendAndPlayer]: the base is not S1 — the main page's [Prisms] button waits (step 6)
+FLEX-R6-3f active Top → [] · Prisms view → []
+FLEX-R6-1a
+FLEX-R6-3b prisms [] · tags 
+FLEX-R6-1b
+FLEX-R6-1f paints 4 · channels calls 3
+FLEX-R6-3e views: settings same true · modified false · key true · serial true — control: same false · modified true · serial false
+FLEX-R6 SKIP R6-3i: the base is not S1 (no legendDrilledIn) — hook H15 waits
+FLEX-R6-1d positive control: round 5's frames change 30424 pixels at iso (img2)
+FLEX-R6-1d nil-alpha (dragged prism) render hash 234002be542ddd78cf7888995a38592f2f02adfaee7a249724f085c7d422621b (recorded before A2 under SWIFT_DETERMINISTIC_HASHING=1: 234002be542ddd78cf7888995a38592f2f02adfaee7a249724f085c7d422621b) · two renderers differ on 0 pixels · deterministic hashing true
+
+# (2) THE MUTATION RUN (after ac54b7bf): each rule reverted in the source, built, its test run (SWIFT_DETERMINISTIC_HASHING=1),
+#     the source restored (git checkout; git diff clean after each), a clean rebuild at the end. Never committed.
+#     a2_ignored        A2 reverted: the item's alphas ignored (every item through today's buffer, premultiplied, with offset + skirt)
+#     glass_cull_none   the GLASS drawn without setCullMode(.back)
+#     glass_contact     the GLASS through the contact pipeline (today's face buffer)
+#     faint_contact     the FAINT prisms through the contact pipeline
+#     reversed_winding  FlexibleGroupWalls.frontIsCounterClockwiseFromOutside flipped
+#     group_tint_rule   FlexiblePageChannels: a map-less pressed face tinted by group whatever groupColours says
+#     turn_call_site    a Play-all turn's base with groupColours: true
+#     legend_rule       FlexibleLegend.shows back to today's (a dent only)
+#     volumes_empty     FlexibleMainStage.volumes always []
+#     prism_rest_rule   the selected face's prism only while dragged (round 3's rule)
+#     (a2_ignored, glass_contact, glass_cull_none and reversed_winding are shown from the SECOND run, after R6-1d's outline
+#     mask became geometric: the first run's mask rendered the items with their fill at 0 — through the contact pipeline that
+#     render carried the contact wash too and hid it, so glass_contact passed the wash bound (zoomed 16 vs face-on 13 + 3).)
+## run_mut2.log
+=== a2_ignored Thu Oct  8 17:25:00 EDT 2026
+MUTATED a2_ignored MetalMeshView.swift
+test exit 1
+FlexibleRound6Tests.swift:345: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertLessThanOrEqual failed: ("56") is greater than ("25") - …slightly: the cyan heat reads through it
+FlexibleRound6Tests.swift:345: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertLessThanOrEqual failed: ("64") is greater than ("25") - …slightly: the dark heat reads through it
+FlexibleRound6Tests.swift:345: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertLessThanOrEqual failed: ("55") is greater than ("25") - …slightly: the green heat reads through it
+FlexibleRound6Tests.swift:351: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertEqual failed: ("27126") is not equal to ("0") - no Group-2 fill elsewhere
+FlexibleRound6Tests.swift:357: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertEqual failed: ("27126") is not equal to ("0") - a back-facing member draws its outline only
+FlexibleRound6Tests.swift:370: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertEqual failed: ("202115") is not equal to ("0") - the bottom wall never tints the top through the X-ray
+FlexibleRound6Tests.swift:386: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertEqual failed: ("245263") is not equal to ("0") - control: wound the other way, the top glass is culled
+FlexibleRound6Tests.swift:399: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertLessThanOrEqual failed: ("244") is greater than ("235") - grazing: no contact wash
+FlexibleRound6Tests.swift:418: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertLessThanOrEqual failed: ("101") is greater than ("25") - top (img3): the dent reads through it
+FlexibleRound6Tests.swift:420: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertLessThanOrEqual failed: ("86") is greater than ("25") - top (img3): faint
+FlexibleRound6Tests.swift:418: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertLessThanOrEqual failed: ("101") is greater than ("25") - iso (img2): the dent reads through it
+FlexibleRound6Tests.swift:420: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertLessThanOrEqual failed: ("91") is greater than ("25") - iso (img2): faint
+FlexibleRound6Tests.swift:430: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertLessThanOrEqual failed: ("105") is greater than ("25") - the Prisms view stays faint
+Test Case '-[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad]' failed (36.343 seconds).
+restored a2_ignored
+=== glass_contact Thu Oct  8 17:26:07 EDT 2026
+MUTATED glass_contact MetalMeshView.swift
+test exit 1
+FlexibleRound6Tests.swift:351: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertEqual failed: ("27126") is not equal to ("0") - no Group-2 fill elsewhere
+FlexibleRound6Tests.swift:357: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertEqual failed: ("27126") is not equal to ("0") - a back-facing member draws its outline only
+FlexibleRound6Tests.swift:370: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertEqual failed: ("202115") is not equal to ("0") - the bottom wall never tints the top through the X-ray
+FlexibleRound6Tests.swift:386: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertEqual failed: ("245263") is not equal to ("0") - control: wound the other way, the top glass is culled
+FlexibleRound6Tests.swift:399: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertLessThanOrEqual failed: ("216") is greater than ("182") - grazing: no contact wash
+Test Case '-[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad]' failed (24.196 seconds).
+restored glass_contact
+=== faint_contact Thu Oct  8 17:26:48 EDT 2026
+MUTATED faint_contact MetalMeshView.swift
+test exit 1
+FlexibleRound6Tests.swift:430: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertLessThanOrEqual failed: ("119") is greater than ("25") - the Prisms view stays faint
+Test Case '-[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad]' failed (24.014 seconds).
+restored faint_contact
+clean build exit 0
+## run_mut3.log
+=== glass_cull_none Thu Oct  8 17:27:55 EDT 2026
+MUTATED glass_cull_none MetalMeshView.swift
+test exit 1
+FlexibleRound6Tests.swift:351: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertEqual failed: ("27126") is not equal to ("0") - no Group-2 fill elsewhere
+FlexibleRound6Tests.swift:357: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertEqual failed: ("27126") is not equal to ("0") - a back-facing member draws its outline only
+FlexibleRound6Tests.swift:370: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertEqual failed: ("202115") is not equal to ("0") - the bottom wall never tints the top through the X-ray
+FlexibleRound6Tests.swift:386: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertEqual failed: ("245263") is not equal to ("0") - control: wound the other way, the top glass is culled
+Test Case '-[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad]' failed (28.796 seconds).
+restored glass_cull_none
+=== reversed_winding Thu Oct  8 17:28:42 EDT 2026
+MUTATED reversed_winding FlexibleGroupWalls.swift
+test exit 1
+Test Case '-[TopOptFlowsTests.FlexibleRound6Tests testAWallIsItsRegionsOwnOutlineProudOfTheFace]' passed (0.033 seconds).
+FlexibleRound6Tests.swift:344: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertGreaterThanOrEqual failed: ("0") is less than ("4") - the glass shows over the cyan heat
+FlexibleRound6Tests.swift:344: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertGreaterThanOrEqual failed: ("0") is less than ("4") - the glass shows over the dark heat
+FlexibleRound6Tests.swift:344: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertGreaterThanOrEqual failed: ("0") is less than ("4") - the glass shows over the green heat
+FlexibleRound6Tests.swift:351: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertEqual failed: ("27126") is not equal to ("0") - no Group-2 fill elsewhere
+FlexibleRound6Tests.swift:357: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertEqual failed: ("27126") is not equal to ("0") - a back-facing member draws its outline only
+FlexibleRound6Tests.swift:370: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertEqual failed: ("202115") is not equal to ("0") - the bottom wall never tints the top through the X-ray
+FlexibleRound6Tests.swift:385: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertGreaterThan failed: ("0") is not greater than ("0") - the top's glass shows from above
+FlexibleRound6Tests.swift:386: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertEqual failed: ("245263") is not equal to ("0") - control: wound the other way, the top glass is culled
+Test Case '-[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad]' failed (23.781 seconds).
+restored reversed_winding
+clean build exit 0
+## run_mut.log
+=== a2_ignored Thu Oct  8 17:14:38 EDT 2026
+MUTATED a2_ignored MetalMeshView.swift
+test exit 1
+FlexibleRound6Tests.swift:317: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertFalse failed
+FlexibleRound6Tests.swift:351: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertGreaterThan failed: ("0") is not greater than ("1000") - control: a cull-none glass tints the top from below
+FlexibleRound6Tests.swift:361: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertGreaterThan failed: ("-1") is not greater than ("0") - the top's glass shows from above
+Test Case '-[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad]' failed (54.717 seconds).
+restored a2_ignored
+=== glass_cull_none Thu Oct  8 17:15:52 EDT 2026
+MUTATED glass_cull_none MetalMeshView.swift
+test exit 1
+FlexibleRound6Tests.swift:328: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertEqual failed: ("26831") is not equal to ("0") - no Group-2 fill elsewhere
+FlexibleRound6Tests.swift:334: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertEqual failed: ("26831") is not equal to ("0") - a back-facing member draws its outline only
+FlexibleRound6Tests.swift:346: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertEqual failed: ("202183") is not equal to ("0") - the bottom wall never tints the top through the X-ray
+FlexibleRound6Tests.swift:362: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertEqual failed: ("244639") is not equal to ("0") - control: wound the other way, the top glass is culled
+Test Case '-[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad]' failed (39.840 seconds).
+restored glass_cull_none
+=== glass_contact Thu Oct  8 17:16:51 EDT 2026
+MUTATED glass_contact MetalMeshView.swift
+test exit 1
+FlexibleRound6Tests.swift:328: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertEqual failed: ("26831") is not equal to ("0") - no Group-2 fill elsewhere
+FlexibleRound6Tests.swift:334: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertEqual failed: ("26831") is not equal to ("0") - a back-facing member draws its outline only
+FlexibleRound6Tests.swift:346: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertEqual failed: ("202183") is not equal to ("0") - the bottom wall never tints the top through the X-ray
+FlexibleRound6Tests.swift:362: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertEqual failed: ("242008") is not equal to ("0") - control: wound the other way, the top glass is culled
+Test Case '-[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad]' failed (39.820 seconds).
+restored glass_contact
+=== reversed_winding Thu Oct  8 17:17:48 EDT 2026
+MUTATED reversed_winding FlexibleGroupWalls.swift
+test exit 1
+Test Case '-[TopOptFlowsTests.FlexibleRound6Tests testAWallIsItsRegionsOwnOutlineProudOfTheFace]' passed (0.033 seconds).
+FlexibleRound6Tests.swift:321: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertGreaterThanOrEqual failed: ("0") is less than ("4") - the glass shows over the cyan heat
+FlexibleRound6Tests.swift:321: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertGreaterThanOrEqual failed: ("0") is less than ("4") - the glass shows over the dark heat
+FlexibleRound6Tests.swift:321: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertGreaterThanOrEqual failed: ("0") is less than ("4") - the glass shows over the green heat
+FlexibleRound6Tests.swift:328: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertEqual failed: ("26831") is not equal to ("0") - no Group-2 fill elsewhere
+FlexibleRound6Tests.swift:334: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertEqual failed: ("26831") is not equal to ("0") - a back-facing member draws its outline only
+FlexibleRound6Tests.swift:346: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertEqual failed: ("202183") is not equal to ("0") - the bottom wall never tints the top through the X-ray
+FlexibleRound6Tests.swift:361: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertGreaterThan failed: ("0") is not greater than ("0") - the top's glass shows from above
+FlexibleRound6Tests.swift:362: error: -[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad] : XCTAssertEqual failed: ("244639") is not equal to ("0") - control: wound the other way, the top glass is culled
+Test Case '-[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad]' failed (32.896 seconds).
+restored reversed_winding
+=== group_tint_rule Thu Oct  8 17:18:46 EDT 2026
+MUTATED group_tint_rule FlexiblePageChannels.swift
+test exit 1
+FlexibleRound6HostedTests.swift:213: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageWearsNoGroupColourInAnyViewOrTurn] : XCTAssertEqual failed: ("[SIMD4<Float>(0.95686275, 0.627451, 0.73333335, 0.35)]") is not equal to ("[SIMD4<Float>(0.188
+FlexibleRound6HostedTests.swift:213: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageWearsNoGroupColourInAnyViewOrTurn] : XCTAssertEqual failed: ("[SIMD4<Float>(0.95686275, 0.627451, 0.73333335, 0.35)]") is not equal to ("[SIMD4<Float>(0.188
+FlexibleRound6HostedTests.swift:213: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageWearsNoGroupColourInAnyViewOrTurn] : XCTAssertEqual failed: ("[SIMD4<Float>(0.95686275, 0.627451, 0.73333335, 0.35)]") is not equal to ("[SIMD4<Float>(0.188
+FlexibleRound6HostedTests.swift:216: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageWearsNoGroupColourInAnyViewOrTurn] : XCTAssertEqual failed: ("[SIMD4<Float>(0.95686275, 0.627451, 0.73333335, 0.35)]") is not equal to ("[SIMD4<Float>(0.188
+Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageWearsNoGroupColourInAnyViewOrTurn]' failed (113.264 seconds).
+FlexibleRound6HostedTests.swift:284: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheSettingsPageWallsTheOpenGroupOnly] : XCTAssertEqual failed: ("12") is not equal to ("0") - …nor the map-less body
+Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testTheSettingsPageWallsTheOpenGroupOnly]' failed (5.815 seconds).
+restored group_tint_rule
+=== turn_call_site Thu Oct  8 17:21:07 EDT 2026
+MUTATED turn_call_site FlexibleMainStage+Squish.swift
+test exit 1
+FlexibleRound6Tests.swift:445: error: -[TopOptFlowsTests.FlexibleRound6Tests testNoPageCallsTheFramePainterOutsideItsControl] : XCTAssertTrue failed - FlexibleMainStage+Squish.swift: a channels call tints the body by group: FlexiblePageChannels.channels(model:
+Test Case '-[TopOptFlowsTests.FlexibleRound6Tests testNoPageCallsTheFramePainterOutsideItsControl]' failed (1.044 seconds).
+restored turn_call_site
+=== legend_rule Thu Oct  8 17:21:24 EDT 2026
+MUTATED legend_rule FlexibleStagePage.swift
+test exit 1
+FlexibleRound6HostedTests.swift:493: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testOneLegendCardCarriesTheViewRows] : XCTAssertTrue failed - a view on with no dent: the card
+FlexibleRound6HostedTests.swift:494: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testOneLegendCardCarriesTheViewRows] : XCTAssertTrue failed
+Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testOneLegendCardCarriesTheViewRows]' failed (14.208 seconds).
+restored legend_rule
+=== volumes_empty Thu Oct  8 17:21:54 EDT 2026
+MUTATED volumes_empty FlexibleMainStage.swift
+test exit 1
+FlexibleRound6HostedTests.swift:536: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageDrawsTheActiveGroupsPrismsAndThePrismsView] : XCTAssertEqual failed: ("[]") is not equal to ("[1]") - the active group Top: face 1's prism
+FlexibleRound6HostedTests.swift:537: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageDrawsTheActiveGroupsPrismsAndThePrismsView] : XCTAssertNotNil failed - faint
+FlexibleRound6HostedTests.swift:540: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageDrawsTheActiveGroupsPrismsAndThePrismsView] : XCTAssertEqual failed: ("[]") is not equal to ("[1, 2, 3, 5, 4]") - the Prisms view: every pressed face
+Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageDrawsTheActiveGroupsPrismsAndThePrismsView]' failed (5.436 seconds).
+restored volumes_empty
+=== prism_rest_rule Thu Oct  8 17:22:16 EDT 2026
+MUTATED prism_rest_rule FlexibleDepthPrism.swift
+test exit 1
+FlexibleRound6HostedTests.swift:363: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testSelectingAPressedFaceShowsItsPrismAndNumberAtOnce] : XCTAssertEqual failed: ("0") is not equal to ("1") - at rest: face 2's prism
+FlexibleRound6HostedTests.swift:364: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testSelectingAPressedFaceShowsItsPrismAndNumberAtOnce] : XCTUnwrap failed: expected non-nil value of type "ClearanceRenderItem"
+Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testSelectingAPressedFaceShowsItsPrismAndNumberAtOnce]' failed (3.255 seconds).
+FlexibleRound6HostedTests.swift:448: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testThePrismsViewDrawsEveryPressedFacesPrismWithItsNumber] : XCTAssertEqual failed: ("0") is not equal to ("1") - control: without the view, one prism
+Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testThePrismsViewDrawsEveryPressedFacesPrismWithItsNumber]' failed (2.405 seconds).
+restored prism_rest_rule
+clean build exit 0

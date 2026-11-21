@@ -1,0 +1,27 @@
+Test Suite 'Selected tests' started at 2026-10-19 15:25:32.051.
+Test Suite 'TopOptKitTests.xctest' started at 2026-10-19 15:25:32.052.
+Test Suite 'TopOptKitTests.xctest' passed at 2026-10-19 15:25:32.053.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-19 15:25:32.053.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Test Suite 'Selected tests' started at 2026-10-19 15:25:32.215.
+Test Suite 'TopOptFlowsTests.xctest' started at 2026-10-19 15:25:32.216.
+Test Suite 'FlexibleR7E3Tests' started at 2026-10-19 15:25:32.216.
+Test Case '-[TopOptFlowsTests.FlexibleR7E3Tests testAnEdgesGroupSquishesAlongItsArrowOnBothPages]' started.
+2026-10-19 15:25:32.269 xctest[1156:14236266] DIAG shellClip mode=OFF inFrame=false algo=- capsules=-1 capVerts=0 capPipeline=true capsulePipeline=true capsulesReplaceField=false bodyAlpha=1.0 initError=nil regionTex=false skinMM=-1.0 dims=SIMD4<Float>(1.0, 1.0, 1.0, 0.0) regions=[] open=[no census]
+2026-10-19 15:25:32.347 xctest[1156:14236266] DIAG seam occupancy: 128x128x27 in 0.07 s (once per mesh)
+Test Case '-[TopOptFlowsTests.FlexibleR7E3Tests testAnEdgesGroupSquishesAlongItsArrowOnBothPages]' passed (19.810 seconds).
+Test Suite 'FlexibleR7E3Tests' passed at 2026-10-19 15:25:52.027.
+	 Executed 1 test, with 0 failures (0 unexpected) in 19.810 (19.811) seconds
+Test Suite 'TopOptFlowsTests.xctest' passed at 2026-10-19 15:25:52.027.
+	 Executed 1 test, with 0 failures (0 unexpected) in 19.810 (19.811) seconds
+Test Suite 'Selected tests' passed at 2026-10-19 15:25:52.027.
+	 Executed 1 test, with 0 failures (0 unexpected) in 19.810 (19.812) seconds
+FLEX-E3-iii his pad, Group 4 (Edge 16 + Edge 18): Edge 14: 52 points · mean u·d 5.3406 mm · mean |u| 5.4298 mm | Edge 16: 52 points · mean u·d 5.6280 mm · mean |u| 5.7572 mm · scale 0.1339543544497248 uncalibrated true
+FLEX-E3-i selector: ["All (one after another)", "Group 1", "Group 2", "Group 3", "Group 4"]
+Test Suite 'Selected tests' started at 2026-10-19 15:25:52.124.
+Test Suite 'TopOptDesignTests.xctest' started at 2026-10-19 15:25:52.125.
+Test Suite 'TopOptDesignTests.xctest' passed at 2026-10-19 15:25:52.125.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-19 15:25:52.125.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds

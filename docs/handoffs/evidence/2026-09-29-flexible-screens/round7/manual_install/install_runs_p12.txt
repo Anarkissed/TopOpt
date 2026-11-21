@@ -1,0 +1,11 @@
+Installer run at 432b46ec (P1+P2), 25 classes once, chunks of 5 (passed/failed/skipped):
+chunk_aa: FlexibleManualP2Tests FlexibleManualP1Tests FlexibleM1ManualTests FlexibleManualFollowUpTests FlexibleM2PredictTests -> 23/0/0
+chunk_ab: FlexibleLatticePassTests FlexibleLatticeFieldTests FlexibleLatticeGradingTests FlexibleR7U21EdgeLookTests FlexibleTopLayerTests -> 27/0/1
+chunk_ac: FlexibleR7E1FollowUpTests FlexibleU1Tests FlexibleSettingsRound4Tests FlexibleSquishCoarsenTests FlexibleFEFieldTests -> 36/0/1
+chunk_ad: FlexibleI1HoldTests FlexibleI3LinkSimTests FlexibleSquishCopyTests FlexibleSettingsPageHostedTests FlexibleFEPassTests -> 15/1/0
+chunk_ae: FlexibleInPassCompositeTests FlexibleBatchBReviewTests FlexibleH39HotfixHookTests FlexibleR7EveningAnswersTests FlexibleReadinessTests -> 39/0/0
+Total 140 passed, 1 failed (FlexibleSettingsPageHostedTests 11l 'as opened', known), 2 skipped.
+Goldens: deterministic 38 identical / 0 DIFFERS; unseeded 32 identical / 0 DIFFERS / 1 PART-SKIP.
+Stage-job hashes: 16, cmp-identical (whole file) to round7/manual_followup/stage_job_hashes_mf.txt.
+xcodebuild Debug (flexA1, iPad Pro 13 Flexible-A1): BUILD SUCCEEDED at 432b46ec; built TopOpt.debug.dylib sha256 b8cbb580d3c67fb048b07f313319fd137e29fb2084d38ee65797344d05ca1c6c (98163344 bytes); strings 'Estimate past tested data', 'Data covers', 'Cells across' present.
+pgrep -f TopOpt.app/TopOpt: pid 28604 (started Thu Oct 22 23:40:42) - the app WAS running; NOT terminated, NOT installed.

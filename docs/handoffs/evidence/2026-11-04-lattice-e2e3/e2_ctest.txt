@@ -1,0 +1,16 @@
+# Full ctest at 6c6102bc (the gate's clean build, with Manifold), 2026-11-04
+257:126/181 Test #126: cli_demo .........................   Passed  2145.24 sec
+295:145/181 Test #145: lattice_scenarios ................***Failed   37.18 sec
+99% tests passed, 2 tests failed out of 181
+
+Total Test time (real) = 5418.86 sec
+
+The following tests FAILED:
+	 38 - app_core_capability_mirror (Failed)
+	145 - lattice_scenarios (Failed)
+Errors while running CTest
+CTEST EXIT 8
+
+# lattice_scenarios after the test fix (local build, library unchanged)
+[lattice-scenarios] lattice-part: lattice margin 5.0425 (light 110.1413)
+PASS: 21 checks, 0 failures

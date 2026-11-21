@@ -699,11 +699,10 @@ final class SurfaceStageHasNoOnwardNavTests: XCTestCase {
 
     /// The greyed-out "Lattice" button is gone from the Surface stage — Save has
     /// that slot. Nothing becomes unreachable: Topology is still top-left.
+    /// ★ B5: Surface is no longer a stage — Edit faces is a mode reached from every ● menu, so no stage lists it.
     func testSurfaceOffersNoForwardStage() {
-        XCTAssertTrue(WorkspaceStage.surface.forward.isEmpty,
-                      "★ the slot belongs to Save")
-        XCTAssertTrue(WorkspaceStage.topology.forward.contains(.surface))
-        XCTAssertTrue(WorkspaceStage.lattice.forward.contains(.surface))
+        XCTAssertEqual(WorkspaceStage.topology.forward, [.lattice])
+        XCTAssertTrue(WorkspaceStage.lattice.forward.isEmpty)
     }
 }
 

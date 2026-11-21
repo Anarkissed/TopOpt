@@ -1,0 +1,78 @@
+# U21 batch E (One lattice rule: NOLAT + LBR-COVER) runs — app/TopOptKit, --scratch-path /tmp/r7x20b-build, on 706d73c5 + batch E working tree
+### run 1: the batch's class + 58 classes that touch/pin the changed files + FlexibleSquishCopyTests + LatticeStaleTypeTests (59 classes, chunks of 10)
+start 03:12:14 706d73c5 + working tree (batch E)
+build exit 0 03:12:17
+chunk_aa exit 0 03:16:46
+chunk_ab exit 1 03:20:13
+chunk_ac exit 0 03:28:12
+chunk_ad exit 0 03:35:57
+chunk_ae exit 0 03:51:35
+chunk_af exit 0 03:56:36
+ALLDONE 03:56:36
+### classes
+FlexibleU21OneLatticeRuleTests FlexibleCornerPairTests FlexibleDepthPrismTests FlexibleEdgeGroupsHostedTests FlexibleEdgeGroupsTests FlexibleFEFieldTests FlexibleFEPassTests FlexibleFaceCommitTests FlexibleFlatPrismTests FlexibleLatticeIsProtectedHostedTests FlexibleLatticeSectionsHostedTests FlexibleLatticeSectionsTests FlexibleLatticeUnderReviewTests FlexibleLatticeUnderTests FlexibleMainPageHookTests FlexibleMainPageLoadsTests FlexibleMainPageRound4Tests FlexibleMainPageRound4VerifyTests FlexibleMainPrismEqualityTests FlexibleMainStageTests FlexibleMeetReviewTests FlexiblePinchTests FlexibleR7D2ReviewHostedTests FlexibleR7D2ReviewTests FlexibleR7E1FollowUpHostedTests FlexibleR7E1ReviewTests FlexibleR7E1bTests FlexibleR7E5Tests FlexibleR7FTests FlexibleR7M1Tests FlexibleR7M1VerifyTests FlexibleR7RTests FlexibleR7SettingsTests FlexibleR7U21BCurveTests FlexibleR7U21CHandlesHostedTests FlexibleR7X1Tests FlexibleR7X1VerifyTests FlexibleReadinessTests FlexibleRegionsTests FlexibleRound5SettingsVerifyTests FlexibleRound6HostedTests FlexibleRound6Tests FlexibleRound7DesignIntegrationHostedTests FlexibleRound7DesignIntegrationTests FlexibleRound7ScreenHookTests FlexibleRound7SelectionsHookTests FlexibleRound7SelectionsHostedTests FlexibleRuling6NoCoreTests FlexibleSectorStoreTests FlexibleSettingsRound4Tests FlexibleSqueezeGroupsReviewUXTests FlexibleSquishSolverTests FlexibleSquishTests FlexibleU1Tests FlexibleU21BendTests FlexibleU21DeleteUndoTests LatticeSectorReviewTests FlexibleSquishCopyTests LatticeStaleTypeTests
+### chunks
+chunk_aa.log: passed 77 · failed 0 · skipped 1
+chunk_ab.log: passed 59 · failed 6 · skipped 0
+chunk_ac.log: passed 68 · failed 0 · skipped 0
+chunk_ad.log: passed 66 · failed 0 · skipped 0
+chunk_ae.log: passed 76 · failed 0 · skipped 0
+chunk_af.log: passed 66 · failed 0 · skipped 1
+TOTAL: 412 passed, 6 failed (all six = the re-pins below), 2 skipped (picture probes), signal lines 0
+Test Case '-[TopOptFlowsTests.FlexibleLatticeSectionsHostedTests testASolidTapShowsTheLineAndOneFix]' failed (12.887 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleLatticeSectionsTests testATapOnTheTopSelectsTheLatticeUnderIt]' failed (3.935 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleLatticeUnderReviewTests testHisRound3PadAsSaved]' failed (8.948 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleLatticeUnderTests testOnHisPadTopBIsSaidAndOneTapLatticesIt]' failed (1.062 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleLatticeUnderTests testTheFixturesTapsAreWhatThePageOffers]' failed (1.345 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleMainPageHookTests testTheExitButtonAndThePageConsultTheReadiness]' failed (0.016 seconds).
+### the batch's own class, red controls (run 1, chunk_aa)
+FLEX-U21-E4 RED (today) Face 5 pressed: 'Only 12 % of Face 5 has lattice under it' fixes [TopOptFlows.FlexibleFix.latticeUnder(5), TopOptFlows.FlexibleFix.rest(5)] · deepest cap 118.83116883116885 mm · prisms 2
+FLEX-U21-E4 Face 5 pressed: 'No lattice under Face 5 · set a face-prism' pill 'No lattice under Face 5' fixes [TopOptFlows.FlexibleFix.goToLattice, TopOptFlows.FlexibleFix.rest(5)] · share 0.0 · deepest 0.0 · prisms 1 (today 2)
+FLEX-U21-E1 RED (today) Face 5 → selected 5 notice - · rim → toast 'Solid here · only face-prisms get latticed'
+FLEX-U21-E1 tap Face 5 → selected 2000008 · notice 'No lattice under Face 5 · set a face-prism' fixes ["Go to Lattice", "Face 5 rests"]
+FLEX-U21-E1 tap Face 1 → selected 2000008 · notice 'No lattice under Face 1 · set a face-prism' fixes ["Go to Lattice", "Face 1 rests"]
+FLEX-U21-E1 tap Face 7 → selected 2000008 · notice 'No lattice under Face 7 · set a face-prism' fixes ["Go to Lattice", "Face 7 rests"]
+FLEX-U21-E1 tap Face 2 → selected 2000008 · notice 'No lattice under Face 2 · set a face-prism' fixes ["Go to Lattice"]
+FLEX-U21-E7 Face 1 pressed: column squares today 1216 (keys 1) · now keys 0
+FLEX-U21-E3 RED (today) no face-prism, tap face 1 → selected 1 notice -
+FLEX-U21-E3 no face-prism, tap face 1 (root 1) → selected nil · 'No lattice under Face 1 · set a face-prism'
+Test Case '-[TopOptFlowsTests.FlexibleU21OneLatticeRuleTests testAPressedFaceWithNoFacePrismSaysTheSameSentence]' passed (1.156 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21OneLatticeRuleTests testCopyFits]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21OneLatticeRuleTests testEveryNoLatticeTapSaysTheSame]' passed (0.657 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21OneLatticeRuleTests testFace1DrawsNoSquares]' passed (1.271 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21OneLatticeRuleTests testNoFacePrismStageSaysTheSame]' passed (0.014 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21OneLatticeRuleTests testNotYetKeepsCoresShare]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21OneLatticeRuleTests testRestStillPossible]' passed (1.186 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21OneLatticeRuleTests testTheLatticePartStillPresses]' passed (0.648 seconds).
+Test Suite 'FlexibleU21OneLatticeRuleTests' passed at 2026-10-22 03:16:45.725.
+### run 2 (after the re-pins): the 5 re-pinned classes + the batch's class
+start 03:57:24 re-pins
+build exit 0 03:57:50
+repins exit 1 03:59:05
+pictures exit 0 04:00:05
+golden det exit 0 04:00:23
+golden unseeded exit 0 04:00:42
+hashes exit 0 04:01:51
+hashes cmp vs round7/batch_x20b/stage_job_hashes_x20b.txt (whole file): identical
+hashes cmp vs round7/batch_u21_integ1/stage_job_hashes_u21_integ1.txt (whole file): identical
+ALLDONE 04:01:51
+repins: passed 30 · failed 1
+Test Case '-[TopOptFlowsTests.FlexibleLatticeUnderTests testTheFixturesTapsAreWhatThePageOffers]' failed (3.011 seconds).
+### run 3: FlexibleLatticeUnderTests after its round-5 re-pin
+Test Case '-[TopOptFlowsTests.FlexibleLatticeUnderTests testAFaceWithNoLatticeUnderItIsSaidNeverBlocking]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleLatticeUnderTests testOnHisPadTopBIsSaidAndOneTapLatticesIt]' passed (2.127 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleLatticeUnderTests testTheFixturesTapsAreWhatThePageOffers]' passed (1.413 seconds).
+E-FLEX his_project_0004 issues ["1000104: [TopOptFlows.FlexibleFix.goToLattice, TopOptFlows.FlexibleFix.rest(1000104)]", "5: [TopOptFlows.FlexibleFix.goToLattice, TopOptFlows.FlexibleFix.rest(5)]"] · own lattice []
+E-FLEX his_project_0004_r5 issues ["3: [TopOptFlows.FlexibleFix.latticeUnderAll([3, 5]), TopOptFlows.FlexibleFix.rest(3)]", "5: [TopOptFlows.FlexibleFix.latticeUnderAll([3, 5]), TopOptFlows.FlexibleFix.rest(5)]"] · own lattice [3, 5]
+### pictures (FlexibleU2Tests.testU21NoLatticeNoticeOnThePage, FLEX_U2_DIR=look/)
+Test Case '-[TopOptFlowsTests.FlexibleU2Tests testU21NoLatticeNoticeOnThePage]' started.
+Test Case '-[TopOptFlowsTests.FlexibleU2Tests testU21NoLatticeNoticeOnThePage]' passed (55.835 seconds).
+tap Face 5: popup (128.0, 132.0, 460.0, 115.0) · 'No lattice under Face 5 · set a face-prism' · fixes ["fix-go-to-lattice", "fix-rest-5"] · toast -
+tap Face 1: popup (128.0, 132.0, 460.0, 115.0) · 'No lattice under Face 1 · set a face-prism' · fixes ["fix-go-to-lattice", "fix-rest-1"] · toast -
+tap Face 2: popup (128.0, 132.0, 460.0, 115.0) · 'No lattice under Face 2 · set a face-prism' · fixes ["fix-go-to-lattice"] · toast -
+[Go to Lattice] clicked at (142.0, 190.0, 124.0, 43.0): left 1, exitUnchanged true
+Face 5 pressed: own lattice false · deepest 0.0 · issue 'No lattice under Face 5 · set a face-prism'
+### goldens
+golden_det: identical 38 · DIFFERS 0 · PART-SKIP 0 · Executed 13 tests, 0 failures
+golden_unseeded: identical 32 · DIFFERS 0 · PART-SKIP 1 · Executed 13 tests, 0 failures
+### the 16 stage-job hashes: stage_job_hashes_u21e.txt — cmp identical (whole file) to x20b and u21_integ1 (see run 2 log above)

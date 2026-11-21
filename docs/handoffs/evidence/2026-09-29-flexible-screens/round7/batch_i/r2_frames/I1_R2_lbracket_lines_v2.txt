@@ -1,0 +1,5 @@
+NO LINK (as saved): bc anchor · k 1.117 · shown u_x Face 6 20.89 mm · Face 2 20.58 mm · max|u| 33.16 mm · line 'Held by Group A · fixed on Topology'
+v2 camera: eye (0.94 -0.21 -0.28) · from the right, a little below and behind
+I1_R2_05_13p_lbracket_NO_LINK_behind_v2.png: playing Group 1 · ×1.0 · held 1.0 · line 'Held by Group A · fixed on Topology' · panel collapsed true
+4 LINKED WALLS: bc wall · k 1.705 · shown u_x Face 6 8.54 mm · Face 2 8.13 mm · max|u| 8.63 mm · line 'Held by 4 linked walls'
+I1_R2_06_13p_lbracket_4_LINKED_behind_v2.png: playing Group 1 · ×1.0 · held 1.0 · line 'Held by 4 linked walls' · panel collapsed true

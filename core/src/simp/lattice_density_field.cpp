@@ -124,20 +124,21 @@ double percentile_sorted(const std::vector<double>& v, double p) {
 
 bool lattice_density_printable(LatticeTopology topo, double rho, double cell_mm,
                                double min_extrudable_width_mm) {
-  if (topo != LatticeTopology::Octet) {
-    // Only octet carries a measured strut-diameter table. Refusing is the same
-    // answer `lattice_min_density_for_strut` gives, and for the same reason:
-    // there is no measurement to borrow.
+  if (!lattice_type_numbers_measured(topo)) {
+    // Only a type with its OWN measured strut-diameter table can answer. Refusing
+    // is the same answer `lattice_min_density_for_strut` gives, and for the same
+    // reason: there is no measurement to borrow.
     return false;
   }
-  return octet_strut_diameter_mm(rho, cell_mm) >= min_extrudable_width_mm;
+  return lattice_strut_diameter_mm(topo, rho, cell_mm) >= min_extrudable_width_mm;
 }
 
 std::vector<LatticeRegionValidity> lattice_region_validity(
     const VoxelGrid& grid, const std::vector<int>& region_id,
     const std::vector<LatticeRegionSpec>& regions,
     const std::vector<double>& member_width_mm, LatticeTopology topo,
-    double cell_mm, double min_extrudable_width_mm) {
+    double cell_mm, double min_extrudable_width_mm,
+    double max_relative_density) {
   if (region_id.size() != grid.voxel_count())
     throw std::invalid_argument(
         "lattice_region_validity: region_id size != grid.voxel_count()");
@@ -168,9 +169,10 @@ std::vector<LatticeRegionValidity> lattice_region_validity(
     v.floor_certifiable = floor_cert;
     v.floor_buildable = floor_build;
     v.lightest_printable_density =
-        topo == LatticeTopology::Octet
+        lattice_type_numbers_measured(topo)
             ? lattice_min_density_for_strut(topo, cell_mm,
-                                            min_extrudable_width_mm)
+                                            min_extrudable_width_mm,
+                                            max_relative_density)
             : -1.0;
     std::vector<double>& w = widths[i];
     v.voxels = w.size();
@@ -204,7 +206,8 @@ std::vector<LatticeRegionValidity> lattice_region_validity(
     // width is 0 is a region of unprinted voxels — reported, not passed on.
     if (v.member_width_median_mm > 0.0) {
       const LatticeCellDerivation d = lattice_derive_cell_for_member(
-          topo, v.member_width_median_mm, min_extrudable_width_mm);
+          topo, v.member_width_median_mm, min_extrudable_width_mm, 0.0,
+          max_relative_density);
       v.min_member_width_certifiable_mm = d.min_member_width_certifiable_mm;
       v.fit_feasible = d.feasible;
       if (d.feasible) {

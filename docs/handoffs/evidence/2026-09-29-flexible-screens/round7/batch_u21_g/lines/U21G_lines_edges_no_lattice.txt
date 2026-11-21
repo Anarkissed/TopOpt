@@ -1,0 +1,2 @@
+no lattice: max move 9.500 mm · note 'Edge preview · no lattice built yet' · inside Edge 12 1140 vertices max 9.50 mm, Edge 9 1234 vertices max 7.32 mm · outside moving 0 · legend 'Squish along the arrow · interim sim'
+RED controlEdgePreviewOff: max move 0.000 mm · note 'Column preview · no lattice built yet'

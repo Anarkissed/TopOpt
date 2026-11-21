@@ -1,0 +1,88 @@
+{
+ "_comment": "K3 ORDERING: the SAME job as empty_after_beam -- whose 31 mm outline beam clears every voxel the law graded -- plus an app-sent plan carrying a 4 mm cell, which is not on a 6 mm halving ladder. Both are refusals. The PLAN's refusal must be the one reported: on a plan job the plan is the design, and core must say the plan is wrong before it says its own grading left nothing. Before K3 the plan was validated AFTER the law's mask, so this job was refused for the beam and the invalid cell was never mentioned -- the app would have been sent to fix a band that is not the problem.",
+ "bake_build_orientation": "off",
+ "grading": {
+  "algorithm": "doubled",
+  "cell_max_mm": 3.0,
+  "cell_min_mm": 3.0,
+  "cell_mode": "swept",
+  "min_extrudable_width_mm": 0.45,
+  "shape_grade": true,
+  "shape_grade_band_mm": 31.0,
+  "topology": "octet"
+ },
+ "lattice": {
+  "emit_3mf": false,
+  "emit_stl": true,
+  "min_extrudable_width_mm": 0.45,
+  "regions": [
+   {
+    "geometry": {
+     "depth_mm": 12.0,
+     "half_u_mm": 6.0,
+     "half_w_mm": 6.0,
+     "normal": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "origin": [
+      18.0,
+      12.0,
+      8.0
+     ],
+     "plan_base_cell_mm": 6.0
+    },
+    "kind": "face",
+    "role": "include"
+   }
+  ],
+  "skin": "none",
+  "stepped_cells": [
+   {
+    "origin_mm": [
+     18.0,
+     8.0,
+     8.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 4.0
+   }
+  ],
+  "topology": "octet"
+ },
+ "loads": {
+  "anchor_face_ids": [
+   2
+  ],
+  "build_dir": [
+   0,
+   0,
+   1
+  ],
+  "groups": [
+   {
+    "face_ids": [
+     9
+    ],
+    "force": [
+     0.0,
+     0.0,
+     -400.0
+    ]
+   }
+  ],
+  "layer_height_mm": 0.2,
+  "minimize_plastic": true
+ },
+ "material": "PLA",
+ "mode": "lattice_part",
+ "model": "dead_parity_tab.stl",
+ "output": {
+  "mesh_format": "stl",
+  "mesh_prefix": "dp",
+  "report": "report.json"
+ },
+ "resolution": 48
+}

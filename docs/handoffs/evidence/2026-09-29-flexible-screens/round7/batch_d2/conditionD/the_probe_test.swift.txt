@@ -1,0 +1,38 @@
+import XCTest
+@testable import TopOptFlows
+@testable import TopOptKit
+
+@MainActor
+final class ZZTempD2Probe: XCTestCase {
+    func job(_ app: AppModel) throws -> String {
+        let req = try XCTUnwrap(app.makeRunRequest())
+        let d = try RemoteRun.buildJobJSON(req)
+        let pretty = try JSONSerialization.data(withJSONObject: try JSONSerialization.jsonObject(with: d), options: [.prettyPrinted, .sortedKeys])
+        return String(data: pretty, encoding: .utf8)!
+    }
+    func testProbe() throws {
+        let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
+        let p = r.project
+        _ = try FlexibleR7M1Fixtures.hisLiveLattice(p)
+        let before = try job(r.app)
+        let canBefore = p.force.canOptimize(in: p.selection.groups, minimizePlastic: p.minimizePlastic, latticeRoleGroups: Set(p.latticeEligibleRoles().keys))
+        let gid = p.selection.addGroup()
+        p.selection.addFaces([4], to: gid)
+        p.force.sync(groups: p.selection.groups)
+        p.lattice.groupRoles[gid] = .include
+        p.lattice.groupDepthMM[gid] = 25
+        p.lattice.selectableRoles[LatticeSelectableRef.face(group: gid, face: 4).key] = .include
+        let canNoH35 = p.force.canOptimize(in: p.selection.groups, minimizePlastic: p.minimizePlastic, latticeRoleGroups: Set(p.latticeEligibleRoles().keys))
+        let noH35 = try job(r.app)
+        p.lattice.flexible?.latticeOnlyGroups = [gid]
+        let canH35 = p.force.canOptimize(in: p.selection.groups, minimizePlastic: p.minimizePlastic, latticeRoleGroups: Set(p.latticeEligibleRoles().keys))
+        let withH35 = try job(r.app)
+        print("PROBE canOptimize before \(canBefore) noH35 \(canNoH35) H35 \(canH35)")
+        print("PROBE job equal noH35 \(before == noH35) H35 \(before == withH35) lens \(before.count) \(noH35.count) \(withH35.count)")
+        let a = before.split(separator: "\n"), b = withH35.split(separator: "\n")
+        let diff = b.enumerated().filter { $0.offset >= a.count || a[$0.offset] != $0.element }.prefix(40)
+        for d in diff { print("PROBE + \(d.offset): \(d.element)") }
+        let lc = p.loadCase()
+        print("PROBE anchors \(lc.anchorFaceIDs) loads \(lc.loadGroups.count) protect \(p.faceProtectionSpecs().faceIDs)")
+    }
+}

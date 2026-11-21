@@ -22,13 +22,58 @@ public struct SegmentedGlass<Value: Hashable>: View {
 
     private let segments: [Segment]
     @Binding private var selection: Value
+    /// A setting row's small segments (the approved mockup's `.seg.sm`, 2026-11-02): 28 pt, 12 pt type, as wide as their
+    /// words; each still takes a 44 pt tall tap.
+    private let small: Bool
 
-    public init(_ segments: [Segment], selection: Binding<Value>) {
+    public init(_ segments: [Segment], selection: Binding<Value>, small: Bool = false) {
         self.segments = segments
         self._selection = selection
+        self.small = small
     }
 
     public var body: some View {
+        if small { smallBody } else { fullBody }
+    }
+
+    private var smallBody: some View {
+        HStack(spacing: 2) {
+            ForEach(segments) { seg in
+                let isOn = seg.value == selection
+                Button { selection = seg.value } label: {
+                    Text(seg.label)
+                        .font(.system(size: 12, weight: isOn ? .semibold : .medium))
+                        .lineLimit(1)
+                        .fixedSize()
+                        .foregroundStyle(isOn ? DS.Color.textPrimary.color : DS.Color.textSecondary.color)
+                        .padding(.horizontal, 10)
+                        .frame(height: 28)
+                        .background {
+                            if isOn {
+                                RoundedRectangle(cornerRadius: DS.Radius.segment, style: .continuous)
+                                    .fill(DS.Color.fillSelected.color)
+                            }
+                        }
+                        .contentShape(Rectangle().inset(by: -8))   // a 44 pt tall tap
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(isOn ? .isSelected : [])
+            }
+        }
+        .padding(3)
+        .background {
+            RoundedRectangle(cornerRadius: DS.Radius.field, style: .continuous)
+                .fill(.black.opacity(0.30))
+                .overlay {
+                    RoundedRectangle(cornerRadius: DS.Radius.field, style: .continuous)
+                        .strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)
+                }
+        }
+        .fixedSize()
+        .animation(.easeOut(duration: 0.15), value: selection)
+    }
+
+    private var fullBody: some View {
         HStack(spacing: 0) {
             ForEach(segments) { seg in
                 let isOn = seg.value == selection

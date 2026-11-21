@@ -1,0 +1,17 @@
+# Release 1757af66 — 2026-11-04 OutlinesFix (UI-Notes' app batch up to b8b9273d), app only, released before review (his 11-03 pick)
+# Core and worker unchanged: fingerprint 6c5a6fbaa842; "fingerprint": "6c5a6fbaa842"
+# Merged onto 8921d8c7; the merged app tree equals b8b9273d's, so the builder's tests apply unchanged.
+# Commits:
+#   ac97ea00 B5 (note 11, Q10): Export chosen versions from the project page — his answers: ticks in the sheet's list, a latticed pick sends its solid
+#   74b244d2 Merge UI-Notes' B5 Export chosen versions (ac97ea00) into B9: project Export beside + Add part, the sheet (#lib-project-export), one STL per part or one 3MF named for the project
+#   4d5005a3 B5 (his Q1, answer "a: save the words"): each Library result tile names its result as Results does — "v2b · +10 %"
+#   8b493adb Merge UI-Notes' B5 result words (4d5005a3) into B9: the results file keeps the run's report, so a reopened run reads a · Just safe / b · +10 % / c · +20 % again; Library tiles read v2b · +10 %
+#   b8b9273d Outlines no longer crash the iPad: the wide-line pipeline takes the MSAA pass's sample count
+#   1757af66 Release 2026-11-04: merge B9 b8b9273d — Outlines crash fix (the wide-line pipeline takes the MSAA sample count; his iPad 11-03 + 11-04), plus UI-Notes' Export chosen versions (ac97ea00) and result words (4d5005a3) (app only; core and worker unchanged at 6c5a6fbaa842)
+# Gates:
+#   20:21 checks ok: OutlinesFix, local 1757af66 over origin 8921d8c7 (6 commits); app tree == b8b9273d's, fingerprint 6c5a6fbaa842
+#   20:21 waiting for HEAVY.lock (free)
+#   20:21 lock taken
+#   20:26 iPad device build green; lock released
+#   20:26 pushed 1757af66
+#   20:26 worker /health "fingerprint": "6c5a6fbaa842" (unchanged, no swap)

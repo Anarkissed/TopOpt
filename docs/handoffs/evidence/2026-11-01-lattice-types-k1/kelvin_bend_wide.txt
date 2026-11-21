@@ -1,0 +1,7 @@
+BEND kelvin: cell S=5.0 mm, vpc=12, cantilever 6 cells long, target rho 0.30 -> periodic cell rho 0.1944 (r/L 0.12500, 3.0 vox/strut), C11=255.18 C12=79.74 C44=43.78 Zener=0.499
+  [writing /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/bendx/kelvin/kelvin_bend.csv]
+    nc=7  block rho 0.1944  K_res 1410.4562  K_hom 1453.2036  err +3.03 %  dof 1582275  14361 ms  NO-GO
+    nc=8  block rho 0.1944  K_res 1918.3107  K_hom 1954.5075  err +1.89 %  dof 2060571  20523 ms  GO
+    nc=9  block rho 0.1944  K_res 2502.7552  K_hom 2528.6594  err +1.04 %  dof 2601939  28754 ms  GO
+    nc=10  block rho 0.1944  K_res 3163.7646  K_hom 3175.6768  err +0.38 %  dof 3206379  36430 ms  GO
+    nc=12  block rho 0.1944  K_res 4715.5242  K_hom 4688.4232  err -0.57 %  dof 4604475  54447 ms  GO

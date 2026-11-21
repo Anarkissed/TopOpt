@@ -1,0 +1,24 @@
+[mg] smoother check (S7): 3 levels, lambda_max(D^-1 A) per smoothed level: 3.823 3.842 ; omega=0.60 => safe <= 3.333 : UNSAFE (omega*lambda >= 2; the safe retry covers a stall)
+[mg-safe] lambda_max(D^-1 A) per smoothed level (omega=0.60 => safe <= 3.33): 3.823 3.842 ; lambda_max(D_l1^-1 A): 0.529 0.709
+[mg-safe] solve 1: shipped stalled (300 cycles, rel res 4.350e-08) -> l1-Jacobi MG-PCG CONVERGED in 54 cycles, rel res 8.100e-09, 894 ms ; islands: 0 unanchored of 1 pieces (0 vox, largest 0), kept frozen 0 (frozen mask), kept big 0, kept hinged 0, dropped 0 islands / 0 vox of 65536 elements
+[mg] smoother check (S7): 3 levels, lambda_max(D^-1 A) per smoothed level: 7.216 8.698 ; omega=0.60 => safe <= 3.333 : UNSAFE (omega*lambda >= 2; the safe retry covers a stall)
+[mg-safe] lambda_max(D^-1 A) per smoothed level (omega=0.60 => safe <= 3.33): 6.369 6.874 ; lambda_max(D_l1^-1 A): 0.882 0.969
+[mg-safe] solve 1: shipped stalled (300 cycles, rel res 1.531e+01) -> l1-Jacobi MG-PCG did not converge in 4200 cycles, rel res 1.348e-04, 78513 ms ; islands: 346 unanchored of 347 pieces (4617 vox, largest 63), kept frozen 1 (frozen mask), kept big 54, kept hinged 116, dropped 175 islands / 685 vox of 65536 elements ; l1 iterate NOT handed over (exact rel res 1.085e+02, start 1.000e+00)
+[mg] smoother check (S7): 3 levels, lambda_max(D^-1 A) per smoothed level: 3.975 4.815 ; omega=0.60 => safe <= 3.333 : UNSAFE (omega*lambda >= 2; the safe retry covers a stall)
+[mg] smoother check (S7): 3 levels, lambda_max(D^-1 A) per smoothed level: 3.975 4.815 ; omega=0.60 => safe <= 3.333 : UNSAFE (omega*lambda >= 2; the safe retry covers a stall)
+      fixture: 64x32x32, 288 loose pieces planted (4617 voxels): 54 bars of 63 voxels, 58 hinged pairs, 1 frozen
+ok:   setup: ~300 loose pieces, with > 27-voxel ones, hinged pairs and a frozen one
+      clean beam: used_mg=1 converged=1 mg cycles=354 its=54 safe engaged=1 threw=0
+ok:   setup: the clean beam converges on multigrid
+      with the pieces: used_mg=0 converged=0 mg cycles=4500 its=40000 safe engaged=1 threw=1 ; solved at the floor: 0 of 4617 planted voxels, 0 others ; compliance 0 vs clean 1752.63601126
+FAIL: L1: every planted loose voxel (big, hinged and frozen ones included) is solved at the floor modulus, and nothing else
+FAIL: L2: the solve converges on multigrid (no Jacobi-CG fallback)
+FAIL: L3: it is bit-identical to the beam with no pieces, in the same MG cycles
+      MG fallback, cap 0: stopped=0 nonconvergence=1 converged=0 : fea_solve_mgcg_matfree: CG did not reach the requested tolerance within max_iterations
+FAIL: N1: the MG solve's Jacobi-CG fallback at its own cap STOPS the job (SolverStopped, 'stopped: the solver did not converge')
+      plain Jacobi-CG, cap 0: stopped=0 nonconvergence=1 converged=0 : fea_solve_cg_matfree: CG did not reach the requested tolerance within max_iterations
+FAIL: N1: so does the plain matrix-free Jacobi-CG at its own cap
+      MG fallback, cap 50: stopped=0 nonconvergence=1 converged=0 : fea_solve_mgcg_matfree: CG did not reach the requested tolerance within max_iterations
+ok:   N2: a caller's explicit cap keeps today's SolverNonConvergence
+loose_pieces: 5 check(s) FAILED
+rc=1

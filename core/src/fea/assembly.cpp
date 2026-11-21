@@ -215,6 +215,30 @@ namespace fea_detail {
 // same assembly + void-gate the Jacobi-CG path uses — both solve the identical
 // reduced system.
 
+// REAL BOLTS — add the bearing springs (DirichletBC::spring > 0) to the assembled K:
+// at each engaged spring's node, spring n n^T + spring_tangent (I - n n^T); a released
+// spring adds nothing. No spring entry, no change.
+void add_contact_springs(SpMat& K, const std::vector<DirichletBC>& bcs, int num_nodes,
+                         const char* who) {
+  if (!has_springs(bcs)) return;
+  std::vector<Eigen::Triplet<double>> t;
+  for (const DirichletBC& b : bcs) {
+    if (!(b.spring > 0.0)) continue;
+    if (b.node < 0 || b.node >= num_nodes)
+      throw std::invalid_argument(std::string(who) + ": spring node out of range");
+    if (b.released) continue;
+    const int d = 3 * b.node;
+    const double n[3] = {b.normal.x, b.normal.y, b.normal.z};
+    const double kt = b.spring_tangent;
+    for (int a = 0; a < 3; ++a)
+      for (int c = 0; c < 3; ++c)
+        t.emplace_back(d + a, d + c, (b.spring - kt) * n[a] * n[c] + (a == c ? kt : 0.0));
+  }
+  SpMat S(K.rows(), K.cols());
+  S.setFromTriplets(t.begin(), t.end());
+  K += S;
+}
+
 ReducedSystem assemble_reduced(const VoxelGrid& grid, double youngs_modulus,
                                double poisson,
                                const std::vector<DirichletBC>& bcs,
@@ -263,6 +287,7 @@ ReducedSystem assemble_reduced(const VoxelGrid& grid, double youngs_modulus,
       }
   SpMat K(ndof, ndof);
   K.setFromTriplets(trips.begin(), trips.end());
+  add_contact_springs(K, bcs, num_nodes, who);
 
   // --- Load vector ----------------------------------------------------------
   Vec f = Vec::Zero(ndof);
@@ -276,6 +301,7 @@ ReducedSystem assemble_reduced(const VoxelGrid& grid, double youngs_modulus,
   std::vector<char> fixed(static_cast<std::size_t>(ndof), 0);
   Vec up = Vec::Zero(ndof);  // prescribed displacement vector
   for (const DirichletBC& bc : bcs) {
+    if (bc.spring > 0.0) continue;  // a bearing spring, in K above (REAL BOLTS)
     if (bc.node < 0 || bc.node >= num_nodes || bc.component < 0 ||
         bc.component > 2)
       throw std::invalid_argument(std::string(who) + ": BC index out of range");
@@ -607,6 +633,7 @@ ReducedSystem assemble_reduced_lattice(
       }
   SpMat K(ndof, ndof);
   K.setFromTriplets(trips.begin(), trips.end());
+  fea_detail::add_contact_springs(K, bcs, num_nodes, who);
 
   Vec f = Vec::Zero(ndof);
   for (const NodalLoad& l : loads) {
@@ -618,6 +645,7 @@ ReducedSystem assemble_reduced_lattice(
   std::vector<char> fixed(static_cast<std::size_t>(ndof), 0);
   Vec up = Vec::Zero(ndof);
   for (const DirichletBC& bc : bcs) {
+    if (bc.spring > 0.0) continue;  // a bearing spring, in K above (REAL BOLTS)
     if (bc.node < 0 || bc.node >= num_nodes || bc.component < 0 ||
         bc.component > 2)
       throw std::invalid_argument(std::string(who) + ": BC index out of range");
@@ -741,6 +769,8 @@ PenalizedSolver::PenalizedSolver(const VoxelGrid& grid, double poisson,
   // unusable so the caller falls back.
   std::vector<char> fixed(static_cast<std::size_t>(m.ndof), 0);
   for (const DirichletBC& bc : bcs) {
+    // A bearing spring (REAL BOLTS) changes K: not this cached fast path; fall back.
+    if (bc.spring > 0.0) { m.usable = false; continue; }
     if (bc.node < 0 || bc.node >= num_nodes || bc.component < 0 ||
         bc.component > 2)
       throw std::invalid_argument("fea_solve_cg: BC index out of range");

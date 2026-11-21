@@ -1,0 +1,20 @@
+# 68BF7B74 stepped (his Aesthetic Stepped, unconverted)
+
+Frozen CLI core 30982e5284b2 (#358 at 36f5fdde).
+
+DG-PROJECT M2 verticalStand algorithm stepped stage Optional(TopOptFlows.LatticeStageMode.aesthetic) step-halves false density sim cells auto
+DG-PLAN stepped: 9865 cell(s) over 5 region(s) | 12.07=5 8.05=21 7.73=18 6.87=7 6.04=45 5.16=789 4.02=568 4.01=2505 3.44=293 2.58=5614
+DG-PLAN per region: r1=2505 r2=4969 r3=639 r4=973 r5=779
+DG-WITHHELD region 3's face is tilted off the grid these cells sit on, and core can't place them there yet | offPlane(regionID: 3, offsetMM: 13.264124775894533)
+DG-K2-JOB job_plan_k2.json: 9865 cells, 5 regions stamped (withheld by the app)
+DG-SLOT-ORIGINS 0 region(s) carry slot_origin_mm
+DG-JOBS /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-stage-frontend-37bee1/scratch/evidence/plans/68BF7B74-3C2A-4ED6-A46D-AC040A9CA649/stepped model model.step
+
+## job_noplan: exit 0 verdict: ACCEPTED
+
+## job_plan: exit 0 verdict: ACCEPTED
+
+## job_plan_k2: exit 1
+> topopt-cli: job.json: lattice region 3 (face 23): a face lattice region's "slot_origin_mm" must lie IN the face plane, and this one stands 13.264125 mm along the region normal from "origin". The slot origin carries the in-plane ANCHOR SHIFT of the grid the cells were packed on; a component along the normal would move the plane the prism's depth is measured from, and every cell's containment verdict with it
+
+model model.step sha256 bdf5646481e370ba (not committed)

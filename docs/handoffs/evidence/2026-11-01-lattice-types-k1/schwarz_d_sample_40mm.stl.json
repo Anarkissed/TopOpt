@@ -1,0 +1,15 @@
+{
+  "topology": "schwarz_d",
+  "relative_density": 0.40025,
+  "relative_density_is_band_middle": true,
+  "band": [0.20038, 0.60012],
+  "cell_mm": 8,
+  "cells_per_side": 5,
+  "size_mm": 40,
+  "base_plate_mm": 1.5,
+  "strut_diameter_mm": 0.856016,
+  "triangles": 2319684,
+  "lattice_triangles": 2319672,
+  "struts": 0,
+  "nodes": 0
+}

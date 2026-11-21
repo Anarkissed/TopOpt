@@ -177,6 +177,14 @@ public struct FaceRegion: Identifiable, Equatable, Sendable, Codable {
     /// never patterned anything stays byte-identical (PR 331's bar R1).
     public var edges: [RegionCut]?
 
+    /// ★★ WHERE EACH PART CAME FROM (the Regions task, 2026-10-08: "Dissolve: the faces go back to
+    /// the group they came from"). The `parentID` each of `parts` had before this union took it,
+    /// aligned with `parts`, so dissolving the union puts every part back where it was — as it was,
+    /// in the group that held it. nil = the union OWNS its parts: a cell a pattern cut from a union
+    /// (its pieces exist only for it), or a union made before this field existed; dissolving such a
+    /// union drops its parts with it. Omitted from the encoding when nil (PR 331's bar R1).
+    public var partParents: [RegionID]?
+
     /// True when this region IS a union of parts rather than a face selection.
     public var isUnionOfParts: Bool { !parts.isEmpty }
 
@@ -188,7 +196,8 @@ public struct FaceRegion: Identifiable, Equatable, Sendable, Codable {
                 filterMatchedAtAuthor: Int = -1, add: [FaceID] = [],
                 remove: [FaceID] = [], cuts: [RegionCut] = [],
                 parentID: RegionID = -1, collapsed: Bool = true,
-                parts: [RegionID] = [], edges: [RegionCut]? = nil) {
+                parts: [RegionID] = [], edges: [RegionCut]? = nil,
+                partParents: [RegionID]? = nil) {
         self.id = id
         self.name = name
         self.filter = filter
@@ -200,6 +209,7 @@ public struct FaceRegion: Identifiable, Equatable, Sendable, Codable {
         self.collapsed = collapsed
         self.parts = parts
         self.edges = edges
+        self.partParents = partParents
     }
 
     // ── Codable, BY HAND, for one reason ──────────────────────────────────
@@ -211,7 +221,7 @@ public struct FaceRegion: Identifiable, Equatable, Sendable, Codable {
 
     private enum CodingKeys: String, CodingKey {
         case id, name, filter, filterMatchedAtAuthor, add, remove, cuts
-        case parentID, collapsed, parts, edges
+        case parentID, collapsed, parts, edges, partParents
     }
 
     public init(from d: Decoder) throws {
@@ -228,6 +238,7 @@ public struct FaceRegion: Identifiable, Equatable, Sendable, Codable {
         collapsed = try c.decodeIfPresent(Bool.self, forKey: .collapsed) ?? true
         parts = try c.decodeIfPresent([RegionID].self, forKey: .parts) ?? []
         edges = try c.decodeIfPresent([RegionCut].self, forKey: .edges)
+        partParents = try c.decodeIfPresent([RegionID].self, forKey: .partParents)
     }
 
     public func encode(to e: Encoder) throws {
@@ -244,6 +255,7 @@ public struct FaceRegion: Identifiable, Equatable, Sendable, Codable {
         // ★ ONLY WHEN IT HOLDS SOMETHING — see the note above.
         if !parts.isEmpty { try c.encode(parts, forKey: .parts) }
         if let edges { try c.encode(edges, forKey: .edges) }
+        if let partParents { try c.encode(partParents, forKey: .partParents) }
     }
 
     /// True when this region is exactly ONE face with no filter and no cut — an
@@ -341,21 +353,85 @@ public struct FaceRegionModel: Equatable, Sendable, Codable {
     /// Dissolving a region also dissolves everything split out of it — those
     /// children are cells of a shape that no longer exists.
     @discardableResult
-    public mutating func dissolve(_ id: RegionID, resolvedMembers: [FaceID] = [])
+    public mutating func dissolve(_ id: RegionID, resolvedMembers: [FaceID] = [], includingLent: Bool = false)
         -> [FaceID] {
         guard let r = region(id) else { return [] }
         let members = resolvedMembers.isEmpty ? r.add : resolvedMembers
+        // ★★ A UNION THAT TOOK EXISTING PIECES GIVES THEM BACK (2026-10-08). Each part returns under
+        // the parent it had before the union, BEFORE anything is dropped, so the pieces the user made
+        // survive the dissolve exactly as they were. A union that owns its parts (`partParents` nil:
+        // a pattern's cell, or a union older than the field) drops them, as it always did.
+        if let pp = r.partParents {
+            for (k, pid) in r.parts.enumerated() {
+                guard let i = regions.firstIndex(where: { $0.id == pid }), regions[i].parentID == id else { continue }
+                regions[i].parentID = k < pp.count ? pp[k] : -1
+            }
+        }
         var drop: Set<RegionID> = [id]
         var changed = true
         while changed {
             changed = false
-            for c in regions where drop.contains(c.parentID) && !drop.contains(c.id) {
+            // ★ his 11-16 (the "T"): a piece cut from a dropped region goes with it EVEN WHEN A UNION HAS TAKEN IT — it was
+            // left behind, still cut, its other half gone, and a tap on that half picked it (and so the union)
+            // (Edit faces asks for it with `includingLent`; Flexible's scratch derivation keeps its own rule)
+            for c in regions where !drop.contains(c.id)
+                && (drop.contains(c.parentID) || (includingLent && (origin(of: c.id).map { drop.contains($0) } ?? false))) {
                 drop.insert(c.id)
                 changed = true
             }
         }
         regions.removeAll { drop.contains($0.id) }
+        if includingLent {
+            // no union keeps a part that is gone; a union left with no part goes too
+            releaseFromUnions(drop)
+            let emptied = regions.filter { $0.parts.isEmpty && $0.partParents != nil && $0.add.isEmpty && !$0.filter.any }.map(\.id)
+            for u in emptied where region(u) != nil { _ = dissolve(u, includingLent: true) }
+        }
         return members
+    }
+
+    /// ★ his 11-16: the region a piece was cut from, through any union that has taken it (`partParents` holds the parent
+    /// it had before); nil for a root.
+    public func origin(of id: RegionID) -> RegionID? {
+        guard let r = region(id), r.parentID >= 0 else { return nil }
+        if let u = region(r.parentID), let k = u.parts.firstIndex(of: id) {
+            guard let pp = u.partParents, k < pp.count, pp[k] >= 0 else { return nil }
+            return pp[k]
+        }
+        return r.parentID
+    }
+
+    /// ★ his 11-16: no union keeps a part that is gone (its `parts` and `partParents` stay in step).
+    mutating func releaseFromUnions(_ gone: Set<RegionID>) {
+        for i in regions.indices where regions[i].parts.contains(where: { gone.contains($0) }) {
+            var keepParts: [RegionID] = [], keepParents: [RegionID] = []
+            for (k, pid) in regions[i].parts.enumerated() where !gone.contains(pid) {
+                keepParts.append(pid)
+                if let pp = regions[i].partParents, k < pp.count { keepParents.append(pp[k]) }
+            }
+            regions[i].parts = keepParts
+            if regions[i].partParents != nil { regions[i].partParents = keepParents }
+        }
+    }
+
+    /// ★ his 11-16 (the "T"): cut pieces whose split no longer exists — the region they were cut from is gone (a split face
+    /// dissolved, or its split taken back, while a union held one of its pieces, before the fix above). The piece still
+    /// carries its cut, so its other half is covered by nothing and a tap there picked the piece.
+    public var orphanedCutPieces: [RegionID] {
+        regions.filter { r in
+            guard r.isCut else { return false }
+            guard let o = origin(of: r.id) else { return true }
+            return region(o) == nil
+        }.map(\.id)
+    }
+
+    /// Make every orphaned piece's face whole again: the piece (and anything cut from it) goes, and its union lets it go.
+    /// Returns the ids that went.
+    @discardableResult
+    public mutating func repairOrphanedCutPieces() -> [RegionID] {
+        let before = Set(regions.map(\.id))
+        for id in orphanedCutPieces where region(id) != nil { _ = dissolve(id, includingLent: true) }
+        return before.subtracting(regions.map(\.id)).sorted()
     }
 
     // MARK: - splits (§4)
@@ -462,9 +538,57 @@ public struct FaceRegionModel: Equatable, Sendable, Codable {
 
     /// Undo the LAST split of a region: drop its immediate children (and theirs).
     /// Splits are a revertable stack (§4d).
-    public mutating func revertSplit(_ id: RegionID) {
-        let kids = children(of: id).map(\.id)
-        for k in kids { _ = dissolve(k) }
+    public mutating func revertSplit(_ id: RegionID, includingLent: Bool = false) {
+        // ★ a union's parts hang off it too — they are what it IS, not a split of it (2026-10-08)
+        let own = Set(region(id)?.parts ?? [])
+        let kids = children(of: id).map(\.id).filter { !own.contains($0) }
+        // ★ his 11-16 (the "T"): and the pieces of this split a union has taken — taking a cut back takes back BOTH halves;
+        // the union keeps its other parts
+        let lent = includingLent
+            ? regions.filter { $0.parentID != id && !own.contains($0.id) && origin(of: $0.id) == id }.map(\.id) : []
+        for k in kids + lent where region(k) != nil { _ = dissolve(k, includingLent: includingLent) }
+    }
+
+    /// ★★ A PATTERN ON A UNION SPLITS THE WHOLE UNION (the Regions task ruling, 2026-10-08:
+    /// "Pattern on a face inside a union splits the WHOLE union"). Every part the union resolves to
+    /// (its leaves) is cut by the SAME cells — the grid laid on the tapped face, whose half-spaces
+    /// reach across every part — and each cell's pieces across the parts become ONE cell of the
+    /// union: a union of them that owns them (`partParents` nil, so undoing the split drops them),
+    /// or the lone piece when a cell reaches one part. `keep(leaf, k)` says whether leaf ∩ cell k
+    /// holds surface; a piece holding none is never made. The cells hang off the union, which
+    /// collapses to one row, exactly as a split's children hang off a face. Before this, the cells
+    /// copied a union's (empty) faces and resolved to nothing.
+    @discardableResult
+    public mutating func splitUnion(_ id: RegionID, cells: [FaceRegionGeometry.GridCell],
+                                    keep: (RegionID, Int) -> Bool) -> [RegionID] {
+        guard let u = region(id), u.isUnionOfParts, !cells.isEmpty else { return [] }
+        let leaves = resolvedLeaves(id)
+        var out: [RegionID] = []
+        for (k, c) in cells.enumerated() {
+            var pieces: [RegionID] = []
+            for leaf in leaves where keep(leaf, k) {
+                guard let l = region(leaf) else { continue }
+                let pid = nextID
+                nextID += 1
+                regions.append(FaceRegion(id: pid, name: "\(l.name) \(c.i + 1)·\(c.j + 1)",
+                                          filter: l.filter, filterMatchedAtAuthor: l.filterMatchedAtAuthor,
+                                          add: l.add, remove: l.remove, cuts: l.cuts + c.cuts,
+                                          parentID: id, collapsed: true, edges: c.drawn))
+                pieces.append(pid)
+            }
+            guard !pieces.isEmpty else { continue }
+            if pieces.count == 1 { out.append(pieces[0]); continue }
+            let cid = nextID
+            nextID += 1
+            regions.append(FaceRegion(id: cid, name: "\(u.name) \(c.i + 1)·\(c.j + 1)",
+                                      parentID: id, collapsed: true, parts: pieces))
+            for p in pieces {
+                if let i = regions.firstIndex(where: { $0.id == p }) { regions[i].parentID = cid }
+            }
+            out.append(cid)
+        }
+        if !out.isEmpty { setCollapsed(id, true) }
+        return out
     }
 
     // MARK: - union of parts (§6c)
@@ -480,8 +604,10 @@ public struct FaceRegionModel: Equatable, Sendable, Codable {
         guard live.count >= 2 else { return nil }
         let id = nextID
         nextID += 1
+        // ★ each part's parent before the union took it — so a dissolve gives it back (2026-10-08)
+        let parents = live.map { pid in region(pid)?.parentID ?? -1 }
         regions.append(FaceRegion(id: id, name: name, parentID: -1,
-                                  collapsed: true, parts: live))
+                                  collapsed: true, parts: live, partParents: parents))
         // The parts hang off the union, so one operation adds ONE row (§5b).
         for pid in live {
             guard let i = regions.firstIndex(where: { $0.id == pid }) else { continue }
@@ -713,5 +839,45 @@ extension TopOptKit.FaceRegionSpec {
             cylinderRadiusMM: r.filter.cylinderRadiusMM,
             cylinderRadiusTolMM: r.filter.cylinderRadiusTolMM,
             filterMatchedAtAuthor: r.filterMatchedAtAuthor)
+    }
+}
+
+
+// ★ THE SAME REGION, FOR THE ON-DEVICE SOLVES (2026-09-05). The remote path serialises a
+// `FaceRegion` to JSON (`RemoteRunner`), the on-device solve needs the kit's POD spec —
+// one mapping, so the stage's stress solve receives exactly the regions the run does.
+// Kind codes are the bridge's (`region_filter_kind`): plane 0, cylinder 1, other 2, −1 none.
+public extension FaceRegion {
+    var kitSpec: TopOptKit.FaceRegionSpec {
+        let kindCode: Int
+        switch filter.kind {
+        case "plane": kindCode = 0
+        case "cylinder": kindCode = 1
+        case "other": kindCode = 2
+        default: kindCode = -1
+        }
+        return TopOptKit.FaceRegionSpec(
+            id: id, parentID: parentID,
+            addFaces: add.map { Int($0) }, removeFaces: remove.map { Int($0) },
+            cuts: cuts.map { (point: $0.point, normal: $0.normal, strict: $0.strict) },
+            maxAreaMM2: filter.maxAreaMM2, minAreaMM2: filter.minAreaMM2,
+            minLargerNeighbours: filter.minLargerNeighbours, largerRatio: filter.largerRatio,
+            kindCode: kindCode, cylinderRadiusMM: filter.cylinderRadiusMM,
+            cylinderRadiusTolMM: filter.cylinderRadiusTolMM,
+            filterMatchedAtAuthor: filterMatchedAtAuthor)
+    }
+}
+
+// MARK: - Upload new version (his ask 2026-11-11, DATA-MODEL.md decision 12)
+
+extension FaceRegionModel {
+    /// Every face a region names by hand (its add and remove lists), on the new model's faces. Its filter is re-evaluated
+    /// on open, as for any re-import, and a change is reported (never absorbed).
+    public mutating func remapFaces(_ to: (FaceID) -> [FaceID]) {
+        func mapped(_ list: [FaceID]) -> [FaceID] { var seen = Set<FaceID>(); return list.flatMap(to).filter { seen.insert($0).inserted } }
+        for i in regions.indices {
+            regions[i].add = mapped(regions[i].add)
+            regions[i].remove = mapped(regions[i].remove)
+        }
     }
 }

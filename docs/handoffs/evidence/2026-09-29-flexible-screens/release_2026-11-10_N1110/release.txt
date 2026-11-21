@@ -1,0 +1,20 @@
+# Release d3c50520 — 2026-11-10 N1110 (his iPad notes 11-10, d20084c8), app only
+# Core and worker unchanged: fingerprint db2cc34ef3fe; "fingerprint": "db2cc34ef3fe"
+# Merged onto 50c83c39; the merged app tree equals N1110's, so its regression set applies unchanged.
+# Commits:
+#   39136c05 His iPad notes 11-10 (362's half; app only): a union of pieces draws its face prism (Lattice and No lattice), the Lattice page's Sample covers the part, the Sample follows the Grade and names what it can't show
+#   134dcc89 His iPad notes 11-10 (img04/05, img08): each band caption one short line under its own slider; Auto │ Manual kept until Reset all
+#   5d881430 His iPad notes 11-10: merge UI-Notes' 134dcc89 (img 4/5 band captions, img 8 Auto/Manual kept) with 362's (img 1/2 union prisms, img 3 Sample covers the part, img 6 Sample follows the Grade); app only
+#   ce5415e6 His 11-10 (later): the Lattice page's two views are samples — Cells is core's chunk of cells, In a part is core's sample part with the settings; never his own part
+#   d20084c8 The Lattice page's Sample builds one at a time, newest only, off the main thread
+# Gates:
+#   551-class regression set on ce5415e6 (split: B 547 classes without HIS_PROJECT_DIR, A 4 stand classes with it), 05:48-11:59 EST: 2653 passed, 173 skipped, 3 failed (the known AppModelTests 3MF tests), build failures 0
+#   d20084c8 (the Sample fix on top of ce5415e6): 30 Lattice-page classes (fix_classes.txt), 12:40-13:25 EST: 166 passed, 0 failed; LatticePageParityHostedTests' walk 1571 s -> 1043 s
+#   13:26 waiting for HEAVY.lock (free)
+#   13:26 lock taken
+#   13:26 STOPPED: iPad build failed rc=65 (ipad_build.log; lock released; merge d3c5052023d4700b542e67457c295f8b1e9dd30c left LOCAL, nothing pushed)
+#   13:26 waiting for HEAVY.lock (free)
+#   13:26 lock taken
+#   13:32 iPad device build green; lock released
+#   13:32 pushed d3c50520
+#   13:32 worker /health "fingerprint": "db2cc34ef3fe" (unchanged, no swap)

@@ -1,0 +1,8 @@
+BEND schwarz_d: S=5.0 mm, vpc=24, 6 cells long, target rho 0.40 -> cell rho 0.4074 (wall 2.91 voxels), C11=897.32 C12=350.78 C44=260.50 Zener=0.953
+  [writing /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-comms-lattice-types-818eda/core/../docs/handoffs/evidence/2026-11-01-lattice-types-k1/schwarz_d_bend.csv]
+    nc=1  block rho 0.4074  K_res 13.7487  K_hom 22.7681  err +65.60 %  dof 271875  10181 ms  NO-GO
+    nc=2  block rho 0.4074  K_res 191.9871  K_hom 231.2973  err +20.48 %  dof 1044435  34719 ms  NO-GO
+    nc=3  block rho 0.4074  K_res 745.4677  K_hom 831.4331  err +11.53 %  dof 2318115  81549 ms  NO-GO
+    nc=4  block rho 0.4074  K_res 1768.5714  K_hom 1904.9333  err +7.71 %  dof 4092915  144688 ms  NO-GO
+    nc=5  block rho 0.4074  K_res 3270.4437  K_hom 3452.3824  err +5.56 %  dof 6368835  249784 ms  NO-GO
+    nc=6  block rho 0.4074  K_res 5237.0117  K_hom 5456.8115  err +4.20 %  dof 9145875  1250157 ms  NO-GO

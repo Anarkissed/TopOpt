@@ -1,0 +1,3 @@
+# his_r5: the Export step's sends as the project stands (FlexibleCoreHold; 'direct' = nothing held)
+send 1 · Send Group 1 only · resting [3] · his_r5_held_send_run_job.json
+send 2 · Send Group 2 only · resting [1000104, 1000103, 5] · his_r5_send2_run_job.json

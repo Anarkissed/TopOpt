@@ -41,3 +41,4 @@ build-diag/
 /dumbbell.stl
 /bracket_export.stl
 __pycache__/
+app/.build-app/

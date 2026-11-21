@@ -1,0 +1,206 @@
+# R7-D2 (Selections, his pick 2) — the RED run: the new test classes against STUBS (the API with empty bodies; the hooks not laid).
+# swift test --skip-build --scratch-path /tmp/r7d-build --filter TopOptFlowsTests.<class>, one process per class, 2026-10-17 23:11–23:13.
+# Passing in the red run are FACTS, said so: the condition (d) evidence (H35 held), the held [Lattice], the ≤44-character copy, two stub-vacuous checks (a locked group / a miss write nothing — the stubs write nothing at all).
+
+=== exit 1 FlexibleRound7SelectionsHookTests 23:11:57
+=== exit 1 FlexibleFacePickTests 23:11:59
+=== exit 1 FlexibleFaceCommitTests 23:12:01
+=== exit 1 FlexibleLatticeOnlyGateTests 23:12:05
+=== exit 1 FlexibleMainPrismEqualityTests 23:12:07
+=== exit 1 FlexibleLatticeHandlesTests 23:12:09
+=== exit 1 FlexibleFaceChipTests 23:12:11
+=== exit 1 FlexibleSelectionsListTests 23:12:13
+=== exit 1 FlexibleR7EveningAnswersTests 23:12:22
+=== exit 1 FlexibleRound7SelectionsHostedTests 23:13:11
+DONE
+
+## FlexibleRound7SelectionsHookTests
+Tests/TopOptFlowsTests/FlexibleRound7SelectionsHookTests.swift:81: error: -[TopOptFlowsTests.FlexibleRound7SelectionsHookTests testEachHookOnceAtItsAnchorWithItsGateAndRemovingAGateGoesRed] : XCTAssertEqual failed: ("["H20: appears 0 times (must be exactly once)", "H20: not right after its anchor"]") is not equal to ("[]") - ★ H20 at its anchor with its gate
+Tests/TopOptFlowsTests/FlexibleRound7SelectionsHookTests.swift:81: error: -[TopOptFlowsTests.FlexibleRound7SelectionsHookTests testEachHookOnceAtItsAnchorWithItsGateAndRemovingAGateGoesRed] : XCTAssertEqual failed: ("["H22: appears 0 times (must be exactly once)", "H22: not right after its anchor"]") is not equal to ("[]") - ★ H22 at its anchor with its gate
+Tests/TopOptFlowsTests/FlexibleRound7SelectionsHookTests.swift:81: error: -[TopOptFlowsTests.FlexibleRound7SelectionsHookTests testEachHookOnceAtItsAnchorWithItsGateAndRemovingAGateGoesRed] : XCTAssertEqual failed: ("["H23: appears 0 times (must be exactly once)", "H23: not right after its anchor"]") is not equal to ("[]") - ★ H23 at its anchor with its gate
+Tests/TopOptFlowsTests/FlexibleRound7SelectionsHookTests.swift:81: error: -[TopOptFlowsTests.FlexibleRound7SelectionsHookTests testEachHookOnceAtItsAnchorWithItsGateAndRemovingAGateGoesRed] : XCTAssertEqual failed: ("["H25: appears 0 times (must be exactly once)", "H25: not right after its anchor"]") is not equal to ("[]") - ★ H25 at its anchor with its gate
+Tests/TopOptFlowsTests/FlexibleRound7SelectionsHookTests.swift:81: error: -[TopOptFlowsTests.FlexibleRound7SelectionsHookTests testEachHookOnceAtItsAnchorWithItsGateAndRemovingAGateGoesRed] : XCTAssertEqual failed: ("["H32: appears 0 times (must be exactly once)", "H32: not right after its anchor"]") is not equal to ("[]") - ★ H32 at its anchor with its gate
+Test Case '-[TopOptFlowsTests.FlexibleRound7SelectionsHookTests testEachHookOnceAtItsAnchorWithItsGateAndRemovingAGateGoesRed]' failed (2.912 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7SelectionsHookTests testH35IsHeldProjectModelHasNoLatticeOnlyLine]' passed (0.023 seconds).
+Tests/TopOptFlowsTests/FlexibleRound7SelectionsHookTests.swift:135: error: -[TopOptFlowsTests.FlexibleRound7SelectionsHookTests testTheNewFlexibleFilesExist] : XCTAssertTrue failed - ★ the keypad gets the sign key for the expand
+Test Case '-[TopOptFlowsTests.FlexibleRound7SelectionsHookTests testTheNewFlexibleFilesExist]' failed (0.003 seconds).
+Tests/TopOptFlowsTests/FlexibleRound7SelectionsHookTests.swift:91: error: -[TopOptFlowsTests.FlexibleRound7SelectionsHookTests testTheOldLinesAreGoneAndNothingElseOfOursIsInThoseSpots] : XCTAssertFalse failed - H20 edits #354's line (+0 −0)
+Tests/TopOptFlowsTests/FlexibleRound7SelectionsHookTests.swift:92: error: -[TopOptFlowsTests.FlexibleRound7SelectionsHookTests testTheOldLinesAreGoneAndNothingElseOfOursIsInThoseSpots] : XCTAssertFalse failed - H25 edits #354's mount line (+0 −0)
+Tests/TopOptFlowsTests/FlexibleRound7SelectionsHookTests.swift:103: error: -[TopOptFlowsTests.FlexibleRound7SelectionsHookTests testTheOldLinesAreGoneAndNothingElseOfOursIsInThoseSpots] : XCTAssertEqual failed: ("0") is not equal to ("1")
+Tests/TopOptFlowsTests/FlexibleRound7SelectionsHookTests.swift:104: error: -[TopOptFlowsTests.FlexibleRound7SelectionsHookTests testTheOldLinesAreGoneAndNothingElseOfOursIsInThoseSpots] : XCTAssertEqual failed: ("0") is not equal to ("1")
+Tests/TopOptFlowsTests/FlexibleRound7SelectionsHookTests.swift:105: error: -[TopOptFlowsTests.FlexibleRound7SelectionsHookTests testTheOldLinesAreGoneAndNothingElseOfOursIsInThoseSpots] : XCTAssertEqual failed: ("0") is not equal to ("1")
+Tests/TopOptFlowsTests/FlexibleRound7SelectionsHookTests.swift:106: error: -[TopOptFlowsTests.FlexibleRound7SelectionsHookTests testTheOldLinesAreGoneAndNothingElseOfOursIsInThoseSpots] : XCTAssertEqual failed: ("0") is not equal to ("1")
+Test Case '-[TopOptFlowsTests.FlexibleRound7SelectionsHookTests testTheOldLinesAreGoneAndNothingElseOfOursIsInThoseSpots]' failed (0.174 seconds).
+	 Executed 4 tests, with 12 failures (0 unexpected) in 3.112 (3.112) seconds
+	 Executed 4 tests, with 12 failures (0 unexpected) in 3.112 (3.113) seconds
+
+## FlexibleFacePickTests
+Tests/TopOptFlowsTests/FlexibleFacePickTests.swift:23: error: -[TopOptFlowsTests.FlexibleFacePickTests testAFreeFaceIsPendingAndNothingIsWritten] : XCTAssertEqual failed: ("none") is not equal to ("pending([TopOptFlows.FlexibleFreeFace.face(4)])") - ★ Face 4 (no group holds it) waits for the chip's answer
+Test Case '-[TopOptFlowsTests.FlexibleFacePickTests testAFreeFaceIsPendingAndNothingIsWritten]' failed (0.137 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleFacePickTests testAMissDropsThePendingSetAndLeavesNoOrphanGroup]' passed (0.009 seconds).
+Tests/TopOptFlowsTests/FlexibleFacePickTests.swift:48: error: -[TopOptFlowsTests.FlexibleFacePickTests testAnOwnedFacePicksItselfInItsGroup] : XCTAssertEqual failed: ("none") is not equal to ("face(group: 2AC5732E-4A99-4195-A0A3-5BBE73DD4D18, ref: TopOptFlows.LatticeSelectableRef.face(group: 2AC5732E-4A99-4195-A0A3-5BBE73DD4D18, face: 3))") - ★ Face 3 of Group C
+Tests/TopOptFlowsTests/FlexibleFacePickTests.swift:49: error: -[TopOptFlowsTests.FlexibleFacePickTests testAnOwnedFacePicksItselfInItsGroup] : XCTAssertEqual failed: ("nil") is not equal to ("Optional(2AC5732E-4A99-4195-A0A3-5BBE73DD4D18)") - ★ the join's target from now on
+Tests/TopOptFlowsTests/FlexibleFacePickTests.swift:51: error: -[TopOptFlowsTests.FlexibleFacePickTests testAnOwnedFacePicksItselfInItsGroup] : XCTAssertEqual failed: ("none") is not equal to ("face(group: A1000001-AAAA-4000-8000-000000000001, ref: TopOptFlows.LatticeSelectableRef.face(group: A1000001-AAAA-4000-8000-000000000001, face: 0))") - an owned face while another is picked: that one
+Test Case '-[TopOptFlowsTests.FlexibleFacePickTests testAnOwnedFacePicksItselfInItsGroup]' failed (0.011 seconds).
+Tests/TopOptFlowsTests/FlexibleFacePickTests.swift:79: error: -[TopOptFlowsTests.FlexibleFacePickTests testAnUnheldIdentityRegionIsTheFaceItself] : XCTAssertEqual failed: ("region(-1)") is not equal to ("face(4)") - ★ skipped: the face itself
+Test Case '-[TopOptFlowsTests.FlexibleFacePickTests testAnUnheldIdentityRegionIsTheFaceItself]' failed (0.009 seconds).
+Tests/TopOptFlowsTests/FlexibleFacePickTests.swift:63: error: -[TopOptFlowsTests.FlexibleFacePickTests testARegionCoveredFaceIsItsPieceAndThePieceIsNeverMoved] : XCTAssertEqual failed: ("none") is not equal to ("pending([TopOptFlows.FlexibleFreeFace.region(102)])") - ★ the tap is the union (its outermost piece)
+Tests/TopOptFlowsTests/FlexibleFacePickTests.swift:68: error: -[TopOptFlowsTests.FlexibleFacePickTests testARegionCoveredFaceIsItsPieceAndThePieceIsNeverMoved] : XCTAssertEqual failed: ("none") is not equal to ("face(group: 2AC5732E-4A99-4195-A0A3-5BBE73DD4D18, ref: TopOptFlows.LatticeSelectableRef.region(group: 2AC5732E-4A99-4195-A0A3-5BBE73DD4D18, region: 102))")
+Test Case '-[TopOptFlowsTests.FlexibleFacePickTests testARegionCoveredFaceIsItsPieceAndThePieceIsNeverMoved]' failed (0.010 seconds).
+Tests/TopOptFlowsTests/FlexibleFacePickTests.swift:37: error: -[TopOptFlowsTests.FlexibleFacePickTests testASecondFreeFaceJoinsThePendingSetAndATapAgainDropsIt] : XCTAssertEqual failed: ("none") is not equal to ("pending([TopOptFlows.FlexibleFreeFace.face(4), TopOptFlows.FlexibleFreeFace.face(2)])")
+Tests/TopOptFlowsTests/FlexibleFacePickTests.swift:38: error: -[TopOptFlowsTests.FlexibleFacePickTests testASecondFreeFaceJoinsThePendingSetAndATapAgainDropsIt] : XCTAssertEqual failed: ("") is not equal to ("Face 4 + Face 2 · new")
+Tests/TopOptFlowsTests/FlexibleFacePickTests.swift:40: error: -[TopOptFlowsTests.FlexibleFacePickTests testASecondFreeFaceJoinsThePendingSetAndATapAgainDropsIt] : XCTAssertEqual failed: ("none") is not equal to ("pending([TopOptFlows.FlexibleFreeFace.face(2)])") - the same face again leaves the set
+Test Case '-[TopOptFlowsTests.FlexibleFacePickTests testASecondFreeFaceJoinsThePendingSetAndATapAgainDropsIt]' failed (0.008 seconds).
+Tests/TopOptFlowsTests/FlexibleFacePickTests.swift:94: error: -[TopOptFlowsTests.FlexibleFacePickTests testThePickSurvivesACommitAndAnUndoThatRemovesItsGroupReadsAsNone] : XCTUnwrap failed: expected non-nil value of type "UUID" - a new Anchor group
+Test Case '-[TopOptFlowsTests.FlexibleFacePickTests testThePickSurvivesACommitAndAnUndoThatRemovesItsGroupReadsAsNone]' failed (0.009 seconds).
+	 Executed 7 tests, with 11 failures (0 unexpected) in 0.193 (0.193) seconds
+	 Executed 7 tests, with 11 failures (0 unexpected) in 0.193 (0.194) seconds
+
+## FlexibleFaceCommitTests
+Test Case '-[TopOptFlowsTests.FlexibleFaceCommitTests testALockedGroupTakesNoWrite]' passed (0.053 seconds).
+Tests/TopOptFlowsTests/FlexibleFaceCommitTests.swift:40: error: -[TopOptFlowsTests.FlexibleFaceCommitTests testAnchorLoadProtectKeepClearMakeAGroupWithTheFaceOff] : XCTUnwrap failed: expected non-nil value of type "UUID" - anchor
+Test Case '-[TopOptFlowsTests.FlexibleFaceCommitTests testAnchorLoadProtectKeepClearMakeAGroupWithTheFaceOff]' failed (0.065 seconds).
+Tests/TopOptFlowsTests/FlexibleFaceCommitTests.swift:153: error: -[TopOptFlowsTests.FlexibleFaceCommitTests testDeleteIsOneUndoStepAndUndoRestoresEverything] : XCTAssertEqual failed: ("nil") is not equal to ("Optional("Group C")")
+Tests/TopOptFlowsTests/FlexibleFaceCommitTests.swift:154: error: -[TopOptFlowsTests.FlexibleFaceCommitTests testDeleteIsOneUndoStepAndUndoRestoresEverything] : XCTAssertNil failed: "SelectionGroup(id: 2AC5732E-4A99-4195-A0A3-5BBE73DD4D18, name: "Group C", colorIndex: 2, faces: [3, 5], regionIDs: [])" - ★ gone (here and for Topology: one selection model)
+Tests/TopOptFlowsTests/FlexibleFaceCommitTests.swift:155: error: -[TopOptFlowsTests.FlexibleFaceCommitTests testDeleteIsOneUndoStepAndUndoRestoresEverything] : XCTAssertNil failed: "include"
+Tests/TopOptFlowsTests/FlexibleFaceCommitTests.swift:155: error: -[TopOptFlowsTests.FlexibleFaceCommitTests testDeleteIsOneUndoStepAndUndoRestoresEverything] : XCTAssertNil failed: "25.0"
+Tests/TopOptFlowsTests/FlexibleFaceCommitTests.swift:155: error: -[TopOptFlowsTests.FlexibleFaceCommitTests testDeleteIsOneUndoStepAndUndoRestoresEverything] : XCTAssertFalse failed
+Tests/TopOptFlowsTests/FlexibleFaceCommitTests.swift:156: error: -[TopOptFlowsTests.FlexibleFaceCommitTests testDeleteIsOneUndoStepAndUndoRestoresEverything] : XCTAssertEqual failed: ("0") is not equal to ("1") - ★ ONE undo step
+Test Case '-[TopOptFlowsTests.FlexibleFaceCommitTests testDeleteIsOneUndoStepAndUndoRestoresEverything]' failed (0.012 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleFaceCommitTests testEveryLineFits44]' passed (0.000 seconds).
+Tests/TopOptFlowsTests/FlexibleFaceCommitTests.swift:65: error: -[TopOptFlowsTests.FlexibleFaceCommitTests testJoinWritesTheGroupsCommonDepthAndExpand] : XCTAssertTrue failed - Group C (Protect) may carry a lattice role
+Tests/TopOptFlowsTests/FlexibleFaceCommitTests.swift:67: error: -[TopOptFlowsTests.FlexibleFaceCommitTests testJoinWritesTheGroupsCommonDepthAndExpand] : XCTAssertEqualWithAccuracy failed: ("0.0") is not equal to ("25.0") +/- ("1e-09")
+Tests/TopOptFlowsTests/FlexibleFaceCommitTests.swift:68: error: -[TopOptFlowsTests.FlexibleFaceCommitTests testJoinWritesTheGroupsCommonDepthAndExpand] : XCTAssertEqualWithAccuracy failed: ("0.0") is not equal to ("2.0") +/- ("1e-09")
+Tests/TopOptFlowsTests/FlexibleFaceCommitTests.swift:70: error: -[TopOptFlowsTests.FlexibleFaceCommitTests testJoinWritesTheGroupsCommonDepthAndExpand] : XCTAssertEqual failed: ("0.0 mm deep") is not equal to ("25.0 mm deep, the same as Face 3 + Face 5")
+Tests/TopOptFlowsTests/FlexibleFaceCommitTests.swift:72: error: -[TopOptFlowsTests.FlexibleFaceCommitTests testJoinWritesTheGroupsCommonDepthAndExpand] : XCTAssertTrue failed
+Tests/TopOptFlowsTests/FlexibleFaceCommitTests.swift:75: error: -[TopOptFlowsTests.FlexibleFaceCommitTests testJoinWritesTheGroupsCommonDepthAndExpand] : XCTAssertEqualWithAccuracy failed: ("4.0") is not equal to ("25.0") +/- ("1e-09") - ★ the group's depth
+Tests/TopOptFlowsTests/FlexibleFaceCommitTests.swift:76: error: -[TopOptFlowsTests.FlexibleFaceCommitTests testJoinWritesTheGroupsCommonDepthAndExpand] : XCTAssertEqualWithAccuracy failed: ("0.0") is not equal to ("2.0") +/- ("1e-09") - ★ the group's expand
+Tests/TopOptFlowsTests/FlexibleFaceCommitTests.swift:78: error: -[TopOptFlowsTests.FlexibleFaceCommitTests testJoinWritesTheGroupsCommonDepthAndExpand] : XCTAssertEqual failed: ("0") is not equal to ("1") - ONE undo step
+Test Case '-[TopOptFlowsTests.FlexibleFaceCommitTests testJoinWritesTheGroupsCommonDepthAndExpand]' failed (0.011 seconds).
+Tests/TopOptFlowsTests/FlexibleFaceCommitTests.swift:111: error: -[TopOptFlowsTests.FlexibleFaceCommitTests testKeepClearAsksFirstThenBlocksAndLatticeInsteadClearsIt] : XCTAssertEqual failed: ("refused") is not equal to ("asksFirst") - ★ 'Keep clear removes this lattice'
+Tests/TopOptFlowsTests/FlexibleFaceCommitTests.swift:114: error: -[TopOptFlowsTests.FlexibleFaceCommitTests testKeepClearAsksFirstThenBlocksAndLatticeInsteadClearsIt] : XCTAssertTrue failed - ★ state B: Keep clear blocks lattice
+Tests/TopOptFlowsTests/FlexibleFaceCommitTests.swift:120: error: -[TopOptFlowsTests.FlexibleFaceCommitTests testKeepClearAsksFirstThenBlocksAndLatticeInsteadClearsIt] : XCTAssertEqual failed: ("refused") is not equal to ("done")
+Tests/TopOptFlowsTests/FlexibleFaceCommitTests.swift:121: error: -[TopOptFlowsTests.FlexibleFaceCommitTests testKeepClearAsksFirstThenBlocksAndLatticeInsteadClearsIt] : XCTAssertTrue failed - ★ Load → Anchor
+Tests/TopOptFlowsTests/FlexibleFaceCommitTests.swift:123: error: -[TopOptFlowsTests.FlexibleFaceCommitTests testKeepClearAsksFirstThenBlocksAndLatticeInsteadClearsIt] : XCTAssertTrue failed
+Test Case '-[TopOptFlowsTests.FlexibleFaceCommitTests testKeepClearAsksFirstThenBlocksAndLatticeInsteadClearsIt]' failed (0.010 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleFaceCommitTests testLatticeOnANewFaceIsHeldAndTodaysRecipeSetsProtect]' passed (0.009 seconds).
+Tests/TopOptFlowsTests/FlexibleFaceCommitTests.swift:144: error: -[TopOptFlowsTests.FlexibleFaceCommitTests testRenameCommitsAndAnEmptyNameKeepsTheOld] : XCTAssertEqual failed: ("Optional("Group C")") is not equal to ("Optional("Pads")")
+Test Case '-[TopOptFlowsTests.FlexibleFaceCommitTests testRenameCommitsAndAnEmptyNameKeepsTheOld]' failed (0.011 seconds).
+Tests/TopOptFlowsTests/FlexibleFaceCommitTests.swift:90: error: -[TopOptFlowsTests.FlexibleFaceCommitTests testTheSegmentDeclaresSeedsAndOffKeepsTheDepth] : XCTAssertNil failed: "include" - Off
+Tests/TopOptFlowsTests/FlexibleFaceCommitTests.swift:96: error: -[TopOptFlowsTests.FlexibleFaceCommitTests testTheSegmentDeclaresSeedsAndOffKeepsTheDepth] : XCTAssertEqual failed: ("Optional(TopOptFlows.LatticeGroupRole.include)") is not equal to ("Optional(TopOptFlows.LatticeGroupRole.exclude)") - Solid
+Tests/TopOptFlowsTests/FlexibleFaceCommitTests.swift:98: error: -[TopOptFlowsTests.FlexibleFaceCommitTests testTheSegmentDeclaresSeedsAndOffKeepsTheDepth] : XCTAssertNil failed: "include"
+Tests/TopOptFlowsTests/FlexibleFaceCommitTests.swift:101: error: -[TopOptFlowsTests.FlexibleFaceCommitTests testTheSegmentDeclaresSeedsAndOffKeepsTheDepth] : XCTUnwrap failed: expected non-nil value of type "UUID"
+Test Case '-[TopOptFlowsTests.FlexibleFaceCommitTests testTheSegmentDeclaresSeedsAndOffKeepsTheDepth]' failed (0.009 seconds).
+	 Executed 9 tests, with 26 failures (0 unexpected) in 0.181 (0.182) seconds
+	 Executed 9 tests, with 26 failures (0 unexpected) in 0.181 (0.183) seconds
+
+## FlexibleLatticeOnlyGateTests
+Tests/TopOptFlowsTests/FlexibleLatticeOnlyGateTests.swift:51: error: -[TopOptFlowsTests.FlexibleLatticeOnlyGateTests testAnOldProjectWithoutTheKeyDecodesAndReEncodesByteIdentical] : XCTAssertNil failed: "[A1000001-AAAA-4000-8000-000000000009]" - ★ not a design input (the face-prisms reach the lattice through the scene)
+Test Case '-[TopOptFlowsTests.FlexibleLatticeOnlyGateTests testAnOldProjectWithoutTheKeyDecodesAndReEncodesByteIdentical]' failed (0.106 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleLatticeOnlyGateTests testConditionDALatticeOnlyGroupAndATopologyRun]' passed (0.089 seconds).
+Tests/TopOptFlowsTests/FlexibleLatticeOnlyGateTests.swift:60: error: -[TopOptFlowsTests.FlexibleLatticeOnlyGateTests testResetAllKeepsTheSet] : XCTAssertEqual failed: ("nil") is not equal to ("Optional(Set([A1000001-AAAA-4000-8000-000000000009]))") - ★ Reset all keeps the main page's lattice-only set
+Test Case '-[TopOptFlowsTests.FlexibleLatticeOnlyGateTests testResetAllKeepsTheSet]' failed (1.718 seconds).
+	 Executed 3 tests, with 2 failures (0 unexpected) in 1.914 (1.914) seconds
+	 Executed 3 tests, with 2 failures (0 unexpected) in 1.914 (1.915) seconds
+
+## FlexibleMainPrismEqualityTests
+Tests/TopOptFlowsTests/FlexibleMainPrismEqualityTests.swift:75: error: -[TopOptFlowsTests.FlexibleMainPrismEqualityTests testNothingBeforeAPickAndNo12mmOnTheTop] : XCTAssertEqual failed: ("[TopOptFlows.ClearanceRenderItem(volume: TopOptFlows.ClearanceVolume(faceID: 3, kind: TopOptKit.TopOptKit.ClearanceKind.face, shape: TopOptFlows.ClearanceVolume.Shape.shell(TopOptFlows.FaceOffsetShell(base: [SIMD3<Float>(100.0, 0.0, 0.0), SIMD3<Float>(100.0, 100.0, 0.0), SIMD3<Float>(100.0, 100.0, 20.0), SIMD3<Float>(100.0, 0.0, 20.0)], offset: [SIMD3<Float>(75.0, 0.0, 0.0), SIMD3<Float>(75.0, 100.0, 0.0), SIMD3<Float>(75.0, 100.0, 20.0), SIMD3<Float>(75.0, 0.0, 20.0)], indices: [0, 1, 2, 0, 2, 3], reachedDepthMM: 25.0, clampedFromMM: nil))), selected: true, tint: Optional(SIMD3<Float>(0.4862745, 0.43529412, 0.8392157)), faceAlpha: nil, edgeAlpha: nil, surfaceOnly: false), TopOptFlows.ClearanceRenderItem(volume: TopOptFlows.ClearanceVolume(faceID: 5, kind: TopOptKit.TopOptKit.ClearanceKind.face, shape: TopOptFlows.ClearanceVolume.Shape.shell(TopOptFlows.FaceOffsetShell(base: [SIMD3<Float>(0.0, 100.0, 0.0), SIMD3<Float>(0.0, 0.0, 0.0), SIMD3<Float>(0.0, 0.0, 20.0), SIMD3<Float>(0.0, 100.0, 20.0)], offset: [SIMD3<Float>(25.0, 100.0, 0.0), SIMD3<Float>(25.0, 0.0, 0.0), SIMD3<Float>(25.0, 0.0, 20.0), SIMD3<Float>(25.0, 100.0, 20.0)], indices: [0, 1, 2, 0, 2, 3], reachedDepthMM: 25.0, clampedFromMM: nil))), selected: true, tint: Optional(SIMD3<Float>(0.4862745, 0.43529412, 0.8392157)), faceAlpha: nil, edgeAlpha: nil, surfaceOnly: false)]") is not equal to ("[]") - ★ the pick decides: a new face, no prism
+Test Case '-[TopOptFlowsTests.FlexibleMainPrismEqualityTests testNothingBeforeAPickAndNo12mmOnTheTop]' failed (0.108 seconds).
+Tests/TopOptFlowsTests/FlexibleMainPrismEqualityTests.swift:31: error: -[TopOptFlowsTests.FlexibleMainPrismEqualityTests testTheHandleTheListAndThePrismReadTheSameNumber] : XCTAssertEqual failed: ("none") is not equal to ("face(group: 2AC5732E-4A99-4195-A0A3-5BBE73DD4D18, ref: TopOptFlows.LatticeSelectableRef.face(group: 2AC5732E-4A99-4195-A0A3-5BBE73DD4D18, face: 3))") - premise: Face 3 picked
+Tests/TopOptFlowsTests/FlexibleMainPrismEqualityTests.swift:33: error: -[TopOptFlowsTests.FlexibleMainPrismEqualityTests testTheHandleTheListAndThePrismReadTheSameNumber] : XCTAssertEqual failed: ("[]") is not equal to ("[TopOptFlows.LatticeSelectableRef.face(group: 2AC5732E-4A99-4195-A0A3-5BBE73DD4D18, face: 3)]") - ★ FACE scope: that face's prism and handle only
+Tests/TopOptFlowsTests/FlexibleMainPrismEqualityTests.swift:36: error: -[TopOptFlowsTests.FlexibleMainPrismEqualityTests testTheHandleTheListAndThePrismReadTheSameNumber] : XCTAssertEqual failed: ("") is not equal to ("25.0 mm")
+Tests/TopOptFlowsTests/FlexibleMainPrismEqualityTests.swift:37: error: -[TopOptFlowsTests.FlexibleMainPrismEqualityTests testTheHandleTheListAndThePrismReadTheSameNumber] : XCTUnwrap failed: expected non-nil value of type "ClearanceRenderItem"
+Test Case '-[TopOptFlowsTests.FlexibleMainPrismEqualityTests testTheHandleTheListAndThePrismReadTheSameNumber]' failed (0.015 seconds).
+	 Executed 2 tests, with 5 failures (0 unexpected) in 0.123 (0.123) seconds
+	 Executed 2 tests, with 5 failures (0 unexpected) in 0.123 (0.124) seconds
+
+## FlexibleLatticeHandlesTests
+Tests/TopOptFlowsTests/FlexibleLatticeHandlesTests.swift:42: error: -[TopOptFlowsTests.FlexibleLatticeHandlesTests testClampedOneToFifty] : XCTAssertEqualWithAccuracy failed: ("3.0") is not equal to ("1.0") +/- ("1e-09")
+Tests/TopOptFlowsTests/FlexibleLatticeHandlesTests.swift:45: error: -[TopOptFlowsTests.FlexibleLatticeHandlesTests testClampedOneToFifty] : XCTAssertEqualWithAccuracy failed: ("45.0") is not equal to ("50.0") +/- ("1e-09")
+Test Case '-[TopOptFlowsTests.FlexibleLatticeHandlesTests testClampedOneToFifty]' failed (0.053 seconds).
+Tests/TopOptFlowsTests/FlexibleLatticeHandlesTests.swift:81: error: -[TopOptFlowsTests.FlexibleLatticeHandlesTests testOneUndoStepPerDragXrayDuringItCardsOnce] : XCTAssertTrue failed - ★ X-ray on while it drags
+Tests/TopOptFlowsTests/FlexibleLatticeHandlesTests.swift:86: error: -[TopOptFlowsTests.FlexibleLatticeHandlesTests testOneUndoStepPerDragXrayDuringItCardsOnce] : XCTAssertEqual failed: ("0") is not equal to ("1") - ★ ONE undo step for the whole drag
+Tests/TopOptFlowsTests/FlexibleLatticeHandlesTests.swift:87: error: -[TopOptFlowsTests.FlexibleLatticeHandlesTests testOneUndoStepPerDragXrayDuringItCardsOnce] : XCTAssertEqual failed: ("0") is not equal to ("1") - ★ the cards refreshed once, on release
+Tests/TopOptFlowsTests/FlexibleLatticeHandlesTests.swift:88: error: -[TopOptFlowsTests.FlexibleLatticeHandlesTests testOneUndoStepPerDragXrayDuringItCardsOnce] : XCTAssertEqualWithAccuracy failed: ("25.0") is not equal to ("19.0") +/- ("1e-09")
+Test Case '-[TopOptFlowsTests.FlexibleLatticeHandlesTests testOneUndoStepPerDragXrayDuringItCardsOnce]' failed (0.050 seconds).
+Tests/TopOptFlowsTests/FlexibleLatticeHandlesTests.swift:64: error: -[TopOptFlowsTests.FlexibleLatticeHandlesTests testTargetsAre44] : XCTAssertEqual failed: ("0.0") is not equal to ("44.0")
+Tests/TopOptFlowsTests/FlexibleLatticeHandlesTests.swift:65: error: -[TopOptFlowsTests.FlexibleLatticeHandlesTests testTargetsAre44] : XCTAssertEqual failed: ("0.0") is not equal to ("32.0")
+Test Case '-[TopOptFlowsTests.FlexibleLatticeHandlesTests testTargetsAre44]' failed (0.000 seconds).
+Tests/TopOptFlowsTests/FlexibleLatticeHandlesTests.swift:17: error: -[TopOptFlowsTests.FlexibleLatticeHandlesTests testTheDepthDragFollowsTheProjectedNormalWithTheDetents] : XCTAssertEqualWithAccuracy failed: ("0.0") is not equal to ("5.0") +/- ("1e-09") - ★ 30 pt along a 60 pt-per-10 mm normal = 5 mm deeper
+Tests/TopOptFlowsTests/FlexibleLatticeHandlesTests.swift:24: error: -[TopOptFlowsTests.FlexibleLatticeHandlesTests testTheDepthDragFollowsTheProjectedNormalWithTheDetents] : XCTAssertEqualWithAccuracy failed: ("15.0") is not equal to ("20.0") +/- ("1e-09") - ★ #354's LatticeDepthDetent magnet (round mm)
+Tests/TopOptFlowsTests/FlexibleLatticeHandlesTests.swift:25: error: -[TopOptFlowsTests.FlexibleLatticeHandlesTests testTheDepthDragFollowsTheProjectedNormalWithTheDetents] : XCTAssertNotNil failed
+Tests/TopOptFlowsTests/FlexibleLatticeHandlesTests.swift:27: error: -[TopOptFlowsTests.FlexibleLatticeHandlesTests testTheDepthDragFollowsTheProjectedNormalWithTheDetents] : XCTAssertFalse failed
+Test Case '-[TopOptFlowsTests.FlexibleLatticeHandlesTests testTheDepthDragFollowsTheProjectedNormalWithTheDetents]' failed (0.001 seconds).
+Tests/TopOptFlowsTests/FlexibleLatticeHandlesTests.swift:52: error: -[TopOptFlowsTests.FlexibleLatticeHandlesTests testTheExpandSnapsToZeroAndGoesNegative] : XCTAssertLessThan failed: ("0.0") is not less than ("0.0") - ★ it shrinks below 0
+Tests/TopOptFlowsTests/FlexibleLatticeHandlesTests.swift:53: error: -[TopOptFlowsTests.FlexibleLatticeHandlesTests testTheExpandSnapsToZeroAndGoesNegative] : XCTAssertEqualWithAccuracy failed: ("49.0") is not equal to ("50.0") +/- ("1e-09") - −50…+50
+Tests/TopOptFlowsTests/FlexibleLatticeHandlesTests.swift:58: error: -[TopOptFlowsTests.FlexibleLatticeHandlesTests testTheExpandSnapsToZeroAndGoesNegative] : XCTAssertEqualWithAccuracy failed: ("0.0") is not equal to ("10.0") +/- ("1e-09")
+Tests/TopOptFlowsTests/FlexibleLatticeHandlesTests.swift:59: error: -[TopOptFlowsTests.FlexibleLatticeHandlesTests testTheExpandSnapsToZeroAndGoesNegative] : XCTAssertEqual failed: ("") is not equal to ("+0.0 mm")
+Tests/TopOptFlowsTests/FlexibleLatticeHandlesTests.swift:60: error: -[TopOptFlowsTests.FlexibleLatticeHandlesTests testTheExpandSnapsToZeroAndGoesNegative] : XCTAssertEqual failed: ("") is not equal to ("−2.0 mm")
+Test Case '-[TopOptFlowsTests.FlexibleLatticeHandlesTests testTheExpandSnapsToZeroAndGoesNegative]' failed (0.001 seconds).
+Tests/TopOptFlowsTests/FlexibleLatticeHandlesTests.swift:34: error: -[TopOptFlowsTests.FlexibleLatticeHandlesTests testTheScreenVerticalFallbackUnder30PointsPer10mm] : XCTAssertTrue failed - ★ under 30 pt per 10 mm: screen-vertical
+Tests/TopOptFlowsTests/FlexibleLatticeHandlesTests.swift:35: error: -[TopOptFlowsTests.FlexibleLatticeHandlesTests testTheScreenVerticalFallbackUnder30PointsPer10mm] : XCTAssertEqualWithAccuracy failed: ("0.0") is not equal to ("4.0") +/- ("1e-09") - down = deeper, 0.1 mm per point
+Tests/TopOptFlowsTests/FlexibleLatticeHandlesTests.swift:36: error: -[TopOptFlowsTests.FlexibleLatticeHandlesTests testTheScreenVerticalFallbackUnder30PointsPer10mm] : XCTAssertTrue failed - no projection: vertical
+Test Case '-[TopOptFlowsTests.FlexibleLatticeHandlesTests testTheScreenVerticalFallbackUnder30PointsPer10mm]' failed (0.000 seconds).
+	 Executed 6 tests, with 20 failures (0 unexpected) in 0.105 (0.106) seconds
+	 Executed 6 tests, with 20 failures (0 unexpected) in 0.105 (0.107) seconds
+
+## FlexibleFaceChipTests
+error: Process '/Applications/Xcode.app/Contents/Developer/usr/bin/xctest -XCTest TopOptFlowsTests.FlexibleFaceChipTests/testADraggedChipKeepsItsSpotForThatFaceAndTheLeaderReAims,TopOptFlowsTests.FlexibleFaceChipTests/testAutoPlacementOrderAndTheKeepOuts,TopOptFlowsTests.FlexibleFaceChipTests/testTheInfoShowsOnlyHisFourRowsFromTheDrawersOwnNumbers,TopOptFlowsTests.FlexibleFaceChipTests/testTheJoinIsAFilledButtonWithItsExactLabel /tmp/r7d-build/out/Products/Debug/TopOptFlowsTests.xctest' exited with unexpected signal code 5
+TopOptFlowsTests/FlexibleFaceChipTests.swift:39: Fatal error: Unexpectedly found nil while unwrapping an Optional value
+
+## FlexibleSelectionsListTests
+Tests/TopOptFlowsTests/FlexibleSelectionsListTests.swift:52: error: -[TopOptFlowsTests.FlexibleSelectionsListTests testLinesAre44AndBoxesAreNumberBoxes] : XCTAssertEqual failed: ("0.0") is not equal to ("44.0")
+Tests/TopOptFlowsTests/FlexibleSelectionsListTests.swift:54: error: -[TopOptFlowsTests.FlexibleSelectionsListTests testLinesAre44AndBoxesAreNumberBoxes] : XCTAssertTrue failed - the boxes are FlexNumberBox
+Tests/TopOptFlowsTests/FlexibleSelectionsListTests.swift:55: error: -[TopOptFlowsTests.FlexibleSelectionsListTests testLinesAre44AndBoxesAreNumberBoxes] : XCTAssertTrue failed - ★ a box edits AND picks its face
+Tests/TopOptFlowsTests/FlexibleSelectionsListTests.swift:56: error: -[TopOptFlowsTests.FlexibleSelectionsListTests testLinesAre44AndBoxesAreNumberBoxes] : XCTAssertTrue failed - ★ the trash asks first (his answer)
+Test Case '-[TopOptFlowsTests.FlexibleSelectionsListTests testLinesAre44AndBoxesAreNumberBoxes]' failed (0.054 seconds).
+Tests/TopOptFlowsTests/FlexibleSelectionsListTests.swift:40: error: -[TopOptFlowsTests.FlexibleSelectionsListTests testTheHeaderHasNothingElseAndTodaysCardDid] : XCTAssertTrue failed
+Tests/TopOptFlowsTests/FlexibleSelectionsListTests.swift:41: error: -[TopOptFlowsTests.FlexibleSelectionsListTests testTheHeaderHasNothingElseAndTodaysCardDid] : XCTAssertTrue failed - minimised: the pill 'Selections 3'
+Test Case '-[TopOptFlowsTests.FlexibleSelectionsListTests testTheHeaderHasNothingElseAndTodaysCardDid]' failed (0.013 seconds).
+Tests/TopOptFlowsTests/FlexibleSelectionsListTests.swift:16: error: -[TopOptFlowsTests.FlexibleSelectionsListTests testTheSummaryForms] : XCTAssertEqual failed: ("") is not equal to ("▦ 2 · 25 mm") - ★ two Lattice faces at 25
+Tests/TopOptFlowsTests/FlexibleSelectionsListTests.swift:18: error: -[TopOptFlowsTests.FlexibleSelectionsListTests testTheSummaryForms] : XCTAssertEqual failed: ("") is not equal to ("▦ 2 · 20–25 mm") - ★ a range
+Tests/TopOptFlowsTests/FlexibleSelectionsListTests.swift:20: error: -[TopOptFlowsTests.FlexibleSelectionsListTests testTheSummaryForms] : XCTAssertEqual failed: ("") is not equal to ("▦ 1 ■ 1") - ★ mixed Lattice and Solid
+Tests/TopOptFlowsTests/FlexibleSelectionsListTests.swift:23: error: -[TopOptFlowsTests.FlexibleSelectionsListTests testTheSummaryForms] : XCTAssertEqual failed: ("") is not equal to ("■ 1 · 10 mm") - ★ Solid only
+Tests/TopOptFlowsTests/FlexibleSelectionsListTests.swift:25: error: -[TopOptFlowsTests.FlexibleSelectionsListTests testTheSummaryForms] : XCTAssertEqual failed: ("") is not equal to ("—") - ★ nothing latticed
+Tests/TopOptFlowsTests/FlexibleSelectionsListTests.swift:26: error: -[TopOptFlowsTests.FlexibleSelectionsListTests testTheSummaryForms] : XCTAssertEqual failed: ("nil") is not equal to ("Optional(25.0)")
+Test Case '-[TopOptFlowsTests.FlexibleSelectionsListTests testTheSummaryForms]' failed (0.050 seconds).
+	 Executed 3 tests, with 12 failures (0 unexpected) in 0.117 (0.117) seconds
+	 Executed 3 tests, with 12 failures (0 unexpected) in 0.117 (0.118) seconds
+
+## FlexibleR7EveningAnswersTests
+Tests/TopOptFlowsTests/FlexibleR7EveningAnswersTests.swift:105: error: -[TopOptFlowsTests.FlexibleR7EveningAnswersTests testACurvedOrHandPlacedPrismThatCannotCutSaysSoOnTheFacesCard] : XCTAssertEqual failed: ("nil") is not equal to ("Optional("Curved lattice here · not yet")") - ★ the Top's card says 'Curved lattice here · not yet'
+Tests/TopOptFlowsTests/FlexibleR7EveningAnswersTests.swift:108: error: -[TopOptFlowsTests.FlexibleR7EveningAnswersTests testACurvedOrHandPlacedPrismThatCannotCutSaysSoOnTheFacesCard] : XCTAssertTrue failed - ★ drawn on the card, always (never only a toast)
+Tests/TopOptFlowsTests/FlexibleR7EveningAnswersTests.swift:109: error: -[TopOptFlowsTests.FlexibleR7EveningAnswersTests testACurvedOrHandPlacedPrismThatCannotCutSaysSoOnTheFacesCard] : XCTAssertTrue failed
+Test Case '-[TopOptFlowsTests.FlexibleR7EveningAnswersTests testACurvedOrHandPlacedPrismThatCannotCutSaysSoOnTheFacesCard]' failed (0.113 seconds).
+Tests/TopOptFlowsTests/FlexibleR7EveningAnswersTests.swift:42: error: -[TopOptFlowsTests.FlexibleR7EveningAnswersTests testAfterResetAllTheMainPageShowsThePlainPartAndOneLine] : XCTAssertTrue failed - ★ RED CONTROL: a lattice to show over nothing to squish
+Test Case '-[TopOptFlowsTests.FlexibleR7EveningAnswersTests testAfterResetAllTheMainPageShowsThePlainPartAndOneLine]' failed (5.547 seconds).
+Tests/TopOptFlowsTests/FlexibleR7EveningAnswersTests.swift:70: error: -[TopOptFlowsTests.FlexibleR7EveningAnswersTests testSquishPrismsWithXrayOffKeepThePartSolid] : XCTAssertEqual failed: ("0.3") is not equal to ("1.0") - ★ solid until X-ray
+Test Case '-[TopOptFlowsTests.FlexibleR7EveningAnswersTests testSquishPrismsWithXrayOffKeepThePartSolid]' failed (0.000 seconds).
+Tests/TopOptFlowsTests/FlexibleR7EveningAnswersTests.swift:84: error: -[TopOptFlowsTests.FlexibleR7EveningAnswersTests testTheFacePrismGlassOverTheOpenLatticeIsFainterNotOutlineOnly] : XCTUnwrap failed: expected non-nil value of type "Float"
+Tests/TopOptFlowsTests/FlexibleR7EveningAnswersTests.swift:85: error: -[TopOptFlowsTests.FlexibleR7EveningAnswersTests testTheFacePrismGlassOverTheOpenLatticeIsFainterNotOutlineOnly] : XCTAssertNotNil failed
+Tests/TopOptFlowsTests/FlexibleR7EveningAnswersTests.swift:86: error: -[TopOptFlowsTests.FlexibleR7EveningAnswersTests testTheFacePrismGlassOverTheOpenLatticeIsFainterNotOutlineOnly] : XCTAssertLessThan failed: ("1.0") is not less than ("0.2") - ★ fainter than #354's 0.60 glass
+Tests/TopOptFlowsTests/FlexibleR7EveningAnswersTests.swift:87: error: -[TopOptFlowsTests.FlexibleR7EveningAnswersTests testTheFacePrismGlassOverTheOpenLatticeIsFainterNotOutlineOnly] : XCTAssertGreaterThan failed: ("0.0") is not greater than ("0.0") - ★ glass, not outline-only
+Tests/TopOptFlowsTests/FlexibleR7EveningAnswersTests.swift:88: error: -[TopOptFlowsTests.FlexibleR7EveningAnswersTests testTheFacePrismGlassOverTheOpenLatticeIsFainterNotOutlineOnly] : XCTAssertGreaterThanOrEqual failed: ("0.0") is less than ("0.6") - its edges still read
+Test Case '-[TopOptFlowsTests.FlexibleR7EveningAnswersTests testTheFacePrismGlassOverTheOpenLatticeIsFainterNotOutlineOnly]' failed (0.001 seconds).
+Tests/TopOptFlowsTests/FlexibleR7EveningAnswersTests.swift:56: error: -[TopOptFlowsTests.FlexibleR7EveningAnswersTests testXrayShowsEveryFacePrismFaintAndThePickedGroupBright] : XCTAssertEqual failed: ("[]") is not equal to ("[5, 3]") - ★ X-ray: every face-prism, even before a pick
+Test Case '-[TopOptFlowsTests.FlexibleR7EveningAnswersTests testXrayShowsEveryFacePrismFaintAndThePickedGroupBright]' failed (0.875 seconds).
+	 Executed 5 tests, with 11 failures (0 unexpected) in 6.536 (6.537) seconds
+	 Executed 5 tests, with 11 failures (0 unexpected) in 6.536 (6.538) seconds
+
+## FlexibleRound7SelectionsHostedTests
+Tests/TopOptFlowsTests/FlexibleRound7SelectionsHostedTests.swift:181: error: -[TopOptFlowsTests.FlexibleRound7SelectionsHostedTests testADraggedChipStaysWhereHeLetsGo] : XCTUnwrap failed: expected non-nil value of type "CGRect"
+Test Case '-[TopOptFlowsTests.FlexibleRound7SelectionsHostedTests testADraggedChipStaysWhereHeLetsGo]' failed (12.564 seconds).
+Tests/TopOptFlowsTests/FlexibleRound7SelectionsHostedTests.swift:161: error: -[TopOptFlowsTests.FlexibleRound7SelectionsHostedTests testTheHandlesNumberIsTheListsAndTheInfoOpensHisFour] : XCTUnwrap failed: expected non-nil value of type "CGRect" - ★ the depth handle's number box
+Test Case '-[TopOptFlowsTests.FlexibleRound7SelectionsHostedTests testTheHandlesNumberIsTheListsAndTheInfoOpensHisFour]' failed (12.027 seconds).
+Tests/TopOptFlowsTests/FlexibleRound7SelectionsHostedTests.swift:204: error: -[TopOptFlowsTests.FlexibleRound7SelectionsHostedTests testTheLayerIsHitTransparent] : XCTAssertEqual failed: ("0") is not equal to ("1") - ★ a click on an empty point of the layer reaches what is under it (orbit and pinch survive)
+Test Case '-[TopOptFlowsTests.FlexibleRound7SelectionsHostedTests testTheLayerIsHitTransparent]' failed (1.418 seconds).
+Tests/TopOptFlowsTests/FlexibleRound7SelectionsHostedTests.swift:107: error: -[TopOptFlowsTests.FlexibleRound7SelectionsHostedTests testTheListTheChipAndTheFilledJoinButton] : XCTAssertNotNil failed - ★ 13p H25: the B1 list in #354's panel slot
+Tests/TopOptFlowsTests/FlexibleRound7SelectionsHostedTests.swift:108: error: -[TopOptFlowsTests.FlexibleRound7SelectionsHostedTests testTheListTheChipAndTheFilledJoinButton] : XCTAssertNotNil failed - 13p: Group C's quiet line
+Tests/TopOptFlowsTests/FlexibleRound7SelectionsHostedTests.swift:109: error: -[TopOptFlowsTests.FlexibleRound7SelectionsHostedTests testTheListTheChipAndTheFilledJoinButton] : XCTAssertNotNil failed - ★ 13p: a trash on the group line
+Tests/TopOptFlowsTests/FlexibleRound7SelectionsHostedTests.swift:112: error: -[TopOptFlowsTests.FlexibleRound7SelectionsHostedTests testTheListTheChipAndTheFilledJoinButton] : XCTUnwrap failed: expected non-nil value of type "CGRect" - ★ 13p: chip M at Face 3
+Test Case '-[TopOptFlowsTests.FlexibleRound7SelectionsHostedTests testTheListTheChipAndTheFilledJoinButton]' failed (12.029 seconds).
+Tests/TopOptFlowsTests/FlexibleRound7SelectionsHostedTests.swift:71: error: -[TopOptFlowsTests.FlexibleRound7SelectionsHostedTests testTheTrashAsksFirstAndUndoBringsTheGroupBack] : XCTUnwrap failed: expected non-nil value of type "CGRect" - no frame 'selTrash-2AC5732E-4A99-4195-A0A3-5BBE73DD4D18' for Group C's trash
+Test Case '-[TopOptFlowsTests.FlexibleRound7SelectionsHostedTests testTheTrashAsksFirstAndUndoBringsTheGroupBack]' failed (9.530 seconds).
+	 Executed 5 tests, with 8 failures (0 unexpected) in 47.568 (47.569) seconds
+	 Executed 5 tests, with 8 failures (0 unexpected) in 47.568 (47.570) seconds
+

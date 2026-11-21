@@ -1,0 +1,51 @@
+# Release 28339e5c25cd - 2026-11-18: release (8), install 3 - claude/install-3 e0040153, one worker swap (85d25b639dee -> 28339e5c25cd) and the worker app's script
+# His go 11-17 ("Implement it as soon as possible") and his OK 11-18 ("Update the Mac Worker").
+# The new engine is Lattice Setup's preview (the old regular-lattice bake retired there, every view ported); the Lattice
+# button makes the new engine's file (on the Mac or this iPad) with the strength check on Structural (pass / solid only /
+# fail, the file made in all three); the chips ask on the new engine; Settings explains the check with the values we chose
+# open to change; Outlines draw cuts and patterns; a too-small cut piece is caught before the send. Variants and Organic
+# keep the old engine. Core tip: LatticeReview's claude/install3-engine 61ac4291. LatticeTypes' 181deb12 is NOT in this release.
+# Gates in the gate tree (b9-screens-362, its own vendor): the whole app suite in three runs, all green but the three
+# macOS 3MF tests (the macOS slice is 3MF-free here, as in every release); targeted classes after each fix.
+# Commits:
+#   8396a526 Too-small cut piece caught before the send (362, Install 3, HELD): his 11-16 ask - one line on the run button and one tap that undoes the piece's cuts
+#   f67e372c Outlines draw the faces as the app sends them (362, Install 3): every cut and pattern line, no line inside a union
+#   64c198a1 New engine (test) retired (362, Install 3, R1): the new engine is Lattice Setup's preview; per-cell region, wall and position reach the app
+#   cb36d87f The new engine's bars wear the old preview's colour key (362, Install 3, R2a)
+#   e3e9f2a8 The old engine's bake retired where the new engine draws; the key and the tap-to-read card on the new engine (362, Install 3, R2b)
+#   a80b0a67 The cells drawer reads the new engine's own walls and cells (362, Install 3, R2c)
+#   db397eae The print file's strength check, app and worker side (362, Install 3, R3a; off until LatticeReview's core is in)
+#   6d099425 The Lattice button on the new engine, with his three strength states (362, Install 3, R4; off until LatticeReview's core is in)
+#   b67cc9c3 Install 3 (1): the strength check of the new engine's lattice file (V4, V5)
+#   2cb707e1 A load on open lattice fails with its reason, never a margin (362, Install 3, R4b; off until LatticeReview's core is in)
+#   afe68f23 Install 3 (1b): a strength fail says why (V5)
+#   f3b7a574 A fail with no reason says the check's own words (362, Install 3, R4c; off until LatticeReview's core is in)
+#   0e837074 Install 3 (1c): the strength check's chosen numbers can be set (strength_settings), and are all written back
+#   27554476 Install 3 (1d): the octet's strut law is the full octet's (re-measured 2026-11-17)
+#   8e0db5f1 The Lattice button's new engine runs on the iPad too, and checks the stresses first when it needs them (362, Install 3, R4d)
+#   73552f34 Merge claude/install3-engine @ 27554476 into install-3 for the strength docs and settings keys (not gated; its final tip with places follows)
+#   2554bf40 The strength check explained in Settings, Simple and Full maths, with the values we chose open to change (362, Install 3, R5)
+#   61ac4291 Install 3 (2): places (rule D23), the faces a region runs into that no rule decides
+#   8d83eb32 Merge LatticeReview's final Install 3 engine (claude/install3-engine @ 61ac4291): the strength check, fail reasons, settings and docs, the octet strut table, places (D23)
+#   16f386d2 The strength check and the new-engine Lattice button switched on, and the chips on the new engine (362, Install 3, R6)
+#   e0040153 Install 3 gate fixes: the pinned lines back word for word, and the thin-wall pop-up on the new engine (362, Install 3)
+#   92f3329d Release (8) install 3 2026-11-18: merge claude/install-3 e0040153 - core = LatticeReview's Install 3 engine (claude/install3-engine 61ac4291: the strength check of the new engine's lattice with its three verdicts and fail reaso
+# Gates (this tree):
+#   03:52 his uncommitted files (left alone): app/TopOpt-Info.plist app/TopOpt.xcodeproj/project.pbxproj app/TopOpt.xcodeproj/xcshareddata/xcschemes/TopOpt.xcscheme 
+#   03:52 his latest OPTIMISATION job for the preflight: /Users/nadim/.topopt-worker/79b695c564fd47c4 (read only)
+#   03:52 merged install-3 as 92f3329d (local); app + core + tools == its; fingerprint 28339e5c25cd
+#   ==> Manifold: /Users/nadim/dev/TopOpt/TopOpt/.vcpkg/installed-manifold (KEEP regions exported exactly)
+#   ==> building macOS slice (Eigen + OCCT, arm64)
+#   ==> building iOS simulator slice (Eigen + OCCT + lib3mf, arm64)
+#   ==> building iOS device slice (Eigen + OCCT + lib3mf, arm64)
+#   03:55 build_core green: topopt_vendored_core_28339e5c25cd + build_identity, lattice_variant_job, Session::lay, run_file_job, lattice_file_strength_check, Session::places in every slice and arch
+#   03:55 worker CLI built: topopt-cli: core 28339e5c25cd (dirty=false), built Nov 18 2026 03:55:56; 3 data paths, all under the release worktree
+#   03:55 app_core_capability_mirror passed
+#   04:03 iPad device build green (this tree's own pair)
+#   04:04 preflight job: /Users/nadim/.topopt-worker/f9c8124fd2df48b3 (his newest optimisation job the installed worker passes; read only)
+#   04:06 preflight on his job: preflight: load path CONNECTED
+#   04:06 pushed 92f3329d
+#   04:06 worker script installed (old kept at /Users/nadim/dev/TopOpt/agent-scratch/install3/topopt_worker.py.installed-before-install3, signature renewed); restarting its server (PID 33263) while idle
+#   04:07 worker swapped: PID 82537, /health "fingerprint": "28339e5c25cd"; data paths under the release worktree; preflight again OK; old CLI kept as build-fix/topopt-cli.85d25b639dee-replaced-20261118
+#   04:07 route, demand and strength_job tests vs the INSTALLED script: ALL PASS
+#   04:07 the app_release scripts now expect 28339e5c25cd

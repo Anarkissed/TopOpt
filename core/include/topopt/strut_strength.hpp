@@ -1,9 +1,12 @@
 #ifndef TOPOPT_STRUT_STRENGTH_HPP
 #define TOPOPT_STRUT_STRENGTH_HPP
 
-// De-homogenized octet strut-strength REPORT (task 2026-07-31-lattice-strut-
-// strength-report). REPORT ONLY — nothing here feeds the acceptance gate;
-// `lattice_accepted` keeps meaning exactly what it meant before this file existed.
+// De-homogenized strut strength, PER TYPE (task 2026-07-31-lattice-strut-strength-
+// report; octet from PR 259, eight more types measured 2026-11-09, ruling 11-08 (B)).
+// What reads it: analyze_fixed_design reports it on every lattice posture, and folds
+// it into the gate only when gate_on_strut_strength is armed or no solid voxel carries
+// load (ruling 11-06 2(a)); the new engine's strength check also puts it in its verdict
+// (struts_pass, rule V5). Nothing here decides a verdict by itself.
 //
 // PR 259 (handoff 2026-07-31-lattice-dehomogenization-probe) measured the map from
 // a latticed voxel's MACRO stress tensor to the peak stress in its struts:
@@ -41,8 +44,10 @@
 //     that split is deliberate; preserve it when reporting.
 
 #include <cstddef>
+#include <string>
 #include <vector>
 
+#include "topopt/lattice.hpp"  // LatticeTopology
 #include "topopt/mesh.hpp"  // Vec3
 
 namespace topopt {
@@ -121,7 +126,8 @@ struct StrutStrengthReport {
 };
 
 // Evaluate the measured octet strut-strength law over one solved macro stress
-// field. REPORT ONLY — callers must not gate on the result (bar L1).
+// field. A report: the callers above decide whether a verdict reads it (bar L1 holds
+// for every caller that does not say otherwise).
 //
 //   stress_tensor_field — flattened grid-indexed (6·n), Voigt [xx,yy,zz,xy,yz,zx],
 //                         TRUE shear, MPa — FixedDesignAnalysis::stress_tensor_field.
@@ -150,6 +156,31 @@ StrutStrengthReport evaluate_strut_strength(
     const std::vector<char>& lattice_mask,
     const std::vector<double>& relative_density, const Vec3& build_dir,
     double yield_strength_mpa, double z_knockdown);
+
+// ★ PER TYPE (reviewer's ruling 11-08 (B)). Each type certifies from its OWN law,
+// measured exactly the PR 259 way (the probe above with TOPOPT_DEHOMOG_TYPE; sheets on
+// the production R7 wall), never from octet's. The functions above are octet's and stay
+// byte for byte; these take the type. A type with no table throws (naming it) --
+// callers ask strut_law_measured first.
+bool strut_law_measured(LatticeTopology topo);
+double strut_law_rho_min(LatticeTopology topo);
+double strut_law_rho_max(LatticeTopology topo);
+StrutLawK strut_law_at(LatticeTopology topo, double rho, bool* clamped = nullptr);
+StrutStrengthReport evaluate_strut_strength(
+    LatticeTopology topo, const std::vector<double>& stress_tensor_field,
+    const std::vector<char>& lattice_mask,
+    const std::vector<double>& relative_density, const Vec3& build_dir,
+    double yield_strength_mpa, double z_knockdown);
+
+// The law's source and its resolution caveat in words, for the receipt
+// (lattice_cert_report_json's "law" and "resolution_note"). Octet's are PR 259's text,
+// byte for byte; every other type names its own evidence folder and its own measured
+// bulk K_dev drift from vpc 32 to 48. Throws for a type with no table, like the above.
+std::string strut_law_source(LatticeTopology topo);
+// The density under which this type's law rests on a BULK-ONLY row (no boundary value measured there), so a strut
+// pass must not be given on it alone: 0.10 for octet (its 0.04959 row, 2026-11-17), 0 for every other type.
+double strut_law_bulk_only_below(LatticeTopology topo);
+std::string strut_law_resolution_note(LatticeTopology topo);
 
 }  // namespace topopt
 

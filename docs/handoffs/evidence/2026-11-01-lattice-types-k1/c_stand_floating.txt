@@ -1,0 +1,159 @@
+== octet rung 0.38
+SPANS /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/gate_C/stand/after/octet/out_run_struct_octet/variant_038_lattice_SPANS.txt: 7901 primitives, 9 components, 936 of 13228 strut ends cut (no other primitive covers them)
+  components with no cut end: 1 (50 primitives)
+  FLOATING (no cut end, not touching the solid companion or the shell): 0 components, 0 primitives
+  component sizes (primitives), largest first: 2502 2037 973 735 646 581 291 86 50
+== octet rung 0.26
+SPANS /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/gate_C/stand/after/octet/out_run_struct_octet/variant_026_lattice_SPANS.txt: 8103 primitives, 10 components, 984 of 13570 strut ends cut (no other primitive covers them)
+  components with no cut end: 0 (0 primitives)
+  FLOATING (no cut end, not touching the solid companion or the shell): 0 components, 0 primitives
+  component sizes (primitives), largest first: 2506 2037 1096 764 581 506 291 131 105 86
+== fcc rung 0.38
+SPANS /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/gate_C/stand/after/fcc/out_run_struct_fcc/variant_038_lattice_SPANS.txt: 6875 primitives, 13 components, 952 of 10202 strut ends cut (no other primitive covers them)
+  components with no cut end: 1 (38 primitives)
+  FLOATING (no cut end, not touching the solid companion or the shell): 0 components, 0 primitives
+  component sizes (primitives), largest first: 1540 1201 1003 801 627 470 377 259 203 128 118 110 38
+== fcc rung 0.26
+SPANS /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/gate_C/stand/after/fcc/out_run_struct_fcc/variant_026_lattice_SPANS.txt: 8147 primitives, 10 components, 994 of 12066 strut ends cut (no other primitive covers them)
+  components with no cut end: 0 (0 primitives)
+  FLOATING (no cut end, not touching the solid companion or the shell): 0 components, 0 primitives
+  component sizes (primitives), largest first: 1679 1540 1473 1201 636 430 403 377 298 110
+== kelvin rung 0.68
+SPANS /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/gate_C/stand/after/kelvin/out_run_struct_kelvin/variant_068_lattice_SPANS.txt: 7071 primitives, 6 components, 186 of 9100 strut ends cut (no other primitive covers them)
+  components with no cut end: 1 (600 primitives)
+  FLOATING (no cut end, not touching the solid companion or the shell): 0 components, 0 primitives
+  component sizes (primitives), largest first: 2429 1800 917 717 608 600
+== kelvin rung 0.52
+SPANS /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/gate_C/stand/after/kelvin/out_run_struct_kelvin/variant_052_lattice_SPANS.txt: 6327 primitives, 6 components, 186 of 8164 strut ends cut (no other primitive covers them)
+  components with no cut end: 1 (216 primitives)
+  FLOATING (no cut end, not touching the solid companion or the shell): 0 components, 0 primitives
+  component sizes (primitives), largest first: 2429 1440 917 717 608 216
+== kelvin rung 0.38
+SPANS /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/gate_C/stand/after/kelvin/out_run_struct_kelvin/variant_038_lattice_SPANS.txt: 1290 primitives, 2 components, 22 of 1670 strut ends cut (no other primitive covers them)
+  components with no cut end: 0 (0 primitives)
+  FLOATING (no cut end, not touching the solid companion or the shell): 0 components, 0 primitives
+  component sizes (primitives), largest first: 885 405
+== kelvin rung 0.26
+SPANS /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/gate_C/stand/after/kelvin/out_run_struct_kelvin/variant_026_lattice_SPANS.txt: 405 primitives, 1 components, 28 of 522 strut ends cut (no other primitive covers them)
+  components with no cut end: 0 (0 primitives)
+  FLOATING (no cut end, not touching the solid companion or the shell): 0 components, 0 primitives
+  component sizes (primitives), largest first: 405
+== rhombic rung 0.52
+SPANS /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/gate_C/stand/after/rhombic/out_run_struct_rhombic/variant_052_lattice_SPANS.txt: 3639 primitives, 4 components, 308 of 5190 strut ends cut (no other primitive covers them)
+  components with no cut end: 2 (6 primitives)
+  FLOATING (no cut end, not touching the solid companion or the shell): 0 components, 0 primitives
+  component sizes (primitives), largest first: 3270 363 3 3
+== rhombic rung 0.38
+SPANS /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/gate_C/stand/after/rhombic/out_run_struct_rhombic/variant_038_lattice_SPANS.txt: 432 primitives, 4 components, 42 of 598 strut ends cut (no other primitive covers them)
+  components with no cut end: 3 (6 primitives)
+  FLOATING (no cut end, not touching the solid companion or the shell): 0 components, 0 primitives
+  component sizes (primitives), largest first: 426 2 2 2
+== diamond rung 0.68
+SPANS /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/gate_C/stand/after/diamond/out_run_struct_diamond/variant_068_lattice_SPANS.txt: 3955 primitives, 8 components, 162 of 4960 strut ends cut (no other primitive covers them)
+  components with no cut end: 3 (256 primitives)
+  FLOATING (no cut end, not touching the solid companion or the shell): 0 components, 0 primitives
+  component sizes (primitives), largest first: 1545 842 543 396 373 252 2 2
+== diamond rung 0.52
+SPANS /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/gate_C/stand/after/diamond/out_run_struct_diamond/variant_052_lattice_SPANS.txt: 3547 primitives, 7 components, 162 of 4480 strut ends cut (no other primitive covers them)
+  components with no cut end: 2 (4 primitives)
+  FLOATING (no cut end, not touching the solid companion or the shell): 0 components, 0 primitives
+  component sizes (primitives), largest first: 1545 686 543 396 373 2 2
+== diamond rung 0.38
+SPANS /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/gate_C/stand/after/diamond/out_run_struct_diamond/variant_038_lattice_SPANS.txt: 780 primitives, 2 components, 38 of 964 strut ends cut (no other primitive covers them)
+  components with no cut end: 0 (0 primitives)
+  FLOATING (no cut end, not touching the solid companion or the shell): 0 components, 0 primitives
+  component sizes (primitives), largest first: 540 240
+== diamond rung 0.26
+SPANS /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/gate_C/stand/after/diamond/out_run_struct_diamond/variant_026_lattice_SPANS.txt: 240 primitives, 1 components, 7 of 294 strut ends cut (no other primitive covers them)
+  components with no cut end: 0 (0 primitives)
+  FLOATING (no cut end, not touching the solid companion or the shell): 0 components, 0 primitives
+  component sizes (primitives), largest first: 240
+== bcc rung 0.52
+SPANS /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/gate_C/stand/after/bcc/out_run_struct_bcc/variant_052_lattice_SPANS.txt: 5309 primitives, 4 components, 308 of 8076 strut ends cut (no other primitive covers them)
+  components with no cut end: 0 (0 primitives)
+  FLOATING (no cut end, not touching the solid companion or the shell): 0 components, 0 primitives
+  component sizes (primitives), largest first: 3805 1171 226 107
+== bcc rung 0.38
+SPANS /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/gate_C/stand/after/bcc/out_run_struct_bcc/variant_038_lattice_SPANS.txt: 333 primitives, 2 components, 45 of 476 strut ends cut (no other primitive covers them)
+  components with no cut end: 0 (0 primitives)
+  FLOATING (no cut end, not touching the solid companion or the shell): 0 components, 0 primitives
+  component sizes (primitives), largest first: 226 107
+== bcc rung 0.26
+SPANS /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/gate_C/stand/after/bcc/out_run_struct_bcc/variant_026_lattice_SPANS.txt: 107 primitives, 1 components, 9 of 150 strut ends cut (no other primitive covers them)
+  components with no cut end: 0 (0 primitives)
+  FLOATING (no cut end, not touching the solid companion or the shell): 0 components, 0 primitives
+  component sizes (primitives), largest first: 107
+== sc rung 0.52
+SPANS /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/gate_C/stand/after/sc/out_run_struct_sc/variant_052_lattice_SPANS.txt: 14233 primitives, 10 components, 1137 of 21084 strut ends cut (no other primitive covers them)
+  components with no cut end: 0 (0 primitives)
+  FLOATING (no cut end, not touching the solid companion or the shell): 0 components, 0 primitives
+  component sizes (primitives), largest first: 9288 2056 1496 430 280 260 154 131 104 34
+== sc rung 0.38
+SPANS /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/gate_C/stand/after/sc/out_run_struct_sc/variant_038_lattice_SPANS.txt: 2374 primitives, 8 components, 187 of 3444 strut ends cut (no other primitive covers them)
+  components with no cut end: 0 (0 primitives)
+  FLOATING (no cut end, not touching the solid companion or the shell): 0 components, 0 primitives
+  component sizes (primitives), largest first: 694 679 325 204 158 154 83 77
+== sc rung 0.26
+SPANS /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/gate_C/stand/after/sc/out_run_struct_sc/variant_026_lattice_SPANS.txt: 2566 primitives, 6 components, 192 of 3746 strut ends cut (no other primitive covers them)
+  components with no cut end: 0 (0 primitives)
+  FLOATING (no cut end, not touching the solid companion or the shell): 0 components, 0 primitives
+  component sizes (primitives), largest first: 1365 679 204 158 83 77
+== gyroid rung 0.52 (sheet)
+EDGES /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/gate_C/stand/after/gyroid/out_run_struct_gyroid/variant_052_lattice.stl: 1951527 edges, 0 open, 6807 non-manifold (in more than two triangles)
+  non-manifold edges by distance to the part's surface: <=0.25 mm 6431, <=0.5 280, <=1 1, <=shell 2.22 95, <=shell+0.5 0, beyond 0
+  6800 non-manifold edges in the piece of 37576 triangles
+  6 non-manifold edges in the piece of 1135324 triangles
+  1 non-manifold edges in the piece of 132548 triangles
+  companion: the piece of 37576 triangles (the widest); held = a vertex within 0.05 mm of it or inside it
+MESH /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/gate_C/stand/after/gyroid/out_run_struct_gyroid/variant_052_lattice.stl: 1305556 triangles, 649156 vertices, 8 pieces
+  FLOATING (no vertex on the solid companion or within the shell): 0 pieces, 0 triangles
+  piece 1135324 triangles bbox (93.724 -48.781 15.960)-(129.844 -28.891 24.080) gap 0.000 mm (signed -2.099..5.356, + = in the body), depth in the part 0.021..8.230 mm held
+  piece 132548 triangles bbox (177.724 -40.916 19.961)-(193.741 -32.818 28.007) gap 0.000 mm (signed -1.204..5.963, + = in the body), depth in the part -1.162..6.974 mm held
+  piece 37576 triangles bbox (-18.276 -48.910 0.000)-(200.000 2.250 201.223) held
+  piece 36 triangles bbox (193.404 -33.230 23.382)-(193.773 -32.876 23.735) gap 0.139 mm (signed 0.139..0.492, + = in the body), depth in the part 0.758..1.205 mm held
+  piece 36 triangles bbox (177.725 -40.909 19.992)-(178.137 -40.510 20.300) gap 4.319 mm (signed 4.319..4.569, + = in the body), depth in the part 5.018..5.326 mm held
+  piece 12 triangles bbox (185.004 -36.224 23.124)-(185.168 -36.143 23.267) gap 0.137 mm (signed 0.137..0.240, + = in the body), depth in the part 0.088..0.190 mm held
+  piece 12 triangles bbox (184.977 -35.802 22.679)-(185.056 -35.723 22.819) gap 0.137 mm (signed 0.137..0.217, + = in the body), depth in the part -0.085..0.019 mm held
+  piece 12 triangles bbox (184.786 -35.890 22.525)-(184.877 -35.723 22.680) gap 0.106 mm (signed 0.106..0.221, + = in the body), depth in the part -0.029..0.179 mm held
+  piece sizes (triangles), largest first: 1135324 132548 37576 36 36 12 12 12
+== gyroid rung 0.38 (sheet)
+EDGES /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/gate_C/stand/after/gyroid/out_run_struct_gyroid/variant_038_lattice.stl: 244618 edges, 0 open, 6226 non-manifold (in more than two triangles)
+  non-manifold edges by distance to the part's surface: <=0.25 mm 5859, <=0.5 265, <=1 3, <=shell 2.22 99, <=shell+0.5 0, beyond 0
+  6208 non-manifold edges in the piece of 38092 triangles
+  18 non-manifold edges in the piece of 129092 triangles
+  companion: the piece of 38092 triangles (the widest); held = a vertex within 0.05 mm of it or inside it
+MESH /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/gate_C/stand/after/gyroid/out_run_struct_gyroid/variant_038_lattice.stl: 167232 triangles, 81272 vertices, 6 pieces
+  FLOATING (no vertex on the solid companion or within the shell): 0 pieces, 0 triangles
+  piece 129092 triangles bbox (173.723 -40.918 19.989)-(193.726 -32.878 28.006) gap 0.000 mm (signed -1.206..5.962, + = in the body), depth in the part -1.151..6.960 mm held
+  piece 38092 triangles bbox (-18.276 -48.910 0.000)-(200.000 2.250 201.223) held
+  piece 12 triangles bbox (193.467 -33.079 23.442)-(193.723 -32.910 23.722) gap 0.152 mm (signed 0.152..0.432, + = in the body), depth in the part 0.795..1.150 mm held
+  piece 12 triangles bbox (185.173 -35.972 23.064)-(185.247 -35.898 23.160) gap 0.148 mm (signed 0.148..0.191, + = in the body), depth in the part -0.077..0.017 mm held
+  piece 12 triangles bbox (184.908 -35.763 22.511)-(184.961 -35.644 22.667) gap 0.121 mm (signed 0.121..0.222, + = in the body), depth in the part -0.099..0.072 mm held
+  piece 12 triangles bbox (173.726 -40.909 20.001)-(173.982 -40.690 20.246) gap 4.685 mm (signed 4.685..4.910, + = in the body), depth in the part 5.048..5.320 mm held
+  piece sizes (triangles), largest first: 129092 38092 12 12 12 12
+== schwarz_d rung 0.52 (sheet)
+EDGES /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/gate_C/stand/after/schwarz_d/out_run_struct_schwarz_d/variant_052_lattice.stl: 2337930 edges, 0 open, 6804 non-manifold (in more than two triangles)
+  non-manifold edges by distance to the part's surface: <=0.25 mm 6430, <=0.5 274, <=1 1, <=shell 2.22 95, <=shell+0.5 0, beyond 4
+  6800 non-manifold edges in the piece of 37576 triangles
+  4 non-manifold edges in the piece of 157944 triangles
+  companion: the piece of 37576 triangles (the widest); held = a vertex within 0.05 mm of it or inside it
+MESH /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/gate_C/stand/after/schwarz_d/out_run_struct_schwarz_d/variant_052_lattice.stl: 1563156 triangles, 776687 vertices, 5 pieces
+  FLOATING (no vertex on the solid companion or within the shell): 0 pieces, 0 triangles
+  piece 1367612 triangles bbox (93.724 -48.777 15.986)-(129.826 -28.899 24.080) gap 0.000 mm (signed -2.099..5.524, + = in the body), depth in the part 0.035..8.227 mm held
+  piece 157944 triangles bbox (177.724 -40.914 19.994)-(193.738 -32.902 28.008) gap 0.000 mm (signed -1.204..5.963, + = in the body), depth in the part -1.173..6.920 mm held
+  piece 37576 triangles bbox (-18.276 -48.910 0.000)-(200.000 2.250 201.223) held
+  piece 12 triangles bbox (193.544 -33.090 23.546)-(193.738 -32.896 23.734) gap 0.139 mm (signed 0.139..0.328, + = in the body), depth in the part 0.815..1.051 mm held
+  piece 12 triangles bbox (177.726 -40.908 20.000)-(178.004 -40.650 20.160) gap 4.360 mm (signed 4.360..4.569, + = in the body), depth in the part 5.087..5.320 mm held
+  piece sizes (triangles), largest first: 1367612 157944 37576 12 12
+== schwarz_d rung 0.38 (sheet)
+EDGES /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/gate_C/stand/after/schwarz_d/out_run_struct_schwarz_d/variant_038_lattice.stl: 331898 edges, 0 open, 6208 non-manifold (in more than two triangles)
+  non-manifold edges by distance to the part's surface: <=0.25 mm 5858, <=0.5 256, <=1 1, <=shell 2.22 93, <=shell+0.5 0, beyond 0
+  6208 non-manifold edges in the piece of 38092 triangles
+  companion: the piece of 38092 triangles (the widest); held = a vertex within 0.05 mm of it or inside it
+MESH /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/gate_C/stand/after/schwarz_d/out_run_struct_schwarz_d/variant_038_lattice.stl: 225404 triangles, 110217 vertices, 4 pieces
+  FLOATING (no vertex on the solid companion or within the shell): 0 pieces, 0 triangles
+  piece 187264 triangles bbox (173.723 -40.913 19.994)-(193.731 -32.810 28.010) gap 0.000 mm (signed -1.206..5.963, + = in the body), depth in the part -1.173..6.911 mm held
+  piece 38092 triangles bbox (-18.276 -48.910 0.000)-(200.000 2.250 201.223) held
+  piece 36 triangles bbox (173.725 -40.909 20.000)-(174.068 -40.566 20.300) gap 4.700 mm (signed 4.700..4.910, + = in the body), depth in the part 5.065..5.321 mm held
+  piece 12 triangles bbox (193.544 -33.090 23.553)-(193.724 -32.910 23.735) gap 0.139 mm (signed 0.139..0.321, + = in the body), depth in the part 0.815..1.050 mm held
+  piece sizes (triangles), largest first: 187264 38092 36 12

@@ -1,0 +1,24 @@
+=== ARM 3: GLOBAL vs PER-STRUT weld piece, same three plans, same pocket geometry
+=== probe frozen read-only; floating_ends MUST stay 0 under both rules
+--- plan 500, load 5.68 9.42 8.97
+# stepped beam cost probe. Shared box: wall times are UPPER BOUNDS,
+# not benchmarks; load1 is on every line. start load 5.68
+plan~500[global] GEOM | cells PLACED 500 | pocket z 5.1..117.3 mm | hex voxels 44448 (slabs + 2-voxel walls) | weld x1.00 piece 0.8024 mm | segments 12000 -> 60192 | welded 17233 | T-ends 45158 | floating 0 | subdiv 0.00 s | network 0.06 s | peak RSS 35 MB | load 5.68
+plan~500[global] CERT | verdict CERTIFIED | margin 179 | p99 0.3073 MPa | max 1.622 | stat p99 | members 60192 | dropped 0 (0.000 of length) | load_dropped 0.0000 | zero_stress 0.0000 | cert_seconds 32.5 | wall 32.5 s | cert_peak_RSS 4281 MB | peak RSS 4281 MB | load 7.92
+plan~500[per-strut] GEOM | cells PLACED 500 | pocket z 5.1..117.3 mm | hex voxels 44448 (slabs + 2-voxel walls) | weld x1.00 piece 0.8024 mm | segments 12000 -> 46776 | welded 13717 | T-ends 38166 | floating 0 | subdiv 0.00 s | network 0.05 s | peak RSS 4281 MB | load 7.92
+plan~500[per-strut] CERT | verdict CERTIFIED | margin 174.9 | p99 0.3144 MPa | max 1.334 | stat p99 | members 46776 | dropped 0 (0.000 of length) | load_dropped 0.0000 | zero_stress 0.0000 | cert_seconds 21.2 | wall 21.2 s | cert_peak_RSS 5114 MB | peak RSS 4294 MB | load 7.48
+--- plan 2000, load 7.48 9.35 8.98
+# stepped beam cost probe. Shared box: wall times are UPPER BOUNDS,
+# not benchmarks; load1 is on every line. start load 7.48
+plan~2000[global] GEOM | cells PLACED 2000 | pocket z 5.1..117.3 mm | hex voxels 44448 (slabs + 2-voxel walls) | weld x1.00 piece 0.3796 mm | segments 48000 -> 286488 | welded 90307 | T-ends 227960 | floating 0 | subdiv 0.00 s | network 0.29 s | peak RSS 104 MB | load 7.48
+plan~2000[global] CERT | verdict CERTIFIED | margin 165.7 | p99 0.3319 MPa | max 1.714 | stat p99 | members 286488 | dropped 0 (0.000 of length) | load_dropped 0.0000 | zero_stress 0.0000 | cert_seconds 51.9 | wall 51.9 s | cert_peak_RSS 5982 MB | peak RSS 4740 MB | load 11.15
+plan~2000[per-strut] GEOM | cells PLACED 2000 | pocket z 5.1..117.3 mm | hex voxels 44448 (slabs + 2-voxel walls) | weld x1.00 piece 0.3796 mm | segments 48000 -> 190776 | welded 57779 | T-ends 161688 | floating 0 | subdiv 0.01 s | network 0.20 s | peak RSS 4740 MB | load 11.15
+plan~2000[per-strut] CERT | verdict CERTIFIED | margin 138.9 | p99 0.3959 MPa | max 4.861 | stat p99 | members 190776 | dropped 0 (0.000 of length) | load_dropped 0.0000 | zero_stress 0.0000 | cert_seconds 46.4 | wall 46.4 s | cert_peak_RSS 6730 MB | peak RSS 4868 MB | load 9.33
+--- plan 8000, load 8.98 9.71 9.18
+# stepped beam cost probe. Shared box: wall times are UPPER BOUNDS,
+# not benchmarks; load1 is on every line. start load 8.98
+plan~8000[global] GEOM | cells PLACED 8000 | pocket z 5.1..117.3 mm | hex voxels 44448 (slabs + 2-voxel walls) | weld x1.00 piece 0.3796 mm | segments 192000 -> 1101144 | welded 345266 | T-ends 879694 | floating 0 | subdiv 0.01 s | network 1.43 s | peak RSS 353 MB | load 8.98
+plan~8000[global] CERT | verdict CERTIFIED | margin 149.8 | p99 0.3672 MPa | max 5.967 | stat p99 | members 1101144 | dropped 0 (0.000 of length) | load_dropped 0.0000 | zero_stress 0.0000 | cert_seconds 196.8 | wall 196.8 s | cert_peak_RSS 10325 MB | peak RSS 6004 MB | load 10.10
+plan~8000[per-strut] GEOM | cells PLACED 8000 | pocket z 5.1..117.3 mm | hex voxels 44448 (slabs + 2-voxel walls) | weld x1.00 piece 0.3796 mm | segments 192000 -> 764328 | welded 231760 | T-ends 649082 | floating 0 | subdiv 0.10 s | network 0.98 s | peak RSS 6004 MB | load 10.10
+plan~8000[per-strut] CERT | verdict CERTIFIED | margin 126.7 | p99 0.434 MPa | max 3.734 | stat p99 | members 764328 | dropped 0 (0.000 of length) | load_dropped 0.0000 | zero_stress 0.0000 | cert_seconds 132.2 | wall 132.2 s | cert_peak_RSS 11750 MB | peak RSS 7637 MB | load 13.93
+AB_DONE

@@ -1,0 +1,24 @@
+# Release 5fb84de5 — 2026-11-03 B4-s1-3_B9-s1-2 (UI-Notes' app batch up to d7208b18), app only, released before review (his 11-03 pick)
+# Core and worker unchanged: fingerprint 35764048bba3; "fingerprint": "35764048bba3"
+# Merged onto dbd8608d; the merged app tree equals d7208b18's, so the builder's tests apply unchanged.
+# Commits:
+#   5ab30b8e B9 (#362): SquishParityHostedTests, the Squish restyle's guard (R6: nothing removed)
+#   82056114 B4 slice 1 (note 13): Results opens plain — no Solid button, no view lit, a lit view tapped again goes off
+#   26ae6b7d Release 2026-11-03: merge B4-s1 (82056114), UI-Notes' app batch (app only; core and worker unchanged at 35764048bba3)
+#   c3bcae5a B4 slice 2 (app-map §3.5, Q1, ledger 11): the panel is the version's results — "v7 results" — with Pick this
+#   9a81fa14 Release 2026-11-03: merge B4-s2 (c3bcae5a), UI-Notes' app batch (app only; core and worker unchanged at 35764048bba3)
+#   f00482a0 B9 slices 1–2 (#362): the Squish page in the one-app look, and the Print plan page
+#   e56113fc Merge the release branch (B3 released at 5c5ba9c1) into B9
+#   95b839af B4 slice 3 (notes 14, 15 (c)): Checks are taps that light their places; the thin-spot row reads E1's finishing
+#   e5b2e195 Release 2026-11-03: merge B4-s3 (95b839af), UI-Notes' app batch (app only; core and worker unchanged at 35764048bba3)
+#   da0359cc B9: re-pin FlexibleChromeLayoutTests' capsule cap to 400 pt (Setup │ Squish │ Print plan │ ✂, ~394 pt)
+#   535800dc Merge B4 slices 1–3 (95b839af) into B9, for one release
+#   d7208b18 B9: the Print plan's panel and Build button observe the project (the plans live in it)
+#   5fb84de5 Release 2026-11-03: merge B9 slices 1–2 (d7208b18, #362's Flexible batch; app only; core and worker unchanged at 35764048bba3)
+# Gates:
+#   19:58 checks ok: B4-s1-3_B9-s1-2, local 5fb84de5 over origin dbd8608d (13 commits); app tree == d7208b18's, fingerprint 35764048bba3
+#   19:58 waiting for HEAVY.lock (LatticeTypes gate C @ 3a1b9b3d (full ctest), driver pid 82295 2026-11-03 19:06)
+#   20:36 lock taken
+#   20:42 iPad device build green; lock released
+#   20:42 pushed 5fb84de5
+#   20:42 worker /health "fingerprint": "35764048bba3" (unchanged, no swap)

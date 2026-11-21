@@ -1,0 +1,17 @@
+First 6 of the 30 traced step evaluations more than 0.05 mm outside the step's band, step 1's build
+(the old cap depth). act = the cell is active; nb = its six face neighbours (x-x+ y-y+ z-z+).
+own/thick/thin = the field with the point's own / the thickest / the thinnest wall in reach.
+[step] p (129.8387 -48.6856 15.9856) cell (37 0 3) act 0 nb x00 y00 z00 | own 4.0000 thick 4.0000 thin 4.0000 | clip_term 4.0000 wall_d -0.0323 | walls 0.4200..0.4308 own 0.4308 | out 3.9800 in -4.0000
+[step] p (193.7252 -39.3230 19.9990) cell (53 2 4) act 0 nb x00 y00 z00 | own 4.0000 thick 4.0000 thin 4.0000 | clip_term 4.0000 wall_d 0.0284 | walls 0.4308..0.7366 own 0.4308 | out 3.9800 in -4.0054
+[step] p (193.7247 -38.4776 19.9995) cell (53 2 4) act 0 nb x00 y00 z00 | own 4.0000 thick 4.0000 thin 4.0000 | clip_term 4.0000 wall_d 0.0440 | walls 0.4308..0.7366 own 0.4308 | out 3.9800 in -4.0054
+[step] p (193.7253 -36.5142 19.9991) cell (53 3 4) act 0 nb x00 y00 z00 | own 4.0000 thick 4.0000 thin 4.0000 | clip_term 4.0000 wall_d 0.0177 | walls 0.4308..0.7366 own 0.4308 | out 3.9800 in -4.0054
+[step] p (193.7260 -35.2694 19.9983) cell (53 3 4) act 0 nb x00 y00 z00 | own 4.0000 thick 4.0000 thin 4.0000 | clip_term 4.0000 wall_d -0.0093 | walls 0.4308..0.7366 own 0.4308 | out 3.9800 in -4.0054
+[step] p (193.7254 -34.5301 19.9990) cell (53 3 4) act 0 nb x00 y00 z00 | own 4.0000 thick 4.0000 thin 4.0000 | clip_term 4.0000 wall_d 0.0083 | walls 0.4308..0.7366 own 0.4308 | out 3.9800 in -4.0054
+
+With step 2's depth, the same trace (first 4): the samples left are on a cap's edge (an active cell,
+an inactive neighbour), inside a thick wall; all were collapse candidates the band refused, and the
+written mesh has none outside the step's band (f8fix_stand_052.txt).
+[step] p (189.8060 -40.7757 27.7796) cell (52 2 6) act 1 nb x00 y01 z10 | own -0.0818 thick -0.0818 thin -0.0818 | clip_term -0.0818 wall_d -0.4206 | walls 0.4308..0.7366 own 0.7366 | out -0.1018 in 0.0763
+[step] p (189.8060 -40.7757 27.7825) cell (52 2 6) act 1 nb x00 y01 z10 | own -0.0818 thick -0.0818 thin -0.0818 | clip_term -0.0818 wall_d -0.4224 | walls 0.4308..0.7366 own 0.7366 | out -0.1018 in 0.0763
+[step] p (191.3821 -33.1622 20.0722) cell (52 3 5) act 1 nb x10 y10 z01 | own -0.0722 thick -0.0722 thin -0.0722 | clip_term -0.0722 wall_d -0.4228 | walls 0.4308..0.7366 own 0.7366 | out -0.0922 in 0.0668
+[step] p (191.9173 -33.0685 23.6592) cell (52 3 5) act 1 nb x10 y10 z01 | own -0.0764 thick -0.0764 thin -0.0764 | clip_term -0.0764 wall_d -0.4203 | walls 0.4308..0.7366 own 0.7366 | out -0.0964 in 0.0710

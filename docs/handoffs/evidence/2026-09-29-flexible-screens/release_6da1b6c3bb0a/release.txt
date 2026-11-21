@@ -1,0 +1,129 @@
+# Release 6da1b6c3bb0a — 2026-11-13: release (5) — claude/lattice-preview-e 473c5b57, one worker swap (54d2ce825a74 -> 6da1b6c3bb0a)
+# The reviewer's go 11-12 20:21Z (his blitz): the new engine's preview on Lattice Setup behind "New engine (test)",
+# OFF by default — off, his app and his LAN runs are as before; on, Lattice Setup draws core's lattice_layout bars
+# (round; the print file squares flat-bridge undersides and adds posts, and the preview says so in one line).
+# Structural lattice strength results aren't to be trusted for load-bearing parts until the rebuild's stage F.
+# LatticeTypes' 181deb12 is NOT in this release. Core tip: LatticeReview's claude/lattice-review f1ebf912 (his three engine fixes 11-12 evening + the file
+# writer, his print rules in core, two-line struts as core's default, the lattice-file CLI job). The worker app's own
+# topopt_worker.py (in /Applications/TopOpt Worker.app) is NOT changed here: its lattice_file route comes with the export.
+# Gates in the gate tree (b9-screens-362, its own vendor, iOS slices with OCCT):
+#   22:37 lattice-preview-e 4f87cb7f (release tip 05c5178b + LatticeReview's lattice_layout); core fingerprint 6da1b6c3bb0a
+#   22:43 build_core green: topopt_vendored_core_6da1b6c3bb0a + lattice_layout::Session::lay in the pinned include and all three slices
+#   22:49 iPad build: exit 0 ** BUILD SUCCEEDED **
+#   22:49 CLI: topopt-cli: core 6da1b6c3bb0a (dirty=false), built Nov 12 2026 22:49:40
+#   22:49 app_core_capability_mirror passed
+#   22:50 core's lattice_layout ctests: 100% tests passed out of 6
+#   22:51 preflight on his latest job: preflight: load path CONNECTED
+#   22:58 A done (the lock held: the night is 362's)
+#   22:58 17-test: 17/17 identical, 05c5178b vs 4f87cb7f
+#   23:00 STAND SHOTS: exit 0 (20 files) NEW-ENGINE his v2 stand: 92 faces, open 160 ms, read 5037, cells 0, bars 2197 ms, bridge 1.1 ms; 2795 bars, 161 cells, 705 solid pieces
+#   23:17 chunk_first.txt: exit 0; so far 82 passed, 0 failed
+#   23:45 chunk_aa: exit 1; so far 543 passed, 3 failed
+#   00:24 chunk_ab: exit 1; so far 883 passed, 4 failed
+#   01:20 chunk_ac: exit 0; so far 1155 passed, 4 failed
+#   02:18 chunk_ad: exit 0; so far 1506 passed, 4 failed
+#   02:46 chunk_ae: exit 0; so far 1893 passed, 4 failed
+#   03:26 chunk_af: exit 0; so far 2149 passed, 4 failed
+#   04:36 chunk_ag: exit 0; so far 2490 passed, 4 failed
+#   04:58 chunk_ah: exit 0; so far 2805 passed, 4 failed
+#   05:14 chunk_ai: exit 0; so far 3245 passed, 4 failed
+#   05:50 chunk_aj: exit 1; so far 3570 passed, 5 failed
+#   06:05 chunk_ak: exit 0; so far 4053 passed, 5 failed
+#   06:08 chunk_al: exit 0; so far 4479 passed, 5 failed
+#   06:10 chunk_am: exit 0; so far 4496 passed, 5 failed
+#   06:18 stand classes: exit 0
+#   06:18 B + stand: 4507 passed, 187 skipped, 5 failed, build failures 0
+#   FP=6da1b6c3bb0a HEAD=4f87cb7f
+#   07:07 after the suite: claude/lattice-preview-e-finish ba331574 merged (b93989ee: Finish, Grade to shape, Protect skin, Whole part, Small cells in thin walls, cells across, density, Organic) + the hook-text fix 473c5b57 (the suite's 2 new reds, mine); every class they touch: 108 passed, 0 failed
+# Commits:
+#   e25d2b19 Lattice rebuild: proposal draft 1 (docs only)
+#   8d61b5ad Lattice rebuild proposal, draft 2: one implementation run on the device; speed requirement; stage 0 speed proof first
+#   24f32df6 Lattice rebuild proposal, draft 3: the maintainer's answers of 11-10 (skin is a lattice of bars, Auto|Manual kept, removals, Finish None notice, enclosed-space notice, reference parts); proposed Manual controls
+#   39330f9b Lattice rebuild proposal, draft 4: ten Manual controls for engineers, in build order
+#   faf7b578 Lattice rebuild, stage A: the rules, working draft 1 (his rulings with dates and sources; five conflicts for him to settle)
+#   9782ea41 Lattice rebuild docs: Protect skin (solid face at his exact depth) and Finish Skin (open bars) kept apart, as he confirmed 11-10 16:41
+#   d94f2739 Lattice batch 0: a Sim density left on with the stress switch off no longer stops the app; the job runs as the switch says
+#   e4fdeab9 Lattice rebuild, stage A: rules draft 3 (the whole rulings ledger read; 36 rules added with his words and dates; two more conflicts; organic rulings set aside)
+#   843a7422 Lattice rebuild, stage A: rules draft 4 (his answers to the seven conflicts, 2026-11-10; Stepped is any whole fraction, Default Grade is halves; Finish None allowed but recommended against)
+#   dfd87190 Lattice rebuild, stage A: the tests, draft 1 (one test statement with its number for each of the 94 rules; speed numbers are starting points for stage 0)
+#   fc6769eb Lattice rebuild, stage 0: first speed numbers on the stand (Mac only; a full new layout is 31 ms at 12 mm cells and 956 ms at 2.4 mm on 6 threads)
+#   1389767a Lattice rebuild, stage 0: the other three parts timed; his answer on the wait after a finger lift written into rule P6
+#   b8dbf92e Lattice rebuild, stage B part 1: measure the part on its mesh and decide lattice or solid at any point (new files only; not yet in CMake; nothing shipped calls it)
+#   a5ed56b7 Lattice rebuild, stage B part 2: regions from the model's own faces (true outline, curved faces as shells), pockets, walls too thin for lattice
+#   b6d4ef39 Lattice rebuild, stage B part 3: curved and joined face-prisms; his rulings D19 (Start from rules whatever nothing else covers) and D20
+#   22ddec1d Lattice rebuild, stage C part 1: cells (one size per region, and Default Grade halves), each wall under a flat face divided exactly and centred on itself
+#   4626637b Lattice rebuild, stage C part 2: Stepped (one shared unit per base cell, any whole fraction of it; core's own menu and prints-open rule)
+#   8da5ab16 Lattice rebuild: single-cell walls are on by default in Aesthetic (his ruling 2026-11-11)
+#   1e954437 Lattice rebuild, stage C part 3: each cell's strut width (dial, per region, typed width, Allow quilt)
+#   5dcd52f7 Lattice rebuild, stage C part 4: Grade to shape (cells shrink toward a flat region's outline; struts thicken toward the quilt)
+#   da3c4c1b Lattice rebuild, stage C: Grade to shape band follows the preview (centre rule, whole cells, larger cells deepest)
+#   f3315932 Lattice rebuild, stage C: cells across are counted on the wall's narrowest width; the layout runs on threads
+#   adf229e7 Lattice rebuild, stage C: cells start behind a Protect skin; each cell knows its wall
+#   b3849294 Lattice rebuild, stage C: the layout reads the part by straight lines (46 times faster on the stand, same cells)
+#   cc00b232 Lattice rebuild, stage C: the wall is the lattice's own column; the narrowest width is read once per column
+#   0272b425 Lattice rebuild, stage C: walls behind a pocket get their own cells; face readings are kept with the domain
+#   8dc33178 Lattice rebuild, stage D part 1: the bars (each strut once, cut where its cell is cut, every cut end marked)
+#   09535128 Lattice rebuild, stage D part 2: loose strut ends run on until they join the other side (S5)
+#   ea7bfe27 Lattice rebuild, stage D part 3: the rim (S1, S2, S10)
+#   6c246f17 Lattice rebuild, stage E part 1: the session the app holds for a part (P2)
+#   b1438a9b Lattice rebuild: struts three times faster (433 ms -> about 150 ms on the stand), cells unchanged
+#   7b5ead25 Lattice rebuild, stage D part 4: is the lattice one piece, and joined to the part? (S4, S5, S6)
+#   c9890882 Lattice rebuild, stage D part 5: Finish Skin, first version (S3); face struts run on along the face (S5)
+#   64355d03 Lattice rebuild, stage D: a bar that ends in another is removed when that one is (S4)
+#   b7689c4e Lattice rebuild: his three other parts run through the whole pipeline; two speed-ups it showed
+#   c000a802 Lattice rebuild, stage D part 6: where Finish None leaves a stepped edge, the layout says where (S4)
+#   41bea033 Lattice rebuild, stage D part 7: Finish Covered (S9); wall edges searched on all threads
+#   ff585d13 Lattice rebuild, G11: how fine the band goes is a control, Auto or typed, not a switch
+#   da9400ec Lattice rebuild: no strut under two line widths, and no cell under the one that strut leaves open (R5, C14)
+#   4393e81b Lattice rebuild, C11a: cells across are counted on the room between the skins
+#   58ffb38d Lattice rebuild, S3: the skin is a regular pattern, the lattice's own grid drawn on the surface
+#   b10607f1 Each lattice type's open look and where it closes up, as width over cell (lattice_width_bounds)
+#   f2cfd3ed Lattice rebuild: without Allow quilt nothing quilts, the Grade to shape band included (R2, G8, G11; R3 withdrawn)
+#   38b72abc Lattice rebuild, R2: "never quilt" means never past the open look (his answer, 2026-11-12)
+#   e1ccfe64 Merge LatticeTypes' per-type strut limits (lattice_width_bounds, b10607f1) into the lattice rebuild
+#   87a0e63b Lattice rebuild: every strut type has its own open look and quilt (on LatticeTypes' lattice_width_bounds)
+#   625d2d46 Lattice rebuild: a part keeps one-line struts; two lines is for a piece that is all smallest lattice (C14, R5)
+#   82089808 Lattice rebuild: Allow quilt sets one cell floor everywhere, so a thin wall is latticed with it on (R2, G11)
+#   da32a32e Lattice rebuild: struts, joins and the piece check treat lattice space no cell holds as solid (D14)
+#   dc3676fe Lattice rebuild: the layout engine is part of the core build (library sources + ctest lattice_layout)
+#   18c0b0e0 Lattice rebuild rules: a per-frame list that grows with the part goes in a buffer, never inline (362's note on his iPad crash)
+#   3ff65efc Lattice rebuild stage E (362): the bridge entry for the new layout — open any imported model, lay, "what is here", cancel
+#   153667b8 Lattice rebuild stage E: a layout can be cancelled part way (a stop flag in Session::lay, read by every thread loop)
+#   11781175 Lattice rebuild stage F: the printable mesh is made from the layout, in core; thin walls with a two-line strut are his per-part choice
+#   876da477 Preview-E (362): merge LatticeReview's claude/lattice-review 11781175 (core lattice_layout + the stage E bridge + the stop flag) onto the release tip
+#   c0f34cec Lattice rebuild stage F: his print rules judged layer by layer in core, and the mesh made again until it passes them
+#   434234e7 Lattice rebuild: two lines is the thinnest strut the app and the worker lay with (R14, reviewer's ruling)
+#   df3faeeb Preview-E (362): the new engine's preview on Lattice Setup behind "New engine (test)" (OFF by default)
+#   52c98060 Lattice rebuild: the lattice file job (topopt-cli lattice-file), with his print rules in it
+#   38f055fd Preview-E (362): the stand probe draws 37,233 bars on his stand under Metal's validation layer (P7 at his file's size)
+#   70fd610d Lattice rebuild: a sealed space that could not hold one cell is filled, not kept
+#   c5921b45 Preview-E (362): "New engine (test)" checked on the real Lattice Setup at the six windows
+#   0809c49d Preview-E (362): merge LatticeReview's claude/lattice-review 70fd610d, the gate tip (additive: the file writer, his print rules in core, two-line struts as core's default, the lattice-file job)
+#   97660fe5 Lattice rebuild: the file's loop carves the part once, not once a pass
+#   33c5f593 Preview-E (362): merge LatticeReview's claude/lattice-review 97660fe5, the new gate tip (one commit on 70fd610d: the lattice-file job carves the part once, additive; the preview does not call it)
+#   1476a068 WIP lattice rebuild D14b: a cell takes in another region's lattice inside its cube; a cube a curved surface cuts thinly, facing air, is a cut cell
+#   3322bc76 Lattice rebuild D14b: lattice is consistent up to a curved surface and across the seam between two regions
+#   e1c4f4e8 Lattice rebuild S3: Finish Skin on a curved wall is a lattice both ways, not lines one way
+#   472296b0 Lattice rebuild D14b: the new rule asks for no wall width where only 'lattice, and whose' is needed
+#   f1ebf912 Lattice rebuild: the file has no crust at a curved wall, and opens what a cell takes in at a seam
+#   4f87cb7f Preview-E (362): merge LatticeReview's claude/lattice-review f1ebf912, the gate tip (f1ebf912: his three engine fixes of 11-12 evening — seams and curved cut cells D14b, skin on a curved wall, no crust in the file)
+#   0413cdb3 Preview-E (362): the new engine's preview sends Finish, Grade to shape, Protect skin and Whole part right
+#   974356d1 Preview-E (362): Small cells in thin walls per part; cells across, density and Organic reach the new engine right
+#   ba331574 Preview-E (362): the density reaches core on a cell its band exists for; the test writes it the page's way
+#   b93989ee Preview-E (362): merge claude/lattice-preview-e-finish (his picks 11-13 night): Finish, Grade to shape, Protect skin, Whole part, Small cells in thin walls (per part), cells across, density, Organic keeps the old preview
+#   473c5b57 Preview-E (362): the preview's edits keep the hook text the source tests pin (the full suite's two new reds)
+#   b2ebb1b3 Release (5) 2026-11-13: merge claude/lattice-preview-e 473c5b57 — the new lattice engine's preview on Lattice Setup behind App settings' "New engine (test)" (OFF by default: off, the app and his LAN runs are as before), and c
+# Gates (this tree):
+#   07:08 his uncommitted files (left alone): app/TopOpt-Info.plist app/TopOpt.xcodeproj/project.pbxproj app/TopOpt.xcodeproj/xcshareddata/xcschemes/TopOpt.xcscheme 
+#   07:08 his latest job for the preflight: /Users/nadim/.topopt-worker/f9c8124fd2df48b3 (read only)
+#   07:08 merged lattice-preview-e as b2ebb1b3 (local); app + core == its; fingerprint 6da1b6c3bb0a
+#   ==> building iOS simulator slice (Eigen + OCCT + lib3mf, arm64)
+#   ==> building iOS device slice (Eigen + OCCT + lib3mf, arm64)
+#   07:09 build_core green: topopt_vendored_core_6da1b6c3bb0a + build_identity + lattice_variant_job + lattice_solid_fallback_reasons + lattice_layout::Session::lay in every slice and arch
+#   07:10 worker CLI built: topopt-cli: core 6da1b6c3bb0a (dirty=false), built Nov 13 2026 07:10:19; 3 data paths, all under the release worktree
+#   07:10 app_core_capability_mirror passed
+#   07:16 iPad device build green (this tree's own pair)
+#   07:17 preflight on his latest job: preflight: load path CONNECTED
+#   07:17 pushed b2ebb1b3
+#   07:17 worker swapped: /health "fingerprint": "6da1b6c3bb0a"; data paths under the release worktree; preflight again OK; old kept as build-fix/topopt-cli.54d2ce825a74-replaced-20261113
+#   07:17 the app_release scripts now expect 6da1b6c3bb0a

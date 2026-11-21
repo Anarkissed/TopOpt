@@ -1,0 +1,6 @@
+E5_01_13p_edge16_top_view_handles_back.png: marks ["flatArrow-Edge 16", "flatDepthChip-Edge 16", "flatKnob-Edge 16", "flatPrism-Edge 16", "flatTiltBox-Edge 16", "flatTwistBox-Edge 16"] · solid ["Edge 16": false, "Edge 14": false] · toast -
+heat: 2 press(es) · top 2.061701536178589 mm · note 'Lattice not tuned for this press yet' · sent 0
+E5_02_13p_edge16_heat_on_footprint_full_squish_45.png: marks ["flatArrow-Edge 16", "flatDepthChip-Edge 16", "flatKnob-Edge 16", "flatPrism-Edge 16", "flatTiltBox-Edge 16", "flatTwistBox-Edge 16"] · solid ["Edge 16": false, "Edge 14": false] · toast -
+E5_03_13p_edge16_xray_bend_prism_45.png: marks ["flatArrow-Edge 16", "flatDepthChip-Edge 16", "flatKnob-Edge 16", "flatPrism-Edge 16", "flatTiltBox-Edge 16", "flatTwistBox-Edge 16"] · solid ["Edge 16": false, "Edge 14": false] · toast -
+stamp: Fingertip 5.400000000000001 × 7.200000000000002 · stored 90.0 · shown 0.0°
+E5_04_13p_edge16_stamp_turn_reads_0.png: marks ["flatArrow-Edge 16", "flatDepthChip-Edge 16", "flatKnob-Edge 16", "flatPrism-Edge 16", "flatTiltBox-Edge 16", "flatTwistBox-Edge 16"] · solid ["Edge 16": false, "Edge 14": false] · toast -

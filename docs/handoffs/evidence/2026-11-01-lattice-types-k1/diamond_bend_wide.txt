@@ -1,0 +1,7 @@
+BEND diamond: cell S=5.0 mm, vpc=12, cantilever 6 cells long, target rho 0.30 -> periodic cell rho 0.2685 (r/L 0.13608, 3.3 vox/strut), C11=273.05 C12=150.71 C44=138.83 Zener=2.270
+  [writing /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-agent-comms-lattice-types-818eda/c7bc77f2-8120-406e-8dc6-57e4a7a57ea1/scratchpad/bendx/diamond/diamond_bend.csv]
+    nc=7  block rho 0.2685  K_res 3435.0094  K_hom 3598.6548  err +4.76 %  dof 1582275  24993 ms  NO-GO
+    nc=8  block rho 0.2685  K_res 4886.6535  K_hom 5050.2003  err +3.35 %  dof 2060571  35956 ms  NO-GO
+    nc=9  block rho 0.2685  K_res 6578.4304  K_hom 6737.3577  err +2.42 %  dof 2601939  47993 ms  NO-GO
+    nc=10  block rho 0.2685  K_res 8506.6231  K_hom 8657.0179  err +1.77 %  dof 3206379  63041 ms  GO
+    nc=12  block rho 0.2685  K_res 13068.3898  K_hom 13190.1956  err +0.93 %  dof 4604475  88155 ms  GO

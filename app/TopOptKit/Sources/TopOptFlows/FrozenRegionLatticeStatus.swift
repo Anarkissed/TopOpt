@@ -82,8 +82,8 @@ public enum FrozenRegionLatticeStatus {
                            reason: "Protected, and marked “no lattice here”.")
             case .some(.include):
                 return Row(id: g.id, name: g.name, outcome: .latticed,
-                           reason: "Protected, and marked “lattice here” — the "
-                                 + "shape is frozen, the inside is latticed.")
+                           reason: "Protected, and marked “lattice here” — TO keeps "   // ★ batch E review: never "frozen"
+                                 + "its shape, the inside is latticed.")
             case .none:
                 if anyIncludeDeclared {
                     return Row(id: g.id, name: g.name, outcome: .solid,

@@ -1,0 +1,8 @@
+[11l] settled true · status 'Preview · core runs one group at a time' · list (24,402 348x189)
+wrote D2_11l_E01_rest.png
+  E02: chip (586,584 404x132) · handles handle-depth-f:2AC5732E-4A99-4195-A0A3-5BBE73DD4D18:3 (718,453 88x32), handle-expand-f:2AC5732E-4A99-4195-A0A3-5BBE73DD4D18:3 (713,524 88x32) · nothing touches
+wrote D2_11l_E02_face3_chipM_handles_list.png
+  E03: chip (462,407 404x229) · handles none · nothing touches
+  join (474,467 380x48) · held line: Lattice on a new face waits for a review
+wrote D2_11l_E03_face2_chipN_join.png
+  tap Add to Group C as lattice [chipJoin (474,467 380x48)]

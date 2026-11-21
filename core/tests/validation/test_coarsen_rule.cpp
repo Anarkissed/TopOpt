@@ -554,7 +554,11 @@ int main() {
 
     // Stagnating field: MG builds but never contracts -> fast-fail to Jacobi on
     // EVERY solve, and after kMgLatchThreshold in a row the run latches MG off.
+    // This is the SHIPPED latch policy, so the safe-smoother retry (which would
+    // rescue this field after the shipped stall) is off for this block and
+    // checked on its own just below.
     fea_matfree_reset_mg_stagnation_latch();
+    topopt::fea_matfree_set_mg_safe_retry(false);
     for (int s = 0; s < 4; ++s) {
       CgInfo si;
       solve(ey_checker, si);
@@ -565,6 +569,21 @@ int main() {
     }
     CHECK(fea_matfree_mg_stagnation_latched(),
           "after N consecutive stagnations the run latches MG off (skips the build)");
+    topopt::fea_matfree_set_mg_safe_retry(true);
+
+    // With the safe retry ON (the default), the same stagnating field is carried
+    // by the l1-Jacobi MG retry on every solve; after the latch trips, the
+    // shipped attempt is skipped and the retry runs directly.
+    fea_matfree_reset_mg_stagnation_latch();
+    for (int s = 0; s < 4; ++s) {
+      CgInfo si;
+      solve(ey_checker, si);
+      CHECK(si.used_multigrid && si.converged,
+            "stagnating field + safe retry: the l1-Jacobi MG retry carries");
+    }
+    CHECK(fea_matfree_mg_stagnation_latched() &&
+              topopt::fea_matfree_mg_safe_carries() == 4,
+          "safe retry: shipped attempt latched off, the retry carried all 4 solves");
 
     // The latch does not leak past a run: a reset re-arms MG, and a healthy solve
     // engages it again. (The driver calls this reset at the start of every run.)

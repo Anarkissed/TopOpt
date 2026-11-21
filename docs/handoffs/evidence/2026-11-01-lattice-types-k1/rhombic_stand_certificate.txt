@@ -1,0 +1,25 @@
+M2 stand, Rhombic dodecahedron (jobs from make_stand_jobs.py rhombic <dir> --fixed 4; binary: the pipeline's frozen archive build of 35dc4ab0).
+The default stand jobs use the swept cell ladder, which is Doubled; core refuses Doubled for rhombic (rhombic_stand_swept_refused.txt), so the stand runs on one fixed 4 mm cell.
+
+analyze struct {"topology": "rhombic", "intent": "structural", "band_rho_min": 0.17245, "band_rho_max": 0.51331, "cells_per_member_floor": 10, "cell_size_mm": 4, "rho_min_used": 0.17245, "rho_max_used": 0.17245, "latticed_voxels": 44966, "recertified_margin": 98.42684546, "recertified_accepted": true}
+analyze aes    {"topology": "rhombic", "intent": "aesthetic", "band_rho_min": 0.17245, "band_rho_max": 0.51331, "cells_per_member_floor": 10, "cell_size_mm": 4, "rho_min_used": 0.2, "rho_max_used": 0.4500630837, "latticed_voxels": 44966, "recertified_margin": null, "recertified_accepted": null}
+run struct LATTICE vf=0.520000 topology=rhombic cell_mm=4 graded=1 rho_min=0.17245 rho_max=0.462411 cells=33 tris=43436 lattice_margin=1765.84 lattice_accepted=1
+run struct LATTICE vf=0.380000 topology=rhombic cell_mm=4 graded=1 rho_min=0.296026 rho_max=0.440016 cells=4 tris=5380 lattice_margin=1686.08 lattice_accepted=1
+run aes    LATTICE vf=0.520000 topology=rhombic cell_mm=4 graded=1 rho_min=0.247377 rho_max=0.51331 cells=33 tris=43436 lattice_margin=1765.66 lattice_accepted=1
+run aes    LATTICE vf=0.380000 topology=rhombic cell_mm=4 graded=1 rho_min=0.51331 rho_max=0.51331 cells=4 tris=5380 lattice_margin=1686.08 lattice_accepted=1
+run struct vf=0.68 NO LATTICE EMITTED — the void space inside this lattice does not reach the exterior. 15 of 51 lattice cells (15 of 65 latticed voxels) sit in 1 SEALED cavity/cavities holding 595.070 mm^3 of ...
+run struct vf=0.26 NO LATTICE EMITTED — the grading law could lattice NONE of this variant's 1443 candidate voxels, so there is no lattice to emit — refusing rather than writing a file with zero struts in it ...
+run aes    vf=0.68 NO LATTICE EMITTED — the void space inside this lattice does not reach the exterior. 15 of 51 lattice cells (15 of 65 latticed voxels) sit in 1 SEALED cavity/cavities holding 595.070 mm^3 of ...
+run aes    vf=0.26 NO LATTICE EMITTED — the grading law could lattice NONE of this variant's 1443 candidate voxels, so there is no lattice to emit — refusing rather than writing a file with zero struts in it ...
+
+lattice-variant (rung 0.38 of the Structural run):
+   reproduction: recorded margin 1686.08 == reproduced 1686.08 (enforced)
+   lattice: graded cell 4 mm, rho 0.296..0.44 over 5 voxels
+   solid margin 1686 -> latticed margin 1686 (effective 349.1)
+   verdict: ACCEPTED
+
+Why two of four rungs carry no lattice (both are core's standing refusals, not rhombic faults):
+  vf 0.26: its widest member is 20.46 mm; at a 4 mm cell, rhombic's 10-cell floor needs 40 mm. A
+           smaller cell is not offered: the 0.42 mm extrusion width puts this rung's printability
+           floor at a 3.01 mm cell, and a 2 mm cell would be the Doubled step core refuses for rhombic.
+  vf 0.68: the void-reaches-exterior check (on by default) found one sealed 595 mm^3 cavity.

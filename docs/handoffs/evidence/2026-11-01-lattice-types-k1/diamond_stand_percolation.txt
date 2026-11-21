@@ -1,0 +1,5 @@
+Stand percolation, Diamond: lattice-variant of the Structural run's rung 0.52 (out_lv1_diamond), part = that run's variant_052.stl, shell 2.22 mm (0.42 + 4 x 0.45).
+SPANS out_lv1_diamond/variant_052_lattice_SPANS.txt: 432 primitives, 15 components, 20 of 488 strut ends cut (no other primitive covers them)
+  components with no cut end: 9 (245 primitives)
+  FLOATING (no cut end, not touching the solid companion or the shell): 0 components, 0 primitives
+  component sizes (primitives), largest first: 57 30 30 30 30 30 29 29 27 27 27 22 22 22 20

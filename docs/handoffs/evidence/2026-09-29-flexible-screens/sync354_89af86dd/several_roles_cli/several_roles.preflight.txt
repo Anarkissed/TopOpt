@@ -1,0 +1,14 @@
+$ topopt-cli preflight several_roles.job.json --materials core/src/materials/materials.json
+exit 0
+topopt-cli: core b21c5d9a8311 (dirty=false), built Oct 24 2026 21:10:36
+[loadcase] load-group 0: faces=1 |F|=19.6N voxels_tagged=4096 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=24000 (structural pad, NOT a face protection)
+[loadcase] face-protection face=2 voxels_frozen=131072 depth=32 requested=5mm effective=5mm status=ok
+[loadcase] clearance face=2 kind=face voxels_frozen=0 SKIP=region-outside-grid
+preflight: load path CONNECTED
+  4096 load voxels, 4032 anchor voxels; 262144 of 262144 voxels may hold material (0 forbidden)
+  narrowest separating cross-section: -1 voxels (-1 mm^2) at step -1 of 1 from the anchor
+  (INFORMATION, not a verdict — connectivity is NECESSARY, not sufficient)
+  check 13.68 ms; import + setup + check 68.4 ms

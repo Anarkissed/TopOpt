@@ -86,6 +86,10 @@ public enum LatticeSelectableRef: Hashable, Sendable {
     /// The choice is still stored (it is the user's, and it must survive until
     /// core catches up) — and the row SAYS SO, because a control that silently
     /// does nothing is worse than one that states its limit.
+    /// ★ SUPERSEDED for regions by `ProjectModel.latticeReachesTheRun(_:)` (2026-09-22):
+    /// a region that is a union of WHOLE faces is emitted as one prism per member face,
+    /// so it does reach the run; only a cut sector does not. This value-only view has no
+    /// model to ask, so it keeps the conservative answer for callers without one.
     public var latticeReachesTheRun: Bool {
         if case .region = self { return false }
         return true

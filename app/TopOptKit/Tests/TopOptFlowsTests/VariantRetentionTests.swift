@@ -288,9 +288,7 @@ final class VariantRetentionTests: XCTestCase {
                 retainedDesign: project.relatticeArtifacts?.designBin,
                 runGeneratedLattice: false, modelPath: "/tmp/part.stl",
                 workerSelected: true, runInFlight: false)
-            XCTAssertTrue(VariantEntry.smoothing(facts).enabled,
-                          "AJ3: still smoothable after \(what) — "
-                          + "\(VariantEntry.smoothingBlocks(facts))")
+            // ★ RE-PINNED (UI-Notes B4, plan.md §B4: "The Smooth page is deleted"; core finishes every result, E1)
             XCTAssertTrue(VariantEntry.lattice(facts).enabled,
                           "AJ3: still latticeable after \(what) — "
                           + "\(VariantEntry.latticeBlocks(facts))")
@@ -348,13 +346,14 @@ final class VariantRetentionTests: XCTestCase {
 
         let p = try XCTUnwrap(ResultsReplacementPrompt.forNewRun(existing: finished(3)))
         XCTAssertEqual(p.variantCount, 3)
-        XCTAssertTrue(p.message.contains("3 variants"), p.message)
+        // ★ RE-PINNED (UI-Notes B10, design-system.md §3: a run's outcomes are "results" on the kept pages, never "variants")
+        XCTAssertTrue(p.message.contains("3 results"), p.message)
         XCTAssertTrue(p.message.contains("41.2 g"), "it names what is at stake: \(p.message)")
         XCTAssertTrue(p.message.contains("can’t be brought back"), p.message)
 
         let one = try XCTUnwrap(ResultsReplacementPrompt.forNewRun(existing: finished(1)))
-        XCTAssertTrue(one.message.contains("1 variant this project"), one.message)
-        XCTAssertFalse(one.message.contains("1 variants"), "singular reads properly")
+        XCTAssertTrue(one.message.contains("1 result this project"), one.message)
+        XCTAssertFalse(one.message.contains("1 results"), "singular reads properly")
     }
 
     /// And the workspace really routes Optimize through it rather than starting
@@ -362,11 +361,15 @@ final class VariantRetentionTests: XCTestCase {
     func testTheOptimizeButtonRoutesThroughTheConfirmation() throws {
         let ws = try String(contentsOf: sourceURL("WorkspacePlaceholder.swift"),
                             encoding: .utf8)
-        let btn = try XCTUnwrap(ws.range(of: "private var optimizeButton"))
-        let body = String(ws[btn.lowerBound...].prefix(400))
-        XCTAssertTrue(body.contains("requestRun()"),
+        // ★ RE-PINNED (UI-Notes B3, the 11-03 daily suite): B1's Mac lines (note 4) pushed the button's action past a 400-character
+        // window, and B3 (#362's note 1) gives the button its run's flavour — the body runs to its label, and the action
+        // still asks (requestRun), never starts (startRun).
+        let btn = try XCTUnwrap(ws.range(of: "private func optimizeButtonView(lattice: Bool)"))
+        let rest = ws[btn.lowerBound...]
+        let body = String(rest[..<(rest.range(of: "} label: {")?.lowerBound ?? rest.endIndex)])
+        XCTAssertTrue(body.contains("requestRun(lattice: lattice)"),
                       "bar 4: Optimize asks before it retires results")
-        XCTAssertFalse(body.contains("startRun()"),
+        XCTAssertFalse(body.contains("startRun("),
                        "bar 4: …and does not start one straight from the button")
         let req = try XCTUnwrap(ws.range(of: "private func requestRun"))
         let reqBody = String(ws[req.lowerBound...].prefix(400))

@@ -1,0 +1,23 @@
+# 102117B9 dg (converted to Default Grade)
+
+Frozen CLI core 30982e5284b2 (#358 at 36f5fdde).
+
+converted plan-102: algorithm 'organic' -> 'doubled', gradeStepStyle 'dyadic'
+DG-PROJECT M2 verticalStand (converted: Default Grade) algorithm doubled stage Optional(TopOptFlows.LatticeStageMode.structural) step-halves true density sim cells auto
+DG-PLAN doubled: 22344 cell(s) over 177 region(s) | 2.40=1224 2.06=20965 2.00=2 1.33=130 1.15=23
+DG-PLAN per region: r1=1224 r2=20965 r19=1 r22=19 r23=10 r29=7 r37=13 r43=1 r44=2 r48=3 r49=3 r54=11 r63=4 r67=3 r129=58 r135=5 r136=5 r137=7 r141=3
+DG-WITHHELD region 19's face is tilted off the grid these cells sit on, and core can't place them there yet | offPlane(regionID: 19, offsetMM: -45.73977662392144)
+DG-K2-JOB job_plan_k2.json: 22344 cells, 19 regions stamped (withheld by the app)
+DG-SLOT-ORIGINS 0 region(s) carry slot_origin_mm
+DG-JOBS /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-stage-frontend-37bee1/scratch/evidence/plans/102117B9-DDD2-4597-9BDE-49DD47EBF393/dg model model.step
+
+## job_noplan: exit 1
+> topopt-cli: lattice_variant: the grading law could lattice NONE of this variant's 66710 candidate voxels, so there is no lattice to emit — refusing rather than writing a file with zero struts in it and calling it a lattice. Reasons: member_too_thin_for_cell=6, strut_unprintable_at_every_cell=66704, irrecoverable_by_any_cell_size=6. The widest member the law rejected is 3.410558605 mm; at this cell size a member must be at least 11.25 mm across to hold 5 cells. A smaller cell needs a finer declared extrusion width (min_extrudable_width_mm 0.45 mm sets the printability floor at 4.931378498 mm) — run the pre-flight forecast for the evaluated remedies.
+
+## job_plan: exit 1
+> topopt-cli: lattice_variant: the grading law could lattice NONE of this variant's 66710 candidate voxels, so there is no lattice to emit — refusing rather than writing a file with zero struts in it and calling it a lattice. Reasons: member_too_thin_for_cell=6, strut_unprintable_at_every_cell=66704, irrecoverable_by_any_cell_size=6. The widest member the law rejected is 3.410558605 mm; at this cell size a member must be at least 11.25 mm across to hold 5 cells. A smaller cell needs a finer declared extrusion width (min_extrudable_width_mm 0.45 mm sets the printability floor at 4.931378498 mm) — run the pre-flight forecast for the evaluated remedies.
+
+## job_plan_k2: exit 1
+> topopt-cli: job.json: lattice region 19 (face 27): a face lattice region's "slot_origin_mm" must lie IN the face plane, and this one stands -45.739777 mm along the region normal from "origin". The slot origin carries the in-plane ANCHOR SHIFT of the grid the cells were packed on; a component along the normal would move the plane the prism's depth is measured from, and every cell's containment verdict with it
+
+model model.step sha256 bdf5646481e370ba (not committed)

@@ -1,0 +1,48 @@
+AUTO FLOOR + SHAPE run, 2026-10-23, at 177dc162 + working tree, scratch-path /tmp/r7x20b-build
+Classes (18, the ones that touch or pin the changed files):
+FlexibleAutoFloorShapeTests FlexibleManualP1Tests FlexibleManualP2Tests FlexibleM1ManualTests FlexibleManualFollowUpTests FlexibleMainViewsTests FlexibleRowCopyTests FlexibleSettingsRound4Tests FlexibleU21OneDepthNumberTests FlexibleR7EveningAnswersTests FlexibleMainPageLoadsTests FlexibleReadinessTests FlexibleSqueezeGroupsReviewUXTests FlexibleSettingsVerifyD1Tests FlexibleRound6Tests FlexibleGeometryOnlyLatticeTests FlexibleBatchMVerifyTests FlexibleChromeStateTests
+
+runner.log:
+start 02:52:11 177dc162 + working tree
+build exit 0 02:52:23
+chunk_aa exit 0 02:56:12
+chunk_ab exit 1 02:56:55
+chunk_ac exit 0 02:57:28
+chunk_ad exit 0 02:58:16
+chunk_ae exit 0 03:06:45
+renders exit 0 03:07:46
+golden det exit 1 03:08:02
+golden unseeded exit 1 03:08:19
+hashes exit 0 03:09:20
+hashes cmp vs manual_p2 (whole file): identical
+ALLDONE 03:09:20
+
+Per chunk (passed failed skipped):
+chunk_aa 21 0 0
+chunk_ab 28 1 0
+chunk_ac 37 0 0
+chunk_ad 29 0 0
+chunk_ae 11 0 1
+Total: 126 passed, 1 failed, 1 skipped
+
+Failure: FlexibleRowCopyTests.testRefusalsUnreachedColumnsAndAutoSayItOnThePanel — source pin "warning: !note.isEmpty" (P1 had
+written "!manual && !note.isEmpty"; P1's run did not include this class). Fixed by making More's Nozzle row Auto-only (it is
+hidden in Manual now); re-run after the fix: FlexibleRowCopyTests 4/4.
+
+Goldens: the first run had 1 DIFFERS both modes — fields_his_0004_r5.txt lines 145, 146, 148, the "app field (the lattice is
+built from it)" section only (core's designs and fields identical): his r5 is at the floor, so its drawn field is graded by its
+shape. Proof it is only that: FLEX_AP_NO_SHAPE_FALLBACK=1 (core's flat field) vs the OLD golden: identical (33578 bytes).
+The 3 lines re-recorded; then goldens det 0 DIFFERS (38 identical), unseeded 0 DIFFERS (32 identical + 1 PART-SKIP).
+Hashes: the 16 stage-job hashes cmp-identical to manual_p2/stage_job_hashes_p2.txt (Auto's job bytes unchanged).
+
+Numbers (FlexibleAutoFloorShapeTests prints):
+FLEX-FLOOR B stamp: 1194 columns under (ρ 0.144), 2632 outside (ρ 0.362)
+FLEX-FLOOR B RED: ρ 0.1430 … 0.1430
+FLEX-FLOOR B curves: centre ρ 0.152 (2003), edge ρ 0.332 (213)
+FLEX-FLOOR A: Face 6 · lattice: columns 4560, pressed 4560, too_firm 4560, ok 0, too_soft 0, beyond 0, no_lattice 0; buildable max 1.805
+FLEX-FLOOR A lines: ["Every column at the softest tested lattice (14 %)", "Auto reaches 0.51–1.80 mm at 10 lb"]
+FLEX-FLOOR A curves lines: ["Nearly every column at softest tested (14 %)", "Auto reaches 0.00–0.64 mm at 10 lb"] · 4549/4560
+FLEX-SHAPE D: under ρ 0.299 (1194), outside ρ 0.100 (2632, spread 0.0019)
+FLEX-SHAPE D RED: outside ρ 0.300 … 0.300
+FLEX-POLISH C: depth before build 25.00 mm (column mean), drawn 24.22 mm; owners 2000008: 24.22 × 4560
+FLEX-POLISH C legend: 20% · gyroid 7.0 mm … 20% · gyroid 7.0 mm

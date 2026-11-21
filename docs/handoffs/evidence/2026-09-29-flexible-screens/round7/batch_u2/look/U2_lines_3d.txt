@@ -1,0 +1,2 @@
+U2 3D: Front: across span·view 0.000 up·view 0.000, along span·view 1.000 · Top: along 0.050 0.000, across span·view 0.999
+RED model angle: Front: across span·view 0.632 up·view 0.769, along span·view 0.091 · Top: along 0.079 0.666, across span·view 0.742

@@ -1,0 +1,2 @@
+(1) pad MANUAL · nozzle 190.0 · rows ["nozzle", "grade", "from", "to", "style", "facts"] · grade Optional(TopOptFlows.FlexibleNozzleGrade(on: true, fromC: 190.0, toC: 220.0, stepped: true)) · lines ["190 °C to 10 mm · 220 °C"] · span Optional(ClosedRange(0.0...20.0))
+(2) pad AUTO · nozzle nil · grade Optional(TopOptFlows.FlexibleNozzleGrade(on: true, fromC: 190.0, toC: 240.0, stepped: false)) · lines ["190 °C at the bed → 240 °C at 20 mm", "+5 °C every 2 mm up the part", "Shown in the sim only · core\'s job: one °C"]

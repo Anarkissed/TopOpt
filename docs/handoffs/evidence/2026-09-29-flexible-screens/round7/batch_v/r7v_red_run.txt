@@ -1,0 +1,99 @@
+# R7-V — the red run: the 15 new tests against the API stubs (FlexibleSquishLoop.pausedByHim/playView/playByHim, FlexibleMainStage.xrayOn/togglePlay/toggleXray + the controls, FlexibleStageViews .play/.heatOff/.heatAll/.bend, FlexibleStagePage.dentScale/overlaysHidden/composeTints(views:), FlexibleViewButton.onLongPress, FlexibleStageVolumes.items(heated:) — each with the OLD behaviour), base 61cfce05, 2026-10-14 ~01:55–02:15 EDT
+# swift test --skip-build --scratch-path /tmp/r7v-build --filter "FlexibleRound7ViewsTests|FlexibleRound7ViewsHostedTests|FlexibleSquishPlayerTests/testHisPauseHoldsUntilHePressesPlay" (unseeded)
+
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.004) seconds
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsHostedTests testBendAloneShowsOnlyTheBentModelAndHeatBringsTheOverlaysBack]' failed (47.609 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsHostedTests testEveryViewRowIsIconsOnlyAndEachPageHasOneLegendCard]' failed (24.664 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsHostedTests testTheHeatIconTapCyclesAndAThreeSecondHoldShowsEveryGroup]' failed (2.642 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsHostedTests testThePlayBarComesOnlyWithPlayOnBothPages]' failed (42.622 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsHostedTests testTheSettingsPagesLoopKeepsHisPauseAcrossAnEditAndARebuild]' failed (83.274 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsHostedTests testXrayOffUnderTheCoveredFinishIsThePlainModel]' failed (20.066 seconds).
+	 Executed 6 tests, with 31 failures (0 unexpected) in 220.877 (220.878) seconds
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsTests testAGroupsPrismShowsOnlyAfterHisPickNeverOnOpenNorForAPendingGroup]' failed (4.807 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsTests testAStressRetryLandingNeverUndoesHisPause]' failed (35.630 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsTests testHisPauseHoldsAcrossAnEditUntilHePressesPlay]' failed (259.011 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsTests testPlayIsOffOnOpenAndOnlyPlayShowsTheBarAndPlays]' failed (34.040 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsTests testTheBendViewHoldsTheWholeGroupAtFullDepth]' failed (304.943 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsTests testTheMainPageModelWearsNoRoleColourWhateverRolesAreHandedOver]' failed (27.788 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsTests testTheSettingsHeatShowsTheCurrentGroupEveryGroupOrNone]' failed (9.676 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsTests testXrayIsItsOwnIconOffByDefaultAndTheDefaultIsTheOpaqueModel]' failed (27.963 seconds).
+	 Executed 8 tests, with 30 failures (0 unexpected) in 703.859 (703.860) seconds
+Test Case '-[TopOptFlowsTests.FlexibleSquishPlayerTests testHisPauseHoldsUntilHePressesPlay]' failed (0.003 seconds).
+	 Executed 15 tests, with 71 failures (0 unexpected) in 924.739 (924.742) seconds
+	 Executed 15 tests, with 71 failures (0 unexpected) in 924.739 (924.744) seconds
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+
+## every failure (the file:line, the test, the message)
+FlexibleRound7ViewsHostedTests:396 testBendAloneShowsOnlyTheBentModelAndHeatBringsTheOverlaysBack: XCTAssertTrue failed - ★ Bend alone hides the overlays
+FlexibleRound7ViewsHostedTests:399 testBendAloneShowsOnlyTheBentModelAndHeatBringsTheOverlaysBack: XCTAssertEqual failed: ("5554") is not equal to ("0") - ★ Bend alone: no curve, chip or tag on the bent model (5554 px)
+FlexibleRound7ViewsHostedTests:200 testEveryViewRowIsIconsOnlyAndEachPageHasOneLegendCard: XCTAssertFalse failed - ★ FlexibleRowCopy.swift: its words are gone
+FlexibleRound7ViewsHostedTests:199 testEveryViewRowIsIconsOnlyAndEachPageHasOneLegendCard: XCTAssertFalse failed - ★ FlexibleMainStatusPill.swift: the worded chip is gone
+FlexibleRound7ViewsHostedTests:200 testEveryViewRowIsIconsOnlyAndEachPageHasOneLegendCard: XCTAssertFalse failed - ★ FlexibleMainStatusPill.swift: its words are gone
+FlexibleRound7ViewsHostedTests:219 testEveryViewRowIsIconsOnlyAndEachPageHasOneLegendCard: XCTAssertNil failed: "(656.0, 235.5, 150.0, 40.0)" - ★ 11l: no 'Role colours off'
+FlexibleRound7ViewsHostedTests:220 testEveryViewRowIsIconsOnlyAndEachPageHasOneLegendCard: XCTAssertNil failed: "(814.0, 235.5, 164.0, 40.0)" - ★ 11l: no 'Prism after a pick'
+FlexibleRound7ViewsHostedTests:225 testEveryViewRowIsIconsOnlyAndEachPageHasOneLegendCard: XCTAssertEqual failed: ("47816") is not equal to ("0") - ★ 11l: nothing but the icon row under the gizmo (47816 px)
+FlexibleRound7ViewsHostedTests:219 testEveryViewRowIsIconsOnlyAndEachPageHasOneLegendCard: XCTAssertNil failed: "(488.0, 283.5, 150.0, 40.0)" - ★ 11p: no 'Role colours off'
+FlexibleRound7ViewsHostedTests:220 testEveryViewRowIsIconsOnlyAndEachPageHasOneLegendCard: XCTAssertNil failed: "(646.0, 283.5, 164.0, 40.0)" - ★ 11p: no 'Prism after a pick'
+FlexibleRound7ViewsHostedTests:225 testEveryViewRowIsIconsOnlyAndEachPageHasOneLegendCard: XCTAssertEqual failed: ("47816") is not equal to ("0") - ★ 11p: nothing but the icon row under the gizmo (47816 px)
+FlexibleRound7ViewsHostedTests:219 testEveryViewRowIsIconsOnlyAndEachPageHasOneLegendCard: XCTAssertNil failed: "(686.0, 283.5, 150.0, 40.0)" - ★ 13p: no 'Role colours off'
+FlexibleRound7ViewsHostedTests:220 testEveryViewRowIsIconsOnlyAndEachPageHasOneLegendCard: XCTAssertNil failed: "(844.0, 283.5, 164.0, 40.0)" - ★ 13p: no 'Prism after a pick'
+FlexibleRound7ViewsHostedTests:225 testEveryViewRowIsIconsOnlyAndEachPageHasOneLegendCard: XCTAssertEqual failed: ("47816") is not equal to ("0") - ★ 13p: nothing but the icon row under the gizmo (47816 px)
+FlexibleRound7ViewsHostedTests:219 testEveryViewRowIsIconsOnlyAndEachPageHasOneLegendCard: XCTAssertNil failed: "(838.0, 235.5, 150.0, 40.0)" - ★ 13l: no 'Role colours off'
+FlexibleRound7ViewsHostedTests:220 testEveryViewRowIsIconsOnlyAndEachPageHasOneLegendCard: XCTAssertNil failed: "(996.0, 235.5, 164.0, 40.0)" - ★ 13l: no 'Prism after a pick'
+FlexibleRound7ViewsHostedTests:225 testEveryViewRowIsIconsOnlyAndEachPageHasOneLegendCard: XCTAssertEqual failed: ("47816") is not equal to ("0") - ★ 13l: nothing but the icon row under the gizmo (47816 px)
+FlexibleRound7ViewsHostedTests:343 testTheHeatIconTapCyclesAndAThreeSecondHoldShowsEveryGroup: XCTUnwrap failed: expected non-nil value of type "Int" - ★ the Heat icon on Settings
+FlexibleRound7ViewsHostedTests:266 testThePlayBarComesOnlyWithPlayOnBothPages: XCTAssertTrue failed - ★ Settings has its Play icon
+FlexibleRound7ViewsHostedTests:274 testThePlayBarComesOnlyWithPlayOnBothPages: XCTAssertNil failed: "(409.0, 1224.0, 340.0, 46.0)" - ★ 13p, main page, Play off: no bar
+FlexibleRound7ViewsHostedTests:282 testThePlayBarComesOnlyWithPlayOnBothPages: XCTAssertTrue failed - the views are shared
+FlexibleRound7ViewsHostedTests:293 testThePlayBarComesOnlyWithPlayOnBothPages: XCTAssertNil failed: "(592.0, 1277.0, 340.0, 80.0)" - ★ 13p, Settings, Play off: no bar
+FlexibleRound7ViewsHostedTests:294 testThePlayBarComesOnlyWithPlayOnBothPages: XCTAssertFalse failed - ★ …and none on the main page
+FlexibleRound7ViewsHostedTests:274 testThePlayBarComesOnlyWithPlayOnBothPages: XCTAssertNil failed: "(427.0, 682.0, 340.0, 46.0)" - ★ 11l, main page, Play off: no bar
+FlexibleRound7ViewsHostedTests:282 testThePlayBarComesOnlyWithPlayOnBothPages: XCTAssertTrue failed - the views are shared
+FlexibleRound7ViewsHostedTests:293 testThePlayBarComesOnlyWithPlayOnBothPages: XCTAssertNil failed: "(673.0, 735.0, 340.0, 80.0)" - ★ 11l, Settings, Play off: no bar
+FlexibleRound7ViewsHostedTests:294 testThePlayBarComesOnlyWithPlayOnBothPages: XCTAssertFalse failed - ★ …and none on the main page
+FlexibleRound7ViewsHostedTests:329 testTheSettingsPagesLoopKeepsHisPauseAcrossAnEditAndARebuild: XCTAssertTrue failed - premise: Play on — the Settings squish played
+FlexibleRound7ViewsHostedTests:330 testTheSettingsPagesLoopKeepsHisPauseAcrossAnEditAndARebuild: XCTAssertEqual failed: ("3") is not equal to ("0") - ★ his pause held across the edit, the rebuilt lattice and a group switch
+FlexibleRound7ViewsHostedTests:416 testXrayOffUnderTheCoveredFinishIsThePlainModel: XCTAssertEqual failed: ("none") is not equal to ("covered") - premise: his pad's finish is Covered
+FlexibleRound7ViewsHostedTests:443 testXrayOffUnderTheCoveredFinishIsThePlainModel: XCTAssertEqual failed: ("5125") is not equal to ("0") - ★ X-ray off, Covered: the lattice adds no pixel — the plain model (5125 px)
+FlexibleRound7ViewsTests:169 testAGroupsPrismShowsOnlyAfterHisPickNeverOnOpenNorForAPendingGroup: XCTAssertEqual failed: ("[]") is not equal to ("[1]") - ★ RED CONTROL: S1b drew the active Top's prism on open
+FlexibleRound7ViewsTests:280 testAStressRetryLandingNeverUndoesHisPause: XCTAssertEqual failed: ("1") is not equal to ("0") - ★ the retried sim landed and his pause held
+FlexibleRound7ViewsTests:281 testAStressRetryLandingNeverUndoesHisPause: XCTAssertFalse failed
+FlexibleRound7ViewsTests:234 testHisPauseHoldsAcrossAnEditUntilHePressesPlay: XCTAssertTrue failed - his pause is latched
+FlexibleRound7ViewsTests:257 testHisPauseHoldsAcrossAnEditUntilHePressesPlay: XCTAssertTrue failed - ★ his pause held across the edit, the landing, Save & Exit and a reading: ["played", "played", "played"]
+FlexibleRound7ViewsTests:258 testHisPauseHoldsAcrossAnEditUntilHePressesPlay: XCTAssertTrue failed - ★ …until he pressed Play
+FlexibleRound7ViewsTests:188 testPlayIsOffOnOpenAndOnlyPlayShowsTheBarAndPlays: XCTAssertFalse failed - ★ Play off: no bar
+FlexibleRound7ViewsTests:189 testPlayIsOffOnOpenAndOnlyPlayShowsTheBarAndPlays: XCTAssertFalse failed - ★ Play off: the loop never plays after the field lands
+FlexibleRound7ViewsTests:199 testPlayIsOffOnOpenAndOnlyPlayShowsTheBarAndPlays: XCTAssertTrue failed
+FlexibleRound7ViewsTests:209 testPlayIsOffOnOpenAndOnlyPlayShowsTheBarAndPlays: XCTAssertTrue failed - ★ no other view turns Play off
+FlexibleRound7ViewsTests:213 testPlayIsOffOnOpenAndOnlyPlayShowsTheBarAndPlays: XCTAssertFalse failed - Play off again: no bar
+FlexibleRound7ViewsTests:214 testPlayIsOffOnOpenAndOnlyPlayShowsTheBarAndPlays: XCTAssertFalse failed
+FlexibleHisProject:109 testTheBendViewHoldsTheWholeGroupAtFullDepth: failed - timed out waiting for his pad: the squish sims
+FlexibleRound7ViewsTests:381 testTheBendViewHoldsTheWholeGroupAtFullDepth: XCTUnwrap failed: expected non-nil value of type "Double" - premise: Group 2's field is current (the 3D sim)
+FlexibleRound7ViewsTests:146 testTheMainPageModelWearsNoRoleColourWhateverRolesAreHandedOver: XCTAssertGreaterThan failed: ("0") is not greater than ("0") - ★ RED CONTROL (model): roles and marks passed through are found
+FlexibleRound7ViewsTests:146 testTheMainPageModelWearsNoRoleColourWhateverRolesAreHandedOver: XCTAssertGreaterThan failed: ("0") is not greater than ("0") - ★ RED CONTROL (model, heat): roles and marks passed through are found
+FlexibleRound7ViewsTests:146 testTheMainPageModelWearsNoRoleColourWhateverRolesAreHandedOver: XCTAssertGreaterThan failed: ("0") is not greater than ("0") - ★ RED CONTROL (X-ray, lattice): roles and marks passed through are found
+FlexibleRound7ViewsTests:146 testTheMainPageModelWearsNoRoleColourWhateverRolesAreHandedOver: XCTAssertGreaterThan failed: ("0") is not greater than ("0") - ★ RED CONTROL (X-ray, lattice, heat): roles and marks passed through are found
+FlexibleRound7ViewsTests:343 testTheSettingsHeatShowsTheCurrentGroupEveryGroupOrNone: XCTAssertEqual failed: ("[1, 2, 3, 4, 5]") is not equal to ("[]") - ★ off: no heat colour on any map
+FlexibleRound7ViewsTests:344 testTheSettingsHeatShowsTheCurrentGroupEveryGroupOrNone: XCTAssertEqual failed: ("[1, 2, 3, 4, 5]") is not equal to ("[2, 4]") - ★ the current group (Group 2: faces 4 and 2) only
+FlexibleRound7ViewsTests:362 testTheSettingsHeatShowsTheCurrentGroupEveryGroupOrNone: XCTAssertTrue failed - ★ no glass over a heated face: glass [1, 4, 2, 3, 5, 0] heated [1, 2, 3, 4, 5]
+FlexibleRound7ViewsTests:288 testXrayIsItsOwnIconOffByDefaultAndTheDefaultIsTheOpaqueModel: XCTAssertEqual failed: ("4") is not equal to ("6") - ★ Heat · Stress · Lattice · Prisms · X-ray · Play
+FlexibleRound7ViewsTests:296 testXrayIsItsOwnIconOffByDefaultAndTheDefaultIsTheOpaqueModel: XCTAssertFalse failed - ★ Heat and the lattice no longer force X-ray (C2 and M6 reversed)
+FlexibleRound7ViewsTests:297 testXrayIsItsOwnIconOffByDefaultAndTheDefaultIsTheOpaqueModel: XCTAssertEqual failed: ("Optional(0.04)") is not equal to ("Optional(1.0)") - ★ the opaque model
+FlexibleRound7ViewsTests:298 testXrayIsItsOwnIconOffByDefaultAndTheDefaultIsTheOpaqueModel: XCTAssertEqual failed: ("Optional(false)") is not equal to ("Optional(true)") - ★ no wall drawn through an opaque body
+FlexibleRound7ViewsTests:306 testXrayIsItsOwnIconOffByDefaultAndTheDefaultIsTheOpaqueModel: XCTAssertTrue failed
+FlexibleRound7ViewsTests:310 testXrayIsItsOwnIconOffByDefaultAndTheDefaultIsTheOpaqueModel: XCTAssertTrue failed
+FlexibleRound7ViewsTests:310 testXrayIsItsOwnIconOffByDefaultAndTheDefaultIsTheOpaqueModel: XCTAssertTrue failed
+FlexibleRound7ViewsTests:313 testXrayIsItsOwnIconOffByDefaultAndTheDefaultIsTheOpaqueModel: XCTAssertEqual failed: ("Optional(0.04)") is not equal to ("Optional(1.0)")
+FlexibleRound7ViewsTests:316 testXrayIsItsOwnIconOffByDefaultAndTheDefaultIsTheOpaqueModel: XCTAssertTrue failed - ★ [Prisms] turns X-ray on itself
+FlexibleSquishPlayerTests:78 testHisPauseHoldsUntilHePressesPlay: XCTAssertTrue failed - ★ his pause is latched
+FlexibleSquishPlayerTests:81 testHisPauseHoldsUntilHePressesPlay: XCTAssertFalse failed - ★ a fresh lattice: still paused
+FlexibleSquishPlayerTests:83 testHisPauseHoldsUntilHePressesPlay: XCTAssertFalse failed - ★ the sims landing (restart from rest): still paused
+FlexibleSquishPlayerTests:84 testHisPauseHoldsUntilHePressesPlay: XCTAssertEqualWithAccuracy failed: ("0.0") is not equal to ("1.0") +/- ("1e-12") - …where he left it
+FlexibleSquishPlayerTests:86 testHisPauseHoldsUntilHePressesPlay: XCTAssertFalse failed - ★ a reading ending: still paused
+FlexibleSquishPlayerTests:90 testHisPauseHoldsUntilHePressesPlay: XCTAssertFalse failed - ★ a drag is his pause too
+FlexibleSquishPlayerTests:113 testHisPauseHoldsUntilHePressesPlay: XCTAssertFalse failed
+FlexibleSquishPlayerTests:113 testHisPauseHoldsUntilHePressesPlay: XCTAssertEqual failed: ("1.0") is not equal to ("0.0") - ★ Play off: at rest
+FlexibleSquishPlayerTests:115 testHisPauseHoldsUntilHePressesPlay: XCTAssertEqual failed: ("1.0") is not equal to ("0.0") - ★ Play off: his live drawing too sits at rest
+FlexibleSquishPlayerTests:117 testHisPauseHoldsUntilHePressesPlay: XCTAssertFalse failed

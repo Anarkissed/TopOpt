@@ -1,0 +1,26 @@
+The 21 identity binaries at the gate: base = 4e7648d8 (TO-core's tip, merged), head = 6c6102bc.
+Filtered as before (the build directory and 'wall time' lines masked). The one DIFFERS is a
+wall-clock line: test_lattice_variant's "[finish] ... 2.1 s" vs "1.5 s" (the filter masks only
+lines saying 'wall time'). Every other line of all 21 is identical.
+
+IDENTICAL test_lattice_gen
+IDENTICAL test_stepped_plan
+IDENTICAL test_lattice_boundary
+IDENTICAL test_lattice_clip_shell
+IDENTICAL test_lattice_void
+IDENTICAL test_lattice_skin_freeform
+IDENTICAL test_grading
+IDENTICAL test_lattice_refusal
+IDENTICAL test_lattice_density_field
+IDENTICAL test_lattice_certification
+IDENTICAL test_lattice_region_mask
+IDENTICAL test_analyze_fixed_design
+IDENTICAL test_lattice_hookup
+DIFFERS   test_lattice_variant
+IDENTICAL test_designbox_lattice_recert
+IDENTICAL test_loadcase_analyze
+IDENTICAL test_orient
+IDENTICAL test_lattice_depth_tie
+IDENTICAL test_lattice_void_exterior
+IDENTICAL test_bake_build_orientation
+IDENTICAL test_mesh_job

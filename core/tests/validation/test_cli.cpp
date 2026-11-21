@@ -338,9 +338,21 @@ int main() {
     const topopt::TriangleMesh proj =
         topopt::project_onto_cad_faces(src, run.model, po, att);
     const double ref = std::fabs(signed_volume(proj));
-    CHECK(std::fabs(vol - ref) <= 0.005 * ref,
+    // E1 (automatic finishing, 2026-11-03): the written mesh is now the projected
+    // mesh FINISHED (thin spots thickened, surface smoothed), so its own volume, which
+    // the run measured on the mesh it wrote, is the round trip's reference. Finishing
+    // adds material at thin spots (vf 0.30 here: +0.76 %), more than the 0.5 % bar.
+    const double written =
+        i < run.pipeline.report.variants.size() &&
+                run.pipeline.report.variants[i].finish.recheck_ran
+            ? run.pipeline.report.variants[i].finish.volume_after_mm3
+            : ref;
+    CHECK(std::fabs(vol - written) <= 0.005 * written,
           "re-imported volume within 0.5% of the mesh that was WRITTEN (the "
-          "projected one, since project_cad_faces now defaults on)");
+          "projected one, since project_cad_faces now defaults on, then finished)");
+    CHECK(i >= run.pipeline.report.variants.size() ||
+              run.pipeline.report.variants[i].finish.recheck_ran,
+          "each written variant was finished and re-checked (E1)");
 
     // A POSITIVE CONTROL for the line above, so it cannot pass by the
     // projection having quietly become a no-op: the armed default must actually

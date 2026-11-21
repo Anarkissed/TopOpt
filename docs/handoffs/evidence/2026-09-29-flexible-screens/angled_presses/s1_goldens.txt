@@ -1,0 +1,143 @@
+# Angled presses (task 2026-10-07), batch S1 — the #361 sync: the AP0 goldens re-run at the merged head, EVERY
+# difference attributed to the merged commit that caused it, then re-recorded as the post-S1 base.
+#
+# THE MERGES (merge-only, git merge --no-ff; never rebased, never forced, never pushed):
+#   b151dfa7  #361 origin/claude/flexible-squish-maths 021b7321 — the C1 addendum 3121151e (press_direction,
+#             face_region_ids, build_press_stack, the receipt's press block, the principal_2d fix), cut sectors in
+#             multi-face presses 254cb137; carries #358 23e6154e and #354 40eec418 (with 877bdb88).
+#             ONE conflicted file, WorkspacePlaceholder.swift, 4 hunks, resolved by the reviewer's ruling of
+#             2026-10-08 19:13: (i) H7/H8 re-applied on #354's legendDrilledIn; (ii) #354's card code taken
+#             (baked cells, topologyID), batch E's share (latticeCardHeldShares) dropped on those lines.
+#   ba599ca6  #358 origin/claude/raster-receipt-fields 36f5fdde — core + docs only, no conflict.
+#   11b264e8  #354 origin/claude/topopt-holes-quilting-298212 06c92c70 — the 8 commits past 40eec418; no conflict
+#             (WorkspacePlaceholder.swift auto-merged, +4 lines: the organic job window).
+#   origin/main f932266f — already contained ("Already up to date"): no merge commit.
+#
+# CORE: app/scripts/build_core.sh at 11b264e8 (exit 0, 6 min 39 s). TopOptCore.xcframework slices
+#   macos-arm64 15:31:15, ios-arm64-simulator 15:33:21, ios-arm64 15:35:08 (2026-10-08); each holds the
+#   addendum's marker "are not adjacent (no shared edge)" (strings, 1 hit each; core/src/flexible/faces.cpp:687);
+#   CoreFingerprint.generated.swift regenerated 15:35:11, value "11b264e8549c" (was "523dd2f90b04").
+#   The package test binary (15:38:15) carries the marker too.
+#
+# (1) THE AP0 GOLDENS AT THE MERGED HEAD, BEFORE ANY RE-RECORD
+#     SWIFT_DETERMINISTIC_HASHING=1 swift test --skip-build --filter 'TopOptFlowsTests\.(FlexibleAngledGoldenTests|FlexiblePressProbeTripwireTests)/'
+#       Executed 14 tests, with 7 failures (0 unexpected) in 15.912 (15.914) seconds
+#     38 golden comparisons: 33 "identical" (31 files; his r5's held send and scene job are compared twice),
+#     5 DIFFER (frames), + the probe test's 2 failures (core now accepts).
+#     IDENTICAL — every Flexible job byte and every core field:
+#       c1_pad_pure_run_job.json, c1_pad_pure_stamp_run_job.json, c1_pad_model_run_job.json, c1_pad_model_scene_job.json,
+#       his_r5_held_send_run_job.json, his_r5_scene_job.json, every send of his_0004 (2), his_r5 (2), A1_0002 (2),
+#       A1_0003 (3), A1_0004 (2) and their scene jobs, the six lattice_subtree_*.json (raw bytes, deterministic
+#       hashing), fields_c1_pad.txt, fields_his_0004.txt, fields_his_0004_r5.txt, frames_cube60.txt,
+#       frames_step_cube.txt; rounded_slab.txt re-recorded byte-identical.
+#     ⇒ #354's ProjectModel / LatticeSettings changes moved NO Flexible run-job or scene-job byte (FlexibleJob's
+#       `regions` included), and NO lattice subtree.
+#
+# (2) EVERY DIFFERENCE, AND ITS CAUSE
+#   (a) frames_c1_pad.txt, frames_his_0004.txt, frames_his_0004_r5.txt — 8 lines each, the SAME 8:
+#       the four side walls, regions 2, 3, 4, 5 ("face 2".."face 5"; on his 0004 and r5 faces 3 and 5 are his
+#       PRESSED pinch pair, 2 and 4 resting / unmarked): xAxis and yAxis only. The exact zero in the in-plane
+#       component became ±1.4802973661668751e-18 (3c3b4e81b4e81b4d), e.g. r5 face 3
+#         was  xAxis [-0 1 -0]                         yAxis [0 0 -1]
+#         now  xAxis [-0 1 1.4802973661668751e-18]     yAxis [0 1.4802973661668751e-18 -1]
+#       = the X axis turned 8.5e-17 degrees. load, centroid, uMin/vMin, extents, pitch, nu/nv, every column (both
+#       SHA-256s, every row digest, every sampled column) are UNCHANGED, so core's designs and fields are too.
+#       CAUSE: core's principal_2d fix, C1 addendum 3121151e (core/src/flexible/faces.cpp:82-103). It now takes the
+#       LONGER of the two eigenvector expressions, (l1 − c, b) or (b, l1 − a). On a 100 × 20 mm wall whose long side
+#       is the second basis axis the old (l1 − c, b) was (0, b) and normalised to an exact axis; the new (b, l1 − a)
+#       keeps b/(l1 − a) ≈ 1.5e-18 — the covariance's rounding noise, now carried instead of rounded away.
+#       His pad's top (face 1, regions 1000103 top A / 1000104 top B on r5) and bottom (face 0): UNCHANGED.
+#   (b) frames_m2.txt — 372 lines over 28 regions of the M2 stand (STEP): sub-micro changes, the same cause.
+#       (★ S1 verification: the counts corrected — 28 regions, not 29; 22 with moved column depths, not 20.)
+#       Every changed region's xAxis/yAxis/uMin/uExtent moved by ulps to 1e-8 relative; the pressed top, face 20:
+#       X axis turned 4.0e-7 degrees (in-plane component −1.62e-8 → −9.25e-9), uMin −68.500001148616803 →
+#       −68.500001042524886, uExtent 137.00000049431847 → ~137.0000004; 22 regions' column depths moved by
+#       ≤ 6e-9 relative (sha256-depth, row digests, sampled columns, latticeMM min/mean/max), resting face 18's
+#       axis turned 4.4e-9 degrees. No column count, no lattice count, no exit face changed in any region.
+#       CAUSE: principal_2d, 3121151e.
+#   (c) frames_l_bracket.txt — his 'l bracket 3' (STEP, frozen S0 92A8016E), 377 lines:
+#       FACE 0 (a 52 × 40 mm rectangle): the X axis TURNED 75.43 DEGREES —
+#         was  xAxis [0.2516 0.9678 0]   extents 51.798 × 60.392 mm   nu 56 nv 65   cell 3640   columns 2322
+#                                         footprintArea 2040.8203125   latticedColumns 2316
+#         now  xAxis [1 −8.2e-17 0]       extents 52 × 40 mm           nu 56 nv 43   cell 2408   columns 2320
+#                                         footprintArea 2039.0625      latticedColumns 2318
+#       i.e. the frame is now the rectangle's own sides; before, b was rounding noise and (l1 − c, b) was two noise
+#       terms "pointing anywhere" — the exact case of the critique (core-purity #2) and of 3121151e's comment.
+#       Faces 1, 3, 5: ulp-level axis changes (≤ 2.2e-14 degrees), 1 and 3 with ulp-level column values.
+#       CAUSE: principal_2d, 3121151e.
+#   (d) the probe: FlexibleAngledGoldenTests.testProbeDocumentsGetTheRecordedBaseRefusals failed twice (:301 tilt,
+#       :302 edge): core now ACCEPTS both angled forms. CAUSE: the C1 addendum 3121151e
+#       (core/src/flexible/job_block.cpp: face_region_ids, press_direction). The test is FLIPPED (renamed
+#       testProbeDocumentsAreAcceptedSinceS1AndTheBaseRefusalsAreKept); probe_refusals_base.json is KEPT (AP6 reads
+#       it); the recorder wrote this core's answers to probe_answers.json:
+#         {"base":"11b264e8","control":null,"core":"11b264e8549c","edge":null,"tilt":null}
+#   SECTOR OWNERSHIP (in_stack's back-ray, stack_owns_projection, 254cb137): NO change seen. fields_his_0004_r5.txt
+#       (core's assembled field of each squeeze group: density and owner SHA-256s, the owner histogram, per-layer
+#       digests, handovers — top A / top B are his two sectors of face 1) and fields_his_0004 / fields_c1_pad are
+#       byte-identical; so are the sectors' own frames (regions 1000103, 1000104). His sectors are flat and
+#       perpendicular to their load, where the old projection and the new back-ray agree.
+#
+# (3) THE CORE-AGREEMENT CONTROLS (spec risk: FlexibleStackMembership mirrors the OLD sector rule)
+#     swift test --skip-build --filter 'TopOptFlowsTests\.(FlexiblePinchTests|FlexibleGroupFieldPerfTests|FlexibleSqueezeGroupsTests|FlexibleSqueezeGroupsModelTests|FlexibleFEFieldTests|FlexibleFEVerifyGTests)/'
+#       Executed 37 tests, with 1 test skipped and 0 failures (0 unexpected) in 250.190 (250.196) seconds
+#       (the skip: FlexibleGroupFieldPerfTests.testTheAssemblerAndTheSegmentDesignCost, env-gated perf)
+#     FLEX-ASSEMBLE app vs core on top A + top B + face 3: 53248 lattice voxels · |Δρ| ≤ 0.0 · owners differ on 0
+#     FLEX-ASSEMBLE his split without cuts: owners differ on 0, |Δρ| ≤ 0.0
+#     FLEX-ASSEMBLE control, no blend: |Δρ| ≤ 0.09997618198394775, owners differ on 0
+#     FLEX-PINCH nothing pinched vs core's design: 5760 columns · |Δρ| ≤ 1.6653345369377348e-16 · |Δdepth| ≤ 1.5987211554602254e-14 mm
+#     No sector fixture went red, so FlexibleStackMembership's cut test is NOT replaced (the spec replaces it with a
+#     batched bridge call to core's stack_owns_projection only if one does). Note: every sector fixture is flat and
+#     perpendicular to its load; no fixture has a CURVED sector, where the two rules differ.
+#     ★ S1 VERIFICATION: a curved-sector fixture DID go red — FlexibleS1VerifyTests, the cylinder's side split by
+#     x ≥ 3 then x + 2z ≥ 37: the app's field differed from core's on 23 voxels (|Δρ| ≤ 0.256; c. 2c889951). The
+#     cut test is REPLACED (26769e2b): the bridge's flexible_scene_stack asks core's stack_owns_projection once for
+#     every voxel a sector's columns hold (FlexStackInfo.sector); owners differ on 0 in all three curved cases; the
+#     old cut test (the verdict stripped) is the red control (23). The controls above, re-run: unchanged.
+#
+# (4) RE-RECORDED AS THE POST-S1 BASE
+#     RECORD=1 SWIFT_DETERMINISTIC_HASHING=1 FLEX_AP_BASE=11b264e8 swift test --skip-build --filter 'TopOptFlowsTests\.FlexibleAngledGoldenRecorder/'
+#       Executed 10 tests, with 0 failures (0 unexpected) in 12.644 (12.646) seconds
+#     git status afterwards: MANIFEST.txt, frames_c1_pad, frames_his_0004, frames_his_0004_r5, frames_l_bracket,
+#     frames_m2 modified; probe_answers.json new; every other golden re-written byte-identical.
+#     The goldens and every press class at the post-S1 base:
+#     SWIFT_DETERMINISTIC_HASHING=1 swift test --skip-build --filter 'TopOptFlowsTests\.(FlexibleAngledGoldenTests|FlexiblePressProbeTripwireTests|FlexibleBatchCHookTests|FlexiblePressFixturesTests|FlexibleStageTests|FlexiblePressSaveTests|FlexibleSqueezeGroupsPressTests|FlexiblePressReframeTests|FlexiblePressReviewTests)/'
+#       Executed 61 tests, with 0 failures (0 unexpected) in 20.365 (20.372) seconds — 43 "GOLDEN … identical", 0 DIFFERS
+#     The same unseeded (CI's mode):
+#       Executed 61 tests, with 0 failures (0 unexpected) in 19.858 (19.864) seconds — 37 identical, 0 DIFFERS, 1
+#       PART-SKIP (the subtrees' RAW bytes need deterministic hashing; canonical subtrees and flexible blocks compared)
+#     RED RUN of the flipped probe test: FLEX_AP_MUTATE=unknown-key (a tilt whose key is press_directionX)
+#       Executed 1 test, with 1 failure (0 unexpected) in 1.810 (1.810) seconds
+#       :324 XCTAssertNil failed: "job.json: flexible: flexible.faces[0]: unknown key "press_directionX"" - ★ core accepts the tilt document
+#
+# (5) THE TRIPWIRE (S1's tests-first, 62e9767c): FlexiblePressProbeTripwireTests.testTheAddendumIsWhatTheProbeExpects
+#     FLEX-AP S1 tripwire · core 11b264e8549c: control accepted · tilt accepted · edge accepted
+#     FLEX-AP S1 tripwire control: press_directionX → job.json: flexible: flexible.faces[0]: unknown key "press_directionX"
+#     Pre-sync evidence: AP0's probe_refusals_base.json (core 523dd2f90b04 refused the tilt for its unknown
+#     "press_direction" and the edge for its missing "face_region_id").
+#
+# (6) LatticeStaleTypeTests RE-INCLUDED (the maintainer's 2026-10-03 instruction; 877bdb88 is in 021b7321):
+#     swift test --skip-build --filter 'TopOptFlowsTests\.LatticeStaleTypeTests/'
+#       Executed 6 tests, with 0 failures (0 unexpected) in 2.187 (2.188) seconds
+#     6/6, not 5/5: #354's c4cf899e (in 021b7321) added the sixth, testTheStaleTypePathAsksCoreNothing. The five of
+#     2026-10-03 all pass; no SIGTRAP.
+#
+# (7) THE H-HOOK ANCHORS, RE-GREPPED AFTER THE MERGES (line now ← line at 30198e91; every anchor's text unchanged except H8)
+#   WorkspacePlaceholder.swift — 39 Flexible lines before, 39 after:
+#     @StateObject flexibleMain 115←111 · fullScreenPageUp (+showFlexiblePage) 618←614 · `lattice.flexible == nil` gate 625←621
+#     · showFlexiblePage 674←670 · .onChange(of: showLatticeWizard) Flexible door 731-732←727-728
+#     · H4 MetalMeshView(mesh: flexibleMain.mesh…) 734←730 · H4 vertexTints 755←751 · H4 settleAnimated 786←782
+#     · H7 `if flexibleMain.read(project, mode: latticeLegendMode, face: fid, point: pt) { return true }` 816←812,
+#       followed by #354's `if legendDrilledIn { return true }` 817 (was `if latticeLegendMode.drilledIn { return true }`)
+#     · H8 `onLatticeProbe: legendDrilledIn && flexibleMain.wantsWallProbe(latticeLegendMode)` 831←827 (RE-APPLIED, ruling (i);
+#       was `latticeLegendMode.drilledIn && …`) · H8 readLattice 833←829 · #354's `onLatticeProbeExit: legendDrilledIn` 839
+#     · H4 stressTints 933←929 · H4 flexDisplacements/flexScale 934←930 · H4 bodyAlpha 1035←1031 · H3 flexibleLattice 1160←1156
+#     · H5 FlexibleMainViewToggles 1312←1308 · H6 FlexibleMainLegends 1335←1331 · B1 sim banner 1337←1333
+#     · FlexibleMainPlayerSlot 1365←1361 · onChooseFlexible 1381-1383←1377-1379 · FlexibleStageSheet 1392-1393←1388-1389
+#     · FlexibleStagePage + H2 didExitSettings 1397-1400←1393-1396 · C2 FlexibleExportMount 1403←1399
+#     · FlexibleStageChip 2800-2801←2796-2797 · H9 stage nav 5530, 5652, 5659, 5668, 5695, 5696 ← 5505, 5627, 5634, 5643, 5670, 5671
+#     · H10 FlexibleMainStatusPill 11627←11536
+#   MetalMeshView.swift — 52 Flexible lines before and after, text unchanged; #354 added 3 lines (a finger may always leave
+#     the key: `if let onLatticeProbeExit { onLatticeProbeExit(); return }`), so only the third init's
+#     `flexDisplacements:` line moved, 7089→7092; M4 5241, M6 3520, the third G-buffer writer 4679-4683, flexibleLattice 1563,
+#     stepFlexibleLoop 3284 unchanged.
+#   LatticeSettings.swift — H12 `s.flexible = nil` 1238←1167.

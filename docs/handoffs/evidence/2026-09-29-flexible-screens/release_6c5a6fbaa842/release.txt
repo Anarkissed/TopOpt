@@ -1,0 +1,26 @@
+# Release 6c5a6fbaa842 — 2026-11-04: Keep clear, exactly (TO-core 1a5a6255; core) + UI-Notes' Library back (0ea004be) + one chosen result (142bac0d), one worker swap
+# Reviewer ruling 21:40Z pick (a): Keep clear on its own core; K1 + grading/design box + the app half are the NEXT core release.
+# The core tree is 1a5a6255's, so TO-core's gates apply unchanged (his 17 jobs / 44 versions: 0 material in any Keep clear;
+# 17-test 17/17 vs 537c1752; ctest 169/170 + cli_demo, the one red a -j4 float flake that passed 11/11 alone).
+# The app tree is B9 f6662561's (UI-Notes' narrow sets: 145 and 724 tests, only the lib3mf trio red).
+# Commits:
+#   3e3e669a Keep clear, exactly: every export is cut out of its Keep clears by Manifold; the re-check refuses any material in one
+#   1a5a6255 Keep clear, exactly (2): the cut file is clean as read, a sealed Keep clear refuses
+#   3bc20de9 Release 2026-11-04: merge Keep clear, exactly (1a5a6255, TO-core): every export is cut out of its Keep clears exactly; the re-check refuses any material in one
+#   0ea004be Re-apply the Library part page, project page and clear pictures: his confirmed list (11-04)
+#   abe867aa Merge UI-Notes' Library back (0ea004be) into B9: L-a, L-b, L-c restored as built (his confirmation: keep the Project page, Export sheet layout, parts page and pictures decisions)
+#   142bac0d B5 (note 11, his "chosen" answer): ONE chosen result per part — Pick this sets it, the latest pick wins; it rings the card
+#   f6662561 Merge UI-Notes' Library chosen result (142bac0d) into B9: one chosen result per part (ring, tag, line, chip, card picture; Results' Picked reads it); LibraryPart.chosen optional
+#   0c4d5c9c Release 2026-11-04: merge B9 f6662561 — UI-Notes' Library back (0ea004be: L-a, L-b, L-c as built, his confirmed list) + one chosen result per part (142bac0d) (app only)
+# Gates:
+#   16:43 release 0c4d5c9c (local): core = 1a5a6255's, app = B9 f6662561's, fingerprint 6c5a6fbaa842
+#   16:50 worker CLI built: topopt-cli: core 6c5a6fbaa842 (dirty=false), built Nov  4 2026 16:50:52; its 3 data files are under the release worktree
+#   16:52 build_core green (the app's xcframework, core 6c5a6fbaa842)
+#   17:00 app classes (core job/report parsing + Library): exit 1; 	 Executed 338 tests, with 1 failure (0 unexpected) in 370.022 (370.055) seconds
+#   17:00 app reds: 1; other than the lib3mf AppModelTests: 1 (OrganicSampleCubeTests.testThickerIsLiveAndNeverRetraces )
+#   17:02 the one app red is known (OrganicSampleCube, red in the 11-04 daily suite and the 10-28 c3c8d4afcf6d suite at the same line); 337/338 otherwise
+#   17:30 iPad device build green
+#   17:31 preflight on his latest job: preflight: load path CONNECTED
+#   17:31 pushed 0c4d5c9c
+#   17:31 worker swapped: /health "fingerprint": "6c5a6fbaa842"; data paths under the release worktree; old kept as build-fix/topopt-cli.35764048bba3-replaced-20261104
+#   17:31 app_release.sh / app_release_tail.sh now expect 6c5a6fbaa842

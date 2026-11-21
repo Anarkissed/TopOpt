@@ -1,0 +1,27 @@
+# Release f2ca3eeb57ae (2026-10-26): the loose-piece fix (his hung Fine/Balanced strengthen runs) + Library B2/B3.
+# Reviewer: GO 2026-10-25 21:45 / 21:49 (root fix) / 00:08 (face connectivity); OK TO SWAP 2026-10-26 03:39.
+# Merge only (--no-ff); nothing rebased, forced, amended or stashed; NOT pushed.
+
+## Tree: claude/flexible-screens a66a1f4b (+ 2cef23d5's app thin-joint line before it)
+#   fdc1cf1c Merge Library B2 (8974f7c8) · 75572456 Merge Library B3 (3d7e66b5) · a6726cf0 Merge core-loose-pieces 4d67e43d
+#   2cef23d5 thin joints in plain words (RedesignToStrengthenTests 19/19, red first) · a66a1f4b Merge core-loose-pieces 85cadb88
+#   app/ tree after the Library merges = Library's own 3d7e66b5 (git diff --stat empty), so its green runs carry over.
+## Fingerprint
+#   printf '%s\n%s\n' "$(git rev-parse HEAD:core)" "$(git rev-parse HEAD:app/scripts/build_core.sh)" | shasum | cut -c1-12
+#   a66a1f4b -> f2ca3eeb57ae = f93e7a74 (the tree the full ctest ran on; 85cadb88 is docs only).
+## Core gates (claude/core-loose-pieces; evidence core_loose_pieces/runs.txt)
+#   full ctest on f93e7a74: 160/160 incl. cli_demo (1,994 s) · 17-test vs 322b1c78: 16 identical, test_recycle differs
+#   (5 edge/corner-hinged pieces in its void fixture, now loose) · red-first: test_loose_pieces, test_loose_review R1-R5
+#   re-certification of his 4 completed runs (13 accepted variants) with 180a23637fc6 vs c67ccbbf vs f93e7a74: identical
+#   his Fine job (8bc1e265 inputs) on c67ccbbf: first 5 fine-grid solves 186/136/177/128/127 l1 cycles, no fallback
+## Builds (MANIFOLD_ROOT=.vcpkg/installed-manifold, LIB3MF_PREFIX=/nonexistent-keep-macos-slice-3mf-free for build_core.sh)
+#   app/scripts/build_core.sh 01:08:34-01:12:58 rc 0; slice stamps macos/iossimulator/iphoneos f2ca3eeb57ae;
+#   CoreFingerprint.generated.swift value "f2ca3eeb57ae", buildTime "Oct 26 2026 01:12:58"
+#   app/scripts/build_cli_macos.sh (core/build-cli-f2ca3eeb57ae) 01:12:58-01:14:29 rc 0;
+#   --version: core f2ca3eeb57ae (dirty=false); sha256 a166329e019d9b3717652b0f498693df748fce55e5055f0835d5634987b0a7e2
+#   swift build (app/TopOptKit, macOS): Build complete.
+## Worker swap (atomic, /health idle: active 0 queued 0)
+#   old kept: build-fix/topopt-cli.180a23637fc6-replaced-20261026; new copied as topopt-cli.next then mv -f (same sha256)
+#   /health after: fingerprint f2ca3eeb57ae, active 0, queued 0. (/health runs --version live; no worker restart.)
+## Not run: the full app (Swift) suite (Library ran R7U21 2/2, Round9 10/10, R7U21 hosted 2/2, WorkspaceBodySize 2/2
+#   on the identical app tree; RedesignToStrengthenTests 19/19 here). One full app suite before the next push.

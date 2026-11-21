@@ -1,0 +1,96 @@
+# Release 8902d87b88ba — 2026-11-06: release (2) — core 565cc17c + its app half (B9 fe923106a2bc0640c9c5010351f5f7798be9fc8f), one worker swap
+# Reviewer rulings 11-06 09:41Z (what ships), 10:45Z (the release tree is his install tree; headers and library change
+# together at the final step; a build-time check stops a mixed vendor at link time) and 19:00Z (fold 565cc17c: a no-solid
+# lattice is never "inf, ACCEPTED"; ac70b9b6 stays out).
+# Gates in the gate tree B9 (its own vendor): red/green for the check — today's crash mix stops at link naming the symbol,
+# the old symlinked layout stops at #error, the pair builds for iPad. Core ctest: LatticeTypes' clean full run on 565cc17c
+# (183/184, the 21 identity binaries identical; the reviewer's ruling 11-06 19:00Z: it stands). 17-test vs c8c4b77a, the
+# mirror, preflight and the app classes (job / report / run_info parsers + every class run today): see r3/status.
+#   r3: 14:20 merged 565cc17c as fe923106; core == 565cc17c's; fingerprint 8902d87b88ba
+#   r3: 16:49 build_core green: topopt_vendored_core_8902d87b88ba in the pinned include and all three slices
+#   r3: 16:54 iPad build: exit 0 ** BUILD SUCCEEDED **
+#   r3: 16:55 CLI: topopt-cli: core 8902d87b88ba (dirty=false), built Nov  6 2026 16:55:00
+#   r3: 16:55 app_core_capability_mirror passed
+#   r3: 16:55 preflight on his latest job: preflight: load path CONNECTED
+#   r3: 17:02 17-test DIFFERS: test_matfree_cubic (14 diff lines; head exit: exit 0)
+#   r3: 17:02 17-test: 16/17 identical, c8c4b77a vs fe923106
+#   r3: 17:02 app classes: 314
+#   r3: 18:42 swift test exit 1; 	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.004) seconds
+#   r3: 18:42 app reds: 3 AppModelTests.testReopenedThreeMFProjectReimportsTheStlWorkingCopy AppModelTests.testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance AppModelTests.testThreeMFImportOptimisesOnDeviceEndToEnd 
+#   r3: FP=8902d87b88ba B9SHA=fe923106
+# Commits:
+#   478b63a6 Lattice types K1: FCC goes live — the generic strut generator, each type's own numbers, the sample block
+#   d1229fff Lattice types K1: Kelvin goes live
+#   695550ce Lattice types K1: Kelvin's evidence and handoff (gate green, 165/165)
+#   35dc4ab0 Lattice types K1: Rhombic dodecahedron goes live (Stepped yes, Doubled refused, measured)
+#   ede88a02 Lattice types K1: Rhombic's evidence and handoff (gate green, 165/165)
+#   9e4484be Lattice types K1: Diamond goes live (Doubled and Stepped both join, measured)
+#   78505f3a Lattice types K2 (WIP, local): sheets' generator, wall law, rows, facts
+#   92d5574f Lattice types K2 (WIP, local): sheet jobs at the parse (Rim/none parse; Diagrid stated or default, organic, Stepped refused)
+#   9f1aa9c9 Lattice types K1: Diamond's evidence and handoff (gate green, 165/165)
+#   58b59339 Lattice types K1: BCC goes live (Doubled and Stepped both join, measured)
+#   af9b60a2 Lattice types K1: SC and BCC receipts carry the R3 directional note
+#   9118402c Lattice types K1: Diagrid links each type's own landing gap (FCC, BCC, SC)
+#   7ae8eea7 Lattice types K1: Simple cubic goes live (Doubled and Stepped both join, measured)
+#   caa18fc0 Lattice types K1: BCC's evidence and handoff (gate green, 165/165)
+#   ca7e6b2d Merge BCC's evidence and handoff (caa18fc0) into the local line
+#   576e2faa Lattice types K1: Simple cubic's evidence and handoff (gate green, 165/165); K1 complete
+#   13ef314c Merge claude/lattice-types-k1 (576e2faa, K1 complete) into the K2 work
+#   07ffbfda Lattice types K2 (WIP, local): the bend probe can solve matrix-free (TOPOPT_BEND_MATFREE=1)
+#   ccf0e03b Lattice types K2: Gyroid and Schwarz-D go live (measured floors; sample block one piece)
+#   472b5632 Lattice types K2: the certification test counts the two sheets (9 certifiable)
+#   eede708a Lattice types K2: Gyroid's and Schwarz-D's evidence and handoff (gate green); queue complete
+#   e2b1bf5c Lattice types, rulings of 2026-11-02: Findings 6 and 7 (a)+(b)
+#   a717389e Lattice types, Finding 7: three gate failures of e2b1bf5c fixed
+#   c009fa30 Lattice types, ruling (3): the certificate is rebuilt from what shipped
+#   8c4f8e10 Lattice types, rulings of 2026-11-02 step 1: handoff and evidence (gate green)
+#   c38a95b3 Lattice types: Finding 8 (bounded sheet simplification) and the sample coupon
+#   661f6947 Lattice types, Finding 8: the sheet facts read the final measurement (3,802 / 6,105 a cell)
+#   262b731f Lattice types, ruling (c): octet made honest (its law and tensor are the full cell's)
+#   3a1b9b3d Lattice types, ruling (c): three tests the full ctest found, re-pinned to the full cell
+#   acf79924 Lattice types, ruling (c): handoff and evidence (gate green)
+#   81f49eef Lattice types, rulings of 2026-11-02: Finding 8 and the coupon, merged onto step (c)
+#   5bd610c1 Lattice types, Finding 8: a run's sheet no longer stalls the simplifier
+#   4dc2d1a1 Lattice types, Finding 8 + the coupon: handoff and evidence (gate green)
+#   214df60e Merge LatticeTypes K1 (4dc2d1a1) onto Keep clear exact (1a5a6255): the base of the grading + design box batch
+#   62a703e9 Grading + a design box: the plan is laid around the added material, and no level lays a cell the certificate calls solid
+#   c46bc068 Lattice E2.1: a scenario job's lattice is graded on the worst scenario and certified under each
+#   ba27a4ea Lattice E2.2 + E2.3: the "- Lattice faces" mode; No lattice on a face region, tested
+#   7445bb6c Lattice E2.5: two regions on one face, the deeper owns the overlap
+#   763dd24d Lattice E2 tests: lattice_part jobs with growth off
+#   49048743 Lattice the part under a design box: the part, not the box
+#   4ace41f5 Lattice E3: an include region's own grading (band, exponent, mode, shape grade)
+#   4e7648d8 App/core mirror: core's remaining graded design-box refusal is the organic lattice
+#   3f3851a2 Merge TO-core's grading + design box (4e7648d8) into E2 + E3
+#   6c6102bc Cell plan: a block the 2:1 balance splits is never left mixed (swept)
+#   b2a7267a lattice_scenarios §5: lattice a top-face layer; every section starts from an empty folder
+#   7d6c5dbc Handoff + evidence: E2 (less E2.4), E3 and the cell-plan slice
+#   00e89e93 Merge LatticeTypes' tip 7d6c5dbc into B9 for release (2) (ruling 11-06 09:41Z): K1, TO-core's grading + design box (4e7648d8), E2 less E2.4, E3, the cell-plan fix — so the app half is written against the core it ships with
+#   15c12927 No-solid lattice is never "margin inf, ACCEPTED"; run_info writes null, not inf
+#   5fe8e992 E2.4: outer_finish "none", the open lattice, certified with its surface cells uncredited
+#   f721be2a E3: an include region's own cell window (cell_min_mm, cell_max_mm) on the swept plan
+#   ce946671 (d) Shape grade on a lattice with no regions seeds from the part's own surface
+#   565cc17c E3 "off" with no density: the lightest one density that certifies what ships
+#   a3eb44ef The core headers and library are one build, or the app does not link (reviewer's ruling 11-06, after his iPad crash)
+#   e3aa8dac Release (2), UI-Notes' app half (the reviewer's ruling 11-06 09:41Z): B6's saved keys reach the job; tests stop dirtying tracked evidence
+#   901cd5f6 Release (2), #362's app half on core 7d6c5dbc (reviewer's ruling 11-06 09:41Z)
+#   071e7af2 Merge UI-Notes' release (2) app half (e3aa8dac, ruling 11-06 09:41Z) into B9: lattice.whole_part from Start from, lattice.scenarios from the folder switches, switched-off groups leave the lattice jobs' loads; tests stop dirtyin
+#   d83552f7 B6 face names (the reviewer's ruling 11-06 09:41Z, part 3; note 28): one namer for Lattice Setup's face rows and Topology's
+#   88c85d27 Tests stop dirtying tracked evidence: the two lattice stage-repair captures (r0, r1) go through EvidenceOut (the reviewer's ruling 11-06 09:41Z); on core 7d6c5dbc they rewrote 2026-08-17's numbers with K1's
+#   a0827c42 Merge UI-Notes' B6 face names (d83552f7, the reviewer's ruling 11-06 09:41Z part 3) into B9 for release (2): one namer from the part's own axes for Lattice Setup's face rows and Topology's face cards; Flexible keeps "Face n" un
+#   808d32c3 Re-pin LatticeStageRepairHisPart for K1 (release (2)): his part's 4 mm card reads 1.12 mm / 90 % / 3.6, as LatticeStageRepairEvidence's card (1.17 mm / 60 % / 3.4 on the legs-only law)
+#   44c41f3e Release (2): the classes the gate set missed, on core 7d6c5dbc — re-pins for K1 (octet's full-cell law: his region cells 8.90 / 6.69 %, r/L 0.1166 at 0.48, his card's old-law literal) and E2 (nine types: Kelvin and BCC wait f
+#   fe923106 Merge LatticeTypes' 565cc17c into B9 for release (2) (the reviewer's ruling 11-06 19:00Z, part 1): a lattice with no solid voxel carrying stress is never "margin inf, ACCEPTED" — the strut law gates it, or it is NOT CERTIFIED
+#   c348fbbd Release (2) 2026-11-06: merge B9 fe923106a2bc0640c9c5010351f5f7798be9fc8f — core 565cc17c (LatticeTypes' K1, TO-core's grading + design box 4e7648d8, E2, E3 with the region window and one density, the cell-plan fix, and the r
+# Gates (this tree):
+#   18:43 his uncommitted files (left alone): app/TopOpt-Info.plist app/TopOpt.xcodeproj/project.pbxproj app/TopOpt.xcodeproj/xcshareddata/xcschemes/TopOpt.xcscheme 
+#   18:43 his latest job for the preflight: /Users/nadim/.topopt-worker/f9c8124fd2df48b3 (read only)
+#   18:47 merged B9 as c348fbbd (local); app + core == B9's; fingerprint 8902d87b88ba
+#   18:49 build_core green: the pinned include and the stamped library are one build (topopt_vendored_core_8902d87b88ba in all three slices)
+#   18:50 worker CLI built: topopt-cli: core 8902d87b88ba (dirty=false), built Nov  6 2026 18:50:07; 3 data paths, all under the release worktree
+#   18:50 app_core_capability_mirror passed (red until the app half; green with it)
+#   18:55 iPad device build green (this tree's own pair)
+#   18:56 preflight on his latest job: preflight: load path CONNECTED
+#   18:56 pushed c348fbbd
+#   18:57 worker swapped: /health "fingerprint": "8902d87b88ba"; data paths under the release worktree; preflight again OK; old kept as build-fix/topopt-cli.6c5a6fbaa842-replaced-20261106
+#   18:57 app_release.sh / app_release_tail.sh now expect 8902d87b88ba

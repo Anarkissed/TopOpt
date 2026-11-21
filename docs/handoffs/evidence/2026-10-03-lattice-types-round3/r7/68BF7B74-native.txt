@@ -1,0 +1,20 @@
+# R7 proof, 68BF7B74 (native copy of snapshot S1-2026-10-02), 2026-10-05 21:45
+# harness: LatticeR7OwnershipProof (R7_PROJECT_DIR=<fresh copy>), one process, three bakes: rule off (token 11), on (12), on again (13, null control)
+Test Case '-[TopOptFlowsTests.LatticeR7OwnershipProof testTheOverlapsAndTheTexelsBeforeAndAfter]' passed (390.887 seconds).
+R7-PROJECT M2 verticalStand algorithm stepped stage Optional(TopOptFlows.LatticeStageMode.aesthetic) step-halves false density sim cells auto
+R7-PAIRS before (a) centre-owned-by-other 828 [(key: "(0,2)", value: 275), (key: "(0,3)", value: 192), (key: "(0,4)", value: 36), (key: "(1,2)", value: 200), (key: "(1,3)", value: 68), (key: "(1,4)", value: 35), (key: "(2,3)", value: 19), (key: "(3,4)", value: 3)] | (b) straddlers 851 [(key: "(0,2)", value: 58), (key: "(0,3)", value: 94), (key: "(0,4)", value: 23), (key: "(1,2)", value: 526), (key: "(1,3)", value: 122), (key: "(1,4)", value: 18), (key: "(2,3)", value: 8), (key: "(3,4)", value: 2)]
+R7-PAIRS after  (a) centre-owned-by-other 0 [] | (b) straddlers 1574 [(key: "(0,2)", value: 61), (key: "(0,3)", value: 199), (key: "(0,4)", value: 74), (key: "(1,2)", value: 540), (key: "(1,3)", value: 453), (key: "(1,4)", value: 198), (key: "(2,3)", value: 41), (key: "(3,4)", value: 8)]
+R7-CELLS before 9760 after 9946
+R7-TEXELS changed 1684 owner-changed 1590 [(key: "r0→r-1", value: 87), (key: "r0→r2", value: 201), (key: "r0→r3", value: 154), (key: "r0→r4", value: 108), (key: "r1→r-1", value: 24), (key: "r1→r2", value: 313), (key: "r1→r3", value: 304), (key: "r1→r4", value: 196), (key: "r2→r-1", value: 84), (key: "r2→r3", value: 44), (key: "r3→r-1", value: 41), (key: "r3→r4", value: 13), (key: "r4→r-1", value: 21)] same-owner-inside-a-yielded-cell 94 same-owner-in-a-cell-R7-let-in 0 same-owner-elsewhere 0 of 172960 | cells yielded 401 []
+R7-EMPTIED texels left with no cell 257 (4404 mm³ at pitch 2.578) by whose space: [(key: "its-own", value: 129), (key: "no-prism", value: 1), (key: "r0\'s", value: 22), (key: "r1\'s", value: 21), (key: "r2\'s", value: 43), (key: "r3\'s", value: 27), (key: "r4\'s", value: 14)]
+
+## core's checks on every cell (classify_plan.py, a port of stepped_validate_plan) — before / after
+# NOTE: the native Stepped run takes no plan (core lays its own any-step layout); this classifies the preview's
+# plan as if it were sent as a doubled plan. Within-region overlaps are the any-step packer's fill pass
+# (finest tiles laid over partly taken space, painting only unowned texels) and predate R7.
+### before
+causes: {'R5-OVERLAP-SAME-REGION': 3948, 'R1-ALIGN': 6323, 'R2-DEPTH': 1528, 'MENU': 1987, 'R3-OVERLAP-OTHER-REGION': 907}
+exact positive-volume overlaps: 1109 pair(s) within a region, 1679 pair(s) across regions
+### after
+causes: {'R5-OVERLAP-SAME-REGION': 3982, 'R1-ALIGN': 6657, 'R2-DEPTH': 1449, 'MENU': 2474, 'R3-OVERLAP-OTHER-REGION': 1172}
+exact positive-volume overlaps: 1175 pair(s) within a region, 1574 pair(s) across regions

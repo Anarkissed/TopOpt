@@ -341,6 +341,28 @@ def main():
             out_dir = args[args.index("--out") + 1]
         (run if args[0] == "run" else analyze)(out_dir, job_path)
         return
+    # ★ Organic cut 2 (organic_cut2_e2e.py): the lattice file and the strengthening, as files only (no geometry): the
+    # invocation is written to out/invocation.json so the harness can see which command ran; the strengthening writes
+    # strengthen.json and two round folders as core does (handover b).
+    if args and args[0] in ("lattice-file", "organic-strengthen"):
+        out_dir = args[args.index("--out") + 1] if "--out" in args else "."
+        os.makedirs(out_dir, exist_ok=True)
+        with open(os.path.join(out_dir, "invocation.json"), "w") as f:
+            json.dump({"argv": args}, f)
+        if args[0] == "organic-strengthen":
+            emit("organic-strengthen: round 1: fail, 12 struts under")
+            emit("organic-strengthen: round 2: pass")
+            for r in ("r1", "r2"):
+                os.makedirs(os.path.join(out_dir, r), exist_ok=True)
+                with open(os.path.join(out_dir, r, "strength.json"), "w") as f:
+                    json.dump({"round": r}, f)
+            with open(os.path.join(out_dir, "r2", "strengthened.json"), "w") as f:
+                json.dump({"version": 2, "additions": "additions.bin"}, f)
+            with open(os.path.join(out_dir, "r2", "additions.bin"), "wb") as f:
+                f.write(b"\x01\x02\x03")
+            with open(os.path.join(out_dir, "strengthen.json"), "w") as f:
+                json.dump({"ok": True, "code": "done", "strengthened": "r2/strengthened.json"}, f)
+        return
     sys.stderr.write("stub_cli: unknown invocation %r\n" % (args,))
     sys.exit(2)
 

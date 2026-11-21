@@ -28,7 +28,9 @@ final class LatticeDepthDetentTests: XCTestCase {
                                             minExtrudableWidthMM: Self.w)
         XCTAssertEqual(d, b.cellsPerMemberFloor * b.printabilityFloorDensestMM,
                        accuracy: 1e-12)
-        XCTAssertEqual(d, 5.87, accuracy: 0.01, "his part's number")
+        // ★ RE-PINNED (release (2), K1 item 5): the thinnest member that holds a certified octet at his 0.45 mm bead is
+        // 5.58 mm on the full cell's law (5.87 on the legs-only law)
+        XCTAssertEqual(d, 5.58, accuracy: 0.01, "his part's number")
     }
 
     /// ★★ AND SNAPPING TO IT ACTUALLY CERTIFIES. A magnet that lands one ULP
@@ -85,8 +87,9 @@ final class LatticeDepthDetentTests: XCTestCase {
         let coarse = try XCTUnwrap(LatticeDepthDetent.certifyingDepthMM(
             topology: "octet", minExtrudableWidthMM: 0.80))
         XCTAssertLessThan(fine, coarse)
-        XCTAssertEqual(fine, 3.26, accuracy: 0.02)
-        XCTAssertEqual(coarse, 10.43, accuracy: 0.02)
+        // ★ RE-PINNED (release (2), K1 item 5): 3.10 / 9.93 on the full cell's law (3.26 / 10.43 legs-only)
+        XCTAssertEqual(fine, 3.10, accuracy: 0.02)
+        XCTAssertEqual(coarse, 9.93, accuracy: 0.02)
     }
 
     // MARK: the feel — one hysteresis rule, not two

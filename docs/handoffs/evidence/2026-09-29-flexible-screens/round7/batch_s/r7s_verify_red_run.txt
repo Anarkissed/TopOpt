@@ -1,0 +1,45 @@
+# R7-S verify fixes: the RED run — the new tests against the STUBS (today's rules), 2026-10-14
+# swift test --skip-build --scratch-path /tmp/r7s-build --filter <the 4 unit + 2 hosted tests>
+# 6 tests: 5 red for their reasons (18 failures); testAPopUpAboutAnotherGroupsFaceLeavesTheTab pins present()'s rule that
+# was ALREADY built (finding: no test exercised it) — green, its red control (today's present()) run inside it.
+
+FlexibleR7SettingsHostedTests.swift:356: error: -[TopOptFlowsTests.FlexibleR7SettingsHostedTests testResetAllOnHisPadOpensNoPopUpOverModelAndNew] : XCTAssertEqual failed: ("["fix-press-1"]") is not equal to ("[]") - no pop-up over [Model] [New]
+FlexibleR7SettingsHostedTests.swift:362: error: -[TopOptFlowsTests.FlexibleR7SettingsHostedTests testResetAllOnHisPadOpensNoPopUpOverModelAndNew] : XCTAssertEqual failed: ("["fix-press-1"]") is not equal to ("[]") - …with no pop-up beside it
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsHostedTests testResetAllOnHisPadOpensNoPopUpOverModelAndNew]' failed (20.622 seconds).
+FlexibleR7SettingsHostedTests.swift:268: error: -[TopOptFlowsTests.FlexibleR7SettingsHostedTests testTheNameFieldNamesItsOwnGroupAndTheRailTabSaysItWhole] : XCTAssertEqual failed: ("["Thumbs", "Group 2", "Group 3"]") is not equal to ("["Group 1", "Thumbs", "Group 3"]") - what he typed names the group he typed it on — never the tab he moved to
+FlexibleR7SettingsHostedTests.swift:269: error: -[TopOptFlowsTests.FlexibleR7SettingsHostedTests testTheNameFieldNamesItsOwnGroupAndTheRailTabSaysItWhole] : XCTAssertTrue failed - no field left open on Group 1's header: ["groupNameField-1"]
+FlexibleR7SettingsHostedTests.swift:270: error: -[TopOptFlowsTests.FlexibleR7SettingsHostedTests testTheNameFieldNamesItsOwnGroupAndTheRailTabSaysItWhole] : XCTAssertEqual failed: ("Optional("Group 2")") is not equal to ("Optional("Thumbs")") - Group 2's rail tab says it
+FlexibleR7SettingsHostedTests.swift:276: error: -[TopOptFlowsTests.FlexibleR7SettingsHostedTests testTheNameFieldNamesItsOwnGroupAndTheRailTabSaysItWhole] : XCTAssertEqual failed: ("Index finger pad") is not equal to ("Index finger") - 12 characters at most
+FlexibleR7SettingsHostedTests.swift:277: error: -[TopOptFlowsTests.FlexibleR7SettingsHostedTests testTheNameFieldNamesItsOwnGroupAndTheRailTabSaysItWhole] : XCTAssertEqual failed: ("Optional("Group 3")") is not equal to ("Optional("Index finger")") - the rail's tab says it at once (nothing else changed)
+FlexibleR7SettingsHostedTests.swift:286: error: -[TopOptFlowsTests.FlexibleR7SettingsHostedTests testTheNameFieldNamesItsOwnGroupAndTheRailTabSaysItWhole] : XCTAssertEqual failed: ("Index finger pad") is not equal to ("Index finger")
+FlexibleR7SettingsHostedTests.swift:288: error: -[TopOptFlowsTests.FlexibleR7SettingsHostedTests testTheNameFieldNamesItsOwnGroupAndTheRailTabSaysItWhole] : XCTAssertGreaterThanOrEqual failed: ("10.5") is less than ("14.0") - 'Index finger' is drawn whole on the rail (10.0 of 14.0 pt)
+FlexibleR7SettingsHostedTests.swift:286: error: -[TopOptFlowsTests.FlexibleR7SettingsHostedTests testTheNameFieldNamesItsOwnGroupAndTheRailTabSaysItWhole] : XCTAssertEqual failed: ("Index finger") is not equal to ("WWWWWWWWWWWW")
+FlexibleR7SettingsHostedTests.swift:288: error: -[TopOptFlowsTests.FlexibleR7SettingsHostedTests testTheNameFieldNamesItsOwnGroupAndTheRailTabSaysItWhole] : XCTAssertGreaterThanOrEqual failed: ("14.5") is less than ("28.0") - 'WWWWWWWWWWWW' is drawn whole on the rail (14.0 of 28.0 pt)
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsHostedTests testTheNameFieldNamesItsOwnGroupAndTheRailTabSaysItWhole]' failed (31.483 seconds).
+	 Executed 2 tests, with 11 failures (0 unexpected) in 52.105 (52.105) seconds
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testAPopUpAboutAnotherGroupsFaceLeavesTheTab]' passed (3.786 seconds).
+FlexibleR7SettingsTests.swift:510: error: -[TopOptFlowsTests.FlexibleR7SettingsTests testATapOnNewStartsAGroupFromAFaceNoGroupHolds] : XCTAssertEqual failed: ("group(1)") is not equal to ("newGroup") - the tab stays [+ New] — never Group 1
+FlexibleR7SettingsTests.swift:511: error: -[TopOptFlowsTests.FlexibleR7SettingsTests testATapOnNewStartsAGroupFromAFaceNoGroupHolds] : XCTAssertEqual failed: ("nil") is not equal to ("Optional(3)") - the keypad asks face 3's weight (no main-page load presses it)
+FlexibleR7SettingsTests.swift:513: error: -[TopOptFlowsTests.FlexibleR7SettingsTests testATapOnNewStartsAGroupFromAFaceNoGroupHolds] : XCTAssertTrue failed - the typed weight starts it
+FlexibleR7SettingsTests.swift:514: error: -[TopOptFlowsTests.FlexibleR7SettingsTests testATapOnNewStartsAGroupFromAFaceNoGroupHolds] : XCTUnwrap failed: expected non-nil value of type "FlexibleSqueezeGroup"
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testATapOnNewStartsAGroupFromAFaceNoGroupHolds]' failed (2.807 seconds).
+FlexibleR7SettingsTests.swift:412: error: -[TopOptFlowsTests.FlexibleR7SettingsTests testEveryGroupHasATrashAndATapToRenameName] : XCTAssertLessThanOrEqual failed: ("16") is greater than ("12")
+FlexibleR7SettingsTests.swift:413: error: -[TopOptFlowsTests.FlexibleR7SettingsTests testEveryGroupHasATrashAndATapToRenameName] : XCTAssertEqual failed: ("16") is not equal to ("12")
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testEveryGroupHasATrashAndATapToRenameName]' failed (2.405 seconds).
+FlexibleR7SettingsTests.swift:559: error: -[TopOptFlowsTests.FlexibleR7SettingsTests testResetAllPopsNothingOverModelAndNew] : XCTAssertFalse failed - no pop-up over [Model] [New]
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testResetAllPopsNothingOverModelAndNew]' failed (1.944 seconds).
+	 Executed 4 tests, with 7 failures (0 unexpected) in 10.942 (10.942) seconds
+	 Executed 6 tests, with 18 failures (0 unexpected) in 63.047 (63.048) seconds
+	 Executed 6 tests, with 18 failures (0 unexpected) in 63.047 (63.048) seconds
+FLEX-R7-VERIFY-RESET exit 'Fix 1 thing' · fixes ["fix-press-1"]
+FLEX-R7-VERIFY-RESET control fixes ["fix-press-1"]
+FLEX-R7-VERIFY-NAME
+  his case: names ["Thumbs", "Group 2", "Group 3"] · fields after the switch ["groupNameField-1"]
+  rail 'Index finger': drawn 62×10, needs 14 pt tall
+  rail 'WWWWWWWWWWWW': drawn 66×14, needs 28 pt tall
+  player note drawn 93 pt beside 'WWWWWWWWWWWW'
+  control 1: names ["Palms", "Group 2", "WWWWWWWWWWWW"] · fields ["groupNameField-1"]
+  control 2: rail WWWWWWWWWWWW
+  control 3: one line 10 pt tall
+FLEX-R7-VERIFY pop-up issue noLatticeUnder|1 on 1000105
+  - TopOptFlowsTests (XCTest)

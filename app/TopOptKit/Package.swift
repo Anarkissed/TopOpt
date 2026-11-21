@@ -109,8 +109,11 @@ var packageTargets: [Target] = [
         // product (below); the bridge itself references OCCT only through the
         // core, so it needs no binary dependency — just the compile define.
         dependencies: ["TopOptCore"],
+        // Clipper2 2.0.1, vendored (Boost licence) for the lattice outline's union (P4, 2026-10-10)
+        exclude: ["clipper2/LICENSE", "clipper2/README.md"],
         cxxSettings: [
             .headerSearchPath("../../vendor/include"),
+            .headerSearchPath("clipper2/include"),
             .define("TOPOPT_BRIDGE_HAS_OCCT", .when(platforms: occtPlatforms)),
             // -stdlib=libc++ so the C++ standard-library include path reaches
             // the module build under Xcode's explicit-modules scanner, where
@@ -143,6 +146,10 @@ var packageTargets: [Target] = [
             // CI app-macos failed to link TopOptKitPackageTests on
             // `_SparseFactor` and friends.
             .linkedFramework("Accelerate"),
+            // ★ ZLIB (Organic cut 2, OF5): the core's streaming 3MF writer deflates through the system zlib
+            // (threemf_stream.cpp); a static archive cannot carry `-lz`, so whoever links libtopopt names it (libz is
+            // in every Apple SDK, macOS and iOS).
+            .linkedLibrary("z"),
         ] + macOSLib3mfLinkerFlags
     ),
     .testTarget(
@@ -167,7 +174,7 @@ var packageTargets: [Target] = [
         // `swift test` could not link at all with lib3mf present, and 8 3MF tests
         // failed with "not available in this build" when it was absent. Gated on
         // the same disk presence, so an OCCT/3MF-free checkout is unchanged.
-        linkerSettings: [.linkedFramework("Accelerate")] + macOSLib3mfLinkerFlags
+        linkerSettings: [.linkedFramework("Accelerate"), .linkedLibrary("z")] + macOSLib3mfLinkerFlags
     ),
     // M7.2 design system: SwiftUI-only, no C++ interop (so it needs none of
     // the bridge's Cxx build settings and stays cross-platform).
@@ -183,6 +190,14 @@ var packageTargets: [Target] = [
     .target(
         name: "TopOptFlows",
         dependencies: ["TopOptKit", "TopOptDesign"],
+        // ★ THE ORGANIC SAMPLE IS THE PR 353 TEST CUBE, AS PRINTED (maintainer,
+        // 2026-09-03): its emitted spans and receipt ride as resources, so the wizard's
+        // sample is real traced geometry through the run's own preview path.
+        // (The folder is NOT named "Resources": a shallow iOS bundle with a top-level
+        // directory of that name fails CodeSign — "bundle format unrecognized".)
+        // ★ Install 3 (his 11-17): the strength check's explainer — the repo's docs/strength-check files as bundled copies
+        // (StrengthCheckDocsTests holds them byte-equal), the page, KaTeX 0.16.11 and marked 12.0.2 (MIT; offline).
+        resources: [.copy("OrganicSample"), .copy("StrengthCheckWeb")],
         swiftSettings: [.interoperabilityMode(.Cxx)]
     ),
     .testTarget(
@@ -202,7 +217,7 @@ var packageTargets: [Target] = [
         // `swift test` could not link at all with lib3mf present, and 8 3MF tests
         // failed with "not available in this build" when it was absent. Gated on
         // the same disk presence, so an OCCT/3MF-free checkout is unchanged.
-        linkerSettings: [.linkedFramework("Accelerate")] + macOSLib3mfLinkerFlags
+        linkerSettings: [.linkedFramework("Accelerate"), .linkedLibrary("z")] + macOSLib3mfLinkerFlags
     ),
     // Carrier for the iOS OCCT/lib3mf frameworks. The app's xcodeproj links the
     // `TopOptOCCT` product; the shim keeps that product valid on an OCCT-free

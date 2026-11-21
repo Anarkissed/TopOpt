@@ -1,0 +1,5 @@
+Edge 16: Edge 16 depth 3.0 mm · legacy false · across [1.0, 0.35, 1.0, 1.0] · drawn ["across", "along"] · rows ["pressShape-Edge 16"] · sent 0
+E4_01_13p_edge16_two_sided_curve_top.png: marks [] · solid ["Edge 14": false, "Edge 16": false] · toast -
+E4_02_13p_edge16_two_sided_curve_45.png: marks ["flatArrow-Edge 16", "flatDepthChip-Edge 16", "flatKnob-Edge 16", "flatPrism-Edge 16", "flatTiltBox-Edge 16", "flatTwistBox-Edge 16"] · solid ["Edge 14": false, "Edge 16": false] · toast -
+stamp: Fingertip 5.400000000000001 × 7.200000000000002 turn 90.0 · slid to 13.84 of 3.600000000000001...16.4
+E4_03_13p_edge16_stamp_slid_along_edge_45.png: marks ["flatArrow-Edge 16", "flatDepthChip-Edge 16", "flatKnob-Edge 16", "flatPrism-Edge 16", "flatTiltBox-Edge 16", "flatTwistBox-Edge 16"] · solid ["Edge 14": false, "Edge 16": false] · toast -

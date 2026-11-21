@@ -1,0 +1,134 @@
+# Recreates the R7-D2-review STUB state (old behaviour behind the new names) from HEAD's sources — the red run's binary.
+def edit(path, old, new, count=1):
+    s=open(path).read()
+    assert s.count(old)==count, (path, old[:60], s.count(old))
+    s=s.replace(old,new)
+    open(path,'w').write(s)
+
+edit('FlexibleFaceStatsPopover.swift', """    public struct Rows: Equatable, Sendable {
+        public let rows: [LatticeDrawerRow]
+        /// The drawer's estimate note under Cells across ("estimate, core checks it"), when it is the bake's estimate.
+        public let note: String?
+    }
+""", """    public struct Rows: Equatable, Sendable {
+        public let rows: [LatticeDrawerRow]
+        /// The drawer's estimate note under Cells across ("estimate, core checks it"), when it is the bake's estimate.
+        public let note: String?
+        /// ★ REVIEW OF R7-D2: the numbers behind the rows (the face's density and drawn cell), for the tests.
+        public var rho: Double? = nil
+        public var cellMM: Double? = nil
+    }
+
+    /// ★ REVIEW OF R7-D2 (STUB — the red run): the (i)'s rows from the Flexible lattice drawn inside the face's own prism.
+    public static func rows(lattice f: FlexibleLatticeInputs, regions: [LatticeRegionSpec], depthMM: Double) -> Rows? { nil }
+""")
+edit('FlexibleFaceStatsPopover.swift', """/// The (i)'s card: the face's name, his four rows, the note, the one caption""", """/// ★ REVIEW OF R7-D2 (STUB — the red run): where the (i)'s card goes.
+enum FlexibleFaceStatsPlacement {
+    static func estimatedHeight(rows: Bool) -> CGFloat { rows ? 210 : 96 }
+    static func frame(anchor a: CGRect, chip: CGRect?, size: CGSize, viewport v: CGSize, keepOut: [CGRect]) -> CGRect {
+        var x = a.maxX + 8
+        if x + size.width > v.width - 8 { x = a.minX - 8 - size.width }
+        x = min(max(8, x), v.width - 8 - size.width)
+        let y = min(max(8, a.midY - size.height / 2), v.height - 8 - size.height)
+        return CGRect(x: x, y: y, width: size.width, height: size.height)
+    }
+}
+
+/// The (i)'s card: the face's name, his four rows, the note, the one caption""")
+edit('FlexibleMainStage+Selections.swift', """    // MARK: the prisms the pick draws (H15' — `volumes`)""", """    // MARK: the (i)'s numbers
+
+    /// ★ REVIEW OF R7-D2 (STUB — the red run): the (i)'s numbers for a face, from the Flexible lattice drawn there.
+    func faceStats(_ ref: LatticeSelectableRef, group gid: UUID, project: ProjectModel) -> FlexibleFaceStats.Rows? { nil }
+
+    // MARK: the prisms the pick draws (H15' — `volumes`)""")
+edit('FlexibleOnModelLayer.swift', """/// The edge light's segments: each face's boundary""", """/// ★ REVIEW OF R7-D2 (STUB — the red run): where the one message goes.
+enum FlexibleSelectionsMessage {
+    static func frame(size: CGSize, viewport v: CGSize, player: CGRect?) -> CGRect {
+        CGRect(x: (PageChrome.edge + PageChrome.panelWidth + v.width) / 2 - size.width / 2,
+               y: v.height - FlexibleChromeLayout.barClearance - PageChrome.gap - 22 - size.height / 2, width: size.width, height: size.height)
+    }
+}
+
+/// The edge light's segments: each face's boundary""")
+edit('FlexibleOnModelLayer.swift', """    static func place(_ cands: [(ProjectModel.LatticeDepthPlane, CGPoint)], viewport v: CGSize, keepOut: [CGRect]) -> [(ProjectModel.LatticeDepthPlane, CGPoint)] {
+        var taken: [CGRect] = []
+        var out: [(ProjectModel.LatticeDepthPlane, CGPoint)] = []
+        for (p, at) in cands {""", """    static func place(_ cands: [(ProjectModel.LatticeDepthPlane, [CGPoint])], viewport v: CGSize, keepOut: [CGRect]) -> [(ProjectModel.LatticeDepthPlane, CGPoint)] {
+        var taken: [CGRect] = []
+        var out: [(ProjectModel.LatticeDepthPlane, CGPoint)] = []
+        for (p, spots) in cands {
+            guard let at = spots.first else { continue }""")
+edit('FlexibleOnModelLayer.swift', """                .compactMap { p -> (ProjectModel.LatticeDepthPlane, CGPoint)? in local(frame.project(p.handle.anchor), origin).map { (p, $0) } },""",
+"""                .compactMap { p -> (ProjectModel.LatticeDepthPlane, [CGPoint])? in local(frame.project(p.handle.anchor), origin).map { (p, [$0]) } },""")
+edit('FlexibleOnModelLayer.swift', """        .position(x: (PageChrome.edge + PageChrome.panelWidth + v.width) / 2,
+                  y: v.height - FlexibleChromeLayout.barClearance - PageChrome.gap - 22)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("flexible-toast")""", """        .background(GeometryReader { g in Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["toast": g.frame(in: .global)]) }
+            .allowsHitTesting(false))
+        .position(x: (PageChrome.edge + PageChrome.panelWidth + v.width) / 2,
+                  y: v.height - FlexibleChromeLayout.barClearance - PageChrome.gap - 22)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("flexible-toast")""")
+edit('FlexibleOnModelLayer.swift', """            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+    }
+
+    // MARK: the chip's spot""", """            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+            // the lit faces' outline on screen (the projector's space is the page's, as `local` reads it) — the tests read it
+            .background(Color.clear.preference(key: FlexibleKeepOutKey.self,
+                                               value: Self.outlineBounds(segs, frame: frame).map { ["faceOutline": $0] } ?? [:])
+                .allowsHitTesting(false))
+        }
+    }
+
+    /// The lit faces' outline on screen (the projector's space), or nil when none of it projects.
+    static func outlineBounds(_ segs: [(SIMD3<Float>, SIMD3<Float>)], frame: LatticeBandChipFrame) -> CGRect? {
+        var r: CGRect?
+        for s in segs {
+            for q in [s.0, s.1] {
+                guard let p = frame.project(q) else { continue }
+                let pr = CGRect(x: p.x, y: p.y, width: 0, height: 0)
+                r = r.map { $0.union(pr) } ?? pr
+            }
+        }
+        return r
+    }
+
+    // MARK: the chip's spot""")
+edit('FlexibleFaceCommits.swift', """/// A role tap's answer: done, or "Keep clear removes this lattice" must be asked first.""", """/// ★ REVIEW OF R7-D2: what else a join gives the face (a Load group's share of its load, an Anchor group's anchor).
+public enum FlexibleJoinAlso: Equatable, Sendable { case none, load, anchor }
+
+/// A role tap's answer: done, or "Keep clear removes this lattice" must be asked first.""")
+edit('FlexibleFaceCommits.swift', """    public static let orNew = "Or start a new group:\"""", """    /// ★ REVIEW OF R7-D2 (STUB — the red run): the join's note with what else the group gives.
+    public static func joinNote(depthMM: Double, like: [String], also: FlexibleJoinAlso) -> String { joinNote(depthMM: depthMM, like: like) }
+    /// ★ REVIEW OF R7-D2: a Load the chip made, its weight not set yet (the mockup's words).
+    public static let weightUnset = "weight: Squish page"
+    public static let orNew = "Or start a new group:\"""")
+edit('FlexibleFaceCommits.swift', """    /// What the join writes: the group's most common live depth and expand""", """    /// ★ REVIEW OF R7-D2 (STUB — the red run): what else joining `id` gives the face.
+    static func joinAlso(_ id: UUID, _ p: ProjectModel) -> FlexibleJoinAlso { .none }
+
+    /// What the join writes: the group's most common live depth and expand""")
+edit('FlexibleFaceChip.swift', """    static func loadWeight(_ p: ProjectModel, _ g: UUID) -> String? {
+        p.force.kind(for: g).weightKg.map { p.force.formattedWeight(kg: $0) }
+    }""", """    static func loadWeight(_ p: ProjectModel, _ g: UUID, ui: FlexibleFaceChipState?) -> String? {
+        p.force.kind(for: g).weightKg.map { p.force.formattedWeight(kg: $0) }
+    }""")
+edit('FlexibleFaceChip.swift', """Self.loadWeight(project, g.id).map""", """Self.loadWeight(project, g.id, ui: ui).map""")
+edit('FlexibleSelectionsList.swift', """FlexibleFaceChip.loadWeight(project, g.id)""", """FlexibleFaceChip.loadWeight(project, g.id, ui: ui)""")
+edit('FlexibleNumberBox.swift', """    /// ★ R7-D2: the unit beside the number (not beside "mixed").
+    var unitShown = true""", """    /// ★ R7-D2: the unit beside the number (not beside "mixed").
+    var unitShown = true
+    /// ★ REVIEW OF R7-D2 (STUB — the red run): the tap target's height around the 32 pt look (the main page's boxes: 44).
+    var hitHeight: CGFloat? = nil""")
+edit('FlexibleNumberBox.swift', """    static let height: CGFloat = 32
+""", """    static let height: CGFloat = 32
+    /// ★ REVIEW OF R7-D2: his 44 pt target rule.
+    static let target: CGFloat = 44
+""")
+edit('FlexibleFaceChipLayout.swift', """    static func hits(_ r: CGRect, _ keepOut: [CGRect]) -> Bool {""", """    /// ★ REVIEW OF R7-D2 (STUB — the red run): the picked face's own outline as a keep-out for the automatic spot.
+    public static func faceKeepOut(_ bounds: CGRect?, viewport v: CGSize) -> CGRect? { nil }
+
+    static func hits(_ r: CGRect, _ keepOut: [CGRect]) -> Bool {""")
+print("stubs ok")

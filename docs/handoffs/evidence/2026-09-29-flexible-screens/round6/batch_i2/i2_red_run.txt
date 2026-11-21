@@ -1,0 +1,87 @@
+# Round 6 batch I2 — the RED run (tests first): the I2 RED STUB tree, swift test --skip-build over FlexibleEdgeGroupsTests + FlexibleEdgeGroupsHostedTests (unseeded). A first attempt (red_run.log) crashed the xctest process on an unguarded index in testAGroupHoldsFacesOrEdgesNeverBoth (gs[2] with the stub's two groups) — the test now guards its indices so a stub can only make it fail, never crash; this is the re-run.
+
+Test Suite 'Selected tests' started at 2026-10-10 23:05:06.650.
+Test Suite 'TopOptKitTests.xctest' started at 2026-10-10 23:05:06.653.
+Test Suite 'TopOptKitTests.xctest' passed at 2026-10-10 23:05:06.654.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-10 23:05:06.654.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.004) seconds
+Test Suite 'Selected tests' started at 2026-10-10 23:05:06.870.
+Test Suite 'TopOptFlowsTests.xctest' started at 2026-10-10 23:05:06.871.
+Test Suite 'FlexibleEdgeGroupsHostedTests' started at 2026-10-10 23:05:06.871.
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsHostedTests testEvidenceOnHisPad]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleEdgeGroupsHostedTests.swift:225: -[TopOptFlowsTests.FlexibleEdgeGroupsHostedTests testEvidenceOnHisPad] : Test skipped - FLEX_I2_EVIDENCE_DIR
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsHostedTests testEvidenceOnHisPad]' skipped (0.003 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsHostedTests testThePickCardListsEveryCandidateWithFingerSizedRowsAndTheEdgesTabItsWidth]' started.
+2026-10-10 23:05:06.960 xctest[31790:57522924] DIAG shellClip mode=OFF inFrame=false algo=- capsules=-1 capVerts=0 capPipeline=true capsulePipeline=true capsulesReplaceField=false bodyAlpha=1.0 initError=nil regionTex=false skinMM=-1.0 dims=SIMD4<Float>(1.0, 1.0, 1.0, 0.0) regions=[] open=[no census]
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleEdgeGroupsHostedTests.swift:104: error: -[TopOptFlowsTests.FlexibleEdgeGroupsHostedTests testThePickCardListsEveryCandidateWithFingerSizedRowsAndTheEdgesTabItsWidth] : XCTAssertNotNil failed - [+ New] asks [Faces] [Edges/corners]
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleEdgeGroupsHostedTests.swift:118: error: -[TopOptFlowsTests.FlexibleEdgeGroupsHostedTests testThePickCardListsEveryCandidateWithFingerSizedRowsAndTheEdgesTabItsWidth] : XCTUnwrap failed: expected non-nil value of type "Candidate"
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsHostedTests testThePickCardListsEveryCandidateWithFingerSizedRowsAndTheEdgesTabItsWidth]' failed (8.804 seconds).
+Test Suite 'FlexibleEdgeGroupsHostedTests' failed at 2026-10-10 23:05:15.680.
+	 Executed 2 tests, with 1 test skipped and 2 failures (0 unexpected) in 8.808 (8.809) seconds
+Test Suite 'FlexibleEdgeGroupsTests' started at 2026-10-10 23:05:15.680.
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsTests testAGroupHoldsFacesOrEdgesNeverBoth]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleEdgeGroupsTests.swift:108: error: -[TopOptFlowsTests.FlexibleEdgeGroupsTests testAGroupHoldsFacesOrEdgesNeverBoth] : XCTAssertEqual failed: ("[TopOptFlows.FlexibleGroupKind.faces, TopOptFlows.FlexibleGroupKind.edges]") is not equal to ("[TopOptFlows.FlexibleGroupKind.faces, TopOptFlows.FlexibleGroupKind.faces, TopOptFlows.FlexibleGroupKind.edges]") - the mixed group split: its edge press in a group of its own
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsTests testAGroupHoldsFacesOrEdgesNeverBoth]' failed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsTests testAnEdgePickPressesAStripOnEachFaceAndTheFaceGroupKeepsTheRest]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleEdgeGroupsTests.swift:333: error: -[TopOptFlowsTests.FlexibleEdgeGroupsTests testAnEdgePickPressesAStripOnEachFaceAndTheFaceGroupKeepsTheRest] : XCTUnwrap failed: expected non-nil value of type "Candidate" - the Top–Face 2 edge
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsTests testAnEdgePickPressesAStripOnEachFaceAndTheFaceGroupKeepsTheRest]' failed (2.646 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsTests testAPickedEdgeBecomesAPressAtCoresHalfwayInTheNewGroupAndIsNeverSent]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleEdgeGroupsTests.swift:510: error: -[TopOptFlowsTests.FlexibleEdgeGroupsTests testAPickedEdgeBecomesAPressAtCoresHalfwayInTheNewGroupAndIsNeverSent] : XCTUnwrap failed: expected non-nil value of type "Candidate"
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsTests testAPickedEdgeBecomesAPressAtCoresHalfwayInTheNewGroupAndIsNeverSent]' failed (2.351 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsTests testATapPicksTheNearestCornerThenEdgeAndARepeatTapCycles]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleEdgeGroupsTests.swift:220: error: -[TopOptFlowsTests.FlexibleEdgeGroupsTests testATapPicksTheNearestCornerThenEdgeAndARepeatTapCycles] : XCTAssertEqual failed: ("Optional(2)") is not equal to ("Optional(1)") - the nearest CORNER first (the edge is nearer); never the one facing away
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleEdgeGroupsTests.swift:224: error: -[TopOptFlowsTests.FlexibleEdgeGroupsTests testATapPicksTheNearestCornerThenEdgeAndARepeatTapCycles] : XCTAssertEqual failed: ("nil") is not equal to ("Optional(1)") - …and the last one back
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleEdgeGroupsTests.swift:226: error: -[TopOptFlowsTests.FlexibleEdgeGroupsTests testATapPicksTheNearestCornerThenEdgeAndARepeatTapCycles] : XCTAssertEqual failed: ("Optional(2)") is not equal to ("Optional(1)") - round again
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleEdgeGroupsTests.swift:237: error: -[TopOptFlowsTests.FlexibleEdgeGroupsTests testATapPicksTheNearestCornerThenEdgeAndARepeatTapCycles] : XCTAssertEqual failed: ("Optional(2)") is not equal to ("Optional(1)") - control: no cycling — the repeat tap picks the corner again
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleEdgeGroupsTests.swift:268: error: -[TopOptFlowsTests.FlexibleEdgeGroupsTests testATapPicksTheNearestCornerThenEdgeAndARepeatTapCycles] : XCTAssertGreaterThan failed: ("0") is not greater than ("0")
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleEdgeGroupsTests.swift:268: error: -[TopOptFlowsTests.FlexibleEdgeGroupsTests testATapPicksTheNearestCornerThenEdgeAndARepeatTapCycles] : XCTAssertGreaterThan failed: ("0") is not greater than ("0")
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleEdgeGroupsTests.swift:279: error: -[TopOptFlowsTests.FlexibleEdgeGroupsTests testATapPicksTheNearestCornerThenEdgeAndARepeatTapCycles] : XCTAssertGreaterThan failed: ("0") is not greater than ("0") - control: without cycling some candidate under its corners is never reached
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleEdgeGroupsTests.swift:288: error: -[TopOptFlowsTests.FlexibleEdgeGroupsTests testATapPicksTheNearestCornerThenEdgeAndARepeatTapCycles] : XCTUnwrap failed: expected non-nil value of type "Projected"
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsTests testATapPicksTheNearestCornerThenEdgeAndARepeatTapCycles]' failed (2.045 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsTests testEdgesGroupsRoundTripAndOtherFacesKeepTheirJobEntries]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleEdgeGroupsTests.swift:659: error: -[TopOptFlowsTests.FlexibleEdgeGroupsTests testEdgesGroupsRoundTripAndOtherFacesKeepTheirJobEntries] : XCTUnwrap failed: expected non-nil value of type "Candidate"
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsTests testEdgesGroupsRoundTripAndOtherFacesKeepTheirJobEntries]' failed (2.137 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsTests testEveryEdgeAndCornerIsListedNumberedAndColouredSoTouchingOnesNeverMatch]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleEdgeGroupsTests.swift:151: error: -[TopOptFlowsTests.FlexibleEdgeGroupsTests testEveryEdgeAndCornerIsListedNumberedAndColouredSoTouchingOnesNeverMatch] : XCTAssertEqual failed: ("0") is not equal to ("8") - his pad: 8 corners
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleEdgeGroupsTests.swift:152: error: -[TopOptFlowsTests.FlexibleEdgeGroupsTests testEveryEdgeAndCornerIsListedNumberedAndColouredSoTouchingOnesNeverMatch] : XCTAssertEqual failed: ("0") is not equal to ("12") - his pad: 12 edges
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleEdgeGroupsTests.swift:153: error: -[TopOptFlowsTests.FlexibleEdgeGroupsTests testEveryEdgeAndCornerIsListedNumberedAndColouredSoTouchingOnesNeverMatch] : XCTAssertEqual failed: ("[]") is not equal to ("[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]") - numbered 1…20, as listed
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleEdgeGroupsTests.swift:165: error: -[TopOptFlowsTests.FlexibleEdgeGroupsTests testEveryEdgeAndCornerIsListedNumberedAndColouredSoTouchingOnesNeverMatch] : XCTAssertEqual failed: ("[]") is not equal to ("[11, 9, 15, 5, 16, 12, 19, 14, 7, 13, 1, 18, 3, 20, 2, 17, 6, 8, 10, 4]") - every candidate has a colour
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleEdgeGroupsTests.swift:170: error: -[TopOptFlowsTests.FlexibleEdgeGroupsTests testEveryEdgeAndCornerIsListedNumberedAndColouredSoTouchingOnesNeverMatch] : XCTAssertEqual failed: ("0") is not equal to ("48") - a box: each corner touches its 3 edges (24), each edge 4 others at its ends (24)
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleEdgeGroupsTests.swift:180: error: -[TopOptFlowsTests.FlexibleEdgeGroupsTests testEveryEdgeAndCornerIsListedNumberedAndColouredSoTouchingOnesNeverMatch] : XCTAssertGreaterThan failed: ("0") is not greater than ("0") - front-facing candidates are tagged
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleEdgeGroupsTests.swift:188: error: -[TopOptFlowsTests.FlexibleEdgeGroupsTests testEveryEdgeAndCornerIsListedNumberedAndColouredSoTouchingOnesNeverMatch] : XCTAssertGreaterThan failed: ("0") is not greater than ("0") - control: round robin puts one colour on touching candidates
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleEdgeGroupsTests.swift:199: error: -[TopOptFlowsTests.FlexibleEdgeGroupsTests testEveryEdgeAndCornerIsListedNumberedAndColouredSoTouchingOnesNeverMatch] : XCTAssertEqual failed: ("0") is not equal to ("20")
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsTests testEveryEdgeAndCornerIsListedNumberedAndColouredSoTouchingOnesNeverMatch]' failed (2.038 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsTests testPickOrderCutsNeverOverlap]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleEdgeGroupsTests.swift:438: error: -[TopOptFlowsTests.FlexibleEdgeGroupsTests testPickOrderCutsNeverOverlap] : XCTAssertEqual failed: ("0") is not equal to ("4") - premise: four edges round the Top
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsTests testPickOrderCutsNeverOverlap]' failed (2.035 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsTests testTheStripWidthReCutsOnChangeAsOneUndoStep]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleEdgeGroupsTests.swift:560: error: -[TopOptFlowsTests.FlexibleEdgeGroupsTests testTheStripWidthReCutsOnChangeAsOneUndoStep] : XCTUnwrap failed: expected non-nil value of type "Candidate"
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsTests testTheStripWidthReCutsOnChangeAsOneUndoStep]' failed (1.981 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsTests testWhatCannotBePickedIsGreyWithOneLine]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleEdgeGroupsTests.swift:606: error: -[TopOptFlowsTests.FlexibleEdgeGroupsTests testWhatCannotBePickedIsGreyWithOneLine] : XCTUnwrap failed: expected non-nil value of type "Candidate"
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsTests testWhatCannotBePickedIsGreyWithOneLine]' failed (2.043 seconds).
+Test Suite 'FlexibleEdgeGroupsTests' failed at 2026-10-10 23:05:32.959.
+	 Executed 9 tests, with 23 failures (0 unexpected) in 17.279 (17.280) seconds
+Test Suite 'TopOptFlowsTests.xctest' failed at 2026-10-10 23:05:32.959.
+	 Executed 11 tests, with 1 test skipped and 25 failures (0 unexpected) in 26.086 (26.088) seconds
+Test Suite 'Selected tests' failed at 2026-10-10 23:05:32.959.
+	 Executed 11 tests, with 1 test skipped and 25 failures (0 unexpected) in 26.086 (26.090) seconds
+FLEX-I2-H1 rows: 
+FLEX-I2-1 split: Group 1 faces faces [1] presses 0 · Group 2 edges faces [2] presses 2
+FLEX-I2-3 top (img3): 0 of 0 facing the camera · taps to reach each: 
+FLEX-I2-3 top (img3) control (no cycling): never reached []
+FLEX-I2-3 straight down: 0 of 0 facing the camera · taps to reach each: 
+FLEX-I2-3 straight down control (no cycling): never reached []
+FLEX-I2-2 his pad: 0 candidates, touching pairs 0, sharing a colour 0 · 
+FLEX-I2-2 control (round robin): touching pairs sharing a colour 0
+FLEX-I2-2 cube60: 0 candidates, touching pairs 0, sharing 0
+Test Suite 'Selected tests' started at 2026-10-10 23:05:33.115.
+Test Suite 'TopOptDesignTests.xctest' started at 2026-10-10 23:05:33.117.
+Test Suite 'TopOptDesignTests.xctest' passed at 2026-10-10 23:05:33.118.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-10 23:05:33.118.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.002) seconds
+Note: Some test targets reported failures:
+  - TopOptFlowsTests (XCTest)
+EXIT 1

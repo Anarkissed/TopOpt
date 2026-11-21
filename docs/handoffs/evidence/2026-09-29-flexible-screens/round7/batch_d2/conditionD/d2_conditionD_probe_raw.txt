@@ -1,0 +1,45 @@
+Test Case '-[TopOptFlowsTests.ZZTempD2Probe testProbe]' started.
+Test Case '-[TopOptFlowsTests.ZZTempD2Probe testProbe]' passed (0.124 seconds).
+PROBE canOptimize before true noH35 false H35 true
+PROBE job equal noH35 true H35 false lens 3479 3479 4374
+PROBE + 116:       },
+PROBE + 117:       {
+PROBE + 118:         "face_id" : 4,
+PROBE + 119:         "geometry" : {
+PROBE + 120:           "depth_mm" : 25,
+PROBE + 121:           "frame_u" : [
+PROBE + 122:             0,
+PROBE + 123:             0,
+PROBE + 124:             -1
+PROBE + 125:           ],
+PROBE + 126:           "frame_w" : [
+PROBE + 127:             1,
+PROBE + 128:             0,
+PROBE + 129:             0
+PROBE + 130:           ],
+PROBE + 131:           "half_u_mm" : 50,
+PROBE + 132:           "half_w_mm" : 50,
+PROBE + 133:           "normal" : [
+PROBE + 134:             0,
+PROBE + 135:             -1,
+PROBE + 136:             0
+PROBE + 137:           ],
+PROBE + 138:           "origin" : [
+PROBE + 139:             50,
+PROBE + 140:             100,
+PROBE + 141:             10
+PROBE + 142:           ],
+PROBE + 143:           "outline_uv" : [
+PROBE + 144:             [
+PROBE + 145:               [
+PROBE + 146:                 10,
+PROBE + 147:                 -50
+PROBE + 148:               ],
+PROBE + 149:               [
+PROBE + 150:                 -10,
+PROBE + 151:                 -50
+PROBE + 152:               ],
+PROBE + 153:               [
+PROBE + 154:                 -10,
+PROBE + 155:                 50
+PROBE anchors [0] loads 1 protect [3, 5]

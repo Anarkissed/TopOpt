@@ -127,4 +127,57 @@ int write_fields_file(const std::string& path,
                       const VoxelGrid& solved_grid,
                       bool accepted_only = true);
 
+// Brief E4 (Organic strength): ONE more block in fields.bin's own v1 layout, appended to a file write_fields_file
+// wrote: variant_count goes up by one and a block follows the others with requested_volume_fraction = `marker`,
+// mass_grams 0, support_volume_voxels 0, von_mises_count = grid.voxel_count() holding `values` (float32, grid-indexed),
+// stress_tensor_count 0 and displacement_count 0. The Organic check writes the SOLID's EFFECTIVE margin per voxel this
+// way (marker -1; NaN where the solid is not judged). Throws FieldsError when the file is not a v1 container of `grid`
+// or `values` is not one per voxel. Published atomically, as the writer does.
+void append_fields_block(const std::string& path, const VoxelGrid& grid, double marker,
+                         const std::vector<float>& values);
+
+// LOAD SCENARIOS — every scenario's OWN fields (out/scenario_fields.bin; his "the
+// scenario selector changes the views", 2026-10-27). fields.bin carries the GOVERNING
+// scenario's fields only, and stays exactly that; this sibling carries each
+// scenario's, so the Scenario menu can swap the stress / bend / load-flow / break
+// views. Same frame, grid and array layouts as fields.bin; ADDITIVE, written only on a
+// run whose accepted variants carry 2+ scenarios (a run without scenarios writes none).
+//
+// FORMAT (scenario_fields.bin v1). Little-endian, version byte first.
+//
+//   run header
+//     u8    version            = kScenarioFieldsFormatVersion (1)
+//     u8    reserved[3]        (0)
+//     i32   grid_nx            the solved grid (== fields.bin's)
+//     i32   grid_ny
+//     i32   grid_nz
+//     f64   grid_origin_x      (mm)
+//     f64   grid_origin_y
+//     f64   grid_origin_z
+//     f64   spacing            (mm)
+//     i32   scenario_count     S, the scenarios of report.json's `scenarios`, in order
+//     i32   variant_count      V, one block per ACCEPTED variant: fields.bin's blocks
+//   S names
+//     i32   byte_count         then that many UTF-8 bytes (no terminator)
+//   per accepted variant (V of these, in fields.bin's order)
+//     f64   requested_volume_fraction   the join key (fields.bin's, design.bin's)
+//     i32   governing          index of the scenario whose fields are fields.bin's
+//     i32   reserved           (0)
+//     per scenario (S of these, in name order)
+//       i64   von_mises_count     == grid.voxel_count()
+//       i64   displacement_count  == 3 * fea_node_count
+//       f32[von_mises_count]      per-voxel von Mises (MPa), grid-indexed
+//       f32[displacement_count]   per-node displacement (mm), DOF-ordered
+//
+// SIZE: S x fields.bin's per-variant arrays (~34 MB per scenario per variant at
+// 128^3). Atomic publish, as fields.bin. Throws FieldsError on a write failure or an
+// array that disagrees with the grid; returns V (0 = nothing written).
+inline constexpr std::uint8_t kScenarioFieldsFormatVersion = 1;
+int write_scenario_fields_file(const std::string& path,
+                               const std::vector<const MinimizePlasticVariant*>& variants,
+                               const VoxelGrid& solved_grid);
+int write_scenario_fields_file(const std::string& path,
+                               const MinimizePlasticResult& result,
+                               const VoxelGrid& solved_grid);
+
 }  // namespace topopt

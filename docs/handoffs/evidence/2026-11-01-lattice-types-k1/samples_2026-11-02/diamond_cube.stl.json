@@ -1,0 +1,15 @@
+{
+  "topology": "diamond",
+  "relative_density": 0.374565,
+  "relative_density_is_band_middle": true,
+  "band": [0.15712, 0.59201],
+  "cell_mm": 8,
+  "cells_per_side": 5,
+  "size_mm": 40,
+  "base_plate_mm": 1.5,
+  "strut_diameter_mm": 2.4679,
+  "triangles": 87252,
+  "lattice_triangles": 87240,
+  "struts": 2000,
+  "nodes": 1162
+}

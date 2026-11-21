@@ -89,8 +89,10 @@ public enum DS {
 
         // Accent — themeable; default `#0A84FF`, options from the design's
         // Appearance section (`accentColor.options`).
-        /// Default accent `#0A84FF`.
-        public static let accent = RGBA(hex: 0x0A84FF)
+        /// The accent: `#0A84FF` until he picks another in App Settings (★ B5, Q12, the reviewer's Accent (a): applied
+        /// when Settings closes). Set ONLY by `AppSettings.applyAccent()`, on the main thread; every view reads it as it
+        /// draws, so never copy it into a `static let`.
+        public static var accent = RGBA(hex: 0x0A84FF)
         /// ★ THE STAGE-NAVIGATION BLUE `#004080` — deliberately DARKER than
         /// `accent` (task 2026-08-15-lattice-and-face-ui §4).
         ///
@@ -141,6 +143,44 @@ public enum DS {
             RGBA(hex: 0xFF9F0A), // D
             RGBA(hex: 0xBF5AF2), // E
         ]
+
+        // ★ THE FLEXIBLE SQUEEZE GROUPS' PALETTE (not in the HTML: the maintainer's OK, 2026-09-30,
+        // "Add more colour tokens" — PR #362 round 5 C5). Eight, never purple (the depth prism's), none
+        // a warning / danger / resting-cyan / selected-white, all ≥ 4.5 : 1 on `background`; computed,
+        // not eyeballed (FlexibleGroupPaletteTests: every pair ΔE ≥ 15, ≥ 8 colour-blind).
+        public static let groupPink = RGBA(hex: 0xF4A0BB)
+        public static let groupMint = RGBA(hex: 0x67FFC6)
+        public static let groupYellow = RGBA(hex: 0xF1E62F)
+        public static let groupTeal = RGBA(hex: 0x028D9B)
+        public static let groupOlive = RGBA(hex: 0x9A950C)
+        public static let groupTerracotta = RGBA(hex: 0xA7665A)
+        /// Squeeze groups 1…8, in order (then round again, numbered).
+        public static let squeezeGroupPalette: [RGBA] = [accentGreen, groupPink, groupMint, accent,
+                                                         groupYellow, groupTeal, groupOlive, groupTerracotta]
+
+        // ★ B2 (design-system §2, U5): ONE colour per role — its glyph, its chip and its tint on the model, on every stage.
+        // A group's own colour (the palettes above) is which group it is; the role colour is what it does. The two never swap.
+        public enum Role {
+            /// Anchor (lock): today's anchor glyph green.
+            public static let anchor = RGBA(hex: 0x30D158)
+            /// Load — Gravity / Push / Pull (arrow): the accent, today's load arrow.
+            public static let load = RGBA(hex: 0x0A84FF)
+            /// Keep clear (⃠): `clearance`, `#F26B61`.
+            public static let keepClear = DS.Color.clearance
+            /// Protect (shield): today's Protect chip teal.
+            public static let protect = RGBA(hex: 0x2EE0C7)
+            /// Lattice (grid): his face-prism purple (09-30).
+            public static let lattice = RGBA(hex: 0x7C6FD6)
+            /// No lattice (grid struck): the lattice purple at 45 %.
+            public static let noLattice = lattice.opacity(0.45)
+            /// Protect skin: a `protect` outline on `lattice` (shield + grid).
+            public static let protectSkinOutline = protect
+            public static let protectSkinFill = lattice
+            /// Lattice zone (dashed box): `lattice`, dashed.
+            public static let latticeZone = lattice
+            /// Allow growth here (dashed box): today's design-box blue, dashed.
+            public static let allowGrowth = RGBA(hex: 0x0A84FF)
+        }
 
         // Hairline strokes — white at low alpha, as the design's `border` rules.
         /// `rgba(255,255,255,0.11)` — default glass-panel hairline.

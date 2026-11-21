@@ -1,0 +1,80 @@
+# R7-D3 — the runs, raw counts. swift test --skip-build --scratch-path /tmp/r7d-build; counts from the Test Case end lines of each chunk log (scratch: d3/suite, d3/suite_extra).
+
+## 1. RED (stubs) — d3_red_run.txt (run 1: the pure 7 + the hosted 4 sizes; run 2: + the mini, after the pure test found it).
+
+## 2. GREEN at 246a7923 — the D3 classes
+FlexibleRound7DesignIntegrationHostedTests test11Landscape passed (73.522 seconds).
+FlexibleRound7DesignIntegrationHostedTests test11Portrait passed (73.727 seconds).
+FlexibleRound7DesignIntegrationHostedTests test13Landscape passed (74.433 seconds).
+FlexibleRound7DesignIntegrationHostedTests test13Portrait passed (74.567 seconds).
+FlexibleRound7DesignIntegrationHostedTests testMiniPortrait passed (74.252 seconds).
+FlexibleRound7DesignIntegrationTests testATypedDepthWithTheCardOpenIsOneNumberEverywhere passed (2.069 seconds).
+FlexibleRound7DesignIntegrationTests testLatticeReadySitsBesideTheIconsNeverUnderThem passed (0.000 seconds).
+FlexibleRound7DesignIntegrationTests testNoPanelEverCoversTheLegend passed (0.000 seconds).
+FlexibleRound7DesignIntegrationTests testOneCardAtATimeAcrossTheBatches passed (2.240 seconds).
+FlexibleRound7DesignIntegrationTests testStepTwoSaysWhatGoesToCoreWheneverTheCardOffersASend passed (0.657 seconds).
+FlexibleRound7DesignIntegrationTests testTheKeepOutsAcrossTheBatchesAtSixViewports passed (7.466 seconds).
+FlexibleRound7DesignIntegrationTests testTheSummaryIsTheJobOnHisPad passed (2.426 seconds).
+
+## 3. Before the suite — every class the step's source changes reach (affected_run: 36 classes, 3 chunks): 205 passed, 5 failed, 3 skipped
+=== chunk 1 rc 1 passed 79 failed 1 skipped 2 sigmentions 0 start 10:00:06 end 10:15:04
+=== chunk 2 rc 1 passed 74 failed 3 skipped 0 sigmentions 0 start 10:15:04 end 10:26:29
+=== chunk 3 rc 1 passed 52 failed 1 skipped 1 sigmentions 0 start 10:26:29 end 10:36:48
+DONE
+Failures: FlexibleFaceChipTests (the let-go source pin), FlexibleMainPageRound4Tests / VerifyTests / HostedTests (R7-D1's 'under the row at 11p') — ours, re-pinned (attributed) and green (re-run: 28 tests, 0 failures); FlexibleRound7ViewsHostedTests' Play ring (known).
+
+## 4. THE TARGETED SUITE at 246a7923 (11:46–13:42):      276 classes (d3_suite_classes.txt: every Flexible* class + every class whose source names a file touched since R7-D1's base cb388365 — WorkspacePlaceholder, MetalMeshView and the Flexible files — + the goldens + LatticeStaleTypeTests + ProjectStoreTests, UndoHistoryTests, LatticeSettingsPersistTests, ViewerTests, SmoothingPageRound2Tests, LatticeSimSolveTriggerTests, BottomBarMeasurementTests, LatticeIncludeGateTests, LatticeBarrierModelTests, LatticeSeparationTests, LatticeLegendColourTests, LatticeStructuralViewStateTests, SurfaceStageGesturesTests, LatticePageRound2Tests, GroupViewStateTests, SurfaceStageTests, LatticePerFaceOnlyTests, DesignOverhaulRound2Tests, AppModelTests, the TopOptKitTests classes, + R7-D2's review's 237), 23 chunks of 12
+=== chunk 1 rc 1 passed 103 failed 3 skipped 13 sigmentions 0 start 11:46:16 end 11:49:10
+=== chunk 2 rc 1 passed 24 failed 1 skipped 13 sigmentions 0 start 11:49:10 end 12:10:48
+=== chunk 3 rc 0 passed 80 failed 0 skipped 2 sigmentions 0 start 12:10:48 end 12:19:46
+=== chunk 4 rc 0 passed 40 failed 0 skipped 3 sigmentions 0 start 12:19:46 end 12:21:53
+=== chunk 5 rc 0 passed 56 failed 0 skipped 2 sigmentions 0 start 12:21:53 end 12:23:45
+=== chunk 6 rc 0 passed 82 failed 0 skipped 0 sigmentions 0 start 12:23:45 end 12:26:21
+=== chunk 7 rc 0 passed 60 failed 0 skipped 4 sigmentions 0 start 12:26:21 end 12:26:48
+=== chunk 8 rc 0 passed 52 failed 0 skipped 8 sigmentions 0 start 12:26:48 end 12:33:53
+=== chunk 9 rc 0 passed 48 failed 0 skipped 5 sigmentions 0 start 12:33:53 end 12:47:35
+=== chunk 10 rc 0 passed 63 failed 0 skipped 12 sigmentions 0 start 12:47:35 end 12:54:56
+=== chunk 11 rc 0 passed 34 failed 0 skipped 25 sigmentions 0 start 12:54:56 end 13:03:51
+=== chunk 12 rc 1 passed 59 failed 1 skipped 4 sigmentions 0 start 13:03:51 end 13:19:56
+=== chunk 13 rc 0 passed 72 failed 0 skipped 0 sigmentions 0 start 13:19:56 end 13:23:55
+=== chunk 14 rc 0 passed 74 failed 0 skipped 5 sigmentions 0 start 13:23:55 end 13:31:49
+=== chunk 15 rc 0 passed 63 failed 0 skipped 0 sigmentions 0 start 13:31:49 end 13:31:52
+=== chunk 16 rc 0 passed 97 failed 0 skipped 1 sigmentions 0 start 13:31:52 end 13:32:44
+=== chunk 17 rc 1 passed 90 failed 1 skipped 3 sigmentions 0 start 13:32:44 end 13:33:16
+=== chunk 18 rc 0 passed 84 failed 0 skipped 0 sigmentions 0 start 13:33:16 end 13:34:02
+=== chunk 19 rc 0 passed 157 failed 0 skipped 2 sigmentions 0 start 13:34:02 end 13:38:19
+=== chunk 20 rc 0 passed 68 failed 0 skipped 0 sigmentions 0 start 13:38:19 end 13:38:22
+=== chunk 21 rc 0 passed 57 failed 0 skipped 0 sigmentions 0 start 13:38:22 end 13:38:24
+=== chunk 22 rc 0 passed 84 failed 0 skipped 0 sigmentions 0 start 13:38:24 end 13:38:33
+=== chunk 23 rc 0 passed 123 failed 0 skipped 3 sigmentions 0 start 13:38:33 end 13:42:24
+DONE
+TOTAL 1781 cases: 1670 passed, 105 skipped, 6 failed; no signal in any chunk
+Failed (all on the known list):
+  KNOWN  TopOptFlowsTests.FlexibleRound7ViewsHostedTests testThePlayIconsRingAndDotAreSeenWithPlayOff
+  KNOWN  TopOptFlowsTests.AppModelTests testReopenedThreeMFProjectReimportsTheStlWorkingCopy
+  KNOWN  TopOptFlowsTests.AppModelTests testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance
+  KNOWN  TopOptFlowsTests.AppModelTests testThreeMFImportOptimisesOnDeviceEndToEnd
+  KNOWN  TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker
+  KNOWN  TopOptFlowsTests.LatticeSimSolveTriggerTests testTheTriggerRefusesOnAllThreeGrounds
+LatticeStaleTypeTests 6/6. Both hook files green (FlexibleRound7ScreenHookTests 4/4 incl. testRemovingAnyGateTurnsThePinRed; FlexibleRound7SelectionsHookTests 4/4). FlexibleRound7CardMessagesTests 3/3 (condition a). FlexibleLatticeOnlyGateTests 3/3 (condition d's decode test + the held state).
+
+## 5. EXTRA PASS (13:43–14:21): the       57 classes that NAME WorkspacePlaceholder or MetalMeshView anywhere (host the page, probes) and were not in 4 (d3_suite_extra_classes.txt)
+=== chunk 1 rc 0 passed 16 failed 0 skipped 1 sigmentions 0 start 13:43:15 end 13:55:07
+=== chunk 2 rc 0 passed 36 failed 0 skipped 3 sigmentions 0 start 13:55:07 end 14:02:54
+=== chunk 3 rc 0 passed 26 failed 0 skipped 1 sigmentions 0 start 14:02:54 end 14:17:07
+=== chunk 4 rc 0 passed 16 failed 0 skipped 5 sigmentions 0 start 14:17:07 end 14:20:17
+=== chunk 5 rc 0 passed 34 failed 0 skipped 2 sigmentions 0 start 14:20:17 end 14:20:56
+DONE
+TOTAL 140 cases: 128 passed, 12 skipped, 0 failed
+They rewrote 4 tracked evidence files (evidence/2026-07-26-plane-extents/01_…png, 02_…png; evidence/2026-08-08-smoothing-…/r3_usable_path.txt, s1c_stroke_latency.txt) — restored with git checkout; the tree is clean.
+
+## 6. GOLDENS (FlexibleAngledGoldenTests, 13 tests, 0 failures each) at 246a7923
+golden_det: identical 38 · DIFFERS 0 · PART-SKIP 0 · Executed 13 tests, with 0 failures (0 unexpected) in 13.451 (13.453) seconds
+golden_unseeded: identical 32 · DIFFERS 0 · PART-SKIP 1 · Executed 13 tests, with 0 failures (0 unexpected) in 13.309 (13.312) seconds
+(golden_det = SWIFT_DETERMINISTIC_HASHING=1)
+
+## 7. THE 16 STAGE-JOB HASHES (angled_presses/stage_job_hashes.sh, SWIFT_TEST_ARGS='--scratch-path /tmp/r7d-build') → stage_job_hashes_d3.txt: byte-identical (cmp, whole file) to batch V review's angled_presses/stage_job_hashes_bvr.txt, round7/review_fix/stage_job_hashes_r7r.txt, batch_d1, batch_d1_review, batch_h39, batch_d2, batch_d2_review (and every round-7 hash file).
+
+## 8. OTHER STAGES (condition e) — other_stages/compare.txt: 0e66bf47 vs 246a7923 in one environment: 12/13 identical + 9 px of the Structural Topology load-arrow flicker (the same code twice differs by the same 9 px).
+
+## 9. EVIDENCE PROBE (FlexibleRound7DesignEvidenceProbe, FLEX_R7D_EVIDENCE_DIR) — 8 tests passed (13p/13l/11p/11l/minip + Ready at 13p/11p/11l): every step's overlaps listed in look/D3_*_log.txt; the only ones are the player's own top row × its note line (D17/D18); no target under 44 pt; 'the Squish page opened by itself: false' at every size; the Ready card's job line 'Group 1 · 22 lb · 1 face · bead 0.45 mm' at 13p/11p/11l.

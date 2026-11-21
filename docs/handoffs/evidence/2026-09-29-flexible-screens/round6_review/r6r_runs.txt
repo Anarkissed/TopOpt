@@ -1,0 +1,478 @@
+# Round 6 REVIEW (task 2026-09-29-flexible-screens; the maintainer's tasks of 2026-10-08, items 1 and 3), the verifier's
+# findings: confirmed, fixed or dispositioned, raw. Debug, swift test --skip-build, this Mac.
+# BASE 5afb0cd5 on claude/flexible-screens. The S1 head (claude/flexible-screens-s1, now 78812635) is still NOT on this
+# branch, so nothing was merged. H15, the main page's [Prisms] button, its legend row and its tags still wait (R6-3g and
+# R6-3i still skip, printed). LatticeStaleTypeTests is still excluded.
+# Commits: 2fdec7a6 tests first (red) · 231b2fbb the fixes · this one (the runs and the renders).
+#
+# HOOKS in #354/main files (re-grep each anchor):
+#   A1  ClearanceGeometry.swift  `public struct ClearanceRenderItem`  +8 -1 (unchanged since fbb55f59)
+#   A2  MetalMeshView.swift  +34 -7 against 30198e91. This review adds +2 -1 in `case let .shell(s):`:
+#       `let sides = target == 1 ? FlexibleFaintEdges.sideVertices(s) : nil` before the boundary loop, and the side
+#       edge drawn `if sides?.contains(a) ?? true`. Nil-alpha items are byte-identical (R6-1d's hash ecb1a386…).
+#   H15 not applied (S1 base only).
+#   No other #354/main file is touched. core/ is untouched.
+#
+# THE VERIFIER'S FINDINGS: each one confirmed, then what was done.
+#  [major, ux] Glass shows no group colour; the Groups view looks unchanged.
+#    CONFIRMED on his pad: at 0.08 the median ΔE76 was 8.5 for Group 1 on the blue top, 6.0 for Group 2 on face 2,
+#    and 3.0 for Group 3, teal over the green heat (R6R-1's red run; sweep below). No single alpha serves every colour:
+#    teal reaches ΔE 10 only at 0.28, where green on the top is already ΔE 40.
+#    FIXED: each member's alpha is its colour's over its own heat (FlexibleGroupWalls.alphas / heatSamples).
+#  [major, ux] Rests shows only a thin outline. CONFIRMED (R6R-6 red: no hidden outline).
+#    FIXED: a member that faces away is drawn as a dashed line in its colour (FlexibleStageViewTags.hidden).
+#  [major, ux] The main-page half of item 3 is not on the device. CONFIRMED. BLOCKED on the S1 base (H15 goes in on S1
+#    only); R6-3h is un-gated now.
+#  [major, correct] The glass can drop out of the Settings list with every test green. CONFIRMED (mutation M1 below).
+#    FIXED: R6R-0.
+#  [minor] Tags and discs can be unmounted. CONFIRMED (M2). FIXED: FlexibleViewMarksKey, and R6R-2 hosted.
+#  [minor] The legend's keep-out is never exercised. CONFIRMED (M3). FIXED: legendKeepOut is lifted out, and R6R-3.
+#  [minor] k 0 vs 1. CONFIRMED: at k 0 the chip sat 19.00 mm off the drawn prism's floor (R6R-4's control).
+#    FIXED: prismK.
+#  [minor] Faint prism barcode. CONFIRMED (sheet before/after). FIXED: FlexibleFaintEdges (R6R-5).
+#  [minor] Icon-only glyphs. FIXED: [Prisms] is arrow.down.to.line in the prisms' purple; [Groups] is his groups'
+#    three colours.
+#  [minor] Stale (i) texts. CONFIRMED (red). FIXED.
+#  [minor] The suite missed 10 pinning classes. CONFIRMED. This review's union is computed by grep -l (section 6).
+#    round6/r6_suite.txt gains a correction note.
+#  [minor] Commit hygiene (5afb0cd5 carried code). NOTED; no rewrite (no history change without the reviewer).
+#  [minor] The glass sits on the rest plane, not the dent. NOT CHANGED: this is his Q1 (glass or fence). Shown in
+#    the renders.
+#  [minor] Main page Model view crease lines. NOT CHANGED: not paint (R6-1a counts 0 group or gap vertices); his
+#    call on the simulator.
+#
+# (0) THE ALPHA SWEEP (scratch probe, never committed). His pad, the page's tints, one alpha for every glass,
+#     ΔE76 median per front member:
+#   iso (img2) · tab g1 · α 0.08: face 1: n 130670 · ΔE median 8.5 p10 4.6 · toward its colour cos 0.99
+#   iso (img2) · tab g1 · α 0.16: face 1: n 130670 · ΔE median 17.0 p10 9.5 · toward its colour cos 0.99
+#   iso (img2) · tab g1 · α 0.24: face 1: n 130670 · ΔE median 25.2 p10 14.1 · toward its colour cos 0.99
+#   iso (img2) · tab g1 · α 0.32: face 1: n 130670 · ΔE median 33.2 p10 18.5 · toward its colour cos 0.99
+#   iso (img2) · tab g2 · α 0.08: face 2: n 29307 · ΔE median 6.0 p10 4.1 · toward its colour cos 0.99
+#   iso (img2) · tab g2 · α 0.16: face 2: n 29307 · ΔE median 12.2 p10 8.9 · toward its colour cos 0.99
+#   iso (img2) · tab g2 · α 0.24: face 2: n 29307 · ΔE median 18.7 p10 14.2 · toward its colour cos 1.00
+#   iso (img2) · tab g2 · α 0.32: face 2: n 29307 · ΔE median 25.3 p10 19.9 · toward its colour cos 1.00
+#   iso (img2) · tab g3 · α 0.08: face 3: n 29308 · ΔE median 3.0 p10 1.8 · toward its colour cos 0.95
+#   iso (img2) · tab g3 · α 0.16: face 3: n 29308 · ΔE median 5.7 p10 3.6 · toward its colour cos 0.96
+#   iso (img2) · tab g3 · α 0.24: face 3: n 29308 · ΔE median 8.5 p10 5.4 · toward its colour cos 0.97
+#   iso (img2) · tab g3 · α 0.32: face 3: n 29308 · ΔE median 11.3 p10 7.1 · toward its colour cos 0.98
+#   iso (img2) · groups view · α 0.08: face 1: n 125080 · ΔE median 8.4 p10 4.6 · toward its colour cos 0.99 | face 2: n 28488 · ΔE median 6.0 p10 4.3 · toward its colour cos 0.99 | face 3: n 28489 · ΔE median 3.0 p10 1
+#   iso (img2) · groups view · α 0.16: face 1: n 125080 · ΔE median 17.0 p10 9.4 · toward its colour cos 0.99 | face 2: n 28488 · ΔE median 12.3 p10 8.9 · toward its colour cos 0.99 | face 3: n 28489 · ΔE median 5.7 p10
+#   iso (img2) · groups view · α 0.24: face 1: n 125080 · ΔE median 25.1 p10 14.0 · toward its colour cos 0.99 | face 2: n 28488 · ΔE median 18.7 p10 14.2 · toward its colour cos 1.00 | face 3: n 28489 · ΔE median 8.5 p
+#   iso (img2) · groups view · α 0.32: face 1: n 125080 · ΔE median 33.0 p10 18.5 · toward its colour cos 0.99 | face 2: n 28488 · ΔE median 25.3 p10 20.2 · toward its colour cos 1.00 | face 3: n 28489 · ΔE median 11.3 
+#   top (img3) · tab g1 · α 0.08: face 1: n 245263 · ΔE median 11.7 p10 5.3 · toward its colour cos 0.99
+#   top (img3) · tab g1 · α 0.16: face 1: n 245263 · ΔE median 23.3 p10 10.6 · toward its colour cos 0.99
+#   top (img3) · tab g1 · α 0.24: face 1: n 245263 · ΔE median 34.7 p10 15.7 · toward its colour cos 0.99
+#   top (img3) · tab g1 · α 0.32: face 1: n 245263 · ΔE median 46.1 p10 20.7 · toward its colour cos 0.99
+#   top (img3) · tab g2 · α 0.08: 
+#   top (img3) · tab g2 · α 0.16: 
+#   top (img3) · tab g2 · α 0.24: 
+#   top (img3) · tab g2 · α 0.32: 
+#   top (img3) · tab g3 · α 0.08: 
+#   top (img3) · tab g3 · α 0.16: 
+#   top (img3) · tab g3 · α 0.24: 
+#   top (img3) · tab g3 · α 0.32: 
+#   top (img3) · groups view · α 0.08: face 1: n 237947 · ΔE median 11.7 p10 5.3 · toward its colour cos 0.99
+#   top (img3) · groups view · α 0.16: face 1: n 237947 · ΔE median 23.3 p10 10.6 · toward its colour cos 0.99
+#   top (img3) · groups view · α 0.24: face 1: n 237947 · ΔE median 34.7 p10 15.7 · toward its colour cos 0.99
+#   top (img3) · groups view · α 0.32: face 1: n 237947 · ΔE median 46.1 p10 20.8 · toward its colour cos 0.99
+#   az135 · tab g1 · α 0.08: face 1: n 130670 · ΔE median 8.7 p10 6.4 · toward its colour cos 0.99
+#   az135 · tab g1 · α 0.16: face 1: n 130670 · ΔE median 17.2 p10 12.6 · toward its colour cos 0.99
+#   az135 · tab g1 · α 0.24: face 1: n 130670 · ΔE median 25.5 p10 18.6 · toward its colour cos 0.99
+#   az135 · tab g1 · α 0.32: face 1: n 130670 · ΔE median 33.5 p10 24.3 · toward its colour cos 0.99
+#   az135 · tab g2 · α 0.08: face 4: n 29331 · ΔE median 5.7 p10 4.6 · toward its colour cos 0.99
+#   az135 · tab g2 · α 0.16: face 4: n 29331 · ΔE median 11.5 p10 10.1 · toward its colour cos 0.99
+#   az135 · tab g2 · α 0.24: face 4: n 29331 · ΔE median 17.6 p10 15.0 · toward its colour cos 0.99
+#   az135 · tab g2 · α 0.32: face 4: n 29331 · ΔE median 23.6 p10 20.5 · toward its colour cos 1.00
+#   az135 · tab g3 · α 0.08: face 3: n 29308 · ΔE median 3.0 p10 1.8 · toward its colour cos 0.95
+#   az135 · tab g3 · α 0.16: face 3: n 29308 · ΔE median 5.7 p10 3.6 · toward its colour cos 0.96
+#   az135 · tab g3 · α 0.24: face 3: n 29308 · ΔE median 8.5 p10 5.4 · toward its colour cos 0.97
+#   az135 · tab g3 · α 0.32: face 3: n 29308 · ΔE median 11.3 p10 7.1 · toward its colour cos 0.98
+#   az135 · groups view · α 0.08: face 1: n 125080 · ΔE median 8.6 p10 6.4 · toward its colour cos 0.99 | face 4: n 28488 · ΔE median 5.7 p10 4.7 · toward its colour cos 0.99 | face 3: n 28489 · ΔE median 3.0 p10 1.8 ·
+#   az135 · groups view · α 0.16: face 1: n 125080 · ΔE median 17.1 p10 12.5 · toward its colour cos 0.99 | face 4: n 28488 · ΔE median 11.6 p10 10.1 · toward its colour cos 0.99 | face 3: n 28489 · ΔE median 5.7 p10 3.
+#   az135 · groups view · α 0.24: face 1: n 125080 · ΔE median 25.3 p10 18.5 · toward its colour cos 0.99 | face 4: n 28488 · ΔE median 17.7 p10 15.3 · toward its colour cos 0.99 | face 3: n 28489 · ΔE median 8.5 p10 5.
+#   az135 · groups view · α 0.32: face 1: n 125080 · ΔE median 33.3 p10 24.3 · toward its colour cos 0.99 | face 4: n 28488 · ΔE median 23.6 p10 20.5 · toward its colour cos 1.00 | face 3: n 28489 · ΔE median 11.3 p10 7
+#
+# (1) TESTS FIRST (2fdec7a6). SWIFT_DETERMINISTIC_HASHING=1 swift test --skip-build --filter 'TopOptFlowsTests\.FlexibleRound6(Hosted)?Tests/'
+	 Executed 25 tests, with 2 tests skipped and 61 failures (0 unexpected) in 237.560 (237.563) seconds
+FlexibleRound6HostedTests.swift:715: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testAMemberThatFacesAwayIsDrawnDashed] : XCTAssertEqual failed: ("[]") is not equal to ("[0]") - iso (img2) · [Rests]: the bottom, dashed
+FlexibleRound6HostedTests.swift:716: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testAMemberThatFacesAwayIsDrawnDashed] : XCTUnwrap failed: expected non-nil value of type "Hidden"
+FlexibleRound6HostedTests.swift:655: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheTagsDiscsAndHiddenOutlinesAreOnThePage] : XCTAssertEqual failed: ("[]") is not equal to ("[[0.18823529411764706, 0.8196078431372549, 0.34509803921568627], [0.956862
+FlexibleRound6HostedTests.swift:657: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheTagsDiscsAndHiddenOutlinesAreOnThePage] : XCTAssertEqual failed: ("Optional("square.stack.3d.down.forward")") is not equal to ("Optional("arrow.down.to.line")") - [
+FlexibleRound6HostedTests.swift:665: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheTagsDiscsAndHiddenOutlinesAreOnThePage] : XCTAssertFalse failed - the Prisms view's mm tags are on the page
+FlexibleRound6HostedTests.swift:667: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheTagsDiscsAndHiddenOutlinesAreOnThePage] : XCTAssertFalse failed - the Groups view: the members that face away, dashed
+FlexibleRound6HostedTests.swift:675: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheTagsDiscsAndHiddenOutlinesAreOnThePage] : XCTAssertEqual failed: ("[]") is not equal to ("["hidden-rests-0"]") - [Rests]: the bottom's dashed outline
+FlexibleRound6HostedTests.swift:676: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheTagsDiscsAndHiddenOutlinesAreOnThePage] : XCTUnwrap failed: expected non-nil value of type "CGRect"
+FlexibleRound6HostedTests.swift:628: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testWithNoDentTheChipStandsOnTheDrawnPrismsFloor] : XCTAssertEqual failed: ("0.0") is not equal to ("1.0") - no dent: the prism's true depth
+FlexibleRound6HostedTests.swift:634: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testWithNoDentTheChipStandsOnTheDrawnPrismsFloor] : XCTAssertLessThan failed: ("19.0") is not less than ("0.001") - the chip on the drawn prism's floor
+FlexibleRound6HostedTests.swift:640: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testWithNoDentTheChipStandsOnTheDrawnPrismsFloor] : XCTAssertTrue failed - the chips, the stamp handle and the tags read the same k
+FlexibleRound6HostedTests.swift:642: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testWithNoDentTheChipStandsOnTheDrawnPrismsFloor] : XCTAssertTrue failed - …as the prisms
+FlexibleRound6HostedTests.swift:644: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testWithNoDentTheChipStandsOnTheDrawnPrismsFloor] : XCTAssertTrue failed - …and the legend's ×k
+FlexibleRound6Tests.swift:667: error: -[TopOptFlowsTests.FlexibleRound6Tests testAFaintPrismsSideEdgesStandOnlyWhereItsOutlineTurns] : XCTAssertEqual failed: ("[2, 7, 0, 13, 8, 15, 1, 4, 12, 14, 11, 3]") is not equal to ("[15, 3, 12, 0]") - the square: its fou
+FlexibleRound6Tests.swift:674: error: -[TopOptFlowsTests.FlexibleRound6Tests testAFaintPrismsSideEdgesStandOnlyWhereItsOutlineTurns] : XCTAssertTrue failed - the disc: no side edge (every turn 5.6°), 64 drawn
+FlexibleRound6Tests.swift:683: error: -[TopOptFlowsTests.FlexibleRound6Tests testAFaintPrismsSideEdgesStandOnlyWhereItsOutlineTurns] : XCTAssertTrue failed - the pass reads the rule for faint items
+FlexibleRound6Tests.swift:684: error: -[TopOptFlowsTests.FlexibleRound6Tests testAFaintPrismsSideEdgesStandOnlyWhereItsOutlineTurns] : XCTAssertTrue failed - …at each side edge
+FlexibleRound6Tests.swift:740: error: -[TopOptFlowsTests.FlexibleRound6Tests testAGlassOutlineIsOneClosedLoopPerBoundary] : XCTAssertEqual failed: ("0") is not equal to ("1") - one boundary, one loop
+FlexibleRound6Tests.swift:741: error: -[TopOptFlowsTests.FlexibleRound6Tests testAGlassOutlineIsOneClosedLoopPerBoundary] : XCTUnwrap failed: expected non-nil value of type "Array<SIMD3<Float>>"
+FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("8.53064732209167") is less than ("10.0") - iso (img2) · Group 1 tab · face 1: the glass reads
+FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("5.960128698253396") is less than ("10.0") - iso (img2) · Group 2 tab · face 2: the glass read
+FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("2.9577789187392987") is less than ("10.0") - iso (img2) · Group 3 tab · face 3: the glass rea
+FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("8.422167190215765") is less than ("10.0") - iso (img2) · Groups view · face 1: the glass read
+FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("5.960128698253396") is less than ("10.0") - iso (img2) · Groups view · face 2: the glass read
+FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("2.9650862599816743") is less than ("10.0") - iso (img2) · Groups view · face 3: the glass rea
+FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("8.422167190215765") is less than ("10.0") - iso (img2) · Groups view, Group 2 open · face 1: 
+FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("9.979106721520777") is less than ("10.0") - iso (img2) · Groups view, Group 2 open · face 2: 
+FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("2.9650862599816743") is less than ("10.0") - iso (img2) · Groups view, Group 2 open · face 3:
+FlexibleRound6Tests.swift:642: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThan failed: ("0.9863132843318314") is not greater than ("0.9926929709049346") - top (img3) · Groups view · face 1:
+FlexibleRound6Tests.swift:642: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThan failed: ("0.9863132843318314") is not greater than ("0.9926929709049346") - top (img3) · Groups view, Group 2 o
+FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("8.679528883087965") is less than ("10.0") - back-right · Group 1 tab · face 1: the glass read
+FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("5.709081175319023") is less than ("10.0") - back-right · Group 2 tab · face 4: the glass read
+FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("2.9566259910935546") is less than ("10.0") - back-right · Group 3 tab · face 3: the glass rea
+FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("8.613947343677742") is less than ("10.0") - back-right · Groups view · face 1: the glass read
+FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("5.720212642495924") is less than ("10.0") - back-right · Groups view · face 4: the glass read
+FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("2.959587980879342") is less than ("10.0") - back-right · Groups view · face 3: the glass read
+FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("8.613947343677742") is less than ("10.0") - back-right · Groups view, Group 2 open · face 1: 
+FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("9.480858047241265") is less than ("10.0") - back-right · Groups view, Group 2 open · face 4: 
+FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("2.959587980879342") is less than ("10.0") - back-right · Groups view, Group 2 open · face 3: 
+FlexibleRound6Tests.swift:692: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheColourAndDeepestInfoSayWhatRoundSixDraws] : XCTAssertFalse failed - This group's colour on the part: its faces are framed in it on this page and on the main Flexible page. Pick
+FlexibleRound6Tests.swift:693: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheColourAndDeepestInfoSayWhatRoundSixDraws] : XCTAssertTrue failed - This group's colour on the part: its faces are framed in it on this page and on the main Flexible page. Pick 
+FlexibleRound6Tests.swift:694: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheColourAndDeepestInfoSayWhatRoundSixDraws] : XCTAssertFalse failed - This group's colour on the part: its faces are framed in it on this page and on the main Flexible page. Pick
+FlexibleRound6Tests.swift:695: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheColourAndDeepestInfoSayWhatRoundSixDraws] : XCTAssertFalse failed - How far the softest spot sinks under the full weight. Drag the chip on the part: while you drag, a glass pri
+FlexibleRound6Tests.swift:696: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheColourAndDeepestInfoSayWhatRoundSixDraws] : XCTAssertTrue failed - How far the softest spot sinks under the full weight. Drag the chip on the part: while you drag, a glass pris
+FlexibleRound6Tests.swift:708: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheLegendKeepsClearOfTheViewButtons] : XCTAssertTrue failed - 11l: the view buttons are in the legend's keep-out
+FlexibleRound6Tests.swift:709: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheLegendKeepsClearOfTheViewButtons] : XCTAssertTrue failed - 11l: the gizmo
+FlexibleRound6Tests.swift:710: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheLegendKeepsClearOfTheViewButtons] : XCTAssertTrue failed - 11l: the top line
+FlexibleRound6Tests.swift:717: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheLegendKeepsClearOfTheViewButtons] : XCTAssertFalse failed - 11l: clear of the buttons (Optional((902.0, 263.5, 268.0, 307.0)) vs (1082.0, 235.5, 88.0, 40.0))
+FlexibleRound6Tests.swift:708: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheLegendKeepsClearOfTheViewButtons] : XCTAssertTrue failed - 11p: the view buttons are in the legend's keep-out
+FlexibleRound6Tests.swift:709: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheLegendKeepsClearOfTheViewButtons] : XCTAssertTrue failed - 11p: the gizmo
+FlexibleRound6Tests.swift:710: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheLegendKeepsClearOfTheViewButtons] : XCTAssertTrue failed - 11p: the top line
+FlexibleRound6Tests.swift:717: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheLegendKeepsClearOfTheViewButtons] : XCTAssertFalse failed - 11p: clear of the buttons (Optional((542.0, 263.5, 268.0, 667.0)) vs (722.0, 235.5, 88.0, 40.0))
+FlexibleRound6Tests.swift:708: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheLegendKeepsClearOfTheViewButtons] : XCTAssertTrue failed - 13p: the view buttons are in the legend's keep-out
+FlexibleRound6Tests.swift:709: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheLegendKeepsClearOfTheViewButtons] : XCTAssertTrue failed - 13p: the gizmo
+FlexibleRound6Tests.swift:710: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheLegendKeepsClearOfTheViewButtons] : XCTAssertTrue failed - 13p: the top line
+FlexibleRound6Tests.swift:717: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheLegendKeepsClearOfTheViewButtons] : XCTAssertFalse failed - 13p: clear of the buttons (Optional((740.0, 263.5, 268.0, 849.0)) vs (920.0, 235.5, 88.0, 40.0))
+FlexibleRound6Tests.swift:708: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheLegendKeepsClearOfTheViewButtons] : XCTAssertTrue failed - 13l: the view buttons are in the legend's keep-out
+FlexibleRound6Tests.swift:709: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheLegendKeepsClearOfTheViewButtons] : XCTAssertTrue failed - 13l: the gizmo
+FlexibleRound6Tests.swift:710: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheLegendKeepsClearOfTheViewButtons] : XCTAssertTrue failed - 13l: the top line
+FlexibleRound6Tests.swift:717: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheLegendKeepsClearOfTheViewButtons] : XCTAssertFalse failed - 13l: clear of the buttons (Optional((1084.0, 263.5, 268.0, 505.0)) vs (1264.0, 235.5, 88.0, 40.0))
+FlexibleRound6Tests.swift:724: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheLegendKeepsClearOfTheViewButtons] : XCTAssertTrue failed - the page places its legend by this list
+#
+# (2) SOURCE MUTATIONS on 231b2fbb (applied, built, run, restored; cmp-checked against the saved files after each).
+#   batch 1: M1 volumes_no_walls (R6R-0) · M3 legend_keepout_no_buttons (R6R-3) · M5 fixed_alpha 0.08/0.13 (R6R-1)
+#            · M6 hidden_facing_inverted (R6R-6) · M7 the pass ignores the faint-edge rule (R6R-5)
+#   batch 2: M2 tags_layer_unmounted (R6R-2) · M4 the overlays' raw k (R6R-4) · M8 the page passes no heat (R6R-1's pin)
+mut_batch2 FlexibleRound6HostedTests.swift:665: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheTagsDiscsAndHiddenOutlinesAreOnThePage] : XCTAssertFalse failed - the Prisms view's mm tags are on the page
+mut_batch2 FlexibleRound6HostedTests.swift:667: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheTagsDiscsAndHiddenOutlinesAreOnThePage] : XCTAssertFalse failed - the Groups view: the members that face away, dashed
+mut_batch2 FlexibleRound6HostedTests.swift:675: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheTagsDiscsAndHiddenOutlinesAreOnThePage] : XCTAssertEqual failed: ("[]") is not equal to ("["hidden-rests-0"]") - [Rests]: the bottom's dashed outline
+mut_batch2 FlexibleRound6HostedTests.swift:676: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheTagsDiscsAndHiddenOutlinesAreOnThePage] : XCTUnwrap failed: expected non-nil value of type "CGRect"
+mut_batch2 FlexibleRound6HostedTests.swift:640: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testWithNoDentTheChipStandsOnTheDrawnPrismsFloor] : XCTAssertTrue failed - the chips, the stamp handle and the tags read the same k
+mut_batch2 FlexibleRound6Tests.swift:657: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertTrue failed - …and hands it to the glass
+mut_batch1 FlexibleRound6HostedTests.swift:715: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testAMemberThatFacesAwayIsDrawnDashed] : XCTAssertEqual failed: ("[]") is not equal to ("[0]") - iso (img2) · [Rests]: the bottom, dashed
+mut_batch1 FlexibleRound6HostedTests.swift:716: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testAMemberThatFacesAwayIsDrawnDashed] : XCTUnwrap failed: expected non-nil value of type "Hidden"
+mut_batch1 FlexibleRound6HostedTests.swift:609: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testThePagesOneListCarriesTheGlassAndThePrisms] : XCTAssertEqual failed: ("[]") is not equal to ("[4, 2]") - views 0: the glass
+mut_batch1 FlexibleRound6HostedTests.swift:610: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testThePagesOneListCarriesTheGlassAndThePrisms] : XCTAssertEqual failed: ("0") is not equal to ("2") - views 0: one glass per member
+mut_batch1 FlexibleRound6HostedTests.swift:612: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testThePagesOneListCarriesTheGlassAndThePrisms] : XCTAssertEqual failed: ("[TopOptFlows.ClearanceRenderItem(volume: TopOptFlows.ClearanceVolume(faceID: 2, kind:
+mut_batch1 FlexibleRound6HostedTests.swift:609: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testThePagesOneListCarriesTheGlassAndThePrisms] : XCTAssertEqual failed: ("[]") is not equal to ("[1, 2, 0, 3, 5, 4]") - views 2: the glass
+mut_batch1 FlexibleRound6HostedTests.swift:610: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testThePagesOneListCarriesTheGlassAndThePrisms] : XCTAssertEqual failed: ("0") is not equal to ("6") - views 2: one glass per member
+mut_batch1 FlexibleRound6HostedTests.swift:612: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testThePagesOneListCarriesTheGlassAndThePrisms] : XCTAssertEqual failed: ("[TopOptFlows.ClearanceRenderItem(volume: TopOptFlows.ClearanceVolume(faceID: 2, kind:
+mut_batch1 FlexibleRound6HostedTests.swift:609: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testThePagesOneListCarriesTheGlassAndThePrisms] : XCTAssertEqual failed: ("[]") is not equal to ("[1, 2, 0, 3, 5, 4]") - views 3: the glass
+mut_batch1 FlexibleRound6HostedTests.swift:610: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testThePagesOneListCarriesTheGlassAndThePrisms] : XCTAssertEqual failed: ("0") is not equal to ("6") - views 3: one glass per member
+mut_batch1 FlexibleRound6HostedTests.swift:612: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testThePagesOneListCarriesTheGlassAndThePrisms] : XCTAssertEqual failed: ("[TopOptFlows.ClearanceRenderItem(volume: TopOptFlows.ClearanceVolume(faceID: 1, kind:
+mut_batch1 FlexibleRound6HostedTests.swift:609: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testThePagesOneListCarriesTheGlassAndThePrisms] : XCTAssertEqual failed: ("[]") is not equal to ("[4, 2]") - views 1: the glass
+mut_batch1 FlexibleRound6HostedTests.swift:610: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testThePagesOneListCarriesTheGlassAndThePrisms] : XCTAssertEqual failed: ("0") is not equal to ("2") - views 1: one glass per member
+mut_batch1 FlexibleRound6HostedTests.swift:612: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testThePagesOneListCarriesTheGlassAndThePrisms] : XCTAssertEqual failed: ("[TopOptFlows.ClearanceRenderItem(volume: TopOptFlows.ClearanceVolume(faceID: 1, kind:
+mut_batch1 FlexibleRound6Tests.swift:690: error: -[TopOptFlowsTests.FlexibleRound6Tests testAFaintPrismsSideEdgesStandOnlyWhereItsOutlineTurns] : XCTAssertTrue failed - the pass reads the rule for faint items
+mut_batch1 FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("8.53064732209167") is less than ("10.0") - iso (img2) · Group 1 tab · face 1: the 
+mut_batch1 FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("5.960128698253396") is less than ("10.0") - iso (img2) · Group 2 tab · face 2: the
+mut_batch1 FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("2.9577789187392987") is less than ("10.0") - iso (img2) · Group 3 tab · face 3: th
+mut_batch1 FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("8.422167190215765") is less than ("10.0") - iso (img2) · Groups view · face 1: the
+mut_batch1 FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("5.960128698253396") is less than ("10.0") - iso (img2) · Groups view · face 2: the
+mut_batch1 FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("2.9650862599816743") is less than ("10.0") - iso (img2) · Groups view · face 3: th
+mut_batch1 FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("8.422167190215765") is less than ("10.0") - iso (img2) · Groups view, Group 2 open 
+mut_batch1 FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("9.979106721520777") is less than ("10.0") - iso (img2) · Groups view, Group 2 open 
+mut_batch1 FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("2.9650862599816743") is less than ("10.0") - iso (img2) · Groups view, Group 2 open
+mut_batch1 FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("8.679528883087965") is less than ("10.0") - back-right · Group 1 tab · face 1: the
+mut_batch1 FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("5.709081175319023") is less than ("10.0") - back-right · Group 2 tab · face 4: the
+mut_batch1 FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("2.9566259910935546") is less than ("10.0") - back-right · Group 3 tab · face 3: th
+mut_batch1 FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("8.613947343677742") is less than ("10.0") - back-right · Groups view · face 1: the
+mut_batch1 FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("5.720212642495924") is less than ("10.0") - back-right · Groups view · face 4: the
+mut_batch1 FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("2.959587980879342") is less than ("10.0") - back-right · Groups view · face 3: the
+mut_batch1 FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("8.613947343677742") is less than ("10.0") - back-right · Groups view, Group 2 open 
+mut_batch1 FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("9.480858047241265") is less than ("10.0") - back-right · Groups view, Group 2 open 
+mut_batch1 FlexibleRound6Tests.swift:632: error: -[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat] : XCTAssertGreaterThanOrEqual failed: ("2.959587980879342") is less than ("10.0") - back-right · Groups view, Group 2 open 
+mut_batch1 FlexibleRound6Tests.swift:715: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheLegendKeepsClearOfTheViewButtons] : XCTAssertTrue failed - 11l: the view buttons are in the legend's keep-out
+mut_batch1 FlexibleRound6Tests.swift:724: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheLegendKeepsClearOfTheViewButtons] : XCTAssertFalse failed - 11l: clear of the buttons (Optional((902.0, 263.5, 268.0, 307.0)) vs (1082.0, 235.5, 88.0, 40.0))
+mut_batch1 FlexibleRound6Tests.swift:715: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheLegendKeepsClearOfTheViewButtons] : XCTAssertTrue failed - 11p: the view buttons are in the legend's keep-out
+mut_batch1 FlexibleRound6Tests.swift:724: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheLegendKeepsClearOfTheViewButtons] : XCTAssertFalse failed - 11p: clear of the buttons (Optional((542.0, 263.5, 268.0, 667.0)) vs (722.0, 235.5, 88.0, 40.0))
+mut_batch1 FlexibleRound6Tests.swift:715: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheLegendKeepsClearOfTheViewButtons] : XCTAssertTrue failed - 13p: the view buttons are in the legend's keep-out
+mut_batch1 FlexibleRound6Tests.swift:724: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheLegendKeepsClearOfTheViewButtons] : XCTAssertFalse failed - 13p: clear of the buttons (Optional((740.0, 263.5, 268.0, 849.0)) vs (920.0, 235.5, 88.0, 40.0))
+mut_batch1 FlexibleRound6Tests.swift:715: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheLegendKeepsClearOfTheViewButtons] : XCTAssertTrue failed - 13l: the view buttons are in the legend's keep-out
+mut_batch1 FlexibleRound6Tests.swift:724: error: -[TopOptFlowsTests.FlexibleRound6Tests testTheLegendKeepsClearOfTheViewButtons] : XCTAssertFalse failed - 13l: clear of the buttons (Optional((1084.0, 263.5, 268.0, 505.0)) vs (1264.0, 235.5, 88.0, 40.0))
+#
+# (3) GREEN on 231b2fbb, SWIFT_DETERMINISTIC_HASHING=1 (FlexibleRound6Tests, FlexibleRound6HostedTests, the evidence probe):
+rev_green2.log:	 Executed 2 tests, with 0 failures (0 unexpected) in 55.349 (55.349) seconds
+rev_green2.log:	 Executed 11 tests, with 1 test skipped and 2 failures (0 unexpected) in 39.605 (39.606) seconds
+rev_green2.log:	 Executed 13 tests, with 1 test skipped and 2 failures (0 unexpected) in 94.954 (94.955) seconds
+rev_green2.log:	 Executed 13 tests, with 1 test skipped and 2 failures (0 unexpected) in 94.954 (94.956) seconds
+rev_green1.log:	 Executed 2 tests, with 0 failures (0 unexpected) in 55.592 (55.593) seconds
+rev_green1.log:	 Executed 14 tests, with 1 test skipped and 0 failures (0 unexpected) in 228.641 (228.643) seconds
+rev_green1.log:	 Executed 11 tests, with 1 test skipped and 8 failures (0 unexpected) in 39.925 (39.926) seconds
+rev_green1.log:	 Executed 27 tests, with 2 tests skipped and 8 failures (0 unexpected) in 324.158 (324.161) seconds
+rev_green1.log:	 Executed 27 tests, with 2 tests skipped and 8 failures (0 unexpected) in 324.158 (324.162) seconds
+#   (green1 ran with targetDE 15: R6R-1 failed on his teal, 8.8 < 10. targetDE became 21; green2: R6R-1's first
+#   'told apart' rule failed (cos 0.988 vs 0.992 — green and teal lie in one direction from his blue top) and was
+#   replaced by the pairwise one; green3: R6R-1 alone, passed.)
+FLEX-R6-1d Group 2 at iso (img2): face 2 faces the camera (ray · n -0.43), face 4 faces away (0.73)
+FLEX-R6-1d Group 2 pixels outside its front member and outlines: 0
+FLEX-R6-1d Groups view, top: the bottom glass's fill inside the top face 0 pixels
+FLEX-R6-1d Prisms view (5) iso (img2): n 13622 · min 6 · median 10 · p90 23 · max 36
+FLEX-R6-1d alphas: glass face 4 0.17 / 0.40, face 2 0.17 / 0.40, face 1 0.11 / 0.40, face 4 0.24 / 0.60, face 2 0.25 / 0.60, face 3 0.25 / 0.40, face 5 0.30 / 0.40, face 0 0.17 / 0.40 · prism at rest 0.05 / 0.40, selected in the view 0.09 / 0.60 · k 1.0
+FLEX-R6-1d alphas: glass face 4 0.23 / 0.40, face 2 0.23 / 0.40, face 1 0.16 / 0.40, face 4 0.31 / 0.60, face 2 0.31 / 0.60, face 3 0.35 / 0.40, face 5 0.35 / 0.40, face 0 0.24 / 0.40 · prism at rest 0.05 / 0.40, selected in the view 0.09 / 0.60 · k 1.0
+FLEX-R6-1d back member face 4: fill pixels off its outline 0 · outline pixels 5546
+FLEX-R6-1d control (cull none): 202115 pixels
+FLEX-R6-1d face 2's faint prism iso (img2): over its dent n 1112 · min 10 · median 20 · p90 20 · max 20 · its whole fill n 2584 · min 7 · median 14 · p90 20 · max 20
+FLEX-R6-1d face 2's faint prism top (img3): over its dent n 122 · min 20 · median 20 · p90 20 · max 20 · its whole fill n 527 · min 5 · median 9 · p90 20 · max 20
+FLEX-R6-1d glass face 2 over cyan: n 1697 · min 37 · median 38 · p90 38 · max 40
+FLEX-R6-1d glass face 2 over cyan: n 1697 · min 52 · median 53 · p90 54 · max 56
+FLEX-R6-1d glass face 2 over dark: n 25392 · min 39 · median 40 · p90 40 · max 40
+FLEX-R6-1d glass face 2 over dark: n 25392 · min 54 · median 56 · p90 56 · max 56
+FLEX-R6-1d glass face 2 over green: n 2218 · mTest Case '-[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad]' passed (22.237 seconds).
+FLEX-R6-1d glass face 2 over green: n 2218 · min 40 · median 51 · p90 53 · max 55
+FLEX-R6-1d nil-alpha (dragged prism) render hash ecb1a3868a761708f533735b474319a9f69e4ac9aeea28ba80190ea68f584ff0 (recorded before A2 under SWIFT_DETERMINISTIC_HASHING=1: ecb1a3868a761708f533735b474319a9f69e4ac9aeea28ba80190ea68f584ff0) · two renderers differ on 0 pixels · deterministic hashing true
+FLEX-R6-1d positive control: round 5's frames change 30424 pixels at iso (img2)
+FLEX-R6-1d top glass (group 1) from above: n 245263 · min 5 · median 15 · p90 18 · max 19 · control (reversed winding): 0 pixels
+FLEX-R6-1d top glass (group 1) from above: n 245263 · min 7 · median 21 · p90 25 · max 27 · control (reversed winding): 0 pixels
+FLEX-R6-1d top glass face-on top: n 273075 · min 5 · median 15 · p90 18 · max 19
+FLEX-R6-1d top glass face-on top: n 273075 · min 7 · median 21 · p90 25 · max 27
+FLEX-R6-1d top glass grazing: n 17286 · min 11 · median 15 · p90 19 · max 19
+FLEX-R6-1d top glass grazing: n 17286 · min 16 · median 21 · p90 26 · max 27
+FLEX-R6-1d top glass zoomed out: n 14640 · min 5 · median 15 · p90 18 · max 19
+FLEX-R6-1d top glass zoomed out: n 14640 · min 7 · median 21 · p90 26 · max 27
+FLEX-R6R-0 views 0 → glass [4, 2] · prisms [2] · views 2 → glass [1, 4, 2, 3, 5, 0] · prisms [2] · views 3 → glass [1, 4, 2, 3, 5, 0] · prisms [1, 4, 2, 3, 5] · views 1 → glass [4, 2] · prisms [1, 4, 2, 3, 5]
+FLEX-R6R-2 tags ["tag-1", "tag-3", "tag-4"] · hidden ["hidden-group-2-4", "hidden-group-3-5", "hidden-rests-0"] · [Rests] ["hidden-rests-0"] (273.5732116699219, 322.4051208496094, 646.8533630371094, 375.1711120605469) · nine groups' discs ["disc-1"]
+FLEX-R6R-3
+FLEX-R6R-4 chip → floor 0.0000 mm · control (k 0) 19.00 mm
+FLEX-R6R-5 square [0, 3, 12, 15] · disc 0 · hexagon [1, 2, 3, 4, 5, 6]
+FLEX-R6R-6 iso (img2) [Rests] → face 0, 1628 pt · top (img3) [Rests] → face 0, 1870 pt · Group 2 iso → [4] · Groups view iso → [0, 4, 5]
+FLEX-R6R-6a sector loop 5 points, 200.0 mm · slab [68]
+FLEX-R6R-1 heat samples per region: 1: 256, 2: 263, 3: 263, 4: 263, 5: 263
+FLEX-R6R-1 iso (img2) · Group 1 tab · face 1 (α 0.16): n 130670 · ΔE median 17.0 p10 9.4 · toward its colour cos 0.99
+FLEX-R6R-1 iso (img2) · Group 2 tab · face 2 (α 0.23): n 29307 · ΔE median 18.2 p10 13.8 · toward its colour cos 1.00
+FLEX-R6R-1 iso (img2) · Group 3 tab · face 3 (α 0.35): n 29308 · ΔE median 12.0 p10 7.8 · toward its colour cos 0.98
+FLEX-R6R-1 iso (img2) · Groups view · face 1 (α 0.16): n 125080 · ΔE median 17.0 p10 9.3 · toward its colour cos 0.99
+FLEX-R6R-1 iso (img2) · Groups view · face 2 (α 0.23): n 28488 · ΔE median 18.2 p10 13.9 · toward its colour cos 1.00
+FLEX-R6R-1 iso (img2) · Groups view · face 3 (α 0.35): n 28489 · ΔE median 12.1 p10 7.8 · toward its colour cos 0.98
+FLEX-R6R-1 iso (img2) · Groups view · faces 1 and 2: their changes' cos -0.92
+FLEX-R6R-1 iso (img2) · Groups view · faces 1 and 3: their changes' cos -0.33
+FLEX-R6R-1 iso (img2) · Groups view · faces 2 and 3: their changes' cos 0.21
+FLEX-R6R-1 iso (img2) · Groups view, Group 2 open · face 1 (α 0.16): n 125080 · ΔE median 17.0 p10 9.3 · toward its colour cos 0.99
+FLEX-R6R-1 iso (img2) · Groups view, Group 2 open · face 2 (α 0.31): n 28488 · ΔE median 24.4 p10 19.4 · toward its colour cos 1.00
+FLEX-R6R-1 iso (img2) · Groups view, Group 2 open · face 3 (α 0.35): n 28489 · ΔE median 12.1 p10 7.8 · toward its colour cos 0.98
+FLEX-R6R-1 iso (img2) · Groups view, Group 2 open · faces 1 and 2: their changes' cos -0.91
+FLEX-R6R-1 iso (img2) · Groups view, Group 2 open · faces 1 and 3: their changes' cos -0.33
+FLEX-R6R-1 iso (img2) · Groups view, Group 2 open · faces 2 and 3: their changes' cos 0.20
+FLEX-R6R-1 top (img3) · Group 1 tab · face 1 (α 0.16): n 245263 · ΔE median 22.9 p10 10.5 · toward its colour cos 0.99
+FLEX-R6R-1 top (img3) · Groups view · face 1 (α 0.16): n 237947 · ΔE median 23.0 p10 10.5 · toward its colour cos 0.99
+FLEX-R6R-1 top (img3) · Groups view, Group 2 open · face 1 (α 0.16): n 237947 · ΔE median 23.0 p10 10.5 · toward its colour cos 0.99
+FLEX-R6R-1 back-right · Group 1 tab · face 1 (α 0.16): n 130670 · ΔE median 17.1 p10 12.5 · toward its colour cos 0.99
+FLEX-R6R-1 back-right · Group 2 tab · face 4 (α 0.23): n 29331 · ΔE median 17.0 p10 14.7 · toward its colour cos 0.99
+FLEX-R6R-1 back-right · Group 3 tab · face 3 (α 0.35): n 29308 · ΔE median 12.0 p10 7.8 · toward its colour cos 0.98
+FLEX-R6R-1 back-right · Groups view · face 1 (α 0.16): n 125080 · ΔE median 17.1 p10 12.4 · toward its colour cos 0.99
+FLEX-R6R-1 back-right · Groups view · face 4 (α 0.23): n 28488 · ΔE median 17.0 p10 14.8 · toward its colour cos 0.99
+FLEX-R6R-1 back-right · Groups view · face 3 (α 0.35): n 28489 · ΔE median 12.1 p10 7.8 · toward its colour cos 0.98
+FLEX-R6R-1 back-right · Groups view · faces 1 and 4: their changes' cos -0.61
+FLEX-R6R-1 back-right · Groups view · faces 1 and 3: their changes' cos -0.32
+FLEX-R6R-1 back-right · Groups view · faces 4 and 3: their changes' cos 0.22
+FLEX-R6R-1 back-right · Groups view, Group 2 open · face 1 (α 0.16): n 125080 · ΔE median 17.1 p10 12.4 · toward its colour cos 0.99
+FLEX-R6R-1 back-right · Groups view, Group 2 open · face 4 (α 0.31): n 28488 · ΔE median 22.9 p10 19.6 · toward its colour cos 1.00
+FLEX-R6R-1 back-right · Groups view, Group 2 open · face 3 (α 0.35): n 28489 · ΔE median 12.1 p10 7.8 · toward its colour cos 0.98
+FLEX-R6R-1 back-right · Groups view, Group 2 open · faces 1 and 4: their changes' cos -0.61
+FLEX-R6R-1 back-right · Groups view, Group 2 open · faces 1 and 3: their changes' cos -0.32
+FLEX-R6R-1 back-right · Groups view, Group 2 open · faces 4 and 3: their changes' cos 0.20
+FLEX-R6R-1 21 member renders measured · 12 pairs told apart
+#
+# (4) GOLDENS (AP0's set), both hash modes:
+#   SWIFT_DETERMINISTIC_HASHING=1 swift test --skip-build --filter 'FlexibleAngledGoldenTests|FlexiblePressFixturesTests|FlexibleStageTests|FlexiblePressSaveTests|FlexibleSqueezeGroupsPressTests|FlexiblePressReframeTests|FlexiblePressReviewTests'
+	 Executed 56 tests, with 0 failures (0 unexpected) in 19.459 (19.464) seconds
+#   43 identical · 0 DIFFERS
+#   unseeded: swift test --skip-build --filter 'FlexibleAngledGoldenTests|FlexiblePressSaveTests|FlexibleSqueezeGroupsPressTests|FlexiblePressReframeTests|FlexiblePressReviewTests'
+	 Executed 39 tests, with 0 failures (0 unexpected) in 17.004 (17.008) seconds
+#   36 identical · 0 DIFFERS · 1 PART-SKIP (raw subtree bytes need deterministic hashing)
+#
+# (5) STAGE-JOB HASHES (angled_presses/stage_job_hashes.sh, TOPOPT_JOB_REPEAT=3): stage_job_hashes_r6r.txt — the 16
+#   rows' hashes identical to round6/stage_job_hashes_r6.txt (diff of row, project and hash: empty); control+ still 31646a7163500d78.
+#
+# (7) iOS: xcodebuild -project app/TopOpt.xcodeproj -scheme TopOpt -configuration Debug -destination id=147E56A1-C8CA-4B9D-BE6C-CF230589A83A -derivedDataPath …/DerivedData/flexA1 build
+** BUILD SUCCEEDED **
+#   xcrun simctl install 147E56A1 (Booted): exit 0, NEVER launched. Installed TopOpt.debug.dylib mtime Oct  8 21:46:40 (= the build
+#   product); strings: arrow.down.to.line 1 · hidden- 1 · 'a faint glass of it' 1 · flexible-settings-view-groups 1 · 'Prism = squish shown' 1.
+#
+# (6) TARGETED SUITE on 231b2fbb, unseeded, detached (nohup; watched by PID 49621, kill -0), LatticeStaleTypeTests left out
+#   (not the S1 base). The class union is MECHANICAL: grep -lF on Tests for every touched source's file name (R6 and this
+#   review: ClearanceGeometry.swift FlexibleDepthPrism.swift FlexibleFaintEdges.swift FlexibleGroupColours.swift FlexibleGroupWalls.swift FlexibleMainStage+Squish.swift FlexibleMainStage+Views.swift FlexibleMainStage.swift FlexiblePageChannels.swift FlexibleRowCopy.swift FlexibleStageModel.swift FlexibleStagePage.swift FlexibleStageViewTags.swift FlexibleStageViews.swift FlexibleStageVolumes.swift FlexibleViewControls.swift MetalMeshView.swift),
+#   plus ClearanceRenderItem and setClearanceVolumes, plus every Flexible* class, plus round 6's AP1 and clearance readers.
+#   146 classes; the 10 the verifier found missing are all in it:
+#     ClearanceGeometryTests in
+#     LatticeSeparationRegionTests in
+#     LatticePreviewConfettiTests in
+#     SmoothingUsablePathTests in
+#     ViewerProfileTests in
+#     SmoothingStrokeCameraTests in
+#     LatticeHisSteppedBakeProbe in
+#     LatticePreviewConfettiEvidenceGen in
+#     LatticeQuiltFrameProbe in
+#     RenderQualityEvidenceGen in
+#   swift test --skip-build --filter 'TopOptFlowsTests\.(ClearanceDerivationTests|ClearanceGeometryTests|ClearanceHeuristicBracketTests|ContactShadingTests|FlexibleAngledGoldenRecorder|FlexibleAngledGoldenTests|FlexibleBatchBReviewTests|FlexibleBatchBReviewUXTests|FlexibleBatchCHookTests|FlexibleBatchCVerifyTests|FlexibleBatchM2Probe|FlexibleBatchM2Tests|FlexibleBatchM2VerifyTests|FlexibleBatchMDentTests|FlexibleBatchMGroupTests|FlexibleBatchMLegendTests|FlexibleBatchMProbe|FlexibleBatchMStressTests|FlexibleBatchMVerifyTests|FlexibleBatchMXrayTests|FlexibleBatchNEvidenceProbe|FlexibleBatchNProbe|FlexibleBatchNRefineTests|FlexibleBatchNVerifyTests|FlexibleCoreClaimTests|FlexibleCurveEditTests|FlexibleDepthPrismTests|FlexibleFEFieldTests|FlexibleFEPassPerfTests|FlexibleFEPassTests|FlexibleFEVerifyGTests|FlexibleGeometryOnlyLatticeTests|FlexibleGroupFieldPerfTests|FlexibleGroupPaletteEvidenceProbe|FlexibleGroupPaletteHostedTests|FlexibleGroupPaletteTests|FlexibleInPassCompositeTests|FlexibleLatticeEvidenceProbe|FlexibleLatticeFieldTests|FlexibleLatticeGradingTests|FlexibleLatticePassPerfTests|FlexibleLatticePassTests|FlexibleLatticeUnderReviewTests|FlexibleLatticeUnderTests|FlexibleLegendPlacementTests|FlexibleMainPageHookTests|FlexibleMainPageLoadsTests|FlexibleMainPageRound4HostedTests|FlexibleMainPageRound4Tests|FlexibleMainPageRound4VerifyTests|FlexibleMainStageTests|FlexibleMainViewsTests|FlexibleMergeR5SMTests|FlexibleOverlayClipTests|FlexibleOverlaySeamTests|FlexiblePinchTests|FlexiblePressFixturesTests|FlexiblePressReframeTests|FlexiblePressReviewTests|FlexiblePressSaveTests|FlexibleReadinessTests|FlexibleRegionsTests|FlexibleRound5EvidenceProbe|FlexibleRound5SettingsHostedTests|FlexibleRound5SettingsTests|FlexibleRound5SettingsVerifyTests|FlexibleRound5SquishExitTests|FlexibleRound6EvidenceProbe|FlexibleRound6HostedTests|FlexibleRound6Tests|FlexibleRowCopyTests|FlexibleSettingsMigrationTests|FlexibleSettingsPageHostedTests|FlexibleSettingsRound4Tests|FlexibleSettingsVerifyD1Tests|FlexibleShownValuesTests|FlexibleSqueezeGroupsModelTests|FlexibleSqueezeGroupsPressTests|FlexibleSqueezeGroupsReviewTests|FlexibleSqueezeGroupsReviewUITests|FlexibleSqueezeGroupsReviewUXTests|FlexibleSqueezeGroupsTests|FlexibleSqueezeGroupsUITests|FlexibleSquishCoarsenTests|FlexibleSquishEvidenceProbe|FlexibleSquishPerfProbe|FlexibleSquishPlayAllTests|FlexibleSquishPlayerTests|FlexibleSquishSolverTests|FlexibleSquishTests|FlexibleSquishVerifyGTests|FlexibleStageTests|FlexibleSurfaceNavTests|LatticeBaldPatchProbe|LatticeBaseDebrisProbe|LatticeEdgeBandProbe|LatticeEmptySpaceProbe|LatticeExploreModeControlProbe|LatticeGradeToSolidBandTests|LatticeHisAnglesProbe|LatticeHisConfigProbe|LatticeHisSteppedBakeProbe|LatticeHoleMetricProbe|LatticeIncludeGateTests|LatticeLegendColourTests|LatticeLocalCoverageProbe|LatticeModeTests|LatticeOneVsTwoCellProbe|LatticePageRound2Tests|LatticePreviewConfettiEvidenceGen|LatticePreviewConfettiTests|LatticePreviewRegionMaskTests|LatticeQuiltFrameProbe|LatticeRegionCapTests|LatticeRimIsTheEmptySpaceProbe|LatticeSDFAlignmentTests|LatticeSeparationRegionTests|LatticeSettingsPersistTests|LatticeShellAndMarchAgreeTests|LatticeSimSolveTriggerTests|LatticeSkinDressingProbe|LatticeVariantFaceWallsTests|ManualPrimitiveTests|OrganicCapsuleImpostorTests|OrganicForecastRouteTests|ProjectStoreTests|ProtectFreezeVsSolidityTests|RenderQualityEvidenceGen|RenderQualityLiveViewTests|SmoothingPageRound2Tests|SmoothingRound3Tests|SmoothingRound4Tests|SmoothingStrokeCameraTests|SmoothingUsablePathTests|SmoothingViewerTests|StrutLineWidthTests|SurfaceCutDetentTests|SurfaceInputDisciplineTests|SurfacePencilToggleExemptionTests|SurfaceStageNoRegressionTests|SurfaceTapMeaningTests|ThreeStageVisibilityTests|UndoHistoryTests|UnifiedShadingTests|ViewerProfileTests|ViewerTests)/'
+	 Executed 951 tests, with 50 tests skipped and 9 failures (0 unexpected) in 5648.698 (5648.792) seconds
+#   9 failures in 2 tests, both on the known list:
+#      8 FlexibleBatchNVerifyTests.testEveryRefineLineIsWholeBesideTheLivePlayAllPicker
+#      1 LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds
+#   (FlexibleBatchNVerifyTests reads the main page's toggles row, which this review does not touch: no 4th button on this base.)
+#   Per class:
+#     ClearanceDerivationTests passed: Executed 17 tests, with 0 failures (0 unexpected) in 0.018 (0.020) seconds
+#     ClearanceGeometryTests passed: Executed 24 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds
+#     ClearanceHeuristicBracketTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 0.080 (0.080) seconds
+#     ContactShadingTests passed: Executed 6 tests, with 0 failures (0 unexpected) in 0.477 (0.478) seconds
+#     FlexibleAngledGoldenRecorder passed: Executed 10 tests, with 10 tests skipped and 0 failures (0 unexpected) in 0.003 (0.004) seconds
+#     FlexibleAngledGoldenTests passed: Executed 13 tests, with 0 failures (0 unexpected) in 13.763 (13.764) seconds
+#     FlexibleBatchBReviewTests passed: Executed 10 tests, with 0 failures (0 unexpected) in 114.567 (114.568) seconds
+#     FlexibleBatchBReviewUXTests passed: Executed 13 tests, with 0 failures (0 unexpected) in 0.641 (0.642) seconds
+#     FlexibleBatchCHookTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 0.836 (0.837) seconds
+#     FlexibleBatchCVerifyTests passed: Executed 14 tests, with 0 failures (0 unexpected) in 17.674 (17.675) seconds
+#     FlexibleBatchM2Probe passed: Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.001 (0.002) seconds
+#     FlexibleBatchM2Tests passed: Executed 2 tests, with 0 failures (0 unexpected) in 27.071 (27.071) seconds
+#     FlexibleBatchM2VerifyTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 43.413 (43.413) seconds
+#     FlexibleBatchMDentTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 46.877 (46.877) seconds
+#     FlexibleBatchMGroupTests passed: Executed 1 test, with 0 failures (0 unexpected) in 49.092 (49.093) seconds
+#     FlexibleBatchMLegendTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 61.581 (61.581) seconds
+#     FlexibleBatchMProbe passed: Executed 5 tests, with 5 tests skipped and 0 failures (0 unexpected) in 0.003 (0.003) seconds
+#     FlexibleBatchMStressTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 109.877 (109.877) seconds
+#     FlexibleBatchMVerifyTests passed: Executed 8 tests, with 1 test skipped and 0 failures (0 unexpected) in 597.162 (597.162) seconds
+#     FlexibleBatchMXrayTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 169.773 (169.774) seconds
+#     FlexibleBatchNEvidenceProbe passed: Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.002 (0.002) seconds
+#     FlexibleBatchNProbe passed: Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#     FlexibleBatchNRefineTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 254.610 (254.611) seconds
+#     FlexibleBatchNVerifyTests failed: Executed 4 tests, with 8 failures (0 unexpected) in 192.432 (192.432) seconds
+#     FlexibleCoreClaimTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 61.454 (61.454) seconds
+#     FlexibleCurveEditTests passed: Executed 7 tests, with 0 failures (0 unexpected) in 0.007 (0.008) seconds
+#     FlexibleDepthPrismTests passed: Executed 11 tests, with 0 failures (0 unexpected) in 0.745 (0.746) seconds
+#     FlexibleFEFieldTests passed: Executed 12 tests, with 0 failures (0 unexpected) in 217.227 (217.229) seconds
+#     FlexibleFEPassPerfTests passed: Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#     FlexibleFEPassTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 57.488 (57.489) seconds
+#     FlexibleFEVerifyGTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 63.800 (63.801) seconds
+#     FlexibleGeometryOnlyLatticeTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 0.250 (0.251) seconds
+#     FlexibleGroupFieldPerfTests passed: Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.000 (0.000) seconds
+#     FlexibleGroupPaletteEvidenceProbe passed: Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#     FlexibleGroupPaletteHostedTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 48.176 (48.176) seconds
+#     FlexibleGroupPaletteTests passed: Executed 7 tests, with 0 failures (0 unexpected) in 0.224 (0.225) seconds
+#     FlexibleInPassCompositeTests passed: Executed 10 tests, with 0 failures (0 unexpected) in 21.187 (21.189) seconds
+#     FlexibleLatticeEvidenceProbe passed: Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.002 (0.002) seconds
+#     FlexibleLatticeFieldTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 2.852 (2.853) seconds
+#     FlexibleLatticeGradingTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 1.994 (1.995) seconds
+#     FlexibleLatticePassPerfTests passed: Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.005 (0.005) seconds
+#     FlexibleLatticePassTests passed: Executed 10 tests, with 0 failures (0 unexpected) in 13.446 (13.447) seconds
+#     FlexibleLatticeUnderReviewTests passed: Executed 7 tests, with 0 failures (0 unexpected) in 17.479 (17.480) seconds
+#     FlexibleLatticeUnderTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 2.572 (2.572) seconds
+#     FlexibleLegendPlacementTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 0.006 (0.007) seconds
+#     FlexibleMainPageHookTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 0.227 (0.228) seconds
+#     FlexibleMainPageLoadsTests passed: Executed 10 tests, with 0 failures (0 unexpected) in 2.907 (2.908) seconds
+#     FlexibleMainPageRound4HostedTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 3.862 (3.862) seconds
+#     FlexibleMainPageRound4Tests passed: Executed 12 tests, with 0 failures (0 unexpected) in 45.214 (45.215) seconds
+#     FlexibleMainPageRound4VerifyTests passed: Executed 9 tests, with 0 failures (0 unexpected) in 97.155 (97.156) seconds
+#     FlexibleMainStageTests passed: Executed 8 tests, with 0 failures (0 unexpected) in 24.144 (24.146) seconds
+#     FlexibleMainViewsTests passed: Executed 10 tests, with 0 failures (0 unexpected) in 27.393 (27.394) seconds
+#     FlexibleMergeR5SMTests passed: Executed 1 test, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+#     FlexibleOverlayClipTests passed: Executed 6 tests, with 0 failures (0 unexpected) in 0.701 (0.701) seconds
+#     FlexibleOverlaySeamTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 0.814 (0.814) seconds
+#     FlexiblePinchTests passed: Executed 7 tests, with 0 failures (0 unexpected) in 5.621 (5.622) seconds
+#     FlexiblePressFixturesTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 0.263 (0.263) seconds
+#     FlexiblePressReframeTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 0.064 (0.064) seconds
+#     FlexiblePressReviewTests passed: Executed 12 tests, with 0 failures (0 unexpected) in 0.988 (0.989) seconds
+#     FlexiblePressSaveTests passed: Executed 8 tests, with 0 failures (0 unexpected) in 1.338 (1.339) seconds
+#     FlexibleReadinessTests passed: Executed 10 tests, with 0 failures (0 unexpected) in 3.932 (3.933) seconds
+#     FlexibleRegionsTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 0.041 (0.041) seconds
+#     FlexibleRound5EvidenceProbe passed: Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.000 (0.000) seconds
+#     FlexibleRound5SettingsHostedTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 92.658 (92.658) seconds
+#     FlexibleRound5SettingsTests passed: Executed 11 tests, with 0 failures (0 unexpected) in 8.529 (8.530) seconds
+#     FlexibleRound5SettingsVerifyTests passed: Executed 9 tests, with 0 failures (0 unexpected) in 2.677 (2.678) seconds
+#     FlexibleRound5SquishExitTests passed: Executed 6 tests, with 0 failures (0 unexpected) in 108.248 (108.249) seconds
+#     FlexibleRound6EvidenceProbe passed: Executed 2 tests, with 2 tests skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#     FlexibleRound6HostedTests passed: Executed 14 tests, with 1 test skipped and 0 failures (0 unexpected) in 303.994 (303.996) seconds
+#     FlexibleRound6Tests passed: Executed 11 tests, with 1 test skipped and 0 failures (0 unexpected) in 37.270 (37.271) seconds
+#     FlexibleRowCopyTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 0.291 (0.291) seconds
+#     FlexibleSettingsMigrationTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 0.005 (0.006) seconds
+#     FlexibleSettingsPageHostedTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 89.043 (89.044) seconds
+#     FlexibleSettingsRound4Tests passed: Executed 14 tests, with 0 failures (0 unexpected) in 5.352 (5.353) seconds
+#     FlexibleSettingsVerifyD1Tests passed: Executed 10 tests, with 0 failures (0 unexpected) in 1.820 (1.821) seconds
+#     FlexibleShownValuesTests passed: Executed 6 tests, with 0 failures (0 unexpected) in 0.945 (0.945) seconds
+#     FlexibleSqueezeGroupsModelTests passed: Executed 7 tests, with 0 failures (0 unexpected) in 18.198 (18.199) seconds
+#     FlexibleSqueezeGroupsPressTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 0.890 (0.890) seconds
+#     FlexibleSqueezeGroupsReviewTests passed: Executed 8 tests, with 0 failures (0 unexpected) in 6.791 (6.792) seconds
+#     FlexibleSqueezeGroupsReviewUITests passed: Executed 2 tests, with 0 failures (0 unexpected) in 61.036 (61.036) seconds
+#     FlexibleSqueezeGroupsReviewUXTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 8.425 (8.426) seconds
+#     FlexibleSqueezeGroupsTests passed: Executed 8 tests, with 0 failures (0 unexpected) in 0.012 (0.013) seconds
+#     FlexibleSqueezeGroupsUITests passed: Executed 4 tests, with 0 failures (0 unexpected) in 36.001 (36.002) seconds
+#     FlexibleSquishCoarsenTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 0.413 (0.413) seconds
+#     FlexibleSquishEvidenceProbe passed: Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#     FlexibleSquishPerfProbe passed: Executed 2 tests, with 2 tests skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#     FlexibleSquishPlayAllTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 1.121 (1.121) seconds
+#     FlexibleSquishPlayerTests passed: Executed 6 tests, with 0 failures (0 unexpected) in 0.685 (0.685) seconds
+#     FlexibleSquishSolverTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 131.290 (131.290) seconds
+#     FlexibleSquishTests passed: Executed 11 tests, with 0 failures (0 unexpected) in 2.966 (2.967) seconds
+#     FlexibleSquishVerifyGTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 421.387 (421.388) seconds
+#     FlexibleStageTests passed: Executed 15 tests, with 0 failures (0 unexpected) in 2.126 (2.127) seconds
+#     FlexibleSurfaceNavTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 0.137 (0.138) seconds
+#     LatticeBaldPatchProbe passed: Executed 1 test, with 0 failures (0 unexpected) in 111.452 (111.452) seconds
+#     LatticeBaseDebrisProbe passed: Executed 1 test, with 0 failures (0 unexpected) in 57.338 (57.338) seconds
+#     LatticeEdgeBandProbe passed: Executed 1 test, with 0 failures (0 unexpected) in 169.500 (169.500) seconds
+#     LatticeEmptySpaceProbe passed: Executed 1 test, with 0 failures (0 unexpected) in 251.586 (251.586) seconds
+#     LatticeExploreModeControlProbe passed: Executed 1 test, with 0 failures (0 unexpected) in 174.233 (174.233) seconds
+#     LatticeGradeToSolidBandTests passed: Executed 11 tests, with 0 failures (0 unexpected) in 6.213 (6.215) seconds
+#     LatticeHisAnglesProbe passed: Executed 1 test, with 0 failures (0 unexpected) in 128.515 (128.515) seconds
+#     LatticeHisConfigProbe passed: Executed 1 test, with 0 failures (0 unexpected) in 105.114 (105.114) seconds
+#     LatticeHisSteppedBakeProbe passed: Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#     LatticeHoleMetricProbe passed: Executed 1 test, with 0 failures (0 unexpected) in 57.860 (57.861) seconds
+#     LatticeIncludeGateTests passed: Executed 8 tests, with 0 failures (0 unexpected) in 2.535 (2.536) seconds
+#     LatticeLegendColourTests passed: Executed 18 tests, with 0 failures (0 unexpected) in 0.110 (0.111) seconds
+#     LatticeLocalCoverageProbe passed: Executed 1 test, with 0 failures (0 unexpected) in 91.259 (91.259) seconds
+#     LatticeModeTests passed: Executed 17 tests, with 0 failures (0 unexpected) in 0.046 (0.047) seconds
+#     LatticeOneVsTwoCellProbe passed: Executed 1 test, with 0 failures (0 unexpected) in 91.084 (91.084) seconds
+#     LatticePageRound2Tests passed: Executed 15 tests, with 1 test skipped and 0 failures (0 unexpected) in 0.048 (0.049) seconds
+#     LatticePreviewConfettiEvidenceGen passed: Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.000 (0.001) seconds
+#     LatticePreviewConfettiTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 7.614 (7.614) seconds
+#     LatticePreviewRegionMaskTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 26.720 (26.721) seconds
+#     LatticeQuiltFrameProbe passed: Executed 2 tests, with 0 failures (0 unexpected) in 279.841 (279.841) seconds
+#     LatticeRegionCapTests passed: Executed 6 tests, with 0 failures (0 unexpected) in 0.192 (0.193) seconds
+#     LatticeRimIsTheEmptySpaceProbe passed: Executed 1 test, with 0 failures (0 unexpected) in 149.609 (149.609) seconds
+#     LatticeSDFAlignmentTests passed: Executed 7 tests, with 2 tests skipped and 0 failures (0 unexpected) in 2.193 (2.193) seconds
+#     LatticeSeparationRegionTests passed: Executed 12 tests, with 0 failures (0 unexpected) in 0.606 (0.607) seconds
+#     LatticeSettingsPersistTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 0.004 (0.005) seconds
+#     LatticeShellAndMarchAgreeTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 21.078 (21.078) seconds
+#     LatticeSimSolveTriggerTests failed: Executed 2 tests, with 1 failure (0 unexpected) in 0.013 (0.013) seconds
+#     LatticeSkinDressingProbe passed: Executed 1 test, with 0 failures (0 unexpected) in 81.423 (81.423) seconds
+#     LatticeVariantFaceWallsTests passed: Executed 8 tests, with 0 failures (0 unexpected) in 1.589 (1.589) seconds
+#     ManualPrimitiveTests passed: Executed 34 tests, with 0 failures (0 unexpected) in 0.019 (0.021) seconds
+#     OrganicCapsuleImpostorTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 34.044 (34.044) seconds
+#     OrganicForecastRouteTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 0.149 (0.149) seconds
+#     ProjectStoreTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 0.020 (0.020) seconds
+#     ProtectFreezeVsSolidityTests passed: Executed 7 tests, with 0 failures (0 unexpected) in 0.066 (0.067) seconds
+#     RenderQualityEvidenceGen passed: Executed 5 tests, with 3 tests skipped and 0 failures (0 unexpected) in 1.083 (1.084) seconds
+#     RenderQualityLiveViewTests passed: Executed 1 test, with 0 failures (0 unexpected) in 1.996 (1.996) seconds
+#     SmoothingPageRound2Tests passed: Executed 21 tests, with 0 failures (0 unexpected) in 0.292 (0.294) seconds
+#     SmoothingRound3Tests passed: Executed 27 tests, with 0 failures (0 unexpected) in 0.143 (0.145) seconds
+#     SmoothingRound4Tests passed: Executed 29 tests, with 0 failures (0 unexpected) in 0.510 (0.512) seconds
+#     SmoothingStrokeCameraTests passed: Executed 8 tests, with 0 failures (0 unexpected) in 1.232 (1.234) seconds
+#     SmoothingUsablePathTests passed: Executed 1 test, with 0 failures (0 unexpected) in 17.779 (17.780) seconds
+#     SmoothingViewerTests passed: Executed 12 tests, with 0 failures (0 unexpected) in 0.026 (0.027) seconds
+#     StrutLineWidthTests passed: Executed 12 tests, with 0 failures (0 unexpected) in 0.516 (0.517) seconds
+#     SurfaceCutDetentTests passed: Executed 7 tests, with 0 failures (0 unexpected) in 0.001 (0.002) seconds
+#     SurfaceInputDisciplineTests passed: Executed 6 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#     SurfacePencilToggleExemptionTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 0.056 (0.056) seconds
+#     SurfaceStageNoRegressionTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#     SurfaceTapMeaningTests passed: Executed 7 tests, with 0 failures (0 unexpected) in 0.003 (0.003) seconds
+#     ThreeStageVisibilityTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#     UndoHistoryTests passed: Executed 10 tests, with 0 failures (0 unexpected) in 0.624 (0.625) seconds
+#     UnifiedShadingTests passed: Executed 11 tests, with 0 failures (0 unexpected) in 6.259 (6.260) seconds
+#     ViewerProfileTests passed: Executed 2 tests, with 2 tests skipped and 0 failures (0 unexpected) in 0.001 (0.002) seconds
+#     ViewerTests passed: Executed 33 tests, with 0 failures (0 unexpected) in 0.249 (0.252) seconds
+#   After every swift test: git checkout -- docs/handoffs/assets/ evidence/ (ContactShadingTests and SmoothingUsablePathTests rewrite them).
+DONE

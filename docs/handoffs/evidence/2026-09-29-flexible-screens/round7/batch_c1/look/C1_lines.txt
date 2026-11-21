@@ -1,0 +1,8 @@
+interim: sent 0 · tuned 0 · sim scale 0.18053604385786773 uncalibrated true · cards ["Edge 12: \'Set up · core support pending\'", "Edge 9: \'Set up · core support pending\'"] · chip 'Lattice not tuned for this press yet'
+interim squish page: note 'Lattice not tuned for this press yet'
+C1_tmp_interim.png: marks ["flatArrow-Edge 12", "flatDepthChip-Edge 12", "flatKnob-Edge 12", "flatPrism-Edge 12", "flatTiltBox-Edge 12", "flatTwistBox-Edge 12"] · solid ["Edge 9": false, "Edge 12": false] · toast -
+interim main card: picked group-2 · chip 'Lattice not tuned for this press yet'
+core: sent 2 · tuned 2 · sim scale 0.4007861106813797 uncalibrated false · cards ["Edge 12: \'Can\'t reach on 72 columns · twisted 29% off\'", "Edge 9: \'Can\'t reach this squish on 66 columns\'"] · chip '-'
+core squish page: note '3D sim · as last saved'
+C1_tmp_core.png: marks ["flatArrow-Edge 12", "flatDepthChip-Edge 12", "flatKnob-Edge 12", "flatPrism-Edge 12", "flatTiltBox-Edge 12", "flatTwistBox-Edge 12"] · solid ["Edge 9": false, "Edge 12": false] · toast -
+core main card: picked group-2 · chip '-'

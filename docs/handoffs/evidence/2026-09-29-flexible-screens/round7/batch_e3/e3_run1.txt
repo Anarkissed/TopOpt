@@ -1,0 +1,36 @@
+Test Suite 'Selected tests' started at 2026-10-19 15:24:35.340.
+Test Suite 'TopOptKitTests.xctest' started at 2026-10-19 15:24:35.342.
+Test Suite 'TopOptKitTests.xctest' passed at 2026-10-19 15:24:35.342.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-19 15:24:35.343.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.003) seconds
+Test Suite 'Selected tests' started at 2026-10-19 15:24:35.512.
+Test Suite 'TopOptFlowsTests.xctest' started at 2026-10-19 15:24:35.513.
+Test Suite 'FlexibleR7E3Tests' started at 2026-10-19 15:24:35.513.
+Test Case '-[TopOptFlowsTests.FlexibleR7E3Tests testAnEdgesGroupSquishesAlongItsArrowOnBothPages]' started.
+2026-10-19 15:24:35.586 xctest[961:14234679] DIAG shellClip mode=OFF inFrame=false algo=- capsules=-1 capVerts=0 capPipeline=true capsulePipeline=true capsulesReplaceField=false bodyAlpha=1.0 initError=nil regionTex=false skinMM=-1.0 dims=SIMD4<Float>(1.0, 1.0, 1.0, 0.0) regions=[] open=[no census]
+2026-10-19 15:24:35.667 xctest[961:14234679] DIAG seam occupancy: 128x128x27 in 0.07 s (once per mesh)
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Sources/TopOptFlows/FlexibleStageModel.swift:1658: error: -[TopOptFlowsTests.FlexibleR7E3Tests testAnEdgesGroupSquishesAlongItsArrowOnBothPages] : failed: caught error: "Squeeze groups are the app's preview for now: core designs one squeeze at a time."
+Test Case '-[TopOptFlowsTests.FlexibleR7E3Tests testAnEdgesGroupSquishesAlongItsArrowOnBothPages]' failed (9.787 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E3Tests testOneNumberOnThePartAndTheCardAndNothingLitUntilPlus]' started.
+2026-10-19 15:24:45.380 xctest[961:14234679] DIAG seam occupancy: 128x128x27 in 0.07 s (once per mesh)
+Test Case '-[TopOptFlowsTests.FlexibleR7E3Tests testOneNumberOnThePartAndTheCardAndNothingLitUntilPlus]' passed (4.221 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E3Tests testPlainWordsForTheSplitAndTiltFirst]' started.
+Test Case '-[TopOptFlowsTests.FlexibleR7E3Tests testPlainWordsForTheSplitAndTiltFirst]' passed (0.000 seconds).
+Test Suite 'FlexibleR7E3Tests' failed at 2026-10-19 15:24:49.522.
+	 Executed 3 tests, with 1 failure (1 unexpected) in 14.008 (14.009) seconds
+Test Suite 'TopOptFlowsTests.xctest' failed at 2026-10-19 15:24:49.522.
+	 Executed 3 tests, with 1 failure (1 unexpected) in 14.008 (14.009) seconds
+Test Suite 'Selected tests' failed at 2026-10-19 15:24:49.522.
+	 Executed 3 tests, with 1 failure (1 unexpected) in 14.008 (14.010) seconds
+FLEX-E3-a his pad after Edge 14's cut: 24 candidates (was 20) · mismatched []
+FLEX-E3-a RED CONTROL (E1b's piece numbers): 14 mismatched · ["edge|1,2: 9 → 10", "edge|1,5: 10 → 12", "edge|1,3: 11 → 13", "edge|1,4: 12 → 14"]
+FLEX-E3-b 'Max 18.1 mm · deeper splits its lattice' (39) · 'Edge 16 · would split its lattice in two'
+Test Suite 'Selected tests' started at 2026-10-19 15:24:49.622.
+Test Suite 'TopOptDesignTests.xctest' started at 2026-10-19 15:24:49.623.
+Test Suite 'TopOptDesignTests.xctest' passed at 2026-10-19 15:24:49.623.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-19 15:24:49.623.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Note: Some test targets reported failures:
+  - TopOptFlowsTests (XCTest)

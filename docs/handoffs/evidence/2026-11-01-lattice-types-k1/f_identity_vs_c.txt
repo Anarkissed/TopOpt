@@ -1,0 +1,50 @@
+The 21 binaries, step (c) (gate_C, 262b731f) vs Finding 8 + coupon + fix (gate_G, 5bd610c1): each binary's
+filtered stdout and stderr compared after masking the build directory (gate_C/gate_G) and the
+wall-time line. Against eede708a the list is the same 9 identical / 12 differ as c_identity_21.txt.
+Gate F (81f49eef) vs gate G: the same comparison, all IDENTICAL as well (summary at the end).
+
+IDENTICAL test_analyze_fixed_design.err
+IDENTICAL test_analyze_fixed_design.out
+IDENTICAL test_bake_build_orientation.err
+IDENTICAL test_bake_build_orientation.out
+IDENTICAL test_designbox_lattice_recert.err
+IDENTICAL test_designbox_lattice_recert.out
+IDENTICAL test_grading.err
+IDENTICAL test_grading.out
+IDENTICAL test_lattice_boundary.err
+IDENTICAL test_lattice_boundary.out
+IDENTICAL test_lattice_certification.err
+IDENTICAL test_lattice_certification.out
+IDENTICAL test_lattice_clip_shell.err
+IDENTICAL test_lattice_clip_shell.out
+IDENTICAL test_lattice_density_field.err
+IDENTICAL test_lattice_density_field.out
+IDENTICAL test_lattice_depth_tie.err
+IDENTICAL test_lattice_depth_tie.out
+IDENTICAL test_lattice_gen.err
+IDENTICAL test_lattice_gen.out
+IDENTICAL test_lattice_hookup.err
+IDENTICAL test_lattice_hookup.out
+IDENTICAL test_lattice_refusal.err
+IDENTICAL test_lattice_refusal.out
+IDENTICAL test_lattice_region_mask.err
+IDENTICAL test_lattice_region_mask.out
+IDENTICAL test_lattice_skin_freeform.err
+IDENTICAL test_lattice_skin_freeform.out
+IDENTICAL test_lattice_variant.err
+IDENTICAL test_lattice_variant.out
+IDENTICAL test_lattice_void.err
+IDENTICAL test_lattice_void.out
+IDENTICAL test_lattice_void_exterior.err
+IDENTICAL test_lattice_void_exterior.out
+IDENTICAL test_loadcase_analyze.err
+IDENTICAL test_loadcase_analyze.out
+IDENTICAL test_mesh_job.err
+IDENTICAL test_mesh_job.out
+IDENTICAL test_orient.err
+IDENTICAL test_orient.out
+IDENTICAL test_stepped_plan.err
+IDENTICAL test_stepped_plan.out
+
+Unmasked, the one line that differs: test_lattice_variant.out, "[Z1] lattice-variant wall time: 1.08 s" (C) vs "1.02 s" (G).
+Gate F vs gate G: 0 of 42 streams differ.

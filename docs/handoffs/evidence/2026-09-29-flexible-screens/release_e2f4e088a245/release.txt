@@ -1,0 +1,92 @@
+# Release e2f4e088a245 - 2026-11-18: release (9), Organic 1 - claude/organic-1 99da4f7e, one worker swap (28339e5c25cd -> e2f4e088a245)
+# His words 11-18: "Preview PLUS settings simultaneously. Export as its own install", "Absolutely get to finishing the
+# Organic Release 1", "I'd rather you do the grown lighter drawing pass" and "Yes, install whenever it is ready".
+# The Organic preview on Lattice Setup with all his settings, on LatticeReview's engine (claude/organic-cut1-engine 2567f0eb):
+# Traced and Grown, Exact (a Draft while a slider moves, Traced), the Auto Sweep limits measured by core, stress and shape or
+# shape only, the colour key and card on Organic's struts, the lay time on screen, the memory gate, Grown by the light pass.
+# The Lattice button: Organic's file comes with cut 2. LatticeTypes' 181deb12 is NOT in this release.
+# Gates in the gate tree (b9-screens-362, its own vendor): the whole app suite in three runs; targeted classes after each fix;
+# his v2 stand through the app's own session and renderer (opt-in probe; pictures outside the repo).
+# Commits:
+#   f501ad4c Organic stage 1a (O1, O2): a strut list that belongs to no cell goes through the new engine
+#   4f43367a Organic stage 1b (O3, O4): the owner's Traced placement goes through the new engine
+#   8b8dbb7f Organic stage 1c: topopt-cli lattice-file makes an Organic (Traced) file from a job
+#   77e8f843 Organic stage 2 (O5 to O10): the owner's bridge rules for a weave, in the writer and the layer check
+#   f08c0a7f Organic stage 3 (O11): a blended foot where a weave strut runs into the part's solid wall, in the writer only
+#   dcec3355 Organic O12: the spacing is a range that follows the stress
+#   da5ffc1c Organic O14: a weave's shallow struts have a flat underside and a round top
+#   edeeddeb Organic O12 corrected, O13: the spacing field is the old run's, with its shape fit
+#   4491081c Organic O12: stage 4's ramp test checks the corrected law
+#   7a5b1692 Lattice rebuild O15, O16: Organic's solid rim and its net skin over an open face, each an option
+#   24147cb3 Organic: merge the round top on a weave's shallow struts (O14) into the old spacing law and shape fit (O12, O13)
+#   9cffb6c1 Organic: merge the Organic rim and the net skin (O15, O16) into the old spacing law, shape fit and round top
+#   7f242d94 Organic S6 (O2, O6, O9, O10): what holds a weave bar
+#   3fb82dea Organic G1 to G12: the owner's Grown placement, written new in the new engine
+#   14f5a9bc Organic OR30: a weave region takes the regular Finish (Rim, Skin, Covered, None); the Organic wall goes
+#   edf13e21 Organic S7 (O17, O18): a sagging weave strand is lifted, or gets a zig-zag leg
+#   8b9b84df Organic S7, LatticeReview's rulings 1 to 4: a sag is lifted only if no node moves more than 0.9 mm, any low point counts, open arms and deep sags get legs, a leg stops on the first bar it meets
+#   cd64f76b Merge claude/organic-s7-sags into claude/organic-main: the hold fixes and the sag rules O17, O18
+#   ee71be30 Merge claude/organic-g1 into claude/organic-main: Grown written new in the new engine (G1 to G12)
+#   cd728da8 Organic Grown on the corrected spacing law: the G tests ask for their spacing, a vine that reaches the surface has arrived, Grown lays a net skin
+#   ef71ab52 Organic Grown, third build: seeds 1.15 L apart, vines lean off the vertical, branches leave their parent, ties climb to a higher landing, thinning never cuts what something stands on
+#   3fd00087 Lattice rebuild, Grown (brief G4): the original Grown's own growth rules come back
+#   e10ce9ad Lattice rebuild, Grown (brief G5): the feet compete at the floor, joins and links stay inside the region
+#   2ae38fdc Lattice rebuild, Grown (brief G5): what the feet's cuts take above half height is counted; G14 stopped again
+#   ab2759a2 Lattice rebuild, Grown (brief G5): the feet compete at 2.5 spacings by default; 0 or less turns it off
+#   bd680c0c Organic engine: merge claude/organic-g6 (ab2759a2) onto the released engine 61ac4291
+#   22915242 Organic, Grown (brief G6): the light is outside the part (G16a) and a bare place is filled from the nearest vine (G16c)
+#   2359c0ed Organic, Grown, rule D (brief G6): the stress lines are the goal
+#   79b5809d Organic, Grown, rule E (brief G6 try keys): bare-place ratio, re-seed rounds, wall seeds that connect, wall roots that compete
+#   0ce58b54 Organic, Grown, rule F (brief G7): crossing vines
+#   57b34f5a Organic, Grown, rule G (brief G8): top runs and roots
+#   41cf55ae Organic, Grown, rule H (brief G9): runs and roots pulled to the stress
+#   dc500322 Organic, Grown, rule I (brief G10): Auto by stress and strut width by stress
+#   1faaef63 Organic, Grown, rule J (brief G12): the five-cell cap off and the pruning of loose ends and small pieces
+#   4de0c75a Organic, Grown, rule K (brief G13): a flat floor on the bed
+#   785ed06e Organic, Grown, rule L (briefs G14, G15): Grade to shape as a variable, and Detect floating parts
+#   976e5aa3 Organic, Grown, rule M (brief G19): wall seeding by stress
+#   742edcb6 Organic, Grown, rule N (brief G21): the crossing-vine gap, and by stress
+#   e65f454b Organic, Grown, rule O (brief G22): how steeply a crossing vine may climb
+#   a0a968b9 Organic, Grown, rule P (brief G23): level ties, more of them where the stress is high
+#   0d4dec77 Organic, Traced, rule Q (brief G24): the floor, strut width by stress and Detect floating parts in Traced
+#   1b9d8c25 Organic, Traced, rule R (brief G26): level ties in Traced
+#   7b3e2d68 Organic, rule S (brief G28): the cut at crossings does not move or lengthen struts
+#   08f0c646 Organic, rule T (brief G30): no strut runs too far without a joint
+#   2e4c9ebe Organic engine: the file job reads both strength_job and tensor, and reads its layout again
+#   078f7f48 Organic engine: a strength job on an Organic job is refused; a cube-lattice result is the released one
+#   55447b11 Organic rules D to T: the rules rows (01-rules.md, section 11)
+#   73db5b20 Organic rules D to T: one pinning test per rule, and the two named faults (test_organic_rules)
+#   5c52d2a2 Organic engine: the O2 crossing tests re-pinned to rule S; the first run's faults in the rule pins fixed
+#   df1b3593 Organic, rule P: a level tie stays level through the repeat merge
+#   aaca5cf3 Organic engine: Grown's known faults held at today's counts; G-11's 90 % superseded by G4
+#   77bcca95 Organic preview, item 1 (brief L2): the cut at crossings holds no pair list; the Grower copies no sample boxes
+#   b3d34526 Organic preview, item 2 (brief L2): the weave handed over as runs
+#   d45cd6c5 Organic preview, item 3 (brief L2): exact or draft, one settings struct
+#   2d3edeec Organic preview, item 4 (brief L2): the Auto Sweep limits in one call
+#   13c30c0e Organic preview (brief L2): the rules rows OP1 to OP4 and their tests in 02-tests.md
+#   8340a99f Organic rules, OP4: the smallest cell of the Auto Sweep limits is the tracer's print floor (lead's ruling)
+#   75a5ec36 Merge LatticeReview's Organic engine for cut 1 (claude/organic-engine @ 8340a99f): Organic on the released engine, the preview lay (exact / draft), weave runs, the Auto Sweep limits
+#   14576e76 Organic cut 1 (brief C1), item 1: Session::sweep_limits, the Auto Sweep limits before any lay (OP5)
+#   5e63c182 Organic cut 1 (brief C1), item 2: organic_follow_stress, stress and shape or shape only (OP6)
+#   2567f0eb Organic cut 1 (brief C1), item 3: rules OP5, OP6 and their tests
+#   3aa1e8f1 Merge LatticeReview's Organic cut 1 engine items (claude/organic-cut1-engine @ 2567f0eb): Session::sweep_limits before any lay (OP5), organic_follow_stress, stress and shape or shape only (OP6)
+#   87261386 Organic cut 1 (362): the Organic preview on the iPad with all his settings, on LatticeReview's engine
+#   99da4f7e Organic cut 1 gate: the new engine draws Organic now (LatticeLayoutPreviewTests pinned Install 3's not-drawn)
+#   cec97d48 Release (9) Organic 1 2026-11-18: merge claude/organic-1 99da4f7e - core = LatticeReview's Organic cut 1 engine (claude/organic-cut1-engine 2567f0eb: the preview lay exact and draft, the weave's runs, the Auto Sweep limits befo
+# Gates (this tree):
+#   12:53 his uncommitted files (left alone): app/TopOpt-Info.plist app/TopOpt.xcodeproj/project.pbxproj app/TopOpt.xcodeproj/xcshareddata/xcschemes/TopOpt.xcscheme 
+#   12:54 preflight job: /Users/nadim/.topopt-worker/f9c8124fd2df48b3 (his newest optimisation job the installed worker passes; read only)
+#   12:54 merged organic-1 as cec97d48 (local); app + core + tools == its; fingerprint e2f4e088a245
+#   ==> Manifold: /Users/nadim/dev/TopOpt/TopOpt/.vcpkg/installed-manifold (KEEP regions exported exactly)
+#   ==> building macOS slice (Eigen + OCCT, arm64)
+#   ==> building iOS simulator slice (Eigen + OCCT + lib3mf, arm64)
+#   ==> building iOS device slice (Eigen + OCCT + lib3mf, arm64)
+#   12:56 build_core green: topopt_vendored_core_e2f4e088a245 + the Install 3 entry points + lay_organic_preview and Session::sweep_limits in every slice and arch
+#   12:56 worker CLI built: topopt-cli: core e2f4e088a245 (dirty=false), built Nov 18 2026 12:56:54; 3 data paths, all under the release worktree
+#   12:58 core suites passed: 100% tests passed out of 5 Total Test time (real) = 110.81 sec 
+#   13:05 iPad device build green (this tree's own pair)
+#   13:06 preflight on his job: preflight: load path CONNECTED
+#   13:06 pushed cec97d48
+#   13:06 worker swapped: /health "fingerprint": "e2f4e088a245"; data paths under the release worktree; preflight again OK; old CLI kept as build-fix/topopt-cli.28339e5c25cd-replaced-20261118
+#   13:06 route, demand and strength_job tests vs the INSTALLED script: ALL PASS
+#   13:06 the app_release scripts now expect e2f4e088a245

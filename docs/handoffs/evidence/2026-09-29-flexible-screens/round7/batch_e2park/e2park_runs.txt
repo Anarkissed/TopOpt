@@ -1,0 +1,46 @@
+# R7-E2 PARKED runs (app/TopOptKit, --scratch-path /tmp/r7e-build) — at c77b19fb + the working tree
+start 14:53:44 c77b19fb + working tree
+build exit 0 14:54:08
+chunk1 exit 0 14:56:30
+chunk2 exit 0 14:56:54
+golden det exit 0 14:57:10
+golden unseeded exit 0 14:57:25
+hashes exit 0 14:58:25
+hashes cmp vs e1r: identical
+ALLDONE 14:58:25
+### chunk1
+Test Suite 'Selected tests' passed at 2026-10-19 14:54:11.436.
+Test Suite 'FlexibleEdgeGroupsTests' passed at 2026-10-19 14:54:47.560.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 35.958 (35.959) seconds
+Test Suite 'FlexibleLatticeIsProtectedTests' passed at 2026-10-19 14:54:48.101.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.541 (0.541) seconds
+Test Suite 'FlexiblePressSaveTests' passed at 2026-10-19 14:54:49.595.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 1.493 (1.494) seconds
+Test Suite 'FlexibleR7E1bTests' passed at 2026-10-19 14:55:16.988.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 27.393 (27.394) seconds
+Test Suite 'FlexibleR7E2ParkTests' passed at 2026-10-19 14:55:22.053.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 5.064 (5.064) seconds
+Test Suite 'FlexibleR7E2Tests' passed at 2026-10-19 14:56:10.071.
+	 Executed 12 tests, with 0 failures (0 unexpected) in 48.017 (48.018) seconds
+Test Suite 'FlexibleR7M1Tests' passed at 2026-10-19 14:56:30.182.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 20.110 (20.111) seconds
+Test Suite 'FlexibleSquishCopyTests' passed at 2026-10-19 14:56:30.208.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.026 (0.027) seconds
+	 Executed 51 tests, with 0 failures (0 unexpected) in 138.602 (138.608) seconds
+Test Suite 'Selected tests' passed at 2026-10-19 14:56:30.208.
+	 Executed 51 tests, with 0 failures (0 unexpected) in 138.602 (138.609) seconds
+FLEX-E2P-2 his pad (live lattice) + Edge 16 + Edge 18: 2 presses · sends ["Send Group 1 only", "Send Group 2 only, Face 2 resting", "Send Group 3 only, Face 5 resting"] · jobs ["Send Group 3 only, Face 5 resting": 21251, "Send Group 1 only": 11698, "Send Group 2 only, Face 2 resting": 11702] · lines ["Shape only · core support comes later", "Shape only · core support comes later"]
+FLEX-E2P-2 RED CONTROL (the switch on): ["designed by core 2", "in the lattice\'s key"]
+Test Suite 'Selected tests' passed at 2026-10-19 14:56:30.333.
+### chunk2
+Test Suite 'FlexibleR7E2HostedTests' passed at 2026-10-19 14:56:53.909.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 21.609 (21.610) seconds
+	 Executed 3 tests, with 0 failures (0 unexpected) in 21.609 (21.610) seconds
+golden_det: identical 38 · DIFFERS 0 · PART-SKIP 0
+golden_unseeded: identical 32 · DIFFERS 0 · PART-SKIP 1
+### the evidence probe (FLEX_E2_DIR=look): testP_ParkedShapeOnly
+FLEX-E2UX [Done] ["Edge 14", "Edge 16"]: stored · sent 0 · designed by core 0 · lines ["Shape only · core support comes later warn false", "Shape only · core support comes later warn false"]
+  P01_13p_edges_group_shape_only_dashed.png: marks ["flatArrow-Edge 14", "flatDepthChip-Edge 14", "flatKnob-Edge 14", "flatPrism-Edge 14", "flatTiltBox-Edge 14", "flatTwistBox-Edge 14"] · solid ["Edge 16": false, "Edge 14": false] · toast -
+  switch OFF: lattice true · error - · sent 0 · gyroid 220.0 °C
+  E1's rule (presses stripped): lattice true · error - · sent 0 · gyroid 220.0 °C
+  density field switch OFF vs E1's rule: 53248 voxels, 0 differ · owner differ 0

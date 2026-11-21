@@ -66,7 +66,9 @@ final class LatticeModeTests: XCTestCase {
         XCTAssertFalse(b.certifiable)
         XCTAssertFalse(b.runnableAsCertified)
         XCTAssertNotNil(b.topologyReason)
-        XCTAssertTrue(b.topologyReason!.lowercased().contains("preview"))
+        // ★ 2026-10-03 (the one guard): the reason is core's own readiness words.
+        XCTAssertTrue(b.topologyReason!.contains(TopOptKit.latticeTypeReadinessPlain(.notEither)),
+                      b.topologyReason!)
     }
 
     func testCellsPerMemberCeilingComesFromCoreAndEngages() {
@@ -164,8 +166,8 @@ final class LatticeModeTests: XCTestCase {
                        "the uniform build fills at the clamped dense end")
         let expected = LatticeType.octet.strutRadiusMM(relativeDensity: core.rhoMax, cellMM: s.cellMM)
         XCTAssertEqual(spec.strutRadiusMM, expected, accuracy: 1e-9)
-        // Enabled but a topology the GENERATOR can't emit → nil (bcc now certifies,
-        // but core's LatticeGenTopology is octet-only — the B0 generatable gate).
+        // Enabled but a topology the app can't run → nil. ★ RE-PINNED (release (2), E2): core builds BCC now; the
+        // run waits for its app batch (`LatticeTypeCatalog.appBatches`, the type gate).
         s.topologyID = "bcc"
         XCTAssertNil(s.runSpec())
         // And a topology that certifies nothing at all → nil too.

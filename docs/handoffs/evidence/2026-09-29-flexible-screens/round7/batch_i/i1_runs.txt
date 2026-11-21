@@ -1,0 +1,35 @@
+# U21 batch I · part I1 runs — app/TopOptKit, --scratch-path /tmp/r7x20b-build, on 67f08efb + the I1 working tree
+### red-first / own tests (FlexibleI1HoldTests, run 1: 2 passed, 1 failed on the perf gate at 4.41 s; reference bounds skipped; run 2: 3 passed)
+FLEX-I1 l-bracket Topology hold: bc anchor · anchors held [5, 8, 10, 9, 11] · missing [] · held 5 · exits held false · free modes 0 · far anvils 0 · raw u_x Face 6 18.6971 · Face 2 18.4184 (ratio 0.99) · solve 443 ms
+FLEX-I1 l-bracket RED today's chain: bc exit · held 0 · raw u_x Face 6 0.4832 · Face 2 0.0000
+FLEX-I1 l-bracket calibration: shown k 1.117 (asked 1.705, referenceK 1.705) · today's k 1.705 (asked 1.705) · RED single solve k 1.117 (asked 2.659, clamped true) · gmaxPart×k 0.500 · fold share 0.655
+FLEX-I1 l-bracket perf parts: bridge call 0.87 s (wait 0 ms) · field 0.89 s · calibrate 0.89 s
+FLEX-I1 l-bracket perf: the sim with its reference 3.48, 3.48 s (best 3.48) · today's one solve 2.60 s · raw solve 443 ms + setup 51 ms
+FLEX-I1 perf gate: OVER 3 s by 0.48 s (debug build) — reported to the reviewer
+FLEX-I1 pad group-1: bc rest · far anvils 0 · free modes 3 · held 2 · exits held true · |Σf| 15.17 of Σ|f| 59.65 N · max|u| raw 4.1691
+### R2 frames probe (FlexibleI1R2FramesProbe, FLEX_I1_DIR=r2_frames): passed; 3 render passes (the first two had the wrong camera on frame 1 / too close; only the last 4 frames are kept)
+### runner.log
+start 09:04:15 67f08efb + working tree
+build exit 0 09:04:16
+kit FlexibleSquishFETests exit 0 09:04:45
+chunk_aa exit 0 09:14:18
+chunk_ab exit 0 09:15:52
+chunk_ac exit 0 09:22:21
+chunk_ad exit 0 09:22:40
+golden det exit 0 09:22:57
+golden unseeded exit 0 09:23:14
+hashes exit 0 09:24:12
+hashes cmp vs round7/batch_u21_integ2/stage_job_hashes_u21_integ2.txt (whole file): identical
+ALLDONE 09:24:12
+### classes (TopOptKitTests.FlexibleSquishFETests + 16 TopOptFlowsTests classes, chunks of 4)
+FlexibleI1HoldTests FlexibleFEFieldTests FlexibleFEVerifyGTests FlexibleSquishVerifyGTests FlexibleX20bTests FlexibleRowCopyTests FlexibleSquishCopyTests FlexibleU21BendTests FlexibleBatchNRefineTests FlexibleSquishSolverTests FlexibleR7E3Tests FlexibleU21RTests FlexibleSquishPerfProbe FlexibleR7U21NewModelTests FlexibleSettingsRound4Tests FlexibleRound5SettingsTests
+kit_fe.log: passed 12 · failed 0 · skipped 0
+chunk_aa.log: passed 23 · failed 0 · skipped 0
+chunk_ab.log: passed 26 · failed 0 · skipped 0
+chunk_ac.log: passed 16 · failed 0 · skipped 0
+chunk_ad.log: passed 32 · failed 0 · skipped 2
+TOTAL: 109 passed, 0 failed, 2 skipped (FlexibleSquishPerfProbe x2: Release only, FLEX_G_PERF=1 — not run, lean)
+### goldens
+golden_det: identical 38 · DIFFERS 0 · PART-SKIP 0
+golden_unseeded: identical 32 · DIFFERS 0 · PART-SKIP 1
+### hashes: stage_job_hashes_i1.txt cmp-identical to round7/batch_u21_integ2/stage_job_hashes_u21_integ2.txt (whole file)

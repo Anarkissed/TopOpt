@@ -1,0 +1,4 @@
+SPANS out_lv_rhombic/variant_038_lattice_SPANS.txt: 194 primitives, 2 components, 10 of 250 strut ends cut (no other primitive covers them)
+  components with no cut end: 0 (0 primitives)
+  FLOATING (no cut end, not touching the solid companion or the shell): 0 components, 0 primitives
+  component sizes (primitives), largest first: 100 94

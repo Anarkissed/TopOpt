@@ -1,0 +1,60 @@
+# 68BF7B74-3C2A-4ED6-A46D-AC040A9CA649 stepped — round 6 after-run, app cfca986d, core 3952c411 (frozen CLI sync-3952c411, sha 1538ab06)
+
+DG-PROJECT M2 verticalStand algorithm stepped stage Optional(TopOptFlows.LatticeStageMode.aesthetic) step-halves false density sim cells auto
+DG-PLAN stepped: 9951 cell(s) over 5 region(s) | 12.07=5 8.05=17 7.73=14 6.87=10 6.04=62 5.16=787 4.02=503 4.01=2505 3.44=309 2.58=5739
+DG-PLAN per region: r1=2505 r2=4973 r3=587 r4=1161 r5=725
+DG-PLAN-BASES 5 region(s) carry plan_base_cell_mm | job region 1: 4.0103 mm; job region 2: 5.1561 mm; job region 3: 24.1500 mm; job region 4: 10.3122 mm; job region 5: 10.3122 mm
+DG-OUTLINE r1 expand=0.000 seams=33 diverging=7 wireMovedOffRaw=18.3849mm | r2 expand=0.000 seams=25 diverging=1 wireMovedOffRaw=12.4612mm | r3 expand=4.150 seams=1 diverging=1 wireMovedOffRaw=5.8690mm | r4 expand=4.150 seams=2 diverging=2 wireMovedOffRaw=5.5535mm | r5 expand=4.150 seams=1 diverging=1 wireMovedOffRaw=5.8691mm
+DG-OVERLAPS 0 same-region pair(s)
+DG-REGIONS voxel=1.719 mm | r1 cells=2505 [4.01=2505] prism=156894 mm3 uncovered=7991 mm3 (5.09%) | r2 cells=4973 [5.16=768 2.58=4205] prism=186340 mm3 uncovered=7895 mm3 (4.24%) | r3 cells=587 [12.08=5 8.05=17 6.04=62 4.02=503] prism=43134 mm3 uncovered=4803 mm3 (11.13%) | r4 cells=1161 [7.73=10 6.87=5 5.16=5 3.44=186 2.58=955] prism=10215 mm3 uncovered=498 mm3 (4.87%) | r5 cells=725 [7.73=4 6.87=5 5.16=14 3.44=123 2.58=579] prism=9946 mm3 uncovered=467 mm3 (4.70%)
+DG-SLOT-ORIGINS 5 region(s) carry slot_origin_mm
+
+## job_plan: exit 0
+> [stepped] any-step plan: 9951 cell(s) over 5 region(s) in 28 pass(es) | 12.07=5 8.05=17 7.73=14 6.87=10 6.04=62 5.16=787 4.02=503 4.01=2505 3.44=309 2.58=5739
+## job_noplan: exit 0
+## job_plan_spans: exit 0
+> [stepped] any-step plan: 9951 cell(s) over 5 region(s) in 28 pass(es) | 12.07=5 8.05=17 7.73=14 6.87=10 6.04=62 5.16=787 4.02=503 4.01=2505 3.44=309 2.58=5739
+
+## cells_vs_spans.txt
+CELLS-VS-SPANS plan cells 9951 | laid 8796 | NOT laid 1155 | struts 261553: in a plan cell 261553, FOREIGN 0
+per size (plan / laid): 12.07=5/5 8.05=17/17 7.73=14/14 6.87=10/10 6.04=62/62 5.16=787/785 4.03=503/387 4.01=2505/2499 3.44=309/266 2.58=5739/4751
+  not laid: region 1 4.010 mm at [43.81806166966757, -48.90997314453125, 96.24757671356201]
+  not laid: region 1 4.010 mm at [43.81806166966757, -44.899657448132835, 96.24757671356201]
+  not laid: region 1 4.010 mm at [43.81806166966757, -40.88934175173441, 96.24757671356201]
+  not laid: region 1 4.010 mm at [47.82837736606598, -48.90997314453125, 108.27852380275728]
+  not laid: region 1 4.010 mm at [47.82837736606598, -44.899657448132835, 108.27852380275728]
+  not laid: region 1 4.010 mm at [47.82837736606598, -40.88934175173441, 108.27852380275728]
+  not laid: region 2 2.578 mm at [-10.607651352882385, -4.051654875278473, 2.5780600905418396]
+  not laid: region 2 2.578 mm at [-10.607651352882385, -4.051654875278473, 5.156120181083679]
+  not laid: region 2 2.578 mm at [-2.8734710812568665, -4.051654875278473, 25.780600905418396]
+  not laid: region 2 2.578 mm at [-2.8734710812568665, -4.051654875278473, 28.358660995960236]
+
+## unlaid.txt
+UNLAID 1155 of 9951 | IN_REGION=767 OUTSIDE=388
+  region 1: OUTSIDE=6
+  region 2: OUTSIDE=12 IN_REGION=6
+  region 3: IN_REGION=116
+  region 4: IN_REGION=445 OUTSIDE=233
+  region 5: IN_REGION=200 OUTSIDE=137
+  e.g. OUTSIDE: r1 4.010 mm inPlane=-3.478 depth mid=2.005 far=4.010 of 13.000
+  e.g. OUTSIDE: r1 4.010 mm inPlane=-3.478 depth mid=6.015 far=8.021 of 13.000
+  e.g. OUTSIDE: r1 4.010 mm inPlane=-3.478 depth mid=10.026 far=12.031 of 13.000
+  e.g. IN_REGION: r2 2.578 mm inPlane=0.867 depth mid=6.445 far=7.734 of 12.000
+  e.g. IN_REGION: r2 2.578 mm inPlane=3.445 depth mid=6.445 far=7.734 of 12.000
+  e.g. IN_REGION: r2 2.578 mm inPlane=4.401 depth mid=6.445 far=7.734 of 12.000
+
+## dropped.txt
+dropped run_noplan/variant_022_lattice.stl 11082484 B
+dropped run_plan/variant_022_lattice.stl 378413284 B
+dropped run_plan_spans/variant_022_lattice.stl 378413284 B
+dropped run_plan_spans/variant_022_lattice_SOLID.stl 975684 B
+dropped run_plan_spans/variant_022_lattice_WELDED.stl 298615684 B
+dropped run_noplan/fields.bin 1037376 B
+dropped run_plan/fields.bin 1037376 B
+dropped run_plan_spans/fields.bin 1037376 B
+dropped run_plan_spans/variant_022_lattice_SPANS.txt 23177889 B
+dropped model.step 229557 B
+
+## the published jobs
+job_plan.json: sha256 77bd2f5cc2753a98d052ba1ed4398271ada4c4ff1ed0ac1d20a19c7c2d517689 (1409012 B, compacted from the harness's pretty-printed write; same JSON value)
+job_noplan.json: sha256 9675fa7db71208a1911cf5451cd670bdec0754ff437477f015fee7e491a1c500 (10360 B, compacted from the harness's pretty-printed write; same JSON value)
