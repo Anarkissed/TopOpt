@@ -1635,6 +1635,11 @@ struct Outcome {
     std::size_t along = 0;
     double along_largest_mm = 0.0;
     std::size_t flush_excluded = 0, flush_down = 0, flush_bed = 0, flush_along = 0;
+    // OG2e (leg S): bars whose bulge and ends whose proud tip a no-lattice zone's footprint on an open face made flush,
+    // and the footprints found (the zone's region id, the model face, the footprint's area on that face, mm2).
+    std::size_t flush_zone_bars = 0, flush_zone_ends = 0;
+    struct ZoneFootprint { int zone = 0; int face = -1; double area_mm2 = 0.0; };
+    std::vector<ZoneFootprint> zone_footprints;
     double grew_mm[6] = {0, 0, 0, 0, 0, 0};
     bool faces_known = true;
   } relief;

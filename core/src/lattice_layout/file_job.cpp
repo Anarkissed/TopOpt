@@ -1878,20 +1878,32 @@ std::string file_result_json(const FileResult& r) {
       const Outcome::Relief& rl = r.relief;
       std::snprintf(b, sizeof b,
                     ",\n    \"relief\": {\"surface_ends\": %llu, \"proud\": %llu, \"largest_mm\": %.9g, \"flush\": "
-                    "{\"excluded_face\": %llu, \"down_facing\": %llu, \"near_bed\": %llu, \"along_surface\": %llu}, "
+                    "{\"excluded_face\": %llu, \"down_facing\": %llu, \"near_bed\": %llu, \"along_surface\": %llu, "
+                    "\"no_lattice_zone\": {\"bars\": %llu, \"ends\": %llu}}, "
                     "\"faces_known\": %s, \"box_grew_mm\": {\"-x\": %.9g, \"+x\": %.9g, \"-y\": %.9g, \"+y\": %.9g, "
                     "\"-z\": %.9g, \"+z\": %.9g},\n      \"tube_proud_ends\": %llu, \"tube_proud_vertices\": %llu, "
                     "\"tube_proud_outside_mm\": %.9g,\n      \"along\": %llu, \"along_largest_mm\": %.9g, \"tube_along_bars\": %llu, "
                     "\"tube_along_vertices\": %llu, \"tube_along_outside_mm\": %.9g, \"file_box_grew_mm\": {\"-x\": %.9g, "
                     "\"+x\": %.9g, \"-y\": %.9g, \"+y\": %.9g, \"-z\": %.9g, \"+z\": %.9g}}",
                     count(rl.surface_ends), count(rl.proud), rl.largest_mm, count(rl.flush_excluded), count(rl.flush_down),
-                    count(rl.flush_bed), count(rl.flush_along), rl.faces_known ? "true" : "false", rl.grew_mm[0],
+                    count(rl.flush_bed), count(rl.flush_along), count(rl.flush_zone_bars), count(rl.flush_zone_ends),
+                    rl.faces_known ? "true" : "false", rl.grew_mm[0],
                     rl.grew_mm[1], rl.grew_mm[2], rl.grew_mm[3], rl.grew_mm[4], rl.grew_mm[5],
                     count(r.made.shells.proud_ends), count(r.made.shells.proud_vertices), r.made.shells.proud_outside_mm,
                     count(rl.along), rl.along_largest_mm, count(r.made.shells.along_bars), count(r.made.shells.along_vertices),
                     r.made.shells.along_outside_mm, r.made.shells.grew_mm[0], r.made.shells.grew_mm[1], r.made.shells.grew_mm[2],
                     r.made.shells.grew_mm[3], r.made.shells.grew_mm[4], r.made.shells.grew_mm[5]);
       o += b;
+      if (!rl.zone_footprints.empty()) {   // OG2e: the no-lattice zones' footprints made flat (inside the relief block)
+        o.pop_back();
+        o += ",\n      \"zone_footprints\": [";
+        for (std::size_t i = 0; i < rl.zone_footprints.size(); ++i) {
+          std::snprintf(b, sizeof b, "%s{\"zone\": %d, \"face\": %d, \"area_mm2\": %.9g}", i ? ", " : "",
+                        rl.zone_footprints[i].zone, rl.zone_footprints[i].face, rl.zone_footprints[i].area_mm2);
+          o += b;
+        }
+        o += "]}";
+      }
     }
     o += "},\n";
   }

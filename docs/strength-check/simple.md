@@ -92,6 +92,14 @@ The print file sweeps each round vine along a smooth curve through its points (r
 
 The print file's round vines have more flat sides on thick vines (as many as keep each flat side within 0.03 mm of a true circle), so they print round, not faceted. A flat bridge (a strut lying flatter than 30 degrees) now has rounded ends wherever a round vine has one: rounded in plan only, so its underside stays one flat level plane right to the tip, and two bridges meeting at a corner turn smoothly seen from above. A bend so sharp that the tube would fold through itself is ended there with a rounded end instead. None of this changes the struts the check judges.
 
+## Organic: a no-lattice zone keeps a face flat
+
+With depth variation on, vines keep their round tops up to 1 mm out of an open face. To keep one face (or part of one)
+flat, put a no-lattice zone on it (rule OG2e): wherever the zone reaches the face, or lies within 0.05 mm of it, that
+part of the face and one line width around it is flat. It works however the zone is placed: thin just under the face,
+straddling it, deep, or filling an open pocket and only touching its walls. The check is unchanged: it always judges
+the vines without their tops.
+
 ## Organic: the solid's weak areas
 
 When the solid part does not certify, the check says where. Every small cube of the solid that the verdict judges gets its own margin, worked out exactly as the verdict works out the solid's (the infill reduction as set, the walls counted or not as set). The cubes under the safety margin that touch each other make one weak area. Up to {{solid_spots_max}} of them are listed, the worst first, and marked on the part.
