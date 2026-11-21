@@ -1366,6 +1366,7 @@ public struct WorkspacePlaceholder: View {
                 .onChange(of: newEngine.problem) { p in   // ★ Organic cut 1: the weave needs the stress; the check runs itself
                     if p == LatticeLayoutPreview.organicNeedsStressLine { runNewEngineStressCheck() }
                 }
+                .onChange(of: latticeSim.phase) { stressCheckEnded($0) }   // ★ his 11-20: its end, said
                 .onChange(of: newEngine.solidReason) { reason in
                     // ★ Install 3: his 11-09 thin-wall pop-up on the new engine — once per project, by itself, on Structural,
                     // when the engine leaves lattice solid because the walls are too thin (its own reason, not the old bake's)
@@ -5005,12 +5006,34 @@ public struct WorkspacePlaceholder: View {
 
     /// ★ Install 2: the stress check the new engine grades by — the stage's quick solve, whatever the old preview asks (its
     /// needsStressSolve covers By stress and Swept only; the new engine also sizes Auto cells by stress).
-    private func runNewEngineStressCheck() {
+    private func runNewEngineStressCheck(force: Bool = false) {
         let ctxs = model.makeLatticeSimContexts()   // ★ control 6: the loads switched on for the lattice, the worst of them
-        guard !ctxs.isEmpty else { return }
-        if latticeSim.field != nil, !latticeSim.isStale(against: ctxs) { return }
+        // ★ his 11-20 ("Why isn't a stress run already done?"): never silent — nothing to solve is said, in a pop-up
+        guard !ctxs.isEmpty else {
+            AppPopups.shared.show(StressCheckCopy.nothingTitle, StressCheckCopy.nothingText); return
+        }
+        // Organic follows the stress's directions: a result without them is run again, never waited on forever
+        let lacksDirections = LatticeLayoutPreview.organic(project.lattice) && latticeSim.field?.stressTensor.isEmpty == true
+        if !force, latticeSim.field != nil, !latticeSim.isStale(against: ctxs), !lacksDirections { return }
         simBannerDismissed = false
         latticeSim.run(ctxs)
+    }
+
+    /// ★ his 11-20: the check's end, said: a failure (or a result Organic cannot follow) as a pop-up with Try again.
+    func stressCheckEnded(_ phase: LatticeSimModel.Phase) {
+        guard newEngine.problem == LatticeLayoutPreview.organicNeedsStressLine || LatticeLayoutPreview.organic(project.lattice)
+        else { return }
+        switch phase {
+        case .failed(let why):
+            AppPopups.shared.show(StressCheckCopy.failedTitle, StressCheckCopy.failedText, log: why,
+                                  action: (StressCheckCopy.tryAgain, { runNewEngineStressCheck(force: true) }))
+        case .complete:
+            if LatticeLayoutPreview.organic(project.lattice), latticeSim.field?.stressTensor.isEmpty == true {
+                AppPopups.shared.show(StressCheckCopy.failedTitle, StressCheckCopy.noDirectionsText,
+                                      action: (StressCheckCopy.tryAgain, { runNewEngineStressCheck(force: true) }))
+            }
+        default: break
+        }
     }
 
     /// ★★ THE FIELD'S OWN IDENTITY — AND THE REBAKE NOBODY WAS FIRING
@@ -15631,6 +15654,14 @@ extension WorkspacePlaceholder {
             // ★ Organic cut 2 (his certify wizard): once every pop-up has gone through, his re-check question is asked here
             if let w = model.certifyWalk, w.asksRecheck(on: project.id) { certifyRecheck } else { latticeRunButton }
             DSSplitButton(key: "latticeSplitMore") {   // §4.6's 64 pt ⌃
+                if LatticeLayoutPreview.needsStress(project.lattice) {   // ★ his 11-20: "add a button option in the carrot"
+                    Button { runNewEngineStressCheck(force: true) } label: {
+                        Text(StressCheckCopy.menuTitle)
+                        Text(latticeSim.phase == .running ? StressCheckCopy.menuRunning : StressCheckCopy.menuLine)
+                    }
+                    .disabled(latticeSim.phase == .running)
+                    .accessibilityIdentifier("lattice-split-stress")
+                }
                 Button { requestLatticeRun() } label: {
                     Text(LatticeSetupCopy.original)
                     Text(latticeThisSummary)
@@ -15872,4 +15903,19 @@ extension WorkspacePlaceholder {
         }
         throw LatticeLayoutPreview.OrganicFileWait.notLaid
     }
+}
+
+
+/// ★ his 11-20: the stress check's words — the ⌃ menu's item, and the pop-ups when it cannot run or fails.
+enum StressCheckCopy {
+    static let menuTitle = "Run the stress check"
+    static let menuLine = "Organic follows the stresses in your part"
+    static let menuRunning = "Checking the stresses…"
+    static let nothingTitle = "There is nothing to check yet"
+    static let nothingText = "The stress check needs at least one load and one fixed face. Add them in Topology, then the "
+        + "lattice will follow."
+    static let failedTitle = "The stress check didn’t finish"
+    static let failedText = "The stresses in your part couldn’t be worked out this time, so the lattice can’t follow them yet."
+    static let noDirectionsText = "The stress check finished without the directions the Organic lattice follows. Try it again."
+    static let tryAgain = "Try again"
 }

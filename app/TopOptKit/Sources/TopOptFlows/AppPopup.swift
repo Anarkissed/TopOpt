@@ -20,16 +20,19 @@ public struct AppPopup: Equatable, Identifiable, Sendable {
 
 @MainActor public final class AppPopups: ObservableObject {
     public static let shared = AppPopups()
-    @Published public var current: AppPopup?
+    @Published public var current: AppPopup? { didSet { if current == nil { action = nil } } }
+    /// The pop-up's one action beside OK (e.g. "Try again"); cleared with it.
+    public private(set) var action: (title: String, run: () -> Void)?
     /// What each raise said, while a test records (FlexibleSaid.recording).
     public static var recorded: [AppPopup] = []
 
     /// Raise one; `log` (technical) goes to the log only.
-    public func show(_ title: String, _ text: String, log: String? = nil) {
+    public func show(_ title: String, _ text: String, log: String? = nil, action: (title: String, run: () -> Void)? = nil) {
         if let log { NSLog("TopOpt popup (%@): %@", title, log) }
         let p = AppPopup(title: title, text: text)
         if FlexibleSaid.recording { Self.recorded.append(p) }
         current = p
+        self.action = action
     }
 
     /// An (i): the setting's name and its explanation, in the same centred card.
@@ -65,8 +68,17 @@ struct AppPopupLayer: View {
                             .multilineTextAlignment(p.info ? .leading : .center).fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: p.info ? .leading : .center)
                             .accessibilityIdentifier("app-popup-text")
-                        PillButton("OK") { popups.current = nil }
-                            .accessibilityIdentifier("app-popup-ok")
+                        HStack(spacing: DS.Space.s) {
+                            if let a = popups.action {
+                                PillButton("OK", style: .secondary) { popups.current = nil }
+                                    .accessibilityIdentifier("app-popup-ok")
+                                PillButton(a.title) { let run = a.run; popups.current = nil; run() }
+                                    .accessibilityIdentifier("app-popup-action")
+                            } else {
+                                PillButton("OK") { popups.current = nil }
+                                    .accessibilityIdentifier("app-popup-ok")
+                            }
+                        }
                     }
                     .padding(DS.Space.xl2)
                     .frame(maxWidth: p.info ? 520 : 440)

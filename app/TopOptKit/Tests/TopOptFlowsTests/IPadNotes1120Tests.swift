@@ -109,4 +109,29 @@ final class IPadNotes1120Tests: XCTestCase {
         XCTAssertNil(C.run("Roots", 2)); XCTAssertNil(C.reach(1)); XCTAssertNil(C.seeds(2.5))
         XCTAssertNil(C.cell(small: 2, large: 8, thinStrutMM: 0.9), "RED CONTROL: his 2 to 8 is taken")
     }
+
+    /// ★ his 11-20 ("Why isn't a stress run already done? ... What is going on??"): Organic never tells him to run the check
+    /// himself (it runs itself; the ⌃ menu offers it), the waiting line says what is happening, and a pop-up can offer Try
+    /// again. RED CONTROL: a regular lattice graded by stress keeps its own line.
+    func testTheStressCheckIsNeverASilentWait() {
+        var l = LatticeSettings(enabled: true)
+        l.algorithm = "organic"
+        XCTAssertFalse(LatticeLayoutPreview.notes(l).contains(LatticeLayoutPreview.byStressLine), "★ Organic: no \"run it yourself\" line")
+        XCTAssertEqual(LatticeLayoutPreview.organicNeedsStressLine, "Checking the stresses first, then the lattice")
+        var ran = 0
+        AppPopups.shared.show(StressCheckCopy.failedTitle, StressCheckCopy.failedText, log: "core: not converged",
+                              action: (StressCheckCopy.tryAgain, { ran += 1 }))
+        XCTAssertEqual(AppPopups.shared.action?.title, "Try again")
+        AppPopups.shared.action?.run()
+        XCTAssertEqual(ran, 1)
+        AppPopups.shared.current = nil
+        XCTAssertNil(AppPopups.shared.action, "the action goes with its pop-up")
+        for t in [StressCheckCopy.nothingText, StressCheckCopy.failedText, StressCheckCopy.noDirectionsText, StressCheckCopy.menuLine] {
+            for bad in ["std::", "core", "tensor", "sim "] { XCTAssertFalse(t.contains(bad), "plain English: \(t)") }
+        }
+        l.algorithm = "stepped"
+        l.setSimulateStresses(true)
+        l.densityMode = .sim
+        XCTAssertEqual(LatticeLayoutPreview.note(l), LatticeLayoutPreview.byStressLine, "RED CONTROL: the regular lattice keeps its line")
+    }
 }
