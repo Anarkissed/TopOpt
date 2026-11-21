@@ -1229,16 +1229,12 @@ struct LatticeLayoutPreviewOneLine: View {
 struct LatticeLayoutPreviewLines: View {
     @ObservedObject var preview: LatticeLayoutPreview
 
+    // ★ his 11-21: "No, never show the bottom note! ... Remove it from the UI entirely!!" — the preview's problem and its notes
+    // (the stress check's among them) are never drawn here: an error is a centred pop-up (AppPopups), nothing else.
     var body: some View {
         VStack(spacing: 2) {
-            if let p = preview.problem {
-                Text(p).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.warning.color)
-                    .lineLimit(3).fixedSize(horizontal: false, vertical: true)   // ★ said whole (sheet H4)
-            } else if preview.laying, preview.bars == nil {
+            if preview.laying, preview.bars == nil {
                 Text("New engine: laying the lattice…").font(.system(size: 12)).foregroundStyle(DS.Color.textSecondary.color)
-            }
-            ForEach(preview.notes, id: \.self) { n in
-                Text(n).font(.system(size: 12)).foregroundStyle(DS.Color.warning.color)
             }
             if let z = preview.nozzleLine {
                 Text(z).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)

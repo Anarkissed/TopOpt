@@ -288,8 +288,13 @@ public final class AppModel: ObservableObject {
             return makeLatticeSimContext(resolution: resolution, leavingOut: leftOut).map { [$0] } ?? []
         }
         let excluded = project.lattice.enabled ? project.lattice.topologyExcluded : []
-        return project.force.scenarioList.filter { !excluded.contains($0.id) }.compactMap {
-            makeLatticeSimContext(resolution: resolution, scenario: $0.id, leavingOut: leftOut)
+        // ★ 11-21 (his 2040 stand: Scenario 2 held no load, its solve failed and sank the check): a scenario with no load adds
+        // no stress, so it is left out — the worst of the others is the same field. Each keeps its name, said if it fails.
+        return project.force.scenarioList.filter { !excluded.contains($0.id) }.compactMap { s in
+            guard var c = makeLatticeSimContext(resolution: resolution, scenario: s.id, leavingOut: leftOut),
+                  !c.loadGroups.isEmpty else { return nil }
+            c.scenarioName = s.name
+            return c
         }
     }
 

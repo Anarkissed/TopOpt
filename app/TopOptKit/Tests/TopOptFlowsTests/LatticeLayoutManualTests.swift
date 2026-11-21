@@ -235,12 +235,21 @@ final class LatticeLayoutManualTests: XCTestCase {
         let loads = p.selection.groups.filter { p.force.kind(for: $0.id).isLoad }
         let load = try XCTUnwrap(loads.first, "premise: a load")
         let s2 = p.force.addScenario()
+        // ★ his 2040 stand (11-21): one load, two scenarios — the scenario holding no load adds no stress and is left out (its
+        // solve used to fail and sink the whole check). Here the load is moved to Scenario 2: Scenario 1 is the empty one.
         p.force.scenarios?.owner[load.id] = s2
-        let two = r.app.makeLatticeSimContexts()
-        XCTAssertEqual(two.count, 2, "★ one solve per scenario")
-        XCTAssertNotEqual(two[0].loadGroups, two[1].loadGroups, "★ each its own loads")
+        let moved = r.app.makeLatticeSimContexts()
+        XCTAssertEqual(moved.count, 1, "★ the scenario with no load is not solved")
+        XCTAssertEqual(moved.first?.scenarioName, p.force.scenarioList[1].name, "★ the one with the load is, by its name")
+        XCTAssertFalse(moved.first?.loadGroups.isEmpty ?? true)
         p.lattice.topologyExcluded.insert(s2)
-        XCTAssertEqual(r.app.makeLatticeSimContexts().count, 1, "★ a scenario switched off for the lattice is not solved")
+        XCTAssertEqual(r.app.makeLatticeSimContexts().count, 0, "★ a scenario switched off for the lattice is not solved")
+        p.lattice.topologyExcluded.remove(s2)
+        p.force.scenarios?.owner[load.id] = nil   // the load back in Scenario 1; Scenario 2 empty, exactly as on his stand
+        let his = r.app.makeLatticeSimContexts()
+        XCTAssertEqual(his.count, 1, "★ his stand: Scenario 2 holds no load, left out")
+        XCTAssertEqual(his.first?.scenarioName, p.force.scenarioList[0].name)
+        // (two scenarios each with loads, combined as the worst at each place: IPadNotes1120Tests)
     }
 
     func until(_ done: @escaping () -> Bool) async throws {

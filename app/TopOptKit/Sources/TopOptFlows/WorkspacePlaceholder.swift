@@ -5028,7 +5028,9 @@ public struct WorkspacePlaceholder: View {
             AppPopups.shared.show(StressCheckCopy.failedTitle, StressCheckCopy.failedText, log: why,
                                   action: (StressCheckCopy.tryAgain, { runNewEngineStressCheck(force: true) }))
         case .complete:
-            if LatticeLayoutPreview.organic(project.lattice), latticeSim.field?.stressTensor.isEmpty == true {
+            if !latticeSim.unsolved.isEmpty {   // ★ 11-21: the others went through; the ones that did not are named
+                AppPopups.shared.show(StressCheckCopy.someTitle, StressCheckCopy.someText(latticeSim.unsolved))
+            } else if LatticeLayoutPreview.organic(project.lattice), latticeSim.field?.stressTensor.isEmpty == true {
                 AppPopups.shared.show(StressCheckCopy.failedTitle, StressCheckCopy.noDirectionsText,
                                       action: (StressCheckCopy.tryAgain, { runNewEngineStressCheck(force: true) }))
             }
@@ -15918,4 +15920,10 @@ enum StressCheckCopy {
     static let failedText = "The stresses in your part couldn’t be worked out this time, so the lattice can’t follow them yet."
     static let noDirectionsText = "The stress check finished without the directions the Organic lattice follows. Try it again."
     static let tryAgain = "Try again"
+    static let someTitle = "Some load scenarios couldn’t be checked"
+    static func someText(_ names: [String]) -> String {
+        let list = names.count == 1 ? names[0] : names.dropLast().joined(separator: ", ") + " and " + names.last!
+        return "\(list) couldn’t be worked out, so the lattice follows your other scenarios. Check that each scenario has a "
+            + "load and a fixed face switched on."
+    }
 }
