@@ -874,6 +874,113 @@ static void test_sweep_tubes() {
   }
 }
 
+// OS1, the file's vine shape (the owner, 2026-11-20: "the rounded ends aren't attached at the right places, there are
+// places without rounded ends at ALL, and there are just straight cuts to turn instead of angles"; the reviewer's
+// ruling with his approval: bridges rounded and mitred IN PLAN ONLY, the underside one level plane to the tip).
+static double puck_lowest(const WeaveShells& w, std::size_t s) {
+  double lo = 1e300;
+  for (std::size_t t = w.first_tri[s]; t < w.first_tri[s + 1]; ++t)
+    for (int k = 0; k < 3; ++k) lo = std::min(lo, w.mesh.vertices[static_cast<std::size_t>(w.mesh.triangles[t][static_cast<std::size_t>(k)])].z);
+  return lo;
+}
+static void test_vine_shape() {
+  WeaveJob job;
+  const Domain& d = *job.session.domain();
+  const PartMeasure& pm = job.session.measure();
+  const OpenSpace open = read_open_space(d, job.out.layout, 0.25);
+  const Carved carved = carve_part(pm, job.out.layout, open);
+  // A: sides by the facet rule (ruling R1): 0.9 mm wide 10, 3.6 mm 18, the floor kept, 0 = tube_sides always.
+  MeshSpec f = file_mesh_defaults();
+  CHECK(f.tube_facet_mm == 0.03 && f.weave_bridge_domes && f.weave_fold_split);
+  CHECK(tube_sides_for(0.9, f) == 10 && tube_sides_for(3.6, f) == 18 && tube_sides_for(50.0, f) == 24);
+  MeshSpec floor12 = f;
+  floor12.tube_sides = 12;
+  CHECK(tube_sides_for(0.9, floor12) == 12);
+  CHECK(tube_sides_for(3.6, MeshSpec{}) == 8);   // the writer's own default: tube_sides, as before
+  // D: a mitre folds where a segment is shorter than its two rings' offsets: a 55-degree zig of 0.3 mm on a 1.2 mm
+  // radius folds (ended at the larger offset); long segments do not.
+  const double t55 = 55.0 * 3.14159265358979323846 / 180.0;
+  const std::vector<Vec3> zig = {{0, 0, 0}, {3, 0, 0}, {3 + 0.3 * std::cos(t55), 0.3 * std::sin(t55), 0},
+                                 {6 + 0.3 * std::cos(t55), 0.3 * std::sin(t55), 0}};
+  CHECK(!mitre_fold_splits(zig, std::vector<double>(4, 1.2)).empty());
+  CHECK(mitre_fold_splits(zig, std::vector<double>(4, 0.2)).empty());
+  // B: level shallow bars of one strand in the weave region: a free end, a 90-degree corner in plan (a split), a free end.
+  Bars level;
+  const Vec3 a{20.0, 6.0, 10.0}, b{23.0, 6.0, 10.0}, c{23.0, 8.5, 10.0};
+  for (const auto& e : {std::pair<Vec3, Vec3>{a, b}, std::pair<Vec3, Vec3>{b, c}}) {
+    Bar x;
+    x.a = e.first;
+    x.b = e.second;
+    x.width = 1.2;
+    x.region = job.regions.front();
+    x.strand = 31;
+    x.end_a = x.end_b = Bar::End::Node;
+    level.bars.push_back(x);
+  }
+  level.bars.front().end_a = Bar::End::Loose;
+  level.bars.back().end_b = Bar::End::Loose;
+  MeshSpec off = f;
+  off.weave_bridge_domes = false;
+  off.tube_facet_mm = 0.0;
+  off.weave_fold_split = false;
+  const WeaveShells flat = weave_shells(pm, d, job.out.layout, level, {}, carved, off, false);
+  const WeaveShells round = weave_shells(pm, d, job.out.layout, level, {}, carved, f, false);
+  CHECK(flat.bridges == 2 && flat.bridge_domes == 0);
+  // Three rounded ends: the two free ends and ONE at the corner (the two bars share it).
+  CHECK(round.bridges == 2 && round.bridge_domes == 3 && round.dome_ends.size() == 3);
+  CHECK(shells_closed_outward(round) == round.shells());
+  // Each rounded end's lowest point is the bar's own underside (0.6 under its line), never under it: the bottom is one
+  // level plane to the tip; every downward face of the bars and their ends is level.
+  bool level_bottom = true;
+  for (std::size_t s = flat.shells(); s < round.shells(); ++s) level_bottom = level_bottom && std::fabs(puck_lowest(round, s) - 9.4) < 1e-9;
+  std::printf("vine shape: level bars %zu shells flat, %zu rounded (%zu ends); underside level %.3f, own %.3f, other %.6f mm2\n",
+              flat.shells(), round.shells(), round.bridge_domes, round.bridge_under_level_mm2, round.bridge_under_own_mm2,
+              round.bridge_under_other_mm2);
+  CHECK(round.shells() == flat.shells() + 3 && level_bottom);
+  CHECK(round.bridge_under_level_mm2 > flat.bridge_under_level_mm2 && round.bridge_under_other_mm2 < 1e-9);
+  // Seen from above the end is a half circle: the rounded end reaches its half width past the bar's end, in plan only.
+  double reach = 0.0;
+  for (const Vec3& v : round.mesh.vertices)
+    if (std::fabs(v.y - 6.0) < 1e-9) reach = std::max(reach, a.x - v.x);
+  CHECK(std::fabs(reach - 0.6) < 1e-9);
+  // R2: an end the print check held flat (MeshSpec::flat_domes_at) is not rounded; counted.
+  MeshSpec held = f;
+  held.flat_domes_at = {a};
+  const WeaveShells h = weave_shells(pm, d, job.out.layout, level, {}, carved, held, false);
+  CHECK(h.bridge_domes == 2 && h.domes_held_flat == 1);
+  // Off: the mesh as before, to the bit (no rounded end, the run-on kept).
+  const WeaveShells flat2 = weave_shells(pm, d, job.out.layout, level, {}, carved, MeshSpec{off}, false);
+  CHECK(flat2.mesh.triangles == flat.mesh.triangles);
+  // The made weave block through the file's defaults: every shell closed and outward.
+  const std::vector<char> present = bars_present(job.weave, {}, job.regions, f.layer_mm);
+  const WeaveHolds holds = weave_holds(job.weave, job.regions, present, f.bridge_rise);
+  const WeaveShells all = weave_shells(pm, d, job.out.layout, job.weave, holds.kept, carved, f, true);
+  CHECK(shells_closed_outward(all) == all.shells());
+  // F: a run end that continues the next run's tube is packed as 5 (version 2 only).
+  WeaveRun r1, r2;
+  r1.points = {{0, 0, 0}, {1, 0, 0}};
+  r1.width_mm = r1.spacing_mm = r1.ring_mm = {1.0, 1.0};
+  r2 = r1;
+  r1.continues_b = true;
+  r2.continues_a = true;
+  const std::vector<std::uint8_t> p2 = pack_weave_runs({r1, r2}, 2), p1 = pack_weave_runs({r1, r2}, 1);
+  CHECK(p2[8 + 9] == 0 && p2[8 + 10] == kEndContinues && p2[8 + 28 + 40 + 9] == kEndContinues);
+  CHECK(p1[10] == 0 && p1[12 + 40 + 9] == 0);
+  // The keys: on by default; false / 0 as before; a facet out of range refused by name.
+  auto job_with = [](const std::string& mesh) {
+    return R"({"mode": "lattice_file", "model": "a.step", "mesh": {)" + mesh + "}}";
+  };
+  const FileJob plain = parse_file_job(job_with(""));
+  CHECK(plain.options.mesh.weave_bridge_domes && plain.options.mesh.weave_fold_split && plain.options.mesh.tube_facet_mm == 0.03);
+  const FileJob none = parse_file_job(job_with(R"("tube_facet_mm": 0, "weave_bridge_domes": false, "weave_fold_split": false)"));
+  CHECK(!none.options.mesh.weave_bridge_domes && !none.options.mesh.weave_fold_split && none.options.mesh.tube_facet_mm == 0.0);
+  bool refused = false;
+  try { (void)parse_file_job(job_with(R"("tube_facet_mm": 0.001)")); } catch (const FileJobError& e) {
+    refused = std::string(e.what()).find("tube_facet_mm") != std::string::npos;
+  }
+  CHECK(refused);
+}
+
 int main() {
   if (!mesh_available()) {
     std::printf("no mesh library in this build (%d checks, %d failed)\n", g_checks, g_fail);
@@ -887,6 +994,7 @@ int main() {
   test_relief_findings();
   test_sweep_line();
   test_sweep_tubes();
+  test_vine_shape();
   std::printf("weave tubes: %d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }

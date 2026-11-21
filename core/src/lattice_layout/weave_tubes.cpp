@@ -5,6 +5,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <map>
 #include <thread>
 
 #include "topopt/lattice_layout_mesh.hpp"
@@ -42,14 +43,17 @@ double volume_of(const TriangleMesh& m, std::size_t t0, std::size_t t1) {
 }
 
 // One tube to sweep: its centre line, the radius at each point, and how each end is closed.
-enum class Cap { Flat, Round };
+// Round: a round tube's half-sphere. Dome (OS1 B): a shallow run's end rounded IN PLAN ONLY (the piece's own end flat,
+// a puck of its section revolved about the vertical there: sweep_puck).
+enum class Cap { Flat, Round, Dome };
 // kind 0: round (r the polygon's equal-area radius); 1: a shallow run's D section, 2: its square bar (r half the width,
-// as build_mesh's StrutMaker writes a shallow bar; both ends always flat).
+// as build_mesh's StrutMaker writes a shallow bar; its ends flat, or domed with OS1 B).
 struct Piece {
   std::vector<Vec3> p;
   std::vector<double> r;   // per point
   Cap cap_a = Cap::Round, cap_b = Cap::Round;
   int kind = 0;
+  int sides = 0;           // OS1 A: a round piece's own sides (0: the spec's tube_sides)
   // OG2 (brief E6): a proud end's tube, from the point before it to its tip: the trim leaves the vertices outside the part
   // that lie within this tube (radius x 1.16, a mitred ring's widest) and no more than `out` (proud + radius) outside.
   // OG2b (leg B): `along` true: a bar along an open face; a vertex within it may stand out of the surface by no more than
@@ -62,7 +66,8 @@ struct Piece {
 
 // A shallow run swept with its own section (the D of O14, or the square bar), the section's frame fixed by the build
 // direction at every segment (its side level, square to the segment; its flat side down), never carried along. At a
-// joint the ring is the mean of where the two segments' section lines meet the bisecting plane; both ends flat.
+// joint the ring is the mean of where the two segments' section lines meet the bisecting plane; both ends flat (an OS1 B
+// rounded end is a shell of its own: sweep_puck).
 bool sweep_section(const Piece& pc, int bar_sides, TriangleMesh& out, std::vector<std::size_t>& first_tri) {
   const std::size_t n = pc.p.size();
   if (n < 2) return false;
@@ -133,6 +138,58 @@ bool sweep_section(const Piece& pc, int bar_sides, TriangleMesh& out, std::vecto
     out.triangles.push_back({at(0, 0), at(0, i + 1), at(0, i)});
     out.triangles.push_back({at(nr - 1, 0), at(nr - 1, i), at(nr - 1, i + 1)});
   }
+  if (volume_of(out, t0, out.triangles.size()) < 0.0)
+    for (std::size_t t = t0; t < out.triangles.size(); ++t) std::swap(out.triangles[t][1], out.triangles[t][2]);
+  first_tri.push_back(t0);
+  return true;
+}
+
+// OS1 B (the reviewer's ruling with the owner's approval, 2026-11-20; his rule of 11-12: "Please ensure bridges are flat
+// and not curved. This is very important."): a shallow run's rounded end, its section revolved about the VERTICAL (the
+// build direction) through the end point `c`: a closed shell, round in plan, its underside one level disc at the bar's
+// own underside height there (c.z - r up.z), its side straight up to c.z, its top the D's round top revolved (a flat top
+// for the square bar). Its back half lies inside the bar (or, at a corner, the next bar): seen from above an end is a
+// half circle and a corner a smooth turn; seen from the side the bar's bottom is a flat line to its very end.
+bool sweep_puck(const Vec3& c, double r, double up_z, int kind, int sides, int bar_sides, TriangleMesh& out,
+                std::vector<std::size_t>& first_tri) {
+  if (!(r > 0.0) || sides < 3) return false;
+  const double kPi = 3.14159265358979323846;
+  const double zb = c.z - r * up_z;
+  // The profile from the axis out and up: (radius, z) rows; the first and last on the axis.
+  std::vector<std::array<double, 2>> prof;
+  prof.push_back({0.0, zb});
+  prof.push_back({r, zb});
+  if (kind == 1) {
+    const int arc = std::max(2, std::max(2, std::max(3, bar_sides) / 2) / 2);   // the D's top: half its facets a quarter
+    for (int k = 0; k < arc; ++k) {
+      const double t = 0.5 * kPi * k / arc;
+      prof.push_back({r * std::cos(t), c.z + r * std::sin(t)});
+    }
+    prof.push_back({0.0, c.z + r});
+  } else {
+    prof.push_back({r, zb + 2.0 * r * up_z});
+    prof.push_back({0.0, zb + 2.0 * r * up_z});
+  }
+  const int rows = static_cast<int>(prof.size());   // rows 0 and rows - 1 are single vertices on the axis
+  const int base = static_cast<int>(out.vertices.size());
+  const std::size_t t0 = out.triangles.size();
+  out.vertices.push_back({c.x, c.y, prof[0][1]});
+  for (int k = 1; k + 1 < rows; ++k)
+    for (int i = 0; i < sides; ++i) {
+      const double a = 2.0 * kPi * i / sides;
+      out.vertices.push_back({c.x + prof[static_cast<std::size_t>(k)][0] * std::cos(a),
+                              c.y + prof[static_cast<std::size_t>(k)][0] * std::sin(a), prof[static_cast<std::size_t>(k)][1]});
+    }
+  out.vertices.push_back({c.x, c.y, prof.back()[1]});
+  const int bottom = base, top = static_cast<int>(out.vertices.size()) - 1;
+  auto at = [&](int k, int i) { return base + 1 + (k - 1) * sides + (i % sides); };
+  for (int i = 0; i < sides; ++i) out.triangles.push_back({bottom, at(1, i + 1), at(1, i)});
+  for (int k = 1; k + 2 < rows; ++k)
+    for (int i = 0; i < sides; ++i) {
+      out.triangles.push_back({at(k, i), at(k, i + 1), at(k + 1, i + 1)});
+      out.triangles.push_back({at(k, i), at(k + 1, i + 1), at(k + 1, i)});
+    }
+  for (int i = 0; i < sides; ++i) out.triangles.push_back({top, at(rows - 2, i), at(rows - 2, i + 1)});
   if (volume_of(out, t0, out.triangles.size()) < 0.0)
     for (std::size_t t = t0; t < out.triangles.size(); ++t) std::swap(out.triangles[t][1], out.triangles[t][2]);
   first_tri.push_back(t0);
@@ -235,6 +292,51 @@ double ms_since(std::chrono::steady_clock::time_point t0) {
 
 }  // namespace
 
+int tube_sides_for(double width_mm, const MeshSpec& spec) {
+  const int floor_sides = std::max(3, spec.tube_sides);
+  if (!(spec.tube_facet_mm > 0.0)) return floor_sides;
+  const double r = 0.5 * width_mm;
+  if (!(r > 0.0)) return floor_sides;
+  const double c = 1.0 - spec.tube_facet_mm / r;
+  int n = c <= -1.0 ? 3 : static_cast<int>(std::ceil(3.14159265358979323846 / std::acos(std::max(-1.0, c)) - 1e-9));
+  n += n % 2;   // even: a ring's sides pair across it
+  return std::max(floor_sides, std::min(24, n));
+}
+
+double tube_round_factor(int sides) {
+  const double kPi = 3.14159265358979323846;
+  return std::sqrt(2.0 * kPi / (sides * std::sin(2.0 * kPi / sides)));
+}
+
+std::vector<std::size_t> mitre_fold_splits(const std::vector<Vec3>& p, const std::vector<double>& corner) {
+  const std::size_t n = p.size();
+  std::vector<std::size_t> out;
+  if (n < 3 || corner.size() != n) return out;
+  std::vector<double> off(n, 0.0), seg(n - 1, 0.0);
+  std::vector<Vec3> t(n - 1);
+  for (std::size_t k = 0; k + 1 < n; ++k) { t[k] = sub(p[k + 1], p[k]); seg[k] = len(t[k]); t[k] = unit(t[k]); }
+  for (std::size_t j = 1; j + 1 < n; ++j) {
+    const double c = std::clamp(dot(t[j - 1], t[j]), -1.0, 1.0);
+    const double half = 0.5 * std::acos(c);
+    off[j] = corner[j] * std::tan(std::min(half, 1.5));
+  }
+  std::vector<char> ended(n, 0);
+  for (bool again = true; again;) {
+    again = false;
+    for (std::size_t k = 0; k + 1 < n; ++k) {
+      const double oa = ended[k] ? 0.0 : off[k], ob = ended[k + 1] ? 0.0 : off[k + 1];
+      if (!(seg[k] < oa + ob - 1e-9)) continue;
+      const std::size_t j = oa >= ob ? k : k + 1;
+      if (j == 0 || j + 1 == n || ended[j]) continue;
+      ended[j] = 1;
+      again = true;
+    }
+  }
+  for (std::size_t j = 1; j + 1 < n; ++j)
+    if (ended[j]) out.push_back(j);
+  return out;
+}
+
 WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const Layout& layout, const Bars& bars,
                          const std::vector<char>& kept, const Carved& carved, const MeshSpec& spec, bool trim) {
   const auto t0 = std::chrono::steady_clock::now();
@@ -263,10 +365,23 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
   const std::vector<WeaveRun> runs = weave_runs(woven, regions, 0.0, &bar_of);
   const int sides = std::max(3, spec.tube_sides);
   const double kPi = 3.14159265358979323846;
-  const double k_round = std::sqrt(2.0 * kPi / (sides * std::sin(2.0 * kPi / sides)));   // equal area
   const double run_on = strut_run_on_mm(carved, spec);
   const double sharp = std::cos(60.0 * kPi / 180.0);   // a turn sharper than 60 degrees ends the tube
   std::vector<Piece> pieces;   // kept for OF3's rebuild
+  // OS1 B: a dome, unless the print check held this end flat (MeshSpec::flat_domes_at).
+  auto dome_or_flat = [&](const Vec3& at) {
+    for (const Vec3& f : spec.flat_domes_at)
+      if (len(sub(f, at)) < 1e-6) { ++out.domes_held_flat; return Cap::Flat; }
+    return Cap::Dome;
+  };
+  // A finished piece: its domes listed for the print check, its sides counted.
+  auto add_piece = [&](Piece&& pc) {
+    if (pc.kind == 0) {
+      out.tube_sides_least = out.tube_sides_least == 0 ? pc.sides : std::min(out.tube_sides_least, pc.sides);
+      out.tube_sides_most = std::max(out.tube_sides_most, pc.sides);
+    }
+    pieces.push_back(std::move(pc));
+  };
   for (std::size_t q = 0; q < runs.size(); ++q) {
     const std::vector<std::size_t>& segs = bar_of[q];
     // The centre line, with each segment's bar width and kind; zero-length segments dropped.
@@ -296,6 +411,12 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
       Piece pc;
       pc.kind = kind[start];
       pc.p.assign(pts.begin() + static_cast<std::ptrdiff_t>(start), pts.begin() + static_cast<std::ptrdiff_t>(k) + 1);
+      if (pc.kind == 0) {   // OS1 A: its own sides, from its widest bar (tube_sides with tube_facet_mm 0)
+        double widest = 0.0;
+        for (std::size_t j = start; j < k; ++j) widest = std::max(widest, w[j]);
+        pc.sides = tube_sides_for(widest, spec);
+      }
+      const double k_round = pc.kind == 0 ? tube_round_factor(pc.sides) : 1.0;   // equal area
       for (std::size_t j = start; j <= k; ++j) {
         const double wj = j == start ? w[start] : j == k ? w[k - 1] : std::max(w[j - 1], w[j]);
         pc.r.push_back(0.5 * wj * (pc.kind == 0 ? k_round : 1.0));
@@ -317,16 +438,24 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
           ++out.proud_ends;
         }
       } else {
-        // Flat at both ends; run on as build_mesh runs a shallow bar on, except on the surface (flat there).
+        // Flat at both ends; run on as build_mesh runs a shallow bar on, except on the surface (flat there). OS1 B: domed
+        // wherever a round tube's end is round (not in solid, not flush on the surface), unless the print check held it
+        // flat (no run-on then: the dome reaches past the end).
         pc.cap_a = pc.cap_b = Cap::Flat;
+        if (spec.weave_bridge_domes) {
+          if (!(outer_a && (ea == Bar::End::Solid || (ea == Bar::End::Surface && !(proud_a > 0.0))))) pc.cap_a = dome_or_flat(pc.p.front());
+          if (!(outer_b && (eb == Bar::End::Solid || (eb == Bar::End::Surface && !(proud_b > 0.0))))) pc.cap_b = dome_or_flat(pc.p.back());
+        }
         // OG2: a shallow run's proud end keeps its flat end (its section has no round cap); its proud part is left out
         // of the trim as a tube's is (the section's corner, r x sqrt 2, from its line).
         const double rs = 1.41421356237 * pc.r.front(), re = 1.41421356237 * pc.r.back();
         if (outer_a && proud_a > 0.0) { pc.proud.push_back({pc.p[1], pc.p[0], rs, proud_a + rs}); ++out.proud_ends; }
         if (outer_b && proud_b > 0.0) { pc.proud.push_back({pc.p[pc.p.size() - 2], pc.p.back(), re, proud_b + re}); ++out.proud_ends; }
       }
-      const bool on_a = pc.kind == 0 ? outer_a && ea == Bar::End::Solid : !(outer_a && ea == Bar::End::Surface);
-      const bool on_b = pc.kind == 0 ? outer_b && eb == Bar::End::Solid : !(outer_b && eb == Bar::End::Surface);
+      const bool on_a = pc.kind == 0 ? outer_a && ea == Bar::End::Solid
+                                     : pc.cap_a == Cap::Flat && !(outer_a && ea == Bar::End::Surface);
+      const bool on_b = pc.kind == 0 ? outer_b && eb == Bar::End::Solid
+                                     : pc.cap_b == Cap::Flat && !(outer_b && eb == Bar::End::Surface);
       if (on_a) pc.p.front() = sub(pc.p.front(), mul(unit(sub(pc.p[1], pc.p[0])), run_on));
       if (on_b) {
         const std::size_t e = pc.p.size() - 1;
@@ -366,7 +495,30 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
         out.sweep_pieces_after += pc.p.size() - 1;
       }
       out.sharp_splits += turn_split;
-      pieces.push_back(std::move(pc));
+      // OS1 D: ended where a mitred ring would cross the next (a round end, a dome, or flat with domes off).
+      if (spec.weave_fold_split && pc.p.size() >= 3) {
+        std::vector<double> corner(pc.r.size());
+        for (std::size_t j = 0; j < pc.r.size(); ++j) corner[j] = pc.kind == 0 ? pc.r[j] : 1.41421356237 * pc.r[j];
+        const std::vector<std::size_t> at = mitre_fold_splits(pc.p, corner);
+        if (!at.empty()) {
+          out.fold_splits += at.size();
+          std::size_t from = 0;
+          for (std::size_t q2 = 0; q2 <= at.size(); ++q2) {
+            const std::size_t to = q2 < at.size() ? at[q2] : pc.p.size() - 1;
+            Piece part_of = pc;
+            part_of.p.assign(pc.p.begin() + static_cast<std::ptrdiff_t>(from), pc.p.begin() + static_cast<std::ptrdiff_t>(to) + 1);
+            part_of.r.assign(pc.r.begin() + static_cast<std::ptrdiff_t>(from), pc.r.begin() + static_cast<std::ptrdiff_t>(to) + 1);
+            const Cap inner = pc.kind == 0 ? Cap::Round : spec.weave_bridge_domes ? Cap::Dome : Cap::Flat;
+            if (from > 0) part_of.cap_a = inner == Cap::Dome ? dome_or_flat(part_of.p.front()) : inner;
+            if (q2 < at.size()) part_of.cap_b = inner == Cap::Dome ? dome_or_flat(part_of.p.back()) : inner;
+            add_piece(std::move(part_of));
+            from = to;
+          }
+          start = k;
+          continue;
+        }
+      }
+      add_piece(std::move(pc));
       start = k;
     }
   }
@@ -391,9 +543,38 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
   for (std::size_t i = 0; i < pieces.size(); ++i) {
     TriangleMesh one;
     std::vector<std::size_t> firsts;
-    if (!(pieces[i].kind == 0 ? sweep(pieces[i], sides, one, firsts) : sweep_section(pieces[i], spec.bar_sides, one, firsts))) continue;
+    if (!(pieces[i].kind == 0 ? sweep(pieces[i], pieces[i].sides > 0 ? pieces[i].sides : sides, one, firsts) : sweep_section(pieces[i], spec.bar_sides, one, firsts))) continue;
     ++(pieces[i].kind == 0 ? out.tubes : out.bridges);
     split_off(one, firsts, static_cast<int>(i));
+  }
+  // OS1 B: each rounded shallow end, once per place (two bars meeting at a corner share one; the wider is kept): its
+  // section revolved about the vertical there, a shell of its own (trimmed with its piece's relief).
+  {
+    struct Puck { Vec3 c; double r = 0.0, up_z = 1.0; int kind = 1; std::size_t piece = 0; };
+    std::map<std::array<long long, 3>, Puck> at;
+    for (std::size_t i = 0; i < pieces.size(); ++i) {
+      const Piece& pc = pieces[i];
+      if (pc.kind == 0 || pc.p.size() < 2) continue;
+      for (int e = 0; e < 2; ++e) {
+        if ((e == 0 ? pc.cap_a : pc.cap_b) != Cap::Dome) continue;
+        const std::size_t j = e == 0 ? 0 : pc.p.size() - 1;
+        const Vec3 t = unit(e == 0 ? sub(pc.p[1], pc.p[0]) : sub(pc.p[j], pc.p[j - 1]));
+        const std::array<long long, 3> key = {std::llround(pc.p[j].x * 1e5), std::llround(pc.p[j].y * 1e5), std::llround(pc.p[j].z * 1e5)};
+        auto it = at.find(key);
+        if (it != at.end() && it->second.r >= pc.r[j]) continue;
+        at[key] = Puck{pc.p[j], pc.r[j], std::sqrt(t.x * t.x + t.y * t.y), pc.kind, i};
+      }
+    }
+    for (const auto& kv : at) {
+      const Puck& u = kv.second;
+      TriangleMesh one;
+      std::vector<std::size_t> firsts;
+      const int ps = std::max(12, tube_sides_for(2.0 * u.r, spec));
+      if (!sweep_puck(u.c, u.r, u.up_z, u.kind, ps, spec.bar_sides, one, firsts)) continue;
+      ++out.bridge_domes;
+      out.dome_ends.push_back({u.c.x, u.c.y, u.c.z, u.r});
+      split_off(one, firsts, static_cast<int>(u.piece));
+    }
   }
   // build_mesh's own shapes: the shallow struts, the feet, the posts.
   {
@@ -554,6 +735,7 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
       auto radius = [&](const At& a) { return pc.r[a.seg] + (pc.r[a.seg + 1] - pc.r[a.seg]) * a.t; };
       cut = Piece{};
       cut.kind = pc.kind;
+      cut.sides = pc.sides;
       cut.p.push_back(point(pick->first));
       cut.r.push_back(radius(pick->first));
       for (std::size_t j = pick->first.seg + 1; j <= pick->second.seg; ++j) {
@@ -581,7 +763,7 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
         if (!cut_back(pr, pieces[static_cast<std::size_t>(made_from[s])], cut)) continue;
         TriangleMesh again;
         std::vector<std::size_t> firsts;
-        if (!(cut.kind == 0 ? sweep(cut, sides, again, firsts) : sweep_section(cut, spec.bar_sides, again, firsts))) continue;
+        if (!(cut.kind == 0 ? sweep(cut, cut.sides > 0 ? cut.sides : sides, again, firsts) : sweep_section(cut, spec.bar_sides, again, firsts))) continue;
         if (!trim_one(pr, again, s)) continue;
         shells[s] = std::move(again);
         keep[s] = 1;
@@ -606,6 +788,41 @@ WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const La
       out.proud_outside_mm = std::max(out.proud_outside_mm, proud_most[s]);
       out.along_vertices += along_left[s];
       out.along_outside_mm = std::max(out.along_outside_mm, along_most[s]);
+    }
+  }
+  // OS1 (the reviewer's proof): the shallow runs' downward-facing surface (bars and their rounded ends, as written):
+  // level (within 0.5 degrees of straight down), the bar's own flat bottom (a rising bridge's sloped underside, within
+  // 0.5 degrees of a segment's bottom), or neither: curved or sloped, not a printed bridge's flat underside.
+  {
+    const double tight = std::cos(0.5 * 3.14159265358979323846 / 180.0);
+    for (std::size_t s = 0; s < shells.size(); ++s) {
+      if (!keep[s] || made_from[s] < 0) continue;
+      const Piece& pc = pieces[static_cast<std::size_t>(made_from[s])];
+      if (pc.kind == 0) continue;
+      std::vector<Vec3> downs;
+      for (std::size_t k = 0; k + 1 < pc.p.size(); ++k) {
+        const Vec3 t = unit(sub(pc.p[k + 1], pc.p[k]));
+        Vec3 sd{-t.y, t.x, 0.0};
+        if (len(sd) < 1e-9) continue;
+        sd = unit(sd);
+        Vec3 u = cross(t, sd);
+        if (u.z < 0) u = mul(u, -1.0);
+        downs.push_back(mul(u, -1.0));
+      }
+      const TriangleMesh& m = shells[s];
+      for (const auto& q : m.triangles) {
+        const Vec3 &a = m.vertices[static_cast<std::size_t>(q[0])], &b = m.vertices[static_cast<std::size_t>(q[1])],
+                   &c = m.vertices[static_cast<std::size_t>(q[2])];
+        const Vec3 nn = cross(sub(b, a), sub(c, a));
+        const double area = 0.5 * len(nn);
+        if (!(area > 0.0)) continue;
+        const Vec3 nu = mul(nn, 0.5 / area);
+        if (!(nu.z < -0.05)) continue;   // not facing down
+        if (-nu.z >= tight) { out.bridge_under_level_mm2 += area; continue; }
+        bool own = false;
+        for (const Vec3& d : downs) own = own || dot(nu, d) >= tight;
+        (own ? out.bridge_under_own_mm2 : out.bridge_under_other_mm2) += area;
+      }
     }
   }
   for (std::size_t s = 0; s < shells.size(); ++s) {

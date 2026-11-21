@@ -353,9 +353,40 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
 
   auto holds = [&](std::size_t i, double* dist) { return holds_at(i, p, dist); };
 
+  // OG2f (leg S; the owner, 2026-11-21): a no-lattice ZONE that would leave less than two printed lines of solid under
+  // an open face of a weave region (its extent along the face's normal, inside the part, from the face) makes none there:
+  // the lattice runs to the face (and OG2e keeps that face flat). Only for a point the zone holds within two lines of the
+  // part's surface where a weave region owns it; everything else as before.
+  auto thin_zone = [&](std::size_t i) {
+    const Region& z = spec.regions[i];
+    const double two = 2.0 * spec.bead_mm;
+    if (!z.from_zone || !(two > 0.0)) return false;
+    const double d = part_.depth(p);
+    if (!(d > 0.0) || !(d < two)) return false;
+    double best = 0.0;
+    const Region* ow = owner_of(p, &best);
+    if (!ow || !ow->weave) return false;
+    const double h = 0.05;
+    Vec3 n{part_.depth({p.x - h, p.y, p.z}) - part_.depth({p.x + h, p.y, p.z}),
+           part_.depth({p.x, p.y - h, p.z}) - part_.depth({p.x, p.y + h, p.z}),
+           part_.depth({p.x, p.y, p.z - h}) - part_.depth({p.x, p.y, p.z + h})};   // outward
+    const double nl = std::sqrt(dot(n, n));
+    if (!(nl > 0.0)) return false;
+    n = {n.x / nl, n.y / nl, n.z / nl};
+    const Vec3 s{p.x + n.x * d, p.y + n.y * d, p.z + n.z * d};   // the face there
+    const double st = 0.05;
+    double held = 0.0;
+    for (double t = 0.5 * st; t < two + st; t += st) {
+      const Vec3 q{s.x - n.x * t, s.y - n.y * t, s.z - n.z * t};
+      if (!d_->region_holds(i, q) || !(part_.depth(q) > 0.0)) continue;
+      if (t > two) return false;   // two lines or more: solid as before
+      held += st;
+    }
+    return held < two;
+  };
   // D6: No lattice beats Lattice.
   for (std::size_t i = 0; i < spec.regions.size(); ++i)
-    if (spec.regions[i].role == Role::NoLattice && holds(i, nullptr))
+    if (spec.regions[i].role == Role::NoLattice && holds(i, nullptr) && !thin_zone(i))
       return inside_or({Why::NoLattice, spec.regions[i].id});
 
   double best = 0.0;
