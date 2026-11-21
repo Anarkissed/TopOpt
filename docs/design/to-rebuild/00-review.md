@@ -340,3 +340,38 @@ Same columns as section B.
 | id | file:line | kind | sev | evidence | action | size |
 |---|---|---|---|---|---|---|
 | I-02 | include/topopt/step.hpp:29-30; src/io/step.cpp:86-87, 231 | contract (G2) | M | A STEP part is turned into triangles once, at 0.1 mm chord error and 0.5 rad. Everything after uses those triangles: the voxel grid, and the Keep-region step that puts "the original part" back into the export. A drawn bore therefore comes back as flats up to 0.1 mm off round, twice his 0.05 mm target, before the optimiser has done anything. Only the CAD snap (planes and cylinders) corrects it, and only where it attributes the vertex. | 03-rules: state the tolerance for drawn curved faces; tessellate finer (or per face) for the export side | S |
+
+## K. Stiffness rule: cubed against linear (reviewer-approved measurement, 2026-11-21)
+
+Probe tree `toreview-probe-p1` (local branch, never merged): two environment switches at minimize_plastic.cpp:1017 and run_job.cpp:13447 set the exponent and the void floor for the optimiser, its in-loop check and the file re-check. Unset = today's engine. Release build, 6 threads.
+
+Arms: p3 = today (stiffness = fill^3, floor 1e-3, so empty = 1e-9 of full); p1 = stiffness = fill, empty = 1e-3; p1lo = stiffness = fill, empty = 1e-6.
+
+| part | arm | wall s | solver s | CG iterations (40 design steps) | margin (shown) | file re-check | mass g |
+|---|---|---|---|---|---|---|---|
+| Original stand, res 128 | p3 | 496 | 235 | 6,106 | 2.397 | 2.410 | 86.55 |
+| | p1 | 536 | 272 | 7,420 | 2.413 | 2.412 | 86.56 |
+| | p1lo | 361 | 63 | 318 | 2.395 | 2.407 | 86.47 |
+| PillowBlock Left, res 96 | p3 | 214 | 73 | 4,167 | 1.067 (refused) | - | - |
+| | p1 | 213 | 73 | 4,162 | 1.070 (refused) | - | - |
+| | p1lo | 214 | 74 | 4,179 | 1.065 (refused) | - | - |
+
+What it says:
+
+1. The switch works (first-step compliance differs: stand 52.128 / 51.998, PillowBlock 14.950 / 13.504).
+2. Solve time does NOT fall with the linear rule on these parts: same on PillowBlock, 21% MORE iterations on the stand. The hypothesis in section H (linear stiffness cuts solver work) is not supported here.
+3. The margin moves by under 1% (P-14's suspected boundary bias from cubing is not visible on these parts).
+4. Stand p1lo is not a speed-up: the design did not move at all (compliance 52.12767 at step 1 and at step 40), so the warm-started solves were nearly free. Not explained yet; PillowBlock p1lo moved normally.
+5. LIMIT: both parts ran one rung only (74% and 68% material) and are mostly frozen, so few voxels are partly filled. A heavily carved part is needed before concluding: Top Motor Mount below.
+
+Second half, Top Motor Mount res 96 (4 rungs, 68% to 26%; about 1,500 CG iterations per solve):
+
+| arm | wall s | solver s by rung | CG iterations by rung | design steps by rung | shown margin by rung | file re-check by rung | mass g by rung |
+|---|---|---|---|---|---|---|---|
+| p3 | 3,260 | 451 / 468 / 480 / 728 | 59,169 / 63,120 / 64,806 / 98,214 | 40 / 40 / 40 / 60 | 1.641 / 1.650 / 1.672 / 1.690 | 1.641 / 1.649 / 1.671 / 1.686 | 105.33 / 103.03 / 100.65 / 98.86 |
+| p1 | 3,592 | 457 / 475 / 479 / 979 | 59,004 / 62,678 / 64,591 / 131,671 | 40 / 40 / 40 / 80 | 1.641 / 1.643 / 1.657 / 1.685 | 1.641 / 1.643 / 1.659 / 1.676 | 105.21 / 102.95 / 100.86 / 98.76 |
+
+6. Per solve the two rules cost the same (1,480 to 1,640 CG iterations either way). The linear arm is 10% slower overall only because its last rung took 80 design steps instead of 60.
+7. Margins agree within 1% on every rung, masses within 0.2 g. All four versions accepted in both arms.
+8. CONCLUSION on three parts: the cubed rule is not what makes the solves slow and it does not bias the margin measurably. The exponent stays; P-14's bias worry is closed as "not measurable"; the section H hypothesis is withdrawn. The solver cost itself stands: 65% of this run is solve time at about 1,500 iterations per solve (S-items in section D).
+9. Seen in passing: on this part the ladder's 68% to 26% changes the printed mass by only 6% (105 to 99 g) and the margin rises as material falls (1.64 to 1.69), so the rung percentage says little about the weight saved (ties to M-07).
