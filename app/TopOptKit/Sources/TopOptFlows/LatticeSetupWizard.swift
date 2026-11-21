@@ -816,8 +816,11 @@ public struct LatticeSetupWizard: View {
         let partSkin = model.boundary == .fullSkin
         let shown = look.finish ?? (partSkin ? .skin : (model.boundary.zoneFinishWord == "shell" ? .solid : LatticeOrganicLook.Finish.none))
         return AnyView(VStack(alignment: .leading, spacing: 5) {
-            Text("Finish").font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)
-                .foregroundStyle(DS.Color.textTertiary.color)
+            HStack(spacing: 0) {
+                Text("Finish").font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)
+                    .foregroundStyle(DS.Color.textTertiary.color)
+                OrganicInfoButton(label: "Finish")
+            }
             HStack(spacing: 4) {
                 ForEach(LatticeOrganicLook.Finish.allCases, id: \.self) { f in
                     segmentButton(f.title, on: shown == f, greyed: false) {
@@ -830,6 +833,7 @@ public struct LatticeSetupWizard: View {
                 }
             }
             .modifier(LatticeSegmentTrack())
+            OrganicGreyLine(label: "Finish")
             if shown == .skin, latticeManual { organicSkinRows(group: group, look: look) }
         })
     }
@@ -840,10 +844,11 @@ public struct LatticeSetupWizard: View {
     private func organicSkinRows(group: UUID, look: LatticeOrganicLook) -> some View {
         HStack(spacing: DS.Space.s) {
             Text("Skin thickness").dsStyle(DS.TypeScale.caption).fontWeight(.semibold).lineLimit(1)
+            OrganicInfoButton(label: "Skin thickness")
             Spacer(minLength: DS.Space.xs)
             OrganicNumberField(value: (look.skinWidthMM ?? 0) > 0 ? look.skinWidthMM : nil, auto: nil, unit: "mm",
                                placeholder: "Auto") { v in
-                if let v, let why = LatticeOrganicLook.Check.skinWidth(v) { organicSkinRefusal = why; return }
+                if let v, let why = LatticeOrganicLook.Check.skinWidth(v) { organicSkinRefusal = why; AppPopups.shared.wrongNumber("Skin thickness", why); return }
                 organicSkinRefusal = nil
                 var l = project.lattice.organicLook(group: group)
                 l.skinWidthMM = v.flatMap { $0 > 0 ? $0 : nil }
@@ -853,11 +858,15 @@ public struct LatticeSetupWizard: View {
         }
         .frame(minHeight: 44)
         .latticeID("lattice-organic-skin-thickness")
+        OrganicGreyLine(label: "Skin thickness")
         if let why = organicSkinRefusal {
             Text(why).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.warning.color).lineLimit(2)
         }
-        Text("Skin density").font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)
-            .foregroundStyle(DS.Color.textTertiary.color)
+        HStack(spacing: 0) {
+            Text("Skin density").font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)
+                .foregroundStyle(DS.Color.textTertiary.color)
+            OrganicInfoButton(label: "Skin density")
+        }
         HStack(spacing: 4) {
             ForEach(Array(LatticeOrganicLook.skinDensityRange), id: \.self) { k in
                 segmentButton("\(k)", on: look.skinDensityValue == k, greyed: false) {
@@ -870,6 +879,7 @@ public struct LatticeSetupWizard: View {
             }
         }
         .modifier(LatticeSegmentTrack())
+        OrganicGreyLine(label: "Skin density")
     }
 
     /// ★ His 11-19 note: Traced or Grown in Auto, on the Part tab, for the whole part (every group).
@@ -877,6 +887,7 @@ public struct LatticeSetupWizard: View {
         let groups = project.latticeAreaGroups.map(\.id)
         return HStack(spacing: DS.Space.s) {
             Text("Organic").dsStyle(DS.TypeScale.caption2).foregroundStyle(DS.Color.textTertiary.color)
+            OrganicInfoButton(label: "Organic")
             Spacer(minLength: DS.Space.xs)
             SegmentedGlass(LatticeOrganicLook.Mode.allCases.map { .init($0, $0.title) },
                            selection: Binding(get: { project.lattice.organicModeForThePart(groups: groups) },
@@ -890,7 +901,7 @@ public struct LatticeSetupWizard: View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: DS.Space.xs) {
                 Text("Look").dsStyle(DS.TypeScale.caption2).foregroundStyle(DS.Color.textTertiary.color)
-                infoButton("organic-look", LatticeOrganicLook.lookInfo)
+                OrganicInfoButton(label: "Look")
             }
             HStack(spacing: DS.Space.s) {
                 Text("1%").dsStyle(DS.TypeScale.caption2).foregroundStyle(DS.Color.textQuaternary.color)
@@ -907,6 +918,7 @@ public struct LatticeSetupWizard: View {
                     .frame(minWidth: 38, alignment: .trailing)
             }
             .frame(minHeight: 44)
+            OrganicGreyLine(label: "Look")   // ★ his 11-20: a couple of words under each setting
             // ★ his 11-19 note: "The look shouldn't show the range of mm because it should be based on the actual model itself"
         }
         .onAppear {
@@ -2664,6 +2676,9 @@ public struct LatticeSetupWizard: View {
                 ? project.latticeAreaGroups[Int(latticeTab.dropFirst(5))!].id : nil : nil
             i.organic = project.lattice.organicLook(group: group).effective(pageManual: latticeManual)
             i.layerMM = project.printParams.layerHeightMM > 0 ? project.printParams.layerHeightMM : 0.2
+            i.coverMM = project.printParams.wallRingMM > 0 ? project.printParams.wallRingMM : -1
+            i.aesthetic = (project.lattice.stageMode ?? .structural) == .aesthetic
+            if let l = organicLimits(group: group), l.measured { i.partStruts = [l.strutLowerMM, l.strutUpperMM, l.strutAutoMM] }
         }
         return i
     }
@@ -2769,6 +2784,7 @@ public struct LatticeSetupWizard: View {
 
     /// [Auto │ Manual] and Reset all, at the top of every tab (as the Squish panel's). Reset all asks once, in place.
     private var latticeTopRow: some View {
+        VStack(alignment: .leading, spacing: 0) {
         HStack(spacing: DS.Space.s) {
             HStack(spacing: 4) {
                 ForEach([(false, "Auto"), (true, "Manual")], id: \.0) { manual, word in
@@ -2789,6 +2805,7 @@ public struct LatticeSetupWizard: View {
                 .overlay(Capsule().strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)))
             .fixedSize()
             .opacity(latticeResetAsk ? 0 : 1).allowsHitTesting(!latticeResetAsk)
+            if model.cellTransition == .organicGrade, !latticeResetAsk { OrganicInfoButton(label: "Auto / Manual") }   // ★ his 11-20
             Spacer(minLength: 0)
             Button { latticeResetAsk = true } label: {
                 Text(FlexibleSettingsExit.resetButton)
@@ -2805,6 +2822,9 @@ public struct LatticeSetupWizard: View {
                                              confirm: { latticeResetAsk = false; resetLatticeSettings() },
                                              cancel: { latticeResetAsk = false }))
             .latticeID("lattice-page-reset-all")
+        }
+        // ★ his 11-20: the words the Organic settings use, behind one short link (never shown open)
+        if model.cellTransition == .organicGrade { OrganicGlossaryLink() }
         }
     }
 

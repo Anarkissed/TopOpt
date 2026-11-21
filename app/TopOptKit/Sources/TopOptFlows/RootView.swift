@@ -74,6 +74,7 @@ public struct RootView: View {
             }
         }
         .laneToast($model.toast)   // ★ B2 (U16, §4.34): centred, clear of every control, two lines at most — above every sheet (U17)
+        .overlay { AppPopupLayer() }   // ★ his 11-20: every error a centred pop-up in plain English (AppPopup.swift)
         .numberPadNote { model.toast = $0 }   // ★ B2 (U15, U17): a pad in a sheet says what it kept, above the sheet
         .task {
             model.loadMaterials()

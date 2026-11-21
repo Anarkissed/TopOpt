@@ -989,6 +989,18 @@ public final class LatticeFileExport: ObservableObject {
     public static let supportsOffLine = LatticeFileJob.supportsOffLine
     /// ★ Organic cut 2: the file is the lattice the preview laid; none laid yet, nothing to make.
     public static let organicNoLayLine = "Let the Organic preview finish first: the file is the lattice it shows"
+    /// ★ his 11-20: the pop-up's title, and the plain sentence for each reason the file could not be made.
+    public static let organicCantMakeTitle = "The print file couldn’t be made"
+    public static let organicPreviewFirstLine = "Finishing the preview first, then the print file"
+    public static let organicPreviewWaitSeconds: TimeInterval = 15 * 60
+    public static func organicPlain(_ error: Error) -> String {
+        switch error as? LatticeLayoutPreview.OrganicFileWait {
+        case .laying?: return "The preview took too long to finish. Try again once it shows the lattice."
+        case .notLaid?, .outOfDate?: return "The preview couldn’t be made with these settings, so there is nothing to print yet. "
+            + "Check the settings, then press Lattice again."
+        case nil: return "Something went wrong preparing the file on this iPad. Press Lattice again; if it keeps happening, tell us."
+        }
+    }
     /// ★ His 11-17 ("Preview only for now"): an Organic part is made on a Mac.
     public static let organicNeedsMacLine = "Making an Organic part needs a Mac: choose one in Runs on"
     /// ★ Install 2: By stress with no stress result — one line, and the bar offers the check itself.

@@ -65,23 +65,23 @@ struct LatticeOrganicControls: View {
                     warning: limits != nil)
             }
             if grown {
-                if on(.seeds) { number("Seeds (feet apart)", "spacings", \.seeds, auto: 2.5, check: { _ in nil }) }
+                if on(.seeds) { number("Seeds (feet apart) (0 = off)", "spacings", \.seeds, auto: 2.5, check: { LatticeOrganicLook.Check.seeds($0) }) }
                 if on(.wallSeedsOff) {
                     toggle("Wall seeds", \.wallSeeds) { on in if !on, look.crossingVines ?? true { look.crossingVines = false } }
                 }
                 if look.wallSeeds ?? true {
-                    gap("Wall seed gap", \.wallGap, LatticeOrganicLook.wallGapAuto)
+                    gap("Wall seed gap (0 = off)", \.wallGap, LatticeOrganicLook.wallGapAuto, zeroOff: true)
                     if on(.crossingVinesOff) { toggle("Crossing vines", \.crossingVines) }
                     if look.crossingVines ?? true { gap("Crossing gap", \.crossGap, LatticeOrganicLook.crossGapAuto) }
                 } else if on(.crossingVinesOff) {
                     say("Crossing vines are off: they grow from wall seeds")   // ★ rule g
                 }
                 if on(.roots) {
-                    number("Roots (0 = off)", "spacings", \.roots, auto: 0) { LatticeOrganicLook.Check.atLeastZero("Roots", $0) }
+                    number("Roots (0 = off)", "spacings", \.roots, auto: 0) { LatticeOrganicLook.Check.run("Roots", $0) }
                 }
                 if on(.topBranches) {
                     number("Top branches (0 = off)", "spacings", \.topBranches, auto: 0) {
-                        LatticeOrganicLook.Check.atLeastZero("Top branches", $0)
+                        LatticeOrganicLook.Check.run("Top branches", $0)
                     }
                 }
                 if on(.stressFollowOff) { toggle("Stress follow", \.stressFollow) }
@@ -89,7 +89,7 @@ struct LatticeOrganicControls: View {
             if on(.flatTiesOff) { toggle("Flat ties", \.flatTies) }
             if look.flatTies ?? true { gap("Flat tie gap", \.tieGap, LatticeOrganicLook.tieGapAuto) }
             if on(.shapeReach) {   // always on (his ruling)
-                number("Grade to shape reach", "×", \.shapeReach, auto: 1) { LatticeOrganicLook.Check.atLeastZero("Grade to shape reach", $0) }
+                number("Grade to shape reach (0 = off)", "×", \.shapeReach, auto: 1) { LatticeOrganicLook.Check.reach($0) }
             }
             if on(.detectFloatingOff) { toggle("Detect floating parts", \.detectFloating) }
             if aesthetic {   // ★ his 11-18: Organic and Aesthetic only
@@ -116,13 +116,13 @@ struct LatticeOrganicControls: View {
             }
             if on(.linkWidth) { number("Link thickness", "× strut", \.linkWidth, auto: 1) { LatticeOrganicLook.Check.link($0) } }
             if on(.unbracedOther) {
-                number("Longest strut without a joint", "widths", \.unbracedMax, auto: 10) { LatticeOrganicLook.Check.unbraced($0) }
+                number("Longest strut without a joint (0 = off)", "widths", \.unbracedMax, auto: 10) { LatticeOrganicLook.Check.unbraced($0) }
             } else {
-                row("Longest strut without a joint") {
+                row("Longest strut without a joint (0 = off)") {
                     Toggle("", isOn: Binding(get: { (look.unbracedMax ?? 10) > 0 }, set: { look.unbracedMax = $0 ? nil : 0 }))
                         .labelsHidden().toggleStyle(.switch)
                 }
-                .accessibilityIdentifier("organic-Longest strut without a joint")
+                .accessibilityIdentifier("organic-Longest strut without a joint (0 = off)")
             }
         }
         .accessibilityIdentifier("organic-controls")
@@ -131,8 +131,11 @@ struct LatticeOrganicControls: View {
     // MARK: rows
 
     private func name(_ label: String) -> some View {
-        Text(label).dsStyle(DS.TypeScale.caption).fontWeight(.semibold).lineLimit(1).minimumScaleFactor(0.85)
-            .layoutPriority(1)
+        HStack(spacing: 0) {
+            Text(label).dsStyle(DS.TypeScale.caption).fontWeight(.semibold).lineLimit(1).minimumScaleFactor(0.85)
+            OrganicInfoButton(label: label)   // ★ his 11-20: an (i) beside every setting
+        }
+        .layoutPriority(1)
     }
 
     private func say(_ text: String, warning: Bool = false) -> some View {
@@ -148,21 +151,26 @@ struct LatticeOrganicControls: View {
         }
     }
 
-    /// One row: the name, then its control at the right. 44 pt.
-    private func row<C: View>(_ label: String, @ViewBuilder _ control: () -> C) -> some View {
-        HStack(spacing: DS.Space.s) {
-            name(label)
-            Spacer(minLength: DS.Space.s)
-            control()
+    /// One row: the name, then its control at the right. 44 pt; ★ his 11-20: its grey line under it (`grey` false: the
+    /// setting puts it under its fields instead).
+    private func row<C: View>(_ label: String, grey: Bool = true, @ViewBuilder _ control: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: DS.Space.s) {
+                name(label)
+                Spacer(minLength: DS.Space.s)
+                control()
+            }
+            .frame(height: 44)
+            if grey { OrganicGreyLine(label: label) }
         }
-        .frame(height: 44)
     }
 
-    /// Two rows: the name, then its control across the row under it.
+    /// Two rows: the name, then its control across the row under it, then its grey line.
     private func stacked<C: View>(_ label: String, @ViewBuilder _ control: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            name(label).frame(height: 24, alignment: .bottom)
+            name(label).frame(height: 44, alignment: .bottom)
             control().frame(maxWidth: .infinity, minHeight: 44, maxHeight: 44, alignment: .leading)
+            OrganicGreyLine(label: label)
         }
     }
 
@@ -182,7 +190,7 @@ struct LatticeOrganicControls: View {
         VStack(alignment: .trailing, spacing: 0) {
             row(label) {
                 OrganicNumberField(value: look[keyPath: kp], auto: auto, unit: unit) { v in
-                    if let v, let why = check(v) { refusal = (label, why); return }
+                    if let v, let why = check(v) { refusal = (label, why); AppPopups.shared.wrongNumber(label, why); return }
                     refusal = nil
                     look[keyPath: kp] = v
                 }
@@ -195,10 +203,11 @@ struct LatticeOrganicControls: View {
     /// A gap (in local spacings): Auto Sweep's close and wide ends, a typed pair, or one number; the close end is the
     /// heavy one (denser where the stress is), 0 = off.
     private func gap(_ label: String, _ kp: WritableKeyPath<LatticeOrganicLook, LatticeOrganicLook.Swept?>,
-                     _ a: LatticeOrganicLook.GapAuto) -> some View {
-        swept(label, "spacings", kp, auto: (a.single, a.heavy, a.light), lightIsSmall: false, step: 0.1,
-              pair: { c, w in LatticeOrganicLook.Check.gap(label, close: c, wide: w) },
-              one: { v in LatticeOrganicLook.Check.gap(label, close: nil, wide: v) })
+                     _ a: LatticeOrganicLook.GapAuto, zeroOff: Bool = false) -> some View {
+        let name = label.replacingOccurrences(of: " (0 = off)", with: "")
+        return swept(label, "spacings", kp, auto: (a.single, a.heavy, a.light), lightIsSmall: false, step: 0.1,
+              pair: { c, w in LatticeOrganicLook.Check.gap(name, close: c, wide: w, zeroOff: zeroOff) },
+              one: { v in LatticeOrganicLook.Check.gap(name, close: nil, wide: v, zeroOff: zeroOff) })
     }
 
     /// His modes on one setting (the ones `offered`): the name and the mode menu on the first row; the fields its mode shows
@@ -216,14 +225,14 @@ struct LatticeOrganicControls: View {
         func snap(_ v: Double) -> Double { step > 0 ? ((v / step).rounded() * step * 1000).rounded() / 1000 : v }
         func setPair(small a: Double?, large b: Double?) {
             let a2 = a.map(snap), b2 = b.map(snap)
-            if let x = a2 ?? auto?.1, let y = b2 ?? auto?.2, let why = pair(x, y) { refusal = (label, why); return }
+            if let x = a2 ?? auto?.1, let y = b2 ?? auto?.2, let why = pair(x, y) { refusal = (label, why); AppPopups.shared.wrongNumber(label, why); return }
             refusal = nil
             var v = s
             if lightIsSmall { v.light = a2; v.heavy = b2 } else { v.heavy = a2; v.light = b2 }
             look[keyPath: kp] = v
         }
         return VStack(alignment: .trailing, spacing: 0) {
-            row(label) {
+            row(label, grey: false) {
                 Menu {
                     ForEach(offered, id: \.self) { m in
                         Button(m.title) { var v = s; v.mode = m; look[keyPath: kp] = v; refusal = nil }
@@ -253,13 +262,14 @@ struct LatticeOrganicControls: View {
                 } else {
                     OrganicNumberField(value: mode.isAuto ? nil : s.single, auto: auto?.0, unit: unit, locked: mode.isAuto) { v in
                         let v2 = v.map(snap)
-                        if let x = v2, let why = one(x) { refusal = (label, why); return }
+                        if let x = v2, let why = one(x) { refusal = (label, why); AppPopups.shared.wrongNumber(label, why); return }
                         refusal = nil
                         var n = s; n.single = v2; look[keyPath: kp] = n
                     }
                 }
             }
             .frame(height: 44)
+            OrganicGreyLine(label: label)
             refused(label)
         }
         .accessibilityIdentifier("organic-" + label)
