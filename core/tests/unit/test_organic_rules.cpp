@@ -3513,7 +3513,9 @@ static void test_og2e_zone_flat() {
   const double X1 = 40.0 / 3.0, lw = 0.45, trim = 0.021;
   struct Case { const char* name; bool pocket, grown; double z0, z1; };
   const Case cases[] = {{"thin", false, false, 19.6, 19.97}, {"straddle", false, false, 19.7, 23.0}, {"deep", false, false, 8.0, 20.5},
-                        {"pocket", true, false, 0, 0}, {"straddle", false, true, 19.7, 23.0}, {"pocket", true, true, 0, 0}};
+                        {"pocket", true, false, 0, 0}, {"straddle", false, true, 19.7, 23.0}, {"pocket", true, true, 0, 0},
+                        {"pocket grazed 0.3", true, false, 0.3, 0}, {"pocket grazed 0.3", true, true, 0.3, 0},
+                        {"pocket 1 mm over", true, false, 1.0, 0}};
   for (const Case& c : cases) {
     const StepModel model = c.pocket ? og2e_pocket() : box_model(40, 30, 20);
     Settings s;
@@ -3524,7 +3526,7 @@ static void test_og2e_zone_flat() {
     z.id = 2; z.role = Role::NoLattice; z.depth_mm = 0;
     z.zone.kind = Zone::Kind::Box;
     z.zone.axis[0] = {1, 0, 0}; z.zone.axis[1] = {0, 1, 0}; z.zone.axis[2] = {0, 0, 1};
-    if (c.pocket) { z.zone.centre = {20, 15, 10}; z.zone.half[0] = 6; z.zone.half[1] = 6; z.zone.half[2] = 11; }
+    if (c.pocket) { z.zone.centre = {20, 15, 10}; z.zone.half[0] = 6 + c.z0; z.zone.half[1] = 6 + c.z0; z.zone.half[2] = 11; }
     else {
       z.zone.centre = {X1 / 2 - 0.5, 15, 0.5 * (c.z0 + c.z1)};
       z.zone.half[0] = X1 / 2 + 0.5; z.zone.half[1] = 16; z.zone.half[2] = 0.5 * (c.z1 - c.z0);
@@ -3588,13 +3590,31 @@ static void test_og2e_zone_flat() {
                             (w.proud_b_mm > 0.0 && into_footprint(Vec3{w.points.back().x, w.points.back().y, c.pocket ? 10.0 : 21.0}) > 0.0);
       marked += at && ((w.marks & kRunAlong) || proud_at);
     }
-    std::printf("OL-OG2E %s %s: flush at the zone %zu bars %zu ends; footprints %zu; file ok %d, print clean %d, guard outside %zu; "
-                "tube vertices out of the face in the footprint %zu (most %.3f), elsewhere %zu; preview runs marked at it %zu\n",
+    // OG2f: no-lattice solid within two printed lines under the woven face, where a weave region would own it (block:
+    // the zone's third of the top, inside the area; pocket: behind one wall, inside the area's depth).
+    const Domain::Probe dp = ps.domain()->probe();
+    std::size_t solid_thin = 0;
+    for (double t = 0.05; t < 2 * lw; t += 0.1)
+      for (double w = 0.5; w < 11.5; w += 0.5) {
+        const Vec3 q = c.pocket ? Vec3{14.0 - t, 9.0 + w, 6.0 + w} : Vec3{2.0 + w, 15.0, 20.0 - t};
+        solid_thin += dp.where(q).why == Why::NoLattice;
+      }
+    // two lines or more of the zone's solid under the face (the deep box, the 1 mm overlap): solid as before
+    const bool skin = (c.pocket && c.z0 >= 2 * lw) || std::string(c.name) == "deep";
+    const bool drop = !skin && (!c.pocket || c.z0 > 0.0);   // under two lines: none made
+    std::printf("OL-OG2E %s %s: flush at the zone %zu bars %zu ends; footprints %zu; thin zone solid dropped %.1f mm2; no-lattice "
+                "solid within two lines under the face %zu; file ok %d, print clean %d, guard outside %zu; tube vertices out of "
+                "the face in the footprint %zu (most %.3f), elsewhere %zu; preview runs marked at it %zu\n",
                 c.name, c.grown ? "Grown" : "Traced", fr.relief.flush_zone_bars, fr.relief.flush_zone_ends,
-                fr.relief.zone_footprints.size(), fr.ok ? 1 : 0, fr.made.print_clean ? 1 : 0, pv.outcome.guard.outside_cut, in,
-                most, out, marked);
-    CHECK(fr.ok && fr.made.print_clean && pv.outcome.guard.outside_cut == 0 && in == 0 && out > 0 && marked == 0 &&
-          fr.relief.flush_zone_bars + fr.relief.flush_zone_ends > 0 && !fr.relief.zone_footprints.empty());
+                fr.relief.zone_footprints.size(), fr.relief.thin_zone_solid_dropped_mm2, solid_thin, fr.ok ? 1 : 0,
+                fr.made.print_clean ? 1 : 0, pv.outcome.guard.outside_cut, in, most, out, marked);
+    CHECK(fr.ok && fr.made.print_clean && pv.outcome.guard.outside_cut == 0 && in == 0 && out > 0 && marked == 0);
+    if (skin) {
+      CHECK(solid_thin > 0 && fr.relief.thin_zone_solid_dropped_mm2 == 0.0);   // the 1 mm skin stays
+    } else {
+      CHECK(fr.relief.flush_zone_bars + fr.relief.flush_zone_ends > 0 && !fr.relief.zone_footprints.empty());
+      CHECK(solid_thin == 0 && (!drop || fr.relief.thin_zone_solid_dropped_mm2 > 0.0));
+    }
   }
   // The file job's own form: region_zones and region_no_lattice, the result names the flush.
   {
@@ -3619,7 +3639,8 @@ static void test_og2e_zone_flat() {
                 fr.relief.flush_zone_bars, fr.relief.flush_zone_ends,
                 js.find("\"no_lattice_zone\": {\"bars\": ") != std::string::npos && js.find("\"zone_footprints\"") != std::string::npos ? 1 : 0);
     CHECK(fr.ok && fr.relief.flush_zone_bars > 0 && js.find("\"no_lattice_zone\": {\"bars\": ") != std::string::npos &&
-          js.find("\"zone_footprints\": [{\"zone\": 2, \"face\": 1") != std::string::npos);
+          js.find("\"zone_footprints\": [{\"zone\": 2, \"face\": 1") != std::string::npos &&
+          js.find("\"thin_zone_solid_dropped\": {\"area_mm2\": ") != std::string::npos);   // OG2f
   }
 }
 static void test_net_kept_apart() {   // OJ8 (leg M): the net ON the open face, crossings made joints

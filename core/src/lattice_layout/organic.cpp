@@ -951,7 +951,7 @@ int zone_footprint_at(const Vec3& on, const Vec3& n, const std::vector<Settings:
 
 void lay_relief(Bars& bars, const StepModel& model, const PartMeasure& part, const std::vector<OrganicGroup>& groups,
                 const std::vector<std::size_t>& first_strand, Outcome::Relief& rep, const std::vector<int>& covered = {},
-                const std::vector<Settings::RegionAsk>& zones = {}, double line_mm = 0.0) {
+                const std::vector<Settings::RegionAsk>& zones = {}, double line_mm = 0.0, const Domain* domain = nullptr) {
   rep = Outcome::Relief{};
   const OrganicGroup* of_region_cache = nullptr;
   auto group_of = [&](int region) -> const OrganicGroup* {
@@ -1151,6 +1151,8 @@ void lay_relief(Bars& bars, const StepModel& model, const PartMeasure& part, con
       rep.grew_mm[5] = std::max(rep.grew_mm[5], tip.z + r - phi.z);
     }
   }
+  std::unique_ptr<Domain::Probe> dprobe;   // OG2f: read only when a footprint was found
+  if (domain && !zone_faces.empty()) dprobe = std::make_unique<Domain::Probe>(domain->probe());
   // OG2e: the footprints found, each face's area inside it (its triangles sampled at about 0.25 mm).
   for (const auto& [zone, face] : zone_faces) {
     Outcome::Relief::ZoneFootprint fp;
@@ -1170,14 +1172,32 @@ void lay_relief(Bars& bars, const StepModel& model, const PartMeasure& part, con
       if (!(area > 0.0)) continue;
       nn = {nn.x / (2 * area), nn.y / (2 * area), nn.z / (2 * area)};
       const int m = std::max(1, static_cast<int>(std::ceil(std::max({dist(A, B), dist(B, C), dist(C, A)}) / 0.25)));
-      std::size_t inside = 0;
+      std::size_t inside = 0, thin = 0;
+      const double two = 2.0 * line_mm, st = 0.05;
       for (int i = 0; i < m; ++i)
         for (int j = 0; j < m - i; ++j) {   // the centroids of the m^2 small triangles (the "up" ones are enough here)
           const double s1 = (i + 1.0 / 3.0) / m, s2 = (j + 1.0 / 3.0) / m;
           const Vec3 q{A.x + u.x * s1 + v.x * s2, A.y + u.y * s1 + v.y * s2, A.z + u.z * s1 + v.z * s2};
           inside += zone_footprint_at(q, nn, one, line_mm) != 0;
+          // OG2f: the zone's solid under this place, along the face's normal, inside the part: under two lines, none
+          // was made (Domain::Probe::where)
+          if (!(two > 0.0)) continue;
+          double held = 0.0;
+          bool deep = false;
+          for (double t = 0.5 * st; t < two + st && !deep; t += st) {
+            const Vec3 w{q.x - nn.x * t, q.y - nn.y * t, q.z - nn.z * t};
+            if (!zone_footprint_at(w, nn, one, -0.05) || !(probe.depth(w) > 0.0)) continue;
+            if (t > two) deep = true; else held += st;
+          }
+          if (!deep && held > 0.0 && held < two && dprobe) {   // where it was a weave region's: lattice there now
+            const Where wh = dprobe->where(Vec3{q.x - nn.x * 0.5 * held, q.y - nn.y * 0.5 * held, q.z - nn.z * 0.5 * held});
+            if (!wh.lattice()) continue;
+            ++thin;
+            if (rep.thin_zone_solid_dropped_at.size() < 20 && (thin % 97) == 1) rep.thin_zone_solid_dropped_at.push_back(q);
+          }
         }
       fp.area_mm2 += area * static_cast<double>(inside) / (0.5 * m * (m + 1));
+      rep.thin_zone_solid_dropped_mm2 += area * static_cast<double>(thin) / (0.5 * m * (m + 1));
     }
     rep.zone_footprints.push_back(fp);
   }
@@ -1388,7 +1408,8 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
     for (const Region& rg : domain_->spec().regions)
       if (rg.weave && domain_->cover_depth_mm(&rg) > 0.0) covered.push_back(rg.id);
     for (const auto& nr : finish.net_reach) covered.push_back(nr.first);   // OJ8: depth variation off on a Skin face
-    lay_relief(out.bars, model_, *measure_, groups, firsts, out.relief, covered, settings.regions, settings.bead_mm);   // OG2e
+    lay_relief(out.bars, model_, *measure_, groups, firsts, out.relief, covered, settings.regions, settings.bead_mm,
+               domain_.get());   // OG2e, OG2f
     out.organic_references = all_references;   // brief E2
     // Brief E2 and E3a (the strength check's floors and additions) are made for ONE ask (the file job's, and a preview
     // of it): they are read from a lay of one group (OP11); a lay of several groups does not apply them.

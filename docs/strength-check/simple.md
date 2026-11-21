@@ -100,6 +100,10 @@ part of the face and one line width around it is flat. It works however the zone
 straddling it, deep, or filling an open pocket and only touching its walls. The check is unchanged: it always judges
 the vines without their tops.
 
+A zone that only grazes the face, leaving less than two printed lines of solid under it, makes no solid there at all
+(rule OG2f): the lattice runs to the face, which is flat. A zone that goes two lines or more into the wall makes that
+part solid, as before.
+
 ## Organic: the solid's weak areas
 
 When the solid part does not certify, the check says where. Every small cube of the solid that the verdict judges gets its own margin, worked out exactly as the verdict works out the solid's (the infill reduction as set, the walls counted or not as set). The cubes under the safety margin that touch each other make one weak area. Up to {{solid_spots_max}} of them are listed, the worst first, and marked on the part.

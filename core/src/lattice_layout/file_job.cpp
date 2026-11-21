@@ -1902,7 +1902,16 @@ std::string file_result_json(const FileResult& r) {
                         rl.zone_footprints[i].zone, rl.zone_footprints[i].face, rl.zone_footprints[i].area_mm2);
           o += b;
         }
-        o += "]}";
+        o += "]";
+        // OG2f: where a zone would have left under two printed lines of solid under the face, none was made
+        std::snprintf(b, sizeof b, ",\n      \"thin_zone_solid_dropped\": {\"area_mm2\": %.9g, \"at\": [", rl.thin_zone_solid_dropped_mm2);
+        o += b;
+        for (std::size_t i = 0; i < rl.thin_zone_solid_dropped_at.size(); ++i) {
+          const Vec3& q = rl.thin_zone_solid_dropped_at[i];
+          std::snprintf(b, sizeof b, "%s[%.9g, %.9g, %.9g]", i ? ", " : "", q.x, q.y, q.z);
+          o += b;
+        }
+        o += "]}}";
       }
     }
     o += "},\n";

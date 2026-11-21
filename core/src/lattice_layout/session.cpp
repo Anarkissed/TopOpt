@@ -149,6 +149,7 @@ void Session::ready_domain(const Settings& settings) {
       region.cover_mm = r.cover_mm;
       region.weave = r.weave;
       region.cover_open_face = r.weave && !zone;   // OJ2: an Organic area's Solid closes its open face only
+      region.from_zone = zone && r.faces.empty() && !cut;   // OG2f
       spec.regions.push_back(std::move(region));
     }
     for (const Settings::ProtectAsk& p : settings.protect)
