@@ -535,6 +535,7 @@ struct PrintableReport {
   // passes that took.
   std::size_t domes_flattened = 0;
   int dome_rounds = 0;
+  std::vector<Vec3> flat_domes_at;   // OS1 B, leg U: every domed shallow end held flat, at its place (the last pass's)
   std::size_t relief_flushed = 0;
   int relief_rounds = 0;
   // OJ6 (leg J item 6): the two ends of each bar made flush, as it was given (so the preview can clear its relief).

@@ -841,6 +841,7 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
       return m2;
     }
   }
+  rep.flat_domes_at = ms.flat_domes_at;   // OS1 B, leg U: the held-flat ends, for the Exact preview
   rep.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
   if (report) *report = rep;
   return mesh;

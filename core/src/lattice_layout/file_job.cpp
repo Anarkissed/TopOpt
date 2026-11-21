@@ -729,6 +729,7 @@ TriangleMesh make_file_mesh(const Session& session, const Layout& layout, const 
   report.relief_flushed_at = made.relief_flushed_at;   // OJ6
   report.relief_rounds = made.relief_rounds;
   report.domes_flattened = made.domes_flattened;   // OS1 B
+  report.flat_domes_at = made.flat_domes_at;       // leg U
   report.dome_rounds = made.dome_rounds;
   report.weave_specks_ignored = made.weave_specks_ignored;
   report.weave_held_ignored = made.weave_held_ignored;

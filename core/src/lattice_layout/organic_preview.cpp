@@ -85,11 +85,30 @@ void thin(WeaveRun& r, double tol) {
 Bars flushed_as_the_file(Session& session, OrganicPreview& out, const std::atomic<bool>* stop) {
   Bars shown = out.outcome.bars;
   if (out.quality == PreviewQuality::Draft) return shown;
-  bool any = false;
-  for (const Bar& b : shown.bars) any = any || b.along_proud > 0.0 || b.proud_a > 0.0 || b.proud_b > 0.0;
-  if (!any) return shown;
-  const PrintChecked pc = print_check_bars(session, out.outcome.layout, shown, file_options_for(FileOptions{}, true), stop);
-  if (pc.ok) out.relief_flushed = clear_flushed_relief(shown, pc.made.relief_flushed_at);
+  const FileOptions fo = file_options_for(FileOptions{}, true);
+  bool any = false, domes = false;
+  for (const Bar& b : shown.bars) {
+    any = any || b.along_proud > 0.0 || b.proud_a > 0.0 || b.proud_b > 0.0;
+    // leg U: a shallow run (a bridge) has domed ends in the file, which the print check may hold flat
+    domes = domes || (fo.mesh.weave_bridge_domes && !b.net && bar_is_bridge(b, fo.mesh.bridge_rise));
+  }
+  if (!any && !domes) return shown;
+  const PrintChecked pc = print_check_bars(session, out.outcome.layout, shown, fo, stop);
+  if (pc.ok) {
+    if (any) out.relief_flushed = clear_flushed_relief(shown, pc.made.relief_flushed_at);
+    // The file's held-flat ends are read on the bars it made (the sag pass may have lifted a joint, O17: those bars keep
+    // their places in the list, legs come after): each is given back at the same bar end of the bars the runs are made
+    // of, so it is a point of a run.
+    for (const Vec3& f : pc.made.flat_domes_at) {
+      Vec3 at = f;
+      for (std::size_t i = 0; i < pc.bars.bars.size() && i < shown.bars.size(); ++i) {
+        const Bar& b = pc.bars.bars[i];
+        if (b.a.x == f.x && b.a.y == f.y && b.a.z == f.z) { at = shown.bars[i].a; break; }
+        if (b.b.x == f.x && b.b.y == f.y && b.b.z == f.z) { at = shown.bars[i].b; break; }
+      }
+      out.flat_ends.push_back(at);
+    }
+  }
   return shown;
 }
 }  // namespace

@@ -904,6 +904,10 @@ struct OrganicPreview {
   // drawn flush: their runs carry no along-face mark and no proud length. How many; the runs are read from those bars
   // (`outcome.bars` stays the lay's). Draft: not run (0).
   std::size_t relief_flushed = 0;
+  // Leg U (the lead's ruling, 2026-11-21; OS1 B's drawing): Exact only: the places of the shallow runs' domed ends the
+  // file's print check held FLAT (its flat_domes_at): run end points and inner split points, exactly as the runs carry
+  // them. The app draws a dome at every shallow end the file domes except these. Draft: empty (no check is run).
+  std::vector<Vec3> flat_ends;
 };
 // OJ6: in `bars`, each bar whose two ends are one of `flushed` (either order) is made flush: its end relief carried
 // back (without_relief), along_proud 0, along_face -1. Returns how many.
