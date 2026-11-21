@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
+#include <thread>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -2444,6 +2446,57 @@ static void test_app_sample_asks_print() {
                 fr.code.c_str(), fr.made.print_clean ? 1 : 0, fr.made.shells.bridge_domes, fr.made.domes_flattened,
                 fr.made.dome_rounds, fr.made.found_per_pass.size());
     CHECK(fr.ok && fr.made.print_clean && fr.made.shells.bridge_domes > 0);
+    // Leg U (the flat ends, the lead's ruling 2026-11-21): the Exact preview of the same ask runs the file's print check
+    // whenever shallow runs have rounded ends (depth variation on or off) and lists the ends it held flat: the file's
+    // flat_domes_at exactly, each one a point of a run within 1e-4 mm; the Draft lists none; a stop during the check
+    // answers "cancelled" (SB1).
+    {
+      ll::Session ps(model);
+      ll::OrganicPreviewAsk pa;
+      pa.quality = ll::PreviewQuality::Exact;
+      const ll::OrganicPreview pv = ll::lay_organic_preview(ps, s, syn.field, groups, pa);
+      std::size_t same = 0, lifted = 0, on_run = 0;
+      for (const Vec3& f : pv.flat_ends) {
+        bool in = false, near = false;
+        for (const Vec3& g : fr.made.flat_domes_at) {
+          in = in || (f.x == g.x && f.y == g.y && f.z == g.z);
+          // a joint the sag pass lifted (O17, at most weave_sag_lift_mm): the file's end there, the runs' end here
+          near = near || std::hypot(f.x - g.x, std::hypot(f.y - g.y, f.z - g.z)) <= job.options.mesh.weave_sag_lift_mm + 1e-9;
+        }
+        same += in;
+        lifted += !in && near;
+        bool run = false;
+        for (const ll::WeaveRun& w : pv.runs)
+          for (const Vec3& q : w.points)
+            run = run || (std::fabs(q.x - f.x) < 1e-4 && std::fabs(q.y - f.y) < 1e-4 && std::fabs(q.z - f.z) < 1e-4);
+        on_run += run;
+      }
+      ll::Session ds(model);
+      ll::OrganicPreviewAsk da;
+      da.quality = ll::PreviewQuality::Draft;
+      const ll::OrganicPreview dv = ll::lay_organic_preview(ds, s, syn.field, groups, da);
+      std::printf("  the Exact preview's flat ends %zu (the file's %zu: the same %zu, at a joint the sag pass lifted %zu; on a run "
+                  "point %zu); the Draft's %zu\n", pv.flat_ends.size(), fr.made.flat_domes_at.size(), same, lifted, on_run,
+                  dv.flat_ends.size());
+      CHECK(!pv.flat_ends.empty() && pv.flat_ends.size() == fr.made.flat_domes_at.size() && same + lifted == pv.flat_ends.size() &&
+            on_run == pv.flat_ends.size() && dv.flat_ends.empty());
+      if (grown) {   // depth variation off: the check runs for the rounded ends alone; a stop during it is a cancel
+        std::size_t threw = 0, cancelled = 0;
+        for (const int ms : {200, 400, 600}) {
+          ll::Session cs(model);
+          std::atomic<bool> stop{false};
+          std::thread t([&] { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); stop = true; });
+          try {
+            cancelled += ll::lay_organic_preview(cs, s, syn.field, groups, pa, 0, &stop).outcome.cancelled;
+          } catch (...) {
+            ++threw;
+          }
+          t.join();
+        }
+        std::printf("  stopped at 200, 400, 600 ms: threw %zu, cancelled %zu\n", threw, cancelled);
+        CHECK(threw == 0);
+      }
+    }
   }
 }
 

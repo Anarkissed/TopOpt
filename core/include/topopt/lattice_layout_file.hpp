@@ -82,6 +82,7 @@ struct FileReport {
   int relief_rounds = 0;
   std::vector<std::array<Vec3, 2>> relief_flushed_at;   // OJ6: the bars made flush (their ends as given)
   std::size_t domes_flattened = 0;   // OS1 B (ruling R2): PrintableReport's
+  std::vector<Vec3> flat_domes_at;   // leg U: PrintableReport's (the held-flat ends' places)
   int dome_rounds = 0;
   std::vector<MeshSpec::Post> posts; // the posts added (the preview can draw them)
   std::size_t stands_added = 0;      // of `posts`, those under a weave's long shallow runs (O8)
