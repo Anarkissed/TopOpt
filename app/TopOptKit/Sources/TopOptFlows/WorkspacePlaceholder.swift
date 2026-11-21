@@ -9180,18 +9180,9 @@ public struct WorkspacePlaceholder: View {
                     .buttonStyle(.plain).accessibilityLabel("Done moving")
                     .background(DSParts.publish("latticeZoneMoveDone-\(key)"))
                     .position(x: center.x + DSParts.target / 2 + 2, y: center.y - box / 2 - 4)
-                } else {
-                    Button { latticeZoneGizmo = z } label: {
-                        gizmoCircleKnob(active: false, size: 40) {
-                            Image(systemName: "move.3d").font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
-                        }
-                        .frame(width: DSParts.target, height: DSParts.target).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain).accessibilityLabel("Move the zone")
-                    .background(DSParts.publish("latticeZoneMove-\(key)"))
-                    // never under the page's own UI (slid sideways, clear of the Selections panel)
-                    .position(LatticeSetupHandles.placed(center, axis: CGVector(dx: 1, dy: 0), keepOut: bandChipKeepOut))
                 }
+                // ★ his 11-21: the closed glass's knob is the Design Box's move dot now (`latticeZoneBoxTargets`): a drag
+                // slides the zone, a tap raises this glass
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .coordinateSpace(name: Self.gizmoStageSpace)
@@ -9323,12 +9314,9 @@ public struct WorkspacePlaceholder: View {
                         latticeExpandHandle(proj, plane, at: ex, axis: axis, shownAt: expandAt)
                     }
                 }
-                // ★ B6 N3: a picked zone's sides — a Box's width, depth and height, a Cylinder's across and height
-                if let z = stageList.activeGroupID, zones.contains(z), !project.groupView.isHidden(z), project.groupView.canEdit(z) {
-                    ForEach(project.latticeZoneHandles(z), id: \.side) { hd in
-                        latticeZoneSideHandle(proj, z, hd, shownAt: spots[LatticeSetupHandles.zoneKey(z, hd.side)])
-                    }
-                }
+                // ★ his 11-21 ("the zones ... EXACTLY the same [as the Design Box] - with handles against each face and
+                // magnetically connected to faces"): a picked zone wears the Design Box's six face squares and move dot
+                placedBoxOverlay(latticeZoneBoxTargets)
                 // ★ his iPad 11-07 (1b): the × on the tapped face of the open group
                 latticeFaceRemoveButton(proj, spots: spots)
             }
@@ -9396,15 +9384,7 @@ public struct WorkspacePlaceholder: View {
                                                 pill: plane.ref.key == latticeFacePick || latticeHandleDrag?.key == key)))
             }
         }
-        if case .zone(let z) = latticeChipScope, !project.groupView.isHidden(z), project.groupView.canEdit(z) {
-            for hd in project.latticeZoneHandles(z) {
-                let anchor = settledWorld(hd.anchor), dir = settleQuat.act(hd.dir)
-                guard let at = proj.project(anchor) else { continue }
-                chips.append(.init(key: LatticeSetupHandles.zoneKey(z, hd.side), at: at,
-                                   axis: LatticeSetupHandles.screenAxis(from: at, to: proj.project(anchor + dir * 10)),
-                                   shape: .init(size: DragHandle.size, pill: true)))
-            }
-        }
+        // (★ his 11-21: a picked zone's sides are the Design Box's squares on its faces, drawn where they sit — `placedBoxOverlay`)
         if let ask = latticeFaceRemoveAsk, let mesh = viewerMesh, let c = mesh.faceCentroid(ask.face),
            let at = proj.project(settledWorld(c)) {
             chips.append(.init(key: "remove-\(ask.ref)", at: at, axis: CGVector(dx: 1, dy: 0), shape: .init(size: DSParts.target)))
@@ -9993,24 +9973,12 @@ public struct WorkspacePlaceholder: View {
                 ForEach(project.manualPrimitives(in: gid)) { mp in
                     if liveGizmo == GizmoTarget(group: gid, id: mp.id) {
                         gizmoHandles(proj, group: gid, mp: mp)
-                    } else if SelectionArrowRule.chipsShow(group: gid, piece: ProjectModel.manualFaceKey(mp.id),
-                                                           selectedGroup: stageList.activeGroupID, selectedPiece: selectedPieceKey),
-                              let pt = proj.project(settledWorld(SIMD3<Float>(mp.center))) {   // ★ app-wide chip rule (10-27)
-                        // Round-2 T6: the move knob is the ONLY way to grab a
-                        // primitive — enlarged (26 → 40 pt glass, ~64 pt hit
-                        // target with the knob's −12 pt inset) so it is easy to hit.
-                        gizmoCircleKnob(active: false, size: 40) {
-                            Image(systemName: "move.3d").font(.system(size: 16, weight: .bold))
-                                .foregroundStyle(.white)
-                        }
-                        .onTapGesture {
-                            setGizmo(GizmoTarget(group: gid, id: mp.id))
-                            chipsRevealedGroup = gid   // T2: tapping the primitive reveals chips
-                        }
-                        .position(pt)
-                        .accessibilityLabel("Select the \(mp.kind.word) to move it")
                     }
                 }
+                // ★ his 11-21 ("make ALL boxes the exact same as the Design Box ... Do the same for Cylinders"): each shown Keep
+                // clear shape wears the Design Box's six face squares and move dot (the move knob's place); a tap on the dot
+                // raises the turn and copy glass above
+                placedBoxOverlay(keepClearBoxTargets(group: gid))
             }
             .coordinateSpace(name: Self.gizmoStageSpace)
         }
@@ -15928,5 +15896,177 @@ enum StressCheckCopy {
         let list = names.count == 1 ? names[0] : names.dropLast().joined(separator: ", ") + " and " + names.last!
         return "\(list) couldn’t be worked out, so the lattice follows your other scenarios. Check that each scenario has a "
             + "load and a fixed face switched on."
+    }
+}
+
+// MARK: - ★ HIS 11-21: every placed box and cylinder on the Design Box's handles
+
+/// "please make ALL boxes the exact same as the Design Box in TO ... with handles against each face and magnetically connected
+/// to faces ... Do the same for Cylinders ... Keep whatever colours are in place of the box you're replacing" (his pick: "Keep the
+/// extras"). A picked Lattice zone and the shown Keep clear shapes of the open Topology group wear the Design Box's six face
+/// squares and its move dot (`resizeHandle` / `moveHandle`), in their own colour, dragged by ONE gesture that hit-tests the
+/// touch-down point (the Design Box's handoff 111 design); a face snaps to the part's faces (`PlacedBoxDetent`) with the Design
+/// Box's pulse and tick. A TAP on the move dot opens the extras the Design Box has not: the turn and copy glass.
+extension WorkspacePlaceholder {
+    struct PlacedBoxTarget {
+        let key: String
+        let box: PlacedBox
+        let tint: LiquidGlass.Tint
+        let write: (PlacedBox) -> Void
+        let tapMove: () -> Void
+        /// The move dot's spoken name.
+        var label = "Move the box"
+        var began: () -> Void = {}
+        var ended: () -> Void = {}
+    }
+
+    static let placedBoxStageSpace = "placedBoxStage"
+
+    func placedBoxCandidates(_ proj: CameraProjection, _ targets: [PlacedBoxTarget]) -> [(handle: PlacedBoxHandle, screen: CGPoint)] {
+        targets.flatMap { t in
+            PlacedBoxHandle.all(t.key).compactMap { h in proj.project(settledWorld(SIMD3<Float>(h.anchor(t.box)))).map { (h, $0) } }
+        }
+    }
+
+    @ViewBuilder func placedBoxOverlay(_ targets: [PlacedBoxTarget]) -> some View {
+        if let proj = projection, !targets.isEmpty {
+            let cands = placedBoxCandidates(proj, targets)
+            let _ = recordPlacedBoxes(targets, cands)
+            ZStack(alignment: .topLeading) {
+                // the visible squares and dot: chrome only, the hit layer below owns the touches
+                ForEach(cands.indices, id: \.self) { i in
+                    let c = cands[i]
+                    let t = targets.first { $0.key == c.handle.key }
+                    let tint = t?.tint ?? Self.designGlass
+                    Group {
+                        if case .move = c.handle.kind {
+                            moveHandle(tint: tint).accessibilityLabel(t?.label ?? "Move the box")
+                        } else {
+                            resizeHandle(tint: tint).accessibilityHidden(true)
+                        }
+                    }
+                    .allowsHitTesting(false)
+                    .background(DSParts.publish(c.handle.frameKey))
+                    .position(c.screen)
+                }
+                // the ONE gesture, on grab circles only: a touch on empty space still turns the view
+                ZStack(alignment: .topLeading) {
+                    ForEach(cands.indices, id: \.self) { i in
+                        Color.clear.frame(width: 44, height: 44).contentShape(Circle())
+                            .offset(x: cands[i].screen.x - 22, y: cands[i].screen.y - 22)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.placedBoxStageSpace))
+                    .onChanged { v in placedBoxDragChanged(targets, start: v.startLocation, translation: v.translation) }
+                    .onEnded { v in placedBoxDragEnded(targets, start: v.startLocation, translation: v.translation) })
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .coordinateSpace(name: Self.placedBoxStageSpace)
+        }
+    }
+
+    /// One frame of the drag: the handle is chosen once, at the touch-down point, after 4 pt of movement (the Design Box's
+    /// minimum); every frame applies the whole drag to the box as it was at the start.
+    func placedBoxDragChanged(_ targets: [PlacedBoxTarget], start: CGPoint, translation: CGSize) {
+        guard let proj = projection, let mesh = viewerMesh else { return }
+        let s = model.placedBoxDrag
+        if s.handle == nil {
+            guard hypot(translation.width, translation.height) >= 4,
+                  let h = PlacedBoxHandle.choose(at: start, among: placedBoxCandidates(proj, targets), radius: Self.boxHandleGrabRadius),
+                  let t = targets.first(where: { $0.key == h.key }) else { return }
+            s.handle = h
+            s.base = t.box
+            s.detent = nil
+            t.began()
+            ClearanceHaptics.grab()
+        }
+        guard let h = s.handle, let base = s.base, let t = targets.first(where: { $0.key == h.key }) else { return }
+        t.write(placedBoxApply(h, base: base, drag: translation, proj: proj, mesh: mesh))
+    }
+
+    /// The end: a drag lets go; a tap on the move dot opens the box's extras.
+    func placedBoxDragEnded(_ targets: [PlacedBoxTarget], start: CGPoint, translation: CGSize) {
+        let s = model.placedBoxDrag
+        if let h = s.handle {
+            targets.first { $0.key == h.key }?.ended()
+            ClearanceHaptics.release()
+            s.end()
+            return
+        }
+        guard let proj = projection, hypot(translation.width, translation.height) < 4,
+              let h = PlacedBoxHandle.choose(at: start, among: placedBoxCandidates(proj, targets), radius: Self.boxHandleGrabRadius),
+              case .move = h.kind else { return }
+        targets.first { $0.key == h.key }?.tapMove()
+    }
+
+    /// The Design Box's drag on a placed box: the move dot slides it in model x and z; a face square moves that face along the
+    /// box's own axis, through the Design Box's magnets.
+    func placedBoxApply(_ h: PlacedBoxHandle, base: PlacedBox, drag: CGSize, proj: CameraProjection, mesh: ViewerMesh) -> PlacedBox {
+        switch h.kind {
+        case .move:
+            let world = settledWorld(SIMD3<Float>(base.center))
+            let dx = axisDelta(fromWorld: world, axis: 0, drag: drag, proj: proj)
+            let dz = axisDelta(fromWorld: world, axis: 2, drag: drag, proj: proj)
+            return base.translated(by: SIMD3(Double(dx), 0, Double(dz)))
+        case .face(let a, let isMax):
+            let world = settledWorld(SIMD3<Float>(base.faceCenter(a, isMax: isMax)))
+            let dir = simd_normalize(settleQuat.act(SIMD3<Float>(base.axes[a])))
+            let delta = DesignBoxDrag.axisDelta(handleWorld: world, worldAxis: dir, drag: CGVector(dx: drag.width, dy: drag.height),
+                                                projection: proj, probe: handleProbe)
+            let r = PlacedBoxDetent.applyFaceDrag(base, axis: a, isMax: isMax, rawTarget: base.faceCoord(a, isMax: isMax) + Double(delta),
+                                                  faces: mesh.faceGeometry, partMin: SIMD3<Double>(mesh.bounds.min),
+                                                  partMax: SIMD3<Double>(mesh.bounds.max), current: model.placedBoxDrag.detent,
+                                                  minSize: Double(DesignBoxModel.minSize(for: mesh.bounds)))
+            model.placedBoxDrag.detent = r.detent
+            if r.didSnap {
+                flashDesignBoxDetent(r.matchedFace)   // the Design Box's pulse of the face it met, and its tick
+                ClearanceHaptics.detent()
+            }
+            return r.box
+        }
+    }
+
+    /// Test hook: the page's placed-box gesture, as last built (a synthesised drag never reaches it offscreen).
+    func recordPlacedBoxes(_ targets: [PlacedBoxTarget], _ cands: [(handle: PlacedBoxHandle, screen: CGPoint)]) {
+        guard LatticeSetupHandles.recordLive else { return }
+        PlacedBoxLive.gesture = (changed: { s, t in placedBoxDragChanged(targets, start: s, translation: t) },
+                                 ended: { s, t in placedBoxDragEnded(targets, start: s, translation: t) })
+        for c in cands { PlacedBoxLive.handles[c.handle.frameKey] = c.screen }
+    }
+
+    /// The picked Lattice zone (its glass not up): its box in its own colour; the move dot's tap raises the turn and copy glass.
+    var latticeZoneBoxTargets: [PlacedBoxTarget] {
+        guard let z = stageList.activeGroupID, project.lattice.zoneGroups.contains(z), !project.groupView.isHidden(z),
+              project.groupView.canEdit(z), latticeZoneGizmo != z, let b = project.latticeZoneBox(z) else { return [] }
+        let colour = project.latticeZones.first { $0.id == z }?.color
+        return [PlacedBoxTarget(key: "zone-\(z.uuidString)", box: b,
+                                tint: colour.map { LiquidGlass.Tint.frost($0, intensity: 0.6) } ?? Self.designGlass,
+                                write: { project.setLatticeZoneBox(z, $0) },
+                                tapMove: { latticeZoneGizmo = z },
+                                label: "Move the zone",
+                                began: { draggingDepthPlane = "zoneBox-\(z.uuidString)" },   // the preview's bake waits for the release
+                                ended: {
+                                    draggingDepthPlane = nil
+                                    refreshLatticeFaceCards()
+                                    if showStrutPreview { buildStrutScene() }
+                                })]
+    }
+
+    /// The open Topology group's Keep clear shapes that show their chips (the app-wide chip rule), their glass not up: each in
+    /// the clearance red the shape is drawn in; the move dot's tap raises the turn and copy glass.
+    func keepClearBoxTargets(group gid: UUID) -> [PlacedBoxTarget] {
+        project.manualPrimitives(in: gid).compactMap { mp in
+            guard liveGizmo != GizmoTarget(group: gid, id: mp.id),
+                  SelectionArrowRule.chipsShow(group: gid, piece: ProjectModel.manualFaceKey(mp.id), selectedGroup: stageList.activeGroupID,
+                                               selectedPiece: selectedPieceKey) else { return nil }
+            return PlacedBoxTarget(key: "keep-\(mp.id.uuidString)", box: project.manualPrimitiveBox(mp), tint: Self.keepOutGlass,
+                                   write: { project.setManualPrimitiveBox(mp.id, in: gid, $0) },
+                                   tapMove: {
+                                       setGizmo(GizmoTarget(group: gid, id: mp.id))
+                                       chipsRevealedGroup = gid   // T2: tapping the shape reveals its chips
+                                   },
+                                   label: "Select the \(mp.kind.word) to move it")
+        }
     }
 }
