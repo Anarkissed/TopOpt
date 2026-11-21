@@ -131,8 +131,15 @@ struct LatticeOrganicControls: View {
     // MARK: rows
 
     private func name(_ label: String) -> some View {
-        HStack(spacing: 0) {
-            Text(label).dsStyle(DS.TypeScale.caption).fontWeight(.semibold).lineLimit(1).minimumScaleFactor(0.85)
+        let off = " (0 = off)"
+        let base = label.hasSuffix(off) ? String(label.dropLast(off.count)) : label
+        return HStack(spacing: 0) {
+            Text(base).dsStyle(DS.TypeScale.caption).fontWeight(.semibold).lineLimit(1).minimumScaleFactor(0.85)
+            // ★ his 11-20: "Add the 0=off beside the name but in italics and the same grey as the details"
+            if base != label {
+                Text(off).font(.system(size: 11.5)).italic().foregroundStyle(DS.Color.textTertiary.color).lineLimit(1)
+                    .fixedSize()
+            }
             OrganicInfoButton(label: label)   // ★ his 11-20: an (i) beside every setting
         }
         .layoutPriority(1)
