@@ -111,6 +111,9 @@ public final class AppModel: ObservableObject {
     /// only known at run time, so each copy is a run-time stack allocation) — a 170-byte @State crashed opening his older
     /// versions with load scenarios (11-20).
     @Published public var certifyWalk: OrganicCertify.Walk?
+    /// ★ his 11-21: the placed box being dragged by the Design Box's handles (a zone, a Keep clear shape) — here, never on the
+    /// workspace's stack.
+    public let placedBoxDrag = PlacedBoxDrag()
 
     // MARK: Cold-launch remote re-attach (handoff 119)
 

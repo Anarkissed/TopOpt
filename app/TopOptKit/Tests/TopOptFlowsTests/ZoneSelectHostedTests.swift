@@ -88,49 +88,86 @@ final class ZoneSelectHostedTests: XCTestCase {
             // ★ his iPad: seen as soon as it is added — its box drawn (no lattice saved), lit through the part
             XCTAssertTrue(p.latticeDepthPlanes().contains { $0.groupID == z }, "\(size): ★ the Box draws with no lattice saved")
             XCTAssertTrue(LatticeSetupHandles.litThrough.contains(z.uuidString), "\(size): ★ picked, its edges lit through the part")
-            XCTAssertEqual(p.latticeZoneHandles(z).map(\.side), [.width, .depth, .height], "\(size): a Box's three")
-            for s in LatticeZoneHandle.Side.allCases {
-                try h.probe("handle-\(LatticeSetupHandles.zoneKey(z, s))", "\(size): ★ N3 — the Box's \(s.rawValue) handle, 44 pt",
-                            covers: ["selectionsList"])
+            // ★ his 11-21: the Design Box's handles — its move dot and a square on each of the six faces
+            for k in Self.sevenHandles {
+                XCTAssertNotNil(h.frames.all[boxKey(z, k)], "\(size): ★ the Design Box's \(k) handle on the zone")
             }
+            XCTAssertTrue(h.frames.all.keys.filter { $0.hasPrefix("handle-zone") }.isEmpty, "\(size): ★ the old three side handles are gone")
             _ = try h.onScreen("latticeZoneHandlesLine-\(z.uuidString)", "\(size): ★ \"\(LatticeSetupCopy.zoneHandlesLine)\"")
-            // Cylinder: across and height
+            // Cylinder: the Design Box's cylinder — the same seven (its sides set the diameter, its ends the height)
             let shape = try h.onScreen("latticeZoneShape-\(z.uuidString)", "\(size): Box │ Cylinder")
             h.click(CGPoint(x: shape.maxX - shape.width / 4, y: shape.midY), settle: 1)
             XCTAssertEqual(p.latticeZoneShape(z), .cylinder, "\(size): premise: a Cylinder")
-            _ = try h.probe("handle-\(LatticeSetupHandles.zoneKey(z, .width))", "\(size): ★ the Cylinder's across")
-            _ = try h.probe("handle-\(LatticeSetupHandles.zoneKey(z, .height))", "\(size): ★ the Cylinder's height")
-            XCTAssertNil(h.frames.all["handle-\(LatticeSetupHandles.zoneKey(z, .depth))"], "\(size): ★ a Cylinder has no depth handle")
+            for k in Self.sevenHandles {
+                XCTAssertNotNil(h.frames.all[boxKey(z, k)], "\(size): ★ the Cylinder's \(k) handle")
+            }
             XCTAssertTrue(LatticeSetupHandles.litThrough.contains(z.uuidString), "\(size): ★ a Cylinder lit through the part too")
             // unpicked: none
             h.scrollIntoList("latticeZone-\(z.uuidString)")
             try h.tap("latticeZone-\(z.uuidString)", "\(size): the picked zone's row again (unpicks it)")
             XCTAssertNotEqual(p.latticeList.activeGroupID, z, "\(size): premise: unpicked")
-            XCTAssertTrue(h.frames.all.keys.filter { $0.hasPrefix("handle-zone") }.isEmpty, "\(size): ★ an unpicked zone shows no handles")
+            XCTAssertTrue(h.frames.all.keys.filter { $0.hasPrefix("placedBox-zone") }.isEmpty, "\(size): ★ an unpicked zone shows no handles")
         }
         XCTAssertEqual(LatticeSetupCopy.zoneHandlesLine, "Drag its handles on the part to size it.")
     }
 
-    /// ★ N3: dragging a side sizes the zone about its middle — the width handle widens it and nothing else, the height
-    /// handle makes it shorter when pushed in — and the zone's middle never moves.
-    func testDraggingASideSizesTheZoneAboutItsMiddle() throws {
+    static let sevenHandles = ["move", "u-", "u+", "v-", "v+", "w-", "w+"]
+    private func boxKey(_ z: UUID, _ k: String) -> String { "placedBox-zone-\(z.uuidString)-\(k)" }
+
+    /// The Design Box's gesture, as the page built it, dragged from a handle by `by` points.
+    private func boxDrag(_ h: AppBuildHost, _ key: String, by d: CGVector, steps: Int = 10) throws {
+        let at = try XCTUnwrap(PlacedBoxLive.handles[key], "★ the page drew the handle '\(key)'")
+        for i in 1...steps {
+            try XCTUnwrap(PlacedBoxLive.gesture, "★ the page built the Design Box's gesture")
+                .changed(at, CGSize(width: d.dx * CGFloat(i) / CGFloat(steps), height: d.dy * CGFloat(i) / CGFloat(steps)))
+            h.pump(0.05)
+        }
+        try XCTUnwrap(PlacedBoxLive.gesture).ended(at, CGSize(width: d.dx, height: d.dy))
+        h.pump(0.8)
+    }
+
+    /// A tap on the zone's move dot (no drag).
+    private func tapDot(_ h: AppBuildHost, _ z: UUID) throws {
+        let at = try XCTUnwrap(PlacedBoxLive.handles[boxKey(z, "move")], "★ the zone's move dot")
+        try XCTUnwrap(PlacedBoxLive.gesture).changed(at, .zero)
+        try XCTUnwrap(PlacedBoxLive.gesture).ended(at, .zero)
+        h.pump(1)
+    }
+
+    /// Outward on screen from the middle through one face's square, `pts` long.
+    private func outward(_ z: UUID, _ k: String, _ pts: CGFloat) throws -> CGVector {
+        let a = try XCTUnwrap(PlacedBoxLive.handles[boxKey(z, k)]), m = try XCTUnwrap(PlacedBoxLive.handles[boxKey(z, "move")])
+        let d = hypot(a.x - m.x, a.y - m.y)
+        XCTAssertGreaterThan(d, 2, "the square is off the middle on screen")
+        return CGVector(dx: (a.x - m.x) / d * pts, dy: (a.y - m.y) / d * pts)
+    }
+
+    /// ★ HIS 11-21 ("EXACTLY the same [as the Design Box] - with handles against each face"): a face square moves THAT face
+    /// only — the opposite face stays where it is (the Design Box's one-sided drag), the other sizes untouched; the move dot
+    /// slides the whole zone, its size unchanged.
+    func testAFaceSquareMovesThatFaceOnly() throws {
         let (h, p) = try stage()
         try h.tap("latticeZonesSectionAction", "+ Add zone", settle: 1)
         let z = try XCTUnwrap(p.latticeZones.first).id
-        let s0 = try XCTUnwrap(p.latticeZoneSize(z)), m0 = p.latticeZoneMiddle(z)
-        try drag(h, LatticeSetupHandles.zoneKey(z, .width), along: 40)
-        let s1 = try XCTUnwrap(p.latticeZoneSize(z))
-        XCTAssertGreaterThan(s1.width, s0.width + 1, "★ dragged out, the width grows (\(s0.width) → \(s1.width))")
-        XCTAssertEqual(s1.depth, s0.depth, accuracy: 1e-9, "the depth stays")
-        XCTAssertEqual(s1.height, s0.height, accuracy: 1e-9, "the height stays")
-        assertSame(p.latticeZoneMiddle(z), m0, "★ about its middle")
-        try drag(h, LatticeSetupHandles.zoneKey(z, .height), along: -20)
-        let s2 = try XCTUnwrap(p.latticeZoneSize(z))
-        XCTAssertLessThan(s2.height, s1.height - 1, "★ pushed in, the height shrinks (\(s1.height) → \(s2.height))")
-        XCTAssertEqual(s2.width, s1.width, accuracy: 1e-9, "the width stays")
-        assertSame(p.latticeZoneMiddle(z), m0, "★ still about its middle")
+        let b0 = try XCTUnwrap(p.latticeZoneBox(z))
+        try boxDrag(h, boxKey(z, "u+"), by: try outward(z, "u+", 40))
+        let b1 = try XCTUnwrap(p.latticeZoneBox(z))
+        XCTAssertGreaterThan(b1.half.x, b0.half.x + 0.5, "★ dragged out, that face moves out (\(2 * b0.half.x) → \(2 * b1.half.x) mm)")
+        XCTAssertEqual(b1.faceCoord(0, isMax: false), b0.faceCoord(0, isMax: false), accuracy: 1e-6, "★ the opposite face stays")
+        XCTAssertEqual(b1.half.y, b0.half.y, accuracy: 1e-9, "the depth stays")
+        XCTAssertEqual(b1.half.z, b0.half.z, accuracy: 1e-9, "the height stays")
+        try boxDrag(h, boxKey(z, "w+"), by: try outward(z, "w+", -20))
+        let b2 = try XCTUnwrap(p.latticeZoneBox(z))
+        XCTAssertLessThan(b2.half.z, b1.half.z - 0.25, "★ pushed in, the top comes down (\(2 * b1.half.z) → \(2 * b2.half.z) mm)")
+        XCTAssertEqual(b2.faceCoord(2, isMax: false), b1.faceCoord(2, isMax: false), accuracy: 1e-6, "★ its bottom stays")
+        XCTAssertEqual(b2.half.x, b1.half.x, accuracy: 1e-9, "the width stays")
+        try boxDrag(h, boxKey(z, "move"), by: CGVector(dx: 50, dy: 0))
+        let b3 = try XCTUnwrap(p.latticeZoneBox(z))
+        XCTAssertGreaterThan(simd_length(b3.center - b2.center), 0.5, "★ the move dot slides the zone")
+        XCTAssertLessThan(simd_length(b3.half - b2.half), 1e-9, "★ its size unchanged")
         // the row's numbers are the zone's (one value)
         _ = try h.onScreen("numberField-latticeZoneW-\(z.uuidString)", "its W number")
+        let s2 = try XCTUnwrap(p.latticeZoneSize(z))
         let w = SelectionsSummary.format((s2.width * 10).rounded() / 10, decimals: 1)
         XCTAssertTrue(p.latticeZoneSizeWords(z)?.hasPrefix(w + " \u{00D7}") == true, "★ the row says what the handles did: \(w)")
     }
@@ -182,15 +219,13 @@ final class ZoneSelectHostedTests: XCTestCase {
         let (h, p) = try stage()
         try h.tap("latticeZonesSectionAction", "+ Add zone", settle: 1)
         let z = try XCTUnwrap(p.latticeZones.first).id, key = z.uuidString
-        _ = try h.probe("latticeZoneMove-\(key)", "★ the zone's move knob, a 44 pt target")
+        XCTAssertNotNil(h.frames.all[boxKey(z, "move")], "★ his 11-21: the Design Box's move dot at its middle")
+        XCTAssertNil(h.frames.all["latticeZoneMove-\(key)"], "★ the old knob is gone")
         XCTAssertNil(h.frames.all["latticeZoneGizmo-\(key)"], "the glass waits for a tap")
-        try h.tap("latticeZoneMove-\(key)", "the move knob")
+        try tapDot(h, z)   // ★ his pick "Keep the extras": a tap on the dot raises the turn and copy glass
         let glass = try h.onScreen("latticeZoneGizmo-\(key)", "★ the move and turn glass")
         _ = try h.probe("latticeZoneMoveDone-\(key)", "★ its ✕, a 44 pt target")
         _ = try h.probe("latticeZoneCopy-\(key)", "★ 2: its Copy, a 44 pt target, off")
-        for s in LatticeZoneHandle.Side.allCases {
-            _ = try h.onScreen("handle-\(LatticeSetupHandles.zoneKey(z, s))", "★ the size handles stay with the glass")
-        }
         let s0 = try XCTUnwrap(p.latticeZoneSize(z)), m0 = try XCTUnwrap(p.latticeZoneMiddle(z))
         let c = CGPoint(x: glass.midX, y: glass.midY)   // the hub: a free move
         for i in 1...10 {
@@ -207,7 +242,7 @@ final class ZoneSelectHostedTests: XCTestCase {
         XCTAssertEqual(p.latticeZones.count, 1, "★ Copy off: no copy")
         try h.tap("latticeZoneMoveDone-\(key)", "✕")
         XCTAssertNil(h.frames.all["latticeZoneGizmo-\(key)"], "★ ✕ puts the glass away")
-        _ = try h.onScreen("latticeZoneMove-\(key)", "the knob is back")
+        XCTAssertNotNil(h.frames.all[boxKey(z, "move")], "the move dot and squares are back")
     }
 
     /// ★ His iPad 11-07 (2): "the COPY icon back, working the same as before: highlighted = moving the zone makes a copy." Lit,
@@ -219,7 +254,7 @@ final class ZoneSelectHostedTests: XCTestCase {
         let z = try XCTUnwrap(p.latticeZones.first).id, key = z.uuidString
         p.setLatticeZoneSize(z, width: 30, depth: 20, height: 12)
         h.pump(0.5)
-        try h.tap("latticeZoneMove-\(key)", "the move knob")
+        try tapDot(h, z)
         let glass = try h.onScreen("latticeZoneGizmo-\(key)", "the glass")
         try h.tap("latticeZoneCopy-\(key)", "★ Copy")
         _ = try h.onScreen("latticeZoneCopy-\(key)-on", "★ Copy lit")
