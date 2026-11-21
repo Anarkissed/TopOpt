@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <thread>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <functional>
@@ -3311,6 +3313,162 @@ static void test_net_outline() {
     CHECK(n_bars > 0 && least >= line - 2e-3);
   }
 }
+// SB1 (leg Q, 2026-11-20; the owner's iPad, the Organic sample: "core stopped with an exception that is not a
+// std::exception"): a stop asked while the Exact preview runs the file's print check (OJ6, depth variation on) used to
+// throw LayCancelled out of lay_organic_preview. Now: whatever moment the stop comes, the call returns (cancelled or
+// whole), never throws. And anything thrown that is not a std::exception comes back as a refusal `core_stopped` in
+// plain words, its type in `detail`; a LayCancelled from inside the lay answers "cancelled".
+static void test_session_boundary() {
+  const StepModel model = box_model(30, 30, 20);
+  const TensorField f = traced_field();
+  Settings st;
+  st.regions = {{1, Role::Lattice, {1}, 12.0, 0.0, true}};
+  st.drop_loose = true;
+  OrganicAsk a = traced_ask();   // depth variation on (face_relief_mm 1, the default)
+  OrganicPreviewAsk pa;
+  pa.quality = PreviewQuality::Exact;
+  double whole_ms = 0.0;
+  std::size_t flushed_check_bars = 0;
+  {
+    Session s(model);
+    const auto t0 = std::chrono::steady_clock::now();
+    const OrganicPreview pv = lay_organic_preview(s, st, f, a, pa);
+    whole_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    for (const Bar& b : pv.outcome.bars.bars) flushed_check_bars += b.along_proud > 0.0 || b.proud_a > 0.0 || b.proud_b > 0.0;
+    CHECK(!pv.outcome.cancelled && pv.outcome.refused.empty() && flushed_check_bars > 0);   // the print check does run
+  }
+  std::size_t threw = 0, cancelled = 0, whole = 0;
+  for (const double share : {0.2, 0.4, 0.6, 0.75, 0.85, 0.92, 0.97}) {
+    Session s(model);
+    std::atomic<bool> stop{false};
+    std::thread canceller([&] {
+      std::this_thread::sleep_for(std::chrono::microseconds(static_cast<long long>(share * whole_ms * 1000.0)));
+      stop = true;   // as the app's cancel does
+    });
+    try {
+      const OrganicPreview pv = lay_organic_preview(s, st, f, a, pa, 0, &stop);
+      ++(pv.outcome.cancelled ? cancelled : whole);
+    } catch (...) {
+      ++threw;
+    }
+    canceller.join();
+  }
+  std::printf("SB1 Exact preview (%zu bars with depth variation, %.0f ms whole) stopped at 7 moments: threw %zu, cancelled %zu, "
+              "whole %zu\n", flushed_check_bars, whole_ms, threw, cancelled, whole);
+  CHECK(threw == 0 && cancelled > 0);
+  // Thrown from inside the lay (the print check hook runs there when a strengthening is replayed): a stop answers
+  // "cancelled"; an int is refused in plain words, its type in the detail.
+  for (int kind = 0; kind < 2; ++kind) {
+    Session s(model);
+    OrganicAsk b = a;
+    b.additions.rounds.push_back(AddRound{});
+    b.print_check = [kind](const Layout&, Bars&) -> std::string {
+      if (kind == 0) throw LayCancelled{};
+      throw 42;
+    };
+    bool out = false;
+    Outcome o;
+    try {
+      o = s.lay_organic(st, f, b);
+    } catch (...) {
+      out = true;
+    }
+    const std::string text = o.refused.empty() ? "" : o.refused.front().text, detail = o.refused.empty() ? "" : o.refused.front().detail;
+    std::printf("SB1 %s thrown in the lay: threw out %d, cancelled %d, refused %s: \"%s\" (detail: %s)\n", kind ? "an int" : "LayCancelled",
+                out ? 1 : 0, o.cancelled ? 1 : 0, o.refused.empty() ? "-" : o.refused.front().code.c_str(), text.c_str(), detail.c_str());
+    if (kind == 0) CHECK(!out && o.cancelled && o.refused.empty());
+    else
+      CHECK(!out && !o.cancelled && o.refused.size() == 1 && o.refused.front().code == "core_stopped" &&
+            text.find("could not be laid") != std::string::npos && text.find("std::") == std::string::npos &&
+            text.find("lay_organic") == std::string::npos && detail.find("int") != std::string::npos);
+  }
+}
+static std::string plain_number_for_test(double v) {   // as the refusals print a whole number
+  char b[32];
+  std::snprintf(b, sizeof b, "%g", v);
+  return b;
+}
+// UL1 (leg R, 2026-11-20; the owner: "Can I put 789293?"): every number the app shows has an upper limit. Per limit: at
+// the limit valid, just over it refused `over_upper_limit` with the allowed range filled (the app clamps its field to it),
+// a huge number refused the same; the judged Auto asks (Traced and Grown) and the app's Auto values stay valid.
+static void test_upper_limits() {
+  Settings st;
+  st.regions = {{1, Role::Lattice, {1}, 12.0, 0.0, true}};
+  struct Lim { const char* setting; double limit; std::function<void(OrganicAsk&, double)> set; bool grown; };
+  const auto range = [](OrganicAsk& a) { a.spacing_mm = 0.0; a.spacing_min_mm = 3.0; a.spacing_max_mm = 6.0; };
+  const std::vector<Lim> lims = {
+      {"spacing_mm", kOrganicCellMaxMm, [](OrganicAsk& a, double v) { a.spacing_mm = v; }, false},
+      {"spacing_min_mm", kOrganicCellMaxMm, [](OrganicAsk& a, double v) { a.spacing_mm = 0; a.spacing_min_mm = v; a.spacing_max_mm = v; }, false},
+      {"spacing_max_mm", kOrganicCellMaxMm, [&](OrganicAsk& a, double v) { range(a); a.spacing_max_mm = v; }, false},
+      {"width_mm", kOrganicStrutMaxMm, [&](OrganicAsk& a, double v) { range(a); a.spacing_min_mm = 200; a.spacing_max_mm = 200; a.width_mm = v; }, false},
+      {"width_heavy_mm", kOrganicStrutMaxMm, [&](OrganicAsk& a, double v) { range(a); a.width_heavy_mm = v; }, false},
+      {"foot_gap", kOrganicSpacingsMax, [](OrganicAsk& a, double v) { a.foot_gap = v; }, true},
+      {"wall_gap", kOrganicSpacingsMax, [](OrganicAsk& a, double v) { a.walls_out = true; a.wall_gap = v; }, true},
+      {"wall_gap_heavy", kOrganicSpacingsMax, [&](OrganicAsk& a, double v) { range(a); a.walls_out = true; a.wall_gap = v; a.wall_gap_heavy = v; }, true},
+      {"cross_gap", kOrganicSpacingsMax, [](OrganicAsk& a, double v) { a.walls_out = true; a.wall_cross = 1; a.cross_gap = v; }, true},
+      {"cross_gap_heavy", kOrganicSpacingsMax, [&](OrganicAsk& a, double v) { range(a); a.walls_out = true; a.wall_cross = 1; a.cross_gap = v; a.cross_gap_heavy = v; }, true},
+      {"tie_gap", kOrganicSpacingsMax, [](OrganicAsk& a, double v) { a.tie_level = true; a.tie_gap = v; }, false},
+      {"tie_gap_heavy", kOrganicSpacingsMax, [&](OrganicAsk& a, double v) { range(a); a.tie_level = true; a.tie_gap = v; a.tie_gap_heavy = v; }, false},
+      {"root_run", kOrganicSpacingsMax, [](OrganicAsk& a, double v) { a.root_run = v; }, true},
+      {"top_run", kOrganicSpacingsMax, [](OrganicAsk& a, double v) { a.top_run = v; }, true},
+      {"shape_reach", kOrganicShapeReachMax, [](OrganicAsk& a, double v) { a.shape_fit = true; a.shape_reach = v; }, false},
+  };
+  std::size_t ok = 0;
+  for (const Lim& l : lims) {
+    std::string said;
+    bool good = true;
+    for (const double v : {l.limit, l.limit + 0.01, 789293.0}) {
+      OrganicAsk a = traced_ask();
+      if (l.grown) { a.mode = OrganicMode::Grown; a.ties = true; }
+      l.set(a, v);
+      const std::vector<OrganicRefusal> r = validate_organic(st, a, nullptr);
+      const OrganicRefusal* mine = nullptr;
+      for (const OrganicRefusal& x : r)
+        if (x.code == "over_upper_limit" && x.setting == l.setting) mine = &x;
+      if (v == l.limit) {
+        bool any_upper = false;
+        for (const OrganicRefusal& x : r) any_upper = any_upper || x.code == "over_upper_limit";
+        good = good && !any_upper;
+      } else {
+        good = good && mine && mine->has_max && mine->allowed_max == l.limit && mine->has_min && !mine->text.empty() &&
+               mine->text.find(plain_number_for_test(l.limit)) != std::string::npos;
+        if (mine) said = mine->text;
+      }
+    }
+    std::printf("UL1 %s: at %g valid, over it refused: \"%s\"%s\n", l.setting, l.limit, said.c_str(), good ? "" : "  <-- WRONG");
+    ok += good;
+    CHECK(good);
+  }
+  // The judged Auto asks and the app's Auto numbers stay valid.
+  for (const bool grown : {false, true}) {
+    OrganicAsk a = gap_judged(grown);
+    std::size_t upper = 0;
+    for (const OrganicRefusal& x : validate_organic(st, a, nullptr)) upper += x.code == "over_upper_limit";
+    CHECK(upper == 0);
+  }
+  // Below the lower end too: every refusal that binds one of these numbers carries both ends of its range.
+  {
+    std::size_t both = 0, n = 0;
+    auto look = [&](const std::vector<OrganicRefusal>& r, const char* setting) {
+      for (const OrganicRefusal& x : r)
+        if (x.setting == setting) { ++n; both += x.has_min && x.has_max && x.allowed_max > x.allowed_min; }
+    };
+    OrganicAsk a = traced_ask(); range(a); a.spacing_max_mm = 2.0; look(validate_organic(st, a, nullptr), "spacing_max_mm");
+    a = traced_ask(); range(a); a.width_heavy_mm = 0.5; look(validate_organic(st, a, nullptr), "width_heavy_mm");
+    a = traced_ask(); a.width_mm = 0.3; look(validate_organic(st, a, nullptr), "width_mm");
+    a = traced_ask(); a.tie_gap = 0.0; look(validate_organic(st, a, nullptr), "tie_gap");
+    a = traced_ask(); a.mode = OrganicMode::Grown; a.root_run = -1; look(validate_organic(st, a, nullptr), "root_run");
+    a = traced_ask(); a.shape_reach = -1; look(validate_organic(st, a, nullptr), "shape_reach");
+    a = traced_ask(); range(a); a.tie_level = true; a.tie_gap = 1.0; a.tie_gap_heavy = 2.0; look(validate_organic(st, a, nullptr), "tie_gap_heavy");
+    Settings sk = st;
+    sk.regions[0].skin = true;
+    sk.regions[0].skin_density = 9;
+    look(validate_organic_groups(sk, {{{1}, traced_ask()}}, nullptr), "skin_density");
+    std::printf("UL1: refusals below the lower end carry both ends of the range: %zu of %zu\n", both, n);
+    CHECK(n == 8 && both == n);
+  }
+  std::printf("UL1: %zu of %zu limits as asked; the judged Auto asks (Traced, Grown) valid\n", ok, lims.size());
+}
 static void test_net_kept_apart() {   // OJ8 (leg M): the net ON the open face, crossings made joints
   const StepModel model = box_model(30, 30, 20);
   const TensorField f = gap_field();
@@ -3389,6 +3547,8 @@ static void test_net_kept_apart() {   // OJ8 (leg M): the net ON the open face, 
 }
 
 int main() {
+  test_session_boundary();
+  test_upper_limits();
   test_net_kept_apart();
   test_net_outline();
   test_groups_floors_additions();
