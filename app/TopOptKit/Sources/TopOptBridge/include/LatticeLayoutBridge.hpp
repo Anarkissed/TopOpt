@@ -323,6 +323,7 @@ struct LatticeLayoutOrganicResult {
   std::vector<std::string> notes;              // ★ E2: plain sentences (equal cell ends)
   int64_t cross_group_touches = 0;             // ★ E7: struts of different groups that touch (not joined)
   int64_t relief_flushed = 0;                  // ★ cut 2, OJ6: bulges the print check made flush (say it when above 0)
+  std::vector<double> flat_ends;               // ★ OS1 B (leg U): x, y, z per rounded end the print check held flat (Exact)
 };
 LatticeLayoutOrganicResult lattice_layout_organic_groups(int64_t session, const LatticeLayoutSettings& settings,
                                                          const LatticeLayoutOrganicGroups& groups, BridgeError& err);

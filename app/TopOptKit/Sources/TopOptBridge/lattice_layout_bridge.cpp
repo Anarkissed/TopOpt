@@ -549,6 +549,7 @@ LatticeLayoutOrganicResult lattice_layout_organic(int64_t session, const Lattice
     s->solid_at.reset();
     o.runs = ll::pack_weave_runs(pv.runs, 2);   // ★ cut 2: version 2 (sections, swept, proud, the file's ring)
     o.relief_flushed = static_cast<int64_t>(pv.relief_flushed);
+    for (const auto& p : pv.flat_ends) { o.flat_ends.push_back(p.x); o.flat_ends.push_back(p.y); o.flat_ends.push_back(p.z); }
     o.quality = pv.quality == ll::PreviewQuality::Draft ? 1 : 0;
     o.strands = static_cast<int64_t>(pv.outcome.strands);
     o.net_struts = static_cast<int64_t>(pv.outcome.net_struts);
@@ -615,6 +616,7 @@ LatticeLayoutOrganicResult lattice_layout_organic_groups(int64_t session, const 
     s->solid_at.reset();
     o.runs = ll::pack_weave_runs(pv.runs, 2);   // ★ cut 2: version 2 (sections, swept, proud, the file's ring)
     o.relief_flushed = static_cast<int64_t>(pv.relief_flushed);
+    for (const auto& p : pv.flat_ends) { o.flat_ends.push_back(p.x); o.flat_ends.push_back(p.y); o.flat_ends.push_back(p.z); }
     o.quality = pv.quality == ll::PreviewQuality::Draft ? 1 : 0;
     o.strands = static_cast<int64_t>(pv.outcome.strands);
     o.net_struts = static_cast<int64_t>(pv.outcome.net_struts);

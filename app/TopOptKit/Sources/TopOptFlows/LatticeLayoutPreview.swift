@@ -522,11 +522,11 @@ public final class LatticeLayoutPreview: ObservableObject {
         // ★ his 11-19 rule ("The drawing follows the print file. Always."): every vine, Grown and the net skin too, as the
         // print file's tubes make them (built off the main thread), cut flat where they reach the part's surface (his 11-20
         // skin note: the file trims every tube to the part)
-        let runs = r.runs
+        let runs = r.runs, held = r.flatEnds   // ★ OS1 B: the rounded ends the print check held flat (Exact)
         let known = cutSurface?.path == path ? cutSurface?.surface : nil
         let mesh = known == nil ? cutMesh.map { ($0.vertices, $0.indices, $0.faceIDs) } : nil
         let (vines, surface) = await Task.detached(priority: .userInitiated) { () -> (OrganicVineShape, OrganicVineShape.CutSurface?) in
-            var v = OrganicVineShape.tubes(runs: runs)
+            var v = OrganicVineShape.tubes(runs: runs, heldFlat: held)
             let surface = known ?? mesh.map { OrganicVineShape.CutSurface(vertices: $0.0, indices: $0.1, faceIDs: $0.2) }
             if let surface { v.cut(runs: runs, surface: surface) }
             return (v, surface)

@@ -129,6 +129,42 @@ final class OrganicVineOS1Tests: XCTestCase {
         XCTAssertEqual(split.caps.filter { simd_length(SIMD3($0.x, $0.y, $0.z) - c) < 1e-5 }.count, 2)
     }
 
+    /// ★ LatticeReview's leg U on the engine: the sample cube's EXACT lay lists the bridges' rounded ends its print check held
+    /// flat, each at a shallow run's own point, and the drawing draws those flat: fewer pucks than with no list. (The engine's
+    /// own test pins the count against the file's; this pins that the app carries it through.)
+    @MainActor func testTheExactLaysHeldFlatEndsReachTheDrawing() async throws {
+        let body = try TopOptKit.latticeSampleBody(cube: true)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("os1-flat-\(UUID().uuidString).stl")
+        try MeshExport.binarySTL(vertices: body.vertices, indices: body.indices, header: Data()).write(to: url)
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        let session = try await LatticeLayoutSession.open(path: url.path)
+        addTeardownBlock { session.close() }
+        let b = try XCTUnwrap(LatticeLayoutPreview.box(body.vertices))
+        var s = LatticeLayoutSession.Settings()
+        var r = LatticeLayoutSession.Region(id: 1, faces: [], depthMM: 0)
+        r.zone = .init(kind: .box, centre: SIMD3<Double>((b.lo + b.hi) / 2), axes: [SIMD3(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0, 0, 1)],
+                       half: SIMD3<Double>((b.hi - b.lo) / 2) + 1)
+        r.weave = true
+        s.regions = [r]
+        let lim = try await session.sweepLimits(s, regions: [1], lineMM: 0.45).map(LatticeOrganicLook.Limits.init)
+        var ask = LatticeOrganicLook().ask(limits: lim, layerMM: 0.2)
+        ask.quality = .exact
+        let groups = [LatticeLayoutSession.OrganicGroup(regions: [1], ask: ask)]
+        _ = try await session.synthetic(s, groups: groups, walls: [(region: 1, foci: 1)], fromEmpty: true)
+        let laid = try await session.layOrganic(s, groups: groups)
+        XCTAssertTrue(laid.refused.isEmpty)
+        let shallow = laid.runs.filter { $0.section == 1 || $0.section == 2 }
+        print("OS1 FLAT ENDS: \(laid.flatEnds.count) held flat; \(shallow.count) shallow runs of \(laid.runs.count)")
+        try XCTSkipIf(shallow.isEmpty, "this sample lays no shallow run")
+        XCTAssertFalse(laid.flatEnds.isEmpty, "★ the Exact lay lists the ends its print check held flat")
+        for p in laid.flatEnds {
+            XCTAssertTrue(shallow.contains { $0.points.contains { simd_length($0 - p) < 1e-3 } }, "★ each at a shallow run's own point")
+        }
+        let without = OrganicVineShape.tubes(runs: laid.runs), with = OrganicVineShape.tubes(runs: laid.runs, heldFlat: laid.flatEnds)
+        print("OS1 FLAT ENDS: pucks \(without.pucks) without the list, \(with.pucks) with it")
+        XCTAssertLessThan(with.pucks, without.pucks, "★ drawn flat where the file holds them flat")
+    }
+
     /// ★ On the app's renderer, seen from the side (z up on screen): the dome top alone is the upper half of the ball (the
     /// shader drops its lower half); with its wall the end is square below (the bar's flat underside to its very end), so it
     /// covers more than a whole ball. RED CONTROL: the same caps drawn as whole balls.

@@ -191,8 +191,9 @@ struct LatticeSampleView: View {
     /// focus (no solve), the lay exact — drawn as the preview draws Organic.
     /// The sample's vines as the print file makes them (his 11-19 rule), cut flat at the body (11-20). Nonisolated: it runs off
     /// the main actor, as part of the caller's task.
-    nonisolated static func sampleVines(runs: [LatticeLayoutSession.Run], vertices: [Float], indices: [Int32]) async -> OrganicVineShape {
-        var v = OrganicVineShape.tubes(runs: runs)
+    nonisolated static func sampleVines(runs: [LatticeLayoutSession.Run], vertices: [Float], indices: [Int32],
+                                        heldFlat: [SIMD3<Float>] = []) async -> OrganicVineShape {
+        var v = OrganicVineShape.tubes(runs: runs, heldFlat: heldFlat)
         v.cut(runs: runs, surface: OrganicVineShape.CutSurface(vertices: vertices, indices: indices))
         return v
     }
@@ -240,7 +241,7 @@ struct LatticeSampleView: View {
             let runs = laid.runs
             let (bv, bi) = (body.vertices, body.indices)
             // off the main thread, but IN this task (never detached): leaving the page cancels it with the rest
-            bars.vines = await Self.sampleVines(runs: runs, vertices: bv, indices: bi)
+            bars.vines = await Self.sampleVines(runs: runs, vertices: bv, indices: bi, heldFlat: laid.flatEnds)
             guard !Task.isCancelled else { return }
             bars.lightFrom = LatticeLayoutPreview.organicLightFrom(grown: look.modeValue == .grown, netFrom: seg.lightFrom,
                                                                    count: seg.count)
