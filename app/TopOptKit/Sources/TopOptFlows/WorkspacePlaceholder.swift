@@ -3633,8 +3633,11 @@ public struct WorkspacePlaceholder: View {
             // again (the stall card's Try Again re-entered startRun and met the same-inputs grey-out — a dead button).
             if ph == .failed { lastRunRequest = nil }
             // ★ Organic cut 2 (his certify wizard): an Organic part that does not certify opens on Results, where it is walked through
-            if ph == .succeeded, lastRunWasLattice, OrganicCertify.opensResults(organic: LatticeLayoutPreview.organic(project.lattice),
-                                                                            reportJSON: run.outcome?.reportJSON) { viewOriginal = false }
+            // ★ his 11-21 ("have it spit out an actual result in the app - because NOTHING happens in app"): every Lattice run
+            // that lands opens its result on Results (the Lattice stage has no landed-run notice)
+            if LatticeFileButton.opensResults(succeeded: ph == .succeeded, byLattice: lastRunWasLattice, outcome: run.outcome) {
+                viewOriginal = false
+            }
             guard ph == .failed, run.failureShowsOnButton else { return }
             runCouldntFinish = true
             run.dismissFailure()
