@@ -69,12 +69,14 @@ final class LatticeCornerHostedTests: XCTestCase {
 
     /// ★ ⌃ holds the five run choices, in the design's order; each greys with nothing to run on.
     func testTheArrowHoldsTheFiveRunChoices() throws {
-        let (h, _, _) = try stage(AppBuildHost.landscape13, prism: true)
+        let (h, p, _) = try stage(AppBuildHost.landscape13, prism: true)
         // (the divider before Preview only reads as an untitled item: dropped)
         let offered = try h.pickFromMenu("latticeSplitMore", "no such item", what: "⌃")
             .filter { !$0.replacingOccurrences(of: " [off]", with: "").isEmpty }
         // ★ note 21's five, then his 11-16 pair: how the lattice view keeps up (Live preview / Click to refresh preview)
-        let five = ["Lattice the original part", "Optimize, then lattice", "Lattice an optimized result", "Preview only", "Export\u{2026}",
+        // ★ his 11-20 ask (acca75e3): "Run the stress check" leads the ⌃ when the lattice follows the stresses
+        let stress = LatticeLayoutPreview.needsStress(p.lattice) ? [StressCheckCopy.menuTitle] : []
+        let five = stress + ["Lattice the original part", "Optimize, then lattice", "Lattice an optimized result", "Preview only", "Export\u{2026}",
                     LatticePreviewMode.live, LatticePreviewMode.refresh]
         XCTAssertEqual(offered.count, five.count, "★ note 21's five + his 11-16 pair: \(offered)")
         for (o, t) in zip(offered, five) { XCTAssertTrue(o.hasPrefix(t), "★ in the design's order: \(t) — \(offered)") }
