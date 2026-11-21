@@ -2455,7 +2455,7 @@ static void test_app_sample_asks_print() {
       ll::OrganicPreviewAsk pa;
       pa.quality = ll::PreviewQuality::Exact;
       const ll::OrganicPreview pv = ll::lay_organic_preview(ps, s, syn.field, groups, pa);
-      std::size_t same = 0, lifted = 0, on_run = 0;
+      std::size_t same = 0, lifted = 0, on_run = 0, on_bridge = 0;
       for (const Vec3& f : pv.flat_ends) {
         bool in = false, near = false;
         for (const Vec3& g : fr.made.flat_domes_at) {
@@ -2465,20 +2465,27 @@ static void test_app_sample_asks_print() {
         }
         same += in;
         lifted += !in && near;
-        bool run = false;
+        bool run = false, bridge = false;   // leg V: on a run point, and that run a shallow one (the file's bridge)
         for (const ll::WeaveRun& w : pv.runs)
           for (const Vec3& q : w.points)
-            run = run || (std::fabs(q.x - f.x) < 1e-4 && std::fabs(q.y - f.y) < 1e-4 && std::fabs(q.z - f.z) < 1e-4);
+            if (std::fabs(q.x - f.x) < 1e-4 && std::fabs(q.y - f.y) < 1e-4 && std::fabs(q.z - f.z) < 1e-4) {
+              run = true;
+              bridge = bridge || (w.section & 3) != 0;
+            }
         on_run += run;
+        on_bridge += bridge;
       }
       ll::Session ds(model);
       ll::OrganicPreviewAsk da;
       da.quality = ll::PreviewQuality::Draft;
       const ll::OrganicPreview dv = ll::lay_organic_preview(ds, s, syn.field, groups, da);
-      std::printf("  the Exact preview's flat ends %zu (the file's %zu: the same %zu, at a joint the sag pass lifted %zu; on a run "
-                  "point %zu); the Draft's %zu\n", pv.flat_ends.size(), fr.made.flat_domes_at.size(), same, lifted, on_run,
+      std::printf("  the Exact preview's flat ends %zu (the file's %zu: the same %zu, elsewhere %zu; on a run point %zu, of a shallow "
+                  "run %zu); the Draft's %zu\n", pv.flat_ends.size(), fr.made.flat_domes_at.size(), same, lifted, on_run, on_bridge,
                   dv.flat_ends.size());
-      CHECK(!pv.flat_ends.empty() && pv.flat_ends.size() == fr.made.flat_domes_at.size() && same + lifted == pv.flat_ends.size() &&
+      // leg V: the runs are the file's bars (the sag pass's lift drawn): every listed end the file's own place, on a
+      // shallow run (the app's case: the cube, Grown, two ends of a bar the lift made shallow, drawn round before)
+      CHECK(!pv.flat_ends.empty() && pv.flat_ends.size() == fr.made.flat_domes_at.size() && same == pv.flat_ends.size() &&
+            on_bridge == pv.flat_ends.size() &&
             on_run == pv.flat_ends.size() && dv.flat_ends.empty());
       if (grown) {   // depth variation off: the check runs for the rounded ends alone; a stop during it is a cancel
         std::size_t threw = 0, cancelled = 0;
