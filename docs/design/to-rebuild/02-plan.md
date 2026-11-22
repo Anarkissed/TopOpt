@@ -139,6 +139,16 @@ Action: keep / clean / rewrite / delete / new. Size S / M / L is amount of work,
 6. **Straight-member "designed" style** (3a candidate 7). Recommended: after stage 9, as a second style, not in this rebuild.
 7. **Resolution.** Once feature sizes are in mm, the app could choose the resolution from the print profile and the part size. Keep the picker, or derive it? Recommended: derive, with the picker kept as an override.
 
+### His answers (2026-11-21)
+
+1. SIMP: "Yes". Delete once generative lands.
+2. Strength range: "The user selects the percentage in the app. If they choose 150, then yes. If they choose 175, then go to 225. And if they go to 200, go up to 250." So three versions: his number, +25 and +50 points.
+3. Stiffness limit: yes, provided it is measured right at the load ("Would this be right at the load? If so, I think that's a good idea."). It is: how far the loaded face moves, per scenario. Optional, off by default.
+4. Sealed pockets: "sure". Allowed in a solid with one plain line; refused in a lattice.
+5. Experiment probes: "yes". Delete the unbuilt ones.
+6. Straight-member style: OPEN. He asked what it is; explained in chat; awaiting his answer.
+7. Resolution: "sounds good! I think there should be a preview resolution vs the actual part resolution that is automatically derived." So two resolutions: a quick one for the preview and a derived one for the real part; the picker stays as an override.
+
 ## 6. Risks
 
 - **The shared certificate.** Stages 1 and 2 change every margin, including the lattice strength check. Planned with LatticeReview through the reviewer; released with a before / after table on his past parts.
