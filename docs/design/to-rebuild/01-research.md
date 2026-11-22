@@ -1,6 +1,6 @@
 # TO rebuild: research
 
-Status 2026-11-21: paper register only. Sections 3a to 3e follow.
+Status 2026-11-21: paper register, then sections 3a to 3e as a FIRST DRAFT. The rankings are proposals for the plan (Phase 4), not decisions. Reading depth is stated per paper in "What was read".
 
 ## Paper register (every DOI in the brief checked against Crossref on 2026-11-21)
 
@@ -63,3 +63,155 @@ All other DOIs and the four arXiv ids (1909.10607, 2004.05448, 1903.01548, 2008.
 | Swierstra, Gupta, Langelaar 2020 | Automated and Accurate Geometry Extraction and Shape Optimization of 3D Topology Optimization Results | arXiv | `arXiv:2004.05448` | free copy |
 
 "Free copy" means an author or repository copy is listed by OpenAlex; not yet opened. "PAYWALLED" means none is listed; an author copy may still exist.
+
+
+## What was read (2026-11-21)
+
+Read from the text (abstract, conclusions and the passages each statement below rests on; not every page): Haber 1996, Sigmund 2007, Wang-Lazarov-Sigmund 2011, Lazarov & Sigmund 2011, van Dijk 2013, Wei 2018, Dunning & Kim 2013, Dunning 2018, Noël 2020, Andreasen 2020, Swierstra 2020, Christiansen 2014 and 2015, Norato 2015, Wein 2020, Guo 2014, Allaire 2004, Taubin 1995, Le 2010, Langelaar 2017 (the filter paper), Gaynor & Guest 2016, Krish 2011, Matejka 2018, Oh 2019, Rodrigues 2002, Deng & To 2021 (PIMM), Groen & Sigmund 2018, Groen 2020, Wu 2018.
+
+NOT read, no copy in hand (statements about these below are marked "(not read)" and rest on the abstract or on how other papers cite them):
+
+- Not obtainable: Wang 2022 (RDBLS) and its 2024 code paper.
+- Free copies exist but the repositories refuse automated download (a bot check I do not work around): Holmberg 2013, Yamada 2010, Allaire 2016 (thickness), Allaire 2017 (overhang), Aage 2017, Langelaar 2016 (Additive Manufacturing), Jewett & Carstensen 2023, Taylor 2008, Cheng 2019, Wu 2017, Groen 2021, Alzahrani 2015, Panesar 2018. Links are in `agent-scratch/toreview/research/oa_check.txt`.
+
+One more correction to the brief: the statement "an RBF support of 2 to 4 knot separations balances stability and efficiency" is in NEITHER Dunning paper (Dunning 2018 uses third-order B-splines and never discusses RBF support). The nearest source read is van Dijk 2013, section 2.1, which says it in words, without numbers: local support moves the boundary at most one element per change, mid-range support gives faster and smoother evolution, global support couples everything and makes steps hard to size. So the number is unsourced; this project must measure it (3a, candidate 2).
+
+## 3a. Smoothness
+
+### What the literature says
+
+Roughness has two separate causes, and the papers treat them with different tools.
+
+1. **The design problem itself wants endless fine detail.** Without a restriction, more and smaller holes always help, so the answer depends on the grid (Haber 1996). Cures: a BOUND on perimeter, which sets the number of holes and their size (Haber 1996); filters with a radius (Sigmund 2007; Lazarov & Sigmund 2011 give the same filter as a diffusion equation with one length); the robust eroded / middle / dilated triple, the only one of these that guarantees a smallest size on BOTH solid and void, at the price of three solves per step (Wang 2011). Andreasen 2020 shows the same filter, projection and robust triple work unchanged on a level set with a crisp boundary. Yamada 2010 (not read) puts one coefficient on a diffusion term to set complexity.
+2. **The way the shape is stored and drawn.** The smoothness of the level-set function is set by the basis (van Dijk 2013, section 2). Cubic B-splines "promote the development of smooth designs and suppress small features" and "limit the need for filtering", though without a guaranteed size (Noël 2020). Dunning 2018 gets guaranteed sizes on a B-spline level set with explicit constraints. The slope of the function has to be kept in a band, by re-normalising (Wei 2018) or by bounds on the coefficients (Swierstra 2020 derive the bound: steepest slope is about 2.21 times the largest weight for unit-spaced Gaussians).
+3. **Every paper that reports a smooth final part takes the surface from the smooth function itself, never from voxels.** Swierstra 2020 fit a Gaussian RBF level set (support 7 elements across) to a finished voxel result, then run a shape optimisation on it with a refined analysis at the boundary; result "highly smooth and accurate", cost on average more than the first optimisation. Christiansen 2014 / 2015 carry an explicit surface mesh through the whole optimisation (3D in the 2015 paper). Andreasen 2020 and Noël 2020 cut the elements at the true boundary so the analysis also sees no stair-steps.
+4. **A "designed" look** (straight members, constant widths, round ends) comes from optimising shapes, not voxels: bars of fixed width projected onto a fixed grid (Norato 2015), moving components (Guo 2014), surveyed in Wein 2020, whose stated motive is "better control over the geometry".
+5. Smoothing a finished mesh (Taubin 1995) is a low-pass filter that knows nothing of loads or protected faces.
+
+### What this project already tried
+
+| attempt | result |
+|---|---|
+| Smoothing the voxel surface afterwards: Taubin (PR 299), SDF / RBF refit (PR 303), curvature flow (PR 314), closing (PR 315) | all failed their targets; curvature flow survives inside the finish and today removes 16 % of the stair-step on the stand |
+| Fitting an analytic level set (PR 324) | carved roughness 24 % |
+| Robust triple | helped; NOT in today's tree (ledger A) |
+| Perimeter as a penalty | cost 8.3 points of margin |
+| Helmholtz filter | margin fell 83 % at the light rung; cause never established |
+| Today (ledger D) | stand res 128: median 0.16 mm off a smooth patch, 98 % of patches over the 0.05 mm target; Top Motor Mount: median 0.01, worst 0.57 mm |
+
+Code facts that explain the numbers (ledger A, B-01, section J):
+
+- The optimiser already holds a smooth function (the RBF field). The export THROWS IT AWAY: it writes each voxel's fill fraction (64 samples, so steps of 1/64), runs marching cubes on that, then tries to smooth the result. Point 3 above is exactly what is not done.
+- The basis the app runs is a cut-off Gaussian with a crease at the edge of every knot's reach (B-01).
+- CAD faces are snapped back only for planes and cylinders, with a tolerance of one voxel, against a target of 0.02 mm.
+
+### Candidates, ranked
+
+| # | candidate | source | size | why here | main risk |
+|---|---|---|---|---|---|
+| 1 | Take the surface from the level-set function itself, at any fineness, and join it to the protected and CAD regions with the exact cutter already in the export | point 3; PR 324 | M | removes the largest loss; no new maths | the shape that is certified (fill fractions) and the shape that is exported must agree: the existing file re-check measures it |
+| 2 | A basis with no crease and a wider reach: Wendland C2 (in the tree), C4, cubic B-splines; reach 2, 3, 4 knot spacings | van Dijk 2013; Noël 2020; B-01 | S | cheap, and candidate 1 inherits whatever ripple the basis has | wider reach = more work per step and slower fine detail |
+| 3 | Keep the slope of the function in a band (coefficient bounds or re-normalising) | Swierstra 2020; Wei 2018 | S | makes the zero surface well defined; needed for 1 | none known |
+| 4 | Robust triple on the level set, with the drain rule in the loop | Wang 2011; Andreasen 2020 | M | the only guaranteed smallest wall AND smallest hole (also serves "2 lines / 0.9 mm") | three solves per step when the solve is already 65 to 77 % of a run |
+| 5 | A BOUND on perimeter or on curvature, computed from the function | Haber 1996; Yamada 2010 | M | this is "reward smooth walls" inside the optimiser; the literature uses a bound, the project tried a penalty | margin cost; must be shown at three strengths |
+| 6 | A last shape pass on the real surface with a real analysis, fairness in the objective | Swierstra 2020; Christiansen 2015 | L | the only step where stress and smoothness trade off on the final shape | cost: as much again as the optimisation |
+| 7 | Straight-member style: fit bars and plates to the result, then optimise them | Norato 2015; Guo 2014; Wein 2020 | L | the "designed" look; a second style for 3e | joints and plates in 3D; a research-grade stage |
+| 8 | Snap to more CAD shapes (cones, fillets) and to 0.02 mm | cad_project today | S-M | CAD faces flat within 0.02 mm is a target of its own | fold-overs near edges (guard exists) |
+
+Helmholtz is not ranked: it is a filter on the design (cause 1), not a surface smoother, and its collapse here is unexplained. A reading to test before reuse: the filter is solved with a no-flux edge on the design region (Lazarov 2011, eq. 12), and on parts that are three-quarters frozen its radius may be wiping out the few thin paths left at a light rung. That is a hypothesis.
+
+### The measurement that decides
+
+Every candidate, at three settings or more, on all reference parts, in one table: worst and RMS distance from a fitted smooth patch (3 mm), ripple in the 1 to 10 mm band, CAD faces within 0.02 mm, thinnest wall, margin under every scenario, mass, sealed voids, Release run time, one slicer picture. Candidate 2 first (same job, basis and reach changed, nothing else) because it is the cheapest and 1 depends on it.
+
+## 3b. Generative ("lightest part that is strong enough")
+
+### What the literature says
+
+- **Minimise mass under a stress limit directly.** Le 2010 make it work with five ingredients: a filter for a smallest size, a stiffness rule that pushes to solid or void, a relaxed stress for part-filled elements (so material can vanish without a false stress peak), ONE aggregated stress number per region (p-norm, P = 6 in their example) and a running normalisation so that number tracks the true peak. Holmberg 2013 (not read) does the same with clustered constraints. PIMM uses a p-norm with p = 10.
+- **A peak stress at a sharp corner does not converge; a stress read over a material length does.** Taylor 2008 (not read; reviewer's addition) is the standard source. This project measured the same thing (ledger F-2): the single-voxel peak climbs without limit as the grid refines, the mean of the hottest 0.5 cm3 holds within 15 to 30 %.
+- **Print rules inside the loop.** Langelaar 2017: a layer-by-layer filter along the build direction, an element may exist only if the elements under it (45 degrees) exist; cheap, exact sensitivities. Gaynor & Guest 2016: the same aim by projection, with the angle as an input, together with a smallest size. Allaire 2017 (not read) does it on a level set. Jewett & Carstensen 2023 (not read): weak bonding between beads.
+- **"Generative" means several outcomes to choose from.** Krish 2011: generate many, filter by constraint envelopes, the designer picks. Matejka 2018: once there are hundreds, the problem is browsing, filtering and comparing them. Oh 2019 get variety from a neural network on 2D wheels; nothing in it transfers to certified 3D parts, so here variety has to come from changing inputs.
+
+### What this project has today
+
+- `strengthen_versions` (R-01) already searches for the lightest design at a margin target, but by trial: up to 6 half-resolution runs and 3 full ones per version, three versions. It optimises stiffness and checks strength afterwards.
+- The reduction ladder walks 68 / 52 / 38 / 26 % and stops at the first failure. On Top Motor Mount that is 50 minutes for 6 g (section K).
+- A stress-constrained optimiser with its adjoint exists and is unused (S-01), in the SIMP loop only.
+- The margin does not converge with resolution (F), so "150 to 200 %" has no fixed meaning until V-01 is done.
+- Weight is reported as solid volume while the margin is cut by infill to the power 1.5 (M-07): the two sides of his rule are measured on different parts.
+
+### Candidates, ranked
+
+1. **A strength number that converges** (stress over a fixed material length, per Taylor 2008; ledger F-2, V-01). Precondition for everything below.
+2. **Weight as printed grams, with infill as a lever** (M-07; goes through the reviewer to LatticeReview).
+3. **Minimise printed mass subject to the strength number, in the level-set loop**, with Le 2010's ingredients; one run in place of up to 27. Cost: one extra (adjoint) solve per scenario per step. The existing bracket (R-01) stays as the baseline and the fallback.
+4. **Print rules in the loop**: overhang along his build direction (Langelaar's filter adapted to the fill fractions), smallest wall of two lines through candidate 4 of 3a, drainable voids.
+5. **Several certified outcomes per press**: margin target (150 / 175 / 200 %), build direction, style (smooth / straight members), infill. Each returned with weight, margin, time and a picture (3e).
+
+### Inputs: what the app collects and what is missing
+
+Collected (RemoteRunner job builder): part and material; loads grouped into scenarios; anchors; protected faces with depths; keep regions and keep-clears (clearances, cuts); design box; build direction; layer height, wall line widths, wall loops, infill %; resolution; redesign mode; lattice selections.
+
+Missing for his rule: a strength RANGE (today one number); a weight target or "stop when savings fall under x"; an overhang limit; a stiffness / deflection limit (a part can be strong enough and still too floppy; nothing asks); which faces are cosmetic; how many outcomes he wants. Each is a question for him in Phase 4, not a decision here.
+
+### The measurement that decides
+
+Candidate 3 against today's bracket on all reference parts: printed grams at the same converged margin, under every scenario, with the print checks, and Release run time; three margin targets.
+
+## 3c. Optimise and lattice TOGETHER
+
+### What the literature says
+
+- Structure and material can be optimised together, an outer problem for where material goes and an inner one for what it is like at each point (Rodrigues 2002).
+- Two routes. **Priced by a law**: the lattice is treated as a material whose stiffness and strength depend on its density (Cheng 2019, not read, adds a stress limit; Groen & Sigmund 2018 and Groen 2020 then draw the real lattice from the coarse answer at about a thousandth of the cost of a fine run). **Priced by the real geometry**: PIMM (Deng & To 2021) adds a second RBF field for lattice density and projects the actual lattice onto the analysis grid, no law needed; their 3D example needs 200 x 200 x 60 elements and a GPU, and it removes sharp corners under a stress limit.
+- Porous regions can be forced without a lattice library: an upper bound on local material volume gives bone-like infill that is robust to load changes (Wu 2018). A skin plus infill can be optimised as one (Wu 2017, not read).
+
+### What this project has
+
+- PR 334 "Mode 2": a second field (beta) and a joint optimiser step, in the tree but unreachable, wired to the SIMP loop and priced with the OLD lattice laws (ledger A, M-06).
+- `multiscale` (PR 293): dead for the app (R-09).
+- The new lattice engine owns the laws and the frame-of-beams strength check (LatticeReview). The rule that a void inside a lattice must reach the outside exists as a check, not in a loop.
+
+### Candidates, ranked
+
+1. **A second field on the same knots, priced by the new engine's own laws** (PIMM's layout, the law route's pricing). PIMM's real-geometry pricing is out at his resolutions: a 0.9 mm strut is one or two voxels. His placement enters as a prior the optimiser may overrule at a price ("guidance, not bible"), never as a fixed mask.
+2. **Skin plus lattice as one design** (Wu 2017) where he asks for a skin.
+3. **A local-volume bound** (Wu 2018) as the fallback where no law is trusted.
+4. Drawing an oriented lattice from the coarse answer (Groen 2020): later; the new engine lays out cells itself.
+
+Needed from LatticeReview through the reviewer: stiffness and allowable stress as functions of density for each cell type, with their valid range, and the cost of one frame-of-beams check.
+
+### The measurement that decides
+
+Printed grams at the same certified margin: TOGETHER against THEN against solid, on all reference parts, with the lattice print checks and the drain rule, and how far the result moved from his placement (a picture).
+
+## 3d. Optimise THEN lattice
+
+### What the literature says
+
+Alzahrani 2015 (not read): map the optimiser's density to strut size cell by cell. Panesar 2018 (not read): several ways to derive a graded lattice from a result; graded beats uniform. Both are after-the-fact mappings and neither re-optimises the solid around the lattice.
+
+### What this needs here
+
+1. **Carry his selections onto the new shape.** Selections are made on the drawn part; the optimised part has different faces. Rule to test: lattice region = his selected volume intersected with what the optimiser kept.
+2. **Grade from the final analysis** (stress or strain energy is already written per voxel) through the new engine's grading.
+3. **A seamless join**: skin or fillet at the solid-to-lattice boundary, merged with the exact cutter; no shared-edge defects (the X-05 class).
+4. **Re-certify the whole part** with the lattice law, and thicken where it fails (the loop Organic cut 2 already runs).
+
+### The measurement that decides
+
+Margin before and after latticing, grams saved, print checks, and a clean single solid, on all reference parts with his real selections.
+
+## 3e. One button
+
+| goal \ lattice | none | THEN | TOGETHER |
+|---|---|---|---|
+| Minimise plastic (start from his part) | today's route, rebuilt | optimise, lattice his areas, re-certify | lattice placed by the optimiser, his areas as guidance |
+| Generative (lightest that is strong enough) | 3b | 3b, then lattice | 3b with the second field |
+
+Every cell returns the same thing: a small set of certified versions, each with printed grams, margin under every scenario, print time, and a picture; refusals say in one plain line why. Comparison follows Matejka 2018: sort and filter by weight, margin and time, two versions side by side. How many versions, and which inputs vary, are his to choose (3b, inputs).
+
+## Where "not possible" could come back
+
+Listed now so the bar is applied when it happens: candidate 1 of 3a (certified shape and exported shape disagree); candidate 4 of 3a and candidate 3 of 3b (run time); candidate 1 of 3c (no usable law at low density). Each needs the named papers answered, a build, all reference parts, three settings and the failing target stated.
