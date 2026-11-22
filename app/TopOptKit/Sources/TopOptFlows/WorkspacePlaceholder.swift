@@ -1349,7 +1349,6 @@ public struct WorkspacePlaceholder: View {
                         }
                         .laneFoot("new-engine")   // ★ his pick 11-15: very bottom in landscape, just above Settings in portrait
                     }
-                    else if newEngineAsked { LatticeLayoutPreviewOneLine(text: LatticeLayoutPreview.organicLine).laneFoot("new-engine") }   // ★ Organic: said
                 }   // ★ the new engine (test): its lines
                 .onChange(of: newEngineOn) { on in
                     newEngine.update(project: project, on: on, solid: !surfaceXrayOn, stress: newEngineStress)
@@ -1740,6 +1739,7 @@ public struct WorkspacePlaceholder: View {
                 }
                 .organicLimits(newEngine.organicAutoLimits)   // ★ Organic cut 1
                 .organicGroupLimits(newEngine.organicGroupLimits)   // ★ Organic per group (his 11-18)
+                .organicMeasuring(newEngine.measuringLimits) { newEngine.measureLimits(project: project) }   // ★ his 11-22
                 .organicProbeDriver(makeOrganicProbeDriver())
                 // ★ ruling 4 (item 6): its "nothing set to lattice" lines leave by its own exit
                 .wallMarking { goToWallMarking() }
@@ -12068,13 +12068,6 @@ public struct WorkspacePlaceholder: View {
                 }
             }
             .padding(.horizontal, 14)
-            if project.lattice.wholePart, !project.latticeWholePartLive {
-                // ★ his 11-03 rule: the job stays as today until the engine takes `lattice.whole_part` (E2) — one plain line,
-                // gone by itself once the linked core takes the key (release (2))
-                Text(LatticeSetupCopy.wholePartWaits).font(.system(size: 12.5)).foregroundStyle(DS.Color.warning.color)
-                    .padding(.horizontal, 14).padding(.bottom, 8)
-                    .background(DSParts.publish("latticeWholePartWaits"))
-            }
         }
     }
 
@@ -12289,12 +12282,7 @@ public struct WorkspacePlaceholder: View {
                 groupLockToggle(g)
             }
             .frame(minHeight: 44)
-            if project.lattice.skinGroups.contains(g.id) {
-                // ★ his 11-03 rule: until the engine has a per-region skin (E2.4) the run keeps it solid — one plain line
-                Text(LatticeSetupCopy.skinWaits).font(.system(size: 12.5)).foregroundStyle(DS.Color.warning.color)
-                    .padding(.bottom, 8)
-                    .background(DSParts.publish("latticeSkinWaits-\(g.id.uuidString)"))
-            }
+            // ★ his 11-22: no engine-update line (the engine lays Protect skin); nothing cuts into the modal
         }
         .padding(.leading, 14).padding(.trailing, 10)
         .background(DSParts.publish("latticeRoleRow-\(g.id.uuidString)"))
@@ -12447,13 +12435,6 @@ public struct WorkspacePlaceholder: View {
                 Text(LatticeSetupCopy.includeLine).font(.system(size: 12.5)).foregroundStyle(DS.Color.textSecondary.color)
                     .padding(.horizontal, 14).padding(.vertical, 8)
                     .background(DSParts.publish("latticeTopologyLine"))
-                if !project.latticeScenariosLive, force.scenarioList.contains(where: { project.lattice.topologyExcluded.contains($0.id) }) {
-                    // ★ his 11-03 rule: a scenario's switch waits on `lattice.scenarios` (E2) — one plain line, gone by itself
-                    // once the linked core takes the key (release (2))
-                    Text(LatticeSetupCopy.includeWaits).font(.system(size: 12.5)).foregroundStyle(DS.Color.warning.color)
-                        .padding(.horizontal, 14).padding(.bottom, 8)
-                        .background(DSParts.publish("latticeIncludeWaits"))
-                }
                 if !project.latticeLeftOutGroups.isEmpty {
                     // ★ release (2): a group's switch acts in the app, on every run but a result's re-lattice
                     Text(LatticeSetupCopy.resultKeepsGroups).font(.system(size: 12.5)).foregroundStyle(DS.Color.textSecondary.color)
@@ -13947,7 +13928,7 @@ public struct WorkspacePlaceholder: View {
             // action button needs.
             // ★ B6 s1 (the approved mockup #lat-setup): Lattice Setup has the hint again — its corner is Topology's three now
             // ★ B8 (mockup #cut): Edit faces has the hint too — where its taps go ("It joins no group.")
-            if Self.hintShows(showsSelectionHint: visible.showsSelectionHint || latticeSetupUp || editFaces.isEditing,
+            if Self.hintShows(showsSelectionHint: visible.showsSelectionHint || (latticeSetupUp && latticeTopologyOpen) || editFaces.isEditing,
                               selectionsCollapsed: selectionsCollapsed) {
                 // ★ LOOK PER SCREEN (11-04, the mockup's .hint): one 36 pt line that gives way before the corner does
                 Text(editFaces.isEditing ? EditFacesCopy.footHint : hint)
@@ -14021,7 +14002,7 @@ public struct WorkspacePlaceholder: View {
 
     private var hint: String {
         if force.phase == .setup { return "Tap the face that points at the floor · drag to orbit" }
-        if latticeSetupUp { return latticeTopologyOpen ? LatticeSetupCopy.topologyHint : LatticeSetupCopy.hint }   // ★ B6: where taps go
+        if latticeSetupUp { return LatticeSetupCopy.topologyHint }   // ★ B6: where taps go (his 11-22: no Lattice hint)
         if let g = activeGroup {
             let k = force.kind(for: g.id)
             if force.needsRole(g.id, latticeRoleGroups: latticeRoleGroupIDs) { return "Tap more faces to grow the selection, then choose Anchor or Load" }

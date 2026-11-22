@@ -58,6 +58,15 @@ public struct LatticeSetupWizard: View {
 
     /// ★ Organic cut 1: the Auto numbers the new engine is using (shown in the Organic controls' fields).
     var organicLimits: LatticeOrganicLook.Limits?
+    /// ★ his 11-22: the part's Auto numbers are being measured (the sample waits), and the call that measures them.
+    var organicMeasuring = false
+    var measureOrganic: (() -> Void)?
+    func organicMeasuring(_ on: Bool, measure: @escaping () -> Void) -> LatticeSetupWizard {
+        var copy = self
+        copy.organicMeasuring = on
+        copy.measureOrganic = measure
+        return copy
+    }
     /// ★ Organic per group: each group's measured limits (before Look).
     var organicGroupLimits: [UUID: LatticeOrganicLook.Limits] = [:]
     func organicGroupLimits(_ g: [UUID: LatticeOrganicLook.Limits]) -> LatticeSetupWizard {
@@ -2646,6 +2655,8 @@ public struct LatticeSetupWizard: View {
             // core's sample part with the settings on it — never his own part (the workspace covers it on this page)
             AnyView(LatticeSampleView(inputs: latticeSampleInputs, notInSample: latticeNotInSample)
                 .id(model.stage)   // each view its own camera: the chunk and the part frame differently
+                // ★ his 11-22: this part's Auto numbers, measured as the page opens (and when it turns Organic)
+                .task(id: model.cellTransition == .organicGrade) { if model.cellTransition == .organicGrade { measureOrganic?() } }
                 .padding(.leading, portrait ? 0 : PageChrome.edge + PageChrome.widePanelWidth)
                 .padding(.top, portrait ? PageChrome.panelTop + latticePanelHeight : PageChrome.panelTop)
                 .latticeID(model.stage == .cell ? "lattice-sample-cells" : "lattice-sample-part"))
@@ -2679,6 +2690,7 @@ public struct LatticeSetupWizard: View {
             i.coverMM = project.printParams.wallRingMM > 0 ? project.printParams.wallRingMM : -1
             i.aesthetic = (project.lattice.stageMode ?? .structural) == .aesthetic
             if let l = organicLimits(group: group), l.measured { i.partStruts = [l.strutLowerMM, l.strutUpperMM, l.strutAutoMM] }
+            else { i.partStrutsPending = organicMeasuring }   // ★ his 11-22: wait for the part's numbers, never build twice
         }
         return i
     }

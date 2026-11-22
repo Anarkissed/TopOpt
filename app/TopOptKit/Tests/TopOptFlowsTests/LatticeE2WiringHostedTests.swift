@@ -79,10 +79,9 @@ final class LatticeE2WiringHostedTests: XCTestCase {
         let block = try XCTUnwrap(doc["lattice"] as? [String: Any])
         XCTAssertEqual(block["scenarios"] as? [String], live ? ["Normal use", "Held by left plate"] : nil, "★ the switched-on two")
         XCTAssertEqual(((doc["loads"] as? [String: Any])?["scenarios"] as? [[String: Any]])?.count, 3, "★ the job keeps all three")
-        XCTAssertEqual(h.frames.all["latticeIncludeWaits"] != nil, !live, "★ the plain line goes when the key is live")
+        XCTAssertNil(h.frames.all["latticeIncludeWaits"], "★ his 11-22: no engine-update line in the modal")
         XCTAssertNil(h.frames.all["latticeResultKeepsGroups"], "a scenario is not a group: no result line")
         if live { XCTAssertNil(TopOptKit.jobSchemaError(try RemoteRun.buildJobJSON(r)), "★ core takes the job the app builds") }
-        XCTAssertEqual(LatticeSetupCopy.includeWaits, "The run still uses every scenario until the engine update")
     }
 
     /// ★ "Lattice an optimized result": the names go only where its run carried them — every one the run had but the

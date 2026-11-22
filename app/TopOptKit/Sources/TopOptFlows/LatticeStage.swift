@@ -155,7 +155,6 @@ public enum LatticeStageCopy {
 /// words — the corner is Topology's, [Settings ⌄] [Lattice] [⌃].
 public enum LatticeSetupCopy {
     /// design-system §5's short form, while taps make lattice groups (mockup #lat-setup).
-    public static let hint = "Tap a face to lattice it \u{00B7} drag to turn"
     /// Lattice, grey: nothing saved on the Lattice page yet (§4.6, ≤ 5 words).
     public static let saveFirst = "Save a lattice first"
     /// The fix line just above the corner (§4.18, N4) and its one tap.
@@ -198,7 +197,6 @@ public enum LatticeSetupCopy {
     }
     public static let switchMode = "Switch"
     /// While − is set: the job stays as today until the engine takes `lattice.whole_part` (his 11-03 rule).
-    public static let wholePartWaits = "\u{2212} Lattice faces waits on the engine update"
 
     // ★ B6 s1b — the Selections rows (§4.3 / §4.4, mockup #lat-setup)
     public static let faces = "Faces"
@@ -221,9 +219,6 @@ public enum LatticeSetupCopy {
     // ★ B6 s2a — the Topology panel (notes 23a, 23b)
     public static let topology = "Topology"
     public static let includeLine = "Switched-off groups are left out of this lattice."
-    /// While a scenario's switch is off and the linked core can't take `lattice.scenarios` yet (his 11-03 rule). Group
-    /// switches act in the app (release (2)), so they never show it.
-    public static let includeWaits = "The run still uses every scenario until the engine update"
     /// ★ Release (2): while a group's switch is off — the one run that can't leave it out (pick (a), asked 11-06 09:49Z).
     public static let resultKeepsGroups =
         "Lattice an optimized result keeps every group: it is checked under the loads it was optimized with."
@@ -234,8 +229,6 @@ public enum LatticeSetupCopy {
     public static let protectSkin = "Protect skin"
     /// A lattice group with no role yet (§4.4's pending state).
     public static let pending = "Pending\u{2026}"
-    /// Protect skin, until the engine has a per-region skin (E2.4): the run keeps the face solid.
-    public static let skinWaits = "Runs as No lattice until the engine update"
     public static let topologyHint = "Taps go to Topology groups"
     /// ★ B6 N2: a picked face row's line, under its depth (mockup #lat-face-prism, "or drag its handle").
     public static let dragItsHandle = "Or drag its handle on the part"

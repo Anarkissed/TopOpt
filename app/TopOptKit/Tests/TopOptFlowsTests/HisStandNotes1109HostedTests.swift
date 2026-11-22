@@ -307,10 +307,9 @@ final class HisStandNotes1109HostedTests: XCTestCase {
             try h.tap("selGroup-\(t.g3.uuidString)", "\(size): Group 3's line", settle: 1.2)
             h.pump(0.6)
             let list = try XCTUnwrap(h.frames.all["selectionsList"], "\(size): the Selections panel")
-            let hint = try h.onScreen("stageHint", "\(size): the hint line")
+            XCTAssertNil(h.frames.all["stageHint"], "\(size): ★ his 11-22: Lattice Setup has no hint")
             XCTAssertLessThanOrEqual(list.maxY, size.height - PageChrome.panelBottom + 1,
                                      "\(size): ★ the panel ends on its band (\(list.maxY) vs \(size.height - PageChrome.panelBottom))")
-            XCTAssertLessThanOrEqual(list.maxY, hint.minY - 12, "\(size): ★ above the hint, with room: \(list) vs \(hint)")
             for z in t.zones {
                 let row = try h.onScreen("latticeZone-\(z.uuidString)", "\(size): ★ a zone row")
                 XCTAssertLessThanOrEqual(row.maxY, list.maxY + 0.5, "\(size): ★ inside the panel")

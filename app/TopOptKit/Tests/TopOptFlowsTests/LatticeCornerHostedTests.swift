@@ -47,10 +47,8 @@ final class LatticeCornerHostedTests: XCTestCase {
             XCTAssertEqual(m.maxY, l.maxY, accuracy: 1, "\(size): one bottom line")
             XCTAssertEqual(l.height, 64, accuracy: 1, "\(size): §4.6 — the 64 pt run button")
             XCTAssertNil(h.frames.all["latticeFixLine"], "\(size): a lattice set: no fix line")
-            _ = try h.onScreen("stageHint", "\(size): ★ the hint is back")
+            XCTAssertNil(h.frames.all["stageHint"], "\(size): ★ his 11-22: no \"Tap a face to lattice it\" hint")
         }
-        // the hint's words (design-system §5's short form, mockup #lat-setup)
-        XCTAssertEqual(LatticeSetupCopy.hint, "Tap a face to lattice it \u{00B7} drag to turn")
     }
 
     /// ★ No lattice settings yet: Lattice is grey ("Save a lattice first") and the fix line above the corner opens the Lattice page.

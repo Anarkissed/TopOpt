@@ -77,6 +77,9 @@ struct LatticeSampleView: View {
         /// ★ his pick 11-20 ("Use my struts"): the group's own Auto struts as his part measured them (thin, thick, one);
         /// empty: the sample's. A typed (Manual) thickness is in `organic` already.
         var partStruts: [Double] = []
+        /// ★ his 11-22 ("The sample model should always be consistent"): the part's own Auto numbers are being measured;
+        /// the sample waits for them rather than build once with its own and again with his part's.
+        var partStrutsPending = false
         /// Aesthetic (Extra spacing's default is on there).
         var aesthetic = false
     }
@@ -199,6 +202,7 @@ struct LatticeSampleView: View {
     }
 
     private func buildOrganic(_ look: LatticeOrganicLook, _ i: Inputs) async {
+        guard !i.partStrutsPending else { return }   // ★ his 11-22: "Building the sample…" until the part's numbers are in
         try? await Task.sleep(nanoseconds: Self.settleNanos)
         guard !Task.isCancelled else { return }
         do {
@@ -229,9 +233,9 @@ struct LatticeSampleView: View {
             ask.quality = .exact
             let groups = [LatticeLayoutSession.OrganicGroup(regions: [1], ask: ask)]
             let made = try await session.synthetic(s, groups: groups, walls: [(region: 1, foci: 1)], fromEmpty: true)
-            if let why = made.refused.first { throw TopOptError(message: why.text) }
+            if !made.refused.isEmpty { throw LatticeRefused(refusals: made.refused) }
             let laid = try await session.layOrganic(s, groups: groups)
-            if let why = laid.refused.first { throw TopOptError(message: why.text) }
+            if !laid.refused.isEmpty { throw LatticeRefused(refusals: laid.refused) }
             guard !Task.isCancelled else { return }
             let seg = LatticeLayoutPreview.segments(laid.runs)
             var l = LatticeLayoutColours.Laid()
@@ -262,14 +266,16 @@ struct LatticeSampleView: View {
         } catch {
             guard !Task.isCancelled else { return }   // the page moved on: nothing to say
             mesh = nil; organicBars = nil; failed = true
-            // his 11-20: a centred pop-up in plain English; the engine's own words to the log only
+            // his 11-20: a centred pop-up in plain English; ★ his 11-22: "An error should always tell what's wrong and how
+            // to fix it. Always." — a refusal says which setting, what it allows and the way out
             caption = Self.organicFailedCaption
-            AppPopups.shared.show(Self.organicFailedTitle, Self.organicFailedText, log: (error as? TopOptError)?.message ?? "\(error)")
+            let why = (error as? LatticeRefused).flatMap { LatticeRefusalWords.lines($0.refusals) } ?? Self.organicFailedText
+            AppPopups.shared.show(Self.organicFailedTitle, why, log: (error as? TopOptError)?.message ?? "\(error)")
         }
     }
     static let organicFailedCaption = "The sample couldn’t be built with these settings"
     static let organicFailedTitle = "The sample couldn’t be built"
-    static let organicFailedText = "These settings didn’t make a sample. Try changing one of them; if it keeps happening, tell us."
+    static let organicFailedText = "Something went wrong building the sample. Try again; if it keeps happening, tell us."
 
     /// "Sample block · 45 × 40 × 35 mm · Octet truss · density 20 → 35 % · built by the engine, as in your part" (R3.3's
     /// words; ★ his iPad notes 11-10: the grade it was built with, and "held to the type's band" when his ends were moved).
