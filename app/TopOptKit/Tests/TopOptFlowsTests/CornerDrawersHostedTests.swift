@@ -223,6 +223,123 @@ final class CornerDrawersTapTests: XCTestCase {
             XCTAssertFalse(src.contains("DSSplitButton(key: \"latticeSplitMore\") {") || src.contains("DSSplitButton(key: \"topologySplitMore\") {")
                            || src.contains("DSSplitButton(key: \"resultsSplitMore\") {"), "\(name): ★ no system menu on the corner's ⌃")
         }
+        XCTAssertTrue(ws.contains(".cornerTapCloses(model.cornerDrawers)") && rs.contains(".cornerTapCloses(model.cornerDrawers)"),
+                      "★ his 11-22: a tap anywhere outside the open drawer closes it, on both pages")
+    }
+}
+
+/// ★ His answer 11-22 ("If you mean tapping on the Selections panel or opening up a new menu, then it ABSOLUTELY should"): a
+/// real click ANYWHERE outside the open drawer closes it and still does its own job; inside it, or on the corner's own chip and
+/// ⌃, it does not (they switch). Both sizes, the Lattice and Topology stages and Results, with a RED CONTROL.
+@MainActor
+final class CornerDrawersOutsideTapHostedTests: XCTestCase {
+    static let sizes = [AppBuildHost.landscape13, CGSize(width: 820, height: 1180)]
+
+    func latticeStage(_ size: CGSize) throws -> (AppBuildHost, ProjectModel, AppModel) {
+        let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: true)
+        let p = r.project
+        p.lattice.flexible = nil
+        p.lattice.chooseLatticeType(.structural)
+        if let c = p.selection.groups.first(where: { $0.name == "Group C" }) { p.force.makeAnchor(c.id) }
+        let h = AppBuildHost(WorkspacePlaceholder(model: r.app, project: p), size: size, test: self)
+        h.pump(3)
+        try h.pickFromMenu("capsuleMenu", "Structural", what: "\(size): the stage menu")
+        h.pump(1)
+        return (h, p, r.app)
+    }
+
+    func click(_ h: AppBuildHost, _ f: CGRect, settle: Double = 1.2) { h.click(CGPoint(x: f.midX, y: f.midY), settle: settle) }
+
+    func testOnTheLatticeStageATapOutsideClosesAndStillDoesItsJob() throws {
+        for size in Self.sizes {
+            let (h, p, app) = try latticeStage(size)
+            // a Selections row: the drawer goes AND the row is picked
+            let g = try XCTUnwrap(p.latticeFaceGroups.first, "\(size): premise: a lattice group (his Top's prism)")
+            let rowKey = "selGroup-\(g.id.uuidString)"
+            h.scrollIntoList(rowKey)
+            XCTAssertNil(p.latticeList.activeGroupID, "\(size): premise: nothing picked")
+            try h.tap("latticeSplitMore", "\(size): the ⌃", settle: 1.2)
+            _ = try h.onScreen("latticeSplitMoreDrawer", "\(size): premise: the ⌃'s drawer")
+            click(h, try h.onScreen(rowKey, "\(size): a Selections row"))
+            XCTAssertNil(h.frames.all["latticeSplitMoreDrawer"], "\(size): ★ a tap on a Selections row closes the drawer")
+            XCTAssertEqual(p.latticeList.activeGroupID, g.id, "\(size): ★ … and still picks the row")
+            // the stage menu (top bar): the drawer goes and the menu opens
+            try h.tap("setupChip", "\(size): Settings", settle: 1.2)
+            _ = try h.onScreen("settingsPanel", "\(size): premise: the Settings drawer")
+            let offered = try h.pickFromMenu("capsuleMenu", "(none: read the menu only)", what: "\(size): ★ the stage menu")
+            XCTAssertFalse(offered.isEmpty, "\(size): ★ the menu still opens: \(offered)")
+            XCTAssertNil(h.frames.all["settingsPanel"], "\(size): ★ opening a menu closes the Settings drawer")
+            XCTAssertNil(app.cornerDrawers.open)
+            // the view cube's corner: its view buttons (Orthographic │ Perspective) — the drawer goes, the view switches. (The
+            // cube itself is a Metal view whose own gesture a synthesised Mac click never reaches; on the iPad the window's
+            // watcher sees every touch, and the cube closes it besides — `closesCornerDrawersOnTouch`.)
+            try h.tap("latticeSplitMore", "\(size): the ⌃", settle: 1.2)
+            let ortho = ViewProjection.shared.orthographic
+            defer { ViewProjection.shared.orthographic = ortho }
+            let viewKey = ortho ? "viewPairPerspective" : "viewPairOrthographic"
+            click(h, try h.onScreen(viewKey, "\(size): the view corner's other button"))
+            XCTAssertNil(h.frames.all["latticeSplitMoreDrawer"], "\(size): ★ a tap on the view corner closes it")
+            XCTAssertEqual(ViewProjection.shared.orthographic, !ortho, "\(size): ★ … and still switches the view")
+            try h.tap("latticeSplitMore", "\(size): the ⌃ again", settle: 1.2)
+            // inside the drawer: it stays
+            let drawer = try h.onScreen("latticeSplitMoreDrawer", "\(size): the ⌃'s drawer")
+            h.click(CGPoint(x: drawer.midX, y: drawer.minY + 3), settle: 1.2)
+            _ = try h.onScreen("latticeSplitMoreDrawer", "\(size): ★ a tap inside the drawer leaves it up")
+            // Settings while the ⌃'s is up: they switch (no close-then-reopen)
+            try h.tap("setupChip", "\(size): ★ Settings", settle: 1.2)
+            XCTAssertEqual(app.cornerDrawers.open, CornerDrawers.settings, "\(size): ★ Settings switches in")
+            _ = try h.onScreen("settingsPanel", "\(size): the Settings drawer")
+            // inside the Settings drawer (a row's left margin, beside its name — not the header, which folds it): it stays
+            let row = try XCTUnwrap(h.frames.all["settingsRow-units"] ?? h.frames.all.first { $0.key.hasPrefix("settingsRow-") }?.value,
+                                    "\(size): a Settings row")
+            h.click(CGPoint(x: row.minX + 5, y: row.midY), settle: 1.2)
+            _ = try h.onScreen("settingsPanel", "\(size): ★ a tap inside Settings leaves it up")
+            // the ⌃ while Settings is up: they switch
+            try h.tap("latticeSplitMore", "\(size): ★ the ⌃", settle: 1.2)
+            XCTAssertNil(h.frames.all["settingsPanel"], "\(size): ★ Settings closed")
+            _ = try h.onScreen("latticeSplitMoreDrawer", "\(size): ★ the ⌃'s drawer open")
+        }
+    }
+
+    func testOnTopologyARowTapClosesAndPicks() throws {
+        for size in Self.sizes {
+            let (h, p, _) = try ParityTopologyShots.pad(size, scenarios: false, test: self)
+            h.pump(1)
+            let g = try XCTUnwrap(p.selection.groups.first)
+            let rowKey = "selGroup-\(g.id.uuidString)"
+            p.selection.clearActive()
+            h.pump(0.5)
+            h.scrollIntoList(rowKey)
+            try h.tap("topologySplitMore", "\(size): Topology's ⌃", settle: 1.2)
+            _ = try h.onScreen("topologySplitMoreDrawer", "\(size): premise: its drawer")
+            click(h, try h.onScreen(rowKey, "\(size): a Selections row"))
+            XCTAssertNil(h.frames.all["topologySplitMoreDrawer"], "\(size): ★ the drawer closes")
+            XCTAssertEqual(p.selection.activeGroupID, g.id, "\(size): ★ and the row is picked")
+        }
+    }
+
+    func testOnResultsATapOutsideClosesAndStillDoesItsJob() throws {
+        let o = try ResultsRedesignTests.strengthenOutcome()
+        let h = AppBuildHost(ResultsScreen(projectName: "CarriageArms", outcome: o, undo: {}, redo: {},
+                                           resultsModel: ResultsModel(projectName: "CarriageArms", outcome: o)),
+                             size: AppBuildHost.landscape13, test: self)
+        h.pump(2)
+        try h.tap("resultsSplitMore", "Results' ⌃", settle: 1.2)
+        _ = try h.onScreen("resultsSplitMoreDrawer", "premise: its drawer")
+        try h.tap("resultsDetailsButton", "★ Details", settle: 1.5)
+        XCTAssertNil(h.frames.all["resultsSplitMoreDrawer"], "★ a tap on Details closes the drawer")
+        XCTAssertNotNil(h.frames.all["resultsDetailsPanel"], "★ … and Details still opens")
+    }
+
+    /// RED CONTROL: without the rule a tap on a Selections row leaves the drawer up.
+    func testRedControlNoOutsideTap() throws {
+        CornerDrawers.controlNoOutsideTap = true
+        addTeardownBlock { @MainActor in CornerDrawers.controlNoOutsideTap = false }
+        let (h, p, _) = try latticeStage(AppBuildHost.landscape13)
+        let g = try XCTUnwrap(p.latticeFaceGroups.first)
+        try h.tap("latticeSplitMore", "the ⌃", settle: 1.2)
+        click(h, try h.onScreen("selGroup-\(g.id.uuidString)", "a Selections row"))
+        XCTAssertNotNil(h.frames.all["latticeSplitMoreDrawer"], "RED: the drawer stays up")
     }
 }
 #endif

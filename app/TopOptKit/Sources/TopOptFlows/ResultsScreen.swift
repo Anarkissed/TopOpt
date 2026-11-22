@@ -361,6 +361,7 @@ public struct ResultsScreen: View {
             let d = all["resultsDetailsPanel"]?.height ?? 0
             if abs(d - drawerHeight) > 0.5 { drawerHeight = d; liftModel() }
         }
+        .cornerTapCloses(model.cornerDrawers)   // ★ his 11-22: a tap anywhere outside the ⌃'s drawer closes it
         .animation(DS.Motion.sheetIn, value: detailsOpen)
         .onChange(of: detailsOpen) { _ in liftModel() }
         .transition(.opacity)
@@ -2132,6 +2133,7 @@ public struct ResultsScreen: View {
                 ViewProjectionPair()   // ★ B2 (note 1): [Orthographic │ Perspective], left of the gizmo, as on every page
                     .padding(.top, (OrientationGizmoView.standardSize - ViewProjectionPair.height) / 2)   // ★ R-a2: as the workspace
                 OrientationGizmoView(camera: cameraModel)
+                    .closesCornerDrawersOnTouch(model.cornerDrawers)   // ★ his 11-22: a touch on the view cube closes the ⌃'s drawer
             }
             Spacer()
         }
