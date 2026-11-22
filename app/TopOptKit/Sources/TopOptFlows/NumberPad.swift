@@ -55,9 +55,14 @@ public struct NumberPadEntry: Equatable, Sendable {
     /// a control it never had.
     public var allowsNegative: Bool = false
 
-    public init(seed: String, allowsDecimal: Bool, allowsNegative: Bool = false) {
+    /// ★ his iPad notes 11-22 (DSNumberPad): the longest text this entry takes. `maxLength` everywhere but the strength
+    /// check's values, which are typed as plain decimals down to 0.00000000001 (no exponent key on the pad).
+    public var limit: Int = NumberPadEntry.maxLength
+
+    public init(seed: String, allowsDecimal: Bool, allowsNegative: Bool = false, limit: Int = NumberPadEntry.maxLength) {
         self.allowsDecimal = allowsDecimal
         self.allowsNegative = allowsNegative
+        self.limit = limit
         self.text = seed
         self.touched = false
     }
@@ -74,14 +79,14 @@ public struct NumberPadEntry: Equatable, Sendable {
         case .digit(let d):
             if !touched { text = ""; touched = true }   // first keystroke clears the seed
             if text == "0" { text = "" }                // no leading zeros ("0"+"5" -> "5")
-            guard text.count < Self.maxLength else { return }
+            guard text.count < limit else { return }
             text += String(d)
         case .dot:
             guard allowsDecimal else { return }
             if !touched { text = ""; touched = true }
             if text.isEmpty { text = "0" }              // ".5" reads as "0.5"
             guard !text.contains(".") else { return }   // only one point
-            guard text.count < Self.maxLength else { return }
+            guard text.count < limit else { return }
             text += "."
         case .delete:
             touched = true
@@ -167,6 +172,13 @@ struct NumberPad: View {
         /// The pad keeps the nearest allowed value on close (and says so). False: the number does it itself (NumberField,
         /// which commits once, on close).
         var clampsOnClose = true
+        /// ★ his iPad notes 11-22 (DSNumberPad): the text the pad opens with, as the field shows it (nil: `seed` as the chips
+        /// format it, 2 decimals at most).
+        var seedText: String? = nil
+        /// ★ 11-22: what the empty pad shows, greyed (an Auto field's Auto number; nil: "0").
+        var placeholder: String? = nil
+        /// ★ 11-22: the longest text it takes (`NumberPadEntry.limit`).
+        var maxLength: Int = NumberPadEntry.maxLength
 
         /// "Depth · 1 to 40 mm" (the name alone without a range, the range alone without a name).
         var header: String {
@@ -186,6 +198,8 @@ struct NumberPad: View {
     let onValue: (Double?) -> Void
     /// Done. nil = dismiss the presentation it sits in (the popover a field without a host falls back to).
     var onDone: (() -> Void)? = nil
+    /// ★ his iPad notes 11-22 (DSNumberPad): the typed TEXT on every keystroke, for a field whose own commit reads text.
+    var onText: ((String) -> Void)? = nil
 
     /// §4.33's measures.
     static let width: CGFloat = 276
@@ -202,14 +216,18 @@ struct NumberPad: View {
     @State private var caretOn = true
     @ScaledMetric(relativeTo: .title2) private var numberSize: CGFloat = 24
 
-    init(config: Config, seed: Double?, onValue: @escaping (Double?) -> Void, onDone: (() -> Void)? = nil) {
+    init(config: Config, seed: Double?, onValue: @escaping (Double?) -> Void, onDone: (() -> Void)? = nil,
+         onText: ((String) -> Void)? = nil) {
         self.config = config
         self.seed = seed
         self.onValue = onValue
         self.onDone = onDone
-        _entry = State(initialValue: NumberPadEntry(seedValue: seed,
+        self.onText = onText
+        _entry = State(initialValue: NumberPadEntry(seed: config.seedText
+                                                        ?? NumberPadEntry.seedString(seed, allowsDecimal: config.allowsDecimal),
                                                     allowsDecimal: config.allowsDecimal,
-                                                    allowsNegative: config.allowsNegative))
+                                                    allowsNegative: config.allowsNegative,
+                                                    limit: config.maxLength))
     }
 
     var body: some View {
@@ -253,9 +271,10 @@ struct NumberPad: View {
         HStack(alignment: .firstTextBaseline, spacing: DS.Space.xs) {
             Spacer(minLength: DS.Space.s)
             HStack(spacing: 1) {
-                Text(entry.text.isEmpty ? "0" : entry.text)
+                Text(entry.text.isEmpty ? (config.placeholder ?? "0") : entry.text)
                     .font(.system(size: numberSize, weight: .heavy)).monospacedDigit()
                     .tracking(-0.5)
+                    .lineLimit(1).minimumScaleFactor(0.5)   // ★ 11-22: a long decimal (0.00000000001) stays on its line
                     .foregroundStyle(entry.text.isEmpty ? DS.Color.textTertiary.color : DS.Color.textPrimary.color)
                     .padding(.horizontal, entry.touched ? 0 : 3)
                     // ★ §4.33: the value shows SELECTED until the first key (which replaces it)
@@ -353,6 +372,7 @@ struct NumberPad: View {
         entry.press(key)
         caretOn = true
         onValue(entry.value)
+        onText?(entry.text)
     }
 
     /// A key's frame in the pad's own window (the popover's), for the hosted tests to click.
@@ -382,5 +402,12 @@ extension View {
     func numberPad(_ presented: Binding<Bool>, config: NumberPad.Config, seed: Double?,
                    onValue: @escaping (Double?) -> Void) -> some View {
         modifier(NumberPadField(presented: presented, config: config, seed: seed, onValue: onValue))
+    }
+
+    /// ★ his iPad notes 11-22 (DSNumberPad): the same pad for a field whose commit reads the typed TEXT (`onText`, on every
+    /// keystroke; with a keyboard connected, on Return). The field commits it itself as the pad closes.
+    func numberPad(_ presented: Binding<Bool>, config: NumberPad.Config, seed: Double?,
+                   onText: @escaping (String) -> Void) -> some View {
+        modifier(NumberPadField(presented: presented, config: config, seed: seed, onValue: { _ in }, onText: onText))
     }
 }
