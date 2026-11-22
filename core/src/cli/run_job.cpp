@@ -723,9 +723,17 @@ TriangleMesh keep_regions_exact(const TriangleMesh& exported, const TriangleMesh
   // overlap by that much and fuse across a volume: cut exactly at K, they touched
   // along lines on K's boundary (his plate: 22 four-way edges at r = 7.0).
   constexpr double kFuse = 0.05;  // mm, below any print resolution
+  // The export side is cut with each region grown by kCut. Two regions that meet only
+  // along an edge (diagonal neighbours on a face) otherwise leave the export's two
+  // other quadrants touching along that edge wherever the export stands proud of the
+  // part, where no part solid fuses them: his stand v4, 2 four-way edges 0.06 mm tall
+  // above the top face, and every version refused as "not one clean solid". Grown,
+  // the regions overlap there. kCut stays under kFuse so the two pieces still fuse
+  // across a volume.
+  constexpr double kCut = 0.01;  // mm
   manifold::Manifold K, K_part;
   for (const KeepRegion& k : keeps) {
-    K = K + keep_region_solid(k, 0.0);
+    K = K + keep_region_solid(k, kCut);
     K_part = K_part + keep_region_solid(k, kFuse);
   }
   // The voxel surface is NUDGED 1 um along a slanted direction first. A part face on
@@ -11970,6 +11978,11 @@ void apply_build_direction_options(MinimizePlasticOptions& options,
 }
 
 }  // namespace
+
+TriangleMesh fuse_keep_regions(const TriangleMesh& exported, const TriangleMesh& part,
+                               const std::vector<KeepRegion>& keeps, double min_piece_mm3) {
+  return keep_regions_exact(exported, part, keeps, min_piece_mm3);
+}
 
 TriangleMesh cut_keep_clears(const TriangleMesh& file, const JobDescription& job,
                              const StepModel& model, double min_piece_mm3, double* cut_mm3,

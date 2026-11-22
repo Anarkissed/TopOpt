@@ -713,6 +713,37 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
       rep.layers.one_ended.erase(std::remove_if(rep.layers.one_ended.begin(), rep.layers.one_ended.end(), at_speck),
                                  rep.layers.one_ended.end());
     }
+    // OS1 B (his ruling R2): a finding on a shallow run's rounded end (within its half width + 0.35 mm of its place in
+    // plan, from a layer under its underside to its top) is not answered by leaving bars out: that end is made flat
+    // again (MeshSpec::flat_domes_at) and the pass made again; counted.
+    if (rep.tubes && !rep.shells.dome_ends.empty()) {
+      std::size_t flattened = 0;
+      auto on_dome = [&](double x, double y, double z) {
+        for (const auto& d : rep.shells.dome_ends) {
+          const double r = d[3];
+          if (std::hypot(x - d[0], y - d[1]) > r + 0.35 || z < d[2] - r - 2.0 * half_layer || z > d[2] + r + 2.0 * half_layer) continue;
+          const Vec3 at{d[0], d[1], d[2]};
+          bool listed = false;
+          for (const Vec3& f : ms.flat_domes_at) listed = listed || (f.x == at.x && f.y == at.y && f.z == at.z);
+          if (!listed) { ms.flat_domes_at.push_back(at); ++flattened; }
+          return true;
+        }
+        return false;
+      };
+      const std::size_t before = flattened;
+      for (const LayerReport::MidAir& m : rep.layers.mid_air) on_dome(m.x, m.y, m.z);
+      for (std::vector<LayerReport::OneEnded>* v : {&rep.layers.one_ended, &rep.layers.long_bridges})
+        for (const LayerReport::OneEnded& o : *v) on_dome(o.x, o.y, o.z);
+      // Leg T (OS1 R2 completed, the lead's ruling 2026-11-21): a round that flattens domes is not one of the check's
+      // passes: the passes left to leave out and post are as many as with no domes (it converges where it converged
+      // without them, release 12); at most `most` such rounds.
+      if (flattened > before && rep.dome_rounds < most) {
+        rep.domes_flattened += flattened - before;
+        ++rep.dome_rounds;
+        --pass;
+        continue;
+      }
+    }
     // O8: a post at the middle of each long stretch that has material straight below it, from that material up into
     // the bar. With nothing below, the run stands as it is.
     std::vector<MeshSpec::Post> stand_posts;
@@ -810,6 +841,7 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
       return m2;
     }
   }
+  rep.flat_domes_at = ms.flat_domes_at;   // OS1 B, leg U: the held-flat ends, for the Exact preview
   rep.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
   if (report) *report = rep;
   return mesh;

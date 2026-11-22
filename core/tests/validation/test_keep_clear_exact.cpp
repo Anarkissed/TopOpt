@@ -325,6 +325,31 @@ int main() {
           "(j) the part and the plug, each one closed shell, in both files");
   }
 
+  // (k) KEEP REGIONS THAT MEET ONLY ALONG AN EDGE (his stand v4, 2026-11-20). Two keep
+  // boxes are diagonal neighbours: they share the line x = 10, y = 10 and nothing else.
+  // The export stands 0.07 mm proud of the part's top face, as a voxel surface does.
+  // Cut at the regions exactly, the proud skin's other two quadrants touched along that
+  // line with no part solid there to fuse them: an edge on four triangles, and the file
+  // refused as not one clean solid.
+  {
+    const manifold::Manifold part_k = box(0.0, 0.0, 0.0, 20.0, 20.0, 10.0);
+    const manifold::Manifold file_k = box(0.0, 0.0, 0.0, 20.0, 20.0, 10.07);
+    KeepRegion a, b;
+    a.min = Vec3{2.0, 2.0, 9.0};
+    a.max = Vec3{10.0, 10.0, 12.0};
+    b.min = Vec3{10.0, 10.0, 9.0};
+    b.max = Vec3{18.0, 18.0, 12.0};
+    const TriangleMesh fused =
+        fuse_keep_regions(to_mesh(file_k), to_mesh(part_k), {a, b}, 0.01);
+    const WrittenAudit wk = audit_as_written(fused);
+    std::printf("[kc] (k) diagonal keep regions under a proud skin: %d edge(s) on >2 "
+                "triangles, %d open, %d point contact(s), %d body(ies)\n",
+                wk.non_manifold_edges, wk.boundary_edges, wk.non_manifold_vertices, wk.bodies);
+    CHECK(wk.non_manifold_edges == 0 && wk.boundary_edges == 0 && wk.non_manifold_vertices == 0,
+          "(k) keep regions meeting along an edge leave a clean file");
+    CHECK(wk.bodies == 1, "(k) and it is still one body");
+  }
+
   if (g_failures == 0) {
     std::printf("keep clear exact: all %d checks passed\n", g_checks);
     return 0;

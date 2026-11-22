@@ -17,11 +17,12 @@ import TopOptKit
 
 // MARK: - routing
 
-enum LibraryRoute: Equatable { case home, project(UUID), unfiled, part(UUID), storage }
+/// ★ His iPad notes 11-22: `details` is a version's full Details page.
+enum LibraryRoute: Equatable { case home, project(UUID), unfiled, part(UUID), storage, details(UUID) }
 
-/// What Compare opens on.
+/// What Compare opens on. ★ His iPad notes 11-22: `new` is Compare new (the former pick against the results never compared).
 struct LibraryCompareRequest: Equatable, Identifiable {
-    enum Scope: Equatable { case all, version(UUID) }
+    enum Scope: Equatable { case all, version(UUID), new }
     let part: UUID
     var scope: Scope
     var id: String { "\(part)-\(scope)" }
@@ -141,6 +142,10 @@ public struct LibraryRootView: View {
                                      ungroup: { library.ungroup() }) }
         case .storage:
             LibraryStorageView(library: library, back: { route = .home })
+        case let .details(folder):
+            // ★ his iPad notes 11-22: a version's full Details page; back is its part's page
+            LibraryVersionDetailsView(model: model, library: library, folder: folder,
+                                      back: { route = library.index.part(containing: folder).map { .part($0.id) } ?? .home })
         }
     }
 }
@@ -875,6 +880,10 @@ struct PartFolderView: View {
         }
     }
 
+    /// ★ His iPad notes 11-22 (decision 1): "It should default to the newest at the top - with a whole bottom section for those
+    /// that have been rejected." Newest (the default): every card by when it last changed, drafts and running versions mixed
+    /// in by that date, a branch no longer pinned under its parent. The other sorts are as they were. `LibraryOrder.sections`
+    /// then puts a version whose EVERY result is rejected in the Rejected section at the bottom.
     private var cards: [LibraryVersion] {
         let pending = part.versions.filter { library.isDraft($0) || model.runningIDs.contains($0.folderID) }
         var done = part.versions.filter { !library.isDraft($0) && !model.runningIDs.contains($0.folderID) }
@@ -886,21 +895,47 @@ struct PartFolderView: View {
         }
         // ★ a version whose every result is hidden goes (one still reading its results stays)
         if rejected != .shown { done = done.filter { v in v.summary == nil ? rejected == .hidden : !shown(v).isEmpty } }
+        let shownPending = filter == .all && rejected != .only ? pending : []
         switch sort {
-        // his decision 11: a branch (v4.1) sits right under the version it came from
-        case .newest: done.sort { VersionNumber.newestFirst($0.number, $1.number) }
+        case .newest: return LibraryOrder.newestFirst(shownPending + done) { library.lastChanged($0) }   // ★ 11-22
         case .oldest: done.sort { $0.number < $1.number }
         case .recent: done.sort { (library.snapshots[$0.folderID]?.savedAt ?? .distantPast) > (library.snapshots[$1.folderID]?.savedAt ?? .distantPast) }
         case .rated: done.sort { ($0.marks.map(\.stars).max() ?? 0, $0.number) > ($1.marks.map(\.stars).max() ?? 0, $1.number) }
         case .lightest: done.sort { (best($0)?.massGrams ?? .infinity) < (best($1)?.massGrams ?? .infinity) }
         case .strongest: done.sort { (best($0)?.worstCaseMargin ?? -1) > (best($1)?.worstCaseMargin ?? -1) }
         }
-        return (filter == .all && rejected != .only ? pending.sorted { VersionNumber.newestFirst($0.number, $1.number) } : []) + done
+        return shownPending.sorted { VersionNumber.newestFirst($0.number, $1.number) } + done
     }
 
     /// The cards in rows of `columnCount`, for the grid (cards in a row share the tallest one's height).
-    private var rows: [[LibraryVersion]] {
+    private func rows(_ cards: [LibraryVersion]) -> [[LibraryVersion]] {
         stride(from: 0, to: cards.count, by: columnCount).map { Array(cards[$0 ..< min($0 + columnCount, cards.count)]) }
+    }
+
+    /// ★ His iPad notes 11-05 (L1): a card per version, a third of the width (half in portrait). "As tall as required": each row
+    /// takes its tallest card's height.
+    private func grid(_ cards: [LibraryVersion]) -> some View {
+        Grid(alignment: .topLeading, horizontalSpacing: DS.Space.xl, verticalSpacing: DS.Space.xl) {
+            ForEach(rows(cards), id: \.first!.folderID) { row in
+                GridRow {
+                    ForEach(row, id: \.folderID) { v in
+                        LibraryVersionCard(model: model, library: library, part: part, version: v, results: shown(v),
+                                           quickLook: { quickLook(v.folderID, $0) },
+                                           compareResults: { compare(LibraryCompareRequest(part: part.id, scope: .version(v.folderID))) },
+                                           open: { openFolder(v.folderID) },
+                                           rename: { renaming = (v.folderID, v.name ?? "") },
+                                           delete: { deleting = v },
+                                           // ★ his iPad notes 11-22: a picture's or a result name's tap opens it on its results;
+                                           // Details (⋯ or a long press); Compare new on the former pick's line
+                                           openOn: { LibraryCardOpen.open(model: model, library: library, folder: v.folderID, result: $0) },
+                                           details: { library.route = .details(v.folderID) },
+                                           compareNew: { compare(LibraryCompareRequest(part: part.id, scope: .new)) })
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    }
+                    ForEach(row.count ..< columnCount, id: \.self) { _ in Color.clear.frame(maxWidth: .infinity, maxHeight: 1) }
+                }
+            }
+        }
     }
 
     private var openTarget: LibraryVersion? {
@@ -959,25 +994,16 @@ struct PartFolderView: View {
                     .accessibilityIdentifier("library-sort")
                 }
                 .padding(.top, DS.Space.s).padding(.bottom, DS.Space.xs)
-                // ★ His iPad notes 11-05 (L1): a card per version, a third of the width (half in portrait), newest first, a
-                // branch right after the version it came from. "As tall as required": each row takes its tallest card's height.
-                Grid(alignment: .topLeading, horizontalSpacing: DS.Space.xl, verticalSpacing: DS.Space.xl) {
-                    ForEach(rows, id: \.first!.folderID) { row in
-                        GridRow {
-                            ForEach(row, id: \.folderID) { v in
-                                LibraryVersionCard(model: model, library: library, part: part, version: v, results: shown(v),
-                                                   quickLook: { quickLook(v.folderID, $0) },
-                                                   compareResults: { compare(LibraryCompareRequest(part: part.id, scope: .version(v.folderID))) },
-                                                   open: { openFolder(v.folderID) },
-                                                   rename: { renaming = (v.folderID, v.name ?? "") },
-                                                   delete: { deleting = v })
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                            }
-                            ForEach(row.count ..< columnCount, id: \.self) { _ in Color.clear.frame(maxWidth: .infinity, maxHeight: 1) }
-                        }
-                    }
+                // ★ His iPad notes 11-22 (decision 1): newest at the top; the versions he rejected whole in a bottom section
+                let split = LibraryOrder.sections(cards)
+                grid(split.top)
+                    .padding(.top, DS.Space.ml)
+                if !split.rejected.isEmpty {
+                    Text("Rejected").dsStyle(DS.TypeScale.headline)
+                        .background(DSParts.publish("library-rejected-section"))
+                        .padding(.top, DS.Space.xl3).padding(.bottom, DS.Space.ml)
+                    grid(split.rejected)
                 }
-                .padding(.top, DS.Space.ml)
                 if cards.isEmpty {
                     Text("Nothing here yet.").dsStyle(DS.TypeScale.body).foregroundStyle(DS.Color.textTertiary.color).padding(.top, DS.Space.xl)
                 }
@@ -1130,25 +1156,43 @@ extension LibraryFlag {
 }
 
 /// A result's flag on its line: "Rejected ✕", "Print ✕". ★ His answer (L2): a tap takes it off, Undo in the toast; 44 pt.
+/// ★ His iPad notes 11-22 (decision 3): "Picked" wears the same × (`picked`); its tap un-picks.
 struct LibraryFlagChip: View {
-    let flag: LibraryFlag
+    let title: String
+    let colour: RGBA
+    let glyph: String?
     let key: String
     let remove: () -> Void
+
+    init(title: String, colour: RGBA, glyph: String? = nil, key: String, remove: @escaping () -> Void) {
+        self.title = title; self.colour = colour; self.glyph = glyph; self.key = key; self.remove = remove
+    }
+
+    init(flag: LibraryFlag, key: String, remove: @escaping () -> Void) {
+        self.init(title: flag.title, colour: flag.colour, glyph: flag.glyph, key: key, remove: remove)
+    }
+
+    /// ★ 11-22: "Picked ×", in the accent the Picked tag always wore; its tap un-picks.
+    static func picked(key: String, unpick: @escaping () -> Void) -> LibraryFlagChip {
+        LibraryFlagChip(title: pickedTitle, colour: DS.Color.accent, key: key, remove: unpick)
+    }
+    static let pickedTitle = "Picked"
+
     var body: some View {
         Button(action: remove) {
             HStack(spacing: 4) {
-                if let g = flag.glyph { Image(systemName: g).font(.system(size: 10, weight: .semibold)) }
-                Text(flag.title).font(.system(size: 11.5, weight: .semibold)).lineLimit(1).fixedSize()
+                if let g = glyph { Image(systemName: g).font(.system(size: 10, weight: .semibold)) }
+                Text(title).font(.system(size: 11.5, weight: .semibold)).lineLimit(1).fixedSize()
                 Image(systemName: "xmark").font(.system(size: 8.5, weight: .bold))
             }
-            .foregroundStyle(flag.colour.color)
+            .foregroundStyle(colour.color)
             .padding(.horizontal, 8).frame(height: 24)
-            .background(Capsule().fill(flag.colour.opacity(0.14).color))
-            .overlay(Capsule().strokeBorder(flag.colour.opacity(0.5).color, lineWidth: 1))
+            .background(Capsule().fill(colour.opacity(0.14).color))
+            .overlay(Capsule().strokeBorder(colour.opacity(0.5).color, lineWidth: 1))
             .frame(minWidth: DSParts.target, minHeight: DSParts.target).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Remove \(flag.title)")
+        .accessibilityLabel("Remove \(title)")
         .background(DSParts.publish(key))
         .accessibilityIdentifier(key)
     }
@@ -1157,8 +1201,9 @@ struct LibraryFlagChip: View {
 /// One version as a card a third of the page wide (★ his iPad notes 11-05, ledger L1): its results small, side by side, just
 /// to show how many; then "v7", Draft / "from v4", the date, ⋯, and its name; then one line per result (his answer "On the
 /// card"): "v2b · +10 %  117 g · 8.7×  ★★★  ⋯", with Picked and its flags under it. As tall as it needs (his add): nothing is
-/// squeezed. Frames: "library-version-v<n>" (and "-draft", "-from", "-running", "-menu", "-open"); each result's small picture
-/// "library-mini-v<n><letter>"; its line "library-result-v<n><letter>" (and "-picked", "-stars", "-menu", "-rejected", "-print").
+/// squeezed. Frames: "library-version-v<n>" (and "-draft", "-from", "-running", "-menu", "-open", "-picture"); each result's
+/// small picture "library-mini-v<n><letter>"; its line "library-result-v<n><letter>" (and "-name", "-picked", "-stars", "-menu",
+/// "-rejected", "-print", "-compare-new"). ★ His iPad notes 11-22: a picture's or a name's tap opens the version on its results.
 struct LibraryVersionCard: View {
     @ObservedObject var model: AppModel
     @ObservedObject var library: LibraryModel
@@ -1166,12 +1211,19 @@ struct LibraryVersionCard: View {
     let version: LibraryVersion
     /// The results the page shows (the Rejected chip may hide some).
     let results: [Int]
-    /// Quick look on one result (a small picture's tap), or nil for the result the version shows.
+    /// Quick look (the ⋯'s), on one result or nil for the result the version shows. (★ 11-22: a picture's tap opens it now.)
     let quickLook: (Int?) -> Void
     let compareResults: () -> Void
     let open: () -> Void
     let rename: () -> Void
     let delete: () -> Void
+    /// ★ His iPad notes 11-22 (decision 4): open this version in the workspace on its results — on one result (a small
+    /// picture's or a result name's tap), or nil for the one it shows. A draft or a running version simply opens.
+    var openOn: (Int?) -> Void = { _ in }
+    /// ★ 11-22: its full Details page (the ⋯'s Details, or a long press's).
+    var details: () -> Void = {}
+    /// ★ 11-22: Compare new — the former pick against the results never compared (its chip on the former pick's line).
+    var compareNew: () -> Void = {}
 
     /// The small pictures' height: three fit across a card at 13″ (about 125 × 160); one alone reads like a part card's.
     static let pictureHeight: CGFloat = 160
@@ -1230,22 +1282,35 @@ struct LibraryVersionCard: View {
         .background(shape.fill(DSCards.fill.color))
         .overlay(shape.strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
         .background(DSParts.publish(key))
+        .contentShape(shape)
+        #if os(iOS)
+        .contentShape(.contextMenuPreview, shape)   // the long press lifts the card with its own corners
+        #endif
+        // ★ his iPad notes 11-22 (decision 4): a long press on the card is the ⋯'s menu, Details first
+        .contextMenu { versionMenu(pending: pending) }
     }
 
-    /// Its results small, side by side (just how many), the picked one ringed, a rejected one dim; a tap is Quick look of that
-    /// one. A draft shows what it came from, dim.
+    /// Its results small, side by side (just how many), the picked one ringed, a rejected one dim. ★ His iPad notes 11-22
+    /// (decision 4): "If I tap on an image it should automatically open up" — a tap opens the version on THAT result (it was
+    /// Quick look). A draft shows what it came from, dim; its tap opens the draft.
     @ViewBuilder private func picture(pending: Bool) -> some View {
         let v = version
         if pending || results.isEmpty {
-            LibraryPicture(image: parentPicture, dim: true)
-                .frame(maxWidth: .infinity).frame(height: Self.pictureHeight)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            Button { openOn(nil) } label: {
+                LibraryPicture(image: parentPicture, dim: true)
+                    .frame(maxWidth: .infinity).frame(height: Self.pictureHeight)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open v\(v.number)")
+            .background(DSParts.publish(key + "-picture"))
         } else {
             HStack(spacing: 6) {
                 ForEach(results, id: \.self) { r in
                     let picked = library.chosenResult(folder: v.folderID) == r
                     let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    Button { quickLook(r) } label: {
+                    Button { openOn(r) } label: {
                         LibraryPicture(image: library.thumbnails[CompareItem(folder: v.folderID, result: r)], dim: v.mark(for: r).rejected)
                             .frame(maxWidth: .infinity).frame(height: Self.pictureHeight)
                             .clipShape(shape)
@@ -1258,7 +1323,7 @@ struct LibraryVersionCard: View {
                             .contentShape(shape)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("v\(v.number)\(ResultMark.letter(r))")
+                    .accessibilityLabel("Open v\(v.number)\(ResultMark.letter(r))")
                     .background(DSParts.publish("library-mini-v\(v.number)\(ResultMark.letter(r))"))
                 }
             }
@@ -1272,17 +1337,28 @@ struct LibraryVersionCard: View {
     }
 
     /// One result's line: "v2b · +10 %", weight · strength, its stars, its ⋯; under it Picked and its flags (when it has any).
+    /// ★ His iPad notes 11-22: a tap on its name opens the version on it (frame "-name"); "Picked ×" un-picks; the former
+    /// Compare pick's line offers "Compare new" (frame "-compare-new").
     private func resultLine(_ r: Int) -> some View {
         let v = version
         let k = "library-result-v\(v.number)\(ResultMark.letter(r))"
         let mark = v.mark(for: r)
         let picked = library.chosenResult(folder: v.folderID) == r   // ★ the part's ONE chosen result
+        let comparesNew = library.formerPick(of: part) == LibraryChosen(folder: v.folderID, result: r)
+            && !library.newResults(of: part).isEmpty
         let s = v.summary?[safe: r]
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                Text(LibraryStyle.resultTitle(number: "\(v.number)", result: r, word: s?.word))   // ★ Q1: "v2b · +10 %"
-                    .font(.system(size: 12.5, weight: .bold)).foregroundStyle(DS.Color.textPrimary.color)
-                    .lineLimit(1).minimumScaleFactor(0.8)
+                Button { openOn(r) } label: {
+                    Text(LibraryStyle.resultTitle(number: "\(v.number)", result: r, word: s?.word))   // ★ Q1: "v2b · +10 %"
+                        .font(.system(size: 12.5, weight: .bold)).foregroundStyle(DS.Color.textPrimary.color)
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                        .frame(minWidth: DSParts.target, minHeight: DSParts.target, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Open v\(v.number)\(ResultMark.letter(r))")
+                .background(DSParts.publish(k + "-name"))
                 Text(s.map { "\(LibraryStyle.grams($0.massGrams)) · \(LibraryStyle.margin($0.worstCaseMargin))" } ?? "")
                     .font(.system(size: 12)).monospacedDigit().foregroundStyle(DS.Color.textTertiary.color).lineLimit(1).fixedSize()
                 Spacer(minLength: 4)
@@ -1295,9 +1371,12 @@ struct LibraryVersionCard: View {
                     .accessibilityIdentifier(k + "-menu")
             }
             .frame(minHeight: DSParts.target)
-            if picked || mark.rejected || mark.printThis || mark.inConsideration {
+            if picked || mark.rejected || mark.printThis || mark.inConsideration || comparesNew {
                 HStack(spacing: 2) {
-                    if picked { DSChip(.accentTag("Picked"), key: k + "-picked") }
+                    // ★ 11-22 (decision 3): "Picked" has its × like "Rejected ×": a tap un-picks (the part has none chosen)
+                    if picked { LibraryFlagChip.picked(key: k + "-picked") { library.unpick(part: part.id) } }
+                    // ★ 11-22 (decision 2): a new version's results cleared this Compare pick: compare only them against it
+                    if comparesNew { DSChip(.fix(LibraryVersionCard.compareNewTitle), key: k + "-compare-new", action: compareNew) }
                     if mark.printThis {
                         LibraryFlagChip(flag: .printThis, key: k + "-print") { library.removeFlag(.printThis, folder: v.folderID, result: r) }
                     }
@@ -1344,9 +1423,14 @@ struct LibraryVersionCard: View {
         }
     }
 
+    /// ★ 11-22: the former Compare pick's chip (≤ 3 words).
+    static let compareNewTitle = "Compare new"
+
     /// app-map's version ⋯: Quick look · Compare its results · Export… · Open v4 · New draft from v4 · Rename · Delete.
+    /// ★ His iPad notes 11-22 (decision 4): Details first (its full page); a long press on the card shows this same menu.
     @ViewBuilder private func versionMenu(pending: Bool) -> some View {
         let v = version
+        Button(action: details) { Label("Details", systemImage: "info.circle") }
         if !pending {
             Button { quickLook(nil) } label: { Label("Quick look", systemImage: "eye") }
             if (v.summary?.count ?? 0) > 1 { Button(action: compareResults) { Label("Compare its results", systemImage: "rectangle.split.3x1") } }

@@ -139,6 +139,9 @@ extension LatticeLayoutSession {
         public var crossGroupTouches = 0
         /// ★ Cut 2 (OJ6): bulges the print check made flush so the part prints (said on screen when above 0).
         public var reliefFlushed = 0
+        /// ★ OS1 B (LatticeReview's leg U): the bridges' rounded ends the print file's check held FLAT, at the runs' own points
+        /// (Exact only; the Draft's is empty): the drawing draws them flat (`OrganicVineShape.tubes(runs:heldFlat:)`).
+        public var flatEnds: [SIMD3<Float>] = []
         /// Segments drawn: one per pair of neighbouring points of every run.
         public var segments: Int { runs.reduce(0) { $0 + Swift.max(0, $1.points.count - 1) } }
     }
@@ -174,6 +177,11 @@ extension LatticeLayoutSession {
     }
 
     /// Lays the weave's preview group by group (latest wins). Needs the stress tensor set first (`setTensor`, `synthetic`).
+    /// x, y, z triples as points (the bridge's flat_ends).
+    static func points(_ xyz: [Double]) -> [SIMD3<Float>] {
+        stride(from: 0, to: xyz.count - xyz.count % 3, by: 3).map { SIMD3(Float(xyz[$0]), Float(xyz[$0 + 1]), Float(xyz[$0 + 2])) }
+    }
+
     public func layOrganic(_ settings: Settings, groups: [OrganicGroup]) async throws -> OrganicResult {
         let mine = beginLay()
         let raw = convert(settings), gs = Self.raw(groups)
@@ -197,6 +205,7 @@ extension LatticeLayoutSession {
                 o.notes = r.notes.map { String($0) }
                 o.crossGroupTouches = Int(r.cross_group_touches)
                 o.reliefFlushed = Int(r.relief_flushed)
+                o.flatEnds = Self.points(Array(r.flat_ends))
                 return o
             }
         } onCancel: { [weak self] in
@@ -322,10 +331,12 @@ extension LatticeLayoutSession {
                 guard let runs = Self.runs(packed: Array(r.runs)) else {
                     throw TopOptError(message: "the Organic preview's runs could not be read")
                 }
-                return OrganicResult(quality: Organic.Quality(rawValue: r.quality) ?? .exact, runs: runs,
-                                     layout: Self.convert(r.layout), strands: Int(r.strands), netStruts: Int(r.net_struts),
-                                     spacingSmallestMM: r.spacing_smallest_mm, spacingLargestMM: r.spacing_largest_mm,
-                                     spacingMeanMM: r.spacing_mean_mm, msTrace: r.ms_trace, ms: r.ms)
+                var o = OrganicResult(quality: Organic.Quality(rawValue: r.quality) ?? .exact, runs: runs,
+                                      layout: Self.convert(r.layout), strands: Int(r.strands), netStruts: Int(r.net_struts),
+                                      spacingSmallestMM: r.spacing_smallest_mm, spacingLargestMM: r.spacing_largest_mm,
+                                      spacingMeanMM: r.spacing_mean_mm, msTrace: r.ms_trace, ms: r.ms)
+                o.flatEnds = Self.points(Array(r.flat_ends))
+                return o
             }
         } onCancel: { [weak self] in
             self?.cancel()

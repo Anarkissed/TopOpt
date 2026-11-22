@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <map>
+#include <set>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -914,8 +915,43 @@ double relief_share(int strand, int region) {   // u in (0, 1], fixed by the str
   return static_cast<double>((x >> 11) + 1) * (1.0 / 9007199254740992.0);
 }
 
+// OG2e (leg S; the owner, 2026-11-21: "can you ensure that adding a no-lattice zone at the face of a "depth variation"
+// latticed wall, flattens it"): is the surface point `on` (outward normal `n`) in a no-lattice zone's footprint: inside
+// the zone (a box or a cylinder, its Expand added in its own plane as the domain adds it), or within 0.05 mm of it, the
+// footprint grown in the face's plane by one line width `lw`. The zone's region id, or 0.
+int zone_footprint_at(const Vec3& on, const Vec3& n, const std::vector<Settings::RegionAsk>& regions, double lw) {
+  // (`lw` here is the growth in the face's plane: one line width, plus the tube's radius where a tube is asked about,
+  // so no part of its round side reaches over the footprint.)
+  auto dot = [](const Vec3& a, const Vec3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; };
+  for (const Settings::RegionAsk& r : regions) {
+    if (r.role != Role::NoLattice || r.zone.kind == Zone::Kind::None) continue;
+    const Zone& z = r.zone;
+    const Vec3 d{on.x - z.centre.x, on.y - z.centre.y, on.z - z.centre.z};
+    const double grow = std::isfinite(r.expand_mm) ? r.expand_mm : 0.0;
+    if (z.kind == Zone::Kind::Box) {
+      bool in = true;
+      for (int k = 0; k < 3 && in; ++k) {
+        const double half = z.half[k] + (k < 2 ? grow : 0.0);
+        const double tol = 0.05 + lw * (1.0 - std::fabs(dot(z.axis[k], n)));
+        in = std::fabs(dot(d, z.axis[k])) <= half + tol;
+      }
+      if (in) return r.id;
+    } else {
+      const Vec3& ax = z.axis[2];
+      const double along = dot(d, ax);
+      const Vec3 rad{d.x - ax.x * along, d.y - ax.y * along, d.z - ax.z * along};
+      const double rl = std::sqrt(dot(rad, rad));
+      const Vec3 ru = rl > 1e-12 ? Vec3{rad.x / rl, rad.y / rl, rad.z / rl} : n;
+      const double tol_ax = 0.05 + lw * (1.0 - std::fabs(dot(ax, n))), tol_rad = 0.05 + lw * (1.0 - std::fabs(dot(ru, n)));
+      if (std::fabs(along) <= z.half[2] + tol_ax && rl <= z.half[0] + grow + tol_rad) return r.id;
+    }
+  }
+  return 0;
+}
+
 void lay_relief(Bars& bars, const StepModel& model, const PartMeasure& part, const std::vector<OrganicGroup>& groups,
-                const std::vector<std::size_t>& first_strand, Outcome::Relief& rep, const std::vector<int>& covered = {}) {
+                const std::vector<std::size_t>& first_strand, Outcome::Relief& rep, const std::vector<int>& covered = {},
+                const std::vector<Settings::RegionAsk>& zones = {}, double line_mm = 0.0, const Domain* domain = nullptr) {
   rep = Outcome::Relief{};
   const OrganicGroup* of_region_cache = nullptr;
   auto group_of = [&](int region) -> const OrganicGroup* {
@@ -930,8 +966,40 @@ void lay_relief(Bars& bars, const StepModel& model, const PartMeasure& part, con
   if (!any) return;
   rep.faces_known = model.triangle_face.size() == model.mesh.triangles.size() && !model.mesh.triangles.empty();
   std::unique_ptr<TriFinder> finder;
-  std::map<const OrganicGroup*, double> beds;   // the bed along each group's build direction
+  // OG2e: the no-lattice zones (none: every lay as before, nothing below reads them).
   const PartMeasure::Probe probe = part.probe();
+  std::vector<Settings::RegionAsk> nl_zones;
+  for (const Settings::RegionAsk& r : zones)
+    if (r.role == Role::NoLattice && r.zone.kind != Zone::Kind::None) nl_zones.push_back(r);
+  std::set<std::pair<int, int>> zone_faces;   // (zone, face) where something was made flush
+  auto face_at = [&](const Vec3& p) {
+    if (!rep.faces_known) return -1;
+    if (!finder) finder = std::make_unique<TriFinder>(model.mesh);
+    const long t = finder->nearest(p);
+    return t >= 0 ? model.triangle_face[static_cast<std::size_t>(t)] : -1;
+  };
+  // OG2e: the zone whose footprint any part of the bar's tube reaches (read every 0.25 mm along it: each point within
+  // its tube (the file's polygon, 1.16 r at most) and a line of the surface, at the face nearest it, along that face's own
+  // normal); 0 for none.
+  auto bar_zone = [&](const Bar& b) {
+    const double r = 0.5 * b.width, L = dist(b.a, b.b), hh = 0.05;
+    const int k = std::max(1, static_cast<int>(std::ceil(L / 0.25)));
+    for (int q = 0; q <= k; ++q) {
+      const double t = static_cast<double>(q) / k;
+      const Vec3 p{b.a.x + (b.b.x - b.a.x) * t, b.a.y + (b.b.y - b.a.y) * t, b.a.z + (b.b.z - b.a.z) * t};
+      const double d = probe.depth(p);
+      if (!(d < 1.16 * r + line_mm)) continue;
+      Vec3 np{probe.depth(Vec3{p.x - hh, p.y, p.z}) - probe.depth(Vec3{p.x + hh, p.y, p.z}),
+              probe.depth(Vec3{p.x, p.y - hh, p.z}) - probe.depth(Vec3{p.x, p.y + hh, p.z}),
+              probe.depth(Vec3{p.x, p.y, p.z - hh}) - probe.depth(Vec3{p.x, p.y, p.z + hh})};
+      const double npl = std::sqrt(np.x * np.x + np.y * np.y + np.z * np.z);
+      if (!(npl > 0.0)) continue;
+      np = {np.x / npl, np.y / npl, np.z / npl};
+      if (const int z = zone_footprint_at(Vec3{p.x + np.x * d, p.y + np.y * d, p.z + np.z * d}, np, nl_zones, line_mm + r)) return z;
+    }
+    return 0;
+  };
+  std::map<const OrganicGroup*, double> beds;   // the bed along each group's build direction
   const Vec3 plo = part.lo(), phi = part.hi();
   const double kDown = std::cos(45.0 * 3.14159265358979323846 / 180.0), kAlong = std::sin(20.0 * 3.14159265358979323846 / 180.0);
   // OG2b (brief E6, leg B; the owner: "Depth variation means to not cut entirely along the plane!"): a weave bar (strands,
@@ -985,6 +1053,15 @@ void lay_relief(Bars& bars, const StepModel& model, const PartMeasure& part, con
       if (std::find(ask.relief_exclude_faces.begin(), ask.relief_exclude_faces.end(), face) != ask.relief_exclude_faces.end())
         continue;
     }
+    if (!nl_zones.empty()) {   // OG2e: any part of the bar at a no-lattice zone's footprint: its bulge is not kept
+      int zone = zone_footprint_at(on, nrm, nl_zones, line_mm + r);
+      if (!zone) zone = bar_zone(b);
+      if (zone) {
+        ++rep.flush_zone_bars;
+        if (const int f = face >= 0 ? face : face_at(on); f >= 0) zone_faces.insert({zone, f});
+        continue;
+      }
+    }
     b.along_proud = ask.face_relief_mm;
     b.along_face = face;
     ++rep.along;
@@ -1020,6 +1097,25 @@ void lay_relief(Bars& bars, const StepModel& model, const PartMeasure& part, con
       nrm = {nrm.x / nl, nrm.y / nl, nrm.z / nl};
       const Vec3 up{ask.build_dir.x / ul, ask.build_dir.y / ul, ask.build_dir.z / ul};
       if (nrm.x * up.x + nrm.y * up.y + nrm.z * up.z < -kDown) { ++rep.flush_down; continue; }
+      if (!nl_zones.empty()) {   // OG2e: an end at a no-lattice zone's footprint stays flush (its proud tip would lean out
+        // along its bar by up to the relief / the sine of its angle: that reach, with its round cap, is asked about too)
+        const double rr = 0.5 * b.width;
+        const double Lb = dist(end, other);
+        double lean = 0.0;
+        if (Lb > 0.0) {
+          const double c = std::fabs(((end.x - other.x) * nrm.x + (end.y - other.y) * nrm.y + (end.z - other.z) * nrm.z) / Lb);
+          lean = c > kAlong ? ask.face_relief_mm * std::sqrt(std::max(0.0, 1.0 - c * c)) / c : 0.0;
+        }
+        const double de = std::max(0.0, probe.depth(end));   // the face's point under the end (an end may sit below it)
+        const Vec3 on_end{end.x + nrm.x * de, end.y + nrm.y * de, end.z + nrm.z * de};
+        int zone = zone_footprint_at(on_end, nrm, nl_zones, line_mm + rr + lean);
+        if (!zone) zone = bar_zone(b);   // the file keeps a proud bar's whole tube: none of it may reach the footprint
+        if (zone) {
+          ++rep.flush_zone_ends;
+          if (const int f = face_at(end); f >= 0) zone_faces.insert({zone, f});
+          continue;
+        }
+      }
       auto found = beds.find(g);
       if (found == beds.end()) {
         double lowest = std::numeric_limits<double>::infinity();
@@ -1054,6 +1150,56 @@ void lay_relief(Bars& bars, const StepModel& model, const PartMeasure& part, con
       rep.grew_mm[4] = std::max(rep.grew_mm[4], plo.z - (tip.z - r));
       rep.grew_mm[5] = std::max(rep.grew_mm[5], tip.z + r - phi.z);
     }
+  }
+  std::unique_ptr<Domain::Probe> dprobe;   // OG2f: read only when a footprint was found
+  if (domain && !zone_faces.empty()) dprobe = std::make_unique<Domain::Probe>(domain->probe());
+  // OG2e: the footprints found, each face's area inside it (its triangles sampled at about 0.25 mm).
+  for (const auto& [zone, face] : zone_faces) {
+    Outcome::Relief::ZoneFootprint fp;
+    fp.zone = zone;
+    fp.face = face;
+    std::vector<Settings::RegionAsk> one;
+    for (const Settings::RegionAsk& r : nl_zones)
+      if (r.id == zone) one.push_back(r);
+    for (std::size_t t = 0; t < model.mesh.triangles.size() && face >= 0 && rep.faces_known; ++t) {
+      if (model.triangle_face[t] != face) continue;
+      const auto& tri = model.mesh.triangles[t];
+      const Vec3 A = model.mesh.vertices[static_cast<std::size_t>(tri[0])], B = model.mesh.vertices[static_cast<std::size_t>(tri[1])],
+                 C = model.mesh.vertices[static_cast<std::size_t>(tri[2])];
+      const Vec3 u{B.x - A.x, B.y - A.y, B.z - A.z}, v{C.x - A.x, C.y - A.y, C.z - A.z};
+      Vec3 nn{u.y * v.z - u.z * v.y, u.z * v.x - u.x * v.z, u.x * v.y - u.y * v.x};
+      const double area = 0.5 * std::sqrt(nn.x * nn.x + nn.y * nn.y + nn.z * nn.z);
+      if (!(area > 0.0)) continue;
+      nn = {nn.x / (2 * area), nn.y / (2 * area), nn.z / (2 * area)};
+      const int m = std::max(1, static_cast<int>(std::ceil(std::max({dist(A, B), dist(B, C), dist(C, A)}) / 0.25)));
+      std::size_t inside = 0, thin = 0;
+      const double two = 2.0 * line_mm, st = 0.05;
+      for (int i = 0; i < m; ++i)
+        for (int j = 0; j < m - i; ++j) {   // the centroids of the m^2 small triangles (the "up" ones are enough here)
+          const double s1 = (i + 1.0 / 3.0) / m, s2 = (j + 1.0 / 3.0) / m;
+          const Vec3 q{A.x + u.x * s1 + v.x * s2, A.y + u.y * s1 + v.y * s2, A.z + u.z * s1 + v.z * s2};
+          inside += zone_footprint_at(q, nn, one, line_mm) != 0;
+          // OG2f: the zone's solid under this place, along the face's normal, inside the part: under two lines, none
+          // was made (Domain::Probe::where)
+          if (!(two > 0.0)) continue;
+          double held = 0.0;
+          bool deep = false;
+          for (double t = 0.5 * st; t < two + st && !deep; t += st) {
+            const Vec3 w{q.x - nn.x * t, q.y - nn.y * t, q.z - nn.z * t};
+            if (!zone_footprint_at(w, nn, one, -0.05) || !(probe.depth(w) > 0.0)) continue;
+            if (t > two) deep = true; else held += st;
+          }
+          if (!deep && held > 0.0 && held < two && dprobe) {   // where it was a weave region's: lattice there now
+            const Where wh = dprobe->where(Vec3{q.x - nn.x * 0.5 * held, q.y - nn.y * 0.5 * held, q.z - nn.z * 0.5 * held});
+            if (!wh.lattice()) continue;
+            ++thin;
+            if (rep.thin_zone_solid_dropped_at.size() < 20 && (thin % 97) == 1) rep.thin_zone_solid_dropped_at.push_back(q);
+          }
+        }
+      fp.area_mm2 += area * static_cast<double>(inside) / (0.5 * m * (m + 1));
+      rep.thin_zone_solid_dropped_mm2 += area * static_cast<double>(thin) / (0.5 * m * (m + 1));
+    }
+    rep.zone_footprints.push_back(fp);
   }
 }
 
@@ -1262,7 +1408,8 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
     for (const Region& rg : domain_->spec().regions)
       if (rg.weave && domain_->cover_depth_mm(&rg) > 0.0) covered.push_back(rg.id);
     for (const auto& nr : finish.net_reach) covered.push_back(nr.first);   // OJ8: depth variation off on a Skin face
-    lay_relief(out.bars, model_, *measure_, groups, firsts, out.relief, covered);
+    lay_relief(out.bars, model_, *measure_, groups, firsts, out.relief, covered, settings.regions, settings.bead_mm,
+               domain_.get());   // OG2e, OG2f
     out.organic_references = all_references;   // brief E2
     // Brief E2 and E3a (the strength check's floors and additions) are made for ONE ask (the file job's, and a preview
     // of it): they are read from a lay of one group (OP11); a lay of several groups does not apply them.

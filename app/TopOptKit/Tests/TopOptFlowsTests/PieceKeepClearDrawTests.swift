@@ -244,7 +244,7 @@ final class PieceKeepClearLineHostedTests: XCTestCase {
         let h = AppBuildHost(WorkspacePlaceholder(model: app, project: p), size: AppBuildHost.landscape13, test: self)
         h.pump(3)
         let key = "keepClearIdlePieces-\(g.uuidString)"
-        let line = try h.onScreen(key, "the line under the open group")
+        let line = try h.onScreen(key, "★ his 11-22: the warning glyph beside the group's Keep clear (no line in the panel)")
         XCTAssertGreaterThan(line.height, 8)
         try h.picture("piece_keep_clear_line.png")
 

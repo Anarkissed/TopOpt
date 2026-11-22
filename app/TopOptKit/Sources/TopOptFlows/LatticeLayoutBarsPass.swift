@@ -38,6 +38,9 @@ public struct LatticeLayoutBarsInputs: Equatable {
     /// round tubes, round ends, blended joints). When set, the pass draws these instead of the bars (the bars stay for the
     /// key, the card and picking).
     public var vines: OrganicVineShape?
+    /// ★ His pick 11-21 (the preview-speed research, "Let's do this one. Absolutely."): the lattice on screen is the LAST one,
+    /// dimmed while the new one lays (its Draft, then the exact lattice, replaces it).
+    public var dimmed = false
     public init(token: Int, bars: [Float], hidden: Bool = false, solid: LatticeLayoutSolidGrid? = nil, flags: [UInt8] = [],
                 colours: [SIMD4<Float>] = [], colourKey: Int = 0) {
         self.token = token; self.bars = bars; self.hidden = hidden; self.solid = solid; self.flags = flags
@@ -45,6 +48,7 @@ public struct LatticeLayoutBarsInputs: Equatable {
     }
     public static func == (a: Self, b: Self) -> Bool {
         a.token == b.token && a.hidden == b.hidden && a.solid?.token == b.solid?.token && a.colourKey == b.colourKey
+            && a.dimmed == b.dimmed
     }
 }
 
@@ -425,7 +429,16 @@ final class LatticeLayoutBarsPass {
     /// ★ His 11-19: Organic's vines (nil: the bars draw).
     private(set) var vinePass: OrganicVinePass?
     var hidden = false
+    /// ★ his pick 11-21: the last lattice, dimmed while the new one lays (`dimmedRGB`).
+    var dimmed = false
     var isDrawable: Bool { !hidden && count > 0 && buffer != nil }
+
+    /// ★ his pick 11-21: a lattice that is about to be replaced: its colour drained toward grey and darkened, so it reads as
+    /// the old one at a glance (never hidden: he keeps his bearings while the new one lays).
+    static func dimmedRGB(_ c: SIMD3<Float>) -> SIMD3<Float> {
+        let grey = SIMD3<Float>(repeating: simd_dot(c, SIMD3(0.299, 0.587, 0.114)))
+        return simd_mix(c, grey, SIMD3(repeating: 0.7)) * 0.6 + 0.12
+    }
 
     init(device: MTLDevice) throws {
         self.device = device
@@ -574,13 +587,15 @@ final class LatticeLayoutBarsPass {
                        clipFromModel: simd_float4x4, eyeFromModel: simd_float4x4, eyeNormalBasis: simd_float4x4,
                        turning: Bool = false) -> Bool {
         guard isDrawable, let buffer, enc.device === device else { return false }
-        let c = Self.colour
+        let c0 = Self.colour
+        let c = dimmed ? Self.dimmedRGB(SIMD3(Float(c0.r), Float(c0.g), Float(c0.b))) : SIMD3(Float(c0.r), Float(c0.g), Float(c0.b))
         if let vp = vinePass, vp.isDrawable {   // ★ his 11-19: Organic's vines, one colour
             return vp.encode(enc, depthState: depthState, clipFromModel: clipFromModel, eyeFromModel: eyeFromModel,
-                             eyeNormalBasis: eyeNormalBasis, albedo: SIMD4(Float(c.r), Float(c.g), Float(c.b), 1), turning: turning)
+                             eyeNormalBasis: eyeNormalBasis, albedo: SIMD4(c, 1), turning: turning)
         }
+        // dimmed: every bar the one drained colour (the key's colours come back with the new lattice)
         var f = Frame(clipFromModel: clipFromModel, modelFromClip: clipFromModel.inverse, eyeFromModel: eyeFromModel,
-                      eyeNormalBasis: eyeNormalBasis, albedo: SIMD4(Float(c.r), Float(c.g), Float(c.b), colourBuffer == nil ? 1 : -1))
+                      eyeNormalBasis: eyeNormalBasis, albedo: SIMD4(c, colourBuffer == nil || dimmed ? 1 : -1))
         enc.setRenderPipelineState(pipeline)
         enc.setDepthStencilState(depthState)
         enc.setCullMode(.none)
@@ -628,6 +643,7 @@ extension MeshRenderer {
         if pass.token != inputs.token { pass.upload(inputs); changed = true }
         else if pass.colourKey != inputs.colourKey { pass.uploadColours(inputs); changed = true }   // ★ Install 3
         if pass.hidden != inputs.hidden { pass.hidden = inputs.hidden; changed = true }
+        if pass.dimmed != inputs.dimmed { pass.dimmed = inputs.dimmed; changed = true }   // ★ his pick 11-21
         if pass.gridToken != (inputs.solid?.token ?? -1) { pass.uploadGrid(inputs.solid); changed = true }
         return changed
     }

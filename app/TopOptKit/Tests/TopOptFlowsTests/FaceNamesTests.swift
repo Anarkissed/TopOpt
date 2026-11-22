@@ -116,7 +116,7 @@ final class FaceNamesTests: XCTestCase {
         XCTAssertTrue(src.contains("info: \"\\(project.faceName(f)) is in"), "and its (i)")
         XCTAssertFalse(src.contains("Text(\"Face \\(project.runFaceID(f))\")"), "a lattice region's member faces too")
         XCTAssertTrue(src.contains("name: project.latticeRowName(ref)"), "Lattice Setup's face rows")
-        XCTAssertTrue(src.contains("LatticeSetupCopy.removed(project.latticeRowName(ref))"), "and its removed toast")
+        XCTAssertFalse(src.contains("LatticeSetupCopy.removed(project.latticeRowName(ref))"), "★ his 11-22: no removed banner")
         XCTAssertFalse(src.contains("project.latticeSelectableName(ref)"), "nothing on Lattice Setup reads Flexible's name")
         let model = try String(contentsOf: Self.repoRoot.appendingPathComponent(
             "app/TopOptKit/Sources/TopOptFlows/ProjectModel.swift"), encoding: .utf8)

@@ -147,10 +147,11 @@ final class OrganicVineShapeTests: XCTestCase {
         r.section = 1
         let s = OrganicVineShape.tubes(runs: [r])
         XCTAssertEqual(OrganicVinePass.sides, 16, "premise: sectionPoint's default is the pass's side count")
-        XCTAssertEqual(s.pieces.count, 2)
-        XCTAssertTrue(s.caps.isEmpty, "★ a bridge has no ball anywhere")
-        XCTAssertTrue(s.pieces[0].flatA && s.pieces[1].flatB, "★ both its ends flat")
-        XCTAssertTrue(s.pieces.allSatisfy { $0.section == 1 })
+        XCTAssertEqual(s.pieces.count - s.pucks, 2)
+        XCTAssertEqual(s.pucks, 2, "★ OS1 B: its two node ends are pucks")
+        XCTAssertTrue(s.capDomes.allSatisfy { $0 } && s.caps.count == 2, "★ a bridge has no whole ball anywhere: dome tops only")
+        XCTAssertTrue(s.pieces[0].flatA && s.pieces[1].flatB, "★ both its pieces' ends flat")
+        XCTAssertTrue(s.pieces.prefix(2).allSatisfy { $0.section == 1 })
         // the mitre: both pieces' rings are one ring (the mean of the two sections pushed onto the bisecting plane)
         var worst: Float = 0
         for j in 0..<OrganicVinePass.sides {

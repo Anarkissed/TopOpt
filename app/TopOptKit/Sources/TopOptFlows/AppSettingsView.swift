@@ -79,9 +79,19 @@ public final class AppSettings: ObservableObject {
         didSet { defaults.set(latticeLivePreview, forKey: Self.livePreviewKey) }
     }
 
+    /// ★ His ask 11-21 ("make it work like the other tools - with an option to have print accurate rendering. Let this
+    /// override my rule that the drawing follows the print file"): the Lattice button's ⌃ "Print-accurate preview". Off
+    /// (DEFAULT): the Organic preview is the quick Draft, a stand-in as the other tools show while you edit; the exact
+    /// lattice is made with the print file. On: the Draft first, then the exact print-file lattice replaces it.
+    static let printAccurateKey = "topopt.settings.latticePrintAccurate.v1"
+    @Published public var latticePrintAccurate: Bool {
+        didSet { defaults.set(latticePrintAccurate, forKey: Self.printAccurateKey) }
+    }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         self.latticeLivePreview = defaults.bool(forKey: Self.livePreviewKey)   // absent ⇒ false: Click to refresh (his pick)
+        self.latticePrintAccurate = defaults.bool(forKey: Self.printAccurateKey)   // absent ⇒ false: the quick Draft (11-21)
         let m = defaults.double(forKey: Self.marginKey)
         self.safetyMargin = m >= SafetyMargin.minimum - 1e-9 ? m : SafetyMargin.defaultValue
         self.units = Self.storedUnits(defaults)

@@ -10,19 +10,25 @@ import SwiftUI
 import TopOptDesign
 
 extension EditFacesCopy {
-    /// The line when a cut piece's other half is gone (never a face number: the face is the one he cut).
-    public static let orphanLine = "A cut face lost its other half, so taps on it pick the wrong piece."
+    /// The line when a cut piece's other half is gone (never a face number: the face is the one he cut). ★ his 11-22 ("What
+    /// does this pop-up even mean? ... word that better and maybe highlight the faces"): the piece is lit on the part (the
+    /// first, when there are several) and the line says what happened, what it does and what the button does.
+    public static func orphanLine(_ n: Int) -> String {
+        (n > 1 ? "The lit piece and \(n - 1) more were" : "The lit piece was")
+            + " cut from a face whose other half is gone, so tapping there picks the wrong piece. Make it whole joins it back."
+    }
     /// Its one tap.
     public static let orphanFix = "Make it whole"
 }
 
 struct EditFacesOrphanCard: View {
     static let width: CGFloat = 300
+    var count = 1
     let repair: () -> Void
 
     var body: some View {
         HStack(spacing: DS.Space.s) {
-            Text(EditFacesCopy.orphanLine)
+            Text(EditFacesCopy.orphanLine(count))
                 .font(.system(size: 12))
                 .foregroundStyle(DS.Color.textPrimary.color)
                 .fixedSize(horizontal: false, vertical: true)

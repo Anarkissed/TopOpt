@@ -145,6 +145,23 @@ struct MeshSpec {
   // OV1: a round weave tube's centre line swept as a curve through its points (sweep_centre_line). Off here (the
   // writer's own default: every caller that does not ask is unchanged); the file job turns it on (organic_sweep).
   SweepAsk sweep{};
+  // OS1, the file's vine shape (the owner, 2026-11-20: "the rounded ends aren't attached at the right places, there are
+  // places without rounded ends at ALL, and there are just straight cuts to turn instead of angles"; "Build the better
+  // vine shape"). Each is off here (the writer's own default: every caller that does not ask is unchanged, to the
+  // bit); the file job turns them on (file_mesh_defaults).
+  // OS1 B: a shallow run's end (its D or square section) is DOMED wherever a round tube's end gets a half-sphere (a
+  // joint, a free end, a split, a proud end): the section's own half-dome, round in plan and on top, its underside the
+  // bar's own flat plane; flat only in solid or at a flush face, as a round tube's. false: every such end flat.
+  bool weave_bridge_domes = false;
+  // OS1 A (his ruling R1): a round tube's sides per piece, from its widest ring: the fewest (even) sides whose flat
+  // facet lies no more than this from the true circle (r (1 - cos(pi / n)) <= tube_facet_mm), from `tube_sides` (the
+  // floor) up to 24. 0: `tube_sides` always.
+  double tube_facet_mm = 0.0;
+  // OS1 D: a piece is ended (a round end, or a dome) at a point whose mitred ring would cross the next ring (the
+  // segment between them shorter than their two mitre offsets: the fold that drew thin fins). false: as before.
+  bool weave_fold_split = false;
+  // OS1 B (his ruling R2): the domes the print check made flat again (a finding on them); each listed end is flat.
+  std::vector<Vec3> flat_domes_at;
   // OF4: every piece of the solid is kept (the tubes route: pieces the unmerged tubes tie together are not loose).
   // false: the mesh as before.
   bool keep_pieces = false;
@@ -383,12 +400,30 @@ struct WeaveShells {
   // OV1: every swept piece's centre line as swept (its solid ends after the run-on), for the preview's test.
   std::vector<std::vector<Vec3>> swept_lines;
   double sweep_largest_offset_mm = 0.0;
+  // OS1: the shallow runs' domed ends, and those held flat for the print check (MeshSpec::flat_domes_at); each dome's
+  // end point (before any run-on) and its half width, for the print check; the pieces ended at a fold (OS1 D); the
+  // round tubes' sides, fewest and most (OS1 A; 0 with no round tube).
+  std::size_t bridge_domes = 0, domes_held_flat = 0, fold_splits = 0;
+  std::vector<std::array<double, 4>> dome_ends;
+  int tube_sides_least = 0, tube_sides_most = 0;
+  // OS1 (his rule of 11-12: "Please ensure bridges are flat and not curved"): the shallow runs' downward-facing area as
+  // written (bars and rounded ends): level, a rising bar's own flat bottom, and the rest (curved or sloped), mm2.
+  double bridge_under_level_mm2 = 0.0, bridge_under_own_mm2 = 0.0, bridge_under_other_mm2 = 0.0;
   double mm3 = 0.0;                      // the shells' own volumes, summed (overlaps counted twice)
   double ms = 0.0;
   std::size_t shells() const { return first_tri.empty() ? 0 : first_tri.size() - 1; }
 };
 WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const Layout& layout, const Bars& bars,
                          const std::vector<char>& kept, const Carved& carved, const MeshSpec& spec, bool trim = true);
+// OS1 A: a round tube's sides for a piece whose widest bar is `width_mm` wide (MeshSpec::tube_facet_mm, tube_sides).
+int tube_sides_for(double width_mm, const MeshSpec& spec);
+// The equal-area factor of a `sides`-gon: its circumradius over the round's radius of the same area.
+double tube_round_factor(int sides);
+// OS1 D: the inner points of a swept piece's centre line `p` where it is ended so that no mitred ring crosses the next:
+// ring j lies off its point along the bar by up to corner[j] x tan(turn_j / 2) (corner: the ring's farthest point from
+// the line: a round tube's radius, a section's corner); a segment shorter than its two ends' offsets folds. Ended
+// points have no offset; the larger of a folding segment's two offsets is ended first, until none folds. Sorted.
+std::vector<std::size_t> mitre_fold_splits(const std::vector<Vec3>& p, const std::vector<double>& corner);
 // Used by weave_shells (build_mesh's own shape code, solid_mesh.cpp): per bar of `bars`, with `strut[i]` its strut and
 // with `feet[i]` its feet (O11) as build_mesh makes them; then every post of `spec.posts`. Each shape is appended to `out`
 // as a closed shell on its own vertices, its first triangle to `first_tri`. Counts go to `rep` (bridges, feet, posts).
@@ -496,6 +531,11 @@ struct PrintableReport {
   // empty when clean), the bars whose relief was cut back flush because a finding lay on their proud part, and how many
   // times the whole loop was run again for that.
   std::vector<Vec3> findings_at;
+  // OS1 B (his ruling R2): domed shallow ends a finding lay on, made flat again (the pass made again), and how many
+  // passes that took.
+  std::size_t domes_flattened = 0;
+  int dome_rounds = 0;
+  std::vector<Vec3> flat_domes_at;   // OS1 B, leg U: every domed shallow end held flat, at its place (the last pass's)
   std::size_t relief_flushed = 0;
   int relief_rounds = 0;
   // OJ6 (leg J item 6): the two ends of each bar made flush, as it was given (so the preview can clear its relief).

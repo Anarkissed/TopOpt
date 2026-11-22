@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
+#include <thread>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -19,6 +21,8 @@
 
 #include "topopt/face_overrides.hpp"
 #include "topopt/lattice_layout_file.hpp"
+#include "topopt/lattice_layout_organic.hpp"
+#include "topopt/lattice_sample.hpp"
 #include "topopt/stl.hpp"
 #include "topopt/threemf_stream.hpp"
 
@@ -2360,7 +2364,151 @@ static void test_floors_and_strengthened() {
   }
 }
 
+// Leg T (OS1 R2 completed; the lead, 2026-11-21): the app's own Organic sample asks make a print file. At 10cc65bd the
+// rounded ends of the shallow runs (weave_bridge_domes, on in file_mesh_defaults) used up the print check's passes and
+// these jobs came back would_not_print; at release 12's engine (bc34b79c) they printed clean. The asks exactly as the
+// Lattice page's sample makes them (the sample cube, a box zone 1 mm round it, the made-up stress of one focus, the
+// Auto Sweep ask at Look 50): Grown with depth variation off, and Traced with it on.
+static void test_app_sample_asks_print() {
+  auto half = [](double v) { return std::round(v * 2.0) / 2.0; };
+  auto smallest_cell = [](double t) { return std::ceil(2.0 * 0.5 * std::sqrt(3.0 * 3.14159265358979323846) * t) / 2.0; };
+  topopt::LatticeSampleSpec spec;
+  spec.shape = "cube";
+  const std::string body = std::string(LATTICE_FILE_TMP_DIR) + "/app_sample_cube.stl";
+  write_stl_file(body, topopt::lattice_sample_body(spec), StlFormat::Binary);
+  const StepModel model = import_part_file_resolved(body);
+  Vec3 lo{1e300, 1e300, 1e300}, hi{-1e300, -1e300, -1e300};
+  for (const Vec3& v : model.mesh.vertices) {
+    lo = {std::min(lo.x, v.x), std::min(lo.y, v.y), std::min(lo.z, v.z)};
+    hi = {std::max(hi.x, v.x), std::max(hi.y, v.y), std::max(hi.z, v.z)};
+  }
+  for (const bool grown : {true, false}) {
+    namespace ll = topopt::lattice_layout;
+    ll::Session session(model);
+    ll::Settings s;
+    s.bead_mm = 0.45;
+    s.min_strut_lines = 2;
+    ll::Settings::RegionAsk r;
+    r.id = 1;
+    r.role = ll::Role::Lattice;
+    r.weave = true;
+    r.zone.kind = ll::Zone::Kind::Box;
+    r.zone.centre = {0.5 * (lo.x + hi.x), 0.5 * (lo.y + hi.y), 0.5 * (lo.z + hi.z)};
+    r.zone.axis[0] = {1, 0, 0};
+    r.zone.axis[1] = {0, 1, 0};
+    r.zone.axis[2] = {0, 0, 1};
+    for (int k = 0; k < 3; ++k) r.zone.half[k] = 0.5 * ((k == 0 ? hi.x - lo.x : k == 1 ? hi.y - lo.y : hi.z - lo.z)) + 1;
+    s.regions = {r};
+    const ll::SweepLimitsUnion L = session.sweep_limits_for(s, {1}, 0.45);
+    const double cl = std::max(half(L.cell_lower_mm), smallest_cell(L.strut_lower_mm)), cu = std::max(cl, half(L.cell_upper_mm));
+    ll::OrganicAsk a;
+    a.mode = grown ? ll::OrganicMode::Grown : ll::OrganicMode::Traced;
+    a.spacing_min_mm = cl;
+    a.spacing_max_mm = cu;
+    a.width_mm = L.strut_lower_mm;
+    a.width_heavy_mm = L.strut_upper_mm;
+    a.walls_out = grown;
+    a.wall_gap = grown ? 2.5 : 0.0;
+    a.wall_gap_heavy = grown ? 1.0 : 0.0;
+    a.wall_cross = grown ? 1 : 0;
+    a.cross_gap = 2.5;
+    a.cross_gap_heavy = grown ? 1.0 : 0.0;
+    a.tie_level = true;
+    a.ties = true;
+    a.tie_gap = 1.0;
+    a.tie_gap_heavy = 0.5;
+    if (grown) { a.foot_gap = 2.5; a.stress_goal = true; a.prune = true; }
+    a.shape_fit = true;
+    a.shape_reach = 1;
+    a.member_cap = false;
+    a.hold_parts = true;
+    a.part_to_floor = true;
+    a.part_reach_mm = 1.5 * cu;
+    a.part_support_mm = 0.75 * cl;
+    a.unbraced_max = 10;
+    a.bed_floor_mm = 0.8;
+    a.layer_mm = 0.2;
+    a.strand_keep = 0.5;
+    a.face_relief_mm = grown ? 0.0 : 1.0;
+    const std::vector<ll::OrganicGroup> groups = {{{1}, a}};
+    const ll::SyntheticStress syn = ll::organic_synthetic_stress(session, s, ll::TensorField{}, {{1, 1}}, groups);
+    CHECK(syn.refused.empty());
+    if (!syn.refused.empty()) continue;
+    FileJob job;   // the file's own defaults (file_mesh_defaults: the rounded ends on)
+    job.settings = s;
+    job.organic = a;
+    job.organic.layer_mm = job.options.layers.layer_mm;
+    job.tensor_field = std::make_shared<ll::TensorField>(syn.field);
+    job.file_format = "stl";
+    const FileResult fr = make_lattice_file(model, job, std::string(LATTICE_FILE_TMP_DIR) + "/app_sample_cube_lattice.stl");
+    std::printf("app sample, cube %s, depth variation %s: ok %d (%s), print clean %d, rounded ends kept %zu, held flat %zu, "
+                "dome rounds %d, passes found [%zu]\n", grown ? "Grown" : "Traced", grown ? "off" : "on", fr.ok ? 1 : 0,
+                fr.code.c_str(), fr.made.print_clean ? 1 : 0, fr.made.shells.bridge_domes, fr.made.domes_flattened,
+                fr.made.dome_rounds, fr.made.found_per_pass.size());
+    CHECK(fr.ok && fr.made.print_clean && fr.made.shells.bridge_domes > 0);
+    // Leg U (the flat ends, the lead's ruling 2026-11-21): the Exact preview of the same ask runs the file's print check
+    // whenever shallow runs have rounded ends (depth variation on or off) and lists the ends it held flat: the file's
+    // flat_domes_at exactly, each one a point of a run within 1e-4 mm; the Draft lists none; a stop during the check
+    // answers "cancelled" (SB1).
+    {
+      ll::Session ps(model);
+      ll::OrganicPreviewAsk pa;
+      pa.quality = ll::PreviewQuality::Exact;
+      const ll::OrganicPreview pv = ll::lay_organic_preview(ps, s, syn.field, groups, pa);
+      std::size_t same = 0, lifted = 0, on_run = 0, on_bridge = 0;
+      for (const Vec3& f : pv.flat_ends) {
+        bool in = false, near = false;
+        for (const Vec3& g : fr.made.flat_domes_at) {
+          in = in || (f.x == g.x && f.y == g.y && f.z == g.z);
+          // a joint the sag pass lifted (O17, at most weave_sag_lift_mm): the file's end there, the runs' end here
+          near = near || std::hypot(f.x - g.x, std::hypot(f.y - g.y, f.z - g.z)) <= job.options.mesh.weave_sag_lift_mm + 1e-9;
+        }
+        same += in;
+        lifted += !in && near;
+        bool run = false, bridge = false;   // leg V: on a run point, and that run a shallow one (the file's bridge)
+        for (const ll::WeaveRun& w : pv.runs)
+          for (const Vec3& q : w.points)
+            if (std::fabs(q.x - f.x) < 1e-4 && std::fabs(q.y - f.y) < 1e-4 && std::fabs(q.z - f.z) < 1e-4) {
+              run = true;
+              bridge = bridge || (w.section & 3) != 0;
+            }
+        on_run += run;
+        on_bridge += bridge;
+      }
+      ll::Session ds(model);
+      ll::OrganicPreviewAsk da;
+      da.quality = ll::PreviewQuality::Draft;
+      const ll::OrganicPreview dv = ll::lay_organic_preview(ds, s, syn.field, groups, da);
+      std::printf("  the Exact preview's flat ends %zu (the file's %zu: the same %zu, elsewhere %zu; on a run point %zu, of a shallow "
+                  "run %zu); the Draft's %zu\n", pv.flat_ends.size(), fr.made.flat_domes_at.size(), same, lifted, on_run, on_bridge,
+                  dv.flat_ends.size());
+      // leg V: the runs are the file's bars (the sag pass's lift drawn): every listed end the file's own place, on a
+      // shallow run (the app's case: the cube, Grown, two ends of a bar the lift made shallow, drawn round before)
+      CHECK(!pv.flat_ends.empty() && pv.flat_ends.size() == fr.made.flat_domes_at.size() && same == pv.flat_ends.size() &&
+            on_bridge == pv.flat_ends.size() &&
+            on_run == pv.flat_ends.size() && dv.flat_ends.empty());
+      if (grown) {   // depth variation off: the check runs for the rounded ends alone; a stop during it is a cancel
+        std::size_t threw = 0, cancelled = 0;
+        for (const int ms : {200, 400, 600}) {
+          ll::Session cs(model);
+          std::atomic<bool> stop{false};
+          std::thread t([&] { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); stop = true; });
+          try {
+            cancelled += ll::lay_organic_preview(cs, s, syn.field, groups, pa, 0, &stop).outcome.cancelled;
+          } catch (...) {
+            ++threw;
+          }
+          t.join();
+        }
+        std::printf("  stopped at 200, 400, 600 ms: threw %zu, cancelled %zu\n", threw, cancelled);
+        CHECK(threw == 0);
+      }
+    }
+  }
+}
+
 int main() {
+  test_app_sample_asks_print();
   test_floors_and_strengthened();
   test_cells_and_weave_job();
   test_max_step_key();

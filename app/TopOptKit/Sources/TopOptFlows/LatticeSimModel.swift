@@ -194,16 +194,19 @@ public final class LatticeSimModel: ObservableObject {
     private let runner: Runner
     private var generation = 0
 
-    public init(runner: @escaping Runner = { ctx in
-        try TopOptKit.analyzeSolidLoadCase(
-            modelPath: ctx.modelPath, material: ctx.material,
-            materialsPath: ctx.materialsPath, rulesPath: ctx.rulesPath,
-            resolution: ctx.resolution, anchorFaceIDs: ctx.anchorFaceIDs,
-            loadGroups: ctx.loadGroups, buildDirection: ctx.buildDirection,
-            faceRegions: ctx.faceRegions, anchorRegionIDs: ctx.anchorRegionIDs)
-    }) {
-        self.runner = runner
+    public init(runner: Runner? = nil) {
+        self.runner = runner ?? Self.testRunner ?? { ctx in
+            try TopOptKit.analyzeSolidLoadCase(
+                modelPath: ctx.modelPath, material: ctx.material,
+                materialsPath: ctx.materialsPath, rulesPath: ctx.rulesPath,
+                resolution: ctx.resolution, anchorFaceIDs: ctx.anchorFaceIDs,
+                loadGroups: ctx.loadGroups, buildDirection: ctx.buildDirection,
+                faceRegions: ctx.faceRegions, anchorRegionIDs: ctx.anchorRegionIDs)
+        }
     }
+
+    /// Test seam (hosted tests): the solver a page's own model is made with while set — nil (always, in the app) is core's.
+    public static var testRunner: Runner?
 
     /// Whether a completed field is STALE against the current inputs — any change
     /// to model / material / resolution / load case invalidates it.

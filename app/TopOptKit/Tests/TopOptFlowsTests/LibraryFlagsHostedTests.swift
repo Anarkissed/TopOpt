@@ -56,14 +56,16 @@ final class LibraryFlagsHostedTests: XCTestCase {
         XCTAssertEqual(app.library.flagUndo?.text, "Print removed")
     }
 
-    /// Quick look's Print this / Reject take a flag off the same way (with Undo).
+    /// Quick look's Print this / Reject take a flag off the same way (with Undo). (★ His iPad notes 11-22: a small picture's tap
+    /// opens the version now, so Quick look is reached from the version's ⋯, on its picked result.)
     func testQuickLookTakesAFlagOffWithUndo() throws {
         let (h, app, f) = try host()
         let v2 = try XCTUnwrap(f["2"])
         app.library.toggleReject(folder: v2, result: 2)
+        app.library.pick(folder: v2, result: 2)
         h.pump(1)
-        let c = try h.onScreen("library-mini-v2c", "v2c, small")
-        h.click(CGPoint(x: c.midX, y: c.midY), settle: 1.5)
+        try h.pickFromMenu("library-version-v2-menu", "Quick look", what: "v2's ⋯")
+        _ = try h.onScreen("libraryQuickLook-v2c", "Quick look on v2c")
         let reject = try h.probe("libraryQuickLook-reject", "Quick look's Reject, on")
         h.click(CGPoint(x: reject.midX, y: reject.midY), settle: 1)
         XCTAssertFalse(try XCTUnwrap(app.library.version(v2)).mark(for: 2).rejected, "★ off")

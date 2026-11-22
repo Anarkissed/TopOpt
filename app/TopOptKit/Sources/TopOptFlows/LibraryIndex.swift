@@ -80,6 +80,13 @@ public struct LibraryPart: Codable, Equatable, Sendable, Identifiable {
     /// ★ Upload new version (his ask 2026-11-11, DATA-MODEL.md decision 12): the other models this part holds, one per
     /// upload — a part is no longer one model file. nil (never written) for a part with one model.
     public var otherModelHashes: [String]?
+    /// ★ His iPad notes 11-22 (his decision 2): true when `chosen` was made THROUGH Compare (its last one left); a pick made
+    /// by hand (Pick this) leaves it nil, and only a Compare pick is cleared by a new version's results. OPTIONAL and left
+    /// out when nil, so a library.json written before reads (and saves) exactly as it was.
+    public var chosenInCompare: Bool?
+    /// ★ 11-22: the Compare pick that a new version's results cleared. Its line offers "Compare new": ONLY the results never
+    /// compared yet, against it. nil (never written) otherwise.
+    public var formerPick: LibraryChosen?
 
     /// Whether these bytes are one of this part's models (same bytes = same part, model by model).
     public func holds(modelHash h: String) -> Bool { modelHash == h || (otherModelHashes ?? []).contains(h) }
@@ -139,6 +146,9 @@ public struct LibraryVersion: Codable, Equatable, Sendable {
     public var trimmed: Bool?
     /// His switch on Storage: true keeps all results, false lets Trim take them; nil follows the rule.
     public var keepAll: Bool?
+    /// ★ His iPad notes 11-22 (his decision 2): the results (0 = a) that have been through a Compare, so Compare new offers only
+    /// the ones that have not. nil (never written) = none: a library.json written before reads (and saves) as it was.
+    public var compared: [Int]?
 
     public init(folderID: UUID, number: VersionNumber, parentNumber: VersionNumber? = nil, name: String? = nil,
                 changes: [VersionChange] = [], marks: [ResultMark] = [], pickedResult: Int? = nil,

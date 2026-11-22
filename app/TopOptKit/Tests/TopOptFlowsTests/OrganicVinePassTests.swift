@@ -47,7 +47,7 @@ final class OrganicVinePassTests: XCTestCase {
         let round10 = OrganicVineShape.capsules(runs: runs)   // release (10)'s drawing: proves the pass draws what the bars do
         XCTAssertEqual(round10.pieces.count, seg.count, "premise: one round strut per bar")
         let shape = OrganicVineShape.tubes(runs: runs)   // ★ his 11-19 rule: the print file's tubes
-        XCTAssertEqual(shape.pieces.count, seg.count, "★ one tube piece per bar")
+        XCTAssertEqual(shape.pieces.count - shape.pucks, seg.count, "★ one tube piece per bar (OS1 B: the pucks besides)")
         XCTAssertLessThan(shape.caps.count, round10.caps.count, "★ round ends only where the file puts them, not at every point")
         r.setMesh(mesh)
         r.camera.setOrientation(azimuth: 0.6, elevation: 0.4)

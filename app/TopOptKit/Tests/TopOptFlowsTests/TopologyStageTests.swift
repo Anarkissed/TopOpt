@@ -252,7 +252,8 @@ final class SelectionsPillNeverCoveredTests: XCTestCase {
         let src = try String(contentsOf: u.appendingPathComponent("Sources/TopOptFlows/WorkspacePlaceholder.swift"), encoding: .utf8)
         // ★ RE-PINNED (UI-Notes B6 s1, mockup #lat-setup): Lattice Setup has the hint too — still through the one rule
         // ★ RE-PINNED (UI-Notes B8, mockup #cut): and Edit faces (its foot hint, "It joins no group.") — the same rule
-        XCTAssertTrue(src.contains("if Self.hintShows(showsSelectionHint: visible.showsSelectionHint || latticeSetupUp || editFaces.isEditing,\n                              selectionsCollapsed: selectionsCollapsed) {"),
+        // ★ RE-PINNED (his 11-22): Lattice Setup's hint only with Topology open, and an empty hint draws nothing
+        XCTAssertTrue(src.contains("if Self.hintShows(showsSelectionHint: visible.showsSelectionHint || (latticeSetupUp && latticeTopologyOpen) || editFaces.isEditing,\n                              selectionsCollapsed: selectionsCollapsed), !(editFaces.isEditing ? EditFacesCopy.footHint : hint).isEmpty {"),
                       "the bar's one hint goes through the rule")
     }
 }

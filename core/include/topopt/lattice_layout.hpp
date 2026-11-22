@@ -199,6 +199,8 @@ struct Region {
   // depth below them, as owner_of reads it, within the cover's thickness), not every face the region meets. Set by the
   // session for a weave region made from faces or pieces; a zone's region keeps the cover on every face in the zone.
   bool cover_open_face = false;
+  // OG2f (leg S): a region made from a zone (D21), not from faces or pieces.
+  bool from_zone = false;
 };
 
 // The region under one or more faces of the model, from the faces themselves (rule D10:
@@ -1635,6 +1637,15 @@ struct Outcome {
     std::size_t along = 0;
     double along_largest_mm = 0.0;
     std::size_t flush_excluded = 0, flush_down = 0, flush_bed = 0, flush_along = 0;
+    // OG2e (leg S): bars whose bulge and ends whose proud tip a no-lattice zone's footprint on an open face made flush,
+    // and the footprints found (the zone's region id, the model face, the footprint's area on that face, mm2).
+    std::size_t flush_zone_bars = 0, flush_zone_ends = 0;
+    // OG2f (leg S): where a no-lattice zone would have left under two printed lines of solid under an open weave face,
+    // none was made (the lattice runs to the face): the area of the face over it (mm2) and up to 20 of its places.
+    double thin_zone_solid_dropped_mm2 = 0.0;
+    std::vector<Vec3> thin_zone_solid_dropped_at;
+    struct ZoneFootprint { int zone = 0; int face = -1; double area_mm2 = 0.0; };
+    std::vector<ZoneFootprint> zone_footprints;
     double grew_mm[6] = {0, 0, 0, 0, 0, 0};
     bool faces_known = true;
   } relief;

@@ -857,8 +857,14 @@ struct WeaveRun {
   // bridge, bar_is_bridge at the file's defaults). Filled always; a run is split at a change of section and the thinning
   // keeps every point where the ring width changes or the run turns sharper than 60 degrees only with `relief_marks`.
   std::vector<double> ring_mm;
+  bool continues_a = false, continues_b = false;   // OS1 F: packed as kEndContinues (version 2)
   std::uint8_t section = 0;   // bits 0-1 the section kind; bit 2 (kSectionSwept, OV1): the points are the swept centre line
 };
+// OS1 F (packed version 2 only): a run end that is not an end of the file's tube: the run was split there for the
+// preview's relief marks and the next run (at end_b) or the previous run (at end_a) continues the same tube. A reader
+// draws no ball and no flat end there; the shipped reader reads it as an end that is not solid or surface (a ball, as
+// before).
+inline constexpr std::uint8_t kEndContinues = 5;
 inline constexpr std::uint8_t kSectionSwept = 4;   // OV1 (ruling R9): bit 2 of WeaveRun::section and the packed section byte
 // OV1 (ruling R9): the runs as the print file sweeps them (the tubes route's pieces, each round one swept by
 // sweep_centre_line, split again where the preview's relief marks split a run); the preview's runs when the ask's sweep
@@ -898,6 +904,10 @@ struct OrganicPreview {
   // drawn flush: their runs carry no along-face mark and no proud length. How many; the runs are read from those bars
   // (`outcome.bars` stays the lay's). Draft: not run (0).
   std::size_t relief_flushed = 0;
+  // Leg U (the lead's ruling, 2026-11-21; OS1 B's drawing): Exact only: the places of the shallow runs' domed ends the
+  // file's print check held FLAT (its flat_domes_at): run end points and inner split points, exactly as the runs carry
+  // them. The app draws a dome at every shallow end the file domes except these. Draft: empty (no check is run).
+  std::vector<Vec3> flat_ends;
 };
 // OJ6: in `bars`, each bar whose two ends are one of `flushed` (either order) is made flush: its end relief carried
 // back (without_relief), along_proud 0, along_face -1. Returns how many.

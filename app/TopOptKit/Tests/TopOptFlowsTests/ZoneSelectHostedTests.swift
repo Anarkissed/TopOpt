@@ -108,7 +108,7 @@ final class ZoneSelectHostedTests: XCTestCase {
             XCTAssertNotEqual(p.latticeList.activeGroupID, z, "\(size): premise: unpicked")
             XCTAssertTrue(h.frames.all.keys.filter { $0.hasPrefix("placedBox-zone") }.isEmpty, "\(size): ★ an unpicked zone shows no handles")
         }
-        XCTAssertEqual(LatticeSetupCopy.zoneHandlesLine, "Drag its handles on the part to size it.")
+        XCTAssertEqual(LatticeSetupCopy.zoneHandlesLine, "Drag its handles to size")   // ★ his 11-22: five words
     }
 
     static let sevenHandles = ["move", "u-", "u+", "v-", "v+", "w-", "w+"]

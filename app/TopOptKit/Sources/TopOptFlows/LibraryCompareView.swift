@@ -297,6 +297,10 @@ struct LibraryCompareView: View {
         switch request.scope {
         case .all:
             session = CompareSession(part: part, skipRejected: skipRejected); three = nil
+        case .new:   // ★ his iPad notes 11-22: the former pick against only the results never compared yet
+            session = CompareSession(part: part, newAgainst: library.formerPick(of: part).map { CompareItem(folder: $0.folder, result: $0.result) },
+                                     skipRejected: skipRejected, running: library.runningFolders)
+            three = nil
         case let .version(folder):
             three = library.version(folder).map(CompareSession.threeUp); session = nil
         }
@@ -531,6 +535,7 @@ struct LibraryCompareView: View {
     private func scopeTitle(_ part: LibraryPart) -> String {
         switch request.scope {
         case .all: return "All results (\(session?.queue.count ?? 0))"
+        case .new: return "New results (\(session?.queue.count ?? 0))"   // ★ 11-22: Compare new
         case let .version(f): return "v\(library.version(f)?.number ?? 0)’s results"
         }
     }
