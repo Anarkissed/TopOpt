@@ -1852,22 +1852,55 @@ public final class ProjectModel: ObservableObject {
     /// and that must never happen. The region shape needs a `parts` list first, plus
     /// expansion at the two emission sites. Returning nil keeps the confirm disabled
     /// rather than shipping the wrong behaviour quietly.
+    /// ★ his iPad 11-22 (img 7-10): he unioned Group 2's faces on the Lattice stage and the union turned Protect's green, could
+    /// not be added, and stayed green when its row went — it had joined TOPOLOGY's group that held a piece (Group C, Protect),
+    /// never his lattice Group 2. "It should have automatically added the unioned faces to the group if the rest of the faces
+    /// were part of the group. They shouldn't be a completely different colour, randomly." Now the union joins the group OF
+    /// THE STAGE BEING EDITED (`latticeStage`: the Lattice stage's list) that held most of its pieces (his yes 11-22: mixed
+    /// pieces go to the group most were in), its pieces leave that group (the union speaks for them), and the other stage's
+    /// list is left exactly as it was.
     @discardableResult
-    public func commitSurfaceUnion(_ u: SurfaceUnion) -> RegionID? {
+    public func commitSurfaceUnion(_ u: SurfaceUnion, latticeStage: Bool = false) -> RegionID? {
         beginFaceEdit(); defer { endFaceEdit(.union) }   // each surface action is its own undo step (B5: sealed after too)
         guard viewerMesh != nil, u.hasEnoughToCombine else { return nil }
+        let onLattice = latticeStage && usesLatticeList
+        var list = onLattice ? latticeList : selection
+        let home = unionHome(u.pieces, among: list.groups)   // read before the union speaks for its pieces
         guard let rid = faceRegions.unionOfParts(u.pieces,
                                                  named: "Union of \(u.count)")
         else { return nil }
-        // The union joins the group any of its parts belonged to, so it appears in
-        // the Selections list where a role and a depth can be given to it.
-        if let g = selection.groups.first(where: { g in
-            u.pieces.contains { g.regionIDs.contains($0) }
-        }) {
-            selection.addRegions([rid], to: g.id)
+        // The union joins that group, so it appears in the Selections list where a role and a depth can be given to it.
+        if let h = home, let g = list.groups.first(where: { $0.id == h }) {
+            let pieces = Set(u.pieces)
+            list.setRegions(g.regionIDs.filter { !pieces.contains($0) } + [rid], for: h)
+            if onLattice { latticeList = list } else { selection = list }
         }
         objectWillChange.send()
         return rid
+    }
+
+    /// The group of `groups` that holds most of these pieces — by a region (the piece, or the face it was cut from) or by
+    /// every face of the piece; nil when none holds any. A tie goes to the first in the list.
+    func unionHome(_ pieces: [RegionID], among groups: [SelectionGroup]) -> UUID? {
+        var best: (id: UUID, n: Int)?
+        for g in groups {
+            let held = Set(surfaceEffectiveRegions(of: g, among: groups)), faces = Set(g.faces)
+            let n = pieces.filter { p in
+                if held.contains(p) { return true }
+                let f = surfaceResolvedFaces(p)
+                return !f.isEmpty && f.allSatisfy { faces.contains($0) }
+            }.count
+            if n > 0, n > (best?.n ?? 0) { best = (g.id, n) }
+        }
+        return best?.id
+    }
+
+    /// The list a group belongs to: the Lattice stage's (when it is there and the group is not Topology's identical twin), or
+    /// Topology's. A piece is claimed only by the groups of its own list (his 11-22: the two lists are independent).
+    func listHolding(_ g: SelectionGroup) -> [SelectionGroup] {
+        guard usesLatticeList, let l = lattice.latticeList?.groups, l.contains(g), !selection.groups.contains(g)
+        else { return selection.groups }
+        return l
     }
 
     /// Every face a region resolves to, following a union down to its parts.
@@ -2346,7 +2379,7 @@ public final class ProjectModel: ObservableObject {
     /// So there is ONE definition, here, and every consumer goes through it: walk to
     /// the OUTERMOST region covering a face — up through unions, down past any
     /// parent whose children have superseded it — and emit that.
-    public func surfaceEffectiveRegions(of g: SelectionGroup) -> [RegionID] {
+    public func surfaceEffectiveRegions(of g: SelectionGroup, among list: [SelectionGroup]? = nil) -> [RegionID] {
         // ★ A PIECE EXPLICITLY GIVEN TO ANOTHER GROUP IS NOT THIS GROUP'S.
         //
         // A parent expands to its children — that is how a cut hands its pieces on.
@@ -2354,14 +2387,20 @@ public final class ProjectModel: ObservableObject {
         // its parent must stop speaking for it, or the piece is claimed by both: the
         // group that holds the parent AND the group it was moved to. One surface,
         // two roles, and the run keeps whichever was written last.
+        // ★ his 11-22: only the other groups of the group's OWN list claim (Topology's list and the Lattice stage's are
+        // independent: a Topology group holding a union took it from his lattice Group 2 — "I couldn't add it"), and a union
+        // speaks for its pieces only in the list that holds it (in the other list a piece stands for itself: his Topology
+        // Protect group kept its one hole, not the whole union, so nothing there widened)
+        let mine = list ?? listHolding(g)
+        let held = Set(mine.flatMap(\.regionIDs))
         var claimedElsewhere: Set<RegionID> = []
-        for other in selection.groups where other.id != g.id {
+        for other in mine where other.id != g.id {
             claimedElsewhere.formUnion(other.regionIDs)
         }
         var out: [RegionID] = []
         var seen: Set<RegionID> = []
         for r in g.regionIDs {
-            for id in surfaceEffectiveRegions(from: r)
+            for id in surfaceEffectiveRegions(from: r, unionsHeld: held)
             where !seen.contains(id) && !claimedElsewhere.contains(id) {
                 seen.insert(id)
                 out.append(id)
@@ -2372,9 +2411,11 @@ public final class ProjectModel: ObservableObject {
 
     /// The effective descendants of one region: itself if nothing has superseded
     /// it, otherwise the pieces that have.
-    public func surfaceEffectiveRegions(from id: RegionID) -> [RegionID] {
-        // A region absorbed into a union is represented BY that union.
-        let top = faceRegions.outermostUnion(containing: id)
+    public func surfaceEffectiveRegions(from id: RegionID, unionsHeld held: Set<RegionID>? = nil) -> [RegionID] {
+        // A region absorbed into a union is represented BY that union — ★ his 11-22: where a list is named (`held`: the
+        // regions its groups hold), only by a union that list holds; else the piece stands for itself.
+        let outer = faceRegions.outermostUnion(containing: id)
+        let top = held.map { outer == id || $0.contains(outer) ? outer : id } ?? outer
         guard let r = faceRegions.region(top) else { return [] }
 
         // A union speaks for its parts — until a pattern divides it (2026-10-08): then its CELLS
@@ -2382,14 +2423,14 @@ public final class ProjectModel: ObservableObject {
         // is, not a split of it.
         if r.isUnionOfParts {
             let cells = faceRegions.children(of: top).filter { !r.parts.contains($0.id) }
-            return cells.isEmpty ? [top] : cells.flatMap { surfaceEffectiveRegions(from: $0.id) }
+            return cells.isEmpty ? [top] : cells.flatMap { surfaceEffectiveRegions(from: $0.id, unionsHeld: held) }
         }
 
         // A cut or grid split is superseded by its children — they cover the same
         // surface between them, and they are what the user then works with.
         let kids = faceRegions.children(of: top).filter { !$0.isUnionOfParts }
         guard !kids.isEmpty else { return [top] }
-        return kids.flatMap { surfaceEffectiveRegions(from: $0.id) }
+        return kids.flatMap { surfaceEffectiveRegions(from: $0.id, unionsHeld: held) }
     }
 
     /// The group's region rows, folded exactly as the Regions sheet folds them: a
@@ -3242,6 +3283,17 @@ public final class ProjectModel: ObservableObject {
 
     /// A selectable's name on Lattice Setup's Selections rows, in its toasts, and in ruling 3's sentence: a face by its plain
     /// name (`faceName`), anything else as `latticeSelectableName`.
+    /// ★ his 11-22 ("hold onto a name ... to rename the group/face/zone"): a Selections row renamed — a face keeps its own
+    /// name (both stages read it), a piece or union its region's name. A zone is a group (its list renames it).
+    public func renameSelectable(_ ref: LatticeSelectableRef, to name: String) {
+        switch ref {
+        case let .face(_, f): faceRegions.setFaceName(Int32(f), name)
+        case let .region(_, rid): faceRegions.rename(rid, to: name)
+        case .primitive: return
+        }
+        objectWillChange.send()
+    }
+
     public func latticeRowName(_ ref: LatticeSelectableRef) -> String {
         switch ref {
         case let .face(_, f): return faceName(f)
@@ -3253,6 +3305,7 @@ public final class ProjectModel: ObservableObject {
     /// 09:41Z). Read from the part's own axes (up against its gravity, else +Z), never the camera, and the same words on
     /// Lattice Setup's rows and Topology's. Its number only while there is no mesh to read, or the face isn't on it.
     public func faceName(_ f: FaceID) -> String {
+        if let own = faceRegions.faceNames[Int32(f)] { return own }   // ★ his 11-22: the name he gave it
         if let m = viewerMesh, let n = FaceNames.name(f, in: m, frame: .init(gravity: force.gravity)) { return n }
         return "Face \(runFaceID(f))"
     }

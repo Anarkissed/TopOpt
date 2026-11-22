@@ -345,15 +345,19 @@ public struct DSRow<Actions: View>: View {
     var tag: String?
     var line: DSRowLine?
     let tap: (() -> Void)?
+    /// ★ his 11-22: a hold on the name renames it (nil: not renamable).
+    let rename: ((String) -> Void)?
     let actions: Actions
+    /// ★ his 11-22: the value column's width under a Selections panel (its handle); nil: the value whole, as before.
+    @Environment(\.dsRowValueWidth) private var valueWidth
 
     public init(_ kind: Kind, key: String, mark: DSRowMark? = nil, name: String, role: (glyph: String, colour: RGBA)? = nil,
                 value: String? = nil, disclosure: Bool? = nil, selected: Bool = false, hidden: Bool = false,
                 disabled: Bool = false, locked: Bool = false, tag: String? = nil, line: DSRowLine? = nil,
-                tap: (() -> Void)? = nil, @ViewBuilder actions: () -> Actions) {
+                tap: (() -> Void)? = nil, rename: ((String) -> Void)? = nil, @ViewBuilder actions: () -> Actions) {
         self.kind = kind; self.key = key; self.mark = mark; self.name = name; self.role = role; self.value = value
         self.disclosure = disclosure; self.selected = selected; self.hidden = hidden; self.disabled = disabled
-        self.locked = locked; self.tag = tag; self.line = line; self.tap = tap; self.actions = actions()
+        self.locked = locked; self.tag = tag; self.line = line; self.tap = tap; self.rename = rename; self.actions = actions()
     }
 
     public var body: some View {
@@ -379,8 +383,13 @@ public struct DSRow<Actions: View>: View {
                     if let tag { DSChip(.tag(tag), key: key + "-tag").layoutPriority(1) }   // before the name, after the value
                     Spacer(minLength: 8)
                     if let value {
-                        Text(value).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color).lineLimit(1)
-                            .fixedSize()
+                        if let w = valueWidth {   // ★ his 11-22: the column the panel's handle sets (the name takes the rest)
+                            Text(value).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color).lineLimit(1)
+                                .truncationMode(.tail).frame(width: w, alignment: .trailing)
+                        } else {
+                            Text(value).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color).lineLimit(1)
+                                .fixedSize()
+                        }
                     }
                     if locked {
                         Image(systemName: "lock.fill").font(.system(size: 12)).foregroundStyle(DS.Color.textTertiary.color)
@@ -421,6 +430,7 @@ public struct DSRow<Actions: View>: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityIdentifier(key)
         .id(key)
+        .modifier(RenameOnHold(name: name, key: key, rename: rename))   // ★ his 11-22: hold the name to rename it
         .background(GeometryReader { g in
             Color.clear
                 .preference(key: ChromeKeepOutKey.self, value: [key: g.frame(in: .global)])
@@ -456,9 +466,10 @@ extension DSRow where Actions == EmptyView {
     public init(_ kind: Kind, key: String, mark: DSRowMark? = nil, name: String, role: (glyph: String, colour: RGBA)? = nil,
                 value: String? = nil, disclosure: Bool? = nil, selected: Bool = false, hidden: Bool = false,
                 disabled: Bool = false, locked: Bool = false, tag: String? = nil, line: DSRowLine? = nil,
-                tap: (() -> Void)? = nil) {
+                tap: (() -> Void)? = nil, rename: ((String) -> Void)? = nil) {
         self.init(kind, key: key, mark: mark, name: name, role: role, value: value, disclosure: disclosure, selected: selected,
-                  hidden: hidden, disabled: disabled, locked: locked, tag: tag, line: line, tap: tap, actions: { EmptyView() })
+                  hidden: hidden, disabled: disabled, locked: locked, tag: tag, line: line, tap: tap, rename: rename,
+                  actions: { EmptyView() })
     }
 }
 

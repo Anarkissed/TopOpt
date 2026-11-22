@@ -299,7 +299,7 @@ final class FacePrismDragHostedTests: XCTestCase {
         XCTAssertEqual(edgeOn.dy, -1, "pointing at the camera: up")
         let f = LatticeSetupHandles.finger(start: CGPoint(x: 100, y: 100), axis: ax, along: 50)
         XCTAssertEqual(f.x, 130, accuracy: 1e-9); XCTAssertEqual(f.y, 140, accuracy: 1e-9)
-        XCTAssertEqual(LatticeSetupCopy.dragItsHandle, "Or drag its handle on the part")
+        XCTAssertEqual(LatticeSetupCopy.dragItsHandle, "Or drag its handle")   // ★ his 11-22: captions of five words
         // never under the page's own UI: slid along its own line to the nearest clear place
         let panel = CGRect(x: 0, y: 0, width: 300, height: 600)
         XCTAssertEqual(LatticeSetupHandles.placed(CGPoint(x: 500, y: 100), axis: CGVector(dx: 1, dy: 0), keepOut: [panel]),

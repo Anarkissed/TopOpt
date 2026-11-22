@@ -87,7 +87,9 @@ final class Notes1122SampleTests: XCTestCase {
         print("NOTES1122: \(line)")
         XCTAssertTrue(line.hasPrefix("Cell size"), "★ which setting: \(line)")
         let floor = try XCTUnwrap(cell.allowedMin)
-        XCTAssertTrue(line.contains("Raise it to \(StrengthCheckDocs.number(floor)) mm, or make the struts thinner."), "★ how: \(line)")
+        let up = StrengthCheckDocs.number(LatticeRefusalWords.upToHundredth(floor))
+        XCTAssertTrue(line.contains("Raise it to \(up) mm, or make the struts thinner."), "★ how: \(line)")
+        XCTAssertTrue(line.contains("at least \(up) mm"), "★ the same number twice (the engine's rounding): \(line)")
         XCTAssertEqual(LatticeRefusalWords.lines(refused)?.hasPrefix(LatticeRefusalWords.line(refused[0])), true)
         // RED CONTROL: the old pop-up said neither what nor how
         let old = "These settings didn’t make a sample. Try changing one of them; if it keeps happening, tell us."

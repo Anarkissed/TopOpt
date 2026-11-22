@@ -214,6 +214,10 @@ public struct SelectionsList: View {
     @State private var dragFrom: CGFloat? = nil
     /// ★ his iPad 11-07 (3b): the list's eye sweep (Lattice Setup's list only).
     @StateObject private var sweep = EyeSweep()
+    /// ★ his 11-22: the panel's width and its columns, remembered (every stage's list reads the same).
+    @ObservedObject private var layout = SelectionsLayout.shared
+    @State private var cornerFrom: (width: CGFloat, height: CGFloat)? = nil
+    @State private var columnFrom: CGFloat? = nil
 
     public init(project: ProjectModel, collapsed: Binding<Bool>, picked: UUID?, deleteAsk: UUID?,
                 isLocked: @escaping (UUID) -> Bool = { _ in false }, readsLattice: @escaping (UUID) -> Bool = { _ in false },
@@ -263,6 +267,13 @@ public struct SelectionsList: View {
         return copy
     }
 
+    /// ★ his 11-22: Lattice Setup's list resizes too (its height, remembered); the binding nil = as tall as its rows.
+    func resizable(height: Binding<CGFloat?>) -> SelectionsList {
+        var copy = self
+        copy.chosenHeight = height
+        return copy
+    }
+
     /// How far a scenario folder's groups sit in from the folder row.
     static let folderIndent: CGFloat = 20
     static let lineHeight: CGFloat = 44
@@ -297,7 +308,9 @@ public struct SelectionsList: View {
                 DeleteConfirm(name: g.name, delete: confirmDelete, oneLine: true, idPrefix: idPrefix, ask: ask)
                     .frame(height: Self.lineHeight)
             } else {
-                header
+                // ★ his 11-22: "handles to expand or shrink the different columns" — in the header's line (never a strip
+                // that cuts into the panel), over the line between the names and their values
+                header.overlay(alignment: .leading) { if !collapsed, !groups.isEmpty { columnHandle } }
             }
             if !collapsed {
                 Divider().overlay(DS.Color.strokeSubtle.color)
@@ -370,6 +383,8 @@ public struct SelectionsList: View {
                 }
             }
         }
+        .environment(\.dsRowValueWidth, layout.valueWidth)   // ★ his 11-22: every row's value in the handle's column
+        .overlay(alignment: .bottomTrailing) { if !collapsed { cornerGrip } }   // ★ his 11-22: the whole panel's size
         .frame(width: collapsed ? nil : listWidth, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: DS.Radius.panel).fill(DS.Surface.panel.color)
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
@@ -528,6 +543,7 @@ public struct SelectionsList: View {
                     // ★ his iPad 14:13: a line with its own control (an anchor's scenario switch) gives the name the room
                     if accessory == nil {
                         SummaryLabel(summary: summary?(g) ?? SelectionsSummary.summary(project: project, group: g))
+                            .frame(width: layout.valueWidth, alignment: .trailing)   // ★ his 11-22: the handle's column
                             .accessibilityIdentifier("\(idPrefix)-sel-summary-\(g.id.uuidString)")
                     }
                     if locked {
@@ -541,6 +557,8 @@ public struct SelectionsList: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("\(idPrefix)-sel-group-\(g.id.uuidString)")
+            // ★ his 11-22: hold the name to rename the group (the full keyboard)
+            .modifier(RenameOnHold(name: g.name, key: "\(idPrefix)-sel-group-\(g.id.uuidString)", rename: { renameGroup(g.id, $0) }))
             if let accessory { accessory }
             if let toggleEye {
                 let hidden = isHidden(g.id)
@@ -632,7 +650,7 @@ public struct SelectionsList: View {
     /// required"): every left panel is ONE width, PageChrome.panelWidth (348 pt). His 10-27 note 2 ("the Group names are
     /// being cut off") holds by wrapping: a long name takes a second line inside its row. (The panel widened for the longest
     /// line, up to 640 pt — to go back, this is the one place.)
-    var listWidth: CGFloat { PageChrome.panelWidth }
+    var listWidth: CGFloat { PageChrome.panelWidth + layout.extraWidth }   // ★ his 11-22: wider by his corner grip
 
     /// The room a wrapped name keeps above and below its lines inside the row.
     static let nameWrapPadding: CGFloat = 4
@@ -659,6 +677,58 @@ public struct SelectionsList: View {
     private func publish(_ key: String) -> some View {
         GeometryReader { g in Color.clear.preference(key: ChromeKeepOutKey.self, value: [key: g.frame(in: .global)]) }
             .allowsHitTesting(false)
+    }
+
+    /// ★ his 11-22: a group renamed in the list it is in (Lattice Setup's own groups, or Topology's).
+    private func renameGroup(_ id: UUID, _ name: String) {
+        if usesLatticeList { var l = project.latticeList; l.rename(id, to: name); project.latticeList = l }
+        else { project.selection.rename(id, to: name) }
+    }
+
+    /// The value column's default width before his first drag (a role word: "Protect skin").
+    static let valueDefault: CGFloat = 96
+    /// The rows' trailing controls (an eye and a trash, 44 pt each) and the row's own trailing inset.
+    static let actionsWidth: CGFloat = 88 + 10
+
+    /// ★ his 11-22 ("handles to expand or shrink the different columns"): one handle at the line between the names and their
+    /// values; drag it left for wider values, right for wider names. It sits in its own thin strip under the header.
+    private var columnHandle: some View {
+        let value = layout.valueWidth ?? Self.valueDefault
+        let x = listWidth - Self.actionsWidth - value - 4
+        return Capsule().fill(DS.Color.textTertiary.color).frame(width: 4, height: 16)
+                .frame(width: 44, height: Self.lineHeight).contentShape(Rectangle())
+                .highPriorityGesture(DragGesture(minimumDistance: 2, coordinateSpace: .global)
+                    .onChanged { v in
+                        let from = columnFrom ?? value
+                        if columnFrom == nil { columnFrom = from }
+                        layout.valueWidth = SelectionsLayout.clampValue(from - v.translation.width)
+                    }
+                    .onEnded { _ in columnFrom = nil })
+                .background(publish("selectionsColumnHandle"))
+                .accessibilityLabel("Resize columns")
+                .accessibilityIdentifier("\(idPrefix)-sel-columns")
+                .padding(.leading, Swift.max(0, x - 22))   // laid out where it is drawn (its frame and its touch agree)
+    }
+
+    /// ★ his 11-22 ("a way to expand/shrink the width/height of the entire Selections modal"): a grip in the panel's bottom
+    /// right corner — across for its width, down for its height (where the list has a height grip).
+    private var cornerGrip: some View {
+        Image(systemName: "arrow.up.left.and.arrow.down.right").font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(DS.Color.textTertiary.color)
+            .frame(width: 44, height: 44).contentShape(Rectangle())
+            .highPriorityGesture(DragGesture(minimumDistance: 2, coordinateSpace: .global)
+                .onChanged { v in
+                    let from: (width: CGFloat, height: CGFloat) = cornerFrom ?? (width: layout.extraWidth, height: listHeight)
+                    if cornerFrom == nil { cornerFrom = from }
+                    layout.extraWidth = SelectionsLayout.clampExtra(from.width + v.translation.width)
+                    if chosenHeight != nil {
+                        chosenHeight?.wrappedValue = Self.resized(from: from.height, drag: v.translation.height, max: min(maxHeight, floorCap))
+                    }
+                }
+                .onEnded { _ in cornerFrom = nil })
+            .background(publish("selectionsCornerGrip"))
+            .accessibilityLabel("Resize Selections")
+            .accessibilityIdentifier("\(idPrefix)-sel-corner")
     }
 }
 

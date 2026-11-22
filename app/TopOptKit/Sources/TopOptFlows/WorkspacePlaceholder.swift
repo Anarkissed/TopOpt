@@ -7266,7 +7266,7 @@ public struct WorkspacePlaceholder: View {
         }
         return SurfaceTint.buffer(mesh: mesh, groupedFaces: surfaceGroupedFaces,
                                   regions: project.faceRegions,
-                                  selected: surfaceSelected,
+                                  selected: surfaceSelected ?? project.surfaceOrphanedCutPieces.first,   // ★ 11-22: the card's piece lit
                                   // Whole-face picks are coloured directly…
                                   // The matches light exactly as tapped faces do —
                                   // they are whole faces, so no fragment test.
@@ -8262,7 +8262,7 @@ public struct WorkspacePlaceholder: View {
         // ★ his iPad 11-16 (the "T"): a cut piece whose other half is gone — one line, one tap makes its face whole again
         .overlay(alignment: .bottomLeading) {
             if !project.surfaceOrphanedCutPieces.isEmpty {
-                EditFacesOrphanCard {
+                EditFacesOrphanCard(count: project.surfaceOrphanedCutPieces.count) {
                     project.surfaceRepairOrphanedCutPieces()
                     surfaceSelected = nil
                     surfaceSelectedFace = nil
@@ -8661,7 +8661,7 @@ public struct WorkspacePlaceholder: View {
                             surfaceUnion.clear()
                         }
                         surfaceClusterConfirm(enabled: surfaceUnion.canCommit) {
-                            surfaceSelected = project.commitSurfaceUnion(surfaceUnion)
+                            surfaceSelected = project.commitSurfaceUnion(surfaceUnion, latticeStage: stage == .lattice)   // ★ his 11-22
                             surfaceUnion.clear()
                         }
                     }
@@ -11452,6 +11452,29 @@ public struct WorkspacePlaceholder: View {
         }
     }
 
+    /// ★ his 11-22 ("NOTHING cuts into the modal"): the diagnosis as one warning glyph (a 44 pt target) in the Role row; a
+    /// tap opens the same pop-up with every failure and its fix. Never in Aesthetic (his 08-25 ruling, as the badge).
+    @ViewBuilder private func latticeDiagnosisGlyph(_ g: SelectionGroup) -> some View {
+        let d = (project.lattice.stageMode ?? .structural) == .aesthetic
+            ? LatticeFaceDiagnosis.merged([]) : latticeDiagnosis(g)
+        if let badge = d.badge {
+            Button { diagnosisPopoverGroup = g.id } label: {
+                Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(latticeVerdictTint(d.severity).color)
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(badge + ". How to fix this")
+            .accessibilityIdentifier("lattice-diagnosis-info-\(g.id.uuidString)")
+            .background(DSParts.publish("lattice-diagnosis-\(g.id.uuidString)"))
+            .popover(isPresented: Binding(
+                get: { diagnosisPopoverGroup == g.id },
+                set: { if !$0 { diagnosisPopoverGroup = nil } })) {
+                latticeDiagnosisPopover(d)
+            }
+        }
+    }
+
     /// ★ §3(b)/§3(e) — THE POP-UP: every failure, and it LEADS WITH THE FIX.
     private func latticeDiagnosisPopover(_ d: LatticeFaceDiagnosis) -> some View {
         VStack(alignment: .leading, spacing: DS.Space.m) {
@@ -12117,13 +12140,13 @@ public struct WorkspacePlaceholder: View {
         VStack(alignment: .leading, spacing: 0) {
             DSRow(.group, key: "latticeZone-\(z.id.uuidString)", mark: .colour(z.color), name: z.name,
                   value: project.latticeZoneSizeWords(z.id), selected: picked, hidden: project.groupView.isHidden(z.id),
-                  tap: { latticeZoneGizmo = nil; if picked { leaveGroupEditing() } else { latticeFacePick = nil; stageList.setActive(z.id) } }) {
+                  tap: { latticeZoneGizmo = nil; if picked { leaveGroupEditing() } else { latticeFacePick = nil; stageList.setActive(z.id) } },
+                  rename: { n in var l = project.latticeList; l.rename(z.id, to: n); project.latticeList = l }) {   // ★ his 11-22
                 DSRowEye(hidden: project.groupView.isHidden(z.id), key: "latticeZoneEye-\(z.id.uuidString)") { toggleTopologyEye(z.id) }
                 DSRowTrash(key: "latticeZoneTrash-\(z.id.uuidString)") {
                     if picked { leaveGroupEditing() }
                     project.removeLatticeZone(z.id)
                     refreshLatticeFaceCards()
-                    model.toast = LatticeSetupCopy.removed(z.name)
                 }
             }
             if picked, let s = project.latticeZoneSize(z.id) {
@@ -12165,25 +12188,23 @@ public struct WorkspacePlaceholder: View {
 
     /// ★ B6 s1b (§4.4, mockup "12–31 mm deep"): a lattice group's one value — how deep its faces lattice.
     private func latticeGroupValue(_ g: SelectionGroup) -> String {
+        if let b = latticeRoleBlock(g) { return b.reason }   // ★ his 11-22: the line's own words, never a line under it
         if project.lattice.groupRoles[g.id] == nil { return LatticeSetupCopy.pending }   // §4.4 "pending": no role yet
         let depths = project.latticeSelectableRefs(g).filter { project.latticeSelectableRole($0, in: g.id) != nil }
             .map { project.latticeSlabDepthMM($0, in: g.id) }
-        guard let lo = depths.min(), let hi = depths.max() else { return "\u{2014}" }
-        return LatticeSetupCopy.deep(lo: lo, hi: hi)
+        guard !depths.isEmpty else { return "\u{2014}" }
+        return ""   // ★ his 11-22: no "mm deep" on a group's line (it took the name's room)
     }
 
     /// ★ B6 s1b (note 28, R2.3 / R4): an open lattice group — one full-size row per face, then the group's Role, then what the
     /// lattice says about it (its diagnosis line). Keep clear and Protect are Topology's (its panel comes in B6 s2).
     @ViewBuilder private func latticeGroupRows(_ g: SelectionGroup) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let b = latticeRoleBlock(g) {
-                // ★ SAY WHY, IN FIVE WORDS (R7): a blocked group's one line
-                Text(b.reason).font(.system(size: 12.5)).foregroundStyle(DS.Color.warning.color).lineLimit(1)
-                    .padding(.leading, DSParts.faceIndent).padding(.vertical, 10)
-            } else {
+            // ★ his 11-22 ("NOTHING cuts into the modal"): a blocked group says why on its line (R7's five words); the
+            // diagnosis is the Role row's warning glyph
+            if latticeRoleBlock(g) == nil {
                 ForEach(project.latticeSelectableRefs(g), id: \.key) { ref in latticeFaceRow(g, ref) }
                 latticeRoleRow(g)
-                latticeDiagnosisBadge(g).padding(.horizontal, 14).padding(.bottom, 6)
             }
         }
     }
@@ -12204,12 +12225,13 @@ public struct WorkspacePlaceholder: View {
         let frozen = !project.latticeReachesTheRun(ref) && role != nil
         let removable: Bool = { if case .primitive = ref { return false }; return true }()
         VStack(alignment: .leading, spacing: 0) {
-            DSRow(.face, key: "latticeFace-\(ref.key)", name: project.latticeRowName(ref), value: picked ? nil : value,
+            DSRow(.face, key: "latticeFace-\(ref.key)", name: project.latticeRowName(ref),
+                  value: picked ? nil : frozen ? LatticeSectorOutline.notLatticedWords(protected: force.isProtected(g.id))
+                      : value.isEmpty ? nil : value,
                   selected: picked, tag: latticeAlsoIn(ref, g),
-                  line: frozen ? DSRowLine(LatticeSectorOutline.notLatticedWords(protected: force.isProtected(g.id)), tone: .warning)
-                      // ★ B6 N2 — ★ 11-09 (2.1): only where its prism (and so its handle) is drawn
-                      : picked && latticePrismShown(ref) && latticeDrawsPrism(g.id) ? DSRowLine(LatticeSetupCopy.dragItsHandle) : nil,
-                  tap: { latticeFacePick = picked ? nil : ref.key }) {
+                  // ★ B6 N2 — ★ 11-09 (2.1): only where its prism (and so its handle) is drawn
+                  line: !frozen && picked && latticePrismShown(ref) && latticeDrawsPrism(g.id) ? DSRowLine(LatticeSetupCopy.dragItsHandle) : nil,
+                  tap: { latticeFacePick = picked ? nil : ref.key }, rename: { project.renameSelectable(ref, to: $0) }) {   // ★ his 11-22
                 if picked {
                     NumberField(key: "latticeFaceDepth-\(ref.key)", title: "Depth",
                                 spec: FlexNumberSpec(value: depth, unit: "mm", step: 0.5,
@@ -12279,6 +12301,7 @@ public struct WorkspacePlaceholder: View {
                                 .init(LatticePickedRole?.some(.skin), LatticeSetupCopy.protectSkin)],
                                selection: Binding(get: { latticePickedRole(g) }, set: { if let r = $0 { setLatticePickedRole(r, g) } }),
                                small: true)
+                latticeDiagnosisGlyph(g)   // ★ his 11-22: a glyph that opens the fixes, never a line in the panel
                 groupLockToggle(g)
             }
             .frame(minHeight: 44)
@@ -12421,7 +12444,6 @@ public struct WorkspacePlaceholder: View {
         if latticeFacePick == ref.key { latticeFacePick = nil }
         project.syncForceGroups()
         refreshLatticeFaceCards()
-        model.toast = LatticeSetupCopy.removed(project.latticeRowName(ref))
     }
 
     // MARK: B6 s2a — the Topology panel on Lattice Setup (notes 19, 23a, 23b, R2.1)
@@ -13929,7 +13951,7 @@ public struct WorkspacePlaceholder: View {
             // ★ B6 s1 (the approved mockup #lat-setup): Lattice Setup has the hint again — its corner is Topology's three now
             // ★ B8 (mockup #cut): Edit faces has the hint too — where its taps go ("It joins no group.")
             if Self.hintShows(showsSelectionHint: visible.showsSelectionHint || (latticeSetupUp && latticeTopologyOpen) || editFaces.isEditing,
-                              selectionsCollapsed: selectionsCollapsed) {
+                              selectionsCollapsed: selectionsCollapsed), !(editFaces.isEditing ? EditFacesCopy.footHint : hint).isEmpty {
                 // ★ LOOK PER SCREEN (11-04, the mockup's .hint): one 36 pt line that gives way before the corner does
                 Text(editFaces.isEditing ? EditFacesCopy.footHint : hint)
                     .font(.system(size: 12.5)).lineLimit(1).truncationMode(.tail)
@@ -14010,7 +14032,7 @@ public struct WorkspacePlaceholder: View {
         }
         // ★ B3 (R5): with scenarios, the hint says which one the part shows
         if scenariosApply, force.hasScenarios { return ScenarioSelectCopy.hint(force.activeScenario.name) }
-        return "Tap a face \u{00B7} drag to turn"   // ★ LOOK PER SCREEN: design-system §5's short form
+        return ""   // ★ his 11-22: no "Tap a face · drag to turn" ("that doesn't even make sense ... it's useless")
     }
 
     /// The groups carrying a LATTICE role (bar Z10). A group set to "lattice here"
@@ -15207,12 +15229,8 @@ extension WorkspacePlaceholder {
 
     /// The group line's words: its role (and a Load's weight · direction), a Protect's depth.
     private func topologyGroupSummary(_ g: SelectionGroup) -> String {
-        let role = force.panelKindLabel(for: g.id)
-        if force.isProtected(g.id), !role.hasPrefix("Protect") {
-            return role + " \u{00B7} " + SelectionsSummary.format(force.faceProtectDepthMM, decimals: 1) + " mm"
-        }
-        if role == "Protect" { return role + " " + SelectionsSummary.format(force.faceProtectDepthMM, decimals: 1) + " mm" }
-        return role
+        // ★ his 11-22: no depth on a group's line ("Protect", not "Protect 1 mm"); a load keeps its weight
+        force.panelKindLabel(for: g.id)
     }
 
     /// The open group: today's row (rename, colour, role, Keep clear / Protect, lock, primitives, the clearance editor), then
@@ -15720,6 +15738,8 @@ extension WorkspacePlaceholder {
                                  isOpen: { stageList.activeGroupID == $0 },
                                  toggleOpen: { latticeOpenOrClose($0) },
                                  lineLook: { _ in latticeFacePick == nil })   // a picked face row wears the look itself
+                .resizable(height: Binding(get: { SelectionsLayout.shared.latticeHeight },
+                                           set: { SelectionsLayout.shared.latticeHeight = $0 }))   // ★ his 11-22
             if !selectionsCollapsed {
                 // ★ B8 (his answer 2026-10-24): Grade lives ONLY on the Cells page — no Grade pair here.
                 HStack(spacing: DS.Space.s) {

@@ -150,11 +150,12 @@ final class IPadNotes1109Tests: XCTestCase {
 
     /// ★ (2.1, ruling (a) 19:21Z) A Protect skin group's face says what it is — "Protect skin · 4 mm" — not "No lattice".
     func testAProtectSkinFaceSaysProtectSkin() {
-        XCTAssertEqual(LatticeSetupCopy.faceValue(role: .exclude, groupHasRole: true, skin: true, mm: "4 mm"), "Protect skin \u{00B7} 4 mm")
-        XCTAssertEqual(LatticeSetupCopy.faceValue(role: .exclude, groupHasRole: true, skin: false, mm: "4 mm"), "No lattice \u{00B7} 4 mm",
+        // ★ his 11-22: "get rid of the words '4mm' and '4mm deep'" — the role alone
+        XCTAssertEqual(LatticeSetupCopy.faceValue(role: .exclude, groupHasRole: true, skin: true, mm: "4 mm"), "Protect skin")
+        XCTAssertEqual(LatticeSetupCopy.faceValue(role: .exclude, groupHasRole: true, skin: false, mm: "4 mm"), "No lattice",
                        "control: a No lattice face as before")
-        XCTAssertEqual(LatticeSetupCopy.faceValue(role: .include, groupHasRole: true, skin: true, mm: "4 mm"), "4 mm",
-                       "a face set to Lattice in a Protect skin group: its depth")
+        XCTAssertEqual(LatticeSetupCopy.faceValue(role: .include, groupHasRole: true, skin: true, mm: "4 mm"), "",
+                       "a face set to Lattice in a Protect skin group: no depth words")
         XCTAssertEqual(LatticeSetupCopy.faceValue(role: nil, groupHasRole: false, skin: false, mm: "4 mm"), "\u{2014}")
         XCTAssertEqual(LatticeSetupCopy.faceValue(role: nil, groupHasRole: true, skin: false, mm: "4 mm"), LatticeSetupCopy.off)
         XCTAssertEqual(LatticeSetupCopy.notLatticed(skin: true), "Protect skin", "its This face choice")

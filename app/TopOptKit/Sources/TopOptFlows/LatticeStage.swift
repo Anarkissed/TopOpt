@@ -231,14 +231,16 @@ public enum LatticeSetupCopy {
     public static let pending = "Pending\u{2026}"
     public static let topologyHint = "Taps go to Topology groups"
     /// ★ B6 N2: a picked face row's line, under its depth (mockup #lat-face-prism, "or drag its handle").
-    public static let dragItsHandle = "Or drag its handle on the part"
+    public static let dragItsHandle = "Or drag its handle"
     /// ★ his iPad 11-09 (2.1, the reviewer's ruling (a) 19:21Z): what a face row says. A face of a Protect skin group says
     /// so ("Protect skin · 4 mm") — it runs as No lattice until the engine has a per-region skin, and said "No lattice ·
     /// 4 mm" beside a depth with no handle (his rule: Protect skin = colour, no prism). A face with no role says "—"
     /// (its group has none yet) or "Off" (declared out); a latticed face its depth.
-    public static func faceValue(role: LatticeGroupRole?, groupHasRole: Bool, skin: Bool, mm: String) -> String {
+    /// ★ his 11-22: "get rid of the words '4mm' and '4mm deep' ... It takes up way too much space": a face row says its role
+    /// only ("Protect skin", "No lattice"); a latticed face says nothing (its depth is its handle and its open row's number).
+    public static func faceValue(role: LatticeGroupRole?, groupHasRole: Bool, skin: Bool, mm: String = "") -> String {
         guard let role else { return groupHasRole ? off : "\u{2014}" }
-        return role == .exclude ? "\(notLatticed(skin: skin)) \u{00B7} \(mm)" : mm
+        return role == .exclude ? notLatticed(skin: skin) : ""
     }
 
     /// A face kept out of the lattice: "Protect skin" in a Protect skin group, else "No lattice" (its row's word and its
@@ -254,7 +256,7 @@ public enum LatticeSetupCopy {
         return (r > 0 ? "+" : "\u{2212}") + SelectionsSummary.format(abs(r), decimals: 1) + " mm"
     }
     /// ★ B6 N3: a picked zone's line, under its size (mockup #lat-zone-sel).
-    public static let zoneHandlesLine = "Drag its handles on the part to size it."
+    public static let zoneHandlesLine = "Drag its handles to size"
     /// The join's second line (the face takes the group it joins).
     public static let joinNote = "with its role and depth"
 
