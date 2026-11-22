@@ -166,6 +166,9 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// ★ Cut 2: the loaded and fixed faces at the lay (kept flush whatever depth variation says).
     private var flushAtLay: [Int32] = []
     private var mapTask: Task<Void, Never>?
+    /// ★ his 11-22 (img 45, 47: "The draft lattice doesn't cut the faces of the solid - so it is barely visible as it barely
+    /// pokes through"): what the lattice on screen was laid in — its part, settings and stress — by its token (`mapFor`).
+    private var shownWhere: (token: Int, at: MapWhere)?
     private var nozzleSession: LatticeLayoutSession?
     private var latticeAtLay = LatticeSettings()
     private var nozzlePath: String?
@@ -422,6 +425,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         b.dimmed = false
         if !solidWanted { b.solid = nil }
         bars = b; laid = r.laid; timing = r.timing
+        shownWhere = (b.token, MapWhere(path: r.inputs.path, settings: r.inputs.settings, stressKey: r.inputs.stress.key))   // ★ 11-22
         organicQuality = r.quality; organicNumbers = r.numbers; problem = r.problem; notes = r.notes
         organicLaidGroups = r.quality == .exact ? r.groups : nil; organicRefusals = []; organicWallVerdicts = r.wallVerdicts
         organicAutoLimits = r.autoLimits; organicGroupLimits = r.groupLimits
@@ -681,6 +685,15 @@ public final class LatticeLayoutPreview: ObservableObject {
         if afterDraft {   // ★ his pick 11-21: the Draft is on screen, marked; the exact lattice is made
             layProgress = LayProgress(quality: .exact, started: Date(), expectedS: layWallS[timeKey(path, .exact)], draftShown: true)
         }
+        // ★ his 11-22 (img 45, 47: "The draft lattice doesn't cut the faces of the solid"): the Draft on screen is cut open
+        // while its exact lattice is made — its own map first (the session's last lay is that Draft), the very map the exact
+        // lattice opens its faces with (`mapFor` keeps it for it). Never the exact lay.
+        let here = MapWhere(path: path, settings: s, stressKey: stress.key)
+        if !draft, layProgress?.draftShown == true, solidWanted, !Self.controlDraftWaitsForExactMap, let b = bars,
+           b.solid?.token != b.token, shownWhere?.token == b.token, shownWhere?.at == here {
+            await addMap()
+            guard !Task.isCancelled else { return }
+        }
         // ★ Auto's numbers first, measured by the engine before any lay or stress (his iPad notes 11-18: the fields showed
         // 0): the whole part's and each group's (E4: the union of its areas), once per "where" and line
         let weave = s.regions.filter { $0.weave && !$0.noLattice }.map(\.id)
@@ -771,7 +784,10 @@ public final class LatticeLayoutPreview: ObservableObject {
         var drawn = LatticeLayoutBarsInputs(token: token, bars: seg.bars, solid: nil, flags: seg.flags)
         drawn.lightFrom = Self.organicLightFrom(grown: grown, netFrom: seg.lightFrom, count: seg.count)
         drawn.vines = vines
+        // ★ his 11-22: cut open at once where the map on screen is this lattice's map too (the Draft's, for its exact lattice)
+        if solidWanted { drawn.solid = Self.mapFor(token: token, at: here, shown: bars, shownWhere: shownWhere) }
         bars = drawn
+        shownWhere = (token, here)
         var l = LatticeLayoutColours.Laid()   // no cells: the key and card read each strut's width and its cell size
         l.bars = seg.bars; l.barFlags = seg.skin; l.barCell = seg.cell; l.barRegion = seg.region; l.token = token
         laid = l
@@ -804,7 +820,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         }
         // a draft is followed by the exact lattice when nothing newer came (Print-accurate preview)
         // ★ his 11-18 iPad (the body hid the weave): the solid view's map, cut open around Organic as around the regular lattice
-        if !more, solidWanted, !Task.isCancelled { await addMap() }
+        if !more, solidWanted, !Task.isCancelled { await addMap() }   // (an exact lattice after its Draft keeps the Draft's: no-op)
         if more, !Task.isCancelled { try await layOrganic(session, path: path, s, draft: false, afterDraft: true) }
     }
 
@@ -984,6 +1000,28 @@ public final class LatticeLayoutPreview: ObservableObject {
     }
 
     // MARK: the solid view's map
+
+    /// What an Organic lattice's map depends on: the part, the settings it was laid with and the stress. The engine's map is
+    /// open wherever a weave region is (core's SolidAt: "a weave's lattice is open"), whatever its vines, so it is the same
+    /// for the Draft and the exact lattice of these, and for every Look of them.
+    struct MapWhere: Equatable {
+        var path: String
+        var settings: LatticeLayoutSession.Settings
+        var stressKey: Int
+    }
+    /// RED CONTROL (tests): the Draft on screen waits for the exact lattice's own map (before 11-22: its faces stayed whole).
+    nonisolated(unsafe) public static var controlDraftWaitsForExactMap = false
+
+    /// ★ his 11-22 (img 45, 47 against 48): the map an Organic lattice laid at `at` opens its faces with, at once — the one on
+    /// screen when it was made for the same part, settings and stress (the Draft's for its exact lattice, the last Look's for
+    /// a new Look), as this lattice's own (no second map). nil: none fits; the lattice's own map is made (`addMap`).
+    static func mapFor(token: Int, at: MapWhere, shown: LatticeLayoutBarsInputs?,
+                       shownWhere: (token: Int, at: MapWhere)?) -> LatticeLayoutSolidGrid? {
+        guard !controlDraftWaitsForExactMap, let b = shown, var m = b.solid, m.token == b.token, let w = shownWhere,
+              w.token == b.token, w.at == at else { return nil }
+        m.token = token
+        return m
+    }
 
     /// X-ray was switched: off asks for the map (once per layout), on drops it.
     private func solidToggled() {
