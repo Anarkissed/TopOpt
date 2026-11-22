@@ -92,8 +92,29 @@ struct LatticeSampleView: View {
     @State private var caption = LatticeSampleView.building
     @State private var failed = false
     @State private var organicBars: LatticeLayoutBarsInputs?
+    /// ★ his 11-22 notes (img 46: "Building the sample…" with no sense of how long): when this build began (the wait for his
+    /// part's own numbers counts as the same build), and how long the sample on screen took.
+    @State private var buildStarted: Date?
+    @State private var heldForPart = false
+    @State private var builtSeconds: Double?
 
     static let building = "Building the sample\u{2026}"
+
+    /// ★ his 11-22: the time so far, once a second ("Building the sample · 12 s").
+    static func buildingLine(elapsed s: Double) -> String {
+        s < 1 ? building : "Building the sample \u{00B7} " + clock(s)
+    }
+    /// ★ his 11-22: how long the sample on screen took, a small quiet label on it (four words at most).
+    static func builtLabel(seconds s: Double) -> String {
+        "Built in " + (s < 10 ? String(format: "%.1f s", Swift.max(0, s)) : clock(s))
+    }
+    /// "12 s" under a minute, "1:05" from one.
+    static func clock(_ s: Double) -> String {
+        let n = Swift.max(0, Int(s.rounded(.down)))
+        return n < 60 ? "\(n) s" : String(format: "%d:%02d", n / 60, n % 60)
+    }
+    /// Test hook (FlexibleSaid.recording): each "Built in" label shown.
+    nonisolated(unsafe) static var recordedBuilt: [String] = []
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -115,7 +136,7 @@ struct LatticeSampleView: View {
                         .background(Capsule().fill(DS.Surface.panel.color))
                         .latticeID("lattice-sample-not-shown")
                 }
-                Text(caption)
+                captionLine
                     .font(.system(size: 12.5)).foregroundStyle((failed ? DS.Color.warning : DS.Color.textSecondary).color)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.s)
@@ -128,6 +149,36 @@ struct LatticeSampleView: View {
         .onChange(of: caption) { c in if FlexibleSaid.recording { Self.recordedCaptions.append(c) } }
         .onAppear { if FlexibleSaid.recording { Self.recordedAppears += 1 }; Self.say(tag, "appear") }
         .onDisappear { Self.say(tag, "disappear") }
+    }
+
+    /// ★ his 11-22 (img 46): the caption, with the time while it builds (once a second, this line only) and, once built, how
+    /// long it took beside it, quieter — on the sample's own caption, never a line of the screen.
+    @ViewBuilder private var captionLine: some View {
+        if caption == Self.building, !failed, let start = buildStarted {
+            TimelineView(.periodic(from: start, by: 1)) { ctx in
+                Text(Self.buildingLine(elapsed: ctx.date.timeIntervalSince(start)))
+            }
+        } else if let s = builtSeconds, !failed {
+            HStack(alignment: .firstTextBaseline, spacing: DS.Space.s) {
+                Text(caption)
+                Text(Self.builtLabel(seconds: s)).foregroundStyle(DS.Color.textTertiary.color).fixedSize()
+                    .latticeID("lattice-sample-built")
+            }
+        } else {
+            Text(caption)
+        }
+    }
+
+    /// The build began (a new one; the wait for his part's numbers goes on as the same one).
+    private func buildBegins() {
+        builtSeconds = nil
+        if !heldForPart || buildStarted == nil { buildStarted = Date() }
+        heldForPart = inputs.organic != nil && inputs.partStrutsPending
+    }
+    /// The sample is on screen: how long it took stays on it.
+    private func buildShown() {
+        builtSeconds = buildStarted.map { Date().timeIntervalSince($0) }
+        if FlexibleSaid.recording, let s = builtSeconds { Self.recordedBuilt.append(Self.builtLabel(seconds: s)) }
     }
 
     /// Diagnostics: SAMPLE_TRACE=1 prints each view's asks, skips, builds and appearances.
@@ -153,6 +204,7 @@ struct LatticeSampleView: View {
 
     private func build() async {
         caption = Self.building; failed = false
+        buildBegins()   // ★ his 11-22: the time it takes, said
         let i = inputs
         if let look = i.organic { return await buildOrganic(look, i) }
         organicBars = nil
@@ -180,6 +232,7 @@ struct LatticeSampleView: View {
             mesh = m
             Self.say(tag, "mesh up (\(block.mesh.indices.count / 3) triangles)")
             camera.reframe(m.bounds)
+            buildShown()
             caption = i.shape == .cells
                 ? Self.cellsCaption(receiptJSON: block.receiptJSON, typeName: i.typeName, densityHeld: block.densityHeld)
                 : Self.caption(receiptJSON: block.receiptJSON, typeName: i.typeName, densityHeld: block.densityHeld)
@@ -254,6 +307,7 @@ struct LatticeSampleView: View {
             organicBars = bars
             mesh = m
             camera.reframe(m.bounds)
+            buildShown()
             let size = cube ? "40 mm cube" : "Sample part · 45 × 40 × 35 mm"
             // his 11-20 (img6): the cells the sample was asked for, his Manual numbers when he set them, never Auto's
             let lo = ask.spacingMM > 0 ? ask.spacingMM : ask.spacingMinMM, hi = ask.spacingMM > 0 ? ask.spacingMM : ask.spacingMaxMM
