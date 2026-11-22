@@ -1293,13 +1293,14 @@ fragment float4 stage_fragment(SOut in [[stage_in]], constant StageUniforms& U [
     float vign   = 1.0 - 0.35 * dot(ndc, ndc);
     col *= clamp(vign, 0.6, 1.0);
 
-    // View ray for this pixel (world space).
+    // View ray for this pixel (world space): from the eye through the pixel's point on the NEAR plane. ★ his 11-22 notes
+    // (img 45, "it's worse from this angle"): the far plane's point (ndc z = 1) is where the projection's depth cancels
+    // (its w is 1/far, a difference of two numbers near 1/near), so the ray's direction wobbled with the angle and the floor
+    // lines slid against the part; the near plane's point has no such cancellation.
     float4 nh = U.invVP * float4(ndc, 0.0, 1.0);
-    float4 fh = U.invVP * float4(ndc, 1.0, 1.0);
     float3 np = nh.xyz / nh.w;
-    float3 fp = fh.xyz / fh.w;
-    float3 rd = normalize(fp - np);
     float3 ro = U.eye;
+    float3 rd = normalize(np - ro);
 
     // Soft horizon glow: rays grazing the floor plane (|rd.y| small) get a faint blue lift.
     float horizon = 1.0 - smoothstep(0.0, 0.14, abs(rd.y));
@@ -1311,8 +1312,11 @@ fragment float4 stage_fragment(SOut in [[stage_in]], constant StageUniforms& U [
         if (t > 0.0) {
             float3 hit = ro + rd * t;
             float2 xz = hit.xz;
-            float minor = gridMask(xz / U.spacing);
-            float major = gridMask(xz / (U.spacing * 5.0));
+            // ★ his 11-22 notes: ONE grid of perfect squares — a major line is exactly every 5th small line (StageFloor
+            // .minorPerMajor), both from the world's origin, on the one floor
+            float2 cell = xz / U.spacing;
+            float minor = gridMask(cell);
+            float major = gridMask(cell / 5.0);
             // Fade with distance from the floor centre, and with grazing angle (kills moiré
             // near the horizon), so far lines dissolve into the gradient.
             float dist  = length(xz - U.centerXZ);
@@ -1855,12 +1859,16 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         Float(0.7 + 0.3 * (0.5 + 0.5 * sin(2 * Double.pi * t / 2.6)))
     }
 
-    /// Whether to draw the ground grid + contact shadow (set once gravity is set).
+    /// Whether to draw the ground's contact shadow (set once gravity is set). ★ his 11-22 notes: its own line grid is gone —
+    /// the stage's floor grid is the one grid, at the same height (`stageFloor`).
     var showGround = false
-    private var groundLineBuffer: MTLBuffer?
-    private var groundLineCount = 0
     private var groundShadowBuffer: MTLBuffer?
     private var groundShadowCount = 0
+    /// ★ his 11-22 notes (img 44, 45): THE floor — the stage's grid and the ground's shadow both lie on it. Made once per mesh
+    /// and settled pose (`buildGround`), never per frame or per camera move. nil: no mesh.
+    private(set) var stageFloor: StageFloor?
+    /// The ground shadow's world height (tests: it lies on the floor the grid is drawn on). nil: none built.
+    private(set) var groundShadowYForTesting: Float?
 
     // M7.dom-app design-box gizmo: translucent box faces + bright edges for the
     // design box (grow room) and any keep-out boxes, in MODEL space so they settle
@@ -2607,11 +2615,11 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         return m
     }
 
-    /// Rebuild the ground grid + contact shadow for the settled bounding box (the
-    /// mesh bbox transformed by `settleTo`), on the world floor plane at its min-Y.
+    /// Rebuild THE floor (★ his 11-22 notes: one grid, one height) and the ground's contact shadow for the settled pose (the
+    /// mesh under `settleTo`): its footprint box gives the centre and size, its lowest vertex the height.
     private func buildGround() {
-        groundLineBuffer = nil; groundLineCount = 0
-        groundShadowBuffer = nil; groundShadowCount = 0
+        groundShadowBuffer = nil; groundShadowCount = 0; groundShadowYForTesting = nil
+        stageFloor = nil
         guard let mesh, !mesh.isEmpty else { return }
         // Settled AABB from the 8 bbox corners under the target rotation.
         let mn = mesh.bounds.min, mx = mesh.bounds.max
@@ -2624,33 +2632,13 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             let p = SIMD3<Float>(w.x, w.y, w.z)
             lo = simd_min(lo, p); hi = simd_max(hi, p)
         }}}
-        let fy = lo.y - 0.001
-        let cx = (lo.x + hi.x) * 0.5, cz = (lo.z + hi.z) * 0.5
+        let floor = StageFloor.under(lo: lo, hi: hi,
+                                     lowest: StageFloor.lowest(positions: mesh.positions, model: model) ?? lo.y)
+        stageFloor = floor
+        let fy = floor.y
+        let cx = floor.centre.x, cz = floor.centre.y
         let extent = Swift.max(hi.x - lo.x, hi.z - lo.z)
         guard extent > 1e-5 else { return }
-        let radius = extent * 1.6
-        let step = extent / 6
-
-        // Grid lines (each: 2 vertices of pos+rgba, stride 7). Fade with distance.
-        var lines: [Float] = []
-        let base = SIMD3<Float>(0.63, 0.71, 0.86)
-        func push(_ p: SIMD3<Float>, _ a: Float) {
-            lines.append(p.x); lines.append(p.y); lines.append(p.z)
-            lines.append(base.x); lines.append(base.y); lines.append(base.z); lines.append(a)
-        }
-        var k = -radius
-        while k <= radius + 1e-4 {
-            let a = (1 - abs(k) / radius) * 0.12
-            push(SIMD3<Float>(cx + k, fy, cz - radius), a); push(SIMD3<Float>(cx + k, fy, cz + radius), a)
-            push(SIMD3<Float>(cx - radius, fy, cz + k), a); push(SIMD3<Float>(cx + radius, fy, cz + k), a)
-            k += step
-        }
-        groundLineCount = lines.count / 7
-        if groundLineCount > 0 {
-            groundLineBuffer = lines.withUnsafeBytes {
-                device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
-            }
-        }
 
         // Contact shadow: a triangle fan (expanded to a triangle list) on the floor,
         // dark at the centre fading to transparent at the rim.
@@ -2670,6 +2658,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             vtx(cx + cos(a1) * sRadius, cz + sin(a1) * sRadius, 0)
         }
         groundShadowCount = shadow.count / 7
+        groundShadowYForTesting = fy
         if groundShadowCount > 0 {
             groundShadowBuffer = shadow.withUnsafeBytes {
                 device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
@@ -3682,21 +3671,15 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             countedDraw(enc, .triangle, vertexDrawCount) }
         if wantsLattice, flexibleWallsGhosted, let gb = gbuffer { encodeFlexibleGhostWalls(enc, gbuffer: gb, mainSize: mainSize) }   // Flexible (#362) batch M (M6) + verification: the walls as a ghost, no depth, AFTER the see-through body (MeshRenderer+FlexibleLattice.swift)
 
-        // Ground grid + contact shadow (M7.6 D2), drawn after the opaque mesh so it
-        // blends, depth-tested so the part occludes it, depth-write off.
-        if showGround, let gpipe = groundPipeline {
+        // Ground contact shadow (M7.6 D2), drawn after the opaque mesh so it blends, depth-tested so the part occludes it,
+        // depth-write off. ★ his 11-22 notes: no line grid of its own any more (the stage's floor grid is the one grid).
+        if showGround, let gpipe = groundPipeline, let sbuf = groundShadowBuffer, groundShadowCount > 0 {
             var gmvp = groundMVP(aspect: aspect)
             enc.setRenderPipelineState(gpipe)
             enc.setDepthStencilState(groundDepthState)
             enc.setVertexBytes(&gmvp, length: MemoryLayout<simd_float4x4>.stride, index: 1)
-            if let sbuf = groundShadowBuffer, groundShadowCount > 0 {
-                enc.setVertexBuffer(sbuf, offset: 0, index: 0)
-                countedDraw(enc, .triangle, groundShadowCount)
-            }
-            if let lbuf = groundLineBuffer, groundLineCount > 0 {
-                enc.setVertexBuffer(lbuf, offset: 0, index: 0)
-                countedDraw(enc, .line, groundLineCount)
-            }
+            enc.setVertexBuffer(sbuf, offset: 0, index: 0)
+            countedDraw(enc, .triangle, groundShadowCount)
         }
 
         // M7.dom-app design-box gizmo: translucent box faces + bright edges, drawn under the
@@ -5027,14 +5010,23 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         let rect = SIMD4<Float>(lo.x - mx, lo.z - mx,
                                 Swift.max(hi.x - lo.x + 2 * mx, 1e-3),
                                 Swift.max(hi.z - lo.z + 2 * mx, 1e-3))
+        // ★ his 11-22 notes: THE floor (`buildGround`: the settled part's lowest point, round squares from its size) — the
+        // same one the ground shadow lies on, and still while the part settles or the camera moves
+        let floor = (mesh?.isEmpty == false ? stageFloor : nil) ?? StageFloor.under(lo: lo, hi: hi, lowest: lo.y)
         return StageUniforms(invVP: inv,
                              eye: camera.eye,
-                             floorY: lo.y - extent * 0.02,
-                             centerXZ: SIMD2<Float>((lo.x + hi.x) * 0.5, (lo.z + hi.z) * 0.5),
-                             spacing: extent / 6,
-                             fadeRadius: extent * 6,
+                             floorY: floor.y,
+                             centerXZ: floor.centre,
+                             spacing: floor.minor,
+                             fadeRadius: floor.fadeRadius,
                              shadowRect: rect,
                              shadowStrength: 0)   // filled in by `encode` once the footprint exists
+    }
+
+    /// The stage's floor grid as this frame would draw it (tests): its height, small squares' side, centre and the eye.
+    func stageGridForTesting(aspect: Float) -> (floorY: Float, spacing: Float, centre: SIMD2<Float>, eye: SIMD3<Float>) {
+        let u = makeStageUniforms(aspect: aspect)
+        return (u.floorY, u.spacing, u.centerXZ, u.eye)
     }
 
     /// Render the current mesh + camera to an offscreen BGRA texture and return the
