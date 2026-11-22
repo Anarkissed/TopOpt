@@ -223,7 +223,10 @@ public struct WorkspacePlaceholder: View {
     @State private var setupPanelOpen = false
     /// ★ B6: the design-primitive row whose trash is asking (in place), and the last trash (its one-step Undo).
     @State private var primitiveDeleteAsk: Int?
-    @State private var primitiveTrashed: TrashedPrimitive?
+    private var primitiveTrashed: TrashedPrimitive? {   // ★ 11-22: held by reference (TopologyViewState), not a @State
+        get { topoView.primitiveTrashed }
+        nonmutating set { topoView.primitiveTrashed = newValue }
+    }
     /// B3: the corner pair's measures (CornerPair).
     @StateObject private var chromeGeometry = ChromeGeometry()
     /// B3: the trash's in-place ask (a group id) and the last trash's one-step Undo.

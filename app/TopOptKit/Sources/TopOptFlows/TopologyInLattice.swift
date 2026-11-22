@@ -22,13 +22,18 @@ public final class TopologyViewState: ObservableObject {
     @Published public var keepClearsHidden = false
     /// ★ The Design box row (its id) whose handles show; nil: none ("6 handles at a time, for each primitive I select").
     @Published public var pickedDesignRow: Int?
+    /// ★ B6: the last Design box row's trash (its one-step Undo) — here, not on the workspace's stack: his 11-22 face names
+    /// made the undo slice 8 bytes bigger, and the workspace held two copies of it (WorkspaceBodySizeTests). Its Undo shows
+    /// only while the project still equals the slice after the trash (`canUndoTrashPrimitive`), so another project never
+    /// offers it.
+    @Published public var primitiveTrashed: TrashedPrimitive?
     /// Its changes, passed on to the model that holds it (the page observes that model).
     var relay: AnyCancellable?
 
     public init() {}
 
     /// Back to how a session starts (the hosted tests share the one instance).
-    public func reset() { keepClearsHidden = false; pickedDesignRow = nil }
+    public func reset() { keepClearsHidden = false; pickedDesignRow = nil; primitiveTrashed = nil }
 }
 
 /// The words and the icon of the Topology view's additions.

@@ -67,27 +67,49 @@ public enum RenameCopy {
     }
 }
 
-/// ★ his 11-22: a hold of half a second on a name asks for its new one, with the full keyboard; empty or unchanged keeps it.
+/// ★ his 11-22: a hold of half a second on a name turns the row into its name field, in place, with the full keyboard (no
+/// alert: U6/U7, confirm in place). Return or a tap away keeps the new name; empty or unchanged keeps the old one.
 /// nil `rename`: the row is not renamable (nothing changes).
 struct RenameOnHold: ViewModifier {
     let name: String
     let key: String
     let rename: ((String) -> Void)?
-    @State private var asking = false
+    @State private var editing = false
     @State private var draft = ""
+    @FocusState private var focused: Bool
 
     @ViewBuilder func body(content: Content) -> some View {
         if let rename {
             content
-                .simultaneousGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in draft = name; asking = true })
-                .alert(RenameCopy.title, isPresented: $asking) {
-                    TextField(RenameCopy.placeholder, text: $draft)
-                    Button(RenameCopy.cancel, role: .cancel) {}
-                    Button(RenameCopy.save) { if let t = RenameCopy.accepted(draft, was: name) { rename(t) } }
+                .simultaneousGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in draft = name; editing = true })
+                .overlay {
+                    if editing {
+                        TextField(RenameCopy.placeholder, text: $draft)
+                            .font(.system(size: 13, weight: .semibold))
+                            .textFieldStyle(.plain)
+                            .submitLabel(.done)
+                            .padding(.horizontal, 8)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                            .background(RoundedRectangle(cornerRadius: DS.Radius.field, style: .continuous)
+                                .fill(DS.Surface.dialog.color)
+                                .overlay(RoundedRectangle(cornerRadius: DS.Radius.field, style: .continuous)
+                                    .strokeBorder(DS.Color.accent.color, lineWidth: 1.5)))
+                            .focused($focused)
+                            .onSubmit { finish(rename) }
+                            .onChange(of: focused) { on in if !on, editing { finish(rename) } }
+                            .onAppear { focused = true }
+                            .accessibilityLabel(RenameCopy.title)
+                            .accessibilityIdentifier(key + "-renaming")
+                    }
                 }
                 .background(DSParts.publish(key + "-renames"))   // the hosted tests' mark: this row renames
         } else {
             content
         }
+    }
+
+    private func finish(_ rename: (String) -> Void) {
+        editing = false
+        if let t = RenameCopy.accepted(draft, was: name) { rename(t) }
     }
 }
