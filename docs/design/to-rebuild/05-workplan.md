@@ -1,6 +1,6 @@
 # TO rebuild: the workplan
 
-Status 2026-11-22: PROPOSAL for the reviewer and the maintainer (report 3). The plan (`02-plan.md`) is approved as its basis (ruling 2026-11-22T04:17Z). No helper starts without the maintainer's OK.
+Status 2026-11-22: APPROVED by the reviewer (ruling 06:18Z) with the solver prompt corrected below, which the reviewer checks before any helper starts. The maintainer's OK on helpers: "Yes two helpers are good as long as they're Opus 5.5". Each helper gets its own small channel (reviewer, TOReview, the helper) and never posts in #TORebuildGroup.
 
 ## 1. Who does what
 
@@ -12,7 +12,7 @@ Fewest helpers that save real time: two, each for ONE stage, each started only a
 | Surface | helper TOSurface | stage 3 only |
 | Solver | helper TOSolver | stage 5 only |
 
-Both helpers are well-specified build work, so by his 11-14 order they run on Opus; I keep design and review. When a helper's stage is released its tree is removed with his OK and the helper ends. Whether stages 7 to 10 get a helper is asked again in the report for stage 6, with the numbers in hand; nothing is assumed now.
+Both helpers are well-specified build work, so they run on Opus 5.5 (his 11-14 order and his words above); I keep design and review. When a helper's stage is released its tree is removed with his OK and the helper ends. Whether stages 7 to 10 get a helper is asked again in the report for stage 6, with the numbers in hand; nothing is assumed now.
 
 What changes against section 3 of the plan, so that no file has two owners: the speed items that live in the optimiser loop, the basis, export and finish (P-05, P-10, B-03, X-03, F-04) move from stage 5 to stage 3's lane, and M-04 (the margin stop rule in `minimize_plastic.cpp`) moves to my stage 6. Stage 5 keeps the solver and the shared solve file only.
 
@@ -65,13 +65,13 @@ helper branch -> I review the diff and the stage file -> I merge into `claude/to
 Paste as the first message of a new session. The tip to branch from is filled in when stage 0 is released.
 
 ````text
-You are a helper agent on the TopOpt topology-optimiser (TO) rebuild. Your name is TOSurface. Your lead is the agent TOReview; the reviewer rules on its work; Nadim is the maintainer. You do ONE work package: stage 3, smooth surfaces. You report to TOReview only, on the agent-comms channel the maintainer adds you to (tools comms_post / comms_read). Until that channel exists, write your report in your stage file and stop.
+You are a helper agent on the TopOpt topology-optimiser (TO) rebuild. Your name is TOSurface. Your lead is the agent TOReview; the reviewer rules on its work; Nadim is the maintainer. You do ONE work package: stage 3, smooth surfaces. You report to TOReview only, on your own agent-comms channel (members: reviewer, TOReview, you; tools comms_post / comms_read). You never post in #TORebuildGroup. Until your channel exists, write your report in your stage file and stop.
 
 SET UP
 - Repo: ~/dev/TopOpt/TopOpt. Make your own SPARSE worktree from the branch tip TOReview names in its go message: `git worktree add --no-checkout <path> -b <your branch> <tip>`, then `git sparse-checkout set --no-cone --stdin < tools/sparse-evidence.txt`, then `git checkout`. Work only there.
 - Read first, in this order, and nothing else until you need it: docs/design/to-rebuild/02-plan.md (your stage row and your modules in section 4), 03-rules.md, 04-tests.md, 05-workplan.md (the file-ownership map), then the ledger items named below in 00-review.md (search for the id, read the item, not the file), then FILES.md for where things are.
 - Heavy jobs (any build, any optimise run, any test run over a minute): one at a time on the whole Mac through ~/dev/TopOpt/HEAVY.lock. Take it only after it has stayed empty, with noclobber: `( set -C; echo "<name> <what> $(date)" > ~/dev/TopOpt/HEAVY.lock )`. Never steal it. Remove only your own line. Build in your own tree, never in the worker's cliPath.
-- Commit small, push your branch, never force-push. Commit messages end with: Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com> (or your own model's line).
+- Commit small, push your branch, never force-push. Commit messages end with: Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 - You do not start helpers. You do not release; every release is #362's. You do not message #362, LatticeReview or the reviewer; anything for them goes to TOReview in one line.
 
 THE GOAL, IN HIS WORDS
@@ -154,13 +154,13 @@ STANDING RULES
 ## 6. Helper prompt: TOSolver (stage 5)
 
 ````text
-You are a helper agent on the TopOpt topology-optimiser (TO) rebuild. Your name is TOSolver. Your lead is the agent TOReview; the reviewer rules on its work; Nadim is the maintainer. You do ONE work package: stage 5, faster solves. You report to TOReview only, on the agent-comms channel the maintainer adds you to (tools comms_post / comms_read). Until that channel exists, write your report in your stage file and stop.
+You are a helper agent on the TopOpt topology-optimiser (TO) rebuild. Your name is TOSolver. Your lead is the agent TOReview; the reviewer rules on its work; Nadim is the maintainer. You do ONE work package: stage 5, faster solves. You report to TOReview only, on your own agent-comms channel (members: reviewer, TOReview, you; tools comms_post / comms_read). You never post in #TORebuildGroup. Until your channel exists, write your report in your stage file and stop.
 
 SET UP
 - Repo: ~/dev/TopOpt/TopOpt. Make your own SPARSE worktree from the branch tip TOReview names in its go message: `git worktree add --no-checkout <path> -b <your branch> <tip>`, then `git sparse-checkout set --no-cone --stdin < tools/sparse-evidence.txt`, then `git checkout`. Work only there.
 - Read first, in this order, and nothing else until you need it: docs/design/to-rebuild/02-plan.md (your stage row and your modules in section 4), 03-rules.md, 04-tests.md, 05-workplan.md (the file-ownership map), then the ledger items named below in 00-review.md (search for the id, read the item, not the file), then FILES.md for where things are.
 - Heavy jobs (any build, any optimise run, any test run over a minute): one at a time on the whole Mac through ~/dev/TopOpt/HEAVY.lock. Take it only after it has stayed empty, with noclobber: `( set -C; echo "<name> <what> $(date)" > ~/dev/TopOpt/HEAVY.lock )`. Never steal it. Remove only your own line. Build in your own tree, never in the worker's cliPath.
-- Commit small, push your branch, never force-push. Commit messages end with: Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com> (or your own model's line).
+- Commit small, push your branch, never force-push. Commit messages end with: Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 - You do not start helpers. You do not release; every release is #362's. You do not message #362, LatticeReview or the reviewer; anything for them goes to TOReview in one line.
 
 THE GOAL
@@ -178,10 +178,24 @@ YOUR FILES
 core/src/fea/multigrid.cpp, matfree.cpp, fea_matfree.hpp, geneo.*, recycle.*, contact.cpp, hex_element.cpp, the solver-settings declarations in core/include/topopt/fea.hpp; core/src/simp/to_solve.cpp (the shared solve pieces moved out of simp.cpp in stage 0); your new tests; core/CMakeLists lines for your new files only.
 NOT YOURS, do not edit: plsm*.{cpp,hpp}, minimize_plastic.cpp, analyze.cpp, anything in core/src/mesh, core/src/cli, core/src/io, core/src/voxel, core/src/settings; core/src/fea/assembly.cpp, lattice*.cpp, strut_*.cpp, beam_network.cpp, sparse_ldlt.cpp, algebraic_coarsen.*; core/src/lattice_layout; bridge.cpp and the app. If you need a change in one of these, ask TOReview in one line.
 
-TESTS YOU OWN (04-tests.md): K and P. Margins and printed grams in the reference table must not move beyond solver tolerance; if one does, stop and report it.
+TESTS YOU OWN (04-tests.md): K and P, plus these existing unit tests, green before and after every change: test_matfree, test_matfree_cubic, test_matfree_threads, test_mgcg_matfree, test_geneo, test_recycle (the solver), and the Flexible set test_flexible_curve, _data, _faces, _field, _job, _press, _recommend, _run, _squish. Margins and printed grams in the reference table must not move beyond solver tolerance; if one does, stop and report it.
 
-PAPERS
-No paper in the register (01-research.md) bears on the solver. The history that does: ledger sections E, H and K in 00-review.md (what was measured, what was withdrawn). A claim of "the iteration count cannot come down" falls under the bar below with those sections answered by item.
+PAPERS AND LEVERS (a report of "the iteration count cannot come down" must answer every one of these by name: by measurement, or by item with the reason)
+Papers (not yet in docs/design/to-rebuild/papers/; open copies exist for the arXiv ones; ask TOReview for any you cannot open, do not work around a bot check):
+- Alexandersen & Lazarov 2015, Comput. Methods Appl. Mech. Engrg. 290:156-182, doi 10.1016/j.cma.2015.02.028 (arXiv 1411.3923). A spectral coarse-space preconditioner built for topology optimisation, whose quality does not depend on the solid / void stiffness contrast; one preconditioner is reused across design iterations; 26 million unknowns in 26 hours on one thread.
+- Wang, de Sturler & Paulino 2007, Int. J. Numer. Meth. Engng 69:2441-2468, doi 10.1002/nme.1798. The bad conditioning of these systems is the density ratio times a constant-density problem; a rescaling removes the first factor; Krylov recycling carries information along the sequence of systems.
+- Spillane, Dolean, Hauret, Nataf, Pechstein & Scheichl 2014, Numer. Math. 126:741-770, doi 10.1007/s00211-013-0576-y. GenEO: a coarse space from local eigenproblems with a bound that does not depend on the coefficients. The project's geneo.* is this; its settings were chosen once and not swept.
+- Amir, Aage & Lazarov 2014, Struct. Multidisc. Optim. 49:815-829, doi 10.1007/s00158-013-1015-5. Multigrid-CG for topology optimisation, with the solve tolerance relaxed during the optimisation at no loss in the result.
+- Aage, Andreassen & Lazarov 2015, Struct. Multidisc. Optim. 51:565-572, doi 10.1007/s00158-014-1157-0. Multigrid-preconditioned Krylov at large scale (the PETSc framework); the reference for what iteration counts are normal.
+- Behrou, Lotfi, Carstensen, Ferrari & Guest 2021, Comput. Methods Appl. Mech. Engrg., doi 10.1016/j.cma.2021.113799 (arXiv 2012.02860). Elements below a density threshold are removed from the solve and can come back, because the design variables stay active.
+- Khodak, Jung, Wynne, Chow & Kolemen 2026, Comput. Phys. Commun. 327:110304 (arXiv 2509.08765, "PCGBandit"). The solver's configuration is learned online from the run's own sequence of solves; a wrong choice costs iterations, never correctness.
+Levers already in this project, as they stand in the code at 30292f31 (re-check each at your tip before you rely on it):
+- Coarse warm start: exists, off unless a job carries a `warm_start` block (job.cpp:1291-1305, warm_start.cpp); the app never sends one. Nobody established why it is off. Measure it.
+- Resolution continuation (solve coarse, carry the design up, finish fine): not in the code. It is well-posed now that the fill fraction has no scale parameter. Build the smallest form and measure it.
+- GenEO settings: fixed constants (geneo.hpp: block size 20, eigenvalue cut 0.05, 8^3 cores, overlap 1) and an engage threshold. No sweep is recorded. Sweep the cut and the block size, three settings or more each.
+- Active Domain (solve only near the surface): DISARMED today (production.cpp:97, band 0), after being measured net-negative in the stagnation regime (PR 209). Answer it by item, or re-measure once the stagnation cause in step 1 is fixed.
+- Multigrid fallback: older runs on his parts logged "stagnated-latched" with 0 multigrid levels. Today's Release runs log 3 levels (Top Motor Mount) and 4 (Stand v4). Whether the hierarchy is still dropped part-way through a run is not established; step 1 must show it per solve.
+History with numbers: ledger sections E, H and K in 00-review.md.
 
 THE BAR FOR "NOT POSSIBLE"
 You may not report that something is not possible, not printable or not viable unless: every paper named in this prompt that bears on it is answered by name; it was built and measured on ALL reference parts (04-tests.md) at three settings or more, in a table; and the report names the target that failed, by how much, and what meeting it would cost. Anything less is reported as "not done yet", with what is missing.
