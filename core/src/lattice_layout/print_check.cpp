@@ -650,8 +650,14 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
     if (!weave_regions.empty()) {
       // O7: a shallow weave bar the rules keep is kept at any length: what the check finds ON it held at one end, or
       // reaching past the limit, is not a finding (read on the bar as `drop_at` is: within its half width + 0.35 mm).
+      // SPEED 11-22: only the kept shallow bars filed on a grid, each finding read against those in its cell
+      std::vector<char> kept_shallow(bars.bars.size(), 0);
+      for (std::size_t i = 0; i < bars.bars.size(); ++i)
+        kept_shallow[i] = i < holds.shallow.size() && i < holds.kept.size() && holds.shallow[i] && holds.kept[i];
+      const BarGrid shallow_grid(bars, kept_shallow);
       auto on_kept_shallow = [&](const LayerReport::OneEnded& o) {
-        for (std::size_t i = 0; i < bars.bars.size(); ++i) {
+        for (const std::uint32_t u : shallow_grid.near({o.x, o.y, o.z})) {
+          const std::size_t i = u;
           if (!holds.shallow[i] || !holds.kept[i]) continue;
           const Bar& x = bars.bars[i];
           const Vec3 d{x.b.x - x.a.x, x.b.y - x.a.y, x.b.z - x.a.z};
@@ -671,7 +677,10 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
       // Read where `drop_at` would put the place (the bottom of its layer), against the bars the writer kept.
       std::vector<Vec3> places;
       for (const LayerReport::MidAir& m : rep.layers.mid_air) places.push_back({m.x, m.y, m.z - half_layer});
-      const std::vector<WeaveFinding> wf = weave_findings(bars, weave_regions, holds.kept, places, ms.layer_mm);
+      // SPEED 11-22: the joints and the grid made ONCE for this pass (they were made again for every place below)
+      const WeaveFindingsIndex findings(bars, weave_regions, holds.kept, ms.layer_mm);
+      std::vector<WeaveFinding> wf(places.size());
+      for (std::size_t q = 0; q < places.size(); ++q) wf[q] = findings.at(places[q]);
       const double speck = 0.5 * layout.bead_mm;
       std::vector<LayerReport::MidAir> still, specks;
       for (std::size_t q = 0; q < rep.layers.mid_air.size(); ++q) {
@@ -692,7 +701,7 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
         const Domain::Probe probe = domain.probe();
         const double layer = 2.0 * half_layer;
         const auto own = [&](double x, double y, double z) {
-          const WeaveFinding f = weave_findings(bars, weave_regions, holds.kept, {{x, y, z - half_layer}}, ms.layer_mm).front();
+          const WeaveFinding f = findings.at({x, y, z - half_layer});
           return f.reached == 0 && !f.on_weave && probe.where({x, y, z - layer}).why == Why::Outside;
         };
         const std::size_t before = rep.layers.mid_air.size() + rep.layers.one_ended.size() + rep.layers.long_bridges.size();

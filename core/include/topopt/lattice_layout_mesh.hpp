@@ -28,6 +28,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
+#include <unordered_map>
 #include <cmath>
 #include <cstddef>
 #include <memory>
@@ -262,6 +264,42 @@ struct WeaveFinding { std::size_t reached = 0, cube = 0, held = 0, level = 0; bo
 std::vector<WeaveFinding> weave_findings(const Bars& bars, const std::vector<int>& weave_regions,
                                          const std::vector<char>& present, const std::vector<Vec3>& places,
                                          double layer_mm = 0.2);
+// SPEED (his 11-22: "We need to speed everything up EXPONENTIALLY"): the bars that can reach a place, found on a grid
+// instead of by reading every bar. A bar is filed under every cell of its box grown by half its width + 0.35 mm (the
+// farthest a place can lie from it and still read it: weave_findings' reach and "on the weave", the O7 shallow read), so
+// a place's cell holds every bar that can reach it (and some that cannot: each is still judged exactly as before).
+// `use` (empty: every bar): only the bars marked 1 are filed.
+class BarGrid {
+ public:
+  explicit BarGrid(const Bars& bars, const std::vector<char>& use = {});
+  // The bars filed in `p`'s cell, in increasing bar order (empty for a place off the grid or not finite).
+  const std::vector<std::uint32_t>& near(const Vec3& p) const;
+  static constexpr double kCell = 2.5;   // mm
+ private:
+  std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> cells_;
+  std::vector<std::uint32_t> none_;
+};
+// weave_findings for many places one by one (the print check's read of the part's own overhangs): the joints and the grid
+// made once for `bars` and `present`, which must not change while it is read. `at(p)` == weave_findings(.., {p}, ..)[0].
+class WeaveFindingsIndex {
+ public:
+  WeaveFindingsIndex(const Bars& bars, const std::vector<int>& weave_regions, const std::vector<char>& present,
+                     double layer_mm = 0.2);
+  WeaveFinding at(const Vec3& place) const;
+ private:
+  const Bars& bars_;
+  std::vector<int> regions_;
+  std::vector<char> here_;
+  double layer_;
+  std::vector<std::size_t> joints_;
+  std::vector<std::vector<std::size_t>> at_;
+  BarGrid grid_;
+};
+// The reference form of weave_findings (every bar read for every place, the joints made per call), kept for the tests
+// that hold the grid to it.
+std::vector<WeaveFinding> weave_findings_every_bar(const Bars& bars, const std::vector<int>& weave_regions,
+                                                   const std::vector<char>& present, const std::vector<Vec3>& places,
+                                                   double layer_mm = 0.2);
 // ── WHAT HAPPENS TO A SAG (O17, O18; the owner's OR29) ─────────────────────────
 // Only the bars of a weave region are read and moved; every other bar is never moved.
 // HELD FROM BELOW (a node, a joint of end_joints): in the solid (a Solid end), or an end of a bar that is not a weave's,
