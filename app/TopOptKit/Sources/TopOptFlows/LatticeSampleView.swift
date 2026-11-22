@@ -92,8 +92,42 @@ struct LatticeSampleView: View {
     @State private var caption = LatticeSampleView.building
     @State private var failed = false
     @State private var organicBars: LatticeLayoutBarsInputs?
+    /// ★ his 11-22 notes (img 46: "Building the sample…" with no sense of how long): when this build began (the wait for his
+    /// part's own numbers counts as the same build), and how long the sample on screen took.
+    @State private var buildStarted: Date?
+    @State private var heldForPart = false
+    @State private var builtSeconds: Double?
 
     static let building = "Building the sample\u{2026}"
+
+    /// ★ his 11-22: the time so far, once a second ("Building the sample · 12 s").
+    static func buildingLine(elapsed s: Double) -> String {
+        s < 1 ? building : "Building the sample \u{00B7} " + clock(s)
+    }
+    /// ★ his 11-22: how long the sample on screen took, a small quiet label on it (four words at most).
+    static func builtLabel(seconds s: Double) -> String {
+        "Built in " + (s < 10 ? String(format: "%.1f s", Swift.max(0, s)) : clock(s))
+    }
+    /// "12 s" under a minute, "1:05" from one.
+    static func clock(_ s: Double) -> String {
+        let n = Swift.max(0, Int(s.rounded(.down)))
+        return n < 60 ? "\(n) s" : String(format: "%d:%02d", n / 60, n % 60)
+    }
+    /// Test hook (FlexibleSaid.recording): each "Built in" label shown.
+    nonisolated(unsafe) static var recordedBuilt: [String] = []
+
+    /// ★ his 11-22 (GenerationTimingLog): what the sample was built from.
+    static func timingInputs(_ i: Inputs) -> GenerationTimingLog.Inputs {
+        var t = GenerationTimingLog.Inputs()
+        t.part = .init(file: i.shape == .cells ? "Sample: cells (40 mm cube)" : "Sample: part")
+        if let o = i.organic { t.organic = ["Sample": o] }
+        t.values = ["latticeType": .text(i.organic.map { "Organic " + $0.modeValue.title } ?? i.typeName),
+                    "topology": .text(i.topology), "cellMM": .number(i.cellMM), "beadMM": .number(i.beadMM),
+                    "rhoLo": .number(i.rhoLo), "rhoHi": .number(i.rhoHi), "layerMM": .number(i.layerMM),
+                    "coverMM": .number(i.coverMM), "aesthetic": .flag(i.aesthetic),
+                    "partStruts": .text(i.partStruts.map { String($0) }.joined(separator: ", "))]
+        return t
+    }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -115,7 +149,7 @@ struct LatticeSampleView: View {
                         .background(Capsule().fill(DS.Surface.panel.color))
                         .latticeID("lattice-sample-not-shown")
                 }
-                Text(caption)
+                captionLine
                     .font(.system(size: 12.5)).foregroundStyle((failed ? DS.Color.warning : DS.Color.textSecondary).color)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.s)
@@ -128,6 +162,36 @@ struct LatticeSampleView: View {
         .onChange(of: caption) { c in if FlexibleSaid.recording { Self.recordedCaptions.append(c) } }
         .onAppear { if FlexibleSaid.recording { Self.recordedAppears += 1 }; Self.say(tag, "appear") }
         .onDisappear { Self.say(tag, "disappear") }
+    }
+
+    /// ★ his 11-22 (img 46): the caption, with the time while it builds (once a second, this line only) and, once built, how
+    /// long it took beside it, quieter — on the sample's own caption, never a line of the screen.
+    @ViewBuilder private var captionLine: some View {
+        if caption == Self.building, !failed, let start = buildStarted {
+            TimelineView(.periodic(from: start, by: 1)) { ctx in
+                Text(Self.buildingLine(elapsed: ctx.date.timeIntervalSince(start)))
+            }
+        } else if let s = builtSeconds, !failed {
+            HStack(alignment: .firstTextBaseline, spacing: DS.Space.s) {
+                Text(caption)
+                Text(Self.builtLabel(seconds: s)).foregroundStyle(DS.Color.textTertiary.color).fixedSize()
+                    .latticeID("lattice-sample-built")
+            }
+        } else {
+            Text(caption)
+        }
+    }
+
+    /// The build began (a new one; the wait for his part's numbers goes on as the same one).
+    private func buildBegins() {
+        builtSeconds = nil
+        if !heldForPart || buildStarted == nil { buildStarted = Date() }
+        heldForPart = inputs.organic != nil && inputs.partStrutsPending
+    }
+    /// The sample is on screen: how long it took stays on it.
+    private func buildShown() {
+        builtSeconds = buildStarted.map { Date().timeIntervalSince($0) }
+        if FlexibleSaid.recording, let s = builtSeconds { Self.recordedBuilt.append(Self.builtLabel(seconds: s)) }
     }
 
     /// Diagnostics: SAMPLE_TRACE=1 prints each view's asks, skips, builds and appearances.
@@ -153,6 +217,7 @@ struct LatticeSampleView: View {
 
     private func build() async {
         caption = Self.building; failed = false
+        buildBegins()   // ★ his 11-22: the time it takes, said
         let i = inputs
         if let look = i.organic { return await buildOrganic(look, i) }
         organicBars = nil
@@ -161,6 +226,8 @@ struct LatticeSampleView: View {
         try? await Task.sleep(nanoseconds: Self.settleNanos)
         guard !Task.isCancelled else { Self.say(tag, "cancelled in the beat"); return }
         let builder = LatticeSampleBuilder.shared
+        let log = GenerationTimingLog.shared, rec = log.begin(.sample, inputs: Self.timingInputs(i))   // ★ his 11-22
+        defer { log.end(rec, .cancelled, reason: "the page moved on") }   // (a build that ended said so first)
         let t = builder.ticket()
         // ★ the viewer's mesh is made on the builder's queue too: for the sample part's ~330 k triangles it held the main
         // thread for seconds (traced 11-10, debug build), a freeze on his iPad each time the sample changed
@@ -173,17 +240,21 @@ struct LatticeSampleView: View {
             }
         } onCancel: { builder.retire(t) }
         Self.say(tag, "ticket \(t): \(built == nil ? "skipped" : "built")\(Task.isCancelled ? ", cancelled" : "")")
+        if built == nil { log.discard(rec) }   // skipped before it began: no line
         guard let r = built, !Task.isCancelled else { return }
         switch r {
         case .success(let made):
             let block = made.block, m = made.mesh
+            log.end(rec, .done, stages: ["triangles": Double(block.mesh.indices.count / 3)])
             mesh = m
             Self.say(tag, "mesh up (\(block.mesh.indices.count / 3) triangles)")
             camera.reframe(m.bounds)
+            buildShown()
             caption = i.shape == .cells
                 ? Self.cellsCaption(receiptJSON: block.receiptJSON, typeName: i.typeName, densityHeld: block.densityHeld)
                 : Self.caption(receiptJSON: block.receiptJSON, typeName: i.typeName, densityHeld: block.densityHeld)
         case .failure(let e):
+            log.end(rec, .failed, reason: e.localizedDescription)
             mesh = nil; failed = true
             caption = "The engine can't build this type's sample: \(e.localizedDescription)"
         }
@@ -205,6 +276,12 @@ struct LatticeSampleView: View {
         guard !i.partStrutsPending else { return }   // ★ his 11-22: "Building the sample…" until the part's numbers are in
         try? await Task.sleep(nanoseconds: Self.settleNanos)
         guard !Task.isCancelled else { return }
+        // ★ his 11-22: the sample's line in the timing log, with each step's time (a build that ends says so first)
+        let log = GenerationTimingLog.shared, rec = log.begin(.sample, inputs: Self.timingInputs(i))
+        var stages: [String: Double] = [:]
+        var t0 = Date()
+        func step(_ name: String) { stages[name] = Date().timeIntervalSince(t0) * 1000; t0 = Date() }
+        defer { log.end(rec, .cancelled, reason: "the page moved on", stages: stages) }
         do {
             let cube = i.shape == .cells
             let body = try TopOptKit.latticeSampleBody(cube: cube)
@@ -212,6 +289,7 @@ struct LatticeSampleView: View {
             try MeshExport.binarySTL(vertices: body.vertices, indices: body.indices, header: Data()).write(to: url)
             let session = try await LatticeLayoutSession.open(path: url.path)
             defer { session.close() }
+            step("openMS")
             var s = LatticeLayoutSession.Settings()
             s.beadMM = i.beadMM > 0 ? i.beadMM : 0.45
             s.minStrutLines = 2
@@ -224,6 +302,7 @@ struct LatticeSampleView: View {
             if LatticeOrganicLook.finishWired { r.finish = LatticeLayoutPreview.organicFinish(look, LatticeSettings(), coverMM: i.coverMM) }
             s.regions = [r]
             var lim = try await session.sweepLimits(s, regions: [1], lineMM: s.beadMM).map(LatticeOrganicLook.Limits.init)
+            step("limitsMS")
             if i.partStruts.count == 3, var l = lim {   // ★ his pick 11-20: the group's struts, as his part gets them
                 l.strutLowerMM = i.partStruts[0]; l.strutUpperMM = i.partStruts[1]; l.strutAutoMM = i.partStruts[2]
                 lim = l
@@ -233,8 +312,11 @@ struct LatticeSampleView: View {
             ask.quality = .exact
             let groups = [LatticeLayoutSession.OrganicGroup(regions: [1], ask: ask)]
             let made = try await session.synthetic(s, groups: groups, walls: [(region: 1, foci: 1)], fromEmpty: true)
+            step("syntheticMS")
             if !made.refused.isEmpty { throw LatticeRefused(refusals: made.refused) }
             let laid = try await session.layOrganic(s, groups: groups)
+            step("layWallMS")
+            stages["layMS"] = laid.ms; stages["traceMS"] = laid.msTrace; stages["strands"] = Double(laid.strands)
             if !laid.refused.isEmpty { throw LatticeRefused(refusals: laid.refused) }
             guard !Task.isCancelled else { return }
             let seg = LatticeLayoutPreview.segments(laid.runs)
@@ -245,8 +327,11 @@ struct LatticeSampleView: View {
             let runs = laid.runs
             let (bv, bi) = (body.vertices, body.indices)
             // off the main thread, but IN this task (never detached): leaving the page cancels it with the rest
+            t0 = Date()
             bars.vines = await Self.sampleVines(runs: runs, vertices: bv, indices: bi, heldFlat: laid.flatEnds)
+            step("vinesMS")
             guard !Task.isCancelled else { return }
+            log.end(rec, .done, struts: seg.count, stages: stages)
             bars.lightFrom = LatticeLayoutPreview.organicLightFrom(grown: look.modeValue == .grown, netFrom: seg.lightFrom,
                                                                    count: seg.count)
             let m = ViewerMesh(vertices: body.vertices, indices: body.indices,
@@ -254,6 +339,7 @@ struct LatticeSampleView: View {
             organicBars = bars
             mesh = m
             camera.reframe(m.bounds)
+            buildShown()
             let size = cube ? "40 mm cube" : "Sample part · 45 × 40 × 35 mm"
             // his 11-20 (img6): the cells the sample was asked for, his Manual numbers when he set them, never Auto's
             let lo = ask.spacingMM > 0 ? ask.spacingMM : ask.spacingMinMM, hi = ask.spacingMM > 0 ? ask.spacingMM : ask.spacingMaxMM
@@ -265,6 +351,7 @@ struct LatticeSampleView: View {
         } catch is CancellationError {
         } catch {
             guard !Task.isCancelled else { return }   // the page moved on: nothing to say
+            log.end(rec, .failed, reason: (error as? TopOptError)?.message ?? "\(error)", stages: stages)
             mesh = nil; organicBars = nil; failed = true
             // his 11-20: a centred pop-up in plain English; ★ his 11-22: "An error should always tell what's wrong and how
             // to fix it. Always." — a refusal says which setting, what it allows and the way out

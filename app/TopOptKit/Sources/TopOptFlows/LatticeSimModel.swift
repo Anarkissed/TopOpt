@@ -178,7 +178,34 @@ public final class LatticeSimModel: ObservableObject {
         case failed(String)
     }
 
-    @Published public private(set) var phase: Phase = .idle
+    @Published public private(set) var phase: Phase = .idle {
+        didSet { stressTiming(from: oldValue) }   // ★ his 11-22: the stress check's time, logged (GenerationTimingLog)
+    }
+    private var timingRecord: GenerationTimingLog.Pending?
+    private var timingInputs = GenerationTimingLog.Inputs()
+    private func stressTiming(from old: Phase) {
+        if phase == .running, old != .running {
+            timingRecord = GenerationTimingLog.shared.begin(.stressCheck, inputs: timingInputs)
+        } else if old == .running, phase != .running, let r = timingRecord {
+            timingRecord = nil
+            switch phase {
+            case .complete(let s):
+                GenerationTimingLog.shared.end(r, .done, extra: ["maxStressMPa": .number(s.maxStressMPa), "safety": .number(s.safety),
+                                                                 "unsolved": .number(Double(unsolved.count))])
+            case .failed(let why): GenerationTimingLog.shared.end(r, .failed, reason: why)
+            default: GenerationTimingLog.shared.end(r, .cancelled, reason: "cancelled or replaced")
+            }
+        }
+    }
+    private func noteTimingInputs(_ ctxs: [Context]) {
+        var i = GenerationTimingLog.Inputs()
+        if let c = ctxs.first {
+            i.part = .init(file: (c.modelPath as NSString).lastPathComponent)
+            i.values = ["resolution": .number(Double(c.resolution)), "scenarios": .number(Double(ctxs.count)),
+                        "material": .text(c.material)]
+        }
+        timingInputs = i
+    }
     /// ★ 11-21 (his 2040 stand: one scenario could not be solved and sank them all): the scenarios the last check could not
     /// solve, by name. The field is the worst of the others.
     public private(set) var unsolved: [String] = []
@@ -218,6 +245,7 @@ public final class LatticeSimModel: ObservableObject {
     /// Kick off ONE sim. No-op while one is already running (B5's "one sim").
     public func run(_ ctx: Context, now: Date = Date()) {
         guard phase != .running else { return }
+        if timingRecord == nil { noteTimingInputs([ctx]) }   // (a run of several scenarios noted them already)
         phase = .running
         generation += 1
         let gen = generation
@@ -257,6 +285,7 @@ public final class LatticeSimModel: ObservableObject {
         guard let first = ctxs.first else { return }
         guard ctxs.count > 1 else { run(first, now: now); return }
         guard phase != .running else { return }
+        noteTimingInputs(ctxs)
         phase = .running
         generation += 1
         let gen = generation

@@ -651,6 +651,13 @@ final class MaterialDensityTable: @unchecked Sendable {
 /// `acceptedCount >= 1`, so `tabs` is never empty).
 @MainActor
 public final class ResultsModel: ObservableObject {
+    /// ★ his iPad notes 11-22 (img 45): the ⌃'s drawer above the corner — here, never a byte on ResultsScreen
+    /// (WorkspaceBodySizeTests' ceiling).
+    public private(set) lazy var cornerDrawers: CornerDrawers = {
+        let d = CornerDrawers()
+        d.relay = d.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+        return d
+    }()
     /// Project name for the top chrome.
     public let projectName: String
     /// The run's material name (from materials.json), shown in the stress legend.
@@ -1155,6 +1162,12 @@ public final class ResultsModel: ObservableObject {
     /// True once the user has manually picked a tab; until then the selection
     /// follows the recommendation as lighter variants stream in.
     private var userSelected = false
+    /// ★ R-07: what each version was called while it was on screen ("b"), by the volume fraction core asked for, kept
+    /// from the FIRST outcome that showed it (a later one re-letters the versions that are left).
+    private var shownLetters: [Double: String] = [:]
+    /// ★ R-07 (reviewer ruling 11-22): one line per version the final check on its print file refused, named as it was
+    /// on screen ("Version b removed"); empty when nothing was refused.
+    public var droppedChecks: [ResultsCheck] { FinalCheckWords.checks(reportBlocks, letters: shownLetters) }
 
     public init(projectName: String, outcome: OptimizeOutcome,
                 materialName: String = "", yieldStrengthMPa: Double = 0,
@@ -1230,6 +1243,8 @@ public final class ResultsModel: ObservableObject {
         tabs = ResultsModel.buildTabs(acc, voxelVolumeMM3: outcome.voxelVolumeMM3,
                                       knockdown: infillKnockdown,
                                       remote: outcome.computedRemotely)
+        shownLetters.merge(FinalCheckWords.letters(tabs: tabs, blocks: reportBlocks,
+                                                   vf: { self.requestedVolumeFraction(of: $0) })) { first, _ in first }
         // M7.viz.1 "honest heatmap": key the shared stress scale to the MATERIAL
         // LIMIT (yield) so a color means the same physical safety everywhere — not
         // to the per-run data range. M7.params infill-aware: the limit is the

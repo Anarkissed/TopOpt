@@ -164,6 +164,8 @@ struct SelectionsPanelFrameKey: PreferenceKey {
 public struct SelectionsList: View {
     @ObservedObject var project: ProjectModel
     @Binding var collapsed: Bool
+    /// ★ his 11-22 (img 44): minimised beside the Topology pill — both pills one width (MinimisedPills).
+    @Environment(\.minimisedPillWidth) private var pairedPillWidth
     /// The picked group (its line tinted, its rows open).
     let picked: UUID?
     /// The trash's ask in the list (nil: none).
@@ -385,7 +387,7 @@ public struct SelectionsList: View {
         }
         .environment(\.dsRowValueWidth, layout.valueWidth)   // ★ his 11-22: every row's value in the handle's column
         .overlay(alignment: .bottomTrailing) { if !collapsed { cornerGrip } }   // ★ his 11-22: the whole panel's size
-        .frame(width: collapsed ? nil : listWidth, alignment: .leading)
+        .frame(width: collapsed ? pairedPillWidth : listWidth, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: DS.Radius.panel).fill(DS.Surface.panel.color)
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
         .dsShadow(DS.Shadow.panel)
@@ -413,7 +415,7 @@ public struct SelectionsList: View {
                     .font(.system(size: 12, weight: .bold)).foregroundStyle(DS.Color.textPrimary.opacity(0.7).color)
                 Text("Selections").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.bold).foregroundStyle(DS.Color.textPrimary.color)
                 if collapsed || !groups.isEmpty {
-                    if !collapsed { Spacer(minLength: DS.Space.s) }
+                    if !collapsed || pairedPillWidth != nil { Spacer(minLength: DS.Space.s) }   // ★ 11-22: the count at the pill's end
                     Text("\(groups.count)").font(.system(size: 13, weight: .semibold)).monospacedDigit()
                         .foregroundStyle(DS.Color.textTertiary.color)
                         .accessibilityIdentifier("\(idPrefix)-sel-count")
@@ -558,7 +560,8 @@ public struct SelectionsList: View {
             .buttonStyle(.plain)
             .accessibilityIdentifier("\(idPrefix)-sel-group-\(g.id.uuidString)")
             // ★ his 11-22: hold the name to rename the group (the full keyboard)
-            .modifier(RenameOnHold(name: g.name, key: "\(idPrefix)-sel-group-\(g.id.uuidString)", rename: { renameGroup(g.id, $0) }))
+            .modifier(RenameOnHold(name: g.name, key: "\(idPrefix)-sel-group-\(g.id.uuidString)", rename: { renameGroup(g.id, $0) },
+                                   field: false))   // ★ his 11-22 (img 42): the field covers the whole line (below)
             if let accessory { accessory }
             if let toggleEye {
                 let hidden = isHidden(g.id)
@@ -590,6 +593,8 @@ public struct SelectionsList: View {
             }
         }
         .padding(.leading, toggleOpen == nil ? DS.Space.l : DS.Space.xs).padding(.trailing, DS.Space.xs)
+        // ★ his 11-22 (img 42-43): one box over the whole line while renaming — the name, its icons, the eye and the trash hidden
+        .modifier(RenameField(name: g.name, key: "\(idPrefix)-sel-group-\(g.id.uuidString)", rename: { renameGroup(g.id, $0) }))
         .background(publish("selGroup-\(g.id.uuidString)"))
     }
 

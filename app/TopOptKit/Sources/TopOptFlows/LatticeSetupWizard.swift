@@ -375,6 +375,7 @@ public struct LatticeSetupWizard: View {
                             .padding(.vertical, 7).padding(.horizontal, DS.Space.s)
                             .frame(maxWidth: .infinity)
                             .background(Capsule().fill(model.gradingMode == m ? DS.Color.fillSelected.color : Color.clear))
+                            .contentShape(Capsule())   // ★ his 11-22 (img 46): the whole segment takes the tap, not only its glyph
                             .foregroundStyle((model.gradingMode == m ? DS.Color.textPrimary : DS.Color.textTertiary).color)
                     }
                     .buttonStyle(.plain)
@@ -414,6 +415,7 @@ public struct LatticeSetupWizard: View {
                         // folded into this panel.
                         .background(Capsule().fill(on ? DS.Color.accent.color
                                                       : Color.clear))
+                        .contentShape(Capsule())   // ★ his 11-22 (img 46): the whole segment takes the tap, not only its glyph
                 }
                 .buttonStyle(.plain)
                 .latticeID("wizard-stage-\(s.rawValue)")
@@ -2347,6 +2349,7 @@ public struct LatticeSetupWizard: View {
             .padding(.horizontal, DS.Space.sm)
             .background(Capsule().fill(on ? DS.Color.fillSelected.color : Color.clear))
             .overlay(Capsule().strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1))
+            .contentShape(Capsule())   // ★ his 11-22 (img 46): the whole segment takes the tap, not only its glyph
     }
     /// The lattice types a user may pick today — core's (`LatticeTypeCatalog`). The rest stay
     /// visible and greyed, with core's reason.
@@ -2807,6 +2810,7 @@ public struct LatticeSetupWizard: View {
                             .lineLimit(1)
                             .padding(.horizontal, 10).padding(.vertical, 7)
                             .background(Capsule().fill(on ? DS.Color.fillSelected.color : Color.clear))
+                            .contentShape(Capsule())   // ★ his 11-22 (img 46): the whole segment takes the tap, not only its glyph
                     }
                     .buttonStyle(.plain)
                     .latticeID("lattice-page-mode-\(manual ? "manual" : "auto")")
@@ -3256,6 +3260,7 @@ public struct LatticeSetupWizard: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 7)
                 .background(Capsule().fill(fill))
+                .contentShape(Capsule())   // ★ his 11-22 (img 46): the whole segment takes the tap, not only its glyph
         }
         .buttonStyle(.plain)
         .disabled(greyed)

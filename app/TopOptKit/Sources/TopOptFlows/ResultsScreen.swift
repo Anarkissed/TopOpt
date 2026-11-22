@@ -299,6 +299,7 @@ public struct ResultsScreen: View {
                 // part reads the stress there (an arrow on the part, an arrow on the key); a double tap anywhere leaves
                 .onSurfacePoint { p in if exploring, let p { stressProbe = p } }
                 .onExploreExit(exploring ? { leaveExplore() } : nil)
+                .closesCornerDrawers(model.cornerDrawers)   // ★ his 11-22 (img 45): a tap on the model closes the ⌃'s drawer
                 .ignoresSafeArea()
 
             // ★ RESULTS REDESIGN (his mockup, approved 2026-10-27): the model is the screen; the versions (bottom left),
@@ -360,6 +361,7 @@ public struct ResultsScreen: View {
             let d = all["resultsDetailsPanel"]?.height ?? 0
             if abs(d - drawerHeight) > 0.5 { drawerHeight = d; liftModel() }
         }
+        .cornerTapCloses(model.cornerDrawers)   // ★ his 11-22: a tap anywhere outside the ⌃'s drawer closes it
         .animation(DS.Motion.sheetIn, value: detailsOpen)
         .onChange(of: detailsOpen) { _ in liftModel() }
         .transition(.opacity)
@@ -1311,7 +1313,8 @@ public struct ResultsScreen: View {
             guard let b = blocks, let t = model.selected, let vf = model.requestedVolumeFraction(of: t) else { return 0 }
             return b.rows.first { $0.accepted && abs($0.volumeFraction - vf) < 1e-6 }?.fragileJoints ?? 0
         }()
-        return ResultsChecks.checks(tab: model.selected, margin: selectedRow?.margin,
+        return model.droppedChecks   // ★ R-07: a version the final check on its file refused, named as it was seen
+            + ResultsChecks.checks(tab: model.selected, margin: selectedRow?.margin,
                                     required: blocks?.safetyMargin ?? blocks?.strengthen?.marginRequired ?? 1,
                                     safetyMargin: blocks?.safetyMargin, scenarios: model.scenarios(for: model.selected),
                                     thinJoints: thin, bridged: model.selected.map { model.isBridged($0) } ?? false,
@@ -1369,13 +1372,28 @@ public struct ResultsScreen: View {
                         key: "resultsExport") { exportSTL() }
                 .accessibilityLabel(model.canExport ? "Export STL" : (model.exportDisabledReason ?? "Export unavailable"))
         } split: {
-            DSSplitButton(key: "resultsSplitMore") {
-                if exportable >= 2 { Button("Export all \(exportable) results") { exportAll() } }
-                Button("Open in Library") { onClose() }
+            // ★ his 11-22 (img 45): the ⌃ opens its own drawer, above the buttons (never over them)
+            DSSplitButton(key: "resultsSplitMore", open: model.cornerDrawers.isOpen("resultsSplitMore")) {
+                model.cornerDrawers.toggle("resultsSplitMore")
             }
         } above: {
-            exportFailureLine
+            if model.cornerDrawers.isOpen("resultsSplitMore") {
+                VStack(alignment: .trailing, spacing: DSParts.cornerGap) {
+                    CornerMoreDrawer(drawers: model.cornerDrawers, key: "resultsSplitMore", items: resultsMoreItems(exportable))
+                    exportFailureLine
+                }
+            } else {
+                exportFailureLine
+            }
         }
+    }
+
+    /// ★ his 11-22 (img 45): the ⌃'s rows — the menu's two (Export all N results · Open in Library).
+    private func resultsMoreItems(_ exportable: Int) -> [CornerMoreItem] {
+        var items: [CornerMoreItem] = []
+        if exportable >= 2 { items.append(.action("Export all \(exportable) results", id: "results-split-export-all") { exportAll() }) }
+        items.append(.action("Open in Library", id: "results-split-library") { onClose() })
+        return items
     }
 
     /// The failure the corner says: an STL export's, else the video's.
@@ -2115,6 +2133,7 @@ public struct ResultsScreen: View {
                 ViewProjectionPair()   // ★ B2 (note 1): [Orthographic │ Perspective], left of the gizmo, as on every page
                     .padding(.top, (OrientationGizmoView.standardSize - ViewProjectionPair.height) / 2)   // ★ R-a2: as the workspace
                 OrientationGizmoView(camera: cameraModel)
+                    .closesCornerDrawersOnTouch(model.cornerDrawers)   // ★ his 11-22: a touch on the view cube closes the ⌃'s drawer
             }
             Spacer()
         }

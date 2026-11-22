@@ -69,47 +69,84 @@ public enum RenameCopy {
 
 /// ★ his 11-22: a hold of half a second on a name turns the row into its name field, in place, with the full keyboard (no
 /// alert: U6/U7, confirm in place). Return or a tap away keeps the new name; empty or unchanged keeps the old one.
+/// ★ his 11-22 (img 42-43): ONE box and nothing behind it — the row's own words and icons are hidden while it is up (no "Group
+/// 1" or "Name" showing through), and the row grows to hold the whole box (its line stays under it).
+/// The one name being renamed (a row's key) and its draft, so the row that shows the field can be wider than the name the
+/// hold is on (a Selections group line: the whole line, its eye and trash hidden too).
+final class RenameInPlace: ObservableObject {
+    static let shared = RenameInPlace()
+    @Published var key: String?
+    @Published var draft = ""
+    func start(_ key: String, name: String) { draft = name; self.key = key }
+}
+
+/// The hold on a name. `field` false: the row draws the field itself (`RenameField` on the whole line).
 /// nil `rename`: the row is not renamable (nothing changes).
 struct RenameOnHold: ViewModifier {
     let name: String
     let key: String
     let rename: ((String) -> Void)?
-    @State private var editing = false
-    @State private var draft = ""
-    @FocusState private var focused: Bool
+    var field = true
 
     @ViewBuilder func body(content: Content) -> some View {
         if let rename {
-            content
-                .simultaneousGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in draft = name; editing = true })
-                .overlay {
-                    if editing {
-                        TextField(RenameCopy.placeholder, text: $draft)
-                            .font(.system(size: 13, weight: .semibold))
-                            .textFieldStyle(.plain)
-                            .submitLabel(.done)
-                            .padding(.horizontal, 8)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                            .background(RoundedRectangle(cornerRadius: DS.Radius.field, style: .continuous)
-                                .fill(DS.Surface.dialog.color)
-                                .overlay(RoundedRectangle(cornerRadius: DS.Radius.field, style: .continuous)
-                                    .strokeBorder(DS.Color.accent.color, lineWidth: 1.5)))
-                            .focused($focused)
-                            .onSubmit { finish(rename) }
-                            .onChange(of: focused) { on in if !on, editing { finish(rename) } }
-                            .onAppear { focused = true }
-                            .accessibilityLabel(RenameCopy.title)
-                            .accessibilityIdentifier(key + "-renaming")
-                    }
-                }
+            let held = content
+                .simultaneousGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in RenameInPlace.shared.start(key, name: name) })
                 .background(DSParts.publish(key + "-renames"))   // the hosted tests' mark: this row renames
+            if field { held.modifier(RenameField(name: name, key: key, rename: rename)) } else { held }
         } else {
             content
         }
     }
+}
 
-    private func finish(_ rename: (String) -> Void) {
-        editing = false
-        if let t = RenameCopy.accepted(draft, was: name) { rename(t) }
+/// The field, in place of everything the modified view draws while its key is being renamed.
+struct RenameField: ViewModifier {
+    let name: String
+    let key: String
+    let rename: (String) -> Void
+    @ObservedObject private var state = RenameInPlace.shared
+    @FocusState private var focused: Bool
+    /// The box's height and the room around it inside its row (the row grows to the box plus this).
+    static let boxHeight: CGFloat = 44, inset: CGFloat = 4
+
+    private var editing: Bool { state.key == key }
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(editing ? 0 : 1)   // ★ nothing behind the box: not the old name, not its icons
+            .allowsHitTesting(!editing)
+            .accessibilityHidden(editing)
+            .frame(minHeight: editing ? Self.boxHeight + 2 * Self.inset : nil)   // ★ the row holds the whole box
+            .overlay {
+                if editing {
+                    TextField(RenameCopy.placeholder, text: $state.draft)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                        .textFieldStyle(.plain)
+                        .submitLabel(.done)
+                        .padding(.horizontal, 10)
+                        .frame(maxWidth: .infinity, minHeight: Self.boxHeight, maxHeight: .infinity, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: DS.Radius.field, style: .continuous)
+                            .fill(Color(.sRGB, red: 32 / 255, green: 32 / 255, blue: 38 / 255, opacity: 1))   // opaque: one box only
+                            .overlay(RoundedRectangle(cornerRadius: DS.Radius.field, style: .continuous)
+                                .strokeBorder(DS.Color.accent.color, lineWidth: 1.5)))
+                        .background(DSParts.publish(key + "-field"))   // the box itself (the hosted tests')
+                        .padding(.vertical, Self.inset)
+                        .focused($focused)
+                        .onSubmit { finish() }
+                        .onChange(of: focused) { on in if !on { finish() } }
+                        .onAppear { focused = true }
+                        .accessibilityLabel(RenameCopy.title)
+                        .accessibilityIdentifier(key + "-renaming")
+                }
+            }
+    }
+
+    private func finish() {
+        guard state.key == key else { return }
+        let d = state.draft
+        state.key = nil
+        if let t = RenameCopy.accepted(d, was: name) { rename(t) }
     }
 }
