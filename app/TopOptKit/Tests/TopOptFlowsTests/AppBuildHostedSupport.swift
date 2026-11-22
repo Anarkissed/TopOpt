@@ -162,6 +162,7 @@ final class AppBuildHost {
     func pickFromMenu(_ key: String, _ title: String, what: String) throws -> [String] {
         let f = try onScreen(key, what)
         var offered: [String] = []
+        CornerMoreDrawer.probe[key] = nil
         let obs = NotificationCenter.default.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: nil) { n in
             guard let m = n.object as? NSMenu else { return }
             RunLoop.main.perform(inModes: [.eventTracking, .default, .modalPanel]) {
@@ -173,6 +174,16 @@ final class AppBuildHost {
         }
         defer { NotificationCenter.default.removeObserver(obs) }
         click(CGPoint(x: f.midX, y: f.midY), settle: 2)
+        // ★ notes23 (his 11-22, img 45): the corner's ⌃ opens its own drawer above the buttons, not the system menu — its rows
+        // are read (in the items' order, as the menu's were) and the first enabled one whose title contains `title` is clicked;
+        // a drawer still up afterwards (no match, or a switch) is shut with the ⌃, as the menu shut
+        if offered.isEmpty, frames.all[key + "Drawer"] != nil, let rows = CornerMoreDrawer.probe[key] {
+            offered = rows.map { $0.title + ($0.enabled ? "" : " [off]") }
+            if let r = rows.first(where: { $0.title.contains(title) && $0.enabled }), let rf = frames.all[r.id] {
+                click(CGPoint(x: rf.midX, y: rf.midY), settle: 2)
+            }
+            if frames.all[key + "Drawer"] != nil, let k = frames.all[key] { click(CGPoint(x: k.midX, y: k.midY), settle: 1) }
+        }
         return offered
     }
 

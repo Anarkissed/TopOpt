@@ -109,6 +109,8 @@ public struct DSPanel<Content: View, Footer: View>: View {
     @State private var rows: [String: CGRect] = [:]
     /// ★ his 11-22 (img 44): folded where Topology and Selections are minimised together — the Selections pill's size and colour.
     @Environment(\.minimisedPillWidth) private var pairedPillWidth
+    /// ★ his 11-22 (img 45): opened from the corner (the Settings drawer) — the ⌃ menu's colour, no blur behind it.
+    @Environment(\.cornerDrawerLook) private var drawerLook
     @State private var viewport: CGFloat = 0
     @State private var contentHeight: CGFloat = 0
     @State private var footerHeight: CGFloat = 0
@@ -202,10 +204,10 @@ public struct DSPanel<Content: View, Footer: View>: View {
         }
         .transformPreference(DSPanelMeasureKey.self) { $0 = [:] }   // (never an enclosing panel's)
         .background(RoundedRectangle(cornerRadius: radius, style: .continuous)
-            .fill(DS.Surface.panel.color))
+            .fill((drawerLook ? DS.Surface.menu : DS.Surface.panel).color))
         // the mockup's .panel blurs what is behind it (backdrop-filter 36 px): a chip on the model never reads through
         // ★ his 11-22 (img 44): the pill beside the Selections pill wears its colour — the glass with no blur behind it
-        .background(pill == nil ? AnyShapeStyle(Material.ultraThinMaterial) : AnyShapeStyle(Color.clear),
+        .background(pill == nil && !drawerLook ? AnyShapeStyle(Material.ultraThinMaterial) : AnyShapeStyle(Color.clear),
                     in: RoundedRectangle(cornerRadius: radius, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
             .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
@@ -824,6 +826,8 @@ public struct DSSplitButton<Items: View>: View {
     let key: String
     let items: Items
     var action: (() -> Void)?
+    /// ★ his 11-22 (img 45): the ⌃ that opens its own drawer (CornerMoreDrawer) — lit while the drawer is up.
+    var open = false
     public init(key: String, @ViewBuilder items: () -> Items) { self.key = key; self.items = items() }
     /// True when it opens a menu (its items); false for the plain button.
     public var isMenu: Bool { action == nil }
@@ -844,8 +848,10 @@ public struct DSSplitButton<Items: View>: View {
     }
     private var face: some View {
         Image(systemName: "chevron.up").font(.system(size: 18, weight: .bold)).foregroundStyle(DS.Color.textPrimary.color)
+            .rotationEffect(.degrees(open ? 180 : 0))   // ★ 11-22: up, the drawer's ⌃ points down (a tap shuts it)
             .frame(width: DSParts.runHeight, height: DSParts.runHeight)
-            .background(RoundedRectangle(cornerRadius: DSParts.runHeight / 2, style: .continuous).fill(DS.Surface.bar.color))
+            .background(RoundedRectangle(cornerRadius: DSParts.runHeight / 2, style: .continuous)
+                .fill((open ? DS.Color.fillSelected : DS.Surface.bar).color))
             .overlay(RoundedRectangle(cornerRadius: DSParts.runHeight / 2, style: .continuous)
                 .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
             .contentShape(Rectangle())
@@ -857,6 +863,11 @@ extension DSSplitButton where Items == EmptyView {
     /// items (Buttons also type-check as a `() -> Void`) stays the menu; one that cannot build Views takes this.
     @_disfavoredOverload
     public init(key: String, action: @escaping () -> Void) { self.key = key; self.items = EmptyView(); self.action = action }
+    /// ★ his iPad notes 11-22 (img 45): the ⌃ of a corner drawer — `toggle` opens or shuts it (CornerDrawers), `open` lights
+    /// it. The drawer is the page's to draw (above the buttons, where Settings opens).
+    public init(key: String, open: Bool, toggle: @escaping () -> Void) {
+        self.key = key; self.items = EmptyView(); self.action = toggle; self.open = open
+    }
 }
 
 /// The secondary button: 48 pt glass, label + optional glyph ("Settings ⌄", "Compare", "Add part"), and an optional tertiary

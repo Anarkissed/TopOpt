@@ -106,7 +106,9 @@ final class LatticeStaleTypeTests: XCTestCase {
         // B3: three controls — Optimize, Lattice, and Topology's Optimize-split row that is the Lattice button there.
         // ★ RE-PINNED (UI-Notes, Topology T1 491e7b1b; posted to #362 11-04 10:20Z): Optimize is §4.6's DSRunButton — its
         // greyed-yet-tappable is the `.grey` state (the tap still leads to the fix), and only `.disabled` refuses the tap
-        XCTAssertEqual(ws.components(separatedBy: ".disabled(!ok && !marks && !opensType)").count - 1, 2, "★ greyed, yet tappable")
+        // ★ RE-PINNED (notes23 chrome, his 11-22 img 45): Topology's ⌃ row is a drawer row now — `enabled: ok || marks || opensType`
+        XCTAssertEqual(ws.components(separatedBy: ".disabled(!ok && !marks && !opensType)").count - 1
+                       + ws.components(separatedBy: "enabled: ok || marks || opensType").count - 1, 2, "★ greyed, yet tappable")
         let opt = try member(ws, "private func optimizeButtonView(lattice: Bool) -> some View")
         XCTAssertTrue(opt.contains(": marks || opensType ? .grey(line)") && opt.contains(": .disabled(line)"),
                       "★ Optimize: greyed, yet tappable (DSRunButton .grey); untappable only when nothing leads to a fix")
