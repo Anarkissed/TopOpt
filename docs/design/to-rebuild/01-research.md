@@ -92,11 +92,14 @@ Roughness has two separate causes, and the papers treat them with different tool
 
 | attempt | result |
 |---|---|
-| Smoothing the voxel surface afterwards: Taubin (PR 299), SDF / RBF refit (PR 303), curvature flow (PR 314), closing (PR 315) | all failed their targets; curvature flow survives inside the finish and today removes 16 % of the stair-step on the stand |
+| Smoothing the voxel surface afterwards: Taubin (PR 299), SDF / RBF refit (PR 303), curvature flow (PR 314), closing (PR 315) | all failed their targets (Taubin took off 5.5 % of the stair height while moving the surface 0.673 mm); curvature flow survives inside the finish and today removes 16 % of the stair-step on the stand |
 | Fitting an analytic level set (PR 324) | carved roughness 24 % |
-| Robust triple | helped; NOT in today's tree (ledger A) |
-| Perimeter as a penalty | cost 8.3 points of margin |
+| Robust triple | the only mechanism measured to GAIN margin and REMOVE surface: light rung margin +19.3 % over control, surface -11.7 %; blocked on sealed void (14.85 %) because the drain rule was not in the loop; NOT in today's tree (ledger A) |
+| Coarser knots | halved the margin. Wider reach at the same knot count, and C4, were never run |
+| Perimeter as a penalty | cost 8.3 points of margin at the light rung |
 | Helmholtz filter | margin fell 83 % at the light rung; cause never established |
+| Level set against the old optimiser | 27.6 % weaker at the light rung, never explained, no owner |
+| Export step alone, on a PERFECT shape (ledger C-1) | sloped and curved walls ripple by up to 0.2 mm, once per voxel, before any design roughness is added |
 | Today (ledger D) | stand res 128: median 0.16 mm off a smooth patch, 98 % of patches over the 0.05 mm target; Top Motor Mount: median 0.01, worst 0.57 mm |
 
 Code facts that explain the numbers (ledger A, B-01, section J):
@@ -169,7 +172,8 @@ Candidate 3 against today's bracket on all reference parts: printed grams at the
 
 ### What this project has
 
-- PR 334 "Mode 2": a second field (beta) and a joint optimiser step, in the tree but unreachable, wired to the SIMP loop and priced with the OLD lattice laws (ledger A, M-06).
+- PR 334 "Mode 2": a second field (beta) and a joint optimiser step, in the tree but unreachable, wired to the SIMP loop and priced with the OLD lattice laws (ledger A, M-06, S-07). Its numbers: net mass -31.4 % and -47.0 %, margin -78 %, missing its 0.95x bar.
+- The old homogenised lattice law over-predicts stiffness by 23 to 52 % when a member is only a few cells wide (lattice-phase0 M2). Any planner must use a knocked-down law, never the textbook one.
 - `multiscale` (PR 293): dead for the app (R-09).
 - The new lattice engine owns the laws and the frame-of-beams strength check (LatticeReview). The rule that a void inside a lattice must reach the outside exists as a check, not in a loop.
 
