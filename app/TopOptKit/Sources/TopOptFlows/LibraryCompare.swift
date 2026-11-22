@@ -46,11 +46,40 @@ public struct CompareSession: Equatable {
 
     /// Opens on the two best.
     public init(part: LibraryPart, skipRejected: Bool) {
-        queue = Self.queue(part, skipRejected: skipRejected)
+        self.init(queue: Self.queue(part, skipRejected: skipRejected))
+    }
+
+    /// ★ His iPad notes 11-22 (decision 2): Compare new — the pick a new version's results cleared, on the left, against ONLY
+    /// the results never compared yet (in the queue's order), not everything again.
+    public init(part: LibraryPart, newAgainst pick: CompareItem?, skipRejected: Bool, running: Set<UUID> = []) {
+        self.init(queue: Self.newQueue(part, against: pick, skipRejected: skipRejected, running: running))
+    }
+
+    private init(queue: [CompareItem]) {
+        self.queue = queue
         left = queue.first
         right = queue.dropFirst().first
         waiting = Array(queue.dropFirst(2))
         seen = [left, right].compactMap { $0 }
+    }
+
+    /// ★ 11-22: every result of every version with results that has never been through a Compare (a running version's
+    /// results wait for its run to end), in the queue's order.
+    public static func newResults(_ part: LibraryPart, running: Set<UUID> = []) -> [CompareItem] {
+        let fresh = part.versions.filter { !running.contains($0.folderID) }.flatMap { v in
+            (v.summary ?? []).indices.filter { !(v.compared ?? []).contains($0) }.map { CompareItem(folder: v.folderID, result: $0) }
+        }
+        let order = queue(part, skipRejected: false)
+        return fresh.sorted { (order.firstIndex(of: $0) ?? .max) < (order.firstIndex(of: $1) ?? .max) }
+    }
+
+    /// ★ 11-22: Compare new's results: the former pick first, then the new ones (rejected ones left out while that switch is on).
+    public static func newQueue(_ part: LibraryPart, against pick: CompareItem?, skipRejected: Bool,
+                                running: Set<UUID> = []) -> [CompareItem] {
+        let new = newResults(part, running: running).filter { i in
+            i != pick && !(skipRejected && (part.version(folderID: i.folder)?.mark(for: i.result).rejected ?? false))
+        }
+        return (pick.map { [$0] } ?? []) + new
     }
 
     /// The results Compare offers: every result of every version that has results, without drafts.

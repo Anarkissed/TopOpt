@@ -95,7 +95,9 @@ public final class AppModel: ObservableObject {
     @Published public private(set) var thumbnails: [UUID: CGImage] = [:]
     /// Projects with a run in flight (incl. background runs) — drives the Library
     /// card's "Running" status so you can see at a glance which are optimizing.
-    @Published public private(set) var runningIDs: Set<UUID> = []
+    @Published public private(set) var runningIDs: Set<UUID> = [] {
+        didSet { library.runningFolders = runningIDs }   // ★ his iPad notes 11-22: a running version never clears a Compare pick
+    }
     /// Phase subscriptions per live project, keeping `runningIDs`/`optimized` current.
     private var runCancellables: [UUID: AnyCancellable] = [:]
     /// Library (B3): each version's draft this session (an edit to a version with results goes there).
