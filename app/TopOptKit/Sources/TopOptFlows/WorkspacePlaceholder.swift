@@ -2029,16 +2029,18 @@ public struct WorkspacePlaceholder: View {
             guard let config = compute.activeRemote else {
                 AppPopups.shared.show(LatticeFileExport.organicCantMakeTitle, LatticeFileExport.organicNeedsMacLine); return
             }
+            LatticePrintFlow.shared.begin(project: project.id, key: latticePrintKey)   // ★ his 11-22: "Making the print file"
             Task { @MainActor in
                 let stress = newEngineStress
                 let inputs: (groups: [LatticeLayoutSession.OrganicGroup], tensor: Data)
                 do { inputs = try await organicInputsWhenReady() } catch {
+                    LatticePrintFlow.shared.ended()
                     AppPopups.shared.show(LatticeFileExport.organicCantMakeTitle, LatticeFileExport.organicPlain(error), log: "\(error)")
                     return
                 }
                 switch LatticeFileJob.forOrganic(project, groups: inputs.groups, tensor: inputs.tensor,
                                                  referenceMPa: stress.referenceMPa, strengthJob: strengthJob) {
-                case .failure(let why): AppPopups.shared.show(LatticeFileExport.organicCantMakeTitle, why.line)
+                case .failure(let why): LatticePrintFlow.shared.ended(); AppPopups.shared.show(LatticeFileExport.organicCantMakeTitle, why.line)
                 case .success(let job): launchFileRun(request, job: job, strengthJob: strengthJob, config: config, organic: true)
                 }
             }
@@ -2057,6 +2059,7 @@ public struct WorkspacePlaceholder: View {
             }
             model.toast = why.line; return
         }
+        LatticePrintFlow.shared.begin(project: project.id, key: latticePrintKey)   // ★ his 11-22: the exact is on screen; the file
         launchFileRun(request, job: job, strengthJob: strengthJob, config: compute.activeRemote)
     }
 
@@ -2067,6 +2070,7 @@ public struct WorkspacePlaceholder: View {
         runCouldntFinish = false; lastRunWasLattice = true   // ★ B1 (O1)
         GenerationTimingLog.shared.printFileRunBegins(.of(project), ranOn: config != nil ? GenerationTimingLog.aMac
                                                                                          : GenerationTimingLog.thisDevice)   // ★ 11-22
+        LatticePrintFlow.shared.fileSent()   // ★ his 11-22: the exact lattice laid, the file's job goes
         let density = model.densityGCm3(for: project.material)
         // the old run's runner stays the run's own: this one is set for this start only (`start` takes it as it begins)
         let before = run.runner
@@ -3667,7 +3671,9 @@ public struct WorkspacePlaceholder: View {
             // ★ Organic cut 2 (his certify wizard): an Organic part that does not certify opens on Results, where it is walked through
             // ★ his 11-21 ("have it spit out an actual result in the app - because NOTHING happens in app"): every Lattice run
             // that lands opens its result on Results (the Lattice stage has no landed-run notice)
-            if LatticeFileButton.opensResults(succeeded: ph == .succeeded, byLattice: lastRunWasLattice, outcome: run.outcome) {
+            // ★ his 11-22 (img 47): a print file he asked for that passes its checks is Approved on the button (its tap opens
+            // Results); one that fails opens there as before
+            if !latticePrintRunMoved(ph), LatticeFileButton.opensResults(succeeded: ph == .succeeded, byLattice: lastRunWasLattice, outcome: run.outcome) {
                 viewOriginal = false
             }
             guard ph == .failed, run.failureShowsOnButton else { return }
@@ -14761,13 +14767,23 @@ extension WorkspacePlaceholder {
                                                       stale: latticePreviewStale, running: runs)
         // ★ his pick 11-21: an Organic preview laying wears its ring and count-down on the button (never a bottom line)
         let laying = refresh || runs ? nil : newEngine.layProgress.map(LatticePreviewMode.buttonProgress)
-        return DSRunButton(refresh ? LatticePreviewMode.refreshButton : runs ? LatticeSetupCopy.running : "Lattice",
-                           subtitle: refresh ? LatticePreviewMode.refreshLine : line, state: refresh ? .ready : state, key: "latticeButton",
-                           progress: laying) {
-            if refresh { refreshLatticePreview(); return }
-            if runs { run.restore(); return }
-            if ok { requestLatticeRun() } else if notSet { showLatticeWizard = true }
-            else if marks { goToWallMarking() } else if opensType { goToLatticeType() }
+        // ★ his 11-22 (img 47): his press for the print file reads "Making the print file", then "Approved" · "Tap to export"
+        // (LatticePrintFlow; only that button follows it)
+        let normal = LatticePrintFlow.Look(title: refresh ? LatticePreviewMode.refreshButton : runs ? LatticeSetupCopy.running : "Lattice",
+                                           subtitle: refresh ? LatticePreviewMode.refreshLine : line, state: refresh ? .ready : state,
+                                           progress: laying)
+        return LatticeRunButtonFlow(flow: .shared, projectID: project.id, normal: normal, layProgress: newEngine.layProgress,
+                                    fileRunning: runs, current: { latticePrintKey }) { tap in
+            switch tap {
+            case .openExport: viewOriginal = false   // ★ Approved: the export (Results on the file's result), as ⌃ Export… opens
+            case .viewRun: run.restore()
+            case .wait: break   // the print file is being made: a second press starts nothing
+            case .normal:
+                if refresh { refreshLatticePreview(); return }
+                if runs { run.restore(); return }
+                if ok { requestLatticeRun() } else if notSet { showLatticeWizard = true }
+                else if marks { goToWallMarking() } else if opensType { goToLatticeType() }
+            }
         }
         .accessibilityHint(refresh ? LatticePreviewMode.refreshLine
                            : marks ? WallMarkingSubline.hint : opensType || notSet ? Self.latticeTypeTapHint : line)
@@ -15772,8 +15788,10 @@ extension WorkspacePlaceholder {
                 }
                 .accessibilityIdentifier("lattice-split-preview")
                 // today's STL / 3MF export is on Results; this opens it (his tap — never by itself)
-                Button(LatticeSetupCopy.export) { viewOriginal = false }
-                    .disabled(!hasResults)
+                // ★ his 11-22 (img 45/47): live with a lattice preview on screen (a Draft too): it makes the print file as the
+                // Lattice button does (Making the print file → Approved), or opens Results when that is what there is
+                Button(LatticeSetupCopy.export) { latticeExportTapped() }
+                    .disabled(!latticeExportLive)
                     .accessibilityIdentifier("lattice-split-export")
                 // ★ his ask 11-16: how the lattice view keeps up — a check mark on the one in force
                 Divider()
@@ -15978,6 +15996,46 @@ extension WorkspacePlaceholder {
             }
         }
         throw LatticeLayoutPreview.OrganicFileWait.notLaid
+    }
+
+    // MARK: ★ his 11-22 (img 47): "Generate the print-accurate preview first, then change the button to 'Approved' and that
+    // should lead to the export page/modal" (LatticePrintFlow)
+
+    /// What the print file is made from now (a change of it gives the Approved button back).
+    var latticePrintKey: LatticeLayoutPreview.LayInputs? {
+        guard let path = project.importedFile?.path else { return nil }
+        let stress = newEngineStress
+        return LatticeLayoutPreview.layInputs(project, path: path, LatticeLayoutPreview.settings(project, referenceMPa: stress.referenceMPa),
+                                              stress: stress)
+    }
+
+    /// The run moved: the print file he asked for ends here. True: it passed its checks and is Approved (Results stays shut
+    /// until he taps it); false: today's way.
+    func latticePrintRunMoved(_ ph: RunPhase) -> Bool {
+        let flow = LatticePrintFlow.shared
+        guard ph != .running, flow.isMaking(project.id) else { return false }
+        guard ph == .succeeded, lastRunWasLattice else { flow.ended(); return false }
+        return flow.landed(passes: LatticePrintFlow.passes(run.outcome, organic: LatticeLayoutPreview.organic(project.lattice),
+                                                           infillNow: project.printParams.infillPercent))
+    }
+
+    /// ⌃ Export… is live with a lattice preview on screen (a Draft too), or results to open.
+    var latticeExportLive: Bool {
+        acceptedVariantCount > 0 || (newEngineDrawn && newEngine.bars != nil && canLatticeThis)
+    }
+
+    /// ⌃ Export…: Approved opens the export; a lattice on screen makes the print file as the Lattice button does; otherwise
+    /// Results (today's).
+    func latticeExportTapped() {
+        let flow = LatticePrintFlow.shared
+        if flow.isMaking(project.id) { return }
+        if flow.isApproved(project.id, current: { latticePrintKey }) { viewOriginal = false; return }
+        if newEngineDrawn, newEngine.bars != nil, canLatticeThis {
+            macNotAnswering = false; runCouldntFinish = false
+            requestLatticeRun()
+            return
+        }
+        viewOriginal = false
     }
 }
 
