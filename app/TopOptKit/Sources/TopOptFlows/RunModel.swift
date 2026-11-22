@@ -515,6 +515,11 @@ public enum RunFailure: Equatable, Sendable {
     case allRejectedOnMargin(worstMargin: Double, effectiveMargin: Double,
                              minFeatureViolations: Int,
                              diagnosis: GateDiagnosis?)
+    /// ★ R-07 (reviewer ruling 11-22): no version is left because the final check on each strong-enough version's PRINT FILE
+    /// refused it (`FinalCheckWords`). `lines` name each one and why ("Version a: it prints in 2 pieces"); `lastTried` is the
+    /// last design's own margin sentence when IT failed on strength (nil when it too was a refused file). Never the generic
+    /// "not strong enough": the margins of a refused file passed.
+    case allRefusedAtFinalCheck(lines: [String], lastTried: String?)
 
     /// The strength-margin minimum every accepted variant must clear (core
     /// `MinimizePlasticOptions.margin_stop` default / ROADMAP M5.3).
@@ -566,6 +571,7 @@ public enum RunFailure: Equatable, Sendable {
         switch self {
         case .solver: return "Optimization couldn’t finish"
         case .allRejectedOnMargin: return "Not strong enough to print"
+        case .allRefusedAtFinalCheck: return "No print file passed the final check"
         }
     }
 
@@ -580,6 +586,13 @@ public enum RunFailure: Equatable, Sendable {
                                       effectiveMargin: effectiveMargin,
                                       violations: violations,
                                       diagnosis: diagnosis)
+        case .allRefusedAtFinalCheck(let lines, let lastTried):
+            var body = "The final check on the print file refused every version strong enough:"
+            for l in lines { body += "\n• " + l }
+            if let t = lastTried, !t.isEmpty {
+                body += "\n\nThe last design the run tried: " + t.prefix(1).lowercased() + t.dropFirst()
+            }
+            return body
         }
     }
 
@@ -1623,17 +1636,30 @@ public final class RunModel: ObservableObject {
                 // "0.00×" the motivating run showed: the reader used to look only at
                 // report.json's accepted array, so an all-rejected run left this
                 // `last` nil and the sheet reported a max over nothing.
+                let shown = outcome.map(FinalCheckWords.letters(of:)) ?? [:]   // ★ R-07: the versions' names while on screen
                 outcome = stamp(o)
                 let terminal = o.variants.last
                 // BOTH margins. `marginEffective` is what the gate compared; the
                 // diagnosis is the only source that has it, and on a solid print (or
                 // a run with no diagnosis) it is the worst case itself.
                 let worst = terminal?.worstCaseMargin ?? 0
+                // ★ R-07: when the final check on the print files refused the versions that were strong enough, say THAT,
+                // naming each as it was on screen (`shown`, from the streamed outcome this final one replaced).
+                if let b = o.reportJSON.flatMap(RunReportBlocks.decode(reportJSON:)), !FinalCheckWords.refused(b).isEmpty {
+                    let refused = FinalCheckWords.refused(b)
+                    let lastRefused = terminal.map { t in refused.contains { abs($0.volumeFraction - t.requestedVolumeFraction) < 1e-6 } } ?? true
+                    failure = .allRefusedAtFinalCheck(
+                        lines: FinalCheckWords.lines(b, letters: shown),
+                        lastTried: lastRefused ? nil : RunFailure.rejectionBody(
+                            worstMargin: worst, effectiveMargin: terminal?.diagnosis?.marginEffective ?? worst,
+                            violations: terminal?.minFeatureViolations ?? 0, diagnosis: terminal?.diagnosis))
+                } else {
                 failure = .allRejectedOnMargin(
                     worstMargin: worst,
                     effectiveMargin: terminal?.diagnosis?.marginEffective ?? worst,
                     minFeatureViolations: terminal?.minFeatureViolations ?? 0,
                     diagnosis: terminal?.diagnosis)
+                }
                 phase = .failed
             } else {
                 outcome = stamp(o)                         // authoritative final

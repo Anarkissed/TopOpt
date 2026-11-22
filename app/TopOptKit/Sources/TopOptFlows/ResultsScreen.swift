@@ -1311,7 +1311,8 @@ public struct ResultsScreen: View {
             guard let b = blocks, let t = model.selected, let vf = model.requestedVolumeFraction(of: t) else { return 0 }
             return b.rows.first { $0.accepted && abs($0.volumeFraction - vf) < 1e-6 }?.fragileJoints ?? 0
         }()
-        return ResultsChecks.checks(tab: model.selected, margin: selectedRow?.margin,
+        return model.droppedChecks   // ★ R-07: a version the final check on its file refused, named as it was seen
+            + ResultsChecks.checks(tab: model.selected, margin: selectedRow?.margin,
                                     required: blocks?.safetyMargin ?? blocks?.strengthen?.marginRequired ?? 1,
                                     safetyMargin: blocks?.safetyMargin, scenarios: model.scenarios(for: model.selected),
                                     thinJoints: thin, bridged: model.selected.map { model.isBridged($0) } ?? false,
