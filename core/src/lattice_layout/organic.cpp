@@ -14,6 +14,8 @@
 #include <memory>
 #include <stdexcept>
 #include <tuple>
+#include <unordered_map>
+#include <cstdint>
 
 #include "topopt/grading.hpp"
 #include "topopt/lattice.hpp"
@@ -1667,6 +1669,24 @@ std::vector<HoldPatchCount> hold_up_weave(Bars& bars, const Domain& domain, cons
       }
     };
     read_ends();
+    // SPEED 11-22: the ends on a 2 mm grid (the area's ends do not change while its points are read; supports are laid
+    // after), so each point reads only the ends in the box its cone can reach.
+    constexpr double kEndCell = 2.0;
+    const auto end_cell = [](double v, long long& c) {
+      if (!std::isfinite(v) || std::fabs(v) > 1e12) return false;
+      c = static_cast<long long>(std::floor(v / kEndCell));
+      return true;
+    };
+    const auto end_key = [](long long i, long long j, long long k) {
+      const auto f = [](long long v) { return static_cast<std::uint64_t>((v + (1LL << 20)) & 0x1FFFFF); };
+      return f(i) << 42 | f(j) << 21 | f(k);
+    };
+    std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> end_grid;
+    for (std::size_t i = 0; i < verts.size(); ++i) {
+      long long a, b, c;
+      if (end_cell(verts[i].x, a) && end_cell(verts[i].y, b) && end_cell(verts[i].z, c))
+        end_grid[end_key(a, b, c)].push_back(static_cast<std::uint32_t>(i));
+    }
     const double g = A.grid_mm > 0.0 ? A.grid_mm : 1.0;
     auto ends_under = [&](const WeaveHold::Patch& P) {
       std::size_t n = 0;
@@ -1700,10 +1720,30 @@ std::vector<HoldPatchCount> hold_up_weave(Bars& bars, const Domain& domain, cons
         if (held) { ++c.held; continue; }
         // The bar ends that can matter: inside the 45 degree cone under p (and a little round it, for the joint test).
         std::vector<std::size_t> near;
-        for (std::size_t i = 0; i < verts.size(); ++i) {
-          const double dz = p.z - verts[i].z, hd = std::hypot(verts[i].x - p.x, verts[i].y - p.y);
+        {   // SPEED 11-22: the candidates from the grid, judged as before, in increasing index order
           const double reach = A.to_floor ? 2.0 * A.depth_mm : A.depth_mm, slack = A.to_floor ? 4.0 : 2.0;
-          if (dz > -2.0 && dz <= reach + 2.0 && hd <= std::max(0.0, dz) + slack) near.push_back(i);
+          const double side = std::max(0.0, reach + 2.0) + slack + 1e-6;
+          long long x0, x1, y0, y1, z0, z1;
+          if (end_cell(p.x - side, x0) && end_cell(p.x + side, x1) && end_cell(p.y - side, y0) && end_cell(p.y + side, y1) &&
+              end_cell(p.z - reach - 2.0 - 1e-6, z0) && end_cell(p.z + 2.0 + 1e-6, z1)) {
+            for (long long a = x0; a <= x1; ++a)
+              for (long long b = y0; b <= y1; ++b)
+                for (long long c = z0; c <= z1; ++c) {
+                  const auto it = end_grid.find(end_key(a, b, c));
+                  if (it == end_grid.end()) continue;
+                  for (const std::uint32_t u : it->second) {
+                    const std::size_t i = u;
+                    const double dz = p.z - verts[i].z, hd = std::hypot(verts[i].x - p.x, verts[i].y - p.y);
+                    if (dz > -2.0 && dz <= reach + 2.0 && hd <= std::max(0.0, dz) + slack) near.push_back(i);
+                  }
+                }
+            std::sort(near.begin(), near.end());
+          } else {   // a point off the grid's range: every end, as before
+            for (std::size_t i = 0; i < verts.size(); ++i) {
+              const double dz = p.z - verts[i].z, hd = std::hypot(verts[i].x - p.x, verts[i].y - p.y);
+              if (dz > -2.0 && dz <= reach + 2.0 && hd <= std::max(0.0, dz) + slack) near.push_back(i);
+            }
+          }
         }
         std::vector<Vec3> path{p};
         Vec3 cur = p;
