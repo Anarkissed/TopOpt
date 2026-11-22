@@ -1,0 +1,46 @@
+# Release 49895f5e9c5e - 2026-11-22: release (13) - claude/organic-1 48d5d626, one worker swap (5541d83e514a -> 49895f5e9c5e)
+# Release (13): X-05 (TOReview's 08461db9), the Organic engine OS1/OG2e/OG2f/9b6ec118 and its drawing, the quicker Organic preview, and all his 11-22 iPad notes (Library, sample, number pad, Topology in Lattice, handles, Hide keep clears, union, Selections panel).
+# Gates in the gate tree (b9-screens-362, its own vendor, core 49895f5e9c5e): the whole app suite in three runs (runs 0 and 1 whole; run 2 in three shards side by side, any failure once more alone, his option 1 11-22), phase B's local half built meanwhile, nothing pushed before the suite was green; the notes' 258-class combined run before it; the Keep, Organic, weave_tubes and mirror core suites here.
+# Commits:
+#   e95b7852 Organic OS1, the file's vine shape (the owner, 2026-11-20, on the sample: "the rounded ends aren't attached at the right places, there are places without rounded ends at ALL, and there are just straight cuts to turn instead of 
+#   5e880c48 Organic OG2e (leg S; the owner, 2026-11-21: "can you ensure that adding a no-lattice zone at the face of a "depth variation" latticed wall, flattens it in the engine and app?"): a no-lattice zone keeps the face flat where it re
+#   10cc65bd Organic OG2f (leg S; the owner, 2026-11-21: "I attempted to use a no-lattice zone to cut off the ends but it didn't really work as expected"; the lead's ruling: build the thin-sheet rule): a zone never leaves a sliver. Where a 
+#   172de3e3 Keep regions that meet along one edge no longer leave the export non-manifold (X-05)
+#   db50fa25 The Lattice menu's test expects Run the stress check first when the lattice follows the stresses (his 11-20 ask, acca75e3)
+#   4df66921 Organic OS1 R2 completed (leg T; the lead's ruling 2026-11-21): the rounded ends never cost the print file. A round of the print check that flattens rounded ends of shallow runs (R2) is no longer one of its passes (at most most
+#   59588993 Merge LatticeReview's engine 4df66921 (claude/organic-engine): the file's vine shape OS1 (e95b7852), a No-lattice zone keeps the face flat (OG2e 5e880c48, his 11-21 ask) and OG2f
+#   53c3a0af The Organic preview draws the print file's new vine shape (LatticeReview's OS1, his 11-19 rule: the drawing follows the print file)
+#   02c955c8 Organic OS1 flat ends (leg U; the lead's ruling 2026-11-21, for the app's drawing of OS1 B): the Exact preview lists the rounded ends the file holds flat. The Exact preview runs the file's print check whenever shallow runs have
+#   0cf79306 Merge LatticeReview's engine 02c955c8 (claude/organic-engine): the Exact preview lists the rounded ends the print file's check held flat (OrganicPreview::flat_ends, OS1 leg U)
+#   9b6ec118 Organic OS1 flat ends, leg V (the app agent's case, 2026-11-21): the Exact preview draws the bars the file is made of. On the sample cube (Grown) two listed flat ends were both ends of a ROUND run (about 42 degrees): in the fil
+#   acbe3a4a Merge LatticeReview's engine 9b6ec118 (claude/organic-engine): where the print check's sag pass lifted joints or laid legs, the Exact preview's runs are the file's own bars and flat_ends the file's own points (OS1 leg V)
+#   8fadc8bb The Organic preview draws flat the rounded bridge ends the print file's check holds flat (LatticeReview's leg U)
+#   3ed7a2d5 The Organic preview shows something at once: Print-accurate preview, remembered lattices, the Draft first (his 11-21 picks)
+#   25126a5d His 11-22 iPad notes: no engine-update lines in the Lattice stage; the sample and the ranges never change under him; a refused sample says what is wrong and how to fix it
+#   e11dbd40 His 11-22 iPad notes: a union joins its own group; the Selections panel resizes, renames and says no depths; nothing cuts into it
+#   73198867 His iPad notes 11-22 (img 5): numbers open the app's number pad beside the field, never the system keyboard
+#   fbf13e73 Merge claude/notes22-keypad: numbers open the app's number pad beside the field, never the system keyboard (his 11-22 img 5)
+#   b02f736a Library, his iPad notes 11-22 (img 1): newest first with a Rejected section, Picked x, a Compare pick cleared by new results with Compare new, taps open the version, Details
+#   7da8ca0a Merge claude/notes22-library: newest first with a Rejected section, Picked x, a Compare pick cleared by new results with Compare new, taps open the version, Details (his 11-22 img 1)
+#   03d6f4c6 His iPad notes 11-22 (img 6, 11, 12): Topology editable in Lattice Setup, one shape's handles at a time, Hide keep clears
+#   055bf9d5 Merge claude/notes22-topology: Topology editable inside Lattice Setup, one shape's handles at a time, Hide keep clears beside Forces (his 11-22 img 6, 11-12)
+#   48d5d626 His 11-22 notes, the combined run's two reds: rename in place, the Design box trash held by reference
+#   3bd9a318 Release (13) 2026-11-22: merge claude/organic-1 - X-05, the Organic engine and its drawing, a quicker Organic preview, and all his 11-22 iPad notes
+# Gates (this tree):
+#   11:12 his uncommitted files (left alone): app/TopOpt-Info.plist app/TopOpt.xcodeproj/project.pbxproj app/TopOpt.xcodeproj/xcshareddata/xcschemes/TopOpt.xcscheme 
+#   11:12 preflight job: /Users/nadim/.topopt-worker/d5af229ca8ee4a8f (his newest optimisation job the installed worker passes; read only)
+#   11:12 merged organic-1 as 3bd9a318 (local, not pushed); app + core + tools == its; fingerprint 49895f5e9c5e
+#   ==> Manifold: /Users/nadim/dev/TopOpt/TopOpt/.vcpkg/installed-manifold (KEEP regions exported exactly)
+#   ==> building macOS slice (Eigen + OCCT, arm64)
+#   ==> building iOS simulator slice (Eigen + OCCT + lib3mf, arm64)
+#   ==> building iOS device slice (Eigen + OCCT + lib3mf, arm64)
+#   11:14 build_core green: topopt_vendored_core_49895f5e9c5e + the Install 3 entry points + lay_organic_preview and Session::sweep_limits in every slice and arch
+#   11:15 worker CLI built: topopt-cli: core 49895f5e9c5e (dirty=false), built Nov 22 2026 11:15:03; 3 data paths, all under the release worktree
+#   11:29 core suites passed: 100% tests passed out of 16 Total Test time (real) = 824.02 sec 
+#   11:36 iPad device build green (this tree's own pair)
+#   11:36 preflight on his job: preflight: load path CONNECTED
+#   12:20 pushed 3bd9a318
+#   12:20 worker script unchanged (release 11's)
+#   12:20 worker swapped: /health "fingerprint": "49895f5e9c5e"; data paths under the release worktree; preflight again OK; old CLI kept as build-fix/topopt-cli.5541d83e514a-replaced-20261122
+#   12:20 route, demand, strength_job and organic cut 2 tests vs the INSTALLED script: ALL PASS
+#   12:20 the app_release scripts now expect 49895f5e9c5e
