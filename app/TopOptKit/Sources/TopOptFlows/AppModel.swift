@@ -114,6 +114,13 @@ public final class AppModel: ObservableObject {
     /// ★ his 11-21: the placed box being dragged by the Design Box's handles (a zone, a Keep clear shape) — here, never on the
     /// workspace's stack.
     public let placedBoxDrag = PlacedBoxDrag()
+    /// ★ his iPad notes 11-22: the Topology view's state for the session (Hide keep clears, the picked Design box row) — here,
+    /// never on the workspace's stack (WorkspaceBodySizeTests); a change to it redraws what observes this model.
+    public private(set) lazy var topologyView: TopologyViewState = {
+        let s = TopologyViewState()
+        s.relay = s.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+        return s
+    }()
 
     // MARK: Cold-launch remote re-attach (handoff 119)
 
