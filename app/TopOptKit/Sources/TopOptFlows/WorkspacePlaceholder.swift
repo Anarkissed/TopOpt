@@ -219,8 +219,12 @@ public struct WorkspacePlaceholder: View {
     @State private var resultsFullScreen = false
     /// B3: the Results dot + message (TopologyResultsNotice — it can never open a page).
     @State private var topoNotice = TopologyResultsNotice()
-    /// B3: the corner pair's Setup panel is open.
-    @State private var setupPanelOpen = false
+    /// B3: the corner pair's Setup panel is open. ★ his 11-22 (img 45): ONE corner drawer at a time (Settings or the ⌃'s) —
+    /// the model's CornerDrawers, never a byte on this struct (WorkspaceBodySizeTests).
+    private var setupPanelOpen: Bool {
+        get { model.cornerDrawers.isOpen(CornerDrawers.settings) }
+        nonmutating set { model.cornerDrawers.set(CornerDrawers.settings, newValue) }
+    }
     /// ★ B6: the design-primitive row whose trash is asking (in place), and the last trash (its one-step Undo).
     @State private var primitiveDeleteAsk: Int?
     private var primitiveTrashed: TrashedPrimitive? {   // ★ 11-22: held by reference (TopologyViewState), not a @State
@@ -888,6 +892,7 @@ public struct WorkspacePlaceholder: View {
                 .onAppear { if FlexibleNewProject.takeLatticeStage(for: project.id) { goToStage(.lattice) } }   // Flexible (PR #362) H45: New TopOpt's Flexible tab lands on the Flexible Lattice stage
                 // B3: Save as new project runs in the copy as it opens (RerunCard; as #362's H50c)
                 .onAppear {
+                    model.cornerDrawers.close()   // ★ his 11-22: a page opens with no corner drawer up (as its @State did)
                     topoNotice.seed(accepted: acceptedVariantCount)
                     topoNotice.version = versionLabel   // ★ B3: "v8 is ready"
                     learnWhatThisVersionRanWith()   // ★ B5 (note 3): "Same settings as v6" after a reopen
@@ -1348,6 +1353,7 @@ public struct WorkspacePlaceholder: View {
                 .onTapRay(primitiveTapRay)   // ★ his iPad 10-28: a tap on a keep-clear volume picks it
                 .cutSibling(SurfaceTint.siblingShows(tool: surfaceTool))   // ★ his 11-14: the other half is tinted under Union only
                 .pieceOutline(outlineDrawing)   // ★ his 11-16/17 (Install 3): Outlines draw the faces as the app sends them
+                .closesCornerDrawers(model.cornerDrawers)   // ★ his 11-22 (img 45): a tap on the 3D view closes the open drawer
                 .overlay(alignment: .bottom) {
                     if newEngineDrawn {
                         VStack(spacing: 6) {
@@ -3319,7 +3325,7 @@ public struct WorkspacePlaceholder: View {
         // with no room — it is withdrawn (drawn faded, untappable) until the view or the panel moves.
         // ★ B10: and the corner's open Settings panel, on the other side (the role picker sat under it at every size)
         let panels = [chromeGeometry.selectionsFrame,   // open or folded to its pill: the frame is whatever is drawn
-                      setupPanelOpen ? chromeGeometry.cornerPanelFrame : nil].compactMap { $0 }
+                      model.cornerDrawers.anyOpen ? chromeGeometry.cornerPanelFrame : nil].compactMap { $0 }   // ★ 11-22: or the ⌃'s
         if !panels.isEmpty {
             var sizes: [String: CGSize] = [:]
             for e in base where !e.rigid { sizes[e.id] = e.bounds }
@@ -10729,6 +10735,7 @@ public struct WorkspacePlaceholder: View {
             }
             if !selectionsCollapsed { latticePreviewNotice }
         }
+        .minimisedPillsTogether(latticeSetupUp && !latticeTopologyOpen && selectionsCollapsed)   // ★ his 11-22 (img 44): one size
         .latticeBandChipKeepOut()          // ★ the Selections panel, for the band chips
         // ★ his iPad 11-09 (2.5): what the column stacks under the panel (an Undo line, the preview's notice) — the panel's
         // floor rises by it, so the whole column ends above the hint line
@@ -14551,7 +14558,7 @@ extension WorkspacePlaceholder {
         guard !editFaces.isEditing else { return }
         if showLatticeWizard { cellsCloseToken += 1 }   // the Cells page's own Save (today's onExit bakes and persists)
         viewOriginal = true
-        setupPanelOpen = false
+        model.cornerDrawers.close()   // ★ his 11-22: Settings or the ⌃'s drawer
         surfaceResetTools()
         editFacesHostReturn = onReturn
         editFacesDiscardAsking = false
@@ -14685,12 +14692,13 @@ extension WorkspacePlaceholder {
     // MARK: the corner pair (A1)
 
     var topologyCornerPair: some View {
-        CornerPair(geometry: chromeGeometry, open: setupPanelOpen ? "setup" : nil, fixLine: topologyFixLine) {   // ★ B3 (U6, U12)
+        CornerPair(geometry: chromeGeometry, open: model.cornerDrawers.open, fixLine: topologyFixLine) {   // ★ B3 (U6, U12)
             topologySetupChip
         } split: {
             topologyOptimizeSplit
         } panel: {
             if setupPanelOpen { settingsPanel }
+            else if model.cornerDrawers.isOpen("topologySplitMore") { moreDrawer("topologySplitMore", topologyMoreItems) }   // ★ 11-22
         }
     }
 
@@ -14704,7 +14712,16 @@ extension WorkspacePlaceholder {
                 open: Binding(get: { true }, set: { if !$0 { withAnimation(DS.Motion.emphasized) { setupPanelOpen = false } } })) {
             topologySetupRows
         }
+        .environment(\.cornerDrawerLook, true)   // ★ his 11-22 (img 45): the ⌃ menu's colour
         .background(CornerPairStyle.publish("cornerPanel"))   // (B2, U12/U16: the lane and the fix line read it)
+    }
+
+    /// ★ his iPad notes 11-22 (img 45): "The ^ menu should start *above* the buttons like the Settings menu so it is not
+    /// covering any buttons" — the ⌃'s drawer opens where Settings opens (the corner pair's panel), as tall as its room.
+    private func moreDrawer(_ key: String, _ items: [CornerMoreItem]) -> some View {
+        CornerMoreDrawer(drawers: model.cornerDrawers, key: key, items: items,
+                         maxHeight: min(620, max(220, chromeGeometry.cornerPanelRoom ?? 620)))
+            .background(CornerPairStyle.publish("cornerPanel"))
     }
 
     // MARK: the Lattice corner (B6 s1)
@@ -14712,12 +14729,13 @@ extension WorkspacePlaceholder {
     /// ★ B6 s1 (his note 21, mockup #lat-setup / #lat-corner): "Should have the same bottom right corner as Topology: Settings |
     /// Lattice | ^" — the Settings chip, the Lattice run button and ⌃, with the fix line above while no lattice is set.
     var latticeCornerPair: some View {
-        CornerPair(geometry: chromeGeometry, open: setupPanelOpen ? "setup" : nil, fixLine: latticeFixLine) {
+        CornerPair(geometry: chromeGeometry, open: model.cornerDrawers.open, fixLine: latticeFixLine) {
             topologySetupChip
         } split: {
             latticeSplit
         } panel: {
             if setupPanelOpen { settingsPanel }
+            else if model.cornerDrawers.isOpen("latticeSplitMore") { moreDrawer("latticeSplitMore", latticeMoreItems) }   // ★ 11-22
         }
     }
 
@@ -14792,34 +14810,33 @@ extension WorkspacePlaceholder {
 
     /// Optimize (today's button, one tap) + ⌃: the Lattice run (today's Lattice button's action and gate).
     private var topologyOptimizeSplit: some View {
+        HStack(spacing: DSParts.cornerGap) {   // ★ LOOK PER SCREEN: §4.18, 12 pt apart
+            optimizeButtonView(lattice: false)   // ★ B3 (#362's note 1): Topology's Optimize is topology only
+            // ★ LOOK PER SCREEN: §4.6's 64 pt ⌃ · ★ his 11-22 (img 45): it opens its own drawer above the buttons
+            DSSplitButton(key: "topologySplitMore", open: model.cornerDrawers.isOpen("topologySplitMore")) {
+                model.cornerDrawers.toggle("topologySplitMore")
+            }
+        }
+        .background(CornerPairStyle.publish("optimizeSplit"))
+    }
+
+    /// Topology's ⌃ rows (★ his 11-22: its drawer's; the menu's two, their gates and taps).
+    private var topologyMoreItems: [CornerMoreItem] {
         let ok = canLatticeThis
         let summary = latticeThisSummary
         let marks = !ok && wallMarkingTapGoesSomewhere && LatticeJobIncludeGate.opensWallMarking(summary)
         let opensType = opensLatticeType(ok, summary)
         let thenLattice = optimizeThenLatticeOK
-        return HStack(spacing: DSParts.cornerGap) {   // ★ LOOK PER SCREEN: §4.18, 12 pt apart
-            optimizeButtonView(lattice: false)   // ★ B3 (#362's note 1): Topology's Optimize is topology only
-            DSSplitButton(key: "topologySplitMore") {   // ★ LOOK PER SCREEN: §4.6's 64 pt ⌃
-                // ★ B3 (app-map §3.3, #362's note 1): the one Topology run that carries the lattice
-                Button {
-                    if thenLattice { macNotAnswering = false; runCouldntFinish = false; requestRun(lattice: true) }
-                } label: {
-                    Text(TopologyRunCopy.optimizeThenLattice)
-                    Text(optimizeThenLatticeLine)
-                }
-                .disabled(!thenLattice)
-                .accessibilityIdentifier("topology-split-optimize-lattice")
-                Button {
-                    if ok { requestLatticeRun() } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }
-                } label: {
-                    Text("Lattice the part (no optimization)")
-                    Text(summary)
-                }
-                .disabled(!ok && !marks && !opensType)
-                .accessibilityIdentifier("topology-split-lattice")
-            }
-        }
-        .background(CornerPairStyle.publish("optimizeSplit"))
+        return [
+            // ★ B3 (app-map §3.3, #362's note 1): the one Topology run that carries the lattice
+            .action(TopologyRunCopy.optimizeThenLattice, line: optimizeThenLatticeLine, enabled: thenLattice,
+                    id: "topology-split-optimize-lattice") {
+                if thenLattice { macNotAnswering = false; runCouldntFinish = false; requestRun(lattice: true) }
+            },
+            .action("Lattice the part (no optimization)", line: summary, enabled: ok || marks || opensType, id: "topology-split-lattice") {
+                if ok { requestLatticeRun() } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }
+            },
+        ]
     }
 
     /// ★ B3 (U6, O2): why Topology's Optimize can't start, as the fix line says it — the same order the button's gate reads.
@@ -15709,84 +15726,65 @@ extension WorkspacePlaceholder {
     /// The lattice split: the Lattice run button, and ⌃ — ★ B6 s1 (note 21) its five, in the design's order: Lattice the original
     /// part · Optimize, then lattice · Lattice an optimized result › · Preview only · Export…
     var latticeSplit: some View {
+        HStack(spacing: DSParts.cornerGap) {   // §4.18, 12 pt apart
+            // ★ Organic cut 2 (his certify wizard): once every pop-up has gone through, his re-check question is asked here
+            if let w = model.certifyWalk, w.asksRecheck(on: project.id) { certifyRecheck } else { latticeRunButton }
+            // §4.6's 64 pt ⌃ · ★ his 11-22 (img 45): it opens its own drawer above the buttons (latticeMoreItems)
+            DSSplitButton(key: "latticeSplitMore", open: model.cornerDrawers.isOpen("latticeSplitMore")) {
+                model.cornerDrawers.toggle("latticeSplitMore")
+            }
+        }
+        .background(CornerPairStyle.publish("latticeSplit"))
+    }
+
+    /// The Lattice ⌃'s rows (★ his 11-22: its drawer's — the menu's items, gates and taps, in its order).
+    var latticeMoreItems: [CornerMoreItem] {
         let hasResults = acceptedVariantCount > 0
         let thenLattice = optimizeThenLatticeOK
         let results = latticeResultChoices
         // ★ B2 (Q3 (c)) → B6: what the lattice builds on ("on −35 %") is ⌃'s to say now, under the result it came from
         let builtOn = LatticeStageCopy.builtOn(achievedVolumeFraction: latticeVariantContext?.achievedVolumeFraction)
-        return HStack(spacing: DSParts.cornerGap) {   // §4.18, 12 pt apart
-            // ★ Organic cut 2 (his certify wizard): once every pop-up has gone through, his re-check question is asked here
-            if let w = model.certifyWalk, w.asksRecheck(on: project.id) { certifyRecheck } else { latticeRunButton }
-            DSSplitButton(key: "latticeSplitMore") {   // §4.6's 64 pt ⌃
-                if LatticeLayoutPreview.needsStress(project.lattice) {   // ★ his 11-20: "add a button option in the carrot"
-                    Button { runNewEngineStressCheck(force: true) } label: {
-                        Text(StressCheckCopy.menuTitle)
-                        Text(latticeSim.phase == .running ? StressCheckCopy.menuRunning : StressCheckCopy.menuLine)
-                    }
-                    .disabled(latticeSim.phase == .running)
-                    .accessibilityIdentifier("lattice-split-stress")
-                }
-                Button { requestLatticeRun() } label: {
-                    Text(LatticeSetupCopy.original)
-                    Text(latticeThisSummary)
-                }
-                .disabled(!canLatticeThis)
-                .accessibilityIdentifier("lattice-split-core")
-                Button {
-                    if thenLattice { macNotAnswering = false; runCouldntFinish = false; requestRun(lattice: true) }
-                } label: {
-                    Text(TopologyRunCopy.optimizeThenLattice)
-                    Text(optimizeThenLatticeLine)
-                }
-                .disabled(!thenLattice)
-                .accessibilityIdentifier("lattice-split-optimize")
-                if results.isEmpty {
-                    // no results yet: a greyed line (a submenu stays live in the menu even when it is disabled)
-                    Button {} label: {
-                        Text(LatticeSetupCopy.optimizedResult)
-                        Text(LatticeSetupCopy.noResults)
-                    }
-                    .disabled(true)
-                    .accessibilityIdentifier("lattice-split-result")
-                } else {
-                    Menu {
-                        ForEach(results, id: \.index) { r in
-                            Button { viewOriginal = true; openLatticePage(variantIndex: r.index) } label: {
-                                Text(r.title)
-                                if let why = r.why { Text(why) }
-                            }
-                            .disabled(!r.enabled)
-                        }
-                    } label: {
-                        Text(LatticeSetupCopy.optimizedResult)
-                        Text(builtOn ?? results.map(\.title).joined(separator: " \u{00B7} "))
-                    }
-                    .accessibilityIdentifier("lattice-split-result")
-                }
-                Divider()
-                Button(LatticeSetupCopy.previewOnly) {
-                    if showStrutPreview { showStrutPreview = false } else { armLatticePreview() }
-                }
-                .accessibilityIdentifier("lattice-split-preview")
-                // today's STL / 3MF export is on Results; this opens it (his tap — never by itself)
-                Button(LatticeSetupCopy.export) { viewOriginal = false }
-                    .disabled(!hasResults)
-                    .accessibilityIdentifier("lattice-split-export")
-                // ★ his ask 11-16: how the lattice view keeps up — a check mark on the one in force
-                Divider()
-                Picker(selection: $appSettings.latticeLivePreview) {
-                    Text(LatticePreviewMode.live).tag(true)
-                    Text(LatticePreviewMode.refresh).tag(false)
-                } label: { EmptyView() }
-                .pickerStyle(.inline)
-                .accessibilityIdentifier("lattice-split-preview-mode")
-                // ★ his ask 11-21: the quick stand-in (off) or the print file's own lattice (on), a check mark when on
-                Toggle(LatticePreviewMode.printAccurate, isOn: Binding(get: { appSettings.latticePrintAccurate },
-                                                                      set: { appSettings.latticePrintAccurate = $0; if newEngineOn { newEngineSettingsChanged() } }))
-                .accessibilityIdentifier("lattice-split-print-accurate")
-            }
+        var items: [CornerMoreItem] = []
+        if LatticeLayoutPreview.needsStress(project.lattice) {   // ★ his 11-20: "add a button option in the carrot"
+            items.append(.action(StressCheckCopy.menuTitle,
+                                 line: latticeSim.phase == .running ? StressCheckCopy.menuRunning : StressCheckCopy.menuLine,
+                                 enabled: latticeSim.phase != .running, id: "lattice-split-stress") { runNewEngineStressCheck(force: true) })
         }
-        .background(CornerPairStyle.publish("latticeSplit"))
+        items.append(.action(LatticeSetupCopy.original, line: latticeThisSummary, enabled: canLatticeThis, id: "lattice-split-core") {
+            requestLatticeRun()
+        })
+        items.append(.action(TopologyRunCopy.optimizeThenLattice, line: optimizeThenLatticeLine, enabled: thenLattice,
+                             id: "lattice-split-optimize") {
+            if thenLattice { macNotAnswering = false; runCouldntFinish = false; requestRun(lattice: true) }
+        })
+        // no results yet: a greyed line; with results, "›" opens them in place
+        items.append(.list(LatticeSetupCopy.optimizedResult,
+                           line: results.isEmpty ? LatticeSetupCopy.noResults
+                                : (builtOn ?? results.map(\.title).joined(separator: " \u{00B7} ")),
+                           enabled: !results.isEmpty, id: "lattice-split-result",
+                           results.map { r in
+                               CornerMoreItem.action(r.title, line: r.why, enabled: r.enabled, id: "lattice-split-result-\(r.index)") {
+                                   viewOriginal = true; openLatticePage(variantIndex: r.index)
+                               }
+                           }))
+        items.append(.divider("lattice-split-divider-run"))
+        items.append(.action(LatticeSetupCopy.previewOnly, id: "lattice-split-preview") {
+            if showStrutPreview { showStrutPreview = false } else { armLatticePreview() }
+        })
+        // today's STL / 3MF export is on Results; this opens it (his tap — never by itself)
+        items.append(.action(LatticeSetupCopy.export, enabled: hasResults, id: "lattice-split-export") { viewOriginal = false })
+        // ★ his ask 11-16: how the lattice view keeps up — a check mark on the one in force
+        items.append(.divider("lattice-split-divider-mode"))
+        items.append(.check(LatticePreviewMode.live, isOn: appSettings.latticeLivePreview, id: "lattice-split-preview-mode-live") {
+            appSettings.latticeLivePreview = true
+        })
+        items.append(.check(LatticePreviewMode.refresh, isOn: !appSettings.latticeLivePreview,
+                            id: "lattice-split-preview-mode-refresh") { appSettings.latticeLivePreview = false })
+        // ★ his ask 11-21: the quick stand-in (off) or the print file's own lattice (on)
+        items.append(.toggle(LatticePreviewMode.printAccurate, isOn: appSettings.latticePrintAccurate, id: "lattice-split-print-accurate") {
+            appSettings.latticePrintAccurate = $0; if newEngineOn { newEngineSettingsChanged() }
+        })
+        return items
     }
 
     // MARK: the Regions page (B1 list)

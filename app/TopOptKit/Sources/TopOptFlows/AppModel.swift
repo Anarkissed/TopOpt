@@ -123,6 +123,13 @@ public final class AppModel: ObservableObject {
         s.relay = s.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         return s
     }()
+    /// ★ his iPad notes 11-22 (img 45): the workspace corner's drawers, one open at a time (Settings, the ⌃'s) — here, never
+    /// on the workspace's stack (WorkspaceBodySizeTests).
+    public private(set) lazy var cornerDrawers: CornerDrawers = {
+        let d = CornerDrawers()
+        d.relay = d.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+        return d
+    }()
 
     // MARK: Cold-launch remote re-attach (handoff 119)
 

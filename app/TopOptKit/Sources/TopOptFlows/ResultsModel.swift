@@ -651,6 +651,13 @@ final class MaterialDensityTable: @unchecked Sendable {
 /// `acceptedCount >= 1`, so `tabs` is never empty).
 @MainActor
 public final class ResultsModel: ObservableObject {
+    /// ★ his iPad notes 11-22 (img 45): the ⌃'s drawer above the corner — here, never a byte on ResultsScreen
+    /// (WorkspaceBodySizeTests' ceiling).
+    public private(set) lazy var cornerDrawers: CornerDrawers = {
+        let d = CornerDrawers()
+        d.relay = d.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+        return d
+    }()
     /// Project name for the top chrome.
     public let projectName: String
     /// The run's material name (from materials.json), shown in the stress legend.
