@@ -14,6 +14,7 @@
 // Nothing blocking runs on the main thread: a record is built from values, encoded and appended on the log's own queue.
 import Foundation
 import Darwin
+import TopOptKit
 #if os(iOS)
 import os
 #endif
