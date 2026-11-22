@@ -19,6 +19,7 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+#include <unordered_map>
 
 namespace topopt::lattice_layout {
 
@@ -224,6 +225,59 @@ struct Boxes {
     b.n[0] = n[0]; b.n[1] = n[1]; b.n[2] = n[2];
     b.box.resize(box.size());
     return b;
+  }
+};
+
+// SPEED 11-22: the same samples on a 0.5 mm grid, for look-ups whose answer does not depend on the order samples are
+// visited. near_within hands on exactly the samples inside the cube of half-side R round q (the set Boxes::near_within
+// hands on), in another order.
+struct FineBoxes {
+  static constexpr double kCell = 0.5;
+  std::unordered_map<std::uint64_t, std::vector<Sample>> cells;
+  static bool cell_of(double v, long long& c) {
+    if (!std::isfinite(v)) return false;
+    const double q = std::floor(v / kCell);
+    if (std::fabs(q) > static_cast<double>((1LL << 20) - 2)) return false;
+    c = static_cast<long long>(q);
+    return true;
+  }
+  static std::uint64_t key(long long i, long long j, long long k) {
+    const auto f = [](long long v) { return static_cast<std::uint64_t>((v + (1LL << 20)) & 0x1FFFFF); };
+    return f(i) << 42 | f(j) << 21 | f(k);
+  }
+  // A sample off the grid's range (not finite, or farther than half a kilometre) is kept aside and read by every look-up.
+  std::vector<Sample> far;
+  void put(const Sample& s) {
+    long long i, j, k;
+    if (cell_of(s.p.x, i) && cell_of(s.p.y, j) && cell_of(s.p.z, k)) cells[key(i, j, k)].push_back(s);
+    else far.push_back(s);
+  }
+  static FineBoxes of(const Boxes& b) {
+    FineBoxes f;
+    std::size_t n = 0;
+    for (const auto& v : b.box) n += v.size();
+    f.cells.reserve(n / 4 + 16);
+    for (const auto& v : b.box)
+      for (const Sample& s : v) f.put(s);
+    return f;
+  }
+  template <class F>
+  void near_within(const Vec3& q, double R, F&& f) const {
+    const auto inside = [&](const Sample& s) {
+      return std::fabs(s.p.x - q.x) <= R && std::fabs(s.p.y - q.y) <= R && std::fabs(s.p.z - q.z) <= R;
+    };
+    for (const Sample& s : far) if (inside(s)) f(s);
+    long long i0, i1, j0, j1, k0, k1;
+    if (!cell_of(q.x - R, i0) || !cell_of(q.x + R, i1) || !cell_of(q.y - R, j0) || !cell_of(q.y + R, j1) ||
+        !cell_of(q.z - R, k0) || !cell_of(q.z + R, k1))
+      return;   // a look-up off the grid's range: only the far samples can be inside it
+    for (long long i = i0; i <= i1; ++i)
+      for (long long j = j0; j <= j1; ++j)
+        for (long long k = k0; k <= k1; ++k) {
+          const auto it = cells.find(key(i, j, k));
+          if (it == cells.end()) continue;
+          for (const Sample& s : it->second) if (inside(s)) f(s);
+        }
   }
 };
 
@@ -1304,7 +1358,7 @@ void Grower::settle() {
 void Grower::repeats() {
   const double near_mm = kRepeatMm + 0.5 * r_;
   std::vector<Line> out;
-  Boxes kept = boxes_.empty_like();
+  FineBoxes kept;   // SPEED 11-22: only order-free look-ups read it (dist_to: a minimum; the candidates: sorted)
   std::vector<Line> keep_lines;
   std::vector<std::array<char, 2>> split;   // per kept piece: its front, its back left by a dropped repeat
   auto dist_to = [&](const Vec3& q, std::size_t line) {
@@ -1320,12 +1374,13 @@ void Grower::repeats() {
   };
   // the ends that stand on or join into another strand now (ruling 3)
   std::vector<Vec3> joints;
+  const FineBoxes fine = FineBoxes::of(boxes_);   // SPEED 11-22: boxes_ does not change until the copies are kept
   for (std::size_t l = 0; l < lines_.size(); ++l) {
     const Line& L = lines_[l];
     if (L.pts.size() < 2) continue;
     for (const Vec3& e : {L.pts.front(), L.pts.back()}) {
       bool on = false;
-      boxes_.near_within(e, ds_ + 1e-6, [&](const Sample& x) {   // SPEED 11-22: own segment within 1e-6
+      fine.near_within(e, ds_ + 1e-6, [&](const Sample& x) {   // SPEED 11-22: own segment within 1e-6 (a yes/no)
         if (on || static_cast<std::size_t>(x.line) == l || !current(x)) return;
         const Line& O = lines_[static_cast<std::size_t>(x.line)];
         on = dist(e, closest_on(e, O.pts[static_cast<std::size_t>(x.seg)], O.pts[static_cast<std::size_t>(x.seg) + 1])) < 1e-6;
@@ -1487,13 +1542,14 @@ std::vector<Strand> Grower::strands() const {
     must[l].assign(lines_[l].pts.size(), 0);
     put[l].resize(lines_[l].pts.size() > 0 ? lines_[l].pts.size() - 1 : 0);
   }
+  const FineBoxes fine = FineBoxes::of(boxes_);   // SPEED 11-22
   for (std::size_t l = 0; l < nl; ++l) {
     const Line& A = lines_[l];
     if (A.pts.size() < 2) continue;
     must[l].front() = must[l].back() = 1;
     for (std::size_t i = 0; i < A.pts.size(); ++i) {
       const Vec3 v = A.pts[i];
-      boxes_.near_within(v, 1e-6 + ds_, [&](const Sample& s) {   // SPEED 11-22: own segment within 1e-6
+      fine.near_within(v, 1e-6 + ds_, [&](const Sample& s) {   // SPEED 11-22: own segment within 1e-6 (sorted after)
         if (static_cast<std::size_t>(s.line) == l || !current(s)) return;
         const Line& B = lines_[static_cast<std::size_t>(s.line)];
         const Vec3 a = B.pts[static_cast<std::size_t>(s.seg)], b = B.pts[static_cast<std::size_t>(s.seg) + 1];
@@ -1569,7 +1625,7 @@ Grower::Fate Grower::pass() {
   // A segment is still there when its middle lies on a bar (within the straightening's tolerance).
   const double tol = 0.25 * r_ + 1e-6;
   auto mark = [&](const Bars& bars, char value, char only) {
-    Boxes bb = boxes_.empty_like();
+    FineBoxes bb;   // SPEED 11-22: a yes/no per segment
     for (std::size_t i = 0; i < bars.bars.size(); ++i) {
       const Vec3 a = bars.bars[i].a, b = bars.bars[i].b;
       const int n = std::max(1, static_cast<int>(std::ceil(dist(a, b) / ds_)));
