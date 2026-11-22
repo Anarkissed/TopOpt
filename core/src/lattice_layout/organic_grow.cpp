@@ -204,6 +204,15 @@ struct Boxes {
         for (int i = i0; i <= i1; ++i)
           for (const Sample& s : box[(static_cast<std::size_t>(k) * n[1] + j) * n[0] + i]) f(s);
   }
+  // SPEED 11-22: the same samples in the same order, but only those inside the cube of half-side R round q (the boxes
+  // are 2 mm; most look-ups ask about a few tenths of a millimetre). For a test on the sample's own segment within a
+  // distance d with d + half a sample step <= R, the answer is the same as near's.
+  template <class F>
+  void near_within(const Vec3& q, double R, F&& f) const {
+    near(q, R, [&](const Sample& s) {
+      if (std::fabs(s.p.x - q.x) <= R && std::fabs(s.p.y - q.y) <= R && std::fabs(s.p.z - q.z) <= R) f(s);
+    });
+  }
   void clear() {
     for (auto& b : box) b.clear();
   }
@@ -1223,7 +1232,7 @@ void Grower::settle() {
       const Vec3 e = L.pts.back();
       if (edge_held(e) || at[key(e)].size() > 1) return false;
       bool on_other = false;
-      boxes_.near(e, ds_, [&](const Sample& s) {
+      boxes_.near_within(e, ds_, [&](const Sample& s) {   // SPEED 11-22: own segment within 1e-6
         if (on_other || s.line == static_cast<int>(l) || !current(s)) return;
         const Line& O = lines_[static_cast<std::size_t>(s.line)];
         on_other = dist(e, closest_on(e, O.pts[static_cast<std::size_t>(s.seg)], O.pts[static_cast<std::size_t>(s.seg) + 1])) < 1e-6;
@@ -1300,7 +1309,7 @@ void Grower::repeats() {
   std::vector<std::array<char, 2>> split;   // per kept piece: its front, its back left by a dropped repeat
   auto dist_to = [&](const Vec3& q, std::size_t line) {
     double best = std::numeric_limits<double>::infinity();
-    kept.near(q, near_mm + ds_, [&](const Sample& s) {
+    kept.near_within(q, near_mm + ds_, [&](const Sample& s) {   // SPEED 11-22: own segment, compared with near_mm
       if (static_cast<std::size_t>(s.line) != line) return;
       const Line& L = keep_lines[line];
       if (L.dead[static_cast<std::size_t>(s.seg)]) return;
@@ -1316,7 +1325,7 @@ void Grower::repeats() {
     if (L.pts.size() < 2) continue;
     for (const Vec3& e : {L.pts.front(), L.pts.back()}) {
       bool on = false;
-      boxes_.near(e, ds_ + 1e-6, [&](const Sample& x) {
+      boxes_.near_within(e, ds_ + 1e-6, [&](const Sample& x) {   // SPEED 11-22: own segment within 1e-6
         if (on || static_cast<std::size_t>(x.line) == l || !current(x)) return;
         const Line& O = lines_[static_cast<std::size_t>(x.line)];
         on = dist(e, closest_on(e, O.pts[static_cast<std::size_t>(x.seg)], O.pts[static_cast<std::size_t>(x.seg) + 1])) < 1e-6;
@@ -1331,7 +1340,7 @@ void Grower::repeats() {
       if (L.dead[s]) continue;   // the path drops it anyway
       const Vec3 a = L.pts[s], b = L.pts[s + 1];
       std::vector<std::size_t> cand;
-      kept.near(a, near_mm + ds_, [&](const Sample& x) {
+      kept.near_within(a, near_mm + ds_, [&](const Sample& x) {   // SPEED 11-22: a repeat of a lies within near_mm
         const std::size_t l = static_cast<std::size_t>(x.line);
         if (std::find(cand.begin(), cand.end(), l) == cand.end()) cand.push_back(l);
       });
@@ -1484,7 +1493,7 @@ std::vector<Strand> Grower::strands() const {
     must[l].front() = must[l].back() = 1;
     for (std::size_t i = 0; i < A.pts.size(); ++i) {
       const Vec3 v = A.pts[i];
-      boxes_.near(v, 1e-6 + ds_, [&](const Sample& s) {
+      boxes_.near_within(v, 1e-6 + ds_, [&](const Sample& s) {   // SPEED 11-22: own segment within 1e-6
         if (static_cast<std::size_t>(s.line) == l || !current(s)) return;
         const Line& B = lines_[static_cast<std::size_t>(s.line)];
         const Vec3 a = B.pts[static_cast<std::size_t>(s.seg)], b = B.pts[static_cast<std::size_t>(s.seg) + 1];
@@ -1571,7 +1580,7 @@ Grower::Fate Grower::pass() {
         if (f.seg[l][k] != only) continue;
         const Vec3 m = mul(add(lines_[l].pts[k], lines_[l].pts[k + 1]), 0.5);
         bool on = false;
-        bb.near(m, tol + ds_, [&](const Sample& x) {
+        bb.near_within(m, tol + ds_, [&](const Sample& x) {   // SPEED 11-22: the bar's own samples, within tol
           const Bar& b = bars.bars[static_cast<std::size_t>(x.line)];
           on = on || dist(m, closest_on(m, b.a, b.b)) <= tol;
         });
