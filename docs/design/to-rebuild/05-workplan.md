@@ -1,6 +1,6 @@
 # TO rebuild: the workplan
 
-Status 2026-11-22: APPROVED by the reviewer (ruling 06:18Z) with the solver prompt corrected below, which the reviewer checks before any helper starts. The maintainer's OK on helpers: "Yes two helpers are good as long as they're Opus 5.5". Each helper gets its own small channel (reviewer, TOReview, the helper) and never posts in #TORebuildGroup.
+Status 2026-11-22: APPROVED by the reviewer (rulings 06:18Z and 06:48Z); both helper prompts below are approved as they stand. Helpers start after the stage 0 move is released and the maintainer has created their channels. The maintainer's OK on helpers: "Yes two helpers are good as long as they're Opus 5.5". Each helper gets its own small channel (reviewer, TOReview, the helper) and never posts in #TORebuildGroup.
 
 ## 1. Who does what
 
@@ -172,7 +172,11 @@ WHAT YOU BUILD (ledger E-05, B-05, B-06, S-05, E-01, and the mixed-precision par
 3. The eleven process-wide solver setters become one settings value passed in; a result must not depend on which solve ran first (test K).
 4. The sensitivity loop in the shared solve file runs on all cores.
 5. The single-precision V-cycle: the switch does nothing on the production path today (guard at multigrid.cpp:2925; ledger K). Either delete that path or revive it with a looser inner tolerance and measure it; your table decides.
-The solver is shared with Flexible: nothing merges without the reviewer's sign-off, which TOReview asks for. Keep every Flexible test green.
+The solver is shared with Flexible, through the app bridge: app/TopOptKit/Sources/TopOptBridge/flexible_squish_fe.cpp calls fea_solve_mgcg_matfree, fea_solve_cg_matfree (when only Jacobi is wanted), fea_set_matfree_threads (one thread for the display solve) and fea_matfree_reset_mg_stagnation_latch. Its hard case is the M2 stand, all lattice, E from 0.16 to 34 MPa (read that file's header; do not edit the file).
+- Those four entry points keep their signatures and their meaning. Any change you need is named to TOReview in one line FIRST, and goes to #362; you do not make it yourself.
+- Add one core test, your first commit, that solves the bridge's way (one thread, latch reset, MG-CG, then Jacobi-only) on a soft graded E field like the M2 stand's; green before and after every change.
+- The app-side Flexible tests (FlexibleBatchM2Tests, FlexibleBatchMStressTests, FlexibleBatchMVerifyTests and the other FlexibleBatchM* tests) run in #362's gate, not yours. Name them in your handoff so #362 runs them.
+Nothing merges without the reviewer's sign-off, which TOReview asks for.
 
 YOUR FILES
 core/src/fea/multigrid.cpp, matfree.cpp, fea_matfree.hpp, geneo.*, recycle.*, contact.cpp, hex_element.cpp, the solver-settings declarations in core/include/topopt/fea.hpp; core/src/simp/to_solve.cpp (the shared solve pieces moved out of simp.cpp in stage 0); your new tests; core/CMakeLists lines for your new files only.
