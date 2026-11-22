@@ -41,7 +41,9 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// ★ His picks 11-21 (the preview-speed research: "Let's do this one. Absolutely."): the Organic lay under way, for the
     /// Lattice button's ring and count-down. The Draft first (the last lattice dimmed meanwhile), then the exact lattice with
     /// the Draft on screen, marked. nil: no Organic lay going.
-    @Published public private(set) var layProgress: LayProgress?
+    @Published public private(set) var layProgress: LayProgress? {
+        didSet { layTimingMoved(from: oldValue) }   // ★ his 11-22: each lay's time and what went in, logged
+    }
     public struct LayProgress: Equatable, Sendable {
         public var quality: LatticeLayoutSession.Organic.Quality
         public var started: Date
@@ -314,6 +316,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         sessionTensorKey = nil; organicLimits = nil; organicQuality = nil; organicNumbers = nil   // ★ Organic cut 1
         organicLaidGroups = nil   // ★ cut 2
         bars = nil; laid = nil; problem = nil; timing = nil; laying = false; places = []
+        layTimingEnds(.cancelled, "the preview was closed")   // ★ his 11-22 (GenerationTimingLog)
         layProgress = nil; shownRestored = false   // ★ his pick 11-21 (what was remembered stays, for this part)
     }
 
@@ -426,8 +429,10 @@ public final class LatticeLayoutPreview: ObservableObject {
         organicLaidGroups = r.quality == .exact ? r.groups : nil; organicRefusals = []; organicWallVerdicts = r.wallVerdicts
         organicAutoLimits = r.autoLimits; organicGroupLimits = r.groupLimits
         shownWalls = r.walls; shownRestored = true
+        layTimingEnds(.cancelled, "a remembered lattice was shown")   // ★ his 11-22 (GenerationTimingLog)
         laying = false; layProgress = nil
         Self.remembersShown += 1
+        layTimingRestored(r)
         return true
     }
 
@@ -457,6 +462,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         groupNamesAtLay = Dictionary(p.latticeAreaGroups.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
         typeAtLay = Self.organic(p.lattice) ? Self.organicButtonType(p) : ""
         inputsAtLay = p.importedFile.map { Self.layInputs(p, path: $0.path, s, stress: stress) }
+        timingInputsAtLay = GenerationTimingLog.Inputs.of(p)   // ★ his 11-22: what went in (values only; encoded off the main thread)
     }
 
     /// The print file's stress for a remembered lattice: the session's tensor made as that lay made it.
@@ -629,10 +635,16 @@ public final class LatticeLayoutPreview: ObservableObject {
 
     private func lay(path: String, _ s: LatticeLayoutSession.Settings, draft: Bool = false) async {
         Self.laysStarted += 1
+        layTimingBegins(Self.organic(latticeAtLay) && draft ? .draft : .exact)   // ★ his 11-22: the lay really begins
         do {
+            var t0 = Date()
             if let t = limitsTask { await t.value }   // ★ his 11-22: the page's Auto numbers first (one session, never two)
+            layStages["limitsWaitMS"] = Self.ms(since: t0)
             guard !Task.isCancelled, let session = try await openSession(path: path) else { return }
+            t0 = Date()
             sessionStressKey = try await Self.give(stress, to: session, holding: sessionStressKey)
+            layStages["stressGiveMS"] = Self.ms(since: t0)
+            layStages["openMS"] = openMS
             if Self.organic(latticeAtLay) {   // ★ Organic cut 1: the weave's own lay
                 try await layOrganic(session, path: path, s, draft: draft)
                 return
@@ -646,6 +658,7 @@ public final class LatticeLayoutPreview: ObservableObject {
             laid = LatticeLayoutColours.Laid(r, token: token)   // ★ Install 3
             timing = Timing(openMS: openMS, readMS: r.msRead, cellsMS: r.msCells, barsMS: r.msBars, bars: r.barCount)
             problem = r.barCount == 0 ? Self.noFitLine : nil
+            layStages["readMS"] = r.msRead; layStages["cellsMS"] = r.msCells; layStages["barsMS"] = r.msBars   // ★ his 11-22
             laying = false; layProgress = nil
             layWallS[timeKey(path, .exact)] = (openMS + r.msRead + r.msCells + r.msBars) / 1000
             if solidWanted { await addMap() }
@@ -680,13 +693,16 @@ public final class LatticeLayoutPreview: ObservableObject {
                             afterDraft: Bool = false) async throws {
         if afterDraft {   // ★ his pick 11-21: the Draft is on screen, marked; the exact lattice is made
             layProgress = LayProgress(quality: .exact, started: Date(), expectedS: layWallS[timeKey(path, .exact)], draftShown: true)
+            layTimingBegins(.exact)   // ★ his 11-22: the Draft's line is written; the exact lattice's begins
         }
         // ★ Auto's numbers first, measured by the engine before any lay or stress (his iPad notes 11-18: the fields showed
         // 0): the whole part's and each group's (E4: the union of its areas), once per "where" and line
         let weave = s.regions.filter { $0.weave && !$0.noLattice }.map(\.id)
         var byGroup: [UUID: [Int32]] = [:]
         for id in weave { if let g = groupsAtLay[id] { byGroup[g, default: []].append(id) } }
+        var t0 = Date()
         guard try await measure(session, s, groups: groupsAtLay) else { return }
+        layStages["measureMS"] = Self.ms(since: t0)   // ★ his 11-22: each step's time, as it comes
         guard let f = stress.field, !f.stressTensor.isEmpty else {
             problem = Self.organicNeedsStressLine; bars = nil; laying = false; layProgress = nil; return
         }
@@ -695,8 +711,10 @@ public final class LatticeLayoutPreview: ObservableObject {
             bars = nil; laying = false; layProgress = nil; return
         }
         if sessionTensorKey != stress.key {
+            t0 = Date()
             try await session.setTensor(voigt: f.stressTensor, nx: f.nx, ny: f.ny, nz: f.nz, origin: f.origin, spacingMM: f.spacingMM)
             sessionTensorKey = stress.key
+            layStages["setTensorMS"] = Self.ms(since: t0)
         }
         // ★ E7, per group (his 11-18: "whole part ONLY if the whole part is latticed. Otherwise, it is per Group"): each
         // group's own settings (Auto: Look alone), its own limits moved by its own Look
@@ -738,7 +756,9 @@ public final class LatticeLayoutPreview: ObservableObject {
             }
         }
         if !walls.isEmpty || syntheticOn {
+            t0 = Date()
             let rep = try await session.synthetic(s, groups: groups, walls: walls)
+            layStages["syntheticMS"] = Self.ms(since: t0)
             guard !Task.isCancelled else { return }
             syntheticOn = !walls.isEmpty
             if !rep.refused.isEmpty { return refuse(rep.refused, groupIDs) }
@@ -746,26 +766,34 @@ public final class LatticeLayoutPreview: ObservableObject {
             for (id, dead) in rep.withoutStress { if let k = keysAtLay[id] { verdicts[k] = dead } }
             organicWallVerdicts = verdicts
         }
+        t0 = Date()
         let r = try await session.layOrganic(s, groups: groups)
+        layStages["layWallMS"] = Self.ms(since: t0)   // ★ his 11-22: the engine's own times, as they come
+        layStages["layMS"] = r.ms; layStages["traceMS"] = r.msTrace
+        layStages["readMS"] = r.layout.msRead; layStages["barsMS"] = r.layout.msBars; layStages["strands"] = Double(r.strands)
         guard !Task.isCancelled else { return }
         if !r.refused.isEmpty { organicLaidGroups = nil; return refuse(r.refused, groupIDs) }
         organicRefusals = []
         // ★ cut 2: the groups the EXACT lay laid (the file is that lattice); a draft is not what will be made
         organicLaidGroups = r.quality == .exact ? groups : nil
         token &+= 1
+        t0 = Date()
         let seg = Self.segments(r.runs)
+        layStages["segmentsMS"] = Self.ms(since: t0)
         // ★ his 11-19 rule ("The drawing follows the print file. Always."): every vine, Grown and the net skin too, as the
         // print file's tubes make them (built off the main thread), cut flat where they reach the part's surface (his 11-20
         // skin note: the file trims every tube to the part)
         let runs = r.runs, held = r.flatEnds   // ★ OS1 B: the rounded ends the print check held flat (Exact)
         let known = cutSurface?.path == path ? cutSurface?.surface : nil
         let mesh = known == nil ? cutMesh.map { ($0.vertices, $0.indices, $0.faceIDs) } : nil
+        t0 = Date()
         let (vines, surface) = await Task.detached(priority: .userInitiated) { () -> (OrganicVineShape, OrganicVineShape.CutSurface?) in
             var v = OrganicVineShape.tubes(runs: runs, heldFlat: held)
             let surface = known ?? mesh.map { OrganicVineShape.CutSurface(vertices: $0.0, indices: $0.1, faceIDs: $0.2) }
             if let surface { v.cut(runs: runs, surface: surface) }
             return (v, surface)
         }.value
+        layStages["vinesMS"] = Self.ms(since: t0)   // ★ his 11-22: the app's own step (tubes + cut), timed apart
         guard !Task.isCancelled else { return }
         if known == nil, let surface { cutSurface = (path, surface); cutMesh = nil }
         var drawn = LatticeLayoutBarsInputs(token: token, bars: seg.bars, solid: nil, flags: seg.flags)
@@ -813,6 +841,60 @@ public final class LatticeLayoutPreview: ObservableObject {
         let n = NumberFormatter.localizedString(from: NSNumber(value: struts), number: .decimal)
         return String(format: "Organic %@ \u{00B7} %@ \u{00B7} laid in %.1f s \u{00B7} %@ struts", mode.title,
                       draft ? "Draft" : "Exact", ms / 1000, n)
+    }
+
+    // MARK: ★ his ask 11-22: "prints the time it took and what changes occurred for each generation" (GenerationTimingLog)
+
+    /// The lay under way's line (tied to the ring it shows), its steps' times, and what it was laid from.
+    private var layRecord: (pending: GenerationTimingLog.Pending, progress: Date)?
+    private var layStages: [String: Double] = [:]
+    private var timingInputsAtLay = GenerationTimingLog.Inputs()
+
+    static func ms(since t: Date) -> Double { Date().timeIntervalSince(t) * 1000 }
+
+    /// A lay really begins (after Live preview's wait): its line opens, tied to the ring the button shows.
+    private func layTimingBegins(_ q: LatticeLayoutSession.Organic.Quality) {
+        guard let p = layProgress else { return }
+        layTimingEnds(.cancelled, "a newer lay began")
+        var i = timingInputsAtLay
+        i.values["quality"] = .text(q == .draft ? "draft" : "exact")
+        let waited = Date().timeIntervalSince(p.started)
+        if waited > 0.05 { i.values["waitedBeforeS"] = .number(waited) }   // Live preview's half second, the Draft before it
+        if let e = p.expectedS { i.values["expectedS"] = .number(e) }
+        layStages = [:]
+        layRecord = (GenerationTimingLog.shared.begin(q == .draft ? .draft : .exact, inputs: i), p.started)
+    }
+
+    /// The ring moved on: the lay it belonged to ended — the exact lattice following its Draft (done), a newer change
+    /// (cancelled), or nothing laying any more (done, or failed with the page's own line).
+    private func layTimingMoved(from old: LayProgress?) {
+        guard let r = layRecord, let old, old.started == r.progress, layProgress?.started != old.started else { return }
+        layRecord = nil
+        let outcome: GenerationTimingLog.Outcome, reason: String?
+        if let new = layProgress {
+            (outcome, reason) = old.quality == .draft && new.quality == .exact && new.draftShown ? (.done, nil) : (.cancelled, "a newer change")
+        } else if bars == nil, let p = problem {
+            (outcome, reason) = (.failed, p)
+        } else {
+            (outcome, reason) = (.done, problem)
+        }
+        GenerationTimingLog.shared.end(r.pending, outcome, reason: reason, struts: outcome == .done ? timing?.bars : nil,
+                                       stages: layStages)
+    }
+
+    /// The lay under way stopped for a reason the ring cannot tell (closed, a remembered lattice shown instead).
+    private func layTimingEnds(_ outcome: GenerationTimingLog.Outcome, _ why: String) {
+        guard let r = layRecord else { return }
+        layRecord = nil
+        GenerationTimingLog.shared.end(r.pending, outcome, reason: why, stages: layStages)
+    }
+
+    /// A lattice made before, shown again with no lay: a "restored" line, no lay time.
+    private func layTimingRestored(_ r: Remembered) {
+        var i = timingInputsAtLay
+        i.values["quality"] = .text(r.quality == .draft ? "draft" : "exact")
+        let p = GenerationTimingLog.shared.begin(.restored, inputs: i)
+        GenerationTimingLog.shared.end(p, .done, struts: r.struts, stages: ["layMS": 0])
     }
 
     /// ★ Organic cut 1, the memory gate: an Exact lay of his stand peaked at 498 MB (Grown) and 186 MB (Traced) (LatticeReview's

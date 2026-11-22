@@ -116,6 +116,19 @@ struct LatticeSampleView: View {
     /// Test hook (FlexibleSaid.recording): each "Built in" label shown.
     nonisolated(unsafe) static var recordedBuilt: [String] = []
 
+    /// ★ his 11-22 (GenerationTimingLog): what the sample was built from.
+    static func timingInputs(_ i: Inputs) -> GenerationTimingLog.Inputs {
+        var t = GenerationTimingLog.Inputs()
+        t.part = .init(file: i.shape == .cells ? "Sample: cells (40 mm cube)" : "Sample: part")
+        if let o = i.organic { t.organic = ["Sample": o] }
+        t.values = ["latticeType": .text(i.organic.map { "Organic " + $0.modeValue.title } ?? i.typeName),
+                    "topology": .text(i.topology), "cellMM": .number(i.cellMM), "beadMM": .number(i.beadMM),
+                    "rhoLo": .number(i.rhoLo), "rhoHi": .number(i.rhoHi), "layerMM": .number(i.layerMM),
+                    "coverMM": .number(i.coverMM), "aesthetic": .flag(i.aesthetic),
+                    "partStruts": .text(i.partStruts.map { String($0) }.joined(separator: ", "))]
+        return t
+    }
+
     var body: some View {
         ZStack(alignment: .bottom) {
             DS.Color.background.color
@@ -213,6 +226,8 @@ struct LatticeSampleView: View {
         try? await Task.sleep(nanoseconds: Self.settleNanos)
         guard !Task.isCancelled else { Self.say(tag, "cancelled in the beat"); return }
         let builder = LatticeSampleBuilder.shared
+        let log = GenerationTimingLog.shared, rec = log.begin(.sample, inputs: Self.timingInputs(i))   // ★ his 11-22
+        defer { log.end(rec, .cancelled, reason: "the page moved on") }   // (a build that ended said so first)
         let t = builder.ticket()
         // ★ the viewer's mesh is made on the builder's queue too: for the sample part's ~330 k triangles it held the main
         // thread for seconds (traced 11-10, debug build), a freeze on his iPad each time the sample changed
@@ -225,10 +240,12 @@ struct LatticeSampleView: View {
             }
         } onCancel: { builder.retire(t) }
         Self.say(tag, "ticket \(t): \(built == nil ? "skipped" : "built")\(Task.isCancelled ? ", cancelled" : "")")
+        if built == nil { log.discard(rec) }   // skipped before it began: no line
         guard let r = built, !Task.isCancelled else { return }
         switch r {
         case .success(let made):
             let block = made.block, m = made.mesh
+            log.end(rec, .done, stages: ["triangles": Double(block.mesh.indices.count / 3)])
             mesh = m
             Self.say(tag, "mesh up (\(block.mesh.indices.count / 3) triangles)")
             camera.reframe(m.bounds)
@@ -237,6 +254,7 @@ struct LatticeSampleView: View {
                 ? Self.cellsCaption(receiptJSON: block.receiptJSON, typeName: i.typeName, densityHeld: block.densityHeld)
                 : Self.caption(receiptJSON: block.receiptJSON, typeName: i.typeName, densityHeld: block.densityHeld)
         case .failure(let e):
+            log.end(rec, .failed, reason: e.localizedDescription)
             mesh = nil; failed = true
             caption = "The engine can't build this type's sample: \(e.localizedDescription)"
         }
@@ -258,6 +276,12 @@ struct LatticeSampleView: View {
         guard !i.partStrutsPending else { return }   // ★ his 11-22: "Building the sample…" until the part's numbers are in
         try? await Task.sleep(nanoseconds: Self.settleNanos)
         guard !Task.isCancelled else { return }
+        // ★ his 11-22: the sample's line in the timing log, with each step's time (a build that ends says so first)
+        let log = GenerationTimingLog.shared, rec = log.begin(.sample, inputs: Self.timingInputs(i))
+        var stages: [String: Double] = [:]
+        var t0 = Date()
+        func step(_ name: String) { stages[name] = Date().timeIntervalSince(t0) * 1000; t0 = Date() }
+        defer { log.end(rec, .cancelled, reason: "the page moved on", stages: stages) }
         do {
             let cube = i.shape == .cells
             let body = try TopOptKit.latticeSampleBody(cube: cube)
@@ -265,6 +289,7 @@ struct LatticeSampleView: View {
             try MeshExport.binarySTL(vertices: body.vertices, indices: body.indices, header: Data()).write(to: url)
             let session = try await LatticeLayoutSession.open(path: url.path)
             defer { session.close() }
+            step("openMS")
             var s = LatticeLayoutSession.Settings()
             s.beadMM = i.beadMM > 0 ? i.beadMM : 0.45
             s.minStrutLines = 2
@@ -277,6 +302,7 @@ struct LatticeSampleView: View {
             if LatticeOrganicLook.finishWired { r.finish = LatticeLayoutPreview.organicFinish(look, LatticeSettings(), coverMM: i.coverMM) }
             s.regions = [r]
             var lim = try await session.sweepLimits(s, regions: [1], lineMM: s.beadMM).map(LatticeOrganicLook.Limits.init)
+            step("limitsMS")
             if i.partStruts.count == 3, var l = lim {   // ★ his pick 11-20: the group's struts, as his part gets them
                 l.strutLowerMM = i.partStruts[0]; l.strutUpperMM = i.partStruts[1]; l.strutAutoMM = i.partStruts[2]
                 lim = l
@@ -286,8 +312,11 @@ struct LatticeSampleView: View {
             ask.quality = .exact
             let groups = [LatticeLayoutSession.OrganicGroup(regions: [1], ask: ask)]
             let made = try await session.synthetic(s, groups: groups, walls: [(region: 1, foci: 1)], fromEmpty: true)
+            step("syntheticMS")
             if !made.refused.isEmpty { throw LatticeRefused(refusals: made.refused) }
             let laid = try await session.layOrganic(s, groups: groups)
+            step("layWallMS")
+            stages["layMS"] = laid.ms; stages["traceMS"] = laid.msTrace; stages["strands"] = Double(laid.strands)
             if !laid.refused.isEmpty { throw LatticeRefused(refusals: laid.refused) }
             guard !Task.isCancelled else { return }
             let seg = LatticeLayoutPreview.segments(laid.runs)
@@ -298,8 +327,11 @@ struct LatticeSampleView: View {
             let runs = laid.runs
             let (bv, bi) = (body.vertices, body.indices)
             // off the main thread, but IN this task (never detached): leaving the page cancels it with the rest
+            t0 = Date()
             bars.vines = await Self.sampleVines(runs: runs, vertices: bv, indices: bi, heldFlat: laid.flatEnds)
+            step("vinesMS")
             guard !Task.isCancelled else { return }
+            log.end(rec, .done, struts: seg.count, stages: stages)
             bars.lightFrom = LatticeLayoutPreview.organicLightFrom(grown: look.modeValue == .grown, netFrom: seg.lightFrom,
                                                                    count: seg.count)
             let m = ViewerMesh(vertices: body.vertices, indices: body.indices,
@@ -319,6 +351,7 @@ struct LatticeSampleView: View {
         } catch is CancellationError {
         } catch {
             guard !Task.isCancelled else { return }   // the page moved on: nothing to say
+            log.end(rec, .failed, reason: (error as? TopOptError)?.message ?? "\(error)", stages: stages)
             mesh = nil; organicBars = nil; failed = true
             // his 11-20: a centred pop-up in plain English; ★ his 11-22: "An error should always tell what's wrong and how
             // to fix it. Always." — a refusal says which setting, what it allows and the way out

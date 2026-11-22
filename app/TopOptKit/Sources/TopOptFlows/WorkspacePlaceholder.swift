@@ -2065,6 +2065,8 @@ public struct WorkspacePlaceholder: View {
     private func launchFileRun(_ request: RunRequest, job: LatticeFileJob.ForPart, strengthJob: Data?, config: RemoteRunnerConfig?,
                                organic: Bool = false) {
         runCouldntFinish = false; lastRunWasLattice = true   // ★ B1 (O1)
+        GenerationTimingLog.shared.printFileRunBegins(.of(project), ranOn: config != nil ? GenerationTimingLog.aMac
+                                                                                         : GenerationTimingLog.thisDevice)   // ★ 11-22
         let density = model.densityGCm3(for: project.material)
         // the old run's runner stays the run's own: this one is set for this start only (`start` takes it as it begins)
         let before = run.runner
@@ -3661,6 +3663,7 @@ public struct WorkspacePlaceholder: View {
             // A run that FAILED produced nothing, so its inputs never count as "already run": Optimize stays live for Try
             // again (the stall card's Try Again re-entered startRun and met the same-inputs grey-out — a dead button).
             if ph == .failed { lastRunRequest = nil }
+            GenerationTimingLog.shared.printFileRunMoved(ph, outcome: run.outcome, failure: run.failure.map { "\($0)" })   // ★ 11-22
             // ★ Organic cut 2 (his certify wizard): an Organic part that does not certify opens on Results, where it is walked through
             // ★ his 11-21 ("have it spit out an actual result in the app - because NOTHING happens in app"): every Lattice run
             // that lands opens its result on Results (the Lattice stage has no landed-run notice)

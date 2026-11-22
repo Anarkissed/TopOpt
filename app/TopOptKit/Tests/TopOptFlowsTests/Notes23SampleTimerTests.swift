@@ -43,9 +43,11 @@ final class Notes23SampleTimerTests: XCTestCase {
     /// the sample's foot (never across the screen).
     @MainActor
     func testTheSampleThenSaysHowLongItTook() throws {
-        let was = FlexibleSaid.recording
+        let was = FlexibleSaid.recording, logDir = GenerationTimingLog.shared.directory
         FlexibleSaid.recording = true
-        defer { FlexibleSaid.recording = was }
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("timing-\(UUID().uuidString)")
+        GenerationTimingLog.shared.directory = dir
+        defer { FlexibleSaid.recording = was; GenerationTimingLog.shared.directory = logDir; try? FileManager.default.removeItem(at: dir) }
         for size in [AppBuildHost.landscape13, CGSize(width: 820, height: 1180)] {
             LatticeSampleView.recordedBuilt = []
             let pr = Probe()
@@ -62,6 +64,13 @@ final class Notes23SampleTimerTests: XCTestCase {
             XCTAssertTrue(cap.insetBy(dx: -0.5, dy: -0.5).contains(built), "\(size): ★ inside the caption's capsule \(built) \(cap)")
             XCTAssertLessThan(cap.width, size.width - 2 * DS.Space.l, "\(size): never a line across the screen")
         }
+        // ★ his 11-22 (GenerationTimingLog): each sample built is one "sample" line, done, with what it was built from
+        GenerationTimingLog.shared.flush()
+        let lines = GenerationTimingLog.shared.records().filter { $0["kind"] as? String == "sample" }
+        XCTAssertEqual(lines.count, 2, "★ one line per sample built: \(lines.map { $0["outcome"] ?? "?" })")
+        XCTAssertTrue(lines.allSatisfy { $0["outcome"] as? String == "done" })
+        XCTAssertEqual(((lines.first?["inputs"] as? [String: Any])?["values"] as? [String: Any])?["topology"] as? String, "octet")
+        XCTAssertNotNil((lines.first?["stages"] as? [String: Any])?["triangles"])
     }
     #endif
 }
