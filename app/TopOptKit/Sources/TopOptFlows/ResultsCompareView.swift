@@ -276,6 +276,7 @@ struct ResultsCompareView: View {
                                 .foregroundStyle((t == detailsTab ? DS.Color.textPrimary : DS.Color.textSecondary).color)
                                 .padding(.horizontal, DS.Space.m).frame(height: 36)
                                 .background(Capsule().fill(t == detailsTab ? DS.Color.fillSubtle.color : Color.clear))
+                                .contentShape(Capsule())   // ★ his 11-22 (img 46): the whole segment takes the tap, not only its glyph
                         }
                         .buttonStyle(.plain)
                     }

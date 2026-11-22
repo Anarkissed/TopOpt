@@ -558,7 +558,8 @@ public struct SelectionsList: View {
             .buttonStyle(.plain)
             .accessibilityIdentifier("\(idPrefix)-sel-group-\(g.id.uuidString)")
             // ★ his 11-22: hold the name to rename the group (the full keyboard)
-            .modifier(RenameOnHold(name: g.name, key: "\(idPrefix)-sel-group-\(g.id.uuidString)", rename: { renameGroup(g.id, $0) }))
+            .modifier(RenameOnHold(name: g.name, key: "\(idPrefix)-sel-group-\(g.id.uuidString)", rename: { renameGroup(g.id, $0) },
+                                   field: false))   // ★ his 11-22 (img 42): the field covers the whole line (below)
             if let accessory { accessory }
             if let toggleEye {
                 let hidden = isHidden(g.id)
@@ -590,6 +591,8 @@ public struct SelectionsList: View {
             }
         }
         .padding(.leading, toggleOpen == nil ? DS.Space.l : DS.Space.xs).padding(.trailing, DS.Space.xs)
+        // ★ his 11-22 (img 42-43): one box over the whole line while renaming — the name, its icons, the eye and the trash hidden
+        .modifier(RenameField(name: g.name, key: "\(idPrefix)-sel-group-\(g.id.uuidString)", rename: { renameGroup(g.id, $0) }))
         .background(publish("selGroup-\(g.id.uuidString)"))
     }
 
