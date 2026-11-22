@@ -1903,6 +1903,7 @@ public struct WorkspacePlaceholder: View {
         // ★ B2 (U16): the top lane's notifications keep clear of every control the page publishes
         .laneControls(laneControls)
         .environment(\.latticeTurning, latticeTurning && !LatticePreviewMode.controlPageFollowsCamera)   // ★ his pick 11-16 (A)
+        .cornerTapCloses(model.cornerDrawers)   // ★ his 11-22: a tap anywhere outside the open corner drawer closes it
     }
 
     /// ★ B10: the project's name, asked in the §4.11 name sheet (it was a system alert).
@@ -1933,6 +1934,7 @@ public struct WorkspacePlaceholder: View {
                                      size: gizmoSize)
                     .latticeBandChipKeepOut()
                     .background(DSParts.publish("orientationGizmo"))   // ★ B10: the corner's panel keeps off it (B10SweepHostedTests)
+                    .closesCornerDrawersOnTouch(model.cornerDrawers)   // ★ his 11-22: a touch on the view cube closes the open drawer
             }
             Spacer()
         }

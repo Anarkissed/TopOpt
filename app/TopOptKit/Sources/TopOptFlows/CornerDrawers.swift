@@ -28,6 +28,9 @@ public final class CornerDrawers: ObservableObject {
     @Published public var expanded: String?
     /// Its changes, passed on to the model that holds it (the page observes that model).
     var relay: AnyCancellable?
+    /// ★ his 11-22 (2): where a tap leaves the open drawer alone — the drawer itself and the corner's own chip and ⌃
+    /// (global frames, from the page's published frames; CornerTapCloser). Not published: nothing redraws for it.
+    var keepFrames: [CGRect] = []
 
     public init() {}
 
