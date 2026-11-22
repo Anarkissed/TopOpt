@@ -114,6 +114,11 @@ public final class LibraryModel: ObservableObject {
     /// The version each new folder was made FROM (a draft, "New draft from vN"), until it is filed — so it
     /// is numbered from that version (his decision 11: v4 → v4.1).
     private var pendingParents: [UUID: UUID] = [:]
+    /// ★ His iPad notes 11-22 (decision 2): the versions running now (AppModel's `runningIDs`). A running version's results
+    /// never clear a Compare pick until its run is done.
+    var runningFolders: Set<UUID> = [] {
+        didSet { if oldValue != runningFolders, mode == .library { settleComparePicks() } }
+    }
 
     private static let queue = DispatchQueue(label: "topopt.library.results", qos: .utility)
 
@@ -159,6 +164,7 @@ public final class LibraryModel: ObservableObject {
             if r != existing { try? store.saveLibrary(r) }
             index = r
             mode = .library
+            settleComparePicks()   // ★ his iPad notes 11-22: a new version's results clear a Compare pick
             loadThumbnailsFromCache()
         case let .unreadable(why):
             mode = .unreadable(why)
@@ -341,9 +347,14 @@ public final class LibraryModel: ObservableObject {
     /// Compare ended. The last one left becomes the part's chosen (as Pick this); a second Tie leaves the undecided ones In
     /// consideration. Returns the toast: "v1a chosen · 4 rejected", or "3 in consideration · 2 rejected".
     public func finishCompare(_ end: CompareSession.End, rejected: Int) -> String {
+        // ★ his iPad notes 11-22 (decision 2): every result the part has now has been through a Compare
+        switch end {
+        case let .chosen(item): markCompared(partContaining: item.folder)
+        case let .undecided(items): if let f = items.first?.folder { markCompared(partContaining: f) }
+        }
         switch end {
         case let .chosen(item):
-            pick(folder: item.folder, result: item.result)
+            pick(folder: item.folder, result: item.result, inCompare: true)
             let name = version(item.folder).map { "v\($0.number)" } ?? ""
             return "\(name)\(ResultMark.letter(item.result)) chosen · \(rejected) rejected"
         case let .undecided(items):
@@ -360,11 +371,76 @@ public final class LibraryModel: ObservableObject {
     // replaces the last. It drives the card's ring, its "v7b" tag, "PA12 · picked v7b", the picture and the strip's accent
     // (note 11). Print this stays its own mark. Old per-version picks are not migrated: no part has one until he picks.
 
-    /// Pick this: `result` of version `folder` becomes its part's chosen result.
-    public func pick(folder: UUID, result: Int) {
+    /// Pick this: `result` of version `folder` becomes its part's chosen result. ★ 11-22: `inCompare` when Compare's last one
+    /// left made it (only such a pick is cleared by a new version's results); a pick by hand ends any "Compare new".
+    public func pick(folder: UUID, result: Int, inCompare: Bool = false) {
         guard let p = index.parts.firstIndex(where: { $0.version(folderID: folder) != nil }) else { return }
         index.parts[p].chosen = LibraryChosen(folder: folder, result: result)
+        index.parts[p].chosenInCompare = inCompare ? true : nil
+        index.parts[p].formerPick = nil
         try? store.saveLibrary(index)
+    }
+
+    /// ★ His iPad notes 11-22 (decision 3): "Picked ×" — the part has no chosen result any more.
+    public func unpick(part: UUID) {
+        guard let p = index.parts.firstIndex(where: { $0.id == part }), index.parts[p].chosen != nil
+                || index.parts[p].formerPick != nil else { return }
+        index.parts[p].chosen = nil
+        index.parts[p].chosenInCompare = nil
+        index.parts[p].formerPick = nil
+        try? store.saveLibrary(index)
+    }
+
+    /// ★ 11-22: the Compare pick a new version's results cleared, while its version is listed and nothing is chosen since.
+    public func formerPick(of part: LibraryPart) -> LibraryChosen? {
+        guard part.chosen == nil, let f = part.formerPick, part.version(folderID: f.folder) != nil else { return nil }
+        return f
+    }
+
+    /// ★ 11-22: the results Compare new offers against the former pick (never through a Compare; none of a running version).
+    public func newResults(of part: LibraryPart) -> [CompareItem] {
+        CompareSession.newResults(part, running: runningFolders)
+    }
+
+    // MARK: ★ his iPad notes 11-22 (decision 2): "If a version was picked through the comparison and a new version is
+    // created/uploaded/modified, then it can no longer be 'picked' and needs to be compared to the versions that were not
+    // compared to yet."
+
+    /// Every result the part has now has been through a Compare; Compare new is answered.
+    private func markCompared(partContaining folder: UUID) {
+        guard let p = index.parts.firstIndex(where: { $0.version(folderID: folder) != nil }) else { return }
+        for i in index.parts[p].versions.indices {
+            let n = index.parts[p].versions[i].summary?.count ?? 0
+            if n > 0 { index.parts[p].versions[i].compared = Array(0..<n) }
+        }
+        index.parts[p].formerPick = nil
+        try? store.saveLibrary(index)
+    }
+
+    /// A Compare pick is cleared once the part has a result never compared (a new version's, once its results are known and
+    /// its run is done): its line offers "Compare new" instead. A pick by hand is never cleared here (his words: "picked
+    /// through the comparison"). With nothing new left (its version deleted), the former pick is the chosen one again.
+    func settleComparePicks() {
+        var changed = false
+        for p in index.parts.indices {
+            let part = index.parts[p]
+            if part.chosenInCompare == true, let c = part.chosen, part.version(folderID: c.folder) != nil,
+               !newResults(of: part).isEmpty {
+                index.parts[p].formerPick = c
+                index.parts[p].chosen = nil
+                index.parts[p].chosenInCompare = nil
+                changed = true
+            } else if part.chosen == nil, let f = part.formerPick, newResults(of: part).isEmpty
+                        || part.version(folderID: f.folder) == nil {
+                if part.version(folderID: f.folder) != nil {
+                    index.parts[p].chosen = f
+                    index.parts[p].chosenInCompare = true
+                }
+                index.parts[p].formerPick = nil
+                changed = true
+            }
+        }
+        if changed { try? store.saveLibrary(index) }
     }
 
     /// The part's chosen result, while its version is listed (nil = none chosen).
@@ -458,6 +534,7 @@ public final class LibraryModel: ObservableObject {
                                               accepted: $0.accepted, achievedVolumeFraction: $0.fraction, word: $0.word)
                             }
                         }
+                        self.settleComparePicks()   // ★ 11-22: its results are known now
                     }
                     for r in results where !self.hasClearPicture(CompareItem(folder: folder, result: r.index)) {
                         self.storeThumbnail(for: CompareItem(folder: folder, result: r.index), mesh: r.mesh)
@@ -701,6 +778,12 @@ public final class LibraryModel: ObservableObject {
             v.pickedResult = 0
             v.summary = keptSummary
             v.trimmed = true
+            v.compared = (v.compared ?? []).contains(picked) ? [0] : nil   // ★ 11-22: the kept one is result 0 now
+        }
+        // ★ 11-22: a former Compare pick on the kept result follows it; on a result that went, it goes too
+        if let p = index.parts.firstIndex(where: { $0.formerPick?.folder == folder }) {
+            index.parts[p].formerPick = index.parts[p].formerPick?.result == picked ? LibraryChosen(folder: folder, result: 0) : nil
+            try? store.saveLibrary(index)
         }
         // ★ the part's chosen result was the one kept (shownResult reads it first): it is result 0 now
         if let p = index.parts.firstIndex(where: { $0.chosen?.folder == folder }) {
