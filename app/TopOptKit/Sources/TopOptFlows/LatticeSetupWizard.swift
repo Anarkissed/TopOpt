@@ -856,7 +856,7 @@ public struct LatticeSetupWizard: View {
             OrganicInfoButton(label: "Skin thickness")
             Spacer(minLength: DS.Space.xs)
             OrganicNumberField(value: (look.skinWidthMM ?? 0) > 0 ? look.skinWidthMM : nil, auto: nil, unit: "mm",
-                               placeholder: "Auto") { v in
+                               placeholder: "Auto", title: "Skin thickness") { v in
                 if let v, let why = LatticeOrganicLook.Check.skinWidth(v) { organicSkinRefusal = why; AppPopups.shared.wrongNumber("Skin thickness", why); return }
                 organicSkinRefusal = nil
                 var l = project.lattice.organicLook(group: group)

@@ -284,24 +284,25 @@ struct StrengthValueRow: View {
         }
     }
 
-    /// A number typed in (e.g. 0.55, 1e-9); applied on Return, refused with its one line when out of range.
+    /// A number typed in (e.g. 0.55, 0.000000001); applied as the pad closes, refused with its one line when out of range.
+    /// ★ His iPad notes 11-22 (img 5): the app's number pad beside the box (PadNumberBox), never the system keyboard; typed as
+    /// plain decimals (no exponent key), so the pad opens with the value's every digit and takes 16 characters.
     private func field(_ label: String, _ x: Double, apply: @escaping (Double) -> String?) -> some View {
         let key = label.isEmpty ? v.key : v.key + "." + label
         let range = [v.min.map { "from " + StrengthCheckDocs.number($0) }, v.max.map { "to " + StrengthCheckDocs.number($0) }]
             .compactMap { $0 }.joined(separator: " ")
         return HStack(spacing: DS.Space.s) {
             if !label.isEmpty { Text(label).dsStyle(DS.TypeScale.callout).frame(width: 140, alignment: .leading) }
-            TextField(StrengthCheckDocs.number(x), text: Binding(get: { entry[key] ?? StrengthCheckDocs.number(x) },
-                                                                 set: { entry[key] = $0 }))
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 140)
-                .onSubmit {
-                    let typed = (entry[key] ?? "").replacingOccurrences(of: "×10^", with: "e").trimmingCharacters(in: .whitespaces)
-                    guard let d = Double(typed) else { refusal = "Not a number"; return }
-                    refusal = apply(d)
-                    if refusal == nil { entry[key] = nil }
-                }
-                .accessibilityIdentifier("strength-field-" + key)
+            PadNumberBox(key: "strength-field-" + key, title: label.isEmpty ? v.name : v.name + " · " + label,
+                         shown: entry[key] ?? StrengthCheckDocs.number(x), placeholder: StrengthCheckDocs.number(x),
+                         seedText: entry[key] ?? PadNumberBox.plain(x), width: 140,
+                         allowsNegative: (v.min ?? -1) < 0, maxLength: PadNumberBox.longLimit) { text in
+                entry[key] = text   // (shown in the box with its refusal, as the text field kept it)
+                let typed = text.replacingOccurrences(of: "×10^", with: "e").trimmingCharacters(in: .whitespaces)
+                guard let d = Double(typed) else { refusal = "Not a number"; return }
+                refusal = apply(d)
+                if refusal == nil { entry[key] = nil }
+            }
             Text([v.unit, range.isEmpty ? nil : "(" + range + ")"].compactMap { $0 }.joined(separator: " "))
                 .dsStyle(DS.TypeScale.footnote).foregroundStyle(DS.Color.textTertiary.color)
         }

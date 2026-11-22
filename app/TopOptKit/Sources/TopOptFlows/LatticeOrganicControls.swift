@@ -130,6 +130,11 @@ struct LatticeOrganicControls: View {
 
     // MARK: rows
 
+    /// A setting's name without its " (0 = off)" (★ 11-22: the number pad's header).
+    static func bare(_ label: String) -> String {
+        label.hasSuffix(" (0 = off)") ? String(label.dropLast(" (0 = off)".count)) : label
+    }
+
     private func name(_ label: String) -> some View {
         let off = " (0 = off)"
         let base = label.hasSuffix(off) ? String(label.dropLast(off.count)) : label
@@ -196,7 +201,7 @@ struct LatticeOrganicControls: View {
                         check: @escaping (Double) -> String?) -> some View {
         VStack(alignment: .trailing, spacing: 0) {
             row(label) {
-                OrganicNumberField(value: look[keyPath: kp], auto: auto, unit: unit) { v in
+                OrganicNumberField(value: look[keyPath: kp], auto: auto, unit: unit, title: Self.bare(label), key: label) { v in
                     if let v, let why = check(v) { refusal = (label, why); AppPopups.shared.wrongNumber(label, why); return }
                     refusal = nil
                     look[keyPath: kp] = v
@@ -259,15 +264,18 @@ struct LatticeOrganicControls: View {
             HStack(spacing: DS.Space.xs) {
                 Spacer(minLength: 0)
                 if mode.isSweep {
-                    OrganicNumberField(value: mode.isAuto ? nil : small, auto: auto?.1, unit: "", locked: mode.isAuto) { v in
+                    OrganicNumberField(value: mode.isAuto ? nil : small, auto: auto?.1, unit: "", locked: mode.isAuto,
+                                       title: Self.bare(label), key: label + "-small") { v in
                         setPair(small: v, large: large)
                     }
                     Text("to").font(.system(size: 12)).foregroundStyle(DS.Color.textTertiary.color)
-                    OrganicNumberField(value: mode.isAuto ? nil : large, auto: auto?.2, unit: unit, locked: mode.isAuto) { v in
+                    OrganicNumberField(value: mode.isAuto ? nil : large, auto: auto?.2, unit: unit, locked: mode.isAuto,
+                                       title: Self.bare(label), key: label + "-large") { v in
                         setPair(small: small, large: v)
                     }
                 } else {
-                    OrganicNumberField(value: mode.isAuto ? nil : s.single, auto: auto?.0, unit: unit, locked: mode.isAuto) { v in
+                    OrganicNumberField(value: mode.isAuto ? nil : s.single, auto: auto?.0, unit: unit, locked: mode.isAuto,
+                                       title: Self.bare(label), key: label) { v in
                         let v2 = v.map(snap)
                         if let x = v2, let why = one(x) { refusal = (label, why); AppPopups.shared.wrongNumber(label, why); return }
                         refusal = nil
@@ -283,8 +291,11 @@ struct LatticeOrganicControls: View {
     }
 }
 
-/// A number field: nil shows Auto's value greyed ("–" until measured); Return applies what he typed (nil when cleared);
-/// `locked` (an Auto mode) shows Auto's value and takes no typing.
+/// A number field: nil shows Auto's value greyed ("–" until measured); what he types applies as the pad closes (nil when
+/// cleared); `locked` (an Auto mode) shows Auto's value and takes no typing.
+/// ★ His iPad notes 11-22 (img 5): "Why is the full alpha-numeric keyboard being used? It should just be the numeric." The box
+/// opens the app's number pad beside it (PadNumberBox), never the system keyboard; Done or a tap elsewhere applies what he
+/// typed through the same rule its Return used (`parse`).
 struct OrganicNumberField: View {
     let value: Double?
     let auto: Double?
@@ -292,28 +303,31 @@ struct OrganicNumberField: View {
     var locked = false
     /// What the empty field shows in place of `auto`'s number (e.g. "Auto" where the engine works the number out).
     var placeholder: String? = nil
+    /// ★ 11-22: the setting's name (the pad's header) and the box's id ("organic-field-<key>").
+    var title: String = ""
+    var key: String = ""
     let apply: (Double?) -> Void
-    @State private var text = ""
-    @State private var editing = false
 
     var body: some View {
         HStack(spacing: 4) {
-            TextField(placeholder ?? auto.map(StrengthCheckDocs.number) ?? "–",
-                      text: Binding(get: { editing ? text : value.map(StrengthCheckDocs.number) ?? "" },
-                                    set: { text = $0; editing = true }))
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 64)
-                .disabled(locked)
-                .opacity(locked ? 0.55 : 1)
-                .onSubmit {
-                    editing = false
-                    let t = text.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")
-                    if t.isEmpty { apply(nil); return }
-                    guard let d = Double(t), d.isFinite else { return }
-                    apply(d)
-                }
+            PadNumberBox(key: "organic-field-" + (key.isEmpty ? title : key), title: title,
+                         shown: value.map(StrengthCheckDocs.number),
+                         placeholder: placeholder ?? auto.map(StrengthCheckDocs.number) ?? "–",
+                         unit: unit.isEmpty ? nil : unit, width: 64, locked: locked) { text in
+                guard let v = Self.parse(text) else { return }
+                apply(v)
+            }
             if !unit.isEmpty { Text(unit).font(.system(size: 12)).foregroundStyle(DS.Color.textTertiary.color).lineLimit(1).fixedSize() }
         }
         .frame(minHeight: 44)
+    }
+
+    /// What a typed text applies (its Return's rule before 11-22, unchanged): cleared = .some(nil), back to Auto; a number;
+    /// anything else (nil) applies nothing.
+    static func parse(_ text: String) -> Double?? {
+        let t = text.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")
+        if t.isEmpty { return .some(nil) }
+        guard let d = Double(t), d.isFinite else { return nil }
+        return .some(d)
     }
 }
