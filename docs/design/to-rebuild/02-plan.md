@@ -146,7 +146,7 @@ Action: keep / clean / rewrite / delete / new. Size S / M / L is amount of work,
 3. Stiffness limit: yes, provided it is measured right at the load ("Would this be right at the load? If so, I think that's a good idea."). It is: how far the loaded face moves, per scenario. Optional, off by default.
 4. Sealed pockets: "sure". Allowed in a solid with one plain line; refused in a lattice.
 5. Experiment probes: "yes". Delete the unbuilt ones.
-6. Straight-member style: OPEN. He asked what it is; explained in chat; awaiting his answer.
+6. Straight-member style: "Yes, I agree. Let's leave it for V2." Not in this rebuild; a row is on the "TopOpt: ideas for v2" sheet.
 7. Resolution: "sounds good! I think there should be a preview resolution vs the actual part resolution that is automatically derived." So two resolutions: a quick one for the preview and a derived one for the real part; the picker stays as an override.
 
 ## 6. Risks
