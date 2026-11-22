@@ -107,6 +107,8 @@ public struct DSPanel<Content: View, Footer: View>: View {
     let footer: Footer
 
     @State private var rows: [String: CGRect] = [:]
+    /// ★ his 11-22 (img 44): folded where Topology and Selections are minimised together — the Selections pill's size and colour.
+    @Environment(\.minimisedPillWidth) private var pairedPillWidth
     @State private var viewport: CGFloat = 0
     @State private var contentHeight: CGFloat = 0
     @State private var footerHeight: CGFloat = 0
@@ -191,25 +193,31 @@ public struct DSPanel<Content: View, Footer: View>: View {
                 }
             }
         }
-        .frame(width: !open && foldedPill ? nil : width)
-        .fixedSize(horizontal: !open && foldedPill, vertical: true)   // the panel is as tall as what it holds (the body caps itself)
+        .frame(width: pill ?? (!open && foldedPill ? nil : width))
+        .fixedSize(horizontal: !open && foldedPill && pill == nil, vertical: true)   // the panel is as tall as what it holds (the body caps itself)
         .onPreferenceChange(DSPanelMeasureKey.self) { m in
             if let c = m["content"], abs(c - contentHeight) > 0.5 { contentHeight = c }
             if let v = m["viewport"], abs(v - viewport) > 0.5 { viewport = v }
             if let f = m["footer"], abs(f - footerHeight) > 0.5 { footerHeight = f }
         }
         .transformPreference(DSPanelMeasureKey.self) { $0 = [:] }   // (never an enclosing panel's)
-        .background(RoundedRectangle(cornerRadius: open ? DSParts.panelRadius : DSParts.headerHeight / 2, style: .continuous)
+        .background(RoundedRectangle(cornerRadius: radius, style: .continuous)
             .fill(DS.Surface.panel.color))
         // the mockup's .panel blurs what is behind it (backdrop-filter 36 px): a chip on the model never reads through
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: open ? DSParts.panelRadius : DSParts.headerHeight / 2,
-                                                             style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: open ? DSParts.panelRadius : DSParts.headerHeight / 2, style: .continuous)
+        // ★ his 11-22 (img 44): the pill beside the Selections pill wears its colour — the glass with no blur behind it
+        .background(pill == nil ? AnyShapeStyle(Material.ultraThinMaterial) : AnyShapeStyle(Color.clear),
+                    in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
             .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: open ? DSParts.panelRadius : DSParts.headerHeight / 2, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         .dsShadow(DS.Shadow.panel)
         .background(DSParts.publish(key))
     }
+
+    /// ★ his 11-22 (img 44): folded beside the minimised Selections pill — that pill's width, height and colour.
+    private var pill: CGFloat? { open ? nil : pairedPillWidth }
+    private var headerH: CGFloat { pill == nil ? DSParts.headerHeight : MinimisedPills.height }
+    private var radius: CGFloat { open ? DSParts.panelRadius : headerH / 2 }
 
     /// Chevron + name + count, nothing else (U2). "view only" in tertiary when the panel is locked (Cut).
     private var header: some View {
@@ -234,7 +242,7 @@ public struct DSPanel<Content: View, Footer: View>: View {
                 }
             }
             .padding(.horizontal, 14)
-            .frame(height: DSParts.headerHeight)
+            .frame(height: headerH)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -733,9 +741,7 @@ public struct DSRunButton: View {
                     }
                 }
                 .foregroundStyle(grey ? DS.Color.textDisabled.color : Color.white)
-                .padding(.horizontal, 22)
-                .frame(minWidth: DSParts.runMinWidth, minHeight: DSParts.runHeight)
-                .fixedSize()   // its own size, max(250, the lines + 44), whatever the parent offers
+                .fixedSize()   // its own size, max(250, the lines + 44), whatever the parent offers (DSRunLabelLayout)
                 .background(Capsule().fill((grey ? DS.Color.fillDisabled : busy ? DS.Color.accent.opacity(0.25) : DS.Color.accent).color))
                 .overlay(Capsule().strokeBorder(DS.Color.accent.opacity(busy ? 0.6 : 0).color, lineWidth: 1))
                 .partsShadow(grey || busy ? nil : DS.Shadow.accentGlow)
@@ -748,8 +754,21 @@ public struct DSRunButton: View {
         }
     }
 
+    /// ★ his iPad notes 11-22 (img 44, img 47: "Laying Draft", "Draft · checking print"): "Please ensure that the text is always
+    /// centred and the progress icon is to the left of the text, perfectly between the text and the left side of the button."
+    /// The two lines sit in the button's centre with or without the ring (DSRunLabelLayout); the ring (or the small spinner)
+    /// is centred in the gap between the capsule's left end and the wider line, and never widens the button.
     private func lines(ring: Double?, spinner: Bool, line: String) -> some View {
-        HStack(spacing: 10) {
+        DSRunLabelLayout(padding: Self.textInset, minWidth: DSParts.runMinWidth, minHeight: DSParts.runHeight) {
+            VStack(spacing: 1) {
+                Text(title).font(.system(size: 16, weight: .bold)).lineLimit(1).fixedSize()
+                    .background(DSParts.publish("\(key)-title"))
+                // never cut (the mockup's `.run small`: nowrap; min-width 250): the button grows to the line
+                Text(line).font(.system(size: 11.5)).lineLimit(1).fixedSize()
+                    .foregroundStyle(grey ? DS.Color.textTertiary.color : Color.white.opacity(0.85))
+                    .background(DSParts.publish("\(key)-line2"))
+            }
+            .background(DSParts.publish("\(key)-text"))
             if let ring {
                 ZStack {
                     Circle().stroke(Color.white.opacity(0.3), lineWidth: 2.5)
@@ -760,14 +779,41 @@ public struct DSRunButton: View {
                 .background(DSParts.publish("\(key)-ring"))
             } else if spinner {
                 ProgressView().controlSize(.small).tint(.white)
+                    .background(DSParts.publish("\(key)-spinner"))
             }
-            VStack(spacing: 1) {
-                Text(title).font(.system(size: 16, weight: .bold)).lineLimit(1).fixedSize()
-                // never cut (the mockup's `.run small`: nowrap; min-width 250): the button grows to the line
-                Text(line).font(.system(size: 11.5)).lineLimit(1).fixedSize()
-                    .foregroundStyle(grey ? DS.Color.textTertiary.color : Color.white.opacity(0.85))
-                    .background(DSParts.publish("\(key)-line2"))
-            }
+        }
+    }
+    /// The lines' clearance from each end of the capsule (the mockup's padding 0 22).
+    static let textInset: CGFloat = 22
+    /// RED CONTROL (RunButtonCentredHostedTests): the ring in a row before the lines, the pair centred (before his 11-22 note).
+    nonisolated(unsafe) public static var controlRingPushesText = false
+}
+
+/// ★ his 11-22: the run button's label — its first subview (the two lines) in the centre, sized max(`minWidth`, lines +
+/// 2 × `padding`) by `minHeight`; any other subview (the ring, the spinner) centred halfway between the left end and the lines.
+/// The ring never counts toward the size, so the button keeps its width when the ring comes or goes.
+struct DSRunLabelLayout: Layout {
+    let padding: CGFloat
+    let minWidth: CGFloat
+    let minHeight: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let text = subviews.first else { return CGSize(width: minWidth, height: minHeight) }
+        let t = text.sizeThatFits(.unspecified)
+        return CGSize(width: Swift.max(minWidth, t.width + 2 * padding), height: Swift.max(minHeight, t.height))
+    }
+
+    func placeSubviews(in b: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let text = subviews.first else { return }
+        let t = text.sizeThatFits(.unspecified)
+        let gap = (b.width - t.width) / 2   // from the capsule's left end to the lines
+        let old = DSRunButton.controlRingPushesText && subviews.count > 1
+        let ringSizes = subviews.dropFirst().map { $0.sizeThatFits(.unspecified) }
+        let shift = old ? ((ringSizes.first?.width ?? 0) + 10) / 2 : 0   // (the old HStack: ring + 10 pt + lines, centred)
+        text.place(at: CGPoint(x: b.midX + shift, y: b.midY), anchor: .center, proposal: ProposedViewSize(t))
+        for (ring, s) in zip(subviews.dropFirst(), ringSizes) {
+            let x = old ? b.midX + shift - t.width / 2 - 10 - s.width / 2 : b.minX + gap / 2
+            ring.place(at: CGPoint(x: x, y: b.midY), anchor: .center, proposal: ProposedViewSize(s))
         }
     }
 }

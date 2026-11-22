@@ -10729,6 +10729,7 @@ public struct WorkspacePlaceholder: View {
             }
             if !selectionsCollapsed { latticePreviewNotice }
         }
+        .minimisedPillsTogether(latticeSetupUp && !latticeTopologyOpen && selectionsCollapsed)   // ★ his 11-22 (img 44): one size
         .latticeBandChipKeepOut()          // ★ the Selections panel, for the band chips
         // ★ his iPad 11-09 (2.5): what the column stacks under the panel (an Undo line, the preview's notice) — the panel's
         // floor rises by it, so the whole column ends above the hint line

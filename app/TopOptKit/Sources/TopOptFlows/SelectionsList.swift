@@ -164,6 +164,8 @@ struct SelectionsPanelFrameKey: PreferenceKey {
 public struct SelectionsList: View {
     @ObservedObject var project: ProjectModel
     @Binding var collapsed: Bool
+    /// ★ his 11-22 (img 44): minimised beside the Topology pill — both pills one width (MinimisedPills).
+    @Environment(\.minimisedPillWidth) private var pairedPillWidth
     /// The picked group (its line tinted, its rows open).
     let picked: UUID?
     /// The trash's ask in the list (nil: none).
@@ -385,7 +387,7 @@ public struct SelectionsList: View {
         }
         .environment(\.dsRowValueWidth, layout.valueWidth)   // ★ his 11-22: every row's value in the handle's column
         .overlay(alignment: .bottomTrailing) { if !collapsed { cornerGrip } }   // ★ his 11-22: the whole panel's size
-        .frame(width: collapsed ? nil : listWidth, alignment: .leading)
+        .frame(width: collapsed ? pairedPillWidth : listWidth, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: DS.Radius.panel).fill(DS.Surface.panel.color)
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
         .dsShadow(DS.Shadow.panel)
@@ -413,7 +415,7 @@ public struct SelectionsList: View {
                     .font(.system(size: 12, weight: .bold)).foregroundStyle(DS.Color.textPrimary.opacity(0.7).color)
                 Text("Selections").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.bold).foregroundStyle(DS.Color.textPrimary.color)
                 if collapsed || !groups.isEmpty {
-                    if !collapsed { Spacer(minLength: DS.Space.s) }
+                    if !collapsed || pairedPillWidth != nil { Spacer(minLength: DS.Space.s) }   // ★ 11-22: the count at the pill's end
                     Text("\(groups.count)").font(.system(size: 13, weight: .semibold)).monospacedDigit()
                         .foregroundStyle(DS.Color.textTertiary.color)
                         .accessibilityIdentifier("\(idPrefix)-sel-count")
