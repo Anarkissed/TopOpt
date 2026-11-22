@@ -218,7 +218,10 @@ public enum LatticeSetupCopy {
     public static func alsoIn(_ group: String) -> String { "also in \(group)" }
     // ★ B6 s2a — the Topology panel (notes 23a, 23b)
     public static let topology = "Topology"
-    public static let includeLine = "Switched-off groups are left out of this lattice."
+    /// ★ his 11-20 rule (a caption is five words at most) and 11-22 ("NOTHING cuts into the modal"): the full sentence is the
+    /// (i)'s first line (`includeInfo`)
+    public static let includeLine = "Switch off to leave out"
+    public static let includeInfo = "Switched-off groups are left out of this lattice."
     /// ★ Release (2): while a group's switch is off — the one run that can't leave it out (pick (a), asked 11-06 09:49Z).
     public static let resultKeepsGroups =
         "Lattice an optimized result keeps every group: it is checked under the loads it was optimized with."

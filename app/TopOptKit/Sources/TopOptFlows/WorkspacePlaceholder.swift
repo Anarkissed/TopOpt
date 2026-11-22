@@ -142,6 +142,8 @@ public struct WorkspacePlaceholder: View {
     @StateObject private var newEngine = LatticeLayoutPreview()   // ★ the lattice rebuild's preview, behind "New engine (test)"
     @StateObject private var fileExport = LatticeFileExport()     // ★ his go 11-13: the print file from that preview, on the Mac
     @ObservedObject private var appSettings = AppSettings.shared
+    /// ★ his iPad notes 11-22: Hide keep clears, the picked Design box row — the model's (never a byte on this struct).
+    private var topoView: TopologyViewState { model.topologyView }
     @State private var strutScene: LatticeSDFScene? = nil
     @State private var strutSceneToken = 0
     /// ★★ WHETHER A STRUT BAKE IS IN FLIGHT (maintainer, 2026-08-19: "There is
@@ -280,6 +282,7 @@ public struct WorkspacePlaceholder: View {
     private func setPickedPiece(_ ref: SelectionArrowRule.PieceRef?) {
         if let t = gizmoTarget, ref.map({ $0.group != t.group || $0.key != ProjectModel.manualFaceKey(t.id) }) ?? true { setGizmo(nil) }
         selectedPiece = ref
+        if ref != nil, topoView.pickedDesignRow != nil { topoView.pickedDesignRow = nil }   // ★ his 11-22: one shape's handles at a time
     }
     /// ★ The Regions surface (task 2026-08-14-face-regions). Opened from the
     /// Selections header; it is where a union, a filter and a split are made.
@@ -535,7 +538,9 @@ public struct WorkspacePlaceholder: View {
     @State private var draggingDepthPlane: String?
 
     /// What this stage may draw. Every visibility site reads THIS, never `stage`.
-    private var visible: WorkspaceStageVisibility { .of(stage, editingFaces: editFaces.isEditing) }
+    private var visible: WorkspaceStageVisibility {   // ★ his 11-22 (img 6): Topology's panel open on Lattice Setup shows Topology's
+        .of(stage, editingFaces: editFaces.isEditing, topologyInLattice: latticeSetupUp && latticeTopologyOpen)
+    }
     /// The variants-entry demand field (that run's own von Mises); nil from the
     /// workspace entry (bar B6's two paths).
     @State private var latticePageVariantField: LatticeDemandField?
@@ -990,6 +995,7 @@ public struct WorkspacePlaceholder: View {
                               // one can join a group while its sibling stays out —
                               // and only the hit POINT can tell them apart.
                               if takeAimPick(at: pt) { return true }   // ★ B3 (note 5): "Pick on the part" aims the load
+                              if topologyTapWouldStartGroup(fid, at: pt, mesh: m) { emptyTapClears(); return true }   // ★ his 11-22 (b)
                               return handleTopologyPiecePick(fid, at: pt, mesh: m)
                           }),
                           // ★ Only while drilled in — the PRESENCE of this closure is
@@ -1142,6 +1148,7 @@ public struct WorkspacePlaceholder: View {
                                           && !legendDrilledIn),
                               negatives: (showDesignGizmo
                                           && visible.keepOuts
+                                          && !keepClearsHiddenHere   // ★ his 11-22: Hide keep clears ("No mass here" rows too)
                                           && !legendDrilledIn)),
                           // Keep-clear v2 (Part 3): the true red clearance volumes, drawn
                           // whenever gravity is set (edit phase) so the user can SEE and
@@ -1440,7 +1447,7 @@ public struct WorkspacePlaceholder: View {
                 // legend!"). The first cut gated only the three GIZMO overlays; the
                 // ⬇ load/anchor markers are drawn here and were still sitting over
                 // the struts he was trying to read.
-                if visible.groupPrimitives, !legendDrilledIn, stage != .topology || topoForcesShown {
+                if visible.groupPrimitives, !legendDrilledIn, !topologyViewUp || topoForcesShown {   // ★ 11-22: Forces in Lattice's Topology view too
                     arrowsOverlay.ignoresSafeArea()             // D6: force arrow shafts
                 }
                 // Gravity direction (round 2, item 4): the arrow is shown ONLY while gravity is
@@ -1462,7 +1469,7 @@ public struct WorkspacePlaceholder: View {
                 // grabbed. Rendered BENEATH the clearance chips below, so the 330 pt gizmo box can
                 // never occlude a value chip (the chip/knob hit areas are small and the rest of that
                 // overlay is hit-transparent, so gizmo drags in empty box space still reach it).
-                if force.phase == .edit, visible.groupPrimitives, !legendDrilledIn {
+                if force.phase == .edit, visible.groupPrimitives, !legendDrilledIn, !keepClearsHiddenHere {   // ★ 11-22: Hide keep clears
                     primitiveGizmoOverlay.ignoresSafeArea()
                 }
                 // Keep-clear Phase B: the draggable clearance handles (wall → margin, caps →
@@ -2634,7 +2641,12 @@ public struct WorkspacePlaceholder: View {
         // whose whole point is an unobstructed look at the surface. The
         // visibility table already said `keepOuts == false`; nothing read it here.
         if !visible.keepOuts, !visible.latticeDepthPlanes { return [] }
-        return visible.latticeDepthPlanes ? latticeDepthPlaneItems : keepOutRenderItems
+        if visible.latticeDepthPlanes { return latticeDepthPlaneItems }
+        // ★ his 11-22: Topology's view (and Lattice Setup's with its Topology panel open) — Hide keep clears hides them all
+        let items = keepClearsHiddenHere ? [] : keepOutRenderItems
+        if LatticeSetupHandles.recordLive { LatticeSetupHandles.drawnPrisms = [] }   // (the tests: no prism drawn)
+        if TopologyViewLive.recordLive { TopologyViewLive.keepClearVolumes = items.count }
+        return items
     }
 
     /// The keep-out volumes (keep-clear v2 Part 3), each tagged whether its group is
@@ -3044,8 +3056,8 @@ public struct WorkspacePlaceholder: View {
     /// that primitive: its group selected, its row picked, its chips shown. The nearest volume in front of the part wins.
     /// Not while a new selection is being built (a tap on a hole then joins it, as before), and Topology's edit phase only.
     private func pickPrimitive(origin o: SIMD3<Float>, dir d: SIMD3<Float>, surface: Float?) -> Bool {
-        guard stage == .topology, force.phase == .edit, !visible.surfaceEditing, !editFaces.isEditing, !showLatticePage,
-              !flexibleMain.owns(project, stage) else { return false }
+        guard topologyViewUp, force.phase == .edit, !visible.surfaceEditing, !editFaces.isEditing, !showLatticePage,   // ★ 11-22
+              !flexibleMain.owns(project, stage), !keepClearsHiddenHere else { return false }
         if let a = selection.activeGroupID, force.needsRole(a, latticeRoleGroups: latticeRoleGroupIDs) { return false }
         // the viewer hands the ray in the MODEL frame already (its settle undone) — the frame the volumes live in
         let origin = o, dir = d
@@ -3062,6 +3074,7 @@ public struct WorkspacePlaceholder: View {
             if best.map({ t < $0.t }) ?? true { best = (v.groupID, v.piece, t) }
         }
         guard let b = best else { return false }
+        topoView.pickedDesignRow = nil   // ★ his 11-22: one shape's handles at a time
         if selection.activeGroupID != b.group { selection.setActive(b.group) }
         setPickedPiece(SelectionArrowRule.PieceRef(group: b.group, key: b.key))
         chipsRevealedGroup = b.group
@@ -3069,8 +3082,21 @@ public struct WorkspacePlaceholder: View {
     }
 
     /// The viewer's first look at a tap (Topology): a keep-clear volume under it is picked.
+    /// ★ his iPad notes 11-22: in Lattice Setup's Topology view too; then a Design box row under it (its handles show, none
+    /// other's); any other tap lets the picked row go.
     private var primitiveTapRay: ((SIMD3<Float>, SIMD3<Float>, Float?) -> Bool)? {
-        stage == .topology ? { o, d, t in pickPrimitive(origin: o, dir: d, surface: t) } : nil
+        topologyViewUp ? { o, d, t in
+            if pickPrimitive(origin: o, dir: d, surface: t) { return true }
+            if showDesignGizmo, visible.designBox, force.phase == .edit, !editFaces.isEditing, !showLatticePage,
+               let row = DesignRowHandles.pick(project.designBox, origin: o, dir: d, surface: t,
+                                               keepClearsHidden: keepClearsHiddenHere) {
+                emptyTapClears()
+                topoView.pickedDesignRow = row
+                return true
+            }
+            topoView.pickedDesignRow = nil
+            return false
+        } : nil
     }
 
     private func gizmoClearInfo(_ proj: CameraProjection) -> (centre: CGPoint, isClear: (CGPoint) -> Bool)? {
@@ -6761,7 +6787,7 @@ public struct WorkspacePlaceholder: View {
     /// tool is active and we're in the normal edit phase (not gravity setup).
     private var showDesignGizmo: Bool {
         force.phase == .edit && force.gravityIsSet && project.designBox.hasPrimitives   // ★ B6: any row (sent or not)
-            && (stage != .topology || topoDesignBoxShown)   // ★ B3: the Design box VIEW (the box still bounds the run)
+            && (!topologyViewUp || topoDesignBoxShown)   // ★ B3: the Design box VIEW (the box still bounds the run) · ★ 11-22: Lattice's Topology view too
     }
 
     /// The design-box tool toggle chip. Off → tap to open (seeds a grow-room box
@@ -6935,10 +6961,11 @@ public struct WorkspacePlaceholder: View {
                 return idx.indices.contains(k) ? project.designBox.primitives[idx[k]].sign == .negative : true
             }()
             let tint = keepOutTint ? Self.keepOutGlass : Self.designGlass
+            let key = DesignRowHandles.frameKey(t.handle, in: project.designBox)   // ★ 11-22: the hosted tests count them
             if case .move = t.handle.kind {
-                moveHandle(tint: tint).position(pos)
+                moveHandle(tint: tint).background(DSParts.publish(key)).position(pos)
             } else {
-                resizeHandle(tint: tint).position(pos)
+                resizeHandle(tint: tint).background(DSParts.publish(key)).position(pos)
             }
         }
     }
@@ -6949,8 +6976,10 @@ public struct WorkspacePlaceholder: View {
         // ★ B6: `.designBox` = the row the run sends (the first Positive Box), `.keepOut(i)` = every other row in list
         // order; a hidden row (its eye off) draws no handles.
         let d = project.designBox
-        let primaryShown = d.primaryIndex.map { d.primitives[$0].isShown } ?? false
-        let hidden = Set(d.otherIndices.enumerated().filter { !d.primitives[$0.element].isShown }.map(\.offset))
+        // ★ his iPad notes 11-22 ("I only want 6 handles at a time, for each primitive I select"): the picked row's alone
+        let shows = DesignRowHandles.shown(d, picked: topoView.pickedDesignRow, keepClearsHidden: keepClearsHiddenHere)
+        let primaryShown = d.primaryIndex.map { shows.contains(d.primitives[$0].id) } ?? false
+        let hidden = Set(d.otherIndices.enumerated().filter { !shows.contains(d.primitives[$0.element].id) }.map(\.offset))
         return DesignBoxHandles.candidates(box: primaryShown ? d.box : nil, keepOuts: d.keepOuts, hiddenKeepOuts: hidden,
                                            settledWorld: settledWorld, project: proj.project)
     }
@@ -7171,7 +7200,7 @@ public struct WorkspacePlaceholder: View {
     /// Every clearance handle to draw, flattened across groups/faces. Degenerate
     /// volumes contribute none (ProjectModel already dropped them).
     private var clearanceHandleItems: [ClearanceHandleItem] {
-        guard force.gravityIsSet else { return [] }
+        guard force.gravityIsSet, !keepClearsHiddenHere else { return [] }   // ★ his 11-22: Hide keep clears
         var items: [ClearanceHandleItem] = []
         for entry in project.groupView.showing(project.clearanceHandles(), group: { $0.groupID }) {   // Flexible (PR #362) H49b: a hidden group's clearance knobs + value chips are not drawn, so they stop catching taps (GroupEyeHides)
             // ★ his iPad 10-26 (2)(3): only the selected group's, and only the selected piece's when one is picked
@@ -7823,10 +7852,13 @@ public struct WorkspacePlaceholder: View {
                     surfaceXrayOn.toggle()
                 }
                 // ★ B3: Topology's views, icon only — Forces, and the Design box while one is on.
-                if stage == .topology, !editFaces.isEditing {
+                if topologyViewUp, !editFaces.isEditing {   // ★ his 11-22: and in Lattice Setup's Topology view
                     viewModeButton("arrow.down.to.line", label: "Forces", on: topoForcesShown) {
                         topoForcesShown.toggle()
                     }
+                    // ★ his 11-22: "something that hides all the keep clears" — beside Forces; on = hidden (a view: they still apply)
+                    viewModeButton(TopologyViewCopy.hideKeepClearsIcon, label: TopologyViewCopy.hideKeepClears,
+                                   on: topoView.keepClearsHidden) { topoView.keepClearsHidden.toggle() }
                     if project.designBox.hasPrimitives {
                         viewModeButton("cube", label: "Allow growth here", on: topoDesignBoxShown) {
                             topoDesignBoxShown.toggle()
@@ -7882,7 +7914,7 @@ public struct WorkspacePlaceholder: View {
                 }
                 // ★ his iPad notes 11-09: one view hides and shows EVERY face prism, on by default — Lattice Setup only, and
                 // only while there is a face prism to hide. It sets each row's eye, so a row never disagrees with it.
-                if latticeSetupUp {
+                if latticeSetupUp, !latticeTopologyOpen {   // ★ 11-22: no prisms in Topology's view
                     let prismKeys = latticeFacePrismKeys
                     if !prismKeys.isEmpty {
                         viewModeButton(LatticePrismsView.icon, label: LatticePrismsView.label,
@@ -11120,17 +11152,21 @@ public struct WorkspacePlaceholder: View {
                         .dsStyle(DS.TypeScale.footnote)
                         .foregroundStyle(DS.Color.textQuaternary.color)
                     keepClearAffixToggle(g)
+                    // ★ E4 (j), ruling 11-08 21:32 (no silent no-ops) + his 11-22 ("NOTHING cuts into the modal"): Keep clear's
+                    // idle pieces are a warning glyph beside its toggle, not a line under the group; a tap says why
+                    if let line = project.keepClearIdlePiecesLine(g) {
+                        InfoPopoverButton(text: line, id: "keepClearIdlePieces-\(g.id.uuidString)",
+                                          label: "Keep clear does nothing here", warning: true)
+                            .background(CornerPairStyle.publish("keepClearIdlePieces-\(g.id.uuidString)"))
+                    }
                     protectAffixToggle(g)   // handoff 124 — the Protect affix
-                }
-                if loadGroupMayNotRegister(g), let h = voxelSpacingMM {
-                    // Sub-voxel load face (099 D2): the load may tag no voxels at
-                    // this resolution, so flag it in plain English. A warning, not a
-                    // verdict — only the voxelizer knows for sure.
-                    Label(VoxelFit.badgeText(qualityTitle: project.quality.title, spacingMM: h),
-                          systemImage: "exclamationmark.triangle.fill")
-                        .font(.system(size: DS.TypeScale.footnote.size))
-                        .foregroundStyle(DS.Color.warning.color)
-                        .help(VoxelFit.warningText(qualityTitle: project.quality.title, spacingMM: h))
+                    if loadGroupMayNotRegister(g), let h = voxelSpacingMM {
+                        // Sub-voxel load face (099 D2): the load may tag no voxels at this resolution, so flag it in plain
+                        // English. A warning, not a verdict — only the voxelizer knows for sure. ★ his 11-22: a glyph, not a line
+                        InfoPopoverButton(text: VoxelFit.warningText(qualityTitle: project.quality.title, spacingMM: h),
+                                          id: "loadMayNotRegister-\(g.id.uuidString)",
+                                          label: VoxelFit.badgeText(qualityTitle: project.quality.title, spacingMM: h), warning: true)
+                    }
                 }
             }
             Spacer(minLength: 0)
@@ -11160,8 +11196,8 @@ public struct WorkspacePlaceholder: View {
                 // "+ a primitive" — revealed once the group is LOCKED IN (active).
                 // Tapping asks CYLINDER or PLANE (handoff item 1). §2b: group
                 // primitives are a TO-page affordance, so the way to ADD one is a
-                // TO-page affordance too.
-                if active, visible.groupPrimitives,
+                // TO-page affordance too. ★ his 11-22 (b): Lattice's Topology view makes no shape.
+                if active, !latticeTopologyOpen, visible.groupPrimitives,
                    project.groupView.canEdit(g.id) {
                     // ★ B3 (U6 / U7, OneWayToSayNoTests): the choice is a menu at the button, never a dialog
                     Menu {
@@ -12454,22 +12490,15 @@ public struct WorkspacePlaceholder: View {
         DSPanel(key: "latticeTopologyPanel", title: LatticeSetupCopy.topology, count: selection.groups.count, maxHeight: maxHeight,
                 open: Binding(get: { latticeTopologyOpen }, set: { setLatticeTopologyOpen($0) })) {
             VStack(alignment: .leading, spacing: 0) {
-                Text(LatticeSetupCopy.includeLine).font(.system(size: 12.5)).foregroundStyle(DS.Color.textSecondary.color)
-                    .padding(.horizontal, 14).padding(.vertical, 8)
-                    .background(DSParts.publish("latticeTopologyLine"))
-                if !project.latticeLeftOutGroups.isEmpty {
-                    // ★ release (2): a group's switch acts in the app, on every run but a result's re-lattice
-                    Text(LatticeSetupCopy.resultKeepsGroups).font(.system(size: 12.5)).foregroundStyle(DS.Color.textSecondary.color)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 14).padding(.bottom, 8)
-                        .background(DSParts.publish("latticeResultKeepsGroups"))
-                }
-                if project.latticeSwitchedOffStillProtects {
-                    // ★ release (2): those switches wait on the reviewer's answer — the job still applies them, said once
-                    Text(LatticeSetupCopy.protectStillApplies).font(.system(size: 12.5)).foregroundStyle(DS.Color.textSecondary.color)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 14).padding(.bottom, 8)
-                        .background(DSParts.publish("latticeProtectStillApplies"))
+                HStack(spacing: 0) {
+                    Text(LatticeSetupCopy.includeLine).font(.system(size: 12.5)).foregroundStyle(DS.Color.textSecondary.color)
+                        .padding(.leading, 14).padding(.vertical, 8)
+                        .background(DSParts.publish("latticeTopologyLine"))
+                    Spacer(minLength: 0)
+                    // ★ his iPad notes 11-22 ("NOTHING cuts into the modal"): release (2)'s two notes (a result's re-lattice keeps
+                    // every group; Protect and Keep clear still apply to switched-off groups) are this (i)'s words now
+                    InfoPopoverButton(text: TopologyViewCopy.panelInfo, id: "latticeTopologyInfo", label: "About these switches")
+                        .background(DSParts.publish("latticeTopologyInfo"))
                 }
                 if force.hasScenarios {
                     ForEach(force.scenarioList, id: \.id) { s in
@@ -12492,17 +12521,32 @@ public struct WorkspacePlaceholder: View {
                 }
             }
         }
+        // ★ his 11-22 (a): an edit made here is Topology's own — and the stress check that reads it goes out of date
+        .onChange(of: project.force) { _ in topologyEditedInLattice() }
+        .onChange(of: project.selection.groups) { _ in topologyEditedInLattice() }
     }
 
     /// One Topology group on Lattice Setup (§4.4's include row): its colour, name, role glyph, value and include switch.
-    private func latticeTopologyRow(_ g: SelectionGroup) -> some View {
+    /// ★ his iPad notes 11-22 (img 6): open, the row is Topology's — a tap picks the group (its arrow, its weight, its shapes on
+    /// the part) and opens Topology's own rows under it (its role, its numbers, its faces); never a new group, load or shape.
+    @ViewBuilder private func latticeTopologyRow(_ g: SelectionGroup) -> some View {
         let glyph = RoleGlyphs.glyphs(project, g.id, readsLattice: false).first
-        return DSRow(.include, key: "latticeTopo-\(g.id.uuidString)", mark: .colour(g.color), name: g.name,
-                     role: glyph.map { (glyph: $0.symbol, colour: $0.tint) }, value: topologyGroupSummary(g)) {
+        let picked = latticeTopologyOpen && selection.activeGroupID == g.id
+        DSRow(.include, key: "latticeTopo-\(g.id.uuidString)", mark: .colour(g.color), name: g.name,
+              role: glyph.map { (glyph: $0.symbol, colour: $0.tint) }, value: topologyGroupSummary(g),
+              disclosure: latticeTopologyOpen ? picked : nil, selected: picked,
+              tap: latticeTopologyOpen ? { pickTopologyGroupInLattice(g.id) } : nil) {
             // ★ the reviewer's ruling 11-06 10:45Z: a Load or Hold switches (a); Protect and Keep clear always apply — rules
             // about the part, not loads — so a group with neither load nor hold shows no switch
             if project.latticeGroupSwitches(g.id) { latticeIncludeSwitch(g.id, name: g.name) }
         }
+        if picked { topologyGroupRows(g).background(DSParts.publish("latticeTopoRows-\(g.id.uuidString)")) }
+    }
+
+    /// ★ 11-22: a row's tap in Lattice Setup's Topology view — Topology's pick (again: let go), one shape at a time.
+    private func pickTopologyGroupInLattice(_ id: UUID) {
+        topoView.pickedDesignRow = nil
+        if selection.activeGroupID == id { leaveGroupEditing() } else { selection.setActive(id); setPickedPiece(nil) }
     }
 
     /// ★ Note 23b: a scenario's or group's include switch — on unless switched off for this lattice.
@@ -13021,6 +13065,7 @@ public struct WorkspacePlaceholder: View {
         // their chips go with it (it cleared only Topology's selection, so the prisms' chips stayed)
         if latticeSetupUp, !latticeTopologyOpen { leaveLatticeGroup() }
         selection.clearActive(); setPickedPiece(nil); chipsRevealedGroup = nil
+        topoView.pickedDesignRow = nil   // ★ his 11-22: and the Design box row's handles
         project.syncForceGroups()
     }
 
@@ -13724,6 +13769,7 @@ public struct WorkspacePlaceholder: View {
                 if force.phase == .edit, let mesh = viewerMesh, let proj = projection {
                     let placed = keepOutResolved(proj)
                     if stage == .topology { ForEach(Array(severalRolesBadges(proj).enumerated()), id: \.offset) { _, b in SeveralRolesBadge(roles: b.roles).position(b.at).allowsHitTesting(false) } }   // Flexible (PR #362) H55i: several roles on one face (owner 2026-10-25) — every role a face has, drawn
+                    if stage == .lattice, latticeTopologyOpen { ForEach(Array(severalRolesBadges(proj).enumerated()), id: \.offset) { _, b in SeveralRolesBadge(roles: b.roles).position(b.at).allowsHitTesting(false) } }   // ★ his 11-22: in Lattice Setup's Topology view too
                     // ★ his iPad 10-27: only a group that still NEEDS a role — a Keep clear / Protect group picked again is done
                     // ★ B6 s2b (23c): on the Lattice stage only while its Topology panel is open (taps go to Topology then)
                     if let g = activeGroup, force.needsRole(g.id, latticeRoleGroups: latticeRoleGroupIDs),
@@ -13758,10 +13804,10 @@ public struct WorkspacePlaceholder: View {
                     }
                     // ★ B3: the Forces view hides the weight pills (the pending chip stays — it is how a face gets a role)
                     // ★ B3 (note 5): the selected Push / Pull load's round handle, at its arrow's free end: drag it to aim
-                    if stage == .topology, topoForcesShown, let g = aimHandleGroup, let arrow = loadArrowGeometry(g, mesh: mesh, proj: proj) {
+                    if topologyViewUp, topoForcesShown, let g = aimHandleGroup, let arrow = loadArrowGeometry(g, mesh: mesh, proj: proj) {   // ★ 11-22: Lattice's Topology view too
                         aimHandle(g, arrow: arrow, proj: proj)
                     }
-                    ForEach((stage != .topology || topoForcesShown ? loadGroups : []).filter {
+                    ForEach((!topologyViewUp || topoForcesShown ? loadGroups : []).filter {
                         SelectionArrowRule.groupShows($0.id, selectedGroup: selection.activeGroupID) }) { g in   // ★ his iPad 10-26 (2)(4)
                         if let arrow = loadArrowGeometry(g, mesh: mesh, proj: proj) {
                             let active = g.id == selection.activeGroupID
@@ -14020,6 +14066,35 @@ public struct WorkspacePlaceholder: View {
     /// ★ B6 s1: the Lattice stage's Setup page is up (not the Lattice page, Edit faces or Flexible's own page).
     private var latticeSetupUp: Bool {
         stage == .lattice && !editFaces.isEditing && !showLatticePage && !showLatticeWizard && !flexibleMain.owns(project, stage)
+    }
+
+    /// ★ his iPad notes 11-22 (img 6): Topology's view — the Topology stage, or Lattice Setup with its Topology panel open (the
+    /// SAME setup, his decision (a): its overlays, its taps, its rows).
+    private var topologyViewUp: Bool { stage == .topology || (latticeSetupUp && latticeTopologyOpen) }
+    /// ★ his 11-22: "Hide keep clears" is on, in Topology's view (a view only: they still keep clear in the run).
+    private var keepClearsHiddenHere: Bool { topoView.keepClearsHidden && topologyViewUp }
+
+    /// ★ his 11-22 (b): Topology's view on Lattice Setup modifies, never makes — with no group picked, a tap on a face (or a
+    /// piece) that no group he can see holds would start a new group; it starts nothing (a tap into nothing).
+    private func topologyTapWouldStartGroup(_ fid: FaceID, at pt: SIMD3<Float>?, mesh: ViewerMesh) -> Bool {
+        guard stage == .lattice, latticeTopologyOpen, selection.activeGroupID == nil else { return false }
+        if case .region(let piece) = EditedFaces.leaf(face: fid, point: pt.map { SIMD3<Double>($0) }, mesh: mesh,
+                                                      regions: project.faceRegions, fallback: project.surfaceCutTarget(face: fid)) {
+            return !selection.groups.contains { $0.regionIDs.contains(piece) }
+        }
+        return SeveralRoles.owner(of: fid, in: selection, hidden: unseenGroups) == nil
+    }
+
+    /// ★ his 11-22 (a): an edit made in Lattice Setup's Topology view is Topology's own (the same groups and loads), and the
+    /// stress check reads them: after it the check on hand is out of date — its fingerprint no longer matches
+    /// (`LatticeSimModel.isStale`), exactly as after an edit on the Topology stage. Here, with the lattice on screen, it says so
+    /// at once, as a settings change does: Refresh Lattice (Click to refresh), or the check runs again (Live preview).
+    private func topologyEditedInLattice() {
+        guard latticeSetupUp, latticeTopologyOpen, !TopologyViewLive.controlNoStressMark else { return }
+        if newEngineOn { newEngineSettingsChanged() }   // its protect and keep-clear regions are Topology's too
+        guard latticeSim.field != nil, latticeSim.isStale(against: model.makeLatticeSimContexts()) else { return }
+        if TopologyViewLive.recordLive { TopologyViewLive.stressMarkedStale += 1 }
+        if latticeLiveHere { refreshLatticePreview(checkNozzle: false) } else { latticePreviewStale = true }
     }
 
     private var hint: String {
@@ -15074,11 +15149,25 @@ extension WorkspacePlaceholder {
 
     private func designPrimitiveRow(_ row: DesignPrimitive, gap: DesignPrimitiveGap?) -> some View {
         let id = row.id
+        let picked = topoView.pickedDesignRow == id
         return VStack(alignment: .leading, spacing: DS.Space.xs) {
             HStack(spacing: DS.Space.s) {
-                Circle().fill(primitiveColor(row.sign)).frame(width: 10, height: 10)
-                Text(row.name).dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
-                    .foregroundStyle((row.isShown ? DS.Color.textPrimary : DS.Color.textTertiary).color).lineLimit(1)
+                // ★ his iPad notes 11-22: the row picks its shape — its handles show on the part, no other row's; again: let go
+                Button {
+                    if picked { topoView.pickedDesignRow = nil } else { emptyTapClears(); topoView.pickedDesignRow = id }
+                } label: {
+                    HStack(spacing: DS.Space.s) {
+                        Circle().fill(primitiveColor(row.sign)).frame(width: 10, height: 10)
+                        Text(row.name).dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
+                            .foregroundStyle((picked ? DS.Color.accent : row.isShown ? DS.Color.textPrimary
+                                              : DS.Color.textTertiary).color).lineLimit(1)
+                    }
+                    .frame(minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .background(DSParts.publish(picked ? "designRowPicked-\(id)" : "designRowPick-\(id)"))
+                .accessibilityLabel(picked ? "\(row.name), its handles shown" : "Show \(row.name)'s handles")
+                .accessibilityAddTraits(picked ? .isSelected : [])
                 Spacer(minLength: DS.Space.s)
                 Picker("Shape", selection: Binding(get: { row.shape }, set: { project.designBox.setShape(id, $0) })) {
                     ForEach(DesignPrimitiveShape.allCases, id: \.self) { Text($0.title).tag($0) }
@@ -15238,14 +15327,7 @@ extension WorkspacePlaceholder {
     private func topologyGroupRows(_ g: SelectionGroup) -> some View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
             autoKeepClearRow(g)   // ★ first, right under the group's line, where he looks (not under its primitives)
-            groupRow(g, inList: true)
-            if let line = project.keepClearIdlePiecesLine(g) {   // ★ E4 (j), ruling 11-08 21:32: no silent no-ops
-                Text(line).dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textSecondary.color)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, DS.Space.l)
-                    .accessibilityIdentifier("keepClearIdlePieces-\(g.id.uuidString)")
-                    .background(CornerPairStyle.publish("keepClearIdlePieces-\(g.id.uuidString)"))
-            }
+            groupRow(g, inList: true)   // (its Keep clear's idle pieces: a warning glyph beside the toggle, his 11-22)
             if force.kind(for: g.id).isLoad { loadRows(g) }   // ★ B3 (note 5): Kind, Weight, Direction
             // ★ his ask 2026-10-26 + his iPad 14:13: every face its own card, picked one at a time, with its own eye and trash
             VStack(spacing: PieceRowPick.spacing) {
@@ -15765,11 +15847,13 @@ private struct InfoPopoverButton: View {
     let text: String
     let id: String
     var label = "About this face"
+    /// ★ his 11-22: a warning that used to be a line in the panel is this glyph (a tap says why)
+    var warning = false
     @State private var shown = false
     var body: some View {
         Button { shown = true } label: {
-            Image(systemName: "info.circle").font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(DS.Color.textTertiary.color)
+            Image(systemName: warning ? "exclamationmark.triangle.fill" : "info.circle").font(.system(size: 13, weight: .semibold))
+                .foregroundStyle((warning ? DS.Color.warning : DS.Color.textTertiary).color)
                 .frame(width: 44, height: 36).contentShape(Rectangle())
         }
         .buttonStyle(.plain)

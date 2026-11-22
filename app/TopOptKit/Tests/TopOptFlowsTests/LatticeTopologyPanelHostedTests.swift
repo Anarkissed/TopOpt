@@ -49,7 +49,7 @@ final class LatticeTopologyPanelHostedTests: XCTestCase {
             try h.tap("latticeTopologyPanelHeader", "\(size): Topology's header", settle: 1)
             let open = try h.onScreen("latticeTopologyPanel", "\(size): ★ open")
             XCTAssertGreaterThan(open.height, 3 * DSParts.rowHeight, "\(size): its rows")
-            _ = try h.onScreen("latticeTopologyLine", "\(size): ★ \"Switched-off groups are left out of this lattice.\"")
+            _ = try h.onScreen("latticeTopologyLine", "\(size): ★ \"Switch off to leave out\" (his 11-22: five words; the sentence is the (i))")
             let pill = try h.onScreen("selectionsList", "\(size): ★ Selections, folded to its pill")
             XCTAssertLessThan(pill.height, 60, "\(size): ★ R2.1 — one open at a time")
             XCTAssertGreaterThan(pill.minY, open.maxY, "\(size): the pill below the open panel")
@@ -59,7 +59,8 @@ final class LatticeTopologyPanelHostedTests: XCTestCase {
                            "\(size): ★ opening Selections folds Topology")
             XCTAssertGreaterThan(try h.onScreen("selectionsList", "\(size): Selections, open").height, 60)
         }
-        XCTAssertEqual(LatticeSetupCopy.includeLine, "Switched-off groups are left out of this lattice.")
+        XCTAssertEqual(LatticeSetupCopy.includeLine, "Switch off to leave out")
+        XCTAssertTrue(TopologyViewCopy.panelInfo.hasPrefix("Switched-off groups are left out of this lattice."), "★ the sentence is the (i)'s")
     }
 
     /// ★ 23b: every scenario folder and group has an include switch, on; off is stored with the lattice. Until the linked core
