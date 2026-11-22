@@ -77,8 +77,9 @@ final class LatticeCornerHostedTests: XCTestCase {
         // ★ his 11-20 ask (acca75e3): "Run the stress check" leads the ⌃ when the lattice follows the stresses
         let stress = LatticeLayoutPreview.needsStress(p.lattice) ? [StressCheckCopy.menuTitle] : []
         let five = stress + ["Lattice the original part", "Optimize, then lattice", "Lattice an optimized result", "Preview only", "Export\u{2026}",
-                    LatticePreviewMode.live, LatticePreviewMode.refresh]
-        XCTAssertEqual(offered.count, five.count, "★ note 21's five + his 11-16 pair: \(offered)")
+                    LatticePreviewMode.live, LatticePreviewMode.refresh,
+                    LatticePreviewMode.printAccurate]   // ★ his ask 11-21: the quick Draft or the print file's own lattice
+        XCTAssertEqual(offered.count, five.count, "★ note 21's five + his 11-16 pair + his 11-21 switch: \(offered)")
         for (o, t) in zip(offered, five) { XCTAssertTrue(o.hasPrefix(t), "★ in the design's order: \(t) — \(offered)") }
         func item(_ t: String) -> String? { offered.first { $0.hasPrefix(t) } }
         XCTAssertFalse(item("Lattice the original part")?.hasSuffix("[off]") ?? true, "★ a lattice set: it runs (\(offered))")

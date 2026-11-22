@@ -656,12 +656,39 @@ public struct DSRunButton: View {
     let subtitle: String
     let state: State
     let key: String
+    let progress: Progress?
     let action: () -> Void
     let fix: (() -> Void)?
 
-    public init(_ title: String, subtitle: String, state: State = .ready, key: String, action: @escaping () -> Void,
-                fix: (() -> Void)? = nil) {
-        self.title = title; self.subtitle = subtitle; self.state = state; self.key = key; self.action = action; self.fix = fix
+    /// ★ His pick 11-21 (the preview-speed research): something the button waits on, said ON the button (never a line at the
+    /// bottom): a ring that fills toward `expected` seconds (never quite closed before it ends; a spinner when nothing says
+    /// how long) and its words with the time left. The button's title and tap stay its own.
+    public struct Progress: Equatable {
+        public var started: Date
+        public var expected: TimeInterval?
+        public var words: String
+        public init(started: Date, expected: TimeInterval?, words: String) {
+            self.started = started; self.expected = expected; self.words = words
+        }
+        /// How full the ring is at `now` (0 to 0.95); nil: a spinner.
+        public func fraction(at now: Date) -> Double? {
+            guard let e = expected, e > 0 else { return nil }
+            return Swift.min(0.95, Swift.max(0, now.timeIntervalSince(started) / e))
+        }
+        /// The line at `now`: the words, then the time left ("12 s", "3 min", "finishing").
+        public func line(at now: Date) -> String {
+            guard let e = expected, e > 0 else { return words }
+            return words + " \u{00B7} " + Self.left(e - now.timeIntervalSince(started))
+        }
+        public static func left(_ s: Double) -> String {
+            s <= 1 ? "finishing" : s < 60 ? "\(Int(s.rounded(.up))) s" : "\(Int((s / 60).rounded(.up))) min"
+        }
+    }
+
+    public init(_ title: String, subtitle: String, state: State = .ready, key: String, progress: Progress? = nil,
+                action: @escaping () -> Void, fix: (() -> Void)? = nil) {
+        self.title = title; self.subtitle = subtitle; self.state = state; self.key = key; self.progress = progress
+        self.action = action; self.fix = fix
     }
 
     private var grey: Bool {
@@ -684,14 +711,14 @@ public struct DSRunButton: View {
                 DSChip(.fix(fixTitle), key: key + "Fix", action: fix)
             }
             Button(action: action) {
-                HStack(spacing: 10) {
-                    if busy { ProgressView().controlSize(.small).tint(.white) }
-                    VStack(spacing: 1) {
-                        Text(title).font(.system(size: 16, weight: .bold)).lineLimit(1).fixedSize()
-                        // never cut (the mockup's `.run small`: nowrap; min-width 250): the button grows to the line
-                        Text(line2).font(.system(size: 11.5)).lineLimit(1).fixedSize()
-                            .foregroundStyle(grey ? DS.Color.textTertiary.color : Color.white.opacity(0.85))
-                            .background(DSParts.publish("\(key)-line2"))
+                Group {
+                    if let progress {   // ★ his pick 11-21: the ring and the count-down, once a second (this view only)
+                        TimelineView(.periodic(from: progress.started, by: 1)) { ctx in
+                            lines(ring: progress.fraction(at: ctx.date), spinner: progress.fraction(at: ctx.date) == nil,
+                                  line: progress.line(at: ctx.date))
+                        }
+                    } else {
+                        lines(ring: nil, spinner: busy, line: line2)
                     }
                 }
                 .foregroundStyle(grey ? DS.Color.textDisabled.color : Color.white)
@@ -707,6 +734,29 @@ public struct DSRunButton: View {
             .disabled({ if case .disabled = state { return true }; return false }())
             .background(DSParts.publish(key))
             .accessibilityIdentifier(key)
+        }
+    }
+
+    private func lines(ring: Double?, spinner: Bool, line: String) -> some View {
+        HStack(spacing: 10) {
+            if let ring {
+                ZStack {
+                    Circle().stroke(Color.white.opacity(0.3), lineWidth: 2.5)
+                    Circle().trim(from: 0, to: ring).stroke(Color.white, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                }
+                .frame(width: 18, height: 18)
+                .background(DSParts.publish("\(key)-ring"))
+            } else if spinner {
+                ProgressView().controlSize(.small).tint(.white)
+            }
+            VStack(spacing: 1) {
+                Text(title).font(.system(size: 16, weight: .bold)).lineLimit(1).fixedSize()
+                // never cut (the mockup's `.run small`: nowrap; min-width 250): the button grows to the line
+                Text(line).font(.system(size: 11.5)).lineLimit(1).fixedSize()
+                    .foregroundStyle(grey ? DS.Color.textTertiary.color : Color.white.opacity(0.85))
+                    .background(DSParts.publish("\(key)-line2"))
+            }
         }
     }
 }

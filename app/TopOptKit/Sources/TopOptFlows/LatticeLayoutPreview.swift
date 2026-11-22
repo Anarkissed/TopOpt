@@ -38,6 +38,34 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// Core's numbers for the debug overlay (stage E's iPad timing): open, read, cells, bars, ms.
     @Published public private(set) var timing: Timing?
     @Published public private(set) var laying = false
+    /// ★ His picks 11-21 (the preview-speed research: "Let's do this one. Absolutely."): the Organic lay under way, for the
+    /// Lattice button's ring and count-down. The Draft first (the last lattice dimmed meanwhile), then the exact lattice with
+    /// the Draft on screen, marked. nil: no Organic lay going.
+    @Published public private(set) var layProgress: LayProgress?
+    public struct LayProgress: Equatable, Sendable {
+        public var quality: LatticeLayoutSession.Organic.Quality
+        public var started: Date
+        /// How long the last lay like it took on this part (s); nil: none yet.
+        public var expectedS: Double?
+        /// This lay's Draft is on screen (marked) while the exact lattice is made.
+        public var draftShown: Bool
+        public init(quality: LatticeLayoutSession.Organic.Quality, started: Date, expectedS: Double?, draftShown: Bool) {
+            self.quality = quality; self.started = started; self.expectedS = expectedS; self.draftShown = draftShown
+        }
+    }
+    /// ★ his ask 11-21: Print-accurate preview (the ⌃ menu): on, every Organic lay ends with the exact print-file lattice;
+    /// off, the Draft alone stands in (the exact lattice is made with the print file).
+    var printAccurate: Bool { AppSettings.shared.latticePrintAccurate }
+    /// The lay going (or last made) ends with the exact lattice.
+    private var accurateAtLay = true
+    /// An exact lattice is being made (the print file waits for it rather than asking again).
+    public var layingExact: Bool { laying && accurateAtLay }
+    /// RED CONTROL (tests): an Organic lay goes straight to the exact lattice, no Draft first (as before 11-21).
+    nonisolated(unsafe) public static var controlNoDraftFirst = false
+    /// RED CONTROL (tests): nothing is remembered (every change of settings lays again, as before 11-21).
+    nonisolated(unsafe) public static var controlForget = false
+    /// Finished Organic previews shown from memory instead of laid (a test's count).
+    public static private(set) var remembersShown = 0
     /// ★ D23 (his 11-17): the chips' places of the last layout, and how long core took to find them.
     @Published public private(set) var places: [LatticeLayoutSession.Place] = []
     public private(set) var placesMS = 0.0
@@ -183,6 +211,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         guard let path = p.importedFile?.path else { return bars == nil }
         return path == sessionPath && Self.settings(p, referenceMPa: stress.referenceMPa) == lastSettings && stress.key == self.stress.key
             && Self.organicKey(p) == lastOrganicKey
+            && (!printAccurate || !Self.organic(p.lattice) || layingExact || (!laying && organicQuality != .draft))   // ★ 11-21
     }
 
     /// ★ Organic cut 2 (the export, handover f): what the print file is made from — the SAME groups the exact preview laid for
@@ -193,6 +222,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         if laying { throw OrganicFileWait.laying }
         guard let groups = organicLaidGroups, let session else { throw OrganicFileWait.notLaid }
         guard isCurrent(project: p, stress: stress) else { throw OrganicFileWait.outOfDate }
+        try await matchSessionTensor(session, groups: groups)   // ★ his pick 11-21: a remembered lattice's own stress
         let tensor = try await session.tensorFile()
         return (groups, tensor)
     }
@@ -210,7 +240,7 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// ★ his picks 11-16: `delay` — Live preview lays half a second after the last change (a newer change cancels the wait);
     /// `checkNozzle` — Refresh also runs the 0.2 mm nozzle check after the layout.
     public func update(project p: ProjectModel, on: Bool, solid: Bool = false, stress: Stress = Stress(),
-                       delay: Duration = .zero, checkNozzle: Bool = false) {
+                       delay: Duration = .zero, checkNozzle: Bool = false, exact: Bool = false) {
         guard on else { clear(); return }
         guard let path = p.importedFile?.path else { problem = Self.noPartLine; bars = nil; return }
         if path != sessionPath || box == nil { box = Self.box(p.importedMesh?.vertices ?? []) }
@@ -222,30 +252,41 @@ public final class LatticeLayoutPreview: ObservableObject {
         let stressMoved = stress.key != self.stress.key
         self.stress = stress
         let ok = Self.organicKey(p)
-        if path == sessionPath, s == lastSettings, ok == lastOrganicKey, !stressMoved, task != nil || bars != nil {
+        // ★ his pick 11-21: the solid view asked of a remembered lattice: its map comes from a lay
+        let mapNeedsLay = solidChanged && solid && shownRestored && bars?.solid == nil
+        // ★ his ask 11-21: the exact lattice asked (Print-accurate preview, or the print file: `exact`) where a Draft stands in
+        let accurate = printAccurate || exact, isOrganic = Self.organic(p.lattice)
+        let wantsExact = accurate && isOrganic && ((laying && !accurateAtLay) || (!laying && bars != nil && organicQuality == .draft))
+        if path == sessionPath, s == lastSettings, ok == lastOrganicKey, !stressMoved, task != nil || bars != nil, !mapNeedsLay,
+           !wantsExact {
             if solidChanged, task == nil || bars != nil { solidToggled() }
             if checkNozzle, nozzleState == .notAsked, bars != nil { self.checkNozzle() }   // Refresh with nothing changed
             return
         }
-        lastSettings = s
-        lastOrganicKey = ok
-        pageManualAtLay = p.latticePageManual
-        latticeAtLay = p.lattice
-        flushAtLay = Self.flushFaces(p)   // ★ cut 2: the loaded and fixed faces, always flush
-        layerAtLay = p.printParams.layerHeightMM > 0 ? p.printParams.layerHeightMM : 0.2
-        keysAtLay = Self.regionKeys(p)   // ★ Install 3: the drawer's rows, as this layout's regions
-        groupsAtLay = Self.regionGroups(p)   // ★ Organic per group: each region's group
-        groupOrderAtLay = p.latticeAreaGroups.map(\.id)
-        groupNamesAtLay = Dictionary(p.latticeAreaGroups.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
+        // ★ his pick 11-21 ("absolutely"): a lattice already made for exactly these inputs is shown at once, no lay
+        if restoreRemembered(p, path: path, s, ok, accurate: accurate) { return }
+        let before = inputsAtLay, wasLaying = laying
+        take(p, s, ok)
+        shownRestored = false
+        // the Draft of exactly these inputs is on screen: the exact lattice alone follows it
+        let draftOnScreen = isOrganic && accurate && !wasLaying && organicQuality == .draft && before != nil && before == inputsAtLay
+        accurateAtLay = accurate
         task?.cancel()
         laying = true
         nozzleWanted = checkNozzle
+        // ★ his pick 11-21 ("Let's do this one. Absolutely."): every Organic lay shows its Draft first (marked, the last
+        // lattice dimmed until it lands), then the exact lattice replaces it (before: only Live preview's dragged slider)
+        // ★ his ask 11-21: Print-accurate preview off, the Draft is all (the exact lattice is made with the print file)
+        let draftFirst = isOrganic && !Self.controlNoDraftFirst && !draftOnScreen
+        let q: LatticeLayoutSession.Organic.Quality = draftFirst ? .draft : .exact
+        layProgress = isOrganic ? LayProgress(quality: q, started: Date(), expectedS: layWallS[timeKey(path, q)],
+                                              draftShown: draftOnScreen) : nil
         task = Task { [weak self] in
             if delay > .zero {   // ★ Live preview: wait for him to stop changing it
                 try? await Task.sleep(for: delay)
                 if Task.isCancelled { return }
             }
-            await self?.lay(path: path, s, draft: delay > .zero && Self.organic(p.lattice))
+            await self?.lay(path: path, s, draft: draftFirst)
         }
     }
 
@@ -269,6 +310,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         sessionTensorKey = nil; organicLimits = nil; organicQuality = nil; organicNumbers = nil   // ★ Organic cut 1
         organicLaidGroups = nil   // ★ cut 2
         bars = nil; laid = nil; problem = nil; timing = nil; laying = false; places = []
+        layProgress = nil; shownRestored = false   // ★ his pick 11-21 (what was remembered stays, for this part)
     }
 
     // MARK: ★ Install 3 — the old preview's colour key on the new engine's bars
@@ -287,6 +329,145 @@ public final class LatticeLayoutPreview: ObservableObject {
 
     private var lookupCache: (token: Int, lookup: LatticeLayoutColours.CellLookup)?
     private var drawnCache: (key: [Int], bars: LatticeLayoutBarsInputs)?
+
+    // MARK: ★ his pick 11-21 ("absolutely"): finished previews remembered
+
+    /// Everything an Organic lay reads: the part, the page's settings as laid and the stress. Equal inputs, the same lattice
+    /// (the engine's lay is pinned). It holds the WHOLE lattice settings, not only the ones known to matter: a setting it
+    /// missed would show an old lattice, one too many only lays again.
+    struct LayInputs: Equatable {
+        var path: String
+        var settings: LatticeLayoutSession.Settings
+        var lattice: LatticeSettings
+        var pageManual: Bool
+        var flush: [Int32]
+        var layer: Double
+        var keys: [Int32: String]
+        var groups: [Int32: UUID]
+        var groupOrder: [UUID]
+        var stress: Stress
+    }
+    static func layInputs(_ p: ProjectModel, path: String, _ s: LatticeLayoutSession.Settings, stress: Stress) -> LayInputs {
+        LayInputs(path: path, settings: s, lattice: p.lattice, pageManual: p.latticePageManual, flush: flushFaces(p),
+                  layer: p.printParams.layerHeightMM > 0 ? p.printParams.layerHeightMM : 0.2, keys: regionKeys(p),
+                  groups: regionGroups(p), groupOrder: p.latticeAreaGroups.map(\.id), stress: stress)
+    }
+    /// One finished exact Organic preview: what the page showed, and what the print file is made from.
+    struct Remembered {
+        var inputs: LayInputs
+        var bars: LatticeLayoutBarsInputs
+        var laid: LatticeLayoutColours.Laid?
+        var timing: Timing?
+        var numbers: OrganicNumbers?
+        var problem: String?
+        var notes: [String]
+        var groups: [LatticeLayoutSession.OrganicGroup]
+        var walls: [(region: Int32, foci: Int)]
+        var wallVerdicts: [String: Bool]
+        var autoLimits: LatticeOrganicLook.Limits?
+        var groupLimits: [UUID: LatticeOrganicLook.Limits]
+        var struts: Int
+        /// A Draft (the quick stand-in) or the exact lattice; a Draft never stands for Print-accurate preview.
+        var quality: LatticeLayoutSession.Organic.Quality
+    }
+    /// Most recent first; at most `rememberedMost`, and no more struts in all than `rememberedStrutsMost` (the iPad's memory).
+    private var remembered: [Remembered] = []
+    public static let rememberedMost = 4
+    public static let rememberedStrutsMost = 600_000
+    private var inputsAtLay: LayInputs?
+    /// The lattice on screen came from memory (the session's last lay is another one).
+    private var shownRestored = false
+    /// The synthetic stress walls of the lattice on screen (the print file's stress is made the same way).
+    private var shownWalls: [(region: Int32, foci: Int)] = []
+    /// ★ his pick 11-21: how long each kind of Organic lay took on this part (s), keyed "path|type|quality".
+    private var layWallS: [String: Double] = [:]
+    private var typeAtLay = ""
+
+    private func timeKey(_ path: String, _ q: LatticeLayoutSession.Organic.Quality) -> String {
+        "\(path)|\(typeAtLay)|\(q == .draft ? "draft" : "exact")"
+    }
+
+    private func remember(_ r: Remembered) {
+        guard !Self.controlForget else { return }
+        if r.quality == .draft, remembered.contains(where: { $0.inputs == r.inputs && $0.quality == .exact }) { return }
+        var kept = [r]
+        var struts = r.struts
+        for e in remembered where e.inputs != r.inputs && kept.count < Self.rememberedMost
+            && struts + e.struts <= Self.rememberedStrutsMost {
+            kept.append(e); struts += e.struts
+        }
+        remembered = kept
+    }
+
+    /// ★ his pick 11-21: a lattice already made for exactly these inputs, shown at once (no lay, nothing dimmed). False: none
+    /// remembered, or it would need the solid view's map, which only a lay makes.
+    private func restoreRemembered(_ p: ProjectModel, path: String, _ s: LatticeLayoutSession.Settings, _ ok: String?,
+                                   accurate: Bool) -> Bool {
+        guard Self.organic(p.lattice), !Self.controlForget, session != nil, sessionPath == path else { return false }
+        let key = Self.layInputs(p, path: path, s, stress: stress)
+        guard let i = remembered.firstIndex(where: { $0.inputs == key && $0.quality == .exact })
+                ?? (accurate ? nil : remembered.firstIndex(where: { $0.inputs == key })) else { return false }
+        if solidWanted, remembered[i].bars.solid == nil { return false }
+        let r = remembered.remove(at: i)
+        remembered.insert(r, at: 0)
+        task?.cancel(); task = nil
+        mapTask?.cancel(); mapTask = nil
+        take(p, s, ok)
+        accurateAtLay = r.quality == .exact
+        var b = r.bars
+        b.dimmed = false
+        if !solidWanted { b.solid = nil }
+        bars = b; laid = r.laid; timing = r.timing
+        organicQuality = r.quality; organicNumbers = r.numbers; problem = r.problem; notes = r.notes
+        organicLaidGroups = r.quality == .exact ? r.groups : nil; organicRefusals = []; organicWallVerdicts = r.wallVerdicts
+        organicAutoLimits = r.autoLimits; organicGroupLimits = r.groupLimits
+        shownWalls = r.walls; shownRestored = true
+        laying = false; layProgress = nil
+        Self.remembersShown += 1
+        return true
+    }
+
+    /// ★ his pick 11-21, for Click to refresh: a changed setting whose lattice was made before shows it at once (true); false:
+    /// the preview is out of date (Refresh Lattice).
+    public func showRemembered(project p: ProjectModel, solid: Bool, stress: Stress) -> Bool {
+        guard let path = p.importedFile?.path, Self.organic(p.lattice) else { return false }
+        let wasSolid = solidWanted, wasStress = self.stress
+        solidWanted = solid; self.stress = stress
+        if restoreRemembered(p, path: path, Self.settings(p, referenceMPa: stress.referenceMPa), Self.organicKey(p),
+                             accurate: printAccurate) { return true }
+        solidWanted = wasSolid; self.stress = wasStress
+        return false
+    }
+
+    /// What the next lay reads off the page (the update's own, and a remembered lattice's).
+    private func take(_ p: ProjectModel, _ s: LatticeLayoutSession.Settings, _ ok: String?) {
+        lastSettings = s
+        lastOrganicKey = ok
+        pageManualAtLay = p.latticePageManual
+        latticeAtLay = p.lattice
+        flushAtLay = Self.flushFaces(p)   // ★ cut 2: the loaded and fixed faces, always flush
+        layerAtLay = p.printParams.layerHeightMM > 0 ? p.printParams.layerHeightMM : 0.2
+        keysAtLay = Self.regionKeys(p)   // ★ Install 3: the drawer's rows, as this layout's regions
+        groupsAtLay = Self.regionGroups(p)   // ★ Organic per group: each region's group
+        groupOrderAtLay = p.latticeAreaGroups.map(\.id)
+        groupNamesAtLay = Dictionary(p.latticeAreaGroups.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
+        typeAtLay = Self.organic(p.lattice) ? Self.organicButtonType(p) : ""
+        inputsAtLay = p.importedFile.map { Self.layInputs(p, path: $0.path, s, stress: stress) }
+    }
+
+    /// The print file's stress for a remembered lattice: the session's tensor made as that lay made it.
+    private func matchSessionTensor(_ session: LatticeLayoutSession, groups: [LatticeLayoutSession.OrganicGroup]) async throws {
+        guard shownRestored, let s = lastSettings else { return }
+        if sessionTensorKey != stress.key, let f = stress.field, !f.stressTensor.isEmpty {
+            try await session.setTensor(voigt: f.stressTensor, nx: f.nx, ny: f.ny, nz: f.nz, origin: f.origin, spacingMM: f.spacingMM)
+            sessionTensorKey = stress.key
+        }
+        if !shownWalls.isEmpty || syntheticOn {
+            _ = try await session.synthetic(s, groups: groups, walls: shownWalls)
+            syntheticOn = !shownWalls.isEmpty
+        }
+        shownRestored = false   // the session now holds what is on screen
+    }
 
     /// Which laid cell holds a point (the tap-to-read card, the drawer), for the layout on screen.
     public func cellLookup() -> LatticeLayoutColours.CellLookup? {
@@ -358,13 +539,17 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// The bars to draw, wearing the old preview's key (LatticeLayoutColours): by what each bar is and how much material it
     /// holds, or by the stress (`stress`, the stress view with the lattice; `stressKey` names it). Worked out once per layout
     /// and colouring.
+    /// ★ his pick 11-21: the lattice on screen is dimmed while an Organic lay goes, until this lay's own Draft lands.
+    public static func dims(_ p: LayProgress?) -> Bool { p.map { !$0.draftShown } ?? false }
+
     public func drawn(stressField field: LatticeDemandField?, stressKey: Int) -> LatticeLayoutBarsInputs? {
         guard var b = bars else { return nil }
+        b.dimmed = Self.dims(layProgress)   // ★ his pick 11-21: the last lattice, dimmed while the new one lays
         guard let laid, laid.token == b.token else { return b }
         let grade = latticeAtLay.gradingMode.fitsShape
         let organic = latticeAtLay.isOrganic
         let key = [b.token, field == nil ? 0 : stressKey, grade ? 1 : 0, latticeAtLay.topologyID.hashValue, organic ? 1 : 0,
-                   LatticeLayoutColours.controlOneColour ? 1 : 0, b.solid?.token ?? -1, b.hidden ? 1 : 0]
+                   LatticeLayoutColours.controlOneColour ? 1 : 0, b.solid?.token ?? -1, b.hidden ? 1 : 0, b.dimmed ? 1 : 0]
         if let c = drawnCache, c.key == key { return c.bars }
         b.colours = LatticeLayoutColours.colours(laid, type: Self.lawType(latticeAtLay), grade: grade,
                                                  stress: field.map(LatticeLayoutColours.Stress.init(field:)),
@@ -387,6 +572,8 @@ public final class LatticeLayoutPreview: ObservableObject {
                 let opened = try await LatticeLayoutSession.open(path: path)
                 guard !Task.isCancelled else { return }
                 session = opened; sessionPath = path; openMS = opened.info.msOpen; sessionStressKey = nil; sessionTensorKey = nil; organicLimits = nil
+                syntheticOn = false   // a new session holds the stress as given
+                remembered.removeAll { $0.inputs.path != path }   // ★ his pick 11-21: another part's lattices are of no use
             }
             guard let session else { return }
             sessionStressKey = try await Self.give(stress, to: session, holding: sessionStressKey)
@@ -425,13 +612,18 @@ public final class LatticeLayoutPreview: ObservableObject {
             problem = Self.failedPlainLine
             bars = nil
             laying = false
+            layProgress = nil
         }
     }
 
     /// ★ Organic cut 1: the weave's lay. The tensor in (once per stress), Auto's numbers (core's, measured before the lay,
     /// once per regions and line), the lay (Draft while a slider moves, then Exact), its runs as
     /// the bars pass's segments. No stress yet: one line (the page runs the stress check first).
-    private func layOrganic(_ session: LatticeLayoutSession, path: String, _ s: LatticeLayoutSession.Settings, draft: Bool) async throws {
+    private func layOrganic(_ session: LatticeLayoutSession, path: String, _ s: LatticeLayoutSession.Settings, draft: Bool,
+                            afterDraft: Bool = false) async throws {
+        if afterDraft {   // ★ his pick 11-21: the Draft is on screen, marked; the exact lattice is made
+            layProgress = LayProgress(quality: .exact, started: Date(), expectedS: layWallS[timeKey(path, .exact)], draftShown: true)
+        }
         // ★ Auto's numbers first, measured by the engine before any lay or stress (his iPad notes 11-18: the fields showed
         // 0): the whole part's and each group's (E4: the union of its areas), once per "where" and line
         let line = s.beadMM > 0 ? s.beadMM : 0.45   // the print line (the settings' bead)
@@ -453,11 +645,11 @@ public final class LatticeLayoutPreview: ObservableObject {
         organicAutoLimits = organicLimits?.limits   // (before Look: the page applies each look's own)
         organicGroupLimits = organicLimits?.groups ?? [:]
         guard let f = stress.field, !f.stressTensor.isEmpty else {
-            problem = Self.organicNeedsStressLine; bars = nil; laying = false; return
+            problem = Self.organicNeedsStressLine; bars = nil; laying = false; layProgress = nil; return
         }
         guard f.stressTensor.allSatisfy(\.isFinite) else {
             problem = "The stress result holds a value that is not a number: run the stress check again"
-            bars = nil; laying = false; return
+            bars = nil; laying = false; layProgress = nil; return
         }
         if sessionTensorKey != stress.key {
             try await session.setTensor(voigt: f.stressTensor, nx: f.nx, ny: f.ny, nz: f.nz, origin: f.origin, spacingMM: f.spacingMM)
@@ -489,7 +681,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         }
         let grown = looks.contains { $0.modeValue == .grown }
         if let short = Self.organicMemoryShort(mode: grown ? .grown : .traced, availableMB: Self.availableMB()) {
-            problem = short; bars = nil; laid = nil; laying = false; return   // ★ refused, never a crash
+            problem = short; bars = nil; laid = nil; laying = false; layProgress = nil; return   // ★ refused, never a crash
         }
         // ★ E5, "Simulate stresses on unstressed walls" (his 11-18: Organic and Aesthetic only; each wall's foci, default 3)
         let aesthetic = (latticeAtLay.stageMode ?? .structural) == .aesthetic
@@ -552,11 +744,25 @@ public final class LatticeLayoutPreview: ObservableObject {
             : missing > 1 ? "\(missing) areas point at faces this part does not have: pick their faces again" : nil
         notes = Self.notes(latticeAtLay, hasStress: true) + (r.quality == .draft ? [Self.draftLine] : []) + r.notes
             + (r.reliefFlushed > 0 ? [Self.reliefFlushedLine(r.reliefFlushed)] : [])   // ★ cut 2 (OJ6)
-        laying = false
-        // a draft is followed by the exact lattice when nothing newer came
+        // ★ his pick 11-21: a Draft is followed by the exact lattice, so the preview is still laying (the print file waits
+        // for the exact one); how long this kind took is kept for the next count-down
+        // ★ his ask 11-21: Print-accurate preview on, the exact lattice follows its Draft; off, the Draft is the preview
+        let more = r.quality == .draft && accurateAtLay
+        laying = more
+        if let started = layProgress?.started { layWallS[timeKey(path, r.quality)] = Date().timeIntervalSince(started) }
+        if !more {
+            layProgress = nil
+            if let inputs = inputsAtLay, seg.count > 0 {   // ★ his pick 11-21 ("absolutely"): remembered
+                remember(Remembered(inputs: inputs, bars: drawn, laid: l, timing: timing, numbers: organicNumbers, problem: problem,
+                                    notes: notes, groups: groups, walls: walls, wallVerdicts: organicWallVerdicts,
+                                    autoLimits: organicAutoLimits, groupLimits: organicGroupLimits, struts: seg.count,
+                                    quality: r.quality))
+            }
+        }
+        // a draft is followed by the exact lattice when nothing newer came (Print-accurate preview)
         // ★ his 11-18 iPad (the body hid the weave): the solid view's map, cut open around Organic as around the regular lattice
-        if r.quality == .exact, solidWanted, !Task.isCancelled { await addMap() }
-        if r.quality == .draft, !Task.isCancelled { try await layOrganic(session, path: path, s, draft: false) }
+        if !more, solidWanted, !Task.isCancelled { await addMap() }
+        if more, !Task.isCancelled { try await layOrganic(session, path: path, s, draft: false, afterDraft: true) }
     }
 
     /// The Organic lay's line: "Organic Grown · Exact · laid in 3.8 s · 63,670 struts".
@@ -607,7 +813,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         }
         problem = texts.first.map { texts.count > 1 ? $0 + " (and \(texts.count - 1) more)" : $0 }
         organicRefusals = refused
-        bars = nil; laid = nil; laying = false
+        bars = nil; laid = nil; laying = false; layProgress = nil
     }
 
     /// ★ What of his Organic settings the lay reads beyond the session Settings: the controls (Manual), Look, and the page's
@@ -752,6 +958,7 @@ public final class LatticeLayoutPreview: ObservableObject {
             now.solid = m.grid
             bars = now
             timing?.mapMS = m.ms
+            if let i = remembered.firstIndex(where: { $0.bars.token == now.token }) { remembered[i].bars.solid = m.grid }   // ★ 11-21
         } catch {
             // the bars stay; the body stays whole where the map could not be read
         }

@@ -4976,8 +4976,11 @@ public struct WorkspacePlaceholder: View {
     private func newEngineSettingsChanged() {
         if latticeLiveHere {
             newEngine.update(project: project, on: true, solid: !surfaceXrayOn, stress: newEngineStress, delay: LatticePreviewMode.liveWait)
-        } else if !newEngine.isCurrent(project: project, stress: newEngineStress) {
-            latticePreviewStale = true
+        } else if newEngine.isCurrent(project: project, stress: newEngineStress) {
+            latticePreviewStale = false   // ★ 11-21: back to the settings on screen (his undo of a zone delete): nothing to lay
+        } else {
+            // ★ his pick 11-21 ("absolutely"): a lattice already made for these settings shows at once, no Refresh
+            latticePreviewStale = !newEngine.showRemembered(project: project, solid: !surfaceXrayOn, stress: newEngineStress)
         }
     }
 
@@ -4993,7 +4996,7 @@ public struct WorkspacePlaceholder: View {
 
     /// ★ his pick 11-16 (2): Refresh Lattice — the stress check when out of date, both previews from the settings as they are
     /// now and (5) the 0.2 mm nozzle check; the button goes back to Lattice.
-    func refreshLatticePreview(checkNozzle: Bool = true) {
+    func refreshLatticePreview(checkNozzle: Bool = true, exact: Bool = false) {
         latticePreviewStale = false
         latticeRefreshRequested = true
         defer { latticeRefreshRequested = false }
@@ -5003,7 +5006,8 @@ public struct WorkspacePlaceholder: View {
         }
         if newEngineOn {
             if LatticeLayoutPreview.needsStress(project.lattice) { runNewEngineStressCheck() }   // only what these settings read
-            newEngine.update(project: project, on: true, solid: !surfaceXrayOn, stress: newEngineStress, checkNozzle: checkNozzle)
+            newEngine.update(project: project, on: true, solid: !surfaceXrayOn, stress: newEngineStress, checkNozzle: checkNozzle,
+                             exact: exact)   // ★ 11-21: the print file asks the exact lattice whatever the preview shows
         }
     }
 
@@ -14361,7 +14365,7 @@ public struct WorkspacePlaceholder: View {
             return
         }
         Task { @MainActor in
-            let inputs = try? await newEngine.organicFileInputs(project: project, stress: stress)
+            let inputs = try? await organicInputsWhenReady()   // ★ 11-21: the exact lattice made first where a Draft stands in
             fileExport.make(project: project, config: compute.activeRemote, stress: stress, strengthJob: strengthJob,
                             organic: inputs ?? ([], Data()))
         }
@@ -14671,8 +14675,11 @@ extension WorkspacePlaceholder {
         // ★ his pick 11-16: under Click to refresh, an out-of-date preview turns the button into Refresh Lattice
         let refresh = LatticePreviewMode.showsRefresh(live: latticeLiveHere, previewUp: showStrutPreview,
                                                       stale: latticePreviewStale, running: runs)
+        // ★ his pick 11-21: an Organic preview laying wears its ring and count-down on the button (never a bottom line)
+        let laying = refresh || runs ? nil : newEngine.layProgress.map(LatticePreviewMode.buttonProgress)
         return DSRunButton(refresh ? LatticePreviewMode.refreshButton : runs ? LatticeSetupCopy.running : "Lattice",
-                           subtitle: refresh ? LatticePreviewMode.refreshLine : line, state: refresh ? .ready : state, key: "latticeButton") {
+                           subtitle: refresh ? LatticePreviewMode.refreshLine : line, state: refresh ? .ready : state, key: "latticeButton",
+                           progress: laying) {
             if refresh { refreshLatticePreview(); return }
             if runs { run.restore(); return }
             if ok { requestLatticeRun() } else if notSet { showLatticeWizard = true }
@@ -15689,6 +15696,10 @@ extension WorkspacePlaceholder {
                 } label: { EmptyView() }
                 .pickerStyle(.inline)
                 .accessibilityIdentifier("lattice-split-preview-mode")
+                // ★ his ask 11-21: the quick stand-in (off) or the print file's own lattice (on), a check mark when on
+                Toggle(LatticePreviewMode.printAccurate, isOn: Binding(get: { appSettings.latticePrintAccurate },
+                                                                      set: { appSettings.latticePrintAccurate = $0; if newEngineOn { newEngineSettingsChanged() } }))
+                .accessibilityIdentifier("lattice-split-print-accurate")
             }
         }
         .background(CornerPairStyle.publish("latticeSplit"))
@@ -15867,7 +15878,8 @@ extension WorkspacePlaceholder {
             do { return try await newEngine.organicFileInputs(project: project, stress: newEngineStress) }
             catch let wait as LatticeLayoutPreview.OrganicFileWait {
                 guard attempt == 0 else { throw wait }
-                if wait != .laying { refreshLatticePreview(checkNozzle: false) }
+                // ★ his ask 11-21: the exact lattice, also where the quick Draft stands in (Print-accurate preview off)
+                if wait != .laying || !newEngine.layingExact { refreshLatticePreview(checkNozzle: false, exact: true) }
                 model.toast = LatticeFileExport.organicPreviewFirstLine
                 let end = Date().addingTimeInterval(LatticeFileExport.organicPreviewWaitSeconds)
                 try await Task.sleep(nanoseconds: 300_000_000)
