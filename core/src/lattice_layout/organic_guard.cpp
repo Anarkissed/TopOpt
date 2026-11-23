@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "topopt/lattice_layout_organic.hpp"
+#include "on_every_core.hpp"
 
 namespace topopt::lattice_layout {
 namespace {
@@ -95,11 +96,22 @@ std::size_t guard_bars(Bars& bars, const Domain& domain, const std::vector<int>&
   auto note = [&](std::vector<Vec3>& at, const Bar& b) {
     if (at.size() < 20) at.push_back({0.5 * (b.a.x + b.b.x), 0.5 * (b.a.y + b.b.y), 0.5 * (b.a.z + b.b.z)});
   };
-  for (std::size_t i = 0; i < n0; ++i) {
+  // Speed (his 11-23 iPad notes): every bar is judged on its own (the domain and its own two ends only), so each is judged
+  // on every core into its own slot (`done`); the answers are then applied in bar order, exactly as one loop applied them.
+  struct Done {
+    enum class Act : char { Keep, Remove, Replace } act = Act::Keep;
+    char counted = 0;        // 'r' removed whole, 'o' cut where it left the part, 's' cut in solid
+    std::string kind;        // by_kind's word (empty: not counted)
+    std::size_t dropped = 0; // pieces with a free end not kept
+    std::vector<Bar> made;   // Replace: made[0] in its place, the rest after every bar
+  };
+  std::vector<Done> done(n0);
+  on_every_core(domain, n0, [&](const Domain::Probe& probe, std::size_t i) {
+    Done& out = done[i];
     const Bar& bar = bars.bars[i];
-    if (!weave(bar)) continue;
+    if (!weave(bar)) return;
     const double L = dist3(bar.a, bar.b);
-    if (!(L > 0.0)) continue;
+    if (!(L > 0.0)) return;
     const Vec3 d{(bar.b.x - bar.a.x) / L, (bar.b.y - bar.a.y) / L, (bar.b.z - bar.a.z) / L};
     // OG2 / OG2b: the relief carried past an open face is not judged here.
     const double t_lo = std::min(bar.relief_a, L), t_hi = std::max(t_lo, L - bar.relief_b);
@@ -126,7 +138,7 @@ std::size_t guard_bars(Bars& bars, const Domain& domain, const std::vector<int>&
     spans.push_back({start, t_hi, prev});
     bool any_bad = false;
     for (const Span& s : spans) any_bad = any_bad || s.c != 'L';
-    if (!any_bad) continue;
+    if (!any_bad) return;
     // How far past an entry into solid at `t` (going `dir`) the bar may run on: min(width, the solid's thickness along
     // the bar minus its radius minus one line width), never under 0.
     const double r = 0.5 * bar.width;
@@ -162,18 +174,14 @@ std::size_t guard_bars(Bars& bars, const Domain& domain, const std::vector<int>&
       if (p.t1 - p.t0 >= kShortest) pieces.push_back(p);   // a sliver of a bar is no bar
     }
     // Unchanged when the one piece is the whole bar (a run-on within the rule).
-    if (pieces.size() == 1 && !pieces[0].ext0 && !pieces[0].ext1) continue;
-    const std::string kind = bar.net ? "net" : bar.support ? "support" : bar.link ? "link" : bar.level_tie ? "tie" : bar.brace ? "brace" : "strand";
+    if (pieces.size() == 1 && !pieces[0].ext0 && !pieces[0].ext1) return;
+    out.kind = bar.net ? "net" : bar.support ? "support" : bar.link ? "link" : bar.level_tie ? "tie" : bar.brace ? "brace" : "strand";
     if (pieces.empty()) {
-      keep[i] = 0;
-      ++rep.in_solid_removed;
-      ++rep.by_kind[kind];
-      note(rep.removed_at, bar);
-      continue;
+      out.act = Done::Act::Remove;
+      out.counted = 'r';
+      return;
     }
-    if (outside) { ++rep.outside_cut; note(rep.outside_at, bar); }
-    else if (in_solid) { ++rep.in_solid_cut; note(rep.in_solid_at, bar); }
-    ++rep.by_kind[kind];
+    out.counted = outside ? 'o' : in_solid ? 's' : 0;
     const Bar orig = bar;
     auto make = [&](const Piece& p) {
       Bar x = orig;
@@ -192,16 +200,26 @@ std::size_t guard_bars(Bars& bars, const Domain& domain, const std::vector<int>&
       return x;
     };
     // After additions: a piece left with a free end by the cut (a new end in no solid) is not kept.
-    std::vector<Bar> made;
     for (const Piece& p : pieces) {
       Bar x = make(p);
       const bool free_end = (p.ext0 && x.end_a == Bar::End::Surface) || (p.ext1 && x.end_b == Bar::End::Surface);
-      if (drop_cut_free && free_end) { ++rep.cut_dropped; continue; }
-      made.push_back(x);
+      if (drop_cut_free && free_end) { ++out.dropped; continue; }
+      out.made.push_back(x);
     }
-    if (made.empty()) { keep[i] = 0; continue; }
-    bars.bars[i] = made[0];
-    for (std::size_t k = 1; k < made.size(); ++k) extra.push_back(made[k]);
+    out.act = out.made.empty() ? Done::Act::Remove : Done::Act::Replace;
+  });
+  for (std::size_t i = 0; i < n0; ++i) {   // the answers, in bar order
+    Done& out = done[i];
+    if (out.act == Done::Act::Keep && out.kind.empty()) continue;
+    const Bar& bar = bars.bars[i];
+    if (out.counted == 'r') { ++rep.in_solid_removed; ++rep.by_kind[out.kind]; note(rep.removed_at, bar); keep[i] = 0; continue; }
+    if (out.counted == 'o') { ++rep.outside_cut; note(rep.outside_at, bar); }
+    else if (out.counted == 's') { ++rep.in_solid_cut; note(rep.in_solid_at, bar); }
+    ++rep.by_kind[out.kind];
+    rep.cut_dropped += out.dropped;
+    if (out.act == Done::Act::Remove) { keep[i] = 0; continue; }
+    bars.bars[i] = out.made[0];
+    for (std::size_t k = 1; k < out.made.size(); ++k) extra.push_back(out.made[k]);
   }
   // A bar removed whole leaves its neighbours ending where it began: an end of theirs at that point, in solid, is now an
   // end in the solid (Solid), not a joint left alone (which the drop would eat back).
