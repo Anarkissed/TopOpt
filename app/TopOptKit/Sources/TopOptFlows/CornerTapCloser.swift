@@ -26,7 +26,8 @@ import AppKit
 extension CornerDrawers {
     /// The published frames a tap leaves the open drawer alone in: the drawers and the corner's chip and ⌃ buttons.
     static let keepKeys: Set<String> = ["cornerPanel", "settingsPanel", "setupChip",
-                                        "latticeSplitMore", "topologySplitMore", "resultsSplitMore"]
+                                        "latticeSplitMore", "topologySplitMore", "resultsSplitMore",
+                                        "versionMenuDrawer", "topLeftVersion"]   // ★ 11-23: the version chip and its drawer
     /// RED CONTROL (CornerDrawersOutsideTapHostedTests): a tap outside the drawer closes nothing (as before his answer).
     @MainActor static var controlNoOutsideTap = false
 

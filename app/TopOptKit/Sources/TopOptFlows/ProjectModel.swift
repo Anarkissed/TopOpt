@@ -35,14 +35,16 @@ public final class ProjectModel: ObservableObject {
     public var latticePreviewPlanWithheld: LatticeSteppedCellWire.PlanWithheld? = nil
     /// Stable identity, shared with the project's `RecentProject.id` so
     /// `AppModel.open(_:)` can restore this exact instance from the recents grid.
-    public let id: UUID
+    /// ★ his iPad notes 11-23: set again only when the live version moves to the next one (`becomeVersion`, VersionMoves.swift).
+    public internal(set) var id: UUID
     /// Display name — editable (tap the title to rename). Identity is `id`.
     @Published public var name: String
     /// Chosen material — editable within the project's process/category.
     @Published public var material: String
     public let process: ProcessKind
     /// The imported file (nil for a legacy recent with no in-memory model yet).
-    public let importedFile: ImportedFile?
+    /// ★ his iPad notes 11-23: re-pointed at the new version's copy when the live version moves (`becomeVersion`).
+    public internal(set) var importedFile: ImportedFile?
     public let importedMesh: ImportedMesh?
 
     /// Task project-store-sidecars (Q2): set by the `restoring:` init when the

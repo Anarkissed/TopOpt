@@ -100,8 +100,12 @@ public final class AppModel: ObservableObject {
     }
     /// Phase subscriptions per live project, keeping `runningIDs`/`optimized` current.
     private var runCancellables: [UUID: AnyCancellable] = [:]
-    /// Library (B3): each version's draft this session (an edit to a version with results goes there).
-    private var libraryDrafts: [UUID: UUID] = [:]
+    /// Library (B3): each version's draft (an edit to a version with results goes there). ★ his iPad notes 11-23 (RESULTS_REPORT
+    /// §7): kept in the store's folder, so the link survives relaunch (VersionDraftLinks).
+    private var libraryDrafts: [UUID: UUID] {
+        get { VersionDraftLinks.read(store) }
+        set { VersionDraftLinks.write(newValue, store) }
+    }
     /// Serial queue for the (potentially large) results encode/decode + file IO, so
     /// persisting/restoring variants never blocks the main thread (persist-c).
     /// Internal (not private) so the write-after-delete race test can hold the queue.
@@ -985,10 +989,11 @@ public final class AppModel: ObservableObject {
 
     /// Write `live` (a version's edited settings) into that version's draft — the one made this session,
     /// else a new folder (the model and its sidecars copied from the version's folder, no results).
+    /// ★ his iPad notes 11-23: `fresh` — always a new folder (a new version), never the draft linked to this one, and no link.
     @discardableResult
-    func writeLibraryDraft(of project: ProjectModel, live: ProjectSnapshot) -> RecentProject? {
+    func writeLibraryDraft(of project: ProjectModel, live: ProjectSnapshot, fresh: Bool = false) -> RecentProject? {
         var d = live
-        d.id = libraryDrafts[project.id] ?? UUID()
+        d.id = fresh ? UUID() : (VersionDraftLinks.usable(libraryDrafts[project.id], store) ?? UUID())
         d.optimized = nil
         d.savedAt = now()
         let model = project.modelSourceURL ?? URL(fileURLWithPath: store.modelPath(id: project.id, fileName: live.modelFileName))
@@ -996,13 +1001,26 @@ public final class AppModel: ObservableObject {
             toast = "Couldn’t save the draft: \(error.localizedDescription)"
             return nil
         }
-        libraryDrafts[project.id] = d.id
+        if !fresh { libraryDrafts[project.id] = d.id }
         library.noteParent(project.id, of: d.id)   // numbered from this version (his decision 11: v4 → v4.1)
         let recent = ProjectDuplication.recent(for: d)
         if let i = recentProjects.firstIndex(where: { $0.id == d.id }) { recentProjects[i] = recent }
         else { recentProjects.insert(recent, at: (recentProjects.firstIndex { $0.id == project.id } ?? -1) + 1) }
         if thumbnails[d.id] == nil { thumbnails[d.id] = thumbnails[project.id] }
         return recent
+    }
+
+    /// ★ his iPad notes 11-23: the live `project` becomes the version in `folder` (just written, VersionMoves.swift): its model
+    /// read from that folder, its live copy and run watch filed under it. The version it was reopens from its own folder.
+    func moveLive(_ project: ProjectModel, to folder: UUID, modelFileName: String) {
+        let old = project.id
+        guard old != folder else { return }
+        project.becomeVersion(folder, modelPath: store.modelPath(id: folder, fileName: modelFileName))
+        projectsById[old] = nil
+        projectsById[folder] = project
+        if let c = runCancellables.removeValue(forKey: old) { runCancellables[folder] = c }
+        if thumbnails[folder] == nil, let t = thumbnails[old] { thumbnails[folder] = t }
+        if libraryDrafts[old] != nil { libraryDrafts[old] = nil }
     }
 
     /// Drop a version's live copy, so it next opens from its folder (as it ran).
@@ -1145,6 +1163,8 @@ public final class AppModel: ObservableObject {
     /// project (e.g. an empty/legacy one with no model).
     public func persistCurrentProject() {
         guard let project else { return }
+        // ★ his iPad notes 11-23: an edit on a version with a result is the next version's (VersionMoves.swift)
+        moveToNextVersionIfEdited(project, baseline: VersionEditWatch.shared.baseline(for: project))
         persist(project)
     }
 

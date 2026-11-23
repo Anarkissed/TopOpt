@@ -24,7 +24,10 @@ public struct RootView: View {
             case .workspace:
                 if let project = model.project {
                     WorkspacePlaceholder(model: model, project: project)
-                        .id(project.id)   // Flexible (PR #362) H53: a project switch (Save as new project) builds a fresh workspace — its state and onAppear belong to the copy
+                        // Flexible (PR #362) H53: a project switch (Save as new project) builds a fresh workspace — its state and
+                        // onAppear belong to the copy. ★ his iPad notes 11-23: keyed by the live project itself, so the version
+                        // moving to its next number (VersionMoves.swift) keeps the page exactly as it is
+                        .id(ObjectIdentifier(project))
                 } else {
                     HomeView(model: model)   // no active project — shouldn't happen
                 }

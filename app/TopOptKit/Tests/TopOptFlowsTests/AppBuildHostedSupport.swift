@@ -234,7 +234,7 @@ final class AppBuildHost {
 struct AppBuildWorkspace: View {
     @ObservedObject var model: AppModel
     var body: some View {
-        if let p = model.project { WorkspacePlaceholder(model: model, project: p).id(p.id) }
+        if let p = model.project { WorkspacePlaceholder(model: model, project: p).id(ObjectIdentifier(p)) }   // ★ 11-23: as RootView
     }
 }
 

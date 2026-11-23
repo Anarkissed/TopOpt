@@ -896,6 +896,7 @@ public struct WorkspacePlaceholder: View {
                     topoNotice.seed(accepted: acceptedVariantCount)
                     topoNotice.version = versionLabel   // ★ B3: "v8 is ready"
                     learnWhatThisVersionRanWith()   // ★ B5 (note 3): "Same settings as v6" after a reopen
+                    VersionEditWatch.shared.watch(project, model: model)   // ★ his 11-23: an edit on a result's version moves on
                     if RerunCard.takeRunOnOpen(for: project.id) { let l = RerunCard.takeRunOnOpenLattice(); if canOptimize(lattice: l) { startRun(lattice: l) } else { model.toast = RerunCard.copyNotReadyToast } }
                     // B4: a copy made to choose a lattice type (or the lattice card's Save as new) opens on Lattice
                     if let toast = LatticeStageOpen.take(for: project.id) { goToStage(.lattice); if !toast.isEmpty { model.toast = toast } }
@@ -1900,6 +1901,7 @@ public struct WorkspacePlaceholder: View {
         } }
         // ★ B10 (U6 / U7, §4.11): Rename project asks in the name sheet, over the whole page (one boxed child: the body stays small)
         .overlay { AnyView(renameSheetLayer) }
+        .versionChipMenu(model, folder: project.id)   // ★ his iPad notes 11-23: the version chip's Save / Save and start a new version
         // ★ B2 (U15): what a number pad kept ("Kept 40 (1 to 40 mm)") is the page's toast
         .numberPadNote { model.toast = $0 }
         // ★ B2 (U16): the top lane's notifications keep clear of every control the page publishes
@@ -1977,6 +1979,7 @@ public struct WorkspacePlaceholder: View {
     /// exactly as it always did.
     private func requestRun(lattice: Bool) {
         guard pendingReplacement == nil else { return }   // ★ B3 (#362's condition 1): the re-run card is up — it answers first
+        moveOnIfEdited()   // ★ his 11-23: an edit on a result's version runs on the next one
         guard canOptimize(lattice: lattice) else { return }
         runWithLattice = lattice
         if let prompt = ResultsReplacementPrompt.forNewRun(existing: run.outcome) {
@@ -1992,6 +1995,7 @@ public struct WorkspacePlaceholder: View {
     /// optimize path uses, because it produces a result that would replace one.
     private func requestLatticeRun() {
         guard pendingReplacement == nil else { return }   // ★ B3 (#362's condition 1): the re-run card is up — it answers first
+        moveOnIfEdited()   // ★ his 11-23: no re-run card, the next version
         guard canLatticeThis else { return }
         guard let request = model.makeLatticeRunRequest() else {
             model.toast = "Import a part and set a lattice region first."
