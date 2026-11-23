@@ -46,6 +46,9 @@ double ms_since(std::chrono::steady_clock::time_point t0) {
 
 struct LayoutSession {
   std::mutex mu;                                  // one layout (or one "where") at a time
+  // ★ his 11-22 (watch it grow): the tap every Organic lay of `session` hands its vines to; read WITHOUT `mu` (the lay holds
+  // it for its whole length). Declared before `session`, so it outlives the session that points at it.
+  ll::GrowthTap tap;
   std::unique_ptr<ll::Session> session;
   int faces = 0;
   // The last layout's outcome: "where" reads the session's domain and this layout's cells, never across the next lay().
@@ -366,6 +369,7 @@ LatticeLayoutOpenInfo lattice_layout_open(const std::string& path, double linear
     auto s = std::make_shared<LayoutSession>();
     s->faces = model.face_count;
     s->session = std::make_unique<ll::Session>(std::move(model));
+    s->session->growth_tap(&s->tap);   // ★ his 11-22: every Organic lay of this session hands its vines to the tap
     info.faces = s->faces;
     info.open_edges = static_cast<int32_t>(s->session->open_edges());
     std::lock_guard<std::mutex> lock(g_layout_mu);
@@ -879,6 +883,25 @@ LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float ori
   });
   if (!why.empty()) {
     o = LatticeLayoutGrid{};
+    failed(err, why);
+  }
+  return o;
+}
+
+LatticeLayoutGrowth lattice_layout_growth_read(int64_t session, int64_t from, int64_t most, BridgeError& err) {
+  LatticeLayoutGrowth o;
+  const std::string why = bridge_guard_run("lattice_layout_growth_read", [&] {
+    auto s = layout_at(session);   // never s->mu: the lay holds it while it runs (the tap has its own lock)
+    ll::GrowthTap::Read r = s->tap.read(static_cast<std::size_t>(std::max<int64_t>(0, from)),
+                                        static_cast<std::size_t>(std::max<int64_t>(0, most)));
+    o.lay = r.lay;
+    o.phase = static_cast<int32_t>(r.phase);
+    o.next = static_cast<int64_t>(r.next);
+    o.xyz = std::move(r.xyz);
+    o.region.assign(r.region.begin(), r.region.end());
+  });
+  if (!why.empty()) {
+    o = LatticeLayoutGrowth{};
     failed(err, why);
   }
   return o;

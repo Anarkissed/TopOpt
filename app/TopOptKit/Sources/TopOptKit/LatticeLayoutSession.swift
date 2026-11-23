@@ -426,6 +426,45 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         }
     }
 
+    /// ★ WATCH IT GROW (his 11-22: "Could the user literally *watch* the lattice grow from nothing?"): what the session's
+    /// Organic lay has laid so far (core's GrowthTap, LatticeLayoutBridge.hpp's lattice_layout_growth_read).
+    public struct Growth: Sendable, Equatable {
+        /// Which lay (core counts them; a new lay starts again at 0). 0: none yet.
+        public var lay: UInt64
+        /// 0 none yet, 1 growing, 2 pruning, 3 re-seeding the bare places, 4 reaching the walls, 5 finishing.
+        public var phase: Int
+        /// The index to read from next time.
+        public var next: Int
+        /// 6 per piece: a xyz, b xyz (the part's own coordinates).
+        public var xyz: [Float]
+        public var region: [Int32]
+        public var count: Int { region.count }
+        public init(lay: UInt64, phase: Int, next: Int, xyz: [Float], region: [Int32]) {
+            self.lay = lay; self.phase = phase; self.next = next; self.xyz = xyz; self.region = region
+        }
+    }
+
+    /// The pieces laid from `from` on (at most `most`; 0 all), the phase and the lay's number. SYNCHRONOUS and callable from
+    /// ANY thread while a lay runs: it never goes through the session's worker (the lay occupies it) and never waits on the lay.
+    public func growthRead(from: Int, most: Int = 0) throws -> Growth {
+        var err = topoptbridge.BridgeError()
+        let r = topoptbridge.lattice_layout_growth_read(id, Int64(Swift.max(0, from)), Int64(Swift.max(0, most)), &err)
+        if !err.ok { throw TopOptError(message: String(err.message)) }
+        // one copy each, straight from the vectors' storage (a poll can carry tens of thousands of pieces)
+        let xyzVec = r.xyz, regionVec = r.region
+        let xyz: [Float] = withExtendedLifetime(xyzVec) {
+            let n = Int(xyzVec.size())
+            guard n > 0, let p = xyzVec.__dataUnsafe() else { return [] }
+            return Array(UnsafeBufferPointer(start: p, count: n))
+        }
+        let region: [Int32] = withExtendedLifetime(regionVec) {
+            let n = Int(regionVec.size())
+            guard n > 0, let p = regionVec.__dataUnsafe() else { return [] }
+            return Array(UnsafeBufferPointer(start: p, count: n))
+        }
+        return Growth(lay: r.lay, phase: Int(r.phase), next: Int(r.next), xyz: xyz, region: region)
+    }
+
     /// Every layout running or waiting comes back cancelled.
     public func cancel() {
         lock.withLock { generation &+= 1 }

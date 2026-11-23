@@ -22,7 +22,9 @@ import os
 public final class LatticeLayoutPreview: ObservableObject {
 
     /// What the 3D view draws (nil: nothing yet).
-    @Published public private(set) var bars: LatticeLayoutBarsInputs?
+    @Published public private(set) var bars: LatticeLayoutBarsInputs? {
+        didSet { growthMeets(bars, after: oldValue) }   // ★ his 11-22: the finished lattice replaces the growth
+    }
     /// ★ Install 3: what the layout on screen laid (bars and cells), for the colour key, the tap-to-read card and the drawer.
     @Published public private(set) var laid: LatticeLayoutColours.Laid?
     /// One plain line under the preview: what is wrong, or nil. ★ his 11-20: a new one is also raised as a centred pop-up.
@@ -51,10 +53,24 @@ public final class LatticeLayoutPreview: ObservableObject {
         public var expectedS: Double?
         /// This lay's Draft is on screen (marked) while the exact lattice is made.
         public var draftShown: Bool
-        public init(quality: LatticeLayoutSession.Organic.Quality, started: Date, expectedS: Double?, draftShown: Bool) {
+        /// ★ his 11-22 (watch it grow): the engine's phase of this lay (LatticePreviewMode.phaseWords); 0 not said yet.
+        public var phase: Int
+        public init(quality: LatticeLayoutSession.Organic.Quality, started: Date, expectedS: Double?, draftShown: Bool,
+                    phase: Int = 0) {
             self.quality = quality; self.started = started; self.expectedS = expectedS; self.draftShown = draftShown
+            self.phase = phase
         }
     }
+    /// ★ his 11-22 ("Could the user literally *watch* the lattice grow from nothing?"): the vines an Organic lay has laid so
+    /// far, drawn by the 3D view while it lays (LatticeGrowth). Not published: each poll redraws the 3D view alone.
+    public let growth = LatticeGrowth()
+    private var growthWatch: LatticeGrowthWatch?
+    /// How often the lay's growth is read (s), and at most how many pieces a read takes: about 80,000 a second, so a lay that
+    /// grows faster than that (his a1 part's Draft: 76,000 pieces in about a second) is still seen rising, not in two jumps.
+    static let growthPollS = 0.15
+    static let growthReadMost = 12_000
+    /// RED CONTROL (tests): no growth is watched (as before 11-22).
+    nonisolated(unsafe) public static var controlNoGrowth = false
     /// ★ his ask 11-21: Print-accurate preview (the ⌃ menu): on, every Organic lay ends with the exact print-file lattice;
     /// off, the Draft alone stands in (the exact lattice is made with the print file).
     var printAccurate: Bool { AppSettings.shared.latticePrintAccurate }
@@ -281,6 +297,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         let draftOnScreen = isOrganic && accurate && !wasLaying && organicQuality == .draft && before != nil && before == inputsAtLay
         accurateAtLay = accurate
         task?.cancel()
+        stopGrowth()   // ★ his 11-22: a new lay grows from nothing again
         laying = true
         nozzleWanted = checkNozzle
         // ★ his pick 11-21 ("Let's do this one. Absolutely."): every Organic lay shows its Draft first (marked, the last
@@ -312,6 +329,7 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// Off: the session closed, nothing drawn.
     public func clear() {
         task?.cancel(); task = nil
+        stopGrowth()   // ★ his 11-22
         mapTask?.cancel(); mapTask = nil
         nozzleTask?.cancel(); nozzleTask = nil; nozzleWanted = false; nozzleState = .notAsked
         nozzleSession?.close(); nozzleSession = nil; nozzlePath = nil; nozzleLine = nil; solidReason = nil
@@ -421,6 +439,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         let r = remembered.remove(at: i)
         remembered.insert(r, at: 0)
         task?.cancel(); task = nil
+        stopGrowth()   // ★ his 11-22: a remembered lattice shows no growth
         mapTask?.cancel(); mapTask = nil
         take(p, s, ok)
         accurateAtLay = r.quality == .exact
@@ -650,6 +669,8 @@ public final class LatticeLayoutPreview: ObservableObject {
             layStages["stressGiveMS"] = Self.ms(since: t0)
             layStages["openMS"] = openMS
             if Self.organic(latticeAtLay) {   // ★ Organic cut 1: the weave's own lay
+                let watch = watchGrowth(session)   // ★ his 11-22: its vines drawn as they are laid, until it ends
+                defer { watch?.stop() }
                 try await layOrganic(session, path: path, s, draft: draft)
                 return
             }
@@ -1580,6 +1601,52 @@ extension LatticeLayoutPreview {
         }
         return out
     }
+}
+
+// MARK: ★ his 11-22 — watch it grow ("Could the user literally *watch* the lattice grow from nothing? … Time isn't wasted if
+// there's an interesting animation running of the actual lattice being grown - this allows for patience from the user.")
+
+extension LatticeLayoutPreview {
+    /// An Organic lay is about to run on `session`: its vines are read as it lays them (about every 0.15 s, on the main actor,
+    /// never through the session's worker) onto `growth`, and its phase onto the Lattice button. nil under the red control.
+    func watchGrowth(_ session: LatticeLayoutSession) -> LatticeGrowthWatch? {
+        growthWatch?.stop()
+        growthWatch = nil
+        guard !Self.controlNoGrowth else { return nil }
+        let w = LatticeGrowthWatch(growth: growth, every: Self.growthPollS, most: Self.growthReadMost,
+                                   read: { [weak session] from, most in
+                                       guard let session else { throw CancellationError() }
+                                       return try session.growthRead(from: from, most: most)
+                                   },
+                                   onPhase: { [weak self] p in self?.growthPhase(p) })
+        growthWatch = w
+        return w
+    }
+
+    /// No more growth: the watch stopped and what was grown gone (a new lay, the preview closed, a remembered lattice).
+    func stopGrowth() {
+        growthWatch?.stop()
+        growthWatch = nil
+        growth.restart()
+    }
+
+    /// The bars on screen changed: a finished lattice (a new one) replaces the growth with a short fade over it; nothing on
+    /// screen (a refusal, an error) takes the growth away at once. The same lattice (its map came) leaves it as it is.
+    func growthMeets(_ now: LatticeLayoutBarsInputs?, after old: LatticeLayoutBarsInputs?) {
+        guard now == nil || now?.token != old?.token else { return }
+        growthWatch?.landed()
+        growth.seal(landed: now != nil)
+    }
+
+    /// The engine's phase of the lay under way, onto the Lattice button's line.
+    func growthPhase(_ p: Int) {
+        guard var lp = layProgress, lp.phase != p else { return }
+        lp.phase = p
+        layProgress = lp
+    }
+
+    /// Tests: whether a watch is reading now.
+    var growthWatching: Bool { growthWatch?.running ?? false }
 }
 
 /// One plain line where the new engine's lines go, when it does not draw (Organic).
