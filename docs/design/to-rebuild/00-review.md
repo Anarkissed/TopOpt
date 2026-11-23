@@ -377,3 +377,22 @@ Second half, Top Motor Mount res 96 (4 rungs, 68% to 26%; about 1,500 CG iterati
 9. Seen in passing: on this part the ladder's 68% to 26% changes the printed mass by only 6% (105 to 99 g) and the margin rises as material falls (1.64 to 1.69), so the rung percentage says little about the weight saved (ties to M-07).
 
 Mixed precision (reviewer-approved, same probe tree, Top Motor Mount res 96, 2026-11-21): with the switch on (run_info echoes `mixed_precision: true`) the run is BIT-IDENTICAL to the cubed arm: same CG iterations on every rung (59,169 / 63,120 / 64,806 / 98,214), same margins, same STL bytes; wall 3,504 s against 3,260 s (rung 0 solve 644 s against 451 s, rungs 1 to 3 equal, so machine load, not the switch). So the single-precision V-cycle never ran on the production path: the guard at multigrid.cpp:2925 (`fine_dinv_f.size() == m.ng && !m.has_cubic`) or the route to it is not met on this job (no lattice, so not the cubic guard; which condition is not traced). Reading: the capability is dead as wired, and handoff 132 (production.cpp:604) measured 20% MORE iterations when it did run, with a mechanical reason (CG tolerance 1e-8 is at single precision's limit). NOT a "not possible" finding: it is "not measured, switch inert". Plan entry: either delete the FP32 path (clean-up) or revive it only together with a looser inner tolerance; no further measurement until the solver stage.
+
+## L. Today's print files against the CAD (stage 0, 2026-11-23)
+
+Tool: `cad_project_probe` (Release, built at 13c6a7fd), on files already in the baseline. Each vertex within one voxel of a drawn flat or bore is measured against that face's own plane, axis and radius from the CAD. Target (rule 9): flats within 0.02 mm, bores round within 0.02 mm.
+
+| part (lightest version, 0.68) | voxel | drawn flats: typical / worst distance from the plane | flats within 0.02 mm | bores: typical / worst out-of-round | bores round within 0.02 mm |
+|---|---|---|---|---|---|
+| Top Motor Mount, res 96 | 1.41 mm | 0.24 / 1.39 mm | 12 of 45 | 0.19 / 1.70 mm | 16 of 61 |
+| 2040 Stand (original), res 128 | 0.99 mm | 0.89 / 0.99 mm | 0 of 11 | 0.94 / 1.44 mm | 2 of 24 |
+| 2040 Stand v4, res 96 | 1.32 mm | 1.19 / 1.32 mm | 1 of 19 | 0.26 / 2.59 mm | 0 of 7 |
+
+"Typical" is the median over faces of each face's worst vertex. Faces with fewer than 50 vertices are left out.
+
+What this can and cannot claim:
+- It is an UPPER bound. The tool counts every vertex within one voxel of a drawn face as belonging to it, so a wall the optimiser legitimately cut close to a face is counted as drift. The worst figures sit at almost exactly one voxel for that reason.
+- What is solid: where a face is untouched (16 bores and 12 flats on Top Motor Mount) the file is exact to the triangle chord (0.02 mm); everywhere a cut wall meets a drawn face, the file leaves the face by up to a voxel. That is the seam the plan's stage 3 removes (C-02, C-03).
+- A clean number needs membership ("this vertex is on face N") from the part-in step, not nearness. Test B is written that way in stage 0.
+
+Still owed for the "today" table: slicer pictures, the strengthen route, Stand v2 / v3 and WallMount, PillowBlock and Base on this measure.
