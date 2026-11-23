@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <limits>
 #include <memory>
@@ -1688,6 +1689,7 @@ std::vector<HoldPatchCount> hold_up_weave(Bars& bars, const Domain& domain, cons
         end_grid[end_key(a, b, c)].push_back(static_cast<std::uint32_t>(i));
     }
     const double g = A.grid_mm > 0.0 ? A.grid_mm : 1.0;
+    std::vector<char> in_near(verts.size(), 0);   // SPEED 11-22: the walk's ends (this point's `near`)
     auto ends_under = [&](const WeaveHold::Patch& P) {
       std::size_t n = 0;
       for (const Vec3& e : solid_ends)
@@ -1759,17 +1761,84 @@ std::vector<HoldPatchCount> hold_up_weave(Bars& bars, const Domain& domain, cons
           return false;
         };
         const double most = A.to_floor ? 2.0 * A.depth_mm : A.depth_mm;
+        // SPEED 11-22: `near` flagged, its cells' range, its widest end: the walk's searches read the end grid round
+        // the walk, `near`'s ends only, and keep the least (distance, index) — the end the in-order scan kept.
+        long long nlo[3] = {0, 0, 0}, nhi[3] = {-1, -1, -1};
+        double vw_max = 0.0;
+        bool near_on_grid = true;
+        for (std::size_t q = 0; q < near.size(); ++q) {
+          const std::size_t i = near[q];
+          in_near[i] = 1;
+          vw_max = std::max(vw_max, vw[i]);
+          long long c[3];
+          if (!end_cell(verts[i].x, c[0]) || !end_cell(verts[i].y, c[1]) || !end_cell(verts[i].z, c[2])) { near_on_grid = false; continue; }
+          for (int a = 0; a < 3; ++a) {
+            if (q == 0 || nhi[a] < nlo[a]) { nlo[a] = c[a]; nhi[a] = c[a]; }
+            nlo[a] = std::min(nlo[a], c[a]);
+            nhi[a] = std::max(nhi[a], c[a]);
+          }
+        }
+        // (a grid-less `near`, or a walk off the grid's range, reads `near` in order as before)
+        const auto in_cone_best = [&](const Vec3& at, std::size_t& best, double& bd) {
+          const auto take = [&](std::size_t i) {
+            const double dz = at.z - verts[i].z;
+            if (!(dz > 0.0)) return;
+            const double hd = std::hypot(verts[i].x - at.x, verts[i].y - at.y);
+            if (hd > dz) return;
+            const double dd = std::hypot(hd, dz);
+            if (dd < bd || (dd == bd && i < best)) { bd = dd; best = i; }
+          };
+          long long c[3];
+          if (!near_on_grid || near.empty() || !end_cell(at.x, c[0]) || !end_cell(at.y, c[1]) || !end_cell(at.z, c[2])) {
+            for (std::size_t i : near) take(i);
+            return;
+          }
+          // rings of cells round `at` (Chebyshev radius r), until no unread cell can hold an end nearer than the best
+          long long rmax = 0;
+          for (int a = 0; a < 3; ++a) rmax = std::max({rmax, std::llabs(c[a] - nlo[a]), std::llabs(nhi[a] - c[a])});
+          for (long long r = 0; r <= rmax; ++r) {
+            if (r >= 2 && static_cast<double>(r - 1) * kEndCell > bd + 1e-9) break;
+            for (long long a = c[0] - r; a <= c[0] + r; ++a)
+              for (long long b = c[1] - r; b <= c[1] + r; ++b)
+                for (long long d = c[2] - r; d <= c[2] + r; ++d) {
+                  if (std::max({std::llabs(a - c[0]), std::llabs(b - c[1]), std::llabs(d - c[2])}) != r) continue;
+                  if (a < nlo[0] || a > nhi[0] || b < nlo[1] || b > nhi[1] || d < nlo[2] || d > nhi[2]) continue;
+                  const auto it = end_grid.find(end_key(a, b, d));
+                  if (it == end_grid.end()) continue;
+                  for (const std::uint32_t u : it->second) if (in_near[u]) take(u);
+                }
+          }
+        };
+        const auto hit_at = [&](const Vec3& at, std::size_t& hit, double& hb) {
+          const auto take = [&](std::size_t i) {
+            if (A.to_floor && joined_at(verts[i])) return;
+            const double dd = d3(at, verts[i]);
+            if (dd <= vw[i] && (dd < hb || (dd == hb && i < hit))) { hb = dd; hit = i; }
+          };
+          long long lo[3], hi[3];
+          const double R = vw_max + 1e-6;
+          if (!near_on_grid || !end_cell(at.x - R, lo[0]) || !end_cell(at.x + R, hi[0]) || !end_cell(at.y - R, lo[1]) ||
+              !end_cell(at.y + R, hi[1]) || !end_cell(at.z - R, lo[2]) || !end_cell(at.z + R, hi[2])) {
+            for (std::size_t i : near) take(i);
+            return;
+          }
+          for (long long a = lo[0]; a <= hi[0]; ++a)
+            for (long long b = lo[1]; b <= hi[1]; ++b)
+              for (long long d = lo[2]; d <= hi[2]; ++d) {
+                const auto it = end_grid.find(end_key(a, b, d));
+                if (it == end_grid.end()) continue;
+                for (const std::uint32_t u : it->second) if (in_near[u]) take(u);
+              }
+        };
+        struct ClearNear {   // the flags go down when the point is done, however its walk ends
+          std::vector<char>& f;
+          const std::vector<std::size_t>& n;
+          ~ClearNear() { for (std::size_t i : n) f[i] = 0; }
+        } clear_near{in_near, near};
         for (;;) {
           std::size_t best = verts.size();
           double bd = std::numeric_limits<double>::infinity();
-          for (std::size_t i : near) {
-            const double dz = cur.z - verts[i].z;
-            if (!(dz > 0.0)) continue;
-            const double hd = std::hypot(verts[i].x - cur.x, verts[i].y - cur.y);
-            if (hd > dz) continue;
-            const double dd = std::hypot(hd, dz);
-            if (dd < bd) { bd = dd; best = i; }
-          }
+          in_cone_best(cur, best, bd);
           Vec3 next{cur.x, cur.y, cur.z - Lh};
           if (best < verts.size()) {
             const double hx = verts[best].x - cur.x, hy = verts[best].y - cur.y, hd = std::hypot(hx, hy);
@@ -1783,11 +1852,7 @@ std::vector<HoldPatchCount> hold_up_weave(Bars& bars, const Domain& domain, cons
           if (entered) {
             std::size_t hit = verts.size();
             double hb = std::numeric_limits<double>::infinity();
-            for (std::size_t i : near) {
-              if (A.to_floor && joined_at(verts[i])) continue;
-              const double dd = d3(next, verts[i]);
-              if (dd <= vw[i] && dd < hb) { hb = dd; hit = i; }
-            }
+            hit_at(next, hit, hb);
             if (hit < verts.size()) {
               path.push_back(verts[hit]);
               if (!A.to_floor) { ending = 1; break; }
