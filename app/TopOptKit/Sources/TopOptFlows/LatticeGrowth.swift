@@ -5,17 +5,21 @@
 // main actor, the read synchronous and never through the session's worker, which the lay occupies), appends the new pieces
 // here, and the 3D view draws them (`LatticeGrowthPass`, an append-only GPU buffer): the vines rising from their seeds in the
 // lattice's own purple, the newest pieces (the growing tips) brighter. When the lay lands, the finished lattice replaces the
-// growth (a short fade over it, never a flash of nothing); a new lay starts the growth again; a remembered preview shows none.
+// growth; a new lay starts the growth again; a remembered preview shows none.
 // The Lattice button's line names the phase the engine is in (LatticePreviewMode.phaseWords).
 //
 // ★ his notes 2026-11-23 (img 49): "It needs to be in 3D. There needs to be depth. I would prefer having the walls removed and
 // seeing the actual 3d models of the lattices grow - but only the ones that are visible to me". The pieces are drawn as real
 // tubes at their strut width (`radiusByRegion`: what each region's group asked — the engine's tap carries no width), lit and
-// depth-tested as the landed lattice is (LatticeGrowthPass); the part is opened by the map on screen when it is this lay's
-// (`mapOpensFaces`), else drawn in X-ray while the vines grow (`landedHold` keeps it so until the landed lattice's own map
-// opens it). Item 3 ("the "Finishing" stayed on for the majority of the time … some sort of animation like the growing of the
-// lattice would be VERY beneficial"): from the engine's phase 2 on (the vines grown, the lay pruning, filling, reaching the
-// walls, finishing) the grown lattice keeps moving (`workingSince`: a band of light rises through it, looping, until it lands).
+// depth-tested as the landed lattice is (LatticeGrowthPass); the part is opened by the map this lay opens it with, else drawn
+// in X-ray while the vines grow (`landedHold` keeps it so until the landed lattice's own map opens it).
+//
+// ★ his words after release 16 (a), "start an animation by removing the walls … THEN starting the growing animation … the
+// recording of the vine growth … at about 10-12 frames per second, slowing the animation down": the 3D view shows the lay
+// through its `LatticeGrowthReplay` — the walls first (`opening`: dissolved by this lay's map, or a fade to X-ray), then the
+// recording played back in steps, behind the engine; the moment the lattice lands what is left is shown within a second and
+// the landed lattice takes over (the tubes sink into it). Item 3 of 11-23: once the replay has shown everything recorded and
+// the engine is still past its growing (phase 2 on), a band of light rises through the grown vines until it lands.
 import Foundation
 import Combine
 import QuartzCore
@@ -26,60 +30,94 @@ import TopOptKit
 /// the renderer reads it while it draws).
 public final class LatticeGrowth {
     /// Two per piece: (a xyz, birth) and (b xyz, radius). `birth` is the poll the piece came in, plus its place in that poll's
-    /// batch (the batch's newest at the poll's own number): `clock` less it is the piece's age in polls, and the young glow.
-    /// ★ notes24: `radius` (mm) is the tube's, from its region's group (`radiusByRegion`).
+    /// batch (the batch's newest at the poll's own number). ★ notes24: `radius` (mm) is the tube's (`radiusByRegion`).
     public private(set) var pieces: [SIMD4<Float>] = []
     public var count: Int { pieces.count / 2 }
     /// A new start (cleared, or a new lay): the renderer begins its buffer again.
     public private(set) var epoch = 0
-    /// The newest poll's number (the tips' clock).
+    /// The newest poll's number (the recording's end, in birth units).
     public private(set) var clock: Float = 0
-    /// The finished lattice landed: the growth fades out over it for `fadeS`, then is cleared. nil: not fading.
+    /// The finished lattice landed: the growth sinks into it for `fadeS` from here (after the replay caught up). nil: not.
     public private(set) var fadeStarted: CFTimeInterval?
     public static let fadeS: CFTimeInterval = 0.35
-    /// Fires on every change: the 3D view redraws itself (no page pass, never the workspace's body).
+    /// From the landing to the growth gone, at most: the catch-up, then the sink.
+    public static var landingS: CFTimeInterval { LatticeGrowthReplay.catchUpEndS + fadeS }
+    /// Fires on every visible change: the 3D view redraws itself (no page pass, never the workspace's body).
     public let changed = PassthroughSubject<Void, Never>()
     /// Pieces appended since this object was made (tests: growth was shown).
     public private(set) var appendedTotal = 0
-    /// The lay it grew for has landed (or stopped): nothing more is appended until a new lay `restart`s it (a read still
-    /// behind the lay never brings its growth back over the finished lattice).
+    /// The lay it grew for has landed (or stopped): nothing more is appended to it until a new lay `restart`s it.
     public private(set) var sealed = false
-    private var fadeTask: Task<Void, Never>?
 
-    /// ★ notes24 (img 49, "the actual 3d models of the lattices"): each region's tube radius (mm) — half the strut width its
-    /// group asked (a range: its middle) — and the radius of a region no group names (two print lines wide).
+    /// ★ notes24: each region's tube radius (mm), and the radius of a region no group names.
     public private(set) var radiusByRegion: [Int32: Float] = [:]
     public private(set) var radiusDefault: Float = 0.45
-    /// ★ notes24: the solid view's map on screen when this lay began opens its faces (the Draft's for its exact lattice, the
-    /// last Look's for a new Look: `LatticeLayoutPreview.mapFor`), so the vines grow inside the part opened as it will be.
-    public private(set) var mapOpensFaces = false
+    /// ★ How this lay's part opens (`layBegins`).
+    public enum Opening: Equatable {
+        /// X-ray: there are no walls to open.
+        case none
+        /// The map on screen is this lay's: the part is open already.
+        case open
+        /// The map this lay opens its faces with, made before it (362's gridAhead): the walls dissolve away with it.
+        case dissolve(LatticeLayoutSolidGrid)
+        /// No map yet: the part fades to X-ray and the vines grow inside it.
+        case xray
+        public init(solid: Bool, mapFits: Bool, ahead: LatticeLayoutSolidGrid?) {
+            self = !solid ? .none : mapFits ? .open : ahead.map { .dissolve($0) } ?? .xray
+        }
+    }
+    public private(set) var opening: Opening = .none
+    /// The map on screen opens this lay's faces (the Draft's for its exact lattice, the last Look's).
+    public var mapOpensFaces: Bool { opening == .open }
+    /// The map made before this lay that its walls dissolve with (nil: none).
+    public var aheadMap: LatticeLayoutSolidGrid? { if case .dissolve(let m) = opening { return m }; return nil }
     /// The engine's phase (core's GrowthTap: 1 growing, 2 pruning, 3 re-seeding, 4 reaching the walls, 5 finishing; 0 none).
     public private(set) var phase = 0
-    /// ★ notes24 item 3: when the lay went on working on its grown vines (its phase 2 on): the clock of the band of light that
-    /// rises through them until the lattice lands. nil: not yet (or none).
+    /// ★ item 3: since when the band of light runs (the replay caught up, the engine past its growing). nil: not running.
     public private(set) var workingSince: CFTimeInterval?
-    /// ★ notes24: the lay landed after growing: the part stays in X-ray (if it was) until the landed lattice's own map opens
-    /// it — never a closed part between the growth and the opened one.
+    /// ★ notes24: the lay landed after growing: the part stays in X-ray (if it was) until the landed lattice's own map opens it.
     public private(set) var landedHold = false
-    /// RED CONTROL (tests): no band — the grown lattice stands still while the lay finishes (as before 11-23).
+    /// ★ the replay of this lay (nil: none asked — every recorded piece shows at once, as before).
+    private(set) var replay: LatticeGrowthReplay?
+    /// RED CONTROLS (tests): no band; the replay never sped up at the landing (the finished lattice would wait for it).
     nonisolated(unsafe) public static var controlNoWorkingBand = false
-    /// The band's redraws a second while it runs (the 3D view is drawn on demand).
-    static let workingFPS: Double = 30
-    private var workTask: Task<Void, Never>?
+    nonisolated(unsafe) public static var controlNoCatchUp = false
+    /// The view's redraws a second while something moves (the walls, the band, the landing; the replay's steps as they come).
+    static let tickFPS: Double = 30
+    private var tickTask: Task<Void, Never>?
+    private var lastShown = -1
+    /// A new lay that began while the last one was still landing: its pieces wait until that landing ends.
+    private var queued: (xyz: [Float], region: [Int32], lay: PendingLay?)?
+    private var pendingLay: PendingLay?
+    struct PendingLay { var opening: Opening; var radius: [Int32: Float]; var radiusDefault: Float; var expectedLeftS: Double? }
 
     public init() {}
 
     /// ★ notes24: an Organic lay of `groups` is about to run (the preview, just before it asks the engine): each region's tube
-    /// radius, and whether the map on screen opens this lay's faces.
-    public func layBegins(_ groups: [LatticeLayoutSession.OrganicGroup], lineMM: Double, mapOpens: Bool) {
+    /// radius, how its part opens, and how long the last lay like it took from now (the replay's pacing; nil: none).
+    public func layBegins(_ groups: [LatticeLayoutSession.OrganicGroup], lineMM: Double, opening: Opening,
+                          expectedLeftS: Double? = nil, now: CFTimeInterval = CACurrentMediaTime()) {
         var m: [Int32: Float] = [:]
         for g in groups {
             let r = Float(Self.strutWidthMM(g.ask, lineMM: lineMM) / 2)
             for id in g.regions { m[id] = r }
         }
-        radiusByRegion = m
-        radiusDefault = Float(Self.strutWidthMM(nil, lineMM: lineMM) / 2)
-        mapOpensFaces = mapOpens
+        let lay = PendingLay(opening: opening, radius: m, radiusDefault: Float(Self.strutWidthMM(nil, lineMM: lineMM) / 2),
+                             expectedLeftS: expectedLeftS)
+        settle(now)
+        if landing(now) { pendingLay = lay; return }   // the last lay's landing first
+        begin(lay, now: now)
+    }
+
+    private func begin(_ lay: PendingLay, now: CFTimeInterval) {
+        radiusByRegion = lay.radius
+        radiusDefault = lay.radiusDefault
+        opening = lay.opening
+        let walls = lay.opening != .none && lay.opening != .open
+        replay = LatticeGrowthReplay(start: now, walls: walls, expectedEnd: lay.expectedLeftS.map { now + $0 })
+        workingSince = nil
+        changed.send()
+        tick()
     }
 
     /// The strut width (mm) a group asked: its one width, or the middle of its light-to-heavy range; none asked (the engine's
@@ -92,6 +130,7 @@ public final class LatticeGrowth {
 
     /// A poll's new pieces (6 floats each: a, b), in the order the engine laid them. Ignored once sealed.
     func append(xyz: [Float], region: [Int32]) {
+        if queued != nil { queued!.xyz += xyz; queued!.region += region; return }
         let n = Swift.min(xyz.count / 6, region.count)
         guard n > 0, !sealed else { return }
         clock += 1
@@ -103,77 +142,207 @@ public final class LatticeGrowth {
             pieces.append(SIMD4(xyz[k + 3], xyz[k + 4], xyz[k + 5], radiusByRegion[region[i]] ?? radiusDefault))
         }
         appendedTotal += n
+        lastShown = shownCount(at: CACurrentMediaTime())   // (this change is drawn now)
         changed.send()
+        tick()
     }
 
-    /// The engine's phase moved. ★ notes24 item 3: from phase 2 on (the vines grown) the lay keeps working: the band of light
-    /// starts and the view is redrawn `workingFPS` times a second until the lattice lands (never a frozen picture).
+    /// The engine's phase moved.
     func phaseMoved(_ p: Int, now: CFTimeInterval = CACurrentMediaTime()) {
         phase = p
-        guard p >= 2, !sealed, workingSince == nil, !Self.controlNoWorkingBand else { return }
-        workingSince = now
-        changed.send()
-        let gap = UInt64(1_000_000_000 / Self.workingFPS)
-        workTask = Task { @MainActor [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: gap)
-                guard let self, !Task.isCancelled, !self.sealed else { return }
-                self.changed.send()
-            }
-        }
+        advance(to: now)
+        tick()   // (the band may start now: never a frozen picture)
     }
 
-    /// The band is running (tests).
-    var working: Bool { workingSince != nil && !sealed && workTask != nil }
+    // MARK: the replay
 
-    /// A new lay (or none yet): nothing grown, and its pieces welcome.
-    func restart() {
-        wipe()
+    /// Moves the replay to `t`: its playhead, and the band (on once it has shown everything recorded and the engine is past
+    /// its growing, until the lattice lands).
+    func advance(to t: CFTimeInterval) {
+        settle(t)
+        replay?.advance(to: t, recorded: Double(clock))
+        let caught = replay.map { t >= $0.replayStart && $0.caughtUp(recorded: Double(clock)) } ?? true
+        let band = phase >= 2 && !sealed && count > 0 && caught && !Self.controlNoWorkingBand
+        if band, workingSince == nil { workingSince = t }
+        if !band { workingSince = nil }
+    }
+
+    /// The playhead (birth units) at `t`: every piece born up to it shows. No replay: all of them.
+    func playhead(at t: CFTimeInterval) -> Float {
+        advance(to: t)
+        guard let r = replay else { return clock }
+        return Float(r.shown)
+    }
+
+    /// How many pieces show at `t` (the first ones: the recording is in birth order).
+    public func shownCount(at t: CFTimeInterval) -> Int {
+        let head = playhead(at: t)
+        guard head < clock else { return count }
+        var lo = 0, hi = count   // the first piece born after the playhead
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if pieces[2 * mid].w <= head + 1e-6 { lo = mid + 1 } else { hi = mid }
+        }
+        return lo
+    }
+
+    /// How far the walls have gone at `t` (0 → 1; 1 when this lay opens none).
+    public func wallsProgress(at t: CFTimeInterval) -> Float {
+        Float(replay?.wallsProgress(t) ?? 1)
+    }
+
+    /// This lay is under way on screen (its walls, its replay, its landing): from `layBegins` until its growth is gone.
+    public var layOnScreen: Bool { replay != nil }
+
+    /// The landed lattice waits at `t` for the replay to show what was left (at most `LatticeGrowthReplay.catchUpEndS`).
+    public func holdsLanded(at t: CFTimeInterval) -> Bool {
+        guard sealed, replay != nil, let f = fadeStarted else { return false }
+        return t < f   // (the sink starts once the replay has shown it all)
+    }
+
+    /// The band runs (tests).
+    var working: Bool { workingSince != nil }
+
+    /// Tests that predate the replay: every recorded piece shows as it comes (no walls, no replay).
+    func replayOffForTesting() { replay = nil }
+
+    // MARK: lays begin and end
+
+    /// A new lay's first pieces (the watch saw it start): nothing grown, its pieces welcome. While the last lay is still
+    /// landing, its pieces wait for that landing to end (never cutting the last one's replay short).
+    func restart(now: CFTimeInterval = CACurrentMediaTime()) {
+        settle(now)
+        if landing(now) {
+            if queued == nil { queued = ([], [], nil) }
+            return
+        }
+        clearPieces()
         sealed = false
         landedHold = false
         phase = 0
+        if var r = replay { r = LatticeGrowthReplay(start: r.start, walls: r.walls, expectedEnd: r.expectedEnd); replay = r }
     }
 
-    /// The lay this grew for is done: the finished lattice `landed` (the growth fades out over it), or nothing is on screen
-    /// (a refusal, an error: gone at once). Nothing more is appended until a new lay restarts it.
+    /// No lay any more (the preview's stop: a new lay coming, a remembered lattice, the preview closed): everything goes.
+    func stop() {
+        queued = nil; pendingLay = nil
+        clearPieces()
+        replay = nil
+        opening = .none
+        sealed = false
+        landedHold = false
+        phase = 0
+        tickTask?.cancel(); tickTask = nil
+    }
+
+    /// The lay this grew for is done: the finished lattice `landed` (the replay catches up within a second, then the growth
+    /// sinks into it), or nothing is on screen (a refusal, an error: gone at once).
     func seal(landed: Bool, now: CFTimeInterval = CACurrentMediaTime()) {
+        settle(now)
+        if sealed, fadeStarted != nil {   // the last lay is still landing and this one landed too: its growth is moot
+            guard landed else { stop(); return }
+            pendingLay = nil; queued = nil
+            return
+        }
         sealed = true
-        workTask?.cancel(); workTask = nil   // the band ends with the landing (it sinks with the growth)
-        guard landed, !pieces.isEmpty else { wipe(); return }
+        workingSince = nil
+        guard landed, !pieces.isEmpty || replay != nil else { stop(); return }
         landedHold = true
-        guard fadeStarted == nil else { return }
-        fadeStarted = now
+        if Self.controlNoCatchUp {   // RED CONTROL: the replay goes on at its own pace; the lattice waits for it
+            replay?.advance(to: now, recorded: Double(clock))
+            let left = replay.map { Double(clock) - $0.shown } ?? 0
+            let rate = replay.map { $0.pace(at: now, recorded: Double(clock)) } ?? 1
+            fadeStarted = now + left * LatticeGrowthReplay.pollS / Swift.max(rate, 1e-3)
+        } else {
+            replay?.land(at: now, recorded: Double(clock))
+            fadeStarted = replay?.caughtUpAt ?? now
+        }
         changed.send()
-        fadeTask = Task { @MainActor [weak self] in
-            let end = Date().addingTimeInterval(Self.fadeS)
-            while Date() < end {
-                try? await Task.sleep(nanoseconds: 33_000_000)   // about 30 frames a second while it fades
-                guard let self, !Task.isCancelled else { return }
-                self.changed.send()
-            }
-            guard let self, !Task.isCancelled else { return }
-            self.wipe()
+        tick()
+    }
+
+    /// The last landing's end, if `t` is past it and the ticker has not seen it yet (never wait on the ticker).
+    private func settle(_ t: CFTimeInterval) {
+        if sealed, let f = fadeStarted, t >= f + Self.fadeS { landed(now: t) }
+    }
+
+    /// The last lay is landing at `t`: sealed, its growth not yet gone.
+    func landing(_ t: CFTimeInterval) -> Bool {
+        guard sealed, let f = fadeStarted else { return false }
+        return t < f + Self.fadeS
+    }
+
+    /// The landing ended: the growth goes (still sealed: a read behind the lay never brings it back); a lay that began
+    /// meanwhile takes its place, its pieces (and its phase) as they came.
+    private func landed(now: CFTimeInterval) {
+        let q = queued, p = pendingLay
+        queued = nil; pendingLay = nil
+        clearPieces()
+        replay = nil
+        opening = .none
+        if q == nil { phase = 0 }
+        if let p { begin(p, now: now); landedHold = false }
+        if let q {
+            sealed = false; landedHold = false
+            if !q.xyz.isEmpty { append(xyz: q.xyz, region: q.region) }
         }
     }
 
-    private func wipe() {
-        fadeTask?.cancel(); fadeTask = nil
-        workTask?.cancel(); workTask = nil
-        workingSince = nil
+    private func clearPieces() {
         let had = !pieces.isEmpty || fadeStarted != nil
         fadeStarted = nil
+        workingSince = nil
         pieces = []
         clock = 0
+        lastShown = -1
         epoch &+= 1
         if had { changed.send() }
     }
 
-    /// How much of the growth shows at `t`: 1, and toward 0 over `fadeS` once the lattice landed (★ notes24: the tubes' size,
-    /// sinking into the finished lattice).
+    /// How much of the growth shows at `t`: 1, and toward 0 over `fadeS` once the replay of the landed lay caught up (the
+    /// tubes' size, sinking into the finished lattice).
     public func alpha(at t: CFTimeInterval) -> Float {
         guard let f = fadeStarted else { return 1 }
         return Float(Swift.max(0, Swift.min(1, 1 - (t - f) / Self.fadeS)))
     }
+
+    // MARK: the redraws
+
+    /// The view is redrawn while something moves: the walls opening, each replay step that shows more, the band, the
+    /// landing; the landing's end clears the growth. Stops when nothing is left to move.
+    private func tick() {
+        guard tickTask == nil else { return }
+        let gap = UInt64(1_000_000_000 / Self.tickFPS)
+        tickTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                if !self.step(CACurrentMediaTime()) { self.tickTask = nil; return }
+                try? await Task.sleep(nanoseconds: gap)
+            }
+        }
+    }
+
+    /// One tick at `t`: true while there is more to come.
+    @discardableResult
+    func step(_ t: CFTimeInterval) -> Bool {
+        if sealed, let f = fadeStarted, t >= f + Self.fadeS {
+            landed(now: t)
+            changed.send()
+            return replay != nil || queued != nil
+        }
+        let shown = shownCount(at: t)
+        var moved = shown != lastShown
+        lastShown = shown
+        if let r = replay, r.walls, wallsProgress(at: t) < 1 { moved = true }
+        if workingSince != nil || fadeStarted != nil { moved = true }
+        if moved { changed.send() }
+        return replay != nil || fadeStarted != nil || workingSince != nil
+    }
+}
+
+extension LatticeLayoutPreview.LayProgress {
+    /// ★ notes24: how long the last lay like this one took, less the time this one has run (the replay's pacing). nil: none.
+    public var expectedLeftS: Double? { expectedS.map { $0 - Date().timeIntervalSince(started) } }
 }
 
 /// What one read of the engine's tap means for the growth on screen. Pure: the tests feed it a fake reader.

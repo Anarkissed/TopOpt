@@ -412,6 +412,28 @@ inline bool shell_is_latticed(float3 mpos, float3 mnormal, constant ShellClip& c
     }
     return false;
 }
+// ★ notes24 (his "start an animation by removing the walls"): the latticed surface DISSOLVING away as a lay begins. `eye.w` is
+// the share of it still standing (0 — every clip until now — gone, as before; 1 all of it); a fragment stands while its
+// noise is under that. Patches of about six of the clip's voxels, in the part's own space (they stay put as he turns it).
+inline float shell_dissolve_noise(float3 p, constant ShellClip& c) {
+    float cell = 6.0 * max(min(c.spacing.x, min(c.spacing.y, c.spacing.z)), 0.05);
+    float n = 0.0, amp = 0.62, tot = 0.0;
+    for (int o = 0; o < 2; ++o) {
+        float3 q = p / cell, i = floor(q), f = q - i;
+        f = f * f * (3.0 - 2.0 * f);
+        float h[8];
+        for (int k = 0; k < 8; ++k) {
+            float3 cc = i + float3(k & 1, (k >> 1) & 1, (k >> 2) & 1);
+            h[k] = fract(sin(dot(cc, float3(127.1, 311.7, 74.7))) * 43758.5453);
+        }
+        float v = mix(mix(mix(h[0], h[1], f.x), mix(h[2], h[3], f.x), f.y), mix(mix(h[4], h[5], f.x), mix(h[6], h[7], f.x), f.y), f.z);
+        n += amp * v; tot += amp; amp *= 0.6; cell *= 0.45;
+    }
+    return clamp((n / tot - 0.5) * 1.6 + 0.5, 0.0, 0.999);
+}
+inline bool shell_standing(float3 mpos, constant ShellClip& c) {
+    return c.eye.w > 0.0 && shell_dissolve_noise(mpos, c) < c.eye.w;
+}
 """
 
 private let viewerShaderSource = """
@@ -544,7 +566,10 @@ fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[
                                 constant ShellClip& shellClip [[buffer(4)]],
                                 constant float4* shellDecls [[buffer(5)]],
                                 texture3d<float, access::sample> clipRegionTex [[texture(4)]]) {
-    if (shell_is_latticed(in.mpos, in.mnormal, shellClip, shellDecls, clipRegionTex)) {
+    // ★ notes24: a latticed fragment still standing while the walls dissolve is drawn (its edge glowing, below)
+    bool latticed = shell_is_latticed(in.mpos, in.mnormal, shellClip, shellDecls, clipRegionTex);
+    float standing = latticed && shellClip.eye.w > 0.0 ? shellClip.eye.w - shell_dissolve_noise(in.mpos, shellClip) : -1.0;
+    if (latticed && standing <= 0.0) {
         discard_fragment();
     }
     if (reveal.w > 0.5) {
@@ -711,6 +736,11 @@ fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[
         rgb = clamp(in.tint.rgb * (0.35 + 0.9 * gr), 0.0, 1.0);
         a = clamp(bodyAlpha + 0.5 * gr, 0.0, 1.0);
     }
+    // ★ notes24 (his walls-first): where the wall is dissolving, its edge glows in the lattice's light purple
+    if (latticed && standing > 0.0) {   // (none before it starts: eye.w 1)
+        float going = clamp((1.0 - shellClip.eye.w) * 12.0, 0.0, 1.0);
+        rgb = mix(rgb, float3(0.78, 0.70, 1.0), 0.9 * going * (1.0 - smoothstep(0.0, 0.12, standing)));
+    }
     return float4(rgb * a, a);   // premultiplied (a==1 → unchanged)
 }
 """
@@ -874,8 +904,8 @@ fragment GBuf depth_fragment(DOut in [[stage_in]],
                              constant ShellClip& shellClip [[buffer(4)]],
                              constant float4* shellDecls [[buffer(5)]],
                              texture3d<float, access::sample> clipRegionTex [[texture(4)]]) {
-    if (shell_is_latticed(in.mpos, in.mnormal, shellClip, shellDecls, clipRegionTex)) {
-        discard_fragment();
+    if (shell_is_latticed(in.mpos, in.mnormal, shellClip, shellDecls, clipRegionTex) && !shell_standing(in.mpos, shellClip)) {
+        discard_fragment();   // (★ notes24: a wall still standing while it dissolves stays, as the visible pass draws it)
     }
     GBuf o;
     o.eyeZ = in.eyeZ;
@@ -1639,8 +1669,11 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     var layoutBars: LatticeLayoutBarsPass?   // the new engine's bars (#362, LatticeLayoutBarsPass.swift); nil = today's frame
     var growth: LatticeGrowth?               // ★ his 11-22 (watch it grow): an Organic lay's vines so far (LatticeGrowthPass.swift)
     var growthPass: LatticeGrowthPass?
-    /// ★ notes24: the growth draws this frame (into the G-buffer, lit as the lattice), decided once a frame (`prepareGrowth`).
-    var growthInFrame = false
+    /// ★ notes24: what the growth does this frame (drawn, its replay, how the part opens), decided once a frame
+    /// (`prepareGrowth`, LatticeGrowthPass.swift).
+    var growthFrame = LatticeGrowthFrame()
+    /// ★ notes24 (b), "looking INTO A PART": the inside's light (LatticeInsideShade.swift), built on first use.
+    var insideShade: LatticeInsideShade?
     /// The scene token last uploaded, so a bake happens once per scene change and never
     /// per frame (the preview's bar P2, carried over unchanged).
     private var latticeSceneToken: Int = -1
@@ -3562,7 +3595,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // pixels are PRODUCED by the prepass now — it is not an optional quality
         // treatment for them, it is where they come from.
         // ★ notes24 (img 49): and the growing vines, real tubes lit by the same shade
-        let wantsLattice = (latticeInFrame || flexibleLatticeInFrame || layoutBarsInFrame || growthInFrame)
+        let wantsLattice = (latticeInFrame || flexibleLatticeInFrame || layoutBarsInFrame || growthInFrame
+                            || growthFrame.ownMap)   // (★ notes24: the walls the growth's own map opens, lit as the lattice)
             && latticeGBufferPipeline != nil && latticeShadePipeline != nil
         let wantsAO = !quality.isDisjoint(with: [.ambientOcclusion, .edges]) && aoPipeline != nil
             && LatticePreviewMode.aoDrawn(turning: turning, latticeShown: wantsLattice)   // ★ his pick 11-16 (D)
@@ -3632,7 +3666,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // arrows show through the walls; alpha 1 is the unchanged opaque draw.
         var drawAlpha = Self.bodyDrawAlpha(bodyAlpha, xray: xrayBody)   // ★ B2: the X-ray look
         // ★ notes24: no map yet to open the part while the vines grow: the Lattice page's own X-ray (MeshRenderer.growthXraysBody)
-        if growthXraysBody { drawAlpha = Swift.min(drawAlpha, LatticeLayoutPreview.ghostAlpha) }
+        // (faded to it over the lay's first seconds: his walls-first, `growthXrayAlpha`)
+        if growthXraysBody { drawAlpha = Swift.min(drawAlpha, growthXrayAlpha) }
         let translucent = drawAlpha < 0.999
         let ghostAfterLattice = flexibleGhostAfterLattice(translucent: translucent, latticeShaded: wantsLattice && gbuffer != nil)
         var bodyAlphaVal = drawAlpha
@@ -3714,6 +3749,12 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             enc.setFragmentTexture(gb.normal, index: 2)
             enc.setFragmentTexture(gb.albedo, index: 3)
             countedDraw(enc, .triangle, 3)
+            // ★ notes24 (b), "looking INTO A PART": what is inside the opened part (vines, growth, cut walls) darker the deeper
+            // he looks and in the shadow of the walls around it (LatticeInsideShade.swift); the solid view's map only
+            if encodeInsideShade(enc, gbuffer: gb, target: mainSize, modelView: uniforms.modelView, projection: proj,
+                                 model: uniforms.model, far: Self.sceneDepthFar) {
+                frameDrawCalls += 1; frameVertices += 3
+            }
         }
         // Flexible X-ray (#362): the see-through body AFTER the opaque lattice shade; lsdf_shade rebound only fragment 0/2 + textures 0-3 (UnifiedShading.swift:1705-1711)
         if ghostAfterLattice {
@@ -4456,6 +4497,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
 
         // ★ THE NEW ENGINE's SOLID VIEW (his ask 11-13): its own map cuts the body open where the lattice is (mode 2)
         // (★ notes24: not while the growing vines stand in the part's X-ray: that map is not this lay's — growthXraysBody)
+        if let own = growthShellClip { return (own.clip, openEverywhere) }   // ★ notes24: the walls dissolving (LatticeGrowthPass)
         if layoutBarsInFrame, !growthXraysBody, let solid = layoutBars?.shellClip { return (solid, openEverywhere) }
         guard latticeInFrame, let layer = latticeLayer else { return (u, openEverywhere) }
         let declared = (layer.scene?.regions ?? []).filter { $0.role == .include }
@@ -4647,6 +4689,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// The texture `shellClipAndDecls` describes: the baked region field when there are
     /// declarations, the neutral "inside everywhere" volume otherwise.
     private var shellClipTexture: MTLTexture? {
+        if let own = growthShellClip { return own.texture }   // ★ notes24: the growth's own map, its walls dissolving
         if layoutBarsInFrame, layoutBars?.shellClip != nil, let t = layoutBars?.gridTexture { return t }   // the new engine's map
         guard latticeInFrame, let layer = latticeLayer else { return neutralShellClipTexture() }
         // Declared ⇒ the region field. Undeclared (the sample block) ⇒ the CELL field,
@@ -4774,7 +4817,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         let lattice = latticeInFrame ? latticeLayer : nil
         guard let dpipe = depthPrepassPipeline, vertexDrawCount > 0,
               let vbuf = vertexBuffer, let fbuf = flexBuffer,
-              shellVisible || lattice != nil || flexibleLatticeInFrame || layoutBarsInFrame || growthInFrame,
+              shellVisible || lattice != nil || flexibleLatticeInFrame || layoutBarsInFrame || growthInFrame
+                || growthFrame.ownMap,
               let tex = sceneDepthTextures(width: width, height: height) else { return nil }
         let pd = MTLRenderPassDescriptor()
         pd.colorAttachments[0].texture = tex.color
@@ -4936,13 +4980,17 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                             clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView, eyeNormalBasis: uniforms.normalMatrix, squish: flexScale) {
             frameDrawCalls += 1; frameVertices += 3 }
         // the new engine's bars (#362): the fourth writer — same encoder, attachments and .less + write depth state
-        if layoutBarsInFrame, let bars = layoutBars,
+        // (★ notes24: the landed lattice waits, at most a second, while the replay shows what was left of its growth)
+        if layoutBarsInFrame, !growthFrame.holdsLanded, let bars = layoutBars,
            bars.encodeGBuffer(penc, depthState: depthState, clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView,
                               eyeNormalBasis: uniforms.normalMatrix, turning: turning) {
             frameDrawCalls += 1; frameVertices += 36 * bars.count }
         // ★ the solid view's cut walls (his ask 11-13): after the bars, the same encoder and depth state (★ notes24: none while
-        // the growing vines stand in the part's X-ray)
-        if layoutBarsInFrame, !growthXraysBody, let bars = layoutBars,
+        // the growing vines stand in the part's X-ray; the growth's own map's while its walls dissolve)
+        if encodeGrowthWalls(penc, depthState: depthState, clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView,
+                             eyeNormalBasis: uniforms.normalMatrix) {
+            frameDrawCalls += 1; frameVertices += 36
+        } else if layoutBarsInFrame, !growthXraysBody, let bars = layoutBars,
            bars.encodeWalls(penc, depthState: depthState, clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView,
                             eyeNormalBasis: uniforms.normalMatrix) {
             frameDrawCalls += 1; frameVertices += 36 }
