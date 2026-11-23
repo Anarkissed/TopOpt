@@ -501,7 +501,8 @@ public final class LatticeLayoutPreview: ObservableObject {
         shownWhere = (b.token, MapWhere(path: r.inputs.path, settings: r.inputs.settings, stressKey: r.inputs.stress.key))   // ★ 11-22
         organicQuality = r.quality; organicNumbers = r.numbers; problem = r.problem; notes = r.notes
         organicLaidGroups = r.quality == .exact ? r.groups : nil; organicRefusals = []
-        organicDraftGroups = r.quality == .draft ? r.groups : nil   // ★ his 11-22; organicWallVerdicts = r.wallVerdicts
+        organicDraftGroups = r.quality == .draft ? r.groups : nil   // ★ his 11-22
+        organicWallVerdicts = r.wallVerdicts
         organicAutoLimits = r.autoLimits; organicGroupLimits = r.groupLimits
         shownWalls = r.walls; shownRestored = true
         layTimingEnds(.cancelled, "a remembered lattice was shown")   // ★ his 11-22 (GenerationTimingLog)
