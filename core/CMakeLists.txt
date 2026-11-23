@@ -589,6 +589,10 @@ if(ZLIB_FOUND)   # OF5: the test inflates the 3MF it reads back
   target_compile_definitions(test_lattice_layout_file PRIVATE TOPOPT_HAVE_ZLIB)
 endif()
 add_test(NAME lattice_layout_file COMMAND test_lattice_layout_file)
+# SPEED 11-22: the print check's overhang read on a grid gives exactly the every-bar answers.
+add_executable(test_weave_findings_grid tests/unit/test_weave_findings_grid.cpp)
+target_link_libraries(test_weave_findings_grid PRIVATE topopt)
+add_test(NAME weave_findings_grid COMMAND test_weave_findings_grid)
 # Organic cut 2 (brief E1, rules OF1..): the file as the solid plus unmerged closed tubes. The test makes its reference
 # unions with Manifold, so it is registered only where the writer has it.
 if(manifold_FOUND)

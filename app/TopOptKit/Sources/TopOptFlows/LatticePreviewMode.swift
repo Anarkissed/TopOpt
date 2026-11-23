@@ -30,10 +30,15 @@ public enum LatticePreviewMode {
     public static let layingDraft = "Laying Draft"
     public static let draftChecking = "Draft \u{00B7} checking print"
     public static let layingExact = "Laying the lattice"
-    /// The button's ring and words for an Organic lay under way.
+    /// ★ his 11-22 ("watch the lattice grow"): what the engine's lay is doing, by its phase (core's GrowthTap: 1 growing,
+    /// 2 pruning, 3 re-seeding the bare places, 4 reaching the walls, 5 finishing), five words at most each.
+    public static let phaseWords: [Int: String] = [1: "Growing the vines", 2: "Pruning", 3: "Filling the gaps",
+                                                   4: "Reaching the walls", 5: "Finishing"]
+    /// The button's ring and words for an Organic lay under way: the engine's phase once it says one, else what is laying.
     public static func buttonProgress(_ p: LatticeLayoutPreview.LayProgress) -> DSRunButton.Progress {
         DSRunButton.Progress(started: p.started, expected: p.expectedS,
-                             words: p.quality == .draft ? layingDraft : p.draftShown ? draftChecking : layingExact)
+                             words: phaseWords[p.phase]
+                                ?? (p.quality == .draft ? layingDraft : p.draftShown ? draftChecking : layingExact))
     }
 
     /// (4) Live preview: the rebuild waits this long after the last change.

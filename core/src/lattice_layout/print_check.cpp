@@ -191,6 +191,21 @@ struct LayerFound {
   double reach = 0.0;
   std::size_t thin = 0;
 };
+}  // namespace
+
+// SPEED 11-22: what the last check judged (its sections and judgements as judge made them, before the "below" reading),
+// and everything a judgement reads besides the two sections.
+struct LayerCache {
+  bool valid = false;
+  int W = 0, H = 0, nl = 0, grow_px = 0;
+  double x0 = 0.0, y0 = 0.0, px = 0.0, zmin = 0.0, L = 0.0;
+  double over = 0.0, reach = 0.0, thin_under = 0.0, thin_min = 0.0;
+  int fill = 0;
+  std::vector<Section> sections;
+  std::vector<LayerFound> found;
+};
+
+namespace {
 
 // What one thread needs to judge a layer.
 struct Bench {
@@ -486,19 +501,47 @@ LayerReport check_layers(const TriangleMesh& mesh, const LayerSpec& spec) {
   }
   const int grow_px = std::max(1, static_cast<int>(std::lround(L / PX)));
   std::vector<LayerFound> found(static_cast<std::size_t>(nl));
+  // SPEED 11-22: the last check's judgement of a layer stands when its section and the one below are the same
+  LayerCache* cache = spec.cache;
+  const bool kept = cache && cache->valid && cache->W == g.W && cache->H == g.H && cache->x0 == g.x0 &&
+                    cache->y0 == g.y0 && cache->px == g.px && cache->nl == nl && cache->zmin == zmin && cache->L == L &&
+                    cache->grow_px == grow_px && cache->over == spec.one_ended_over_mm &&
+                    cache->reach == spec.reach_limit_mm && cache->thin_under == spec.thin_under_mm &&
+                    cache->thin_min == spec.thin_min_mm2 && cache->fill == static_cast<int>(spec.fill) &&
+                    cache->sections.size() == sections.size() && cache->found.size() == found.size();
+  auto same = [&](int k) {
+    const Section& a = sections[static_cast<std::size_t>(k)];
+    const Section& b = cache->sections[static_cast<std::size_t>(k)];
+    return a.start == b.start && a.cols == b.cols;
+  };
   {
     std::atomic<int> next{0};
     auto work = [&] {
       Bench bench;
-      for (int k = next.fetch_add(1); k < nl && !asked(spec.stop); k = next.fetch_add(1))
+      for (int k = next.fetch_add(1); k < nl && !asked(spec.stop); k = next.fetch_add(1)) {
+        if (kept && same(k) && (k == 0 || same(k - 1))) {
+          found[static_cast<std::size_t>(k)] = cache->found[static_cast<std::size_t>(k)];
+          continue;
+        }
         found[static_cast<std::size_t>(k)] = judge(k > 0 ? &sections[static_cast<std::size_t>(k) - 1] : nullptr, sections[static_cast<std::size_t>(k)],
                                                    z_of(k), g, grow_px, spec, bench);
+      }
     };
     std::vector<std::thread> pool;
     for (int t = 1; t < nt; ++t) pool.emplace_back(work);
     work();
     for (std::thread& t : pool) t.join();
     if (asked(spec.stop)) throw LayCancelled{};
+  }
+  if (cache) {   // SPEED 11-22: for the next pass
+    cache->valid = true;
+    cache->W = g.W; cache->H = g.H; cache->x0 = g.x0; cache->y0 = g.y0; cache->px = g.px;
+    cache->nl = nl; cache->zmin = zmin; cache->L = L; cache->grow_px = grow_px;
+    cache->over = spec.one_ended_over_mm; cache->reach = spec.reach_limit_mm;
+    cache->thin_under = spec.thin_under_mm; cache->thin_min = spec.thin_min_mm2;
+    cache->fill = static_cast<int>(spec.fill);
+    cache->sections = sections;
+    cache->found = found;
   }
   // The first material below a place: the highest layer under it with anything within 0.45 mm.
   const int near_px = static_cast<int>(std::lround(0.45 / PX));
@@ -570,9 +613,11 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
   if (rep.tubes)
     for (const Bar& x : bars.bars)
       if (std::find(weave_regions.begin(), weave_regions.end(), x.region) == weave_regions.end()) cube_bars.bars.push_back(x);
+  LayerCache layer_cache;   // SPEED 11-22: each pass judges only the layers its changes touched
   for (int pass = 1; pass <= most; ++pass) {
     rep.passes = pass;
     LayerSpec layers = spec.layers;
+    layers.cache = &layer_cache;
     WeaveHolds holds;
     std::vector<char> present;
     std::vector<WeaveStand> stands;
@@ -650,8 +695,14 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
     if (!weave_regions.empty()) {
       // O7: a shallow weave bar the rules keep is kept at any length: what the check finds ON it held at one end, or
       // reaching past the limit, is not a finding (read on the bar as `drop_at` is: within its half width + 0.35 mm).
+      // SPEED 11-22: only the kept shallow bars filed on a grid, each finding read against those in its cell
+      std::vector<char> kept_shallow(bars.bars.size(), 0);
+      for (std::size_t i = 0; i < bars.bars.size(); ++i)
+        kept_shallow[i] = i < holds.shallow.size() && i < holds.kept.size() && holds.shallow[i] && holds.kept[i];
+      const BarGrid shallow_grid(bars, kept_shallow);
       auto on_kept_shallow = [&](const LayerReport::OneEnded& o) {
-        for (std::size_t i = 0; i < bars.bars.size(); ++i) {
+        for (const std::uint32_t u : shallow_grid.near({o.x, o.y, o.z})) {
+          const std::size_t i = u;
           if (!holds.shallow[i] || !holds.kept[i]) continue;
           const Bar& x = bars.bars[i];
           const Vec3 d{x.b.x - x.a.x, x.b.y - x.a.y, x.b.z - x.a.z};
@@ -671,7 +722,10 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
       // Read where `drop_at` would put the place (the bottom of its layer), against the bars the writer kept.
       std::vector<Vec3> places;
       for (const LayerReport::MidAir& m : rep.layers.mid_air) places.push_back({m.x, m.y, m.z - half_layer});
-      const std::vector<WeaveFinding> wf = weave_findings(bars, weave_regions, holds.kept, places, ms.layer_mm);
+      // SPEED 11-22: the joints and the grid made ONCE for this pass (they were made again for every place below)
+      const WeaveFindingsIndex findings(bars, weave_regions, holds.kept, ms.layer_mm);
+      std::vector<WeaveFinding> wf(places.size());
+      for (std::size_t q = 0; q < places.size(); ++q) wf[q] = findings.at(places[q]);
       const double speck = 0.5 * layout.bead_mm;
       std::vector<LayerReport::MidAir> still, specks;
       for (std::size_t q = 0; q < rep.layers.mid_air.size(); ++q) {
@@ -692,7 +746,7 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
         const Domain::Probe probe = domain.probe();
         const double layer = 2.0 * half_layer;
         const auto own = [&](double x, double y, double z) {
-          const WeaveFinding f = weave_findings(bars, weave_regions, holds.kept, {{x, y, z - half_layer}}, ms.layer_mm).front();
+          const WeaveFinding f = findings.at({x, y, z - half_layer});
           return f.reached == 0 && !f.on_weave && probe.where({x, y, z - layer}).why == Why::Outside;
         };
         const std::size_t before = rep.layers.mid_air.size() + rep.layers.one_ended.size() + rep.layers.long_bridges.size();

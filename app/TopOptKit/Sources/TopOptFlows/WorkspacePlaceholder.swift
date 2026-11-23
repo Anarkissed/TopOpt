@@ -1349,6 +1349,7 @@ public struct WorkspacePlaceholder: View {
                                                                        stressKey: latticeStressFieldKey) : nil,   // ★ the new engine's bars, in the old preview's colour key (Install 3)
                           flexibleLattice: flexibleMain.layer(project, stage: stage, pageUp: fullScreenPageUp))   // Flexible (PR #362) H3: the main page's lattice + its squish loop (FlexibleMainStage.swift)
                 .onEmptyTap { emptyTapClears() }   // ★ his iPad 10-26 (5): a tap on empty space clears the selection
+                .latticeGrowth(newEngineDrawn ? newEngine.growth : nil)   // ★ his 11-22: watch the Organic lattice grow
                 .onLatticeTurning { latticeTurningChanged($0) }   // ★ his pick 11-16 (A): chips and legends hide while he turns a lattice
                 .onTapRay(primitiveTapRay)   // ★ his iPad 10-28: a tap on a keep-clear volume picks it
                 .cutSibling(SurfaceTint.siblingShows(tool: surfaceTool))   // ★ his 11-14: the other half is tinted under Union only
