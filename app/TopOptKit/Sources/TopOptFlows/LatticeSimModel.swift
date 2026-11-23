@@ -273,6 +273,7 @@ public final class LatticeSimModel: ObservableObject {
                         provenance: .solidSim(date: now, resolution: ctx.resolution))
                     self.fingerprint = ctx.fingerprint
                     self.phase = .complete(summary)
+                    self.keep()   // ★ his iPad notes 11-23: kept in the version's folder
                 }
             }
         }
@@ -320,6 +321,7 @@ public final class LatticeSimModel: ObservableObject {
                         provenance: .solidSim(date: now, resolution: first.resolution))
                     self.fingerprint = fp
                     self.phase = .complete(summary)
+                    self.keep()   // ★ his iPad notes 11-23: kept in the version's folder
                 }
             }
         }
@@ -391,6 +393,28 @@ public final class LatticeSimModel: ObservableObject {
         guard phase == .running else { return }
         generation += 1
         phase = .idle
+    }
+
+    // MARK: ★ his iPad notes 11-23: the check kept in the version's folder, and read back (LatticePreviewStore)
+
+    /// The check just made, kept beside the version's model.
+    private func keep() {
+        guard let field, let fingerprint, case let .complete(summary) = phase else { return }
+        LatticePreviewStore.saveStress(.init(field: field, summary: summary, unsolved: unsolved), fingerprint: fingerprint)
+    }
+
+    /// The check this version's folder keeps for exactly these inputs, taken as this page's (no solve). False: none, other
+    /// inputs, or a check is running or done already.
+    @discardableResult
+    public func adoptSaved(for ctxs: [Context]) -> Bool {
+        guard phase != .running, field == nil, let fp = Self.fingerprint(of: ctxs),
+              let saved = LatticePreviewStore.loadStress(fp) else { return false }
+        generation += 1
+        unsolved = saved.unsolved
+        field = saved.field
+        fingerprint = fp
+        phase = .complete(saved.summary)
+        return true
     }
 
     /// Drop a completed/failed sim (e.g. when the part itself is replaced).

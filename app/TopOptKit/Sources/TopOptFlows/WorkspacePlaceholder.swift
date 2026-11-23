@@ -1368,6 +1368,7 @@ public struct WorkspacePlaceholder: View {
                     }
                 }   // ★ the new engine (test): its lines
                 .onChange(of: newEngineOn) { on in
+                    if on, latticeSim.field == nil, LatticeLayoutPreview.needsStress(project.lattice) { latticeSim.adoptSaved(for: model.makeLatticeSimContexts()) }   // ★ his 11-23
                     newEngine.update(project: project, on: on, solid: !surfaceXrayOn, stress: newEngineStress)
                     // ★ Install 3: under the new engine the old picture goes (memory, and no stale key or card); leaving it (the
                     // lattice page, a variant, Organic) bakes it again
@@ -5067,6 +5068,7 @@ public struct WorkspacePlaceholder: View {
             AppPopups.shared.show(StressCheckCopy.nothingTitle, StressCheckCopy.nothingText); return
         }
         // Organic follows the stress's directions: a result without them is run again, never waited on forever
+        if !force, latticeSim.field == nil { latticeSim.adoptSaved(for: ctxs) }   // ★ his iPad notes 11-23: the version's own
         let lacksDirections = LatticeLayoutPreview.organic(project.lattice) && latticeSim.field?.stressTensor.isEmpty == true
         if !force, latticeSim.field != nil, !latticeSim.isStale(against: ctxs), !lacksDirections { return }
         simBannerDismissed = false
