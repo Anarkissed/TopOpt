@@ -496,6 +496,21 @@ public enum LatticeFileRun {
         public var timing: RunTiming?
     }
 
+    /// ★ his 11-22 (the print-accurate lattice made on the Mac, "Check right after"): the file as soon as it is saved, before
+    /// the strength check ends, and how many of its first triangles are the solid (core writes "<file>.parts.json" before the
+    /// file is moved in; nil when that note is unreadable).
+    public struct Early: Sendable {
+        public static let partsSuffix = ".parts.json"
+        public var name: String
+        public var got: @Sendable (_ file: Data, _ baseTriangles: Int?) -> Void
+        public init(name: String = "lattice.3mf", got: @escaping @Sendable (_ file: Data, _ baseTriangles: Int?) -> Void) {
+            self.name = name; self.got = got
+        }
+        static func baseTriangles(_ parts: Data) -> Int? {
+            ((try? JSONSerialization.jsonObject(with: parts)) as? [String: Any])?["base_triangles"].flatMap { ($0 as? NSNumber)?.intValue }
+        }
+    }
+
     /// The strengthening's ceiling: six rounds of a lay, a solve and a frame check (his stand: about 40 to 45 minutes).
     public static let strengthenCeilingSeconds: TimeInterval = 4 * 3600
 
@@ -563,7 +578,8 @@ public enum LatticeFileRun {
 
         /// Polls the job to its end; its last record. A cancel deletes the Mac's job; a failure says the CLI's last line.
         func wait(_ jobURL: URL, ceiling: TimeInterval, failed: String, isCancelled: @Sendable () -> Bool,
-                  onState: @Sendable (_ state: String, _ position: Int?) -> Void) throws -> [String: Any] {
+                  onState: @Sendable (_ state: String, _ position: Int?) -> Void,
+                  eachPoll: (_ state: String) -> Void = { _ in }) throws -> [String: Any] {
             let deadline = Date().addingTimeInterval(ceiling)
             var record: [String: Any] = [:]
             while Date() < deadline {
@@ -580,6 +596,7 @@ public enum LatticeFileRun {
                 let state = (o["state"] as? String) ?? "unknown"
                 record = o
                 onState(state, o["position"] as? Int)   // queued (and how many ahead) or running
+                eachPoll(state)   // ★ his 11-22: the print-accurate file fetched as soon as it is saved
                 if state == "done" { return record }
                 if state == "failed" || state == "error" || state == "cancelled" {
                     // the CLI's last line carries the same plain why as its report (the contract)
@@ -636,20 +653,33 @@ public enum LatticeFileRun {
                              demand: Data? = nil, strengthJob: Data? = nil, tensor: Data? = nil,
                              strengthened: Strengthened.Files? = nil,
                              isCancelled: @escaping @Sendable () -> Bool = { false },
-                             onState: @escaping @Sendable (_ state: String, _ position: Int?) -> Void = { _, _ in })
+                             onState: @escaping @Sendable (_ state: String, _ position: Int?) -> Void = { _, _ in },
+                             onJob: @escaping @Sendable (URL) -> Void = { _ in }, early: Early? = nil)
         throws -> Made {
         let w = Worker(config)
         try w.checkEngine()
         let jobURL = try w.submit(try parts(modelPath: modelPath, jobJSON: jobJSON, projectName: projectName, demand: demand,
                                             strengthJob: strengthJob, tensor: tensor, strengthened: strengthened))
+        onJob(jobURL)
+        // ★ his 11-22 ("Check right after"): the 3MF fetched the moment it is saved (its parts note is written first), so the
+        // iPad draws it while the Mac still checks its strength; kept, so it is fetched once
+        var earlyFile: Data?
         let record = try w.wait(jobURL, ceiling: ceilingSeconds, failed: "The file could not be made", isCancelled: isCancelled,
-                                onState: onState)
+                                onState: onState, eachPoll: { state in
+            guard let early, earlyFile == nil, state == "running" || state == "done",
+                  let parts = w.file(jobURL, early.name + Early.partsSuffix), let d = w.file(jobURL, early.name) else { return }
+            earlyFile = d
+            early.got(d, Early.baseTriangles(parts))
+        })
         guard let rd = w.file(jobURL, LatticeFileJob.reportName), let report = LatticeFileReport.parse(rd) else {
             throw Failure("The Mac made the file but its report could not be read")
         }
         guard report.ok else { throw Failure(report.why.isEmpty ? "The file could not be made" : report.why) }
         // the file by the name the report gives (Organic: lattice.3mf), else the job's own output
-        guard let stl = w.file(jobURL, report.fileName) else { throw Failure("The Mac made the file but it could not be fetched") }
+        let kept = early?.name == report.fileName ? earlyFile : nil
+        guard let stl = kept ?? w.file(jobURL, report.fileName) else {
+            throw Failure("The Mac made the file but it could not be fetched")
+        }
         // ★ Install 3: the strength check's views, by the names its block gives (bare names beside the report); enrichment —
         // a missing one leaves the views gated, never the result
         func named(_ n: String?) -> Data? { n.flatMap { $0.contains("/") || $0.contains("..") ? nil : w.file(jobURL, $0) } }
@@ -711,7 +741,8 @@ public enum LatticeFileRun {
     public static func strengthen(config: RemoteRunnerConfig, modelPath: String, jobJSON: Data, projectName: String,
                                   strengthJob: Data, tensor: Data?,
                                   isCancelled: @escaping @Sendable () -> Bool = { false },
-                                  onState: @escaping @Sendable (_ state: String, _ position: Int?) -> Void = { _, _ in })
+                                  onState: @escaping @Sendable (_ state: String, _ position: Int?) -> Void = { _, _ in },
+                                  onJob: @escaping @Sendable (URL) -> Void = { _ in })
         throws -> Strengthened {
         let w = Worker(config)
         try w.checkEngine()
@@ -719,6 +750,7 @@ public enum LatticeFileRun {
                           tensor: tensor, strengthened: nil)
         p.append(RemoteRun.UploadPart(name: "run", filename: nil, contentType: nil, data: Data("organic-strengthen".utf8)))
         let jobURL = try w.submit(p)
+        onJob(jobURL)
         _ = try w.wait(jobURL, ceiling: strengthenCeilingSeconds, failed: "The lattice could not be strengthened",
                        isCancelled: isCancelled, onState: onState)
         guard let sd = w.file(jobURL, "strengthen.json"), let read = Strengthened.parse(sd) else {
@@ -886,7 +918,9 @@ public enum LatticeFileButton {
     /// file alone. The strengthening's summary rides in the result's report as its `organic_strengthen` block (the Results
     /// screen and the certify wizard read it). Two coarse ticks: strengthening, then making.
     public static func organicRunner(config: RemoteRunnerConfig, job: LatticeFileJob.ForPart, projectName: String,
-                                     strengthJob: Data?, densityGCm3: Double) -> RunModel.Runner {
+                                     strengthJob: Data?, densityGCm3: Double,
+                                     onJob: @escaping @Sendable (_ strengthening: Bool, URL) -> Void = { _, _ in },
+                                     early: LatticeFileRun.Early? = nil) -> RunModel.Runner {
         { _, progress, _ in
             let keepGoing = Progress(progress)
             let steps = strengthJob == nil ? 1 : 2
@@ -895,12 +929,14 @@ public enum LatticeFileButton {
             if let strengthJob {
                 strengthened = try LatticeFileRun.strengthen(config: config, modelPath: job.modelPath, jobJSON: job.json,
                                                              projectName: projectName, strengthJob: strengthJob, tensor: job.tensor,
-                                                             isCancelled: { !keepGoing.call(0, steps, 0) })
+                                                             isCancelled: { !keepGoing.call(0, steps, 0) },
+                                                             onJob: { onJob(true, $0) })
                 _ = keepGoing.call(1, steps, 0)
             }
             var made = try LatticeFileRun.drive(config: config, modelPath: job.modelPath, jobJSON: job.json, projectName: projectName,
                                                 strengthJob: strengthJob, tensor: job.tensor, strengthened: strengthened?.files,
-                                                isCancelled: { !keepGoing.call(steps - 1, steps, 0) })
+                                                isCancelled: { !keepGoing.call(steps - 1, steps, 0) },
+                                                onJob: { onJob(false, $0) }, early: early)
             if let s = strengthened { made.reportJSON = withStrengthen(made.reportJSON, s) }
             return try outcome(made, densityGCm3: densityGCm3, organic: true)
         }

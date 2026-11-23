@@ -119,6 +119,7 @@ public final class LatticePrintFlow: ObservableObject {
 /// The Lattice button, as the print file's flow has it (this view alone follows the flow; the workspace passes today's button).
 struct LatticeRunButtonFlow: View {
     @ObservedObject var flow: LatticePrintFlow
+    @ObservedObject var mac = LatticeMacMake.shared   // ★ his 11-22: made print-accurate on the Mac
     let projectID: UUID
     let normal: LatticePrintFlow.Look
     let layProgress: LatticeLayoutPreview.LayProgress?
@@ -127,8 +128,18 @@ struct LatticeRunButtonFlow: View {
     let tap: (LatticePrintFlow.Tap) -> Void
 
     var body: some View {
-        let l = flow.look(for: projectID, normal: normal, layProgress: layProgress, fileRunning: fileRunning, current: current)
+        let l = look()
         DSRunButton(l.title, subtitle: l.subtitle, state: l.state, key: "latticeButton", progress: l.progress) { tap(l.tap) }
             .background(l.marker.map { CornerPairStyle.publish($0) })
+    }
+
+    /// The flow's button; ★ his 11-22: made on the Mac, its words, then the check's.
+    func look() -> LatticePrintFlow.Look {
+        var l = flow.look(for: projectID, normal: normal, layProgress: layProgress, fileRunning: fileRunning, current: current)
+        guard mac.isMaking(projectID), l.marker == "latticeMakingFile" else { return l }
+        l.subtitle = mac.checking ? LatticeMacMakeCopy.checking : LatticeMacMakeCopy.making
+        l.state = .running(l.subtitle)
+        l.progress?.words = l.subtitle
+        return l
     }
 }

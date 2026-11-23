@@ -167,6 +167,8 @@ public final class LatticeLayoutPreview: ObservableObject {
     private var session: LatticeLayoutSession?
     /// ★ Organic cut 2: the groups the last EXACT Organic lay laid (nil: none, a draft, or refused).
     private var organicLaidGroups: [LatticeLayoutSession.OrganicGroup]?
+    /// ★ his 11-22 (the print-accurate lattice made on the Mac): the groups the last DRAFT laid, for the Mac's file job.
+    private var organicDraftGroups: [LatticeLayoutSession.OrganicGroup]?
     private var sessionPath: String?
     private var openMS = 0.0
     private var lastSettings: LatticeLayoutSession.Settings?
@@ -234,10 +236,45 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// out of date when not). True with nothing laid yet only when there is nothing to lay.
     public func isCurrent(project p: ProjectModel, stress: Stress = Stress()) -> Bool {
         guard let path = p.importedFile?.path else { return bars == nil }
-        return path == sessionPath && Self.settings(p, referenceMPa: stress.referenceMPa) == lastSettings && stress.key == self.stress.key
-            && Self.organicKey(p) == lastOrganicKey
+        return sameInputs(project: p, stress: stress)
             && (!printAccurate || !Self.organic(p.lattice) || layingExact || (!laying && organicQuality != .draft))   // ★ 11-21
     }
+    /// The lattice on screen (a Draft too) was laid from these inputs.
+    func sameInputs(project p: ProjectModel, stress: Stress) -> Bool {
+        guard let path = p.importedFile?.path else { return bars == nil }
+        return path == sessionPath && Self.settings(p, referenceMPa: stress.referenceMPa) == lastSettings && stress.key == self.stress.key
+            && Self.organicKey(p) == lastOrganicKey
+    }
+
+    /// ★ his 11-22 ("Can you make the Mac send the lattice over to the iPad after it's done?"; his pick: only on his press):
+    /// the file's inputs from the lattice on screen, a Draft too — its groups asked exact (the file job lays the exact lattice
+    /// whatever it is asked; every other part of the ask is the exact's own), and the stress that lay followed. No iPad exact.
+    public func organicMacInputs(project p: ProjectModel, stress: Stress = Stress())
+        async throws -> (groups: [LatticeLayoutSession.OrganicGroup], tensor: Data) {
+        if laying { throw OrganicFileWait.laying }
+        let draft = organicDraftGroups?.map { g -> LatticeLayoutSession.OrganicGroup in var g = g; g.ask.quality = .exact; return g }
+        guard let groups = organicLaidGroups ?? draft, let session else { throw OrganicFileWait.notLaid }
+        guard sameInputs(project: p, stress: stress) else { throw OrganicFileWait.outOfDate }
+        try await matchSessionTensor(session, groups: groups)
+        let tensor = try await session.tensorFile()
+        return (groups, tensor)
+    }
+
+    /// ★ his 11-22: the print file's own lattice, from the Mac, drawn in place of the lattice on screen (same body, opened the
+    /// same way). False when the lattice on screen is no longer the one the file was made from.
+    @discardableResult
+    public func showFile(_ m: LatticeFileMesh, project p: ProjectModel, stress: Stress = Stress()) -> Bool {
+        guard !laying, var b = bars, sameInputs(project: p, stress: stress) else { return false }
+        token &+= 1
+        b.token = token
+        b.fileMesh = m
+        b.dimmed = false
+        if let w = shownWhere { shownWhere = (token, w.1) }
+        bars = b
+        return true
+    }
+    /// Whether the print file's lattice is what is drawn now.
+    public var showsFile: Bool { bars?.fileMesh != nil }
 
     /// ★ Organic cut 2 (the export, handover f): what the print file is made from — the SAME groups the exact preview laid for
     /// these inputs, and the stress that lay followed (as set, or as the synthetic stress filled it) as core's file. nil: no
@@ -335,7 +372,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         nozzleSession?.close(); nozzleSession = nil; nozzlePath = nil; nozzleLine = nil; solidReason = nil
         session?.close(); session = nil; sessionPath = nil; lastSettings = nil; sessionStressKey = nil; nozzleStressKey = nil
         sessionTensorKey = nil; organicLimits = nil; organicQuality = nil; organicNumbers = nil   // ★ Organic cut 1
-        organicLaidGroups = nil   // ★ cut 2
+        organicLaidGroups = nil; organicDraftGroups = nil   // ★ cut 2; ★ his 11-22
         bars = nil; laid = nil; problem = nil; timing = nil; laying = false; places = []
         layTimingEnds(.cancelled, "the preview was closed")   // ★ his 11-22 (GenerationTimingLog)
         layProgress = nil; shownRestored = false   // ★ his pick 11-21 (what was remembered stays, for this part)
@@ -449,7 +486,8 @@ public final class LatticeLayoutPreview: ObservableObject {
         bars = b; laid = r.laid; timing = r.timing
         shownWhere = (b.token, MapWhere(path: r.inputs.path, settings: r.inputs.settings, stressKey: r.inputs.stress.key))   // ★ 11-22
         organicQuality = r.quality; organicNumbers = r.numbers; problem = r.problem; notes = r.notes
-        organicLaidGroups = r.quality == .exact ? r.groups : nil; organicRefusals = []; organicWallVerdicts = r.wallVerdicts
+        organicLaidGroups = r.quality == .exact ? r.groups : nil; organicRefusals = []
+        organicDraftGroups = r.quality == .draft ? r.groups : nil   // ★ his 11-22; organicWallVerdicts = r.wallVerdicts
         organicAutoLimits = r.autoLimits; organicGroupLimits = r.groupLimits
         shownWalls = r.walls; shownRestored = true
         layTimingEnds(.cancelled, "a remembered lattice was shown")   // ★ his 11-22 (GenerationTimingLog)
@@ -806,10 +844,11 @@ public final class LatticeLayoutPreview: ObservableObject {
         layStages["layMS"] = r.ms; layStages["traceMS"] = r.msTrace
         layStages["readMS"] = r.layout.msRead; layStages["barsMS"] = r.layout.msBars; layStages["strands"] = Double(r.strands)
         guard !Task.isCancelled else { return }
-        if !r.refused.isEmpty { organicLaidGroups = nil; return refuse(r.refused, groupIDs) }
+        if !r.refused.isEmpty { organicLaidGroups = nil; organicDraftGroups = nil; return refuse(r.refused, groupIDs) }
         organicRefusals = []
         // ★ cut 2: the groups the EXACT lay laid (the file is that lattice); a draft is not what will be made
         organicLaidGroups = r.quality == .exact ? groups : nil
+        organicDraftGroups = r.quality == .draft ? groups : nil   // ★ his 11-22: the Mac makes the print file from these
         token &+= 1
         t0 = Date()
         let seg = Self.segments(r.runs)
