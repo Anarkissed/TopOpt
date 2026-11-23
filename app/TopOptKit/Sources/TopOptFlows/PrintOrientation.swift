@@ -154,6 +154,7 @@ enum PrintOrientationLayout {
     /// The line's own frames, and the markers on the part: not controls it keeps clear of.
     static func ignored(_ key: String) -> Bool {
         key.hasPrefix("resultsOrient") || key == "info-resultsOrient" || key.hasPrefix("resultsCheckMarker")
+            || key.hasPrefix("certify")   // ★ notes25 B1: the fix pop-up keeps clear of the line, never the line of it
     }
 
     /// Where the line's bottom edge goes: `bottom` off the screen's, centred — or, with a control in its way (13″ portrait:

@@ -229,16 +229,11 @@ public struct ResultsScreen: View {
     }
 
     /// ★ his design: the card, and its line straight to the area, staying on it however he turns the part.
+    /// ★ his notes 11-23 (notes25 B1): at the left in the middle, clear of every control, draggable, its line attached
+    /// (CertifyCardPlace; the controls it keeps clear of are this screen's published frames, `.onPreferenceChange` below).
     @ViewBuilder private func certifyLayer(_ c: OrganicCertifyCard) -> some View {
         let target = c.issue.at.flatMap { projection?.project(SIMD3<Float>($0)) }
-        OrganicCertifyLeader(from: spotMemo.cardFrame, to: target).ignoresSafeArea()
-        OrganicCertifyCardView(card: c)
-            .background(GeometryReader { g in
-                Color.clear.onAppear { spotMemo.cardFrame = g.frame(in: .global) }
-                    .onChange(of: g.frame(in: .global)) { f in if spotMemo.cardFrame != f { spotMemo.cardFrame = f } }
-            })
-            .padding(.top, PageChrome.panelTop).padding(.leading, PageChrome.edge)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        CertifyCardLayer(card: c, target: target, place: CertifyCardPlace.shared)
             .zIndex(3)
     }
     @State private var orientPhase: PrintOrientationPhase = .ours
@@ -360,6 +355,7 @@ public struct ResultsScreen: View {
             if let c = all["resultsCorner"], c != cornerFrame { cornerFrame = c }   // ★ R-a
             let d = all["resultsDetailsPanel"]?.height ?? 0
             if abs(d - drawerHeight) > 0.5 { drawerHeight = d; liftModel() }
+            if certify != nil { CertifyCardPlace.shared.noteResults(all) }   // ★ notes25 B1: what the fix pop-up keeps clear of
         }
         .cornerTapCloses(model.cornerDrawers)   // ★ his 11-22: a tap anywhere outside the ⌃'s drawer closes it
         .animation(DS.Motion.sheetIn, value: detailsOpen)
@@ -2134,6 +2130,7 @@ public struct ResultsScreen: View {
                     .padding(.top, (OrientationGizmoView.standardSize - ViewProjectionPair.height) / 2)   // ★ R-a2: as the workspace
                 OrientationGizmoView(camera: cameraModel)
                     .closesCornerDrawersOnTouch(model.cornerDrawers)   // ★ his 11-22: a touch on the view cube closes the ⌃'s drawer
+                    .background(ResultsChrome.publish("resultsGizmo"))   // ★ notes25 B1: the fix pop-up keeps clear of the cube
             }
             Spacer()
         }

@@ -492,6 +492,7 @@ struct ResultsVersionsPanel: View {
         DSPanel(key: "resultsVersions", title: Self.title(version), count: rows.count, foldedPill: pill, open: $open) {
             ForEach(rows) { r in line(r) }
         }
+        .environment(\.dsRowLineWraps, true)   // ★ notes25 B3: a result's line (why core could not make it) wraps, never cut
     }
 
     @ViewBuilder private func line(_ r: ResultsVersionRow) -> some View {
@@ -528,12 +529,16 @@ struct ResultsCheckLine: View {
             VStack(alignment: .leading, spacing: 0) {
                 Button(action: tap) { line.contentShape(Rectangle()) }.buttonStyle(.plain)
                 if open {
-                    HStack(spacing: DS.Space.s) {
+                    // ★ notes25 B3 (his Checks note: "doesn't allow for enough space for the text … automatically expanded/
+                    // contracted to fit the text with some buffer above/below and to the sides"): the line takes the row's
+                    // whole width and wraps (Details › under it, at the right), the row's own padding at its sides and foot
+                    VStack(alignment: .leading, spacing: DS.Space.xxs) {
                         if let more = c.more {
                             Text(more).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
                                 .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(ResultsChrome.publish("resultsCheckMoreText-" + c.title))
                         }
-                        Spacer(minLength: DS.Space.s)
                         if let details, c.tab != nil {
                             Button(action: details) {
                                 Text("Details \u{203A}").font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.accent.color)
@@ -541,9 +546,11 @@ struct ResultsCheckLine: View {
                             }
                             .buttonStyle(.plain)
                             .background(ResultsChrome.publish("resultsCheckDetails-" + c.title))
+                            .frame(maxWidth: .infinity, alignment: .trailing)
                         }
                     }
-                    .padding(.leading, DS.Space.l + 26 + DS.Space.m).padding(.trailing, DS.Space.m)
+                    .padding(.leading, DS.Space.l + 26 + DS.Space.m).padding(.trailing, DS.Space.l)
+                    .padding(.bottom, details != nil && c.tab != nil ? DS.Space.xxs : DS.Space.sm)
                     .background(ResultsChrome.publish("resultsCheckMore-" + c.title))
                 }
             }
@@ -565,6 +572,7 @@ struct ResultsCheckLine: View {
                 .frame(width: 26, height: 26).background(Circle().fill(tint.opacity(0.18)))
             VStack(alignment: .leading, spacing: 1) {
                 Text(c.title).font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                    .fixedSize(horizontal: false, vertical: true)   // ★ notes25 B3: wraps, never cut
                 Text(c.detail).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -652,6 +660,7 @@ struct ResultsDetailsDrawer: View {
                             ForEach(rows(tab)) { r in
                                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                                     Text(r.label).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
+                                        .fixedSize(horizontal: false, vertical: true)   // ★ notes25 B3: wraps, never cut
                                     Spacer(minLength: 8)
                                     Text(r.value).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                                         .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)
@@ -866,7 +875,7 @@ struct ResultsMotionBar: View {
                     Text(title).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                     Text(readout).font(.system(size: 11, weight: .semibold)).monospacedDigit()
                         .foregroundStyle((alarm ? DS.Color.danger : DS.Color.textSecondary).color)
-                        .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                        .fixedSize(horizontal: false, vertical: true)   // ★ notes25 B3: every line it needs (was 2 at most)
                 }
                 Spacer(minLength: 0)
             }

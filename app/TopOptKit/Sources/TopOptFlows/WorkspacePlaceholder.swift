@@ -1917,6 +1917,7 @@ public struct WorkspacePlaceholder: View {
         .laneControls(laneControls)
         .environment(\.latticeTurning, latticeTurning && !LatticePreviewMode.controlPageFollowsCamera)   // ★ his pick 11-16 (A)
         .cornerTapCloses(model.cornerDrawers)   // ★ his 11-22: a tap anywhere outside the open corner drawer closes it
+        .certifyCardPageFrames()   // ★ notes25 B1: the fix pop-up keeps clear of the stage menu riding over Results
     }
 
     /// ★ B10: the project's name, asked in the §4.11 name sheet (it was a system alert).
@@ -15976,10 +15977,26 @@ extension WorkspacePlaceholder {
     var certifyCard: OrganicCertifyCard? {
         guard let w = model.certifyWalk, w.version == project.id, let issue = w.current else { return nil }
         return OrganicCertifyCard(issue: issue, step: w.step, grid: w.grid, solvedLines: w.currentSolved ? w.infillLines : nil,
-                                  next: { certifyAdvance() }, skip: { certifyAdvance() }, solve: { certifySolve(issue) })
+                                  advice: OrganicCertifyAdvice.advice(issue, certifyContext(issue)),   // ★ notes25 B4
+                                  next: { certifyAdvance() },
+                                  skip: { OrganicCertifyCard.controlSkipLeaves ? certifyAdvance() : certifySkip() },   // ★ notes25 B2/B5
+                                  solve: { certifySolve(issue) })
     }
 
-    /// Next or Skip. After the last pop-up the part's Lattice stage shows, where his re-check question is.
+    /// ★ notes25 B4: the settings as they stand, for the pop-up's value to try (the struts' group, its strut thickness).
+    func certifyContext(_ issue: OrganicCertify.Issue) -> OrganicCertifyAdvice.Context {
+        OrganicCertifyAdvice.context(project, partLimits: newEngine.organicAutoLimits, groupLimits: newEngine.organicGroupLimits,
+                                     weakestWidthMM: issue.strutWidthMM)
+    }
+
+    /// ★ notes25 B2/B5 (his 11-23: "When tapping 'Skip' it immediately exits out of the Results screen. It should close the
+    /// pop-up and stay on the Results page"; "'Skip' closes that notification and goes to the next one if there is one"): the
+    /// next pop-up, or none; Results stays. (Skip ran `certifyAdvance`, whose end leaves Results for the Lattice stage.)
+    func certifySkip() {
+        model.certifyWalk?.skip()
+    }
+
+    /// Next. After the last pop-up the part's Lattice stage shows, where his re-check question is.
     func certifyAdvance() {
         model.certifyWalk?.next()
         if model.certifyWalk?.done == true {
@@ -16003,6 +16020,9 @@ extension WorkspacePlaceholder {
                 newVersion: model.nextVersionPreview().map { "v\($0.number)" }, ranVersion: versionLabel)
             return
         }
+        // ★ notes25 B6: the field that fixes it, lit and brought to the middle of the Lattice settings (OrganicCertifyFocus)
+        OrganicCertifyFocus.shared.ask(OrganicCertifyAdvice.advice(issue, certifyContext(issue)), issue: issue,
+                                       group: certifyContext(issue).groupID)
         model.certifyWalk?.next()
         viewOriginal = true
         goToLatticeType()

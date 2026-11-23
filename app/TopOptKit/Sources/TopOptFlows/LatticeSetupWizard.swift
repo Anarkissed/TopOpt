@@ -30,6 +30,8 @@ public struct LatticeSetupWizard: View {
     let onExit: () -> Void
 
     @State private var model: LatticeWizardModel
+    /// ★ notes25 B6: the field the certify wizard's Solve asked for (lit and scrolled to the middle).
+    @ObservedObject private var certifyFocus = OrganicCertifyFocus.shared
     /// ★ §5 — which numeric field has the keypad open. One at a time, keyed by the
     /// field's id, so every number on this page types as well as drags.
     @State private var numberPadField: String?
@@ -2764,6 +2766,7 @@ public struct LatticeSetupWizard: View {
                          pick: { id in withAnimation(.easeInOut(duration: 0.15)) { openLatticeTab(id, c) } },
                          width: latticeTabsWidth(c))   // ★ his iPad notes 11-23: as wide as its names, a little air
                 .frame(maxHeight: .infinity, alignment: .top)
+            ScrollViewReader { reader in
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: DS.Space.m) {
                     latticeTopRow
@@ -2771,7 +2774,30 @@ public struct LatticeSetupWizard: View {
                 }
                 .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 12)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .latticeID("lattice-page-rows-content")
             }
+            .latticeID("lattice-page-rows")
+            // ★ notes25 B6: the certify wizard's Solve — the field it names, on its tab, in the middle, lit
+            .onAppear { bringCertifyFocus(reader, c) }
+            .onChange(of: certifyFocus.field?.token) { _ in bringCertifyFocus(reader, c) }
+            }
+        }
+    }
+
+    /// ★ notes25 B6 (his 11-23: "send the user exactly to the right page to fix it, and highlight the field to fix, making
+    /// sure to scroll to a position so that the field is close to the middle"): Manual (the Organic fields live there), the
+    /// field's tab, then the field scrolled to the middle of the rows (as far as they scroll); OrganicFocusRing lights it.
+    private func bringCertifyFocus(_ reader: ScrollViewProxy, _ c: CellsPageContext) {
+        guard let f = certifyFocus.field, model.cellTransition == .organicGrade else { return }
+        if !latticeManual { latticeManual = true }
+        let i = f.group.flatMap { g in project.latticeAreaGroups.firstIndex { $0.id == g } }
+        let tab = i.map { "area-\($0)" } ?? "part"
+        if (latticeArea(c) == nil ? "part" : latticeTab) != tab { openLatticeTab(tab, c) }
+        let token = f.token
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            guard certifyFocus.field?.token == token else { return }
+            withAnimation(DS.Motion.sheetIn) { reader.scrollTo(OrganicCertifyFocus.rowID(f.label), anchor: .center) }
+            certifyFocus.shown(token)
         }
     }
 
