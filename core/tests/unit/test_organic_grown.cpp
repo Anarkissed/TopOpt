@@ -600,6 +600,97 @@ static Settings pocket_settings(double depth) {
   s.regions = {r};
   return s;
 }
+// His 11-22 ("Could the user literally *watch* the lattice grow from nothing?"): a lay with a GrowthTap gives the SAME
+// bars as one without; the tap received pieces (inside the box), reached the pruning phase, counted a new lay each time,
+// and reads in parts as it reads whole.
+static void test_growth_tap() {
+  Part b = converging();
+  Session session(box_model(24, 24, 20));
+  const TensorField field = make_field(24, 24, 20, [](const Vec3& p) {
+    return std::array<double, 6>{0.5, 0.0, 1.0, 0.0, 0.0, 0.3 * (p.x - 12.0) / 12.0};
+  });
+  const Outcome plain = session.lay_organic(pocket_settings(16), field, b.ask, 1);
+  GrowthTap tap;
+  session.growth_tap(&tap);
+  const Outcome tapped = session.lay_organic(pocket_settings(16), field, b.ask, 1);
+  bool same = plain.bars.bars.size() == tapped.bars.bars.size() && !plain.bars.bars.empty();
+  for (std::size_t i = 0; same && i < plain.bars.bars.size(); ++i) {
+    const Bar& x = plain.bars.bars[i];
+    const Bar& y = tapped.bars.bars[i];
+    same = x.a.x == y.a.x && x.a.y == y.a.y && x.a.z == y.a.z && x.b.x == y.b.x && x.b.y == y.b.y && x.b.z == y.b.z &&
+           x.end_a == y.end_a && x.end_b == y.end_b && x.width == y.width;
+  }
+  CHECK(same);
+  const GrowthTap::Read all = tap.read(0);
+  CHECK(all.lay == 1);
+  CHECK(all.region.size() > 50);
+  CHECK(all.xyz.size() == 6 * all.region.size());
+  CHECK(all.next == all.region.size());
+  CHECK(all.phase >= 2);
+  bool inside = true;
+  for (float v : all.xyz) inside = inside && std::isfinite(v) && v > -1.0f && v < 31.0f;
+  CHECK(inside);
+  // read in parts: the same pieces
+  std::vector<float> parts;
+  for (std::size_t from = 0;;) {
+    const GrowthTap::Read r = tap.read(from, 37);
+    if (r.region.empty()) break;
+    parts.insert(parts.end(), r.xyz.begin(), r.xyz.end());
+    from = r.next;
+  }
+  CHECK(parts == all.xyz);
+  session.lay_organic(pocket_settings(16), field, b.ask, 1);
+  CHECK(tap.read(0).lay == 2);
+  session.growth_tap(nullptr);
+  std::printf("G-tap: %zu pieces watched, phase %d at the end, bars the same with and without\n", all.region.size(), all.phase);
+}
+
+// His 11-22 item 2 (redo only what a change affects): the session keeps each region's strands under a key of all the step
+// reads. A lay that changes only the finish (Skin) reuses them and gives EXACTLY the bars a fresh session gives; the exact
+// lay after its Draft reuses the Draft's strands and equals a fresh exact lay; a growth setting changed is laid anew.
+static bool same_bars(const Outcome& x, const Outcome& y) {
+  if (x.bars.bars.size() != y.bars.bars.size() || x.strands != y.strands) return false;
+  for (std::size_t i = 0; i < x.bars.bars.size(); ++i) {
+    const Bar& a = x.bars.bars[i];
+    const Bar& b = y.bars.bars[i];
+    if (a.a.x != b.a.x || a.a.y != b.a.y || a.a.z != b.a.z || a.b.x != b.b.x || a.b.y != b.b.y || a.b.z != b.b.z ||
+        a.end_a != b.end_a || a.end_b != b.end_b || a.width != b.width || a.region != b.region || a.net != b.net)
+      return false;
+  }
+  return true;
+}
+static void test_strand_cache() {
+  Part b = converging();
+  const TensorField field = make_field(24, 24, 20, [](const Vec3& p) {
+    return std::array<double, 6>{0.5, 0.0, 1.0, 0.0, 0.0, 0.3 * (p.x - 12.0) / 12.0};
+  });
+  Settings bare = pocket_settings(16);
+  bare.skin = false;
+  Settings skinned = pocket_settings(16);
+  skinned.skin = true;
+  Session kept(box_model(24, 24, 20));
+  const Outcome first = kept.lay_organic(bare, field, b.ask, 1);
+  const Outcome again = kept.lay_organic(skinned, field, b.ask, 1);   // the finish changed: the strands are kept
+  Session fresh(box_model(24, 24, 20));
+  const Outcome ref = fresh.lay_organic(skinned, field, b.ask, 1);
+  CHECK(same_bars(again, ref));
+  CHECK(!first.bars.bars.empty() && !ref.bars.bars.empty());
+  Session draft_first(box_model(24, 24, 20));
+  const Outcome d = draft_first.lay_organic_draft(skinned, field, b.ask, 1);
+  const Outcome e = draft_first.lay_organic(skinned, field, b.ask, 1);   // the exact lay reads the Draft's strands
+  CHECK(same_bars(e, ref));
+  CHECK(!d.bars.bars.empty());
+  OrganicAsk other = b.ask;
+  other.seed = 2;   // the growth changed: laid anew
+  const Outcome f = kept.lay_organic(skinned, field, other, 1);
+  Session fresh2(box_model(24, 24, 20));
+  const Outcome g = fresh2.lay_organic(skinned, field, other, 1);
+  CHECK(same_bars(f, g));
+  CHECK(!same_bars(f, ref));
+  std::printf("G-cache: kept strands reused (trace %.0f ms -> %.0f ms; exact after Draft %.0f ms), %zu bars the same as fresh\n",
+              ref.ms_trace, again.ms_trace, e.ms_trace, again.bars.bars.size());
+}
+
 static void test_same_every_time() {
   Part b = converging();
   b.ask.reference_mpa = 2.0;
@@ -1077,6 +1168,8 @@ int main() {
   test_walls_out();
   test_no_repeats();
   test_same_every_time();
+  test_growth_tap();
+  test_strand_cache();
   test_vines_arrive();
   test_file_job();
   test_cube_time();

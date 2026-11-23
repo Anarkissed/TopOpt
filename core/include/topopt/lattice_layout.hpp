@@ -363,6 +363,38 @@ struct Where {
 // answers `cancelled`; a caller that never sets a stop flag never sees it.
 struct LayCancelled {};
 
+// His 11-22 ("Could the user literally *watch* the lattice grow from nothing?"): an Organic lay as it happens. The grower
+// hands each piece of vine it lays to the tap (and the tracer each region's strands), with the phase it is in; the app
+// reads what came since its last read, from its own thread, while the lay runs. It only copies what is laid: nothing
+// the lay makes depends on it. Phases: 1 growing, 2 pruning, 3 re-seeding, 4 reaching the walls, 5 finishing.
+class GrowthTap {
+ public:
+  // A new lay: nothing read yet, phase 1, a new lay number (so a reader knows to start again).
+  void start();
+  void phase(int p);
+  // The laying thread's own: batched, handed over every 256 pieces and at each phase and at the end.
+  void piece(int region, const Vec3& a, const Vec3& b);
+  void flush();
+  struct Read {
+    std::uint64_t lay = 0;          // which lay (start() counts them)
+    int phase = 0;
+    std::size_t next = 0;           // the index to read from next time
+    std::vector<float> xyz;         // 6 per piece: a then b
+    std::vector<std::int32_t> region;
+  };
+  // Any thread: the pieces from `from` on, at most `most` of them (0: all).
+  Read read(std::size_t from, std::size_t most = 0) const;
+
+ private:
+  mutable std::mutex m_;
+  std::uint64_t lay_ = 0;
+  int phase_ = 0;
+  std::vector<float> xyz_;
+  std::vector<std::int32_t> region_;
+  std::vector<float> batch_xyz_;            // the laying thread's, not under the lock
+  std::vector<std::int32_t> batch_region_;
+};
+
 class Domain {
  public:
   // `measure` must outlive the domain. The spec is copied; regions are kept sorted by id
@@ -452,6 +484,9 @@ class Domain {
   void watch(const std::atomic<bool>* stop) { stop_ = stop; }
   bool stop_asked() const { return stop_ && stop_->load(std::memory_order_relaxed); }
   void check_stop() const { if (stop_asked()) throw LayCancelled{}; }
+  // His 11-22 (watch it grow): the tap an Organic lay hands its vines to as it lays them; null = none.
+  void tap(GrowthTap* t) { tap_ = t; }
+  GrowthTap* growth_tap() const { return tap_; }
   // The depth a Protect skin is solid to: its own, or two line widths at 0 (rule D5).
   double protect_depth_mm(const ProtectSkin& s) const {
     return s.depth_mm > 0.0 ? s.depth_mm : 2.0 * spec_.bead_mm;
@@ -482,6 +517,7 @@ class Domain {
   DomainSpec spec_;
   double bed_level_ = 0.0;   // K1: the part's lowest point along spec_.bed_up (made unit length)
   const std::atomic<bool>* stop_ = nullptr;
+  GrowthTap* tap_ = nullptr;   // his 11-22: watch it grow (the session's, for an Organic lay)
   std::vector<Near> near_skin_;    // one per Protect skin, within its depth
   // Every Protect skin of one depth as ONE surface (the distance to several surfaces is the least of their
   // distances, so nothing an answer is made of changes). How far a point is from "any skin's solid" is then one
@@ -1663,6 +1699,9 @@ class Session {
   // whole step). What the session keeps for the next lay() is not harmed: the same settings asked again give the
   // layout a fresh session gives. The flag must outlive the call; the session never writes it.
   Outcome lay(const Settings& settings, int threads = 0, const std::atomic<bool>* stop = nullptr);
+  // His 11-22 (watch it grow): the tap every Organic lay of this session hands its vines to (null: none). It must
+  // outlive the lays; the bridge owns it.
+  void growth_tap(GrowthTap* t) { tap_ = t; }
   // O1, O2: the same lay, with a weave. The cube regions are laid as lay() lays them; the weave regions' bars are made
   // from `strands` (weave_bars), cut at their crossings (split_at_crossings) and added after the cells' bars; then all
   // of them are joined, skinned if asked, loose bars dropped and pieces counted as lay() does. The layout's weave
@@ -1754,6 +1793,13 @@ class Session {
   std::unique_ptr<PartMeasure> measure_;
   std::string where_;                  // the "where" settings the kept domain was made for
   std::unique_ptr<Domain> domain_;
+  GrowthTap* tap_ = nullptr;                  // his 11-22: watch it grow
+  // His 11-22 item 2 (redo only what a change affects): each weave region's grown or traced strands and what the lay
+  // reads from that step, kept under a key of everything the step reads (organic.cpp, strand_key); a new domain clears
+  // it. At most kStrandCacheMax entries (the oldest goes). Opaque here: defined in organic.cpp.
+  struct StrandCache;
+  std::shared_ptr<StrandCache> strand_cache_;
+  std::uint64_t domain_epoch_ = 0;            // counts the domains made (part of every key)
   std::unique_ptr<Domain> domain_no_chips_;   // D23: the domain with the protect_chip entries left out (null: none)
   std::vector<int> chip_ids_;
   Layout last_cells_;                         // D23: the last lay()'s regions (their own cells), nothing else

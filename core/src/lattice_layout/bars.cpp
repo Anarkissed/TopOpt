@@ -8,6 +8,8 @@
 #include <cmath>
 #include <limits>
 #include <map>
+#include <cstdint>
+#include <unordered_map>
 #include <memory>
 #include <thread>
 #include <tuple>
@@ -796,29 +798,67 @@ void drop_loose_bars(Bars& bars, const std::vector<int>* arrived) {
   }
   // A node end lands on another bar only while another bar is still there: take away
   // bars that hold a node alone, until none does. (A Solid end has landed already.)
-  for (bool again = true; again;) {
-    again = false;
-    std::map<PointKey, int> at;
-    for (std::size_t i = 0; i < bars.bars.size(); ++i) {
-      if (!keep[i]) continue;
-      ++at[key_of(bars.bars[i].a)];
-      ++at[key_of(bars.bars[i].b)];
+  // SPEED 11-22: by a work list, not in rounds. Taking a bar away only ever makes another more alone (or its joined end's
+  // bar gone), so every order reaches the one largest set in which no bar holds a node alone or ends in a bar taken away:
+  // the set the rounds reached. Points by key_of, as the ordered map keyed them.
+  const std::size_t n = bars.bars.size();
+  struct PointHash {
+    std::size_t operator()(const PointKey& k) const noexcept {
+      std::uint64_t h = 1469598103934665603ull;
+      for (long long v : {k.x, k.y, k.z}) h = (h ^ static_cast<std::uint64_t>(v)) * 1099511628211ull;
+      return static_cast<std::size_t>(h);
     }
-    for (std::size_t i = 0; i < bars.bars.size(); ++i) {
-      if (!keep[i]) continue;
-      const Bar& b = bars.bars[i];
-      const bool alone_a = b.end_a == Bar::End::Node && at[key_of(b.a)] < 2;
-      const bool alone_b = b.end_b == Bar::End::Node && at[key_of(b.b)] < 2;
-      // A joined end lands on the bar it ends in only while that bar is still there.
-      auto gone = [&](Bar::End e, int into) {
-        return e == Bar::End::Joined && into >= 0 && into < static_cast<int>(keep.size()) &&
-               !keep[static_cast<std::size_t>(into)];
-      };
-      if (alone_a || alone_b || gone(b.end_a, b.into_a) || gone(b.end_b, b.into_b)) {
-        keep[i] = 0;
-        again = true;
-      }
+  };
+  struct PointEq {
+    bool operator()(const PointKey& x, const PointKey& y) const noexcept { return x == y; }
+  };
+  std::unordered_map<PointKey, std::size_t, PointHash, PointEq> point_id;
+  point_id.reserve(2 * n);
+  std::vector<std::size_t> pa(n), pb(n);
+  std::vector<int> count;
+  std::vector<std::vector<std::size_t>> bars_at;
+  auto id_of = [&](const Vec3& p) {
+    const auto [it, fresh] = point_id.emplace(key_of(p), count.size());
+    if (fresh) { count.push_back(0); bars_at.emplace_back(); }
+    return it->second;
+  };
+  std::vector<std::vector<std::size_t>> joined_into(n);   // per bar: the bars with a Joined end in it
+  for (std::size_t i = 0; i < n; ++i) {
+    const Bar& b = bars.bars[i];
+    pa[i] = id_of(b.a);
+    pb[i] = id_of(b.b);
+    if (keep[i]) { ++count[pa[i]]; ++count[pb[i]]; }
+    bars_at[pa[i]].push_back(i);
+    if (pb[i] != pa[i]) bars_at[pb[i]].push_back(i);
+    for (int e = 0; e < 2; ++e) {
+      const Bar::End end = e ? b.end_b : b.end_a;
+      const int into = e ? b.into_b : b.into_a;
+      if (end == Bar::End::Joined && into >= 0 && into < static_cast<int>(n)) joined_into[static_cast<std::size_t>(into)].push_back(i);
     }
+  }
+  auto loose = [&](std::size_t i) {
+    const Bar& b = bars.bars[i];
+    const bool alone_a = b.end_a == Bar::End::Node && count[pa[i]] < 2;
+    const bool alone_b = b.end_b == Bar::End::Node && count[pb[i]] < 2;
+    // A joined end lands on the bar it ends in only while that bar is still there.
+    auto gone = [&](Bar::End e, int into) {
+      return e == Bar::End::Joined && into >= 0 && into < static_cast<int>(keep.size()) &&
+             !keep[static_cast<std::size_t>(into)];
+    };
+    return alone_a || alone_b || gone(b.end_a, b.into_a) || gone(b.end_b, b.into_b);
+  };
+  std::vector<std::size_t> work;
+  for (std::size_t i = 0; i < n; ++i) if (keep[i]) work.push_back(i);
+  while (!work.empty()) {
+    const std::size_t i = work.back();
+    work.pop_back();
+    if (!keep[i] || !loose(i)) continue;
+    keep[i] = 0;
+    --count[pa[i]];
+    --count[pb[i]];
+    for (const std::size_t p : {pa[i], pb[i]})
+      for (const std::size_t j : bars_at[p]) if (keep[j]) work.push_back(j);
+    for (const std::size_t j : joined_into[i]) if (keep[j]) work.push_back(j);
   }
   keep_only(bars, keep);
 }

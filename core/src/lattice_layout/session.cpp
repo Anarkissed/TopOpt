@@ -169,6 +169,7 @@ void Session::ready_domain(const Settings& settings) {
     }
     domain_ = std::make_unique<Domain>(*measure_, std::move(spec));
     where_ = where;
+    ++domain_epoch_;   // his 11-22 item 2: strands kept for the old domain are never read for this one
     unread_ = true;
     ref_kept_ = false;   // the reference is the new domain's to read again
     ref_field_.reset();
@@ -409,6 +410,52 @@ std::vector<Place> Session::places(const Settings& settings) const {
   const CellSpec& c = settings.cells;
   return find_places(model_, *domain_, domain_no_chips_.get(), chip_ids_, settings.regions, last_cells_,
                      c.cell_max_mm > 0.0 ? c.cell_max_mm : c.cell_mm);
+}
+
+// ── his 11-22: watch it grow ────────────────────────────────────────────────────
+void GrowthTap::start() {
+  std::lock_guard<std::mutex> lock(m_);
+  ++lay_;
+  phase_ = 1;
+  xyz_.clear();
+  region_.clear();
+  batch_xyz_.clear();
+  batch_region_.clear();
+}
+
+void GrowthTap::flush() {
+  if (batch_region_.empty()) return;
+  std::lock_guard<std::mutex> lock(m_);
+  xyz_.insert(xyz_.end(), batch_xyz_.begin(), batch_xyz_.end());
+  region_.insert(region_.end(), batch_region_.begin(), batch_region_.end());
+  batch_xyz_.clear();
+  batch_region_.clear();
+}
+
+void GrowthTap::phase(int p) {
+  flush();
+  std::lock_guard<std::mutex> lock(m_);
+  phase_ = p;
+}
+
+void GrowthTap::piece(int region, const Vec3& a, const Vec3& b) {
+  for (const double v : {a.x, a.y, a.z, b.x, b.y, b.z}) batch_xyz_.push_back(static_cast<float>(v));
+  batch_region_.push_back(region);
+  if (batch_region_.size() >= 256) flush();
+}
+
+GrowthTap::Read GrowthTap::read(std::size_t from, std::size_t most) const {
+  std::lock_guard<std::mutex> lock(m_);
+  Read r;
+  r.lay = lay_;
+  r.phase = phase_;
+  const std::size_t n = region_.size();
+  const std::size_t a = std::min(from, n);
+  const std::size_t b = most > 0 ? std::min(n, a + most) : n;
+  r.xyz.assign(xyz_.begin() + static_cast<long>(6 * a), xyz_.begin() + static_cast<long>(6 * b));
+  r.region.assign(region_.begin() + static_cast<long>(a), region_.begin() + static_cast<long>(b));
+  r.next = b;
+  return r;
 }
 
 }  // namespace topopt::lattice_layout

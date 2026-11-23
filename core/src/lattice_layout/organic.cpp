@@ -9,11 +9,14 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <limits>
 #include <memory>
 #include <stdexcept>
 #include <tuple>
+#include <unordered_map>
+#include <cstdint>
 
 #include "topopt/grading.hpp"
 #include "topopt/lattice.hpp"
@@ -1230,6 +1233,92 @@ Outcome::Tight tight_of(const Bars& bars, const std::vector<int>& weave, double 
 }
 }  // namespace
 
+// ── his 11-22 item 2: the strands kept per weave region ─────────────────────────────────────────────────────────────
+namespace {
+struct KeyBytes {
+  std::string b;
+  template <class T> void pod(const T& v) { b.append(reinterpret_cast<const char*>(&v), sizeof v); }
+  void d(double v) { v = v + 0.0; pod(v); }   // -0 is 0
+  void v3(const Vec3& p) { d(p.x); d(p.y); d(p.z); }
+};
+std::uint64_t field_hash(const TensorField& f) {
+  std::uint64_t h = 1469598103934665603ull;
+  const auto mix = [&](const void* p, std::size_t n) {
+    const unsigned char* c = static_cast<const unsigned char*>(p);
+    for (std::size_t i = 0; i < n; ++i) h = (h ^ c[i]) * 1099511628211ull;
+  };
+  mix(&f.origin.x, sizeof(double)); mix(&f.origin.y, sizeof(double)); mix(&f.origin.z, sizeof(double));
+  mix(&f.spacing, sizeof f.spacing); mix(&f.nx, sizeof f.nx); mix(&f.ny, sizeof f.ny); mix(&f.nz, sizeof f.nz);
+  if (!f.voigt.empty()) mix(f.voigt.data(), f.voigt.size() * sizeof(double));
+  return h;
+}
+// EVERY field of the ask that is data (print_check, a hook the finish runs, is not: the strands never read it).
+// ★ A field added to OrganicAsk must be added here, or a change to it would read stale strands.
+std::string strand_key(std::uint64_t epoch, std::uint64_t field, int region, const std::vector<int>& pool,
+                       const OrganicAsk& a) {
+  KeyBytes k;
+  k.pod(epoch); k.pod(field); k.pod(region);
+  k.pod(pool.size()); for (int r : pool) k.pod(r);
+  k.v3(a.build_dir);
+  for (double v : {a.spacing_mm, a.width_mm, a.spacing_min_mm, a.spacing_max_mm, a.spacing_exponent, a.reference_mpa,
+                   a.percentile, a.layer_mm, a.tie_swirl, a.seed_stride, a.foot_gap, a.void_ratio, a.wall_bare_mm,
+                   a.wall_reach, a.wall_gap, a.top_run, a.root_run, a.run_gap, a.run_follow, a.run_pull, a.run_seek,
+                   a.run_min, a.root_gap, a.width_heavy_mm, a.bed_floor_mm, a.shape_reach, a.part_reach_mm,
+                   a.part_support_mm, a.wall_gap_heavy, a.cross_gap, a.cross_gap_heavy, a.cross_climb_max_deg,
+                   a.link_width, a.unbraced_max, a.tie_gap, a.tie_gap_heavy, a.gap_lines, a.face_relief_mm,
+                   a.strand_keep})
+    k.d(v);
+  for (bool v : {a.shape_fit, a.walls_out, a.ties, a.stress_goal, a.wall_connect, a.auto_by_stress, a.member_cap,
+                 a.prune, a.hold_parts, a.part_to_floor, a.tie_level, a.follow_stress})
+    k.pod(static_cast<char>(v));
+  k.pod(static_cast<int>(a.mode)); k.pod(a.seed);
+  k.pod(a.reseed_rounds); k.pod(a.wall_cross); k.pod(a.run_max);
+  k.pod(a.floors.size());
+  for (const WidthFloor& f : a.floors) { k.v3(f.centre); k.d(f.radius_mm); k.d(f.width_mm); }
+  k.pod(a.additions.rounds.size());
+  for (const AddRound& r : a.additions.rounds) {
+    k.pod(r.hash); k.pod(r.ops.size());
+    for (const AddOp& o : r.ops) { k.pod(o.kind); k.pod(o.v.size()); for (double v : o.v) k.d(v); }
+  }
+  k.pod(a.relief_exclude_faces.size()); for (int f : a.relief_exclude_faces) k.pod(f);
+  k.pod(static_cast<char>(a.sweep.on));
+  for (double v : {a.sweep.max_offset_mm, a.sweep.max_turn_deg, a.sweep.max_piece_mm, a.sweep.min_turn_deg,
+                   a.sweep.min_radius})
+    k.d(v);
+  return k.b;
+}
+}  // namespace
+
+// One region's step: its strands and everything the lay reads from making them.
+struct Session::StrandCache {
+  struct Entry {
+    std::vector<Strand> strands;
+    OrganicTraceStats st;
+    OrganicSpacing sp;
+    double median = 0.0;
+    GrowReport one;
+    bool grown = false;
+    std::size_t gap_capped = 0;
+  };
+  static constexpr std::size_t kMax = 12;
+  std::vector<std::pair<std::string, std::shared_ptr<const Entry>>> kept;   // newest last
+  std::shared_ptr<const Entry> find(const std::string& key) {
+    for (std::size_t i = 0; i < kept.size(); ++i)
+      if (kept[i].first == key) {
+        auto e = kept[i].second;
+        auto moved = std::move(kept[i]);
+        kept.erase(kept.begin() + static_cast<long>(i));
+        kept.push_back(std::move(moved));
+        return e;
+      }
+    return nullptr;
+  }
+  void keep(std::string key, std::shared_ptr<const Entry> e) {
+    kept.emplace_back(std::move(key), std::move(e));
+    if (kept.size() > kMax) kept.erase(kept.begin());
+  }
+};
+
 Outcome Session::lay_organic(const Settings& settings, const TensorField& field, const OrganicAsk& ask, int threads,
                              const std::atomic<bool>* stop) {
   return lay_organic_with(settings, field, one_group(settings, ask), threads, stop, false);
@@ -1282,10 +1371,19 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
   // OR30: the Finish is the regular lattices' own. Rim and Covered are "where" settings of the domain the weave is
   // traced and laid in (their solid cuts the strands as any solid does); Skin lays the net skin (O16).
   ready_domain(settings);
+  // His 11-22 (watch it grow): the session's tap for the length of this lay
+  // (the domain is read again at the end: a later step may have made it again)
+  struct TapFor {
+    std::unique_ptr<Domain>& d;
+    GrowthTap* t;
+    TapFor(std::unique_ptr<Domain>& domain, GrowthTap* tap) : d(domain), t(tap) { if (d) d->tap(t); if (t) t->start(); }
+    ~TapFor() { if (t) t->flush(); if (d) d->tap(nullptr); }
+  } tap_for(domain_, tap_);
   WeaveFinish finish;
   finish.draft = draft;                 // brief L2, item 3
   const auto t0 = std::chrono::steady_clock::now();
   std::vector<Strand> strands;
+  const std::uint64_t field_key = field_hash(field);   // his 11-22 item 2
   double smallest = 0.0, largest = 0.0, sum = 0.0;
   std::size_t candidates = 0;
   std::shared_ptr<GrowReport> grown;
@@ -1307,15 +1405,21 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
     for (const Region& r : domain_->spec().regions) {
       if (r.role != Role::Lattice || !r.weave) continue;
       if (std::find(group.regions.begin(), group.regions.end(), r.id) == group.regions.end()) continue;
-      OrganicTraceStats st;
-      std::vector<Strand> traced;
+      // his 11-22 item 2: the step's strands kept under a key of everything it reads; kept ones are handed on as they were
+      if (!strand_cache_) strand_cache_ = std::make_shared<StrandCache>();
+      const std::string key = strand_key(domain_epoch_, field_key, r.id, *pool, ask);
+      std::shared_ptr<const StrandCache::Entry> kept = strand_cache_->find(key);
+      if (!kept) {
+        auto made = std::make_shared<StrandCache::Entry>();
+        StrandCache::Entry& e = *made;
+        OrganicTraceStats& st = e.st;
       // O16, the net skin's reach: Traced, the trace's own median spacing (as the old run); Grown, which has no trace,
       // the median of the spacing field over the region's candidates (the field it is laid with). LatticeReview's
       // ruling 2 (2026-11-15) asked the field's median for both; on the made-up cube it changed Traced's net from 5,145
       // struts (12,626 mm) to 5,932 (24,424 mm), so Traced keeps its own until that is ruled on.
-      const OrganicSpacing sp =
-          ask.mode == OrganicMode::Grown ? organic_spacing(*domain_, r.id, field, ask, pool) : OrganicSpacing{};
-      double median = 0.0;
+      e.sp = ask.mode == OrganicMode::Grown ? organic_spacing(*domain_, r.id, field, ask, pool) : OrganicSpacing{};
+      const OrganicSpacing& sp = e.sp;
+      double& median = e.median;
       {
         std::vector<double> all;
         for (std::size_t e = 0; e < sp.candidate.size(); ++e)
@@ -1326,11 +1430,10 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
         }
       }
       if (ask.mode == OrganicMode::Grown) {
-        GrowReport one;
-        traced = grow_strands(*domain_, r.id, field, ask, &one, &sp);   // T fix: the spacing computed once, above
-        gap_capped += one.gap_capped;   // OG1
-        if (!grown) grown = std::make_shared<GrowReport>();
-        grown->add(one);
+        GrowReport& one = e.one;
+        e.grown = true;
+        e.strands = grow_strands(*domain_, r.id, field, ask, &one, &sp);   // T fix: the spacing computed once, above
+        e.gap_capped = one.gap_capped;   // OG1
         for (std::size_t e = 0; e < sp.candidate.size(); ++e) {
           if (!sp.candidate[e]) continue;
           const double v = sp.spacing_mm[e];
@@ -1341,8 +1444,26 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
         }
         if (st.candidates) st.spacing_mean_mm /= static_cast<double>(st.candidates);
       } else {
-        traced = trace_strands(*domain_, r.id, field, ask, &st, pool);
-        gap_capped += st.gap_capped;   // OG1
+        e.strands = trace_strands(*domain_, r.id, field, ask, &st, pool);
+        if (GrowthTap* t = domain_->growth_tap())   // his 11-22 (watch it grow): Traced's region appears whole, as traced
+          for (const Strand& st2 : e.strands)
+            for (std::size_t k = 0; k + 1 < st2.points.size(); ++k) t->piece(r.id, st2.points[k], st2.points[k + 1]);
+        e.gap_capped = st.gap_capped;   // OG1
+      }
+        strand_cache_->keep(key, made);
+        kept = made;
+      } else if (GrowthTap* t = domain_->growth_tap()) {   // watch it grow: kept strands appear at once
+        for (const Strand& st2 : kept->strands)
+          for (std::size_t k = 0; k + 1 < st2.points.size(); ++k) t->piece(r.id, st2.points[k], st2.points[k + 1]);
+      }
+      OrganicTraceStats st = kept->st;
+      const OrganicSpacing& sp = kept->sp;
+      const double median = kept->median;
+      std::vector<Strand> traced = kept->strands;
+      gap_capped += kept->gap_capped;   // OG1
+      if (kept->grown) {
+        if (!grown) grown = std::make_shared<GrowReport>();
+        grown->add(kept->one);
       }
       const double reach = ask.mode == OrganicMode::Grown ? median : st.spacing_median_mm;
       // O16, per region (leg J item 1): the region's own Skin and width, else the part's.
@@ -1398,6 +1519,7 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
       notes.push_back(kNoteEqualEnds);
   }
   const double ms_trace = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+  if (GrowthTap* t = domain_->growth_tap()) t->phase(5);   // his 11-22 (watch it grow): finishing
   Outcome out = lay_with(settings, &strands, threads, stop, &finish);
   if (!out.cancelled) {
     // OG2 (brief E6): the ends carried proud of the open faces, on the bars as laid (before the floors and additions,
@@ -1667,7 +1789,26 @@ std::vector<HoldPatchCount> hold_up_weave(Bars& bars, const Domain& domain, cons
       }
     };
     read_ends();
+    // SPEED 11-22: the ends on a 2 mm grid (the area's ends do not change while its points are read; supports are laid
+    // after), so each point reads only the ends in the box its cone can reach.
+    constexpr double kEndCell = 2.0;
+    const auto end_cell = [](double v, long long& c) {
+      if (!std::isfinite(v) || std::fabs(v) > 1e12) return false;
+      c = static_cast<long long>(std::floor(v / kEndCell));
+      return true;
+    };
+    const auto end_key = [](long long i, long long j, long long k) {
+      const auto f = [](long long v) { return static_cast<std::uint64_t>((v + (1LL << 20)) & 0x1FFFFF); };
+      return f(i) << 42 | f(j) << 21 | f(k);
+    };
+    std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> end_grid;
+    for (std::size_t i = 0; i < verts.size(); ++i) {
+      long long a, b, c;
+      if (end_cell(verts[i].x, a) && end_cell(verts[i].y, b) && end_cell(verts[i].z, c))
+        end_grid[end_key(a, b, c)].push_back(static_cast<std::uint32_t>(i));
+    }
     const double g = A.grid_mm > 0.0 ? A.grid_mm : 1.0;
+    std::vector<char> in_near(verts.size(), 0);   // SPEED 11-22: the walk's ends (this point's `near`)
     auto ends_under = [&](const WeaveHold::Patch& P) {
       std::size_t n = 0;
       for (const Vec3& e : solid_ends)
@@ -1700,10 +1841,30 @@ std::vector<HoldPatchCount> hold_up_weave(Bars& bars, const Domain& domain, cons
         if (held) { ++c.held; continue; }
         // The bar ends that can matter: inside the 45 degree cone under p (and a little round it, for the joint test).
         std::vector<std::size_t> near;
-        for (std::size_t i = 0; i < verts.size(); ++i) {
-          const double dz = p.z - verts[i].z, hd = std::hypot(verts[i].x - p.x, verts[i].y - p.y);
+        {   // SPEED 11-22: the candidates from the grid, judged as before, in increasing index order
           const double reach = A.to_floor ? 2.0 * A.depth_mm : A.depth_mm, slack = A.to_floor ? 4.0 : 2.0;
-          if (dz > -2.0 && dz <= reach + 2.0 && hd <= std::max(0.0, dz) + slack) near.push_back(i);
+          const double side = std::max(0.0, reach + 2.0) + slack + 1e-6;
+          long long x0, x1, y0, y1, z0, z1;
+          if (end_cell(p.x - side, x0) && end_cell(p.x + side, x1) && end_cell(p.y - side, y0) && end_cell(p.y + side, y1) &&
+              end_cell(p.z - reach - 2.0 - 1e-6, z0) && end_cell(p.z + 2.0 + 1e-6, z1)) {
+            for (long long a = x0; a <= x1; ++a)
+              for (long long b = y0; b <= y1; ++b)
+                for (long long c = z0; c <= z1; ++c) {
+                  const auto it = end_grid.find(end_key(a, b, c));
+                  if (it == end_grid.end()) continue;
+                  for (const std::uint32_t u : it->second) {
+                    const std::size_t i = u;
+                    const double dz = p.z - verts[i].z, hd = std::hypot(verts[i].x - p.x, verts[i].y - p.y);
+                    if (dz > -2.0 && dz <= reach + 2.0 && hd <= std::max(0.0, dz) + slack) near.push_back(i);
+                  }
+                }
+            std::sort(near.begin(), near.end());
+          } else {   // a point off the grid's range: every end, as before
+            for (std::size_t i = 0; i < verts.size(); ++i) {
+              const double dz = p.z - verts[i].z, hd = std::hypot(verts[i].x - p.x, verts[i].y - p.y);
+              if (dz > -2.0 && dz <= reach + 2.0 && hd <= std::max(0.0, dz) + slack) near.push_back(i);
+            }
+          }
         }
         std::vector<Vec3> path{p};
         Vec3 cur = p;
@@ -1719,17 +1880,84 @@ std::vector<HoldPatchCount> hold_up_weave(Bars& bars, const Domain& domain, cons
           return false;
         };
         const double most = A.to_floor ? 2.0 * A.depth_mm : A.depth_mm;
+        // SPEED 11-22: `near` flagged, its cells' range, its widest end: the walk's searches read the end grid round
+        // the walk, `near`'s ends only, and keep the least (distance, index) — the end the in-order scan kept.
+        long long nlo[3] = {0, 0, 0}, nhi[3] = {-1, -1, -1};
+        double vw_max = 0.0;
+        bool near_on_grid = true;
+        for (std::size_t q = 0; q < near.size(); ++q) {
+          const std::size_t i = near[q];
+          in_near[i] = 1;
+          vw_max = std::max(vw_max, vw[i]);
+          long long c[3];
+          if (!end_cell(verts[i].x, c[0]) || !end_cell(verts[i].y, c[1]) || !end_cell(verts[i].z, c[2])) { near_on_grid = false; continue; }
+          for (int a = 0; a < 3; ++a) {
+            if (q == 0 || nhi[a] < nlo[a]) { nlo[a] = c[a]; nhi[a] = c[a]; }
+            nlo[a] = std::min(nlo[a], c[a]);
+            nhi[a] = std::max(nhi[a], c[a]);
+          }
+        }
+        // (a grid-less `near`, or a walk off the grid's range, reads `near` in order as before)
+        const auto in_cone_best = [&](const Vec3& at, std::size_t& best, double& bd) {
+          const auto take = [&](std::size_t i) {
+            const double dz = at.z - verts[i].z;
+            if (!(dz > 0.0)) return;
+            const double hd = std::hypot(verts[i].x - at.x, verts[i].y - at.y);
+            if (hd > dz) return;
+            const double dd = std::hypot(hd, dz);
+            if (dd < bd || (dd == bd && i < best)) { bd = dd; best = i; }
+          };
+          long long c[3];
+          if (!near_on_grid || near.empty() || !end_cell(at.x, c[0]) || !end_cell(at.y, c[1]) || !end_cell(at.z, c[2])) {
+            for (std::size_t i : near) take(i);
+            return;
+          }
+          // rings of cells round `at` (Chebyshev radius r), until no unread cell can hold an end nearer than the best
+          long long rmax = 0;
+          for (int a = 0; a < 3; ++a) rmax = std::max({rmax, std::llabs(c[a] - nlo[a]), std::llabs(nhi[a] - c[a])});
+          for (long long r = 0; r <= rmax; ++r) {
+            if (r >= 2 && static_cast<double>(r - 1) * kEndCell > bd + 1e-9) break;
+            for (long long a = c[0] - r; a <= c[0] + r; ++a)
+              for (long long b = c[1] - r; b <= c[1] + r; ++b)
+                for (long long d = c[2] - r; d <= c[2] + r; ++d) {
+                  if (std::max({std::llabs(a - c[0]), std::llabs(b - c[1]), std::llabs(d - c[2])}) != r) continue;
+                  if (a < nlo[0] || a > nhi[0] || b < nlo[1] || b > nhi[1] || d < nlo[2] || d > nhi[2]) continue;
+                  const auto it = end_grid.find(end_key(a, b, d));
+                  if (it == end_grid.end()) continue;
+                  for (const std::uint32_t u : it->second) if (in_near[u]) take(u);
+                }
+          }
+        };
+        const auto hit_at = [&](const Vec3& at, std::size_t& hit, double& hb) {
+          const auto take = [&](std::size_t i) {
+            if (A.to_floor && joined_at(verts[i])) return;
+            const double dd = d3(at, verts[i]);
+            if (dd <= vw[i] && (dd < hb || (dd == hb && i < hit))) { hb = dd; hit = i; }
+          };
+          long long lo[3], hi[3];
+          const double R = vw_max + 1e-6;
+          if (!near_on_grid || !end_cell(at.x - R, lo[0]) || !end_cell(at.x + R, hi[0]) || !end_cell(at.y - R, lo[1]) ||
+              !end_cell(at.y + R, hi[1]) || !end_cell(at.z - R, lo[2]) || !end_cell(at.z + R, hi[2])) {
+            for (std::size_t i : near) take(i);
+            return;
+          }
+          for (long long a = lo[0]; a <= hi[0]; ++a)
+            for (long long b = lo[1]; b <= hi[1]; ++b)
+              for (long long d = lo[2]; d <= hi[2]; ++d) {
+                const auto it = end_grid.find(end_key(a, b, d));
+                if (it == end_grid.end()) continue;
+                for (const std::uint32_t u : it->second) if (in_near[u]) take(u);
+              }
+        };
+        struct ClearNear {   // the flags go down when the point is done, however its walk ends
+          std::vector<char>& f;
+          const std::vector<std::size_t>& n;
+          ~ClearNear() { for (std::size_t i : n) f[i] = 0; }
+        } clear_near{in_near, near};
         for (;;) {
           std::size_t best = verts.size();
           double bd = std::numeric_limits<double>::infinity();
-          for (std::size_t i : near) {
-            const double dz = cur.z - verts[i].z;
-            if (!(dz > 0.0)) continue;
-            const double hd = std::hypot(verts[i].x - cur.x, verts[i].y - cur.y);
-            if (hd > dz) continue;
-            const double dd = std::hypot(hd, dz);
-            if (dd < bd) { bd = dd; best = i; }
-          }
+          in_cone_best(cur, best, bd);
           Vec3 next{cur.x, cur.y, cur.z - Lh};
           if (best < verts.size()) {
             const double hx = verts[best].x - cur.x, hy = verts[best].y - cur.y, hd = std::hypot(hx, hy);
@@ -1743,11 +1971,7 @@ std::vector<HoldPatchCount> hold_up_weave(Bars& bars, const Domain& domain, cons
           if (entered) {
             std::size_t hit = verts.size();
             double hb = std::numeric_limits<double>::infinity();
-            for (std::size_t i : near) {
-              if (A.to_floor && joined_at(verts[i])) continue;
-              const double dd = d3(next, verts[i]);
-              if (dd <= vw[i] && dd < hb) { hb = dd; hit = i; }
-            }
+            hit_at(next, hit, hb);
             if (hit < verts.size()) {
               path.push_back(verts[hit]);
               if (!A.to_floor) { ending = 1; break; }
