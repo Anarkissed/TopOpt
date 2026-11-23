@@ -249,11 +249,14 @@ final class LatticeGrowthPass {
     @discardableResult
     func encode(_ enc: MTLRenderCommandEncoder, growth g: LatticeGrowth, depthState: MTLDepthStencilState,
                 clipFromModel: simd_float4x4, eyeFromModel: simd_float4x4, eyeNormalBasis: simd_float4x4,
-                model: simd_float4x4, heights: (lo: Float, hi: Float), now: CFTimeInterval) -> Int {
+                model: simd_float4x4, heights: (lo: Float, hi: Float), now: CFTimeInterval,
+                shown: Int? = nil, playhead: Float? = nil) -> Int {
         sync(g)
         lastDrawn = 0
         let size = g.alpha(at: now)
-        guard uploaded > 0, size > 0, let buffer, enc.device === device else { return 0 }
+        // ★ notes24 (his "the recording of the vine growth"): the replay's first `shown` pieces (all: no replay)
+        let n = Swift.min(shown ?? uploaded, uploaded)
+        guard n > 0, size > 0, let buffer, enc.device === device else { return 0 }
         var band = SIMD4<Float>(0, 1, 0, 1)
         if let since = g.workingSince {
             let t = now - since
@@ -262,7 +265,7 @@ final class LatticeGrowthPass {
                          Swift.max(Self.bandEdge * span, 0.02))
         }
         var f = Frame(clipFromModel: clipFromModel, eyeFromModel: eyeFromModel, eyeNormalBasis: eyeNormalBasis,
-                      colour: SIMD4(Self.colour, size), tip: SIMD4(Self.tipColour, g.clock), cue: SIMD4(1, 0, 0, 0),
+                      colour: SIMD4(Self.colour, size), tip: SIMD4(Self.tipColour, playhead ?? g.clock), cue: SIMD4(1, 0, 0, 0),
                       worldY: SIMD4(model.columns.0.y, model.columns.1.y, model.columns.2.y, model.columns.3.y),
                       band: band, bandColour: SIMD4(Self.bandColour, 1))
         enc.setRenderPipelineState(pipeline)
@@ -276,47 +279,107 @@ final class LatticeGrowthPass {
             enc.drawIndexedPrimitives(type: .triangle, indexCount: Self.indices.count, indexType: .uint16,
                                       indexBuffer: indexBuffer, indexBufferOffset: 0, instanceCount: n)
         }
-        let p = Self.plan(uploaded)
+        let p = Self.plan(n)
         if p.oldCount > 0 {   // the older pieces, thinned
             f.cue.x = p.oldStride; f.cue.y = 0
             draw(p.oldCount)
         }
         f.cue.x = 1; f.cue.y = Float(p.tipsFrom)
-        draw(uploaded - p.tipsFrom)
-        lastDrawn = p.oldCount + uploaded - p.tipsFrom
+        draw(n - p.tipsFrom)
+        lastDrawn = p.oldCount + n - p.tipsFrom
         Self.framesDrawn += 1
         return lastDrawn
     }
+}
+
+
+/// ★ notes24: what the growth does in one frame, decided once a frame (`MeshRenderer.prepareGrowth`).
+struct LatticeGrowthFrame {
+    /// Pieces are drawn this frame (into the G-buffer): how many (the replay's) and its playhead (the glow's clock).
+    var drawn = false
+    var shown = 0
+    var playhead: Float = 0
+    /// A lay is on screen (its walls, its replay, its landing).
+    var active = false
+    /// The landed lattice waits for the replay's catch-up (at most LatticeGrowthReplay.catchUpEndS).
+    var holdsLanded = false
+    /// How far the walls have gone (0 → 1): the dissolve with this lay's own map, or the fade to X-ray.
+    var walls: Float = 1
+    /// The walls open by the growth's own map (made before the lay: his walls-first, 362's gridAhead) — the landed path's
+    /// own code (`LatticeLayoutBarsPass`'s map, shell clip and cut walls) on a map the landed lattice does not hold yet.
+    var ownMap = false
+    var mapPass: LatticeLayoutBarsPass?
 }
 
 extension MeshRenderer {
     /// The clock the growth is drawn at (tests set it; else now).
     nonisolated(unsafe) static var growthClockForTesting: CFTimeInterval?
     var growthNow: CFTimeInterval { Self.growthClockForTesting ?? CACurrentMediaTime() }
+    /// ★ notes24: the growth draws this frame (into the G-buffer, lit as the lattice).
+    var growthInFrame: Bool { growthFrame.drawn }
 
     /// Once a frame, before anything reads it: the growth's pass built the first time it has pieces (with the frame's
-    /// device), and whether the growth draws this frame (`growthInFrame`).
+    /// device), the replay's playhead, and how the part opens this frame (`growthFrame`).
     func prepareGrowth(_ device: MTLDevice) {
         growthPass?.lastDrawn = 0
-        if growthPass == nil, let g = growth, g.count > 0, LatticeGrowthPass.lastInitError == nil {
+        var f = LatticeGrowthFrame()
+        f.mapPass = growthFrame.mapPass   // kept: built once
+        defer { growthFrame = f }
+        guard let g = growth else { return }
+        if growthPass == nil, g.count > 0, LatticeGrowthPass.lastInitError == nil {
             do { growthPass = try LatticeGrowthPass(device: device) } catch {
                 LatticeGrowthPass.lastInitError = "\(error)"   // the frame draws without it; a test reads this
                 NSLog("DIAG lattice growth: %@", "\(error)")
             }
         }
-        if let g = growth, growthPass != nil, g.count > 0 { growthInFrame = g.alpha(at: growthNow) > 0 } else { growthInFrame = false }
+        let now = growthNow
+        f.active = g.layOnScreen
+        f.shown = g.shownCount(at: now)
+        f.playhead = g.playhead(at: now)
+        f.drawn = growthPass != nil && f.shown > 0 && g.alpha(at: now) > 0
+        f.holdsLanded = g.holdsLanded(at: now)
+        f.walls = g.wallsProgress(at: now)
+        if let m = g.aheadMap, g.layOnScreen, bodyAlpha >= 0.999 {   // ★ the walls dissolve with this lay's own map
+            if f.mapPass == nil { f.mapPass = try? LatticeLayoutBarsPass(device: device) }
+            if let p = f.mapPass, p.gridToken != m.token { p.uploadGrid(m) }
+            f.ownMap = f.mapPass?.shellClip != nil
+        }
     }
 
-    /// ★ notes24 (img 49), his fallback where opening the part is impossible: the part is drawn in X-ray while the vines grow
-    /// and no map on screen opens it as this lay's lattice will (the first lay of these settings: the engine makes the map
-    /// from the finished lay), and after it lands until its own map comes — never a closed part over the growth. With the
-    /// lay's map on screen (the Draft's for its exact lattice, the last Look's) the part is drawn exactly as the landed
-    /// lattice draws it: solid, opened by that map. Only the solid view (an opaque body); X-ray is X-ray already.
+    /// ★ notes24 (img 49), his fallback where opening the part is impossible: the part is drawn in X-ray while a lay is on
+    /// screen and no map opens it as this lay's lattice will (the first lay of these settings, before the engine can make the
+    /// map ahead), and after it lands until its own map comes — never a closed part over the growth. With the lay's map (on
+    /// screen, or made before it) the part is drawn exactly as the landed lattice draws it: solid, opened by that map. Only
+    /// the solid view (an opaque body); X-ray is X-ray already.
     var growthXraysBody: Bool {
         guard let g = growth, bodyAlpha >= 0.999, !LatticeGrowthPass.controlNoXrayStandIn else { return false }
-        guard growthInFrame || g.landedHold else { return false }
+        guard growthFrame.active || growthFrame.drawn || g.landedHold else { return false }
+        if growthFrame.ownMap { return false }
         let mapShown = layoutBarsInFrame && layoutBars?.shellClip != nil
         return !(mapShown && (g.sealed || g.mapOpensFaces))
+    }
+
+    /// The body's drawn opacity while the X-ray stands in: faded from solid to the Lattice page's X-ray over the walls' part of
+    /// the lay (his walls-first), then the X-ray.
+    var growthXrayAlpha: Float {
+        let ghost = LatticeLayoutPreview.ghostAlpha
+        return 1 - (1 - ghost) * Swift.min(Swift.max(growthFrame.walls, 0), 1)
+    }
+
+    /// ★ his walls-first: the shell clip and its map while the walls dissolve with the growth's own map — the share of the
+    /// latticed surface still standing rides in `eye.w` (`shell_standing` in the body's fragments). nil: not this frame.
+    var growthShellClip: (clip: ShellClipUniform, texture: MTLTexture)? {
+        guard growthFrame.ownMap, let p = growthFrame.mapPass, var u = p.shellClip, let t = p.gridTexture else { return nil }
+        u.eye.w = 1 - Swift.min(Swift.max(growthFrame.walls, 0), 1)
+        return (u, t)
+    }
+
+    /// The cut walls of the growth's own map into the prepass (the landed lattice's walls, its code). True when drawn.
+    func encodeGrowthWalls(_ enc: MTLRenderCommandEncoder, depthState: MTLDepthStencilState, clipFromModel: simd_float4x4,
+                           eyeFromModel: simd_float4x4, eyeNormalBasis: simd_float4x4) -> Bool {
+        guard growthFrame.ownMap, let p = growthFrame.mapPass else { return false }
+        return p.encodeWalls(enc, depthState: depthState, clipFromModel: clipFromModel, eyeFromModel: eyeFromModel,
+                             eyeNormalBasis: eyeNormalBasis)
     }
 
     /// The growth into the prepass's G-buffer, after the landed lattice and its walls (same encoder, attachments and depth
@@ -333,7 +396,8 @@ extension MeshRenderer {
             }}}
         } else { lo = 0; hi = 1 }
         return pass.encode(enc, growth: g, depthState: depthState, clipFromModel: clipFromModel, eyeFromModel: eyeFromModel,
-                           eyeNormalBasis: eyeNormalBasis, model: model, heights: (lo, hi), now: growthNow)
+                           eyeNormalBasis: eyeNormalBasis, model: model, heights: (lo, hi), now: growthNow,
+                           shown: growthFrame.shown, playhead: growthFrame.playhead)
     }
 
     /// The growth this view draws (the Lattice page's preview's), or none. Returns true when the frame must be redrawn.
@@ -342,7 +406,7 @@ extension MeshRenderer {
         guard growth !== g else { return false }
         growth = g
         growthPass?.forget()
-        if g == nil { growthPass = nil; growthInFrame = false }
+        if g == nil { growthPass = nil; growthFrame = LatticeGrowthFrame() }
         return true
     }
 }

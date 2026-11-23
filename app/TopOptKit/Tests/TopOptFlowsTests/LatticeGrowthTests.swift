@@ -269,7 +269,7 @@ final class LatticeGrowthTests: XCTestCase {
         let a3 = LatticeLayoutSession.Organic()   // the engine's own width
         let g = LatticeGrowth()
         g.layBegins([.init(regions: [1, 2], ask: a1), .init(regions: [5], ask: a2), .init(regions: [9], ask: a3)], lineMM: 0.4,
-                    mapOpens: true)
+                    opening: .open)
         g.restart()   // the lay's first poll
         XCTAssertTrue(g.mapOpensFaces)
         g.append(xyz: [Float](repeating: 0, count: 6 * 4), region: [1, 5, 9, 7])
@@ -278,7 +278,7 @@ final class LatticeGrowthTests: XCTestCase {
         XCTAssertEqual(g.pieces[5].w, 0.4, accuracy: 1e-6, "none asked: two print lines")
         XCTAssertEqual(g.pieces[7].w, 0.4, accuracy: 1e-6, "a region no group names: two print lines")
         XCTAssertEqual(g.pieces[0].w, 0.25, accuracy: 1e-6, "the birth as before")
-        g.layBegins([], lineMM: 0, mapOpens: false)
+        g.layBegins([], lineMM: 0, opening: .xray)
         XCTAssertFalse(g.mapOpensFaces)
         XCTAssertEqual(g.radiusDefault, 0.45, accuracy: 1e-6, "no line known: 0.45 mm lines")
     }
@@ -396,7 +396,8 @@ final class LatticeGrowthTests: XCTestCase {
         r.setBodyAlpha(0)
         let bare = try frame(r)
         let g = LatticeGrowth()
-        g.layBegins(Self.group(1.2), lineMM: 0.45, mapOpens: false)
+        g.layBegins(Self.group(1.2), lineMM: 0.45, opening: .xray)
+        g.replayOffForTesting()   // (the replay's own tests: LatticeGrowthReplayTests)
         r.applyGrowth(g)
         XCTAssertEqual(try frame(r), bare, "nothing grown yet: the bare frame")
         g.append(xyz: Self.vine(SIMD3(2, 5, 10), SIMD3(18, 5, 10), 200), region: [Int32](repeating: 1, count: 200))
@@ -464,7 +465,8 @@ final class LatticeGrowthTests: XCTestCase {
         let bars = LatticeLayoutBarsInputs(token: 7, bars: [3, 3, 3, 3.1, 3, 3, 0.05], solid: Self.halfOpenMap(token: 7))
         XCTAssertTrue(r.applyLayoutBars(bars, device: device))
         let g = LatticeGrowth()
-        g.layBegins(Self.group(1.2), lineMM: 0.45, mapOpens: true)
+        g.layBegins(Self.group(1.2), lineMM: 0.45, opening: .open)
+        g.replayOffForTesting()   // (the replay's own tests: LatticeGrowthReplayTests)
         r.applyGrowth(g)
         g.append(xyz: Self.vine(SIMD3(12, 5, 10), SIMD3(18, 5, 10), 60) + Self.vine(SIMD3(2, 5, 10), SIMD3(8, 5, 10), 60),
                  region: [Int32](repeating: 1, count: 120))
@@ -485,7 +487,8 @@ final class LatticeGrowthTests: XCTestCase {
         XCTAssertGreaterThan(opened.right, 150, "★ through the opened face: the vine grows in 3D")
         XCTAssertLessThan(opened.left, 10, "★ the vine behind the closed wall is hidden (only what he can see)")
         // RED CONTROL: the map on screen is another lay's: the part in X-ray while it grows, both vines seen
-        g.layBegins(Self.group(1.2), lineMM: 0.45, mapOpens: false)
+        g.layBegins(Self.group(1.2), lineMM: 0.45, opening: .xray)
+        g.replayOffForTesting()   // (the replay's own tests: LatticeGrowthReplayTests)
         let xray = halves(try frame(r, w, 300))
         XCTAssertTrue(r.growthXraysBody)
         XCTAssertGreaterThan(xray.left, 100, "RED CONTROL: the X-ray stand-in shows the vine the wall hid")
@@ -502,7 +505,8 @@ final class LatticeGrowthTests: XCTestCase {
         let (r, device) = try renderer()
         r.setBodyAlpha(1)
         let g = LatticeGrowth()
-        g.layBegins(Self.group(1.2), lineMM: 0.45, mapOpens: false)
+        g.layBegins(Self.group(1.2), lineMM: 0.45, opening: .xray)
+        g.replayOffForTesting()   // (the replay's own tests: LatticeGrowthReplayTests)
         r.applyGrowth(g)
         g.append(xyz: Self.vine(SIMD3(2, 5, 10), SIMD3(18, 5, 10), 50), region: [Int32](repeating: 1, count: 50))
         _ = try frame(r)
@@ -547,7 +551,8 @@ final class LatticeGrowthTests: XCTestCase {
         let landed = try frame(r)
         r.applyLayoutBars(nil, device: device)
         let g = LatticeGrowth()
-        g.layBegins(Self.group(1.2), lineMM: 0.45, mapOpens: false)
+        g.layBegins(Self.group(1.2), lineMM: 0.45, opening: .xray)
+        g.replayOffForTesting()   // (the replay's own tests: LatticeGrowthReplayTests)
         r.applyGrowth(g)
         g.append(xyz: Self.vine(pts[0], pts[1], 40) + Self.vine(pts[1], pts[2], 40), region: [Int32](repeating: 1, count: 80))
         for _ in 0..<10 { g.append(xyz: [Float](repeating: 1000, count: 6), region: [1]) }   // cooled
@@ -590,7 +595,8 @@ final class LatticeGrowthTests: XCTestCase {
         for red in [false, true] {
             LatticeGrowth.controlNoWorkingBand = red
             let g = LatticeGrowth()
-            g.layBegins(Self.group(2), lineMM: 0.45, mapOpens: false)
+            g.layBegins(Self.group(2), lineMM: 0.45, opening: .xray)
+            g.replayOffForTesting()   // (the replay's own tests: LatticeGrowthReplayTests)
             r.applyGrowth(g)
             g.append(xyz: Self.vine(SIMD3(10, 0.5, 10), SIMD3(10, 9.5, 10), 30), region: [Int32](repeating: 1, count: 30))
             for _ in 0..<8 { g.append(xyz: [Float](repeating: 1000, count: 6), region: [1]) }   // cooled
@@ -644,7 +650,8 @@ final class LatticeGrowthTests: XCTestCase {
         let landedS = best()
         r.applyLayoutBars(nil, device: device)
         let g = LatticeGrowth()
-        g.layBegins(Self.group(0.6), lineMM: 0.45, mapOpens: false)
+        g.layBegins(Self.group(0.6), lineMM: 0.45, opening: .xray)
+        g.replayOffForTesting()   // (the replay's own tests: LatticeGrowthReplayTests)
         r.applyGrowth(g)
         g.append(xyz: xyz, region: [Int32](repeating: 1, count: n))
         let grownS = best()

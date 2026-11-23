@@ -417,7 +417,8 @@ final class LatticeLayoutBarsPass {
     private(set) var grid: (origin: SIMD3<Float>, voxel: Float, dims: SIMD3<Int32>)?
     private(set) var gridToken = -1
     /// The cut walls' colour: the body's own grey, so a cut reads as the same material.
-    static let wallColour = SIMD4<Float>(0.80, 0.81, 0.83, 1)
+    /// ★ notes24 (b, "as if you're looking INTO A PART"): exactly the body's clay (viewer_fragment's `clay`), no cooler grey.
+    static let wallColour = SIMD4<Float>(0.78, 0.77, 0.75, 1)
     /// The cut walls, on (11-13: they draw — the hollow core's solid core behind its lattice; his v4 stand at 2048 × 1536 on
     /// the Mac: 21 ms a frame without, 25–29 ms with). The tests' red control turns them off.
     static var drawWalls = true

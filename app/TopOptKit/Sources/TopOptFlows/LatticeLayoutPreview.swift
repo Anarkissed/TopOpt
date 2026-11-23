@@ -854,8 +854,12 @@ public final class LatticeLayoutPreview: ObservableObject {
             for (id, dead) in rep.withoutStress { if let k = keysAtLay[id] { verdicts[k] = dead } }
             organicWallVerdicts = verdicts
         }
-        // ★ notes24 (viewer): the growing tubes' widths, and whether the map on screen opens this lay's faces (LatticeGrowth)
-        growth.layBegins(groups, lineMM: s.beadMM, mapOpens: Self.mapFor(token: token, at: here, shown: bars, shownWhere: shownWhere) != nil)
+        // ★ notes24 (viewer): the growing tubes' widths and how the part opens — by the map on screen when it is this lay's, else
+        // by the map made before the lay (his walls-first; `mapAhead`, 362's gridAhead), else in X-ray (LatticeGrowth)
+        let fits = Self.mapFor(token: token, at: here, shown: bars, shownWhere: shownWhere) != nil
+        let ahead = solidWanted && !fits ? await Self.mapAhead(session, s, box, token: token &+ 1, smooth: true) : nil
+        growth.layBegins(groups, lineMM: s.beadMM, opening: .init(solid: solidWanted, mapFits: fits, ahead: ahead),
+                         expectedLeftS: layProgress?.expectedLeftS)
         t0 = Date()
         let r = try await session.layOrganic(s, groups: groups)
         layStages["layWallMS"] = Self.ms(since: t0)   // ★ his 11-22: the engine's own times, as they come
@@ -891,7 +895,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         drawn.lightFrom = Self.organicLightFrom(grown: grown, netFrom: seg.lightFrom, count: seg.count)
         drawn.vines = vines
         // ★ his 11-22: cut open at once where the map on screen is this lattice's map too (the Draft's, for its exact lattice)
-        if solidWanted { drawn.solid = Self.mapFor(token: token, at: here, shown: bars, shownWhere: shownWhere) }
+        if solidWanted { drawn.solid = Self.mapFor(token: token, at: here, shown: bars, shownWhere: shownWhere) ?? growth.landedMap(token: token) }   // ★ notes24: or the one made before it
         bars = drawn
         shownWhere = (token, here)
         var l = LatticeLayoutColours.Laid()   // no cells: the key and card read each strut's width and its cell size
@@ -1223,11 +1227,7 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// 0.35 mm.
     static func map(_ s: LatticeLayoutSession, _ box: (lo: SIMD3<Float>, hi: SIMD3<Float>), token: Int,
                     smooth: Bool = false) async throws -> (grid: LatticeLayoutSolidGrid, ms: Double) {
-        let ext = simd_max(box.hi - box.lo, SIMD3(repeating: 0.1))
-        let voxel = Swift.max(0.35, Float(cbrt(Double(ext.x * ext.y * ext.z) / 1_000_000)))
-        let dims = SIMD3<Int32>(Int32((ext.x / voxel).rounded(.up)) + 3, Int32((ext.y / voxel).rounded(.up)) + 3,
-                                Int32((ext.z / voxel).rounded(.up)) + 3)
-        let origin = box.lo - SIMD3(repeating: voxel)
+        let (origin, voxel, dims) = mapGeometry(box)   // ★ notes24: shared with `mapAhead`
         let r = try await s.grid(origin: origin, voxel: voxel, dims: dims)
         // ★ his 11-19 note: Organic's cut edges are smooth lines, not the voxels' stair-steps
         let rg = smooth ? LatticeLayoutSolidGrid.smoothed(r.rg, dims: dims) : r.rg
@@ -1687,7 +1687,7 @@ extension LatticeLayoutPreview {
     func stopGrowth() {
         growthWatch?.stop()
         growthWatch = nil
-        growth.restart()
+        growth.stop()   // ★ notes24: its walls and replay too
     }
 
     /// The bars on screen changed: a finished lattice (a new one) replaces the growth with a short fade over it; nothing on

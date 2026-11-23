@@ -73,7 +73,7 @@ final class LatticeGrowthHostedTests: XCTestCase {
         XCTAssertTrue(seen.draftGrewInXray, "★ no map yet: the Draft grew inside the part in X-ray")
         XCTAssertTrue(seen.exactGrewOpened, "★ the exact lattice grew inside the part its Draft's map opened")
         XCTAssertFalse(seen.exactGrewInXray, "★ never X-ray while a map opens the part")
-        h.pump(LatticeGrowth.fadeS + 0.6)
+        h.pump(LatticeGrowth.landingS + 0.6)
         XCTAssertNotNil(preview.bars?.solid, "landed: the lattice's map on screen")
         _ = r.renderOffscreen(width: 320, height: 240, clear: MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1), stage: false)
         XCTAssertFalse(r.growthXraysBody, "★ landed: the part solid, opened by its map (as it will stay)")
@@ -105,7 +105,7 @@ final class LatticeGrowthHostedTests: XCTestCase {
             // landed: the finished lattice, the growth gone after its fade
             XCTAssertNotNil(preview.bars, "\(name): the finished lattice is on screen")
             XCTAssertEqual(preview.organicQuality, .exact)
-            h.pump(LatticeGrowth.fadeS + 0.4)
+            h.pump(LatticeGrowth.landingS + 0.4)
             XCTAssertEqual(preview.growth.count, 0, "★ \(name): the growth is gone once the lattice landed")
             _ = r.renderOffscreen(width: 320, height: 240, clear: MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1), stage: false)
             XCTAssertEqual(r.growthPass?.lastDrawn ?? 0, 0, "★ \(name): the renderer draws no growth")
@@ -116,7 +116,7 @@ final class LatticeGrowthHostedTests: XCTestCase {
                 // another Look, laid; then back: the remembered lattice at once, no growth
                 var look = p.lattice.organicLook!; look.lookPercent = 8; p.lattice.organicLook = look
                 _ = try lay(preview, p, st, h, r, "\(name) Look 8")
-                h.pump(LatticeGrowth.fadeS + 0.4)
+                h.pump(LatticeGrowth.landingS + 0.4)
                 let total = preview.growth.appendedTotal
                 look.lookPercent = 5; p.lattice.organicLook = look
                 preview.update(project: p, on: true, stress: st)
@@ -169,7 +169,7 @@ final class LatticeGrowthHostedTests: XCTestCase {
             if preview.growth.count > 0, r.growth === preview.growth,
                r.renderOffscreen(width: 320, height: 240, clear: MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1), stage: false) != nil {
                 seen.drawnMost = Swift.max(seen.drawnMost, r.growthPass?.lastDrawn ?? 0)
-                if r.growthInFrame, !preview.growth.sealed {   // ★ notes24: the part as this frame drew it, while a lay grows
+                if r.growthInFrame || r.growthFrame.active, !preview.growth.sealed {   // ★ notes24: the part as this frame drew it, while a lay is on screen
                     seen.inGBuffer = seen.inGBuffer || r.lastFrameHadLatticeGBuffer
                     let opened = !r.growthXraysBody && r.layoutBars?.shellClip != nil && preview.growth.mapOpensFaces
                     if preview.layProgress?.quality == .draft { seen.draftGrewInXray = seen.draftGrewInXray || r.growthXraysBody }
