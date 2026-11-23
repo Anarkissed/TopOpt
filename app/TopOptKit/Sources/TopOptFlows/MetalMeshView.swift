@@ -153,7 +153,12 @@ private struct StageUniforms {
     var shadowRect: SIMD4<Float> = .zero
     /// §3c: shadow strength; 0 = off.
     var shadowStrength: Float = 0
-    var _pad: SIMD3<Float> = .zero   // 16-byte tail alignment
+    /// ★ notes24 item 1 (img 49): how much of the floor is seen as a plane (StageFloor.planeWeight): 1 = as before; 0 = a
+    /// level view, the floor's edge-on line and no horizon haze.
+    var plane: Float = 1
+    /// The horizon glow's half width in the ray's |y| (StageFloor.glowBand).
+    var glowBand: Float = 0.14
+    var _pad: Float = 0   // 16-byte tail alignment (the MSL twin is 144 bytes)
 }
 
 // The depth-prepass uniforms — must match `DUniforms` in `depthPrepassShaderSource`.
@@ -1258,10 +1263,13 @@ struct StageUniforms {
     float3   eye;       // camera world position
     float    floorY;    // world y of the stage floor plane
     float2   centerXZ;  // floor plane centre (x,z) — the fade origin
-    float    spacing;   // minor grid spacing (world units)
+    float    spacing;   // ★ notes24: the unit the squares count from (StageFloor.unit, 1 mm): level n's squares are spacing × 10ⁿ
     float    fadeRadius;// world distance at which the grid fully fades out
     float4   shadowRect;     // §3c — (originX, originZ, sizeX, sizeZ) in world XZ
     float    shadowStrength; // §3c — 0 = off
+    float    plane;          // ★ notes24 item 1: 1 = the floor seen as a plane; 0 = a level view (its edge-on line, no haze)
+    float    glowBand;       // the horizon glow's half width in |rd.y| (StageFloor.glowBand)
+    float    _pad;
 };
 
 struct SOut { float4 pos [[position]]; float2 uv; };
@@ -1274,10 +1282,17 @@ vertex SOut stage_vertex(uint vid [[vertex_id]]) {
     return o;
 }
 
-static float gridMask(float2 coord) {
-    float2 d = fwidth(coord);
-    float2 g = abs(fract(coord - 0.5) - 0.5) / max(d, float2(1e-5));
+// `d`: how many cells one pixel spans (the floor's own screen derivative over the level's side — ★ notes24: never the
+// derivative of `coord` itself, which jumps where neighbouring pixels pick different levels)
+static float gridMask(float2 coord, float2 d) {
+    float2 g = abs(fract(coord - 0.5) - 0.5) / max(d, float2(1e-7));
     return 1.0 - min(min(g.x, g.y), 1.0);
+}
+
+// ★ notes24 item 4: a level's line strength by its rank — how many decades its squares are above the finest that can show
+// (StageFloor.strength: the minor strength by 0.6, a major line from 1 to 2; continuous, so the zoom never pops a line)
+static float levelStrength(float rank) {
+    return 0.16 * smoothstep(0.0, 0.6, rank) + 0.34 * smoothstep(1.0, 2.0, rank);
 }
 
 fragment float4 stage_fragment(SOut in [[stage_in]], constant StageUniforms& U [[buffer(0)]],
@@ -1302,28 +1317,42 @@ fragment float4 stage_fragment(SOut in [[stage_in]], constant StageUniforms& U [
     float3 ro = U.eye;
     float3 rd = normalize(np - ro);
 
-    // Soft horizon glow: rays grazing the floor plane (|rd.y| small) get a faint blue lift.
-    float horizon = 1.0 - smoothstep(0.0, 0.14, abs(rd.y));
-    col += float3(0.10, 0.16, 0.28) * horizon * 0.5;
+    // Soft horizon glow: rays grazing the floor plane (|rd.y| small) get a faint blue lift. ★ notes24 item 1 (img 49: "At
+    // perfectly straight on, the background becomes this blue haze"): only while the floor is seen as a plane (`plane`, from
+    // the view's elevation), and as wide as the lens's share of the picture (`glowBand`): the orthographic view's rays all lie
+    // within half a degree of level, so a fixed band covered the whole screen
+    float horizon = 1.0 - smoothstep(0.0, max(U.glowBand, 1e-5), abs(rd.y));
+    col += float3(0.10, 0.16, 0.28) * horizon * 0.5 * U.plane;
+    float3 gridCol = float3(0.34, 0.52, 0.80);
 
-    // Infinite floor grid: intersect the ray with y = floorY.
+    // Infinite floor grid: intersect the ray with y = floorY. The hit (and how much floor a pixel covers there) is worked out
+    // for every pixel, so its screen derivatives are whole wherever the floor shows.
+    float rdy = abs(rd.y) > 1e-5 ? rd.y : -1e-5;
+    float t = (U.floorY - ro.y) / rdy;
+    float2 xz = (ro + rd * t).xz;
+    float2 xdx = dfdx(xz), xdy = dfdy(xz);
+    float pixelMM = max(max(length(float2(xdx.x, xdy.x)), length(float2(xdx.y, xdy.y))), 1e-9);
     if (abs(rd.y) > 1e-5) {
-        float t = (U.floorY - ro.y) / rd.y;
         if (t > 0.0) {
-            float3 hit = ro + rd * t;
-            float2 xz = hit.xz;
-            // ★ his 11-22 notes: ONE grid of perfect squares — a major line is exactly every 5th small line (StageFloor
-            // .minorPerMajor), both from the world's origin, on the one floor
-            float2 cell = xz / U.spacing;
-            float minor = gridMask(cell);
-            float major = gridMask(cell / 5.0);
+            // ★ his 11-22 notes: ONE grid of perfect squares from the world's origin, on the one floor. ★ notes24 item 4 ("an
+            // infinitely shrinking view of squares"): squares of spacing × 10ⁿ mm, each split into 10 × 10 of the next finer;
+            // which show is read from how much floor this pixel covers (the zoom, and the distance along the floor): the
+            // finest that can show (`n0`, its squares at least 8 px across) fades in, the next two grow into major lines
+            // (StageFloor.levels). Lines one pixel wide at every level.
+            float l = log10(pixelMM * 8.0 / U.spacing);   // StageFloor.firstShowsPx
+            float n0 = ceil(l);
+            float r0 = n0 - l;
+            float s0 = U.spacing * pow(10.0, n0);
+            float2 fw = abs(xdx) + abs(xdy);
+            float lines = max(levelStrength(r0) * gridMask(xz / s0, fw / s0),
+                              max(levelStrength(r0 + 1.0) * gridMask(xz / (s0 * 10.0), fw / (s0 * 10.0)),
+                                  levelStrength(r0 + 2.0) * gridMask(xz / (s0 * 100.0), fw / (s0 * 100.0))));
             // Fade with distance from the floor centre, and with grazing angle (kills moiré
             // near the horizon), so far lines dissolve into the gradient.
             float dist  = length(xz - U.centerXZ);
             float fade  = 1.0 - smoothstep(U.fadeRadius * 0.35, U.fadeRadius, dist);
             float graze = smoothstep(0.02, 0.22, abs(rd.y));
-            float3 gridCol = float3(0.34, 0.52, 0.80);
-            float a = (minor * 0.16 + major * 0.34) * fade * graze;
+            float a = lines * fade * graze;
             col = mix(col, gridCol, clamp(a, 0.0, 1.0));
 
             // ★ §3c CONTACT SHADOW. Right now the part FLOATS. `shadowTex` is the
@@ -1359,6 +1388,22 @@ fragment float4 stage_fragment(SOut in [[stage_in]], constant StageUniforms& U [
                 }
             }
         }
+    }
+
+    // ★ notes24 item 1 (img 49: "showing a flat floor line and keeping the same black background"): a level view sees the
+    // floor edge-on — one thin line at the floor's height, where the ray passes nearest the part's centre (seen from above),
+    // fading out to the sides as the grid does; drawn as the plane gives way to it (`plane` → 0), where the ray really grazes
+    // the floor (the orthographic view's; the lens sees its floor as a plane below the part, its grid drawn).
+    float dd = max(dot(rd.xz, rd.xz), 1e-12);
+    float tc = dot(U.centerXZ - ro.xz, rd.xz) / dd;
+    float h = ro.y + rd.y * tc - U.floorY;
+    float hw = max(fwidth(h), 1e-9);
+    if (U.plane < 0.999 && dd > 1e-8) {
+        float side = length(ro.xz + rd.xz * tc - U.centerXZ);
+        float lineA = 1.0 - min(abs(h) / hw, 1.0);
+        float sideFade = 1.0 - smoothstep(U.fadeRadius * 0.35, U.fadeRadius, side);
+        float edgeOn = (1.0 - U.plane) * (1.0 - smoothstep(0.0, 0.05, abs(rd.y)));
+        col = mix(col, gridCol, clamp(lineA * 0.5 * sideFade * edgeOn, 0.0, 1.0));
     }
 
     return float4(col, 1.0);   // opaque backdrop (replaces the flat clear)
@@ -5017,20 +5062,26 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // ★ his 11-22 notes: THE floor (`buildGround`: the settled part's lowest point, round squares from its size) — the
         // same one the ground shadow lies on, and still while the part settles or the camera moves
         let floor = (mesh?.isEmpty == false ? stageFloor : nil) ?? StageFloor.under(lo: lo, hi: hi, lowest: lo.y)
+        // ★ notes24 item 1: a level view sees the floor edge-on (its line, no haze); the glow as wide as the lens's share
+        let haze = StageFloor.controlHazeAtLevel
         return StageUniforms(invVP: inv,
                              eye: camera.eye,
                              floorY: floor.y,
                              centerXZ: floor.centre,
-                             spacing: floor.minor,
+                             spacing: StageFloor.unit,   // ★ notes24 item 4: the squares are 10ⁿ of it, by the zoom
                              fadeRadius: floor.fadeRadius,
                              shadowRect: rect,
-                             shadowStrength: 0)   // filled in by `encode` once the footprint exists
+                             shadowStrength: 0,   // filled in by `encode` once the footprint exists
+                             plane: haze ? 1 : StageFloor.planeWeight(elevationSine: camera.direction.y),
+                             glowBand: haze ? 0.14 : StageFloor.glowBand(drawFovY: camera.drawFovY, fovY: camera.fovY))
     }
 
-    /// The stage's floor grid as this frame would draw it (tests): its height, small squares' side, centre and the eye.
-    func stageGridForTesting(aspect: Float) -> (floorY: Float, spacing: Float, centre: SIMD2<Float>, eye: SIMD3<Float>) {
+    /// The stage's floor grid as this frame would draw it (tests): its height, the unit its squares count from, centre and
+    /// the eye; and how much of the floor is seen as a plane and the glow's width (notes24 item 1).
+    func stageGridForTesting(aspect: Float) -> (floorY: Float, spacing: Float, centre: SIMD2<Float>, eye: SIMD3<Float>,
+                                                plane: Float, glowBand: Float) {
         let u = makeStageUniforms(aspect: aspect)
-        return (u.floorY, u.spacing, u.centerXZ, u.eye)
+        return (u.floorY, u.spacing, u.centerXZ, u.eye, u.plane, u.glowBand)
     }
 
     /// Render the current mesh + camera to an offscreen BGRA texture and return the

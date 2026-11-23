@@ -5,9 +5,22 @@
 // Two grids were drawn: the stage's floor grid (`stage_fragment`, 2% of the part BELOW the part, lines at world multiples of
 // extent/6) and, once gravity was set, the ground pass's line grid (just under the part, centred on the part, the same step):
 // two grids at two heights and two phases, which slid against each other as the view turned. Now there is ONE floor, drawn by
-// the stage alone: one height (the settled part's lowest point: it rests on it), one origin (the world's), square cells of a
-// round size (1, 2 or 5 × 10ⁿ mm, from the part's size, never the camera's), and every 5th line a major one, so each major
-// square is exactly 5 × 5 small squares.
+// the stage alone: one height (the settled part's lowest point: it rests on it), one origin (the world's), square cells.
+//
+// ★ his iPad notes 2026-11-23 (on release 15), item 4: "Can you make the grid an infinitely shrinking view of squares? So I want
+// to be able to see more and more squares the more I zoom in. And when I zoom out, it should hide the smallest of the squares."
+// The squares are now powers of ten millimetres (… 0.1, 1, 10, 100 mm …), each split into 10 × 10 of the next finer — graph
+// paper, the sizes a designer reads off a ruler (5 would give 25 mm and 125 mm squares nobody measures in). Which squares show
+// depends on how much floor one pixel covers there (the zoom, and the distance along the floor): a level fades in once its
+// squares are `firstShowsPx` pixels across, grows into a major line two decades later, and the finest fades out again as he
+// zooms out — smoothly, never a pop. Lines stay one pixel wide at every level. Still ONE grid of perfect squares from the
+// world's origin: every finer square lies exactly inside the coarser one, lined up at every angle.
+//
+// ★ item 1 (img 49): "At perfectly straight on, the background becomes this blue haze instead of showing a flat floor line and
+// keeping the same black background." A level view looks at the floor edge-on (the orthographic view's rays are all level):
+// the horizon glow, meant as a soft band near the horizon, covered the whole screen. Now the glow follows how much of the floor
+// is seen as a plane (`planeWeight`, from the view's elevation), and a level view draws the floor as one thin line on the same
+// black background.
 import simd
 
 struct StageFloor: Equatable {
@@ -17,31 +30,74 @@ struct StageFloor: Equatable {
     var centre: SIMD2<Float>
     /// The part's larger footprint side (mm).
     var extent: Float
-    /// The small squares' side (mm): 1, 2 or 5 × 10ⁿ.
-    var minor: Float
-    /// Small squares along a major square's side: a major line is exactly every 5th small line.
-    static let minorPerMajor: Float = 5
-    /// The major squares' side (mm).
-    var major: Float { minor * Self.minorPerMajor }
     /// Where the grid has faded out (as before: six part sizes from the centre).
     var fadeRadius: Float { extent * 6 }
 
+    /// ★ notes24 item 4: each square splits into `split` × `split` squares of the next finer level.
+    static let split: Float = 10
+    /// The size the levels count from: level n's squares are `unit` × 10ⁿ mm (1 mm, 10 mm, 0.1 mm …).
+    static let unit: Float = 1
+    /// A level starts to show once its squares are this many pixels across (finer: a mat of lines, hidden).
+    static let firstShowsPx: Float = 8
+    /// A line's strength: the finest level's (`minorAlpha`) and a major line's (`majorAlpha`), as release 14 drew them.
+    static let minorAlpha: Float = 0.16
+    static let majorAlpha: Float = 0.50
+
     init(y: Float, centre: SIMD2<Float>, extent: Float) {
         self.y = y; self.centre = centre; self.extent = extent
-        minor = Self.minorSpacing(extent: extent)
     }
 
-    /// The small squares' side for a part `extent` mm across: the largest of 1, 2, 5 × 10ⁿ mm that is at most a fifth of it
-    /// (so a major square is at most the part's size). A real size, and the same while the part's size moves a little.
-    static func minorSpacing(extent: Float) -> Float {
-        let t = Double(extent) / 5
-        guard t.isFinite, t > 0 else { return 1 }
-        let eps = 1e-9
-        var p = pow(10, floor(log10(t)))
-        if p * 10 <= t * (1 + eps) { p *= 10 }   // log10 rounding at an exact power of ten
-        if p > t * (1 + eps) { p /= 10 }
-        for m in [5.0, 2.0, 1.0] where m * p <= t * (1 + eps) { return Float(m * p) }
-        return Float(p)
+    /// A level's line strength by its rank: how many decades its squares are above the finest that can show (`ρ = n − ℓ`,
+    /// ℓ = log10(pixelMM × firstShowsPx / unit)). 0 below 0; up to the minor strength by 0.6 (its squares 4 × the first size);
+    /// up to a major line from 1 to 2 (ten to a hundred times it). Continuous in ρ, so the zoom never pops a line.
+    /// The shader's `levelStrength` is this.
+    static func strength(rank r: Float) -> Float {
+        minorAlpha * smooth(0, 0.6, r) + (majorAlpha - minorAlpha) * smooth(1, 2, r)
+    }
+
+    /// The three levels drawn where one pixel covers `pixelMM` mm of floor, finest first: their squares' side (mm) and their
+    /// lines' strength. A coarser level than these draws only lines these already draw (at the major strength).
+    static func levels(pixelMM: Float) -> [(sideMM: Float, strength: Float)] {
+        let l = log10f(Swift.max(pixelMM, 1e-12) * firstShowsPx / unit)
+        let n0 = l.rounded(.up)
+        let r0 = n0 - l
+        return (0..<3).map { k in (unit * powf(10, n0 + Float(k)), strength(rank: r0 + Float(k))) }
+    }
+
+    /// The line strength at the floor point `xzMM` where a pixel covers `pixelMM` mm (one pixel wide lines, anti-aliased as
+    /// the shader's `gridMask` does): the strongest of the levels drawn there. The CPU mirror of the shader, for the tests.
+    static func lineStrength(atMM xz: SIMD2<Double>, pixelMM: Float) -> Float {
+        var a: Float = 0
+        for lv in levels(pixelMM: pixelMM) {
+            let s = Double(lv.sideMM)
+            func mask(_ c: Double) -> Double {
+                let f = (c / s) - 0.5
+                let g = abs((f - f.rounded(.down)) - 0.5) / (Double(pixelMM) / s)
+                return 1 - Swift.min(g, 1)
+            }
+            a = Swift.max(a, lv.strength * Float(Swift.max(mask(xz.x), mask(xz.y))))
+        }
+        return a
+    }
+
+    /// ★ notes24 item 1: how much of the floor is seen as a plane, by the view's elevation (its sine, either side): 1 from
+    /// about 10° up or down, 0 within about 2° of level, where the floor is seen edge-on. The horizon glow is scaled by it;
+    /// the floor's edge-on line by what is left.
+    static func planeWeight(elevationSine e: Float) -> Float {
+        smooth(sinf(2 * .pi / 180), sinf(10 * .pi / 180), abs(e))
+    }
+    /// RED CONTROL (tests): the glow as before 11-23, whatever the elevation (the level view's blue haze).
+    nonisolated(unsafe) static var controlHazeAtLevel = false
+
+    /// The horizon glow's half width, in the ray's |y|: 0.14 through the lens; through the orthographic telephoto (whose rays
+    /// all lie within half a degree of the view's own) the same share of the picture, so it never covers the whole screen.
+    static func glowBand(drawFovY: Float, fovY: Float) -> Float {
+        0.14 * tanf(drawFovY * 0.5) / Swift.max(tanf(fovY * 0.5), 1e-6)
+    }
+
+    private static func smooth(_ a: Float, _ b: Float, _ x: Float) -> Float {
+        let t = Swift.min(Swift.max((x - a) / (b - a), 0), 1)
+        return t * t * (3 - 2 * t)
     }
 
     /// The floor under a part: its settled footprint box (`lo`/`hi`, world) for the centre and size, and its lowest point —
