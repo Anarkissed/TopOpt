@@ -35,7 +35,7 @@ Parts: 2040 Extrusion Stand (original, v2, v3, v4), Base, Pressing Plate Mount, 
 - Release run time, split into solve and the rest;
 - one slicer picture, same view every time, beside the previous stage's.
 
-Still owed in the "today" column (stage 0): the CAD-referenced surface numbers, slicer pictures, the strengthen route, and jobs for Stand v2 / v3 and WallMount.
+"Today" column: CAD-referenced numbers and the strengthen route are in ledger section L. Stand v2, Stand v3 and WallMount have no "today" row (maintainer, 2026-11-23: "Skip those parts"); they get rows from the first stage that runs them. Still owed: slicer pictures.
 
 ## What a stage report contains
 

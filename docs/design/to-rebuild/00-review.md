@@ -397,4 +397,6 @@ What this can and cannot claim:
 
 Base, Pressing Plate Mount and PillowBlock (Left) give no print file today (section D table: the part as drawn fails the strength check, so no version is returned), so they have no row here. Re-run 2026-11-23 on the Release build at 13c6a7fd with the same outcome: Pressing 335 s, Base 121 s, Pressing strengthen 325 s (as drawn 0.35, ceiling 0.40 against 1.5), no version.
 
-Still owed for the "today" table: slicer pictures, and jobs for Stand v2 / v3 and WallMount.
+Stand v2, Stand v3 and WallMount are left out of the "today" table by the maintainer ("Skip those parts", 2026-11-23); they are measured after the rebuild stages only.
+
+Still owed for the "today" table: slicer pictures.
