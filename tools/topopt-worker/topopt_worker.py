@@ -163,6 +163,16 @@ class Job:
         # Count of ACCEPTED variant meshes so far (handoff 124): the History pane on the
         # Mac shows a real outcome summary ("3 variants · 12m") rather than a placeholder.
         self.variants = 0
+        # ★ 362 11-23 (his notes: the window sat on "starting..." for a whole lattice-file job): the job's
+        # command (`mode`: run / lattice-file / organic-strengthen / ...) and its latest stage line from the
+        # CLI ("lattice-file: making the file" -> stage "making the file") with its time, so GET /jobs can
+        # say what a non-optimizer job is doing. And on a failure the engine's plain reason (`message`) and
+        # its `code` from the job's own report, so the iPad can show WHY in a pop-up.
+        self.mode = cmd[1] if isinstance(cmd, (list, tuple)) and len(cmd) > 1 else None
+        self.stage = None
+        self.stage_at = None
+        self.message = None
+        self.code = None
         # Timestamps (epoch seconds). created = submit; started = promoted to
         # running; finished = terminal.
         self.created_at = time.time()
@@ -180,7 +190,13 @@ class Job:
                 self.iter = event.get("iter")
             elif t == "variant" and event.get("accepted"):
                 self.variants += 1
+            elif t == "log" and self.mode and (event.get("line") or "").startswith(self.mode + ": "):
+                self.stage = event["line"][len(self.mode) + 2:].strip()
+                self.stage_at = time.time()
             elif t in ("done", "error", "cancelled"):
+                if t == "error":
+                    self.message = event.get("message")
+                    self.code = event.get("code")
                 self.done = True
                 self.state = t
                 if self.finished_at is None:
@@ -229,6 +245,11 @@ class Job:
             "rungs": self.rungs,
             "iter": self.iter,
             "variants": self.variants,
+            "mode": self.mode,
+            "stage": self.stage,
+            "stage_at": self.stage_at,
+            "message": self.message,
+            "code": self.code,
             "position": position,
             "created_at": self.created_at,
             "started_at": self.started_at,
@@ -602,10 +623,32 @@ def run_job_thread(job):
             job.emit({"type": "done", "returncode": 0, "artifacts": meshes})
         else:
             msg = "".join(stderr_buf).strip() or f"topopt-cli exited with code {rc}"
-            job.emit({"type": "error", "returncode": rc, "message": msg})
+            ev = {"type": "error", "returncode": rc, "message": msg}
+            # ★ 362 11-23: a refused lattice file says WHY in its own report (ok:false, code, why); carry that
+            # plain reason on the error (and so on the job record) instead of the raw stderr tail.
+            why, code = _report_reason(job.out_dir)
+            if why:
+                ev["message"] = why
+            if code:
+                ev["code"] = code
+            job.emit(ev)
     finally:
         if SCHED is not None:
             SCHED.on_finished(job)
+
+
+def _report_reason(out_dir):
+    """(why, code) from a failed job's own report, e.g. lattice_file.json {"ok": false, "code": ..., "why": ...};
+    (None, None) when there is none. Best-effort: a missing or unreadable report changes nothing."""
+    for name in ("lattice_file.json",):
+        try:
+            with open(os.path.join(out_dir, name)) as f:
+                doc = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if isinstance(doc, dict) and doc.get("ok") is False:
+            return doc.get("why"), doc.get("code")
+    return None, None
 
 
 def _signal_child(job, sig):
