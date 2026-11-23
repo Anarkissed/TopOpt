@@ -83,9 +83,11 @@ public final class LatticePrintFlow: ObservableObject {
 
     /// The button for this version: the normal one, "Making the print file" (its ring: the exact lay and the file's job
     /// together), or "Approved" · "Tap to export".
+    /// ★ his notes 11-23: `saved` — Approved worked out from the version's SAVED print file (AppModel.latticeResultApproved),
+    /// read only when this flow is not making one for it, so it survives a relaunch.
     func look(for id: UUID, normal: Look, layProgress: LatticeLayoutPreview.LayProgress?, fileRunning: Bool,
-              current: () -> LatticeLayoutPreview.LayInputs?) -> Look {
-        if isApproved(id, current: current) {
+              current: () -> LatticeLayoutPreview.LayInputs?, saved: () -> Bool = { false }) -> Look {
+        if isApproved(id, current: current) || (!isMaking(id) && !fileRunning && saved()) {
             return Look(title: LatticePrintFlowCopy.approved, subtitle: LatticePrintFlowCopy.approvedLine, state: .ready,
                         progress: nil, tap: .openExport, marker: "latticeApproved")
         }
@@ -125,6 +127,8 @@ struct LatticeRunButtonFlow: View {
     let layProgress: LatticeLayoutPreview.LayProgress?
     let fileRunning: Bool
     let current: () -> LatticeLayoutPreview.LayInputs?
+    /// ★ his notes 11-23: Approved from the version's saved print file (survives a relaunch).
+    var saved: () -> Bool = { false }
     let tap: (LatticePrintFlow.Tap) -> Void
 
     var body: some View {
@@ -135,7 +139,8 @@ struct LatticeRunButtonFlow: View {
 
     /// The flow's button; ★ his 11-22: made on the Mac, its words, then the check's.
     func look() -> LatticePrintFlow.Look {
-        var l = flow.look(for: projectID, normal: normal, layProgress: layProgress, fileRunning: fileRunning, current: current)
+        var l = flow.look(for: projectID, normal: normal, layProgress: layProgress, fileRunning: fileRunning, current: current,
+                          saved: saved)
         guard mac.isMaking(projectID), l.marker == "latticeMakingFile" else { return l }
         l.subtitle = mac.checking ? LatticeMacMakeCopy.checking : LatticeMacMakeCopy.making
         l.state = .running(l.subtitle)
