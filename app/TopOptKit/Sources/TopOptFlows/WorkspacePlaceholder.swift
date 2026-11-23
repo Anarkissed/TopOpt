@@ -6818,7 +6818,7 @@ public struct WorkspacePlaceholder: View {
             withAnimation(DS.Motion.emphasized) { bandChipsHidden.toggle() }
         } label: {
             HStack(spacing: DS.Space.s) {
-                Image(systemName: bandChipsHidden ? "eye" : "eye.slash")
+                Image(systemName: GroupViewState.eyeSymbol(hidden: bandChipsHidden))   // ★ notes25 icons: the eye shows the state, as the rows
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle((bandChipsHidden ? DS.Color.textTertiary : DS.Color.accent).color)
                 ZStack(alignment: .leading) {
@@ -7904,12 +7904,12 @@ public struct WorkspacePlaceholder: View {
                 viewModeButton("grid", label: "Outlines", on: surfaceWireframeOn) {   // ★ B2 (U4): never "Wireframe"
                     surfaceWireframeOn.toggle()
                 }
-                viewModeButton("square.stack.3d.up", label: "X-ray", on: surfaceXrayOn) {
+                viewModeButton(FlexibleMainViewToggles.xrayIcon, label: "X-ray", on: surfaceXrayOn) {
                     surfaceXrayOn.toggle()
                 }
                 // ★ B3: Topology's views, icon only — Forces, and the Design box while one is on.
                 if topologyViewUp, !editFaces.isEditing {   // ★ his 11-22: and in Lattice Setup's Topology view
-                    viewModeButton("arrow.down.to.line", label: "Forces", on: topoForcesShown) {
+                    viewModeButton("arrow.down", label: "Forces", on: topoForcesShown) {
                         topoForcesShown.toggle()
                     }
                     // ★ his 11-22: "something that hides all the keep clears" — beside Forces; on = hidden (a view: they still apply)
@@ -15079,7 +15079,7 @@ extension WorkspacePlaceholder {
                 gravityDraft = nil
                 gravitySnapLabel = nil
             } label: {
-                DSValueBox("\(gravityDirectionLabel) \u{00B7} Change", systemImage: "arrow.down")
+                DSValueBox("\(gravityDirectionLabel) \u{00B7} Change", systemImage: "arrow.down.to.line")
             }
             .buttonStyle(.plain)
         case .minimizePlastic:

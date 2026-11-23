@@ -1714,7 +1714,7 @@ public struct LatticePage: View {
                     Button {
                         project.lattice.groupDensities.removeValue(forKey: r.id)
                     } label: {
-                        Image(systemName: "arrow.uturn.backward")
+                        Image(systemName: "arrow.counterclockwise")   // ★ notes25 icons: Reset is one glyph
                             .font(.system(size: 11, weight: .semibold))
                     }
                     .buttonStyle(.plain)

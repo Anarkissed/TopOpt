@@ -328,7 +328,7 @@ public enum ResultsViewMode: String, CaseIterable, Sendable {
     var symbol: String {
         switch self {
         case .stress: return ""            // the colour wheel, drawn
-        case .xray: return "cube.transparent"
+        case .xray: return FlexibleMainViewToggles.xrayIcon   // ★ notes25 icons: one X-ray glyph app-wide
         case .loadPaths: return "point.topleft.down.to.point.bottomright.curvepath"
         case .bend: return "arrow.down.to.line"
         case .breakIt: return "bolt.fill"
@@ -557,7 +557,7 @@ struct ResultsCheckLine: View {
             let (sym, tint): (String, Color) = {
                 switch c.kind {
                 case .ok: return ("checkmark", DS.Color.okGreen.color)
-                case .info: return ("arrow.up", DS.Color.accent.color)
+                case .info: return ("info", DS.Color.accent.color)   // ★ notes25 icons: an "i" for information
                 case .warn: return ("exclamationmark", DS.Color.warning.color)
                 }
             }()

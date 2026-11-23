@@ -55,7 +55,7 @@ public struct LibraryRootView: View {
             case .flat:
                 HomeView(model: model)
                     .overlay(alignment: .bottom) {
-                        LibraryBanner(icon: "square.stack.3d.up", text: "Sort your copies into parts and versions",
+                        LibraryBanner(icon: "square.stack", text: "Sort your copies into parts and versions",
                                       button: "Review") { grouping = true }
                     }
             case let .unreadable(why):
@@ -284,7 +284,7 @@ struct LibraryPicture: View {
                     .padding(DS.Space.s).opacity(dim ? 0.32 : 1)
                     .background { if let drawnKey { CornerPairStyle.publish(drawnKey) } }
             } else {
-                Image(systemName: "cube.transparent").font(.system(size: 34, weight: .light))
+                Image(systemName: "cube").font(.system(size: 34, weight: .light))
                     .foregroundStyle(DS.Color.textPrimary.opacity(0.22).color)
             }
         }
@@ -834,7 +834,7 @@ struct LibraryPartCard: View {
                 Image(decorative: image, scale: 1).resizable().aspectRatio(contentMode: .fit).padding(12)
                     .background(CornerPairStyle.publish("libraryPartPicture-\(part.name)"))   // B1: hosted tests
             } else {
-                Image(systemName: "cube.transparent").font(.system(size: 34, weight: .light))
+                Image(systemName: "cube").font(.system(size: 34, weight: .light))
                     .foregroundStyle(DS.Color.textPrimary.opacity(0.22).color)
             }
         }
@@ -1433,7 +1433,7 @@ struct LibraryVersionCard: View {
         Button(action: details) { Label("Details", systemImage: "info.circle") }
         if !pending {
             Button { quickLook(nil) } label: { Label("Quick look", systemImage: "eye") }
-            if (v.summary?.count ?? 0) > 1 { Button(action: compareResults) { Label("Compare its results", systemImage: "rectangle.split.3x1") } }
+            if (v.summary?.count ?? 0) > 1 { Button(action: compareResults) { Label("Compare its results", systemImage: "rectangle.split.2x1") } }
             Button { LibraryExport.start(model: model, library: library, folder: v.folderID, result: library.shownResult(v)) } label: {
                 Label("Export…", systemImage: "square.and.arrow.up")
             }

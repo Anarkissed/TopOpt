@@ -208,7 +208,7 @@ struct FlexibleManualGroupRow: View {
             let own = model.settings.manual?.hasOwn(group: group.id) == true
             VStack(alignment: .leading, spacing: DS.Space.xs) {
                 HStack(spacing: DS.Space.xs) {
-                    Image(systemName: "square.grid.3x3").font(.system(size: 13)).foregroundStyle(.secondary)
+                    Image(systemName: "square.grid.3x3.fill").font(.system(size: 13)).foregroundStyle(.secondary)
                     Text(own ? FlexibleManualCopy.ownLattice : FlexibleManualCopy.sameAsPart)
                         .font(.system(size: 13)).foregroundStyle(.secondary)
                         .lineLimit(1).minimumScaleFactor(0.85)
