@@ -223,7 +223,14 @@ final class NumberPadNotes1122HostedTests: XCTestCase {
             let during = others(h, pr)
             for (k, f) in before {
                 guard let now = during[k] else { continue }
-                XCTAssertEqual(now.minX, f.minX, accuracy: 0.5, "\(name): ★ nothing else moved: \(k)")
+                // ★ RE-PINNED (release 16's whole suite): the sample's own line is centred and says its build — the engine's
+                // faster Draft (release 16) can finish the sample while the pad is up, and "Making the sample… 3 s" becomes its
+                // built caption (wider, the same centre). The line is held where it stood by its centre; the rest by their edges.
+                if k.hasSuffix("lattice-sample-caption") {
+                    XCTAssertEqual(now.midX, f.midX, accuracy: 0.5, "\(name): ★ nothing else moved: \(k)")
+                } else {
+                    XCTAssertEqual(now.minX, f.minX, accuracy: 0.5, "\(name): ★ nothing else moved: \(k)")
+                }
                 XCTAssertEqual(now.minY, f.minY, accuracy: 0.5, "\(name): ★ nothing else moved: \(k)")
                 XCTAssertEqual(now.height, f.height, accuracy: 0.5, "\(name): ★ nothing else shrank: \(k)")
             }

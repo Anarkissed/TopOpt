@@ -253,10 +253,10 @@ public final class AppModel: ObservableObject {
         backgroundTime: BackgroundTime? = nil,
         latticeJobInputsRoot: URL = LatticeJobInputs.defaultRoot
     ) {
-        self.backgroundTime = backgroundTime ?? SystemBackgroundTime()
-        self.latticeJobInputsRoot = latticeJobInputsRoot
         // ★ Before any bridge run: core's receipts name the core this app links (#358).
         CoreBuildIdentity.state()
+        self.backgroundTime = backgroundTime ?? SystemBackgroundTime()
+        self.latticeJobInputsRoot = latticeJobInputsRoot
         _ = AppSettings.shared   // ★ B5 (Q12): the app wears his accent from the first draw
         self.materialsPath = materialsPath
         self.rulesPath = rulesPath

@@ -371,8 +371,12 @@ final class VariantRetentionTests: XCTestCase {
                       "bar 4: Optimize asks before it retires results")
         XCTAssertFalse(body.contains("startRun("),
                        "bar 4: …and does not start one straight from the button")
+        // ★ RE-PINNED (release 16, his 11-23 notes): the next-version line (moveOnIfEdited) pushed the card past 400
+        // characters; the window is the function's own body now (to its closing brace at its indent)
         let req = try XCTUnwrap(ws.range(of: "private func requestRun"))
-        let reqBody = String(ws[req.lowerBound...].prefix(400))
+        let reqRest = ws[req.lowerBound...]
+        let reqBody = String(reqRest[..<(reqRest.range(of: "\n    }\n")?.upperBound ?? reqRest.endIndex)])
+        XCTAssertFalse(reqBody.contains("private func requestLatticeRun"), "the window is requestRun's body only")
         XCTAssertTrue(reqBody.contains("ResultsReplacementPrompt.forNewRun"))
     }
 
