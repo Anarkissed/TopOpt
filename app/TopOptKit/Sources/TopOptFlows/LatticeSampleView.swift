@@ -86,6 +86,13 @@ struct LatticeSampleView: View {
     let inputs: Inputs
     /// ★ his iPad notes 11-10 (img 6): the settings he has on that core's sample block can't show yet — said in one line.
     var notInSample: [String] = []
+    /// ★ his iPad notes 11-23 (img 3): the sides of this view the page covers (the panel, the top rows). The view fills the page
+    /// (its background edge to edge); the picture and its lines are drawn in what is left.
+    var visible = EdgeInsets()
+    /// RED CONTROL (LatticePageNotes1123Tests): the picture framed in the whole view.
+    @MainActor static var controlWholeView = false
+    /// The same sample with the page's covered sides (`visible`).
+    func visible(_ insets: EdgeInsets) -> LatticeSampleView { var v = self; v.visible = insets; return v }
 
     @StateObject private var camera = OrbitCameraModel()
     @State private var mesh: ViewerMesh?
@@ -130,6 +137,31 @@ struct LatticeSampleView: View {
     }
 
     var body: some View {
+        GeometryReader { g in
+            sample
+                .onAppear { frameRegion(g.size, visible) }
+                .onChange(of: g.size) { frameRegion($0, visible) }
+                .onChange(of: visible) { frameRegion(g.size, $0) }   // (the new insets: the closure's own may be the last draw's)
+        }
+    }
+
+    /// ★ his iPad notes 11-23: the picture in the part of the view the page leaves free.
+    private func frameRegion(_ size: CGSize, _ visible: EdgeInsets) {
+        guard !Self.controlWholeView, size.width > 1, size.height > 1 else {
+            camera.setFrameRegion(nil)
+            if FlexibleSaid.recording { Self.recordedRegion = nil }
+            return
+        }
+        let x0 = Swift.min(0.9, Swift.max(0, visible.leading / size.width)), y0 = Swift.min(0.9, Swift.max(0, visible.top / size.height))
+        let x1 = Swift.max(x0 + 0.05, 1 - visible.trailing / size.width), y1 = Swift.max(y0 + 0.05, 1 - visible.bottom / size.height)
+        let r: SIMD4<Float>? = x0 == 0 && y0 == 0 && x1 >= 1 && y1 >= 1 ? nil : SIMD4(Float(x0), Float(y0), Float(x1), Float(y1))
+        camera.setFrameRegion(r)
+        if FlexibleSaid.recording { Self.recordedRegion = r }
+    }
+    /// Test hook (FlexibleSaid.recording): the region the last sample's picture was drawn in.
+    nonisolated(unsafe) static var recordedRegion: SIMD4<Float>?
+
+    private var sample: some View {
         ZStack(alignment: .bottom) {
             DS.Color.background.color
             if let mesh {
@@ -157,6 +189,7 @@ struct LatticeSampleView: View {
                     .latticeID("lattice-sample-caption")
             }
             .padding(.bottom, DS.Space.l)
+            .padding(.leading, visible.leading).padding(.trailing, visible.trailing).padding(.bottom, visible.bottom)   // ★ 11-23
         }
         .task(id: inputs) { await build() }
         .onChange(of: caption) { c in if FlexibleSaid.recording { Self.recordedCaptions.append(c) } }
