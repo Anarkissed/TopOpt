@@ -497,7 +497,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         var b = r.bars
         b.dimmed = false
         if !solidWanted { b.solid = nil }
-        bars = b; laid = r.laid; timing = r.timing
+        bars = b; laid = r.laid; timing = Self.inStrands(r.timing, r.numbers)   // ★ notes25
         shownWhere = (b.token, MapWhere(path: r.inputs.path, settings: r.inputs.settings, stressKey: r.inputs.stress.key))   // ★ 11-22
         organicQuality = r.quality; organicNumbers = r.numbers; problem = r.problem; notes = r.notes
         organicLaidGroups = r.quality == .exact ? r.groups : nil; organicRefusals = []
@@ -903,7 +903,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         laid = l
         timing = Timing(openMS: openMS, readMS: r.layout.msRead, cellsMS: r.msTrace, barsMS: r.layout.msBars, bars: seg.count)
         timing?.organicLine = Self.organicTimeLine(mode: grown ? .grown : .traced, draft: r.quality == .draft, ms: r.ms,
-                                                   struts: seg.count)
+                                                   strands: r.strands)   // ★ notes25: strands (the print file's count too)
         organicQuality = r.quality
         organicNumbers = OrganicNumbers(strands: r.strands, segments: seg.count, ms: r.ms, draft: r.quality == .draft,
                                         limitsMeasured: organicLimits?.limits?.measured == true)
@@ -934,11 +934,23 @@ public final class LatticeLayoutPreview: ObservableObject {
         if more, !Task.isCancelled { try await layOrganic(session, path: path, s, draft: false, afterDraft: true) }
     }
 
-    /// The Organic lay's line: "Organic Grown · Exact · laid in 3.8 s · 63,670 struts".
-    static func organicTimeLine(mode: LatticeOrganicLook.Mode, draft: Bool, ms: Double, struts: Int) -> String {
-        let n = NumberFormatter.localizedString(from: NSNumber(value: struts), number: .decimal)
-        return String(format: "Organic %@ \u{00B7} %@ \u{00B7} laid in %.1f s \u{00B7} %@ struts", mode.title,
+    /// The Organic lay's line: "Organic Grown · Exact · laid in 3.8 s · 12,605 strands".
+    /// ★ notes25 (362's numbers investigation): it counted the drawn tube pieces as "struts" — a third meaning of the word (the
+    /// print file counts the engine's bars, the strength check its frame struts). It counts STRANDS now: the same number on the
+    /// iPad and in the print file (the Printing tab's "Strands").
+    static func organicTimeLine(mode: LatticeOrganicLook.Mode, draft: Bool, ms: Double, strands: Int) -> String {
+        let n = NumberFormatter.localizedString(from: NSNumber(value: strands), number: .decimal)
+        return String(format: "Organic %@ \u{00B7} %@ \u{00B7} laid in %.1f s \u{00B7} %@ strands", mode.title,
                       draft ? "Draft" : "Exact", ms / 1000, n)
+    }
+
+    /// ★ notes25: a lattice kept from before says strands too (its line was saved saying "struts").
+    static func inStrands(_ t: Timing?, _ n: OrganicNumbers?) -> Timing? {
+        guard var t, let line = t.organicLine, line.hasSuffix(" struts"), let n,
+              let cut = line.range(of: " \u{00B7} ", options: .backwards) else { return t }
+        t.organicLine = String(line[..<cut.upperBound])
+            + NumberFormatter.localizedString(from: NSNumber(value: n.strands), number: .decimal) + " strands"
+        return t
     }
 
     // MARK: ★ his ask 11-22: "prints the time it took and what changes occurred for each generation" (GenerationTimingLog)

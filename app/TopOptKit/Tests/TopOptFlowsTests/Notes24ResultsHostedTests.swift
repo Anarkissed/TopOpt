@@ -70,10 +70,12 @@ final class Notes24ResultsHostedTests: XCTestCase {
 
     /// ★ Results up in the LATTICE stage: its Export on screen, the Lattice stage's capsule (Setup │ Lattice) over it, never
     /// Topology's (Setup │ Results).
+    /// ★ RE-PINNED (notes25, his 11-23 Img 4: the Results tab is the Lattice stage's own, next to Setup and Lattice): the Lattice
+    /// stage's capsule is Setup │ Lattice │ Results — a "Results" tab is there, with its "Lattice" (Topology's has none).
     private func assertResultsInTheLatticeStage(_ h: AppBuildHost, _ what: String) {
         XCTAssertNotNil(waitFor(h, "resultsExport"), "★ \(what): Results is up")
         XCTAssertNotNil(waitFor(h, "capsuleLattice", seconds: 3), "★ \(what): in the Lattice stage (its capsule over Results)")
-        XCTAssertNil(h.frames.all["capsuleResults"], "★ \(what): never on Topology")
+        XCTAssertNotNil(h.frames.all["capsuleResults"], "★ \(what): the Lattice stage's own Results tab")
     }
 
     /// ★ "The result should NOT be greyed out on the version screen" / "accessible from the Versions page just by tapping onto
@@ -99,6 +101,7 @@ final class Notes24ResultsHostedTests: XCTestCase {
             h1.click(CGPoint(x: m1.midX, y: m1.midY), settle: 2)
             XCTAssertEqual(app1.project?.id, f1["1"])
             XCTAssertNotNil(waitFor(h1, "capsuleResults"), "\(name): RED CONTROL: a Topology result opens on Topology")
+            XCTAssertNil(h1.frames.all["capsuleLattice"], "\(name): RED CONTROL: Topology's capsule (★ notes25)")
         }
         let src = try FlexibleSource.code("LibraryViews.swift")
         XCTAssertTrue(src.contains("LibraryPicture(image: parentPicture, dim: false)"), "★ a draft's card is never greyed either")
@@ -108,6 +111,8 @@ final class Notes24ResultsHostedTests: XCTestCase {
     /// goes back to editing (Setup), and there ⌃ always has "Results", which opens it again — never a new run. The Lattice
     /// button reads Approved from the SAVED print file (this launch never made it). RED CONTROL: a print file that failed its
     /// checks is not Approved.
+    /// ★ RE-PINNED (notes25, his follow-up: "when adding the Results tab to lattice, remove it from the ^ menu"): the ⌃ has no
+    /// "Results" any more; the capsule's Results tab opens it again — never a new run.
     func testTheLatticeStagesArrowOpensResultsAndTheButtonIsApprovedFromTheSavedFile() throws {
         for (name, size) in Self.sizes {
             for passes in [true, false] {
@@ -127,9 +132,13 @@ final class Notes24ResultsHostedTests: XCTestCase {
                     continue
                 }
                 let run = try XCTUnwrap(app.project?.run)
-                let offered = try h.pickFromMenu("latticeSplitMore", LatticeResultsMenuCopy.title, what: "\(name): ⌃")
-                XCTAssertTrue(offered.first?.hasPrefix(LatticeResultsMenuCopy.title) ?? false, "\(name): ★ Results first: \(offered)")
-                XCTAssertNotNil(waitFor(h, "resultsExport"), "\(name): ★ ⌃ Results opens it")
+                let offered = try h.pickFromMenu("latticeSplitMore", "no such item", what: "\(name): ⌃")
+                XCTAssertFalse(offered.isEmpty, "\(name): the ⌃ was read")
+                XCTAssertFalse(offered.contains { $0.hasPrefix(LatticeResultsTab.title) }, "\(name): ★ no Results row: \(offered)")
+                // (this lookalike's gravity is not set, so the stage's capsule waits for it: Approved's tap opens it here; the
+                // capsule's Results tab is Notes25FlowHostedTests', on a part with its gravity)
+                try h.tap("latticeButton", "\(name): ★ Approved's tap", settle: 1.5)
+                XCTAssertNotNil(waitFor(h, "resultsExport"), "\(name): ★ it opens the result again")
                 XCTAssertEqual(run.phase, .idle, "\(name): ★ never a new run")
                 XCTAssertEqual(app.project?.id, f["2"])
             }

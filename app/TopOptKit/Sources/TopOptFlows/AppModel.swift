@@ -1239,7 +1239,7 @@ public final class AppModel: ObservableObject {
                !recentProjects[idx].optimized {
                 recentProjects[idx].optimized = true
             }
-            writeResults(outcome, id: project.id)   // ★ notes 11-23: the same write, inside background time (AppModel+Results)
+            writeResults(outcome, other: project.run.otherOutcome, id: project.id)   // ★ notes 11-23: the same write, inside background time (AppModel+Results) · ★ notes25: the other stage's beside it
             // The RE-LATTICE artifacts, beside the results they describe (task
             // 2026-08-02-lattice-a-variant): the exact job document submitted and
             // that run's design.bin. Written together, cleared together — a
@@ -1260,10 +1260,14 @@ public final class AppModel: ObservableObject {
 
     /// ★ his notes 11-23: a result's file, encoded and written off the main thread inside background time that ends when it
     /// has landed (`landed` then); `persist` and a finished run's save (AppModel+Results) both write through it.
-    func writeResults(_ outcome: OptimizeOutcome, id resultsID: UUID, landed: @escaping () -> Void = {}) {
+    /// ★ notes25: `other` — the version's result of the other stage (RunModel.otherOutcome), written beside it in the same
+    /// background time, or its file removed when there is none.
+    func writeResults(_ outcome: OptimizeOutcome, other: OptimizeOutcome? = nil, id resultsID: UUID,
+                      landed: @escaping () -> Void = {}) {
         let token = backgroundTime.begin("app.topopt.save-result")
         let dto = OutcomeCodec.dto(from: outcome)
-        let url = store.resultsURL(id: resultsID)
+        let otherDTO = other.map(OutcomeCodec.dto(from:))
+        let url = store.resultsURL(id: resultsID), otherURL = store.otherResultsURL(id: resultsID)
         let resultsStore = store
         Self.resultsQueue.async { [weak self] in
             defer { DispatchQueue.main.async { landed(); self?.backgroundTime.end(token) } }
@@ -1272,6 +1276,11 @@ public final class AppModel: ObservableObject {
             guard resultsStore.holdsProject(id: resultsID),
                   let data = try? OutcomeCodec.encode(dto) else { return }
             try? data.write(to: url, options: .atomic)
+            if let otherDTO {
+                if let more = try? OutcomeCodec.encode(otherDTO) { try? more.write(to: otherURL, options: .atomic) }
+            } else {
+                try? FileManager.default.removeItem(at: otherURL)
+            }
         }
     }
 
@@ -1294,12 +1303,14 @@ public final class AppModel: ObservableObject {
         // off-main and drop them into the idle run so results reopen instantly.
         if snap.optimized == true {
             resultRanWith[snap.id] = snap   // ★ notes 11-23: what its saved result ran with (the Lattice button's Approved)
-            let url = store.resultsURL(id: snap.id)
+            let url = store.resultsURL(id: snap.id), otherURL = store.otherResultsURL(id: snap.id)   // ★ notes25
             let artifacts = store.loadRelatticeArtifacts(id: snap.id)
             Self.resultsQueue.async {
                 guard let data = try? Data(contentsOf: url),
                       let outcome = try? OutcomeCodec.decode(data) else { return }
+                let other = (try? Data(contentsOf: otherURL)).flatMap { try? OutcomeCodec.decode($0) }   // ★ notes25: the other stage's
                 DispatchQueue.main.async {
+                    if let other { pm.run.restoreOtherOutcome(other) }   // ★ notes25 (first: one settled look as it lands)
                     pm.run.restoreOutcome(outcome)
                     // Restored together with the results, so a reopened project
                     // can lattice its variants exactly as the live one could —

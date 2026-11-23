@@ -941,7 +941,42 @@ public final class RunModel: ObservableObject {
     /// The outcome the results screen consumes. Updated INCREMENTALLY as variants
     /// stream in (progressive results), then replaced by the authoritative final
     /// outcome when the run resolves. `@Published` so the results screen grows live.
-    @Published public private(set) var outcome: OptimizeOutcome?
+    @Published public private(set) var outcome: OptimizeOutcome? {
+        didSet { outcomeIsPrintFile = LatticeSavedResult.isPrintFile(outcome) }   // ★ notes25: read once, not on every look
+    }
+
+    /// ★ notes25 (his iPad notes 11-23, Img 4/5: "The results tab should ONLY be in the Lattice stage so that I can ALSO run TO
+    /// results and have *them* be in the Topology stage - keeping both in the same version if I wanted to"): the version's
+    /// result of the OTHER stage — a print file's (the Lattice stage's) while `outcome` is a Topology run's, or a Topology
+    /// run's while `outcome` is a print file's. A run of one stage never retires the other's: as it starts, the result of its
+    /// own stage comes forward into `outcome` (AJ1 holds it as before) and the other stage's waits here, with its retention
+    /// pair; a run that produced nothing puts them back exactly as they were. `outcome` stays the LAST run's (results.plist);
+    /// this one is saved beside it (ProjectStore.otherResultsURL).
+    @Published public private(set) var otherOutcome: OptimizeOutcome? {
+        didSet { otherIsPrintFile = LatticeSavedResult.isPrintFile(otherOutcome) }
+    }
+    /// `outcome` is a print file's (the Lattice stage's), read once as it is set.
+    public private(set) var outcomeIsPrintFile = false
+    private var otherIsPrintFile = false
+    /// The other stage's result's retention pair (a Topology run's; a print file reports none).
+    @Published public private(set) var otherArtifacts: RelatticeArtifacts?
+    /// The run in flight moved the two at its start (undone when it produced nothing of its own).
+    private var movedAsideAtStart = false
+
+    /// ★ notes25: the result a stage shows — the Lattice stage a print file's (`LatticeSavedResult.isPrintFile`), Topology
+    /// every other (a Topology run's), whichever of the two places holds it.
+    public func outcome(lattice: Bool) -> OptimizeOutcome? {
+        if let o = outcome, outcomeIsPrintFile == lattice { return o }
+        if let o = otherOutcome, otherIsPrintFile == lattice { return o }
+        return nil
+    }
+
+    /// ★ notes25: the other stage's result read back from its version's folder beside `outcome` (persist-c), with its pair.
+    public func restoreOtherOutcome(_ restored: OptimizeOutcome) {
+        guard phase == .idle, otherOutcome == nil else { return }
+        otherOutcome = restored
+    }
+
     /// True while more variants may still arrive (the optimize is running behind an
     /// already-visible results screen). Drives an "optimizing more…" indicator.
     @Published public private(set) var isStreaming = false
@@ -1031,6 +1066,8 @@ public final class RunModel: ObservableObject {
     /// Reinstate a pair loaded from disk beside restored results (persist-c).
     public func restoreArtifacts(_ artifacts: RelatticeArtifacts?) {
         guard phase == .idle else { return }
+        // ★ notes25: the pair is a Topology run's — beside the other stage's result when that one is the Topology run's
+        if outcome != nil, outcomeIsPrintFile, otherOutcome != nil { otherArtifacts = artifacts; return }
         retainedArtifacts = artifacts
     }
 
@@ -1324,6 +1361,8 @@ public final class RunModel: ObservableObject {
         failure = nil
         failureShowsOnButton = false   // ★ B1 (O1)
         canKeepWaiting = false
+        // ★ notes25: the other stage's result steps aside (never retired by this run); this run's own stage's comes forward
+        moveAsideTheOtherStage(lattice: request.jobMode == LatticeFileButton.jobMode)
         // AJ1: HOLD the finished run's variants rather than dropping them. `outcome`
         // still has to be cleared (streamed variants append to it), but a run that
         // ends up producing nothing puts these back — see `preservedOutcome`.
@@ -1537,6 +1576,7 @@ public final class RunModel: ObservableObject {
     /// did. No-op when this run produced its own outcome: THAT replacement is the
     /// user's own Optimize, and it is the only thing allowed to retire a finished run.
     private func restorePreservedOutcome() {
+        defer { putBackTheOtherStageIfNothingOwn() }   // ★ notes25
         let kept = preservedOutcome, keptArtifacts = preservedArtifacts
         preservedOutcome = nil
         preservedArtifacts = nil
@@ -1545,6 +1585,26 @@ public final class RunModel: ObservableObject {
         retainedArtifacts = keptArtifacts
         restoredPreviousResults = true
         diag("a run produced no variants — the previous run's \(kept.variants.count) variant(s) are kept")
+    }
+
+    /// ★ notes25: as a run starts, the result of ITS stage is the one in `outcome` (held by AJ1 as before) and the other
+    /// stage's waits in `otherOutcome`: a Lattice button's print file run (`lattice`) leaves a Topology result standing, and an
+    /// Optimize leaves a print file's.
+    private func moveAsideTheOtherStage(lattice: Bool) {
+        let here = outcome.map { _ in outcomeIsPrintFile }, there = otherOutcome.map { _ in otherIsPrintFile }
+        movedAsideAtStart = here == !lattice || there == lattice
+        guard movedAsideAtStart else { return }
+        swap(&outcome, &otherOutcome)
+        swap(&retainedArtifacts, &otherArtifacts)
+    }
+
+    /// ★ notes25: a run that produced nothing of its own leaves both results exactly as they were before it started.
+    private func putBackTheOtherStageIfNothingOwn() {
+        guard movedAsideAtStart else { return }
+        movedAsideAtStart = false
+        guard outcome == nil || restoredPreviousResults else { return }
+        swap(&outcome, &otherOutcome)
+        swap(&retainedArtifacts, &otherArtifacts)
     }
 
     /// A run has just resolved WITH results of its own: its retention pair (if the
@@ -1567,6 +1627,9 @@ public final class RunModel: ObservableObject {
         failure = nil
         canKeepWaiting = false
         outcome = nil
+        otherOutcome = nil   // ★ notes25
+        otherArtifacts = nil
+        movedAsideAtStart = false
         preservedOutcome = nil
         preservedArtifacts = nil
         pendingArtifacts = nil

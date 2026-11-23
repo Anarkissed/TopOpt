@@ -55,7 +55,7 @@ extension AppModel {
             recentProjects[i].optimized = true
         }
         library.resultsSaved(folder: pm.id, snapshot: snapshot)   // its card reads its own result, never greyed
-        writeResults(outcome, id: pm.id) { [weak self] in
+        writeResults(outcome, other: pm.run.otherOutcome, id: pm.id) { [weak self] in   // ★ notes25: the other stage's beside it
             landed()
             guard let self else { return }
             // the Library's numbers and picture for it — only with the app in front (its mesh is big)
