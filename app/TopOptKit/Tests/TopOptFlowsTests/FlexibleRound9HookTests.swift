@@ -60,7 +60,9 @@ final class FlexibleRound9HookTests: XCTestCase {
         Hook(id: "H51-menu", file: home, pin: "            Button { onDuplicate() } label: { Label(\"Duplicate\", systemImage: \"plus.square.on.square\") }   // Flexible (PR #362) H51", gate: nil),
         Hook(id: "H51-call", file: home, pin: "                                          onDuplicate: { _ = model.duplicateProject(id: proj.id) })   // Flexible (PR #362) H51", gate: nil),
         Hook(id: "H52", file: app, pin: "    @discardableResult public func duplicateProject(id: UUID) -> RecentProject? {   // Flexible (PR #362) H52", gate: nil),
-        Hook(id: "H53", file: root, pin: "                        .id(project.id)   // Flexible (PR #362) H53", gate: nil),
+        // ★ RE-PINNED (362, release 16: builder B keyed the workspace by the live project itself, so a version moving to its
+        // next number keeps the page; a different project is still a different object: a fresh workspace, H53's rule)
+        Hook(id: "H53", file: root, pin: "                        .id(ObjectIdentifier(project))   // Flexible (PR #362) H53", gate: nil),
     ]
 
     static func source(_ file: String) throws -> String {

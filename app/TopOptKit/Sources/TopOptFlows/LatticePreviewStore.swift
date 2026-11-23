@@ -123,10 +123,17 @@ enum LatticePreviewStore {
     /// A test's count: lattices shown from a version's folder.
     nonisolated(unsafe) static var restoredFromDisk = 0
 
-    /// The version's folder the model at `path` is in (the store's copy, beside its project.json); nil for any other file.
+    /// Folders (and everything under them) this store never writes into or reads from: inputs kept as they are (the tests'
+    /// frozen projects, opened in place).
+    nonisolated(unsafe) static var readOnlyFolders: Set<String> = []
+
+    /// The version's folder the model at `path` is in (the store's copy, beside its project.json); nil for any other file, and
+    /// for one under a read-only folder.
     static func folder(forModelPath path: String) -> URL? {
         guard !path.isEmpty else { return nil }
         let dir = URL(fileURLWithPath: path).deletingLastPathComponent()
+        let p = dir.standardizedFileURL.path
+        if readOnlyFolders.contains(where: { p == $0 || p.hasPrefix($0 + "/") }) { return nil }
         return FileManager.default.fileExists(atPath: dir.appendingPathComponent("project.json").path) ? dir : nil
     }
 

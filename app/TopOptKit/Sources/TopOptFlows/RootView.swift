@@ -27,7 +27,7 @@ public struct RootView: View {
                         // Flexible (PR #362) H53: a project switch (Save as new project) builds a fresh workspace — its state and
                         // onAppear belong to the copy. ★ his iPad notes 11-23: keyed by the live project itself, so the version
                         // moving to its next number (VersionMoves.swift) keeps the page exactly as it is
-                        .id(ObjectIdentifier(project))
+                        .id(ObjectIdentifier(project))   // Flexible (PR #362) H53
                 } else {
                     HomeView(model: model)   // no active project — shouldn't happen
                 }
@@ -99,11 +99,9 @@ public struct RootView: View {
             if newPhase != .active { model.persistCurrentProject() }
             model.sceneChanged(active: newPhase == .active)   // ★ his notes 11-23: Results never mount behind the app
         }
-        // ★ his notes 11-23: a run's notification tapped (RunNotificationRouter, set up as the app starts) opens its result
-        // (a @Published says it before it is set: the route is taken on the next turn, once it is there)
-        .onReceive(RunNotificationRouter.shared.$pending) { r in
-            if r != nil { DispatchQueue.main.async { model.openTappedResult() } }
-        }
+        // ★ his notes 11-23: a run's notification tapped (RunNotificationRouter, set up as the app starts) opens its result —
+        // in THIS screen's app (the one that attached last)
+        .onAppear { RunNotificationRouter.shared.attach(model) }
         // The design is a dark-glass system: pin the scheme so default-coloured text
         // stays light and `Material` backings render dark, regardless of the device's
         // light/dark setting (otherwise labels + glass go unreadable in light mode).

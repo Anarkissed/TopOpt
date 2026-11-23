@@ -150,6 +150,9 @@ final class Notes24ResultsHostedTests: XCTestCase {
             assertResultsInTheLatticeStage(h, "\(name): the tap")
             XCTAssertNil(h.frames.all["resultOpeningCover"], "\(name): the cover is gone")
             XCTAssertNil(RunNotificationRouter.shared.pending, "taken")
+            // (362, release 16: this size's app closed before the next one's — two RootViews alive at once both hear the one
+            // router, and the first, whose store lacks the next app's version, took its tap)
+            h.window.orderOut(nil); h.window.contentView = nil
         }
     }
 

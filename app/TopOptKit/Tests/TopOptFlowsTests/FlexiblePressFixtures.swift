@@ -219,8 +219,12 @@ enum FlexiblePressFixtures {
     /// The S0 projects frozen beside the stage-job hashes (s0_frozen/README.txt): his7/ and a1/, with
     /// SHA256SUMS. The A1 store's Flexible projects are restored from HERE, never from the simulator.
     nonisolated static var frozenDir: URL {
-        FlexibleHisProject.repoRoot.appendingPathComponent(
+        let d = FlexibleHisProject.repoRoot.appendingPathComponent(
             "docs/handoffs/evidence/2026-09-29-flexible-screens/angled_presses/s0_frozen", isDirectory: true)
+        // ★ notes24: frozen inputs stay as they are — the preview store (a version's last lattice and stress check) never
+        // writes beside a frozen project opened in place
+        LatticePreviewStore.readOnlyFolders.insert(d.standardizedFileURL.path)
+        return d
     }
 
     /// The A1 store's project n (1…4): A1000001-0000-4000-8000-00000000000n.

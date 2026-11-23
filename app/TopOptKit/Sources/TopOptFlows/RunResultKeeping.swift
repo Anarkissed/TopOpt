@@ -106,6 +106,23 @@ public final class RunNotificationRouter: NSObject {
 
     /// The route a tap asked for, until the app takes it.
     @Published public private(set) var pending: RunResultRoute?
+    /// The app screen a tap goes to: the one that attached last (RootView, on appear). One in the field; never every listener
+    /// (a screen still alive from before would take a tap meant for another app's version).
+    private weak var app: AppModel?
+
+    /// RootView's model, as its screen appears: a tap goes to it (one already waiting, at once).
+    @MainActor public func attach(_ model: AppModel) {
+        app = model
+        if pending != nil { deliver() }
+    }
+
+    private func deliver() {
+        // (on the next turn: `pending` is set by then)
+        Task { @MainActor [weak self] in
+            guard let self, let app = self.app else { return }
+            app.openTappedResult(self)
+        }
+    }
 
     /// Set as the notification centre's delegate (once, as the app starts — a tap that launched the app arrives through it).
     public static func install() {
@@ -117,7 +134,7 @@ public final class RunNotificationRouter: NSObject {
     /// A tap on a notification carrying `userInfo` (the delegate's, and the tests').
     public func tapped(userInfo: [AnyHashable: Any]) {
         guard let r = RunResultRoute(userInfo: userInfo) else { return }
-        let post = { self.pending = r }
+        let post = { self.pending = r; self.deliver() }
         if Thread.isMainThread { post() } else { DispatchQueue.main.async(execute: post) }
     }
 
