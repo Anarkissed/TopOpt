@@ -407,6 +407,23 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         }
     }
 
+    /// ★ his 11-23 ("start an animation by removing the walls ... and THEN starting the growing animation"): the same map for
+    /// `s` BEFORE its lay, when every lattice region is Organic (a woven region is open whatever is laid in it); the session's
+    /// domain for `s` is made now and the lay keeps it. nil when a region needs the laid cells (a cube lattice): the map then
+    /// comes after the lay, as before. LatticeLayoutBridge.hpp, lattice_layout_grid_ahead.
+    public func gridAhead(_ s: Settings, origin: SIMD3<Float>, voxel: Float, dims: SIMD3<Int32>) async throws
+        -> (rg: [Int8], ms: Double)? {
+        let sid = id
+        let input = convert(s)
+        return try await worker.run {
+            var err = topoptbridge.BridgeError()
+            let r = topoptbridge.lattice_layout_grid_ahead(sid, input, origin.x, origin.y, origin.z, voxel, dims.x, dims.y,
+                                                           dims.z, &err)
+            if !err.ok { throw TopOptError(message: String(err.message)) }
+            return r.supported ? (Array(r.grid.rg), r.grid.ms) : nil
+        }
+    }
+
     /// The stress result a layout grades by (core's DemandField): von Mises MPa, x fastest, on a grid whose LOW CORNER is
     /// `origin`. Kept by the session until set again (one pointer between lays: core keeps the part's own reference by
     /// it), so set it once per field, never per lay. nil clears it (no stress yet).

@@ -1753,6 +1753,10 @@ class Session {
   // The domain the last lay() was laid in: null before the first, REPLACED when a "where" setting changes. Read it after a
   // lay() and never hold it across the next one (362's bridge, the 4th call: a batch of points -> lattice / rim / solid).
   const Domain* domain() const { return domain_.get(); }
+  // His 11-23 (the walls taken away first, then the vines grow): the domain for these settings' "where", made now, as the
+  // next lay() would make it (and keeps it: the same "where"), so its map can be read before that lay. Changes nothing the
+  // lay then does.
+  void prepare_domain(const Settings& settings) { ready_domain(settings); }
 
  private:
   // O16: what lay_organic adds with Finish Skin on: per weave region, the net skin's reach.
