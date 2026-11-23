@@ -1794,6 +1794,12 @@ class Session {
   std::string where_;                  // the "where" settings the kept domain was made for
   std::unique_ptr<Domain> domain_;
   GrowthTap* tap_ = nullptr;                  // his 11-22: watch it grow
+  // His 11-22 item 2 (redo only what a change affects): each weave region's grown or traced strands and what the lay
+  // reads from that step, kept under a key of everything the step reads (organic.cpp, strand_key); a new domain clears
+  // it. At most kStrandCacheMax entries (the oldest goes). Opaque here: defined in organic.cpp.
+  struct StrandCache;
+  std::shared_ptr<StrandCache> strand_cache_;
+  std::uint64_t domain_epoch_ = 0;            // counts the domains made (part of every key)
   std::unique_ptr<Domain> domain_no_chips_;   // D23: the domain with the protect_chip entries left out (null: none)
   std::vector<int> chip_ids_;
   Layout last_cells_;                         // D23: the last lay()'s regions (their own cells), nothing else

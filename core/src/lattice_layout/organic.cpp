@@ -1233,6 +1233,92 @@ Outcome::Tight tight_of(const Bars& bars, const std::vector<int>& weave, double 
 }
 }  // namespace
 
+// ── his 11-22 item 2: the strands kept per weave region ─────────────────────────────────────────────────────────────
+namespace {
+struct KeyBytes {
+  std::string b;
+  template <class T> void pod(const T& v) { b.append(reinterpret_cast<const char*>(&v), sizeof v); }
+  void d(double v) { v = v + 0.0; pod(v); }   // -0 is 0
+  void v3(const Vec3& p) { d(p.x); d(p.y); d(p.z); }
+};
+std::uint64_t field_hash(const TensorField& f) {
+  std::uint64_t h = 1469598103934665603ull;
+  const auto mix = [&](const void* p, std::size_t n) {
+    const unsigned char* c = static_cast<const unsigned char*>(p);
+    for (std::size_t i = 0; i < n; ++i) h = (h ^ c[i]) * 1099511628211ull;
+  };
+  mix(&f.origin.x, sizeof(double)); mix(&f.origin.y, sizeof(double)); mix(&f.origin.z, sizeof(double));
+  mix(&f.spacing, sizeof f.spacing); mix(&f.nx, sizeof f.nx); mix(&f.ny, sizeof f.ny); mix(&f.nz, sizeof f.nz);
+  if (!f.voigt.empty()) mix(f.voigt.data(), f.voigt.size() * sizeof(double));
+  return h;
+}
+// EVERY field of the ask that is data (print_check, a hook the finish runs, is not: the strands never read it).
+// ★ A field added to OrganicAsk must be added here, or a change to it would read stale strands.
+std::string strand_key(std::uint64_t epoch, std::uint64_t field, int region, const std::vector<int>& pool,
+                       const OrganicAsk& a) {
+  KeyBytes k;
+  k.pod(epoch); k.pod(field); k.pod(region);
+  k.pod(pool.size()); for (int r : pool) k.pod(r);
+  k.v3(a.build_dir);
+  for (double v : {a.spacing_mm, a.width_mm, a.spacing_min_mm, a.spacing_max_mm, a.spacing_exponent, a.reference_mpa,
+                   a.percentile, a.layer_mm, a.tie_swirl, a.seed_stride, a.foot_gap, a.void_ratio, a.wall_bare_mm,
+                   a.wall_reach, a.wall_gap, a.top_run, a.root_run, a.run_gap, a.run_follow, a.run_pull, a.run_seek,
+                   a.run_min, a.root_gap, a.width_heavy_mm, a.bed_floor_mm, a.shape_reach, a.part_reach_mm,
+                   a.part_support_mm, a.wall_gap_heavy, a.cross_gap, a.cross_gap_heavy, a.cross_climb_max_deg,
+                   a.link_width, a.unbraced_max, a.tie_gap, a.tie_gap_heavy, a.gap_lines, a.face_relief_mm,
+                   a.strand_keep})
+    k.d(v);
+  for (bool v : {a.shape_fit, a.walls_out, a.ties, a.stress_goal, a.wall_connect, a.auto_by_stress, a.member_cap,
+                 a.prune, a.hold_parts, a.part_to_floor, a.tie_level, a.follow_stress})
+    k.pod(static_cast<char>(v));
+  k.pod(static_cast<int>(a.mode)); k.pod(a.seed);
+  k.pod(a.reseed_rounds); k.pod(a.wall_cross); k.pod(a.run_max);
+  k.pod(a.floors.size());
+  for (const WidthFloor& f : a.floors) { k.v3(f.centre); k.d(f.radius_mm); k.d(f.width_mm); }
+  k.pod(a.additions.rounds.size());
+  for (const AddRound& r : a.additions.rounds) {
+    k.pod(r.hash); k.pod(r.ops.size());
+    for (const AddOp& o : r.ops) { k.pod(o.kind); k.pod(o.v.size()); for (double v : o.v) k.d(v); }
+  }
+  k.pod(a.relief_exclude_faces.size()); for (int f : a.relief_exclude_faces) k.pod(f);
+  k.pod(static_cast<char>(a.sweep.on));
+  for (double v : {a.sweep.max_offset_mm, a.sweep.max_turn_deg, a.sweep.max_piece_mm, a.sweep.min_turn_deg,
+                   a.sweep.min_radius})
+    k.d(v);
+  return k.b;
+}
+}  // namespace
+
+// One region's step: its strands and everything the lay reads from making them.
+struct Session::StrandCache {
+  struct Entry {
+    std::vector<Strand> strands;
+    OrganicTraceStats st;
+    OrganicSpacing sp;
+    double median = 0.0;
+    GrowReport one;
+    bool grown = false;
+    std::size_t gap_capped = 0;
+  };
+  static constexpr std::size_t kMax = 12;
+  std::vector<std::pair<std::string, std::shared_ptr<const Entry>>> kept;   // newest last
+  std::shared_ptr<const Entry> find(const std::string& key) {
+    for (std::size_t i = 0; i < kept.size(); ++i)
+      if (kept[i].first == key) {
+        auto e = kept[i].second;
+        auto moved = std::move(kept[i]);
+        kept.erase(kept.begin() + static_cast<long>(i));
+        kept.push_back(std::move(moved));
+        return e;
+      }
+    return nullptr;
+  }
+  void keep(std::string key, std::shared_ptr<const Entry> e) {
+    kept.emplace_back(std::move(key), std::move(e));
+    if (kept.size() > kMax) kept.erase(kept.begin());
+  }
+};
+
 Outcome Session::lay_organic(const Settings& settings, const TensorField& field, const OrganicAsk& ask, int threads,
                              const std::atomic<bool>* stop) {
   return lay_organic_with(settings, field, one_group(settings, ask), threads, stop, false);
@@ -1297,6 +1383,7 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
   finish.draft = draft;                 // brief L2, item 3
   const auto t0 = std::chrono::steady_clock::now();
   std::vector<Strand> strands;
+  const std::uint64_t field_key = field_hash(field);   // his 11-22 item 2
   double smallest = 0.0, largest = 0.0, sum = 0.0;
   std::size_t candidates = 0;
   std::shared_ptr<GrowReport> grown;
@@ -1318,15 +1405,21 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
     for (const Region& r : domain_->spec().regions) {
       if (r.role != Role::Lattice || !r.weave) continue;
       if (std::find(group.regions.begin(), group.regions.end(), r.id) == group.regions.end()) continue;
-      OrganicTraceStats st;
-      std::vector<Strand> traced;
+      // his 11-22 item 2: the step's strands kept under a key of everything it reads; kept ones are handed on as they were
+      if (!strand_cache_) strand_cache_ = std::make_shared<StrandCache>();
+      const std::string key = strand_key(domain_epoch_, field_key, r.id, *pool, ask);
+      std::shared_ptr<const StrandCache::Entry> kept = strand_cache_->find(key);
+      if (!kept) {
+        auto made = std::make_shared<StrandCache::Entry>();
+        StrandCache::Entry& e = *made;
+        OrganicTraceStats& st = e.st;
       // O16, the net skin's reach: Traced, the trace's own median spacing (as the old run); Grown, which has no trace,
       // the median of the spacing field over the region's candidates (the field it is laid with). LatticeReview's
       // ruling 2 (2026-11-15) asked the field's median for both; on the made-up cube it changed Traced's net from 5,145
       // struts (12,626 mm) to 5,932 (24,424 mm), so Traced keeps its own until that is ruled on.
-      const OrganicSpacing sp =
-          ask.mode == OrganicMode::Grown ? organic_spacing(*domain_, r.id, field, ask, pool) : OrganicSpacing{};
-      double median = 0.0;
+      e.sp = ask.mode == OrganicMode::Grown ? organic_spacing(*domain_, r.id, field, ask, pool) : OrganicSpacing{};
+      const OrganicSpacing& sp = e.sp;
+      double& median = e.median;
       {
         std::vector<double> all;
         for (std::size_t e = 0; e < sp.candidate.size(); ++e)
@@ -1337,11 +1430,10 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
         }
       }
       if (ask.mode == OrganicMode::Grown) {
-        GrowReport one;
-        traced = grow_strands(*domain_, r.id, field, ask, &one, &sp);   // T fix: the spacing computed once, above
-        gap_capped += one.gap_capped;   // OG1
-        if (!grown) grown = std::make_shared<GrowReport>();
-        grown->add(one);
+        GrowReport& one = e.one;
+        e.grown = true;
+        e.strands = grow_strands(*domain_, r.id, field, ask, &one, &sp);   // T fix: the spacing computed once, above
+        e.gap_capped = one.gap_capped;   // OG1
         for (std::size_t e = 0; e < sp.candidate.size(); ++e) {
           if (!sp.candidate[e]) continue;
           const double v = sp.spacing_mm[e];
@@ -1352,11 +1444,26 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
         }
         if (st.candidates) st.spacing_mean_mm /= static_cast<double>(st.candidates);
       } else {
-        traced = trace_strands(*domain_, r.id, field, ask, &st, pool);
+        e.strands = trace_strands(*domain_, r.id, field, ask, &st, pool);
         if (GrowthTap* t = domain_->growth_tap())   // his 11-22 (watch it grow): Traced's region appears whole, as traced
-          for (const Strand& st2 : traced)
+          for (const Strand& st2 : e.strands)
             for (std::size_t k = 0; k + 1 < st2.points.size(); ++k) t->piece(r.id, st2.points[k], st2.points[k + 1]);
-        gap_capped += st.gap_capped;   // OG1
+        e.gap_capped = st.gap_capped;   // OG1
+      }
+        strand_cache_->keep(key, made);
+        kept = made;
+      } else if (GrowthTap* t = domain_->growth_tap()) {   // watch it grow: kept strands appear at once
+        for (const Strand& st2 : kept->strands)
+          for (std::size_t k = 0; k + 1 < st2.points.size(); ++k) t->piece(r.id, st2.points[k], st2.points[k + 1]);
+      }
+      OrganicTraceStats st = kept->st;
+      const OrganicSpacing& sp = kept->sp;
+      const double median = kept->median;
+      std::vector<Strand> traced = kept->strands;
+      gap_capped += kept->gap_capped;   // OG1
+      if (kept->grown) {
+        if (!grown) grown = std::make_shared<GrowReport>();
+        grown->add(kept->one);
       }
       const double reach = ask.mode == OrganicMode::Grown ? median : st.spacing_median_mm;
       // O16, per region (leg J item 1): the region's own Skin and width, else the part's.

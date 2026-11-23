@@ -169,6 +169,7 @@ void Session::ready_domain(const Settings& settings) {
     }
     domain_ = std::make_unique<Domain>(*measure_, std::move(spec));
     where_ = where;
+    ++domain_epoch_;   // his 11-22 item 2: strands kept for the old domain are never read for this one
     unread_ = true;
     ref_kept_ = false;   // the reference is the new domain's to read again
     ref_field_.reset();
