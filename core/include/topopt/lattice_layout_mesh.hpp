@@ -487,6 +487,9 @@ bool cut_shell_at_bed(TriangleMesh& shell, double bed);
 //   - the longest reach of any bridge, for the report.
 // Judged on the finished mesh, never strut by strut: a strut-by-strut rule threw out
 // 3,033 good struts on his stand (2026-11-12) and made a 3.3 mm overhang.
+// SPEED 11-22: the last pass's sections and judgements, so the next pass judges only the layers that changed
+// (print_check.cpp; the passes own it). Opaque here.
+struct LayerCache;
 struct LayerSpec {
   double layer_mm = 0.2;
   double pixel_mm = 0.05;
@@ -515,6 +518,9 @@ struct LayerSpec {
   bool layer_areas = false;
   int threads = 0;
   const std::atomic<bool>* stop = nullptr;
+  // SPEED 11-22: null = judge every layer (as before). With one, a layer whose section and the one below are the same
+  // as at the last check given the same cache (same grid, layers and thresholds) keeps its judgement: the same report.
+  LayerCache* cache = nullptr;
 };
 struct LayerReport {
   double z_bed = 0.0;
