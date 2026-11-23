@@ -532,6 +532,7 @@ class Grower {
   // A new segment at the end of a line, to `b`; `record`: b is a recorded vertex.
   void lay(int li, const Vec3& b, bool record = false) {
     Line& L = lines_[static_cast<std::size_t>(li)];
+    if (GrowthTap* t = domain_.growth_tap()) t->piece(region_, L.pts.back(), b);   // his 11-22: watch it grow
     laid_mm_ += dist(L.pts.back(), b);
     L.pts.push_back(b);
     L.rec.push_back(record ? 1 : 0);
@@ -3137,6 +3138,7 @@ std::vector<Strand> Grower::run() {
   // The owner's order (2026-11-15): grow, prune, then one round of re-seeding in the bare areas, grown and pruned
   // the same way.
   std::vector<Tip> tips;
+  if (GrowthTap* t = domain_.growth_tap()) t->phase(1);   // his 11-22: growing
   seeds(tips);
   tips_ = tips.size();
   top_open_ = ask_.top_run > 0.0;   // G: the top ends are recorded during this first growth only
@@ -3161,6 +3163,7 @@ std::vector<Strand> Grower::run() {
   top_open_ = false;
   if (ask_.ties) ties(0);
   if (ask_.top_run > 0.0 || ask_.root_run > 0.0) runs();   // G
+  if (GrowthTap* t = domain_.growth_tap()) t->phase(2);   // pruning
   prune();
   rep_.bare_before = bare();
   // E: the re-seed step reseed_rounds times (G11: once); between rounds what the last pass cut is no longer material,
@@ -3175,6 +3178,7 @@ std::vector<Strand> Grower::run() {
     const std::size_t first_new = lines_.size();
     const std::size_t voids0 = rep_.reseed_voids;
     std::vector<Tip> more;
+    if (GrowthTap* t = domain_.growth_tap()) t->phase(3);   // re-seeding the bare places
     reseed(more);
     rep_.reseed_voids_round.push_back(rep_.reseed_voids - voids0);
     grow(std::move(more));
@@ -3197,6 +3201,7 @@ std::vector<Strand> Grower::run() {
       for (std::size_t k = 0; k < f.seg[l].size(); ++k) lines_[l].dead[k] = f.seg[l][k] != 0;
     rebuild_rec();
     const std::size_t before = rep_.wall_branches;
+    if (GrowthTap* t = domain_.growth_tap()) t->phase(4);   // reaching the walls
     reach_walls(walls);
     if (rep_.wall_branches > before) {
       repeats();

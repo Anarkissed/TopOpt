@@ -1285,6 +1285,14 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
   // OR30: the Finish is the regular lattices' own. Rim and Covered are "where" settings of the domain the weave is
   // traced and laid in (their solid cuts the strands as any solid does); Skin lays the net skin (O16).
   ready_domain(settings);
+  // His 11-22 (watch it grow): the session's tap for the length of this lay
+  // (the domain is read again at the end: a later step may have made it again)
+  struct TapFor {
+    std::unique_ptr<Domain>& d;
+    GrowthTap* t;
+    TapFor(std::unique_ptr<Domain>& domain, GrowthTap* tap) : d(domain), t(tap) { if (d) d->tap(t); if (t) t->start(); }
+    ~TapFor() { if (t) t->flush(); if (d) d->tap(nullptr); }
+  } tap_for(domain_, tap_);
   WeaveFinish finish;
   finish.draft = draft;                 // brief L2, item 3
   const auto t0 = std::chrono::steady_clock::now();
@@ -1345,6 +1353,9 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
         if (st.candidates) st.spacing_mean_mm /= static_cast<double>(st.candidates);
       } else {
         traced = trace_strands(*domain_, r.id, field, ask, &st, pool);
+        if (GrowthTap* t = domain_->growth_tap())   // his 11-22 (watch it grow): Traced's region appears whole, as traced
+          for (const Strand& st2 : traced)
+            for (std::size_t k = 0; k + 1 < st2.points.size(); ++k) t->piece(r.id, st2.points[k], st2.points[k + 1]);
         gap_capped += st.gap_capped;   // OG1
       }
       const double reach = ask.mode == OrganicMode::Grown ? median : st.spacing_median_mm;
@@ -1401,6 +1412,7 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
       notes.push_back(kNoteEqualEnds);
   }
   const double ms_trace = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+  if (GrowthTap* t = domain_->growth_tap()) t->phase(5);   // his 11-22 (watch it grow): finishing
   Outcome out = lay_with(settings, &strands, threads, stop, &finish);
   if (!out.cancelled) {
     // OG2 (brief E6): the ends carried proud of the open faces, on the bars as laid (before the floors and additions,
