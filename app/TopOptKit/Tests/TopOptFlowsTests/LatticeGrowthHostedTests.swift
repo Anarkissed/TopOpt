@@ -70,7 +70,9 @@ final class LatticeGrowthHostedTests: XCTestCase {
         print("GROWTH solid view: the Draft grew in X-ray \(seen.draftGrewInXray); the exact lattice grew in the opened part "
               + "\(seen.exactGrewOpened), in X-ray \(seen.exactGrewInXray); in the G-buffer \(seen.inGBuffer)")
         XCTAssertTrue(seen.inGBuffer, "★ the vines grow in the lattice's G-buffer (3D, lit, depth-tested)")
-        XCTAssertTrue(seen.draftGrewInXray, "★ no map yet: the Draft grew inside the part in X-ray")
+        // ★ RE-PINNED (362, his 11-23 walls first; the engine's map before the lay, gridAhead): the Draft grows inside the part
+        // opened by the map made before its lay — never X-ray
+        XCTAssertFalse(seen.draftGrewInXray, "★ the map made before the lay opens the part: the Draft never grows in X-ray")
         XCTAssertTrue(seen.exactGrewOpened, "★ the exact lattice grew inside the part its Draft's map opened")
         XCTAssertFalse(seen.exactGrewInXray, "★ never X-ray while a map opens the part")
         h.pump(LatticeGrowth.landingS + 0.6)
@@ -78,6 +80,16 @@ final class LatticeGrowthHostedTests: XCTestCase {
         _ = r.renderOffscreen(width: 320, height: 240, clear: MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1), stage: false)
         XCTAssertFalse(r.growthXraysBody, "★ landed: the part solid, opened by its map (as it will stay)")
         try h.picture("growth-solid-landed-13L.png")
+        // RED CONTROL: no map before the lay: a first lay's Draft grows inside the part in X-ray (as before the engine made one)
+        LatticeLayoutPreview.controlNoMapAhead = true
+        defer { LatticeLayoutPreview.controlNoMapAhead = false }
+        let q = try organicProject()
+        let preview2 = LatticeLayoutPreview()
+        defer { preview2.clear() }
+        let h2 = AppBuildHost(Stage(preview: preview2, mesh: q.viewerMesh, bodyAlpha: 1), size: AppBuildHost.landscape13, test: self)
+        h2.pump(1)
+        let seen2 = try lay(preview2, q, try stress(q, key: 74), h2, try renderer(h2), "solid, no map ahead", solid: true)
+        XCTAssertTrue(seen2.draftGrewInXray, "RED CONTROL: no map yet: the Draft grew inside the part in X-ray")
     }
 
     func testTheVinesGrowOnScreenThenTheLatticeReplacesThem() throws {

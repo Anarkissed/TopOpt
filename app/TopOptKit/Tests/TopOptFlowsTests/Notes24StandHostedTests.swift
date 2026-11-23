@@ -109,7 +109,9 @@ final class Notes24StandHostedTests: XCTestCase {
                 XCTAssertFalse(sawXray, "★ never X-ray with that map")
                 XCTAssertEqual(preview.bars?.solid?.rg, firstMap?.rg, "★ it lands opened by that very map (no second one)")
             } else {
-                XCTAssertTrue(sawXray, "the first lay, no map before it: the X-ray stand-in")
+                // ★ RE-PINNED (362: the engine's map before the lay, gridAhead, is wired): the first lay too
+                XCTAssertTrue(sawDissolve, "★ the engine's map made before the first lay: the walls dissolve away")
+                XCTAssertFalse(sawXray, "★ never X-ray with that map")
             }
             XCTAssertNotNil(preview.bars?.solid, "\(name): landed opened by its map")
             try shoot("3-landed-after")

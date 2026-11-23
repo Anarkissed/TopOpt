@@ -107,7 +107,14 @@ final class DraftOpensFacesTests: XCTestCase {
         func run(_ what: String) async throws -> (draftCut: Bool, final: LatticeLayoutBarsInputs, draftMap: [Int8]?) {
             var seen: [(token: Int, own: Bool, rg: [Int8]?, exactLaying: Bool)] = []
             var progress: LatticeLayoutPreview.LayProgress?
-            let watch = preview.$layProgress.sink { progress = $0 }
+            // ★ RE-PINNED (362: the Draft now lands already opened by the map made before its lay, so no later map arrives to
+            // be seen): what is on screen is read too each time the exact lattice's lay moves
+            let watch = preview.$layProgress.sink { p in
+                progress = p
+                guard p?.quality == .exact, p?.draftShown == true, let b = preview.bars else { return }
+                let own = b.solid.map { $0.token == b.token } ?? false
+                seen.append((b.token, own, own ? b.solid?.rg : nil, true))
+            }
             let sub = preview.$bars.sink { b in
                 guard let b else { return }
                 let own = b.solid.map { $0.token == b.token } ?? false

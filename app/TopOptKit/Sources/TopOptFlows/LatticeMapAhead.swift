@@ -23,20 +23,21 @@ extension LatticeLayoutPreview {
 
     /// Tests: a map handed out as if the engine had made it ahead (nil: none).
     nonisolated(unsafe) static var mapAheadForTesting: ((LatticeLayoutSession.Settings) -> LatticeLayoutSolidGrid?)?
+    /// Tests' RED CONTROL: no map before the lay (the part stands in X-ray while it grows, as before the engine made one).
+    nonisolated(unsafe) public static var controlNoMapAhead = false
 
     /// ★ THE HOOK: the map settings `s` will open the part with, made before the lay (on the session's worker, right before
     /// `layOrganic`). nil: not available — the part stands in X-ray while it grows.
     static func mapAhead(_ session: LatticeLayoutSession, _ s: LatticeLayoutSession.Settings,
                          _ box: (lo: SIMD3<Float>, hi: SIMD3<Float>)?, token: Int, smooth: Bool) async -> LatticeLayoutSolidGrid? {
+        if controlNoMapAhead || controlDraftWaitsForExactMap { return nil }
         if let t = mapAheadForTesting, var m = t(s) { m.token = token; return m }
         guard let box else { return nil }
         let g = mapGeometry(box)
-        _ = (session, g, smooth)
-        // ── PLUG 362's gridAhead HERE (when organic-1 carries it and its vendor):
-        // guard let r = try? await session.gridAhead(s, origin: g.origin, voxel: g.voxel, dims: g.dims) else { return nil }
-        // let rg = smooth ? LatticeLayoutSolidGrid.smoothed(r.rg, dims: g.dims) : r.rg
-        // return LatticeLayoutSolidGrid(token: token, origin: g.origin, voxel: g.voxel, dims: g.dims, rg: rg, smooth: smooth)
-        return nil
+        // ★ 362 (claude/speed-2 05b12173): the engine's map made before the lay (nil: a cube-lattice region, or it failed)
+        guard let r = try? await session.gridAhead(s, origin: g.origin, voxel: g.voxel, dims: g.dims) else { return nil }
+        let rg = smooth ? LatticeLayoutSolidGrid.smoothed(r.rg, dims: g.dims) : r.rg
+        return LatticeLayoutSolidGrid(token: token, origin: g.origin, voxel: g.voxel, dims: g.dims, rg: rg, smooth: smooth)
     }
 }
 
