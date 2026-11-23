@@ -173,6 +173,11 @@ class Job:
         self.stage_at = None
         self.message = None
         self.code = None
+        # ★ 362 11-23 (his Organic run: the iPad switched apps between the strengthening and the file, so the Mac sat idle
+        # for 10 minutes): a strengthening asked with `then` = file makes its print file ITSELF, on the Mac, from its last
+        # round, as its own job; `next` is that job's id (on this job's record before its `done`), so the iPad follows it.
+        self.then_file = False
+        self.next = None
         # Timestamps (epoch seconds). created = submit; started = promoted to
         # running; finished = terminal.
         self.created_at = time.time()
@@ -250,6 +255,7 @@ class Job:
             "stage_at": self.stage_at,
             "message": self.message,
             "code": self.code,
+            "next": self.next,
             "position": position,
             "created_at": self.created_at,
             "started_at": self.started_at,
@@ -619,8 +625,22 @@ def run_job_thread(job):
         if job.state == "cancelled":
             return  # a DELETE already posted the terminal event
         if rc == 0:
+            nxt = None
+            if job.then_file:
+                try:
+                    nxt = _chained_file_job(job)
+                except (OSError, ValueError) as e:
+                    print("CHAIN job=%s could not make its file job: %s" % (job.id, e), flush=True)
+                if nxt is not None:
+                    with job.cond:
+                        job.next = nxt.id
+                    SCHED.submit(nxt)
+                    print("CHAIN job=%s next=%s" % (job.id, nxt.id), flush=True)
             meshes = sorted(os.listdir(job.out_dir)) if os.path.isdir(job.out_dir) else []
-            job.emit({"type": "done", "returncode": 0, "artifacts": meshes})
+            done = {"type": "done", "returncode": 0, "artifacts": meshes}
+            if job.next:
+                done["next"] = job.next
+            job.emit(done)
         else:
             msg = "".join(stderr_buf).strip() or f"topopt-cli exited with code {rc}"
             ev = {"type": "error", "returncode": rc, "message": msg}
@@ -635,6 +655,51 @@ def run_job_thread(job):
     finally:
         if SCHED is not None:
             SCHED.on_finished(job)
+
+
+def _chained_file_job(job):
+    """The print-file job a finished strengthening makes itself (its `then` = file): the SAME inputs (the model and every
+    file beside its job), its job.json with `strengthened` naming the last round's strengthened.json, that round's
+    strengthened.json and the additions it names copied beside it, run through `lattice-file`. Exactly what the iPad
+    would have sent. None when the strengthening's report is not ok (no file is made from a failed strengthening)."""
+    with open(os.path.join(job.out_dir, "strengthen.json")) as f:
+        rep_doc = json.load(f)
+    if not (isinstance(rep_doc, dict) and rep_doc.get("ok")):
+        return None
+    with open(os.path.join(job.tmpdir, "job.json")) as f:
+        doc = json.load(f)
+    new_id = uuid.uuid4().hex[:16]
+    tmp2 = os.path.join(CFG.workdir, new_id)
+    out2 = os.path.join(tmp2, "out")
+    os.makedirs(out2, exist_ok=True)
+    try:
+        for name in os.listdir(job.tmpdir):
+            src = os.path.join(job.tmpdir, name)
+            if os.path.isfile(src) and name not in ("job.json", "worker.log"):
+                shutil.copy2(src, os.path.join(tmp2, name))
+        last = rep_doc.get("strengthened")
+        if isinstance(last, str) and last and ".." not in last and not last.startswith("/"):
+            spath = os.path.join(job.out_dir, last)
+            with open(spath) as f:
+                sdoc = json.load(f)
+            adds = sdoc.get("additions") if isinstance(sdoc, dict) else None
+            if not isinstance(adds, str) or adds in ("", ".", "..", "strengthened.json") or os.path.basename(adds) != adds:
+                raise ValueError("the last round's strengthened.json names no bare additions file")
+            shutil.copy2(os.path.join(os.path.dirname(spath), adds), os.path.join(tmp2, adds))
+            shutil.copy2(spath, os.path.join(tmp2, "strengthened.json"))
+            doc["strengthened"] = "strengthened.json"
+        job_path = os.path.join(tmp2, "job.json")
+        with open(job_path, "w") as f:
+            json.dump(doc, f)
+    except (OSError, ValueError):
+        shutil.rmtree(tmp2, ignore_errors=True)
+        raise
+    cmd = [CFG.cli, "lattice-file", job_path, "--out", out2]
+    if CFG.materials:
+        cmd += ["--materials", CFG.materials]
+    if CFG.rules:
+        cmd += ["--rules", CFG.rules]
+    return Job(new_id, tmp2, out2, cmd, project_name=job.project_name)
 
 
 def _report_reason(out_dir):
@@ -1011,6 +1076,18 @@ class Handler(BaseHTTPRequestHandler):
                 shutil.rmtree(tmpdir, ignore_errors=True)
                 return self._json(400, {"error": "run must be organic-strengthen, on a lattice_file job"})
             subcmd = "organic-strengthen"
+        # ★ 362 11-23: "then" = file (only with run = organic-strengthen): the Mac makes the print file from the last round
+        # when the strengthening ends, without waiting for the iPad (see Job.then_file).
+        then_file = False
+        if "then" in fields:
+            try:
+                then = fields["then"]["data"].decode("utf-8").strip()
+            except UnicodeDecodeError:
+                then = None
+            if then != "file" or subcmd != "organic-strengthen":
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                return self._json(400, {"error": "then must be file, on an organic-strengthen run"})
+            then_file = True
         cmd = [CFG.cli, subcmd, job_path, "--out", out_dir]
         if CFG.materials:
             cmd += ["--materials", CFG.materials]
@@ -1018,6 +1095,7 @@ class Handler(BaseHTTPRequestHandler):
             cmd += ["--rules", CFG.rules]
 
         job = Job(job_id, tmpdir, out_dir, cmd, project_name=project_name)
+        job.then_file = then_file
         SCHED.submit(job)
         self._json(202, {"job_id": job_id})
 
