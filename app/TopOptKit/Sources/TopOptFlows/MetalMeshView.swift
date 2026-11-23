@@ -1639,6 +1639,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     var layoutBars: LatticeLayoutBarsPass?   // the new engine's bars (#362, LatticeLayoutBarsPass.swift); nil = today's frame
     var growth: LatticeGrowth?               // ★ his 11-22 (watch it grow): an Organic lay's vines so far (LatticeGrowthPass.swift)
     var growthPass: LatticeGrowthPass?
+    /// ★ notes24: the growth draws this frame (into the G-buffer, lit as the lattice), decided once a frame (`prepareGrowth`).
+    var growthInFrame = false
     /// The scene token last uploaded, so a bake happens once per scene change and never
     /// per frame (the preview's bar P2, carried over unchanged).
     private var latticeSceneToken: Int = -1
@@ -3537,6 +3539,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         guard vertexDrawCount > 0, let vbuf = vertexBuffer, let tbuf = tintBuffer,
               let fbuf = flexBuffer else { return }
         var uniforms = makeUniforms(aspect: aspect)
+        prepareGrowth(cmd.device)   // ★ notes24: whether the growing vines draw this frame (LatticeGrowthPass.swift)
 
         // DEPTH PREPASS (items 7+8, parts b+c): when a translucent volume is present, capture the
         // opaque part's eye-space depth into a texture FIRST (its own render pass — you cannot read
@@ -3558,8 +3561,9 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // ★ AND WHENEVER A LATTICE IS IN THE FRAME (unified shading). The lattice's
         // pixels are PRODUCED by the prepass now — it is not an optional quality
         // treatment for them, it is where they come from.
-        let wantsLattice = (latticeInFrame || flexibleLatticeInFrame || layoutBarsInFrame) && latticeGBufferPipeline != nil
-            && latticeShadePipeline != nil
+        // ★ notes24 (img 49): and the growing vines, real tubes lit by the same shade
+        let wantsLattice = (latticeInFrame || flexibleLatticeInFrame || layoutBarsInFrame || growthInFrame)
+            && latticeGBufferPipeline != nil && latticeShadePipeline != nil
         let wantsAO = !quality.isDisjoint(with: [.ambientOcclusion, .edges]) && aoPipeline != nil
             && LatticePreviewMode.aoDrawn(turning: turning, latticeShown: wantsLattice)   // ★ his pick 11-16 (D)
         // The G-buffer is single-sampled, so it is sized from the RESOLVE target when
@@ -3626,7 +3630,9 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // Load-flow body modes (handoff 070): a body alpha < 1 draws the mesh through
         // the translucent pipeline (premultiplied "over", no depth write) so the comet
         // arrows show through the walls; alpha 1 is the unchanged opaque draw.
-        let drawAlpha = Self.bodyDrawAlpha(bodyAlpha, xray: xrayBody)   // ★ B2: the X-ray look
+        var drawAlpha = Self.bodyDrawAlpha(bodyAlpha, xray: xrayBody)   // ★ B2: the X-ray look
+        // ★ notes24: no map yet to open the part while the vines grow: the Lattice page's own X-ray (MeshRenderer.growthXraysBody)
+        if growthXraysBody { drawAlpha = Swift.min(drawAlpha, LatticeLayoutPreview.ghostAlpha) }
         let translucent = drawAlpha < 0.999
         let ghostAfterLattice = flexibleGhostAfterLattice(translucent: translucent, latticeShaded: wantsLattice && gbuffer != nil)
         var bodyAlphaVal = drawAlpha
@@ -3893,8 +3899,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                 countedDraw(enc, .triangle, loadFlowVertexCount)
             }
         }
-        // ★ his 11-22 (watch it grow): the Organic lay's vines as they are laid, over the frame (LatticeGrowthPass.swift)
-        encodeGrowth(enc, clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView, target: mainSize)
+        // ★ his 11-22 (watch it grow): the Organic lay's vines are no longer drawn over the frame here — ★ notes24 (img 49:
+        // "It needs to be in 3D") they are tubes in the prepass's G-buffer, lit by the lattice shade above (encodeDepthPrepass)
         enc.endEncoding()
     }
 
@@ -3993,7 +3999,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     }
     /// ★ his pick 11-16 (6): a lattice is drawn (the old preview's march, the Flexible pass or the new engine's bars) — the
     /// view then draws at half resolution while he turns it (`LatticePreviewMode.drawScale`).
-    var latticeDrawnForScale: Bool { latticeInFrame || flexibleLatticeInFrame || layoutBarsInFrame }
+    var latticeDrawnForScale: Bool { latticeInFrame || flexibleLatticeInFrame || layoutBarsInFrame || growthInFrame }
     /// ★ his picks 11-16 (C, D): a camera gesture is down with a lattice drawn (the coordinator sets it). While it is, the
     /// lattice's layer is drawn smaller and the soft shading in the gaps and the edge lines are left out.
     var turning = false
@@ -4243,7 +4249,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // the Flexible march inherits latticeGBufferMaxPixels = 1152; ★ his pick 11-16 (C): while turning, every lattice (the
         // new engine's bars too) is drawn at `LatticePreviewMode.turningGBufferMaxPixels`
         guard let cap = LatticePreviewMode.gbufferCap(turning: turning, marched: latticeInFrame || flexibleLatticeInFrame,
-                                                      bars: layoutBarsInFrame, restCap: Self.latticeGBufferMaxPixels)
+                                                      bars: layoutBarsInFrame || growthInFrame,
+                                                      restCap: Self.latticeGBufferMaxPixels)
         else { return (width, height) }
         let long = Swift.max(width, height)
         guard long > cap else { return (width, height) }
@@ -4448,7 +4455,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         let openEverywhere: [SIMD4<Float>] = [SIMD4(0, 0, 1, 0), .zero, .zero]
 
         // ★ THE NEW ENGINE's SOLID VIEW (his ask 11-13): its own map cuts the body open where the lattice is (mode 2)
-        if layoutBarsInFrame, let solid = layoutBars?.shellClip { return (solid, openEverywhere) }
+        // (★ notes24: not while the growing vines stand in the part's X-ray: that map is not this lay's — growthXraysBody)
+        if layoutBarsInFrame, !growthXraysBody, let solid = layoutBars?.shellClip { return (solid, openEverywhere) }
         guard latticeInFrame, let layer = latticeLayer else { return (u, openEverywhere) }
         let declared = (layer.scene?.regions ?? []).filter { $0.role == .include }
         guard !declared.isEmpty, let g = layer.regionGrid, layer.regionTexture != nil else {
@@ -4766,7 +4774,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         let lattice = latticeInFrame ? latticeLayer : nil
         guard let dpipe = depthPrepassPipeline, vertexDrawCount > 0,
               let vbuf = vertexBuffer, let fbuf = flexBuffer,
-              shellVisible || lattice != nil || flexibleLatticeInFrame || layoutBarsInFrame,
+              shellVisible || lattice != nil || flexibleLatticeInFrame || layoutBarsInFrame || growthInFrame,
               let tex = sceneDepthTextures(width: width, height: height) else { return nil }
         let pd = MTLRenderPassDescriptor()
         pd.colorAttachments[0].texture = tex.color
@@ -4932,11 +4940,18 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
            bars.encodeGBuffer(penc, depthState: depthState, clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView,
                               eyeNormalBasis: uniforms.normalMatrix, turning: turning) {
             frameDrawCalls += 1; frameVertices += 36 * bars.count }
-        // ★ the solid view's cut walls (his ask 11-13): after the bars, the same encoder and depth state
-        if layoutBarsInFrame, let bars = layoutBars,
+        // ★ the solid view's cut walls (his ask 11-13): after the bars, the same encoder and depth state (★ notes24: none while
+        // the growing vines stand in the part's X-ray)
+        if layoutBarsInFrame, !growthXraysBody, let bars = layoutBars,
            bars.encodeWalls(penc, depthState: depthState, clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView,
                             eyeNormalBasis: uniforms.normalMatrix) {
             frameDrawCalls += 1; frameVertices += 36 }
+        // ★ notes24 (img 49: "It needs to be in 3D … only the ones that are visible to me"): the growing vines, real tubes, the
+        // fifth writer — the same encoder, attachments and .less + write depth state: depth-tested against the part and lattice
+        if growthInFrame, encodeGrowthGBuffer(penc, depthState: depthState, clipFromModel: uniforms.mvp,
+                                              eyeFromModel: uniforms.modelView, eyeNormalBasis: uniforms.normalMatrix,
+                                              model: uniforms.model) > 0 {
+            frameDrawCalls += 1; frameVertices += 18 * (growthPass?.lastDrawn ?? 0) }
         penc.endEncoding()
         return (tex.color, tex.normal, tex.albedo)
     }
@@ -7820,7 +7835,8 @@ extension MetalMeshView {
     }
 
     /// ★ his 11-22 ("Could the user literally *watch* the lattice grow from nothing?"): the Organic lay's vines as they are
-    /// laid, drawn over the frame while it lays (LatticeGrowthPass); the view redraws itself on each change. nil = none.
+    /// laid, drawn while it lays (LatticeGrowthPass: ★ notes24, real tubes lit and depth-tested as the landed lattice); the view
+    /// redraws itself on each change. nil = none.
     public func latticeGrowth(_ growth: LatticeGrowth?) -> MetalMeshView {
 #if canImport(MetalKit)
         var copy = self
