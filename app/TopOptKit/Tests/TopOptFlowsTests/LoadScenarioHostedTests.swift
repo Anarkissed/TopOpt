@@ -247,11 +247,12 @@ final class LoadScenarioHostedTests: XCTestCase {
         try picture(h, "open_group_tall_list.png")
         XCTAssertGreaterThan(tall.height, SelectionsList.lineHeight + 1 + SelectionsList.maxListHeight + 4,
                              "★ the open list grows past the old 420 pt cap (\(tall.height))")
-        // the grip is on his screen, under the rows and above the pinned footer (a synthetic mouse drag does not reach SwiftUI's
-        // DragGesture offscreen; the drag's math is `SelectionsList.resized`, tested in LoadScenarioTests)
-        let grip = try onScreen(h, "selectionsGrip", "the resize grip")
-        let addRow = try onScreen(h, "addLoadScenario", "+ Add a load scenario")
-        XCTAssertLessThan(grip.maxY, addRow.minY, "the grip sits above the pinned footer")
+        // ★ his iPad notes 11-23 ("Remove it"): no grip under the rows — the panel's corner grip resizes it (a synthetic mouse
+        // drag does not reach SwiftUI's DragGesture offscreen; the drag's math is `SelectionsList.resized`, tested in
+        // LoadScenarioTests), its double tap fits it to its rows (SelectionsNotes1123Tests)
+        XCTAssertNil(h.frames.all["selectionsGrip"], "★ no grip under the rows (his 11-23)")
+        let corner = try onScreen(h, "selectionsCornerGrip", "the corner grip")
+        XCTAssertEqual(corner.maxY, tall.maxY, accuracy: 1, "the corner grip sits at the panel's foot")
     }
 
     /// ★ HIS iPad 14:13: a scenario folder has its own open button: Scenario 1 opens beside the open Scenario 2.
