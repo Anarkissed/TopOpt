@@ -1464,6 +1464,16 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     } catch (const std::exception& e) {
       write_detail = e.what();
     }
+    // His 11-22 (the print-accurate lattice made on the Mac, drawn on the iPad as soon as it is saved, before the strength
+    // check): beside a 3MF, "<file>.parts.json" says how many of its first triangles are the solid; written BEFORE the file
+    // is moved in, so whoever sees the file sees this too. The report says the same at the end ("base_triangles").
+    if (written && r.file_format == "3mf") {
+      if (std::FILE* f = std::fopen((file_path + ".parts.json").c_str(), "w")) {
+        std::fprintf(f, "{\"base_triangles\": %llu, \"triangles\": %llu}\n", static_cast<unsigned long long>(r.made.base_triangles),
+                     static_cast<unsigned long long>(mesh.triangles.size()));
+        std::fclose(f);
+      }
+    }
     if (written && std::rename(part.c_str(), file_path.c_str()) != 0) {
       written = false;
       write_detail = "cannot move the file into " + file_path;
@@ -1678,6 +1688,11 @@ std::string file_result_json(const FileResult& r) {
                   "\"compressed\": %s, \"slicer_supports\": \"off\",\n",
                   r.file_format.c_str(), r.weave_mesh.c_str(), count(r.made.shells.shells()), count(r.made.shells.left_out),
                   r.compressed ? "true" : "false");
+    o += b;
+    // His 11-22 (the print-accurate lattice made on the Mac, drawn on the iPad): the file's first `base_triangles` are the
+    // solid (the part, its skins, any cube lattice joined to it); every triangle after is a weave shell, so the app colours
+    // the lattice apart from the part exactly.
+    std::snprintf(b, sizeof b, "  \"base_triangles\": %llu,\n", count(r.made.base_triangles));
     o += b;
     // OV1: the swept vines (all 0 with organic_sweep off).
     const WeaveShells& ws = r.made.shells;

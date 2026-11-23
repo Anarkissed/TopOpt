@@ -162,14 +162,26 @@ std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std
     // nearest protected face (by the distance to its own triangles). A landing whose stem is not clear is not used
     // (its foot is not); a join that is not clear is not laid.
     const double line = domain.spec().bead_mm;
+    // Speed (his 11-23 "Finishing" wait; the same answer): the distance to the protected faces cannot change by more
+    // than the way walked (it is a distance), so a point found clear by a margin m answers for every later point within
+    // m of it along the line (less a micrometre for rounding): those are not measured again. A point that is not clear
+    // is still found, at the same 0.1 mm points, so every stem and join is judged exactly as before.
     auto clear = [&](const Vec3& a, const Vec3& b, double w, const Vec3& n_in) {
-      const int n = std::max(1, static_cast<int>(std::ceil(dist(a, b) / 0.1)));
+      const double len = dist(a, b);
+      const int n = std::max(1, static_cast<int>(std::ceil(len / 0.1)));
+      const double floor_gap = line - 1e-9 + 0.5 * w;   // clear: the distance at least this
+      double known_to = -1.0;                          // along the line (mm): the distance test passes up to here
       for (int k = 0; k <= n; ++k) {
-        const Vec3 s = lerp(a, b, static_cast<double>(k) / n);
+        const double t = static_cast<double>(k) / n;
+        const Vec3 s = lerp(a, b, t);
         const Vec3 q{s.x + n_in.x * kHair, s.y + n_in.y * kHair, s.z + n_in.z * kHair};
         const Where wq = probe.where(q);
         if (!(wq.lattice() && wq.id == region)) return false;
-        if (probe.protect_face_distance(s) - 0.5 * w < line - 1e-9) return false;
+        const double along = t * len;
+        if (along <= known_to) continue;
+        const double d = probe.protect_face_distance(s);
+        if (d - 0.5 * w < line - 1e-9) return false;
+        known_to = along + (d - floor_gap) - 1e-6;
       }
       return true;
     };
