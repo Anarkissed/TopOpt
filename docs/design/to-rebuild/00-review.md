@@ -395,4 +395,6 @@ What this can and cannot claim:
 - What is solid: where a face is untouched (16 bores and 12 flats on Top Motor Mount) the file is exact to the triangle chord (0.02 mm); everywhere a cut wall meets a drawn face, the file leaves the face by up to a voxel. That is the seam the plan's stage 3 removes (C-02, C-03).
 - A clean number needs membership ("this vertex is on face N") from the part-in step, not nearness. Test B is written that way in stage 0.
 
-Still owed for the "today" table: slicer pictures, the strengthen route, Stand v2 / v3 and WallMount, PillowBlock and Base on this measure.
+Base, Pressing Plate Mount and PillowBlock (Left) give no print file today (section D table: the part as drawn fails the strength check, so no version is returned), so they have no row here. Re-run 2026-11-23 on the Release build at 13c6a7fd with the same outcome: Pressing 335 s, Base 121 s, Pressing strengthen 325 s (as drawn 0.35, ceiling 0.40 against 1.5), no version.
+
+Still owed for the "today" table: slicer pictures, and jobs for Stand v2 / v3 and WallMount.
