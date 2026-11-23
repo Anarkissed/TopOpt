@@ -72,6 +72,12 @@ public struct RootView: View {
                 PrintParamsOverlay(model: model, project: project)
                     .transition(.opacity)
             }
+
+            // ★ his notes 11-23 ("Tapping the notification should bring you RIGHT to the result screen. Nothing else."):
+            // while a tapped notification's result is read, nothing else shows — no Library, no Topology on the way
+            if model.openingResult != nil {
+                ResultOpeningCover().zIndex(3)
+            }
         }
         .laneToast($model.toast)   // ★ B2 (U16, §4.34): centred, clear of every control, two lines at most — above every sheet (U17)
         .overlay { AppPopupLayer() }   // ★ his 11-20: every error a centred pop-up in plain English (AppPopup.swift)
@@ -83,9 +89,16 @@ public struct RootView: View {
             // foreground — or landing via re-attach — can post a local completion
             // banner (handoff 121, requirement 5).
             LocalRunNotifier.requestAuthorization()
+            model.resumeLatticeJobs()   // ★ his notes 11-23: a Lattice job the app did not live to save, followed and saved
         }
         .onChange(of: scenePhase) { newPhase in
             if newPhase != .active { model.persistCurrentProject() }
+            model.sceneChanged(active: newPhase == .active)   // ★ his notes 11-23: Results never mount behind the app
+        }
+        // ★ his notes 11-23: a run's notification tapped (RunNotificationRouter, set up as the app starts) opens its result
+        // (a @Published says it before it is set: the route is taken on the next turn, once it is there)
+        .onReceive(RunNotificationRouter.shared.$pending) { r in
+            if r != nil { DispatchQueue.main.async { model.openTappedResult() } }
         }
         // The design is a dark-glass system: pin the scheme so default-coloured text
         // stays light and `Material` backings render dark, regardless of the device's

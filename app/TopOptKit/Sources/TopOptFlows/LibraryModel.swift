@@ -546,6 +546,28 @@ public final class LibraryModel: ObservableObject {
         step(todo[...])
     }
 
+    /// ★ his notes 11-23 ("The result should NOT be greyed out on the version screen"): a run's result was just saved in
+    /// `folder` — its card is a version with results now (never a draft), and its numbers and pictures are read again from
+    /// that result (the next `loadSummaries`), never an older run's.
+    func resultsSaved(folder: UUID, snapshot: ProjectSnapshot) {
+        snapshots[folder] = snapshot
+        edit(folder) { $0.summary = nil; $0.trimmed = nil }
+        resultsCache[folder] = nil
+        resultsOrder.removeAll { $0 == folder }
+        let fm = FileManager.default
+        for k in thumbnails.keys where k.folder == folder && k.result != Self.originalResult {
+            thumbnails[k] = nil
+            try? fm.removeItem(at: thumbnailURL(k))
+            try? fm.removeItem(at: opaqueThumbnailURL(k))
+        }
+        for r in 0..<64 {   // pictures of results not loaded this launch
+            let k = CompareItem(folder: folder, result: r)
+            guard fm.fileExists(atPath: thumbnailURL(k).path) || fm.fileExists(atPath: opaqueThumbnailURL(k).path) else { break }
+            try? fm.removeItem(at: thumbnailURL(k))
+            try? fm.removeItem(at: opaqueThumbnailURL(k))
+        }
+    }
+
     /// Every result of a version, with its mesh (decoded off the main thread; the last few are kept).
     public func results(for folder: UUID, _ done: @escaping ([LibraryResult]?) -> Void) {
         if let hit = resultsCache[folder] { done(hit); return }

@@ -51,13 +51,16 @@ final class StubWorker {
     /// convenience — a fixture that reported a few kilobytes would let the budget
     /// through every time and prove nothing.
     private let sizeOverrides: [String: Int]
+    /// ★ notes 11-23: other job ids served as this one (a recorded strengthening and its file job, each its own id).
+    private let aliases: [String]
 
     init(filesDir: URL, events: [String], fingerprint: String,
-         sizeOverrides: [String: Int] = [:]) throws {
+         sizeOverrides: [String: Int] = [:], aliases: [String] = []) throws {
         self.filesDir = filesDir
         self.events = events
         self.fingerprint = fingerprint
         self.sizeOverrides = sizeOverrides
+        self.aliases = aliases
 
         let listenFD = socket(AF_INET, SOCK_STREAM, 0)
         guard listenFD >= 0 else { throw NSError(domain: "stub-worker", code: 1) }
@@ -155,8 +158,10 @@ final class StubWorker {
         }
         let parts = requestLine.split(separator: " ")
         guard parts.count >= 2 else { return }
-        let method = String(parts[0]), path = String(parts[1])
-        logLock.lock(); requestLog.append("\(method) \(path)"); if method == "POST" { postBodies.append(Data(body)) }; logLock.unlock()
+        let method = String(parts[0]), asked = String(parts[1])
+        logLock.lock(); requestLog.append("\(method) \(asked)"); if method == "POST" { postBodies.append(Data(body)) }; logLock.unlock()
+        // an alias is served as the stub's own job (its log keeps the id asked for)
+        let path = aliases.reduce(asked) { p, a in p.hasPrefix("/jobs/\(a)") ? "/jobs/\(jobID)" + p.dropFirst("/jobs/\(a)".count) : p }
 
         func send(_ status: String, _ body: Data,
                   contentType: String = "application/json",
