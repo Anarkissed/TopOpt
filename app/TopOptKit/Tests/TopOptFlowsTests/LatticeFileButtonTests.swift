@@ -198,7 +198,7 @@ final class LatticeFileButtonTests: XCTestCase {
         XCTAssertEqual(v.meshVertices.count, 9)
         XCTAssertTrue(v.accepted)
         XCTAssertEqual(o.acceptedCount, 1)
-        XCTAssertEqual(v.worstCaseMargin, 1.8)
+        XCTAssertEqual(v.worstCaseMargin, 1.2, "★ RE-PINNED (notes25 C3): the governing margin — the struts' 1.2 under the solid's 1.8")
         XCTAssertEqual(v.massGrams, 42, "the check's mass")
         XCTAssertEqual(v.inPlaneMargin, 2.4)
         XCTAssertEqual(v.interlayerMargin, 1.8)
@@ -219,8 +219,10 @@ final class LatticeFileButtonTests: XCTestCase {
         let m = ResultsModel(projectName: "Bracket", outcome: o)
         let rows = ResultsVersions.rows(tabs: m.tabs, blocks: m.reportBlocks, requestedVF: { m.requestedVolumeFraction(of: $0) })
         let details = m.detailRows(.strength, version: try XCTUnwrap(rows.first))
-        XCTAssertTrue(details.contains { $0.label == "Struts" && $0.value == "Do not keep the margin · 1.2×, needs 1.5×" },
+        // ★ RE-PINNED (notes25 C3 (6)): one "how strong" line, the struts' governing margin, two decimals
+        XCTAssertTrue(details.contains { $0.label == "Holds" && $0.value == "1.20× your load" },
                       "★ the Strength tab says the struts: \(details)")
+        XCTAssertTrue(details.contains { $0.label == "Needs" && $0.value == "1.5× your load" })
         let checks = ResultsChecks.checks(tab: m.selected, margin: 1.8, required: 1.5, safetyMargin: 1.5, scenarios: [],
                                           thinJoints: 0, bridged: false, struts: m.reportBlocks?.latticeFile)
         let strong = try XCTUnwrap(checks.firstIndex { $0.title == "Strong enough" }, "the solid keeps its margin")
