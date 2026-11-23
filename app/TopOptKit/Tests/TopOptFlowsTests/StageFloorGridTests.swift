@@ -3,7 +3,8 @@
 // square, broken down into smaller perfect squares." / "Look at the grid - it's worse from this angle."
 // Two grids were drawn (the stage's floor grid, and once gravity was set the ground pass's own line grid at another height and
 // phase), and the stage's ray came from the far plane's point. Now:
-//   * the small squares are a round size (1, 2 or 5 × 10ⁿ mm) from the part's size, a major square exactly 5 × 5 of them;
+//   * the squares are powers of ten mm, each split into 10 × 10 of the next finer (★ his notes 2026-11-23, item 4: which ones
+//     show follows the zoom — Notes24StageTests; release 14's part-sized 1/2/5 × 10ⁿ squares are gone);
 //   * ONE floor: the ground draws no grid of its own, its shadow lies at the grid's height, the settled part's lowest point;
 //   * the floor stays put while the camera turns (it comes from the part, never the camera);
 //   * the ray starts on the near plane: steady at a grazing angle (RED CONTROL: the far plane's point is not).
@@ -13,33 +14,19 @@ import simd
 
 final class StageFloorGridTests: XCTestCase {
 
-    /// The small squares: the largest of 1, 2, 5 × 10ⁿ mm at most a fifth of the part; a major square 5 of them.
+    /// The squares: every level a power of ten mm, each exactly 10 × 10 of the next finer (one grid of perfect squares).
     func testTheSquaresAreRealRoundSizes() {
-        let cases: [(Float, Float)] = [(200, 20), (100, 20), (99, 10), (250, 50), (600, 100), (10, 2), (30, 5), (3, 0.5),
-                                       (1000, 200), (49.9, 5), (50, 10)]
-        for (extent, minor) in cases {
-            XCTAssertEqual(StageFloor.minorSpacing(extent: extent), minor, accuracy: minor * 1e-5, "part \(extent) mm")
-        }
-        for extent: Float in stride(from: 0.7, through: 3000, by: 3.3) {
-            let m = StageFloor.minorSpacing(extent: extent)
-            let mantissa = m / powf(10, floorf(log10f(m) + 1e-6))
-            XCTAssertTrue([1, 2, 5].contains { abs(mantissa - $0) < 1e-3 }, "★ a round size: \(m) mm for \(extent) mm")
-            XCTAssertLessThanOrEqual(m, extent / 5 * 1.0001, "a major square at most the part's size")
-            XCTAssertGreaterThan(m, extent / 12.5 * 0.9999, "never a dust of lines")
-            let f = StageFloor(y: 0, centre: .zero, extent: extent)
-            XCTAssertEqual(f.major, 5 * f.minor, "★ each major square is exactly 5 × 5 small squares")
-        }
-        XCTAssertEqual(StageFloor.minorSpacing(extent: 0), 1, "no part: a 1 mm grid, never a NaN")
-    }
-
-    /// The part's size moving a little (a smoothing stroke, a settle) leaves the squares as they were.
-    func testTheSquaresStayWhileThePartBarelyChanges() {
-        for extent: Float in [120, 200, 400] {
-            let m = StageFloor.minorSpacing(extent: extent)
-            for k: Float in [0.97, 0.99, 1.01, 1.03] {
-                XCTAssertEqual(StageFloor.minorSpacing(extent: extent * k), m, "\(extent) × \(k)")
+        for px in stride(from: Float(-5), through: 3, by: 0.37).map({ powf(10, $0) }) {
+            let lv = StageFloor.levels(pixelMM: px)
+            XCTAssertEqual(lv.count, 3)
+            for (k, l) in lv.enumerated() {
+                let e = log10f(l.sideMM / StageFloor.unit)
+                XCTAssertEqual(e, e.rounded(), accuracy: 1e-3, "★ a power of ten mm: \(l.sideMM) at \(px) mm a pixel")
+                if k > 0 { XCTAssertEqual(l.sideMM / lv[k - 1].sideMM, StageFloor.split, accuracy: 1e-3, "★ 10 × 10 inside") }
             }
         }
+        XCTAssertEqual(StageFloor.split, 10)
+        XCTAssertEqual(StageFloor.levels(pixelMM: 0)[0].sideMM.isFinite, true, "no NaN at a zero pixel")
     }
 
     /// The part's own lowest point under its pose, not its box's corner.
@@ -55,15 +42,17 @@ final class StageFloorGridTests: XCTestCase {
         let f = StageFloor.under(lo: SIMD3(-5, 2, -5), hi: SIMD3(195, 40, 35), lowest: 3)
         XCTAssertEqual(f.y, 3 - 0.02, accuracy: 1e-5, "a hair (a ten-thousandth of the part) under its lowest point")
         XCTAssertEqual(f.centre, SIMD2(95, 15))
-        XCTAssertEqual(f.minor, 20)
+        XCTAssertEqual(f.extent, 200)
     }
 
-    /// The shader: one grid (a major line every 5th small line, from the same coordinates), and the ray from the eye through
-    /// the near plane (never the far plane's point).
+    /// The shader: one grid (every level from the same floor coordinates, each 10 × the last), and the ray from the eye
+    /// through the near plane (never the far plane's point).
     func testTheStageShaderDrawsOneGridFromTheNearPlane() {
         let src = MeshRenderer.stageShaderSourceForTesting
-        XCTAssertTrue(src.contains("float2 cell = xz / U.spacing;"))
-        XCTAssertTrue(src.contains("gridMask(cell / \(Int(StageFloor.minorPerMajor)).0)"), "★ major = every 5th small line")
+        XCTAssertTrue(src.contains("float s0 = U.spacing * pow(10.0, n0);"))
+        XCTAssertTrue(src.contains("gridMask(xz / s0, fw / s0)") && src.contains("gridMask(xz / (s0 * 10.0), fw / (s0 * 10.0))")
+                      && src.contains("gridMask(xz / (s0 * 100.0), fw / (s0 * 100.0))"),
+                      "★ each level 10 × the last, from the same coordinates")
         XCTAssertTrue(src.contains("float3 rd = normalize(np - ro);"), "★ the eye through the near plane")
         XCTAssertFalse(src.contains("float4(ndc, 1.0, 1.0)"), "RED CONTROL: no far-plane point")
     }
@@ -157,7 +146,7 @@ final class StageFloorRendererTests: XCTestCase {
             let g = r.stageGridForTesting(aspect: 4.0 / 3)
             XCTAssertEqual(g.floorY, floor.y, "the stage draws THE floor")
             XCTAssertEqual(try XCTUnwrap(r.groundShadowYForTesting), g.floorY, "★ the shadow lies on the grid's floor")
-            XCTAssertEqual(g.spacing, floor.minor)
+            XCTAssertEqual(g.spacing, StageFloor.unit, "★ notes24: the squares count from 1 mm (10ⁿ of it, by the zoom)")
             // the settled box's lowest vertex
             let m = simd_float4x4(rotation)
             let centre = Self.box().bounds.center
@@ -168,7 +157,6 @@ final class StageFloorRendererTests: XCTestCase {
             }
             XCTAssertEqual(g.floorY, lowest, accuracy: 0.05, "★ the part rests on the floor (not 2% above it)")
             XCTAssertLessThan(g.floorY, lowest, "a hair under it")
-            XCTAssertEqual(g.spacing, 20, "a 200 mm part: 20 mm squares, 100 mm majors")
             let saved = r.camera
             for (az, el): (Float, Float) in [(0.2, 0.1), (1.7, 0.6), (3.0, 0.05)] {
                 r.camera.setOrientation(azimuth: az, elevation: el)

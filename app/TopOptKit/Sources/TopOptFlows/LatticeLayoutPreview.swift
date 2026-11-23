@@ -838,6 +838,8 @@ public final class LatticeLayoutPreview: ObservableObject {
             for (id, dead) in rep.withoutStress { if let k = keysAtLay[id] { verdicts[k] = dead } }
             organicWallVerdicts = verdicts
         }
+        // ★ notes24 (viewer): the growing tubes' widths, and whether the map on screen opens this lay's faces (LatticeGrowth)
+        growth.layBegins(groups, lineMM: s.beadMM, mapOpens: Self.mapFor(token: token, at: here, shown: bars, shownWhere: shownWhere) != nil)
         t0 = Date()
         let r = try await session.layOrganic(s, groups: groups)
         layStages["layWallMS"] = Self.ms(since: t0)   // ★ his 11-22: the engine's own times, as they come
