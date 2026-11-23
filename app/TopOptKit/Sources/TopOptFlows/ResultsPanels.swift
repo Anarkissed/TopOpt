@@ -75,7 +75,7 @@ public enum ResultsVersions {
         for tab in tabs where !used.contains(tab.index) {
             k += 1
             let title = ResultMark.letter(k - 1) + " · " + tab.headlineLabel   // ★ B2 (U4): a result is its letter + (tab.isLatticed ? " · latticed" : "")
-            out.append(row(tab, title: title, margin: tab.worstCaseMargin))
+            out.append(row(tab, title: title, margin: tab.worstCaseMargin, twoDecimals: blocks?.printFile != nil))   // ★ notes25 C3
         }
         return out
     }
@@ -108,7 +108,8 @@ public enum ResultsVersions {
     }
 
     static func row(_ tab: ResultVariantVM, title: String, margin: Double, headline: String? = nil,
-                    pieces: Int? = nil) -> ResultsVersionRow {
+                    pieces: Int? = nil, twoDecimals: Bool = false) -> ResultsVersionRow {
+        let x = twoDecimals ? StrengthWords.x : Self.x   // ★ notes25 C3: a print file's margin always with two decimals
         let verdict = tab.latticeAccepted == false ? "not certified" : x(margin) + " ✓"
         let piecesLine = pieces.map { " · in \($0) pieces" } ?? ""
         return ResultsVersionRow(id: "t\(tab.index)", title: title,
@@ -140,10 +141,12 @@ public enum ResultsChecks {
                               scenarios: [ScenarioResult], thinJoints: Int, bridged: Bool,
                               pieces: StrengthenText.PiecesFlag? = nil, finish: FinishReport? = nil,
                               weakest: SIMD3<Double>? = nil, struts: LatticeFileStrength? = nil,
-                              printFile: LatticeFileFacts? = nil) -> [ResultsCheck] {
+                              printFile: LatticeFileFacts? = nil, answer: LatticeStrengthAnswer? = nil) -> [ResultsCheck] {
         guard let tab else { return [] }
         var out: [ResultsCheck] = []
-        if let m = margin, m > 0 {
+        if let a = answer, a.governing != nil {
+            out.append(a.check())   // ★ notes25 C3 (4): "Not strong enough · Holds 1.34× · needs 1.5×", its place lit
+        } else if let m = margin, m > 0 {
             let built = safetyMargin.map { " · built for \(Int(($0 * 100).rounded()))%" } ?? ""
             out.append(m >= required
                 ? ResultsCheck(kind: .ok, title: "Strong enough", detail: ResultsVersions.x(m) + " your load" + built,
@@ -155,7 +158,7 @@ public enum ResultsChecks {
         }
         // ★ his ruling 11-17 ("Yes, but only in the structural lattice stage"): the struts must pass too — said right under the
         // solid's line, the file made either way
-        if let s = struts, let line = s.strutsLine {
+        if answer?.governing == nil, let s = struts, let line = s.strutsLine {
             out.append(ResultsCheck(kind: s.strutsPass ? .ok : .warn,
                                     title: s.strutsPass ? "Struts strong enough" : s.strutNoRule ? "Struts not checked" : "Struts not strong enough",
                                     detail: line, tab: .strength))
@@ -253,6 +256,17 @@ extension ResultsModel {
         let isSelected = tab?.index == selected?.index
         let s = reportBlocks?.strengthen
         switch t {
+        case .strength where latticeAnswer != nil:
+            // ★ notes25 C3 (6): a print file's ONE set — core's governing margin, where it gives first, the struts, the solid at
+            // his infill, the plastic, the load on the struts, the strengthening; nothing solid-only (no verified margin, mesh vs
+            // grid, peak stress, "breaks at about", "built for")
+            let a = latticeAnswer!
+            let plastic = tab.map { $0.massLabel + ($0.savingsPercent > 0 ? " \u{00B7} \($0.savingsPercent)% less than solid" : "") }
+            r += a.rows(loadKg: shownLoadKg, unit: loadUnit, infillPercent: infillPercent, plastic: plastic)
+            if let f = reportBlocks?.printFile { r += f.rows(.strength) }   // "Strengthened"
+            add("Version", version?.title)
+            add("Recommended", recommendationLine.map { $0.hasPrefix("Recommended: ") ? String($0.dropFirst(13)) : $0 }
+                .map { $0.prefix(1).uppercased() + $0.dropFirst() })
         case .strength:
             if let m = version?.margin {
                 let need = reportBlocks?.safetyMargin ?? s?.marginRequired
@@ -309,7 +323,7 @@ extension ResultsModel {
             }
         }
         // ★ his 11-21: a Lattice run's print file, strengthening and checks, every number in words
-        if let f = reportBlocks?.printFile { r += f.rows(t) }
+        if let f = reportBlocks?.printFile, !(t == .strength && latticeAnswer != nil) { r += f.rows(t) }
         return r
     }
 }
@@ -839,13 +853,15 @@ struct ResultsMotionBar: View {
     @Binding var playing: Bool
     let position: Double
     let scrub: (Double) -> Void
-    /// ★ 10-28: Bend / Break's Exaggeration slider ("to make it bend more visually"); nil hides it.
+    /// ★ 10-28: Bend / Break's Exaggeration slider ("to make it bend more visually"); nil hides it. ★ notes25 C1: its 0…1 runs
+    /// from the true size to the part's own top (ResultsLoadMotion.swift); `exaggerationLabel` says where it is ("6.7×").
     var exaggeration: Binding<Double>? = nil
+    var exaggerationLabel: String = ""
 
     init(title: String, readout: String, alarm: Bool, playing: Binding<Bool>, position: Double,
-         scrub: @escaping (Double) -> Void, exaggeration: Binding<Double>? = nil) {
+         scrub: @escaping (Double) -> Void, exaggeration: Binding<Double>? = nil, exaggerationLabel: String = "") {
         self.title = title; self.readout = readout; self.alarm = alarm; self._playing = playing
-        self.exaggeration = exaggeration; self.position = position; self.scrub = scrub
+        self.exaggeration = exaggeration; self.position = position; self.scrub = scrub; self.exaggerationLabel = exaggerationLabel
     }
 
     var body: some View {
@@ -878,12 +894,12 @@ struct ResultsMotionBar: View {
             if let ex = exaggeration {
                 HStack(spacing: DS.Space.s) {
                     Text("Exaggeration").font(.system(size: 11, weight: .semibold)).foregroundStyle(DS.Color.textSecondary.color)
-                    Slider(value: ex, in: Double(FlexAnimation.minExaggeration)...Double(FlexAnimation.maxExaggeration))
+                    Slider(value: ex, in: 0...1)
                         .tint(DS.Color.accent.color)
                         .accessibilityLabel("Bend exaggeration")
                         .accessibilityIdentifier("results-exaggeration-slider")
                         .background(ResultsChrome.publish("resultsExaggeration"))
-                    Text("\(Int(ex.wrappedValue))×").font(.system(size: 12, weight: .semibold)).monospacedDigit()
+                    Text(exaggerationLabel).font(.system(size: 12, weight: .semibold)).monospacedDigit()
                         .foregroundStyle(DS.Color.textPrimary.color).frame(width: 40, alignment: .trailing)
                 }
             }

@@ -78,16 +78,24 @@ final class IPadNotes1121Tests: XCTestCase {
         let f = try XCTUnwrap(LatticeFileFacts.decode(Self.report()))
         let checks = f.checks
         XCTAssertEqual(checks.map(\.title), ["Strengthened · 5 rounds", "Print file ready", "Prints layer by layer"])
-        XCTAssertEqual(checks[0].more, "50 struts thickened · 2 struts braced", "every round's thickening counted")
-        XCTAssertEqual(checks[1].detail, "120,000 struts · 3MF · 25.4 MB")
+        // ★ RE-PINNED (notes25 C3 (4): only numbers true for the final lattice — the per-round "thickened" sum counted a strut once
+        // per round; the file's line carries no strut count)
+        XCTAssertEqual(checks[0].more, "2 braced", "the braces (no widest strut in this report)")
+        XCTAssertEqual(checks[1].detail, "3MF · 25.4 MB")
         XCTAssertEqual(checks[1].more, "Turn supports off in your slicer")
-        let strength = f.rows(.strength).map(\.label)
-        XCTAssertTrue(strength.contains("Weakest strut") && strength.contains("Struts checked") && strength.contains("Strengthened"))
-        XCTAssertEqual(f.rows(.strength).first { $0.label == "Weakest strut" }?.value, "1.6× · in tension · 2.3 mm thick, 5.8 mm long")
+        // ★ RE-PINNED (notes25 C3 (6): the strength rows are the governing answer's — LatticeStrengthAnswer; the facts keep the
+        // strengthening)
+        XCTAssertEqual(f.rows(.strength).map(\.label), ["Strengthened"])
+        XCTAssertEqual(f.rows(.strength).first?.value, "5 rounds · 2 braced")
+        let a = try XCTUnwrap(LatticeStrengthAnswer.decode(report: Self.report()))
+        let strength = a.rows(loadKg: 0, unit: .kg, infillPercent: 100, plastic: nil)
+        XCTAssertEqual(strength.first { $0.label == "Gives first at" }?.value, "A strut · in tension · 2.30 mm thick, 5.8 mm long")
+        XCTAssertEqual(strength.first { $0.label == "Holds" }?.value, "1.60× your load", "the smaller of the strut's 1.6 and the solid's 3")
         let printing = f.rows(.printing).map(\.label)
         XCTAssertEqual(printing.first, "Print file")
         XCTAssertTrue(printing.contains("Bridges") && printing.contains("Layers") && printing.contains("Longest bridge"))
-        XCTAssertEqual(f.rows(.run).map(\.value), ["10 min 20 s", "10 min 1 s"], "the strengthening, then the file")
+        XCTAssertEqual(f.rows(.run).map(\.value), ["120,000", "10 min 20 s", "10 min 1 s"],
+                       "★ RE-PINNED (notes25 C3 (7)): the file's bars, then the strengthening, then the file")
     }
 
     func testAFileWithoutStrengtheningOrWithLayerTroubleSaysSo() throws {

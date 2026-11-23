@@ -340,6 +340,8 @@ public struct LatticeFileStrength: Equatable, Sendable {
     public var fields: String?
     /// ★ Each load scenario's own views, beside the report, or nil (one scenario).
     public var scenarioFields: String?
+    /// ★ notes25 C3: every bar's margin (strut_margins.bin, one float32 per bar in the layout's order), or nil.
+    public var strutMarginsFile: String? = nil
     public var maxInterlayerTensionMPa: Double
     /// The build direction the check judged the layers along, or nil.
     public var buildDirection: SIMD3<Double>?
@@ -387,6 +389,7 @@ public struct LatticeFileStrength: Equatable, Sendable {
         marginInterlayer = num(b["margin_interlayer"])
         fields = b["fields"] as? String
         scenarioFields = b["scenario_fields"] as? String
+        strutMarginsFile = b["strut_margins"] as? String
         maxInterlayerTensionMPa = num(b["max_interlayer_tension_mpa"])
         buildDirection = (b["build_direction"] as? [NSNumber]).flatMap {
             $0.count == 3 ? SIMD3($0[0].doubleValue, $0[1].doubleValue, $0[2].doubleValue) : nil
@@ -499,6 +502,8 @@ public enum LatticeFileRun {
         public var timing: RunTiming?
         /// ★ his notes 11-23: the job on the Mac that made it (its record is ended once the result is saved, or refused).
         public var jobID: String? = nil
+        /// ★ notes25 C3: strut_margins.bin (every bar's margin), fetched beside fields.bin when the report names it.
+        public var strutMargins: Data? = nil
     }
 
     /// ★ his 11-22 (the print-accurate lattice made on the Mac, "Check right after"): the file as soon as it is saved, before
@@ -746,7 +751,7 @@ public enum LatticeFileRun {
                         scenarioFields: named(report.strength?.scenarioFields),
                         timing: RunTiming.fromWorker(createdAt: state["created_at"] as? Double, startedAt: state["started_at"] as? Double,
                                                      finishedAt: state["finished_at"] as? Double),
-                        jobID: id)
+                        jobID: id, strutMargins: named(report.strength?.strutMarginsFile))
         } catch let f as Failure where !f.transient {
             record?.ended(id)
             throw f
@@ -923,7 +928,12 @@ public enum LatticeFileButton {
         let fraction = plasticShare(m.report, organic: organic, densityGCm3: densityGCm3)
         let passes = s?.accepted ?? true
         let accepted = organic || passes
-        let reportJSON = organic ? withSpots(m.reportJSON, fields: fields) : m.reportJSON
+        // ★ notes25 C3: the solid's own margin per voxel and every bar's margin ride with the result (Results colours by them)
+        let reportJSON = withStrength(organic ? withSpots(m.reportJSON, fields: fields) : m.reportJSON, fields: fields,
+                                      strutMargins: m.strutMargins)
+        // ★ notes25 C3: ONE "how strong" number — the smaller of the solid's margin at his infill and the weakest strut's
+        let governing = ((try? JSONSerialization.jsonObject(with: reportJSON)) as? [String: Any])
+            .flatMap(LatticeStrengthAnswer.decode(report:))?.governing
         let grams = s.flatMap { $0.massGrams > 0 ? $0.massGrams : nil } ?? m.report.plasticMM3 / 1000 * densityGCm3
         // ★ a fail with no load path (a load on open lattice): the not-strong-enough card says so INSTEAD of a margin sentence
         // (its load-path wording), with core's reason in plain words and the fix; a margin fail keeps core's own diagnosis
@@ -948,7 +958,7 @@ public enum LatticeFileButton {
             requestedVolumeFraction: fraction, achievedVolumeFraction: fraction,
             massGrams: grams, supportVolumeVoxels: block?.supportVolumeVoxels ?? 0,
             meshTriangleCount: mesh.indices.count / 3,
-            worstCaseMargin: s?.marginWorstCase ?? 0, accepted: accepted, v3Passes: passes,
+            worstCaseMargin: governing ?? s?.marginWorstCase ?? 0, accepted: accepted, v3Passes: passes,
             orientation: s?.buildDirection ?? SIMD3(0, 0, 1),
             maxStressMPa: s?.maxEffectiveVonMisesMPa ?? 0, maxInterlayerTensionMPa: s?.maxInterlayerTensionMPa ?? 0,
             inPlaneMargin: s?.marginInPlane ?? 0, interlayerMargin: s?.marginInterlayer ?? 0,
@@ -985,6 +995,27 @@ public enum LatticeFileButton {
         guard let g = OrganicSpotGrid.from(ids: ids, nx: f.gridNx, ny: f.gridNy, nz: f.gridNz, origin: f.gridOrigin,
                                             spacing: f.spacing, listed: listed) else { return report }
         o[OrganicSpotGrid.reportKey] = g.json
+        return (try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys])) ?? report
+    }
+
+    /// ★ notes25 C3: the report with the solid's margin per voxel (fields.bin's block 2, requested_volume_fraction -1, where core
+    /// judged a voxel as solid) and every bar's margin (strut_margins.bin), so a saved result colours by them whenever it opens.
+    static func withStrength(_ report: Data, fields: RemoteFieldsContainer?, strutMargins: Data?) -> Data {
+        guard var o = (try? JSONSerialization.jsonObject(with: report)) as? [String: Any], o["strength"] is [String: Any] else {
+            return report
+        }
+        var changed = false
+        if let f = fields, let block = f.variants.first(where: { $0.requestedVF == -1 })?.vonMises,
+           block.count == f.gridNx * f.gridNy * f.gridNz,
+           let solid = SolidMarginVoxels.from(block: block, nx: f.gridNx, ny: f.gridNy, origin: f.gridOrigin, spacing: f.spacing) {
+            o[SolidMarginVoxels.reportKey] = solid.json
+            changed = true
+        }
+        if let d = strutMargins, !d.isEmpty, d.count % 4 == 0 {
+            o["app_strut_margins"] = d.base64EncodedString()   // per bar, the layout's order (no bar geometry yet: not drawn)
+            changed = true
+        }
+        guard changed else { return report }
         return (try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys])) ?? report
     }
 
@@ -1144,7 +1175,8 @@ public enum LatticeFileButton {
         guard report.ok else { throw LatticeFileRun.Failure(report.why.isEmpty ? said : report.why) }
         guard let stl = file(report.fileName) else { throw LatticeFileRun.Failure("The file was made but could not be read") }
         return LatticeFileRun.Made(stl: stl, report: report, reportJSON: rd, fields: report.strength?.fields.flatMap(file),
-                                   scenarioFields: report.strength?.scenarioFields.flatMap(file), timing: nil)
+                                   scenarioFields: report.strength?.scenarioFields.flatMap(file), timing: nil,
+                                   strutMargins: report.strength?.strutMarginsFile.flatMap(file))
     }
 }
 
