@@ -102,7 +102,11 @@ final class Notes23PrintFlowTests: XCTestCase {
     /// passes is Approved instead of opening Results by itself.
     func testOnlyThePressLaysTheExactLatticeAndExportFollowsIt() throws {
         let ws = try FlexibleSource.code("WorkspacePlaceholder.swift")
-        XCTAssertEqual(ws.components(separatedBy: "exact: true").count - 1, 1, "★ one exact ask")
+        // ★ RE-PINNED (his 11-22, no Mac: "try again", cancel, or make it on the iPad): + the pop-up's "Make it on the iPad",
+        // his own press too (macNotAnsweringPopup)
+        XCTAssertEqual(ws.components(separatedBy: "exact: true").count - 1, 2, "★ two exact asks, both his presses")
+        let ipad = try XCTUnwrap(ws.range(of: "func macNotAnsweringPopup("))
+        XCTAssertTrue(String(ws[ipad.upperBound...].prefix(600)).contains("refreshLatticePreview(exact: true)"))
         let wait = try XCTUnwrap(ws.range(of: "func organicInputsWhenReady()"))
         XCTAssertTrue(String(ws[wait.upperBound...].prefix(900)).contains("refreshLatticePreview(checkNozzle: false, exact: true)"))
         for call in ws.components(separatedBy: "newEngine.update(").dropFirst() {

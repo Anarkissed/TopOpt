@@ -480,7 +480,10 @@ public enum LatticeFileRun {
 
     public struct Failure: Error, CustomStringConvertible {
         public let description: String
-        public init(_ d: String) { description = d }
+        /// ★ his notes 11-23: the Mac could not be reached (the job may still be there): its record is kept, so the job is
+        /// followed again when the app comes back. Anything else ends the job's record.
+        public var transient = false
+        public init(_ d: String, transient: Bool = false) { description = d; self.transient = transient }
     }
 
     /// What the Mac made: the file, its report, the strength check's views beside it (fields.bin, scenario_fields.bin; only
@@ -494,6 +497,23 @@ public enum LatticeFileRun {
         public var fields: Data?
         public var scenarioFields: Data?
         public var timing: RunTiming?
+        /// ★ his notes 11-23: the job on the Mac that made it (its record is ended once the result is saved, or refused).
+        public var jobID: String? = nil
+    }
+
+    /// ★ his 11-22 (the print-accurate lattice made on the Mac, "Check right after"): the file as soon as it is saved, before
+    /// the strength check ends, and how many of its first triangles are the solid (core writes "<file>.parts.json" before the
+    /// file is moved in; nil when that note is unreadable).
+    public struct Early: Sendable {
+        public static let partsSuffix = ".parts.json"
+        public var name: String
+        public var got: @Sendable (_ file: Data, _ baseTriangles: Int?) -> Void
+        public init(name: String = "lattice.3mf", got: @escaping @Sendable (_ file: Data, _ baseTriangles: Int?) -> Void) {
+            self.name = name; self.got = got
+        }
+        static func baseTriangles(_ parts: Data) -> Int? {
+            ((try? JSONSerialization.jsonObject(with: parts)) as? [String: Any])?["base_triangles"].flatMap { ($0 as? NSNumber)?.intValue }
+        }
     }
 
     /// The strengthening's ceiling: six rounds of a lay, a solve and a frame check (his stand: about 40 to 45 minutes).
@@ -522,8 +542,23 @@ public enum LatticeFileRun {
                 sem.signal()
             }.resume()
             sem.wait()
-            guard let out else { throw Failure("The Mac did not answer (\(err?.localizedDescription ?? "no response"))") }
+            guard let out else {
+                throw Failure("The Mac did not answer (\(err?.localizedDescription ?? "no response"))", transient: true)
+            }
             return (out.0, (out.1 as? HTTPURLResponse)?.statusCode ?? 0)
+        }
+
+        /// ★ his notes 11-23: a job's state, read again after a missed answer (an iPad coming back from the background drops
+        /// its first requests): three tries, 2 s then 4 s apart, before it is said the Mac cannot be reached (kept, transient).
+        func sendRetrying(_ req: URLRequest, tries: Int = 3, wait: TimeInterval = 2) throws -> (Data, Int) {
+            var pause = wait
+            for attempt in 1...Swift.max(1, tries) {
+                do { return try send(req) } catch let f as Failure where f.transient && attempt < tries {
+                    Thread.sleep(forTimeInterval: pause)
+                    pause *= 2
+                }
+            }
+            return try send(req)
         }
 
         /// The worker's core must be the app's (a different core lays a different lattice than the preview drew).
@@ -562,8 +597,11 @@ public enum LatticeFileRun {
         }
 
         /// Polls the job to its end; its last record. A cancel deletes the Mac's job; a failure says the CLI's last line.
-        func wait(_ jobURL: URL, ceiling: TimeInterval, failed: String, isCancelled: @Sendable () -> Bool,
-                  onState: @Sendable (_ state: String, _ position: Int?) -> Void) throws -> [String: Any] {
+        /// ★ his notes 11-23: `doneFile` — a worker restarted since forgets its jobs' states but still serves their files, so
+        /// a job it no longer knows whose `doneFile` is there is done (an empty record). ★ his 11-22: `eachPoll` after each poll.
+        func wait(_ jobURL: URL, ceiling: TimeInterval, failed: String, doneFile: String? = nil, isCancelled: @Sendable () -> Bool,
+                  onState: @Sendable (_ state: String, _ position: Int?) -> Void,
+                  eachPoll: (_ state: String) -> Void = { _ in }) throws -> [String: Any] {
             let deadline = Date().addingTimeInterval(ceiling)
             var record: [String: Any] = [:]
             while Date() < deadline {
@@ -573,13 +611,16 @@ public enum LatticeFileRun {
                     _ = try? send(del)
                     throw Failure("Cancelled")
                 }
-                let (d, code) = try send(URLRequest(url: jobURL))
+                let (d, code) = try sendRetrying(URLRequest(url: jobURL))
+                if code == 404, let doneFile, try fetch(jobURL, doneFile) != nil { return [:] }
+                if code >= 500 { throw Failure("The Mac's worker did not answer (\(code))", transient: true) }
                 guard code == 200, let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else {
                     throw Failure("Lost the job on the Mac")
                 }
                 let state = (o["state"] as? String) ?? "unknown"
                 record = o
                 onState(state, o["position"] as? Int)   // queued (and how many ahead) or running
+                eachPoll(state)   // ★ his 11-22: the print-accurate file fetched as soon as it is saved
                 if state == "done" { return record }
                 if state == "failed" || state == "error" || state == "cancelled" {
                     // the CLI's last line carries the same plain why as its report (the contract)
@@ -593,9 +634,17 @@ public enum LatticeFileRun {
 
         /// One of the job's files (`name` may be a round's: "r3/strengthened.json"), or nil.
         func file(_ jobURL: URL, _ name: String) -> Data? {
+            try? fetch(jobURL, name)
+        }
+
+        /// ★ his notes 11-23: one of the job's files; nil when the Mac has none by that name; THROWS (transient) when the Mac
+        /// cannot be reached, so a file the Mac holds is never taken for one it lacks (its job is followed again later).
+        func fetch(_ jobURL: URL, _ name: String) throws -> Data? {
             var url = jobURL.appendingPathComponent("files")
             for c in name.split(separator: "/") { url = url.appendingPathComponent(String(c)) }
-            guard let (d, c) = try? send(URLRequest(url: url)), c == 200, !d.isEmpty else { return nil }
+            let (d, c) = try sendRetrying(URLRequest(url: url))
+            if c >= 500 { throw Failure("The Mac's worker did not answer (\(c))", transient: true) }
+            guard c == 200, !d.isEmpty else { return nil }
             return d
         }
     }
@@ -632,31 +681,76 @@ public enum LatticeFileRun {
 
     /// Submit, poll, fetch: blocking, so call it off the main thread. The worker's core must be the app's (a different core lays
     /// a different lattice than the preview drew). ★ Organic cut 2: `strengthened` = the strengthening's last round, replayed.
+    /// ★ his notes 11-23: `record` keeps the job's record (RemoteJobStore) from its submit until its result is saved (the
+    /// caller's), or ended here when the job fails, is cancelled or cannot be read — never when the Mac only could not be
+    /// reached. `strengthenedFrom`: the strengthening this file replays, whose own record ends once this job is on the Mac.
     public static func drive(config: RemoteRunnerConfig, modelPath: String, jobJSON: Data, projectName: String,
                              demand: Data? = nil, strengthJob: Data? = nil, tensor: Data? = nil,
                              strengthened: Strengthened.Files? = nil,
+                             record: LatticeJobRecorder? = nil, strengthenedFrom: String? = nil,
                              isCancelled: @escaping @Sendable () -> Bool = { false },
-                             onState: @escaping @Sendable (_ state: String, _ position: Int?) -> Void = { _, _ in })
+                             onState: @escaping @Sendable (_ state: String, _ position: Int?) -> Void = { _, _ in },
+                             onJob: @escaping @Sendable (URL) -> Void = { _ in }, early: Early? = nil)
         throws -> Made {
         let w = Worker(config)
         try w.checkEngine()
         let jobURL = try w.submit(try parts(modelPath: modelPath, jobJSON: jobJSON, projectName: projectName, demand: demand,
                                             strengthJob: strengthJob, tensor: tensor, strengthened: strengthened))
-        let record = try w.wait(jobURL, ceiling: ceilingSeconds, failed: "The file could not be made", isCancelled: isCancelled,
-                                onState: onState)
-        guard let rd = w.file(jobURL, LatticeFileJob.reportName), let report = LatticeFileReport.parse(rd) else {
-            throw Failure("The Mac made the file but its report could not be read")
+        onJob(jobURL)
+        record?.saved(.file, jobID: jobURL.lastPathComponent, config: config, strengthenJobID: strengthenedFrom)
+        if let s = strengthenedFrom { record?.ended(s) }
+        return try fileMade(w, jobURL, record: record, isCancelled: isCancelled, onState: onState, early: early)
+    }
+
+    /// ★ his notes 11-23: a print file's job already on the Mac (the app was gone when it ended), followed to its end and
+    /// fetched — the same result as `drive`'s. Blocking.
+    public static func follow(config: RemoteRunnerConfig, jobID: String, record: LatticeJobRecorder? = nil,
+                              isCancelled: @escaping @Sendable () -> Bool = { false },
+                              onState: @escaping @Sendable (_ state: String, _ position: Int?) -> Void = { _, _ in })
+        throws -> Made {
+        let w = Worker(config)
+        return try fileMade(w, config.baseURL.appendingPathComponent("jobs").appendingPathComponent(jobID), record: record,
+                            isCancelled: isCancelled, onState: onState)
+    }
+
+    /// The file job polled to its end and what it made fetched; its record ended on anything but a Mac out of reach.
+    /// ★ his 11-22 ("Check right after"): with `early`, the 3MF is fetched the moment it is saved (core's parts note is
+    /// written first), so the iPad draws it while the Mac still checks its strength; kept, so it is fetched once.
+    static func fileMade(_ w: Worker, _ jobURL: URL, record: LatticeJobRecorder?, isCancelled: @escaping @Sendable () -> Bool,
+                         onState: @escaping @Sendable (_ state: String, _ position: Int?) -> Void, early: Early? = nil)
+        throws -> Made {
+        let id = jobURL.lastPathComponent
+        do {
+            var earlyFile: Data?
+            let state = try w.wait(jobURL, ceiling: ceilingSeconds, failed: "The file could not be made",
+                                   doneFile: LatticeFileJob.reportName, isCancelled: isCancelled, onState: onState,
+                                   eachPoll: { state in
+                guard let early, earlyFile == nil, state == "running" || state == "done",
+                      let parts = w.file(jobURL, early.name + Early.partsSuffix), let d = w.file(jobURL, early.name) else { return }
+                earlyFile = d
+                early.got(d, Early.baseTriangles(parts))
+            })
+            guard let rd = try w.fetch(jobURL, LatticeFileJob.reportName), let report = LatticeFileReport.parse(rd) else {
+                throw Failure("The Mac made the file but its report could not be read")
+            }
+            guard report.ok else { throw Failure(report.why.isEmpty ? "The file could not be made" : report.why) }
+            // the file by the name the report gives (Organic: lattice.3mf), else the job's own output
+            let kept = early?.name == report.fileName ? earlyFile : nil
+            guard let stl = try kept ?? w.fetch(jobURL, report.fileName) else {
+                throw Failure("The Mac made the file but it could not be fetched")
+            }
+            // ★ Install 3: the strength check's views, by the names its block gives (bare names beside the report); enrichment —
+            // a missing one leaves the views gated, never the result
+            func named(_ n: String?) -> Data? { n.flatMap { $0.contains("/") || $0.contains("..") ? nil : w.file(jobURL, $0) } }
+            return Made(stl: stl, report: report, reportJSON: rd, fields: named(report.strength?.fields),
+                        scenarioFields: named(report.strength?.scenarioFields),
+                        timing: RunTiming.fromWorker(createdAt: state["created_at"] as? Double, startedAt: state["started_at"] as? Double,
+                                                     finishedAt: state["finished_at"] as? Double),
+                        jobID: id)
+        } catch let f as Failure where !f.transient {
+            record?.ended(id)
+            throw f
         }
-        guard report.ok else { throw Failure(report.why.isEmpty ? "The file could not be made" : report.why) }
-        // the file by the name the report gives (Organic: lattice.3mf), else the job's own output
-        guard let stl = w.file(jobURL, report.fileName) else { throw Failure("The Mac made the file but it could not be fetched") }
-        // ★ Install 3: the strength check's views, by the names its block gives (bare names beside the report); enrichment —
-        // a missing one leaves the views gated, never the result
-        func named(_ n: String?) -> Data? { n.flatMap { $0.contains("/") || $0.contains("..") ? nil : w.file(jobURL, $0) } }
-        return Made(stl: stl, report: report, reportJSON: rd, fields: named(report.strength?.fields),
-                    scenarioFields: named(report.strength?.scenarioFields),
-                    timing: RunTiming.fromWorker(createdAt: record["created_at"] as? Double, startedAt: record["started_at"] as? Double,
-                                                 finishedAt: record["finished_at"] as? Double))
     }
 
     /// ★ Organic cut 2 (handover f3; his 11-18 "Strengthen by adding ... Yes, absolutely"): what the strengthening did
@@ -677,6 +771,8 @@ public enum LatticeFileRun {
         public var pastLimitWidestMM: Double
         public var files: Files?
         public var summaryJSON: Data
+        /// ★ his notes 11-23: the strengthening's job on the Mac (its record ends once the file's job is on the Mac).
+        public var jobID: String? = nil
 
         /// strengthen.json read (the files fetched apart). nil: not core's strengthen.json.
         public static func parse(_ d: Data) -> (summary: Strengthened, lastRound: String?)? {
@@ -708,10 +804,13 @@ public enum LatticeFileRun {
 
     /// ★ Organic cut 2 (handover f3): the strengthening on the Mac — the SAME lattice_file job through `organic-strengthen`
     /// (the worker's `run` field) — then its last round's two files fetched for the file job to replay. Blocking.
+    /// ★ his notes 11-23: `record` keeps the strengthening's record from its submit, with the file job's own inputs beside it
+    /// (`LatticeJobInputs`), so the file can still be made from it if the app is gone when it ends.
     public static func strengthen(config: RemoteRunnerConfig, modelPath: String, jobJSON: Data, projectName: String,
-                                  strengthJob: Data, tensor: Data?,
+                                  strengthJob: Data, tensor: Data?, record: LatticeJobRecorder? = nil,
                                   isCancelled: @escaping @Sendable () -> Bool = { false },
-                                  onState: @escaping @Sendable (_ state: String, _ position: Int?) -> Void = { _, _ in })
+                                  onState: @escaping @Sendable (_ state: String, _ position: Int?) -> Void = { _, _ in },
+                                  onJob: @escaping @Sendable (URL) -> Void = { _ in })
         throws -> Strengthened {
         let w = Worker(config)
         try w.checkEngine()
@@ -719,23 +818,51 @@ public enum LatticeFileRun {
                           tensor: tensor, strengthened: nil)
         p.append(RemoteRun.UploadPart(name: "run", filename: nil, contentType: nil, data: Data("organic-strengthen".utf8)))
         let jobURL = try w.submit(p)
-        _ = try w.wait(jobURL, ceiling: strengthenCeilingSeconds, failed: "The lattice could not be strengthened",
-                       isCancelled: isCancelled, onState: onState)
-        guard let sd = w.file(jobURL, "strengthen.json"), let read = Strengthened.parse(sd) else {
-            throw Failure("The Mac strengthened the lattice but its report could not be read")
+        onJob(jobURL)
+        if let record {
+            record.keepInputs(jobID: jobURL.lastPathComponent, json: jobJSON, strengthJob: strengthJob, tensor: tensor)
+            record.saved(.strengthen, jobID: jobURL.lastPathComponent, config: config)
         }
-        var s = read.summary
-        // the last round's lattice: strengthened.json and the additions it names (bare names, beside it)
-        if let last = read.lastRound, !last.contains(".."), let json = w.file(jobURL, last),
-           let doc = (try? JSONSerialization.jsonObject(with: json)) as? [String: Any],
-           let name = doc["additions"] as? String, !name.contains("/"), !name.contains("..") {
-            let folder = (last as NSString).deletingLastPathComponent
-            guard let adds = w.file(jobURL, folder.isEmpty ? name : folder + "/" + name) else {
-                throw Failure("The Mac strengthened the lattice but its additions could not be fetched")
+        return try strengthened(w, jobURL, record: record, isCancelled: isCancelled, onState: onState)
+    }
+
+    /// ★ his notes 11-23: a strengthening already on the Mac, followed to its end (re-attach). Blocking.
+    public static func followStrengthen(config: RemoteRunnerConfig, jobID: String, record: LatticeJobRecorder? = nil,
+                                        isCancelled: @escaping @Sendable () -> Bool = { false },
+                                        onState: @escaping @Sendable (_ state: String, _ position: Int?) -> Void = { _, _ in })
+        throws -> Strengthened {
+        try strengthened(Worker(config), config.baseURL.appendingPathComponent("jobs").appendingPathComponent(jobID),
+                         record: record, isCancelled: isCancelled, onState: onState)
+    }
+
+    /// The strengthening polled to its end, its summary and last round fetched; its record ended on anything but a Mac out of
+    /// reach (on success it stays until the file's job is on the Mac).
+    static func strengthened(_ w: Worker, _ jobURL: URL, record: LatticeJobRecorder?, isCancelled: @escaping @Sendable () -> Bool,
+                             onState: @escaping @Sendable (_ state: String, _ position: Int?) -> Void) throws -> Strengthened {
+        let id = jobURL.lastPathComponent
+        do {
+            _ = try w.wait(jobURL, ceiling: strengthenCeilingSeconds, failed: "The lattice could not be strengthened",
+                           doneFile: "strengthen.json", isCancelled: isCancelled, onState: onState)
+            guard let sd = try w.fetch(jobURL, "strengthen.json"), let read = Strengthened.parse(sd) else {
+                throw Failure("The Mac strengthened the lattice but its report could not be read")
             }
-            s.files = Strengthened.Files(json: json, additionsName: name, additions: adds)
+            var s = read.summary
+            s.jobID = id
+            // the last round's lattice: strengthened.json and the additions it names (bare names, beside it)
+            if let last = read.lastRound, !last.contains(".."), let json = try w.fetch(jobURL, last),
+               let doc = (try? JSONSerialization.jsonObject(with: json)) as? [String: Any],
+               let name = doc["additions"] as? String, !name.contains("/"), !name.contains("..") {
+                let folder = (last as NSString).deletingLastPathComponent
+                guard let adds = try w.fetch(jobURL, folder.isEmpty ? name : folder + "/" + name) else {
+                    throw Failure("The Mac strengthened the lattice but its additions could not be fetched")
+                }
+                s.files = Strengthened.Files(json: json, additionsName: name, additions: adds)
+            }
+            return s
+        } catch let f as Failure where !f.transient {
+            record?.ended(id)
+            throw f
         }
-        return s
     }
 }
 
@@ -861,22 +988,26 @@ public enum LatticeFileButton {
         return (try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys])) ?? report
     }
 
-    private final class Progress: @unchecked Sendable {
+    final class Progress: @unchecked Sendable {   // ★ notes 11-23: the re-attach runner's too (LatticeJobResume)
         let call: (Int, Int, Int) -> Bool
         init(_ c: @escaping (Int, Int, Int) -> Bool) { call = c }
     }
 
     /// The run the Lattice button starts: the job sent, polled and fetched on the Mac (a tap on the running card's cancel
     /// deletes the Mac's job), then `outcome`.
+    /// ★ his notes 11-23: the job is recorded for its version (the request's project) in `defaults`, as an Optimize run's is.
     public static func runner(config: RemoteRunnerConfig, job: LatticeFileJob.ForPart, projectName: String,
-                              strengthJob: Data?, densityGCm3: Double) -> RunModel.Runner {
-        { _, progress, _ in
+                              strengthJob: Data?, densityGCm3: Double, defaults: UserDefaults = .standard,
+                              inputsRoot: URL = LatticeJobInputs.defaultRoot) -> RunModel.Runner {
+        { request, progress, _ in
             let keepGoing = Progress(progress)
             _ = keepGoing.call(0, 1, 0)
+            let record = LatticeJobRecorder(projectID: request.projectID, projectName: projectName, organic: false,
+                                            defaults: defaults, inputsRoot: inputsRoot)
             let made = try LatticeFileRun.drive(config: config, modelPath: job.modelPath, jobJSON: job.json, projectName: projectName,
-                                                demand: job.demand, strengthJob: strengthJob, tensor: job.tensor,
+                                                demand: job.demand, strengthJob: strengthJob, tensor: job.tensor, record: record,
                                                 isCancelled: { !keepGoing.call(0, 1, 0) })
-            return try outcome(made, densityGCm3: densityGCm3)
+            return try record.reading(made) { try outcome(made, densityGCm3: densityGCm3) }
         }
     }
 
@@ -886,24 +1017,54 @@ public enum LatticeFileButton {
     /// file alone. The strengthening's summary rides in the result's report as its `organic_strengthen` block (the Results
     /// screen and the certify wizard read it). Two coarse ticks: strengthening, then making.
     public static func organicRunner(config: RemoteRunnerConfig, job: LatticeFileJob.ForPart, projectName: String,
-                                     strengthJob: Data?, densityGCm3: Double) -> RunModel.Runner {
-        { _, progress, _ in
+                                     strengthJob: Data?, densityGCm3: Double, defaults: UserDefaults = .standard,
+                                     inputsRoot: URL = LatticeJobInputs.defaultRoot,
+                                     onJob: @escaping @Sendable (_ strengthening: Bool, URL) -> Void = { _, _ in },
+                                     early: LatticeFileRun.Early? = nil) -> RunModel.Runner {
+        { request, progress, _ in
             let keepGoing = Progress(progress)
             let steps = strengthJob == nil ? 1 : 2
             _ = keepGoing.call(0, steps, 0)
+            // ★ his notes 11-23: both jobs recorded for the version, so either is followed again if the app is gone
+            let record = LatticeJobRecorder(projectID: request.projectID, projectName: projectName, organic: true,
+                                            defaults: defaults, inputsRoot: inputsRoot)
             var strengthened: LatticeFileRun.Strengthened?
             if let strengthJob {
                 strengthened = try LatticeFileRun.strengthen(config: config, modelPath: job.modelPath, jobJSON: job.json,
                                                              projectName: projectName, strengthJob: strengthJob, tensor: job.tensor,
-                                                             isCancelled: { !keepGoing.call(0, steps, 0) })
+                                                             record: record, isCancelled: { !keepGoing.call(0, steps, 0) },
+                                                             onJob: { onJob(true, $0) })
                 _ = keepGoing.call(1, steps, 0)
             }
-            var made = try LatticeFileRun.drive(config: config, modelPath: job.modelPath, jobJSON: job.json, projectName: projectName,
-                                                strengthJob: strengthJob, tensor: job.tensor, strengthened: strengthened?.files,
-                                                isCancelled: { !keepGoing.call(steps - 1, steps, 0) })
-            if let s = strengthened { made.reportJSON = withStrengthen(made.reportJSON, s) }
-            return try outcome(made, densityGCm3: densityGCm3, organic: true)
+            return try fileFromStrengthening(config: config, modelPath: job.modelPath, jobJSON: job.json, projectName: projectName,
+                                             strengthJob: strengthJob, tensor: job.tensor, strengthened: strengthened,
+                                             record: record, densityGCm3: densityGCm3,
+                                             isCancelled: { !keepGoing.call(steps - 1, steps, 0) },
+                                             onJob: { onJob(false, $0) }, early: early)
         }
+    }
+
+    /// The Organic file made (from the strengthening's last round, when there was one) and read as the result. A refusal
+    /// before the file's job is on the Mac ends the strengthening's record too (nothing could ever make its file).
+    static func fileFromStrengthening(config: RemoteRunnerConfig, modelPath: String, jobJSON: Data, projectName: String,
+                                      strengthJob: Data?, tensor: Data?, strengthened: LatticeFileRun.Strengthened?,
+                                      record: LatticeJobRecorder, densityGCm3: Double,
+                                      isCancelled: @escaping @Sendable () -> Bool,
+                                      onJob: @escaping @Sendable (URL) -> Void = { _ in },
+                                      early: LatticeFileRun.Early? = nil) throws -> OptimizeOutcome {
+        var made: LatticeFileRun.Made
+        do {
+            made = try LatticeFileRun.drive(config: config, modelPath: modelPath, jobJSON: jobJSON, projectName: projectName,
+                                            strengthJob: strengthJob, tensor: tensor, strengthened: strengthened?.files,
+                                            record: record, strengthenedFrom: strengthened?.jobID, isCancelled: isCancelled,
+                                            onJob: onJob, early: early)
+        } catch let f as LatticeFileRun.Failure where !f.transient {
+            if let s = strengthened?.jobID { record.ended(s) }
+            throw f
+        }
+        if let s = strengthened { made.reportJSON = withStrengthen(made.reportJSON, s) }
+        let m = made
+        return try record.reading(m) { try outcome(m, densityGCm3: densityGCm3, organic: true) }
     }
 
     /// The file's report with the strengthening's summary added as `organic_strengthen` (an app-side block; core's keys

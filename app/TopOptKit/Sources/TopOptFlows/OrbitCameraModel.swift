@@ -104,6 +104,10 @@ public final class OrbitCameraModel: ObservableObject {
     public func setFrameLift(_ f: Float) {
         if camera.frameLift != f { camera.frameLift = f }
     }
+    /// ★ his iPad notes 11-23: draw the picture in this part of the view (OrbitCamera.frameRegion); nil: the whole view.
+    public func setFrameRegion(_ r: SIMD4<Float>?) {
+        if camera.frameRegion != r { camera.frameRegion = r }
+    }
 
     public func adopt(_ newCamera: OrbitCamera) {
         camera = newCamera

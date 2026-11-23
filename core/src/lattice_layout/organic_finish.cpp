@@ -5,14 +5,19 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <map>
+#include <mutex>
 #include <set>
+#include <thread>
 #include <utility>
 
 #include "topopt/organic_lattice.hpp"
+#include "on_every_core.hpp"
 
 namespace topopt::lattice_layout {
 namespace {
@@ -38,6 +43,9 @@ double to_segment2(const Vec3& p, const Vec3& a, const Vec3& b) {
 using Key = std::array<double, 3>;
 Key key_of(const Vec3& p) { return {p.x, p.y, p.z}; }
 
+// How many of a landing's nearest candidates the fallback works out ahead on every core (the rest, rarely reached, in turn).
+constexpr std::size_t kFallbackAhead = 256;
+
 }  // namespace
 
 std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std::pair<int, double>>& reach_of,
@@ -57,20 +65,23 @@ std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std
   const Domain::Probe probe = domain.probe();
   const PartMeasure::Probe& part = probe.part();
   // The surface's inward normal at `p`: the depth's gradient, read `h` either side (the old sdf_normal at 2 r).
-  auto normal_in = [&](const Vec3& p, double h) {
-    const Vec3 g{part.depth({p.x + h, p.y, p.z}) - part.depth({p.x - h, p.y, p.z}),
-                 part.depth({p.x, p.y + h, p.z}) - part.depth({p.x, p.y - h, p.z}),
-                 part.depth({p.x, p.y, p.z + h}) - part.depth({p.x, p.y, p.z - h})};
+  // (each question below by any probe of the domain, `..._by`, so it can be asked on every core; by `probe` otherwise)
+  auto normal_in_by = [&](const PartMeasure::Probe& pt, const Vec3& p, double h) {
+    const Vec3 g{pt.depth({p.x + h, p.y, p.z}) - pt.depth({p.x - h, p.y, p.z}),
+                 pt.depth({p.x, p.y + h, p.z}) - pt.depth({p.x, p.y - h, p.z}),
+                 pt.depth({p.x, p.y, p.z + h}) - pt.depth({p.x, p.y, p.z - h})};
     const double n = std::sqrt(g.x * g.x + g.y * g.y + g.z * g.z);
     return n > 1e-12 ? Vec3{g.x / n, g.y / n, g.z / n} : Vec3{0.0, 0.0, 0.0};
   };
+  auto normal_in = [&](const Vec3& p, double h) { return normal_in_by(part, p, h); };
   // Is the part's surface nearest `p` an open face of `region`: a hair inside it, lattice of the region?
-  auto open_face = [&](const Vec3& p, double depth, const Vec3& n, int region) {
+  auto open_face_by = [&](const Domain::Probe& pr, const Vec3& p, double depth, const Vec3& n, int region) {
     if (!(n.x * n.x + n.y * n.y + n.z * n.z > 0.25)) return false;
     const Vec3 q{p.x - n.x * (depth - kHair), p.y - n.y * (depth - kHair), p.z - n.z * (depth - kHair)};
-    const Where w = probe.where(q);
+    const Where w = pr.where(q);
     return w.lattice() && w.id == region;
   };
+  auto open_face = [&](const Vec3& p, double depth, const Vec3& n, int region) { return open_face_by(probe, p, depth, n, region); };
   // Every bar's two ends, as joined already; and the bars by place, for "buried".
   std::set<std::pair<Key, Key>> joined;
   auto pair_of = [](const Vec3& a, const Vec3& b) {
@@ -162,22 +173,35 @@ std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std
     // nearest protected face (by the distance to its own triangles). A landing whose stem is not clear is not used
     // (its foot is not); a join that is not clear is not laid.
     const double line = domain.spec().bead_mm;
-    auto clear = [&](const Vec3& a, const Vec3& b, double w, const Vec3& n_in) {
-      const int n = std::max(1, static_cast<int>(std::ceil(dist(a, b) / 0.1)));
+    // Speed (his 11-23 "Finishing" wait; the same answer): the distance to the protected faces cannot change by more
+    // than the way walked (it is a distance), so a point found clear by a margin m answers for every later point within
+    // m of it along the line (less a micrometre for rounding): those are not measured again. A point that is not clear
+    // is still found, at the same 0.1 mm points, so every stem and join is judged exactly as before.
+    auto clear_by = [&](const Domain::Probe& pr, const Vec3& a, const Vec3& b, double w, const Vec3& n_in) {
+      const double len = dist(a, b);
+      const int n = std::max(1, static_cast<int>(std::ceil(len / 0.1)));
+      const double floor_gap = line - 1e-9 + 0.5 * w;   // clear: the distance at least this
+      double known_to = -1.0;                          // along the line (mm): the distance test passes up to here
       for (int k = 0; k <= n; ++k) {
-        const Vec3 s = lerp(a, b, static_cast<double>(k) / n);
+        const double t = static_cast<double>(k) / n;
+        const Vec3 s = lerp(a, b, t);
         const Vec3 q{s.x + n_in.x * kHair, s.y + n_in.y * kHair, s.z + n_in.z * kHair};
-        const Where wq = probe.where(q);
+        const Where wq = pr.where(q);
         if (!(wq.lattice() && wq.id == region)) return false;
-        if (probe.protect_face_distance(s) - 0.5 * w < line - 1e-9) return false;
+        const double along = t * len;
+        if (along <= known_to) continue;
+        const double d = pr.protect_face_distance(s);
+        if (d - 0.5 * w < line - 1e-9) return false;
+        known_to = along + (d - floor_gap) - 1e-6;
       }
       return true;
     };
     std::vector<char> usable(L.size(), 1);
-    for (std::size_t i = 0; i < L.size(); ++i) {
-      const double w = L[i].width;
-      if (!clear(L[i].p, foot[i], w, L[i].n)) { usable[i] = 0; ++rep.landings_not_used; }
-    }
+    on_every_core(domain, L.size(), [&](const Domain::Probe& pr, std::size_t i) {
+      usable[i] = clear_by(pr, L[i].p, foot[i], L[i].width, L[i].n) ? 1 : 0;
+    });
+    for (std::size_t i = 0; i < L.size(); ++i)
+      if (!usable[i]) ++rep.landings_not_used;
     // The bars by place, for "buried" (the old test: every one of 7 points along the join inside an existing bar).
     const double cell = std::max(reach, 0.5);
     auto slot = [&](double x) { return static_cast<long long>(std::floor(x / cell)); };
@@ -206,18 +230,22 @@ std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std
     };
     // It stays on the region: each inner point is lattice of the region, or within the join's half width of the
     // region's open face.
-    auto on_region = [&](const Vec3& a, const Vec3& b, double r) {
+    auto on_region_by = [&](const Domain::Probe& pr, const Vec3& a, const Vec3& b, double r) {
       for (int k = 1; k <= 5; ++k) {
         const Vec3 s = lerp(a, b, k / 6.0);
-        const Where w = probe.where(s);
+        const Where w = pr.where(s);
         if (w.lattice() && w.id == region) continue;
-        const double d = part.depth(s);
-        if (std::fabs(d) <= r && open_face(s, d, normal_in(s, std::max(r, 1e-4)), region)) continue;
+        const double d = pr.part().depth(s);
+        if (std::fabs(d) <= r && open_face_by(pr, s, d, normal_in_by(pr.part(), s, std::max(r, 1e-4)), region)) continue;
         return false;
       }
       return true;
     };
-    auto fits = [&](std::size_t i, std::size_t j, double lo, double hi) {
+    // Whether landings i and j may be joined: the quick conditions (`fits_quick`) and the costly ones (`fits_rest`: buried,
+    // and on the region, which reads the part at five points). Speed (his 11-23 Finishing wait): every search below wants
+    // only the NEAREST partners that fit, so it sorts the quick ones by distance and tests the costly conditions in that
+    // order, stopping where the answer is decided: the same partners in the same order as testing every one first.
+    auto fits_quick = [&](std::size_t i, std::size_t j, double lo, double hi) {
       if (!usable[i] || !usable[j]) return false;          // OJ8: its stem would not be clear
       if (dist(foot[i], foot[j]) < 1e-9) return false;   // one foot (OJ8)
       const double d = dist(L[i].p, L[j].p);
@@ -225,9 +253,13 @@ std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std
       if (joined.count(pair_of(L[i].p, L[j].p))) return false;
       const Vec3 &ni = L[i].n, &nj = L[j].n;
       if (ni.x * nj.x + ni.y * nj.y + ni.z * nj.z < kOrganicFinishCoplanarCos) return false;   // would cut the corner
-      if (buried(L[i].p, L[j].p)) return false;
-      return on_region(L[i].p, L[j].p, 0.5 * std::min(L[i].width, L[j].width));
+      return true;
     };
+    auto fits_rest_by = [&](const Domain::Probe& pr, std::size_t i, std::size_t j) {
+      if (buried(L[i].p, L[j].p)) return false;
+      return on_region_by(pr, L[i].p, L[j].p, 0.5 * std::min(L[i].width, L[j].width));
+    };
+    auto fits_rest = [&](std::size_t i, std::size_t j) { return fits_rest_by(probe, i, j); };
     std::map<std::array<long long, 3>, std::vector<std::size_t>> land_grid;
     auto lslot = [&](double x) { return static_cast<long long>(std::floor(x / reach)); };
     for (std::size_t i = 0; i < L.size(); ++i) land_grid[{lslot(L[i].p.x), lslot(L[i].p.y), lslot(L[i].p.z)}].push_back(i);
@@ -300,7 +332,21 @@ std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std
       }
       return false;
     };
-    auto join = [&](std::size_t i, std::size_t j) {
+    // OJ8: a join between the feet of landings i and j stays within the region's outline on the face and a line off every
+    // protected face (its width and the mean of the two faces' normals, as the join lays it).
+    auto join_clear_by = [&](const Domain::Probe& pr, std::size_t i, std::size_t j) {
+      const double w = width_here > 0.0 ? width_here : std::min(L[i].width, L[j].width);
+      Vec3 nm{L[i].n.x + L[j].n.x, L[i].n.y + L[j].n.y, L[i].n.z + L[j].n.z};
+      const double nl = std::sqrt(nm.x * nm.x + nm.y * nm.y + nm.z * nm.z);
+      if (nl > 1e-12) nm = {nm.x / nl, nm.y / nl, nm.z / nl};
+      return clear_by(pr, foot[i], foot[j], w, nm);
+    };
+    // Speed (his 11-23): a try that comes too near the net already laid fails whatever its clearance says; the clearance
+    // then only decides which count it goes to, so those are worked out at the region's end on every core (`deferred`).
+    struct Deferred { std::size_t i, j; int known; };
+    std::vector<Deferred> deferred;
+    // `known`: join_clear_by's answer for this pair worked out already on another core (1 clear, 0 not), -1 none.
+    auto join = [&](std::size_t i, std::size_t j, int known) {
       if (feet_joined.count(pair_of(foot[i], foot[j]))) return false;   // OJ8: one net strut per two feet
       Bar net;
       net.a = foot[i];   // OJ8: between the landings' feet on the face
@@ -313,17 +359,12 @@ std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std
       net.region = region;
       net.net = true;
       net.end_a = net.end_b = Bar::End::Node;
-      {   // OJ8: the join stays within the region's outline on the face and a line off every protected face
-        Vec3 nm{L[i].n.x + L[j].n.x, L[i].n.y + L[j].n.y, L[i].n.z + L[j].n.z};
-        const double nl = std::sqrt(nm.x * nm.x + nm.y * nm.y + nm.z * nm.z);
-        if (nl > 1e-12) nm = {nm.x / nl, nm.y / nl, nm.z / nl};
-        if (!clear(foot[i], foot[j], net.width, nm)) {
-          ++rep.joins_not_clear;
-          return false;
-        }
+      if (too_near(i, j, net.width)) {   // OJ7: kept a gap apart from the net already laid (counted at the end: `deferred`)
+        deferred.push_back({i, j, known});
+        return false;
       }
-      if (too_near(i, j, net.width)) {   // OJ7: kept a gap apart from the net already laid
-        if (kept_apart) ++*kept_apart;
+      if (!(known >= 0 ? known == 1 : join_clear_by(probe, i, j))) {   // OJ8: within the outline, off protected faces
+        ++rep.joins_not_clear;
         return false;
       }
       const int at_bar = static_cast<int>(bars.bars.size());
@@ -347,14 +388,16 @@ std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std
     };
     // Each landing's own shortlist: its 3 nearest partners, nearest first (ties by place order).
     std::vector<std::vector<std::size_t>> want(L.size());
-    for (std::size_t i = 0; i < L.size(); ++i) {
+    on_every_core(domain, L.size(), [&](const Domain::Probe& pr, std::size_t i) {   // (nothing is joined while it is made)
       std::vector<std::pair<double, std::size_t>> cand;
       for (std::size_t j : near(i, span_scale > 1.0 ? 4 : 1))
-        if (fits(i, j, kOrganicFinishMinSpanRatio * reach, reach * span_scale)) cand.push_back({dist(L[i].p, L[j].p), j});
+        if (fits_quick(i, j, kOrganicFinishMinSpanRatio * reach, reach * span_scale)) cand.push_back({dist(L[i].p, L[j].p), j});
       std::sort(cand.begin(), cand.end());
-      if (cand.size() > static_cast<std::size_t>(degree)) cand.resize(static_cast<std::size_t>(degree));   // OJ8: skin_density
-      for (const auto& c : cand) want[i].push_back(c.second);
-    }
+      for (const auto& c : cand) {   // the nearest that fit, at most `degree` (OJ8: skin_density)
+        if (want[i].size() >= static_cast<std::size_t>(degree)) break;
+        if (fits_rest_by(pr, i, c.second)) want[i].push_back(c.second);
+      }
+    });
     // Mutual: a pair wanted both ways (OJ7: shortest first when kept apart).
     {
       std::vector<std::pair<std::size_t, std::size_t>> mutual;
@@ -369,27 +412,69 @@ std::size_t lay_net_skin(Bars& bars, const Domain& domain, const std::vector<std
         std::stable_sort(mutual.begin(), mutual.end(), [&](const auto& x, const auto& y) {
           return dist(L[x.first].p, L[x.second].p) < dist(L[y.first].p, L[y.second].p);
         });
-      for (const auto& [i, j] : mutual) {
+      std::vector<signed char> mutual_clear(mutual.size(), -1);
+      on_every_core(domain, mutual.size(), [&](const Domain::Probe& pr, std::size_t k) {
+        mutual_clear[k] = join_clear_by(pr, mutual[k].first, mutual[k].second) ? 1 : 0;
+      });
+      for (std::size_t k = 0; k < mutual.size(); ++k) {
+        const auto [i, j] = mutual[k];
         if (joined.count(pair_of(L[i].p, L[j].p))) continue;
-        join(i, j);
+        join(i, j, mutual_clear[k]);
       }
     }
     // Every landing short of one join, then of two, takes its nearest partner within 1.5 reach.
+    // (Speed: a landing that may need a partner here has fewer than two joins now; its candidates in distance order, and
+    // for its nearest kFallbackAhead the costly answers, are worked out first on every core. Of the quick conditions only
+    // "not joined already" can change as joins are laid, so it is asked again in turn; the rest are the same answers.)
+    const double fall_lo = kOrganicFinishMinSpanRatio * reach;
+    const double fall_hi = kNetFallbackReach * reach * span_scale * (1.0 - 1e-12);
+    struct Fall { std::vector<std::pair<double, std::size_t>> cands; std::vector<signed char> rest, clear; };
+    std::vector<Fall> fall(L.size());
+    std::vector<std::size_t> short_of;
+    for (std::size_t i = 0; i < L.size(); ++i)
+      if (deg[i] < 2) short_of.push_back(i);
+    on_every_core(domain, short_of.size(), [&](const Domain::Probe& pr, std::size_t k) {
+      const std::size_t i = short_of[k];
+      Fall& f = fall[i];
+      for (std::size_t j : near(i, span_scale > 1.0 ? 5 : 2))
+        if (fits_quick(i, j, fall_lo, fall_hi)) f.cands.push_back({dist(L[i].p, L[j].p), j});
+      std::stable_sort(f.cands.begin(), f.cands.end(), [](const auto& x, const auto& y) { return x.first < y.first; });
+      const std::size_t ahead = std::min(f.cands.size(), kFallbackAhead);
+      f.rest.assign(ahead, 0);
+      f.clear.assign(ahead, -1);
+      for (std::size_t h = 0; h < ahead; ++h) {
+        const std::size_t j = f.cands[h].second;
+        if (keep_apart && feet_joined.count(pair_of(foot[i], foot[j]))) continue;   // (skipped in turn: see below)
+        f.rest[h] = fits_rest_by(pr, i, j) ? 1 : 0;
+      }
+    });
     for (int need = 1; need <= 2; ++need)
       for (std::size_t i = 0; i < L.size(); ++i) {
         if (deg[i] >= need) continue;
-        std::vector<std::pair<double, std::size_t>> cands;
-        for (std::size_t j : near(i, span_scale > 1.0 ? 5 : 2)) {
-          if (!fits(i, j, kOrganicFinishMinSpanRatio * reach, kNetFallbackReach * reach * span_scale * (1.0 - 1e-12))) continue;
-          cands.push_back({dist(L[i].p, L[j].p), j});
-        }
-        std::stable_sort(cands.begin(), cands.end(), [](const auto& x, const auto& y) { return x.first < y.first; });
-        // The nearest; kept apart (OJ7): the nearest that does not come too near the net already laid.
-        for (const auto& cj : cands) {
-          if (join(i, cj.second)) break;
+        const Fall& f = fall[i];
+        // The nearest that fits; kept apart (OJ7): the nearest that fits and does not come too near the net already laid.
+        for (std::size_t h = 0; h < f.cands.size(); ++h) {
+          const std::size_t j = f.cands[h].second;
+          if (joined.count(pair_of(L[i].p, L[j].p))) continue;   // (the quick condition that changes as joins are laid)
+          // (kept apart, a pair whose feet were tried already goes on to the next whatever else is asked: the join refuses
+          // it first and changes nothing; so the costly conditions are not asked for it)
+          if (keep_apart && feet_joined.count(pair_of(foot[i], foot[j]))) continue;
+          if (!(h < f.rest.size() ? f.rest[h] == 1 : fits_rest(i, j))) continue;
+          if (join(i, j, h < f.clear.size() ? f.clear[h] : -1)) break;
           if (!keep_apart) break;
         }
       }
+    {   // the tries that came too near: not clear counts as not clear (as the clearance was asked first before), else kept apart
+      std::vector<signed char> c(deferred.size(), 0);
+      on_every_core(domain, deferred.size(), [&](const Domain::Probe& pr, std::size_t k) {
+        const Deferred& d = deferred[k];
+        c[k] = d.known >= 0 ? static_cast<signed char>(d.known) : (join_clear_by(pr, d.i, d.j) ? 1 : 0);
+      });
+      for (signed char ok : c) {
+        if (!ok) ++rep.joins_not_clear;
+        else if (kept_apart) ++*kept_apart;
+      }
+    }
     // OJ8: each joined landing's STEM, from the node to its foot along the face's normal, as wide as the node's strut
     // (none when the node is its own foot: a vine end already at the face, with no sink).
     for (std::size_t i = 0; i < L.size(); ++i) {

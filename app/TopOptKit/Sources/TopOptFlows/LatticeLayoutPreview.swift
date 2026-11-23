@@ -167,6 +167,8 @@ public final class LatticeLayoutPreview: ObservableObject {
     private var session: LatticeLayoutSession?
     /// ★ Organic cut 2: the groups the last EXACT Organic lay laid (nil: none, a draft, or refused).
     private var organicLaidGroups: [LatticeLayoutSession.OrganicGroup]?
+    /// ★ his 11-22 (the print-accurate lattice made on the Mac): the groups the last DRAFT laid, for the Mac's file job.
+    private var organicDraftGroups: [LatticeLayoutSession.OrganicGroup]?
     private var sessionPath: String?
     private var openMS = 0.0
     private var lastSettings: LatticeLayoutSession.Settings?
@@ -234,10 +236,45 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// out of date when not). True with nothing laid yet only when there is nothing to lay.
     public func isCurrent(project p: ProjectModel, stress: Stress = Stress()) -> Bool {
         guard let path = p.importedFile?.path else { return bars == nil }
-        return path == sessionPath && Self.settings(p, referenceMPa: stress.referenceMPa) == lastSettings && stress.key == self.stress.key
-            && Self.organicKey(p) == lastOrganicKey
+        return sameInputs(project: p, stress: stress)
             && (!printAccurate || !Self.organic(p.lattice) || layingExact || (!laying && organicQuality != .draft))   // ★ 11-21
     }
+    /// The lattice on screen (a Draft too) was laid from these inputs.
+    func sameInputs(project p: ProjectModel, stress: Stress) -> Bool {
+        guard let path = p.importedFile?.path else { return bars == nil }
+        return path == sessionPath && Self.settings(p, referenceMPa: stress.referenceMPa) == lastSettings && stress.key == self.stress.key
+            && Self.organicKey(p) == lastOrganicKey
+    }
+
+    /// ★ his 11-22 ("Can you make the Mac send the lattice over to the iPad after it's done?"; his pick: only on his press):
+    /// the file's inputs from the lattice on screen, a Draft too — its groups asked exact (the file job lays the exact lattice
+    /// whatever it is asked; every other part of the ask is the exact's own), and the stress that lay followed. No iPad exact.
+    public func organicMacInputs(project p: ProjectModel, stress: Stress = Stress())
+        async throws -> (groups: [LatticeLayoutSession.OrganicGroup], tensor: Data) {
+        if laying { throw OrganicFileWait.laying }
+        let draft = organicDraftGroups?.map { g -> LatticeLayoutSession.OrganicGroup in var g = g; g.ask.quality = .exact; return g }
+        guard let groups = organicLaidGroups ?? draft, let session else { throw OrganicFileWait.notLaid }
+        guard sameInputs(project: p, stress: stress) else { throw OrganicFileWait.outOfDate }
+        try await matchSessionTensor(session, groups: groups)
+        let tensor = try await session.tensorFile()
+        return (groups, tensor)
+    }
+
+    /// ★ his 11-22: the print file's own lattice, from the Mac, drawn in place of the lattice on screen (same body, opened the
+    /// same way). False when the lattice on screen is no longer the one the file was made from.
+    @discardableResult
+    public func showFile(_ m: LatticeFileMesh, project p: ProjectModel, stress: Stress = Stress()) -> Bool {
+        guard !laying, var b = bars, sameInputs(project: p, stress: stress) else { return false }
+        token &+= 1
+        b.token = token
+        b.fileMesh = m
+        b.dimmed = false
+        if let w = shownWhere { shownWhere = (token, w.1) }
+        bars = b
+        return true
+    }
+    /// Whether the print file's lattice is what is drawn now.
+    public var showsFile: Bool { bars?.fileMesh != nil }
 
     /// ★ Organic cut 2 (the export, handover f): what the print file is made from — the SAME groups the exact preview laid for
     /// these inputs, and the stress that lay followed (as set, or as the synthetic stress filled it) as core's file. nil: no
@@ -268,6 +305,7 @@ public final class LatticeLayoutPreview: ObservableObject {
                        delay: Duration = .zero, checkNozzle: Bool = false, exact: Bool = false) {
         guard on else { clear(); return }
         guard let path = p.importedFile?.path else { problem = Self.noPartLine; bars = nil; return }
+        retargetIfSamePart(path)   // ★ his iPad notes 11-23: the version moved to its next number, the same part
         if path != sessionPath || box == nil { box = Self.box(p.importedMesh?.vertices ?? []) }
         if path != cutSurface?.path { cutMesh = p.importedMesh }
         let solidChanged = solid != solidWanted
@@ -289,7 +327,9 @@ public final class LatticeLayoutPreview: ObservableObject {
             return
         }
         // ★ his pick 11-21 ("absolutely"): a lattice already made for exactly these inputs is shown at once, no lay
+        adoptSaved(p, path: path, s)   // ★ his iPad notes 11-23: ... and the one this version's folder keeps
         if restoreRemembered(p, path: path, s, ok, accurate: accurate) { return }
+        openingAfterRestore?.cancel(); openingAfterRestore = nil   // ★ 11-23: the lay opens the session itself
         let before = inputsAtLay, wasLaying = laying
         take(p, s, ok)
         shownRestored = false
@@ -335,7 +375,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         nozzleSession?.close(); nozzleSession = nil; nozzlePath = nil; nozzleLine = nil; solidReason = nil
         session?.close(); session = nil; sessionPath = nil; lastSettings = nil; sessionStressKey = nil; nozzleStressKey = nil
         sessionTensorKey = nil; organicLimits = nil; organicQuality = nil; organicNumbers = nil   // ★ Organic cut 1
-        organicLaidGroups = nil   // ★ cut 2
+        organicLaidGroups = nil; organicDraftGroups = nil   // ★ cut 2; ★ his 11-22
         bars = nil; laid = nil; problem = nil; timing = nil; laying = false; places = []
         layTimingEnds(.cancelled, "the preview was closed")   // ★ his 11-22 (GenerationTimingLog)
         layProgress = nil; shownRestored = false   // ★ his pick 11-21 (what was remembered stays, for this part)
@@ -400,6 +440,11 @@ public final class LatticeLayoutPreview: ObservableObject {
     }
     /// Most recent first; at most `rememberedMost`, and no more struts in all than `rememberedStrutsMost` (the iPad's memory).
     private var remembered: [Remembered] = []
+    /// ★ his iPad notes 11-23 (LatticePreviewStore): the remembered lattice read back from the version's folder (its token), the
+    /// inputs the folder was last asked for and had nothing for, and the part's session opening behind a lattice shown so.
+    private var adoptedToken: Int?
+    private var diskMiss: LayInputs?
+    private var openingAfterRestore: Task<Void, Never>?
     public static let rememberedMost = 4
     public static let rememberedStrutsMost = 600_000
     private var inputsAtLay: LayInputs?
@@ -425,17 +470,23 @@ public final class LatticeLayoutPreview: ObservableObject {
             kept.append(e); struts += e.struts
         }
         remembered = kept
+        LatticePreviewStore.save(r)   // ★ his iPad notes 11-23: kept in the version's folder too
     }
 
     /// ★ his pick 11-21: a lattice already made for exactly these inputs, shown at once (no lay, nothing dimmed). False: none
     /// remembered, or it would need the solid view's map, which only a lay makes.
     private func restoreRemembered(_ p: ProjectModel, path: String, _ s: LatticeLayoutSession.Settings, _ ok: String?,
                                    accurate: Bool) -> Bool {
-        guard Self.organic(p.lattice), !Self.controlForget, session != nil, sessionPath == path else { return false }
+        guard Self.organic(p.lattice), !Self.controlForget else { return false }
         let key = Self.layInputs(p, path: path, s, stress: stress)
         guard let i = remembered.firstIndex(where: { $0.inputs == key && $0.quality == .exact })
                 ?? (accurate ? nil : remembered.firstIndex(where: { $0.inputs == key })) else { return false }
-        if solidWanted, remembered[i].bars.solid == nil { return false }
+        // ★ his iPad notes 11-23: read back from the version's folder, it is shown before the part's session is open (it opens
+        // behind it, and the solid view's map follows) — no lay
+        let fromDisk = adoptedToken != nil && remembered[i].bars.token == adoptedToken
+        guard fromDisk || (session != nil && sessionPath == path) else { return false }
+        if fromDisk, bars?.token == remembered[i].bars.token, openingAfterRestore != nil { return true }   // on screen already
+        if solidWanted, remembered[i].bars.solid == nil, !fromDisk { return false }
         let r = remembered.remove(at: i)
         remembered.insert(r, at: 0)
         task?.cancel(); task = nil
@@ -449,13 +500,16 @@ public final class LatticeLayoutPreview: ObservableObject {
         bars = b; laid = r.laid; timing = r.timing
         shownWhere = (b.token, MapWhere(path: r.inputs.path, settings: r.inputs.settings, stressKey: r.inputs.stress.key))   // ★ 11-22
         organicQuality = r.quality; organicNumbers = r.numbers; problem = r.problem; notes = r.notes
-        organicLaidGroups = r.quality == .exact ? r.groups : nil; organicRefusals = []; organicWallVerdicts = r.wallVerdicts
+        organicLaidGroups = r.quality == .exact ? r.groups : nil; organicRefusals = []
+        organicDraftGroups = r.quality == .draft ? r.groups : nil   // ★ his 11-22
+        organicWallVerdicts = r.wallVerdicts
         organicAutoLimits = r.autoLimits; organicGroupLimits = r.groupLimits
         shownWalls = r.walls; shownRestored = true
         layTimingEnds(.cancelled, "a remembered lattice was shown")   // ★ his 11-22 (GenerationTimingLog)
         laying = false; layProgress = nil
         Self.remembersShown += 1
         layTimingRestored(r)
+        if fromDisk { openBehindRestored(path: path) }   // ★ his iPad notes 11-23
         return true
     }
 
@@ -800,16 +854,23 @@ public final class LatticeLayoutPreview: ObservableObject {
             for (id, dead) in rep.withoutStress { if let k = keysAtLay[id] { verdicts[k] = dead } }
             organicWallVerdicts = verdicts
         }
+        // ★ notes24 (viewer): the growing tubes' widths and how the part opens — by the map on screen when it is this lay's, else
+        // by the map made before the lay (his walls-first; `mapAhead`, 362's gridAhead), else in X-ray (LatticeGrowth)
+        let fits = Self.mapFor(token: token, at: here, shown: bars, shownWhere: shownWhere) != nil
+        let ahead = solidWanted && !fits ? await Self.mapAhead(session, s, box, token: token &+ 1, smooth: true) : nil
+        growth.layBegins(groups, lineMM: s.beadMM, opening: .init(solid: solidWanted, mapFits: fits, ahead: ahead),
+                         expectedLeftS: layProgress?.expectedLeftS)
         t0 = Date()
         let r = try await session.layOrganic(s, groups: groups)
         layStages["layWallMS"] = Self.ms(since: t0)   // ★ his 11-22: the engine's own times, as they come
         layStages["layMS"] = r.ms; layStages["traceMS"] = r.msTrace
         layStages["readMS"] = r.layout.msRead; layStages["barsMS"] = r.layout.msBars; layStages["strands"] = Double(r.strands)
         guard !Task.isCancelled else { return }
-        if !r.refused.isEmpty { organicLaidGroups = nil; return refuse(r.refused, groupIDs) }
+        if !r.refused.isEmpty { organicLaidGroups = nil; organicDraftGroups = nil; return refuse(r.refused, groupIDs) }
         organicRefusals = []
         // ★ cut 2: the groups the EXACT lay laid (the file is that lattice); a draft is not what will be made
         organicLaidGroups = r.quality == .exact ? groups : nil
+        organicDraftGroups = r.quality == .draft ? groups : nil   // ★ his 11-22: the Mac makes the print file from these
         token &+= 1
         t0 = Date()
         let seg = Self.segments(r.runs)
@@ -834,7 +895,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         drawn.lightFrom = Self.organicLightFrom(grown: grown, netFrom: seg.lightFrom, count: seg.count)
         drawn.vines = vines
         // ★ his 11-22: cut open at once where the map on screen is this lattice's map too (the Draft's, for its exact lattice)
-        if solidWanted { drawn.solid = Self.mapFor(token: token, at: here, shown: bars, shownWhere: shownWhere) }
+        if solidWanted { drawn.solid = Self.mapFor(token: token, at: here, shown: bars, shownWhere: shownWhere) ?? growth.landedMap(token: token) }   // ★ notes24: or the one made before it
         bars = drawn
         shownWhere = (token, here)
         var l = LatticeLayoutColours.Laid()   // no cells: the key and card read each strut's width and its cell size
@@ -1142,7 +1203,10 @@ public final class LatticeLayoutPreview: ObservableObject {
             now.solid = m.grid
             bars = now
             timing?.mapMS = m.ms
-            if let i = remembered.firstIndex(where: { $0.bars.token == now.token }) { remembered[i].bars.solid = m.grid }   // ★ 11-21
+            if let i = remembered.firstIndex(where: { $0.bars.token == now.token }) {
+                remembered[i].bars.solid = m.grid   // ★ 11-21
+                if i == 0 { LatticePreviewStore.save(remembered[0]) }   // ★ his iPad notes 11-23: kept with its map
+            }
         } catch {
             // the bars stay; the body stays whole where the map could not be read
         }
@@ -1163,11 +1227,7 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// 0.35 mm.
     static func map(_ s: LatticeLayoutSession, _ box: (lo: SIMD3<Float>, hi: SIMD3<Float>), token: Int,
                     smooth: Bool = false) async throws -> (grid: LatticeLayoutSolidGrid, ms: Double) {
-        let ext = simd_max(box.hi - box.lo, SIMD3(repeating: 0.1))
-        let voxel = Swift.max(0.35, Float(cbrt(Double(ext.x * ext.y * ext.z) / 1_000_000)))
-        let dims = SIMD3<Int32>(Int32((ext.x / voxel).rounded(.up)) + 3, Int32((ext.y / voxel).rounded(.up)) + 3,
-                                Int32((ext.z / voxel).rounded(.up)) + 3)
-        let origin = box.lo - SIMD3(repeating: voxel)
+        let (origin, voxel, dims) = mapGeometry(box)   // ★ notes24: shared with `mapAhead`
         let r = try await s.grid(origin: origin, voxel: voxel, dims: dims)
         // ★ his 11-19 note: Organic's cut edges are smooth lines, not the voxels' stair-steps
         let rg = smooth ? LatticeLayoutSolidGrid.smoothed(r.rg, dims: dims) : r.rg
@@ -1627,7 +1687,7 @@ extension LatticeLayoutPreview {
     func stopGrowth() {
         growthWatch?.stop()
         growthWatch = nil
-        growth.restart()
+        growth.stop()   // ★ notes24: its walls and replay too
     }
 
     /// The bars on screen changed: a finished lattice (a new one) replaces the growth with a short fade over it; nothing on
@@ -1658,6 +1718,49 @@ struct LatticeLayoutPreviewOneLine: View {
             .background(Capsule().fill(DS.Surface.bar.color))
             .background(CornerPairStyle.publish("new-engine-lines"))
             .allowsHitTesting(false)
+    }
+}
+
+// MARK: - ★ his iPad notes 11-23: the version's last lattice, kept in its folder (LatticePreviewStore)
+
+extension LatticeLayoutPreview {
+    /// The lattice this version's folder keeps for exactly these inputs joins the remembered ones (a fresh token), so the
+    /// restore shows it at once: no stress check, no lay, no session needed to draw it. Read once per inputs.
+    fileprivate func adoptSaved(_ p: ProjectModel, path: String, _ s: LatticeLayoutSession.Settings) {
+        guard Self.organic(p.lattice), !Self.controlForget else { return }
+        let inputs = Self.layInputs(p, path: path, s, stress: stress)
+        guard inputs != diskMiss, !remembered.contains(where: { $0.inputs == inputs }) else { return }
+        guard let r = LatticePreviewStore.load(inputs, token: token &+ 1) else { diskMiss = inputs; return }
+        token &+= 1
+        adoptedToken = token
+        remembered.insert(r, at: 0)
+        LatticePreviewStore.restoredFromDisk += 1
+    }
+
+    /// The part's session, opened behind a lattice read back from the folder (the print file, the nozzle check and Auto's
+    /// numbers use it; `matchSessionTensor` gives it the stress the lattice was laid with), then the solid view's map.
+    fileprivate func openBehindRestored(path: String) {
+        guard session == nil || sessionPath != path else { return }
+        openingAfterRestore?.cancel()
+        openingAfterRestore = Task { [weak self] in
+            defer { self?.openingAfterRestore = nil }
+            guard let self, (try? await self.openSession(path: path)) != nil, !Task.isCancelled else { return }
+            if self.solidWanted, self.bars?.solid == nil { await self.addMap() }
+        }
+    }
+
+    /// ★ The live version moved to its next number (VersionMoves.swift): the same part, its copy in the new folder. The session,
+    /// the remembered lattices and the drawn one are this part's still — re-pointed, never laid again.
+    fileprivate func retargetIfSamePart(_ path: String) {
+        guard let old = sessionPath, old != path, session != nil,
+              FileManager.default.contentsEqual(atPath: old, andPath: path) else { return }
+        sessionPath = path
+        for i in remembered.indices where remembered[i].inputs.path == old { remembered[i].inputs.path = path }
+        if inputsAtLay?.path == old { inputsAtLay?.path = path }
+        if let c = cutSurface, c.path == old { cutSurface = (path, c.surface) }
+        if let w = shownWhere, w.at.path == old { var at = w.at; at.path = path; shownWhere = (w.token, at) }
+        if nozzlePath == old { nozzlePath = path }
+        diskMiss = nil
     }
 }
 

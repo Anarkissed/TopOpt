@@ -41,6 +41,9 @@ public struct LatticeLayoutBarsInputs: Equatable {
     /// ★ His pick 11-21 (the preview-speed research, "Let's do this one. Absolutely."): the lattice on screen is the LAST one,
     /// dimmed while the new one lays (its Draft, then the exact lattice, replaces it).
     public var dimmed = false
+    /// ★ his 11-22 (the print-accurate lattice made on the Mac): the print file's own lattice; when set it draws instead of the
+    /// vines and the bars (they stay for the key, the card and picking), in the same colour and light.
+    public var fileMesh: LatticeFileMesh?
     public init(token: Int, bars: [Float], hidden: Bool = false, solid: LatticeLayoutSolidGrid? = nil, flags: [UInt8] = [],
                 colours: [SIMD4<Float>] = [], colourKey: Int = 0) {
         self.token = token; self.bars = bars; self.hidden = hidden; self.solid = solid; self.flags = flags
@@ -414,7 +417,8 @@ final class LatticeLayoutBarsPass {
     private(set) var grid: (origin: SIMD3<Float>, voxel: Float, dims: SIMD3<Int32>)?
     private(set) var gridToken = -1
     /// The cut walls' colour: the body's own grey, so a cut reads as the same material.
-    static let wallColour = SIMD4<Float>(0.80, 0.81, 0.83, 1)
+    /// ★ notes24 (b, "as if you're looking INTO A PART"): exactly the body's clay (viewer_fragment's `clay`), no cooler grey.
+    static let wallColour = SIMD4<Float>(0.78, 0.77, 0.75, 1)
     /// The cut walls, on (11-13: they draw — the hollow core's solid core behind its lattice; his v4 stand at 2048 × 1536 on
     /// the Mac: 21 ms a frame without, 25–29 ms with). The tests' red control turns them off.
     static var drawWalls = true
@@ -428,6 +432,8 @@ final class LatticeLayoutBarsPass {
     private(set) var lightFrom = Int.max
     /// ★ His 11-19: Organic's vines (nil: the bars draw).
     private(set) var vinePass: OrganicVinePass?
+    /// ★ his 11-22: the print file's lattice from the Mac (nil: the vines or the bars draw).
+    private(set) var filePass: LatticeFileMeshPass?
     var hidden = false
     /// ★ his pick 11-21: the last lattice, dimmed while the new one lays (`dimmedRGB`).
     var dimmed = false
@@ -545,6 +551,17 @@ final class LatticeLayoutBarsPass {
         } else {
             vinePass = nil
         }
+        if let m = inputs.fileMesh {   // ★ his 11-22
+            if filePass == nil {
+                do { filePass = try LatticeFileMeshPass(device: device); LatticeFileMeshPass.lastInitError = nil } catch {
+                    LatticeFileMeshPass.lastInitError = "\(error)"
+                    NSLog("DIAG print file lattice: %@", "\(error)")
+                }
+            }
+            if filePass?.token != m.token { filePass?.upload(m) }
+        } else {
+            filePass = nil
+        }
         let packed = Self.pack(inputs.bars, flags: inputs.flags)
         count = packed.count / 2
         buffer = packed.isEmpty ? nil : device.makeBuffer(bytes: packed, length: MemoryLayout<SIMD4<Float>>.stride * packed.count,
@@ -589,6 +606,10 @@ final class LatticeLayoutBarsPass {
         guard isDrawable, let buffer, enc.device === device else { return false }
         let c0 = Self.colour
         let c = dimmed ? Self.dimmedRGB(SIMD3(Float(c0.r), Float(c0.g), Float(c0.b))) : SIMD3(Float(c0.r), Float(c0.g), Float(c0.b))
+        if let fp = filePass, fp.isDrawable {   // ★ his 11-22: the print file's own lattice, the vines' colour and light
+            return fp.encode(enc, depthState: depthState, clipFromModel: clipFromModel, eyeFromModel: eyeFromModel,
+                             eyeNormalBasis: eyeNormalBasis, albedo: SIMD4(c, 1))
+        }
         if let vp = vinePass, vp.isDrawable {   // ★ his 11-19: Organic's vines, one colour
             return vp.encode(enc, depthState: depthState, clipFromModel: clipFromModel, eyeFromModel: eyeFromModel,
                              eyeNormalBasis: eyeNormalBasis, albedo: SIMD4(c, 1), turning: turning)

@@ -817,6 +817,13 @@ public protocol RunNotifier {
     func willRunInBackground()
     /// The (backgrounded) run finished — post the completion notification.
     func runDidComplete(summary: String)
+    /// ★ his notes 11-23 ("Tapping the notification should bring you RIGHT to the result screen"): the same, carrying where
+    /// its result is (the version, and whether it opens in the Lattice stage). A notifier that only knows the summary posts it.
+    func runDidComplete(summary: String, route: RunResultRoute?)
+}
+
+public extension RunNotifier {
+    func runDidComplete(summary: String, route: RunResultRoute?) { runDidComplete(summary: summary) }
 }
 
 /// A notifier that does nothing (the default, and what headless tests use through
@@ -879,13 +886,17 @@ public final class LocalRunNotifier: RunNotifier {
         #endif
     }
 
-    public func runDidComplete(summary: String) {
+    public func runDidComplete(summary: String) { runDidComplete(summary: summary, route: nil) }
+
+    public func runDidComplete(summary: String, route: RunResultRoute?) {
         #if canImport(UserNotifications)
         if Self.hasAppBundle {
         let content = UNMutableNotificationContent()
         content.title = "TopOpt"
         content.body = summary
         content.sound = .default
+        // ★ his notes 11-23: where the result is, so a tap opens it (RunNotificationRouter)
+        if let route { content.userInfo = route.userInfo }
         UNUserNotificationCenter.current().add(
             UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
         }
@@ -1118,6 +1129,10 @@ public final class RunModel: ObservableObject {
     /// NOT arm the local setup-stall watchdog: its liveness — queue-awareness and the
     /// heartbeat/probe loop — is owned by `RemoteRun` (handoff 129).
     private var isRemoteRun = false
+    /// ★ his notes 11-23: the run (in flight, or the last one) is on a Mac — the app holds background time for the whole of it.
+    public var isRemote: Bool { isRemoteRun }
+    /// ★ his notes 11-23: the last run's mode ("lattice_file": the Lattice button's print file), kept after it resolves.
+    public private(set) var lastJobMode: String?
 
     #if canImport(os)
     private static let log = Logger(subsystem: "app.topopt", category: "run")
@@ -1334,6 +1349,7 @@ public final class RunModel: ObservableObject {
         let token = CancelToken()
         self.token = token
         runningRequest = request
+        lastJobMode = request.jobMode
         let runner = Self.hostedTestRunner ?? self.runner
         let scheduler = self.scheduler
 
@@ -1709,7 +1725,8 @@ public final class RunModel: ObservableObject {
         // just cancelled it themselves — a "cancelled" banner would be noise); a
         // backgrounded local run keeps its prior behaviour unchanged.
         if runningInBackground || observedRemoteFinish {
-            notifier.runDidComplete(summary: completionSummary(request))
+            // ★ his notes 11-23: the notification names where its result is (nil when the run has no version)
+            notifier.runDidComplete(summary: completionSummary(request), route: RunResultRoute(request))
         }
     }
 

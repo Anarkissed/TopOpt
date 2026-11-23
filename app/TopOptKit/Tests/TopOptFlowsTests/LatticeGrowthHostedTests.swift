@@ -8,6 +8,9 @@
 //   * once the lattice lands the growth is gone (after its short fade) and the renderer draws none;
 //   * a remembered lattice shown at once grows nothing.
 // RED CONTROL `controlNoGrowth`: no growth, no phase on the button (as before 11-22).
+// ★ his notes 2026-11-23 (img 49, "It needs to be in 3D … I would prefer having the walls removed"): in the solid view, a first
+// lay's Draft grows inside the part in X-ray (no map exists before a lay lands), then the exact lattice grows inside the part
+// opened by its Draft's map — exactly as the landed lattice shows it — and lands without the part closing again.
 #if canImport(AppKit) && canImport(MetalKit)
 import XCTest
 import SwiftUI
@@ -25,9 +28,11 @@ final class LatticeGrowthHostedTests: XCTestCase {
     struct Stage: View {
         @ObservedObject var preview: LatticeLayoutPreview
         let mesh: ViewerMesh?
+        /// The page's: X-ray on (the ghost), or the solid view (1).
+        var bodyAlpha: Float = LatticeLayoutPreview.ghostAlpha
         var body: some View {
             ZStack(alignment: .bottomTrailing) {
-                MetalMeshView(mesh: mesh, bodyAlpha: LatticeLayoutPreview.ghostAlpha,
+                MetalMeshView(mesh: mesh, bodyAlpha: bodyAlpha,
                               layoutBars: preview.drawn(stressField: nil, stressKey: 0))
                     .latticeGrowth(preview.growth)
                 DSRunButton("Lattice", subtitle: "Organic Grown", key: "latticeButton",
@@ -48,6 +53,43 @@ final class LatticeGrowthHostedTests: XCTestCase {
     /// What one hosted lay showed.
     struct Seen {
         var growthMost = 0, drawnMost = 0, phases = Set<Int>(), phaseLineDrawn = false, frames = 0
+        /// ★ notes24: what the 3D view did with the part while each kind of lay grew (the solid view).
+        var draftGrewInXray = false, exactGrewInXray = false, exactGrewOpened = false, inGBuffer = false
+    }
+
+    /// ★ notes24: the solid view. A first lay's Draft grows inside the part in X-ray (no map yet), the exact lattice inside the
+    /// part opened by its Draft's map (the landed lattice's own way), and the landed lattice stays opened (never closed).
+    func testInTheSolidViewTheExactLatticeGrowsInsideThePartItsDraftsMapOpened() throws {
+        let p = try organicProject()
+        let preview = LatticeLayoutPreview()
+        defer { preview.clear() }
+        let h = AppBuildHost(Stage(preview: preview, mesh: p.viewerMesh, bodyAlpha: 1), size: AppBuildHost.landscape13, test: self)
+        h.pump(1)
+        let r = try renderer(h)
+        let seen = try lay(preview, p, try stress(p, key: 73), h, r, "solid", solid: true)
+        print("GROWTH solid view: the Draft grew in X-ray \(seen.draftGrewInXray); the exact lattice grew in the opened part "
+              + "\(seen.exactGrewOpened), in X-ray \(seen.exactGrewInXray); in the G-buffer \(seen.inGBuffer)")
+        XCTAssertTrue(seen.inGBuffer, "★ the vines grow in the lattice's G-buffer (3D, lit, depth-tested)")
+        // ★ RE-PINNED (362, his 11-23 walls first; the engine's map before the lay, gridAhead): the Draft grows inside the part
+        // opened by the map made before its lay — never X-ray
+        XCTAssertFalse(seen.draftGrewInXray, "★ the map made before the lay opens the part: the Draft never grows in X-ray")
+        XCTAssertTrue(seen.exactGrewOpened, "★ the exact lattice grew inside the part its Draft's map opened")
+        XCTAssertFalse(seen.exactGrewInXray, "★ never X-ray while a map opens the part")
+        h.pump(LatticeGrowth.landingS + 0.6)
+        XCTAssertNotNil(preview.bars?.solid, "landed: the lattice's map on screen")
+        _ = r.renderOffscreen(width: 320, height: 240, clear: MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1), stage: false)
+        XCTAssertFalse(r.growthXraysBody, "★ landed: the part solid, opened by its map (as it will stay)")
+        try h.picture("growth-solid-landed-13L.png")
+        // RED CONTROL: no map before the lay: a first lay's Draft grows inside the part in X-ray (as before the engine made one)
+        LatticeLayoutPreview.controlNoMapAhead = true
+        defer { LatticeLayoutPreview.controlNoMapAhead = false }
+        let q = try organicProject()
+        let preview2 = LatticeLayoutPreview()
+        defer { preview2.clear() }
+        let h2 = AppBuildHost(Stage(preview: preview2, mesh: q.viewerMesh, bodyAlpha: 1), size: AppBuildHost.landscape13, test: self)
+        h2.pump(1)
+        let seen2 = try lay(preview2, q, try stress(q, key: 74), h2, try renderer(h2), "solid, no map ahead", solid: true)
+        XCTAssertTrue(seen2.draftGrewInXray, "RED CONTROL: no map yet: the Draft grew inside the part in X-ray")
     }
 
     func testTheVinesGrowOnScreenThenTheLatticeReplacesThem() throws {
@@ -75,7 +117,7 @@ final class LatticeGrowthHostedTests: XCTestCase {
             // landed: the finished lattice, the growth gone after its fade
             XCTAssertNotNil(preview.bars, "\(name): the finished lattice is on screen")
             XCTAssertEqual(preview.organicQuality, .exact)
-            h.pump(LatticeGrowth.fadeS + 0.4)
+            h.pump(LatticeGrowth.landingS + 0.4)
             XCTAssertEqual(preview.growth.count, 0, "★ \(name): the growth is gone once the lattice landed")
             _ = r.renderOffscreen(width: 320, height: 240, clear: MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1), stage: false)
             XCTAssertEqual(r.growthPass?.lastDrawn ?? 0, 0, "★ \(name): the renderer draws no growth")
@@ -86,7 +128,7 @@ final class LatticeGrowthHostedTests: XCTestCase {
                 // another Look, laid; then back: the remembered lattice at once, no growth
                 var look = p.lattice.organicLook!; look.lookPercent = 8; p.lattice.organicLook = look
                 _ = try lay(preview, p, st, h, r, "\(name) Look 8")
-                h.pump(LatticeGrowth.fadeS + 0.4)
+                h.pump(LatticeGrowth.landingS + 0.4)
                 let total = preview.growth.appendedTotal
                 look.lookPercent = 5; p.lattice.organicLook = look
                 preview.update(project: p, on: true, stress: st)
@@ -111,9 +153,9 @@ final class LatticeGrowthHostedTests: XCTestCase {
     /// One lay through the preview (Print-accurate preview on, as the host sets it: the Draft grows and lands, then the exact
     /// lattice grows over it), sampled every 50 ms while it lays.
     private func lay(_ preview: LatticeLayoutPreview, _ p: ProjectModel, _ st: LatticeLayoutPreview.Stress, _ h: AppBuildHost,
-                     _ r: MeshRenderer, _ what: String) throws -> Seen {
+                     _ r: MeshRenderer, _ what: String, solid: Bool = false) throws -> Seen {
         var seen = Seen()
-        preview.update(project: p, on: true, stress: st)
+        preview.update(project: p, on: true, solid: solid, stress: st)
         XCTAssertTrue(preview.laying, "\(what): premise: laying")
         let font = NSFont.systemFont(ofSize: 11.5)
         func width(_ s: String) -> CGFloat { (s as NSString).size(withAttributes: [.font: font]).width }
@@ -139,6 +181,15 @@ final class LatticeGrowthHostedTests: XCTestCase {
             if preview.growth.count > 0, r.growth === preview.growth,
                r.renderOffscreen(width: 320, height: 240, clear: MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1), stage: false) != nil {
                 seen.drawnMost = Swift.max(seen.drawnMost, r.growthPass?.lastDrawn ?? 0)
+                if r.growthInFrame || r.growthFrame.active, !preview.growth.sealed {   // ★ notes24: the part as this frame drew it, while a lay is on screen
+                    seen.inGBuffer = seen.inGBuffer || r.lastFrameHadLatticeGBuffer
+                    let opened = !r.growthXraysBody && r.layoutBars?.shellClip != nil && preview.growth.mapOpensFaces
+                    if preview.layProgress?.quality == .draft { seen.draftGrewInXray = seen.draftGrewInXray || r.growthXraysBody }
+                    if preview.layProgress?.quality == .exact {
+                        seen.exactGrewInXray = seen.exactGrewInXray || r.growthXraysBody
+                        seen.exactGrewOpened = seen.exactGrewOpened || opened
+                    }
+                }
             }
             let q = preview.layProgress?.quality == .draft ? "draft" : "exact"
             if let dir = shots, let n = shotAt.last(where: { preview.growth.count >= $0 }), !shot.contains("\(q)\(n)"),

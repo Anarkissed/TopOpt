@@ -1593,6 +1593,25 @@ static void test_organic_job() {
                 "the solid made %d times over %d passes\n", r.file_bytes, r.compressed ? "deflated" : "stored", nv, tris.size(),
                 r.made.shells.shells(), r.made.shells.left_out, bad, r.made.base_builds, r.made.builds);
     CHECK(in_range && bad == 0);
+    // His 11-22 (the print-accurate lattice made on the Mac, drawn on the iPad before the strength check): the solid's
+    // triangles come first, and how many there are is said beside the file (written before it is moved in) and in the
+    // report; no shell triangle shares a vertex with the solid's, so the app colours the lattice apart exactly.
+    {
+      const std::string parts = slurp(three + ".parts.json");
+      const std::size_t base = r.made.base_triangles;
+      std::printf("organic 3mf parts: the solid's %zu of %zu triangles; %s", base, tris.size(), parts.c_str());
+      CHECK(base > 0 && base < tris.size());
+      CHECK(parts == "{\"base_triangles\": " + std::to_string(base) + ", \"triangles\": " + std::to_string(tris.size()) + "}\n");
+      CHECK(has(text, "\"base_triangles\": " + std::to_string(base) + ","));
+      std::vector<char> solid(nv, 0);
+      for (std::size_t i = 0; i < base; ++i)
+        for (int e = 0; e < 3; ++e) solid[tris[i][static_cast<std::size_t>(e)]] = 1;
+      std::size_t shared = 0;
+      for (std::size_t i = base; i < tris.size(); ++i)
+        for (int e = 0; e < 3; ++e) shared += solid[tris[i][static_cast<std::size_t>(e)]];
+      CHECK(shared == 0);
+      std::remove((three + ".parts.json").c_str());
+    }
     // Asked for an STL, the tubes route writes the STL (the unmerged shells as triangles); asked "merged", an STL as before.
     write_job(R"("tensor": "lattice_file_pocket.tensor", "file_format": "stl", )", weave);
     const FileResult rs = run_file_job(job_path, kTmp);

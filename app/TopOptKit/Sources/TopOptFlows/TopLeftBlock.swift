@@ -99,7 +99,23 @@ public struct TopLeftBlock: View {
                 .layoutPriority(-1)   // ★ R-a2: the name gives way before anything else in the pill
                 Rectangle().fill(DS.Color.textPrimary.opacity(0.15).color).frame(width: 1, height: 14)
                 if let v = Self.versionLabel(library, folder: projectID) {
-                    Text(v).dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textPrimary.opacity(0.5).color).fixedSize()
+                    // ★ his iPad notes 11-23 ("Tapping on 'v7 draft' should open up two options: Save, and Save and Start a New
+                    // Version"): the version opens its drawer under it (VersionChipMenu); a 44 pt target, the words where they sat
+                    Button { model.cornerDrawers.toggle(VersionChipMenu.key) } label: {
+                        Text(v).dsStyle(DS.TypeScale.caption)
+                            .foregroundStyle(DS.Color.textPrimary.opacity(model.cornerDrawers.isOpen(VersionChipMenu.key) ? 0.9 : 0.5).color)
+                            .fixedSize()
+                            .padding(.horizontal, Self.materialReach)
+                            .frame(minWidth: Self.target, minHeight: Self.target)
+                            .contentShape(Rectangle())
+                            .anchorPreference(key: VersionChipAnchorKey.self, value: .bounds) { $0 }
+                            .background(CornerPairStyle.publish("topLeftVersion"))
+                    }
+                    .buttonStyle(.plain)
+                    .fixedSize()
+                    .padding(.horizontal, -Self.materialReach)
+                    .accessibilityLabel("\(v): save, or start a new version")
+                    .accessibilityIdentifier("topLeftVersion")
                     Text("\u{00B7}").dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textPrimary.opacity(0.35).color)
                 }
                 // Tap the material to switch it: only same-category materials

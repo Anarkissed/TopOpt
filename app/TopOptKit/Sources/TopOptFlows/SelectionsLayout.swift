@@ -78,6 +78,8 @@ final class RenameInPlace: ObservableObject {
     @Published var key: String?
     @Published var draft = ""
     func start(_ key: String, name: String) { draft = name; self.key = key }
+    /// ★ his iPad notes 11-23: the field's own scroll identity (a list brings it into view: SelectionsList).
+    static func scrollID(_ key: String) -> String { "rename-" + key }
 }
 
 /// The hold on a name. `field` false: the row draws the field itself (`RenameField` on the whole line).
@@ -141,6 +143,7 @@ struct RenameField: ViewModifier {
                         .accessibilityIdentifier(key + "-renaming")
                 }
             }
+            .id(RenameInPlace.scrollID(key))   // ★ 11-23: the row (with its box), found by a list to bring it above the keyboard
     }
 
     private func finish() {

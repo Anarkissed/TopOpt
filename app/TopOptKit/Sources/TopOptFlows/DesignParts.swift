@@ -969,8 +969,11 @@ public struct DSFolderTabs: View {
     let key: String
     let pick: (String) -> Void
     let add: (() -> Void)?
-    public init(_ tabs: [Tab], selected: String?, key: String, pick: @escaping (String) -> Void, add: (() -> Void)? = nil) {
-        self.tabs = tabs; self.selected = selected; self.key = key; self.pick = pick; self.add = add
+    /// ★ his iPad notes 11-23: the column's width (the Lattice page widens it to its names: LatticePageColumns).
+    var width: CGFloat = DSParts.tabsWidth
+    public init(_ tabs: [Tab], selected: String?, key: String, pick: @escaping (String) -> Void, add: (() -> Void)? = nil,
+                width: CGFloat = DSParts.tabsWidth) {
+        self.tabs = tabs; self.selected = selected; self.key = key; self.pick = pick; self.add = add; self.width = width
     }
     public var body: some View {
         VStack(spacing: 6) {
@@ -1018,7 +1021,8 @@ public struct DSFolderTabs: View {
             Spacer(minLength: 0)
         }
         .padding(.vertical, 10).padding(.horizontal, 6)
-        .frame(width: DSParts.tabsWidth)
+        .frame(width: width)
+        .background(DSParts.publish("\(key)-column"))   // ★ 11-23: the column (the hosted tests')
         .overlay(alignment: .trailing) { Rectangle().fill(DSParts.strokeSub.color).frame(width: 1) }
     }
 }

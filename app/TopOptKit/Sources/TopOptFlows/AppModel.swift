@@ -36,7 +36,7 @@ public final class AppModel: ObservableObject {
     @Published public private(set) var project: ProjectModel?
     /// Live projects keyed by their `RecentProject.id`, so opening a recent within
     /// this launch restores the exact in-progress state rather than an empty one.
-    private var projectsById: [UUID: ProjectModel] = [:]
+    var projectsById: [UUID: ProjectModel] = [:]   // ★ notes 11-23: internal (AppModel+Results)
 
     // MARK: Import draft (valid only while the sheet is open)
 
@@ -82,11 +82,11 @@ public final class AppModel: ObservableObject {
     @Published public private(set) var resinMaterials: [MaterialOption] = []
     /// Full material records by name, kept so a result screen can look up the chosen
     /// material's yield strength for the M7.viz.1 stress legend/scale.
-    private var materialsByName: [String: Material] = [:]
+    var materialsByName: [String: Material] = [:]   // ★ notes 11-23: internal (AppModel+Results)
 
     // MARK: Recents + toast
 
-    @Published public private(set) var recentProjects: [RecentProject] = []
+    @Published public internal(set) var recentProjects: [RecentProject] = []   // ★ notes 11-23: internal(set) (AppModel+Results)
     /// ★ ROUND 3 RULING (c) (2026-10-01): projects on disk the store cannot read — shown on Home as
     /// "Can’t open" with the reason, never dropped, never opened, never deleted (see `deleteProject`).
     @Published public private(set) var unreadableProjects: [UnreadableProject] = []
@@ -100,8 +100,12 @@ public final class AppModel: ObservableObject {
     }
     /// Phase subscriptions per live project, keeping `runningIDs`/`optimized` current.
     private var runCancellables: [UUID: AnyCancellable] = [:]
-    /// Library (B3): each version's draft this session (an edit to a version with results goes there).
-    private var libraryDrafts: [UUID: UUID] = [:]
+    /// Library (B3): each version's draft (an edit to a version with results goes there). ★ his iPad notes 11-23 (RESULTS_REPORT
+    /// §7): kept in the store's folder, so the link survives relaunch (VersionDraftLinks).
+    private var libraryDrafts: [UUID: UUID] {
+        get { VersionDraftLinks.read(store) }
+        set { VersionDraftLinks.write(newValue, store) }
+    }
     /// Serial queue for the (potentially large) results encode/decode + file IO, so
     /// persisting/restoring variants never blocks the main thread (persist-c).
     /// Internal (not private) so the write-after-delete race test can hold the queue.
@@ -179,8 +183,8 @@ public final class AppModel: ObservableObject {
 
     // MARK: Dependencies (injected for tests; default to the real bridge)
 
-    private let materialsPath: String?
-    private let rulesPath: String?
+    let materialsPath: String?   // ★ notes 11-23: internal (AppModel+Results)
+    let rulesPath: String?
     private let materialsLoader: (String) throws -> [Material]
     private let importer: (String) throws -> ImportedMesh
     /// Handoff 134 — structured mesh inspection (the refusal sheet's source of
@@ -190,20 +194,38 @@ public final class AppModel: ObservableObject {
     private let rescaler: (String, String, Double) throws -> Void
     /// Cross-launch persistence layer (M7.x-persist-b) and the clock used for
     /// `savedAt` (injected for deterministic tests).
-    private let store: ProjectStore
+    let store: ProjectStore   // ★ notes 11-23: internal (AppModel+Results)
     /// The Library: Project → Part → Version over the same store (approved Library mockup, 2026-10-25).
     public let library: LibraryModel
     /// App-wide print-preset persistence (separate from per-project `store`).
     private let presetStore: PrintParamsPresetStore
-    private let now: () -> Date
+    let now: () -> Date   // ★ notes 11-23: internal (AppModel+Results)
     /// Where the active-remote-job record lives (handoff 119). Injected so tests use a
     /// scratch suite; production reads/clears the real `UserDefaults.standard` that
     /// `RemoteRun` wrote at submit time.
-    private let remoteJobDefaults: UserDefaults
+    let remoteJobDefaults: UserDefaults   // ★ notes 11-23: internal (AppModel+Results)
     /// Builds the runner that re-attaches to an existing job. Injected so tests drive
     /// the flow with a stub (the real one streams the worker's `/events`); nil → the
     /// production `RunModel.remoteReattachRunner`.
     private let reattachRunnerFactory: ((RemoteRunnerConfig, String) -> RunModel.Runner)?
+
+    // MARK: ★ his notes 11-23: a finished run's result is never lost (AppModel+Results.swift)
+
+    /// Background time: the whole of a run on the Mac, and a finished run's result until its file has landed.
+    let backgroundTime: BackgroundTime
+    /// Where a strengthening keeps its print file's inputs (LatticeJobInputs).
+    let latticeJobInputsRoot: URL
+    /// The run time held per version while its run is on the Mac.
+    var runTime: [UUID: Int] = [:]
+    /// The settings each version's saved result ran with (read when it is saved or reopened): the Lattice button's Approved
+    /// from the saved result compares them with today's.
+    var resultRanWith: [UUID: ProjectSnapshot] = [:]
+    /// The app is in front (the scene active). A Results screen never mounts while it is not.
+    @Published public internal(set) var sceneActive = true
+    /// The Results screen on screen now (it stays when the app leaves the front).
+    public let resultsMounted = ResultsMounted()
+    /// A notification's result being opened: RootView covers the screen until it is (no Library, no Topology on the way).
+    @Published public internal(set) var openingResult: RunResultRoute?
 
     /// - Parameters:
     ///   - materialsPath: path to materials.json (defaults to the app bundle's
@@ -227,8 +249,12 @@ public final class AppModel: ObservableObject {
         presetStore: PrintParamsPresetStore = PrintParamsPresetStore(),
         now: @escaping () -> Date = { Date() },
         remoteJobDefaults: UserDefaults = .standard,
-        reattachRunnerFactory: ((RemoteRunnerConfig, String) -> RunModel.Runner)? = nil
+        reattachRunnerFactory: ((RemoteRunnerConfig, String) -> RunModel.Runner)? = nil,
+        backgroundTime: BackgroundTime? = nil,
+        latticeJobInputsRoot: URL = LatticeJobInputs.defaultRoot
     ) {
+        self.backgroundTime = backgroundTime ?? SystemBackgroundTime()
+        self.latticeJobInputsRoot = latticeJobInputsRoot
         // ★ Before any bridge run: core's receipts name the core this app links (#358).
         CoreBuildIdentity.state()
         _ = AppSettings.shared   // ★ B5 (Q12): the app wears his accent from the first draw
@@ -268,7 +294,8 @@ public final class AppModel: ObservableObject {
         // terminal resolution or user cancel, so leftover records mean the app died
         // with those runs still in flight. `loadAll` also migrates a pre-121 single-slot
         // record on first read.
-        pendingReattachJobs = RemoteJobStore.loadAll(defaults: remoteJobDefaults)
+        // ★ his notes 11-23: a Lattice button job is followed and saved by itself (`resumeLatticeJobs`), never offered here
+        pendingReattachJobs = RemoteJobStore.loadAll(defaults: remoteJobDefaults).filter { !$0.isLatticeJob }
     }
 
     /// Assemble the inputs `minimize_plastic` needs for the M7.7 run, or nil if a
@@ -595,17 +622,22 @@ public final class AppModel: ObservableObject {
 
     /// Track a live project's run phase so the Library reflects background runs:
     /// `runningIDs` gains/loses the id, and finishing with results marks it optimized.
-    private func observeRun(_ pm: ProjectModel) {
+    func observeRun(_ pm: ProjectModel) {   // ★ notes 11-23: internal (AppModel+Results)
         guard runCancellables[pm.id] == nil else { return }
+        // ★ his notes 11-23: a run's start and its end, seen as they happen (whatever screen is open): the end saves its
+        // result into the run's own version folder (`runFinished`, AppModel+Results)
+        var wasRunning = false
         runCancellables[pm.id] = pm.run.$phase
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak pm] phase in
                 guard let self, let pm else { return }
                 if phase == .running {
                     self.runningIDs.insert(pm.id)
+                    if !wasRunning { wasRunning = true; self.runStarted(pm) }
                 } else {
                     self.runningIDs.remove(pm.id)
-                    if pm.hasResults { self.markOptimized(pm.id) }
+                    if wasRunning { wasRunning = false; self.runFinished(pm) }
+                    else if pm.hasResults { self.markOptimized(pm.id) }
                 }
             }
     }
@@ -985,10 +1017,11 @@ public final class AppModel: ObservableObject {
 
     /// Write `live` (a version's edited settings) into that version's draft — the one made this session,
     /// else a new folder (the model and its sidecars copied from the version's folder, no results).
+    /// ★ his iPad notes 11-23: `fresh` — always a new folder (a new version), never the draft linked to this one, and no link.
     @discardableResult
-    func writeLibraryDraft(of project: ProjectModel, live: ProjectSnapshot) -> RecentProject? {
+    func writeLibraryDraft(of project: ProjectModel, live: ProjectSnapshot, fresh: Bool = false) -> RecentProject? {
         var d = live
-        d.id = libraryDrafts[project.id] ?? UUID()
+        d.id = fresh ? UUID() : (VersionDraftLinks.usable(libraryDrafts[project.id], store) ?? UUID())
         d.optimized = nil
         d.savedAt = now()
         let model = project.modelSourceURL ?? URL(fileURLWithPath: store.modelPath(id: project.id, fileName: live.modelFileName))
@@ -996,13 +1029,26 @@ public final class AppModel: ObservableObject {
             toast = "Couldn’t save the draft: \(error.localizedDescription)"
             return nil
         }
-        libraryDrafts[project.id] = d.id
+        if !fresh { libraryDrafts[project.id] = d.id }
         library.noteParent(project.id, of: d.id)   // numbered from this version (his decision 11: v4 → v4.1)
         let recent = ProjectDuplication.recent(for: d)
         if let i = recentProjects.firstIndex(where: { $0.id == d.id }) { recentProjects[i] = recent }
         else { recentProjects.insert(recent, at: (recentProjects.firstIndex { $0.id == project.id } ?? -1) + 1) }
         if thumbnails[d.id] == nil { thumbnails[d.id] = thumbnails[project.id] }
         return recent
+    }
+
+    /// ★ his iPad notes 11-23: the live `project` becomes the version in `folder` (just written, VersionMoves.swift): its model
+    /// read from that folder, its live copy and run watch filed under it. The version it was reopens from its own folder.
+    func moveLive(_ project: ProjectModel, to folder: UUID, modelFileName: String) {
+        let old = project.id
+        guard old != folder else { return }
+        project.becomeVersion(folder, modelPath: store.modelPath(id: folder, fileName: modelFileName))
+        projectsById[old] = nil
+        projectsById[folder] = project
+        if let c = runCancellables.removeValue(forKey: old) { runCancellables[folder] = c }
+        if thumbnails[folder] == nil, let t = thumbnails[old] { thumbnails[folder] = t }
+        if libraryDrafts[old] != nil { libraryDrafts[old] = nil }
     }
 
     /// Drop a version's live copy, so it next opens from its folder (as it ran).
@@ -1103,7 +1149,10 @@ public final class AppModel: ObservableObject {
 
     /// Dismiss every outstanding re-attach offer at once (the list's "Dismiss all").
     public func dismissAllReattach() {
+        // ★ his notes 11-23: only the banner's own (Optimize) records; a Lattice job's record stays until its result is saved
+        let lattice = RemoteJobStore.loadAll(defaults: remoteJobDefaults).filter(\.isLatticeJob)
         RemoteJobStore.clear(defaults: remoteJobDefaults)
+        for j in lattice { RemoteJobStore.save(j, defaults: remoteJobDefaults) }
         pendingReattachJobs = []
     }
 
@@ -1145,6 +1194,8 @@ public final class AppModel: ObservableObject {
     /// project (e.g. an empty/legacy one with no model).
     public func persistCurrentProject() {
         guard let project else { return }
+        // ★ his iPad notes 11-23: an edit on a version with a result is the next version's (VersionMoves.swift)
+        moveToNextVersionIfEdited(project, baseline: VersionEditWatch.shared.baseline(for: project))
         persist(project)
     }
 
@@ -1188,16 +1239,7 @@ public final class AppModel: ObservableObject {
                !recentProjects[idx].optimized {
                 recentProjects[idx].optimized = true
             }
-            let dto = OutcomeCodec.dto(from: outcome)
-            let url = store.resultsURL(id: project.id)
-            let resultsStore = store, resultsID = project.id
-            Self.resultsQueue.async {
-                // ★ only into a project that still exists: a write queued before a delete must
-                // never recreate its folder without project.json (round 3 review, 2026-10-01)
-                guard resultsStore.holdsProject(id: resultsID),
-                      let data = try? OutcomeCodec.encode(dto) else { return }
-                try? data.write(to: url, options: .atomic)
-            }
+            writeResults(outcome, id: project.id)   // ★ notes 11-23: the same write, inside background time (AppModel+Results)
             // The RE-LATTICE artifacts, beside the results they describe (task
             // 2026-08-02-lattice-a-variant): the exact job document submitted and
             // that run's design.bin. Written together, cleared together — a
@@ -1216,10 +1258,27 @@ public final class AppModel: ObservableObject {
         }
     }
 
+    /// ★ his notes 11-23: a result's file, encoded and written off the main thread inside background time that ends when it
+    /// has landed (`landed` then); `persist` and a finished run's save (AppModel+Results) both write through it.
+    func writeResults(_ outcome: OptimizeOutcome, id resultsID: UUID, landed: @escaping () -> Void = {}) {
+        let token = backgroundTime.begin("app.topopt.save-result")
+        let dto = OutcomeCodec.dto(from: outcome)
+        let url = store.resultsURL(id: resultsID)
+        let resultsStore = store
+        Self.resultsQueue.async { [weak self] in
+            defer { DispatchQueue.main.async { landed(); self?.backgroundTime.end(token) } }
+            // ★ only into a project that still exists: a write queued before a delete must
+            // never recreate its folder without project.json (round 3 review, 2026-10-01)
+            guard resultsStore.holdsProject(id: resultsID),
+                  let data = try? OutcomeCodec.encode(dto) else { return }
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
     /// Rebuild a project from its on-disk snapshot, re-importing the copied model.
     /// Returns nil if there is no snapshot or the re-import fails (the caller falls
     /// back to an empty workspace).
-    private func restoreFromDisk(_ recent: RecentProject) -> ProjectModel? {
+    func restoreFromDisk(_ recent: RecentProject) -> ProjectModel? {   // ★ notes 11-23: internal (AppModel+Results)
         guard let snap = store.snapshot(id: recent.id) else { return nil }
         let path = store.modelPath(id: snap.id, fileName: snap.modelFileName)
         guard let mesh = try? importer(path) else { return nil }
@@ -1234,6 +1293,7 @@ public final class AppModel: ObservableObject {
         // persist-c: if this project had results, load them (variants + playback)
         // off-main and drop them into the idle run so results reopen instantly.
         if snap.optimized == true {
+            resultRanWith[snap.id] = snap   // ★ notes 11-23: what its saved result ran with (the Lattice button's Approved)
             let url = store.resultsURL(id: snap.id)
             let artifacts = store.loadRelatticeArtifacts(id: snap.id)
             Self.resultsQueue.async {

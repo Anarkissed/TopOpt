@@ -220,6 +220,17 @@ struct LatticeLayoutGrid {
 };
 LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float origin_y, float origin_z, float voxel_mm,
                                       int32_t nx, int32_t ny, int32_t nz, BridgeError& err);
+// ★ his 11-23 (the walls taken away FIRST, then the vines grow): the same map for these settings BEFORE the lay, when every
+// lattice region is Organic (a woven region's lattice is open whatever is laid in it: SolidAt O1). The session's domain for
+// these settings is made now (the lay then keeps it: the same "where"). `supported` false (and `grid.rg` empty) when a voxel
+// would need the laid cells (a cube lattice region): then the map comes after the lay, as before.
+struct LatticeLayoutGridAhead {
+  LatticeLayoutGrid grid;
+  bool supported = false;
+};
+LatticeLayoutGridAhead lattice_layout_grid_ahead(int64_t session, const LatticeLayoutSettings& settings, float origin_x,
+                                                 float origin_y, float origin_z, float voxel_mm, int32_t nx, int32_t ny,
+                                                 int32_t nz, BridgeError& err);
 // THE STRESS RESULT the session grades by (Install 2): von Mises, MPa, x fastest then y then z, on a grid whose low corner
 // is `origin` and whose voxel edge is `spacing` (core's DemandField). Kept by the session (one pointer between lays: core
 // keeps the part's own reference by it) until set again; an empty `mpa` clears it (no stress yet).

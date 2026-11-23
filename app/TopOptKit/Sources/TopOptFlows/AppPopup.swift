@@ -20,9 +20,12 @@ public struct AppPopup: Equatable, Identifiable, Sendable {
 
 @MainActor public final class AppPopups: ObservableObject {
     public static let shared = AppPopups()
-    @Published public var current: AppPopup? { didSet { if current == nil { action = nil } } }
+    @Published public var current: AppPopup? { didSet { if current == nil { action = nil; second = nil; dismissTitle = nil } } }
     /// The pop-up's one action beside OK (e.g. "Try again"); cleared with it.
     public private(set) var action: (title: String, run: () -> Void)?
+    /// ★ his 11-22 (no Mac: "try again", cancel, or make it on the iPad): a second action, and the dismiss button's own word.
+    public private(set) var second: (title: String, run: () -> Void)?
+    public private(set) var dismissTitle: String?
     /// What each raise said, while a test records (FlexibleSaid.recording).
     public static var recorded: [AppPopup] = []
 
@@ -33,6 +36,14 @@ public struct AppPopup: Equatable, Identifiable, Sendable {
         if FlexibleSaid.recording { Self.recorded.append(p) }
         current = p
         self.action = action
+    }
+
+    /// ★ his 11-22: a pop-up with two actions and a dismiss word ("Try again", "Make it on the iPad", "Cancel").
+    public func choose(_ title: String, _ text: String, log: String? = nil, first: (title: String, run: () -> Void),
+                       second: (title: String, run: () -> Void), dismiss: String) {
+        show(title, text, log: log, action: first)
+        self.second = second
+        dismissTitle = dismiss
     }
 
     /// An (i): the setting's name and its explanation, in the same centred card.
@@ -69,7 +80,16 @@ struct AppPopupLayer: View {
                             .frame(maxWidth: .infinity, alignment: p.info ? .leading : .center)
                             .accessibilityIdentifier("app-popup-text")
                         HStack(spacing: DS.Space.s) {
-                            if let a = popups.action {
+                            if let a = popups.action, let b = popups.second {   // ★ his 11-22: two choices and a dismiss, stacked
+                                VStack(spacing: DS.Space.s) {
+                                    PillButton(a.title) { let run = a.run; popups.current = nil; run() }
+                                        .accessibilityIdentifier("app-popup-action")
+                                    PillButton(b.title, style: .secondary) { let run = b.run; popups.current = nil; run() }
+                                        .accessibilityIdentifier("app-popup-second")
+                                    PillButton(popups.dismissTitle ?? "OK", style: .secondary) { popups.current = nil }
+                                        .accessibilityIdentifier("app-popup-ok")
+                                }
+                            } else if let a = popups.action {
                                 PillButton("OK", style: .secondary) { popups.current = nil }
                                     .accessibilityIdentifier("app-popup-ok")
                                 PillButton(a.title) { let run = a.run; popups.current = nil; run() }
