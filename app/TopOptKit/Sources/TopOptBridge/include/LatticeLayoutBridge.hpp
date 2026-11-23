@@ -378,6 +378,21 @@ struct LatticeLayoutSynthetic {
 LatticeLayoutSynthetic lattice_layout_synthetic(int64_t session, const LatticeLayoutSettings& settings,
                                                 const LatticeLayoutOrganicGroups& groups, const LatticeLayoutIds& walls,
                                                 bool from_empty, BridgeError& err);
+// ★ WATCH IT GROW (his 11-22: "Could the user literally *watch* the lattice grow from nothing?"): what the session's Organic
+// lay has laid so far (core's GrowthTap; the session owns one, every Organic lay hands it its vines): the pieces from `from`
+// on (at most `most`; 0 = all), the index to read from next time, the phase (0 none yet, 1 growing, 2 pruning, 3 re-seeding
+// the bare places, 4 reaching the walls, 5 finishing) and the lay's number (a new lay starts again at 0). It NEVER waits on
+// the lay (the lay holds the session's own lock for its whole length): call it from any thread while the lay runs. After a
+// lay, its pieces stay until the next one starts. Traced hands each region's strands whole.
+struct LatticeLayoutGrowth {
+  uint64_t lay = 0;
+  int32_t phase = 0;
+  int64_t next = 0;
+  std::vector<float> xyz;        // 6 per piece: a xyz, b xyz (the part's own coordinates)
+  std::vector<int32_t> region;   // 1 per piece
+};
+LatticeLayoutGrowth lattice_layout_growth_read(int64_t session, int64_t from, int64_t most, BridgeError& err);
+
 // Every layout of `session` running now or waiting comes back cancelled. Safe from any thread.
 void lattice_layout_cancel(int64_t session);
 void lattice_layout_close(int64_t session);

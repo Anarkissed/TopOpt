@@ -1588,6 +1588,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     private var latticeLayer: LatticeSDFRenderer?
     var flexibleLattice: FlexibleLatticePass?   // Flexible (PR #362): a third G-buffer writer (FlexibleLatticePass.swift); nil = #354's frame
     var layoutBars: LatticeLayoutBarsPass?   // the new engine's bars (#362, LatticeLayoutBarsPass.swift); nil = today's frame
+    var growth: LatticeGrowth?               // ★ his 11-22 (watch it grow): an Organic lay's vines so far (LatticeGrowthPass.swift)
+    var growthPass: LatticeGrowthPass?
     /// The scene token last uploaded, so a bake happens once per scene change and never
     /// per frame (the preview's bar P2, carried over unchanged).
     private var latticeSceneToken: Int = -1
@@ -3863,6 +3865,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                 countedDraw(enc, .triangle, loadFlowVertexCount)
             }
         }
+        // ★ his 11-22 (watch it grow): the Organic lay's vines as they are laid, over the frame (LatticeGrowthPass.swift)
+        encodeGrowth(enc, clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView, target: mainSize)
         enc.endEncoding()
     }
 
@@ -5976,6 +5980,8 @@ struct MeshViewInputs {
     var flexibleLattice: FlexibleLatticeLayerInputs? = nil
     /// The new engine's bars (#362, LatticeLayoutBarsPass; behind "New engine (test)"). nil = today's frame.
     var layoutBars: LatticeLayoutBarsInputs? = nil
+    /// ★ his 11-22 (watch it grow): the Organic lay's vines so far; the view redraws itself on each of its changes. nil = none.
+    var growth: LatticeGrowth? = nil
     /// ★ his 11-16/17 (Install 3): the Outlines view's whole line set, the faces as the app sends them (`PieceOutline`);
     /// drawn in place of the part's edges + `extraLines` when it was made on this mesh. nil = the part's own edges.
     var pieceOutline: PieceOutline.Drawing? = nil
@@ -6452,6 +6458,7 @@ extension MetalMeshView {
         /// renderer's own `camera` becomes a mirror kept in sync from this via `sink`.
         private(set) var cameraModel: OrbitCameraModel?
         private var cameraCancellable: AnyCancellable?
+        private var growthCancellable: AnyCancellable?   // ★ his 11-22: the growing vines redraw the view (no page pass)
         private weak var boundView: MTKView?
         private var appliedSignature: ViewerMeshSignature?
         private var appliedTint: TintKey?
@@ -7100,6 +7107,7 @@ extension MetalMeshView {
 
             if renderer.applyFlexibleLattice(inputs.flexibleLattice, device: view.device, baseScale: appliedFlexScale) { dirty = true }   // token-keyed upload in FlexibleLatticePass.swift; squish frames already dirty via flexScale; baseScale: the view's own squish, back when a loop lets go
             if renderer.applyLayoutBars(inputs.layoutBars, device: view.device) { dirty = true }   // the new engine's bars (#362): token-keyed upload
+            if attachGrowth(inputs.growth, to: view, renderer: renderer) { dirty = true }   // ★ his 11-22: watch it grow
             if dirty { redraw(view) }
             // Publish the camera projection (deduped) on the NEXT runloop, never inline:
             // `onProjection` writes the host view's `@State projection`, and `apply` runs
@@ -7118,6 +7126,19 @@ extension MetalMeshView {
                 for f in g.faces { tint[f] = v }
             }
             return tint
+        }
+
+        /// ★ his 11-22 (watch it grow): the growth this view draws; each of its changes (a poll's pieces, the fade) redraws
+        /// the view directly, as the camera model does, never through the page. True when it changed.
+        private func attachGrowth(_ g: LatticeGrowth?, to view: MTKView, renderer: MeshRenderer) -> Bool {
+            guard renderer.applyGrowth(g) else { return false }
+            growthCancellable = g?.changed.sink { [weak self, weak view] in
+                MainActor.assumeIsolated {
+                    guard let self, let view else { return }
+                    self.redraw(view)
+                }
+            }
+            return true
         }
 
         /// Subscribe to the shared camera model (STEP 1): mirror every published camera
@@ -7749,6 +7770,18 @@ extension MetalMeshView {
 #if canImport(MetalKit)
         var copy = self
         copy.inputs.pieceOutline = drawing
+        return copy
+#else
+        self
+#endif
+    }
+
+    /// ★ his 11-22 ("Could the user literally *watch* the lattice grow from nothing?"): the Organic lay's vines as they are
+    /// laid, drawn over the frame while it lays (LatticeGrowthPass); the view redraws itself on each change. nil = none.
+    public func latticeGrowth(_ growth: LatticeGrowth?) -> MetalMeshView {
+#if canImport(MetalKit)
+        var copy = self
+        copy.inputs.growth = growth
         return copy
 #else
         self
