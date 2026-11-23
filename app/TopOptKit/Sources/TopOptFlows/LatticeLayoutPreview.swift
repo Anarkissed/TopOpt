@@ -305,6 +305,7 @@ public final class LatticeLayoutPreview: ObservableObject {
                        delay: Duration = .zero, checkNozzle: Bool = false, exact: Bool = false) {
         guard on else { clear(); return }
         guard let path = p.importedFile?.path else { problem = Self.noPartLine; bars = nil; return }
+        retargetIfSamePart(path)   // ★ his iPad notes 11-23: the version moved to its next number, the same part
         if path != sessionPath || box == nil { box = Self.box(p.importedMesh?.vertices ?? []) }
         if path != cutSurface?.path { cutMesh = p.importedMesh }
         let solidChanged = solid != solidWanted
@@ -326,7 +327,9 @@ public final class LatticeLayoutPreview: ObservableObject {
             return
         }
         // ★ his pick 11-21 ("absolutely"): a lattice already made for exactly these inputs is shown at once, no lay
+        adoptSaved(p, path: path, s)   // ★ his iPad notes 11-23: ... and the one this version's folder keeps
         if restoreRemembered(p, path: path, s, ok, accurate: accurate) { return }
+        openingAfterRestore?.cancel(); openingAfterRestore = nil   // ★ 11-23: the lay opens the session itself
         let before = inputsAtLay, wasLaying = laying
         take(p, s, ok)
         shownRestored = false
@@ -437,6 +440,11 @@ public final class LatticeLayoutPreview: ObservableObject {
     }
     /// Most recent first; at most `rememberedMost`, and no more struts in all than `rememberedStrutsMost` (the iPad's memory).
     private var remembered: [Remembered] = []
+    /// ★ his iPad notes 11-23 (LatticePreviewStore): the remembered lattice read back from the version's folder (its token), the
+    /// inputs the folder was last asked for and had nothing for, and the part's session opening behind a lattice shown so.
+    private var adoptedToken: Int?
+    private var diskMiss: LayInputs?
+    private var openingAfterRestore: Task<Void, Never>?
     public static let rememberedMost = 4
     public static let rememberedStrutsMost = 600_000
     private var inputsAtLay: LayInputs?
@@ -462,17 +470,23 @@ public final class LatticeLayoutPreview: ObservableObject {
             kept.append(e); struts += e.struts
         }
         remembered = kept
+        LatticePreviewStore.save(r)   // ★ his iPad notes 11-23: kept in the version's folder too
     }
 
     /// ★ his pick 11-21: a lattice already made for exactly these inputs, shown at once (no lay, nothing dimmed). False: none
     /// remembered, or it would need the solid view's map, which only a lay makes.
     private func restoreRemembered(_ p: ProjectModel, path: String, _ s: LatticeLayoutSession.Settings, _ ok: String?,
                                    accurate: Bool) -> Bool {
-        guard Self.organic(p.lattice), !Self.controlForget, session != nil, sessionPath == path else { return false }
+        guard Self.organic(p.lattice), !Self.controlForget else { return false }
         let key = Self.layInputs(p, path: path, s, stress: stress)
         guard let i = remembered.firstIndex(where: { $0.inputs == key && $0.quality == .exact })
                 ?? (accurate ? nil : remembered.firstIndex(where: { $0.inputs == key })) else { return false }
-        if solidWanted, remembered[i].bars.solid == nil { return false }
+        // ★ his iPad notes 11-23: read back from the version's folder, it is shown before the part's session is open (it opens
+        // behind it, and the solid view's map follows) — no lay
+        let fromDisk = adoptedToken != nil && remembered[i].bars.token == adoptedToken
+        guard fromDisk || (session != nil && sessionPath == path) else { return false }
+        if fromDisk, bars?.token == remembered[i].bars.token, openingAfterRestore != nil { return true }   // on screen already
+        if solidWanted, remembered[i].bars.solid == nil, !fromDisk { return false }
         let r = remembered.remove(at: i)
         remembered.insert(r, at: 0)
         task?.cancel(); task = nil
@@ -494,6 +508,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         laying = false; layProgress = nil
         Self.remembersShown += 1
         layTimingRestored(r)
+        if fromDisk { openBehindRestored(path: path) }   // ★ his iPad notes 11-23
         return true
     }
 
@@ -1183,7 +1198,10 @@ public final class LatticeLayoutPreview: ObservableObject {
             now.solid = m.grid
             bars = now
             timing?.mapMS = m.ms
-            if let i = remembered.firstIndex(where: { $0.bars.token == now.token }) { remembered[i].bars.solid = m.grid }   // ★ 11-21
+            if let i = remembered.firstIndex(where: { $0.bars.token == now.token }) {
+                remembered[i].bars.solid = m.grid   // ★ 11-21
+                if i == 0 { LatticePreviewStore.save(remembered[0]) }   // ★ his iPad notes 11-23: kept with its map
+            }
         } catch {
             // the bars stay; the body stays whole where the map could not be read
         }
@@ -1699,6 +1717,49 @@ struct LatticeLayoutPreviewOneLine: View {
             .background(Capsule().fill(DS.Surface.bar.color))
             .background(CornerPairStyle.publish("new-engine-lines"))
             .allowsHitTesting(false)
+    }
+}
+
+// MARK: - ★ his iPad notes 11-23: the version's last lattice, kept in its folder (LatticePreviewStore)
+
+extension LatticeLayoutPreview {
+    /// The lattice this version's folder keeps for exactly these inputs joins the remembered ones (a fresh token), so the
+    /// restore shows it at once: no stress check, no lay, no session needed to draw it. Read once per inputs.
+    fileprivate func adoptSaved(_ p: ProjectModel, path: String, _ s: LatticeLayoutSession.Settings) {
+        guard Self.organic(p.lattice), !Self.controlForget else { return }
+        let inputs = Self.layInputs(p, path: path, s, stress: stress)
+        guard inputs != diskMiss, !remembered.contains(where: { $0.inputs == inputs }) else { return }
+        guard let r = LatticePreviewStore.load(inputs, token: token &+ 1) else { diskMiss = inputs; return }
+        token &+= 1
+        adoptedToken = token
+        remembered.insert(r, at: 0)
+        LatticePreviewStore.restoredFromDisk += 1
+    }
+
+    /// The part's session, opened behind a lattice read back from the folder (the print file, the nozzle check and Auto's
+    /// numbers use it; `matchSessionTensor` gives it the stress the lattice was laid with), then the solid view's map.
+    fileprivate func openBehindRestored(path: String) {
+        guard session == nil || sessionPath != path else { return }
+        openingAfterRestore?.cancel()
+        openingAfterRestore = Task { [weak self] in
+            defer { self?.openingAfterRestore = nil }
+            guard let self, (try? await self.openSession(path: path)) != nil, !Task.isCancelled else { return }
+            if self.solidWanted, self.bars?.solid == nil { await self.addMap() }
+        }
+    }
+
+    /// ★ The live version moved to its next number (VersionMoves.swift): the same part, its copy in the new folder. The session,
+    /// the remembered lattices and the drawn one are this part's still — re-pointed, never laid again.
+    fileprivate func retargetIfSamePart(_ path: String) {
+        guard let old = sessionPath, old != path, session != nil,
+              FileManager.default.contentsEqual(atPath: old, andPath: path) else { return }
+        sessionPath = path
+        for i in remembered.indices where remembered[i].inputs.path == old { remembered[i].inputs.path = path }
+        if inputsAtLay?.path == old { inputsAtLay?.path = path }
+        if let c = cutSurface, c.path == old { cutSurface = (path, c.surface) }
+        if let w = shownWhere, w.at.path == old { var at = w.at; at.path = path; shownWhere = (w.token, at) }
+        if nozzlePath == old { nozzlePath = path }
+        diskMiss = nil
     }
 }
 

@@ -198,8 +198,8 @@ public struct SelectionsList: View {
     var toggleOpen: ((UUID) -> Void)? = nil
     /// ★ his ask 11-13 (Topology like Lattice): false = a picked group's rows close on its chevron and it stays picked.
     var pickedStaysOpen = true
-    /// ★ his ask: the list's height, set by dragging the grip under it (nil: as tall as its rows, up to the screen).
-    /// No binding: no grip.
+    /// ★ his ask: the list's height, set by dragging the corner grip (nil: as tall as its rows, up to the screen — the corner's
+    /// double tap, his 11-23). No binding: the corner sets the width only.
     var chosenHeight: Binding<CGFloat?>? = nil
     /// ★ B6 s1b: a section heading the groups (nil: none).
     var lead: AnyView? = nil
@@ -213,11 +213,12 @@ public struct SelectionsList: View {
     /// ★ his iPad 11-09 (2.5): the panel's top in the window, and its height less the list's (header, sections, footer).
     @State private var panelTopY: CGFloat? = nil
     @State private var chromeHeight: CGFloat = 0
-    @State private var dragFrom: CGFloat? = nil
     /// ★ his iPad 11-07 (3b): the list's eye sweep (Lattice Setup's list only).
     @StateObject private var sweep = EyeSweep()
     /// ★ his 11-22: the panel's width and its columns, remembered (every stage's list reads the same).
     @ObservedObject private var layout = SelectionsLayout.shared
+    /// ★ his iPad notes 11-23 (img 2): the name being renamed, kept in view above the keyboard.
+    @ObservedObject private var renaming = RenameInPlace.shared
     @State private var cornerFrom: (width: CGFloat, height: CGFloat)? = nil
     @State private var columnFrom: CGFloat? = nil
 
@@ -273,8 +274,15 @@ public struct SelectionsList: View {
     func resizable(height: Binding<CGFloat?>) -> SelectionsList {
         var copy = self
         copy.chosenHeight = height
+        copy.heightRemembered = true
         return copy
     }
+    /// ★ his iPad notes 11-23 ("dragging it around does nothing UNTIL I tap the corner icon"): Lattice Setup's height is read
+    /// where it is kept (SelectionsLayout), never through the binding: a binding made by the page holds the value it had when
+    /// the page last drew, so a drag that only redrew this list drew the old height until something redrew the page.
+    private var heightRemembered = false
+    /// His height for the list (nil: fitted to its rows).
+    private var chosenValue: CGFloat? { heightRemembered ? layout.latticeHeight : chosenHeight?.wrappedValue }
 
     /// How far a scenario folder's groups sit in from the folder row.
     static let folderIndent: CGFloat = 20
@@ -349,7 +357,7 @@ public struct SelectionsList: View {
                                 .padding(.vertical, DS.Space.xs)
                                 .background(GeometryReader { g in
                                     Color.clear.onAppear { contentHeight = g.size.height }
-                                        .onChange(of: g.size.height) { contentHeight = $0 }
+                                        .onChange(of: g.size.height) { h in contentFollowed(h) }
                                 })
                                 .environment(\.eyeSweepInScroll, true)   // ★ 3b: these eyes are the scroll's targets
                         }
@@ -369,7 +377,14 @@ public struct SelectionsList: View {
                             }
                         }
                         // ★ B2 (U10): nothing hidden below the fold — "n more ⌄" on the list's foot; a tap scrolls them in
-                        .overlay(alignment: .bottom) { moreCue(reader) }
+                        // (★ 11-23: never over a name being renamed)
+                        .overlay(alignment: .bottom) { if !renamesHere { moreCue(reader) } }
+                        .background(publish("selectionsRows"))   // the rows' window (the hosted tests')
+                        // ★ his iPad notes 11-23 (img 2: "When I attempted to rename a group, it didn't even show. The asset being
+                        // named should be front and centre"): the keyboard shortens the list to its floor, so the row being
+                        // renamed is brought to the list's middle as the rename starts, and again as the list shortens under it
+                        .onReceive(renaming.$key) { key in keepRenameInView(key, reader) }
+                        .onChange(of: listHeight) { _ in keepRenameInView(renaming.key, reader) }
                     // a card under the panel's lowest lines never opens out of sight
                     .onChange(of: deleteAsk) { id in
                         guard let id else { return }
@@ -378,7 +393,8 @@ public struct SelectionsList: View {
                     }
                 }
                 if let tail { tail }   // ★ B6 s3a
-                if chosenHeight != nil, !groups.isEmpty { grip }
+                // ★ his iPad notes 11-23 (img 1, 2): no grip under the list ("dragging it around does nothing UNTIL I tap the
+                // corner icon ... Remove it"): the corner grip sizes the panel, its double tap fits it to what it holds
                 if let footer {
                     Divider().overlay(DS.Color.strokeSubtle.color)
                     footer
@@ -476,6 +492,20 @@ public struct SelectionsList: View {
     static func lineScrollID(_ id: UUID) -> String { "selLine-\(id.uuidString)" }
     /// The cue's look: a 28 pt bar on the list's foot (its target the finger's 44 pt, reaching up over the list).
     static let cueHeight: CGFloat = 28
+
+    /// ★ his iPad notes 11-23: a rename under way (the name being renamed is the one thing to see): the "more" cue keeps off it.
+    private var renamesHere: Bool { !Self.controlRenameHidden && renaming.key != nil }
+    /// RED CONTROL (SelectionsNotes1123Tests): the row being renamed is left where it is (under the fold, behind the keyboard).
+    @MainActor static var controlRenameHidden = false
+
+    /// The field of `key` (a row of this list, if it is one) brought to the middle of the rows' window, after it is drawn.
+    private func keepRenameInView(_ key: String?, _ reader: ScrollViewProxy) {
+        guard let key, !Self.controlRenameHidden else { return }
+        DispatchQueue.main.async {
+            guard RenameInPlace.shared.key == key else { return }
+            withAnimation(.easeOut(duration: 0.2)) { reader.scrollTo(RenameInPlace.scrollID(key), anchor: .center) }
+        }
+    }
 
     /// The shown group lines whose middle lies below the list's visible foot, nearest first.
     private var linesBelow: [UUID] {
@@ -628,7 +658,7 @@ public struct SelectionsList: View {
     /// ★ his iPad 11-09 (2.5): and never past the page's floor — the panel's foot stays above the hint line.
     private var listHeight: CGFloat {
         let cap = min(maxHeight, floorCap)
-        if let chosen = chosenHeight?.wrappedValue { return max(Self.lineHeight * 2, min(chosen, cap)) }
+        if let chosen = chosenValue { return max(Self.lineHeight * 2, min(chosen, cap)) }
         return min(cap, max(contentHeight, Self.lineHeight))
     }
 
@@ -660,23 +690,22 @@ public struct SelectionsList: View {
     /// The room a wrapped name keeps above and below its lines inside the row.
     static let nameWrapPadding: CGFloat = 4
 
-    /// ★ his ask (14:3x): "make it resizeable" — a grip under the list; drag it down for more rows, up for fewer. The panel
-    /// grows about its centre, so the height moves twice the finger and the grip stays under it.
-    private var grip: some View {
-        Capsule().fill(DS.Color.textTertiary.color).frame(width: 36, height: 5)
-            .frame(maxWidth: .infinity).frame(height: 22).contentShape(Rectangle())
-            // ★ his iPad 2026-10-27 (note 2): GLOBAL translation (the grip moves as the panel grows, so a local one fought the
-            // finger) and HIGH priority (the canvas's orbit drag under the panel took the touch)
-            .highPriorityGesture(DragGesture(minimumDistance: 2, coordinateSpace: .global)
-                .onChanged { v in
-                    let from = dragFrom ?? listHeight
-                    if dragFrom == nil { dragFrom = from }
-                    chosenHeight?.wrappedValue = Self.resized(from: from, drag: v.translation.height, max: min(maxHeight, floorCap))
-                }
-                .onEnded { _ in dragFrom = nil })
-            .background(publish("selectionsGrip"))
-            .accessibilityLabel("Resize Selections")
-            .accessibilityIdentifier("\(idPrefix)-sel-grip")
+    /// ★ his iPad notes 11-23: "double tapping the corner icon should set it to automatically expand/contract to fill whatever
+    /// is in the Selections modal (as it expands or contracts when Groups/zones are opened)" — no chosen height: the list is as
+    /// tall as its rows (up to the screen), following them as a group or zone opens or closes. A drag of the corner sets a height
+    /// again (fit is left).
+    func fitToContents() {
+        guard let chosenHeight, chosenValue != nil else { return }
+        withAnimation(DS.Motion.emphasized) { chosenHeight.wrappedValue = nil }
+    }
+
+    /// Whether the list follows its rows (no height of his: fit to contents).
+    var followsContents: Bool { chosenValue == nil }
+
+    /// The rows' height measured: fitted to them, the list grows and shrinks with them, animated (never a jump).
+    private func contentFollowed(_ h: CGFloat) {
+        guard abs(h - contentHeight) > 0.5 else { return }
+        if followsContents { withAnimation(DS.Motion.emphasized) { contentHeight = h } } else { contentHeight = h }
     }
 
     private func publish(_ key: String) -> some View {
@@ -731,6 +760,8 @@ public struct SelectionsList: View {
                     }
                 }
                 .onEnded { _ in cornerFrom = nil })
+            // ★ his iPad notes 11-23: a double tap fits the panel to what it holds (and keeps following it)
+            .simultaneousGesture(TapGesture(count: 2).onEnded { fitToContents() })
             .background(publish("selectionsCornerGrip"))
             .accessibilityLabel("Resize Selections")
             .accessibilityIdentifier("\(idPrefix)-sel-corner")

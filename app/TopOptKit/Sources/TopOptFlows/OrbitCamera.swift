@@ -93,6 +93,11 @@ public struct OrbitCamera: Equatable {
     /// share of the view's height a drawer covers at the bottom (0 = none). The picture is drawn scaled into the page above
     /// it — folded into `projectionMatrix`, so the renderer, picking, `CameraProjection.project` and `ray` all agree.
     public var frameLift: Float = 0
+    /// ★ his iPad notes 11-23 (the Lattice page's sample): the part of the view the picture is drawn in — (x0, y0, x1, y1), shares
+    /// of the view's width and height from its top left; nil = the whole view. Drawn as a view of that size would draw it (the
+    /// same framing), placed there, while the floor and the background go on to the view's edges. Folded into
+    /// `projectionMatrix`, as the lift is.
+    public var frameRegion: SIMD4<Float>? = nil
     /// The un-panned orbit centre — the framed model centre `frame` computed. `pan` moves
     /// `target` away from it; `resetPan` (the Home button, round-4 item 2) returns to it, so
     /// Home clears any pan. Captured by `init`/`frame` so it always tracks the current framing.
@@ -320,16 +325,28 @@ public struct OrbitCamera: Equatable {
             near = Swift.max(near, eyeDistance - reach)
             far = Swift.max(far, eyeDistance + reach * 6)
         }
-        let a = aspect > 0 ? aspect : 1
+        var a = aspect > 0 ? aspect : 1
+        let region = frameRegion.flatMap { r -> SIMD4<Float>? in r.z - r.x > 0.01 && r.w - r.y > 0.01 ? r : nil }
+        if let r = region { a *= (r.z - r.x) / (r.w - r.y) }   // ★ 11-23: the region's own shape
         let ys = 1 / tan(drawFovY * 0.5)   // ★ B2: the drawn field of view (the telephoto when orthographic)
         let xs = ys / a
         let zs = far / (near - far)
-        let p = simd_float4x4(columns: (
+        var p = simd_float4x4(columns: (
             SIMD4<Float>(xs, 0, 0, 0),
             SIMD4<Float>(0, ys, 0, 0),
             SIMD4<Float>(0, 0, zs, -1),
             SIMD4<Float>(0, 0, zs * near, 0)
         ))
+        if let r = region {
+            // ★ 11-23: NDC (x, y) → the region: scaled by its share, centred on it (y up: the top share is NDC 1)
+            let place = simd_float4x4(columns: (
+                SIMD4<Float>(r.z - r.x, 0, 0, 0),
+                SIMD4<Float>(0, r.w - r.y, 0, 0),
+                SIMD4<Float>(0, 0, 1, 0),
+                SIMD4<Float>(r.x + r.z - 1, 1 - (r.y + r.w), 0, 1)
+            ))
+            p = place * p
+        }
         guard frameLift > 0 else { return p }
         // ★ the lift: NDC (x, y) → ((1 − f)·x, (1 − f)·y + f) — the whole picture in the top (1 − f) of the view
         let f = Swift.min(0.9, frameLift)

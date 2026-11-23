@@ -57,25 +57,30 @@ final class RerunAfterLandHostedTests: XCTestCase {
         waitUntil(h, 10, "its results are saved") { disk.hasPersistedResults(id: p.id) }
 
         // he changes the Safety margin (a setting; the Setup panel's own row is B2's)
+        // ★ his iPad notes 11-23 ("A new version should be made withOUT the export as soon as ANY changes are made onto the
+        // version the result is on"): the change itself makes v2 and the page moves there (no "Optimize as v2" card)
+        let v1 = p.id
         p.force.safetyMargin = 2.0
-        h.pump(0.5)
+        h.pump(0.8)
+        XCTAssertNotEqual(p.id, v1, "★ the change made the next version")
+        XCTAssertEqual(app.library.version(p.id)?.number, 2)
 
-        // ★ Optimize again: the "Optimize as v2" card shows
+        // ★ Optimize again: v2 runs, no card
         try clickOptimize(h, "Optimize, after the run landed")
-        _ = try h.onScreen("nextVersionOptimize", "★ the Optimize as v2 card, after a landed run")
-
-        // ★ its Optimize opens v2 and v2 runs
-        try h.tap("nextVersionOptimize", "the card's Optimize v2", settle: 1.5)
-        waitUntil(h, 15, "v2 opens and its run lands") { app.project.map { $0.id != p.id && $0.run.phase == .succeeded } ?? false }
+        XCTAssertNil(h.frames.all["nextVersionOptimize"], "★ no Optimize as v2 card: the page is on v2 already")
+        waitUntil(h, 15, "v2's run lands") { app.project.map { $0.id != v1 && $0.run.phase == .succeeded } ?? false }
         XCTAssertEqual(runs.count, 2, "★ the second run ran")
+        XCTAssertTrue(disk.hasPersistedResults(id: v1), "v1 keeps its result")
 
         // ★ and again, in v2: a third run is not blocked either
         let v2 = try XCTUnwrap(app.project)
         waitUntil(h, 10, "v2's results are saved") { disk.hasPersistedResults(id: v2.id) }
+        let v2id = v2.id
         v2.force.safetyMargin = 2.5
-        h.pump(0.5)
-        try clickOptimize(h, "Optimize in v2, after its run landed")
-        _ = try h.onScreen("nextVersionOptimize", "★ the Optimize as v3 card, in v2")
+        h.pump(0.8)
+        XCTAssertNotEqual(v2.id, v2id, "★ v3, made by the change")
+        try clickOptimize(h, "Optimize in v3")
+        waitUntil(h, 15, "v3's run lands") { runs.count == 3 }
     }
 }
 #endif

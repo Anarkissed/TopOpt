@@ -2634,6 +2634,11 @@ public struct LatticeSetupWizard: View {
         rebuild()
     }
 
+    /// ★ his iPad notes 11-23 ("allow the left column to expand automatically a little bit"): the column fits its names.
+    private func latticeTabsWidth(_ c: CellsPageContext) -> CGFloat { LatticePageColumns.tabsWidth(latticeTabs(c).map(\.title)) }
+    /// The panel, wider by what its column took (the settings keep their room).
+    private func latticePanelWidth(_ c: CellsPageContext) -> CGFloat { LatticePageColumns.panelWidth(tabs: latticeTabsWidth(c)) }
+
     private func latticeTabs(_ c: CellsPageContext) -> [DSFolderTabs.Tab] {
         [DSFolderTabs.Tab(id: "part", title: "Part")]
             + c.regions.enumerated().map { DSFolderTabs.Tab(id: "area-\($0.offset)", title: $0.element, colour: DS.Color.Role.lattice) }
@@ -2656,12 +2661,15 @@ public struct LatticeSetupWizard: View {
         return AnyView(ZStack {
             // ★ B7 (his iPad notes 11-08, design note 30), ★ his 11-10 (later): Cells is core's chunk of cells; In a part is
             // core's sample part with the settings on it — never his own part (the workspace covers it on this page)
+            // ★ his iPad notes 11-23 (img 3): the sample's background fills the whole page behind the panel and the top rows (no
+            // black bars); its picture is drawn in the part the panel leaves free, framed as it was
             AnyView(LatticeSampleView(inputs: latticeSampleInputs, notInSample: latticeNotInSample)
+                .visible(EdgeInsets(top: portrait ? PageChrome.panelTop + latticePanelHeight : PageChrome.panelTop,
+                                    leading: portrait ? 0 : PageChrome.edge + latticePanelWidth(c), bottom: 0, trailing: 0))
                 .id(model.stage)   // each view its own camera: the chunk and the part frame differently
                 // ★ his 11-22: this part's Auto numbers, measured as the page opens (and when it turns Organic)
                 .task(id: model.cellTransition == .organicGrade) { if model.cellTransition == .organicGrade { measureOrganic?() } }
-                .padding(.leading, portrait ? 0 : PageChrome.edge + PageChrome.widePanelWidth)
-                .padding(.top, portrait ? PageChrome.panelTop + latticePanelHeight : PageChrome.panelTop)
+                .ignoresSafeArea()
                 .latticeID(model.stage == .cell ? "lattice-sample-cells" : "lattice-sample-part"))
             latticePanel(c, hug: portrait)
                 .frame(height: portrait ? nil : band)
@@ -2670,7 +2678,7 @@ public struct LatticeSetupWizard: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             latticeViewSwitch
                 .frame(maxWidth: .infinity)
-                .padding(.leading, portrait ? PageChrome.edge : PageChrome.edge + PageChrome.widePanelWidth + DS.Space.l)
+                .padding(.leading, portrait ? PageChrome.edge : PageChrome.edge + latticePanelWidth(c) + DS.Space.l)
                 .padding(.trailing, PageChrome.edge)
                 .padding(.top, portrait ? PageChrome.panelTop + latticePanelHeight + DS.Space.l + 14 : PageChrome.panelTop + 14)
                 .frame(maxHeight: .infinity, alignment: .top)
@@ -2728,7 +2736,7 @@ public struct LatticeSetupWizard: View {
                     .overlay(alignment: .top) { Rectangle().fill(DS.Color.strokeSubtle.color).frame(height: 1) }
             }
         }
-        .frame(width: PageChrome.widePanelWidth, alignment: .leading)
+        .frame(width: latticePanelWidth(c), alignment: .leading)   // ★ his iPad notes 11-23: wider with its names' column
         .frame(maxHeight: latticePanelOpen && !hug ? .infinity : nil, alignment: .top)
         .background(CornerPairStyle.publish("latticeSettingsPanel"))
         .background(latticePanelShape.fill(DS.Surface.panel.color))
@@ -2753,7 +2761,8 @@ public struct LatticeSetupWizard: View {
     private func latticeTabsAndRows(_ c: CellsPageContext) -> some View {
         HStack(alignment: .top, spacing: 0) {
             DSFolderTabs(latticeTabs(c), selected: latticeArea(c) == nil ? "part" : latticeTab, key: Self.latticeTabsKey,
-                         pick: { id in withAnimation(.easeInOut(duration: 0.15)) { openLatticeTab(id, c) } })
+                         pick: { id in withAnimation(.easeInOut(duration: 0.15)) { openLatticeTab(id, c) } },
+                         width: latticeTabsWidth(c))   // ★ his iPad notes 11-23: as wide as its names, a little air
                 .frame(maxHeight: .infinity, alignment: .top)
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: DS.Space.m) {

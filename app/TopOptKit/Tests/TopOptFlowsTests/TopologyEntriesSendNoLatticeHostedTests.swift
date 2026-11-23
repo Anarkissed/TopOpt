@@ -93,12 +93,14 @@ final class TopologyEntriesSendNoLatticeHostedTests: XCTestCase {
         try clickOptimize(h)
         waitUntil(h, 15, "the first run lands") { p.run.phase == .succeeded }
         waitUntil(h, 10, "its results are saved") { disk.hasPersistedResults(id: p.id) }
+        // ★ his iPad notes 11-23: the change makes v2 at once and the page moves there; Optimize runs v2 (no card)
+        let v1 = p.id
         p.force.safetyMargin = 2.0
-        h.pump(0.5)
+        h.pump(0.8)
+        XCTAssertNotEqual(p.id, v1, "★ on v2")
         try clickOptimize(h)
-        try h.tap("nextVersionOptimize", "Optimize as v2", settle: 1.5)
         waitUntil(h, 20, "v2's run") { sent.requests.count == 2 }
-        XCTAssertTrue(sent.requests.allSatisfy { $0.lattice == nil }, "★ Optimize as v2 sends no lattice block")
+        XCTAssertTrue(sent.requests.allSatisfy { $0.lattice == nil }, "★ Optimize on v2 sends no lattice block")
     }
 }
 #endif
