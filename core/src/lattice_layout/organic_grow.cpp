@@ -1456,13 +1456,50 @@ void Grower::repeats() {
   // Moved until each such end lies on another strand (an end moved onto a strand whose own end then moves is moved
   // again), at most 8 times.
   std::vector<std::pair<std::size_t, int>> need;
+  // SPEED 11-22: "this end lay on a joint" (within 1e-9 mm) read on a 1 micron grid of the joints (27 cells round the end)
+  // instead of against every joint: the same yes/no. A point off the grid's range is read against every joint as before.
+  constexpr double kJointCell = 1e-3;
+  const auto jcell = [](double v, long long& c) {
+    if (!std::isfinite(v)) return false;
+    const double q = std::floor(v / kJointCell);
+    if (std::fabs(q) > static_cast<double>((1LL << 20) - 4)) return false;
+    c = static_cast<long long>(q);
+    return true;
+  };
+  const auto jkey = [](long long i, long long j, long long k) {
+    const auto f = [](long long v) { return static_cast<std::uint64_t>((v + (1LL << 20)) & 0x1FFFFF); };
+    return f(i) << 42 | f(j) << 21 | f(k);
+  };
+  std::unordered_map<std::uint64_t, std::vector<Vec3>> jgrid;
+  std::vector<Vec3> joints_far;
+  for (const Vec3& j : joints) {
+    long long a, b, c;
+    if (jcell(j.x, a) && jcell(j.y, b) && jcell(j.z, c)) jgrid[jkey(a, b, c)].push_back(j);
+    else joints_far.push_back(j);
+  }
+  const auto on_a_joint = [&](const Vec3& e) {
+    for (const Vec3& j : joints_far) if (dist(j, e) < 1e-9) return true;
+    long long a, b, c;
+    if (!jcell(e.x, a) || !jcell(e.y, b) || !jcell(e.z, c)) {
+      for (const Vec3& j : joints) if (dist(j, e) < 1e-9) return true;
+      return false;
+    }
+    for (long long da = -1; da <= 1; ++da)
+      for (long long db = -1; db <= 1; ++db)
+        for (long long dc = -1; dc <= 1; ++dc) {
+          const auto it = jgrid.find(jkey(a + da, b + db, c + dc));
+          if (it == jgrid.end()) continue;
+          for (const Vec3& j : it->second) if (dist(j, e) < 1e-9) return true;
+        }
+    return false;
+  };
   for (std::size_t l = 0; l < lines_.size(); ++l) {
     Line& L = lines_[l];
     if (L.pts.size() < 2) continue;
     for (int end = 0; end < 2; ++end) {
       const Vec3& e = end ? L.pts.back() : L.pts.front();
       bool was = split[l][static_cast<std::size_t>(end)] != 0;   // the piece went on along the dropped copy
-      for (const Vec3& j : joints) was = was || dist(j, e) < 1e-9;
+      was = was || on_a_joint(e);
       if (was) need.push_back({l, end});
     }
   }
