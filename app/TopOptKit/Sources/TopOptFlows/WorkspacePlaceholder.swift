@@ -901,6 +901,8 @@ public struct WorkspacePlaceholder: View {
                     if let toast = LatticeStageOpen.take(for: project.id) { goToStage(.lattice); if !toast.isEmpty { model.toast = toast } }
                     if let r = LibraryOpen.takeExport(for: project.id) { libraryExportVariant = r; openLibraryExportIfReady() }   // Library (B3): Export from a card
                 }
+                // ★ his notes 11-23: a notification's tap on the version already open opens its Results at once
+                .onReceive(LibraryOpen.asked) { f in if f == project.id, let r = LibraryOpen.takeExport(for: f) { libraryExportVariant = r; openLibraryExportIfReady() } }
             MetalMeshView(mesh: flexibleMain.mesh(project, on: stage) ?? stageMesh,   // Flexible (PR #362) H4: the part + its dented map quads
                           camera: cameraModel,
                           selection: stageList,   // ★ B6: the Lattice stage draws its own groups
@@ -1804,7 +1806,10 @@ public struct WorkspacePlaceholder: View {
             // results), while the rest keep optimizing behind them. They PERSIST on
             // the project, so leaving to Home and reopening shows them again — until
             // the user views the original and re-optimizes.
-            if let outcome = run.outcome, outcome.variants.contains(where: { $0.accepted }), !viewOriginal {
+            // ★ his notes 11-23: never MOUNTED while the app is not in front (its mesh is the app's biggest; one mounted behind
+            // Sidecar ended his app) — it opens as the app comes back; one already up stays
+            if let outcome = run.outcome, outcome.variants.contains(where: { $0.accepted }), !viewOriginal,
+               model.sceneActive || model.resultsMounted.mounted {
                 ResultsScreen(projectName: project.name, outcome: outcome,
                               materialName: project.material,
                               yieldStrengthMPa: model.yieldStrengthMPa(for: project.material),
@@ -1868,7 +1873,8 @@ public struct WorkspacePlaceholder: View {
                               },
                               certify: certifyCard)   // ★ Organic cut 2: his certify wizard
                     .ignoresSafeArea()
-                    .onAppear { startCertifyWalk() }
+                    .onAppear { startCertifyWalk(); model.resultsMounted.mounted = true }   // ★ 11-23
+                    .onDisappear { model.resultsMounted.mounted = false }
                     .onChange(of: outcome.reportJSON) { _ in startCertifyWalk() }
             }
             // ★ NO "See Results" CHIP (his 11-05: "I don't think that's necessary anymore … Please have that removed"): Results
@@ -1876,6 +1882,9 @@ public struct WorkspacePlaceholder: View {
             // ★ B3: on Topology the capsule rides over its Results page too (the way back to Setup),
             // and a landed run says so here — it never opens Results by itself.
             if stage == .topology, !fullScreenPageUp, viewerMesh != nil, topologyResultsPageUp, !resultsFullScreen { topologyCapsuleOverlay }
+            // ★ his notes 11-23: and the Lattice stage's over its Results (a print file's), the way back to editing
+            if stage == .lattice, !fullScreenPageUp, viewerMesh != nil, topologyResultsPageUp, !resultsFullScreen,
+               model.sceneActive || model.resultsMounted.mounted { latticeCapsuleOverlay }
             if stage == .topology, !editFaces.isEditing, !fullScreenPageUp, let msg = topoNotice.message { topologyResultsMessage(msg) }
             })   // Flexible (PR #362) H58
         }
@@ -3682,7 +3691,9 @@ public struct WorkspacePlaceholder: View {
             // that lands opens its result on Results (the Lattice stage has no landed-run notice)
             // ★ his 11-22 (img 47): a print file he asked for that passes its checks is Approved on the button (its tap opens
             // Results); one that fails opens there as before
-            if !latticePrintRunMoved(ph), LatticeFileButton.opensResults(succeeded: ph == .succeeded, byLattice: lastRunWasLattice, outcome: run.outcome) {
+            // ★ his notes 11-23: a print file's job followed again after the app was gone lands on Results too
+            if !latticePrintRunMoved(ph), LatticeFileButton.opensResults(succeeded: ph == .succeeded, byLattice: lastRunWasLattice
+                || (run.wasReattached && run.lastJobMode == LatticeFileButton.jobMode), outcome: run.outcome) {
                 viewOriginal = false
             }
             guard ph == .failed, run.failureShowsOnButton else { return }
@@ -14794,7 +14805,8 @@ extension WorkspacePlaceholder {
                                            subtitle: refresh ? LatticePreviewMode.refreshLine : line, state: refresh ? .ready : state,
                                            progress: laying)
         return LatticeRunButtonFlow(flow: .shared, projectID: project.id, normal: normal, layProgress: newEngine.layProgress,
-                                    fileRunning: runs, current: { latticePrintKey }) { tap in
+                                    fileRunning: runs, current: { latticePrintKey },
+                                    saved: { model.latticeResultApproved(project) }) { tap in   // ★ 11-23: from the saved file
             switch tap {
             case .openExport: viewOriginal = false   // ★ Approved: the export (Results on the file's result), as ⌃ Export… opens
             case .viewRun: run.restore()
@@ -15622,7 +15634,9 @@ extension WorkspacePlaceholder {
     private func openLibraryExportIfReady() {
         guard let r = libraryExportVariant, acceptedVariantCount > 0 else { return }
         libraryExportVariant = nil
-        if stage != .topology { goToStage(.topology) }
+        // ★ 11-23: a print file's result opens in the Lattice stage
+        let home: WorkspaceStage = LatticeSavedResult.opensInLattice(run.outcome) ? .lattice : .topology
+        if stage != home { goToStage(home) }
         resultsOpenOn = run.outcome.flatMap { ResultsPick.accepted(r, in: $0) }
         viewOriginal = false
     }
@@ -15649,7 +15663,9 @@ extension WorkspacePlaceholder {
             StageCapsule.Item(id: r.id, title: r.title, detail: r.detail, enabled: r.enabled, checked: r.checked,
                               action: LatticeStageMenu.capsuleAction(r.target))
         }
-        let page: StageCapsule.Page = LatticeStagePage.current(cellsUp: showLatticeWizard) == .cells ? .secondary : .primary
+        // ★ his notes 11-23: over its Results too (no page lit), Setup and Lattice each close Results — the way back to editing
+        let page: StageCapsule.Page = topologyResultsPageUp ? .tertiary
+            : LatticeStagePage.current(cellsUp: showLatticeWizard) == .cells ? .secondary : .primary
         HStack(spacing: DS.Space.s) {
             StageCapsule(project: project, title: LatticeStageMenu.title(typeInUse: mode),
                          accent: mode.map { LatticeStageModeStyle.accent($0) } ?? DS.Color.textSecondary.color,
@@ -15657,8 +15673,8 @@ extension WorkspacePlaceholder {
                          idPrefix: "lattice",
                          page: page,
                          go: { dest in leaveLatticeCells(); goToStage(dest) },
-                         primary: { leaveLatticeCells() },
-                         secondary: { showLatticeWizard = true },
+                         primary: { leaveLatticeCells(); viewOriginal = true },
+                         secondary: { viewOriginal = true; showLatticeWizard = true },
                          about: { showLatticeModeSheet = true },
                          greyed: mode == nil ? [.primary, .secondary] : [],
                          menuRows: rows,
@@ -15766,6 +15782,7 @@ extension WorkspacePlaceholder {
         // ★ B2 (Q3 (c)) → B6: what the lattice builds on ("on −35 %") is ⌃'s to say now, under the result it came from
         let builtOn = LatticeStageCopy.builtOn(achievedVolumeFraction: latticeVariantContext?.achievedVolumeFraction)
         var items: [CornerMoreItem] = []
+        if acceptedVariantCount > 0 { items.append(latticeResultsItem) }   // ★ 11-23: its result (latticeResultsItem)
         if LatticeLayoutPreview.needsStress(project.lattice) {   // ★ his 11-20: "add a button option in the carrot"
             items.append(.action(StressCheckCopy.menuTitle,
                                  line: latticeSim.phase == .running ? StressCheckCopy.menuRunning : StressCheckCopy.menuLine,
@@ -16029,13 +16046,21 @@ extension WorkspacePlaceholder {
     func latticeExportTapped() {
         let flow = LatticePrintFlow.shared
         if flow.isMaking(project.id) { return }
-        if flow.isApproved(project.id, current: { latticePrintKey }) { viewOriginal = false; return }
+        if flow.isApproved(project.id, current: { latticePrintKey }) || model.latticeResultApproved(project) {   // ★ 11-23: saved
+            viewOriginal = false; return
+        }
         if newEngineDrawn, newEngine.bars != nil, canLatticeThis {
             macNotAnswering = false; runCouldntFinish = false
             requestLatticeRun()
             return
         }
         viewOriginal = false
+    }
+
+    /// ★ his notes 11-23 ("If going to edit it, the "results" screen should be in the Lattice Stage"): the Lattice ⌃'s first row
+    /// whenever the version has a result — it opens that result, never a new run.
+    var latticeResultsItem: CornerMoreItem {
+        .action(LatticeResultsMenuCopy.title, line: LatticeResultsMenuCopy.line, id: "lattice-split-results") { viewOriginal = false }
     }
 }
 

@@ -1292,12 +1292,12 @@ struct LibraryVersionCard: View {
 
     /// Its results small, side by side (just how many), the picked one ringed, a rejected one dim. ★ His iPad notes 11-22
     /// (decision 4): "If I tap on an image it should automatically open up" — a tap opens the version on THAT result (it was
-    /// Quick look). A draft shows what it came from, dim; its tap opens the draft.
+    /// Quick look). A draft shows what it came from (★ 11-23: never dim); its tap opens the draft.
     @ViewBuilder private func picture(pending: Bool) -> some View {
         let v = version
         if pending || results.isEmpty {
             Button { openOn(nil) } label: {
-                LibraryPicture(image: parentPicture, dim: true)
+                LibraryPicture(image: parentPicture, dim: false)   // ★ his notes 11-23: "should NOT be greyed out": never dim
                     .frame(maxWidth: .infinity).frame(height: Self.pictureHeight)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))

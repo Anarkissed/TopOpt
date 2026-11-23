@@ -15,14 +15,21 @@
 // Export from a card opens that version on Smooth with that result, once (`LibraryOpen`).
 
 import Foundation
+import Combine
 import TopOptKit
 
 /// What a version's workspace is asked to do as it opens.
 @MainActor
 public enum LibraryOpen {
     private static var pendingExport: (folder: UUID, result: Int)?
+    /// ★ his notes 11-23: each ask, said as it is made — the workspace already open on `folder` takes it at once (a
+    /// notification's tap on the version on screen).
+    public static let asked = PassthroughSubject<UUID, Never>()
     /// Export from a card: the next workspace that opens `folder` goes to Smooth on `result`.
-    public static func exportOnOpen(_ folder: UUID, result: Int) { pendingExport = (folder, result) }
+    public static func exportOnOpen(_ folder: UUID, result: Int) {
+        pendingExport = (folder, result)
+        asked.send(folder)
+    }
     /// The result to export, exactly once, for the folder that was asked for.
     public static func takeExport(for folder: UUID) -> Int? {
         guard let p = pendingExport, p.folder == folder else { return nil }
