@@ -623,6 +623,24 @@ int main() {
     }
     std::printf("[organic] strut_margins.bin: %zu bars, %zu judged; file bars %zu\n", mb.size() / 4, judged_bars, org.r.bars);
     CHECK(mb.size() % 4 == 0 && mb.size() / 4 >= org.r.bars && judged_bars > 0);
+    {   // K4 (his Results notes, 2026-11-24): bars.bin, the bars of strut_margins.bin in the same order, the model's frame:
+        // "TOBARS1\0", uint32 count, uint32 0, then count x 7 float32 (ax ay az bx by bz width_mm); named in the block.
+      const std::string bb = slurp(org.out + "/bars.bin");
+      std::uint32_t head[2] = {0, 0};
+      if (bb.size() >= 16) std::memcpy(head, bb.data() + 8, 8);
+      std::size_t inside = 0, wide = 0;
+      for (std::uint32_t i = 0; i < head[0] && 16 + 28 * (i + 1) <= bb.size(); ++i) {
+        float v[7];
+        std::memcpy(v, bb.data() + 16 + 28 * i, 28);
+        inside += v[0] >= -0.01f && v[0] <= 30.01f && v[3] >= -0.01f && v[3] <= 30.01f && v[2] >= -0.01f && v[5] <= 12.01f;
+        wide += v[6] > 0.0f;
+      }
+      std::printf("[organic] bars.bin: %zu bytes, magic %s, count %u (strut_margins %zu), reserved %u, %zu inside the block, "
+                  "%zu with a width\n", bb.size(), bb.substr(0, 7).c_str(), head[0], mb.size() / 4, head[1], inside, wide);
+      CHECK(bb.size() >= 16 && bb.compare(0, 8, std::string("TOBARS1\0", 8)) == 0 && head[0] == mb.size() / 4 && head[1] == 0 &&
+            bb.size() == 16 + 28 * static_cast<std::size_t>(head[0]) && inside == head[0] && wide == head[0]);
+      CHECK(has(b, "\"bars\": \"bars.bin\"") && has(b, "\"strut_margins\": \"strut_margins.bin\""));
+    }
     CHECK(exists(org.out + "/fields.bin"));
     // The Organic verdict (the lead's ruling of 2026-11-18): the solid's stress margin over its solid voxels; the load path
     // judged on the frame (Install 3's voxel load-path test not applied); each weakest strut says what drives its ends.
@@ -780,6 +798,18 @@ int main() {
     std::printf("%s\n", ajson.substr(0, 2400).c_str());
     CHECK(ad.ok && (ad.code == "done" || ad.code == "limit") && ad.rounds_fixed >= 1 && ad.old_bars_kept);
     CHECK(has(ajson, "\"mode\": \"additive\"") && has(ajson, "\"old_bars_kept\": true") && !has(ajson, "\"old_bars_kept\": false"));
+    {   // K4 (his Results notes, 2026-11-24: "What changes were made to strengthen it?"): what the strengthening did, at the
+        // top of strengthen.json (the app's organic_strengthen block): struts thickened (distinct, every round), braced,
+        // the widest strut now, the struts now wider than their own group's thickest setting, and per group.
+      const double thick = num_after(ajson, "thickened_distinct"), widest = num_after(ajson, "widest_mm"),
+                   past = num_after(ajson, "past_thickest");
+      const std::size_t g = ajson.find("\"groups\": [{\"id\": 0, \"regions\": [");
+      std::printf("[additive] summary: thickened %.0f, braced %.0f, widest %.4g mm, past thickest %.0f; groups %s\n", thick,
+                  num_after(ajson, "braced"), widest, past, g == std::string::npos ? "(none)" : ajson.substr(g, 120).c_str());
+      CHECK(thick >= 1.0 && has(ajson, "\"braced\": ") && widest > 0.9 && past >= 0.0 && g != std::string::npos &&
+            num_after(ajson, "thickest_setting_mm", g) == 1.8 && num_after(ajson, "past_thickest", g) == past);
+      CHECK(ajson.find("\"thickened_distinct\"") < ajson.find("\"rounds\": ["));   // top-level, before the rounds
+    }
     // OS11 (the order): a strut already at the limit in round 0 is widened past it only from round 1.
     CHECK(has(ajson, "\"added\": {\"strengthened\": \"r1/strengthened.json\"") && most_after(ajson, "bars_widened") > 0);
     for (const char* x : {"/r0/strength.json", "/r0/struts_under.json", "/r1/strengthened.json", "/r1/additions.bin", "/r1/strength.json"})
