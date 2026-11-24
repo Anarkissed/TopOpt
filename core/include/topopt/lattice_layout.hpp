@@ -1682,7 +1682,7 @@ struct Outcome {
   std::size_t thin_solid = 0;    // cut cells print rule P8 (f) made solid (solidify_thin_cuts)
   // K3 (his 11-23 notes): with the quilt off, the Lattice regions (their ids) that laid no cell at all and were laid
   // again with the quilt's smallest cell (Session::lay_with). Empty: none (the quilt was off everywhere, or on).
-  std::vector<int> quilt_regions;
+  std::vector<int> quilt_regions;   // K3 (only where the cell is Auto: a typed cell that fits nowhere stays solid)
   bool cells_by_stress = false;  // C22 was applied to this layout (stress_sizes_cells)
   bool cells_no_stress = false;  // C22 was asked for and there was no stress result, or no reference
   // The one stress reference resolved for this lay (the stated one or the part's own), read by the cells and the

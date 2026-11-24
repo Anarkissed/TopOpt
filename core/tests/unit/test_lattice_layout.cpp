@@ -4062,6 +4062,20 @@ static void test_quilt_only_where_nothing_else_lays() {
   Settings on = st;
   on.struts.allow_quilt = true;
   CHECK(Session(model).lay(on).quilt_regions.empty());
+  // Only where the cell is Auto (362, 2026-11-24, his D4: a typed cell is his; one that fits nowhere stays solid, the
+  // file job's no_cells, the app's "Cannot Lattice"). The thin region alone: Auto falls back to the quilt; a typed 6 mm
+  // cell lays nothing, and is not quilted.
+  Settings thin_only = st;
+  thin_only.regions = {st.regions[0]};
+  const Outcome auto_cell = Session(model).lay(thin_only);
+  Settings typed = thin_only;
+  typed.cells.cell_mm = 6;
+  const Outcome typed_cell = Session(model).lay(typed);
+  std::printf("[K3] the thin region alone: Auto cell %zu cells (quilted %zu), typed 6 mm cell %zu cells (quilted %zu)\n",
+              auto_cell.layout.cells.size(), auto_cell.quilt_regions.size(), typed_cell.layout.cells.size(),
+              typed_cell.quilt_regions.size());
+  CHECK(auto_cell.quilt_regions == std::vector<int>{1} && !auto_cell.layout.cells.empty());   // as before
+  CHECK(typed_cell.quilt_regions.empty() && typed_cell.layout.cells.empty());   // no fallback: nothing to lay (no_cells)
 }
 
 static void test_cells_curved_region() {

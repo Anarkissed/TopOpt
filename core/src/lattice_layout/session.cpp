@@ -245,10 +245,17 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
     // for the smallest cell the thinnest strut leaves open) is laid again with the quilt's smallest cell, that region
     // only, and named (Outcome::quilt_regions). Every other region keeps the layout it had, byte for byte. The struts are
     // still set without the quilt (a small cell carries the thinnest strut), as with Small cells in thin walls.
+    // Only where the cell is Auto (cell_mm 0, the part's or the region's own, C23): a typed cell is his choice, and one
+    // that fits nowhere stays solid (his D4: "Cannot Lattice"; 362, 2026-11-24: quilt cells instead of his typed size
+    // ignore it).
     if (!cells.allow_quilt) {
-      std::vector<int> bare;   // frames of regions with no cell and something solid
-      for (const RegionCells& r : out.layout.regions)
-        if (r.cells == 0 && r.solid > 0) bare.push_back(r.frame);
+      std::vector<int> bare;   // frames of regions with no cell and something solid, whose cell is Auto
+      for (const RegionCells& r : out.layout.regions) {
+        if (!(r.cells == 0 && r.solid > 0)) continue;
+        const auto o = own.find(r.region);
+        const double typed = o != own.end() ? region_cells(cells, o->second).cell_mm : cells.cell_mm;
+        if (!(typed > 0.0)) bare.push_back(r.frame);
+      }
       if (!bare.empty()) {
         CellSpec quilt = cells;
         quilt.allow_quilt = true;

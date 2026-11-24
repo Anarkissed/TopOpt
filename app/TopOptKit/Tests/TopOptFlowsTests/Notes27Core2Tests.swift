@@ -58,6 +58,10 @@ final class Notes27Core2Tests: XCTestCase {
         XCTAssertTrue(auto.cellSearch, "★ Auto: the cells fitted")
         p.lattice.stageMode = .structural
         XCTAssertTrue(LatticeLayoutPreview.settings(p).cellSearch, "★ Structural Auto asks too (core says its walls keep their own)")
+        p.lattice.cellSizeMode = .fixed
+        p.lattice.cellMM = 60
+        XCTAssertFalse(LatticeLayoutPreview.settings(p).cellSearch, "RED CONTROL: a typed cell size is his: never fitted")
+        p.lattice.cellSizeMode = .auto
         p.lattice.stageMode = .aesthetic
         p.latticePageManual = true
         let manual = LatticeLayoutPreview.settings(p)
