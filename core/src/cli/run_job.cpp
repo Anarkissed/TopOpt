@@ -51,7 +51,8 @@
 #include "topopt/lattice.hpp"
 #include "topopt/lattice_algorithm.hpp"
 #include "topopt/print_frame.hpp"   // P2: his print orientation, the door
-#include "topopt/print_orientation.hpp"   // P4: the candidates
+#include "topopt/print_orientation.hpp"   // P4, P5: the candidates, the bed
+#include "topopt/support_paint.hpp"   // P3, P5: painted supports
 #include "topopt/lattice_boundary.hpp"
 #include "topopt/lattice_types.hpp"
 #include "topopt/lattice_gen.hpp"
@@ -13141,6 +13142,54 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     auto v3 = [](const Vec3& v) {
       return "[" + json_num(v.x) + ", " + json_num(v.y) + ", " + json_num(v.z) + "]";
     };
+    // P5, his "Check strength" (spec 2d): the part standing each way, as the benefits modal compares them (both MEASURED
+    // on the file): its height and layers, the face on the bed, the part's own overhangs painted (the 45 degree rule: a
+    // topology result has no layer check) with the support under them (an estimate), and, along the new up, the file
+    // itself turned to stand on that face (base at z = 0) and painted: "oriented.3mf" (an up along one of the part's
+    // six axes; Phase 1). Nothing here changes the solve or the verdict above.
+    const double layer_h = job.loads.layer_height_mm > 0.0 ? job.loads.layer_height_mm : 0.2;
+    std::string oriented_file;
+    const auto standing = [&](const Vec3& up_dir, bool write) {
+      PrintFrame pf;
+      std::string why;
+      if (!print_frame_for_up(up_dir, pf, &why)) return std::string(", \"standing\": null");
+      TriangleMesh tm = m;
+      print_frame_set_base(pf, tm);
+      turn_mesh(pf, tm);
+      SupportPaintAsk pa;
+      pa.layer_mm = layer_h;
+      const SupportPaint sp = paint_supports(tm, pa);
+      const OrientationGeometry g = orientation_geometry(tm)[0];   // +Z of the turned mesh: the new up
+      std::string file = "null";
+      if (write) {
+        const std::string path = join_path(out_dir, "oriented.3mf");
+        try {
+          StreamingThreeMfWriter::Options o;
+          o.indexed = true;
+          o.deflate = true;
+          o.supports = sp.triangles > 0;
+          StreamingThreeMfWriter w(path, o);
+          for (const Vec3& v : tm.vertices) w.add_vertex(v);
+          for (std::size_t i = 0; i < tm.triangles.size(); ++i)
+            w.add_indexed(static_cast<std::uint64_t>(tm.triangles[i][0]), static_cast<std::uint64_t>(tm.triangles[i][1]),
+                          static_cast<std::uint64_t>(tm.triangles[i][2]), o.supports && sp.painted[i] != 0);
+          w.finish();
+          oriented_file = path;
+          file = json_str("oriented.3mf");
+        } catch (const std::exception& e) {
+          std::remove(path.c_str());
+          throw JobError(std::string("orientation re-check: cannot write oriented.3mf: ") + e.what());
+        }
+      }
+      return ", \"standing\": {\"height_mm\": " + json_num(g.height_mm) + ", \"layers\": " +
+             json_num(std::ceil(g.height_mm / layer_h - 1e-9)) + ", \"layer_mm\": " + json_num(layer_h) +
+             ", \"bed_contact_mm2\": " + json_num(g.contact_mm2) + ", \"painted\": {\"triangles\": " +
+             std::to_string(sp.triangles) + ", \"area_mm2\": " + json_num(sp.area_mm2) + ", \"est_volume_mm3\": " +
+             json_num(sp.est_volume_mm3) + "}, \"slicer_supports\": " + json_str(sp.triangles > 0 ? "painted" : "off") +
+             ", \"file\": " + file + ", \"print_frame\": " + print_frame_json(pf) + "}";
+    };
+    const std::string now_standing = standing(job.orientation_recheck_dir, true);
+    const std::string base_standing = standing(base_dir, false);
     const std::string block =
         "  \"orientation_recheck\": {\"build_dir\": " + v3(job.orientation_recheck_dir) +
         ", \"margin\": " + json_num(a.margin_effective) +
@@ -13148,9 +13197,9 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
         ", \"margin_required\": " + json_num(r.margin_required) +
         ", \"accepted\": " + (a.accepted ? "true" : "false") +
         ", \"overhang_area_mm2\": " + json_num(now.area_mm2) +
-        ", \"support_volume_mm3\": " + json_num(now.support_volume_mm3) +
+        ", \"support_volume_mm3\": " + json_num(now.support_volume_mm3) + now_standing +
         ", \"reason\": " + json_str(reason) + ", \"baseline\": {\"build_dir\": " +
-        v3(base_dir) + ", \"overhang_area_mm2\": " + json_num(base.area_mm2) + "}}\n";
+        v3(base_dir) + ", \"overhang_area_mm2\": " + json_num(base.area_mm2) + base_standing + "}}\n";
     std::ifstream in(r.provenance_path);
     std::string prov((std::istreambuf_iterator<char>(in)), {});
     const std::size_t end = prov.rfind("\n}");
@@ -13161,6 +13210,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     r.orientation_recheck_reason = reason;
     r.orientation_recheck_overhang_mm2 = now.area_mm2;
     r.orientation_recheck_baseline_overhang_mm2 = base.area_mm2;
+    r.orientation_recheck_file = oriented_file;   // P5: the file to print, standing that way
     return r;
   }
   refuse_flexible_job(job, "analyze_job");  // Flexible stage (flexible/job_block.hpp)
