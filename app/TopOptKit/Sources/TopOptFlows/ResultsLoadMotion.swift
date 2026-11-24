@@ -16,10 +16,12 @@
 //     each place's share of its limit at your load × the same load, on ONE fixed scale (red = it gives way / yields at the shown
 //     load). The load eases up, holds, eases back and rests, so a loop never jumps. The displacement is sampled smoothly (the
 //     material's own grid nodes, interpolated), so a surface bends instead of tearing.
-//   * C3: a print file's colours are how close each place is to giving way (the listed weakest struts by their own margin, the
-//     solid by its margin per voxel; places core did not judge stay the plain part), so the weakest strut is the first thing to
-//     turn red, exactly at the governing margin, where the marker sits. Break runs from your load to that margin and, there, the
-//     part gives way at that place (a restrained local fold).
+//   * C3: a print file's colours are how close each place is to giving way, so the weakest strut is the first thing to turn red,
+//     exactly at the governing margin, where the marker sits. Break runs from your load to that margin and, there, the part gives
+//     way at that place (a restrained local fold).
+//   * ★ notes27 F1 (his 11-23: "The stress map is meant to be on the *entire* model ... It shouldn't JUST BE on the few struts"):
+//     EVERY place is coloured — every strut by its own bar's margin (bars.bin), the solid by its margin per voxel, and anything
+//     neither judged (an older file) by the stress field — never plain (PrintFileColours.swift).
 // The colours are made on the GPU from one upload per selection (the viewer's load ramp); a frame is two uniforms and, past the
 // governing load, a few hundred vertices rewritten in place.
 
@@ -201,9 +203,10 @@ public final class ResultsMotionPrep {
     // MARK: building
 
     /// How the colours are made: a solid result's stress against its (knocked-down) yield, or a print file's margins.
+    /// ★ notes27 F1: a print file's every place (`PrintFileColouring`); nil: nothing to colour by.
     public enum ColouringInput {
         case stress(field: StressField, scaleMaxMPa: Double)
-        case utilisation(struts: [LatticeStrengthAnswer.Strut], solidMargins: [Float]?, grid: StressField?)
+        case utilisation(PrintFileColouring?)
     }
 
     private static var nextKey = 0
@@ -218,6 +221,9 @@ public final class ResultsMotionPrep {
         var e = [SIMD3<Float>](repeating: .zero, count: n)
         var u = [Float](repeating: .nan, count: n)
         let util = utilisation(colouring)
+        // ★ notes27 F1: a print file's vertex is the solid's or a strut's by the file's own triangle order
+        let printFile: PrintFileColouring? = { if case let .utilisation(pf) = colouring { return pf }; return nil }()
+        let kinds = printFile.map { $0.kinds(indices: idx, vertexCount: n) }
         let chunks = Swift.max(1, Swift.min(16, n / 20_000))
         e.withUnsafeMutableBufferPointer { eb in
             u.withUnsafeMutableBufferPointer { ub in
@@ -227,7 +233,11 @@ public final class ResultsMotionPrep {
                     for v in lo..<hi {
                         let p = SIMD3<Float>(pos[3 * v], pos[3 * v + 1], pos[3 * v + 2])
                         if let d = displacement { ep[v] = smoothDisplacement(d, mask: mask, at: p) }
-                        up[v] = util(p) ?? .nan
+                        if let pf = printFile, let k = kinds {
+                            up[v] = pf.share(at: p, k[v]) ?? .nan
+                        } else {
+                            up[v] = util(p) ?? .nan
+                        }
                     }
                 }
             }
@@ -333,57 +343,16 @@ public final class ResultsMotionPrep {
         return f.displacement(at: p)
     }
 
-    /// Each point's share of its limit at your load (red at 1), or nil where nothing judged it.
+    /// Each point's share of its limit at your load (red at 1), or nil where nothing judged it (a tap on the part reads it).
     static func utilisation(_ c: ColouringInput) -> (SIMD3<Float>) -> Float? {
         switch c {
         case let .stress(field, scale):
             let s = Float(scale)
             return { p in s > 0 ? field.value(at: p) / s : nil }
-        case let .utilisation(struts, solid, grid):
-            // the listed weakest struts, each a tube along end → middle → end (a woven strut curves), a little past its skin
-            struct Tube { var pts: [SIMD3<Float>]; var r: Float; var share: Float; var lo: SIMD3<Float>; var hi: SIMD3<Float> }
-            let tubes: [Tube] = struts.compactMap { s in
-                guard s.margin > 0 else { return nil }
-                let f = { (d: SIMD3<Double>) in SIMD3<Float>(Float(d.x), Float(d.y), Float(d.z)) }
-                let pts = s.ends.count >= 2 ? [f(s.ends[0]), f(s.at), f(s.ends[1])] : [f(s.at)]
-                let r = Float(s.widthMM / 2 + Swift.max(0.3, 0.2 * s.widthMM)) + (s.ends.count >= 2 ? 0 : Float(s.lengthMM / 2))
-                let lo = pts.reduce(pts[0]) { simd_min($0, $1) } - SIMD3(repeating: r)
-                let hi = pts.reduce(pts[0]) { simd_max($0, $1) } + SIMD3(repeating: r)
-                return Tube(pts: pts, r: r, share: Float(1 / s.margin), lo: lo, hi: hi)
-            }
-            let g = grid, margins = solid
-            return { p in
-                var best: Float? = nil
-                for t in tubes where all(p .>= t.lo) && all(p .<= t.hi) {
-                    var d = Float.infinity
-                    if t.pts.count == 1 { d = simd_length(p - t.pts[0]) }
-                    for q in 0..<(t.pts.count - 1) {
-                        let a = t.pts[q], b = t.pts[q + 1], ab = b - a
-                        let l2 = simd_length_squared(ab)
-                        let s = l2 > 0 ? Swift.min(1, Swift.max(0, simd_dot(p - a, ab) / l2)) : 0
-                        d = Swift.min(d, simd_length(p - (a + s * ab)))
-                    }
-                    if d <= t.r { best = Swift.max(best ?? 0, t.share) }
-                }
-                if let g, let m = margins, !g.isEmpty {
-                    let c = (p - g.origin) / g.spacing
-                    let i = Int(c.x.rounded(.down)), j = Int(c.y.rounded(.down)), k = Int(c.z.rounded(.down))
-                    func at(_ i: Int, _ j: Int, _ k: Int) -> Float? {
-                        guard i >= 0, j >= 0, k >= 0, i < g.nx, j < g.ny, k < g.nz else { return nil }
-                        let v = m[(k * g.ny + j) * g.nx + i]
-                        return v.isFinite && v > 0 ? v : nil
-                    }
-                    // its own voxel; on a solid's skin the voxel beside it (the surface sits between the two)
-                    var mm = at(i, j, k)
-                    if mm == nil {
-                        for (a, b, c) in [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)] {
-                            if let v = at(i + a, j + b, k + c) { mm = Swift.min(mm ?? v, v) }
-                        }
-                    }
-                    if let mm { best = Swift.max(best ?? 0, 1 / mm) }
-                }
-                return best
-            }
+        case let .utilisation(pf):
+            // ★ notes27 F1: a print file's every place (a tapped point is the solid's or a strut's by where it sits)
+            guard let pf else { return { _ in nil } }
+            return { p in pf.share(at: p, .unknown) }
         }
     }
 }
@@ -400,11 +369,14 @@ public final class ResultsLoadMotion: ObservableObject {
     @Published public private(set) var exaggerationPick: Pick?
     var prepCache: (key: String, prep: ResultsMotionPrep)?
     var frameCache: (key: String, state: ResultsModel.MotionState)?
+    /// ★ notes27: the Strengthened row's highlight and the map's shares Load flow carries, built once per selection.
+    var strengthenedCache: (key: String, tints: [SIMD4<Float>]?)?
+    var mapSharesCache: (key: String, shares: [Float]?)?
 
     public init() {}
 
     /// The fields or the selection changed: build again when next asked.
-    public func invalidate() { prepCache = nil; frameCache = nil }
+    public func invalidate() { prepCache = nil; frameCache = nil; strengthenedCache = nil; mapSharesCache = nil }
     /// A motion starts: from the top of its loop.
     public func restart() { clock = 0 }
     public func advance(_ dt: Double, _ kind: LoadMotionKind) {
@@ -459,16 +431,19 @@ extension ResultsModel {
         guard let mesh = selectedMesh, let disp = selectedDisplacementField else { return nil }
         let field = selectedStressField
         let key = "\(selectedIndex)|\(viewScenario ?? "")|\(mesh.flat.vertexCount)|\(latticeAnswer != nil)|\(stressScaleMaxMPa)"
+            + "|\(printFileParts?.barCount ?? -1)"
         let m = loadMotion
         if let c = m.prepCache, c.key == key { return c.prep }
         let colouring: ResultsMotionPrep.ColouringInput
         if let a = latticeAnswer {
+            // ★ notes27 F1: every strut (bars.bin), the solid (its margin per voxel), the rest from the stress field — never plain
             let count = field.map { $0.nx * $0.ny * $0.nz } ?? 0
-            colouring = .utilisation(struts: a.weakest, solidMargins: solidMargins?.grid(count: count), grid: field)
+            colouring = .utilisation(PrintFileColouring(answer: a, parts: printFileParts, solidMargins: solidMargins?.grid(count: count),
+                                                        field: field, limitMPa: stressScaleMaxMPa))
         } else if let f = field, stressScaleMaxMPa > 0 {
             colouring = .stress(field: f, scaleMaxMPa: stressScaleMaxMPa)
         } else {
-            colouring = .utilisation(struts: [], solidMargins: nil, grid: nil)
+            colouring = .utilisation(nil)
         }
         let prep = ResultsMotionPrep.build(mesh: mesh, displacement: disp, stress: field, colouring: colouring,
                                            place: latticeAnswer?.place)

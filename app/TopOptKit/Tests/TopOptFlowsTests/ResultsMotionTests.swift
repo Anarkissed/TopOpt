@@ -103,11 +103,17 @@ final class ResultsMotionTests: XCTestCase {
         XCTAssertTrue(l.isOn(.breakIt) && !l.isOn(.bend) && l.isOn(.stress), "★ one motion at a time; Break turns Stress on")
         l.tap(.stress, hasStress: true); l.xray = false
         l.tap(.loadPaths, hasStress: true)
-        XCTAssertTrue(l.isOn(.loadPaths) && l.isOn(.xray) && !l.isOn(.stress), "★ Load paths turns X-ray on, not Stress")
+        // ★ RE-PINNED (notes27, his 11-24: "the load flow should NOT show without the stress map turned on. This doesn't make
+        // sense without it"): Load paths turns X-ray AND the stress map on; the stress map turned off ends it
+        XCTAssertTrue(l.isOn(.loadPaths) && l.isOn(.xray) && l.isOn(.stress), "★ Load paths turns X-ray and Stress on")
         l.tap(.stress, hasStress: true)
-        XCTAssertTrue(l.isOn(.stress) && l.isOn(.loadPaths), "Stress can be added to Load paths")
+        XCTAssertTrue(!l.isOn(.stress) && l.motion == nil, "★ the stress map off: no Load flow without it")
+        l.tap(.loadPaths, hasStress: true)
+        XCTAssertTrue(l.isOn(.stress) && l.isOn(.loadPaths), "on again, with its stress map")
         l.tap(.loadPaths, hasStress: true)
         XCTAssertNil(l.motion, "tapped again: no motion")
+        var noField = ResultsLayers(stress: false); noField.tap(.loadPaths, hasStress: false)
+        XCTAssertNil(noField.motion, "★ no stress map to show: no Load flow")
         var none = ResultsLayers(stress: false); none.tap(.bend, hasStress: false)
         XCTAssertFalse(none.isOn(.stress), "no stress field: no Stress to turn on")
     }

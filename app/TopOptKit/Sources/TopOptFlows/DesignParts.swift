@@ -38,6 +38,9 @@ public enum DSParts {
     public static let rowHeight: CGFloat = 48
     public static let shortRowHeight: CGFloat = 44
     public static let faceIndent: CGFloat = 34
+    /// §4.4: a selected row's highlight — its outline's corner radius and its inset from the row's edges.
+    public static let rowHighlightRadius: CGFloat = 10
+    public static let rowHighlightInset: CGFloat = 4
     /// §4.6.
     public static let runHeight: CGFloat = 64
     public static let runMinWidth: CGFloat = 250
@@ -99,6 +102,8 @@ public struct DSPanel<Content: View, Footer: View>: View {
     var foldedPill = false
     /// The count in words, in a colour, instead of a number (Results' Checks: "2 to look at" / "All good").
     var countLabel: (text: String, tint: RGBA)? = nil
+    /// ★ notes27 F3: its corner radius while open (nil: §4.3's 22 pt) — Results' list is concentric with its rows' highlight.
+    var openRadius: CGFloat? = nil
     /// The empty state's one line ("Tap a face to start"), shown when `isEmpty`.
     let empty: String?
     let isEmpty: Bool
@@ -219,7 +224,7 @@ public struct DSPanel<Content: View, Footer: View>: View {
     /// ★ his 11-22 (img 44): folded beside the minimised Selections pill — that pill's width, height and colour.
     private var pill: CGFloat? { open ? nil : pairedPillWidth }
     private var headerH: CGFloat { pill == nil ? DSParts.headerHeight : MinimisedPills.height }
-    private var radius: CGFloat { open ? DSParts.panelRadius : headerH / 2 }
+    private var radius: CGFloat { open ? (openRadius ?? DSParts.panelRadius) : headerH / 2 }
 
     /// Chevron + name + count, nothing else (U2). "view only" in tertiary when the panel is locked (Cut).
     private var header: some View {
@@ -421,8 +426,8 @@ public struct DSRow<Actions: View>: View {
             if selected {
                 ZStack(alignment: .leading) {
                     Rectangle().fill(DS.Color.fillSelected.color)
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(DS.Color.accent.color, lineWidth: 1.5).padding(4)
+                    RoundedRectangle(cornerRadius: DSParts.rowHighlightRadius, style: .continuous)
+                        .strokeBorder(DS.Color.accent.color, lineWidth: 1.5).padding(DSParts.rowHighlightInset)
                     RoundedRectangle(cornerRadius: 2).fill(DS.Color.accent.color).frame(width: 3).padding(.vertical, 6)
                 }
                 // ★ B6 N3: the highlight is drawn over the row's tap button (the next background) — a filled shape takes a
