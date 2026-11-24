@@ -5,6 +5,7 @@
 // shared camera). "Use this" follows ResultsCompareSession; Details rises as a sheet over the bottom of the SAME screen.
 
 import SwiftUI
+import simd
 import TopOptDesign
 import TopOptKit
 
@@ -16,6 +17,9 @@ struct ResultsCompareView: View {
     let close: () -> Void
     /// Results opens on this tab (a pick that ends Compare).
     let use: (Int) -> Void
+    /// ★ notes27 (his print orientation, SPEC 2a): each version drawn standing the way it prints, on the bed (Results' own turn).
+    var settle = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
+    var onBed = false
 
     @StateObject private var camera = OrbitCameraModel()
     /// ★ 10-28: the same layers as Results — Stress or Solid, with X-ray on top of either (no motion here).
@@ -109,7 +113,8 @@ struct ResultsCompareView: View {
         let vm = tabVM(tab)
         ZStack(alignment: .top) {
             if let vm, let mesh = model.compareMesh(vm) {
-                MetalMeshView(mesh: mesh, camera: camera, onProjection: { projections[tab] = $0 },
+                MetalMeshView(mesh: mesh, camera: camera, settleRotation: settle, showGround: onBed,
+                              onProjection: { projections[tab] = PrintDraw.modelProjection($0, centre: mesh.bounds.center, rotation: settle) },
                               stressTints: keyShown ? model.compareStressTints(vm) : nil,
                               bodyAlpha: layers.xray ? 0.3 : 1)
                     // ★ 10-28: open key → a tap on this panel reads every version at that spot; a double tap leaves

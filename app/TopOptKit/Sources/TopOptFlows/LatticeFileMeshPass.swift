@@ -22,8 +22,11 @@ public final class LatticeFileMesh: @unchecked Sendable, Equatable {
     /// The shells of core's 3MF: triangles from `baseTriangles` on (the solid's come first), their vertices packed apart with
     /// area-weighted normals (each shell is closed and shares its own vertices, so its tubes shade round). Blocking: call it
     /// off the main thread.
-    public static func make(threeMF: Data, baseTriangles: Int, token: Int) throws -> LatticeFileMesh {
-        let m = try CoreThreeMF.mesh(threeMF)
+    /// ★ notes27 (his print orientation): `turn` — the print frame the file was made standing in, un-baked so the lattice is
+    /// drawn in the part's own coordinates (nil: the file is the part's own frame).
+    public static func make(threeMF: Data, baseTriangles: Int, token: Int, turn: PrintFrameTurn? = nil) throws -> LatticeFileMesh {
+        var m = try CoreThreeMF.mesh(threeMF)
+        if let turn { turn.unbake(&m.vertices) }
         return try make(vertices: m.vertices, indices: m.indices, baseTriangles: baseTriangles, token: token)
     }
 

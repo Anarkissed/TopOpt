@@ -7,6 +7,7 @@ import Foundation
 import SwiftUI
 import TopOptKit
 import TopOptDesign
+import simd
 
 // MARK: the job
 
@@ -87,13 +88,13 @@ public enum LatticeFileJob {
     /// (Structural). The file is a 3MF of separate closed tubes.
     @MainActor
     public static func forOrganic(_ p: ProjectModel, groups: [LatticeLayoutSession.OrganicGroup], tensor: Data,
-                                  referenceMPa: Double, strengthJob: Data?) -> Result<ForPart, NoJob> {
+                                  referenceMPa: Double, strengthJob: Data?, printUp: SIMD3<Double>? = nil) -> Result<ForPart, NoJob> {
         guard let path = p.importedFile?.path else { return .failure(NoJob(line: LatticeLayoutPreview.noPartLine)) }
         guard !groups.isEmpty else { return .failure(NoJob(line: LatticeFileExport.organicNoLayLine)) }
         let settings = LatticeLayoutPreview.settings(p, referenceMPa: referenceMPa)
         guard let json = try? build(settings, modelName: (path as NSString).lastPathComponent,
                                     strengthJob: strengthJob == nil ? nil : strengthJobName, organic: groups,
-                                    tensor: tensorName) else {
+                                    tensor: tensorName, printFrameUp: printUp ?? printFrameUp(p)) else {   // ★ notes27
             return .failure(NoJob(line: "The job could not be written"))
         }
         return .success(ForPart(json: json, modelPath: path, demand: nil, tensor: tensor))
@@ -137,8 +138,19 @@ public enum LatticeFileJob {
     /// Why a part's job cannot be written, in its one line.
     public struct NoJob: Error, Equatable { public let line: String }
 
+    /// ★ notes27 (his print orientation, SPEC 2c test 4: "the job built for a plate pick carries print_frame.up = the plate up,
+    /// for the strengthen, file and Mac print-accurate jobs alike"): the up the print file stands on — the face he chose; nil
+    /// when he chose none (as placed: the job as before).
     @MainActor
-    public static func forPart(_ p: ProjectModel, stress: LatticeLayoutPreview.Stress, strengthJob: Data?) -> Result<ForPart, NoJob> {
+    public static func printFrameUp(_ p: ProjectModel) -> SIMD3<Double>? {
+        guard let u = p.buildOrientation.plateUp, u != .zero, simd_length(u).isFinite else { return nil }
+        let n = simd_normalize(u)
+        return SIMD3(Double(n.x), Double(n.y), Double(n.z))
+    }
+
+    @MainActor
+    public static func forPart(_ p: ProjectModel, stress: LatticeLayoutPreview.Stress, strengthJob: Data?,
+                               printUp: SIMD3<Double>? = nil) -> Result<ForPart, NoJob> {
         guard let path = p.importedFile?.path else { return .failure(NoJob(line: LatticeLayoutPreview.noPartLine)) }
         let settings = LatticeLayoutPreview.settings(p, referenceMPa: stress.referenceMPa)
         let needs = needsStress(settings)
@@ -148,7 +160,8 @@ public enum LatticeFileJob {
             demand = demandFile(f)
         }
         guard let json = try? build(settings, modelName: (path as NSString).lastPathComponent, demand: needs ? demandName : nil,
-                                    strengthJob: strengthJob == nil ? nil : strengthJobName) else {
+                                    strengthJob: strengthJob == nil ? nil : strengthJobName,
+                                    printFrameUp: printUp ?? printFrameUp(p)) else {   // ★ notes27
             return .failure(NoJob(line: "The job could not be written"))
         }
         return .success(ForPart(json: json, modelPath: path, demand: demand))
@@ -157,7 +170,8 @@ public enum LatticeFileJob {
     /// The job document, keys sorted (the same settings give the same bytes).
     public static func build(_ s: LatticeLayoutSession.Settings, modelName: String, linearDeflection: Double = 0,
                              demand: String? = nil, strengthJob: String? = nil,
-                             organic: [LatticeLayoutSession.OrganicGroup]? = nil, tensor: String? = nil) throws -> Data {
+                             organic: [LatticeLayoutSession.OrganicGroup]? = nil, tensor: String? = nil,
+                             printFrameUp: SIMD3<Double>? = nil) throws -> Data {
         var layout: [String: Any] = [
             "all_lattice": s.allLattice, "bead_mm": s.beadMM, "min_strut_lines": s.minStrutLines, "min_wall_mm": s.minWallMM,
             "rim_mm": s.rimMM, "cover_mm": s.coverMM,
@@ -280,6 +294,9 @@ public enum LatticeFileJob {
         for (k, v) in top { job[k] = v }
         if let demand { job["demand"] = demand }
         if let strengthJob { job["strength_job"] = strengthJob }   // ★ Install 3
+        // ★ notes27 (his print orientation, SPEC 2c): the part stood on the face he chose — core turns every input at its door
+        // and writes the file standing that way; none (as placed): no key, the job byte for byte as before
+        if let u = printFrameUp { job["print_frame"] = ["up": [u.x, u.y, u.z]] }
         return try JSONSerialization.data(withJSONObject: job, options: [.sortedKeys])
     }
 }
@@ -956,7 +973,7 @@ public enum LatticeFileButton {
     /// "Not strong enough"); the weak spots' voxels (fields.bin block 3) ride in the report for the wizard's colour and outline.
     public static func outcome(_ m: LatticeFileRun.Made, densityGCm3: Double, organic: Bool = false) throws -> OptimizeOutcome {
         // ★ Organic cut 2: core's 3MF read back by its own small reader; an STL as before
-        let mesh: (vertices: [Float], indices: [Int32])
+        var mesh: (vertices: [Float], indices: [Int32])
         if m.report.isThreeMF {
             do { mesh = try CoreThreeMF.mesh(m.stl) } catch { throw LatticeFileRun.Failure("\(error)") }
         } else {
@@ -966,6 +983,9 @@ public enum LatticeFileButton {
         guard !mesh.vertices.isEmpty, !mesh.indices.isEmpty else {
             throw LatticeFileRun.Failure("The Mac made the file but it could not be read")
         }
+        // ★ notes27 (his print orientation, SPEC 2a): a file made standing on a chosen face (its report's `print_frame`) is
+        // un-baked on load — the app draws the part in its own coordinates (every overlay's frame) and turns it on screen
+        if let turn = PrintFrameTurn.of(report: m.reportJSON) { turn.unbake(&mesh.vertices) }
         let s = m.report.strength
         let fields = m.fields.flatMap(RemoteFieldsContainer.parse)
         let block = fields?.variants.first
