@@ -229,6 +229,12 @@ public struct ProjectStore {
         projectDir(id).appendingPathComponent("results_other_stage.plist")
     }
 
+    /// ★ notes28 (his "Check strength" on Results): the Organic inputs that made the version's print file, beside its results
+    /// (`OrganicResultInputs`; they name the result they made).
+    public func organicInputsDir(id: UUID) -> URL {
+        projectDir(id).appendingPathComponent(OrganicResultInputs.folderName, isDirectory: true)
+    }
+
     /// Whether a results blob EXISTS for this project — asked without reading it
     /// (the blob carries every variant's mesh and fields, so a presence question
     /// must not cost a decode). `AppModel.persist` uses it so the snapshot's

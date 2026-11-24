@@ -7,6 +7,10 @@
 // with a processing animation → modal with the breakdown of the new orientation's benefits vs the previous; buttons Keep
 // orientation / Cancel; Keep → Results with the new orientation and all the new data; Cancel → the old Results.
 //
+// ★ notes28 (his iPad notes on release 18): "'Cancel' cuts below the 'Structural' menu row... Let's put it to the left of 'Manual
+// orientation'" — Cancel is in the bottom row now; Manual orientation draws Bambu Studio's patches (PrintOrientationPatches)
+// and stays open after a pick; Check strength stands the result's own lattice (PrintCheckInputs) and says every stop plainly.
+//
 // The state lives here (never as @State on the workspace). A candidate shown is a VIEW: nothing about the project changes until
 // "Keep orientation" (a question is not a decision); Keep sets the face, which makes the next version holding the new result
 // (his 11-23 version rule). "Check strength" re-runs the right chain on the Mac (P7, PrintCheckJobs): an Organic lattice its
@@ -69,6 +73,14 @@ public final class PrintOrientationFlow: ObservableObject {
     @Published public private(set) var started: Date?
     @Published public private(set) var result: PrintCheckResult?
     @Published public private(set) var hull: PrintHull?
+    /// ★ notes28 (his img 81, Bambu Studio's Lay on face): what Manual orientation draws to tap — each hull face a flat patch,
+    /// each edge rest its own small bevel face (made with the hull).
+    public private(set) var patches: PrintPatches?
+    /// ★ notes28: the patch under his finger (or the pointer), drawn brighter.
+    @Published public private(set) var under: PrintPatches.Target?
+    /// ★ notes28: the part turning to the patch he picked (Manual stays open; its patches come back in the new pose).
+    @Published public private(set) var turning = false
+    private var turnTask: Task<Void, Never>?
     public private(set) var kind: PrintCheckKind = .topology
     private var ranking: PrintOrientationRanking?
     private var cancelFlag = CancelFlag()
@@ -136,6 +148,7 @@ public final class PrintOrientationFlow: ObservableObject {
         ask = nil; result = nil
         let wasShown = shown != nil
         shown = nil
+        under = nil; turning = false; turnTask?.cancel(); turnTask = nil   // ★ notes28
         phase = .placed
         LatticeMacMake.idleTimer(disabled: false)
         if wasShown { settleBack() } else { animating = false }
@@ -166,11 +179,32 @@ public final class PrintOrientationFlow: ObservableObject {
         }
         choose(PrintPick(up: e.up, onEdge: true, recommended: false))
     }
+    /// ★ notes28 (as Bambu Studio's Lay on face): the part turns to it and Manual stays open — its patches come back once the
+    /// part has turned, the picked one outlined; Check strength (or another patch) from there.
     func choose(_ p: PrintPick) {
         animating = true
         shown = p
-        phase = .proposed
+        under = nil
+        if phase == .manual { settleTurn() } else { phase = .proposed }
     }
+
+    /// ★ notes28: a patch under his finger (nil: lifted), or the pointer over it.
+    public func press(_ t: PrintPatches.Target?) { if under != t { under = t } }
+    public func hover(_ t: PrintPatches.Target, _ on: Bool) {
+        if on { press(t) } else if under == t { under = nil }
+    }
+
+    /// The patches hide while the part turns (the viewer's 0.8 s), then show in its new pose.
+    private func settleTurn() {
+        turning = true
+        turnTask?.cancel()
+        turnTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: Self.turnNanoseconds)
+            guard let self, !Task.isCancelled else { return }
+            self.turning = false
+        }
+    }
+    static var turnNanoseconds: UInt64 = 900_000_000
 
     /// "Check strength": the processing pop-up while the Mac re-runs the chain standing this way; then the benefits modal.
     public func check(host: PrintOrientationHost, variant: PrintCheckVariant) {
@@ -233,6 +267,7 @@ public final class PrintOrientationFlow: ObservableObject {
         backTask?.cancel(); backTask = nil
         if phase == .checking { LatticeMacMake.idleTimer(disabled: false) }
         phase = .placed; shown = nil; ask = nil; result = nil; hull = nil; animating = false; ranking = nil
+        patches = nil; under = nil; turning = false; turnTask?.cancel(); turnTask = nil   // ★ notes28
     }
 
     // MARK: the rest
@@ -249,16 +284,18 @@ public final class PrintOrientationFlow: ObservableObject {
     private func makeHull(_ mesh: (vertices: [Float], indices: [Int32])?) {
         guard let m = mesh, !m.vertices.isEmpty else { return }
         hullTask = Task { [weak self] in
-            let h = await Task.detached(priority: .userInitiated) { PrintHull.of(vertices: m.vertices, indices: m.indices) }.value
+            let made = await Task.detached(priority: .userInitiated) { () -> (PrintHull?, PrintPatches?) in
+                let h = PrintHull.of(vertices: m.vertices, indices: m.indices)
+                return (h, h.map(PrintPatches.of))   // ★ notes28: its patches to tap, made with it
+            }.value
             guard let self, !Task.isCancelled else { return }
-            self.hull = h
+            self.patches = made.1
+            self.hull = made.0
         }
     }
 
-    static func plain(_ e: Error) -> String {
-        if let f = e as? LatticeFileRun.Failure { return f.description }
-        return "\(e)"
-    }
+    /// ★ notes28 (his img 82 showed "notLaid"): every error in plain words, never a Swift name (`PrintOrientationWords.plain`).
+    static func plain(_ e: Error) -> String { PrintOrientationWords.plain(e) }
 
     /// Tests only: a result as if a check had landed.
     func land(_ r: PrintCheckResult) { result = r; phase = .compare }

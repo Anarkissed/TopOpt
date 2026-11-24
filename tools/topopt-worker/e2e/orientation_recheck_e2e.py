@@ -131,6 +131,22 @@ def main():
         doc = json.load(open(os.path.join(workdir, jid, "job.json"))) if jid else {}
         check(doc.get("print_frame") == {"up": [0.7071067812, 0, 0.7071067812]}, "print_frame reaches the CLI's job.json")
         wait_done(port, jid)
+        # (4) ★ notes28 (a): Check strength on an Organic result re-sends the job that made its file (kept with the result),
+        # its print_frame set to the new up, with the stress it followed: the groups, the new frame and the stress reach the
+        # CLI exactly as kept
+        groups = [{"name": "Back wall", "organic_mode": "traced", "regions": [3]}, {"organic_mode": "grown", "regions": [4]}]
+        kept = {"mode": "lattice_file", "model": "m.step", "output": "lattice.stl", "file_format": "3mf",
+                "layout": {"organic_groups": groups}, "tensor": "tensor.bin", "print_frame": {"up": [0, 1, 0]}}
+        status, r = submit(port, kept, [("tensor", "tensor.bin", "TOTENSOR-kept-with-the-result")])
+        check(status < 300 and "job_id" in r, "the kept Organic job, standing the new way, accepted")
+        jid = r.get("job_id", "")
+        doc = json.load(open(os.path.join(workdir, jid, "job.json"))) if jid else {}
+        check(doc.get("layout", {}).get("organic_groups") == groups, "its groups reach the CLI untouched")
+        check(doc.get("print_frame") == {"up": [0, 1, 0]}, "its new print_frame reaches the CLI")
+        tensor_path = os.path.join(workdir, jid, "tensor.bin")
+        check(os.path.isfile(tensor_path) and open(tensor_path).read() == "TOTENSOR-kept-with-the-result",
+              "the stress it followed beside it, byte for byte")
+        wait_done(port, jid)
         print("\n%s (%d failures)" % ("ALL PASS" if failures == 0 else "FAILURES", failures))
         sys.exit(0 if failures == 0 else 1)
     finally:

@@ -1270,6 +1270,7 @@ public final class AppModel: ObservableObject {
         let otherDTO = other.map(OutcomeCodec.dto(from:))
         let url = store.resultsURL(id: resultsID), otherURL = store.otherResultsURL(id: resultsID)
         let resultsStore = store
+        let reports = [outcome.reportJSON, other?.reportJSON], inputsDir = store.organicInputsDir(id: resultsID)   // ★ notes28 (a)
         Self.resultsQueue.async { [weak self] in
             defer { DispatchQueue.main.async { landed(); self?.backgroundTime.end(token) } }
             // ★ only into a project that still exists: a write queued before a delete must
@@ -1282,6 +1283,8 @@ public final class AppModel: ObservableObject {
             } else {
                 try? FileManager.default.removeItem(at: otherURL)
             }
+            // ★ notes28 (a): the Organic inputs that made its print file, beside it (Check strength stands that same lattice)
+            OrganicResultInputs.keep(reports: reports, dir: inputsDir)
         }
     }
 

@@ -126,6 +126,8 @@ public struct LatticeFileFacts: Equatable, Sendable {
     /// ★ notes27 (his print orientation, P3 in core): what the file tells the slicer about supports — "painted" (the part's own
     /// overhangs painted, support on for them only), "needed" (found, none could be painted), "off" (none); nil: not said.
     public var slicerSupports: String?
+    /// ★ notes28: the plastic the file's painted supports take (core's estimate, mm³); nil when it paints none.
+    public var paintedMM3: Double? = nil
     public var fileSeconds: Double?
     // the layer check
     public var printClean: Bool
@@ -164,7 +166,9 @@ public struct LatticeFileFacts: Equatable, Sendable {
         return LatticeFileFacts(
             fileName: file, fileBytes: int(r["file_bytes"]), triangles: int(mesh["triangles"]),
             struts: int(layout["bars"]), strands: int(layout["strands"]), bridges: int(mesh["bridges"]),
-            posts: int(mesh["posts"]), postsMM: num(mesh["posts_mm"]), slicerSupports: r["slicer_supports"] as? String,
+            posts: int(mesh["posts"]), postsMM: num(mesh["posts_mm"]),
+            slicerSupports: PrintOrientationWords.supportsWord(report: r),   // ★ notes28: what the file carries
+            paintedMM3: PrintOrientationWords.paintedMM3(report: r),
             fileSeconds: (ms["total"] as? NSNumber).map { $0.doubleValue / 1000 },
             printClean: p["clean"] as? Bool ?? false, layers: int(p["layers"]), midairStarts: int(p["midair_starts"]),
             longestBridgeMM: num(p["longest_bridge_reach_mm"]), firstLayerMM2: num(p["first_layer_mm2"]),
@@ -258,13 +262,21 @@ public struct LatticeFileFacts: Equatable, Sendable {
             add("Print file", fileName + (fileBytes > 0 ? " \u{00B7} " + Self.bytes(fileBytes) : ""))
             if strands > 0 { add("Strands", Self.number(strands)) }   // ★ notes25 C3 (7): the bars are in Run
             if bridges > 0 { add("Bridges", Self.number(bridges)) }
-            if posts > 0 { add("Posts", Self.number(posts) + String(format: " \u{00B7} %.0f mm in all", postsMM)) }
+            if posts > 0 {   // ★ notes28: printed with the lattice, never slicer supports (its (i) says so)
+                r.append(ResultsDetailRow(label: "Posts", value: Self.number(posts) + String(format: " \u{00B7} %.0f mm in all", postsMM),
+                                          info: PrintOrientationWords.postsInfo))
+            }
             if triangles > 0 { add("Triangles", Self.number(triangles)) }
             if layers > 0 { add("Layers", Self.number(layers)) }
             if firstLayerMM2 > 0 { add("On the bed", String(format: "%.0f mm\u{00B2}", firstLayerMM2)) }
             if longestBridgeMM > 0 { add("Longest bridge", String(format: "%.1f mm", longestBridgeMM)) }
             if thinIslands > 0 { add("Thin islands", Self.number(thinIslands) + " (small spots in a layer)") }
-            if let w = PrintOrientationWords.supports(slicerSupports) { add("Supports", w) }   // ★ notes27
+            // ★ notes27 · ★ notes28: what the file carries, with its painted supports' plastic; how to slice it in the (i)
+            if let w = PrintOrientationWords.supports(slicerSupports) {
+                r.append(ResultsDetailRow(label: "Supports",
+                                          value: w + (paintedMM3.map { String(format: " \u{00B7} %.1f cm\u{00B3}", $0 / 1000) } ?? ""),
+                                          info: PrintOrientationWords.supportsInfo(slicerSupports)))
+            }
         case .run:
             if struts > 0 { add("Bars in the file", Self.number(struts)) }   // ★ notes25 C3 (7)
             if let g = strengthening, g.seconds > 0 { add("Strengthening", Self.duration(g.seconds)) }

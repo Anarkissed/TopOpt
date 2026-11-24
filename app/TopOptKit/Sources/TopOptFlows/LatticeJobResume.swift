@@ -124,10 +124,12 @@ extension LatticeFileButton {
                     record.ended(job.jobID)
                     throw LatticeFileRun.Failure(LatticeJobResumeCopy.cantFinish)
                 }
-                return try fileFromStrengthening(config: config, modelPath: modelPath, jobJSON: kept.json, projectName: name,
-                                                 strengthJob: kept.strengthJob, tensor: kept.tensor, strengthened: s,
-                                                 record: record, densityGCm3: densityGCm3,
-                                                 isCancelled: { !keepGoing.call(1, 2, 0) })
+                let made = try fileFromStrengthening(config: config, modelPath: modelPath, jobJSON: kept.json, projectName: name,
+                                                     strengthJob: kept.strengthJob, tensor: kept.tensor, strengthened: s,
+                                                     record: record, densityGCm3: densityGCm3,
+                                                     isCancelled: { !keepGoing.call(1, 2, 0) })
+                OrganicResultInputs.remember(kept, report: made.reportJSON)   // ★ notes28 (a): kept with its result
+                return made
             }
             _ = keepGoing.call(0, 1, 0)
             var made = try LatticeFileRun.follow(config: config, jobID: job.jobID, record: record,

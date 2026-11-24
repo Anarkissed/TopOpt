@@ -68,12 +68,15 @@ final class PrintOrientationFlowHostedTests: XCTestCase {
             }
             try tap(h, "orientOK", "\(what): OK")
             XCTAssertEqual(PrintOrientationFlow.shared.phase, .proposed, "\(what): ★ OK animates to it")
-            // Cancel: the top left, under the Structural capsule
+            // ★ RE-PINNED (notes28, his: "'Cancel' cuts below the 'Structural' menu row... Let's put it to the left of 'Manual
+            // orientation'"): Cancel in the bottom row, left of Manual orientation, on its line; nothing at the top left
             let cancel = try XCTUnwrap(h.frames.all["orientCancel"], "\(what): ★ Cancel")
-            XCTAssertLessThan(cancel.midX, size.width / 3, "\(what): at the left")
-            XCTAssertGreaterThanOrEqual(cancel.minY, PageChrome.panelTop - 1, "\(what): ★ under the capsule")
-            XCTAssertLessThan(cancel.maxY, size.height / 3, "\(what): at the top")
+            let manualButton = try XCTUnwrap(h.frames.all["orientManual"], "\(what): Manual orientation")
+            XCTAssertLessThanOrEqual(cancel.maxX, manualButton.minX + 0.5, "\(what): ★ left of Manual orientation")
+            XCTAssertEqual(cancel.midY, manualButton.midY, accuracy: 2, "\(what): ★ on its row")
+            XCTAssertGreaterThan(cancel.midY, size.height * 0.75, "\(what): ★ at the bottom, never under the capsule")
             XCTAssertGreaterThanOrEqual(cancel.height, 43.5, "\(what): a 44 pt target")
+            XCTAssertTrue(screen.contains(cancel), "\(what): on the screen")
             // Check strength + Manual orientation, bottom right, in Export's place (Export hidden)
             XCTAssertNil(h.frames.all["resultsExport"], "\(what): ★ Export is hidden: nothing unchecked is exported")
             for k in ["orientCheck", "orientManual"] {
@@ -84,8 +87,9 @@ final class PrintOrientationFlowHostedTests: XCTestCase {
                 XCTAssertTrue(screen.contains(b), "\(what): \(k) on the screen")
             }
             for (k, f) in h.frames.all where k.hasPrefix("orient") {
-                XCTAssertFalse(bottomCentre.contains(CGPoint(x: f.midX, y: f.midY)) && k != "orientCheck" && k != "orientManual",
-                               "\(what): ★ nothing at the bottom-centre: \(k)")
+                // (the corner's own row — Cancel, Manual orientation, Check strength — is the corner, never a note)
+                XCTAssertFalse(bottomCentre.contains(CGPoint(x: f.midX, y: f.midY)) && k != "orientCheck" && k != "orientManual"
+                               && k != "orientCancel", "\(what): ★ nothing at the bottom-centre: \(k)")
             }
             // Check strength → the benefits modal, centred
             try tap(h, "orientCheck", "\(what): Check strength")

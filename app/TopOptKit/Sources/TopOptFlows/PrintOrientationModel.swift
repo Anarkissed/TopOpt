@@ -170,14 +170,15 @@ public struct PrintReportFacts: Equatable, Sendable {
         memo = Array(([(d, f)] + memo).prefix(4))
         return f
     }
-    private static let keys = ["\"print_frame\"", "\"print_orientation\"", "\"slicer_supports\"", "\"orientation_recheck\""]
+    private static let keys = ["\"print_frame\"", "\"print_orientation\"", "\"slicer_supports\"", "\"orientation_recheck\"",
+                               "\"painted\""]   // ★ notes28: a cell lattice's file says its supports by its painted block
         .map { Data($0.utf8) }
     nonisolated(unsafe) private static var memo: [(data: Data, facts: PrintReportFacts)] = []
 
     public static func decode(_ o: [String: Any]) -> PrintReportFacts {
         var f = PrintReportFacts.none
         f.frame = PrintFrameTurn.decode(o["print_frame"])
-        f.slicerSupports = o["slicer_supports"] as? String
+        f.slicerSupports = PrintOrientationWords.supportsWord(report: o)   // ★ notes28: what the file carries
         f.onEdge = ((o["painted"] as? [String: Any])?["stand"] as? [String: Any])?["rests_on"] as? String == "edge"
         f.ranking = PrintOrientationRanking.decode(o["print_orientation"])
         f.baseTriangles = (o["base_triangles"] as? NSNumber)?.intValue
@@ -352,11 +353,20 @@ public enum PrintOrientationWords {
     public static func plateValue(_ o: BuildOrientation) -> String { o.isInferredFromGravity ? "As placed" : "Chosen face" }
 
     // the supports line, from the file's `slicer_supports`
-    public static let painted = "Supports painted for you"
-    public static let none = "No supports needed"
-    public static let needed = "Supports needed here"
+    // ★ notes28 (his iPad notes on release 18, img 85: "It still says 'no supports' even though there should be some manual
+    // ones. What is going on with that?"): each word says what the FILE carries — support places painted on the part's own
+    // overhangs (core P3: supports on, Tree (manual), only where painted), places it found but could not paint, or none. The
+    // lattice's own posts are printed with it (part of the file), never slicer supports. "No supports needed" is never said
+    // of a file that carries painted supports.
+    public static let painted = "Supports painted on overhangs"
+    public static let none = "No slicer supports needed"
+    public static let needed = "Overhangs need slicer supports"
     public static let paintedInfo = "The file turns supports on, only where painted. Bambu, Orca: Type tree (manual). "
         + "PrusaSlicer: For support enforcers only. In Bambu Studio, open the file as a project."
+    public static let neededInfo = "The part has overhangs the file could not paint. Turn supports on in your slicer for them."
+    /// ★ notes28: the lattice's posts are printed with it — the Details row's (i).
+    public static let postsInfo = "Short posts printed with the lattice, so no strand starts in mid-air. They are part of the "
+        + "file, not slicer supports."
     public static func supports(_ slicer: String?) -> String? {
         switch slicer {
         case "painted": return painted
@@ -364,6 +374,33 @@ public enum PrintOrientationWords {
         case "needed": return needed
         default: return nil
         }
+    }
+    /// The (i) beside the supports line: how to slice what the file carries.
+    public static func supportsInfo(_ slicer: String?) -> String? {
+        switch slicer {
+        case "painted": return paintedInfo
+        case "needed": return neededInfo
+        default: return nil
+        }
+    }
+    /// ★ notes28: what a file's report says it carries — core's `slicer_supports`, else (a file core wrote no word for: a cell
+    /// lattice's) its `painted` block: "painted" when it painted any, "needed" when it found places and painted none; nil when
+    /// the report says nothing.
+    public static func supportsWord(report o: [String: Any]) -> String? {
+        if let w = o["slicer_supports"] as? String { return w }
+        guard let p = o["painted"] as? [String: Any] else { return nil }
+        let stand = p["stand"] as? [String: Any]
+        let painted = ((p["triangles"] as? NSNumber)?.intValue ?? 0) + ((stand?["triangles"] as? NSNumber)?.intValue ?? 0)
+        if painted > 0 { return "painted" }
+        return ((p["places"] as? NSNumber)?.intValue ?? 0) > 0 || stand != nil ? "needed" : nil
+    }
+    /// ★ notes28: the plastic the painted supports take (core's estimate, mm³: the overhangs' and an edge's stand supports);
+    /// nil when the file paints none.
+    public static func paintedMM3(report o: [String: Any]) -> Double? {
+        guard supportsWord(report: o) == "painted", let p = o["painted"] as? [String: Any] else { return nil }
+        let stand = p["stand"] as? [String: Any]
+        let v = ((p["est_volume_mm3"] as? NSNumber)?.doubleValue ?? 0) + ((stand?["est_volume_mm3"] as? NSNumber)?.doubleValue ?? 0)
+        return v > 0 ? v : nil
     }
 
     // the flow (spec 2d)
@@ -378,6 +415,7 @@ public enum PrintOrientationWords {
     public static let check = "Check strength"
     public static let manual = "Manual orientation"
     public static let manualCaption = "Tap a face or edge"
+    public static let findingFaces = "Finding its faces\u{2026}"
     public static let yourChoice = "Your choice"
     public static let keep = "Keep orientation"
     public static let estimate = "Estimate"
@@ -400,6 +438,34 @@ public enum PrintOrientationWords {
     }
     public static let noRankingText = "This result has no ranking yet. Tap Manual orientation to pick the face for the bed, "
         + "then Check strength."
+
+    // ★ notes28 (his img 82: "notLaid"): the check's steps on this iPad, and every way it can stop, in plain words
+    public static let layingFirst = "Laying the lattice on this iPad"
+    public static let stressFirst = "Working out the stress first"
+    public static let couldNotLayText = "This result’s lattice couldn’t be laid on this iPad. Open Lattice Setup to see it, "
+        + "then try again."
+    public static let stressFailedText = "The stress this lattice follows couldn’t be worked out on this iPad."
+    public static let stillLayingText = "The lattice was still being laid on this iPad."
+    public static let movedText = "The lattice settings changed while it was being laid."
+    public static let stoppedText = "The check was stopped."
+    public static let unreachableText = "Your Mac couldn’t be reached."
+    public static let somethingText = "Something went wrong on the way."
+
+    /// ★ notes28: what stopped a check, in plain words — never a Swift error's name (his img 82 showed "notLaid").
+    public static func plain(_ e: Error) -> String {
+        if let f = e as? LatticeFileRun.Failure { return f.description }
+        if let n = e as? LatticeFileJob.NoJob { return n.line }
+        if let w = e as? LatticeLayoutPreview.OrganicFileWait {
+            switch w {
+            case .laying: return stillLayingText
+            case .notLaid: return couldNotLayText
+            case .outOfDate: return movedText
+            }
+        }
+        if e is CancellationError { return stoppedText }
+        if e is URLError || (e as NSError).domain == NSURLErrorDomain { return unreachableText }
+        return somethingText
+    }
 
     /// The (i) of the pop-up: the estimate's numbers (his rule: a guess says so).
     public static func estimateLines(_ r: PrintOrientationRanking, _ c: PrintOrientationRanking.Candidate?) -> [String] {
