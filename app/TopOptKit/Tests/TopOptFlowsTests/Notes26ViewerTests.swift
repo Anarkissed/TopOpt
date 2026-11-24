@@ -134,18 +134,24 @@ final class Notes26ViewerTests: XCTestCase {
         let c = MTLRenderPipelineColorAttachmentDescriptor()
         MeshRenderer.blendLoadLightHalo(c)
         XCTAssertTrue(c.isBlendingEnabled)
-        XCTAssertEqual(c.sourceRGBBlendFactor, .one); XCTAssertEqual(c.destinationRGBBlendFactor, .one, "★ light ADDED")
+        // ★ RE-PINNED (notes27, his 11-24 img 75: "COMPLETELY blown out"): the halo is the LARGER of itself and what is there — a
+        // dense lattice's many halo shells summed to white
+        XCTAssertEqual(c.rgbBlendOperation, .max, "★ the halo never sums")
+        XCTAssertEqual(c.sourceRGBBlendFactor, .one); XCTAssertEqual(c.destinationRGBBlendFactor, .one)
         XCTAssertEqual(c.sourceAlphaBlendFactor, .zero); XCTAssertEqual(c.destinationAlphaBlendFactor, .one)
         XCTAssertTrue(try renderer().loadLightHaloPipelineDidBuild, "the halo's pipeline builds on a real GPU")
         let src = try FlexibleSource.code("MetalMeshView.swift")
         XCTAssertTrue(src.contains("const float3 cool = float3(0.20, 0.62, 1.00);") && src.contains("const float3 hot = float3(1.00, 0.40, 0.12);"),
                       "★ the colour by how much load flows")
-        XCTAssertTrue(src.contains("color += lc * clamp(in.light.x, 0.0, 1.0) * (0.75 + 1.1 * frl);"), "★ emitted, strongest at the rim")
+        // ★ RE-PINNED (notes27: the band's colour MIXED in, capped under white, strongest at the rim — no longer added)
+        XCTAssertTrue(src.contains("color = mix(color, band, clamp(in.light.x, 0.0, 1.0) * (0.8 + 0.2 * frl));"),
+                      "★ shown, strongest at the rim")
         XCTAssertTrue(src.contains("a = max(a, clamp(in.light.x * 0.95, 0.0, 1.0));"), "★ seen through the X-ray body")
         XCTAssertTrue(src.contains("(nl > 1e-6 ? n / nl : float3(0.0)) * (u.flex.z * lt.x)"), "★ the halo: a shell out along the normals")
         XCTAssertTrue(src.contains("if loadLightOn, let hpipe = loadLightHaloPipeline {"))
         let screen = try FlexibleSource.code("ResultsScreen.swift")
-        XCTAssertTrue(screen.contains(".loadLight(loadLight)") && screen.contains("lf.lightFrame(phase: Float(model.lightPhase), stressColours: colours)"))
+        // ★ RE-PINNED (notes27, his 11-24: only over the stress map, the band carrying each place's stress as it passes)
+        XCTAssertTrue(screen.contains(".loadLight(loadLight)") && screen.contains("lf.loadFrame(phase: Float(model.lightPhase), shares: shares)"))
         XCTAssertTrue(screen.contains("if layers.motion == .loadPaths { return nil }"), "RED CONTROL: no longer paint in the tints")
     }
 

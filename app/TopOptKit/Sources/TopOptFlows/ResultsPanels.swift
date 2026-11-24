@@ -242,6 +242,8 @@ public enum ResultsDetailsTab: String, CaseIterable, Sendable {
 public struct ResultsDetailRow: Equatable, Sendable, Identifiable {
     public let label: String
     public let value: String
+    /// ★ notes27 F2 (his 11-23: "Explain it simply. If more information is required, add an (i)"): the row's (i), nil: none.
+    public var info: String? = nil
     public var id: String { label + "·" + value }
 }
 
@@ -497,16 +499,21 @@ struct ResultsVersionsPanel: View {
 
     static func title(_ version: String?) -> String { version.map { "\($0) results" } ?? "Results" }
     static let pickLabel = "Pick this"
+    /// ★ notes27 F3 (his 11-23: the list's corner radius cut into the selected row's highlight): the list's corners are
+    /// concentric with the highlight's — its radius plus the space between them.
+    static let radius: CGFloat = DSParts.rowHighlightRadius + DSParts.rowHighlightInset
     static let pickedLabel = "Picked"
 
     /// ★ LOOK PER SCREEN (R-b, mockup #topo-results): §4.3's panel; each result one §4.4 line — its name, "87 g · 1.5×", and
     /// Pick this (every line not picked) or Picked; the selected line in the accent edge; one core could not make greyed with
     /// its reason. Folded and short of room, a pill (his note 2026-10-27).
     var body: some View {
-        DSPanel(key: "resultsVersions", title: Self.title(version), count: rows.count, foldedPill: pill, open: $open) {
+        var panel = DSPanel(key: "resultsVersions", title: Self.title(version), count: rows.count, foldedPill: pill, open: $open) {
             ForEach(rows) { r in line(r) }
         }
-        .environment(\.dsRowLineWraps, true)   // ★ notes25 B3: a result's line (why core could not make it) wraps, never cut
+        panel.openRadius = Self.radius   // ★ notes27 F3
+        return panel
+            .environment(\.dsRowLineWraps, true)   // ★ notes25 B3: a result's line (why core could not make it) wraps, never cut
     }
 
     @ViewBuilder private func line(_ r: ResultsVersionRow) -> some View {
@@ -672,14 +679,15 @@ struct ResultsDetailsDrawer: View {
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 24, alignment: .top), count: cols),
                                   alignment: .leading, spacing: 0) {
                             ForEach(rows(tab)) { r in
-                                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                HStack(alignment: r.info == nil ? .firstTextBaseline : .center, spacing: 12) {
                                     Text(r.label).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
                                         .fixedSize(horizontal: false, vertical: true)   // ★ notes25 B3: wraps, never cut
                                     Spacer(minLength: 8)
                                     Text(r.value).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                                         .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)
+                                    if let info = r.info { ResultsDetailInfo(label: r.label, text: info) }   // ★ notes27 F2
                                 }
-                                .padding(.vertical, 10)
+                                .padding(.vertical, r.info == nil ? 10 : 0)
                                 .overlay(alignment: .bottom) { Rectangle().fill(DS.Color.strokeSubtle.color).frame(height: 1) }
                             }
                         }
@@ -701,6 +709,23 @@ struct ResultsDetailsDrawer: View {
                 .background(ResultsChrome.publish("resultsDetailsPanel"))
             }
         }
+    }
+}
+
+/// ★ notes27 F2: a Details row's (i) — its explanation in the centred card (AppPopups' help), a 44 pt target.
+struct ResultsDetailInfo: View {
+    let label: String
+    let text: String
+    var body: some View {
+        Button { AppPopups.shared.help(label, text) } label: {
+            Image(systemName: "info.circle").font(.system(size: 15, weight: .regular))
+                .foregroundStyle(DS.Color.textTertiary.color)
+                .frame(width: DSParts.target, height: DSParts.target).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("About \(label)")
+        .accessibilityIdentifier("results-detail-info-" + label)
+        .background(ResultsChrome.publish("resultsDetailInfo-" + label))
     }
 }
 
@@ -836,15 +861,23 @@ public struct ResultsLayers: Equatable, Sendable {
     }
     /// A tap: a lit view goes off (back to the plain part, note 13); Stress colours; X-ray toggles; a motion starts (or stops
     /// when tapped again).
+    /// ★ notes27 (his 11-24: "the load flow should NOT show without the stress map turned on. This doesn't make sense without
+    /// it"): Load flow turns the stress map on with it (one tap, as Bend and Break), and the stress map turned off ends it.
     public mutating func tap(_ m: ResultsViewMode, hasStress: Bool) {
         switch m {
-        case .stress: stress = hasStress && !stress
+        case .stress:
+            stress = hasStress && !stress
+            if !stress, motion == .loadPaths { motion = nil }   // ★ notes27: no Load flow without the stress map
         case .xray: xray.toggle()
         case .loadPaths, .bend, .breakIt:
             motion = motion == m ? nil : m
-            // ★ his iPad 2026-10-28: Bend and Break turn Stress on; Load paths turns X-ray on (Stress can be added)
+            // ★ his iPad 2026-10-28: Bend and Break turn Stress on; Load paths turns X-ray on
             if motion == .bend || motion == .breakIt { stress = hasStress }
-            if motion == .loadPaths { xray = true }
+            if motion == .loadPaths {
+                xray = true
+                stress = hasStress   // ★ notes27: and the stress map with it — never the light alone
+                if !hasStress { motion = nil }
+            }
         }
     }
 }

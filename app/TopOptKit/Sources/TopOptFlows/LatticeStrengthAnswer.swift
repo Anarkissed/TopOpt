@@ -132,15 +132,19 @@ public struct LatticeStrengthAnswer: Equatable, Sendable {
     }
 
     /// Details › Strength (★ C3 (6), labels of at most five words). `loadKg`: the load the result was solved under.
+    /// ★ notes27 F2 (his 11-23: "Explain it simply. If more information is required, add an (i)"): each row plain, its detail
+    /// behind its (i).
     public func rows(loadKg: Double, unit: WeightUnit, infillPercent: Int, plastic: String?) -> [ResultsDetailRow] {
         var r: [ResultsDetailRow] = []
-        func add(_ l: String, _ v: String?) { if let v, !v.isEmpty { r.append(ResultsDetailRow(label: l, value: v)) } }
+        func add(_ l: String, _ v: String?, info: String? = nil) {
+            if let v, !v.isEmpty { r.append(ResultsDetailRow(label: l, value: v, info: info)) }
+        }
         if let g = governing {
             add("Holds", StrengthWords.x(g) + " your load" + (loadKg > 0 ? " (" + StrengthWords.load(g * loadKg, unit) + ")" : ""))
         }
         add("Needs", StrengthWords.need(required) + " your load"
             + (loadKg > 0 ? " (" + StrengthWords.load(required * loadKg, unit) + ")" : ""))
-        add("Gives first at", givesFirstLine)
+        add("Weakest spot", weakestSpot, info: weakestSpotInfo)   // ★ notes27 F2: was "Gives first at: A strut · bends · …"
         if let short = strutsShort, let judged = strutsJudged, judged > 0 {
             add("Struts short", "\(LatticeFileFacts.number(short)) of \(LatticeFileFacts.number(judged)) checked")
         }
@@ -149,20 +153,57 @@ public struct LatticeStrengthAnswer: Equatable, Sendable {
                 + (solidPassesAtInfill.map { " \u{00B7} OK at \($0)%" } ?? ""))
         }
         add("Plastic", plastic)
-        if let s = loadShare, s > 0 { add("Load on struts", String(format: "%.0f%% of your load, where it presses", s * 100)) }
+        // ★ notes27 F2 (his: "Load on struts: 77% of your load, where it presses — What does that mean?"): where his load
+        // pushes on the part, the share of that force the lattice carries; the solid walls carry the rest
+        if let s = loadShare, s > 0 {
+            let p = Swift.min(100, Int((s * 100).rounded()))
+            add("Lattice carries", "\(p)% of the load", info: Self.latticeCarriesInfo(p))
+        }
         return r
     }
 
-    /// "A strut · bends · 2.25 mm thick, 15.6 mm long", or "The solid part".
-    public var givesFirstLine: String? {
+    /// ★ notes27 F2: what gives way first, in two or three words ("A strut", "The solid part"); the rest is in its (i).
+    public var weakestSpot: String? {
         switch governs {
-        case .strut?:
-            guard let w = weakest.first else { return "A strut" }
-            return "A strut" + (w.action.isEmpty ? "" : " \u{00B7} " + w.action)
-                + " \u{00B7} " + StrengthWords.mm(w.widthMM) + " thick, " + String(format: "%.1f mm long", w.lengthMM)
+        case .strut?: return "A strut"
         case .solid?: return "The solid part"
         case nil: return nil
         }
+    }
+
+    /// ★ notes27 F2: the (i) behind "Weakest spot": what it is, how it fails, its size, where to see it.
+    public var weakestSpotInfo: String? {
+        let see = " To see it lit on the part, tap the strength line at the top of Checks, or play Break."
+        switch governs {
+        case .strut?:
+            var t = "If the load keeps growing, this strut gives way first."
+            if let w = weakest.first {
+                if let a = Self.actionWords(w.action) { t += " " + a }
+                if w.widthMM > 0 {
+                    t += " It is " + StrengthWords.mm(w.widthMM) + " thick"
+                        + (w.lengthMM > 0 ? String(format: " and %.1f mm long.", w.lengthMM) : ".")
+                }
+            }
+            return t + see
+        case .solid?: return "If the load keeps growing, the solid part gives way first, before any strut." + see
+        case nil: return nil
+        }
+    }
+
+    /// How the weakest strut fails, in plain words (core's axial force against its moment: `Strut.action`).
+    static func actionWords(_ action: String) -> String? {
+        switch action {
+        case "bends": return "It bends rather than stretches."
+        case "in tension": return "It is pulled along its length."
+        case "in compression": return "It is squashed along its length."
+        case "buckles": return "It buckles (bows out sideways)."
+        default: return nil
+        }
+    }
+
+    /// ★ notes27 F2: the (i) behind "Lattice carries".
+    static func latticeCarriesInfo(_ p: Int) -> String {
+        "Where your load pushes on the part, the lattice takes \(p)% of that force. The solid walls take the other \(100 - p)%."
     }
 }
 

@@ -321,19 +321,27 @@ final class Notes25MotionTests: XCTestCase {
         XCTAssertFalse(checks.contains { $0.title.hasPrefix("Struts") }, "★ no second strength line: \(checks.map(\.title))")
         let strengthened = try XCTUnwrap(checks.first { $0.title == "Strengthened · 6 rounds" })
         XCTAssertEqual(strengthened.detail, "3 struts still short")
-        XCTAssertEqual(strengthened.more, "19 braced · thickest now 4.06 mm", "★ only numbers true for the final lattice")
+        // ★ RE-PINNED (notes27 F2, his 11-23 "What changes were made to strengthen it?": the changes in plain words, the same as
+        // Details' "Strengthened"; this older report has no summary keys, so only its braced struts and thickest strut)
+        XCTAssertEqual(strengthened.more, "19 struts braced · thickest now 4.06 mm", "★ only numbers true for the final lattice")
         XCTAssertEqual(checks.first { $0.title == "Print file ready" }?.detail, "STL · 44.4 MB", "★ no strut count")
 
         let details = m.detailRows(.strength, version: row)
         func v(_ l: String) -> String? { details.first { $0.label == l }?.value }
         XCTAssertEqual(v("Holds"), "1.34× your load (55 kg)")
         XCTAssertEqual(v("Needs"), "1.5× your load (62 kg)")
-        XCTAssertEqual(v("Gives first at"), "A strut · bends · 2.25 mm thick, 15.6 mm long", "★ bending-led (0.13 N vs 29.8 N·mm)")
+        // ★ RE-PINNED (notes27 F2, his 11-23: "Gives first at ... is very confusing ... Explain it simply. If more information is
+        // required, add an (i)"): "Weakest spot · A strut", how it fails and its size behind the (i)
+        XCTAssertEqual(v("Weakest spot"), "A strut")
+        XCTAssertTrue(details.first { $0.label == "Weakest spot" }?.info?.contains("It bends rather than stretches. It is 2.25 mm thick "
+                      + "and 15.6 mm long.") == true, "★ bending-led (0.13 N vs 29.8 N·mm)")
         XCTAssertEqual(v("Struts short"), "3 of 8,181 checked")
         XCTAssertEqual(v("Solid part"), "2.66× at 50% infill · OK at 35%")
         XCTAssertEqual(v("Plastic"), "67 g · 39% less than solid")
-        XCTAssertEqual(v("Load on struts"), "77% of your load, where it presses")
-        XCTAssertEqual(v("Strengthened"), "6 rounds · 19 braced")
+        // ★ RE-PINNED (notes27 F2, his: "Load on struts ... What does that mean?"): what the lattice carries of his load, its (i)
+        // saying where and the rest; "Strengthened" lists the changes, as the Checks line does
+        XCTAssertEqual(v("Lattice carries"), "77% of the load")
+        XCTAssertEqual(v("Strengthened"), "6 rounds · 19 struts braced · thickest now 4.06 mm")
         for gone in ["Verified margin", "Mesh vs grid", "Peak stress", "Breaks at about", "Built for", "Stress scale", "Struts",
                      "Weakest strut", "Struts checked", "Infill"] {
             XCTAssertNil(v(gone), "★ '\(gone)' is gone: \(details.map(\.label))")
@@ -376,7 +384,12 @@ final class Notes25MotionTests: XCTestCase {
         }
         XCTAssertEqual(Double(try XCTUnwrap(share(at: Notes25Fixture.onSolid[0]))), 1 / 2.663863157, accuracy: 1e-5,
                        "the solid: 1 ÷ its margin there")
-        XCTAssertTrue(try XCTUnwrap(share(at: Notes25Fixture.unjudged[0])).isNaN, "nothing judged it: the plain part")
+        // ★ RE-PINNED (notes27 F1, his 11-23: "The stress map is meant to be on the *entire* model"): a place nothing judged is
+        // coloured from the stress field (the material's limit at his infill), never plain
+        let field = try XCTUnwrap(m.selectedStressField)
+        XCTAssertEqual(Double(try XCTUnwrap(share(at: Notes25Fixture.unjudged[0]))),
+                       Double(field.value(at: Notes25Fixture.unjudged[0])) / m.stressScaleMaxMPa, accuracy: 1e-5,
+                       "★ nothing judged it: the stress field, never the plain part")
         let first = try XCTUnwrap(s.prep.firstRed)
         XCTAssertEqual(Double(first.share) * s.top, 1, accuracy: 1e-5, "★ red exactly at the governing margin")
         XCTAssertLessThan(simd_distance(SIMD3<Double>(first.position), Notes25Fixture.weakestAt), 2,
