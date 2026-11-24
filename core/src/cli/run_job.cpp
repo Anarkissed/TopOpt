@@ -16762,6 +16762,27 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
       return R;
     }
     done.files.push_back("strut_margins.bin");
+    // K4 (his Results notes, 2026-11-24: the stress colours on the WHOLE model): bars.bin, every bar of strut_margins.bin
+    // in the same order, so the app can draw each one coloured by its margin. "TOBARS1\0" (8 bytes), uint32 count N,
+    // uint32 0 (reserved), then N records of 7 float32: ax ay az bx by bz width_mm, in the part's own (model) frame.
+    std::vector<float> rec;
+    rec.reserve(layout_bars.bars.size() * 7);
+    for (const ll::Bar& b : layout_bars.bars) {
+      const Vec3 a = S.frame.point_to_model(b.a), e = S.frame.point_to_model(b.b);   // P2
+      for (const double v : {a.x, a.y, a.z, e.x, e.y, e.z, b.width}) rec.push_back(static_cast<float>(v));
+    }
+    std::ofstream bf(join_path(out_dir, "bars.bin"), std::ios::binary);
+    const char magic[8] = {'T', 'O', 'B', 'A', 'R', 'S', '1', '\0'};
+    const std::uint32_t head[2] = {static_cast<std::uint32_t>(layout_bars.bars.size()), 0u};
+    bf.write(magic, 8);
+    bf.write(reinterpret_cast<const char*>(head), sizeof head);
+    bf.write(reinterpret_cast<const char*>(rec.data()), static_cast<std::streamsize>(rec.size() * sizeof(float)));
+    if (!bf) {
+      R.done = strength_no("strength_failed", 1, "The lattice's strength could not be checked, so no file was made.",
+                           "cannot write bars.bin");
+      return R;
+    }
+    done.files.push_back("bars.bin");
   }
   // ── the block: Install 3's keys, and the frame's.
   const double nan = std::numeric_limits<double>::quiet_NaN();
@@ -16806,6 +16827,7 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
        "\"margin_interlayer\": null, \"margin_worst_case\": " + num(smallest) + ", \"out_of_regime\": false, \"regime_note\": \"\"},\n";
   s += "    \"fields\": \"fields.bin\",\n";
   s += "    \"strut_margins\": \"strut_margins.bin\",\n";
+  s += "    \"bars\": \"bars.bin\",\n";   // K4: the bars of strut_margins.bin, same order, model frame
   s += "    \"struts\": {\"judged\": " + std::to_string(c.judged) + ", \"under_safety\": " + std::to_string(c.under_safety) +
        ", \"under_one\": " + std::to_string(c.under_one) + ", \"smallest_margin\": " + num(smallest) +
        ", \"buckling_failures\": " + std::to_string(c.buckling_failures) + ", \"stubs\": " + std::to_string(c.stubs) +
@@ -17037,6 +17059,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
     return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
   };
   std::string rounds_json;
+  std::string summary_keys;   // K4: what the strengthening did, for the app (the additive mode's last check)
   double reference = 0.0;
   int limit = 0;
   std::string mode_name = "rebuild";
@@ -17058,7 +17081,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
                       return std::string(b);
                     }() +
                     ",\n  \"strengthened\": " + (res.last_strengthened.empty() ? std::string("null") : json_str(res.last_strengthened)) +
-                    ",\n  \"rounds\": [" + rounds_json + (rounds_json.empty() ? "" : "\n  ") + "],\n  \"seconds\": " +
+                    summary_keys + ",\n  \"rounds\": [" + rounds_json + (rounds_json.empty() ? "" : "\n  ") + "],\n  \"seconds\": " +
                     json_num(std::round(secs(t_all) * 10.0) / 10.0) + "\n}\n";
     std::ofstream(join_path(out_dir, "strengthen.json")) << o;
     return res;
@@ -17205,6 +17228,10 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
     std::map<EndsKey, double> prev_margin_of;              // a bar of the check before: its strut's margin (judged)
     std::vector<std::pair<ll::Bar, double>> prev_bars;     // the same bars, for "a piece of which old bar"
     res.old_bars_kept = true;
+    // K4 (his Results notes, 2026-11-24: "What changes were made to strengthen it?"): the struts (known across rounds by
+    // their key, as OS18 knows them) widened by a widening the round kept (one taken back near a print finding is not
+    // counted), and those held by braces, over every round.
+    std::set<StrutKey> thickened_ever, braced_ever;
     for (int n = 0;; ++n) {
       if (stop && stop->load()) return finish(false, "cancelled", 1, "Stopped before the strengthening was finished.");
       const std::string rdir = join_path(out_dir, "r" + std::to_string(n));
@@ -17309,6 +17336,47 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
       const bool clean = c.solved && c.under_safety == 0;
       if (clean || n >= limit || !c.solved) {
         rounds_json += r + "}";
+        {   // K4: the summary, of this last check (the lattice the last round's strengthened.json gives)
+          double widest = 0.0;
+          for (std::size_t i = 0; i < bars.bars.size(); ++i)
+            if (i >= in_file.size() || in_file[i]) widest = std::max(widest, bars.bars[i].width);
+          // Per group (OJ5; one group for a job of one ask): its regions, its thickest setting (the upper width), and its
+          // struts of this check wider than it.
+          struct Group { std::vector<int> regions; double thickest = 0.0; std::size_t past = 0; };
+          std::vector<Group> gs;
+          if (groups.empty()) {
+            Group g;
+            g.regions = ctx.weave_regions;
+            g.thickest = upper;
+            gs.push_back(g);
+          } else {
+            for (const ll::OrganicGroup& og : groups) {
+              Group g;
+              g.regions = og.regions;
+              g.thickest = lim_r(og.regions.empty() ? 0 : og.regions.front());
+              gs.push_back(g);
+            }
+          }
+          std::size_t past = 0;
+          for (const ll::FrameStrut& sn : c.struts) {
+            const int rg = reg(sn);
+            if (!(sn.width_max > lim_r(rg) + 1e-9)) continue;
+            ++past;
+            for (Group& g : gs)
+              if (groups.empty() || std::find(g.regions.begin(), g.regions.end(), rg) != g.regions.end()) { ++g.past; break; }
+          }
+          summary_keys = ",\n  \"thickened_distinct\": " + std::to_string(thickened_ever.size()) +
+                         ",\n  \"braced\": " + std::to_string(braced_ever.size()) + ",\n  \"widest_mm\": " + json_num(widest) +
+                         ",\n  \"past_thickest\": " + std::to_string(past) + ",\n  \"groups\": [";
+          for (std::size_t gi = 0; gi < gs.size(); ++gi) {
+            std::string regs;
+            for (std::size_t q = 0; q < gs[gi].regions.size(); ++q) regs += (q ? ", " : "") + std::to_string(gs[gi].regions[q]);
+            summary_keys += std::string(gi ? ", " : "") + "{\"id\": " + std::to_string(gi) + ", \"regions\": [" + regs +
+                            "], \"thickest_setting_mm\": " + json_num(gs[gi].thickest) + ", \"past_thickest\": " +
+                            std::to_string(gs[gi].past) + "}";
+          }
+          summary_keys += "]";
+        }
         res.passing = cr.verdict == "pass";
         if (clean) return finish(true, "done", 0, "");
         if (!c.solved) return finish(true, "frame_not_solved", 0, "The frame could not be solved, so there is nothing to strengthen from.");
@@ -17426,7 +17494,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
         if (sn.by == "buckling") {
           bool all = brace_ops_of[wi].second > brace_ops_of[wi].first;
           for (std::size_t q = brace_ops_of[wi].first; q < brace_ops_of[wi].second; ++q) all = all && brep.braces_at[q] > 0;
-          if (all) { ++struts_braced; continue; }
+          if (all) { ++struts_braced; braced_ever.insert(strut_key(sn.at)); continue; }   // K4
           f = std::pow(ss.target_margin / sn.buckling_margin, 1.0 / p_buckle);
         } else {
           f = std::pow(ss.target_margin / sn.stress_margin, 1.0 / (sn.bending_led ? p_bend : p_axial));
@@ -17451,6 +17519,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
         if (any) widened_now.insert(strut_key(sn.at));   // OS18
       }
       ll::AddRound widen;
+      std::vector<StrutKey> widen_key;   // K4: per widening op, its strut's key
       double past_widest = 0.0;   // OS18 amended: the widest a bar was made past the limit this round
       {
         const std::vector<std::vector<std::size_t>> on = ll::pieces_on(bars, olds);
@@ -17463,6 +17532,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
             if (!(w > b.width)) continue;
             done.insert(j);
             widen.ops.push_back({2, {b.a.x, b.a.y, b.a.z, b.b.x, b.b.y, b.b.z, w}});
+            widen_key.push_back(strut_key(strut_of[k]->at));   // K4
             if (ceil_of[k] > lim_of[k] && w > lim_of[k] + 1e-12) past_widest = std::max(past_widest, w);
           }
       }
@@ -17509,8 +17579,10 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
           return finish(false, "print_check_failed", 1, "The lattice's file could not be put together, so its strength cannot be judged.", pc2.why);
         if (pc2.made.print_clean || pass >= 5 || pc2.made.findings_at.empty()) break;
         std::vector<ll::AddOp> keep;
+        std::vector<StrutKey> keep_key;   // K4
         std::size_t dropped = 0;
-        for (const ll::AddOp& op : widen.ops) {
+        for (std::size_t oi = 0; oi < widen.ops.size(); ++oi) {
+          const ll::AddOp& op = widen.ops[oi];
           const Vec3 a{op.v[0], op.v[1], op.v[2]}, b{op.v[3], op.v[4], op.v[5]};
           const Vec3 d{b.x - a.x, b.y - a.y, b.z - a.z};
           const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
@@ -17520,11 +17592,13 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
             const double ex = a.x + d.x * t - f.x, ey = a.y + d.y * t - f.y, ez = a.z + d.z * t - f.z;
             near = near || std::sqrt(ex * ex + ey * ey + ez * ez) <= op.v[6] + 1.0;
           }
-          if (near) ++dropped; else keep.push_back(op);
+          if (near) ++dropped;
+          else { keep.push_back(op); keep_key.push_back(widen_key[oi]); }
         }
         if (dropped == 0) break;
         widen_taken_back += dropped;
         widen.ops = keep;
+        widen_key = keep_key;
         bars = pre_widen;
         if (!widen.ops.empty() && !ll::apply_add_round(bars, domain, widen, ctx, &wrep, &why))
           return finish(false, "strengthen_failed", 1, "A round of strengthening could not be added.", why);
@@ -17532,6 +17606,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
         round.ops.insert(round.ops.end(), widen.ops.begin(), widen.ops.end());
         round_guard = ll::GuardReport{};
       }
+      for (const StrutKey& k : widen_key) thickened_ever.insert(k);   // K4: the widenings the round kept
       if (!pc2.made.print_clean)
         return finish(false, "would_not_print", 1,
                       "After round " + std::to_string(n + 1) + " the lattice would not print (an overhang or a start in mid-air), "

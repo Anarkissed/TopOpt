@@ -20,6 +20,7 @@ final class LatticeLayoutManualTests: XCTestCase {
     func project() throws -> FlexibleHisProject.Restored {
         let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
         _ = try FlexibleR7M1Fixtures.hisLiveLattice(r.project)
+        r.project.latticePageManual = true   // ★ K3: these are Manual's controls (Auto asks for the thinnest strut, no quilt)
         return r
     }
 

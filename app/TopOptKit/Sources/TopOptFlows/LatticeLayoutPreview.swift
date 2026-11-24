@@ -1408,6 +1408,19 @@ public final class LatticeLayoutPreview: ObservableObject {
         var s = partWide(p.lattice, beadMM: p.printParams.strutLineWidthMM, wallRingMM: p.printParams.wallRingMM,
                          referenceMPa: referenceMPa, percent: { p.latticeDensityPercent(rho: $0, cellMM: $1) })
         let l = p.lattice
+        // ★ K3 (his 11-23 notes on release 17: "When I set auto regular lattices, it automatically set quilting=on. That should
+        // ALWAYS be off by default unless it is literally impossible to lattice without it. If users want it on, they need to go
+        // into manual." "Auto should try to give as thin struts as possible, regardless of the cell size."): the page on Auto
+        // asks for no quilt and no Small cells in thin walls (the engine lays a region with the quilt's cells only where no
+        // other cell can be laid, and names it: quilt_regions), and for the thinnest strut the printer lays (its lines x its
+        // line width) in every cell, the cells still grading. Manual sends his own choices, as before. (362 at the merge with
+        // notes26: applied here, after partWide, where the page's Manual is known.)
+        if !p.latticePageManual, !l.isOrganic {
+            s.allowQuilt = false
+            s.smallCellsInThinWalls = false
+            s.byStress = false
+            s.strutWidthMM = s.minStrutLines * s.beadMM
+        }
         let rowDensity = s.perRegion
         var id: Int32 = 1
         var uniformSet = false

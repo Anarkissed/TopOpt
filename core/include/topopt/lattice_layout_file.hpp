@@ -94,6 +94,7 @@ struct FileReport {
   std::size_t weave_specks_ignored = 0, weave_held_ignored = 0;   // O10: PrintableReport's
   std::size_t part_overhangs = 0;   // PrintableReport's: the part's own overhangs, counted, never propped
   std::vector<Vec3> part_overhang_at;   // P3: PrintableReport's: where (the last pass)
+  std::size_t own_by_k1 = 0;   // K1: PrintableReport's (left to the slicer by his rule, judged by the far point)
   std::size_t posts_outside = 0;    // ★ 362 11-23, PrintableReport's (F2): posts not added, their column leaving the part
   bool stopped_repeating = false;   // ★ 362 11-23, PrintableReport's (F3): stopped, a try having nothing new to try
   // O17, O18: PrintableReport's: what the sag pass did, and the bars the file was made of when it changed any (null:
@@ -354,6 +355,8 @@ struct FileResult {
   std::size_t cells = 0, solid_pieces = 0, bars = 0, at_one_line = 0, at_widest = 0;
   std::size_t stubs = 0, joined = 0, dropped = 0, pieces = 0, adrift = 0, stepped_edges = 0;
   std::size_t thin_solid = 0;   // cut cells print rule P8 (f) made solid (Outcome::thin_solid)
+  std::size_t small_patch_cells = 0;   // K5: cells made solid for a Structural patch narrower than its count across
+  std::vector<int> quilt_regions;      // K3: Outcome::quilt_regions (laid with the quilt: nothing else laid there)
   bool cells_by_stress = false; // cell size by stress was applied to the layout (Outcome::cells_by_stress, C22)
   double step_held_at = 0.0;    // C24: the part's size-step limit kept (Outcome::step_held_at); 0 when none was asked
   double floor_cell_mm = 0.0, min_strut_mm = 0.0, open_look = 0.0, touch = 0.0;

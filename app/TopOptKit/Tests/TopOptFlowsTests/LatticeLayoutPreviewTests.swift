@@ -175,6 +175,32 @@ final class LatticeLayoutPreviewTests: XCTestCase {
         XCTAssertTrue(s.regionDials.allSatisfy { $0.dial >= 0.01 && $0.dial <= 1 }, "★ on core's 0.01 ... 1 scale")
     }
 
+    /// ★ K3 (his 11-23 notes on release 17: "When I set auto regular lattices, it automatically set quilting=on. That should
+    /// ALWAYS be off by default unless it is literally impossible to lattice without it. If users want it on, they need to go
+    /// into manual." "Auto should try to give as thin struts as possible, regardless of the cell size."): the page on Auto asks
+    /// for no quilt, no Small cells in thin walls (the engine falls back to the quilt by itself where nothing else lays) and the
+    /// thinnest strut everywhere, the cells still grading by stress; Manual sends his own choices.
+    func testAutoNeverQuiltsAndLaysTheThinnestStruts() throws {
+        let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
+        let p = r.project
+        p.lattice.allowQuilt = true
+        p.lattice.smallCellsInThinWalls = true
+        p.lattice.setSimulateStresses(true)
+        p.lattice.gradingMode = .full
+        p.lattice.densityMode = .sim
+        p.latticePageManual = false
+        let auto = LatticeLayoutPreview.settings(p)
+        XCTAssertFalse(auto.allowQuilt, "★ Auto: no quilt")
+        XCTAssertFalse(auto.smallCellsInThinWalls, "★ Auto: no Small cells in thin walls")
+        XCTAssertFalse(auto.byStress, "★ Auto: one strut width, the thinnest")
+        XCTAssertEqual(auto.strutWidthMM, auto.minStrutLines * auto.beadMM, accuracy: 1e-12, "★ its lines x its line width")
+        XCTAssertTrue(auto.cellsByStress, "★ the cells still grade by stress")
+        p.latticePageManual = true
+        let manual = LatticeLayoutPreview.settings(p)
+        XCTAssertTrue(manual.allowQuilt && manual.smallCellsInThinWalls && manual.byStress, "★ Manual: his own choices")
+        XCTAssertEqual(manual.strutWidthMM, 0, "★ Manual by stress: no typed width")
+    }
+
     /// ★ 11-13 round 2: Small cells in thin walls is saved with the part (off is not written) and reaches core; Organic keeps the old
     /// preview with one plain line; By stress gets one plain line.
     func testSmallCellsOrganicAndByStress() throws {
@@ -186,6 +212,7 @@ final class LatticeLayoutPreviewTests: XCTestCase {
         l.smallCellsInThinWalls = true
         XCTAssertTrue(try JSONDecoder().decode(LatticeSettings.self, from: JSONEncoder().encode(l)).smallCellsInThinWalls, "★ saved")
         p.lattice.smallCellsInThinWalls = true
+        p.latticePageManual = true   // ★ K3: his own choice, in Manual (Auto never asks for it)
         XCTAssertTrue(LatticeLayoutPreview.settings(p).smallCellsInThinWalls, "★ reaches core")
         l.algorithm = "organic"
         XCTAssertTrue(LatticeLayoutPreview.draws(l), "★ Organic cut 1 (his 11-18 \"Preview PLUS settings\"): the new engine draws it")

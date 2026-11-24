@@ -1000,6 +1000,7 @@ double strut_run_on_mm(const Carved&, const MeshSpec& spec) {
 void weave_bar_shells(const Domain&, const Layout&, const Bars&, const std::vector<char>&, const std::vector<char>&,
                       const Carved&, const MeshSpec&, TriangleMesh&, std::vector<std::size_t>&, MeshReport&) {}
 std::vector<char> solid_slivers_left_out(const Carved&, const std::vector<Vec3>&) { return {}; }
+TriangleMesh carved_solid_mesh(const Carved&) { return {}; }
 bool cut_shell_at_bed(TriangleMesh&, double) { return false; }
 
 #else
@@ -1075,6 +1076,19 @@ std::vector<char> solid_slivers_left_out(const Carved& carved, const std::vector
   if (!carved.kept) return out;
   for (const Manifold& piece : static_cast<const CarvedSolids*>(carved.kept.get())->pieces)
     out.push_back(drop_at.empty() ? 0 : sliver_dropped(piece.BoundingBox(), piece.Volume(), drop_at) ? 1 : 0);
+  return out;
+}
+
+TriangleMesh carved_solid_mesh(const Carved& carved) {
+  TriangleMesh out;
+  if (!carved.ok || !carved.kept) return out;
+  const manifold::MeshGL64 g = static_cast<const CarvedSolids*>(carved.kept.get())->solid.GetMeshGL64();
+  out.vertices.reserve(g.NumVert());
+  for (std::size_t v = 0; v < g.NumVert(); ++v)
+    out.vertices.push_back({g.vertProperties[v * g.numProp], g.vertProperties[v * g.numProp + 1], g.vertProperties[v * g.numProp + 2]});
+  out.triangles.reserve(g.NumTri());
+  for (std::size_t t = 0; t < g.NumTri(); ++t)
+    out.triangles.push_back({static_cast<int>(g.triVerts[3 * t]), static_cast<int>(g.triVerts[3 * t + 1]), static_cast<int>(g.triVerts[3 * t + 2])});
   return out;
 }
 
