@@ -2666,7 +2666,8 @@ public struct LatticeSetupWizard: View {
             // core's sample part with the settings on it — never his own part (the workspace covers it on this page)
             // ★ his iPad notes 11-23 (img 3): the sample's background fills the whole page behind the panel and the top rows (no
             // black bars); its picture is drawn in the part the panel leaves free, framed as it was
-            AnyView(LatticeSampleView(inputs: latticeSampleInputs, notInSample: latticeNotInSample)
+            // ★ notes26 (his 11-23): live from the open tab's settings, the finish and the band in it — no "Not in the sample" line
+            AnyView(LatticeSampleView(inputs: latticeSampleInputs)
                 .kept(.init(project: project.id, group: latticeTab))   // ★ his 11-23: each group's sample kept (LatticeSampleKeep)
                 .visible(EdgeInsets(top: portrait ? PageChrome.panelTop + latticePanelHeight : PageChrome.panelTop,
                                     leading: portrait ? 0 : PageChrome.edge + latticePanelWidth(c), bottom: 0, trailing: 0))
@@ -2696,10 +2697,18 @@ public struct LatticeSetupWizard: View {
     /// graded (the chunk of cells shows "from").
     private var latticeSampleInputs: LatticeSampleView.Inputs {
         var i = Self.sampleInputs(model, beadMM: project.printParams.strutLineWidthMM)
-        // ★ his 11-18: Organic's samples, from the open tab's Organic settings (a group's own, or the whole part's)
-        if model.cellTransition == .organicGrade, project.importedFile != nil {
-            let group = latticeTab.hasPrefix("area-") ? project.latticeAreaGroups.indices.contains(Int(latticeTab.dropFirst(5)) ?? -1)
-                ? project.latticeAreaGroups[Int(latticeTab.dropFirst(5))!].id : nil : nil
+        let group = latticeTab.hasPrefix("area-") ? project.latticeAreaGroups.indices.contains(Int(latticeTab.dropFirst(5)) ?? -1)
+            ? project.latticeAreaGroups[Int(latticeTab.dropFirst(5))!].id : nil : nil
+        // ★ notes26 (his 11-23, "Yes to the live sample"): a strut type's sample is laid from the open tab's settings — the
+        // page's (the open area's grade on them) and the area's own Finish and Manual controls
+        if model.cellTransition != .organicGrade {
+            i.lay = LatticeSampleLay.page(model.applied(to: project.lattice), area: group,
+                                          own: group.map { (latticeAreaEdits ?? project.lattice.areaGrading)[$0] ?? LatticeAreaGrading() },
+                                          lineWidthMM: project.printParams.strutLineWidthMM, wallRingMM: project.printParams.wallRingMM)
+        }
+        // ★ his 11-18: Organic's samples, from the open tab's Organic settings (a group's own, or the whole part's); ★ notes26:
+        // with or without the part's model file (the sample is its own body), so nothing is left out of it
+        if model.cellTransition == .organicGrade {
             i.organic = project.lattice.organicLook(group: group).effective(pageManual: latticeManual)
             i.layerMM = project.printParams.layerHeightMM > 0 ? project.printParams.layerHeightMM : 0.2
             i.coverMM = project.printParams.wallRingMM > 0 ? project.printParams.wallRingMM : -1
@@ -2719,14 +2728,6 @@ public struct LatticeSetupWizard: View {
                                         beadMM: beadMM,
                                         rhoLo: graded ? model.minRelativeDensity : model.relativeDensity,
                                         rhoHi: model.relativeDensity)
-    }
-
-    /// ★ his iPad notes 11-10 (img 6): what he has on that the engine's sample block can't show yet.
-    private var latticeNotInSample: [String] {
-        LatticeSampleView.notInSample(organic: model.cellTransition == .organicGrade, finish: model.boundary,
-                                      shapeBand: model.gradingMode.fitsShape,
-                                      singleCell: model.singleCellMembers && (project.lattice.stageMode ?? .structural) == .aesthetic,
-                                      organicBuilt: project.importedFile != nil)
     }
 
     private func latticePanel(_ c: CellsPageContext, hug: Bool) -> some View {
@@ -3108,8 +3109,19 @@ public struct LatticeSetupWizard: View {
         onExit()
     }
 
-    /// One cell │ In the part, over the canvas: what the canvas shows (its settings are on the panel's tabs).
+    /// The switch, and (★ notes26, his rule: never a note at the bottom-centre) what the see-through sample truly can't draw —
+    /// Rim's and Covered's solid — in an (i) beside it; a 44 pt space on its other side keeps the switch where it was.
     private var latticeViewSwitch: some View {
+        let why = LatticeSampleLay.notDrawn(latticeSampleInputs.lay)
+        return HStack(spacing: DS.Space.s) {
+            if why != nil { Color.clear.frame(width: 44, height: 44) }
+            latticeStageSwitch
+            if let why { InfoTip(key: "lattice-sample-not-drawn", text: why, label: "What the sample can't show") }
+        }
+    }
+
+    /// One cell │ In the part, over the canvas: what the canvas shows (its settings are on the panel's tabs).
+    private var latticeStageSwitch: some View {
         HStack(spacing: 2) {
             ForEach(LatticeWizardStage.allCases, id: \.rawValue) { s in
                 let on = model.stage == s
