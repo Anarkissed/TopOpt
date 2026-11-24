@@ -185,6 +185,10 @@ public final class LatticeMacMake: ObservableObject {
     @Published public private(set) var checking = false
     /// ★ notes25 (A3): the lattice on screen was print-accurate already at his press: the card and the button say the print file.
     @Published public private(set) var fileOnly = false
+    /// ★ notes27 (G1, his notes on release 17: "The animation for regular lattices should *show* a regular lattice, and not an
+    /// organic one"): the job's lattice kind, which picks the card's animation (Organic's vines, a cell lattice's hexagons).
+    public enum Kind: Equatable, Sendable { case organic, cells }
+    @Published public private(set) var kind: Kind = .organic
     private(set) var projectID: UUID?
     /// The run he asked for (Try again sends it again).
     var request: RunRequest?
@@ -212,12 +216,14 @@ public final class LatticeMacMake: ObservableObject {
     /// goes the moment it ends); `fileOnly` — the print-accurate lattice is on screen already (A3).
     /// ★ notes25 (A5): `onMac` false — made on this iPad (a cell lattice with no Mac): its first step is the file, never "Waiting
     /// for your Mac".
-    func begin(project id: UUID, path: String?, run: RunModel? = nil, fileOnly: Bool = false, onMac: Bool = true,
-               cancel: @escaping () -> Void, now: Date = Date()) {
+    /// ★ notes27 (G1): `kind` — the job's lattice kind (the card's animation).
+    func begin(project id: UUID, path: String?, run: RunModel? = nil, fileOnly: Bool = false, kind: Kind = .organic,
+               onMac: Bool = true, cancel: @escaping () -> Void, now: Date = Date()) {
         events?.cancel(); events = nil
         projectID = id; self.path = path; cancelAction = cancel
         started = now; stage = onMac ? LatticeMacMakeCopy.waiting : LatticeMacMakeCopy.makingFile; checking = false
         self.fileOnly = fileOnly
+        self.kind = kind
         inBackground = false; runOver = false; runSeen = false
         LatticeFileSpot.shared.clear()   // ★ notes25: a new press: the last refusal's spot goes
         SettingToChange.shared.ask = nil   // ... and the field it asked to change
@@ -284,7 +290,7 @@ public final class LatticeMacMake: ObservableObject {
         events?.cancel(); events = nil; jobURL = nil
         runWatch?.cancel(); runWatch = nil; run = nil
         going = false; inBackground = false; runOver = false; runSeen = false
-        checking = false; fileOnly = false; cancelAction = nil; projectID = nil; request = nil
+        checking = false; fileOnly = false; cancelAction = nil; projectID = nil; request = nil   // (`kind` stays: each press sets it)
     }
 
     /// His Cancel on the card.
@@ -295,7 +301,9 @@ public final class LatticeMacMake: ObservableObject {
     }
 
     /// Tests only.
-    func reset() { ended(); workspaceUp = true; stayAwake(); lastSeconds = [:]; started = nil; stage = LatticeMacMakeCopy.waiting }
+    func reset() {
+        ended(); workspaceUp = true; stayAwake(); lastSeconds = [:]; started = nil; stage = LatticeMacMakeCopy.waiting; kind = .organic
+    }
 }
 
 /// The card while the Mac makes the print-accurate lattice: centred over everything, the vines growing, the step, the time.
@@ -309,9 +317,7 @@ struct LatticeMacMakeModal: View {
                 Rectangle().fill(Color.black.opacity(0.35)).ignoresSafeArea()
                 GlassPanel {
                     VStack(spacing: DS.Space.m) {
-                        LatticeMacMakeVines()
-                            .frame(width: 220, height: 150)
-                            .accessibilityHidden(true)
+                        LatticeMacMakeAnimation(kind: make.kind)   // ★ notes27 (G1): by the job's lattice kind
                         Text(make.title).dsStyle(DS.TypeScale.title).foregroundStyle(DS.Color.textPrimary.color)
                             .multilineTextAlignment(.center)
                             .accessibilityIdentifier("mac-make-title")
@@ -372,6 +378,136 @@ struct LatticeMacMakeBar: View {
                     g.fill(Path(roundedRect: lit, cornerRadius: size.height / 2), with: .color(DS.Color.accent.color))
                 }
             }
+        }
+    }
+}
+
+/// ★ notes27 (G1): the card's animation, by the job's lattice kind — Organic keeps its vines; a cell lattice shows hexagonal
+/// cells put one after another. The same size and place on the card, each publishing its own frame (the hosted tests').
+struct LatticeMacMakeAnimation: View {
+    let kind: LatticeMacMake.Kind
+    static let size = CGSize(width: 220, height: 150)
+
+    var body: some View {
+        Group {
+            switch kind {
+            case .organic:
+                LatticeMacMakeVines().frame(width: Self.size.width, height: Self.size.height)
+                    .background(CornerPairStyle.publish("macMakeVines"))
+            case .cells:
+                LatticeMacMakeCells().frame(width: Self.size.width, height: Self.size.height)
+                    .background(CornerPairStyle.publish("macMakeCells"))
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// ★ notes27 (G1, his iPad notes 11-23 on release 17: "The animation for regular lattices should *show* a regular lattice, and
+/// not an organic one. I picture something like a bunch of hexagons getting put one after another."): a cell lattice's card
+/// fills a honeycomb — hexagonal cells, each an outline of struts with a node at every corner, put in place one after another
+/// from the floor up (each dropped into its place beside the last), the newest brightest; full, it fades and fills again, for
+/// as long as the card is up. The vines' purple, frame and rhythm (it never stops: `TimelineView(.animation)`).
+struct LatticeMacMakeCells: View {
+    private static let purple = LatticeStructureColour.interior
+
+    var body: some View {
+        TimelineView(.animation) { ctx in
+            Canvas { g, size in Self.draw(g, size: size, t: ctx.date.timeIntervalSinceReferenceDate) }
+        }
+    }
+
+    /// One fill and fade (s): it fills for 80 % of it, then fades (as the vines).
+    static let cycle = 7.0
+    /// The honeycomb: 7 columns of 4 cells (28).
+    static let columns = 7, rows = 4
+    /// One cell's put (s), from a little above into its place; and how long the newest stays bright once it is down.
+    static let drop = 0.45, glow = 0.7
+    /// The struts' width and the nodes' radius (pt).
+    static let line: CGFloat = 2.6, node: CGFloat = 2.3
+
+    /// The honeycomb laid in `size`, centred (flat-topped cells, the odd columns half a cell lower): the cells' radius (centre
+    /// to corner) and their centres in the order they are put — the bottom row first, each row the other way from the last,
+    /// so every cell is put beside the one before.
+    static func layout(_ size: CGSize) -> (radius: CGFloat, centres: [CGPoint]) {
+        let s3 = CGFloat(3).squareRoot(), margin = line + node
+        let r = max(1, min((size.width - 2 * margin) / (2 + 1.5 * CGFloat(columns - 1)),
+                           (size.height - 2 * margin) / (s3 * (CGFloat(rows) + 0.5))))
+        let w = r * (2 + 1.5 * CGFloat(columns - 1)), h = r * s3 * (CGFloat(rows) + 0.5)
+        let x0 = (size.width - w) / 2 + r, y0 = (size.height - h) / 2 + r * s3 / 2
+        var out: [CGPoint] = []
+        for k in 0..<rows {
+            let row = rows - 1 - k
+            for c in k % 2 == 0 ? Array(0..<columns) : Array((0..<columns).reversed()) {
+                out.append(CGPoint(x: x0 + CGFloat(c) * 1.5 * r, y: y0 + CGFloat(row) * s3 * r + (c % 2 == 1 ? s3 * r / 2 : 0)))
+            }
+        }
+        return (r, out)
+    }
+
+    /// The moment `t` in its cycle: seconds into it, and the whole's opacity (1 while it fills, then fading to 0).
+    static func moment(_ t: TimeInterval) -> (into: Double, fade: Double) {
+        let into = t - (t / cycle).rounded(.down) * cycle, phase = into / cycle
+        return (into, phase < 0.8 ? 1 : max(0, 1 - (phase - 0.8) / 0.2))
+    }
+
+    /// When cell `i` of `n` starts to be put (s into the cycle): evenly through the fill, the last down as the fill ends.
+    static func start(_ i: Int, of n: Int) -> Double {
+        n <= 1 ? 0 : (cycle * 0.8 - drop) * Double(i) / Double(n - 1)
+    }
+
+    /// The cells down in their places at `t` (the tests' measure that the fill moves on and loops).
+    static func placed(at t: TimeInterval) -> Int {
+        let n = columns * rows, into = moment(t).into
+        return (0..<n).filter { into >= start($0, of: n) + drop }.count
+    }
+
+    /// One frame at `t`: the cells already down as one honeycomb (one stroke, so a shared strut is drawn once), then each cell
+    /// still being put or newly down, on top — dropping in, brightest while new.
+    static func draw(_ g: GraphicsContext, size: CGSize, t: TimeInterval) {
+        let (r, centres) = layout(size)
+        let (into, fade) = moment(t)
+        guard fade > 0 else { return }
+        let c = purple
+        func corners(_ p: CGPoint, _ k: CGFloat) -> [CGPoint] {
+            (0..<6).map { i in
+                let a = Double(i) * .pi / 3
+                return CGPoint(x: p.x + CGFloat(cos(a)) * r * k, y: p.y + CGFloat(sin(a)) * r * k)
+            }
+        }
+        func nodes(_ pts: [CGPoint]) -> Path {
+            var n = Path()
+            for p in pts { n.addEllipse(in: CGRect(x: p.x - node, y: p.y - node, width: 2 * node, height: 2 * node)) }
+            return n
+        }
+        let strut = StrokeStyle(lineWidth: line, lineCap: .round, lineJoin: .round)
+        var down = Path(), downNodes: [CGPoint] = []
+        var fresh: [(at: CGPoint, k: CGFloat, ease: Double, bright: Double)] = []
+        for (i, p) in centres.enumerated() {
+            let since = into - start(i, of: centres.count)
+            guard since > 0 else { continue }
+            let put = min(1, since / drop), ease = 1 - pow(1 - put, 3)
+            let bright = since < drop ? 1 : max(0, 1 - (since - drop) / glow)
+            if bright <= 0 {
+                let k = corners(p, 1)
+                down.addLines(k); down.closeSubpath(); downNodes += k
+            } else {
+                fresh.append((CGPoint(x: p.x, y: p.y - CGFloat(1 - ease) * r * 0.6), CGFloat(0.6 + 0.4 * ease), ease, bright))
+            }
+        }
+        let settled = Color(.sRGB, red: c.r, green: c.g, blue: c.b, opacity: fade * 0.75)
+        g.stroke(down, with: .color(settled), style: strut)
+        g.fill(nodes(downNodes), with: .color(settled))
+        for f in fresh {
+            let k = corners(f.at, f.k)
+            var hex = Path()
+            hex.addLines(k); hex.closeSubpath()
+            let o = fade * f.ease
+            g.fill(hex, with: .color(Color(.sRGB, red: c.r, green: c.g, blue: c.b, opacity: o * 0.22 * f.bright)))
+            let lit = Color(.sRGB, red: c.r + (min(1, c.r + 0.25) - c.r) * f.bright, green: c.g + (min(1, c.g + 0.25) - c.g) * f.bright,
+                            blue: c.b + (1 - c.b) * f.bright, opacity: o * (0.75 + 0.25 * f.bright))
+            g.stroke(hex, with: .color(lit), style: strut)
+            g.fill(nodes(k), with: .color(lit))
         }
     }
 }

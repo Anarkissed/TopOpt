@@ -2117,9 +2117,10 @@ public struct WorkspacePlaceholder: View {
         }
         LatticePrintFlow.shared.begin(project: project.id, key: latticePrintKey)   // ★ his 11-22: the exact is on screen; the file
         // ★ notes25 (A5, his 11-23 evening: "ensure that the regular lattice gets a similar export pop-up, with an animation and
-        // everything"): the cell lattice's print file wears the same one card (the vines: no cell motion exists to reuse)
+        // everything"): the cell lattice's print file wears the same one card (★ notes27: with its own hexagons)
         let r = run
         LatticeMacMake.shared.begin(project: project.id, path: project.importedFile?.path, run: r, fileOnly: true,
+                                    kind: .cells,   // ★ notes27 (G1): its animation shows hexagonal cells, never the vines
                                     onMac: compute.activeRemote != nil, cancel: { r.cancel() })
         LatticeMacMake.shared.request = request
         launchFileRun(request, job: job, strengthJob: strengthJob, config: compute.activeRemote)
@@ -3408,6 +3409,7 @@ public struct WorkspacePlaceholder: View {
     private var resultsTopLeftBlock: some View {
         TopLeftBlock(model: model, projectID: project.id, name: project.name, material: project.material,
                      process: project.process, optimized: true, back: { model.backHome() },
+                     part: { model.backToPart() },   // ★ notes27 (G3): "Part", the part's versions
                      rename: { nameDraft = project.name; renaming = true },
                      canUndo: project.canUndoNow, canRedo: project.canRedoNow,
                      undo: { project.performUndo() }, redo: { project.performRedo() })
@@ -3418,6 +3420,7 @@ public struct WorkspacePlaceholder: View {
         // version · material · undo · redo; Results draws the same view. Its insets are the ones this row always had.
         TopLeftBlock(model: model, projectID: project.id, name: project.name, material: project.material,
                      process: project.process, back: { model.backHome() },
+                     part: { model.backToPart() },   // ★ notes27 (G3): "Part", the part's versions
                      rename: { nameDraft = project.name; renaming = true },
                      canUndo: project.canUndoNow, canRedo: project.canRedoNow,
                      undo: { project.performUndo() }, redo: { project.performRedo() })
@@ -16160,7 +16163,10 @@ extension WorkspacePlaceholder {
             switch b {
             case .latticeAgain: return (LatticeFileRefusal.latticeAgain, { requestLatticeRun() })
             case .changeSettings: return (LatticeFileRefusal.changeSettings, { openSettingToChange(refusal.settingToChange) })
-            case .showMe: return refusal.findingsAt.first.map { at in (LatticeFileRefusal.showMe, { showLatticeFileSpot(at) }) }
+            case .showMe:   // ★ notes27 (G2): the marker's tap raises this same pop-up again
+                return refusal.findingsAt.first.map { at in
+                    (LatticeFileRefusal.showMe, { showLatticeFileSpot(at, reopen: { latticeFilePopup(refusal, tryAgain: tryAgain) }) })
+                }
             case .ok: return nil
             }
         }
@@ -16174,12 +16180,13 @@ extension WorkspacePlaceholder {
     }
 
     /// ★ notes25 ("Show me"): the view turns to the spot (the part's own mm) and the spot is marked on the part.
-    func showLatticeFileSpot(_ at: SIMD3<Double>) {
+    /// ★ notes27 (G2): `reopen` — the pop-up it came from, raised again by a tap on the marker.
+    func showLatticeFileSpot(_ at: SIMD3<Double>, reopen: (() -> Void)? = nil) {
         guard let mesh = stageMesh else { return }
         let m = SIMD3<Float>(at), b = mesh.bounds
         cameraModel.adopt(LatticeFileSpot.camera(cameraModel.camera, showing: m, centre: b.center, settle: settleQuat,
                                                  radius: b.radius))
-        LatticeFileSpot.shared.mark(m, version: project.id)
+        LatticeFileSpot.shared.mark(m, version: project.id, reopen: reopen)
     }
 
     /// ★ notes25 ("Change settings" must "lead to the settings page, scrolling to and highlighting the field to change along
