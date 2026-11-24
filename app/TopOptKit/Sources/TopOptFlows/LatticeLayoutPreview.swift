@@ -1404,84 +1404,11 @@ public final class LatticeLayoutPreview: ObservableObject {
 
     /// Lattice Setup's settings for core's lattice_layout (read where its rows read them).
     public static func settings(_ p: ProjectModel, referenceMPa: Double = 0) -> LatticeLayoutSession.Settings {
-        var s = LatticeLayoutSession.Settings()
+        // ★ notes26: the part-wide half is its own function, so the Lattice page's sample lays by the same rules
+        var s = partWide(p.lattice, beadMM: p.printParams.strutLineWidthMM, wallRingMM: p.printParams.wallRingMM,
+                         referenceMPa: referenceMPa, percent: { p.latticeDensityPercent(rho: $0, cellMM: $1) })
         let l = p.lattice
-        let bead = p.printParams.strutLineWidthMM
-        s.beadMM = bead > 0 ? bead : 0.45
-        s.minStrutLines = 2   // ★ the reviewer's ruling 11-12: one line does not print on his 0.4 mm nozzle
-        s.topology = l.topologyID.isEmpty ? "octet" : l.topologyID
-        // ★ "Grade the lattice" off (his 08-25: "No grade — one cell, one density"): core's uniform
-        let graded = l.gradingMode != .none
-        // ★ Install 2 (the reviewer 10-08): Stepped is Aesthetic only — the page blocks it in Structural, and a stored one goes
-        // as Default Grade there
-        let stepped = l.resolvedAlgorithm == "stepped" && (l.stageMode ?? .structural) == .aesthetic
-        s.algorithm = !graded ? "uniform" : stepped ? "stepped" : "default_grade"
-        // ★ 11-13: the cell window the page RESOLVES, as the old engine's job reads it (Auto: the floor to the type's ceiling;
-        // Swept: the typed window, never under the floor) — never the stored numbers a mode does not show
-        let bounds = LatticeBounds.compute(settings: l, limits: TopOptKit.latticeLimits(topology: l.topologyID),
-                                           lineWidthMM: s.beadMM)
-        let plan = l.resolvedCellPlan(bounds: bounds, minimizePlastic: false)
-        s.cellMM = l.cellSizeMode == .fixed ? l.cellMM : 0
-        s.cellMinMM = Swift.max(0, plan.loMM)
-        s.cellMaxMM = plan.hiMM > 0 ? plan.hiMM : (l.cellMaxMM > 0 ? l.cellMaxMM : 8)
-        switch l.boundary {
-        case .rim: s.rimMM = l.rimWidthMM.map { Swift.max(0.1, $0) } ?? -1   // Finish Rim: two line widths, or his (control 8)
-        case .fullSkin: s.skin = true     // Finish Skin (S3): bars across the face joining the cut strut ends (his pick 11-12:
-                                          // this went as Covered)
-            if let w = l.skinBarWidthMM, w > 0 { s.skinWidthMM = w }        // ★ control 7: the skin's bars
-            if let k = l.skinReachCells, k > 0 { s.skinReachCells = k }
-        case .covered:                    // Finish Covered (S9): a solid shell over the lattice — ★ Install 2: at the printer's
-                                          // own wall (his 08-19 caption, faceSkinMM); two line widths with none set
-            let ring = p.printParams.wallRingMM
-            s.coverMM = ring > 0 ? ring : -1
-        default: break
-        }
-        // ★ Install 2 (his 09-18: single-cell members lock the Finish to Skin; jobSkinResolved): a one-cell member's struts are
-        // tied by the skin, whatever None or Rim the page holds
-        if l.singleCellMembers, l.boundary == .none || l.boundary == .rim { s.skin = true }
-        // Grade to shape: the grading mode's shape fit, its band and its Strength, as the old engine's job sends them (Stepped and
-        // Doubled only)
-        if graded, l.gradingMode.fitsShape, ["stepped", "doubled"].contains(l.resolvedAlgorithm) {
-            s.gradeToShape = true
-            s.bandMM = Swift.max(0, l.shapeFitBandMM)
-            s.strength = l.shapeFitGradeStrength
-        }
-        // ★ Install 2: by stress (his 08-17 permission, the 08-25 grades; LatticeReview's Install 2 engine)
-        let stressHalf = Self.settings(l)
-        s.byStress = stressHalf.byStress
-        s.cellsByStress = stressHalf.cellsByStress
-        if s.byStress || s.cellsByStress {
-            s.response = Swift.min(4, Swift.max(0.25, l.demandExponent))
-            s.percentile = 0.95
-            // Structural: the printed yield over his Safety margin (his 11-14 carry-over); Aesthetic: the part's own
-            s.referenceMPa = (l.stageMode ?? .structural) == .structural ? Swift.max(0, referenceMPa) : 0
-            if let t = l.stressTargetMPa, t > 0 { s.referenceMPa = t }   // ★ control 5: his target stress
-        }
-        if s.byStress {
-            // Grade to (light) and Grade from (heavy), on the dial the page's densities use (R10, the largest cell)
-            func dial(_ rho: Double, _ fallback: Double) -> Double {
-                guard rho > 0 else { return fallback }
-                let pct = p.latticeDensityPercent(rho: rho, cellMM: s.cellMaxMM) ?? rho * 100
-                return Swift.min(1, Swift.max(0.01, pct / 100))
-            }
-            s.dialLight = dial(l.minRelativeDensity, 0.01)
-            s.dialHeavy = dial(l.maxRelativeDensity, 1)
-            // ★ control 1: the two ends typed in mm
-            if let a = l.strutFromMM, let b = l.strutToMM, a > 0, b >= a { s.widthLightMM = a; s.widthHeavyMM = b }
-        }
-        // ★ a typed Thickness only with the simulation off (his 08-19), and never under By stress
-        if !l.simulateStresses, !s.byStress, let t = l.manualStrutThicknessMM, t > 0 { s.strutWidthMM = t }
-        s.allowQuilt = l.allowQuilt
-        s.smallCellsInThinWalls = l.smallCellsInThinWalls   // ★ his per-part choice (11-13)
-        // ★ cells across a wall (C3-C5): Structural five; Aesthetic one with "Allow single-cell members", else two
-        let aesthetic = (l.stageMode ?? .structural) == .aesthetic
-        s.minCellsAcross = Self.minCellsAcross(l)   // ★ notes25 (D8): the one rule, read by the thin-wall pop-up too
-        if l.neverSkipCellSize, s.algorithm == "default_grade" { s.maxStep = 2 }   // ★ control 4 (Default Grade only)
-        s.oneGrid = aesthetic && l.letWallsCutCells   // ★ his 11-14: Aesthetic only; Structural always sends false
-        // ★ density (R10): core's dial is the percent he sees / 100 (0.01 thinnest ... 1 widest); a typed strut width wins
-        // ★ Install 2: the rows' densities only in Per region (the proposal: "Shown only in this mode, sent only in this mode")
-        let rowDensity = l.densityMode == .perRegion && !s.byStress
-        s.perRegion = rowDensity
+        let rowDensity = s.perRegion
         var id: Int32 = 1
         var uniformSet = false
         let ring = p.printParams.wallRingMM, cover = ring > 0 ? ring : -1   // Covered's shell: the printer's own wall
@@ -1530,6 +1457,100 @@ public final class LatticeLayoutPreview: ObservableObject {
                 id += 1
             }
         }
+        return Self.partRest(s, p, nextID: id)
+    }
+
+    /// ★ notes26 (his 11-23, "Yes to the live sample"): the part-wide half of `settings(_:)` — everything read off the lattice
+    /// settings and the printer alone, no face row: the type, the cells, the grade, the band, the finish, the struts. The Lattice
+    /// page's sample lays the open group's settings through it, so it follows his part's own rules. `percent`: a density → the
+    /// percent the page shows on that cell (nil: the type has no strut law).
+    static func partWide(_ l: LatticeSettings, beadMM bead: Double, wallRingMM ring: Double, referenceMPa: Double,
+                         percent: (_ rho: Double, _ cellMM: Double) -> Double?) -> LatticeLayoutSession.Settings {
+        var s = LatticeLayoutSession.Settings()
+        s.beadMM = bead > 0 ? bead : 0.45
+        s.minStrutLines = 2   // ★ the reviewer's ruling 11-12: one line does not print on his 0.4 mm nozzle
+        s.topology = l.topologyID.isEmpty ? "octet" : l.topologyID
+        // ★ "Grade the lattice" off (his 08-25: "No grade — one cell, one density"): core's uniform
+        let graded = l.gradingMode != .none
+        // ★ Install 2 (the reviewer 10-08): Stepped is Aesthetic only — the page blocks it in Structural, and a stored one goes
+        // as Default Grade there
+        let stepped = l.resolvedAlgorithm == "stepped" && (l.stageMode ?? .structural) == .aesthetic
+        s.algorithm = !graded ? "uniform" : stepped ? "stepped" : "default_grade"
+        // ★ 11-13: the cell window the page RESOLVES, as the old engine's job reads it (Auto: the floor to the type's ceiling;
+        // Swept: the typed window, never under the floor) — never the stored numbers a mode does not show
+        let bounds = LatticeBounds.compute(settings: l, limits: TopOptKit.latticeLimits(topology: l.topologyID),
+                                           lineWidthMM: s.beadMM)
+        let plan = l.resolvedCellPlan(bounds: bounds, minimizePlastic: false)
+        s.cellMM = l.cellSizeMode == .fixed ? l.cellMM : 0
+        s.cellMinMM = Swift.max(0, plan.loMM)
+        s.cellMaxMM = plan.hiMM > 0 ? plan.hiMM : (l.cellMaxMM > 0 ? l.cellMaxMM : 8)
+        switch l.boundary {
+        case .rim: s.rimMM = l.rimWidthMM.map { Swift.max(0.1, $0) } ?? -1   // Finish Rim: two line widths, or his (control 8)
+        case .fullSkin: s.skin = true     // Finish Skin (S3): bars across the face joining the cut strut ends (his pick 11-12:
+                                          // this went as Covered)
+            if let w = l.skinBarWidthMM, w > 0 { s.skinWidthMM = w }        // ★ control 7: the skin's bars
+            if let k = l.skinReachCells, k > 0 { s.skinReachCells = k }
+        case .covered:                    // Finish Covered (S9): a solid shell over the lattice — ★ Install 2: at the printer's
+                                          // own wall (his 08-19 caption, faceSkinMM); two line widths with none set
+            s.coverMM = ring > 0 ? ring : -1
+        default: break
+        }
+        // ★ Install 2 (his 09-18: single-cell members lock the Finish to Skin; jobSkinResolved): a one-cell member's struts are
+        // tied by the skin, whatever None or Rim the page holds
+        if l.singleCellMembers, l.boundary == .none || l.boundary == .rim { s.skin = true }
+        // Grade to shape: the grading mode's shape fit, its band and its Strength, as the old engine's job sends them (Stepped and
+        // Doubled only)
+        if graded, l.gradingMode.fitsShape, ["stepped", "doubled"].contains(l.resolvedAlgorithm) {
+            s.gradeToShape = true
+            s.bandMM = Swift.max(0, l.shapeFitBandMM)
+            s.strength = l.shapeFitGradeStrength
+        }
+        // ★ Install 2: by stress (his 08-17 permission, the 08-25 grades; LatticeReview's Install 2 engine)
+        let stressHalf = Self.settings(l)
+        s.byStress = stressHalf.byStress
+        s.cellsByStress = stressHalf.cellsByStress
+        if s.byStress || s.cellsByStress {
+            s.response = Swift.min(4, Swift.max(0.25, l.demandExponent))
+            s.percentile = 0.95
+            // Structural: the printed yield over his Safety margin (his 11-14 carry-over); Aesthetic: the part's own
+            s.referenceMPa = (l.stageMode ?? .structural) == .structural ? Swift.max(0, referenceMPa) : 0
+            if let t = l.stressTargetMPa, t > 0 { s.referenceMPa = t }   // ★ control 5: his target stress
+        }
+        if s.byStress {
+            // Grade to (light) and Grade from (heavy), on the dial the page's densities use (R10, the largest cell)
+            func dial(_ rho: Double, _ fallback: Double) -> Double {
+                guard rho > 0 else { return fallback }
+                let pct = percent(rho, s.cellMaxMM) ?? rho * 100
+                return Swift.min(1, Swift.max(0.01, pct / 100))
+            }
+            s.dialLight = dial(l.minRelativeDensity, 0.01)
+            s.dialHeavy = dial(l.maxRelativeDensity, 1)
+            // ★ control 1: the two ends typed in mm
+            if let a = l.strutFromMM, let b = l.strutToMM, a > 0, b >= a { s.widthLightMM = a; s.widthHeavyMM = b }
+        }
+        // ★ a typed Thickness only with the simulation off (his 08-19), and never under By stress
+        if !l.simulateStresses, !s.byStress, let t = l.manualStrutThicknessMM, t > 0 { s.strutWidthMM = t }
+        s.allowQuilt = l.allowQuilt
+        s.smallCellsInThinWalls = l.smallCellsInThinWalls   // ★ his per-part choice (11-13)
+        // ★ cells across a wall (C3-C5): Structural five; Aesthetic one with "Allow single-cell members", else two
+        let aesthetic = (l.stageMode ?? .structural) == .aesthetic
+        s.minCellsAcross = Self.minCellsAcross(l)   // ★ notes25 (D8): the one rule, read by the thin-wall pop-up too
+        if l.neverSkipCellSize, s.algorithm == "default_grade" { s.maxStep = 2 }   // ★ control 4 (Default Grade only)
+        s.oneGrid = aesthetic && l.letWallsCutCells   // ★ his 11-14: Aesthetic only; Structural always sends false
+        // ★ density (R10): core's dial is the percent he sees / 100 (0.01 thinnest ... 1 widest); a typed strut width wins
+        // ★ Install 2: the rows' densities only in Per region (the proposal: "Shown only in this mode, sent only in this mode")
+        let rowDensity = l.densityMode == .perRegion && !s.byStress
+        s.perRegion = rowDensity
+        return s
+    }
+
+    /// The rest of `settings(_:)` after its face rows (`id`: the next region id): Protect skins merged, Organic's weave, the
+    /// chips' Solid faces, and whether the whole part is lattice.
+    private static func partRest(_ settings: LatticeLayoutSession.Settings, _ p: ProjectModel, nextID id: Int32)
+        -> LatticeLayoutSession.Settings {
+        var s = settings
+        let l = p.lattice
+        let ring = p.printParams.wallRingMM, cover = ring > 0 ? ring : -1   // Covered's shell: the printer's own wall
         // ★ 11-13: Protect skins of one depth go as ONE skin (the same solid, rule D5). The engine's reading asks every skin in
         // turn: his v4 stand's 26 skins of 4 mm took 289 s to lay on the Mac, one group of them 0.7 s, the lattice identical.
         s.protect = Self.mergedByDepth(s.protect)

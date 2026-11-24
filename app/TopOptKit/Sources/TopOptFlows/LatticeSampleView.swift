@@ -8,6 +8,9 @@
 // curved top, a thin tongue beside the thick body, the density graded along it, a cell-size step where the type allows
 // one), drawn beside the panel in the model area. It is the engine's own triangles, so the picture is what the engine
 // builds for the type — never an app-side stand-in. In the part is the stage's live preview, as before.
+// ★ notes26 (his 11-23, "Yes to the live sample"): a strut type's sample is no longer that coupon — it is laid live from the
+// open group's settings (finish, band, grade, cell, type) in the bare sample body, inside the see-through body, as Organic's
+// is (LatticeSampleLay).
 import SwiftUI
 import simd
 import TopOptDesign
@@ -44,6 +47,10 @@ final class LatticeSampleBuilder: @unchecked Sendable {
         guard t == newest else { return false }
         started += 1; return true
     }
+
+    /// ★ notes26: a strut type's sample is laid on a session of its own (its worker runs one lay at a time, the latest wins);
+    /// true, and counted as a build, when `t` is still the newest as it starts.
+    func begin(_ t: Int) -> Bool { claim(t) }
 
     /// Runs `work` on the builder's one queue if `t` is still the newest when its turn comes; nil when it was skipped.
     func run<T>(_ t: Int, _ work: @escaping () throws -> T) async -> Result<T, Error>? {
@@ -82,10 +89,11 @@ struct LatticeSampleView: View {
         var partStrutsPending = false
         /// Aesthetic (Extra spacing's default is on there).
         var aesthetic = false
+        /// ★ notes26: a strut type's sample — the open group's settings as the engine lays them (LatticeSampleLay); nil: the
+        /// type, cell and density above alone.
+        var lay: LatticeSampleLay? = nil
     }
     let inputs: Inputs
-    /// ★ his iPad notes 11-10 (img 6): the settings he has on that core's sample block can't show yet — said in one line.
-    var notInSample: [String] = []
     /// ★ his iPad notes 11-23 (img 3): the sides of this view the page covers (the panel, the top rows). The view fills the page
     /// (its background edge to edge); the picture and its lines are drawn in what is left.
     var visible = EdgeInsets()
@@ -105,7 +113,8 @@ struct LatticeSampleView: View {
     @State private var mesh: ViewerMesh?
     @State private var caption = LatticeSampleView.building
     @State private var failed = false
-    @State private var organicBars: LatticeLayoutBarsInputs?
+    /// The engine's struts drawn in the see-through body (Organic's vines, ★ notes26 a strut type's bars).
+    @State private var laidBars: LatticeLayoutBarsInputs?
     /// ★ his 11-22 notes (img 46: "Building the sample…" with no sense of how long): when this build began (the wait for his
     /// part's own numbers counts as the same build), and how long the sample on screen took.
     @State private var buildStarted: Date?
@@ -140,6 +149,12 @@ struct LatticeSampleView: View {
                     "rhoLo": .number(i.rhoLo), "rhoHi": .number(i.rhoHi), "layerMM": .number(i.layerMM),
                     "coverMM": .number(i.coverMM), "aesthetic": .flag(i.aesthetic),
                     "partStruts": .text(i.partStruts.map { String($0) }.joined(separator: ", "))]
+        if let l = i.lay {   // ★ notes26: what a strut type's sample lays
+            t.values["finish"] = .text(l.finishWord ?? "None")
+            t.values["band"] = .flag(l.band)
+            t.values["byStress"] = .flag(l.madeUpStress)
+            t.values["algorithm"] = .text(l.settings.algorithm)
+        }
         return t
     }
 
@@ -172,22 +187,16 @@ struct LatticeSampleView: View {
         ZStack(alignment: .bottom) {
             DS.Color.background.color
             if let mesh {
-                if let organicBars {   // ★ Organic: the engine's struts in the bare body, seen through it
+                if let laidBars {   // ★ the engine's struts in the bare body, seen through it (Organic; ★ notes26 every type)
                     MetalMeshView(mesh: mesh, camera: camera, settleRotation: Self.settleZUp,
-                                  bodyAlpha: LatticeLayoutPreview.ghostAlpha, layoutBars: organicBars)
+                                  bodyAlpha: LatticeLayoutPreview.ghostAlpha, layoutBars: laidBars)
                 } else {
                     MetalMeshView(mesh: mesh, camera: camera, settleRotation: Self.settleZUp)
                 }
             }
+            // ★ notes26 (his rule: never a note at the bottom-centre): the "Not in the sample yet" line is gone — the finish and
+            // the band are in the sample now; only the caption (what is drawn) stays at its foot
             VStack(spacing: DS.Space.s) {
-                if let line = Self.notInSampleLine(notInSample) {
-                    Text(line)
-                        .font(.system(size: 12.5)).foregroundStyle(DS.Color.warning.color)
-                        .lineLimit(1).minimumScaleFactor(0.8)
-                        .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.s)
-                        .background(Capsule().fill(DS.Surface.panel.color))
-                        .latticeID("lattice-sample-not-shown")
-                }
                 captionLine
                     .font(.system(size: 12.5)).foregroundStyle((failed ? DS.Color.warning : DS.Color.textSecondary).color)
                     .multilineTextAlignment(.center)
@@ -225,7 +234,7 @@ struct LatticeSampleView: View {
     /// ★ his 11-23: a group's kept sample, shown as it was built (its caption and its build time), with no build.
     private func showKept(_ s: LatticeSampleKeep.Sample) {
         failed = false
-        organicBars = s.bars
+        laidBars = s.bars
         mesh = s.mesh
         camera.reframe(s.mesh.bounds)
         buildStarted = nil; heldForPart = false
@@ -275,46 +284,62 @@ struct LatticeSampleView: View {
         buildBegins()   // ★ his 11-22: the time it takes, said
         let i = inputs
         if let look = i.organic { return await buildOrganic(look, i) }
-        organicBars = nil
         if FlexibleSaid.recording { Self.recordedAsks.append(i) }
         Self.say(tag, "ask \(i.shape) \(i.topology) cell \(i.cellMM) rho \(i.rhoLo)-\(i.rhoHi) bead \(i.beadMM)")
         try? await Task.sleep(nanoseconds: Self.settleNanos)
         guard !Task.isCancelled else { Self.say(tag, "cancelled in the beat"); return }
+        // ★ notes26 (his 11-23, "Yes to the live sample"): the open group's settings laid in the bare sample body, as his part's
+        // lay reads them (LatticeSampleLay) — never core's fixed coupon again
+        let plan = i.lay ?? LatticeSampleLay.plain(topology: i.topology, cellMM: i.cellMM, lineWidthMM: i.beadMM, rho: i.rhoHi)
+        let cube = i.shape == .cells
         let builder = LatticeSampleBuilder.shared
         let log = GenerationTimingLog.shared, rec = log.begin(.sample, inputs: Self.timingInputs(i))   // ★ his 11-22
         defer { log.end(rec, .cancelled, reason: "the page moved on") }   // (a build that ended said so first)
         let t = builder.ticket()
-        // ★ the viewer's mesh is made on the builder's queue too: for the sample part's ~330 k triangles it held the main
-        // thread for seconds (traced 11-10, debug build), a freeze on his iPad each time the sample changed
-        let built = await withTaskCancellationHandler {
-            await builder.run(t) { () -> (block: TopOptKit.LatticeSampleBlock, mesh: ViewerMesh) in
-                let b = try TopOptKit.latticeSampleBlock(topology: i.topology, cellMM: i.cellMM, beadMM: i.beadMM,
-                                                         rhoLo: i.rhoLo, rhoHi: i.rhoHi, cube: i.shape == .cells)
-                return (b, ViewerMesh(vertices: b.mesh.vertices, indices: b.mesh.indices,
-                                      faceIDs: [Int32](repeating: 1, count: b.mesh.indices.count / 3)))
-            }
+        // off the main thread (the session's own worker, the colours in this task), never detached: leaving the page or a
+        // newer setting cancels it with the rest
+        let built: Result<LatticeSampleLay.Made, Error>? = await withTaskCancellationHandler {
+            guard builder.begin(t) else { return nil }
+            do { return .success(try await LatticeSampleLay.lay(plan, cube: cube)) } catch { return .failure(error) }
         } onCancel: { builder.retire(t) }
         Self.say(tag, "ticket \(t): \(built == nil ? "skipped" : "built")\(Task.isCancelled ? ", cancelled" : "")")
         if built == nil { log.discard(rec) }   // skipped before it began: no line
         guard let r = built, !Task.isCancelled else { return }
         switch r {
         case .success(let made):
-            let block = made.block, m = made.mesh
-            log.end(rec, .done, stages: ["triangles": Double(block.mesh.indices.count / 3)])
+            guard made.struts > 0 else { return laidFailed(log, rec, Self.sampleNoFitText, stages: made.stages) }
+            log.end(rec, .done, struts: made.struts, stages: made.stages)
+            let m = ViewerMesh(vertices: made.body.vertices, indices: made.body.indices,
+                               faceIDs: [Int32](repeating: 1, count: made.body.indices.count / 3))
+            let token = Int.random(in: 1...Int.max)
+            laidBars = LatticeLayoutBarsInputs(token: token, bars: made.bars, flags: made.flags, colours: made.colours,
+                                               colourKey: token)
             mesh = m
-            Self.say(tag, "mesh up (\(block.mesh.indices.count / 3) triangles)")
+            Self.say(tag, "laid (\(made.struts) struts)")
             camera.reframe(m.bounds)
             buildShown()
-            caption = i.shape == .cells
-                ? Self.cellsCaption(receiptJSON: block.receiptJSON, typeName: i.typeName, densityHeld: block.densityHeld)
-                : Self.caption(receiptJSON: block.receiptJSON, typeName: i.typeName, densityHeld: block.densityHeld)
-            if let k = keep { LatticeSampleKeep.shared.keep(k, inputs: i, .init(mesh: m, bars: nil, caption: caption, seconds: builtSeconds)) }   // ★ 11-23
+            caption = LatticeSampleLay.caption(made, typeName: i.typeName, cube: cube, finish: plan.finishWord, band: plan.band)
+            if FlexibleSaid.recording { Self.recordedLaid = Array((Self.recordedLaid + [made]).suffix(4)) }
+            if let k = keep { LatticeSampleKeep.shared.keep(k, inputs: i, .init(mesh: m, bars: laidBars, caption: caption, seconds: builtSeconds)) }   // ★ 11-23
         case .failure(let e):
-            log.end(rec, .failed, reason: e.localizedDescription)
-            mesh = nil; failed = true
-            caption = "The engine can't build this type's sample: \(e.localizedDescription)"
+            if e is CancellationError { return }   // a newer lay took its place: nothing to say
+            laidFailed(log, rec, (e as? TopOptError)?.message ?? "\(e)", stages: [:], popUp: Self.organicFailedText)
         }
     }
+
+    /// ★ notes26: a strut type's sample that could not be laid — the caption says so, a centred pop-up says what to do (his
+    /// rule: what is wrong and how to fix it), the engine's words go to the log only.
+    private func laidFailed(_ log: GenerationTimingLog, _ rec: GenerationTimingLog.Pending, _ why: String,
+                            stages: [String: Double], popUp: String? = nil) {
+        log.end(rec, .failed, reason: why, stages: stages)
+        mesh = nil; laidBars = nil; failed = true
+        caption = Self.organicFailedCaption
+        AppPopups.shared.show(Self.organicFailedTitle, popUp ?? why, log: why)
+    }
+    /// No strut laid in the sample: these cells and struts don't fit it.
+    static let sampleNoFitText = "No lattice fits these settings. Try a smaller cell size or thinner struts."
+    /// Test hook (FlexibleSaid.recording): the last four strut type's samples laid.
+    nonisolated(unsafe) static var recordedLaid: [LatticeSampleLay.Made] = []
 
     /// ★ Organic's sample (his 11-18; LatticeReview's C2, E5 and E8): the bare body (the cube, or the coupon) through a layout
     /// session — ONE woven region from a box zone round it, Auto's limits for it moved by Look, the made-up stress of ONE
@@ -392,7 +417,7 @@ struct LatticeSampleView: View {
                                                                    count: seg.count)
             let m = ViewerMesh(vertices: body.vertices, indices: body.indices,
                                faceIDs: [Int32](repeating: 1, count: body.indices.count / 3))
-            organicBars = bars
+            laidBars = bars
             mesh = m
             camera.reframe(m.bounds)
             buildShown()
@@ -409,7 +434,7 @@ struct LatticeSampleView: View {
         } catch {
             guard !Task.isCancelled else { return }   // the page moved on: nothing to say
             log.end(rec, .failed, reason: (error as? TopOptError)?.message ?? "\(error)", stages: stages)
-            mesh = nil; organicBars = nil; failed = true
+            mesh = nil; laidBars = nil; failed = true
             // his 11-20: a centred pop-up in plain English; ★ his 11-22: "An error should always tell what's wrong and how
             // to fix it. Always." — a refusal says which setting, what it allows and the way out
             caption = Self.organicFailedCaption
@@ -451,31 +476,5 @@ struct LatticeSampleView: View {
             dens = "density \(Int((r * 100).rounded())) %" + (densityHeld ? " (held to \(typeName)'s band)" : "") + " · "
         }
         return "\(head)\(typeName) · \(dens)built by the engine"
-    }
-
-    /// One plain line for the settings he has on that the engine's sample block doesn't build yet; nil when none.
-    static func notInSampleLine(_ names: [String]) -> String? {
-        names.isEmpty ? nil : "Not in the sample yet: " + names.joined(separator: ", ")
-    }
-
-    /// The page's settings the coupon can't show (core's sample takes the type, the cell and the grade only): Organic, the
-    /// finish, the shape band, single-cell members — each named only while it is on.
-    static func notInSample(organic: Bool, finish: LatticeBoundaryTreatment, shapeBand: Bool, singleCell: Bool,
-                            organicBuilt: Bool) -> [String] {
-        if organic && organicBuilt { return [] }   // ★ his 11-18: Organic's own samples show it
-        return notInSample(organic: organic, finish: finish, shapeBand: shapeBand, singleCell: singleCell)
-    }
-    static func notInSample(organic: Bool, finish: LatticeBoundaryTreatment, shapeBand: Bool, singleCell: Bool) -> [String] {
-        var out: [String] = []
-        if organic { out.append("Organic") }
-        switch finish {
-        case .none: break
-        case .rim: out.append("Rim")
-        case .fullSkin: out.append("Skin")
-        case .covered: out.append("Covered")
-        }
-        if shapeBand { out.append("the shape band") }
-        if singleCell { out.append("single-cell members") }
-        return out
     }
 }
