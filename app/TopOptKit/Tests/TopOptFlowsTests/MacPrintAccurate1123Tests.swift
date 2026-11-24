@@ -53,7 +53,10 @@ final class MacPrintAccurate1123Tests: XCTestCase {
         m.fileArrived()
         XCTAssertEqual(m.stage, LatticeMacMakeCopy.drawing)
         m.drawn(checkFollows: true, now: Date(timeIntervalSince1970: 200))
-        XCTAssertFalse(m.shown, "★ the drawing closes the card")
+        // ★ RE-PINNED (notes25, his Img 1: "two pop-ups, one behind the other. There should only be one"): the card stays up
+        // through the check (it was the run's own card that went on behind it); it says the check
+        XCTAssertTrue(m.shown, "★ one card for the whole chain")
+        XCTAssertEqual(m.stage, LatticeMacMakeCopy.checking)
         XCTAssertTrue(m.checking); XCTAssertTrue(m.isMaking(id))
         m.ended()
         XCTAssertFalse(m.checking); XCTAssertFalse(m.isMaking(id))
@@ -61,7 +64,7 @@ final class MacPrintAccurate1123Tests: XCTestCase {
         XCTAssertEqual(m.expectedS, 200, "★ the time it took last time is the card's 'about'")
         m.cancel()
         XCTAssertTrue(cancelled); XCTAssertFalse(m.shown)
-        // RED CONTROL: an Aesthetic part (no check after): the card closes and the button is free at once
+        // RED CONTROL: an Aesthetic part (no check after): nothing is checked (★ notes25: the card goes as its run ends)
         m.begin(project: id, path: nil, cancel: {})
         m.drawn(checkFollows: false)
         XCTAssertFalse(m.checking)

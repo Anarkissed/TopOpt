@@ -616,6 +616,11 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
   LayerCache layer_cache;   // SPEED 11-22: each pass judges only the layers its changes touched
   for (int pass = 1; pass <= most; ++pass) {
     rep.passes = pass;
+    if (spec.said) {   // ★ 362 11-23
+      char line[96];
+      std::snprintf(line, sizeof line, "checking it prints: try %d of at most %d", pass, most);
+      spec.said(line);
+    }
     LayerSpec layers = spec.layers;
     layers.cache = &layer_cache;
     WeaveHolds holds;
@@ -767,6 +772,40 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
       rep.layers.one_ended.erase(std::remove_if(rep.layers.one_ended.begin(), rep.layers.one_ended.end(), at_speck),
                                  rep.layers.one_ended.end());
     }
+    if (weave_regions.empty()) {
+      // ★ 362 11-23, F1 (his regular lattice refused every time on his stand: the stand's OWN top tab, a flat bar bridged
+      // about 13.5 mm behind a slot, was judged as the lattice's and "answered" with a post from the bed that the cut to
+      // the part deletes, ten times): the lead's ruling of 2026-11-19 (OS17) for every lattice, as for a weave. A finding
+      // that reaches no bar the writer keeps (within its half width + 0.35 mm, read at the bottom of its layer as
+      // `drop_at` is) and has the outside of the part right under it, a layer down, is the PART'S OWN overhang: the
+      // slicer's business, counted, never left out, never propped, never a reason the file is not clean.
+      const std::vector<char> kept = bars_present(bars, ms.drop_at);
+      const BarGrid grid(bars, kept);
+      const PartMeasure::Probe exact = part.probe();   // the part's own surface, exact (the domain's map is coarse at a face)
+      const double layer = 2.0 * half_layer;
+      const auto reaches_bar = [&](double x, double y, double z) {
+        const Vec3 p{x, y, z - half_layer};
+        for (const std::uint32_t u : grid.near(p)) {
+          const Bar& b = bars.bars[u];
+          const Vec3 d{b.b.x - b.a.x, b.b.y - b.a.y, b.b.z - b.a.z};
+          const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
+          const double t = l2 > 0 ? std::clamp(((p.x - b.a.x) * d.x + (p.y - b.a.y) * d.y + (p.z - b.a.z) * d.z) / l2, 0.0, 1.0) : 0.0;
+          const double ex = b.a.x + t * d.x - p.x, ey = b.a.y + t * d.y - p.y, ez = b.a.z + t * d.z - p.z;
+          if (std::sqrt(ex * ex + ey * ey + ez * ez) < 0.5 * b.width + 0.35) return true;
+        }
+        return false;
+      };
+      const auto own = [&](double x, double y, double z) {
+        return exact.depth({x, y, z - layer}) < 0.0 && !reaches_bar(x, y, z);
+      };
+      const std::size_t before = rep.layers.mid_air.size() + rep.layers.one_ended.size() + rep.layers.long_bridges.size();
+      rep.layers.mid_air.erase(std::remove_if(rep.layers.mid_air.begin(), rep.layers.mid_air.end(),
+                                              [&](const LayerReport::MidAir& m) { return own(m.x, m.y, m.z); }),
+                               rep.layers.mid_air.end());
+      for (std::vector<LayerReport::OneEnded>* v : {&rep.layers.one_ended, &rep.layers.long_bridges})
+        v->erase(std::remove_if(v->begin(), v->end(), [&](const LayerReport::OneEnded& o) { return own(o.x, o.y, o.z); }), v->end());
+      rep.part_overhangs += before - (rep.layers.mid_air.size() + rep.layers.one_ended.size() + rep.layers.long_bridges.size());
+    }
     // OS1 B (his ruling R2): a finding on a shallow run's rounded end (within its half width + 0.35 mm of its place in
     // plan, from a layer under its underside to its top) is not answered by leaving bars out: that end is made flat
     // again (MeshSpec::flat_domes_at) and the pass made again; counted.
@@ -813,24 +852,55 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
     for (const MeshSpec::Post& p : stand_posts) ms.posts.push_back(p);
     rep.stands_added += stand_posts.size();
     if (n == 0) { last = n; continue; }   // only the stands to add: made again with them
+    // ★ 362 11-23, F2 and F3: what this try adds. A post whose column leaves the part is never added (the cut to the
+    // part deletes what of it is outside, so it could hold nothing: F2); a post or a place to leave out that is already
+    // there is not added again (F3). When a try adds nothing at all, the next try would make the same file again: the
+    // loop stops there (F3), instead of making it again up to the last try (his stand: the same post, nine times).
+    // Cell lattices only: a weave's loop (Organic) is left exactly as released (its own rules, OS17, already keep the
+    // part's own overhangs out of it).
+    const bool cells_only = weave_regions.empty();
+    std::size_t added = stand_posts.size();
+    const PartMeasure::Probe column_probe = part.probe();
+    const auto add_post = [&](const MeshSpec::Post& p) {
+      if (cells_only) {
+        for (const MeshSpec::Post& q : ms.posts)
+          if (q.x == p.x && q.y == p.y && q.z_top == p.z_top && q.z_bottom == p.z_bottom) return;
+        // read against the part's own surface (exact): most of the column outside it = a post the cut deletes
+        int samples = 0, outside = 0;
+        for (double z = p.z_bottom + 0.25; z < p.z_top - 0.5; z += 0.5, ++samples)
+          outside += column_probe.depth({p.x, p.y, z}) < 0.0;
+        if (samples > 0 && 2 * outside > samples) { ++rep.posts_outside; return; }
+      }
+      ms.posts.push_back(p);
+      ++added;
+    };
+    const auto add_drop = [&](const Vec3& v) {
+      if (cells_only)
+        for (const Vec3& q : ms.drop_at)
+          if (q.x == v.x && q.y == v.y && q.z == v.z) return;
+      ms.drop_at.push_back(v);
+      ++added;
+    };
     auto post_all = [&] {
       for (const LayerReport::MidAir& m : rep.layers.mid_air)
-        ms.posts.push_back({m.x, m.y, m.z, m.anything_below ? std::max(m.below_z, rep.layers.z_bed) : rep.layers.z_bed});
+        add_post({m.x, m.y, m.z, m.anything_below ? std::max(m.below_z, rep.layers.z_bed) : rep.layers.z_bed});
       for (const LayerReport::OneEnded& o : rep.layers.one_ended)
-        ms.posts.push_back({o.x, o.y, o.z, o.anything_below ? std::max(o.below_z, rep.layers.z_bed) : rep.layers.z_bed});
+        add_post({o.x, o.y, o.z, o.anything_below ? std::max(o.below_z, rep.layers.z_bed) : rep.layers.z_bed});
     };
     // A bridge that reaches too far is never cured by leaving a strut out: it gets a post under its far point.
     for (const LayerReport::OneEnded& o : rep.layers.long_bridges)
-      ms.posts.push_back({o.x, o.y, o.z, o.anything_below ? std::max(o.below_z, rep.layers.z_bed) : rep.layers.z_bed});
+      add_post({o.x, o.y, o.z, o.anything_below ? std::max(o.below_z, rep.layers.z_bed) : rep.layers.z_bed});
     if (!posting) {
       // First answer: leave out what starts there (the bottom of that layer).
-      for (const LayerReport::MidAir& m : rep.layers.mid_air) ms.drop_at.push_back({m.x, m.y, m.z - half_layer});
-      for (const LayerReport::OneEnded& o : rep.layers.one_ended) ms.drop_at.push_back({o.x, o.y, o.z - half_layer});
+      for (const LayerReport::MidAir& m : rep.layers.mid_air) add_drop({m.x, m.y, m.z - half_layer});
+      for (const LayerReport::OneEnded& o : rep.layers.one_ended) add_drop({o.x, o.y, o.z - half_layer});
       // When leaving out no longer helps, tie down what is left with posts.
       if (n == last) { posting = true; post_all(); }
     } else {
       post_all();
     }
+    if (cells_only && added == 0 && !posting) { posting = true; post_all(); }   // leaving out no longer helps: posts
+    if (cells_only && added == 0) { rep.stopped_repeating = true; rep.clean = false; break; }
     last = n;
   }
   rep.drop_at = ms.drop_at;

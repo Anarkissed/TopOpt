@@ -1424,6 +1424,24 @@ int main() {
                 t.r.made.found_per_pass.empty() ? -1 : t.r.made.found_per_pass.front());
     CHECK(t.r.ok && t.r.made.print_clean && t.r.made.part_overhangs > 0 && outside == 0);
     CHECK(has(t.json, "\"part_overhangs\": " + std::to_string(t.r.made.part_overhangs)));
+
+    // ── §16b (362, 2026-11-23: his regular lattice refused every time on his stand, whose own top tab bridges behind a
+    // slot) the same ruling for a CELL lattice: the same block, an octet under the top face instead of the weave. The
+    // tab's overhang is the part's own: counted (`own_overhangs`), never propped (no post outside the block, F2), and the
+    // file is made; a try with nothing new to try ends the loop (F3), so it never runs to its last try on the same file.
+    const std::string cj = "{\"mode\": \"lattice_file\", \"model\": \"tab.stl\", \"output\": \"tab_cells.stl\", "
+                           "\"layout\": {\"min_strut_lines\": 2, \"region_ids\": [1], \"region_no_lattice\": [0], "
+                           "\"region_depth_mm\": [14], \"region_expand_mm\": [-2], \"region_face_counts\": [1], "
+                           "\"region_faces\": [" + std::to_string(top) + "], \"topology\": \"octet\", "
+                           "\"algorithm\": \"uniform\", \"cell_max_mm\": 8, \"min_cells_across\": 1}}";
+    const Run c = run("tab_cells", cj, "");
+    std::size_t c_outside = 0;
+    for (const MeshSpec::Post& q : c.r.made.posts) c_outside += q.y > 10.0;
+    std::printf("[tab cells] ok %d code %s; own overhangs %zu, posts %zu (%zu outside the block), posts refused outside %zu, "
+                "clean %d, tries %d\n", c.r.ok, c.r.code.c_str(), c.r.made.part_overhangs, c.r.made.posts.size(), c_outside,
+                c.r.made.posts_outside, c.r.made.print_clean, c.r.made.builds);
+    CHECK(c.r.ok && c.r.made.print_clean && c.r.made.part_overhangs > 0 && c_outside == 0 && c.r.made.builds < 10);
+    CHECK(has(c.json, "\"own_overhangs\": " + std::to_string(c.r.made.part_overhangs)));
   }
 
   // ── §8 the octet's strut law is the full octet's (2026-11-17): its span is the octet band, so no density in the band

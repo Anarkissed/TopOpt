@@ -227,7 +227,7 @@ public final class ProjectModel: ObservableObject {
     /// kept no design. The pair describes ONE run's results, so it moves with them
     /// or not at all. This stays as the property every reader already uses.
     public var relatticeArtifacts: RelatticeArtifacts? {
-        get { run.retainedArtifacts }
+        get { run.retainedArtifacts ?? run.otherArtifacts }   // ★ notes25: a Topology run's pair, beside a print file's result too
         set { run.restoreArtifacts(newValue) }
     }
 
@@ -358,12 +358,13 @@ public final class ProjectModel: ObservableObject {
         self.run = run ?? ProjectModel.makeRun()
         // The two initial value-replays fire here during init, before any view
         // observes this object, so they're harmless no-ops.
-        self.runForwarding = Publishers.Merge3(
+        self.runForwarding = Publishers.Merge4(
             self.run.$outcome.map { _ in () },
             self.run.$phase.map { _ in () },
             // The retention pair now lives on the run too, and the entry controls
             // read it — so its changes must reach the workspace body as well.
-            self.run.$retainedArtifacts.map { _ in () }
+            self.run.$retainedArtifacts.map { _ in () },
+            self.run.$otherOutcome.map { _ in () }   // ★ notes25: the other stage's result (each stage its own Results)
         )
         .sink { [weak self] in self?.objectWillChange.send() }
         // Round-6 item 4: seed the undo baseline with the just-built state (so undo can never go

@@ -563,6 +563,9 @@ struct PrintableSpec {
   int most_passes = 10;
   // false: nothing is ever left out; what would start in mid-air is tied down with posts from the first pass.
   bool leave_out = true;
+  // ★ 362 11-23: told each try as it starts ("checking it prints: try 3 of at most 10"), so the Mac and the iPad can say
+  // what a long check is doing (his worker window sat on "starting..." for seven minutes). Null: nothing said.
+  void (*said)(const char*) = nullptr;
 };
 struct PrintableReport {
   MeshReport mesh;     // of the mesh returned
@@ -595,6 +598,12 @@ struct PrintableReport {
   // bar, and right under it, a layer down, is outside the part) is the slicer's business: counted here, all passes
   // together, never left out, never propped, never a reason the file is not clean.
   std::size_t part_overhangs = 0;
+  // ★ 362 11-23 (his regular lattice refused every time on his stand): F2, the posts not added because their column
+  // leaves the part (the cut to the part deletes what of a post is outside it, so it could never hold anything); F3, the
+  // loop stopped because a try had nothing new to try (the same findings, no new place to leave out, no new post), so
+  // the next try would have been the same file again.
+  std::size_t posts_outside = 0;
+  bool stopped_repeating = false;
   // O17, O18: what the sag pass did (once, before the first pass), and, when it changed a bar, the bars every pass
   // was made of (the layout's own otherwise: null). `drop_at` and `posts` are read against those.
   SagReport sags;

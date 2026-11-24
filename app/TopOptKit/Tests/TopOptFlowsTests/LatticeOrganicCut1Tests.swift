@@ -211,8 +211,10 @@ final class LatticeOrganicCut1Tests: XCTestCase {
         XCTAssertEqual(r.cellMM, 4); XCTAssertEqual(r.widthMM, 1); XCTAssertEqual(r.density, 0.25, accuracy: 1e-9)
         XCTAssertEqual(r.klass, .interior)
         XCTAssertEqual(try XCTUnwrap(LatticeLayoutPreview.read(laid, at: SIMD3(5, 5, 0), lattice: organic, lookup: nil)).klass, .rim)
-        XCTAssertEqual(LatticeLayoutPreview.organicTimeLine(mode: .grown, draft: false, ms: 3840, struts: 63670),
-                       "Organic Grown \u{00B7} Exact \u{00B7} laid in 3.8 s \u{00B7} 63,670 struts")
+        // ★ RE-PINNED (notes25, 362's numbers investigation: "struts" meant three things; the line counts strands, the print
+        // file's own count)
+        XCTAssertEqual(LatticeLayoutPreview.organicTimeLine(mode: .grown, draft: false, ms: 3840, strands: 12605),
+                       "Organic Grown \u{00B7} Exact \u{00B7} laid in 3.8 s \u{00B7} 12,605 strands")
     }
 
     /// ★ The memory gate: a lay that would not fit in what the iPad has free is refused in one line, never a crash.

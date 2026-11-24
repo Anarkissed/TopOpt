@@ -713,6 +713,7 @@ TriangleMesh make_file_mesh(const Session& session, const Layout& layout, const 
   spec.layers.stop = stop;
   spec.most_passes = options.most_passes;
   spec.leave_out = options.leave_out;
+  spec.said = options.said;
   PrintableReport made;
   TriangleMesh mesh = build_printable_mesh(session.measure(), *domain, layout, bars, open, spec, &made);
   report.mesh = made.mesh;
@@ -734,6 +735,8 @@ TriangleMesh make_file_mesh(const Session& session, const Layout& layout, const 
   report.weave_specks_ignored = made.weave_specks_ignored;
   report.weave_held_ignored = made.weave_held_ignored;
   report.part_overhangs = made.part_overhangs;
+  report.posts_outside = made.posts_outside;           // ★ 362 11-23 (F2)
+  report.stopped_repeating = made.stopped_repeating;   // ★ 362 11-23 (F3)
   report.sags = made.sags;
   report.sagged = made.sagged;
   report.tubes = made.tubes;
@@ -1316,7 +1319,8 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     say(said, "laying the lattice");
     // OS16 (brief E4, leg 2): strengthening's additions are replayed with the file's print check before the first
     // round and after each, as the strengthen job made them.
-    const FileOptions options = file_options_for(job.options, any_weave);
+    FileOptions options = file_options_for(job.options, any_weave);
+    options.said = said;   // ★ 362 11-23: a line per try of the print check
     OrganicAsk organic = job.organic;
     if (any_weave && !organic.additions.empty()) organic.print_check = print_check_hook(session, options, stop);
     std::vector<OrganicGroup> groups = job.organic_groups;   // OJ3
@@ -1418,12 +1422,21 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     if (!r.made.print_clean && !job.options.keep_if_not_clean) {
       const std::size_t mid = r.made.layers.mid_air.size(), one = r.made.layers.one_ended.size(),
                         far = r.made.layers.long_bridges.size();
-      char line[320];
+      // ★ 362 11-23: only what was found is named (his refusal said "0 places ... 0 overhangs ... and 1 bridge").
+      std::vector<std::string> found;
+      char part[160];
+      if (mid) { std::snprintf(part, sizeof part, "%zu place%s that would start printing in mid-air", mid, mid == 1 ? "" : "s"); found.push_back(part); }
+      if (one) { std::snprintf(part, sizeof part, "%zu overhang%s held at one end only", one, one == 1 ? "" : "s"); found.push_back(part); }
+      if (far) { std::snprintf(part, sizeof part, "%zu bridge%s longer than a printer can span", far, far == 1 ? "" : "s"); found.push_back(part); }
+      std::string what;
+      for (std::size_t k = 0; k < found.size(); ++k)
+        what += (k == 0 ? "" : k + 1 == found.size() ? " and " : ", ") + found[k];
+      if (what.empty()) what = "a place that would not print";
+      char line[480];
       std::snprintf(line, sizeof line,
-                    "After %d tries the lattice still has %zu place%s that would start printing in mid-air, %zu overhang%s "
-                    "held at one end only and %zu bridge%s longer than a printer can span. No file was made. A larger cell "
-                    "or a Protect skin near those places usually fixes it.",
-                    r.made.builds, mid, mid == 1 ? "" : "s", one, one == 1 ? "" : "s", far, far == 1 ? "" : "s");
+                    "After %d tries the lattice still has %s. No file was made. A larger cell or a Protect skin near "
+                    "those places usually fixes it.",
+                    r.made.builds, what.c_str());
       // OG2c (brief E6, leg C): a refusal says where (x, y, z mm, each finding).
       std::string where = "at";
       for (const Vec3& q : r.made.findings_at) {
@@ -1852,8 +1865,11 @@ std::string file_result_json(const FileResult& r) {
       std::snprintf(b, sizeof b, "%s%d", i ? ", " : "", r.made.found_per_pass[i]);
       o += b;
     }
-    {   // OG2c (brief E6, leg C)
-      std::snprintf(b, sizeof b, "],\n    \"relief_flushed\": %llu, \"relief_rounds\": %d, \"findings_at\": [",
+    {   // OG2c (brief E6, leg C); ★ 362 11-23: the part's own overhangs (every lattice), F2's posts, F3's stop
+      std::snprintf(b, sizeof b, "],\n    \"own_overhangs\": %llu, \"posts_outside\": %llu, \"stopped_repeating\": %s",
+                    count(r.made.part_overhangs), count(r.made.posts_outside), r.made.stopped_repeating ? "true" : "false");
+      o += b;
+      std::snprintf(b, sizeof b, ",\n    \"relief_flushed\": %llu, \"relief_rounds\": %d, \"findings_at\": [",
                     count(r.made.relief_flushed), r.made.relief_rounds);
       o += b;
       for (std::size_t i = 0; i < r.made.findings_at.size(); ++i) {

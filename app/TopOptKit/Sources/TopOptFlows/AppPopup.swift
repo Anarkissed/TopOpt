@@ -20,7 +20,13 @@ public struct AppPopup: Equatable, Identifiable, Sendable {
 
 @MainActor public final class AppPopups: ObservableObject {
     public static let shared = AppPopups()
-    @Published public var current: AppPopup? { didSet { if current == nil { action = nil; second = nil; dismissTitle = nil } } }
+    @Published public var current: AppPopup? {
+        didSet { if current == nil { action = nil; second = nil; third = nil; dismissTitle = nil; dismissShown = true } }
+    }
+    /// ★ notes25: a third action (the print file's refusal, Auto adjusted: "Lattice again", "Change settings", "Show me").
+    public private(set) var third: (title: String, run: () -> Void)?
+    /// ★ notes25: whether the dismiss button is drawn beside the actions (a tap outside the card still closes it).
+    public private(set) var dismissShown = true
     /// The pop-up's one action beside OK (e.g. "Try again"); cleared with it.
     public private(set) var action: (title: String, run: () -> Void)?
     /// ★ his 11-22 (no Mac: "try again", cancel, or make it on the iPad): a second action, and the dismiss button's own word.
@@ -36,14 +42,19 @@ public struct AppPopup: Equatable, Identifiable, Sendable {
         if FlexibleSaid.recording { Self.recorded.append(p) }
         current = p
         self.action = action
+        second = nil; third = nil; dismissTitle = nil; dismissShown = true   // ★ notes25: never another pop-up's buttons
     }
 
     /// ★ his 11-22: a pop-up with two actions and a dismiss word ("Try again", "Make it on the iPad", "Cancel").
+    /// ★ notes25: `third` — a third action below the second; `dismiss` nil — no dismiss button among them.
     public func choose(_ title: String, _ text: String, log: String? = nil, first: (title: String, run: () -> Void),
-                       second: (title: String, run: () -> Void), dismiss: String) {
+                       second: (title: String, run: () -> Void), third: (title: String, run: () -> Void)? = nil,
+                       dismiss: String?) {
         show(title, text, log: log, action: first)
         self.second = second
+        self.third = third
         dismissTitle = dismiss
+        dismissShown = dismiss != nil
     }
 
     /// An (i): the setting's name and its explanation, in the same centred card.
@@ -86,8 +97,14 @@ struct AppPopupLayer: View {
                                         .accessibilityIdentifier("app-popup-action")
                                     PillButton(b.title, style: .secondary) { let run = b.run; popups.current = nil; run() }
                                         .accessibilityIdentifier("app-popup-second")
-                                    PillButton(popups.dismissTitle ?? "OK", style: .secondary) { popups.current = nil }
-                                        .accessibilityIdentifier("app-popup-ok")
+                                    if let c = popups.third {   // ★ notes25
+                                        PillButton(c.title, style: .secondary) { let run = c.run; popups.current = nil; run() }
+                                            .accessibilityIdentifier("app-popup-third")
+                                    }
+                                    if popups.dismissShown {
+                                        PillButton(popups.dismissTitle ?? "OK", style: .secondary) { popups.current = nil }
+                                            .accessibilityIdentifier("app-popup-ok")
+                                    }
                                 }
                             } else if let a = popups.action {
                                 PillButton("OK", style: .secondary) { popups.current = nil }

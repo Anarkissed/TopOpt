@@ -57,6 +57,8 @@ struct FileOptions {
   int most_passes = 10;
   bool leave_out = true;
   bool keep_if_not_clean = false;
+  // ★ 362 11-23: the job's own line-teller, handed to the print check (PrintableSpec::said). Null: nothing said.
+  void (*said)(const char*) = nullptr;
   // OF4: mesh key "weave_mesh" ("tubes" or "merged"). Not given: Tubes for a job with a weave region (make_lattice_file
   // sets mesh.weave_mesh), the writer's own Merged otherwise (a job with no weave region is never changed by it).
   bool weave_mesh_asked = false;
@@ -90,6 +92,8 @@ struct FileReport {
   std::size_t stands_added = 0;      // of `posts`, those under a weave's long shallow runs (O8)
   std::size_t weave_specks_ignored = 0, weave_held_ignored = 0;   // O10: PrintableReport's
   std::size_t part_overhangs = 0;   // PrintableReport's: the part's own overhangs, counted, never propped
+  std::size_t posts_outside = 0;    // ★ 362 11-23, PrintableReport's (F2): posts not added, their column leaving the part
+  bool stopped_repeating = false;   // ★ 362 11-23, PrintableReport's (F3): stopped, a try having nothing new to try
   // O17, O18: PrintableReport's: what the sag pass did, and the bars the file was made of when it changed any (null:
   // the layout's own). `left_out_at` and `posts` are read against those.
   SagReport sags;
