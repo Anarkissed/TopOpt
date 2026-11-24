@@ -360,6 +360,8 @@ public struct DSRow<Actions: View>: View {
     let actions: Actions
     /// ★ his 11-22: the value column's width under a Selections panel (its handle); nil: the value whole, as before.
     @Environment(\.dsRowValueWidth) private var valueWidth
+    /// ★ notes25 B3: the line under the row wraps to fit its words (Results' list); false: one line, as everywhere else.
+    @Environment(\.dsRowLineWraps) private var lineWraps
 
     public init(_ kind: Kind, key: String, mark: DSRowMark? = nil, name: String, role: (glyph: String, colour: RGBA)? = nil,
                 value: String? = nil, disclosure: Bool? = nil, selected: Bool = false, hidden: Bool = false,
@@ -463,7 +465,8 @@ public struct DSRow<Actions: View>: View {
             Text(l.text).font(.system(size: 12.5))
                 .foregroundStyle((l.tone == .danger ? DS.Color.danger : l.tone == .warning ? DS.Color.warning
                                   : DS.Color.textSecondary).color)
-                .lineLimit(1)
+                .lineLimit(lineWraps ? nil : 1)
+                .fixedSize(horizontal: false, vertical: lineWraps)
             if let fix = l.fix { DSChip(.fix(fix.title), key: key + "-fix", action: fix.run) }
             Spacer(minLength: 0)
         }

@@ -237,7 +237,7 @@ struct FlexibleFaceChip: View {
             let w = loadWeight(project, g, ui: ui)
             return RoleReading(word: w == FlexibleSelectionsCopy.weightUnset ? (w ?? "Load") : "Load" + (w.map { " " + $0 } ?? ""),
                                symbol: "arrow.down", tint: DS.Color.accent, shield: false)
-        } else if k.isAnchor { return RoleReading(word: "Anchor", symbol: "lock.fill", tint: DS.Color.okGreen, shield: false)
+        } else if k.isAnchor { return RoleReading(word: "Anchor", symbol: "pin.fill", tint: DS.Color.okGreen, shield: false)
         } else if project.force.keepClearAffix(for: g) == .on { return RoleReading(word: "Keep clear", symbol: "nosign", tint: DS.Color.clearance, shield: false)
         } else if FlexibleFaceCommits.readsLattice(g, project) {
             return RoleReading(word: FlexibleSelectionsCopy.kindWord(.lattice), symbol: "square.grid.3x3.fill", tint: FlexibleStageStyle.facePrismToken, shield: true)

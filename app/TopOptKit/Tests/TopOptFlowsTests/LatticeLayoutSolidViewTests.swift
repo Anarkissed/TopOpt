@@ -163,7 +163,15 @@ final class LatticeLayoutSolidViewTests: XCTestCase {
         print("SOLID-VIEW body grey: closed \(gc), cut \(gu); strut pixels: closed \(sc), cut \(su)")
         XCTAssertGreaterThan(gc, 5_000, "RED CONTROL: without the map the solid body is there")
         XCTAssertLessThan(Double(gu), 0.5 * Double(gc), "★ the map cuts the surface open")
-        XCTAssertGreaterThan(Double(su), 1.3 * Double(sc), "★ and the bars inside show")
+        // ★ RE-PINNED (notes26 C6: with the map the bars are clipped to the part, flush with its faces — the cut frame no longer
+        // counts the half-strut bulges past every face that the old 1.3× included; 12,042 against the closed body's 10,601 on
+        // the first run). The bars inside show, and the bulges are gone (RED CONTROL: the same cut frame unclipped).
+        XCTAssertGreaterThan(Double(su), 1.1 * Double(sc), "★ and the bars inside show")
+        LatticeLayoutBarsPass.clipToPart = false
+        let bulging = Self.strutPixels(try frame(mesh, bars: bars, grid: g))
+        LatticeLayoutBarsPass.clipToPart = true
+        print("SOLID-VIEW strut pixels unclipped \(bulging), clipped \(su)")
+        XCTAssertLessThan(su, bulging, "RED CONTROL: unclipped, the bars bulge out of every face")
     }
 
     /// ★ THE WALLS: a lattice one face deep is cut into the solid; the walls behind its opening are drawn.

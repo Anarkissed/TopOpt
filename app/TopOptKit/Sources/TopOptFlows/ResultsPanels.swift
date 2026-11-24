@@ -75,7 +75,7 @@ public enum ResultsVersions {
         for tab in tabs where !used.contains(tab.index) {
             k += 1
             let title = ResultMark.letter(k - 1) + " · " + tab.headlineLabel   // ★ B2 (U4): a result is its letter + (tab.isLatticed ? " · latticed" : "")
-            out.append(row(tab, title: title, margin: tab.worstCaseMargin))
+            out.append(row(tab, title: title, margin: tab.worstCaseMargin, twoDecimals: blocks?.printFile != nil))   // ★ notes25 C3
         }
         return out
     }
@@ -108,7 +108,8 @@ public enum ResultsVersions {
     }
 
     static func row(_ tab: ResultVariantVM, title: String, margin: Double, headline: String? = nil,
-                    pieces: Int? = nil) -> ResultsVersionRow {
+                    pieces: Int? = nil, twoDecimals: Bool = false) -> ResultsVersionRow {
+        let x = twoDecimals ? StrengthWords.x : Self.x   // ★ notes25 C3: a print file's margin always with two decimals
         let verdict = tab.latticeAccepted == false ? "not certified" : x(margin) + " ✓"
         let piecesLine = pieces.map { " · in \($0) pieces" } ?? ""
         return ResultsVersionRow(id: "t\(tab.index)", title: title,
@@ -140,10 +141,12 @@ public enum ResultsChecks {
                               scenarios: [ScenarioResult], thinJoints: Int, bridged: Bool,
                               pieces: StrengthenText.PiecesFlag? = nil, finish: FinishReport? = nil,
                               weakest: SIMD3<Double>? = nil, struts: LatticeFileStrength? = nil,
-                              printFile: LatticeFileFacts? = nil) -> [ResultsCheck] {
+                              printFile: LatticeFileFacts? = nil, answer: LatticeStrengthAnswer? = nil) -> [ResultsCheck] {
         guard let tab else { return [] }
         var out: [ResultsCheck] = []
-        if let m = margin, m > 0 {
+        if let a = answer, a.governing != nil {
+            out.append(a.check())   // ★ notes25 C3 (4): "Not strong enough · Holds 1.34× · needs 1.5×", its place lit
+        } else if let m = margin, m > 0 {
             let built = safetyMargin.map { " · built for \(Int(($0 * 100).rounded()))%" } ?? ""
             out.append(m >= required
                 ? ResultsCheck(kind: .ok, title: "Strong enough", detail: ResultsVersions.x(m) + " your load" + built,
@@ -155,7 +158,7 @@ public enum ResultsChecks {
         }
         // ★ his ruling 11-17 ("Yes, but only in the structural lattice stage"): the struts must pass too — said right under the
         // solid's line, the file made either way
-        if let s = struts, let line = s.strutsLine {
+        if answer?.governing == nil, let s = struts, let line = s.strutsLine {
             out.append(ResultsCheck(kind: s.strutsPass ? .ok : .warn,
                                     title: s.strutsPass ? "Struts strong enough" : s.strutNoRule ? "Struts not checked" : "Struts not strong enough",
                                     detail: line, tab: .strength))
@@ -253,6 +256,17 @@ extension ResultsModel {
         let isSelected = tab?.index == selected?.index
         let s = reportBlocks?.strengthen
         switch t {
+        case .strength where latticeAnswer != nil:
+            // ★ notes25 C3 (6): a print file's ONE set — core's governing margin, where it gives first, the struts, the solid at
+            // his infill, the plastic, the load on the struts, the strengthening; nothing solid-only (no verified margin, mesh vs
+            // grid, peak stress, "breaks at about", "built for")
+            let a = latticeAnswer!
+            let plastic = tab.map { $0.massLabel + ($0.savingsPercent > 0 ? " \u{00B7} \($0.savingsPercent)% less than solid" : "") }
+            r += a.rows(loadKg: shownLoadKg, unit: loadUnit, infillPercent: infillPercent, plastic: plastic)
+            if let f = reportBlocks?.printFile { r += f.rows(.strength) }   // "Strengthened"
+            add("Version", version?.title)
+            add("Recommended", recommendationLine.map { $0.hasPrefix("Recommended: ") ? String($0.dropFirst(13)) : $0 }
+                .map { $0.prefix(1).uppercased() + $0.dropFirst() })
         case .strength:
             if let m = version?.margin {
                 let need = reportBlocks?.safetyMargin ?? s?.marginRequired
@@ -309,7 +323,7 @@ extension ResultsModel {
             }
         }
         // ★ his 11-21: a Lattice run's print file, strengthening and checks, every number in words
-        if let f = reportBlocks?.printFile { r += f.rows(t) }
+        if let f = reportBlocks?.printFile, !(t == .strength && latticeAnswer != nil) { r += f.rows(t) }
         return r
     }
 }
@@ -328,9 +342,9 @@ public enum ResultsViewMode: String, CaseIterable, Sendable {
     var symbol: String {
         switch self {
         case .stress: return ""            // the colour wheel, drawn
-        case .xray: return "cube.transparent"
+        case .xray: return FlexibleMainViewToggles.xrayIcon   // ★ notes25 icons: one X-ray glyph app-wide
         case .loadPaths: return "point.topleft.down.to.point.bottomright.curvepath"
-        case .bend: return "arrow.down.to.line"
+        case .bend: return "rectangle.compress.vertical"   // ★ notes25 icons: Bend, as on the Squish page (arrow-to-line is Gravity)
         case .breakIt: return "bolt.fill"
         }
     }
@@ -492,6 +506,7 @@ struct ResultsVersionsPanel: View {
         DSPanel(key: "resultsVersions", title: Self.title(version), count: rows.count, foldedPill: pill, open: $open) {
             ForEach(rows) { r in line(r) }
         }
+        .environment(\.dsRowLineWraps, true)   // ★ notes25 B3: a result's line (why core could not make it) wraps, never cut
     }
 
     @ViewBuilder private func line(_ r: ResultsVersionRow) -> some View {
@@ -528,12 +543,16 @@ struct ResultsCheckLine: View {
             VStack(alignment: .leading, spacing: 0) {
                 Button(action: tap) { line.contentShape(Rectangle()) }.buttonStyle(.plain)
                 if open {
-                    HStack(spacing: DS.Space.s) {
+                    // ★ notes25 B3 (his Checks note: "doesn't allow for enough space for the text … automatically expanded/
+                    // contracted to fit the text with some buffer above/below and to the sides"): the line takes the row's
+                    // whole width and wraps (Details › under it, at the right), the row's own padding at its sides and foot
+                    VStack(alignment: .leading, spacing: DS.Space.xxs) {
                         if let more = c.more {
                             Text(more).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
                                 .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(ResultsChrome.publish("resultsCheckMoreText-" + c.title))
                         }
-                        Spacer(minLength: DS.Space.s)
                         if let details, c.tab != nil {
                             Button(action: details) {
                                 Text("Details \u{203A}").font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.accent.color)
@@ -541,9 +560,11 @@ struct ResultsCheckLine: View {
                             }
                             .buttonStyle(.plain)
                             .background(ResultsChrome.publish("resultsCheckDetails-" + c.title))
+                            .frame(maxWidth: .infinity, alignment: .trailing)
                         }
                     }
-                    .padding(.leading, DS.Space.l + 26 + DS.Space.m).padding(.trailing, DS.Space.m)
+                    .padding(.leading, DS.Space.l + 26 + DS.Space.m).padding(.trailing, DS.Space.l)
+                    .padding(.bottom, details != nil && c.tab != nil ? DS.Space.xxs : DS.Space.sm)
                     .background(ResultsChrome.publish("resultsCheckMore-" + c.title))
                 }
             }
@@ -557,14 +578,15 @@ struct ResultsCheckLine: View {
             let (sym, tint): (String, Color) = {
                 switch c.kind {
                 case .ok: return ("checkmark", DS.Color.okGreen.color)
-                case .info: return ("arrow.up", DS.Color.accent.color)
-                case .warn: return ("exclamationmark", DS.Color.warning.color)
+                case .info: return ("info", DS.Color.accent.color)   // ★ notes25 icons: an "i" for information
+                case .warn: return ("exclamationmark.triangle.fill", DS.Color.warning.color)   // ★ notes25 icons: one warning glyph
                 }
             }()
             Image(systemName: sym).font(.system(size: 11, weight: .heavy)).foregroundStyle(tint)
                 .frame(width: 26, height: 26).background(Circle().fill(tint.opacity(0.18)))
             VStack(alignment: .leading, spacing: 1) {
                 Text(c.title).font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                    .fixedSize(horizontal: false, vertical: true)   // ★ notes25 B3: wraps, never cut
                 Text(c.detail).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -652,6 +674,7 @@ struct ResultsDetailsDrawer: View {
                             ForEach(rows(tab)) { r in
                                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                                     Text(r.label).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
+                                        .fixedSize(horizontal: false, vertical: true)   // ★ notes25 B3: wraps, never cut
                                     Spacer(minLength: 8)
                                     Text(r.value).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                                         .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)
@@ -770,10 +793,7 @@ struct ResultsViewModePicker: View {
 
     @ViewBuilder private func icon(_ m: ResultsViewMode) -> some View {
         if m == .stress {
-            Circle().fill(AngularGradient(colors: [RGBA(28, 60, 170).color, RGBA(0, 170, 220).color, RGBA(60, 190, 110).color,
-                                                   RGBA(250, 220, 60).color, RGBA(255, 70, 50).color, RGBA(28, 60, 170).color],
-                                          center: .center))
-                .frame(width: 16, height: 16)
+            StressWheelIcon()   // ★ notes25 icons: the one Stress icon, every page
         } else {
             Image(systemName: m.symbol).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
         }
@@ -839,13 +859,15 @@ struct ResultsMotionBar: View {
     @Binding var playing: Bool
     let position: Double
     let scrub: (Double) -> Void
-    /// ★ 10-28: Bend / Break's Exaggeration slider ("to make it bend more visually"); nil hides it.
+    /// ★ 10-28: Bend / Break's Exaggeration slider ("to make it bend more visually"); nil hides it. ★ notes25 C1: its 0…1 runs
+    /// from the true size to the part's own top (ResultsLoadMotion.swift); `exaggerationLabel` says where it is ("6.7×").
     var exaggeration: Binding<Double>? = nil
+    var exaggerationLabel: String = ""
 
     init(title: String, readout: String, alarm: Bool, playing: Binding<Bool>, position: Double,
-         scrub: @escaping (Double) -> Void, exaggeration: Binding<Double>? = nil) {
+         scrub: @escaping (Double) -> Void, exaggeration: Binding<Double>? = nil, exaggerationLabel: String = "") {
         self.title = title; self.readout = readout; self.alarm = alarm; self._playing = playing
-        self.exaggeration = exaggeration; self.position = position; self.scrub = scrub
+        self.exaggeration = exaggeration; self.position = position; self.scrub = scrub; self.exaggerationLabel = exaggerationLabel
     }
 
     var body: some View {
@@ -866,7 +888,7 @@ struct ResultsMotionBar: View {
                     Text(title).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                     Text(readout).font(.system(size: 11, weight: .semibold)).monospacedDigit()
                         .foregroundStyle((alarm ? DS.Color.danger : DS.Color.textSecondary).color)
-                        .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                        .fixedSize(horizontal: false, vertical: true)   // ★ notes25 B3: every line it needs (was 2 at most)
                 }
                 Spacer(minLength: 0)
             }
@@ -878,12 +900,12 @@ struct ResultsMotionBar: View {
             if let ex = exaggeration {
                 HStack(spacing: DS.Space.s) {
                     Text("Exaggeration").font(.system(size: 11, weight: .semibold)).foregroundStyle(DS.Color.textSecondary.color)
-                    Slider(value: ex, in: Double(FlexAnimation.minExaggeration)...Double(FlexAnimation.maxExaggeration))
+                    Slider(value: ex, in: 0...1)
                         .tint(DS.Color.accent.color)
                         .accessibilityLabel("Bend exaggeration")
                         .accessibilityIdentifier("results-exaggeration-slider")
                         .background(ResultsChrome.publish("resultsExaggeration"))
-                    Text("\(Int(ex.wrappedValue))×").font(.system(size: 12, weight: .semibold)).monospacedDigit()
+                    Text(exaggerationLabel).font(.system(size: 12, weight: .semibold)).monospacedDigit()
                         .foregroundStyle(DS.Color.textPrimary.color).frame(width: 40, alignment: .trailing)
                 }
             }

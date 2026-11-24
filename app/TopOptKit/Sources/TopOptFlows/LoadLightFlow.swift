@@ -133,6 +133,53 @@ public struct LoadLightFlow: Sendable {
     }
 }
 
+// ★ notes26 (C5, his 11-23: "making the Load path animation a bit more clear. I think it needs more colour and light coming out
+// of it"). The band above was paint — a warm tint mixed into the surface's albedo, then lit like the clay, so it read as a pale
+// stain on a dark part. It is now LIGHT: the viewer EMITS it (added over the shading, strongest at the rim where the wall turns
+// away), colours it by how much load flows there (`strength`: a cool blue where little does, white, a hot amber where the most
+// does), lets it show through the X-ray body, and spills a HALO of it past the wall (MetalMeshView `halo_vertex`). The sweep —
+// head, trail, pacing — is the one above, so the motion is the same and stays clear.
+extension LoadLightFlow {
+    /// This frame's light for the GPU: per flat vertex a sentinel tint — alpha −2 − s over the dark body, or −3 − s over its stress
+    /// colour (`stressColours`, rgb) — where s is how much load flows there (0…0.99), and how lit it is now (`light`, 0…1).
+    public func lightFrame(phase p: Float, stressColours: [SIMD4<Float>]? = nil) -> (tints: [SIMD4<Float>], light: [Float]) {
+        let sc = stressColours.flatMap { $0.count == arrival.count ? $0 : nil }
+        var tints = [SIMD4<Float>](repeating: .zero, count: arrival.count)
+        var light = [Float](repeating: 0, count: arrival.count)
+        let lo = p - Self.trailLength, hi = p + Self.headWidth
+        for v in 0..<arrival.count {
+            let s = min(0.99, max(0, strength[v]))
+            if let sc { tints[v] = SIMD4(sc[v].x, sc[v].y, sc[v].z, -3 - s) } else { tints[v] = SIMD4(0, 0, 0, -2 - s) }
+            let av = arrival[v]
+            guard av >= 0, av > lo - 1e-6, av < hi else { continue }
+            light[v] = min(1, Self.glow(arrival: av, phase: p) * (0.55 + 0.45 * s) * 1.25)
+        }
+        return (tints, light)
+    }
+}
+
+/// ★ notes26 (C5): one frame of Load paths' light for the viewer (`MetalMeshView.loadLight`). Equal by key.
+public struct LoadLightFrame: Equatable {
+    public var key: Int
+    public var tints: [SIMD4<Float>]
+    public var light: [Float]
+    public init(key: Int, tints: [SIMD4<Float>], light: [Float]) { self.key = key; self.tints = tints; self.light = light }
+    public static func == (a: LoadLightFrame, b: LoadLightFrame) -> Bool { a.key == b.key }
+}
+
+extension MetalMeshView {
+    /// ★ notes26 (C5): Load paths' light, emitted and haloed on the GPU.
+    public func loadLight(_ frame: LoadLightFrame?) -> MetalMeshView {
+#if canImport(MetalKit)
+        var copy = self
+        copy.inputs.loadLight = frame
+        return copy
+#else
+        self
+#endif
+    }
+}
+
 /// A small binary min-heap of (distance, voxel).
 private struct MinHeap {
     private var a: [(Float, Int)] = []

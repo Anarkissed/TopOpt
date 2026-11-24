@@ -1360,14 +1360,15 @@ public struct WorkspacePlaceholder: View {
                 .closesCornerDrawers(model.cornerDrawers)   // ★ his 11-22 (img 45): a tap on the 3D view closes the open drawer
                 .overlay(alignment: .bottom) {
                     if newEngineDrawn {
-                        VStack(spacing: 6) {
-                            if let why = newEngine.solidReason {   // ★ his ruling 11-14: solid where lattice was asked — why, and fixes
-                                LatticeSolidReasonBar(reason: why, apply: { fix in SolidReason.apply(fix, to: &project.lattice) },
-                                                      checkNozzle: newEngine.nozzleState == .notAsked ? { newEngine.checkNozzle() } : nil)   // ★ 11-16
+                        LatticeLayoutPreviewLines(preview: newEngine)
+                            .laneFoot("new-engine")   // ★ his pick 11-15: very bottom in landscape, just above Settings in portrait
+                            .overlay {   // ★ notes25 (his 11-23): the solid notice on the screen's centre line, above the lines
+                                if let why = newEngine.solidReason {   // ★ his ruling 11-14: solid where lattice was asked — why, and fixes
+                                    LatticeSolidReasonBar(reason: why, apply: { fix in SolidReason.apply(fix, to: &project.lattice) },
+                                                          checkNozzle: newEngine.nozzleState == .notAsked ? { newEngine.checkNozzle() } : nil)   // ★ 11-16
+                                        .laneCentreFoot("new-engine-reason", above: "new-engine")
+                                }
                             }
-                            LatticeLayoutPreviewLines(preview: newEngine)
-                        }
-                        .laneFoot("new-engine")   // ★ his pick 11-15: very bottom in landscape, just above Settings in portrait
                     }
                 }   // ★ the new engine (test): its lines
                 .onChange(of: newEngineOn) { on in
@@ -1391,13 +1392,18 @@ public struct WorkspacePlaceholder: View {
                     // ★ Install 3: his 11-09 thin-wall pop-up on the new engine — once per project, by itself, on Structural,
                     // when the engine leaves lattice solid because the walls are too thin (its own reason, not the old bake's)
                     guard newEngineDrawn else { return }
-                    latticeThinWalls = Self.thinWalls(reason, project: project)
+                    latticeThinWalls = Self.thinWalls(reason, project: project, floorCellMM: newEngine.laid?.floorCellMM ?? 0)   // ★ D10: the lay's floor
                     if let thin = latticeThinWalls, LatticeThinWallPrompt.opensByItself(
                         finding: thin, structural: project.lattice.stageMode == .structural,
                         setupUp: latticeSetupUp, seen: project.lattice.thinWallsNoticeSeen) {
                         latticeThinWallsPromptUp = true
                     }
                     if latticeThinWalls == nil { latticeThinWallsPromptUp = false }
+                    // ★ notes25 (D10): the walls glow on the new engine too — this lay's own solid places (thinWallGlow)
+                    latticeThinWallTints = []
+                    if latticeThinWalls != nil, let m = stageMesh {
+                        Task { let t = await newEngine.thinWallGlow(mesh: m); if newEngine.solidReason == reason { latticeThinWallTints = t } }
+                    }
                 }
                 .onChange(of: newEngine.laid) { _ in
                     // ★ Install 3: the drawer's walls and cells are the new engine's — re-derive the cards when its layout lands
@@ -1517,6 +1523,8 @@ public struct WorkspacePlaceholder: View {
                !legendDrilledIn {
                 latticeBandChipsOverlay.ignoresSafeArea()
             }
+            // ★ notes25: the print file's refusal, "Show me": its spot marked on the part (LatticeFileRefusal)
+            if !fullScreenPageUp, viewerMesh != nil { LatticeFileSpotMarker(frame: latticeBandChipFrame, version: project.id).ignoresSafeArea() }
 
             // ★ his iPad notes 11-10 (img 3): while the Lattice page shows its Sample, the part is covered — never seen behind
             // the panel or cut off above it; the top-left block and the stage capsule stay over it
@@ -1801,6 +1809,12 @@ public struct WorkspacePlaceholder: View {
                       resolution: runResolution,
                       onRetry: { startRun(lattice: startedRunWithLattice) },   // ★ B3: the run that failed, as it was
                       version: versionLabel)   // ★ T5: the card's overline names it
+                // ★ notes25: the print file's chain ends while the cards' host is away (a full-screen page up, gravity being set)
+                // — its stop is still said at once in the centred pop-up
+                .onChange(of: run.phase) { ph in
+                    guard fullScreenPageUp || force.phase == .setup else { return }
+                    if latticeChainEnded(ph), ph == .failed { run.dismissFailure() }
+                }
                 // The running card / failure sheet dim their OWN full-bleed
                 // backdrops; keeping RunScreen inside the safe area lets the
                 // minimized "Optimizing…" chip sit under the status bar / nav row.
@@ -1810,7 +1824,9 @@ public struct WorkspacePlaceholder: View {
             // the user views the original and re-optimizes.
             // ★ his notes 11-23: never MOUNTED while the app is not in front (its mesh is the app's biggest; one mounted behind
             // Sidecar ended his app) — it opens as the app comes back; one already up stays
-            if let outcome = run.outcome, outcome.variants.contains(where: { $0.accepted }), !viewOriginal,
+            // ★ notes25 (his 11-23, Img 4/5): each stage's Results shows its OWN result — Topology a Topology run's, the Lattice
+            // stage a print file's (RunModel.outcome(lattice:)); one version keeps both
+            if let outcome = stageOutcome, outcome.variants.contains(where: { $0.accepted }), !viewOriginal,
                model.sceneActive || model.resultsMounted.mounted {
                 ResultsScreen(projectName: project.name, outcome: outcome,
                               materialName: project.material,
@@ -1858,7 +1874,7 @@ public struct WorkspacePlaceholder: View {
                               // AJ2: the entry is DECIDED HERE, before the page can be
                               // reached, and a blocked one carries its own reason on the
                               // disabled control. (★ B4: Smooth's entry went with its page.)
-                              latticeEntry: { latticeEntry($0) },
+                              latticeEntry: { stage == .lattice ? latticeEntry($0, lattice: true) : latticeEntry($0) },   // ★ notes25: the shown result's own
                               // ★ Results redesign (2026-10-27): undo / redo at the top left
                               undo: { project.performUndo() }, redo: { project.performRedo() },
                               canUndo: { project.canUndoNow }, canRedo: { project.canRedoNow },
@@ -1869,15 +1885,16 @@ public struct WorkspacePlaceholder: View {
                               takeOpenOn: { defer { resultsOpenOn = nil }; return resultsOpenOn },
                               // ★ B4 (app-map §3.5, Q1): "v7 results" and Pick this — the Library's chosen result
                               version: versionLabel,
-                              pickedVariant: ResultsPick.accepted(model.library.chosenResult(folder: project.id), in: outcome),   // ★ the part's chosen
-                              onPick: model.library.version(project.id) == nil ? nil : { v in
+                              pickedVariant: stageOutcomeIsLast ? ResultsPick.accepted(model.library.chosenResult(folder: project.id), in: outcome) : nil,   // ★ the part's chosen (★ notes25: of the last run's result)
+                              onPick: model.library.version(project.id) == nil || !stageOutcomeIsLast ? nil : { v in
                                   if let r = ResultsPick.all(v, in: outcome) { model.library.pick(folder: project.id, result: r) }
                               },
-                              certify: certifyCard)   // ★ Organic cut 2: his certify wizard
+                              certify: stage == .lattice ? certifyCard : nil)   // ★ Organic cut 2: his certify wizard (★ notes25: the print file's, in the Lattice stage)
                     .ignoresSafeArea()
                     .onAppear { startCertifyWalk(); model.resultsMounted.mounted = true }   // ★ 11-23
                     .onDisappear { model.resultsMounted.mounted = false }
                     .onChange(of: outcome.reportJSON) { _ in startCertifyWalk() }
+                    .id(stage)   // ★ notes25: each stage's Results its own screen (never one stage's result merged into the other's)
             }
             // ★ NO "See Results" CHIP (his 11-05: "I don't think that's necessary anymore … Please have that removed"): Results
             // is Topology's page, reached from its capsule and its "Open Results" line.
@@ -1885,7 +1902,7 @@ public struct WorkspacePlaceholder: View {
             // and a landed run says so here — it never opens Results by itself.
             if stage == .topology, !fullScreenPageUp, viewerMesh != nil, topologyResultsPageUp, !resultsFullScreen { topologyCapsuleOverlay }
             // ★ his notes 11-23: and the Lattice stage's over its Results (a print file's), the way back to editing
-            if stage == .lattice, !fullScreenPageUp, viewerMesh != nil, topologyResultsPageUp, !resultsFullScreen,
+            if stage == .lattice, !fullScreenPageUp, viewerMesh != nil, latticeResultsPageUp, !resultsFullScreen,
                model.sceneActive || model.resultsMounted.mounted { latticeCapsuleOverlay }
             if stage == .topology, !editFaces.isEditing, !fullScreenPageUp, let msg = topoNotice.message { topologyResultsMessage(msg) }
             })   // Flexible (PR #362) H58
@@ -1917,6 +1934,7 @@ public struct WorkspacePlaceholder: View {
         .laneControls(laneControls)
         .environment(\.latticeTurning, latticeTurning && !LatticePreviewMode.controlPageFollowsCamera)   // ★ his pick 11-16 (A)
         .cornerTapCloses(model.cornerDrawers)   // ★ his 11-22: a tap anywhere outside the open corner drawer closes it
+        .certifyCardPageFrames()   // ★ notes25 B1: the fix pop-up keeps clear of the stage menu riding over Results
     }
 
     /// ★ B10: the project's name, asked in the §4.11 name sheet (it was a system alert).
@@ -1991,7 +2009,7 @@ public struct WorkspacePlaceholder: View {
         moveOnIfEdited()   // ★ his 11-23: an edit on a result's version runs on the next one
         guard canOptimize(lattice: lattice) else { return }
         runWithLattice = lattice
-        if let prompt = ResultsReplacementPrompt.forNewRun(existing: run.outcome) {
+        if let prompt = ResultsReplacementPrompt.forNewRun(existing: topologyOutcome) {   // ★ notes25: a print file's result stays
             if libraryAsks() { return }   // Library (B3)
             rerunOffersCopy = true; pendingReplacement = prompt   // Flexible (PR #362) H50d: Optimize's card offers Save as new project
             return
@@ -2013,7 +2031,7 @@ public struct WorkspacePlaceholder: View {
         if stoppedForTinyPiece(request) { return }   // ★ his 11-16 (Install 3)
         // ★ B4 (APP LIST 6): the LATTICE run's own re-run card — its first button starts this request
         // (startLatticeRequest), never Topology's Optimize run
-        if let prompt = ResultsReplacementPrompt.forNewRun(existing: run.outcome) {
+        if let prompt = ResultsReplacementPrompt.forNewRun(existing: latticeOutcome) {   // ★ notes25: a Topology result stays
             pendingLatticeRerun = prompt
             return
         }
@@ -2058,7 +2076,10 @@ public struct WorkspacePlaceholder: View {
             // ★ his 11-22 (his pick: only on his press, "a nice modal saying it's generating with some animation"): made on the
             // Mac from the lattice on screen, a Draft too (no iPad exact lay); the card up until the Mac's file is drawn
             let r = run
-            LatticeMacMake.shared.begin(project: project.id, path: project.importedFile?.path, cancel: { r.cancel() })
+            // ★ notes25: the card carries the run to its end (its own card stays away); A3: the print-accurate lattice already
+            // on screen → the print file alone
+            LatticeMacMake.shared.begin(project: project.id, path: project.importedFile?.path, run: r,
+                                        fileOnly: newEngine.showsFile || latticeExactOnScreen, cancel: { r.cancel() })
             Task { @MainActor in
                 let stress = newEngineStress
                 let inputs: (groups: [LatticeLayoutSession.OrganicGroup], tensor: Data)
@@ -2067,6 +2088,8 @@ public struct WorkspacePlaceholder: View {
                     AppPopups.shared.show(LatticeFileExport.organicCantMakeTitle, LatticeFileExport.organicPlain(error), log: "\(error)")
                     return
                 }
+                // ★ notes25: Cancel on the card while the lattice was still being readied stops the chain here
+                guard LatticeMacMake.shared.isMaking(project.id) else { LatticePrintFlow.shared.ended(); return }
                 switch LatticeFileJob.forOrganic(project, groups: inputs.groups, tensor: inputs.tensor,
                                                  referenceMPa: stress.referenceMPa, strengthJob: strengthJob) {
                 case .failure(let why):
@@ -2093,6 +2116,12 @@ public struct WorkspacePlaceholder: View {
             model.toast = why.line; return
         }
         LatticePrintFlow.shared.begin(project: project.id, key: latticePrintKey)   // ★ his 11-22: the exact is on screen; the file
+        // ★ notes25 (A5, his 11-23 evening: "ensure that the regular lattice gets a similar export pop-up, with an animation and
+        // everything"): the cell lattice's print file wears the same one card (the vines: no cell motion exists to reuse)
+        let r = run
+        LatticeMacMake.shared.begin(project: project.id, path: project.importedFile?.path, run: r, fileOnly: true,
+                                    onMac: compute.activeRemote != nil, cancel: { r.cancel() })
+        LatticeMacMake.shared.request = request
         launchFileRun(request, job: job, strengthJob: strengthJob, config: compute.activeRemote)
     }
 
@@ -2114,7 +2143,7 @@ public struct WorkspacePlaceholder: View {
                                                   densityGCm3: density, onJob: { _, url in LatticeMacMake.shared.job(url) },
                                                   early: macEarlyFile(checkFollows: strengthJob != nil))
                 : LatticeFileButton.runner(config: config, job: job, projectName: project.name, strengthJob: strengthJob,
-                                           densityGCm3: density)
+                                           densityGCm3: density, onJob: { LatticeMacMake.shared.job($0) })   // ★ notes25 (A5)
             run.start(fileRequest, remote: true, workerName: compute.selectedWorkerName)
         } else {
             run.runner = LatticeFileButton.deviceRunner(job: job, strengthJob: strengthJob, materialsPath: request.materialsPath,
@@ -2128,13 +2157,17 @@ public struct WorkspacePlaceholder: View {
     /// too narrow for the cells across Structural needs, or (the whole part latticed) the part itself too shallow for them
     /// (on his first A1 pad the engine says "the region is too shallow", 93 %); the thinnest wall it lattices is that many of
     /// the smallest cell. A face prism too shallow is his depth, not a thin wall: its own line says so, no pop-up.
-    static func thinWalls(_ r: SolidReason?, project p: ProjectModel) -> LatticeStructuralThinWalls.Finding? {
+    /// ★ notes25 (D10, "walls under 0.0 mm"): the smallest cell is the one core's lay uses — the larger of its own floor
+    /// (`floorCellMM`, the printability floor) and the page's smallest (a Manual cell, a Swept low end); the settings alone
+    /// say 0 in Fit and Auto. The ONE place the wall is worked out; the pop-up, its reasons and the note read it.
+    static func thinWalls(_ r: SolidReason?, project p: ProjectModel, floorCellMM: Double = 0) -> LatticeStructuralThinWalls.Finding? {
         guard let r, (p.lattice.stageMode ?? .structural) == .structural,
               r.cause == .wallNarrow || r.cause == .tooFewAcross || (r.cause == .regionShallow && p.latticeStartsWhole)
         else { return nil }
         let s = LatticeLayoutPreview.settings(p, referenceMPa: 0)
-        let smallest = s.cellMinMM > 0 ? s.cellMinMM : s.cellMM
-        return .init(minWallMM: Double(Swift.max(1, s.minCellsAcross)) * smallest, share: r.share)
+        let smallest = Swift.max(floorCellMM, s.cellMM > 0 ? s.cellMM : s.cellMinMM)
+        return .init(minWallMM: Double(Swift.max(1, s.minCellsAcross)) * smallest, share: r.share,
+                     cellsAcross: Int(Swift.max(1, s.minCellsAcross)))   // ★ notes25 (D8): the engine's own number, said in the pop-up
     }
 
     /// ★ Organic cut 1: Live preview, except Grown on the new engine, always Click to refresh (a Grown lay takes minutes).
@@ -3648,6 +3681,10 @@ public struct WorkspacePlaceholder: View {
         .onChange(of: run.isStreaming) { streaming in
             if !streaming { topoNotice.noteFinished(accepted: acceptedVariantCount, resultsOpen: !viewOriginal) }
         }
+        .onChange(of: latticeResultCount) { _ in openLibraryExportIfReady() }   // ★ notes25: a print file's result arrives too
+        .onChange(of: savedPrintFileKey) { _ in drawSavedPrintFile() }   // ★ notes25 (A4): the drawing follows the print file
+        .onAppear { LatticeMacMake.shared.workspace(up: true) }   // ★ notes25 (A6): awake during a chain, here only
+        .onDisappear { LatticeMacMake.shared.workspace(up: false) }
         .onChange(of: viewOriginal) { shut in if !shut { topoNotice.opened() } }
         .onChange(of: run.restoredPreviousResults) { restored in
             announceRestoredResults(restored)
@@ -3701,13 +3738,8 @@ public struct WorkspacePlaceholder: View {
             // A run that FAILED produced nothing, so its inputs never count as "already run": Optimize stays live for Try
             // again (the stall card's Try Again re-entered startRun and met the same-inputs grey-out — a dead button).
             if ph == .failed { lastRunRequest = nil }
-            if ph != .running, LatticeMacMake.shared.isMaking(project.id) {   // ★ his 11-22
-                let request = LatticeMacMake.shared.request
-                LatticeMacMake.shared.ended()
-                if ph == .failed, LatticeMacMakeCopy.macStopped(run.lastEngineFailureText), let request {
-                    macNotAnsweringPopup(request)
-                }
-            }
+            // ★ his 11-22 · ★ notes25 (A5): the print file's chain ends with its run — a stop ends in the centred pop-up
+            let saidInAPopUp = latticeChainEnded(ph)
             GenerationTimingLog.shared.printFileRunMoved(ph, outcome: run.outcome, failure: run.failure.map { "\($0)" })   // ★ 11-22
             // ★ Organic cut 2 (his certify wizard): an Organic part that does not certify opens on Results, where it is walked through
             // ★ his 11-21 ("have it spit out an actual result in the app - because NOTHING happens in app"): every Lattice run
@@ -3717,10 +3749,13 @@ public struct WorkspacePlaceholder: View {
             // ★ his notes 11-23: a print file's job followed again after the app was gone lands on Results too
             if !latticePrintRunMoved(ph), LatticeFileButton.opensResults(succeeded: ph == .succeeded, byLattice: lastRunWasLattice
                 || (run.wasReattached && run.lastJobMode == LatticeFileButton.jobMode), outcome: run.outcome) {
+                // ★ notes25: on its own stage's Results (a print file's in the Lattice stage, wherever he is)
+                let home: WorkspaceStage = run.outcomeIsPrintFile ? .lattice : .topology
+                if stage != home { goToStage(home) }
                 viewOriginal = false
             }
             guard ph == .failed, run.failureShowsOnButton else { return }
-            runCouldntFinish = true
+            if !saidInAPopUp { runCouldntFinish = true }   // ★ notes25: said in the pop-up — the button is Lattice again
             run.dismissFailure()
         }
     }
@@ -3748,10 +3783,11 @@ public struct WorkspacePlaceholder: View {
     /// `project.designBox`, `project.force` or `project.selection`: whether a
     /// finished variant can be worked on is a question about the run that produced
     /// it, not about what the workspace happens to be set to now.
-    private func variantEntryFacts(_ index: Int) -> VariantEntryFacts? {
-        guard let o = run.outcome, o.variants.indices.contains(index) else { return nil }
+    private func variantEntryFacts(_ index: Int, lattice: Bool = false) -> VariantEntryFacts? {
+        // ★ notes25: a Topology run's result (its retention pair); `lattice`: the print file's on the Lattice stage's Results
+        guard let o = run.outcome(lattice: lattice), o.variants.indices.contains(index) else { return nil }
         let v = o.variants[index]
-        let art = project.relatticeArtifacts
+        let art = lattice ? nil : project.relatticeArtifacts
         return VariantEntryFacts(
             hasGeometry: !v.meshVertices.isEmpty && !v.meshIndices.isEmpty,
             machine: SolvingMachine.of(o),
@@ -3769,8 +3805,8 @@ public struct WorkspacePlaceholder: View {
     }
 
     /// The Lattice entry control's verdict for a variant.
-    private func latticeEntry(_ index: Int) -> VariantEntryVerdict {
-        guard let f = variantEntryFacts(index) else {
+    private func latticeEntry(_ index: Int, lattice: Bool = false) -> VariantEntryVerdict {
+        guard let f = variantEntryFacts(index, lattice: lattice) else {
             return VariantEntryVerdict(label: "Lattice", enabled: false,
                                        reason: "this run has no variant here",
                                        allReasons: ["this run has no variant here"])
@@ -3795,7 +3831,7 @@ public struct WorkspacePlaceholder: View {
         // variant's alternative carries the run's emitted spans and receipt when the
         // job asked for them. Stashed for the bake; cleared when there is none, so a
         // stale run can never dress a new variant.
-        if let idx = variantIndex, let o = run.outcome, o.variants.indices.contains(idx),
+        if let idx = variantIndex, let o = topologyOutcome, o.variants.indices.contains(idx),   // ★ notes25: Topology's result
            let alt = o.variants[idx].latticeAlternative {
             latticeOrganicSpans = alt.spanText.flatMap { try? OrganicSpanIndex.parse($0) }
             latticeOrganicReceipt = OrganicRunReceipt(info: alt.receiptJSON.flatMap {
@@ -3805,7 +3841,7 @@ public struct WorkspacePlaceholder: View {
             latticeOrganicSpans = nil
             latticeOrganicReceipt = nil
         }
-        if let idx = variantIndex, let o = run.outcome, o.variants.indices.contains(idx),
+        if let idx = variantIndex, let o = topologyOutcome, o.variants.indices.contains(idx),
            !o.variants[idx].vonMisesField.isEmpty {
             let v = o.variants[idx]   // ★ B4: the variant as core finished it (E1); no app-side smoothed twin any more
             let field = LatticeDemandField(
@@ -5318,7 +5354,7 @@ public struct WorkspacePlaceholder: View {
         latticeThinWallsPromptUp && latticeSetupUp && !latticeThinWallTints.isEmpty
     }
 
-    /// ★ Install 3: the pop-up on the new engine, from its own reason (no glow yet: the old bake's mask is not made there).
+    /// ★ Install 3: the pop-up on the new engine, from its own reason (★ notes25 D10: its glow is the lay's own, thinWallGlow).
     private var latticeThinWallPopUpOnNewEngine: Bool {
         newEngineDrawn && latticeThinWallsPromptUp && latticeSetupUp && latticeThinWalls != nil
     }
@@ -5574,7 +5610,7 @@ public struct WorkspacePlaceholder: View {
                                 origin: SIMD3<Float>(f.origin), spacing: Float(f.spacingMM),
                                 values: f.vonMises)
         } else {
-            field = LatticeSDFScene.demandField(from: run.outcome)
+            field = LatticeSDFScene.demandField(from: topologyOutcome)   // ★ notes25: a Topology run's field
         }
         // ★ the printer's bead, captured on the main thread for the skin under unselected faces
         let beadForBake = project.printParams.strutLineWidthMM
@@ -6146,7 +6182,8 @@ public struct WorkspacePlaceholder: View {
         // ★ B1 (note 16, approved design 2026-11-02): changing stage closes Topology's Results FIRST. It draws over
         // every stage (Results is mounted above the stage row), so the stage changed underneath them and the ● menu line went.
         // The same way out the capsule's Setup segment takes.
-        if dest != .topology {
+        // ★ notes25: each stage has its own Results now — any change of stage closes the one it leaves
+        if dest != .topology || dest != stage {
             viewOriginal = true
         }
         stage = dest
@@ -6595,7 +6632,7 @@ public struct WorkspacePlaceholder: View {
             }
         } label: {
             HStack(spacing: DS.Space.s) {
-                Image(systemName: "square.grid.3x3.fill").font(.system(size: 12, weight: .semibold))
+                Image(systemName: "dial.medium").font(.system(size: 12, weight: .semibold))   // ★ notes25 icons: Quality
                     .foregroundStyle(DS.Color.accent.color)
                 Text("\(project.quality.title) · \(project.quality.resolution)³")
                     .dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
@@ -6818,7 +6855,7 @@ public struct WorkspacePlaceholder: View {
             withAnimation(DS.Motion.emphasized) { bandChipsHidden.toggle() }
         } label: {
             HStack(spacing: DS.Space.s) {
-                Image(systemName: bandChipsHidden ? "eye" : "eye.slash")
+                Image(systemName: GroupViewState.eyeSymbol(hidden: bandChipsHidden))   // ★ notes25 icons: the eye shows the state, as the rows
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle((bandChipsHidden ? DS.Color.textTertiary : DS.Color.accent).color)
                 ZStack(alignment: .leading) {
@@ -7904,12 +7941,12 @@ public struct WorkspacePlaceholder: View {
                 viewModeButton("grid", label: "Outlines", on: surfaceWireframeOn) {   // ★ B2 (U4): never "Wireframe"
                     surfaceWireframeOn.toggle()
                 }
-                viewModeButton("square.stack.3d.up", label: "X-ray", on: surfaceXrayOn) {
+                viewModeButton(FlexibleMainViewToggles.xrayIcon, label: "X-ray", on: surfaceXrayOn) {
                     surfaceXrayOn.toggle()
                 }
                 // ★ B3: Topology's views, icon only — Forces, and the Design box while one is on.
                 if topologyViewUp, !editFaces.isEditing {   // ★ his 11-22: and in Lattice Setup's Topology view
-                    viewModeButton("arrow.down.to.line", label: "Forces", on: topoForcesShown) {
+                    viewModeButton("arrow.down", label: "Forces", on: topoForcesShown) {
                         topoForcesShown.toggle()
                     }
                     // ★ his 11-22: "something that hides all the keep clears" — beside Forces; on = hidden (a view: they still apply)
@@ -7988,12 +8025,13 @@ public struct WorkspacePlaceholder: View {
                 // has spent the whole task removing. While the solve is running
                 // the button appears DISABLED with the phase as its label, so
                 // the wait is visible rather than mysterious.
+                // ★ notes25 icons (his pick 11-23): Stress is the drawn colour wheel on every page
                 if latticeSimIsRunning {
                     viewModeButton("waveform.path.ecg", label: "Simulating…",
-                                   on: false, enabled: false) { }
+                                   on: false, enabled: false, glyph: AnyView(StressWheelIcon())) { }
                 } else if latticeStressField != nil {
                     viewModeButton("waveform.path.ecg", label: "Stress",
-                                   on: stressViewOn) { stressViewOn.toggle() }
+                                   on: stressViewOn, glyph: AnyView(StressWheelIcon())) { stressViewOn.toggle() }
                 }
             }
         }
@@ -8015,6 +8053,7 @@ public struct WorkspacePlaceholder: View {
     private func viewModeButton(_ icon: String, label: String, on: Bool,
                                 enabled: Bool = true,
                                 tint: RGBA? = nil,
+                                glyph: AnyView? = nil,   // ★ notes25 icons: a drawn icon in the symbol's place (Stress's wheel)
                                 onLongPress: (() -> Void)? = nil,
                                 action: @escaping () -> Void) -> some View {
         Button(action: {
@@ -8024,8 +8063,9 @@ public struct WorkspacePlaceholder: View {
                                         pressBeganAt: viewModePressBeganAt, now: Date()) { return }
             action()
         }) {
-            Image(systemName: icon)
-                .font(.system(size: 15, weight: .semibold))
+            Group {
+                if let glyph { glyph } else { Image(systemName: icon).font(.system(size: 15, weight: .semibold)) }
+            }
                 .foregroundStyle((on ? DS.Color.textPrimary
                                      : DS.Color.textTertiary).color)
                 .opacity(enabled ? 1 : 0.45)
@@ -9603,11 +9643,8 @@ public struct WorkspacePlaceholder: View {
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(DS.Color.textPrimary.color)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(LatticeThinWallPrompt.body(thin, cellsPerMember: strutScene?.minCellsPerMember ?? 5,
-                                                manualCell: project.lattice.cellSizeMode != .auto))
-                    .dsStyle(DS.TypeScale.footnote)
-                    .foregroundStyle(DS.Color.textSecondary.color)
-                    .fixedSize(horizontal: false, vertical: true)
+                // ★ notes25 (D8, his 11-23): why, in three short reasons with their (i)s, what Aesthetic does, and Learn more
+                LatticeThinWallReasons(finding: thin, lattice: project.lattice, oldBakeCells: strutScene?.minCellsPerMember)
                 HStack(spacing: DS.Space.s) {
                     Button {
                         project.switchLatticeStageMode(to: .aesthetic)
@@ -9645,6 +9682,7 @@ public struct WorkspacePlaceholder: View {
             .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
             .shadow(color: .black.opacity(0.35), radius: 24, y: 8)
             .background(CornerPairStyle.publish("lattice-thin-walls-panel"))   // ★ his 11-14: the pop-up's own frame (the card's is the screen's)
+            .background(latticeThinWallGlowUp ? CornerPairStyle.publish("lattice-thin-walls-glow") : nil)   // ★ notes25 D10: the walls glow (tests)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)   // ★ his 11-14: in the centre of the screen
             .background(CornerPairStyle.publish("lattice-thin-walls-card"))
             .accessibilityElement(children: .contain)
@@ -13296,7 +13334,7 @@ public struct WorkspacePlaceholder: View {
             Spacer()
             if open {
                 Button { scenarioAnchorHint = s.id; selection.clearActive(); selectedPiece = nil } label: {
-                    HStack(spacing: 3) { Image(systemName: "plus"); Text("Add Anchor").dsStyle(DS.TypeScale.caption) }
+                    HStack(spacing: 3) { Image(systemName: "pin.fill"); Text("Add Anchor").dsStyle(DS.TypeScale.caption) }
                 }
                 .buttonStyle(.plain).foregroundStyle(DS.Color.accent.color)
                 .accessibilityIdentifier("scenario-add-anchor")
@@ -13900,7 +13938,7 @@ public struct WorkspacePlaceholder: View {
     private func anchorLoadChip(_ g: SelectionGroup) -> some View {
         HStack(spacing: DS.Space.xs) {
             Button { if let line = SeveralRoles.refusal(committing: g.id, as: .anchor, selection: selection, force: force) { model.toast = line; return }; force.makeAnchor(g.id); selection.clearActive() } label: {   // Flexible (PR #362) H55f: several roles on one face (owner 2026-10-25) — Anchor on a loaded face, refused
-                chipLabel("lock.fill", "Anchor")
+                chipLabel("pin.fill", "Anchor")   // ★ notes25 icons: Anchor is the pin
                     .foregroundStyle(DS.Color.accentGreen.color)
                     .background(Capsule().fill(DS.Color.accentGreen.opacity(0.2).color))
             }
@@ -14542,7 +14580,21 @@ public struct WorkspacePlaceholder: View {
 extension WorkspacePlaceholder {
 
     /// The run's accepted variants (what the Results page would show).
-    var acceptedVariantCount: Int { run.outcome?.variants.filter { $0.accepted }.count ?? 0 }
+    var acceptedVariantCount: Int { topologyOutcome?.variants.filter { $0.accepted }.count ?? 0 }   // ★ notes25: Topology's own
+
+    /// ★ notes25 (his iPad notes 11-23, Img 4/5): "The results tab should ONLY be in the Lattice stage so that I can ALSO run TO
+    /// results and have *them* be in the Topology stage - keeping both in the same version". Each stage's result, wherever
+    /// the version keeps it (RunModel.outcome(lattice:)).
+    var topologyOutcome: OptimizeOutcome? { run.outcome(lattice: false) }
+    var latticeOutcome: OptimizeOutcome? { run.outcome(lattice: true) }
+    /// The result this stage's Results page shows.
+    var stageOutcome: OptimizeOutcome? { stage == .lattice ? latticeOutcome : topologyOutcome }
+    /// It is the version's last run's (the one the Library's card and its pick read).
+    var stageOutcomeIsLast: Bool { run.otherOutcome == nil || run.outcomeIsPrintFile == (stage == .lattice) }
+    /// The Lattice stage's result (a print file's) accepted count.
+    var latticeResultCount: Int { latticeOutcome?.variants.filter { $0.accepted }.count ?? 0 }
+    /// The Lattice stage's Results page is up.
+    var latticeResultsPageUp: Bool { !viewOriginal && latticeResultCount > 0 }
 
     /// The Results page is up: open (not "Original"), and there is something on it.
     var topologyResultsPageUp: Bool { !viewOriginal && acceptedVariantCount > 0 }
@@ -14827,13 +14879,17 @@ extension WorkspacePlaceholder {
         // (LatticePrintFlow; only that button follows it)
         // ★ his 11-22 ("Lattice print accurate ... to indicate that there would be another step in between"): with an Organic
         // lattice on screen, the press makes it print-accurate on the Mac
-        let macStep = !refresh && !runs && ok && LatticeLayoutPreview.organic(project.lattice) && newEngine.bars != nil
-            && !newEngine.laying && !newEngine.showsFile
+        // ★ notes25 (his Img 4): "Lattice" once the print-accurate lattice is on screen (the iPad's exact, current; LatticeMacStep)
+        let macStep = !refresh && !runs && LatticeMacStep.makesPrintAccurate(ready: ok, organic: LatticeLayoutPreview.organic(project.lattice),
+            laid: newEngine.bars != nil, laying: newEngine.laying, showsFile: newEngine.showsFile, exactOnScreen: latticeExactOnScreen)
         let normal = LatticePrintFlow.Look(title: refresh ? LatticePreviewMode.refreshButton : runs ? LatticeSetupCopy.running
                                                 : macStep ? LatticeMacMakeCopy.button : "Lattice",
                                            subtitle: refresh ? LatticePreviewMode.refreshLine : macStep ? LatticeMacMakeCopy.buttonLine : line,
                                            state: refresh ? .ready : state, progress: laying)
-        return LatticeRunButtonFlow(flow: .shared, projectID: project.id, normal: normal, layProgress: newEngine.layProgress,
+        // ★ notes25 (his 11-23, D4): nothing of the lattice he asked for can be laid (the solid notice's own 100 %) — "Cannot
+        // Lattice", greyed, not pressable (LatticeCannotLattice)
+        let cannot = !refresh && !runs && newEngineDrawn && !newEngine.laying && LatticeCannotLattice.applies(newEngine.solidReason)
+        return LatticeRunButtonFlow(flow: .shared, projectID: project.id, normal: LatticeCannotLattice.look(normal, cannot: cannot), layProgress: newEngine.layProgress,
                                     fileRunning: runs, current: { latticePrintKey },
                                     saved: { model.latticeResultApproved(project) }) { tap in   // ★ 11-23: from the saved file
             switch tap {
@@ -14855,7 +14911,7 @@ extension WorkspacePlaceholder {
     /// ★ B6 s1 (note 21): "Lattice an optimized result ›" — this run's results, each as the Library names it ("v7a"); a tap
     /// opens the Lattice page on that result, as Results' own Lattice does (its entry gate greys one that can't be latticed).
     private var latticeResultChoices: [(index: Int, title: String, enabled: Bool, why: String?)] {
-        guard let o = run.outcome else { return [] }
+        guard let o = topologyOutcome else { return [] }   // ★ notes25: a Topology run's results, never the print file's
         var out: [(index: Int, title: String, enabled: Bool, why: String?)] = []
         for (i, v) in o.variants.enumerated() where v.accepted {
             let e = latticeEntry(i)
@@ -15045,6 +15101,7 @@ extension WorkspacePlaceholder {
                 }
                 .dsPanelRow("settingsRow-\(row.rawValue)")   // ★ B3: SettingsPanelHostedTests; T3: the cue counts it
                 .accessibilityIdentifier("topology-setup-row-\(row.rawValue)")
+                .settingToChange(row.rawValue)   // ★ notes25: "Change settings" marks the row it asks for
             }
         }
         .padding(.horizontal, 14).padding(.vertical, DS.Space.xs)
@@ -15062,7 +15119,7 @@ extension WorkspacePlaceholder {
                 }
             } label: {
                 DSValueBox("\(project.quality.title) \u{00B7} \(project.quality.resolution)\u{00B3}",
-                           systemImage: "square.grid.3x3.fill")
+                           systemImage: "dial.medium")   // ★ notes25 icons: Quality (the grid is Lattice alone)
             }
             .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain).fixedSize()
         case .plate:
@@ -15079,7 +15136,7 @@ extension WorkspacePlaceholder {
                 gravityDraft = nil
                 gravitySnapLabel = nil
             } label: {
-                DSValueBox("\(gravityDirectionLabel) \u{00B7} Change", systemImage: "arrow.down")
+                DSValueBox("\(gravityDirectionLabel) \u{00B7} Change", systemImage: "arrow.down.to.line")
             }
             .buttonStyle(.plain)
         case .minimizePlastic:
@@ -15661,7 +15718,7 @@ extension WorkspacePlaceholder {
     // Library (B3): Export from a card — ★ B4: Results on the chosen result (its Export button is the finished shape core
     // made; the Smooth page that used to open here is gone), once its results are in
     private func openLibraryExportIfReady() {
-        guard let r = libraryExportVariant, acceptedVariantCount > 0 else { return }
+        guard let r = libraryExportVariant, project.hasResults else { return }   // ★ notes25: either stage's (the last run's)
         libraryExportVariant = nil
         // ★ 11-23: a print file's result opens in the Lattice stage
         let home: WorkspaceStage = LatticeSavedResult.opensInLattice(run.outcome) ? .lattice : .topology
@@ -15692,8 +15749,9 @@ extension WorkspacePlaceholder {
             StageCapsule.Item(id: r.id, title: r.title, detail: r.detail, enabled: r.enabled, checked: r.checked,
                               action: LatticeStageMenu.capsuleAction(r.target))
         }
-        // ★ his notes 11-23: over its Results too (no page lit), Setup and Lattice each close Results — the way back to editing
-        let page: StageCapsule.Page = topologyResultsPageUp ? .tertiary
+        // ★ his notes 11-23: over its Results too, Setup and Lattice each close Results — the way back to editing
+        // ★ notes25 (his 11-23, Img 4): Results is the third tab, lit while it is up (hidden with no lattice result yet)
+        let page: StageCapsule.Page = latticeResultsPageUp ? .tertiary
             : LatticeStagePage.current(cellsUp: showLatticeWizard) == .cells ? .secondary : .primary
         HStack(spacing: DS.Space.s) {
             StageCapsule(project: project, title: LatticeStageMenu.title(typeInUse: mode),
@@ -15705,10 +15763,12 @@ extension WorkspacePlaceholder {
                          primary: { leaveLatticeCells(); viewOriginal = true },
                          secondary: { viewOriginal = true; showLatticeWizard = true },
                          about: { showLatticeModeSheet = true },
+                         tertiaryTitle: LatticeResultsTab.title, tertiary: { leaveLatticeCells(); viewOriginal = false },
                          greyed: mode == nil ? [.primary, .secondary] : [],
                          menuRows: rows,
                          editFaces: { openEditFaces() },
-                         changeType: { askChangeLatticeType() })
+                         changeType: { askChangeLatticeType() },
+                         hidden: LatticeResultsTab.hidden(hasResult: latticeResultCount > 0))
                 .onDeleteStage { deleteLatticeStageAsk = true }
             // ★ B6 s1 (the reviewer's Q3 (c)): "on −35 %" left the stage row — the corner's ⌃ says it, under "Lattice an
             // optimized result"
@@ -15811,7 +15871,6 @@ extension WorkspacePlaceholder {
         // ★ B2 (Q3 (c)) → B6: what the lattice builds on ("on −35 %") is ⌃'s to say now, under the result it came from
         let builtOn = LatticeStageCopy.builtOn(achievedVolumeFraction: latticeVariantContext?.achievedVolumeFraction)
         var items: [CornerMoreItem] = []
-        if acceptedVariantCount > 0 { items.append(latticeResultsItem) }   // ★ 11-23: its result (latticeResultsItem)
         if LatticeLayoutPreview.needsStress(project.lattice) {   // ★ his 11-20: "add a button option in the carrot"
             items.append(.action(StressCheckCopy.menuTitle,
                                  line: latticeSim.phase == .running ? StressCheckCopy.menuRunning : StressCheckCopy.menuLine,
@@ -15965,7 +16024,7 @@ enum LatticeRegionCellMemo {
 extension WorkspacePlaceholder {
     /// A new Organic result that does not certify starts its walk; the result already walked keeps its place.
     func startCertifyWalk() {
-        guard LatticeLayoutPreview.organic(project.lattice), let o = run.outcome else { return }
+        guard LatticeLayoutPreview.organic(project.lattice), let o = latticeOutcome else { return }   // ★ notes25: the print file's
         let key = o.reportJSON?.hashValue ?? 0
         if let w = model.certifyWalk, w.version == project.id, w.key == key { return }
         model.certifyWalk = OrganicCertify.walk(version: project.id, reportJSON: o.reportJSON,
@@ -15976,10 +16035,26 @@ extension WorkspacePlaceholder {
     var certifyCard: OrganicCertifyCard? {
         guard let w = model.certifyWalk, w.version == project.id, let issue = w.current else { return nil }
         return OrganicCertifyCard(issue: issue, step: w.step, grid: w.grid, solvedLines: w.currentSolved ? w.infillLines : nil,
-                                  next: { certifyAdvance() }, skip: { certifyAdvance() }, solve: { certifySolve(issue) })
+                                  advice: OrganicCertifyAdvice.advice(issue, certifyContext(issue)),   // ★ notes25 B4
+                                  next: { certifyAdvance() },
+                                  skip: { OrganicCertifyCard.controlSkipLeaves ? certifyAdvance() : certifySkip() },   // ★ notes25 B2/B5
+                                  solve: { certifySolve(issue) })
     }
 
-    /// Next or Skip. After the last pop-up the part's Lattice stage shows, where his re-check question is.
+    /// ★ notes25 B4: the settings as they stand, for the pop-up's value to try (the struts' group, its strut thickness).
+    func certifyContext(_ issue: OrganicCertify.Issue) -> OrganicCertifyAdvice.Context {
+        OrganicCertifyAdvice.context(project, partLimits: newEngine.organicAutoLimits, groupLimits: newEngine.organicGroupLimits,
+                                     weakestWidthMM: issue.strutWidthMM)
+    }
+
+    /// ★ notes25 B2/B5 (his 11-23: "When tapping 'Skip' it immediately exits out of the Results screen. It should close the
+    /// pop-up and stay on the Results page"; "'Skip' closes that notification and goes to the next one if there is one"): the
+    /// next pop-up, or none; Results stays. (Skip ran `certifyAdvance`, whose end leaves Results for the Lattice stage.)
+    func certifySkip() {
+        model.certifyWalk?.skip()
+    }
+
+    /// Next. After the last pop-up the part's Lattice stage shows, where his re-check question is.
     func certifyAdvance() {
         model.certifyWalk?.next()
         if model.certifyWalk?.done == true {
@@ -16004,6 +16079,12 @@ extension WorkspacePlaceholder {
             return
         }
         model.certifyWalk?.next()
+        // ★ notes25 B6: the field that fixes it — the ONE way there "Change settings" takes too (lit, in the middle, its tab)
+        let context = certifyContext(issue)
+        if let ask = OrganicCertifyAdvice.advice(issue, context)?.settingToChange(group: context.groupID) {
+            openSettingToChange(ask)
+            return
+        }
         viewOriginal = true
         goToLatticeType()
     }
@@ -16049,6 +16130,78 @@ extension WorkspacePlaceholder {
                                 dismiss: LatticeMacMakeCopy.cancel)
     }
 
+    /// ★ his 11-22 · ★ notes25 (A5): the print file's chain ended with its run (the card goes). No Mac (Organic): Try again /
+    /// Make it on the iPad / Cancel, as before; any other stop: the centred pop-up with the engine's own reason — never a
+    /// line on the button, never nothing. True: a pop-up said it.
+    func latticeChainEnded(_ ph: RunPhase) -> Bool {
+        guard ph != .running, LatticeMacMake.shared.isMaking(project.id) else { return false }
+        let request = LatticeMacMake.shared.request
+        LatticeMacMake.shared.ended()
+        guard ph == .failed, run.failureShowsOnButton else { return false }
+        let stopped = LatticeMacMakeCopy.macStopped(run.lastEngineFailureText)
+        if stopped, let request, LatticeLayoutPreview.organic(project.lattice) { macNotAnsweringPopup(request); return true }
+        latticeFilePopup((run.lastEngineError as? LatticeFileRun.Failure)?.refusal,
+                         tryAgain: stopped ? request : nil)
+        return true
+    }
+
+    /// ★ notes25: "The print file couldn't be made" — the engine's refusal as its pop-up says it (`LatticeFileRefusal.popUp`:
+    /// the plain reason with "Show me", "Change settings", OK; or, Auto having adjusted it, his words with "Lattice again",
+    /// "Change settings", "Show me"); no refusal read: what went wrong and what to do.
+    func latticeFilePopup(_ refusal: LatticeFileRefusal?, tryAgain: RunRequest?) {
+        let log = run.lastEngineFailureText
+        guard let refusal else {
+            AppPopups.shared.show(LatticeMacMakeCopy.failedTitle, LatticeMacMakeCopy.failedText(log, onMac: run.isRemote), log: log,
+                                  action: tryAgain.map { r in (LatticeMacMakeCopy.tryAgain, { startLatticeRun(r) }) })
+            return
+        }
+        let p = refusal.popUp
+        let acts: [(title: String, run: () -> Void)] = p.buttons.compactMap { b in
+            switch b {
+            case .latticeAgain: return (LatticeFileRefusal.latticeAgain, { requestLatticeRun() })
+            case .changeSettings: return (LatticeFileRefusal.changeSettings, { openSettingToChange(refusal.settingToChange) })
+            case .showMe: return refusal.findingsAt.first.map { at in (LatticeFileRefusal.showMe, { showLatticeFileSpot(at) }) }
+            case .ok: return nil
+            }
+        }
+        let dismiss = p.buttons.contains(.ok) ? LatticeFileRefusal.ok : nil
+        if acts.count >= 2 {
+            AppPopups.shared.choose(p.title, p.text, log: log, first: acts[0], second: acts[1], third: acts.count > 2 ? acts[2] : nil,
+                                    dismiss: dismiss)
+        } else {
+            AppPopups.shared.show(p.title, p.text, log: log, action: acts.first)
+        }
+    }
+
+    /// ★ notes25 ("Show me"): the view turns to the spot (the part's own mm) and the spot is marked on the part.
+    func showLatticeFileSpot(_ at: SIMD3<Double>) {
+        guard let mesh = stageMesh else { return }
+        let m = SIMD3<Float>(at), b = mesh.bounds
+        cameraModel.adopt(LatticeFileSpot.camera(cameraModel.camera, showing: m, centre: b.center, settle: settleQuat,
+                                                 radius: b.radius))
+        LatticeFileSpot.shared.mark(m, version: project.id)
+    }
+
+    /// ★ notes25 ("Change settings" must "lead to the settings page, scrolling to and highlighting the field to change along
+    /// with what to try"): THE ONE WAY THERE — the page (the Lattice page, Topology's Settings, or Selections), the field marked
+    /// with what to try (SettingToChange). The fix wizard's "Solve" (builder B) is to share it at merge.
+    func openSettingToChange(_ a: SettingToChange.Ask) {
+        viewOriginal = true
+        switch a.page {
+        case .lattice:
+            if showLatticePage { closeLatticePage() }   // ★ notes25 B6: as the Settings' own way in (goToLatticeType)
+            if stage != .lattice { goToStage(.lattice) }
+            showLatticeWizard = true
+        case .topologySettings:
+            if stage != .topology { goToStage(.topology) }
+            setupPanelOpen = true
+        case .selections:
+            if stage != .lattice { goToStage(.lattice) }
+            selectionsCollapsed = false
+        }
+        SettingToChange.shared.ask = a
+    }
+
     /// ★ his 11-22 ("Check right after"): the Mac's file as soon as it is saved — read off the main thread, its lattice drawn in
     /// place of the one on screen (the same body, opened the same way), the card closed; the check goes on.
     func macEarlyFile(checkFollows: Bool) -> LatticeFileRun.Early {
@@ -16083,6 +16236,30 @@ extension WorkspacePlaceholder {
     // MARK: ★ his 11-22 (img 47): "Generate the print-accurate preview first, then change the button to 'Approved' and that
     // should lead to the export page/modal" (LatticePrintFlow)
 
+    /// ★ notes25 (his Img 4): the iPad's exact (print-accurate) lattice is laid for exactly these settings, Print-accurate
+    /// preview on — the Lattice button is "Lattice" then, never "Make print-accurate" (LatticeMacStep).
+    var latticeExactOnScreen: Bool {
+        LatticeMacStep.exactOnScreen(printAccurate: appSettings.latticePrintAccurate, quality: newEngine.organicQuality,
+                                     current: newEngine.isCurrent(project: project, stress: newEngineStress),
+                                     laying: newEngine.laying)
+    }
+
+    /// ★ notes25 (A4, his rule "The drawing follows the print file. Always."): with Print-accurate preview on, the version's
+    /// print file made for exactly these settings is drawn in place of the iPad's own lattice — its strengthening with it
+    /// (LatticeSavedFileDrawing). A settings change lays the iPad's own again.
+    func drawSavedPrintFile() {
+        guard LatticeSavedFile.drawn(
+            printAccurate: appSettings.latticePrintAccurate, organic: LatticeLayoutPreview.organic(project.lattice),
+            laid: newEngine.bars != nil, laying: newEngine.laying, showsFile: newEngine.showsFile, madeForNow: true),
+              let o = LatticeSavedResult.madeForNow(project, ranWith: model.resultRanWith[project.id]) else { return }
+        LatticeSavedFileDrawing.shared.draw(o, project: project, preview: newEngine, stress: newEngineStress)
+    }
+    /// What `drawSavedPrintFile` reads that can change (the lattice on screen, the switch, the result).
+    var savedPrintFileKey: [Int] {
+        [newEngine.bars?.token ?? -1, newEngine.laying ? 1 : 0, newEngine.showsFile ? 1 : 0,
+         appSettings.latticePrintAccurate ? 1 : 0, latticeResultCount, run.phase == .running ? 1 : 0]
+    }
+
     /// What the print file is made from now (a change of it gives the Approved button back).
     var latticePrintKey: LatticeLayoutPreview.LayInputs? {
         guard let path = project.importedFile?.path else { return nil }
@@ -16103,7 +16280,7 @@ extension WorkspacePlaceholder {
 
     /// ⌃ Export… is live with a lattice preview on screen (a Draft too), or results to open.
     var latticeExportLive: Bool {
-        acceptedVariantCount > 0 || (newEngineDrawn && newEngine.bars != nil && canLatticeThis)
+        project.hasResults || (newEngineDrawn && newEngine.bars != nil && canLatticeThis)   // ★ notes25: either stage's result
     }
 
     /// ⌃ Export…: Approved opens the export; a lattice on screen makes the print file as the Lattice button does; otherwise
@@ -16119,14 +16296,12 @@ extension WorkspacePlaceholder {
             requestLatticeRun()
             return
         }
+        if latticeResultCount == 0, acceptedVariantCount > 0 { goToStage(.topology) }   // ★ notes25: Topology's own Results
         viewOriginal = false
     }
 
-    /// ★ his notes 11-23 ("If going to edit it, the "results" screen should be in the Lattice Stage"): the Lattice ⌃'s first row
-    /// whenever the version has a result — it opens that result, never a new run.
-    var latticeResultsItem: CornerMoreItem {
-        .action(LatticeResultsMenuCopy.title, line: LatticeResultsMenuCopy.line, id: "lattice-split-results") { viewOriginal = false }
-    }
+    // ★ notes25 (his follow-up: "when adding the Results tab to lattice, remove it from the ^ menu"): the ⌃'s "Results" row is
+    // gone; the Lattice stage's Results tab opens its result (LatticeResultsTab).
 }
 
 

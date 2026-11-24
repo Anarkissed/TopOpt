@@ -497,9 +497,9 @@ struct FlexiblePlanCutLayer: View {
                          set: @escaping (Double) -> Void) -> some View {
         HStack(spacing: 2) {
             label(t)
-            round("arrow.counterclockwise", "\(t) \u{2212}15\u{00B0}", key: "\(key)Minus") { set(max(range.lowerBound, value - 15)) }
+            round("rotate.left", "\(t) \u{2212}15\u{00B0}", key: "\(key)Minus") { set(max(range.lowerBound, value - 15)) }
             field(key, t, value, unit: "\u{00B0}", step: 1, range: range, commit: set)
-            round("arrow.clockwise", "\(t) +15\u{00B0}", key: "\(key)Plus") { set(min(range.upperBound, value + 15)) }
+            round("rotate.right", "\(t) +15\u{00B0}", key: "\(key)Plus") { set(min(range.upperBound, value + 15)) }
         }
     }
 

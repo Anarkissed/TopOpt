@@ -21,6 +21,7 @@ struct ComputeLocationControl: View {
                     if warnSelected {
                         Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 11, weight: .bold))
                             .foregroundStyle(DS.Color.danger.color)
+                            .background(DSParts.publish("computeSkewMark"))   // ★ notes25 (D9): its frame, for the tests
                     }
                     DSValueBox(compute.label, systemImage: iconName)
                 }
@@ -32,6 +33,7 @@ struct ComputeLocationControl: View {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(DS.Color.danger.color)
+                        .background(DSParts.publish("computeSkewMark"))   // ★ notes25 (D9): its frame, for the tests
                 }
             }
             .foregroundStyle(DS.Color.textPrimary.color)

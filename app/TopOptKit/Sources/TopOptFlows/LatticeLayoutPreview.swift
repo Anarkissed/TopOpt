@@ -497,7 +497,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         var b = r.bars
         b.dimmed = false
         if !solidWanted { b.solid = nil }
-        bars = b; laid = r.laid; timing = r.timing
+        bars = b; laid = r.laid; timing = Self.inStrands(r.timing, r.numbers)   // ★ notes25
         shownWhere = (b.token, MapWhere(path: r.inputs.path, settings: r.inputs.settings, stressKey: r.inputs.stress.key))   // ★ 11-22
         organicQuality = r.quality; organicNumbers = r.numbers; problem = r.problem; notes = r.notes
         organicLaidGroups = r.quality == .exact ? r.groups : nil; organicRefusals = []
@@ -903,7 +903,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         laid = l
         timing = Timing(openMS: openMS, readMS: r.layout.msRead, cellsMS: r.msTrace, barsMS: r.layout.msBars, bars: seg.count)
         timing?.organicLine = Self.organicTimeLine(mode: grown ? .grown : .traced, draft: r.quality == .draft, ms: r.ms,
-                                                   struts: seg.count)
+                                                   strands: r.strands)   // ★ notes25: strands (the print file's count too)
         organicQuality = r.quality
         organicNumbers = OrganicNumbers(strands: r.strands, segments: seg.count, ms: r.ms, draft: r.quality == .draft,
                                         limitsMeasured: organicLimits?.limits?.measured == true)
@@ -934,11 +934,23 @@ public final class LatticeLayoutPreview: ObservableObject {
         if more, !Task.isCancelled { try await layOrganic(session, path: path, s, draft: false, afterDraft: true) }
     }
 
-    /// The Organic lay's line: "Organic Grown · Exact · laid in 3.8 s · 63,670 struts".
-    static func organicTimeLine(mode: LatticeOrganicLook.Mode, draft: Bool, ms: Double, struts: Int) -> String {
-        let n = NumberFormatter.localizedString(from: NSNumber(value: struts), number: .decimal)
-        return String(format: "Organic %@ \u{00B7} %@ \u{00B7} laid in %.1f s \u{00B7} %@ struts", mode.title,
+    /// The Organic lay's line: "Organic Grown · Exact · laid in 3.8 s · 12,605 strands".
+    /// ★ notes25 (362's numbers investigation): it counted the drawn tube pieces as "struts" — a third meaning of the word (the
+    /// print file counts the engine's bars, the strength check its frame struts). It counts STRANDS now: the same number on the
+    /// iPad and in the print file (the Printing tab's "Strands").
+    static func organicTimeLine(mode: LatticeOrganicLook.Mode, draft: Bool, ms: Double, strands: Int) -> String {
+        let n = NumberFormatter.localizedString(from: NSNumber(value: strands), number: .decimal)
+        return String(format: "Organic %@ \u{00B7} %@ \u{00B7} laid in %.1f s \u{00B7} %@ strands", mode.title,
                       draft ? "Draft" : "Exact", ms / 1000, n)
+    }
+
+    /// ★ notes25: a lattice kept from before says strands too (its line was saved saying "struts").
+    static func inStrands(_ t: Timing?, _ n: OrganicNumbers?) -> Timing? {
+        guard var t, let line = t.organicLine, line.hasSuffix(" struts"), let n,
+              let cut = line.range(of: " \u{00B7} ", options: .backwards) else { return t }
+        t.organicLine = String(line[..<cut.upperBound])
+            + NumberFormatter.localizedString(from: NSNumber(value: n.strands), number: .decimal) + " strands"
+        return t
     }
 
     // MARK: ★ his ask 11-22: "prints the time it took and what changes occurred for each generation" (GenerationTimingLog)
@@ -1128,6 +1140,43 @@ public final class LatticeLayoutPreview: ObservableObject {
         let then = try await unheldShare(fine, box) ?? now
         return Swift.max(0, (now - then) / now)
     }
+
+    /// ★ notes25 (D10, his 11-23 img 4: "Structural can't lattice the glowing walls" — and no wall glowed): on the new engine the
+    /// thin-wall pop-up had its finding but no glow (the glow's mask was the old bake's). The glow from THIS lay: core's own
+    /// answer for each place of a coarse grid over the part (`whereAt`, the last layout's Why) — the places he asked to lattice
+    /// that it left solid because no cell fits or the wall is too thin for one (`wallTooThin`, `noCellFits`) — made into the
+    /// part's per-vertex tints by the old glow's own look (LatticeThinWallGlow: those walls electric blue, the rest dimmed).
+    /// [] when there is no lay, it is laying, or no such place.
+    public func thinWallGlow(mesh: ViewerMesh) async -> [Float] {
+        guard let session, let box, !laying else { return [] }
+        let ext = simd_max(box.hi - box.lo, SIMD3(repeating: 0.1))
+        let voxel = Swift.max(0.5, Float(cbrt(Double(ext.x * ext.y * ext.z) / Self.glowPoints)))
+        let nx = Int((ext.x / voxel).rounded(.up)) + 3, ny = Int((ext.y / voxel).rounded(.up)) + 3
+        let nz = Int((ext.z / voxel).rounded(.up)) + 3
+        let origin = box.lo - SIMD3(repeating: voxel)   // voxel (0,0,0)'s centre: a voxel of air all round
+        var points: [SIMD3<Float>] = []
+        points.reserveCapacity(nx * ny * nz)
+        for z in 0..<nz { for y in 0..<ny { for x in 0..<nx {
+            points.append(origin + SIMD3(Float(x), Float(y), Float(z)) * voxel)
+        } } }
+        guard let at = try? await session.whereAt(points), at.count == points.count, !Task.isCancelled else { return [] }
+        let grid = LatticeVoxelGrid(nx: nx, ny: ny, nz: nz, origin: origin, spacing: SIMD3(repeating: voxel), values: [])
+        let tints = await Task.detached(priority: .userInitiated) { () -> [Float] in
+            let thin = at.map { $0.why == .wallTooThin || $0.why == .noCellFits }
+            guard thin.contains(true) else { return [] }
+            let inside = at.map { $0.why != .outside }
+            return LatticeThinWallGlow.vertexTints(mesh: mesh, grid: grid,
+                                                   field: LatticeThinWallGlow.field(thin: thin, inside: inside, grid: grid))
+        }.value
+        var lit = 0, k = 7
+        while k < tints.count { if tints[k] > 0.03 { lit += 1 }; k += 8 }
+        Self.lastGlowLit = lit
+        return tints
+    }
+    /// About how many places the glow asks core about (a coarse grid; the glow is soft).
+    static let glowPoints = 120_000.0
+    /// Test hook: how many of the part's vertices the last glow lit.
+    nonisolated(unsafe) static var lastGlowLit = 0
 
     /// ★ his ruling 11-14: why asked-for lattice is solid, and the fixes (after every layout: one coarse map).
     private func solidReasonCheck(lattice: LatticeSettings) async {
@@ -1345,6 +1394,14 @@ public final class LatticeLayoutPreview: ObservableObject {
         }
     }
 
+    /// ★ cells across a wall (C3-C5) the engine is asked for: Structural five; Aesthetic one with "Allow single-cell members",
+    /// else two; his own minimum (control 2) over either. ★ notes25 (D8): the one place this rule lives — the thin-wall
+    /// pop-up says these numbers (LatticeThinWallReasons).
+    nonisolated public static func minCellsAcross(_ l: LatticeSettings) -> Int32 {
+        if let n = l.cellsAcrossMin, n >= 1 { return Int32(n) }   // ★ control 2: his minimum
+        return (l.stageMode ?? .structural) == .aesthetic ? (l.singleCellMembers ? 1 : 2) : 5
+    }
+
     /// Lattice Setup's settings for core's lattice_layout (read where its rows read them).
     public static func settings(_ p: ProjectModel, referenceMPa: Double = 0) -> LatticeLayoutSession.Settings {
         var s = LatticeLayoutSession.Settings()
@@ -1418,8 +1475,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         s.smallCellsInThinWalls = l.smallCellsInThinWalls   // ★ his per-part choice (11-13)
         // ★ cells across a wall (C3-C5): Structural five; Aesthetic one with "Allow single-cell members", else two
         let aesthetic = (l.stageMode ?? .structural) == .aesthetic
-        s.minCellsAcross = aesthetic ? (l.singleCellMembers ? 1 : 2) : 5
-        if let n = l.cellsAcrossMin, n >= 1 { s.minCellsAcross = Int32(n) }   // ★ control 2: his minimum
+        s.minCellsAcross = Self.minCellsAcross(l)   // ★ notes25 (D8): the one rule, read by the thin-wall pop-up too
         if l.neverSkipCellSize, s.algorithm == "default_grade" { s.maxStep = 2 }   // ★ control 4 (Default Grade only)
         s.oneGrid = aesthetic && l.letWallsCutCells   // ★ his 11-14: Aesthetic only; Structural always sends false
         // ★ density (R10): core's dial is the percent he sees / 100 (0.01 thinnest ... 1 widest); a typed strut width wins

@@ -48,6 +48,10 @@ public enum OrganicCertify {
         public var solve: Solve?
         /// The worst margin among its spots (to order within a stage).
         public var worst: Double
+        /// ★ notes25 B4: the margin it needs (the check's safety margin), for the pop-up's value to try.
+        public var needs: Double = 1.5
+        /// ★ notes25 B4: the weakest strut's width (mm), when the struts govern (whose group's struts they are).
+        public var strutWidthMM: Double? = nil
     }
 
     /// One weak spot of the solid, as the check lists it.
@@ -91,31 +95,37 @@ public enum OrganicCertify {
         if reason == "load_on_open_lattice" {
             out.append(Issue(id: "load_on_open_lattice", stage: .lattice, title: "The load lands on open lattice",
                              text: "Nothing carries it to the fixings. Protect the loaded face to keep it solid, then check again.",
-                             spotIDs: [], at: nil, solve: .protectLoadedFace, worst: 0))
+                             spotIDs: [], at: nil, solve: .protectLoadedFace, worst: 0, needs: safety))
         }
         let struts = s["struts"] as? [String: Any] ?? [:]
         let under = (struts["under_safety"] as? NSNumber)?.intValue ?? 0
         if under > 0 {
-            let weakest = (s["weakest"] as? [[String: Any]] ?? []).compactMap { w -> (SIMD3<Double>, Double)? in
+            let weakest = (s["weakest"] as? [[String: Any]] ?? []).compactMap { w -> (SIMD3<Double>, Double, Double?)? in
                 guard let at = v3(w["at"]) else { return nil }
-                return (at, num(w["margin"]) ?? 0)
+                return (at, num(w["margin"]) ?? 0, num(w["width_mm"]))
             }.min { $0.1 < $1.1 }
-            let smallest = num(struts["smallest_margin"]) ?? weakest?.1 ?? 0
-            let sum = report[LatticeFileButton.strengthenKey] as? [String: Any]
-            let rounds = (sum?["rounds"] as? [Any])?.count
-            let after = rounds.map { " after \($0 == 1 ? "1 round" : "\($0) rounds") of strengthening" } ?? ""
+            // ★ notes25 (merged with builder C): a print file's ONE strength answer (LatticeStrengthAnswer — what Results' lines,
+            // Details and Break say), when the report is a print file's; else the check's own block as before
+            let answer = LatticeStrengthAnswer.decode(report: report)
+            let smallest = answer?.strutMargin ?? num(struts["smallest_margin"]) ?? weakest?.1 ?? 0
+            let needs = answer?.required ?? safety
+            // the line goes where it gives way: the governing place when the struts govern, else the weakest strut
+            let at = answer.flatMap { $0.governs == .strut ? $0.place : $0.weakest.first?.at } ?? weakest?.0
+            // ★ notes25 B7: the rounds that ADDED material (core's `rounds_fixed`: the Checks panel's own reading,
+            // LatticeFileFacts.strengthening), never the checks (the `rounds` array holds one more: the last check)
+            let rounds = LatticeFileFacts.strengthening(report[LatticeFileButton.strengthenKey] as? [String: Any])?.rounds
             out.append(Issue(id: "struts_short", stage: .lattice,
                              title: under == 1 ? "1 strut is still short" : "\(under) struts are still short",
-                             text: String(format: "The weakest holds %.2f× your load%@; it needs %.1f×. Thicker struts fix it: "
-                                          + "raise the strut thickness, or let strengthening go further past it.",
-                                          smallest, after, safety),
-                             spotIDs: [], at: weakest?.0, solve: .strutThickness, worst: smallest))
+                             text: OrganicCertifyCopy.strutsShort(holds: smallest, rounds: rounds, needs: needs),
+                             spotIDs: [], at: at, solve: .strutThickness, worst: smallest, needs: needs,
+                             strutWidthMM: answer?.weakest.first?.widthMM ?? weakest?.2))
         }
         let spots = Self.spots(s)
         let byIssue = Dictionary(grouping: spots, by: \.issue)
         if let near = byIssue["beside_the_lattice"], let w = near.min(by: { $0.effectiveMargin < $1.effectiveMargin }) {
             out.append(Issue(id: "beside_the_lattice", stage: .lattice, title: plural(near.count, "weak area beside the lattice"),
-                             text: w.advice, spotIDs: near.map(\.id), at: w.worstAt, solve: .keepLatticeAway, worst: w.effectiveMargin))
+                             text: w.advice, spotIDs: near.map(\.id), at: w.worstAt, solve: .keepLatticeAway, worst: w.effectiveMargin,
+                             needs: safety))
         }
 
         // ── infill: the ONLY place it changes (his words: "the 81% infill is one solution, but ... the other is to
@@ -129,7 +139,7 @@ public enum OrganicCertify {
                    + "strengthen the areas pointed to."
             out.append(Issue(id: "infill", stage: .infill, title: "Print it at \(pass)% infill",
                              text: text, spotIDs: spots.map(\.id), at: worst?.worstAt, solve: .infill(percent: pass),
-                             worst: worst?.effectiveMargin ?? (num(solid["effective"]) ?? 0)))
+                             worst: worst?.effectiveMargin ?? (num(solid["effective"]) ?? 0), needs: safety))
         }
 
         // ── the model ──
@@ -137,7 +147,7 @@ public enum OrganicCertify {
                              ("inside_the_solid", "weak area inside the solid")] {
             guard let group = byIssue[key], let w = group.min(by: { $0.effectiveMargin < $1.effectiveMargin }) else { continue }
             out.append(Issue(id: key, stage: .model, title: plural(group.count, title), text: w.advice, spotIDs: group.map(\.id),
-                             at: w.worstAt, solve: nil, worst: w.effectiveMargin))
+                             at: w.worstAt, solve: nil, worst: w.effectiveMargin, needs: safety))
         }
         // ── a fail none of the above covers (nothing carries the load; the check's own words): one pop-up says why ──
         if out.isEmpty, verdict == "fail" {

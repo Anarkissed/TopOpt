@@ -72,11 +72,11 @@ struct CutBar: View {
                          set: @escaping (Double) -> Void) -> some View {
         HStack(spacing: 4) {
             label(t)
-            round("arrow.counterclockwise", "\(t) \u{2212}15\u{00B0}", key: "\(key)Minus", accent: false) { set(value - 15) }
+            round("rotate.left", "\(t) \u{2212}15\u{00B0}", key: "\(key)Minus", accent: false) { set(value - 15) }
             NumberField(key: key, title: t,
                         spec: FlexNumberSpec(value: value, unit: "\u{00B0}", step: 1, range: range, decimals: 0, wraps: wraps),
                         size: .bare, allowsNegative: range.lowerBound < 0, onCommit: set)
-            round("arrow.clockwise", "\(t) +15\u{00B0}", key: "\(key)Plus", accent: false) { set(value + 15) }
+            round("rotate.right", "\(t) +15\u{00B0}", key: "\(key)Plus", accent: false) { set(value + 15) }
         }
     }
 

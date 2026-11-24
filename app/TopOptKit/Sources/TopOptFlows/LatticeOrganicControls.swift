@@ -112,7 +112,8 @@ struct LatticeOrganicControls: View {
                         .labelsHidden().toggleStyle(.switch)
                 }
                 .accessibilityIdentifier("organic-Extra spacing between vines")
-                if look.extraSpacingValue(aesthetic: aesthetic) { say("Will likely lose strength") }
+                // ★ his iPad notes 11-23 (img 9): "Will likely lose strength" showed twice with it on — its grey caption
+                // (OrganicSettingsHelp) and this line. The caption says it; this line is gone.
             }
             if on(.linkWidth) { number("Link thickness", "× strut", \.linkWidth, auto: 1) { LatticeOrganicLook.Check.link($0) } }
             if on(.unbracedOther) {
@@ -288,6 +289,7 @@ struct LatticeOrganicControls: View {
             refused(label)
         }
         .accessibilityIdentifier("organic-" + label)
+        .settingToChange(label, also: label == "Cell size" ? [LatticeWizardSetting.cellSize.rawValue] : [])   // ★ notes25 B6: Solve and "Change settings" light it and bring it to the middle (SettingToChange)
     }
 }
 

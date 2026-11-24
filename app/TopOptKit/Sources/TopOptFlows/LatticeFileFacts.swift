@@ -55,6 +55,8 @@ public struct LatticeFileFacts: Equatable, Sendable {
     /// The share of the load the lattice's struts carry (0…1).
     public var loadOnStruts: Double?
     public var strengthening: Strengthening?
+    /// ★ notes25 C3: the struts the final check found short of the margin (`struts.under_safety`).
+    public var strutsShort: Int? = nil
 
     /// A Lattice run's report (it has `layout` and `mesh`), else nil.
     public static func decode(_ r: [String: Any]) -> LatticeFileFacts? {
@@ -83,7 +85,8 @@ public struct LatticeFileFacts: Equatable, Sendable {
             solidInPlane: (solid["in_plane"] as? NSNumber)?.doubleValue, solidLayers: (solid["interlayer"] as? NSNumber)?.doubleValue,
             passesAtInfill: (solid["passes_at_infill_percent"] as? NSNumber)?.intValue,
             loadOnStruts: (frame["load_share"] as? NSNumber)?.doubleValue,
-            strengthening: strengthening(r[LatticeFileButton.strengthenKey] as? [String: Any]))
+            strengthening: strengthening(r[LatticeFileButton.strengthenKey] as? [String: Any]),
+            strutsShort: (struts["under_safety"] as? NSNumber)?.intValue)
     }
 
     static func strengthening(_ o: [String: Any]?) -> Strengthening? {
@@ -109,19 +112,21 @@ public struct LatticeFileFacts: Equatable, Sendable {
     /// The checks list's lines, under the strength lines: the strengthening, the file, the layer check.
     public var checks: [ResultsCheck] {
         var out: [ResultsCheck] = []
+        // ★ notes25 C3 (4): only numbers true for the FINAL lattice — the struts still short, the braces, the thickest strut now
+        // (the per-round "thickened" sum counted a strut once per round, and "past your thickest" mixed two rounds: gone)
         if let g = strengthening, g.rounds > 0 {
-            var more = [Self.count(g.thickened, "strut") + " thickened"]
-            if g.braced > 0 { more.append(Self.count(g.braced, "strut") + " braced") }
-            if g.pastLimit > 0 { more.append(String(format: "%@ past your thickest strut (up to %.1f mm)", Self.count(g.pastLimit, "strut"),
-                                                    g.pastLimitWidestMM)) }
+            var more: [String] = []
+            if g.braced > 0 { more.append(Self.number(g.braced) + " braced") }
+            if g.pastLimitWidestMM > 0 { more.append("thickest now " + StrengthWords.mm(g.pastLimitWidestMM)) }
+            let short = strutsShort.map { $0 > 0 ? Self.count($0, "strut") + " still short" : "Every strut holds" }
             out.append(ResultsCheck(kind: g.passing ? .ok : .warn,
                                     title: "Strengthened \u{00B7} " + Self.count(g.rounds, "round"),
-                                    detail: g.passing ? "Weak struts thickened until they hold" : "Some struts are still short",
-                                    more: more.joined(separator: " \u{00B7} "), tab: .strength))
+                                    detail: g.passing ? "Weak struts thickened until they hold" : (short ?? "Some struts are still short"),
+                                    more: more.isEmpty ? nil : more.joined(separator: " \u{00B7} "), tab: .strength))
         }
         let size = fileBytes > 0 ? " \u{00B7} " + Self.bytes(fileBytes) : ""
         out.append(ResultsCheck(kind: .ok, title: "Print file ready",
-                                detail: Self.count(struts, "strut") + " \u{00B7} " + fileKind + size,
+                                detail: fileKind + size,   // ★ notes25 C3: no strut count (the file's bars are another unit)
                                 more: slicerSupportsOff ? "Turn supports off in your slicer" : nil, tab: .printing))
         out.append(printClean
             ? ResultsCheck(kind: .ok, title: "Prints layer by layer", detail: "Nothing starts in mid-air", tab: .printing)
@@ -138,23 +143,14 @@ public struct LatticeFileFacts: Equatable, Sendable {
         func add(_ l: String, _ v: String?) { if let v, !v.isEmpty { r.append(ResultsDetailRow(label: l, value: v)) } }
         switch t {
         case .strength:
-            if let w = weakest {
-                add("Weakest strut", ResultsVersions.x(w.margin) + (w.by.isEmpty ? "" : " \u{00B7} in " + w.by)
-                    + String(format: " \u{00B7} %.1f mm thick, %.1f mm long", w.widthMM, w.lengthMM))
-            }
-            if strutsJudged > 0 { add("Struts checked", Self.number(strutsJudged)) }
-            if let a = solidInPlane, let b = solidLayers {
-                add("Solid", ResultsVersions.x(a) + " along the layers \u{00B7} " + ResultsVersions.x(b) + " across them")
-            }
-            if let i = passesAtInfill { add("Infill", "Still strong enough at \(i)% infill") }
-            if let s = loadOnStruts, s > 0 { add("Load on the struts", String(format: "%.0f%% of your load", s * 100)) }
-            if let g = strengthening {
-                add("Strengthened", Self.count(g.rounds, "round") + " \u{00B7} " + Self.count(g.thickened, "strut") + " thickened"
-                    + (g.braced > 0 ? ", " + Self.count(g.braced, "strut") + " braced" : ""))
+            // ★ notes25 C3 (6): the strength rows are the governing answer's (LatticeStrengthAnswer.rows); here only what the
+            // strengthening left: its rounds and the braces
+            if let g = strengthening, g.rounds > 0 {
+                add("Strengthened", Self.count(g.rounds, "round") + (g.braced > 0 ? " \u{00B7} " + Self.number(g.braced) + " braced" : ""))
             }
         case .printing:
             add("Print file", fileName + (fileBytes > 0 ? " \u{00B7} " + Self.bytes(fileBytes) : ""))
-            add("Struts", Self.number(struts) + (strands > 0 ? " in " + Self.count(strands, "strand") : ""))
+            if strands > 0 { add("Strands", Self.number(strands)) }   // ★ notes25 C3 (7): the bars are in Run
             if bridges > 0 { add("Bridges", Self.number(bridges)) }
             if posts > 0 { add("Posts", Self.number(posts) + String(format: " \u{00B7} %.0f mm in all", postsMM)) }
             if triangles > 0 { add("Triangles", Self.number(triangles)) }
@@ -164,6 +160,7 @@ public struct LatticeFileFacts: Equatable, Sendable {
             if thinIslands > 0 { add("Thin islands", Self.number(thinIslands) + " (small spots in a layer)") }
             if slicerSupportsOff { add("Slicer", "Supports off") }
         case .run:
+            if struts > 0 { add("Bars in the file", Self.number(struts)) }   // ★ notes25 C3 (7)
             if let g = strengthening, g.seconds > 0 { add("Strengthening", Self.duration(g.seconds)) }
             if let s = fileSeconds, s > 0 { add("Making the file", Self.duration(s)) }
         case .scenarios:

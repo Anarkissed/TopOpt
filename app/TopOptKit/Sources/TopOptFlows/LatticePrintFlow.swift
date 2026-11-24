@@ -133,7 +133,11 @@ struct LatticeRunButtonFlow: View {
 
     var body: some View {
         let l = look()
-        DSRunButton(l.title, subtitle: l.subtitle, state: l.state, key: "latticeButton", progress: l.progress) { tap(l.tap) }
+        DSRunButton(l.title, subtitle: l.subtitle, state: l.state, key: "latticeButton", progress: l.progress) {
+            // ★ notes25 (his Img 1): while the Mac's chain goes, the tap brings its one card back (never a second card)
+            if mac.isMaking(projectID) { mac.reopen(); return }
+            tap(l.tap)
+        }
             .background(l.marker.map { CornerPairStyle.publish($0) })
     }
 
@@ -142,7 +146,8 @@ struct LatticeRunButtonFlow: View {
         var l = flow.look(for: projectID, normal: normal, layProgress: layProgress, fileRunning: fileRunning, current: current,
                           saved: saved)
         guard mac.isMaking(projectID), l.marker == "latticeMakingFile" else { return l }
-        l.subtitle = mac.checking ? LatticeMacMakeCopy.checking : LatticeMacMakeCopy.making
+        // ★ notes25 (A3): the print-accurate lattice on screen already: the print file alone is being made
+        l.subtitle = mac.checking ? LatticeMacMakeCopy.checking : mac.fileOnly ? LatticePrintFlowCopy.making : LatticeMacMakeCopy.making
         l.state = .running(l.subtitle)
         l.progress?.words = l.subtitle
         return l

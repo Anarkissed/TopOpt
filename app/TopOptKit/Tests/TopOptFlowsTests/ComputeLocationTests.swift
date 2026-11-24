@@ -63,7 +63,10 @@ final class ComputeLocationTests: XCTestCase {
         XCTAssertFalse(m.isSkewed(matching), "same fingerprint → no skew")
         XCTAssertTrue(m.isSkewed(skewed), "different fingerprint → skew")
         XCTAssertFalse(m.isSkewed(unknown), "no advertised fingerprint → don't cry wolf")
-        XCTAssertTrue(m.skewMessage(skewed).contains("Update core"),
-                      "skew message points at the Mac app's Update core")
+        // ★ RE-PINNED (notes25, D9 — 362's worker investigation: the worker app has no "Update core…"): the message says what
+        // is wrong and the true fix, the matching release on the Mac (Notes25RunsOnHealthTests pins the whole sentence).
+        XCTAssertFalse(m.skewMessage(skewed).contains("Update core"), "never a menu the worker app does not have")
+        XCTAssertTrue(m.skewMessage(skewed).contains("Install the matching TopOpt release on the Mac"),
+                      "skew message points at the true fix")
     }
 }

@@ -144,7 +144,7 @@ struct NewFaceButton: View {
     static func style(_ k: NewFaceKind) -> (symbol: String, tint: RGBA, fill: Double) {
         switch k {
         case .lattice: return ("square.grid.3x3.fill", StateGlyph.latticeTint, 0)
-        case .anchor: return ("lock.fill", DS.Color.okGreen, 0.20)
+        case .anchor: return ("pin.fill", DS.Color.okGreen, 0.20)   // ★ notes25 icons: Anchor is the pin (the lock is locked)
         case .load: return ("arrow.down", DS.Color.accent, 0.18)
         case .protect: return ("shield.lefthalf.filled", FaceChip.protectTint, 0.16)
         case .keepClear: return ("nosign", DS.Color.clearance, 0.16)

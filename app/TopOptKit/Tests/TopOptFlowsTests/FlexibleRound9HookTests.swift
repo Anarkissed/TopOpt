@@ -206,7 +206,10 @@ final class FlexibleRound9HookTests: XCTestCase {
         let ws = try Self.source(Self.ws)
         // ★ RE-PINNED (UI-Notes B3, #362's own note 1 from his iPad 11-03 15:03: Topology's Optimize is topology only; the lattice rides ⌃ "Optimize, then lattice" and the Lattice stage). The run carries its flavour — `lattice` — through the gate, the card, the copy and the copy's one-shot run. Same gates, same card.
         let body = try XCTUnwrap(ws.range(of: "    private func requestRun(lattice: Bool) {").map { String(ws[$0.lowerBound...].prefix(800)) })   // (B3: + the flavour line and the card guard)
-        let prompt = try XCTUnwrap(body.range(of: "ResultsReplacementPrompt.forNewRun(existing: run.outcome)"))
+        // ★ RE-PINNED (notes25, his 11-23 Img 4: "so that I can ALSO run TO results and have *them* be in the Topology stage -
+        // keeping both in the same version"): Optimize's card asks about TOPOLOGY's result only — a print file's stays on the
+        // version (RunModel.otherOutcome). Same card, same place, before the run.
+        let prompt = try XCTUnwrap(body.range(of: "ResultsReplacementPrompt.forNewRun(existing: topologyOutcome)"))
         let start = try XCTUnwrap(body.range(of: "startRun(lattice: lattice)"))
         XCTAssertLessThan(prompt.lowerBound, start.lowerBound, "the card is asked for before the run starts")
         let callers = ws.components(separatedBy: "startRun(").count - 1

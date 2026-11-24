@@ -182,7 +182,7 @@ public enum LatticeSavedResult {
     /// it) are the version's settings now. Survives a relaunch, unlike the button's memory.
     @MainActor
     public static func approved(_ p: ProjectModel, ranWith: ProjectSnapshot?) -> Bool {
-        guard p.run.phase != .running, let o = p.run.outcome, isPrintFile(o), let ranWith,
+        guard p.run.phase != .running, let o = p.run.outcome(lattice: true), let ranWith,   // ★ notes25: wherever it is kept
               LatticePrintFlow.passes(o, organic: LatticeLayoutPreview.organic(p.lattice), infillNow: p.printParams.infillPercent),
               let now = p.snapshot(savedAt: ranWith.savedAt) else { return false }
         return LibrarySettings.same(ranWith, now)
@@ -196,8 +196,13 @@ public final class ResultsMounted {
     public init() {}
 }
 
-/// ★ his notes 11-23: the Lattice stage's ⌃ item that opens the version's result (a caption of five words at most).
-enum LatticeResultsMenuCopy {
-    static let title = "Results"
-    static let line = "This version’s result"
+/// ★ notes25 (his iPad notes 11-23, Img 4: "The "Results" page is hidden in the ^ menu. It is meant to be next to the
+/// "Setting" tab at the very top, as it is in Topology"; his follow-up: "when adding the Results tab to lattice, remove it from
+/// the ^ menu"): the Lattice stage's third tab, Setup │ Lattice │ Results, opening the version's print file result. (The ⌃'s
+/// "Results" row of 11-23 is gone.)
+enum LatticeResultsTab {
+    /// Topology's own word for its tab.
+    static let title = TopologyPage.results.title
+    /// Hidden — not greyed — while the version has no lattice result: Topology's rule for its Results tab (B8), mirrored.
+    static func hidden(hasResult: Bool) -> Set<StageCapsule.Page> { hasResult ? [] : [.tertiary] }
 }

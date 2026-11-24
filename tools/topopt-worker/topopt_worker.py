@@ -163,6 +163,21 @@ class Job:
         # Count of ACCEPTED variant meshes so far (handoff 124): the History pane on the
         # Mac shows a real outcome summary ("3 variants · 12m") rather than a placeholder.
         self.variants = 0
+        # ★ 362 11-23 (his notes: the window sat on "starting..." for a whole lattice-file job): the job's
+        # command (`mode`: run / lattice-file / organic-strengthen / ...) and its latest stage line from the
+        # CLI ("lattice-file: making the file" -> stage "making the file") with its time, so GET /jobs can
+        # say what a non-optimizer job is doing. And on a failure the engine's plain reason (`message`) and
+        # its `code` from the job's own report, so the iPad can show WHY in a pop-up.
+        self.mode = cmd[1] if isinstance(cmd, (list, tuple)) and len(cmd) > 1 else None
+        self.stage = None
+        self.stage_at = None
+        self.message = None
+        self.code = None
+        # ★ 362 11-23 (his Organic run: the iPad switched apps between the strengthening and the file, so the Mac sat idle
+        # for 10 minutes): a strengthening asked with `then` = file makes its print file ITSELF, on the Mac, from its last
+        # round, as its own job; `next` is that job's id (on this job's record before its `done`), so the iPad follows it.
+        self.then_file = False
+        self.next = None
         # Timestamps (epoch seconds). created = submit; started = promoted to
         # running; finished = terminal.
         self.created_at = time.time()
@@ -180,7 +195,13 @@ class Job:
                 self.iter = event.get("iter")
             elif t == "variant" and event.get("accepted"):
                 self.variants += 1
+            elif t == "log" and self.mode and (event.get("line") or "").startswith(self.mode + ": "):
+                self.stage = event["line"][len(self.mode) + 2:].strip()
+                self.stage_at = time.time()
             elif t in ("done", "error", "cancelled"):
+                if t == "error":
+                    self.message = event.get("message")
+                    self.code = event.get("code")
                 self.done = True
                 self.state = t
                 if self.finished_at is None:
@@ -229,6 +250,12 @@ class Job:
             "rungs": self.rungs,
             "iter": self.iter,
             "variants": self.variants,
+            "mode": self.mode,
+            "stage": self.stage,
+            "stage_at": self.stage_at,
+            "message": self.message,
+            "code": self.code,
+            "next": self.next,
             "position": position,
             "created_at": self.created_at,
             "started_at": self.started_at,
@@ -598,14 +625,95 @@ def run_job_thread(job):
         if job.state == "cancelled":
             return  # a DELETE already posted the terminal event
         if rc == 0:
+            nxt = None
+            if job.then_file:
+                try:
+                    nxt = _chained_file_job(job)
+                except (OSError, ValueError) as e:
+                    print("CHAIN job=%s could not make its file job: %s" % (job.id, e), flush=True)
+                if nxt is not None:
+                    with job.cond:
+                        job.next = nxt.id
+                    SCHED.submit(nxt)
+                    print("CHAIN job=%s next=%s" % (job.id, nxt.id), flush=True)
             meshes = sorted(os.listdir(job.out_dir)) if os.path.isdir(job.out_dir) else []
-            job.emit({"type": "done", "returncode": 0, "artifacts": meshes})
+            done = {"type": "done", "returncode": 0, "artifacts": meshes}
+            if job.next:
+                done["next"] = job.next
+            job.emit(done)
         else:
             msg = "".join(stderr_buf).strip() or f"topopt-cli exited with code {rc}"
-            job.emit({"type": "error", "returncode": rc, "message": msg})
+            ev = {"type": "error", "returncode": rc, "message": msg}
+            # ★ 362 11-23: a refused lattice file says WHY in its own report (ok:false, code, why); carry that
+            # plain reason on the error (and so on the job record) instead of the raw stderr tail.
+            why, code = _report_reason(job.out_dir)
+            if why:
+                ev["message"] = why
+            if code:
+                ev["code"] = code
+            job.emit(ev)
     finally:
         if SCHED is not None:
             SCHED.on_finished(job)
+
+
+def _chained_file_job(job):
+    """The print-file job a finished strengthening makes itself (its `then` = file): the SAME inputs (the model and every
+    file beside its job), its job.json with `strengthened` naming the last round's strengthened.json, that round's
+    strengthened.json and the additions it names copied beside it, run through `lattice-file`. Exactly what the iPad
+    would have sent. None when the strengthening's report is not ok (no file is made from a failed strengthening)."""
+    with open(os.path.join(job.out_dir, "strengthen.json")) as f:
+        rep_doc = json.load(f)
+    if not (isinstance(rep_doc, dict) and rep_doc.get("ok")):
+        return None
+    with open(os.path.join(job.tmpdir, "job.json")) as f:
+        doc = json.load(f)
+    new_id = uuid.uuid4().hex[:16]
+    tmp2 = os.path.join(CFG.workdir, new_id)
+    out2 = os.path.join(tmp2, "out")
+    os.makedirs(out2, exist_ok=True)
+    try:
+        for name in os.listdir(job.tmpdir):
+            src = os.path.join(job.tmpdir, name)
+            if os.path.isfile(src) and name not in ("job.json", "worker.log"):
+                shutil.copy2(src, os.path.join(tmp2, name))
+        last = rep_doc.get("strengthened")
+        if isinstance(last, str) and last and ".." not in last and not last.startswith("/"):
+            spath = os.path.join(job.out_dir, last)
+            with open(spath) as f:
+                sdoc = json.load(f)
+            adds = sdoc.get("additions") if isinstance(sdoc, dict) else None
+            if not isinstance(adds, str) or adds in ("", ".", "..", "strengthened.json") or os.path.basename(adds) != adds:
+                raise ValueError("the last round's strengthened.json names no bare additions file")
+            shutil.copy2(os.path.join(os.path.dirname(spath), adds), os.path.join(tmp2, adds))
+            shutil.copy2(spath, os.path.join(tmp2, "strengthened.json"))
+            doc["strengthened"] = "strengthened.json"
+        job_path = os.path.join(tmp2, "job.json")
+        with open(job_path, "w") as f:
+            json.dump(doc, f)
+    except (OSError, ValueError):
+        shutil.rmtree(tmp2, ignore_errors=True)
+        raise
+    cmd = [CFG.cli, "lattice-file", job_path, "--out", out2]
+    if CFG.materials:
+        cmd += ["--materials", CFG.materials]
+    if CFG.rules:
+        cmd += ["--rules", CFG.rules]
+    return Job(new_id, tmp2, out2, cmd, project_name=job.project_name)
+
+
+def _report_reason(out_dir):
+    """(why, code) from a failed job's own report, e.g. lattice_file.json {"ok": false, "code": ..., "why": ...};
+    (None, None) when there is none. Best-effort: a missing or unreadable report changes nothing."""
+    for name in ("lattice_file.json",):
+        try:
+            with open(os.path.join(out_dir, name)) as f:
+                doc = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if isinstance(doc, dict) and doc.get("ok") is False:
+            return doc.get("why"), doc.get("code")
+    return None, None
 
 
 def _signal_child(job, sig):
@@ -968,6 +1076,18 @@ class Handler(BaseHTTPRequestHandler):
                 shutil.rmtree(tmpdir, ignore_errors=True)
                 return self._json(400, {"error": "run must be organic-strengthen, on a lattice_file job"})
             subcmd = "organic-strengthen"
+        # ★ 362 11-23: "then" = file (only with run = organic-strengthen): the Mac makes the print file from the last round
+        # when the strengthening ends, without waiting for the iPad (see Job.then_file).
+        then_file = False
+        if "then" in fields:
+            try:
+                then = fields["then"]["data"].decode("utf-8").strip()
+            except UnicodeDecodeError:
+                then = None
+            if then != "file" or subcmd != "organic-strengthen":
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                return self._json(400, {"error": "then must be file, on an organic-strengthen run"})
+            then_file = True
         cmd = [CFG.cli, subcmd, job_path, "--out", out_dir]
         if CFG.materials:
             cmd += ["--materials", CFG.materials]
@@ -975,6 +1095,7 @@ class Handler(BaseHTTPRequestHandler):
             cmd += ["--rules", CFG.rules]
 
         job = Job(job_id, tmpdir, out_dir, cmd, project_name=project_name)
+        job.then_file = then_file
         SCHED.submit(job)
         self._json(202, {"job_id": job_id})
 

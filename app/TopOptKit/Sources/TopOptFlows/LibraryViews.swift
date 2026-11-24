@@ -55,13 +55,13 @@ public struct LibraryRootView: View {
             case .flat:
                 HomeView(model: model)
                     .overlay(alignment: .bottom) {
-                        LibraryBanner(icon: "square.stack.3d.up", text: "Sort your copies into parts and versions",
+                        LibraryBanner(icon: "square.stack", text: "Sort your copies into parts and versions",
                                       button: "Review") { grouping = true }
                     }
             case let .unreadable(why):
                 HomeView(model: model)
                     .overlay(alignment: .bottom) {
-                        LibraryBanner(icon: "exclamationmark.triangle", text: "The Library can’t be read (\(why)). Your projects are listed as before.",
+                        LibraryBanner(icon: "exclamationmark.triangle.fill", text: "The Library can’t be read (\(why)). Your projects are listed as before.",
                                       button: nil) {}
                     }
             }
@@ -284,7 +284,7 @@ struct LibraryPicture: View {
                     .padding(DS.Space.s).opacity(dim ? 0.32 : 1)
                     .background { if let drawnKey { CornerPairStyle.publish(drawnKey) } }
             } else {
-                Image(systemName: "cube.transparent").font(.system(size: 34, weight: .light))
+                Image(systemName: "cube").font(.system(size: 34, weight: .light))
                     .foregroundStyle(DS.Color.textPrimary.opacity(0.22).color)
             }
         }
@@ -385,11 +385,10 @@ struct LibraryHomeView: View {
 
     private let columns = [GridItem(.adaptive(minimum: 290), spacing: DS.Space.xl3)]
 
-    /// The newest draft anywhere: what Continue opens.
+    /// ★ his iPad notes 11-23 (img 1: "It should recommend my most recent version that I was working on"): the version or
+    /// draft he last opened or changed, anywhere — what Continue opens (LibraryContinue). It was the newest DRAFT only.
     private var continueDraft: (part: LibraryPart, v: LibraryVersion)? {
-        library.index.parts.flatMap { p in p.versions.filter(library.isDraft).map { (p, $0) } }
-            .max { (library.snapshots[$0.1.folderID]?.savedAt ?? .distantPast) < (library.snapshots[$1.1.folderID]?.savedAt ?? .distantPast) }
-            .map { (part: $0.0, v: $0.1) }
+        LibraryContinue.pick(library.index.parts) { library.lastChanged($0) }
     }
 
     /// The four newest versions with results, anywhere.
@@ -506,13 +505,18 @@ struct LibraryHomeView: View {
     }
 
     private func continueRow(_ part: LibraryPart, _ v: LibraryVersion) -> some View {
-        Button { openFolder(v.folderID) } label: {
+        let draft = library.isDraft(v)   // ★ 11-23: a version with results is offered too, as itself
+        return Button { openFolder(v.folderID) } label: {
             HStack(spacing: DS.Space.ml) {
-                LibraryPicture(image: parentPicture(part, v)).frame(width: 72, height: 50)
+                LibraryPicture(image: draft ? parentPicture(part, v)
+                                            : library.thumbnails[CompareItem(folder: v.folderID, result: library.shownResult(v))])
+                    .frame(width: 72, height: 50)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Continue · \(part.name) v\(v.number) draft").dsStyle(DS.TypeScale.bodyStrong)
-                    Text(v.changes.isEmpty ? "Not optimized yet" : "\(v.changes.count) change\(v.changes.count == 1 ? "" : "s") since v\(v.parentNumber ?? v.number)")
+                    Text(LibraryContinue.title(part: part.name, number: v.number, draft: draft)).dsStyle(DS.TypeScale.bodyStrong)
+                        .background(DSParts.publish("libraryContinue-v\(v.number)\(draft ? "-draft" : "")"))   // ★ 11-23 (tests)
+                    Text(!draft ? library.shortTitle(of: v, in: part)
+                         : v.changes.isEmpty ? "Not optimized yet" : "\(v.changes.count) change\(v.changes.count == 1 ? "" : "s") since v\(v.parentNumber ?? v.number)")
                         .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
                 }
                 Spacer()
@@ -834,7 +838,7 @@ struct LibraryPartCard: View {
                 Image(decorative: image, scale: 1).resizable().aspectRatio(contentMode: .fit).padding(12)
                     .background(CornerPairStyle.publish("libraryPartPicture-\(part.name)"))   // B1: hosted tests
             } else {
-                Image(systemName: "cube.transparent").font(.system(size: 34, weight: .light))
+                Image(systemName: "cube").font(.system(size: 34, weight: .light))
                     .foregroundStyle(DS.Color.textPrimary.opacity(0.22).color)
             }
         }
@@ -938,8 +942,10 @@ struct PartFolderView: View {
         }
     }
 
+    /// ★ his iPad notes 11-23 (img 2: "Open v5 draft" beside the newer v8, v7, v6): the version or draft of this part he last
+    /// opened or changed (LibraryContinue). It was the highest-numbered draft.
     private var openTarget: LibraryVersion? {
-        part.versions.filter(library.isDraft).max { $0.number < $1.number } ?? part.versions.max { $0.number < $1.number }
+        LibraryContinue.pick(in: part) { library.lastChanged($0) }
     }
 
     var body: some View {
@@ -1050,15 +1056,16 @@ struct PartFolderView: View {
             // ★ Upload new version (his ask 2026-11-11, decision 12): the part's next version from a new model file,
             // beside Compare in the same glass; Topology parts first (his 4th answer)
             if upload {
-                DSGlassButton("Upload new version", systemImage: "square.and.arrow.up", key: "library-upload") { uploading = true }
+                DSGlassButton("Upload new version", systemImage: "tray.and.arrow.down", key: "library-upload") { uploading = true }
             }
             // ★ B5 (mockup #lib-part): [Compare] [Open v8 draft] [⌄], §4's glass and accent buttons
             DSGlassButton("Compare", systemImage: "rectangle.split.2x1", key: "library-compare") {
                 compare(LibraryCompareRequest(part: part.id, scope: .all))
             }
             if let t = openTarget {
-                DSGlassButton(library.isDraft(t) ? "Open v\(t.number) draft" : "Open v\(t.number)", accent: true,
+                DSGlassButton(LibraryContinue.openTitle(number: t.number, draft: library.isDraft(t)), accent: true,
                               key: "library-open") { openFolder(t.folderID) }
+                    .background(DSParts.publish("library-open-v\(t.number)"))   // ★ 11-23: which one it opens (tests)
                 // his decision 6: the ⌄ lists the drafts (newest first), then every version
                 Menu {
                     let drafts = library.drafts(of: part)
@@ -1093,7 +1100,7 @@ struct PartFolderView: View {
     /// ★ Upload new version (decision 12) where the top row has no room: a 44 pt icon in the ⌄'s glass, leading the filter row.
     private var uploadIcon: some View {
         Button { uploading = true } label: {
-            Image(systemName: "square.and.arrow.up").font(.system(size: 15, weight: .bold)).foregroundStyle(DS.Color.textPrimary.color)
+            Image(systemName: "tray.and.arrow.down").font(.system(size: 15, weight: .bold)).foregroundStyle(DS.Color.textPrimary.color)
                 .frame(width: DSParts.glassHeight, height: DSParts.glassHeight)
                 .background(Circle().fill(DS.Surface.bar.color))
                 .overlay(Circle().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
@@ -1283,6 +1290,12 @@ struct LibraryVersionCard: View {
         .overlay(shape.strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
         .background(DSParts.publish(key))
         .contentShape(shape)
+        // ★ his iPad notes 11-23 (img 2: "I had to tap the one I wanted twice ... Most people will tap the image or close to it.
+        // When I did that it didn't open."): only the pictures, the result names and "Open v5 draft" were targets; a tap
+        // anywhere else on the card (beside or under the picture, its name row, its line) did nothing, so his first tap there
+        // was lost. Now a tap anywhere on the card opens it as its picture does; the card's own controls (stars, the ⋯ menus,
+        // the flags, the links) are inner targets and keep their own jobs.
+        .onTapGesture { openOn(nil) }
         #if os(iOS)
         .contentShape(.contextMenuPreview, shape)   // the long press lifts the card with its own corners
         #endif
@@ -1433,7 +1446,7 @@ struct LibraryVersionCard: View {
         Button(action: details) { Label("Details", systemImage: "info.circle") }
         if !pending {
             Button { quickLook(nil) } label: { Label("Quick look", systemImage: "eye") }
-            if (v.summary?.count ?? 0) > 1 { Button(action: compareResults) { Label("Compare its results", systemImage: "rectangle.split.3x1") } }
+            if (v.summary?.count ?? 0) > 1 { Button(action: compareResults) { Label("Compare its results", systemImage: "rectangle.split.2x1") } }
             Button { LibraryExport.start(model: model, library: library, folder: v.folderID, result: library.shownResult(v)) } label: {
                 Label("Export…", systemImage: "square.and.arrow.up")
             }
