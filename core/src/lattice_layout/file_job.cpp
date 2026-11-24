@@ -736,6 +736,7 @@ TriangleMesh make_file_mesh(const Session& session, const Layout& layout, const 
   report.weave_held_ignored = made.weave_held_ignored;
   report.part_overhangs = made.part_overhangs;
   report.part_overhang_at = made.part_overhang_at;   // P3
+  report.own_by_k1 = made.own_by_k1;                 // K1
   report.posts_outside = made.posts_outside;           // ★ 362 11-23 (F2)
   report.stopped_repeating = made.stopped_repeating;   // ★ 362 11-23 (F3)
   report.sags = made.sags;
@@ -1354,6 +1355,8 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     r.adrift = out.pieces.adrift;
     r.stepped_edges = out.stepped_edges.size();
     r.thin_solid = out.thin_solid;
+    r.small_patch_cells = out.layout.small_patch_cells;   // K5
+    r.quilt_regions = out.quilt_regions;                  // K3
     r.cells_by_stress = out.cells_by_stress;
     r.step_held_at = out.step_held_at;   // C24
     r.floor_cell_mm = out.layout.floor_cell_mm;
@@ -1881,6 +1884,15 @@ std::string file_result_json(const FileResult& r) {
                 count(r.adrift), count(r.stepped_edges), count(r.thin_solid),
                 r.cells_by_stress ? "true" : "false", r.step_held_at);
   o += b;
+  if (r.small_patch_cells > 0) {   // K5: written only when the rule made a cell solid (else the report is as it was)
+    std::snprintf(b, sizeof b, "    \"small_patch_cells\": %llu,\n", count(r.small_patch_cells));
+    o += b;
+  }
+  if (!r.quilt_regions.empty()) {   // K3: written only when a region needed the quilt (else the report is as it was)
+    o += "    \"quilt_regions\": [";
+    for (std::size_t i = 0; i < r.quilt_regions.size(); ++i) o += (i ? ", " : "") + std::to_string(r.quilt_regions[i]);
+    o += "],\n";
+  }
   if (r.weave_regions > 0) {   // Organic: written only for a job with a weave region (a cube-lattice result is the
                                // released engine's, byte for byte)
     std::snprintf(b, sizeof b, "    \"weave_regions\": %llu, \"strands\": %llu, \"weave_bars\": %llu,\n",
@@ -1944,6 +1956,9 @@ std::string file_result_json(const FileResult& r) {
     {   // OG2c (brief E6, leg C); ★ 362 11-23: the part's own overhangs (every lattice), F2's posts, F3's stop
       std::snprintf(b, sizeof b, "],\n    \"own_overhangs\": %llu, \"posts_outside\": %llu, \"stopped_repeating\": %s",
                     count(r.made.part_overhangs), count(r.made.posts_outside), r.made.stopped_repeating ? "true" : "false");
+      o += b;
+      // K1 (his rule, 2026-11-24: only what the app made is judged): how it differs from the far-point reading
+      std::snprintf(b, sizeof b, ", \"own_by_k1\": %llu", count(r.made.own_by_k1));
       o += b;
       std::snprintf(b, sizeof b, ",\n    \"relief_flushed\": %llu, \"relief_rounds\": %d, \"findings_at\": [",
                     count(r.made.relief_flushed), r.made.relief_rounds);

@@ -80,7 +80,8 @@ final class IPadNotes1121Tests: XCTestCase {
         XCTAssertEqual(checks.map(\.title), ["Strengthened · 5 rounds", "Print file ready", "Prints layer by layer"])
         // ★ RE-PINNED (notes25 C3 (4): only numbers true for the final lattice — the per-round "thickened" sum counted a strut once
         // per round; the file's line carries no strut count)
-        XCTAssertEqual(checks[0].more, "2 braced", "the braces (no widest strut in this report)")
+        // ★ RE-PINNED (notes27 F2: the changes in plain words, the same as Details' "Strengthened")
+        XCTAssertEqual(checks[0].more, "2 struts braced", "the braces (no widest strut in this report)")
         XCTAssertEqual(checks[1].detail, "3MF · 25.4 MB")
         // ★ RE-PINNED (notes27, his print orientation: the file's own supports word is the orientation row's line — "No supports
         // needed" / "Supports painted for you" — never "Turn supports off", which core hard-coded before P3)
@@ -89,10 +90,13 @@ final class IPadNotes1121Tests: XCTestCase {
         // ★ RE-PINNED (notes25 C3 (6): the strength rows are the governing answer's — LatticeStrengthAnswer; the facts keep the
         // strengthening)
         XCTAssertEqual(f.rows(.strength).map(\.label), ["Strengthened"])
-        XCTAssertEqual(f.rows(.strength).first?.value, "5 rounds · 2 braced")
+        XCTAssertEqual(f.rows(.strength).first?.value, "5 rounds · 2 struts braced")   // ★ RE-PINNED (notes27 F2)
         let a = try XCTUnwrap(LatticeStrengthAnswer.decode(report: Self.report()))
         let strength = a.rows(loadKg: 0, unit: .kg, infillPercent: 100, plastic: nil)
-        XCTAssertEqual(strength.first { $0.label == "Gives first at" }?.value, "A strut · in tension · 2.30 mm thick, 5.8 mm long")
+        // ★ RE-PINNED (notes27 F2, his: "Explain it simply ... add an (i)"): "Weakest spot · A strut", the rest in its (i)
+        XCTAssertEqual(strength.first { $0.label == "Weakest spot" }?.value, "A strut")
+        XCTAssertTrue(strength.first { $0.label == "Weakest spot" }?.info?.contains("It is pulled along its length. It is 2.30 mm "
+                      + "thick and 5.8 mm long.") == true)
         XCTAssertEqual(strength.first { $0.label == "Holds" }?.value, "1.60× your load", "the smaller of the strut's 1.6 and the solid's 3")
         let printing = f.rows(.printing).map(\.label)
         XCTAssertEqual(printing.first, "Print file")

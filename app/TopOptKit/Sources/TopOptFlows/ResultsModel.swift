@@ -860,6 +860,8 @@ public final class ResultsModel: ObservableObject {
     public private(set) var latticeAnswer: LatticeStrengthAnswer?
     /// ★ notes25 C3: the solid's own margin per voxel (fields.bin block 2), carried in a print file's saved report.
     public private(set) var solidMargins: SolidMarginVoxels?
+    /// ★ notes27 F1: a print file's every bar (bars.bin) with its margin, and how many of its first triangles are the solid.
+    public private(set) var printFileParts: PrintFileParts?
     /// ★ notes25 (C1, C2): Bend and Break run the load; their per-selection data and clock live here, never on ResultsScreen.
     public private(set) lazy var loadMotion: ResultsLoadMotion = {
         let m = ResultsLoadMotion()
@@ -1248,6 +1250,7 @@ public final class ResultsModel: ObservableObject {
             latticeAnswer = LatticeStrengthAnswer.decode(report: o)   // ★ notes25 C3
             solidMargins = SolidMarginVoxels.decode(report: o)
             printFacts = PrintReportFacts.decode(o)   // ★ notes27: its print frame, supports word, ranking, re-check
+            printFileParts = latticeAnswer == nil ? nil : PrintFileParts.decode(report: o)   // ★ notes27 F1
         }
         clearanceNotes = ResultsModel.clearanceNotes(outcome.appliedClearances)
         faceProtectionNotes = ResultsModel.faceProtectionNotes(outcome.appliedFaceProtections)

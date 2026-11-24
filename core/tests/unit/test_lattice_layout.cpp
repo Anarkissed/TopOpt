@@ -3506,6 +3506,87 @@ static void test_cells_across_the_room_between_skins() {
   NEAR(d0.probe().room_through({20, 3, 3}), 6.0, 1e-5);   // no skin: the thickness itself
 }
 
+// K5 (his yes, 2026-11-23: "Structural must refuse lattice strips only one cell wide"). On his stand Structural laid a
+// column of cells about 4 mm wide between an anchor hole's Protect skin and the start of the end's rounded corner: the
+// member rule counted the cells across the MATERIAL (the toe's height), not across the lattice's own room. A block
+// 60 x 30 x 20 latticed under its top face, 20 deep, cells up to 4 mm, 0.2 mm lines at one line (small cells print);
+// a No lattice region over all of the face but a strip 4 mm wide at x 0..4. The strip's material is the whole block
+// (20 deep, 30 wide), so it held five 4 mm cells across the material; read across the lattice space it is 4 mm.
+static void test_structural_strips_refused() {
+  PartMeasure pm(weld_mesh(box(60, 30, 20)));
+  auto lay = [&](bool strip, int across, bool whole_part) {
+    DomainSpec s;
+    s.bead_mm = 0.2;
+    s.min_strut_lines = 1.0;
+    // A region under the top face, its half sizes given along x and y whichever way its own frame's axes lie.
+    auto top = [](int id, Role role, double cx, double hx, double hy) {
+      const Region r = face_region(id, role, {cx, 15, 20}, {0, 0, -1}, hx, hy, 20);
+      return std::fabs(r.prism.u.x) > 0.5 ? r : face_region(id, role, {cx, 15, 20}, {0, 0, -1}, hy, hx, 20);
+    };
+    if (whole_part) s.start = Start::AllLattice;
+    else s.regions = {top(1, Role::Lattice, 30, 30, 15)};
+    if (strip) s.regions.push_back(top(2, Role::NoLattice, 32, 28, 15));
+    Domain d(pm, s);
+    CellSpec cs;
+    cs.min_cells_across = across;
+    cs.cell_max_mm = 4.0;
+    return lay_cells(d, cs);
+  };
+  // Cells with any of their cube in the strip, and their largest size.
+  auto in_strip = [](const Layout& l, double* largest) {
+    int n = 0;
+    *largest = 0.0;
+    for (const Cell& c : l.cells) {
+      Vec3 lo, hi;
+      const Frame& f = l.frames[static_cast<std::size_t>(c.frame)];
+      const Vec3 a = f.at(c.lo[0], c.lo[1], c.lo[2]), b = f.at(c.lo[0] + c.size, c.lo[1] + c.size, c.lo[2] + c.size);
+      lo = {std::min(a.x, b.x), std::min(a.y, b.y), std::min(a.z, b.z)};
+      hi = {std::max(a.x, b.x), std::max(a.y, b.y), std::max(a.z, b.z)};
+      if (lo.x < 4.0 - 1e-6 && hi.x > 0.0) { ++n; *largest = std::max(*largest, c.size); }
+    }
+    return n;
+  };
+  auto too_few = [](const Layout& l) {
+    std::size_t n = 0;
+    for (const SolidWhy& w : l.solid_why) n += w.why == NoCell::TooFewAcross || w.why == NoCell::WallNarrow;
+    return n;
+  };
+  double big = 0.0;
+  // Structural (five across), a face region: the strip is solid, its reason a thin wall's (too few across / too narrow).
+  const Layout st = lay(true, 5, false);
+  const int st_n = in_strip(st, &big);
+  std::printf("[K5] Structural strip: %d cells in the strip (largest %.3f mm), %zu solid as thin, %zu cells in all\n", st_n,
+              big, too_few(st), st.cells.size());
+  CHECK(st_n == 0 && too_few(st) > 0);
+  // The whole part (no face map: the member is read across the material) is held by the minimum patch: the strip's
+  // patch is one 4 mm cell across in x, under five.
+  const Layout wp = lay(true, 5, true);
+  const int wp_n = in_strip(wp, &big);
+  std::printf("[K5] Structural strip, whole part: %d cells in the strip, %zu cells made solid by the minimum patch\n", wp_n,
+              wp.small_patch_cells);
+  CHECK(wp_n == 0 && wp.small_patch_cells > 0);
+  // A wide wall still lattices: the block without the No lattice region, Structural, a face region and the whole part.
+  for (bool whole : {false, true}) {
+    const Layout wide = lay(false, 5, whole);
+    const int n = in_strip(wide, &big);
+    std::printf("[K5] Structural wide wall (%s): %zu cells, %d of them at x 0..4 (largest %.3f mm), %zu solid, %zu by the "
+                "minimum patch\n", whole ? "whole part" : "face", wide.cells.size(), n, big, wide.solid.size(),
+                wide.small_patch_cells);
+    // its own cell at the edge and at its corners (nothing solid): 4 mm under the face (20 deep, five across), the
+    // whole part's 2.107 mm (its base); as laid before the rule (the face: 600 cells of 4 mm, nothing solid)
+    CHECK(wide.cells.size() > 100 && n > 0 && big >= (whole ? 2.1 : 4.0 - 1e-6) && wide.small_patch_cells == 0 &&
+          wide.solid.empty());
+    if (!whole) CHECK(wide.cells.size() == 600);
+  }
+  // Aesthetic (one or two across) is unchanged: the strip lattices, as before.
+  for (int across : {1, 2}) {
+    const Layout ae = lay(true, across, false);
+    const int n = in_strip(ae, &big);
+    std::printf("[K5] Aesthetic (%d across) strip: %d cells in the strip, %zu by the minimum patch\n", across, n, ae.small_patch_cells);
+    CHECK(n > 0 && ae.small_patch_cells == 0);
+  }
+}
+
 // D5, D15, C15: with a Protect skin on a face, the lattice starts at the skin's own depth
 // and its cells divide what is left of the wall. The skin never cuts through a cell.
 static void test_cells_behind_a_protect_skin() {
@@ -3687,6 +3768,92 @@ static void test_thin_walls_follow_the_quilt_switch() {
     CHECK(held_off == 0 && held_on == 1);
     CHECK((pr.where({58.5, 1.3, 4}) == Where{Why::Lattice, 1}));   // it was asked for either way
   }
+}
+
+// K2 (his 11-23 notes: "Look at the lack of crisp straight lines at the edges of the lattice. This was with cut cells =
+// on. So why isn't it working?"). A prism whose plan is a trapezoid with a 45 degree side (0,0)-(20,20), 30 tall,
+// latticed under its top face (the whole of it), Let walls cut cells on. Read a hair inside the sloped side, every
+// 0.5 mm along it and up it, at 0.6, 1.2 and 2.4 mm in: lattice the domain asks for there that no cell holds is the
+// solid step he sees. Printed per setting; with the cells cut along the slope there is none.
+static void test_cut_cells_follow_a_slope() {
+  const TriangleMesh m = prism({{0, 0}, {60, 0}, {60, 20}, {20, 20}}, 0, 30);
+  PartMeasure pm(weld_mesh(m));
+  for (double rim : {0.0, -1.0}) {   // no Finish, and a Rim along the outline (solid beside the slope: his stand's)
+  DomainSpec s;
+  s.bead_mm = 0.45;
+  s.min_strut_lines = 2.0;
+  s.rim_mm = rim;
+  // The top face's region: its outline the trapezoid's box (the region's prism is cut by the part's own sides).
+  {
+    const Region r = face_region(1, Role::Lattice, {30, 10, 30}, {0, 0, -1}, 30, 10, 30);
+    s.regions = {std::fabs(r.prism.u.x) > 0.5 ? r : face_region(1, Role::Lattice, {30, 10, 30}, {0, 0, -1}, 10, 30, 30)};
+  }
+  Domain d(pm, s);
+  auto pr = d.probe();
+  const double inv = 1.0 / std::sqrt(2.0);
+  const Vec3 in_dir{inv, -inv, 0};   // into the part, square to the slope
+  for (Algorithm algo : {Algorithm::Stepped, Algorithm::DefaultGrade})
+    for (bool quilt : {false, true}) {
+      CellSpec cs;
+      cs.algorithm = algo;
+      cs.one_grid = true;
+      cs.cell_max_mm = 12;
+      cs.cell_min_mm = 4;
+      cs.allow_quilt = quilt;
+      const Layout l = lay_cells(d, cs);
+      int asked = 0, bare = 0;
+      for (double depth : {0.6, 1.2, 2.4})
+        for (double t = 1.0; t <= 27.3; t += 0.5)      // along the slope (its length is 28.3)
+          for (double z = 1.0; z <= 29.0; z += 0.5) {
+            const Vec3 p{t * inv + depth * in_dir.x, t * inv + depth * in_dir.y, z};
+            if (!pr.where(p).lattice()) continue;
+            ++asked;
+            if (cells_holding(l, p, 1) == 0) ++bare;
+          }
+      std::printf("[K2] slope, %s, rim %s, quilt %s: %zu cells, %zu solid; along the slope %d of %d places asked for are held "
+                  "by no cell\n", algo == Algorithm::Stepped ? "Stepped" : "Default Grade", rim < 0.0 ? "on" : "off",
+                  quilt ? "on" : "off", l.cells.size(), l.solid.size(), bare, asked);
+      CHECK(asked > 1000 && bare == 0);
+    }
+  }
+}
+
+// K3 (his 11-23 notes: quilting "should ALWAYS be off by default unless it is literally impossible to lattice without
+// it"). The 20 x 20 x 12 block, two lines of 0.45 mm (a 0.9 mm strut: the open look's smallest cell is 4.74 mm, the
+// quilt's 2.55 mm): a region 3 mm deep under the top face (no cell that prints open fits it) and one 6 mm deep under the
+// bottom face. With the quilt off the thin region is laid again with the quilt's smallest cell, that region only, and
+// named; the thick one keeps exactly the cells it lays alone. With the quilt on there is nothing to fall back to.
+static void test_quilt_only_where_nothing_else_lays() {
+  const StepModel model = finish_block();
+  Settings st;
+  st.regions = {{1, Role::Lattice, {1}, 3.0, 0.0}, {2, Role::Lattice, {0}, 6.0, 0.0}};
+  st.cells.cell_max_mm = 6;
+  const Outcome both = Session(model).lay(st);
+  const double open_floor = 0.9 / (0.7592 / 4.0), quilt_floor = 0.9 / kQuiltStrutPerCell;
+  std::size_t thin = 0, thick = 0, thin_small = 0, thick_small = 0;
+  for (const Cell& c : both.layout.cells) {
+    const bool top = c.region == 1;
+    (top ? thin : thick) += 1;
+    if (c.size < open_floor - 1e-9) (top ? thin_small : thick_small) += 1;
+    CHECK(c.size >= quilt_floor - 1e-9);
+  }
+  std::printf("[K3] quilt off: regions laid with the quilt %zu (first %d); thin region %zu cells (%zu under the open look), "
+              "thick region %zu cells (%zu under it)\n", both.quilt_regions.size(), both.quilt_regions.empty() ? -1 : both.quilt_regions.front(),
+              thin, thin_small, thick, thick_small);
+  CHECK(both.quilt_regions == std::vector<int>{1} && thin > 0 && thin_small == thin && thick > 0 && thick_small == 0);
+  // The thick region alone: the same cells (the fallback touched the thin region only).
+  Settings alone = st;
+  alone.regions = {st.regions[1]};
+  const Outcome one = Session(model).lay(alone);
+  std::vector<std::array<double, 5>> a, b;
+  for (const Cell& c : both.layout.cells)
+    if (c.region == 2) a.push_back({c.lo[0], c.lo[1], c.lo[2], c.size, c.strut});
+  for (const Cell& c : one.layout.cells) b.push_back({c.lo[0], c.lo[1], c.lo[2], c.size, c.strut});
+  CHECK(a == b && one.quilt_regions.empty());
+  // Allow quilt on: no fallback (the quilt is on everywhere already).
+  Settings on = st;
+  on.struts.allow_quilt = true;
+  CHECK(Session(model).lay(on).quilt_regions.empty());
 }
 
 static void test_cells_curved_region() {
@@ -8115,10 +8282,13 @@ int main() {
   test_one_grid();
   test_cells_behind_a_protect_skin();
   test_thin_walls_follow_the_quilt_switch();
+  test_quilt_only_where_nothing_else_lays();   // K3
+  test_cut_cells_follow_a_slope();   // K2
   test_cells_across_the_narrowest_width();
   test_band_never_quilts_without_the_switch();
   test_two_line_struts();
   test_cells_across_the_room_between_skins();
+  test_structural_strips_refused();   // K5
   test_cells_behind_a_pocket();
   test_grooves_do_not_narrow_a_wall();
   test_kept_readings();

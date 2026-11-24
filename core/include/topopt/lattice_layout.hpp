@@ -857,6 +857,9 @@ struct Layout {
   // Print rule P8 (f): the entries of `solid` that solidify_thin_cuts put there, in the order it put them. Space inside
   // one of these cubes is never taken in by another region's cell (D14b): what the rule made solid stays solid.
   std::vector<std::uint32_t> thin_solid;
+  // K5 (his yes, 2026-11-23): cells lay_cells made solid because their patch holds fewer cells than its count across
+  // (Structural, three or more) along one of its frame's axes; each is an entry of `solid` (TooFewAcross).
+  std::size_t small_patch_cells = 0;
   std::vector<RegionCells> regions;
   // O1: the weave regions (Region::weave), in region order. Each has no cell; its lattice is open space, read by
   // read_open_space in `frame` (the part's own axes, as a curved region's). `spacing_mm` is the smallest spacing of
@@ -1605,6 +1608,9 @@ struct Outcome {
   std::vector<int> empty_regions;
   double ms_read = 0.0, ms_cells = 0.0, ms_bars = 0.0;
   std::size_t thin_solid = 0;    // cut cells print rule P8 (f) made solid (solidify_thin_cuts)
+  // K3 (his 11-23 notes): with the quilt off, the Lattice regions (their ids) that laid no cell at all and were laid
+  // again with the quilt's smallest cell (Session::lay_with). Empty: none (the quilt was off everywhere, or on).
+  std::vector<int> quilt_regions;
   bool cells_by_stress = false;  // C22 was applied to this layout (stress_sizes_cells)
   bool cells_no_stress = false;  // C22 was asked for and there was no stress result, or no reference
   // The one stress reference resolved for this lay (the stated one or the part's own), read by the cells and the

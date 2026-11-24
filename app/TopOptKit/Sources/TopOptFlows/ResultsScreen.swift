@@ -264,6 +264,13 @@ public struct ResultsScreen: View {
     let certify: OrganicCertifyCard?
     @StateObject private var spotMemo = OrganicSpotPaintMemo()
 
+    /// ★ notes27 (his 11-24: "You can colour the struts without the stress map on when the "Strengthened" row is selected and
+    /// opened in the "Checks" modal"): that row open — the struts the strengthening changed, in one clear highlight.
+    private var strengthenedPaint: [SIMD4<Float>]? {
+        guard certifyPaint == nil, let id = openCheck, id.hasPrefix("Strengthened"), let mesh = viewerMesh else { return nil }
+        return model.strengthenedTints(for: mesh)
+    }
+
     /// The open pop-up's weak areas painted on the shown part (one paint per issue and mesh); nil: none to paint.
     private var certifyPaint: OrganicSpotPaint.Result? {
         guard let c = certify, let g = c.grid, !c.issue.spotIDs.isEmpty, let mesh = viewerMesh else { return nil }
@@ -733,6 +740,7 @@ public struct ResultsScreen: View {
     private var stressTints: [SIMD4<Float>]? {
         // ★ Organic cut 2 (his certify wizard): while a pop-up is up, its weak areas are coloured on the part
         if let p = certifyPaint { return p.tints }
+        if let s = strengthenedPaint { return s }   // ★ notes27: the Strengthened row open — the struts it changed, in gold
         if loadRamp != nil { return nil }   // ★ notes25: Bend / Break's (and a print file's) colours are made on the GPU
         // In load-path FLOW mode the flow's Body segment owns the body appearance: the
         // "Stress" body paints the static field with the MOVING epicenters blended in
@@ -770,12 +778,13 @@ public struct ResultsScreen: View {
     /// emitted and haloed by the viewer, coloured by how much load flows there; with the Stress layer on, over the stress colours
     /// (the part's stress stays readable, the light is that colour lifted toward white). A new key each phase step; held paused.
     private var loadLight: LoadLightFrame? {
-        guard layers.motion == .loadPaths, certifyPaint == nil, let lf = model.lightFlow, let mesh = viewerMesh,
+        guard layers.motion == .loadPaths, certifyPaint == nil, strengthenedPaint == nil, let lf = model.lightFlow, let mesh = viewerMesh,
               lf.arrival.count == mesh.flat.vertexCount else { return nil }
-        let colours = legendShown ? model.selectedStressField.map { model.stressTints(for: mesh, field: $0) } : nil
-        let f = lf.lightFrame(phase: Float(model.lightPhase), stressColours: colours)
-        return LoadLightFrame(key: Int((model.lightPhase * 100_000).rounded()) * 2 + (colours == nil ? 0 : 1),
-                              tints: f.tints, light: f.light)
+        // ★ notes27 (his 11-24): only over the stress map; the band carries each place's stress on the map's own scale, rising to
+        // its full colour as the band's centre reaches it (LoadLightFlow.loadFrame)
+        guard legendShown, let shares = model.mapShares(for: mesh) else { return nil }
+        let f = lf.loadFrame(phase: Float(model.lightPhase), shares: shares)
+        return LoadLightFrame(key: Int((model.lightPhase * 100_000).rounded()) * 2 + 1, tints: f.tints, light: f.light)
     }
 
     /// ★ notes25: the moving view that runs the load (Bend / Break), when the part can move.
@@ -792,7 +801,7 @@ public struct ResultsScreen: View {
     /// ★ notes25: the colours made on the GPU — the moving view's at its frame's load, and a print file's still view at your load
     /// (each place's share of its limit); nil: the CPU's stress tints as before.
     private var loadRamp: LoadRamp? {
-        guard certifyPaint == nil, legendShown, !loadPathActive, layers.motion != .loadPaths else { return nil }
+        guard certifyPaint == nil, strengthenedPaint == nil, legendShown, !loadPathActive, layers.motion != .loadPaths else { return nil }
         if let m = motion { return m.ramp }
         return showHistory ? nil : model.stillRamp()
     }
@@ -1407,6 +1416,7 @@ public struct ResultsScreen: View {
                                     printFile: blocks?.printFile,   // ★ his 11-21: its file, strengthening and layers
                                     answer: model.latticeAnswer,   // ★ notes25 C3: a print file's one strength line
                                     printing: printing)   // ★ notes27: how it prints, in his words
+                .map { model.withStrengthenedLegend($0) }   // ★ notes27: its legend when its struts are lit
     }
 
     /// Bottom left: the streaming pill, a latticed version's mesh state, then the Versions panel.

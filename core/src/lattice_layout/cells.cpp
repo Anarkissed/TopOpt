@@ -409,8 +409,162 @@ struct Pass {
     // (Between skins: a skin takes at most its own depth off each end of the ball.)
     if (2.0 * (probe->part().depth(mid) - skin_most) < r.width - kReadingSlack)
       narrow = std::min(r.width, probe->room_through(mid, r.width));
+    if (counts_space()) narrow = std::min(narrow, space_across(a, b, r.start + 0.5 * r.width, narrow));   // K5
     columns.push_back({a, b, r.start, r.width, narrow});
     return narrow;
+  }
+
+  // K5 (his yes, 2026-11-23: "Structural must refuse lattice strips only one cell wide"). On his stand Structural laid a
+  // column of cells about 4 mm wide and 13 mm tall between an anchor hole's 4 mm Protect skin and the start of the end's
+  // rounded corner: the member's narrowest width (room_through) is read across the MATERIAL, which is the toe's whole
+  // height there, and the skin and the region's own edge narrow the lattice's room, not the material. So with the cells
+  // a member must hold counted (no one grid) at Structural's count (three or more across: Aesthetic asks for one or
+  // two; core does not know the stage), the member is also read across the LATTICE SPACE itself, in the face's plane:
+  // its local width at the column: the width of the largest disc, or square on the face's own axes, of the region's own
+  // lattice at the column's middle depth that holds the column (read on the face's map of stretches, kept with the
+  // domain, at its 1 mm nodes: to about a millimetre). A strip is as wide as it is across, whichever way it runs; a wide
+  // wall is wide everywhere in it, its edges and right-angled corners too. A strip narrower than its cells across is
+  // refused as any thin wall is (WallNarrow, TooFewAcross).
+  bool counts_space() const {
+    return walls && walls->flat && walls->nu > 0 && !spec->one_grid && spec->min_cells_across >= 3;
+  }
+  bool node_space(long i, long j, double depth) const {
+    if (i < 0 || j < 0 || i >= walls->nu || j >= walls->nw) return false;
+    for (int k = 0; k < WallMap::kDeep; ++k) {
+      const std::size_t n = (static_cast<std::size_t>(j) * walls->nu + static_cast<std::size_t>(i)) * WallMap::kDeep + k;
+      if (walls->bin[n] < 0) continue;
+      const double top = walls->sbin[n] * WallMap::kBin, end = top + walls->bin[n] * WallMap::kBin;
+      if (depth >= top - WallMap::kBin && depth <= end + WallMap::kBin) return true;
+    }
+    return false;
+  }
+  // Per node of the map, at one depth (kept per depth, to the map's bin, for this pass): the space's local width, mm.
+  mutable std::map<long, std::vector<float>> space_width_;
+  const std::vector<float>& space_widths(double depth) const {
+    const long key = std::lround(depth / WallMap::kBin);
+    const auto it = space_width_.find(key);
+    if (it != space_width_.end()) return it->second;
+    // The map padded by a node of no space all round; the squared distance (in nodes) from each node to the nearest
+    // node of no space (exact: down the columns, then the lower envelope of parabolas along the rows).
+    const int W = walls->nu + 2, H = walls->nw + 2;
+    std::vector<char> in(static_cast<std::size_t>(W) * H, 0);
+    for (int j = 0; j < walls->nw; ++j)
+      for (int i = 0; i < walls->nu; ++i) in[static_cast<std::size_t>(j + 1) * W + (i + 1)] = node_space(i, j, depth) ? 1 : 0;
+    const double far = 1e18;
+    std::vector<double> d2(in.size(), far);
+    for (int x = 0; x < W; ++x) {
+      double d = far;
+      for (int y = 0; y < H; ++y) {
+        const std::size_t q = static_cast<std::size_t>(y) * W + x;
+        d = !in[q] ? 0.0 : (d >= far ? far : d + 1.0);
+        d2[q] = d;
+      }
+      d = far;
+      for (int y = H - 1; y >= 0; --y) {
+        const std::size_t q = static_cast<std::size_t>(y) * W + x;
+        d = !in[q] ? 0.0 : (d >= far ? far : d + 1.0);
+        d2[q] = std::min(d2[q], d);
+      }
+    }
+    std::vector<double> f(static_cast<std::size_t>(W)), zz(static_cast<std::size_t>(W) + 1);
+    std::vector<int> v(static_cast<std::size_t>(W));
+    for (int y = 0; y < H; ++y) {
+      double* row = d2.data() + static_cast<std::size_t>(y) * W;
+      int k = -1;
+      for (int q = 0; q < W; ++q) {
+        f[static_cast<std::size_t>(q)] = row[q] >= far ? far : row[q] * row[q];
+        if (f[static_cast<std::size_t>(q)] >= far) continue;
+        if (k < 0) { k = 0; v[0] = q; zz[0] = -far; zz[1] = far; continue; }
+        double sx = 0.0;
+        for (;;) {
+          const int pp = v[static_cast<std::size_t>(k)];
+          sx = ((f[static_cast<std::size_t>(q)] + 1.0 * q * q) - (f[static_cast<std::size_t>(pp)] + 1.0 * pp * pp)) / (2.0 * q - 2.0 * pp);
+          if (sx <= zz[static_cast<std::size_t>(k)] && k > 0) { --k; continue; }
+          break;
+        }
+        ++k;
+        v[static_cast<std::size_t>(k)] = q;
+        zz[static_cast<std::size_t>(k)] = sx;
+        zz[static_cast<std::size_t>(k) + 1] = far;
+      }
+      if (k < 0) continue;
+      int jj = 0;
+      for (int q = 0; q < W; ++q) {
+        while (zz[static_cast<std::size_t>(jj) + 1] < q) ++jj;
+        const int pp = v[static_cast<std::size_t>(jj)];
+        row[q] = 1.0 * (q - pp) * (q - pp) + f[static_cast<std::size_t>(pp)];
+      }
+    }
+    // Each node of space is the middle of a disc reaching half a node short of the nearest node of no space; every node
+    // that disc holds is at least as wide as it (its width: twice its middle's distance, in mm).
+    std::vector<float> width(static_cast<std::size_t>(walls->nu) * walls->nw, 0.0f);
+    for (int y = 1; y < H - 1; ++y)
+      for (int x = 1; x < W - 1; ++x) {
+        const std::size_t q = static_cast<std::size_t>(y) * W + x;
+        if (!in[q]) continue;
+        const double dist = std::sqrt(d2[q]), r = dist - 0.5;
+        const float wq = static_cast<float>(2.0 * dist * WallMap::kPitch);
+        const int R = static_cast<int>(std::floor(r));
+        for (int dy = -R; dy <= R; ++dy)
+          for (int dx = -R; dx <= R; ++dx) {
+            if (dx * dx + dy * dy > r * r + 1e-9) continue;
+            const int xi = x + dx - 1, yj = y + dy - 1;
+            if (xi < 0 || yj < 0 || xi >= walls->nu || yj >= walls->nw) continue;
+            float& w = width[static_cast<std::size_t>(yj) * walls->nu + xi];
+            w = std::max(w, wq);
+          }
+      }
+    // The same with squares square to the face's own axes (the cells' axes): a disc reads a corner of a wall narrow
+    // (no large disc reaches into a right-angled corner), a square does not. A node is as wide as the wider of the two.
+    std::vector<int> cheb(in.size(), 0);   // chessboard distance, in nodes, to the nearest node of no space
+    for (int y = 0; y < H; ++y)
+      for (int x = 0; x < W; ++x) {
+        const std::size_t q = static_cast<std::size_t>(y) * W + x;
+        if (!in[q]) continue;
+        int d = 1 << 20;
+        if (x > 0) d = std::min(d, cheb[q - 1] + 1);
+        if (y > 0) {
+          d = std::min(d, cheb[q - static_cast<std::size_t>(W)] + 1);
+          if (x > 0) d = std::min(d, cheb[q - static_cast<std::size_t>(W) - 1] + 1);
+          if (x + 1 < W) d = std::min(d, cheb[q - static_cast<std::size_t>(W) + 1] + 1);
+        }
+        cheb[q] = d;
+      }
+    for (int y = H - 1; y >= 0; --y)
+      for (int x = W - 1; x >= 0; --x) {
+        const std::size_t q = static_cast<std::size_t>(y) * W + x;
+        if (!in[q]) continue;
+        int d = cheb[q];
+        if (x + 1 < W) d = std::min(d, cheb[q + 1] + 1);
+        if (y + 1 < H) {
+          d = std::min(d, cheb[q + static_cast<std::size_t>(W)] + 1);
+          if (x + 1 < W) d = std::min(d, cheb[q + static_cast<std::size_t>(W) + 1] + 1);
+          if (x > 0) d = std::min(d, cheb[q + static_cast<std::size_t>(W) - 1] + 1);
+        }
+        cheb[q] = d;
+      }
+    for (int y = 1; y < H - 1; ++y)
+      for (int x = 1; x < W - 1; ++x) {
+        const std::size_t q = static_cast<std::size_t>(y) * W + x;
+        if (!in[q]) continue;
+        const int R = cheb[q] - 1;   // the square of nodes all of space round q
+        const float wq = static_cast<float>(2.0 * cheb[q] * WallMap::kPitch);
+        for (int dy = -R; dy <= R; ++dy)
+          for (int dx = -R; dx <= R; ++dx) {
+            const int xi = x + dx - 1, yj = y + dy - 1;
+            if (xi < 0 || yj < 0 || xi >= walls->nu || yj >= walls->nw) continue;
+            float& w = width[static_cast<std::size_t>(yj) * walls->nu + xi];
+            w = std::max(w, wq);
+          }
+      }
+    return space_width_.emplace(key, std::move(width)).first->second;
+  }
+  double space_across(double a, double b, double depth, double limit) const {
+    const double P = WallMap::kPitch;
+    const long i = std::lround((a - walls->u0) / P), j = std::lround((b - walls->w0) / P);
+    if (!node_space(i, j, depth)) return limit;   // the column's middle is off the map: nothing read
+    const double across = space_widths(depth)[static_cast<std::size_t>(j) * walls->nu + static_cast<std::size_t>(i)];
+    return std::min(limit, across);
   }
 
   // D14: a strip of this pass's lattice thinner than the spacing of a cube's own sample
@@ -445,6 +599,21 @@ struct Pass {
           }
         }
     return seen;
+  }
+
+  // K2: a cube's lattice read on a finer grid than its own points: 5 x 5 x 5 points a tenth of the cube in from its
+  // faces and a fifth apart (a wedge a fifth of the cube deep is seen). How many are its lattice.
+  int finer_look(const double lo[3], double s, double* fit, Seen* seen) const {
+    int found = 0;
+    for (int c = 0; c < 5; ++c)
+      for (int b = 0; b < 5; ++b)
+        for (int a = 0; a < 5; ++a) {
+          double f = 0.0;
+          if (!sample(lo[0] + s * (0.1 + 0.2 * a), lo[1] + s * (0.1 + 0.2 * b), lo[2] + s * (0.1 + 0.2 * c), &f, seen)) continue;
+          ++found;
+          *fit = std::min(*fit, f);
+        }
+    return found;
   }
 
   void emit(const double lo[3], double s, bool cut, bool as_cell, const SolidWhy& why = SolidWhy{}) {
@@ -518,6 +687,14 @@ struct Pass {
         inside = counted;
       }
     }
+    // K2 (his 11-23 notes, on his stand's 45 degree sides: "Look at the lack of crisp straight lines at the edges of the
+    // lattice. This was with cut cells = on."): with Let walls cut cells on, a cube none of whose points is its lattice
+    // is looked at again closely (finer_look) whatever stands beside it, solid included. Before, a cube the side cut
+    // so that only a corner wedge of it was lattice, with a rim or a skin beside it, was passed over (the sliver under
+    // solid of D14b) and that wedge stood solid: steps of a cube along the slope. Now it is a cut cube, divided down to
+    // its finest cells, which the side cuts. (A cut piece thinner than its strut against solid is still made solid,
+    // P8 f.)
+    if (inside == 0 && spec->one_grid) inside = finer_look(lo, s, &fits, &seen);
     // Nothing of this pass here; or a sliver under solid (D14b), which no cube is recorded for, so it has no reason of
     // its own (D14c): SolidAt::why answers Other there.
     if (inside == 0 && !look_at_nodes(lo, s, &fits, &seen)) return;
@@ -611,6 +788,7 @@ struct Pass {
                 }
             const double at[3] = {lo[0] + t * i, lo[1] + t * j, lo[2] + t * k};
             if (!in[u] && look_at_nodes(at, t, &fit[u], &seen[u])) in[u] = 1;
+            if (!in[u] && spec->one_grid && finer_look(at, t, &fit[u], &seen[u]) > 0) in[u] = 1;   // K2
           }
       Packed p;
       p.n = n;
@@ -961,6 +1139,99 @@ CellSpec region_cells(const CellSpec& part, const AreaOwn& own) {
   if (own.max_step) c.max_step = *own.max_step;
   return c;
 }
+
+// K5 (his yes, 2026-11-23): "no lattice patch of fewer cells than the rule's minimum across, in any direction" (the
+// Structural count, three or more across; core does not know the stage). A patch is the cells of one region and frame
+// joined face to face (sharing part of a face); along each of its frame's three axes it must reach `k` times its
+// largest cell (its extent, a cut cell counted as its whole cube). One that does not is solid, every cell of it, as a
+// thin wall is (TooFewAcross: the patch's extent that way against `k` of its cells).
+namespace {
+template <class K>
+void drop_small_patches(Layout& out, const K& k_of) {
+  const std::size_t n = out.cells.size();
+  if (n == 0) return;
+  bool any = false;
+  for (const Cell& c : out.cells) any = any || k_of(c.region) >= 3;
+  if (!any) return;
+  std::vector<std::size_t> up(n);
+  for (std::size_t i = 0; i < n; ++i) up[i] = i;
+  const auto find = [&](std::size_t i) {
+    while (up[i] != i) { up[i] = up[up[i]]; i = up[i]; }
+    return i;
+  };
+  // Cells filed by their low corner on a grid of the largest cell: two that share a face lie in neighbouring buckets.
+  double big = 0.0;
+  for (const Cell& c : out.cells) big = std::max(big, c.size);
+  std::map<std::array<long long, 4>, std::vector<std::size_t>> grid;
+  const auto key = [&](const Cell& c, int dx, int dy, int dz) {
+    return std::array<long long, 4>{c.frame, static_cast<long long>(std::floor(c.lo[0] / big)) + dx,
+                                    static_cast<long long>(std::floor(c.lo[1] / big)) + dy,
+                                    static_cast<long long>(std::floor(c.lo[2] / big)) + dz};
+  };
+  for (std::size_t i = 0; i < n; ++i)
+    if (k_of(out.cells[i].region) >= 3) grid[key(out.cells[i], 0, 0, 0)].push_back(i);
+  const double tol = 1e-6 * std::max(1.0, big);
+  for (std::size_t i = 0; i < n; ++i) {
+    const Cell& a = out.cells[i];
+    if (k_of(a.region) < 3) continue;
+    for (int dz = -1; dz <= 1; ++dz)
+      for (int dy = -1; dy <= 1; ++dy)
+        for (int dx = -1; dx <= 1; ++dx) {
+          const auto it = grid.find(key(a, dx, dy, dz));
+          if (it == grid.end()) continue;
+          for (std::size_t j : it->second) {
+            if (j <= i) continue;
+            const Cell& b = out.cells[j];
+            if (b.region != a.region) continue;
+            int touch = 0, overlap = 0;
+            for (int ax = 0; ax < 3; ++ax) {
+              const double lo = std::max(a.lo[ax], b.lo[ax]), hi = std::min(a.lo[ax] + a.size, b.lo[ax] + b.size);
+              if (hi - lo > tol) ++overlap;
+              else if (std::fabs(hi - lo) <= tol) ++touch;
+            }
+            if (overlap == 2 && touch == 1) up[find(j)] = find(i);
+          }
+        }
+  }
+  struct Extent { double lo[3] = {1e300, 1e300, 1e300}, hi[3] = {-1e300, -1e300, -1e300}, big = 0.0; };
+  std::map<std::size_t, Extent> patch;
+  for (std::size_t i = 0; i < n; ++i) {
+    const Cell& c = out.cells[i];
+    if (k_of(c.region) < 3) continue;
+    Extent& e = patch[find(i)];
+    for (int ax = 0; ax < 3; ++ax) {
+      e.lo[ax] = std::min(e.lo[ax], c.lo[ax]);
+      e.hi[ax] = std::max(e.hi[ax], c.lo[ax] + c.size);
+    }
+    e.big = std::max(e.big, c.size);
+  }
+  std::vector<Cell> kept;
+  kept.reserve(n);
+  for (std::size_t i = 0; i < n; ++i) {
+    const Cell& c = out.cells[i];
+    const int k = k_of(c.region);
+    if (k < 3) { kept.push_back(c); continue; }
+    const Extent& e = patch[find(i)];
+    double least = 1e300;
+    for (int ax = 0; ax < 3; ++ax) least = std::min(least, e.hi[ax] - e.lo[ax]);
+    if (least >= k * e.big - 1e-6 * k * e.big) { kept.push_back(c); continue; }
+    out.solid.push_back(c);
+    SolidWhy why;
+    why.why = NoCell::TooFewAcross;
+    why.have_mm = static_cast<float>(std::floor(least * 1e3 + 1e-6) * 1e-3);
+    why.need_mm = static_cast<float>(std::ceil(k * e.big * 1e3 - 1e-6) * 1e-3);
+    out.solid_why.push_back(why);
+    ++out.small_patch_cells;
+    for (RegionCells& r : out.regions)
+      if (r.frame == c.frame && r.region == c.region) {
+        if (r.cells > 0) --r.cells;
+        ++r.solid;
+        break;
+      }
+  }
+  out.cells.swap(kept);
+}
+}  // namespace
 
 double step_held(const CellSpec& spec) {
   if (!(spec.max_step > 0.0)) return 0.0;
@@ -1477,6 +1748,8 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads, const 
     out.walls[static_cast<std::size_t>(pass.frame_index)] = std::move(map);
   }
   if (ds.start == Start::AllLattice) run(0, world, 1e300, world_base(spec), wlo, whi, false);
+  // K5: no Structural patch of fewer cells than its count across, in any direction.
+  drop_small_patches(out, [&](int region) { const CellSpec& cs = spec_of(region); return cs.one_grid ? 1 : cs.min_cells_across; });
   // D14b: cells take in the lattice slivers inside their cubes.
   out.absorb = spec.absorb_slivers;
   if (out.absorb) out.index = index_cells(out);
