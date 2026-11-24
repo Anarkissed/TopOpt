@@ -50,7 +50,8 @@ public enum PrintDraw {
 final class ResultsPrintSource {
     let up: SIMD3<Float>?
     let chosenFace: Bool
-    init(up: SIMD3<Float>?, chosenFace: Bool) { self.up = up; self.chosenFace = chosenFace }
+    let host: PrintOrientationHost?
+    init(up: SIMD3<Float>?, chosenFace: Bool, host: PrintOrientationHost?) { self.up = up; self.chosenFace = chosenFace; self.host = host }
 }
 
 // MARK: - the print frame core turned a file through

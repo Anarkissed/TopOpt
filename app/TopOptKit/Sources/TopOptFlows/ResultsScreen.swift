@@ -186,6 +186,7 @@ public struct ResultsScreen: View {
                 version: String? = nil, pickedVariant: Int? = nil, onPick: ((Int) -> Void)? = nil,
                 printOrientation: ResultsPrintOrientation? = nil,
                 printUp: SIMD3<Float>? = nil, chosenFace: Bool = false,
+                orientation: PrintOrientationHost? = nil,
                 certify: OrganicCertifyCard? = nil) {
         // `resultsModel` is a TEST SEAM (the M7 /app/ house style — the run is tested
         // through an injected scheduler / runner / notifier the same way). The screen
@@ -219,8 +220,8 @@ public struct ResultsScreen: View {
         self.printOrientation = printOrientation
         self.certify = certify
         // ★ notes27: one reference (WorkspaceBodySizeTests: Results' own size has 16 bytes of room)
-        self.printSource = printUp == nil ? nil
-            : ResultsPrintSource(up: printUp, chosenFace: chosenFace)
+        self.printSource = printUp == nil && orientation == nil ? nil
+            : ResultsPrintSource(up: printUp, chosenFace: chosenFace, host: orientation)
     }
 
     /// ★ notes27 (his print orientation, SPEC 2a: "I want the part first drawn the way it prints"): the way up it prints (the
@@ -234,10 +235,27 @@ public struct ResultsScreen: View {
     var printing: ResultsPrinting {
         let f = model.printFacts
         return ResultsPrinting(way: f.onEdge ? .onEdge : chosenFace ? .chosenFace : .asPlaced,
-                               slicerSupports: f.slicerSupports, linked: false)
+                               slicerSupports: f.slicerSupports, linked: orientation != nil)   // ★ P6: the row's link
     }
-    /// The turn the part is drawn with: its print up to the screen's up.
-    var printSettle: simd_quatf { printUp.map(PrintDraw.settle(up:)) ?? simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0)) }
+    /// The turn the part is drawn with: its print up to the screen's up (★ P6: the way the orientation flow shows, while open).
+    var printSettle: simd_quatf {
+        ((orientation != nil ? orient.shownUp() : nil) ?? printUp).map(PrintDraw.settle(up:)) ?? simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
+    }
+    /// ★ notes27 P6 (his print orientation, SPEC 2d): "Print orientation" — the workspace's check and keep; nil: not offered.
+    var orientation: PrintOrientationHost? { printSource?.host }
+    /// The flow (shared; observed by the views that draw it — PrintTurnedStage, the corner switch, the layer — so this screen's
+    /// own size never grows).
+    private var orient: PrintOrientationFlow { PrintOrientationFlow.shared }
+
+    /// "Print orientation" (the ⌃ drawer, the Checks row's link): the engine's ranking of this result, else Manual.
+    private func startOrientation() {
+        guard let h = orientation else { return }
+        model.cornerDrawers.close()
+        let m = viewerMesh
+        var tris = (m?.indices ?? []).map { Int32(bitPattern: $0) }
+        if let b = model.printFacts.baseTriangles, b > 0, b * 3 < tris.count { tris = Array(tris.prefix(b * 3)) }   // the solid
+        orient.start(kind: h.kind, ranking: model.printFacts.ranking, mesh: m.map { ($0.positions, tris) })
+    }
 
     /// ★ B4 (note 12, Q9): the orientation line's source; nil draws no line.
     let printOrientation: ResultsPrintOrientation?
@@ -289,7 +307,9 @@ public struct ResultsScreen: View {
     struct MergeTrigger: Equatable {
         let outcome: OptimizeOutcome
         static func == (a: MergeTrigger, b: MergeTrigger) -> Bool {
-            a.outcome.variants.count == b.outcome.variants.count
+            // ★ notes27 P6 ("Keep orientation"): a kept check's result replaces the one shown with as many variants — its report
+            // (its size, cheap) tells them apart
+            a.outcome.variants.count == b.outcome.variants.count && a.outcome.reportJSON?.count == b.outcome.reportJSON?.count
         }
     }
     private var mergeTrigger: MergeTrigger { MergeTrigger(outcome: liveOutcome) }
@@ -305,9 +325,10 @@ public struct ResultsScreen: View {
             // the selected variant's isosurface, optionally stress-colored, morphing
             // with the scrub. Pixels are device QA (the M7 /app/ standard).
             DS.Color.background.color.ignoresSafeArea()
+            PrintTurnedStage(flow: orient, follows: orientation != nil, up: printUp) { settle, animated in   // ★ notes27: as it prints
             MetalMeshView(mesh: viewerMesh,
                           camera: cameraModel,
-                          settleRotation: printSettle, settleAnimated: false,   // ★ notes27: drawn the way it prints
+                          settleRotation: settle, settleAnimated: animated && !reduceMotion,   // ★ notes27: drawn the way it prints
                           showGround: printUp != nil,                                  // ... on the bed
                           onProjection: { rawProjection = $0 },
                           stressTints: stressTints,
@@ -327,6 +348,7 @@ public struct ResultsScreen: View {
                 .onSurfacePoint { p in if exploring, let p { stressProbe = p } }
                 .onExploreExit(exploring ? { leaveExplore() } : nil)
                 .closesCornerDrawers(model.cornerDrawers)   // ★ his 11-22 (img 45): a tap on the model closes the ⌃'s drawer
+            }
                 .ignoresSafeArea()
 
             // ★ RESULTS REDESIGN (his mockup, approved 2026-10-27): the model is the screen; the versions (bottom left),
@@ -354,7 +376,11 @@ public struct ResultsScreen: View {
             versionsColumn
             rightColumn
             if let po = printOrientation { printOrientationLine(po) }   // ★ B4 (note 12): bottom-centre
+            // ★ notes27 P6: in the flow, Check strength + Manual orientation stand in Export's place
+            PrintOrientationCornerSwitch(flow: orient, host: orientation,
+                                         variant: { PrintCheckVariant(index: model.selectedVariantIndex, stl: model.exportSTLData()) }) {
             resultsCorner   // ★ LOOK PER SCREEN (R-a, §4.18): Compare · Details · Export · ⌃
+            }
             if detailsOpen {
                 // ★ R-a (mockup #topo-results-details): the drawer from the bottom, the page's width
                 ResultsDetailsDrawer(tab: $detailsTab, versionTitle: selectedRow?.title ?? "",
@@ -373,6 +399,11 @@ public struct ResultsScreen: View {
             if model.hasHistory, !fullScreen { mediaPlayer }
             if legendShown { stressProbeCallout.ignoresSafeArea() }
             orientationGizmo
+            if let h = orientation {   // ★ notes27 P6: his print orientation flow, over Results (it draws only while open)
+                PrintOrientationLayer(flow: orient, host: h, raw: rawProjection, up: printUp,
+                                      centre: viewerMesh?.bounds.center ?? .zero, eye: cameraModel.camera.eye)
+                    .zIndex(6)
+            }
             if compare != nil {
                 ResultsCompareView(model: model, rows: versionRows, session: $compare, scenarioPick: $scenarioPick,
                                    close: { compare = nil },
@@ -401,6 +432,7 @@ public struct ResultsScreen: View {
         .onChange(of: model.selectedIndex) { _ in
             stressProbe = nil; applyMotion(layers.motion)   // a new version's views start from rest
             syncOrientPhase()                               // ★ B4: and its own way of printing
+            orient.reset()                                  // ★ notes27 P6: another result: the flow starts over
         }
         // ★ his ask 2026-10-27: the Scenario menu changes the views — the picked scenario's own fields, from rest
         .onChange(of: scenarioPick) { p in model.viewScenario = p; stressProbe = nil; applyMotion(layers.motion) }
@@ -415,7 +447,7 @@ public struct ResultsScreen: View {
         // ★ his iPad 2026-10-27: Compare covers the page too, so the Topology | Setup | Results capsule hides under it
         .onChange(of: fullScreen) { onFullScreen?($0 || compare != nil) }
         .onChange(of: compare != nil) { onFullScreen?($0 || fullScreen) }
-        .onDisappear { if fullScreen || compare != nil { onFullScreen?(false) } }
+        .onDisappear { if fullScreen || compare != nil { onFullScreen?(false) }; orient.reset() }   // ★ notes27 P6
         .background(GeometryReader { g in
             Color.clear.onAppear { screenWidth = g.size.width; screenHeight = g.size.height }
                 .onChange(of: g.size.width) { screenWidth = $0 }.onChange(of: g.size.height) { screenHeight = $0 }
@@ -468,6 +500,7 @@ public struct ResultsScreen: View {
             model.setFlowWiggle(0)                    // … and never wiggle
             layers = ResultsLayers()   // ★ B4 (note 13): open plain, no view lit
             syncOrientPhase()
+            orient.reset()   // ★ notes27 P6: the flow starts closed (it is shared: never another screen's state)
             if let v = takeOpenOn?(), let t = model.tabs.first(where: { $0.variantIndex == v && !$0.isLatticed }) { model.select(t.index) }
             model.stressOn = layers.stress
             applyMotion(nil)
@@ -1443,6 +1476,10 @@ public struct ResultsScreen: View {
     private func resultsMoreItems(_ exportable: Int) -> [CornerMoreItem] {
         var items: [CornerMoreItem] = []
         if exportable >= 2 { items.append(.action("Export all \(exportable) results", id: "results-split-export-all") { exportAll() }) }
+        // ★ notes27 P6 (his print orientation, SPEC 2d): "Print orientation", the recommendation and Check strength
+        if orientation != nil {
+            items.append(.action(PrintOrientationWords.drawerItem, id: "results-split-orientation") { startOrientation() })
+        }
         items.append(.action("Open in Library", id: "results-split-library") { onClose() })
         return items
     }
@@ -1535,7 +1572,8 @@ public struct ResultsScreen: View {
                 if sc.count >= 2 { ResultsScenarioPicker(scenarios: sc, pick: $scenarioPick).padding(.top, 6) }
                 ResultsChecksAndDetails(checks: checks, checksOpen: $checksOpen, openCheck: $openCheck, detailsOpen: $detailsOpen,
                                         tab: $detailsTab, versionTitle: selectedRow?.title ?? "",
-                                        rows: { model.printing = printing; return model.detailRows($0, version: selectedRow) }, pill: crowded)   // ★ notes27
+                                        rows: { model.printing = printing; return model.detailRows($0, version: selectedRow) }, pill: crowded,   // ★ notes27
+                                        link: { _ in startOrientation() })   // ★ notes27 P6: the orientation row's "Print orientation"
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)

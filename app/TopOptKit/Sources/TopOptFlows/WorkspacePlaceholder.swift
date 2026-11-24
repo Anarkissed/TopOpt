@@ -1893,6 +1893,7 @@ public struct WorkspacePlaceholder: View {
                               printUp: PrintDraw.up(frame: PrintReportFacts.of(report: outcome.reportJSON).frame,
                                                     orientation: project.buildOrientation, gravity: force.gravity),
                               chosenFace: !project.buildOrientation.isInferredFromGravity,
+                              orientation: printOrientationHost(for: outcome),   // ★ notes27 P6/P7: "Print orientation"
                               certify: stage == .lattice ? certifyCard : nil)   // ★ Organic cut 2: his certify wizard (★ notes25: the print file's, in the Lattice stage)
                     .ignoresSafeArea()
                     .onAppear { startCertifyWalk(); model.resultsMounted.mounted = true }   // ★ 11-23
@@ -2128,6 +2129,20 @@ public struct WorkspacePlaceholder: View {
                                     onMac: compute.activeRemote != nil, cancel: { r.cancel() })
         LatticeMacMake.shared.request = request
         launchFileRun(request, job: job, strengthJob: strengthJob, config: compute.activeRemote)
+    }
+
+    /// ★ notes27 P6/P7 (his print orientation, SPEC 2d): what Results' "Print orientation" runs for this stage's result — its
+    /// "Check strength" chain on the Mac standing the chosen way (PrintCheckJobs), and "Keep orientation".
+    private func printOrientationHost(for outcome: OptimizeOutcome) -> PrintOrientationHost {
+        let lattice = stage == .lattice, organic = lattice && LatticeLayoutPreview.organic(project.lattice)
+        let comp = compute
+        return PrintOrientationHost(kind: !lattice ? .topology : organic ? .organic : .cells,
+                                    macReady: { comp.activeRemote != nil },
+                                    check: { up, v, cancelled, said in
+                                        try await checkPrintOrientation(up: up, outcome: outcome, lattice: lattice, organic: organic,
+                                                                        variant: v, isCancelled: cancelled, stage: said)
+                                    },
+                                    keep: { up, o in keepPrintOrientation(up: up, outcome: o, lattice: lattice) })
     }
 
     /// ★ notes27 P7: "Check strength" along `up` — an Organic lattice its strengthening and print file, a cell lattice its print
