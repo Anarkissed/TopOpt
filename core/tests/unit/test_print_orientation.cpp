@@ -120,6 +120,10 @@ int main() {
     // None passes: the strongest only, said so.
     r = recommend_print_orientation({cand(1.0, 0, 900, 40, true), cand(1.2, 0, 900, 30)}, 1.5);
     CHECK(r.none_passes && r.recommended == 1 && has_why(r, "None passes yet"));
+    // None passes and the strongest is only 4 % stronger (his stand of 11-23: 1.34 as placed, 1.397 on an edge): kept.
+    r = recommend_print_orientation({cand(1.34, 2000, 3120, 70, true), cand(1.397, 18669, 3120, 60)}, 1.5);
+    CHECK(r.none_passes && r.recommended == 0 && !r.change && has_why(r, "Prints best as placed") &&
+          has_why(r, "None passes yet") && r.candidates[0].offered && r.candidates[0].dropped.empty());
     // Strength not known: support decides, his placement kept unless 30 % less.
     r = recommend_print_orientation({cand(nan, 1000, 900, 40, true), cand(nan, 500, 900, 30)}, 1.5);
     CHECK(r.recommended == 1 && r.change && !r.candidates[1].passes);

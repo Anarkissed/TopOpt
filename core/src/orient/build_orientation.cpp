@@ -831,9 +831,13 @@ OrientationRecommendation recommend_print_orientation(const std::vector<Orientat
     if (less) out.why.push_back("Less support needed");
     if (inc_out && out.candidates[static_cast<std::size_t>(inc)].dropped == "cannot_stand")
       out.why.push_back("Stands on a larger face");
-    if (inc_out && out.candidates[static_cast<std::size_t>(inc)].dropped == "too_weak" && out.why.empty())
-      out.why.push_back("Stronger across the layers");
-    if (out.why.empty()) out.recommended = inc;
+    // (His placement dropped as too weak when NONE passes is still his placement: the hysteresis above decides, so a
+    // winner a little stronger that fails too is no reason to turn the part.)
+    if (out.why.empty()) {
+      out.recommended = inc;
+      out.candidates[static_cast<std::size_t>(inc)].offered = true;
+      out.candidates[static_cast<std::size_t>(inc)].dropped.clear();
+    }
   }
   out.change = inc >= 0 && out.recommended != inc;
   out.headline = out.change ? "new_orientation_may_be_stronger" : "best_orientation";
