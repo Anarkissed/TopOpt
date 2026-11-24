@@ -1018,6 +1018,22 @@ class Handler(BaseHTTPRequestHandler):
             with open(os.path.join(tmpdir, "strengthened.json"), "wb") as f:
                 f.write(fields["strengthened"]["data"])
             job_doc["strengthened"] = "strengthened.json"
+        # ★ notes27 (his print orientation, "Check strength" for a topology result): the mesh core's orientation re-check
+        # reads (an analyze job's `orientation_recheck`: {"mesh", "build_dir"}), uploaded as the multipart "recheck_mesh",
+        # saved beside the job under its bare name (.stl or .3mf) and named by the job. Only with that block, only on an
+        # analyze job; anything else is refused here. (Every other job key, e.g. a lattice file's "print_frame", passes
+        # through to the CLI untouched, and a chained print file keeps it: _chained_file_job copies job.json's keys.)
+        if "recheck_mesh" in fields:
+            orc = job_doc.get("orientation_recheck")
+            rname = os.path.basename(fields["recheck_mesh"]["filename"] or "recheck.stl")
+            if (not isinstance(orc, dict) or job_doc.get("mode") != "analyze"
+                    or not rname.lower().endswith((".stl", ".3mf")) or rname == step_name):
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                return self._json(400, {"error": "recheck_mesh goes with an analyze job's orientation_recheck "
+                                                 "(an .stl or .3mf, not the model)"})
+            with open(os.path.join(tmpdir, rname), "wb") as f:
+                f.write(fields["recheck_mesh"]["data"])
+            orc["mesh"] = rname
         job_path = os.path.join(tmpdir, "job.json")
         with open(job_path, "w") as f:
             json.dump(job_doc, f)

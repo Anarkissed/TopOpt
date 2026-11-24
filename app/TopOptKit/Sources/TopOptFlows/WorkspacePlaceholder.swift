@@ -2130,6 +2130,56 @@ public struct WorkspacePlaceholder: View {
         launchFileRun(request, job: job, strengthJob: strengthJob, config: compute.activeRemote)
     }
 
+    /// ★ notes27 P7: "Check strength" along `up` — an Organic lattice its strengthening and print file, a cell lattice its print
+    /// file (each with `print_frame`), a topology result core's re-check of its own run job.
+    @MainActor
+    private func checkPrintOrientation(up: SIMD3<Double>, outcome: OptimizeOutcome, lattice: Bool, organic: Bool,
+                                       variant: PrintCheckVariant, isCancelled: @escaping @Sendable () -> Bool,
+                                       stage said: @escaping @Sendable (String) -> Void) async throws -> PrintCheckResult {
+        guard let config = compute.activeRemote else { throw LatticeFileRun.Failure(PrintOrientationWords.noMacText) }
+        let before = outcome.reportJSON.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+        guard lattice else {
+            guard let path = project.importedFile?.path, let runJob = project.relatticeArtifacts?.jobJSON, let stl = variant.stl else {
+                throw LatticeFileRun.Failure("This result\u{2019}s own run is not kept on this iPad, so it can\u{2019}t be checked again.")
+            }
+            return try await PrintCheckJobs.topology(config: config, modelPath: path, runJob: runJob, variantSTL: stl, outcome: outcome,
+                                                     variant: variant.index, up: up, projectName: project.name,
+                                                     isCancelled: isCancelled, stage: said)
+        }
+        guard let request = model.makeLatticeRunRequest() else { throw LatticeFileRun.Failure("Import a part and set a lattice region first.") }
+        let strengthJob = LatticeFileJob.checksStrength(project.lattice, wired: LatticeFileButton.wired) ? strengthJobJSON(request) : nil
+        let made: Result<LatticeFileJob.ForPart, LatticeFileJob.NoJob>
+        if organic {
+            let inputs = try await organicMacInputsWhenReady()
+            made = LatticeFileJob.forOrganic(project, groups: inputs.groups, tensor: inputs.tensor, referenceMPa: newEngineStress.referenceMPa,
+                                             strengthJob: strengthJob, printUp: up)
+        } else {
+            made = LatticeFileJob.forPart(project, stress: newEngineStress, strengthJob: strengthJob, printUp: up)
+        }
+        let job: LatticeFileJob.ForPart
+        switch made {
+        case .success(let j): job = j
+        case .failure(let why): throw LatticeFileRun.Failure(why.line)
+        }
+        let required = ((before["strength"] as? [String: Any])?["safety_margin"] as? NSNumber)?.doubleValue
+            ?? PrintReportFacts.decode(before).ranking?.requiredMargin ?? 1.5
+        return try await PrintCheckJobs.lattice(config: config, job: job, strengthJob: strengthJob, organic: organic,
+                                                request: request.withJobMode(LatticeFileButton.jobMode), projectName: project.name,
+                                                densityGCm3: model.densityGCm3(for: project.material), up: up, before: before,
+                                                required: required, isCancelled: isCancelled, stage: said)
+    }
+
+    /// ★ notes27 P6: "Keep orientation" — the face he kept is set (his 11-23 rule: a change on a version with a result makes the
+    /// next version), and that version holds the check's result: Results shows it, standing the new way.
+    private func keepPrintOrientation(up: SIMD3<Double>, outcome: OptimizeOutcome, lattice: Bool) {
+        let artifacts = lattice ? nil : project.relatticeArtifacts   // a topology result keeps its run's pair
+        project.buildOrientation.plateUp = SIMD3<Float>(Float(up.x), Float(up.y), Float(up.z))
+        model.moveToNextVersionIfEdited(project, baseline: VersionEditWatch.shared.baseline(for: project))
+        run.replaceOutcome(outcome, lattice: lattice)
+        if let a = artifacts, project.relatticeArtifacts == nil { project.relatticeArtifacts = a }
+        model.persistCurrentProject()
+    }
+
     /// The print file's run, started: on the chosen Mac, else this iPad (a regular lattice only: Organic needs a Mac).
     /// ★ Organic cut 2: `organic` strengthens first in Structural (LatticeFileButton.organicRunner).
     private func launchFileRun(_ request: RunRequest, job: LatticeFileJob.ForPart, strengthJob: Data?, config: RemoteRunnerConfig?,
