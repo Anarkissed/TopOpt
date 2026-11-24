@@ -294,6 +294,7 @@ public struct ResultsScreen: View {
                           bodyAlpha: bodyAlpha,
                           spotFaces: certifyPaint?.outline, spotKey: certifyPaint?.key ?? 0)
                 .loadMotion(ramp: loadRamp, patch: motion?.patch)   // ★ notes25: Bend / Break run the load
+                .loadLight(loadLight)   // ★ notes26 (C5): Load paths' light, emitted and haloed
                 // ★ tap-to-explore, the Lattice key's process (his iPad 2026-10-27): while the key is open a tap on the
                 // part reads the stress there (an arrow on the part, an arrow on the key); a double tap anywhere leaves
                 .onSurfacePoint { p in if exploring, let p { stressProbe = p } }
@@ -682,11 +683,8 @@ public struct ResultsScreen: View {
         }
         // ★ his iPad 2026-10-28: Load paths is light travelling through the part, painted on its own surface — and with the
         // Stress layer on, the light is the stress it passes through
-        if layers.motion == .loadPaths {
-            guard let lf = model.lightFlow, let mesh = viewerMesh, lf.arrival.count == mesh.flat.vertexCount else { return nil }
-            let colours = legendShown ? model.selectedStressField.map { model.stressTints(for: mesh, field: $0) } : nil
-            return lf.tints(phase: Float(model.lightPhase), lightColours: colours)
-        }
+        // ★ notes26 (C5): now LIGHT, emitted and haloed on the GPU (`loadLight`), not paint in these tints
+        if layers.motion == .loadPaths { return nil }
         guard showStressColors, let mesh = viewerMesh,
               let field = model.selectedStressField, !field.isEmpty else { return nil }
         return model.stressTints(for: mesh, field: field, multiplier: stressMultiplier)
@@ -705,6 +703,18 @@ public struct ResultsScreen: View {
     /// in Break, 1 at rest — so the legend's numbers are the part's (the old flex colours were boosted to hit red).
     /// ★ notes25: the load the moving view shows this frame (the colours are each place's share at your load × it).
     private var stressMultiplier: Double { motion.map { Double($0.frame.colourLoad) } ?? 1 }
+
+    /// ★ notes26 (C5, his 11-23: "more colour and light coming out of it"): Load paths' light this frame — the same sweep, now
+    /// emitted and haloed by the viewer, coloured by how much load flows there; with the Stress layer on, over the stress colours
+    /// (the part's stress stays readable, the light is that colour lifted toward white). A new key each phase step; held paused.
+    private var loadLight: LoadLightFrame? {
+        guard layers.motion == .loadPaths, certifyPaint == nil, let lf = model.lightFlow, let mesh = viewerMesh,
+              lf.arrival.count == mesh.flat.vertexCount else { return nil }
+        let colours = legendShown ? model.selectedStressField.map { model.stressTints(for: mesh, field: $0) } : nil
+        let f = lf.lightFrame(phase: Float(model.lightPhase), stressColours: colours)
+        return LoadLightFrame(key: Int((model.lightPhase * 100_000).rounded()) * 2 + (colours == nil ? 0 : 1),
+                              tints: f.tints, light: f.light)
+    }
 
     /// ★ notes25: the moving view that runs the load (Bend / Break), when the part can move.
     private var motionKind: LoadMotionKind? {
