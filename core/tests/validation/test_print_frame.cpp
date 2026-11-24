@@ -494,6 +494,40 @@ int main() {
     std::printf("[A] file z %.6g .. %.6g\n", lo, hi);
     CHECK(std::fabs(lo) < 1e-6 && std::fabs(hi - 40.0) < 1e-3);
   }
+  // ── P4: the print orientation ranking: six candidates, as placed first (the frame's up, in the part's coordinates);
+  // as placed, its guessed strength is the check's own (the solid's effective margin, the struts' smallest).
+  {
+    try {
+      const sj::Value j = sj::parse(A.json, "A");
+      const sj::Value* po = sj::find(j, "print_orientation");
+      const sj::Value* st = sj::find(j, "strength");
+      CHECK(po && st);
+      if (po && st) {
+        const sj::Value& cands = sj::require(*po, "candidates", "po");
+        CHECK(cands.arr.size() == 6);
+        const sj::Value& c0 = cands.arr.at(0);
+        const sj::Value& up = sj::require(c0, "up", "c0");
+        CHECK(up.arr.size() == 3 && up.arr[0].num == 1.0 && up.arr[1].num == 0.0 && up.arr[2].num == 0.0);
+        CHECK(sj::require(c0, "as_placed", "c0").boolean);
+        const sj::Value& s0 = sj::require(c0, "strength", "c0");
+        const double solid = sj::require(s0, "solid", "s0").num;
+        const double eff = sj::require(sj::require(*st, "solid_margin", "st"), "effective", "sm").num;
+        const sj::Value& struts = sj::require(s0, "struts", "s0");
+        const double smallest = sj::require(sj::require(*st, "struts", "st"), "smallest_margin", "ss").num;
+        std::printf("[A] as placed: solid %.6g (check %.6g), struts %.6g (check %.6g); recommended %d, change %d\n", solid,
+                    eff, struts.is_number() ? struts.num : -1.0, smallest,
+                    static_cast<int>(sj::require(*po, "recommended", "po").num), sj::require(*po, "change", "po").boolean);
+        CHECK(std::fabs(solid - eff) <= 1e-9 * std::max(1.0, eff));
+        CHECK(!struts.is_number() || std::fabs(struts.num - smallest) <= 1e-9 * std::max(1.0, smallest));
+        int offered = 0;
+        for (const sj::Value& c : cands.arr) offered += sj::require(c, "offered", "c").boolean;
+        CHECK(offered >= 1);
+      }
+    } catch (const std::exception& e) {
+      CHECK(false);
+      std::printf("  print_orientation not read: %s\n", e.what());
+    }
+  }
   // ── no frame: no "print_frame" key, and the file as the job made it before (its own up)
   {
     const Run P = run("plain", "job_plain.json");

@@ -51,6 +51,7 @@
 #include "topopt/lattice.hpp"
 #include "topopt/lattice_algorithm.hpp"
 #include "topopt/print_frame.hpp"   // P2: his print orientation, the door
+#include "topopt/print_orientation.hpp"   // P4: the candidates
 #include "topopt/lattice_boundary.hpp"
 #include "topopt/lattice_types.hpp"
 #include "topopt/lattice_gen.hpp"
@@ -16334,6 +16335,7 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
   fst.up = build_dir;
   fst.safety = options.margin_stop;
   fst.light_width_mm = light_width_mm;
+  for (const Vec3& u : orientation_axes()) fst.also_up.push_back(u);   // P4: the same struts, the six candidate ups
   R.check = ll::check_frame(R.frame, vs, fst, fs);
   R.ms_frame = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
   R.mb_frame = process_memory().rss_mb;
@@ -16346,6 +16348,7 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
   // wall rescue on the member width, measured as analyze_fixed_design measures it, here on the solid share).
   double solid_vm = 0.0;
   std::size_t solid_voxels = 0;
+  std::array<double, 6> tension_up{};   // P4: the solid's tension across the layers, per candidate up
   std::vector<double> s_vm, s_width;   // per solid voxel: von Mises, member width (width-aware only)
   std::vector<double> width;           // per voxel: the solid share's member width (width-aware, or for the spots)
   const auto measure_width = [&] {
@@ -16372,10 +16375,14 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
         for (int q = 0; q < 6; ++q) sig[e][static_cast<std::size_t>(q)] = a.stress_tensor_field[6 * e + static_cast<std::size_t>(q)];
     }
     R.solid_tension = solid_voxels ? max_interlayer_tension(cert_grid, sig, build_dir) : 0.0;
+    // P4: the same solid with its layers across each candidate up (exact: the solve does not read the up)
+    for (std::size_t k = 0; k < 6; ++k)
+      tension_up[k] = solid_voxels ? max_interlayer_tension(cert_grid, sig, orientation_axes()[k]) : 0.0;
   }
   R.solid_margin = compute_stress_margin(material.yield_strength_mpa, material.z_knockdown, solid_vm, R.solid_tension);
   // The effective margin at an infill percent: Install 3's gate (gate_margin_effective), the job's other print settings.
-  const auto effective_at = [&](double infill) {
+  // (P4: with the layers' tension given, the same margin for another up.)
+  const auto effective_with = [&](double infill, double tension) {
     KnockdownSpec k = knockdown;
     k.infill_percent = infill;
     k.infill_knockdown = infill_margin_knockdown(infill, k.infill_exponent, k.infill_floor);
@@ -16386,8 +16393,9 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
         vm_eff = std::max(vm_eff, s_vm[i] / width_aware_knockdown(infill, s_width[i], k.wall_thickness_mm,
                                                                    k.infill_exponent, k.infill_floor));
     }
-    return gate_margin_effective(material.yield_strength_mpa, material.z_knockdown, solid_vm, vm_eff, R.solid_tension, k);
+    return gate_margin_effective(material.yield_strength_mpa, material.z_knockdown, solid_vm, vm_eff, tension, k);
   };
+  const auto effective_at = [&](double infill) { return effective_with(infill, R.solid_tension); };
   R.solid_margin_effective = effective_at(knockdown.infill_percent);
   for (int pc = 1; pc <= 100 && R.passes_at_infill_percent < 0; ++pc)
     if (effective_at(pc) >= options.margin_stop) R.passes_at_infill_percent = pc;
@@ -16829,6 +16837,45 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
   done.ok = true;
   done.json = std::move(s);
   done.accepted = R.verdict != "fail";
+  // P4: per candidate up (print_orientation.hpp): the solid's margin with its layers across it (exact), the struts'
+  // smallest (the same struts and forces, the limit by their rise: an estimate), the part's own support (voxels); and
+  // the centre of mass (the solid's and the lattice's material).
+  {
+    OrientationStrengths& os = done.orientation;
+    os.known = true;
+    os.required_margin = options.margin_stop;
+    std::vector<char> solid_mask(nvox, 0);
+    double mass = 0.0;
+    Vec3 com{0.0, 0.0, 0.0};
+    for (int k = 0; k < cert_grid.nz; ++k)
+      for (int j = 0; j < cert_grid.ny; ++j)
+        for (int i = 0; i < cert_grid.nx; ++i) {
+          const std::size_t e = cert_grid.index(i, j, k);
+          if (!in_part[e]) continue;
+          solid_mask[e] = static_cast<double>(fm.solid[e]) >= printed_iso;
+          const double w = density[e];
+          const Vec3 vc = cert_grid.voxel_center(i, j, k);
+          mass += w;
+          com = {com.x + w * vc.x, com.y + w * vc.y, com.z + w * vc.z};
+        }
+    if (mass > 0.0) {
+      os.centre_of_mass = {com.x / mass, com.y / mass, com.z / mass};
+      os.has_centre_of_mass = true;
+    }
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    for (std::size_t q = 0; q < 6; ++q) {
+      const Vec3& u = orientation_axes()[q];
+      const int axis = u.x != 0.0 ? 0 : u.y != 0.0 ? 1 : 2;
+      const int sgn = (u.x + u.y + u.z) > 0.0 ? 1 : -1;
+      OrientationStrength& t = os.by_axis[q];
+      t.solid = effective_with(knockdown.infill_percent, tension_up[q]);
+      t.solid_interlayer = compute_stress_margin(material.yield_strength_mpa, material.z_knockdown, solid_vm, tension_up[q]).interlayer;
+      const bool struts_known = c.solved && c.judged > 0 && q < c.by_up.size();
+      t.struts = struts_known ? c.by_up[q].smallest_margin : nan;
+      t.struts_under = struts_known ? c.by_up[q].under_safety : 0;
+      t.support_mm3 = support_along_axis(cert_grid, in_part, solid_mask, axis, sgn);
+    }
+  }
   (void)in_part;
   return R;
 }

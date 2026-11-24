@@ -28,6 +28,7 @@
 #include "topopt/lattice_layout_organic.hpp"
 #include "topopt/mesh.hpp"
 #include "topopt/print_frame.hpp"
+#include "topopt/print_orientation.hpp"
 #include "topopt/step.hpp"
 
 namespace topopt::lattice_layout {
@@ -196,6 +197,10 @@ struct StrengthDone {
   std::string json;                   // ok (run): the `strength` block, an object
   std::vector<std::string> files;     // ok (run): the files written into out_dir, by bare name
   bool accepted = false;
+  // P4 (his print orientation): the six candidates' guessed strength and the part's own support, in the job's frame
+  // (print_orientation.hpp); the file job adds the bed and writes "print_orientation". Not known: the check made none
+  // (the cube check, so far).
+  OrientationStrengths orientation;
 };
 // The check is the CLI's (run_job.cpp: lattice_file_strength_check): core's lattice layout is always built, and the
 // old check needs the solver and the importer. `before` reads the strength job (cheap; no solve) and may refuse it;
@@ -372,6 +377,8 @@ struct FileResult {
   bool strength_ran = false;
   bool strength_accepted = false;
   std::string strength_json;
+  // P4: the print orientation ranking and recommendation ("print_orientation"), when the check gave its numbers.
+  std::string orientation_json;
   double ms_strength = 0.0;
   // Where the time went, ms.
   double ms_import = 0.0, ms_measure = 0.0, ms_read = 0.0, ms_cells = 0.0, ms_bars = 0.0;

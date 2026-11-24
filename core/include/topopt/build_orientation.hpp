@@ -287,6 +287,55 @@ std::string build_orientation_report_json(const BuildOrientationReport& r,
                                           const Vec3& as_built_dir,
                                           const BuildFrameRotation* baked = nullptr);
 
+// ── THE PRINT ORIENTATION RECOMMENDATION (his print orientation, 2026-11-23; spec 2e, piece P4) ─────────────────────
+// ONE rule, for every result that can rank (a lattice file's ranking; the topology recheck may call it too), so two
+// results can never recommend by different rules. Plain and lexicographic, no blended score (a weighted sum would
+// "launder" the trade-off, as this header warns above). Decision D1 (362's default; he may change any number here):
+//   1. Must be strong enough: keep the candidates whose guessed strength (the least of the solid's and the struts')
+//      is at least the required margin; if none is, keep the single strongest and say none passes yet.
+//   2. Must stand: a face on the bed of at least `min_contact_mm2` and at least `min_contact_share` of the largest
+//      candidate's, with the centre of mass over it.
+//   3. Least part support wins; supports within `support_tie` of the least count as equal.
+//   4. Ties: the stronger, then the lower.
+//   5. His placement (the incumbent) is kept unless the winner is at least `stronger_by` stronger (or the incumbent
+//      fails and the winner passes), or needs `less_support_by` less part support without being weaker.
+// Strength not known (NaN, no strength check): steps 1 and the strength comparisons are left out.
+struct OrientationCandidateIn {
+  Vec3 up{0.0, 0.0, 1.0};       // as the caller reports it
+  bool incumbent = false;       // his placement (exactly one)
+  bool flat = true;             // a flat face square to the up rests on the bed (Phase 1: else not offered)
+  double strength = 0.0;        // the guessed margin (least of solid and struts); NaN: not known
+  double support_mm3 = 0.0;     // part-only support
+  double contact_mm2 = 0.0;     // the face on the bed
+  bool stands = true;           // the centre of mass over that face
+  double height_mm = 0.0;
+};
+struct OrientationRule {
+  double min_contact_mm2 = 300.0;
+  double min_contact_share = 0.25;
+  double support_tie = 0.10;
+  double stronger_by = 0.10;
+  double less_support_by = 0.30;
+};
+struct OrientationCandidateOut {
+  bool offered = false;         // flat, strong enough (or the strongest when none is), stands
+  bool passes = false;          // strength known and at least the required margin
+  std::string dropped;          // "" offered; "no_flat_face", "too_weak", "cannot_stand"
+};
+struct OrientationRecommendation {
+  int incumbent = -1;
+  int recommended = -1;         // the incumbent when no change is worth it
+  bool change = false;
+  bool none_passes = false;
+  // "best_orientation" (keep it: the pop-up "Best orientation") or "new_orientation_may_be_stronger".
+  std::string headline;
+  std::vector<std::string> why;   // each at most 5 words, plain
+  std::vector<OrientationCandidateOut> candidates;
+};
+OrientationRecommendation recommend_print_orientation(const std::vector<OrientationCandidateIn>& candidates,
+                                                      double required_margin,
+                                                      const OrientationRule& rule = OrientationRule{});
+
 }  // namespace topopt
 
 #endif  // TOPOPT_BUILD_ORIENTATION_HPP

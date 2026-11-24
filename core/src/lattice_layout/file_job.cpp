@@ -1546,6 +1546,10 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
       r.strength_ran = true;
       r.strength_accepted = sd.accepted;
       r.strength_json = sd.json;
+      // P4: the print orientation ranking: the check's strength and support per candidate, the file's bed and height.
+      if (sd.orientation.known)
+        r.orientation_json = print_orientation_json(sd.orientation, orientation_geometry(mesh), job.print_frame,
+                                                    options.layers.layer_mm);
     }
     r.file = file_path;
     r.file_bytes = want;
@@ -1879,6 +1883,8 @@ std::string file_result_json(const FileResult& r) {
   }
   // V4: written only when the check ran (V2); the block is the check's own.
   if (r.strength_ran) o += "  \"strength\": " + r.strength_json + ",\n";
+  // P4: written only when the check gave the six candidates' numbers.
+  if (!r.orientation_json.empty()) o += "  \"print_orientation\": " + r.orientation_json + ",\n";
   if (r.weave_regions > 0) {
     // Organic, Traced: the trace's time and the shallow-bar table (ShallowTable). Only for a job with a weave region.
     const ShallowTable& t = r.shallow;

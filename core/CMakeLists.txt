@@ -190,6 +190,8 @@ add_library(topopt
   src/lattice_layout/file_job.cpp
   # His print orientation (P2): "rotate at the door", every input of a job turned once so up is +Z (print_frame.hpp).
   src/lattice_layout/print_frame.cpp
+  # His print orientation (P4): the six candidates, their guessed strength, support, height and bed (print_orientation.hpp).
+  src/lattice_layout/print_orientation.cpp
   # Install 3: the lattice the strength check sees (rule V4); the check itself is run_job.cpp's.
   src/lattice_layout/strength.cpp
   # Brief E2, Part A: the Organic strength check, a frame of beams (lattice_layout_frame.hpp).
@@ -595,6 +597,10 @@ add_test(NAME lattice_layout_file COMMAND test_lattice_layout_file)
 add_executable(test_weave_findings_grid tests/unit/test_weave_findings_grid.cpp)
 target_link_libraries(test_weave_findings_grid PRIVATE topopt)
 add_test(NAME weave_findings_grid COMMAND test_weave_findings_grid)
+# His print orientation (P4): the six candidates and the one rule (recommend_print_orientation).
+add_executable(test_print_orientation tests/unit/test_print_orientation.cpp)
+target_link_libraries(test_print_orientation PRIVATE topopt)
+add_test(NAME print_orientation COMMAND test_print_orientation)
 # Organic cut 2 (brief E1, rules OF1..): the file as the solid plus unmerged closed tubes. The test makes its reference
 # unions with Manifold, so it is registered only where the writer has it.
 if(manifold_FOUND)

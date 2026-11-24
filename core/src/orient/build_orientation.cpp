@@ -744,4 +744,103 @@ std::string build_orientation_report_json(const BuildOrientationReport& r,
 }
 
 
+// ── THE PRINT ORIENTATION RECOMMENDATION (P4; build_orientation.hpp) ────────────────────────────────────────────────
+OrientationRecommendation recommend_print_orientation(const std::vector<OrientationCandidateIn>& c,
+                                                      double required_margin, const OrientationRule& rule) {
+  OrientationRecommendation out;
+  const std::size_t n = c.size();
+  out.candidates.assign(n, OrientationCandidateOut{});
+  for (std::size_t i = 0; i < n; ++i)
+    if (c[i].incumbent && out.incumbent < 0) out.incumbent = static_cast<int>(i);
+  if (n == 0) return out;
+  const auto known = [&](std::size_t i) { return std::isfinite(c[i].strength); };
+  bool any_known = false;
+  for (std::size_t i = 0; i < n; ++i) any_known = any_known || known(i);
+  for (std::size_t i = 0; i < n; ++i) out.candidates[i].passes = known(i) && c[i].strength >= required_margin;
+  std::vector<char> alive(n, 0);
+  for (std::size_t i = 0; i < n; ++i) {
+    alive[i] = c[i].flat || c[i].incumbent;
+    if (!alive[i]) out.candidates[i].dropped = "no_flat_face";
+  }
+  // 1. strong enough
+  if (any_known) {
+    bool any_pass = false;
+    for (std::size_t i = 0; i < n; ++i) any_pass = any_pass || (alive[i] && out.candidates[i].passes);
+    if (any_pass) {
+      for (std::size_t i = 0; i < n; ++i)
+        if (alive[i] && !out.candidates[i].passes) {
+          alive[i] = 0;
+          out.candidates[i].dropped = "too_weak";
+        }
+    } else {
+      out.none_passes = true;
+      int best = -1;
+      for (std::size_t i = 0; i < n; ++i)
+        if (alive[i] && known(i) && (best < 0 || c[i].strength > c[static_cast<std::size_t>(best)].strength)) best = static_cast<int>(i);
+      for (std::size_t i = 0; i < n; ++i)
+        if (alive[i] && static_cast<int>(i) != best) {
+          alive[i] = 0;
+          out.candidates[i].dropped = "too_weak";
+        }
+    }
+  }
+  // 2. must stand
+  double most_contact = 0.0;
+  for (std::size_t i = 0; i < n; ++i)
+    if (c[i].flat) most_contact = std::max(most_contact, c[i].contact_mm2);
+  std::vector<char> stands(n, 0);
+  for (std::size_t i = 0; i < n; ++i)
+    stands[i] = c[i].stands && c[i].contact_mm2 >= rule.min_contact_mm2 && c[i].contact_mm2 >= rule.min_contact_share * most_contact;
+  {
+    bool any = false;
+    for (std::size_t i = 0; i < n; ++i) any = any || (alive[i] && stands[i]);
+    if (any)
+      for (std::size_t i = 0; i < n; ++i)
+        if (alive[i] && !stands[i]) {
+          alive[i] = 0;
+          out.candidates[i].dropped = "cannot_stand";
+        }
+  }
+  for (std::size_t i = 0; i < n; ++i) out.candidates[i].offered = alive[i] != 0;
+  // 3. least part support (within support_tie of the least count as equal), 4. the stronger, then the lower
+  double least = std::numeric_limits<double>::infinity();
+  for (std::size_t i = 0; i < n; ++i)
+    if (alive[i]) least = std::min(least, c[i].support_mm3);
+  int win = -1;
+  for (std::size_t i = 0; i < n; ++i) {
+    if (!alive[i] || !(c[i].support_mm3 <= least * (1.0 + rule.support_tie) + 1e-9)) continue;
+    if (win < 0) { win = static_cast<int>(i); continue; }
+    const OrientationCandidateIn& w = c[static_cast<std::size_t>(win)];
+    const double sa = known(i) ? c[i].strength : 0.0, sw = std::isfinite(w.strength) ? w.strength : 0.0;
+    if (sa > sw || (sa == sw && c[i].height_mm < w.height_mm)) win = static_cast<int>(i);
+  }
+  const int inc = out.incumbent;
+  if (win < 0) win = inc;
+  out.recommended = win;
+  // 5. his placement is kept unless the change is worth it
+  if (inc >= 0 && win != inc) {
+    const OrientationCandidateIn& I = c[static_cast<std::size_t>(inc)];
+    const OrientationCandidateIn& W = c[static_cast<std::size_t>(win)];
+    const bool both = std::isfinite(I.strength) && std::isfinite(W.strength);
+    const bool inc_out = !alive[static_cast<std::size_t>(inc)];
+    const bool fixes = both && !out.candidates[static_cast<std::size_t>(inc)].passes && out.candidates[static_cast<std::size_t>(win)].passes;
+    const bool stronger = both && W.strength >= (1.0 + rule.stronger_by) * I.strength;
+    const bool not_weaker = !both || W.strength >= I.strength;
+    const bool less = W.support_mm3 <= (1.0 - rule.less_support_by) * I.support_mm3 && not_weaker;
+    if (fixes || stronger) out.why.push_back("Stronger across the layers");
+    if (less) out.why.push_back("Less support needed");
+    if (inc_out && out.candidates[static_cast<std::size_t>(inc)].dropped == "cannot_stand")
+      out.why.push_back("Stands on a larger face");
+    if (inc_out && out.candidates[static_cast<std::size_t>(inc)].dropped == "too_weak" && out.why.empty())
+      out.why.push_back("Stronger across the layers");
+    if (out.why.empty()) out.recommended = inc;
+  }
+  out.change = inc >= 0 && out.recommended != inc;
+  out.headline = out.change ? "new_orientation_may_be_stronger" : "best_orientation";
+  if (!out.change) out.why.assign(1, "Prints best as placed");
+  if (out.none_passes) out.why.push_back("None passes yet");
+  return out;
+}
+
 }  // namespace topopt
+
