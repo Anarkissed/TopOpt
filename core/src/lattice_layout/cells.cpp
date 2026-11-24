@@ -601,6 +601,21 @@ struct Pass {
     return seen;
   }
 
+  // K2: a cube's lattice read on a finer grid than its own points: 5 x 5 x 5 points a tenth of the cube in from its
+  // faces and a fifth apart (a wedge a fifth of the cube deep is seen). How many are its lattice.
+  int finer_look(const double lo[3], double s, double* fit, Seen* seen) const {
+    int found = 0;
+    for (int c = 0; c < 5; ++c)
+      for (int b = 0; b < 5; ++b)
+        for (int a = 0; a < 5; ++a) {
+          double f = 0.0;
+          if (!sample(lo[0] + s * (0.1 + 0.2 * a), lo[1] + s * (0.1 + 0.2 * b), lo[2] + s * (0.1 + 0.2 * c), &f, seen)) continue;
+          ++found;
+          *fit = std::min(*fit, f);
+        }
+    return found;
+  }
+
   void emit(const double lo[3], double s, bool cut, bool as_cell, const SolidWhy& why = SolidWhy{}) {
     Cell cell;
     cell.region = region;
@@ -672,6 +687,14 @@ struct Pass {
         inside = counted;
       }
     }
+    // K2 (his 11-23 notes, on his stand's 45 degree sides: "Look at the lack of crisp straight lines at the edges of the
+    // lattice. This was with cut cells = on."): with Let walls cut cells on, a cube none of whose points is its lattice
+    // is looked at again closely (finer_look) whatever stands beside it, solid included. Before, a cube the side cut
+    // so that only a corner wedge of it was lattice, with a rim or a skin beside it, was passed over (the sliver under
+    // solid of D14b) and that wedge stood solid: steps of a cube along the slope. Now it is a cut cube, divided down to
+    // its finest cells, which the side cuts. (A cut piece thinner than its strut against solid is still made solid,
+    // P8 f.)
+    if (inside == 0 && spec->one_grid) inside = finer_look(lo, s, &fits, &seen);
     // Nothing of this pass here; or a sliver under solid (D14b), which no cube is recorded for, so it has no reason of
     // its own (D14c): SolidAt::why answers Other there.
     if (inside == 0 && !look_at_nodes(lo, s, &fits, &seen)) return;
@@ -765,6 +788,7 @@ struct Pass {
                 }
             const double at[3] = {lo[0] + t * i, lo[1] + t * j, lo[2] + t * k};
             if (!in[u] && look_at_nodes(at, t, &fit[u], &seen[u])) in[u] = 1;
+            if (!in[u] && spec->one_grid && finer_look(at, t, &fit[u], &seen[u]) > 0) in[u] = 1;   // K2
           }
       Packed p;
       p.n = n;

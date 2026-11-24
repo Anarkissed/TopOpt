@@ -3770,6 +3770,54 @@ static void test_thin_walls_follow_the_quilt_switch() {
   }
 }
 
+// K2 (his 11-23 notes: "Look at the lack of crisp straight lines at the edges of the lattice. This was with cut cells =
+// on. So why isn't it working?"). A prism whose plan is a trapezoid with a 45 degree side (0,0)-(20,20), 30 tall,
+// latticed under its top face (the whole of it), Let walls cut cells on. Read a hair inside the sloped side, every
+// 0.5 mm along it and up it, at 0.6, 1.2 and 2.4 mm in: lattice the domain asks for there that no cell holds is the
+// solid step he sees. Printed per setting; with the cells cut along the slope there is none.
+static void test_cut_cells_follow_a_slope() {
+  const TriangleMesh m = prism({{0, 0}, {60, 0}, {60, 20}, {20, 20}}, 0, 30);
+  PartMeasure pm(weld_mesh(m));
+  for (double rim : {0.0, -1.0}) {   // no Finish, and a Rim along the outline (solid beside the slope: his stand's)
+  DomainSpec s;
+  s.bead_mm = 0.45;
+  s.min_strut_lines = 2.0;
+  s.rim_mm = rim;
+  // The top face's region: its outline the trapezoid's box (the region's prism is cut by the part's own sides).
+  {
+    const Region r = face_region(1, Role::Lattice, {30, 10, 30}, {0, 0, -1}, 30, 10, 30);
+    s.regions = {std::fabs(r.prism.u.x) > 0.5 ? r : face_region(1, Role::Lattice, {30, 10, 30}, {0, 0, -1}, 10, 30, 30)};
+  }
+  Domain d(pm, s);
+  auto pr = d.probe();
+  const double inv = 1.0 / std::sqrt(2.0);
+  const Vec3 in_dir{inv, -inv, 0};   // into the part, square to the slope
+  for (Algorithm algo : {Algorithm::Stepped, Algorithm::DefaultGrade})
+    for (bool quilt : {false, true}) {
+      CellSpec cs;
+      cs.algorithm = algo;
+      cs.one_grid = true;
+      cs.cell_max_mm = 12;
+      cs.cell_min_mm = 4;
+      cs.allow_quilt = quilt;
+      const Layout l = lay_cells(d, cs);
+      int asked = 0, bare = 0;
+      for (double depth : {0.6, 1.2, 2.4})
+        for (double t = 1.0; t <= 27.3; t += 0.5)      // along the slope (its length is 28.3)
+          for (double z = 1.0; z <= 29.0; z += 0.5) {
+            const Vec3 p{t * inv + depth * in_dir.x, t * inv + depth * in_dir.y, z};
+            if (!pr.where(p).lattice()) continue;
+            ++asked;
+            if (cells_holding(l, p, 1) == 0) ++bare;
+          }
+      std::printf("[K2] slope, %s, rim %s, quilt %s: %zu cells, %zu solid; along the slope %d of %d places asked for are held "
+                  "by no cell\n", algo == Algorithm::Stepped ? "Stepped" : "Default Grade", rim < 0.0 ? "on" : "off",
+                  quilt ? "on" : "off", l.cells.size(), l.solid.size(), bare, asked);
+      CHECK(asked > 1000 && bare == 0);
+    }
+  }
+}
+
 static void test_cells_curved_region() {
   int L = -1, square = -1, sideA = -1, sideB = -1;
   const StepModel model = plate_with_L_face(&L, &square, &sideA, &sideB);
@@ -8196,6 +8244,7 @@ int main() {
   test_one_grid();
   test_cells_behind_a_protect_skin();
   test_thin_walls_follow_the_quilt_switch();
+  test_cut_cells_follow_a_slope();   // K2
   test_cells_across_the_narrowest_width();
   test_band_never_quilts_without_the_switch();
   test_two_line_struts();
