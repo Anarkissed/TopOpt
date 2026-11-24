@@ -1,0 +1,44 @@
+# Release bbf5f7081cd0 - 2026-11-23: release (17) - claude/organic-1 7a12f4c9, one worker swap (14bbf088cccb -> bbf5f7081cd0)
+# Release (17): his 11-23 notes on release 16 + his evening notes (four builders), the regular lattice's print file made (the part's own overhangs left to the slicer), the Mac chains strengthen -> print file itself, the worker says what a job is doing and why it failed.
+# Gates in the gate tree (b9-screens-362, its own vendor built from organic-1's core): the new classes first, then the WHOLE app suite in three shards, any failure once more alone. Core suites (gate tree core, F1-F3): lattice_layout, lattice_layout_mesh, lattice_layout_file, weave_tubes, lattice_strength 5/5; his stand's refused Aesthetic job (a scratch copy) made in 119.6 s. Worker: chain_e2e, job_stage_e2e, organic_cut2, queue_state_machine, queue_http, lattice_part_route, demand_field, crlf_body_bytes, analyze_route all pass. The worker is restarted on this swap (the engine changed: the Mac advertises the new engine to the iPad).
+# Commits:
+#   846ca784 Icons, part 1 (362's clear fixes): one X-ray glyph on Results and the Topology views, Forces is the load arrow, Gravity is arrow-to-line, the lattice glyph is the filled grid, Expand is plus, Reset and Rotate glyphs, the band-c
+#   d33ec7bb notes25 popup: the fix pop-up at the left in the middle, draggable clear of every control with its line attached; Skip stays on Results; text areas fit their words; every pop-up names the value to try; Solve opens the field lit
+#   942823b6 notes25 flow: one print-accurate pop-up; the Lattice stage's own Results tab; "Lattice" with the exact on screen; the drawing follows the print file
+#   e890a8bc The worker's job record says what a job is doing and why it failed (his 11-23 notes)
+#   9fb2accc notes25 motion: Bend/Break run the load; one strength answer for print files
+#   4c9555f8 Merge claude/notes25-motion (builder C): Bend/Break run the load; one strength answer for print files
+#   122bd32a The Mac makes the print file itself after a strengthening (his 11-23 Organic run stalled 10 minutes)
+#   c44a37ac notes25 flow (A5, A6): the cell lattice's print file wears the same card; a stop ends in a centred pop-up with the engine's reason; the iPad stays awake through the chain
+#   b0439945 The iPad asks the Mac to chain the print file and follows the Mac's own file job (his 11-23 stall)
+#   8b6034eb Icons, part 2 (his picks 11-23): Stress is the drawn colour wheel on every page; Bend is rectangle.compress.vertical; prisms are square.stack.3d.forward.dottedline on Lattice and Flexible; Quality is dial.medium; Orthographic s
+#   2c8c4331 Merge claude/notes25-flow (builder A): one pop-up for the chain, the Lattice stage's own Results tab, "Lattice" with the exact laid, the drawing follows the print file, the cell lattice's card, a stop ends in a centred pop-up, 
+#   aea1b88f notes25 popup: the card's place applies the page's frames on the next main-loop turn (a change published inside the workspace's update was dropped: the card stayed where it first drew); the card placed in the Results screen's o
+#   4a4fbde8 Merge claude/organic-1 (2c8c4331: builder A's flow and builder C's motion) into notes25-popup
+#   4b43db60 notes25 popup + builder A: Solve goes the ONE way "Change settings" takes (openSettingToChange); that one way now opens Manual where the field lives only there, its group's tab, scrolls the field to the middle and lights it (ti
+#   7afacba0 notes25 small (his iPad notes 11-23 evening + 362's D8-D10): Continue picks the last one he worked on, a tap anywhere on a version card opens it, the solid notice centred at the foot, Cannot Lattice, the clipped stack, one "los
+#   5f489cf0 Merge claude/notes25-small (builder D): Continue = his last version, one tap opens a card, the solid notice centred, Cannot Lattice, the clipped stack, one strength caption, each group keeps its sample, the thin-wall pop-up exp
+#   bae703a9 The regular lattice's print file: the part's own overhangs left to the slicer, no post the cut deletes, no try made twice
+#   00933f31 notes26 C4-C6: the floor seen from below, Load paths as light, lattice bars clipped flush
+#   69b31ae2 Merge claude/notes25-motion 00933f31 (builder C): the floor seen from below, Load paths as light, lattice bars clipped flush to the part
+#   7a12f4c9 Merge claude/notes25-popup (builder B): the fix pop-up at the left middle, draggable, its line attached; Skip stays on Results and moves on; text fits its area; every fix names the value to try; Solve and Change settings open t
+#   159e5ab1 Release (17): his 11-23 notes on release 16 and his evening notes; the regular lattice's print file made; the Mac chains strengthen and file
+# Gates (this tree):
+#   21:53 his uncommitted files (left alone): app/TopOpt-Info.plist app/TopOpt.xcodeproj/project.pbxproj app/TopOpt.xcodeproj/xcshareddata/xcschemes/TopOpt.xcscheme 
+#   21:53 preflight job: /Users/nadim/.topopt-worker/d5af229ca8ee4a8f (his newest optimisation job the installed worker passes; read only)
+#   21:53 merged organic-1 as 159e5ab1 (local, not pushed); app + core + tools == its; fingerprint bbf5f7081cd0
+#   ==> Manifold: /Users/nadim/dev/TopOpt/TopOpt/.vcpkg/installed-manifold (KEEP regions exported exactly)
+#   ==> building macOS slice (Eigen + OCCT, arm64)
+#   ==> building iOS simulator slice (Eigen + OCCT + lib3mf, arm64)
+#   ==> building iOS device slice (Eigen + OCCT + lib3mf, arm64)
+#   21:55 build_core green: topopt_vendored_core_bbf5f7081cd0 + the Install 3 entry points + lay_organic_preview and Session::sweep_limits in every slice and arch
+#   21:56 worker CLI built: topopt-cli: core bbf5f7081cd0 (dirty=false), built Nov 23 2026 21:56:23; 3 data paths, all under the release worktree
+#   22:10 core suites passed: 100% tests passed out of 19 Total Test time (real) = 808.90 sec 
+#   22:17 iPad device build green (this tree's own pair)
+#   22:17 preflight on his job: preflight: load path CONNECTED
+#   23:04 pushed 159e5ab1
+#   23:04 worker script changed: installed, the old one kept as /Users/nadim/dev/TopOpt/agent-scratch/organic1/fast17/x/topopt_worker.py.installed-before-release15
+#   23:04 restarting the worker server (PID 25652; /health said "fingerprint": "bbf5f7081cd0") while idle, so it runs the new script
+#   23:05 worker swapped: /health "fingerprint": "bbf5f7081cd0"; data paths under the release worktree; preflight again OK; old CLI kept as build-fix/topopt-cli.14bbf088cccb-replaced-20261123
+#   23:05 route, demand, strength_job and organic cut 2 tests vs the INSTALLED script: ALL PASS
+#   23:05 the app_release scripts now expect bbf5f7081cd0
