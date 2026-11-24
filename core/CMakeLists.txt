@@ -188,6 +188,8 @@ add_library(topopt
   # The lattice file job (docs/design/lattice-rebuild/04-layout-file-job.md): job.json ->
   # layout -> mesh -> STL. `topopt-cli lattice-file` is its only caller in core.
   src/lattice_layout/file_job.cpp
+  # His print orientation (P2): "rotate at the door", every input of a job turned once so up is +Z (print_frame.hpp).
+  src/lattice_layout/print_frame.cpp
   # Install 3: the lattice the strength check sees (rule V4); the check itself is run_job.cpp's.
   src/lattice_layout/strength.cpp
   # Brief E2, Part A: the Organic strength check, a frame of beams (lattice_layout_frame.hpp).
@@ -2343,6 +2345,15 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
       DOCS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../docs/strength-check"
       TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME lattice_strength COMMAND test_lattice_strength)
+    # His print orientation (P2): "rotate at the door". The same job with up = +X makes the same file and report as a
+    # copy of everything turned by hand; each input left unturned is caught (print_frame.hpp).
+    add_executable(test_print_frame tests/validation/test_print_frame.cpp)
+    target_link_libraries(test_print_frame PRIVATE topopt)
+    target_compile_definitions(test_print_frame PRIVATE
+      MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+      SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+      TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME print_frame COMMAND test_print_frame)
   endif()
 
   # M6.2 integration test: the maintainer-authored demo job in

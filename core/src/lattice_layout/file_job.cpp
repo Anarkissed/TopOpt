@@ -1052,7 +1052,7 @@ FileJob parse_file_job(const std::string& json_text) {
     const std::string w = "job.json";
     json::as_object(doc, w);
     json::reject_unknown(doc, {"mode", "model", "output", "linear_deflection", "threads", "layout", "mesh", "demand",
-                               "strength_job", "tensor", "file_format", "strengthened"},
+                               "strength_job", "tensor", "file_format", "strengthened", "print_frame"},
                          w);
     const std::string mode = json::as_string(json::require(doc, "mode", w), w + ".mode");
     if (mode != "lattice_file") json::fail(w + ".mode", "must be \"lattice_file\", not \"" + mode + "\"");
@@ -1092,6 +1092,14 @@ FileJob parse_file_job(const std::string& json_text) {
     if (json::find(doc, "strengthened")) {
       job.strengthened = text(doc, "strengthened", "", w);
       if (job.strengthened.empty()) throw FileJobError("\"strengthened\" must name a strengthened.json");
+    }
+    // P2, his print orientation: {"up": [x, y, z]} (print_frame.hpp). Phase 1: one of the part's six axes.
+    if (const json::Value* pf = json::find(doc, "print_frame")) {
+      const std::string at = w + ".print_frame";
+      json::as_object(*pf, at);
+      json::reject_unknown(*pf, {"up"}, at);
+      std::string why;
+      if (!print_frame_for_up(vec3(*pf, "up", at), job.print_frame, &why)) json::fail(at + ".up", why);
     }
     if (json::find(doc, "tensor")) {
       job.tensor = text(doc, "tensor", "", w);
@@ -1180,8 +1188,10 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
                              const StrengthCheck* strength) {
   FileResult r;
   const auto t_all = std::chrono::steady_clock::now();
+  r.print_frame = job.print_frame;   // P2: off for every job without "print_frame"
   const auto done = [&]() -> FileResult& {
     r.ms_total += ms_since(t_all);
+    turn_result_to_model(r.print_frame, r);   // P2: the positions in the model frame (nothing when off)
     return r;
   };
   try {
@@ -1416,7 +1426,8 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
                     r.made.builds, mid, mid == 1 ? "" : "s", one, one == 1 ? "" : "s", far, far == 1 ? "" : "s");
       // OG2c (brief E6, leg C): a refusal says where (x, y, z mm, each finding).
       std::string where = "at";
-      for (const Vec3& p : r.made.findings_at) {
+      for (const Vec3& q : r.made.findings_at) {
+        const Vec3 p = job.print_frame.point_to_model(q);   // P2: where, in the part's own coordinates
         char b[96];
         std::snprintf(b, sizeof b, " (%.2f, %.2f, %.2f)", p.x, p.y, p.z);
         where += b;
@@ -1500,6 +1511,7 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
       ask.part_lo = part_lo;
       ask.part_hi = part_hi;
       ask.threads = job.options.threads;
+      ask.frame = job.print_frame;   // P2
       // Brief E2, item 7: Organic is checked on the FINAL bars, as the file holds them.
       std::vector<char> kept;
       if (any_weave) {
@@ -1594,9 +1606,66 @@ bool load_file_job(const std::string& job_path, int threads, FileJob& job, StepM
       }
       job.tensor_field = std::move(field);
     }
+    // P2: with a print frame the part is opened first, so the door knows where its base is; then every input is turned
+    // (turn_file_job_inputs), and only then is a strengthening applied: it was made in the print frame.
+    const auto open_part = [&]() -> bool {
+      const std::string model_path =
+          !job.model.empty() && job.model[0] == '/' ? job.model : folder_of(job_path) + "/" + job.model;
+      say(said, "opening the part");
+      const auto t0 = std::chrono::steady_clock::now();
+      try {
+        StepTessellation tess;
+        if (job.linear_deflection > 0.0) tess.linear_deflection = job.linear_deflection;
+        model = import_part_file_resolved(model_path, tess);
+      } catch (const std::exception& e) {
+        refuse(r, kModelUnreadable,
+               "The part's file could not be opened on the Mac, so no lattice file was made.", e.what());
+        return false;
+      } catch (...) {
+        refuse(r, kModelUnreadable,
+               "The part's file could not be opened on the Mac, so no lattice file was made.");
+        return false;
+      }
+      r.ms_import = ms_since(t0);
+      return true;
+    };
+    if (job.print_frame.on) {
+      if (!open_part()) return false;
+      print_frame_set_base(job.print_frame, model.mesh);
+      if (!(g_print_frame_test_skip & kSkipModel)) turn_step_model(job.print_frame, model);
+      turn_file_job_inputs(job.print_frame, job);
+    }
     // Brief E2, item 11: a strengthen round's stress input, reference and floors in place of the job's own.
     if (!job.strengthened.empty()) {
       const std::string sp = job.strengthened[0] == '/' ? job.strengthened : folder_of(job_path) + "/" + job.strengthened;
+      // P2: a strengthening is made in its job's print frame; one made standing another way is refused, never applied.
+      {
+        std::ifstream sf(sp);
+        std::ostringstream st;
+        st << sf.rdbuf();
+        Vec3 made_up{0.0, 0.0, 1.0};
+        bool stated = false;
+        try {
+          const json::Value sd = json::parse(st.str(), "strengthened.json");
+          if (sd.is_object())
+            if (const json::Value* pu = json::find(sd, "print_up")) {
+              made_up = vec3(sd, "print_up", "strengthened.json");
+              stated = true;
+              (void)pu;
+            }
+        } catch (const std::exception&) {
+          // read again (and refused, with its own words) by apply_strengthened below
+        }
+        const Vec3 want = job.print_frame.on ? job.print_frame.up : Vec3{0.0, 0.0, 1.0};
+        const bool same = stated ? (made_up.x == want.x && made_up.y == want.y && made_up.z == want.z)
+                                 : !job.print_frame.on;
+        if (!same) {
+          refuse(r, kStrengthenedMismatch,
+                 "The strengthening sent with the lattice job was made with the part standing another way, so nothing "
+                 "was made. Strengthen it again.");
+          return false;
+        }
+      }
       // (version 2, brief E3a: the job's own stress stays; version 1 replaces it)
       auto field = job.tensor_field ? std::make_shared<TensorField>(*job.tensor_field) : std::make_shared<TensorField>();
       std::string why;
@@ -1617,24 +1686,7 @@ bool load_file_job(const std::string& job_path, int threads, FileJob& job, StepM
           }
       job.tensor_field = std::move(field);
     }
-    const std::string model_path =
-        !job.model.empty() && job.model[0] == '/' ? job.model : folder_of(job_path) + "/" + job.model;
-    say(said, "opening the part");
-    const auto t0 = std::chrono::steady_clock::now();
-    try {
-      StepTessellation tess;
-      if (job.linear_deflection > 0.0) tess.linear_deflection = job.linear_deflection;
-      model = import_part_file_resolved(model_path, tess);
-    } catch (const std::exception& e) {
-      refuse(r, kModelUnreadable,
-             "The part's file could not be opened on the Mac, so no lattice file was made.", e.what());
-      return false;
-    } catch (...) {
-      refuse(r, kModelUnreadable,
-             "The part's file could not be opened on the Mac, so no lattice file was made.");
-      return false;
-    }
-    r.ms_import = ms_since(t0);
+    if (!job.print_frame.on && !open_part()) return false;
     return true;
   };
   return run();
@@ -1682,6 +1734,8 @@ std::string file_result_json(const FileResult& r) {
   o += "  \"file\": \"" + escaped(base_name(r.file)) + "\",\n";
   std::snprintf(b, sizeof b, "  \"file_bytes\": %llu,\n", count(r.file_bytes));
   o += b;
+  // P2: the file stands on the chosen face (print frame); every position below is in the part's own coordinates.
+  if (r.print_frame.on) o += "  \"print_frame\": " + print_frame_json(r.print_frame) + ",\n";
   if (r.weave_regions > 0 && !r.file_format.empty()) {   // OF5: only for a job with a weave region that made its file
     std::snprintf(b, sizeof b,
                   "  \"file_format\": \"%s\", \"weave_mesh\": \"%s\", \"shells\": %llu, \"shells_left_out\": %llu, "
@@ -1813,7 +1867,12 @@ std::string file_result_json(const FileResult& r) {
     o += "],\n    \"posts\": [";
     for (std::size_t i = 0; i < r.made.posts.size(); ++i) {
       const MeshSpec::Post& p = r.made.posts[i];
-      std::snprintf(b, sizeof b, "%s[%.4f, %.4f, %.4f, %.4f]", i ? ", " : "", p.x, p.y, p.z_bottom, p.z_top);
+      if (r.print_frame.on) {   // P2: a post stands along the print frame's up: its bottom and top, in the model frame
+        const Vec3 lo = r.print_frame.point_to_model({p.x, p.y, p.z_bottom}), hi = r.print_frame.point_to_model({p.x, p.y, p.z_top});
+        std::snprintf(b, sizeof b, "%s[%.4f, %.4f, %.4f, %.4f, %.4f, %.4f]", i ? ", " : "", lo.x, lo.y, lo.z, hi.x, hi.y, hi.z);
+      } else {
+        std::snprintf(b, sizeof b, "%s[%.4f, %.4f, %.4f, %.4f]", i ? ", " : "", p.x, p.y, p.z_bottom, p.z_top);
+      }
       o += b;
     }
     o += "]},\n";
