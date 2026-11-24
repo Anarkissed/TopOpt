@@ -486,6 +486,8 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             //    the fast-fail negative control, not a hang.
             let health = try getJSON(config.baseURL.appendingPathComponent("health"))
             let fp = (health["fingerprint"] as? String) ?? "unknown"
+            // ★ notes25 (D9): the Runs on ⚠ follows what this live check says (WorkerHealth.swift)
+            if let live = health["fingerprint"] as? String { WorkerHealth.heard(host: config.host, port: config.port, fingerprint: live) }
             guard fp == config.expectedFingerprint else {
                 throw RemoteRunError(
                     "worker core mismatch: worker \(fp), app \(config.expectedFingerprint). " +

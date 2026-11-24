@@ -1129,6 +1129,43 @@ public final class LatticeLayoutPreview: ObservableObject {
         return Swift.max(0, (now - then) / now)
     }
 
+    /// ★ notes25 (D10, his 11-23 img 4: "Structural can't lattice the glowing walls" — and no wall glowed): on the new engine the
+    /// thin-wall pop-up had its finding but no glow (the glow's mask was the old bake's). The glow from THIS lay: core's own
+    /// answer for each place of a coarse grid over the part (`whereAt`, the last layout's Why) — the places he asked to lattice
+    /// that it left solid because no cell fits or the wall is too thin for one (`wallTooThin`, `noCellFits`) — made into the
+    /// part's per-vertex tints by the old glow's own look (LatticeThinWallGlow: those walls electric blue, the rest dimmed).
+    /// [] when there is no lay, it is laying, or no such place.
+    public func thinWallGlow(mesh: ViewerMesh) async -> [Float] {
+        guard let session, let box, !laying else { return [] }
+        let ext = simd_max(box.hi - box.lo, SIMD3(repeating: 0.1))
+        let voxel = Swift.max(0.5, Float(cbrt(Double(ext.x * ext.y * ext.z) / Self.glowPoints)))
+        let nx = Int((ext.x / voxel).rounded(.up)) + 3, ny = Int((ext.y / voxel).rounded(.up)) + 3
+        let nz = Int((ext.z / voxel).rounded(.up)) + 3
+        let origin = box.lo - SIMD3(repeating: voxel)   // voxel (0,0,0)'s centre: a voxel of air all round
+        var points: [SIMD3<Float>] = []
+        points.reserveCapacity(nx * ny * nz)
+        for z in 0..<nz { for y in 0..<ny { for x in 0..<nx {
+            points.append(origin + SIMD3(Float(x), Float(y), Float(z)) * voxel)
+        } } }
+        guard let at = try? await session.whereAt(points), at.count == points.count, !Task.isCancelled else { return [] }
+        let grid = LatticeVoxelGrid(nx: nx, ny: ny, nz: nz, origin: origin, spacing: SIMD3(repeating: voxel), values: [])
+        let tints = await Task.detached(priority: .userInitiated) { () -> [Float] in
+            let thin = at.map { $0.why == .wallTooThin || $0.why == .noCellFits }
+            guard thin.contains(true) else { return [] }
+            let inside = at.map { $0.why != .outside }
+            return LatticeThinWallGlow.vertexTints(mesh: mesh, grid: grid,
+                                                   field: LatticeThinWallGlow.field(thin: thin, inside: inside, grid: grid))
+        }.value
+        var lit = 0, k = 7
+        while k < tints.count { if tints[k] > 0.03 { lit += 1 }; k += 8 }
+        Self.lastGlowLit = lit
+        return tints
+    }
+    /// About how many places the glow asks core about (a coarse grid; the glow is soft).
+    static let glowPoints = 120_000.0
+    /// Test hook: how many of the part's vertices the last glow lit.
+    nonisolated(unsafe) static var lastGlowLit = 0
+
     /// ★ his ruling 11-14: why asked-for lattice is solid, and the fixes (after every layout: one coarse map).
     private func solidReasonCheck(lattice: LatticeSettings) async {
         guard let session, let box, !Task.isCancelled else { return }
@@ -1345,6 +1382,14 @@ public final class LatticeLayoutPreview: ObservableObject {
         }
     }
 
+    /// ★ cells across a wall (C3-C5) the engine is asked for: Structural five; Aesthetic one with "Allow single-cell members",
+    /// else two; his own minimum (control 2) over either. ★ notes25 (D8): the one place this rule lives — the thin-wall
+    /// pop-up says these numbers (LatticeThinWallReasons).
+    nonisolated public static func minCellsAcross(_ l: LatticeSettings) -> Int32 {
+        if let n = l.cellsAcrossMin, n >= 1 { return Int32(n) }   // ★ control 2: his minimum
+        return (l.stageMode ?? .structural) == .aesthetic ? (l.singleCellMembers ? 1 : 2) : 5
+    }
+
     /// Lattice Setup's settings for core's lattice_layout (read where its rows read them).
     public static func settings(_ p: ProjectModel, referenceMPa: Double = 0) -> LatticeLayoutSession.Settings {
         var s = LatticeLayoutSession.Settings()
@@ -1418,8 +1463,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         s.smallCellsInThinWalls = l.smallCellsInThinWalls   // ★ his per-part choice (11-13)
         // ★ cells across a wall (C3-C5): Structural five; Aesthetic one with "Allow single-cell members", else two
         let aesthetic = (l.stageMode ?? .structural) == .aesthetic
-        s.minCellsAcross = aesthetic ? (l.singleCellMembers ? 1 : 2) : 5
-        if let n = l.cellsAcrossMin, n >= 1 { s.minCellsAcross = Int32(n) }   // ★ control 2: his minimum
+        s.minCellsAcross = Self.minCellsAcross(l)   // ★ notes25 (D8): the one rule, read by the thin-wall pop-up too
         if l.neverSkipCellSize, s.algorithm == "default_grade" { s.maxStep = 2 }   // ★ control 4 (Default Grade only)
         s.oneGrid = aesthetic && l.letWallsCutCells   // ★ his 11-14: Aesthetic only; Structural always sends false
         // ★ density (R10): core's dial is the percent he sees / 100 (0.01 thinnest ... 1 widest); a typed strut width wins

@@ -93,6 +93,13 @@ struct LatticeSampleView: View {
     @MainActor static var controlWholeView = false
     /// The same sample with the page's covered sides (`visible`).
     func visible(_ insets: EdgeInsets) -> LatticeSampleView { var v = self; v.visible = insets; return v }
+    /// ★ his iPad notes 11-23 (img 3, img 9: "an instant switch when I tap on the other group"): whose sample this is (the open
+    /// part and the page's tab); its last built sample is kept and shown again at once while its inputs are unchanged
+    /// (LatticeSampleKeep). nil: nothing kept.
+    var keep: LatticeSampleKeep.Key? = nil
+    func kept(_ key: LatticeSampleKeep.Key?) -> LatticeSampleView { var v = self; v.keep = key; return v }
+    /// Test hook (FlexibleSaid.recording): how many times a kept sample was shown instead of a build.
+    nonisolated(unsafe) static var recordedKept = 0
 
     @StateObject private var camera = OrbitCameraModel()
     @State private var mesh: ViewerMesh?
@@ -215,6 +222,19 @@ struct LatticeSampleView: View {
         }
     }
 
+    /// ★ his 11-23: a group's kept sample, shown as it was built (its caption and its build time), with no build.
+    private func showKept(_ s: LatticeSampleKeep.Sample) {
+        failed = false
+        organicBars = s.bars
+        mesh = s.mesh
+        camera.reframe(s.mesh.bounds)
+        buildStarted = nil; heldForPart = false
+        builtSeconds = s.seconds
+        caption = s.caption
+        if FlexibleSaid.recording { Self.recordedKept += 1 }
+        Self.say(tag, "kept sample shown")
+    }
+
     /// The build began (a new one; the wait for his part's numbers goes on as the same one).
     private func buildBegins() {
         builtSeconds = nil
@@ -249,6 +269,8 @@ struct LatticeSampleView: View {
     static let settleNanos: UInt64 = 120_000_000
 
     private func build() async {
+        // ★ his 11-23: back on a group whose settings are as its sample was built — that sample, at once, no build
+        if let k = keep, let s = LatticeSampleKeep.shared.sample(k, for: inputs) { return showKept(s) }
         caption = Self.building; failed = false
         buildBegins()   // ★ his 11-22: the time it takes, said
         let i = inputs
@@ -286,6 +308,7 @@ struct LatticeSampleView: View {
             caption = i.shape == .cells
                 ? Self.cellsCaption(receiptJSON: block.receiptJSON, typeName: i.typeName, densityHeld: block.densityHeld)
                 : Self.caption(receiptJSON: block.receiptJSON, typeName: i.typeName, densityHeld: block.densityHeld)
+            if let k = keep { LatticeSampleKeep.shared.keep(k, inputs: i, .init(mesh: m, bars: nil, caption: caption, seconds: builtSeconds)) }   // ★ 11-23
         case .failure(let e):
             log.end(rec, .failed, reason: e.localizedDescription)
             mesh = nil; failed = true
@@ -381,6 +404,7 @@ struct LatticeSampleView: View {
                             : String(format: " · cells %@ to %@ mm", StrengthCheckDocs.number(lo), StrengthCheckDocs.number(hi)))
                 : ""
             caption = "\(size) · Organic \(look.modeValue.title) · one stress focus\(cells) · built by the engine"
+            if let k = keep { LatticeSampleKeep.shared.keep(k, inputs: i, .init(mesh: m, bars: bars, caption: caption, seconds: builtSeconds)) }   // ★ 11-23
         } catch is CancellationError {
         } catch {
             guard !Task.isCancelled else { return }   // the page moved on: nothing to say
