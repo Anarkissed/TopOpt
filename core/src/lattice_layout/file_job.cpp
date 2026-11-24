@@ -1408,7 +1408,7 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
 
     say(said, "making the file");
     // OF4: a job with a weave region takes the tubes route unless it asked for one (file_options_for, above).
-    const TriangleMesh mesh = make_file_mesh(session, out, options, r.made, stop);
+    TriangleMesh mesh = make_file_mesh(session, out, options, r.made, stop);   // (Phase 2: stand supports may cut it)
     if (!r.made.mesh.ok || mesh.empty()) {
       refuse(r, kMeshFailed,
              r.made.mesh.why.empty() ? "The lattice file could not be put together. Nothing was made."
@@ -1450,6 +1450,26 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
       return done();
     }
 
+    // P4 (Phase 2): the candidates the part can rest on (its hull's faces and edges), for the strength check to judge
+    // and, when the job itself stands the part on an EDGE (his "edges held by supports"), for its stand supports: bands
+    // on the edge's two faces, as wide as the centre of mass needs (orientation_stand), cut into the mesh and painted.
+    OrientationCandidates cands;
+    if (!job.strength_job.empty() || job.print_frame.on)
+      cands = print_candidates(mesh, r.made.tubes ? r.made.base_triangles : 0);
+    StandPaint stand;
+    if (!cands.list.empty() && cands.list.front().kind == OrientationCandidate::Kind::Edge) {
+      OrientationCandidate& c0 = cands.list.front();
+      orientation_stand(c0, mesh_centroid(mesh, r.made.tubes ? r.made.base_triangles : 0));
+      r.stand_edge = true;
+      r.stand = c0;
+      if (c0.stands && (!job.file_format.empty() ? job.file_format : r.made.tubes ? "3mf" : "stl") == "3mf") {
+        stand = paint_stand_supports(mesh, r.made.tubes ? r.made.base_triangles : 0, c0);
+        if (r.made.tubes) r.made.base_triangles += stand.added;
+        r.stand_triangles = stand.triangles;
+        r.stand_area_mm2 = stand.area_mm2;
+      }
+    }
+
     say(said, "saving the file");
     t0 = std::chrono::steady_clock::now();
     // Written beside its target and moved in only when whole: a failed job never leaves
@@ -1489,14 +1509,15 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
         StreamingThreeMfWriter::Options o;
         o.indexed = true;
         o.deflate = true;
-        o.supports = r.painted.triangles > 0;   // P3: off (the file as before) when nothing is painted
+        o.supports = r.painted.triangles > 0 || stand.triangles > 0;   // P3: off (the file as before) when nothing is painted
         o.object_name = base_name(file_path);
         StreamingThreeMfWriter w(part, o);
         for (const Vec3& v : mesh.vertices) w.add_vertex(v);
         for (std::size_t i = 0; i < mesh.triangles.size(); ++i) {
           const auto& t = mesh.triangles[i];
+          const bool paint = (i < r.painted.painted.size() && r.painted.painted[i]) || (i < stand.painted.size() && stand.painted[i]);
           w.add_indexed(static_cast<std::uint64_t>(t[0]), static_cast<std::uint64_t>(t[1]), static_cast<std::uint64_t>(t[2]),
-                        o.supports && r.painted.painted[i] != 0);
+                        o.supports && paint);
         }
         w.finish();
         r.compressed = w.compressed();
@@ -1548,6 +1569,8 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
       ask.part_hi = part_hi;
       ask.threads = job.options.threads;
       ask.frame = job.print_frame;   // P2
+      // P4 (Phase 2): the candidates the part can rest on (hull faces, edges), their ups for the check to judge.
+      for (const OrientationCandidate& c : cands.list) ask.orientation_ups.push_back(c.up);
       // Brief E2, item 7: Organic is checked on the FINAL bars, as the file holds them.
       std::vector<char> kept;
       if (any_weave) {
@@ -1584,8 +1607,7 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
       r.strength_json = sd.json;
       // P4: the print orientation ranking: the check's strength and support per candidate, the file's bed and height.
       if (sd.orientation.known)
-        r.orientation_json = print_orientation_json(sd.orientation, orientation_geometry(mesh), job.print_frame,
-                                                    options.layers.layer_mm);
+        r.orientation_json = print_orientation_json(sd.orientation, cands, job.print_frame, options.layers.layer_mm);
     }
     r.file = file_path;
     r.file_bytes = want;
@@ -1779,7 +1801,8 @@ std::string file_result_json(const FileResult& r) {
   if (r.weave_regions > 0 && !r.file_format.empty()) {   // OF5: only for a job with a weave region that made its file
     // P3: what the slicer is told about supports: "painted" (the part's own overhangs painted, support on for them
     // only), "needed" (found, none could be painted), "off" (none).
-    const char* supports = r.painted.triangles > 0 ? "painted" : r.part_overhang_places > 0 ? "needed" : "off";
+    const char* supports = r.painted.triangles > 0 || r.stand_triangles > 0 ? "painted"
+                           : r.part_overhang_places > 0 || r.stand_edge ? "needed" : "off";
     std::snprintf(b, sizeof b,
                   "  \"file_format\": \"%s\", \"weave_mesh\": \"%s\", \"shells\": %llu, \"shells_left_out\": %llu, "
                   "\"compressed\": %s, \"slicer_supports\": \"%s\",\n",
@@ -1819,19 +1842,31 @@ std::string file_result_json(const FileResult& r) {
     o += b;
   }
   // P3: the part's own overhangs and what the file paints for them (written only when the print check found any).
-  if (r.part_overhang_places > 0) {
+  if (r.part_overhang_places > 0 || r.stand_edge) {
     const SupportPaint& p = r.painted;
     std::snprintf(b, sizeof b,
                   "  \"painted\": {\"places\": %llu, \"places_painted\": %llu, \"places_unpainted\": %llu, \"triangles\": %llu, "
                   "\"area_mm2\": %.9g, \"est_volume_mm3\": %.9g, \"support_type\": \"%s\", \"at\": [",
                   count(r.part_overhang_places), count(p.places), count(r.part_overhang_places - p.places),
-                  count(p.triangles), p.area_mm2, p.est_volume_mm3, p.triangles > 0 ? "tree(manual)" : "");
+                  count(p.triangles), p.area_mm2, p.est_volume_mm3,
+                  p.triangles > 0 || r.stand_triangles > 0 ? "tree(manual)" : "");
     o += b;
     for (std::size_t i = 0; i < p.at.size(); ++i) {
       std::snprintf(b, sizeof b, "%s[%.4f, %.4f, %.4f]", i ? ", " : "", p.at[i].x, p.at[i].y, p.at[i].z);
       o += b;
     }
-    o += "]},\n";
+    o += "]";
+    // Phase 2: the part stands on an edge, held by its stand supports (bands on the edge's two faces).
+    if (r.stand_edge) {
+      const OrientationCandidate& c = r.stand;
+      std::snprintf(b, sizeof b,
+                    ", \"stand\": {\"rests_on\": \"edge\", \"stands\": %s, \"band_mm\": [%.9g, %.9g], \"triangles\": %llu, "
+                    "\"area_mm2\": %.9g, \"est_volume_mm3\": %.9g, \"edge_mm\": %.9g}",
+                    c.stands ? "true" : "false", c.band1_mm, c.band2_mm, count(r.stand_triangles), r.stand_area_mm2,
+                    c.stand_support_mm3, c.plate_mm2);
+      o += b;
+    }
+    o += "},\n";
   }
   std::snprintf(b, sizeof b, "  \"part\": {\"faces\": %d, \"triangles\": %llu, \"open_edges\": %llu},\n",
                 r.faces, count(r.part_triangles), count(r.open_edges));

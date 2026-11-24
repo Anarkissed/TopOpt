@@ -309,6 +309,9 @@ struct OrientationCandidateIn {
   double contact_mm2 = 0.0;     // the face on the bed
   bool stands = true;           // the centre of mass over that face
   double height_mm = 0.0;
+  // Phase 2 (his edges, "held by supports"): it stands on painted stand supports, not on a face: the contact rules
+  // (min_contact_mm2, min_contact_share) do not apply; `stands` (orientation_stand) decides.
+  bool held_by_supports = false;
 };
 struct OrientationRule {
   double min_contact_mm2 = 300.0;

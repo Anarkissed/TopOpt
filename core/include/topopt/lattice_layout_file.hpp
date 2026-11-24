@@ -194,6 +194,9 @@ struct StrengthAsk {
   // check turns its strength job (and that job's part) through the same door, and writes every position it reports,
   // and fields.bin, back in the model frame. Off: as before.
   PrintFrame frame;
+  // P4 (Phase 2): the print-orientation candidates' ups, in the job's frame (print_candidates); the check judges
+  // each (StrengthDone::orientation). Empty: none.
+  std::vector<Vec3> orientation_ups;
 };
 struct StrengthDone {
   bool ok = false;
@@ -206,7 +209,7 @@ struct StrengthDone {
   // P4 (his print orientation): the six candidates' guessed strength and the part's own support, in the job's frame
   // (print_orientation.hpp); the file job adds the bed and writes "print_orientation". Not known: the check made none
   // (the cube check, so far).
-  OrientationStrengths orientation;
+  OrientationStrengthsN orientation;
 };
 // The check is the CLI's (run_job.cpp: lattice_file_strength_check): core's lattice layout is always built, and the
 // old check needs the solver and the importer. `before` reads the strength job (cheap; no solve) and may refuse it;
@@ -391,6 +394,12 @@ struct FileResult {
   // part triangle under them), "off" (none found).
   std::size_t part_overhang_places = 0;
   SupportPaint painted;
+  // P4 (Phase 2, his "edges held by supports"): the job stands the part on an EDGE; its stand supports (bands on the
+  // edge's two faces, orientation_stand), painted when it stands (`stand.stands`).
+  bool stand_edge = false;
+  OrientationCandidate stand;
+  std::size_t stand_triangles = 0;
+  double stand_area_mm2 = 0.0;
   double ms_strength = 0.0;
   // Where the time went, ms.
   double ms_import = 0.0, ms_measure = 0.0, ms_read = 0.0, ms_cells = 0.0, ms_bars = 0.0;

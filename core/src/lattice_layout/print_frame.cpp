@@ -42,26 +42,41 @@ std::string num(double v) {
 
 }  // namespace
 
+// R and R^T on a vector (the general turn; the six axes take the exact path below).
+Vec3 PrintFrame::rot(const Vec3& v) const {
+  return {R[0] * v.x + R[1] * v.y + R[2] * v.z, R[3] * v.x + R[4] * v.y + R[5] * v.z, R[6] * v.x + R[7] * v.y + R[8] * v.z};
+}
+Vec3 PrintFrame::rot_t(const Vec3& v) const {
+  return {R[0] * v.x + R[3] * v.y + R[6] * v.z, R[1] * v.x + R[4] * v.y + R[7] * v.z, R[2] * v.x + R[5] * v.y + R[8] * v.z};
+}
+
 Vec3 PrintFrame::point_to_print(const Vec3& p) const {
   if (!on) return p;
   Vec3 q;
+  if (!exact) {
+    q = rot(p);
+    return {q.x + t.x, q.y + t.y, q.z + t.z};
+  }
   for (int a = 0; a < 3; ++a) set(q, a, signed_of(sign[a], at(p, perm[a])) + at(t, a));
   return q;
 }
 Vec3 PrintFrame::dir_to_print(const Vec3& d) const {
   if (!on) return d;
+  if (!exact) return rot(d);
   Vec3 q;
   for (int a = 0; a < 3; ++a) set(q, a, signed_of(sign[a], at(d, perm[a])));
   return q;
 }
 Vec3 PrintFrame::point_to_model(const Vec3& q) const {
   if (!on) return q;
+  if (!exact) return rot_t({q.x - t.x, q.y - t.y, q.z - t.z});
   Vec3 p;
   for (int a = 0; a < 3; ++a) set(p, perm[a], signed_of(sign[a], at(q, a) - at(t, a)));
   return p;
 }
 Vec3 PrintFrame::dir_to_model(const Vec3& d) const {
   if (!on) return d;
+  if (!exact) return rot_t(d);
   Vec3 p;
   for (int a = 0; a < 3; ++a) set(p, perm[a], signed_of(sign[a], at(d, a)));
   return p;
@@ -69,6 +84,24 @@ Vec3 PrintFrame::dir_to_model(const Vec3& d) const {
 void PrintFrame::tensor_to_print(const double* in, double* out) const {
   if (!on) {
     for (int q = 0; q < 6; ++q) out[q] = in[q];
+    return;
+  }
+  if (!exact) {   // R s R^T
+    const double S[3][3] = {{in[0], in[3], in[5]}, {in[3], in[1], in[4]}, {in[5], in[4], in[2]}};
+    double T[3][3];
+    for (int i = 0; i < 3; ++i)
+      for (int j = 0; j < 3; ++j) {
+        double acc = 0.0;
+        for (int k = 0; k < 3; ++k)
+          for (int l = 0; l < 3; ++l) acc += R[3 * i + k] * S[k][l] * R[3 * j + l];
+        T[i][j] = acc;
+      }
+    out[0] = T[0][0];
+    out[1] = T[1][1];
+    out[2] = T[2][2];
+    out[3] = T[0][1];
+    out[4] = T[1][2];
+    out[5] = T[2][0];
     return;
   }
   for (int a = 0; a < 3; ++a)
@@ -80,24 +113,45 @@ void PrintFrame::tensor_to_print(const double* in, double* out) const {
 std::array<double, 9> PrintFrame::rotation_row_major() const {
   std::array<double, 9> r{1, 0, 0, 0, 1, 0, 0, 0, 1};
   if (!on) return r;
-  r.fill(0.0);
-  for (int a = 0; a < 3; ++a) r[static_cast<std::size_t>(3 * a + perm[a])] = sign[a];
+  for (std::size_t i = 0; i < 9; ++i) r[i] = R[i];
   return r;
 }
 void PrintFrame::box_to_print(Vec3& lo, Vec3& hi) const {
   if (!on) return;
+  if (!exact) {   // the turned box's own axis-aligned box (its eight corners)
+    Vec3 a{1e300, 1e300, 1e300}, b{-1e300, -1e300, -1e300};
+    for (int c = 0; c < 8; ++c) {
+      const Vec3 q = point_to_print({c & 1 ? hi.x : lo.x, c & 2 ? hi.y : lo.y, c & 4 ? hi.z : lo.z});
+      a = {std::min(a.x, q.x), std::min(a.y, q.y), std::min(a.z, q.z)};
+      b = {std::max(b.x, q.x), std::max(b.y, q.y), std::max(b.z, q.z)};
+    }
+    lo = a;
+    hi = b;
+    return;
+  }
   const Vec3 a = point_to_print(lo), b = point_to_print(hi);
   lo = {std::min(a.x, b.x), std::min(a.y, b.y), std::min(a.z, b.z)};
   hi = {std::max(a.x, b.x), std::max(a.y, b.y), std::max(a.z, b.z)};
 }
 void PrintFrame::box_to_model(Vec3& lo, Vec3& hi) const {
   if (!on) return;
+  if (!exact) {
+    Vec3 a{1e300, 1e300, 1e300}, b{-1e300, -1e300, -1e300};
+    for (int c = 0; c < 8; ++c) {
+      const Vec3 q = point_to_model({c & 1 ? hi.x : lo.x, c & 2 ? hi.y : lo.y, c & 4 ? hi.z : lo.z});
+      a = {std::min(a.x, q.x), std::min(a.y, q.y), std::min(a.z, q.z)};
+      b = {std::max(b.x, q.x), std::max(b.y, q.y), std::max(b.z, q.z)};
+    }
+    lo = a;
+    hi = b;
+    return;
+  }
   const Vec3 a = point_to_model(lo), b = point_to_model(hi);
   lo = {std::min(a.x, b.x), std::min(a.y, b.y), std::min(a.z, b.z)};
   hi = {std::max(a.x, b.x), std::max(a.y, b.y), std::max(a.z, b.z)};
 }
 void PrintFrame::axis_six_to_model(const double in[6], double out[6]) const {
-  if (!on) {
+  if (!on || !exact) {   // a general turn: still measured along the print frame's own axes
     for (int q = 0; q < 6; ++q) out[q] = in[q];
     return;
   }
@@ -119,13 +173,29 @@ bool print_frame_for_up(const Vec3& up, PrintFrame& out, std::string* why) {
       axis = a;
       s = at(u, a) > 0.0 ? 1 : -1;
     }
-  if (axis < 0) {
-    if (why)
-      *why = "the print frame's up must lie along one of the part's six axes for now (a sloped face comes later)";
-    return false;
-  }
   PrintFrame f;
   f.on = true;
+  if (axis < 0) {
+    // Phase 2 (his 11-23 evening: "I *would* add the 45 degree sides in this run"): any up. The shortest turn taking it
+    // to +Z (Rodrigues about u x z); rounding as any rotation's.
+    f.exact = false;
+    f.up = u;
+    const Vec3 k0{u.y, -u.x, 0.0};   // u x z
+    const double sn = std::sqrt(k0.x * k0.x + k0.y * k0.y), cs = u.z;
+    const Vec3 k{k0.x / sn, k0.y / sn, 0.0};
+    const double K[9] = {0.0, -k.z, k.y, k.z, 0.0, -k.x, -k.y, k.x, 0.0};
+    double K2[9];
+    for (int i = 0; i < 3; ++i)
+      for (int j = 0; j < 3; ++j) {
+        double acc = 0.0;
+        for (int m = 0; m < 3; ++m) acc += K[3 * i + m] * K[3 * m + j];
+        K2[3 * i + j] = acc;
+      }
+    for (int i = 0; i < 9; ++i) f.R[i] = (i % 4 == 0 ? 1.0 : 0.0) + sn * K[i] + (1.0 - cs) * K2[i];
+    out = f;
+    return true;
+  }
+  f.exact = true;
   f.up = {0.0, 0.0, 0.0};
   set(f.up, axis, static_cast<double>(s));
   // print[a] = sign[a] * model[perm[a]]: the shortest turn taking `up` to +Z (a half turn about X for -Z).
@@ -136,6 +206,8 @@ bool print_frame_for_up(const Vec3& up, PrintFrame& out, std::string* why) {
     f.perm[a] = kPerm[axis][a];
     f.sign[a] = s > 0 ? kSignPlus[axis][a] : kSignMinus[axis][a];
   }
+  for (int i = 0; i < 9; ++i) f.R[i] = 0.0;
+  for (int a = 0; a < 3; ++a) f.R[3 * a + f.perm[a]] = f.sign[a];
   out = f;
   return true;
 }
@@ -166,6 +238,31 @@ void turn_step_model(const PrintFrame& f, StepModel& m) {
 
 void turn_keep_region(const PrintFrame& f, KeepRegion& k) {
   if (!f.on) return;
+  if (!f.exact) {
+    // A general turn: an axis-aligned region becomes an oriented one (its centre, axes and half sizes), its box the
+    // turned region's own axis-aligned box (KeepRegion::contains reads the box first, then the oriented shape).
+    if (!k.oriented) {
+      const double c[3] = {0.5 * (k.min.x + k.max.x), 0.5 * (k.min.y + k.max.y), 0.5 * (k.min.z + k.max.z)};
+      const double h[3] = {0.5 * (k.max.x - k.min.x), 0.5 * (k.max.y - k.min.y), 0.5 * (k.max.z - k.min.z)};
+      const Vec3 e[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+      k.center = {c[0], c[1], c[2]};
+      if (k.cylinder) {   // its axis in axes[2], its radius in half.x, its half length in half.z
+        const int u = (k.axis + 1) % 3, w = (k.axis + 2) % 3;
+        k.axes[0] = e[u];
+        k.axes[1] = e[w];
+        k.axes[2] = e[k.axis];
+        k.half = {h[u], h[u], h[k.axis]};
+      } else {
+        for (int a = 0; a < 3; ++a) k.axes[a] = e[a];
+        k.half = {h[0], h[1], h[2]};
+      }
+      k.oriented = true;
+    }
+    f.box_to_print(k.min, k.max);
+    k.center = f.point_to_print(k.center);
+    for (Vec3& ax : k.axes) ax = f.dir_to_print(ax);
+    return;
+  }
   f.box_to_print(k.min, k.max);
   // An axis-aligned cylinder's axis index follows the permutation: model axis perm[a] is print axis a.
   for (int a = 0; a < 3; ++a)
@@ -289,14 +386,112 @@ std::vector<T> turn_grid_impl(const PrintFrame& f, bool to_print, const int n[3]
       }
   return out;
 }
+
+// Phase 2: a general turn. The output grid is the turned source box's own axis-aligned box at the same pitch; each
+// output voxel centre reads the source at its turned-back place: trilinear between the source's voxel centres (a place
+// within half a voxel of the source's box reads its edge voxels; beyond the box: `fill`), or the nearest voxel. Vectors
+// and tensors are then turned (R v, R s R^T; back: R^T v, R^T s R).
+void tensor_turn(const PrintFrame& f, bool to_print, const double in[6], double out[6]) {
+  const double S[3][3] = {{in[0], in[3], in[5]}, {in[3], in[1], in[4]}, {in[5], in[4], in[2]}};
+  double T[3][3];
+  for (int i = 0; i < 3; ++i)
+    for (int j = 0; j < 3; ++j) {
+      double acc = 0.0;
+      for (int k = 0; k < 3; ++k)
+        for (int l = 0; l < 3; ++l)
+          acc += (to_print ? f.R[3 * i + k] * f.R[3 * j + l] : f.R[3 * k + i] * f.R[3 * l + j]) * S[k][l];
+      T[i][j] = acc;
+    }
+  out[0] = T[0][0];
+  out[1] = T[1][1];
+  out[2] = T[2][2];
+  out[3] = T[0][1];
+  out[4] = T[1][2];
+  out[5] = T[2][0];
+}
+template <class T>
+std::vector<T> resample_impl(const PrintFrame& f, bool to_print, const int n[3], Vec3 origin, double h,
+                             const std::vector<T>& values, int kind, int n_out[3], Vec3& origin_out, bool trilinear,
+                             T fill) {
+  const int comp = kind == 0 ? 1 : kind;
+  Vec3 lo = origin, hi{origin.x + h * n[0], origin.y + h * n[1], origin.z + h * n[2]};
+  if (to_print) f.box_to_print(lo, hi);
+  else f.box_to_model(lo, hi);
+  for (int o = 0; o < 3; ++o) n_out[o] = std::max(1, static_cast<int>(std::ceil((at(hi, o) - at(lo, o)) / h - 1e-9)));
+  origin_out = lo;
+  const std::size_t nv = static_cast<std::size_t>(n[0]) * static_cast<std::size_t>(n[1]) * static_cast<std::size_t>(n[2]);
+  const std::size_t nvo = static_cast<std::size_t>(n_out[0]) * static_cast<std::size_t>(n_out[1]) * static_cast<std::size_t>(n_out[2]);
+  std::vector<T> out(nvo * static_cast<std::size_t>(comp), fill);
+  if (values.size() != nv * static_cast<std::size_t>(comp)) return {};
+  const auto src = [&](int i, int j, int k) {
+    return ((static_cast<std::size_t>(k) * static_cast<std::size_t>(n[1]) + static_cast<std::size_t>(j)) *
+                static_cast<std::size_t>(n[0]) + static_cast<std::size_t>(i)) * static_cast<std::size_t>(comp);
+  };
+  std::vector<double> acc(static_cast<std::size_t>(comp));
+  for (int k = 0; k < n_out[2]; ++k)
+    for (int j = 0; j < n_out[1]; ++j)
+      for (int i = 0; i < n_out[0]; ++i) {
+        const Vec3 q{origin_out.x + (i + 0.5) * h, origin_out.y + (j + 0.5) * h, origin_out.z + (k + 0.5) * h};
+        const Vec3 p = to_print ? f.point_to_model(q) : f.point_to_print(q);
+        double g[3];
+        bool inside = true;
+        for (int a = 0; a < 3; ++a) {
+          g[a] = (at(p, a) - at(origin, a)) / h - 0.5;
+          inside = inside && g[a] >= -0.5 && g[a] <= n[a] - 0.5;
+        }
+        if (!inside) continue;
+        std::fill(acc.begin(), acc.end(), 0.0);
+        if (trilinear) {
+          int i0[3];
+          double w[3];
+          for (int a = 0; a < 3; ++a) {
+            i0[a] = std::min(std::max(0, static_cast<int>(std::floor(g[a]))), std::max(0, n[a] - 2));
+            w[a] = n[a] > 1 ? std::min(1.0, std::max(0.0, g[a] - i0[a])) : 0.0;
+          }
+          for (int c = 0; c < 8; ++c) {
+            const int di = c & 1, dj = (c >> 1) & 1, dk = (c >> 2) & 1;
+            const double wt = (di ? w[0] : 1.0 - w[0]) * (dj ? w[1] : 1.0 - w[1]) * (dk ? w[2] : 1.0 - w[2]);
+            if (wt == 0.0) continue;
+            const std::size_t e = src(std::min(i0[0] + di, n[0] - 1), std::min(i0[1] + dj, n[1] - 1), std::min(i0[2] + dk, n[2] - 1));
+            for (int q2 = 0; q2 < comp; ++q2) acc[static_cast<std::size_t>(q2)] += wt * static_cast<double>(values[e + static_cast<std::size_t>(q2)]);
+          }
+        } else {
+          int id[3];
+          for (int a = 0; a < 3; ++a) id[a] = std::min(n[a] - 1, std::max(0, static_cast<int>(std::lround(g[a]))));
+          const std::size_t e = src(id[0], id[1], id[2]);
+          for (int q2 = 0; q2 < comp; ++q2) acc[static_cast<std::size_t>(q2)] = static_cast<double>(values[e + static_cast<std::size_t>(q2)]);
+        }
+        T* vo = &out[((static_cast<std::size_t>(k) * static_cast<std::size_t>(n_out[1]) + static_cast<std::size_t>(j)) *
+                      static_cast<std::size_t>(n_out[0]) + static_cast<std::size_t>(i)) * static_cast<std::size_t>(comp)];
+        if (kind == 0) {
+          vo[0] = static_cast<T>(acc[0]);
+        } else if (kind == 3) {
+          const Vec3 v{acc[0], acc[1], acc[2]};
+          const Vec3 r = to_print ? f.dir_to_print(v) : f.dir_to_model(v);
+          vo[0] = static_cast<T>(r.x);
+          vo[1] = static_cast<T>(r.y);
+          vo[2] = static_cast<T>(r.z);
+        } else {
+          double tin[6], tout[6];
+          for (int q2 = 0; q2 < 6; ++q2) tin[q2] = acc[static_cast<std::size_t>(q2)];
+          tensor_turn(f, to_print, tin, tout);
+          for (int q2 = 0; q2 < 6; ++q2) vo[q2] = static_cast<T>(tout[q2]);
+        }
+      }
+  return out;
+}
 }  // namespace
 
 std::vector<double> turn_grid_values(const PrintFrame& f, bool to_print, const int n[3], Vec3 origin, double spacing,
                                      const std::vector<double>& values, int kind, int n_out[3], Vec3& origin_out) {
+  if (f.on && !f.exact)
+    return resample_impl<double>(f, to_print, n, origin, spacing, values, kind, n_out, origin_out, to_print, 0.0);
   return turn_grid_impl<double>(f, to_print, n, origin, spacing, values, kind, n_out, origin_out);
 }
 std::vector<float> turn_grid_values_f(const PrintFrame& f, bool to_print, const int n[3], Vec3 origin, double spacing,
                                       const std::vector<float>& values, int kind, int n_out[3], Vec3& origin_out) {
+  if (f.on && !f.exact)
+    return resample_impl<float>(f, to_print, n, origin, spacing, values, kind, n_out, origin_out, to_print, 0.0f);
   return turn_grid_impl<float>(f, to_print, n, origin, spacing, values, kind, n_out, origin_out);
 }
 std::vector<float> turn_node_vectors_f(const PrintFrame& f, bool to_print, const int n[3],
@@ -344,6 +539,91 @@ bool turn_fields_file_to_model(const PrintFrame& f, const std::string& path, std
     std::vector<float> none;
     (void)turn_grid_values_f(f, false, n, Vec3{org[0], org[1], org[2]}, h, none, 0, nout, oout);
   }
+  if (!f.exact) {
+    // Phase 2, a general turn: the container is made again on the model-frame grid (the print grid's box turned back,
+    // the same pitch); each voxel and node reads the print frame's NEAREST (values are not blended: a spot's id stays
+    // an id), the displacements turned back. Outside the print grid: 0 (the margin block: NaN, not judged).
+    const std::size_t nvo = static_cast<std::size_t>(nout[0]) * static_cast<std::size_t>(nout[1]) * static_cast<std::size_t>(nout[2]);
+    const std::size_t nno = static_cast<std::size_t>(nout[0] + 1) * static_cast<std::size_t>(nout[1] + 1) * static_cast<std::size_t>(nout[2] + 1);
+    std::vector<unsigned char> o(b.begin(), b.begin() + 64);
+    const auto put = [&](const void* src_, std::size_t n_) {
+      const unsigned char* c = static_cast<const unsigned char*>(src_);
+      o.insert(o.end(), c, c + n_);
+    };
+    const std::int32_t d2[3] = {nout[0], nout[1], nout[2]};
+    const double o2[3] = {oout.x, oout.y, oout.z};
+    std::memcpy(o.data() + 4, d2, sizeof d2);
+    std::memcpy(o.data() + 16, o2, sizeof o2);
+    // The nearest print-frame voxel (nodes: node) to `q`, or false outside the print grid.
+    const auto print_index = [&](const Vec3& q, bool nodes, int id[3]) {
+      for (int a = 0; a < 3; ++a) {
+        const double g = (at(q, a) - org[a]) / h - (nodes ? 0.0 : 0.5);
+        const int m = n[a] + (nodes ? 1 : 0);
+        if (g < -0.5 || g > m - 0.5) return false;
+        id[a] = std::min(m - 1, std::max(0, static_cast<int>(std::lround(g))));
+      }
+      return true;
+    };
+    std::size_t p = 64;
+    for (std::int32_t v = 0; v < count; ++v) {
+      std::int64_t c_vm = 0, c_t = 0, c_d = 0;
+      double marker = 0.0;
+      if (!rd(p, &marker, 8) || !rd(p + 24, &c_vm, 8) || !rd(p + 32, &c_t, 8) || !rd(p + 40, &c_d, 8)) {
+        if (why) *why = "a block is cut short";
+        return false;
+      }
+      if ((c_vm != 0 && static_cast<std::size_t>(c_vm) != nv) || c_t != 0 || (c_d != 0 && static_cast<std::size_t>(c_d) != 3 * nn) ||
+          p + 48 + 4 * static_cast<std::size_t>(c_vm + c_d) > b.size()) {
+        if (why) *why = "a block's size is not its grid's";
+        return false;
+      }
+      std::vector<unsigned char> head(b.begin() + static_cast<std::ptrdiff_t>(p), b.begin() + static_cast<std::ptrdiff_t>(p + 24));
+      o.insert(o.end(), head.begin(), head.end());
+      const std::int64_t n_vm = c_vm ? static_cast<std::int64_t>(nvo) : 0, n_t = 0, n_d = c_d ? static_cast<std::int64_t>(3 * nno) : 0;
+      put(&n_vm, 8);
+      put(&n_t, 8);
+      put(&n_d, 8);
+      p += 48;
+      if (c_vm) {
+        std::vector<float> vals(static_cast<std::size_t>(c_vm));
+        rd(p, vals.data(), vals.size() * 4);
+        const float fill = marker == -1.0 ? std::numeric_limits<float>::quiet_NaN() : 0.0f;
+        std::vector<float> outv(nvo, fill);
+        for (int k = 0; k < nout[2]; ++k)
+          for (int j = 0; j < nout[1]; ++j)
+            for (int i = 0; i < nout[0]; ++i) {
+              int id[3];
+              const Vec3 q = f.point_to_print({oout.x + (i + 0.5) * h, oout.y + (j + 0.5) * h, oout.z + (k + 0.5) * h});
+              if (!print_index(q, false, id)) continue;
+              outv[(static_cast<std::size_t>(k) * nout[1] + j) * nout[0] + i] =
+                  vals[(static_cast<std::size_t>(id[2]) * n[1] + id[1]) * n[0] + id[0]];
+            }
+        put(outv.data(), outv.size() * 4);
+        p += vals.size() * 4;
+      }
+      if (c_d) {
+        std::vector<float> vals(static_cast<std::size_t>(c_d));
+        rd(p, vals.data(), vals.size() * 4);
+        std::vector<float> outv(3 * nno, 0.0f);
+        for (int k = 0; k <= nout[2]; ++k)
+          for (int j = 0; j <= nout[1]; ++j)
+            for (int i = 0; i <= nout[0]; ++i) {
+              int id[3];
+              const Vec3 q = f.point_to_print({oout.x + i * h, oout.y + j * h, oout.z + k * h});
+              if (!print_index(q, true, id)) continue;
+              const std::size_t e = (static_cast<std::size_t>(id[2]) * (n[1] + 1) + id[1]) * (n[0] + 1) + id[0];
+              const Vec3 d = f.dir_to_model({vals[3 * e], vals[3 * e + 1], vals[3 * e + 2]});
+              const std::size_t eo = (static_cast<std::size_t>(k) * (nout[1] + 1) + j) * (nout[0] + 1) + i;
+              outv[3 * eo] = static_cast<float>(d.x);
+              outv[3 * eo + 1] = static_cast<float>(d.y);
+              outv[3 * eo + 2] = static_cast<float>(d.z);
+            }
+        put(outv.data(), outv.size() * 4);
+        p += vals.size() * 4;
+      }
+    }
+    b.swap(o);
+  } else {
   std::size_t p = 64;
   for (std::int32_t v = 0; v < count; ++v) {
     std::int64_t c_vm = 0, c_t = 0, c_d = 0;
@@ -375,6 +655,7 @@ bool turn_fields_file_to_model(const PrintFrame& f, const std::string& path, std
   const double o2[3] = {oout.x, oout.y, oout.z};
   wr(4, d2, sizeof d2);
   wr(16, o2, sizeof o2);
+  }
   const std::string tmp = path + ".part";
   {
     std::ofstream out(tmp, std::ios::binary | std::ios::trunc);

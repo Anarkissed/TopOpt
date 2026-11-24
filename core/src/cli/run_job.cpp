@@ -13156,6 +13156,21 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
       TriangleMesh tm = m;
       print_frame_set_base(pf, tm);
       turn_mesh(pf, tm);
+      // Phase 2 (his "edges held by supports"): standing on an edge, the stand supports cut in and painted first.
+      std::string stand_json;
+      StandPaint stand;
+      {
+        OrientationCandidates cs = print_candidates(tm);
+        if (!cs.list.empty() && cs.list.front().kind == OrientationCandidate::Kind::Edge) {
+          OrientationCandidate& c0 = cs.list.front();
+          orientation_stand(c0, mesh_centroid(tm));
+          if (c0.stands) stand = paint_stand_supports(tm, 0, c0);
+          stand_json = ", \"stand\": {\"rests_on\": \"edge\", \"stands\": " + std::string(c0.stands ? "true" : "false") +
+                       ", \"band_mm\": [" + json_num(c0.band1_mm) + ", " + json_num(c0.band2_mm) + "], \"triangles\": " +
+                       std::to_string(stand.triangles) + ", \"area_mm2\": " + json_num(stand.area_mm2) +
+                       ", \"est_volume_mm3\": " + json_num(c0.stand_support_mm3) + "}";
+        }
+      }
       SupportPaintAsk pa;
       pa.layer_mm = layer_h;
       const SupportPaint sp = paint_supports(tm, pa);
@@ -13167,12 +13182,13 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
           StreamingThreeMfWriter::Options o;
           o.indexed = true;
           o.deflate = true;
-          o.supports = sp.triangles > 0;
+          o.supports = sp.triangles > 0 || stand.triangles > 0;
           StreamingThreeMfWriter w(path, o);
           for (const Vec3& v : tm.vertices) w.add_vertex(v);
           for (std::size_t i = 0; i < tm.triangles.size(); ++i)
             w.add_indexed(static_cast<std::uint64_t>(tm.triangles[i][0]), static_cast<std::uint64_t>(tm.triangles[i][1]),
-                          static_cast<std::uint64_t>(tm.triangles[i][2]), o.supports && sp.painted[i] != 0);
+                          static_cast<std::uint64_t>(tm.triangles[i][2]),
+                          o.supports && (sp.painted[i] != 0 || (i < stand.painted.size() && stand.painted[i] != 0)));
           w.finish();
           oriented_file = path;
           file = json_str("oriented.3mf");
@@ -13185,7 +13201,8 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
              json_num(std::ceil(g.height_mm / layer_h - 1e-9)) + ", \"layer_mm\": " + json_num(layer_h) +
              ", \"bed_contact_mm2\": " + json_num(g.contact_mm2) + ", \"painted\": {\"triangles\": " +
              std::to_string(sp.triangles) + ", \"area_mm2\": " + json_num(sp.area_mm2) + ", \"est_volume_mm3\": " +
-             json_num(sp.est_volume_mm3) + "}, \"slicer_supports\": " + json_str(sp.triangles > 0 ? "painted" : "off") +
+             json_num(sp.est_volume_mm3) + "}" + stand_json + ", \"slicer_supports\": " +
+             json_str(sp.triangles > 0 || stand.triangles > 0 ? "painted" : "off") +
              ", \"file\": " + file + ", \"print_frame\": " + print_frame_json(pf) + "}";
     };
     const std::string now_standing = standing(job.orientation_recheck_dir, true);
@@ -15518,6 +15535,7 @@ struct StrengthSetup {
   MinimizePlasticOptions options;
   SolvedDesignDomain domain;
   PrintFrame frame;   // P2: the file job's print frame (off: as before); the job and its part were turned through it
+  std::vector<Vec3> ups;   // P4: the print-orientation candidates' ups (the job's frame); empty: none judged
 };
 
 ll::StrengthDone strength_setup(const ll::StrengthAsk& ask, const std::string& materials_path,
@@ -15543,6 +15561,7 @@ ll::StrengthDone strength_setup(const ll::StrengthAsk& ask, const std::string& m
     return strength_no("strength_job_unreadable", 1, kStrengthJobUnreadableWhy, p);
   // P2: the strength job through the file job's door (its loads, boxes and service; its build direction the print up).
   S.frame = ask.frame;
+  S.ups = ask.orientation_ups;   // P4
   if (S.frame.on && !(g_print_frame_test_skip & kSkipStrengthJob)) turn_job_description(S.frame, job);
   // The material, with its layer factor as the settings state it (a copy: the library is not changed).
   S.material = materials.at(job.material);
@@ -16385,7 +16404,7 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
   fst.up = build_dir;
   fst.safety = options.margin_stop;
   fst.light_width_mm = light_width_mm;
-  for (const Vec3& u : orientation_axes()) fst.also_up.push_back(u);   // P4: the same struts, the six candidate ups
+  fst.also_up = S.ups;   // P4: the same struts, judged against each candidate up the file job asked for
   R.check = ll::check_frame(R.frame, vs, fst, fs);
   R.ms_frame = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
   R.mb_frame = process_memory().rss_mb;
@@ -16398,7 +16417,7 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
   // wall rescue on the member width, measured as analyze_fixed_design measures it, here on the solid share).
   double solid_vm = 0.0;
   std::size_t solid_voxels = 0;
-  std::array<double, 6> tension_up{};   // P4: the solid's tension across the layers, per candidate up
+  std::vector<double> tension_up(S.ups.size(), 0.0);   // P4: the solid's tension across the layers, per candidate up
   std::vector<double> s_vm, s_width;   // per solid voxel: von Mises, member width (width-aware only)
   std::vector<double> width;           // per voxel: the solid share's member width (width-aware, or for the spots)
   const auto measure_width = [&] {
@@ -16426,8 +16445,8 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
     }
     R.solid_tension = solid_voxels ? max_interlayer_tension(cert_grid, sig, build_dir) : 0.0;
     // P4: the same solid with its layers across each candidate up (exact: the solve does not read the up)
-    for (std::size_t k = 0; k < 6; ++k)
-      tension_up[k] = solid_voxels ? max_interlayer_tension(cert_grid, sig, orientation_axes()[k]) : 0.0;
+    for (std::size_t k = 0; k < S.ups.size(); ++k)
+      tension_up[k] = solid_voxels ? max_interlayer_tension(cert_grid, sig, S.ups[k]) : 0.0;
   }
   R.solid_margin = compute_stress_margin(material.yield_strength_mpa, material.z_knockdown, solid_vm, R.solid_tension);
   // The effective margin at an infill percent: Install 3's gate (gate_margin_effective), the job's other print settings.
@@ -16890,8 +16909,8 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
   // P4: per candidate up (print_orientation.hpp): the solid's margin with its layers across it (exact), the struts'
   // smallest (the same struts and forces, the limit by their rise: an estimate), the part's own support (voxels); and
   // the centre of mass (the solid's and the lattice's material).
-  {
-    OrientationStrengths& os = done.orientation;
+  if (!S.ups.empty()) {
+    OrientationStrengthsN& os = done.orientation;
     os.known = true;
     os.required_margin = options.margin_stop;
     std::vector<char> solid_mask(nvox, 0);
@@ -16913,17 +16932,15 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
       os.has_centre_of_mass = true;
     }
     const double nan = std::numeric_limits<double>::quiet_NaN();
-    for (std::size_t q = 0; q < 6; ++q) {
-      const Vec3& u = orientation_axes()[q];
-      const int axis = u.x != 0.0 ? 0 : u.y != 0.0 ? 1 : 2;
-      const int sgn = (u.x + u.y + u.z) > 0.0 ? 1 : -1;
-      OrientationStrength& t = os.by_axis[q];
+    os.by_up.assign(S.ups.size(), OrientationStrength{});
+    for (std::size_t q = 0; q < S.ups.size(); ++q) {
+      OrientationStrength& t = os.by_up[q];
       t.solid = effective_with(knockdown.infill_percent, tension_up[q]);
       t.solid_interlayer = compute_stress_margin(material.yield_strength_mpa, material.z_knockdown, solid_vm, tension_up[q]).interlayer;
       const bool struts_known = c.solved && c.judged > 0 && q < c.by_up.size();
       t.struts = struts_known ? c.by_up[q].smallest_margin : nan;
       t.struts_under = struts_known ? c.by_up[q].under_safety : 0;
-      t.support_mm3 = support_along_axis(cert_grid, in_part, solid_mask, axis, sgn);
+      t.support_mm3 = support_along(cert_grid, in_part, solid_mask, S.ups[q]);
     }
   }
   (void)in_part;

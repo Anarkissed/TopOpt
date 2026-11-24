@@ -15,6 +15,7 @@
 // outward normal is -X; the strength check's build direction is the up; a job with no frame has no "print_frame" key.
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -389,7 +390,7 @@ int main() {
     }
     PrintFrame f;
     std::string why;
-    CHECK(!print_frame_for_up({1, 1, 0}, f, &why) && !why.empty());
+    CHECK(print_frame_for_up({1, 1, 0}, f, &why) && !f.exact);   // Phase 2: any up, a rotation
     CHECK(!print_frame_for_up({0, 0, 0}, f, &why));
     CHECK(print_frame_for_up({1, 0, 0}, f));
     const Vec3 a = f.point_to_print({1, 2, 3});
@@ -513,7 +514,7 @@ int main() {
       CHECK(po && st);
       if (po && st) {
         const sj::Value& cands = sj::require(*po, "candidates", "po");
-        CHECK(cands.arr.size() == 6);
+        CHECK(cands.arr.size() >= 2);   // Phase 2: the hull's faces and edges
         const sj::Value& c0 = cands.arr.at(0);
         const sj::Value& up = sj::require(c0, "up", "c0");
         CHECK(up.arr.size() == 3 && up.arr[0].num == 1.0 && up.arr[1].num == 0.0 && up.arr[2].num == 0.0);
@@ -589,13 +590,207 @@ int main() {
     const Run S3 = run("s3", "job_s3.json");
     CHECK(!S3.r.ok && S3.r.code == "strengthened_unreadable");   // (its additions file is not there: read, not refused for the up)
   }
-  // ── a tilted up is refused for now (Phase 1), in plain words
+  // ── PHASE 2 (his 11-23 evening: the 45 degree sides, and edges held by supports): ANY up. The bracket stood on the
+  // edge between its underside and the plate's end (up = (-1, 0, 1)/sqrt2: both faces at 45 degrees), against a copy
+  // turned BY HAND (a 45 degree turn about +Y, this file's own; the STL rounds it to float, the tensor written from the
+  // same linear field at the turned places): no longer the same bytes (a rotation rounds), but the same lattice within a
+  // stated tolerance: bars and strut volume within 5 %, the solid's margin within 3 %, the weakest strut's within 25 %
+  // (the traced lay follows the stress lines, and a 1e-6 mm rounding of the part moves a few of them: measured 17 %),
+  // the same verdicts, the same stand on the edge, and as few of the file's points inside the turned No-lattice zone;
+  // the  // same verdicts, the same stand on the edge. Each input left unturned is caught by the same tolerance.
   {
-    Job t = a;
-    t.extra = ", \"print_frame\": {\"up\": [1, 1, 0]}";
-    write(kDir + "/job_t.json", file_job(t));
-    const Run T = run("t", "job_t.json");
-    CHECK(!T.r.ok && T.r.code == "job_unreadable" && T.r.detail.find("six axes") != std::string::npos);
+    const double cq = 1.0 / std::sqrt(2.0);
+    const auto rot = [&](const Vec3& p) { return Vec3{cq * p.x + cq * p.z, p.y, -cq * p.x + cq * p.z}; };
+    double tz = 1e300;
+    for (const Vec3& v : part.vertices) tz = std::min(tz, rot(v).z);
+    tz = 0.0 - tz;
+    const auto turn_g = [&](const Vec3& p) { const Vec3 q = rot(p); return Vec3{q.x, q.y, q.z + tz}; };
+    TriangleMesh tg = part;
+    for (Vec3& v : tg.vertices) v = turn_g(v);
+    write_stl_file(kDir + "/part_g.stl", tg, StlFormat::Binary);
+    {   // B_g's tensor: the same linear field, at each turned place, turned (R s R^T), on the grid a turn of A's grid
+        // lands on (its box turned, the same pitch: the grid is the door's convention; the VALUES are this file's own)
+      Vec3 lo{1e300, 1e300, 1e300}, hi{-1e300, -1e300, -1e300};
+      for (int c = 0; c < 8; ++c) {
+        const Vec3 v = turn_g({c & 1 ? 42.0 : -2.0, c & 2 ? 26.0 : -2.0, c & 4 ? 32.0 : -2.0});
+        lo = {std::min(lo.x, v.x), std::min(lo.y, v.y), std::min(lo.z, v.z)};
+        hi = {std::max(hi.x, v.x), std::max(hi.y, v.y), std::max(hi.z, v.z)};
+      }
+      TensorField u;
+      u.spacing = 1.0;
+      u.origin = lo;
+      u.nx = std::max(1, static_cast<int>(std::ceil((hi.x - lo.x) - 1e-9)));
+      u.ny = std::max(1, static_cast<int>(std::ceil((hi.y - lo.y) - 1e-9)));
+      u.nz = std::max(1, static_cast<int>(std::ceil((hi.z - lo.z) - 1e-9)));
+      u.voigt.assign(6 * static_cast<std::size_t>(u.nx) * u.ny * u.nz, 0.0);
+      const double Rm[3][3] = {{cq, 0, cq}, {0, 1, 0}, {-cq, 0, cq}};
+      for (int k = 0; k < u.nz; ++k)
+        for (int j = 0; j < u.ny; ++j)
+          for (int i = 0; i < u.nx; ++i) {
+            const Vec3 q{u.origin.x + i + 0.5, u.origin.y + j + 0.5, u.origin.z + k + 0.5 - tz};
+            Vec3 p{Rm[0][0] * q.x + Rm[1][0] * q.y + Rm[2][0] * q.z, Rm[0][1] * q.x + Rm[1][1] * q.y + Rm[2][1] * q.z,
+                   Rm[0][2] * q.x + Rm[1][2] * q.y + Rm[2][2] * q.z};   // R^T q
+            if (p.x < -2 || p.y < -2 || p.z < -2 || p.x > 42 || p.y > 26 || p.z > 32) continue;   // outside A's grid: 0
+            // within half a voxel of A's box: A's edge voxels' value (the field at the nearest voxel centre's plane)
+            p = {std::min(41.5, std::max(-1.5, p.x)), std::min(25.5, std::max(-1.5, p.y)), std::min(31.5, std::max(-1.5, p.z))};
+            double s[6];
+            tensor_at(p, s);
+            const double S[3][3] = {{s[0], s[3], s[5]}, {s[3], s[1], s[4]}, {s[5], s[4], s[2]}};
+            double T[3][3];
+            for (int x = 0; x < 3; ++x)
+              for (int y = 0; y < 3; ++y) {
+                T[x][y] = 0.0;
+                for (int m = 0; m < 3; ++m)
+                  for (int nn = 0; nn < 3; ++nn) T[x][y] += Rm[x][m] * S[m][nn] * Rm[y][nn];
+              }
+            double* o = &u.voigt[6 * u.index(i, j, k)];
+            o[0] = T[0][0]; o[1] = T[1][1]; o[2] = T[2][2]; o[3] = T[0][1]; o[4] = T[1][2]; o[5] = T[2][0];
+          }
+      CHECK(write_tensor_file(kDir + "/stress_g.tensor", u));
+    }
+    Job ag = a, bg = b;
+    ag.extra = ", \"print_frame\": {\"up\": [-0.7071067811865476, 0, 0.7071067811865476]}";
+    bg.model = "part_g.stl";
+    bg.tensor = "stress_g.tensor";
+    bg.strength = "strength_bg.json";
+    bg.top = a.top;
+    bg.bottom = a.bottom;
+    bg.wall_top = a.wall_top;
+    const auto rv = [&](const Vec3& d) { return rot(d); };
+    bg.zone = "{\"kind\": \"box\", \"centre\": " + v3s(turn_g({24, 12, 3})) + ", \"axes\": [" + v3s(rv({1, 0, 0})) + ", " +
+              v3s(rv({0, 1, 0})) + ", " + v3s(rv({0, 0, 1})) + "], \"half_mm\": [4, 5, 4]}";
+    // a load that matters (3 kN): margins that mean something
+    write(kDir + "/strength_bg.json", strength_job(bg, rv({0, 0, -3000}), rv({0, 0, 1}), true));
+    write(kDir + "/strength_ag.json", strength_job(a, {0, 0, -3000}, {0, 0, 1}, false));
+    ag.strength = "strength_ag.json";
+    bg.extra = "";
+    write(kDir + "/job_ag.json", file_job(ag));
+    write(kDir + "/job_bg.json", file_job(bg));
+    struct Facts { bool ok = false; double bars = 0, struts_mm3 = 0, solid = 0, smallest = 0; std::size_t in_zone = 0; std::string verdict; bool clean = false;
+                   bool stand = false, stands = false; double band0 = 0, band1 = 0; std::size_t stand_tris = 0; };
+    const auto facts = [&](const Run& x) {
+      Facts f;
+      f.ok = x.r.ok;
+      if (!x.r.ok) return f;
+      const sj::Value j = sj::parse(x.json, "x");
+      f.bars = static_cast<double>(x.r.bars);
+      f.struts_mm3 = x.r.made.mesh.struts_mm3 + x.r.made.shells.mm3;
+      const sj::Value& st = sj::require(j, "strength", "j");
+      f.solid = sj::require(sj::require(st, "solid_margin", "st"), "effective", "sm").num;
+      f.smallest = sj::require(sj::require(st, "struts", "st"), "smallest_margin", "ss").num;
+      f.verdict = sj::require(st, "verdict", "st").str;
+      f.clean = x.r.made.print_clean;
+      f.stand = x.r.stand_edge;
+      f.stands = x.r.stand.stands;
+      f.band0 = x.r.stand.band1_mm;
+      f.band1 = x.r.stand.band2_mm;
+      f.stand_tris = x.r.stand_triangles;
+      {   // the file's points inside the turned No-lattice zone (1 mm in): few when the zone was turned with the
+          // part (solid there), many when it was not (lattice tubes)
+        const StepModel fm = import_part_file_resolved(x.out + "/part_lattice.3mf");
+        const Vec3 zc = turn_g({24, 12, 3}), z0 = rot({1, 0, 0}), z1 = rot({0, 1, 0}), z2 = rot({0, 0, 1});
+        const double hz[3] = {3.0, 4.0, 2.5};
+        for (const Vec3& v : fm.mesh.vertices) {
+          const Vec3 d{v.x - zc.x, v.y - zc.y, v.z - zc.z};
+          f.in_zone += std::fabs(d.x * z0.x + d.y * z0.y + d.z * z0.z) < hz[0] && std::fabs(d.x * z1.x + d.y * z1.y + d.z * z1.z) < hz[1] &&
+                       std::fabs(d.x * z2.x + d.y * z2.y + d.z * z2.z) < hz[2];
+        }
+      }
+      return f;
+    };
+    const auto near = [](double u, double w, double rel) { return std::fabs(u - w) <= rel * std::max(std::fabs(u), std::fabs(w)) + 1e-9; };
+    const auto close = [&](const Facts& x, const Facts& y, bool say) {
+      const bool ok = x.ok && y.ok && near(x.bars, y.bars, 0.05) && near(x.struts_mm3, y.struts_mm3, 0.05) &&
+                      near(x.solid, y.solid, 0.03) && near(x.smallest, y.smallest, 0.25) && x.verdict == y.verdict &&
+                      std::fabs(static_cast<double>(x.in_zone) - static_cast<double>(y.in_zone)) <= 20.0 + 0.25 * static_cast<double>(y.in_zone) &&
+                      x.clean == y.clean && x.stand == y.stand && x.stands == y.stands &&
+                      std::fabs(x.band0 - y.band0) <= 1.0 && std::fabs(x.band1 - y.band1) <= 1.0;
+      if (say)
+        std::printf("  in the zone %zu / %zu, bars %.0f / %.0f, struts %.6g / %.6g mm3, solid %.4g / %.4g, struts' smallest %.4g / %.4g, verdict %s / %s, "
+                    "clean %d / %d, stand %d / %d stands %d / %d, bands [%.3g %.3g] / [%.3g %.3g], stand triangles %zu / %zu\n",
+                    x.in_zone, y.in_zone, x.bars, y.bars, x.struts_mm3, y.struts_mm3, x.solid, y.solid, x.smallest, y.smallest, x.verdict.c_str(),
+                    y.verdict.c_str(), x.clean, y.clean, x.stand, y.stand, x.stands, y.stands, x.band0, x.band1, y.band0,
+                    y.band1, x.stand_tris, y.stand_tris);
+      return ok;
+    };
+    const Run AG = run("ag", "job_ag.json");
+    const Run BG = run("bg", "job_bg.json");
+    const Facts fa = facts(AG), fb = facts(BG);
+    const bool g_ok = close(fa, fb, true);
+    std::printf("[A_g vs B_g, up (-1, 0, 1)/sqrt2] %s\n", g_ok ? "within the tolerance" : "OUTSIDE the tolerance");
+    CHECK(g_ok);
+    CHECK(AG.json.find("\"rotation_row_major\": [0.7071067812, 0, 0.7071067812, 0, 1, 0, -0.7071067812, 0, 0.7071067812]") !=
+          std::string::npos);
+    // it rests on an edge: its stand supports painted, Tree (manual) in the file
+    CHECK(fa.stand && fa.stands && fa.stand_tris > 0 && AG.json.find("\"slicer_supports\": \"painted\"") != std::string::npos);
+    CHECK(slurp(AG.out + "/part_lattice.3mf").find("Metadata/model_settings.config") != std::string::npos);
+    for (const auto& [bit, name] : std::vector<std::pair<unsigned, const char*>>{
+             {kSkipTensor, "tensor"}, {kSkipZones, "zones"}, {kSkipStrengthJob, "strength job"}}) {
+      g_print_frame_test_skip = bit;
+      const Run M = run(std::string("g_skip_") + std::to_string(bit), "job_ag.json");
+      g_print_frame_test_skip = 0;
+      const bool differs = !close(facts(M), fb, true);
+      std::printf("[general mutation: %s left unturned] %s\n", name, differs ? "differs (caught)" : "within (NOT caught)");
+      CHECK(differs);
+    }
+  }
+  // ── the resampling's cost and accuracy on a real tensor (PRINT_FRAME_TENSOR: a tensor.bin, read only; his stand's for
+  // the report). Reported, not judged: the round trip (turned, then read back at the source's own voxel centres) and the
+  // most tension across the layers for three ups (the field's turn leaves it unchanged in an exact resample).
+  if (const char* path = std::getenv("PRINT_FRAME_TENSOR")) {
+    TensorField t0;
+    std::string why;
+    if (read_tensor_file(path, t0, &why)) {
+      for (const Vec3& up : {Vec3{0, 1, 1}, Vec3{1, 0, 1}, Vec3{1, 1, 1}}) {
+        PrintFrame f;
+        print_frame_for_up(up, f);
+        const int n[3] = {t0.nx, t0.ny, t0.nz};
+        int no[3];
+        Vec3 oo;
+        const auto c0 = std::chrono::steady_clock::now();
+        const std::vector<double> r = turn_grid_values(f, true, n, t0.origin, t0.spacing, t0.voigt, 6, no, oo);
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - c0).count();
+        // read the turned field back at every source voxel centre (trilinear), turned back
+        const auto vm = [](const double* s) {
+          return std::sqrt(0.5 * ((s[0] - s[1]) * (s[0] - s[1]) + (s[1] - s[2]) * (s[1] - s[2]) + (s[2] - s[0]) * (s[2] - s[0])) +
+                           3.0 * (s[3] * s[3] + s[4] * s[4] + s[5] * s[5]));
+        };
+        double vmax = 0.0;
+        for (std::size_t e = 0; e < t0.voigt.size() / 6; ++e) vmax = std::max(vmax, vm(&t0.voigt[6 * e]));
+        std::vector<double> errs;
+        for (int k = 0; k < n[2]; ++k)
+          for (int j = 0; j < n[1]; ++j)
+            for (int i = 0; i < n[0]; ++i) {
+              const double* s0 = &t0.voigt[6 * t0.index(i, j, k)];
+              if (vm(s0) < 0.1 * vmax) continue;
+              const Vec3 q = f.point_to_print({t0.origin.x + (i + 0.5) * t0.spacing, t0.origin.y + (j + 0.5) * t0.spacing,
+                                               t0.origin.z + (k + 0.5) * t0.spacing});
+              double g[3] = {(q.x - oo.x) / t0.spacing - 0.5, (q.y - oo.y) / t0.spacing - 0.5, (q.z - oo.z) / t0.spacing - 0.5};
+              int i0[3];
+              double w[3];
+              for (int a2 = 0; a2 < 3; ++a2) {
+                i0[a2] = std::min(std::max(0, static_cast<int>(std::floor(g[a2]))), no[a2] - 2);
+                w[a2] = std::min(1.0, std::max(0.0, g[a2] - i0[a2]));
+              }
+              double s1[6] = {0, 0, 0, 0, 0, 0};
+              for (int cc = 0; cc < 8; ++cc) {
+                const int di = cc & 1, dj = (cc >> 1) & 1, dk = (cc >> 2) & 1;
+                const double wt = (di ? w[0] : 1 - w[0]) * (dj ? w[1] : 1 - w[1]) * (dk ? w[2] : 1 - w[2]);
+                const std::size_t e = 6 * ((static_cast<std::size_t>(i0[2] + dk) * no[1] + (i0[1] + dj)) * no[0] + (i0[0] + di));
+                for (int c2 = 0; c2 < 6; ++c2) s1[c2] += wt * r[e + static_cast<std::size_t>(c2)];
+              }
+              errs.push_back(std::fabs(vm(s1) - vm(s0)) / vmax);   // von Mises is the same in any frame
+            }
+          std::sort(errs.begin(), errs.end());
+        const double med = errs.empty() ? 0.0 : errs[errs.size() / 2], p95 = errs.empty() ? 0.0 : errs[errs.size() * 95 / 100];
+        std::printf("[his tensor %d x %d x %d -> %d x %d x %d, up (%g, %g, %g)] %.1f ms; von Mises after the round trip, of the "
+                    "largest: median %.3g, 95th %.3g, worst %.3g (%zu voxels above a tenth of it)\n",
+                    n[0], n[1], n[2], no[0], no[1], no[2], up.x, up.y, up.z, ms, med, p95, errs.empty() ? 0.0 : errs.back(),
+                    errs.size());
+      }
+    } else {
+      std::printf("[his tensor] not read: %s\n", why.c_str());
+    }
   }
 
   // ── the mutation guard: each input left unturned makes A differ from B

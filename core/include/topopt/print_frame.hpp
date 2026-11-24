@@ -9,10 +9,11 @@
 //
 // No "print_frame" key: nothing here runs, and every byte is as before.
 //
-// Phase 1 (decision D5): the up is one of the part's six axes. The turn is then an exact signed permutation of the
-// coordinates (no rounding: x, -x, y ... only), so the turned inputs are the very numbers a copy of the part turned by
-// hand would hold, and the voxel grids of the stress results permute exactly. A negated 0 is written +0 (0 - x, never
-// -x), so a turned file never holds a "-0".
+// Along one of the part's six axes the turn is an exact signed permutation of the coordinates (no rounding: x, -x, y
+// ... only), so the turned inputs are the very numbers a copy of the part turned by hand would hold, and the voxel
+// grids of the stress results permute exactly. A negated 0 is written +0 (0 - x, never -x), so a turned file never
+// holds a "-0". Any other up (Phase 2, decision D5 as he changed it 11-23 evening: the 45 degree sides, and edges):
+// a rotation, and the stress grids resampled (trilinear, the same pitch; turn_grid_values).
 #pragma once
 
 #include <array>
@@ -31,11 +32,19 @@ struct KeepRegion;
 
 struct PrintFrame {
   bool on = false;               // false: the identity, and nothing is turned (today's jobs, byte for byte)
-  Vec3 up{0.0, 0.0, 1.0};        // the up, in the model frame (unit, one of the six axes)
-  // print[a] = sign[a] * model[perm[a]] + t[a]
+  // true: the up is one of the six axes and the turn is the exact signed permutation below. false (Phase 2, his 11-23
+  // evening: the 45 degree sides, and edges): any up, the rotation R, rounded as any rotation is; the voxel grids
+  // (stress) are then RESAMPLED (trilinear, the same pitch) into the print frame, and fields.bin back.
+  bool exact = true;
+  Vec3 up{0.0, 0.0, 1.0};        // the up, in the model frame (unit)
+  // exact: print[a] = sign[a] * model[perm[a]] + t[a]
   int perm[3] = {0, 1, 2};
   int sign[3] = {1, 1, 1};
+  // print = R model + t, row by row (exact: the permutation's own matrix)
+  double R[9] = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
   Vec3 t{0.0, 0.0, 0.0};         // after the turn: only z, so the part's lowest point is at z = 0
+  Vec3 rot(const Vec3& v) const;     // R v
+  Vec3 rot_t(const Vec3& v) const;   // R^T v
 
   Vec3 point_to_print(const Vec3& p) const;
   Vec3 dir_to_print(const Vec3& d) const;
@@ -52,8 +61,9 @@ struct PrintFrame {
   void axis_six_to_model(const double in[6], double out[6]) const;
 };
 
-// The frame whose up is `up` (model frame). Phase 1: `up` must lie along one of the six axes (within 1e-6 after it is
-// made unit); otherwise false and `why` says so in plain words. The translation is 0 until print_frame_set_base.
+// The frame whose up is `up` (model frame). Along one of the six axes (within 1e-6 after it is made unit): the exact
+// permutation. Any other up (Phase 2): the shortest rotation taking it to +Z. A zero or not finite up: false and `why`
+// says so in plain words. The translation is 0 until print_frame_set_base.
 bool print_frame_for_up(const Vec3& up, PrintFrame& out, std::string* why = nullptr);
 // The base: t = (0, 0, -lowest z of the turned vertices), so the turned part stands on z = 0.
 void print_frame_set_base(PrintFrame& f, const TriangleMesh& model_mesh);

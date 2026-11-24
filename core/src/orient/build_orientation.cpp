@@ -759,7 +759,7 @@ OrientationRecommendation recommend_print_orientation(const std::vector<Orientat
   for (std::size_t i = 0; i < n; ++i) out.candidates[i].passes = known(i) && c[i].strength >= required_margin;
   std::vector<char> alive(n, 0);
   for (std::size_t i = 0; i < n; ++i) {
-    alive[i] = c[i].flat || c[i].incumbent;
+    alive[i] = c[i].flat || c[i].incumbent || c[i].held_by_supports;
     if (!alive[i]) out.candidates[i].dropped = "no_flat_face";
   }
   // 1. strong enough
@@ -790,7 +790,7 @@ OrientationRecommendation recommend_print_orientation(const std::vector<Orientat
     if (c[i].flat) most_contact = std::max(most_contact, c[i].contact_mm2);
   std::vector<char> stands(n, 0);
   for (std::size_t i = 0; i < n; ++i)
-    stands[i] = c[i].stands && c[i].contact_mm2 >= rule.min_contact_mm2 && c[i].contact_mm2 >= rule.min_contact_share * most_contact;
+    stands[i] = c[i].stands && (c[i].held_by_supports || (c[i].contact_mm2 >= rule.min_contact_mm2 && c[i].contact_mm2 >= rule.min_contact_share * most_contact));
   {
     bool any = false;
     for (std::size_t i = 0; i < n; ++i) any = any || (alive[i] && stands[i]);
