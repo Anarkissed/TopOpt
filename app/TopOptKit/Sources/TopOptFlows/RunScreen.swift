@@ -23,6 +23,9 @@ public struct RunScreen: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulse = false
+    /// ★ notes25 (his Img 1: "two pop-ups, one behind the other. There should only be one"): the Mac's print-accurate card
+    /// carries this run from his press to its end — no progress card and no top-lane pill of its own then.
+    @ObservedObject private var mac = LatticeMacMake.shared
 
     public init(model: RunModel, materialName: String, resolution: Int,
                 onRetry: @escaping () -> Void = {}, version: String? = nil) {
@@ -39,7 +42,7 @@ public struct RunScreen: View {
             case .running:
                 // Once the first variant streams in, the results screen takes over
                 // (progressive results); the progress card yields to it.
-                if !(model.outcome?.variants.isEmpty ?? true) {
+                if !(model.outcome?.variants.isEmpty ?? true) || mac.covers(model) {   // ★ notes25: the Mac's one card instead
                     EmptyView()
                 } else if model.isMinimized {
                     minimizedChip

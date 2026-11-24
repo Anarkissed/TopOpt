@@ -2163,6 +2163,7 @@ public struct LatticeSetupWizard: View {
                 }
             }
         }
+        .settingToChange(s.rawValue)   // ★ notes25: "Change settings" marks the field it asks for (SettingToChange)
     }
 
     /// ★ §11(b) — EVERY LATTICE TYPE MUST BE REACHABLE. His screenshot shows the
@@ -2766,6 +2767,7 @@ public struct LatticeSetupWizard: View {
                 .frame(maxHeight: .infinity, alignment: .top)
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: DS.Space.m) {
+                    SettingToChangeNote(page: .lattice) { LatticeWizardSetting(rawValue: $0)?.title ?? $0 }   // ★ notes25
                     latticeTopRow
                     latticeTabBody(c)
                 }

@@ -486,7 +486,11 @@ public enum LatticeFileRun {
         /// ★ his notes 11-23: the Mac could not be reached (the job may still be there): its record is kept, so the job is
         /// followed again when the app comes back. Anything else ends the job's record.
         public var transient = false
-        public init(_ d: String, transient: Bool = false) { description = d; self.transient = transient }
+        /// ★ notes25: the engine's own reason (its lattice_file.json), when it refused to make the file.
+        public var refusal: LatticeFileRefusal? = nil
+        public init(_ d: String, transient: Bool = false, refusal: LatticeFileRefusal? = nil) {
+            description = d; self.transient = transient; self.refusal = refusal
+        }
     }
 
     /// What the Mac made: the file, its report, the strength check's views beside it (fields.bin, scenario_fields.bin; only
@@ -628,8 +632,10 @@ public enum LatticeFileRun {
                 eachPoll(state)   // ★ his 11-22: the print-accurate file fetched as soon as it is saved
                 if state == "done" { return record }
                 if state == "failed" || state == "error" || state == "cancelled" {
-                    // the CLI's last line carries the same plain why as its report (the contract)
-                    let why = ((o["message"] as? String) ?? "").split(separator: "\n").last.map(String.init) ?? ""
+                    // the CLI's last line carries the same plain why as its report (the contract); ★ notes25: the worker's
+                    // record may carry `message` or `code` (fileMade reads the report's own reason after this)
+                    let said = (o["message"] as? String) ?? (o["why"] as? String) ?? (o["code"] as? String) ?? ""
+                    let why = said.split(separator: "\n").last.map(String.init) ?? ""
                     throw Failure(why.isEmpty ? failed : why)
                 }
                 Thread.sleep(forTimeInterval: pollSeconds)
@@ -740,18 +746,30 @@ public enum LatticeFileRun {
         let id = jobURL.lastPathComponent
         do {
             var earlyFile: Data?
-            let state = try w.wait(jobURL, ceiling: ceilingSeconds, failed: "The file could not be made",
+            let state: [String: Any]
+            do {
+                state = try w.wait(jobURL, ceiling: ceilingSeconds, failed: "The file could not be made",
                                    doneFile: LatticeFileJob.reportName, isCancelled: isCancelled, onState: onState,
                                    eachPoll: { state in
-                guard let early, earlyFile == nil, state == "running" || state == "done",
-                      let parts = w.file(jobURL, early.name + Early.partsSuffix), let d = w.file(jobURL, early.name) else { return }
-                earlyFile = d
-                early.got(d, Early.baseTriangles(parts))
-            })
+                    guard let early, earlyFile == nil, state == "running" || state == "done",
+                          let parts = w.file(jobURL, early.name + Early.partsSuffix), let d = w.file(jobURL, early.name) else { return }
+                    earlyFile = d
+                    early.got(d, Early.baseTriangles(parts))
+                })
+            } catch let f as Failure where !f.transient && f.description != "Cancelled" {
+                // ★ notes25: the job ended in error — its own reason is in its report (served after a restart too)
+                if let rd = w.file(jobURL, LatticeFileJob.reportName), let refusal = LatticeFileRefusal.parse(rd) {
+                    throw Failure(refusal.plain, refusal: refusal)
+                }
+                throw f
+            }
             guard let rd = try w.fetch(jobURL, LatticeFileJob.reportName), let report = LatticeFileReport.parse(rd) else {
                 throw Failure("The Mac made the file but its report could not be read")
             }
-            guard report.ok else { throw Failure(report.why.isEmpty ? "The file could not be made" : report.why) }
+            guard report.ok else {
+                let refusal = LatticeFileRefusal.parse(rd)   // ★ notes25: the engine's reason, kept for the pop-up
+                throw Failure(refusal?.plain ?? (report.why.isEmpty ? "The file could not be made" : report.why), refusal: refusal)
+            }
             // the file by the name the report gives (Organic: lattice.3mf), else the job's own output
             let kept = early?.name == report.fileName ? earlyFile : nil
             guard let stl = try kept ?? w.fetch(jobURL, report.fileName) else {
@@ -1046,9 +1064,11 @@ public enum LatticeFileButton {
     /// The run the Lattice button starts: the job sent, polled and fetched on the Mac (a tap on the running card's cancel
     /// deletes the Mac's job), then `outcome`.
     /// ★ his notes 11-23: the job is recorded for its version (the request's project) in `defaults`, as an Optimize run's is.
+    /// ★ notes25 (A5): `onJob` — the job sent (the print file's card reads the Mac's steps from its event stream).
     public static func runner(config: RemoteRunnerConfig, job: LatticeFileJob.ForPart, projectName: String,
                               strengthJob: Data?, densityGCm3: Double, defaults: UserDefaults = .standard,
-                              inputsRoot: URL = LatticeJobInputs.defaultRoot) -> RunModel.Runner {
+                              inputsRoot: URL = LatticeJobInputs.defaultRoot,
+                              onJob: @escaping @Sendable (URL) -> Void = { _ in }) -> RunModel.Runner {
         { request, progress, _ in
             let keepGoing = Progress(progress)
             _ = keepGoing.call(0, 1, 0)
@@ -1056,7 +1076,7 @@ public enum LatticeFileButton {
                                             defaults: defaults, inputsRoot: inputsRoot)
             let made = try LatticeFileRun.drive(config: config, modelPath: job.modelPath, jobJSON: job.json, projectName: projectName,
                                                 demand: job.demand, strengthJob: strengthJob, tensor: job.tensor, record: record,
-                                                isCancelled: { !keepGoing.call(0, 1, 0) })
+                                                isCancelled: { !keepGoing.call(0, 1, 0) }, onJob: onJob)
             return try record.reading(made) { try outcome(made, densityGCm3: densityGCm3) }
         }
     }
