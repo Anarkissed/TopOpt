@@ -106,13 +106,13 @@ final class WorkerKitTests: XCTestCase {
     func testProgressWordRendersRungAndIter() {
         // rung is 0-based on the wire → "rung 4/4 · iter 106" for the last rung.
         let solving = WorkerJob(id: "1", state: "running", rung: 3, rungs: 4, iter: 106)
-        XCTAssertEqual(solving.progressWord, "rung 4/4 · iter 106")
+        XCTAssertEqual(solving.progressWord(), "rung 4/4 · iter 106")
 
         let queued = WorkerJob(id: "2", state: "queued", position: 2)
-        XCTAssertEqual(queued.progressWord, "position 2")
+        XCTAssertEqual(queued.progressWord(), "position 2")
 
         // Row assembled exactly as a face renders it.
-        let row = "\(solving.displayName) — \(solving.stateWord) · \(solving.progressWord)"
+        let row = "\(solving.displayName) — \(solving.stateWord) · \(solving.progressWord())"
         XCTAssertEqual(row, "Job 1 — Solving · rung 4/4 · iter 106")
     }
 
@@ -174,6 +174,33 @@ final class WorkerKitTests: XCTestCase {
         JobControls.actions(for: job).map { action in
             client.request(action, job: job.id)
         }
+    }
+
+    /// ★ 362 11-23 (his worker window sat on "starting…" for a whole print-file job, and a strengthening's History row
+    /// said "0 variants"): a one-shot job says what it is, its stage in plain words with its time, and its own outcome.
+    func testAOneShotJobSaysItsStageAndItsOwnOutcome() throws {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let file = WorkerJob(id: "f1", project: "Stand", state: "running", startedAt: 900, mode: "lattice-file",
+                             stage: "checking it prints: try 3 of at most 10", stageAt: 959)
+        XCTAssertEqual(file.stateWord, "Making the print file")
+        XCTAssertEqual(file.progressWord(now: now), "Checking it prints · try 3 · 41s")
+        XCTAssertNil(file.fractionComplete(), "no made-up fraction: the window shows a moving bar")
+        let strong = WorkerJob(id: "s1", project: "Stand", state: "running", mode: "organic-strengthen",
+                               stage: "round 2: checking its strength")
+        XCTAssertEqual(strong.stateWord, "Strengthening")
+        XCTAssertEqual(strong.progressWord(now: now), "Round 2 · checking its strength")
+        let done = WorkerJob(id: "s2", project: "Stand", state: "done", startedAt: 0, finishedAt: 258, mode: "organic-strengthen")
+        XCTAssertFalse(done.outcomeSummary().contains("variant"), "never \"0 variants\" for a strengthening")
+        XCTAssertTrue(done.outcomeSummary().hasPrefix("strengthened"))
+        let failed = WorkerJob(id: "f2", project: "Stand", state: "error", mode: "lattice-file",
+                               message: "After 10 tries the lattice still has 1 bridge longer than a printer can span.")
+        XCTAssertEqual(failed.completionSummary, "Stand: After 10 tries the lattice still has 1 bridge longer than a printer can span.")
+        // RED CONTROL: an optimization (or an older worker with no mode) reads exactly as before
+        let old = WorkerJob(id: "o1", state: "running", rung: 0, rungs: 4, iter: 3)
+        XCTAssertEqual(old.stateWord, "Solving")
+        XCTAssertEqual(old.progressWord(), "rung 1/4 · iter 3")
+        let jobs = try JSONDecoder().decode([WorkerJob].self, from: Data(#"[{"id": "x", "state": "running", "paused": false, "mode": "lattice-file", "stage": "making the file", "stage_at": 1.0, "message": null, "code": null, "next": null}]"#.utf8))
+        XCTAssertEqual(jobs.first?.stageWord, "Making the file", "the worker's new row decodes")
     }
 
     private func requestSignatures(_ reqs: [URLRequest]) -> [String] {
