@@ -707,6 +707,19 @@ public enum LatticeFileRun {
         return try fileMade(w, jobURL, record: record, isCancelled: isCancelled, onState: onState, early: early)
     }
 
+    /// ★ 362 11-23: the print-file job the Mac chained after a strengthening (`next`), taken over as `drive` would have
+    /// submitted it: recorded for the version, the strengthening's record ended, followed to its end and fetched. Blocking.
+    public static func followChained(config: RemoteRunnerConfig, jobID: String, record: LatticeJobRecorder? = nil,
+                                     strengthenedFrom: String? = nil, isCancelled: @escaping @Sendable () -> Bool = { false },
+                                     onJob: @escaping @Sendable (URL) -> Void = { _ in }, early: Early? = nil) throws -> Made {
+        let w = Worker(config)
+        let jobURL = config.baseURL.appendingPathComponent("jobs").appendingPathComponent(jobID)
+        onJob(jobURL)
+        record?.saved(.file, jobID: jobID, config: config, strengthenJobID: strengthenedFrom)
+        if let s = strengthenedFrom { record?.ended(s) }
+        return try fileMade(w, jobURL, record: record, isCancelled: isCancelled, onState: { _, _ in }, early: early)
+    }
+
     /// ★ his notes 11-23: a print file's job already on the Mac (the app was gone when it ended), followed to its end and
     /// fetched — the same result as `drive`'s. Blocking.
     public static func follow(config: RemoteRunnerConfig, jobID: String, record: LatticeJobRecorder? = nil,
@@ -778,6 +791,9 @@ public enum LatticeFileRun {
         public var summaryJSON: Data
         /// ★ his notes 11-23: the strengthening's job on the Mac (its record ends once the file's job is on the Mac).
         public var jobID: String? = nil
+        /// ★ 362 11-23 (his run stalled 10 minutes while he was in another app): the print-file job the MAC made itself when
+        /// the strengthening ended (the worker's `next`, asked by "then" = file); nil from a worker that does not chain.
+        public var nextJobID: String? = nil
 
         /// strengthen.json read (the files fetched apart). nil: not core's strengthen.json.
         public static func parse(_ d: Data) -> (summary: Strengthened, lastRound: String?)? {
@@ -822,6 +838,8 @@ public enum LatticeFileRun {
         var p = try parts(modelPath: modelPath, jobJSON: jobJSON, projectName: projectName, demand: nil, strengthJob: strengthJob,
                           tensor: tensor, strengthened: nil)
         p.append(RemoteRun.UploadPart(name: "run", filename: nil, contentType: nil, data: Data("organic-strengthen".utf8)))
+        // ★ 362 11-23: the Mac makes the print file itself when the strengthening ends, so nothing waits on the iPad
+        p.append(RemoteRun.UploadPart(name: "then", filename: nil, contentType: nil, data: Data("file".utf8)))
         let jobURL = try w.submit(p)
         onJob(jobURL)
         if let record {
@@ -846,13 +864,14 @@ public enum LatticeFileRun {
                              onState: @escaping @Sendable (_ state: String, _ position: Int?) -> Void) throws -> Strengthened {
         let id = jobURL.lastPathComponent
         do {
-            _ = try w.wait(jobURL, ceiling: strengthenCeilingSeconds, failed: "The lattice could not be strengthened",
-                           doneFile: "strengthen.json", isCancelled: isCancelled, onState: onState)
+            let done = try w.wait(jobURL, ceiling: strengthenCeilingSeconds, failed: "The lattice could not be strengthened",
+                                  doneFile: "strengthen.json", isCancelled: isCancelled, onState: onState)
             guard let sd = try w.fetch(jobURL, "strengthen.json"), let read = Strengthened.parse(sd) else {
                 throw Failure("The Mac strengthened the lattice but its report could not be read")
             }
             var s = read.summary
             s.jobID = id
+            if let next = done["next"] as? String, !next.isEmpty, !next.contains("/"), !next.contains("..") { s.nextJobID = next }
             // the last round's lattice: strengthened.json and the additions it names (bare names, beside it)
             if let last = read.lastRound, !last.contains(".."), let json = try w.fetch(jobURL, last),
                let doc = (try? JSONSerialization.jsonObject(with: json)) as? [String: Any],
@@ -1085,10 +1104,17 @@ public enum LatticeFileButton {
                                       early: LatticeFileRun.Early? = nil) throws -> OptimizeOutcome {
         var made: LatticeFileRun.Made
         do {
-            made = try LatticeFileRun.drive(config: config, modelPath: modelPath, jobJSON: jobJSON, projectName: projectName,
-                                            strengthJob: strengthJob, tensor: tensor, strengthened: strengthened?.files,
-                                            record: record, strengthenedFrom: strengthened?.jobID, isCancelled: isCancelled,
-                                            onJob: onJob, early: early)
+            if let next = strengthened?.nextJobID {
+                // ★ 362 11-23: the Mac already made the file's job itself (his stall: the iPad was in another app)
+                made = try LatticeFileRun.followChained(config: config, jobID: next, record: record,
+                                                        strengthenedFrom: strengthened?.jobID, isCancelled: isCancelled,
+                                                        onJob: onJob, early: early)
+            } else {
+                made = try LatticeFileRun.drive(config: config, modelPath: modelPath, jobJSON: jobJSON, projectName: projectName,
+                                                strengthJob: strengthJob, tensor: tensor, strengthened: strengthened?.files,
+                                                record: record, strengthenedFrom: strengthened?.jobID, isCancelled: isCancelled,
+                                                onJob: onJob, early: early)
+            }
         } catch let f as LatticeFileRun.Failure where !f.transient {
             if let s = strengthened?.jobID { record.ended(s) }
             throw f
