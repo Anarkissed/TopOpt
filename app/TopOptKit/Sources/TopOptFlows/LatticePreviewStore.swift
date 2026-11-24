@@ -117,7 +117,8 @@ enum LatticePreviewStore {
     static let stressFileName = "stress_check.bin"
     static let magic: UInt32 = 0x504C_4F54   // "TOLP"
     static let stressMagic: UInt32 = 0x5353_4F54   // "TOSS"
-    static let formatVersion: UInt32 = 1
+    // ★ 362 11-24: 2 adds the lay's floor cell (notes25 D10, LatticeLayoutColours.Laid.floorCellMM); 1 is still read (floor 0).
+    static let formatVersion: UInt32 = 2
     /// RED CONTROL (LatticePreviewStoreTests): nothing is saved or read back (every open lays again, as before 11-23).
     nonisolated(unsafe) static var controlNoStore = false
     /// A test's count: lattices shown from a version's folder.
@@ -236,6 +237,7 @@ enum LatticePreviewStore {
             w.bool(same); if !same { w.pod(l.bars) }
             w.pod(l.barFlags); w.pod(l.barCell); w.pod(l.barRegion); w.pod(l.frames); w.pod(l.cellInfo); w.pod(l.cellRegion)
             w.pod(l.cellWall); w.pod(l.cellFrame); w.pod(l.cellLo); w.pod(l.cellWallMM)
+            w.f64(l.floorCellMM)
         }
         return w.data
     }
@@ -245,7 +247,9 @@ enum LatticePreviewStore {
     static func decode(_ data: Data, for current: LatticeLayoutPreview.LayInputs, token: Int) -> LatticeLayoutPreview.Remembered? {
         var r = PreviewBinReader(data)
         do {
-            guard try r.u32() == magic, try r.u32() == formatVersion else { return nil }
+            guard try r.u32() == magic else { return nil }
+            let version = try r.u32()
+            guard version == formatVersion || version == 1 else { return nil }
             guard try getKey(&r) == key(current) else { return nil }
             let quality: LatticeLayoutSession.Organic.Quality = try r.u8() == 1 ? .draft : .exact
             let struts = try r.int()
@@ -295,6 +299,7 @@ enum LatticePreviewStore {
                 l.frames = try r.pod(Float.self); l.cellInfo = try r.pod(Float.self); l.cellRegion = try r.pod(Int32.self)
                 l.cellWall = try r.pod(Int32.self); l.cellFrame = try r.pod(Int32.self); l.cellLo = try r.pod(Float.self)
                 l.cellWallMM = try r.pod(Float.self)
+                if version >= 2 { l.floorCellMM = try r.f64() }
                 l.token = token
                 laid = l
             }
