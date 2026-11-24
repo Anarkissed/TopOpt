@@ -189,12 +189,19 @@ final class LatticeLayoutPreviewTests: XCTestCase {
         p.lattice.gradingMode = .full
         p.lattice.densityMode = .sim
         p.latticePageManual = false
+        // ★ RE-PINNED (362 11-24, his answer: the thinnest struts on Auto are for Aesthetic only)
+        p.lattice.stageMode = .aesthetic
         let auto = LatticeLayoutPreview.settings(p)
         XCTAssertFalse(auto.allowQuilt, "★ Auto: no quilt")
         XCTAssertFalse(auto.smallCellsInThinWalls, "★ Auto: no Small cells in thin walls")
         XCTAssertFalse(auto.byStress, "★ Auto: one strut width, the thinnest")
         XCTAssertEqual(auto.strutWidthMM, auto.minStrutLines * auto.beadMM, accuracy: 1e-12, "★ its lines x its line width")
         XCTAssertTrue(auto.cellsByStress, "★ the cells still grade by stress")
+        p.lattice.stageMode = .structural
+        let structural = LatticeLayoutPreview.settings(p)
+        XCTAssertFalse(structural.allowQuilt || structural.smallCellsInThinWalls, "★ Structural Auto: no quilt either")
+        XCTAssertTrue(structural.byStress, "★ Structural Auto keeps its strength-led struts (his 11-24 answer)")
+        p.lattice.stageMode = .aesthetic
         p.latticePageManual = true
         let manual = LatticeLayoutPreview.settings(p)
         XCTAssertTrue(manual.allowQuilt && manual.smallCellsInThinWalls && manual.byStress, "★ Manual: his own choices")

@@ -1418,8 +1418,12 @@ public final class LatticeLayoutPreview: ObservableObject {
         if !p.latticePageManual, !l.isOrganic {
             s.allowQuilt = false
             s.smallCellsInThinWalls = false
-            s.byStress = false
-            s.strutWidthMM = s.minStrutLines * s.beadMM
+            // ★ his 11-24 answer: the thinnest struts on Auto are for AESTHETIC only. Structural Auto keeps its strength-led
+            // struts (his aim, to come: work back from his margin, 150/175/200 %, to the least plastic that meets it).
+            if (l.stageMode ?? .structural) == .aesthetic {
+                s.byStress = false
+                s.strutWidthMM = s.minStrutLines * s.beadMM
+            }
         }
         let rowDensity = s.perRegion
         var id: Int32 = 1
