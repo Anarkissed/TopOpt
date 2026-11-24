@@ -233,10 +233,13 @@ def test_jobs_golden_and_queue():
             "jobs": [
                 {"id": "A", "project": "Runner", "state": "running", "paused": False,
                  "rung": "<n>", "rungs": "<n>", "iter": "<n>", "variants": "<n>",
+                 # ★ 362 11-23: the job's command, its stage line, a failure's reason and a chained next job
+                 "mode": "run", "stage": None, "stage_at": None, "message": None, "code": None, "next": None,
                  "position": None,
                  "created_at": "<ts>", "started_at": "<ts>", "finished_at": None},
                 {"id": "B", "project": "Waiter", "state": "queued", "paused": False,
                  "rung": None, "rungs": None, "iter": None, "variants": "<n>",
+                 "mode": "run", "stage": None, "stage_at": None, "message": None, "code": None, "next": None,
                  "position": 1,
                  "created_at": "<ts>", "started_at": None, "finished_at": None},
             ],

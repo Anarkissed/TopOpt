@@ -14,9 +14,27 @@
 // plain words, the time. The moment the Mac has saved the file the iPad fetches it and draws it in place of the Draft
 // (`LatticeLayoutPreview.showFile`); the modal closes and the button reads "Checking its strength" until the run lands
 // (Approved, or today's Results when it does not pass). The state lives here, never as @State on the workspace.
+//
+// ★ notes25 (his iPad notes 11-23, Img 1): "When making a print-accurate version there are *two* pop-ups, one behind the other.
+// There should only be one. When the animated pop-up finishes, the one in the background continues. There should only be a
+// single pop-up that contains everything - including a "Run in the Background" and "Cancel" button." The one behind was the
+// run's own progress card (RunScreen's), up for the whole of the Mac's run, which went on to check the strength after this
+// card closed. Now THIS card is the chain's one pop-up from his press until the run ends: the vines, the step (the Mac's
+// laying, strengthening, the file, then the check), one clock, and "Run in the Background" · "Cancel". The run's own card and
+// its top-lane pill stay away while it carries the run (`covers`, read by RunScreen). "Run in the Background" hides it; the
+// Lattice button keeps its ring and words, and its tap brings the same card back. Cancel stops the whole chain.
+// ★ notes25 (his Img 4: "With "Print-accurate Preview" selected, and the "exact" laid down, it still says "Make print
+// accurate" ... The button should just say "Lattice""): with the print-accurate lattice already on screen (the iPad's exact,
+// current; or the Mac's file) the press is the same Mac run, its card and button saying the print file, never
+// "print-accurate" again (`fileOnly`; `LatticeMacStep`).
 import Foundation
+import Combine
 import SwiftUI
 import TopOptDesign
+import TopOptKit
+#if canImport(UIKit) && os(iOS)
+import UIKit
+#endif
 
 /// The words (five at most each on the button and the card's lines).
 enum LatticeMacMakeCopy {
@@ -26,12 +44,19 @@ enum LatticeMacMakeCopy {
     static let checking = "Checking its strength"
     static let title = "Making it print-accurate"
     static let cancel = "Cancel"
+    /// ★ notes25 (his words, Img 1).
+    static let background = "Run in the Background"
+    /// ★ notes25: the card's title when the lattice on screen is print-accurate already (the print file is all that is made).
+    static let fileTitle = "Making the print file"
     static let noMacTitle = "Your Mac isn’t answering"
     static let noMacText = "The print-accurate lattice is made on your Mac. Check that it is on and TopOpt is running "
         + "there, then try again. Or make it here on the iPad: it takes longer."
     static let tryAgain = "Try again"
     static let onIPad = "Make it on the iPad"
     static let opening = "Opening your part"
+    static let measuring = "Measuring your part"   // ★ notes25
+    /// ★ notes25: the print check's try, as text (never a fraction of the tries it may take).
+    static func printCheckTry(_ n: Int) -> String { "Checking it prints \u{00B7} try \(n)" }
     static let laying = "Laying the lattice"
     static let printCheck = "Checking it prints"
     static let makingFile = "Making the file"
@@ -40,6 +65,22 @@ enum LatticeMacMakeCopy {
     static let drawing = "Drawing it"
     static let waiting = "Waiting for your Mac"
     static func strengthening(_ round: Int) -> String { round > 0 ? "Strengthening, round \(round)" : "Strengthening it" }
+
+    /// ★ notes25 (A5, his 11-23 evening: the cell lattice's print file stopped on the Mac after ~7 min): a stop never just
+    /// vanishes — a centred pop-up says what is wrong and what to do.
+    static let failedTitle = "The print file couldn\u{2019}t be made"
+    static func failedText(_ engine: String?, onMac: Bool) -> String {
+        let w = engine?.lowercased() ?? ""
+        if w.contains("bridge") || w.contains("span") {
+            return "Part of the lattice would bridge farther than your printer can span. Try smaller cells, or another "
+                + "lattice type, then press Lattice again."
+        }
+        if onMac, macStopped(engine) {
+            return "Your Mac stopped answering. Check that it is on and TopOpt is running there, then press Lattice again."
+        }
+        return (onMac ? "Your Mac couldn\u{2019}t finish it." : "This iPad couldn\u{2019}t finish it.")
+            + " Press Lattice again; if it keeps happening, tell us."
+    }
 
     /// The Mac's own line ("organic-strengthen: round 2: checking its strength", "lattice-file: saving the file") in plain
     /// words; nil for a line that is not a step.
@@ -58,7 +99,12 @@ enum LatticeMacMakeCopy {
             return nil
         }
         guard tool == "lattice-file" else { return nil }
-        if rest.hasPrefix("opening") || rest.hasPrefix("measuring") { return opening }
+        if rest.hasPrefix("opening") { return opening }
+        if rest.hasPrefix("measuring") { return measuring }   // ★ notes25
+        if rest.hasPrefix("checking it prints") {   // ★ notes25: "checking it prints: try 3 of at most 10" → its try, as words
+            let n = rest.range(of: "try ").map { Int(rest[$0.upperBound...].prefix { $0.isNumber }) ?? 0 } ?? 0
+            return n > 0 ? printCheckTry(n) : printCheck
+        }
         if rest.hasPrefix("laying") { return laying }
         if rest.hasPrefix("making the file") { return makingFile }
         if rest.hasPrefix("saving the file") { return saving }
@@ -79,20 +125,73 @@ enum LatticeMacMakeCopy {
     }
 }
 
+/// ★ notes25 (his Img 4): what the Lattice button is with an Organic lattice on screen — "Make print-accurate" (the Mac makes it
+/// print-accurate, then checks it) only while what is drawn is the quick stand-in; with the print-accurate lattice already on
+/// screen (the ⌃ "Print-accurate preview" on and the iPad's exact laid for exactly these settings, or the Mac's own file) it is
+/// "Lattice", whose press goes straight to the Mac's run for the print file and its check.
+enum LatticeMacStep {
+    /// The iPad's exact lattice is laid, current, with the ⌃ switch on.
+    static func exactOnScreen(printAccurate: Bool, quality: LatticeLayoutSession.Organic.Quality?, current: Bool,
+                              laying: Bool) -> Bool {
+        printAccurate && quality == .exact && current && !laying
+    }
+    /// The button reads "Make print-accurate" (its old rule, less an exact or a file already on screen).
+    static func makesPrintAccurate(ready: Bool, organic: Bool, laid: Bool, laying: Bool, showsFile: Bool,
+                                   exactOnScreen: Bool) -> Bool {
+        ready && organic && laid && !laying && !showsFile && !exactOnScreen
+    }
+}
+
 @MainActor
 public final class LatticeMacMake: ObservableObject {
     public static let shared = LatticeMacMake()
 
-    /// The modal is up (from his press until the file is drawn, or the run stops).
-    @Published public private(set) var shown = false
+    /// ★ notes25: the chain is going — from his press until its run ends (or it stops).
+    @Published public private(set) var going = false { didSet { stayAwake() } }
+    /// ★ notes25: he sent the card to the background ("Run in the Background"); the Lattice button brings it back.
+    @Published public private(set) var inBackground = false
+    /// ★ notes25: the chain's run has ended (the card goes at once; the workspace then ends the chain, `ended`).
+    @Published private(set) var runOver = false { didSet { stayAwake() } }
+
+    /// ★ notes25 (A6, his Organic run 11-23: 10 minutes lost between the strengthening and the print file — the iPad drives
+    /// that chain step by step, and it had locked while he watched the Mac): the iPad stays awake while the chain goes (his
+    /// press to the result, a failure or a cancel), and only while the workspace is up.
+    @Published public private(set) var keepsAwake = false
+    private var workspaceUp = true
+    private func stayAwake() {
+        let on = going && !runOver && workspaceUp
+        guard on != keepsAwake else { return }
+        keepsAwake = on
+        Self.idleTimer(disabled: on)
+    }
+    /// THE ONE PLACE the iPad's sleep is held off (the Mac's test host has no idle timer).
+    static func idleTimer(disabled: Bool) {
+        #if canImport(UIKit) && os(iOS)
+        UIApplication.shared.isIdleTimerDisabled = disabled
+        #endif
+    }
+    /// The workspace appeared (true) or left (false): the iPad sleeps again once it has left.
+    func workspace(up: Bool) { workspaceUp = up; stayAwake() }
+    /// ★ notes25 (A6): the app came back to the front mid-chain: the Mac's steps are followed again at once (the event stream
+    /// broke while the app was away; the run's own polling goes on by itself every 2 s).
+    func cameBack() { if going, !runOver, let u = jobURL { follow(u) } }
+    private var jobURL: URL?
+    /// The card is up: the chain going, not in the background. ★ notes25: ONE card for the whole chain (was: until the file).
+    public var shown: Bool { going && !inBackground && !runOver }
     /// The Mac's step, in plain words.
     @Published public private(set) var stage = LatticeMacMakeCopy.waiting
     @Published public private(set) var started: Date?
-    /// The print file's lattice is drawn and the Mac still checks its strength (the button says so).
+    /// The print file's lattice is drawn and the Mac still checks its strength (the button and the card say so).
     @Published public private(set) var checking = false
+    /// ★ notes25 (A3): the lattice on screen was print-accurate already at his press: the card and the button say the print file.
+    @Published public private(set) var fileOnly = false
     private(set) var projectID: UUID?
     /// The run he asked for (Try again sends it again).
     var request: RunRequest?
+    /// ★ notes25: the run this card carries (its own card stays away while this one is the chain's: `covers`).
+    private weak var run: RunModel?
+    private var runWatch: AnyCancellable?
+    private var runSeen = false
     private var path: String?
     private var cancelAction: (() -> Void)?
     private var events: Task<Void, Never>?
@@ -101,14 +200,35 @@ public final class LatticeMacMake: ObservableObject {
 
     public init() {}
 
-    func isMaking(_ id: UUID) -> Bool { projectID == id && (shown || checking) }
+    func isMaking(_ id: UUID) -> Bool { projectID == id && going }
     var expectedS: Double? { path.flatMap { lastSeconds[$0] } }
+    /// ★ notes25: the card's title (the print file alone when the lattice on screen is print-accurate already).
+    var title: String { fileOnly ? LatticeMacMakeCopy.fileTitle : LatticeMacMakeCopy.title }
 
-    /// His press: the modal up, the run to be sent.
-    func begin(project id: UUID, path: String?, cancel: @escaping () -> Void, now: Date = Date()) {
+    /// ★ notes25: this card carries `run` (RunScreen draws neither its progress card nor its pill for it).
+    public func covers(_ run: RunModel) -> Bool { going && self.run === run }
+
+    /// His press: the modal up, the run to be sent. ★ notes25: `run` — the project's run the chain goes on (watched, so the card
+    /// goes the moment it ends); `fileOnly` — the print-accurate lattice is on screen already (A3).
+    /// ★ notes25 (A5): `onMac` false — made on this iPad (a cell lattice with no Mac): its first step is the file, never "Waiting
+    /// for your Mac".
+    func begin(project id: UUID, path: String?, run: RunModel? = nil, fileOnly: Bool = false, onMac: Bool = true,
+               cancel: @escaping () -> Void, now: Date = Date()) {
         events?.cancel(); events = nil
         projectID = id; self.path = path; cancelAction = cancel
-        started = now; stage = LatticeMacMakeCopy.waiting; checking = false; shown = true
+        started = now; stage = onMac ? LatticeMacMakeCopy.waiting : LatticeMacMakeCopy.makingFile; checking = false
+        self.fileOnly = fileOnly
+        inBackground = false; runOver = false; runSeen = false
+        LatticeFileSpot.shared.clear()   // ★ notes25: a new press: the last refusal's spot goes
+        SettingToChange.shared.ask = nil   // ... and the field it asked to change
+        self.run = run
+        runWatch = run?.$phase.sink { [weak self] ph in   // (the new phase, as it is set)
+            MainActor.assumeIsolated {
+                guard let self, self.going else { return }
+                if ph == .running { self.runSeen = true } else if self.runSeen { self.runOver = true }
+            }
+        }
+        going = true
     }
 
     /// A job was sent to the Mac: its steps are read from the worker's event stream.
@@ -117,6 +237,7 @@ public final class LatticeMacMake: ObservableObject {
     }
 
     private func follow(_ url: URL) {
+        jobURL = url
         events?.cancel()
         events = Task { [weak self] in
             let events = url.appendingPathComponent("events")
@@ -134,27 +255,36 @@ public final class LatticeMacMake: ObservableObject {
         }
     }
 
-    private func said(_ words: String) {
-        guard shown else { return }
-        stage = words
+    /// The Mac's step said (★ notes25: kept while the card is in the background too, so it comes back saying where it is).
+    func said(_ words: String) {
+        guard going else { return }
+        stage = checking && words != LatticeMacMakeCopy.checking ? stage : words
     }
 
     /// The file arrived from the Mac: drawing it.
-    func fileArrived() { if shown { stage = LatticeMacMakeCopy.drawing } }
+    func fileArrived() { if going { stage = LatticeMacMakeCopy.drawing } }
 
-    /// The file is drawn: the modal closes; `checkFollows` (a Structural part) keeps the button on "Checking its strength".
+    /// The file is drawn. ★ notes25: the card STAYS (one card for the whole chain); `checkFollows` (a Structural part): it and
+    /// the button say "Checking its strength" until the run lands.
     func drawn(checkFollows: Bool, now: Date = Date()) {
-        guard shown else { return }
+        guard going else { return }
         if let s = started, let path { lastSeconds[path] = now.timeIntervalSince(s) }
-        shown = false
         checking = checkFollows
-        if !checkFollows { events?.cancel(); events = nil }
+        if checkFollows { stage = LatticeMacMakeCopy.checking }
     }
+
+    /// ★ notes25: "Run in the Background" — the card goes; the run goes on, the Lattice button showing it.
+    func sendToBackground() { if going { inBackground = true } }
+
+    /// ★ notes25: the Lattice button's tap while the chain goes — the same card back.
+    func reopen() { if going, !runOver { inBackground = false } }
 
     /// The run ended (landed, failed or cancelled): everything goes back.
     func ended() {
-        events?.cancel(); events = nil
-        shown = false; checking = false; cancelAction = nil; projectID = nil; request = nil
+        events?.cancel(); events = nil; jobURL = nil
+        runWatch?.cancel(); runWatch = nil; run = nil
+        going = false; inBackground = false; runOver = false; runSeen = false
+        checking = false; fileOnly = false; cancelAction = nil; projectID = nil; request = nil
     }
 
     /// His Cancel on the card.
@@ -165,10 +295,11 @@ public final class LatticeMacMake: ObservableObject {
     }
 
     /// Tests only.
-    func reset() { ended(); lastSeconds = [:]; started = nil; stage = LatticeMacMakeCopy.waiting }
+    func reset() { ended(); workspaceUp = true; stayAwake(); lastSeconds = [:]; started = nil; stage = LatticeMacMakeCopy.waiting }
 }
 
 /// The card while the Mac makes the print-accurate lattice: centred over everything, the vines growing, the step, the time.
+/// ★ notes25: the chain's ONE card, from his press to the run's end — "Run in the Background" and "Cancel".
 struct LatticeMacMakeModal: View {
     @ObservedObject var make = LatticeMacMake.shared
 
@@ -181,22 +312,34 @@ struct LatticeMacMakeModal: View {
                         LatticeMacMakeVines()
                             .frame(width: 220, height: 150)
                             .accessibilityHidden(true)
-                        Text(LatticeMacMakeCopy.title).dsStyle(DS.TypeScale.title).foregroundStyle(DS.Color.textPrimary.color)
+                        Text(make.title).dsStyle(DS.TypeScale.title).foregroundStyle(DS.Color.textPrimary.color)
                             .multilineTextAlignment(.center)
                             .accessibilityIdentifier("mac-make-title")
                         Text(make.stage).dsStyle(DS.TypeScale.body).foregroundStyle(DS.Color.textSecondary.color)
                             .multilineTextAlignment(.center)
                             .accessibilityIdentifier("mac-make-stage")
+                        // ★ notes25: no real fraction to show — a moving bar with the time, never a made-up share
+                        LatticeMacMakeBar().frame(width: 220, height: 4).accessibilityHidden(true)
                         TimelineView(.periodic(from: .now, by: 1)) { ctx in
                             Text(timeLine(ctx.date)).dsStyle(DS.TypeScale.body).monospacedDigit()
                                 .foregroundStyle(DS.Color.textSecondary.color)
                                 .accessibilityIdentifier("mac-make-time")
                         }
-                        PillButton(LatticeMacMakeCopy.cancel, style: .secondary) { make.cancel() }
-                            .accessibilityIdentifier("mac-make-cancel")
+                        // ★ notes25 (his Img 1): "Run in the Background" and "Cancel", side by side
+                        HStack(spacing: DS.Space.m) {
+                            PillButton(LatticeMacMakeCopy.background, style: .secondary) { make.sendToBackground() }
+                                .fixedSize()
+                                .background(CornerPairStyle.publish("macMakeBackground"))
+                                .accessibilityIdentifier("mac-make-background")
+                            PillButton(LatticeMacMakeCopy.cancel, style: .secondary) { make.cancel() }
+                                .fixedSize()
+                                .background(CornerPairStyle.publish("macMakeCancel"))
+                                .accessibilityIdentifier("mac-make-cancel")
+                        }
+                        .padding(.top, DS.Space.xs)
                     }
                     .padding(DS.Space.xl2)
-                    .frame(maxWidth: 420)
+                    .frame(maxWidth: 480)
                 }
                 .padding(DS.Space.xl)
                 .background(CornerPairStyle.publish("macMakeModal"))
@@ -210,6 +353,26 @@ struct LatticeMacMakeModal: View {
         let gone = make.started.map { now.timeIntervalSince($0) } ?? 0
         guard let e = make.expectedS, e > gone else { return LatticeMacMakeCopy.clock(gone) }
         return LatticeMacMakeCopy.clock(gone) + " of about " + LatticeMacMakeCopy.clock(e)
+    }
+}
+
+/// ★ notes25: the card's moving bar — a short light sweeping along a track, for as long as the work goes (it says it is
+/// going, never how far: the Mac gives no true share of its steps).
+struct LatticeMacMakeBar: View {
+    var body: some View {
+        TimelineView(.animation) { ctx in
+            Canvas { g, size in
+                let t = ctx.date.timeIntervalSinceReferenceDate
+                let track = Path(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: size.height / 2)
+                g.fill(track, with: .color(DS.Color.textPrimary.opacity(0.12).color))
+                let w = size.width * 0.3
+                let x = (t.truncatingRemainder(dividingBy: 1.6) / 1.6) * (size.width + w) - w
+                let lit = CGRect(x: x, y: 0, width: w, height: size.height).intersection(CGRect(origin: .zero, size: size))
+                if !lit.isNull, lit.width > 0 {
+                    g.fill(Path(roundedRect: lit, cornerRadius: size.height / 2), with: .color(DS.Color.accent.color))
+                }
+            }
+        }
     }
 }
 

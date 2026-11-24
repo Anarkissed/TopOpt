@@ -183,17 +183,19 @@ final class ResultsRedesignHostedTests: XCTestCase {
             let bar = try frame(h, "resultsMotionBar"), views = try frame(h, "resultsViewModes")
             XCTAssertGreaterThan(bar.minY, views.maxY - 1, "★ \(size): right under the view buttons")
             XCTAssertTrue(rm.flexOn)
-            let p0 = rm.flexPhase
+            // ★ RE-PINNED (notes25, C2: Bend runs the LOAD on its own clock, ResultsLoadMotion — was the flex phase)
+            let p0 = rm.loadMotion.clock
             ui.pump(0.6)
-            XCTAssertNotEqual(rm.flexPhase, p0, "★ \(size): the part BENDS on its own")
+            XCTAssertNotEqual(rm.loadMotion.clock, p0, "★ \(size): the part BENDS on its own")
             let play = try frame(h, "resultsMotionPlay")
             ui.click(h, CGPoint(x: play.midX, y: play.midY))
-            let paused = rm.flexPhase
+            let paused = rm.loadMotion.clock
             ui.pump(0.6)
-            XCTAssertEqual(rm.flexPhase, paused, accuracy: 1e-9, "★ \(size): Pause holds it")
+            XCTAssertEqual(rm.loadMotion.clock, paused, accuracy: 1e-9, "★ \(size): Pause holds it")
             let slider = try frame(h, "resultsMotionSlider")
             ui.click(h, CGPoint(x: slider.minX + slider.width * 0.75, y: slider.midY))
-            XCTAssertGreaterThan(rm.flexPhase, 0.55, "★ \(size): the slider moves it by hand (\(rm.flexPhase))")
+            XCTAssertGreaterThan(rm.loadMotion.position(.bend), 0.55,
+                                 "★ \(size): the slider moves it by hand (\(rm.loadMotion.position(.bend)))")
             try ui.picture(h, "results_bend_\(Int(size.width)).png")
 
             // ★ 10-28: Load paths is light travelling through the part (no arrows): it builds, then sweeps on its own
@@ -208,9 +210,11 @@ final class ResultsRedesignHostedTests: XCTestCase {
 
             let brk = try frame(h, "resultsView-Break")
             ui.click(h, CGPoint(x: brk.midX, y: brk.midY))
-            XCTAssertTrue(rm.pushActive)
+            // ★ RE-PINNED (notes25, C2/C3: Break runs the load from 1.00× up to where it gives way — was the push factor)
+            XCTAssertNotNil(rm.motionState(.breakIt, reduceMotion: false))
             ui.pump(1.2)
-            XCTAssertGreaterThan(rm.pushFactor, 1.05, "★ \(size): the load climbs toward the one that breaks it")
+            XCTAssertGreaterThan(rm.motionState(.breakIt, reduceMotion: false)?.frame.load ?? 0, 1.05,
+                                 "★ \(size): the load climbs toward the one where it gives way")
             try ui.picture(h, "results_break_\(Int(size.width)).png")
         }
     }
@@ -272,13 +276,23 @@ final class ResultsRedesignHostedTests: XCTestCase {
         ui.click(h, CGPoint(x: key.midX, y: key.midY))
         XCTAssertNotNil(h.frames.all["resultsStressKey"], "★ the key, open, while the part bends")
         _ = try frame(h, "resultsExaggeration")
-        rm.setFlexExaggeration(150); ui.pump(0.5)
-        XCTAssertEqual(rm.flexExaggeration, 150)
+        // ★ RE-PINNED (notes25, C1: the slider is scaled to the part — 1× to where the largest movement reaches 8 % of its longest
+        // side; was a fixed 10…300×)
+        let range = try XCTUnwrap(rm.motionState(.bend, reduceMotion: false)).range
+        rm.loadMotion.pickExaggeration(range.value(at: 0.5), selection: rm.motionSelection); ui.pump(0.5)
+        XCTAssertEqual(rm.motionState(.bend, reduceMotion: false)?.exaggeration ?? 0, range.value(at: 0.5), accuracy: 1e-9)
         try ui.picture(h, "results_bend_key.png")
         let brk = try frame(h, "resultsView-Break")
         ui.click(h, CGPoint(x: brk.midX, y: brk.midY))
         XCTAssertNotNil(h.frames.all["resultsStressKey"], "★ Break: the key stays")
-        _ = try frame(h, "resultsExaggeration")
+        // ★ RE-PINNED (notes25 C1: the slider's top is where the largest movement reaches 8 % of the part's longest side, and a
+        // part already past that at its true size shows only the true size). This 1 mm triangle gives way at 52× its load, where it
+        // moves 1.2 mm: Break shows it at true size, with no slider; the readout says so.
+        let s = try XCTUnwrap(rm.motionState(.breakIt, reduceMotion: false))
+        XCTAssertFalse(s.range.adjustable, "premise: past the cap at Break's top (\(s.range.high))")
+        XCTAssertNil(h.frames.all["resultsExaggeration"], "no slider with nothing to choose")
+        XCTAssertEqual(s.exaggeration, 1)
+        _ = try frame(h, "resultsMotionBar")
         // Load paths: X-ray on, Stress as it was (on)
         let flow = try frame(h, "resultsView-Load paths")
         ui.click(h, CGPoint(x: flow.midX, y: flow.midY))

@@ -286,7 +286,9 @@ final class VariantEntryGatingTests: XCTestCase {
         let ws = try String(contentsOf: sourceURL("WorkspacePlaceholder.swift"),
                             encoding: .utf8)
         XCTAssertFalse(ws.contains("smoothEntry:"), "★ RE-PINNED (UI-Notes B4, plan.md §B4: \"The Smooth page is deleted\"; core finishes every result, E1)")
-        XCTAssertTrue(ws.contains("latticeEntry: { latticeEntry($0) }"))
+        // ★ RE-PINNED (notes25: each stage's Results shows its own result — the entry's facts are the shown result's: the Lattice
+        // stage's a print file's, Topology's a Topology run's)
+        XCTAssertTrue(ws.contains("latticeEntry: { stage == .lattice ? latticeEntry($0, lattice: true) : latticeEntry($0) }"))
     }
 
     // MARK: - failure (B) · the app must not invite a configuration it cannot run

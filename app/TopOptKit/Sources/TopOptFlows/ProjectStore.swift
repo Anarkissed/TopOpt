@@ -217,6 +217,13 @@ public struct ProjectStore {
         try? Data(contentsOf: resultsURL(id: id))
     }
 
+    /// ★ notes25 (his iPad notes 11-23: Topology's results and the Lattice stage's "in the same version"): the version's
+    /// result of the OTHER stage, beside results.plist (which stays the last run's, as the Library reads it) — written and
+    /// removed with it (`RunModel.otherOutcome`).
+    public func otherResultsURL(id: UUID) -> URL {
+        projectDir(id).appendingPathComponent("results_other_stage.plist")
+    }
+
     /// Whether a results blob EXISTS for this project — asked without reading it
     /// (the blob carries every variant's mesh and fields, so a presence question
     /// must not cost a decode). `AppModel.persist` uses it so the snapshot's

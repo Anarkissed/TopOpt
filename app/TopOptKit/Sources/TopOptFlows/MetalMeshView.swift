@@ -504,13 +504,32 @@ struct Uniforms { float4x4 mvp; float4x4 normalMatrix; float4 flex;
 // (exaggeration·amplitude). At scale 0 the buffer contributes nothing, so the
 // static workspace draw is byte-identical — this is the M7.viz.3 flex animation,
 // a pure vertex displacement of the already-solved solution (no re-simulation).
+// ★ notes25 (Bend / Break): the Results colour ramp (ResultsModel.stressColor's five stops, the same interpolation), red at 1.
+static float3 load_ramp(float f) {
+    const float3 s0 = float3(28.0, 60.0, 170.0) / 255.0;
+    const float3 s1 = float3(0.0, 170.0, 220.0) / 255.0;
+    const float3 s2 = float3(60.0, 190.0, 110.0) / 255.0;
+    const float3 s3 = float3(250.0, 220.0, 60.0) / 255.0;
+    const float3 s4 = float3(255.0, 70.0, 50.0) / 255.0;
+    float x = clamp(f, 0.0, 1.0) * 4.0;
+    int i = min(3, int(x));
+    float t = x - float(i);
+    float3 a = i == 0 ? s0 : (i == 1 ? s1 : (i == 2 ? s2 : s3));
+    float3 b = i == 0 ? s1 : (i == 1 ? s2 : (i == 2 ? s3 : s4));
+    return mix(a, b, t);
+}
+
 vertex VOut viewer_vertex(VIn in [[stage_in]], constant Uniforms& u [[buffer(1)]],
                           constant packed_float3* disp [[buffer(3)]], uint vid [[vertex_id]]) {
     VOut o;
     float3 p = in.position + u.flex.x * float3(disp[vid]);
     o.position = u.mvp * float4(p, 1.0);
     o.vnormal  = (u.normalMatrix * float4(in.normal, 0.0)).xyz;
-    o.tint = in.tint;
+    // ★ notes25: a LOAD RAMP vertex (alpha < 0): r = its share of its limit at your load, g = 1 where that is known. Its colour is
+    // made HERE at this frame's load (flex.y), so Bend / Break recolour without a re-upload; unknown = no tint (the clay).
+    float4 tn = in.tint;
+    if (tn.a < -0.5) { tn = tn.g > 0.5 ? float4(load_ramp(tn.r * u.flex.y), 1.0) : float4(0.0); }
+    o.tint = tn;
     o.mheight = in.position.y;   // model-space height (rest), for the M7.8 reveal scrub
     o.mpos = in.position;        // §6: rest model position, for the cut's half-space test
     o.mnormal = in.normal;       // the shell's declared-face test (model space, rest)
@@ -3232,6 +3251,46 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// M7.viz.3 flex: the current displacement scale (exaggeration·amplitude); 0 rests.
     func setFlexScale(_ s: Float) { flexScale = s }
 
+    /// ★ notes25 (Bend / Break): the load the LOAD RAMP's colours are made at this frame (the viewer shader's `flex.y`).
+    var rampLoad: Float = 0
+
+    /// ★ notes25: upload the load ramp — one value per flat vertex (its share of its limit at your load; NaN = not known) as
+    /// sentinel tints (alpha −1) the viewer shader colours at `rampLoad`. Once per selection; each frame is the uniform alone.
+    func setLoadRamp(_ values: [Float]) {
+        guard vertexDrawCount > 0, values.count == vertexDrawCount else { return }
+        tintsAreState = false         // §4: a DATA ramp — its hue is the datum, hands off
+        var tints = [Float](repeating: 0, count: vertexDrawCount * 8)
+        for v in 0..<vertexDrawCount {
+            let x = values[v]
+            tints[v * 8] = x.isFinite ? x : 0
+            tints[v * 8 + 1] = x.isFinite ? 1 : 0
+            tints[v * 8 + 3] = -1
+        }
+        tintBuffer = tints.withUnsafeBytes {
+            device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
+        }
+    }
+
+    /// ★ notes25 (Break gives way): rewrite a few flat vertices' displacements in place (xyz per index), so the part gives way
+    /// where it gives first without re-uploading the whole buffer.
+    func patchFlex(indices: [Int32], values: [Float]) {
+        guard let buf = flexBuffer, values.count == indices.count * 3 else { return }
+        let n = buf.length / (MemoryLayout<Float>.stride * 3)
+        let dst = buf.contents().bindMemory(to: Float.self, capacity: n * 3)
+        var lo = Int.max, hi = -1
+        for (k, i32) in indices.enumerated() {
+            let i = Int(i32)
+            guard i >= 0, i < n else { continue }
+            dst[i * 3] = values[k * 3]; dst[i * 3 + 1] = values[k * 3 + 1]; dst[i * 3 + 2] = values[k * 3 + 2]
+            lo = Swift.min(lo, i); hi = Swift.max(hi, i)
+        }
+        #if os(macOS)
+        if hi >= lo, buf.storageMode == .managed {
+            buf.didModifyRange(lo * 12 ..< (hi + 1) * 12)
+        }
+        #endif
+    }
+
     /// M7.viz.4 load-path: upload the line segments (flattened `[x,y,z,r,g,b,a]` per
     /// vertex, two vertices per glyph) to draw over the variant. A malformed buffer
     /// (not a multiple of the stride-7 layout) is ignored. Empty clears the overlay.
@@ -3968,7 +4027,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             SIMD4<Float>(0, 0, 0, 1)))
         let e = camera.eye
         return ViewerUniforms(mvp: mvp, normalMatrix: normal4,
-                              flex: SIMD4<Float>(flexScale, 0, 0, 0),
+                              flex: SIMD4<Float>(flexScale, rampLoad, 0, 0),   // ★ notes25: .y = the load ramp's load
                               worldNormalMatrix: worldNormal4,
                               model: model,
                               modelView: vm,
@@ -6096,6 +6155,10 @@ struct MeshViewInputs {
     /// them. nil = none.
     var spotFaces: [Float]? = nil
     var spotKey: Int = 0
+    /// ★ notes25 (Bend / Break): the colours made on the GPU from each vertex's share of its limit, at `load` (nil: `stressTints`).
+    var loadRamp: LoadRamp? = nil
+    /// ★ notes25 (Break gives way): the few vertices around where it gives first, rewritten in place each frame.
+    var flexPatch: FlexPatch? = nil
 }
 
 /// ★ THE LATTICE AS A LAYER OF THE MESH VIEW, NOT A VIEW BESIDE IT.
@@ -6585,6 +6648,16 @@ extension MetalMeshView {
         private var appliedReveal: Float = 1
         /// M7.viz.3: whether flex displacements are uploaded, and the last scale.
         private var appliedFlex = false
+        /// ★ notes25: the base displacements of the patched vertices (what a patch puts back when it goes).
+        static func patchBase(_ indices: [Int32], _ base: [Float]) -> [Float] {
+            var out = [Float](); out.reserveCapacity(indices.count * 3)
+            for i32 in indices {
+                let i = Int(i32)
+                if i >= 0, i * 3 + 2 < base.count { out += [base[i * 3], base[i * 3 + 1], base[i * 3 + 2]] } else { out += [0, 0, 0] }
+            }
+            return out
+        }
+
         /// ★ The nearest triangle of the BENT surface (rest + scale·disp per flat vertex) the ray hits, mapped back to the
         /// same barycentric point on the rest surface — or nil on a miss.
         static func restPointOnBentSurface(_ flat: FlatMesh, disp: [Float], scale: Float,
@@ -6611,6 +6684,10 @@ extension MetalMeshView {
             return r0 * (1 - b.u - b.v) + r1 * b.u + r2 * b.v
         }
 
+        /// ★ notes25: the load ramp uploaded (its key), and the patched vertices (restored from the base when the patch goes).
+        private var appliedRampKey: Int?
+        private var appliedPatchKey: Int?
+        private var appliedPatchIndices: [Int32] = []
         private var appliedFlexArray: [Float]?   // Flexible (PR #362): the dent uploaded — a new dent on the same mesh re-uploads (Array == is O(1) on the same storage)
         private var appliedFlexScale: Float = 0
         /// M7.viz.4: whether load-path segments are uploaded, and the last flow phase.
@@ -6820,7 +6897,24 @@ extension MetalMeshView {
                 dirty = true
             }
 
-            if let stress = inputs.stressTints {
+            // ★ notes25: the load ramp owns the tint buffer while it is on (one upload, then the load uniform each frame); when it
+            // ends, the other tints upload afresh
+            if let ramp = inputs.loadRamp {
+                if dirty || ramp.key != appliedRampKey {
+                    appliedRampKey = ramp.key
+                    appliedStress = false; appliedStressTints = nil; appliedTint = nil; appliedVertexTint = nil
+                    renderer.setLoadRamp(ramp.values)
+                    dirty = true
+                }
+                if ramp.load != renderer.rampLoad { renderer.rampLoad = ramp.load; dirty = true }
+            } else if appliedRampKey != nil {
+                appliedRampKey = nil
+                renderer.rampLoad = 0
+                appliedStress = false; appliedStressTints = nil; appliedTint = nil; appliedVertexTint = nil
+                dirty = true
+            }
+            if inputs.loadRamp != nil {
+            } else if let stress = inputs.stressTints {
                 // THE TINTS THEMSELVES ARE A TRIGGER (task 2026-08-05, bar D4).
                 //
                 // The conditions below could all be false while the tint array
@@ -6921,11 +7015,13 @@ extension MetalMeshView {
             // M7.viz.3 flex: upload the per-vertex displacement vectors on mesh change
             // / when they first arrive (they only depend on the mesh + field, not the
             // phase); the scale is a cheap per-frame uniform that drives the loop.
+            var flexUploaded = false
             if let flex = inputs.flexDisplacements {
                 if dirty || !appliedFlex || flex != appliedFlexArray {
                     appliedFlex = true
                     appliedFlexArray = flex
                     renderer.setFlexDisplacements(flex)
+                    flexUploaded = true
                     dirty = true
                 }
             } else if appliedFlex {
@@ -6937,6 +7033,24 @@ extension MetalMeshView {
             if inputs.flexScale != appliedFlexScale {
                 appliedFlexScale = inputs.flexScale
                 renderer.setFlexScale(inputs.flexScale)
+                dirty = true
+            }
+            // ★ notes25 (Break gives way): a few vertices rewritten in place; restored from the base when the patch goes
+            if let patch = inputs.flexPatch, appliedFlex {
+                if flexUploaded || patch.key != appliedPatchKey {
+                    if !flexUploaded, let base = appliedFlexArray, !appliedPatchIndices.isEmpty,
+                       appliedPatchIndices != patch.indices {
+                        renderer.patchFlex(indices: appliedPatchIndices, values: Self.patchBase(appliedPatchIndices, base))
+                    }
+                    renderer.patchFlex(indices: patch.indices, values: patch.values)
+                    appliedPatchKey = patch.key; appliedPatchIndices = patch.indices
+                    dirty = true
+                }
+            } else if appliedPatchKey != nil {
+                if appliedFlex, !flexUploaded, let base = appliedFlexArray {
+                    renderer.patchFlex(indices: appliedPatchIndices, values: Self.patchBase(appliedPatchIndices, base))
+                }
+                appliedPatchKey = nil; appliedPatchIndices = []
                 dirty = true
             }
 
