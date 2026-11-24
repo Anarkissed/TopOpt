@@ -157,7 +157,7 @@ std::size_t solidify_thin_cuts(Layout& layout, const Domain& domain, int threads
     const Domain::Probe probe = domain.probe();
     for (std::size_t ci = next.fetch_add(1); ci < total && !domain.stop_asked(); ci = next.fetch_add(1)) {
       const Cell& c = layout.cells[ci];
-      if (!c.cut || !(c.strut > 0.0)) continue;
+      if (!c.cut || !(c.strut > 0.0) || c.absorbed) continue;   // K8: a sliver another cell's struts reach across
       const Frame& f = layout.frames[static_cast<std::size_t>(c.frame)];
       if (faces_air(probe, f, c)) continue;   // the lattice runs out to an open surface: left open
       // Thin along an axis, and against solid along it: on more than half the lines that found a run, an end of the

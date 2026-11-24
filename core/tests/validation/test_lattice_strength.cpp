@@ -809,6 +809,43 @@ int main() {
       CHECK(thick >= 1.0 && has(ajson, "\"braced\": ") && widest > 0.9 && past >= 0.0 && g != std::string::npos &&
             num_after(ajson, "thickest_setting_mm", g) == 1.8 && num_after(ajson, "past_thickest", g) == past);
       CHECK(ajson.find("\"thickened_distinct\"") < ajson.find("\"rounds\": ["));   // top-level, before the rounds
+      // notes27: per group too, its struts thickened and its widest strut (one group, the whole part: the same as the top)
+      CHECK(g != std::string::npos && num_after(ajson, "thickened_distinct", g) == thick &&
+            num_after(ajson, "widest_mm", g) == widest && !has(ajson.substr(g, 200), "\"name\""));
+    }
+    {   // notes27 (builder F's extension of bars.bin, the struts the strengthening changed): word 2 is 1 and one byte per
+        // bar follows the records (bit 0 thickened by the strengthening, bit 1 a brace it added) once a round has added;
+        // round 0's lattice (nothing added yet) has word 2 = 0 and nothing after the records.
+      const auto bars_bin = [&](const std::string& p, std::uint32_t& n, std::uint32_t& word2, std::size_t& marked,
+                                std::size_t& thicker, std::size_t& braced, bool& sized) {
+        const std::string bb = slurp(p);
+        std::uint32_t head[2] = {0, 0};
+        if (bb.size() >= 16) std::memcpy(head, bb.data() + 8, 8);
+        n = head[0];
+        word2 = head[1];
+        const std::size_t recs = 16 + 28 * static_cast<std::size_t>(n);
+        sized = bb.size() == recs + (word2 == 1 ? n : 0);
+        marked = thicker = braced = 0;
+        bool only_known = true;
+        if (word2 == 1 && sized)
+          for (std::size_t i = 0; i < n; ++i) {
+            const unsigned char f = static_cast<unsigned char>(bb[recs + i]);
+            marked += f != 0;
+            thicker += (f & 1) != 0;
+            braced += (f & 2) != 0;
+            only_known = only_known && f <= 3;
+          }
+        sized = sized && only_known;
+      };
+      std::uint32_t n0 = 0, w0 = 9, n1 = 0, w1 = 9;
+      std::size_t m0 = 0, t0 = 0, b0 = 0, m1 = 0, t1 = 0, b1 = 0;
+      bool s0 = false, s1 = false;
+      bars_bin(kDir + "/additive/r0/bars.bin", n0, w0, m0, t0, b0, s0);
+      bars_bin(kDir + "/additive/r1/bars.bin", n1, w1, m1, t1, b1, s1);
+      std::printf("[additive] bars.bin r0: %u bars, word 2 = %u; r1: %u bars, word 2 = %u, %zu marked (%zu thickened, %zu "
+                  "braces)\n", n0, w0, n1, w1, m1, t1, b1);
+      CHECK(s0 && w0 == 0 && n0 > 0);   // RED CONTROL: nothing strengthened, nothing after the records
+      CHECK(s1 && w1 == 1 && n1 > 0 && m1 > 0 && t1 > 0 && m1 < n1);
     }
     // OS11 (the order): a strut already at the limit in round 0 is widened past it only from round 1.
     CHECK(has(ajson, "\"added\": {\"strengthened\": \"r1/strengthened.json\"") && most_after(ajson, "bars_widened") > 0);

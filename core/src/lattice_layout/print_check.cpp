@@ -611,46 +611,31 @@ namespace {
 //   - material the app put in: material of the file two pixels or more from the carved solid's own cross-section there
 //     (a kept bar, a weave's tube, a post: what fills the open space), or
 //   - a finish the layout added: material of the carved solid at least 0.3 mm inside its cross-section (clear of the
-//     open space's 0.25 mm reading at its edge) where the domain says rim (S1), cover (S9) or Organic bed floor;
-// and the app took away what held it: the part's own material runs on under it, a layer and 1 mm more down (inside the
-// part by more than 0.05 mm there). Material the layout only left in place (the part's walls, a Protect skin, what no
-// region asked for, a wall too thin, lattice space no cell holds) is the part's own; so is the app's material at the
-// part's own underside (within a layer and 1 mm of it: the carving's 0.25 mm reading and the stubs it drops lift the
-// file's underside off the part's by up to that), which the slicer holds as it holds the part's.
+//     open space's 0.25 mm reading at its edge) where the domain says rim (S1), cover (S9) or Organic bed floor.
+// Material the layout only left in place (the part's walls, a Protect skin, what no region asked for, a wall too thin,
+// lattice space no cell holds) is the part's own. (K6: the allowance for the app's material at the part's own underside
+// is gone: the struts a thin bottom row of cells kept, cut at the bed, hold what floated there.)
 class AppMade {
  public:
-  AppMade(const PartMeasure& part, const Domain& domain, const Carved& carved, double layer_mm)
-      : part_(part.probe()), probe_(domain.probe()), carved_(&carved), layer_(layer_mm) {}
-  // `underside`: the app's material at the part's own underside is the part's (a cell lattice); false, any of the app's
-  // material is the app's (a weave: Organic changes only where a finding lay on the part alone).
-  bool any(const LayerReport& rep, const std::vector<std::int32_t>& pixels, double z, bool underside = true) {
+  AppMade(const Domain& domain, const Carved& carved) : probe_(domain.probe()), carved_(&carved) {}
+  bool any(const LayerReport& rep, const std::vector<std::int32_t>& pixels, double z) {
     if (pixels.empty() || rep.grid_w <= 0) return true;   // nothing to read it by: judged as before
     const Grid g = grid_of(rep);
     const Section& solid = solid_at(g, z);
-    const double under = z - layer_ - kUnderMM;
-    const auto held_by_part = [&](double x, double y) {   // the part's material runs on under (x, y)
-      if (!underside) return true;
-      const Vec3 q{x, y, under};
-      return part_.inside(q) && part_.depth_up_to(q, kDeep) >= kDeep;
-    };
     for (const std::int32_t i : pixels) {   // material the app put in (cheap first)
       const int c = i % g.W, r = i / g.W;
-      if (!any_in(solid, g, r - 2, r + 2, c - 2, c + 2) && held_by_part(g.x0 + (c + 0.5) * g.px, g.y0 + (r + 0.5) * g.px))
-        return true;
+      if (!any_in(solid, g, r - 2, r + 2, c - 2, c + 2)) return true;
     }
     for (const std::int32_t i : pixels) {   // then a finish the layout added
       const int c = i % g.W, r = i / g.W;
       if (!all_in(solid, g, r - kEdge, r + kEdge, c - kEdge, c + kEdge)) continue;
-      const double x = g.x0 + (c + 0.5) * g.px, y = g.y0 + (r + 0.5) * g.px;
-      const Why w = probe_.where({x, y, z}).why;
-      if ((w == Why::Rim || w == Why::Cover || w == Why::BedFloor) && held_by_part(x, y)) return true;
+      const Why w = probe_.where({g.x0 + (c + 0.5) * g.px, g.y0 + (r + 0.5) * g.px, z}).why;
+      if (w == Why::Rim || w == Why::Cover || w == Why::BedFloor) return true;
     }
     return false;
   }
 
  private:
-  static constexpr double kDeep = 0.05;     // mm: deeper than the pixel the file's surface is read to
-  static constexpr double kUnderMM = 1.0;   // mm under the layer below: the part's own underside, read with its lift
   static constexpr int kEdge = 6;   // pixels: 0.3 mm at 0.05 mm, past the open space's 0.25 mm reading at its edge
   static Grid grid_of(const LayerReport& rep) {
     Grid g;
@@ -697,10 +682,8 @@ class AppMade {
     std::vector<std::vector<int>> rows(static_cast<std::size_t>(g.H));
     return sections_.emplace(z, cut(solid_, through, z, g, rows)).first->second;
   }
-  PartMeasure::Probe part_;
   Domain::Probe probe_;
   const Carved* carved_;
-  double layer_;
   bool made_ = false;
   TriangleMesh solid_;
   std::vector<double> zlo_, zhi_;
@@ -751,7 +734,7 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
     for (const Bar& x : bars.bars)
       if (std::find(weave_regions.begin(), weave_regions.end(), x.region) == weave_regions.end()) cube_bars.bars.push_back(x);
   LayerCache layer_cache;   // SPEED 11-22: each pass judges only the layers its changes touched
-  AppMade app_made(part, domain, carved, 2.0 * half_layer);   // K1: what the app made, read once per layer asked
+  AppMade app_made(domain, carved);   // K1: what the app made, read once per layer asked
   for (int pass = 1; pass <= most; ++pass) {
     rep.passes = pass;
     rep.part_overhang_at.clear();   // P3: this pass's (the last pass's are the file's)
@@ -841,12 +824,12 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
     // K1 (his rule, 2026-11-24): with only_app_made, a finding is the part's own when its island holds no pixel the app
     // made (AppMade); `far_own` (F1 / OS17, read at the far point) then only counts how the two readings differ.
     // Without, `far_own` decides, as before.
-    const auto take_own = [&](const auto& far_own, bool underside) {
+    const auto take_own = [&](const auto& far_own) {
       const std::size_t before = rep.layers.mid_air.size() + rep.layers.one_ended.size() + rep.layers.long_bridges.size();
       const auto own = [&](double x, double y, double z, const std::vector<std::int32_t>& pixels) {
         const bool far = far_own(x, y, z);
         if (!spec.only_app_made || far) return far;   // what F1 / OS17 left to the slicer stays the slicer's
-        const bool mine = !app_made.any(rep.layers, pixels, z, underside);
+        const bool mine = !app_made.any(rep.layers, pixels, z);
         rep.own_by_k1 += mine && !far;
         return mine;
       };
@@ -924,7 +907,7 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
           const WeaveFinding f = findings.at({x, y, z - half_layer});
           return f.reached == 0 && !f.on_weave && probe.where({x, y, z - layer}).why == Why::Outside;
         };
-        take_own(far_own, false);   // the weave: only an island with none of the app's material is the part's own
+        take_own(far_own);
       }
       // A speck held by nothing below is also seen as an overhang held at one place: the same island, in the same
       // layer within half a line width of the speck's middle, is not a finding either.
@@ -962,7 +945,7 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
       const auto far_own = [&](double x, double y, double z) {
         return exact.depth({x, y, z - layer}) < 0.0 && !reaches_bar(x, y, z);
       };
-      take_own(far_own, true);   // K1: his rule on the finding's island with only_app_made (F1 at its far point without)
+      take_own(far_own);   // K1: his rule on the finding's island with only_app_made (F1 at its far point without)
     }
     // OS1 B (his ruling R2): a finding on a shallow run's rounded end (within its half width + 0.35 mm of its place in
     // plan, from a layer under its underside to its top) is not answered by leaving bars out: that end is made flat

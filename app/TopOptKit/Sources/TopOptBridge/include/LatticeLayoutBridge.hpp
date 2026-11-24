@@ -91,6 +91,8 @@ struct LatticeLayoutSettings {
   std::vector<double> dial_value;
   double strut_width_mm = 0.0;               // > 0: this width everywhere (R11)
   bool allow_quilt = false;                  // R2, G11: the one switch
+  bool cell_search = false;                  // K7: Auto's base cell searched for the fewest slivers at square faces
+  bool stretch_edges = false;                // K8: a sliver left at a square face taken in by the row beside it
   double strength = 0.0;                     // G4, -1 .. 1
   // ── finish ──
   bool bars = true;                          // false: cells and strut widths only

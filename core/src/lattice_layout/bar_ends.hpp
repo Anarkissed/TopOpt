@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 #include "topopt/lattice_layout.hpp"
 
@@ -34,10 +35,14 @@ inline constexpr double kPastEnd = 3.0 * 0.02;   // mm
 // A finished end is tagged by what lies just past it: Surface (outside the part: the end is moved onto the part's own
 // surface along the line), Solid (inside the part and solid by `solid_at`: the bar runs on into it by its own width,
 // S11, never past t = 0 or 1) or Loose (open lattice). Returns false for a stub: a piece (piece.piece) shorter than
-// its own width (S4), which the caller does not keep.
+// its own width (S4), which the caller does not keep. K6: `bed_z` given (a cell lattice), an end cut flat ON the bed (a
+// Surface end within a layer of the part's lowest plane, `bed_z`) is marked (Bar::on_bed), and its piece is kept however
+// short: it stands on the bed and holds what is above it.
+inline constexpr double kBedLayerMM = 0.2;   // mm: a layer
 template <class Held, class At, class Solid>
 bool finish_bar_ends(Bar& piece, const BarLine& line, double t0, double t1, bool cut_a, double out_a, bool cut_b,
-                     double out_b, const Domain::Probe& probe, const Solid& solid_at, Held held, At at) {
+                     double out_b, const Domain::Probe& probe, const Solid& solid_at, Held held, At at,
+                     double bed_z = std::numeric_limits<double>::quiet_NaN()) {
   const Vec3& a = line.a;
   const Vec3& b = line.b;
   const Vec3& ab = line.ab;
@@ -98,8 +103,15 @@ bool finish_bar_ends(Bar& piece, const BarLine& line, double t0, double t1, bool
     piece.end_b = past(t1, kPastEnd);
     if (piece.end_b == Bar::End::Surface) t1 = to_surface(t1, 1.0);
   }
-  if ((t1 - t0) * length < piece.width) {   // S4: a stub shorter than one strut width
-    if (piece.piece) return false;
+  // K6 (his 11-24: "why can't we just extend cells and cut them off where the bed is?"): an end cut flat on the bed
+  // stands there and holds the struts above it (the bottom row of a grid the bed cuts thin).
+  piece.on_bed = 0;
+  if (std::isfinite(bed_z)) {
+    if (piece.end_a == Bar::End::Surface && a.z + ab.z * t0 <= bed_z + kBedLayerMM) piece.on_bed |= Bar::kOnBedA;
+    if (piece.end_b == Bar::End::Surface && a.z + ab.z * t1 <= bed_z + kBedLayerMM) piece.on_bed |= Bar::kOnBedB;
+  }
+  if ((t1 - t0) * length < piece.width) {   // S4: a stub shorter than one strut width, unless it stands on the bed
+    if (piece.piece && !piece.on_bed) return false;
   }
   // S11: where the solid begins the bar runs on into it by its own width.
   if (piece.end_a == Bar::End::Solid) t0 = std::max(0.0, t0 - piece.width / length);

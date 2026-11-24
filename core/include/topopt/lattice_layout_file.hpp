@@ -357,6 +357,7 @@ struct FileResult {
   std::size_t thin_solid = 0;   // cut cells print rule P8 (f) made solid (Outcome::thin_solid)
   std::size_t small_patch_cells = 0;   // K5: cells made solid for a Structural patch narrower than its count across
   std::vector<int> quilt_regions;      // K3: Outcome::quilt_regions (laid with the quilt: nothing else laid there)
+  std::vector<Layout::CellSearch> cell_search;   // K7, K8: Layout::cell_search (asked: CellSpec::cell_search, stretch_edges)
   bool cells_by_stress = false; // cell size by stress was applied to the layout (Outcome::cells_by_stress, C22)
   double step_held_at = 0.0;    // C24: the part's size-step limit kept (Outcome::step_held_at); 0 when none was asked
   double floor_cell_mm = 0.0, min_strut_mm = 0.0, open_look = 0.0, touch = 0.0;

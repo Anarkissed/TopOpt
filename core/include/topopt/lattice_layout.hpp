@@ -581,6 +581,13 @@ enum class Algorithm : std::uint8_t {
 
 struct DemandField;   // a stress result (below)
 
+// K7, K8: a cut cell is a SLIVER where, against a face square to one of its grid's axes, the piece of it inside the
+// lattice is thinner than this share of the cell. The one threshold, read by both.
+inline constexpr double kSliverFraction = 0.4;
+// K7: a size replaces the size Auto lays only for a clear gain: at most this share of its sliver area (the bed's aside).
+inline constexpr double kSearchGain = 0.75;
+#define TOPOPT_CELL_SEARCH 1   // K7, K8: CellSpec::cell_search and stretch_edges are here (the app's bridge tests it)
+
 struct CellSpec {
   Algorithm algorithm = Algorithm::DefaultGrade;
   LatticeTopology topology = LatticeTopology::Octet;
@@ -677,6 +684,28 @@ struct CellSpec {
   // no limit is under 1 (step_held). Across a seam between two regions, or between two frames, the grids do not line
   // up and the rule is not applied. Uniform has one size and nothing to divide: the limit does not act there.
   double max_step = 0.0;
+  // K7, K8 (his 11-24 notes; the app's Auto asks for both, Manual for neither): the cells fitted to the faces the grid
+  // is square to (the bed, a wall, a Protect skin's inner face), in a region laid on ONE grid (a flat region with
+  // `one_grid`; a curved region; the whole part) whose cell is Auto (`cell_mm` 0). Both off: the layout is today's,
+  // byte for byte.
+  //   cell_search   K7: the region's base cell is searched. Every size its depth allows (a flat region's base divides
+  //                 its depth, C15) from the size Auto lays (Max cell) down to the smallest that prints, each scored
+  //                 by the slivers its grid leaves (kSliverFraction) where the region's lattice ends on a square
+  //                 face, read once along lines across the region. A size that would lose the grade (a ladder of one
+  //                 size where Auto's own grades) is never laid. A size replaces Auto's own only for a clear gain:
+  //                 less sliver area on the bed; or as much on the bed and at most kSearchGain of the sliver area in
+  //                 all; or the same area, both with slivers, and a thicker thinnest. Ties keep Auto's own size,
+  //                 then the larger. The floor and every other rule are the lay's own. `Layout::cell_search` says what
+  //                 was tried and why the size laid won.
+  //   stretch_edges K8: then a sliver left against such a face, where the face is flat across the whole of the cell
+  //                 beside it, is taken in by that cell: its struts reach on to the face (the row taller by the
+  //                 sliver, so by under kSliverFraction of a cell, never past Max cell), and the sliver lays no struts
+  //                 (Cell::absorbed; it still holds its place). Only onto a face the lattice stands on (the bed, a
+  //                 floor), along the grid's upright axis: there the stretch only makes struts steeper and the row's
+  //                 bottom struts rest on the face. A sliver at an upright wall or under a ceiling (where the row's top
+  //                 struts would lie along it as bridges) is left to K7 and the cut cells.
+  bool cell_search = false;
+  bool stretch_edges = false;
 };
 // C22: is cell size by stress applied to a layout laid with `spec` (by_stress on and none of its OFF list)?
 bool stress_sizes_cells(const CellSpec& spec);
@@ -749,10 +778,17 @@ struct Cell {
   // 1 when no band applies.
   double band = 1.0;
   bool finest = false;  // the smallest cell this spot's ladder allows
+  // K8 (CellSpec::stretch_edges): this cell's struts reach this far past its cube along each of its frame's axes (mm),
+  // below and above, on to a square face, across the sliver cell there (which is `absorbed`). The cube, the place the
+  // cell holds, is unchanged. 0: none.
+  double reach_lo[3] = {0, 0, 0}, reach_hi[3] = {0, 0, 0};
+  bool absorbed = false;   // K8: a sliver whose place the next cell's struts reach across: it lays no struts of its own
   bool operator==(const Cell& o) const {
     return region == o.region && frame == o.frame && lo[0] == o.lo[0] && lo[1] == o.lo[1] &&
            lo[2] == o.lo[2] && size == o.size && cut == o.cut && wall == o.wall && strut == o.strut &&
-           own == o.own && band == o.band && finest == o.finest;
+           own == o.own && band == o.band && finest == o.finest && absorbed == o.absorbed &&
+           reach_lo[0] == o.reach_lo[0] && reach_lo[1] == o.reach_lo[1] && reach_lo[2] == o.reach_lo[2] &&
+           reach_hi[0] == o.reach_hi[0] && reach_hi[1] == o.reach_hi[1] && reach_hi[2] == o.reach_hi[2];
   }
 };
 
@@ -860,6 +896,30 @@ struct Layout {
   // K5 (his yes, 2026-11-23): cells lay_cells made solid because their patch holds fewer cells than its count across
   // (Structural, three or more) along one of its frame's axes; each is an entry of `solid` (TooFewAcross).
   std::size_t small_patch_cells = 0;
+  // K7, K8 (CellSpec::cell_search, stretch_edges): per region asked, in region order, what the search tried and why
+  // the size laid won, and what the stretch took in. Empty when neither was asked.
+  struct CellSearch {
+    int region = 0;
+    // Each size tried, the size Auto lays without the search first: its base and its finest (the cut) cell, whether
+    // it grades (a ladder of more than one size), and the slivers its grid leaves on the square faces read (how many
+    // places, their area, the thinnest's share of its cell, 1 with none; and how many of them, and their area, on the
+    // bed).
+    struct Tried {
+      double base_mm = 0.0, finest_mm = 0.0, sliver_mm2 = 0.0, thinnest = 1.0, bed_mm2 = 0.0;
+      std::size_t slivers = 0, at_bed = 0;
+      bool grades = false;
+    };
+    std::vector<Tried> tried;
+    double chosen_mm = 0.0;     // the base laid
+    std::string why;            // plain words; or why the region was not searched ("not_searched" set)
+    bool not_searched = false;  // a region with walls of their own (one_grid off), or a typed cell
+    double square_mm2 = 0.0;    // the square faces read (where the region's lattice ends on one)
+    double ms = 0.0;            // reading the faces and scoring the sizes
+    // K8: the cells whose struts reach on to a square face, the slivers they took in, and the slivers left (a face not
+    // flat across the cell beside it, a cell at Max cell, or a stretch that would lay a strut flatter).
+    std::size_t stretched = 0, taken_in = 0, slivers_left = 0;
+  };
+  std::vector<CellSearch> cell_search;
   std::vector<RegionCells> regions;
   // O1: the weave regions (Region::weave), in region order. Each has no cell; its lattice is open space, read by
   // read_open_space in `frame` (the part's own axes, as a curved region's). `spacing_mm` is the smallest spacing of
@@ -1081,6 +1141,17 @@ struct Bar {
   // file cuts it flat at the face; OG5's guard reads it as inside and does not move it. Not in bars_hash.
   bool face_skin = false;
   bool stem = false;   // OJ8: of those, a stem (from a landing node to its foot on the face); not in bars_hash
+  // notes27 (his Results notes: the struts the strengthening changed, lit when its row is open): what a strengthening
+  // round did to this bar (apply_add_round): bit 0 (kStrengthenedThicker) widened by it (a link widened with it too),
+  // bit 1 (kStrengthenedBrace) a brace it laid. The pieces a later cut makes keep it. Not in bars_hash.
+  std::uint8_t strengthened = 0;
+  static constexpr std::uint8_t kStrengthenedThicker = 1, kStrengthenedBrace = 2;
+  // K6 (his 11-24: "why can't we just extend cells and cut them off where the bed is?"): a cell strut's Surface end cut
+  // flat ON the bed (within a layer of the part's lowest plane, in the print frame): bit 0 (kOnBedA) end a, bit 1
+  // (kOnBedB) end b. It stands on the bed: drop_loose_bars keeps it as landed, and S4 keeps its piece however short.
+  // Read only with that end's kind Surface. Not in bars_hash.
+  std::uint8_t on_bed = 0;
+  static constexpr std::uint8_t kOnBedA = 1, kOnBedB = 2;
 };
 // OG1: what set the local spacing at a strand point (Bar::local_why, Outcome::tight).
 enum class SpacingWhy : std::uint8_t {
@@ -1410,6 +1481,7 @@ std::size_t lay_skin(Bars& bars, const Domain& domain, const SkinSpec& spec = Sk
 // G11 (Grown, the brief G2 change 3): in the regions of `arrived` (the Grown weave regions; null or empty: none), the
 // Surface end of a steep bar (not a bridge, bar_is_bridge) that is its UPPER end (the higher z) has landed: a vine that
 // climbed to the part's surface has arrived, and the Finish decides what joins it. Its lower end is judged as before.
+// K6: a Surface end on the bed (Bar::on_bed) has landed too: the bed holds it (and it is no cut end in the air).
 void drop_loose_bars(Bars& bars, const std::vector<int>* arrived = nullptr);
 
 // S4, S5, S6: is the lattice one piece, and is it joined to the part? Bars are one piece

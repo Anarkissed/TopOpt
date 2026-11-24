@@ -589,14 +589,12 @@ struct PrintableSpec {
   //   - material the app put in: material of the file at least two pixels from the carved solid's own cross-section at
   //     that layer (a kept bar, a weave's tube, a post: what fills the open space), or
   //   - a finish the layout added: material of the carved solid at least 0.3 mm inside its cross-section (clear of the
-  //     open space's 0.25 mm reading at its edge) where the domain says rim (S1), cover (S9) or Organic bed floor,
-  // whose hold the app took away: the part's own material runs on under it, a layer and 1 mm more down (inside the part
-  // by more than 0.05 mm there). Anything else is the part's own and is never judged: material the layout only left in
-  // place (the part's walls, a Protect skin, what no region asked for, a wall too thin, lattice space no cell holds, and
-  // the surfaces the carving bared on them), and the app's material at the part's own underside (within a layer and
-  // 1 mm of it: the slicer holds it as it holds the part's; the carving's reading and the stubs it drops lift the file's
-  // underside off the part's by up to that; a cell lattice only: with a weave, an island holding any of the app's material
-  // is judged, so Organic changes only where a finding lay on the part alone). Near a bar is not on a bar. A long bridge
+  //     open space's 0.25 mm reading at its edge) where the domain says rim (S1), cover (S9) or Organic bed floor.
+  // Anything else is the part's own and is never judged: material the layout only left in place (the part's walls, a
+  // Protect skin, what no region asked for, a wall too thin, lattice space no cell holds, and the surfaces the carving
+  // bared on them). (K6 took away the allowance for the app's material at the part's own underside: the bottom row's
+  // struts, cut at the bed, hold what floated there.) Organic changes only where a finding lay on the part alone. Near
+  // a bar is not on a bar. A long bridge
   // the app made gets a post under each of its places that reach too far, in one try (OneEnded::more), cell lattices
   // only. What F1 / OS17 left to the slicer stays the
   // slicer's, so his rule only ever judges fewer. The part's own is counted (`part_overhangs`, `own_by_k1`), its place

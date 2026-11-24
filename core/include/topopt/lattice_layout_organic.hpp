@@ -396,6 +396,7 @@ std::string old_bars_kept(const Bars& before, const Bars& after, double tol_mm =
 struct OrganicGroup {
   std::vector<int> regions;   // weave region ids
   OrganicAsk ask;
+  std::string name;           // notes27: the app's name for the group (the job's "name"), said back in strengthen.json
 };
 // OP11: validate_organic for a group list: every refusal of each group's ask (validate_organic, field not checked there,
 // OrganicRefusal::group its index), then the list's own (group -1 unless said): a weave region of the settings in no
