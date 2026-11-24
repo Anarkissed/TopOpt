@@ -4,15 +4,20 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
+#include <string>
 #include <thread>
 #include <unordered_map>
 
 #include "topopt/stepped_plan.hpp"  // stepped_size_menu, kSteppedPrintsOpenMaxStrutPerCell
+#include "topopt/strut_cell.hpp"    // K8: the type's struts, so a stretch never lays one flatter
 
 namespace topopt::lattice_layout {
 
@@ -1233,6 +1238,185 @@ void drop_small_patches(Layout& out, const K& k_of) {
 }
 }  // namespace
 
+// K7, K8 (CellSpec::cell_search, stretch_edges): where a region's lattice ends on a face SQUARE to one of its frame's
+// axes. Read along lines parallel to each axis over the region's box (its frame's coordinates), about a 64th of the
+// box apart (never under 1 mm): every end of a run of the region's own lattice, found to 1e-8 mm (a stretched row
+// ends on it). An end is square where the lines beside it, one each way on both other axes, end within kSquareMM of
+// it: the face there is flat and square to the axis (a slope a few degrees off square is not). It depends on the
+// part, the region and the skins only, never on a cell size: read once and kept with the domain.
+namespace {
+struct SquareEnds {
+  struct End {
+    int axis = 0;
+    int side = 0;           // +1: the lattice lies below `at` along the axis; -1: above it
+    double at = 0.0;        // along the axis, mm
+    double p[2] = {0, 0};   // the line, on the other two axes (in axis order)
+    double area = 0.0;      // the face it stands for, mm^2
+  };
+  std::vector<End> ends;
+  double ms = 0.0;          // how long the reading took
+};
+constexpr double kSquareMM = 0.05;
+constexpr double kStretchInset = 0.02;   // K8: mm a stretched row stops short of the face it stands on
+constexpr int kKeptSquareEnds = -1000000;   // Domain::kept key: this less the region (FaceReadings use the id)
+
+void other_axes(int a, int* o0, int* o1) {
+  *o0 = a == 0 ? 1 : 0;
+  *o1 = a == 2 ? 1 : 2;
+}
+
+std::shared_ptr<const SquareEnds> read_square_ends(const Domain& domain, int region, const Frame& f, const double lo[3],
+                                                   const double hi[3], int threads) {
+  const auto t0 = std::chrono::steady_clock::now();
+  auto out = std::make_shared<SquareEnds>();
+  double ext = 0.0;
+  for (int a = 0; a < 3; ++a) ext = std::max(ext, hi[a] - lo[a]);
+  const double pitch = std::max(1.0, ext / 64.0);
+  const double step = std::min(0.5, 0.5 * pitch);
+  struct Line { int axis, i, j; double p[2]; };
+  std::vector<Line> lines;
+  int count[3][2];
+  double area[3];
+  for (int a = 0; a < 3; ++a) {
+    int o0, o1;
+    other_axes(a, &o0, &o1);
+    const double s0 = hi[o0] - lo[o0], s1 = hi[o1] - lo[o1];
+    count[a][0] = std::max(1, static_cast<int>(std::ceil(s0 / pitch - 1e-9)));
+    count[a][1] = std::max(1, static_cast<int>(std::ceil(s1 / pitch - 1e-9)));
+    area[a] = (s0 / count[a][0]) * (s1 / count[a][1]);
+    for (int j = 0; j < count[a][1]; ++j)
+      for (int i = 0; i < count[a][0]; ++i)
+        lines.push_back({a, i, j, {lo[o0] + (i + 0.5) * s0 / count[a][0], lo[o1] + (j + 0.5) * s1 / count[a][1]}});
+  }
+  struct Found { double at; int side; };
+  std::vector<std::vector<Found>> found(lines.size());
+  const int thread_count =
+      threads > 0 ? threads : std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
+  std::atomic<std::size_t> next{0};
+  auto work = [&]() {
+    const Domain::Probe probe = domain.probe();
+    for (std::size_t li = next.fetch_add(1); li < lines.size() && !domain.stop_asked(); li = next.fetch_add(1)) {
+      const Line& L = lines[li];
+      int o0, o1;
+      other_axes(L.axis, &o0, &o1);
+      auto own = [&](double t) {
+        double q[3];
+        q[L.axis] = t;
+        q[o0] = L.p[0];
+        q[o1] = L.p[1];
+        const Where w = probe.where(f.at(q[0], q[1], q[2]));
+        return w.lattice() && w.id == region;
+      };
+      const double from = lo[L.axis] - 0.25, to = hi[L.axis] + 0.25;
+      const int n = std::max(2, static_cast<int>(std::ceil((to - from) / step)));
+      double tp = from;
+      bool was = own(tp);
+      for (int k = 1; k <= n; ++k) {
+        const double t = from + (to - from) * k / n;
+        const bool is = own(t);
+        if (is != was) {
+          double a = tp, b = t;   // own(a) == was, own(b) == is: to a few hundred-millionths of a millimetre, so a row
+                                  // stretched on to the face (K8) ends on it
+          for (int r = 0; r < 26; ++r) {
+            const double m = 0.5 * (a + b);
+            if (own(m) == was) a = m; else b = m;
+          }
+          found[li].push_back({0.5 * (a + b), was ? +1 : -1});
+        }
+        tp = t;
+        was = is;
+      }
+    }
+  };
+  {
+    const int nt = static_cast<int>(std::min<std::size_t>(static_cast<std::size_t>(thread_count), lines.size()));
+    std::vector<std::thread> pool;
+    for (int t = 1; t < nt; ++t) pool.emplace_back(work);
+    work();
+    for (std::thread& t : pool) t.join();
+  }
+  domain.check_stop();
+  // Line (a, i, j) -> its index, to read the lines beside it.
+  std::size_t first[3] = {0, 0, 0};
+  for (int a = 1; a < 3; ++a) first[a] = first[a - 1] + static_cast<std::size_t>(count[a - 1][0]) * count[a - 1][1];
+  auto line_at = [&](int a, int i, int j) -> const std::vector<Found>* {
+    if (i < 0 || j < 0 || i >= count[a][0] || j >= count[a][1]) return nullptr;
+    return &found[first[a] + static_cast<std::size_t>(j) * count[a][0] + static_cast<std::size_t>(i)];
+  };
+  for (std::size_t li = 0; li < lines.size(); ++li) {
+    const Line& L = lines[li];
+    for (const Found& e : found[li]) {
+      auto agrees = [&](int di, int dj) {
+        const std::vector<Found>* o = line_at(L.axis, L.i + di, L.j + dj);
+        if (!o) return false;
+        for (const Found& x : *o)
+          if (x.side == e.side && std::fabs(x.at - e.at) <= kSquareMM) return true;
+        return false;
+      };
+      // A box one line across a way has no neighbour that way: read as agreeing.
+      const bool way0 = count[L.axis][0] == 1 || agrees(-1, 0) || agrees(1, 0);
+      const bool way1 = count[L.axis][1] == 1 || agrees(0, -1) || agrees(0, 1);
+      if (!way0 || !way1) continue;
+      SquareEnds::End end;
+      end.axis = L.axis;
+      end.side = e.side;
+      end.at = e.at;
+      end.p[0] = L.p[0];
+      end.p[1] = L.p[1];
+      end.area = area[L.axis];
+      out->ends.push_back(end);
+    }
+  }
+  out->ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+  return out;
+}
+
+// K7: the slivers a grid leaves on the square faces read: its base cells start at `start` (frame coordinates) and its
+// finest cell, the only one a face cuts (C20), is `finest`. A face on a grid plane (to 0.02 mm) cuts nothing.
+Layout::CellSearch::Tried score_grid(const SquareEnds& se, const double start[3], double base, double finest,
+                                     const Frame& f, double bed_z) {
+  Layout::CellSearch::Tried t;
+  t.base_mm = base;
+  t.finest_mm = finest;
+  for (const SquareEnds::End& e : se.ends) {
+    const double u = (e.at - start[e.axis]) / finest;
+    const double frac = u - std::floor(u);
+    double share = e.side > 0 ? frac : 1.0 - frac;   // the cut cell's piece inside the lattice, of the cell
+    if (share * finest < 0.02 || share * finest > finest - 0.02) share = 1.0;
+    if (!(share < kSliverFraction)) continue;
+    ++t.slivers;
+    t.sliver_mm2 += e.area;
+    t.thinnest = std::min(t.thinnest, share);
+    double q[3];
+    int o0, o1;
+    other_axes(e.axis, &o0, &o1);
+    q[e.axis] = e.at;
+    q[o0] = e.p[0];
+    q[o1] = e.p[1];
+    // On the bed: the face is the part's lowest plane and the lattice stands on it (lies up the axis from it).
+    if (f.at(q[0], q[1], q[2]).z <= bed_z + 0.2 && -e.side * f.ax[e.axis].z > 0.99) {
+      ++t.at_bed;
+      t.bed_mm2 += e.area;
+    }
+  }
+  return t;
+}
+// Is `x` a clear gain over `best` (K7)? Less sliver area on the bed; or as much there and at most kSearchGain of its
+// sliver area in all; or the same area, both with slivers, and a thicker thinnest. Else the earlier stands.
+bool better(const Layout::CellSearch::Tried& x, const Layout::CellSearch::Tried& best) {
+  if (x.bed_mm2 < best.bed_mm2 - 1e-9) return true;
+  if (x.bed_mm2 > best.bed_mm2 + 1e-9) return false;
+  if (x.sliver_mm2 <= kSearchGain * best.sliver_mm2 - 1e-9) return true;
+  if (std::fabs(x.sliver_mm2 - best.sliver_mm2) > 1e-9) return false;
+  return x.slivers > 0 && best.slivers > 0 && x.thinnest > best.thinnest + 1e-9;
+}
+std::string mm_words(double v) {
+  char b[32];
+  std::snprintf(b, sizeof b, "%.3g mm", v);
+  return b;
+}
+}  // namespace
+
 double step_held(const CellSpec& spec) {
   if (!(spec.max_step > 0.0)) return 0.0;
   // A ratio of the larger cell to the smaller is never under 1; Default Grade's sizes are halves, so its smallest step
@@ -1618,6 +1802,85 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads, const 
     *layers = std::max(k_min_of(cs), static_cast<int>(std::ceil(width / target_of(cs) - 1e-9)));
     return width / *layers;
   };
+  // K7: the finest cell a lay of `base` uses (the one a face cuts, C20), as `lay` makes its ladder.
+  auto finest_of = [&](const CellSpec& cs, double base, bool band) {
+    const double band_floor =
+        band && cs.band_cell_mm > 0.0 ? std::max(cs.band_cell_mm, out.floor_cell_mm) : out.floor_cell_mm;
+    const double tile_min = std::max(cs.cell_min_mm, band_floor);
+    double finest = base;
+    if (cs.algorithm == Algorithm::DefaultGrade)
+      for (double a : stepped_size_menu(cs.topology, base, min_strut, tile_min, !cs.allow_quilt, SteppedMenu::Halves))
+        finest = std::min(finest, a);
+    if (cs.algorithm == Algorithm::Stepped)
+      for (int n :
+           stepped_admitted_divisors(cs.topology, base, min_strut, tile_min, !cs.allow_quilt, SteppedMenu::AnyStep))
+        if (n >= 2) finest = std::min(finest, base / n);
+    return finest;
+  };
+  // K7, K8: the regions fitted, for the stretch once every region is laid.
+  struct Fit {
+    int region = 0, frame = 0;
+    const CellSpec* spec = nullptr;
+    std::shared_ptr<const SquareEnds> ends;
+    std::size_t report = 0;   // its entry of out.cell_search
+  };
+  std::vector<Fit> fits;
+  const double bed_z = part.lo().z;
+  // K7: the base a region asked for is laid with: `base` (Auto's own) unless the search finds a size leaving fewer
+  // slivers. `sizes`: the sizes to try after `base`, largest first. `depth_from_zero`: the grid starts at lo[2] on
+  // its third axis (a flat region's face), else centred on every axis (C9), as `lay` places it.
+  auto search = [&](int region, const CellSpec& cs, const Frame& frame, const double lo[3], const double hi[3],
+                    bool depth_from_zero, bool band, double base, const std::vector<double>& sizes) {
+    Layout::CellSearch rep;
+    rep.region = region;
+    rep.chosen_mm = base;
+    if (!cs.cell_search && !cs.stretch_edges) return base;
+    const auto t0 = std::chrono::steady_clock::now();
+    const std::shared_ptr<const SquareEnds> ends = domain.kept<SquareEnds>(
+        kKeptSquareEnds - region, [&]() { return read_square_ends(domain, region, frame, lo, hi, thread_count); });
+    for (const SquareEnds::End& e : ends->ends) rep.square_mm2 += e.area;
+    auto tried = [&](double b) {
+      double start[3];
+      int count[3];
+      for (int a = 0; a < 3; ++a) centred(lo[a], hi[a], b, &start[a], &count[a]);
+      if (depth_from_zero) start[2] = lo[2];
+      Layout::CellSearch::Tried t = score_grid(*ends, start, b, finest_of(cs, b, band), frame, bed_z);
+      t.grades = t.finest_mm < b * (1.0 - 1e-9);
+      return t;
+    };
+    rep.tried.push_back(tried(base));
+    std::size_t best = 0;
+    const bool grades = rep.tried.front().grades;
+    if (cs.cell_search)
+      for (double b : sizes) {
+        rep.tried.push_back(tried(b));
+        if (grades && !rep.tried.back().grades) continue;   // never a size that loses the grade
+        if (better(rep.tried.back(), rep.tried[best])) best = rep.tried.size() - 1;
+      }
+    rep.chosen_mm = rep.tried[best].base_mm;
+    const Layout::CellSearch::Tried& w = rep.tried[best];
+    const Layout::CellSearch::Tried& first = rep.tried.front();
+    if (!cs.cell_search) rep.why = "not searched (the stretch only)";
+    else if (rep.tried.size() == 1) rep.why = "the only size its depth and window allow";
+    else if (best == 0 && first.slivers == 0) rep.why = "no sliver at a square face at the size Auto lays";
+    else if (best == 0) rep.why = "no size that keeps the grade leaves clearly fewer slivers than the size Auto lays";
+    else if (w.slivers == 0)
+      rep.why = "no sliver at a square face (the size Auto lays, " + mm_words(first.base_mm) + ", leaves " +
+                std::to_string(first.slivers) + ")";
+    else
+      rep.why = "fewer slivers: " + std::to_string(w.slivers) + " against " + std::to_string(first.slivers) +
+                " at the size Auto lays (" + mm_words(first.base_mm) + ")";
+    rep.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count() + ends->ms;
+    Fit fit;
+    fit.region = region;
+    fit.frame = static_cast<int>(out.frames.size());   // the frame the lay opens next
+    fit.spec = &cs;
+    fit.ends = ends;
+    fit.report = out.cell_search.size();
+    fits.push_back(fit);
+    out.cell_search.push_back(std::move(rep));
+    return out.cell_search.back().chosen_mm;
+  };
 
   // The part's own frame, centred on it (C9). Used by the whole part and by curved regions.
   Frame world;
@@ -1637,6 +1900,24 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads, const 
     return s;
   };
 
+  // K7: the sizes a curved region or the whole part may try after Auto's own (centred on every axis, so any size of
+  // its window): seven more down to the smallest that prints. Default Grade keeps C17's base (its halves must land on
+  // the floor) and a typed cell is his.
+  auto world_sizes = [&](const CellSpec& cs, double base) {
+    std::vector<double> sizes;
+    if (cs.cell_mm > 0.0 || cs.algorithm == Algorithm::DefaultGrade) return sizes;
+    const double top = target_of(cs), bottom = smallest_of(cs);
+    for (int j = 1; j <= 7 && top > bottom; ++j) {
+      const double s = top - j * (top - bottom) / 7.0;
+      if (std::fabs(s - base) > 1e-9) sizes.push_back(s);
+    }
+    return sizes;
+  };
+  auto world_fit = [&](int region, const CellSpec& cs) {
+    const double base = world_base(cs);
+    return search(region, cs, world, wlo, whi, false, false, base, world_sizes(cs, base));
+  };
+
   // Regions are already in id order (D13), the whole part last.
   for (const Region& r : ds.regions) {
     if (r.role != Role::Lattice) continue;
@@ -1652,7 +1933,7 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads, const 
       continue;
     }
     if (r.is_shell()) {
-      run(r.id, world, r.shell_depth_mm, world_base(spec), wlo, whi, false);
+      run(r.id, world, r.shell_depth_mm, world_fit(r.id, spec), wlo, whi, false);
       continue;
     }
     const ClearanceGeometry& g = r.prism;
@@ -1674,7 +1955,19 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads, const 
       // ONE grid for the whole region, in the face's own frame, the face a cell boundary (C15), laid in one frame as
       // a curved region is: no wall map, no wall its own cells. Whatever is not this region's lattice cuts the cells
       // (D3). Grade to shape reads the region's own outline, as it does wall by wall.
-      Pass pass = open(r.id, f, g.depth, base);
+      // K7: Auto's base searched among the sizes that divide the depth, down to the smallest that prints.
+      double fitted = base;
+      if (spec.cell_search || spec.stretch_edges) {
+        std::vector<double> sizes;
+        if (!(spec.cell_mm > 0.0))
+          for (int kk = k + 1; kk <= k + 24; ++kk) {
+            const double b = g.depth / kk;
+            if (b < smallest * (1.0 - 1e-9)) break;
+            sizes.push_back(b);
+          }
+        fitted = search(r.id, spec, f, lo, hi, true, spec.grade_to_shape && spec.band_mm > 0.0, base, sizes);
+      }
+      Pass pass = open(r.id, f, g.depth, fitted);
       pass.depth_need = depth_need;
       pass.tally = &out.regions.back();
       const WallMap none = out.walls.back();   // no walls: a cell's shape is its region's lattice in its cube
@@ -1682,14 +1975,22 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads, const 
       if (spec.grade_to_shape && spec.band_mm > 0.0) pass.band_region = &r;
       if (const double limit = step_of(r.id); limit > 0.0) {   // C24
         std::vector<Laid> lays;
-        lay(pass, base, lo, hi, true, &lays);
+        lay(pass, fitted, lo, hi, true, &lays);
         keep_steps(lays, limit);
         continue;
       }
-      lay(pass, base, lo, hi, true);
+      lay(pass, fitted, lo, hi, true);
       continue;
     }
 
+    if (spec.cell_search || spec.stretch_edges) {   // K7, K8: said, not done
+      Layout::CellSearch rep;
+      rep.region = r.id;
+      rep.chosen_mm = base;
+      rep.not_searched = true;
+      rep.why = "its walls are laid each with cells of their own (Let walls cut cells off)";
+      out.cell_search.push_back(rep);
+    }
     // The walls under this face, from the readings kept with the domain: every stretch of
     // material under each node of a coarse map of the face (a wall, a pocket and the wall
     // behind the pocket are two), gathered where they start at one depth and are one width.
@@ -1747,9 +2048,158 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads, const 
     if (keep) keep_steps(lays, limit);
     out.walls[static_cast<std::size_t>(pass.frame_index)] = std::move(map);
   }
-  if (ds.start == Start::AllLattice) run(0, world, 1e300, world_base(spec), wlo, whi, false);
+  if (ds.start == Start::AllLattice) run(0, world, 1e300, world_fit(0, spec), wlo, whi, false);
   // K5: no Structural patch of fewer cells than its count across, in any direction.
   drop_small_patches(out, [&](int region) { const CellSpec& cs = spec_of(region); return cs.one_grid ? 1 : cs.min_cells_across; });
+  // K8 (CellSpec::stretch_edges): a sliver left against a square face is taken in by the cell beside it, where the
+  // face is flat across the whole of that cell: the cell's struts reach on to the face, the sliver lays none.
+  auto stretch_rows = [&](const Fit& fit) {
+    Layout::CellSearch& rep = out.cell_search[fit.report];
+    const Frame& f = out.frames[static_cast<std::size_t>(fit.frame)];
+    std::vector<std::uint32_t> mine;
+    double big = 0.0;
+    for (std::size_t i = 0; i < out.cells.size(); ++i)
+      if (out.cells[i].frame == fit.frame && out.cells[i].region == fit.region) {
+        mine.push_back(static_cast<std::uint32_t>(i));
+        big = std::max(big, out.cells[i].size);
+      }
+    if (mine.empty() || fit.ends->ends.empty()) return;
+    const double pitch = big * (1.0 + 1e-9);
+    const auto slot = [&](double x) { return static_cast<long long>(std::floor(x / pitch)); };
+    std::map<std::array<long long, 3>, std::vector<std::uint32_t>> grid;
+    for (const std::uint32_t ci : mine) {
+      const Cell& c = out.cells[ci];
+      for (long long x = slot(c.lo[0]); x <= slot(c.lo[0] + c.size); ++x)
+        for (long long y = slot(c.lo[1]); y <= slot(c.lo[1] + c.size); ++y)
+          for (long long z = slot(c.lo[2]); z <= slot(c.lo[2] + c.size); ++z) grid[{x, y, z}].push_back(ci);
+    }
+    const auto cell_at = [&](const double q[3]) -> long {   // the first cell, in layout order, whose cube holds q
+      const auto it = grid.find({slot(q[0]), slot(q[1]), slot(q[2])});
+      if (it == grid.end()) return -1;
+      for (const std::uint32_t ci : it->second) {
+        const Cell& c = out.cells[ci];
+        bool in = !c.absorbed;
+        for (int a = 0; a < 3 && in; ++a) in = q[a] >= c.lo[a] && q[a] < c.lo[a] + c.size;
+        if (in) return static_cast<long>(ci);
+      }
+      return -1;
+    };
+    const auto lattice_at = [&](const double q[3]) {
+      const Where w = probe.where(f.at(q[0], q[1], q[2]));
+      return w.lattice() && w.id == fit.region;
+    };
+    const std::vector<StrutCellStrut> struts = strut_cell_closed_struts(lattice_strut_cell(fit.spec->topology));
+    const double most = target_of(*fit.spec);   // Max cell
+    // Would stretching by `factor` along axis `a` lay any strut flatter (less rise over its length) than the cell does?
+    const auto flatter = [&](int a, double factor) {
+      for (const StrutCellStrut& s : struts) {
+        const double d[3] = {static_cast<double>(s.b.x - s.a.x), static_cast<double>(s.b.y - s.a.y),
+                             static_cast<double>(s.b.z - s.a.z)};
+        const auto rise = [&](double fa) {
+          Vec3 v{0, 0, 0};
+          for (int k = 0; k < 3; ++k) {
+            const double m = d[k] * (k == a ? fa : 1.0);
+            v = Vec3{v.x + f.ax[k].x * m, v.y + f.ax[k].y * m, v.z + f.ax[k].z * m};
+          }
+          const double l = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+          return l > 0.0 ? std::fabs(v.z) / l : 1.0;
+        };
+        if (rise(factor) < rise(1.0) - 1e-9) return true;
+      }
+      return false;
+    };
+    // The slivers met on a square face, and the cell beside each, face to face: what that cell would reach to.
+    struct Ask { int axis = 0, side = 0; double at = 0.0, d = 0.0, plane = 0.0; };
+    std::map<std::uint32_t, Ask> asks;   // by the neighbour, in layout order; the first face found
+    std::set<std::uint32_t> slivers;
+    for (const SquareEnds::End& e : fit.ends->ends) {
+      int o0, o1;
+      other_axes(e.axis, &o0, &o1);
+      const int a = e.axis;
+      // Only a face the lattice stands on (the bed, a floor): along the grid's upright axis, the lattice above it. Under
+      // a ceiling the row's top struts would lie along the ceiling as bridges, where the cut struts run up into it.
+      if (-e.side * f.ax[a].z < 0.99) continue;
+      double q[3];
+      q[a] = e.at - e.side * 0.02;
+      q[o0] = e.p[0];
+      q[o1] = e.p[1];
+      const long si = cell_at(q);
+      if (si < 0) continue;
+      const Cell& s = out.cells[static_cast<std::size_t>(si)];
+      const double d = e.side > 0 ? e.at - s.lo[a] : s.lo[a] + s.size - e.at;
+      if (!(d > 0.02 && d < kSliverFraction * s.size)) continue;   // the face cuts it whole, or not thin
+      slivers.insert(static_cast<std::uint32_t>(si));
+      const double plane = e.side > 0 ? s.lo[a] : s.lo[a] + s.size;
+      double qn[3] = {q[0], q[1], q[2]};
+      qn[a] = plane - e.side * 0.02;
+      const long ni = cell_at(qn);
+      if (ni < 0) continue;
+      const Cell& n = out.cells[static_cast<std::size_t>(ni)];
+      if (std::fabs((e.side > 0 ? n.lo[a] + n.size : n.lo[a]) - plane) > 1e-6) continue;
+      asks.emplace(static_cast<std::uint32_t>(ni), Ask{a, e.side, e.at, d, plane});
+    }
+    std::set<std::uint32_t> taken;
+    for (const auto& [ni, ask] : asks) {
+      Cell& n = out.cells[ni];
+      const int a = ask.axis;
+      int o0, o1;
+      other_axes(a, &o0, &o1);
+      if (n.absorbed || taken.count(ni) || n.reach_lo[a] > 0.0 || n.reach_hi[a] > 0.0) continue;
+      if (n.size + ask.d > most * (1.0 + 1e-9)) continue;        // never past Max cell
+      if (flatter(a, (n.size + ask.d) / n.size)) continue;       // never a strut flatter than the cell lays it
+      // Every cell starting on the plane over its footprint lies inside the footprint and is the same face's sliver.
+      std::vector<std::uint32_t> across;
+      bool ok = true;
+      for (const std::uint32_t ci : mine) {
+        if (ci == ni) continue;
+        const Cell& t = out.cells[ci];
+        if (std::fabs((ask.side > 0 ? t.lo[a] : t.lo[a] + t.size) - ask.plane) > 1e-6) continue;
+        const bool overlaps = t.lo[o0] < n.lo[o0] + n.size - 1e-6 && t.lo[o0] + t.size > n.lo[o0] + 1e-6 &&
+                              t.lo[o1] < n.lo[o1] + n.size - 1e-6 && t.lo[o1] + t.size > n.lo[o1] + 1e-6;
+        if (!overlaps) continue;
+        const bool inside = t.lo[o0] >= n.lo[o0] - 1e-6 && t.lo[o0] + t.size <= n.lo[o0] + n.size + 1e-6 &&
+                            t.lo[o1] >= n.lo[o1] - 1e-6 && t.lo[o1] + t.size <= n.lo[o1] + n.size + 1e-6;
+        const double dt = ask.side > 0 ? ask.at - t.lo[a] : t.lo[a] + t.size - ask.at;
+        if (!inside || t.absorbed || taken.count(ci) || std::fabs(dt - ask.d) > 1e-3 ||
+            !(ask.d < kSliverFraction * t.size)) {
+          ok = false;
+          break;
+        }
+        across.push_back(ci);
+      }
+      if (!ok || across.empty()) continue;
+      // The face is flat across the whole footprint (4 x 4 places): the region's lattice through the sliver up to
+      // the face, and none past it.
+      for (int i = 0; i < 4 && ok; ++i)
+        for (int j = 0; j < 4 && ok; ++j) {
+          double q[3];
+          q[o0] = n.lo[o0] + n.size * (i + 0.5) / 4.0;
+          q[o1] = n.lo[o1] + n.size * (j + 0.5) / 4.0;
+          q[a] = ask.at - ask.side * std::min(0.05, 0.25 * ask.d);
+          ok = lattice_at(q);
+          q[a] = 0.5 * (ask.plane + ask.at);
+          ok = ok && lattice_at(q);
+          q[a] = ask.at + ask.side * 0.05;
+          ok = ok && !lattice_at(q);
+        }
+      if (!ok) continue;
+      // A hair short of the face (kStretchInset): the row's nodes and bottom struts sit just above it, so the part cuts
+      // them flat on it cleanly (centred ON the face, their round sections met the part's own face edge to edge and
+      // the file kept a few microns of crumb under the bed).
+      (ask.side > 0 ? n.reach_hi[a] : n.reach_lo[a]) = ask.d - kStretchInset;
+      n.cut = true;   // its struts are read closely (lay_bars)
+      for (const std::uint32_t ci : across) {
+        out.cells[ci].absorbed = true;
+        taken.insert(ci);
+      }
+      ++rep.stretched;
+      rep.taken_in += across.size();
+    }
+    for (const std::uint32_t si : slivers)
+      if (!out.cells[si].absorbed) ++rep.slivers_left;
+  };
+  for (const Fit& fit : fits)
+    if (fit.spec->stretch_edges) stretch_rows(fit);
   // D14b: cells take in the lattice slivers inside their cubes.
   out.absorb = spec.absorb_slivers;
   if (out.absorb) out.index = index_cells(out);

@@ -824,7 +824,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         } else {
             for g in groupOrderAtLay where byGroup[g] != nil {
                 let look = latticeAtLay.organicLook(group: g).effective(pageManual: pageManualAtLay)
-                groups.append(.init(regions: byGroup[g]!, ask: ask(look, organicLimits?.groups[g])))
+                groups.append(.init(regions: byGroup[g]!, ask: ask(look, organicLimits?.groups[g]), name: groupNamesAtLay[g]))
                 looks.append(look); groupIDs.append(g)
             }
         }
@@ -1424,6 +1424,11 @@ public final class LatticeLayoutPreview: ObservableObject {
                 s.byStress = false
                 s.strutWidthMM = s.minStrutLines * s.beadMM
             }
+            // ★ K7, K8 (his 11-24: "why can't we just extend cells and cut them off where the bed is?"): Auto's cells fitted to
+            // the faces the grid is square to — the size with the fewest slivers there, a sliver left taken in by the row
+            // beside it (core: a region laid on one grid; Structural's walls keep their own cells and are only said). Manual
+            // lays his own size, as before.
+            s.cellSearch = true
         }
         let rowDensity = s.perRegion
         var id: Int32 = 1

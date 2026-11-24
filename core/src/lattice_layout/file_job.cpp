@@ -196,7 +196,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "protect_face_counts", "protect_faces", "protect_pieces", "protect_chip", "topology", "algorithm", "cell_mm", "cell_max_mm",
        "cell_min_mm", "min_cells_across", "grade_to_shape", "band_mm", "band_cell_mm",
        "per_region", "dial", "dial_region", "dial_value", "strut_width_mm", "allow_quilt",
-       "strength", "small_cells_in_thin_walls", "one_grid", "cells_by_stress", "bars", "join_loose", "skin", "skin_density", "skin_sink",
+       "strength", "small_cells_in_thin_walls", "one_grid", "cell_search", "stretch_edges", "cells_by_stress", "bars", "join_loose", "skin", "skin_density", "skin_sink",
        "skin_width_mm", "skin_reach_cells", "drop_loose", "by_stress", "dial_light", "dial_heavy", "width_light_mm",
        "width_heavy_mm", "reference_mpa", "percentile", "response", "region_own", "max_step", "region_weave", "organic_spacing_mm",
        "organic_width_mm", "organic_spacing_min_mm", "organic_spacing_max_mm", "organic_spacing_exponent",
@@ -366,6 +366,8 @@ Settings settings_from(const json::Value& in, const std::string& w) {
   s.cells.band_cell_mm = num(in, "band_cell_mm", s.cells.band_cell_mm, w);
   s.cells.by_stress = flag(in, "cells_by_stress", s.cells.by_stress, w);   // C22
   s.cells.max_step = num(in, "max_step", s.cells.max_step, w);            // C24
+  s.cells.cell_search = flag(in, "cell_search", s.cells.cell_search, w);          // K7
+  s.cells.stretch_edges = flag(in, "stretch_edges", s.cells.stretch_edges, w);    // K8
 
   const bool per_region = flag(in, "per_region", false, w), by_stress = flag(in, "by_stress", false, w);
   if (per_region && by_stress) json::fail(w, "by_stress and per_region cannot both be on: pick one density");
@@ -1124,7 +1126,7 @@ FileJob parse_file_job(const std::string& json_text) {
           const json::Value& go = json::as_object(list[g], ga);
           json::Value merged = *v;
           for (const auto& [k, val] : go.obj) {
-            if (k == "regions") continue;
+            if (k == "regions" || k == "name") continue;   // notes27: the group's name, said back, never laid
             if (k.rfind("organic_", 0) != 0 || k == "organic_groups")
               json::fail(ga + "." + k, "is not an Organic setting a group can hold (a group holds \"regions\" and organic_* keys)");
             bool found = false;
@@ -1134,6 +1136,7 @@ FileJob parse_file_job(const std::string& json_text) {
           }
           OrganicGroup og;
           og.regions = wholes(go, "regions", ga);
+          if (json::find(go, "name")) og.name = text(go, "name", "", ga);
           if (og.regions.empty()) json::fail(ga + ".regions", "must name the group's Organic areas");
           og.ask = organic_from(merged, job.settings, ga);
           job.organic_groups.push_back(std::move(og));
@@ -1357,6 +1360,7 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     r.thin_solid = out.thin_solid;
     r.small_patch_cells = out.layout.small_patch_cells;   // K5
     r.quilt_regions = out.quilt_regions;                  // K3
+    r.cell_search = out.layout.cell_search;               // K7, K8
     r.cells_by_stress = out.cells_by_stress;
     r.step_held_at = out.step_held_at;   // C24
     r.floor_cell_mm = out.layout.floor_cell_mm;
@@ -1891,6 +1895,34 @@ std::string file_result_json(const FileResult& r) {
   if (!r.quilt_regions.empty()) {   // K3: written only when a region needed the quilt (else the report is as it was)
     o += "    \"quilt_regions\": [";
     for (std::size_t i = 0; i < r.quilt_regions.size(); ++i) o += (i ? ", " : "") + std::to_string(r.quilt_regions[i]);
+    o += "],\n";
+  }
+  if (!r.cell_search.empty()) {   // K7, K8: written only when asked (else the report is as it was)
+    o += "    \"cell_search\": [";
+    for (std::size_t i = 0; i < r.cell_search.size(); ++i) {
+      const Layout::CellSearch& c = r.cell_search[i];
+      o += (i ? ", " : "") + std::string("{\"region\": ") + std::to_string(c.region);
+      if (c.not_searched) {
+        o += ", \"not_searched\": \"" + escaped(c.why) + "\"}";
+        continue;
+      }
+      std::snprintf(b, sizeof b, ", \"chosen_mm\": %.6g, \"square_mm2\": %.6g, \"ms\": %.4g, \"tried\": [", c.chosen_mm,
+                    c.square_mm2, c.ms);
+      o += b;
+      for (std::size_t t = 0; t < c.tried.size(); ++t) {
+        const Layout::CellSearch::Tried& x = c.tried[t];
+        std::snprintf(b, sizeof b,
+                      "%s{\"base_mm\": %.6g, \"finest_mm\": %.6g, \"grades\": %s, \"slivers\": %llu, "
+                      "\"sliver_mm2\": %.6g, \"thinnest\": %.4g, \"at_bed\": %llu, \"bed_mm2\": %.6g}",
+                      t ? ", " : "", x.base_mm, x.finest_mm, x.grades ? "true" : "false", count(x.slivers), x.sliver_mm2,
+                      x.thinnest, count(x.at_bed), x.bed_mm2);
+        o += b;
+      }
+      std::snprintf(b, sizeof b, "], \"stretched\": %llu, \"taken_in\": %llu, \"slivers_left\": %llu, ",
+                    count(c.stretched), count(c.taken_in), count(c.slivers_left));
+      o += b;
+      o += "\"why\": \"" + escaped(c.why) + "\"}";
+    }
     o += "],\n";
   }
   if (r.weave_regions > 0) {   // Organic: written only for a job with a weave region (a cube-lattice result is the

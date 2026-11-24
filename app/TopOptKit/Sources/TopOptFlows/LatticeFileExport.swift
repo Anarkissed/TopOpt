@@ -29,6 +29,7 @@ public enum LatticeFileJob {
         "widthHeavyMM": "width_heavy_mm", "cellsByStress": "cells_by_stress", "referenceMPa": "reference_mpa",
         "percentile": "percentile", "response": "response", "maxStep": "max_step",
         "bedFloorMM": "organic_bed_floor_mm",   // the flat floor (Organic only; written only when on)
+        "cellSearch": "cell_search/stretch_edges",   // K7, K8 (Auto only; written only when on)
     ]
 
     /// The stress result's name beside the job (core's top-level "demand"; the demand file format of 04-layout-file-job.md).
@@ -204,6 +205,8 @@ public enum LatticeFileJob {
         layout["max_step"] = s.maxStep
         // the flat floor (K1): Organic's ask; written only when on, so every other job is the bytes it was
         if s.bedFloorMM > 0 { layout["organic_bed_floor_mm"] = s.bedFloorMM }
+        // K7, K8: Auto's cells fitted to the square faces; written only when on, so every other job is the bytes it was
+        if s.cellSearch { layout["cell_search"] = true; layout["stretch_edges"] = true }
         if s.byStress { layout["per_region"] = false }   // core refuses By stress with Per region
         // an area's own settings (C23), its Finish (S13), zones (D21): one entry per region, null where it states nothing
         func own(_ o: LatticeLayoutSession.AreaOwn) -> Any {
@@ -269,6 +272,7 @@ public enum LatticeFileJob {
                 layout["organic_groups"] = organic.map { g -> [String: Any] in
                     var d = organicKeys(g.ask)
                     d["regions"] = g.regions.map { Int($0) }
+                    if let n = g.name, !n.isEmpty { d["name"] = n }   // ★ notes27: said back in strengthen.json's groups
                     return d
                 }
             }

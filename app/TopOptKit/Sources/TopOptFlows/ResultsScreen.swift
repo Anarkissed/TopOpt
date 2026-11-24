@@ -1568,12 +1568,17 @@ public struct ResultsScreen: View {
         }
     }
 
+    /// ★ notes27: the tapped value's words — a print file's is its share of the limit there ("62% of its limit"), never MPa.
+    nonisolated static func probeText(_ r: Double, share: Bool) -> String {
+        share ? String(format: "%.0f%% of its limit", r * 100) : String(format: "%.2f MPa", r)
+    }
+
     /// The tapped point on the model: an arrow and its value, re-projected every frame so it rides the part through an orbit.
     @ViewBuilder private var stressProbeCallout: some View {
         if let p = stressProbeShown, let r = stressReading, let s = projection?.project(p) {
             HStack(spacing: 5) {
                 Image(systemName: "arrowtriangle.left.fill").font(.system(size: 11)).foregroundStyle(DS.Color.accent.color)
-                Text(String(format: "%.2f MPa", r)).font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                Text(Self.probeText(r, share: model.latticeAnswer != nil)).font(.system(size: 13, weight: .semibold)).monospacedDigit()
                     .foregroundStyle(DS.Color.textPrimary.color)
             }
             .padding(.horizontal, 9).padding(.vertical, 6)

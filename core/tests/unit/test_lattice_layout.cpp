@@ -3770,6 +3770,214 @@ static void test_thin_walls_follow_the_quilt_switch() {
   }
 }
 
+// K6 (his 11-24: "I don't understand why we can't just extend cells and cut them off where the bed is?"). A block
+// latticed under its front face, one grid, Stepped: 12 mm cells cut to 6 mm at its edges, the grid centred on the face,
+// so the bed cuts the bottom row thin (0.5, 1.3 and 2 mm for blocks 13, 14.6 and 16 tall). The struts the bed cuts are
+// kept, cut flat on the bed (Bar::on_bed), however short, and the drop keeps them: they stand on the bed and hold the
+// row above. A Surface end anywhere else (the block's sides) is dropped as before.
+static void test_cells_cut_flat_at_the_bed() {
+  for (double h : {13.0, 14.6, 16.0}) {
+    PartMeasure pm(weld_mesh(box(24, 20, h)));
+    DomainSpec s;
+    s.bead_mm = 0.3;
+    s.min_strut_lines = 2.0;
+    Region r = face_region(1, Role::Lattice, {12, 0, h / 2}, {0, 1, 0}, 12, h / 2, 12);
+    if (!(std::fabs(r.prism.u.x) > 0.5)) r = face_region(1, Role::Lattice, {12, 0, h / 2}, {0, 1, 0}, h / 2, 12, 12);
+    s.regions = {r};
+    Domain d(pm, s);
+    CellSpec cs;
+    cs.algorithm = Algorithm::Stepped;
+    cs.one_grid = true;
+    cs.cell_max_mm = 12;
+    cs.cell_min_mm = 5;
+    Layout l = lay_cells(d, cs);
+    set_struts(l, StrutSpec{});
+    const Bars laid = lay_bars(l, d);
+    double lowest = 1e9;   // the lowest node: the top of the row the bed cuts
+    for (const Bar& b : laid.bars) {
+      if (b.end_a == Bar::End::Node) lowest = std::min(lowest, b.a.z);
+      if (b.end_b == Bar::End::Node) lowest = std::min(lowest, b.b.z);
+    }
+    std::size_t on_bed = 0, short_on_bed = 0, unmarked = 0;
+    for (const Bar& b : laid.bars) {
+      const bool a_bed = b.end_a == Bar::End::Surface && b.a.z <= 0.2, b_bed = b.end_b == Bar::End::Surface && b.b.z <= 0.2;
+      if (a_bed || b_bed) {
+        ++on_bed;
+        if (bar_length(b) < b.width) ++short_on_bed;
+        if ((a_bed && !(b.on_bed & Bar::kOnBedA)) || (b_bed && !(b.on_bed & Bar::kOnBedB))) ++unmarked;
+      }
+      if ((b.end_a == Bar::End::Surface && b.a.z > 0.2 && (b.on_bed & Bar::kOnBedA)) ||
+          (b.end_b == Bar::End::Surface && b.b.z > 0.2 && (b.on_bed & Bar::kOnBedB)))
+        ++unmarked;   // marked off the bed
+    }
+    Bars kept = laid;
+    drop_loose_bars(kept);
+    std::size_t kept_on_bed = 0, surface_off_bed = 0, air_at_bed = 0;
+    double kept_low = 1e9;
+    for (const Bar& b : kept.bars) {
+      kept_low = std::min({kept_low, b.a.z, b.b.z});
+      for (int e = 0; e < 2; ++e) {
+        const bool surf = (e ? b.end_b : b.end_a) == Bar::End::Surface;
+        const double z = e ? b.b.z : b.a.z;
+        if (surf && z <= 0.2) ++kept_on_bed;
+        if (surf && z > 0.2) ++surface_off_bed;
+      }
+    }
+    for (const Bars::CutEnd& c : kept.cut_in_air) air_at_bed += c.at.z <= 0.2;
+    // RED CONTROL: without the bed's mark the drop takes every one of them (as before K6)
+    Bars unmarked_bars = laid;
+    for (Bar& b : unmarked_bars.bars) b.on_bed = 0;
+    drop_loose_bars(unmarked_bars);
+    std::size_t control_on_bed = 0;
+    double control_low = 1e9;
+    for (const Bar& b : unmarked_bars.bars) {
+      control_low = std::min({control_low, b.a.z, b.b.z});
+      control_on_bed += (b.end_a == Bar::End::Surface && b.a.z <= 0.2) + (b.end_b == Bar::End::Surface && b.b.z <= 0.2);
+    }
+    std::printf("[K6] %.1f mm block: the lowest node at z %.2f (the row under it cut by the bed); %zu struts cut at the bed "
+                "(%zu shorter than wide), %zu unmarked; after the drop %zu ends on the bed, lowest strut z %.3f, %zu Surface ends "
+                "off the bed, %zu cut ends 'in the air' at the bed; without the mark: %zu on the bed, lowest z %.3f\n",
+                h, lowest, on_bed, short_on_bed, unmarked, kept_on_bed, kept_low,
+                surface_off_bed, air_at_bed, control_on_bed, control_low);
+    CHECK(on_bed > 10 && unmarked == 0);
+    CHECK(kept_on_bed > 10 && kept_low < 1e-6);   // the bottom row stands on the bed
+    CHECK(surface_off_bed == 0 && air_at_bed == 0);   // elsewhere unchanged: a cut end off the bed lands on nothing
+    CHECK(control_on_bed == 0 && control_low > 0.2);   // RED CONTROL
+    if (h == 13.0) CHECK(short_on_bed > 0);   // S4 keeps a stub on the bed however short
+  }
+}
+
+// K7 (362's brief on his 11-24 notes: Auto tries cell sizes). A block latticed from its top face down to the bed, one
+// grid, Stepped, cells 4 to 12 mm (a 0.6 mm strut). Auto lays a 12 mm base (three layers of the 36 mm depth, graded down
+// to 4 mm) whose finest cells the 42 x 41 block's walls cut to slivers; the search lays the 9 mm base (four layers,
+// graded to 4.5 mm), with none. The sizes that would lose the grade (a ladder of one size: 7.2, 6, 5.1, 4.5 and 4 mm)
+// are tried and never laid. A 36 x 34 block leaves none at 12 mm: that size stays, and the layout is the one laid
+// without the search, byte for byte. Same answer every time.
+static void test_cell_search_fits_square_faces() {
+  const Vec3 down{0, 0, -1};
+  for (const double x : {42.0, 36.0}) {
+    const double y = x == 42.0 ? 41.0 : 34.0;
+    PartMeasure pm(weld_mesh(box(x, y, 36)));
+    DomainSpec s;
+    s.bead_mm = 0.3;
+    s.min_strut_lines = 2.0;
+    Region r = face_region(1, Role::Lattice, {x / 2, y / 2, 36}, down, x / 2, y / 2, 36);
+    if (!(std::fabs(r.prism.u.x) > 0.5)) r = face_region(1, Role::Lattice, {x / 2, y / 2, 36}, down, y / 2, x / 2, 36);
+    s.regions = {r};
+    Domain d(pm, s);
+    CellSpec cs;
+    cs.algorithm = Algorithm::Stepped;
+    cs.one_grid = true;
+    cs.cell_max_mm = 12;
+    cs.cell_min_mm = 4;
+    const Layout plain = lay_cells(d, cs);
+    CellSpec on = cs;
+    on.cell_search = true;
+    const Layout fit = lay_cells(d, on);
+    CHECK(plain.cell_search.empty());   // not asked: nothing said, nothing changed
+    CHECK(fit.cell_search.size() == 1);
+    if (fit.cell_search.size() != 1) continue;
+    const Layout::CellSearch& c = fit.cell_search[0];
+    std::printf("[K7] %.0f x %.0f block: chose %.4g mm (%s), %.4g mm^2 of square face read in %.1f ms\n", x, y, c.chosen_mm,
+                c.why.c_str(), c.square_mm2, c.ms);
+    for (const Layout::CellSearch::Tried& t : c.tried)
+      std::printf("[K7]   tried %.4g mm (finest %.4g, %s): %zu slivers, %.4g mm^2, thinnest %.3g of its cell\n", t.base_mm,
+                  t.finest_mm, t.grades ? "grades" : "one size", t.slivers, t.sliver_mm2, t.thinnest);
+    CHECK(c.tried.size() == 7 && std::fabs(c.tried[0].base_mm - 12.0) < 1e-9 && std::fabs(c.tried[0].finest_mm - 4.0) < 1e-9);
+    CHECK(c.square_mm2 > 2.0 * (x + y) * 36.0 * 0.8);   // the four walls (and the bed and the face) read
+    std::size_t one_size = 0;
+    for (const Layout::CellSearch::Tried& t : c.tried) one_size += !t.grades;
+    CHECK(one_size == 5 && c.tried[0].grades && c.tried[1].grades);
+    if (x == 42.0) {
+      CHECK(c.tried[0].slivers > 0 && c.tried[0].thinnest < kSliverFraction);   // RED CONTROL: Auto's own size
+      CHECK(c.tried[1].slivers == 0 && std::fabs(c.tried[1].base_mm - 9.0) < 1e-9);
+      CHECK(std::fabs(c.chosen_mm - 9.0) < 1e-9 && std::fabs(fit.regions[0].base_cell_mm - 9.0) < 1e-9);
+      CHECK(!(plain.cells == fit.cells));
+    } else {
+      CHECK(c.tried[0].slivers == 0 && std::fabs(c.chosen_mm - 12.0) < 1e-9);
+      CHECK(plain.cells == fit.cells);   // the size Auto lays stands, byte for byte
+    }
+    CHECK(lay_cells(d, on).cells == fit.cells && lay_cells(d, on, 1).cells == fit.cells);   // the same, any threads
+  }
+}
+
+// K8 (362's brief: stretch the edge row). A block 38 wide and 20 tall latticed under its front face 9 deep: one grid,
+// Stepped, a 9 mm base cut to 4.5 mm at its edges. The bed and the top cut the bottom and top rows to 1 mm slivers; with
+// the stretch the 4.5 mm row on the bed reaches down on to it (5.5 mm tall), its own nodes stand on the bed, and the
+// slivers lay none. The top's slivers stay (under a ceiling the row's top struts would lie along it as bridges), and
+// so do the two side walls' (a sideways stretch would lay the struts flatter than the cells do).
+static void test_edge_rows_stretch() {
+  const double x = 38.0, y = 20.0, h = 20.0, depth = 9.0;
+  PartMeasure pm(weld_mesh(box(x, y, h)));
+  DomainSpec s;
+  s.bead_mm = 0.3;
+  s.min_strut_lines = 2.0;
+  Region r = face_region(1, Role::Lattice, {x / 2, 0, h / 2}, {0, 1, 0}, x / 2, h / 2, depth);
+  if (!(std::fabs(r.prism.u.x) > 0.5)) r = face_region(1, Role::Lattice, {x / 2, 0, h / 2}, {0, 1, 0}, h / 2, x / 2, depth);
+  s.regions = {r};
+  Domain d(pm, s);
+  CellSpec cs;
+  cs.algorithm = Algorithm::Stepped;
+  cs.one_grid = true;
+  cs.cell_max_mm = 12;
+  cs.cell_min_mm = 4;
+  Layout plain = lay_cells(d, cs);
+  CellSpec on = cs;
+  on.stretch_edges = true;
+  Layout fit = lay_cells(d, on);
+  CHECK(fit.cell_search.size() == 1);
+  if (fit.cell_search.size() != 1) return;
+  const Layout::CellSearch& c = fit.cell_search[0];
+  std::size_t absorbed = 0, stretched = 0, sideways = 0, up = 0;
+  double tallest = 0.0;
+  for (const Cell& cell : fit.cells) {
+    absorbed += cell.absorbed;
+    for (int a = 0; a < 3; ++a)
+      if (cell.reach_lo[a] > 0.0 || cell.reach_hi[a] > 0.0) {
+        ++stretched;
+        const double z = fit.frames[static_cast<std::size_t>(cell.frame)].ax[a].z;
+        if (std::fabs(z) < 0.99) ++sideways;
+        if ((z > 0.0 ? cell.reach_hi[a] : cell.reach_lo[a]) > 0.0) ++up;   // reaching up, to a ceiling
+        tallest = std::max(tallest, cell.size + cell.reach_lo[a] + cell.reach_hi[a]);
+      }
+  }
+  std::printf("[K8] %zu cells reach on to a square face (tallest %.9g mm), %zu slivers taken in, %zu left; report: %zu "
+              "stretched, %zu taken in, %zu left (%s)\n", stretched, tallest, absorbed, c.slivers_left, c.stretched, c.taken_in,
+              c.slivers_left, c.why.c_str());
+  CHECK(stretched > 0 && sideways == 0 && up == 0 && stretched == c.stretched && absorbed == c.taken_in && absorbed >= stretched);
+  CHECK(std::fabs(tallest - 5.48) < 1e-4);   // the 4.5 mm row on the bed, 1 mm taller less a hair (never past Max cell)
+  CHECK(lay_cells(d, on).cells == fit.cells);   // the same every time
+  CHECK(c.slivers_left > 0);   // the side walls' slivers stay (never a strut flatter)
+  CHECK(c.tried.size() == 1 && std::fabs(c.chosen_mm - 9.0) < 1e-9);   // the stretch only: no size searched
+  set_struts(plain, StrutSpec{});
+  set_struts(fit, StrutSpec{});
+  const auto at_bed = [](const Bars& bars, std::size_t* surface, std::size_t* node, double* low) {
+    *surface = *node = 0;
+    *low = 1e9;
+    for (const Bar& b : bars.bars) {
+      if (b.end_a == Bar::End::Node) *low = std::min(*low, b.a.z);   // the lowest node
+      if (b.end_b == Bar::End::Node) *low = std::min(*low, b.b.z);
+      for (int e = 0; e < 2; ++e) {
+        const Vec3& p = e ? b.b : b.a;
+        if (p.z > 0.05) continue;
+        ((e ? b.end_b : b.end_a) == Bar::End::Surface ? *surface : *node) += 1;
+      }
+    }
+  };
+  Bars pb = lay_bars(plain, d), fb = lay_bars(fit, d);
+  drop_loose_bars(pb);
+  drop_loose_bars(fb);
+  std::size_t ps = 0, pn = 0, fs = 0, fn = 0;
+  double plow = 0.0, flow = 0.0;
+  at_bed(pb, &ps, &pn, &plow);
+  at_bed(fb, &fs, &fn, &flow);
+  std::printf("[K8] bar ends on the bed: as laid %zu cut, %zu nodes; stretched %zu cut, %zu nodes (lowest %.4g)\n", ps, pn, fs,
+              fn, flow);
+  CHECK(ps > 0);                           // RED CONTROL: the bottom row's struts cut at the bed (K6)
+  CHECK(fn > 0 && std::fabs(flow - 0.02) < 1e-4);   // the stretched row's own nodes stand on the bed (a hair above it)
+  CHECK(fs < ps);                          // only the corner cells' cut struts are left there
+}
+
 // K2 (his 11-23 notes: "Look at the lack of crisp straight lines at the edges of the lattice. This was with cut cells =
 // on. So why isn't it working?"). A prism whose plan is a trapezoid with a 45 degree side (0,0)-(20,20), 30 tall,
 // latticed under its top face (the whole of it), Let walls cut cells on. Read a hair inside the sloped side, every
@@ -7816,8 +8024,10 @@ static void test_lay_bars_unchanged() {
     got[2] = bars_hash(b);
     count[2] = b.bars.size();
   }
-  const unsigned long long want[3] = {0x935840c703eb5f33ULL, 0xff5cc5b3af9fe0d9ULL, 0x17631120b9e61b43ULL};
-  const std::size_t want_count[3] = {5392, 2267, 1328};
+  // K6 (2026-11-24): the struts the bed cuts are kept however short (S4 keeps a piece cut flat on the bed): the first
+  // two parts' bottom rows now stand on the bed (was 0x935840c703eb5f33, 5392 and 0xff5cc5b3af9fe0d9, 2267).
+  const unsigned long long want[3] = {0x3b61a1c514810738ULL, 0x36346af0f7436e68ULL, 0x17631120b9e61b43ULL};
+  const std::size_t want_count[3] = {5403, 2367, 1328};
   std::printf("lay_bars as before: %zu, %zu, %zu bars; %016llx %016llx %016llx\n", count[0], count[1], count[2], got[0], got[1],
               got[2]);
   for (int i = 0; i < 3; ++i) CHECK(got[i] == want[i] && count[i] == want_count[i]);
@@ -8284,6 +8494,9 @@ int main() {
   test_thin_walls_follow_the_quilt_switch();
   test_quilt_only_where_nothing_else_lays();   // K3
   test_cut_cells_follow_a_slope();   // K2
+  test_cells_cut_flat_at_the_bed();   // K6
+  test_cell_search_fits_square_faces();   // K7
+  test_edge_rows_stretch();   // K8
   test_cells_across_the_narrowest_width();
   test_band_never_quilts_without_the_switch();
   test_two_line_struts();

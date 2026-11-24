@@ -250,6 +250,10 @@ ll::Settings settings_from(const LatticeLayoutSettings& in) {
   s.struts.width_heavy_mm = in.width_heavy_mm;
   s.cells.by_stress = in.cells_by_stress;
   s.cells.max_step = in.max_step;
+#ifdef TOPOPT_CELL_SEARCH   // K7, K8 (a vendored core before notes27 has neither: the preview lays without them)
+  s.cells.cell_search = in.cell_search;
+  s.cells.stretch_edges = in.stretch_edges;
+#endif
   s.stress.reference_mpa = in.reference_mpa;
   s.stress.percentile = in.percentile;
   s.stress.response = in.response;

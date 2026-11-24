@@ -178,6 +178,10 @@ bool apply_add_round(Bars& bars, const Domain& domain, const AddRound& round, co
     for (double x : op.v)
       if (!std::isfinite(x)) return no("an addition holds a number that is not finite");
   }
+  // notes27: the braces a round lays are marked (Bar::strengthened); the braces already there are known by their ends.
+  std::set<Ends> braces_before;
+  for (const Bar& b : bars.bars)
+    if (b.brace) braces_before.insert(ends_of(b.a, b.b));
   // 1. The brace points, all in one call of rule T's brace maker.
   {
     const std::map<Ends, std::size_t> at = by_ends(bars);
@@ -233,6 +237,8 @@ bool apply_add_round(Bars& bars, const Domain& domain, const AddRound& round, co
       }
     }
   }
+  for (Bar& b : bars.bars)
+    if (b.brace && !braces_before.count(ends_of(b.a, b.b))) b.strengthened |= Bar::kStrengthenedBrace;
   // 2. The widenings, then the links at the widened bars' ends (S8, only wider).
   {
     const std::map<Ends, std::size_t> at = by_ends(bars);
@@ -244,6 +250,7 @@ bool apply_add_round(Bars& bars, const Domain& domain, const AddRound& round, co
       Bar& b = bars.bars[it->second];
       if (op.v[6] > b.width) {
         b.width = op.v[6];
+        b.strengthened |= Bar::kStrengthenedThicker;   // notes27
         ++rep.widened;
         touched.insert(end_key(b.a));
         touched.insert(end_key(b.b));
@@ -268,6 +275,7 @@ bool apply_add_round(Bars& bars, const Domain& domain, const AddRound& round, co
         const double w = std::max(lm, std::min(lw * thin, thick));
         if (w > l.width + 1e-12) {
           l.width = w;
+          l.strengthened |= Bar::kStrengthenedThicker;   // notes27
           ++rep.links_widened;
         }
       }

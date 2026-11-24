@@ -42,6 +42,10 @@ public struct LatticeFileFacts: Equatable, Sendable {
             public var name: String?
             public var thickened: Int?
             public var widestMM: Double?
+            /// ★ notes27: the group's thickest strut setting, and its struts now past it (core's `thickest_setting_mm`,
+            /// `past_thickest`).
+            public var thickestSettingMM: Double? = nil
+            public var pastThickest: Int? = nil
         }
 
         /// ★ notes27 F2: what was changed, plainly — only what the report says is true of the final lattice ("1,554 struts
@@ -63,6 +67,26 @@ public struct LatticeFileFacts: Equatable, Sendable {
             return out
         }
 
+        /// ★ notes27 (362's words): per group, plainly — "Back wall: thickest set 2.25 mm · 4 struts past it" (its name, else
+        /// "Group 2"; with no setting from core, what it thickened and its thickest strut now).
+        public var groupLines: [String] {
+            groups.enumerated().compactMap { (i, g) -> String? in
+                var bits: [String] = []
+                var join = ", "
+                if let s = g.thickestSettingMM, s > 0 {
+                    bits.append("thickest set " + StrengthWords.mm(s))
+                    let k = g.pastThickest ?? 0
+                    bits.append(k > 0 ? LatticeFileFacts.count(k, "strut") + " past it" : "none past it")
+                    join = " · "
+                } else {
+                    if let n = g.thickened, n > 0 { bits.append(LatticeFileFacts.count(n, "strut") + " thickened") }
+                    if let w = g.widestMM, w > 0 { bits.append("thickest " + StrengthWords.mm(w)) }
+                }
+                guard !bits.isEmpty else { return nil }
+                return (g.name ?? "Group \(i + 1)") + ": " + bits.joined(separator: join)
+            }
+        }
+
         /// ★ notes27 F2: the (i) behind "Strengthened": what the Mac did, in a few plain sentences.
         public func info(strutsShort: Int?) -> String {
             var t = "The Mac checked every strut against your load and made the weak ones stronger, one round at a time ("
@@ -78,14 +102,8 @@ public struct LatticeFileFacts: Equatable, Sendable {
                 t += " It braced " + LatticeFileFacts.count(braced, "strut") + " to stop them bowing out."
             }
             if let w = widestMM, w > 0 { t += " The thickest strut is now " + StrengthWords.mm(w) + "." }
-            let named = groups.filter { ($0.thickened ?? 0) > 0 || ($0.widestMM ?? 0) > 0 }
-            if named.count > 1 {
-                for (i, g) in named.enumerated() {
-                    var bits: [String] = []
-                    if let n = g.thickened, n > 0 { bits.append(LatticeFileFacts.count(n, "strut") + " thickened") }
-                    if let w = g.widestMM, w > 0 { bits.append("thickest " + StrengthWords.mm(w)) }
-                    t += " " + (g.name ?? "Group \(i + 1)") + ": " + bits.joined(separator: ", ") + "."
-                }
+            if groups.count > 1 {
+                for line in groupLines { t += " " + line + "." }
             }
             if passing {
                 t += " Every strut now holds."
@@ -184,7 +202,9 @@ public struct LatticeFileFacts: Equatable, Sendable {
         g.groups = (sum["groups"] as? [[String: Any]] ?? []).map {
             Strengthening.Group(name: ($0["name"] as? String) ?? ($0["group"] as? String),
                                 thickened: (($0["thickened_distinct"] ?? $0["thickened"]) as? NSNumber)?.intValue,
-                                widestMM: ($0["widest_mm"] as? NSNumber)?.doubleValue)
+                                widestMM: ($0["widest_mm"] as? NSNumber)?.doubleValue,
+                                thickestSettingMM: ($0["thickest_setting_mm"] as? NSNumber)?.doubleValue,
+                                pastThickest: ($0["past_thickest"] as? NSNumber)?.intValue)
         }
         return g
     }
