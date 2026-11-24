@@ -2665,6 +2665,7 @@ public struct LatticeSetupWizard: View {
             // ★ his iPad notes 11-23 (img 3): the sample's background fills the whole page behind the panel and the top rows (no
             // black bars); its picture is drawn in the part the panel leaves free, framed as it was
             AnyView(LatticeSampleView(inputs: latticeSampleInputs, notInSample: latticeNotInSample)
+                .kept(.init(project: project.id, group: latticeTab))   // ★ his 11-23: each group's sample kept (LatticeSampleKeep)
                 .visible(EdgeInsets(top: portrait ? PageChrome.panelTop + latticePanelHeight : PageChrome.panelTop,
                                     leading: portrait ? 0 : PageChrome.edge + latticePanelWidth(c), bottom: 0, trailing: 0))
                 .id(model.stage)   // each view its own camera: the chunk and the part frame differently

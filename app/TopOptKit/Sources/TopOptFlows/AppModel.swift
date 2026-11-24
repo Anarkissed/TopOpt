@@ -1006,6 +1006,7 @@ public final class AppModel: ObservableObject {
         // Library (B3): a version whose edits went to its draft reopens as it ran
         if let p = project, libraryDrafts[p.id] != nil { forgetLiveVersion(p.id) }
         screen = .home
+        LatticeSampleKeep.shared.forget()   // ★ notes25 (his 11-23): the part closed — its groups' kept samples go
         library.refresh()   // Library: file what changed (a new version, a new part)
         if let p = project { library.comeBack(from: p.id) }   // ★ B1 (note 8): back to the part's project folder
     }

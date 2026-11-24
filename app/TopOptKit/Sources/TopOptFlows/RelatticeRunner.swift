@@ -443,6 +443,10 @@ public enum RelatticeRun {
             throw RelatticeError("the worker did not answer /health")
         }
         let fp = (health["fingerprint"] as? String) ?? "unknown"
+        // ★ notes25 (D9): the Runs on ⚠ follows what this live check says (WorkerHealth.swift)
+        if let live = health["fingerprint"] as? String {
+            WorkerHealth.heard(host: inputs.config.host, port: inputs.config.port, fingerprint: live)
+        }
         guard fp == inputs.config.expectedFingerprint else {
             throw RelatticeError(
                 "worker core mismatch: worker \(fp), app "

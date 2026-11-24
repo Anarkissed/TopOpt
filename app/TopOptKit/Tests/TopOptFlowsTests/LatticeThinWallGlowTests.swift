@@ -46,17 +46,33 @@ final class LatticeThinWallGlowTests: XCTestCase {
 
     /// His rules for the pop-up: by itself only on Structural, Lattice Setup, walls found, not answered; the cell hint only
     /// where he set the cell by hand ("If in auto, then the cell would have gone as small as possible to fit").
-    func testThePopUpsRules() {
+    func testThePopUpsRules() throws {
         let f = LatticeStructuralThinWalls.Finding(minWallMM: 20, share: 0.63)
         XCTAssertTrue(LatticeThinWallPrompt.opensByItself(finding: f, structural: true, setupUp: true, seen: false))
         XCTAssertFalse(LatticeThinWallPrompt.opensByItself(finding: f, structural: true, setupUp: true, seen: true), "★ quiet after Continue")
         XCTAssertFalse(LatticeThinWallPrompt.opensByItself(finding: f, structural: false, setupUp: true, seen: false), "never under Aesthetic")
         XCTAssertFalse(LatticeThinWallPrompt.opensByItself(finding: nil, structural: true, setupUp: true, seen: false), "no walls, no pop-up")
-        let auto = LatticeThinWallPrompt.body(f, cellsPerMember: 5, manualCell: false)
-        let manual = LatticeThinWallPrompt.body(f, cellsPerMember: 5, manualCell: true)
-        XCTAssertTrue(auto.contains("thinner than 20 mm") && auto.contains("5 cells") && auto.contains("Aesthetic lattices thin walls"))
-        XCTAssertFalse(auto.contains("smaller cell"), "★ no cell hint in Auto")
-        XCTAssertTrue(manual.contains("a smaller cell may lattice some of them"), "★ the hint in a Manual cell mode")
+        // ★ RE-PINNED (notes25, D8 — his 11-23: "Give 3 reasons" each with an (i), and what Aesthetic does): the one-paragraph
+        // body became LatticeThinWallPrompt.reasons + aestheticLine + manualHint (LatticeThinWallReasons draws them, the hint
+        // in a Manual cell mode only). The same facts are pinned: the wall's thickness, the 5 cells, Aesthetic latticing thin
+        // walls, and the cell hint's words.
+        let reasons = LatticeThinWallPrompt.reasons(f, cellsAcross: 5)
+        XCTAssertEqual(reasons.count, 3, "★ three reasons")
+        XCTAssertEqual(reasons[0].line, "A lattice needs 5 cells across a wall.")
+        XCTAssertTrue(reasons[0].why.contains("at least 20 mm thick"), "★ the wall's thickness, in reason 1's (i)")
+        XCTAssertTrue(LatticeThinWallPrompt.aestheticLine(cellsAcross: 2).contains("so it can lattice thinner walls"))
+        XCTAssertEqual(LatticeThinWallPrompt.manualHint, "Your cell size is set by hand: a smaller cell may lattice some of them.",
+                       "★ the hint in a Manual cell mode")
+        // ★ notes25 (D10): "set by hand" is Fixed and Swept only — never Auto (his 11-09), nor Fit
+        let ws = try FlexibleSource.code("LatticeThinWallReasons.swift")
+        let gate = try XCTUnwrap(ws.range(of: "if LatticeThinWallPrompt.cellSetByHand(lattice) {"), "★ the hint's gate")
+        XCTAssertTrue(String(ws[gate.upperBound...].prefix(120)).contains("Text(LatticeThinWallPrompt.manualHint)"),
+                      "★ the hint only where the cell is set by hand")
+        var l = LatticeSettings()
+        for (mode, byHand) in [(LatticeCellSizeMode.auto, false), (.fit, false), (.fixed, true), (.swept, true)] {
+            l.cellSizeMode = mode
+            XCTAssertEqual(LatticeThinWallPrompt.cellSetByHand(l), byHand, "★ \(mode): set by hand \(byHand)")
+        }
         XCTAssertEqual(LatticeThinWallPrompt.switchTitle, "Switch to Aesthetic")
         XCTAssertEqual(LatticeThinWallPrompt.continueTitle, "Continue with Structural")
     }

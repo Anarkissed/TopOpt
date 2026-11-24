@@ -27,6 +27,9 @@ public struct SolidReason: Equatable, Sendable {
     /// Said only when this much of the asked-for lattice is solid.
     public static let worthSaying = 0.05
 
+    /// The share as the line says it ("100% of the lattice you asked for is solid").
+    public static func percent(_ share: Double) -> Int { Int((100 * share).rounded()) }
+
     /// The line and its fixes, or nil when too little is solid to say.
     public static func of(share: Double, nocell: [Int], lattice l: LatticeSettings) -> SolidReason? {
         guard share >= worthSaying, nocell.count >= 5 else { return nil }
@@ -34,7 +37,7 @@ public struct SolidReason: Equatable, Sendable {
         // c3b4f855); Other only when nothing else is
         let ranked = [Cause.wallNarrow, .tooFewAcross, .regionShallow, .sliver].sorted { nocell[$0.rawValue] > nocell[$1.rawValue] }
         let cause: Cause = nocell[ranked[0].rawValue] > 0 ? ranked[0] : .other
-        let pct = Int((100 * share).rounded())
+        let pct = percent(share)   // ★ notes25 (D4): the one rounding the notice and "Cannot Lattice" share
         let why: String
         switch cause {
         case .wallNarrow: why = "the walls there are too thin for a whole cell"

@@ -1360,14 +1360,15 @@ public struct WorkspacePlaceholder: View {
                 .closesCornerDrawers(model.cornerDrawers)   // ★ his 11-22 (img 45): a tap on the 3D view closes the open drawer
                 .overlay(alignment: .bottom) {
                     if newEngineDrawn {
-                        VStack(spacing: 6) {
-                            if let why = newEngine.solidReason {   // ★ his ruling 11-14: solid where lattice was asked — why, and fixes
-                                LatticeSolidReasonBar(reason: why, apply: { fix in SolidReason.apply(fix, to: &project.lattice) },
-                                                      checkNozzle: newEngine.nozzleState == .notAsked ? { newEngine.checkNozzle() } : nil)   // ★ 11-16
+                        LatticeLayoutPreviewLines(preview: newEngine)
+                            .laneFoot("new-engine")   // ★ his pick 11-15: very bottom in landscape, just above Settings in portrait
+                            .overlay {   // ★ notes25 (his 11-23): the solid notice on the screen's centre line, above the lines
+                                if let why = newEngine.solidReason {   // ★ his ruling 11-14: solid where lattice was asked — why, and fixes
+                                    LatticeSolidReasonBar(reason: why, apply: { fix in SolidReason.apply(fix, to: &project.lattice) },
+                                                          checkNozzle: newEngine.nozzleState == .notAsked ? { newEngine.checkNozzle() } : nil)   // ★ 11-16
+                                        .laneCentreFoot("new-engine-reason", above: "new-engine")
+                                }
                             }
-                            LatticeLayoutPreviewLines(preview: newEngine)
-                        }
-                        .laneFoot("new-engine")   // ★ his pick 11-15: very bottom in landscape, just above Settings in portrait
                     }
                 }   // ★ the new engine (test): its lines
                 .onChange(of: newEngineOn) { on in
@@ -1391,13 +1392,18 @@ public struct WorkspacePlaceholder: View {
                     // ★ Install 3: his 11-09 thin-wall pop-up on the new engine — once per project, by itself, on Structural,
                     // when the engine leaves lattice solid because the walls are too thin (its own reason, not the old bake's)
                     guard newEngineDrawn else { return }
-                    latticeThinWalls = Self.thinWalls(reason, project: project)
+                    latticeThinWalls = Self.thinWalls(reason, project: project, floorCellMM: newEngine.laid?.floorCellMM ?? 0)   // ★ D10: the lay's floor
                     if let thin = latticeThinWalls, LatticeThinWallPrompt.opensByItself(
                         finding: thin, structural: project.lattice.stageMode == .structural,
                         setupUp: latticeSetupUp, seen: project.lattice.thinWallsNoticeSeen) {
                         latticeThinWallsPromptUp = true
                     }
                     if latticeThinWalls == nil { latticeThinWallsPromptUp = false }
+                    // ★ notes25 (D10): the walls glow on the new engine too — this lay's own solid places (thinWallGlow)
+                    latticeThinWallTints = []
+                    if latticeThinWalls != nil, let m = stageMesh {
+                        Task { let t = await newEngine.thinWallGlow(mesh: m); if newEngine.solidReason == reason { latticeThinWallTints = t } }
+                    }
                 }
                 .onChange(of: newEngine.laid) { _ in
                     // ★ Install 3: the drawer's walls and cells are the new engine's — re-derive the cards when its layout lands
@@ -2150,13 +2156,17 @@ public struct WorkspacePlaceholder: View {
     /// too narrow for the cells across Structural needs, or (the whole part latticed) the part itself too shallow for them
     /// (on his first A1 pad the engine says "the region is too shallow", 93 %); the thinnest wall it lattices is that many of
     /// the smallest cell. A face prism too shallow is his depth, not a thin wall: its own line says so, no pop-up.
-    static func thinWalls(_ r: SolidReason?, project p: ProjectModel) -> LatticeStructuralThinWalls.Finding? {
+    /// ★ notes25 (D10, "walls under 0.0 mm"): the smallest cell is the one core's lay uses — the larger of its own floor
+    /// (`floorCellMM`, the printability floor) and the page's smallest (a Manual cell, a Swept low end); the settings alone
+    /// say 0 in Fit and Auto. The ONE place the wall is worked out; the pop-up, its reasons and the note read it.
+    static func thinWalls(_ r: SolidReason?, project p: ProjectModel, floorCellMM: Double = 0) -> LatticeStructuralThinWalls.Finding? {
         guard let r, (p.lattice.stageMode ?? .structural) == .structural,
               r.cause == .wallNarrow || r.cause == .tooFewAcross || (r.cause == .regionShallow && p.latticeStartsWhole)
         else { return nil }
         let s = LatticeLayoutPreview.settings(p, referenceMPa: 0)
-        let smallest = s.cellMinMM > 0 ? s.cellMinMM : s.cellMM
-        return .init(minWallMM: Double(Swift.max(1, s.minCellsAcross)) * smallest, share: r.share)
+        let smallest = Swift.max(floorCellMM, s.cellMM > 0 ? s.cellMM : s.cellMinMM)
+        return .init(minWallMM: Double(Swift.max(1, s.minCellsAcross)) * smallest, share: r.share,
+                     cellsAcross: Int(Swift.max(1, s.minCellsAcross)))   // ★ notes25 (D8): the engine's own number, said in the pop-up
     }
 
     /// ★ Organic cut 1: Live preview, except Grown on the new engine, always Click to refresh (a Grown lay takes minutes).
@@ -5343,7 +5353,7 @@ public struct WorkspacePlaceholder: View {
         latticeThinWallsPromptUp && latticeSetupUp && !latticeThinWallTints.isEmpty
     }
 
-    /// ★ Install 3: the pop-up on the new engine, from its own reason (no glow yet: the old bake's mask is not made there).
+    /// ★ Install 3: the pop-up on the new engine, from its own reason (★ notes25 D10: its glow is the lay's own, thinWallGlow).
     private var latticeThinWallPopUpOnNewEngine: Bool {
         newEngineDrawn && latticeThinWallsPromptUp && latticeSetupUp && latticeThinWalls != nil
     }
@@ -9629,11 +9639,8 @@ public struct WorkspacePlaceholder: View {
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(DS.Color.textPrimary.color)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(LatticeThinWallPrompt.body(thin, cellsPerMember: strutScene?.minCellsPerMember ?? 5,
-                                                manualCell: project.lattice.cellSizeMode != .auto))
-                    .dsStyle(DS.TypeScale.footnote)
-                    .foregroundStyle(DS.Color.textSecondary.color)
-                    .fixedSize(horizontal: false, vertical: true)
+                // ★ notes25 (D8, his 11-23): why, in three short reasons with their (i)s, what Aesthetic does, and Learn more
+                LatticeThinWallReasons(finding: thin, lattice: project.lattice, oldBakeCells: strutScene?.minCellsPerMember)
                 HStack(spacing: DS.Space.s) {
                     Button {
                         project.switchLatticeStageMode(to: .aesthetic)
@@ -9671,6 +9678,7 @@ public struct WorkspacePlaceholder: View {
             .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
             .shadow(color: .black.opacity(0.35), radius: 24, y: 8)
             .background(CornerPairStyle.publish("lattice-thin-walls-panel"))   // ★ his 11-14: the pop-up's own frame (the card's is the screen's)
+            .background(latticeThinWallGlowUp ? CornerPairStyle.publish("lattice-thin-walls-glow") : nil)   // ★ notes25 D10: the walls glow (tests)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)   // ★ his 11-14: in the centre of the screen
             .background(CornerPairStyle.publish("lattice-thin-walls-card"))
             .accessibilityElement(children: .contain)
@@ -14874,7 +14882,10 @@ extension WorkspacePlaceholder {
                                                 : macStep ? LatticeMacMakeCopy.button : "Lattice",
                                            subtitle: refresh ? LatticePreviewMode.refreshLine : macStep ? LatticeMacMakeCopy.buttonLine : line,
                                            state: refresh ? .ready : state, progress: laying)
-        return LatticeRunButtonFlow(flow: .shared, projectID: project.id, normal: normal, layProgress: newEngine.layProgress,
+        // ★ notes25 (his 11-23, D4): nothing of the lattice he asked for can be laid (the solid notice's own 100 %) — "Cannot
+        // Lattice", greyed, not pressable (LatticeCannotLattice)
+        let cannot = !refresh && !runs && newEngineDrawn && !newEngine.laying && LatticeCannotLattice.applies(newEngine.solidReason)
+        return LatticeRunButtonFlow(flow: .shared, projectID: project.id, normal: LatticeCannotLattice.look(normal, cannot: cannot), layProgress: newEngine.layProgress,
                                     fileRunning: runs, current: { latticePrintKey },
                                     saved: { model.latticeResultApproved(project) }) { tap in   // ★ 11-23: from the saved file
             switch tap {

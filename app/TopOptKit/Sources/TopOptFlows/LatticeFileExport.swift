@@ -577,6 +577,7 @@ public enum LatticeFileRun {
                 throw Failure("The Mac's worker did not answer")
             }
             let fp = (h["fingerprint"] as? String) ?? "unknown"
+            if let live = h["fingerprint"] as? String { WorkerHealth.heard(host: config.host, port: config.port, fingerprint: live) }   // ★ notes25 (D9)
             guard fp == config.expectedFingerprint else { throw Failure("The Mac runs a different engine: update it first") }
         }
 
