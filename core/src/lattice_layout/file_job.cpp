@@ -1355,6 +1355,7 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     r.adrift = out.pieces.adrift;
     r.stepped_edges = out.stepped_edges.size();
     r.thin_solid = out.thin_solid;
+    r.small_patch_cells = out.layout.small_patch_cells;   // K5
     r.cells_by_stress = out.cells_by_stress;
     r.step_held_at = out.step_held_at;   // C24
     r.floor_cell_mm = out.layout.floor_cell_mm;
@@ -1882,6 +1883,10 @@ std::string file_result_json(const FileResult& r) {
                 count(r.adrift), count(r.stepped_edges), count(r.thin_solid),
                 r.cells_by_stress ? "true" : "false", r.step_held_at);
   o += b;
+  if (r.small_patch_cells > 0) {   // K5: written only when the rule made a cell solid (else the report is as it was)
+    std::snprintf(b, sizeof b, "    \"small_patch_cells\": %llu,\n", count(r.small_patch_cells));
+    o += b;
+  }
   if (r.weave_regions > 0) {   // Organic: written only for a job with a weave region (a cube-lattice result is the
                                // released engine's, byte for byte)
     std::snprintf(b, sizeof b, "    \"weave_regions\": %llu, \"strands\": %llu, \"weave_bars\": %llu,\n",

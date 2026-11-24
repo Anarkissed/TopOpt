@@ -857,6 +857,9 @@ struct Layout {
   // Print rule P8 (f): the entries of `solid` that solidify_thin_cuts put there, in the order it put them. Space inside
   // one of these cubes is never taken in by another region's cell (D14b): what the rule made solid stays solid.
   std::vector<std::uint32_t> thin_solid;
+  // K5 (his yes, 2026-11-23): cells lay_cells made solid because their patch holds fewer cells than its count across
+  // (Structural, three or more) along one of its frame's axes; each is an entry of `solid` (TooFewAcross).
+  std::size_t small_patch_cells = 0;
   std::vector<RegionCells> regions;
   // O1: the weave regions (Region::weave), in region order. Each has no cell; its lattice is open space, read by
   // read_open_space in `frame` (the part's own axes, as a curved region's). `spacing_mm` is the smallest spacing of
