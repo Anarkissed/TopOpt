@@ -1142,11 +1142,15 @@ public enum LatticeFileButton {
                                                              onJob: { onJob(true, $0) })
                 _ = keepGoing.call(1, steps, 0)
             }
-            return try fileFromStrengthening(config: config, modelPath: job.modelPath, jobJSON: job.json, projectName: projectName,
-                                             strengthJob: strengthJob, tensor: job.tensor, strengthened: strengthened,
-                                             record: record, densityGCm3: densityGCm3,
-                                             isCancelled: { !keepGoing.call(steps - 1, steps, 0) },
-                                             onJob: { onJob(false, $0) }, early: early)
+            let made = try fileFromStrengthening(config: config, modelPath: job.modelPath, jobJSON: job.json, projectName: projectName,
+                                                 strengthJob: strengthJob, tensor: job.tensor, strengthened: strengthened,
+                                                 record: record, densityGCm3: densityGCm3,
+                                                 isCancelled: { !keepGoing.call(steps - 1, steps, 0) },
+                                                 onJob: { onJob(false, $0) }, early: early)
+            // ★ notes28 (a): the inputs that made it, kept with the result (its version's folder), so Check strength stands
+            // this same lattice another way
+            OrganicResultInputs.remember(.init(json: job.json, strengthJob: strengthJob, tensor: job.tensor), report: made.reportJSON)
+            return made
         }
     }
 

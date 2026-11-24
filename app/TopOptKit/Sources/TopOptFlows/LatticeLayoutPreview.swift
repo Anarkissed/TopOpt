@@ -78,6 +78,8 @@ public final class LatticeLayoutPreview: ObservableObject {
     private var accurateAtLay = true
     /// An exact lattice is being made (the print file waits for it rather than asking again).
     public var layingExact: Bool { laying && accurateAtLay }
+    /// ★ notes28: the part's session still opening behind a lattice read back from the version's folder (its inputs wait).
+    public var opening: Bool { openingAfterRestore != nil }
     /// RED CONTROL (tests): an Organic lay goes straight to the exact lattice, no Draft first (as before 11-21).
     nonisolated(unsafe) public static var controlNoDraftFirst = false
     /// RED CONTROL (tests): nothing is remembered (every change of settings lays again, as before 11-21).

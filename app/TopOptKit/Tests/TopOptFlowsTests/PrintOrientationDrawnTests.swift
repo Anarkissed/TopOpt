@@ -140,13 +140,17 @@ final class PrintOrientationDrawnTests: XCTestCase {
         XCTAssertEqual(row(ResultsPrinting(way: .onEdge))?.title, "On its edge, held by supports")
         // a Y-up STL (the certified up is +Y): "as placed", never "tilted 90°"
         XCTAssertEqual(row(nil)?.title, "Prints as you placed it", "★ the default is his placement, not the file's axis")
+        // ★ RE-PINNED (notes28, his img 85: "It still says 'no supports' even though there should be some manual ones"): each
+        // word says what the FILE carries — painted on the part's overhangs, none for the slicer, or found and not painted
         let painted = try XCTUnwrap(row(ResultsPrinting(way: .chosenFace, slicerSupports: "painted", linked: true)))
-        XCTAssertEqual(painted.detail, "Supports painted for you")
+        XCTAssertEqual(painted.detail, "Supports painted on overhangs")
         XCTAssertEqual(painted.info, "The file turns supports on, only where painted. Bambu, Orca: Type tree (manual). "
             + "PrusaSlicer: For support enforcers only. In Bambu Studio, open the file as a project.")
         XCTAssertEqual(painted.link, "Print orientation")
-        XCTAssertEqual(row(ResultsPrinting(way: .asPlaced, slicerSupports: "off"))?.detail, "No supports needed")
-        XCTAssertEqual(row(ResultsPrinting(way: .asPlaced, slicerSupports: "needed"))?.detail, "Supports needed here")
+        XCTAssertEqual(row(ResultsPrinting(way: .asPlaced, slicerSupports: "off"))?.detail, "No slicer supports needed")
+        XCTAssertEqual(row(ResultsPrinting(way: .asPlaced, slicerSupports: "needed"))?.detail, "Overhangs need slicer supports")
+        XCTAssertEqual(row(ResultsPrinting(way: .asPlaced, slicerSupports: "needed"))?.info, PrintOrientationWords.neededInfo,
+                       "★ notes28: how to slice it, in its (i)")
         for w in [PrintWay.asPlaced, .chosenFace, .onEdge] {
             let t = PrintOrientationWords.title(w)
             // (362's words for the edge, "On its edge, held by supports", are six: a row's title, not a caption)
@@ -159,7 +163,7 @@ final class PrintOrientationDrawnTests: XCTestCase {
         // Details › Printing: no "load paths"
         m.printing = ResultsPrinting(way: .chosenFace, slicerSupports: "painted")
         let orient = m.detailRows(.printing, version: nil).first { $0.label == "Orientation" }?.value ?? ""
-        XCTAssertEqual(orient, "Prints on the chosen face · layers across the height · Supports painted for you")
+        XCTAssertEqual(orient, "Prints on the chosen face · layers across the height · Supports painted on overhangs")   // ★ RE-PINNED (notes28)
         XCTAssertFalse(ResultsModel.orientationSummary(tiltDegrees: 0, supportCm3: 0, supportLabel: "").contains("load paths"),
                        "★ never computed: never said")
         // the Settings Plate row
@@ -169,7 +173,9 @@ final class PrintOrientationDrawnTests: XCTestCase {
 
     func testTheFilesOwnSupportsWord() throws {
         var r = IPadNotes1121Tests.report()
-        for (word, line) in [("painted", "Supports painted for you"), ("off", "No supports needed"), ("needed", "Supports needed here")] {
+        // ★ RE-PINNED (notes28): what the file carries
+        for (word, line) in [("painted", "Supports painted on overhangs"), ("off", "No slicer supports needed"),
+                             ("needed", "Overhangs need slicer supports")] {
             r["slicer_supports"] = word
             let f = try XCTUnwrap(LatticeFileFacts.decode(r))
             XCTAssertEqual(f.slicerSupports, word)

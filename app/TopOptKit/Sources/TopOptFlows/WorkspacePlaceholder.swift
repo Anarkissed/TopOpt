@@ -2162,13 +2162,22 @@ public struct WorkspacePlaceholder: View {
                                                      isCancelled: isCancelled, stage: said)
         }
         guard let request = model.makeLatticeRunRequest() else { throw LatticeFileRun.Failure("Import a part and set a lattice region first.") }
-        let strengthJob = LatticeFileJob.checksStrength(project.lattice, wired: LatticeFileButton.wired) ? strengthJobJSON(request) : nil
+        var strengthJob = LatticeFileJob.checksStrength(project.lattice, wired: LatticeFileButton.wired) ? strengthJobJSON(request) : nil
         let made: Result<LatticeFileJob.ForPart, LatticeFileJob.NoJob>
-        if organic {
-            let inputs = try await organicMacInputsWhenReady()
+        // ★ notes28 (his img 82, "notLaid"): the lattice OF THIS RESULT — (a) the inputs that made its file, kept with it; else
+        // (b) its exact lattice laid on this iPad first, on Results too (the preview lays nothing here), as long as it takes
+        if organic, let path = project.importedFile?.path,
+           let kept = OrganicResultInputs.of(report: outcome.reportJSON, dir: model.store.organicInputsDir(id: project.id)),
+           let standing = OrganicResultInputs.standing(kept, up: up, modelPath: path) {
+            made = .success(standing)
+            strengthJob = kept.strengthJob
+        } else if organic {
+            let inputs = try await PrintCheckLay.organic(organicCheckPreview(isCancelled: isCancelled, said: said),
+                                                         isCancelled: isCancelled, said: said)
             made = LatticeFileJob.forOrganic(project, groups: inputs.groups, tensor: inputs.tensor, referenceMPa: newEngineStress.referenceMPa,
                                              strengthJob: strengthJob, printUp: up)
         } else {
+            try await stressReadyForCheck(isCancelled: isCancelled, said: said)   // ★ notes28: By stress grades by its field
             made = LatticeFileJob.forPart(project, stress: newEngineStress, strengthJob: strengthJob, printUp: up)
         }
         let job: LatticeFileJob.ForPart
@@ -2182,6 +2191,43 @@ public struct WorkspacePlaceholder: View {
                                                 request: request.withJobMode(LatticeFileButton.jobMode), projectName: project.name,
                                                 densityGCm3: model.densityGCm3(for: project.material), up: up, before: before,
                                                 required: required, isCancelled: isCancelled, stage: said)
+    }
+
+    /// ★ notes28 (b): the iPad's preview as the check drives it — the exact lattice of this result's settings, asked on Results
+    /// too (`newEngineOn` is false there, so its refresh laid nothing), followed until it lands; where the page does not draw
+    /// it, it lets go once its inputs are taken, and Cancel stops it.
+    @MainActor
+    private func organicCheckPreview(isCancelled: @escaping @Sendable () -> Bool,
+                                     said: @escaping @Sendable (String) -> Void) -> PrintCheckLay.Preview {
+        let preview = newEngine, p = project
+        return PrintCheckLay.Preview(
+            inputs: { try await preview.organicMacInputs(project: p, stress: newEngineStress) },
+            stressReady: { try await stressReadyForCheck(isCancelled: isCancelled, said: said) },
+            lay: { preview.update(project: p, on: true, solid: false, stress: newEngineStress, checkNozzle: false, exact: true) },
+            busy: { preview.laying || preview.opening },
+            problem: { preview.problem },
+            stop: { if !newEngineOn { preview.clear() } })
+    }
+
+    /// ★ notes28: the stress this result's lattice follows, ready before its check — the version's own stress check read back,
+    /// else run here and waited for (Organic follows its directions; a cell lattice graded By stress reads its field).
+    @MainActor
+    private func stressReadyForCheck(isCancelled: @escaping @Sendable () -> Bool,
+                                     said: @escaping @Sendable (String) -> Void) async throws {
+        guard LatticeLayoutPreview.needsStress(project.lattice) else { return }
+        let ctxs = model.makeLatticeSimContexts()
+        guard !ctxs.isEmpty else { return }   // nothing to solve: the lay (or the job) says what it needs
+        if latticeSim.field == nil { _ = latticeSim.adoptSaved(for: ctxs) }
+        let lacksDirections = LatticeLayoutPreview.organic(project.lattice) && latticeSim.field?.stressTensor.isEmpty == true
+        if latticeSim.phase != .running, latticeSim.field == nil || latticeSim.isStale(against: ctxs) || lacksDirections {
+            said(PrintOrientationWords.stressFirst)
+            latticeSim.run(ctxs)
+        }
+        while latticeSim.phase == .running {
+            if isCancelled() { throw CancellationError() }
+            try await Task.sleep(nanoseconds: PrintCheckLay.pollNanoseconds)
+        }
+        if case .failed = latticeSim.phase, latticeSim.field == nil { throw LatticeFileRun.Failure(PrintOrientationWords.stressFailedText) }
     }
 
     /// ★ notes27 P6: "Keep orientation" — the face he kept is set (his 11-23 rule: a change on a version with a result makes the

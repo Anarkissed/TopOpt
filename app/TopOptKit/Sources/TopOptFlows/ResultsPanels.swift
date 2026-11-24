@@ -212,7 +212,7 @@ public enum ResultsChecks {
                                 detail: PrintOrientationWords.supports(pr.slicerSupports)
                                     ?? (tab.supportCm3 > 0 ? "About " + String(format: "%.1f", tab.supportCm3) + " cm³ of support"
                                                            : "No support needed"),
-                                tab: .printing, info: pr.slicerSupports == "painted" ? PrintOrientationWords.paintedInfo : nil,
+                                tab: .printing, info: PrintOrientationWords.supportsInfo(pr.slicerSupports),   // ★ notes28
                                 link: pr.linked ? PrintOrientationWords.rowLink : nil))
         // ★ B4 (note 14, ledger 15 (c)): with E1's finishing the thin-spot row says what core did — "Thin spots fixed · 6", or
         // where it could not, "2 thin spots left" and why there; a result from before E1 keeps today's row
@@ -332,7 +332,9 @@ extension ResultsModel {
         case .printing:
             if let tab {
                 add("Orientation", printing?.line ?? tab.orientationSummary)   // ★ notes27
-                add("Support", tab.supportLabel)
+                // ★ notes28 (his img 85: "Support 1.9 cm³" beside "No supports needed"): that number is the strength check's
+                // grid estimate, not what the file carries; a print file that says its supports says them (its Supports row)
+                if reportBlocks?.printFile?.slicerSupports == nil { add("Support", tab.supportLabel) }
                 add("Layer shear", tab.layerShear.label)
                 if tab.minFeatureViolations > 0 { add("Thin spots", tab.minFeatureWarning.isEmpty ? "\(tab.minFeatureViolations) regions" : tab.minFeatureWarning) }
             }
