@@ -130,6 +130,27 @@ const char* kModelHead =
     " <resources>\r\n  <object id=\"1\" type=\"model\">\r\n   <mesh>\r\n"
     "    <vertices>\r\n";
 
+// P3: the same head declaring PrusaSlicer's namespace (its enforcer mark is slic3rpe:custom_supports).
+const char* kModelHeadPainted =
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
+    "<model unit=\"millimeter\" xml:lang=\"en-US\" "
+    "xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\" "
+    "xmlns:slic3rpe=\"http://schemas.slic3r.org/3mf/2017/06\">\r\n"
+    " <resources>\r\n  <object id=\"1\" type=\"model\">\r\n   <mesh>\r\n"
+    "    <vertices>\r\n";
+
+std::string xml_escaped(const std::string& s) {
+  std::string o;
+  for (const char ch : s) {
+    if (ch == '&') o += "&amp;";
+    else if (ch == '<') o += "&lt;";
+    else if (ch == '>') o += "&gt;";
+    else if (ch == '"') o += "&quot;";
+    else o += ch;
+  }
+  return o;
+}
+
 }  // namespace
 
 StreamingThreeMfWriter::StreamingThreeMfWriter(const std::string& path)
@@ -159,7 +180,8 @@ StreamingThreeMfWriter::StreamingThreeMfWriter(const std::string& path, const Op
     if (!probe)
       throw ThreeMfStreamError("cannot open 3MF file for writing: " + path_);
   }
-  put(kModelHead, std::strlen(kModelHead));
+  const char* head = options_.supports ? kModelHeadPainted : kModelHead;
+  put(head, std::strlen(head));
 }
 
 void StreamingThreeMfWriter::put(const char* s, std::size_t n) {
@@ -182,14 +204,25 @@ std::uint64_t StreamingThreeMfWriter::add_vertex(const Vec3& v) {
 }
 
 void StreamingThreeMfWriter::add_indexed(std::uint64_t a, std::uint64_t b, std::uint64_t c) {
+  add_indexed(a, b, c, false);
+}
+
+void StreamingThreeMfWriter::add_indexed(std::uint64_t a, std::uint64_t b, std::uint64_t c, bool paint) {
   if (finished_ || !options_.indexed)
     throw ThreeMfStreamError("StreamingThreeMfWriter: add_indexed needs an indexed writer not yet finished");
   if (a >= vert_count_ || b >= vert_count_ || c >= vert_count_)
     throw ThreeMfStreamError("StreamingThreeMfWriter: a triangle names a vertex not yet added");
-  char buf[128];
-  const int n = std::snprintf(buf, sizeof(buf), "     <triangle v1=\"%llu\" v2=\"%llu\" v3=\"%llu\"/>\r\n",
+  if (paint && !options_.supports)
+    throw ThreeMfStreamError("StreamingThreeMfWriter: a painted triangle needs Options::supports");
+  char buf[192];
+  // P3: a whole triangle painted as a support enforcer: "4" in both slicers' triangle-selector code (state 1 << 2).
+  const int n = std::snprintf(buf, sizeof(buf),
+                              paint ? "     <triangle v1=\"%llu\" v2=\"%llu\" v3=\"%llu\" paint_supports=\"4\" "
+                                      "slic3rpe:custom_supports=\"4\"/>\r\n"
+                                    : "     <triangle v1=\"%llu\" v2=\"%llu\" v3=\"%llu\"/>\r\n",
                               static_cast<unsigned long long>(a), static_cast<unsigned long long>(b),
                               static_cast<unsigned long long>(c));
+  painted_ += paint ? 1 : 0;
   tris_.write(buf, n);
   if (!tris_) throw ThreeMfStreamError("failed writing 3MF triangle temp: " + tris_path_);
   tris_len_ += static_cast<std::uint64_t>(n);
@@ -277,6 +310,31 @@ void StreamingThreeMfWriter::finish() {
   entries[0].size = entries[0].csize = entries[0].data.size();
   entries[1].crc = crc32_of(entries[1].data);
   entries[1].size = entries[1].csize = entries[1].data.size();
+  // P3: support ON for the object, only the painted places supported (Bambu / Orca, then PrusaSlicer). PrusaSlicer
+  // builds an object's volumes from its config, so its one volume names every triangle.
+  if (options_.supports) {
+    const std::string name = xml_escaped(options_.object_name);
+    ZipEntry bambu, prusa;
+    bambu.name = "Metadata/model_settings.config";
+    bambu.data = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<config>\n  <object id=\"1\">\n"
+                 "    <metadata key=\"name\" value=\"" + name + "\"/>\n"
+                 "    <metadata key=\"enable_support\" value=\"1\"/>\n"
+                 "    <metadata key=\"support_type\" value=\"" + xml_escaped(options_.support_type) + "\"/>\n"
+                 "  </object>\n</config>\n";
+    prusa.name = "Metadata/Slic3r_PE_model.config";
+    prusa.data = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<config>\n <object id=\"1\" instances_count=\"1\">\n"
+                 "  <metadata type=\"object\" key=\"name\" value=\"" + name + "\"/>\n"
+                 "  <metadata type=\"object\" key=\"support_material\" value=\"1\"/>\n"
+                 "  <metadata type=\"object\" key=\"support_material_auto\" value=\"0\"/>\n"
+                 "  <volume firstid=\"0\" lastid=\"" + std::to_string(tri_count_ > 0 ? tri_count_ - 1 : 0) + "\">\n"
+                 "   <metadata type=\"volume\" key=\"name\" value=\"" + name + "\"/>\n"
+                 "  </volume>\n </object>\n</config>\n";
+    for (ZipEntry* e : {&bambu, &prusa}) {
+      e->crc = crc32_of(e->data);
+      e->size = e->csize = e->data.size();
+      entries.push_back(*e);
+    }
+  }
 #ifdef TOPOPT_HAVE_ZLIB
   if (options_.deflate) entries[2].method = 8;
 #endif

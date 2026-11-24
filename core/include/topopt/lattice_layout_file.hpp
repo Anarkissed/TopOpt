@@ -27,7 +27,10 @@
 #include "topopt/lattice_layout_mesh.hpp"
 #include "topopt/lattice_layout_organic.hpp"
 #include "topopt/mesh.hpp"
+#include "topopt/print_frame.hpp"
+#include "topopt/print_orientation.hpp"
 #include "topopt/step.hpp"
+#include "topopt/support_paint.hpp"
 
 namespace topopt::lattice_layout {
 
@@ -90,6 +93,7 @@ struct FileReport {
   std::size_t stands_added = 0;      // of `posts`, those under a weave's long shallow runs (O8)
   std::size_t weave_specks_ignored = 0, weave_held_ignored = 0;   // O10: PrintableReport's
   std::size_t part_overhangs = 0;   // PrintableReport's: the part's own overhangs, counted, never propped
+  std::vector<Vec3> part_overhang_at;   // P3: PrintableReport's: where (the last pass)
   std::size_t posts_outside = 0;    // ★ 362 11-23, PrintableReport's (F2): posts not added, their column leaving the part
   bool stopped_repeating = false;   // ★ 362 11-23, PrintableReport's (F3): stopped, a try having nothing new to try
   // O17, O18: PrintableReport's: what the sag pass did, and the bars the file was made of when it changed any (null:
@@ -186,6 +190,13 @@ struct StrengthAsk {
   const Bars* bars = nullptr;
   const std::vector<char>* kept = nullptr;
   double light_width_mm = 0.0;
+  // P2 (print_frame.hpp): the job's print frame. On: the session, the bars and part_lo/hi are in the print frame; the
+  // check turns its strength job (and that job's part) through the same door, and writes every position it reports,
+  // and fields.bin, back in the model frame. Off: as before.
+  PrintFrame frame;
+  // P4 (Phase 2): the print-orientation candidates' ups, in the job's frame (print_candidates); the check judges
+  // each (StrengthDone::orientation). Empty: none.
+  std::vector<Vec3> orientation_ups;
 };
 struct StrengthDone {
   bool ok = false;
@@ -195,6 +206,10 @@ struct StrengthDone {
   std::string json;                   // ok (run): the `strength` block, an object
   std::vector<std::string> files;     // ok (run): the files written into out_dir, by bare name
   bool accepted = false;
+  // P4 (his print orientation): the six candidates' guessed strength and the part's own support, in the job's frame
+  // (print_orientation.hpp); the file job adds the bed and writes "print_orientation". Not known: the check made none
+  // (the cube check, so far).
+  OrientationStrengthsN orientation;
 };
 // The check is the CLI's (run_job.cpp: lattice_file_strength_check): core's lattice layout is always built, and the
 // old check needs the solver and the importer. `before` reads the strength job (cheap; no solve) and may refuse it;
@@ -243,7 +258,20 @@ struct FileJob {
   std::vector<OrganicGroup> organic_groups;
   Settings settings;
   FileOptions options;
+  // P2, his print orientation (key "print_frame": {"up": [x, y, z]}, the up in the part's own coordinates; Phase 1: one
+  // of its six axes). Not given: off, and the job is as before, byte for byte. On: load_file_job turns every input
+  // through the door (print_frame.hpp, turn_file_job_inputs) once the part is open; the file is written standing on
+  // the chosen face; the result's positions are turned back (turn_result_to_model) and it carries "print_frame".
+  PrintFrame print_frame;
 };
+
+// P2: the door for a lattice file job: the zones, the cut pieces' cuts (regions and Protect skins), the demand field and
+// the tensor field. The part is turned where it is opened (turn_step_model). A strengthening's additions and width
+// floors are NOT turned: a strengthening of a job with a print frame ran in that frame and wrote them there.
+void turn_file_job_inputs(const PrintFrame& f, FileJob& job);
+// The same door for a layout's own inputs (what the iPad's bridge session holds: its settings and its tensor). An
+// Organic ask's build_dir must then be +Z (the print frame's up): the caller sets it.
+void turn_layout_inputs(const PrintFrame& f, Settings& settings, std::shared_ptr<const TensorField>& tensor);
 
 // THE DEMAND FILE (a stress result for By stress, R16 to R18), little-endian:
 //   8 bytes "TODEMAND", int32 version (1), int32 nx, ny, nz, float64 origin x, y, z, float64 spacing,
@@ -358,11 +386,31 @@ struct FileResult {
   bool strength_ran = false;
   bool strength_accepted = false;
   std::string strength_json;
+  // P4: the print orientation ranking and recommendation ("print_orientation"), when the check gave its numbers.
+  std::string orientation_json;
+  // P3: the part's own overhang places the print check found (its last pass), and what was painted for them in the
+  // 3MF (support_paint.hpp; `painted.at` in the model frame once the result is turned back). The result's
+  // "slicer_supports" follows: "painted" (some painted), "needed" (places found, none could be painted: an STL, or no
+  // part triangle under them), "off" (none found).
+  std::size_t part_overhang_places = 0;
+  SupportPaint painted;
+  // P4 (Phase 2, his "edges held by supports"): the job stands the part on an EDGE; its stand supports (bands on the
+  // edge's two faces, orientation_stand), painted when it stands (`stand.stands`).
+  bool stand_edge = false;
+  OrientationCandidate stand;
+  std::size_t stand_triangles = 0;
+  double stand_area_mm2 = 0.0;
   double ms_strength = 0.0;
   // Where the time went, ms.
   double ms_import = 0.0, ms_measure = 0.0, ms_read = 0.0, ms_cells = 0.0, ms_bars = 0.0;
   double ms_write = 0.0, ms_total = 0.0;
+  // P2: the job's print frame (off: as before). On, the result's positions are in the model frame
+  // (turn_result_to_model) and the file is in the print frame; the result says which ("print_frame").
+  PrintFrame print_frame;
 };
+// P2: every position of a result made in the print frame, turned back to the model frame (once, before it is written).
+// The strength block is turned where the check writes it.
+void turn_result_to_model(const PrintFrame& f, FileResult& r);
 
 // The whole job for a part already in memory: checks it, lays it, makes the mesh, writes
 // the STL at `stl_path`. Never throws: every failure is a FileResult with its plain line.
