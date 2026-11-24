@@ -82,7 +82,10 @@ final class IPadNotes1121Tests: XCTestCase {
         // per round; the file's line carries no strut count)
         XCTAssertEqual(checks[0].more, "2 braced", "the braces (no widest strut in this report)")
         XCTAssertEqual(checks[1].detail, "3MF · 25.4 MB")
-        XCTAssertEqual(checks[1].more, "Turn supports off in your slicer")
+        // ★ RE-PINNED (notes27, his print orientation: the file's own supports word is the orientation row's line — "No supports
+        // needed" / "Supports painted for you" — never "Turn supports off", which core hard-coded before P3)
+        XCTAssertNil(checks[1].more)
+        XCTAssertEqual(f.slicerSupports, "off")
         // ★ RE-PINNED (notes25 C3 (6): the strength rows are the governing answer's — LatticeStrengthAnswer; the facts keep the
         // strengthening)
         XCTAssertEqual(f.rows(.strength).map(\.label), ["Strengthened"])

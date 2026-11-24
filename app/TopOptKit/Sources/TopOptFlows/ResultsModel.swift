@@ -739,6 +739,10 @@ public final class ResultsModel: ObservableObject {
     @Published public private(set) var selectedIndex: Int = 0
     /// Stress overlay toggle (colors the variant mesh by von Mises — Metal follow-up).
     @Published public var stressOn: Bool = false
+    /// ★ notes27 (his print orientation, SPEC 2b): how the shown result prints (the screen sets it); Details says it.
+    public var printing: ResultsPrinting?
+    /// ★ notes27: what the result's report says about printing (read with the report).
+    public private(set) var printFacts = PrintReportFacts.none
     /// Flex animation toggle (M7.viz.3): displace the mesh by the FEA displacement
     /// field, looping rest→full→rest (or a static full-deflection frame under
     /// reduced-motion). Only meaningful when the selected variant `hasFlex`.
@@ -1243,6 +1247,7 @@ public final class ResultsModel: ObservableObject {
             scenarioResults = ScenarioResult.parse(o)
             latticeAnswer = LatticeStrengthAnswer.decode(report: o)   // ★ notes25 C3
             solidMargins = SolidMarginVoxels.decode(report: o)
+            printFacts = PrintReportFacts.decode(o)   // ★ notes27: its print frame, supports word, ranking, re-check
         }
         clearanceNotes = ResultsModel.clearanceNotes(outcome.appliedClearances)
         faceProtectionNotes = ResultsModel.faceProtectionNotes(outcome.appliedFaceProtections)
@@ -3024,9 +3029,8 @@ public final class ResultsModel: ObservableObject {
     /// (DECISIONS 2026-07-11 chose (b) omit).
     static func orientationSummary(tiltDegrees tilt: Int, supportCm3 cm3: Double,
                                    supportLabel: String, remote: Bool = false) -> String {
-        let base = tilt <= 6
-            ? "Print upright — load paths align with the layer direction."
-            : "Tilt \(tilt)° from vertical — load paths align with the layer direction."
+        // ★ notes27 (his print orientation, SPEC 2b): no "load paths align with the layer direction" — nothing computes it
+        let base = tilt <= 6 ? "Print upright." : "Tilt \(tilt)° from vertical."
         // The orientation itself is in the report (valid for a remote run); only the
         // support estimate is unavailable, so omit that clause rather than claim a
         // support figure the worker didn't compute (097).

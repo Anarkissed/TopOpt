@@ -37,7 +37,9 @@ public struct LatticeFileFacts: Equatable, Sendable {
     public var bridges: Int
     public var posts: Int
     public var postsMM: Double
-    public var slicerSupportsOff: Bool
+    /// ★ notes27 (his print orientation, P3 in core): what the file tells the slicer about supports — "painted" (the part's own
+    /// overhangs painted, support on for them only), "needed" (found, none could be painted), "off" (none); nil: not said.
+    public var slicerSupports: String?
     public var fileSeconds: Double?
     // the layer check
     public var printClean: Bool
@@ -76,7 +78,7 @@ public struct LatticeFileFacts: Equatable, Sendable {
         return LatticeFileFacts(
             fileName: file, fileBytes: int(r["file_bytes"]), triangles: int(mesh["triangles"]),
             struts: int(layout["bars"]), strands: int(layout["strands"]), bridges: int(mesh["bridges"]),
-            posts: int(mesh["posts"]), postsMM: num(mesh["posts_mm"]), slicerSupportsOff: (r["slicer_supports"] as? String) == "off",
+            posts: int(mesh["posts"]), postsMM: num(mesh["posts_mm"]), slicerSupports: r["slicer_supports"] as? String,
             fileSeconds: (ms["total"] as? NSNumber).map { $0.doubleValue / 1000 },
             printClean: p["clean"] as? Bool ?? false, layers: int(p["layers"]), midairStarts: int(p["midair_starts"]),
             longestBridgeMM: num(p["longest_bridge_reach_mm"]), firstLayerMM2: num(p["first_layer_mm2"]),
@@ -127,7 +129,7 @@ public struct LatticeFileFacts: Equatable, Sendable {
         let size = fileBytes > 0 ? " \u{00B7} " + Self.bytes(fileBytes) : ""
         out.append(ResultsCheck(kind: .ok, title: "Print file ready",
                                 detail: fileKind + size,   // ★ notes25 C3: no strut count (the file's bars are another unit)
-                                more: slicerSupportsOff ? "Turn supports off in your slicer" : nil, tab: .printing))
+                                tab: .printing))   // ★ notes27: the supports line is the orientation row's (from the file's own word)
         out.append(printClean
             ? ResultsCheck(kind: .ok, title: "Prints layer by layer", detail: "Nothing starts in mid-air", tab: .printing)
             : ResultsCheck(kind: .warn, title: "Check the layers", detail: midairStarts > 0
@@ -158,7 +160,7 @@ public struct LatticeFileFacts: Equatable, Sendable {
             if firstLayerMM2 > 0 { add("On the bed", String(format: "%.0f mm\u{00B2}", firstLayerMM2)) }
             if longestBridgeMM > 0 { add("Longest bridge", String(format: "%.1f mm", longestBridgeMM)) }
             if thinIslands > 0 { add("Thin islands", Self.number(thinIslands) + " (small spots in a layer)") }
-            if slicerSupportsOff { add("Slicer", "Supports off") }
+            if let w = PrintOrientationWords.supports(slicerSupports) { add("Supports", w) }   // ★ notes27
         case .run:
             if struts > 0 { add("Bars in the file", Self.number(struts)) }   // ★ notes25 C3 (7)
             if let g = strengthening, g.seconds > 0 { add("Strengthening", Self.duration(g.seconds)) }

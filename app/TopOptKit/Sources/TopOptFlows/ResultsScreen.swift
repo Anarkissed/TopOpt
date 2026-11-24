@@ -13,6 +13,7 @@ import SwiftUI
 import TopOptDesign
 import TopOptKit
 import os
+import simd
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -113,7 +114,13 @@ public struct ResultsScreen: View {
     @State private var orientOpen = false
     /// The latest camera→screen projection the viewer publishes, so the hot-spot
     /// marker (M7.viz.2) tracks the worst point as the camera orbits/zooms.
-    @State private var projection: CameraProjection?
+    @State private var rawProjection: CameraProjection?
+    /// ★ notes27 (his print orientation, SPEC 2a): the camera's projection with the part's turn in front of it, so every overlay
+    /// pinned to a point of the part (model frame) lands on the part as it is drawn, standing the way it prints.
+    private var projection: CameraProjection? {
+        guard let p = rawProjection, let c = viewerMesh?.bounds.center else { return rawProjection }
+        return PrintDraw.modelProjection(p, centre: c, rotation: printSettle)
+    }
     /// Whether the hot-spot marker's value/margin callout is expanded (tap to toggle).
     @State private var hotSpotExpanded = false
     /// Whether the streaming pill's progress drawer is open (tap the pill to toggle):
@@ -178,6 +185,7 @@ public struct ResultsScreen: View {
                 takeOpenOn: (() -> Int?)? = nil,
                 version: String? = nil, pickedVariant: Int? = nil, onPick: ((Int) -> Void)? = nil,
                 printOrientation: ResultsPrintOrientation? = nil,
+                printUp: SIMD3<Float>? = nil, chosenFace: Bool = false,
                 certify: OrganicCertifyCard? = nil) {
         // `resultsModel` is a TEST SEAM (the M7 /app/ house style — the run is tested
         // through an injected scheduler / runner / notifier the same way). The screen
@@ -210,7 +218,26 @@ public struct ResultsScreen: View {
         self.takeOpenOn = takeOpenOn
         self.printOrientation = printOrientation
         self.certify = certify
+        // ★ notes27: one reference (WorkspaceBodySizeTests: Results' own size has 16 bytes of room)
+        self.printSource = printUp == nil ? nil
+            : ResultsPrintSource(up: printUp, chosenFace: chosenFace)
     }
+
+    /// ★ notes27 (his print orientation, SPEC 2a: "I want the part first drawn the way it prints"): the way up it prints (the
+    /// part's own coordinates); the part stands on the bed that way. nil (previews, tests): drawn in the file's own frame.
+    var printUp: SIMD3<Float>? { printSource?.up }
+    /// ★ notes27: how it prints and what "Print orientation" runs, held by reference (the screen's size must not grow).
+    let printSource: ResultsPrintSource?
+    /// ★ notes27: he chose the face it prints on (a plate), not his placement.
+    var chosenFace: Bool { printSource?.chosenFace ?? false }
+    /// ★ notes27 (SPEC 2b): how the shown result prints, in his words, and what its file tells the slicer.
+    var printing: ResultsPrinting {
+        let f = model.printFacts
+        return ResultsPrinting(way: f.onEdge ? .onEdge : chosenFace ? .chosenFace : .asPlaced,
+                               slicerSupports: f.slicerSupports, linked: false)
+    }
+    /// The turn the part is drawn with: its print up to the screen's up.
+    var printSettle: simd_quatf { printUp.map(PrintDraw.settle(up:)) ?? simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0)) }
 
     /// ★ B4 (note 12, Q9): the orientation line's source; nil draws no line.
     let printOrientation: ResultsPrintOrientation?
@@ -280,7 +307,9 @@ public struct ResultsScreen: View {
             DS.Color.background.color.ignoresSafeArea()
             MetalMeshView(mesh: viewerMesh,
                           camera: cameraModel,
-                          onProjection: { projection = $0 },
+                          settleRotation: printSettle, settleAnimated: false,   // ★ notes27: drawn the way it prints
+                          showGround: printUp != nil,                                  // ... on the bed
+                          onProjection: { rawProjection = $0 },
                           stressTints: stressTints,
                           stressMultiplier: Float(stressMultiplier),
                           reveal: viewerReveal,
@@ -329,7 +358,7 @@ public struct ResultsScreen: View {
             if detailsOpen {
                 // ★ R-a (mockup #topo-results-details): the drawer from the bottom, the page's width
                 ResultsDetailsDrawer(tab: $detailsTab, versionTitle: selectedRow?.title ?? "",
-                                     rows: { model.detailRows($0, version: selectedRow) },
+                                     rows: { model.printing = printing; return model.detailRows($0, version: selectedRow) },   // ★ notes27
                                      close: { withAnimation(DS.Motion.sheetIn) { detailsOpen = false } })
                     .frame(maxHeight: .infinity, alignment: .bottom)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -347,7 +376,8 @@ public struct ResultsScreen: View {
             if compare != nil {
                 ResultsCompareView(model: model, rows: versionRows, session: $compare, scenarioPick: $scenarioPick,
                                    close: { compare = nil },
-                                   use: { tab in model.select(tab); compare = nil })
+                                   use: { tab in model.select(tab); compare = nil },
+                                   settle: printSettle, onBed: printUp != nil)   // ★ notes27: as it prints
                     .transition(.opacity)
                     .zIndex(5)
             }
@@ -1342,7 +1372,8 @@ public struct ResultsScreen: View {
                                     weakest: model.latticeAnswer?.place ?? model.hotSpot.map { SIMD3<Double>($0.position) },
                                     struts: blocks?.latticeFile,   // ★ his ruling 11-17: a new-engine Lattice run's struts
                                     printFile: blocks?.printFile,   // ★ his 11-21: its file, strengthening and layers
-                                    answer: model.latticeAnswer)   // ★ notes25 C3: a print file's one strength line
+                                    answer: model.latticeAnswer,   // ★ notes25 C3: a print file's one strength line
+                                    printing: printing)   // ★ notes27: how it prints, in his words
     }
 
     /// Bottom left: the streaming pill, a latticed version's mesh state, then the Versions panel.
@@ -1504,7 +1535,7 @@ public struct ResultsScreen: View {
                 if sc.count >= 2 { ResultsScenarioPicker(scenarios: sc, pick: $scenarioPick).padding(.top, 6) }
                 ResultsChecksAndDetails(checks: checks, checksOpen: $checksOpen, openCheck: $openCheck, detailsOpen: $detailsOpen,
                                         tab: $detailsTab, versionTitle: selectedRow?.title ?? "",
-                                        rows: { model.detailRows($0, version: selectedRow) }, pill: crowded)
+                                        rows: { model.printing = printing; return model.detailRows($0, version: selectedRow) }, pill: crowded)   // ★ notes27
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)

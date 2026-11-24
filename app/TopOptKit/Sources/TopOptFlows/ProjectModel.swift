@@ -406,6 +406,7 @@ public final class ProjectModel: ObservableObject {
         self.faceRegions = snapshot.faceRegions ?? FaceRegionModel()
         self.latticePageManual = snapshot.latticePageManual ?? false   // ★ 11-10 (img08)
         self.newModel = snapshot.newModel   // ★ Upload new version (decision 12): a group that found no face stays until he picks
+        self.buildOrientation.plateUp = snapshot.plateUp   // ★ notes27: the face he chose for the bed, kept with the project
         if let lost = snapshot.newModel?.lostGroups, !lost.isEmpty { self.selection.keepWhenEmpty(Set(lost)) }
         // ★ RE-EVALUATE THE PERSISTED REGIONS AGAINST THIS IMPORT, and report what
         // moved (§3c / bar R6). A union is stored as a filter plus a hand
@@ -4051,7 +4052,9 @@ public final class ProjectModel: ObservableObject {
                                // ★ 11-10 (img08): only Manual is written, so a part that never picked it saves as before
                                latticePageManual: latticePageManual ? true : nil,
                                // ★ Upload new version (decision 12): the groups still waiting for faces
-                               newModel: newModel.map { var n = $0; n.lostGroups = lostFaceGroups.map(\.id); return n })
+                               newModel: newModel.map { var n = $0; n.lostGroups = lostFaceGroups.map(\.id); return n },
+                               // ★ notes27: the face he chose for the bed (nil: as placed, never written)
+                               plateUp: buildOrientation.plateUp.flatMap { $0 == .zero ? nil : $0 })
     }
 
     /// ★ Upload new version (his ask 2026-11-11, DATA-MODEL.md decision 12): the model this version brought, if it came by

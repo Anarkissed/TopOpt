@@ -1889,6 +1889,10 @@ public struct WorkspacePlaceholder: View {
                               onPick: model.library.version(project.id) == nil || !stageOutcomeIsLast ? nil : { v in
                                   if let r = ResultsPick.all(v, in: outcome) { model.library.pick(folder: project.id, result: r) }
                               },
+                              // ★ notes27 (his print orientation, SPEC 2a): drawn the way it prints, on the bed
+                              printUp: PrintDraw.up(frame: PrintReportFacts.of(report: outcome.reportJSON).frame,
+                                                    orientation: project.buildOrientation, gravity: force.gravity),
+                              chosenFace: !project.buildOrientation.isInferredFromGravity,
                               certify: stage == .lattice ? certifyCard : nil)   // ★ Organic cut 2: his certify wizard (★ notes25: the print file's, in the Lattice stage)
                     .ignoresSafeArea()
                     .onAppear { startCertifyWalk(); model.resultsMounted.mounted = true }   // ★ 11-23
@@ -6560,14 +6564,8 @@ public struct WorkspacePlaceholder: View {
             HStack(spacing: DS.Space.xs) {
                 Image(systemName: "square.3.layers.3d.top.filled")
                     .font(.system(size: 12, weight: .bold))
-                Text("Plate up \(BuildOrientation.label(project.buildOrientation.resolved(gravity: force.gravity)))")
+                Text("Plate \u{00B7} " + PrintOrientationWords.plateValue(project.buildOrientation))   // ★ notes27: never "+Z"
                     .dsStyle(DS.TypeScale.footnote).fontWeight(.bold)
-                if project.buildOrientation.isInferredFromGravity {
-                    Text("assumed")
-                        .font(.system(size: 9, weight: .bold))
-                        .padding(.vertical, 2).padding(.horizontal, 5)
-                        .background(Capsule().fill(DS.Color.fillSubtle.color))
-                }
             }
             .foregroundStyle(DS.Color.textPrimary.color)
             .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.m)
@@ -15127,8 +15125,7 @@ extension WorkspacePlaceholder {
             .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain).fixedSize()
         case .plate:
             Button { withAnimation(DS.Motion.emphasized) { showBuildOrientation.toggle() } } label: {
-                DSValueBox("Plate up \(BuildOrientation.label(project.buildOrientation.resolved(gravity: force.gravity)))"
-                           + (project.buildOrientation.isInferredFromGravity ? " \u{00B7} assumed" : ""))
+                DSValueBox(PrintOrientationWords.plateValue(project.buildOrientation))   // ★ notes27: never "+Z"; the picture shows which
             }
             .buttonStyle(.plain)
         case .gravity:
@@ -16213,9 +16210,11 @@ extension WorkspacePlaceholder {
     /// place of the one on screen (the same body, opened the same way), the card closed; the check goes on.
     func macEarlyFile(checkFollows: Bool) -> LatticeFileRun.Early {
         let preview = newEngine, p = project, stress = newEngineStress
+        let turn = LatticeFileJob.printFrameUp(p).flatMap { PrintFrameTurn.forUp($0, base: p.viewerMesh?.positions) }   // ★ notes27
         return LatticeFileRun.Early { data, base in
             Task { @MainActor in LatticeMacMake.shared.fileArrived() }
-            guard let base, let mesh = try? LatticeFileMesh.make(threeMF: data, baseTriangles: base, token: Int(Date().timeIntervalSince1970))
+            guard let base, let mesh = try? LatticeFileMesh.make(threeMF: data, baseTriangles: base, token: Int(Date().timeIntervalSince1970),
+                                                                 turn: turn)
             else { return }
             Task { @MainActor in
                 preview.showFile(mesh, project: p, stress: stress)

@@ -42,6 +42,9 @@ public struct LibraryResult: Identifiable {
     public let accepted: Bool
     /// ★ His Q1: its word as Results says it ("Just safe", "+10 %"); nil when its run's results don't say.
     public var word: String? = nil
+    /// ★ notes27 (his print orientation, SPEC 2a): the way up it prints (its file's print frame, else its version's face or
+    /// gravity), so a compared result stands on the bed as it prints; nil: drawn in the file's own frame.
+    public var printUp: SIMD3<Float>? = nil
     public var id: Int { index }
 }
 
@@ -589,12 +592,16 @@ public final class LibraryModel: ObservableObject {
                 guard let data = store.loadResultsData(id: folder),
                       let o = try? OutcomeCodec.decode(data) else { return nil }
                 let words = ResultsVersions.words(o)   // ★ Q1: each result's word, as Results says it
+                // ★ notes27: the way it prints — its print file's frame, else its version's own face or gravity
+                let snap = store.snapshot(id: folder)
+                let up = PrintDraw.up(frame: PrintFrameTurn.of(report: o.reportJSON),
+                                      orientation: BuildOrientation(plateUp: snap?.plateUp), gravity: snap?.force.gravity)
                 return o.variants.enumerated().map { i, v in
                     LibraryResult(index: i,
                                   mesh: ViewerMesh(vertices: v.meshVertices, indices: v.meshIndices, faceIDs: [],
                                                    smoothShaded: true),
                                   massGrams: v.massGrams, margin: v.worstCaseMargin,
-                                  fraction: v.achievedVolumeFraction, accepted: v.accepted, word: words[i])
+                                  fraction: v.achievedVolumeFraction, accepted: v.accepted, word: words[i], printUp: up)
                 }
             }()
             DispatchQueue.main.async { done(results) }
