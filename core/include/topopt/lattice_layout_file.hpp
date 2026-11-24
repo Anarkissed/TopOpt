@@ -94,6 +94,7 @@ struct FileReport {
   std::size_t weave_specks_ignored = 0, weave_held_ignored = 0;   // O10: PrintableReport's
   std::size_t part_overhangs = 0;   // PrintableReport's: the part's own overhangs, counted, never propped
   std::vector<Vec3> part_overhang_at;   // P3: PrintableReport's: where (the last pass)
+  std::size_t own_by_k1 = 0;   // K1: PrintableReport's (left to the slicer by his rule, judged by the far point)
   std::size_t posts_outside = 0;    // ★ 362 11-23, PrintableReport's (F2): posts not added, their column leaving the part
   bool stopped_repeating = false;   // ★ 362 11-23, PrintableReport's (F3): stopped, a try having nothing new to try
   // O17, O18: PrintableReport's: what the sag pass did, and the bars the file was made of when it changed any (null:

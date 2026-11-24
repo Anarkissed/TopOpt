@@ -736,6 +736,7 @@ TriangleMesh make_file_mesh(const Session& session, const Layout& layout, const 
   report.weave_held_ignored = made.weave_held_ignored;
   report.part_overhangs = made.part_overhangs;
   report.part_overhang_at = made.part_overhang_at;   // P3
+  report.own_by_k1 = made.own_by_k1;                 // K1
   report.posts_outside = made.posts_outside;           // ★ 362 11-23 (F2)
   report.stopped_repeating = made.stopped_repeating;   // ★ 362 11-23 (F3)
   report.sags = made.sags;
@@ -1944,6 +1945,9 @@ std::string file_result_json(const FileResult& r) {
     {   // OG2c (brief E6, leg C); ★ 362 11-23: the part's own overhangs (every lattice), F2's posts, F3's stop
       std::snprintf(b, sizeof b, "],\n    \"own_overhangs\": %llu, \"posts_outside\": %llu, \"stopped_repeating\": %s",
                     count(r.made.part_overhangs), count(r.made.posts_outside), r.made.stopped_repeating ? "true" : "false");
+      o += b;
+      // K1 (his rule, 2026-11-24: only what the app made is judged): how it differs from the far-point reading
+      std::snprintf(b, sizeof b, ", \"own_by_k1\": %llu", count(r.made.own_by_k1));
       o += b;
       std::snprintf(b, sizeof b, ",\n    \"relief_flushed\": %llu, \"relief_rounds\": %d, \"findings_at\": [",
                     count(r.made.relief_flushed), r.made.relief_rounds);

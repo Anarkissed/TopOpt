@@ -1444,6 +1444,33 @@ int main() {
     CHECK(has(c.json, "\"own_overhangs\": " + std::to_string(c.r.made.part_overhangs)));
   }
 
+  // ── §16c K1 (his rule, 2026-11-24: "the checking printability should ONLY check what was created in the app, not the
+  // rest of the part. Assume the rest of the part is completely printable."). A 40 x 40 x 30 block, a 2 mm Protect skin
+  // on its top face and 12 mm octet cells under it (26 deep: two layers of cells under the skin). The skin's underside
+  // spans the 12 mm cells between the struts that end on it: a bridge reaching past 5 mm from what holds it, and right
+  // under it, a layer down, the part had material the carving opened, so F1's far-point reading judged it the lattice's
+  // (and propped it). Its island holds no lattice and no solid the layout made (the skin is the part's own): it is the
+  // part's own now, counted, never propped, and the file is clean. The struts themselves are still judged.
+  {
+    write_stl_file(kDir + "/ceiling.stl", box(40, 40, 30), StlFormat::Binary);
+    const StepModel cm = import_part_file_resolved(kDir + "/ceiling.stl");
+    const int top = face_at(cm, 0, 0, 1, 30.0);
+    CHECK(top >= 0);
+    const std::string kj = "{\"mode\": \"lattice_file\", \"model\": \"ceiling.stl\", \"output\": \"ceiling_cells.stl\", "
+                           "\"layout\": {\"min_strut_lines\": 2, \"region_ids\": [1], \"region_no_lattice\": [0], "
+                           "\"region_depth_mm\": [26], \"region_expand_mm\": [0], \"region_face_counts\": [1], "
+                           "\"region_faces\": [" + std::to_string(top) + "], \"protect_ids\": [2], \"protect_depth_mm\": [2], "
+                           "\"protect_face_counts\": [1], \"protect_faces\": [" + std::to_string(top) + "], "
+                           "\"topology\": \"octet\", \"algorithm\": \"uniform\", \"cell_max_mm\": 12, \"min_cells_across\": 1}}";
+    const Run k = run("ceiling", kj, "");
+    std::printf("[ceiling] ok %d code %s; own overhangs %zu (%zu of them judged by the far point before K1), posts %zu, "
+                "clean %d, tries %d, found per pass %d\n", k.r.ok,
+                k.r.code.c_str(), k.r.made.part_overhangs, k.r.made.own_by_k1, k.r.made.posts.size(),
+                k.r.made.print_clean, k.r.made.builds, k.r.made.found_per_pass.empty() ? -1 : k.r.made.found_per_pass.front());
+    CHECK(k.r.ok && k.r.made.print_clean && k.r.made.part_overhangs > 0 && k.r.made.own_by_k1 > 0 && k.r.made.posts.empty());
+    CHECK(has(k.json, "\"own_by_k1\": " + std::to_string(k.r.made.own_by_k1)));
+  }
+
   // ── §8 the octet's strut law is the full octet's (2026-11-17): its span is the octet band, so no density in the band
   // is clamped; its lowest row is bulk only, so a credited cell under 0.10 gets no strut pass, with a plain note.
   {
