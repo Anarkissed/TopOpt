@@ -26,6 +26,92 @@ public struct LatticeFileFacts: Equatable, Sendable {
         /// Struts thickened past his thickest strut (the cap's doing), and the widest.
         public var pastLimit: Int
         public var pastLimitWidestMM: Double
+        // ★ notes27 F2 (his 11-23: "What changes were made to strengthen it?"): core's summary of the FINAL lattice — each strut
+        // counted once (`thickened_distinct`), the braces added (`braced`), the thickest strut now (`widest_mm`), how many are
+        // past his thickest (`past_thickest`) and per strut group (`groups`). nil / empty: an older report (none of them).
+        public var thickenedDistinct: Int? = nil
+        public var bracesAdded: Int? = nil
+        public var widestMM: Double? = nil
+        public var pastThickest: Int? = nil
+        public var groups: [Group] = []
+        /// ★ notes27: the limit it never thickens a strut past unless it must (his thickest strut, `added.limit.limit_mm`).
+        public var limitMM: Double? = nil
+
+        /// One strut group's part of the summary (its name when core gives one).
+        public struct Group: Equatable, Sendable {
+            public var name: String?
+            public var thickened: Int?
+            public var widestMM: Double?
+            /// ★ notes27: the group's thickest strut setting, and its struts now past it (core's `thickest_setting_mm`,
+            /// `past_thickest`).
+            public var thickestSettingMM: Double? = nil
+            public var pastThickest: Int? = nil
+        }
+
+        /// ★ notes27 F2: what was changed, plainly — only what the report says is true of the final lattice ("1,554 struts
+        /// thickened", "19 braces added", "thickest now 4.06 mm"); an older report: its braced struts and the thickest past
+        /// his limit, as before.
+        public var changes: [String] {
+            var out: [String] = []
+            if let n = thickenedDistinct, n > 0 { out.append(LatticeFileFacts.count(n, "strut") + " thickened") }
+            if let b = bracesAdded {
+                if b > 0 { out.append(LatticeFileFacts.count(b, "brace") + " added") }
+            } else if braced > 0 {
+                out.append(LatticeFileFacts.count(braced, "strut") + " braced")
+            }
+            if let w = widestMM, w > 0 {
+                out.append("thickest now " + StrengthWords.mm(w))
+            } else if widestMM == nil, pastLimitWidestMM > 0 {
+                out.append("thickest now " + StrengthWords.mm(pastLimitWidestMM))
+            }
+            return out
+        }
+
+        /// ★ notes27 (362's words): per group, plainly — "Back wall: thickest set 2.25 mm · 4 struts past it" (its name, else
+        /// "Group 2"; with no setting from core, what it thickened and its thickest strut now).
+        public var groupLines: [String] {
+            groups.enumerated().compactMap { (i, g) -> String? in
+                var bits: [String] = []
+                var join = ", "
+                if let s = g.thickestSettingMM, s > 0 {
+                    bits.append("thickest set " + StrengthWords.mm(s))
+                    let k = g.pastThickest ?? 0
+                    bits.append(k > 0 ? LatticeFileFacts.count(k, "strut") + " past it" : "none past it")
+                    join = " · "
+                } else {
+                    if let n = g.thickened, n > 0 { bits.append(LatticeFileFacts.count(n, "strut") + " thickened") }
+                    if let w = g.widestMM, w > 0 { bits.append("thickest " + StrengthWords.mm(w)) }
+                }
+                guard !bits.isEmpty else { return nil }
+                return (g.name ?? "Group \(i + 1)") + ": " + bits.joined(separator: join)
+            }
+        }
+
+        /// ★ notes27 F2: the (i) behind "Strengthened": what the Mac did, in a few plain sentences.
+        public func info(strutsShort: Int?) -> String {
+            var t = "The Mac checked every strut against your load and made the weak ones stronger, one round at a time ("
+                + LatticeFileFacts.count(rounds, "round") + ")."
+            if let n = thickenedDistinct, n > 0 {
+                t += " It thickened " + LatticeFileFacts.count(n, "strut")
+                if let k = pastThickest, k > 0 { t += ", " + LatticeFileFacts.number(k) + " of them past your thickest strut" }
+                t += "."
+            }
+            if let b = bracesAdded, b > 0 {
+                t += " It added " + LatticeFileFacts.count(b, "brace") + " to stop long struts bowing out."
+            } else if bracesAdded == nil, braced > 0 {
+                t += " It braced " + LatticeFileFacts.count(braced, "strut") + " to stop them bowing out."
+            }
+            if let w = widestMM, w > 0 { t += " The thickest strut is now " + StrengthWords.mm(w) + "." }
+            if groups.count > 1 {
+                for line in groupLines { t += " " + line + "." }
+            }
+            if passing {
+                t += " Every strut now holds."
+            } else if let s = strutsShort, s > 0 {
+                t += " " + LatticeFileFacts.count(s, "strut") + (s == 1 ? " is" : " are") + " still short."
+            }
+            return t
+        }
     }
 
     // the file
@@ -37,7 +123,9 @@ public struct LatticeFileFacts: Equatable, Sendable {
     public var bridges: Int
     public var posts: Int
     public var postsMM: Double
-    public var slicerSupportsOff: Bool
+    /// ★ notes27 (his print orientation, P3 in core): what the file tells the slicer about supports — "painted" (the part's own
+    /// overhangs painted, support on for them only), "needed" (found, none could be painted), "off" (none); nil: not said.
+    public var slicerSupports: String?
     public var fileSeconds: Double?
     // the layer check
     public var printClean: Bool
@@ -76,7 +164,7 @@ public struct LatticeFileFacts: Equatable, Sendable {
         return LatticeFileFacts(
             fileName: file, fileBytes: int(r["file_bytes"]), triangles: int(mesh["triangles"]),
             struts: int(layout["bars"]), strands: int(layout["strands"]), bridges: int(mesh["bridges"]),
-            posts: int(mesh["posts"]), postsMM: num(mesh["posts_mm"]), slicerSupportsOff: (r["slicer_supports"] as? String) == "off",
+            posts: int(mesh["posts"]), postsMM: num(mesh["posts_mm"]), slicerSupports: r["slicer_supports"] as? String,
             fileSeconds: (ms["total"] as? NSNumber).map { $0.doubleValue / 1000 },
             printClean: p["clean"] as? Bool ?? false, layers: int(p["layers"]), midairStarts: int(p["midair_starts"]),
             longestBridgeMM: num(p["longest_bridge_reach_mm"]), firstLayerMM2: num(p["first_layer_mm2"]),
@@ -92,19 +180,35 @@ public struct LatticeFileFacts: Equatable, Sendable {
     static func strengthening(_ o: [String: Any]?) -> Strengthening? {
         guard let o, o["code"] != nil else { return nil }
         let rounds = o["rounds"] as? [[String: Any]] ?? []
-        var thick = 0, braced = 0, past = 0, widest = 0.0
+        var thick = 0, braced = 0, past = 0, widest = 0.0, limit = 0.0
         for r in rounds {
             let a = r["added"] as? [String: Any] ?? [:]
             thick += int(a["struts_widened"])
             braced += int(a["struts_braced"])
+            limit = Swift.max(limit, num((a["limit"] as? [String: Any])?["limit_mm"]))
             let lim = (a["limit"] as? [String: Any])?["past_limit"] as? [String: Any]
             past = Swift.max(past, int(lim?["struts"]))
             widest = Swift.max(widest, num(lim?["widest_mm"]))
         }
         // rounds_fixed: the rounds that added to the struts (the last check that passed adds nothing)
         let n = (o["rounds_fixed"] as? NSNumber)?.intValue ?? rounds.filter { $0["added"] != nil }.count
-        return Strengthening(rounds: n, passing: o["passing"] as? Bool ?? false, seconds: num(o["seconds"]),
-                             thickened: thick, braced: braced, pastLimit: past, pastLimitWidestMM: widest)
+        var g = Strengthening(rounds: n, passing: o["passing"] as? Bool ?? false, seconds: num(o["seconds"]),
+                              thickened: thick, braced: braced, pastLimit: past, pastLimitWidestMM: widest)
+        g.limitMM = limit > 0 ? limit : nil
+        // ★ notes27 F2: core's summary of the final lattice (at the top of strengthen.json, or in its `summary`)
+        let sum = o["summary"] as? [String: Any] ?? o
+        g.thickenedDistinct = (sum["thickened_distinct"] as? NSNumber)?.intValue
+        g.bracesAdded = (sum["braced"] as? NSNumber)?.intValue
+        g.widestMM = (sum["widest_mm"] as? NSNumber)?.doubleValue
+        g.pastThickest = (sum["past_thickest"] as? NSNumber)?.intValue
+        g.groups = (sum["groups"] as? [[String: Any]] ?? []).map {
+            Strengthening.Group(name: ($0["name"] as? String) ?? ($0["group"] as? String),
+                                thickened: (($0["thickened_distinct"] ?? $0["thickened"]) as? NSNumber)?.intValue,
+                                widestMM: ($0["widest_mm"] as? NSNumber)?.doubleValue,
+                                thickestSettingMM: ($0["thickest_setting_mm"] as? NSNumber)?.doubleValue,
+                                pastThickest: ($0["past_thickest"] as? NSNumber)?.intValue)
+        }
+        return g
     }
 
     // MARK: the words
@@ -115,9 +219,7 @@ public struct LatticeFileFacts: Equatable, Sendable {
         // ★ notes25 C3 (4): only numbers true for the FINAL lattice — the struts still short, the braces, the thickest strut now
         // (the per-round "thickened" sum counted a strut once per round, and "past your thickest" mixed two rounds: gone)
         if let g = strengthening, g.rounds > 0 {
-            var more: [String] = []
-            if g.braced > 0 { more.append(Self.number(g.braced) + " braced") }
-            if g.pastLimitWidestMM > 0 { more.append("thickest now " + StrengthWords.mm(g.pastLimitWidestMM)) }
+            let more = g.changes   // ★ notes27 F2: the same words as Details' "Strengthened"
             let short = strutsShort.map { $0 > 0 ? Self.count($0, "strut") + " still short" : "Every strut holds" }
             out.append(ResultsCheck(kind: g.passing ? .ok : .warn,
                                     title: "Strengthened \u{00B7} " + Self.count(g.rounds, "round"),
@@ -127,7 +229,7 @@ public struct LatticeFileFacts: Equatable, Sendable {
         let size = fileBytes > 0 ? " \u{00B7} " + Self.bytes(fileBytes) : ""
         out.append(ResultsCheck(kind: .ok, title: "Print file ready",
                                 detail: fileKind + size,   // ★ notes25 C3: no strut count (the file's bars are another unit)
-                                more: slicerSupportsOff ? "Turn supports off in your slicer" : nil, tab: .printing))
+                                tab: .printing))   // ★ notes27: the supports line is the orientation row's (from the file's own word)
         out.append(printClean
             ? ResultsCheck(kind: .ok, title: "Prints layer by layer", detail: "Nothing starts in mid-air", tab: .printing)
             : ResultsCheck(kind: .warn, title: "Check the layers", detail: midairStarts > 0
@@ -145,8 +247,12 @@ public struct LatticeFileFacts: Equatable, Sendable {
         case .strength:
             // ★ notes25 C3 (6): the strength rows are the governing answer's (LatticeStrengthAnswer.rows); here only what the
             // strengthening left: its rounds and the braces
+            // ★ notes27 F2 (his: "What changes were made to strengthen it?"): "6 rounds · 1,554 struts thickened · 19 braces
+            // added · thickest now 4.06 mm", what the Mac did behind its (i)
             if let g = strengthening, g.rounds > 0 {
-                add("Strengthened", Self.count(g.rounds, "round") + (g.braced > 0 ? " \u{00B7} " + Self.number(g.braced) + " braced" : ""))
+                r.append(ResultsDetailRow(label: "Strengthened",
+                                          value: ([Self.count(g.rounds, "round")] + g.changes).joined(separator: " \u{00B7} "),
+                                          info: g.info(strutsShort: strutsShort)))
             }
         case .printing:
             add("Print file", fileName + (fileBytes > 0 ? " \u{00B7} " + Self.bytes(fileBytes) : ""))
@@ -158,7 +264,7 @@ public struct LatticeFileFacts: Equatable, Sendable {
             if firstLayerMM2 > 0 { add("On the bed", String(format: "%.0f mm\u{00B2}", firstLayerMM2)) }
             if longestBridgeMM > 0 { add("Longest bridge", String(format: "%.1f mm", longestBridgeMM)) }
             if thinIslands > 0 { add("Thin islands", Self.number(thinIslands) + " (small spots in a layer)") }
-            if slicerSupportsOff { add("Slicer", "Supports off") }
+            if let w = PrintOrientationWords.supports(slicerSupports) { add("Supports", w) }   // ★ notes27
         case .run:
             if struts > 0 { add("Bars in the file", Self.number(struts)) }   // ★ notes25 C3 (7)
             if let g = strengthening, g.seconds > 0 { add("Strengthening", Self.duration(g.seconds)) }

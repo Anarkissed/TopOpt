@@ -163,7 +163,10 @@ extension LatticeLayoutSession {
     public struct OrganicGroup: Sendable {
         public var regions: [Int32]
         public var ask: Organic
-        public init(regions: [Int32], ask: Organic) { self.regions = regions; self.ask = ask }
+        /// ★ notes27: his name for the group ("Back wall"), sent with the Mac's job and said back in the strengthening's
+        /// summary; nil for the whole part. Not read by the lay.
+        public var name: String? = nil
+        public init(regions: [Int32], ask: Organic, name: String? = nil) { self.regions = regions; self.ask = ask; self.name = name }
     }
 
     static func raw(_ groups: [OrganicGroup]) -> topoptbridge.LatticeLayoutOrganicGroups {

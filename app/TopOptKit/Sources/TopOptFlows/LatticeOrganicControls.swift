@@ -106,7 +106,9 @@ struct LatticeOrganicControls: View {
                         .labelsHidden().toggleStyle(.switch)
                 }
                 .accessibilityIdentifier("organic-Depth variation")
-                say(look.depthVariationValue ? "Up to 1 mm out at open faces" : "Cut flush at every face")
+                // ★ notes26 (his yes, 11-23): "Up to 1 mm out." showed twice with it on — its grey caption (OrganicSettingsHelp)
+                // and this line ("… at open faces"). ONE line now, as Extra spacing's: the caption, five words (his rule); the
+                // open faces are in its (i).
                 row("Extra spacing between vines") {
                     Toggle("", isOn: Binding(get: { look.extraSpacingValue(aesthetic: aesthetic) }, set: { look.extraSpacing = $0 }))
                         .labelsHidden().toggleStyle(.switch)

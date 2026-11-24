@@ -20,6 +20,7 @@ final class LatticeLayoutStressPageTests: XCTestCase {
     func project() throws -> ProjectModel {
         let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
         _ = try FlexibleR7M1Fixtures.hisLiveLattice(r.project)
+        r.project.latticePageManual = true   // ★ K3: the page's grading as Manual sends it (Auto: the thinnest strut, no quilt)
         return r.project
     }
 

@@ -133,6 +133,27 @@ public struct ResultsCheck: Equatable, Sendable, Identifiable {
     public var places: [SIMD3<Double>] = []
     public var more: String? = nil
     public var tab: ResultsDetailsTab? = nil
+    /// ★ notes27 (his rule: detail in an (i)): the row's (i), beside its line; nil: none.
+    public var info: String? = nil
+    /// ★ notes27 (his print orientation, SPEC 2d): the open row's link (its words); the panel says what it opens.
+    public var link: String? = nil
+}
+
+/// ★ notes27 (his print orientation, SPEC 2b): how the selected result prints — the way (as placed, the chosen face, an edge)
+/// and what its file tells the slicer about supports (`slicer_supports`: "painted", "off", "needed"; nil: no file says).
+public struct ResultsPrinting: Equatable, Sendable {
+    public var way: PrintWay
+    public var slicerSupports: String?
+    /// The orientation row carries the "Print orientation" link.
+    public var linked: Bool
+    public init(way: PrintWay, slicerSupports: String? = nil, linked: Bool = false) {
+        self.way = way; self.slicerSupports = slicerSupports; self.linked = linked
+    }
+    /// The Details "Orientation" line (no "load paths": nothing computes them).
+    public var line: String {
+        PrintOrientationWords.title(way) + " \u{00B7} layers across the height"
+            + (PrintOrientationWords.supports(slicerSupports).map { " \u{00B7} " + $0 } ?? "")
+    }
 }
 
 public enum ResultsChecks {
@@ -141,7 +162,8 @@ public enum ResultsChecks {
                               scenarios: [ScenarioResult], thinJoints: Int, bridged: Bool,
                               pieces: StrengthenText.PiecesFlag? = nil, finish: FinishReport? = nil,
                               weakest: SIMD3<Double>? = nil, struts: LatticeFileStrength? = nil,
-                              printFile: LatticeFileFacts? = nil, answer: LatticeStrengthAnswer? = nil) -> [ResultsCheck] {
+                              printFile: LatticeFileFacts? = nil, answer: LatticeStrengthAnswer? = nil,
+                              printing: ResultsPrinting? = nil) -> [ResultsCheck] {
         guard let tab else { return [] }
         var out: [ResultsCheck] = []
         if let a = answer, a.governing != nil {
@@ -183,9 +205,15 @@ public enum ResultsChecks {
         default: out.append(ResultsCheck(kind: .warn, title: "Layers may split", detail: "Layer shear " + tab.layerShear.label.lowercased(),
                                          tab: .printing))
         }
-        out.append(ResultsCheck(kind: .info, title: tab.tiltDegrees == 0 ? "Print it upright" : "Print it tilted \(tab.tiltDegrees)°",
-                                detail: tab.supportCm3 > 0 ? "About " + String(format: "%.1f", tab.supportCm3) + " cm³ of support"
-                                                           : "No support needed", tab: .printing))
+        // ★ notes27 (his print orientation, SPEC 2b): how it prints, in his words — never "upright" against the file's axis,
+        // never a face number — and what the file tells the slicer about supports (the (i) says how to slice it)
+        let pr = printing ?? ResultsPrinting(way: .asPlaced, slicerSupports: printFile?.slicerSupports)
+        out.append(ResultsCheck(kind: .info, title: PrintOrientationWords.title(pr.way),
+                                detail: PrintOrientationWords.supports(pr.slicerSupports)
+                                    ?? (tab.supportCm3 > 0 ? "About " + String(format: "%.1f", tab.supportCm3) + " cm³ of support"
+                                                           : "No support needed"),
+                                tab: .printing, info: pr.slicerSupports == "painted" ? PrintOrientationWords.paintedInfo : nil,
+                                link: pr.linked ? PrintOrientationWords.rowLink : nil))
         // ★ B4 (note 14, ledger 15 (c)): with E1's finishing the thin-spot row says what core did — "Thin spots fixed · 6", or
         // where it could not, "2 thin spots left" and why there; a result from before E1 keeps today's row
         if let f = finish {
@@ -242,6 +270,8 @@ public enum ResultsDetailsTab: String, CaseIterable, Sendable {
 public struct ResultsDetailRow: Equatable, Sendable, Identifiable {
     public let label: String
     public let value: String
+    /// ★ notes27 F2 (his 11-23: "Explain it simply. If more information is required, add an (i)"): the row's (i), nil: none.
+    public var info: String? = nil
     public var id: String { label + "·" + value }
 }
 
@@ -301,7 +331,7 @@ extension ResultsModel {
             }
         case .printing:
             if let tab {
-                add("Orientation", tab.orientationSummary)
+                add("Orientation", printing?.line ?? tab.orientationSummary)   // ★ notes27
                 add("Support", tab.supportLabel)
                 add("Layer shear", tab.layerShear.label)
                 if tab.minFeatureViolations > 0 { add("Thin spots", tab.minFeatureWarning.isEmpty ? "\(tab.minFeatureViolations) regions" : tab.minFeatureWarning) }
@@ -497,16 +527,21 @@ struct ResultsVersionsPanel: View {
 
     static func title(_ version: String?) -> String { version.map { "\($0) results" } ?? "Results" }
     static let pickLabel = "Pick this"
+    /// ★ notes27 F3 (his 11-23: the list's corner radius cut into the selected row's highlight): the list's corners are
+    /// concentric with the highlight's — its radius plus the space between them.
+    static let radius: CGFloat = DSParts.rowHighlightRadius + DSParts.rowHighlightInset
     static let pickedLabel = "Picked"
 
     /// ★ LOOK PER SCREEN (R-b, mockup #topo-results): §4.3's panel; each result one §4.4 line — its name, "87 g · 1.5×", and
     /// Pick this (every line not picked) or Picked; the selected line in the accent edge; one core could not make greyed with
     /// its reason. Folded and short of room, a pill (his note 2026-10-27).
     var body: some View {
-        DSPanel(key: "resultsVersions", title: Self.title(version), count: rows.count, foldedPill: pill, open: $open) {
+        var panel = DSPanel(key: "resultsVersions", title: Self.title(version), count: rows.count, foldedPill: pill, open: $open) {
             ForEach(rows) { r in line(r) }
         }
-        .environment(\.dsRowLineWraps, true)   // ★ notes25 B3: a result's line (why core could not make it) wraps, never cut
+        panel.openRadius = Self.radius   // ★ notes27 F3
+        return panel
+            .environment(\.dsRowLineWraps, true)   // ★ notes25 B3: a result's line (why core could not make it) wraps, never cut
     }
 
     @ViewBuilder private func line(_ r: ResultsVersionRow) -> some View {
@@ -538,6 +573,8 @@ struct ResultsCheckLine: View {
     var open = false
     var tap: (() -> Void)? = nil
     var details: (() -> Void)? = nil
+    /// ★ notes27: the row's link (`c.link`), opened.
+    var link: (() -> Void)? = nil
     var body: some View {
         if let tap {
             VStack(alignment: .leading, spacing: 0) {
@@ -552,6 +589,23 @@ struct ResultsCheckLine: View {
                                 .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .background(ResultsChrome.publish("resultsCheckMoreText-" + c.title))
+                        }
+                        // ★ notes27: the row's (i) (how to slice the painted file) and its link ("Print orientation"), in the open row
+                        if c.info != nil || (link != nil && c.link != nil) {
+                            HStack(spacing: DS.Space.m) {
+                                if let info = c.info { InfoTip(key: "resultsCheck-" + c.title, text: info, label: "How to slice it") }
+                                if let link, let words = c.link {
+                                    Button(action: link) {
+                                        Text(words + " \u{203A}").font(.system(size: 13, weight: .semibold))
+                                            .foregroundStyle(DS.Color.accent.color)
+                                            .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .background(ResultsChrome.publish("resultsCheckLink-" + c.title))
+                                    .accessibilityIdentifier("results-check-link")
+                                }
+                                Spacer(minLength: 0)
+                            }
                         }
                         if let details, c.tab != nil {
                             Button(action: details) {
@@ -611,6 +665,8 @@ struct ResultsChecksAndDetails: View {
     let rows: (ResultsDetailsTab) -> [ResultsDetailRow]
     /// Folded AND short of room: the Checks header and Details become pills at the right.
     var pill = false
+    /// ★ notes27: a row's link opened (the orientation row's "Print orientation").
+    var link: ((ResultsCheck) -> Void)? = nil
 
     /// ★ LOOK PER SCREEN (R-c, mockup #topo-results): §4.3's panel, 300 pt as the mockup draws it; its header says how many
     /// to look at, in the warning colour ("All good" in green).
@@ -621,7 +677,8 @@ struct ResultsChecksAndDetails: View {
                 // ★ B4 (note 14): a tap opens it — its places light on the part — and a second tap closes it
                 ResultsCheckLine(c: c, open: openCheck == c.id,
                                  tap: { withAnimation(DS.Motion.sheetIn) { openCheck = openCheck == c.id ? nil : c.id } },
-                                 details: c.tab.map { t in { tab = t; withAnimation(DS.Motion.sheetIn) { detailsOpen = true } } })
+                                 details: c.tab.map { t in { tab = t; withAnimation(DS.Motion.sheetIn) { detailsOpen = true } } },
+                                 link: c.link == nil ? nil : link.map { l in { l(c) } })
                     .overlay(alignment: .bottom) { Rectangle().fill(DS.Color.strokeSubtle.color).frame(height: 1) }
                     .dsPanelRow("resultsCheckRow-" + c.id)
             }
@@ -672,14 +729,15 @@ struct ResultsDetailsDrawer: View {
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 24, alignment: .top), count: cols),
                                   alignment: .leading, spacing: 0) {
                             ForEach(rows(tab)) { r in
-                                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                HStack(alignment: r.info == nil ? .firstTextBaseline : .center, spacing: 12) {
                                     Text(r.label).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
                                         .fixedSize(horizontal: false, vertical: true)   // ★ notes25 B3: wraps, never cut
                                     Spacer(minLength: 8)
                                     Text(r.value).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                                         .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)
+                                    if let info = r.info { ResultsDetailInfo(label: r.label, text: info) }   // ★ notes27 F2
                                 }
-                                .padding(.vertical, 10)
+                                .padding(.vertical, r.info == nil ? 10 : 0)
                                 .overlay(alignment: .bottom) { Rectangle().fill(DS.Color.strokeSubtle.color).frame(height: 1) }
                             }
                         }
@@ -701,6 +759,23 @@ struct ResultsDetailsDrawer: View {
                 .background(ResultsChrome.publish("resultsDetailsPanel"))
             }
         }
+    }
+}
+
+/// ★ notes27 F2: a Details row's (i) — its explanation in the centred card (AppPopups' help), a 44 pt target.
+struct ResultsDetailInfo: View {
+    let label: String
+    let text: String
+    var body: some View {
+        Button { AppPopups.shared.help(label, text) } label: {
+            Image(systemName: "info.circle").font(.system(size: 15, weight: .regular))
+                .foregroundStyle(DS.Color.textTertiary.color)
+                .frame(width: DSParts.target, height: DSParts.target).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("About \(label)")
+        .accessibilityIdentifier("results-detail-info-" + label)
+        .background(ResultsChrome.publish("resultsDetailInfo-" + label))
     }
 }
 
@@ -836,15 +911,23 @@ public struct ResultsLayers: Equatable, Sendable {
     }
     /// A tap: a lit view goes off (back to the plain part, note 13); Stress colours; X-ray toggles; a motion starts (or stops
     /// when tapped again).
+    /// ★ notes27 (his 11-24: "the load flow should NOT show without the stress map turned on. This doesn't make sense without
+    /// it"): Load flow turns the stress map on with it (one tap, as Bend and Break), and the stress map turned off ends it.
     public mutating func tap(_ m: ResultsViewMode, hasStress: Bool) {
         switch m {
-        case .stress: stress = hasStress && !stress
+        case .stress:
+            stress = hasStress && !stress
+            if !stress, motion == .loadPaths { motion = nil }   // ★ notes27: no Load flow without the stress map
         case .xray: xray.toggle()
         case .loadPaths, .bend, .breakIt:
             motion = motion == m ? nil : m
-            // ★ his iPad 2026-10-28: Bend and Break turn Stress on; Load paths turns X-ray on (Stress can be added)
+            // ★ his iPad 2026-10-28: Bend and Break turn Stress on; Load paths turns X-ray on
             if motion == .bend || motion == .breakIt { stress = hasStress }
-            if motion == .loadPaths { xray = true }
+            if motion == .loadPaths {
+                xray = true
+                stress = hasStress   // ★ notes27: and the stress map with it — never the light alone
+                if !hasStress { motion = nil }
+            }
         }
     }
 }

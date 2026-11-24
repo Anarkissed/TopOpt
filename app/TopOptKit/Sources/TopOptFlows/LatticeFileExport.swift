@@ -7,6 +7,7 @@ import Foundation
 import SwiftUI
 import TopOptKit
 import TopOptDesign
+import simd
 
 // MARK: the job
 
@@ -29,6 +30,7 @@ public enum LatticeFileJob {
         "widthHeavyMM": "width_heavy_mm", "cellsByStress": "cells_by_stress", "referenceMPa": "reference_mpa",
         "percentile": "percentile", "response": "response", "maxStep": "max_step",
         "bedFloorMM": "organic_bed_floor_mm",   // the flat floor (Organic only; written only when on)
+        "cellSearch": "cell_search/stretch_edges",   // K7, K8 (Auto only; written only when on)
     ]
 
     /// The stress result's name beside the job (core's top-level "demand"; the demand file format of 04-layout-file-job.md).
@@ -87,13 +89,13 @@ public enum LatticeFileJob {
     /// (Structural). The file is a 3MF of separate closed tubes.
     @MainActor
     public static func forOrganic(_ p: ProjectModel, groups: [LatticeLayoutSession.OrganicGroup], tensor: Data,
-                                  referenceMPa: Double, strengthJob: Data?) -> Result<ForPart, NoJob> {
+                                  referenceMPa: Double, strengthJob: Data?, printUp: SIMD3<Double>? = nil) -> Result<ForPart, NoJob> {
         guard let path = p.importedFile?.path else { return .failure(NoJob(line: LatticeLayoutPreview.noPartLine)) }
         guard !groups.isEmpty else { return .failure(NoJob(line: LatticeFileExport.organicNoLayLine)) }
         let settings = LatticeLayoutPreview.settings(p, referenceMPa: referenceMPa)
         guard let json = try? build(settings, modelName: (path as NSString).lastPathComponent,
                                     strengthJob: strengthJob == nil ? nil : strengthJobName, organic: groups,
-                                    tensor: tensorName) else {
+                                    tensor: tensorName, printFrameUp: printUp ?? printFrameUp(p)) else {   // ★ notes27
             return .failure(NoJob(line: "The job could not be written"))
         }
         return .success(ForPart(json: json, modelPath: path, demand: nil, tensor: tensor))
@@ -137,8 +139,19 @@ public enum LatticeFileJob {
     /// Why a part's job cannot be written, in its one line.
     public struct NoJob: Error, Equatable { public let line: String }
 
+    /// ★ notes27 (his print orientation, SPEC 2c test 4: "the job built for a plate pick carries print_frame.up = the plate up,
+    /// for the strengthen, file and Mac print-accurate jobs alike"): the up the print file stands on — the face he chose; nil
+    /// when he chose none (as placed: the job as before).
     @MainActor
-    public static func forPart(_ p: ProjectModel, stress: LatticeLayoutPreview.Stress, strengthJob: Data?) -> Result<ForPart, NoJob> {
+    public static func printFrameUp(_ p: ProjectModel) -> SIMD3<Double>? {
+        guard let u = p.buildOrientation.plateUp, u != .zero, simd_length(u).isFinite else { return nil }
+        let n = simd_normalize(u)
+        return SIMD3(Double(n.x), Double(n.y), Double(n.z))
+    }
+
+    @MainActor
+    public static func forPart(_ p: ProjectModel, stress: LatticeLayoutPreview.Stress, strengthJob: Data?,
+                               printUp: SIMD3<Double>? = nil) -> Result<ForPart, NoJob> {
         guard let path = p.importedFile?.path else { return .failure(NoJob(line: LatticeLayoutPreview.noPartLine)) }
         let settings = LatticeLayoutPreview.settings(p, referenceMPa: stress.referenceMPa)
         let needs = needsStress(settings)
@@ -148,7 +161,8 @@ public enum LatticeFileJob {
             demand = demandFile(f)
         }
         guard let json = try? build(settings, modelName: (path as NSString).lastPathComponent, demand: needs ? demandName : nil,
-                                    strengthJob: strengthJob == nil ? nil : strengthJobName) else {
+                                    strengthJob: strengthJob == nil ? nil : strengthJobName,
+                                    printFrameUp: printUp ?? printFrameUp(p)) else {   // ★ notes27
             return .failure(NoJob(line: "The job could not be written"))
         }
         return .success(ForPart(json: json, modelPath: path, demand: demand))
@@ -157,7 +171,8 @@ public enum LatticeFileJob {
     /// The job document, keys sorted (the same settings give the same bytes).
     public static func build(_ s: LatticeLayoutSession.Settings, modelName: String, linearDeflection: Double = 0,
                              demand: String? = nil, strengthJob: String? = nil,
-                             organic: [LatticeLayoutSession.OrganicGroup]? = nil, tensor: String? = nil) throws -> Data {
+                             organic: [LatticeLayoutSession.OrganicGroup]? = nil, tensor: String? = nil,
+                             printFrameUp: SIMD3<Double>? = nil) throws -> Data {
         var layout: [String: Any] = [
             "all_lattice": s.allLattice, "bead_mm": s.beadMM, "min_strut_lines": s.minStrutLines, "min_wall_mm": s.minWallMM,
             "rim_mm": s.rimMM, "cover_mm": s.coverMM,
@@ -204,6 +219,8 @@ public enum LatticeFileJob {
         layout["max_step"] = s.maxStep
         // the flat floor (K1): Organic's ask; written only when on, so every other job is the bytes it was
         if s.bedFloorMM > 0 { layout["organic_bed_floor_mm"] = s.bedFloorMM }
+        // K7, K8: Auto's cells fitted to the square faces; written only when on, so every other job is the bytes it was
+        if s.cellSearch { layout["cell_search"] = true; layout["stretch_edges"] = true }
         if s.byStress { layout["per_region"] = false }   // core refuses By stress with Per region
         // an area's own settings (C23), its Finish (S13), zones (D21): one entry per region, null where it states nothing
         func own(_ o: LatticeLayoutSession.AreaOwn) -> Any {
@@ -269,6 +286,7 @@ public enum LatticeFileJob {
                 layout["organic_groups"] = organic.map { g -> [String: Any] in
                     var d = organicKeys(g.ask)
                     d["regions"] = g.regions.map { Int($0) }
+                    if let n = g.name, !n.isEmpty { d["name"] = n }   // ★ notes27: said back in strengthen.json's groups
                     return d
                 }
             }
@@ -280,6 +298,9 @@ public enum LatticeFileJob {
         for (k, v) in top { job[k] = v }
         if let demand { job["demand"] = demand }
         if let strengthJob { job["strength_job"] = strengthJob }   // ★ Install 3
+        // ★ notes27 (his print orientation, SPEC 2c): the part stood on the face he chose — core turns every input at its door
+        // and writes the file standing that way; none (as placed): no key, the job byte for byte as before
+        if let u = printFrameUp { job["print_frame"] = ["up": [u.x, u.y, u.z]] }
         return try JSONSerialization.data(withJSONObject: job, options: [.sortedKeys])
     }
 }
@@ -342,6 +363,8 @@ public struct LatticeFileStrength: Equatable, Sendable {
     public var scenarioFields: String?
     /// ★ notes25 C3: every bar's margin (strut_margins.bin, one float32 per bar in the layout's order), or nil.
     public var strutMarginsFile: String? = nil
+    /// ★ notes27 F1: every bar's two ends and width (bars.bin, "TOBARS1", strut_margins.bin's order), or nil (an older core).
+    public var barsFile: String? = nil
     public var maxInterlayerTensionMPa: Double
     /// The build direction the check judged the layers along, or nil.
     public var buildDirection: SIMD3<Double>?
@@ -390,6 +413,7 @@ public struct LatticeFileStrength: Equatable, Sendable {
         fields = b["fields"] as? String
         scenarioFields = b["scenario_fields"] as? String
         strutMarginsFile = b["strut_margins"] as? String
+        barsFile = b["bars"] as? String
         maxInterlayerTensionMPa = num(b["max_interlayer_tension_mpa"])
         buildDirection = (b["build_direction"] as? [NSNumber]).flatMap {
             $0.count == 3 ? SIMD3($0[0].doubleValue, $0[1].doubleValue, $0[2].doubleValue) : nil
@@ -508,6 +532,8 @@ public enum LatticeFileRun {
         public var jobID: String? = nil
         /// ★ notes25 C3: strut_margins.bin (every bar's margin), fetched beside fields.bin when the report names it.
         public var strutMargins: Data? = nil
+        /// ★ notes27 F1: bars.bin (every bar's ends and width), fetched with strut_margins.bin when the report names it.
+        public var bars: Data? = nil
     }
 
     /// ★ his 11-22 (the print-accurate lattice made on the Mac, "Check right after"): the file as soon as it is saved, before
@@ -783,7 +809,8 @@ public enum LatticeFileRun {
                         scenarioFields: named(report.strength?.scenarioFields),
                         timing: RunTiming.fromWorker(createdAt: state["created_at"] as? Double, startedAt: state["started_at"] as? Double,
                                                      finishedAt: state["finished_at"] as? Double),
-                        jobID: id, strutMargins: named(report.strength?.strutMarginsFile))
+                        jobID: id, strutMargins: named(report.strength?.strutMarginsFile),
+                        bars: named(report.strength?.barsFile))   // ★ notes27 F1
         } catch let f as Failure where !f.transient {
             record?.ended(id)
             throw f
@@ -950,7 +977,7 @@ public enum LatticeFileButton {
     /// "Not strong enough"); the weak spots' voxels (fields.bin block 3) ride in the report for the wizard's colour and outline.
     public static func outcome(_ m: LatticeFileRun.Made, densityGCm3: Double, organic: Bool = false) throws -> OptimizeOutcome {
         // ★ Organic cut 2: core's 3MF read back by its own small reader; an STL as before
-        let mesh: (vertices: [Float], indices: [Int32])
+        var mesh: (vertices: [Float], indices: [Int32])
         if m.report.isThreeMF {
             do { mesh = try CoreThreeMF.mesh(m.stl) } catch { throw LatticeFileRun.Failure("\(error)") }
         } else {
@@ -960,6 +987,9 @@ public enum LatticeFileButton {
         guard !mesh.vertices.isEmpty, !mesh.indices.isEmpty else {
             throw LatticeFileRun.Failure("The Mac made the file but it could not be read")
         }
+        // ★ notes27 (his print orientation, SPEC 2a): a file made standing on a chosen face (its report's `print_frame`) is
+        // un-baked on load — the app draws the part in its own coordinates (every overlay's frame) and turns it on screen
+        if let turn = PrintFrameTurn.of(report: m.reportJSON) { turn.unbake(&mesh.vertices) }
         let s = m.report.strength
         let fields = m.fields.flatMap(RemoteFieldsContainer.parse)
         let block = fields?.variants.first
@@ -968,7 +998,7 @@ public enum LatticeFileButton {
         let accepted = organic || passes
         // ★ notes25 C3: the solid's own margin per voxel and every bar's margin ride with the result (Results colours by them)
         let reportJSON = withStrength(organic ? withSpots(m.reportJSON, fields: fields) : m.reportJSON, fields: fields,
-                                      strutMargins: m.strutMargins)
+                                      strutMargins: m.strutMargins, bars: m.bars)
         // ★ notes25 C3: ONE "how strong" number — the smaller of the solid's margin at his infill and the weakest strut's
         let governing = ((try? JSONSerialization.jsonObject(with: reportJSON)) as? [String: Any])
             .flatMap(LatticeStrengthAnswer.decode(report:))?.governing
@@ -1038,7 +1068,8 @@ public enum LatticeFileButton {
 
     /// ★ notes25 C3: the report with the solid's margin per voxel (fields.bin's block 2, requested_volume_fraction -1, where core
     /// judged a voxel as solid) and every bar's margin (strut_margins.bin), so a saved result colours by them whenever it opens.
-    static func withStrength(_ report: Data, fields: RemoteFieldsContainer?, strutMargins: Data?) -> Data {
+    /// ★ notes27 F1: and every bar's ends and width (bars.bin, kept as core wrote it), so every strut is coloured by its margin.
+    static func withStrength(_ report: Data, fields: RemoteFieldsContainer?, strutMargins: Data?, bars: Data? = nil) -> Data {
         guard var o = (try? JSONSerialization.jsonObject(with: report)) as? [String: Any], o["strength"] is [String: Any] else {
             return report
         }
@@ -1050,7 +1081,11 @@ public enum LatticeFileButton {
             changed = true
         }
         if let d = strutMargins, !d.isEmpty, d.count % 4 == 0 {
-            o["app_strut_margins"] = d.base64EncodedString()   // per bar, the layout's order (no bar geometry yet: not drawn)
+            o[PrintFileParts.marginsKey] = d.base64EncodedString()   // per bar, the layout's order
+            changed = true
+        }
+        if let d = bars, PrintFileParts.parseBars(d) != nil {
+            o[PrintFileParts.barsKey] = d.base64EncodedString()   // ★ notes27 F1: each bar's ends and width, the same order
             changed = true
         }
         guard changed else { return report }
@@ -1223,7 +1258,8 @@ public enum LatticeFileButton {
         guard let stl = file(report.fileName) else { throw LatticeFileRun.Failure("The file was made but could not be read") }
         return LatticeFileRun.Made(stl: stl, report: report, reportJSON: rd, fields: report.strength?.fields.flatMap(file),
                                    scenarioFields: report.strength?.scenarioFields.flatMap(file), timing: nil,
-                                   strutMargins: report.strength?.strutMarginsFile.flatMap(file))
+                                   strutMargins: report.strength?.strutMarginsFile.flatMap(file),
+                                   bars: report.strength?.barsFile.flatMap(file))   // ★ notes27 F1
     }
 }
 

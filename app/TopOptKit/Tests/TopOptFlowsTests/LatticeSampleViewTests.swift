@@ -48,7 +48,8 @@ final class LatticeSampleViewTests: XCTestCase {
         let r = try XCTUnwrap(src.range(of: "private func latticePage(_ c: CellsPageContext, size: CGSize) -> AnyView {"))
         let page = String(src[r.upperBound...].prefix(1400))
         XCTAssertFalse(page.contains("if model.stage == .cell {"), "★ no longer only under the first view")
-        XCTAssertTrue(page.contains("LatticeSampleView(inputs: latticeSampleInputs, notInSample: latticeNotInSample)"))
+        // ★ RE-PINNED (notes26, his 11-23 "Yes to the live sample"): the finish and band are in the sample, no line says what isn't
+        XCTAssertTrue(page.contains("LatticeSampleView(inputs: latticeSampleInputs)"))
         XCTAssertTrue(src.contains("Text(s.title)"), "the switch says the views' own titles")
         XCTAssertEqual(LatticeWizardStage.cell.title, "Cells")
         XCTAssertEqual(LatticeWizardStage.lattice.title, "In a part")
@@ -102,13 +103,14 @@ final class LatticeSampleViewTests: XCTestCase {
         XCTAssertNotEqual(a, b, "★ the sample rebuilds when the grade changes")
     }
 
-    /// ★ What the engine's block can't show is said, in one line, only for what he has on.
-    func testTheSampleSaysWhatItCantShow() {
-        XCTAssertNil(LatticeSampleView.notInSampleLine(
-            LatticeSampleView.notInSample(organic: false, finish: .none, shapeBand: false, singleCell: false)), "nothing on, no line")
-        let all = LatticeSampleView.notInSample(organic: true, finish: .fullSkin, shapeBand: true, singleCell: true)
-        XCTAssertEqual(LatticeSampleView.notInSampleLine(all),
-                       "Not in the sample yet: Organic, Skin, the shape band, single-cell members")
+    /// ★ RE-PINNED (notes26, his 11-23 "Yes to the live sample" and his rule "never a note at the bottom-centre"): what the
+    /// engine's block couldn't show was said in an orange line at the sample's foot ("Not in the sample yet: Skin, the shape
+    /// band"). The sample is laid from his settings now (Notes26SampleTests), so nothing is left out and the line is gone.
+    func testTheSampleLeavesNothingOutSoNoLineSaysSo() throws {
+        let src = try FlexibleSource.code("LatticeSampleView.swift")
+        XCTAssertFalse(src.contains("Not in the sample yet"), "★ the line is gone")
+        XCTAssertFalse(src.contains("lattice-sample-not-shown"))
+        XCTAssertFalse(try FlexibleSource.code("LatticeSetupWizard.swift").contains("notInSample"), "★ nothing feeds it")
     }
 }
 

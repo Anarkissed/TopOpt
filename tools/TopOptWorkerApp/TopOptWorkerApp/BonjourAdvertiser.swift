@@ -30,6 +30,16 @@ final class BonjourAdvertiser: NSObject, NetServiceDelegate {
         service = svc
     }
 
+    /// ★ 362 11-23 (his iPad showed ⚠ after releases that swapped only the engine): the record's fingerprint changed in
+    /// place, without re-publishing, when the live engine differs from what was advertised.
+    func update(fingerprint: String) {
+        guard let svc = service else { return }
+        var txt: [String: Data] = [:]
+        txt["fingerprint"] = Data(fingerprint.utf8)
+        txt["worker"] = Data("topopt".utf8)
+        _ = svc.setTXTRecord(NetService.data(fromTXTRecord: txt))
+    }
+
     func stop() {
         service?.stop()
         service = nil

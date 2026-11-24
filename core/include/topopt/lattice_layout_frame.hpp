@@ -89,6 +89,11 @@ struct FrameStrength {
   Vec3 up{0.0, 0.0, 1.0};     // the build direction: "level" is square to it
   double safety = 1.5;
   double light_width_mm = 0.0;   // the job's light strut width (item 5's reach)
+  // P4 (his print orientation, "guessed strength"): other ups to judge the SAME struts against. The beams' stiffness
+  // does not read the build direction, so every piece's axial force and moment are the same for any up; only the
+  // tensile limit moves with the rise. Each gives FrameCheck::by_up (an estimate: a lay along that up would grow
+  // other struts). Empty: nothing more is computed.
+  std::vector<Vec3> also_up;
 };
 struct FrameStrut {
   double margin = 0.0, stress_margin = 0.0, buckling_margin = 0.0;
@@ -157,6 +162,14 @@ struct FrameCheck {
   std::vector<float> bar_margin;  // per bar of the Bars the frame was built from: its strut's margin; NaN not judged
   std::vector<Vec3> node_u;       // per node: its displacement as solved (0 for nodes not in the solve)
   std::vector<char> node_loaded;  // per node: it carries a share of the load (step 5); brief E3a, item 1
+  // P4: per FrameStrength::also_up, the judged struts' margins with that up (the same forces; the tensile limit by the
+  // rise along it; buckling unchanged): the smallest, how many are under the safety margin, where the weakest is.
+  struct ByUp {
+    double smallest_margin = 0.0;   // +inf when nothing is judged
+    std::size_t under_safety = 0;
+    Vec3 weakest_at{};
+  };
+  std::vector<ByUp> by_up;
   double ms_drive = 0.0, ms_assemble = 0.0, ms_solve = 0.0, ms_verdict = 0.0;
 };
 FrameCheck check_frame(const FrameModel& frame, const FrameVoxelSolve& voxels, const FrameStrength& strength,

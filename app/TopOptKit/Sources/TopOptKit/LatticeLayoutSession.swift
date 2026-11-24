@@ -191,6 +191,9 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         public var percentile = 0.95
         public var response = 1.0
         public var maxStep = 0.0                  // his switch "Never skip a cell size": 2 on Default Grade
+        /// ★ K7, K8 (Auto only): the cells fitted to the faces the grid is square to — the base cell searched for the fewest
+        /// slivers there, and a sliver left taken in by the row beside it (core's cell_search and stretch_edges, both)
+        public var cellSearch = false
         public var bedFloorMM = 0.0               // ★ Organic: K1's flat floor under the weave (sheet H1); 0 none
         public init() {}
         public static func == (a: Settings, b: Settings) -> Bool {
@@ -207,7 +210,7 @@ public final class LatticeLayoutSession: @unchecked Sendable {
                 && a.byStress == b.byStress && a.dialLight == b.dialLight && a.dialHeavy == b.dialHeavy
                 && a.widthLightMM == b.widthLightMM && a.widthHeavyMM == b.widthHeavyMM && a.cellsByStress == b.cellsByStress
                 && a.referenceMPa == b.referenceMPa && a.percentile == b.percentile && a.response == b.response
-                && a.maxStep == b.maxStep && a.bedFloorMM == b.bedFloorMM
+                && a.maxStep == b.maxStep && a.bedFloorMM == b.bedFloorMM && a.cellSearch == b.cellSearch
         }
     }
 
@@ -558,6 +561,8 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         o.percentile = s.percentile
         o.response = s.response
         o.max_step = s.maxStep
+        o.cell_search = s.cellSearch      // K7
+        o.stretch_edges = s.cellSearch    // K8
         o.topology = std.string(s.topology)
         o.algorithm = std.string(s.algorithm)
         o.cell_mm = s.cellMM

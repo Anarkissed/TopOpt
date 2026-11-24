@@ -533,6 +533,12 @@ static float3 load_light_colour(float s) {
     return x < 0.5 ? mix(cool, gold, x * 2.0) : mix(gold, hot, (x - 0.5) * 2.0);
 }
 
+// ★ notes27 (his 11-24: "COMPLETELY blown out ... bright enough to be seen - but not blown out"): the band over the stress map is
+// the place's own stress colour lifted a little toward white and capped under it (LoadLightFlow.bandColour, the same numbers).
+static float3 load_band(float3 sc) {
+    return min(mix(clamp(sc, 0.0, 1.0), float3(1.0), 0.2) * 1.08, float3(0.92));
+}
+
 // ★ notes26 (C5): a LOAD LIGHT vertex's light (tint alpha −2 − s over the dark body, −3 − s over its stress colour; the light in
 // flags.w): (strength, s) or (strength, 2 + s); (0, 0) for any other vertex.
 static float2 load_light_of(float4 tint, float4 flags) {
@@ -564,12 +570,13 @@ vertex HOut halo_vertex(VIn in [[stage_in]], constant Uniforms& u [[buffer(1)]],
 fragment float4 halo_fragment(HOut in [[stage_in]]) {
     if (in.light.x < 0.002) { discard_fragment(); }
     bool overStress = in.light.y > 1.5;
-    float3 lc = overStress ? mix(in.tint, float3(1.0), 0.45) : load_light_colour(in.light.y);
+    // ★ notes27: the band's own colour (capped), softly, and MAXED with what is there (blendLoadLightHalo): never summed to white
+    float3 lc = overStress ? load_band(in.tint) : min(load_light_colour(in.light.y), float3(0.92));
     float3 N = normalize(in.wnormal);
     float3 V = normalize(in.eyeWS - in.wpos);
     float fr = pow(1.0 - clamp(abs(dot(N, V)), 0.0, 1.0), 1.5);
-    float g = clamp(in.light.x, 0.0, 1.0) * (0.25 + 0.75 * fr) * 0.5;
-    return float4(lc * g, 0.0);   // ADDED light (alpha untouched)
+    float g = clamp(in.light.x, 0.0, 1.0) * (0.25 + 0.75 * fr) * 0.35;
+    return float4(lc * g, 0.0);   // the larger of it and what is there (alpha untouched)
 }
 
 vertex VOut viewer_vertex(VIn in [[stage_in]], constant Uniforms& u [[buffer(1)]],
@@ -789,13 +796,15 @@ fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[
     // ★ notes26 (C5): the load light is EMITTED — added over the surface's shading, strongest at the rim where the wall turns
     // away (what reads as light coming out of it), its colour by how much load flows there (over the stress colours: that colour,
     // lifted toward white)
+    // ★ notes27 (his 11-24: "The colours are there to show the actual stress amount on each area"): MIXED in, never added — the
+    // band shows the place's stress colour (lifted, capped under white) as strongly as the band has brought its load there
     if (in.light.x > 0.001) {
         bool overStress = in.light.y > 1.5;
-        float3 lc = overStress ? mix(in.tint.rgb / 0.6, float3(1.0), 0.45) : load_light_colour(in.light.y);
+        float3 band = overStress ? load_band(in.tint.rgb / 0.6) : min(load_light_colour(in.light.y), float3(0.92));
         float3 Nl = normalize(in.wnormal);
         float3 Vl = normalize(in.eyeWS - in.wpos);
         float frl = pow(1.0 - clamp(abs(dot(Nl, Vl)), 0.0, 1.0), 2.0);
-        color += lc * clamp(in.light.x, 0.0, 1.0) * (0.75 + 1.1 * frl);
+        color = mix(color, band, clamp(in.light.x, 0.0, 1.0) * (0.8 + 0.2 * frl));
     }
     // Handoff 124 — Face protection crosshatch. A protected face carries the UNIQUE
     // mint-teal PROTECT_RGB (WorkspacePlaceholder.protectFaceRGB); recognise it by
@@ -1701,10 +1710,11 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         d.isDepthWriteEnabled = false
         return d
     }
-    /// ★ notes26 (C5): light ADDED — additive colour, the alpha left as it was.
+    /// ★ notes26 (C5): the halo's colour over what is there, the alpha left as it was. ★ notes27 (his 11-24, img 75: "COMPLETELY
+    /// blown out"): the LARGER of the two, never their sum — a dense lattice's many halo shells summed to white.
     static func blendLoadLightHalo(_ c: MTLRenderPipelineColorAttachmentDescriptor) {
         c.isBlendingEnabled = true
-        c.rgbBlendOperation = .add
+        c.rgbBlendOperation = .max
         c.alphaBlendOperation = .add
         c.sourceRGBBlendFactor = .one
         c.destinationRGBBlendFactor = .one
@@ -1712,7 +1722,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         c.destinationAlphaBlendFactor = .one
     }
     /// ★ notes26 (C5): the halo's reach — this share of the part's largest side (at least 0.4 mm).
-    static let loadLightHaloShare: Float = 0.02
+    static let loadLightHaloShare: Float = 0.01   // ★ notes27: half the reach it had
     /// Depth state for the translucent body: test `.less` but DO NOT write depth, so
     /// back walls show through the front (the x-ray read).
     private let translucentBodyDepthState: MTLDepthStencilState

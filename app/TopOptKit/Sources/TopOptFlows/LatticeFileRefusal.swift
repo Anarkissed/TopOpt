@@ -129,13 +129,22 @@ public struct LatticeFileRefusal: Equatable, Sendable {
 }
 
 /// ★ notes25: the spot "Show me" marks on the part (model space), until the next press or another version.
+/// ★ notes27 (G2, his iPad notes 11-23 on release 17: "tapping the orange marker should open up the notification again as well
+/// as an "x" next to it so that it can be closed"): it keeps the pop-up it came from — a tap on the ring raises that same pop-up
+/// (its reason and its buttons) again; the x beside it takes the marker away.
 @MainActor
 public final class LatticeFileSpot: ObservableObject {
     public static let shared = LatticeFileSpot()
     @Published public private(set) var spot: (version: UUID, at: SIMD3<Float>)?
+    /// ★ notes27 (G2): the pop-up "Show me" was pressed in, raised again by the ring's tap.
+    private var popUp: (() -> Void)?
     public init() {}
-    func mark(_ at: SIMD3<Float>, version: UUID) { spot = (version, at) }
-    func clear() { spot = nil }
+    func mark(_ at: SIMD3<Float>, version: UUID, reopen: (() -> Void)? = nil) { spot = (version, at); popUp = reopen }
+    func clear() { spot = nil; popUp = nil }
+    /// ★ notes27 (G2): the ring tapped — the same pop-up again; the marker stays (its x takes it away).
+    func reopen() { popUp?() }
+    /// ★ notes27 (G2): the ring's tap has a pop-up to raise.
+    var reopens: Bool { popUp != nil }
 
     /// The camera that shows model point `m` (in a part drawn about `centre` through `settle`) at the view's middle, from
     /// outside the part (from its centre's side of the spot), a little closer than the whole part's view.
@@ -155,6 +164,8 @@ public final class LatticeFileSpot: ObservableObject {
 }
 
 /// The marked spot on the part: a ring that breathes, drawn where the spot is on screen (it rides the part as the view turns).
+/// ★ notes27 (G2): the ring is a 44 pt button raising the failure's pop-up again; a small x beside it (its own 44 pt target,
+/// clear of the ring's, placed from the ring so it rides the part with it) takes the marker away.
 struct LatticeFileSpotMarker: View {
     @ObservedObject var spots = LatticeFileSpot.shared
     let frame: LatticeBandChipFrame?
@@ -162,20 +173,57 @@ struct LatticeFileSpotMarker: View {
 
     var body: some View {
         if let s = spots.spot, s.version == version, let f = frame, let p = f.project(s.at) {
-            TimelineView(.animation) { ctx in
-                let t = ctx.date.timeIntervalSinceReferenceDate
-                let breathe = 0.5 + 0.5 * sin(t * 2 * .pi / 1.6)
-                ZStack {
-                    Circle().stroke(DS.Color.warning.color, lineWidth: 3).frame(width: 30 + 14 * breathe, height: 30 + 14 * breathe)
-                        .opacity(0.55 + 0.45 * (1 - breathe))
-                    Circle().fill(DS.Color.warning.color).frame(width: 10, height: 10)
+            let x = Self.closeOffset(at: p, in: f.viewportSize)
+            ZStack {
+                Button { spots.reopen() } label: {
+                    LatticeFileSpotRing()
+                        .frame(width: DSParts.target, height: DSParts.target).contentShape(Rectangle())
                 }
-                .frame(width: 44, height: 44)
+                .buttonStyle(.plain)
+                .accessibilityLabel("Show the problem again")
+                .accessibilityIdentifier("lattice-file-spot")
                 .background(CornerPairStyle.publish("latticeFileSpot"))   // the hosted tests' frame: the spot, marked
                 .position(p)
+                Button { spots.clear() } label: {
+                    ZStack {
+                        Circle().fill(DS.Color.chipSolid.color)
+                        Circle().strokeBorder(DS.Color.warning.color, lineWidth: 1.5)
+                        Image(systemName: "xmark").font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(DS.Color.textPrimary.color)
+                    }
+                    .frame(width: 26, height: 26)
+                    .frame(width: DSParts.target, height: DSParts.target).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Remove the marker")
+                .accessibilityIdentifier("lattice-file-spot-close")
+                .background(CornerPairStyle.publish("latticeFileSpotClose"))
+                .position(x: p.x + x.dx, y: p.y + x.dy)
             }
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
+        }
+    }
+
+    /// ★ notes27 (G2): where the x's middle sits from the ring's — beside it, up and to the right, its 44 pt target two points
+    /// clear of the ring's; on the ring's left near the stage's right edge, and down to the right near its top.
+    static func closeOffset(at p: CGPoint, in stage: CGSize) -> CGVector {
+        let t = DSParts.target, gap: CGFloat = 2
+        let dx = p.x + t / 2 + gap + t > stage.width ? -(t + gap) : t + gap
+        let dy = p.y - t < 0 ? t / 2 : -t / 2
+        return CGVector(dx: dx, dy: dy)
+    }
+}
+
+/// The marker's ring: orange, breathing for as long as it is up, a dot at the spot.
+struct LatticeFileSpotRing: View {
+    var body: some View {
+        TimelineView(.animation) { ctx in
+            let t = ctx.date.timeIntervalSinceReferenceDate
+            let breathe = 0.5 + 0.5 * sin(t * 2 * .pi / 1.6)
+            ZStack {
+                Circle().stroke(DS.Color.warning.color, lineWidth: 3).frame(width: 30 + 14 * breathe, height: 30 + 14 * breathe)
+                    .opacity(0.55 + 0.45 * (1 - breathe))
+                Circle().fill(DS.Color.warning.color).frame(width: 10, height: 10)
+            }
         }
     }
 }

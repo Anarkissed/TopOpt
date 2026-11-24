@@ -31,22 +31,58 @@ public struct WorkerJob: Identifiable, Equatable, Decodable, Sendable {
     public let createdAt: Double?
     public let startedAt: Double?
     public let finishedAt: Double?
+    /// ★ 362 11-23 (his worker window sat on "starting…" for a whole print-file job): the job's command (`run`,
+    /// `lattice-file`, `organic-strengthen`, …), its latest stage line from the engine and when it began, and on a failure
+    /// the engine's own reason. Nil from an older worker (the window then reads as before).
+    public let mode: String?
+    public let stage: String?
+    public let stageAt: Double?
+    public let message: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, project, state, paused, rung, rungs, iter, variants, position
+        case id, project, state, paused, rung, rungs, iter, variants, position, mode, stage, message
         case createdAt = "created_at"
         case startedAt = "started_at"
         case finishedAt = "finished_at"
+        case stageAt = "stage_at"
     }
 
     public init(id: String, project: String? = nil, state: String, paused: Bool = false,
                 rung: Int? = nil, rungs: Int? = nil, iter: Int? = nil, variants: Int? = nil,
                 position: Int? = nil, createdAt: Double? = nil, startedAt: Double? = nil,
-                finishedAt: Double? = nil) {
+                finishedAt: Double? = nil, mode: String? = nil, stage: String? = nil, stageAt: Double? = nil,
+                message: String? = nil) {
         self.id = id; self.project = project; self.state = state; self.paused = paused
         self.rung = rung; self.rungs = rungs; self.iter = iter; self.variants = variants
         self.position = position
         self.createdAt = createdAt; self.startedAt = startedAt; self.finishedAt = finishedAt
+        self.mode = mode; self.stage = stage; self.stageAt = stageAt; self.message = message
+    }
+
+    /// An optimization ladder (rungs, variants) as opposed to a one-shot job (a print file, a strengthening, an analysis).
+    public var isOptimization: Bool { mode == nil || mode == "run" }
+
+    /// What the job IS, in plain words, for its running pill and its notification.
+    public var jobWord: String {
+        switch mode {
+        case "lattice-file":        return "Making the print file"
+        case "organic-strengthen":  return "Strengthening"
+        case "analyze":             return "Checking the stresses"
+        case "lattice-variant":     return "Latticing"
+        default:                    return "Solving"
+        }
+    }
+
+    /// The engine's stage line in plain words: "checking it prints: try 3 of at most 10" -> "Checking it prints · try 3",
+    /// "round 2: checking its strength" -> "Round 2 · checking its strength". Nil when there is none.
+    public var stageWord: String? {
+        guard var s = stage?.trimmingCharacters(in: .whitespaces), !s.isEmpty else { return nil }
+        if let r = s.range(of: #": try (\d+) of at most \d+"#, options: .regularExpression) {
+            let n = s[r].split(separator: " ")[2]
+            s.replaceSubrange(r, with: " · try \(n)")
+        }
+        s = s.replacingOccurrences(of: ": ", with: " · ")
+        return s.prefix(1).uppercased() + s.dropFirst()
     }
 
     public var isActive: Bool { state == "queued" || state == "running" }
@@ -68,7 +104,7 @@ public struct WorkerJob: Identifiable, Equatable, Decodable, Sendable {
     public var stateWord: String {
         switch state {
         case "queued":    return "Queued"
-        case "running":   return paused ? "Paused" : "Solving"
+        case "running":   return paused ? "Paused" : jobWord
         case "done":      return "Done"
         case "error":     return "Failed"
         case "cancelled": return "Cancelled"
@@ -78,7 +114,12 @@ public struct WorkerJob: Identifiable, Equatable, Decodable, Sendable {
 
     /// The daily-driver telemetry (handoff 124, item 1): "rung 4/4 · iter 106" while
     /// solving, "position 2" while queued, else "". `rung` is 0-based on the wire.
-    public var progressWord: String {
+    public func progressWord(now: Date = Date()) -> String {
+        // ★ 362 11-23: a one-shot job says its stage and how long it has been on it ("Checking it prints · try 3 · 0:41")
+        if state == "running", !isOptimization, let w = stageWord {
+            guard let t = stageAt else { return w }
+            return "\(w) · \(Self.duration(max(0, now.timeIntervalSince1970 - t)))"
+        }
         if state == "running", let n = rungs {
             let r = (rung ?? 0) + 1
             let i = iter.map { " · iter \($0)" } ?? ""
@@ -117,8 +158,19 @@ public struct WorkerJob: Identifiable, Equatable, Decodable, Sendable {
         let dur = elapsedWord(now: now)
         switch state {
         case "done":
-            let n = variants ?? 0
-            let v = "\(n) variant\(n == 1 ? "" : "s")"
+            // ★ 362 11-23: a one-shot job never says "0 variants" (his History row of a strengthening)
+            let v: String
+            if isOptimization {
+                let n = variants ?? 0
+                v = "\(n) variant\(n == 1 ? "" : "s")"
+            } else {
+                switch mode {
+                case "lattice-file":       v = "print file made"
+                case "organic-strengthen": v = "strengthened"
+                case "analyze":            v = "checked"
+                default:                   v = "done"
+                }
+            }
             return dur.isEmpty ? v : "\(v) · \(dur)"
         case "error":     return dur.isEmpty ? "failed" : "failed · \(dur)"
         case "cancelled": return dur.isEmpty ? "cancelled" : "cancelled · \(dur)"
@@ -140,8 +192,11 @@ public struct WorkerJob: Identifiable, Equatable, Decodable, Sendable {
     /// The completion-notification body: project + outcome summary.
     public var completionSummary: String {
         switch state {
-        case "done":  return "\(displayName): optimization finished"
-        case "error": return "\(displayName): optimization failed"
+        case "done":  return isOptimization ? "\(displayName): optimization finished" : "\(displayName): \(outcomeSummary())"
+        case "error":
+            if isOptimization { return "\(displayName): optimization failed" }
+            let why = (message ?? "").split(separator: "\n").first.map(String.init) ?? ""
+            return why.isEmpty ? "\(displayName): \(jobWord.lowercased()) failed" : "\(displayName): \(why)"
         default:      return "\(displayName): \(stateWord.lowercased())"
         }
     }

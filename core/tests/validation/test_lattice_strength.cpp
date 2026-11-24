@@ -623,6 +623,24 @@ int main() {
     }
     std::printf("[organic] strut_margins.bin: %zu bars, %zu judged; file bars %zu\n", mb.size() / 4, judged_bars, org.r.bars);
     CHECK(mb.size() % 4 == 0 && mb.size() / 4 >= org.r.bars && judged_bars > 0);
+    {   // K4 (his Results notes, 2026-11-24): bars.bin, the bars of strut_margins.bin in the same order, the model's frame:
+        // "TOBARS1\0", uint32 count, uint32 0, then count x 7 float32 (ax ay az bx by bz width_mm); named in the block.
+      const std::string bb = slurp(org.out + "/bars.bin");
+      std::uint32_t head[2] = {0, 0};
+      if (bb.size() >= 16) std::memcpy(head, bb.data() + 8, 8);
+      std::size_t inside = 0, wide = 0;
+      for (std::uint32_t i = 0; i < head[0] && 16 + 28 * (i + 1) <= bb.size(); ++i) {
+        float v[7];
+        std::memcpy(v, bb.data() + 16 + 28 * i, 28);
+        inside += v[0] >= -0.01f && v[0] <= 30.01f && v[3] >= -0.01f && v[3] <= 30.01f && v[2] >= -0.01f && v[5] <= 12.01f;
+        wide += v[6] > 0.0f;
+      }
+      std::printf("[organic] bars.bin: %zu bytes, magic %s, count %u (strut_margins %zu), reserved %u, %zu inside the block, "
+                  "%zu with a width\n", bb.size(), bb.substr(0, 7).c_str(), head[0], mb.size() / 4, head[1], inside, wide);
+      CHECK(bb.size() >= 16 && bb.compare(0, 8, std::string("TOBARS1\0", 8)) == 0 && head[0] == mb.size() / 4 && head[1] == 0 &&
+            bb.size() == 16 + 28 * static_cast<std::size_t>(head[0]) && inside == head[0] && wide == head[0]);
+      CHECK(has(b, "\"bars\": \"bars.bin\"") && has(b, "\"strut_margins\": \"strut_margins.bin\""));
+    }
     CHECK(exists(org.out + "/fields.bin"));
     // The Organic verdict (the lead's ruling of 2026-11-18): the solid's stress margin over its solid voxels; the load path
     // judged on the frame (Install 3's voxel load-path test not applied); each weakest strut says what drives its ends.
@@ -780,6 +798,55 @@ int main() {
     std::printf("%s\n", ajson.substr(0, 2400).c_str());
     CHECK(ad.ok && (ad.code == "done" || ad.code == "limit") && ad.rounds_fixed >= 1 && ad.old_bars_kept);
     CHECK(has(ajson, "\"mode\": \"additive\"") && has(ajson, "\"old_bars_kept\": true") && !has(ajson, "\"old_bars_kept\": false"));
+    {   // K4 (his Results notes, 2026-11-24: "What changes were made to strengthen it?"): what the strengthening did, at the
+        // top of strengthen.json (the app's organic_strengthen block): struts thickened (distinct, every round), braced,
+        // the widest strut now, the struts now wider than their own group's thickest setting, and per group.
+      const double thick = num_after(ajson, "thickened_distinct"), widest = num_after(ajson, "widest_mm"),
+                   past = num_after(ajson, "past_thickest");
+      const std::size_t g = ajson.find("\"groups\": [{\"id\": 0, \"regions\": [");
+      std::printf("[additive] summary: thickened %.0f, braced %.0f, widest %.4g mm, past thickest %.0f; groups %s\n", thick,
+                  num_after(ajson, "braced"), widest, past, g == std::string::npos ? "(none)" : ajson.substr(g, 120).c_str());
+      CHECK(thick >= 1.0 && has(ajson, "\"braced\": ") && widest > 0.9 && past >= 0.0 && g != std::string::npos &&
+            num_after(ajson, "thickest_setting_mm", g) == 1.8 && num_after(ajson, "past_thickest", g) == past);
+      CHECK(ajson.find("\"thickened_distinct\"") < ajson.find("\"rounds\": ["));   // top-level, before the rounds
+      // notes27: per group too, its struts thickened and its widest strut (one group, the whole part: the same as the top)
+      CHECK(g != std::string::npos && num_after(ajson, "thickened_distinct", g) == thick &&
+            num_after(ajson, "widest_mm", g) == widest && !has(ajson.substr(g, 200), "\"name\""));
+    }
+    {   // notes27 (builder F's extension of bars.bin, the struts the strengthening changed): word 2 is 1 and one byte per
+        // bar follows the records (bit 0 thickened by the strengthening, bit 1 a brace it added) once a round has added;
+        // round 0's lattice (nothing added yet) has word 2 = 0 and nothing after the records.
+      const auto bars_bin = [&](const std::string& p, std::uint32_t& n, std::uint32_t& word2, std::size_t& marked,
+                                std::size_t& thicker, std::size_t& braced, bool& sized) {
+        const std::string bb = slurp(p);
+        std::uint32_t head[2] = {0, 0};
+        if (bb.size() >= 16) std::memcpy(head, bb.data() + 8, 8);
+        n = head[0];
+        word2 = head[1];
+        const std::size_t recs = 16 + 28 * static_cast<std::size_t>(n);
+        sized = bb.size() == recs + (word2 == 1 ? n : 0);
+        marked = thicker = braced = 0;
+        bool only_known = true;
+        if (word2 == 1 && sized)
+          for (std::size_t i = 0; i < n; ++i) {
+            const unsigned char f = static_cast<unsigned char>(bb[recs + i]);
+            marked += f != 0;
+            thicker += (f & 1) != 0;
+            braced += (f & 2) != 0;
+            only_known = only_known && f <= 3;
+          }
+        sized = sized && only_known;
+      };
+      std::uint32_t n0 = 0, w0 = 9, n1 = 0, w1 = 9;
+      std::size_t m0 = 0, t0 = 0, b0 = 0, m1 = 0, t1 = 0, b1 = 0;
+      bool s0 = false, s1 = false;
+      bars_bin(kDir + "/additive/r0/bars.bin", n0, w0, m0, t0, b0, s0);
+      bars_bin(kDir + "/additive/r1/bars.bin", n1, w1, m1, t1, b1, s1);
+      std::printf("[additive] bars.bin r0: %u bars, word 2 = %u; r1: %u bars, word 2 = %u, %zu marked (%zu thickened, %zu "
+                  "braces)\n", n0, w0, n1, w1, m1, t1, b1);
+      CHECK(s0 && w0 == 0 && n0 > 0);   // RED CONTROL: nothing strengthened, nothing after the records
+      CHECK(s1 && w1 == 1 && n1 > 0 && m1 > 0 && t1 > 0 && m1 < n1);
+    }
     // OS11 (the order): a strut already at the limit in round 0 is widened past it only from round 1.
     CHECK(has(ajson, "\"added\": {\"strengthened\": \"r1/strengthened.json\"") && most_after(ajson, "bars_widened") > 0);
     for (const char* x : {"/r0/strength.json", "/r0/struts_under.json", "/r1/strengthened.json", "/r1/additions.bin", "/r1/strength.json"})
@@ -1442,6 +1509,33 @@ int main() {
                 c.r.made.posts_outside, c.r.made.print_clean, c.r.made.builds);
     CHECK(c.r.ok && c.r.made.print_clean && c.r.made.part_overhangs > 0 && c_outside == 0 && c.r.made.builds < 10);
     CHECK(has(c.json, "\"own_overhangs\": " + std::to_string(c.r.made.part_overhangs)));
+  }
+
+  // ── §16c K1 (his rule, 2026-11-24: "the checking printability should ONLY check what was created in the app, not the
+  // rest of the part. Assume the rest of the part is completely printable."). A 40 x 40 x 30 block, a 2 mm Protect skin
+  // on its top face and 12 mm octet cells under it (26 deep: two layers of cells under the skin). The skin's underside
+  // spans the 12 mm cells between the struts that end on it: a bridge reaching past 5 mm from what holds it, and right
+  // under it, a layer down, the part had material the carving opened, so F1's far-point reading judged it the lattice's
+  // (and propped it). Its island holds no lattice and no solid the layout made (the skin is the part's own): it is the
+  // part's own now, counted, never propped, and the file is clean. The struts themselves are still judged.
+  {
+    write_stl_file(kDir + "/ceiling.stl", box(40, 40, 30), StlFormat::Binary);
+    const StepModel cm = import_part_file_resolved(kDir + "/ceiling.stl");
+    const int top = face_at(cm, 0, 0, 1, 30.0);
+    CHECK(top >= 0);
+    const std::string kj = "{\"mode\": \"lattice_file\", \"model\": \"ceiling.stl\", \"output\": \"ceiling_cells.stl\", "
+                           "\"layout\": {\"min_strut_lines\": 2, \"region_ids\": [1], \"region_no_lattice\": [0], "
+                           "\"region_depth_mm\": [26], \"region_expand_mm\": [0], \"region_face_counts\": [1], "
+                           "\"region_faces\": [" + std::to_string(top) + "], \"protect_ids\": [2], \"protect_depth_mm\": [2], "
+                           "\"protect_face_counts\": [1], \"protect_faces\": [" + std::to_string(top) + "], "
+                           "\"topology\": \"octet\", \"algorithm\": \"uniform\", \"cell_max_mm\": 12, \"min_cells_across\": 1}}";
+    const Run k = run("ceiling", kj, "");
+    std::printf("[ceiling] ok %d code %s; own overhangs %zu (%zu of them judged by the far point before K1), posts %zu, "
+                "clean %d, tries %d, found per pass %d\n", k.r.ok,
+                k.r.code.c_str(), k.r.made.part_overhangs, k.r.made.own_by_k1, k.r.made.posts.size(),
+                k.r.made.print_clean, k.r.made.builds, k.r.made.found_per_pass.empty() ? -1 : k.r.made.found_per_pass.front());
+    CHECK(k.r.ok && k.r.made.print_clean && k.r.made.part_overhangs > 0 && k.r.made.own_by_k1 > 0 && k.r.made.posts.empty());
+    CHECK(has(k.json, "\"own_by_k1\": " + std::to_string(k.r.made.own_by_k1)));
   }
 
   // ── §8 the octet's strut law is the full octet's (2026-11-17): its span is the octet band, so no density in the band

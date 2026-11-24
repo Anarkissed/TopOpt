@@ -21,8 +21,8 @@ final class LatticeSampleKeep {
         var group: String
     }
 
-    /// A sample as it was shown: its body, the Organic struts drawn in it (nil: a strut type's sample), its caption and how
-    /// long it took.
+    /// A sample as it was shown: its body, the struts drawn in it (Organic's vines; ★ notes26 a strut type's bars too), its
+    /// caption and how long it took.
     struct Sample {
         var mesh: ViewerMesh
         var bars: LatticeLayoutBarsInputs?

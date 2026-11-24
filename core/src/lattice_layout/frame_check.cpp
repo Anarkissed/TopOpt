@@ -740,6 +740,8 @@ FrameCheck check_frame(const FrameModel& f, const FrameVoxelSolve& vs, const Fra
   t0 = std::chrono::steady_clock::now();
   std::vector<double> pm_stress(np, inf), pN(np, 0.0), pM(np, 0.0), pT(np, inf), pC(np, inf), plen(np, 0.0);
   std::vector<char> pbend(np, 0);   // brief E3a: bending the larger part of the piece's stress
+  std::vector<double> pst(np, 0.0), psc(np, 0.0);   // P4: the piece's tensile and compressive stress
+  std::vector<Vec3> pdir(np, Vec3{0.0, 0.0, 0.0});  // P4: its unit direction (its length is pf[pi].L)
   for (std::size_t pi = 0; pi < np; ++pi) {
     const FramePiece& p = f.pieces[pi];
     plen[pi] = len3(sub3(f.nodes[static_cast<std::size_t>(p.b)], f.nodes[static_cast<std::size_t>(p.a)]));
@@ -772,6 +774,13 @@ FrameCheck check_frame(const FrameModel& f, const FrameVoxelSolve& vs, const Fra
     pN[pi] = N;
     pM[pi] = M;
     pbend[pi] = sb > std::fabs(N) / sc.A;
+    pst[pi] = s_t;
+    psc[pi] = s_c;
+    {
+      const Vec3 d = sub3(f.nodes[static_cast<std::size_t>(p.b)], f.nodes[static_cast<std::size_t>(p.a)]);
+      const double L = pf[pi].L;
+      if (L > 0.0) pdir[pi] = {d.x / L, d.y / L, d.z / L};
+    }
   }
   // Struts: non-link pieces joined through nodes that are not joints (a joint: three or more non-link pieces, driven,
   // or an end of one piece only).
@@ -904,6 +913,32 @@ FrameCheck check_frame(const FrameModel& f, const FrameVoxelSolve& vs, const Fra
     return ma != mb ? ma < mb : a < b;
   });
   if (out.weakest.size() > static_cast<std::size_t>(std::max(0, s.weakest))) out.weakest.resize(static_cast<std::size_t>(std::max(0, s.weakest)));
+  // P4: the same struts judged against other ups (the same forces, the tensile limit by the rise along each).
+  for (const Vec3& u0 : st.also_up) {
+    FrameCheck::ByUp b;
+    b.smallest_margin = inf;
+    const double ul = std::sqrt(u0.x * u0.x + u0.y * u0.y + u0.z * u0.z);
+    const Vec3 u = ul > 0.0 ? Vec3{u0.x / ul, u0.y / ul, u0.z / ul} : Vec3{0.0, 0.0, 1.0};
+    for (const FrameStrut& sn : out.struts) {
+      if (!sn.judged) continue;
+      double sm = inf;
+      for (int pi : sn.pieces) {
+        const std::size_t q = static_cast<std::size_t>(pi);
+        if (!(plen[q] >= s.min_piece * f.pieces[q].width)) continue;
+        const double rise = std::min(1.0, std::fabs(dot3(pdir[q], u)));
+        const double lim_t = st.level_mpa * (1.0 - rise * rise) + st.across_mpa * rise * rise;
+        const double mt = pst[q] > 0.0 ? lim_t / pst[q] : inf, mc = psc[q] > 0.0 ? st.level_mpa / psc[q] : inf;
+        sm = std::min(sm, std::min(mt, mc));
+      }
+      const double m = std::min(sm, sn.buckling_margin);
+      if (m < st.safety) ++b.under_safety;
+      if (m < b.smallest_margin) {
+        b.smallest_margin = m;
+        b.weakest_at = sn.at;
+      }
+    }
+    out.by_up.push_back(b);
+  }
   out.ms_verdict = ms_since(t0);
   return out;
 }

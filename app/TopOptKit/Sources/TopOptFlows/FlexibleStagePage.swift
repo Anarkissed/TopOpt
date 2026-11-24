@@ -813,6 +813,10 @@ public struct FlexibleStagePage: View {
             if let appModel {
                 TopLeftBlock(model: appModel, projectID: project.id, name: project.name, material: project.material,
                              process: project.process, back: { leave(then: onBack) },
+                             // ★ notes27 (G3): "Part" — the same leave check, then Back landing on the part's versions
+                             part: onBack.map { back -> () -> Void in
+                                 { leave(then: { back(); appModel.library.comeBackToPart(from: project.id) }) }
+                             },
                              canUndo: project.canUndoNow, canRedo: project.canRedoNow,
                              undo: { Self.history(undo: true, project: project, model: model) },
                              redo: { Self.history(undo: false, project: project, model: model) })

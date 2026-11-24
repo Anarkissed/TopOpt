@@ -70,7 +70,8 @@ final class Notes23SampleTimerTests: XCTestCase {
         XCTAssertEqual(lines.count, 2, "★ one line per sample built: \(lines.map { $0["outcome"] ?? "?" })")
         XCTAssertTrue(lines.allSatisfy { $0["outcome"] as? String == "done" })
         XCTAssertEqual(((lines.first?["inputs"] as? [String: Any])?["values"] as? [String: Any])?["topology"] as? String, "octet")
-        XCTAssertNotNil((lines.first?["stages"] as? [String: Any])?["triangles"])
+        // ★ RE-PINNED (notes26): the sample is laid now (LatticeSampleLay), so its steps are the lay's, not the coupon's triangles
+        XCTAssertNotNil((lines.first?["stages"] as? [String: Any])?["layMS"])
     }
     #endif
 }

@@ -472,6 +472,10 @@ void weave_bar_shells(const Domain& domain, const Layout& layout, const Bars& ba
 double strut_run_on_mm(const Carved& carved, const MeshSpec& spec);
 // Per piece of the carved solid: 1 when build_mesh leaves it out for `drop_at` (a small piece starting at one of them).
 std::vector<char> solid_slivers_left_out(const Carved& carved, const std::vector<Vec3>& drop_at);
+// K1 (his rule, 2026-11-24): the carved solid itself (the part less the open space, every piece), as a mesh, so the
+// print check can tell the material the carving left (the part's) from the material put into the open space (the
+// lattice's). Empty without the mesh library or a carving.
+TriangleMesh carved_solid_mesh(const Carved& carved);
 // OF3 (the lead's ruling, 2026-11-18: the owner's rule is a flat bottom): a closed shell reaching under `bed` cut there,
 // with a flat face on the bed plane (Manifold). False (the shell untouched) when it cannot be.
 bool cut_shell_at_bed(TriangleMesh& shell, double bed);
@@ -521,6 +525,9 @@ struct LayerSpec {
   // SPEED 11-22: null = judge every layer (as before). With one, a layer whose section and the one below are the same
   // as at the last check given the same cache (same grid, layers and thresholds) keeps its judgement: the same report.
   LayerCache* cache = nullptr;
+  // K1 (his rule, 2026-11-24): set, each finding keeps its island's pixels (MidAir / OneEnded::pixels: a mid-air start's
+  // whole island, an overhang's or a bridge's overhanging patch), so the printable loop can ask what they are made of.
+  bool keep_pixels = false;
 };
 struct LayerReport {
   double z_bed = 0.0;
@@ -528,8 +535,17 @@ struct LayerReport {
   double sloped_mm2 = 0.0;       // footprint of downward faces within the first layer that are NOT flat on the bed
   double first_layer_mm2 = 0.0;  // the first layer's cross-section
   int layers = 0;
-  struct MidAir { double z = 0, mm2 = 0, x = 0, y = 0, size_x = 0, size_y = 0, below_z = 0; bool anything_below = false; };
-  struct OneEnded { double reach_mm = 0, z = 0, x = 0, y = 0, below_z = 0; bool anything_below = false; };
+  // K1: the check's pixel grid (pixel (c, r) has its middle at x0 + (c + 0.5) px, y0 + (r + 0.5) px; index r * w + c).
+  int grid_w = 0, grid_h = 0;
+  double grid_x0 = 0.0, grid_y0 = 0.0, grid_px = 0.0;
+  // `pixels` (LayerSpec::keep_pixels only, else empty): the finding's island, as grid indices.
+  struct MidAir { double z = 0, mm2 = 0, x = 0, y = 0, size_x = 0, size_y = 0, below_z = 0; bool anything_below = false;
+                  std::vector<std::int32_t> pixels; };
+  // `more` (a long bridge, LayerSpec::keep_pixels only): the other places of its patch, x y, that reach past
+  // `reach_limit_mm` from what holds it and from the far point and each other (a post at each of them and at the far
+  // point leaves no place of the patch reaching that far).
+  struct OneEnded { double reach_mm = 0, z = 0, x = 0, y = 0, below_z = 0; bool anything_below = false;
+                    std::vector<std::int32_t> pixels; std::vector<std::array<double, 2>> more; };
   std::vector<MidAir> mid_air;       // in layer order
   std::vector<OneEnded> one_ended;   // in layer order
   std::vector<OneEnded> long_bridges;   // held at two places or more, but reaching past `reach_limit_mm`; in layer order
@@ -566,6 +582,26 @@ struct PrintableSpec {
   // ★ 362 11-23: told each try as it starts ("checking it prints: try 3 of at most 10"), so the Mac and the iPad can say
   // what a long check is doing (his worker window sat on "starting..." for seven minutes). Null: nothing said.
   void (*said)(const char*) = nullptr;
+  // K1 (his rule, 2026-11-24: "the checking printability should ONLY check what was created in the app, not the rest of
+  // the part. Assume the rest of the part is completely printable. That is for the user and the slicer."): a finding
+  // counts only when its island (a mid-air start's island, an overhang's or a bridge's overhanging patch) holds an
+  // overhang the app made, read pixel by pixel at the layer's middle: a pixel of
+  //   - material the app put in: material of the file at least two pixels from the carved solid's own cross-section at
+  //     that layer (a kept bar, a weave's tube, a post: what fills the open space), or
+  //   - a finish the layout added: material of the carved solid at least 0.3 mm inside its cross-section (clear of the
+  //     open space's 0.25 mm reading at its edge) where the domain says rim (S1), cover (S9) or Organic bed floor.
+  // Anything else is the part's own and is never judged: material the layout only left in place (the part's walls, a
+  // Protect skin, what no region asked for, a wall too thin, lattice space no cell holds, and the surfaces the carving
+  // bared on them). (K6 took away the allowance for the app's material at the part's own underside: the bottom row's
+  // struts, cut at the bed, hold what floated there.) Organic changes only where a finding lay on the part alone. Near
+  // a bar is not on a bar. A long bridge
+  // the app made gets a post under each of its places that reach too far, in one try (OneEnded::more), cell lattices
+  // only. What F1 / OS17 left to the slicer stays the
+  // slicer's, so his rule only ever judges fewer. The part's own is counted (`part_overhangs`, `own_by_k1`), its place
+  // kept (`part_overhang_at`), never left out, never propped, never a reason the file is not clean. For a cell lattice
+  // and a weave alike. false: F1 and OS17 as before (a finding read at its far point only: within half a bar's width +
+  // 0.35 mm of a kept bar, or with part under it, judged).
+  bool only_app_made = true;
 };
 struct PrintableReport {
   MeshReport mesh;     // of the mesh returned
@@ -604,6 +640,14 @@ struct PrintableReport {
   // the next try would have been the same file again.
   std::size_t posts_outside = 0;
   bool stopped_repeating = false;
+  // P3 (his print orientation): where the part's own overhangs are, of the LAST pass (the mesh returned): each finding
+  // the weave's rule or the cell lattice's (F1) took as the part's own, its place (x, y, z, the layer's middle), so the
+  // file can paint the part's triangles there as support enforcers (support_paint.hpp).
+  std::vector<Vec3> part_overhang_at;
+  // K1 (PrintableSpec::only_app_made), all passes together: of `part_overhangs`, the findings the far-point reading of
+  // F1 / OS17 judged (a kept bar within half its width + 0.35 mm of it, or the part right under it) that his rule leaves
+  // to the slicer. (What the far point left to the slicer stays the slicer's: his rule only ever judges fewer.)
+  std::size_t own_by_k1 = 0;
   // O17, O18: what the sag pass did (once, before the first pass), and, when it changed a bar, the bars every pass
   // was made of (the layout's own otherwise: null). `drop_at` and `posts` are read against those.
   SagReport sags;

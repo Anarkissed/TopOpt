@@ -94,6 +94,26 @@ final class LatticePreviewStoreTests: XCTestCase {
     /// ★ The whole lattice reads back exactly (what is drawn and what the print file is made from), in well under a second
     /// for 90k struts (printed: the times on this Mac's debug build; the iPad runs the release build). RED CONTROL: one setting
     /// changed, nothing is read back.
+    /// ★ 362 11-24 (release 17's whole suite: the lay's floor cell, notes25 D10, was not kept, so `readsBack` refused every
+    /// lattice with a floor and his versions would have reopened with no saved preview): format 2 keeps it; a format-1
+    /// file (his versions saved before) still reads, its floor 0.
+    func testTheFloorCellIsKeptAndAnOldFileStillReads() throws {
+        let dir = try folder()
+        var m = remembered(path: dir.appendingPathComponent("model.stl").path, struts: 50)
+        var laid = try XCTUnwrap(m.laid)
+        laid.floorCellMM = 2.55
+        m.laid = laid
+        let data = try XCTUnwrap(LatticePreviewStore.encode(m))
+        XCTAssertTrue(LatticePreviewStore.readsBack(data, m), "★ a lattice with a floor reads back as it was")
+        XCTAssertEqual(LatticePreviewStore.decode(data, for: m.inputs, token: 1)?.laid?.floorCellMM, 2.55)
+        // the same lattice as format 1 wrote it: version 1, no floor at the end
+        var old = data.prefix(data.count - 8)
+        old.replaceSubrange(4..<8, with: withUnsafeBytes(of: UInt32(1)) { Data($0) })
+        let back = try XCTUnwrap(LatticePreviewStore.decode(Data(old), for: m.inputs, token: 1), "★ an old file still reads")
+        XCTAssertEqual(back.laid?.floorCellMM, 0)
+        XCTAssertEqual(back.bars.bars, m.bars.bars)
+    }
+
     func testA90kStrutLatticeRoundTripsQuickly() throws {
         let dir = try folder()
         let m = remembered(path: dir.appendingPathComponent("model.stl").path)
@@ -173,7 +193,8 @@ final class LatticePreviewStoreTests: XCTestCase {
         // (11: + fileMesh, 362's Mac print-accurate file — NOT kept here: the version's result holds that file)
         XCTAssertEqual(n(LatticeLayoutBarsInputs(token: 0, bars: [])), 11, "what is drawn")
         XCTAssertEqual(n(LatticeLayoutSolidGrid(token: 0, origin: .zero, voxel: 1, dims: .zero, rg: [])), 6)
-        XCTAssertEqual(n(LatticeLayoutColours.Laid()), 12)
+        // ★ RE-PINNED (362 11-24: notes25 D10 added floorCellMM; the store now keeps it, format 2, and still reads 1)
+        XCTAssertEqual(n(LatticeLayoutColours.Laid()), 13)
         XCTAssertEqual(n(LatticeLayoutPreview.Timing(openMS: 0, readMS: 0, cellsMS: 0, barsMS: 0, bars: 0)), 7)
         XCTAssertEqual(n(LatticeOrganicLook.Limits(strutLowerMM: 0, strutUpperMM: 0, strutAutoMM: 0, cellLowerMM: 0, cellUpperMM: 0,
                                                    cellAutoMM: 0)), 8)

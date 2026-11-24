@@ -406,6 +406,7 @@ public final class ProjectModel: ObservableObject {
         self.faceRegions = snapshot.faceRegions ?? FaceRegionModel()
         self.latticePageManual = snapshot.latticePageManual ?? false   // ★ 11-10 (img08)
         self.newModel = snapshot.newModel   // ★ Upload new version (decision 12): a group that found no face stays until he picks
+        self.buildOrientation.plateUp = snapshot.plateUp   // ★ notes27: the face he chose for the bed, kept with the project
         if let lost = snapshot.newModel?.lostGroups, !lost.isEmpty { self.selection.keepWhenEmpty(Set(lost)) }
         // ★ RE-EVALUATE THE PERSISTED REGIONS AGAINST THIS IMPORT, and report what
         // moved (§3c / bar R6). A union is stored as a filter plus a hand
@@ -1218,8 +1219,14 @@ public final class ProjectModel: ObservableObject {
     /// nil when the topology id has no strut law (item a, 2026-10-02): there is no width
     /// dial to show — never octet's widths under another type's name.
     public func latticeDensityBandDiametersMM(cellMM: Double) -> (lo: Double, hi: Double)? {
-        guard let lat = LatticeType.named(lattice.topologyID) else { return nil }
-        let bead = Swift.max(0.05, printParams.strutLineWidthMM)
+        Self.latticeDensityBandDiametersMM(topology: lattice.topologyID, lineWidthMM: printParams.strutLineWidthMM, cellMM: cellMM)
+    }
+    /// ★ notes26: the same band for a named type and print line (the Lattice page's sample reads the PAGE's type, which may
+    /// not be saved yet).
+    nonisolated public static func latticeDensityBandDiametersMM(topology: String, lineWidthMM: Double,
+                                                                 cellMM: Double) -> (lo: Double, hi: Double)? {
+        guard let lat = LatticeType.named(topology) else { return nil }
+        let bead = Swift.max(0.05, lineWidthMM)
         // The law's own ceiling: what a fully dense cell of this size produces.
         let solid = 2 * lat.strutRadiusMM(relativeDensity: 1, cellMM: cellMM)
         // The quilt: neighbouring struts meet when the diameter reaches half the
@@ -1239,8 +1246,13 @@ public final class ProjectModel: ObservableObject {
     /// A stored density → the percent to SHOW, 1…100 across the width band.
     /// nil when the type has no strut law (item a): the drawer shows no percent.
     public func latticeDensityPercent(rho: Double, cellMM: Double) -> Double? {
-        guard let lat = LatticeType.named(lattice.topologyID),
-              let b = latticeDensityBandDiametersMM(cellMM: cellMM) else { return nil }
+        Self.latticeDensityPercent(rho: rho, cellMM: cellMM, topology: lattice.topologyID, lineWidthMM: printParams.strutLineWidthMM)
+    }
+    /// ★ notes26: the same percent for a named type and print line (the Lattice page's sample).
+    nonisolated public static func latticeDensityPercent(rho: Double, cellMM: Double, topology: String,
+                                                         lineWidthMM: Double) -> Double? {
+        guard let lat = LatticeType.named(topology),
+              let b = latticeDensityBandDiametersMM(topology: topology, lineWidthMM: lineWidthMM, cellMM: cellMM) else { return nil }
         guard cellMM > 0 else { return 1 }
         guard b.hi > b.lo else { return 1 }
         let d = 2 * lat.strutRadiusMM(relativeDensity: rho, cellMM: cellMM)
@@ -4040,7 +4052,9 @@ public final class ProjectModel: ObservableObject {
                                // ★ 11-10 (img08): only Manual is written, so a part that never picked it saves as before
                                latticePageManual: latticePageManual ? true : nil,
                                // ★ Upload new version (decision 12): the groups still waiting for faces
-                               newModel: newModel.map { var n = $0; n.lostGroups = lostFaceGroups.map(\.id); return n })
+                               newModel: newModel.map { var n = $0; n.lostGroups = lostFaceGroups.map(\.id); return n },
+                               // ★ notes27: the face he chose for the bed (nil: as placed, never written)
+                               plateUp: buildOrientation.plateUp.flatMap { $0 == .zero ? nil : $0 })
     }
 
     /// ★ Upload new version (his ask 2026-11-11, DATA-MODEL.md decision 12): the model this version brought, if it came by

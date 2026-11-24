@@ -18,6 +18,8 @@ public struct TopLeftBlock: View {
     let process: ProcessKind
     var optimized = false
     let back: () -> Void
+    /// ★ notes27 (G3): "Part" — back to this part's own page (its versions) instead of its project; nil: no Part.
+    let part: (() -> Void)?
     let rename: (() -> Void)?
     let canUndo: Bool
     let canRedo: Bool
@@ -25,12 +27,16 @@ public struct TopLeftBlock: View {
     let redo: () -> Void
 
     public init(model: AppModel, projectID: UUID, name: String, material: String, process: ProcessKind, optimized: Bool = false,
-                back: @escaping () -> Void, rename: (() -> Void)? = nil,
+                back: @escaping () -> Void, part: (() -> Void)? = nil, rename: (() -> Void)? = nil,
                 canUndo: Bool, canRedo: Bool, undo: @escaping () -> Void, redo: @escaping () -> Void) {
         self.model = model; self.library = model.library; self.projectID = projectID; self.name = name; self.material = material
-        self.process = process; self.optimized = optimized; self.back = back; self.rename = rename
+        self.process = process; self.optimized = optimized; self.back = back; self.part = part; self.rename = rename
         self.canUndo = canUndo; self.canRedo = canRedo; self.undo = undo; self.redo = redo
     }
+
+    /// ★ notes27 (G3, his 11-24: "add another button to the right of that called "Part" that leads to the list of the versions of
+    /// the part rather than all the way back to the project"): its word.
+    static let partTitle = "Part"
 
     /// The row's top and leading inset (the capsule sits `StageCapsuleLayout.capsuleTop` down, 8 pt under it).
     public static let top: CGFloat = DS.Space.xl3
@@ -66,24 +72,42 @@ public struct TopLeftBlock: View {
 
     private var row: some View {
         HStack(spacing: DS.Space.m) {
-            Button(action: back) {
-                HStack(spacing: DS.Space.xs) {
-                    Image(systemName: "chevron.left").font(.system(size: 14, weight: .semibold))
-                    Text(Self.backTitle(library, folder: projectID)).dsStyle(DS.TypeScale.bodyStrong).lineLimit(1)
+            // ★ notes27 (G3, his 11-24: "Connect it like Structural | Setup | Lattice... etc., making it part of the same pill,
+            // but separated with a "|""): ONE pill — ‹ the project | Part — divided as the stage capsule's segments are
+            HStack(spacing: 2) {
+                Button(action: back) {
+                    HStack(spacing: DS.Space.xs) {
+                        Image(systemName: "chevron.left").font(.system(size: 14, weight: .semibold))
+                        Text(Self.backTitle(library, folder: projectID)).dsStyle(DS.TypeScale.bodyStrong).lineLimit(1)
+                    }
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .padding(.horizontal, DS.Space.l)
+                    // ★ 11-12 (Touch, design-system §1: every target ≥ 44 × 44; #362's B10 census): the pill is drawn 42, as it
+                    // always was; its target is 44, the row's own height
+                    .frame(minWidth: 44, minHeight: Self.target)
+                    .contentShape(Rectangle())
                 }
-                .foregroundStyle(DS.Color.textPrimary.color)
-                .padding(.horizontal, DS.Space.l)
-                .frame(minWidth: 44, minHeight: Self.height)
-                .background(Capsule().fill(DS.Surface.bar.color)
-                    .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
-                // ★ 11-12 (Touch, design-system §1: every target ≥ 44 × 44; #362's B10 census): the pill is drawn 42, as it
-                // always was; its target is 44, the row's own height
-                .frame(minHeight: Self.target)
-                .contentShape(Capsule())
+                .buttonStyle(.plain)
+                .accessibilityLabel("Back to \(Self.backTitle(library, folder: projectID))")
+                .background(CornerPairStyle.publish("backButton"))
+                if let part, library.partPage(of: projectID) != nil {   // (before he groups there is no part's page)
+                    Rectangle().fill(DS.Color.strokeStrong.color).frame(width: 1, height: 22)
+                    Button(action: part) {
+                        Text(Self.partTitle).dsStyle(DS.TypeScale.bodyStrong).lineLimit(1).fixedSize()
+                            .foregroundStyle(DS.Color.textPrimary.color)
+                            .padding(.horizontal, DS.Space.l)
+                            .frame(minWidth: Self.target, minHeight: Self.target)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Back to this part's versions")
+                    .background(CornerPairStyle.publish("topLeftPart"))
+                }
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Back to \(Self.backTitle(library, folder: projectID))")
-            .background(CornerPairStyle.publish("backButton"))
+            .background(Capsule().fill(DS.Surface.bar.color)
+                .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1))
+                .background(CornerPairStyle.publish("topLeftBackPill"))   // the pill as drawn (42 tall)
+                .padding(.vertical, (Self.target - Self.height) / 2))
 
             HStack(spacing: DS.Space.sm) {
                 Button { rename?() } label: {

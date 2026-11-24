@@ -971,6 +971,15 @@ public final class RunModel: ObservableObject {
         return nil
     }
 
+    /// ★ notes27 (his print orientation, "Keep orientation"): a stage's result replaced by the check's (its own place —
+    /// `outcome` or `otherOutcome`), outside any run; the other stage's result is left as it is.
+    public func replaceOutcome(_ o: OptimizeOutcome, lattice: Bool) {
+        guard phase != .running else { return }
+        if outcome != nil, outcomeIsPrintFile == lattice { outcome = o; return }
+        if otherOutcome != nil, otherIsPrintFile == lattice { otherOutcome = o; return }
+        if outcome == nil { outcome = o } else { otherOutcome = o }
+    }
+
     /// ★ notes25: the other stage's result read back from its version's folder beside `outcome` (persist-c), with its pair.
     public func restoreOtherOutcome(_ restored: OptimizeOutcome) {
         guard phase == .idle, otherOutcome == nil else { return }

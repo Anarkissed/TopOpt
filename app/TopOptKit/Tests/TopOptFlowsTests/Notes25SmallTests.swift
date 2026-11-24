@@ -73,14 +73,15 @@ final class Notes25ContinueTests: XCTestCase {
     }
 
     /// D6 (his img 9): "Will likely lose strength" said once — the setting's grey caption; the second line it had when on is gone.
-    /// Depth variation's two lines are not his note: left as they are.
+    /// Depth variation's two lines were not his note then (★ notes26: his yes since — one line, Notes26DepthLineTests).
     func testExtraSpacingSaysLoseStrengthOnce() throws {
         let src = try FlexibleSource.code("LatticeOrganicControls.swift")
         XCTAssertFalse(src.contains("say(\"Will likely lose strength\")"), "★ the second line is gone")
         XCTAssertEqual(OrganicSettingsHelp.entry("Extra spacing between vines")?.grey, "Will likely lose strength.",
                        "★ the caption still says it, once")
-        XCTAssertTrue(src.contains("say(look.depthVariationValue ? \"Up to 1 mm out at open faces\" : \"Cut flush at every face\")"),
-                      "Depth variation untouched (not named)")
+        // ★ RE-PINNED (notes26, his yes to one line for Depth variation too): its second line is gone, as this one's
+        XCTAssertFalse(src.contains("say(look.depthVariationValue ? \"Up to 1 mm out at open faces\" : \"Cut flush at every face\")"),
+                       "Depth variation: one line now (Notes26DepthLineTests)")
     }
 }
 

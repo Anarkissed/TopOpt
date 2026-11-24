@@ -1889,6 +1889,11 @@ public struct WorkspacePlaceholder: View {
                               onPick: model.library.version(project.id) == nil || !stageOutcomeIsLast ? nil : { v in
                                   if let r = ResultsPick.all(v, in: outcome) { model.library.pick(folder: project.id, result: r) }
                               },
+                              // ★ notes27 (his print orientation, SPEC 2a): drawn the way it prints, on the bed
+                              printUp: PrintDraw.up(frame: PrintReportFacts.of(report: outcome.reportJSON).frame,
+                                                    orientation: project.buildOrientation, gravity: force.gravity),
+                              chosenFace: !project.buildOrientation.isInferredFromGravity,
+                              orientation: printOrientationHost(for: outcome),   // ★ notes27 P6/P7: "Print orientation"
                               certify: stage == .lattice ? certifyCard : nil)   // ★ Organic cut 2: his certify wizard (★ notes25: the print file's, in the Lattice stage)
                     .ignoresSafeArea()
                     .onAppear { startCertifyWalk(); model.resultsMounted.mounted = true }   // ★ 11-23
@@ -2117,12 +2122,77 @@ public struct WorkspacePlaceholder: View {
         }
         LatticePrintFlow.shared.begin(project: project.id, key: latticePrintKey)   // ★ his 11-22: the exact is on screen; the file
         // ★ notes25 (A5, his 11-23 evening: "ensure that the regular lattice gets a similar export pop-up, with an animation and
-        // everything"): the cell lattice's print file wears the same one card (the vines: no cell motion exists to reuse)
+        // everything"): the cell lattice's print file wears the same one card (★ notes27: with its own hexagons)
         let r = run
         LatticeMacMake.shared.begin(project: project.id, path: project.importedFile?.path, run: r, fileOnly: true,
+                                    kind: .cells,   // ★ notes27 (G1): its animation shows hexagonal cells, never the vines
                                     onMac: compute.activeRemote != nil, cancel: { r.cancel() })
         LatticeMacMake.shared.request = request
         launchFileRun(request, job: job, strengthJob: strengthJob, config: compute.activeRemote)
+    }
+
+    /// ★ notes27 P6/P7 (his print orientation, SPEC 2d): what Results' "Print orientation" runs for this stage's result — its
+    /// "Check strength" chain on the Mac standing the chosen way (PrintCheckJobs), and "Keep orientation".
+    private func printOrientationHost(for outcome: OptimizeOutcome) -> PrintOrientationHost {
+        let lattice = stage == .lattice, organic = lattice && LatticeLayoutPreview.organic(project.lattice)
+        let comp = compute
+        return PrintOrientationHost(kind: !lattice ? .topology : organic ? .organic : .cells,
+                                    macReady: { comp.activeRemote != nil },
+                                    check: { up, v, cancelled, said in
+                                        try await checkPrintOrientation(up: up, outcome: outcome, lattice: lattice, organic: organic,
+                                                                        variant: v, isCancelled: cancelled, stage: said)
+                                    },
+                                    keep: { up, o in keepPrintOrientation(up: up, outcome: o, lattice: lattice) })
+    }
+
+    /// ★ notes27 P7: "Check strength" along `up` — an Organic lattice its strengthening and print file, a cell lattice its print
+    /// file (each with `print_frame`), a topology result core's re-check of its own run job.
+    @MainActor
+    private func checkPrintOrientation(up: SIMD3<Double>, outcome: OptimizeOutcome, lattice: Bool, organic: Bool,
+                                       variant: PrintCheckVariant, isCancelled: @escaping @Sendable () -> Bool,
+                                       stage said: @escaping @Sendable (String) -> Void) async throws -> PrintCheckResult {
+        guard let config = compute.activeRemote else { throw LatticeFileRun.Failure(PrintOrientationWords.noMacText) }
+        let before = outcome.reportJSON.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+        guard lattice else {
+            guard let path = project.importedFile?.path, let runJob = project.relatticeArtifacts?.jobJSON, let stl = variant.stl else {
+                throw LatticeFileRun.Failure("This result\u{2019}s own run is not kept on this iPad, so it can\u{2019}t be checked again.")
+            }
+            return try await PrintCheckJobs.topology(config: config, modelPath: path, runJob: runJob, variantSTL: stl, outcome: outcome,
+                                                     variant: variant.index, up: up, projectName: project.name,
+                                                     isCancelled: isCancelled, stage: said)
+        }
+        guard let request = model.makeLatticeRunRequest() else { throw LatticeFileRun.Failure("Import a part and set a lattice region first.") }
+        let strengthJob = LatticeFileJob.checksStrength(project.lattice, wired: LatticeFileButton.wired) ? strengthJobJSON(request) : nil
+        let made: Result<LatticeFileJob.ForPart, LatticeFileJob.NoJob>
+        if organic {
+            let inputs = try await organicMacInputsWhenReady()
+            made = LatticeFileJob.forOrganic(project, groups: inputs.groups, tensor: inputs.tensor, referenceMPa: newEngineStress.referenceMPa,
+                                             strengthJob: strengthJob, printUp: up)
+        } else {
+            made = LatticeFileJob.forPart(project, stress: newEngineStress, strengthJob: strengthJob, printUp: up)
+        }
+        let job: LatticeFileJob.ForPart
+        switch made {
+        case .success(let j): job = j
+        case .failure(let why): throw LatticeFileRun.Failure(why.line)
+        }
+        let required = ((before["strength"] as? [String: Any])?["safety_margin"] as? NSNumber)?.doubleValue
+            ?? PrintReportFacts.decode(before).ranking?.requiredMargin ?? 1.5
+        return try await PrintCheckJobs.lattice(config: config, job: job, strengthJob: strengthJob, organic: organic,
+                                                request: request.withJobMode(LatticeFileButton.jobMode), projectName: project.name,
+                                                densityGCm3: model.densityGCm3(for: project.material), up: up, before: before,
+                                                required: required, isCancelled: isCancelled, stage: said)
+    }
+
+    /// ★ notes27 P6: "Keep orientation" — the face he kept is set (his 11-23 rule: a change on a version with a result makes the
+    /// next version), and that version holds the check's result: Results shows it, standing the new way.
+    private func keepPrintOrientation(up: SIMD3<Double>, outcome: OptimizeOutcome, lattice: Bool) {
+        let artifacts = lattice ? nil : project.relatticeArtifacts   // a topology result keeps its run's pair
+        project.buildOrientation.plateUp = SIMD3<Float>(Float(up.x), Float(up.y), Float(up.z))
+        model.moveToNextVersionIfEdited(project, baseline: VersionEditWatch.shared.baseline(for: project))
+        run.replaceOutcome(outcome, lattice: lattice)
+        if let a = artifacts, project.relatticeArtifacts == nil { project.relatticeArtifacts = a }
+        model.persistCurrentProject()
     }
 
     /// The print file's run, started: on the chosen Mac, else this iPad (a regular lattice only: Organic needs a Mac).
@@ -3408,6 +3478,7 @@ public struct WorkspacePlaceholder: View {
     private var resultsTopLeftBlock: some View {
         TopLeftBlock(model: model, projectID: project.id, name: project.name, material: project.material,
                      process: project.process, optimized: true, back: { model.backHome() },
+                     part: { model.backToPart() },   // ★ notes27 (G3): "Part", the part's versions
                      rename: { nameDraft = project.name; renaming = true },
                      canUndo: project.canUndoNow, canRedo: project.canRedoNow,
                      undo: { project.performUndo() }, redo: { project.performRedo() })
@@ -3418,6 +3489,7 @@ public struct WorkspacePlaceholder: View {
         // version · material · undo · redo; Results draws the same view. Its insets are the ones this row always had.
         TopLeftBlock(model: model, projectID: project.id, name: project.name, material: project.material,
                      process: project.process, back: { model.backHome() },
+                     part: { model.backToPart() },   // ★ notes27 (G3): "Part", the part's versions
                      rename: { nameDraft = project.name; renaming = true },
                      canUndo: project.canUndoNow, canRedo: project.canRedoNow,
                      undo: { project.performUndo() }, redo: { project.performRedo() })
@@ -6557,14 +6629,8 @@ public struct WorkspacePlaceholder: View {
             HStack(spacing: DS.Space.xs) {
                 Image(systemName: "square.3.layers.3d.top.filled")
                     .font(.system(size: 12, weight: .bold))
-                Text("Plate up \(BuildOrientation.label(project.buildOrientation.resolved(gravity: force.gravity)))")
+                Text("Plate \u{00B7} " + PrintOrientationWords.plateValue(project.buildOrientation))   // ★ notes27: never "+Z"
                     .dsStyle(DS.TypeScale.footnote).fontWeight(.bold)
-                if project.buildOrientation.isInferredFromGravity {
-                    Text("assumed")
-                        .font(.system(size: 9, weight: .bold))
-                        .padding(.vertical, 2).padding(.horizontal, 5)
-                        .background(Capsule().fill(DS.Color.fillSubtle.color))
-                }
             }
             .foregroundStyle(DS.Color.textPrimary.color)
             .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.m)
@@ -15124,8 +15190,7 @@ extension WorkspacePlaceholder {
             .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain).fixedSize()
         case .plate:
             Button { withAnimation(DS.Motion.emphasized) { showBuildOrientation.toggle() } } label: {
-                DSValueBox("Plate up \(BuildOrientation.label(project.buildOrientation.resolved(gravity: force.gravity)))"
-                           + (project.buildOrientation.isInferredFromGravity ? " \u{00B7} assumed" : ""))
+                DSValueBox(PrintOrientationWords.plateValue(project.buildOrientation))   // ★ notes27: never "+Z"; the picture shows which
             }
             .buttonStyle(.plain)
         case .gravity:
@@ -16160,7 +16225,10 @@ extension WorkspacePlaceholder {
             switch b {
             case .latticeAgain: return (LatticeFileRefusal.latticeAgain, { requestLatticeRun() })
             case .changeSettings: return (LatticeFileRefusal.changeSettings, { openSettingToChange(refusal.settingToChange) })
-            case .showMe: return refusal.findingsAt.first.map { at in (LatticeFileRefusal.showMe, { showLatticeFileSpot(at) }) }
+            case .showMe:   // ★ notes27 (G2): the marker's tap raises this same pop-up again
+                return refusal.findingsAt.first.map { at in
+                    (LatticeFileRefusal.showMe, { showLatticeFileSpot(at, reopen: { latticeFilePopup(refusal, tryAgain: tryAgain) }) })
+                }
             case .ok: return nil
             }
         }
@@ -16174,12 +16242,13 @@ extension WorkspacePlaceholder {
     }
 
     /// ★ notes25 ("Show me"): the view turns to the spot (the part's own mm) and the spot is marked on the part.
-    func showLatticeFileSpot(_ at: SIMD3<Double>) {
+    /// ★ notes27 (G2): `reopen` — the pop-up it came from, raised again by a tap on the marker.
+    func showLatticeFileSpot(_ at: SIMD3<Double>, reopen: (() -> Void)? = nil) {
         guard let mesh = stageMesh else { return }
         let m = SIMD3<Float>(at), b = mesh.bounds
         cameraModel.adopt(LatticeFileSpot.camera(cameraModel.camera, showing: m, centre: b.center, settle: settleQuat,
                                                  radius: b.radius))
-        LatticeFileSpot.shared.mark(m, version: project.id)
+        LatticeFileSpot.shared.mark(m, version: project.id, reopen: reopen)
     }
 
     /// ★ notes25 ("Change settings" must "lead to the settings page, scrolling to and highlighting the field to change along
@@ -16206,9 +16275,11 @@ extension WorkspacePlaceholder {
     /// place of the one on screen (the same body, opened the same way), the card closed; the check goes on.
     func macEarlyFile(checkFollows: Bool) -> LatticeFileRun.Early {
         let preview = newEngine, p = project, stress = newEngineStress
+        let turn = LatticeFileJob.printFrameUp(p).flatMap { PrintFrameTurn.forUp($0, base: p.viewerMesh?.positions) }   // ★ notes27
         return LatticeFileRun.Early { data, base in
             Task { @MainActor in LatticeMacMake.shared.fileArrived() }
-            guard let base, let mesh = try? LatticeFileMesh.make(threeMF: data, baseTriangles: base, token: Int(Date().timeIntervalSince1970))
+            guard let base, let mesh = try? LatticeFileMesh.make(threeMF: data, baseTriangles: base, token: Int(Date().timeIntervalSince1970),
+                                                                 turn: turn)
             else { return }
             Task { @MainActor in
                 preview.showFile(mesh, project: p, stress: stress)
