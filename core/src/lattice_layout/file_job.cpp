@@ -1356,6 +1356,7 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     r.stepped_edges = out.stepped_edges.size();
     r.thin_solid = out.thin_solid;
     r.small_patch_cells = out.layout.small_patch_cells;   // K5
+    r.quilt_regions = out.quilt_regions;                  // K3
     r.cells_by_stress = out.cells_by_stress;
     r.step_held_at = out.step_held_at;   // C24
     r.floor_cell_mm = out.layout.floor_cell_mm;
@@ -1886,6 +1887,11 @@ std::string file_result_json(const FileResult& r) {
   if (r.small_patch_cells > 0) {   // K5: written only when the rule made a cell solid (else the report is as it was)
     std::snprintf(b, sizeof b, "    \"small_patch_cells\": %llu,\n", count(r.small_patch_cells));
     o += b;
+  }
+  if (!r.quilt_regions.empty()) {   // K3: written only when a region needed the quilt (else the report is as it was)
+    o += "    \"quilt_regions\": [";
+    for (std::size_t i = 0; i < r.quilt_regions.size(); ++i) o += (i ? ", " : "") + std::to_string(r.quilt_regions[i]);
+    o += "],\n";
   }
   if (r.weave_regions > 0) {   // Organic: written only for a job with a weave region (a cube-lattice result is the
                                // released engine's, byte for byte)

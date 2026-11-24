@@ -1473,6 +1473,18 @@ public final class LatticeLayoutPreview: ObservableObject {
         if !l.simulateStresses, !s.byStress, let t = l.manualStrutThicknessMM, t > 0 { s.strutWidthMM = t }
         s.allowQuilt = l.allowQuilt
         s.smallCellsInThinWalls = l.smallCellsInThinWalls   // ★ his per-part choice (11-13)
+        // ★ K3 (his 11-23 notes on release 17: "When I set auto regular lattices, it automatically set quilting=on. That should
+        // ALWAYS be off by default unless it is literally impossible to lattice without it. If users want it on, they need to go
+        // into manual." "Auto should try to give as thin struts as possible, regardless of the cell size."): the page on Auto
+        // asks for no quilt and no Small cells in thin walls (the engine lays a region with the quilt's cells only where no
+        // other cell can be laid, and names it: quilt_regions), and for the thinnest strut the printer lays (its lines x its
+        // line width) in every cell, the cells still grading. Manual sends his own choices, as before.
+        if !p.latticePageManual, !l.isOrganic {
+            s.allowQuilt = false
+            s.smallCellsInThinWalls = false
+            s.byStress = false
+            s.strutWidthMM = s.minStrutLines * s.beadMM
+        }
         // ★ cells across a wall (C3-C5): Structural five; Aesthetic one with "Allow single-cell members", else two
         let aesthetic = (l.stageMode ?? .structural) == .aesthetic
         s.minCellsAcross = Self.minCellsAcross(l)   // ★ notes25 (D8): the one rule, read by the thin-wall pop-up too

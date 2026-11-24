@@ -3818,6 +3818,44 @@ static void test_cut_cells_follow_a_slope() {
   }
 }
 
+// K3 (his 11-23 notes: quilting "should ALWAYS be off by default unless it is literally impossible to lattice without
+// it"). The 20 x 20 x 12 block, two lines of 0.45 mm (a 0.9 mm strut: the open look's smallest cell is 4.74 mm, the
+// quilt's 2.55 mm): a region 3 mm deep under the top face (no cell that prints open fits it) and one 6 mm deep under the
+// bottom face. With the quilt off the thin region is laid again with the quilt's smallest cell, that region only, and
+// named; the thick one keeps exactly the cells it lays alone. With the quilt on there is nothing to fall back to.
+static void test_quilt_only_where_nothing_else_lays() {
+  const StepModel model = finish_block();
+  Settings st;
+  st.regions = {{1, Role::Lattice, {1}, 3.0, 0.0}, {2, Role::Lattice, {0}, 6.0, 0.0}};
+  st.cells.cell_max_mm = 6;
+  const Outcome both = Session(model).lay(st);
+  const double open_floor = 0.9 / (0.7592 / 4.0), quilt_floor = 0.9 / kQuiltStrutPerCell;
+  std::size_t thin = 0, thick = 0, thin_small = 0, thick_small = 0;
+  for (const Cell& c : both.layout.cells) {
+    const bool top = c.region == 1;
+    (top ? thin : thick) += 1;
+    if (c.size < open_floor - 1e-9) (top ? thin_small : thick_small) += 1;
+    CHECK(c.size >= quilt_floor - 1e-9);
+  }
+  std::printf("[K3] quilt off: regions laid with the quilt %zu (first %d); thin region %zu cells (%zu under the open look), "
+              "thick region %zu cells (%zu under it)\n", both.quilt_regions.size(), both.quilt_regions.empty() ? -1 : both.quilt_regions.front(),
+              thin, thin_small, thick, thick_small);
+  CHECK(both.quilt_regions == std::vector<int>{1} && thin > 0 && thin_small == thin && thick > 0 && thick_small == 0);
+  // The thick region alone: the same cells (the fallback touched the thin region only).
+  Settings alone = st;
+  alone.regions = {st.regions[1]};
+  const Outcome one = Session(model).lay(alone);
+  std::vector<std::array<double, 5>> a, b;
+  for (const Cell& c : both.layout.cells)
+    if (c.region == 2) a.push_back({c.lo[0], c.lo[1], c.lo[2], c.size, c.strut});
+  for (const Cell& c : one.layout.cells) b.push_back({c.lo[0], c.lo[1], c.lo[2], c.size, c.strut});
+  CHECK(a == b && one.quilt_regions.empty());
+  // Allow quilt on: no fallback (the quilt is on everywhere already).
+  Settings on = st;
+  on.struts.allow_quilt = true;
+  CHECK(Session(model).lay(on).quilt_regions.empty());
+}
+
 static void test_cells_curved_region() {
   int L = -1, square = -1, sideA = -1, sideB = -1;
   const StepModel model = plate_with_L_face(&L, &square, &sideA, &sideB);
@@ -8244,6 +8282,7 @@ int main() {
   test_one_grid();
   test_cells_behind_a_protect_skin();
   test_thin_walls_follow_the_quilt_switch();
+  test_quilt_only_where_nothing_else_lays();   // K3
   test_cut_cells_follow_a_slope();   // K2
   test_cells_across_the_narrowest_width();
   test_band_never_quilts_without_the_switch();
