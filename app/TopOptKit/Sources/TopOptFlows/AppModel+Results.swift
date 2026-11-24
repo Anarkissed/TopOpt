@@ -86,6 +86,7 @@ extension AppModel {
         guard sceneActive != active else { return }
         sceneActive = active
         guard active else { return }
+        LatticeMacMake.shared.cameBack()   // ★ notes25 (A6): a chain under way follows the Mac's steps again at once
         resumeLatticeJobs()
         if screen == .home { library.loadSummaries() }
     }

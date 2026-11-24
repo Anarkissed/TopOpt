@@ -227,6 +227,59 @@ final class Notes25FlowTests: XCTestCase {
         XCTAssertFalse(m.shown, "nothing to bring back")
     }
 
+    /// ★ A6 (his Organic run 11-23: 10 minutes lost between the strengthening and the file — the iPad had locked): the iPad is
+    /// kept awake from his press while the chain's job runs, and sleeps again when it is done, failed or cancelled, and when
+    /// the workspace is left (back again mid-chain: awake again). The app back in front follows the Mac's steps again at once.
+    /// The one place that holds the sleep off is pinned.
+    func testTheIPadStaysAwakeWhileTheChainsJobRuns() throws {
+        let m = LatticeMacMake.shared
+        m.reset()
+        XCTAssertFalse(m.keepsAwake, "premise")
+        let id = UUID()
+        // done
+        let file = try Notes24ResultsTests.printFile()
+        let done = syncRun(); done.runner = { _, _, _ in file }
+        m.begin(project: id, path: nil, run: done, cancel: {})
+        XCTAssertTrue(m.keepsAwake, "★ from his press")
+        done.start(request(id, lattice: true), remote: true)
+        XCTAssertFalse(m.keepsAwake, "★ the job done: the iPad may sleep")
+        m.ended()
+        // failure
+        let failing = syncRun(); failing.runner = { _, _, _ in throw LatticeFileRun.Failure("The file could not be made") }
+        m.begin(project: id, path: nil, run: failing, cancel: {})
+        XCTAssertTrue(m.keepsAwake)
+        failing.start(request(id, lattice: true), remote: true)
+        XCTAssertEqual(failing.phase, .failed)
+        XCTAssertFalse(m.keepsAwake, "★ the job failed: the iPad may sleep")
+        m.ended()
+        // cancel, and the workspace left and back mid-chain
+        let held = RunModel(scheduler: Notes25HeldScheduler(), notifier: SilentRunNotifier(), watchdog: DisabledRunWatchdog())
+        m.begin(project: id, path: nil, run: held, cancel: { held.cancel() })
+        held.start(request(id, lattice: true), remote: true)
+        XCTAssertTrue(m.keepsAwake, "★ while the job runs")
+        m.workspace(up: false)
+        XCTAssertFalse(m.keepsAwake, "★ the workspace left")
+        m.workspace(up: true)
+        XCTAssertTrue(m.keepsAwake, "★ back mid-chain")
+        m.cameBack()   // (no job URL yet: nothing to follow, nothing breaks)
+        m.cancel()
+        XCTAssertFalse(m.keepsAwake, "★ cancelled: the iPad may sleep")
+
+        // the one place
+        var hits: [String] = []
+        let dir = Notes24ResultsTests.repoRoot.appendingPathComponent("app/TopOptKit/Sources")
+        let files = try XCTUnwrap(FileManager.default.enumerator(at: dir, includingPropertiesForKeys: nil))
+        for case let f as URL in files where f.pathExtension == "swift" {
+            let s = try String(contentsOf: f, encoding: .utf8)
+            for line in s.split(separator: "\n") where line.contains("isIdleTimerDisabled") && !line.trimmingCharacters(in: .whitespaces).hasPrefix("//") {
+                hits.append(f.lastPathComponent + ": " + line.trimmingCharacters(in: .whitespaces))
+            }
+        }
+        XCTAssertEqual(hits, ["LatticeMacMake.swift: UIApplication.shared.isIdleTimerDisabled = disabled"], "★ one place: \(hits)")
+        let app = try FlexibleSource.code("AppModel+Results.swift")
+        XCTAssertTrue(app.contains("LatticeMacMake.shared.cameBack()"), "★ back in front: the steps followed again at once")
+    }
+
     /// The words: his own on the button, five at most on each.
     func testTheCardsWords() {
         XCTAssertEqual(LatticeMacMakeCopy.background, "Run in the Background", "★ his words")
@@ -403,6 +456,149 @@ final class Notes25FlowTests: XCTestCase {
         XCTAssertEqual(LatticeLayoutPreview.inStrands(t, n)?.organicLine,
                        "Organic Grown \u{00B7} Draft \u{00B7} laid in 10.9 s \u{00B7} 12,605 strands")
         XCTAssertEqual(LatticeLayoutPreview.inStrands(t, nil)?.organicLine, t.organicLine, "nothing to count with: kept")
+    }
+
+    // MARK: A5 · the cell lattice's print file: the same card; a stop says why, in the centre
+
+    /// His cell lattice's refusal on the Mac (after ~7 min): core's lattice_file.json, `ok: false`, its sentence naming every
+    /// count (zeros too), and where.
+    static func refusedReport(bridges: Int = 1, at: [[Double]] = [[1, 2, 3]]) -> Data {
+        let o: [String: Any] = [
+            "ok": false, "code": "would_not_print",
+            "why": "After 7 tries the lattice still has 0 places that would start printing in mid-air, 0 overhangs held at one end "
+                + "only and \(bridges) bridge longer than a printer can span. No file was made. A larger cell or a Protect skin near "
+                + "those places usually fixes it.",
+            "detail": "at (1.00, 2.00, 3.00)", "file": "", "layout": [:] as [String: Any], "mesh": [:] as [String: Any],
+            "print_check": ["midair_starts": 0, "one_ended": 0, "long_bridges": bridges, "findings_at": at] as [String: Any]]
+        return try! JSONSerialization.data(withJSONObject: o, options: [.sortedKeys])
+    }
+
+    /// ★ The reason in plain words naming only the problems that are there (never "0 places … 0 overhangs"), what fixes it,
+    /// where it is, and the setting it names. Another refusal keeps the engine's own sentence. RED CONTROL: a made file is no
+    /// refusal.
+    func testARefusalSaysOnlyWhatIsWrongAndWhatFixesIt() throws {
+        let r = try XCTUnwrap(LatticeFileRefusal.parse(Self.refusedReport()))
+        XCTAssertEqual(r.code, "would_not_print")
+        XCTAssertEqual(r.longBridges, 1); XCTAssertEqual(r.midAir, 0); XCTAssertEqual(r.oneEnded, 0)
+        XCTAssertEqual(r.findingsAt, [SIMD3(1, 2, 3)])
+        XCTAssertEqual(r.plain, "The lattice has 1 bridge longer than a printer can span, so no file was made. A larger cell or a "
+                       + "Protect skin near it usually fixes it.")
+        XCTAssertFalse(r.plain.contains("0 "), "★ never the zeros")
+        XCTAssertEqual(r.setting, .latticeCells)
+        var two = r; two.midAir = 2
+        XCTAssertTrue(two.plain.hasPrefix("The lattice has 2 places that would start printing in mid-air and 1 bridge"))
+        var other = r; other.code = "no_cells"; other.why = "No lattice cell fits anywhere in these regions."
+        XCTAssertEqual(other.plain, "No lattice cell fits anywhere in these regions.", "another refusal: the engine's plain sentence")
+        other.code = "protect_faces_missing"
+        XCTAssertEqual(other.setting, .protectSkin)
+        XCTAssertNil(LatticeFileRefusal.parse(Data(#"{"ok": true, "code": "", "why": ""}"#.utf8)), "RED CONTROL: a made file")
+        for w in [LatticeFileRefusal.showMe, LatticeFileRefusal.changeSettings, LatticeFileRefusal.ok] {
+            XCTAssertLessThanOrEqual(w.split(separator: " ").count, 5)
+        }
+        // with no reason read: what is wrong and what to do, plainly
+        XCTAssertTrue(LatticeMacMakeCopy.failedText("1 bridge longer than a printer can span", onMac: true).contains("printer can span"))
+        XCTAssertTrue(LatticeMacMakeCopy.failedText("The Mac did not answer (timed out)", onMac: true).contains("Check that it is on"))
+        XCTAssertTrue(LatticeMacMakeCopy.failedText("anything", onMac: false).hasPrefix("This iPad couldn"))
+        XCTAssertTrue(LatticeMacMakeCopy.failedText(nil, onMac: true).contains("Press Lattice again"))
+    }
+
+    /// ★ The pop-up as data, both ways (his 11-23 ~18:55): the plain refusal — the reason, "Show me", "Change settings", OK;
+    /// Auto having adjusted the settings (the report says so; the engine side is 362's) — his words, the settings it moved
+    /// (old → new), "Lattice again" first, then "Change settings", "Show me". "Change settings" asks for the page, the field and
+    /// what to try. RED CONTROL: no spot, no Show me.
+    func testThePopUpsTwoVariantsAndTheSettingItAsksFor() throws {
+        let r = try XCTUnwrap(LatticeFileRefusal.parse(Self.refusedReport()))
+        XCTAssertFalse(r.autoAdjusted)
+        XCTAssertEqual(r.popUp.title, "The print file couldn\u{2019}t be made")
+        XCTAssertEqual(r.popUp.text, r.plain)
+        XCTAssertEqual(r.popUp.buttons, [.showMe, .changeSettings, .ok])
+        var none = r; none.findingsAt = []
+        XCTAssertEqual(none.popUp.buttons, [.changeSettings, .ok], "RED CONTROL: nowhere to show")
+
+        var o = try XCTUnwrap((try JSONSerialization.jsonObject(with: Self.refusedReport())) as? [String: Any])
+        o["auto_adjusted"] = true
+        o["adjusted"] = [["setting": "Cell size", "from": "4 mm", "to": "5 mm"]]
+        let a = try XCTUnwrap(LatticeFileRefusal.parse(try JSONSerialization.data(withJSONObject: o)))
+        XCTAssertTrue(a.autoAdjusted)
+        XCTAssertEqual(a.adjusted, [.init(setting: "Cell size", from: "4 mm", to: "5 mm")])
+        XCTAssertEqual(a.popUp.buttons, [.latticeAgain, .changeSettings, .showMe], "★ Lattice again first")
+        XCTAssertTrue(a.popUp.text.hasPrefix("The app has already adjusted the settings for you; press Lattice to try again. "
+                                             + "Prefer to set them yourself? Change settings."), "★ his words")
+        XCTAssertTrue(a.popUp.text.contains("Cell size 4 mm \u{2192} 5 mm"), "★ what it moved, old → new")
+
+        let ask = r.settingToChange
+        XCTAssertEqual(ask.page, .lattice)
+        XCTAssertEqual(ask.field, LatticeWizardSetting.cellSize.rawValue)
+        XCTAssertLessThanOrEqual(ask.tryText.split(separator: " ").count, 5, "his 5-word caption rule")
+        var protect = r; protect.code = "protect_faces_missing"
+        XCTAssertEqual(protect.settingToChange.page, .topologySettings)
+        XCTAssertEqual(protect.settingToChange.field, TopologySetupRow.protectSkin.rawValue)
+        let ws = try FlexibleSource.code("WorkspacePlaceholder.swift")
+        XCTAssertEqual(ws.components(separatedBy: "SettingToChange.shared.ask = ").count - 1, 1, "★ ONE way there")
+        XCTAssertTrue(ws.contains("case .changeSettings: return (LatticeFileRefusal.changeSettings, { openSettingToChange(refusal.settingToChange) })"))
+        XCTAssertTrue(try FlexibleSource.code("LatticeSetupWizard.swift").contains(".settingToChange(s.rawValue)"))
+        XCTAssertEqual(LatticeFileRefusal.latticeAgain.split(separator: " ").count, 2)
+    }
+
+    /// ★ The Mac's job ended in error (or made no file): its reason is read from its report — never the bare "The file could not
+    /// be made". RED CONTROL: with no report to read, the worker's own word is kept.
+    func testTheMacsRefusalIsReadFromTheJobsReport() throws {
+        for state in ["error", "done"] {
+            let out = dir.appendingPathComponent("mac-\(state)/out", isDirectory: true)
+            try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+            try Self.refusedReport().write(to: out.appendingPathComponent(LatticeFileJob.reportName))
+            let w = try StubWorker(filesDir: out, events: [], fingerprint: CoreFingerprint.value, jobState: state)
+            defer { w.stop() }
+            let model = dir.appendingPathComponent("p.step")
+            try Data("ISO-10303-21;".utf8).write(to: model)
+            let config = RemoteRunnerConfig(host: "127.0.0.1", port: Int(w.port), expectedFingerprint: CoreFingerprint.value)
+            XCTAssertThrowsError(try LatticeFileRun.drive(config: config, modelPath: model.path, jobJSON: Data("{}".utf8),
+                                                          projectName: "Stand")) { e in
+                let f = e as? LatticeFileRun.Failure
+                XCTAssertEqual(f?.refusal?.code, "would_not_print", "★ \(state): the engine's own reason, from its report")
+                XCTAssertEqual(f?.description, f?.refusal?.plain, "★ \(state): said plainly")
+                XCTAssertEqual(f?.refusal?.findingsAt.count, 1, "★ \(state): and where")
+            }
+        }
+        // RED CONTROL: no report on the Mac — the worker's word
+        let empty = dir.appendingPathComponent("mac-none/out", isDirectory: true)
+        try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
+        let w = try StubWorker(filesDir: empty, events: [], fingerprint: CoreFingerprint.value, jobState: "error")
+        defer { w.stop() }
+        let model = dir.appendingPathComponent("q.step")
+        try Data("ISO-10303-21;".utf8).write(to: model)
+        let config = RemoteRunnerConfig(host: "127.0.0.1", port: Int(w.port), expectedFingerprint: CoreFingerprint.value)
+        XCTAssertThrowsError(try LatticeFileRun.drive(config: config, modelPath: model.path, jobJSON: Data("{}".utf8),
+                                                      projectName: "Stand")) { e in
+            XCTAssertNil((e as? LatticeFileRun.Failure)?.refusal, "RED CONTROL: nothing to read")
+        }
+    }
+
+    /// ★ The real steps, in plain words: the part measured, the print check's try as text (never a fraction of its tries).
+    func testTheFilesStepsInPlainWords() {
+        XCTAssertEqual(LatticeMacMakeCopy.stage("lattice-file: opening the part"), LatticeMacMakeCopy.opening)
+        XCTAssertEqual(LatticeMacMakeCopy.stage("lattice-file: measuring the part"), LatticeMacMakeCopy.measuring)
+        XCTAssertEqual(LatticeMacMakeCopy.stage("lattice-file: checking it prints: try 3 of at most 10"), "Checking it prints \u{00B7} try 3")
+        XCTAssertFalse(LatticeMacMakeCopy.stage("lattice-file: checking it prints: try 3 of at most 10")?.contains("10") ?? true,
+                       "★ never how many tries it may take")
+        XCTAssertEqual(LatticeMacMakeCopy.stage("lattice-file: checking it prints"), LatticeMacMakeCopy.printCheck)
+        XCTAssertEqual(LatticeMacMakeCopy.stage("lattice-file: laying the lattice"), LatticeMacMakeCopy.laying)
+        let m = LatticeMacMake.shared
+        m.begin(project: UUID(), path: nil, fileOnly: true, onMac: false, cancel: {})
+        XCTAssertEqual(m.stage, LatticeMacMakeCopy.makingFile, "★ made on this iPad: never \"Waiting for your Mac\"")
+    }
+
+    /// ★ The pieces in place: the cell lattice's press begins the same card (the print file's words), its runner says the
+    /// Mac's steps, and a stop is said in the centred pop-up (the button is Lattice again).
+    func testTheCellLatticesPrintFileIsWired() throws {
+        let ws = try FlexibleSource.code("WorkspacePlaceholder.swift")
+        XCTAssertTrue(ws.contains("LatticeMacMake.shared.begin(project: project.id, path: project.importedFile?.path, run: r, fileOnly: true,"))
+        XCTAssertTrue(ws.contains("onMac: compute.activeRemote != nil, cancel: { r.cancel() })"))
+        XCTAssertTrue(ws.contains("densityGCm3: density, onJob: { LatticeMacMake.shared.job($0) })"))
+        XCTAssertTrue(ws.contains("let saidInAPopUp = latticeChainEnded(ph)"))
+        XCTAssertTrue(ws.contains("if !saidInAPopUp { runCouldntFinish = true }"))
+        let ex = try FlexibleSource.code("LatticeFileExport.swift")
+        XCTAssertTrue(ex.contains("isCancelled: { !keepGoing.call(0, 1, 0) }, onJob: onJob)"))
     }
 
     // MARK: helpers

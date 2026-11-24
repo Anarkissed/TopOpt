@@ -1149,6 +1149,8 @@ public final class RunModel: ObservableObject {
     @Published public private(set) var failureShowsOnButton = false
     /// The engine's own words for the last such failure (for B2's (i); never drawn in a card).
     @Published public private(set) var lastEngineFailureText: String?
+    /// ★ notes25: the error itself (a print file's refusal carries the engine's own reason and where: the pop-up's Show me).
+    public private(set) var lastEngineError: Error?
 
     private let scheduler: RunScheduler
     private let notifier: RunNotifier
@@ -1764,6 +1766,7 @@ public final class RunModel: ObservableObject {
                 failure = .solver(message)
                 failureShowsOnButton = true      // ★ B1 (O1): engine text, never a card
                 lastEngineFailureText = message
+                lastEngineError = error   // ★ notes25
                 phase = .failed
             }
         }

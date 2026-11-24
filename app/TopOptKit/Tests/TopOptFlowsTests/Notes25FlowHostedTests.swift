@@ -24,6 +24,8 @@ final class Notes25FlowHostedTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
         LatticeMacMake.shared.reset()
         LatticePrintFlow.shared.reset()
+        AppPopups.shared.current = nil
+        LatticeFileSpot.shared.clear()
     }
 
     static let sizes: [(String, CGSize)] = [("13″ landscape", AppBuildHost.landscape13), ("portrait", CGSize(width: 820, height: 1180))]
@@ -123,6 +125,136 @@ final class Notes25FlowHostedTests: XCTestCase {
             waited = 0
             while run.phase == .running, waited < 10 { h.pump(0.25); waited += 0.25 }
             LatticePrintFlow.shared.reset()
+        }
+    }
+
+    // MARK: A5 · the cell lattice's print file: the same one card; a stop ends in the centred pop-up
+
+    /// His A1 pad, Structural with cells (never Organic), on the Lattice stage, the card and the pop-ups mounted as RootView
+    /// mounts them.
+    private func cellStage(_ size: CGSize, organic: Bool = false, lattice: Bool = true) throws -> (AppBuildHost, ProjectModel) {
+        let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: true)
+        let p = r.project
+        p.lattice.flexible = nil
+        p.lattice.chooseLatticeType(.structural)
+        if organic { p.lattice.algorithm = "organic" }
+        if let c = p.selection.groups.first(where: { $0.name == "Group C" }) { p.force.makeAnchor(c.id) }
+        let h = AppBuildHost(WorkspacePlaceholder(model: r.app, project: p).overlay { LatticeMacMakeModal() }.overlay { AppPopupLayer() },
+                             size: size, test: self)
+        h.pump(3)
+        if lattice {
+            try h.pickFromMenu("capsuleMenu", "Structural", what: "\(size): the stage menu")
+            h.pump(1)
+        }
+        return (h, p)
+    }
+
+    private func fileRun(_ p: ProjectModel, failing: Error) {
+        p.run.runner = { _, progress, _ in
+            var n = 0
+            while progress(0, 1, 0), n < 50 { usleep(50_000); n += 1 }
+            throw failing
+        }
+        p.run.start(RunRequest(modelPath: p.importedFile?.path ?? "", material: "PLA", materialsPath: "", rulesPath: "",
+                               resolution: 64, projectName: p.name, projectID: p.id).withJobMode(LatticeFileButton.jobMode),
+                    remote: true, workerName: "Mac")
+    }
+
+    /// ★ "ensure that the regular lattice gets a similar export pop-up, with an animation and everything": a CELL lattice's
+    /// print file wears the same one card — "Making the print file", the animation, one clock, Run in the Background · Cancel —
+    /// never the run's own "LATTICING" card or its "Tap to view" pill. The Mac refuses it (his bridge, after ~7 min): the card
+    /// ends in ONE centred pop-up with the reason in plain words, "Show me", "Change settings" and OK; the button is Lattice
+    /// again (never "Couldn't finish"). "Show me" marks the spot on the part.
+    func testACellLatticesPrintFileWearsTheSameCardAndARefusalEndsInThePopUp() throws {
+        for (name, size) in Self.sizes {
+            AppPopups.shared.current = nil
+            let (h, p) = try cellStage(size)
+            XCTAssertFalse(LatticeLayoutPreview.organic(p.lattice), "premise: a cell lattice")
+            let mac = LatticeMacMake.shared
+            LatticePrintFlow.shared.begin(project: p.id, key: nil)
+            let run = p.run
+            mac.begin(project: p.id, path: p.importedFile?.path, run: run, fileOnly: true, cancel: { run.cancel() })
+            let box = try XCTUnwrap(LatticeLayoutPreview.box(p.importedMesh?.vertices ?? []))
+            let top: [Double] = [Double(box.lo.x + box.hi.x) / 2, Double(box.lo.y + box.hi.y) / 2, Double(box.hi.z)]
+            let refusal = try XCTUnwrap(LatticeFileRefusal.parse(Notes25FlowTests.refusedReport(at: [top])))
+            fileRun(p, failing: LatticeFileRun.Failure(refusal.plain, refusal: refusal))
+            h.pump(1)
+            XCTAssertEqual(run.phase, .running, "premise: the file is being made")
+            XCTAssertEqual(upNow(h), ["macMakeModal"], "\(name): ★ one pop-up: the same card (never the run's own)")
+            XCTAssertEqual(mac.title, LatticeMacMakeCopy.fileTitle, "\(name): ★ \"Making the print file\"")
+            _ = try h.probe("macMakeBackground", "\(name): ★ Run in the Background")
+            _ = try h.probe("macMakeCancel", "\(name): ★ Cancel")
+            try h.tap("macMakeBackground", "\(name): Run in the Background", settle: 0.6)
+            XCTAssertEqual(upNow(h), [], "\(name): ★ in the background: no card, no pill")
+            try h.tap("latticeButton", "\(name): the Lattice button", settle: 0.6)
+            XCTAssertEqual(upNow(h), ["macMakeModal"], "\(name): ★ the button brings it back")
+
+            var waited = 0.0
+            while run.phase == .running, waited < 15 { h.pump(0.25); waited += 0.25 }
+            h.pump(1)
+            XCTAssertEqual(upNow(h), ["appPopup"], "\(name): ★ the stop: ONE centred pop-up, never nothing")
+            let pop = try XCTUnwrap(AppPopups.shared.current)
+            XCTAssertEqual(pop.title, LatticeMacMakeCopy.failedTitle)
+            XCTAssertEqual(pop.text, refusal.plain, "\(name): ★ the engine's reason, plainly")
+            XCTAssertEqual(AppPopups.shared.action?.title, LatticeFileRefusal.showMe)
+            XCTAssertEqual(AppPopups.shared.second?.title, LatticeFileRefusal.changeSettings)
+            XCTAssertEqual(AppPopups.shared.dismissTitle, LatticeFileRefusal.ok)
+            XCTAssertNil(h.frames.all["latticeMakingFile"], "\(name): ★ the button is Lattice again")
+            XCTAssertNotEqual(p.run.phase, .failed, "the failure is not left up")
+
+            let showMe = AppPopups.shared.action?.run, change = AppPopups.shared.second?.run
+            AppPopups.shared.current = nil
+            showMe?()
+            XCTAssertNotNil(waitFor(h, "latticeFileSpot", seconds: 3), "\(name): ★ Show me: the spot marked on the part")
+            if let spot = h.frames.all["latticeFileSpot"] {
+                XCTAssertTrue(CGRect(origin: .zero, size: h.size).contains(CGPoint(x: spot.midX, y: spot.midY)), "\(name): on screen")
+            }
+            change?()
+            XCTAssertNotNil(waitFor(h, "settingToChangeNote", seconds: 3),
+                            "\(name): ★ Change settings: the Lattice page, the field named with what to try")
+            XCTAssertEqual(SettingToChange.shared.ask?.field, LatticeWizardSetting.cellSize.rawValue)
+            LatticeFileSpot.shared.clear()
+            SettingToChange.shared.ask = nil
+
+            // ★ Auto adjusted it (his words; the engine side is 362's): "Lattice again" first, then Change settings, Show me
+            var auto = refusal
+            auto.autoAdjusted = true
+            auto.adjusted = [.init(setting: "Cell size", from: "4 mm", to: "5 mm")]
+            mac.begin(project: p.id, path: p.importedFile?.path, run: run, fileOnly: true, cancel: { run.cancel() })
+            fileRun(p, failing: LatticeFileRun.Failure(auto.plain, refusal: auto))
+            waited = 0
+            while run.phase == .running, waited < 15 { h.pump(0.25); waited += 0.25 }
+            h.pump(1)
+            XCTAssertEqual(upNow(h), ["appPopup"], "\(name): one pop-up")
+            XCTAssertTrue(AppPopups.shared.current?.text.hasPrefix(LatticeFileRefusal.autoAdjustedText) ?? false, "\(name): ★ his words")
+            XCTAssertEqual(AppPopups.shared.action?.title, LatticeFileRefusal.latticeAgain, "\(name): ★ Lattice again first")
+            XCTAssertEqual(AppPopups.shared.second?.title, LatticeFileRefusal.changeSettings)
+            XCTAssertEqual(AppPopups.shared.third?.title, LatticeFileRefusal.showMe)
+            XCTAssertFalse(AppPopups.shared.dismissShown, "\(name): the three buttons, no fourth")
+            AppPopups.shared.current = nil
+        }
+    }
+
+    /// ★ "the Mac did not answer" still asks as before (Organic): Try again, Make it on the iPad, Cancel.
+    func testAMacThatDidNotAnswerStillAsksTryAgainOrTheIPad() throws {
+        for (name, size) in Self.sizes {
+            AppPopups.shared.current = nil
+            let (h, p) = try cellStage(size, organic: true, lattice: false)
+            let mac = LatticeMacMake.shared
+            LatticePrintFlow.shared.begin(project: p.id, key: nil)
+            let run = p.run
+            mac.begin(project: p.id, path: p.importedFile?.path, run: run, cancel: { run.cancel() })
+            mac.request = RunRequest(modelPath: p.importedFile?.path ?? "", material: "PLA", materialsPath: "", rulesPath: "",
+                                     resolution: 64, projectName: p.name, projectID: p.id)
+            fileRun(p, failing: LatticeFileRun.Failure("The Mac did not answer (timed out)", transient: true))
+            var waited = 0.0
+            while run.phase == .running, waited < 15 { h.pump(0.25); waited += 0.25 }
+            h.pump(1)
+            XCTAssertEqual(upNow(h), ["appPopup"], "\(name): one pop-up")
+            XCTAssertEqual(AppPopups.shared.current?.title, LatticeMacMakeCopy.noMacTitle, "\(name): ★ the Mac's own pop-up")
+            XCTAssertEqual(AppPopups.shared.action?.title, LatticeMacMakeCopy.tryAgain)
+            XCTAssertEqual(AppPopups.shared.second?.title, LatticeMacMakeCopy.onIPad)
+            AppPopups.shared.current = nil
         }
     }
 
@@ -258,6 +390,7 @@ final class Notes25FlowHostedTests: XCTestCase {
 
             // (this lookalike has no anchor or load, so Topology's ● keeps its lattice row grey: back through the Versions page)
             app.backHome()
+            app.library.route = .part(try XCTUnwrap(app.library.index.part(containing: try XCTUnwrap(f["3"]))).id)
             h.pump(2)
             try openVersion(h, "v3a", name)
             XCTAssertEqual(app.project?.id, f["3"])

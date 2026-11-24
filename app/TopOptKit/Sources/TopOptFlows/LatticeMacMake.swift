@@ -32,6 +32,9 @@ import Combine
 import SwiftUI
 import TopOptDesign
 import TopOptKit
+#if canImport(UIKit) && os(iOS)
+import UIKit
+#endif
 
 /// The words (five at most each on the button and the card's lines).
 enum LatticeMacMakeCopy {
@@ -51,6 +54,9 @@ enum LatticeMacMakeCopy {
     static let tryAgain = "Try again"
     static let onIPad = "Make it on the iPad"
     static let opening = "Opening your part"
+    static let measuring = "Measuring your part"   // ★ notes25
+    /// ★ notes25: the print check's try, as text (never a fraction of the tries it may take).
+    static func printCheckTry(_ n: Int) -> String { "Checking it prints \u{00B7} try \(n)" }
     static let laying = "Laying the lattice"
     static let printCheck = "Checking it prints"
     static let makingFile = "Making the file"
@@ -59,6 +65,22 @@ enum LatticeMacMakeCopy {
     static let drawing = "Drawing it"
     static let waiting = "Waiting for your Mac"
     static func strengthening(_ round: Int) -> String { round > 0 ? "Strengthening, round \(round)" : "Strengthening it" }
+
+    /// ★ notes25 (A5, his 11-23 evening: the cell lattice's print file stopped on the Mac after ~7 min): a stop never just
+    /// vanishes — a centred pop-up says what is wrong and what to do.
+    static let failedTitle = "The print file couldn\u{2019}t be made"
+    static func failedText(_ engine: String?, onMac: Bool) -> String {
+        let w = engine?.lowercased() ?? ""
+        if w.contains("bridge") || w.contains("span") {
+            return "Part of the lattice would bridge farther than your printer can span. Try smaller cells, or another "
+                + "lattice type, then press Lattice again."
+        }
+        if onMac, macStopped(engine) {
+            return "Your Mac stopped answering. Check that it is on and TopOpt is running there, then press Lattice again."
+        }
+        return (onMac ? "Your Mac couldn\u{2019}t finish it." : "This iPad couldn\u{2019}t finish it.")
+            + " Press Lattice again; if it keeps happening, tell us."
+    }
 
     /// The Mac's own line ("organic-strengthen: round 2: checking its strength", "lattice-file: saving the file") in plain
     /// words; nil for a line that is not a step.
@@ -77,7 +99,12 @@ enum LatticeMacMakeCopy {
             return nil
         }
         guard tool == "lattice-file" else { return nil }
-        if rest.hasPrefix("opening") || rest.hasPrefix("measuring") { return opening }
+        if rest.hasPrefix("opening") { return opening }
+        if rest.hasPrefix("measuring") { return measuring }   // ★ notes25
+        if rest.hasPrefix("checking it prints") {   // ★ notes25: "checking it prints: try 3 of at most 10" → its try, as words
+            let n = rest.range(of: "try ").map { Int(rest[$0.upperBound...].prefix { $0.isNumber }) ?? 0 } ?? 0
+            return n > 0 ? printCheckTry(n) : printCheck
+        }
         if rest.hasPrefix("laying") { return laying }
         if rest.hasPrefix("making the file") { return makingFile }
         if rest.hasPrefix("saving the file") { return saving }
@@ -120,11 +147,35 @@ public final class LatticeMacMake: ObservableObject {
     public static let shared = LatticeMacMake()
 
     /// ★ notes25: the chain is going — from his press until its run ends (or it stops).
-    @Published public private(set) var going = false
+    @Published public private(set) var going = false { didSet { stayAwake() } }
     /// ★ notes25: he sent the card to the background ("Run in the Background"); the Lattice button brings it back.
     @Published public private(set) var inBackground = false
     /// ★ notes25: the chain's run has ended (the card goes at once; the workspace then ends the chain, `ended`).
-    @Published private(set) var runOver = false
+    @Published private(set) var runOver = false { didSet { stayAwake() } }
+
+    /// ★ notes25 (A6, his Organic run 11-23: 10 minutes lost between the strengthening and the print file — the iPad drives
+    /// that chain step by step, and it had locked while he watched the Mac): the iPad stays awake while the chain goes (his
+    /// press to the result, a failure or a cancel), and only while the workspace is up.
+    @Published public private(set) var keepsAwake = false
+    private var workspaceUp = true
+    private func stayAwake() {
+        let on = going && !runOver && workspaceUp
+        guard on != keepsAwake else { return }
+        keepsAwake = on
+        Self.idleTimer(disabled: on)
+    }
+    /// THE ONE PLACE the iPad's sleep is held off (the Mac's test host has no idle timer).
+    static func idleTimer(disabled: Bool) {
+        #if canImport(UIKit) && os(iOS)
+        UIApplication.shared.isIdleTimerDisabled = disabled
+        #endif
+    }
+    /// The workspace appeared (true) or left (false): the iPad sleeps again once it has left.
+    func workspace(up: Bool) { workspaceUp = up; stayAwake() }
+    /// ★ notes25 (A6): the app came back to the front mid-chain: the Mac's steps are followed again at once (the event stream
+    /// broke while the app was away; the run's own polling goes on by itself every 2 s).
+    func cameBack() { if going, !runOver, let u = jobURL { follow(u) } }
+    private var jobURL: URL?
     /// The card is up: the chain going, not in the background. ★ notes25: ONE card for the whole chain (was: until the file).
     public var shown: Bool { going && !inBackground && !runOver }
     /// The Mac's step, in plain words.
@@ -159,13 +210,17 @@ public final class LatticeMacMake: ObservableObject {
 
     /// His press: the modal up, the run to be sent. ★ notes25: `run` — the project's run the chain goes on (watched, so the card
     /// goes the moment it ends); `fileOnly` — the print-accurate lattice is on screen already (A3).
-    func begin(project id: UUID, path: String?, run: RunModel? = nil, fileOnly: Bool = false, cancel: @escaping () -> Void,
-               now: Date = Date()) {
+    /// ★ notes25 (A5): `onMac` false — made on this iPad (a cell lattice with no Mac): its first step is the file, never "Waiting
+    /// for your Mac".
+    func begin(project id: UUID, path: String?, run: RunModel? = nil, fileOnly: Bool = false, onMac: Bool = true,
+               cancel: @escaping () -> Void, now: Date = Date()) {
         events?.cancel(); events = nil
         projectID = id; self.path = path; cancelAction = cancel
-        started = now; stage = LatticeMacMakeCopy.waiting; checking = false
+        started = now; stage = onMac ? LatticeMacMakeCopy.waiting : LatticeMacMakeCopy.makingFile; checking = false
         self.fileOnly = fileOnly
         inBackground = false; runOver = false; runSeen = false
+        LatticeFileSpot.shared.clear()   // ★ notes25: a new press: the last refusal's spot goes
+        SettingToChange.shared.ask = nil   // ... and the field it asked to change
         self.run = run
         runWatch = run?.$phase.sink { [weak self] ph in   // (the new phase, as it is set)
             MainActor.assumeIsolated {
@@ -182,6 +237,7 @@ public final class LatticeMacMake: ObservableObject {
     }
 
     private func follow(_ url: URL) {
+        jobURL = url
         events?.cancel()
         events = Task { [weak self] in
             let events = url.appendingPathComponent("events")
@@ -225,7 +281,7 @@ public final class LatticeMacMake: ObservableObject {
 
     /// The run ended (landed, failed or cancelled): everything goes back.
     func ended() {
-        events?.cancel(); events = nil
+        events?.cancel(); events = nil; jobURL = nil
         runWatch?.cancel(); runWatch = nil; run = nil
         going = false; inBackground = false; runOver = false; runSeen = false
         checking = false; fileOnly = false; cancelAction = nil; projectID = nil; request = nil
@@ -239,7 +295,7 @@ public final class LatticeMacMake: ObservableObject {
     }
 
     /// Tests only.
-    func reset() { ended(); lastSeconds = [:]; started = nil; stage = LatticeMacMakeCopy.waiting }
+    func reset() { ended(); workspaceUp = true; stayAwake(); lastSeconds = [:]; started = nil; stage = LatticeMacMakeCopy.waiting }
 }
 
 /// The card while the Mac makes the print-accurate lattice: centred over everything, the vines growing, the step, the time.
@@ -262,6 +318,8 @@ struct LatticeMacMakeModal: View {
                         Text(make.stage).dsStyle(DS.TypeScale.body).foregroundStyle(DS.Color.textSecondary.color)
                             .multilineTextAlignment(.center)
                             .accessibilityIdentifier("mac-make-stage")
+                        // ★ notes25: no real fraction to show — a moving bar with the time, never a made-up share
+                        LatticeMacMakeBar().frame(width: 220, height: 4).accessibilityHidden(true)
                         TimelineView(.periodic(from: .now, by: 1)) { ctx in
                             Text(timeLine(ctx.date)).dsStyle(DS.TypeScale.body).monospacedDigit()
                                 .foregroundStyle(DS.Color.textSecondary.color)
@@ -295,6 +353,26 @@ struct LatticeMacMakeModal: View {
         let gone = make.started.map { now.timeIntervalSince($0) } ?? 0
         guard let e = make.expectedS, e > gone else { return LatticeMacMakeCopy.clock(gone) }
         return LatticeMacMakeCopy.clock(gone) + " of about " + LatticeMacMakeCopy.clock(e)
+    }
+}
+
+/// ★ notes25: the card's moving bar — a short light sweeping along a track, for as long as the work goes (it says it is
+/// going, never how far: the Mac gives no true share of its steps).
+struct LatticeMacMakeBar: View {
+    var body: some View {
+        TimelineView(.animation) { ctx in
+            Canvas { g, size in
+                let t = ctx.date.timeIntervalSinceReferenceDate
+                let track = Path(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: size.height / 2)
+                g.fill(track, with: .color(DS.Color.textPrimary.opacity(0.12).color))
+                let w = size.width * 0.3
+                let x = (t.truncatingRemainder(dividingBy: 1.6) / 1.6) * (size.width + w) - w
+                let lit = CGRect(x: x, y: 0, width: w, height: size.height).intersection(CGRect(origin: .zero, size: size))
+                if !lit.isNull, lit.width > 0 {
+                    g.fill(Path(roundedRect: lit, cornerRadius: size.height / 2), with: .color(DS.Color.accent.color))
+                }
+            }
+        }
     }
 }
 

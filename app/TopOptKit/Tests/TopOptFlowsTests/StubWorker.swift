@@ -53,14 +53,17 @@ final class StubWorker {
     private let sizeOverrides: [String: Int]
     /// ★ notes 11-23: other job ids served as this one (a recorded strengthening and its file job, each its own id).
     private let aliases: [String]
+    /// ★ notes25: the job's state as the worker says it ("done", or "error" for a job the engine refused).
+    private let jobState: String
 
     init(filesDir: URL, events: [String], fingerprint: String,
-         sizeOverrides: [String: Int] = [:], aliases: [String] = []) throws {
+         sizeOverrides: [String: Int] = [:], aliases: [String] = [], jobState: String = "done") throws {
         self.filesDir = filesDir
         self.events = events
         self.fingerprint = fingerprint
         self.sizeOverrides = sizeOverrides
         self.aliases = aliases
+        self.jobState = jobState
 
         let listenFD = socket(AF_INET, SOCK_STREAM, 0)
         guard listenFD >= 0 else { throw NSError(domain: "stub-worker", code: 1) }
@@ -206,7 +209,7 @@ final class StubWorker {
             }
 
         case path == "/jobs/\(jobID)":
-            sendJSON("200 OK", ["state": "done", "status": "done",
+            sendJSON("200 OK", ["state": jobState, "status": jobState,
                                 "created_at": 1_770_000_000.0,
                                 "started_at": 1_770_000_001.0,
                                 "finished_at": 1_770_000_099.0])

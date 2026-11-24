@@ -1517,6 +1517,8 @@ public struct WorkspacePlaceholder: View {
                !legendDrilledIn {
                 latticeBandChipsOverlay.ignoresSafeArea()
             }
+            // ★ notes25: the print file's refusal, "Show me": its spot marked on the part (LatticeFileRefusal)
+            if !fullScreenPageUp, viewerMesh != nil { LatticeFileSpotMarker(frame: latticeBandChipFrame, version: project.id).ignoresSafeArea() }
 
             // ★ his iPad notes 11-10 (img 3): while the Lattice page shows its Sample, the part is covered — never seen behind
             // the panel or cut off above it; the top-left block and the stage capsule stay over it
@@ -1801,6 +1803,12 @@ public struct WorkspacePlaceholder: View {
                       resolution: runResolution,
                       onRetry: { startRun(lattice: startedRunWithLattice) },   // ★ B3: the run that failed, as it was
                       version: versionLabel)   // ★ T5: the card's overline names it
+                // ★ notes25: the print file's chain ends while the cards' host is away (a full-screen page up, gravity being set)
+                // — its stop is still said at once in the centred pop-up
+                .onChange(of: run.phase) { ph in
+                    guard fullScreenPageUp || force.phase == .setup else { return }
+                    if latticeChainEnded(ph), ph == .failed { run.dismissFailure() }
+                }
                 // The running card / failure sheet dim their OWN full-bleed
                 // backdrops; keeping RunScreen inside the safe area lets the
                 // minimized "Optimizing…" chip sit under the status bar / nav row.
@@ -2101,6 +2109,12 @@ public struct WorkspacePlaceholder: View {
             model.toast = why.line; return
         }
         LatticePrintFlow.shared.begin(project: project.id, key: latticePrintKey)   // ★ his 11-22: the exact is on screen; the file
+        // ★ notes25 (A5, his 11-23 evening: "ensure that the regular lattice gets a similar export pop-up, with an animation and
+        // everything"): the cell lattice's print file wears the same one card (the vines: no cell motion exists to reuse)
+        let r = run
+        LatticeMacMake.shared.begin(project: project.id, path: project.importedFile?.path, run: r, fileOnly: true,
+                                    onMac: compute.activeRemote != nil, cancel: { r.cancel() })
+        LatticeMacMake.shared.request = request
         launchFileRun(request, job: job, strengthJob: strengthJob, config: compute.activeRemote)
     }
 
@@ -2122,7 +2136,7 @@ public struct WorkspacePlaceholder: View {
                                                   densityGCm3: density, onJob: { _, url in LatticeMacMake.shared.job(url) },
                                                   early: macEarlyFile(checkFollows: strengthJob != nil))
                 : LatticeFileButton.runner(config: config, job: job, projectName: project.name, strengthJob: strengthJob,
-                                           densityGCm3: density)
+                                           densityGCm3: density, onJob: { LatticeMacMake.shared.job($0) })   // ★ notes25 (A5)
             run.start(fileRequest, remote: true, workerName: compute.selectedWorkerName)
         } else {
             run.runner = LatticeFileButton.deviceRunner(job: job, strengthJob: strengthJob, materialsPath: request.materialsPath,
@@ -3658,6 +3672,8 @@ public struct WorkspacePlaceholder: View {
         }
         .onChange(of: latticeResultCount) { _ in openLibraryExportIfReady() }   // ★ notes25: a print file's result arrives too
         .onChange(of: savedPrintFileKey) { _ in drawSavedPrintFile() }   // ★ notes25 (A4): the drawing follows the print file
+        .onAppear { LatticeMacMake.shared.workspace(up: true) }   // ★ notes25 (A6): awake during a chain, here only
+        .onDisappear { LatticeMacMake.shared.workspace(up: false) }
         .onChange(of: viewOriginal) { shut in if !shut { topoNotice.opened() } }
         .onChange(of: run.restoredPreviousResults) { restored in
             announceRestoredResults(restored)
@@ -3711,13 +3727,8 @@ public struct WorkspacePlaceholder: View {
             // A run that FAILED produced nothing, so its inputs never count as "already run": Optimize stays live for Try
             // again (the stall card's Try Again re-entered startRun and met the same-inputs grey-out — a dead button).
             if ph == .failed { lastRunRequest = nil }
-            if ph != .running, LatticeMacMake.shared.isMaking(project.id) {   // ★ his 11-22
-                let request = LatticeMacMake.shared.request
-                LatticeMacMake.shared.ended()
-                if ph == .failed, LatticeMacMakeCopy.macStopped(run.lastEngineFailureText), let request {
-                    macNotAnsweringPopup(request)
-                }
-            }
+            // ★ his 11-22 · ★ notes25 (A5): the print file's chain ends with its run — a stop ends in the centred pop-up
+            let saidInAPopUp = latticeChainEnded(ph)
             GenerationTimingLog.shared.printFileRunMoved(ph, outcome: run.outcome, failure: run.failure.map { "\($0)" })   // ★ 11-22
             // ★ Organic cut 2 (his certify wizard): an Organic part that does not certify opens on Results, where it is walked through
             // ★ his 11-21 ("have it spit out an actual result in the app - because NOTHING happens in app"): every Lattice run
@@ -3733,7 +3744,7 @@ public struct WorkspacePlaceholder: View {
                 viewOriginal = false
             }
             guard ph == .failed, run.failureShowsOnButton else { return }
-            runCouldntFinish = true
+            if !saidInAPopUp { runCouldntFinish = true }   // ★ notes25: said in the pop-up — the button is Lattice again
             run.dismissFailure()
         }
     }
@@ -15075,6 +15086,7 @@ extension WorkspacePlaceholder {
                 }
                 .dsPanelRow("settingsRow-\(row.rawValue)")   // ★ B3: SettingsPanelHostedTests; T3: the cue counts it
                 .accessibilityIdentifier("topology-setup-row-\(row.rawValue)")
+                .settingToChange(row.rawValue)   // ★ notes25: "Change settings" marks the row it asks for
             }
         }
         .padding(.horizontal, 14).padding(.vertical, DS.Space.xs)
@@ -16079,6 +16091,77 @@ extension WorkspacePlaceholder {
                                 first: (LatticeMacMakeCopy.tryAgain, { startLatticeRun(request) }),
                                 second: (LatticeMacMakeCopy.onIPad, { refreshLatticePreview(exact: true) }),
                                 dismiss: LatticeMacMakeCopy.cancel)
+    }
+
+    /// ★ his 11-22 · ★ notes25 (A5): the print file's chain ended with its run (the card goes). No Mac (Organic): Try again /
+    /// Make it on the iPad / Cancel, as before; any other stop: the centred pop-up with the engine's own reason — never a
+    /// line on the button, never nothing. True: a pop-up said it.
+    func latticeChainEnded(_ ph: RunPhase) -> Bool {
+        guard ph != .running, LatticeMacMake.shared.isMaking(project.id) else { return false }
+        let request = LatticeMacMake.shared.request
+        LatticeMacMake.shared.ended()
+        guard ph == .failed, run.failureShowsOnButton else { return false }
+        let stopped = LatticeMacMakeCopy.macStopped(run.lastEngineFailureText)
+        if stopped, let request, LatticeLayoutPreview.organic(project.lattice) { macNotAnsweringPopup(request); return true }
+        latticeFilePopup((run.lastEngineError as? LatticeFileRun.Failure)?.refusal,
+                         tryAgain: stopped ? request : nil)
+        return true
+    }
+
+    /// ★ notes25: "The print file couldn't be made" — the engine's refusal as its pop-up says it (`LatticeFileRefusal.popUp`:
+    /// the plain reason with "Show me", "Change settings", OK; or, Auto having adjusted it, his words with "Lattice again",
+    /// "Change settings", "Show me"); no refusal read: what went wrong and what to do.
+    func latticeFilePopup(_ refusal: LatticeFileRefusal?, tryAgain: RunRequest?) {
+        let log = run.lastEngineFailureText
+        guard let refusal else {
+            AppPopups.shared.show(LatticeMacMakeCopy.failedTitle, LatticeMacMakeCopy.failedText(log, onMac: run.isRemote), log: log,
+                                  action: tryAgain.map { r in (LatticeMacMakeCopy.tryAgain, { startLatticeRun(r) }) })
+            return
+        }
+        let p = refusal.popUp
+        let acts: [(title: String, run: () -> Void)] = p.buttons.compactMap { b in
+            switch b {
+            case .latticeAgain: return (LatticeFileRefusal.latticeAgain, { requestLatticeRun() })
+            case .changeSettings: return (LatticeFileRefusal.changeSettings, { openSettingToChange(refusal.settingToChange) })
+            case .showMe: return refusal.findingsAt.first.map { at in (LatticeFileRefusal.showMe, { showLatticeFileSpot(at) }) }
+            case .ok: return nil
+            }
+        }
+        let dismiss = p.buttons.contains(.ok) ? LatticeFileRefusal.ok : nil
+        if acts.count >= 2 {
+            AppPopups.shared.choose(p.title, p.text, log: log, first: acts[0], second: acts[1], third: acts.count > 2 ? acts[2] : nil,
+                                    dismiss: dismiss)
+        } else {
+            AppPopups.shared.show(p.title, p.text, log: log, action: acts.first)
+        }
+    }
+
+    /// ★ notes25 ("Show me"): the view turns to the spot (the part's own mm) and the spot is marked on the part.
+    func showLatticeFileSpot(_ at: SIMD3<Double>) {
+        guard let mesh = stageMesh else { return }
+        let m = SIMD3<Float>(at), b = mesh.bounds
+        cameraModel.adopt(LatticeFileSpot.camera(cameraModel.camera, showing: m, centre: b.center, settle: settleQuat,
+                                                 radius: b.radius))
+        LatticeFileSpot.shared.mark(m, version: project.id)
+    }
+
+    /// ★ notes25 ("Change settings" must "lead to the settings page, scrolling to and highlighting the field to change along
+    /// with what to try"): THE ONE WAY THERE — the page (the Lattice page, Topology's Settings, or Selections), the field marked
+    /// with what to try (SettingToChange). The fix wizard's "Solve" (builder B) is to share it at merge.
+    func openSettingToChange(_ a: SettingToChange.Ask) {
+        viewOriginal = true
+        switch a.page {
+        case .lattice:
+            if stage != .lattice { goToStage(.lattice) }
+            showLatticeWizard = true
+        case .topologySettings:
+            if stage != .topology { goToStage(.topology) }
+            setupPanelOpen = true
+        case .selections:
+            if stage != .lattice { goToStage(.lattice) }
+            selectionsCollapsed = false
+        }
+        SettingToChange.shared.ask = a
     }
 
     /// ★ his 11-22 ("Check right after"): the Mac's file as soon as it is saved — read off the main thread, its lattice drawn in
