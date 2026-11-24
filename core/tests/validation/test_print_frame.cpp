@@ -50,6 +50,10 @@ static int g_fail = 0, g_checks = 0;
 namespace {
 
 const std::string kDir = std::string(TMP_DIR) + "/print_frame";
+// The solve's own round-off: the same job run twice gives strut margins and stresses that differ in their last bits
+// (measured: 1807.0250 against 1807.0251, float32; the threads' sums). The door is exact; a wrong turn moves numbers by
+// far more than this.
+constexpr double kTol = 1e-6;
 
 std::string slurp(const std::string& p) {
   std::ifstream f(p, std::ios::binary);
@@ -233,7 +237,7 @@ bool same(const sj::Value& a, const sj::Value& b, const std::string& at, std::st
   if (a.type != b.type) { *where = at + " (type)"; return false; }
   if (a.is_number()) {
     const double d = std::fabs(a.num - b.num), m = std::max(std::fabs(a.num), std::fabs(b.num));
-    if (!(d <= 1e-9 * std::max(1.0, m))) { *where = at + " " + std::to_string(a.num) + " vs " + std::to_string(b.num); return false; }
+    if (!(d <= kTol * std::max(1e-3, m))) { *where = at + " " + std::to_string(a.num) + " vs " + std::to_string(b.num); return false; }
     return true;
   }
   if (a.is_string()) { if (a.str != b.str) { *where = at + " \"" + a.str + "\" vs \"" + b.str + "\""; return false; } return true; }
@@ -289,7 +293,10 @@ bool fields_same(const std::string& a_path, const std::string& b_path, std::stri
           const std::size_t ea = (static_cast<std::size_t>(k) * ny + j) * nx + i;
           const std::size_t eb = (static_cast<std::size_t>(i) * db[1] + j) * db[0] + (db[0] - 1 - k);
           const float x = f(a, p + 4 * ea), y = f(b, p + 4 * eb);
-          if (!(x == y || (std::isnan(x) && std::isnan(y)))) { *why = "voxel value"; return false; }
+          if (!(x == y || (std::isnan(x) && std::isnan(y)) || std::fabs(x - y) <= kTol * std::max(std::fabs(x), std::fabs(y)))) {
+            *why = "voxel value";
+            return false;
+          }
         }
     p += 4 * static_cast<std::size_t>(cv) + 4 * static_cast<std::size_t>(ct);
     for (int k = 0; k <= nz && cd; ++k)
@@ -299,7 +306,8 @@ bool fields_same(const std::string& a_path, const std::string& b_path, std::stri
           const std::size_t eb = (static_cast<std::size_t>(i) * (db[1] + 1) + j) * (db[0] + 1) + (db[0] - k);
           const Vec3 m = hand_back({f(b, p + 12 * eb), f(b, p + 12 * eb + 4), f(b, p + 12 * eb + 8)});
           const float ax = f(a, p + 12 * ea), ay = f(a, p + 12 * ea + 4), az = f(a, p + 12 * ea + 8);
-          if (ax != static_cast<float>(m.x) || ay != static_cast<float>(m.y) || az != static_cast<float>(m.z)) {
+          const auto near = [](double u, double w) { return u == w || std::fabs(u - w) <= kTol * std::max(std::fabs(u), std::fabs(w)) + 1e-12; };
+          if (!near(ax, m.x) || !near(ay, m.y) || !near(az, m.z)) {
             *why = "node vector";
             return false;
           }
@@ -315,8 +323,8 @@ bool a_matches_b(const Run& A, const Run& B, bool quiet = false) {
   std::string why;
   const std::string fa = slurp(A.out + "/part_lattice.3mf"), fb = slurp(B.out + "/part_lattice.3mf");
   if (fa.empty() || fa != fb) { ok = false; if (!quiet) std::printf("  3MF differs (%zu vs %zu bytes)\n", fa.size(), fb.size()); }
-  {   // per bar, its strut's margin: the same, but for struts that carry no load (a margin above 1e6 is "unbounded":
-      // there the stress is the solver's round-off, which differs from one run of the same job to the next)
+  {   // per bar, its strut's margin: the same to kTol, and for struts that carry no load (a margin above 1e6 is
+      // "unbounded": there the stress is the solver's round-off) only both unbounded
     const std::string ma = slurp(A.out + "/strut_margins.bin"), mb = slurp(B.out + "/strut_margins.bin");
     std::size_t differ = 0;
     if (ma.size() != mb.size() || ma.empty()) differ = 1;
@@ -324,7 +332,8 @@ bool a_matches_b(const Run& A, const Run& B, bool quiet = false) {
       float x, y;
       std::memcpy(&x, ma.data() + i, 4);
       std::memcpy(&y, mb.data() + i, 4);
-      const bool same_bar = x == y || (std::isnan(x) && std::isnan(y)) || (x > 1e6f && y > 1e6f);
+      const bool same_bar = x == y || (std::isnan(x) && std::isnan(y)) || (x > 1e6f && y > 1e6f) ||
+                            std::fabs(x - y) <= kTol * std::max(std::fabs(x), std::fabs(y));
       differ += !same_bar;
     }
     if (differ) {
@@ -535,6 +544,32 @@ int main() {
     CHECK(P.json.find("\"build_direction\": {\"x\": 0, \"y\": 0, \"z\": 1}") != std::string::npos);
   }
 
+  // ── P3: standing on the plate's end (up = -X) the wall's inner face (24 x 24 mm) hangs 32 mm over the bed: the part's
+  // own overhang, painted (only that face, only the solid's triangles), support on for it only (Tree (manual)); A, as
+  // placed on the wall's end, has nothing to paint and its file carries no paint and no settings.
+  {
+    Job u = a;
+    u.extra = ", \"print_frame\": {\"up\": [-1, 0, 0]}";
+    write(kDir + "/job_u.json", file_job(u));
+    const Run U = run("u", "job_u.json");
+    std::printf("[U] ok %d slicer_supports %s places %zu painted %zu triangles, %.6g mm2, est %.6g mm3, base %zu\n", U.r.ok,
+                U.json.find("\"slicer_supports\": \"painted\"") != std::string::npos ? "painted" : "not painted",
+                U.r.part_overhang_places, U.r.painted.triangles, U.r.painted.area_mm2, U.r.painted.est_volume_mm3,
+                U.r.made.base_triangles);
+    CHECK(U.r.ok && U.json.find("\"slicer_supports\": \"painted\"") != std::string::npos);
+    CHECK(U.r.painted.triangles > 0 && std::fabs(U.r.painted.area_mm2 - 24.0 * 24.0) < 1e-6);
+    CHECK(std::fabs(U.r.painted.est_volume_mm3 - 24.0 * 24.0 * 32.0) < 24.0 * 24.0 * 1.0);   // to the bed, read every mm
+    bool only_solid = true;
+    for (std::size_t i = U.r.made.base_triangles; i < U.r.painted.painted.size(); ++i) only_solid = only_solid && !U.r.painted.painted[i];
+    CHECK(only_solid);
+    const std::string zip = slurp(U.out + "/part_lattice.3mf");
+    CHECK(zip.find("Metadata/model_settings.config") != std::string::npos &&
+          zip.find("Metadata/Slic3r_PE_model.config") != std::string::npos);
+    // Every painted place is in the part's own coordinates: on the wall's inner face (x = 8), above the plate.
+    for (const Vec3& p : U.r.painted.at) CHECK(std::fabs(p.x - 8.0) < 0.5 && p.z > 6.0 - 0.5);
+    const std::string za = slurp(A.out + "/part_lattice.3mf");
+    CHECK(A.json.find("\"slicer_supports\": \"off\"") != std::string::npos && za.find("Metadata/") == std::string::npos);
+  }
   // ── a strengthening made standing another way is refused, never applied (strengthened.json's "print_up")
   {
     write(kDir + "/strengthened_flat.json", "{\"version\": 2, \"mode\": \"additive\", \"additions\": \"none.bin\"}");

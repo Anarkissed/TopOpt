@@ -604,6 +604,10 @@ struct PrintableReport {
   // the next try would have been the same file again.
   std::size_t posts_outside = 0;
   bool stopped_repeating = false;
+  // P3 (his print orientation): where the part's own overhangs are, of the LAST pass (the mesh returned): each finding
+  // the weave's rule or the cell lattice's (F1) took as the part's own, its place (x, y, z, the layer's middle), so the
+  // file can paint the part's triangles there as support enforcers (support_paint.hpp).
+  std::vector<Vec3> part_overhang_at;
   // O17, O18: what the sag pass did (once, before the first pass), and, when it changed a bar, the bars every pass
   // was made of (the layout's own otherwise: null). `drop_at` and `posts` are read against those.
   SagReport sags;

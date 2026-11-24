@@ -94,6 +94,8 @@ add_library(topopt
   src/materials/materials.cpp
   src/io/stl.cpp
   src/io/threemf_stream.cpp
+  # His print orientation (P3): the part's overhangs painted as support enforcers (support_paint.hpp).
+  src/io/support_paint.cpp
   src/io/segment.cpp
   src/io/part.cpp
   src/io/face_tag.cpp
@@ -597,6 +599,15 @@ add_test(NAME lattice_layout_file COMMAND test_lattice_layout_file)
 add_executable(test_weave_findings_grid tests/unit/test_weave_findings_grid.cpp)
 target_link_libraries(test_weave_findings_grid PRIVATE topopt)
 add_test(NAME weave_findings_grid COMMAND test_weave_findings_grid)
+# His print orientation (P3): the part's overhangs painted as support enforcers, and the 3MF that tells the slicer.
+add_executable(test_support_paint tests/unit/test_support_paint.cpp)
+target_link_libraries(test_support_paint PRIVATE topopt)
+target_compile_definitions(test_support_paint PRIVATE SUPPORT_PAINT_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+if(ZLIB_FOUND)
+  target_link_libraries(test_support_paint PRIVATE ZLIB::ZLIB)
+  target_compile_definitions(test_support_paint PRIVATE TOPOPT_HAVE_ZLIB)
+endif()
+add_test(NAME support_paint COMMAND test_support_paint)
 # His print orientation (P4): the six candidates and the one rule (recommend_print_orientation).
 add_executable(test_print_orientation tests/unit/test_print_orientation.cpp)
 target_link_libraries(test_print_orientation PRIVATE topopt)

@@ -476,6 +476,7 @@ void turn_result_to_model(const PrintFrame& f, FileResult& r) {
   back(f, r.guard.in_solid_at);
   back(f, r.guard.removed_at);
   back(f, r.relief.thin_zone_solid_dropped_at);
+  back(f, r.painted.at);   // P3
   {
     double six[6];
     f.axis_six_to_model(r.relief.grew_mm, six);

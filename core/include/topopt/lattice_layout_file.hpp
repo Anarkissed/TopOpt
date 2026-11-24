@@ -30,6 +30,7 @@
 #include "topopt/print_frame.hpp"
 #include "topopt/print_orientation.hpp"
 #include "topopt/step.hpp"
+#include "topopt/support_paint.hpp"
 
 namespace topopt::lattice_layout {
 
@@ -92,6 +93,7 @@ struct FileReport {
   std::size_t stands_added = 0;      // of `posts`, those under a weave's long shallow runs (O8)
   std::size_t weave_specks_ignored = 0, weave_held_ignored = 0;   // O10: PrintableReport's
   std::size_t part_overhangs = 0;   // PrintableReport's: the part's own overhangs, counted, never propped
+  std::vector<Vec3> part_overhang_at;   // P3: PrintableReport's: where (the last pass)
   std::size_t posts_outside = 0;    // ★ 362 11-23, PrintableReport's (F2): posts not added, their column leaving the part
   bool stopped_repeating = false;   // ★ 362 11-23, PrintableReport's (F3): stopped, a try having nothing new to try
   // O17, O18: PrintableReport's: what the sag pass did, and the bars the file was made of when it changed any (null:
@@ -383,6 +385,12 @@ struct FileResult {
   std::string strength_json;
   // P4: the print orientation ranking and recommendation ("print_orientation"), when the check gave its numbers.
   std::string orientation_json;
+  // P3: the part's own overhang places the print check found (its last pass), and what was painted for them in the
+  // 3MF (support_paint.hpp; `painted.at` in the model frame once the result is turned back). The result's
+  // "slicer_supports" follows: "painted" (some painted), "needed" (places found, none could be painted: an STL, or no
+  // part triangle under them), "off" (none found).
+  std::size_t part_overhang_places = 0;
+  SupportPaint painted;
   double ms_strength = 0.0;
   // Where the time went, ms.
   double ms_import = 0.0, ms_measure = 0.0, ms_read = 0.0, ms_cells = 0.0, ms_bars = 0.0;

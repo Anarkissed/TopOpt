@@ -616,6 +616,7 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
   LayerCache layer_cache;   // SPEED 11-22: each pass judges only the layers its changes touched
   for (int pass = 1; pass <= most; ++pass) {
     rep.passes = pass;
+    rep.part_overhang_at.clear();   // P3: this pass's (the last pass's are the file's)
     if (spec.said) {   // ★ 362 11-23
       char line[96];
       std::snprintf(line, sizeof line, "checking it prints: try %d of at most %d", pass, most);
@@ -755,11 +756,20 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
           return f.reached == 0 && !f.on_weave && probe.where({x, y, z - layer}).why == Why::Outside;
         };
         const std::size_t before = rep.layers.mid_air.size() + rep.layers.one_ended.size() + rep.layers.long_bridges.size();
+        // P3: each finding taken as the part's own keeps its place (the predicate runs once per finding)
         rep.layers.mid_air.erase(std::remove_if(rep.layers.mid_air.begin(), rep.layers.mid_air.end(),
-                                                [&](const LayerReport::MidAir& m) { return own(m.x, m.y, m.z); }),
+                                                [&](const LayerReport::MidAir& m) {
+                                                  const bool w = own(m.x, m.y, m.z);
+                                                  if (w) rep.part_overhang_at.push_back({m.x, m.y, m.z});
+                                                  return w;
+                                                }),
                                  rep.layers.mid_air.end());
         for (std::vector<LayerReport::OneEnded>* v : {&rep.layers.one_ended, &rep.layers.long_bridges})
-          v->erase(std::remove_if(v->begin(), v->end(), [&](const LayerReport::OneEnded& o) { return own(o.x, o.y, o.z); }), v->end());
+          v->erase(std::remove_if(v->begin(), v->end(), [&](const LayerReport::OneEnded& o) {
+                     const bool w = own(o.x, o.y, o.z);
+                     if (w) rep.part_overhang_at.push_back({o.x, o.y, o.z});
+                     return w;
+                   }), v->end());
         rep.part_overhangs += before - (rep.layers.mid_air.size() + rep.layers.one_ended.size() + rep.layers.long_bridges.size());
       }
       // A speck held by nothing below is also seen as an overhang held at one place: the same island, in the same
@@ -799,11 +809,20 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
         return exact.depth({x, y, z - layer}) < 0.0 && !reaches_bar(x, y, z);
       };
       const std::size_t before = rep.layers.mid_air.size() + rep.layers.one_ended.size() + rep.layers.long_bridges.size();
+      // P3: each finding taken as the part's own keeps its place (the predicate runs once per finding)
       rep.layers.mid_air.erase(std::remove_if(rep.layers.mid_air.begin(), rep.layers.mid_air.end(),
-                                              [&](const LayerReport::MidAir& m) { return own(m.x, m.y, m.z); }),
+                                              [&](const LayerReport::MidAir& m) {
+                                                const bool w = own(m.x, m.y, m.z);
+                                                if (w) rep.part_overhang_at.push_back({m.x, m.y, m.z});
+                                                return w;
+                                              }),
                                rep.layers.mid_air.end());
       for (std::vector<LayerReport::OneEnded>* v : {&rep.layers.one_ended, &rep.layers.long_bridges})
-        v->erase(std::remove_if(v->begin(), v->end(), [&](const LayerReport::OneEnded& o) { return own(o.x, o.y, o.z); }), v->end());
+        v->erase(std::remove_if(v->begin(), v->end(), [&](const LayerReport::OneEnded& o) {
+                   const bool w = own(o.x, o.y, o.z);
+                   if (w) rep.part_overhang_at.push_back({o.x, o.y, o.z});
+                   return w;
+                 }), v->end());
       rep.part_overhangs += before - (rep.layers.mid_air.size() + rep.layers.one_ended.size() + rep.layers.long_bridges.size());
     }
     // OS1 B (his ruling R2): a finding on a shallow run's rounded end (within its half width + 0.35 mm of its place in

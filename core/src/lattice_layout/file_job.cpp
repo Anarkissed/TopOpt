@@ -735,6 +735,7 @@ TriangleMesh make_file_mesh(const Session& session, const Layout& layout, const 
   report.weave_specks_ignored = made.weave_specks_ignored;
   report.weave_held_ignored = made.weave_held_ignored;
   report.part_overhangs = made.part_overhangs;
+  report.part_overhang_at = made.part_overhang_at;   // P3
   report.posts_outside = made.posts_outside;           // ★ 362 11-23 (F2)
   report.stopped_repeating = made.stopped_repeating;   // ★ 362 11-23 (F3)
   report.sags = made.sags;
@@ -1466,15 +1467,37 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     std::size_t want = 84 + 50 * mesh.triangles.size();
     bool written = false;
     std::string write_detail;
+    // P3 (his print orientation, decision D6): the part's own overhangs stay the slicer's business, and the file now
+    // tells the slicer where: the part's triangles under them (never the lattice's: on the tubes route only the solid's
+    // first base_triangles) painted as support enforcers, and support turned on with only those places supported
+    // (support_paint.hpp; decision D4, Tree (manual)). A 3MF only: an STL cannot carry it.
+    r.part_overhang_places = r.made.part_overhang_at.size();
+    if (r.file_format == "3mf" && !r.made.part_overhang_at.empty()) {
+      SupportPaintAsk pa;
+      pa.layer_mm = options.layers.layer_mm;
+      pa.line_mm = session.domain()->spec().bead_mm;
+      pa.part_triangles = r.made.tubes ? r.made.base_triangles : 0;
+      pa.places = &r.made.part_overhang_at;
+      // air below = outside the part's own surface, read exactly (as F1 reads it; the domain's map is coarse at a face).
+      // Inside the part (its solid, or a lattice region) is never air: nothing is painted over the lattice.
+      const PartMeasure::Probe exact = session.measure().probe();
+      pa.outside = [&exact](const Vec3& p) { return exact.depth(p) < 0.0; };
+      r.painted = paint_supports(mesh, pa);
+    }
     try {
       if (r.file_format == "3mf") {
         StreamingThreeMfWriter::Options o;
         o.indexed = true;
         o.deflate = true;
+        o.supports = r.painted.triangles > 0;   // P3: off (the file as before) when nothing is painted
+        o.object_name = base_name(file_path);
         StreamingThreeMfWriter w(part, o);
         for (const Vec3& v : mesh.vertices) w.add_vertex(v);
-        for (const auto& t : mesh.triangles)
-          w.add_indexed(static_cast<std::uint64_t>(t[0]), static_cast<std::uint64_t>(t[1]), static_cast<std::uint64_t>(t[2]));
+        for (std::size_t i = 0; i < mesh.triangles.size(); ++i) {
+          const auto& t = mesh.triangles[i];
+          w.add_indexed(static_cast<std::uint64_t>(t[0]), static_cast<std::uint64_t>(t[1]), static_cast<std::uint64_t>(t[2]),
+                        o.supports && r.painted.painted[i] != 0);
+        }
         w.finish();
         r.compressed = w.compressed();
         want = size_of_file(part);
@@ -1754,11 +1777,14 @@ std::string file_result_json(const FileResult& r) {
   // P2: the file stands on the chosen face (print frame); every position below is in the part's own coordinates.
   if (r.print_frame.on) o += "  \"print_frame\": " + print_frame_json(r.print_frame) + ",\n";
   if (r.weave_regions > 0 && !r.file_format.empty()) {   // OF5: only for a job with a weave region that made its file
+    // P3: what the slicer is told about supports: "painted" (the part's own overhangs painted, support on for them
+    // only), "needed" (found, none could be painted), "off" (none).
+    const char* supports = r.painted.triangles > 0 ? "painted" : r.part_overhang_places > 0 ? "needed" : "off";
     std::snprintf(b, sizeof b,
                   "  \"file_format\": \"%s\", \"weave_mesh\": \"%s\", \"shells\": %llu, \"shells_left_out\": %llu, "
-                  "\"compressed\": %s, \"slicer_supports\": \"off\",\n",
+                  "\"compressed\": %s, \"slicer_supports\": \"%s\",\n",
                   r.file_format.c_str(), r.weave_mesh.c_str(), count(r.made.shells.shells()), count(r.made.shells.left_out),
-                  r.compressed ? "true" : "false");
+                  r.compressed ? "true" : "false", supports);
     o += b;
     // His 11-22 (the print-accurate lattice made on the Mac, drawn on the iPad): the file's first `base_triangles` are the
     // solid (the part, its skins, any cube lattice joined to it); every triangle after is a weave shell, so the app colours
@@ -1791,6 +1817,21 @@ std::string file_result_json(const FileResult& r) {
                   ws.tube_sides_least, ws.tube_sides_most, count(ws.tubes), count(ws.bridges), count(ws.sharp_splits),
                   ws.bridge_under_level_mm2, ws.bridge_under_own_mm2, ws.bridge_under_other_mm2);
     o += b;
+  }
+  // P3: the part's own overhangs and what the file paints for them (written only when the print check found any).
+  if (r.part_overhang_places > 0) {
+    const SupportPaint& p = r.painted;
+    std::snprintf(b, sizeof b,
+                  "  \"painted\": {\"places\": %llu, \"places_painted\": %llu, \"places_unpainted\": %llu, \"triangles\": %llu, "
+                  "\"area_mm2\": %.9g, \"est_volume_mm3\": %.9g, \"support_type\": \"%s\", \"at\": [",
+                  count(r.part_overhang_places), count(p.places), count(r.part_overhang_places - p.places),
+                  count(p.triangles), p.area_mm2, p.est_volume_mm3, p.triangles > 0 ? "tree(manual)" : "");
+    o += b;
+    for (std::size_t i = 0; i < p.at.size(); ++i) {
+      std::snprintf(b, sizeof b, "%s[%.4f, %.4f, %.4f]", i ? ", " : "", p.at[i].x, p.at[i].y, p.at[i].z);
+      o += b;
+    }
+    o += "]},\n";
   }
   std::snprintf(b, sizeof b, "  \"part\": {\"faces\": %d, \"triangles\": %llu, \"open_edges\": %llu},\n",
                 r.faces, count(r.part_triangles), count(r.open_edges));
