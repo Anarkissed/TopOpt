@@ -7,8 +7,13 @@
 // ★ P7 (the rebuild's rule from his 11-11 crash): the bars, a list that grows with the part, are ONE MTLBuffer bound with
 // setVertexBuffer / setFragmentBuffer — never setFragmentBytes (his v2 stand is 37,233 bars, ~1.2 MB). The per-frame uniform
 // is a fixed 256-byte struct.
-// ★ NO CLIP: core's bars are already cut to the part (the old impostors clip against the old engine's part and region
-// fields; these have none). The ray comes from the inverse clip matrix, so Orthographic and Perspective are both right.
+// ★ THE CLIP (notes26 C6, his 11-23: the regular lattice "looks like it's ON TOP of the face of the part, not *in* it"). Core's
+// bars END on the part's surface (lattice_layout.hpp) and its skin bars lie ON it (bars.cpp), but a bar was drawn with round caps
+// half a strut past each end (and a square bar R past both), so every cut strut bulged half a strut out of the face — while the
+// print file cuts them flush (solid_mesh.cpp). With the engine's map of the part on the GPU (the solid view's), each bar is now
+// clipped to the part: nothing of it draws outside; where it meets the face it ends in a flat cap flush with the surface (the
+// face's own normal); a skin bar keeps its inner half. "The drawing follows the print file." The X-ray view has no map: as
+// before. The ray comes from the inverse clip matrix, so Orthographic and Perspective are both right.
 // ★ THE GHOST: the bars are inside the part, so the page draws the body see-through while this pass is on, and the body
 // follows the Flexible pass's two rules (MeshRenderer+FlexibleLattice): out of the G-buffer, drawn after the shade.
 // ★ PREVIEW IS THE SPEC, not yet: the print file squares the undersides of flat bridges and adds posts; this first cut draws
@@ -110,7 +115,22 @@ struct BarFrame {
     float4x4 eyeFromModel;
     float4x4 eyeNormalBasis;
     float4   albedo;
+    float4   mapOrigin;    // ★ notes26 C6: the engine's map — voxel (0,0,0)'s centre
+    float4   mapSpacing;   //   its voxel size
+    float4   mapDims;      //   its voxel counts; w = 1: clip the bars to the part
 };
+
+// ★ notes26 C6: is `p` inside the part (the map's inside channel, read linear — the way Organic's softened map is), never
+// outside the map's own box (beyond it nothing is the part)
+static float3 bar_map_uvw(float3 p, constant BarFrame& F) {
+    return ((p - F.mapOrigin.xyz) / F.mapSpacing.xyz + 0.5) / F.mapDims.xyz;
+}
+static float bar_map_inside(float3 p, constant BarFrame& F, texture3d<float, access::sample> map) {
+    constexpr sampler sl(coord::normalized, filter::linear, address::clamp_to_edge);
+    float3 uvw = bar_map_uvw(p, F);
+    if (any(uvw < 0.0) || any(uvw > 1.0)) { return -1.0; }
+    return map.sample(sl, uvw).g;
+}
 
 struct BarVOut {
     float4 pos [[position]];
@@ -201,7 +221,8 @@ struct BarGBuf {
 fragment BarGBuf bar_gbuffer(BarVOut in [[stage_in]],
                              const device float4* bars [[buffer(0)]],
                              constant BarFrame& F [[buffer(1)]],
-                             const device float4* colours [[buffer(2)]]) {
+                             const device float4* colours [[buffer(2)]],
+                             texture3d<float, access::sample> map [[texture(0)]]) {
     float4 A = bars[2 * in.iid], B = bars[2 * in.iid + 1];
     float R = max(A.w, 1e-4);
     // this fragment's ray, from the inverse clip matrix: right for Orthographic and Perspective alike
@@ -211,6 +232,7 @@ fragment BarGBuf bar_gbuffer(BarVOut in [[stage_in]],
     float3 ro = n0.xyz / n0.w;
     float3 rd = normalize(n1.xyz / n1.w - ro);
     float t;
+    float tExit;   // ★ notes26 C6: where the ray leaves the bar
     float3 n;
     if (bar_square(B)) {
         float3 ax = B.xyz - A.xyz;
@@ -227,12 +249,41 @@ fragment BarGBuf bar_gbuffer(BarVOut in [[stage_in]],
         float tN = max(max(tn.x, tn.y), tn.z), tF = min(min(tf.x, tf.y), tf.z);
         if (tF < max(tN, 0.0)) { discard_fragment(); }
         t = tN >= 0.0 ? tN : tF;
+        tExit = tF;
         float3 ln = (tN == tn.x) ? float3(-sign(ld.x), 0.0, 0.0) : ((tN == tn.y) ? float3(0.0, -sign(ld.y), 0.0) : float3(0.0, 0.0, -sign(ld.z)));
         n = normalize(ln.x * u + ln.y * v + ln.z * w);
     } else {
         t = bar_intersect(ro, rd, A.xyz, B.xyz, R);
         if (t < 0.0) { discard_fragment(); }
         n = bar_normal(ro + rd * t, A.xyz, B.xyz);
+        // the far side: the same test from a point past the bar, looking back
+        float far = t + 2.0 * (length(B.xyz - A.xyz) + 2.0 * R);
+        float back = bar_intersect(ro + rd * far, -rd, A.xyz, B.xyz, R);
+        tExit = back >= 0.0 ? far - back : t;
+    }
+    // ★ notes26 C6: clipped to the part. A hit outside it: walk the bar's chord to where the ray enters the part — there the bar
+    // ends FLAT, flush with the face (the face's own normal); none: nothing of this bar is here.
+    if (F.mapDims.w > 0.5 && bar_map_inside(ro + rd * t, F, map) <= 0.0) {
+        const int STEPS = 40;
+        float dt = max(tExit - t, 0.0) / float(STEPS);
+        float hit = -1.0;
+        for (int i = 1; i <= STEPS; ++i) {
+            float sx = t + dt * float(i);
+            if (bar_map_inside(ro + rd * sx, F, map) > 0.0) { hit = sx; break; }
+        }
+        if (hit < 0.0) { discard_fragment(); }
+        float a = hit - dt, b = hit;
+        for (int k = 0; k < 8; ++k) {
+            float m = 0.5 * (a + b);
+            if (bar_map_inside(ro + rd * m, F, map) > 0.0) { b = m; } else { a = m; }
+        }
+        t = b;
+        float3 q = ro + rd * t;
+        float e = 0.5 * min(F.mapSpacing.x, min(F.mapSpacing.y, F.mapSpacing.z));
+        float3 g = float3(bar_map_inside(q + float3(e, 0, 0), F, map) - bar_map_inside(q - float3(e, 0, 0), F, map),
+                          bar_map_inside(q + float3(0, e, 0), F, map) - bar_map_inside(q - float3(0, e, 0), F, map),
+                          bar_map_inside(q + float3(0, 0, e), F, map) - bar_map_inside(q - float3(0, 0, e), F, map));
+        n = length(g) > 1e-5 ? -normalize(g) : -rd;   // out of the part: the face's own normal
     }
     float3 p = ro + rd * t;
     float4 clip = F.clipFromModel * float4(p, 1.0);
@@ -419,6 +470,9 @@ final class LatticeLayoutBarsPass {
     /// The cut walls' colour: the body's own grey, so a cut reads as the same material.
     /// ★ notes24 (b, "as if you're looking INTO A PART"): exactly the body's clay (viewer_fragment's `clay`), no cooler grey.
     static let wallColour = SIMD4<Float>(0.78, 0.77, 0.75, 1)
+    /// ★ notes26 C6: the bars clipped to the part where its map is on the GPU (the solid view). RED CONTROL (tests): off — the round
+    /// caps bulge half a strut out of the face, as before.
+    static var clipToPart = true
     /// The cut walls, on (11-13: they draw — the hollow core's solid core behind its lattice; his v4 stand at 2048 × 1536 on
     /// the Mac: 21 ms a frame without, 25–29 ms with). The tests' red control turns them off.
     static var drawWalls = true
@@ -597,7 +651,25 @@ final class LatticeLayoutBarsPass {
         var eyeFromModel: simd_float4x4
         var eyeNormalBasis: simd_float4x4
         var albedo: SIMD4<Float>
+        /// ★ notes26 C6: the engine's map (BarFrame's twin); `mapDims.w` 1 = clip the bars to the part.
+        var mapOrigin = SIMD4<Float>(0, 0, 0, 0)
+        var mapSpacing = SIMD4<Float>(1, 1, 1, 0)
+        var mapDims = SIMD4<Float>(1, 1, 1, 0)
     }
+
+    /// ★ notes26 C6: a 1×1×1 map bound when there is none (the shader declares it, so it is bound on every path).
+    private lazy var neutralMap: MTLTexture? = {
+        let d = MTLTextureDescriptor()
+        d.textureType = .type3D
+        d.pixelFormat = .rg8Snorm
+        d.width = 1; d.height = 1; d.depth = 1
+        d.usage = [.shaderRead]
+        d.storageMode = .shared
+        let t = device.makeTexture(descriptor: d)
+        var z: [Int8] = [0, 0]
+        t?.replace(region: MTLRegionMake3D(0, 0, 0, 1, 1, 1), mipmapLevel: 0, slice: 0, withBytes: &z, bytesPerRow: 2, bytesPerImage: 2)
+        return t
+    }()
 
     /// Bars into the prepass's G-buffer (its encoder, attachments and .less + write depth state).
     func encodeGBuffer(_ enc: MTLRenderCommandEncoder, depthState: MTLDepthStencilState,
@@ -617,6 +689,11 @@ final class LatticeLayoutBarsPass {
         // dimmed: every bar the one drained colour (the key's colours come back with the new lattice)
         var f = Frame(clipFromModel: clipFromModel, modelFromClip: clipFromModel.inverse, eyeFromModel: eyeFromModel,
                       eyeNormalBasis: eyeNormalBasis, albedo: SIMD4(c, colourBuffer == nil || dimmed ? 1 : -1))
+        if Self.clipToPart, let g = grid, gridTexture != nil {   // ★ notes26 C6: the solid view's map clips the bars to the part
+            f.mapOrigin = SIMD4(g.origin, 0)
+            f.mapSpacing = SIMD4(g.voxel, g.voxel, g.voxel, 0)
+            f.mapDims = SIMD4(Float(g.dims.x), Float(g.dims.y), Float(g.dims.z), 1)
+        }
         enc.setRenderPipelineState(pipeline)
         enc.setDepthStencilState(depthState)
         enc.setCullMode(.none)
@@ -625,6 +702,7 @@ final class LatticeLayoutBarsPass {
         enc.setFragmentBuffer(buffer, offset: 0, index: 0)
         enc.setFragmentBytes(&f, length: MemoryLayout<Frame>.stride, index: 1)
         enc.setFragmentBuffer(colourBuffer ?? buffer, offset: 0, index: 2)   // bound either way (read only when albedo.w < 0)
+        enc.setFragmentTexture(gridTexture ?? neutralMap, index: 0)   // ★ notes26 C6: bound either way (read only when clipping)
         let cast = Swift.min(Swift.max(lightFrom, 0), count)
         if cast > 0 { enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 36, instanceCount: cast) }
         if cast < count {   // ★ Organic cut 1: the light pass, the same buffers from bar `cast` on
