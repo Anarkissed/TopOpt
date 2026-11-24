@@ -1427,8 +1427,8 @@ public final class LatticeLayoutPreview: ObservableObject {
             // ★ K7, K8 (his 11-24: "why can't we just extend cells and cut them off where the bed is?"): Auto's cells fitted to
             // the faces the grid is square to — the size with the fewest slivers there, a sliver left taken in by the row
             // beside it (core: a region laid on one grid; Structural's walls keep their own cells and are only said). Manual
-            // lays his own size, as before.
-            s.cellSearch = true
+            // lays his own size, as before — and so does a typed cell size (core2, 362: only when the cell size is Auto).
+            s.cellSearch = l.cellSizeMode != .fixed
         }
         let rowDensity = s.perRegion
         var id: Int32 = 1
