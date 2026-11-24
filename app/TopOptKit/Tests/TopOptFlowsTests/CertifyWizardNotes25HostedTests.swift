@@ -23,13 +23,13 @@ final class CertifyWizardNotes25HostedTests: XCTestCase {
     override nonisolated func setUp() {
         super.setUp()
         FlexibleSaid.recording = true   // the lattice page publishes its ids
-        MainActor.assumeIsolated { CertifyCardPlace.shared.reset(); OrganicCertifyFocus.shared.reset() }
+        MainActor.assumeIsolated { CertifyCardPlace.shared.reset(); SettingToChange.shared.ask = nil }
     }
     override nonisolated func tearDown() {
         FlexibleSaid.recording = false
         MainActor.assumeIsolated {
             OrganicCertifyCard.controlSkipLeaves = false
-            CertifyCardPlace.shared.reset(); OrganicCertifyFocus.shared.reset()
+            CertifyCardPlace.shared.reset(); SettingToChange.shared.ask = nil
         }
         super.tearDown()
     }
@@ -238,14 +238,20 @@ final class CertifyWizardNotes25HostedTests: XCTestCase {
     func workspaceOnResults(_ size: CGSize, _ what: String) throws -> (AppBuildHost, Probe, FlexibleHisProject.Restored) {
         closeLast()
         CertifyCardPlace.shared.reset()
-        OrganicCertifyFocus.shared.reset()
+        SettingToChange.shared.ask = nil
         let r = try organicPart()
         let probe = Probe()
         let h = opened(AppBuildHost(WorkspacePlaceholder(model: r.app, project: r.project).onPreferenceChange(LatticeProbeKey.self) { probe.all = $0 },
                                     size: size, test: self))
         h.pump(3)
-        try h.tap("capsuleResults", "\(what): the capsule's Results")
-        h.pump(1.5)
+        // ★ notes25 (builder A): the print file's result is the Lattice stage's — its own Results tab, beside Setup and Lattice
+        if h.frames.all["capsuleLattice"] == nil {
+            let offered = try h.pickFromMenu("capsuleMenu", "Structural", what: "\(what): the ● menu")
+            h.pump(2)
+            XCTAssertNotNil(h.frames.all["capsuleLattice"], "\(what): premise: the Lattice stage (offered \(offered))")
+        }
+        try h.tap("capsuleResults", "\(what): the Lattice stage's Results tab", settle: 1.5)
+        for _ in 0..<10 where h.frames.all["certifyCard"] == nil { h.pump(0.3) }
         _ = try h.onScreen("resultsVersions", "\(what): Results is open")
         return (h, probe, r)
     }
@@ -256,13 +262,7 @@ final class CertifyWizardNotes25HostedTests: XCTestCase {
         for size in Self.sizes {
             let what = "\(Int(size.width))×\(Int(size.height))"
             let (h, _, _) = try workspaceOnResults(size, what)
-            let pl = CertifyCardPlace.shared
-            print("CERTIFY PLACE \(what): size \(pl.size) viewport \(pl.viewport) rest \(pl.rest) assets \(pl.assets.count) "
-                  + "card \(String(describing: h.frames.all["certifyCard"])) results' own \(String(describing: pl.rawResults["certifyCard"])) "
-                  + "skip \(String(describing: pl.rawResults["certifySkip"])) vs \(String(describing: h.frames.all["certifySkip"]))")
-            h.pump(1)
-            print("CERTIFY PLACE later \(what): card \(String(describing: h.frames.all["certifyCard"])) results' own "
-                  + "\(String(describing: pl.rawResults["certifyCard"]))")
+            h.pump(0.5)
             let card = try h.onScreen("certifyCard", "\(what): ★ the fix pop-up on Results")
             let capsule = try h.onScreen("capsule", "\(what): the stage menu over Results")
             XCTAssertFalse(card.intersects(capsule.insetBy(dx: -(CertifyCardLayout.gap - 1), dy: -(CertifyCardLayout.gap - 1))),
@@ -282,7 +282,8 @@ final class CertifyWizardNotes25HostedTests: XCTestCase {
         XCTAssertNil(h.frames.all["resultsVersions"], "RED CONTROL: Skip as it was leaves Results")
     }
 
-    /// ★ B6: Solve opens the Lattice settings with Strut thickness lit, as near the middle of the rows as they scroll.
+    /// ★ B6: Solve opens the Lattice settings with Strut thickness lit, as near the middle of the rows as they scroll — the ONE
+    /// way "Change settings" takes too (SettingToChange, builder A's opener).
     func testSolveOpensTheFieldLitInTheMiddle() throws {
         for size in Self.sizes {
             let what = "\(Int(size.width))×\(Int(size.height))"
@@ -293,8 +294,11 @@ final class CertifyWizardNotes25HostedTests: XCTestCase {
             _ = try h.onScreen("latticeSettingsPanel", "\(what): ★ the Lattice settings are open")
             XCTAssertNil(h.frames.all["resultsVersions"], "\(what): Results gave way")
             XCTAssertTrue(r.project.latticePageManual, "\(what): ★ Manual: the Organic fields live there")
-            let ring = try XCTUnwrap(probe.all["certify-focus-Strut thickness"],
-                                     "\(what): ★ Strut thickness is lit; ids: \(probe.all.keys.filter { $0.hasPrefix("certify") || $0.hasPrefix("organic") }.sorted())")
+            XCTAssertEqual(SettingToChange.shared.ask?.field, "Strut thickness", "\(what): ★ through the one opener")
+            XCTAssertEqual(SettingToChange.shared.ask?.group, r.project.latticeAreaGroups.first?.id, "\(what): its group's tab")
+            XCTAssertNotNil(h.frames.all["settingToChangeNote"], "\(what): the page says what to try at its top")
+            let ring = try XCTUnwrap(h.frames.all["settingToChange-Strut thickness"],
+                                     "\(what): ★ Strut thickness is lit; \(h.frames.all.keys.filter { $0.hasPrefix("setting") }.sorted())")
             let rows = try XCTUnwrap(probe.all["lattice-page-rows"], "\(what): the rows")
             let content = try XCTUnwrap(probe.all["lattice-page-rows-content"], "\(what): the rows' content")
             XCTAssertTrue(rows.insetBy(dx: -8, dy: -8).contains(CGPoint(x: ring.midX, y: ring.midY)), "\(what): ★ in view: \(ring) \(rows)")

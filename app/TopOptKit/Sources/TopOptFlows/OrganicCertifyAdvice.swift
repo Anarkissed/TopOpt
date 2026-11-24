@@ -22,15 +22,26 @@ import Foundation
 public struct OrganicCertifyAdvice: Equatable, Sendable {
     public var setting: String?
     public var line: String
-    public init(setting: String?, line: String) { self.setting = setting; self.line = line }
+    /// What to try, five words at most (the field's own note on the settings page: SettingToChange).
+    public var tryText: String
+    public init(setting: String?, line: String, tryText: String = "") { self.setting = setting; self.line = line; self.tryText = tryText }
+
+    /// ★ notes25 B6: Solve's way to the field — the ONE way "Change settings" takes (`openSettingToChange`); nil: no field on a
+    /// settings page holds this fix (the faces' selections, the model, or infill, which Solve sets itself).
+    public func settingToChange(group: UUID?) -> SettingToChange.Ask? {
+        guard let s = setting, SettingToChange.organicFields.contains(s) else { return nil }
+        return SettingToChange.Ask(page: .lattice, field: s, tryText: tryText, group: group)
+    }
 }
 
 /// ★ The wizard's words, in ONE place.
 public enum OrganicCertifyCopy {
-    /// A margin as the check reads it: two decimals ("1.34×").
-    public static func margin(_ m: Double) -> String { String(format: "%.2f\u{00D7}", m) }
+    /// A margin as the check reads it: two decimals ("1.34×") — the strength answer's own words (StrengthWords, builder C).
+    public static func margin(_ m: Double) -> String { StrengthWords.x(m) }
     /// What it needs: "1.5×".
-    public static func needs(_ s: Double) -> String { String(format: "%.1f\u{00D7}", s) }
+    public static func needs(_ s: Double) -> String { StrengthWords.need(s) }
+    /// The field's note: "Try 1.8 to 3.15 mm" (five words at most).
+    static func tryRange(_ lo: Double, _ hi: Double, single: Bool) -> String { "Try " + range(lo, hi, single: single) }
     /// A length as the setting's field shows it ("2.25", "2.7").
     public static func mm(_ v: Double) -> String { StrengthCheckDocs.number((v * 1000).rounded() / 1000) }
     static func range(_ lo: Double, _ hi: Double, single: Bool) -> String {
@@ -125,15 +136,19 @@ extension OrganicCertifyAdvice {
         case "struts_short":
             let f = strutFactor(holds: issue.worst, needs: s)
             guard let now = c.strut else {
-                return .init(setting: "Strut thickness", line: OrganicCertifyCopy.strutUnmeasured(percent: Int(((f - 1) * 100).rounded(.up))))
+                let pct = Int(((f - 1) * 100).rounded(.up))
+                return .init(setting: "Strut thickness", line: OrganicCertifyCopy.strutUnmeasured(percent: pct),
+                             tryText: "About \(pct)% thicker, both ends")
             }
             let hi = thicker(now.heavy, factor: f, stepMM: c.stepMM)
             let lo = now.single ? hi : Swift.min(hi, thicker(now.light, factor: f, stepMM: c.stepMM))
             if hi > LatticeOrganicLook.Check.strutMaxMM {
                 return .init(setting: "Cell size", line: OrganicCertifyCopy.strutPastMax(needMM: now.heavy * f,
-                                                                                         maxMM: LatticeOrganicLook.Check.strutMaxMM))
+                                                                                         maxMM: LatticeOrganicLook.Check.strutMaxMM),
+                             tryText: "Try smaller cells")
             }
-            return .init(setting: "Strut thickness", line: OrganicCertifyCopy.strutTry(now: now, lo: lo, hi: hi, group: c.group))
+            return .init(setting: "Strut thickness", line: OrganicCertifyCopy.strutTry(now: now, lo: lo, hi: hi, group: c.group),
+                         tryText: OrganicCertifyCopy.tryRange(lo, hi, single: now.single))
         case "infill":
             guard case .infill(let to)? = issue.solve else { return nil }
             return .init(setting: "Infill", line: OrganicCertifyCopy.infill(now: c.infillNow, passes: to))

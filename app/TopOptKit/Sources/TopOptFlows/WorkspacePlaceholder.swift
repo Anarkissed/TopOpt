@@ -16067,10 +16067,13 @@ extension WorkspacePlaceholder {
                 newVersion: model.nextVersionPreview().map { "v\($0.number)" }, ranVersion: versionLabel)
             return
         }
-        // ★ notes25 B6: the field that fixes it, lit and brought to the middle of the Lattice settings (OrganicCertifyFocus)
-        OrganicCertifyFocus.shared.ask(OrganicCertifyAdvice.advice(issue, certifyContext(issue)), issue: issue,
-                                       group: certifyContext(issue).groupID)
         model.certifyWalk?.next()
+        // ★ notes25 B6: the field that fixes it — the ONE way there "Change settings" takes too (lit, in the middle, its tab)
+        let context = certifyContext(issue)
+        if let ask = OrganicCertifyAdvice.advice(issue, context)?.settingToChange(group: context.groupID) {
+            openSettingToChange(ask)
+            return
+        }
         viewOriginal = true
         goToLatticeType()
     }
@@ -16175,6 +16178,7 @@ extension WorkspacePlaceholder {
         viewOriginal = true
         switch a.page {
         case .lattice:
+            if showLatticePage { closeLatticePage() }   // ★ notes25 B6: as the Settings' own way in (goToLatticeType)
             if stage != .lattice { goToStage(.lattice) }
             showLatticeWizard = true
         case .topologySettings:

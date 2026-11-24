@@ -288,7 +288,7 @@ struct LatticeOrganicControls: View {
             refused(label)
         }
         .accessibilityIdentifier("organic-" + label)
-        .modifier(OrganicFocusRing(label: label))   // ★ notes25 B6: the wizard's Solve lights this field and scrolls it to the middle
+        .settingToChange(label, also: label == "Cell size" ? [LatticeWizardSetting.cellSize.rawValue] : [])   // ★ notes25 B6: Solve and "Change settings" light it and bring it to the middle (SettingToChange)
     }
 }
 

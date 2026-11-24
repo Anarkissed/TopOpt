@@ -104,17 +104,21 @@ public enum OrganicCertify {
                 guard let at = v3(w["at"]) else { return nil }
                 return (at, num(w["margin"]) ?? 0, num(w["width_mm"]))
             }.min { $0.1 < $1.1 }
-            let smallest = num(struts["smallest_margin"]) ?? weakest?.1 ?? 0
-            // ★ notes25 B7: the rounds that ADDED material (core's `rounds_fixed`, the Checks panel's number), never the checks
-            // (the `rounds` array holds one more entry: the last check, which adds nothing)
-            let sum = report[LatticeFileButton.strengthenKey] as? [String: Any]
-            let rounds = (sum?["rounds_fixed"] as? NSNumber)?.intValue
-                ?? (sum?["rounds"] as? [[String: Any]]).map { $0.filter { $0["added"] != nil }.count }
+            // ★ notes25 (merged with builder C): a print file's ONE strength answer (LatticeStrengthAnswer — what Results' lines,
+            // Details and Break say), when the report is a print file's; else the check's own block as before
+            let answer = LatticeStrengthAnswer.decode(report: report)
+            let smallest = answer?.strutMargin ?? num(struts["smallest_margin"]) ?? weakest?.1 ?? 0
+            let needs = answer?.required ?? safety
+            // the line goes where it gives way: the governing place when the struts govern, else the weakest strut
+            let at = answer.flatMap { $0.governs == .strut ? $0.place : $0.weakest.first?.at } ?? weakest?.0
+            // ★ notes25 B7: the rounds that ADDED material (core's `rounds_fixed`: the Checks panel's own reading,
+            // LatticeFileFacts.strengthening), never the checks (the `rounds` array holds one more: the last check)
+            let rounds = LatticeFileFacts.strengthening(report[LatticeFileButton.strengthenKey] as? [String: Any])?.rounds
             out.append(Issue(id: "struts_short", stage: .lattice,
                              title: under == 1 ? "1 strut is still short" : "\(under) struts are still short",
-                             text: OrganicCertifyCopy.strutsShort(holds: smallest, rounds: rounds, needs: safety),
-                             spotIDs: [], at: weakest?.0, solve: .strutThickness, worst: smallest, needs: safety,
-                             strutWidthMM: weakest?.2))
+                             text: OrganicCertifyCopy.strutsShort(holds: smallest, rounds: rounds, needs: needs),
+                             spotIDs: [], at: at, solve: .strutThickness, worst: smallest, needs: needs,
+                             strutWidthMM: answer?.weakest.first?.widthMM ?? weakest?.2))
         }
         let spots = Self.spots(s)
         let byIssue = Dictionary(grouping: spots, by: \.issue)

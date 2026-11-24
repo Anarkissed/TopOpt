@@ -230,7 +230,10 @@ public struct ResultsScreen: View {
     /// ★ his notes 11-23 (notes25 B1): at the left in the middle, clear of every control, draggable, its line attached
     /// (CertifyCardPlace; the controls it keeps clear of are this screen's published frames, `.onPreferenceChange` below).
     @ViewBuilder private func certifyLayer(_ c: OrganicCertifyCard) -> some View {
-        let target = c.issue.at.flatMap { projection?.project(SIMD3<Float>($0)) }
+        // ★ notes25 (merged with builder C): the struts card's line goes where the print file's ONE answer says it gives way
+        // (the weakest strut when the struts govern) — the place Results lights and Break marks
+        let struts = c.issue.id == "struts_short" ? model.latticeAnswer.flatMap { $0.governs == .strut ? $0.place : $0.weakest.first?.at } : nil
+        let target = (struts ?? c.issue.at).flatMap { projection?.project(SIMD3<Float>($0)) }
         CertifyCardLayer(card: c, target: target, place: CertifyCardPlace.shared)
             .zIndex(3)
     }

@@ -23,6 +23,13 @@ final class OrganicCertifyAdviceTests: XCTestCase {
         XCTAssertEqual(a?.setting, "Strut thickness")
         XCTAssertEqual(a?.line, "Strut thickness is 1.35 to 2.7 mm. Try 1.8 to 3.15 mm.",
                        "★ both ends × √(1.5 ÷ 1.34) = 1.058, rounded up to the 0.45 mm line the field snaps to")
+        // ★ B6 (merged with builder A): Solve goes the ONE way "Change settings" takes — the field, its group, what to try
+        XCTAssertEqual(a?.tryText, "Try 1.8 to 3.15 mm", "five words at most, on the field's own note")
+        let g = UUID()
+        XCTAssertEqual(a?.settingToChange(group: g),
+                       SettingToChange.Ask(page: .lattice, field: "Strut thickness", tryText: "Try 1.8 to 3.15 mm", group: g))
+        XCTAssertNil(OrganicCertifyAdvice(setting: "Protect skin", line: "x").settingToChange(group: nil),
+                     "RED CONTROL: a fix no settings field holds opens no field")
         // the coordinator's example: one number, a 0.1 mm step
         let one = A.StrutNow(light: 2.2, heavy: 2.2, single: true, auto: false)
         XCTAssertEqual(A.advice(struts, A.Context(strut: one, stepMM: 0.1, infillNow: 50))?.line,
