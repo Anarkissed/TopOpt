@@ -566,7 +566,7 @@ public struct LatticePage: View {
         switch k {
         case .simRunning, .optimizing: return "circle.fill"
         case .simComplete: return "checkmark"
-        case .simStale, .smoothingStale, .variantJobRefused: return "exclamationmark"
+        case .simStale, .smoothingStale, .variantJobRefused: return "exclamationmark.triangle.fill"   // ★ notes25 icons: one warning glyph
         case .failed: return "xmark"
         }
     }

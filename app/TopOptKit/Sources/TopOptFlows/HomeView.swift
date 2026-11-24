@@ -246,7 +246,7 @@ struct UnreadableProjectCard: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: DS.Space.s) {
-                Image(systemName: "exclamationmark.triangle")
+                Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(DS.Color.warning.color)
                 Text(entry.reason)

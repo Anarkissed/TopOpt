@@ -61,7 +61,7 @@ public struct LibraryRootView: View {
             case let .unreadable(why):
                 HomeView(model: model)
                     .overlay(alignment: .bottom) {
-                        LibraryBanner(icon: "exclamationmark.triangle", text: "The Library can’t be read (\(why)). Your projects are listed as before.",
+                        LibraryBanner(icon: "exclamationmark.triangle.fill", text: "The Library can’t be read (\(why)). Your projects are listed as before.",
                                       button: nil) {}
                     }
             }
@@ -1050,7 +1050,7 @@ struct PartFolderView: View {
             // ★ Upload new version (his ask 2026-11-11, decision 12): the part's next version from a new model file,
             // beside Compare in the same glass; Topology parts first (his 4th answer)
             if upload {
-                DSGlassButton("Upload new version", systemImage: "square.and.arrow.up", key: "library-upload") { uploading = true }
+                DSGlassButton("Upload new version", systemImage: "tray.and.arrow.down", key: "library-upload") { uploading = true }
             }
             // ★ B5 (mockup #lib-part): [Compare] [Open v8 draft] [⌄], §4's glass and accent buttons
             DSGlassButton("Compare", systemImage: "rectangle.split.2x1", key: "library-compare") {
@@ -1093,7 +1093,7 @@ struct PartFolderView: View {
     /// ★ Upload new version (decision 12) where the top row has no room: a 44 pt icon in the ⌄'s glass, leading the filter row.
     private var uploadIcon: some View {
         Button { uploading = true } label: {
-            Image(systemName: "square.and.arrow.up").font(.system(size: 15, weight: .bold)).foregroundStyle(DS.Color.textPrimary.color)
+            Image(systemName: "tray.and.arrow.down").font(.system(size: 15, weight: .bold)).foregroundStyle(DS.Color.textPrimary.color)
                 .frame(width: DSParts.glassHeight, height: DSParts.glassHeight)
                 .background(Circle().fill(DS.Surface.bar.color))
                 .overlay(Circle().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))

@@ -388,7 +388,7 @@ struct FlexibleStateGlyph: View {
     var body: some View { StateGlyph(role: role) }
 }
 
-/// The group's role glyphs: Anchor (lock, green), Load (arrow, blue), Protect (shield, teal), Keep clear (no-sign, red).
+/// The group's role glyphs: Anchor (pin, green), Load (arrow, blue), Protect (shield, teal), Keep clear (no-sign, red).
 /// ★ P2: the shared RoleGlyphs; whether the group reads "Lattice" is Flexible's rule (FlexibleFaceCommits.readsLattice).
 struct FlexibleRoleGlyphs: View {
     @ObservedObject var project: ProjectModel

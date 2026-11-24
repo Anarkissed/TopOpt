@@ -6596,7 +6596,7 @@ public struct WorkspacePlaceholder: View {
             }
         } label: {
             HStack(spacing: DS.Space.s) {
-                Image(systemName: "square.grid.3x3.fill").font(.system(size: 12, weight: .semibold))
+                Image(systemName: "dial.medium").font(.system(size: 12, weight: .semibold))   // ★ notes25 icons: Quality
                     .foregroundStyle(DS.Color.accent.color)
                 Text("\(project.quality.title) · \(project.quality.resolution)³")
                     .dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
@@ -7989,12 +7989,13 @@ public struct WorkspacePlaceholder: View {
                 // has spent the whole task removing. While the solve is running
                 // the button appears DISABLED with the phase as its label, so
                 // the wait is visible rather than mysterious.
+                // ★ notes25 icons (his pick 11-23): Stress is the drawn colour wheel on every page
                 if latticeSimIsRunning {
                     viewModeButton("waveform.path.ecg", label: "Simulating…",
-                                   on: false, enabled: false) { }
+                                   on: false, enabled: false, glyph: AnyView(StressWheelIcon())) { }
                 } else if latticeStressField != nil {
                     viewModeButton("waveform.path.ecg", label: "Stress",
-                                   on: stressViewOn) { stressViewOn.toggle() }
+                                   on: stressViewOn, glyph: AnyView(StressWheelIcon())) { stressViewOn.toggle() }
                 }
             }
         }
@@ -8016,6 +8017,7 @@ public struct WorkspacePlaceholder: View {
     private func viewModeButton(_ icon: String, label: String, on: Bool,
                                 enabled: Bool = true,
                                 tint: RGBA? = nil,
+                                glyph: AnyView? = nil,   // ★ notes25 icons: a drawn icon in the symbol's place (Stress's wheel)
                                 onLongPress: (() -> Void)? = nil,
                                 action: @escaping () -> Void) -> some View {
         Button(action: {
@@ -8025,8 +8027,9 @@ public struct WorkspacePlaceholder: View {
                                         pressBeganAt: viewModePressBeganAt, now: Date()) { return }
             action()
         }) {
-            Image(systemName: icon)
-                .font(.system(size: 15, weight: .semibold))
+            Group {
+                if let glyph { glyph } else { Image(systemName: icon).font(.system(size: 15, weight: .semibold)) }
+            }
                 .foregroundStyle((on ? DS.Color.textPrimary
                                      : DS.Color.textTertiary).color)
                 .opacity(enabled ? 1 : 0.45)
@@ -13297,7 +13300,7 @@ public struct WorkspacePlaceholder: View {
             Spacer()
             if open {
                 Button { scenarioAnchorHint = s.id; selection.clearActive(); selectedPiece = nil } label: {
-                    HStack(spacing: 3) { Image(systemName: "plus"); Text("Add Anchor").dsStyle(DS.TypeScale.caption) }
+                    HStack(spacing: 3) { Image(systemName: "pin.fill"); Text("Add Anchor").dsStyle(DS.TypeScale.caption) }
                 }
                 .buttonStyle(.plain).foregroundStyle(DS.Color.accent.color)
                 .accessibilityIdentifier("scenario-add-anchor")
@@ -13901,7 +13904,7 @@ public struct WorkspacePlaceholder: View {
     private func anchorLoadChip(_ g: SelectionGroup) -> some View {
         HStack(spacing: DS.Space.xs) {
             Button { if let line = SeveralRoles.refusal(committing: g.id, as: .anchor, selection: selection, force: force) { model.toast = line; return }; force.makeAnchor(g.id); selection.clearActive() } label: {   // Flexible (PR #362) H55f: several roles on one face (owner 2026-10-25) — Anchor on a loaded face, refused
-                chipLabel("lock.fill", "Anchor")
+                chipLabel("pin.fill", "Anchor")   // ★ notes25 icons: Anchor is the pin
                     .foregroundStyle(DS.Color.accentGreen.color)
                     .background(Capsule().fill(DS.Color.accentGreen.opacity(0.2).color))
             }
@@ -15063,7 +15066,7 @@ extension WorkspacePlaceholder {
                 }
             } label: {
                 DSValueBox("\(project.quality.title) \u{00B7} \(project.quality.resolution)\u{00B3}",
-                           systemImage: "square.grid.3x3.fill")
+                           systemImage: "dial.medium")   // ★ notes25 icons: Quality (the grid is Lattice alone)
             }
             .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain).fixedSize()
         case .plate:

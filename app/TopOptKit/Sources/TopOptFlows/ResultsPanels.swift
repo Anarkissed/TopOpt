@@ -330,7 +330,7 @@ public enum ResultsViewMode: String, CaseIterable, Sendable {
         case .stress: return ""            // the colour wheel, drawn
         case .xray: return FlexibleMainViewToggles.xrayIcon   // ★ notes25 icons: one X-ray glyph app-wide
         case .loadPaths: return "point.topleft.down.to.point.bottomright.curvepath"
-        case .bend: return "arrow.down.to.line"
+        case .bend: return "rectangle.compress.vertical"   // ★ notes25 icons: Bend, as on the Squish page (arrow-to-line is Gravity)
         case .breakIt: return "bolt.fill"
         }
     }
@@ -565,7 +565,7 @@ struct ResultsCheckLine: View {
                 switch c.kind {
                 case .ok: return ("checkmark", DS.Color.okGreen.color)
                 case .info: return ("info", DS.Color.accent.color)   // ★ notes25 icons: an "i" for information
-                case .warn: return ("exclamationmark", DS.Color.warning.color)
+                case .warn: return ("exclamationmark.triangle.fill", DS.Color.warning.color)   // ★ notes25 icons: one warning glyph
                 }
             }()
             Image(systemName: sym).font(.system(size: 11, weight: .heavy)).foregroundStyle(tint)
@@ -779,10 +779,7 @@ struct ResultsViewModePicker: View {
 
     @ViewBuilder private func icon(_ m: ResultsViewMode) -> some View {
         if m == .stress {
-            Circle().fill(AngularGradient(colors: [RGBA(28, 60, 170).color, RGBA(0, 170, 220).color, RGBA(60, 190, 110).color,
-                                                   RGBA(250, 220, 60).color, RGBA(255, 70, 50).color, RGBA(28, 60, 170).color],
-                                          center: .center))
-                .frame(width: 16, height: 16)
+            StressWheelIcon()   // ★ notes25 icons: the one Stress icon, every page
         } else {
             Image(systemName: m.symbol).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
         }

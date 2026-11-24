@@ -33,7 +33,7 @@ enum FlexibleExportRows {
                 case .idle:
                     EmptyView()
                 default:
-                    Image(systemName: "exclamationmark.circle.fill").font(.system(size: size + 1, weight: .semibold))
+                    Image(systemName: "exclamationmark.triangle.fill").font(.system(size: size + 1, weight: .semibold))
                         .foregroundStyle(DS.Color.warning.color)
                 }
                 Text(run.line)

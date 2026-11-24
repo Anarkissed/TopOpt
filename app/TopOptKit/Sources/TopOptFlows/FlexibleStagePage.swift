@@ -1077,7 +1077,7 @@ public struct FlexibleStagePage: View {
                 // ★ ROUND 5 (S9): it names the button — "Save & Exit builds…" only once something changed
                 noticePill(FlexibleSettingsExit.topLine(r, modified: FlexibleSettingsExit.modified(model.settings, since: opened),
                                                         empty: model.isEmptySetup),
-                           icon: empty ? "info.circle.fill" : (good ? "checkmark.circle.fill" : "exclamationmark.circle.fill"),
+                           icon: empty ? "info.circle.fill" : (good ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"),
                            colour: (empty ? DS.Color.textSecondary : (good ? FlexibleStageStyle.accentToken : DS.Color.warning)).color,
                            fix: Self.noticeFix(r, model: model))   // ★ M1 VERIFY: no [Fix] with no face-prism
             }
