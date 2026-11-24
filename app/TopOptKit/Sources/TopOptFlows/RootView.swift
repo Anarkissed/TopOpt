@@ -114,7 +114,7 @@ public struct RootView: View {
         VStack {
             VStack(spacing: DS.Space.sm) {
                 HStack(spacing: DS.Space.xs) {
-                    Image(systemName: "antenna.radiowaves.left.and.right")
+                    Image(systemName: "desktopcomputer")
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(DS.Color.accent.color)
                     Text("Run still on your Mac").dsStyle(DS.TypeScale.headline)
@@ -164,7 +164,7 @@ public struct RootView: View {
         VStack {
             VStack(spacing: DS.Space.sm) {
                 HStack(spacing: DS.Space.xs) {
-                    Image(systemName: "antenna.radiowaves.left.and.right")
+                    Image(systemName: "desktopcomputer")
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(DS.Color.accent.color)
                     Text("\(jobs.count) runs still on your Mac").dsStyle(DS.TypeScale.headline)

@@ -30,6 +30,8 @@ public struct LatticeSetupWizard: View {
     let onExit: () -> Void
 
     @State private var model: LatticeWizardModel
+    /// ★ notes25 B6: the setting "Change settings" or the fix wizard's Solve asked for (lit and scrolled to the middle).
+    @ObservedObject private var settingAsk = SettingToChange.shared
     /// ★ §5 — which numeric field has the keypad open. One at a time, keyed by the
     /// field's id, so every number on this page types as well as drags.
     @State private var numberPadField: String?
@@ -2766,6 +2768,7 @@ public struct LatticeSetupWizard: View {
                          pick: { id in withAnimation(.easeInOut(duration: 0.15)) { openLatticeTab(id, c) } },
                          width: latticeTabsWidth(c))   // ★ his iPad notes 11-23: as wide as its names, a little air
                 .frame(maxHeight: .infinity, alignment: .top)
+            ScrollViewReader { reader in
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: DS.Space.m) {
                     SettingToChangeNote(page: .lattice) { LatticeWizardSetting(rawValue: $0)?.title ?? $0 }   // ★ notes25
@@ -2774,7 +2777,33 @@ public struct LatticeSetupWizard: View {
                 }
                 .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 12)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .latticeID("lattice-page-rows-content")
             }
+            .latticeID("lattice-page-rows")
+            // ★ notes25 B6: the setting asked for ("Change settings", the fix wizard's Solve) — on its tab, in the middle, lit
+            .onAppear { bringSettingToChange(reader, c) }
+            .onChange(of: settingAsk.serial) { _ in bringSettingToChange(reader, c) }
+            }
+        }
+    }
+
+    /// ★ notes25 B6 (his 11-23: "send the user exactly to the right page to fix it, and highlight the field to fix, making
+    /// sure to scroll to a position so that the field is close to the middle"): Manual when the field lives only there, the
+    /// field's group tab, then the field scrolled to the middle of the rows (as far as they scroll); SettingToChangeMark lights it.
+    private func bringSettingToChange(_ reader: ScrollViewProxy, _ c: CellsPageContext) {
+        guard let a = settingAsk.ask, a.page == .lattice else { return }
+        if SettingToChange.needsManual(a.field), !latticeManual { latticeManual = true }
+        if let g = a.group, let i = project.latticeAreaGroups.firstIndex(where: { $0.id == g }),
+           (latticeArea(c) == nil ? "part" : latticeTab) != "area-\(i)" {
+            openLatticeTab("area-\(i)", c)
+        }
+        // the Organic page's Cell size row answers the lattice's cellSize (its own name is its key)
+        let field = model.cellTransition == .organicGrade && a.field == LatticeWizardSetting.cellSize.rawValue ? "Cell size" : a.field
+        let serial = settingAsk.serial
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            guard settingAsk.serial == serial else { return }
+            withAnimation(DS.Motion.sheetIn) { reader.scrollTo(SettingToChange.rowID(field), anchor: .center) }
+            settingAsk.shown(serial)
         }
     }
 

@@ -72,10 +72,10 @@ public struct ViewProjectionPair: View {
 
     public var body: some View {
         VStack(spacing: 2) {
-            button(icon: "square.grid.3x3", label: "Orthographic", on: projection.orthographic, key: "viewPairOrthographic") {
+            button(icon: "square", label: "Orthographic", on: projection.orthographic, key: "viewPairOrthographic") {
                 projection.orthographic = true
             }
-            button(icon: "cube", label: "Perspective", on: !projection.orthographic, key: "viewPairPerspective") {
+            button(icon: "perspective", label: "Perspective", on: !projection.orthographic, key: "viewPairPerspective") {
                 projection.orthographic = false
             }
         }

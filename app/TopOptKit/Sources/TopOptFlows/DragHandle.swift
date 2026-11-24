@@ -41,7 +41,7 @@ struct DragHandle: View {
 
     var body: some View {
         HStack(spacing: DS.Space.s) {
-            Image(systemName: glyph == .along ? "arrow.up.and.down" : glyph == .expand ? "plus.forwardslash.minus" : "arrow.triangle.2.circlepath")
+            Image(systemName: glyph == .along ? "arrow.up.and.down" : glyph == .expand ? "plus" : "arrow.triangle.2.circlepath")
                 .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(DS.Color.textPrimary.color)
                 .rotationEffect(glyph == .along ? angle : .zero)

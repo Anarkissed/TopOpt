@@ -108,11 +108,11 @@ struct PatternBar: View {
     private func stepper(_ t: String, key: String, value: Double, set: @escaping (Double) -> Void) -> some View {
         HStack(spacing: 4) {
             Text(t).font(.system(size: 12)).foregroundStyle(DS.Color.textSecondary.color).padding(.horizontal, 6).fixedSize()
-            round("arrow.counterclockwise", "\(t) \u{2212}15\u{00B0}", key: "\(key)Minus", accent: false) { set(value - 15) }
+            round("rotate.left", "\(t) \u{2212}15\u{00B0}", key: "\(key)Minus", accent: false) { set(value - 15) }
             NumberField(key: key, title: t,
                         spec: FlexNumberSpec(value: value, unit: "\u{00B0}", step: 1, range: 0...360, decimals: 0, wraps: true),
                         size: .bare, onCommit: set)
-            round("arrow.clockwise", "\(t) +15\u{00B0}", key: "\(key)Plus", accent: false) { set(value + 15) }
+            round("rotate.right", "\(t) +15\u{00B0}", key: "\(key)Plus", accent: false) { set(value + 15) }
         }
     }
 

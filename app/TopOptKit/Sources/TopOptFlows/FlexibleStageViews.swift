@@ -30,7 +30,7 @@ public struct FlexibleStageViews: OptionSet, Hashable, Sendable {
     /// none, a 3 s hold: every group's; its bit is `heatOff`, the page opening with the current group's), [Bend] (the
     /// current group at full depth, every face at once, frozen) and [Play] (the sim and its bar; shared with the main page).
     static let buttons: [(view: FlexibleStageViews, icon: String, label: String, id: String)] = [
-        (.prisms, "arrow.down.to.line", "Prisms", "flexible-settings-view-prisms"),
+        (.prisms, LatticePrismsView.icon, "Prisms", "flexible-settings-view-prisms"),   // ★ notes25 icons: the Lattice stage's Face prisms glyph
         (.groups, "circle.grid.2x2", "Groups", "flexible-settings-view-groups"),
         (.heatOff, "thermometer.medium", "Heat", "flexible-settings-view-heat"),
         (.bend, "rectangle.compress.vertical", "Bend", "flexible-settings-view-bend"),
@@ -40,12 +40,14 @@ public struct FlexibleStageViews: OptionSet, Hashable, Sendable {
     ]
     static let buttonSize: CGFloat = FlexibleViewButton.side   // ★ R7-D1: 44 pt, the main page's row geometry
     /// [Prisms]' SF symbol (its glyph's, and the accessibility fallback) — ★ S1b: the main page's [Prisms] too.
-    static let prismsIcon = "arrow.down.to.line"
-    /// ★ S1b: [Prisms]' glyph, ONE for both pages — "down to a depth" in the prisms' own purple when on.
+    /// ★ notes25 icons (his pick 11-23): the prisms' ONE glyph app-wide, the Lattice stage's Face prisms one (arrow-to-line is
+    /// Gravity's alone).
+    static let prismsIcon = LatticePrismsView.icon
+    /// ★ S1b: [Prisms]' glyph, ONE for both pages. ★ notes25 icons: lit as every view icon is (the purple arrow is dropped).
     static func prismsGlyph(on: Bool) -> AnyView {
         AnyView(Image(systemName: prismsIcon)
             .font(.system(size: 15, weight: .semibold))
-            .foregroundStyle(on ? FlexibleStageStyle.facePrismKnob.color : DS.Color.textTertiary.color))
+            .foregroundStyle((on ? DS.Color.textPrimary : DS.Color.textTertiary).color))
     }
     /// ★ R6 REVIEW: the [Groups] glyph's three dots — his first three groups' colours, the palette's after them.
     @MainActor static func glyphColours(model: FlexibleStageModel) -> [RGBA] {

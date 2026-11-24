@@ -566,7 +566,7 @@ public struct LatticePage: View {
         switch k {
         case .simRunning, .optimizing: return "circle.fill"
         case .simComplete: return "checkmark"
-        case .simStale, .smoothingStale, .variantJobRefused: return "exclamationmark"
+        case .simStale, .smoothingStale, .variantJobRefused: return "exclamationmark.triangle.fill"   // ★ notes25 icons: one warning glyph
         case .failed: return "xmark"
         }
     }
@@ -1714,7 +1714,7 @@ public struct LatticePage: View {
                     Button {
                         project.lattice.groupDensities.removeValue(forKey: r.id)
                     } label: {
-                        Image(systemName: "arrow.uturn.backward")
+                        Image(systemName: "arrow.counterclockwise")   // ★ notes25 icons: Reset is one glyph
                             .font(.system(size: 11, weight: .semibold))
                     }
                     .buttonStyle(.plain)

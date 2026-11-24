@@ -48,10 +48,16 @@ public final class SelectionsLayout: ObservableObject {
 
 /// The value column's width under a Selections panel (nil: each row's own).
 private struct DSRowValueWidthKey: EnvironmentKey { static let defaultValue: CGFloat? = nil }
+/// ★ notes25 B3: a row's line wraps to fit its words (Results' list of results); false: one line.
+private struct DSRowLineWrapsKey: EnvironmentKey { static let defaultValue = false }
 extension EnvironmentValues {
     var dsRowValueWidth: CGFloat? {
         get { self[DSRowValueWidthKey.self] }
         set { self[DSRowValueWidthKey.self] = newValue }
+    }
+    var dsRowLineWraps: Bool {
+        get { self[DSRowLineWrapsKey.self] }
+        set { self[DSRowLineWrapsKey.self] = newValue }
     }
 }
 

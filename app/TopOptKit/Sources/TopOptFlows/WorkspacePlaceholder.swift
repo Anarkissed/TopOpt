@@ -1934,6 +1934,7 @@ public struct WorkspacePlaceholder: View {
         .laneControls(laneControls)
         .environment(\.latticeTurning, latticeTurning && !LatticePreviewMode.controlPageFollowsCamera)   // ★ his pick 11-16 (A)
         .cornerTapCloses(model.cornerDrawers)   // ★ his 11-22: a tap anywhere outside the open corner drawer closes it
+        .certifyCardPageFrames()   // ★ notes25 B1: the fix pop-up keeps clear of the stage menu riding over Results
     }
 
     /// ★ B10: the project's name, asked in the §4.11 name sheet (it was a system alert).
@@ -6631,7 +6632,7 @@ public struct WorkspacePlaceholder: View {
             }
         } label: {
             HStack(spacing: DS.Space.s) {
-                Image(systemName: "square.grid.3x3.fill").font(.system(size: 12, weight: .semibold))
+                Image(systemName: "dial.medium").font(.system(size: 12, weight: .semibold))   // ★ notes25 icons: Quality
                     .foregroundStyle(DS.Color.accent.color)
                 Text("\(project.quality.title) · \(project.quality.resolution)³")
                     .dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
@@ -6854,7 +6855,7 @@ public struct WorkspacePlaceholder: View {
             withAnimation(DS.Motion.emphasized) { bandChipsHidden.toggle() }
         } label: {
             HStack(spacing: DS.Space.s) {
-                Image(systemName: bandChipsHidden ? "eye" : "eye.slash")
+                Image(systemName: GroupViewState.eyeSymbol(hidden: bandChipsHidden))   // ★ notes25 icons: the eye shows the state, as the rows
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle((bandChipsHidden ? DS.Color.textTertiary : DS.Color.accent).color)
                 ZStack(alignment: .leading) {
@@ -7940,12 +7941,12 @@ public struct WorkspacePlaceholder: View {
                 viewModeButton("grid", label: "Outlines", on: surfaceWireframeOn) {   // ★ B2 (U4): never "Wireframe"
                     surfaceWireframeOn.toggle()
                 }
-                viewModeButton("square.stack.3d.up", label: "X-ray", on: surfaceXrayOn) {
+                viewModeButton(FlexibleMainViewToggles.xrayIcon, label: "X-ray", on: surfaceXrayOn) {
                     surfaceXrayOn.toggle()
                 }
                 // ★ B3: Topology's views, icon only — Forces, and the Design box while one is on.
                 if topologyViewUp, !editFaces.isEditing {   // ★ his 11-22: and in Lattice Setup's Topology view
-                    viewModeButton("arrow.down.to.line", label: "Forces", on: topoForcesShown) {
+                    viewModeButton("arrow.down", label: "Forces", on: topoForcesShown) {
                         topoForcesShown.toggle()
                     }
                     // ★ his 11-22: "something that hides all the keep clears" — beside Forces; on = hidden (a view: they still apply)
@@ -8024,12 +8025,13 @@ public struct WorkspacePlaceholder: View {
                 // has spent the whole task removing. While the solve is running
                 // the button appears DISABLED with the phase as its label, so
                 // the wait is visible rather than mysterious.
+                // ★ notes25 icons (his pick 11-23): Stress is the drawn colour wheel on every page
                 if latticeSimIsRunning {
                     viewModeButton("waveform.path.ecg", label: "Simulating…",
-                                   on: false, enabled: false) { }
+                                   on: false, enabled: false, glyph: AnyView(StressWheelIcon())) { }
                 } else if latticeStressField != nil {
                     viewModeButton("waveform.path.ecg", label: "Stress",
-                                   on: stressViewOn) { stressViewOn.toggle() }
+                                   on: stressViewOn, glyph: AnyView(StressWheelIcon())) { stressViewOn.toggle() }
                 }
             }
         }
@@ -8051,6 +8053,7 @@ public struct WorkspacePlaceholder: View {
     private func viewModeButton(_ icon: String, label: String, on: Bool,
                                 enabled: Bool = true,
                                 tint: RGBA? = nil,
+                                glyph: AnyView? = nil,   // ★ notes25 icons: a drawn icon in the symbol's place (Stress's wheel)
                                 onLongPress: (() -> Void)? = nil,
                                 action: @escaping () -> Void) -> some View {
         Button(action: {
@@ -8060,8 +8063,9 @@ public struct WorkspacePlaceholder: View {
                                         pressBeganAt: viewModePressBeganAt, now: Date()) { return }
             action()
         }) {
-            Image(systemName: icon)
-                .font(.system(size: 15, weight: .semibold))
+            Group {
+                if let glyph { glyph } else { Image(systemName: icon).font(.system(size: 15, weight: .semibold)) }
+            }
                 .foregroundStyle((on ? DS.Color.textPrimary
                                      : DS.Color.textTertiary).color)
                 .opacity(enabled ? 1 : 0.45)
@@ -13330,7 +13334,7 @@ public struct WorkspacePlaceholder: View {
             Spacer()
             if open {
                 Button { scenarioAnchorHint = s.id; selection.clearActive(); selectedPiece = nil } label: {
-                    HStack(spacing: 3) { Image(systemName: "plus"); Text("Add Anchor").dsStyle(DS.TypeScale.caption) }
+                    HStack(spacing: 3) { Image(systemName: "pin.fill"); Text("Add Anchor").dsStyle(DS.TypeScale.caption) }
                 }
                 .buttonStyle(.plain).foregroundStyle(DS.Color.accent.color)
                 .accessibilityIdentifier("scenario-add-anchor")
@@ -13934,7 +13938,7 @@ public struct WorkspacePlaceholder: View {
     private func anchorLoadChip(_ g: SelectionGroup) -> some View {
         HStack(spacing: DS.Space.xs) {
             Button { if let line = SeveralRoles.refusal(committing: g.id, as: .anchor, selection: selection, force: force) { model.toast = line; return }; force.makeAnchor(g.id); selection.clearActive() } label: {   // Flexible (PR #362) H55f: several roles on one face (owner 2026-10-25) — Anchor on a loaded face, refused
-                chipLabel("lock.fill", "Anchor")
+                chipLabel("pin.fill", "Anchor")   // ★ notes25 icons: Anchor is the pin
                     .foregroundStyle(DS.Color.accentGreen.color)
                     .background(Capsule().fill(DS.Color.accentGreen.opacity(0.2).color))
             }
@@ -15115,7 +15119,7 @@ extension WorkspacePlaceholder {
                 }
             } label: {
                 DSValueBox("\(project.quality.title) \u{00B7} \(project.quality.resolution)\u{00B3}",
-                           systemImage: "square.grid.3x3.fill")
+                           systemImage: "dial.medium")   // ★ notes25 icons: Quality (the grid is Lattice alone)
             }
             .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain).fixedSize()
         case .plate:
@@ -15132,7 +15136,7 @@ extension WorkspacePlaceholder {
                 gravityDraft = nil
                 gravitySnapLabel = nil
             } label: {
-                DSValueBox("\(gravityDirectionLabel) \u{00B7} Change", systemImage: "arrow.down")
+                DSValueBox("\(gravityDirectionLabel) \u{00B7} Change", systemImage: "arrow.down.to.line")
             }
             .buttonStyle(.plain)
         case .minimizePlastic:
@@ -16031,10 +16035,26 @@ extension WorkspacePlaceholder {
     var certifyCard: OrganicCertifyCard? {
         guard let w = model.certifyWalk, w.version == project.id, let issue = w.current else { return nil }
         return OrganicCertifyCard(issue: issue, step: w.step, grid: w.grid, solvedLines: w.currentSolved ? w.infillLines : nil,
-                                  next: { certifyAdvance() }, skip: { certifyAdvance() }, solve: { certifySolve(issue) })
+                                  advice: OrganicCertifyAdvice.advice(issue, certifyContext(issue)),   // ★ notes25 B4
+                                  next: { certifyAdvance() },
+                                  skip: { OrganicCertifyCard.controlSkipLeaves ? certifyAdvance() : certifySkip() },   // ★ notes25 B2/B5
+                                  solve: { certifySolve(issue) })
     }
 
-    /// Next or Skip. After the last pop-up the part's Lattice stage shows, where his re-check question is.
+    /// ★ notes25 B4: the settings as they stand, for the pop-up's value to try (the struts' group, its strut thickness).
+    func certifyContext(_ issue: OrganicCertify.Issue) -> OrganicCertifyAdvice.Context {
+        OrganicCertifyAdvice.context(project, partLimits: newEngine.organicAutoLimits, groupLimits: newEngine.organicGroupLimits,
+                                     weakestWidthMM: issue.strutWidthMM)
+    }
+
+    /// ★ notes25 B2/B5 (his 11-23: "When tapping 'Skip' it immediately exits out of the Results screen. It should close the
+    /// pop-up and stay on the Results page"; "'Skip' closes that notification and goes to the next one if there is one"): the
+    /// next pop-up, or none; Results stays. (Skip ran `certifyAdvance`, whose end leaves Results for the Lattice stage.)
+    func certifySkip() {
+        model.certifyWalk?.skip()
+    }
+
+    /// Next. After the last pop-up the part's Lattice stage shows, where his re-check question is.
     func certifyAdvance() {
         model.certifyWalk?.next()
         if model.certifyWalk?.done == true {
@@ -16059,6 +16079,12 @@ extension WorkspacePlaceholder {
             return
         }
         model.certifyWalk?.next()
+        // ★ notes25 B6: the field that fixes it — the ONE way there "Change settings" takes too (lit, in the middle, its tab)
+        let context = certifyContext(issue)
+        if let ask = OrganicCertifyAdvice.advice(issue, context)?.settingToChange(group: context.groupID) {
+            openSettingToChange(ask)
+            return
+        }
         viewOriginal = true
         goToLatticeType()
     }
@@ -16163,6 +16189,7 @@ extension WorkspacePlaceholder {
         viewOriginal = true
         switch a.page {
         case .lattice:
+            if showLatticePage { closeLatticePage() }   // ★ notes25 B6: as the Settings' own way in (goToLatticeType)
             if stage != .lattice { goToStage(.lattice) }
             showLatticeWizard = true
         case .topologySettings:

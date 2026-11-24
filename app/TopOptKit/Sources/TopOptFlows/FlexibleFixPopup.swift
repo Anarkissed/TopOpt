@@ -26,7 +26,7 @@ struct FlexibleFixPopup: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.m) {
             HStack(alignment: .top, spacing: DS.Space.s) {
-                Image(systemName: "exclamationmark.circle.fill")
+                Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(DS.Color.warning.color)
                 Text(issue.oneLine)

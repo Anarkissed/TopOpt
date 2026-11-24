@@ -76,7 +76,7 @@ struct FlexibleBlockerCalloutView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.s) {
             HStack(spacing: DS.Space.s) {
-                Image(systemName: "exclamationmark.circle.fill").font(.system(size: 15, weight: .semibold))
+                Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(DS.Color.warning.color)
                 Text(FlexibleBlockerCallout.title).font(.system(size: 14.5, weight: .semibold)).foregroundStyle(DS.Color.warning.color)
                 Spacer(minLength: 0)

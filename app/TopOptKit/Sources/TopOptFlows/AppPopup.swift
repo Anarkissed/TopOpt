@@ -80,7 +80,7 @@ struct AppPopupLayer: View {
                     .onTapGesture { popups.current = nil }
                 GlassPanel {
                     VStack(spacing: DS.Space.m) {
-                        Image(systemName: p.info ? "info.circle.fill" : "exclamationmark.circle.fill")
+                        Image(systemName: p.info ? "info.circle.fill" : "exclamationmark.triangle.fill")
                             .font(.system(size: 30, weight: .semibold))
                             .foregroundStyle((p.info ? DS.Color.accent : DS.Color.warning).color)
                         Text(p.title).dsStyle(DS.TypeScale.title).foregroundStyle(DS.Color.textPrimary.color)

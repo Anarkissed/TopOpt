@@ -788,7 +788,7 @@ struct StateGlyph: View {
     }
 }
 
-/// The group's role glyphs: Anchor (lock, green), Load (arrow, blue), Protect (shield, teal), Keep clear (no-sign, red).
+/// The group's role glyphs: Anchor (pin, green), Load (arrow, blue), Protect (shield, teal), Keep clear (no-sign, red).
 struct RoleGlyphs: View {
     @ObservedObject var project: ProjectModel
     let group: UUID
@@ -802,7 +802,7 @@ struct RoleGlyphs: View {
         let k = project.force.kind(for: group)
         var out: [(symbol: String, tint: RGBA)] = []
         if readsLattice { out.append(("square.grid.3x3.fill", StateGlyph.latticeTint)) }
-        if k.isAnchor { out.append(("lock.fill", DS.Color.okGreen)) }
+        if k.isAnchor { out.append(("pin.fill", DS.Color.okGreen)) }   // ★ notes25 icons: Anchor is the pin
         if k.isLoad { out.append(("arrow.down", DS.Color.accent)) }
         if project.force.isProtected(group) { out.append(("shield.lefthalf.filled", FaceChip.protectTint)) }
         if project.force.keepClearAffix(for: group) == .on { out.append(("nosign", DS.Color.clearance)) }

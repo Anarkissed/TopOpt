@@ -954,7 +954,8 @@ final class FlexibleRound6HostedTests: XCTestCase {
         let (r, m) = try his()
         XCTAssertEqual(FlexibleStageViews.glyphColours(model: m).map { [$0.r, $0.g, $0.b] },
                        m.squeezeGroups.prefix(3).map { m.groupColour($0) }.map { [$0.r, $0.g, $0.b] }, "the [Groups] glyph: his groups' colours")
-        XCTAssertEqual(FlexibleStageViews.buttons.first { $0.view == .prisms }?.icon, "arrow.down.to.line", "[Prisms]: down to a depth")
+        // ★ RE-PINNED (notes25 icons, his pick 11-23): the prisms' one glyph app-wide (arrow-to-line is Gravity's alone)
+        XCTAssertEqual(FlexibleStageViews.buttons.first { $0.view == .prisms }?.icon, "square.stack.3d.forward.dottedline", "[Prisms]: the prisms' glyph")
         m.select(2)
         m.views = [.prisms, .groups]
         let size = Self.sizes[0].1

@@ -25,7 +25,12 @@ final class OrganicCertifyTests: XCTestCase {
                 "solid_margin": ["effective": 0.58, "passes_at_infill_percent": passAt, "spots_total": list.count, "spots": list,
                                  "text": "The solid part is not certifying at 50% infill. 81% infill is one solution."],
             ] as [String: Any],
-            LatticeFileButton.strengthenKey: ["code": "limit", "rounds": [[:], [:], [:], [:], [:], [:]]],
+            // ★ RE-PINNED (notes25 B7, the numbers investigation): the strengthening's shape as core writes it — `rounds` holds
+            // every CHECK (7: six that added material, then the last), `rounds_fixed` the rounds that added (6). The pop-up says
+            // 6, the Checks panel's number; the old fixture's six empty checks counted as six rounds only by luck.
+            LatticeFileButton.strengthenKey: ["code": "limit", "rounds_fixed": 6,
+                                              "rounds": Array(repeating: ["added": ["struts_widened": 1]] as [String: Any], count: 6)
+                                                  + [["struts": ["judged": 900]] as [String: Any]]],
         ]
     }
 

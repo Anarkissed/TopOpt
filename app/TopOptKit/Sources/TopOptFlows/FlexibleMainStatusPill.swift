@@ -65,7 +65,7 @@ public struct FlexibleMainStatusPill: View {
             VStack(spacing: 1) {
                 HStack(spacing: 6) {
                     if s.tone == .building { ProgressView().controlSize(.mini).tint(DS.Color.textPrimary.color) }
-                    if s.tone == .fix || s.tone == .blocked { Image(systemName: "exclamationmark.circle.fill").font(.system(size: 12, weight: .bold)) }
+                    if s.tone == .fix || s.tone == .blocked { Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 12, weight: .bold)) }
                     Text("Lattice").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
                 }
                 Text(s.line)
@@ -138,6 +138,7 @@ public struct FlexibleMainViewToggles: View {
     }
 
     static let heatIcon = "thermometer.medium"
+    /// (★ notes25 icons: drawn as the colour wheel, StressWheelIcon; the name is the symbol's fallback only)
     static let stressIcon = "waveform.path.ecg"
     /// ★ R7-V: the X-ray icon (the glyph C2 removed) and the Play icon.
     static let xrayIcon = "square.stack.3d.up"
@@ -171,7 +172,8 @@ public struct FlexibleMainViewToggles: View {
     }
     private var stressButton: some View {
         FlexibleViewButton(icon: FlexibleMainViewToggles.stressIcon, label: main.stressRunning ? "Simulating…" : "Stress",
-                           on: main.stress && main.viewsAvailable) { main.toggleStress() }
+                           on: main.stress && main.viewsAvailable, action: { main.toggleStress() },
+                           glyph: AnyView(StressWheelIcon()))   // ★ notes25 icons: the one Stress icon, every page
             .overlay {
                 if main.stressRunning, main.stress {
                     ProgressView().controlSize(.small).tint(DS.Color.textPrimary.color).allowsHitTesting(false)

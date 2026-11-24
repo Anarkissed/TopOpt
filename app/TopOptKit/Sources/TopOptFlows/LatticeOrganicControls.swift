@@ -289,6 +289,7 @@ struct LatticeOrganicControls: View {
             refused(label)
         }
         .accessibilityIdentifier("organic-" + label)
+        .settingToChange(label, also: label == "Cell size" ? [LatticeWizardSetting.cellSize.rawValue] : [])   // ★ notes25 B6: Solve and "Change settings" light it and bring it to the middle (SettingToChange)
     }
 }
 

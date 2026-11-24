@@ -14,7 +14,8 @@ public enum LatticePrismsView {
     /// The view button's label (its icon only on screen; the label is its name in tests and accessibility).
     public static let label = "Face prisms"
     /// A face's prism: a slab dragged in from the face.
-    public static let icon = "square.on.square.dashed"
+    /// ★ notes25 icons (his pick 11-23): the prisms' one glyph, here and on Flexible (the Regions sheet keeps square.on.square.dashed)
+    public static let icon = "square.stack.3d.forward.dottedline"
 
     /// ON ⇔ every face prism shows (an empty list is on: nothing is hidden — the button is not offered then).
     public static func allShown(_ keys: [String], eye: [String: Bool]) -> Bool {

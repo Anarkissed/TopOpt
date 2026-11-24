@@ -146,7 +146,7 @@ public struct RunScreen: View {
 
                 GlassSheet {
                     VStack(spacing: DS.Space.m) {
-                        Image(systemName: "exclamationmark.triangle")
+                        Image(systemName: "exclamationmark.triangle.fill")
                             .font(.system(size: 30, weight: .semibold))
                             .foregroundStyle(DS.Color.danger.color)
                             .padding(.bottom, DS.Space.xs)
