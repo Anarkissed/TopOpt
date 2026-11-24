@@ -74,9 +74,19 @@ final class CertifyWizardNotes25HostedTests: XCTestCase {
                                   next: {}, skip: {}, solve: {})
     }
 
+    /// ONE page up at a time, as on the iPad: the card's place is the session's (one object), so a page left open in an earlier
+    /// window would keep telling it its own frames.
+    var lastHost: AppBuildHost?
+    func closeLast() {
+        if let h = lastHost { h.window.orderOut(nil); h.window.contentView = nil; h.pump(0.1) }
+        lastHost = nil
+    }
+    func opened(_ h: AppBuildHost) -> AppBuildHost { lastHost = h; return h }
+
     /// Results as the workspace mounts it, the stage menu riding over it where the workspace draws it (a stand-in publishing
     /// "capsule" at the capsule's place and size).
     func results(_ size: CGSize, certify: OrganicCertifyCard?) throws -> AppBuildHost {
+        closeLast()
         let o = try Self.outcome()
         let capsule = Color.clear.frame(width: 268, height: StageCapsuleLayout.capsuleHeight)
             .background(ResultsChrome.publish("capsule"))
@@ -84,7 +94,7 @@ final class CertifyWizardNotes25HostedTests: XCTestCase {
         let v = ResultsScreen(projectName: "Stand", outcome: o, undo: {}, redo: {}, topLeftBlock: AnyView(capsule),
                               resultsModel: ResultsModel(projectName: "Stand", outcome: o), certify: certify)
             .frame(width: size.width, height: size.height)
-        let h = AppBuildHost(v, size: size, test: self)
+        let h = opened(AppBuildHost(v, size: size, test: self))
         h.pump(2)
         return h
     }
@@ -108,7 +118,7 @@ final class CertifyWizardNotes25HostedTests: XCTestCase {
     /// ★ B1: left, middle, clear of everything — the stage menu above all (it was right under it, touching it).
     func testThePopUpRestsAtTheLeftInTheMiddleClearOfEveryControl() throws {
         for size in Self.sizes {
-            CertifyCardPlace.shared.reset()
+            closeLast(); CertifyCardPlace.shared.reset()
             let h = try results(size, certify: try Self.card())
             let what = "\(Int(size.width))×\(Int(size.height))"
             let card = try h.onScreen("certifyCard", "\(what): the fix pop-up")
@@ -125,7 +135,7 @@ final class CertifyWizardNotes25HostedTests: XCTestCase {
     /// clear spot; the spot is his for the session (a new Results screen opens it there).
     func testADragMovesItAndADropOnAControlSettlesClear() throws {
         for size in Self.sizes {
-            CertifyCardPlace.shared.reset()
+            closeLast(); CertifyCardPlace.shared.reset()
             let place = CertifyCardPlace.shared
             var h = try results(size, certify: try Self.card())
             let what = "\(Int(size.width))×\(Int(size.height))"
@@ -226,12 +236,13 @@ final class CertifyWizardNotes25HostedTests: XCTestCase {
     final class Probe { var all: [String: CGRect] = [:] }
 
     func workspaceOnResults(_ size: CGSize, _ what: String) throws -> (AppBuildHost, Probe, FlexibleHisProject.Restored) {
+        closeLast()
         CertifyCardPlace.shared.reset()
         OrganicCertifyFocus.shared.reset()
         let r = try organicPart()
         let probe = Probe()
-        let h = AppBuildHost(WorkspacePlaceholder(model: r.app, project: r.project).onPreferenceChange(LatticeProbeKey.self) { probe.all = $0 },
-                             size: size, test: self)
+        let h = opened(AppBuildHost(WorkspacePlaceholder(model: r.app, project: r.project).onPreferenceChange(LatticeProbeKey.self) { probe.all = $0 },
+                                    size: size, test: self))
         h.pump(3)
         try h.tap("capsuleResults", "\(what): the capsule's Results")
         h.pump(1.5)
@@ -247,7 +258,11 @@ final class CertifyWizardNotes25HostedTests: XCTestCase {
             let (h, _, _) = try workspaceOnResults(size, what)
             let pl = CertifyCardPlace.shared
             print("CERTIFY PLACE \(what): size \(pl.size) viewport \(pl.viewport) rest \(pl.rest) assets \(pl.assets.count) "
-                  + "card \(String(describing: h.frames.all["certifyCard"]))")
+                  + "card \(String(describing: h.frames.all["certifyCard"])) results' own \(String(describing: pl.rawResults["certifyCard"])) "
+                  + "skip \(String(describing: pl.rawResults["certifySkip"])) vs \(String(describing: h.frames.all["certifySkip"]))")
+            h.pump(1)
+            print("CERTIFY PLACE later \(what): card \(String(describing: h.frames.all["certifyCard"])) results' own "
+                  + "\(String(describing: pl.rawResults["certifyCard"]))")
             let card = try h.onScreen("certifyCard", "\(what): ★ the fix pop-up on Results")
             let capsule = try h.onScreen("capsule", "\(what): the stage menu over Results")
             XCTAssertFalse(card.intersects(capsule.insetBy(dx: -(CertifyCardLayout.gap - 1), dy: -(CertifyCardLayout.gap - 1))),

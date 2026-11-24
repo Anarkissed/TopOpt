@@ -125,32 +125,43 @@ public final class CertifyCardPlace: ObservableObject {
     }
 
     // MARK: what the page tells it
+    //
+    // Each arrives from a preference callback, inside the page's update: what it changes is applied on the next turn of the
+    // main loop (a change published inside the update was dropped on the workspace — the card stayed where it first drew; the
+    // house rule, ChromeGeometry.noteSelections).
 
-    func noteResults(_ all: [String: CGRect]) {
+    func noteResults(_ all: [String: CGRect]) { DispatchQueue.main.async { [weak self] in self?.applyResults(all) } }
+    func notePage(_ all: [String: CGRect]) {
+        let mine = all.filter { CertifyCardLayout.pageKeys.contains($0.key) }
+        DispatchQueue.main.async { [weak self] in self?.applyPage(mine) }
+    }
+    func noteViewport(_ v: CGSize) { DispatchQueue.main.async { [weak self] in self?.applyViewport(v) } }
+    func noteSize(_ s: CGSize) { DispatchQueue.main.async { [weak self] in self?.applySize(s) } }
+
+    func applyResults(_ all: [String: CGRect]) {
         rawResults = all
         let a = CertifyCardLayout.assets(all, viewport: viewport)
         guard a != resultsAssets else { return }
         resultsAssets = a
         resettle()
     }
-    func notePage(_ all: [String: CGRect]) {
-        let mine = all.filter { CertifyCardLayout.pageKeys.contains($0.key) }
+    func applyPage(_ mine: [String: CGRect]) {
         rawPage = mine
         let a = CertifyCardLayout.assets(mine, viewport: viewport)
         guard a != pageAssets else { return }
         pageAssets = a
         resettle()
     }
-    func noteViewport(_ v: CGSize) {
+    func applyViewport(_ v: CGSize) {
         guard v != viewport, v.width > 0, v.height > 0 else { return }
         viewport = v
         resultsAssets = CertifyCardLayout.assets(rawResults, viewport: v)
         pageAssets = CertifyCardLayout.assets(rawPage, viewport: v)
         resettle(animated: false)
     }
-    private var rawResults: [String: CGRect] = [:]
-    private var rawPage: [String: CGRect] = [:]
-    func noteSize(_ s: CGSize) {
+    private(set) var rawResults: [String: CGRect] = [:]
+    private(set) var rawPage: [String: CGRect] = [:]
+    func applySize(_ s: CGSize) {
         guard s.width > 0, s.height > 0, abs(s.width - size.width) > 0.5 || abs(s.height - size.height) > 0.5 else { return }
         let first = size == .zero
         size = s
@@ -213,26 +224,27 @@ struct CertifyCardLayer: View {
     let target: CGPoint?
     @ObservedObject var place: CertifyCardPlace
 
+    /// The Results screen fills the screen (its layers ignore the safe area), so its own space is the screen's: the card is
+    /// placed, and its line drawn, in the same points the page's frames are published in (the card's line always was).
     var body: some View {
-        GeometryReader { g in
-            let space = g.frame(in: .global)
-            let f = place.frame.offsetBy(dx: -space.minX, dy: -space.minY)
-            ZStack(alignment: .topLeading) {
-                Color.clear.preference(key: CertifyCardMeasures.self, value: ["viewport": space.size])
-                if place.size.width > 0 { OrganicCertifyLeader(from: f, to: target) }
-                OrganicCertifyCardView(card: card)
-                    .background(GeometryReader { c in
-                        Color.clear.preference(key: CertifyCardMeasures.self, value: ["card": c.size])
-                    })
-                    .background(ResultsChrome.publish("certifyCard"))
-                    .gesture(DragGesture(minimumDistance: 8, coordinateSpace: .global)
-                        .onChanged { place.dragChanged($0.translation) }
-                        .onEnded { place.dragEnded($0.translation) })
-                    .opacity(place.size.width > 0 ? 1 : 0)
-                    .position(x: f.midX, y: f.midY)
-            }
-            .frame(width: g.size.width, height: g.size.height, alignment: .topLeading)
+        let f = place.frame
+        ZStack(alignment: .topLeading) {
+            if place.size.width > 0 { OrganicCertifyLeader(from: f, to: target) }
+            OrganicCertifyCardView(card: card)
+                .background(GeometryReader { c in
+                    Color.clear.preference(key: CertifyCardMeasures.self, value: ["card": c.size])
+                })
+                .background(ResultsChrome.publish("certifyCard"))
+                .gesture(DragGesture(minimumDistance: 8, coordinateSpace: .global)
+                    .onChanged { place.dragChanged($0.translation) }
+                    .onEnded { place.dragEnded($0.translation) })
+                .opacity(place.size.width > 0 ? 1 : 0)
+                .padding(.leading, Swift.max(0, f.minX)).padding(.top, Swift.max(0, f.minY))
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(GeometryReader { g in
+            Color.clear.preference(key: CertifyCardMeasures.self, value: ["viewport": g.size])
+        })
         .ignoresSafeArea()
         // the screen's size and the card's, as each layout leaves them (a preference follows every layout)
         .onPreferenceChange(CertifyCardMeasures.self) { m in
