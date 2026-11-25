@@ -650,6 +650,19 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   // bracket is far wider than the part; 100 halvings take it to machine
   // precision.
   auto solve_offset = [&](double want) {
+    if (surf.on) {
+      // Stage 3 (ledger P-05): the offset is near zero after the previous fold, so
+      // a bracket grown from one voxel and halved to 1e-10 voxel needs about 40
+      // volume passes where the fixed +-400 mm bracket took 100.
+      double lo = -h, hi = h;
+      for (int g = 0; g < 30 && active_volume_at(lo) < want; ++g) lo *= 2.0;
+      for (int g = 0; g < 30 && active_volume_at(hi) > want; ++g) hi *= 2.0;
+      while (hi - lo > 1e-10 * h) {
+        const double mid = 0.5 * (lo + hi);
+        if (active_volume_at(mid) > want) lo = mid; else hi = mid;
+      }
+      return 0.5 * (lo + hi);
+    }
     double lo = -400.0, hi = 400.0;
     if (active_volume_at(lo) < want) return lo;
     if (active_volume_at(hi) > want) return hi;
