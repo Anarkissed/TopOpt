@@ -232,6 +232,7 @@ struct MeshReport {
   // those that fell back to the solid wall (their places: SheetSeamBand::fell_back in the file's result).
   std::size_t sheet_blocks = 0, sheet_triangles = 0;
   std::size_t sheet_places = 0;    // the cell places the blocks contoured (each block's laid cells' box; not its ring)
+  double sheet_contoured_mm3 = 0.0; // the volume the blocks' sheets were contoured over (each box with its overlap)
   double sheet_mm3 = 0.0, sheet_deviation_mm = 0.0, ms_sheets = 0.0, ms_sheet_union = 0.0;
   std::size_t seams_blended = 0, seams_fell_back = 0;
 };

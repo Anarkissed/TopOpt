@@ -1055,7 +1055,7 @@ struct CarvedSolids {
     bool ok = false;
     std::string why;
     std::size_t blocks = 0, triangles = 0, places = 0, seams_blended = 0, seams_fell_back = 0;
-    double deviation_mm = 0.0, mm3 = 0.0, ms = 0.0, ms_union = 0.0;
+    double deviation_mm = 0.0, mm3 = 0.0, ms = 0.0, ms_union = 0.0, contoured_mm3 = 0.0;
   };
   mutable std::mutex sheets_mu;
   mutable std::shared_ptr<SheetsMade> sheets;
@@ -1483,7 +1483,7 @@ std::shared_ptr<CarvedSolids::SheetsMade> make_sheets(const Domain& domain, cons
 
   std::vector<Manifold> pieces(jobs.size());
   std::vector<std::size_t> tris(jobs.size(), 0);
-  std::vector<double> devs(jobs.size(), 0.0);
+  std::vector<double> devs(jobs.size(), 0.0), vols(jobs.size(), 0.0);
   std::vector<std::string> whys(jobs.size());
   std::atomic<std::size_t> next{0};
   const std::atomic<bool>* stop = spec.stop;
@@ -1551,6 +1551,7 @@ std::shared_ptr<CarvedSolids::SheetsMade> make_sheets(const Domain& domain, cons
       }
       tris[j] = sink.mesh.triangles.size();
       devs[j] = st.simplified ? std::max(st.simplify.max_out_measured_mm, st.simplify.max_in_measured_mm) : 0.0;
+      vols[j] = (hi[0] - lo[0] + 2.0 * g) * (hi[1] - lo[1] + 2.0 * g) * (hi[2] - lo[2] + 2.0 * g);
       if (sink.mesh.triangles.empty()) continue;
       Manifold sheet = manifold_of(sink.mesh, &fr);
       sink.mesh = TriangleMesh{};
@@ -1590,6 +1591,7 @@ std::shared_ptr<CarvedSolids::SheetsMade> make_sheets(const Domain& domain, cons
   made->blocks = jobs.size();
   for (const Job& job : jobs)
     made->places += static_cast<std::size_t>((job.e[0] - job.b[0] + 1) * (job.e[1] - job.b[1] + 1) * (job.e[2] - job.b[2] + 1));
+  for (const double v : vols) made->contoured_mm3 += v;
   // E's blend bands (SPEC 1.5): each seam asked as a blend and not fallen back.
   if (spec.sheet_seams)
     for (const SheetSeamBand& seam : *spec.sheet_seams) {
@@ -1870,6 +1872,7 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
     rep.sheet_blocks = made->blocks;
     rep.sheet_triangles = made->triangles;
     rep.sheet_places = made->places;
+    rep.sheet_contoured_mm3 = made->contoured_mm3;
     rep.sheet_deviation_mm = made->deviation_mm;
     rep.sheet_mm3 = made->mm3;
     rep.ms_sheets = made->ms;
