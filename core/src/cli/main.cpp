@@ -737,6 +737,34 @@ int main(int argc, char** argv) {
   if (argc >= 2 && std::string(argv[1]) == "flexible") return run_flexible(argc, argv);
   if (argc >= 2 && std::string(argv[1]) == "lattice-sample")
     return run_lattice_sample(argc, argv);
+  // `lattice-coupon` (2026-11-24): a strut type's print coupon, made by the lattice layout's file job
+  // (lattice_layout_file.hpp, make_type_coupon). Exit 0 made, 3 refused, 1 anything else, 2 usage.
+  if (argc >= 2 && std::string(argv[1]) == "lattice-coupon") {
+    topopt::lattice_layout::CouponAsk ask;
+    std::string out;
+    bool ok = argc % 2 == 0;
+    for (int i = 2; ok && i + 1 < argc; i += 2) {
+      const std::string arg = argv[i], val = argv[i + 1];
+      if (arg == "--topology") {
+        try { ask.topology = topopt::lattice_topology_from_id(val); } catch (const std::exception&) { ok = false; }
+      } else if (arg == "--out") out = val;
+      else if (arg == "--cell") ask.cell_mm = std::atof(val.c_str());
+      else if (arg == "--bead") ask.bead_mm = std::atof(val.c_str());
+      else ok = false;
+    }
+    if (!ok || out.empty() || !(ask.cell_mm > 0.0) || !(ask.bead_mm > 0.0)) {
+      std::fprintf(stderr, "usage: %s lattice-coupon --topology ID [--cell MM] [--bead MM] --out DIR\n", argv[0]);
+      return 2;
+    }
+    const topopt::lattice_layout::FileResult r = topopt::lattice_layout::make_type_coupon(ask, out);
+    if (r.ok)
+      std::printf("lattice-coupon: %s, %zu cells, %zu struts, print-clean %s, %.0f mm2 flat on the bed -> %s\n",
+                  topopt::lattice_topology_name(ask.topology), r.cells, r.bars, r.made.print_clean ? "yes" : "no",
+                  r.made.bed_contact_mm2, r.file.c_str());
+    else
+      std::printf("lattice-coupon: REFUSED (%s): %s %s\n", r.code.c_str(), r.why.c_str(), r.detail.c_str());
+    return r.ok ? 0 : r.exit_code;
+  }
   if (argc >= 2 && std::string(argv[1]) == "lattice-file") return run_lattice_file(argc, argv, TOPOPT_CLI_DEFAULT_MATERIALS, TOPOPT_CLI_DEFAULT_RULES);
   if (argc >= 2 && std::string(argv[1]) == "organic-strengthen")
     return run_organic_strengthen_cli(argc, argv, TOPOPT_CLI_DEFAULT_MATERIALS, TOPOPT_CLI_DEFAULT_RULES);

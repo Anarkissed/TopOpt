@@ -167,6 +167,30 @@ std::vector<P> sorted_unique(std::vector<P> v) {
   return {s.begin(), s.end()};
 }
 
+// The z columns the tetragonal variants add: a cell edge along z, corner to corner (the probe's vertical_edge).
+bool vertical_edge(const P& a, const P& b, int S) {
+  return is_corner(a, S) && is_corner(b, S) && a.x == b.x && a.y == b.y && std::abs(a.z - b.z) == S;
+}
+
+// Re-entrant (auxetic), the probe's build_reentrant: four waist nodes pulled in from the four SIDE faces (x and y),
+// each joined to the four corners of its own face, and the z columns. Only the cell's own corners (no neighbour's).
+std::vector<StrutCellStrut> reentrant_struts(int S) {
+  std::vector<P> corners;
+  for (int z = 0; z <= S; z += S)
+    for (int y = 0; y <= S; y += S)
+      for (int x = 0; x <= S; x += S) corners.push_back({x, y, z});
+  struct Waist { P p; int axis; int side; };
+  const std::vector<Waist> waists = {{{1, 2, 2}, 0, 0}, {{3, 2, 2}, 0, 4}, {{2, 1, 2}, 1, 0}, {{2, 3, 2}, 1, 4}};
+  std::set<StrutCellStrut, SLess> uniq;
+  for (const Waist& w : waists)
+    for (const P& c : corners)
+      if ((w.axis == 0 ? c.x : c.y) == w.side && midpoint_in_cell(w.p, c, S)) uniq.insert(canonicalized(w.p, c));
+  for (const P& a : corners)
+    for (const P& b : corners)
+      if (vertical_edge(a, b, S) && midpoint_in_cell(a, b, S)) uniq.insert(canonicalized(a, b));
+  return {uniq.begin(), uniq.end()};
+}
+
 StrutCell build(LatticeTopology topo) {
   StrutCell c;
   switch (topo) {
@@ -214,13 +238,26 @@ StrutCell build(LatticeTopology topo) {
       c.nodes = folded_vertices(centres, c.S, rhombic_dodec_verts());
       break;
     }
+    // The tetragonal three (the owner, 2026-11-24: all nine strut types on the new lattice engine, these three in
+    // Aesthetic only, never certified): the family study's cells, as the probe builds them (test_strut_cell compares).
     case LatticeTopology::Bccz:
+      c.S = 2;
+      c.nodes = sorted_unique(bcc_basis(c.S));
+      c.struts = from_pairs(bcc_basis(c.S), c.S,
+                            [S = c.S](P a, P b) { return dist2(a, b) == 3 || vertical_edge(a, b, S); });
+      break;
     case LatticeTopology::Fccz:
+      c.S = 2;
+      c.nodes = sorted_unique(fcc_basis(c.S));
+      c.struts = from_pairs(fcc_basis(c.S), c.S, [S = c.S](P a, P b) {
+        return (dist2(a, b) == 2 && (is_corner(a, S) != is_corner(b, S))) || vertical_edge(a, b, S);
+      });
+      break;
     case LatticeTopology::Reentrant:
-      throw std::invalid_argument(
-          std::string("lattice_strut_cell: \"") + lattice_topology_name(topo) +
-          "\" has no canonical cell in core: it is tetragonal and not in round 1 "
-          "(docs/design/lattice-types/00-decisions.md M1).");
+      c.S = 4;
+      c.nodes = sorted_unique({{0, 0, 0}, {1, 2, 2}, {3, 2, 2}, {2, 1, 2}, {2, 3, 2}});
+      c.struts = reentrant_struts(c.S);
+      break;
     case LatticeTopology::Gyroid:
     case LatticeTopology::SchwarzD:
       throw std::invalid_argument(
@@ -249,10 +286,10 @@ bool lattice_has_strut_cell(LatticeTopology topo) {
     case LatticeTopology::Diamond:
     case LatticeTopology::Kelvin:
     case LatticeTopology::Rhombic:
-      return true;
     case LatticeTopology::Bccz:
     case LatticeTopology::Fccz:
     case LatticeTopology::Reentrant:
+      return true;
     case LatticeTopology::Gyroid:
     case LatticeTopology::SchwarzD:
       return false;
@@ -270,9 +307,9 @@ const StrutCell& lattice_strut_cell(LatticeTopology topo) {
     case LatticeTopology::Diamond: { static const StrutCell c = build(topo); return c; }
     case LatticeTopology::Kelvin: { static const StrutCell c = build(topo); return c; }
     case LatticeTopology::Rhombic: { static const StrutCell c = build(topo); return c; }
-    case LatticeTopology::Bccz:
-    case LatticeTopology::Fccz:
-    case LatticeTopology::Reentrant:
+    case LatticeTopology::Bccz: { static const StrutCell c = build(topo); return c; }
+    case LatticeTopology::Fccz: { static const StrutCell c = build(topo); return c; }
+    case LatticeTopology::Reentrant: { static const StrutCell c = build(topo); return c; }
     case LatticeTopology::Gyroid:
     case LatticeTopology::SchwarzD:
       break;

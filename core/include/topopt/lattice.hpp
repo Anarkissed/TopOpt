@@ -858,6 +858,10 @@ double lattice_aesthetic_density_ceiling(LatticeTopology topo);
 //       diamond      0.353553    0.433013     0.353553  1/(2 sqrt 2)
 //       kelvin       0.353553    0.353553     0.353553  1/(2 sqrt 2) (its square windows)
 //       rhombic      0.353553    0.408248     0.353553  1/(2 sqrt 2)
+//     and the tetragonal three (2026-11-24: on the new engine, Aesthetic only; their cells are the family study's):
+//       bccz         0.707107    0.707107     0.707107  1/sqrt 2 (bcc's: its corner columns are crossed by bcc's view)
+//       fccz         0.707107    0.500000     0.500000  1/2
+//       reentrant    0.447214    0.333333     0.333333  1/3
 //     test_lattice_width_bounds recomputes both gaps from lattice_strut_cell, exactly.
 //   SHEETS: where the CHANNELS CLOSE -- the walls facing across a channel meet at its
 //     narrowest throat, so the void on that side stops running through the part (enclosed
@@ -870,8 +874,7 @@ double lattice_aesthetic_density_ceiling(LatticeTopology topo);
 //                  midpoint (f's saddle, clearance 0.17573 there; 0.17534 at 0.03 cell along).
 //     Measured on tpms.hpp's field: docs/handoffs/evidence/2026-11-11-lattice-width-bounds.
 //
-// The tetragonal three (bccz, fccz, reentrant) have no canonical cell and throw
-// std::invalid_argument naming the type: no bound is borrowed from another type (R1).
+// No bound is ever borrowed from another type (R1): a type core does not know throws std::invalid_argument naming it.
 struct LatticeWidthBounds {
   double open_look = 0.0;
   double touch = 0.0;

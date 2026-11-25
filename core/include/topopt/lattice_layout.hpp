@@ -36,6 +36,7 @@
 #include "topopt/mesh.hpp"
 #include "topopt/mesh_distance.hpp"
 #include "topopt/step.hpp"
+#include "topopt/strut_cell.hpp"
 
 namespace topopt::lattice_layout {
 
@@ -713,6 +714,31 @@ bool stress_sizes_cells(const CellSpec& spec);
 // ladder's smallest step (2 on Default Grade) and never under 1.
 double step_held(const CellSpec& spec);
 
+// ── PER TYPE (the owner, 2026-11-24: every strut type on this engine; bccz, fccz and reentrant Aesthetic only) ────
+// Print rule (e)'s bridge reach (LayerSpec::reach_limit_mm's default): no bridge reaches more than this past what
+// holds it.
+inline constexpr double kBridgeReachLimitMm = 5.0;
+// The longest LEVEL strut of the type's cell (both ends at one height, the cell standing on its own axes with its z
+// up), over the cell: sc 1 (its edges), octet, fcc and fccz 1/sqrt 2 (face diagonals), kelvin 1/(2 sqrt 2) (its square
+// windows); 0 for a type with none (bcc, diamond, rhombic, bccz, reentrant). Read off the canonical cell.
+double level_strut_per_cell(LatticeTopology topo);
+// Auto's largest cell for the type: a level strut spans its share of the cell and, held at both ends, reaches half of
+// that as a bridge, so the cell at which it would reach kBridgeReachLimitMm: 2 x 5 mm / share (sc 10 mm, fcc and fccz
+// 14.1 mm, kelvin 28.3 mm). Infinity for a type with no level strut, and for the octet (its 14.1 mm is not applied: its
+// layouts stay what they were, R9). lay_cells holds Max cell (CellSpec::cell_max_mm, the part's and each region's own)
+// under it when the cell is Auto; a typed cell is laid as typed (the print check props a bridge that reaches too far).
+double auto_cell_cap_mm(LatticeTopology topo);
+// Structural (a strength check asked for) with the type: "" when its strength can be checked; else ONE plain line why
+// not, for the maker. The file job refuses a job with a strength job and such a type (type_not_supported) in that line;
+// the app offers the type in Aesthetic only and says the same. Refused: the tetragonal three (bccz, fccz, reentrant:
+// their tensors need a tetragonal certification, PR 246, not built).
+std::string structural_refusal(LatticeTopology topo);
+// Structural is allowed but its struts get no strength credit at the widest the open look allows: "" when they do; else
+// ONE plain line for the maker. Read from the type's own measured law (lattice_density_from_strut at the open look
+// against lattice_rho_min; the laws are never extrapolated, ruling 11-09), so it clears by itself when the law is
+// measured down to the struts the engine lays. Today: bcc, diamond and sc (builder F, 2026-11-24, re-measures them).
+std::string structural_note(LatticeTopology topo);
+
 // C23, R19 (the app's area tabs; Manual: "each can be set for the part or per zone or region"): a Lattice region's
 // own cell and strut settings. Each value stated here is the region's own; what is not stated, it takes from the
 // part's. Nothing stated anywhere: every layout is the one laid without it, byte for byte.
@@ -1005,7 +1031,10 @@ double stress_reference(const Domain& domain, const DemandField& field, double p
 
 // ── STRUT WIDTH ───────────────────────────────────────────────────────────────
 // What a lattice looks like is one number, strut width over cell size (R9). Octet's
-// neighbouring struts touch at 1/(2*sqrt 2): the quilt, the top of every range.
+// neighbouring struts touch at 1/(2*sqrt 2): the quilt, the top of every range. That is the
+// OCTET's number (its tests read it); the layout reads each type's own, Layout::touch
+// (lattice_width_bounds: sc 1, bcc and bccz 1/sqrt 2, fcc 1/sqrt 3, fccz 1/2, reentrant 1/3,
+// diamond, kelvin and rhombic 1/(2 sqrt 2)), never this.
 inline constexpr double kQuiltStrutPerCell = 0.35355339059327373;
 
 enum class Density : std::uint8_t {
@@ -1094,9 +1123,11 @@ struct Bar {
   bool piece = false;    // part of a strut of a cut cell, not a whole strut
   bool skin = false;     // a skin bar (S3): it lies on the part's surface, between cut ends
   bool net = false;      // O16: a strut of the Organic net skin over a weave region's open face
-  // The plane of its cell's own grid that the strut lies in, as that plane's unit normal
-  // (an octet strut lies in exactly one: a cell face, or the plane half way between two).
-  // Zero for a strut that lies in none, or in two. The skin follows these planes.
+  // The plane of its cell's own grid that the strut lies in, as that plane's unit normal: square to the one axis along
+  // which the strut does not run (an octet strut lies in exactly one: a cell face, or the plane half way between two;
+  // fcc's legs and kelvin's edges too, kelvin's planes a quarter cell apart). Zero for a strut that lies in none (bcc,
+  // diamond, rhombic, reentrant's waist struts: they cross the cell on a slant) or in two (sc's edges, the tetragonal
+  // columns). The skin follows these planes.
   Vec3 flat{};
   // For a Joined end: the bar it ends in (its place in Bars::bars), -1 otherwise. If that
   // bar is removed, this end lands on nothing again (drop_loose_bars follows it).
@@ -1239,6 +1270,14 @@ struct SteppedEdge {
 std::vector<SteppedEdge> stepped_edges(const Bars& bars);
 
 Bars lay_bars(const Layout& layout, const Domain& domain, int threads = 0);
+
+// The type's struts as a cell of `frame` lays them (strut_cell_closed_struts, in the cell's integer units). A cubic type
+// looks the same along each of its axes and is laid as it is (the very list, in its order). A tetragonal one (bccz,
+// fccz, reentrant) has one special axis, its cell's z (the columns; the waist's axis): it is laid along the frame's axis
+// nearest the print's up (+Z of the layout's own coordinates, the print frame's when the part is turned), so its columns
+// stand up whichever face the region is on; ties go to the frame's third axis, then its first. lay_bars and the K8
+// stretch read the struts here.
+std::vector<StrutCellStrut> cell_struts(LatticeTopology topo, const Frame& frame);
 
 // ── ORGANIC: A WEAVE (O1, O2) ─────────────────────────────────────────────────
 // Rule O2: a strut list that belongs to no cell. One strand is a polyline in the part's own coordinates, one width per
@@ -1436,11 +1475,15 @@ class SolidAt {
 // S3, Finish Skin: bars across the part's surface joining the cut strut ends, "a flat
 // lattice over the lattice". It is open and does not seal (that is Protect skin, D5).
 // A REGULAR pattern (his answer, 2026-11-12): the skin is the lattice's own grid drawn on
-// the surface. Every strut lies in one plane of its cells' grid (a cell face, or the
-// plane half way between two), so its cut end lies on the line where that plane meets
-// the surface; the skin joins neighbouring cut ends ALONG that line, and nothing else.
+// the surface. An octet strut lies in one plane of its cells' grid (a cell face, or the
+// plane half way between two: Bar::flat), so its cut end lies on the line where that plane
+// meets the surface; the skin joins neighbouring cut ends ALONG that line, and nothing else.
 // On a flat face that gives straight rows, one per plane, a half cell apart, in each of
-// the grid's directions that cross the face; round a boss, rings and uprights.
+// the grid's directions that cross the face; round a boss, rings and uprights. (Every
+// strut type, 2026-11-24: fcc and kelvin lie in such planes too, kelvin's a quarter cell
+// apart; the struts of bcc, diamond, rhombic and sc lie in no single one, and their cut
+// ends are joined among themselves by the rule below. Measured on core's fixtures in
+// test_lattice_types_matrix: no type leaves more of its cut ends open than the octet does.)
 // Two cut ends of one plane are joined when no other cut end of that plane lies in or on
 // the ball between them, when they are no farther apart than `reach_cells` of the larger
 // of their two cells, and when the bar between them lies on the surface (not across a
