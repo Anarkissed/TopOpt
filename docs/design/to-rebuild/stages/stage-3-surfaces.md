@@ -35,6 +35,23 @@ Switch values: `on` (the chosen basis), or a measurement arm `on:<basis>:<reach>
 
 ## Not done yet
 
+## Research behind it (2026-11-25)
+
+Read for this stage: 01-research.md section 3a; Swierstra 2020 section 4.3 (slope bound); Noël 2020 sections 1 and 7.1 (B-splines "promote smooth designs", slope held by a penalty on |grad phi|). Searched for newer work:
+
+- Adaptive immersed isogeometric level-set topology optimisation (Struct Multidisc Optim 2025; free copy at par.nsf.gov/servlets/purl/10655130): higher-order B-spline level sets give smoother designs, and the analysis follows the smooth boundary. Supports the B-spline choice here, and idea 3 below.
+- Smooth geometry extraction from SIMP results by a signed-distance RBF with volume preservation (arXiv 2512.06976, Dec 2025), and a sequential SIMP-to-level-set refinement (arXiv 2605.04735, 2026): both take the surface from a smooth function and then refine the SHAPE by optimisation, not by mesh smoothing (our candidate 6).
+- 3MF Volumetric extension v1.0 (published 2025-11-13): a 3MF file can carry a level-set function instead of triangles (idea 1).
+- Not found free: Sotola et al. 2024 on surface-based smoothing of optimisation results (title and DOI still to pin down).
+
+## Ideas beyond the plan (for discussion with him; NOT acted on)
+
+1. **Ship the design, not a mesh.** Our shape is now one smooth function on a grid of B-spline weights. 3MF's new Volumetric extension can carry exactly that: a file a fraction of the size, exact at any print resolution. Open question before any work: which slicers read it today.
+2. **A CAD file for engineers.** The function is a cubic B-spline in 3D, so its surface can be fitted with NURBS patches and written as STEP, which an engineer can open and edit. Engineer mode only; the beginner keeps the print file.
+3. **Certify the smooth surface itself.** Today the strength check reads voxels and the file is smooth. An analysis that cuts the voxels at the true surface (Andreasen 2020; the 2025 immersed paper) would make "certified = printed" true by construction and steady the stress number across resolutions (stage 2's A-02). Large; joint with stage 2.
+4. **Auto and engineer controls for smoothness.** Auto: the knot spacing follows the printer's line width and the resolution; nothing on screen. Engineer: one "Detail (mm)" control, the smallest feature the shape may have, with an (i).
+5. **A last polish on the real surface.** After the ladder, a short shape pass with the analysis on the smooth surface (Swierstra 2020 stage 3; the 2026 preprint). The "designed" look, possibly some margin back. Cost: about one more optimisation.
+
 ## For #362 (carried by TOReview with the switch flip; not edited here)
 
 Known until then: with the switch on, the `.meta` beside the coefficients names the basis "wendland" for the new bases, and the device preview is still meshed from the voxels, so it differs from the print file (rule 12) until the second change lands.
