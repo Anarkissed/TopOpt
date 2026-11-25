@@ -26,6 +26,12 @@
 
 namespace topopt {
 
+namespace {
+// Edges shorter than this are collapsed before a mesh is handed on (see
+// mesh_level_surface). 0.2 um: ten float steps at 200 mm, far below a print.
+constexpr double kAsWrittenTol = 2e-4;
+}  // namespace
+
 bool plsm_parse_basis(const std::string& s, PlsmBasisKind& out) {
   if (s == "gaussian") out = PlsmBasisKind::Gaussian;
   else if (s == "wendland" || s == "wendland_c2") out = PlsmBasisKind::Wendland;
@@ -85,8 +91,12 @@ TriangleMesh mesh_level_surface(const std::function<double(const Vec3&)>& f,
     return -f(Vec3{q.x, q.y, q.z});
   };
   const manifold::Box box(manifold::vec3(lo.x, lo.y, lo.z), manifold::vec3(hi.x, hi.y, hi.z));
+  // The file stores float corners (about 2e-5 mm apart at 200 mm): edges shorter
+  // than kAsWrittenTol are collapsed by Manifold itself, which keeps the solid
+  // valid, so nothing meets in float that was apart in double.
   const manifold::Manifold M =
-      manifold::Manifold::LevelSet(sdf, box, cell_mm, 0.0, tol_mm, /*canParallel=*/false);
+      manifold::Manifold::LevelSet(sdf, box, cell_mm, 0.0, tol_mm, /*canParallel=*/false)
+          .SetTolerance(kAsWrittenTol);
   const manifold::MeshGL64 g = M.GetMeshGL64();
   out.vertices.reserve(g.NumVert());
   for (std::size_t v = 0; v < g.NumVert(); ++v)
@@ -185,7 +195,7 @@ TriangleMesh mesh_intersection(const TriangleMesh& a, const TriangleMesh& b, std
              " mesh is not a closed manifold";
     return {};
   }
-  return from_manifold64(A ^ B);
+  return from_manifold64((A ^ B).SetTolerance(kAsWrittenTol));
 #else
   (void)a; (void)b;
   if (why) *why = "this build has no Manifold";
@@ -518,7 +528,7 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
     if (A.Status() == manifold::Manifold::Error::NoError &&
         K.Status() == manifold::Manifold::Error::NoError &&
         P.Status() == manifold::Manifold::Error::NoError)
-      cut = from_manifold64((A + K) ^ P);
+      cut = from_manifold64(((A + K) ^ P).SetTolerance(kAsWrittenTol));
     else
       w = "the surface, keep regions or drawn part is not a closed manifold";
 #endif
