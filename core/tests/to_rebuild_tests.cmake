@@ -29,7 +29,11 @@ endif()
 
 # Test K: the same job twice in one process, an unrelated solve between, same
 # bytes. Runs the demo fixture through run_job, so it needs what test_cli needs.
-# Measures only until its first result is on record; then --gate.
+# First result on record 2026-11-25 (same shape both times; only 3MF ids and
+# wall-clock times differed, which the test blanks), so it runs as a gate.
+# It takes over an hour while the demo part's solves fall back to the slow
+# solver (handed to stage 5), so a plain ctest skips it. Run it with:
+#   ctest -C Long -R to_same_job_twice
 if(TARGET test_cli)
   add_executable(test_to_same_job_twice tests/validation/test_to_same_job_twice.cpp)
   target_link_libraries(test_to_same_job_twice PRIVATE topopt)
@@ -38,5 +42,7 @@ if(TARGET test_cli)
     MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
     CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
-  add_test(NAME to_same_job_twice COMMAND test_to_same_job_twice)
+  add_test(NAME to_same_job_twice CONFIGURATIONS Long
+           COMMAND test_to_same_job_twice --gate)
+  set_tests_properties(to_same_job_twice PROPERTIES TIMEOUT 14400)
 endif()

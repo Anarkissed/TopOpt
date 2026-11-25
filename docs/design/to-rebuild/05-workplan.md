@@ -4,6 +4,8 @@ Status 2026-11-22: APPROVED by the reviewer (rulings 06:18Z and 06:48Z); both he
 
 ## 0. Where the work stands (kept current; newest first)
 
+**2026-11-25, 06:20 EST.** Test K answered. The rerun (5,351 s) kept both runs and showed where they differ: the 3MF library stamps random p:UUID ids on every write (three per file); the .meta carries two wall-clock times and the output folder's own path; build_orientation.json carries one wall-clock time. With exactly those blanked, 14 files compared, 0 differ: the shape, the fields and the report are the same bytes both times, with an unrelated solve in between. Control: one changed byte in a field file and one renamed key are both caught. The test now blanks those three things and nothing else, has `--compare A B` for two kept folders, and is registered as a gate under `ctest -C Long` (over an hour while the demo part's solves fall back to the slow solver, so a plain ctest skips it). Rule 21 is met on today's path; it must be run again with stage 1's switch on before the flip.
+
 **2026-11-25, 04:30 EST.** Measured beside #362's lock holder (build on three cores, no lock), from commit e704ba16. Both helpers started (channels TOSurface-Group, TOSolver-Group).
 
 - Test E, plate with a hole at 30 degrees, textbook 3.03, hole radius 3 / 4 / 5 / 6 voxels, multigrid solve, 248 s: all-or-nothing 2.20 / 2.50 / 2.65 / 2.73 (worst miss 27.5 %, spread 24.4 %); fill with E x fill^3 (today) 3.42 / 3.43 / 3.15 / 3.52 (16.2 %, 11.7 %); fill with E x fill 2.48 / 2.69 / 2.66 / 2.84 (18.3 %, 14.7 %). None meets rule 5 (5 % and 10 %). Read over a fixed size on the E x fill arm, spread only: 0.9 mm 14.7 %, 1.8 mm 6.3 %, 3.6 mm 7.8 %. So a fixed-size reading does settle across resolutions; no arm yet reads the right peak.
