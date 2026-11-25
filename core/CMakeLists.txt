@@ -108,6 +108,7 @@ add_library(topopt
   src/io/fields.cpp
   src/io/design_store.cpp
   src/mesh/mesh.cpp
+  src/mesh/level_surface.cpp
   # Exact signed distance to a closed mesh (task 2026-08-08-strut-clip-matches-
   # shell) — the term that lets the strut clip be evaluated against the SURFACE
   # the shell is extracted from rather than the voxel-cube union it chamfers.

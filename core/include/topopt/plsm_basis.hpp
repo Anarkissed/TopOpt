@@ -36,12 +36,29 @@
 
 namespace topopt {
 
-// ── the two bases ───────────────────────────────────────────────────────────
+// ── the bases ───────────────────────────────────────────────────────────────
 //
-// Both are written as functions of the NORMALISED radius r = |x - x_i|_R, where
-// |·|_R is the ellipsoidal norm with per-axis radii R_a. Both vanish at r >= 1,
-// so the support test is the same test for both.
-enum class PlsmBasisKind { Wendland, Gaussian };
+// The radial ones are written as functions of the NORMALISED radius
+// r = |x - x_i|_R, where |·|_R is the ellipsoidal norm with per-axis radii R_a,
+// and vanish at r >= 1. The cubic B-spline is a tensor product, not radial: its
+// support is the box |x_a - x_ia| < R_a with R_a = 2 knot spacings (its reach is
+// fixed by its degree), and it reproduces every linear function exactly on the
+// knot lattice, so a flat wall fitted at any tilt carries no knot ripple.
+//
+// TO rebuild stage 3 (ledger B-01): the Gaussian below has a slope step at r = 1
+// (a crease on a sphere round every knot); Wendland C2 / C4 and the B-spline have
+// none. Which ships is chosen by measurement (stages/stage-3-surfaces.md).
+enum class PlsmBasisKind { Wendland, Gaussian, WendlandC4, BSpline3 };
+
+inline const char* plsm_basis_name(PlsmBasisKind b) {
+  switch (b) {
+    case PlsmBasisKind::Wendland: return "wendland";
+    case PlsmBasisKind::Gaussian: return "gaussian";
+    case PlsmBasisKind::WendlandC4: return "wendland_c4";
+    case PlsmBasisKind::BSpline3: return "bspline";
+  }
+  return "gaussian";
+}
 
 // Wendland C²: (1-r)_+^4 (4r+1). Positive definite in R³ for this form.
 inline double plsm_psi_wendland(double r) {
@@ -49,6 +66,38 @@ inline double plsm_psi_wendland(double r) {
   const double t = 1.0 - r;
   const double t2 = t * t;
   return t2 * t2 * (4.0 * r + 1.0);
+}
+
+// Wendland C⁴: (1-r)_+^6 (35r² + 18r + 3) / 3, scaled to 1 at r = 0. Positive
+// definite in R³; slope and curvature are zero at the edge of its reach.
+inline double plsm_psi_wendland_c4(double r) {
+  if (r >= 1.0) return 0.0;
+  const double t = 1.0 - r;
+  const double t3 = t * t * t;
+  return t3 * t3 * (35.0 * r * r + 18.0 * r + 3.0) / 3.0;
+}
+
+// The uniform cubic B-spline of one variable, u in knot spacings, support |u| < 2,
+// scaled to 1 at u = 0 (its own peak is 2/3). Scaling all coefficients alike keeps
+// the partition of unity a constant (1.5³), which the volume offset absorbs.
+inline double plsm_bspline3(double u) {
+  const double a = std::fabs(u);
+  if (a >= 2.0) return 0.0;
+  if (a >= 1.0) {
+    const double t = 2.0 - a;
+    return 0.25 * t * t * t;
+  }
+  return 1.0 - 1.5 * a * a + 0.75 * a * a * a;
+}
+inline double plsm_bspline3_d(double u) {  // d/du of the above
+  const double a = std::fabs(u);
+  if (a >= 2.0) return 0.0;
+  const double s = u < 0.0 ? -1.0 : 1.0;
+  if (a >= 1.0) {
+    const double t = 2.0 - a;
+    return -0.75 * t * t * s;
+  }
+  return (-3.0 * a + 2.25 * a * a) * s;
 }
 
 // A 3σ-truncated Gaussian: exp(-(3r)²/2), so r = 1 is three standard deviations
@@ -63,7 +112,47 @@ inline double plsm_psi_gaussian(double r) {
 }
 
 inline double plsm_psi(PlsmBasisKind b, double r) {
-  return b == PlsmBasisKind::Wendland ? plsm_psi_wendland(r) : plsm_psi_gaussian(r);
+  switch (b) {
+    case PlsmBasisKind::Wendland: return plsm_psi_wendland(r);
+    case PlsmBasisKind::WendlandC4: return plsm_psi_wendland_c4(r);
+    default: return plsm_psi_gaussian(r);
+  }
+}
+
+// d psi / d r of the radial bases (r normalised).
+inline double plsm_psi_dr(PlsmBasisKind b, double r) {
+  if (r >= 1.0) return 0.0;
+  const double t = 1.0 - r;
+  switch (b) {
+    case PlsmBasisKind::Wendland:  // d/dr (1-r)^4 (4r+1) = -20 r (1-r)^3
+      return -20.0 * r * t * t * t;
+    case PlsmBasisKind::WendlandC4: {  // = -(56/3) r (1-r)^5 (5r+1)
+      const double t5 = t * t * t * t * t;
+      return -(56.0 / 3.0) * r * t5 * (5.0 * r + 1.0);
+    }
+    default: {
+      constexpr double kEdge = 0.011108996538242306;
+      return -9.0 * r * std::exp(-4.5 * r * r) / (1.0 - kEdge);
+    }
+  }
+}
+
+// The weight of the knot at offset (dx, dy, dz) (voxel units) from a point, for a
+// lattice with per-axis reach (rx, ry, rz) and spacing (sx, sy, sz). 0 outside
+// the support. The one place every basis is evaluated.
+inline double plsm_weight(PlsmBasisKind b, double dx, double dy, double dz, double rx,
+                          double ry, double rz, double sx, double sy, double sz) {
+  if (b == PlsmBasisKind::BSpline3)
+    return plsm_bspline3(dx / sx) * plsm_bspline3(dy / sy) * plsm_bspline3(dz / sz);
+  const double ux = dx / rx, uy = dy / ry, uz = dz / rz;
+  const double r2 = ux * ux + uy * uy + uz * uz;
+  if (r2 >= 1.0) return 0.0;
+  return plsm_psi(b, std::sqrt(r2));
+}
+
+// The B-spline's reach is fixed by its degree: two spacings each side.
+inline double plsm_effective_support(PlsmBasisKind b, double support) {
+  return b == PlsmBasisKind::BSpline3 ? 2.0 : support;
 }
 
 // ── the knot lattice: PER AXIS, and padded so the boundary is covered ───────
@@ -163,6 +252,23 @@ inline void plsm_support_of(const PlsmKnotLattice& L, PlsmBasisKind b, double x,
   const int c0 = std::max(0, static_cast<int>(std::ceil((z - L.rz) / L.dz)) + L.padz);
   const int c1 = std::min(L.mz - 1,
                           static_cast<int>(std::floor((z + L.rz) / L.dz)) + L.padz);
+  if (b == PlsmBasisKind::BSpline3) {
+    for (int c = c0; c <= c1; ++c) {
+      const double wz = plsm_bspline3((z - L.uz(c)) / L.dz);
+      if (wz == 0.0) continue;
+      for (int bb = b0; bb <= b1; ++bb) {
+        const double wy = plsm_bspline3((y - L.uy(bb)) / L.dy);
+        if (wy == 0.0) continue;
+        for (int a = a0; a <= a1; ++a) {
+          const double v = wz * wy * plsm_bspline3((x - L.ux(a)) / L.dx);
+          if (v == 0.0) continue;
+          idx.push_back(static_cast<int>(L.at(a, bb, c)));
+          w.push_back(v);
+        }
+      }
+    }
+    return;
+  }
   for (int c = c0; c <= c1; ++c) {
     const double dz3 = (z - L.uz(c)) / L.rz;
     const double z2 = dz3 * dz3;
@@ -182,6 +288,63 @@ inline void plsm_support_of(const PlsmKnotLattice& L, PlsmBasisKind b, double x,
       }
     }
   }
+}
+
+// phi and its gradient (per voxel unit) at a point in VOXEL coordinates, straight
+// from the coefficients: what the print surface is meshed from.
+inline double plsm_value_grad(const PlsmKnotLattice& L, PlsmBasisKind b,
+                              const std::vector<double>& alpha, double x, double y,
+                              double z, double* g) {
+  const int a0 = std::max(0, static_cast<int>(std::ceil((x - L.rx) / L.dx)) + L.padx);
+  const int a1 = std::min(L.mx - 1,
+                          static_cast<int>(std::floor((x + L.rx) / L.dx)) + L.padx);
+  const int b0 = std::max(0, static_cast<int>(std::ceil((y - L.ry) / L.dy)) + L.pady);
+  const int b1 = std::min(L.my - 1,
+                          static_cast<int>(std::floor((y + L.ry) / L.dy)) + L.pady);
+  const int c0 = std::max(0, static_cast<int>(std::ceil((z - L.rz) / L.dz)) + L.padz);
+  const int c1 = std::min(L.mz - 1,
+                          static_cast<int>(std::floor((z + L.rz) / L.dz)) + L.padz);
+  double s = 0.0, gx = 0.0, gy = 0.0, gz = 0.0;
+  for (int c = c0; c <= c1; ++c) {
+    const double ez = z - L.uz(c);
+    for (int bb = b0; bb <= b1; ++bb) {
+      const double ey = y - L.uy(bb);
+      for (int a = a0; a <= a1; ++a) {
+        const double ex = x - L.ux(a);
+        const double al = alpha[L.at(a, bb, c)];
+        if (b == PlsmBasisKind::BSpline3) {
+          const double ux = ex / L.dx, uy = ey / L.dy, uz = ez / L.dz;
+          const double wx = plsm_bspline3(ux), wy = plsm_bspline3(uy),
+                       wz = plsm_bspline3(uz);
+          if (wx == 0.0 || wy == 0.0 || wz == 0.0) continue;
+          s += al * wx * wy * wz;
+          if (g) {
+            gx += al * plsm_bspline3_d(ux) / L.dx * wy * wz;
+            gy += al * wx * plsm_bspline3_d(uy) / L.dy * wz;
+            gz += al * wx * wy * plsm_bspline3_d(uz) / L.dz;
+          }
+          continue;
+        }
+        const double ux = ex / L.rx, uy = ey / L.ry, uz = ez / L.rz;
+        const double r2 = ux * ux + uy * uy + uz * uz;
+        if (r2 >= 1.0) continue;
+        const double r = std::sqrt(r2);
+        s += al * plsm_psi(b, r);
+        if (g && r > 0.0) {
+          const double d = al * plsm_psi_dr(b, r) / r;
+          gx += d * ux / L.rx;
+          gy += d * uy / L.ry;
+          gz += d * uz / L.rz;
+        }
+      }
+    }
+  }
+  if (g) {
+    g[0] = gx;
+    g[1] = gy;
+    g[2] = gz;
+  }
+  return s;
 }
 
 inline PlsmCsr plsm_build_A(int nx, int ny, int nz, const PlsmKnotLattice& L,
@@ -371,6 +534,10 @@ inline std::vector<double> plsm_evaluate(const PlsmKnotLattice& L, PlsmBasisKind
     const int c1 = std::min(L.mz - 1,
                             static_cast<int>(std::floor((z + L.rz) / L.dz)) + L.padz);
     double s = 0.0;
+    if (b == PlsmBasisKind::BSpline3) {
+      out[v] = plsm_value_grad(L, b, alpha, x, y, z, nullptr);
+      return;
+    }
     for (int c = c0; c <= c1; ++c) {
       const double dz3 = (z - L.uz(c)) / L.rz;
       const double z2 = dz3 * dz3;
