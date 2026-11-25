@@ -51,3 +51,18 @@ if(TARGET test_cli)
            COMMAND test_to_same_job_twice --gate)
   set_tests_properties(to_same_job_twice PROPERTIES TIMEOUT 14400)
 endif()
+
+# Stage 1 against the LATTICE strength check (reviewer's ruling; LatticeReview's
+# three made jobs): the stage switch off and on. Holds one rule, that the switch
+# does not move the laid lattice; prints the rest for the stage report. Slow, so
+# a plain ctest skips it:  ctest -C Long -R to_stage1_lattice_check
+if(TARGET test_lattice_strength)
+  add_executable(test_to_stage1_lattice_check tests/validation/test_to_stage1_lattice_check.cpp)
+  target_link_libraries(test_to_stage1_lattice_check PRIVATE topopt)
+  target_compile_definitions(test_to_stage1_lattice_check PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME to_stage1_lattice_check CONFIGURATIONS Long COMMAND test_to_stage1_lattice_check)
+  set_tests_properties(to_stage1_lattice_check PROPERTIES TIMEOUT 7200)
+endif()

@@ -44,13 +44,20 @@ std::size_t tag_region_m(VoxelGrid& grid, const StepModel& model,
   return tag_face_hosts(grid, region_pieces(model, region, 0.5 * grid.spacing), tag);
 }
 
+// A depth of zero or less means "the thinnest there is": one layer on the voxel
+// path (region_depth_layers floors at 1), one voxel of true distance here, so
+// neither path refuses what the other accepts.
+double floored_depth_mm(const VoxelGrid& grid, double depth_mm) {
+  return depth_mm > 0.0 ? depth_mm : grid.spacing;
+}
+
 // Depth: `depth_voxels` on the voxel path, `depth_mm` on the face path.
 std::size_t mask_face_m(const VoxelGrid& grid, const StepModel& model, int fid,
                         MaskValue value, int depth_voxels, double depth_mm,
                         DesignMask& mask) {
   if (face_load_mode() == FaceLoadMode::Voxel)
     return mask_step_face(grid, model, fid, value, depth_voxels, mask);
-  return mask_face_depth_mm(grid, model, {fid}, depth_mm, value, mask);
+  return mask_face_depth_mm(grid, model, {fid}, floored_depth_mm(grid, depth_mm), value, mask);
 }
 
 std::size_t mask_region_m(const VoxelGrid& grid, const StepModel& model,
@@ -58,7 +65,8 @@ std::size_t mask_region_m(const VoxelGrid& grid, const StepModel& model,
                           int depth_voxels, double depth_mm, DesignMask& mask) {
   if (face_load_mode() == FaceLoadMode::Voxel)
     return mask_step_region(grid, model, region, value, depth_voxels, mask);
-  return mask_region_depth_mm(grid, model, region, depth_mm, value, mask);
+  return mask_region_depth_mm(grid, model, region, floored_depth_mm(grid, depth_mm), value,
+                              mask);
 }
 
 // The freeze as geometry, for the stages that draw from true distance

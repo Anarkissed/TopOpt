@@ -1,0 +1,242 @@
+// TO rebuild stage 1: what the stage switch (TOPOPT_FACE_LOADS) does to the
+// LATTICE strength check (reviewer's ruling 2026-11-25; the set LatticeReview
+// named, TORebuildGroup 2026-11-25). Three made jobs, none of the maintainer's:
+//
+//   A  a box on the grid, lattice from its whole top face to a depth that is a
+//      whole number of voxels, held on the whole bottom, loaded on the whole
+//      top. THE CONTROL: the switch should change nothing beyond rounding.
+//   B  the same box turned 17 degrees about z and 9 about x, so no face lies on
+//      the grid; loaded on a (tilted) side face that carries a protected skin
+//      1.3 mm deep, which is not a whole number of voxels. Regular cells.
+//   C  job B with Organic (traced), so the frame-of-beams check runs.
+//
+// Each job runs twice in this process: switch off, then `face`. Printed per
+// job: every number of the result's "strength" block that differs, the
+// verdicts, the bar count and a hash of the laid file's bytes.
+//
+// THE RULE HELD HERE: the switch moves the check's loads and protected solid and
+// must NOT move the laid lattice, so the bar count and the file's bytes must be
+// IDENTICAL off and on. That fails the test in either form. Everything else is
+// measured and printed for the stage report.
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <map>
+#include <sstream>
+#include <string>
+#include <vector>
+
+#include "topopt/face_overrides.hpp"
+#include "topopt/lattice_file_strength.hpp"
+#include "topopt/lattice_layout_file.hpp"
+#include "topopt/step.hpp"
+#include "topopt/stl.hpp"
+
+using namespace topopt;
+using namespace topopt::lattice_layout;
+
+namespace {
+
+const std::string kDir = std::string(TMP_DIR) + "/to_stage1_lattice_check";
+
+std::string slurp(const std::string& p) {
+  std::ifstream f(p, std::ios::binary);
+  std::ostringstream s;
+  s << f.rdbuf();
+  return s.str();
+}
+void write(const std::string& path, const std::string& text) { std::ofstream(path) << text; }
+
+struct Turn {
+  double m[3][3];
+  Vec3 operator()(const Vec3& v) const {
+    return {m[0][0] * v.x + m[0][1] * v.y + m[0][2] * v.z, m[1][0] * v.x + m[1][1] * v.y + m[1][2] * v.z,
+            m[2][0] * v.x + m[2][1] * v.y + m[2][2] * v.z};
+  }
+};
+Turn turn(double deg_z, double deg_x) {
+  const double pi = std::acos(-1.0), a = deg_z * pi / 180.0, b = deg_x * pi / 180.0;
+  const double ca = std::cos(a), sa = std::sin(a), cb = std::cos(b), sb = std::sin(b);
+  // Rx(b) * Rz(a)
+  return {{{ca, -sa, 0.0}, {cb * sa, cb * ca, -sb}, {sb * sa, sb * ca, cb}}};
+}
+
+TriangleMesh box(double L, double W, double H, const Turn& t) {
+  TriangleMesh m;
+  for (const Vec3& v : std::vector<Vec3>{{0, 0, 0}, {L, 0, 0}, {L, W, 0}, {0, W, 0},
+                                         {0, 0, H}, {L, 0, H}, {L, W, H}, {0, W, H}})
+    m.vertices.push_back(t(v));
+  const int tri[12][3] = {{0, 2, 1}, {0, 3, 2}, {4, 5, 6}, {4, 6, 7}, {0, 1, 5}, {0, 5, 4},
+                          {3, 7, 6}, {3, 6, 2}, {0, 4, 7}, {0, 7, 3}, {1, 2, 6}, {1, 6, 5}};
+  for (const auto& x : tri) m.triangles.push_back({x[0], x[1], x[2]});
+  return m;
+}
+
+int face_with_normal(const StepModel& m, const Vec3& n) {
+  for (int f = 0; f < m.face_count; ++f) {
+    const StepFaceInfo& fi = m.faces[static_cast<std::size_t>(f)];
+    if (fi.kind == StepSurfaceKind::Plane &&
+        fi.plane_normal.x * n.x + fi.plane_normal.y * n.y + fi.plane_normal.z * n.z > 0.99)
+      return f;
+  }
+  return -1;
+}
+
+struct Faces { int top = -1, bottom = -1, side = -1; };
+
+std::string file_job(const std::string& model, const Faces& f, const std::string& extra) {
+  return "{\"mode\": \"lattice_file\", \"model\": \"" + model + "\", \"output\": \"lattice.stl\", "
+         "\"strength_job\": \"strength_job.json\", "
+         "\"layout\": {\"min_strut_lines\": 2, \"region_ids\": [1], \"region_no_lattice\": [0], "
+         "\"region_depth_mm\": [8], \"region_expand_mm\": [0], \"region_face_counts\": [1], "
+         "\"region_faces\": [" + std::to_string(f.top) + "], \"topology\": \"octet\", "
+         "\"algorithm\": \"uniform\", \"cell_max_mm\": 8, \"min_cells_across\": 1" + extra + "}}";
+}
+std::string strength_job(const std::string& model, const Faces& f, int load_face, const std::string& protect) {
+  return "{\"model\": \"" + model + "\", \"material\": \"PLA\", \"mode\": \"lattice_part\", \"resolution\": 40, "
+         "\"loads\": {\"minimize_plastic\": true, \"safety_margin\": 1.5, \"build_dir\": [0, 0, 1], "
+         "\"anchor_face_ids\": [" + std::to_string(f.bottom) + "], \"groups\": [{\"face_ids\": [" +
+         std::to_string(load_face) + "], \"force\": [0, 0, -20]}]" + protect + "}, "
+         "\"lattice\": {\"topology\": \"octet\", \"require_lattice_void_reaches_exterior\": false}, "
+         "\"grading\": {\"topology\": \"octet\", \"cell_mm\": 8, \"min_extrudable_width_mm\": 0.45, "
+         "\"intent\": \"structural\"}, "
+         "\"output\": {\"report\": \"report.json\", \"mesh_format\": \"stl\", \"mesh_prefix\": \"variant\"}}";
+}
+
+struct Result {
+  bool ok = false;
+  std::size_t bars = 0;
+  std::size_t file_hash = 0;
+  std::string strength;  // the "strength" block's text
+  std::string code, why;
+};
+
+Result run(const std::string& tag, const std::string& mode, const std::string& job, const std::string& sjob) {
+  if (mode.empty()) unsetenv("TOPOPT_FACE_LOADS"); else setenv("TOPOPT_FACE_LOADS", mode.c_str(), 1);
+  const std::string folder = kDir + "/" + tag + (mode.empty() ? "_off" : "_" + mode);
+  std::filesystem::remove_all(folder);
+  std::filesystem::create_directories(folder);
+  write(kDir + "/" + tag + "_job.json", job);
+  write(kDir + "/strength_job.json", sjob);
+  const StrengthCheck check = lattice_file_strength_check(MATERIALS_JSON_PATH, SETTINGS_RULES_PATH);
+  const FileResult r = run_file_job(kDir + "/" + tag + "_job.json", folder, 0, nullptr, &check);
+  unsetenv("TOPOPT_FACE_LOADS");
+  Result x;
+  x.ok = r.ok;
+  x.bars = r.bars;
+  x.code = r.code;
+  x.why = r.why;
+  x.file_hash = std::hash<std::string>{}(slurp(folder + "/lattice.stl"));
+  const std::string json = slurp(folder + "/" + kFileResultName);
+  const std::size_t a = json.find("\n  \"strength\": {");
+  if (a != std::string::npos) {
+    const std::size_t b = json.find("\n  },\n", a);
+    x.strength = b == std::string::npos ? json.substr(a) : json.substr(a, b - a + 5);
+  }
+  std::printf("[%s %s] ok %d code %s why %s bars %zu strength ran %d accepted %d\n", tag.c_str(),
+              mode.empty() ? "off" : mode.c_str(), r.ok, r.code.c_str(), r.why.c_str(), r.bars, r.strength_ran,
+              r.strength_accepted);
+  return x;
+}
+
+// Every `"key": value` of a block, in order of appearance; a repeated key gets #2, #3...
+std::vector<std::pair<std::string, std::string>> pairs(const std::string& b) {
+  std::vector<std::pair<std::string, std::string>> out;
+  std::map<std::string, int> seen;
+  for (std::size_t at = b.find('"'); at != std::string::npos;) {
+    const std::size_t end = b.find('"', at + 1);
+    if (end == std::string::npos) break;
+    if (b.compare(end, 3, "\": ") == 0) {
+      const std::string key = b.substr(at + 1, end - at - 1);
+      std::size_t v = end + 3, e = v;
+      if (b[v] == '"') {
+        e = b.find('"', v + 1);
+        e = e == std::string::npos ? b.size() : e + 1;
+      } else {
+        while (e < b.size() && b[e] != ',' && b[e] != '\n' && b[e] != '}' && b[e] != ']') ++e;
+      }
+      const std::string val = b.substr(v, e - v);
+      if (!val.empty() && val[0] != '{' && val[0] != '[') {
+        const int n = ++seen[key];
+        out.push_back({n == 1 ? key : key + "#" + std::to_string(n), val});
+      }
+      at = b.find('"', e);
+    } else {
+      at = b.find('"', end + 1);
+    }
+  }
+  return out;
+}
+
+int compare(const std::string& tag, const Result& off, const Result& on) {
+  int failures = 0;
+  if (!off.ok || !on.ok) {
+    std::printf("[%s] a run did not complete (off: %s %s; face: %s %s)\n", tag.c_str(), off.code.c_str(),
+                off.why.c_str(), on.code.c_str(), on.why.c_str());
+    return 1;
+  }
+  const bool same_lay = off.bars == on.bars && off.file_hash == on.file_hash;
+  std::printf("[%s] laid lattice: bars %zu / %zu, file hash %zx / %zx  %s\n", tag.c_str(), off.bars, on.bars,
+              off.file_hash, on.file_hash, same_lay ? "IDENTICAL" : "DIFFERENT (the switch moved the lattice)");
+  if (!same_lay) ++failures;
+  const auto a = pairs(off.strength), b = pairs(on.strength);
+  std::map<std::string, std::string> bm(b.begin(), b.end());
+  int differ = 0;
+  for (const auto& kv : a) {
+    const auto it = bm.find(kv.first);
+    const std::string other = it == bm.end() ? "(absent)" : it->second;
+    if (other == kv.second) continue;
+    if (kv.first.find("seconds") != std::string::npos || kv.first.find("_ms") != std::string::npos) continue;
+    ++differ;
+    std::printf("[%s]   %-44s off %-22s face %s\n", tag.c_str(), kv.first.c_str(), kv.second.c_str(), other.c_str());
+  }
+  std::printf("[%s] strength block: %zu values, %d differ\n", tag.c_str(), a.size(), differ);
+  return failures;
+}
+
+}  // namespace
+
+int main() {
+  std::filesystem::remove_all(kDir);
+  std::filesystem::create_directories(kDir);
+  int failures = 0;
+
+  // 32 x 32 x 16 mm at resolution 40: voxel 0.8 mm, so the 8 mm lattice depth is ten voxels.
+  const Turn none = turn(0.0, 0.0), tilted = turn(17.0, 9.0);
+  write_stl_file(kDir + "/box.stl", box(32, 32, 16, none), StlFormat::Binary);
+  write_stl_file(kDir + "/tilted.stl", box(32, 32, 16, tilted), StlFormat::Binary);
+  auto faces = [&](const std::string& file, const Turn& t) {
+    const StepModel m = import_part_file_resolved(kDir + "/" + file);
+    Faces f;
+    f.top = face_with_normal(m, t({0, 0, 1}));
+    f.bottom = face_with_normal(m, t({0, 0, -1}));
+    f.side = face_with_normal(m, t({1, 0, 0}));
+    std::printf("%s faces: top %d bottom %d side %d (of %d)\n", file.c_str(), f.top, f.bottom, f.side, m.face_count);
+    return f;
+  };
+  const Faces fa = faces("box.stl", none), fb = faces("tilted.stl", tilted);
+  if (fa.top < 0 || fa.bottom < 0 || fb.top < 0 || fb.bottom < 0 || fb.side < 0) {
+    std::printf("a face was not found\n");
+    return 1;
+  }
+
+  struct Job { const char* tag; std::string file, strength; };
+  const std::string protect =
+      ", \"face_protections\": [{\"face_id\": " + std::to_string(fb.side) + ", \"depth_mm\": 1.3}]";
+  const std::string weave = ", \"region_weave\": [true], \"organic_spacing_mm\": 4, \"organic_width_mm\": 0.9";
+  const std::vector<Job> jobs = {
+      {"A_control", file_job("box.stl", fa, ""), strength_job("box.stl", fa, fa.top, "")},
+      {"B_off_grid", file_job("tilted.stl", fb, ""), strength_job("tilted.stl", fb, fb.side, protect)},
+      {"C_organic", file_job("tilted.stl", fb, weave), strength_job("tilted.stl", fb, fb.side, protect)},
+  };
+  for (const Job& j : jobs) {
+    const Result off = run(j.tag, "", j.file, j.strength);
+    const Result on = run(j.tag, "face", j.file, j.strength);
+    failures += compare(j.tag, off, on);
+  }
+  std::printf("[stage 1 lattice check] %d failure(s)\n", failures);
+  return failures == 0 ? 0 : 1;
+}
