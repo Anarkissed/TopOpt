@@ -219,7 +219,7 @@ void open_boxes_with(const Layout& lay, const Domain::Probe& probe, const Cell& 
     }
     for (const Slab& b : done)
       mine.push_back({c.frame, {c.lo[0] + b.i0 * s, c.lo[1] + b.j0 * s, c.lo[2] + b.z0 * s},
-                      {c.lo[0] + b.i1 * s, c.lo[1] + b.j1 * s, c.lo[2] + b.z1 * s}});
+                      {c.lo[0] + b.i1 * s, c.lo[1] + b.j1 * s, c.lo[2] + b.z1 * s}, c.region});
   };
   if (!walls.flat) {
     // No flat face to read columns from: the cell's own shape point by point.
@@ -365,7 +365,8 @@ void open_boxes_with(const Layout& lay, const Domain::Probe& probe, const Cell& 
     open_runs = keep;
   }
   for (const Run& r : done)
-    mine.push_back({c.frame, {c.lo[0] + r.i0 * s, c.lo[1] + r.j0 * s, r.c0}, {c.lo[0] + r.i1 * s, c.lo[1] + r.j1 * s, r.c1}});
+    mine.push_back({c.frame, {c.lo[0] + r.i0 * s, c.lo[1] + r.j0 * s, r.c0}, {c.lo[0] + r.i1 * s, c.lo[1] + r.j1 * s, r.c1},
+                    c.region});
   // The crossed columns point by point; then the air beside all of it, the open columns'
   // own stretches included (a wall that crosses the columns on a slant). A column of air
   // that opened with its neighbour, and the little an open column runs on past the
@@ -1052,10 +1053,11 @@ struct CarvedSolids {
     Manifold body;                 // every sheet, cut and joined (not yet to the solid)
     Manifold with_solid;           // the solid and the sheets, joined (made on the first build with no drop_at)
     bool joined = false;
+    bool body_freed = false;
     bool ok = false;
     std::string why;
     std::size_t blocks = 0, triangles = 0, places = 0, seams_blended = 0, seams_fell_back = 0;
-    double deviation_mm = 0.0, mm3 = 0.0, ms = 0.0, ms_union = 0.0;
+    double deviation_mm = 0.0, mm3 = 0.0, ms = 0.0, ms_union = 0.0, contoured_mm3 = 0.0;
   };
   mutable std::mutex sheets_mu;
   mutable std::shared_ptr<SheetsMade> sheets;
@@ -1437,6 +1439,47 @@ Manifold manifold_of(const TriangleMesh& soup_or_mesh, const Frame* frame) {
   return Manifold(g);
 }
 
+// generate_tpms writes each triangle with three corners of its own: welded here as they come (corners at one place are
+// one corner) and turned into the part, straight into Manifold's own form, so a block never holds its triangles twice.
+struct WeldSink : TriangleSink {
+  const Frame* frame;
+  manifold::MeshGL64 g;
+  std::size_t triangles = 0;
+  struct Key {
+    std::uint64_t a, b, c;
+    bool operator==(const Key& o) const { return a == o.a && b == o.b && c == o.c; }
+  };
+  struct KeyHash {
+    std::size_t operator()(const Key& k) const {
+      return static_cast<std::size_t>((k.a * 0x9E3779B97F4A7C15ULL) ^ (k.b * 0xC2B2AE3D27D4EB4FULL) ^ (k.c * 0x165667B19E3779F9ULL));
+    }
+  };
+  std::unordered_map<Key, std::uint64_t, KeyHash> at;
+  explicit WeldSink(const Frame* f) : frame(f) { g.numProp = 3; }
+  std::uint64_t corner(const Vec3& q) {
+    Key k;
+    std::memcpy(&k.a, &q.x, 8);
+    std::memcpy(&k.b, &q.y, 8);
+    std::memcpy(&k.c, &q.z, 8);
+    const auto it = at.emplace(k, static_cast<std::uint64_t>(at.size()));
+    if (it.second) {
+      const Vec3 p = frame ? frame->at(q.x, q.y, q.z) : q;
+      g.vertProperties.push_back(p.x);
+      g.vertProperties.push_back(p.y);
+      g.vertProperties.push_back(p.z);
+    }
+    return it.first->second;
+  }
+  void add_triangle(const Vec3& a, const Vec3& b, const Vec3& c) override {
+    ++triangles;
+    const std::uint64_t i = corner(a), j = corner(b), k = corner(c);
+    if (i == j || j == k || i == k) return;
+    g.triVerts.push_back(i);
+    g.triVerts.push_back(j);
+    g.triVerts.push_back(k);
+  }
+};
+
 std::shared_ptr<CarvedSolids::SheetsMade> make_sheets(const Domain& domain, const Layout& lay, const CarvedSolids& kept,
                                                       const MeshSpec& spec, double run_on) {
   const auto t0 = std::chrono::steady_clock::now();
@@ -1478,12 +1521,15 @@ std::shared_ptr<CarvedSolids::SheetsMade> make_sheets(const Domain& domain, cons
       jobs.push_back({fi, {kv.second[0], kv.second[1], kv.second[2]}, {kv.second[3], kv.second[4], kv.second[5]}});
   }
   // Each frame's open boxes, by frame.
-  std::map<int, std::vector<const OpenSpace::Box*>> boxes_of;
-  for (const OpenSpace::Box& b : kept.open_boxes) boxes_of[b.frame].push_back(&b);
+  // Each field's own open space: the boxes read from its own region's cells, in its frame (builder B, 11-25: two fields
+  // on one frame were each cut to every box of that frame, while the strength check credits a voxel by its own cell's
+  // field; the mesh, the preview and the credit now read the same).
+  std::map<std::pair<int, int>, std::vector<const OpenSpace::Box*>> boxes_of;   // (region, frame)
+  for (const OpenSpace::Box& b : kept.open_boxes) boxes_of[{b.region, b.frame}].push_back(&b);
 
   std::vector<Manifold> pieces(jobs.size());
   std::vector<std::size_t> tris(jobs.size(), 0);
-  std::vector<double> devs(jobs.size(), 0.0);
+  std::vector<double> devs(jobs.size(), 0.0), vols(jobs.size(), 0.0);
   std::vector<std::string> whys(jobs.size());
   std::atomic<std::size_t> next{0};
   const std::atomic<bool>* stop = spec.stop;
@@ -1541,7 +1587,7 @@ std::shared_ptr<CarvedSolids::SheetsMade> make_sheets(const Domain& domain, cons
       o.true_wall_mm = [&f, raised](const Vec3& q) { return raised(sheet_wall_at_local(f, q)); };
       o.wall_param_of = [topo, L](double w) { return lattice_sheet_wall_param_mm(topo, w, L); };
       o.true_wall_steps = false;   // the wall is blended trilinearly: no step anywhere (SPEC 1.4)
-      MeshSink sink;
+      WeldSink sink(&fr);
       TpmsGenStats st;
       try {
         st = generate_tpms(f.kind, R, W, sink, o);
@@ -1549,18 +1595,20 @@ std::shared_ptr<CarvedSolids::SheetsMade> make_sheets(const Domain& domain, cons
         whys[j] = std::string("a sheet block could not be contoured: ") + e.what();
         continue;
       }
-      tris[j] = sink.mesh.triangles.size();
+      tris[j] = sink.triangles;
       devs[j] = st.simplified ? std::max(st.simplify.max_out_measured_mm, st.simplify.max_in_measured_mm) : 0.0;
-      if (sink.mesh.triangles.empty()) continue;
-      Manifold sheet = manifold_of(sink.mesh, &fr);
-      sink.mesh = TriangleMesh{};
+      vols[j] = (hi[0] - lo[0] + 2.0 * g) * (hi[1] - lo[1] + 2.0 * g) * (hi[2] - lo[2] + 2.0 * g);
+      if (sink.g.triVerts.empty()) continue;
+      sink.at = {};
+      Manifold sheet(sink.g);
+      sink.g = manifold::MeshGL64{};
       if (sheet.Status() != Manifold::Error::NoError) {
         whys[j] = "a sheet block's surface is not closed";
         continue;
       }
       // The region's open space near the block, each box grown by the run-on.
       std::vector<Manifold> cut;
-      const auto it = boxes_of.find(f.frame);
+      const auto it = boxes_of.find({f.region, f.frame});
       if (it != boxes_of.end())
         for (const OpenSpace::Box* b : it->second) {
           bool meets = true;
@@ -1590,6 +1638,7 @@ std::shared_ptr<CarvedSolids::SheetsMade> make_sheets(const Domain& domain, cons
   made->blocks = jobs.size();
   for (const Job& job : jobs)
     made->places += static_cast<std::size_t>((job.e[0] - job.b[0] + 1) * (job.e[1] - job.b[1] + 1) * (job.e[2] - job.b[2] + 1));
+  for (const double v : vols) made->contoured_mm3 += v;
   // E's blend bands (SPEC 1.5): each seam asked as a blend and not fallen back.
   if (spec.sheet_seams)
     for (const SheetSeamBand& seam : *spec.sheet_seams) {
@@ -1859,17 +1908,24 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
       if (!kept.sheets || kept.sheets->key != spec.sheets || kept.sheets->seams_key != seams_key)
         kept.sheets = make_sheets(domain, lay, kept, spec, strut_run_on_mm(carved, spec));
       made = kept.sheets;
+      if (made->ok && made->joined && !spec.drop_at.empty() && made->body_freed)   // made again, to leave things out
+        made = kept.sheets = make_sheets(domain, lay, kept, spec, strut_run_on_mm(carved, spec));
       if (made->ok && !made->joined && spec.drop_at.empty()) {
         const auto tu = std::chrono::steady_clock::now();
         made->with_solid = made->body.IsEmpty() ? kept.solid : fresh(kept.solid + made->body);
         made->joined = true;
         made->ms_union = ms_since(tu);
+        // Memory: the sheets alone are not read again unless a pass leaves part of the solid out (never for a sheet
+        // file: its print check posts, it leaves nothing out), and then they are made again.
+        made->body = Manifold();
+        made->body_freed = true;
       }
     }
     check(stop);
     rep.sheet_blocks = made->blocks;
     rep.sheet_triangles = made->triangles;
     rep.sheet_places = made->places;
+    rep.sheet_contoured_mm3 = made->contoured_mm3;
     rep.sheet_deviation_mm = made->deviation_mm;
     rep.sheet_mm3 = made->mm3;
     rep.ms_sheets = made->ms;
