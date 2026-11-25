@@ -250,7 +250,7 @@ int main() {
         }
         if (fl & SheetCellRecord::kUnderFloor) {
           ++under;
-          CHECK(c.cell_across[i] > 0 && c.cell_across[i] < c.floor_cells && !c.cell_credit[i]);
+          CHECK(c.cell_across[i] >= 0 && c.cell_across[i] < c.floor_cells && !c.cell_credit[i]);
           // RED: with the floor read as 1, a whole cell in the band would be credited.
           if (!x.cut && !(fl & SheetCellRecord::kOutOfBand)) ++plate_ok_at_one;
         }

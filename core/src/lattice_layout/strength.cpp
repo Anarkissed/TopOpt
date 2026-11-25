@@ -235,7 +235,8 @@ void judge_sheet_cells(const Layout& layout, const Domain& domain, const SheetSe
                              ? static_cast<int>(std::floor(room / c.size + 1e-9))
                              : 0;
       out.cell_across[ci] = across;
-      const bool under = s.floor_cells > 0.0 && across > 0 && across < s.floor_cells;
+      // Read (some point of the cell's lattice measured): a member thinner than one cell is under the floor too (0 across).
+      const bool under = s.floor_cells > 0.0 && std::isfinite(room) && across < s.floor_cells;
       const int fi = s.field_of_cell[ci];
       bool blend = false;
       for (const Vec3& p : pts)

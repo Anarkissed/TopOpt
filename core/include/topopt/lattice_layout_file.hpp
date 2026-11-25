@@ -191,7 +191,8 @@ struct LatticeCredit {
 // fields are the layout's own (sheet_fields, as Outcome::sheets), the blend seams every touching pair
 // (sheet_seams) that Layout::membrane does not make a solid wall. Per cell: no credit when it is cut (until D's
 // tables and the reviewer's ruling, kSheetCutCellsCredited), when the member there holds fewer than the floor of
-// cells across (cell_across, read by Domain::Probe::room_through at the cell's held points), or when its own wall's
+// cells across (cell_across, read by Domain::Probe::room_through at the cell's held points; a member thinner than one
+// cell reads 0 and is under it too; a cell none of whose points is held is not read), or when its own wall's
 // density is out of the type's band (reported as for struts). Per voxel held by a cell that may be credited: its own
 // density, lattice_density_from_strut(type, the cell, half of sheet_wall_at(the voxel centre)), banded per voxel
 // (voxel_rho); no credit inside a blend band (|sheet_seam_mm| under half the band: blend_band, SPEC 1.5); a voxel the
