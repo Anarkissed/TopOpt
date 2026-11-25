@@ -744,8 +744,112 @@ void turn_file_job_inputs(const PrintFrame& f, FileJob& job) {
   turn_layout_inputs(f, job.settings, job.tensor_field);
   // Up IS +Z inside the door: the grower, the floor and the bed read the print frame's own up (the job never states
   // another: "build_dir" is not a job key).
-  job.organic.build_dir = {0.0, 0.0, 1.0};
-  for (OrganicGroup& g : job.organic_groups) g.ask.build_dir = {0.0, 0.0, 1.0};
+  turn_organic_asks(f, &job.organic, &job.organic_groups);
+}
+
+// ★ notes29 (lattice_layout_file.hpp): the file job's door, shared with the iPad's session.
+void open_in_print_frame(PrintFrame& f, StepModel& model) {
+  if (!f.on) return;
+  print_frame_set_base(f, model.mesh);
+  if (!(g_print_frame_test_skip & kSkipModel)) turn_step_model(f, model);
+}
+
+void turn_organic_asks(const PrintFrame& f, OrganicAsk* ask, std::vector<OrganicGroup>* groups) {
+  if (!f.on) return;
+  if (ask) ask->build_dir = {0.0, 0.0, 1.0};
+  if (groups)
+    for (OrganicGroup& g : *groups) g.ask.build_dir = {0.0, 0.0, 1.0};
+}
+
+namespace {
+// One turn of a lay's outputs, either way (to the print frame, or back to the model frame).
+struct Turn {
+  const PrintFrame& f;
+  bool to_print;
+  Vec3 p(const Vec3& v) const { return to_print ? f.point_to_print(v) : f.point_to_model(v); }
+  Vec3 d(const Vec3& v) const { return to_print ? f.dir_to_print(v) : f.dir_to_model(v); }
+  void box(Vec3& lo, Vec3& hi) const {
+    if (to_print) f.box_to_print(lo, hi);
+    else f.box_to_model(lo, hi);
+  }
+  void all(std::vector<Vec3>& v) const {
+    for (Vec3& x : v) x = p(x);
+  }
+  // Six numbers by axis side (-x, +x, -y, +y, -z, +z), re-labelled: print axis a, side s (0 -, 1 +) is model axis
+  // perm[a], its side flipped when sign[a] < 0 (axis_six_to_model). A general turn keeps the print frame's own axes.
+  void six(double s[6]) const {
+    if (!f.exact) return;
+    double out[6];
+    for (int a = 0; a < 3; ++a)
+      for (int k = 0; k < 2; ++k) {
+        const int m = 2 * f.perm[a] + (f.sign[a] > 0 ? k : 1 - k), q = 2 * a + k;
+        if (to_print) out[q] = s[m];
+        else out[m] = s[q];
+      }
+    for (int q = 0; q < 6; ++q) s[q] = out[q];
+  }
+};
+
+void turn_outcome(const PrintFrame& f, bool to_print, Outcome& o) {
+  if (!f.on) return;
+  const Turn T{f, to_print};
+  for (Bar& b : o.bars.bars) {
+    b.a = T.p(b.a);
+    b.b = T.p(b.b);
+    b.flat = T.d(b.flat);
+  }
+  for (Bars::CutEnd& c : o.bars.cut_in_air) c.at = T.p(c.at);
+  Layout& L = o.layout;
+  for (Frame& fr : L.frames) {
+    fr.origin = T.p(fr.origin);
+    for (Vec3& a : fr.ax) a = T.d(a);
+  }
+  if (L.index) L.index = index_cells(L, L.index->pitch);   // its slots are places
+  for (SteppedEdge& e : o.stepped_edges) {
+    e.at = T.p(e.at);
+    T.box(e.lo, e.hi);
+  }
+  T.all(o.guard.outside_at);
+  T.all(o.guard.in_solid_at);
+  T.all(o.guard.removed_at);
+  T.all(o.relief.thin_zone_solid_dropped_at);
+  T.six(o.relief.grew_mm);
+  if (o.grown) {
+    auto g = std::make_shared<GrowReport>(*o.grown);
+    for (GrowReport::WallRefused& w : g->wall_refused_at) w.at = T.p(w.at);
+    for (GrowReport::Stub& s : g->stubs) {
+      s.root = T.p(s.root);
+      s.top = T.p(s.top);
+      T.all(s.pts);
+    }
+    // face_hits (+x, -x, +y, -y, +z, none: the sides a tip left by, never -z, as it climbs) stays in the print frame's
+    // own axes: its +z IS the up there, and the model frame has no slot for the sides it would turn into.
+    o.grown = std::move(g);
+  }
+}
+
+void turn_preview(const PrintFrame& f, bool to_print, OrganicPreview& p) {
+  if (!f.on) return;
+  turn_outcome(f, to_print, p.outcome);
+  const Turn T{f, to_print};
+  for (WeaveRun& r : p.runs) T.all(r.points);
+  T.all(p.flat_ends);
+}
+}  // namespace
+
+void turn_outcome_to_model(const PrintFrame& f, Outcome& o) { turn_outcome(f, false, o); }
+void turn_outcome_to_print(const PrintFrame& f, Outcome& o) { turn_outcome(f, true, o); }
+void turn_preview_to_model(const PrintFrame& f, OrganicPreview& p) { turn_preview(f, false, p); }
+void turn_preview_to_print(const PrintFrame& f, OrganicPreview& p) { turn_preview(f, true, p); }
+
+void turn_growth_to_model(const PrintFrame& f, GrowthTap::Read& r) {
+  if (!f.on) return;
+  for (std::size_t i = 0; i + 2 < r.xyz.size(); i += 3) {
+    const Vec3 m = f.point_to_model({r.xyz[i], r.xyz[i + 1], r.xyz[i + 2]});
+    r.xyz[i] = static_cast<float>(m.x);
+    r.xyz[i + 1] = static_cast<float>(m.y);
+    r.xyz[i + 2] = static_cast<float>(m.z);
+  }
 }
 
 void turn_result_to_model(const PrintFrame& f, FileResult& r) {
