@@ -8,6 +8,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -273,6 +274,11 @@ ll::Settings settings_from(const LatticeLayoutSettings& in) {
   s.drop_loose = in.drop_loose;
   s.small_cells_in_thin_walls = in.small_cells_in_thin_walls;
   s.one_grid = in.one_grid;
+  // ★ SHEETS (the contract's bridge additions): "Where regions meet" and Auto's wall by the cell (read for a sheet only)
+  if (in.sheet_seam == "blend") s.sheet_seam = ll::SheetSeam::Blend;
+  else if (in.sheet_seam == "solid_wall" || in.sheet_seam.empty()) s.sheet_seam = ll::SheetSeam::SolidWall;
+  else throw std::invalid_argument("lattice layout: sheet_seam \"" + in.sheet_seam + "\" is not blend or solid_wall");
+  s.struts.auto_by_cell = in.auto_by_cell;
   return s;
 }
 
@@ -356,6 +362,15 @@ void fill(LatticeLayoutResult& o, const ll::Outcome& out) {
   o.ms_read = out.ms_read;
   o.ms_cells = out.ms_cells;
   o.ms_bars = out.ms_bars;
+  // ★ SHEETS: the laid fields and their seams, in the contract's flat form (empty for a strut type)
+  if (!out.sheets.empty()) {
+    const ll::SheetsFlat f = ll::flatten_sheets(out.sheets, out.sheet_seams);
+    o.sheet_region = f.region; o.sheet_frame = f.frame; o.sheet_kind = f.kind; o.sheet_axes = f.axes;
+    o.sheet_anchor = f.anchor; o.sheet_cell_mm = f.cell_mm; o.sheet_n = f.n; o.sheet_lo = f.lo;
+    o.sheet_wall_count = f.wall_count; o.sheet_wall_mm = f.wall_mm; o.sheet_wall_range = f.wall_range;
+    o.sheet_seam_ab = f.seam_ab; o.sheet_seam_band_mm = f.seam_band_mm; o.sheet_seam_raise_mm = f.seam_raise_mm;
+    o.sheet_seam_solid = f.seam_solid; o.sheet_seam_fell_back = f.seam_fell_back; o.sheet_seam_why = f.seam_why;
+  }
 }
 
 void failed(BridgeError& err, const std::string& why) {
@@ -830,6 +845,51 @@ LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float ori
     const ll::SolidAt& solid_at = *s->solid_at;
     const std::size_t n = static_cast<std::size_t>(nx) * ny * nz;
     std::vector<uint8_t> cls(n, 0);   // 0 outside, 1 solid, 2 open
+    // ★ SHEETS (builder B): the region and seam channels. For a sheet layout the cell that holds each open voxel is
+    // found here (the same first-in-layout-order search SolidAt makes, so open and solid are unchanged), and its field.
+    const ll::Outcome& out = *s->last;
+    const ll::Layout& lay = out.layout;
+    const bool sheets = !out.sheets.empty();
+    std::vector<uint8_t> field;                       // per voxel, 255 none
+    std::vector<int> field_of_cell;                   // per layout cell, its field (-1 none)
+    std::vector<std::vector<std::size_t>> blend_of;   // per field, its blend seams
+    std::shared_ptr<const ll::CellIndex> own_index;
+    if (sheets) {
+      field.assign(n, 255);
+      field_of_cell.assign(lay.cells.size(), -1);
+      for (std::size_t ci = 0; ci < lay.cells.size(); ++ci)
+        for (std::size_t f = 0; f < out.sheets.size() && f < 255; ++f)
+          if (out.sheets[f].region == lay.cells[ci].region && out.sheets[f].frame == lay.cells[ci].frame) {
+            field_of_cell[ci] = static_cast<int>(f);
+            break;
+          }
+      blend_of.assign(out.sheets.size(), {});
+      for (std::size_t k = 0; k < out.sheet_seams.size() && k < 255; ++k) {
+        const ll::SheetSeamBand& b = out.sheet_seams[k];
+        if (b.solid_wall || b.a < 0 || b.b < 0) continue;
+        if (static_cast<std::size_t>(b.a) < blend_of.size()) blend_of[static_cast<std::size_t>(b.a)].push_back(k);
+        if (static_cast<std::size_t>(b.b) < blend_of.size()) blend_of[static_cast<std::size_t>(b.b)].push_back(k);
+      }
+      own_index = ll::index_cells(lay);   // SolidAt's own filing of the cells (pitch 4, each cube's box, cell order)
+    }
+    const ll::CellIndex* index = own_index.get();
+    // The holding cell's field at an open point of region `id` (SolidAt's own search: a cell of that region, or any
+    // with Layout::absorb, whose lattice holds p; -1 none: solid).
+    auto held_field = [&](const ll::Domain::Probe& probe, const topopt::Vec3& p, int id, bool* held) -> int {
+      *held = false;
+      const auto it = index->grid.find({static_cast<long long>(std::floor(p.x / index->pitch)),
+                                        static_cast<long long>(std::floor(p.y / index->pitch)),
+                                        static_cast<long long>(std::floor(p.z / index->pitch))});
+      if (it == index->grid.end()) return -1;
+      for (std::uint32_t ci : it->second) {
+        const ll::Cell& c = lay.cells[ci];
+        if ((c.region == id || lay.absorb) && ll::cell_holds(lay, probe, c, p)) {
+          *held = true;
+          return field_of_cell[ci];
+        }
+      }
+      return -1;
+    };
     std::atomic<int32_t> next{0};
     std::array<int64_t, 5> nocell_total{};
     std::mutex nocell_mu;
@@ -843,12 +903,20 @@ LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float ori
             const topopt::Vec3 p{origin_x + voxel_mm * x, origin_y + voxel_mm * y, origin_z + voxel_mm * z};
             const ll::Where w = probe.where(p);
             uint8_t c = 1;
+            const std::size_t i = (static_cast<std::size_t>(z) * ny + y) * nx + x;
             if (w.why == ll::Why::Outside) c = 0;
             else if (w.why == ll::Why::Lattice) {
-              c = solid_at(probe, p, w) ? 3 : 2;   // 3: asked for, no cell holds it (D14: solid)
+              if (sheets && !lay.is_weave(w.id)) {   // (a weave's lattice is open and no field's: SolidAt O1)
+                bool held = false;
+                const int f = held_field(probe, p, w.id, &held);
+                c = held ? 2 : 3;
+                if (held && f >= 0) field[i] = static_cast<uint8_t>(f);
+              } else {
+                c = solid_at(probe, p, w) ? 3 : 2;   // 3: asked for, no cell holds it (D14: solid)
+              }
               if (c == 3) ++local[std::min<std::size_t>(4, static_cast<std::size_t>(solid_at.why(probe, p).why))];
             }
-            cls[(static_cast<std::size_t>(z) * ny + y) * nx + x] = c;
+            cls[i] = c;
           }
         }
       }
@@ -883,6 +951,56 @@ LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float ori
           o.rg[2 * i] = open ? 127 : -127;
           o.rg[2 * i + 1] = c != 0 ? 127 : -127;
         }
+    if (sheets) {
+      // The region channel at the opening: an outside voxel opened by an open neighbour takes that neighbour's field.
+      auto open_field = [&](int32_t x, int32_t y, int32_t z) -> uint8_t {
+        if (x < 0 || y < 0 || z < 0 || x >= nx || y >= ny || z >= nz) return 255;
+        const std::size_t j = (static_cast<std::size_t>(z) * ny + y) * nx + x;
+        return cls[j] == 2 ? field[j] : 255;
+      };
+      for (int32_t z = 0; z < nz; ++z)
+        for (int32_t y = 0; y < ny; ++y)
+          for (int32_t x = 0; x < nx; ++x) {
+            const std::size_t i = (static_cast<std::size_t>(z) * ny + y) * nx + x;
+            if (cls[i] != 0 || o.rg[2 * i] != 127) continue;
+            for (const uint8_t f : {open_field(x - 1, y, z), open_field(x + 1, y, z), open_field(x, y - 1, z),
+                                    open_field(x, y + 1, z), open_field(x, y, z - 1), open_field(x, y, z + 1)})
+              if (f != 255) { field[i] = f; break; }
+          }
+      // The seam channel: per voxel with a field, its nearest blend seam across (core's sheet_seam_mm), on every core.
+      std::vector<uint8_t> seam(n, 255);
+      std::vector<float> seam_mm(n, 0.0f);
+      bool any_blend = false;
+      for (const auto& b : blend_of) any_blend = any_blend || !b.empty();
+      if (any_blend) {
+        std::atomic<int32_t> zn{0};
+        auto seams = [&] {
+          for (int32_t z = zn++; z < nz; z = zn++)
+            for (int32_t y = 0; y < ny; ++y)
+              for (int32_t x = 0; x < nx; ++x) {
+                const std::size_t i = (static_cast<std::size_t>(z) * ny + y) * nx + x;
+                if (field[i] == 255) continue;
+                const topopt::Vec3 p{origin_x + voxel_mm * x, origin_y + voxel_mm * y, origin_z + voxel_mm * z};
+                double best = std::numeric_limits<double>::infinity();
+                for (const std::size_t k : blend_of[field[i]]) {
+                  const double m = ll::sheet_seam_mm(*domain, out.sheet_seams[k], p);
+                  if (std::isfinite(m) && std::fabs(m) < std::fabs(best)) {
+                    best = m;
+                    seam[i] = static_cast<uint8_t>(k);
+                  }
+                }
+                if (seam[i] != 255) seam_mm[i] = static_cast<float>(best);
+              }
+        };
+        std::vector<std::thread> pool2;
+        for (unsigned t = 1; t < threads; ++t) pool2.emplace_back(seams);
+        seams();
+        for (auto& t : pool2) t.join();
+      }
+      o.sheet_field = std::move(field);
+      o.sheet_seam = std::move(seam);
+      o.sheet_seam_mm = std::move(seam_mm);
+    }
     o.nocell.assign(nocell_total.begin(), nocell_total.end());
     o.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
   });
@@ -994,8 +1112,18 @@ LatticeLayoutTypeFacts lattice_layout_type_facts(const std::string& topology) {
   LatticeLayoutTypeFacts f;
   const std::string why = bridge_guard_run("lattice_layout_type_facts", [&] {
     const topopt::LatticeTopology topo = topopt::lattice_topology_from_id(topology);
-    if (topopt::lattice_topology_is_sheet(topo))
-      throw std::invalid_argument("\"" + topology + "\" is a sheet type: the engine lays strut types only");
+    if (ll::sheet_kind_of(topo)) {
+      // ★ SHEETS (notes28 sheets SPEC 5): the engine lays a sheet on its cells, with one field per region (no struts)
+      const topopt::LatticeWidthBounds b = topopt::lattice_width_bounds(topo);
+      f.open_look = b.open_look;
+      f.touch = b.touch;
+      f.family = ll::lattice_family(topo);
+      f.structural_floor_cells = ll::sheet_structural_floor_cells(topo);
+      f.floor_cell_mm = ll::sheet_floor_cell_mm(topo, 2.0 * 0.45);   // two lines of a 0.45 mm line (the contract)
+      f.auto_cell_cap_mm = ll::auto_cell_cap_mm(topo);
+      f.lays = true;
+      return;
+    }
     // The engine's own two questions, in the order a lay asks them (cells.cpp: the width bounds; bars.cpp: the cell).
     const topopt::LatticeWidthBounds b = topopt::lattice_width_bounds(topo);
     if (!topopt::lattice_has_strut_cell(topo))
@@ -1010,6 +1138,8 @@ LatticeLayoutTypeFacts lattice_layout_type_facts(const std::string& topology) {
     f.nodes.reserve(3 * cell.nodes.size());
     for (const topopt::StrutCellPoint& n : cell.nodes)
       for (int v : {n.x, n.y, n.z}) f.nodes.push_back(v);
+    f.family = ll::lattice_family(topo);
+    f.auto_cell_cap_mm = ll::auto_cell_cap_mm(topo);
     f.lays = true;
   });
   if (!why.empty()) {
@@ -1024,6 +1154,97 @@ LatticeLayoutTypeFacts lattice_layout_type_facts(const std::string& topology) {
     f.structural_note = ll::structural_note(topo);
   });
   return f;
+}
+
+// ★ SHEETS: the wall law sampled for the GPU and the Swift field (LatticeLayoutBridge.hpp)
+std::vector<double> lattice_layout_sheet_param_table(const std::string& topology, int32_t n, double max_share) {
+  std::vector<double> out;
+  const std::string why = bridge_guard_run("lattice_layout_sheet_param_table", [&] {
+    const topopt::LatticeTopology topo = topopt::lattice_topology_from_id(topology);
+    if (!ll::sheet_kind_of(topo) || n < 1 || !(max_share > 0.0)) return;
+    out.reserve(static_cast<size_t>(n) + 1);
+    out.push_back(0.0);   // no wall, no parameter (the law runs through the origin below its first row)
+    for (int32_t i = 1; i <= n; ++i) {
+      const double share = max_share * static_cast<double>(i) / static_cast<double>(n);
+      out.push_back(topopt::lattice_sheet_wall_param_mm(topo, share, 1.0));   // over a 1 mm cell: the parameter's share
+    }
+  });
+  if (!why.empty()) out.clear();
+  return out;
+}
+
+namespace {
+ll::SheetField sheet_from_probe(const LatticeLayoutSheetProbe& p) {
+  if (p.axes.size() != 12 || p.anchor.size() != 3 || p.n.size() != 3 || p.lo.size() != 3)
+    throw std::invalid_argument("sheet probe: a field needs 12 axes, 3 anchor, 3 n and 3 lo numbers");
+  ll::SheetField s;
+  s.kind = p.kind == 1 ? topopt::TpmsKind::SchwarzD : topopt::TpmsKind::Gyroid;
+  s.axes.origin = {p.axes[0], p.axes[1], p.axes[2]};
+  for (int k = 0; k < 3; ++k) s.axes.ax[k] = {p.axes[3 + 3 * k], p.axes[4 + 3 * k], p.axes[5 + 3 * k]};
+  for (int k = 0; k < 3; ++k) {
+    s.anchor[k] = p.anchor[k];
+    s.n[k] = p.n[k];
+    s.lo[k] = p.lo[k];
+  }
+  s.cell_mm = p.cell_mm;
+  const size_t want = static_cast<size_t>(std::max(1, s.n[0])) * static_cast<size_t>(std::max(1, s.n[1])) *
+                      static_cast<size_t>(std::max(1, s.n[2]));
+  if (p.wall_mm.size() != want) throw std::invalid_argument("sheet probe: wall_mm is not n0 * n1 * n2 values");
+  s.wall_mm.assign(p.wall_mm.begin(), p.wall_mm.end());
+  return s;
+}
+}  // namespace
+
+std::vector<double> lattice_layout_sheet_probe(const LatticeLayoutSheetProbe& probe, BridgeError& err) {
+  std::vector<double> out;
+  const std::string why = bridge_guard_run("lattice_layout_sheet_probe", [&] {
+    const ll::SheetField s = sheet_from_probe(probe);
+    out.reserve(probe.xyz.size() / 3);
+    for (size_t i = 0; i + 2 < probe.xyz.size(); i += 3) {
+      const topopt::Vec3 p{probe.xyz[i], probe.xyz[i + 1], probe.xyz[i + 2]};
+      out.push_back(probe.wall ? ll::sheet_wall_at(s, p) : ll::sheet_distance_at(s, p));
+    }
+  });
+  if (!why.empty()) {
+    out.clear();
+    failed(err, why);
+  }
+  return out;
+}
+
+LatticeSheetCells lattice_sheet_cells_read(const std::string& path) {
+  LatticeSheetCells o;
+  const std::string why = bridge_guard_run("lattice_sheet_cells_read", [&] {
+    ll::SheetCellsFile f;
+    std::string refused;
+    if (!ll::read_sheet_cells_file(path, f, &refused)) {
+      o.why = refused.empty() ? std::string("not a sheet_cells.bin") : refused;
+      return;
+    }
+    for (const ll::Frame& fr : f.frames) {
+      put(o.frames, fr.origin);
+      for (const topopt::Vec3& a : fr.ax) put(o.frames, a);
+    }
+    const size_t n = f.cells.size();
+    o.region.reserve(n); o.frame.reserve(n); o.lo.reserve(3 * n); o.size_mm.reserve(n); o.wall_mm.reserve(n);
+    o.cells_across.reserve(n); o.margin.reserve(n); o.flags.reserve(n);
+    for (const ll::SheetCellRecord& c : f.cells) {
+      o.region.push_back(c.region);
+      o.frame.push_back(c.frame);
+      for (float v : c.lo) o.lo.push_back(v);
+      o.size_mm.push_back(c.size_mm);
+      o.wall_mm.push_back(c.wall_mm);
+      o.cells_across.push_back(c.cells_across);
+      o.margin.push_back(c.margin);
+      o.flags.push_back(c.flags);
+    }
+    o.ok = true;
+  });
+  if (!why.empty()) {
+    o = LatticeSheetCells{};
+    o.why = why;
+  }
+  return o;
 }
 
 void lattice_layout_cancel(int64_t session) {

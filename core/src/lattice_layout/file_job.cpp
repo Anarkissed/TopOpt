@@ -1657,6 +1657,26 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
         r.detail = sd.detail;
         return done();
       }
+      // SHEETS (SPEC 1.6; builder B): sheet_cells.bin beside strength.json, its key "sheet_cells" in the block. The check
+      // writes it with its margins (write_sheet_check_files); when it did not, the cells are judged here (cells across,
+      // flags) and their margins left NaN (not judged), so the app always finds the file a sheet's block names.
+      if (!made_from->sheets.empty() &&
+          std::find(sd.files.begin(), sd.files.end(), std::string(kSheetCellsName)) == sd.files.end()) {
+        const LatticeCredit cells = lattice_credit_cells(made_from->layout, *session.domain(), job.options.threads);
+        const SheetCheckFiles sw = write_sheet_check_files(ask.out_dir, made_from->layout, cells, {}, job.print_frame);
+        if (!sw.ok) {
+          std::remove(file_path.c_str());
+          for (const std::string& f : sd.files) std::remove((ask.out_dir + "/" + f).c_str());
+          r.ok = false;
+          r.code = "strength_failed";
+          r.exit_code = 1;
+          r.why = "The lattice's strength could not be checked, so no file was made.";
+          r.detail = sw.why;
+          return done();
+        }
+        sd.files.push_back(sw.file);
+        sd.json = strength_block_with(sd.json, sw.keys);
+      }
       r.strength_ran = true;
       r.strength_accepted = sd.accepted;
       r.strength_json = sd.json;

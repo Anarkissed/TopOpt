@@ -176,12 +176,47 @@ struct LatticeCredit {
   std::vector<float> voxel_rho;
   std::vector<std::int32_t> cell_across;
   std::size_t blend_band = 0, membrane = 0;
+  // SHEETS (builder B, additive): per layout cell its sheet_cells.bin flags (SheetCellRecord::kCredited, kCut,
+  // kBlendBand, kOutOfBand, kUnderFloor, kMembrane); the floor it was judged by, in cells across
+  // (sheet_structural_floor_cells: 10 / 9 until builder D's tables); the cells under it (no credit, SPEC 3.3); the
+  // voxels credited. Empty / 0 for a strut type.
+  std::vector<std::uint32_t> cell_flags;
+  double floor_cells = 0.0;
+  std::size_t under_floor = 0, voxels_credited = 0;
 };
 // `solid`, when given, names the voxels to read (the part's); the rest are left -1. `left_out_at` is the file's
 // FileReport::left_out_at (the places the mesh writer left bars out for). Same answer for any number of threads.
+//
+// SHEETS (SPEC 1.4, 1.5, 3.3; builder B). For a sheet layout (sheet_kind_of) the same call credits by PLACE: the
+// fields are the layout's own (sheet_fields, as Outcome::sheets), the blend seams every touching pair
+// (sheet_seams) that Layout::membrane does not make a solid wall. Per cell: no credit when it is cut (until D's
+// tables and the reviewer's ruling, kSheetCutCellsCredited), when the member there holds fewer than the floor of
+// cells across (cell_across, read by Domain::Probe::room_through at the cell's held points; a member thinner than one
+// cell reads 0 and is under it too; a cell none of whose points is held is not read), or when its own wall's
+// density is out of the type's band (reported as for struts). Per voxel held by a cell that may be credited: its own
+// density, lattice_density_from_strut(type, the cell, half of sheet_wall_at(the voxel centre)), banded per voxel
+// (voxel_rho); no credit inside a blend band (|sheet_seam_mm| under half the band: blend_band, SPEC 1.5); a voxel the
+// solid-wall membrane keeps from every cell is counted (membrane) and is solid in the check, as everything else
+// no cell holds. `bars` and `left_out_at` are not read for a sheet (it has none).
 LatticeCredit lattice_credit(const Layout& layout, const Domain& domain, const Bars& bars,
                              const std::vector<Vec3>& left_out_at, const CreditGrid& grid,
                              const std::vector<char>* solid = nullptr, int threads = 0);
+// SPEC 3.3: a cut sheet cell is credited only with builder D's cut-layer rows in the law and the reviewer's ruling.
+inline constexpr bool kSheetCutCellsCredited = false;
+// The per-cell half of lattice_credit for a sheet layout, with no voxel grid: cell_credit, cell_rho, cell_across,
+// cell_flags and the cell counts (the per-voxel vectors stay empty). The file job reads it for sheet_cells.bin when the
+// check did not write one. For a strut layout: empty.
+LatticeCredit lattice_credit_cells(const Layout& layout, const Domain& domain, int threads = 0);
+
+// THE CHECK'S MARGIN PER VOXEL by the type's strut law (strut_strength.hpp: the bound the check's strut result reads,
+// Kd vm + Kv |p| in the plane and Kild vm + Kilv |p| + the off-axis term across the layers, at the density each
+// voxel is credited with: LatticeCredit::voxel_rho, else its cell's): min(yield / in-plane bound, z_knockdown x yield /
+// interlayer bound), +infinity where nothing loads it; NaN where the voxel is not credited, or the type has no law.
+// `stress_tensor_field` 6 per voxel of the credit's grid (Voigt [xx yy zz xy yz zx], true shear, MPa: the composite
+// solve's FixedDesignAnalysis::stress_tensor_field). Throws std::invalid_argument when the sizes disagree.
+std::vector<float> lattice_voxel_margins(LatticeTopology topo, const LatticeCredit& credit,
+                                         const std::vector<double>& stress_tensor_field, const Vec3& build_dir,
+                                         double yield_mpa, double z_knockdown);
 
 // What the file job hands the check, once its file is made.
 struct StrengthAsk {
@@ -527,6 +562,32 @@ bool write_sheet_cells_file(const std::string& path, const SheetCellsFile& f);
 // Refuses a wrong magic, a file not exactly the size its counts need, a frame index out of range, a number that is not
 // finite (but a NaN margin); `why` says which.
 bool read_sheet_cells_file(const std::string& path, SheetCellsFile& out, std::string* why = nullptr);
+
+// SHEETS (builder B): sheet_cells.bin AS THE CHECK JUDGED IT: sheet_cells_of's records, each with its cells across
+// (LatticeCredit::cell_across), its flags (cell_flags; kCut kept) and its margin, the smallest of `voxel_margin` over
+// the voxels the cell holds (LatticeCredit::cell; lattice_voxel_margins: NaN where none is judged). `voxel_margin`
+// empty: every margin NaN (the cells judged, the margins not). The credit must be of this layout.
+SheetCellsFile sheet_cells_judged(const Layout& layout, const LatticeCredit& credit,
+                                  const std::vector<float>& voxel_margin, const PrintFrame& frame = PrintFrame{});
+// What the check writes for a sheet job beside strength.json: sheet_cells.bin (sheet_cells_judged) in `out_dir`, and
+// the strength block's sheet keys, as `keys` (lines of the block, each indented four spaces and ending ",\n"):
+//   "sheet_cells": "sheet_cells.bin",       the file, by its bare name (THE KEY the app fetches it by)
+//   "sheet_credit": {"cells", "cells_credited", "cells_cut", "cells_out_of_band", "cells_under_floor",
+//                    "cells_in_blend_band", "cells_by_membrane": counts of cells by their flags;
+//                    "floor_cells": the floor judged by; "cut_cells_credited": kSheetCutCellsCredited;
+//                    "voxels_credited", "voxels_blend_band", "voxels_membrane": the voxel counts (null with no grid);
+//                    "margins": true when the records carry the check's margins}
+// For a strut layout nothing is written (`file` and `keys` empty). Not ok: `why` (the file could not be written).
+struct SheetCheckFiles {
+  bool ok = true;
+  std::string why;
+  std::string file;   // kSheetCellsName when written
+  std::string keys;
+};
+SheetCheckFiles write_sheet_check_files(const std::string& out_dir, const Layout& layout, const LatticeCredit& credit,
+                                        const std::vector<float>& voxel_margin, const PrintFrame& frame = PrintFrame{});
+// The strength block (an object's text, "{" first) with `keys` (write_sheet_check_files) put in right after its "{".
+std::string strength_block_with(const std::string& block, const std::string& keys);
 
 // The result file's name, and its text.
 inline constexpr const char* kFileResultName = "lattice_file.json";
