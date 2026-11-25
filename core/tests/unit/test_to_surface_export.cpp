@@ -319,6 +319,54 @@ int main(int argc, char** argv) {
     if (used < 100) ++failures;
     if (gate && !f_ok) ++failures;
   }
+  // ── J, the two cases his stand forced: neighbours that touch only along an edge
+  // (two stamped voxels; two keep regions) must fuse, not meet on a line. NOTE: an
+  // isolated diagonal pair is already joined by the Catmull-Rom overshoot, so the
+  // stamp half of this passes even without the 0.01 mm fusing; the stand's own
+  // configurations (larger patterns) are checked by its reference run. ─────────────
+  {
+    const manifold::Manifold box = manifold::Manifold::Cube(manifold::vec3(30, 30, 30), true)
+                                       .Translate(manifold::vec3(20, 20, 20));
+    const TriangleMesh drawn = from_manifold(box);
+    const VoxelGrid gj = voxelize(drawn, static_cast<int>(std::lround(30.0 / kVoxel)));
+    // The design keeps a slab along x = low and is void elsewhere; two voxels in the
+    // void are stamped solid and share only an edge, and so do two keep boxes.
+    MinimizePlasticVariant vj = make_version(gj, [&](const Vec3& p) { return p.x - 12.0; });
+    // The first voxel past the slab's face (x = 12) touches the slab; the second
+    // touches the first only along an edge. The keep boxes likewise.
+    const int i0 = static_cast<int>(std::ceil((12.0 - gj.origin.x) / gj.spacing - 0.5)),
+              j0 = gj.ny / 2, k0 = gj.nz / 2;
+    for (int d = 0; d < 2; ++d) {
+      const std::size_t c = (static_cast<std::size_t>(k0) * gj.ny + (j0 + d)) * gj.nx + (i0 + d);
+      vj.optimization.physical_density[c] = 1.0;
+    }
+    const double e = gj.spacing;
+    const Vec3 kc = gj.voxel_center(i0, j0 - 4, k0);
+    std::vector<KeepRegion> keeps(2);
+    for (int d = 0; d < 2; ++d) {
+      keeps[d].min = Vec3{11.5 + d * e, kc.y + d * e, kc.z - e};
+      keeps[d].max = Vec3{11.5 + (d + 1) * e, kc.y + (d + 1) * e, kc.z + e};
+    }
+    manifold::Manifold K;
+    for (const KeepRegion& k : keeps)  // as to_export.inc builds it: grown 0.01 mm
+      K = K + manifold::Manifold::Cube(manifold::vec3(k.max.x - k.min.x + 0.02, k.max.y - k.min.y + 0.02,
+                                                      k.max.z - k.min.z + 0.02))
+                  .Translate(manifold::vec3(k.min.x - 0.01, k.min.y - 0.01, k.min.z - 0.01));
+    const TriangleMesh ks = from_manifold(K);
+    std::string wj;
+    FunctionSurfaceReport rj;
+    const TriangleMesh fj = function_surface_mesh(vj, gj, drawn, 2, 0.5, &wj, &rj, nullptr,
+                                                  nullptr, &keeps, &ks);
+    const WrittenAudit aj = audit_as_written(fj);
+    const bool ok = !fj.triangles.empty() && aj.non_manifold_edges == 0 &&
+                    aj.boundary_edges == 0 && aj.non_manifold_vertices == 0;
+    std::printf("[test J] edge-touching stamps and keep regions: %lld stamped; open %d, 3+ %d, "
+                "point %d, bodies %d%s%s: %s\n",
+                rj.stamped_solid, aj.boundary_edges, aj.non_manifold_edges,
+                aj.non_manifold_vertices, aj.bodies, wj.empty() ? "" : ", ", wj.c_str(),
+                ok ? "ok" : "MISSED");
+    if (gate && !ok) ++failures;
+  }
   std::printf("[test B/F/J] %s: %d failure(s)\n", gate ? "gate" : "measure only", failures);
   return failures == 0 ? 0 : 1;
 }
