@@ -128,6 +128,11 @@ struct LatticeLayoutSettings {
   // axis 1 xyz, axis 2 xyz, half xyz (core's Zone: a cylinder's axis is axis 2, its radius half x, its half length
   // half z). Empty: no zones.
   std::vector<double> region_zone;
+  // ── SHEETS (notes28 sheets SPEC 1.3, 1.5; the contract's bridge additions, lattice_layout.hpp "THE BRIDGE'S FORM") ──
+  // Read for a sheet type only. "Where regions meet": "blend" | "solid_wall" (core's Settings::sheet_seam; the app sends
+  // Blend in Aesthetic and Solid wall in Structural). Auto's wall by the cell (StrutSpec::auto_by_cell; the app's Auto).
+  std::string sheet_seam = "solid_wall";
+  bool auto_by_cell = false;
 };
 
 struct LatticeLayoutResult {
@@ -180,6 +185,22 @@ struct LatticeLayoutResult {
   double stress_reference_mpa = 0.0, step_held_at = 0.0;
   int32_t thin_solid = 0;
   double ms_read = 0.0, ms_cells = 0.0, ms_bars = 0.0, ms_bridge = 0.0;
+  // ★ SHEETS (the contract's SheetsFlat, flatten_sheets(Outcome::sheets, Outcome::sheet_seams), under its own names
+  // prefixed "sheet_"): one entry per laid sheet field unless said; all empty for a strut type.
+  std::vector<int32_t> sheet_region, sheet_frame;
+  std::vector<uint8_t> sheet_kind;           // 0 gyroid, 1 schwarz_d
+  std::vector<float> sheet_axes;             // 12 per field: origin xyz, ax[0] xyz, ax[1] xyz, ax[2] xyz (part coordinates)
+  std::vector<float> sheet_anchor;           // 3 per field, frame mm
+  std::vector<float> sheet_cell_mm;
+  std::vector<int32_t> sheet_n;              // 3 per field
+  std::vector<float> sheet_lo;               // 3 per field, frame mm (the first centre)
+  std::vector<int32_t> sheet_wall_count;     // n0 * n1 * n2 per field
+  std::vector<float> sheet_wall_mm;          // every field's walls, one after another, x fastest (the 3D textures)
+  std::vector<float> sheet_wall_range;       // 2 per field: wall_min_mm, wall_max_mm
+  std::vector<int32_t> sheet_seam_ab;        // 2 per seam: the two field indices
+  std::vector<float> sheet_seam_band_mm, sheet_seam_raise_mm;
+  std::vector<uint8_t> sheet_seam_solid, sheet_seam_fell_back;
+  std::vector<std::string> sheet_seam_why;
 };
 
 // What is at each of a batch of points (the drawer's "is this lattice, rim or solid"; the blue glow's reasons): one
@@ -416,6 +437,10 @@ LatticeLayoutGrowth lattice_layout_growth_read(int64_t session, int64_t from, in
 // line: `structural_refusal` — Structural can never take it (the tetragonal three; the file job refuses such a job,
 // type_not_supported); `structural_note` — its measured strength law credits none of the struts the engine lays (today
 // bcc and sc; it clears by itself when the law is measured down to them).
+// ★ SHEETS (notes28 sheets SPEC 5, the contract's bridge additions): a sheet type (gyroid, schwarz_d) `lays` too, with
+// `family` "sheet" (lattice_family), its open look and touch (core's lattice_width_bounds), its Structural floor in cells
+// (sheet_structural_floor_cells: 10 / 9 until builder D's tables), its floor cell at two 0.45 mm lines
+// (sheet_floor_cell_mm), Auto's largest cell (auto_cell_cap_mm; +infinity when none) and no struts or nodes (s = 0).
 struct LatticeLayoutTypeFacts {
   bool lays = false;
   std::string why;
@@ -425,8 +450,46 @@ struct LatticeLayoutTypeFacts {
   std::vector<int32_t> nodes;
   std::string structural_refusal;
   std::string structural_note;
+  std::string family = "strut";
+  double structural_floor_cells = 0.0;
+  double floor_cell_mm = 0.0;
+  double auto_cell_cap_mm = 0.0;
 };
 LatticeLayoutTypeFacts lattice_layout_type_facts(const std::string& topology);
+
+// ★ SHEETS: the type's wall law as the GPU and the Swift field read it — core's lattice_sheet_wall_param_mm (the TRUE wall
+// → the field parameter, both linear in the cell), sampled at n + 1 evenly spaced walls over the cell from 0 to `max_share`
+// (wall / cell): value i is the parameter over the cell at wall / cell = max_share * i / n. Empty for a strut type or a bad
+// argument. Never throws.
+std::vector<double> lattice_layout_sheet_param_table(const std::string& topology, int32_t n, double max_share);
+// ★ SHEETS: core's own field at a batch of points (tests: the Swift copy and the shader against core): one field given flat
+// (its SheetsFlat entries), sheet_distance_at (or, `wall` true, sheet_wall_at) at each point (3 per point, part
+// coordinates). Empty with `err` set on a bad field.
+struct LatticeLayoutSheetProbe {
+  uint8_t kind = 0;
+  std::vector<float> axes;      // 12
+  std::vector<float> anchor;    // 3
+  float cell_mm = 0.0f;
+  std::vector<int32_t> n;       // 3
+  std::vector<float> lo;        // 3
+  std::vector<float> wall_mm;   // n0 * n1 * n2
+  std::vector<float> xyz;       // the points
+  bool wall = false;
+};
+std::vector<double> lattice_layout_sheet_probe(const LatticeLayoutSheetProbe& probe, BridgeError& err);
+
+// ★ SHEETS: sheet_cells.bin (lattice_layout_file.hpp, SPEC 1.6: the K4 colours and the Results card of a sheet, in place
+// of bars.bin), read by core's own reader (read_sheet_cells_file: its refusals). `ok` false with `why` when refused.
+struct LatticeSheetCells {
+  bool ok = false;
+  std::string why;
+  std::vector<float> frames;              // 12 per frame
+  std::vector<int32_t> region, frame;     // per cell
+  std::vector<float> lo;                  // 3 per cell, frame mm
+  std::vector<float> size_mm, wall_mm, cells_across, margin;   // per cell (margin NaN: not judged)
+  std::vector<uint32_t> flags;            // per cell: SheetCellRecord's bits
+};
+LatticeSheetCells lattice_sheet_cells_read(const std::string& path);
 
 // Every layout of `session` running now or waiting comes back cancelled. Safe from any thread.
 void lattice_layout_cancel(int64_t session);

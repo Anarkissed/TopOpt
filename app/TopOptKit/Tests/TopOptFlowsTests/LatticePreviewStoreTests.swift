@@ -191,10 +191,13 @@ final class LatticePreviewStoreTests: XCTestCase {
         XCTAssertEqual(n(OrganicVineShape.Params()), 6, "the vines' parameters")
         XCTAssertEqual(n(OrganicVineShape.Cut(planes: [], union: false)), 2)
         // (11: + fileMesh, 362's Mac print-accurate file — NOT kept here: the version's result holds that file)
-        XCTAssertEqual(n(LatticeLayoutBarsInputs(token: 0, bars: [])), 11, "what is drawn")
+        // ★ RE-PINNED 11 -> 12 (notes28 sheets, builder C): + sheets, a sheet layout's fields — NOT kept here: the store keeps
+        // finished Organic lattices only, and a sheet is never Organic
+        XCTAssertEqual(n(LatticeLayoutBarsInputs(token: 0, bars: [])), 12, "what is drawn")
         XCTAssertEqual(n(LatticeLayoutSolidGrid(token: 0, origin: .zero, voxel: 1, dims: .zero, rg: [])), 6)
         // ★ RE-PINNED (362 11-24: notes25 D10 added floorCellMM; the store now keeps it, format 2, and still reads 1)
-        XCTAssertEqual(n(LatticeLayoutColours.Laid()), 13)
+        // ★ RE-PINNED 13 -> 15 (notes28 sheets, builder C): + sheets, sheetSeams — never an Organic lattice's, so not kept
+        XCTAssertEqual(n(LatticeLayoutColours.Laid()), 15)
         XCTAssertEqual(n(LatticeLayoutPreview.Timing(openMS: 0, readMS: 0, cellsMS: 0, barsMS: 0, bars: 0)), 7)
         XCTAssertEqual(n(LatticeOrganicLook.Limits(strutLowerMM: 0, strutUpperMM: 0, strutAutoMM: 0, cellLowerMM: 0, cellUpperMM: 0,
                                                    cellAutoMM: 0)), 8)

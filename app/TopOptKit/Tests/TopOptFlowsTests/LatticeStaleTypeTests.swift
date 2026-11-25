@@ -180,8 +180,9 @@ final class LatticeStaleTypeTests: XCTestCase {
         func clear() { lock.lock(); log.removeAll(); lock.unlock() }
         // ★ RE-PINNED (release (2), E2): core builds every type it certifies now, so the stale set is the types core
         // runs whose app batch has not shipped (`LatticeTypeCatalog.appBatches`)
+        // ★ RE-PINNED (notes28 sheets, builder C): the OLD run's gate — the sheets ship on the new engine only
         let stale = Set(TopOptKit.latticeCertifiableTopologies + TopOptKit.latticeGeneratableTopologies)
-            .subtracting(LatticeTypeCatalog.appBatches)
+            .subtracting(LatticeTypeCatalog.oldRunBatches)
         XCTAssertFalse(stale.isEmpty, "positive control: core runs types the app has not shipped")
         for organic in [false, true] {
             let (p, _, _) = VariantFacePrismFixture.project(organic: organic)

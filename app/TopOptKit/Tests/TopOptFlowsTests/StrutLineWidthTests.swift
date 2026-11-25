@@ -363,9 +363,14 @@ final class StrutLineWidthTests: XCTestCase {
         //   * `LatticeSetupWizard.typeChangeLines` (the plain words before Save), `.pickType` (the page's two densities
         //     carried when a card is picked) and `.saveAndClose` (the densities stored per group and per face carried on Save).
         //   * `LatticePage`'s topology pane (the variant page's pick carries them the same way).
-        XCTAssertEqual(strutSites, 20,
-                       "the twenty audited lattice sites (AppModel 0, LatticePage 3, "
-                       + "WorkspacePlaceholder 4, ProjectModel 7, LatticeSetupWizard 6). "
+        // ★ RE-PINNED 20 -> 22 (2026-11-25, notes28 sheets, builder C): AUDITED. The Lattice page's two sheet wall rows
+        //   (`LatticeSetupWizard`: the Manual "Wall thickness" row's caption and the Auto wall row, both
+        //   `LatticeSheets.wallInfo(lineWidthMM:)`) say the thinnest wall, two lines of the STRUT bead (a sheet's wall is laid
+        //   by core's min_strut_mm, two strut lines), and Auto's wall at this cell (core's sheet_auto_wall_mm from the same
+        //   two lines). Never a wall loop.
+        XCTAssertEqual(strutSites, 22,
+                       "the twenty-two audited lattice sites (AppModel 0, LatticePage 3, "
+                       + "WorkspacePlaceholder 4, ProjectModel 7, LatticeSetupWizard 8). "
                        + "If this number moved, audit the new site and update the count.")
         XCTAssertTrue(offenders.isEmpty,
                       "lattice lineWidthMM site(s) reading a WALL bead:\n"

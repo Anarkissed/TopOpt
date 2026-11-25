@@ -31,6 +31,7 @@ public enum LatticeFileJob {
         "percentile": "percentile", "response": "response", "maxStep": "max_step",
         "bedFloorMM": "organic_bed_floor_mm",   // the flat floor (Organic only; written only when on)
         "cellSearch": "cell_search/stretch_edges",   // K7, K8 (Auto only; written only when on)
+        "sheetSeam": "sheet_seam", "autoByCell": "auto_by_cell",   // ★ SHEETS (written for a sheet type only)
     ]
 
     /// The stress result's name beside the job (core's top-level "demand"; the demand file format of 04-layout-file-job.md).
@@ -221,6 +222,12 @@ public enum LatticeFileJob {
         if s.bedFloorMM > 0 { layout["organic_bed_floor_mm"] = s.bedFloorMM }
         // K7, K8: Auto's cells fitted to the square faces; written only when on, so every other job is the bytes it was
         if s.cellSearch { layout["cell_search"] = true; layout["stretch_edges"] = true }
+        // ★ SHEETS (the contract's job keys): "Where regions meet" and Auto's wall by the cell, for a sheet type only, so every
+        // strut job is the bytes it was
+        if LatticeTypeCatalog.sheetIDs.contains(s.topology) {
+            layout["sheet_seam"] = s.sheetSeam
+            layout["auto_by_cell"] = s.autoByCell
+        }
         if s.byStress { layout["per_region"] = false }   // core refuses By stress with Per region
         // an area's own settings (C23), its Finish (S13), zones (D21): one entry per region, null where it states nothing
         func own(_ o: LatticeLayoutSession.AreaOwn) -> Any {

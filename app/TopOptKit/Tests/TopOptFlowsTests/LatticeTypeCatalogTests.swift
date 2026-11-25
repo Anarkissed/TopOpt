@@ -65,8 +65,12 @@ final class LatticeTypeCatalogTests: XCTestCase {
             XCTAssertEqual(e.first { $0.id == id }?.reason, "Not buildable or strength-checked yet", id)
         }
         XCTAssertTrue(TopOptKit.jobSchemaAcceptsTopology("octet"), "the control")
+        // ★ RE-PINNED (notes28 sheets, builder C): the sheets' batch shipped on the NEW engine only; the old run's gate
+        // (`oldRunBatches`, `batchShipped`) is the strut types, so this old-run catalog is as it was
         XCTAssertEqual(LatticeTypeCatalog.appBatches, ["octet", "sc", "bcc", "fcc", "diamond", "kelvin", "rhombic",
-                                                       "bccz", "fccz", "reentrant"])
+                                                       "bccz", "fccz", "reentrant", "gyroid", "schwarz_d"])
+        XCTAssertEqual(LatticeTypeCatalog.oldRunBatches, ["octet", "sc", "bcc", "fcc", "diamond", "kelvin", "rhombic",
+                                                          "bccz", "fccz", "reentrant"])
         XCTAssertEqual(LatticeSetupWizard.offeredTypeIDs, ["octet", "sc", "bcc", "fcc", "diamond", "kelvin", "rhombic"])
         // RED CONTROL: behind the old gate the octet alone was offered
         LatticeTypeCatalog.appBatchesForTests = ["octet"]
