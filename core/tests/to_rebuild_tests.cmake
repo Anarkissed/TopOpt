@@ -17,3 +17,12 @@ if(Eigen3_FOUND)
   target_link_libraries(test_to_strength_known_stress PRIVATE topopt)
   add_test(NAME to_strength_known_stress COMMAND test_to_strength_known_stress)
 endif()
+
+# Tests C and D: the area a load really lands on, and protection depth in mm.
+# traction_loads lives in assembly.cpp (Eigen). Measures only until stage 1, which
+# adds --gate.
+if(Eigen3_FOUND)
+  add_executable(test_to_true_loads tests/unit/test_to_true_loads.cpp)
+  target_link_libraries(test_to_true_loads PRIVATE topopt)
+  add_test(NAME to_true_loads COMMAND test_to_true_loads)
+endif()
