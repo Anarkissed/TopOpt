@@ -230,15 +230,7 @@ StepModel import_step_file(const std::string& path,
   BRepGProp::VolumeProperties(shape, props);
   model.brep_volume = props.Mass();
 
-  // TO rebuild stage 3 (ledger I-02): the drawn part's own triangles become the
-  // print file's drawn faces, so with the switch on a default tessellation is made
-  // to the 0.02 mm target (0.01 mm chord, 0.1 rad) instead of 0.1 mm / 0.5 rad.
-  StepTessellation use = tess;
-  if (to_surface_on() && tess.linear_deflection == StepTessellation{}.linear_deflection &&
-      tess.angular_deflection == StepTessellation{}.angular_deflection) {
-    use.linear_deflection = 0.01;
-    use.angular_deflection = 0.1;
-  }
+  const StepTessellation& use = tess;
   Tessellated t = tessellate(shape, use.linear_deflection, use.angular_deflection);
   // STEP MESH REPAIR (his 2040 Extrusion Stand, 2026-10-29: the app closed it since
   // 2026-10-23 with StepMeshRepair.swift, the worker refused it "not watertight").
@@ -273,6 +265,20 @@ StepModel import_step_file(const std::string& path,
   model.triangle_face = std::move(t.triangle_face);
   if (model.mesh.empty())
     throw StepError("STEP tessellation produced no triangles: " + path);
+  // TO rebuild stage 3 (ledger I-02): the drawn part's own triangles become the
+  // print file's drawn faces, so with the switch on a second copy is made to the
+  // 0.02 mm target (0.01 mm chord, 0.1 rad) for the export's cut only; the grid,
+  // the tags and the loads keep `mesh`. Kept only when it is watertight.
+  if (to_surface_on() && tess.linear_deflection > 0.01) {
+    BRepTools::Clean(shape);
+    Tessellated tf = tessellate(shape, 0.01, std::min(0.1, tess.angular_deflection));
+    (void)drop_repeated_index_triangles(tf);
+    if (!tf.mesh.empty() && check_watertight(tf.mesh).watertight)
+      model.export_mesh = std::move(tf.mesh);
+    else
+      std::fprintf(stderr, "[step] the 0.01 mm copy is not watertight; the export cuts "
+                           "with the 0.1 mm mesh (%s)\n", path.c_str());
+  }
   return model;
 }
 

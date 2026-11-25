@@ -159,7 +159,7 @@ TriangleMesh variant_export_model_mesh(const MinimizePlasticVariant& variant,
   if (to_surface_on() && cad != nullptr && !cad->mesh.empty()) {
     std::string why;
     FunctionSurfaceReport fr;
-    TriangleMesh m = function_surface_mesh(variant, sg, cad->mesh, std::max(1, sf),
+    TriangleMesh m = function_surface_mesh(variant, sg, cad->drawn_mesh(), std::max(1, sf),
                                            printed_iso, &why, &fr);
     if (!m.triangles.empty()) {
       std::fprintf(stderr,
