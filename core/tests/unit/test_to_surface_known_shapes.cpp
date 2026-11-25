@@ -158,7 +158,7 @@ Measured measure_new(const Shape& s, const Arm& arm, double cell_mm) {
   using namespace topopt;
   const double sup = plsm_effective_support(arm.basis, arm.reach);
   const PlsmKnotLattice L = plsm_make_lattice(kN, kN, kN, arm.knot, arm.knot, arm.knot, sup);
-  const int th = plsm_hw_threads(0);
+  const int th = 3;  // shares the Mac: at most three cores
   const PlsmCsr A = plsm_build_A(kN, kN, kN, L, arm.basis, th);
   const PlsmCsr At = plsm_transpose(A, th);
   const std::size_t n = static_cast<std::size_t>(kN) * kN * kN;
