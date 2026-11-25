@@ -4,6 +4,8 @@ Status 2026-11-22: APPROVED by the reviewer (rulings 06:18Z and 06:48Z); both he
 
 ## 0. Where the work stands (kept current; newest first)
 
+**2026-11-25, 09:10 EST.** The refused 0.30 version on the drawn-face path is explained (full log kept: `agent-scratch/toreview/testK_face_full.log`). It is solve 19: the design at that step is in 17 separate pieces, the multigrid solve grows its error (relative residual 136 after 2,500 cycles), and the Jacobi-CG fallback runs to its cap (122,682 iterations) at residual 0.092, so the version is refused. On today's path the same part goes through 8 to 11 pieces and its fallbacks happen to finish inside the cap. So this is not a fault of the drawn-face loader: it is the two faults already on record meeting (the optimiser breaks the part into pieces; the solver cannot settle a broken part quickly), and which side of the cap a run lands on is luck. Stage 1's report says so; the fix belongs to stage 5 (solver) and the stage 3/4 boundary (no loaded piece left unattached). Also seen: the refusal's own wording is wrong ("tolerance 1e-08 ... after 4 iterations" for a solve run at 1e-04 for 122,682 iterations); handed to TOSolver.
+
 **2026-11-25, 07:55 EST.** Test K with stage 1's switch on (TOPOPT_FACE_LOADS=face), demo job.
 
 - First attempt (3,626 s): 14 files, 0 differ, but the numbers were today's to the digit: the simple-job path (job.fixture_faces, `to_setup.inc`, `to_analyze.inc`) tagged the old way and never read the switch. Fixed at 7f6c9aaa (`tag_face_by_stage`, loadcase.hpp). #362's own lattice strength-check code in run_job.cpp tags the old way in two more places (near lines 11337 and 12647); those go on the replacement list handed to #362 at the flip.
