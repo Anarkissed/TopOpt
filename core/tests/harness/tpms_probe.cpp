@@ -569,6 +569,9 @@ int main(int argc, char** argv) {
     return 2;
   }
   const std::string cmd = argv[1];
+  // TOPOPT_TP_THREADS: the matrix-free solve's thread count (unset = the library default, every
+  // core). The per-width bending study (sheets 3.2) runs beside other measurements on one Mac.
+  if (const char* th = std::getenv("TOPOPT_TP_THREADS")) topopt::fea_set_matfree_threads(std::atoi(th));
   if (cmd == "law") return mode_law(argv[2]);
   if (cmd == "perc") return mode_perc(argv[2]);
   if (cmd == "bend") return mode_bend(argv[2]);

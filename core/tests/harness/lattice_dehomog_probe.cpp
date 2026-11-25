@@ -446,18 +446,24 @@ std::size_t drop_floaters(VoxelGrid& g, const std::vector<char>& seed_vox) {
 // Voigt strains, prescribe u = eps*x on the boundary node set (all faces for
 // kubc, the two x faces for sandwich/cut), Jacobi-CG, recover per-solid-voxel
 // centroid stress with the PRODUCTION hex8_stress.
+// `lx` (the per-width study, phase `widths`): the block's length along x, the gripped axis,
+// in cells; 0 is N (the cube every earlier phase uses, so they are unchanged). A member two
+// cells across needs a third cell along x: in a 2x2x2 sandwich every cell touches a grip.
+// `matfree`: the same reduced system and stopping criterion through fea_solve_cg_matfree
+// (no assembled K; an 8-cell block's assembly alone is several GB). Off = the 11-09 path.
 Fixture solve_finite(double r_unit, int N, int vpc, bool kubc, double cut_frac,
-                     double cg_tol, int cg_cap) {
+                     double cg_tol, int cg_cap, int lx = 0, bool matfree = false) {
   const auto segs = octet_struts();
   Fixture f;
-  f.vpc = vpc; f.ncx = N; f.ncy = N; f.ncz_whole = N;
+  if (lx <= 0) lx = N;
+  f.vpc = vpc; f.ncx = lx; f.ncy = N; f.ncz_whole = N;
   int nz_vox = N * vpc;
   if (cut_frac > 0.0) {
     f.has_cut = true;
     f.ncz_whole = N;  // N whole layers + one partial layer on top
     nz_vox = (int)std::lround((N + cut_frac) * vpc);
   }
-  f.grid = build_block(r_unit, N, N, vpc, nz_vox, segs);
+  f.grid = build_block(r_unit, lx, N, vpc, nz_vox, segs);
   VoxelGrid& g = f.grid;
 
   // Prescribed node set: solid nodes on the prescribed faces.
@@ -534,7 +540,8 @@ Fixture solve_finite(double r_unit, int N, int vpc, bool kubc, double cut_frac,
     CgInfo info;
     FeaSolution sol;
     try {
-      sol = fea_solve_cg(g, kEs, kNu, bcs, {}, cg_tol, cg_cap, &info);
+      sol = matfree ? fea_solve_cg_matfree(g, kEs, kNu, bcs, {}, cg_tol, cg_cap, &info)
+                    : fea_solve_cg(g, kEs, kNu, bcs, {}, cg_tol, cg_cap, &info);
     } catch (const std::exception& ex) {
       std::fprintf(stderr, "  [finite solve J=%d FAILED: %s]\n", J, ex.what());
       f.ok = false;
@@ -1508,6 +1515,329 @@ void phase_fit(const std::string& ev) {
 }
 
 // ---------------------------------------------------------------------------
+// PHASE: widths — THE LAW PER MEMBER WIDTH (sheets spec 2026-11-25 rev 3, §3.2; builder D).
+// The 11-09 boundary fixtures, unchanged in kind, at N = 2, 3, 4, 5, 6, 8 cells across:
+//   sandwich  N x N cells across (y, z), lateral faces FREE, gripped on the two x faces;
+//   cut       the same with a partial top layer, cut at 0.25, 0.5, 0.6 (11-09's) and 0.75.
+// Along x the block is N long (11-09's cube), but at least 3: a 2-cell cube has no cell off
+// the grips. Every rho of the band. The aliasing guard is 11-09's, and an aliased case is
+// re-measured one pitch finer at the SAME width (vpc 16 -> 24 -> 32 -> 40; 11-09's ladder
+// also stepped N4 -> N3, which here would change the very thing measured).
+// Env:
+//   TOPOPT_DEHOMOG_W_RHOS  rho targets (default: the band sweep, as 11-09)
+//   TOPOPT_DEHOMOG_W_NS    widths (default 2,3,4,5,6,8)
+//   TOPOPT_DEHOMOG_W_CUTS  cut fractions, 0 = the sandwich (default 0,0.25,0.5,0.6,0.75)
+//   TOPOPT_DEHOMOG_W_VPC   pitch (default 11-09's: 24 under rho 0.19, else 16)
+//   TOPOPT_DEHOMOG_W_TAG   file tag: k_{states,exact,cells}_w_<tag>.csv (default "all")
+//   TOPOPT_DEHOMOG_MATFREE 1 = fea_solve_cg_matfree (same system and criterion)
+// The exact CSV adds lx, cut_frac, the TRUE wall in voxels (2 r_unit vpc: the wall the
+// generator builds, across its normal) and the solve's wall-clock seconds.
+// ---------------------------------------------------------------------------
+std::vector<double> env_list(const char* name, const std::vector<double>& dflt) {
+  const char* s = std::getenv(name);
+  if (!s || !*s) return dflt;
+  std::vector<double> out;
+  std::string cur;
+  for (const char* p = s;; ++p) {
+    if (*p == ',' || *p == ';' || *p == ' ' || *p == '\0') {
+      if (!cur.empty()) out.push_back(std::atof(cur.c_str()));
+      cur.clear();
+      if (*p == '\0') break;
+    } else {
+      cur.push_back(*p);
+    }
+  }
+  return out;
+}
+
+const char* kExactHeaderW =
+    "fixture,rho_target,rho_lib,rho_meas,N,vpc,population,n_vox,wall_vox,"
+    "K_dev_max,K_vol,K_il_dev,K_il_vol,samp_min,samp_med,samp_p95,samp_max,"
+    "n_samp,cg_iters_max,cg_resid_max,dropped_floaters,lx,cut_frac,wall_true_vox,solve_s,"
+    "solver";
+
+void phase_widths(const std::string& ev) {
+  std::printf("\n===== WIDTHS — the law per member width (sheets 3.2) =====\n");
+  const char* tagc = std::getenv("TOPOPT_DEHOMOG_W_TAG");
+  const std::string tag = tagc && *tagc ? tagc : "all";
+  const bool matfree = std::getenv("TOPOPT_DEHOMOG_MATFREE") != nullptr &&
+                       std::getenv("TOPOPT_DEHOMOG_MATFREE")[0] == '1';
+  std::vector<double> rhos = env_list("TOPOPT_DEHOMOG_W_RHOS", rho_sweep());
+  // A target within 1e-4 of a band-sweep row IS that row (the band ends are core's own
+  // numbers, printed to 5 digits): the per-width fixtures then share 11-09's radii exactly.
+  for (double& r : rhos)
+    for (double s : rho_sweep())
+      if (std::fabs(r - s) < 1e-4) r = s;
+  const std::vector<double> ns = env_list("TOPOPT_DEHOMOG_W_NS", {2, 3, 4, 5, 6, 8});
+  const std::vector<double> cuts = env_list("TOPOPT_DEHOMOG_W_CUTS", {0.0, 0.25, 0.5, 0.6, 0.75});
+  const std::vector<double> vpcs = env_list("TOPOPT_DEHOMOG_W_VPC", {});
+  FILE* states = open_csv(ev, ("k_states_w_" + tag + ".csv").c_str(), kStateHeader);
+  FILE* exact = open_csv(ev, ("k_exact_w_" + tag + ".csv").c_str(), kExactHeaderW);
+  FILE* cells = open_csv(ev, ("k_cells_w_" + tag + ".csv").c_str(),
+                         "fixture,rho_target,rho_lib,N,vpc,state,ci,cj,ck,class,"
+                         "n_solid,cellavg_vm,cell_peak_vm,K_cell,K_far,lx,cut_frac");
+  std::printf("  solver: %s; widths:", matfree ? "fea_solve_cg_matfree" : "fea_solve_cg (assembled)");
+  for (double n : ns) std::printf(" %d", (int)n);
+  std::printf("; cuts:");
+  for (double c : cuts) std::printf(" %.2f", c);
+  std::printf("\n");
+
+  struct Case { double rho; int N, vpc; double cut; };
+  std::vector<Case> cases;
+  for (double r : rhos)
+    for (double n : ns)
+      for (double c : cuts) {
+        const int base = (r < 0.19) ? 24 : 16;
+        if (vpcs.empty()) cases.push_back({r, (int)n, base, c});
+        else
+          for (double v : vpcs) cases.push_back({r, (int)n, (int)v, c});
+      }
+  auto finer = [](const Case& cs, Case& out) {
+    static const int ladder[] = {16, 24, 32, 40};
+    for (int i = 0; i + 1 < 4; ++i)
+      if (cs.vpc == ladder[i]) {
+        out = {cs.rho, cs.N, ladder[i + 1], cs.cut};
+        return true;
+      }
+    return false;
+  };
+  for (std::size_t ci = 0; ci < cases.size(); ++ci) {
+    const Case cs = cases[ci];
+    const RhoCal c = calibrate(cs.rho);
+    const char* fixname = cs.cut > 0 ? "cut" : "sandwich";
+    const int lx = std::max(cs.N, 3);
+    const auto t0 = std::chrono::steady_clock::now();
+    Fixture f = solve_finite(c.r_unit, cs.N, cs.vpc, /*kubc=*/false, cs.cut, 1e-7, 160000, lx,
+                             matfree);
+    const auto t1 = std::chrono::steady_clock::now();
+    const double secs = std::chrono::duration<double>(t1 - t0).count();
+    if (!f.ok) {
+      std::printf("  %s rho %.3f N%d vpc%d cut %.2f SOLVE FAILED\n", fixname, cs.rho, cs.N,
+                  cs.vpc, cs.cut);
+      continue;
+    }
+    const M6 Dlib = lib_D(c.rho_lib);
+    const double wall_true = 2.0 * c.r_unit * cs.vpc;
+    std::vector<Pop> pops = {Pop::Interior, Pop::Grip, Pop::Free};
+    if (cs.cut > 0) pops.push_back(Pop::Cut);
+    int itmax = 0;
+    double rmax = 0;
+    for (int J = 0; J < 6; ++J) {
+      itmax = std::max(itmax, f.iters[J]);
+      rmax = std::max(rmax, f.resid[J]);
+    }
+    double kd_free = 0, kd_cut = 0;
+    // DIAGNOSTIC, not in the law: the cut layer's cells off the two grip columns. 11-09's
+    // cut_layer population (kept as is, it is the law's) includes the cut cells beside the
+    // gripped faces; this row says whether its peak sits there.
+    if (cs.cut > 0) {
+      Fixture sub;
+      sub.grid = f.grid;  // shape fields only; the voxel lists below are the subset
+      sub.vpc = f.vpc; sub.ncx = f.ncx; sub.ncy = f.ncy; sub.ncz_whole = f.ncz_whole;
+      sub.has_cut = f.has_cut;
+      const VoxelGrid& g = f.grid;
+      for (std::size_t v = 0; v < f.vox.size(); ++v) {
+        if (f.pop[v] != Pop::Cut) continue;
+        const int i = (int)(f.vox[v] % (std::size_t)g.nx);
+        const int cix = i / f.vpc;
+        if (cix == 0 || cix == f.ncx - 1) continue;
+        sub.vox.push_back(f.vox[v]);
+        sub.pop.push_back(Pop::Cut);
+        sub.S.push_back(f.S[v]);
+      }
+      if (!sub.vox.empty()) {
+        const ExactDev ed = exact_dev(sub, Dlib, Pop::Cut, false);
+        const VolRatios vr = vol_ratios(sub, Dlib, Pop::Cut, false);
+        std::fprintf(exact,
+                     "%s,%.5f,%.5f,%.5f,%d,%d,%s,%zu,%.1f,"
+                     "%.4f,%.4f,%.4f,%.4f,%.3f,%.3f,%.3f,%.3f,%d,%d,%.2e,%zu,%d,%.2f,%.2f,%.1f,%s\n",
+                     fixname, c.target, c.rho_lib, f.rho_meas, cs.N, cs.vpc, "cut_off_grip",
+                     sub.vox.size(), f.wall_vox, ed.K_dev, vr.K_vol, ed.K_il_dev, vr.K_il_vol,
+                     0.0, 0.0, 0.0, 0.0, 0, itmax, rmax, f.dropped_floaters, lx, cs.cut,
+                     wall_true, secs, matfree ? "matfree" : "assembled");
+      }
+    }
+    for (Pop p : pops) {
+      write_state_rows(states, fixname, c, cs.N, cs.vpc, f, Dlib, p, false, pop_name(p));
+      if (pop_count(f, p, false) == 0) continue;
+      const ExactDev ed = exact_dev(f, Dlib, p, false);
+      const VolRatios vr = vol_ratios(f, Dlib, p, false);
+      const SampStats st = sampled_stats(f, Dlib, p, false, 64);
+      if (p == Pop::Free) kd_free = ed.K_dev;
+      if (p == Pop::Cut) kd_cut = ed.K_dev;
+      std::fprintf(exact,
+                   "%s,%.5f,%.5f,%.5f,%d,%d,%s,%zu,%.1f,"
+                   "%.4f,%.4f,%.4f,%.4f,%.3f,%.3f,%.3f,%.3f,%d,%d,%.2e,%zu,%d,%.2f,%.2f,%.1f,%s\n",
+                   fixname, c.target, c.rho_lib, f.rho_meas, cs.N, cs.vpc, pop_name(p),
+                   pop_count(f, p, false), f.wall_vox, ed.K_dev, vr.K_vol, ed.K_il_dev,
+                   vr.K_il_vol, st.kmin, st.kmed, st.kp95, st.kmax, st.n, itmax, rmax,
+                   f.dropped_floaters, lx, cs.cut, wall_true, secs,
+                   matfree ? "matfree" : "assembled");
+    }
+    for (const auto& ns2 : named_states()) {
+      V6 e;
+      for (int i = 0; i < 6; ++i) e(i) = ns2.e[i];
+      const double mvm = von_mises_of(Dlib * e);
+      for (const CellRec& r : per_cell(f, e, mvm, false))
+        std::fprintf(cells, "%s,%.5f,%.5f,%d,%d,%s,%d,%d,%d,%s,%zu,%.4f,%.4f,%.3f,%.3f,%d,%.2f\n",
+                     fixname, c.target, c.rho_lib, cs.N, cs.vpc, ns2.name, r.ci, r.cj, r.ck,
+                     pop_name(r.cls), r.n_solid, r.avg_vm, r.peak_vm, r.K_cell, r.K_far, lx,
+                     cs.cut);
+    }
+    std::fflush(states); std::fflush(exact); std::fflush(cells);
+    std::printf("  %-8s rho %.3f N%d (lx %d) vpc%d cut %.2f: K_dev free=%.2f cut=%.2f wall %.0f vox "
+                "(true %.1f) dropped=%zu (%.0fs, cg<=%d)\n",
+                fixname, c.rho_lib, cs.N, lx, cs.vpc, cs.cut, kd_free, kd_cut, f.wall_vox,
+                wall_true, f.dropped_floaters, secs, itmax);
+    const bool off = c.rho_lib <= 0 || std::fabs(f.rho_meas - c.rho_lib) / c.rho_lib > 0.15 ||
+                     kd_free <= 0.0;
+    Case next;
+    if (off) {
+      if (finer(cs, next)) {
+        std::printf("    rho_meas %.4f is %+.1f%% off rho_lib %.4f (aliased): re-measuring at "
+                    "vpc%d\n", f.rho_meas, 100.0 * (f.rho_meas - c.rho_lib) / c.rho_lib,
+                    c.rho_lib, next.vpc);
+        cases.push_back(next);
+      } else {
+        std::printf("    rho_meas %.4f is %+.1f%% off rho_lib %.4f (aliased) at the finest pitch "
+                    "tried: no %s population here\n", f.rho_meas,
+                    100.0 * (f.rho_meas - c.rho_lib) / c.rho_lib, c.rho_lib, fixname);
+      }
+    }
+  }
+  std::fclose(states); std::fclose(exact); std::fclose(cells);
+}
+
+// ---------------------------------------------------------------------------
+// PHASE: fitw — the law tables per member width, from the bulk CSV and every
+// k_exact_w_*.csv in the folder (listed in TOPOPT_DEHOMOG_W_FILES, comma separated).
+//   K_N(rho)   = the envelope (max) of the bulk row (finest vpc) and the free-surface and
+//                cut-layer populations of every block N across, at every pitch measured
+//                that the aliasing guard keeps (11-09's fit, per width);
+//   K_law(N)   = the max of K_N' over N' >= N and of the wide row (11-09's kfit.csv, read
+//                from TOPOPT_DEHOMOG_WIDE_KFIT; the law today, valid from 10 / 9 cells):
+//                a narrower member is never credited more than a wider one.
+// Writes kfit_widths.csv (one row per rho and N, each column enveloped on its own as 11-09
+// does) and prints the Kd table.
+// ---------------------------------------------------------------------------
+void phase_fitw(const std::string& ev) {
+  std::printf("\n===== FITW — the law per member width =====\n");
+  const auto bulk = read_csv(ev + "/k_exact_bulk.csv");
+  if (bulk.empty()) { std::printf("  no bulk rows — run bulk first\n"); return; }
+  auto aliased = [](const std::map<std::string, std::string>& r) {
+    const double lib = num(r, "rho_lib"), meas = num(r, "rho_meas");
+    return lib <= 0 || std::fabs(meas - lib) / lib > 0.15;
+  };
+  // bulk per rho at the finest vpc (phase_fit's rule)
+  std::map<double, LawRow> B;
+  for (const auto& r : bulk) {
+    if (aliased(r)) continue;
+    const double rho = num(r, "rho_lib");
+    const int vpc = (int)num(r, "vpc");
+    LawRow& L = B[rho];
+    if (vpc >= L.vpc) {
+      L.rho = rho; L.vpc = vpc; L.wall_vox = num(r, "wall_vox");
+      L.Kd_bulk = num(r, "K_dev_max"); L.Kv_bulk = num(r, "K_vol");
+      L.Kild_bulk = num(r, "K_il_dev"); L.Kilv_bulk = num(r, "K_il_vol");
+    }
+  }
+  // the wide row (11-09's law)
+  std::map<double, std::array<double, 4>> wide;
+  if (const char* wk = std::getenv("TOPOPT_DEHOMOG_WIDE_KFIT"))
+    for (const auto& r : read_csv(wk))
+      wide[num(r, "rho_lib")] = {num(r, "Kd_cert"), num(r, "Kv_cert"), num(r, "Kild_cert"),
+                                 num(r, "Kilv_cert")};
+  auto nearest = [](auto& m, double rho) {
+    auto best = m.end();
+    double d = 1e9;
+    for (auto it = m.begin(); it != m.end(); ++it)
+      if (std::fabs(it->first - rho) < d) { d = std::fabs(it->first - rho); best = it; }
+    return d < 1e-4 ? best : m.end();
+  };
+  // boundary per (rho, N): max over pops/fixtures/pitches; plus the provenance
+  struct Bnd { double k[4] = {0, 0, 0, 0}; int vpc_min = 999, vpc_max = 0; double wall_min = 1e9,
+               wall_true_min = 1e9; int fixtures = 0; std::string argmax; };
+  std::map<std::pair<double, int>, Bnd> W;
+  std::vector<std::string> files;
+  if (const char* fl = std::getenv("TOPOPT_DEHOMOG_W_FILES")) {
+    std::string cur;
+    for (const char* p = fl;; ++p) {
+      if (*p == ',' || *p == '\0') { if (!cur.empty()) files.push_back(cur); cur.clear(); if (!*p) break; }
+      else cur.push_back(*p);
+    }
+  }
+  for (const std::string& fn : files)
+    for (const auto& r : read_csv(ev + "/" + fn)) {
+      const std::string pop = r.at("population");
+      if (pop != "free_surface" && pop != "cut_layer") continue;
+      if (num(r, "n_vox") <= 0 || num(r, "K_dev_max") <= 0) continue;
+      if (aliased(r)) continue;
+      auto it = nearest(B, num(r, "rho_lib"));
+      if (it == B.end()) continue;
+      Bnd& b = W[{it->first, (int)num(r, "N")}];
+      const double k[4] = {num(r, "K_dev_max"), num(r, "K_vol"), num(r, "K_il_dev"),
+                           num(r, "K_il_vol")};
+      if (k[0] > b.k[0]) {
+        char buf[96];
+        std::snprintf(buf, sizeof buf, "%s cut %.2f vpc%d %s", r.at("fixture").c_str(),
+                      num(r, "cut_frac"), (int)num(r, "vpc"), pop.c_str());
+        b.argmax = buf;
+      }
+      for (int q = 0; q < 4; ++q) b.k[q] = std::max(b.k[q], k[q]);
+      const int vpc = (int)num(r, "vpc");
+      b.vpc_min = std::min(b.vpc_min, vpc);
+      b.vpc_max = std::max(b.vpc_max, vpc);
+      b.wall_min = std::min(b.wall_min, num(r, "wall_vox"));
+      b.wall_true_min = std::min(b.wall_true_min, num(r, "wall_true_vox"));
+      ++b.fixtures;
+    }
+  FILE* out = open_csv(ev, "kfit_widths.csv",
+                       "rho_lib,N,Kd_bulk,Kv_bulk,Kild_bulk,Kilv_bulk,Kd_bnd,Kv_bnd,Kild_bnd,"
+                       "Kilv_bnd,Kd_N,Kv_N,Kild_N,Kilv_N,Kd_law,Kv_law,Kild_law,Kilv_law,"
+                       "Kd_wide,Kd_law_over_wide,raised_by,vpc_min,vpc_max,wall_vox_min,"
+                       "wall_true_vox_min,fixtures,argmax");
+  for (auto& kv : B) {
+    const double rho = kv.first;
+    const LawRow& L = kv.second;
+    const double bulkk[4] = {L.Kd_bulk, L.Kv_bulk, L.Kild_bulk, L.Kilv_bulk};
+    std::array<double, 4> w = {0, 0, 0, 0};
+    { auto it = nearest(wide, rho); if (it != wide.end()) w = it->second; }
+    // widths measured at this rho, widest first
+    std::vector<int> Ns;
+    for (auto& e : W) if (e.first.first == rho) Ns.push_back(e.first.second);
+    std::sort(Ns.rbegin(), Ns.rend());
+    double run[4] = {w[0], w[1], w[2], w[3]};  // the running envelope, from the wide row down
+    std::printf("  rho %.5f (wide Kd %.3f):", rho, w[0]);
+    struct OutRow { int N; double kN[4], law[4]; const Bnd* b; std::string raised; };
+    std::vector<OutRow> rows;
+    for (int N : Ns) {
+      const Bnd& b = W[{rho, N}];
+      OutRow o;
+      o.N = N; o.b = &b;
+      for (int q = 0; q < 4; ++q) o.kN[q] = std::max(bulkk[q], b.k[q]);
+      const double before = run[0];
+      for (int q = 0; q < 4; ++q) { run[q] = std::max(run[q], o.kN[q]); o.law[q] = run[q]; }
+      o.raised = o.kN[0] >= before ? "this width" : (before == w[0] ? "wide row" : "a wider width");
+      rows.push_back(o);
+    }
+    std::sort(rows.begin(), rows.end(), [](const OutRow& a, const OutRow& b) { return a.N < b.N; });
+    for (const OutRow& o : rows) {
+      std::fprintf(out, "%.5f,%d,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,"
+                        "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%s,%d,%d,%.1f,%.2f,%d,%s\n",
+                   rho, o.N, bulkk[0], bulkk[1], bulkk[2], bulkk[3], o.b->k[0], o.b->k[1],
+                   o.b->k[2], o.b->k[3], o.kN[0], o.kN[1], o.kN[2], o.kN[3], o.law[0],
+                   o.law[1], o.law[2], o.law[3], w[0], w[0] > 0 ? o.law[0] / w[0] : 0.0,
+                   o.raised.c_str(), o.b->vpc_min, o.b->vpc_max, o.b->wall_min,
+                   o.b->wall_true_min, o.b->fixtures, o.b->argmax.c_str());
+      std::printf("  N%d %.2f", o.N, o.law[0]);
+    }
+    std::printf("\n");
+  }
+  std::fclose(out);
+  std::printf("  kfit_widths.csv written\n");
+}
+
+// ---------------------------------------------------------------------------
 // PHASE: j6 — what would the gate have said about PR 255's certified designs?
 // ---------------------------------------------------------------------------
 double interp_col(const std::vector<std::array<double, 2>>& tab, double rho) {
@@ -1752,6 +2082,9 @@ int main(int argc, char** argv) {
   if (want("blocks")) phase_blocks(ev, fast);
   if (want("boundary")) phase_boundary(ev, fast);
   if (want("fit")) phase_fit(ev);
+  // The per-width study (sheets 3.2) runs only when named: `all` is 11-09's, unchanged.
+  if (phase == "widths") phase_widths(ev);
+  if (phase == "fitw") phase_fitw(ev);
   if (want("j6") && g_topo == LatticeTopology::Octet) phase_j6(ev, pr255_dir);  // PR 255: octet
   std::printf("\nDONE (rc=%d).\n", rc);
   return rc;
