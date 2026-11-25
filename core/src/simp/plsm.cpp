@@ -984,8 +984,9 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
     // what holds |grad phi| near 1 — which keeps the band the width eta claims,
     // which keeps the volume measure from drifting.
     if (plsm.refit_every > 0 && it % plsm.refit_every == 0) {
-      std::vector<double> pr = phi;
-      if (extend_layers > 0) extend_into_empty(grid, pr, extend_layers);
+      std::vector<double> ext = phi;  // phi carried across the drawn faces
+      if (extend_layers > 0) extend_into_empty(grid, ext, extend_layers);
+      std::vector<double> pr = ext;
       plsm_reinitialise(nx, ny, nz, pr, h, plsm.reinit_sweeps, false);
       std::vector<double> tgt(n, 0.0);
       std::vector<double> w(n, 1.0);
@@ -1007,8 +1008,8 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
                 w[v] = 0.01;
                 continue;
               }
-              const double g = plsm_grad_mag(nx, ny, nz, phi, i, j, kz, h);
-              if (g > 0.1) tgt[v] = phi[v] / g;
+              const double g = plsm_grad_mag(nx, ny, nz, ext, i, j, kz, h);
+              if (g > 0.1) tgt[v] = ext[v] / g;
             }
       const PlsmFitResult rf =
           plsm_solve_normal(Psi, PsiT, tgt, w, plsm.ridge,
