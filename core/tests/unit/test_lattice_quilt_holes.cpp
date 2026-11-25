@@ -249,10 +249,86 @@ void test_no_type_quilts_without_the_switch() {
   CHECK(control_past == 30);
 }
 
+void test_no_holes_in_a_region() {
+  const StepModel model = wing();
+  Session session(model);
+  const auto field = blobs();
+  std::size_t total = 0;
+  for (LatticeTopology t : kTypes) {
+    for (int mode = 0; mode < 2; ++mode) {
+      Settings st = stand(t);
+      st.regions = {{1, Role::Lattice, {0}, 20.0, -3.0}};   // the outline pulled 3 mm in: a solid border all round
+      st.cells.cell_max_mm = 12;
+      st.cells.min_cells_across = 2;
+      st.stress.demand = field;
+      st.cells.by_stress = true;
+      if (mode == 0) { st.struts.width_mm = 0.9; st.cells.cell_search = true; st.cells.stretch_edges = true; }
+      else { st.struts.mode = Density::ByStress; st.struts.dial_heavy = 1.0; }
+      const Outcome o = session.lay(st);
+      const std::vector<std::size_t> holes = empty_cells(o.layout, o.bars);
+      double lo = 1e9, hi = 0;
+      for (const Cell& c : o.layout.cells) { lo = std::min(lo, c.size); hi = std::max(hi, c.size); }
+      if (!holes.empty())
+        std::printf("  %s %s: %zu of %zu cells (%.2f .. %.2f mm) hold no strut (pieces adrift %zu)\n",
+                    lattice_topology_name(t), mode ? "by stress" : "auto", holes.size(), o.layout.cells.size(), lo, hi,
+                    o.pieces.adrift);
+      CHECK(holes.empty());
+      total += holes.size();
+      if (t == LatticeTopology::Kelvin && mode == 0) {
+        CHECK(hi > lo + 1e-9);   // the fixture does grade (the patches of another size are what lost their struts)
+        // RED control: a hole made by hand (every bar through one whole cell taken out) is found.
+        std::size_t whole = 0;
+        while (whole < o.layout.cells.size() && (o.layout.cells[whole].cut || o.layout.cells[whole].absorbed)) ++whole;
+        CHECK(whole < o.layout.cells.size());
+        if (whole < o.layout.cells.size()) {
+          Bars cut = o.bars;
+          const Cell& c = o.layout.cells[whole];
+          const Frame& f = o.layout.frames.at(static_cast<std::size_t>(c.frame));
+          cut.bars.erase(std::remove_if(cut.bars.begin(), cut.bars.end(), [&](const Bar& b) {
+                           return through_cube(to_frame(f, b.a), to_frame(f, b.b), c.lo, c.size);
+                         }), cut.bars.end());
+          const std::vector<std::size_t> made = empty_cells(o.layout, cut);
+          CHECK(std::find(made.begin(), made.end(), whole) != made.end());
+        }
+      }
+    }
+  }
+  std::printf("[§2] no holes: %zu cells laid with nothing in them, over 10 strut types x 2 asks\n", total);
+}
+
+void test_an_even_outline() {
+  const StepModel model = wing();
+  Session session(model);
+  const auto field = blobs();
+  std::size_t total = 0;
+  for (LatticeTopology t : kTypes) {
+    Settings st = stand(t);
+    st.regions = {{1, Role::Lattice, {0}, 12.0, 0.0}};   // the face's own outline: the wing's slanted ends cut the cells
+    st.cells.cell_max_mm = 12;
+    st.cells.min_cells_across = 2;
+    st.stress.demand = field;
+    st.cells.by_stress = true;
+    st.struts.width_mm = 0.9;
+    st.cells.cell_search = true;
+    st.cells.stretch_edges = true;
+    const Outcome o = session.lay(st);
+    std::size_t cut_empty = 0, cut = 0;
+    for (std::size_t i : empty_cells(o.layout, o.bars)) cut_empty += o.layout.cells[i].cut;
+    for (const Cell& c : o.layout.cells) cut += c.cut;
+    if (cut_empty) std::printf("  %s: %zu of %zu cut cells opened at the edge with no strut in them\n",
+                               lattice_topology_name(t), cut_empty, cut);
+    CHECK(cut > 0 && cut_empty == 0);
+    total += cut_empty;
+  }
+  std::printf("[§3] an even outline: %zu cut cells opened with nothing in them, over 10 strut types\n", total);
+}
+
 }  // namespace
 
 int main() {
   test_no_type_quilts_without_the_switch();
+  test_no_holes_in_a_region();
+  test_an_even_outline();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }

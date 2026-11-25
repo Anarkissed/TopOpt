@@ -1549,6 +1549,26 @@ Pieces count_pieces(const Bars& bars, const Domain& domain, std::vector<char>* a
 // Finish None, completed: a piece that is not joined to the part cannot be printed and is
 // removed. Counted in `dropped`. Returns what count_pieces found before removing.
 Pieces drop_adrift_bars(Bars& bars, const Domain& domain, const Layout* layout = nullptr);
+// ★ notes29 (his notes on release 20, 2026-11-25: "There were even *holes* in the lattice -- which should NEVER
+// happen"). Where the cells grade from one size to the next, a type whose nodes lie on its cube's faces but not at its
+// corners (kelvin, rhombic) meets none of the next size's nodes: a patch of one size is then a piece of its own, held
+// by nothing, and drop_adrift_bars removes every strut of it, leaving its cells opened in the file with nothing in them.
+// Before that drop: each Node end of a bar of a piece adrift (count_pieces) is run on as S5 runs a Loose end: straight
+// on in its own direction, at most one cell of its own, through open lattice, until it first reaches another bar's
+// middle line within half that bar's width (the bars that meet at the node itself are not read). Into a bar of ANOTHER
+// piece it is joined there (Joined, into that bar); into solid first it runs on into it by its own width (Solid, S11).
+// Into a bar of its own piece, out of the part, or nothing within the cell: it is the node it was, where it was.
+// Returns the ends joined. Nothing adrift: the bars are left exactly as they were. Session::lay runs it for cube
+// lattices, after drop_loose_bars.
+std::size_t join_cut_off_pieces(Bars& bars, const Domain& domain, int threads = 0, const Layout* layout = nullptr);
+// ★ notes29 (his notes on release 20: "the solid outline isn't even, there is a chunk cut out of it on either side").
+// A cell of a Lattice region (not a K8 sliver) left with no strut of its own (no bar laid for a cell of its size whose
+// middle lies in its cube) holds no lattice: the file would open its space and print nothing there, a hole inside the
+// lattice or a notch in the part's solid round it. (The whole part's own lattice, region 0, has no solid round it: an
+// empty cut cell at its open surface is the lattice running out to the surface, D14b, and is left as it was.) It leaves the cells and joins the solid list (D14), its SolidWhy Sliver for a cut cell (have 0,
+// need its strut), Other for a whole one. Returns how many. None: the layout is left exactly as it was.
+// Session::lay runs it for cube lattices, after the bars are dropped.
+std::size_t solidify_empty_cells(Layout& layout, const Bars& bars);
 
 // ── SESSION (stage E) ─────────────────────────────────────────────────────────
 // What the app holds for one part while its Lattice page is open. It measures the part
@@ -1728,6 +1748,10 @@ struct Outcome {
   std::vector<int> empty_regions;
   double ms_read = 0.0, ms_cells = 0.0, ms_bars = 0.0;
   std::size_t thin_solid = 0;    // cut cells print rule P8 (f) made solid (solidify_thin_cuts)
+  // ★ notes29 (his notes on release 20, the holes and the chunk cut out of the outline), cube lattices: the free node
+  // ends of pieces cut off at a size step that were run on into the lattice beside them (join_cut_off_pieces), and the
+  // cells left with no strut of their own that were made solid (solidify_empty_cells).
+  std::size_t cut_off_joined = 0, empty_solid = 0;
   // K3 (his 11-23 notes): with the quilt off, the Lattice regions (their ids) that laid no cell at all and were laid
   // again with the quilt's smallest cell. ★ notes29 (his notes on release 20, 2026-11-25): WITHDRAWN, with Allow quilt
   // off nothing is laid with the quilt; such a region stays solid and says why (Layout::solid_why). Always empty.

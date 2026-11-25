@@ -352,7 +352,17 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
       if (settings.drop_loose && !draft) {
         drop_loose_bars(out.bars, finish && !finish->arrived.empty() ? &finish->arrived : nullptr);   // G11
         out.stepped_edges = stepped_edges(out.bars);
+        // ★ notes29 (his notes on release 20: "There were even *holes* in the lattice -- which should NEVER happen"): a
+        // patch of cells of one size whose nodes meet none of the next size's (kelvin, rhombic: no node at a cube's
+        // corner) was a piece adrift, and the drop below took every strut of it. Its free nodes are run on into the
+        // lattice beside it first (join_cut_off_pieces); then what is still adrift goes, as before. Cube lattices only.
+        if (!strands) out.cut_off_joined = join_cut_off_pieces(out.bars, *domain_, threads, &out.layout);
         out.pieces = drop_adrift_bars(out.bars, *domain_, &out.layout);
+        // ★ notes29 ("the solid outline isn't even, there is a chunk cut out of it on either side"): a cell left with no
+        // strut of its own (a cut cell at the part's edge whose pieces were all too short or left hanging) is opened
+        // space in the file with nothing printed in it: a hole, or a notch in the outline. It is solid (D14).
+        if (!strands) out.empty_solid = solidify_empty_cells(out.layout, out.bars);
+        if (out.empty_solid > 0) last_cells_.regions = out.layout.regions;   // D23 reads the counts as they now are
         if (finish && !finish->prune.empty()) prune_weave(out.bars, finish->prune);   // J2, where the dropping ends
       } else {
         out.pieces = count_pieces(out.bars, *domain_, nullptr, nullptr, &out.layout);
