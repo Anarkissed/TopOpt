@@ -69,10 +69,10 @@ RunFinish make_run_finish(const JobDescription& job, const MinimizePlasticOption
   }
   if (cad != nullptr && !cad->mesh.empty()) {  // every file is cut out of its Keep clears
     f.keep_clears = lattice_keep_outs_from_job(job, *cad);
-    f.part = &cad->mesh;
+    f.part = &cad->drawn_mesh();  // stage 3: the 0.01 mm copy when made
     if (!f.keep_clears.empty() || !job.keep_regions.empty())
       f.keep_clear_cut = std::make_shared<const KeepClearCut>(
-          make_keep_clear_cut(cad->mesh, f.keep_clears, job.keep_regions));
+          make_keep_clear_cut(cad->drawn_mesh(), f.keep_clears, job.keep_regions));
   }
   f.ctx.slim_line_mm = 2.0 * f.ctx.min_thickness_mm;  // his ruling 2026-11-03: slim
   // A latticed job's versions carry a lattice companion built from the unfinished shape.
@@ -150,7 +150,7 @@ TriangleMesh variant_export_model_mesh(const MinimizePlasticVariant& variant,
   }
   if (!keeps.empty() && cad != nullptr)  // item KEEP: exact inside each keep region
     return keep_regions_exact(
-        variant_export_model_mesh(variant, out, sg, printed_iso, cad, {}), cad->mesh,
+        variant_export_model_mesh(variant, out, sg, printed_iso, cad, {}), cad->drawn_mesh(),
         keeps, sg.spacing * sg.spacing * sg.spacing);
   const int sf = out.smooth_factor;
   // Stage 3 (switch on): the zero surface of the optimiser's own function, cut by
