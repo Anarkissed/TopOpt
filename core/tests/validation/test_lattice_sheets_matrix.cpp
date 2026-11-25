@@ -28,7 +28,8 @@
 //   seam_fallback  a Blend that cannot be made becomes the solid wall and the result says so
 //                                                                                   RED: the fallback off
 //   floor      a Structural member under the floor is solid (WallTooThin)          RED: the floor read as 1
-//   strength   a Structural job gives a number (builder B's credit per voxel)      RED: no strength job
+//   strength   a Structural job runs the check to its verdict and sheet credit      RED: no strength job
+//              (the number itself: builder B's test_lattice_sheets_strength, on a part as thick as the floor)
 //   coupon     both coupons made, print-clean, flat, two-line wall                 RED: a one-line coupon
 //   size       sheet triangles within 20 % of k x cell per contoured cell (k: 475 gyroid, 763 Schwarz-D)
 //                                                                                   RED: the unsimplified mesh
@@ -206,7 +207,7 @@ std::string strength_job_json(const std::string& topo, const Fixture& f) {
          "\"loads\": {\"minimize_plastic\": true, \"safety_margin\": 1.5, \"build_dir\": [0, 0, 1], "
          "\"anchor_face_ids\": [" + std::to_string(f.bottom) + "], \"groups\": [{\"face_ids\": [" +
          std::to_string(f.side) + "], \"force\": [0, 0, -20]}]}, "
-         "\"lattice\": {\"topology\": \"" + topo + "\", \"require_lattice_void_reaches_exterior\": false}, "
+         "\"lattice\": {\"topology\": \"" + topo + "\", \"require_lattice_void_reaches_exterior\": false, \"skin\": \"none\"}, "
          "\"grading\": {\"topology\": \"" + topo + "\", \"cell_mm\": 8, \"min_extrudable_width_mm\": 0.45, "
          "\"intent\": \"structural\"}, "
          "\"output\": {\"report\": \"report.json\", \"mesh_format\": \"stl\", \"mesh_prefix\": \"variant\"}}";
@@ -406,10 +407,16 @@ std::string check_coupon(const FileResult& r) {
   }
   return "";
 }
+// The Structural job runs the check end to end on a sheet and it answers with its verdict and its sheet credit
+// (builder B's block: "sheet_credit", "sheet_cells"). A NUMBER needs credited cells, and no fixture of core's is as thick
+// as the sheets' floor (10 / 9 cells of at least 4.36 mm): builder B's own suite (test_lattice_sheets_strength) holds
+// the number on a part made for it.
 std::string check_strength(const FileResult& r) {
   if (!r.ok) return "no file: " + r.code + ": " + r.why;
   if (!r.strength_ran) return "the strength check did not run";
-  if (!std::isfinite(num_after(r.strength_json, "margin_worst_case"))) return "no strength number";
+  if (!has(r.strength_json, "\"verdict\": \"") || !has(r.strength_json, "\"sheet_credit\": {") ||
+      !has(r.strength_json, "\"sheet_cells\": \"sheet_cells.bin\""))
+    return "the strength block has no verdict or no sheet credit";
   return "";
 }
 
@@ -516,8 +523,6 @@ std::string check_membrane(const TriangleMesh& file, double seam_z, double half,
 // ── KNOWN FAILURES TODAY ──────────────────────────────────────────────────────
 struct Expected { const char* type; const char* check; const char* reason; };
 const std::vector<Expected> kExpected = {
-    {"gyroid", "strength", "builder B: the strength check on a sheet, credit per voxel (SPEC 1.4, 3.3), not landed yet"},
-    {"schwarz_d", "strength", "builder B: the strength check on a sheet, credit per voxel (SPEC 1.4, 3.3), not landed yet"},
     // Measured 2026-11-25 (builder A): 0.99 x at 8 mm (the cube), 1.33 x at 5.5 mm (the plate: Schwarz-D's floor cell is
     // 5.41 mm, so every wall there is at the two-line floor, contoured raised with the bead guard's inward margin at
     // 0.6 to 1 x the bound). The SPEC's 763 x cell is one wall at one cell; the gyroid at 5.5 mm is 1.02 x.
