@@ -67,6 +67,19 @@ Why the file is 6 g lighter: it follows his 211 keep regions EXACTLY, where toda
 
 What the real part forced (all fixed, all inside the switch): the design-box check read the grid's margin as a design box (the export silently fell back); 91 frozen bodies queried one by one (47 s; merged by depth: 11 s); a body list that moved its meshes under the distance finders (crash with two or more bodies); keep regions joined by a second, nudged union along faces that are now exactly the part's (bad edges: now joined before the one cut); two voxels or two keep regions that share only an edge (now fused 0.01 mm); pinch points where the mesher snapped a saddle onto a grid point (two sheets at one float position: each copy moves 1 um into its own solid).
 
+### Hold 1 of the reference batch (2026-11-25, Release, frozen binary 157609bc, switch on; stage 1 off)
+
+"Before" is ledger D (TOReview's runs of the released worker CLI). Wall patches as above; their count n changes because the drawn flats are now exact and counted apart.
+
+| part (res) | before: versions, margin, grams | after: versions, margin (certified -> file), grams | wall patches before: median / p90 / worst, share > 0.05 | after |
+|---|---|---|---|---|
+| Stand (128) | 1; 2.40; 86.6 g | 1; 2.39 -> 2.65; 84.8 g | 0.160 / 0.33 / 0.40, 98 % (n 145) | 0.000 / 0.15 / 0.25, 38 % (n 16) |
+| Top Motor Mount (96), rung 0.68 | 4 versions; 1.64; 105.3 g | 4 versions; 1.64 -> 1.61; 104.5 g | 0.011 / 0.26 / 0.57, 35 % | **0.083 / 0.32 / 0.78, 64 % (worse)** |
+| Top Motor Mount, rung 0.38 | 1.67; 100.6 g | 1.67 -> 1.64; 99.7 g | 0.037 / 0.28 / 0.61, 46 % | **0.057 / 0.30 / 0.81, 56 % (worse)** |
+| Stand v4 (96) | NO version (file not one clean solid, X-05) | 1; 1.84 -> 1.88; 77.2 g (through the VOXEL export: design-box runs fell back; fixed since, not yet re-run) | - | 0.198 / 0.30 / 0.59, 93 % (voxel export) |
+
+Top Motor Mount got worse, and it is the part the optimiser really carves. Two causes are being separated (runs at res 64, stage 1 on and off): (1) without stage 1 its protected faces come as stamped voxels (2,000-6,600 per version), now without the curvature flow that used to sand them; (2) between re-fits the optimiser's steps leave bumps at the knot spacing (about 3 mm) in the function itself, which the old export's fill, resample and flow low-passed and the exact surface shows. The re-fit now runs just before each margin probe so every certified design is re-normalised (the slope band), and its move is measured only where phi has a slope.
+
 ## Not done yet
 
 - B-02, B-03, P-10 (single-pass basis build, a thread pool, per-iteration allocations): priced, not done. About 50 thread start-ups and six vector allocations per iteration cost milliseconds against a 1-28 s solve per iteration; the basis is built once per run. Worth doing only in the stage 10 clean-out.
