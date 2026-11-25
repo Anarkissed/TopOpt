@@ -541,6 +541,28 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
     return f;
   };
 
+  if (const char* pr = std::getenv("TOPOPT_SURFACE_PROBE")) {  // "x,y,z;x,y,z;..."
+    std::stringstream ss(pr);
+    for (std::string item; std::getline(ss, item, ';');) {
+      double x = 0, y = 0, z = 0;
+      if (std::sscanf(item.c_str(), "%lf,%lf,%lf", &x, &y, &z) != 3) continue;
+      const Vec3 p{x, y, z};
+      const int i = static_cast<int>(std::floor((x - o.x) / h)),
+                j = static_cast<int>(std::floor((y - o.y) / h)),
+                k2 = static_cast<int>(std::floor((z - o.z) / h));
+      std::string vx = "outside the grid";
+      if (i >= 0 && j >= 0 && k2 >= 0 && i < nx && j < ny && k2 < nz) {
+        const std::size_t c = (static_cast<std::size_t>(k2) * ny + j) * nx + i;
+        char b[200];
+        std::snprintf(b, sizeof b, "voxel (%d,%d,%d) tag %d rho %.4f stamped %d/%d", i, j, k2,
+                      static_cast<int>(sg.tags[c]), rho[c], st_solid[c], st_void[c]);
+        vx = b;
+      }
+      std::fprintf(stderr, "[surface probe] (%.1f,%.1f,%.1f): %s; phi %.3f; field %.3f\n", x, y, z,
+                   vx.c_str(), phi_vox((x - o.x) / h - 0.5, (y - o.y) / h - 0.5, (z - o.z) / h - 0.5),
+                   field(p));
+    }
+  }
   // 2) Mesh the zero surface, one voxel past the grid on every side so the drawn
   //    part, not the box, closes it.
   const double cell = h / static_cast<double>(std::max(1, smooth_factor));
