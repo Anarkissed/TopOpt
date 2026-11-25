@@ -12,10 +12,16 @@
 //    mask_step_face); the test measures how deep the frozen material really goes.
 //    Rule 3: the typed mm within a tenth of a voxel.
 //
-// Today both follow whole voxels (ledger V-01 and L-03), so:
-//   no argument : MEASURE. Prints both tables; fails only on a broken run or a
-//                 total force that changed. This is what ctest runs until stage 1.
-//   --gate      : also fails outside the rules. Stage 1 switches ctest to it.
+// Each table has two halves: TODAY's path (whole voxels; ledger V-01 and L-03),
+// which is only reported, and the DRAWN-FACE path (face_loads.hpp, stage 1), which
+// is held to the rules:
+//   - the loaded area, its centre and the total force, exactly as drawn;
+//   - the protected depth as the frozen whole voxels show it (half a voxel at
+//     best, by construction) and as the per-voxel protected share shows it (the
+//     typed mm within a tenth of a voxel; what a stage that can hold a partly
+//     protected voxel will deliver).
+// The test fails when the drawn-face path breaks a rule. Today's path never
+// fails it.
 //
 // Pure C++/std: the model is built in code; no OCCT, no Eigen.
 #include <algorithm>
@@ -24,6 +30,7 @@
 #include <cstring>
 #include <vector>
 
+#include "topopt/face_loads.hpp"
 #include "topopt/face_region.hpp"
 #include "topopt/fea.hpp"
 #include "topopt/mesh.hpp"
@@ -123,9 +130,31 @@ LoadRow measure_load(int res, double x0, double y0) {
   return r;
 }
 
+// The same patch through the drawn-face path.
+LoadRow measure_load_face(int res, double x0, double y0) {
+  LoadRow r;
+  r.res = res;
+  const StepModel model = build_block(x0, y0);
+  const VoxelGrid g = topopt::voxelize(model.mesh, res);
+  r.voxel = g.spacing;
+  topopt::FaceAreaReport rep;
+  const std::vector<topopt::NodeArea> areas = topopt::face_node_areas(
+      g, topopt::face_pieces(model, {F_PATCH}, 0.5 * g.spacing), &rep);
+  if (areas.empty()) return r;
+  for (const topopt::NodalLoad& l :
+       topopt::face_traction_loads(areas, Vec3{0.0, 0.0, kForce}))
+    if (l.component == 2) r.total += l.value;
+  r.area = rep.placed_area;
+  r.centre_off = std::hypot(rep.placed_centre.x - (x0 + 0.5 * kPatch),
+                            rep.placed_centre.y - (y0 + 0.5 * kPatch));
+  r.ok = true;
+  return r;
+}
+
 struct DepthRow {
   int res = 0;
   double voxel = 0.0, typed = 0.0, measured = 0.0;
+  double by_share = 0.0;  // drawn-face path only: depth the protected shares add up to
   bool ok = false;
 };
 
@@ -149,6 +178,45 @@ DepthRow measure_depth(int res, double typed_mm) {
       lowest = k;
   if (lowest < 0) return r;
   r.measured = kLz - (g.origin.z + lowest * g.spacing);
+  r.ok = true;
+  return r;
+}
+
+// The same protection through the drawn-face path.
+DepthRow measure_depth_face(int res, double typed_mm) {
+  DepthRow r;
+  r.res = res;
+  r.typed = typed_mm;
+  const double x0 = 20.37, y0 = 10.71;
+  const StepModel model = build_block(x0, y0);
+  const VoxelGrid g = topopt::voxelize(model.mesh, res);
+  r.voxel = g.spacing;
+  topopt::DesignMask mask(g.voxel_count(), topopt::MaskValue::Active);
+  std::vector<float> share;
+  topopt::mask_face_depth_mm(g, model, {F_PATCH}, typed_mm,
+                             topopt::MaskValue::FrozenSolid, mask, &share);
+  const int i = static_cast<int>((x0 + 0.5 * kPatch - g.origin.x) / g.spacing);
+  const int j = static_cast<int>((y0 + 0.5 * kPatch - g.origin.y) / g.spacing);
+  int lowest = -1;
+  double sum = 0.0;
+  for (int k = g.nz - 1; k >= 0; --k) {
+    if (g.solid(i, j, k) && mask[g.index(i, j, k)] == topopt::MaskValue::FrozenSolid)
+      lowest = k;
+    // A voxel's share counts only for the part of the voxel that is under the face.
+    const double z0 = g.origin.z + k * g.spacing;
+    const double under = std::min(std::max(kLz - z0, 0.0), g.spacing) / g.spacing;
+    sum += std::min(static_cast<double>(share[g.index(i, j, k)]), under);
+  }
+  if (lowest < 0) return r;
+  r.measured = kLz - (g.origin.z + lowest * g.spacing);
+  // Where the face stands above the highest solid voxel, that sliver of the part
+  // is not in the grid at all (a voxelisation matter, ledger V-02); it is under
+  // the face all the same.
+  int top = -1;
+  for (int k = 0; k < g.nz; ++k)
+    if (g.solid(i, j, k)) top = k;
+  const double missing = std::max(kLz - (g.origin.z + (top + 1) * g.spacing), 0.0);
+  r.by_share = missing + sum * g.spacing;
   r.ok = true;
   return r;
 }
@@ -185,6 +253,25 @@ int main(int argc, char** argv) {
               worst_area, nothing_loaded);
   if (gate && (worst_area > 2.0 || nothing_loaded > 0)) ++failures;
 
+  std::printf("\n[test C] the same patch through the drawn-face path\n");
+  double worst_face_area = 0.0, worst_face_centre = 0.0;
+  for (int res : {32, 40, 48, 64, 80, 96})
+    for (int p = 0; p < 3; ++p) {
+      const LoadRow r = measure_load_face(res, places[p][0], places[p][1]);
+      const double pct = 100.0 * (r.area / (kPatch * kPatch) - 1.0);
+      const bool force_ok = std::fabs(r.total - kForce) < 1e-9 * std::fabs(kForce);
+      std::printf("%5d %8.3f %10d %12.1f %+10.2f %14.4f %10.3f %s\n", r.res, r.voxel,
+                  p + 1, r.area, pct, r.centre_off / r.voxel, r.total,
+                  !r.ok ? "NOTHING LOADED" : (!force_ok ? "FORCE CHANGED" : ""));
+      if (!r.ok || !force_ok) ++failures;
+      worst_face_area = std::max(worst_face_area, std::fabs(pct));
+      worst_face_centre = std::max(worst_face_centre, r.centre_off / r.voxel);
+    }
+  std::printf("[test C] drawn-face path: worst area error %.2f %% (rule 6: 2 %%), "
+              "centre off by at most %.3f voxel\n",
+              worst_face_area, worst_face_centre);
+  if (worst_face_area > 2.0 || worst_face_centre > 0.1) ++failures;
+
   std::printf("\n[test D] protection depth under the patch\n");
   std::printf("%5s %8s %10s %12s %14s\n", "res", "voxel", "typed mm", "measured mm",
               "off, in voxels");
@@ -198,8 +285,28 @@ int main(int argc, char** argv) {
       if (!r.ok && gate) ++failures;
       worst_depth = std::max(worst_depth, std::fabs(off));
     }
-  std::printf("[test D] worst depth error %.2f voxel (rule 3: 0.10)\n", worst_depth);
+  std::printf("[test D] today: worst depth error %.2f voxel (rule 3: 0.10)\n", worst_depth);
   if (gate && worst_depth > 0.10) ++failures;
+
+  std::printf("\n[test D] the same protection through the drawn-face path\n");
+  std::printf("%5s %8s %10s %14s %14s %12s %14s\n", "res", "voxel", "typed mm",
+              "whole voxels", "off, in voxels", "by share mm", "off, in voxels");
+  double worst_whole = 0.0, worst_share = 0.0;
+  for (int res : {48, 64, 96})
+    for (double typed : {2.0, 3.0, 5.0}) {
+      const DepthRow r = measure_depth_face(res, typed);
+      const double v = r.voxel > 0.0 ? r.voxel : 1.0;
+      std::printf("%5d %8.3f %10.1f %14.3f %+14.2f %12.3f %+14.2f %s\n", r.res, r.voxel,
+                  r.typed, r.measured, (r.measured - r.typed) / v, r.by_share,
+                  (r.by_share - r.typed) / v, r.ok ? "" : "BROKEN");
+      if (!r.ok) ++failures;
+      worst_whole = std::max(worst_whole, std::fabs(r.measured - r.typed) / v);
+      worst_share = std::max(worst_share, std::fabs(r.by_share - r.typed) / v);
+    }
+  std::printf("[test D] drawn-face path: whole voxels off by at most %.2f voxel (0.5 by "
+              "construction), protected share off by at most %.2f voxel (rule 3: 0.10)\n",
+              worst_whole, worst_share);
+  if (worst_whole > 0.5 + 1e-9 || worst_share > 0.10) ++failures;
 
   std::printf("[tests C, D] %s: %d failure(s)\n", gate ? "gate" : "measure only", failures);
   return failures == 0 ? 0 : 1;

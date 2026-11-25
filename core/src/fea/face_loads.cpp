@@ -292,10 +292,21 @@ std::vector<DirichletBC> face_spring_bcs(const std::vector<NodeArea>& areas,
   return bcs;
 }
 
-std::size_t mask_face_depth_mm(const VoxelGrid& grid, const StepModel& model,
-                               const std::vector<int>& face_ids, double depth_mm,
-                               MaskValue mask_value, DesignMask& mask,
-                               std::vector<float>* fraction) {
+namespace {
+
+bool inside_cuts(const Vec3& p, const std::vector<RegionCut>& cuts) {
+  for (const RegionCut& c : cuts) {
+    const double s = dot(sub(p, c.point), c.normal);
+    if (c.strict ? !(s > 0.0) : !(s >= 0.0)) return false;
+  }
+  return true;
+}
+
+std::size_t mask_depth_impl(const VoxelGrid& grid, const StepModel& model,
+                            const std::vector<int>& face_ids,
+                            const std::vector<RegionCut>& cuts, double depth_mm,
+                            MaskValue mask_value, DesignMask& mask,
+                            std::vector<float>* fraction) {
   check_model(model, "mask_face_depth_mm");
   if (!(depth_mm > 0.0))
     throw std::invalid_argument("mask_face_depth_mm: depth_mm must be > 0");
@@ -351,12 +362,13 @@ std::size_t mask_face_depth_mm(const VoxelGrid& grid, const StepModel& model,
       ++set;
     }
   };
-  constexpr int kSub = 4;
+  constexpr int kSub = 8;  // the share is then good to a sixteenth of a voxel on a flat face
   for (int k = a0[2]; k <= a1[2]; ++k)
     for (int j = a0[1]; j <= a1[1]; ++j)
       for (int i = a0[0]; i <= a1[0]; ++i) {
         if (!grid.solid(i, j, k)) continue;
         const Vec3 centre = grid.voxel_center(i, j, k);
+        if (!inside_cuts(centre, cuts)) continue;
         const double d2 = dist2(centre);
         if (d2 <= depth2) freeze(i, j, k);
         if (!fraction) continue;
@@ -382,10 +394,54 @@ std::size_t mask_face_depth_mm(const VoxelGrid& grid, const StepModel& model,
       }
   // A protection never freezes nothing: the voxels the face lies on are always in.
   for (const FacePiece& piece : face_pieces(model, face_ids, 0.5 * h)) {
+    if (!inside_cuts(piece.point, cuts)) continue;
     int i = 0, j = 0, k = 0;
     if (host_voxel(grid, piece, i, j, k)) freeze(i, j, k);
   }
   return set;
+}
+
+}  // namespace
+
+std::size_t mask_face_depth_mm(const VoxelGrid& grid, const StepModel& model,
+                               const std::vector<int>& face_ids, double depth_mm,
+                               MaskValue mask_value, DesignMask& mask,
+                               std::vector<float>* fraction) {
+  return mask_depth_impl(grid, model, face_ids, {}, depth_mm, mask_value, mask, fraction);
+}
+
+std::size_t mask_region_depth_mm(const VoxelGrid& grid, const StepModel& model,
+                                 const ResolvedFaceRegion& region, double depth_mm,
+                                 MaskValue mask_value, DesignMask& mask,
+                                 std::vector<float>* fraction) {
+  return mask_depth_impl(grid, model, region.member_faces, region.cuts, depth_mm,
+                         mask_value, mask, fraction);
+}
+
+std::vector<FacePiece> region_pieces(const StepModel& model,
+                                     const ResolvedFaceRegion& region, double max_edge) {
+  std::vector<FacePiece> all = face_pieces(model, region.member_faces, max_edge);
+  if (region.cuts.empty()) return all;
+  std::vector<FacePiece> out;
+  out.reserve(all.size());
+  for (const FacePiece& p : all)
+    if (inside_cuts(p.point, region.cuts)) out.push_back(p);
+  return out;
+}
+
+std::size_t tag_face_hosts(VoxelGrid& grid, const std::vector<FacePiece>& pieces,
+                           VoxelTag tag) {
+  if (tag != VoxelTag::Load && tag != VoxelTag::Fixture)
+    throw std::invalid_argument("tag_face_hosts: tag must be Load or Fixture");
+  std::size_t tagged = 0;
+  for (const FacePiece& piece : pieces) {
+    int i = 0, j = 0, k = 0;
+    if (!host_voxel(grid, piece, i, j, k)) continue;
+    if (grid.tag(i, j, k) == tag) continue;
+    grid.set_tag(i, j, k, tag);
+    ++tagged;
+  }
+  return tagged;
 }
 
 }  // namespace topopt

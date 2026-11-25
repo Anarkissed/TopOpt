@@ -23,6 +23,7 @@
 #include <cstddef>
 #include <vector>
 
+#include "topopt/face_region.hpp"
 #include "topopt/fea.hpp"
 #include "topopt/mesh.hpp"
 #include "topopt/step.hpp"
@@ -47,6 +48,20 @@ std::vector<FacePiece> face_pieces(const StepModel& model,
 std::vector<FacePiece> triangle_pieces(const StepModel& model,
                                        const std::vector<int>& triangles,
                                        double max_edge);
+
+// The same for a region: its member faces, kept only where every one of the
+// region's cuts holds at the piece's centre (the same test cut_voxels applies to
+// voxel centres, applied here to the face itself).
+std::vector<FacePiece> region_pieces(const StepModel& model,
+                                     const ResolvedFaceRegion& region,
+                                     double max_edge);
+
+// Tag the solid voxels the pieces lie on (Load or Fixture), so everything that
+// reads tags (the frozen skin, the receipts) sees the same voxels the nodes'
+// areas came from. Returns how many voxels were newly tagged. Unlike
+// tag_step_face this never comes back empty for a face that touches the part.
+std::size_t tag_face_hosts(VoxelGrid& grid, const std::vector<FacePiece>& pieces,
+                           VoxelTag tag);
 
 // The area of drawn face each node stands for.
 struct NodeArea {
@@ -100,5 +115,11 @@ std::size_t mask_face_depth_mm(const VoxelGrid& grid, const StepModel& model,
                                const std::vector<int>& face_ids, double depth_mm,
                                MaskValue mask_value, DesignMask& mask,
                                std::vector<float>* fraction = nullptr);
+// The same for a region (member faces; the cuts are applied to each voxel's
+// centre, as mask_step_region does).
+std::size_t mask_region_depth_mm(const VoxelGrid& grid, const StepModel& model,
+                                 const ResolvedFaceRegion& region, double depth_mm,
+                                 MaskValue mask_value, DesignMask& mask,
+                                 std::vector<float>* fraction = nullptr);
 
 }  // namespace topopt

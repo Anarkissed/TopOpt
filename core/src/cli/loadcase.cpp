@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <cstdlib>
 #include <limits>
 #include <map>
 #include <set>
@@ -12,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "topopt/face_loads.hpp"     // TO rebuild stage 1: loads from the drawn face
 #include "topopt/observability.hpp"  // steady_clock_ms (the counterfactual cost)
 #include "topopt/production.hpp"  // configure_production_options, production_reduction_ladder
 #include "topopt/simp.hpp"        // effective_design_mask (the pre-flight allowed set)
@@ -19,6 +21,65 @@
 namespace topopt {
 
 namespace {
+
+// ---------------------------------------------------------------------------
+// TO rebuild stage 1 -- THE ONE TEMPORARY SWITCH (02-plan.md section 3).
+// TOPOPT_FACE_LOADS picks where loads, anchors, pads and protection depths come
+// from:
+//   unset / "voxel" : today's path (voxel centres within half a voxel of the face;
+//                     depths in whole voxels). The default until stage 1's gate.
+//   "face"          : the drawn face's own area (face_loads.hpp); pads and
+//                     protections in mm; anchors clamp the voxels the face lies on.
+//   "face_spring"   : as "face", and each anchor node is held by a spring in
+//                     proportion to the drawn area it stands for.
+// The switch and the "voxel" path are deleted in stage 1's close-out.
+enum class FaceLoadMode { Voxel, Face, FaceSpring };
+
+FaceLoadMode face_load_mode() {
+  const char* v = std::getenv("TOPOPT_FACE_LOADS");
+  if (v == nullptr) return FaceLoadMode::Voxel;
+  const std::string m(v);
+  if (m == "face") return FaceLoadMode::Face;
+  if (m == "face_spring") return FaceLoadMode::FaceSpring;
+  return FaceLoadMode::Voxel;
+}
+
+// The anchor / load pad in mm on the face path (TOPOPT_PAD_MM, default 3.0: an
+// open choice stage 1 settles by measurement). The voxel path keeps its 3 voxels.
+double face_pad_depth_mm() {
+  const char* v = std::getenv("TOPOPT_PAD_MM");
+  const double d = v ? std::atof(v) : 0.0;
+  return d > 0.0 ? d : 3.0;
+}
+
+std::size_t tag_face_m(VoxelGrid& grid, const StepModel& model, int fid, VoxelTag tag) {
+  if (face_load_mode() == FaceLoadMode::Voxel) return tag_step_face(grid, model, fid, tag);
+  return tag_face_hosts(grid, face_pieces(model, {fid}, 0.5 * grid.spacing), tag);
+}
+
+std::size_t tag_region_m(VoxelGrid& grid, const StepModel& model,
+                         const ResolvedFaceRegion& region, VoxelTag tag) {
+  if (face_load_mode() == FaceLoadMode::Voxel)
+    return tag_step_region(grid, model, region, tag);
+  return tag_face_hosts(grid, region_pieces(model, region, 0.5 * grid.spacing), tag);
+}
+
+// Depth: `depth_voxels` on the voxel path, `depth_mm` on the face path.
+std::size_t mask_face_m(const VoxelGrid& grid, const StepModel& model, int fid,
+                        MaskValue value, int depth_voxels, double depth_mm,
+                        DesignMask& mask) {
+  if (face_load_mode() == FaceLoadMode::Voxel)
+    return mask_step_face(grid, model, fid, value, depth_voxels, mask);
+  return mask_face_depth_mm(grid, model, {fid}, depth_mm, value, mask);
+}
+
+std::size_t mask_region_m(const VoxelGrid& grid, const StepModel& model,
+                          const ResolvedFaceRegion& region, MaskValue value,
+                          int depth_voxels, double depth_mm, DesignMask& mask) {
+  if (face_load_mode() == FaceLoadMode::Voxel)
+    return mask_step_region(grid, model, region, value, depth_voxels, mask);
+  return mask_region_depth_mm(grid, model, region, depth_mm, value, mask);
+}
 
 // The process-global per-load-group log sink (loadcase.hpp). Defaults to one line
 // on stderr; a front-end can reroute it (e.g. os_log) and a test can capture it.
@@ -341,6 +402,21 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // same condition tag_step_face would have thrown on, made legible.
   for (int fid : lc.anchor_face_ids)
     validate_face_id(fid, model, "load case anchor");
+  // One group's force as nodal loads. Voxel path: spread over the exposed faces of
+  // the Load voxels of `gg`. Face path: spread over the drawn faces' own area.
+  auto group_loads = [&](const VoxelGrid& gg, const std::vector<int>& fids,
+                         const std::vector<int>& rids, const Vec3& force,
+                         const std::string& who) -> std::vector<NodalLoad> {
+    if (face_load_mode() == FaceLoadMode::Voxel)
+      return traction_loads(gg, VoxelTag::Load, force);
+    std::vector<FacePiece> pieces = face_pieces(model, fids, 0.5 * gg.spacing);
+    for (int rid : rids) {
+      const std::vector<FacePiece> more =
+          region_pieces(model, region_or_throw(rid, who), 0.5 * gg.spacing);
+      pieces.insert(pieces.end(), more.begin(), more.end());
+    }
+    return face_traction_loads(face_node_areas(gg, pieces), force);
+  };
   // CORE LIST item 47 — each anchor's OWN Fixture voxels, tagged on a scratch copy
   // of the untagged grid, so a rung that lets an anchored piece go can name its
   // faces (MinimizePlasticOptions::anchor_voxels; receipt only — the tags below
@@ -358,20 +434,20 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
     };
     for (int fid : lc.anchor_face_ids) {
       VoxelGrid one = untagged;
-      tag_step_face(one, model, fid, VoxelTag::Fixture);
+      tag_face_m(one, model, fid, VoxelTag::Fixture);
       anchor_voxels.push_back({fid, -1, own_voxels(one)});
     }
     for (int rid : lc.anchor_region_ids) {
       VoxelGrid one = untagged;
-      tag_step_region(one, model, region_or_throw(rid, "load case anchor"),
+      tag_region_m(one, model, region_or_throw(rid, "load case anchor"),
                       VoxelTag::Fixture);
       anchor_voxels.push_back({-1, rid, own_voxels(one)});
     }
   }
   for (int fid : lc.anchor_face_ids)
-    tag_step_face(grid, model, fid, VoxelTag::Fixture);
+    tag_face_m(grid, model, fid, VoxelTag::Fixture);
   for (int rid : lc.anchor_region_ids)
-    tag_step_region(grid, model, region_or_throw(rid, "load case anchor"),
+    tag_region_m(grid, model, region_or_throw(rid, "load case anchor"),
                     VoxelTag::Fixture);
   const VoxelGrid base_grid = grid;
 
@@ -404,9 +480,9 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
       validate_face_id(fid, model, "load group " + std::to_string(gi));
     VoxelGrid gg = base_grid;  // anchors only, no other group's Load
     for (int fid : group.face_ids)
-      tag_step_face(gg, model, fid, VoxelTag::Load);
+      tag_face_m(gg, model, fid, VoxelTag::Load);
     for (int rid : group.region_ids)
-      tag_step_region(gg, model,
+      tag_region_m(gg, model,
                       region_or_throw(rid, "load group " + std::to_string(gi)),
                       VoxelTag::Load);
     const std::size_t tagged = count_tagged(gg, VoxelTag::Load);
@@ -422,12 +498,13 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
            LoadGroupReport::Status::ZeroTagged});
       continue;
     }
-    const std::vector<NodalLoad> tl = traction_loads(gg, VoxelTag::Load, force);
+    const std::vector<NodalLoad> tl = group_loads(
+        gg, group.face_ids, group.region_ids, force, "load group " + std::to_string(gi));
     external.insert(external.end(), tl.begin(), tl.end());
     // Retain the load faces on the MAIN grid (Load voxels are implicitly
     // FrozenSolid, so the surface the traction sits on is never optimized away).
     for (int fid : group.face_ids) {
-      tag_step_face(grid, model, fid, VoxelTag::Load);
+      tag_face_m(grid, model, fid, VoxelTag::Load);
       retained_load_faces.push_back(fid);
     }
     // Regions are retained on the main grid the same way. Their structural pad
@@ -435,7 +512,7 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
     // union or to one sector of a grid split sits on the same pad a load face
     // has always sat on — the pad is not a face-only privilege.
     for (int rid : group.region_ids) {
-      tag_step_region(grid, model,
+      tag_region_m(grid, model,
                       region_or_throw(rid, "load group " + std::to_string(gi)),
                       VoxelTag::Load);
       retained_load_regions.push_back(rid);
@@ -603,6 +680,26 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
     }
     std::printf("[loadcase] anchors: bearing, %zu springs on %zu anchors (steel 200 GPa "
                 "through 1 mm, compression-only, frictionless)\n",
+                n_springs, anchor_voxels.size());
+  } else if (face_load_mode() == FaceLoadMode::FaceSpring && !scenarios) {
+    // TO rebuild stage 1, "face_spring": each anchor node is held by a spring in
+    // proportion to the drawn area it stands for (the bearing stiffness per mm^2,
+    // the same in every direction, never letting go), so the held area is the
+    // face's own whatever the grid alignment. Scenario jobs keep the clamp below.
+    std::size_t n_springs = 0;
+    for (const MinimizePlasticOptions::AnchorVoxels& a : anchor_voxels) {
+      const std::vector<FacePiece> pieces =
+          a.face_id >= 0
+              ? face_pieces(model, {a.face_id}, 0.5 * grid.spacing)
+              : region_pieces(model, region_or_throw(a.region_id, "load case anchor"),
+                              0.5 * grid.spacing);
+      const std::vector<DirichletBC> springs = face_spring_bcs(
+          face_node_areas(grid, pieces), lc.bearing_stiffness_mpa_per_mm);
+      n_springs += springs.size();
+      bcs.insert(bcs.end(), springs.begin(), springs.end());
+    }
+    any_fixture = n_springs > 0;
+    std::printf("[loadcase] anchors: held by area springs, %zu nodes on %zu anchors\n",
                 n_springs, anchor_voxels.size());
   } else {
     for (int k = 0; k < grid.nz; ++k)
@@ -772,19 +869,19 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
     };
     if (want_pad) {
       for (int fid : lc.anchor_face_ids)
-        mask_step_face(grid, model, fid, MaskValue::FrozenSolid,
-                       kProductionAnchorPadDepthVoxels, pad);
+        mask_face_m(grid, model, fid, MaskValue::FrozenSolid,
+                    kProductionAnchorPadDepthVoxels, face_pad_depth_mm(), pad);
       for (int fid : retained_load_faces)
-        mask_step_face(grid, model, fid, MaskValue::FrozenSolid,
-                       kProductionAnchorPadDepthVoxels, pad);
+        mask_face_m(grid, model, fid, MaskValue::FrozenSolid,
+                    kProductionAnchorPadDepthVoxels, face_pad_depth_mm(), pad);
       // A retained load REGION gets the same structural pad a retained load
       // face gets. The pad is what ties a boundary condition into the body; a
       // load applied to a union or to one sector of a grid split needs it for
       // exactly the same reason (diagnosis 064).
       for (int rid : retained_load_regions)
-        mask_step_region(grid, model, region_or_throw(rid, "retained load"),
-                         MaskValue::FrozenSolid,
-                         kProductionAnchorPadDepthVoxels, pad);
+        mask_region_m(grid, model, region_or_throw(rid, "retained load"),
+                      MaskValue::FrozenSolid, kProductionAnchorPadDepthVoxels,
+                      face_pad_depth_mm(), pad);
       // COUNT THE PAD SEPARATELY (task 2026-08-12 §1f). Everything frozen so far
       // is the pad and only the pad — the protections below run after this.
       std::size_t pad_voxels = 0;
@@ -823,7 +920,8 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
             region_depth_layers(requested_mm, grid.spacing);
         // What `depth_vox` LAYERS actually reach, by mask_step_face's own rule
         // (a voxel is in iff its centre is within (depth - 0.5) spacings).
-        const double effective_mm = depth_vox * grid.spacing;
+        const bool by_mm = face_load_mode() != FaceLoadMode::Voxel;
+        const double effective_mm = by_mm ? requested_mm : depth_vox * grid.spacing;
         // Freeze this face's skin into a PER-FACE mask so the report counts THIS
         // face's frozen voxels (not ones an anchor pad or an earlier protection
         // already froze — both are the same FrozenSolid value). Freeze once more a
@@ -831,11 +929,12 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
         // consumed at `depth_vox` (thinner than / equal to the requested depth) —
         // the honest "freezes what exists and SAYS so" signal, no silent over-claim.
         DesignMask one = make_active_mask(grid);
-        const std::size_t frozen = mask_step_face(
-            grid, model, fid, MaskValue::FrozenSolid, depth_vox, one);
+        const std::size_t frozen = mask_face_m(
+            grid, model, fid, MaskValue::FrozenSolid, depth_vox, requested_mm, one);
         DesignMask deeper = make_active_mask(grid);
-        const std::size_t frozen_deeper = mask_step_face(
-            grid, model, fid, MaskValue::FrozenSolid, depth_vox + 1, deeper);
+        const std::size_t frozen_deeper = mask_face_m(
+            grid, model, fid, MaskValue::FrozenSolid, depth_vox + 1,
+            requested_mm + grid.spacing, deeper);
         long long first_frozen_here = 0;  // item 40: credited to this face alone
         for (std::size_t idx = 0; idx < pad.size(); ++idx)
           if (one[idx] == MaskValue::FrozenSolid) {
@@ -864,13 +963,15 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
         const double requested_mm = lc.face_protection_region_depth_for(pi);
         const int depth_vox =
             region_depth_layers(requested_mm, grid.spacing);
-        const double effective_mm = depth_vox * grid.spacing;
+        const bool by_mm = face_load_mode() != FaceLoadMode::Voxel;
+        const double effective_mm = by_mm ? requested_mm : depth_vox * grid.spacing;
         DesignMask one = make_active_mask(grid);
-        const std::size_t frozen = mask_step_region(
-            grid, model, reg, MaskValue::FrozenSolid, depth_vox, one);
+        const std::size_t frozen = mask_region_m(
+            grid, model, reg, MaskValue::FrozenSolid, depth_vox, requested_mm, one);
         DesignMask deeper = make_active_mask(grid);
-        const std::size_t frozen_deeper = mask_step_region(
-            grid, model, reg, MaskValue::FrozenSolid, depth_vox + 1, deeper);
+        const std::size_t frozen_deeper = mask_region_m(
+            grid, model, reg, MaskValue::FrozenSolid, depth_vox + 1,
+            requested_mm + grid.spacing, deeper);
         long long first_frozen_here = 0;  // item 40: credited to this region alone
         for (std::size_t idx = 0; idx < pad.size(); ++idx)
           if (one[idx] == MaskValue::FrozenSolid) {
@@ -1085,13 +1186,14 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
         VoxelGrid gg = no_load;
         for (const int fid : g.face_ids) {
           validate_face_id(fid, model, "load scenario \"" + sc.name + "\" group");
-          tag_step_face(gg, model, fid, VoxelTag::Load);
+          tag_face_m(gg, model, fid, VoxelTag::Load);
         }
         for (const int rid : g.region_ids)
-          tag_step_region(gg, model, region_or_throw(rid, "load scenario group"),
+          tag_region_m(gg, model, region_or_throw(rid, "load scenario group"),
                           VoxelTag::Load);
         if (count_tagged(gg, VoxelTag::Load) == 0) continue;
-        const std::vector<NodalLoad> tl = traction_loads(gg, VoxelTag::Load, g.force);
+        const std::vector<NodalLoad> tl =
+            group_loads(gg, g.face_ids, g.region_ids, g.force, "load scenario group");
         s.loads.insert(s.loads.end(), tl.begin(), tl.end());
       }
       if (s.loads.empty())
@@ -1332,7 +1434,7 @@ std::string preflight_refusal_report(
       bool ok_ids = true;
       for (const int fid : g.face_ids) {
         if (fid < 0 || fid >= model.face_count) { ok_ids = false; break; }
-        tag_step_face(probe_part, model, fid, VoxelTag::Load);
+        tag_face_m(probe_part, model, fid, VoxelTag::Load);
       }
       if (!ok_ids) continue;
       VoxelGrid probe = domain.grid;

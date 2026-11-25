@@ -2304,7 +2304,8 @@ endif()
 # needs only Eigen (traction_loads / minimize_plastic_solved_grid). That is what
 # lets an STL/3MF part run the full load-case pipeline on a slice without OCCT.
 if(Eigen3_FOUND)
-  target_sources(topopt PRIVATE src/cli/loadcase.cpp)
+  target_sources(topopt PRIVATE src/cli/loadcase.cpp
+    src/fea/face_loads.cpp)  # TO rebuild stage 1: loads from the drawn face
 endif()
 
 if(OpenCASCADE_FOUND AND Eigen3_FOUND)
