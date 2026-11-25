@@ -89,6 +89,16 @@ struct StageFloor: Equatable {
     /// RED CONTROL (tests): the glow as before 11-23, whatever the elevation (the level view's blue haze).
     nonisolated(unsafe) static var controlHazeAtLevel = false
 
+    /// ★ notes28 (his iPad notes on release 18, img 77 against Bambu Studio's img 78, from under the bed: "It doesn't seem like we
+    /// are actually looking through a wall ... Please implement it similarly."): how far the look has gone over to the bed seen
+    /// FROM UNDER IT — a see-through tinted plate with its grid, in front of the part (the stage's `stage_under_fragment`) —
+    /// from the eye's height below the bed over its distance (the sine of how far under the bed's plane it looks from): 0 on
+    /// and above the plane (the look from above, unchanged), all of it 6° under, smoothly between as he turns through it.
+    static func underWeight(eyeY: Float, floorY: Float, eyeDistance: Float) -> Float {
+        smooth(0, underFullSine, (floorY - eyeY) / Swift.max(eyeDistance, 1e-6))
+    }
+    static let underFullSine: Float = sinf(6 * .pi / 180)
+
     /// The horizon glow's half width, in the ray's |y|: 0.14 through the lens; through the orthographic telephoto (whose rays
     /// all lie within half a degree of the view's own) the same share of the picture, so it never covers the whole screen.
     static func glowBand(drawFovY: Float, fovY: Float) -> Float {

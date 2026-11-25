@@ -515,8 +515,10 @@ struct LibraryHomeView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(LibraryContinue.title(part: part.name, number: v.number, draft: draft)).dsStyle(DS.TypeScale.bodyStrong)
                         .background(DSParts.publish("libraryContinue-v\(v.number)\(draft ? "-draft" : "")"))   // ★ 11-23 (tests)
+                    // ★ notes28: a draft's changes worked out now from both folders (they were the ones at filing)
+                    let changed = draft ? library.changes(of: v, in: part).count : 0
                     Text(!draft ? library.shortTitle(of: v, in: part)
-                         : v.changes.isEmpty ? "Not optimized yet" : "\(v.changes.count) change\(v.changes.count == 1 ? "" : "s") since v\(v.parentNumber ?? v.number)")
+                         : changed == 0 ? "Not optimized yet" : "\(changed) change\(changed == 1 ? "" : "s") since v\(v.parentNumber ?? v.number)")
                         .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
                 }
                 Spacer()
@@ -1265,8 +1267,21 @@ struct LibraryVersionCard: View {
                     .accessibilityLabel("v\(v.number) menu")
                     .accessibilityIdentifier(key + "-menu")
             }
-            Text(line).font(.system(size: 12.5)).foregroundStyle(DS.Color.textSecondary.color).lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
+            // ★ notes28: his own words when he typed some, the automatic differences on one line under them
+            if let own = ownWords {
+                Text(own).font(.system(size: 13, weight: .medium)).foregroundStyle(DS.Color.textPrimary.color).lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .said(own)
+                    .background(DSParts.publish(key + "-description"))
+                Text(line).font(.system(size: 12)).foregroundStyle(DS.Color.textTertiary.color).lineLimit(1)
+                    .said(line)
+                    .background(DSParts.publish(key + "-differences"))
+            } else {
+                Text(line).font(.system(size: 12.5)).foregroundStyle(DS.Color.textSecondary.color).lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .said(line)
+                    .background(DSParts.publish(key + "-differences"))
+            }
             if pending {
                 if !running {
                     // a draft's card opens it (the ⋯'s Open, as a button he can see)
@@ -1407,15 +1422,13 @@ struct LibraryVersionCard: View {
         .accessibilityIdentifier(k)
     }
 
-    /// What the row says after "v7": his name, else the automatic one ("Keep Clear on 2 faces · res 128"). A draft says where it
-    /// came from first ("from v7 · …"); a branch's "from v4" is its tag.
-    private var line: String {
-        let title = library.shortTitle(of: version, in: part)
-        let prefix = "v\(version.number) · "
-        let words = title.hasPrefix(prefix) ? String(title.dropFirst(prefix.count)) : title
-        guard library.isDraft(version), version.number.isMainLine, let p = version.parentNumber else { return words }
-        return "from v\(p) · \(words)"
-    }
+    /// ★ notes28 (his iPad notes on release 18, img 83: "a guessing game"): what the row says after "v7" — the biggest three
+    /// differences from the version it came from, then "+n more", worked out from both folders now
+    /// (`LibraryModel.differencesLine`). A draft says where it came from first ("from v7 · …"); a branch's "from v4" is its tag.
+    private var line: String { library.differencesLine(of: version, in: part) }
+
+    /// ★ notes28: his own words — the description he typed, else the name he gave it (Rename…); nil: neither.
+    private var ownWords: String? { library.description(of: version.folderID) ?? version.name }
 
     private var date: String {
         library.snapshots[version.folderID].map { $0.savedAt.formatted(.dateTime.month(.abbreviated).day()) } ?? ""
@@ -1454,10 +1467,17 @@ struct LibraryVersionCard: View {
         Button(action: open) { Label("Open v\(v.number)", systemImage: "arrow.up.forward.app") }
         // #362 H51's behaviour, carried over: Duplicate is now "New draft from vN" (H52 unchanged)
         Button {
-            if let copy = model.duplicateProject(id: v.folderID) { library.noteParent(v.folderID, of: copy.id) }
+            let copy = model.duplicateProject(id: v.folderID)
+            if let copy { library.noteParent(v.folderID, of: copy.id) }
             library.refresh()
+            // ★ notes28 (d): a new draft from a version — his words for either one?
+            if let copy { VersionDescriptionEdit.askAfterNewVersion(library: library, made: copy.id, from: v.folderID) }
         } label: { Label("New draft from v\(v.number)", systemImage: "plus.square.on.square") }
         Button(action: rename) { Label("Rename…", systemImage: "pencil") }
+        // ★ notes28 (his notes on release 18): his own words for the version, in the centred editor
+        Button { VersionDescriptionEdit.open(library: library, folder: v.folderID) } label: {
+            Label(VersionDescriptionCopy.edit, systemImage: "text.bubble")
+        }
         Button(role: .destructive, action: delete) { Label("Delete v\(v.number)…", systemImage: "trash") }
     }
 }

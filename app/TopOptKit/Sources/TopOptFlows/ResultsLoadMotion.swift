@@ -55,7 +55,11 @@ public enum LoadMotion {
     /// C1: where the slider opens.
     public static let standardShare = 0.03
     /// Break: how far the part gives way at its weakest place, as a share of the largest movement shown at the top (local).
-    public static let giveShare = 0.5
+    /// ★ notes28 (his notes on release 18, img 79: "showing an actual breakage of the model"): the whole movement again, as a
+    /// crack that opens there (it was half, as a fold).
+    public static let giveShare = 1.0
+    /// ★ notes28: the far side of the crack moves back this share of the near side's give, so the crack opens both ways.
+    public static let crackBackShare = 0.35
     /// Break: the give-way's reach around that place, as a share of the part's longest side.
     public static let giveRadiusShare = 0.06
 
@@ -99,7 +103,10 @@ public enum LoadMotion {
         public var cycle: Double { up + hold + down + rest }
     }
     public static let bendTimeline = Timeline(up: 1.6, hold: 0.6, down: 1.3, rest: 0.4)
-    public static let breakTimeline = Timeline(up: 2.6, hold: 1.6, down: 1.4, rest: 0.4)
+    /// ★ notes28 (his notes on release 18, img 79): "should *end* at the break, showing an actual breakage of the model. It
+    /// shouldn't return back. It should pause on the break then reset." — the load climbs to the break, the part breaks there and
+    /// stays broken for the hold, then the loop starts again from the start (no way down: `down` is 0), after a short rest.
+    public static let breakTimeline = Timeline(up: 2.6, hold: 2.2, down: 0, rest: 0.6)
     public static func timeline(_ k: LoadMotionKind) -> Timeline { k == .bend ? bendTimeline : breakTimeline }
 
     /// Zero slope at both ends (no snap where it turns).
@@ -120,16 +127,18 @@ public enum LoadMotion {
         return 0
     }
 
-    /// Break: how far it has given way (0…1): nothing on the climb; it gives way over the first part of the hold at the top load,
-    /// and springs back over the first half of the way down (never while the load is low).
+    /// Break: how far it has given way (0…1): nothing on the climb; at the top load it breaks — quickly, over the first quarter
+    /// of the hold — and stays broken for the rest of it. ★ notes28: it never springs back; the loop starts over from the start.
     public static func giveWay(time t: Double, _ tl: Timeline) -> Double {
         let u = wrap(t, tl.cycle)
         let top = tl.up, back = tl.up + tl.hold
         if u < top { return 0 }
-        if u < back { return ease((u - top) / (0.6 * tl.hold)) }
-        if u < back + tl.down { return 1 - ease((u - back) / (0.5 * tl.down)) }
+        if u < back { return ease((u - top) / (breakShare * tl.hold)) }
+        if tl.down > 0, u < back + tl.down { return 1 - ease((u - back) / (0.5 * tl.down)) }
         return 0
     }
+    /// ★ notes28: the share of the hold the break takes (a break is sudden; the rest of the hold shows it broken).
+    public static let breakShare = 0.25
 
     /// One frame of a moving view.
     public struct Frame: Equatable, Sendable {
@@ -263,7 +272,9 @@ public final class ResultsMotionPrep {
             disp[3 * j] = e[v].x; disp[3 * j + 1] = e[v].y; disp[3 * j + 2] = e[v].z
             ramp[j] = u[v]
         }
-        // the give-way around the place: a smooth local bump along the way the place moves
+        // the give-way around the place: ★ notes28 (img 79, "an actual breakage") a crack through the place, across the way it
+        // moves — the near side pulled away along that way, the far side a little back, fading out around the place — so the
+        // part visibly splits there (it was one smooth bump, a fold)
         var giveIndices: [Int32] = [], giveBase: [Float] = [], giveVec: [Float] = []
         var giveAtPlace = SIMD3<Float>.zero
         if let at = place, longest > 0, largest > 0 {
@@ -279,14 +290,17 @@ public final class ResultsMotionPrep {
             }
             if simd_length(dir) < 1e-9, let far = e.max(by: { simd_length($0) < simd_length($1) }) { dir = far }
             if simd_length(dir) > 1e-12 {
-                let k = simd_normalize(dir) * Float(LoadMotion.giveShare) * largest
+                let way = simd_normalize(dir)
+                let k = way * Float(LoadMotion.giveShare) * largest
                 giveAtPlace = k
                 for j in 0..<flatN {
                     let v = Int(idx[j])
                     guard v < n, w[v] > 0 else { continue }
                     giveIndices.append(Int32(j))
                     giveBase += [e[v].x, e[v].y, e[v].z]
-                    let g = w[v] * k
+                    let p = SIMD3<Float>(pos[3 * v], pos[3 * v + 1], pos[3 * v + 2])
+                    let side: Float = simd_dot(p - at, way) >= 0 ? 1 : -Float(LoadMotion.crackBackShare)
+                    let g = w[v] * side * k
                     giveVec += [g.x, g.y, g.z]
                 }
             }

@@ -22,11 +22,13 @@ import TopOptKit
 enum LibraryVersionFacts {
     /// Where it came from: "From v1" / "First run" (a draft: "Edited from v1" / "Not run yet"), the model it brought
     /// ("Uploaded: bracket.stl"), then what changed from the version it came from.
-    static func origin(_ v: LibraryVersion, snapshot s: ProjectSnapshot?, draft: Bool) -> [String] {
+    /// ★ notes28: `changes` — what changed, worked out now from both folders (LibraryModel.changes(of:in:)); nil: the list
+    /// stored when it was filed. Every one of them is listed ("Details lists them all").
+    static func origin(_ v: LibraryVersion, snapshot s: ProjectSnapshot?, draft: Bool, changes now: [VersionChange]? = nil) -> [String] {
         var out: [String] = []
         if let p = v.parentNumber { out.append(draft ? "Edited from v\(p)" : "From v\(p)") } else { out.append(draft ? "Not run yet" : "First run") }
         if let m = s?.newModel { out.append("Uploaded: \(m.fileName)") }
-        let changes = v.changes.map(\.text).filter { !$0.hasPrefix("New model:") }   // the upload is said above
+        let changes = (now ?? v.changes).map(\.text).filter { !$0.hasPrefix("New model:") }   // the upload is said above
         out += changes
         if changes.isEmpty, v.parentNumber != nil { out.append("Same settings") }
         return out
@@ -89,6 +91,8 @@ struct LibraryVersionDetailsView: View {
     let folder: UUID
     let back: () -> Void
     @State private var portrait = false
+    /// ★ notes28 (b): the description being edited in place (nil: not editing).
+    @State private var describing: String?
 
     var body: some View {
         Group {
@@ -180,6 +184,7 @@ struct LibraryVersionDetailsView: View {
     private func facts(_ part: LibraryPart, _ v: LibraryVersion, pending: Bool) -> some View {
         let snap = library.snapshots[v.folderID]
         return VStack(alignment: .leading, spacing: DS.Space.l) {
+            descriptionSection(v)
             section("Results", key: key(v) + "-results") {
                 if model.runningIDs.contains(v.folderID) {
                     Text("Running").dsStyle(DS.TypeScale.callout).foregroundStyle(DS.Color.textSecondary.color)
@@ -195,7 +200,8 @@ struct LibraryVersionDetailsView: View {
             }
             section("Where it came from", key: key(v) + "-from") {
                 VStack(alignment: .leading, spacing: DS.Space.xs) {
-                    ForEach(Array(LibraryVersionFacts.origin(v, snapshot: snap, draft: library.isDraft(v)).enumerated()), id: \.offset) { _, line in
+                    ForEach(Array(LibraryVersionFacts.origin(v, snapshot: snap, draft: library.isDraft(v),
+                                                             changes: library.changes(of: v, in: part)).enumerated()), id: \.offset) { _, line in
                         Text(line).dsStyle(DS.TypeScale.callout)
                     }
                 }
@@ -262,6 +268,72 @@ struct LibraryVersionDetailsView: View {
             }
         }
         .background(DSParts.publish(k))
+    }
+
+    /// ★ notes28 (b): "Description" with a pencil beside it; the pencil edits his words right here (Save / Cancel).
+    private func descriptionSection(_ v: LibraryVersion) -> some View {
+        let shape = RoundedRectangle(cornerRadius: DSCards.versionRadius, style: .continuous)
+        let k = key(v) + "-description"
+        return VStack(alignment: .leading, spacing: DS.Space.m) {
+            HStack(spacing: DS.Space.xs) {
+                Text(VersionDescriptionCopy.heading).dsStyle(DS.TypeScale.overlineSmall).foregroundStyle(DS.Color.textTertiary.color)
+                if describing == nil {
+                    Button { describing = library.descriptionDraft(of: v.folderID) } label: {
+                        Image(systemName: "pencil").font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.Color.accent.color)
+                            .frame(width: DSParts.target, height: DSParts.target).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(VersionDescriptionCopy.edit)
+                    .background(DSParts.publish(k + "-edit"))
+                    .accessibilityIdentifier(k + "-edit")
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(minHeight: DSParts.target)
+            if let text = describing {
+                descriptionField(text)
+                    .background(DSParts.publish(k + "-field"))
+                HStack(spacing: DS.Space.s) {
+                    Spacer(minLength: 0)
+                    PillButton(VersionDescriptionCopy.cancel, style: .secondary) { describing = nil }
+                        .background(DSParts.publish(k + "-cancel"))
+                    PillButton(VersionDescriptionCopy.save) {
+                        library.setDescription(describing, folder: v.folderID)
+                        describing = nil
+                    }
+                    .background(DSParts.publish(k + "-save"))
+                }
+            } else {
+                let words = library.description(of: v.folderID)
+                Text(words ?? VersionDescriptionCopy.none).dsStyle(DS.TypeScale.callout)
+                    .foregroundStyle((words == nil ? DS.Color.textTertiary : DS.Color.textPrimary).color)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .said(words ?? VersionDescriptionCopy.none)
+                    .background(DSParts.publish(k + "-text"))
+            }
+        }
+        .padding(DS.Space.l)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(shape.fill(DSCards.fill.color))
+        .overlay(shape.strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
+        .background(DSParts.publish(k))
+    }
+
+    @ViewBuilder private func descriptionField(_ text: String) -> some View {
+        let binding = Binding(get: { describing ?? "" }, set: { describing = $0 })
+        Group {
+            if #available(iOS 16.0, macOS 13.0, *) {
+                TextField(VersionDescriptionCopy.placeholder, text: binding, axis: .vertical).lineLimit(2...8)
+            } else {
+                TextField(VersionDescriptionCopy.placeholder, text: binding)
+            }
+        }
+        .textFieldStyle(.plain)
+        .font(DS.TypeScale.callout.font)
+        .padding(.horizontal, DS.Space.ml).padding(.vertical, DS.Space.sm)
+        .frame(minHeight: DSParts.target, alignment: .topLeading)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.3)))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(DS.Color.strokeStrong.color, lineWidth: 1))
     }
 
     private func section<C: View>(_ title: String, key: String, @ViewBuilder _ content: () -> C) -> some View {

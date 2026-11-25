@@ -68,6 +68,9 @@ final class LatticeCornerHostedTests: XCTestCase {
     /// ★ ⌃ holds the five run choices, in the design's order; each greys with nothing to run on.
     func testTheArrowHoldsTheFiveRunChoices() throws {
         let (h, p, _) = try stage(AppBuildHost.landscape13, prism: true)
+        // ★ notes28 (his 11-24: the lattice view "should default to 'on' in the Lattice stage"): the lattice is laid on screen
+        let laid = Date().addingTimeInterval(120)
+        while h.frames.all["new-engine-timing"] == nil, Date() < laid { h.pump(0.5) }
         // (the divider before Preview only reads as an untitled item: dropped)
         let offered = try h.pickFromMenu("latticeSplitMore", "no such item", what: "⌃")
             .filter { !$0.replacingOccurrences(of: " [off]", with: "").isEmpty }
@@ -82,7 +85,10 @@ final class LatticeCornerHostedTests: XCTestCase {
         func item(_ t: String) -> String? { offered.first { $0.hasPrefix(t) } }
         XCTAssertFalse(item("Lattice the original part")?.hasSuffix("[off]") ?? true, "★ a lattice set: it runs (\(offered))")
         XCTAssertTrue(item("Lattice an optimized result")?.hasSuffix("[off]") ?? false, "★ no results yet: nothing to pick (\(offered))")
-        XCTAssertTrue(item("Export")?.hasSuffix("[off]") ?? false, "no results: nothing to export (\(offered))")
+        // ★ RE-PINNED notes28: no results, but the lattice view opens on and its lattice is on screen — Export… makes its print
+        // file (notes25: "live with a lattice preview on screen"); it greys only with neither
+        XCTAssertNotNil(h.frames.all["new-engine-timing"], "premise: the lattice laid on screen, the view on by itself")
+        XCTAssertFalse(item("Export")?.hasSuffix("[off]") ?? true, "★ a lattice on screen: Export… makes its file (\(offered))")
 
         // with results: "Lattice an optimized result ›" opens them, and Export is live
         let (h2, p2, _) = try stage(AppBuildHost.landscape13, prism: true)

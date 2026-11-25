@@ -66,7 +66,9 @@ final class LatticeOldBakeRetiredHostedTests: XCTestCase {
     func testNoOldBakeUnderTheNewEngineAndTheKeyIsUp() throws {
         for control in [false, true] {
             LatticeLayoutPreview.controlOldBakeUnderNewEngine = control
-            defer { LatticeLayoutPreview.controlOldBakeUnderNewEngine = false }
+            // ★ notes28: the RED CONTROL is the page as it was — its lattice view off on entering (he tapped it on), as then
+            WorkspacePlaceholder.controlLatticeViewStartsOff = control
+            defer { LatticeLayoutPreview.controlOldBakeUnderNewEngine = false; WorkspacePlaceholder.controlLatticeViewStartsOff = false }
             let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
             let p = r.project
             p.lattice.flexible = nil

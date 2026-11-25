@@ -1361,14 +1361,10 @@ public struct WorkspacePlaceholder: View {
                 .overlay(alignment: .bottom) {
                     if newEngineDrawn {
                         LatticeLayoutPreviewLines(preview: newEngine)
+                            .background(latticeThinWallGlowUp ? CornerPairStyle.publish("lattice-walls-glow") : nil)   // ★ notes28 (tests)
                             .laneFoot("new-engine")   // ★ his pick 11-15: very bottom in landscape, just above Settings in portrait
-                            .overlay {   // ★ notes25 (his 11-23): the solid notice on the screen's centre line, above the lines
-                                if let why = newEngine.solidReason {   // ★ his ruling 11-14: solid where lattice was asked — why, and fixes
-                                    LatticeSolidReasonBar(reason: why, apply: { fix in SolidReason.apply(fix, to: &project.lattice) },
-                                                          checkNozzle: newEngine.nozzleState == .notAsked ? { newEngine.checkNozzle() } : nil)   // ★ 11-16
-                                        .laneCentreFoot("new-engine-reason", above: "new-engine")
-                                }
-                            }
+                            // ★ notes28 (his 11-21 "Remove it from the UI entirely!!"): no solid notice at the bottom-centre — its
+                            // words, fixes and nozzle check are the centred pop-up's (LatticeLayoutPreview.raiseSolidPopUp)
                     }
                 }   // ★ the new engine (test): its lines
                 .onChange(of: newEngineOn) { on in
@@ -1401,7 +1397,7 @@ public struct WorkspacePlaceholder: View {
                     if latticeThinWalls == nil { latticeThinWallsPromptUp = false }
                     // ★ notes25 (D10): the walls glow on the new engine too — this lay's own solid places (thinWallGlow)
                     latticeThinWallTints = []
-                    if latticeThinWalls != nil, let m = stageMesh {
+                    if LatticeLayoutPreview.glowWanted(thinWalls: latticeThinWalls != nil, solidPopUp: newEngine.solidPopUpUp), let m = stageMesh {   // ★ notes28
                         Task { let t = await newEngine.thinWallGlow(mesh: m); if newEngine.solidReason == reason { latticeThinWallTints = t } }
                     }
                 }
@@ -1881,7 +1877,7 @@ public struct WorkspacePlaceholder: View {
                               onFullScreen: { resultsFullScreen = $0 },
                               loadSurfacePoints: { loadFlowSurfacePoints() },
                               scenarioLoads: resultsScenarioLoads,
-                              topLeftBlock: AnyView(resultsTopLeftBlock),
+                              topLeftBlock: AnyView(resultsTopLeftBlock.padding(.top, chromeGeometry.safeTop)),   // ★ notes28 (4a): where every stage's sits
                               takeOpenOn: { defer { resultsOpenOn = nil }; return resultsOpenOn },
                               // ★ B4 (app-map §3.5, Q1): "v7 results" and Pick this — the Library's chosen result
                               version: versionLabel,
@@ -2272,7 +2268,8 @@ public struct WorkspacePlaceholder: View {
     /// ★ Install 3: the thin-wall finding from the new engine's own reason — Structural, walls too thin for a whole cell or
     /// too narrow for the cells across Structural needs, or (the whole part latticed) the part itself too shallow for them
     /// (on his first A1 pad the engine says "the region is too shallow", 93 %); the thinnest wall it lattices is that many of
-    /// the smallest cell. A face prism too shallow is his depth, not a thin wall: its own line says so, no pop-up.
+    /// the smallest cell. A face prism too shallow is his depth, not a thin wall: ★ notes28 (his 11-24, "Glow them too") its
+    /// places glow under the new engine's own solid pop-up, which says that reason and its fix (LatticeLayoutPreview).
     /// ★ notes25 (D10, "walls under 0.0 mm"): the smallest cell is the one core's lay uses — the larger of its own floor
     /// (`floorCellMM`, the printability floor) and the page's smallest (a Manual cell, a Swept low end); the settings alone
     /// say 0 in Fit and Auto. The ONE place the wall is worked out; the pop-up, its reasons and the note read it.
@@ -3645,6 +3642,7 @@ public struct WorkspacePlaceholder: View {
             // The strut preview follows lattice mode: off with it; rebaked when the
             // lattice TYPE changes (the segment soup is per-lattice; cell size and
             // density are live shader params and need no rebake).
+            latticeViewComesOn()   // ★ notes28: the lattice just set up on its stage: its view on, as on entering
             if !project.lattice.enabled {
                 showStrutPreview = false
             } else if showStrutPreview {
@@ -3728,6 +3726,8 @@ public struct WorkspacePlaceholder: View {
         .onChange(of: stage) { s in
             if s == .lattice { openLatticeSettingsIfUnconfigured() }
         }
+        // ★ notes28: the session's lattice settings saved on the Lattice stage (settings first): its lattice view comes on
+        .onChange(of: latticeSettingsSavedThisSession) { saved in if saved { latticeViewComesOn() } }
         // ★★ THE PREVIEW GOING OFF ENDS THE VIEWS THAT LIVE ON IT (his 2026-10-01). Five paths
         // turn it off — the cube, the mode sheet's delete, lattice mode off, the page's own
         // switch — and none cleared lattice only or the key's drill-in, so both outlived it.
@@ -3786,6 +3786,15 @@ public struct WorkspacePlaceholder: View {
         Color.clear
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .allowsHitTesting(false)
+        // ★ notes28 (3): the version opens as he left it, and keeps how he leaves it (VersionViewState.swift)
+        .onAppear { restoreVersionView() }
+        .onDisappear { keepVersionView() }
+        .onChange(of: stage) { _ in keepVersionView() }
+        // ★ notes28 (4a): where the safe area starts — Results (drawn edge to edge) puts its top row there too
+        .background(GeometryReader { g in
+            Color.clear.onAppear { chromeGeometry.noteSafeTop(g.frame(in: .global).minY) }
+                .onChange(of: g.frame(in: .global).minY) { chromeGeometry.noteSafeTop($0) }
+        })
         // BAR 4, the other half: when a run produced nothing and the previous run's
         // variants came BACK, say so — results reappearing behind a failure sheet
         // with no explanation is its own confusion.
@@ -5468,8 +5477,10 @@ public struct WorkspacePlaceholder: View {
     }
 
     /// ★ his 11-09: the glow is up — the pop-up is open on Lattice Setup and the last bake found walls.
+    /// ★ notes28 (his 11-24, "Glow them too"): or the new engine's solid pop-up is up (any reason the lattice he asked for stayed
+    /// solid: a too shallow region too) — its places glow the same way while it shows.
     private var latticeThinWallGlowUp: Bool {
-        latticeThinWallsPromptUp && latticeSetupUp && !latticeThinWallTints.isEmpty
+        (latticeThinWallsPromptUp || (newEngineDrawn && newEngine.solidPopUpUp)) && latticeSetupUp && !latticeThinWallTints.isEmpty
     }
 
     /// ★ Install 3: the pop-up on the new engine, from its own reason (★ notes25 D10: its glow is the lay's own, thinWallGlow).
@@ -6304,9 +6315,36 @@ public struct WorkspacePlaceholder: View {
         if dest != .topology || dest != stage {
             viewOriginal = true
         }
+        let entersLattice = dest == .lattice && stage != .lattice   // ★ notes28
         stage = dest
         latticeDisclosure.closeAll()
         if dest == .lattice { refreshLatticeFaceCards() }
+        if entersLattice { latticeViewOnEntering() } else if dest != .lattice { newEngine.latticeViewWanted = false }
+    }
+
+    /// ★ notes28 (his iPad notes on release 18: "I had to turn on the 'lattice' view button. This should default to 'on' in the
+    /// Lattice stage."): entering the Lattice stage, the lattice view (the cube among the round view buttons) comes on — now,
+    /// or once the lattice is set up there (a type chosen, lattice on, or the session's settings saved); his own tap that turns
+    /// it off holds until he leaves the stage.
+    /// Not on Flexible (its own stage). The view buttons are not remembered per version, so every version opens with it on.
+    private func latticeViewOnEntering() {
+        guard project.lattice.flexible == nil, !Self.controlLatticeViewStartsOff else { return }
+        newEngine.latticeViewWanted = true
+        latticeViewComesOn()
+    }
+    /// RED CONTROL (tests): the lattice view starts off on the Lattice stage (before notes28).
+    nonisolated(unsafe) static var controlLatticeViewStartsOff = false
+
+    /// The lattice view on, when it is wanted and the lattice is set up (a type chosen, lattice on). The new engine lays it from
+    /// the part's own settings at once; the old engine's bake (a variant's page) still waits for the session's Save, as the
+    /// cube's own tap arms it.
+    private func latticeViewComesOn() {
+        guard newEngine.latticeViewWanted, stage == .lattice, !showStrutPreview, project.lattice.enabled,
+              project.lattice.stageMode != nil, project.lattice.flexible == nil else { return }
+        showStrutPreview = true
+        guard latticeSettingsSavedThisSession else { return }
+        startStressSolveIfNeeded(); refreshLatticeStressPeak()
+        if strutScene == nil { buildStrutScene() }
     }
 
     /// ★★ RULING 4 (item 6, maintainer 2026-09-30): THE ONE TAP wherever "nothing set to lattice"
@@ -8112,6 +8150,7 @@ public struct WorkspacePlaceholder: View {
                         latticeOnly = false            // back to the lattice preview
                     } else if showStrutPreview {
                         showStrutPreview = false
+                        newEngine.latticeViewWanted = false   // ★ notes28: his own off holds on this stage
                     } else {
                         latticeOnly = false
                         armLatticePreview()
@@ -15829,6 +15868,7 @@ extension WorkspacePlaceholder {
     // Library (B3): Export from a card — ★ B4: Results on the chosen result (its Export button is the finished shape core
     // made; the Smooth page that used to open here is gone), once its results are in
     private func openLibraryExportIfReady() {
+        settleResultStage()   // ★ notes28 (3): a plain Open of a version with a result: its result's stage, not the result
         guard let r = libraryExportVariant, project.hasResults else { return }   // ★ notes25: either stage's (the last run's)
         libraryExportVariant = nil
         // ★ 11-23: a print file's result opens in the Lattice stage
@@ -16611,5 +16651,79 @@ extension WorkspacePlaceholder {
                                    },
                                    label: "Select the \(mp.kind.word) to move it")
         }
+    }
+}
+
+// MARK: - ★ notes28 (3): a version opens as he left it (VersionViewState.swift)
+//
+// His iPad notes on release 18 (img 84: "it automatically opens on the topology stage"). Nothing here is new state on the page:
+// what is kept is written to the version's folder, and the open as it settles is held by `VersionViewOpen`.
+extension WorkspacePlaceholder {
+
+    /// What the page shows now, to keep with the version.
+    func capturedVersionView() -> VersionViewState {
+        let page = !viewOriginal && project.hasResults ? VersionViewState.pageResults
+            : stage == .lattice && showLatticeWizard ? VersionViewState.pageCells : VersionViewState.pageSetup
+        return VersionViewState(stage: stage.rawValue, page: page, selectionsCollapsed: selectionsCollapsed,
+                                latticeTopologyOpen: latticeTopologyOpen, legendMinimized: latticeLegendMinimized,
+                                outlines: surfaceWireframeOn, xray: surfaceXrayOn, forces: topoForcesShown,
+                                keepClearsHidden: topoView.keepClearsHidden, designBox: topoDesignBoxShown, stress: stressViewOn,
+                                camera: VersionCameraPose(cameraModel.camera))
+    }
+
+    /// Keep the page with the version (its folder's view_state.json; never project.json).
+    func keepVersionView() {
+        guard !VersionViewOpen.controlOpensAsBefore, model.library.store.holdsProject(id: project.id) else { return }
+        let v = capturedVersionView()
+        model.library.store.saveViewState(v, id: project.id)
+        VersionViewOpen.lastWritten[project.id] = v
+    }
+
+    /// As the page opens: its panels, view buttons and camera as he left them; the stage he left it on — or, for a version
+    /// with a result, the stage that result belongs to (chosen as the result arrives), never the result itself.
+    func restoreVersionView() {
+        // ★ notes28 (4c): Results' Export finds this version's kept print file
+        PrintFileKeep.open = { [weak project, weak library = model.library] in
+            guard let project, let library else { return nil }
+            return (project.id, library.store)
+        }
+        // once per open: the host reappears in the same visit (a full-screen page closing) and must change nothing then
+        guard VersionViewOpen.shared.takeOpened(project.id) else { return }
+        VersionViewOpen.shared.clear()
+        guard !VersionViewOpen.controlOpensAsBefore else { return }
+        let saved = model.library.store.loadViewState(id: project.id)
+        if let v = saved {
+            if let x = v.selectionsCollapsed { selectionsCollapsed = x }
+            if let x = v.latticeTopologyOpen { latticeTopologyOpen = x }
+            if let x = v.legendMinimized { latticeLegendMinimized = x }
+            if let x = v.outlines { surfaceWireframeOn = x }
+            if let x = v.xray { surfaceXrayOn = x }
+            if let x = v.forces { topoForcesShown = x }
+            if let x = v.keepClearsHidden { topoView.keepClearsHidden = x }
+            if let x = v.designBox { topoDesignBoxShown = x }
+            if let x = v.stress { stressViewOn = x }
+            if let c = v.camera { cameraModel.restore(c) }
+        }
+        if project.hasResults || model.library.store.hasPersistedResults(id: project.id) {
+            VersionViewOpen.shared.waitForResult(project.id, saved: saved)
+            settleResultStage()
+        } else if let v = saved, let st = v.stage.flatMap(WorkspaceStage.init(rawValue:)) {
+            if st != stage { goToStage(st) }
+            if st == .lattice, v.page == VersionViewState.pageCells, project.lattice.stageMode != nil { showLatticeWizard = true }
+            VersionViewOpen.settled[project.id] = st.rawValue
+        }
+    }
+
+    /// A version with a result, its result now in: the stage that result belongs to (the Lattice stage for a print file's),
+    /// Results left shut — unless a card asked for the result itself (Results opens on it then, as before).
+    func settleResultStage() {
+        guard VersionViewOpen.shared.awaitsResultStage == project.id, project.hasResults else { return }
+        let (_, saved) = VersionViewOpen.shared.take(project.id)
+        guard libraryExportVariant == nil else { return }
+        let home: WorkspaceStage = LatticeSavedResult.opensInLattice(run.outcome) ? .lattice : .topology
+        if stage != home { goToStage(home) }
+        if home == .lattice, saved?.stage == WorkspaceStage.lattice.rawValue, saved?.page == VersionViewState.pageCells,
+           project.lattice.stageMode != nil { showLatticeWizard = true }
+        VersionViewOpen.settled[project.id] = home.rawValue
     }
 }

@@ -169,8 +169,9 @@ final class LaneControls: ObservableObject {
     static func ignored(_ key: String) -> Bool {
         key.hasPrefix("lane-") || key.hasPrefix("numberPad") || notControls.contains(key)
     }
-    /// Published frames that hold a pop-up in the screen's middle (the whole screen): never controls.
-    static let notControls: Set<String> = ["lattice-thin-walls-card"]
+    /// Published frames that hold a pop-up in the screen's middle (the whole screen): never controls. ★ notes28: nor the
+    /// solid places' glow marker (a test's frame on the new engine's own lines, not a control).
+    static let notControls: Set<String> = ["lattice-thin-walls-card", "lattice-walls-glow"]
 }
 
 /// The app's toast (design-system §4.12, §4.34): bottom centre, 96 pt off the bottom edge or above the first free row, never

@@ -11,6 +11,7 @@
 // squares flat-bridge undersides and adds posts (PREVIEW IS THE SPEC — until the drawer shows them).
 import Foundation
 import SwiftUI
+import Combine
 import simd
 import TopOptKit
 import TopOptDesign
@@ -306,6 +307,7 @@ public final class LatticeLayoutPreview: ObservableObject {
     public func update(project p: ProjectModel, on: Bool, solid: Bool = false, stress: Stress = Stress(),
                        delay: Duration = .zero, checkNozzle: Bool = false, exact: Bool = false) {
         guard on else { clear(); return }
+        fixProject = p   // ★ notes28: the solid pop-up's fixes are taken on this part
         guard let path = p.importedFile?.path else { problem = Self.noPartLine; bars = nil; return }
         retargetIfSamePart(path)   // ★ his iPad notes 11-23: the version moved to its next number, the same part
         if path != sessionPath || box == nil { box = Self.box(p.importedMesh?.vertices ?? []) }
@@ -325,6 +327,10 @@ public final class LatticeLayoutPreview: ObservableObject {
         if path == sessionPath, s == lastSettings, ok == lastOrganicKey, !stressMoved, task != nil || bars != nil, !mapNeedsLay,
            !wantsExact {
             if solidChanged, task == nil || bars != nil { solidToggled() }
+            else if solid, !laying, let g = bars?.solid, !isOrganic, g.smooth != Self.cutSmoothWanted(lattice: latticeAtLay, printAccurate: printAccurate) {
+                mapTask?.cancel()   // ★ notes28: Print-accurate preview switched — the cut drawn the other way (its map again)
+                mapTask = Task { [weak self] in await self?.addMap(again: true) }
+            }
             if checkNozzle, nozzleState == .notAsked, bars != nil { self.checkNozzle() }   // Refresh with nothing changed
             return
         }
@@ -375,6 +381,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         mapTask?.cancel(); mapTask = nil
         nozzleTask?.cancel(); nozzleTask = nil; nozzleWanted = false; nozzleState = .notAsked
         nozzleSession?.close(); nozzleSession = nil; nozzlePath = nil; nozzleLine = nil; solidReason = nil
+        solidPopUpKey = nil; nozzleAskedByPopUp = false; popUpWatch = nil; solidPopUpUp = false   // ★ notes28
         session?.close(); session = nil; sessionPath = nil; lastSettings = nil; sessionStressKey = nil; nozzleStressKey = nil
         sessionTensorKey = nil; organicLimits = nil; organicQuality = nil; organicNumbers = nil   // ★ Organic cut 1
         organicLaidGroups = nil; organicDraftGroups = nil   // ★ cut 2; ★ his 11-22
@@ -638,7 +645,8 @@ public final class LatticeLayoutPreview: ObservableObject {
         let grade = latticeAtLay.gradingMode.fitsShape
         let organic = latticeAtLay.isOrganic
         let key = [b.token, field == nil ? 0 : stressKey, grade ? 1 : 0, latticeAtLay.topologyID.hashValue, organic ? 1 : 0,
-                   LatticeLayoutColours.controlOneColour ? 1 : 0, b.solid?.token ?? -1, b.hidden ? 1 : 0, b.dimmed ? 1 : 0]
+                   LatticeLayoutColours.controlOneColour ? 1 : 0, b.solid?.token ?? -1, b.hidden ? 1 : 0, b.dimmed ? 1 : 0,
+                   b.solid?.smooth == true ? 1 : 0]   // ★ notes28
         if let c = drawnCache, c.key == key { return c.bars }
         b.colours = LatticeLayoutColours.colours(laid, type: Self.lawType(latticeAtLay), grade: grade,
                                                  stress: field.map(LatticeLayoutColours.Stress.init(field:)),
@@ -738,13 +746,16 @@ public final class LatticeLayoutPreview: ObservableObject {
             bars = LatticeLayoutBarsInputs(token: token, bars: r.bars, solid: solidWanted ? bars?.solid : nil, flags: r.barFlags)
             laid = LatticeLayoutColours.Laid(r, token: token)   // ★ Install 3
             timing = Timing(openMS: openMS, readMS: r.msRead, cellsMS: r.msCells, barsMS: r.msBars, bars: r.barCount)
-            problem = r.barCount == 0 ? Self.noFitLine : nil
+            if r.barCount > 0 { problem = nil }   // ★ notes28: nothing laid is said after the reason is read (below)
             layStages["readMS"] = r.msRead; layStages["cellsMS"] = r.msCells; layStages["barsMS"] = r.msBars   // ★ his 11-22
             laying = false; layProgress = nil
             layWallS[timeKey(path, .exact)] = (openMS + r.msRead + r.msCells + r.msBars) / 1000
             if solidWanted { await addMap() }
             nozzleTask?.cancel(); nozzleLine = nil; nozzleState = .notAsked
             await solidReasonCheck(lattice: latticeAtLay)   // ★ his ruling 11-14: why it is solid (one coarse map, cheap)
+            // ★ notes28 (img 76): nothing laid — the solid pop-up names the real reason (raised by the check above); the general
+            // line only when the engine gives none
+            if r.barCount == 0, !Task.isCancelled { problem = solidReason == nil || Self.controlNoSolidPopUp ? Self.noFitLine : nil }
             // ★ his 11-17 "add a chip to ask what it should be": the faces this layout's regions run into that no rule decides
             // (D23), asked with the SAME settings it was laid with — a second call, so a dragged slider never waits on it
             if !Task.isCancelled, let found = try? await session.places(s), !Task.isCancelled {
@@ -1151,6 +1162,11 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// [] when there is no lay, it is laying, or no such place.
     public func thinWallGlow(mesh: ViewerMesh) async -> [Float] {
         guard let session, let box, !laying else { return [] }
+        return await Self.solidGlow(session, box, mesh: mesh)
+    }
+    /// The glow of the session's last lay (★ notes28: its own function, so a test can light a part laid on its own session).
+    static func solidGlow(_ session: LatticeLayoutSession, _ box: (lo: SIMD3<Float>, hi: SIMD3<Float>),
+                          mesh: ViewerMesh) async -> [Float] {
         let ext = simd_max(box.hi - box.lo, SIMD3(repeating: 0.1))
         let voxel = Swift.max(0.5, Float(cbrt(Double(ext.x * ext.y * ext.z) / Self.glowPoints)))
         let nx = Int((ext.x / voxel).rounded(.up)) + 3, ny = Int((ext.y / voxel).rounded(.up)) + 3
@@ -1163,12 +1179,34 @@ public final class LatticeLayoutPreview: ObservableObject {
         } } }
         guard let at = try? await session.whereAt(points), at.count == points.count, !Task.isCancelled else { return [] }
         let grid = LatticeVoxelGrid(nx: nx, ny: ny, nz: nz, origin: origin, spacing: SIMD3(repeating: voxel), values: [])
+        // ★ notes28 ("Glow them too"): and the engine's answer just under each triangle's middle, either side (the mesh's
+        // winding is mixed): a region thinner than the grid's voxel (a shallow face prism) and a big face's middle glow too
+        let tris = mesh.indices.count / 3
+        var mids: [SIMD3<Float>] = []
+        mids.reserveCapacity(2 * tris)
+        for t in 0..<tris {
+            func p(_ k: Int) -> SIMD3<Float> {
+                let i = Int(mesh.indices[3 * t + k]) * 3
+                return SIMD3(mesh.positions[i], mesh.positions[i + 1], mesh.positions[i + 2])
+            }
+            let a = p(0), b = p(1), c = p(2)
+            let cr = simd_cross(b - a, c - a)
+            let n = simd_length(cr) > 1e-12 ? simd_normalize(cr) : SIMD3<Float>(0, 0, 1)
+            let m = (a + b + c) / 3
+            mids.append(m - n * Self.glowProbeMM); mids.append(m + n * Self.glowProbeMM)
+        }
+        let under = Self.controlGlowGridOnly ? [] : ((try? await session.whereAt(mids)) ?? [])
+        guard !Task.isCancelled else { return [] }
         let tints = await Task.detached(priority: .userInitiated) { () -> [Float] in
             let thin = at.map { $0.why == .wallTooThin || $0.why == .noCellFits }
-            guard thin.contains(true) else { return [] }
+            let lit: [Bool]? = under.count == 2 * tris ? (0..<tris).map { t in
+                [under[2 * t].why, under[2 * t + 1].why].contains { $0 == .wallTooThin || $0 == .noCellFits }
+            } : nil
+            guard thin.contains(true) || lit?.contains(true) == true else { return [] }
             let inside = at.map { $0.why != .outside }
             return LatticeThinWallGlow.vertexTints(mesh: mesh, grid: grid,
-                                                   field: LatticeThinWallGlow.field(thin: thin, inside: inside, grid: grid))
+                                                   field: LatticeThinWallGlow.field(thin: thin, inside: inside, grid: grid),
+                                                   triangleLit: lit)
         }.value
         var lit = 0, k = 7
         while k < tints.count { if tints[k] > 0.03 { lit += 1 }; k += 8 }
@@ -1177,6 +1215,10 @@ public final class LatticeLayoutPreview: ObservableObject {
     }
     /// About how many places the glow asks core about (a coarse grid; the glow is soft).
     static let glowPoints = 120_000.0
+    /// ★ notes28: how far under a triangle's middle the glow asks (mm).
+    static let glowProbeMM: Float = 0.25
+    /// RED CONTROL (tests): the glow from the coarse grid alone (before notes28: a 1 mm face prism on his pad never glowed).
+    nonisolated(unsafe) public static var controlGlowGridOnly = false
     /// Test hook: how many of the part's vertices the last glow lit.
     nonisolated(unsafe) static var lastGlowLit = 0
 
@@ -1187,6 +1229,122 @@ public final class LatticeLayoutPreview: ObservableObject {
             solidReason = SolidReason.of(share: rep.share, nocell: rep.nocell, lattice: lattice)
         } else {
             solidReason = nil
+        }
+        if !Task.isCancelled { raiseSolidPopUpIfNew() }   // ★ notes28
+    }
+
+    // MARK: ★ notes28 — the solid places said in a centred pop-up, never at the bottom (his 11-21 rule; his 11-24 "Glow them too")
+
+    /// ★ notes28 (his 11-24: the lattice view "should default to 'on' in the Lattice stage"): the stage wants its lattice view
+    /// on (set on entering the stage; his tap that turns it off clears it). Kept here, the stage's own model, so the workspace
+    /// holds no more state of its own (the iPad's main-thread stack).
+    public var latticeViewWanted = false
+
+    /// The part the pop-up's fixes are taken on (the page's own, as `update` was last called with it).
+    private weak var fixProject: ProjectModel?
+    /// The solid pop-up is up: the places he asked to lattice that stayed solid glow while it is (the workspace reads it).
+    @Published public private(set) var solidPopUpUp = false
+    private var solidPopUpID: UUID?
+    /// The reason last raised (part, cause, all of it or some): a lay that keeps it raises nothing more; one without a reason
+    /// clears it, so the same reason coming back is said again.
+    private var solidPopUpKey: String?
+    private var popUpWatch: AnyCancellable?
+    /// The nozzle check was asked from the pop-up: its answer comes back in one.
+    private var nozzleAskedByPopUp = false
+    /// RED CONTROL (tests): no solid pop-up (before notes28: its words were the bottom-centre box, the general line popped up).
+    nonisolated(unsafe) public static var controlNoSolidPopUp = false
+
+    /// ★ notes28 (his 11-24, "Glow them too"): whether this lay's solid places are made into the glow — for the Structural
+    /// thin-wall pop-up (as before) and for the solid pop-up, whatever its reason (a too shallow region among them; the glow
+    /// lights every place he asked to lattice that stayed solid: `thinWallGlow`'s "no cell fits" is core's D14 solid, all its
+    /// reasons). RED CONTROL `controlGlowThinWallsOnly`: thin walls only (before: a shallow region never glowed).
+    static func glowWanted(thinWalls: Bool, solidPopUp: Bool) -> Bool {
+        thinWalls || (solidPopUp && !controlGlowThinWallsOnly)
+    }
+    nonisolated(unsafe) public static var controlGlowThinWallsOnly = false
+    /// Tests: how many solid pop-ups were raised.
+    public static private(set) var solidPopUpsRaised = 0
+
+    /// After a lay's reason is read: its pop-up, when the reason is new for this part — unless the Structural thin-wall pop-up
+    /// owns this case (walls too thin for Structural's cells: LatticeThinWallPrompt, the workspace's own card).
+    private func raiseSolidPopUpIfNew() {
+        guard let r = solidReason else { solidPopUpKey = nil; return }
+        guard !Self.controlNoSolidPopUp, let p = fixProject else { return }
+        if WorkspacePlaceholder.thinWalls(r, project: p, floorCellMM: laid?.floorCellMM ?? 0) != nil {
+            if solidPopUpUp { AppPopups.shared.current = nil }   // an earlier reason's pop-up: the thin-wall one says this
+            solidPopUpKey = nil
+            return
+        }
+        let key = "\(sessionPath ?? "")|\(r.cause.rawValue)|\(SolidReason.percent(r.share) >= 100)"
+        guard key != solidPopUpKey else { return }
+        solidPopUpKey = key
+        raiseSolidPopUp(r, nozzleAnswer: nil)
+    }
+
+    /// The pop-up: what is solid and why, the fix that fits it, its fix taps, the 0.2 mm nozzle check (his pick 11-16 (5)),
+    /// and OK. `nozzleAnswer`: the check's answer, said under the reason (its button gone).
+    private func raiseSolidPopUp(_ r: SolidReason, nozzleAnswer: String?) {
+        var text = SolidPopUp.text(r, lattice: latticeAtLay)
+        if let a = nozzleAnswer { text += "\n\n" + a }
+        var acts: [(title: String, run: () -> Void)] = r.fixes.map { f in
+            (f.title, { [weak self] in self?.takeFix(f) })
+        }
+        if nozzleAnswer == nil, nozzleOffered { acts.append((LatticePreviewMode.nozzleCheck, { [weak self] in self?.checkNozzleFromPopUp() })) }
+        acts = Array(acts.prefix(3))
+        let popups = AppPopups.shared
+        let title = SolidPopUp.title(r)
+        if acts.count >= 2 {
+            popups.choose(title, text, first: acts[0], second: acts[1], third: acts.count > 2 ? acts[2] : nil, dismiss: "OK")
+        } else {
+            popups.show(title, text, action: acts.first)
+        }
+        Self.solidPopUpsRaised += 1
+        watchSolidPopUp(popups.current?.id)
+    }
+
+    /// Whether the pop-up offers the 0.2 mm nozzle check: not asked yet for the lattice on screen, and the line is wider than a
+    /// 0.2 mm nozzle's (a finer one has nothing to say).
+    private var nozzleOffered: Bool {
+        nozzleState == .notAsked && (lastSettings?.beadMM ?? 0) > Self.fineBeadMM + 0.05
+    }
+
+    /// The glow lasts as long as this pop-up: closed (OK, a tap outside, a fix) or replaced, it stops.
+    private func watchSolidPopUp(_ id: UUID?) {
+        solidPopUpID = id
+        solidPopUpUp = id != nil
+        popUpWatch = AppPopups.shared.$current.sink { [weak self] now in
+            MainActor.assumeIsolated {
+                guard let self, now?.id != self.solidPopUpID else { return }
+                self.solidPopUpUp = false
+                self.solidPopUpID = nil
+                self.popUpWatch = nil
+            }
+        }
+    }
+
+    /// A fix tap: taken on the part's lattice settings (the preview lays again on the change).
+    private func takeFix(_ f: SolidReason.Fix) {
+        guard let p = fixProject else { return }
+        SolidReason.apply(f, to: &p.lattice)
+    }
+
+    /// The pop-up's "Check a 0.2 mm nozzle": the check runs; its answer comes back in the pop-up.
+    func checkNozzleFromPopUp() {
+        nozzleAskedByPopUp = true
+        checkNozzle()
+    }
+
+    /// The nozzle check ended: its answer, in the solid pop-up when its reason still stands (the pop-up comes back with it), or
+    /// on its own — when he asked for it, or when it found a finer nozzle worth it (a Refresh's check).
+    private func nozzleAnswered(cure: Double?) {
+        let asked = nozzleAskedByPopUp
+        nozzleAskedByPopUp = false
+        guard !Self.controlNoSolidPopUp, asked || nozzleLine != nil else { return }
+        let answer = SolidPopUp.nozzleAnswer(cure: cure)
+        if let r = solidReason, let p = fixProject, WorkspacePlaceholder.thinWalls(r, project: p, floorCellMM: laid?.floorCellMM ?? 0) == nil {
+            raiseSolidPopUp(r, nozzleAnswer: answer)
+        } else {
+            AppPopups.shared.show(SolidPopUp.nozzleTitle, answer)
         }
     }
 
@@ -1205,10 +1363,13 @@ public final class LatticeLayoutPreview: ObservableObject {
                 nozzlePath = path
             }
             guard let fine = nozzleSession, !Task.isCancelled else { return }
-            guard let c = try await Self.cure(main: session, fine: fine, settings: s, box: box), !Task.isCancelled else { return }
-            if c >= Self.worthSaying {
+            let cure = try await Self.cure(main: session, fine: fine, settings: s, box: box)
+            guard !Task.isCancelled else { return }
+            if let c = cure, c >= Self.worthSaying {
                 nozzleLine = String(format: "A 0.2 mm nozzle would lattice %.0f%% of what is solid now", 100 * c)
             }
+            nozzleState = .done
+            nozzleAnswered(cure: cure)   // ★ notes28: said in the centred pop-up (never a line at the bottom)
         } catch {
             // no line: the preview stands as it is
         }
@@ -1246,10 +1407,11 @@ public final class LatticeLayoutPreview: ObservableObject {
         mapTask = Task { [weak self] in await self?.addMap() }
     }
 
-    private func addMap() async {
-        guard let session, let box, let b = bars, b.solid?.token != b.token else { return }
+    private func addMap(again: Bool = false) async {
+        guard let session, let box, let b = bars, again || b.solid?.token != b.token else { return }
         do {
-            let m = try await Self.map(session, box, token: b.token, smooth: latticeAtLay.isOrganic)
+            let m = try await Self.map(session, box, token: b.token, smooth: latticeAtLay.isOrganic,
+                                       cutSmooth: Self.cutSmoothWanted(lattice: latticeAtLay, printAccurate: printAccurate))   // ★ notes28
             guard !Task.isCancelled, solidWanted, var now = bars, now.token == b.token else { return }
             now.solid = m.grid
             bars = now
@@ -1277,13 +1439,33 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// The engine's map over the part's box with a voxel of air all round: about a million voxels at most, never finer than
     /// 0.35 mm.
     static func map(_ s: LatticeLayoutSession, _ box: (lo: SIMD3<Float>, hi: SIMD3<Float>), token: Int,
-                    smooth: Bool = false) async throws -> (grid: LatticeLayoutSolidGrid, ms: Double) {
+                    smooth: Bool = false, cutSmooth: Bool = false) async throws -> (grid: LatticeLayoutSolidGrid, ms: Double) {
         let (origin, voxel, dims) = mapGeometry(box)   // ★ notes24: shared with `mapAhead`
         let r = try await s.grid(origin: origin, voxel: voxel, dims: dims)
         // ★ his 11-19 note: Organic's cut edges are smooth lines, not the voxels' stair-steps
-        let rg = smooth ? LatticeLayoutSolidGrid.smoothed(r.rg, dims: dims) : r.rg
-        return (LatticeLayoutSolidGrid(token: token, origin: origin, voxel: voxel, dims: dims, rg: rg, smooth: smooth), r.ms)
+        var rg = smooth ? LatticeLayoutSolidGrid.smoothed(r.rg, dims: dims) : r.rg
+        // ★ notes28 (img 77, "stair stepping on the cut lines of the original part's wall"): the regular lattice's cut, smoothed
+        // off the main thread (Print-accurate preview OFF; `cutSmoothWanted`), read linear like Organic's
+        if cutSmooth, !smooth {
+            let raw = r.rg
+            rg = await Task.detached(priority: .userInitiated) { LatticeLayoutSolidGrid.cutSmoothed(raw, dims: dims) }.value
+        }
+        return (LatticeLayoutSolidGrid(token: token, origin: origin, voxel: voxel, dims: dims, rg: rg, smooth: smooth || cutSmooth),
+                r.ms)
     }
+
+    /// ★ notes28 (his iPad notes on release 18, img 77: "Is there no way to vectorize the mechanism to cut the wall? If not, is
+    /// there a way to implement anti-aliasing to make the stair-stepping less pronounced? It's on every wall."). Whether the
+    /// regular lattice's cut is drawn smooth (`LatticeLayoutSolidGrid.cutSmoothed`, read linear, its edge anti-aliased in the
+    /// viewer) or as the map's own voxels. HIS RULE: "The drawing follows the print file. Always." — amended 11-21: with
+    /// Print-accurate preview ON. The print file's own cut along a slope steps (0.25 mm columns, measured: Notes28LatticeView-
+    /// Tests), so ON the drawing keeps the map's steps; OFF (the default) the quick stand-in draws the straight line. Organic
+    /// keeps its own smoothing (`smoothed`).
+    static func cutSmoothWanted(lattice l: LatticeSettings, printAccurate: Bool) -> Bool {
+        !controlSteppedCut && !l.isOrganic && !printAccurate
+    }
+    /// RED CONTROL (tests): the regular lattice's cut drawn as the map's voxels always (before notes28).
+    nonisolated(unsafe) public static var controlSteppedCut = false
 
     // MARK: the page's settings, as core reads them
 
@@ -1875,10 +2057,7 @@ struct LatticeLayoutPreviewLines: View {
     var body: some View {
         VStack(spacing: 2) {
             // ★ his 11-22: no "laying the lattice" line; the Lattice button's ring says it
-            if let z = preview.nozzleLine {
-                Text(z).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
-                    .background(CornerPairStyle.publish("new-engine-nozzle"))
-            }
+            // ★ notes28: nor the 0.2 mm nozzle's answer — it is said in the centred pop-up (LatticeLayoutPreview.nozzleAnswered)
             if let t = preview.timing {
                 Text(t.line).font(.system(size: 11, design: .monospaced)).foregroundStyle(DS.Color.textTertiary.color)
                     .accessibilityIdentifier("new-engine-timing")

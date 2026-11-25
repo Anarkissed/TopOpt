@@ -158,6 +158,11 @@ private struct StageUniforms {
     var plane: Float = 1
     /// The horizon glow's half width in the ray's |y| (StageFloor.glowBand).
     var glowBand: Float = 0.14
+    /// ★ notes28 (his iPad notes on release 18, img 77 against Bambu Studio's img 78: "Looking from below the model makes the
+    /// grid look very confusing. It doesn't seem like we are actually looking through a wall"): how far the look has gone over to
+    /// the bed SEEN FROM UNDER IT (StageFloor.underWeight) — 0 from above (as before), 1 a little under the bed: the bed a
+    /// see-through tinted plate with its grid, drawn in front of the part (`stage_under_fragment`), the backdrop's own grid gone.
+    var under: Float = 0
     /// ★ notes26 (C4): 1 when the eye is UNDER the floor (the floor is then between the eye and the part, and its grid is drawn
     /// again over the part by `stage_under_fragment`); 0 from above. Also the 16-byte tail (the MSL twin is 144 bytes).
     var below: Float = 0
@@ -636,7 +641,17 @@ vertex VOut viewer_vertex(VIn in [[stage_in]], constant Uniforms& u [[buffer(1)]
 // be free to drift by a voxel and impossible to notice.
 \(shellClipMSL)
 
-fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[buffer(0)]],
+// ★ notes28 (his iPad notes on release 18, img 77: "is there a way to implement anti-aliasing to make the stair-stepping less
+// pronounced?"): the body's colour and WHICH of the pixel's MSAA samples it covers. Where the engine's map cuts the surface
+// (ShellClip mode 2 with `gate.z` = the frame's sample count, set by MeshRenderer), the cut is asked at each of the 4 samples'
+// own places (the standard 4x positions), so the cut edge is anti-aliased by the same resolve as every other edge; elsewhere
+// every sample, as before.
+struct ViewerFragOut {
+    float4 color [[color(0)]];
+    uint   mask  [[sample_mask]];
+};
+
+fragment ViewerFragOut viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[buffer(0)]],
                                 constant float& bodyAlpha [[buffer(1)]],
                                 constant ShadeParams& sp [[buffer(2)]],
                                 // ★ MOVED TO 3 BY THE MERGE. `render-quality` took
@@ -651,6 +666,17 @@ fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[
                                 texture3d<float, access::sample> clipRegionTex [[texture(4)]]) {
     // ★ notes24: a latticed fragment still standing while the walls dissolve is drawn (its edge glowing, below)
     bool latticed = shell_is_latticed(in.mpos, in.mnormal, shellClip, shellDecls, clipRegionTex);
+    uint coverage = 0xFFFFFFFFu;
+    float3 mdx = dfdx(in.mpos), mdy = dfdy(in.mpos);   // (out of any branch: derivatives in uniform flow)
+    if (shellClip.origin.w > 0.5 && shellClip.gate.y > 1.5 && shellClip.gate.z > 3.5) {   // ★ notes28: the cut, per sample
+        const float2 at4[4] = { float2(0.375, 0.125), float2(0.875, 0.375), float2(0.125, 0.625), float2(0.625, 0.875) };
+        coverage = 0u;
+        for (uint k = 0; k < 4; ++k) {
+            float3 q = in.mpos + mdx * (at4[k].x - 0.5) + mdy * (at4[k].y - 0.5);
+            if (!shell_is_latticed(q, in.mnormal, shellClip, shellDecls, clipRegionTex)) { coverage |= (1u << k); }
+        }
+        latticed = coverage == 0u;   // open at every sample: none of the body here
+    }
     float standing = latticed && shellClip.eye.w > 0.0 ? shellClip.eye.w - shell_dissolve_noise(in.mpos, shellClip) : -1.0;
     if (latticed && standing <= 0.0) {
         discard_fragment();
@@ -838,7 +864,10 @@ fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[
         rgb = mix(rgb, float3(0.78, 0.70, 1.0), 0.9 * going * (1.0 - smoothstep(0.0, 0.12, standing)));
     }
     a = max(a, clamp(in.light.x * 0.95, 0.0, 1.0));   // ★ notes26 (C5): the light shows through the X-ray body
-    return float4(rgb * a, a);   // premultiplied (a==1 → unchanged)
+    ViewerFragOut out;
+    out.color = float4(rgb * a, a);   // premultiplied (a==1 → unchanged)
+    out.mask = coverage;              // ★ notes28: every sample, except along the map's cut
+    return out;
 }
 """
 
@@ -1396,6 +1425,7 @@ struct StageUniforms {
     float    shadowStrength; // §3c — 0 = off
     float    plane;          // ★ notes24 item 1: 1 = the floor seen as a plane; 0 = a level view (its edge-on line, no haze)
     float    glowBand;       // the horizon glow's half width in |rd.y| (StageFloor.glowBand)
+    float    under;          // ★ notes28: 0 from above … 1 under the bed: the bed a tinted see-through plate in front of the part
     float    below;          // ★ notes26 (C4): 1 = the eye is under the floor (stage_under_fragment draws its grid over the part)
 };
 
@@ -1479,7 +1509,7 @@ fragment float4 stage_fragment(SOut in [[stage_in]], constant StageUniforms& U [
             float dist  = length(xz - U.centerXZ);
             float fade  = 1.0 - smoothstep(U.fadeRadius * 0.35, U.fadeRadius, dist);
             float graze = smoothstep(0.02, 0.22, abs(rd.y));
-            float a = lines * fade * graze;
+            float a = lines * fade * graze * (1.0 - U.under);   // ★ notes28: under the bed the plate draws its grid
             col = mix(col, gridCol, clamp(a, 0.0, 1.0));
 
             // ★ §3c CONTACT SHADOW. Right now the part FLOATS. `shadowTex` is the
@@ -1537,15 +1567,25 @@ fragment float4 stage_fragment(SOut in [[stage_in]], constant StageUniforms& U [
 }
 
 // ★ notes26 (C4, his iPad 11-23 from underneath: "It should feel like we're looking UP through the grid from this angle, instead
-// it changed its projection entirely"). The backdrop above is drawn FIRST, so from below the part covered the floor's grid as if
-// the floor lay BEHIND it — while the floor is between the eye and the part. With the eye under the floor (`below`), this draws
-// the same floor's grid again OVER what was drawn: the same plane at the same height, the same ray through the near plane, the
-// same perspective, levels, distance fade and grazing fade as stage_fragment — fainter (`STAGE_UNDER_ALPHA`), so the part's
-// bottom stays clear. Its pipeline blends premultiplied OVER and tests depth GREATER at the far plane (never written): it lands
-// only where something nearer was drawn (the part); the backdrop already shows the grid everywhere else.
-fragment float4 stage_under_fragment(SOut in [[stage_in]], constant StageUniforms& U [[buffer(0)]]) {
-    const float STAGE_UNDER_ALPHA = 0.65;
-    if (U.below < 0.5) { discard_fragment(); }
+// it changed its projection entirely"): from under the floor its grid was drawn again over the part, faintly.
+// ★ notes28 (his iPad notes on release 18, img 77 against Bambu Studio from under its bed, img 78: "Looking from below the model
+// makes the grid look very confusing. It doesn't seem like we are actually looking through a wall ... Please implement it
+// similarly."). Under the bed, the bed is a PLATE between the eye and the part: a see-through tinted plane with its grid lines
+// on it, at the bed's own height and depth, so the part's underside is seen THROUGH it. The same plane at the same height, the
+// same ray through the near plane, the same perspective, levels, distance fade and grazing fade as stage_fragment; the plate's
+// tint fades with the distance as its grid does. Its depth is the bed point's own, a hair nearer the eye (the part stands ON the
+// bed: its bottom face is the bed's plane), tested LESS and never written: in front of everything above the bed, behind
+// anything below it. `under` (StageFloor.underWeight) fades it in as the eye crosses the bed's plane; the backdrop's own grid
+// fades out by the same weight, so its lines are never drawn twice.
+struct StageUnderOut {
+    float4 color [[color(0)]];
+    float  depth [[depth(any)]];
+};
+
+fragment StageUnderOut stage_under_fragment(SOut in [[stage_in]], constant StageUniforms& U [[buffer(0)]]) {
+    const float PLATE_ALPHA = 0.42;   // the plate's tint at its strongest
+    const float LINE_ALPHA = 0.75;    // its grid lines over the tint
+    if (U.under <= 0.001) { discard_fragment(); }
     float2 ndc = in.uv;
     float4 nh = U.invVP * float4(ndc, 0.0, 1.0);
     float3 np = nh.xyz / nh.w;
@@ -1568,9 +1608,26 @@ fragment float4 stage_under_fragment(SOut in [[stage_in]], constant StageUniform
     float dist  = length(xz - U.centerXZ);
     float fade  = 1.0 - smoothstep(U.fadeRadius * 0.35, U.fadeRadius, dist);
     float graze = smoothstep(0.02, 0.22, abs(rd.y));
-    float a = clamp(lines * fade * graze, 0.0, 1.0) * STAGE_UNDER_ALPHA;
-    float3 gridCol = float3(0.34, 0.52, 0.80);
-    return float4(gridCol * a, a);   // premultiplied
+    float plate = PLATE_ALPHA * fade * graze * U.under;
+    float lineA = clamp(lines * 2.0, 0.0, 1.0) * LINE_ALPHA * fade * graze * U.under;
+    float3 tint = float3(0.30, 0.33, 0.38);       // a cool grey plate (Bambu's, on our charcoal-blue stage)
+    float3 gridCol = float3(0.62, 0.74, 0.92);    // its lines, lighter than the plate
+    // premultiplied: the lines OVER the plate, the two OVER what is behind
+    float3 rgb = gridCol * lineA + tint * plate * (1.0 - lineA);
+    float a = lineA + plate * (1.0 - lineA);
+    // the bed point's depth, a hair nearer the eye. Clip space is linear along the pixel's ray, so from the near plane's point
+    // (depth 0) and the point at depth ½ (never the far plane's: its w cancels, StageFloorGridTests) the depth at s along that
+    // segment (s past 1 too) is ½·s·w½ / ((1−s)·w_near + s·w½)
+    float4 mh = U.invVP * float4(ndc, 0.5, 1.0);
+    float3 mp = mh.xyz / mh.w;
+    float3 hit = ro + rd * (t * (1.0 - 1e-3));
+    float3 seg = mp - np;
+    float sAlong = max(dot(hit - np, seg) / max(dot(seg, seg), 1e-20), 0.0);
+    float wn = 1.0 / nh.w, wm = 1.0 / mh.w;
+    StageUnderOut o;
+    o.color = float4(rgb, a);
+    o.depth = clamp(0.5 * sAlong * wm / max((1.0 - sAlong) * wn + sAlong * wm, 1e-20), 0.0, 1.0);
+    return o;
 }
 """
 
@@ -1734,13 +1791,15 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     private let stageUnderPipeline: MTLRenderPipelineState?
     private let stageUnderDepthState: MTLDepthStencilState
     var stageUnderPipelineDidBuild: Bool { stageUnderPipeline != nil }
+    /// RED CONTROL (tests): the map's cut on the body decided once per pixel (before notes28: no anti-aliasing of the cut).
+    nonisolated(unsafe) static var controlAliasedCut = false
     /// RED CONTROL (tests): the floor from underneath as before notes26 — no grid over the part.
     nonisolated(unsafe) static var controlNoUnderGrid = false
-    /// ★ notes26 (C4): from under the floor, the grid is drawn where something NEARER than the far plane was drawn (the part,
-    /// its lattice) — depth GREATER than the full-screen triangle's far-plane depth — and never written.
+    /// ★ notes26 (C4) → ★ notes28: from under the bed, the plate is drawn at the bed's OWN depth (the fragment writes it), where
+    /// it is nearer than what is there — in front of the part above it and of the backdrop — and never written.
     static func stageUnderDepth() -> MTLDepthStencilDescriptor {
         let d = MTLDepthStencilDescriptor()
-        d.depthCompareFunction = .greater
+        d.depthCompareFunction = .less
         d.isDepthWriteEnabled = false
         return d
     }
@@ -4064,7 +4123,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         }
         // ★ notes26 (C4): from UNDER the floor, the floor lies between the eye and the part — its grid again, over the part,
         // faint, so the part is seen THROUGH it (stage_under_fragment); never from above (`below` 0)
-        if drawStage, stageUniforms.below > 0.5, !Self.controlNoUnderGrid, let upipe = stageUnderPipeline {
+        if drawStage, stageUniforms.under > 0.001, !Self.controlNoUnderGrid, let upipe = stageUnderPipeline {   // ★ notes28: as it fades in
             var su = stageUniforms
             enc.setRenderPipelineState(upipe)
             enc.setDepthStencilState(stageUnderDepthState)
@@ -4795,7 +4854,10 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // ★ THE NEW ENGINE's SOLID VIEW (his ask 11-13): its own map cuts the body open where the lattice is (mode 2)
         // (★ notes24: not while the growing vines stand in the part's X-ray: that map is not this lay's — growthXraysBody)
         if let own = growthShellClip { return (own.clip, openEverywhere) }   // ★ notes24: the walls dissolving (LatticeGrowthPass)
-        if layoutBarsInFrame, !growthXraysBody, let solid = layoutBars?.shellClip { return (solid, openEverywhere) }
+        if layoutBarsInFrame, !growthXraysBody, var solid = layoutBars?.shellClip {
+            if sampleCount == 4, !Self.controlAliasedCut { solid.gate.z = 4 }   // ★ notes28: the cut asked per MSAA sample
+            return (solid, openEverywhere)
+        }
         guard latticeInFrame, let layer = latticeLayer else { return (u, openEverywhere) }
         let declared = (layer.scene?.regions ?? []).filter { $0.role == .include }
         guard !declared.isEmpty, let g = layer.regionGrid, layer.regionTexture != nil else {
@@ -5434,11 +5496,15 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                              shadowStrength: 0,   // filled in by `encode` once the footprint exists
                              plane: haze ? 1 : StageFloor.planeWeight(elevationSine: camera.direction.y),
                              glowBand: haze ? 0.14 : StageFloor.glowBand(drawFovY: camera.drawFovY, fovY: camera.fovY),
+                             under: Self.controlNoUnderGrid ? 0 : StageFloor.underWeight(eyeY: camera.eye.y, floorY: floor.y,
+                                                                                          eyeDistance: camera.eyeDistance),
                              below: camera.eye.y < floor.y ? 1 : 0)   // ★ notes26 (C4): looking UP through the floor
     }
 
     /// ★ notes26 (C4, tests): whether the stage sees the floor from under it now.
     func stageEyeBelowFloorForTesting(aspect: Float) -> Bool { makeStageUniforms(aspect: aspect).below > 0.5 }
+    /// ★ notes28 (tests): how far the look has gone over to the bed seen from under it (0 above … 1).
+    func stageUnderWeightForTesting(aspect: Float) -> Float { makeStageUniforms(aspect: aspect).under }
 
     /// The stage's floor grid as this frame would draw it (tests): its height, the unit its squares count from, centre and
     /// the eye; and how much of the floor is seen as a plane and the glow's width (notes24 item 1).
@@ -7082,7 +7148,7 @@ extension MetalMeshView {
                         // AFTER this render pass; the renderer already holds the framed
                         // camera for the current draw.
                         let framed = renderer.camera
-                        DispatchQueue.main.async { [weak model] in model?.adopt(framed) }
+                        DispatchQueue.main.async { [weak model] in model?.adoptFramed(framed) }   // ★ notes28: a version's camera as he left it, once
                     }
                     // ONLY A REFRAME INVALIDATES THESE. `setMesh` zeroes the tint
                     // buffer and resets the settle to identity, so both have to be
