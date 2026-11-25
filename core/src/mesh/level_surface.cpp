@@ -473,7 +473,11 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
         }
       }
     }
-    return (0.5 - f) * h;  // < 0 inside the set
+    // < 0 inside the set. 0.01 mm fuller than the 0.5 level: two stamped voxels
+    // that share only an edge sit exactly at 0.5 along it by symmetry, and would
+    // leave two sheets meeting on a line (four triangles on one edge as written);
+    // fuller, they fuse, as their hexes share nodes in the solve.
+    return (0.5 - f) * h - 0.01;
   };
   auto field = [&](const Vec3& p) {
     const double x = (p.x - o.x) / h - 0.5, y = (p.y - o.y) / h - 0.5, z = (p.z - o.z) / h - 0.5;

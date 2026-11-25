@@ -161,7 +161,9 @@ TriangleMesh variant_export_model_mesh(const MinimizePlasticVariant& variant,
 #ifdef TOPOPT_HAVE_MANIFOLD
     if (!keeps.empty()) {
       manifold::Manifold K;
-      for (const KeepRegion& k : keeps) K = K + keep_region_solid(k, 0.0);
+      // Grown 0.01 mm, as keep_regions_exact's kCut: two regions that meet only along
+      // an edge then overlap instead of leaving four triangles on that edge.
+      for (const KeepRegion& k : keeps) K = K + keep_region_solid(k, 0.01);
       const manifold::MeshGL64 g = K.GetMeshGL64();
       for (std::size_t v = 0; v < g.NumVert(); ++v)
         keep_solid.vertices.push_back({g.vertProperties[v * g.numProp],
