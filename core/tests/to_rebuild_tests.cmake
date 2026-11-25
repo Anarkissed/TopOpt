@@ -26,3 +26,10 @@ if(Eigen3_FOUND)
   target_link_libraries(test_to_true_loads PRIVATE topopt)
   add_test(NAME to_true_loads COMMAND test_to_true_loads)
 endif()
+
+# Stage 5 (faster solves): the solver driven the way the Flexible bridge drives it
+# (one thread, latch reset, multigrid then Jacobi-only, warm next step) on a soft
+# graded field like the M2 stand's. Green before and after every solver change.
+add_executable(test_to_solver_bridge_way tests/unit/test_to_solver_bridge_way.cpp)
+target_link_libraries(test_to_solver_bridge_way PRIVATE topopt)
+add_test(NAME to_solver_bridge_way COMMAND test_to_solver_bridge_way)
