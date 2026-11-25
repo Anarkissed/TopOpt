@@ -144,9 +144,11 @@ struct Arm {
   topopt::PlsmBasisKind basis = topopt::PlsmBasisKind::BSpline3;
   double reach = 2.0;   // knot spacings (bspline: fixed at 2)
   double knot = 2.0;    // voxels
+  double band = 0.0;    // > 0: the fit weights |sd| <= band voxels 1 and the rest 0.01
   std::string name() const {
     char b[96];
-    std::snprintf(b, sizeof b, "%s r%.0f k%.1f", topopt::plsm_basis_name(basis), reach, knot);
+    std::snprintf(b, sizeof b, "%s r%.0f k%.1f%s", topopt::plsm_basis_name(basis), reach, knot,
+                  band > 0.0 ? " band" : "");
     return b;
   }
 };
@@ -167,8 +169,10 @@ Measured measure_new(const Shape& s, const Arm& arm, double cell_mm) {
     for (int j = 0; j < kN; ++j)
       for (int i = 0; i < kN; ++i) {
         const Vec3 c{(i + 0.5) * kVoxel, (j + 0.5) * kVoxel, (k + 0.5) * kVoxel};
-        tgt[(static_cast<std::size_t>(k) * kN + j) * kN + i] =
-            std::max(-6.0 * kVoxel, std::min(6.0 * kVoxel, s.sd(c)));
+        const std::size_t q = (static_cast<std::size_t>(k) * kN + j) * kN + i;
+        const double d = s.sd(c);
+        tgt[q] = std::max(-6.0 * kVoxel, std::min(6.0 * kVoxel, d));
+        if (arm.band > 0.0 && std::fabs(d) > arm.band * kVoxel) w[q] = 0.01;
       }
   const PlsmFitResult fr = plsm_solve_normal(A, At, tgt, w, 1e-6, 4000, 1e-10, th);
   PlsmFieldView fv;
@@ -221,10 +225,12 @@ int main(int argc, char** argv) {
       char b[64] = {0};
       Arm x;
       double r = 0, k = 0;
-      if (std::sscanf(argv[a + 1], "%63[^:]:%lf:%lf", b, &r, &k) == 3 &&
+      double bd = 0.0;
+      if (std::sscanf(argv[a + 1], "%63[^:]:%lf:%lf:%lf", b, &r, &k, &bd) >= 3 &&
           topopt::plsm_parse_basis(b, x.basis)) {
         x.reach = r;
         x.knot = k;
+        x.band = bd;
         arms.push_back(x);
       }
     }
@@ -236,6 +242,8 @@ int main(int argc, char** argv) {
                               PlsmBasisKind::WendlandC4})
         for (double r : {2.0, 3.0, 4.0}) arms.push_back(Arm{b, r, k});
       arms.push_back(Arm{PlsmBasisKind::BSpline3, 2.0, k});
+      arms.push_back(Arm{PlsmBasisKind::BSpline3, 2.0, k, 1.5});
+      arms.push_back(Arm{PlsmBasisKind::WendlandC4, 3.0, k, 1.5});
     }
   }
   if (!arms.empty()) {
