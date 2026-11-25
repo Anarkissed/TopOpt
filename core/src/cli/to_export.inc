@@ -130,10 +130,12 @@ TriangleMesh variant_export_model_mesh(const MinimizePlasticVariant& variant,
                                        const RunFinish* fin = nullptr,
                                        FinishBlock* fb = nullptr,
                                        TriangleMesh* unfinished = nullptr,
-                                       const std::vector<FrozenFaceSet>* frozen = nullptr) {
+                                       const std::vector<FrozenFaceSet>* frozen = nullptr,
+                                       const DesignBox* box = nullptr) {
   if (fin != nullptr) {  // E1: the finished shape, after CAD projection and exact Protect
-    const TriangleMesh raw = variant_export_model_mesh(variant, out, sg, printed_iso, cad, keeps,
-                                                       nullptr, nullptr, nullptr, &fin->frozen);
+    const TriangleMesh raw = variant_export_model_mesh(
+        variant, out, sg, printed_iso, cad, keeps, nullptr, nullptr, nullptr, &fin->frozen,
+        fin->ctx.has_box ? &fin->ctx.box : nullptr);
     FinishContext c = fin->ctx;
     // Stage 3: a surface meshed from the function needs no curvature flow.
     if (to_surface_on()) c.flow = false;
@@ -181,7 +183,7 @@ TriangleMesh variant_export_model_mesh(const MinimizePlasticVariant& variant,
       TriangleMesh m = function_surface_mesh(
           variant, sg, cad->drawn_mesh(), std::max(1, out.smooth_factor), printed_iso, &why,
           &fr, frozen, cad, keeps.empty() ? nullptr : &keeps,
-          keep_solid.triangles.empty() ? nullptr : &keep_solid);
+          keep_solid.triangles.empty() ? nullptr : &keep_solid, box);
       if (!m.triangles.empty()) {
         std::fprintf(stderr,
                      "[surface] vf %.2f: from the function: %lld triangles, mesh %.2f s, "
@@ -200,7 +202,7 @@ TriangleMesh variant_export_model_mesh(const MinimizePlasticVariant& variant,
   if (!keeps.empty() && cad != nullptr)  // item KEEP: exact inside each keep region
     return keep_regions_exact(
         variant_export_model_mesh(variant, out, sg, printed_iso, cad, {}, nullptr, nullptr,
-                                  nullptr, frozen),
+                                  nullptr, frozen, box),
         cad->drawn_mesh(),
         keeps, sg.spacing * sg.spacing * sg.spacing);
   const int sf = out.smooth_factor;

@@ -112,8 +112,11 @@ TriangleMesh mesh_intersection(const TriangleMesh& a, const TriangleMesh& b,
 // solid BEFORE the one cut by the drawn part, so there is a single exact boolean
 // and no second union along the drawn faces.
 //
+// With `box` (a design-box run, which may grow material outside the part), the
+// cut is by the drawn part AND the box, so the box's faces are exact too.
+//
 // Empty with `why` set when it cannot be made (no analytic design, no drawn part,
-// a design-box run, no Manifold): the caller keeps today's export and says so.
+// a design-box run without its box, no Manifold): the caller keeps today's export and says so.
 struct MinimizePlasticVariant;
 struct FrozenFaceSet;
 struct StepModel;
@@ -132,6 +135,7 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
                                    const std::vector<FrozenFaceSet>* frozen = nullptr,
                                    const StepModel* model = nullptr,
                                    const std::vector<KeepRegion>* keeps = nullptr,
-                                   const TriangleMesh* keep_solid = nullptr);
+                                   const TriangleMesh* keep_solid = nullptr,
+                                   const DesignBox* box = nullptr);
 
 }  // namespace topopt

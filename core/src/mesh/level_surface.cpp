@@ -365,7 +365,8 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
                                    const std::vector<FrozenFaceSet>* frozen,
                                    const StepModel* model,
                                    const std::vector<KeepRegion>* keeps,
-                                   const TriangleMesh* keep_solid) {
+                                   const TriangleMesh* keep_solid,
+                                   const DesignBox* box) {
   FunctionSurfaceReport local;
   FunctionSurfaceReport& R = rep ? *rep : local;
   R = FunctionSurfaceReport{};
@@ -387,6 +388,10 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
      // part alone tags only voxels whose centre is inside the part.
     Vec3 lo, hi;
     bounding_box(part, lo, hi);
+    if (box != nullptr) {  // the run may grow inside its box: the domain is part + box
+      lo = Vec3{std::min(lo.x, box->min.x), std::min(lo.y, box->min.y), std::min(lo.z, box->min.z)};
+      hi = Vec3{std::max(hi.x, box->max.x), std::max(hi.y, box->max.y), std::max(hi.z, box->max.z)};
+    }
     for (int kz = 0; kz < nz; ++kz)
       for (int j = 0; j < ny; ++j)
         for (int i = 0; i < nx; ++i) {
@@ -597,16 +602,24 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
   const auto t1 = std::chrono::steady_clock::now();
   std::string w;
   TriangleMesh cut;
-  if (keep_solid != nullptr && !keep_solid->triangles.empty()) {
+  if ((keep_solid != nullptr && !keep_solid->triangles.empty()) || box != nullptr) {
 #ifdef TOPOPT_HAVE_MANIFOLD
-    const manifold::Manifold A = to_manifold64(S), K = to_manifold64(*keep_solid),
-                             P = to_manifold64(part);
+    manifold::Manifold A = to_manifold64(S), P = to_manifold64(part);
+    const bool keep = keep_solid != nullptr && !keep_solid->triangles.empty();
+    const manifold::Manifold K = keep ? to_manifold64(*keep_solid) : manifold::Manifold();
     if (A.Status() == manifold::Manifold::Error::NoError &&
         K.Status() == manifold::Manifold::Error::NoError &&
-        P.Status() == manifold::Manifold::Error::NoError)
-      cut = from_manifold64(((A + K) ^ P).SetTolerance(kAsWrittenTol));
-    else
+        P.Status() == manifold::Manifold::Error::NoError) {
+      if (box != nullptr)  // the design box joins the domain: its faces are exact
+        P = P + manifold::Manifold::Cube(manifold::vec3(box->max.x - box->min.x,
+                                                        box->max.y - box->min.y,
+                                                        box->max.z - box->min.z))
+                    .Translate(manifold::vec3(box->min.x, box->min.y, box->min.z));
+      if (keep) A = A + K;
+      cut = from_manifold64((A ^ P).SetTolerance(kAsWrittenTol));
+    } else {
       w = "the surface, keep regions or drawn part is not a closed manifold";
+    }
 #endif
   } else {
     cut = mesh_intersection(S, part, &w);
