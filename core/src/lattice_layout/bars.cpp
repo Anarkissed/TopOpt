@@ -112,11 +112,68 @@ bool SolidAt::operator()(const Domain::Probe& probe, const Vec3& p, const Where&
   return true;   // lattice was asked for here and no cell holds it: solid (D14)
 }
 
+namespace {
+// The re-entrant rule of lay_bars, on one cell's bars (`from`: the strut of `struts` each came from; `glo`, `unit`: the
+// cell's integer grid in its frame). A waist strut joins a waist (not a corner of the cell) to a corner.
+void hold_waists(std::vector<Bar>& bars, const std::vector<std::size_t>& from, const std::vector<StrutCellStrut>& struts,
+                 const Frame& f, const double glo[3], const double unit[3]) {
+  const auto corner = [&](const StrutCellPoint& q, int S) { return q.x % S == 0 && q.y % S == 0 && q.z % S == 0; };
+  const int S = 4;
+  const auto z_of = [&](const StrutCellPoint& q) {
+    return f.at(glo[0] + q.x * unit[0], glo[1] + q.y * unit[1], glo[2] + q.z * unit[2]).z;
+  };
+  struct Waist { StrutCellPoint at; bool held = false; };
+  std::vector<Waist> waists;
+  const auto waist_of = [&](const StrutCellPoint& q) -> std::size_t {
+    for (std::size_t k = 0; k < waists.size(); ++k)
+      if (waists[k].at.x == q.x && waists[k].at.y == q.y && waists[k].at.z == q.z) return k;
+    waists.push_back({q, false});
+    return waists.size() - 1;
+  };
+  // Per bar: its waist (-1: a column), whether its strut lies below the waist, and whether its corner side is its end a.
+  std::vector<long> waist(bars.size(), -1);
+  std::vector<char> lower(bars.size(), 0), corner_is_a(bars.size(), 0), drop(bars.size(), 0);
+  for (std::size_t i = 0; i < bars.size(); ++i) {
+    const StrutCellStrut& s = struts[from[i]];
+    const bool ca = corner(s.a, S), cb = corner(s.b, S);
+    if (ca == cb) continue;   // a column (corner to corner)
+    const StrutCellPoint& w = ca ? s.b : s.a;
+    const StrutCellPoint& c = ca ? s.a : s.b;
+    waist[i] = static_cast<long>(waist_of(w));
+    lower[i] = z_of(c) < z_of(w);
+    // The piece's end a is on the strut's s.a side (pieces keep the strut's direction).
+    corner_is_a[i] = ca;
+  }
+  for (std::size_t i = 0; i < bars.size(); ++i) {
+    if (waist[i] < 0 || !lower[i]) continue;
+    const Bar& b = bars[i];
+    const Bar::End low = corner_is_a[i] ? b.end_a : b.end_b, high = corner_is_a[i] ? b.end_b : b.end_a;
+    const bool on_bed = (b.on_bed & (corner_is_a[i] ? Bar::kOnBedA : Bar::kOnBedB)) != 0;
+    const bool rests = low == Bar::End::Node || low == Bar::End::Solid || (low == Bar::End::Surface && on_bed);
+    if (!rests && low == Bar::End::Surface) drop[i] = 1;   // starts at a wall, in the air
+    if (rests && high == Bar::End::Node) waists[static_cast<std::size_t>(waist[i])].held = true;
+  }
+  for (std::size_t i = 0; i < bars.size(); ++i)
+    if (waist[i] >= 0 && !waists[static_cast<std::size_t>(waist[i])].held) drop[i] = 1;
+  std::size_t k = 0;
+  for (std::size_t i = 0; i < bars.size(); ++i)
+    if (!drop[i]) bars[k++] = bars[i];
+  bars.resize(k);
+}
+}  // namespace
+
 Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
   const StrutCell& type = lattice_strut_cell(layout.topology);   // throws for a type with none
   // The struts each frame's cells lay (cell_struts: a tetragonal type's columns stand up in every frame; a cubic type's
   // list is the same for every frame, in its order).
   std::vector<std::vector<StrutCellStrut>> struts_of(layout.frames.size());
+  // RE-ENTRANT (2026-11-24, his 10 mm cube with a face region: every cell cut by its sides, the print loop left out 120
+  // of 121 struts). Each waist of a re-entrant cell hangs from the two struts below it, the ones to the bottom corners
+  // of its side face, and holds the two above it. Where a wall cuts a lower strut, its piece starts at the wall in the
+  // air: nothing is under it. So, of a cell's bars, a lower waist strut is kept only where its lower end rests (on its
+  // corner node, in solid, or on the bed), and a waist that no lower strut reaches resting is not laid at all (its upper
+  // struts would hang from it). Every other type, and the columns, as before.
+  const bool reentrant = layout.topology == LatticeTopology::Reentrant;
   for (std::size_t fi = 0; fi < layout.frames.size(); ++fi) struts_of[fi] = cell_struts(layout.topology, layout.frames[fi]);
   const int thread_count =
       threads > 0 ? threads : std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
@@ -142,6 +199,8 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
                              glo[1] + 0.5 * (c.size + c.reach_lo[1] + c.reach_hi[1]),
                              glo[2] + 0.5 * (c.size + c.reach_lo[2] + c.reach_hi[2])};
       Found& out = per_cell[ci];
+      // Re-entrant (below, after the cell's struts): which strut each of the cell's bars came from.
+      std::vector<std::size_t> from_strut;
       // Each node of the cell, read once (a hair toward the cell's middle): -1 not yet.
       std::map<std::array<int, 3>, bool> node_read;
       auto node_is_mine = [&](const StrutCellPoint& n) {
@@ -217,6 +276,7 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
             bar.a = a;
             bar.b = b;
             out.bars.push_back(bar);
+            if (reentrant) from_strut.push_back(static_cast<std::size_t>(&s - struts.data()));
             continue;
           }
         }
@@ -244,8 +304,10 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
           i = j;
           if (!kept) { ++out.stubs; continue; }
           out.bars.push_back(piece);
+          if (reentrant) from_strut.push_back(static_cast<std::size_t>(&s - struts.data()));
         }
       }
+      if (reentrant) hold_waists(out.bars, from_strut, struts, f, glo, unit);
     }
   };
   {

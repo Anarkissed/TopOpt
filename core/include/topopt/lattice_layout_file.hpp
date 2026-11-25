@@ -357,6 +357,17 @@ struct FileResult {
   std::size_t thin_solid = 0;   // cut cells print rule P8 (f) made solid (Outcome::thin_solid)
   std::size_t small_patch_cells = 0;   // K5: cells made solid for a Structural patch narrower than its count across
   std::vector<int> quilt_regions;      // K3: Outcome::quilt_regions (laid with the quilt: nothing else laid there)
+  // 2026-11-24 (362, after reentrant on the cube's face region): a cell region whose struts the print check's leave-outs
+  // took (nearly) all of: kEmptiedShare or more of its struts (skin bars not counted), at least kEmptiedFewest of them.
+  // The file is still written, with nothing where the region's cells were (their space open, their struts gone); the app
+  // shows the region as "Cannot Lattice" with `why`, one plain line with the cause, never a silent empty lattice.
+  // Written as the result's "cannot_lattice" only when there is one (else the result is as it was).
+  struct Emptied {
+    int region = 0;
+    std::size_t struts = 0, left_out = 0;
+    std::string why;
+  };
+  std::vector<Emptied> emptied;
   std::vector<Layout::CellSearch> cell_search;   // K7, K8: Layout::cell_search (asked: CellSpec::cell_search, stretch_edges)
   bool cells_by_stress = false; // cell size by stress was applied to the layout (Outcome::cells_by_stress, C22)
   double step_held_at = 0.0;    // C24: the part's size-step limit kept (Outcome::step_held_at); 0 when none was asked
@@ -460,6 +471,13 @@ std::string type_coupon_job(const CouponAsk& ask, const std::string& model, int 
 // Writes into `out_dir` (which must exist): <type>_coupon_part.stl (the part), <type>_coupon_job.json, and what the file
 // job writes there (<type>_coupon_lattice.stl, the file to print, and lattice_file.json). Never throws.
 FileResult make_type_coupon(const CouponAsk& ask, const std::string& out_dir);
+
+inline constexpr double kEmptiedShare = 0.9;
+inline constexpr std::size_t kEmptiedFewest = 4;
+// FileResult::emptied of a file made of `bars` (its cell regions; `weave_regions` are not read) with the print check's
+// leave-out places `left_out_at` (FileReport::left_out_at; bars_present is the writer's own rule).
+std::vector<FileResult::Emptied> emptied_regions(const Bars& bars, const std::vector<Vec3>& left_out_at,
+                                                 const std::vector<int>& weave_regions);
 
 // The result file's name, and its text.
 inline constexpr const char* kFileResultName = "lattice_file.json";
