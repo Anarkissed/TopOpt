@@ -41,10 +41,12 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -108,6 +110,13 @@ constexpr int kMinLevels = kMgMinLevels;            // < 2 usable levels -> not 
 // MG would have solved. The only cutoffs are this full-cycle budget and the
 // wall-clock guard below (a coarse safety net, not a convergence signal).
 constexpr int kMgIterBudget = 300;
+// TO stage 5: the stall rule for its stable smoothers, which run to the caller's
+// cap instead of the budget above. Every kStage5Window cycles the window's best
+// relative residual must be at most kStage5Gain x the previous checkpoint's.
+// A converging solve on his parts gains about 10x per 250 cycles even on the
+// geometric hierarchy (Top Motor Mount: 4 decades in 727 to 1,227 cycles).
+constexpr int kStage5Window = 250;
+constexpr double kStage5Gain = 0.5;
 
 // Per-attempt wall-clock guard. DEFAULT 0 = DISABLED: the deterministic
 // cycle budget (kMgIterBudget) is the sole bound. A fixed seconds value
@@ -408,6 +417,15 @@ struct MgOpts {
   // l1-Jacobi (safe retry only): x <- x + D_l1^-1 r, omega ignored. Never set
   // by mg_opts_now(), so the shipped cycle cannot reach it.
   bool l1 = false;
+  // TO stage 5 (B-05): 4th-kind Chebyshev of this degree, and/or the per-level
+  // Jacobi weight omega_over_lambda / lambda_level. Both read the level's
+  // lambda (Level::lambda, MfHierarchy::fine_lambda), set per solve by
+  // set_smoother_lambdas; a level without one falls back to the fixed omega.
+  bool cheb = false;
+  int cheb_degree = 2;
+  double omega_over_lambda = 0.0;
+  // True when either needs per-level lambdas (and the stage-5 budget below).
+  bool lambda_smoother() const { return cheb || omega_over_lambda > 0.0; }
 };
 
 MgOpts mg_opts_now() {
@@ -419,7 +437,47 @@ MgOpts mg_opts_now() {
   o.coarse_extra = t.coarse_extra_smooth;
   o.gamma = t.cycle_gamma;
   o.point_block = (t.smoother == fea_detail::MgSmoother::PointBlockJacobi);
+  o.cheb = (t.smoother == fea_detail::MgSmoother::Chebyshev4) && t.cheb_degree >= 1;
+  o.cheb_degree = t.cheb_degree;
+  o.omega_over_lambda = t.omega_over_lambda;
   return o;
+}
+
+// The Jacobi weight at a level whose lambda_max(D^-1 A) bound is `lambda`: the
+// stage-5 per-level weight when it is set and the level has a bound, else the
+// fixed omega (the shipped path returns o.omega unchanged, so its arithmetic is
+// byte-identical).
+inline double level_weight(const MgOpts& o, double lambda) {
+  if (o.omega_over_lambda > 0.0 && lambda > 0.0 && std::isfinite(lambda))
+    return o.omega_over_lambda / lambda;
+  return o.omega;
+}
+
+// 4th-kind Chebyshev smoothing step of degree k on A x = b (Lottes 2023, alg. 3;
+// Phillips & Fischer 2022): with r = b - A x,
+//   d_0 = 4/(3 rho) D^-1 r_0,  x_{i} = x_{i-1} + d_{i-1},  r_i = r_{i-1} - A d_{i-1},
+//   d_i = (2i-1)/(2i+3) d_{i-1} + (8i+4)/((2i+3) rho) D^-1 r_i.
+// k operator applies (k-1 when x starts at zero: r_0 = b needs none). `apply`
+// is y = A x; `r`, `d`, `ad` are caller-owned scratch of the level's size.
+template <class ApplyA>
+void cheb4_smooth(ApplyA apply, const Vec& dinv, double rho, int k, const Vec& b,
+                  Vec& x, bool x_zero, Vec& r, Vec& d, Vec& ad) {
+  if (x_zero) {
+    r = b;
+  } else {
+    apply(x, ad);
+    r = b - ad;
+  }
+  d = (4.0 / (3.0 * rho)) * (dinv.array() * r.array()).matrix();
+  for (int i = 1; i < k; ++i) {
+    x += d;
+    apply(d, ad);
+    r -= ad;
+    const double c1 = (2.0 * i - 1.0) / (2.0 * i + 3.0);
+    const double c2 = (8.0 * i + 4.0) / ((2.0 * i + 3.0) * rho);
+    d = c1 * d + c2 * (dinv.array() * r.array()).matrix();
+  }
+  x += d;
 }
 
 // Sweeps to run at GLOBAL level `level` (0 == finest). The extra sweeps land on
@@ -627,6 +685,9 @@ struct Level {
   std::vector<int> active;     // (node*3+comp) -> local dof id, or -1
   BlockDiag pbd;               // point-block smoother data; EMPTY on the shipped path
   Vec Dl1inv;                  // 1/rowsum|A| (l1-Jacobi); EMPTY unless the safe retry ran
+  // Stage 5: the upper bound on lambda_max(Dinv A) the Chebyshev and per-level
+  // Jacobi smoothers use; 0 = not computed (the shipped path never computes it).
+  double lambda = 0.0;
   bool coarsest = false;
   // coarsest-level exact solve; held by pointer so Level stays movable in a
   // std::vector (Eigen's factorisation objects are not moveable).
@@ -935,7 +996,21 @@ inline void jacobi_sweep(const Level& L, const Vec& b, Vec& x, const MgOpts& o) 
     block_apply(L.pbd, o.omega, r, x);
     return;
   }
-  x += o.omega * (L.Dinv.array() * r.array()).matrix();
+  x += level_weight(o, L.lambda) * (L.Dinv.array() * r.array()).matrix();
+}
+
+// One smoothing step at an assembled level: the stage-5 Chebyshev when selected
+// and the level has its lambda bound (never on the l1 safe retry), else one
+// Jacobi sweep exactly as before. `x_zero` = x is still the cycle's zero start.
+inline void level_smooth(const Level& L, const Vec& b, Vec& x, const MgOpts& o,
+                         bool x_zero) {
+  if (o.cheb && !o.l1 && L.lambda > 0.0) {
+    Vec r, d, ad;
+    cheb4_smooth([&L](const Vec& v, Vec& y) { y = L.A * v; }, L.Dinv, L.lambda,
+                 o.cheb_degree, b, x, x_zero, r, d, ad);
+    return;
+  }
+  jacobi_sweep(L, b, x, o);
 }
 
 // Recursive symmetric gamma-cycle: return an approximate solution of A_l x = b.
@@ -955,7 +1030,7 @@ Vec v_cycle(const std::vector<Level>& levels, int l, const Vec& b,
   Vec x = Vec::Zero(L.n);
   const int npre = sweeps_at(o.pre, o, global_level);
   const int npost = sweeps_at(o.post, o, global_level);
-  for (int s = 0; s < npre; ++s) jacobi_sweep(L, b, x, o);
+  for (int s = 0; s < npre; ++s) level_smooth(L, b, x, o, /*x_zero=*/s == 0);
 
   for (int g = 0; g < o.gamma; ++g) {
     const Vec r = b - L.A * x;
@@ -964,7 +1039,7 @@ Vec v_cycle(const std::vector<Level>& levels, int l, const Vec& b,
     x += L.P * ec;                                  // prolongate + correct
   }
 
-  for (int s = 0; s < npost; ++s) jacobi_sweep(L, b, x, o);
+  for (int s = 0; s < npost; ++s) level_smooth(L, b, x, o, /*x_zero=*/false);
   return x;
 }
 
@@ -1229,6 +1304,9 @@ struct MfHierarchy {
   // l1-Jacobi inverse diagonal of the FINE level (safe retry only; empty on the
   // shipped path).
   Vec fine_dl1inv;
+  // Stage 5: the fine level's lambda_max(D^-1 A) bound (see Level::lambda); 0 =
+  // not computed, which the shipped path never does.
+  double fine_lambda = 0.0;
   int levels() const { return 1 + static_cast<int>(coarse.size()); }
 };
 
@@ -1254,6 +1332,9 @@ struct MfScratch {
   // reused as the FP64 hand-off buffers for the (still FP64) coarse direct solve.
   VecF bf, xf, Axf, vrf, prolf;  // fine-level (ng) FP32 work
   VecF bcf, ecf;                 // coarse-level (nc) FP32 work
+  // Stage 5 Chebyshev fine-level work (residual, direction); sized on first
+  // use, so the shipped path allocates none of it. `Ax` above is the A*d image.
+  Vec chr, chd;
 
   void resize(int ng, int nc) {
     Ax.resize(ng); vr.resize(ng); prol.resize(ng); Ap.resize(ng); zc.resize(ng);
@@ -1292,7 +1373,20 @@ inline void mf_jacobi_sweep(const MfHierarchy& H, MfScratch& S, const Vec& b,
     block_apply(H.fine_pbd, o.omega, S.vr, x);
     return;
   }
-  x += o.omega * (H.fine_dinv.array() * (b - S.Ax).array()).matrix();
+  x += level_weight(o, H.fine_lambda) * (H.fine_dinv.array() * (b - S.Ax).array()).matrix();
+}
+
+// One fine smoothing step: the stage-5 Chebyshev when selected and the fine
+// level has its lambda bound (never on the l1 safe retry), else one sweep as
+// before. With x still zero the Chebyshev skips the A*0 apply.
+inline void mf_smooth(const MfHierarchy& H, MfScratch& S, const Vec& b, Vec& x,
+                      const MgOpts& o, bool x_zero) {
+  if (o.cheb && !o.l1 && H.fine_lambda > 0.0) {
+    cheb4_smooth([&H](const Vec& v, Vec& y) { mf_fine_matvec(H, v, y); }, H.fine_dinv,
+                 H.fine_lambda, o.cheb_degree, b, x, x_zero, S.chr, S.chd, S.Ax);
+    return;
+  }
+  mf_jacobi_sweep(H, S, b, x, o);
 }
 
 // Symmetric V-cycle with a matrix-free finest level, writing the result into the
@@ -1302,7 +1396,7 @@ inline void mf_jacobi_sweep(const MfHierarchy& H, MfScratch& S, const Vec& b,
 void mf_v_cycle(const MfHierarchy& H, MfScratch& S, const Vec& b, Vec& x,
                 const MgOpts& o) {
   x.setZero(H.m->ng);
-  for (int s = 0; s < o.pre; ++s) mf_jacobi_sweep(H, S, b, x, o);
+  for (int s = 0; s < o.pre; ++s) mf_smooth(H, S, b, x, o, /*x_zero=*/s == 0);
 
   // gamma == 1 is the shipped V-cycle: one coarse-grid correction. gamma == 2
   // repeats it against a freshly recomputed fine residual (the W-cycle).
@@ -1315,7 +1409,7 @@ void mf_v_cycle(const MfHierarchy& H, MfScratch& S, const Vec& b, Vec& x,
     x += S.prol;
   }
 
-  for (int s = 0; s < o.post; ++s) mf_jacobi_sweep(H, S, b, x, o);
+  for (int s = 0; s < o.post; ++s) mf_smooth(H, S, b, x, o, /*x_zero=*/false);
 }
 
 // MIXED-PRECISION V-cycle (handoff 092). Same symmetric structure as mf_v_cycle
@@ -1338,7 +1432,10 @@ void mf_v_cycle(const MfHierarchy& H, MfScratch& S, const Vec& b, Vec& x,
 void mf_v_cycle_mixed(const MfHierarchy& H, MfScratch& S, const Vec& b, Vec& x,
                       const MgOpts& o) {
   const int ng = H.m->ng;
-  const float omega = static_cast<float>(o.omega);
+  // The fine weight: the shipped fixed omega, or stage 5's per-level weight
+  // (level_weight returns o.omega unchanged on the shipped path). The FP32
+  // cycle has no Chebyshev: the caller never selects it when o.cheb is set.
+  const float omega = static_cast<float>(level_weight(o, H.fine_lambda));
   S.bf = b.cast<float>();                       // convert on entry
   S.xf.setZero(ng);
   for (int s = 0; s < o.pre; ++s) {
@@ -2450,6 +2547,101 @@ std::vector<double> hierarchy_lambdas(const MfHierarchy& H, bool l1, int iters) 
   return out;
 }
 
+// TO stage 5 (B-05): the per-level lambda_max(D^-1 A) bounds the Chebyshev and
+// per-level Jacobi smoothers read, computed on THIS solve's hierarchy (so no
+// state crosses solves; test K). The fine estimate uses the COUNTED production
+// apply, so the run's matvec column carries the cost honestly. Deterministic:
+// fixed start vector, fixed iteration count. No-op on the shipped path.
+void set_smoother_lambdas(MfHierarchy& H, const MgOpts& o, int iters, double safety) {
+  if (!o.lambda_smoother() || H.m == nullptr) return;
+  if (iters < 1) iters = 1;
+  if (!(safety >= 1.0)) safety = 1.0;
+  const int n0 = H.m->ng;
+  const double l0 = power_lambda_dinv_a(
+      n0, H.fine_dinv,
+      [&H, n0](const Vec& x, Vec& y) {
+        y.resize(n0);
+        H.m->apply_kgg_raw(x.data(), y.data());
+      },
+      iters);
+  H.fine_lambda = (l0 > 0.0 && std::isfinite(l0)) ? safety * l0 : 0.0;
+  for (Level& L : H.coarse) {
+    if (L.coarsest) continue;
+    const double lc = power_lambda_dinv_a(
+        L.n, L.Dinv, [&L](const Vec& x, Vec& y) { y = L.A * x; }, iters);
+    L.lambda = (lc > 0.0 && std::isfinite(lc)) ? safety * lc : 0.0;
+  }
+}
+
+// TO STAGE 5 SWITCH (docs/design/to-rebuild/stages/stage-5-faster-solves.md,
+// 02-plan.md section 3: one temporary switch per stage, deleted with the old
+// path at the stage's close-out). TOPOPT_SOLVER selects the smoother under
+// test; unset, empty or "today" = today's solver, byte-identical:
+//   "jacobi:F"  damped Jacobi, weight F / lambda_level on every level (F < 2)
+//   "cheb:K"    4th-kind Chebyshev of degree K on every level
+// optionally followed by ",safety=S" (lambda bound factor, default 1.1) and
+// ",iters=N" (power iterations, default 12). Read once per solve; an unknown
+// value is reported once and runs today's solver.
+bool parse_stage5_solver(const char* v, fea_detail::MgTuning& t) {
+  const std::string s(v);
+  std::size_t pos = s.find(',');
+  const std::string head = s.substr(0, pos);
+  if (head.rfind("jacobi:", 0) == 0) {
+    const double f = std::atof(head.c_str() + 7);
+    if (!(f > 0.0 && f < 2.0)) return false;
+    t.smoother = fea_detail::MgSmoother::ScalarJacobi;
+    t.omega_over_lambda = f;
+  } else if (head.rfind("cheb:", 0) == 0) {
+    const int k = std::atoi(head.c_str() + 5);
+    if (k < 1 || k > 16) return false;
+    t.smoother = fea_detail::MgSmoother::Chebyshev4;
+    t.cheb_degree = k;
+    t.omega_over_lambda = 0.0;
+  } else {
+    return false;
+  }
+  while (pos != std::string::npos) {
+    const std::size_t next = s.find(',', pos + 1);
+    const std::string kv = s.substr(pos + 1, next == std::string::npos ? std::string::npos
+                                                                         : next - pos - 1);
+    if (kv.rfind("safety=", 0) == 0) t.lambda_safety = std::atof(kv.c_str() + 7);
+    else if (kv.rfind("iters=", 0) == 0) t.lambda_iters = std::atoi(kv.c_str() + 6);
+    else return false;
+    pos = next;
+  }
+  return t.lambda_safety >= 1.0 && t.lambda_iters >= 1;
+}
+
+// Installs the TOPOPT_SOLVER tuning for ONE solve and restores the previous
+// tuning on exit, so a harness's mg_set_tuning and every other caller see
+// exactly what they set. Inert (no copy, no install) when the variable is unset.
+struct Stage5SolverScope {
+  bool active = false;
+  fea_detail::MgTuning saved;
+  Stage5SolverScope() {
+    const char* v = std::getenv("TOPOPT_SOLVER");
+    if (v == nullptr || *v == '\0' || std::strcmp(v, "today") == 0) return;
+    fea_detail::MgTuning t = g_mg_tuning;
+    static thread_local std::string reported;
+    const bool ok = parse_stage5_solver(v, t);
+    if (reported != v) {
+      reported = v;
+      std::fprintf(stderr, "[mg] TOPOPT_SOLVER=%s: %s\n", v,
+                   ok ? "stage-5 smoother in use (per-level lambda bound, per solve)"
+                      : "NOT understood; today's solver runs");
+    }
+    if (!ok) return;
+    saved = g_mg_tuning;
+    g_mg_tuning = t;
+    active = true;
+  }
+  ~Stage5SolverScope() {
+    if (active) g_mg_tuning = saved;
+  }
+  Stage5SolverScope(const Stage5SolverScope&) = delete;
+  Stage5SolverScope& operator=(const Stage5SolverScope&) = delete;
+};
+
 // D4 on the V-cycle B as a stationary iteration: e <- (I - B A) e, normalised
 // in the A-norm. Returns rho_A(I - BA) (growth factor of the last step) and the
 // Rayleigh quotient of BA at the dominant error, <BAe, e>_A / <e, e>_A. A
@@ -2759,6 +2951,10 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
   // build, the HIERARCHY build (the expensive part the 127 latch exists to skip),
   // the V-cycle loop and the Jacobi fallback are timed separately, because a
   // solve's `iterations` count describes only the last of those.
+  // TO stage 5's switch (TOPOPT_SOLVER): inert when unset; otherwise the
+  // smoother under test for exactly this solve, the caller's tuning restored on
+  // exit. First, so the hierarchy build and every cycle below see one recipe.
+  const Stage5SolverScope stage5_solver;
   const double t_entry = fea_detail::mf_steady_ms();
   const long long mv_entry = fea_matvec_count();
   {  // observation only: did THIS solve run with the island drop permitted?
@@ -2853,11 +3049,33 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
     // solve, and how many MG-CG cycles it attempted. hier_built==false when the
     // grid is not coarsenable (build-rejection) OR the 127 latch skipped the build.
     diag.hier_built = have_h;
+    // Stage 5: this solve's per-level lambda bounds for the Chebyshev / per-level
+    // Jacobi smoother (no-op on the shipped path), before the first cycle.
+    const MgOpts stage_opts = mg_opts_now();
+    if (have_h)
+      set_smoother_lambdas(H, stage_opts, g_mg_tuning.lambda_iters,
+                           g_mg_tuning.lambda_safety);
     // S7 observability on the SHIPPED path: once per run, on the first
     // hierarchy built, log lambda_max(D^-1 A) per smoothed level against the
     // shipped weight's bound 2/omega. Read-only: an uncounted operator apply
     // on private scratch, so the solve below and every reported number
     // (matvecs included) are unchanged; it costs ~20 fine applies per run.
+    if (have_h && !g_mg_lambda_logged && stage_opts.lambda_smoother()) {
+      // Stage 5's smoothers are stable by construction (weight F/lambda with
+      // F < 2; Chebyshev on [0, rho >= lambda]): say which, with the bounds.
+      g_mg_lambda_logged = true;
+      if (stage_opts.cheb)
+        std::fprintf(stderr, "[mg] smoother (stage 5): 4th-kind Chebyshev degree %d",
+                     stage_opts.cheb_degree);
+      else
+        std::fprintf(stderr, "[mg] smoother (stage 5): Jacobi weight %.3f / lambda",
+                     stage_opts.omega_over_lambda);
+      std::fprintf(stderr, ", %d levels, lambda bound per smoothed level: %.3f",
+                   H.levels(), H.fine_lambda);
+      for (const Level& L : H.coarse)
+        if (!L.coarsest) std::fprintf(stderr, " %.3f", L.lambda);
+      std::fprintf(stderr, "\n");
+    }
     if (have_h && !g_mg_lambda_logged) {
       g_mg_lambda_logged = true;
       const double om = mg_opts_now().omega;
@@ -2908,7 +3126,12 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
     if (have_h && !safe_direct) {
       Vec rgv = Eigen::Map<const Vec>(m.rg.data(),
                                       static_cast<Eigen::Index>(m.ng));
-      const int mg_cap = std::min(cap, kMgIterBudget);
+      // The 300-cycle budget exists to abandon a DIVERGING shipped cycle. Stage
+      // 5's smoothers are stable, so a slow-but-converging solve (his parts on
+      // the geometric hierarchy: 700-1,200 cycles) must not be cut there; a
+      // stall is caught instead by the progress window (kStage5Window).
+      const bool stage5 = stage_opts.lambda_smoother();
+      const int mg_cap = stage5 ? cap : std::min(cap, kMgIterBudget);
       Vec xg;
       int it = 0;
       double res = 0.0;
@@ -2923,7 +3146,8 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       // so a cubic system always preconditions in FP64 — mixed precision is
       // production-blocked anyway (handoff 132 D).
       const bool mixed = fea_detail::mf_mixed_precision_enabled() &&
-                         H.fine_dinv_f.size() == m.ng && !m.has_cubic;
+                         H.fine_dinv_f.size() == m.ng && !m.has_cubic &&
+                         !stage_opts.cheb;  // the FP32 cycle has no Chebyshev
       if (mixed) scratch.resize_f(m.ng, static_cast<int>(H.P0.cols()));
       // The warm guess, as an Eigen vector the MG-CG loop can start from.
       // Held here (not inside mf_mgpcg) so the FP64 RETRY after a failed mixed
@@ -2932,11 +3156,13 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       if (warm) x0 = Eigen::Map<const Vec>(xkept.data(),
                                            static_cast<Eigen::Index>(m.ng));
       const Vec* x0p = warm ? &x0 : nullptr;
+      const int win = stage5 ? kStage5Window : 0;
+      const double gain = stage5 ? kStage5Gain : 0.0;
       bool ok = mf_mgpcg(H, scratch, rgv, tolerance, mg_cap, xg, it, res, mixed,
-                         &rec, x0p);
+                         &rec, x0p, nullptr, win, gain);
       if (!ok && mixed)
         ok = mf_mgpcg(H, scratch, rgv, tolerance, mg_cap, xg, it, res,
-                      /*mixed=*/false, &rec, x0p);
+                      /*mixed=*/false, &rec, x0p, nullptr, win, gain);
       // Cycles this solve burned on MG-CG (the last attempt's count when a mixed
       // attempt was retried in FP64): honest whether it converged or stagnated.
       diag.mg_cycles_attempted = it;

@@ -441,6 +441,13 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
 enum class MgSmoother {
   ScalarJacobi = 0,      // x <- x + omega*Dinv.*(b - A x)  (SHIPPED)
   PointBlockJacobi = 1,  // per-node 3x3 block inverse (Peetz & Elbanna)
+  // TO stage 5 (B-05): 4th-kind Chebyshev of degree `cheb_degree` in D^-1 A
+  // (Lottes 2023, arXiv 2202.08830; Phillips & Fischer 2022, arXiv 2210.03179),
+  // on [0, rho] with rho = `lambda_safety` x the level's power-iteration
+  // estimate of lambda_max(D^-1 A). A polynomial in D^-1 A is A-self-adjoint, so
+  // equal pre and post smoothing keeps the cycle SPD. Needs only an UPPER bound,
+  // and an over-estimate costs little, so no lower eigenvalue bound is guessed.
+  Chebyshev4 = 2,
 };
 
 struct MgTuning {
@@ -468,6 +475,18 @@ struct MgTuning {
   // reject outright; raising it is what makes those cells measurable at all.
   int coarse_dof_cap = 6000;  // == kMgCoarseDofCap
   MgSmoother smoother = MgSmoother::ScalarJacobi;
+  // TO stage 5 (B-05). Damped Jacobi weighted PER LEVEL: omega_level =
+  // omega_over_lambda / lambda_level, stable for omega_over_lambda < 2 whatever
+  // the level's lambda_max(D^-1 A) (the shipped fixed 0.6 is unstable above
+  // lambda 3.33; his parts measure 4.4 to 9.9). 0 = the fixed `omega` (shipped).
+  double omega_over_lambda = 0.0;
+  // Chebyshev4's polynomial degree (operator applies per smoothing step).
+  int cheb_degree = 2;
+  // lambda_level = lambda_safety x the power-iteration estimate (which approaches
+  // lambda_max from below) over `lambda_iters` iterations. Computed per solve,
+  // after the hierarchy is built, so no state crosses solves.
+  double lambda_safety = 1.1;
+  int lambda_iters = 12;
 };
 
 // The tuning in force on THIS thread. Thread-local, like the stagnation latch

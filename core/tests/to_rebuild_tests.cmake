@@ -33,3 +33,11 @@ endif()
 add_executable(test_to_solver_bridge_way tests/unit/test_to_solver_bridge_way.cpp)
 target_link_libraries(test_to_solver_bridge_way PRIVATE topopt)
 add_test(NAME to_solver_bridge_way COMMAND test_to_solver_bridge_way)
+
+# Stage 5, B-05: the stable smoothers behind TOPOPT_SOLVER (per-level Jacobi and
+# 4th-kind Chebyshev, three settings each): converge on multigrid without the l1
+# retry, match a tight reference, identical bytes on a repeat, switch inert unset.
+add_executable(test_to_solver_smoother tests/unit/test_to_solver_smoother.cpp)
+target_link_libraries(test_to_solver_smoother PRIVATE topopt)
+target_include_directories(test_to_solver_smoother PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME to_solver_smoother COMMAND test_to_solver_smoother)
