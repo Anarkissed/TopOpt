@@ -21,15 +21,32 @@ Switch values: `on` (the chosen basis), or a measurement arm `on:<basis>:<reach>
 
 ## Tests
 
-| test | before | after |
-|---|---|---|
-| A known shapes (gate 0.05 mm) | | |
-| B drawn faces (0.02 mm) | | |
-| F ripple 1-10 mm (0.05 mm) | | |
-| J one clean solid | | |
-| K, M, P | | |
+Run on a Release build of this branch (2026-11-25).
+
+| test | target | before (today's export) | after (switch on) | ctest |
+|---|---|---|---|---|
+| A known shapes, voxel 1.7 mm (vertices AND triangle interiors) | 0.05 mm | 0.12 to 0.24 mm (walls 0.12-0.19, holes 0.22-0.24, sphere 0.20) | walls 0.001-0.003, hole 10 mm 0.011, sphere 0.015, hole 5 mm 0.049 | `--gate` |
+| B drawn faces (block with a bore, 17/9 deg to the grid; a 4 mm protected layer with a cavity cut into it) | 0.02 mm | (CAD snap: planes and cylinders only, within one voxel; ledger C-02) | flats 0.0000, bore 0.0001 (mean radius 4.9999 of 5.0), protected layer's inner face 0.015 | `--gate` |
+| F ripple at 1-10 mm (a 40 mm wave tilted 13/7 deg) | 0.05 mm | not measured on the old path | 0.016 | `--gate` |
+| J one clean solid | no bad edge, no point contact | | 0 / 0 / 0, one body (after welding as written: the exact cut can leave a float-coincident sliver) | `--gate` |
+| K same job twice | same bytes | | TOReview's in-process test K runs for hours on the demo fixture; mine is the stand job run twice through the CLI, compared byte for byte (below) | |
+| M off path unchanged | same bytes as before | | stand at res 64, switch off, against TOReview's tip build (same TO sources as 2b40bcf4) (below) | |
+| P Release time | within 10 % | | (below) | |
 
 ## The open choice: basis, reach, knot spacing
+
+Test A's worst distance over all eight shapes (mm), the shape fitted the way the optimiser's own re-fit fits it, its zero surface meshed directly:
+
+| basis, reach | knots 1 voxel | 1.5 voxels | 2 voxels (today's rule at 1.7 mm) |
+|---|---|---|---|
+| Gaussian, 2 (today) | 0.029 | 0.076 | 0.134 |
+| Gaussian, 3 / 4 | 0.094 / 0.106 | | |
+| Wendland C2, 2 / 3 / 4 | 0.032 / 0.020 / 0.020 | - / 0.077 / 0.108 | - / 0.138 / 0.138 |
+| Wendland C4, 2 / 3 / 4 | 0.098 / 0.025 / 0.020 | - / 0.083 / 0.079 | - / 0.134 / 0.136 |
+| cubic B-spline (reach 2 by degree) | 0.022 | 0.075 | 0.119 |
+| **cubic B-spline, band-weighted fit** | 0.022 (more knots than voxels: the fit interpolates, the weight cannot act) | **0.040** | **0.049** |
+
+The band-weighted fit puts weight 1 on the voxels within 1.5 voxels of the surface and 0.01 elsewhere (plsm_solve_normal's W, which existed and was never armed): only the surface carries geometry, so the fit spends its accuracy there. Flat walls go from 0.02 to 0.002 mm with it. Reading: the B-spline is the best basis at every spacing, and the cheapest (64 knots per point; Wendland reach 4 at one voxel touches about 270). Settled for the switch: **cubic B-spline, band-weighted fit**. The knot spacing is set by the real-part runs below.
 
 ## Reference table, before and after
 
