@@ -58,8 +58,13 @@ final class LatticeLayoutSolidViewTests: XCTestCase {
         return n
     }
 
-    /// ★ His 0.2 mm nozzle rule (11-14): a 3 mm skin of lattice on every face of the cube has no room for a two-line cell at
-    /// 0.45 mm, and room at 0.22 mm, so the line says so (RED CONTROL: a whole-part lattice with nothing left solid says nothing).
+    /// ★ His 0.2 mm nozzle rule (11-14): a 3 mm skin of lattice on every face of the cube, its cell typed at 3.5 mm, has no
+    /// room for a two-line cell at 0.45 mm, and room at 0.22 mm, so the line says so (RED CONTROL: a whole-part lattice with
+    /// nothing left solid says nothing).
+    /// ★ 2026-11-24 (release 18's whole suite): the cell is TYPED. On Auto, K3 now lays a region that lays no cell at all with
+    /// the quilt's smallest cell (his 11-23 "unless it is literally impossible to lattice without it"), so an Auto skin leaves
+    /// nothing solid to ask about; a typed cell that fits nowhere stays solid (his D4). Measured on this cube: typed 3.0–4.0 mm
+    /// in the 3 mm skin are all solid at 0.45 mm and 99% laid at 0.22 mm (2.8 mm fits at neither), so 3.5 mm sits mid-band.
     func testTheNozzleLineMeasuresTheSolidAFinerNozzleWouldLattice() async throws {
         let main = try await LatticeLayoutSession.open(path: Self.cube), fine = try await LatticeLayoutSession.open(path: Self.cube)
         defer { main.close(); fine.close() }
@@ -67,6 +72,7 @@ final class LatticeLayoutSolidViewTests: XCTestCase {
         let box = try XCTUnwrap(LatticeLayoutPreview.box(m.vertices))
         var thin = LatticeLayoutSession.Settings()
         thin.regions = (0..<6).map { .init(id: Int32($0 + 1), faces: [Int32($0)], depthMM: 3) }
+        thin.cellMM = 3.5
         _ = try await main.lay(thin)
         let cured = try await LatticeLayoutPreview.cure(main: main, fine: fine, settings: thin, box: box)
         print("NOZZLE thin skin: \(cured.map { String(format: "%.0f%%", 100 * $0) } ?? "nothing to say")")

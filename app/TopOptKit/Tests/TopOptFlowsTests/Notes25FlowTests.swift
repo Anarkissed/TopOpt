@@ -348,7 +348,8 @@ final class Notes25FlowTests: XCTestCase {
         XCTAssertTrue(ws.contains("if ok { requestLatticeRun() }"), "the press: the Lattice run (the Mac's file and check)")
         let x = try XCTUnwrap(ws.range(of: "    var latticeExactOnScreen: Bool {"))
         XCTAssertTrue(String(ws[x.upperBound...].prefix(400)).contains("printAccurate: appSettings.latticePrintAccurate, quality: newEngine.organicQuality"))
-        XCTAssertEqual(ws.components(separatedBy: "exact: true").count - 1, 2, "no new exact lay asked (Notes23PrintFlowTests' two)")
+        // ★ RE-PINNED (notes28): + Check strength's lay of a result's exact lattice (his press; Notes23PrintFlowTests locates it)
+        XCTAssertEqual(ws.components(separatedBy: "exact: true").count - 1, 3, "no new exact lay asked (Notes23PrintFlowTests' three)")
         // the button while it runs: the print file's words
         let normal = LatticePrintFlow.Look(title: "Lattice", subtitle: "Organic Grown · 1 group", state: .ready, progress: nil)
         let flow = LatticePrintFlow()

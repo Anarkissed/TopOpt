@@ -107,13 +107,17 @@ final class PrintOrientationFlowTests: XCTestCase {
         shown.current = nil
         let back = try XCTUnwrap(h.faces.first { $0.normal.y < -0.999 })
         f.pick(face: back)
-        XCTAssertEqual(f.phase, .proposed)
+        // ★ RE-PINNED (notes28, his img 81 — Bambu Studio's Lay on face): the part turns to it and Manual stays open, its patches
+        // back in the new pose once it has turned (the picked one outlined); Check strength from there
+        XCTAssertEqual(f.phase, .manual)
+        XCTAssertTrue(f.turning, "the patches wait while it turns")
+        XCTAssertTrue(f.ownsCorner, "Check strength is there")
         XCTAssertEqual(f.shown?.up, SIMD3(0, 1, 0), "the back face down: printed with its back on the bed")
         XCTAssertEqual(f.shown?.recommended, false, "his own choice")
         f.manual()
         let e = try XCTUnwrap(h.edges.first)
         f.pick(edge: e)
-        XCTAssertEqual(f.phase, .proposed)
+        XCTAssertEqual(f.phase, .manual)
         XCTAssertTrue(f.shown?.onEdge ?? false)
     }
 

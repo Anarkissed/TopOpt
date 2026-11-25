@@ -349,9 +349,15 @@ final class StrutLineWidthTests: XCTestCase {
         // the variant's re-lattice job and its receipt echo now call instead of building
         // their own (WorkspacePlaceholder −2). Audited: both new sites read
         // `printParams.strutLineWidthMM`, the STRUT bead. Four sites became two.
-        XCTAssertEqual(strutSites, 12,
-                       "the twelve audited lattice sites (AppModel 0, LatticePage 2, "
-                       + "WorkspacePlaceholder 4, ProjectModel 4, LatticeSetupWizard 2). "
+        // ★ RE-PINNED 12 -> 15 (2026-11-24, release 18's whole suite; notes26, the regular lattice's live sample): AUDITED.
+        //   * `LatticeSetupWizard.latticeSampleInputs` -> `LatticeSampleLay.page(lineWidthMM:)`: the sample lays struts
+        //     from the page's settings, so its strut floor is the STRUT bead (as the lay itself).
+        //   * `ProjectModel.latticeDensityBandDiametersMM` and `.latticeDensityPercent` now call their static twins (the
+        //     sample reads the PAGE's type, which may not be saved yet). Both pass `strutLineWidthMM`: the dial's bottom is
+        //     one extruded strut bead (`printabilityDensityFloor`), never a wall loop. Same numbers as before, new call sites.
+        XCTAssertEqual(strutSites, 15,
+                       "the fifteen audited lattice sites (AppModel 0, LatticePage 2, "
+                       + "WorkspacePlaceholder 4, ProjectModel 6, LatticeSetupWizard 3). "
                        + "If this number moved, audit the new site and update the count.")
         XCTAssertTrue(offenders.isEmpty,
                       "lattice lineWidthMM site(s) reading a WALL bead:\n"
