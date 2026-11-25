@@ -993,10 +993,23 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
         tgt[v] = std::max(-plsm.clamp_voxels * h,
                           std::min(plsm.clamp_voxels * h, pr[v]));
       // Stage 3: only the band near the surface carries geometry, so the fit may
-      // spend its accuracy there (plsm_solve_normal's W).
+      // spend its accuracy there (plsm_solve_normal's W) -- and in that band the
+      // target is phi RE-NORMALISED, phi / |grad phi| (Wei 2018), not the grid
+      // re-distance: the same zero set exactly, slope one. The re-distance, whose
+      // grid crossing moves the surface by a fraction of a voxel, is kept only away
+      // from the surface, where it sets the slope.
       if (surf.fit_band_voxels > 0.0)
-        for (std::size_t v = 0; v < n; ++v)
-          if (std::fabs(pr[v]) > surf.fit_band_voxels * h) w[v] = 0.01;
+        for (int kz = 0; kz < nz; ++kz)
+          for (int j = 0; j < ny; ++j)
+            for (int i = 0; i < nx; ++i) {
+              const std::size_t v = plsm_at(nx, ny, i, j, kz);
+              if (std::fabs(pr[v]) > surf.fit_band_voxels * h) {
+                w[v] = 0.01;
+                continue;
+              }
+              const double g = plsm_grad_mag(nx, ny, nz, phi, i, j, kz, h);
+              if (g > 0.1) tgt[v] = phi[v] / g;
+            }
       const PlsmFitResult rf =
           plsm_solve_normal(Psi, PsiT, tgt, w, plsm.ridge,
                             plsm.fit_cg_iterations, 1e-10, threads);
