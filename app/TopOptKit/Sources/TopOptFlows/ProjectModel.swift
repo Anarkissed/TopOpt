@@ -3036,7 +3036,7 @@ public final class ProjectModel: ObservableObject {
         // ★ RELEASE (2), E2: core runs nine types; a type whose app batch has not shipped (B7.n) is stale here too
         // (`LatticeTypeCatalog.appBatches`), asked first, so its path still asks core nothing.
         guard lattice.enabled,
-              LatticeTypeCatalog.batchShipped(lattice.topologyID),   // ★ notes28: the one gate question
+              LatticeTypeCatalog.oldRunShipped(lattice.topologyID),   // ★ notes28 (his 11-25): the old run keeps the octet only
               TopOptKit.latticeTypeReadiness(lattice.topologyID,
                                              generatable: TopOptKit.latticeGeneratableTopologies,
                                              certifiable: TopOptKit.latticeCertifiableTopologies) == .live

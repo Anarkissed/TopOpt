@@ -102,6 +102,18 @@ public enum LatticeTypeCatalog {
     /// The line for a type core runs whose app batch has not shipped.
     public static let appBatchPending = "Ready in the engine; its settings come in a later update."
 
+    /// ★★ notes28 (his "Sure", 2026-11-25): the OLD run — a Topology result's lattice (the variant page), Optimize with a
+    /// lattice grown inside, an STL part's Lattice button — keeps the OCTET only until it moves to the new engine. The other
+    /// strut types are the new engine's (cells cut at the bed, Auto's caps per type, the reentrant rule), so they are
+    /// offered only where the new engine makes the lattice. The test stand-in still opens or closes every gate.
+    public static let oldRunBatches: Set<String> = ["octet"]
+    public static func oldRunShipped(_ id: String) -> Bool {
+        appBatchesForTests != nil ? batchShipped(id) : oldRunBatches.contains(id)
+    }
+    /// A type the new engine lays, asked for where the old run makes the lattice: its line.
+    /// (The variant page, Optimize's lattice and an STL part's Lattice stage alike: all three are the older lattice maker.)
+    public static let oldRunPending = "Not here yet: this uses the older lattice maker."
+
     /// Core's words for a type it does not offer. A type on the round's list that core has no id
     /// for yet (the sheets, brief item b) is told core's "neither" line: core's own "Not a lattice
     /// type" would tell the user a planned type is not a lattice.
@@ -116,25 +128,29 @@ public enum LatticeTypeCatalog {
     /// The entries from core's three facts, given explicitly (the pure form the tests drive).
     public static func entries(generatable: [String], certifiable: [String],
                                jobAccepts: (String) -> Bool,
-                               appReady: (String) -> Bool = { _ in true }) -> [LatticeTypeEntry] {
+                               appReady: (String) -> Bool = { _ in true },
+                               pending: (String) -> String = { _ in appBatchPending }) -> [LatticeTypeEntry] {
         // a type core adds that this list does not know yet still shows (after the round's)
         let extra = (generatable + certifiable).filter { !order.contains($0) }
         var seen = Set<String>()
         return (order + extra).filter { seen.insert($0).inserted }.map { id in
             let reason = coreReason(id, generatable: generatable, certifiable: certifiable)
                 ?? (jobAccepts(id) ? nil : jobRefused)
-                ?? (appReady(id) ? nil : appBatchPending)   // ★ the type gate, after every core fact
+                ?? (appReady(id) ? nil : pending(id))   // ★ the type gate, after every core fact
             return LatticeTypeEntry(id: id, displayName: LatticeType.displayName(forID: id),
                                     offered: reason == nil, reason: reason)
         }
     }
 
-    /// The entries read live from the linked core (the production path), behind the type gate.
+    /// The entries read live from the linked core (the production path), behind the type gate. ★ notes28 (his 11-25):
+    /// these are the OLD run's (the variant page, Optimize's lattice, an STL part's Lattice button): the octet only
+    /// (`oldRunShipped`); a type only the new engine makes reads `oldRunPending`.
     public static func entriesFromCore() -> [LatticeTypeEntry] {
         entries(generatable: TopOptKit.latticeGeneratableTopologies,
                 certifiable: TopOptKit.latticeCertifiableTopologies,
                 jobAccepts: TopOptKit.jobSchemaAcceptsTopology,
-                appReady: batchShipped)
+                appReady: { batchShipped($0) && oldRunShipped($0) },
+                pending: { batchShipped($0) ? oldRunPending : appBatchPending })
     }
 
     /// The ids that may be picked today.
