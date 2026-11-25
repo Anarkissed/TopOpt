@@ -18,24 +18,27 @@ What changes against section 3 of the plan, so that no file has two owners: the 
 
 ## 2. File-ownership map
 
-After stage 0 the TO code in `run_job.cpp` lives in new files. Names and ranges (at 30292f31; I re-read them against the tip on the day and post them in #TORebuildGroup 24 hours ahead, per the ruling):
+After stage 0 the TO code in `run_job.cpp` lives in five files of its own (moved 2026-11-24 on top of #362's 559d094b; reviewer ruling 2026-11-25 04:02Z). They are INCLUDED by `run_job.cpp` at the place the code stood, so it is still one translation unit and nothing else in #362's file changed. Each becomes a real `.cpp` with its own header in the stage that rewrites it.
 
-| new file | from `core/src/cli/run_job.cpp` |
+| new file | holds |
 |---|---|
-| `core/src/cli/to_export.cpp` | 915 to 2817 (export mesh, finish, file re-check) |
-| `core/src/cli/to_analyze.cpp` | 13076 to 14119 (`analyze_job`) |
-| `core/src/cli/to_run.cpp` | within 17570 to 21635: `build_job_setup`, `run_job`, `refinish_job` |
-| `core/src/cli/to_strengthen.cpp` | within 17570 to 21635: `strengthen_versions` |
-| `core/src/simp/to_solve.cpp` | from `simp.cpp`: `simp_compliance`, `simp_scenarios_compliance`, `effective_design_mask` (no one else's file; no freeze needed) |
+| `core/src/cli/to_export.inc` | the print-file export chain (export mesh, finish, file re-check) |
+| `core/src/cli/to_analyze.inc` | `analyze_job` |
+| `core/src/cli/to_setup.inc` | `build_job_setup` |
+| `core/src/cli/to_strengthen.inc` | `strengthen_versions` and its helpers |
+| `core/src/cli/to_run.inc` | `preflight_job`, `run_job`, `refinish_job` |
+| `core/src/simp/to_solve.cpp` | from `simp.cpp`: `simp_compliance`, `simp_scenarios_compliance`, `effective_design_mask`. NOT moved in stage 0: it is the solver helper's second commit in stage 5 (after its bridge-way test), a pure move; no one else's file. |
+
+New repo tests live in `core/tests/unit/test_to_*.cpp` and are registered in `core/tests/to_rebuild_tests.cmake` (one include line in `core/CMakeLists.txt`); each lane adds its tests there.
 
 | files | stages 1 and 2 | stage 3 | stage 5 | later |
 |---|---|---|---|---|
-| `to_run.cpp`, `to_analyze.cpp`, `loadcase.cpp`, `io/face_tag.cpp`, `fea/assembly.cpp` (`traction_loads`) | Lead (1) | - | - | Lead |
+| `to_run.inc`, `to_setup.inc`, `to_analyze.inc`, `loadcase.cpp`, `io/face_tag.cpp`, `fea/assembly.cpp` (`traction_loads`) | Lead (1) | - | - | Lead |
 | `analyze.cpp`, `gate_diagnosis.cpp`, `settings/` | Lead (2) | - | - | Lead |
 | `plsm.cpp`, `plsm.hpp`, `plsm_basis.hpp`, `plsm_frac.hpp` | - | TOSurface | - | Lead (4, 6) after stage 3 is released |
-| `mesh.cpp`, `finish.cpp`, `surface_operator.cpp`, `cad_project.cpp`, new `level_surface.cpp`, `to_export.cpp`, `voxel/voxelize.cpp`, `io/step*` | - | TOSurface | - | Lead (4) after stage 3 |
+| `mesh.cpp`, `finish.cpp`, `surface_operator.cpp`, `cad_project.cpp`, new `level_surface.cpp`, `to_export.inc`, `voxel/voxelize.cpp`, `io/step*` | - | TOSurface | - | Lead (4) after stage 3 |
 | `fea/multigrid.cpp`, `matfree.cpp`, `fea_matfree.hpp`, `geneo.*`, `recycle.*`, `contact.cpp`, `hex_element.cpp`, `to_solve.cpp` | - | - | TOSolver | Lead |
-| `minimize_plastic.cpp`, `to_strengthen.cpp`, `job.cpp`, `production.*`, MMA files, `plsm_topology.hpp` | untouched until stage 4 / 6 | - | - | Lead |
+| `minimize_plastic.cpp`, `to_strengthen.inc`, `job.cpp`, `production.*`, MMA files, `plsm_topology.hpp` | untouched until stage 4 / 6 | - | - | Lead |
 | `run_job.cpp` (what is left), old lattice files, `core/src/lattice_layout`, lattice laws in `fea/` | LatticeReview / #362; never ours | | | |
 | `bridge.cpp`, the app | #362 | | | |
 | `core/CMakeLists.txt`, `core/tests/unit/CMakeLists` | each lane adds only its own new-file lines; I merge | | | |
@@ -86,8 +89,8 @@ WHAT YOU BUILD (ledger X-01, X-04, B-01, P-03, P-04, P-11, P-16, P-17, V-02, C-0
 The shape that is certified and the shape that is exported must be the same surface (test E's part, margin within 2 % between the two).
 
 YOUR FILES (no one else edits these while you work)
-core/src/simp/plsm.cpp, core/include/topopt/plsm.hpp, plsm_basis.hpp, plsm_frac.hpp; core/src/mesh/mesh.cpp, finish.cpp, surface_operator.cpp, cad_project.cpp and their headers; a new core/src/mesh/level_surface.cpp (+ header); core/src/cli/to_export.cpp; core/src/voxel/voxelize.cpp (the part-in step only); core/src/io/step*; your new tests under core/tests/unit; core/CMakeLists lines for your new files only.
-NOT YOURS, do not edit: anything in core/src/fea; core/src/simp/to_solve.cpp, analyze.cpp, minimize_plastic.cpp, gate_diagnosis.cpp; core/src/cli/to_run.cpp, to_analyze.cpp, to_strengthen.cpp, loadcase.cpp, job.cpp, run_job.cpp; core/src/io/face_tag.cpp; core/src/settings; core/src/lattice_layout and every lattice file; bridge.cpp and the app; plsm_kernel.hpp and plsm_topology.hpp (read only). If you need a change in one of these, ask TOReview in one line.
+core/src/simp/plsm.cpp, core/include/topopt/plsm.hpp, plsm_basis.hpp, plsm_frac.hpp; core/src/mesh/mesh.cpp, finish.cpp, surface_operator.cpp, cad_project.cpp and their headers; a new core/src/mesh/level_surface.cpp (+ header); core/src/cli/to_export.inc; core/src/voxel/voxelize.cpp (the part-in step only); core/src/io/step*; your new tests under core/tests/unit; core/CMakeLists lines for your new files only.
+NOT YOURS, do not edit: anything in core/src/fea; core/src/simp/to_solve.cpp, analyze.cpp, minimize_plastic.cpp, gate_diagnosis.cpp; core/src/cli/to_run.inc, to_setup.inc, to_analyze.inc, to_strengthen.inc, loadcase.cpp, job.cpp, run_job.cpp; core/src/io/face_tag.cpp; core/src/settings; core/src/lattice_layout and every lattice file; bridge.cpp and the app; plsm_kernel.hpp and plsm_topology.hpp (read only). If you need a change in one of these, ask TOReview in one line.
 
 TESTS YOU OWN (04-tests.md): A, B, F, J pass; K, M, P hold.
 
@@ -179,7 +182,7 @@ The solver is shared with Flexible, through the app bridge: app/TopOptKit/Source
 Nothing merges without the reviewer's sign-off, which TOReview asks for.
 
 YOUR FILES
-core/src/fea/multigrid.cpp, matfree.cpp, fea_matfree.hpp, geneo.*, recycle.*, contact.cpp, hex_element.cpp, the solver-settings declarations in core/include/topopt/fea.hpp; core/src/simp/to_solve.cpp (the shared solve pieces moved out of simp.cpp in stage 0); your new tests; core/CMakeLists lines for your new files only.
+core/src/fea/multigrid.cpp, matfree.cpp, fea_matfree.hpp, geneo.*, recycle.*, contact.cpp, hex_element.cpp, the solver-settings declarations in core/include/topopt/fea.hpp; core/src/simp/to_solve.cpp (new: YOUR SECOND COMMIT moves simp_compliance, simp_scenarios_compliance and effective_design_mask out of core/src/simp/simp.cpp into it, unchanged, with its tests green before and after; that move is the only edit you make to simp.cpp); your new tests; core/CMakeLists lines for your new files only.
 NOT YOURS, do not edit: plsm*.{cpp,hpp}, minimize_plastic.cpp, analyze.cpp, anything in core/src/mesh, core/src/cli, core/src/io, core/src/voxel, core/src/settings; core/src/fea/assembly.cpp, lattice*.cpp, strut_*.cpp, beam_network.cpp, sparse_ldlt.cpp, algebraic_coarsen.*; core/src/lattice_layout; bridge.cpp and the app. If you need a change in one of these, ask TOReview in one line.
 
 TESTS YOU OWN (04-tests.md): K and P, plus these existing unit tests, green before and after every change: test_matfree, test_matfree_cubic, test_matfree_threads, test_mgcg_matfree, test_geneo, test_recycle (the solver), and the Flexible set test_flexible_curve, _data, _faces, _field, _job, _press, _recommend, _run, _squish. Margins and printed grams in the reference table must not move beyond solver tolerance; if one does, stop and report it.
