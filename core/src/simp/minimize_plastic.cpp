@@ -2215,6 +2215,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       // loop/export disagreement this repository has already paid for once. The
       // run then keeps the compliance-plateau rule and says so.
       PlsmOptions plsm_opts = options.plsm;
+      plsm_opts.line_width_mm = options.wall_line_width_mm;  // TO stage 3 (P-03)
       if (plsm_opts.margin_probe_every > 0 && !options.multiscale_lattice) {
         plsm_opts.margin_probe =
             [&](const std::vector<double>& density) -> PlsmMarginProbe {
