@@ -76,6 +76,11 @@ public struct LatticeLayoutSolidGrid: Equatable {
     /// ★ his 11-19 note ("They have VERY hard edges and stair-step. It should be a single straight or curved line"): the map
     /// softened (`smoothed`), read with linear filtering so the cut follows a smooth line between voxels (Organic).
     public var smooth = false
+    /// ★ SHEETS, builder E: the engine's seam channels (the bridge's sheet_seam, sheet_seam_mm: per voxel the blend seam of its
+    /// field nearest across, 255 none, and the signed distance across it, mm, + toward the seam's b side), so the sheet pass
+    /// draws the band the file prints. Empty for every other lay.
+    public var sheetSeam: [UInt8] = []
+    public var sheetSeamMM: [Float] = []
     public init(token: Int, origin: SIMD3<Float>, voxel: Float, dims: SIMD3<Int32>, rg: [Int8], smooth: Bool = false) {
         self.token = token; self.origin = origin; self.voxel = voxel; self.dims = dims; self.rg = rg; self.smooth = smooth
     }

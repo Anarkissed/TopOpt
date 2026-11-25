@@ -133,6 +133,9 @@ struct LatticeLayoutSettings {
   // Blend in Aesthetic and Solid wall in Structural). Auto's wall by the cell (StrutSpec::auto_by_cell; the app's Auto).
   std::string sheet_seam = "solid_wall";
   bool auto_by_cell = false;
+  // ★ E: seams made the solid wall whatever sheet_seam asks (core's Settings::sheet_walls), two region ids per seam: the
+  // seams the last print file fell back on, so the preview draws the wall it printed. Empty: none.
+  std::vector<int32_t> sheet_walls;
 };
 
 struct LatticeLayoutResult {

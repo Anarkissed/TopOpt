@@ -76,9 +76,12 @@ extension LatticeSheets {
         }.joined(separator: "\n")
     }
     /// Raises the centred pop-up for a landed print file whose blend fell back to the solid wall. True: it said something.
+    /// ★ builder E: every landed print file also tells the preview which seams it made solid walls (none: it clears them), so
+    /// the preview draws the wall the file printed.
     @MainActor @discardableResult
     static func sayFellBack(report: Data?, in p: ProjectModel) -> Bool {
         let seams = fileSeams(report: report)
+        if report != nil { LatticeSheetsFellBack.shared.set(seams.filter(\.fellBack).map(\.regions), for: p.id) }
         guard let text = fellBackText(seams, name: { LatticeCannotLattice.regionName($0, in: p) }) else { return false }
         AppPopups.shared.show(fellBackTitle, text, log: seams.filter(\.fellBack).map(\.why).joined(separator: " | "))
         return true

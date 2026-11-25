@@ -124,10 +124,12 @@ final class LatticeSheetsAppTests: XCTestCase {
         // ACROSS A BLEND BAND: the shader's mix against the Swift copy's (core's sheet_blend_distance_at form)
         let seam = LatticeSheetSeam(a: 0, b: 1, bandMM: 11, raiseMM: 0.15, solidWall: false)
         let seamMM = pts.map { Float(($0.x - 10) * 0.8) }
-        let blend = try XCTUnwrap(pass.probeBlend(pts, seamMM: seamMM, bandMM: 11, raiseMM: 0.15))
+        // (builder E's form reads the distance's gradient too: here (0.8, 0, 0))
+        let blend = try XCTUnwrap(pass.probeBlend(pts, seamMM: seamMM, bandMM: 11, raiseMM: 0.15, seamGrad: SIMD3(0.8, 0, 0)))
         var worstBlend = 0.0
         for (i, p) in pts.enumerated() {
-            let s = LatticeSheetSeam.blendDistance(fields[0], fields[1], seam: seam, seamMM: Double(seamMM[i]), SIMD3<Double>(p))
+            let s = LatticeSheetSeam.blendDistance(fields[0], fields[1], seam: seam, seamMM: Double(seamMM[i]),
+                                                   seamGrad: SIMD3(0.8, 0, 0), SIMD3<Double>(p))
             worstBlend = Swift.max(worstBlend, abs(Double(blend[i]) - s))
         }
         print("SHEETS parity shader vs Swift across a blend band: \(worstBlend * 1000) µm")

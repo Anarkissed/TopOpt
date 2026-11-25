@@ -200,6 +200,9 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         public var sheetSeam = "solid_wall"
         /// ★ SHEETS (SPEC 1.3): Auto's wall by the cell (core's StrutSpec::auto_by_cell; the page's Auto for a sheet).
         public var autoByCell = false
+        /// ★ SHEETS, builder E (SPEC 1.5): seams laid as the solid wall whatever `sheetSeam` asks, two region ids each (core's
+        /// Settings::sheet_walls): the seams the last print file fell back on, so the preview draws the wall it printed.
+        public var sheetWalls: [Int32] = []
         public init() {}
         public static func == (a: Settings, b: Settings) -> Bool {
             a.allLattice == b.allLattice && a.beadMM == b.beadMM && a.minStrutLines == b.minStrutLines && a.minWallMM == b.minWallMM
@@ -216,7 +219,7 @@ public final class LatticeLayoutSession: @unchecked Sendable {
                 && a.widthLightMM == b.widthLightMM && a.widthHeavyMM == b.widthHeavyMM && a.cellsByStress == b.cellsByStress
                 && a.referenceMPa == b.referenceMPa && a.percentile == b.percentile && a.response == b.response
                 && a.maxStep == b.maxStep && a.bedFloorMM == b.bedFloorMM && a.cellSearch == b.cellSearch
-                && a.sheetSeam == b.sheetSeam && a.autoByCell == b.autoByCell
+                && a.sheetSeam == b.sheetSeam && a.autoByCell == b.autoByCell && a.sheetWalls == b.sheetWalls
         }
     }
 
@@ -606,6 +609,7 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         o.one_grid = s.oneGrid
         o.sheet_seam = std.string(s.sheetSeam)   // ★ SHEETS
         o.auto_by_cell = s.autoByCell
+        for v in s.sheetWalls { o.sheet_walls.push_back(v) }   // ★ E
         return o
     }
 

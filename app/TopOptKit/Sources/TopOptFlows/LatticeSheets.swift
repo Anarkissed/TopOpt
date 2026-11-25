@@ -131,6 +131,22 @@ public enum LatticeSheets {
     public static func greyed(_ id: String) -> [Greyed] { sheet(id) ? Greyed.allCases : [] }
 }
 
+/// ★ SHEETS, builder E (SPEC 1.5, "a fallen-back seam draws as the solid wall"): per part, the seams its last print file
+/// made solid walls (two region ids each, the job's ids), set when a print file lands (LatticeSheets.sayFellBack: a file that
+/// blended every seam clears it). The preview lays them as the solid wall (core's Settings::sheet_walls), so the drawing
+/// follows the print file. A shared holder, read off the main thread too: no page needs a new @State.
+public final class LatticeSheetsFellBack: @unchecked Sendable {
+    public static let shared = LatticeSheetsFellBack()
+    private let lock = NSLock()
+    private var walls: [UUID: [Int32]] = [:]
+    public func set(_ pairs: [[Int]], for project: UUID) {
+        let flat = pairs.filter { $0.count == 2 }.flatMap { $0.map(Int32.init) }
+        lock.withLock { walls[project] = flat.isEmpty ? nil : flat }
+    }
+    /// Two region ids per seam, flat (empty: none).
+    public func walls(for project: UUID) -> [Int32] { lock.withLock { walls[project] ?? [] } }
+}
+
 /// ★ SHEETS: the sheet seams the last lay laid on the part the page shows (the preview sets it), so the Lattice page knows
 /// when two sheet regions touch ("Where regions meet" shows only then). A shared holder, so no page needs a new @State.
 @MainActor public final class LatticeSheetsLaid: ObservableObject {

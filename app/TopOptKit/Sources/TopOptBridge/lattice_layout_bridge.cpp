@@ -279,6 +279,7 @@ ll::Settings settings_from(const LatticeLayoutSettings& in) {
   else if (in.sheet_seam == "solid_wall" || in.sheet_seam.empty()) s.sheet_seam = ll::SheetSeam::SolidWall;
   else throw std::invalid_argument("lattice layout: sheet_seam \"" + in.sheet_seam + "\" is not blend or solid_wall");
   s.struts.auto_by_cell = in.auto_by_cell;
+  for (std::size_t i = 0; i + 1 < in.sheet_walls.size(); i += 2) s.sheet_walls.push_back({in.sheet_walls[i], in.sheet_walls[i + 1]});
   return s;
 }
 
