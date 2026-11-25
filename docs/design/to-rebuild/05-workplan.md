@@ -4,6 +4,13 @@ Status 2026-11-22: APPROVED by the reviewer (rulings 06:18Z and 06:48Z); both he
 
 ## 0. Where the work stands (kept current; newest first)
 
+**2026-11-25, 04:30 EST.** Measured beside #362's lock holder (build on three cores, no lock), from commit e704ba16. Both helpers started (channels TOSurface-Group, TOSolver-Group).
+
+- Test E, plate with a hole at 30 degrees, textbook 3.03, hole radius 3 / 4 / 5 / 6 voxels, multigrid solve, 248 s: all-or-nothing 2.20 / 2.50 / 2.65 / 2.73 (worst miss 27.5 %, spread 24.4 %); fill with E x fill^3 (today) 3.42 / 3.43 / 3.15 / 3.52 (16.2 %, 11.7 %); fill with E x fill 2.48 / 2.69 / 2.66 / 2.84 (18.3 %, 14.7 %). None meets rule 5 (5 % and 10 %). Read over a fixed size on the E x fill arm, spread only: 0.9 mm 14.7 %, 1.8 mm 6.3 %, 3.6 mm 7.8 %. So a fixed-size reading does settle across resolutions; no arm yet reads the right peak.
+- Test K, the demo job twice with an unrelated solve between, first run ever (7,596 s on a shared machine): 14 files compared, 7 differ: each version's .3mf and _alpha.meta (sizes differ by 0 to 8 bytes). The other 7 files are identical, and both runs print the same margins, masses and solver iteration counts, so the suspicion is a time or id written into those files, not the geometry. NOT YET SHOWN: the test deleted both runs. It now prints where each pair first differs and keeps both runs when any differ; it reruns with the next lock job. Stage 1's switch cannot flip until this test passes (reviewer).
+- Seen in test K, handed to TOSolver: on the demo part (48x32x48) the multigrid solve diverges from solve 9 on (relative residual grows to 38 to 326) and every such solve falls back to Jacobi-CG for 17,000 to 70,000 iterations. The same in both runs.
+- For stage 3 (TOSurface's ask): the pad and protected faces are also handed on as geometry (`frozen_sets.hpp`, `MinimizePlasticOptions::frozen_sets`, commit be77631b), filled only with the switch on.
+
 **2026-11-24, night.** Hold lifted by the maintainer ("Get started right away"; 24-hour wait waived; machine shared with #362 through HEAVY.lock and the channel #362_and_TOReview).
 
 - Stage 0 move: DONE in the tree (commit d1f00b8a, on #362's 559d094b), approved by the reviewer as five included files. PROOF PENDING: `agent-scratch/toreview/stage0_proof.sh` builds a frozen copy of commit b760e6c9 (`agent-scratch/toreview/src0`) once #362's release 19 suite frees the lock, compares run_job.cpp's object before and after (as built, and with asserts off if they differ), runs the three source-reading tests and one small job. Result in `stage0_proof.out`. Then: hand b760e6c9 to #362 in #TORebuildGroup, push, report to the reviewer.

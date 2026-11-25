@@ -53,6 +53,7 @@ int main(int argc, char** argv) {
   fs::remove_all(tmp, ec);
   fs::create_directories(tmp);
   int failures = 0;
+  bool kept_for_reading = false;
   try {
     const topopt::JobDescription job = topopt::parse_job(read_file(demo + "/job.json"));
     const topopt::MaterialLibrary materials =
@@ -80,6 +81,20 @@ int main(int argc, char** argv) {
       if (it->second != kv.second) {
         std::printf("differs:                %s (%zu vs %zu bytes)\n", kv.first.c_str(),
                     kv.second.size(), it->second.size());
+        // Where it first differs, with a little of each side, so the cause can be
+        // named from the log alone (a time, an id, or the geometry itself).
+        const std::string &x = kv.second, &y = it->second;
+        std::size_t at = 0;
+        while (at < x.size() && at < y.size() && x[at] == y[at]) ++at;
+        auto show = [&](const std::string& t) {
+          const std::size_t from = at > 40 ? at - 40 : 0;
+          std::string o = t.substr(from, 80);
+          for (char& c : o)
+            if (c < 32 || c > 126) c = '.';
+          return o;
+        };
+        std::printf("    first differs at byte %zu\n    first : %s\n    second: %s\n", at,
+                    show(x).c_str(), show(y).c_str());
         ++differ;
       }
     }
@@ -89,13 +104,17 @@ int main(int argc, char** argv) {
         ++differ;
       }
     std::printf("[test K] %d files compared, %d differ\n", compared, differ);
+    kept_for_reading = differ > 0;
     if (compared == 0) ++failures;
     if (gate && differ > 0) ++failures;
   } catch (const std::exception& e) {
     std::printf("[test K] a run failed: %s\n", e.what());
     ++failures;
   }
-  fs::remove_all(tmp, ec);
+  if (kept_for_reading)
+    std::printf("[test K] both runs kept for reading in %s\n", tmp.string().c_str());
+  else
+    fs::remove_all(tmp, ec);
   std::printf("[test K] %s: %d failure(s)\n", gate ? "gate" : "measure only", failures);
   return failures == 0 ? 0 : 1;
 }
