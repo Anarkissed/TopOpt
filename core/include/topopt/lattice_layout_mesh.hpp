@@ -46,7 +46,9 @@ namespace topopt::lattice_layout {
 // the domain and the cells only (not on the struts, nor on which of them are left out), so
 // whoever makes the mesh more than once reads it once.
 struct OpenSpace {
-  struct Box { int frame = 0; double lo[3] = {0, 0, 0}, hi[3] = {0, 0, 0}; };
+  // `region`: the region of the cell (or weave cube) the box was read from (SHEETS: each sheet field is cut to its own
+  // region's boxes only, as the strength check credits a voxel by its own cell's field). Not read by the carving.
+  struct Box { int frame = 0; double lo[3] = {0, 0, 0}, hi[3] = {0, 0, 0}; int region = 0; };
   std::vector<Box> boxes;   // in cell order: the same for any number of threads
   double pitch_mm = 0.0;
   double ms = 0.0;

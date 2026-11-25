@@ -219,7 +219,7 @@ void open_boxes_with(const Layout& lay, const Domain::Probe& probe, const Cell& 
     }
     for (const Slab& b : done)
       mine.push_back({c.frame, {c.lo[0] + b.i0 * s, c.lo[1] + b.j0 * s, c.lo[2] + b.z0 * s},
-                      {c.lo[0] + b.i1 * s, c.lo[1] + b.j1 * s, c.lo[2] + b.z1 * s}});
+                      {c.lo[0] + b.i1 * s, c.lo[1] + b.j1 * s, c.lo[2] + b.z1 * s}, c.region});
   };
   if (!walls.flat) {
     // No flat face to read columns from: the cell's own shape point by point.
@@ -365,7 +365,8 @@ void open_boxes_with(const Layout& lay, const Domain::Probe& probe, const Cell& 
     open_runs = keep;
   }
   for (const Run& r : done)
-    mine.push_back({c.frame, {c.lo[0] + r.i0 * s, c.lo[1] + r.j0 * s, r.c0}, {c.lo[0] + r.i1 * s, c.lo[1] + r.j1 * s, r.c1}});
+    mine.push_back({c.frame, {c.lo[0] + r.i0 * s, c.lo[1] + r.j0 * s, r.c0}, {c.lo[0] + r.i1 * s, c.lo[1] + r.j1 * s, r.c1},
+                    c.region});
   // The crossed columns point by point; then the air beside all of it, the open columns'
   // own stretches included (a wall that crosses the columns on a slant). A column of air
   // that opened with its neighbour, and the little an open column runs on past the
@@ -1520,8 +1521,11 @@ std::shared_ptr<CarvedSolids::SheetsMade> make_sheets(const Domain& domain, cons
       jobs.push_back({fi, {kv.second[0], kv.second[1], kv.second[2]}, {kv.second[3], kv.second[4], kv.second[5]}});
   }
   // Each frame's open boxes, by frame.
-  std::map<int, std::vector<const OpenSpace::Box*>> boxes_of;
-  for (const OpenSpace::Box& b : kept.open_boxes) boxes_of[b.frame].push_back(&b);
+  // Each field's own open space: the boxes read from its own region's cells, in its frame (builder B, 11-25: two fields
+  // on one frame were each cut to every box of that frame, while the strength check credits a voxel by its own cell's
+  // field; the mesh, the preview and the credit now read the same).
+  std::map<std::pair<int, int>, std::vector<const OpenSpace::Box*>> boxes_of;   // (region, frame)
+  for (const OpenSpace::Box& b : kept.open_boxes) boxes_of[{b.region, b.frame}].push_back(&b);
 
   std::vector<Manifold> pieces(jobs.size());
   std::vector<std::size_t> tris(jobs.size(), 0);
@@ -1604,7 +1608,7 @@ std::shared_ptr<CarvedSolids::SheetsMade> make_sheets(const Domain& domain, cons
       }
       // The region's open space near the block, each box grown by the run-on.
       std::vector<Manifold> cut;
-      const auto it = boxes_of.find(f.frame);
+      const auto it = boxes_of.find({f.region, f.frame});
       if (it != boxes_of.end())
         for (const OpenSpace::Box* b : it->second) {
           bool meets = true;
