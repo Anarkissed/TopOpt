@@ -107,6 +107,10 @@ private func armedLatticeSetup(_ size: CGSize, _ test: XCTestCase) throws -> (Ap
     p.lattice.enabled = true
     let h = AppBuildHost(WorkspacePlaceholder(model: r.app, project: p), size: size, test: test)
     h.pump(3)
+    // ★ notes28: the stage now opens with its lattice view on; these set-ups ARM it by his tap (settings first, then their
+    // Save), the flow they were written for — so the stage is entered as before
+    WorkspacePlaceholder.controlLatticeViewStartsOff = true
+    defer { WorkspacePlaceholder.controlLatticeViewStartsOff = false }
     try h.pickFromMenu("capsuleMenu", "Structural", what: "the stage menu")
     h.pump(1.5)
     if h.frames.all["view-Lattice preview-on"] == nil { try h.tap("view-Lattice preview", "the lattice preview", settle: 1.5) }

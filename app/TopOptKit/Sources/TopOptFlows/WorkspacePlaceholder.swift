@@ -1361,14 +1361,10 @@ public struct WorkspacePlaceholder: View {
                 .overlay(alignment: .bottom) {
                     if newEngineDrawn {
                         LatticeLayoutPreviewLines(preview: newEngine)
+                            .background(latticeThinWallGlowUp ? CornerPairStyle.publish("lattice-walls-glow") : nil)   // ★ notes28 (tests)
                             .laneFoot("new-engine")   // ★ his pick 11-15: very bottom in landscape, just above Settings in portrait
-                            .overlay {   // ★ notes25 (his 11-23): the solid notice on the screen's centre line, above the lines
-                                if let why = newEngine.solidReason {   // ★ his ruling 11-14: solid where lattice was asked — why, and fixes
-                                    LatticeSolidReasonBar(reason: why, apply: { fix in SolidReason.apply(fix, to: &project.lattice) },
-                                                          checkNozzle: newEngine.nozzleState == .notAsked ? { newEngine.checkNozzle() } : nil)   // ★ 11-16
-                                        .laneCentreFoot("new-engine-reason", above: "new-engine")
-                                }
-                            }
+                            // ★ notes28 (his 11-21 "Remove it from the UI entirely!!"): no solid notice at the bottom-centre — its
+                            // words, fixes and nozzle check are the centred pop-up's (LatticeLayoutPreview.raiseSolidPopUp)
                     }
                 }   // ★ the new engine (test): its lines
                 .onChange(of: newEngineOn) { on in
@@ -1401,7 +1397,7 @@ public struct WorkspacePlaceholder: View {
                     if latticeThinWalls == nil { latticeThinWallsPromptUp = false }
                     // ★ notes25 (D10): the walls glow on the new engine too — this lay's own solid places (thinWallGlow)
                     latticeThinWallTints = []
-                    if latticeThinWalls != nil, let m = stageMesh {
+                    if LatticeLayoutPreview.glowWanted(thinWalls: latticeThinWalls != nil, solidPopUp: newEngine.solidPopUpUp), let m = stageMesh {   // ★ notes28
                         Task { let t = await newEngine.thinWallGlow(mesh: m); if newEngine.solidReason == reason { latticeThinWallTints = t } }
                     }
                 }
@@ -2226,7 +2222,8 @@ public struct WorkspacePlaceholder: View {
     /// ★ Install 3: the thin-wall finding from the new engine's own reason — Structural, walls too thin for a whole cell or
     /// too narrow for the cells across Structural needs, or (the whole part latticed) the part itself too shallow for them
     /// (on his first A1 pad the engine says "the region is too shallow", 93 %); the thinnest wall it lattices is that many of
-    /// the smallest cell. A face prism too shallow is his depth, not a thin wall: its own line says so, no pop-up.
+    /// the smallest cell. A face prism too shallow is his depth, not a thin wall: ★ notes28 (his 11-24, "Glow them too") its
+    /// places glow under the new engine's own solid pop-up, which says that reason and its fix (LatticeLayoutPreview).
     /// ★ notes25 (D10, "walls under 0.0 mm"): the smallest cell is the one core's lay uses — the larger of its own floor
     /// (`floorCellMM`, the printability floor) and the page's smallest (a Manual cell, a Swept low end); the settings alone
     /// say 0 in Fit and Auto. The ONE place the wall is worked out; the pop-up, its reasons and the note read it.
@@ -3599,6 +3596,7 @@ public struct WorkspacePlaceholder: View {
             // The strut preview follows lattice mode: off with it; rebaked when the
             // lattice TYPE changes (the segment soup is per-lattice; cell size and
             // density are live shader params and need no rebake).
+            latticeViewComesOn()   // ★ notes28: the lattice just set up on its stage: its view on, as on entering
             if !project.lattice.enabled {
                 showStrutPreview = false
             } else if showStrutPreview {
@@ -3682,6 +3680,8 @@ public struct WorkspacePlaceholder: View {
         .onChange(of: stage) { s in
             if s == .lattice { openLatticeSettingsIfUnconfigured() }
         }
+        // ★ notes28: the session's lattice settings saved on the Lattice stage (settings first): its lattice view comes on
+        .onChange(of: latticeSettingsSavedThisSession) { saved in if saved { latticeViewComesOn() } }
         // ★★ THE PREVIEW GOING OFF ENDS THE VIEWS THAT LIVE ON IT (his 2026-10-01). Five paths
         // turn it off — the cube, the mode sheet's delete, lattice mode off, the page's own
         // switch — and none cleared lattice only or the key's drill-in, so both outlived it.
@@ -5422,8 +5422,10 @@ public struct WorkspacePlaceholder: View {
     }
 
     /// ★ his 11-09: the glow is up — the pop-up is open on Lattice Setup and the last bake found walls.
+    /// ★ notes28 (his 11-24, "Glow them too"): or the new engine's solid pop-up is up (any reason the lattice he asked for stayed
+    /// solid: a too shallow region too) — its places glow the same way while it shows.
     private var latticeThinWallGlowUp: Bool {
-        latticeThinWallsPromptUp && latticeSetupUp && !latticeThinWallTints.isEmpty
+        (latticeThinWallsPromptUp || (newEngineDrawn && newEngine.solidPopUpUp)) && latticeSetupUp && !latticeThinWallTints.isEmpty
     }
 
     /// ★ Install 3: the pop-up on the new engine, from its own reason (★ notes25 D10: its glow is the lay's own, thinWallGlow).
@@ -6258,9 +6260,36 @@ public struct WorkspacePlaceholder: View {
         if dest != .topology || dest != stage {
             viewOriginal = true
         }
+        let entersLattice = dest == .lattice && stage != .lattice   // ★ notes28
         stage = dest
         latticeDisclosure.closeAll()
         if dest == .lattice { refreshLatticeFaceCards() }
+        if entersLattice { latticeViewOnEntering() } else if dest != .lattice { newEngine.latticeViewWanted = false }
+    }
+
+    /// ★ notes28 (his iPad notes on release 18: "I had to turn on the 'lattice' view button. This should default to 'on' in the
+    /// Lattice stage."): entering the Lattice stage, the lattice view (the cube among the round view buttons) comes on — now,
+    /// or once the lattice is set up there (a type chosen, lattice on, or the session's settings saved); his own tap that turns
+    /// it off holds until he leaves the stage.
+    /// Not on Flexible (its own stage). The view buttons are not remembered per version, so every version opens with it on.
+    private func latticeViewOnEntering() {
+        guard project.lattice.flexible == nil, !Self.controlLatticeViewStartsOff else { return }
+        newEngine.latticeViewWanted = true
+        latticeViewComesOn()
+    }
+    /// RED CONTROL (tests): the lattice view starts off on the Lattice stage (before notes28).
+    nonisolated(unsafe) static var controlLatticeViewStartsOff = false
+
+    /// The lattice view on, when it is wanted and the lattice is set up (a type chosen, lattice on). The new engine lays it from
+    /// the part's own settings at once; the old engine's bake (a variant's page) still waits for the session's Save, as the
+    /// cube's own tap arms it.
+    private func latticeViewComesOn() {
+        guard newEngine.latticeViewWanted, stage == .lattice, !showStrutPreview, project.lattice.enabled,
+              project.lattice.stageMode != nil, project.lattice.flexible == nil else { return }
+        showStrutPreview = true
+        guard latticeSettingsSavedThisSession else { return }
+        startStressSolveIfNeeded(); refreshLatticeStressPeak()
+        if strutScene == nil { buildStrutScene() }
     }
 
     /// ★★ RULING 4 (item 6, maintainer 2026-09-30): THE ONE TAP wherever "nothing set to lattice"
@@ -8066,6 +8095,7 @@ public struct WorkspacePlaceholder: View {
                         latticeOnly = false            // back to the lattice preview
                     } else if showStrutPreview {
                         showStrutPreview = false
+                        newEngine.latticeViewWanted = false   // ★ notes28: his own off holds on this stage
                     } else {
                         latticeOnly = false
                         armLatticePreview()

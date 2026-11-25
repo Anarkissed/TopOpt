@@ -286,6 +286,10 @@ private func latticeSetup(_ size: CGSize, _ name: String, _ test: XCTestCase, th
     p.lattice.enabled = true
     let h = AppBuildHost(WorkspacePlaceholder(model: r.app, project: p), size: size, test: test)
     h.pump(3)
+    // ★ notes28: the stage now opens with its lattice view on; this set-up ARMS it by his tap (settings first, then their
+    // Save), the flow these tests were written for — so the stage is entered as before
+    WorkspacePlaceholder.controlLatticeViewStartsOff = true
+    defer { WorkspacePlaceholder.controlLatticeViewStartsOff = false }
     try h.pickFromMenu("capsuleMenu", "Structural", what: "\(name): the stage menu")
     h.pump(1.5)
     if h.frames.all["view-Lattice preview-on"] == nil { try h.tap("view-Lattice preview", "\(name): the lattice preview", settle: 1.5) }
@@ -357,24 +361,17 @@ final class Notes25LatticeSetupHostedTests: XCTestCase {
             // D5: nothing cut off at the screen's edges, the pop-up up
             let stack = try h.onScreen("lane-new-engine", "★ \(name): the new engine's stack, whole on the screen")
             XCTAssertGreaterThanOrEqual(stack.width, NotificationLane.minWidth, "★ \(name): never squeezed to nothing (\(stack))")
-            let notice = try h.onScreen("lane-new-engine-reason", "★ \(name): the notice, whole on the screen")
-            _ = try h.onScreen("new-engine-reason", "★ \(name): its line, whole on the screen")
             for (k, f) in h.frames.all where k.hasPrefix("lane-") || k.hasPrefix("new-engine") {
                 guard f.width > 0.5, f.height > 0.5 else { continue }
                 XCTAssertTrue(screen.insetBy(dx: -0.5, dy: -0.5).contains(f), "★ \(name): \(k) \(f) is cut off at the screen's edge")
             }
-            XCTAssertFalse(notice.intersects(panel), "\(name): the notice clear of the pop-up")
 
-            // D3: on the screen's centre line, clear of Settings and Lattice, above the status lines
-            XCTAssertEqual(notice.midX, size.width / 2, accuracy: 1, "★ \(name): the notice on the screen's centre line (\(notice))")
-            for (k, what) in [("setupChip", "Settings"), ("latticeSplit", "Lattice")] {
-                let c = try h.onScreen(k, "\(name): premise: \(what)")
-                XCTAssertFalse(notice.intersects(c), "★ \(name): the notice \(notice) clear of \(what) \(c)")
+            // D3 → ★ RE-PINNED notes28 (his 11-21 rule restated on release 18, img 76: "never a note at the bottom-centre … Remove
+            // it from the UI entirely!!"): the notice that sat on the screen's centre line at the foot is gone; this pop-up says why
+            for k in ["lane-new-engine-reason", "new-engine-reason", "new-engine-nozzle-check"] {
+                XCTAssertNil(h.frames.all[k], "★ \(name): nothing at the bottom-centre (\(k))")
             }
-            if let lines = h.frames.all["new-engine-lines"], lines.height > 0.5 {
-                XCTAssertLessThanOrEqual(notice.maxY, lines.minY + 0.5, "★ \(name): above the status lines \(lines)")
-            }
-            print("NOTES25 D3 \(name): notice \(notice), stack \(stack), panel \(panel), glow lit \(LatticeLayoutPreview.lastGlowLit)")
+            print("NOTES25 D3 \(name): no bottom notice; stack \(stack), panel \(panel), glow lit \(LatticeLayoutPreview.lastGlowLit)")
             // ★ D10: he picks (Continue): the pop-up and its glow go
             try h.tap("lattice-thin-walls-continue", "\(name): Continue with Structural", settle: 1)
             XCTAssertNil(h.frames.all["lattice-thin-walls-glow"], "★ \(name): the glow ends when he picks")
@@ -395,7 +392,11 @@ final class Notes25LatticeSetupHostedTests: XCTestCase {
             let title = try h.onScreen("latticeButton-title", "\(name): the button's title")
             XCTAssertEqual(title.width, width(LatticeCannotLattice.title), accuracy: 1.5, "★ \(name): it says \"Cannot Lattice\"")
             XCTAssertNotEqual(width("Cannot Lattice"), width("Lattice"), accuracy: 1.5, "control: the two read apart")
-            XCTAssertNotNil(h.frames.all["new-engine-reason"], "\(name): the same moment the notice says why")
+            // ★ RE-PINNED notes28: no bottom notice; a centred pop-up says why (the solid pop-up, or Structural's thin-wall one)
+            XCTAssertNil(h.frames.all["new-engine-reason"], "\(name): nothing at the bottom-centre")
+            XCTAssertTrue(AppPopups.shared.current != nil || h.frames.all["lattice-thin-walls-panel"] != nil,
+                          "\(name): the same moment a centred pop-up says why")
+            AppPopups.shared.current = nil
             // pressed: nothing starts
             try h.tap("latticeButton", "\(name): a press on Cannot Lattice", settle: 1)
             XCTAssertNotNil(h.frames.all["latticeCannot"], "★ \(name): not pressable: still Cannot Lattice")

@@ -293,6 +293,10 @@ final class LatticeFileButtonTests: XCTestCase {
         p.lattice.chooseLatticeType(.structural)
         let h = AppBuildHost(WorkspacePlaceholder(model: app, project: p), size: AppBuildHost.landscape13, test: self)
         h.pump(3)
+        // ★ notes28: the stage now opens with its lattice view on (its lattice laid, the button reading it); these tests press
+        // Lattice with the view off, the state they were written for (the run's routing, not the preview)
+        WorkspacePlaceholder.controlLatticeViewStartsOff = true
+        addTeardownBlock { @MainActor in WorkspacePlaceholder.controlLatticeViewStartsOff = false }
         try h.pickFromMenu("capsuleMenu", "Structural", what: "the stage menu")
         h.pump(1)
         let f = faces[2]
