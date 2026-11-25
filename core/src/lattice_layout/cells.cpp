@@ -1424,7 +1424,17 @@ double step_held(const CellSpec& spec) {
   return std::max(spec.max_step, spec.algorithm == Algorithm::DefaultGrade ? 2.0 : 1.0);
 }
 
-Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads, const AreaOwnMap* own) {
+namespace {
+// Auto's largest cell held under the type's own (auto_cell_cap_mm: a level strut's bridge must not reach past the print
+// rule's limit). A typed cell, and a type with no cap (the octet among them), are left as they are.
+CellSpec held_for_type(CellSpec cs) {
+  if (!(cs.cell_mm > 0.0)) cs.cell_max_mm = std::min(cs.cell_max_mm, auto_cell_cap_mm(cs.topology));
+  return cs;
+}
+}  // namespace
+
+Layout lay_cells(const Domain& domain, const CellSpec& asked, int threads, const AreaOwnMap* own) {
+  const CellSpec spec = held_for_type(asked);
   Layout out;
   const int thread_count =
       threads > 0 ? threads : std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
@@ -1447,7 +1457,7 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads, const 
   std::map<int, CellSpec> resolved;
   if (own)
     for (const auto& [id, o] : *own)
-      if (id > 0 && o.any()) resolved.emplace(id, region_cells(spec, o));
+      if (id > 0 && o.any()) resolved.emplace(id, held_for_type(region_cells(spec, o)));
   const auto spec_of = [&](int region) -> const CellSpec& {
     const auto it = resolved.find(region);
     return it == resolved.end() ? spec : it->second;
@@ -2088,7 +2098,7 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads, const 
       const Where w = probe.where(f.at(q[0], q[1], q[2]));
       return w.lattice() && w.id == fit.region;
     };
-    const std::vector<StrutCellStrut> struts = strut_cell_closed_struts(lattice_strut_cell(fit.spec->topology));
+    const std::vector<StrutCellStrut> struts = cell_struts(fit.spec->topology, f);   // as lay_bars lays them
     const double most = target_of(*fit.spec);   // Max cell
     // Would stretching by `factor` along axis `a` lay any strut flatter (less rise over its length) than the cell does?
     const auto flatter = [&](int a, double factor) {

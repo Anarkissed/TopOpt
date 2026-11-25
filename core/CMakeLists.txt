@@ -196,6 +196,10 @@ add_library(topopt
   src/lattice_layout/print_orientation.cpp
   # Install 3: the lattice the strength check sees (rule V4); the check itself is run_job.cpp's.
   src/lattice_layout/strength.cpp
+  # 2026-11-24: what differs by strut type (lattice_layout.hpp, PER TYPE; cell_struts).
+  src/lattice_layout/types.cpp
+  # 2026-11-24: a print coupon per strut type, made by this engine (lattice_layout_file.hpp, make_type_coupon).
+  src/lattice_layout/coupon.cpp
   # Brief E2, Part A: the Organic strength check, a frame of beams (lattice_layout_frame.hpp).
   src/lattice_layout/frame_check.cpp
   # Brief E2, Part B: the width floors, their file and strengthened.json (the job key "strengthened").

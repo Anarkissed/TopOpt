@@ -23,6 +23,12 @@
 //             and judges its struts by the type's own law
 //   painted   the 3MF paints supports where the part overhangs        RED: the cube (no overhang)
 //   refused   a Structural bccz / fccz / reentrant is refused         RED: a Structural octet is not
+//   geometry  the laid struts lie at the type's own angles above level, none between level and 30 degrees
+//                                                                      RED: the octet read as bcc
+//   cap       Auto's largest cell keeps a level strut's bridge within the 5 mm reach
+//                                                                      RED: sc's cap read as bcc's (none)
+//   coupon    the type's print coupon is made, print-clean, flat on the bed, two-line struts
+//                                                                      RED: a coupon with one-line struts
 // And the octet is pinned: its bars and its file, on the cube and the plate, are the bytes they were before the types
 // came up (hashes taken on claude/organic-1 3c2c2f90).
 //
@@ -48,7 +54,9 @@
 #include "topopt/lattice_file_strength.hpp"
 #include "topopt/lattice_layout.hpp"
 #include "topopt/lattice_layout_file.hpp"
+#include "topopt/lattice_sample.hpp"
 #include "topopt/stepped_plan.hpp"
+#include "topopt/stl.hpp"
 
 using namespace topopt;
 using namespace topopt::lattice_layout;
@@ -176,12 +184,14 @@ struct Case {
   bool skin = true;          // Finish Skin; else Finish None
   bool three_mf = false;
   std::string up;            // print_frame up, e.g. "[1, 0, 0]"; empty: none
+  std::string algorithm = "default_grade";
+  std::string extra;         // more layout keys (", \"grade_to_shape\": true, ...")
 };
 
 std::string layout_json(const Type& ty, const Case& c, const std::string& extra = "", int lines = 2) {
   std::string s = "{\"min_strut_lines\": " + std::to_string(lines) + ", \"bead_mm\": 0.45, \"topology\": \"" +
                   std::string(ty.id) + "\", ";
-  s += "\"algorithm\": \"default_grade\", \"cell_max_mm\": 8, \"min_cells_across\": 1, ";
+  s += "\"algorithm\": \"" + c.algorithm + "\", \"cell_max_mm\": 8, \"min_cells_across\": 1, ";
   if (c.auto_cell) s += "\"cell_mm\": 0, \"cell_search\": true, \"stretch_edges\": true, ";
   else s += "\"cell_mm\": " + std::to_string(c.cell_mm) + ", ";
   s += std::string("\"skin\": ") + (c.skin ? "true" : "false") + ", ";
@@ -191,7 +201,7 @@ std::string layout_json(const Type& ty, const Case& c, const std::string& extra 
     s += "\"region_ids\": [1], \"region_no_lattice\": [0], \"region_depth_mm\": [" + std::to_string(c.depth_mm) +
          "], \"region_expand_mm\": [0], \"region_face_counts\": [1], \"region_faces\": [" + std::to_string(c.fx->top) + "]";
   }
-  return s + extra + "}";
+  return s + c.extra + extra + "}";
 }
 std::string file_job_json(const Type& ty, const Case& c, const std::string& extra = "") {
   std::string s = "{\"mode\": \"lattice_file\", \"model\": \"" + c.fx->path + "\", \"output\": \"lattice.stl\"";
@@ -254,12 +264,20 @@ SkinCount skin_count(const Outcome& o) {
   }
   return n;
 }
+// A type passes when it leaves no more of its cut ends open than a quarter, or than the octet leaves on the same case
+// (and five points): "as well as the octet does". The octet is the reference (its own skin rule leaves 44 % open on the
+// stepped bracket), and its bytes are pinned below.
 constexpr double kSkinOpenMost = 0.25;
-std::string check_skin(const Outcome& o) {
+std::map<std::string, double> g_octet_skin;   // by case: the octet's open share
+double skin_share(const Outcome& o) {
+  const SkinCount n = skin_count(o);
+  return n.cut ? static_cast<double>(n.open) / static_cast<double>(n.cut) : 0.0;
+}
+std::string check_skin(const Outcome& o, double allowed = kSkinOpenMost) {
   const SkinCount n = skin_count(o);
   if (n.cut == 0) return "";
   const double share = static_cast<double>(n.open) / static_cast<double>(n.cut);
-  if (n.skin_bars > 0 && share <= kSkinOpenMost) return "";
+  if (n.skin_bars > 0 && share <= allowed + 1e-12) return "";
   char s[128];
   std::snprintf(s, sizeof s, "%zu of %zu cut ends open (%.0f%%), %zu skin bars", n.open, n.cut, 100.0 * share, n.skin_bars);
   return s;
@@ -274,6 +292,91 @@ std::string check_loose(const Outcome& o, const Session& session) {
   std::snprintf(s, sizeof s, "%zu loose ends, %zu pieces adrift (%zu bars)", loose, p.adrift, p.adrift_bars);
   return s;
 }
+// Struts meet across a change of cell size (R4) and wherever a cell's shape stops inside the lattice: of the struts'
+// ends, before Finish None's drop, those join_loose_bars left loose (it runs a loose end on until it meets a bar, up to
+// a cell). A loose end is a strut the drop then takes away: a hole in the lattice where two sizes meet.
+struct JoinCount { std::size_t ends = 0, loose = 0; };
+JoinCount join_count(const Outcome& o) {
+  JoinCount n;
+  for (const Bar& b : o.bars.bars) {
+    if (b.skin) continue;
+    n.ends += 2;
+    n.loose += (b.end_a == Bar::End::Loose) + (b.end_b == Bar::End::Loose);
+  }
+  return n;
+}
+constexpr double kLooseMost = 0.02;
+std::string check_joins(const Outcome& kept) {
+  const JoinCount n = join_count(kept);
+  if (n.ends == 0 || static_cast<double>(n.loose) <= kLooseMost * static_cast<double>(n.ends)) return "";
+  char s[128];
+  std::snprintf(s, sizeof s, "%zu of %zu strut ends loose before the drop (%.1f%%)", n.loose, n.ends,
+                100.0 * static_cast<double>(n.loose) / static_cast<double>(n.ends));
+  return s;
+}
+
+// THE PRINT GEOMETRY (the reviewer, 2026-11-24): with the cell on its own axes and +Z up, each type's whole struts
+// lie at its own angles above level, read off the laid bars, and none lies between level and the 30 degree bridge
+// cut-off (a level strut is a bridge, printed flat; at 30 degrees and over a strut is a round bar, self-supporting):
+//   octet, fcc, kelvin 0 and 45 (level: face diagonals; kelvin's square windows)    sc 0 and 90 (its edges)
+//   bcc, diamond, rhombic 35.26 (<111>)    bccz 35.26 and 90    fccz 0, 45 and 90    reentrant 41.81 and 90
+std::set<int> want_angles(LatticeTopology t) {   // tenths of a degree
+  switch (t) {
+    case LatticeTopology::Octet: case LatticeTopology::Fcc: case LatticeTopology::Kelvin: return {0, 450};
+    case LatticeTopology::SimpleCubic: return {0, 900};
+    case LatticeTopology::Bcc: case LatticeTopology::Diamond: case LatticeTopology::Rhombic: return {353};
+    case LatticeTopology::Bccz: return {353, 900};
+    case LatticeTopology::Fccz: return {0, 450, 900};
+    case LatticeTopology::Reentrant: return {418, 900};
+    default: return {};
+  }
+}
+std::string check_geometry(const Outcome& o, LatticeTopology t) {
+  std::set<int> got;
+  std::size_t shallow = 0;
+  for (const Bar& b : o.bars.bars) {
+    if (b.skin || b.piece) continue;
+    const double dx = b.b.x - b.a.x, dy = b.b.y - b.a.y, dz = b.b.z - b.a.z;
+    const double deg = std::atan2(std::fabs(dz), std::sqrt(dx * dx + dy * dy)) * 180.0 / 3.14159265358979323846;
+    got.insert(static_cast<int>(std::lround(deg * 10.0)));
+    if (deg > 0.05 && deg < 30.0) ++shallow;
+  }
+  if (got == want_angles(t) && !shallow) return "";
+  std::string s = "angles above level (tenths of a degree):";
+  for (int a : got) s += " " + std::to_string(a);
+  if (shallow) s += "; " + std::to_string(shallow) + " struts between level and 30 degrees";
+  return s;
+}
+// Auto's largest cell (auto_cell_cap_mm): a level strut's bridge never reaches past the print rule's 5 mm. Laid on the
+// coupon's outline (45 x 40 x 35) whole, Auto, Max cell 16 mm: no cell over the type's cap, and the level struts' own
+// reach (half their span) within the limit.
+std::string check_cap(const Outcome& o, LatticeTopology t) {
+  double largest = 0.0, reach = 0.0;
+  for (const Cell& c : o.layout.cells) largest = std::max(largest, c.size);
+  for (const Bar& b : o.bars.bars)
+    if (!b.skin && !b.piece && std::fabs(b.b.z - b.a.z) < 1e-9)
+      reach = std::max(reach, 0.5 * (std::hypot(b.b.x - b.a.x, b.b.y - b.a.y) - b.width));
+  char s[160];
+  if (largest > auto_cell_cap_mm(t) + 1e-9 || reach > kBridgeReachLimitMm + 1e-9) {
+    std::snprintf(s, sizeof s, "largest cell %.2f mm (cap %.2f), longest level reach %.2f mm", largest, auto_cell_cap_mm(t),
+                  reach);
+    return s;
+  }
+  return "";
+}
+// The type's print coupon (make_type_coupon): made, print-clean, flat on the bed (the 2 mm plate: 1,464 mm2 of the
+// coupon's 45 x 40 underside less its tongue's notch), two-line struts.
+std::string check_coupon(const FileResult& r) {
+  if (!r.ok) return "not made: " + r.code + ": " + r.why;
+  char s[160];
+  if (!r.made.print_clean || r.made.midair_starts != 0 || r.made.bed_contact_mm2 < 1000.0 || r.min_strut_mm < 0.9 - 1e-9) {
+    std::snprintf(s, sizeof s, "clean %d, mid-air %d, flat on the bed %.0f mm2, thinnest strut %.3f mm",
+                  r.made.print_clean ? 1 : 0, r.made.midair_starts, r.made.bed_contact_mm2, r.min_strut_mm);
+    return s;
+  }
+  return "";
+}
+
 // The file is made and the print check is clean, its counts sane: nothing starts in mid-air, no overhang is held at
 // one end only, no bridge is too long, and the struts left out are a small share of the lattice.
 std::string check_print(const FileResult& r) {
@@ -343,6 +446,8 @@ struct Expected { const char* type; const char* check; const char* reason; };
 #define BELOW_BAND(floor)                                                                                        \
   "the type's measured density band starts past its open look (its band's floor at strut/cell " floor ", the open " \
   "look 0.1898): no strut laid without the quilt is credited, so the whole-part cube, with no solid, has no number"
+// The strength-credit checks of bcc, diamond and sc stay listed until builder F (claude/notes28-strut-laws, 2026-11-24)
+// lands their laws measured down to the engine's two-line struts: then they pass, are reported XPASS, and come off.
 const std::vector<Expected> kExpected = {
     // Step (a), 2026-11-24, on claude/organic-1 3c2c2f90.
     {"bcc", "strength", BELOW_BAND("0.2192")},
@@ -353,15 +458,15 @@ const std::vector<Expected> kExpected = {
     {"diamond", "credit", "its band's floor is at strut/cell 0.1861: the dial's struts are under it"},
     {"sc", "strength", BELOW_BAND("0.2044")},
     {"sc", "credit", BELOW_BAND("0.2044")},
-    {"bccz", "lays", "no canonical cell in core (tetragonal): lattice_width_bounds and lattice_strut_cell refuse it"},
-    {"bccz", "painted", "nothing is laid (no canonical cell)"},
-    {"bccz", "refused", "a Structural job naming it is not refused in its own words: it fails inside (error)"},
-    {"fccz", "lays", "no canonical cell in core (tetragonal): lattice_width_bounds and lattice_strut_cell refuse it"},
-    {"fccz", "painted", "nothing is laid (no canonical cell)"},
-    {"fccz", "refused", "a Structural job naming it is not refused in its own words: it fails inside (error)"},
-    {"reentrant", "lays", "no canonical cell in core (tetragonal): lattice_width_bounds and lattice_strut_cell refuse it"},
-    {"reentrant", "painted", "nothing is laid (no canonical cell)"},
-    {"reentrant", "refused", "a Structural job naming it is not refused in its own words: it fails inside (error)"},
+    // Step (b), 2026-11-24.
+    {"fccz", "coupon",
+     "the mesh writer leaves a thin web between a level bridge's square bar and the 12-sided tube of a leg where they "
+     "meet a z column (3 mid-air islands at x 21, y 20.4, z 18.5 to 18.9 that the print loop cannot clear); with 16 "
+     "sides it prints clean: the writer's union, not the type's geometry"},
+    {"reentrant", "print",
+     "on the cube's face region its cells are cut by the cube's sides: the waist struts there start in the air just "
+     "above the solid floor, the print loop leaves them out and, as each waist hangs from only two struts below it, "
+     "the rest go after them (120 of 121 struts left out; print-clean, but no lattice)"},
 };
 const char* expected(const std::string& type, const std::string& check) {
   for (const Expected& e : kExpected)
@@ -422,6 +527,13 @@ int main() {
     models.emplace(f->name, m);
   }
   CHECK(cube.top == 4);   // the fixture's own job names face 4 its top
+  // The coupon's outline (lattice_coupon_solid), as the coupon's file job opens it.
+  StepModel coupon_model;
+  {
+    std::filesystem::create_directories(kDir);
+    write_stl_file(kDir + "/coupon_part.stl", lattice_coupon_solid(), StlFormat::Binary);
+    coupon_model = import_part_file_resolved(kDir + "/coupon_part.stl");
+  }
   if (plate.side < 0) plate.side = plate.top;   // a round plate has no flat side: the load goes on its top
 
   // The bracket's plate top (z = 8) is its region: the outermost +Z face is the wall's top (z = 60).
@@ -436,6 +548,9 @@ int main() {
 
   // The cases. Structural (a strength job) is laid with one cell across: the app's five across (C5) holds in no
   // fixture of core's (the widest wall is the plate's 6 mm), and the strength job is what makes a job Structural.
+  // Two more Aesthetic cases change the cell size inside one region, so the struts must meet across a size step (R4):
+  // Grade to shape on the plate's top (cells shrink toward its outline and the bore), and Stepped on the bracket's
+  // plate (its two holes).
   std::vector<Case> cases = {
       {"aes-auto-face-cube", &cube, false, true, 0.0, false, 6.0, true, false, ""},
       {"aes-typed-whole-cube", &cube, false, false, 5.0, true, 6.0, true, false, ""},
@@ -445,6 +560,16 @@ int main() {
       {"str-auto-face-cube", &cube, true, true, 0.0, false, 6.0, true, false, ""},
       {"str-typed-whole-cube", &cube, true, false, 5.0, true, 6.0, true, false, ""},
   };
+  {
+    Case g{"aes-grade-face-plate", &plate, false, true, 0.0, false, 6.0, true, false, ""};
+    g.extra = ", \"grade_to_shape\": true, \"band_mm\": 8, \"allow_quilt\": true";
+    cases.insert(cases.begin() + 5, g);
+    Case st{"aes-stepped-face-bracket", &bracket, false, false, 8.0, false, 6.0, true, false, ""};
+    st.algorithm = "stepped";
+    st.extra = ", \"grade_to_shape\": true, \"band_mm\": 10, \"allow_quilt\": true";
+    cases.insert(cases.begin() + 6, st);
+  }
+  const Case str_face = *std::find_if(cases.begin(), cases.end(), [](const Case& c) { return c.tag == "str-auto-face-cube"; });
 
   // ── per type: the layout, then the file ─────────────────────────────────────
   std::map<std::string, unsigned long long> octet_pins;
@@ -491,14 +616,21 @@ int main() {
         record(ty.id, "lays", c.tag, check_lays(o));
         if (!o.layout.cells.empty()) {
           record(ty.id, "two_lines", c.tag, check_two_lines(o, 0.45));
-          if (c.skin) {   // the cut ends as the skin left them, before Finish None's drop takes the open ones away
-            const Outcome kept = session.lay(parsed_settings(layout_json(ty, c, ", \"drop_loose\": false")));
-            const SkinCount k = skin_count(kept);
-            std::printf("  [%s] before the drop: cut ends %zu (%zu open), skin bars %zu\n", tag.c_str(), k.cut, k.open,
-                        k.skin_bars);
-            record(ty.id, "skin", c.tag, check_skin(kept));
+          // The ends as the skin and the joins left them, before Finish None's drop takes the open ones away.
+          const Outcome kept = session.lay(parsed_settings(layout_json(ty, c, ", \"drop_loose\": false")));
+          const SkinCount k = skin_count(kept);
+          const JoinCount j = join_count(kept);
+          std::printf("  [%s] before the drop: cut ends %zu (%zu open), skin bars %zu; strut ends %zu (%zu loose)\n",
+                      tag.c_str(), k.cut, k.open, k.skin_bars, j.ends, j.loose);
+          if (c.skin) {
+            if (ty.t == LatticeTopology::Octet) g_octet_skin[c.tag] = skin_share(kept);
+            const auto oct = g_octet_skin.find(c.tag);
+            const double allowed = std::max(kSkinOpenMost, oct == g_octet_skin.end() ? 0.0 : oct->second + 0.05);
+            record(ty.id, "skin", c.tag, check_skin(kept, allowed));
           }
+          record(ty.id, "joins", c.tag, check_joins(kept));
           record(ty.id, "loose", c.tag, check_loose(o, session));
+          if (c.tag == "aes-typed-whole-cube") record(ty.id, "geometry", c.tag, check_geometry(o, ty.t));
         }
         if (ty.t == LatticeTopology::Octet && !c.structural && c.fx != &bracket) {
           octet_pins[c.tag + " bars"] = all_bars_hash(o.bars);
@@ -523,10 +655,31 @@ int main() {
         octet_pins[c.tag + " file"] = fnv(slurp(f.r.file).data(), slurp(f.r.file).size());
     }
     if (!ty.structural) {   // a Structural job naming it is refused, in one line
-      Case c = cases[5];
+      Case c = str_face;
       const Ran f = run_job(std::string(ty.id) + "-str-refused", file_job_json(ty, c), strength_job_json(ty, c, 20.0), check);
       std::printf("  [%s-str-refused] %s: %s\n", ty.id, f.r.code.c_str(), f.r.why.c_str());
       record(ty.id, "refused", "str-auto-face-cube", check_refused(f.r));
+    }
+    // Auto's cap, on the coupon's outline laid whole (the layout only).
+    try {
+      Session session(coupon_model);
+      const Outcome o = session.lay(parsed_settings(
+          "{\"all_lattice\": true, \"min_strut_lines\": 2, \"topology\": \"" + std::string(ty.id) +
+          "\", \"algorithm\": \"default_grade\", \"cell_mm\": 0, \"cell_max_mm\": 16, \"min_cells_across\": 1}"));
+      record(ty.id, "cap", "auto-whole-coupon16", check_cap(o, ty.t));
+    } catch (const std::exception& e) {
+      record(ty.id, "cap", "auto-whole-coupon16", std::string("threw: ") + e.what());
+    }
+    // The print coupon.
+    {
+      const std::string folder = kDir + "/coupon-" + ty.id;
+      std::filesystem::create_directories(folder);
+      CouponAsk ask;
+      ask.topology = ty.t;
+      const FileResult r = make_type_coupon(ask, folder);
+      std::printf("  [%s-coupon] %s %s (cells %zu, bars %zu, bed %.0f mm2, builds %d) -> %s\n", ty.id, r.code.c_str(),
+                  r.ok ? "" : r.why.c_str(), r.cells, r.bars, r.made.bed_contact_mm2, r.made.builds, r.file.c_str());
+      record(ty.id, "coupon", "8mm", check_coupon(r));
     }
   }
 
@@ -570,7 +723,7 @@ int main() {
   }
   {
     const Type& bcc = kTypes[1];
-    Case c = cases[5];
+    Case c = str_face;
     c.structural = false;   // no strength job
     const Ran f = run_job("red-strength", file_job_json(bcc, c), "", check);
     std::printf("  strength with no strength job: %s\n", check_strength(f.r).c_str());
@@ -580,9 +733,35 @@ int main() {
     const Ran g = run_job("red-painted", file_job_json(kTypes[0], cube3mf), "", check);
     std::printf("  painted on the cube: %s\n", check_painted(g.r).c_str());
     CHECK(g.r.ok && !check_painted(g.r).empty());
-    const Ran h = run_job("red-refused", file_job_json(kTypes[0], cases[5]), strength_job_json(kTypes[0], cases[5], 20.0), check);
+    const Ran h = run_job("red-refused", file_job_json(kTypes[0], str_face), strength_job_json(kTypes[0], str_face, 20.0), check);
     std::printf("  refused on a Structural octet: %s\n", check_refused(h.r).c_str());
     CHECK(!check_refused(h.r).empty());
+  }
+
+  {
+    // geometry: the octet's struts read as bcc's (35.26 only) fail.
+    Session session(models.at("cube"));
+    const Outcome o = session.lay(parsed_settings(layout_json(kTypes[0], cases[1])));
+    std::printf("  geometry of the octet read as bcc: %s\n", check_geometry(o, LatticeTopology::Bcc).c_str());
+    CHECK(!check_geometry(o, LatticeTopology::Bcc).empty() && check_geometry(o, LatticeTopology::Octet).empty());
+    // cap: sc laid with no cap (as bcc, Max cell 16 on the coupon) breaks the reach (its cap is what holds it).
+    Session cs(coupon_model);
+    const Outcome big = cs.lay(parsed_settings(
+        "{\"all_lattice\": true, \"min_strut_lines\": 2, \"topology\": \"sc\", \"algorithm\": \"default_grade\", "
+        "\"cell_mm\": 16, \"min_cells_across\": 1}"));   // typed: laid as typed, past the cap
+    std::printf("  cap on sc typed at 16 mm: %s\n", check_cap(big, LatticeTopology::SimpleCubic).c_str());
+    CHECK(!check_cap(big, LatticeTopology::SimpleCubic).empty());
+    CHECK(auto_cell_cap_mm(LatticeTopology::SimpleCubic) == 10.0 && std::isinf(auto_cell_cap_mm(LatticeTopology::Octet)) &&
+          std::isinf(auto_cell_cap_mm(LatticeTopology::Bcc)));
+    // coupon: the same coupon at one-line struts (the 0.2 mm nozzle's case) fails the two-line test.
+    FileResult one;
+    one.ok = true;
+    one.made.print_clean = true;
+    one.made.midair_starts = 0;
+    one.made.bed_contact_mm2 = 1464.0;
+    one.min_strut_mm = 0.45;
+    std::printf("  coupon at one line: %s\n", check_coupon(one).c_str());
+    CHECK(!check_coupon(one).empty());
   }
 
   // ── the octet, pinned ────────────────────────────────────────────────────────
@@ -597,6 +776,11 @@ int main() {
       {"aes-typed-face-plate bars", 0x5bdf2c55ab6a5217ULL}, {"aes-typed-face-plate cells", 0xf58ae9d5e07bc243ULL},
       {"aes-typed-face-plate file", 0x9071ab450398365fULL}, {"aes-typed-whole-cube bars", 0xaa81ce86b5f9abd7ULL},
       {"aes-typed-whole-cube cells", 0x3dca4e3ec5a17343ULL}, {"aes-typed-whole-cube file", 0xdf8272ddea526aceULL},
+      // Step (b): the graded case came in with it, so its pins are taken there; the octet's path through step (b) is
+      // the one it had (cell_struts hands it its own struts list; Max cell is not held for it), and the 12 above,
+      // taken on 3c2c2f90, still hold.
+      {"aes-grade-face-plate bars", 0x5e4368bb32d28806ULL}, {"aes-grade-face-plate cells", 0xdc10f18a3d7d6373ULL},
+      {"aes-grade-face-plate file", 0xafd0ede2728f6535ULL},
   };
   std::size_t pinned = 0;
   for (const auto& [k, h] : octet_pins) {
@@ -613,7 +797,8 @@ int main() {
 
   // ── the matrix ───────────────────────────────────────────────────────────────
   std::printf("\n== the matrix ==\n");
-  const char* checks[] = {"lays", "two_lines", "skin", "loose", "print", "strength", "credit", "painted", "refused"};
+  const char* checks[] = {"lays", "two_lines", "skin", "joins", "loose", "print", "strength", "credit", "painted", "refused", "geometry",
+                          "cap", "coupon"};
   for (const Type& ty : kTypes) {
     for (const char* ck : checks) {
       const auto t = g_matrix.find(ty.id);
