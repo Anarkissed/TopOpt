@@ -41,10 +41,9 @@ double sheet_auto_wall_mm(LatticeTopology topo, double cell_mm, double min_strut
 
 double sheet_structural_floor_cells(LatticeTopology topo) {
   // The bending study (tpms_probe bend, recorded in lattice.cpp): within 2.4 % of the averaged member only from 10
-  // (gyroid) and 9 (Schwarz-D) cells across. Builder D's re-measure (SPEC 3.2) lowers these here.
-  if (topo == LatticeTopology::Gyroid) return 10.0;
-  if (topo == LatticeTopology::SchwarzD) return 9.0;
-  return 0.0;
+  // (gyroid) and 9 (Schwarz-D) cells across. Read from core's one place for it (the app's Structural count reads the
+  // same), so builder D's re-measure (SPEC 3.2) lowers it there and it drops here by itself.
+  return sheet_kind_of(topo) ? lattice_cells_per_member_min(topo) : 0.0;
 }
 
 double sheet_floor_cell_mm(LatticeTopology topo, double min_strut_mm) {
