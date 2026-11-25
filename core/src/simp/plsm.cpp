@@ -341,11 +341,14 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
         "and all three must be > 0 — or all three zero to derive them from the "
         "grid. A partial spec would honour one axis and invent the others.");
   if (!any) knots = plsm_knots_for_grid(grid);
-  if (!any && surf.on && surf.knot_line_widths > 0.0 && h > 0.0) {
-    // Stage 3 measurement arm: the knot spacing in print line widths, floored at
-    // two voxels as the production rule is.
+  if (!any && surf.on && (surf.knot_line_widths > 0.0 || surf.knot_voxels > 0.0) && h > 0.0) {
+    // Stage 3: the knot spacing in print line widths (ledger P-03) or, for a
+    // measurement arm, in voxels; floored at ONE voxel (a crease-free basis at the
+    // voxel is still smooth; the plan's 2-4 line widths are under two voxels at
+    // every resolution he runs).
     const double lw = plsm.line_width_mm > 0.0 ? plsm.line_width_mm : 0.45;
-    const double per = std::max(kPlsmKnotMinVoxels, surf.knot_line_widths * lw / h);
+    const double per = std::max(1.0, surf.knot_voxels > 0.0 ? surf.knot_voxels
+                                                            : surf.knot_line_widths * lw / h);
     knots.dx = knots.dy = knots.dz = per;
   }
 
