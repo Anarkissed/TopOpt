@@ -8,6 +8,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -844,6 +845,51 @@ LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float ori
     const ll::SolidAt& solid_at = *s->solid_at;
     const std::size_t n = static_cast<std::size_t>(nx) * ny * nz;
     std::vector<uint8_t> cls(n, 0);   // 0 outside, 1 solid, 2 open
+    // ★ SHEETS (builder B): the region and seam channels. For a sheet layout the cell that holds each open voxel is
+    // found here (the same first-in-layout-order search SolidAt makes, so open and solid are unchanged), and its field.
+    const ll::Outcome& out = *s->last;
+    const ll::Layout& lay = out.layout;
+    const bool sheets = !out.sheets.empty();
+    std::vector<uint8_t> field;                       // per voxel, 255 none
+    std::vector<int> field_of_cell;                   // per layout cell, its field (-1 none)
+    std::vector<std::vector<std::size_t>> blend_of;   // per field, its blend seams
+    std::shared_ptr<const ll::CellIndex> own_index;
+    if (sheets) {
+      field.assign(n, 255);
+      field_of_cell.assign(lay.cells.size(), -1);
+      for (std::size_t ci = 0; ci < lay.cells.size(); ++ci)
+        for (std::size_t f = 0; f < out.sheets.size() && f < 255; ++f)
+          if (out.sheets[f].region == lay.cells[ci].region && out.sheets[f].frame == lay.cells[ci].frame) {
+            field_of_cell[ci] = static_cast<int>(f);
+            break;
+          }
+      blend_of.assign(out.sheets.size(), {});
+      for (std::size_t k = 0; k < out.sheet_seams.size() && k < 255; ++k) {
+        const ll::SheetSeamBand& b = out.sheet_seams[k];
+        if (b.solid_wall || b.a < 0 || b.b < 0) continue;
+        if (static_cast<std::size_t>(b.a) < blend_of.size()) blend_of[static_cast<std::size_t>(b.a)].push_back(k);
+        if (static_cast<std::size_t>(b.b) < blend_of.size()) blend_of[static_cast<std::size_t>(b.b)].push_back(k);
+      }
+      own_index = ll::index_cells(lay);   // SolidAt's own filing of the cells (pitch 4, each cube's box, cell order)
+    }
+    const ll::CellIndex* index = own_index.get();
+    // The holding cell's field at an open point of region `id` (SolidAt's own search: a cell of that region, or any
+    // with Layout::absorb, whose lattice holds p; -1 none: solid).
+    auto held_field = [&](const ll::Domain::Probe& probe, const topopt::Vec3& p, int id, bool* held) -> int {
+      *held = false;
+      const auto it = index->grid.find({static_cast<long long>(std::floor(p.x / index->pitch)),
+                                        static_cast<long long>(std::floor(p.y / index->pitch)),
+                                        static_cast<long long>(std::floor(p.z / index->pitch))});
+      if (it == index->grid.end()) return -1;
+      for (std::uint32_t ci : it->second) {
+        const ll::Cell& c = lay.cells[ci];
+        if ((c.region == id || lay.absorb) && ll::cell_holds(lay, probe, c, p)) {
+          *held = true;
+          return field_of_cell[ci];
+        }
+      }
+      return -1;
+    };
     std::atomic<int32_t> next{0};
     std::array<int64_t, 5> nocell_total{};
     std::mutex nocell_mu;
@@ -857,12 +903,20 @@ LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float ori
             const topopt::Vec3 p{origin_x + voxel_mm * x, origin_y + voxel_mm * y, origin_z + voxel_mm * z};
             const ll::Where w = probe.where(p);
             uint8_t c = 1;
+            const std::size_t i = (static_cast<std::size_t>(z) * ny + y) * nx + x;
             if (w.why == ll::Why::Outside) c = 0;
             else if (w.why == ll::Why::Lattice) {
-              c = solid_at(probe, p, w) ? 3 : 2;   // 3: asked for, no cell holds it (D14: solid)
+              if (sheets && !lay.is_weave(w.id)) {   // (a weave's lattice is open and no field's: SolidAt O1)
+                bool held = false;
+                const int f = held_field(probe, p, w.id, &held);
+                c = held ? 2 : 3;
+                if (held && f >= 0) field[i] = static_cast<uint8_t>(f);
+              } else {
+                c = solid_at(probe, p, w) ? 3 : 2;   // 3: asked for, no cell holds it (D14: solid)
+              }
               if (c == 3) ++local[std::min<std::size_t>(4, static_cast<std::size_t>(solid_at.why(probe, p).why))];
             }
-            cls[(static_cast<std::size_t>(z) * ny + y) * nx + x] = c;
+            cls[i] = c;
           }
         }
       }
@@ -897,6 +951,56 @@ LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float ori
           o.rg[2 * i] = open ? 127 : -127;
           o.rg[2 * i + 1] = c != 0 ? 127 : -127;
         }
+    if (sheets) {
+      // The region channel at the opening: an outside voxel opened by an open neighbour takes that neighbour's field.
+      auto open_field = [&](int32_t x, int32_t y, int32_t z) -> uint8_t {
+        if (x < 0 || y < 0 || z < 0 || x >= nx || y >= ny || z >= nz) return 255;
+        const std::size_t j = (static_cast<std::size_t>(z) * ny + y) * nx + x;
+        return cls[j] == 2 ? field[j] : 255;
+      };
+      for (int32_t z = 0; z < nz; ++z)
+        for (int32_t y = 0; y < ny; ++y)
+          for (int32_t x = 0; x < nx; ++x) {
+            const std::size_t i = (static_cast<std::size_t>(z) * ny + y) * nx + x;
+            if (cls[i] != 0 || o.rg[2 * i] != 127) continue;
+            for (const uint8_t f : {open_field(x - 1, y, z), open_field(x + 1, y, z), open_field(x, y - 1, z),
+                                    open_field(x, y + 1, z), open_field(x, y, z - 1), open_field(x, y, z + 1)})
+              if (f != 255) { field[i] = f; break; }
+          }
+      // The seam channel: per voxel with a field, its nearest blend seam across (core's sheet_seam_mm), on every core.
+      std::vector<uint8_t> seam(n, 255);
+      std::vector<float> seam_mm(n, 0.0f);
+      bool any_blend = false;
+      for (const auto& b : blend_of) any_blend = any_blend || !b.empty();
+      if (any_blend) {
+        std::atomic<int32_t> zn{0};
+        auto seams = [&] {
+          for (int32_t z = zn++; z < nz; z = zn++)
+            for (int32_t y = 0; y < ny; ++y)
+              for (int32_t x = 0; x < nx; ++x) {
+                const std::size_t i = (static_cast<std::size_t>(z) * ny + y) * nx + x;
+                if (field[i] == 255) continue;
+                const topopt::Vec3 p{origin_x + voxel_mm * x, origin_y + voxel_mm * y, origin_z + voxel_mm * z};
+                double best = std::numeric_limits<double>::infinity();
+                for (const std::size_t k : blend_of[field[i]]) {
+                  const double m = ll::sheet_seam_mm(*domain, out.sheet_seams[k], p);
+                  if (std::isfinite(m) && std::fabs(m) < std::fabs(best)) {
+                    best = m;
+                    seam[i] = static_cast<uint8_t>(k);
+                  }
+                }
+                if (seam[i] != 255) seam_mm[i] = static_cast<float>(best);
+              }
+        };
+        std::vector<std::thread> pool2;
+        for (unsigned t = 1; t < threads; ++t) pool2.emplace_back(seams);
+        seams();
+        for (auto& t : pool2) t.join();
+      }
+      o.sheet_field = std::move(field);
+      o.sheet_seam = std::move(seam);
+      o.sheet_seam_mm = std::move(seam_mm);
+    }
     o.nocell.assign(nocell_total.begin(), nocell_total.end());
     o.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
   });

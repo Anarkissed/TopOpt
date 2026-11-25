@@ -372,6 +372,9 @@ public struct LatticeFileStrength: Equatable, Sendable {
     public var strutMarginsFile: String? = nil
     /// ★ notes27 F1: every bar's two ends and width (bars.bin, "TOBARS1", strut_margins.bin's order), or nil (an older core).
     public var barsFile: String? = nil
+    /// ★ notes28 SHEETS (builder B): a sheet's cells as the check judged them (sheet_cells.bin, "TOSHEET1": per cell its frame,
+    /// cube, wall, cells across, flags and margin; core's read_sheet_cells_file), by the block's key "sheet_cells", or nil.
+    public var sheetCellsFile: String? = nil
     public var maxInterlayerTensionMPa: Double
     /// The build direction the check judged the layers along, or nil.
     public var buildDirection: SIMD3<Double>?
@@ -421,6 +424,7 @@ public struct LatticeFileStrength: Equatable, Sendable {
         scenarioFields = b["scenario_fields"] as? String
         strutMarginsFile = b["strut_margins"] as? String
         barsFile = b["bars"] as? String
+        sheetCellsFile = b["sheet_cells"] as? String   // ★ notes28 SHEETS
         maxInterlayerTensionMPa = num(b["max_interlayer_tension_mpa"])
         buildDirection = (b["build_direction"] as? [NSNumber]).flatMap {
             $0.count == 3 ? SIMD3($0[0].doubleValue, $0[1].doubleValue, $0[2].doubleValue) : nil
@@ -539,6 +543,8 @@ public enum LatticeFileRun {
         public var jobID: String? = nil
         /// ★ notes25 C3: strut_margins.bin (every bar's margin), fetched beside fields.bin when the report names it.
         public var strutMargins: Data? = nil
+        /// ★ notes28 SHEETS: sheet_cells.bin (a sheet's cells as judged), fetched beside fields.bin when the block names it.
+        public var sheetCells: Data? = nil
         /// ★ notes27 F1: bars.bin (every bar's ends and width), fetched with strut_margins.bin when the report names it.
         public var bars: Data? = nil
     }
@@ -817,6 +823,7 @@ public enum LatticeFileRun {
                         timing: RunTiming.fromWorker(createdAt: state["created_at"] as? Double, startedAt: state["started_at"] as? Double,
                                                      finishedAt: state["finished_at"] as? Double),
                         jobID: id, strutMargins: named(report.strength?.strutMarginsFile),
+                        sheetCells: named(report.strength?.sheetCellsFile),   // ★ notes28 SHEETS
                         bars: named(report.strength?.barsFile))   // ★ notes27 F1
         } catch let f as Failure where !f.transient {
             record?.ended(id)
@@ -1005,6 +1012,7 @@ public enum LatticeFileButton {
         let accepted = organic || passes
         // ★ notes25 C3: the solid's own margin per voxel and every bar's margin ride with the result (Results colours by them)
         let reportJSON = withStrength(organic ? withSpots(m.reportJSON, fields: fields) : m.reportJSON, fields: fields,
+                                      sheetCells: m.sheetCells,   // ★ notes28 SHEETS
                                       strutMargins: m.strutMargins, bars: m.bars)
         // ★ notes25 C3: ONE "how strong" number — the smaller of the solid's margin at his infill and the weakest strut's
         let governing = ((try? JSONSerialization.jsonObject(with: reportJSON)) as? [String: Any])
@@ -1076,7 +1084,11 @@ public enum LatticeFileButton {
     /// ★ notes25 C3: the report with the solid's margin per voxel (fields.bin's block 2, requested_volume_fraction -1, where core
     /// judged a voxel as solid) and every bar's margin (strut_margins.bin), so a saved result colours by them whenever it opens.
     /// ★ notes27 F1: and every bar's ends and width (bars.bin, kept as core wrote it), so every strut is coloured by its margin.
-    static func withStrength(_ report: Data, fields: RemoteFieldsContainer?, strutMargins: Data?, bars: Data? = nil) -> Data {
+    /// ★ notes28 SHEETS: and a sheet's cells as judged (sheet_cells.bin, kept as core wrote it under `sheetCellsKey`), so the
+    /// K4 colours read each cell's margin (LatticeLayoutColours.sheetMarginColours) whenever the result opens.
+    static let sheetCellsKey = "app_sheet_cells"
+    static func withStrength(_ report: Data, fields: RemoteFieldsContainer?, sheetCells: Data? = nil, strutMargins: Data?,
+                             bars: Data? = nil) -> Data {
         guard var o = (try? JSONSerialization.jsonObject(with: report)) as? [String: Any], o["strength"] is [String: Any] else {
             return report
         }
@@ -1093,6 +1105,10 @@ public enum LatticeFileButton {
         }
         if let d = bars, PrintFileParts.parseBars(d) != nil {
             o[PrintFileParts.barsKey] = d.base64EncodedString()   // ★ notes27 F1: each bar's ends and width, the same order
+            changed = true
+        }
+        if let d = sheetCells, d.count >= 20, d.prefix(8) == Data("TOSHEET1".utf8) {
+            o[sheetCellsKey] = d.base64EncodedString()   // ★ notes28 SHEETS: per cell its margin and flags, as core wrote it
             changed = true
         }
         guard changed else { return report }
@@ -1270,6 +1286,7 @@ public enum LatticeFileButton {
         return LatticeFileRun.Made(stl: stl, report: report, reportJSON: rd, fields: report.strength?.fields.flatMap(file),
                                    scenarioFields: report.strength?.scenarioFields.flatMap(file), timing: nil,
                                    strutMargins: report.strength?.strutMarginsFile.flatMap(file),
+                                   sheetCells: report.strength?.sheetCellsFile.flatMap(file),   // ★ notes28 SHEETS
                                    bars: report.strength?.barsFile.flatMap(file))   // ★ notes27 F1
     }
 }
