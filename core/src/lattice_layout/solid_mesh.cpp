@@ -1052,6 +1052,7 @@ struct CarvedSolids {
     Manifold body;                 // every sheet, cut and joined (not yet to the solid)
     Manifold with_solid;           // the solid and the sheets, joined (made on the first build with no drop_at)
     bool joined = false;
+    bool body_freed = false;
     bool ok = false;
     std::string why;
     std::size_t blocks = 0, triangles = 0, places = 0, seams_blended = 0, seams_fell_back = 0;
@@ -1437,6 +1438,47 @@ Manifold manifold_of(const TriangleMesh& soup_or_mesh, const Frame* frame) {
   return Manifold(g);
 }
 
+// generate_tpms writes each triangle with three corners of its own: welded here as they come (corners at one place are
+// one corner) and turned into the part, straight into Manifold's own form, so a block never holds its triangles twice.
+struct WeldSink : TriangleSink {
+  const Frame* frame;
+  manifold::MeshGL64 g;
+  std::size_t triangles = 0;
+  struct Key {
+    std::uint64_t a, b, c;
+    bool operator==(const Key& o) const { return a == o.a && b == o.b && c == o.c; }
+  };
+  struct KeyHash {
+    std::size_t operator()(const Key& k) const {
+      return static_cast<std::size_t>((k.a * 0x9E3779B97F4A7C15ULL) ^ (k.b * 0xC2B2AE3D27D4EB4FULL) ^ (k.c * 0x165667B19E3779F9ULL));
+    }
+  };
+  std::unordered_map<Key, std::uint64_t, KeyHash> at;
+  explicit WeldSink(const Frame* f) : frame(f) { g.numProp = 3; }
+  std::uint64_t corner(const Vec3& q) {
+    Key k;
+    std::memcpy(&k.a, &q.x, 8);
+    std::memcpy(&k.b, &q.y, 8);
+    std::memcpy(&k.c, &q.z, 8);
+    const auto it = at.emplace(k, static_cast<std::uint64_t>(at.size()));
+    if (it.second) {
+      const Vec3 p = frame ? frame->at(q.x, q.y, q.z) : q;
+      g.vertProperties.push_back(p.x);
+      g.vertProperties.push_back(p.y);
+      g.vertProperties.push_back(p.z);
+    }
+    return it.first->second;
+  }
+  void add_triangle(const Vec3& a, const Vec3& b, const Vec3& c) override {
+    ++triangles;
+    const std::uint64_t i = corner(a), j = corner(b), k = corner(c);
+    if (i == j || j == k || i == k) return;
+    g.triVerts.push_back(i);
+    g.triVerts.push_back(j);
+    g.triVerts.push_back(k);
+  }
+};
+
 std::shared_ptr<CarvedSolids::SheetsMade> make_sheets(const Domain& domain, const Layout& lay, const CarvedSolids& kept,
                                                       const MeshSpec& spec, double run_on) {
   const auto t0 = std::chrono::steady_clock::now();
@@ -1541,7 +1583,7 @@ std::shared_ptr<CarvedSolids::SheetsMade> make_sheets(const Domain& domain, cons
       o.true_wall_mm = [&f, raised](const Vec3& q) { return raised(sheet_wall_at_local(f, q)); };
       o.wall_param_of = [topo, L](double w) { return lattice_sheet_wall_param_mm(topo, w, L); };
       o.true_wall_steps = false;   // the wall is blended trilinearly: no step anywhere (SPEC 1.4)
-      MeshSink sink;
+      WeldSink sink(&fr);
       TpmsGenStats st;
       try {
         st = generate_tpms(f.kind, R, W, sink, o);
@@ -1549,12 +1591,13 @@ std::shared_ptr<CarvedSolids::SheetsMade> make_sheets(const Domain& domain, cons
         whys[j] = std::string("a sheet block could not be contoured: ") + e.what();
         continue;
       }
-      tris[j] = sink.mesh.triangles.size();
+      tris[j] = sink.triangles;
       devs[j] = st.simplified ? std::max(st.simplify.max_out_measured_mm, st.simplify.max_in_measured_mm) : 0.0;
       vols[j] = (hi[0] - lo[0] + 2.0 * g) * (hi[1] - lo[1] + 2.0 * g) * (hi[2] - lo[2] + 2.0 * g);
-      if (sink.mesh.triangles.empty()) continue;
-      Manifold sheet = manifold_of(sink.mesh, &fr);
-      sink.mesh = TriangleMesh{};
+      if (sink.g.triVerts.empty()) continue;
+      sink.at = {};
+      Manifold sheet(sink.g);
+      sink.g = manifold::MeshGL64{};
       if (sheet.Status() != Manifold::Error::NoError) {
         whys[j] = "a sheet block's surface is not closed";
         continue;
@@ -1861,11 +1904,17 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
       if (!kept.sheets || kept.sheets->key != spec.sheets || kept.sheets->seams_key != seams_key)
         kept.sheets = make_sheets(domain, lay, kept, spec, strut_run_on_mm(carved, spec));
       made = kept.sheets;
+      if (made->ok && made->joined && !spec.drop_at.empty() && made->body_freed)   // made again, to leave things out
+        made = kept.sheets = make_sheets(domain, lay, kept, spec, strut_run_on_mm(carved, spec));
       if (made->ok && !made->joined && spec.drop_at.empty()) {
         const auto tu = std::chrono::steady_clock::now();
         made->with_solid = made->body.IsEmpty() ? kept.solid : fresh(kept.solid + made->body);
         made->joined = true;
         made->ms_union = ms_since(tu);
+        // Memory: the sheets alone are not read again unless a pass leaves part of the solid out (never for a sheet
+        // file: its print check posts, it leaves nothing out), and then they are made again.
+        made->body = Manifold();
+        made->body_freed = true;
       }
     }
     check(stop);
