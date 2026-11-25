@@ -60,7 +60,7 @@ as a bridge, which must stay within 5 mm.
 | Touch | 1/sqrt 2 (bcc's; geometry) | 1/2 (3D; geometry) | 1/3 (3D; geometry; face view 1/sqrt 5) |
 | Smallest cell with the quilt | 1.27 mm | 1.80 mm | 2.70 mm |
 | Strut angles, cell upright | 35.26 and 90 | 0 (bridges, 0.71 x cell), 45 and 90 | 41.81 and 90 |
-| Self-support | as bcc; its columns stand | as fcc; its columns stand | the waist struts lean 41.8 degrees, over the 30 degree cut-off: round bars; the struts below a waist hold it up, the ones above lean out from it; checked by the print check on its coupon (clean) |
+| Self-support | as bcc; its columns stand | as fcc; its columns stand | the waist struts lean 41.8 degrees, over the 30 degree cut-off: round bars; the struts below a waist hold it up, the ones above lean out from it; a waist whose lower struts a wall cuts (they would start in the air) is not laid (lay_bars, 2026-11-25); its coupon prints clean |
 | Auto's cap | none | 14.1 mm | none |
 | Special axis | its z (the columns) is laid along the frame axis nearest up, so the columns stand up on any face (`cell_struts`) | as bccz | as bccz (its waists' axis) |
 
