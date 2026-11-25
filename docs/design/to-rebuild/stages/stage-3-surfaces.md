@@ -69,6 +69,9 @@ What the real part forced (all fixed, all inside the switch): the design-box che
 
 ## Not done yet
 
+- B-02, B-03, P-10 (single-pass basis build, a thread pool, per-iteration allocations): priced, not done. About 50 thread start-ups and six vector allocations per iteration cost milliseconds against a 1-28 s solve per iteration; the basis is built once per run. Worth doing only in the stage 10 clean-out.
+- X-03 (the file re-check writes an STL and re-runs the whole analysis): the re-check is stage 1's R-07 (TOReview's to_run.inc); unchanged here.
+
 ## Research behind it (2026-11-25)
 
 Read for this stage: 01-research.md section 3a; Swierstra 2020 section 4.3 (slope bound); Noël 2020 sections 1 and 7.1 (B-splines "promote smooth designs", slope held by a penalty on |grad phi|). Searched for newer work:
