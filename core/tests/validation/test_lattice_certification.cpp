@@ -147,7 +147,10 @@ int main() {
           "diamond is anisotropic (Zener != 1)");
     CubicTensor dlo = lattice_cubic_tensor(LatticeTopology::Diamond, 0.20, E, nullptr);
     check(dlo.C11 < d.C11, "diamond C11 increases with rho");
-    check(lattice_rho_min(LatticeTopology::Diamond) > 0.10 &&
+    // The band's floor is the measured 0.03874 since 2026-11-25 (it was 0.15712, over 0.10;
+    // evidence/2026-11-25-strut-laws-low-density measured diamond down to the engine's struts).
+    check(lattice_rho_min(LatticeTopology::Diamond) > 0.03 &&
+          lattice_rho_min(LatticeTopology::Diamond) < 0.04 &&
           lattice_rho_max(LatticeTopology::Diamond) > 0.5, "diamond band reported");
 
     // fcc IS the old octet-legs geometry: it keeps that row byte for byte, and since ruling

@@ -2650,7 +2650,8 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
     TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
-    LAW_EVIDENCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../evidence/2026-11-09-lattice-type-strut-laws")
+    LAW_EVIDENCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../evidence/2026-11-09-lattice-type-strut-laws"
+    LOW_LAW_EVIDENCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../evidence/2026-11-25-strut-laws-low-density")
   add_test(NAME lattice_type_strut_law COMMAND test_lattice_type_strut_law)
   # E2.4 (ruling 11-06 (1)): outer_finish "none", the open lattice, its cut cells uncredited.
   add_executable(test_lattice_open_finish tests/validation/test_lattice_open_finish.cpp)

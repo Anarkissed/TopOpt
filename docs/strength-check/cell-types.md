@@ -25,7 +25,8 @@ density outside a type's measured band gets no strength credit (V4; ruling 11-09
 ## Per type
 
 Strength laws are `*_cert` columns of `evidence/2026-11-09-lattice-type-strut-laws/<type>/kfit.csv` (octet:
-`evidence/2026-11-17-octet-full-strut-law`), core/src/fea/strut_strength.cpp: per density, the worst strut von Mises
+`evidence/2026-11-17-octet-full-strut-law`; bcc, diamond and sc under their 11-09 floor:
+`evidence/2026-11-25-strut-laws-low-density/<type>/kfit.csv`, with their low tensor rows, builder F), core/src/fea/strut_strength.cpp: per density, the worst strut von Mises
 per unit macro von Mises (Kd) and per unit macro pressure (Kv), and the interlayer pair (Kild, Kilv). Stiffness is the
 cubic tensor (C11, C12, C44, MPa on PLA's modulus) of core/src/fea/lattice.cpp, measured by
 `tensor_library_nine_probe.cpp` (octet: PR 198/246). Both are **measured**, on each type's own cell, over the band
@@ -38,19 +39,19 @@ as a bridge, which must stay within 5 mm.
 
 | | octet | fcc | kelvin | rhombic | diamond | bcc | sc |
 |---|---|---|---|---|---|---|---|
-| Measured band (density) | 0.0496 - 0.9003 | 0.0951 - 0.5909 | 0.0938 - 0.5052 | 0.1724 - 0.5133 | 0.1571 - 0.5920 | 0.2105 - 0.5929 | 0.0866 - 0.4964 |
-| Stiffness at the band's ends, C11 / C12 / C44 (MPa) | 36.3/18.4/17.2 - 3862/1765/1076 | 79.1/38.2/34.1 - 1345/444/392 | 69.6/44.6/8.76 - 1157/376/315 | 134/101/40.7 - 998/449/378 | 119/83.5/47.9 - 1223/557/521 | 156/127/113 - 1126/522/471 | 124/7.47/2.65 - 1122/234/201 |
-| Strut law at the band's ends, Kd / Kv | 108/57.1 (bulk only, a lower bound; no pass under 0.10) - 6.39/3.74 | 76.3/42.0 - 9.67/6.68 | 194/38.4 - 11.9/7.73 | 137/25.9 - 12.0/8.50 | 108/32.7 - 11.7/7.08 | 125/21.2 - 12.0/8.52 | 593/47.5 - 20.9/9.15 |
-| Interlayer law at the ends, Kild / Kilv | 68.8/46.0 - 2.37/2.11 | 66.4/42.9 - 8.67/7.76 | 170/44.9 - 8.37/6.37 | 95.9/25.5 - 12.9/7.85 | 64.3/23.8 - 6.45/4.27 | 91.9/20.1 - 14.2/8.04 | 333/46.7 - 19.4/8.78 |
+| Measured band (density) | 0.0496 - 0.9003 | 0.0951 - 0.5909 | 0.0938 - 0.5052 | 0.1724 - 0.5133 | 0.0387 - 0.5920 (measured 2026-11-25 under 0.1571) | 0.0319 - 0.5929 (2026-11-25 under 0.2105) | 0.0161 - 0.4964 (2026-11-25 under 0.0866) |
+| Stiffness at the band's ends, C11 / C12 / C44 (MPa) | 36.3/18.4/17.2 - 3862/1765/1076 | 79.1/38.2/34.1 - 1345/444/392 | 69.6/44.6/8.76 - 1157/376/315 | 134/101/40.7 - 998/449/378 | 19.1/17.4/2.54 - 1223/557/521 | 14.6/14.3/13.4 - 1126/522/471 | 20.3/0.466/0.0629 - 1122/234/201 |
+| Strut law at the band's ends, Kd / Kv | 108/57.1 (bulk only, a lower bound; no pass under 0.10) - 6.39/3.74 | 76.3/42.0 - 9.67/6.68 | 194/38.4 - 11.9/7.73 | 137/25.9 - 12.0/8.50 | 2202/160 - 11.7/7.08 | 9894/141 - 12.0/8.52 | 23636/242 - 20.9/9.15 |
+| Interlayer law at the ends, Kild / Kilv | 68.8/46.0 - 2.37/2.11 | 66.4/42.9 - 8.67/7.76 | 170/44.9 - 8.37/6.37 | 95.9/25.5 - 12.9/7.85 | 1444/104 - 6.45/4.27 | 5658/120 - 14.2/8.04 | 4755/278 - 19.4/8.78 |
 | Density at the open look (strut/cell 0.1898) | 0.3487 | 0.1937 | 0.1889 | 0.2920 | 0.1630 | 0.1630 | 0.0756 |
-| Strut/cell at the band's floor | 0.0640 | 0.1279 | 0.1281 | 0.1394 | 0.1861 | **0.2192 (past the open look)** | **0.2044 (past the open look)** |
-| Two-line strut credited up to | 14.1 mm cell | 7.04 mm | 7.03 mm | 6.46 mm | 4.84 mm | never (4.11 mm < the 4.74 mm floor) | never (4.40 mm < 4.74 mm) |
+| Strut/cell at the band's floor | 0.0640 | 0.1279 | 0.1281 | 0.1394 | 0.0879 | 0.0794 | 0.0846 |
+| Two-line strut credited up to | 14.1 mm cell | 7.04 mm | 7.03 mm | 6.46 mm | 10.2 mm | 11.3 mm | 10.6 mm |
 | Touch (where neighbouring struts meet: "Allow quilt" on) | 1/(2 sqrt 2) = 0.3536 | 1/sqrt 3 = 0.5774 | 0.3536 | 0.3536 | 0.3536 | 1/sqrt 2 = 0.7071 | 1 |
 | Smallest cell with the quilt (0.90 mm / touch) | 2.55 mm | 1.56 mm | 2.55 mm | 2.55 mm | 2.55 mm | 1.27 mm | 0.90 mm |
 | Strut angles above level, cell upright (+Z up) | 0 (face diagonals: bridges, 0.71 x cell between nodes) and 45 | 0 (top-face diagonals: bridges, 0.71 x cell) and 45 | 0 (square windows: bridges, 0.35 x cell) and 45 | 35.26 (<111>) | 35.26 (<111>) | 35.26 (<111>) | 0 (edges: bridges, a full cell) and 90 |
 | Self-support | 45 degree struts self-supporting; bridges level and short | as octet | as octet, its bridges half as long | every strut a round bar over the 30 degree cut-off, self-supporting | as rhombic | as rhombic | columns stand; every level edge is a bridge a whole cell long |
 | Auto's cap | none applied (14.1 mm by its geometry; the octet's layouts stay as they were, R9) | 14.1 mm | 28.3 mm | none (no level strut) | none | none | **10 mm** |
-| Structural | yes | yes | yes | yes | yes; only its heaviest struts (strut/cell 0.186 - 0.190) are in band | allowed; no strut it lays is in band: no credit until F's laws (`structural_note`) | as bcc |
+| Structural | yes | yes | yes | yes | yes (every strut it lays without the quilt is in band since 2026-11-25) | yes (since 2026-11-25; `structural_note` clears itself) | yes (as bcc) |
 
 | | bccz | fccz | reentrant |
 |---|---|---|---|
