@@ -194,6 +194,45 @@ public enum LatticeLayoutColours {
         }
     }
 
+    /// ★ SHEETS, K4 (SPEC 5, Results): the strength check's colours from sheet_cells.bin, one texel per laid cell on each
+    /// field's own cell grid (read nearest): a judged cell by how close it is to giving way at your load (its share, 1 /
+    /// margin, red at 1: the stress ramp), a cell in a blend band the "not credited" grey (no strength credit there, SPEC
+    /// 1.5), a cell not judged the interior colour. Cells are matched to their field by region and by their corner's place on
+    /// the field's grid (anchor + k × cell), so the file's frames need not be the layout's.
+    public static let notCreditedColour = SIMD4<Float>(0.60, 0.60, 0.64, 1)
+    public static func sheetMarginColours(_ fields: [LatticeSheetField], cells c: LatticeSheetCells)
+        -> (colours: [[SIMD4<Float>]], grids: [LatticeSheetDrawing.ColourGrid?]) {
+        func rgb(_ x: RGBAColor) -> SIMD3<Float> { SIMD3(Float(x.r), Float(x.g), Float(x.b)) }
+        let interior = SIMD4(rgb(LatticeStructureColour.interior), 1)
+        var colours: [[SIMD4<Float>]] = [], grids: [LatticeSheetDrawing.ColourGrid?] = []
+        for f in fields {
+            guard f.cellMM > 0 else { colours.append([]); grids.append(nil); continue }
+            var at: [(k: SIMD3<Int32>, i: Int)] = []
+            for i in 0..<c.count where c.region[i] == f.region && 3 * i + 2 < c.lo.count {
+                let q = (SIMD3(Double(c.lo[3 * i]), Double(c.lo[3 * i + 1]), Double(c.lo[3 * i + 2])) - f.anchor) / f.cellMM
+                at.append((SIMD3<Int32>(Int32(q.x.rounded()), Int32(q.y.rounded()), Int32(q.z.rounded())), i))
+            }
+            guard let first = at.first else { colours.append([]); grids.append(nil); continue }
+            var kmin = first.k, kmax = first.k
+            for a in at { kmin = simd_min(kmin, a.k); kmax = simd_max(kmax, a.k) }
+            let n = kmax &- kmin &+ 1
+            let count = Int(n.x) * Int(n.y) * Int(n.z)
+            guard count > 0, count <= 4_000_000 else { colours.append([]); grids.append(nil); continue }
+            var out = [SIMD4<Float>](repeating: interior, count: count)
+            for a in at {
+                let d = a.k &- kmin
+                let idx = (Int(d.z) * Int(n.y) + Int(d.y)) * Int(n.x) + Int(d.x)
+                let flags = a.i < c.flags.count ? c.flags[a.i] : 0
+                let m = a.i < c.margin.count ? c.margin[a.i] : .nan
+                if flags & LatticeSheetCells.blendBand != 0 { out[idx] = notCreditedColour }
+                else if m.isFinite, m > 0 { out[idx] = LatticeStressTint.colour(fraction: 1 / Double(m)) }
+            }
+            colours.append(out)
+            grids.append(.init(lo: f.anchor + f.cellMM * (SIMD3<Double>(kmin) + 0.5), n: n))
+        }
+        return (colours, grids)
+    }
+
     /// One colour per bar (rgb, alpha 1), the old key's rules (see the header). `grade` = grade to shape is on.
     public static func colours(_ laid: Laid, type: LatticeType?, grade: Bool, stress: Stress? = nil,
                                lookup: CellLookup? = nil, oneColour: Bool = false) -> [SIMD4<Float>] {

@@ -393,6 +393,26 @@ final class LatticeSheetsAppTests: XCTestCase {
         XCTAssertEqual(at(SIMD3(7.25, 7.25, 7.25)), 255, "RED CONTROL: no cell holds it, nor is it beside one")
     }
 
+    /// ★ Results (K4): sheet_cells.bin's margins, one texel per cell on the field's own cell grid (read nearest); a blend band
+    /// the "not credited" grey; a cell not judged the interior colour. RED CONTROL: another region's field takes none of them.
+    func testTheStrengthColoursAreOneTexelPerCellAndABlendBandIsNotCredited() {
+        let f = LatticeSheetField(region: 1, kind: .gyroid, cellMM: 5, wallMM: [0.9])
+        let other = LatticeSheetField(region: 3, kind: .gyroid, cellMM: 5, wallMM: [0.9])
+        let cells = LatticeSheetCells(frames: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1], region: [1, 1, 1, 2], frame: [0, 0, 0, 0],
+                                      lo: [0, 0, 0, 5, 0, 0, 10, 0, 0, 0, 5, 0], sizeMM: [5, 5, 5, 5], wallMM: [0.9, 0.9, 0.9, 0.9],
+                                      cellsAcross: [12, 12, 12, 12], margin: [2, .nan, 3, 1.5],
+                                      flags: [LatticeSheetCells.credited, 0, LatticeSheetCells.blendBand, LatticeSheetCells.credited])
+        let (colours, grids) = LatticeLayoutColours.sheetMarginColours([f, other], cells: cells)
+        XCTAssertEqual(grids[0]?.n, SIMD3(3, 1, 1), "★ one texel per laid cell of the region")
+        XCTAssertEqual(grids[0]?.lo, SIMD3(2.5, 2.5, 2.5), "the first cell's centre")
+        XCTAssertEqual(colours[0][0], LatticeStressTint.colour(fraction: 0.5), "★ a judged cell: its share of the limit")
+        let c = LatticeStructureColour.interior
+        XCTAssertEqual(colours[0][1], SIMD4(Float(c.r), Float(c.g), Float(c.b), 1), "not judged: the interior colour")
+        XCTAssertEqual(colours[0][2], LatticeLayoutColours.notCreditedColour, "★ a blend band: not credited")
+        XCTAssertTrue(colours[1].isEmpty, "RED CONTROL: another region's cells are not this field's")
+        XCTAssertNil(grids[1])
+    }
+
     @MainActor
     func testTheWallColoursAndTheCardReadTheWall() {
         let f = Self.gradedField(.gyroid)

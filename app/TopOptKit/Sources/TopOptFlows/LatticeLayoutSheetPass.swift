@@ -40,6 +40,14 @@ public struct LatticeSheetDrawing: Equatable, @unchecked Sendable {
     /// colour.
     public var colours: [[SIMD4<Float>]] = []
     public var colourKey = 0
+    /// Per field, the grid its colours are on when it is not the wall grid (nil: the wall grid, read linear): the region's
+    /// laid cells, one texel per cell, read nearest — the K4 colours from sheet_cells.bin (each cell its own margin).
+    public var colourGrids: [ColourGrid?] = []
+    public struct ColourGrid: Equatable, Sendable {
+        public var lo: SIMD3<Double>   // the first cell's centre, frame mm
+        public var n: SIMD3<Int32>
+        public init(lo: SIMD3<Double>, n: SIMD3<Int32>) { self.lo = lo; self.n = n }
+    }
     /// The march's box (model mm): the laid sheet cells' cubes; nil = the map's box.
     public var boxLo: SIMD3<Float>?
     public var boxHi: SIMD3<Float>?
@@ -146,6 +154,8 @@ struct SheetFieldU {
     float4 lo;       // the wall grid's first centre (frame mm); w = 1: graded (read the wall texture), 0: one wall
     float4 n;        // the wall grid's counts; w = the one wall (mm) when not graded
     float4 colour;   // rgb: the one colour; w = 1: one colour per cell (the colour texture)
+    float4 clo;      // the colour grid's first centre (frame mm); w = 1: read nearest (one cell, one colour)
+    float4 cn;       // the colour grid's counts
 };
 
 struct SheetFrame {
@@ -369,8 +379,9 @@ fragment SheetGBuf sheet_gbuffer(SheetVOut in [[stage_in]],
     float3 albedo = S.colour.rgb;
     if (S.colour.w > 0.5f) {
         constexpr sampler sl(coord::normalized, filter::linear, address::clamp_to_edge);
-        float3 uvw = ((sheet_local(S, p) - S.lo.xyz) / S.anchor.w + 0.5f) / S.n.xyz;
-        albedo = cols[fi].sample(sl, uvw).rgb;
+        constexpr sampler sn(coord::normalized, filter::nearest, address::clamp_to_edge);
+        float3 uvw = ((sheet_local(S, p) - S.clo.xyz) / S.anchor.w + 0.5f) / S.cn.xyz;
+        albedo = S.clo.w > 0.5f ? cols[fi].sample(sn, uvw).rgb : cols[fi].sample(sl, uvw).rgb;
         if (F.counts.w > 0.5f) {   // dimmed: drained toward grey and darkened (LatticeLayoutBarsPass.dimmedRGB)
             float grey = dot(albedo, float3(0.299f, 0.587f, 0.114f));
             albedo = mix(albedo, float3(grey), 0.7f) * 0.6f + 0.12f;
@@ -496,7 +507,7 @@ final class LatticeLayoutSheetPass {
         colourKey = s.colourKey
         colourTextures = s.fields.prefix(LatticeSheetDrawing.maxFields).enumerated().map { i, f in
             guard i < s.colours.count else { return nil }
-            let n = f.graded ? f.n : SIMD3<Int32>(1, 1, 1)
+            let n = (i < s.colourGrids.count ? s.colourGrids[i]?.n : nil) ?? (f.graded ? f.n : SIMD3<Int32>(1, 1, 1))
             let c = s.colours[i]
             guard c.count == Int(n.x) * Int(n.y) * Int(n.z) else { return nil }
             let rgba: [UInt8] = c.flatMap { v in
@@ -534,6 +545,8 @@ final class LatticeLayoutSheetPass {
         var lo = SIMD4<Float>(0, 0, 0, 0)
         var n = SIMD4<Float>(1, 1, 1, 0)
         var colour = SIMD4<Float>(1, 1, 1, 0)
+        var clo = SIMD4<Float>(0, 0, 0, 0)
+        var cn = SIMD4<Float>(1, 1, 1, 0)
     }
     struct Frame {
         var clipFromModel = matrix_identity_float4x4
@@ -551,7 +564,8 @@ final class LatticeLayoutSheetPass {
             (FieldU(), FieldU(), FieldU(), FieldU(), FieldU(), FieldU(), FieldU(), FieldU())
     }
 
-    static func fieldU(_ f: LatticeSheetField, colour: SIMD3<Float>, perCell: Bool) -> FieldU {
+    static func fieldU(_ f: LatticeSheetField, colour: SIMD3<Float>, perCell: Bool,
+                       grid: LatticeSheetDrawing.ColourGrid? = nil) -> FieldU {
         var u = FieldU()
         func v(_ a: SIMD3<Double>, _ w: Float) -> SIMD4<Float> { SIMD4(Float(a.x), Float(a.y), Float(a.z), w) }
         u.origin = v(f.origin, Float(f.kind.rawValue))
@@ -560,6 +574,13 @@ final class LatticeLayoutSheetPass {
         u.lo = v(f.lo, f.graded ? 1 : 0)
         u.n = f.graded ? SIMD4(Float(f.n.x), Float(f.n.y), Float(f.n.z), 0) : SIMD4(1, 1, 1, f.wallMM.first ?? 0)
         u.colour = SIMD4(colour, perCell ? 1 : 0)
+        if let g = grid {   // the cells' own grid, read nearest
+            u.clo = v(g.lo, 1)
+            u.cn = SIMD4(Float(g.n.x), Float(g.n.y), Float(g.n.z), 0)
+        } else {            // the wall grid, read linear
+            u.clo = SIMD4(u.lo.x, u.lo.y, u.lo.z, 0)
+            u.cn = SIMD4(u.n.x, u.n.y, u.n.z, 0)
+        }
         return u
     }
 
@@ -582,7 +603,8 @@ final class LatticeLayoutSheetPass {
         let colour = dimmed ? LatticeLayoutBarsPass.dimmedRGB(albedo) : albedo
         var us = [FieldU](repeating: FieldU(), count: LatticeSheetDrawing.maxFields)
         for i in 0..<count {
-            us[i] = Self.fieldU(s.fields[i], colour: colour, perCell: i < colourTextures.count && colourTextures[i] != nil)
+            us[i] = Self.fieldU(s.fields[i], colour: colour, perCell: i < colourTextures.count && colourTextures[i] != nil,
+                                grid: i < s.colourGrids.count ? s.colourGrids[i] : nil)
         }
         f.fields = (us[0], us[1], us[2], us[3], us[4], us[5], us[6], us[7])
         return f

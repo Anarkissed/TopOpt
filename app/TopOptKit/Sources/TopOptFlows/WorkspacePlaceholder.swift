@@ -8335,7 +8335,7 @@ public struct WorkspacePlaceholder: View {
         if newEngineDrawn {   // ★ Install 3: the new engine's lattice is the layer, its bars what there is to draw
             return LatticePreviewBodyAlpha.latticeOnlyShowing(viewOn: latticeOnlyViewOn, layerDrawn: true,
                                                               simRunning: latticeSimIsRunning,
-                                                              nothingToDraw: (newEngine.laid?.barCount ?? 0) == 0)
+                                                              nothingToDraw: newEngine.laid.map { $0.barCount == 0 && $0.sheets.isEmpty } ?? true)   // ★ SHEETS: a sheet is drawn too
         }
         return LatticePreviewBodyAlpha.latticeOnlyShowing(viewOn: latticeOnlyViewOn,
                                                    layerDrawn: latticeLayerIsDrawn,

@@ -768,6 +768,10 @@ public final class LatticeLayoutPreview: ObservableObject {
             bars = next
             laid = LatticeLayoutColours.Laid(r, token: token)   // ★ Install 3
             timing = Timing(openMS: openMS, readMS: r.msRead, cellsMS: r.msCells, barsMS: r.msBars, bars: r.barCount)
+            if !r.sheets.isEmpty {   // ★ SHEETS: a sheet has cells, not struts (its own line, as Organic's)
+                let n = NumberFormatter.localizedString(from: NSNumber(value: r.cells), number: .decimal)
+                timing?.organicLine = String(format: "Laid in %.1f s \u{00B7} %@ cells", (openMS + r.msRead + r.msCells + r.msBars) / 1000, n)
+            }
             if r.laidAnything { problem = nil }   // ★ notes28: nothing laid is said after the reason is read (below)
             LatticeSheetsLaid.shared.set(r.sheetSeams, path: path)   // ★ SHEETS: the page's "Where regions meet" reads it
             layStages["readMS"] = r.msRead; layStages["cellsMS"] = r.msCells; layStages["barsMS"] = r.msBars   // ★ his 11-22
