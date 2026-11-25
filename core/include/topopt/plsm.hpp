@@ -293,6 +293,10 @@ struct PlsmOptions {
   bool warm_start = true;            // reuse the previous iterate's displacement
 
   int threads = 0;  // 0 = hardware concurrency
+
+  // TO rebuild stage 3: the print profile's line width, for a knot spacing stated
+  // in line widths (ledger P-03). 0 = not supplied (0.45 mm is assumed).
+  double line_width_mm = 0.0;
 };
 
 // The frozen-set signed distances the SMOOTH BOOLEAN is built from, plus the
@@ -426,6 +430,13 @@ struct PlsmRunResult {
   int best_iteration = 0;
   double total_solve_wall_s = 0.0;
   double total_wall_s = 0.0;
+
+  // ── ★ THE RE-FIT, RECORDED (ledger P-11) ──────────────────────────────────
+  // How many re-fits ran and how far the worst one moved the surface (max and RMS
+  // over the ACTIVE cells the surface passes near, |dphi| / |grad phi|).
+  int refits = 0;
+  double refit_move_max_mm = 0.0;
+  double refit_move_rms_mm = 0.0;
 };
 
 // Optimise `alpha` under the volume constraint of `options.volume_fraction` over

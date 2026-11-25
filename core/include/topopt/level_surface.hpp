@@ -14,6 +14,7 @@
 
 #include "topopt/mesh.hpp"
 #include "topopt/plsm_basis.hpp"
+#include "topopt/voxel.hpp"
 
 namespace topopt {
 
@@ -34,7 +35,7 @@ struct SurfaceSwitch {
   std::string raw;
 };
 SurfaceSwitch to_surface_switch();
-inline bool to_surface_on() { return to_surface_switch().on; }
+bool to_surface_on();
 
 // Parse a basis name; false when unknown.
 bool plsm_parse_basis(const std::string& s, PlsmBasisKind& out);
@@ -78,5 +79,34 @@ struct SurfaceError {
 SurfaceError surface_error(const TriangleMesh& m,
                            const std::function<double(const Vec3&)>& sd,
                            const Vec3& lo, const Vec3& hi, double ignore_mm);
+
+// Two closed meshes intersected exactly (Manifold). Empty with `why` set when
+// either is not a closed manifold or this build has no Manifold.
+TriangleMesh mesh_intersection(const TriangleMesh& a, const TriangleMesh& b,
+                               std::string* why = nullptr);
+
+// ── the print surface of one optimised version (02-plan.md stage 3) ─────────
+//
+// The zero surface of the optimiser's own function, cut by the DRAWN part, so
+// every drawn face that the design keeps is the drawn face itself and every cut
+// wall is the function's. The voxels the run stamped (frozen solid / frozen
+// void) and that the function does not already explain are recovered from the
+// shipped density, sample for sample on the optimiser's own sub-cell lattice, so
+// the shape that ships holds exactly what was certified. Bodies that carry no
+// load or anchor are dropped exactly as the voxel export drops them.
+//
+// Empty with `why` set when it cannot be made (no analytic design, no drawn part,
+// a design-box run, no Manifold): the caller keeps today's export and says so.
+struct MinimizePlasticVariant;
+struct FunctionSurfaceReport {
+  long long stamped_solid = 0, stamped_void = 0;
+  long long evaluations = 0, triangles = 0;
+  double mesh_s = 0.0, cut_s = 0.0;
+  double slope_min = 0.0, slope_median = 0.0, slope_max = 0.0;  // |grad phi| at vertices
+};
+TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelGrid& sg,
+                                   const TriangleMesh& part, int smooth_factor,
+                                   double printed_iso, std::string* why,
+                                   FunctionSurfaceReport* rep = nullptr);
 
 }  // namespace topopt

@@ -88,6 +88,10 @@ struct FinishContext {
   // A version with a lattice companion: the companion is built from the unfinished
   // shape, so every vertex may only move outward and the shell never retreats from it.
   bool outward_only = false;
+  // TO rebuild stage 3: false skips the curvature flow (and its volume nudge). The
+  // surface meshed from the optimiser's own function needs no mesh filter; the
+  // thin-spot cleanup still runs (it goes in stage 4).
+  bool flow = true;
 };
 // How many times the slim finish may re-run the flow with more vertices held
 // outward-only before it gives up and uses the safe finish.

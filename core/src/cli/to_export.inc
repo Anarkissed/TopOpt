@@ -6,6 +6,17 @@
 // namespace topopt, so every name resolves exactly as before. Do not compile
 // it on its own and do not include it anywhere else.
 
+// TO rebuild stage 3: the print surface from the optimiser's own function
+// (level_surface.hpp). This file sits inside run_job.cpp's `namespace topopt {
+// namespace {`, so the header is included at file scope by closing and reopening
+// both (the same unnamed namespace is reopened). Goes when to_export becomes a
+// real .cpp.
+}  // namespace
+}  // namespace topopt
+#include "topopt/level_surface.hpp"
+namespace topopt {
+namespace {
+
 // ENGINE BATCH E1 — a run's finishing context (finish.hpp): the printable minimum
 // (2 x the outer wall line width), the export cell, the forbidden voxels (Keep clear
 // and Protect's reach), the box (growth) or the part (reduction), and the CAD.
@@ -118,6 +129,8 @@ TriangleMesh variant_export_model_mesh(const MinimizePlasticVariant& variant,
   if (fin != nullptr) {  // E1: the finished shape, after CAD projection and exact Protect
     const TriangleMesh raw = variant_export_model_mesh(variant, out, sg, printed_iso, cad, keeps);
     FinishContext c = fin->ctx;
+    // Stage 3: a surface meshed from the function needs no curvature flow.
+    if (to_surface_on()) c.flow = false;
     c.density = &variant.optimization.physical_density;
     if (!fin->part_solid.empty()) c.part_solid = &fin->part_solid;
     c.part_voxels = fin->part_voxels.empty() ? nullptr : &fin->part_voxels;
@@ -140,6 +153,27 @@ TriangleMesh variant_export_model_mesh(const MinimizePlasticVariant& variant,
         variant_export_model_mesh(variant, out, sg, printed_iso, cad, {}), cad->mesh,
         keeps, sg.spacing * sg.spacing * sg.spacing);
   const int sf = out.smooth_factor;
+  // Stage 3 (switch on): the zero surface of the optimiser's own function, cut by
+  // the drawn part -- no fill resample, no CAD snap. Where it cannot be made the
+  // run keeps today's export and says so in one line.
+  if (to_surface_on() && cad != nullptr && !cad->mesh.empty()) {
+    std::string why;
+    FunctionSurfaceReport fr;
+    TriangleMesh m = function_surface_mesh(variant, sg, cad->mesh, std::max(1, sf),
+                                           printed_iso, &why, &fr);
+    if (!m.triangles.empty()) {
+      std::fprintf(stderr,
+                   "[surface] vf %.2f: from the function: %lld triangles, mesh %.2f s, "
+                   "cut %.2f s, stamped %lld solid / %lld void voxels, slope at the "
+                   "surface %.2f / %.2f / %.2f (min / median / max)\n",
+                   variant.requested_volume_fraction, fr.triangles, fr.mesh_s, fr.cut_s,
+                   fr.stamped_solid, fr.stamped_void, fr.slope_min, fr.slope_median,
+                   fr.slope_max);
+      return m;
+    }
+    std::fprintf(stderr, "[surface] vf %.2f: kept the voxel export: %s\n",
+                 variant.requested_volume_fraction, why.c_str());
+  }
   TriangleMesh smooth;  // only populated when sf > 1
   if (sf > 1) {
     const TriangleMesh raw = marching_cubes_resampled(

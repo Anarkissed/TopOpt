@@ -1179,7 +1179,7 @@ TriangleMesh finish_shape(const TriangleMesh& mesh, const FinishContext& ctx,
   TriangleMesh m = thin_spot_cleanup(mesh, ctx, pins, &r, &moved);
   const TriangleMesh after_c = m;
   std::vector<char> movable;
-  m = surface_finish(m, ctx, pins, moved, &r, &movable);
+  if (ctx.flow) m = surface_finish(m, ctx, pins, moved, &r, &movable);
   if (movable.size() != m.vertices.size()) movable.assign(m.vertices.size(), 0);
   r.volume_after_mm3 = signed_volume(m);
   // Never remove material: the volume restoration of the flow can land a hair under.

@@ -47,10 +47,12 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <limits>
 #include <stdexcept>
 #include <string>
 
+#include "topopt/level_surface.hpp"
 #include "topopt/plsm_frac.hpp"
 #include "topopt/plsm_kernel.hpp"
 #include "topopt/plsm_mma.hpp"
@@ -116,11 +118,54 @@ double discrete_weight_from(double dc, double rho_min) {
 }
 
 PlsmBasisKind parse_basis(const std::string& s) {
-  if (s == "gaussian") return PlsmBasisKind::Gaussian;
-  if (s == "wendland") return PlsmBasisKind::Wendland;
+  PlsmBasisKind b;
+  if (plsm_parse_basis(s, b)) return b;
   throw std::invalid_argument(
-      "plsm_optimize: basis must be \"gaussian\" or \"wendland\", got \"" + s +
-      "\"");
+      "plsm_optimize: basis must be \"gaussian\", \"wendland\", \"wendland_c4\" or "
+      "\"bspline\", got \"" + s + "\"");
+}
+
+// ── TO rebuild stage 3: THE FUNCTION CARRIED ACROSS THE DRAWN FACES ─────────
+//
+// Outside the part (Empty voxels) nothing acts on phi -- no density, no
+// sensitivity -- so before this its zero set floated in the band between the
+// last part voxel and the drawn face, a smoothed copy of the voxel staircase.
+// The print surface is now phi cut by the drawn part, so phi there must carry the
+// design's own decision out to the face: each Empty voxel within `layers` of the
+// part takes the value of its nearest part voxel (breadth-first, six neighbours,
+// in index order, so it is the same every run) before the re-distance and the
+// fit. Where the design keeps the skin the solid now reaches past the drawn face
+// and the cut makes the face; where it cuts, the wall runs on through the face.
+void extend_into_empty(const VoxelGrid& grid, std::vector<double>& phi, int layers) {
+  const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
+  const std::size_t n = grid.voxel_count();
+  std::vector<int> depth(n, -1);
+  std::vector<std::size_t> front, next;
+  for (std::size_t v = 0; v < n; ++v)
+    if (grid.tags[v] != VoxelTag::Empty) {
+      depth[v] = 0;
+      front.push_back(v);
+    }
+  for (int d = 1; d <= layers && !front.empty(); ++d) {
+    next.clear();
+    for (std::size_t v : front) {
+      const int i = static_cast<int>(v % static_cast<std::size_t>(nx));
+      const int j = static_cast<int>((v / static_cast<std::size_t>(nx)) % static_cast<std::size_t>(ny));
+      const int k = static_cast<int>(v / (static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny)));
+      const int nb[6][3] = {{i - 1, j, k}, {i + 1, j, k}, {i, j - 1, k},
+                            {i, j + 1, k}, {i, j, k - 1}, {i, j, k + 1}};
+      for (const auto& q : nb) {
+        if (q[0] < 0 || q[1] < 0 || q[2] < 0 || q[0] >= nx || q[1] >= ny || q[2] >= nz) continue;
+        const std::size_t u = plsm_at(nx, ny, q[0], q[1], q[2]);
+        if (depth[u] >= 0) continue;
+        depth[u] = d;
+        phi[u] = phi[v];
+        next.push_back(u);
+      }
+    }
+    std::sort(next.begin(), next.end());
+    front.swap(next);
+  }
 }
 
 }  // namespace
@@ -261,7 +306,14 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   const double h = grid.spacing;
   const double eta = plsm.eta_voxels * h;
   const int threads = plsm_hw_threads(plsm.threads);
-  const PlsmBasisKind basis = parse_basis(plsm.basis);
+  // TO rebuild stage 3: with the switch on, the basis and its reach are the
+  // stage's (level_surface.hpp), and the function is carried across the drawn
+  // faces (extend_into_empty).
+  const SurfaceSwitch surf = to_surface_switch();
+  const PlsmBasisKind basis =
+      surf.on ? (surf.basis_set ? surf.basis : PlsmBasisKind::BSpline3) : parse_basis(plsm.basis);
+  const double support =
+      plsm_effective_support(basis, surf.on && surf.basis_set ? surf.reach : plsm.support);
   const int fk = plsm.frac_samples;
 
   // ★ THE MASK THE RUN ACTUALLY HOLDS FROZEN, not a second opinion about it.
@@ -289,10 +341,16 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
         "and all three must be > 0 — or all three zero to derive them from the "
         "grid. A partial spec would honour one axis and invent the others.");
   if (!any) knots = plsm_knots_for_grid(grid);
+  if (!any && surf.on && surf.knot_line_widths > 0.0 && h > 0.0) {
+    // Stage 3 measurement arm: the knot spacing in print line widths, floored at
+    // two voxels as the production rule is.
+    const double lw = plsm.line_width_mm > 0.0 ? plsm.line_width_mm : 0.45;
+    const double per = std::max(kPlsmKnotMinVoxels, surf.knot_line_widths * lw / h);
+    knots.dx = knots.dy = knots.dz = per;
+  }
 
   PlsmRunResult out;
-  out.lattice = plsm_make_lattice(nx, ny, nz, knots.dx, knots.dy, knots.dz,
-                                  plsm.support);
+  out.lattice = plsm_make_lattice(nx, ny, nz, knots.dx, knots.dy, knots.dz, support);
   out.basis_kind = basis;
   out.eta_voxels = plsm.eta_voxels;
   out.ersatz = plsm.ersatz;
@@ -428,6 +486,9 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   // not a distance. The edge-ratio crossing interpolation is well defined for ANY
   // monotone field and is what the seed needs; RS applies from the first re-fit
   // onward, once phi genuinely is a distance function.
+  const int extend_layers =
+      surf.on ? static_cast<int>(std::ceil(support * knots.dx)) + 2 : 0;
+  if (extend_layers > 0) extend_into_empty(grid, phi, extend_layers);
   plsm_reinitialise(nx, ny, nz, phi, h, plsm.reinit_sweeps, false);
 
   // ── the seed fit: the SAME weighted least squares plsm_probe runs ─────────
@@ -903,6 +964,7 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
     // which keeps the volume measure from drifting.
     if (plsm.refit_every > 0 && it % plsm.refit_every == 0) {
       std::vector<double> pr = phi;
+      if (extend_layers > 0) extend_into_empty(grid, pr, extend_layers);
       plsm_reinitialise(nx, ny, nz, pr, h, plsm.reinit_sweeps, false);
       std::vector<double> tgt(n, 0.0);
       const std::vector<double> w(n, 1.0);
@@ -912,6 +974,30 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
       const PlsmFitResult rf =
           plsm_solve_normal(Psi, PsiT, tgt, w, plsm.ridge,
                             plsm.fit_cg_iterations, 1e-10, threads);
+      // ★ NOT SILENT (ledger P-11): how far the re-fit moved the surface, at the
+      // centre of every ACTIVE cell the surface passes near, |dphi| / |grad phi|.
+      {
+        std::vector<double> after(n, 0.0);
+        plsm_spmv(Psi, rf.alpha, after, threads);
+        double mx = 0.0, s2 = 0.0;
+        long long cnt = 0;
+        for (int kz = 0; kz < nz; ++kz)
+          for (int j = 0; j < ny; ++j)
+            for (int i = 0; i < nx; ++i) {
+              const std::size_t v = plsm_at(nx, ny, i, j, kz);
+              if (grid.tags[v] == VoxelTag::Empty || eff[v] != MaskValue::Active) continue;
+              if (std::fabs(phi[v]) > h) continue;
+              const double g = plsm_grad_mag(nx, ny, nz, phi, i, j, kz, h);
+              if (!(g > 0.1)) continue;
+              const double d = std::fabs(after[v] - phi[v]) / g;
+              mx = std::max(mx, d);
+              s2 += d * d;
+              ++cnt;
+            }
+        ++out.refits;
+        out.refit_move_max_mm = std::max(out.refit_move_max_mm, mx);
+        if (cnt > 0) out.refit_move_rms_mm = std::max(out.refit_move_rms_mm, std::sqrt(s2 / cnt));
+      }
       alpha = rf.alpha;
       sync();
     }
@@ -1083,6 +1169,12 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   }
 
   out.total_wall_s = steady_s() - t_run0;
+  if (surf.on)
+    std::fprintf(stderr,
+                 "[plsm] basis %s reach %.1f knots %.2f vox: %d iterations, %d re-fits, "
+                 "re-fit moved the surface up to %.3f mm (rms %.3f)\n",
+                 plsm_basis_name(basis), support, knots.dx, done_iters, out.refits,
+                 out.refit_move_max_mm, out.refit_move_rms_mm);
   out.best_iteration = best_iter;
   out.margin_peak_iteration = peak_iter > 0 ? peak_iter : 0;
   out.margin_peak = peak_iter > 0 ? peak_margin : 0.0;
