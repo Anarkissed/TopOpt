@@ -15822,6 +15822,10 @@ ll::StrengthDone run_lattice_file_strength(const ll::StrengthAsk& ask,
       no_credit[e] = 1;
     }
   }
+  // ANALYZE GUARD (sheets): the cells-per-member guard reads the member width the engine measured on the part itself
+  // (LatticePosture::member_width_mm: room_through over each cell, as the lay's floor and the credit read it), not the
+  // voxel staircase, which reads a member about two voxels thin. Empty for a strut type: the staircase, as before.
+  post.member_width_mm = ll::sheet_member_width_mm(out.layout, *ask.session->domain(), credit, g, ask.threads);
 
   // ── THE OLD CHECK, unchanged: the null-posture solve, the composite solve, the gate. Its context is the one the
   // old run builds, with the settings laid over it (each equal to what it replaces when not stated).

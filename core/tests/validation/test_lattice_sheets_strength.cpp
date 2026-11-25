@@ -502,6 +502,7 @@ int main() {
                 reg == std::string::npos ? "?" : d.json.substr(reg + 17, 5).c_str(),
                 has(d.json, "\"verdict\": \"pass\"") ? "pass" : has(d.json, "\"verdict\": \"fail\"") ? "fail" : "solid_only",
                 why_at == std::string::npos ? "" : d.json.substr(why_at + 25, d.json.find('"', why_at + 25) - why_at - 25).c_str());
+    CHECK(!has(d.json, "\"not_certified\": true") && has(d.json, "\"out_of_regime\": false"));   // ANALYZE GUARD (sheets)
   }
 
   // ── check, graded: the solve sees each voxel's own density (By stress: the wall blended between cells) ──
@@ -577,6 +578,22 @@ int main() {
     std::printf("[guard member] %zu cells, whole ones %d+ across; not certified: %s; reason: %s\n", o.layout.cells.size(),
                 least, has(d.json, "\"not_certified\": true") ? "YES" : "no",
                 why_at == std::string::npos ? "" : d.json.substr(why_at + 25, d.json.find('"', why_at + 25) - why_at - 25).c_str());
+    // ANALYZE GUARD (sheets): the guard reads the engine's own member width (sheet_member_width_mm), so a box ten cells
+    // across is in regime. RED CONTROL: c347c70a, the same case with the guard on the voxel staircase: "Not certified:
+    // ... its thinnest latticed member is 1.3 cells across, below the 10".
+    CHECK(!has(d.json, "\"not_certified\": true") && has(d.json, "\"out_of_regime\": false"));
+    const CreditGrid g = grid_over(member, 1.56);
+    const LatticeCredit cg = lattice_credit(o.layout, *s.domain(), o.bars, {}, g);
+    const std::vector<double> w = sheet_member_width_mm(o.layout, *s.domain(), cg, g);
+    double thinnest = std::numeric_limits<double>::infinity();
+    std::size_t read = 0;
+    for (std::size_t e = 0; e < w.size(); ++e)
+      if (cg.cell[e] >= 0) {
+        ++read;
+        thinnest = std::min(thinnest, w[e] / o.layout.cells[static_cast<std::size_t>(cg.cell[e])].size);
+      }
+    std::printf("[guard member] the width the guard reads: %zu lattice voxels, thinnest %.3f cells across\n", read, thinnest);
+    CHECK(w.size() == cg.cell.size() && read > 0 && thinnest >= 10.0);
   }
 
   // ── file: the file job with the check, as the CLI runs it (a 12 mm box: every member under the floor) ──
@@ -620,6 +637,7 @@ int main() {
     CHECK(!o.bars.bars.empty() && c.voxel_rho.empty() && c.cell_flags.empty() && c.cell_across.empty() &&
           c.voxels_credited == 0 && c.floor_cells == 0.0);
     CHECK(lattice_credit_cells(o.layout, *s.domain()).cell_flags.empty());
+    CHECK(c.cell_room_mm.empty() && sheet_member_width_mm(o.layout, *s.domain(), c, grid_over(small, 1.0)).empty());   // the guard's staircase, as before
     const SheetCheckFiles w = write_sheet_check_files(kDir + "/octet_none", o.layout, c, {});
     CHECK(w.ok && w.file.empty() && w.keys.empty());
   }
