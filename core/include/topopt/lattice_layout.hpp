@@ -1620,6 +1620,11 @@ struct Settings {
   // thicker for it: a cell too small for the open look carries the THINNEST strut and nothing more, and every other
   // cell keeps the open look. Denser than the open look in those small cells, never touching. (His v2 stand, printed
   // with two-line struts: its wing edges, socket walls and spotface walls.) Allow quilt on makes this moot.
+  // ★ notes29 (his notes on release 20, 2026-11-25: "No matter what I did, the quilting kept on happening -- even with
+  // quilting off", "limit both when 'Allow quilt' is turned off"): NOT READ while Allow quilt is off. It lowered the
+  // smallest cell of the whole layout, not of the thin walls alone, so every place the band or the stress shrank the
+  // cells got the thinnest strut past the open look, up to touching: the quilt. With Allow quilt off no cell is under
+  // lattice_open_cell_mm (the thinnest strut's) and no strut past the open look, anywhere; with it on it is moot.
   bool small_cells_in_thin_walls = false;
   // "Let walls cut cells" (his ruling 2026-11-14): per part, OFF unless the user turns it on. The session
   // hands it to the cells as CellSpec::one_grid (see there): on, every wall, pocket, hole, Protect skin and the
@@ -1724,8 +1729,9 @@ struct Outcome {
   double ms_read = 0.0, ms_cells = 0.0, ms_bars = 0.0;
   std::size_t thin_solid = 0;    // cut cells print rule P8 (f) made solid (solidify_thin_cuts)
   // K3 (his 11-23 notes): with the quilt off, the Lattice regions (their ids) that laid no cell at all and were laid
-  // again with the quilt's smallest cell (Session::lay_with). Empty: none (the quilt was off everywhere, or on).
-  std::vector<int> quilt_regions;   // K3 (only where the cell is Auto: a typed cell that fits nowhere stays solid)
+  // again with the quilt's smallest cell. ★ notes29 (his notes on release 20, 2026-11-25): WITHDRAWN, with Allow quilt
+  // off nothing is laid with the quilt; such a region stays solid and says why (Layout::solid_why). Always empty.
+  std::vector<int> quilt_regions;
   bool cells_by_stress = false;  // C22 was applied to this layout (stress_sizes_cells)
   bool cells_no_stress = false;  // C22 was asked for and there was no stress result, or no reference
   // The one stress reference resolved for this lay (the stated one or the part's own), read by the cells and the
