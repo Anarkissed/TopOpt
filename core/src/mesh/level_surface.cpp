@@ -51,6 +51,9 @@ SurfaceSwitch to_surface_switch() {
     if (!parts[3].empty() && parts[3][0] == 'v') s.knot_voxels = std::atof(parts[3].c_str() + 1);
     else s.knot_line_widths = std::atof(parts[3].c_str());
   }
+  // Default: the band-weighted fit (test A: B-spline worst 0.119 -> 0.049 mm at
+  // two voxels, 0.075 -> 0.040 at 1.5; stages/stage-3-surfaces.md).
+  s.fit_band_voxels = 1.5;
   if (parts.size() >= 5) s.fit_band_voxels = std::atof(parts[4].c_str());
   if (!(s.reach >= 1.0)) s.reach = 2.0;
   if (!(s.knot_line_widths >= 0.0)) s.knot_line_widths = 0.0;

@@ -210,11 +210,16 @@ int main(int argc, char** argv) {
   shapes.push_back(sphere("sphere radius 12 mm", 12.0));
 
   // The arm that ships when the stage 3 switch is on (level_surface.hpp).
+  // The arm that ships with the switch on: B-spline, two voxels (today's knot rule
+  // at this voxel), band-weighted fit -- or what TOPOPT_SURFACE names.
   Arm ship;
+  ship.band = 1.5;
   {
     const topopt::SurfaceSwitch sw = topopt::to_surface_switch();
     if (sw.basis_set) ship.basis = sw.basis;
     if (sw.basis_set) ship.reach = sw.reach;
+    if (sw.on) ship.band = sw.fit_band_voxels;
+    if (sw.knot_voxels > 0.0) ship.knot = sw.knot_voxels;
   }
   const double cell = 0.5 * kVoxel;  // the export's tessellation, smooth_factor 2
   bool matrix = false;

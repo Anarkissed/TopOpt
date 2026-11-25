@@ -28,7 +28,8 @@ namespace topopt {
 //                  (0 = today's 3.41 mm rule), or "v<n>" for n voxels (a
 //                  measurement arm); either is floored at 1 voxel. Optional 5th field: the re-fit
 //                  weights the band |phi| <= that many voxels 1 and the rest
-//                  0.01 (0 = uniform, today). Example "on:bspline:2:0:1.5".
+//                  0.01 (default 1.5; 0 = uniform, today). Example
+//                  "on:bspline:2:v1.5:1.5".
 struct SurfaceSwitch {
   bool on = false;
   bool basis_set = false;
