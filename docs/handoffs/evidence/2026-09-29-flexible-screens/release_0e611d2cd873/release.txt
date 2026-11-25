@@ -1,0 +1,56 @@
+# Release 0e611d2cd873 - 2026-11-24: release (18) - claude/organic-1 15e48100, one worker swap (bbf5f7081cd0 -> 0e611d2cd873)
+# Release (18): his notes on release 17 (whole-model stress, colour rules, Load flow, the marker, "Part", hexagons, live regular sample), print orientation (engine + iPad flow, painted supports Tree (manual)), printability of only what the app made, cells cut flat at the bed, Auto's cell-size search and stretched edge row.
+# Gates in the gate tree (b9-screens-362, its own vendor built from organic-1's core): the new classes, then phase B's local half (core suites incl. lattice_layout, lattice_strength, weave_tubes; iPad device build; preflight on his job). FAST-TRACKED: the whole app suite in three shards runs AFTER the install. Worker: route, demand, strength_job, organic cut 2 and chain vs the installed script; job_stage and orientation_recheck. The worker is restarted on this swap (the engine changed; the app sends cell_search / stretch_edges on Auto, which an older worker refuses).
+# Commits:
+#   b7c4298b P2 print orientation: rotate at the door (the job key "print_frame")
+#   e14aabec P4 print orientation: six candidates, guessed strength and the one rule ("print_orientation")
+#   32d691a6 Merge branch 'claude/organic-1' into claude/orient-core
+#   bea71f17 P3 print orientation: the part's own overhangs painted as supports, Tree (manual) in the file
+#   c9527f98 P5 print orientation: "Check strength" for a topology result standing a chosen way
+#   9549dfee The Mac worker window says what a job is doing, and its Bonjour record follows the live engine (his 11-23 notes)
+#   1ae64d77 Phase 2 print orientation: any up at the door, hull faces and edges, stand supports
+#   f43dc2cc P4 rule: when none passes, his placement is kept unless the strongest is 10 % stronger
+#   09afc1cc Merge claude/orient-core: print orientation, the engine half (the door, painted supports Tree (manual), candidates incl. 45° sides and edges held by stand supports, the rule, Check strength for topology results)
+#   534f898c notes26 sample (his 11-23 "Yes to the live sample"): the regular lattice's sample laid live from the open group's settings — finish (Skin), band, grade, cell and type — in the see-through sample body, as Organic's is; no "N
+#   4461a78f notes27 flow (builder G): hexagon animation for cell lattices, the failure marker reopens its pop-up with an x, and "‹ project | Part"
+#   aee9bcb8 Merge claude/notes27-flow 4461a78f (builder G): hexagons for a cell lattice's print-file card, the failure marker reopens its pop-up and closes with an x, "‹ Squish Mechanism | Part"
+#   d99f77cb The saved lattice keeps the lay's floor cell again, so versions keep their saved preview (release 17's whole suite)
+#   59f72444 K1: the print check judges only what the app made (his rule, 2026-11-24)
+#   850c8a6f Merge claude/notes26-sample 534f898c (builder E): the regular lattice's sample laid live from his settings (Skin, band, grade) inside the see-through cube; Depth variation shows one caption
+#   b4649eee K5: Structural refuses lattice strips one cell wide (his yes, 2026-11-23)
+#   f6d82a26 K2: cut cells follow a slope (his 11-23 notes: "lack of crisp straight lines at the edges of the lattice")
+#   e346b605 K4: bars.bin beside strut_margins.bin, and what strengthening did (his Results notes, 2026-11-24)
+#   fada5eea K3: Auto never quilts unless nothing else lays, and lays the thinnest struts (his 11-23 notes)
+#   6e3ff789 Merge claude/notes27-core (core27): printability judges only what the app made (his rule), Structural refuses one-cell strips, crisp edges along slopes with cut cells, Auto regular lattices with no quilt and the thinnest struts
+#   962a9c43 Auto's thinnest struts are for Aesthetic only; Structural Auto keeps its strength-led struts (his 11-24 answer)
+#   f4210bb3 notes27 results: whole-model colours, plain Strength details, concentric results list, colour rules, readable Load flow
+#   d84182f5 Merge claude/notes27-results f4210bb3 (builder F): the whole model coloured (every strut from bars.bin, the solid by its margins, the field elsewhere, never plain), Details in plain words, the concentric results list, his colou
+#   087fba41 notes27 orient-app P1 (his print orientation, SPEC 2a + 2b): drawn as it prints, and honest words
+#   be8af319 notes27 orient-app P7 (his print orientation, SPEC 2d "What Check strength re-runs"): the jobs
+#   8a4e37c6 notes27 orient-app P6 (his print orientation, SPEC 2d): his flow on Results
+#   421e6bf2 Merge claude/organic-1 d84182f5 into claude/notes27-orient-app (362's ask): builder F's Results work and core27 K1-K5
+#   529a7cbe Merge claude/notes27-orient-app 421e6bf2 (builder H): his print orientation on the iPad: the part drawn the way it prints, honest words, the Print orientation recommendation flow on Results (pop-up, turn animation, Cancel, Chec
+#   2801d011 notes27 core2: bars.bin marks what strengthening changed, the summary per named group, a print file's tap in % of its limit; cells cut flat at the bed (K6); Auto fits its cells to the square faces (K7, K8)
+#   f7deeba0 Merge claude/notes27-core2 2801d011 (core27): cells cut flat at the bed (K6, his "extend cells and cut them off where the bed is"), Auto fits its cell size to the faces (K7) and stretches the edge row onto the bed (K8), bars.bi
+#   1730c736 K3's quilt fallback only where the cell is Auto; the app fits cells (K7, K8) only for an Auto cell size
+#   15e48100 Merge claude/notes27-core2 1730c736 (core27): K3's quilt fallback only for an Auto cell; a typed cell that fits nowhere stays Cannot Lattice (his D4 rule; release 18's gate red)
+#   48af30df Release (18): his notes on release 17, print orientation (engine + iPad), cells cut flat at the bed, Auto fitting its cells
+# Gates (this tree):
+#   06:12 his uncommitted files (left alone): app/TopOpt-Info.plist app/TopOpt.xcodeproj/project.pbxproj app/TopOpt.xcodeproj/xcshareddata/xcschemes/TopOpt.xcscheme 
+#   06:12 preflight job: /Users/nadim/.topopt-worker/d5af229ca8ee4a8f (his newest optimisation job the installed worker passes; read only)
+#   06:12 merged organic-1 as 48af30df (local, not pushed); app + core + tools == its; fingerprint 0e611d2cd873
+#   ==> Manifold: /Users/nadim/dev/TopOpt/TopOpt/.vcpkg/installed-manifold (KEEP regions exported exactly)
+#   ==> building macOS slice (Eigen + OCCT, arm64)
+#   ==> building iOS simulator slice (Eigen + OCCT + lib3mf, arm64)
+#   ==> building iOS device slice (Eigen + OCCT + lib3mf, arm64)
+#   06:14 build_core green: topopt_vendored_core_0e611d2cd873 + the Install 3 entry points + lay_organic_preview and Session::sweep_limits in every slice and arch
+#   06:15 worker CLI built: topopt-cli: core 0e611d2cd873 (dirty=false), built Nov 24 2026 06:15:14; 3 data paths, all under the release worktree
+#   06:29 core suites passed: 100% tests passed out of 19 Total Test time (real) = 777.12 sec 
+#   06:35 iPad device build green (this tree's own pair)
+#   06:35 preflight on his job: preflight: load path CONNECTED
+#   06:35 pushed 48af30df
+#   06:35 worker script changed: installed, the old one kept as /Users/nadim/dev/TopOpt/agent-scratch/organic1/fast18/x/topopt_worker.py.installed-before-release15
+#   06:35 restarting the worker server (PID 16297; /health said "fingerprint": "0e611d2cd873") while idle, so it runs the new script
+#   06:35 worker swapped: /health "fingerprint": "0e611d2cd873"; data paths under the release worktree; preflight again OK; old CLI kept as build-fix/topopt-cli.bbf5f7081cd0-replaced-20261124
+#   06:35 route, demand, strength_job, organic cut 2 and chain tests vs the INSTALLED script, job_stage and orientation_recheck: ALL PASS
+#   06:35 the app_release scripts now expect 0e611d2cd873

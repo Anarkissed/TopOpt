@@ -1,0 +1,36 @@
+# Release 56c33beb457d - 2026-11-22: release (15) - claude/organic-1 1ff2a5a0, one worker swap (49895f5e9c5e -> 56c33beb457d)
+# Release (15): the Organic lay sped up (exact: the same print-file bytes old vs new on his Grown job), the vines kept per region (his item 2), the lay streamed and drawn as it grows (his item 3).
+# Gates in the gate tree (b9-screens-362, its own vendor built from organic-1's core): the new classes (release 14's combined set + the growth classes) first, then the whole app suite in three shards side by side (any failure once more alone) while phase B's local half built; nothing pushed before both were green. Core suites here: Keep, Organic, weave_tubes, weave_findings_grid, lattice_layout(_mesh), mirror.
+# Commits:
+#   26154999 Speed: the print check reads each overhang against nearby bars, joints made once per pass
+#   093a8739 Speed: the grower's look-ups test only the samples inside their own cube
+#   a25d09fa Speed: hold_up_weave reads only the vine ends its cone can reach
+#   53656973 Speed: the grower's order-free look-ups on a 0.5 mm grid
+#   8301dd75 Speed: repeats()' re-join reads the joints on a 1 micron grid
+#   b2659c34 Speed: drop_loose_bars by a work list, not in rounds
+#   2b2a07cd Speed: hold_up_weave's walk reads the end grid round it, not every end of `near`
+#   a452403f Watch it grow (his 11-22), engine half: a GrowthTap an Organic lay hands its vines to as it lays them
+#   a4f0ab74 Redo only what a change affects (his 11-22 item 2): the session keeps each weave region's strands
+#   6a58fed0 Speed: the print check's passes judge only the layers that changed
+#   efe6b9dc Watch it grow (his 11-22), app half: the Organic lay's vines drawn as they are laid, the button names the phase
+#   3f600a0a Merge claude/speed-1: the Organic lay's blow-ups removed, the vines kept per region, the lay streamed (his 11-22: "we need to speed everything up EXPONENTIALLY"; his picks 1/2/3)
+#   1ff2a5a0 Merge claude/speed-anim: watch the Organic lattice grow (his 11-22: "Could the user literally *watch* the lattice grow from nothing?")
+#   a249baf2 Release (15) 2026-11-22: the Organic lay sped up and streamed (his 11-22: "we need to speed everything up EXPONENTIALLY"; his picks 1/2/3), one worker swap
+# Gates (this tree):
+#   22:07 his uncommitted files (left alone): app/TopOpt-Info.plist app/TopOpt.xcodeproj/project.pbxproj app/TopOpt.xcodeproj/xcshareddata/xcschemes/TopOpt.xcscheme 
+#   22:07 preflight job: /Users/nadim/.topopt-worker/d5af229ca8ee4a8f (his newest optimisation job the installed worker passes; read only)
+#   22:07 merged organic-1 as a249baf2 (local, not pushed); app + core + tools == its; fingerprint 56c33beb457d
+#   ==> Manifold: /Users/nadim/dev/TopOpt/TopOpt/.vcpkg/installed-manifold (KEEP regions exported exactly)
+#   ==> building macOS slice (Eigen + OCCT, arm64)
+#   ==> building iOS simulator slice (Eigen + OCCT + lib3mf, arm64)
+#   ==> building iOS device slice (Eigen + OCCT + lib3mf, arm64)
+#   22:09 build_core green: topopt_vendored_core_56c33beb457d + the Install 3 entry points + lay_organic_preview and Session::sweep_limits in every slice and arch
+#   22:10 worker CLI built: topopt-cli: core 56c33beb457d (dirty=false), built Nov 22 2026 22:10:38; 3 data paths, all under the release worktree
+#   22:25 core suites passed: 100% tests passed out of 19 Total Test time (real) = 854.33 sec 
+#   22:32 iPad device build green (this tree's own pair)
+#   22:32 preflight on his job: preflight: load path CONNECTED
+#   23:11 pushed a249baf2
+#   23:11 worker script unchanged (release 11's)
+#   23:11 worker swapped: /health "fingerprint": "56c33beb457d"; data paths under the release worktree; preflight again OK; old CLI kept as build-fix/topopt-cli.49895f5e9c5e-replaced-20261122
+#   23:11 route, demand, strength_job and organic cut 2 tests vs the INSTALLED script: ALL PASS
+#   23:11 the app_release scripts now expect 56c33beb457d

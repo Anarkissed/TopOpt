@@ -1,0 +1,16 @@
+# Release aacd5e1f — 2026-11-21 box1121 (every placed box on the Design Box handles, 414d4a10), app only
+# Core and worker unchanged: fingerprint 5541d83e514a; "fingerprint": "5541d83e514a"
+# Merged onto f3ab3dcd; the merged app tree equals box1121's, so its gate applies unchanged.
+# Commits (first parent of box1121 since the release tip):
+#   414d4a10 Every box and cylinder he places on the Design Box's handles and face magnets (his 11-21)
+# Gates:
+#   Targeted gate in b9-screens-362 (c23): PlacedBoxTests, ZoneSelectHostedTests, LatticeZonesHostedTests, DesignBoxTests and 8 more classes: 05:17 exit 0; 132 passed, 0 failed
+#   Fast track (his 11-21: Please fast track this): the full app suite runs after the push.
+#   04:37 evidence f3ab3dcd pushed; release 7ab6e9bf DONE
+#   05:17 checks ok: box1121 414d4a10, 1 commit(s), app-only, onto f3ab3dcd, fingerprint 5541d83e514a
+#   05:17 merged aacd5e1f; app tree == box1121's, fingerprint 5541d83e514a
+#   05:17 waiting for HEAVY.lock (free)
+#   05:17 lock taken (16 GB free)
+#   05:23 iPad device build green; lock released
+#   05:23 pushed aacd5e1f
+#   05:23 worker /health "fingerprint": "5541d83e514a" (unchanged, no swap)

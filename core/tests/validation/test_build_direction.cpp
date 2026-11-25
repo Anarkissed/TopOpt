@@ -260,7 +260,12 @@ int main() {
     }
     // run_job.cpp holds TWO of the three sites, so it must call the resolver
     // twice; a single call would mean one path silently kept an old derivation.
-    const std::string rj = read_file(src_dir + "/src/cli/run_job.cpp");
+    const std::string rj = read_file(src_dir + "/src/cli/run_job.cpp")
+        + read_file(src_dir + "/src/cli" + "/to_export.inc")
+        + read_file(src_dir + "/src/cli" + "/to_analyze.inc")
+        + read_file(src_dir + "/src/cli" + "/to_setup.inc")
+        + read_file(src_dir + "/src/cli" + "/to_strengthen.inc")
+        + read_file(src_dir + "/src/cli" + "/to_run.inc");  // + its TO parts (stage 0 move)
     std::size_t calls = 0, at = 0;
     while ((at = rj.find("resolve_build_direction(options)", at)) !=
            std::string::npos) {
