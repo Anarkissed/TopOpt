@@ -437,6 +437,7 @@ struct PlsmRunResult {
   int refits = 0;
   double refit_move_max_mm = 0.0;
   double refit_move_rms_mm = 0.0;
+  double refit_move_p90_mm = 0.0;
 };
 
 // Optimise `alpha` under the volume constraint of `options.volume_fraction` over

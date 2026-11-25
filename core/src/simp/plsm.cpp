@@ -1025,20 +1025,29 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
         plsm_spmv(Psi, rf.alpha, after, threads);
         double mx = 0.0, s2 = 0.0;
         long long cnt = 0;
+        std::vector<double> moves;
         for (int kz = 0; kz < nz; ++kz)
           for (int j = 0; j < ny; ++j)
             for (int i = 0; i < nx; ++i) {
               const std::size_t v = plsm_at(nx, ny, i, j, kz);
               if (grid.tags[v] == VoxelTag::Empty || eff[v] != MaskValue::Active) continue;
               if (std::fabs(phi[v]) > h) continue;
+              // Only where phi has a slope worth the name: on a nearly flat phi the
+              // quotient below reads any small change as a huge move.
               const double g = plsm_grad_mag(nx, ny, nz, phi, i, j, kz, h);
-              if (!(g > 0.1)) continue;
+              if (!(g > 0.5)) continue;
               const double d = std::fabs(after[v] - phi[v]) / g;
+              moves.push_back(d);
               mx = std::max(mx, d);
               s2 += d * d;
               ++cnt;
             }
         ++out.refits;
+        if (!moves.empty()) {
+          std::sort(moves.begin(), moves.end());
+          out.refit_move_p90_mm =
+              std::max(out.refit_move_p90_mm, moves[static_cast<std::size_t>(0.9 * (moves.size() - 1))]);
+        }
         out.refit_move_max_mm = std::max(out.refit_move_max_mm, mx);
         if (cnt > 0) out.refit_move_rms_mm = std::max(out.refit_move_rms_mm, std::sqrt(s2 / cnt));
       }
@@ -1216,9 +1225,10 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   if (surf.on)
     std::fprintf(stderr,
                  "[plsm] basis %s reach %.1f knots %.2f vox: %d iterations, %d re-fits, "
-                 "re-fit moved the surface up to %.3f mm (rms %.3f)\n",
+                 "re-fit moved the surface (worst re-fit, where |grad phi| > 0.5): rms %.3f, "
+                 "90th pct %.3f, max %.3f mm\n",
                  plsm_basis_name(basis), support, knots.dx, done_iters, out.refits,
-                 out.refit_move_max_mm, out.refit_move_rms_mm);
+                 out.refit_move_rms_mm, out.refit_move_p90_mm, out.refit_move_max_mm);
   out.best_iteration = best_iter;
   out.margin_peak_iteration = peak_iter > 0 ? peak_iter : 0;
   out.margin_peak = peak_iter > 0 ? peak_margin : 0.0;
