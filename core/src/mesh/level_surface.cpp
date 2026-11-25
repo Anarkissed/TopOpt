@@ -224,6 +224,9 @@ struct FrozenBody {
 std::vector<FrozenBody> make_frozen_bodies(const std::vector<FrozenFaceSet>& sets,
                                            const StepModel& model, double cap) {
   std::vector<FrozenBody> out;
+  // Each body's MeshDistance points at the body's own `tri`: the vector must never
+  // reallocate after a body is placed, or every earlier pointer dangles.
+  out.reserve(sets.size());
   // Coarse triangle count per face, to tell whole faces from parts of faces.
   std::vector<int> per_face;
   for (int f : model.triangle_face) {
