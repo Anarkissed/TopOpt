@@ -14,7 +14,6 @@
 #include <vector>
 
 #include "topopt/face_loads.hpp"     // TO rebuild stage 1: loads from the drawn face
-#include "topopt/to_stage_switch.hpp"
 #include "topopt/observability.hpp"  // steady_clock_ms (the counterfactual cost)
 #include "topopt/production.hpp"  // configure_production_options, production_reduction_ladder
 #include "topopt/simp.hpp"        // effective_design_mask (the pre-flight allowed set)

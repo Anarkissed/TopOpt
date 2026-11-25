@@ -1902,6 +1902,10 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   // E1: each streamed version's slim finish (reused by the re-check), and the latticed
   // companions each version wrote (withdrawn with it if finishing refuses it).
   std::map<double, StreamedFinish> streamed_finish;
+  // TO rebuild stage 1 (ledger R-07): on the stage 1 path a version's FILE is
+  // checked when it is made, before the version is shown; (e) below reuses the
+  // verdict instead of checking again after the whole ladder.
+  std::map<double, VersionFinish> early_finish;
   const bool strengthen_run = job.loads.present && job.loads.redesign == "strengthen";
   // ── THE DESIGN CONTAINER, PUBLISHED AS THE LADDER GOES (task
   //    2026-08-03-variant-postprocessing-fix, defect 1) ────────────────────────
@@ -2006,8 +2010,31 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
         sf.mesh = variant_export_model_mesh(v, job.output, solved_grid, run_printed_iso(options),
                                             &result.model, job.keep_regions, &fin, &sf.fb,
                                             &sf.raw);
+        const TriangleMesh* shipped = &sf.mesh;
+        if (to_stage1_on()) {
+          const DesignMask* clearance =
+              !options.clearance_void.empty() &&
+                      options.clearance_void.size() == solved_grid.voxel_count()
+                  ? &options.clearance_void
+                  : nullptr;
+          VersionFinish& f = early_finish[v.requested_volume_fraction];
+          f = finish_and_recheck(
+              v, job, job_dir, solved_grid, run_printed_iso(options), &result.model, fin,
+              clearance, material.density_g_cm3, materials, rules,
+              join_path(out_dir, "finish_check"), v.report.margin_effective,
+              v.report.margin_required, &sf);
+          if (!f.refusal.empty()) {
+            // Never shown: no file, no VARIANT line, no FINISH line. (e) records it.
+            std::fprintf(stderr,
+                         "[finish] version vf %.2f refused before it was shown: %s\n",
+                         v.requested_volume_fraction, f.refusal.c_str());
+            streamed_finish.erase(v.requested_volume_fraction);
+            return;
+          }
+          if (f.fb.finish_fallback) shipped = &f.mesh;  // the safe finish is what ships
+        }
         p = export_variant_mesh(v, out_dir, job.output, solved_grid, run_printed_iso(options),
-                                &result.model, job.keep_regions, &fin, &sf.mesh);
+                                &result.model, job.keep_regions, &fin, shipped);
       }
       streamed_paths.push_back(p);
       // The analytic design, written BESIDE the mesh into out_dir (S1(d)).
@@ -2578,11 +2605,15 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     for (MinimizePlasticVariant& v : result.pipeline.evaluated) {
       if (!v.accepted) continue;
       const auto streamed = streamed_finish.find(v.requested_volume_fraction);
-      VersionFinish f = finish_and_recheck(
-          v, job, job_dir, sg, run_printed_iso(options), &result.model, fin, clearance,
-          material.density_g_cm3, materials, rules, check_dir, v.report.margin_effective,
-          v.report.margin_required,
-          streamed != streamed_finish.end() ? &streamed->second : nullptr);
+      const auto early = early_finish.find(v.requested_volume_fraction);
+      VersionFinish f =
+          early != early_finish.end()
+              ? std::move(early->second)  // stage 1: checked when the file was made
+              : finish_and_recheck(
+                    v, job, job_dir, sg, run_printed_iso(options), &result.model, fin,
+                    clearance, material.density_g_cm3, materials, rules, check_dir,
+                    v.report.margin_effective, v.report.margin_required,
+                    streamed != streamed_finish.end() ? &streamed->second : nullptr);
       FinishBlock& fb = f.fb;
       if (!f.refusal.empty()) {
         fb.verdict_changed = true;
