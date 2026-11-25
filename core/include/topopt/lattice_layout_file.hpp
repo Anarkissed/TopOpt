@@ -440,6 +440,27 @@ FileResult run_file_job(const std::string& job_path, const std::string& out_dir,
 bool load_file_job(const std::string& job_path, int threads, FileJob& job, StepModel& model, FileResult& r,
                    void (*said)(const char*) = nullptr);
 
+// ── A PRINT COUPON PER STRUT TYPE (2026-11-24) ────────────────────────────────
+// His rule: every type but the octet (proven at 8 mm) and bccz (8 mm, 2026-07-29) is "Not print-tested" until he prints
+// a sample. The coupon is the 8 mm rim coupon's (printed 2026-11-11) made by THIS engine for any strut type: the old
+// coupon's outline (lattice_coupon_solid: 45 x 40 x 35 mm, a tongue, a half-round top that cuts the cells at every
+// angle), all lattice, 8 mm cells (smaller only where a wall needs it), two-line struts, Finish Skin over the cut cells,
+// and a flat 2 mm plate fused in (a 2 mm Protect skin on its underside: one file, flat on the bed). It goes through the
+// file job, so it is the print-checked file (made, checked layer by layer and made again) or a refusal in one line.
+struct CouponAsk {
+  LatticeTopology topology = LatticeTopology::Octet;
+  double cell_mm = 8.0;
+  double plate_mm = 2.0;
+  double bead_mm = 0.45;
+  int threads = 0;   // 0: every core
+};
+// The coupon's file job (its JSON), for the part saved as `model` (beside the job) whose underside is face
+// `underside_face`.
+std::string type_coupon_job(const CouponAsk& ask, const std::string& model, int underside_face);
+// Writes into `out_dir` (which must exist): <type>_coupon_part.stl (the part), <type>_coupon_job.json, and what the file
+// job writes there (<type>_coupon_lattice.stl, the file to print, and lattice_file.json). Never throws.
+FileResult make_type_coupon(const CouponAsk& ask, const std::string& out_dir);
+
 // The result file's name, and its text.
 inline constexpr const char* kFileResultName = "lattice_file.json";
 std::string file_result_json(const FileResult& r);

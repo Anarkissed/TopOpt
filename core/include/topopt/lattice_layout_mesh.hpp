@@ -501,7 +501,7 @@ struct LayerSpec {
   // Print rule (e) (reviewer, 2026-11-14, until he names his own number): no bridge reaches more than this past
   // what holds it (a bridge held at both ends reaches half its span). Clean files reach 1.4 to 3.3 mm; the two
   // faults of 2026-11-12 (a cap printed over a paper-thin slot) showed only as reaches of 8.88 and 20.01 mm.
-  double reach_limit_mm = 5.0;
+  double reach_limit_mm = kBridgeReachLimitMm;
   // Rule (d), a COUNT only (reviewer, 2026-11-12): an island of a layer thinner than this
   // (and at least `thin_min_mm2` in area) is about one line wide: a strut lying in a
   // lattice face's plane, cut in half along its length by the face. His 8 mm sample has

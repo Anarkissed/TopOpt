@@ -1265,6 +1265,15 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
              "types made of struts so far. Pick a strut type.");
       return done();
     }
+    // 2026-11-24 (every strut type on this engine): a Structural job (one with a strength job) of a type whose strength
+    // cannot be checked (the tetragonal three, Aesthetic only) is refused before the long work, in one plain line.
+    if (!job.strength_job.empty()) {
+      const std::string no = structural_refusal(job.settings.cells.topology);
+      if (!no.empty()) {
+        refuse(r, kTypeNotSupported, no, std::string("structural with ") + lattice_topology_name(job.settings.cells.topology));
+        return done();
+      }
+    }
     if (cells_by_stress && (!job.settings.stress.demand || job.settings.stress.demand->empty())) {
       refuse(r, kNoStress,
              "Cell size by stress needs a stress result, and this job has none, so nothing was made. Send the "

@@ -114,7 +114,10 @@ bool SolidAt::operator()(const Domain::Probe& probe, const Vec3& p, const Where&
 
 Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
   const StrutCell& type = lattice_strut_cell(layout.topology);   // throws for a type with none
-  const std::vector<StrutCellStrut> struts = strut_cell_closed_struts(type);
+  // The struts each frame's cells lay (cell_struts: a tetragonal type's columns stand up in every frame; a cubic type's
+  // list is the same for every frame, in its order).
+  std::vector<std::vector<StrutCellStrut>> struts_of(layout.frames.size());
+  for (std::size_t fi = 0; fi < layout.frames.size(); ++fi) struts_of[fi] = cell_struts(layout.topology, layout.frames[fi]);
   const int thread_count =
       threads > 0 ? threads : std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
 
@@ -129,6 +132,7 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
       const Cell& c = layout.cells[ci];
       if (c.absorbed) continue;   // K8: a sliver the next cell's struts reach across lays none of its own
       const Frame& f = layout.frames[static_cast<std::size_t>(c.frame)];
+      const std::vector<StrutCellStrut>& struts = struts_of[static_cast<std::size_t>(c.frame)];
       // K8: the struts span the cube and what it reaches past it on to a square face (Cell::reach_lo, reach_hi).
       const double glo[3] = {c.lo[0] - c.reach_lo[0], c.lo[1] - c.reach_lo[1], c.lo[2] - c.reach_lo[2]};
       const double unit[3] = {(c.size + c.reach_lo[0] + c.reach_hi[0]) / type.S,
