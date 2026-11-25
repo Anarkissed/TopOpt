@@ -570,8 +570,10 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   };
   // f_v at one ACTIVE cell, at a rigid offset of the level set. The mollified
   // value is the default; both agree on the volume they measure to 0.037%.
+  // Stage 3 (ledger P-16): with the switch on the hard 1/64-step count is gone.
+  const bool mollified = plsm.frac_mollified || surf.on;
   auto frac_at = [&](std::size_t v, double offset) {
-    return plsm.frac_mollified
+    return mollified
                ? plsm_frac_of_soft(
                      fcache, v,
                      plsm_frac_eps(frac_gs[v], h, fk, plsm.frac_eps_mult), offset)

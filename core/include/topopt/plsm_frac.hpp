@@ -223,9 +223,14 @@ inline double plsm_frac_grad_l1(int nx, int ny, int nz,
     C = std::min(std::max(C, 0), nz - 1);
     return phi[plsm_at(nx, ny, A, B, C)];
   };
-  const double gx = (P(i + 1, j, k) - P(i - 1, j, k)) / (2.0 * h);
-  const double gy = (P(i, j + 1, k) - P(i, j - 1, k)) / (2.0 * h);
-  const double gz = (P(i, j, k + 1) - P(i, j, k - 1)) / (2.0 * h);
+  // The span of the clamped stencil: h, not 2h, on a border voxel (ledger P-17;
+  // plsm_grad_mag already does this).
+  auto span = [&](int a, int n) {
+    return static_cast<double>(std::min(a + 1, n - 1) - std::max(a - 1, 0)) * h;
+  };
+  const double gx = nx > 1 ? (P(i + 1, j, k) - P(i - 1, j, k)) / span(i, nx) : 0.0;
+  const double gy = ny > 1 ? (P(i, j + 1, k) - P(i, j - 1, k)) / span(j, ny) : 0.0;
+  const double gz = nz > 1 ? (P(i, j, k + 1) - P(i, j, k - 1)) / span(k, nz) : 0.0;
   return std::fabs(gx) + std::fabs(gy) + std::fabs(gz);
 }
 
