@@ -26,3 +26,12 @@ if(Eigen3_FOUND)
   target_link_libraries(test_to_true_loads PRIVATE topopt)
   add_test(NAME to_true_loads COMMAND test_to_true_loads)
 endif()
+
+# Tests B, F and J (stage 3): drawn faces exact after export, ripple at 1 to 10 mm,
+# and one clean solid, on the export meshed from the optimiser's function. The
+# drawn parts are built with Manifold and the export cuts with it.
+if(manifold_FOUND)
+  add_executable(test_to_surface_export tests/unit/test_to_surface_export.cpp)
+  target_link_libraries(test_to_surface_export PRIVATE topopt manifold::manifold)
+  add_test(NAME to_surface_export COMMAND test_to_surface_export)
+endif()

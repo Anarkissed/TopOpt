@@ -34,6 +34,8 @@
 #include <gp_Pnt.hxx>
 #include <gp_Trsf.hxx>
 
+#include "topopt/level_surface.hpp"
+
 namespace topopt {
 namespace {
 
@@ -228,7 +230,16 @@ StepModel import_step_file(const std::string& path,
   BRepGProp::VolumeProperties(shape, props);
   model.brep_volume = props.Mass();
 
-  Tessellated t = tessellate(shape, tess.linear_deflection, tess.angular_deflection);
+  // TO rebuild stage 3 (ledger I-02): the drawn part's own triangles become the
+  // print file's drawn faces, so with the switch on a default tessellation is made
+  // to the 0.02 mm target (0.01 mm chord, 0.1 rad) instead of 0.1 mm / 0.5 rad.
+  StepTessellation use = tess;
+  if (to_surface_on() && tess.linear_deflection == StepTessellation{}.linear_deflection &&
+      tess.angular_deflection == StepTessellation{}.angular_deflection) {
+    use.linear_deflection = 0.01;
+    use.angular_deflection = 0.1;
+  }
+  Tessellated t = tessellate(shape, use.linear_deflection, use.angular_deflection);
   // STEP MESH REPAIR (his 2040 Extrusion Stand, 2026-10-29: the app closed it since
   // 2026-10-23 with StepMeshRepair.swift, the worker refused it "not watertight").
   // A valid B-rep can tessellate with cracks: (T1) a pole of a degenerated edge (a
@@ -246,9 +257,9 @@ StepModel import_step_file(const std::string& path,
       t = std::move(t1);
     } else {
       for (const double fraction : {0.5, 0.25}) {
-        const double d = tess.linear_deflection * fraction;
+        const double d = use.linear_deflection * fraction;
         BRepTools::Clean(shape);  // force BRepMesh to mesh again, finer
-        Tessellated tf = tessellate(shape, d, tess.angular_deflection);
+        Tessellated tf = tessellate(shape, d, use.angular_deflection);
         const int n = drop_repeated_index_triangles(tf);
         if (!repair_accepted(tf, wanted)) continue;
         std::fprintf(stderr, "[step] mesh repaired: re-meshed at %.3g mm, %d pole sliver(s) dropped (%s)\n",
