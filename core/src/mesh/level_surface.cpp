@@ -227,14 +227,16 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
         const bool full = rho[c] >= 1.0 - 1e-9;
         const bool none = rho[c] <= rho_lo + 1e-12 && rho_lo < 0.5;
         if (!full && !none) continue;
-        int neg = 0;
-        for (int r = 0; r < k; ++r)
-          for (int q = 0; q < k; ++q)
-            for (int p = 0; p < k; ++p)
-              neg += phi_vox(i + (p + 0.5) / k - 0.5, j + (q + 0.5) / k - 0.5,
-                             kz + (r + 0.5) / k - 0.5) < 0.0;
-        if (full && neg < k * k * k) st_solid[c] = 1;
-        if (none && neg > 0) st_void[c] = 1;
+        // The first sample that contradicts the stamp decides; most cells read all.
+        bool stamped = false;
+        for (int r = 0; r < k && !stamped; ++r)
+          for (int q = 0; q < k && !stamped; ++q)
+            for (int p = 0; p < k && !stamped; ++p) {
+              const bool solid = phi_vox(i + (p + 0.5) / k - 0.5, j + (q + 0.5) / k - 0.5,
+                                         kz + (r + 0.5) / k - 0.5) < 0.0;
+              stamped = full ? !solid : solid;
+            }
+        if (stamped) (full ? st_solid : st_void)[c] = 1;
       }
   // A stamped-solid region on the drawn surface reaches two voxels past it, so the
   // cut by the drawn part, not the voxel, makes that face.
