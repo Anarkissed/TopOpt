@@ -495,10 +495,13 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   std::vector<double> alpha;
   {
     std::vector<double> target(n, 0.0);
-    const std::vector<double> w(n, 1.0);
+    std::vector<double> w(n, 1.0);
     for (std::size_t v = 0; v < n; ++v)
       target[v] = std::max(-plsm.clamp_voxels * h,
                            std::min(plsm.clamp_voxels * h, phi[v]));
+    if (surf.fit_band_voxels > 0.0)  // stage 3: as the re-fit below
+      for (std::size_t v = 0; v < n; ++v)
+        if (std::fabs(phi[v]) > surf.fit_band_voxels * h) w[v] = 0.01;
     const PlsmFitResult fr =
         plsm_solve_normal(Psi, PsiT, target, w, plsm.ridge,
                           plsm.fit_cg_iterations, 1e-10, threads);
