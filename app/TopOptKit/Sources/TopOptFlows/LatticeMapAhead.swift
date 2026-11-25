@@ -13,7 +13,7 @@ import TopOptKit
 extension LatticeLayoutPreview {
     /// The engine's map over the part's box with a voxel of air all round: about a million voxels at most, never finer than
     /// 0.35 mm (the landed lattice's `map` and the map made ahead alike).
-    static func mapGeometry(_ box: (lo: SIMD3<Float>, hi: SIMD3<Float>)) -> (origin: SIMD3<Float>, voxel: Float, dims: SIMD3<Int32>) {
+    nonisolated static func mapGeometry(_ box: (lo: SIMD3<Float>, hi: SIMD3<Float>)) -> (origin: SIMD3<Float>, voxel: Float, dims: SIMD3<Int32>) {
         let ext = simd_max(box.hi - box.lo, SIMD3(repeating: 0.1))
         let voxel = Swift.max(0.35, Float(cbrt(Double(ext.x * ext.y * ext.z) / 1_000_000)))
         let dims = SIMD3<Int32>(Int32((ext.x / voxel).rounded(.up)) + 3, Int32((ext.y / voxel).rounded(.up)) + 3,

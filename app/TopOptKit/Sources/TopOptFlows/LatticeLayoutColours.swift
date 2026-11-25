@@ -35,6 +35,9 @@ public enum LatticeLayoutColours {
         public var cellWallMM: [Float] = []    // 1 per cell: its wall's width, mm (0 = no wall)
         /// ★ notes25 (D10): the smallest cell this lay could use (core's printability floor, min strut / open look), mm.
         public var floorCellMM = 0.0
+        /// ★ SHEETS: a sheet layout's fields and seams (core's Outcome::sheets, sheet_seams); empty for struts.
+        public var sheets: [LatticeSheetField] = []
+        public var sheetSeams: [LatticeSheetSeam] = []
         public var token = 0
         public init() {}
         public init(_ r: LatticeLayoutSession.Result, token: Int) {
@@ -42,6 +45,7 @@ public enum LatticeLayoutColours {
             frames = r.frames; cellInfo = r.cellInfo; cellRegion = r.cellRegion; cellWall = r.cellWall
             cellFrame = r.cellFrame; cellLo = r.cellLo; cellWallMM = r.cellWallMM
             floorCellMM = r.floorCellMM
+            sheets = r.sheets; sheetSeams = r.sheetSeams   // ★ SHEETS
             self.token = token
         }
         public var barCount: Int { bars.count / 7 }
@@ -137,6 +141,55 @@ public enum LatticeLayoutColours {
                 let k = Swift.min(Swift.max(Int(g.z.rounded()), 0), f.nz - 1)
                 let n = (k * f.ny + j) * f.nx + i
                 return n >= 0 && n < f.vonMises.count ? Double(f.vonMises[n]) : nil
+            }
+        }
+    }
+
+    // MARK: - ★ SHEETS: the wall-thickness key (the strut width key's twin, notes28 sheets SPEC 1.4)
+
+    /// A sheet's relative density (its solid share) at a TRUE wall in a cell: core's own law (lattice_density_from_strut, half
+    /// the wall as the "radius"), 0 where core has none.
+    public static func sheetDensity(_ kind: LatticeSheetField.Kind, wallMM: Double, cellMM: Double) -> Double {
+        guard wallMM > 0, cellMM > 0 else { return 0 }
+        return TopOptKit.latticeRelativeDensity(topology: kind.id, strutRadiusMM: wallMM / 2, cellMM: cellMM)
+    }
+
+    /// Per field, its walls' densities (one per wall texel, x fastest).
+    public static func sheetDensities(_ fields: [LatticeSheetField]) -> [[Double]] {
+        fields.map { f in f.wallMM.map { sheetDensity(f.kind, wallMM: Double($0), cellMM: f.cellMM) } }
+    }
+
+    /// The centre of wall texel `i` of a field (model mm).
+    public static func sheetTexelCentre(_ f: LatticeSheetField, _ i: Int) -> SIMD3<Float> {
+        let nx = Int(f.n.x), ny = Int(f.n.y)
+        let q = f.lo + f.cellMM * SIMD3(Double(i % nx), Double((i / nx) % ny), Double(i / (nx * ny)))
+        return SIMD3<Float>(f.origin + q.x * f.ax[0] + q.y * f.ax[1] + q.z * f.ax[2])
+    }
+
+    /// One colour per wall texel of each field (the sheet pass's colour textures): LIGHTNESS by the wall's density over the
+    /// layout's own span, the interior hue (a sheet has no boundary bars); with the stress view on, the stress ramp at the
+    /// texel's cell. `oneColour` (or the red control): empty (the pass's one colour).
+    public static func sheetColours(_ fields: [LatticeSheetField], stress: Stress? = nil, oneColour: Bool = false) -> [[SIMD4<Float>]] {
+        func rgb(_ c: RGBAColor) -> SIMD3<Float> { SIMD3(Float(c.r), Float(c.g), Float(c.b)) }
+        if controlOneColour || oneColour { return [] }
+        if let s = stress, s.peakMPa > 0 {
+            let interior = rgb(LatticeStructureColour.interior)
+            return fields.map { f in
+                (0..<f.wallMM.count).map { i in
+                    guard let mpa = s.at(sheetTexelCentre(f, i)) else { return SIMD4(interior, 1) }
+                    let c = LatticeStressTint.colour(fraction: mpa / s.peakMPa)
+                    return SIMD4(c.x, c.y, c.z, 1)
+                }
+            }
+        }
+        let rho = sheetDensities(fields)
+        let all = rho.flatMap { $0 }.filter { $0 > 0 }
+        let lo = all.min() ?? 0, hi = all.max() ?? 0, span = hi - lo
+        let interior = rgb(LatticeStructureColour.interior), pale = rgb(LatticeStructureColour.pale)
+        return rho.map { r in
+            r.map { v in
+                let frac = span > 1e-4 ? Float(Swift.min(Swift.max((v - lo) / span, 0), 1)) : 0
+                return SIMD4(simd_mix(pale, interior, SIMD3(repeating: Swift.min(Swift.max(0.25 + 0.75 * frac, 0), 1))), 1)
             }
         }
     }

@@ -327,7 +327,8 @@ public final class LatticeLayoutPreview: ObservableObject {
         if path == sessionPath, s == lastSettings, ok == lastOrganicKey, !stressMoved, task != nil || bars != nil, !mapNeedsLay,
            !wantsExact {
             if solidChanged, task == nil || bars != nil { solidToggled() }
-            else if solid, !laying, let g = bars?.solid, !isOrganic, g.smooth != Self.cutSmoothWanted(lattice: latticeAtLay, printAccurate: printAccurate) {
+            else if !laying, let g = solid ? bars?.solid : bars?.sheets?.map, !isOrganic,   // ★ SHEETS: a sheet's map in X-ray too
+                    g.smooth != Self.cutSmoothWanted(lattice: latticeAtLay, printAccurate: printAccurate) {
                 mapTask?.cancel()   // ★ notes28: Print-accurate preview switched — the cut drawn the other way (its map again)
                 mapTask = Task { [weak self] in await self?.addMap(again: true) }
             }
@@ -576,8 +577,15 @@ public final class LatticeLayoutPreview: ObservableObject {
 
     /// The span of relative density the bars are drawn over (the key's scale), and the median cell (its millimetres).
     public func keyScale() -> (lo: Double, hi: Double, cellMM: Double)? {
-        guard let laid, laid.barCount > 0 else { return nil }
+        guard let laid, laid.barCount > 0 || !laid.sheets.isEmpty else { return nil }
         if let c = scaleCache, c.token == laid.token { return c.scale }
+        if !laid.sheets.isEmpty {   // ★ SHEETS: the walls' densities, the median region's cell
+            let rho = LatticeLayoutColours.sheetDensities(laid.sheets).flatMap { $0 }.filter { $0 > 0 }
+            let cells = laid.sheets.map(\.cellMM).sorted()
+            let scale = (lo: rho.min() ?? 0, hi: rho.max() ?? 0, cellMM: cells.isEmpty ? 0 : cells[cells.count / 2])
+            scaleCache = (laid.token, scale)
+            return scale
+        }
         let rho = LatticeLayoutColours.densities(laid, type: Self.lawType(latticeAtLay))
         let cells = laid.barCell.sorted()
         let scale = (lo: rho.min() ?? 0, hi: rho.max() ?? 0, cellMM: Double(cells.isEmpty ? 0 : cells[cells.count / 2]))
@@ -599,6 +607,7 @@ public final class LatticeLayoutPreview: ObservableObject {
     }
     public func read(at p: SIMD3<Float>) -> Reading? {
         guard let laid else { return nil }
+        if !laid.sheets.isEmpty { return Self.readSheet(laid, at: p, lookup: cellLookup()) }   // ★ SHEETS
         return Self.read(laid, at: p, lattice: latticeAtLay, lookup: latticeAtLay.gradingMode.fitsShape ? cellLookup() : nil)
     }
     /// The same, for a given layout and settings (tests read it directly).
@@ -647,7 +656,17 @@ public final class LatticeLayoutPreview: ObservableObject {
         let key = [b.token, field == nil ? 0 : stressKey, grade ? 1 : 0, latticeAtLay.topologyID.hashValue, organic ? 1 : 0,
                    LatticeLayoutColours.controlOneColour ? 1 : 0, b.solid?.token ?? -1, b.hidden ? 1 : 0, b.dimmed ? 1 : 0,
                    b.solid?.smooth == true ? 1 : 0]   // ★ notes28
+            + (b.sheets.map { $0.mapKey } ?? [])   // ★ SHEETS: its map landed
         if let c = drawnCache, c.key == key { return c.bars }
+        if var sh = b.sheets {   // ★ SHEETS: the wall-thickness key (or the stress), one colour per cell, on the sheet pass
+            sh.colours = LatticeLayoutColours.sheetColours(laid.sheets, stress: field.map(LatticeLayoutColours.Stress.init(field:)))
+            var h = Hasher()
+            key.forEach { h.combine($0) }
+            sh.colourKey = h.finalize()
+            b.sheets = sh
+            drawnCache = (key, b)
+            return b
+        }
         b.colours = LatticeLayoutColours.colours(laid, type: Self.lawType(latticeAtLay), grade: grade,
                                                  stress: field.map(LatticeLayoutColours.Stress.init(field:)),
                                                  lookup: grade ? cellLookup() : nil, oneColour: organic)
@@ -743,19 +762,23 @@ public final class LatticeLayoutPreview: ObservableObject {
             guard !Task.isCancelled else { return }
             token &+= 1
             // the last map stays until this layout's own lands (no flash of a closed part on every change)
-            bars = LatticeLayoutBarsInputs(token: token, bars: r.bars, solid: solidWanted ? bars?.solid : nil, flags: r.barFlags)
+            var next = LatticeLayoutBarsInputs(token: token, bars: r.bars, solid: solidWanted ? bars?.solid : nil, flags: r.barFlags)
+            // ★ SHEETS: a sheet layout's fields (no bars), drawn on the engine's map — the last one stays until this lay's lands
+            if !r.sheets.isEmpty { next.sheets = Self.sheetDrawing(r, token: token, lastMap: bars?.sheets) }
+            bars = next
             laid = LatticeLayoutColours.Laid(r, token: token)   // ★ Install 3
             timing = Timing(openMS: openMS, readMS: r.msRead, cellsMS: r.msCells, barsMS: r.msBars, bars: r.barCount)
-            if r.barCount > 0 { problem = nil }   // ★ notes28: nothing laid is said after the reason is read (below)
+            if r.laidAnything { problem = nil }   // ★ notes28: nothing laid is said after the reason is read (below)
+            LatticeSheetsLaid.shared.set(r.sheetSeams, path: path)   // ★ SHEETS: the page's "Where regions meet" reads it
             layStages["readMS"] = r.msRead; layStages["cellsMS"] = r.msCells; layStages["barsMS"] = r.msBars   // ★ his 11-22
             laying = false; layProgress = nil
             layWallS[timeKey(path, .exact)] = (openMS + r.msRead + r.msCells + r.msBars) / 1000
-            if solidWanted { await addMap() }
+            if solidWanted || !r.sheets.isEmpty { await addMap() }   // ★ SHEETS: a sheet is drawn on the map (X-ray too)
             nozzleTask?.cancel(); nozzleLine = nil; nozzleState = .notAsked
             await solidReasonCheck(lattice: latticeAtLay)   // ★ his ruling 11-14: why it is solid (one coarse map, cheap)
             // ★ notes28 (img 76): nothing laid — the solid pop-up names the real reason (raised by the check above); the general
             // line only when the engine gives none
-            if r.barCount == 0, !Task.isCancelled { problem = solidReason == nil || Self.controlNoSolidPopUp ? Self.noFitLine : nil }
+            if !r.laidAnything, !Task.isCancelled { problem = solidReason == nil || Self.controlNoSolidPopUp ? Self.noFitLine : nil }
             // ★ his 11-17 "add a chip to ask what it should be": the faces this layout's regions run into that no rule decides
             // (D23), asked with the SAME settings it was laid with — a second call, so a dragged slider never waits on it
             if !Task.isCancelled, let found = try? await session.places(s), !Task.isCancelled {
@@ -1408,12 +1431,26 @@ public final class LatticeLayoutPreview: ObservableObject {
     }
 
     private func addMap(again: Bool = false) async {
-        guard let session, let box, let b = bars, again || b.solid?.token != b.token else { return }
+        let sheetNeeds = bars.map { $0.sheets != nil && $0.sheets?.map?.token != $0.token } ?? false   // ★ SHEETS
+        guard let session, let box, let b = bars, again || (solidWanted && b.solid?.token != b.token) || sheetNeeds else { return }
+        // ★ SHEETS: the sheet's own map of this lay is the solid view's too (no second map)
+        if !again, !sheetNeeds, solidWanted, let m = b.sheets?.map, m.token == b.token {
+            var now = b
+            now.solid = m
+            bars = now
+            return
+        }
         do {
             let m = try await Self.map(session, box, token: b.token, smooth: latticeAtLay.isOrganic,
                                        cutSmooth: Self.cutSmoothWanted(lattice: latticeAtLay, printAccurate: printAccurate))   // ★ notes28
-            guard !Task.isCancelled, solidWanted, var now = bars, now.token == b.token else { return }
-            now.solid = m.grid
+            guard !Task.isCancelled, solidWanted || b.sheets != nil, var now = bars, now.token == b.token else { return }
+            if solidWanted { now.solid = m.grid }
+            if var sh = now.sheets, let laid, laid.token == now.token {   // ★ SHEETS: the map, and which field holds each voxel
+                sh.map = m.grid
+                sh.regions = sh.fields.count > 1 ? await Self.sheetRegions(sh.fields, map: m.grid, laid: laid) : nil
+                guard !Task.isCancelled, bars?.token == b.token else { return }
+                now.sheets = sh
+            }
             bars = now
             timing?.mapMS = m.ms
             if let i = remembered.firstIndex(where: { $0.bars.token == now.token }) {
@@ -1616,6 +1653,12 @@ public final class LatticeLayoutPreview: ObservableObject {
                 s.byStress = false
                 s.strutWidthMM = s.minStrutLines * s.beadMM
             }
+            // ★ SHEETS (notes28 sheets SPEC 1.3, his answer 1): Auto's wall for a sheet is core's by the cell — two lines in a
+            // small cell (the lightest that prints, the cells kept open), growing with a larger cell — never a typed width
+            if LatticeSheets.autoByCell(l, pageManual: p.latticePageManual) {
+                s.autoByCell = true
+                s.strutWidthMM = 0
+            }
             // ★ K7, K8 (his 11-24: "why can't we just extend cells and cut them off where the bed is?"): Auto's cells fitted to
             // the faces the grid is square to — the size with the fewest slivers there, a sliver left taken in by the row
             // beside it (core: a region laid on one grid; Structural's walls keep their own cells and are only said). Manual
@@ -1755,6 +1798,17 @@ public final class LatticeLayoutPreview: ObservableObject {
         // ★ Install 2: the rows' densities only in Per region (the proposal: "Shown only in this mode, sent only in this mode")
         let rowDensity = l.densityMode == .perRegion && !s.byStress
         s.perRegion = rowDensity
+        // ★ SHEETS (notes28 sheets SPEC 1.2, 1.5): one grid per region, Uniform, one cell size — what core lays a sheet with
+        // whatever is asked, sent as it is laid (so the page never shows a setting the lattice does not follow); no Finish
+        // Skin (a sheet has no strut ends: core's R8); "Where regions meet" (his pick, else the stage's default)
+        if LatticeSheets.isSheet(s.topology) {
+            s.algorithm = "uniform"
+            s.gradeToShape = false
+            s.cellsByStress = false
+            s.maxStep = 0
+            s.skin = false
+            s.sheetSeam = LatticeSheets.seam(l)
+        }
         return s
     }
 

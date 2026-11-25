@@ -50,6 +50,9 @@ public struct LatticeLayoutBarsInputs: Equatable {
     /// ★ his 11-22 (the print-accurate lattice made on the Mac): the print file's own lattice; when set it draws instead of the
     /// vines and the bars (they stay for the key, the card and picking), in the same colour and light.
     public var fileMesh: LatticeFileMesh?
+    /// ★ SHEETS (notes28 sheets SPEC 5): a sheet layout's fields (LatticeLayoutSheetPass), drawn in place of bars (a sheet lays
+    /// none); nil for a strut layout.
+    public var sheets: LatticeSheetDrawing?
     public init(token: Int, bars: [Float], hidden: Bool = false, solid: LatticeLayoutSolidGrid? = nil, flags: [UInt8] = [],
                 colours: [SIMD4<Float>] = [], colourKey: Int = 0) {
         self.token = token; self.bars = bars; self.hidden = hidden; self.solid = solid; self.flags = flags
@@ -58,6 +61,7 @@ public struct LatticeLayoutBarsInputs: Equatable {
     public static func == (a: Self, b: Self) -> Bool {
         a.token == b.token && a.hidden == b.hidden && a.solid?.token == b.solid?.token && a.colourKey == b.colourKey
             && a.dimmed == b.dimmed && a.solid?.smooth == b.solid?.smooth   // ★ notes28: the same map drawn the other way
+            && a.sheets == b.sheets   // ★ SHEETS: its map lands after the lay; its colours
     }
 }
 
@@ -580,10 +584,12 @@ final class LatticeLayoutBarsPass {
     private(set) var vinePass: OrganicVinePass?
     /// ★ his 11-22: the print file's lattice from the Mac (nil: the vines or the bars draw).
     private(set) var filePass: LatticeFileMeshPass?
+    /// ★ SHEETS: a sheet layout's fields (nil: a strut layout's bars draw).
+    private(set) var sheetPass: LatticeLayoutSheetPass?
     var hidden = false
     /// ★ his pick 11-21: the last lattice, dimmed while the new one lays (`dimmedRGB`).
     var dimmed = false
-    var isDrawable: Bool { !hidden && count > 0 && buffer != nil }
+    var isDrawable: Bool { !hidden && ((count > 0 && buffer != nil) || sheetPass?.isDrawable == true) }
 
     /// ★ his pick 11-21: a lattice that is about to be replaced: its colour drained toward grey and darkened, so it reads as
     /// the old one at a glance (never hidden: he keeps his bearings while the new one lays).
@@ -708,11 +714,26 @@ final class LatticeLayoutBarsPass {
         } else {
             filePass = nil
         }
+        uploadSheets(inputs)   // ★ SHEETS
         let packed = Self.pack(inputs.bars, flags: inputs.flags)
         count = packed.count / 2
         buffer = packed.isEmpty ? nil : device.makeBuffer(bytes: packed, length: MemoryLayout<SIMD4<Float>>.stride * packed.count,
                                                           options: .storageModeShared)
         uploadColours(inputs)
+    }
+
+    /// ★ SHEETS: a sheet layout's fields, its map and colours (each on its own key: the map lands after the lay); nil tears the
+    /// sheet pass down.
+    func uploadSheets(_ inputs: LatticeLayoutBarsInputs) {
+        guard let sh = inputs.sheets else { sheetPass = nil; return }
+        if sheetPass == nil {
+            guard LatticeLayoutSheetPass.lastInitError == nil else { return }
+            do { sheetPass = try LatticeLayoutSheetPass(device: device) } catch {
+                LatticeLayoutSheetPass.lastInitError = "\(error)"   // nothing draws; a test reads this
+                NSLog("DIAG sheet pass: %@", "\(error)")
+            }
+        }
+        sheetPass?.upload(sh)
     }
 
     /// ★ Install 3: the bars' colours (one per bar), or none (the one colour). A count that is not the bars' is none.
@@ -767,8 +788,13 @@ final class LatticeLayoutBarsPass {
     func encodeGBuffer(_ enc: MTLRenderCommandEncoder, depthState: MTLDepthStencilState,
                        clipFromModel: simd_float4x4, eyeFromModel: simd_float4x4, eyeNormalBasis: simd_float4x4,
                        turning: Bool = false) -> Bool {
-        guard isDrawable, let buffer, enc.device === device else { return false }
+        guard isDrawable, enc.device === device else { return false }
         let c0 = Self.colour
+        if let sp = sheetPass, sp.isDrawable {   // ★ SHEETS: the field the print file is contoured from (no bars to draw)
+            return sp.encode(enc, depthState: depthState, clipFromModel: clipFromModel, eyeFromModel: eyeFromModel,
+                             eyeNormalBasis: eyeNormalBasis, albedo: SIMD3(Float(c0.r), Float(c0.g), Float(c0.b)), dimmed: dimmed)
+        }
+        guard let buffer else { return false }
         let c = dimmed ? Self.dimmedRGB(SIMD3(Float(c0.r), Float(c0.g), Float(c0.b))) : SIMD3(Float(c0.r), Float(c0.g), Float(c0.b))
         if let fp = filePass, fp.isDrawable {   // ★ his 11-22: the print file's own lattice, the vines' colour and light
             return fp.encode(enc, depthState: depthState, clipFromModel: clipFromModel, eyeFromModel: eyeFromModel,
@@ -833,6 +859,10 @@ extension MeshRenderer {
         var changed = false
         if pass.token != inputs.token { pass.upload(inputs); changed = true }
         else if pass.colourKey != inputs.colourKey { pass.uploadColours(inputs); changed = true }   // ★ Install 3
+        if pass.token == inputs.token, let sh = inputs.sheets, let sp = pass.sheetPass,   // ★ SHEETS: the same lay's map landed,
+           sp.mapKey != sh.mapKey || sp.colourKey != sh.colourKey {                         // or its colours moved
+            pass.uploadSheets(inputs); changed = true
+        }
         if pass.hidden != inputs.hidden { pass.hidden = inputs.hidden; changed = true }
         if pass.dimmed != inputs.dimmed { pass.dimmed = inputs.dimmed; changed = true }   // ★ his pick 11-21
         if pass.gridToken != (inputs.solid?.token ?? -1) || (inputs.solid.map { $0.smooth != pass.gridSmooth } ?? false) {
