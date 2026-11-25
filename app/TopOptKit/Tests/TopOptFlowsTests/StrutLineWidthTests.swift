@@ -363,9 +363,14 @@ final class StrutLineWidthTests: XCTestCase {
         //   * `LatticeSetupWizard.typeChangeLines` (the plain words before Save), `.pickType` (the page's two densities
         //     carried when a card is picked) and `.saveAndClose` (the densities stored per group and per face carried on Save).
         //   * `LatticePage`'s topology pane (the variant page's pick carries them the same way).
-        XCTAssertEqual(strutSites, 20,
-                       "the twenty audited lattice sites (AppModel 0, LatticePage 3, "
-                       + "WorkspacePlaceholder 4, ProjectModel 7, LatticeSetupWizard 6). "
+        // ★ RE-PINNED 20 -> 22 (2026-11-25, notes29: the Density dial, 100 % = the type's own quilt; builder N2): AUDITED.
+        //   * `LatticeSetupWizard`'s Grade boxes -> `LatticeDensityDial.Page(lineWidthMM:)`: the percent is read on the
+        //     strut-width dial, whose bottom is one extruded STRUT bead, never a wall loop.
+        //   * `WorkspacePlaceholder`'s per-face density keypad -> `LatticeDensityDial.accept(lineWidthMM:)`: the same dial,
+        //     refusing a percent past the type's open look with Allow quilt off.
+        XCTAssertEqual(strutSites, 22,
+                       "the twenty-two audited lattice sites (AppModel 0, LatticePage 3, "
+                       + "WorkspacePlaceholder 5, ProjectModel 7, LatticeSetupWizard 7). "
                        + "If this number moved, audit the new site and update the count.")
         XCTAssertTrue(offenders.isEmpty,
                       "lattice lineWidthMM site(s) reading a WALL bead:\n"

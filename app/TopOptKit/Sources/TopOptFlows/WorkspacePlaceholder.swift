@@ -12983,6 +12983,11 @@ public struct WorkspacePlaceholder: View {
                               // (printable→quilt); the store stays absolute.
                               // 0 (or less) clears back to AUTO — the one way
                               // out of a stored override.
+                              // ★ notes29: with Allow quilt off, past the type's open look is refused (centred pop-up)
+                              if aesthetic, pct > 0,
+                                 !LatticeDensityDial.accept(pct, allowQuilt: project.lattice.allowQuilt && project.latticePageManual,
+                                                            cellMM: cardCell, topology: project.lattice.topologyID,
+                                                            lineWidthMM: project.printParams.strutLineWidthMM) { return }
                               let f: Double? = pct <= 0 ? nil
                                   : aesthetic
                                   ? project.latticeDensityForPercent(

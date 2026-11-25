@@ -1791,13 +1791,15 @@ public struct LatticeSetupWizard: View {
             }
             .toggleStyle(SwitchToggleStyle(tint: DS.Color.okGreen.color))
             .latticeID("wizard-small-cells-thin-walls")
-            .disabled(project.lattice.allowQuilt)   // ★ 11-13: Allow quilt already lets cells go this small (the engine reads either)
-            captionLine(project.lattice.allowQuilt ? "Allow quilt is on: it already lets cells go this small."
-                        : model.smallCellsInThinWalls ? "Thin walls get small, denser cells instead of going solid."
-                                                    : "A wall too thin for an open cell stays solid.",
+            // ★ 11-13: Allow quilt already lets cells go this small. ★ notes29 (his notes on release 20): with it off the
+            // engine lays no cell under the open one (its small cells were the quilt), so the switch does nothing either way
+            .disabled(true)
+            captionLine(project.lattice.allowQuilt ? "Allow quilt does this now."
+                                                   : "Needs Allow quilt on.",
                         info: "small-cells",
-                        "New engine only. A wall too thin for an open cell at two-line struts takes small, denser cells "
-                        + "(never touching) instead of going solid.")
+                        "Small cells in a thin wall carry the thinnest strut, past the open look: that is the quilt. With "
+                        + "Allow quilt off no cell is smaller than the one that stays open, so a wall too thin for it stays "
+                        + "solid. With Allow quilt on, cells already go this small.")
         }
     }
 
@@ -3295,14 +3297,22 @@ public struct LatticeSetupWizard: View {
                         .foregroundStyle(DS.Color.textTertiary.color)
                     switch row {
                     case .grade:
+                        // ★ notes29 (his notes on release 20): the Density percent is the page's dial (100 % = the type's own
+                        // quilt, LatticeDensityDial); with Allow quilt off a percent past the open look is refused with the
+                        // centred pop-up. The store stays the density the run reads.
+                        let dial = LatticeDensityDial.Page(model.applied(to: project.lattice),
+                                                           lineWidthMM: project.printParams.strutLineWidthMM,
+                                                           allowQuilt: project.lattice.allowQuilt && project.latticePageManual)
                         HStack(spacing: DS.Space.s) {
-                            cellsPercentBox("cells-grade-from", title: "Grade from", value: model.relativeDensity) { v in
-                                model.relativeDensity = Swift.min(1, Swift.max(v, Swift.max(0.05, model.minRelativeDensity + 0.02)))
+                            cellsPercentBox("cells-grade-from", title: "Grade from", value: Swift.min(dial.shown(model.relativeDensity), dial.most / 100)) { v in
+                                guard let rho = dial.typed(v * 100) else { return }
+                                model.relativeDensity = Swift.min(1, Swift.max(rho, Swift.max(0.05, model.minRelativeDensity + 0.02)))
                                 rebuild()
                             }
                             Text("\u{2192}").font(.system(size: 13, weight: .bold)).foregroundStyle(DS.Color.textTertiary.color)
-                            cellsPercentBox("cells-grade-to", title: "Grade to", value: model.minRelativeDensity) { v in
-                                model.minRelativeDensity = Swift.max(0, Swift.min(v, model.relativeDensity - 0.02))
+                            cellsPercentBox("cells-grade-to", title: "Grade to", value: Swift.min(dial.shown(model.minRelativeDensity), dial.most / 100)) { v in
+                                guard let rho = dial.typed(v * 100) else { return }
+                                model.minRelativeDensity = Swift.max(0, Swift.min(rho, model.relativeDensity - 0.02))
                                 rebuild()
                             }
                             Text("density").dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
@@ -3326,6 +3336,7 @@ public struct LatticeSetupWizard: View {
                                  write: @escaping (Double) -> Void) -> some View {
         Text("\(Int((value * 100).rounded())) %")
             .font(.system(size: 12, weight: .bold)).monospacedDigit()
+            .said("\(title) \(Int((value * 100).rounded())) %")   // ★ notes29: the hosted test reads what the box shows
             .foregroundStyle(DS.Color.textPrimary.color)
             .padding(.vertical, 6).padding(.horizontal, DS.Space.m)
             .background(Capsule().fill(DS.Color.fillSelected.color))
