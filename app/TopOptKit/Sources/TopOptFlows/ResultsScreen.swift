@@ -85,7 +85,9 @@ public struct ResultsScreen: View {
     /// ★ Points on each load group's own faces (the light flow starts there), asked once when the screen opens.
     var loadSurfacePoints: () -> [[SIMD3<Float>]] = { [] }
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    /// ★ notes29: Reduce Motion, or Settings › Skip all animations.
+    private var reduceMotion: Bool { systemReduceMotion || AppSettings.skipAllAnimations }
     // ★ Results redesign state (his mockup, 2026-10-27)
     @State private var versionsOpen = true
     @State private var checksOpen = true

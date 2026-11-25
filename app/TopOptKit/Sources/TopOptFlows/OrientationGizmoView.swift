@@ -78,7 +78,9 @@ public struct OrientationGizmoView: View {
     /// absolute top-right corner without reaching the other panels.
     public static let standardSize: CGFloat = 210
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    /// ★ notes29: Reduce Motion, or Settings › Skip all animations.
+    private var reduceMotion: Bool { systemReduceMotion || AppSettings.skipAllAnimations }
 
     /// The SDF cell (the shared `globalId`) currently glowing from a pointer hover, or -1.
     @State private var hoverId: Float = -1

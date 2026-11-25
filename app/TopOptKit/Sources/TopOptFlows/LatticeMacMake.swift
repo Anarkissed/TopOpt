@@ -366,7 +366,8 @@ struct LatticeMacMakeModal: View {
 /// going, never how far: the Mac gives no true share of its steps).
 struct LatticeMacMakeBar: View {
     var body: some View {
-        TimelineView(.animation) { ctx in
+        TimelineView(.animation(minimumInterval: nil, paused: AppSettings.skipAllAnimations)) {   // ★ notes29: still with Skip all animations
+            ctx in
             Canvas { g, size in
                 let t = ctx.date.timeIntervalSinceReferenceDate
                 let track = Path(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: size.height / 2)
@@ -412,7 +413,8 @@ struct LatticeMacMakeCells: View {
     private static let purple = LatticeStructureColour.interior
 
     var body: some View {
-        TimelineView(.animation) { ctx in
+        TimelineView(.animation(minimumInterval: nil, paused: AppSettings.skipAllAnimations)) {   // ★ notes29: still with Skip all animations
+            ctx in
             Canvas { g, size in Self.draw(g, size: size, t: ctx.date.timeIntervalSinceReferenceDate) }
         }
     }
@@ -518,7 +520,8 @@ struct LatticeMacMakeVines: View {
     private static let purple = LatticeStructureColour.interior
 
     var body: some View {
-        TimelineView(.animation) { ctx in
+        TimelineView(.animation(minimumInterval: nil, paused: AppSettings.skipAllAnimations)) {   // ★ notes29: still with Skip all animations
+            ctx in
             Canvas { g, size in
                 let t = ctx.date.timeIntervalSinceReferenceDate
                 let cycle = 6.0

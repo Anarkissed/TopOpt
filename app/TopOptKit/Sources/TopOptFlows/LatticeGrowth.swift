@@ -39,9 +39,15 @@ public final class LatticeGrowth {
     public private(set) var clock: Float = 0
     /// The finished lattice landed: the growth sinks into it for `fadeS` from here (after the replay caught up). nil: not.
     public private(set) var fadeStarted: CFTimeInterval?
-    public static let fadeS: CFTimeInterval = 0.35
-    /// From the landing to the growth gone, at most: the catch-up, then the sink.
-    public static var landingS: CFTimeInterval { LatticeGrowthReplay.catchUpEndS + fadeS }
+    /// ★ notes29 (his "the end always feels too rushed"): the sink, 1.0 s eased (release 20: 0.35 s, straight) — his to tune.
+    nonisolated(unsafe) public static var fadeS: CFTimeInterval = 1.0
+    nonisolated(unsafe) static var fadeEases = true
+    static let release20FadeS: CFTimeInterval = 0.35
+    /// From the landing to the growth gone, at most: the catch-up (or, nothing left, the rest), then the sink.
+    public static var landingS: CFTimeInterval {
+        Swift.max(Swift.max(LatticeGrowthReplay.catchUpEndS, LatticeGrowthReplay.restS) + fadeS,
+                  LatticeGrowthReplay.minTotalS)   // ★ his review: a quick lay's end fills the 8 s
+    }
     /// Fires on every visible change: the 3D view redraws itself (no page pass, never the workspace's body).
     public let changed = PassthroughSubject<Void, Never>()
     /// Pieces appended since this object was made (tests: growth was shown).
@@ -104,6 +110,8 @@ public final class LatticeGrowth {
         }
         let lay = PendingLay(opening: opening, radius: m, radiusDefault: Float(Self.strutWidthMM(nil, lineMM: lineMM) / 2),
                              expectedLeftS: expectedLeftS)
+        // ★ notes29: Skip all animations — no walls, no replay, no growth: the page's "Refreshing Lattice" card instead
+        if AppSettings.skipAllAnimations { stop(); return }
         settle(now)
         if landing(now) { pendingLay = lay; return }   // the last lay's landing first
         begin(lay, now: now)
@@ -130,6 +138,7 @@ public final class LatticeGrowth {
 
     /// A poll's new pieces (6 floats each: a, b), in the order the engine laid them. Ignored once sealed.
     func append(xyz: [Float], region: [Int32]) {
+        if AppSettings.skipAllAnimations { return }   // ★ notes29: Skip all animations — nothing grows on screen
         if queued != nil { queued!.xyz += xyz; queued!.region += region; return }
         let n = Swift.min(xyz.count / 6, region.count)
         guard n > 0, !sealed else { return }
@@ -303,7 +312,8 @@ public final class LatticeGrowth {
     /// tubes' size, sinking into the finished lattice).
     public func alpha(at t: CFTimeInterval) -> Float {
         guard let f = fadeStarted else { return 1 }
-        return Float(Swift.max(0, Swift.min(1, 1 - (t - f) / Self.fadeS)))
+        let x = Swift.max(0, Swift.min(1, (t - f) / Self.fadeS))
+        return Float(1 - (Self.fadeEases ? x * x * (3 - 2 * x) : x))   // ★ notes29: eased in and out
     }
 
     // MARK: the redraws

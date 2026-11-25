@@ -70,7 +70,9 @@ public struct FlexibleStagePage: View {
     /// ★ THE SQUISH PLAYER (maintainer: "a play button and/or timeline to drag that moves the
     /// squish in and out"): one amount 0…1 for the dent AND the walls (FlexibleSquishLoop).
     @StateObject private var loop = FlexibleSquishLoop()
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    /// ★ notes29: Reduce Motion, or Settings › Skip all animations.
+    private var reduceMotion: Bool { systemReduceMotion || AppSettings.skipAllAnimations }
     /// The fix pop-up (item 9): which issue, and the rule that opens it on a NEW one.
     @State private var fixShown: FlexibleIssue?
     /// ★ R7-E1 REVIEW: the flat press the camera last turned to ([Done], a press selected) — while it is the one he works on, a

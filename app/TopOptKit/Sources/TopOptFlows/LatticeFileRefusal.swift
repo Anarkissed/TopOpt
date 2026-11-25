@@ -216,7 +216,7 @@ struct LatticeFileSpotMarker: View {
 /// The marker's ring: orange, breathing for as long as it is up, a dot at the spot.
 struct LatticeFileSpotRing: View {
     var body: some View {
-        TimelineView(.animation) { ctx in
+        TimelineView(.animation(minimumInterval: nil, paused: AppSettings.skipAllAnimations)) { ctx in   // ★ notes29
             let t = ctx.date.timeIntervalSinceReferenceDate
             let breathe = 0.5 + 0.5 * sin(t * 2 * .pi / 1.6)
             ZStack {
