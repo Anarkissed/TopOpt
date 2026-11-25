@@ -2305,7 +2305,8 @@ endif()
 # lets an STL/3MF part run the full load-case pipeline on a slice without OCCT.
 if(Eigen3_FOUND)
   target_sources(topopt PRIVATE src/cli/loadcase.cpp
-    src/fea/face_loads.cpp)  # TO rebuild stage 1: loads from the drawn face
+    src/fea/face_loads.cpp      # TO rebuild stage 1: loads from the drawn face
+    src/simp/stress_measure.cpp)  # TO rebuild stage 2: stress read over a fixed size
 endif()
 
 if(OpenCASCADE_FOUND AND Eigen3_FOUND)

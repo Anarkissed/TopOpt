@@ -2,6 +2,17 @@
 
 Status 2026-11-22: APPROVED by the reviewer (rulings 06:18Z and 06:48Z); both helper prompts below are approved as they stand. Helpers start after the stage 0 move is released and the maintainer has created their channels. The maintainer's OK on helpers: "Yes two helpers are good as long as they're Opus 5.5". Each helper gets its own small channel (reviewer, TOReview, the helper) and never posts in #TORebuildGroup.
 
+## 0. Where the work stands (kept current; newest first)
+
+**2026-11-24, night.** Hold lifted by the maintainer ("Get started right away"; 24-hour wait waived; machine shared with #362 through HEAVY.lock and the channel #362_and_TOReview).
+
+- Stage 0 move: DONE in the tree (commit d1f00b8a, on #362's 559d094b), approved by the reviewer as five included files. PROOF PENDING: `agent-scratch/toreview/stage0_proof.sh` builds a frozen copy of commit b760e6c9 (`agent-scratch/toreview/src0`) once #362's release 19 suite frees the lock, compares run_job.cpp's object before and after (as built, and with asserts off if they differ), runs the three source-reading tests and one small job. Result in `stage0_proof.out`. Then: hand b760e6c9 to #362 in #TORebuildGroup, push, report to the reviewer.
+- Stage 0 tests, measuring only (`core/tests/to_rebuild_tests.cmake`): A surface of known shapes (today 0.12 to 0.24 mm against 0.05); C loaded area and D protection depth (today: area up to 13 % off, nothing loaded in 6 of 18 cases, depth up to 1 voxel off); E strength against a textbook stress (written, first numbers need the build).
+- Stage 1, written AHEAD of its build, all behind the one switch `TOPOPT_FACE_LOADS` (`to_stage_switch.hpp`; default = today, unchanged): the drawn-face loader (`face_loads.hpp/.cpp`: area, centre and force exact in 18 of 18 cases standalone; protected share within 0.05 voxel), wired into `loadcase.cpp` (loads, host tags, pads in mm via `TOPOPT_PAD_MM`, protection depth in mm, regions, scenarios, optional area springs for anchors); the stop rule watches the design's own stress (P-15, `plsm.cpp` + `minimize_plastic.cpp`); a version's file is checked before it is shown (R-07, `to_run.inc`). Syntax-checked only; NOT built, NOT run on a part.
+- Stage 1, not written: A-05 (the plain "too weak as drawn" line needs a report key agreed with #362); R-08 (one accept rule) moves to stage 2, where loop, certificate and file check get one number; the bridge's own copy of the tagging (#362); the lattice's region mask uses the protection's voxel layers (`to_export.inc` `region_lattice_mask`, bar R5: joint with LatticeReview before the default flips); the export's keep regions.
+- Stage 2, written ahead: `stress_measure.hpp/.cpp` (stress averaged over a ball of a stated diameter in mm), read in test E beside today's peak and beside the same solve with stiffness E x fill instead of E x fill^3 (A-01). Not built.
+- Next with the lock: the proof; then build the tree's tip and run tests A, C/D, E; then the stage 1 table on the reference parts with the switch at voxel / face / face_spring (three settings), pad 2 / 3 / 4.5 mm.
+
 ## 1. Who does what
 
 Fewest helpers that save real time: two, each for ONE stage, each started only after stage 0's split is released (before that every stage would edit `run_job.cpp`).

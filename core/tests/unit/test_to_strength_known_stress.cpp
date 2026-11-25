@@ -6,8 +6,16 @@
 // about 3.03 for a plate ten holes wide). The tilt puts the peak on a
 // stair-stepped part of the hole, which is where a voxel stress reading is
 // weakest. The plate is solved at four resolutions (hole radius 3, 4, 6, 8
-// voxels) and with two ways of filling the hole's edge: each voxel all-or-nothing,
-// and each voxel's exact fill fraction.
+// voxels) and with three ways of treating the hole's edge: each voxel
+// all-or-nothing; each voxel's exact fill fraction solved as today (stiffness
+// E x fill^3, ledger A-01); and the exact fill fraction solved with stiffness
+// E x fill (a cut voxel is about as stiff as the material it holds).
+//
+// The plate is the SAME physical plate at every resolution (hole radius 6 mm), so
+// a reading over a fixed size in mm can be compared across resolutions. On the
+// E x fill arm the stress is also read over 0.9, 1.8 and 3.6 mm (2, 4 and 8 line
+// widths of 0.45 mm; stress_measure.hpp). An averaged reading sits below the
+// textbook peak by design, so those columns are judged on their spread only.
 //
 // Rule 5 asks: within 5 % of the textbook value, and the four resolutions within
 // 10 % of one another. Today's reading is the peak over voxels and is not
@@ -28,6 +36,7 @@
 #include "topopt/fea.hpp"
 #include "topopt/materials.hpp"
 #include "topopt/simp.hpp"
+#include "topopt/stress_measure.hpp"
 #include "topopt/voxel.hpp"
 
 using topopt::DirichletBC;
@@ -42,11 +51,15 @@ constexpr double kTiltDeg = 30.0;
 constexpr double kTextbook = 3.03;    // Kirsch 3.0, finite width d/W = 0.1
 constexpr int kThickness = 2;         // voxels
 constexpr int kSub = 8;
+constexpr double kHoleRadiusMm = 6.0;
+constexpr double kSizesMm[3] = {0.9, 1.8, 3.6};
 
 struct Row {
   int radius_voxels = 0;
   double ratio_binary = 0.0;
-  double ratio_fill = 0.0;
+  double ratio_fill = 0.0;         // exact fill, stiffness E x fill^3 (today)
+  double ratio_fill_linear = 0.0;  // exact fill, stiffness E x fill
+  double over_size[3] = {0.0, 0.0, 0.0};  // E x fill arm, read over kSizesMm
 };
 
 std::vector<NodalLoad> edge_tractions(const VoxelGrid& g, double sxx, double syy,
@@ -76,13 +89,14 @@ std::vector<NodalLoad> edge_tractions(const VoxelGrid& g, double sxx, double syy
   return loads;
 }
 
-double peak_ratio(int radius_voxels, bool exact_fill, bool* ok) {
+double peak_ratio(int radius_voxels, bool exact_fill, double penalty, bool* ok,
+                  double* over_size = nullptr) {
   const int w = 20 * radius_voxels;  // plate ten holes wide
   VoxelGrid g;
   g.nx = w;
   g.ny = w;
   g.nz = kThickness;
-  g.spacing = 1.0;
+  g.spacing = kHoleRadiusMm / radius_voxels;
   g.origin = Vec3{0.0, 0.0, 0.0};
   g.tags.assign(static_cast<std::size_t>(w) * w * kThickness, topopt::VoxelTag::Interior);
 
@@ -133,7 +147,7 @@ double peak_ratio(int radius_voxels, bool exact_fill, bool* ok) {
   topopt::SimpParams params;
   params.youngs_modulus = m.youngs_modulus_mpa;
   params.poisson = m.poisson;
-  params.penalty = 3.0;
+  params.penalty = penalty;
 
   topopt::KnockdownSpec knockdown;
   const topopt::FixedDesignAnalysis res = topopt::analyze_fixed_design(
@@ -141,6 +155,11 @@ double peak_ratio(int radius_voxels, bool exact_fill, bool* ok) {
       topopt::SolverKind::JacobiCG, 0.0, knockdown, true,
       static_cast<double>(g.tags.size()));
   *ok = res.max_von_mises > 0.0 && std::isfinite(res.max_von_mises);
+  if (over_size != nullptr && res.von_mises_field.size() == density.size())
+    for (int q = 0; q < 3; ++q)
+      over_size[q] = topopt::peak_stress_over_size(g, res.von_mises_field, density, 0.5,
+                                                   kSizesMm[q]) /
+                     kFarStress;
   return res.max_von_mises / kFarStress;
 }
 
@@ -153,15 +172,20 @@ int main(int argc, char** argv) {
   std::printf("[test E] plate with a hole, pulled at %.0f deg to the grid; peak / far "
               "stress, textbook %.2f\n",
               kTiltDeg, kTextbook);
-  std::printf("%-22s %14s %14s\n", "hole radius (voxels)", "all-or-nothing", "exact fill");
+  std::printf("%-12s %9s %14s %16s %14s %9s %9s %9s\n", "hole radius", "voxel mm",
+              "all-or-nothing", "fill, E x fill^3", "fill, E x fill", "over 0.9", "over 1.8",
+              "over 3.6");
   for (int r : {3, 4, 6, 8}) {
     Row row;
     row.radius_voxels = r;
-    bool ok1 = false, ok2 = false;
-    row.ratio_binary = peak_ratio(r, false, &ok1);
-    row.ratio_fill = peak_ratio(r, true, &ok2);
-    if (!ok1 || !ok2) ++failures;
-    std::printf("%-22d %14.3f %14.3f\n", r, row.ratio_binary, row.ratio_fill);
+    bool ok1 = false, ok2 = false, ok3 = false;
+    row.ratio_binary = peak_ratio(r, false, 3.0, &ok1);
+    row.ratio_fill = peak_ratio(r, true, 3.0, &ok2);
+    row.ratio_fill_linear = peak_ratio(r, true, 1.0, &ok3, row.over_size);
+    if (!ok1 || !ok2 || !ok3) ++failures;
+    std::printf("%-12d %9.3f %14.3f %16.3f %14.3f %9.3f %9.3f %9.3f\n", r,
+                kHoleRadiusMm / r, row.ratio_binary, row.ratio_fill, row.ratio_fill_linear,
+                row.over_size[0], row.over_size[1], row.over_size[2]);
     rows.push_back(row);
   }
   auto band = [&](double Row::*f, const char* name) {
@@ -173,13 +197,23 @@ int main(int argc, char** argv) {
     }
     const double spread = lo > 0.0 ? hi / lo - 1.0 : 1e300;
     const bool pass = worst <= 0.05 && spread <= 0.10;
-    std::printf("%-16s worst miss from textbook %5.1f %%, spread across resolutions "
+    std::printf("%-18s worst miss from textbook %5.1f %%, spread across resolutions "
                 "%5.1f %%  %s\n",
                 name, 100.0 * worst, 100.0 * spread, pass ? "ok" : "outside rule 5");
     if (gate && !pass) ++failures;
   };
   band(&Row::ratio_binary, "all-or-nothing");
-  band(&Row::ratio_fill, "exact fill");
+  band(&Row::ratio_fill, "fill, E x fill^3");
+  band(&Row::ratio_fill_linear, "fill, E x fill");
+  for (int q = 0; q < 3; ++q) {
+    double lo = 1e300, hi = 0.0;
+    for (const Row& r : rows) {
+      lo = std::min(lo, r.over_size[q]);
+      hi = std::max(hi, r.over_size[q]);
+    }
+    std::printf("read over %.1f mm   spread across resolutions %5.1f %%\n", kSizesMm[q],
+                lo > 0.0 ? 100.0 * (hi / lo - 1.0) : 0.0);
+  }
   std::printf("[test E] %s: %d failure(s)\n", gate ? "gate" : "measure only", failures);
   return failures == 0 ? 0 : 1;
 }
