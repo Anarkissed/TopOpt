@@ -302,12 +302,20 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
   const double h = sg.spacing;
   const Vec3 o = sg.origin;
   const Vec3 top{o.x + nx * h, o.y + ny * h, o.z + nz * h};
-  {  // A design-box run prints outside the drawn part: not this path (yet).
+  {  // A design-box run prints outside the drawn part: not this path (yet). Its
+     // grid tags material more than a voxel outside the part's box; a run on the
+     // part alone tags only voxels whose centre is inside the part.
     Vec3 lo, hi;
     bounding_box(part, lo, hi);
-    if (lo.x > o.x + 2 * h || lo.y > o.y + 2 * h || lo.z > o.z + 2 * h ||
-        hi.x < top.x - 2 * h || hi.y < top.y - 2 * h || hi.z < top.z - 2 * h)
-      return fail("a design-box run (the grid is larger than the drawn part)");
+    for (int kz = 0; kz < nz; ++kz)
+      for (int j = 0; j < ny; ++j)
+        for (int i = 0; i < nx; ++i) {
+          if (sg.tags[(static_cast<std::size_t>(kz) * ny + j) * nx + i] == VoxelTag::Empty) continue;
+          const Vec3 c = sg.voxel_center(i, j, kz);
+          if (c.x < lo.x - h || c.y < lo.y - h || c.z < lo.z - h || c.x > hi.x + h ||
+              c.y > hi.y + h || c.z > hi.z + h)
+            return fail("a design-box run (material outside the drawn part)");
+        }
   }
   const PlsmKnotLattice& L = v.plsm_lattice;
   const PlsmBasisKind B = v.plsm_basis_kind;
