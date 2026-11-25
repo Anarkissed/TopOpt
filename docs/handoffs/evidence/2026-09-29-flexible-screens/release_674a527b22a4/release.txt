@@ -1,0 +1,68 @@
+# Release 674a527b22a4 - 2026-11-25: release (20) - claude/organic-1 6ed45178, one worker swap (0e611d2cd873 -> 674a527b22a4)
+# Release (20): all nine strut cell types on the new lattice engine (engine + app), BCC/Diamond/SC strength laws measured down to two-line struts, the old run kept on the octet, and the TO rebuild's Stage 0 file move.
+# Gates in the gate tree (b9-screens-362, its own vendor built from organic-1's core): the new classes; phase B's local half (core suites incl. lattice_types_matrix, strut_cell, lattice_width_bounds, lattice_types, strut_strength, lattice_certification, support_paint, print_frame, cli_lattice_file pair; the signed iPad build; preflight on his job). The whole app suite in three shards runs AFTER the install. Worker: swapped and restarted (the engine changed); route, demand, strength_job, organic cut 2, chain, job_stage and orientation_recheck e2e.
+# Commits:
+#   08461db9 Keep regions that meet along one edge no longer leave the export non-manifold (X-05)
+#   8318f1d3 TO review: ledger and file map after the Phase 1 reading (docs only)
+#   ed910960 TO research: paper register, every DOI checked (docs only)
+#   0d7e1dbe TO review: stiffness rule measured on three parts, cubed against linear (docs only)
+#   d4eaa0b8 TO review: mixed-precision switch is inert on the production path (docs only)
+#   29ad7d05 TO research: sections 3a to 3e, first draft (docs only)
+#   2198a2f3 TO rebuild: plan, rules and tests, proposal for review (docs only)
+#   01e59745 TO plan: the maintainer's answers to the plan decisions (docs only)
+#   d1de9139 TO plan: straight-member style parked for V2 by the maintainer (docs only)
+#   abd37700 TO research: the 13 papers behind bot checks, now read from the maintainer's copies (docs only)
+#   b6cc756d TO workplan: lanes, file-ownership map, order, release path, two helper prompts (docs only)
+#   8f747f45 TO workplan: solver helper prompt carries its papers, levers and Flexible tests (docs only)
+#   13c6a7fd TO workplan: solver prompt names the Flexible bridge entry points and its test (docs only)
+#   bc5b1804 TO review: today's print files against the CAD, first numbers (docs only)
+#   88fd3f3f TO review: Base and Pressing re-run, same outcome, no print file (docs only)
+#   737b808b TO tests: Stand v2/v3 and WallMount left out of the today column by the maintainer (docs only)
+#   2bc8a99c Merge remote-tracking branch 'origin/claude/flexible-screens' into claude/topopt-review-rebuild-3c317f
+#   d1f00b8a TO stage 0: TO code moved out of run_job.cpp into five included files, unchanged
+#   9ed347d4 TO stage 0: repo tests A (surface of known shapes) and E (strength against a textbook stress), measuring only
+#   44c884b2 notes28 cell types (builder D), step (a): the type matrix, with today's results
+#   04fb8a99 TO stage 0: repo tests C (loaded area) and D (protection depth), measuring only
+#   35138b38 TO workplan: stage 0 file names as moved (five included files), solve-file move goes to stage 5 (docs only)
+#   b760e6c9 TO stage 1 (ahead, not yet in the build): loads, anchors and protection depth taken from the drawn face
+#   edcf4945 notes28 cell types (builder D), PER-TYPE LAW/GEOMETRY COMMIT 1: the tetragonal cells and their width bounds
+#   3d853981 notes28 cell types (builder D), step (b): every strut type on the engine (shared fixes, per-type rules, a coupon per type)
+#   b200544a notes28 cell types (builder D), PER-TYPE LAW TABLE: docs/strength-check/cell-types.md (no code)
+#   f82ac0b8 Merge claude/notes28-celltypes-core b200544a (builder D): all nine strut cell types on the new lattice engine
+#   8f00d552 Merge origin/claude/organic-1 f82ac0b8 into claude/notes28-celltypes-core (builder D: closing the two open items)
+#   ded0daa0 Strut-law probe: options to measure a band extended downward (defaults unchanged)
+#   624a22d1 Merge remote-tracking branch 'origin/claude/organic-1' into claude/notes28-strut-laws
+#   6283d30f Merge claude/organic-1 f82ac0b8 (builder D: all nine strut cell types on the new lattice engine) into notes28-celltypes-app
+#   0825bf96 notes28 cell types (builder D): the two open items closed (fccz's coupon web; reentrant cut by a wall, and "Cannot Lattice" when the print check empties a region)
+#   5bdca042 Merge claude/notes28-celltypes-core 0825bf96 (builder D): fccz's coupon prints (16-sided joints only where a level strut meets a column), reentrant never starts in mid-air, an emptied region says Cannot Lattice
+#   3fa0b367 Merge claude/organic-1 5bdca042 (builder D: fccz's coupon, reentrant cut by a wall, Cannot Lattice when the print check empties a region) into notes28-celltypes-app
+#   d3cb1f85 notes28 cell types, app side (builder E): every strut type on the new engine
+#   bace9e8c Merge claude/notes28-celltypes-app d3cb1f85 (builder E): all strut cell types in the app on the new engine
+#   526c4a8f notes28 (362, his "Sure" 11-25): the old run keeps the octet only; the other strut types only where the new engine makes the lattice
+#   9bcbd058 Merge TOReview's Stage 0 hand-over b760e6c9 (claude/topopt-review-rebuild-3c317f): run_job.cpp's TO parts moved into includes
+#   0056a109 VariantEntryGatingTests reads run_job.cpp with its Stage 0 parts (to_*.inc)
+#   b2f1ffcc Evidence: bcc, diamond and sc measured down to the struts the new lattice engine lays
+#   2bbf381f LAW TABLES: bcc, diamond and sc strut-strength laws, tensor rows and diameter law down to the engine's struts
+#   70bf9e16 Type matrix: bcc, diamond and sc strength and credit come off kExpected (they pass)
+#   54ea41db Evidence: the suites on the low-density laws (70bf9e16's tree)
+#   932b0310 Merge claude/notes28-strut-laws 54ea41db (builder F): BCC, Diamond and SC strength laws measured down to the struts the new engine lays
+#   6ed45178 Release (20)'s gate: tests re-pinned to tonight's rulings (no app or core change)
+#   71d2c05b Release (20): all strut cell types on the new lattice engine, BCC/Diamond/SC strength measured down to the engine's struts, the TO rebuild's Stage 0 file move
+# Gates (this tree):
+#   08:19 his uncommitted files (left alone): app/TopOpt-Info.plist app/TopOpt.xcodeproj/project.pbxproj app/TopOpt.xcodeproj/xcshareddata/xcschemes/TopOpt.xcscheme 
+#   08:19 preflight job: /Users/nadim/.topopt-worker/d5af229ca8ee4a8f (his newest optimisation job the installed worker passes; read only)
+#   08:19 merged organic-1 as 71d2c05b (local, not pushed); app + core + tools == its; fingerprint 674a527b22a4
+#   ==> Manifold: /Users/nadim/dev/TopOpt/TopOpt/.vcpkg/installed-manifold (KEEP regions exported exactly)
+#   ==> building macOS slice (Eigen + OCCT, arm64)
+#   ==> building iOS simulator slice (Eigen + OCCT + lib3mf, arm64)
+#   ==> building iOS device slice (Eigen + OCCT + lib3mf, arm64)
+#   08:21 build_core green: topopt_vendored_core_674a527b22a4 + the Install 3 entry points + lay_organic_preview and Session::sweep_limits in every slice and arch
+#   08:22 worker CLI built: topopt-cli: core 674a527b22a4 (dirty=false), built Nov 25 2026 08:22:12; 3 data paths, all under the release worktree
+#   08:41 core suites passed: 100% tests passed out of 29 Total Test time (real) = 1113.28 sec 
+#   08:49 FAILED: signed iPad build (see ipad_build.log)
+#   14:43 pushed 71d2c05b
+#   14:43 worker script unchanged (release 11's)
+#   14:43 restarting the worker server (PID 79681; /health said "fingerprint": "674a527b22a4") while idle, so it runs the new script
+#   14:43 worker swapped: /health "fingerprint": "674a527b22a4"; data paths under the release worktree; preflight again OK; old CLI kept as build-fix/topopt-cli.0e611d2cd873-replaced-20261125
+#   14:44 route, demand, strength_job, organic cut 2 and chain tests vs the INSTALLED script, job_stage and orientation_recheck: ALL PASS
+#   14:44 the app_release scripts now expect 674a527b22a4
