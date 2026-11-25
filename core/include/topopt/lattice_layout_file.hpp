@@ -14,6 +14,7 @@
 // Eigen of its own); a STEP model needs a build with OCCT, as everywhere else.
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -46,6 +47,39 @@ inline MeshSpec file_mesh_defaults() {
   return m;
 }
 
+// ── PRINT RESOLUTION (2026-11-25, his "Offer print resolutions when exporting. Full detail vs medium vs coarse. All with
+// information about their file size estimates and resolution.") ────────────────────────────────────────────────────────
+// Job key "print_resolution": "full" | "medium" | "coarse" (not given: full, the job as before). A level loosens only how
+// finely the surface is written, never what prints: the layout, the cells, the struts' and walls' widths, the print check
+// and the strength check are the same at every level.
+//   FULL    the file as before, byte for byte (every strut type and the sheets).
+//   MEDIUM  sheets: surface within 0.05 mm (the bound the simplifier holds; Full's 0.02), contoured on a cell of half the
+//           thinnest wall (Full's third), never coarser than a 16th of the cell (Full's 24th; measured: as many
+//           triangles, a third quicker). Struts: a round strut and its joint balls 8 sides (Full's 12) where the corners
+//           then lie within 0.05 mm of the true round: every strut up to 1.4 mm wide (two lines, and more).
+//   COARSE  the same at 0.1 mm: struts up to 2.9 mm wide go to 8 sides (so a two-line lattice's struts are Medium's).
+// Walls stay at least two lines at every level: the sheets' bead guard and the floor's contoured wall
+// (sheet_print_wall_mm) take the level's bound, so a two-line sheet prints a little thicker (its thinnest wall measured
+// 0.95 mm at Full, 0.97 at Medium, 1.00 at Coarse; its plastic +5 % and +13 % on core's plate); a strut's flat sides are
+// never nearer its centre than at Full. What the print check does is the same: no level leaves a strut out that Full
+// keeps (a sheet's posts follow its surface, which the level moves by up to its bound).
+// A job with an Organic (weave) region is made at Full only: another level is refused (job_unreadable).
+enum class PrintResolution : std::uint8_t { Full = 0, Medium = 1, Coarse = 2 };
+inline constexpr PrintResolution kPrintResolutions[3] = {PrintResolution::Full, PrintResolution::Medium,
+                                                         PrintResolution::Coarse};
+const char* print_resolution_id(PrintResolution level);      // "full" | "medium" | "coarse"
+bool print_resolution_from_id(const std::string& id, PrintResolution& out);
+struct PrintResolutionLevel {
+  PrintResolution level = PrintResolution::Full;
+  double surface_mm = 0.02;            // the sheets' bound, and the struts' corners (0 at Full: the struts as before)
+  double strut_facet_mm = 0.0;         // MeshSpec::strut_facet_mm
+  double sheet_dc_wall_share = 3.0;    // MeshSpec::sheet_dc_wall_share
+  double sheet_dc_cell_share = 24.0;   // MeshSpec::sheet_dc_cell_share
+  const char* name = "Full detail";    // his words for the level
+  const char* words = "";              // the resolution in plain words: "surface within 0.05 mm"
+};
+PrintResolutionLevel print_resolution_level(PrintResolution level);
+
 // How the mesh is made from a layout.
 struct FileOptions {
   double pitch_mm = 0.25;   // how finely each cell's shape is read (read_open_space)
@@ -64,6 +98,51 @@ struct FileOptions {
   // sets mesh.weave_mesh), the writer's own Merged otherwise (a job with no weave region is never changed by it).
   bool weave_mesh_asked = false;
 };
+
+// PRINT RESOLUTION: the options a level makes the file with. Full leaves `o` exactly as given (the file as before);
+// Medium and Coarse set the sheets' bound and contouring cell and the struts' facets (print_resolution_level).
+void apply_print_resolution(PrintResolution level, FileOptions& o);
+
+// ── THE SIZE ESTIMATE PER LEVEL (before the file is made: from the layout alone) ─────────────────────────────────────
+// What it reads, all of it the layout's and the part's (no mesh): the part's own triangles; the cells, and of them those
+// cut by the part's surface; per round strut its radius and per joint its ball's (the writer's own reading: an end not on
+// the surface is a joint, its ball the widest strut there); the bridges (square bars); per sheet field its type, cell and
+// cells laid.
+struct PrintSizeInputs {
+  std::size_t part_triangles = 0;
+  std::size_t cells = 0, cut_cells = 0;
+  std::vector<float> strut_r;      // per round strut, mm
+  std::vector<float> ball_r;       // per joint, mm
+  std::size_t bridges = 0;
+  struct Sheet { TpmsKind kind = TpmsKind::Gyroid; double cell_mm = 0.0, wall_mm = 0.0; std::size_t cells = 0; };
+  std::vector<Sheet> sheets;
+  int bar_sides = 12;              // MeshSpec::bar_sides of the job
+  LatticeTopology topology = LatticeTopology::Octet;   // the layout's (a strut side's weight is its type's)
+  bool weave = false;              // a weave (Organic) region: no estimate (Full only)
+};
+PrintSizeInputs print_size_inputs(const Layout& layout, const Bars& bars, const std::vector<SheetField>& sheets,
+                                  std::size_t part_triangles, const FileOptions& options);
+// One level's estimate. `triangles` from the calibrated model (lattice_layout/print_resolution.cpp, THE MODEL: fitted on
+// core's fixtures at the three levels, its error stated there and held by test_print_resolution); `stl_bytes` is a
+// binary STL of that many (84 + 50 T, exact for the count); `threemf_bytes` the deflated 3MF the job writes (indexed).
+// `ms`: how long the Mac takes to make it, from a made job's own times (print_size_ms); -1 when not known.
+struct PrintSizeEstimate {
+  PrintResolution level = PrintResolution::Full;
+  std::size_t triangles = 0;
+  std::uint64_t stl_bytes = 0, threemf_bytes = 0;
+  double ms = -1.0;
+};
+PrintSizeEstimate estimate_print_size(const PrintSizeInputs& in, PrintResolution level);
+// The model behind it (for the test that fits and holds it): the terms at a level (0 the part's own triangles, 1 the cut
+// cells, 2 the cells of a strut lattice, 3 every round strut's sides, 4 every joint ball's sphere triangles, 5 the
+// bridges, 6 and 7 a gyroid's and a Schwarz-D's cell (mm) x cells) and each term's weight (a sheet's per level, a strut
+// side's per type).
+inline constexpr int kPrintSizeTerms = 8;
+std::array<double, kPrintSizeTerms> print_size_terms(const PrintSizeInputs& in, PrintResolution level);
+double print_size_weight(int term, PrintResolution level, LatticeTopology topology);
+// The bytes of a file of `triangles` triangles: binary STL (exact) and the job's deflated 3MF (estimated).
+std::uint64_t stl_bytes_for(std::size_t triangles);
+std::uint64_t threemf_bytes_for(std::size_t triangles);
 
 // What making the mesh found.
 struct FileReport {
@@ -320,6 +399,9 @@ struct FileJob {
   // through the door (print_frame.hpp, turn_file_job_inputs) once the part is open; the file is written standing on
   // the chosen face; the result's positions are turned back (turn_result_to_model) and it carries "print_frame".
   PrintFrame print_frame;
+  // PRINT RESOLUTION (key "print_resolution"): the level the file is made at; `options` already carry it
+  // (apply_print_resolution, in parse_file_job). Not given: Full.
+  PrintResolution resolution = PrintResolution::Full;
 };
 
 // P2: the door for a lattice file job: the zones, the cut pieces' cuts (regions and Protect skins), the demand field and
@@ -487,7 +569,20 @@ struct FileResult {
   // P2: the job's print frame (off: as before). On, the result's positions are in the model frame
   // (turn_result_to_model) and the file is in the print frame; the result says which ("print_frame").
   PrintFrame print_frame;
+  // PRINT RESOLUTION: the level the file was made at, and the three levels' estimates (from the layout, before the file
+  // was made; `sized` false when none was made: a weave job, or a refusal before the lay). The result's
+  // "print_resolution" block (written for a cell lattice that was laid):
+  //   {"level": "full", "levels": [{"level": "full", "name": "Full detail", "words": "surface within 0.02 mm",
+  //     "triangles": N, "stl_bytes": N, "threemf_bytes": N, "ms": N}, ...medium, coarse]}
+  // `ms` per level: how long the Mac takes to make that file (print_size_ms of this job's own times).
+  PrintResolution resolution = PrintResolution::Full;
+  bool sized = false;
+  PrintSizeEstimate estimates[3];
 };
+// PRINT RESOLUTION: how long the Mac takes to make `level`'s file of a job, from a made job's own times: the job again
+// without its strength check, the sheets' contouring and the write scaled to the level (calibrated with the triangles).
+// -1 when `r` made no file.
+double print_size_ms(const FileResult& r, PrintResolution level);
 // P2: every position of a result made in the print frame, turned back to the model frame (once, before it is written).
 // The strength block is turned where the check writes it.
 void turn_result_to_model(const PrintFrame& f, FileResult& r);
