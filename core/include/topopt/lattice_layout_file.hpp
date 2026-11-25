@@ -169,6 +169,13 @@ struct LatticeCredit {
   std::vector<double> cell_rho;      // its relative density (0 when the type has no law for it)
   std::size_t cells_credited = 0, cells_no_credit = 0;
   std::size_t cut = 0, lost_bar = 0, out_of_band = 0;   // why no credit (a cell counted under its first reason)
+  // SHEETS (SPEC 1.4, 3.3; builder B fills these, empty / 0 for a strut type). Per voxel: its own density,
+  // lattice_density_from_strut(type, its cell, half of sheet_wall_at(voxel centre)); 0 where `credited` is 0. The band
+  // test is per voxel. Per layout cell: the cells across the member there (Domain::Probe::room_through over the cell,
+  // rounded down; 0 not read). Voxels in a blend band (no credit, SPEC 1.5) and in the solid-wall membrane (solid).
+  std::vector<float> voxel_rho;
+  std::vector<std::int32_t> cell_across;
+  std::size_t blend_band = 0, membrane = 0;
 };
 // `solid`, when given, names the voxels to read (the part's); the rest are left -1. `left_out_at` is the file's
 // FileReport::left_out_at (the places the mesh writer left bars out for). Same answer for any number of threads.
@@ -369,6 +376,15 @@ struct FileResult {
   };
   std::vector<Emptied> emptied;
   std::vector<Layout::CellSearch> cell_search;   // K7, K8: Layout::cell_search (asked: CellSpec::cell_search, stretch_edges)
+  // SHEETS: the laid fields and seams (Outcome::sheets, sheet_seams; the result's "sheets" and "sheet_seams", written
+  // only for a sheet job). The seams' fell_back / why come from the file (the blend's loop), not the lay. In the result:
+  //   "sheets": [{"region": 1, "kind": "gyroid" | "schwarz_d", "cell_mm": 8, "wall_min_mm": 0.9, "wall_max_mm": 0.9,
+  //               "cells": 120}, ...]
+  //   "sheet_seams": [{"regions": [1, 2], "seam": "solid_wall" | "blend", "fell_back": false, "why": ""}, ...]
+  // The layout keys a sheet job reads (and the bridge's settings of the same names): "sheet_seam": "blend" |
+  // "solid_wall" (Settings::sheet_seam; not given: solid_wall), "auto_by_cell": true | false (StrutSpec::auto_by_cell).
+  std::vector<SheetField> sheets;
+  std::vector<SheetSeamBand> sheet_seams;
   bool cells_by_stress = false; // cell size by stress was applied to the layout (Outcome::cells_by_stress, C22)
   double step_held_at = 0.0;    // C24: the part's size-step limit kept (Outcome::step_held_at); 0 when none was asked
   double floor_cell_mm = 0.0, min_strut_mm = 0.0, open_look = 0.0, touch = 0.0;
@@ -478,6 +494,39 @@ inline constexpr std::size_t kEmptiedFewest = 4;
 // leave-out places `left_out_at` (FileReport::left_out_at; bars_present is the writer's own rule).
 std::vector<FileResult::Emptied> emptied_regions(const Bars& bars, const std::vector<Vec3>& left_out_at,
                                                  const std::vector<int>& weave_regions);
+
+// ── SHEETS: sheet_cells.bin (SPEC 1.6, the K4 colours and the Results card for a sheet, in place of bars.bin) ───
+// Written by the strength check beside strength.json (builder B) for a sheet job; little-endian:
+//   8 bytes "TOSHEET1", uint32 frame count F, uint32 cell count N, uint32 flags (0; reserved),
+//   F frames of 12 float32: origin xyz, ax[0] xyz, ax[1] xyz, ax[2] xyz (the part's own MODEL frame, P2 turned back),
+//   N records of 40 bytes, in the layout's cell order:
+//     int32 region, int32 frame (index into the F frames), float32 lo a, b, c (frame mm, the cube's low corner),
+//     float32 size_mm, float32 wall_mm (the cell's own wall, Cell::strut), float32 cells_across (0: not read),
+//     float32 margin (the check's margin for the cell, its worst voxel's; NaN: not judged), uint32 flags.
+inline constexpr char kSheetCellsMagic[8] = {'T', 'O', 'S', 'H', 'E', 'E', 'T', '1'};
+inline constexpr const char* kSheetCellsName = "sheet_cells.bin";
+struct SheetCellRecord {
+  std::int32_t region = 0, frame = 0;
+  float lo[3] = {0, 0, 0};
+  float size_mm = 0.0f, wall_mm = 0.0f, cells_across = 0.0f;
+  float margin = 0.0f;
+  std::uint32_t flags = 0;
+  // flags
+  static constexpr std::uint32_t kCredited = 1, kCut = 2, kBlendBand = 4, kOutOfBand = 8, kUnderFloor = 16,
+                                 kMembrane = 32;
+};
+static_assert(sizeof(SheetCellRecord) == 40, "sheet_cells.bin: 40 bytes a record");
+struct SheetCellsFile {
+  std::vector<Frame> frames;
+  std::vector<SheetCellRecord> cells;
+};
+// The records of a laid sheet layout (frames, region, frame, lo, size, wall, cut flag; margin NaN, the rest 0): the
+// check fills margin, cells_across and its flags. `frame` turns each frame into the model frame (P2).
+SheetCellsFile sheet_cells_of(const Layout& layout, const PrintFrame& frame = PrintFrame{});
+bool write_sheet_cells_file(const std::string& path, const SheetCellsFile& f);
+// Refuses a wrong magic, a file not exactly the size its counts need, a frame index out of range, a number that is not
+// finite (but a NaN margin); `why` says which.
+bool read_sheet_cells_file(const std::string& path, SheetCellsFile& out, std::string* why = nullptr);
 
 // The result file's name, and its text.
 inline constexpr const char* kFileResultName = "lattice_file.json";
