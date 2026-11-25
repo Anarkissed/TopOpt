@@ -46,7 +46,7 @@ Not in this proposal, flagged: the smooth-surface check (certify the true surfac
 - How cautious: start at HALF the published length, until his rig can check it; today's per-voxel peak stays as a softer second warning shown to engineers only. "Agreed."
 - Across layers: the same length with today's layer knockdown, said in the (i). "agreed"
 - Auto and engineer: Auto uses the material's own length with nothing on screen; engineers get one control, "Stress reading size (mm)", with an (i). "agreed"
-- Weight (printed grams at his infill): NOT decided; he asked for a simpler explanation first.
+- Weight: grams and "saved" count the plastic really used at his infill and walls, so both numbers describe the same printed part. "agreed. Never the solid unless the user set infill to 100%". (Closes M-07.)
 
 ## What it does to the lattice strength check
 
