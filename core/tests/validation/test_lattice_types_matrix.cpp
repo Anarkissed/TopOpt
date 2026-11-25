@@ -17,7 +17,8 @@
 //   skin      with Finish Skin, the cut ends are joined by the skin   RED: the same job with Skin off
 //             (read before Finish None's drop, which would take the open ends away and hide them)
 //   loose     no bar ends loose, no piece adrift                      RED: the same job with join and drop off
-//   print     the file is made, print-clean, counts sane              RED: a result that started in mid-air
+//   print     the file is made, print-clean, counts sane, no region   RED: a result that started in mid-air; a region
+//             emptied by the print check's leave-outs ("cannot_lattice") whose struts all start at its leave-out places
 //   strength  the six give a strength number                          RED: the same job with no strength job
 //   credit    on whole cells the check credits the type's lattice     (its RED: the same as strength's)
 //             and judges its struts by the type's own law
@@ -381,6 +382,7 @@ std::string check_coupon(const FileResult& r) {
 // one end only, no bridge is too long, and the struts left out are a small share of the lattice.
 std::string check_print(const FileResult& r) {
   if (!r.ok) return "no file: " + r.code + ": " + r.why;
+  if (!r.emptied.empty()) return "a region the print check emptied: " + r.emptied.front().why;
   char s[192];
   const std::size_t left = r.made.left_out_at.size();
   if (!r.made.print_clean || r.made.midair_starts != 0 || !r.made.layers.mid_air.empty() ||
@@ -458,15 +460,8 @@ const std::vector<Expected> kExpected = {
     {"diamond", "credit", "its band's floor is at strut/cell 0.1861: the dial's struts are under it"},
     {"sc", "strength", BELOW_BAND("0.2044")},
     {"sc", "credit", BELOW_BAND("0.2044")},
-    // Step (b), 2026-11-24.
-    {"fccz", "coupon",
-     "the mesh writer leaves a thin web between a level bridge's square bar and the 12-sided tube of a leg where they "
-     "meet a z column (3 mid-air islands at x 21, y 20.4, z 18.5 to 18.9 that the print loop cannot clear); with 16 "
-     "sides it prints clean: the writer's union, not the type's geometry"},
-    {"reentrant", "print",
-     "on the cube's face region its cells are cut by the cube's sides: the waist struts there start in the air just "
-     "above the solid floor, the print loop leaves them out and, as each waist hangs from only two struts below it, "
-     "the rest go after them (120 of 121 struts left out; print-clean, but no lattice)"},
+    // Step (b)'s fccz coupon and reentrant face-cube print were closed on the same branch (2026-11-25): the mesh
+    // writer's finer joints where a level strut meets a column, and re-entrant's resting waists.
 };
 const char* expected(const std::string& type, const std::string& check) {
   for (const Expected& e : kExpected)
@@ -753,6 +748,32 @@ int main() {
     CHECK(!check_cap(big, LatticeTopology::SimpleCubic).empty());
     CHECK(auto_cell_cap_mm(LatticeTopology::SimpleCubic) == 10.0 && std::isinf(auto_cell_cap_mm(LatticeTopology::Octet)) &&
           std::isinf(auto_cell_cap_mm(LatticeTopology::Bcc)));
+    // print / cannot_lattice: a region whose struts all start at the print check's leave-out places is named, with its
+    // plain line, and written as "cannot_lattice"; one that keeps most of its struts is not.
+    {
+      Bars bs;
+      for (int k = 0; k < 10; ++k) {
+        Bar b;
+        b.a = Vec3{2.0 * k, 0.0, 1.0};
+        b.b = Vec3{2.0 * k + 1.0, 0.0, 2.0};
+        b.width = 0.9;
+        b.region = k < 9 ? 1 : 2;   // region 1: nine struts; region 2: one (too few to say)
+        bs.bars.push_back(b);
+      }
+      std::vector<Vec3> at;
+      for (int k = 0; k < 9; ++k) at.push_back(Vec3{2.0 * k, 0.0, 0.55});   // each strut's lowest point
+      const std::vector<FileResult::Emptied> e = emptied_regions(bs, at, {});
+      std::vector<Vec3> some(at.begin(), at.begin() + 7);   // 7 of 9: under the 90 %
+      FileResult r;
+      r.ok = true;
+      r.emptied = e;
+      std::printf("  emptied: %zu region(s): %s\n", e.size(), e.empty() ? "" : e.front().why.c_str());
+      CHECK(e.size() == 1 && e.front().region == 1 && e.front().struts == 9 && e.front().left_out == 9 &&
+            has(e.front().why, "Region 1 cannot be latticed") && has(e.front().why, "mid-air"));
+      CHECK(emptied_regions(bs, some, {}).empty() && emptied_regions(bs, {}, {}).empty());
+      CHECK(has(file_result_json(r), "\"cannot_lattice\": [{\"region\": 1, \"struts\": 9, \"left_out\": 9"));
+      CHECK(!check_print(r).empty());
+    }
     // coupon: the same coupon at one-line struts (the 0.2 mm nozzle's case) fails the two-line test.
     FileResult one;
     one.ok = true;

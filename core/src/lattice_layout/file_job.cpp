@@ -1436,6 +1436,8 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
                                     job.options.layers.layer_mm);
       r.shallow.stands_added = r.made.stands_added;
     }
+    // A cell region the print check's leave-outs emptied is named, with why (FileResult::emptied).
+    r.emptied = emptied_regions(r.made.sagged ? *r.made.sagged : out.bars, r.made.left_out_at, weave_regions);
     if (!r.made.print_clean && !job.options.keep_if_not_clean) {
       const std::size_t mid = r.made.layers.mid_air.size(), one = r.made.layers.one_ended.size(),
                         far = r.made.layers.long_bridges.size();
@@ -1770,6 +1772,34 @@ bool load_file_job(const std::string& job_path, int threads, FileJob& job, StepM
   return run();
 }
 
+std::vector<FileResult::Emptied> emptied_regions(const Bars& bars, const std::vector<Vec3>& left_out_at,
+                                                 const std::vector<int>& weave_regions) {
+  std::vector<FileResult::Emptied> out;
+  if (left_out_at.empty()) return out;
+  const std::vector<char> present = bars_present(bars, left_out_at);
+  std::map<int, std::pair<std::size_t, std::size_t>> by_region;   // struts, left out
+  for (std::size_t i = 0; i < bars.bars.size(); ++i) {
+    const Bar& x = bars.bars[i];
+    if (x.skin || x.net || x.strand >= 0) continue;
+    if (std::find(weave_regions.begin(), weave_regions.end(), x.region) != weave_regions.end()) continue;
+    auto& n = by_region[x.region];
+    ++n.first;
+    if (i < present.size() && !present[i]) ++n.second;
+  }
+  for (const auto& [region, n] : by_region) {
+    if (n.first < kEmptiedFewest || static_cast<double>(n.second) < kEmptiedShare * static_cast<double>(n.first)) continue;
+    FileResult::Emptied e;
+    e.region = region;
+    e.struts = n.first;
+    e.left_out = n.second;
+    e.why = (region == 0 ? std::string("The part") : "Region " + std::to_string(region)) +
+            " cannot be latticed: its struts would start printing in mid-air there, so the print check left them out and "
+            "nothing is printed there.";
+    out.push_back(std::move(e));
+  }
+  return out;
+}
+
 FileResult run_file_job(const std::string& job_path, const std::string& out_dir, int threads,
                         void (*said)(const char*), const StrengthCheck* strength) {
   FileResult r;
@@ -1900,6 +1930,16 @@ std::string file_result_json(const FileResult& r) {
   if (r.small_patch_cells > 0) {   // K5: written only when the rule made a cell solid (else the report is as it was)
     std::snprintf(b, sizeof b, "    \"small_patch_cells\": %llu,\n", count(r.small_patch_cells));
     o += b;
+  }
+  if (!r.emptied.empty()) {   // written only when the print check emptied a region (else the report is as it was)
+    o += "    \"cannot_lattice\": [";
+    for (std::size_t i = 0; i < r.emptied.size(); ++i) {
+      const FileResult::Emptied& e = r.emptied[i];
+      std::snprintf(b, sizeof b, "%s{\"region\": %d, \"struts\": %llu, \"left_out\": %llu, \"why\": \"", i ? ", " : "", e.region,
+                    count(e.struts), count(e.left_out));
+      o += b + escaped(e.why) + "\"}";
+    }
+    o += "],\n";
   }
   if (!r.quilt_regions.empty()) {   // K3: written only when a region needed the quilt (else the report is as it was)
     o += "    \"quilt_regions\": [";
