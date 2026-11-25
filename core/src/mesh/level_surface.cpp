@@ -611,7 +611,8 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
     const std::string dir = std::getenv("TOPOPT_SURFACE_DEBUG");
     if (dir.size() > 1) {
       static int seq = 0;
-      write_stl_file(dir + "/cut_" + std::to_string(seq++) + ".stl", cut);
+      write_stl_file(dir + "/cut_" + std::to_string(seq) + ".stl", cut);
+      write_stl_file(dir + "/part_" + std::to_string(seq++) + ".stl", part);
     }
   }
   // 5) As written: the file stores float corners, and an exact cut can leave a
