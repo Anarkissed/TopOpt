@@ -1,0 +1,33 @@
+LATTICE DE-HOMOGENIZATION PROBE — diamond band [0.03874, 0.59201] (read from core)
+
+===== BULK LAW — periodic cell, band sweep (J2/J3/J5) =====
+EXPECTATION STATED BEFORE MEASURING (J2): PR 247 measured the uniaxial
+strut/macro concentration at ~25x (rho 0.31) and ~44x (rho 0.20) on
+voxelized joint peaks at vpc32. If K ~ A/rho that implies A ~ 8:
+  expected K(uni) ~ 160 at rho 0.05, ~ 8-13 at rho 0.60-0.90.
+Shear states are expected WORSE per unit macro vm for a stretch-
+dominated lattice; hydrostatic macro vm is 0, so K_vm(hydro) = inf —
+the vol term must be reported per unit pressure instead.
+  rho 0.039 vpc 16 (wall 1 vox, 0.0s): K_dev=0.0 K_vol=38.5  
+  rho 0.039 vpc 24 (wall 2 vox, 0.1s): K_dev=499.3 K_vol=79.6  
+  rho 0.039 vpc 32 (wall 2 vox, 0.4s): K_dev=358.6 K_vol=76.0  
+  rho 0.039 vpc 40 (wall 4 vox, 1.0s): K_dev=702.4 K_vol=76.0  
+  rho 0.039 vpc 48 (wall 4 vox, 1.9s): K_dev=584.5 K_vol=74.1  
+  rho 0.039 vpc 64 (wall 5 vox, 5.6s): K_dev=761.2 K_vol=80.7  
+  rho 0.039 vpc 80 (wall 7 vox, 14.9s): K_dev=903.9 K_vol=89.3  
+  rho 0.050 vpc 32 (wall 3 vox, 0.5s): K_dev=249.9 K_vol=57.9  
+  rho 0.050 vpc 48 (wall 5 vox, 2.2s): K_dev=342.5 K_vol=57.4  
+  rho 0.050 vpc 64 (wall 7 vox, 6.6s): K_dev=408.4 K_vol=58.5  
+  rho 0.070 vpc 16 (wall 2 vox, 0.0s): K_dev=211.8 K_vol=43.4  
+  rho 0.070 vpc 24 (wall 3 vox, 0.2s): K_dev=169.6 K_vol=41.4  
+  rho 0.070 vpc 32 (wall 4 vox, 0.5s): K_dev=239.4 K_vol=40.1  
+  rho 0.070 vpc 40 (wall 5 vox, 1.1s): K_dev=206.9 K_vol=40.2  
+  rho 0.070 vpc 48 (wall 6 vox, 2.3s): K_dev=252.9 K_vol=40.3  
+  rho 0.070 vpc 64 (wall 8 vox, 7.3s): K_dev=286.8 K_vol=44.0  
+  rho 0.100 vpc 32 (wall 5 vox, 0.7s): K_dev=119.1 K_vol=27.6  
+  rho 0.100 vpc 48 (wall 7 vox, 2.7s): K_dev=183.5 K_vol=32.3  
+  rho 0.125 vpc 32 (wall 5 vox, 1.1s): K_dev=110.3 K_vol=23.2  
+  rho 0.125 vpc 48 (wall 8 vox, 3.3s): K_dev=105.1 K_vol=23.3  
+
+DONE (rc=0).
+exit 0

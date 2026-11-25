@@ -445,23 +445,13 @@ std::string check_refused(const FileResult& r) {
 
 // ── KNOWN FAILURES TODAY ──────────────────────────────────────────────────────
 struct Expected { const char* type; const char* check; const char* reason; };
-#define BELOW_BAND(floor)                                                                                        \
-  "the type's measured density band starts past its open look (its band's floor at strut/cell " floor ", the open " \
-  "look 0.1898): no strut laid without the quilt is credited, so the whole-part cube, with no solid, has no number"
-// The strength-credit checks of bcc, diamond and sc stay listed until builder F (claude/notes28-strut-laws, 2026-11-24)
-// lands their laws measured down to the engine's two-line struts: then they pass, are reported XPASS, and come off.
+// The strength-credit checks of bcc, diamond and sc were listed here until builder F (claude/notes28-strut-laws,
+// 2026-11-25) landed their laws measured down to the engine's two-line struts (their bands now start at strut/cell
+// 0.080 / 0.088 / 0.085, evidence/2026-11-25-strut-laws-low-density): they then passed (XPASS) and came off.
 const std::vector<Expected> kExpected = {
-    // Step (a), 2026-11-24, on claude/organic-1 3c2c2f90.
-    {"bcc", "strength", BELOW_BAND("0.2192")},
-    {"bcc", "credit", BELOW_BAND("0.2192")},
-    {"diamond", "strength",
-     "its band's floor is at strut/cell 0.1861, a hair under the open look 0.1898: the cube's struts (dial 0.45) are "
-     "under it, so no cell is credited and the whole-part cube has no number"},
-    {"diamond", "credit", "its band's floor is at strut/cell 0.1861: the dial's struts are under it"},
-    {"sc", "strength", BELOW_BAND("0.2044")},
-    {"sc", "credit", BELOW_BAND("0.2044")},
-    // Step (b)'s fccz coupon and reentrant face-cube print were closed on the same branch (2026-11-25): the mesh
-    // writer's finer joints where a level strut meets a column, and re-entrant's resting waists.
+    // Step (b)'s fccz coupon and reentrant face-cube print were closed on builder D's branch (2026-11-25): the mesh
+    // writer's finer joints where a level strut meets a column, and re-entrant's resting waists. Builder F's laws
+    // closed the bcc / diamond / sc strength + credit checks the same day (362's merge: both lists empty).
 };
 const char* expected(const std::string& type, const std::string& check) {
   for (const Expected& e : kExpected)

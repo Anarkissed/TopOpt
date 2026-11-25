@@ -1,0 +1,26 @@
+TENSOR-LIBRARY-NINE PROBE — E_solid=3500 MPa nu=0.33, bcc, L=5 mm
+
+===== SWEEP bcc — density sweep + resolution convergence + symmetry =====
+  L=5 mm, 8 struts/cell, min strut len = 0.8660 L.
+  truth = periodic homogenization; row @ vpc64 vs reference curve @ vpc96,
+  drift = row E100 vs the vpc96 curve interpolated to the ROW's own rho
+  (band-extension clean metric — removes the density-landing artefact).
+  VALIDATED := |drift| < 2.4% AND vox/strut >= 6 AND converged.
+  CUBIC := axial |C33/C11-1| < 2.4% AND shear |Cyz/Cxy-1| < 2.4%
+  (else TETRAGONAL: a cubic (C11,C12,C44) tensor cannot represent it).
+
+  [writing evidence/2026-11-25-strut-laws-low-density/tensor/high/bcc_sweep.csv]
+  vf     rho      vox/str E100     drift%   zener    C33/C11 Cyz/xy  cubic  cg     row
+  0.092  0.0836   8.64    4.3      -26.45   26.769   1.000   1.000   yes    154    -
+  0.110  0.1074   9.93    8.0      +4.69    19.271   1.000   1.000   yes    152    -
+  0.132  0.1348   10.71   13.5     +0.97    14.541   1.000   1.000   yes    156    VALID
+  0.158  0.1526   11.78   18.3     +0.48    12.353   1.000   1.000   yes    163    VALID
+  0.190  0.1914   13.06   32.5     +1.48    9.057    1.000   1.000   yes    169    VALID
+  0.210  0.2123   14.14   42.6     +2.28    7.775    1.000   1.000   yes    177    VALID
+
+  VALIDATED BAND: rho [0.1348, 0.2123]  (4 of 6 rows: drift<2.4% & vox/strut>=6)
+  ZENER across sweep: [7.775, 26.769]  (octet-legs reference 1.06-1.55).
+  SYMMETRY: max |C33/C11-1| = 0.0%, max |Cyz/Cxy-1| = 0.0%  ->  CUBIC (cubic tensor is exact; certifiable)
+
+DONE.
+bcc exit 0
