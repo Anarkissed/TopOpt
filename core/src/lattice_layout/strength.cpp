@@ -141,6 +141,8 @@ SheetSetup sheet_setup(const Layout& layout, const Domain& domain) {
     s.blends_of[static_cast<std::size_t>(b.a)].push_back(s.blends.size() - 1);
     s.blends_of[static_cast<std::size_t>(b.b)].push_back(s.blends.size() - 1);
   }
+  // E: where each blend's two regions meet, as the lay reads it (sheet_seam_mm reads +infinity without it).
+  sheet_seams_across(domain, layout, s.sheets, s.blends);
   return s;
 }
 

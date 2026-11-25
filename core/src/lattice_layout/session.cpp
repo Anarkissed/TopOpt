@@ -401,12 +401,25 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
       out.sheets = sheet_fields(out.layout);
       const double line = domain_->spec().bead_mm;
       out.sheet_seams = sheet_seams(out.layout, out.sheets, settings.sheet_seam, line);
+      // E: a seam the app's last print file fell back on is the solid wall here too (the preview draws what printed)
+      for (SheetSeamBand& sb : out.sheet_seams) {
+        if (sb.solid_wall) continue;
+        for (const auto& w : settings.sheet_walls)
+          if ((w[0] == sb.region_a && w[1] == sb.region_b) || (w[1] == sb.region_a && w[0] == sb.region_b)) {
+            sb.solid_wall = sb.fell_back = true;
+            sb.why = "The print file made this seam a solid wall: its blend could not be made to print.";
+            break;
+          }
+      }
       set_sheet_membrane(out.layout, out.sheet_seams, out.sheets, line);
+      // E: a sheet beside an Organic region meets it at the solid wall (no blend with Organic), its side two lines.
+      set_sheet_weave_membrane(out.layout, *domain_, out.sheets, line);
+      // E: where each Blend seam's two regions meet (sheet_seam_mm: the file, the strength check and the map read it).
+      sheet_seams_across(*domain_, out.layout, out.sheets, out.sheet_seams, threads);
       if (settings.bars) out.ms_bars = ms_since(t0);
       domain_->check_stop();
       if (!strands) return out;
       // With an Organic region beside the sheets (O1), its weave is laid below as for any lay; the cells lay no bars.
-      // (Their seam is the weave's own edge and the sheet's cut: the solid wall's membrane is between sheets only.)
     }
     if (settings.bars) {
       t0 = std::chrono::steady_clock::now();

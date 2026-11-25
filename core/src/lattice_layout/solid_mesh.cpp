@@ -1526,6 +1526,35 @@ std::shared_ptr<CarvedSolids::SheetsMade> make_sheets(const Domain& domain, cons
   // field; the mesh, the preview and the credit now read the same).
   std::map<std::pair<int, int>, std::vector<const OpenSpace::Box*>> boxes_of;   // (region, frame)
   for (const OpenSpace::Box& b : kept.open_boxes) boxes_of[{b.region, b.frame}].push_back(&b);
+  // E's blend bands (SPEC 1.5): the file's, made once (MeshSpec::sheet_bands); a direct caller's made here, once. Each
+  // region's own sheet then stops a block's overlap inside its side of every band that was made.
+  std::vector<SeamBand> own_bands;
+  const std::vector<SeamBand>* bands = nullptr;
+  if (spec.sheet_seams && !spec.sheet_seams->empty()) {
+    if (spec.sheet_bands && spec.sheet_bands->size() == spec.sheet_seams->size()) {
+      bands = spec.sheet_bands;
+    } else {
+      own_bands.resize(spec.sheet_seams->size());
+      for (std::size_t k = 0; k < spec.sheet_seams->size(); ++k)
+        if (!(*spec.sheet_seams)[k].solid_wall)
+          own_bands[k] = mesh_sheet_seam_band(domain, lay, sheets, (*spec.sheet_seams)[k], spec);
+      bands = &own_bands;
+    }
+  }
+  const auto band_made = [&](std::size_t k) {
+    const SheetSeamBand& s = (*spec.sheet_seams)[k];
+    return bands && !s.solid_wall && (*bands)[k].ok &&
+           (!(*bands)[k].mesh.triangles.empty() || !(*bands)[k].blocks.empty()) && s.across && s.across->ok;
+  };
+  struct Stop { const SheetSeamBand* seam; bool a_side; };
+  std::vector<std::vector<Stop>> stops(sheets.size());
+  if (bands)
+    for (std::size_t k = 0; k < spec.sheet_seams->size(); ++k) {
+      if (!band_made(k)) continue;
+      const SheetSeamBand& s = (*spec.sheet_seams)[k];
+      if (s.a >= 0 && static_cast<std::size_t>(s.a) < sheets.size()) stops[static_cast<std::size_t>(s.a)].push_back({&s, true});
+      if (s.b >= 0 && static_cast<std::size_t>(s.b) < sheets.size()) stops[static_cast<std::size_t>(s.b)].push_back({&s, false});
+    }
 
   std::vector<Manifold> pieces(jobs.size());
   std::vector<std::size_t> tris(jobs.size(), 0);
@@ -1565,9 +1594,39 @@ std::shared_ptr<CarvedSolids::SheetsMade> make_sheets(const Domain& domain, cons
       R.cell_mm = L;
       // Lipschitz-1, positive inside the block's box grown by g (and by h: the generator erodes its clip by one DC cell).
       const double cl[3] = {lo[0] - g - h, lo[1] - g - h, lo[2] - g - h}, ch[3] = {hi[0] + g + h, hi[1] + g + h, hi[2] + g + h};
-      R.clip = [cl, ch](const Vec3& q) {
-        return std::min({q.x - cl[0], ch[0] - q.x, q.y - cl[1], ch[1] - q.y, q.z - cl[2], ch[2] - q.z});
-      };
+      // E: the bands this block reaches (its box, in the part, meets the band's grid): the sheet stops `g` inside the
+      // band's edge on its own side (the band runs `g` past it), as one block stops inside its neighbour.
+      std::vector<Stop> near_stops;
+      for (const Stop& st : stops[job.field]) {
+        const SheetSeamAcross& X = *st.seam->across;
+        double pl[3] = {1e300, 1e300, 1e300}, ph[3] = {-1e300, -1e300, -1e300};
+        for (int c = 0; c < 8; ++c) {
+          const Vec3 v = fr.at((c & 1) ? ch[0] : cl[0], (c & 2) ? ch[1] : cl[1], (c & 4) ? ch[2] : cl[2]);
+          const double xyz[3] = {v.x, v.y, v.z};
+          for (int a = 0; a < 3; ++a) { pl[a] = std::min(pl[a], xyz[a]); ph[a] = std::max(ph[a], xyz[a]); }
+        }
+        const double xo[3] = {X.origin.x, X.origin.y, X.origin.z};
+        bool meets = true;
+        for (int a = 0; a < 3 && meets; ++a) meets = ph[a] >= xo[a] && pl[a] <= xo[a] + (X.n[a] - 1) * X.h;
+        if (meets) near_stops.push_back(st);
+      }
+      if (near_stops.empty()) {
+        R.clip = [cl, ch](const Vec3& q) {
+          return std::min({q.x - cl[0], ch[0] - q.x, q.y - cl[1], ch[1] - q.y, q.z - cl[2], ch[2] - q.z});
+        };
+      } else {
+        R.clip = [cl, ch, near_stops, &fr, &domain, g, h](const Vec3& q) {
+          double c = std::min({q.x - cl[0], ch[0] - q.x, q.y - cl[1], ch[1] - q.y, q.z - cl[2], ch[2] - q.z});
+          const Vec3 p = fr.at(q.x, q.y, q.z);
+          for (const Stop& st : near_stops) {
+            const double m = sheet_seam_mm(domain, *st.seam, p);
+            if (!std::isfinite(m)) continue;
+            const double edge = 0.5 * st.seam->band_mm;
+            c = std::min(c, st.a_side ? (g + h - edge) - m : m - (edge - g - h));
+          }
+          return c;
+        };
+      }
       // The floor (two lines, SPEC 2): the file never prints a wall below it. The wall contoured is sheet_print_wall_mm
       // (thicker within about 0.07 mm of the floor: the field's own wall is uneven by up to 3 %, and the mesh may sit
       // inside it by the bound), and the generator's bead guard is given floor / (1 - 3 %). Its inward margin is then
@@ -1639,15 +1698,53 @@ std::shared_ptr<CarvedSolids::SheetsMade> make_sheets(const Domain& domain, cons
   for (const Job& job : jobs)
     made->places += static_cast<std::size_t>((job.e[0] - job.b[0] + 1) * (job.e[1] - job.b[1] + 1) * (job.e[2] - job.b[2] + 1));
   for (const double v : vols) made->contoured_mm3 += v;
-  // E's blend bands (SPEC 1.5): each seam asked as a blend and not fallen back.
+  // E's blend bands (SPEC 1.5): each band made, cut to its two regions' open space (each box grown by the run-on, as
+  // their sheets are) and to the part. A seam the file made a solid wall (fell_back), or whose band a direct caller's
+  // make could not make, is counted as fallen back.
   if (spec.sheet_seams)
-    for (const SheetSeamBand& seam : *spec.sheet_seams) {
-      if (seam.solid_wall) continue;
-      const SeamBand band = mesh_sheet_seam_band(domain, lay, sheets, seam, spec);
-      if (!band.ok || band.mesh.triangles.empty()) { ++made->seams_fell_back; continue; }
-      const Manifold m = manifold_of(band.mesh, nullptr);
+    for (std::size_t k = 0; k < spec.sheet_seams->size(); ++k) {
+      const SheetSeamBand& seam = (*spec.sheet_seams)[k];
+      if (seam.solid_wall) {
+        if (seam.fell_back) ++made->seams_fell_back;
+        continue;
+      }
+      if (!band_made(k)) {
+        if (!(bands && (*bands)[k].ok)) ++made->seams_fell_back;   // (ok and empty: nothing of either lies in the band)
+        continue;
+      }
+      const SeamBand& band = (*bands)[k];
+      std::vector<Manifold> parts;
+      bool bad = false;
+      if (!band.mesh.triangles.empty()) parts.push_back(manifold_of(band.mesh, nullptr));
+      for (const TriangleMesh& b : band.blocks) parts.push_back(manifold_of(b, nullptr));
+      for (const Manifold& p : parts) bad = bad || p.Status() != Manifold::Error::NoError;
+      if (bad || parts.empty()) { ++made->seams_fell_back; continue; }
+      const Manifold m = parts.size() == 1 ? parts.front() : fresh(Manifold::BatchBoolean(parts, manifold::OpType::Add));
+      parts.clear();
       if (m.Status() != Manifold::Error::NoError) { ++made->seams_fell_back; continue; }
-      pieces.push_back(fresh(m ^ kept.part));
+      const manifold::Box mb = m.BoundingBox();
+      std::vector<Manifold> cut;
+      for (const int side : {seam.a, seam.b}) {
+        if (side < 0 || static_cast<std::size_t>(side) >= sheets.size()) continue;
+        const SheetField& f = sheets[static_cast<std::size_t>(side)];
+        const Frame& fr = lay.frames[static_cast<std::size_t>(f.frame)];
+        const auto it = boxes_of.find({f.region, f.frame});
+        if (it == boxes_of.end()) continue;
+        for (const OpenSpace::Box* b : it->second) {
+          const Manifold box = Manifold::Cube({b->hi[0] - b->lo[0] + 2 * run_on, b->hi[1] - b->lo[1] + 2 * run_on,
+                                               b->hi[2] - b->lo[2] + 2 * run_on})
+                                   .Translate({b->lo[0] - run_on, b->lo[1] - run_on, b->lo[2] - run_on})
+                                   .Transform(manifold::mat3x4(mv(fr.ax[0]), mv(fr.ax[1]), mv(fr.ax[2]), mv(fr.origin)));
+          const manifold::Box bb = box.BoundingBox();
+          if (bb.max.x < mb.min.x || bb.min.x > mb.max.x || bb.max.y < mb.min.y || bb.min.y > mb.max.y ||
+              bb.max.z < mb.min.z || bb.min.z > mb.max.z)
+            continue;
+          cut.push_back(box);
+        }
+      }
+      if (cut.empty()) continue;
+      const Manifold open = Manifold::BatchBoolean(cut, manifold::OpType::Add);
+      pieces.push_back(fresh((m ^ open) ^ kept.part));
       ++made->seams_blended;
     }
   if (!made->why.empty()) {

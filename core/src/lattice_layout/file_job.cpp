@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <exception>
 #include <fstream>
 #include <map>
@@ -544,7 +545,7 @@ FileOptions options_from(const json::Value& in, const std::string& w) {
                         "fill_under_mm3", "bridge_rise", "post_mm", "layer_mm", "pixel_mm", "most_passes",
                         "leave_out", "keep_if_not_clean", "weave_stand_every_mm", "weave_foot_mm", "weave_round_top",
                         "weave_sag_lift_mm", "weave_sag_legs", "weave_mesh", "tube_sides", "tube_facet_mm",
-                        "weave_bridge_domes", "weave_fold_split"},
+                        "weave_bridge_domes", "weave_fold_split", "sheet_seam_raise_cap_mm"},
                        w);
   FileOptions o;
   o.pitch_mm = num(in, "pitch_mm", o.pitch_mm, w);
@@ -570,6 +571,8 @@ FileOptions options_from(const json::Value& in, const std::string& w) {
     else json::fail(w + ".weave_mesh", "must be \"tubes\" or \"merged\", not \"" + m + "\"");
     o.weave_mesh_asked = true;
   }
+  // SHEETS, E: the most a blend band may be raised, mm (< 0, not given: up to the touch; MeshSpec).
+  o.mesh.sheet_seam_raise_cap_mm = num(in, "sheet_seam_raise_cap_mm", o.mesh.sheet_seam_raise_cap_mm, w);
   o.mesh.tube_sides = whole(in, "tube_sides", o.mesh.tube_sides, w);   // OF2
   if (o.mesh.tube_sides < 3) json::fail(w + ".tube_sides", "must be 3 or more");
   // OS1: the vine shape (the file's defaults on; false / 0 the file as before).
@@ -698,18 +701,88 @@ void say(void (*said)(const char*), const char* line) {
 
 // ── THE ONE PLACE THE MESH IS MADE ────────────────────────────────────────────
 // (LatticeReview's build-and-check-the-layers loop replaces this body.)
+Outcome sheet_fallback_outcome(const Domain& domain, const Outcome& outcome, const std::vector<SheetSeamBand>& seams) {
+  Outcome o = outcome;
+  o.sheet_seams = seams;
+  const double line = domain.spec().bead_mm > 0.0 ? domain.spec().bead_mm : outcome.layout.bead_mm;
+  set_sheet_membrane(o.layout, o.sheet_seams, o.sheets, line);
+  set_sheet_weave_membrane(o.layout, domain, o.sheets, line);
+  return o;
+}
+
 TriangleMesh make_file_mesh(const Session& session, const Outcome& outcome, const FileOptions& options,
                             FileReport& report, const std::atomic<bool>* stop) {
-  if (!outcome.sheets.empty()) {
-    // SHEETS (SPEC section 4, 1.6): the sheets in place of bars; nothing is ever left out (a finding is answered by a
-    // post), so the print check's leave-outs never empty a region.
+  if (outcome.sheets.empty()) return make_file_mesh(session, outcome.layout, outcome.bars, options, report, stop);
+  // SHEETS (SPEC section 4, 1.6): the sheets in place of bars; nothing is ever left out (a finding is answered by a
+  // post), so the print check's leave-outs never empty a region.
+  const Domain* domain = session.domain();
+  std::vector<SheetSeamBand> seams = outcome.sheet_seams;
+  // E (SPEC 1.5): each Blend seam's band, made ONCE: its wall measured and raised to two lines, or the seam falls back
+  // to the solid wall before anything is carved.
+  std::vector<SeamBand> bands(seams.size());
+  std::vector<double> thinnest(seams.size(), 0.0);
+  bool fell = false;
+  MeshSpec band_spec = options.mesh;   // as the mesh is made (make_file_mesh's own threads and stop)
+  band_spec.threads = options.threads;
+  band_spec.stop = stop;
+  if (domain)
+    for (std::size_t k = 0; k < seams.size(); ++k) {
+      SheetSeamBand& seam = seams[k];
+      if (seam.solid_wall) continue;
+      if (stop && stop->load()) throw LayCancelled{};
+      bands[k] = mesh_sheet_seam_band(*domain, outcome.layout, outcome.sheets, seam, band_spec);
+      thinnest[k] = bands[k].thinnest_mm;
+      if (bands[k].ok) {
+        seam.raise_mm = bands[k].raise_mm;
+        continue;
+      }
+      seam.solid_wall = seam.fell_back = true;
+      seam.why = bands[k].why;
+      bands[k] = SeamBand{};
+      fell = true;
+    }
+  int remakes = 0;
+  for (;;) {
+    std::optional<Outcome> walled;
+    if (fell && domain) walled = sheet_fallback_outcome(*domain, outcome, seams);
+    const Layout& layout = walled ? walled->layout : outcome.layout;
     FileOptions sheet = options;
     sheet.mesh.sheets = &outcome.sheets;
-    sheet.mesh.sheet_seams = &outcome.sheet_seams;
+    sheet.mesh.sheet_seams = &seams;
+    sheet.mesh.sheet_bands = &bands;
     sheet.leave_out = false;
-    return make_file_mesh(session, outcome.layout, outcome.bars, sheet, report, stop);
+    TriangleMesh mesh = make_file_mesh(session, layout, outcome.bars, sheet, report, stop);
+    report.sheet_seams = seams;
+    report.seam_thinnest_mm = thinnest;
+    report.seam_remakes = remakes;
+    if (!report.mesh.ok || report.print_clean || !domain) return mesh;
+    // (c) The print check's loop ended with findings: a blended band any of them lies in falls back to the solid wall
+    // (within the band, or a millimetre past its edge), and the file is made again.
+    std::vector<Vec3> found;
+    for (const auto& m : report.layers.mid_air) found.push_back({m.x, m.y, m.z});
+    for (const auto& m : report.layers.one_ended) found.push_back({m.x, m.y, m.z});
+    for (const auto& m : report.layers.long_bridges) found.push_back({m.x, m.y, m.z});
+    bool again = false;
+    for (std::size_t k = 0; k < seams.size(); ++k) {
+      SheetSeamBand& seam = seams[k];
+      if (seam.solid_wall || !bands[k].ok) continue;
+      bool in = false;
+      for (const Vec3& p : found) {
+        const double m = sheet_seam_mm(*domain, seam, p);
+        in = in || (std::isfinite(m) && std::fabs(m) <= 0.5 * seam.band_mm + 1.0);
+      }
+      if (!in) continue;
+      seam.solid_wall = seam.fell_back = true;
+      seam.raise_mm = 0.0;
+      const auto name = [](int r) { return r == 0 ? std::string("the whole part") : "region " + std::to_string(r); };
+      seam.why = "The lattices of " + name(seam.region_a) + " and " + name(seam.region_b) +
+                 " were blended, but the blend did not print cleanly, so a solid wall joins them.";
+      bands[k] = SeamBand{};
+      again = fell = true;
+    }
+    if (!again) return mesh;
+    ++remakes;
   }
-  return make_file_mesh(session, outcome.layout, outcome.bars, options, report, stop);
 }
 
 TriangleMesh make_file_mesh(const Session& session, const Layout& layout, const Bars& bars, const FileOptions& options,
@@ -1433,35 +1506,24 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
              "or a deeper region.");
       return done();
     }
-    // SHEETS (SPEC 1.5): a seam asked as a blend whose band cannot be made printable falls back to the solid wall (the
-    // membrane, laid into a copy of the layout before its open space is read), and the result says so.
+    say(said, "making the file");
+    // OF4: a job with a weave region takes the tubes route unless it asked for one (file_options_for, above).
+    TriangleMesh mesh = make_file_mesh(session, out, options, r.made, stop);   // (Phase 2: stand supports may cut it)
+    // SHEETS (SPEC 1.5, E): make_file_mesh decided each Blend seam once (its band made, or the solid wall where the band
+    // could not be made two lines thick or did not print cleanly); the result says so, and the strength check reads
+    // the layout the file was made of (the membrane where a seam fell back).
     Outcome sheeted;
     const Outcome* made_from = &out;
     if (!out.sheets.empty()) {
-      std::vector<SheetSeamBand> seams = out.sheet_seams;
       bool fell = false;
-      for (SheetSeamBand& seam : seams) {
-        if (seam.solid_wall) continue;
-        const SeamBand band = mesh_sheet_seam_band(*session.domain(), out.layout, out.sheets, seam, options.mesh);
-        if (band.ok) { seam.raise_mm = band.raise_mm; continue; }
-        seam.solid_wall = true;
-        seam.fell_back = true;
-        seam.why = band.why;
-        fell = true;
-      }
+      for (const SheetSeamBand& s : r.made.sheet_seams) fell = fell || s.fell_back;
       if (fell) {
-        sheeted = out;
-        sheeted.sheet_seams = seams;
-        set_sheet_membrane(sheeted.layout, seams, sheeted.sheets, out.layout.bead_mm);
+        sheeted = sheet_fallback_outcome(*session.domain(), out, r.made.sheet_seams);
         made_from = &sheeted;
       }
       r.sheets = made_from->sheets;
-      r.sheet_seams = made_from->sheet_seams;
+      r.sheet_seams = r.made.sheet_seams.size() == out.sheet_seams.size() ? r.made.sheet_seams : out.sheet_seams;
     }
-
-    say(said, "making the file");
-    // OF4: a job with a weave region takes the tubes route unless it asked for one (file_options_for, above).
-    TriangleMesh mesh = make_file_mesh(session, *made_from, options, r.made, stop);   // (Phase 2: stand supports may cut it)
     if (!r.made.mesh.ok || mesh.empty()) {
       refuse(r, kMeshFailed,
              r.made.mesh.why.empty() ? "The lattice file could not be put together. Nothing was made."
@@ -1985,8 +2047,11 @@ std::string file_result_json(const FileResult& r) {
     o += "],\n  \"sheet_seams\": [";
     for (std::size_t i = 0; i < r.sheet_seams.size(); ++i) {
       const SheetSeamBand& sb = r.sheet_seams[i];
-      std::snprintf(b, sizeof b, "%s{\"regions\": [%d, %d], \"seam\": \"%s\", \"fell_back\": %s, \"why\": \"", i ? ", " : "",
-                    sb.region_a, sb.region_b, sb.solid_wall ? "solid_wall" : "blend", sb.fell_back ? "true" : "false");
+      // "seam": what was asked (a blend that fell back says so with "fell_back"); E: "raise_mm", the band's raise.
+      std::snprintf(b, sizeof b,
+                    "%s{\"regions\": [%d, %d], \"seam\": \"%s\", \"fell_back\": %s, \"raise_mm\": %.4f, \"why\": \"",
+                    i ? ", " : "", sb.region_a, sb.region_b, sb.solid_wall && !sb.fell_back ? "solid_wall" : "blend",
+                    sb.fell_back ? "true" : "false", sb.solid_wall ? 0.0 : sb.raise_mm);
       o += b + escaped(sb.why) + "\"}";
     }
     o += "],\n";
