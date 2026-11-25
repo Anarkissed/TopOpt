@@ -2362,6 +2362,17 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
       DOCS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../docs/strength-check"
       TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME lattice_strength COMMAND test_lattice_strength)
+    # The type matrix (2026-11-24): every strut type through the layout and the file job on core's fixtures (the cube,
+    # the filleted bore plate, the L-bracket stood on end), Structural (with the strength check) and Aesthetic, Auto
+    # and a typed cell, a face region and the whole part; each check with its RED control; the octet's bytes pinned.
+    add_executable(test_lattice_types_matrix tests/validation/test_lattice_types_matrix.cpp)
+    target_link_libraries(test_lattice_types_matrix PRIVATE topopt)
+    target_compile_definitions(test_lattice_types_matrix PRIVATE
+      MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+      SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+      FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
+      TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME lattice_types_matrix COMMAND test_lattice_types_matrix)
     # His print orientation (P2): "rotate at the door". The same job with up = +X makes the same file and report as a
     # copy of everything turned by hand; each input left unturned is caught (print_frame.hpp).
     add_executable(test_print_frame tests/validation/test_print_frame.cpp)
