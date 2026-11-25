@@ -50,6 +50,23 @@ The band-weighted fit puts weight 1 on the voxels within 1.5 voxels of the surfa
 
 ## Reference table, before and after
 
+### 2040 Extrusion Stand at res 64 (quick part; 77 % of it frozen, so this rung keeps only the frozen set and the design barely moves)
+
+Release build, same job; "before" is TOReview's tip build (same TO sources as 2b40bcf4). Wall patches = TOReview's measure_surface.py, 3 mm patches on sloped and curved walls (the drawn flats and sharp edges are counted apart).
+
+| run | margin (certified -> file re-check) | grams (file) | wall patches: median / 90th pct / worst | share over 0.05 mm |
+|---|---|---|---|---|
+| before (today's export) | 4.696 -> 4.731 | 90.5 | 0.092 / 0.32 / 0.56 mm | 68 % |
+| switch off (this branch) | byte-identical to before (test M) | | | |
+| stage 3 on | 4.679 -> 5.014 | 84.5 | 0.000 / 0.09 / 0.17 mm | 37 % |
+| stage 3 on, run twice | byte-identical files (test K) | | | |
+| stage 1 (TOReview's, face loads) alone | 4.896 | 90.5 | 0.104 / 0.32 / 0.57 | 71 % |
+| stage 1 + stage 3 | 4.884 -> 4.979 | 87.3 | 0.023 / 0.32 / 0.85 | 39 % |
+
+Why the file is 6 g lighter: it follows his 211 keep regions EXACTLY, where today's file keeps every frozen voxel whole (half a 3.4 mm voxel past a keep region's boundary) plus the Catmull-Rom overshoot into empty neighbours (probed point by point). Without stage 1 the frozen faces come from stamped voxels (smoothed as today's export does); with stage 1 they come from the drawn faces by true distance.
+
+What the real part forced (all fixed, all inside the switch): the design-box check read the grid's margin as a design box (the export silently fell back); 91 frozen bodies queried one by one (47 s; merged by depth: 11 s); a body list that moved its meshes under the distance finders (crash with two or more bodies); keep regions joined by a second, nudged union along faces that are now exactly the part's (bad edges: now joined before the one cut); two voxels or two keep regions that share only an edge (now fused 0.01 mm); pinch points where the mesher snapped a saddle onto a grid point (two sheets at one float position: each copy moves 1 um into its own solid).
+
 ## Not done yet
 
 ## Research behind it (2026-11-25)
