@@ -1774,6 +1774,9 @@ struct SimpOptimizeResult {
   bool non_convergent = false;
   int non_convergent_iteration = 0;
   double non_convergent_residual = 0.0;
+  // The CG tolerance the failing solve was run at (the loose trajectory one or the
+  // tight certification one), so a refusal can say which it missed (0 = not set).
+  double non_convergent_tolerance = 0.0;
   // --- ACTIVE DOMAIN outcome (active-domain phase 1) -----------------------
   // `active_domain_band` is the band width this run ACTUALLY ran with (0 = the
   // feature was off; a negative request has already been resolved to its auto

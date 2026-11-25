@@ -707,6 +707,7 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   bool non_convergent = false;
   int non_convergent_iteration = 0;
   double non_convergent_residual = 0.0;
+  double non_convergent_tolerance = 0.0;
   bool cancelled = false;
   int done_iters = 0;
 
@@ -784,8 +785,11 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
                            nullptr, options.solver);
     } catch (const SolverNonConvergence& e) {
       non_convergent = true;
-      non_convergent_iteration = it;
+      // The CG iteration count the failing solve reached (simp.hpp's contract), not
+      // the design step; and the tolerance it ran at.
+      non_convergent_iteration = e.iterations;
       non_convergent_residual = e.residual;
+      non_convergent_tolerance = tol_loose;
       break;
     }
     if (plsm.warm_start) { warm = sc.solution; have_warm = true; }
@@ -1226,6 +1230,7 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   r.non_convergent = non_convergent;
   r.non_convergent_iteration = non_convergent_iteration;
   r.non_convergent_residual = non_convergent_residual;
+  r.non_convergent_tolerance = non_convergent_tolerance;
   if (best_iter < 0) {
     // Not one state solve completed. There is no design to ship, and saying so
     // through the same flags `simp_optimize` uses is what lets the ladder driver
@@ -1304,8 +1309,9 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
     r.compliance = fc.compliance;
   } catch (const SolverNonConvergence& e) {
     r.non_convergent = true;
-    r.non_convergent_iteration = done_iters;
+    r.non_convergent_iteration = e.iterations;
     r.non_convergent_residual = e.residual;
+    r.non_convergent_tolerance = tol_tight;
     r.compliance = best_compliance;
   }
   r.initial_compliance =
