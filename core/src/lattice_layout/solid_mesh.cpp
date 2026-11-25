@@ -1506,7 +1506,11 @@ std::shared_ptr<CarvedSolids::SheetsMade> make_sheets(const Domain& domain, cons
       // the same way twice (measured, gyroid in an 8 mm cell: at the open look's 1.65 mm wall a third of it is 0.55 mm,
       // 4k triangles contoured and 2k to 107k out for walls 0.003 mm apart; at 0.33 mm 12.7k in and 2.6k out, steady).
       const double h = std::max(1e-3, std::min(f.wall_min_mm / 3.0, L / 24.0));
-      const double g = run_on + kSheetBlockOverlapMm;           // the block's own sheet runs this far past its box
+      // The block's own sheet runs this far past its box. The simplifier treats a sheet within three DC cells of the
+      // block's cut as a crease and may move it there by up to half a DC cell (TpmsGenOptions, at_cut), so each block runs
+      // far enough into its neighbour that what it keeps there is clear of its own crease, and the neighbour's crease
+      // lies in it (measured with the overlap at the run-on alone: a 0.88 mm wall at a block face of a graded plate).
+      const double g = run_on + 3.0 * h + kSheetBlockOverlapMm;
       TpmsRegion R;
       R.anchor = {lo[0] - L, lo[1] - L, lo[2] - L};
       R.nx = static_cast<int>(job.e[0] - job.b[0]) + 3;
@@ -1518,16 +1522,13 @@ std::shared_ptr<CarvedSolids::SheetsMade> make_sheets(const Domain& domain, cons
       R.clip = [cl, ch](const Vec3& q) {
         return std::min({q.x - cl[0], ch[0] - q.x, q.y - cl[1], ch[1] - q.y, q.z - cl[2], ch[2] - q.z});
       };
-      // The floor (two lines, SPEC 2): the file never cuts a wall below it. The generator's bead guard lets the mesh sit
-      // up to `max_in` = half the wall's margin over the bead inside the true surface; at a margin near 0 its simplifier
-      // refines without end (measured: a 0.905 mm wall over a 0.9 mm bead, 6.5 s and 39k triangles a cell against 2.4 s
-      // and 2.9k at 0.92; at 0.9 it did not finish). So within two bounds of the floor the wall is contoured raised,
-      // by the bound at the floor to nothing two bounds above it: the guard's inward margin is then at least half the
-      // bound everywhere, and the thinnest the mesh can be is the floor exactly.
+      // The floor (two lines, SPEC 2): the file never prints a wall below it. The wall contoured is sheet_print_wall_mm
+      // (thicker within about 0.07 mm of the floor: the field's own wall is uneven by up to 3 %, and the mesh may sit
+      // inside it by the bound), and the generator's bead guard is given floor / (1 - 3 %). Its inward margin is then
+      // never under 0.6 of the bound: at a margin near 0 its simplifier refines without end (measured: a 0.905 mm wall over
+      // a 0.9 mm bead, 6.5 s and 39k triangles a cell against 2.4 s and 2.9k at 0.92; at 0.9 it did not finish).
       const double floor_mm = lay.min_strut_mm;
-      const auto raised = [floor_mm, dev](double w) {
-        return dev > 0.0 ? w + dev * std::clamp(1.0 - (w - floor_mm) / (2.0 * dev), 0.0, 1.0) : w;
-      };
+      const auto raised = [floor_mm, dev](double w) { return sheet_print_wall_mm(w, floor_mm, dev); };
       TpmsWallField W;
       W.field = [&f, topo, L, raised](const Vec3& q) {
         return lattice_sheet_wall_param_mm(topo, raised(sheet_wall_at_local(f, q)), L);
@@ -1536,7 +1537,7 @@ std::shared_ptr<CarvedSolids::SheetsMade> make_sheets(const Domain& domain, cons
       o.min_wall_mm = f.wall_min_mm;
       o.dc_cell_mm = h;
       o.max_deviation_mm = dev;
-      o.bead_mm = floor_mm;
+      o.bead_mm = dev > 0.0 ? floor_mm / (1.0 - kSheetWallUnevenness) : 0.0;
       o.true_wall_mm = [&f, raised](const Vec3& q) { return raised(sheet_wall_at_local(f, q)); };
       o.wall_param_of = [topo, L](double w) { return lattice_sheet_wall_param_mm(topo, w, L); };
       o.true_wall_steps = false;   // the wall is blended trilinearly: no step anywhere (SPEC 1.4)
