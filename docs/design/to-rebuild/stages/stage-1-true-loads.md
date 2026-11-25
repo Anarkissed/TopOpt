@@ -61,6 +61,17 @@ The refused 0.30 version: at solve 19 the design is in 17 separate pieces; the m
 - `region_lattice_mask` now follows the mm depth with the switch on, through the SAME function the protection is frozen with (`mask_region_by_stage`), so bar R5 stays structural (LatticeReview's position; for the reviewer to rule; LatticeReview reviews the diff). Proof owed on job B: no cube both protected and lattice, none that is neither along the inner boundary; job A unchanged. Not mine: `flexible/job_block.cpp:374` also calls `region_depth_layers` (#362's).
 - Test K again with the switch on once stage 5 removes the solver luck.
 
+## Measured: the sideways lip (LatticeReview's question)
+
+A face that is PART of a flat side (a 20 x 20 mm patch in a 60 x 40 mm top; `test_to_true_loads`, table "[lip]"). Frozen voxels with their centre outside the prism under the patch:
+
+| res (voxel mm) | depth mm | today, by layers: inside / outside | by true distance: inside / outside, farthest reach |
+|---|---|---|---|
+| 48 (1.25) | 2 / 4 / 10 | 512 / 170, 768 / 461, 2,048 / 4,038 | 512 / 188 (1.9 mm), 1,024 / 674 (4.0), 2,048 / 4,486 (10.0) |
+| 96 (0.625) | 2 / 4 / 10 | 2,048 / 572, 5,120 / 3,179, 15,360 / 31,300 | 3,072 / 1,055 (1.95), 6,144 / 4,460 (3.96), 16,384 / 33,643 (9.98) |
+
+Reading: the lip is NOT new. Today's layer walk already spreads sideways under the neighbouring face (at 10 mm deep, twice as many voxels outside the prism as inside). True distance adds 7 to 85 % more outside voxels and reaches exactly the depth. Whether a region should be a prism under its outline (as the new lattice engine lays it) or a distance band is a question for the reviewer, for both paths.
+
 ## For #362 (handed over with the switch flip; not edited by me)
 
 Until these land, with the switch on, the app's previews count voxels the old way while the run freezes by true distance.

@@ -41,6 +41,13 @@ Not in this proposal, flagged: the smooth-surface check (certify the true surfac
 - **Auto and engineer:** Auto uses the material's own length, nothing on screen. Engineers get one control, "Stress reading size (mm)", with an (i).
 - **Weight:** should "grams" and "saved" be printed grams at his infill, so they match the margin? Recommended: yes.
 
+## Decided by the maintainer (2026-11-25)
+
+- How cautious: start at HALF the published length, until his rig can check it; today's per-voxel peak stays as a softer second warning shown to engineers only. "Agreed."
+- Across layers: the same length with today's layer knockdown, said in the (i). "agreed"
+- Auto and engineer: Auto uses the material's own length with nothing on screen; engineers get one control, "Stress reading size (mm)", with an (i). "agreed"
+- Weight (printed grams at his infill): NOT decided; he asked for a simpler explanation first.
+
 ## What it does to the lattice strength check
 
 Steps 1 and 2 change the solid part's reading only if applied in the shared code path; the lattice check reads strut stresses through its own laws. To be confirmed with LatticeReview before any edit: which branches of `analyze.cpp` the lattice posture takes, and that its numbers are byte-identical with the switch off.

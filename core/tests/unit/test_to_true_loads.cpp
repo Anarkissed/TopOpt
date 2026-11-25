@@ -223,6 +223,48 @@ DepthRow measure_depth_face(int res, double typed_mm) {
 
 }  // namespace
 
+// The sideways lip (LatticeReview, 2026-11-25). The patch is PART of the flat
+// top. A depth by voxel layers stays in the prism under the patch; a depth by
+// true distance to the patch's triangles also reaches sideways under the
+// neighbouring face, by up to the depth. Counted here: the frozen voxels whose
+// centre lies outside the prism under the drawn patch, and how far the farthest
+// one is from it.
+struct LipRow {
+  double voxel = 0.0;
+  long long in_prism = 0, outside = 0;
+  double reach = 0.0;  // mm, sideways, of the farthest outside voxel
+};
+LipRow measure_lip(int res, double typed_mm, bool by_distance) {
+  LipRow r;
+  const double x0 = 20.37, y0 = 10.71;
+  const StepModel model = build_block(x0, y0);
+  const VoxelGrid g = topopt::voxelize(model.mesh, res);
+  r.voxel = g.spacing;
+  topopt::DesignMask mask(g.voxel_count(), topopt::MaskValue::Active);
+  if (by_distance)
+    topopt::mask_face_depth_mm(g, model, {F_PATCH}, typed_mm, topopt::MaskValue::FrozenSolid,
+                               mask);
+  else
+    topopt::mask_step_face(g, model, F_PATCH, topopt::MaskValue::FrozenSolid,
+                           topopt::region_depth_layers(typed_mm, g.spacing), mask);
+  for (int k = 0; k < g.nz; ++k)
+    for (int j = 0; j < g.ny; ++j)
+      for (int i = 0; i < g.nx; ++i) {
+        if (mask[g.index(i, j, k)] != topopt::MaskValue::FrozenSolid) continue;
+        const topopt::Vec3 c = g.voxel_center(i, j, k);
+        const double dx = std::max({x0 - c.x, c.x - (x0 + kPatch), 0.0});
+        const double dy = std::max({y0 - c.y, c.y - (y0 + kPatch), 0.0});
+        const double side = std::hypot(dx, dy);
+        if (side > 0.0) {
+          ++r.outside;
+          r.reach = std::max(r.reach, side);
+        } else {
+          ++r.in_prism;
+        }
+      }
+  return r;
+}
+
 int main(int argc, char** argv) {
   const bool gate = argc > 1 && std::strcmp(argv[1], "--gate") == 0;
   int failures = 0;
@@ -307,6 +349,17 @@ int main(int argc, char** argv) {
               "construction), protected share off by at most %.2f voxel (rule 3: 0.10)\n",
               worst_whole, worst_share);
   if (worst_whole > 0.5 + 1e-9 || worst_share > 0.10) ++failures;
+
+  std::printf("\n[lip] frozen voxels outside the prism under the patch (a face that is part of "
+              "a flat face)\n");
+  std::printf("%5s %8s %10s %22s %30s\n", "res", "voxel", "typed mm",
+              "by layers: in / outside", "by distance: in / outside / reach mm");
+  for (int res : {48, 96})
+    for (double typed : {2.0, 4.0, 10.0}) {
+      const LipRow a = measure_lip(res, typed, false), d = measure_lip(res, typed, true);
+      std::printf("%5d %8.3f %10.1f %12lld / %-7lld %12lld / %-7lld / %.2f\n", res, a.voxel,
+                  typed, a.in_prism, a.outside, d.in_prism, d.outside, d.reach);
+    }
 
   std::printf("[tests C, D] %s: %d failure(s)\n", gate ? "gate" : "measure only", failures);
   return failures == 0 ? 0 : 1;
