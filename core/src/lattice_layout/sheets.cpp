@@ -101,6 +101,20 @@ double sheet_param_at(const SheetField& s, const Vec3& p) {
   return lattice_sheet_wall_param_mm(sheet_topology(s.kind), wall, s.cell_mm);
 }
 
+double sheet_print_wall_mm(double wall_mm, double floor_mm, double deviation_mm) {
+  if (!(deviation_mm > 0.0) || !(floor_mm > 0.0)) return wall_mm;
+  // The generator's bead guard is given B = floor / (1 - u): the mesh then sits at most half the wall's margin over B
+  // inside it (max_in), and the field's own wall at most u thinner than its number, so the mesh's wall is at least
+  // (1 - u) n - 2 max_in. Over (floor + 2 bound) / (1 - u) that is the floor with the whole bound inward; under it the
+  // wall is contoured at n >= B + 1.2 bound (the guard keeps 0.6 of the bound inward: at a margin near 0 its refine runs
+  // away), where (1 - u) n - (n - B) = B - u n stays at the floor to a micron.
+  const double u = kSheetWallUnevenness, dev = deviation_mm;
+  const double B = floor_mm / (1.0 - u), W1 = (floor_mm + 2.0 * dev) / (1.0 - u);
+  if (wall_mm >= W1) return wall_mm;
+  const double R = (B + 1.2 * dev) - floor_mm;
+  return wall_mm + R * std::clamp((W1 - wall_mm) / (W1 - floor_mm), 0.0, 1.0);
+}
+
 double sheet_distance_at_local(const SheetField& s, const Vec3& q) {
   const double wall = sheet_wall_at_local(s, q);
   if (!(s.cell_mm > 0.0)) return std::numeric_limits<double>::infinity();

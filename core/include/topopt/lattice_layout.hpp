@@ -1662,6 +1662,15 @@ double sheet_distance_at_local(const SheetField& s, const Vec3& q);
 double sheet_mid_distance_at(const SheetField& s, const Vec3& p);
 // The field parameter at a point (lattice_sheet_wall_param_mm of the wall there): what the blend thickens.
 double sheet_param_at(const SheetField& s, const Vec3& p);
+// THE WALL THE FILE IS CONTOURED AT, for a true wall `wall_mm` (sheet_wall_at) over the floor `floor_mm` (two lines),
+// the mesh simplified to `deviation_mm` (0: as contoured, and the wall is returned as it is). The file never prints a
+// wall under the floor: the field's own wall is uniform only to 1 to 3 % (core's wall law, kSheetWallUnevenness) and
+// the simplified mesh may sit up to the bound inside it, so near the floor the wall is contoured thicker: by 0.052 mm at
+// a two-line wall (0.952 for 0.9), tapering to nothing at (floor + 2 x bound) / (1 - 3 %) (0.969 for 0.9) and above
+// (measured on a graded plate before this: a sample 0.882 mm thick under a 0.9 mm wall). The preview may draw it to
+// follow the file exactly there; the strength check credits the true wall (the lighter one).
+inline constexpr double kSheetWallUnevenness = 0.03;
+double sheet_print_wall_mm(double wall_mm, double floor_mm, double deviation_mm);
 
 // SPEC 1.5, "Where regions meet: Blend / Solid wall" (Settings::sheet_seam). Default here: SolidWall (the app sends
 // Blend in Aesthetic and Solid wall in Structural; core does not know the stage).
