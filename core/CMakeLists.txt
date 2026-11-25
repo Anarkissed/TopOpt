@@ -3084,3 +3084,6 @@ foreach(_t topopt_cli test_lattice_clip_shell test_recycle test_cli test_organic
   endif()
 endforeach()
 add_custom_target(cli_suite DEPENDS ${_cli_suite_programs})
+
+# TO rebuild repo tests (docs/design/to-rebuild/04-tests.md).
+include(tests/to_rebuild_tests.cmake)
