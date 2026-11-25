@@ -198,6 +198,10 @@ add_library(topopt
   src/lattice_layout/strength.cpp
   # 2026-11-24: what differs by strut type (lattice_layout.hpp, PER TYPE; cell_struts).
   src/lattice_layout/types.cpp
+  # notes28 sheets (gyroid, Schwarz-D on this engine): the field, the seams, the membrane, sheet_cells.bin
+  # (lattice_layout.hpp, SHEETS), and the blend band (builder E's: lattice_layout_mesh.hpp, mesh_sheet_seam_band).
+  src/lattice_layout/sheets.cpp
+  src/lattice_layout/sheet_blend.cpp
   # 2026-11-24: a print coupon per strut type, made by this engine (lattice_layout_file.hpp, make_type_coupon).
   src/lattice_layout/coupon.cpp
   # Brief E2, Part A: the Organic strength check, a frame of beams (lattice_layout_frame.hpp).
