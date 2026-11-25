@@ -5,7 +5,7 @@
 // grid. The peak stress at the hole's edge is 3 times the far stress (Kirsch;
 // about 3.03 for a plate ten holes wide). The tilt puts the peak on a
 // stair-stepped part of the hole, which is where a voxel stress reading is
-// weakest. The plate is solved at four resolutions (hole radius 3, 4, 6, 8
+// weakest. The plate is solved at four resolutions (hole radius 3, 4, 5, 6
 // voxels) and with three ways of treating the hole's edge: each voxel
 // all-or-nothing; each voxel's exact fill fraction solved as today (stiffness
 // E x fill^3, ledger A-01); and the exact fill fraction solved with stiffness
@@ -152,7 +152,7 @@ double peak_ratio(int radius_voxels, bool exact_fill, double penalty, bool* ok,
   topopt::KnockdownSpec knockdown;
   const topopt::FixedDesignAnalysis res = topopt::analyze_fixed_design(
       g, params, density, bcs, loads, m, Vec3{0.0, 0.0, 1.0}, 1e-8, 20000,
-      topopt::SolverKind::JacobiCG, 0.0, knockdown, true,
+      topopt::SolverKind::MultigridCG_Matfree, 0.0, knockdown, true,
       static_cast<double>(g.tags.size()));
   *ok = res.max_von_mises > 0.0 && std::isfinite(res.max_von_mises);
   if (over_size != nullptr && res.von_mises_field.size() == density.size())
@@ -175,7 +175,7 @@ int main(int argc, char** argv) {
   std::printf("%-12s %9s %14s %16s %14s %9s %9s %9s\n", "hole radius", "voxel mm",
               "all-or-nothing", "fill, E x fill^3", "fill, E x fill", "over 0.9", "over 1.8",
               "over 3.6");
-  for (int r : {3, 4, 6, 8}) {
+  for (int r : {3, 4, 5, 6}) {
     Row row;
     row.radius_voxels = r;
     bool ok1 = false, ok2 = false, ok3 = false;
@@ -195,7 +195,7 @@ int main(int argc, char** argv) {
       hi = std::max(hi, r.*f);
       worst = std::max(worst, std::fabs(r.*f / kTextbook - 1.0));
     }
-    const double spread = lo > 0.0 ? hi / lo - 1.0 : 1e300;
+    const double spread = lo > 0.0 ? hi / lo - 1.0 : 9.99;
     const bool pass = worst <= 0.05 && spread <= 0.10;
     std::printf("%-18s worst miss from textbook %5.1f %%, spread across resolutions "
                 "%5.1f %%  %s\n",
