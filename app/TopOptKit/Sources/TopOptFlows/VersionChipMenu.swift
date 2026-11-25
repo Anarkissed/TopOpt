@@ -19,6 +19,11 @@ public enum VersionChipCopy {
     public static func saveLine(_ v: String) -> String { "Saves to \(v)" }
     public static func newLine(_ v: String, next: String) -> String { "Saves \(v), then opens \(next)" }
     public static func saved(_ v: String) -> String { "\(v) saved" }
+    /// ★ notes28 (e): the Edit description row's grey line — the start of his words (five words at most).
+    public static func descriptionLine(_ words: String) -> String {
+        let w = words.split(whereSeparator: \.isWhitespace)
+        return w.prefix(5).joined(separator: " ") + (w.count > 5 ? "…" : "")
+    }
     public static let failedTitle = "Couldn\u{2019}t start a new version"
     public static let failedText = "This version was saved, but the new one couldn\u{2019}t be written. Free some space on the iPad, then try again."
 }
@@ -61,6 +66,13 @@ struct VersionChipMenu: View {
                 enabled: !busy) {
                 model.cornerDrawers.close()
                 model.saveAndStartNewVersion()
+            }
+            // ★ notes28 (e): a tap on the version's name offers his own words for it
+            Rectangle().fill(DS.Color.strokeSubtle.color).frame(height: 1).padding(.horizontal, 12)
+            row(VersionDescriptionCopy.edit, line: library.description(of: folder).map(VersionChipCopy.descriptionLine),
+                id: "versionMenuDescribe", enabled: library.version(folder) != nil) {
+                model.cornerDrawers.close()
+                VersionDescriptionEdit.open(library: library, folder: folder)
             }
         }
         .padding(.vertical, 6)

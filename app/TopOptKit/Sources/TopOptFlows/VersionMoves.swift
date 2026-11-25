@@ -119,6 +119,7 @@ extension AppModel {
         guard let project else { return }
         persistCurrentProject()
         if let v = library.version(project.id) { toast = VersionChipCopy.saved("v\(v.number)") }
+        VersionDescriptionEdit.askAfterSave(library: library, folder: project.id)   // ★ notes28 (c): his words for it?
     }
 
     /// ★ his iPad notes 11-23: the version chip's "Save and start a new version" — saved, then the next version made from it, the
@@ -143,6 +144,7 @@ extension AppModel {
         moveLive(project, to: made.id, modelFileName: live.modelFileName)
         library.refresh()
         VersionEditWatch.shared.rebase(project)   // the new version's own settings are its baseline now
+        VersionDescriptionEdit.askAfterNewVersion(library: library, made: made.id, from: from)   // ★ notes28 (d)
         return made
     }
 }

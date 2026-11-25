@@ -132,7 +132,9 @@ public struct LibraryVersion: Codable, Equatable, Sendable {
     /// His own name; nil means the automatic one (`VersionChanges.autoName`). His decision 9
     /// (2026-10-25): grouped copies DROP their old "copy N" names.
     public var name: String?
-    /// What changed from the parent, worked out when the version was made.
+    /// What changed from the parent, worked out when the version was made. ★ notes28: the Library now works it out afresh
+    /// from both folders' saved settings (`LibraryModel.changes(of:in:)`); this stored list is read only when one of the two
+    /// folders can't be.
     public var changes: [VersionChange]
     /// His marks, one entry per result that has any.
     public var marks: [ResultMark]
@@ -149,6 +151,11 @@ public struct LibraryVersion: Codable, Equatable, Sendable {
     /// ★ His iPad notes 11-22 (his decision 2): the results (0 = a) that have been through a Compare, so Compare new offers only
     /// the ones that have not. nil (never written) = none: a library.json written before reads (and saves) as it was.
     public var compared: [Int]?
+    /// ★ notes28 (his iPad notes on release 18: "a guessing game"): his own words for this version, typed on its card's ⋯,
+    /// its Details, the version chip, or the ask after a save or a new version. OPTIONAL with a nil default and left out
+    /// when nil, so a library.json written before reads (and saves) exactly as it was — an index that fails to decode
+    /// takes the whole Library with it. Never a setting: it makes no version and is in no "what changed".
+    public var versionDescription: String?
 
     public init(folderID: UUID, number: VersionNumber, parentNumber: VersionNumber? = nil, name: String? = nil,
                 changes: [VersionChange] = [], marks: [ResultMark] = [], pickedResult: Int? = nil,

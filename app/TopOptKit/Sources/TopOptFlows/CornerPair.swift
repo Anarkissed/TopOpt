@@ -37,6 +37,16 @@ struct ChromeKeepOutKey: PreferenceKey {
 @MainActor
 public final class ChromeGeometry: ObservableObject {
     @Published public internal(set) var viewport: CGSize = .zero
+    /// ★ notes28 (4a): where the workspace's safe area starts (global y). Results is drawn edge to edge, so its top row is put
+    /// down by this much to sit where every stage's does.
+    @Published public internal(set) var safeTop: CGFloat = 0
+    /// RED CONTROL (VersionNotes28HostedTests): Results' top row at the screen's top, as release 18 drew it.
+    @MainActor static var controlNoSafeTop = false
+    @MainActor func noteSafeTop(_ y: CGFloat) {
+        let t = Self.controlNoSafeTop ? 0 : Swift.max(0, y)
+        guard abs(t - safeTop) > 0.5 else { return }
+        DispatchQueue.main.async { [weak self] in if let self, abs(t - self.safeTop) > 0.5 { self.safeTop = t } }
+    }
     /// The open panel's drawn height and which panel it is (a player keeps clear of the panel's REAL frame).
     @Published public internal(set) var panelHeight: CGFloat = 0
     @Published public internal(set) var panelCard: String?

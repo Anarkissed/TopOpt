@@ -258,7 +258,58 @@ public final class LibraryModel: ObservableObject {
     public func title(of v: LibraryVersion, in part: LibraryPart) -> String {
         if let name = v.name { return "\(part.name) · v\(v.number) · \(name)" }
         let res = (snapshots[v.folderID]?.quality ?? .fast).resolution
-        return VersionChanges.autoName(part: part.name, number: v.number, changes: v.changes, resolution: res)
+        return VersionChanges.autoName(part: part.name, number: v.number, changes: changes(of: v, in: part), resolution: res)
+    }
+
+    // MARK: ★ notes28 — what changed, worked out now; his own description
+
+    /// ★ notes28 (his iPad notes on release 18, img 83: "very little difference between them... a guessing game"; "Is there
+    /// any way to go back and update all the descriptions"): what changed from the version it came from, worked out NOW
+    /// from both folders' saved settings — so every version and draft on disk says it the moment the update installs, and a
+    /// draft says what he changed since it was made. Nothing is rewritten. The list stored when it was filed stands in only
+    /// when either folder can't be read (or it came from nothing).
+    public func changes(of v: LibraryVersion, in part: LibraryPart) -> [VersionChange] {
+        guard let s = snapshots[v.folderID], let p = v.parentNumber.flatMap(part.version(number:)),
+              let from = snapshots[p.folderID] else { return v.changes }
+        return VersionChanges.between(from, s)
+    }
+
+    /// The card's line of differences: the biggest three, then "+n more" ("Cell size Auto → 6 mm · Finish None → Skin ·
+    /// +2 more"); "same settings" only when nothing differs; a first version is its first run. A main-line draft says
+    /// where it came from first ("from v7 · …").
+    public func differencesLine(of v: LibraryVersion, in part: LibraryPart) -> String {
+        let c = changes(of: v, in: part)
+        var bits: [String]
+        if c.isEmpty {
+            bits = v.parentNumber == nil ? ["first run", "res \((snapshots[v.folderID]?.quality ?? .fast).resolution)"]
+                : ["same settings"]
+        } else {
+            bits = c.prefix(Self.differencesShown).map(\.text)
+            if c.count > Self.differencesShown { bits.append("+\(c.count - Self.differencesShown) more") }
+        }
+        if isDraft(v), v.number.isMainLine, let p = v.parentNumber { bits.insert("from v\(p)", at: 0) }
+        return bits.joined(separator: " · ")
+    }
+    /// His "the biggest 2-3 differences".
+    public static let differencesShown = 3
+
+    /// His own words for a version (nil: none typed).
+    public func description(of folder: UUID) -> String? {
+        version(folder)?.versionDescription.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+    }
+
+    /// Keep his words for a version; empty clears them. Only library.json is written.
+    public func setDescription(_ text: String?, folder: UUID) {
+        let t = text?.trimmingCharacters(in: .whitespacesAndNewlines)
+        edit(folder) { $0.versionDescription = (t?.isEmpty ?? true) ? nil : t }
+    }
+
+    /// What the description editor starts with: his words, else the differences (his "prefilled with the automatic
+    /// differences"), without "same settings" / "first run".
+    public func descriptionDraft(of folder: UUID) -> String {
+        if let d = description(of: folder) { return d }
+        guard let part = index.part(containing: folder), let v = part.version(folderID: folder) else { return "" }
+        return changes(of: v, in: part).map(\.text).joined(separator: ", ")
     }
 
     /// The short title a card in its own part shows: "v6 · Keep Clear on 2 faces · res 128".

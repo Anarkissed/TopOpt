@@ -73,13 +73,15 @@ public struct CornerMoreItem: Identifiable {
     public let line: String?
     public let enabled: Bool
     public let kind: Kind
+    /// ★ notes28: an (i) at the row's end — its explanation in the centred card (nil: none).
+    public var info: String? = nil
 
-    public init(id: String, title: String, line: String? = nil, enabled: Bool = true, kind: Kind) {
-        self.id = id; self.title = title; self.line = line; self.enabled = enabled; self.kind = kind
+    public init(id: String, title: String, line: String? = nil, enabled: Bool = true, kind: Kind, info: String? = nil) {
+        self.id = id; self.title = title; self.line = line; self.enabled = enabled; self.kind = kind; self.info = info
     }
-    public static func action(_ title: String, line: String? = nil, enabled: Bool = true, id: String,
+    public static func action(_ title: String, line: String? = nil, enabled: Bool = true, id: String, info: String? = nil,
                               _ run: @escaping () -> Void) -> CornerMoreItem {
-        CornerMoreItem(id: id, title: title, line: line, enabled: enabled, kind: .action(run))
+        CornerMoreItem(id: id, title: title, line: line, enabled: enabled, kind: .action(run), info: info)
     }
     public static func check(_ title: String, isOn: Bool, id: String, _ pick: @escaping () -> Void) -> CornerMoreItem {
         CornerMoreItem(id: id, title: title, kind: .check(isOn: isOn, pick))
@@ -196,6 +198,21 @@ public struct CornerMoreDrawer: View {
             .background(DSParts.publish(item.id))
             .accessibilityIdentifier(item.id)
             .accessibilityValue(accessibilityValue(item))
+            .overlay(alignment: .trailing) {
+                // ★ notes28: the row's (i), its own 44 pt target over the row's end (the row's tap stays the row's)
+                if let info = item.info {
+                    Button { AppPopups.shared.help(item.title, info) } label: {
+                        Image(systemName: "info.circle").font(.system(size: 15, weight: .regular))
+                            .foregroundStyle(DS.Color.textTertiary.color)
+                            .frame(width: DSParts.target, height: DSParts.target).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, 4)
+                    .accessibilityLabel("About \(item.title)")
+                    .background(DSParts.publish(item.id + "-info"))
+                    .accessibilityIdentifier(item.id + "-info")
+                }
+            }
         }
     }
 

@@ -7082,7 +7082,7 @@ extension MetalMeshView {
                         // AFTER this render pass; the renderer already holds the framed
                         // camera for the current draw.
                         let framed = renderer.camera
-                        DispatchQueue.main.async { [weak model] in model?.adopt(framed) }
+                        DispatchQueue.main.async { [weak model] in model?.adoptFramed(framed) }   // ★ notes28: a version's camera as he left it, once
                     }
                     // ONLY A REFRAME INVALIDATES THESE. `setMesh` zeroes the tint
                     // buffer and resets the settle to identity, so both have to be
