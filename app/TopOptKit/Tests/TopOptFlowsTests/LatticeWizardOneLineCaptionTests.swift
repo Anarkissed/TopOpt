@@ -39,17 +39,25 @@ final class LatticeWizardOneLineCaptionTests: XCTestCase {
     /// ★ Re-pinned for lattice types U1 (2026-10-01): the offered set is CORE's (build ∩ certify ∩
     /// the job parser) — the octet alone today, exactly as his 2026-09-18 ruling had it, now lifted
     /// type by type (M8). A type not offered still never selects: its tap only says why.
-    func testOnlyTheOctetTrussIsOffered() {
-        XCTAssertEqual(LatticeSetupWizard.offeredTypeIDs, ["octet"])
+    /// ★ RE-PINNED (notes28, the maintainer's decision 2026-11-24: all the strut types): the octet is no longer the only one —
+    /// every strut type the old run builds is offered (the Lattice stage reads the new engine's catalog, which adds the
+    /// Structural rules — LatticeCellTypesNotes28Tests). Still pinned: a type the stage can't use is drawn only greyed with
+    /// its sentence, never picked, and a saved one says why under the row.
+    func testEveryStrutTypeTheRunBuildsIsOffered() {
+        XCTAssertEqual(LatticeSetupWizard.offeredTypeIDs, ["octet", "sc", "bcc", "fcc", "diamond", "kelvin", "rhombic"])
         let s = src
         // ★ RE-PINNED (B7 slice 2, plan.md §B7 Type, LS-1 / LS-19): a type not offered is not on the page at all, so it
         // can't be selected; a SAVED type core can't run still says why under the row.
-        XCTAssertTrue(s.contains("let offered = entries.filter(\\.offered)") && s.contains("ForEach(offered)"),
-                      "★ only offered types are drawn")
+        XCTAssertTrue(s.contains("let offered = entries.filter(\\.offered)") && s.contains("ForEach(shown)")
+                      && s.contains("guard e.offered else { typeReason = LatticeTypeCatalog.line(e); return }"),
+                      "★ only offered types can be picked; the rest are drawn greyed, if at all")
         XCTAssertTrue(s.contains("if let why = typeReason ?? stale {"), "★ a saved type core can't run says why")
+        let bccz = LatticeTypeCatalog.entriesFromCore().first { $0.id == "bccz" }!
+        XCTAssertEqual(LatticeTypeCatalog.reasonLine(bccz), "BCC + Z: Not buildable or strength-checked yet", "…in one sentence")
+        LatticeTypeCatalog.appBatchesForTests = ["octet"]   // RED CONTROL: behind the old gate BCC waited for its batch
+        defer { LatticeTypeCatalog.appBatchesForTests = nil }
         let bcc = LatticeTypeCatalog.entriesFromCore().first { $0.id == "bcc" }!
-        // ★ RE-PINNED (release (2), E2): core builds, certifies and runs BCC now; it waits for its app batch (the type gate)
-        XCTAssertEqual(LatticeTypeCatalog.reasonLine(bcc), "BCC: \(LatticeTypeCatalog.appBatchPending)", "…in one sentence")
+        XCTAssertEqual(LatticeTypeCatalog.reasonLine(bcc), "BCC: \(LatticeTypeCatalog.appBatchPending)")
         // Organic hides the cards — except the offered card that fixes a saved type core can't run
         // (review 2026-10-01, `LatticeStaleTypeTests`)
         XCTAssertTrue(s.contains("if !organicOn || stale != nil {"), "only Organic hides the cards, never the stale fix")

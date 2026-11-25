@@ -136,7 +136,11 @@ final class LatticeTypeReadinessFromCoreTests: XCTestCase {
         XCTAssertNil(why("octet"))
         // ★ RE-PINNED (release (2), E2): core builds and certifies nine types. Kelvin's job runs, so it waits for its app
         // batch (the type gate); gyroid is built and certified but core's job parser refuses it, so it reads core's refusal.
-        XCTAssertEqual(why("kelvin"), LatticeTypeCatalog.appBatchPending)
+        // ★ RE-PINNED (notes28, 2026-11-24): Kelvin's batch shipped with all the strut types — offered now
+        XCTAssertNil(why("kelvin"))
+        LatticeTypeCatalog.appBatchesForTests = ["octet"]   // RED CONTROL: behind the old gate it waited for its batch
+        defer { LatticeTypeCatalog.appBatchesForTests = nil }
+        XCTAssertEqual(LatticeTypeCatalog.entriesFromCore().first { $0.id == "kelvin" }?.reason, LatticeTypeCatalog.appBatchPending)
         XCTAssertEqual(why("reentrant"), "Not buildable or strength-checked yet")
         XCTAssertEqual(why("gyroid"), LatticeTypeCatalog.jobRefused)
         XCTAssertEqual(TopOptKit.latticeTypeReadiness("gyroid", generatable: TopOptKit.latticeGeneratableTopologies,

@@ -41,6 +41,8 @@ enum LibraryVersionFacts {
         let stage = LibraryStyle.stage(s).0
         let mode = s.lattice?.flexible == nil && s.lattice?.enabled == true ? s.lattice?.stageMode?.title : nil
         rows.append(("Type", mode.map { "\(stage) · \($0)" } ?? stage))
+        // ★ notes28 (all nine strut types): a cell lattice names its cell type, the Library's own words (VersionChanges')
+        if let l = s.lattice, l.enabled, l.flexible == nil, !l.isOrganic { rows.append(("Cell type", VersionChanges.typeName(l))) }
         rows.append(("Material", "\(s.material) · \(s.process.rawValue.uppercased())"))
         rows.append(("Resolution", "\((s.quality ?? .fast).resolution)"))
         let f = s.force

@@ -170,7 +170,8 @@ final class LatticePageParityHostedTests: XCTestCase {
     ].merging(LatticePageParityHostedTests.oldOrganicRow.map { ($0, "his 11-18 iPad notes: under Organic only the new engine's Organic settings show "
                                           + "(Auto: Look alone); LatticeOrganicPageHostedTests holds those") },
               uniquingKeysWith: { a, _ in a })
-    .merging(["bcc", "bccz", "diamond", "fcc", "fccz", "gyroid", "kelvin", "reentrant", "rhombic", "sc", "schwarz_d"]
+    // ★ RE-PINNED (notes28, 2026-11-24): every strut type's batch shipped (its card shows again); the sheets stay hidden
+    .merging(["gyroid", "schwarz_d"]
         .map { ("wizard-type-\($0)", "plan §B7 Type: unready types are hidden (each shows with its B7.n batch)") },
         uniquingKeysWith: { a, _ in a })
 
@@ -295,6 +296,10 @@ final class LatticePageParityHostedTests: XCTestCase {
     /// ★ B7 slice 2 (plan.md §B7 OneTypeIsALabel; LS-1): core offering one type (the octet today) draws a LABEL card — no
     /// picker, no greyed types — and Save is live on a new lattice.
     func testOneTypeIsALabelAndSaveIsLive() throws {
+        // ★ RE-PINNED (notes28, 2026-11-24): the app offers every strut type now, so one type is a stubbed gate (as the
+        // two-type test's is)
+        LatticeTypeCatalog.appBatchesForTests = ["octet"]
+        defer { LatticeTypeCatalog.appBatchesForTests = nil }
         var saved = false
         let h = try newLatticePart { saved = true }
         let ids = Set(axIDs(h).map(\.id))

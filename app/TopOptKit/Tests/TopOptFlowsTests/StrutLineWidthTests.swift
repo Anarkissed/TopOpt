@@ -355,9 +355,17 @@ final class StrutLineWidthTests: XCTestCase {
         //   * `ProjectModel.latticeDensityBandDiametersMM` and `.latticeDensityPercent` now call their static twins (the
         //     sample reads the PAGE's type, which may not be saved yet). Both pass `strutLineWidthMM`: the dial's bottom is
         //     one extruded strut bead (`printabilityDensityFloor`), never a wall loop. Same numbers as before, new call sites.
-        XCTAssertEqual(strutSites, 15,
-                       "the fifteen audited lattice sites (AppModel 0, LatticePage 2, "
-                       + "WorkspacePlaceholder 4, ProjectModel 6, LatticeSetupWizard 3). "
+        // ★ RE-PINNED 15 -> 20 (2026-11-24, notes28: all the strut types on the new engine; builder E): AUDITED. Every new
+        //   site carries a density from one type's strut law to another's at the same place on the strut-width dial
+        //   (`LatticeTypeChange`), and the dial's bottom is one extruded STRUT bead (`printabilityDensityFloor`), never a wall
+        //   loop — the same question `latticeDensityPercent` already asks with it:
+        //   * `ProjectModel.latticeDensityForPercent` now calls its static twin (a type change asks it for the NEW type).
+        //   * `LatticeSetupWizard.typeChangeLines` (the plain words before Save), `.pickType` (the page's two densities
+        //     carried when a card is picked) and `.saveAndClose` (the densities stored per group and per face carried on Save).
+        //   * `LatticePage`'s topology pane (the variant page's pick carries them the same way).
+        XCTAssertEqual(strutSites, 20,
+                       "the twenty audited lattice sites (AppModel 0, LatticePage 3, "
+                       + "WorkspacePlaceholder 4, ProjectModel 7, LatticeSetupWizard 6). "
                        + "If this number moved, audit the new site and update the count.")
         XCTAssertTrue(offenders.isEmpty,
                       "lattice lineWidthMM site(s) reading a WALL bead:\n"

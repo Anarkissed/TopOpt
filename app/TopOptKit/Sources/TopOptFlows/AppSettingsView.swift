@@ -92,8 +92,30 @@ public final class AppSettings: ObservableObject {
         didSet { defaults.set(latticePrintAccurate, forKey: Self.printAccurateKey) }
     }
 
+    /// ★ notes28 (362's ruling 2026-11-24, maintainer-approved; his rule "NOT PRINT-TESTED"): the strut types he has printed
+    /// and marked tested — the app's, not a project's. A type not in it wears "Not print-tested" on its card until he marks it
+    /// (`LatticePrintTested`). Octet and BCC + Z start tested; he only ever adds to it.
+    nonisolated static let printTestedKey = "topopt.settings.latticePrintTested.v1"
+    nonisolated public static let printTestedAtStart: Set<String> = ["octet", "bccz"]
+    @Published public private(set) var latticePrintTested: Set<String> {
+        didSet { defaults.set(latticePrintTested.sorted(), forKey: Self.printTestedKey) }
+    }
+    /// He printed the type's sample coupon and it printed well: the tag goes, on every project.
+    public func markPrintTested(_ id: String) {
+        guard !latticePrintTested.contains(id) else { return }
+        latticePrintTested.insert(id)
+    }
+    /// The same answer read straight from this device's defaults (thread-safe, for the catalog's pure code).
+    nonisolated public static func isPrintTested(_ id: String, _ defaults: UserDefaults = .standard) -> Bool {
+        storedPrintTested(defaults).contains(id)
+    }
+    nonisolated static func storedPrintTested(_ defaults: UserDefaults) -> Set<String> {
+        printTestedAtStart.union(defaults.stringArray(forKey: printTestedKey) ?? [])
+    }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        self.latticePrintTested = Self.storedPrintTested(defaults)
         self.latticeLivePreview = defaults.bool(forKey: Self.livePreviewKey)   // absent ⇒ false: Click to refresh (his pick)
         self.latticePrintAccurate = defaults.bool(forKey: Self.printAccurateKey)   // absent ⇒ false: the quick Draft (11-21)
         let m = defaults.double(forKey: Self.marginKey)

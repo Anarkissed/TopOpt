@@ -23,6 +23,7 @@
 #include "topopt/lattice_layout_file.hpp"   // run_file_job: the print file on the iPad
 #include "topopt/lattice_file_strength.hpp" // its strength check (Install 3)
 #include "topopt/lattice_layout_organic.hpp" // ★ Organic cut 1: the weave's preview lay, its runs, the sweep limits
+#include "topopt/strut_cell.hpp"            // ★ notes28: each strut type's canonical cell (lattice_layout_type_facts)
 
 namespace topoptbridge {
 namespace {
@@ -987,6 +988,42 @@ LatticeLayoutGrowth lattice_layout_growth_read(int64_t session, int64_t from, in
     failed(err, why);
   }
   return o;
+}
+
+LatticeLayoutTypeFacts lattice_layout_type_facts(const std::string& topology) {
+  LatticeLayoutTypeFacts f;
+  const std::string why = bridge_guard_run("lattice_layout_type_facts", [&] {
+    const topopt::LatticeTopology topo = topopt::lattice_topology_from_id(topology);
+    if (topopt::lattice_topology_is_sheet(topo))
+      throw std::invalid_argument("\"" + topology + "\" is a sheet type: the engine lays strut types only");
+    // The engine's own two questions, in the order a lay asks them (cells.cpp: the width bounds; bars.cpp: the cell).
+    const topopt::LatticeWidthBounds b = topopt::lattice_width_bounds(topo);
+    if (!topopt::lattice_has_strut_cell(topo))
+      throw std::invalid_argument("\"" + topology + "\" has no canonical cell in core yet");
+    const topopt::StrutCell& cell = topopt::lattice_strut_cell(topo);
+    f.open_look = b.open_look;
+    f.touch = b.touch;
+    f.s = cell.S;
+    f.struts.reserve(6 * cell.struts.size());
+    for (const topopt::StrutCellStrut& st : cell.struts)
+      for (int v : {st.a.x, st.a.y, st.a.z, st.b.x, st.b.y, st.b.z}) f.struts.push_back(v);
+    f.nodes.reserve(3 * cell.nodes.size());
+    for (const topopt::StrutCellPoint& n : cell.nodes)
+      for (int v : {n.x, n.y, n.z}) f.nodes.push_back(v);
+    f.lays = true;
+  });
+  if (!why.empty()) {
+    f = LatticeLayoutTypeFacts{};
+    f.why = why;
+  }
+  // ★ notes28 (builder D's types.cpp, 362 11-24: "mirror both through the bridge instead of re-deriving them in Swift"):
+  // core's own Structural verdicts for the type, asked apart so a type the engine does not lay still says them.
+  bridge_guard_run("lattice_layout_type_facts structural", [&] {
+    const topopt::LatticeTopology topo = topopt::lattice_topology_from_id(topology);
+    f.structural_refusal = ll::structural_refusal(topo);
+    f.structural_note = ll::structural_note(topo);
+  });
+  return f;
 }
 
 void lattice_layout_cancel(int64_t session) {

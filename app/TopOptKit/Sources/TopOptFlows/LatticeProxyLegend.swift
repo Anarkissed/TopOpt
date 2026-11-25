@@ -126,8 +126,10 @@ public struct LatticeProxyLegend: View {
         return VStack(alignment: .leading, spacing: 2) {
             Text("on device: \(c.proxyTriangles.formatted()) tris · \(mb(c.proxyGPUBytes))")
                 .dsStyle(DS.TypeScale.footnote).foregroundStyle(DS.Color.textSecondary.color)
-            Text("real lattice: \(c.realTriangles.formatted()) tris · \(mb(c.realGPUBytes)) · \(ratioLabel(c.gpuRatio)) heavier")
-                .dsStyle(DS.TypeScale.footnote).foregroundStyle(DS.Color.textTertiary.color)
+            if c.realTriangles > 0 {   // ★ notes28: no measured count for the type, no line (never the octet's)
+                Text("real lattice: \(c.realTriangles.formatted()) tris · \(mb(c.realGPUBytes)) · \(ratioLabel(c.gpuRatio)) heavier")
+                    .dsStyle(DS.TypeScale.footnote).foregroundStyle(DS.Color.textTertiary.color)
+            }
         }
     }
 

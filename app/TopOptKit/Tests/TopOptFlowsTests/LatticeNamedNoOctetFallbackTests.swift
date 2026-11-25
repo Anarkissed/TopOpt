@@ -18,7 +18,14 @@ final class LatticeNamedNoOctetFallbackTests: XCTestCase {
     func testTheLookupResolvesItsOwnIdsAndNothingElse() throws {
         XCTAssertEqual(LatticeType.named("octet"), .octet)
         for t in LatticeType.family { XCTAssertEqual(LatticeType.named(t.id), t, t.id) }
-        for id in ["kelvin", "rhombic", "gyroid", "schwarz_d", "reentrant", "", "lattice9"] {
+        // ★ RE-PINNED (notes28, 2026-11-24): Kelvin, Rhombic and Re-entrant resolve to THEIR OWN types now — built from the engine's own
+        // cell (core's lattice_strut_cell), with core's measured law — never the octet; a type core has no cell for is nil
+        for id in ["kelvin", "rhombic", "reentrant"] {
+            let t = LatticeType.named(id)
+            XCTAssertEqual(t?.id, id, "★ \(id): its own type")
+            XCTAssertNotEqual(t?.struts, LatticeType.octet.struts, "★ \(id): never octet in disguise")
+        }
+        for id in ["gyroid", "schwarz_d", "", "lattice9"] {
             XCTAssertNil(LatticeType.named(id), "★ \(id): never octet in disguise")
         }
     }
@@ -37,8 +44,12 @@ final class LatticeNamedNoOctetFallbackTests: XCTestCase {
         XCTAssertTrue(limits.certifiable, "core certifies Kelvin now")
         XCTAssertNotEqual([limits.rhoMin, limits.rhoMax], [octet.rhoMin, octet.rhoMax], "★ never octet's band")
         let k = try XCTUnwrap(lat.runSpec(limits: limits, generatable: true, lineWidthMM: 0.45))
-        XCTAssertEqual(k.densityCapRho, 0, "★ no octet cap rides a Kelvin job")
-        XCTAssertNil(lat.runSpec(lineWidthMM: 0.45), "★ and the app runs none until Kelvin's batch ships (the type gate)")
+        // ★ RE-PINNED (notes28, 2026-11-24): Kelvin has its own strut law now (`LatticeType.named`), whose look cap is "none"
+        // (1: only the octet carries one, his ruling), as every non-octet type with a law always had — so the cap the JOB
+        // WRITES (`densityCapWritten`: 0 = none) is what is pinned. Kelvin's batch shipped too: the app runs Kelvin's own spec.
+        XCTAssertEqual(k.densityCapWritten, 0, "★ no octet cap rides a Kelvin job")
+        XCTAssertEqual(k.densityCapRho, 1, "Kelvin's own law: no cap")
+        XCTAssertEqual(try XCTUnwrap(lat.runSpec(lineWidthMM: 0.45)).densityCapWritten, 0, "★ Kelvin's own run: no octet cap")
         // control: octet still carries its cap
         var oct = lat; oct.topologyID = "octet"
         let o = try XCTUnwrap(oct.runSpec(limits: TopOptKit.latticeLimits(topology: "octet"),
@@ -52,24 +63,34 @@ final class LatticeNamedNoOctetFallbackTests: XCTestCase {
         lat.cellMM = 2.0
         let b = LatticeBounds.compute(settings: lat, limits: TopOptKit.latticeLimits(topology: "kelvin"),
                                       lineWidthMM: 0.45)
-        XCTAssertEqual(b.strutRadiusMM, 0, "★ no strut law: no strut width")
-        XCTAssertNil(b.strutReason)
-        XCTAssertFalse(b.densityLoReason?.contains("extrusion") ?? false, "★ no octet printability floor")
-        // control: octet at 2 mm and a 0.45 mm bead does carry the floor
+        // ★ RE-PINNED (notes28, 2026-11-24): Kelvin has its OWN strut law now (the engine's cell, core's measured table), so
+        // its bounds carry Kelvin's strut — never the octet's; an id with no law (no type core knows) carries none
         var oct = lat; oct.topologyID = "octet"
         let o = LatticeBounds.compute(settings: oct, limits: TopOptKit.latticeLimits(topology: "octet"),
                                       lineWidthMM: 0.45)
-        XCTAssertGreaterThan(o.strutRadiusMM, 0)
+        XCTAssertGreaterThan(o.strutRadiusMM, 0, "control: octet at 2 mm and a 0.45 mm bead carries its strut")
+        XCTAssertGreaterThan(b.strutRadiusMM, 0, "★ Kelvin's own strut")
+        XCTAssertNotEqual(b.strutRadiusMM, o.strutRadiusMM, accuracy: 1e-9, "★ never the octet's strut under Kelvin's name")
+        var re = lat; re.topologyID = "lattice9"
+        let r = LatticeBounds.compute(settings: re, limits: TopOptKit.latticeLimits(topology: "lattice9"), lineWidthMM: 0.45)
+        XCTAssertEqual(r.strutRadiusMM, 0, "★ no strut law: no strut width")
+        XCTAssertNil(r.strutReason)
+        XCTAssertFalse(r.densityLoReason?.contains("extrusion") ?? false, "★ no octet printability floor")
     }
 
     /// The preview draws no Kelvin-labelled octet struts; the proxy has no law; the wizard sample
     /// is empty.
     func testThePreviewDrawsNothingForATypeWithNoTable() throws {
-        XCTAssertNil(LatticeSDFPreview(latticeID: "kelvin"))
+        // ★ RE-PINNED (notes28, 2026-11-24): Kelvin has a table now — the engine's own cell — so the type with none is
+        // a sheet (Gyroid: no strut cell); Kelvin's preview draws Kelvin's struts, never the octet's
+        XCTAssertNil(LatticeSDFPreview(latticeID: "gyroid"))
         XCTAssertNotNil(LatticeSDFPreview(latticeID: "octet"))
-        XCTAssertNil(LatticeProxyParams(latticeID: "kelvin").lattice)
-        let m = LatticeWizardModel(settings: LatticeSettings(enabled: true, topologyID: "kelvin"))
+        XCTAssertEqual(LatticeSDFPreview(latticeID: "kelvin")?.lattice.id, "kelvin")
+        XCTAssertNotEqual(LatticeSDFPreview(latticeID: "kelvin")?.segments, LatticeSDFPreview(latticeID: "octet")?.segments)
+        XCTAssertNil(LatticeProxyParams(latticeID: "gyroid").lattice)
+        let m = LatticeWizardModel(settings: LatticeSettings(enabled: true, topologyID: "gyroid"))
         XCTAssertNil(m.lattice, "★ no octet cell under another name (B8: the sample that drew it is deleted)")
+        XCTAssertEqual(LatticeWizardModel(settings: LatticeSettings(enabled: true, topologyID: "kelvin")).lattice?.id, "kelvin")
     }
 
     /// The face card asks core by the RAW id: Kelvin's card is core's answer for "kelvin",
