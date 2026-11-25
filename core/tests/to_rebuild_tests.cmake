@@ -16,6 +16,11 @@ if(Eigen3_FOUND)
   add_executable(test_to_strength_known_stress tests/unit/test_to_strength_known_stress.cpp)
   target_link_libraries(test_to_strength_known_stress PRIVATE topopt)
   add_test(NAME to_strength_known_stress COMMAND test_to_strength_known_stress)
+  # Second half: a thick ring with pressure on its curved inner face, put on by
+  # stage 1's drawn-face loader. Measures only until stage 2.
+  add_executable(test_to_strength_known_ring tests/unit/test_to_strength_known_ring.cpp)
+  target_link_libraries(test_to_strength_known_ring PRIVATE topopt)
+  add_test(NAME to_strength_known_ring COMMAND test_to_strength_known_ring)
 endif()
 
 # Tests C and D: the area a load really lands on, and protection depth in mm.
