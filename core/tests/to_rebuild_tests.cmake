@@ -6,7 +6,7 @@
 # test); stage 3 adds --gate.
 add_executable(test_to_surface_known_shapes tests/unit/test_to_surface_known_shapes.cpp)
 target_link_libraries(test_to_surface_known_shapes PRIVATE topopt)
-add_test(NAME to_surface_known_shapes COMMAND test_to_surface_known_shapes)
+add_test(NAME to_surface_known_shapes COMMAND test_to_surface_known_shapes --gate)
 
 # Test E (first half): the strength number against a textbook stress, a plate
 # with a hole pulled at an angle to the grid, at four resolutions. Drives
