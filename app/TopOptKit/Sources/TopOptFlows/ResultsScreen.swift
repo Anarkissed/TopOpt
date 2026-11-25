@@ -13,6 +13,7 @@ import SwiftUI
 import TopOptDesign
 import TopOptKit
 import os
+import simd
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -110,12 +111,16 @@ public struct ResultsScreen: View {
     @State private var stressKeyMinimized = true
     /// ★ His iPad 2026-10-27: the moving views (Load paths, Bend, Break) play on their own, pause, and scrub by hand.
     @State private var motionPlaying = true
-    /// Break's own clock while it plays (seconds into the push loop).
-    @State private var breakClock: Double = 0
     @State private var orientOpen = false
     /// The latest camera→screen projection the viewer publishes, so the hot-spot
     /// marker (M7.viz.2) tracks the worst point as the camera orbits/zooms.
-    @State private var projection: CameraProjection?
+    @State private var rawProjection: CameraProjection?
+    /// ★ notes27 (his print orientation, SPEC 2a): the camera's projection with the part's turn in front of it, so every overlay
+    /// pinned to a point of the part (model frame) lands on the part as it is drawn, standing the way it prints.
+    private var projection: CameraProjection? {
+        guard let p = rawProjection, let c = viewerMesh?.bounds.center else { return rawProjection }
+        return PrintDraw.modelProjection(p, centre: c, rotation: printSettle)
+    }
     /// Whether the hot-spot marker's value/margin callout is expanded (tap to toggle).
     @State private var hotSpotExpanded = false
     /// Whether the streaming pill's progress drawer is open (tap the pill to toggle):
@@ -180,6 +185,8 @@ public struct ResultsScreen: View {
                 takeOpenOn: (() -> Int?)? = nil,
                 version: String? = nil, pickedVariant: Int? = nil, onPick: ((Int) -> Void)? = nil,
                 printOrientation: ResultsPrintOrientation? = nil,
+                printUp: SIMD3<Float>? = nil, chosenFace: Bool = false,
+                orientation: PrintOrientationHost? = nil,
                 certify: OrganicCertifyCard? = nil) {
         // `resultsModel` is a TEST SEAM (the M7 /app/ house style — the run is tested
         // through an injected scheduler / runner / notifier the same way). The screen
@@ -212,6 +219,42 @@ public struct ResultsScreen: View {
         self.takeOpenOn = takeOpenOn
         self.printOrientation = printOrientation
         self.certify = certify
+        // ★ notes27: one reference (WorkspaceBodySizeTests: Results' own size has 16 bytes of room)
+        self.printSource = printUp == nil && orientation == nil ? nil
+            : ResultsPrintSource(up: printUp, chosenFace: chosenFace, host: orientation)
+    }
+
+    /// ★ notes27 (his print orientation, SPEC 2a: "I want the part first drawn the way it prints"): the way up it prints (the
+    /// part's own coordinates); the part stands on the bed that way. nil (previews, tests): drawn in the file's own frame.
+    var printUp: SIMD3<Float>? { printSource?.up }
+    /// ★ notes27: how it prints and what "Print orientation" runs, held by reference (the screen's size must not grow).
+    let printSource: ResultsPrintSource?
+    /// ★ notes27: he chose the face it prints on (a plate), not his placement.
+    var chosenFace: Bool { printSource?.chosenFace ?? false }
+    /// ★ notes27 (SPEC 2b): how the shown result prints, in his words, and what its file tells the slicer.
+    var printing: ResultsPrinting {
+        let f = model.printFacts
+        return ResultsPrinting(way: f.onEdge ? .onEdge : chosenFace ? .chosenFace : .asPlaced,
+                               slicerSupports: f.slicerSupports, linked: orientation != nil)   // ★ P6: the row's link
+    }
+    /// The turn the part is drawn with: its print up to the screen's up (★ P6: the way the orientation flow shows, while open).
+    var printSettle: simd_quatf {
+        ((orientation != nil ? orient.shownUp() : nil) ?? printUp).map(PrintDraw.settle(up:)) ?? simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
+    }
+    /// ★ notes27 P6 (his print orientation, SPEC 2d): "Print orientation" — the workspace's check and keep; nil: not offered.
+    var orientation: PrintOrientationHost? { printSource?.host }
+    /// The flow (shared; observed by the views that draw it — PrintTurnedStage, the corner switch, the layer — so this screen's
+    /// own size never grows).
+    private var orient: PrintOrientationFlow { PrintOrientationFlow.shared }
+
+    /// "Print orientation" (the ⌃ drawer, the Checks row's link): the engine's ranking of this result, else Manual.
+    private func startOrientation() {
+        guard let h = orientation else { return }
+        model.cornerDrawers.close()
+        let m = viewerMesh
+        var tris = (m?.indices ?? []).map { Int32(bitPattern: $0) }
+        if let b = model.printFacts.baseTriangles, b > 0, b * 3 < tris.count { tris = Array(tris.prefix(b * 3)) }   // the solid
+        orient.start(kind: h.kind, ranking: model.printFacts.ranking, mesh: m.map { ($0.positions, tris) })
     }
 
     /// ★ B4 (note 12, Q9): the orientation line's source; nil draws no line.
@@ -220,8 +263,13 @@ public struct ResultsScreen: View {
     /// ★ Organic cut 2 (his certify wizard, 11-19): the open pop-up (the workspace keeps the walk); nil: none.
     let certify: OrganicCertifyCard?
     @StateObject private var spotMemo = OrganicSpotPaintMemo()
-    /// The pop-up's frame (global), where its line starts.
-    @State private var certifyCardFrame: CGRect = .zero
+
+    /// ★ notes27 (his 11-24: "You can colour the struts without the stress map on when the "Strengthened" row is selected and
+    /// opened in the "Checks" modal"): that row open — the struts the strengthening changed, in one clear highlight.
+    private var strengthenedPaint: [SIMD4<Float>]? {
+        guard certifyPaint == nil, let id = openCheck, id.hasPrefix("Strengthened"), let mesh = viewerMesh else { return nil }
+        return model.strengthenedTints(for: mesh)
+    }
 
     /// The open pop-up's weak areas painted on the shown part (one paint per issue and mesh); nil: none to paint.
     private var certifyPaint: OrganicSpotPaint.Result? {
@@ -231,16 +279,14 @@ public struct ResultsScreen: View {
     }
 
     /// ★ his design: the card, and its line straight to the area, staying on it however he turns the part.
+    /// ★ his notes 11-23 (notes25 B1): at the left in the middle, clear of every control, draggable, its line attached
+    /// (CertifyCardPlace; the controls it keeps clear of are this screen's published frames, `.onPreferenceChange` below).
     @ViewBuilder private func certifyLayer(_ c: OrganicCertifyCard) -> some View {
-        let target = c.issue.at.flatMap { projection?.project(SIMD3<Float>($0)) }
-        OrganicCertifyLeader(from: certifyCardFrame, to: target).ignoresSafeArea()
-        OrganicCertifyCardView(card: c)
-            .background(GeometryReader { g in
-                Color.clear.onAppear { certifyCardFrame = g.frame(in: .global) }
-                    .onChange(of: g.frame(in: .global)) { f in certifyCardFrame = f }
-            })
-            .padding(.top, PageChrome.panelTop).padding(.leading, PageChrome.edge)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // ★ notes25 (merged with builder C): the struts card's line goes where the print file's ONE answer says it gives way
+        // (the weakest strut when the struts govern) — the place Results lights and Break marks
+        let struts = c.issue.id == "struts_short" ? model.latticeAnswer.flatMap { $0.governs == .strut ? $0.place : $0.weakest.first?.at } : nil
+        let target = (struts ?? c.issue.at).flatMap { projection?.project(SIMD3<Float>($0)) }
+        CertifyCardLayer(card: c, target: target, place: CertifyCardPlace.shared)
             .zIndex(3)
     }
     @State private var orientPhase: PrintOrientationPhase = .ours
@@ -268,7 +314,9 @@ public struct ResultsScreen: View {
     struct MergeTrigger: Equatable {
         let outcome: OptimizeOutcome
         static func == (a: MergeTrigger, b: MergeTrigger) -> Bool {
-            a.outcome.variants.count == b.outcome.variants.count
+            // ★ notes27 P6 ("Keep orientation"): a kept check's result replaces the one shown with as many variants — its report
+            // (its size, cheap) tells them apart
+            a.outcome.variants.count == b.outcome.variants.count && a.outcome.reportJSON?.count == b.outcome.reportJSON?.count
         }
     }
     private var mergeTrigger: MergeTrigger { MergeTrigger(outcome: liveOutcome) }
@@ -284,9 +332,12 @@ public struct ResultsScreen: View {
             // the selected variant's isosurface, optionally stress-colored, morphing
             // with the scrub. Pixels are device QA (the M7 /app/ standard).
             DS.Color.background.color.ignoresSafeArea()
+            PrintTurnedStage(flow: orient, follows: orientation != nil, up: printUp) { settle, animated in   // ★ notes27: as it prints
             MetalMeshView(mesh: viewerMesh,
                           camera: cameraModel,
-                          onProjection: { projection = $0 },
+                          settleRotation: settle, settleAnimated: animated && !reduceMotion,   // ★ notes27: drawn the way it prints
+                          showGround: printUp != nil,                                  // ... on the bed
+                          onProjection: { rawProjection = $0 },
                           stressTints: stressTints,
                           stressMultiplier: Float(stressMultiplier),
                           reveal: viewerReveal,
@@ -297,10 +348,14 @@ public struct ResultsScreen: View {
                           loadFlowGuides: loadFlowGuides,
                           bodyAlpha: bodyAlpha,
                           spotFaces: certifyPaint?.outline, spotKey: certifyPaint?.key ?? 0)
+                .loadMotion(ramp: loadRamp, patch: motion?.patch)   // ★ notes25: Bend / Break run the load
+                .loadLight(loadLight)   // ★ notes26 (C5): Load paths' light, emitted and haloed
                 // ★ tap-to-explore, the Lattice key's process (his iPad 2026-10-27): while the key is open a tap on the
                 // part reads the stress there (an arrow on the part, an arrow on the key); a double tap anywhere leaves
                 .onSurfacePoint { p in if exploring, let p { stressProbe = p } }
                 .onExploreExit(exploring ? { leaveExplore() } : nil)
+                .closesCornerDrawers(model.cornerDrawers)   // ★ his 11-22 (img 45): a tap on the model closes the ⌃'s drawer
+            }
                 .ignoresSafeArea()
 
             // ★ RESULTS REDESIGN (his mockup, approved 2026-10-27): the model is the screen; the versions (bottom left),
@@ -328,11 +383,15 @@ public struct ResultsScreen: View {
             versionsColumn
             rightColumn
             if let po = printOrientation { printOrientationLine(po) }   // ★ B4 (note 12): bottom-centre
+            // ★ notes27 P6: in the flow, Check strength + Manual orientation stand in Export's place
+            PrintOrientationCornerSwitch(flow: orient, host: orientation,
+                                         variant: { PrintCheckVariant(index: model.selectedVariantIndex, stl: model.exportSTLData()) }) {
             resultsCorner   // ★ LOOK PER SCREEN (R-a, §4.18): Compare · Details · Export · ⌃
+            }
             if detailsOpen {
                 // ★ R-a (mockup #topo-results-details): the drawer from the bottom, the page's width
                 ResultsDetailsDrawer(tab: $detailsTab, versionTitle: selectedRow?.title ?? "",
-                                     rows: { model.detailRows($0, version: selectedRow) },
+                                     rows: { model.printing = printing; return model.detailRows($0, version: selectedRow) },   // ★ notes27
                                      close: { withAnimation(DS.Motion.sheetIn) { detailsOpen = false } })
                     .frame(maxHeight: .infinity, alignment: .bottom)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -347,10 +406,16 @@ public struct ResultsScreen: View {
             if model.hasHistory, !fullScreen { mediaPlayer }
             if legendShown { stressProbeCallout.ignoresSafeArea() }
             orientationGizmo
+            if let h = orientation {   // ★ notes27 P6: his print orientation flow, over Results (it draws only while open)
+                PrintOrientationLayer(flow: orient, host: h, raw: rawProjection, up: printUp,
+                                      centre: viewerMesh?.bounds.center ?? .zero, eye: cameraModel.camera.eye)
+                    .zIndex(6)
+            }
             if compare != nil {
                 ResultsCompareView(model: model, rows: versionRows, session: $compare, scenarioPick: $scenarioPick,
                                    close: { compare = nil },
-                                   use: { tab in model.select(tab); compare = nil })
+                                   use: { tab in model.select(tab); compare = nil },
+                                   settle: printSettle, onBed: printUp != nil)   // ★ notes27: as it prints
                     .transition(.opacity)
                     .zIndex(5)
             }
@@ -361,7 +426,9 @@ public struct ResultsScreen: View {
             if let c = all["resultsCorner"], c != cornerFrame { cornerFrame = c }   // ★ R-a
             let d = all["resultsDetailsPanel"]?.height ?? 0
             if abs(d - drawerHeight) > 0.5 { drawerHeight = d; liftModel() }
+            if certify != nil { CertifyCardPlace.shared.noteResults(all) }   // ★ notes25 B1: what the fix pop-up keeps clear of
         }
+        .cornerTapCloses(model.cornerDrawers)   // ★ his 11-22: a tap anywhere outside the ⌃'s drawer closes it
         .animation(DS.Motion.sheetIn, value: detailsOpen)
         .onChange(of: detailsOpen) { _ in liftModel() }
         .transition(.opacity)
@@ -372,6 +439,7 @@ public struct ResultsScreen: View {
         .onChange(of: model.selectedIndex) { _ in
             stressProbe = nil; applyMotion(layers.motion)   // a new version's views start from rest
             syncOrientPhase()                               // ★ B4: and its own way of printing
+            orient.reset()                                  // ★ notes27 P6: another result: the flow starts over
         }
         // ★ his ask 2026-10-27: the Scenario menu changes the views — the picked scenario's own fields, from rest
         .onChange(of: scenarioPick) { p in model.viewScenario = p; stressProbe = nil; applyMotion(layers.motion) }
@@ -386,7 +454,7 @@ public struct ResultsScreen: View {
         // ★ his iPad 2026-10-27: Compare covers the page too, so the Topology | Setup | Results capsule hides under it
         .onChange(of: fullScreen) { onFullScreen?($0 || compare != nil) }
         .onChange(of: compare != nil) { onFullScreen?($0 || fullScreen) }
-        .onDisappear { if fullScreen || compare != nil { onFullScreen?(false) } }
+        .onDisappear { if fullScreen || compare != nil { onFullScreen?(false) }; orient.reset() }   // ★ notes27 P6
         .background(GeometryReader { g in
             Color.clear.onAppear { screenWidth = g.size.width; screenHeight = g.size.height }
                 .onChange(of: g.size.width) { screenWidth = $0 }.onChange(of: g.size.height) { screenHeight = $0 }
@@ -397,9 +465,8 @@ public struct ResultsScreen: View {
             // is driving the whole view — the maintainer reads this against the
             // GizmoFrame track to localise the frame collapse (see the handoff).
             let animating = model.playing
-                || (motionPlaying && model.flexOn && !reduceMotion)
+                || (motionPlaying && motionKind != nil && !reduceMotion)
                 || (motionPlaying && layers.motion == .loadPaths && model.lightFlow != nil && !reduceMotion)
-                || (motionPlaying && model.pushActive && !reduceMotion)
             if animating {
                 os_signpost(.event, log: resultsSignpost, name: "playback_tick")
             }
@@ -408,20 +475,15 @@ public struct ResultsScreen: View {
             // M7.viz.3: loop the flex while it's on — UNLESS reduced-motion, which
             // holds the static full-deflection frame (no advance → phase stays put,
             // and flexScale uses amplitude 1).
-            if motionPlaying, model.flexOn, !reduceMotion {
-                model.advanceFlex((1.0 / 30.0) / ResultsMotion.bendSeconds)
+            // ★ notes25: Bend and Break run the LOAD — it eases up, holds, eases back (ResultsLoadMotion.swift)
+            if motionPlaying, let k = motionKind, !reduceMotion {
+                model.loadMotion.advance(1.0 / 30.0, k)
             }
             // Handoff 070 flow: advance the comet clock while the overlay is on — UNLESS
             // reduced-motion, which freezes the arrows mid-path with clean heads. The arrows travel; they never wiggle
             // (flowWiggle 0, his note 2026-10-27).
             if motionPlaying, layers.motion == .loadPaths, model.lightFlow != nil, !reduceMotion {
                 model.advanceLightPhase(1.0 / 30.0)   // ★ 10-28: the light sweeps through the part
-            }
-            // Break: the load climbs to the one that breaks it, holds there, and climbs again.
-            if motionPlaying, model.pushActive, !reduceMotion, let fp = model.failurePrediction {
-                breakClock += 1.0 / 30.0
-                model.setPush(factor: ResultsMotion.pushFactor(position: ResultsMotion.breakPosition(time: breakClock),
-                                                               multiplier: fp.multiplier))
             }
         }
         .onChange(of: mergeTrigger) { trigger in
@@ -445,6 +507,7 @@ public struct ResultsScreen: View {
             model.setFlowWiggle(0)                    // … and never wiggle
             layers = ResultsLayers()   // ★ B4 (note 13): open plain, no view lit
             syncOrientPhase()
+            orient.reset()   // ★ notes27 P6: the flow starts closed (it is shared: never another screen's state)
             if let v = takeOpenOn?(), let t = model.tabs.first(where: { $0.variantIndex == v && !$0.isLatticed }) { model.select(t.index) }
             model.stressOn = layers.stress
             applyMotion(nil)
@@ -677,6 +740,8 @@ public struct ResultsScreen: View {
     private var stressTints: [SIMD4<Float>]? {
         // ★ Organic cut 2 (his certify wizard): while a pop-up is up, its weak areas are coloured on the part
         if let p = certifyPaint { return p.tints }
+        if let s = strengthenedPaint { return s }   // ★ notes27: the Strengthened row open — the struts it changed, in gold
+        if loadRamp != nil { return nil }   // ★ notes25: Bend / Break's (and a print file's) colours are made on the GPU
         // In load-path FLOW mode the flow's Body segment owns the body appearance: the
         // "Stress" body paints the static field with the MOVING epicenters blended in
         // (a bloom following each arrow); x-ray / solid paint plain clay (nil tints).
@@ -688,11 +753,8 @@ public struct ResultsScreen: View {
         }
         // ★ his iPad 2026-10-28: Load paths is light travelling through the part, painted on its own surface — and with the
         // Stress layer on, the light is the stress it passes through
-        if layers.motion == .loadPaths {
-            guard let lf = model.lightFlow, let mesh = viewerMesh, lf.arrival.count == mesh.flat.vertexCount else { return nil }
-            let colours = legendShown ? model.selectedStressField.map { model.stressTints(for: mesh, field: $0) } : nil
-            return lf.tints(phase: Float(model.lightPhase), lightColours: colours)
-        }
+        // ★ notes26 (C5): now LIGHT, emitted and haloed on the GPU (`loadLight`), not paint in these tints
+        if layers.motion == .loadPaths { return nil }
         guard showStressColors, let mesh = viewerMesh,
               let field = model.selectedStressField, !field.isEmpty else { return nil }
         return model.stressTints(for: mesh, field: field, multiplier: stressMultiplier)
@@ -709,12 +771,39 @@ public struct ResultsScreen: View {
     /// to the viewer so it re-uploads the recolored tints as the multiplier moves.
     /// ★ 10-28: the TRUE load the colours show — the bend's share of the load (0…1 through the loop), the push's multiple
     /// in Break, 1 at rest — so the legend's numbers are the part's (the old flex colours were boosted to hit red).
-    private var stressMultiplier: Double {
+    /// ★ notes25: the load the moving view shows this frame (the colours are each place's share at your load × it).
+    private var stressMultiplier: Double { motion.map { Double($0.frame.colourLoad) } ?? 1 }
+
+    /// ★ notes26 (C5, his 11-23: "more colour and light coming out of it"): Load paths' light this frame — the same sweep, now
+    /// emitted and haloed by the viewer, coloured by how much load flows there; with the Stress layer on, over the stress colours
+    /// (the part's stress stays readable, the light is that colour lifted toward white). A new key each phase step; held paused.
+    private var loadLight: LoadLightFrame? {
+        guard layers.motion == .loadPaths, certifyPaint == nil, strengthenedPaint == nil, let lf = model.lightFlow, let mesh = viewerMesh,
+              lf.arrival.count == mesh.flat.vertexCount else { return nil }
+        // ★ notes27 (his 11-24): only over the stress map; the band carries each place's stress on the map's own scale, rising to
+        // its full colour as the band's centre reaches it (LoadLightFlow.loadFrame)
+        guard legendShown, let shares = model.mapShares(for: mesh) else { return nil }
+        let f = lf.loadFrame(phase: Float(model.lightPhase), shares: shares)
+        return LoadLightFrame(key: Int((model.lightPhase * 100_000).rounded()) * 2 + 1, tints: f.tints, light: f.light)
+    }
+
+    /// ★ notes25: the moving view that runs the load (Bend / Break), when the part can move.
+    private var motionKind: LoadMotionKind? {
+        guard model.hasFlex else { return nil }
         switch layers.motion {
-        case .bend: return model.flexAmplitude(reduceMotion: reduceMotion)
-        case .breakIt: return model.pushActive ? model.pushFactor : 1
-        default: return 1
+        case .bend?: return .bend
+        case .breakIt?: return model.canBreak ? .breakIt : nil
+        default: return nil
         }
+    }
+    /// ★ notes25: this frame of it (built once per selection, cached per frame in the model).
+    private var motion: ResultsModel.MotionState? { motionKind.flatMap { model.motionState($0, reduceMotion: reduceMotion) } }
+    /// ★ notes25: the colours made on the GPU — the moving view's at its frame's load, and a print file's still view at your load
+    /// (each place's share of its limit); nil: the CPU's stress tints as before.
+    private var loadRamp: LoadRamp? {
+        guard certifyPaint == nil, strengthenedPaint == nil, legendShown, !loadPathActive, layers.motion != .loadPaths else { return nil }
+        if let m = motion { return m.ramp }
+        return showHistory ? nil : model.stillRamp()
     }
 
     /// The mesh the viewer shows. When the variant has an optimization history and
@@ -735,7 +824,7 @@ public struct ResultsScreen: View {
     private var pushActive: Bool { model.pushActive }
     /// Either flex mechanism displaces the mesh via the same render path (per-vertex
     /// displacement × scale): the viz.3 wobble or the viz.6 push scrub.
-    private var deflectionActive: Bool { flexActive || pushActive }
+    private var deflectionActive: Bool { motion != nil }   // ★ notes25: Bend / Break run the load (ResultsLoadMotion.swift)
     /// Whether Play morphs THROUGH the optimization history (the "watch it carve out")
     /// rather than the reveal-slice fallback. `stressOn` is deliberately NOT a factor
     /// (see `ResultsModel.showsHistoryMorph`): the Stress chip used to fall through to
@@ -803,17 +892,13 @@ public struct ResultsScreen: View {
     /// Per-flat-vertex flex displacement for the selected variant (nil when flex is
     /// off / the variant has no field). Cached in the model, so this is cheap.
     private var flexDisplacements: [Float]? {
-        guard deflectionActive, let mesh = model.selectedMesh,
-              let field = model.selectedDisplacementField, !field.isEmpty else { return nil }
-        return model.flexDisplacements(for: mesh, field: field)
+        motion?.prep.disp   // ★ notes25: sampled smoothly from the material's own nodes (no tearing), once per selection
     }
     /// The per-frame displacement scale. For the viz.3 wobble it is exaggeration·
     /// amplitude (reduced-motion pins amplitude at 1); for the viz.6 push scrub it is
     /// the load-proportional push exaggeration (a static scrub — no loop).
     private var flexScale: Float {
-        // ★ 10-28: Break bends with the SAME exaggeration as Bend, at the pushed load (true shape × the slider)
-        if pushActive { return model.flexExaggeration * Float(model.pushFactor) }
-        return flexActive ? model.flexScale(reduceMotion: reduceMotion) : 0
+        motion?.frame.shapeScale ?? 0   // ★ notes25: the computed displacement × the load × the exaggeration
     }
 
     // MARK: - Stress legend (M7.viz.1 — scaled to material yield)
@@ -1148,32 +1233,38 @@ public struct ResultsScreen: View {
     /// The failure-point marker: reuses the M7.viz.2 hot-spot marker styling at the
     /// same worst point (the failure location IS the peak-stress point). Turns red with
     /// a "Yields here" callout once the push scrub reaches the failure multiple.
+    /// ★ notes25 (C2, C3): placed from the same data that colours the part — a print file's governing place (the weakest strut,
+    /// or the solid's weakest voxel), a solid result's first place to reach the top colour — and drawn on the BENT part.
     @ViewBuilder private var failureMarker: some View {
-        if model.failureOn, let fp = model.failurePrediction, let p = projection?.project(fp.position) {
-            let tint = model.atFailure ? Self.failureRed : DS.Color.accent.color
+        if let s = motion, s.kind == .breakIt, let at = s.placeShown, let p = projection?.project(at) {
+            let tint = s.frame.atTop ? Self.failureRed : DS.Color.accent.color
             ZStack {
                 Circle()
                     .strokeBorder(tint, lineWidth: 2)
-                    .background(Circle().fill(tint.opacity(model.atFailure ? 0.30 : 0.18)))
+                    .background(Circle().fill(tint.opacity(s.frame.atTop ? 0.30 : 0.18)))
                     .frame(width: 26, height: 26)
-                failureCallout(fp, tint: tint)
+                failureCallout(s, tint: tint)
                     .fixedSize()
                     .offset(y: -48)   // float the readout above the marker
             }
+            .background(ResultsChrome.publish("resultsGivesWayMarker"))
             .position(p)
         }
     }
 
     /// The failure marker's readout: "YIELDS HERE" + the load at which it yields, or —
     /// before failure — the current push load against the failure load.
-    private func failureCallout(_ fp: FailurePrediction, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(model.atFailure ? "YIELDS HERE" : "FAILS AT")
+    private func failureCallout(_ s: ResultsModel.MotionState, tint: Color) -> some View {
+        let lines = model.breakMarkerLines(s)   // ★ notes25 C3: "GIVES WAY HERE · 55 kg · 1.34× your load"
+        return VStack(alignment: .leading, spacing: 1) {
+            Text(lines.title)
                 .font(.system(size: 9, weight: .bold)).tracking(0.6)
                 .foregroundStyle(DS.Color.textSecondary.color)
-            Text(fp.valueLabel).dsStyle(DS.TypeScale.bodyStrong)
-                .foregroundStyle(model.atFailure ? tint : DS.Color.textPrimary.color)
-            Text(String(format: "%.1f× the load", fp.multiplier))
+            if let load = lines.load {
+                Text(load).dsStyle(DS.TypeScale.bodyStrong)
+                    .foregroundStyle(s.frame.atTop ? tint : DS.Color.textPrimary.color)
+            }
+            Text(lines.multiple)
                 .dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
                 .foregroundStyle(tint)
         }
@@ -1313,14 +1404,19 @@ public struct ResultsScreen: View {
             guard let b = blocks, let t = model.selected, let vf = model.requestedVolumeFraction(of: t) else { return 0 }
             return b.rows.first { $0.accepted && abs($0.volumeFraction - vf) < 1e-6 }?.fragileJoints ?? 0
         }()
-        return ResultsChecks.checks(tab: model.selected, margin: selectedRow?.margin,
+        return model.droppedChecks   // ★ R-07: a version the final check on its file refused, named as it was seen
+            + ResultsChecks.checks(tab: model.selected, margin: selectedRow?.margin,
                                     required: blocks?.safetyMargin ?? blocks?.strengthen?.marginRequired ?? 1,
                                     safetyMargin: blocks?.safetyMargin, scenarios: model.scenarios(for: model.selected),
                                     thinJoints: thin, bridged: model.selected.map { model.isBridged($0) } ?? false,
                                     pieces: model.selected.flatMap { model.piecesFlag($0) },
                                     finish: selectedFinish,   // ★ B4: E1's finishing
-                                    weakest: model.hotSpot.map { SIMD3<Double>($0.position) },
-                                    struts: blocks?.latticeFile)   // ★ his ruling 11-17: a new-engine Lattice run's struts
+                                    weakest: model.latticeAnswer?.place ?? model.hotSpot.map { SIMD3<Double>($0.position) },
+                                    struts: blocks?.latticeFile,   // ★ his ruling 11-17: a new-engine Lattice run's struts
+                                    printFile: blocks?.printFile,   // ★ his 11-21: its file, strengthening and layers
+                                    answer: model.latticeAnswer,   // ★ notes25 C3: a print file's one strength line
+                                    printing: printing)   // ★ notes27: how it prints, in his words
+                .map { model.withStrengthenedLegend($0) }   // ★ notes27: its legend when its struts are lit
     }
 
     /// Bottom left: the streaming pill, a latticed version's mesh state, then the Versions panel.
@@ -1367,16 +1463,41 @@ public struct ResultsScreen: View {
         } run: {
             DSRunButton(exportTitle, subtitle: exportLine,
                         state: model.canExport ? .ready : .disabled(model.exportDisabledReason ?? "Nothing to export"),
-                        key: "resultsExport") { exportSTL() }
-                .accessibilityLabel(model.canExport ? "Export STL" : (model.exportDisabledReason ?? "Export unavailable"))
+                        key: "resultsExport") { exportFile() }   // ★ notes28 (4c): the 3MF by default (STL in the ⌃)
+                .accessibilityLabel(model.canExport ? (model.exportIsStreamed ? "Export STL" : "Export 3MF")
+                                    : (model.exportDisabledReason ?? "Export unavailable"))
         } split: {
-            DSSplitButton(key: "resultsSplitMore") {
-                if exportable >= 2 { Button("Export all \(exportable) results") { exportAll() } }
-                Button("Open in Library") { onClose() }
+            // ★ his 11-22 (img 45): the ⌃ opens its own drawer, above the buttons (never over them)
+            DSSplitButton(key: "resultsSplitMore", open: model.cornerDrawers.isOpen("resultsSplitMore")) {
+                model.cornerDrawers.toggle("resultsSplitMore")
             }
         } above: {
-            exportFailureLine
+            if model.cornerDrawers.isOpen("resultsSplitMore") {
+                VStack(alignment: .trailing, spacing: DSParts.cornerGap) {
+                    CornerMoreDrawer(drawers: model.cornerDrawers, key: "resultsSplitMore", items: resultsMoreItems(exportable))
+                    exportFailureLine
+                }
+            } else {
+                exportFailureLine
+            }
         }
+    }
+
+    /// ★ his 11-22 (img 45): the ⌃'s rows — the menu's two (Export all N results · Open in Library).
+    private func resultsMoreItems(_ exportable: Int) -> [CornerMoreItem] {
+        var items: [CornerMoreItem] = []
+        // ★ notes28 (4c, his "an *option* for an stl (via the '^' menu)"): Export is the 3MF; the shape alone as an STL here
+        if !model.exportIsStreamed {
+            items.append(.action(ResultsExportCopy.stlItem, line: ResultsExportCopy.stlLine, enabled: model.canExport,
+                                 id: "results-split-export-stl", info: ResultsExportCopy.stlInfo) { exportSTL() })
+        }
+        if exportable >= 2 { items.append(.action("Export all \(exportable) results", id: "results-split-export-all") { exportAll() }) }
+        // ★ notes27 P6 (his print orientation, SPEC 2d): "Print orientation", the recommendation and Check strength
+        if orientation != nil {
+            items.append(.action(PrintOrientationWords.drawerItem, id: "results-split-orientation") { startOrientation() })
+        }
+        items.append(.action("Open in Library", id: "results-split-library") { onClose() })
+        return items
     }
 
     /// The failure the corner says: an STL export's, else the video's.
@@ -1402,6 +1523,7 @@ public struct ResultsScreen: View {
 
     private func retryExport(_ f: ResultsExportFailure) {
         switch f {
+        case .file: exportFile()   // ★ notes28 (4c)
         case .stl: exportSTL()
         case .stlAll: exportAll()
         case .video:
@@ -1410,15 +1532,39 @@ public struct ResultsScreen: View {
         }
     }
 
-    /// "Export v7b (.stl)": the version and the result's letter.
+    /// "Export v7b (.3mf)": the version and the result's letter. ★ notes28 (4c): a 3MF by default; a worker-streamed latticed
+    /// variant is the worker's STL.
     private var exportTitle: String {
         let letter = selectedRow.map { $0.title.components(separatedBy: " · ").first ?? $0.title } ?? ""
-        return "Export " + (version ?? "") + letter + " (.stl)"
+        return "Export " + (version ?? "") + letter + (model.exportIsStreamed ? " (.stl)" : " (.3mf)")
     }
 
-    /// What the file is: the latticed part, or one finished shape (smoothed when E1 finished it).
+    /// What the file is: the print file itself, the latticed part, or one finished shape (smoothed when E1 finished it).
     private var exportLine: String {
-        model.exportIsStreamed ? "The latticed part" : selectedFinish != nil ? "One finished shape \u{00B7} smoothed" : "One finished shape"
+        if !model.exportIsStreamed, PrintFileKeep.openFile(exists: model.printFileIdentity) { return ResultsExportCopy.printFileLine }
+        return model.exportIsStreamed ? "The latticed part" : selectedFinish != nil ? "One finished shape \u{00B7} smoothed" : "One finished shape"
+    }
+
+    /// ★ notes28 (4c): Export's default — a print file's result hands out the print file itself (kept with its version: its
+    /// painted supports and print settings); any other result its shape as a 3MF; a worker-streamed latticed variant the
+    /// worker's STL, as before.
+    private func exportFile() {
+        if model.exportIsStreamed { exportSTL(); return }
+        exportFailure = nil
+        Self.exportAttemptProbe?("3mf")
+        if Self.exportWriteFailsForTests { exportFailure = .file(CocoaError(.fileWriteNoPermission).localizedDescription); return }
+        if let kept = PrintFileKeep.openFile(model.printFileIdentity, named: model.exportStem(for: model.selected)) {
+            stlExportURLs = [kept]
+            return
+        }
+        guard let data = model.exportThreeMFData() else { return }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(model.exportThreeMFFilename)
+        do {
+            try data.write(to: url, options: .atomic)
+            stlExportURLs = [url]
+        } catch {
+            exportFailure = .file(error.localizedDescription)
+        }
     }
 
     /// ★ The model rises above the Details drawer while it is open (mockup #topo-results-details: "the drawer never covers
@@ -1467,7 +1613,8 @@ public struct ResultsScreen: View {
                 if sc.count >= 2 { ResultsScenarioPicker(scenarios: sc, pick: $scenarioPick).padding(.top, 6) }
                 ResultsChecksAndDetails(checks: checks, checksOpen: $checksOpen, openCheck: $openCheck, detailsOpen: $detailsOpen,
                                         tab: $detailsTab, versionTitle: selectedRow?.title ?? "",
-                                        rows: { model.detailRows($0, version: selectedRow) }, pill: crowded)
+                                        rows: { model.printing = printing; return model.detailRows($0, version: selectedRow) }, pill: crowded,   // ★ notes27
+                                        link: { _ in startOrientation() })   // ★ notes27 P6: the orientation row's "Print orientation"
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
@@ -1482,26 +1629,30 @@ public struct ResultsScreen: View {
 
     /// The stress at the tapped point — the SAME field value the colour there is painted from.
     private var stressReading: Double? {
-        guard let p = stressProbe, let f = model.selectedStressField else { return nil }
+        guard let p = stressProbe else { return nil }
+        // ★ notes25 C3: a print file's reading is the share of its limit there, at the shown load (what the colour says)
+        if model.latticeAnswer != nil { return model.shareOfLimit(at: p, load: stressMultiplier) }
+        guard let f = model.selectedStressField else { return nil }
         return Double(f.value(at: p)) * stressMultiplier   // ★ 10-28: the value the colour there shows, at the shown load
     }
     /// ★ 10-28: where the tapped spot is ON SCREEN — on the bent part while it bends ("it should show the BENT part").
     private var stressProbeShown: SIMD3<Float>? {
         guard let p = stressProbe else { return nil }
-        guard deflectionActive, flexScale != 0, let d = model.selectedDisplacementField else { return p }
-        return p + d.displacement(at: p) * flexScale
+        guard let s = motion, s.frame.shapeScale != 0 else { return p }
+        return p + s.prep.displacement(at: p) * s.frame.shapeScale
     }
     /// ★ His iPad 2026-10-28: the Exaggeration slider (Bend and Break), straight onto the model's one value.
-    private var exaggerationBinding: Binding<Double> {
-        Binding(get: { Double(model.flexExaggeration) }, set: { model.setFlexExaggeration(Float($0)) })
+    /// ★ notes25 C1: the slider's 0…1 over 1× … the part's own top (8 % of its longest side), logarithmic.
+    private func exaggerationBinding(_ s: ResultsModel.MotionState) -> Binding<Double>? {
+        guard s.range.adjustable else { return nil }
+        return Binding(get: { s.range.position(of: s.exaggeration) },
+                       set: { model.loadMotion.pickExaggeration(s.range.value(at: $0), selection: model.motionSelection) })
     }
     /// What the colours show right now, for the key.
     private var legendNote: String? {
         switch layers.motion {
-        case .bend:
-            return "At \(Int((stressMultiplier * 100).rounded()))% of your load · bend shown \(Int(model.flexExaggeration))× exaggerated"
-        case .breakIt:
-            return String(format: "At %.1f× your load · bend shown %d× exaggerated", stressMultiplier, Int(model.flexExaggeration))
+        case .bend, .breakIt:
+            return motion.map { model.motionNote($0) }   // ★ notes25
         case .loadPaths:
             return "The light takes the colour of the stress it passes through"
         default:
@@ -1510,9 +1661,16 @@ public struct ResultsScreen: View {
     }
     @ViewBuilder private var stressKey: some View {
         if legendShown {
-            ResultsStressExplore(peakMPa: model.stressScaleMaxMPa, caption: model.stressLegend.caption, note: legendNote,
-                                 reading: stressReading, minimized: $stressKeyMinimized)
+            // ★ notes25 (C2, C3): the top colour in plain words — "Yields", or a print file's "Gives way"
+            ResultsGiveWayKey(scale: model.latticeAnswer != nil ? .share : .stress(topMPa: model.stressScaleMaxMPa),
+                              caption: model.latticeAnswer != nil ? "How close to giving way" : model.stressLegend.caption,
+                              note: legendNote, reading: stressReading, minimized: $stressKeyMinimized)
         }
+    }
+
+    /// ★ notes27: the tapped value's words — a print file's is its share of the limit there ("62% of its limit"), never MPa.
+    nonisolated static func probeText(_ r: Double, share: Bool) -> String {
+        share ? String(format: "%.0f%% of its limit", r * 100) : String(format: "%.2f MPa", r)
     }
 
     /// The tapped point on the model: an arrow and its value, re-projected every frame so it rides the part through an orbit.
@@ -1520,7 +1678,7 @@ public struct ResultsScreen: View {
         if let p = stressProbeShown, let r = stressReading, let s = projection?.project(p) {
             HStack(spacing: 5) {
                 Image(systemName: "arrowtriangle.left.fill").font(.system(size: 11)).foregroundStyle(DS.Color.accent.color)
-                Text(String(format: "%.2f MPa", r)).font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                Text(Self.probeText(r, share: model.latticeAnswer != nil)).font(.system(size: 13, weight: .semibold)).monospacedDigit()
                     .foregroundStyle(DS.Color.textPrimary.color)
             }
             .padding(.horizontal, 9).padding(.vertical, 6)
@@ -1535,7 +1693,7 @@ public struct ResultsScreen: View {
 
     private var viewModes: [ResultsViewMode] {
         ResultsViewMode.shown(hasStress: model.hasStress, hasDisplacement: model.hasFlex,
-                              canBreak: model.hasFlex && model.hasFailurePrediction)
+                              canBreak: model.canBreak)   // ★ notes25 C3: a print file's governing margin too
     }
 
     /// One view at a time: Stress colours; none lit is the plain part; X-ray see-through; Load paths, Bend and Break MOVE (his iPad
@@ -1548,9 +1706,8 @@ public struct ResultsScreen: View {
         if model.loadPathOn { model.toggleLoadPath() }
         if m == .loadPaths { model.setLightPhasePosition(0); model.prepareLightFlow() }
         model.failureOn = m == .breakIt
-        model.setPush(factor: 1)
         model.flowReducedStatic = false
-        breakClock = 0
+        model.loadMotion.restart()   // ★ notes25: Bend / Break's load from the top of its loop
         motionPlaying = true
     }
 
@@ -1567,9 +1724,13 @@ public struct ResultsScreen: View {
     @ViewBuilder private var motionBar: some View {
         switch layers.motion {
         case .bend where model.flexOn:
-            ResultsMotionBar(title: "Bend", readout: "\(Int(model.flexExaggeration))× exaggerated · not to scale",
-                             alarm: false, playing: $motionPlaying, position: model.flexPhase,
-                             scrub: { model.setFlexPhase($0) }, exaggeration: exaggerationBinding)
+            // ★ notes25: the load from none to yours, eased, held and back; the slider is one loop
+            if let s = motion {
+                ResultsMotionBar(title: "Bend", readout: model.bendReadout(s),
+                                 alarm: false, playing: $motionPlaying, position: model.loadMotion.position(.bend),
+                                 scrub: { model.loadMotion.setPosition($0, .bend) }, exaggeration: exaggerationBinding(s),
+                                 exaggerationLabel: LoadMotion.label(s.exaggeration))
+            }
         case .loadPaths:
             ResultsMotionBar(title: "Load flow",
                              readout: model.lightFlow != nil ? "the load travelling through the part, as light"
@@ -1577,14 +1738,12 @@ public struct ResultsScreen: View {
                              alarm: false, playing: $motionPlaying, position: model.lightPhasePosition,
                              scrub: { model.setLightPhasePosition($0) })
         case .breakIt:
-            if let fp = model.failurePrediction {
-                ResultsMotionBar(title: "Break", readout: model.pushReadout(prediction: fp), alarm: model.atFailure,
-                                 playing: $motionPlaying,
-                                 position: ResultsMotion.breakPosition(pushFactor: model.pushFactor, multiplier: fp.multiplier),
-                                 scrub: { p in
-                                     breakClock = p * ResultsMotion.breakRampSeconds
-                                     model.setPush(factor: ResultsMotion.pushFactor(position: p, multiplier: fp.multiplier))
-                                 }, exaggeration: exaggerationBinding)
+            // ★ notes25 C3: from your load (1.00×) to the governing margin, where it gives way at the marked place
+            if let s = motion {
+                ResultsMotionBar(title: "Break", readout: model.breakReadout(s), alarm: s.frame.atTop,
+                                 playing: $motionPlaying, position: model.loadMotion.position(.breakIt),
+                                 scrub: { model.loadMotion.setPosition($0, .breakIt) }, exaggeration: exaggerationBinding(s),
+                                 exaggerationLabel: LoadMotion.label(s.exaggeration))
             }
         default:
             EmptyView()
@@ -2116,6 +2275,8 @@ public struct ResultsScreen: View {
                 ViewProjectionPair()   // ★ B2 (note 1): [Orthographic │ Perspective], left of the gizmo, as on every page
                     .padding(.top, (OrientationGizmoView.standardSize - ViewProjectionPair.height) / 2)   // ★ R-a2: as the workspace
                 OrientationGizmoView(camera: cameraModel)
+                    .closesCornerDrawersOnTouch(model.cornerDrawers)   // ★ his 11-22: a touch on the view cube closes the ⌃'s drawer
+                    .background(ResultsChrome.publish("resultsGizmo"))   // ★ notes25 B1: the fix pop-up keeps clear of the cube
             }
             Spacer()
         }
@@ -2274,15 +2435,18 @@ struct ShareSheet: View {
 /// at most 12 words) with one "Try again" chip; the system's own words go in its (i).
 public enum ResultsExportFailure: Equatable, Sendable {
     case stl(String), stlAll(String), video(String)
+    /// ★ notes28 (4c): the default Export's file (the 3MF).
+    case file(String)
     public static let retry = "Try again"
     public var words: String {
         switch self {
         case .stl: return "Couldn\u{2019}t export the STL"
         case .stlAll: return "Couldn\u{2019}t export the STL files"
         case .video: return "Couldn\u{2019}t save the video"
+        case .file: return ResultsExportCopy.fileFailed
         }
     }
     public var detail: String {
-        switch self { case let .stl(d), let .stlAll(d), let .video(d): return d }
+        switch self { case let .stl(d), let .stlAll(d), let .video(d), let .file(d): return d }
     }
 }

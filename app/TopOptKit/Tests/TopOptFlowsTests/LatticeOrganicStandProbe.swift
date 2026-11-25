@@ -47,7 +47,7 @@ final class LatticeOrganicStandProbe: XCTestCase {
             look.mode = mode
             let r = try await session.layOrganic(s, look.ask(limits: limits, layerMM: 0.2))
             let seg = LatticeLayoutPreview.segments(r.runs)
-            print("ORGANIC-STAND " + LatticeLayoutPreview.organicTimeLine(mode: mode, draft: false, ms: r.ms, struts: seg.count)
+            print("ORGANIC-STAND " + LatticeLayoutPreview.organicTimeLine(mode: mode, draft: false, ms: r.ms, strands: r.strands)
                   + " · \(seg.count - Swift.min(LatticeLayoutPreview.organicLightFrom(grown: mode == .grown, netFrom: seg.lightFrom, count: seg.count), seg.count)) by the light pass · \(r.strands) strands")
             XCTAssertGreaterThan(seg.count, 1_000, "★ \(mode.title): his stand's weave")
             // his 11-19 vines note: the runs for the look's prototype (outside the repo; only the lay's centre lines)

@@ -46,7 +46,7 @@ public enum FrozenRegionLatticeStatus {
 
         public var label: String { self == .latticed ? "Latticed" : "Solid" }
         public var symbol: String {
-            self == .latticed ? "circle.grid.cross" : "square.fill"
+            self == .latticed ? "square.grid.3x3.fill" : "square.fill"   // ★ notes25 icons: the lattice glyph
         }
     }
 

@@ -211,8 +211,10 @@ final class LatticeOrganicCut1Tests: XCTestCase {
         XCTAssertEqual(r.cellMM, 4); XCTAssertEqual(r.widthMM, 1); XCTAssertEqual(r.density, 0.25, accuracy: 1e-9)
         XCTAssertEqual(r.klass, .interior)
         XCTAssertEqual(try XCTUnwrap(LatticeLayoutPreview.read(laid, at: SIMD3(5, 5, 0), lattice: organic, lookup: nil)).klass, .rim)
-        XCTAssertEqual(LatticeLayoutPreview.organicTimeLine(mode: .grown, draft: false, ms: 3840, struts: 63670),
-                       "Organic Grown \u{00B7} Exact \u{00B7} laid in 3.8 s \u{00B7} 63,670 struts")
+        // ★ RE-PINNED (notes25, 362's numbers investigation: "struts" meant three things; the line counts strands, the print
+        // file's own count)
+        XCTAssertEqual(LatticeLayoutPreview.organicTimeLine(mode: .grown, draft: false, ms: 3840, strands: 12605),
+                       "Organic Grown \u{00B7} Exact \u{00B7} laid in 3.8 s \u{00B7} 12,605 strands")
     }
 
     /// ★ The memory gate: a lay that would not fit in what the iPad has free is refused in one line, never a crash.
@@ -232,13 +234,18 @@ final class LatticeOrganicCut1Tests: XCTestCase {
     func testLookTheWholePartLimitsAndTheRules() {
         typealias L = LatticeOrganicLook.Limits
         typealias C = LatticeOrganicLook.Check
-        let mid = Self.stand.looked(percent: 50)
-        XCTAssertEqual(mid.cellLowerMM, 2); XCTAssertEqual(mid.cellUpperMM, 8, "★ 50 %: the measured range")
+        // ★ his rule 11-19, kept 11-20: "1 = barely any; 100 = almost solid"; Look starts at 15
         let open = Self.stand.looked(percent: 1)
-        XCTAssertEqual(open.cellLowerMM, 4); XCTAssertEqual(open.cellUpperMM, 16, "1 %: twice the range")
+        XCTAssertEqual(open.cellLowerMM, 2); XCTAssertEqual(open.cellUpperMM, 8, "★ 1: the measured range (U/4 to U), the old 50 %")
+        let start = Self.stand.looked(percent: LatticeOrganicLook.lookDefault)
+        XCTAssertEqual(LatticeOrganicLook.lookDefault, 15)
+        XCTAssertEqual(start.cellLowerMM, 2); XCTAssertEqual(start.cellUpperMM, 6.5, "★ 15, the start: close to the old look")
+        let mid = Self.stand.looked(percent: 50)
+        XCTAssertEqual(mid.cellLowerMM, 1.5); XCTAssertEqual(mid.cellUpperMM, 3.5, "50: denser")
         let fine = Self.stand.looked(percent: 100)
-        XCTAssertEqual(fine.cellLowerMM, 1.5, "100 %: half, never under the smallest printable cell (1.38 mm, to 1.5)")
-        XCTAssertEqual(fine.cellUpperMM, 4)
+        XCTAssertEqual(fine.cellLowerMM, 1.5, "★ 100: the smallest printable cell (1.38 mm, to 1.5) everywhere: almost solid")
+        XCTAssertEqual(fine.cellUpperMM, 1.5)
+        XCTAssertEqual(LatticeOrganicLook().lookPercentValue, 15, "★ a new group starts at 15")
         XCTAssertEqual(fine.strutLowerMM, 0.9); XCTAssertEqual(fine.strutUpperMM, 1.8, "★ struts are not moved by Look")
         let shallow = L(strutLowerMM: 0.9, strutUpperMM: 0.9, strutAutoMM: 0.9, cellLowerMM: 1.5, cellUpperMM: 4, cellAutoMM: 3)
         let shell = L(strutLowerMM: 0, strutUpperMM: 0, strutAutoMM: 0, cellLowerMM: 0, cellUpperMM: 0, cellAutoMM: 0, measured: false)

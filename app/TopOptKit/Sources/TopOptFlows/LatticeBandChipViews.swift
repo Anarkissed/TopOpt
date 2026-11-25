@@ -46,7 +46,7 @@ struct LatticeBandChipView: View {
     private var glyph: String {
         switch (placement.decision.kind, placement.solid) {
         case (.face, true), (.place, true):  return "square.fill"
-        case (.face, false), (.place, false): return "square.grid.3x3"
+        case (.face, false), (.place, false): return "square.grid.3x3.fill"   // ★ notes25 icons: the lattice glyph
         case (.cap, true):   return "square.bottomhalf.filled"
         case (.cap, false):  return "square.dashed"
         }

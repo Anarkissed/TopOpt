@@ -193,7 +193,7 @@ private struct MenuJobRow: View {
 
     /// "Solving · rung 4/4 · iter 106 · started 12 min ago" — the restored daily readout.
     private var detail: String {
-        [job.stateWord, job.progressWord, job.startedWord()]
+        [job.stateWord, job.progressWord(), job.startedWord()]
             .filter { !$0.isEmpty }.joined(separator: " · ")
     }
 

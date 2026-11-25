@@ -75,7 +75,7 @@ public enum ResultsVersions {
         for tab in tabs where !used.contains(tab.index) {
             k += 1
             let title = ResultMark.letter(k - 1) + " · " + tab.headlineLabel   // ★ B2 (U4): a result is its letter + (tab.isLatticed ? " · latticed" : "")
-            out.append(row(tab, title: title, margin: tab.worstCaseMargin))
+            out.append(row(tab, title: title, margin: tab.worstCaseMargin, twoDecimals: blocks?.printFile != nil))   // ★ notes25 C3
         }
         return out
     }
@@ -108,7 +108,8 @@ public enum ResultsVersions {
     }
 
     static func row(_ tab: ResultVariantVM, title: String, margin: Double, headline: String? = nil,
-                    pieces: Int? = nil) -> ResultsVersionRow {
+                    pieces: Int? = nil, twoDecimals: Bool = false) -> ResultsVersionRow {
+        let x = twoDecimals ? StrengthWords.x : Self.x   // ★ notes25 C3: a print file's margin always with two decimals
         let verdict = tab.latticeAccepted == false ? "not certified" : x(margin) + " ✓"
         let piecesLine = pieces.map { " · in \($0) pieces" } ?? ""
         return ResultsVersionRow(id: "t\(tab.index)", title: title,
@@ -132,6 +133,27 @@ public struct ResultsCheck: Equatable, Sendable, Identifiable {
     public var places: [SIMD3<Double>] = []
     public var more: String? = nil
     public var tab: ResultsDetailsTab? = nil
+    /// ★ notes27 (his rule: detail in an (i)): the row's (i), beside its line; nil: none.
+    public var info: String? = nil
+    /// ★ notes27 (his print orientation, SPEC 2d): the open row's link (its words); the panel says what it opens.
+    public var link: String? = nil
+}
+
+/// ★ notes27 (his print orientation, SPEC 2b): how the selected result prints — the way (as placed, the chosen face, an edge)
+/// and what its file tells the slicer about supports (`slicer_supports`: "painted", "off", "needed"; nil: no file says).
+public struct ResultsPrinting: Equatable, Sendable {
+    public var way: PrintWay
+    public var slicerSupports: String?
+    /// The orientation row carries the "Print orientation" link.
+    public var linked: Bool
+    public init(way: PrintWay, slicerSupports: String? = nil, linked: Bool = false) {
+        self.way = way; self.slicerSupports = slicerSupports; self.linked = linked
+    }
+    /// The Details "Orientation" line (no "load paths": nothing computes them).
+    public var line: String {
+        PrintOrientationWords.title(way) + " \u{00B7} layers across the height"
+            + (PrintOrientationWords.supports(slicerSupports).map { " \u{00B7} " + $0 } ?? "")
+    }
 }
 
 public enum ResultsChecks {
@@ -139,10 +161,14 @@ public enum ResultsChecks {
     public static func checks(tab: ResultVariantVM?, margin: Double?, required: Double, safetyMargin: Double?,
                               scenarios: [ScenarioResult], thinJoints: Int, bridged: Bool,
                               pieces: StrengthenText.PiecesFlag? = nil, finish: FinishReport? = nil,
-                              weakest: SIMD3<Double>? = nil, struts: LatticeFileStrength? = nil) -> [ResultsCheck] {
+                              weakest: SIMD3<Double>? = nil, struts: LatticeFileStrength? = nil,
+                              printFile: LatticeFileFacts? = nil, answer: LatticeStrengthAnswer? = nil,
+                              printing: ResultsPrinting? = nil) -> [ResultsCheck] {
         guard let tab else { return [] }
         var out: [ResultsCheck] = []
-        if let m = margin, m > 0 {
+        if let a = answer, a.governing != nil {
+            out.append(a.check())   // ★ notes25 C3 (4): "Not strong enough · Holds 1.34× · needs 1.5×", its place lit
+        } else if let m = margin, m > 0 {
             let built = safetyMargin.map { " · built for \(Int(($0 * 100).rounded()))%" } ?? ""
             out.append(m >= required
                 ? ResultsCheck(kind: .ok, title: "Strong enough", detail: ResultsVersions.x(m) + " your load" + built,
@@ -154,11 +180,13 @@ public enum ResultsChecks {
         }
         // ★ his ruling 11-17 ("Yes, but only in the structural lattice stage"): the struts must pass too — said right under the
         // solid's line, the file made either way
-        if let s = struts, let line = s.strutsLine {
+        if answer?.governing == nil, let s = struts, let line = s.strutsLine {
             out.append(ResultsCheck(kind: s.strutsPass ? .ok : .warn,
                                     title: s.strutsPass ? "Struts strong enough" : s.strutNoRule ? "Struts not checked" : "Struts not strong enough",
                                     detail: line, tab: .strength))
         }
+        // ★ his 11-21 ("show all the information associated to the final result"): the strengthening, the file, its layers
+        if let f = printFile { out += f.checks }
         if scenarios.count >= 2 {
             let unheld = scenarios.filter(\.unheld)
             if let u = unheld.first {
@@ -177,9 +205,15 @@ public enum ResultsChecks {
         default: out.append(ResultsCheck(kind: .warn, title: "Layers may split", detail: "Layer shear " + tab.layerShear.label.lowercased(),
                                          tab: .printing))
         }
-        out.append(ResultsCheck(kind: .info, title: tab.tiltDegrees == 0 ? "Print it upright" : "Print it tilted \(tab.tiltDegrees)°",
-                                detail: tab.supportCm3 > 0 ? "About " + String(format: "%.1f", tab.supportCm3) + " cm³ of support"
-                                                           : "No support needed", tab: .printing))
+        // ★ notes27 (his print orientation, SPEC 2b): how it prints, in his words — never "upright" against the file's axis,
+        // never a face number — and what the file tells the slicer about supports (the (i) says how to slice it)
+        let pr = printing ?? ResultsPrinting(way: .asPlaced, slicerSupports: printFile?.slicerSupports)
+        out.append(ResultsCheck(kind: .info, title: PrintOrientationWords.title(pr.way),
+                                detail: PrintOrientationWords.supports(pr.slicerSupports)
+                                    ?? (tab.supportCm3 > 0 ? "About " + String(format: "%.1f", tab.supportCm3) + " cm³ of support"
+                                                           : "No support needed"),
+                                tab: .printing, info: PrintOrientationWords.supportsInfo(pr.slicerSupports),   // ★ notes28
+                                link: pr.linked ? PrintOrientationWords.rowLink : nil))
         // ★ B4 (note 14, ledger 15 (c)): with E1's finishing the thin-spot row says what core did — "Thin spots fixed · 6", or
         // where it could not, "2 thin spots left" and why there; a result from before E1 keeps today's row
         if let f = finish {
@@ -236,6 +270,8 @@ public enum ResultsDetailsTab: String, CaseIterable, Sendable {
 public struct ResultsDetailRow: Equatable, Sendable, Identifiable {
     public let label: String
     public let value: String
+    /// ★ notes27 F2 (his 11-23: "Explain it simply. If more information is required, add an (i)"): the row's (i), nil: none.
+    public var info: String? = nil
     public var id: String { label + "·" + value }
 }
 
@@ -250,6 +286,17 @@ extension ResultsModel {
         let isSelected = tab?.index == selected?.index
         let s = reportBlocks?.strengthen
         switch t {
+        case .strength where latticeAnswer != nil:
+            // ★ notes25 C3 (6): a print file's ONE set — core's governing margin, where it gives first, the struts, the solid at
+            // his infill, the plastic, the load on the struts, the strengthening; nothing solid-only (no verified margin, mesh vs
+            // grid, peak stress, "breaks at about", "built for")
+            let a = latticeAnswer!
+            let plastic = tab.map { $0.massLabel + ($0.savingsPercent > 0 ? " \u{00B7} \($0.savingsPercent)% less than solid" : "") }
+            r += a.rows(loadKg: shownLoadKg, unit: loadUnit, infillPercent: infillPercent, plastic: plastic)
+            if let f = reportBlocks?.printFile { r += f.rows(.strength) }   // "Strengthened"
+            add("Version", version?.title)
+            add("Recommended", recommendationLine.map { $0.hasPrefix("Recommended: ") ? String($0.dropFirst(13)) : $0 }
+                .map { $0.prefix(1).uppercased() + $0.dropFirst() })
         case .strength:
             if let m = version?.margin {
                 let need = reportBlocks?.safetyMargin ?? s?.marginRequired
@@ -284,8 +331,10 @@ extension ResultsModel {
             }
         case .printing:
             if let tab {
-                add("Orientation", tab.orientationSummary)
-                add("Support", tab.supportLabel)
+                add("Orientation", printing?.line ?? tab.orientationSummary)   // ★ notes27
+                // ★ notes28 (his img 85: "Support 1.9 cm³" beside "No supports needed"): that number is the strength check's
+                // grid estimate, not what the file carries; a print file that says its supports says them (its Supports row)
+                if reportBlocks?.printFile?.slicerSupports == nil { add("Support", tab.supportLabel) }
                 add("Layer shear", tab.layerShear.label)
                 if tab.minFeatureViolations > 0 { add("Thin spots", tab.minFeatureWarning.isEmpty ? "\(tab.minFeatureViolations) regions" : tab.minFeatureWarning) }
             }
@@ -305,6 +354,8 @@ extension ResultsModel {
                 for n in LatticeReport.finishLines(receipt: selectedLattice?.receiptJSON) { add("Lattice", n) }
             }
         }
+        // ★ his 11-21: a Lattice run's print file, strengthening and checks, every number in words
+        if let f = reportBlocks?.printFile, !(t == .strength && latticeAnswer != nil) { r += f.rows(t) }
         return r
     }
 }
@@ -323,9 +374,9 @@ public enum ResultsViewMode: String, CaseIterable, Sendable {
     var symbol: String {
         switch self {
         case .stress: return ""            // the colour wheel, drawn
-        case .xray: return "cube.transparent"
+        case .xray: return FlexibleMainViewToggles.xrayIcon   // ★ notes25 icons: one X-ray glyph app-wide
         case .loadPaths: return "point.topleft.down.to.point.bottomright.curvepath"
-        case .bend: return "arrow.down.to.line"
+        case .bend: return "rectangle.compress.vertical"   // ★ notes25 icons: Bend, as on the Squish page (arrow-to-line is Gravity)
         case .breakIt: return "bolt.fill"
         }
     }
@@ -478,15 +529,21 @@ struct ResultsVersionsPanel: View {
 
     static func title(_ version: String?) -> String { version.map { "\($0) results" } ?? "Results" }
     static let pickLabel = "Pick this"
+    /// ★ notes27 F3 (his 11-23: the list's corner radius cut into the selected row's highlight): the list's corners are
+    /// concentric with the highlight's — its radius plus the space between them.
+    static let radius: CGFloat = DSParts.rowHighlightRadius + DSParts.rowHighlightInset
     static let pickedLabel = "Picked"
 
     /// ★ LOOK PER SCREEN (R-b, mockup #topo-results): §4.3's panel; each result one §4.4 line — its name, "87 g · 1.5×", and
     /// Pick this (every line not picked) or Picked; the selected line in the accent edge; one core could not make greyed with
     /// its reason. Folded and short of room, a pill (his note 2026-10-27).
     var body: some View {
-        DSPanel(key: "resultsVersions", title: Self.title(version), count: rows.count, foldedPill: pill, open: $open) {
+        var panel = DSPanel(key: "resultsVersions", title: Self.title(version), count: rows.count, foldedPill: pill, open: $open) {
             ForEach(rows) { r in line(r) }
         }
+        panel.openRadius = Self.radius   // ★ notes27 F3
+        return panel
+            .environment(\.dsRowLineWraps, true)   // ★ notes25 B3: a result's line (why core could not make it) wraps, never cut
     }
 
     @ViewBuilder private func line(_ r: ResultsVersionRow) -> some View {
@@ -518,17 +575,40 @@ struct ResultsCheckLine: View {
     var open = false
     var tap: (() -> Void)? = nil
     var details: (() -> Void)? = nil
+    /// ★ notes27: the row's link (`c.link`), opened.
+    var link: (() -> Void)? = nil
     var body: some View {
         if let tap {
             VStack(alignment: .leading, spacing: 0) {
                 Button(action: tap) { line.contentShape(Rectangle()) }.buttonStyle(.plain)
                 if open {
-                    HStack(spacing: DS.Space.s) {
+                    // ★ notes25 B3 (his Checks note: "doesn't allow for enough space for the text … automatically expanded/
+                    // contracted to fit the text with some buffer above/below and to the sides"): the line takes the row's
+                    // whole width and wraps (Details › under it, at the right), the row's own padding at its sides and foot
+                    VStack(alignment: .leading, spacing: DS.Space.xxs) {
                         if let more = c.more {
                             Text(more).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
                                 .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(ResultsChrome.publish("resultsCheckMoreText-" + c.title))
                         }
-                        Spacer(minLength: DS.Space.s)
+                        // ★ notes27: the row's (i) (how to slice the painted file) and its link ("Print orientation"), in the open row
+                        if c.info != nil || (link != nil && c.link != nil) {
+                            HStack(spacing: DS.Space.m) {
+                                if let info = c.info { InfoTip(key: "resultsCheck-" + c.title, text: info, label: "How to slice it") }
+                                if let link, let words = c.link {
+                                    Button(action: link) {
+                                        Text(words + " \u{203A}").font(.system(size: 13, weight: .semibold))
+                                            .foregroundStyle(DS.Color.accent.color)
+                                            .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .background(ResultsChrome.publish("resultsCheckLink-" + c.title))
+                                    .accessibilityIdentifier("results-check-link")
+                                }
+                                Spacer(minLength: 0)
+                            }
+                        }
                         if let details, c.tab != nil {
                             Button(action: details) {
                                 Text("Details \u{203A}").font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.accent.color)
@@ -536,9 +616,11 @@ struct ResultsCheckLine: View {
                             }
                             .buttonStyle(.plain)
                             .background(ResultsChrome.publish("resultsCheckDetails-" + c.title))
+                            .frame(maxWidth: .infinity, alignment: .trailing)
                         }
                     }
-                    .padding(.leading, DS.Space.l + 26 + DS.Space.m).padding(.trailing, DS.Space.m)
+                    .padding(.leading, DS.Space.l + 26 + DS.Space.m).padding(.trailing, DS.Space.l)
+                    .padding(.bottom, details != nil && c.tab != nil ? DS.Space.xxs : DS.Space.sm)
                     .background(ResultsChrome.publish("resultsCheckMore-" + c.title))
                 }
             }
@@ -552,14 +634,15 @@ struct ResultsCheckLine: View {
             let (sym, tint): (String, Color) = {
                 switch c.kind {
                 case .ok: return ("checkmark", DS.Color.okGreen.color)
-                case .info: return ("arrow.up", DS.Color.accent.color)
-                case .warn: return ("exclamationmark", DS.Color.warning.color)
+                case .info: return ("info", DS.Color.accent.color)   // ★ notes25 icons: an "i" for information
+                case .warn: return ("exclamationmark.triangle.fill", DS.Color.warning.color)   // ★ notes25 icons: one warning glyph
                 }
             }()
             Image(systemName: sym).font(.system(size: 11, weight: .heavy)).foregroundStyle(tint)
                 .frame(width: 26, height: 26).background(Circle().fill(tint.opacity(0.18)))
             VStack(alignment: .leading, spacing: 1) {
                 Text(c.title).font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                    .fixedSize(horizontal: false, vertical: true)   // ★ notes25 B3: wraps, never cut
                 Text(c.detail).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -584,6 +667,8 @@ struct ResultsChecksAndDetails: View {
     let rows: (ResultsDetailsTab) -> [ResultsDetailRow]
     /// Folded AND short of room: the Checks header and Details become pills at the right.
     var pill = false
+    /// ★ notes27: a row's link opened (the orientation row's "Print orientation").
+    var link: ((ResultsCheck) -> Void)? = nil
 
     /// ★ LOOK PER SCREEN (R-c, mockup #topo-results): §4.3's panel, 300 pt as the mockup draws it; its header says how many
     /// to look at, in the warning colour ("All good" in green).
@@ -594,7 +679,8 @@ struct ResultsChecksAndDetails: View {
                 // ★ B4 (note 14): a tap opens it — its places light on the part — and a second tap closes it
                 ResultsCheckLine(c: c, open: openCheck == c.id,
                                  tap: { withAnimation(DS.Motion.sheetIn) { openCheck = openCheck == c.id ? nil : c.id } },
-                                 details: c.tab.map { t in { tab = t; withAnimation(DS.Motion.sheetIn) { detailsOpen = true } } })
+                                 details: c.tab.map { t in { tab = t; withAnimation(DS.Motion.sheetIn) { detailsOpen = true } } },
+                                 link: c.link == nil ? nil : link.map { l in { l(c) } })
                     .overlay(alignment: .bottom) { Rectangle().fill(DS.Color.strokeSubtle.color).frame(height: 1) }
                     .dsPanelRow("resultsCheckRow-" + c.id)
             }
@@ -645,13 +731,15 @@ struct ResultsDetailsDrawer: View {
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 24, alignment: .top), count: cols),
                                   alignment: .leading, spacing: 0) {
                             ForEach(rows(tab)) { r in
-                                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                HStack(alignment: r.info == nil ? .firstTextBaseline : .center, spacing: 12) {
                                     Text(r.label).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
+                                        .fixedSize(horizontal: false, vertical: true)   // ★ notes25 B3: wraps, never cut
                                     Spacer(minLength: 8)
                                     Text(r.value).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                                         .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)
+                                    if let info = r.info { ResultsDetailInfo(label: r.label, text: info) }   // ★ notes27 F2
                                 }
-                                .padding(.vertical, 10)
+                                .padding(.vertical, r.info == nil ? 10 : 0)
                                 .overlay(alignment: .bottom) { Rectangle().fill(DS.Color.strokeSubtle.color).frame(height: 1) }
                             }
                         }
@@ -673,6 +761,23 @@ struct ResultsDetailsDrawer: View {
                 .background(ResultsChrome.publish("resultsDetailsPanel"))
             }
         }
+    }
+}
+
+/// ★ notes27 F2: a Details row's (i) — its explanation in the centred card (AppPopups' help), a 44 pt target.
+struct ResultsDetailInfo: View {
+    let label: String
+    let text: String
+    var body: some View {
+        Button { AppPopups.shared.help(label, text) } label: {
+            Image(systemName: "info.circle").font(.system(size: 15, weight: .regular))
+                .foregroundStyle(DS.Color.textTertiary.color)
+                .frame(width: DSParts.target, height: DSParts.target).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("About \(label)")
+        .accessibilityIdentifier("results-detail-info-" + label)
+        .background(ResultsChrome.publish("resultsDetailInfo-" + label))
     }
 }
 
@@ -765,10 +870,7 @@ struct ResultsViewModePicker: View {
 
     @ViewBuilder private func icon(_ m: ResultsViewMode) -> some View {
         if m == .stress {
-            Circle().fill(AngularGradient(colors: [RGBA(28, 60, 170).color, RGBA(0, 170, 220).color, RGBA(60, 190, 110).color,
-                                                   RGBA(250, 220, 60).color, RGBA(255, 70, 50).color, RGBA(28, 60, 170).color],
-                                          center: .center))
-                .frame(width: 16, height: 16)
+            StressWheelIcon()   // ★ notes25 icons: the one Stress icon, every page
         } else {
             Image(systemName: m.symbol).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
         }
@@ -811,15 +913,23 @@ public struct ResultsLayers: Equatable, Sendable {
     }
     /// A tap: a lit view goes off (back to the plain part, note 13); Stress colours; X-ray toggles; a motion starts (or stops
     /// when tapped again).
+    /// ★ notes27 (his 11-24: "the load flow should NOT show without the stress map turned on. This doesn't make sense without
+    /// it"): Load flow turns the stress map on with it (one tap, as Bend and Break), and the stress map turned off ends it.
     public mutating func tap(_ m: ResultsViewMode, hasStress: Bool) {
         switch m {
-        case .stress: stress = hasStress && !stress
+        case .stress:
+            stress = hasStress && !stress
+            if !stress, motion == .loadPaths { motion = nil }   // ★ notes27: no Load flow without the stress map
         case .xray: xray.toggle()
         case .loadPaths, .bend, .breakIt:
             motion = motion == m ? nil : m
-            // ★ his iPad 2026-10-28: Bend and Break turn Stress on; Load paths turns X-ray on (Stress can be added)
+            // ★ his iPad 2026-10-28: Bend and Break turn Stress on; Load paths turns X-ray on
             if motion == .bend || motion == .breakIt { stress = hasStress }
-            if motion == .loadPaths { xray = true }
+            if motion == .loadPaths {
+                xray = true
+                stress = hasStress   // ★ notes27: and the stress map with it — never the light alone
+                if !hasStress { motion = nil }
+            }
         }
     }
 }
@@ -834,13 +944,15 @@ struct ResultsMotionBar: View {
     @Binding var playing: Bool
     let position: Double
     let scrub: (Double) -> Void
-    /// ★ 10-28: Bend / Break's Exaggeration slider ("to make it bend more visually"); nil hides it.
+    /// ★ 10-28: Bend / Break's Exaggeration slider ("to make it bend more visually"); nil hides it. ★ notes25 C1: its 0…1 runs
+    /// from the true size to the part's own top (ResultsLoadMotion.swift); `exaggerationLabel` says where it is ("6.7×").
     var exaggeration: Binding<Double>? = nil
+    var exaggerationLabel: String = ""
 
     init(title: String, readout: String, alarm: Bool, playing: Binding<Bool>, position: Double,
-         scrub: @escaping (Double) -> Void, exaggeration: Binding<Double>? = nil) {
+         scrub: @escaping (Double) -> Void, exaggeration: Binding<Double>? = nil, exaggerationLabel: String = "") {
         self.title = title; self.readout = readout; self.alarm = alarm; self._playing = playing
-        self.exaggeration = exaggeration; self.position = position; self.scrub = scrub
+        self.exaggeration = exaggeration; self.position = position; self.scrub = scrub; self.exaggerationLabel = exaggerationLabel
     }
 
     var body: some View {
@@ -861,7 +973,7 @@ struct ResultsMotionBar: View {
                     Text(title).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                     Text(readout).font(.system(size: 11, weight: .semibold)).monospacedDigit()
                         .foregroundStyle((alarm ? DS.Color.danger : DS.Color.textSecondary).color)
-                        .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                        .fixedSize(horizontal: false, vertical: true)   // ★ notes25 B3: every line it needs (was 2 at most)
                 }
                 Spacer(minLength: 0)
             }
@@ -873,12 +985,12 @@ struct ResultsMotionBar: View {
             if let ex = exaggeration {
                 HStack(spacing: DS.Space.s) {
                     Text("Exaggeration").font(.system(size: 11, weight: .semibold)).foregroundStyle(DS.Color.textSecondary.color)
-                    Slider(value: ex, in: Double(FlexAnimation.minExaggeration)...Double(FlexAnimation.maxExaggeration))
+                    Slider(value: ex, in: 0...1)
                         .tint(DS.Color.accent.color)
                         .accessibilityLabel("Bend exaggeration")
                         .accessibilityIdentifier("results-exaggeration-slider")
                         .background(ResultsChrome.publish("resultsExaggeration"))
-                    Text("\(Int(ex.wrappedValue))×").font(.system(size: 12, weight: .semibold)).monospacedDigit()
+                    Text(exaggerationLabel).font(.system(size: 12, weight: .semibold)).monospacedDigit()
                         .foregroundStyle(DS.Color.textPrimary.color).frame(width: 40, alignment: .trailing)
                 }
             }

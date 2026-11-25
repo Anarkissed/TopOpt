@@ -104,10 +104,38 @@ public final class OrbitCameraModel: ObservableObject {
     public func setFrameLift(_ f: Float) {
         if camera.frameLift != f { camera.frameLift = f }
     }
+    /// ★ his iPad notes 11-23: draw the picture in this part of the view (OrbitCamera.frameRegion); nil: the whole view.
+    public func setFrameRegion(_ r: SIMD4<Float>?) {
+        if camera.frameRegion != r { camera.frameRegion = r }
+    }
 
     public func adopt(_ newCamera: OrbitCamera) {
         camera = newCamera
         if followsViewProjection { camera.orthographic = ViewProjection.shared.orthographic }   // ★ B2: the app's choice holds
+    }
+
+    // MARK: ★ notes28 — a version's camera as he left it (VersionViewState.swift)
+
+    /// The pose waiting for the viewer to frame the part (`adoptFramed`): its zoom and pan are put back then — framing a
+    /// newly shown part re-fits both.
+    public private(set) var pendingPose: VersionCameraPose?
+
+    /// Turn the camera as he left it now (framing keeps the turn) and put its zoom and pan back when the part is framed.
+    public func restore(_ pose: VersionCameraPose) {
+        pendingPose = pose
+        adopt(pose.applied(to: camera))
+        // the part may have been framed already (then the line above put it back): a pose never waits for a later part
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.poseWaitS) { [weak self] in
+            if self?.pendingPose == pose { self?.pendingPose = nil }
+        }
+    }
+    static let poseWaitS: TimeInterval = 3
+
+    /// The viewer framed a newly shown part: adopt its framing — with a waiting pose's turn, zoom and pan, once.
+    public func adoptFramed(_ framed: OrbitCamera) {
+        guard let p = pendingPose else { adopt(framed); return }
+        pendingPose = nil
+        adopt(p.applied(to: framed))
     }
 
     // MARK: - Snap / home (STEP 3 accelerators)

@@ -180,8 +180,9 @@ private struct JobCard: View {
 
             if job.state == "running" {
                 HStack(spacing: 10) {
-                    HonestBar(fraction: job.fractionComplete(), tint: job.accentColor)
-                    Text(job.progressWord.isEmpty ? "starting…" : job.progressWord)
+                    // ★ 362 11-23: a one-shot job has no honest fraction: a moving bar, never an empty one
+                    HonestBar(fraction: job.fractionComplete(), tint: job.accentColor, moving: job.fractionComplete() == nil)
+                    Text(job.progressWord().isEmpty ? "starting…" : job.progressWord())
                         .font(.system(size: 11, weight: .medium, design: .rounded).monospacedDigit())
                         .foregroundStyle(WD.Palette.textSecondary)
                         .fixedSize()

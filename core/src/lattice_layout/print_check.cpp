@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <map>
 #include <thread>
 
 namespace topopt::lattice_layout {
@@ -191,12 +192,28 @@ struct LayerFound {
   double reach = 0.0;
   std::size_t thin = 0;
 };
+}  // namespace
+
+// SPEED 11-22: what the last check judged (its sections and judgements as judge made them, before the "below" reading),
+// and everything a judgement reads besides the two sections.
+struct LayerCache {
+  bool valid = false;
+  int W = 0, H = 0, nl = 0, grow_px = 0;
+  double x0 = 0.0, y0 = 0.0, px = 0.0, zmin = 0.0, L = 0.0;
+  double over = 0.0, reach = 0.0, thin_under = 0.0, thin_min = 0.0;
+  int fill = 0;
+  bool keep = false;   // K1: the findings hold their pixels
+  std::vector<Section> sections;
+  std::vector<LayerFound> found;
+};
+
+namespace {
 
 // What one thread needs to judge a layer.
 struct Bench {
   std::vector<unsigned char> below, here, sup, ring;
   std::vector<double> d2, inside2;
-  std::vector<int> label, stack;
+  std::vector<int> label, stack, island;
   Distance distance;
 };
 
@@ -238,11 +255,13 @@ LayerFound judge(const Section* s_below, const Section& s_here, double z, const 
     bool held = false;
     double deepest2 = 0.0;
     b.stack.clear();
+    b.island.clear();
     b.stack.push_back(static_cast<int>(i0));
     b.label[i0] = islands;
     while (!b.stack.empty()) {
       const int i = b.stack.back();
       b.stack.pop_back();
+      if (spec.keep_pixels) b.island.push_back(i);   // K1
       const int x = i % W, y = i / W;
       ++count; sx += x; sy += y;
       x_lo = std::min(x_lo, x); x_hi = std::max(x_hi, x);
@@ -269,6 +288,7 @@ LayerFound judge(const Section* s_below, const Section& s_here, double z, const 
     m.y = g.y0 + (static_cast<double>(sy) / count + 0.5) * g.px;
     m.size_x = (x_hi - x_lo + 1) * g.px;
     m.size_y = (y_hi - y_lo + 1) * g.px;
+    if (spec.keep_pixels) m.pixels.assign(b.island.begin(), b.island.end());   // K1
     out.mid_air.push_back(m);
   }
   if (!any_over || !any_sup) return out;
@@ -314,6 +334,7 @@ LayerFound judge(const Section* s_below, const Section& s_here, double z, const 
       o.z = z;
       o.x = g.x0 + (far_at % W + 0.5) * g.px;
       o.y = g.y0 + (far_at / W + 0.5) * g.px;
+      if (spec.keep_pixels) o.pixels.assign(patch.begin(), patch.end());   // K1: its overhanging patch
       return o;
     };
     // The held material within two pixels of the patch: in how many separate places?
@@ -353,7 +374,33 @@ LayerFound judge(const Section* s_below, const Section& s_here, double z, const 
       }
     }
     if (places >= 2) {   // a bridge: held at two places or more. Fine, unless it reaches too far (rule e).
-      if (spec.reach_limit_mm > 0.0 && reach > spec.reach_limit_mm) out.long_bridges.push_back(far_point());
+      if (spec.reach_limit_mm > 0.0 && reach > spec.reach_limit_mm) {
+        LayerReport::OneEnded o = far_point();
+        if (spec.keep_pixels) {
+          // K1: every place of the patch that would still reach past the limit once the far point is held, one after
+          // another (farthest first), so one try can hold the whole bridge (his stand: a strip of lattice 118 mm long
+          // floating 1.2 mm over the bed took a post a try and ran out of tries).
+          const double lim2 = (spec.reach_limit_mm / g.px) * (spec.reach_limit_mm / g.px);
+          std::vector<double> left(patch.size());
+          for (std::size_t q = 0; q < patch.size(); ++q) left[q] = b.d2[static_cast<std::size_t>(patch[q])];
+          int px = far_at % W, py = far_at / W;
+          for (int k = 0; k < 256; ++k) {
+            double most = 0.0;
+            std::size_t at = 0;
+            for (std::size_t q = 0; q < patch.size(); ++q) {
+              const int x = patch[q] % W, y = patch[q] / W;
+              const double d = static_cast<double>(x - px) * (x - px) + static_cast<double>(y - py) * (y - py);
+              if (d < left[q]) left[q] = d;
+              if (left[q] > most) { most = left[q]; at = q; }
+            }
+            if (!(most > lim2)) break;
+            px = patch[at] % W;
+            py = patch[at] / W;
+            o.more.push_back({g.x0 + (px + 0.5) * g.px, g.y0 + (py + 0.5) * g.px});
+          }
+        }
+        out.long_bridges.push_back(o);
+      }
       continue;
     }
     out.one_ended.push_back(far_point());
@@ -395,6 +442,7 @@ LayerReport check_layers(const TriangleMesh& mesh, const LayerSpec& spec) {
   g.y0 = lo[1] - 4 * PX;
   const int nl = static_cast<int>(std::ceil((hi[2] - zmin) / L - 1e-9));
   rep.layers = nl;
+  rep.grid_w = g.W; rep.grid_h = g.H; rep.grid_x0 = g.x0; rep.grid_y0 = g.y0; rep.grid_px = g.px;   // K1
   if (nl <= 0) return rep;
   auto z_of = [&](int k) { return zmin + (k + 0.5) * L + 1e-5; };
   // Which triangles each layer's plane passes through.
@@ -486,19 +534,49 @@ LayerReport check_layers(const TriangleMesh& mesh, const LayerSpec& spec) {
   }
   const int grow_px = std::max(1, static_cast<int>(std::lround(L / PX)));
   std::vector<LayerFound> found(static_cast<std::size_t>(nl));
+  // SPEED 11-22: the last check's judgement of a layer stands when its section and the one below are the same
+  LayerCache* cache = spec.cache;
+  const bool kept = cache && cache->valid && cache->W == g.W && cache->H == g.H && cache->x0 == g.x0 &&
+                    cache->y0 == g.y0 && cache->px == g.px && cache->nl == nl && cache->zmin == zmin && cache->L == L &&
+                    cache->grow_px == grow_px && cache->over == spec.one_ended_over_mm &&
+                    cache->reach == spec.reach_limit_mm && cache->thin_under == spec.thin_under_mm &&
+                    cache->thin_min == spec.thin_min_mm2 && cache->fill == static_cast<int>(spec.fill) &&
+                    cache->keep == spec.keep_pixels &&
+                    cache->sections.size() == sections.size() && cache->found.size() == found.size();
+  auto same = [&](int k) {
+    const Section& a = sections[static_cast<std::size_t>(k)];
+    const Section& b = cache->sections[static_cast<std::size_t>(k)];
+    return a.start == b.start && a.cols == b.cols;
+  };
   {
     std::atomic<int> next{0};
     auto work = [&] {
       Bench bench;
-      for (int k = next.fetch_add(1); k < nl && !asked(spec.stop); k = next.fetch_add(1))
+      for (int k = next.fetch_add(1); k < nl && !asked(spec.stop); k = next.fetch_add(1)) {
+        if (kept && same(k) && (k == 0 || same(k - 1))) {
+          found[static_cast<std::size_t>(k)] = cache->found[static_cast<std::size_t>(k)];
+          continue;
+        }
         found[static_cast<std::size_t>(k)] = judge(k > 0 ? &sections[static_cast<std::size_t>(k) - 1] : nullptr, sections[static_cast<std::size_t>(k)],
                                                    z_of(k), g, grow_px, spec, bench);
+      }
     };
     std::vector<std::thread> pool;
     for (int t = 1; t < nt; ++t) pool.emplace_back(work);
     work();
     for (std::thread& t : pool) t.join();
     if (asked(spec.stop)) throw LayCancelled{};
+  }
+  if (cache) {   // SPEED 11-22: for the next pass
+    cache->valid = true;
+    cache->W = g.W; cache->H = g.H; cache->x0 = g.x0; cache->y0 = g.y0; cache->px = g.px;
+    cache->nl = nl; cache->zmin = zmin; cache->L = L; cache->grow_px = grow_px;
+    cache->over = spec.one_ended_over_mm; cache->reach = spec.reach_limit_mm;
+    cache->thin_under = spec.thin_under_mm; cache->thin_min = spec.thin_min_mm2;
+    cache->fill = static_cast<int>(spec.fill);
+    cache->keep = spec.keep_pixels;
+    cache->sections = sections;
+    cache->found = found;
   }
   // The first material below a place: the highest layer under it with anything within 0.45 mm.
   const int near_px = static_cast<int>(std::lround(0.45 / PX));
@@ -528,6 +606,91 @@ LayerReport check_layers(const TriangleMesh& mesh, const LayerSpec& spec) {
 }
 
 namespace {
+// K1 (his rule, 2026-11-24; PrintableSpec::only_app_made): does a finding's island hold an overhang the app made?
+// Read pixel by pixel on the check's own grid, at the layer's middle. A pixel is the app's when it is
+//   - material the app put in: material of the file two pixels or more from the carved solid's own cross-section there
+//     (a kept bar, a weave's tube, a post: what fills the open space), or
+//   - a finish the layout added: material of the carved solid at least 0.3 mm inside its cross-section (clear of the
+//     open space's 0.25 mm reading at its edge) where the domain says rim (S1), cover (S9) or Organic bed floor.
+// Material the layout only left in place (the part's walls, a Protect skin, what no region asked for, a wall too thin,
+// lattice space no cell holds) is the part's own. (K6: the allowance for the app's material at the part's own underside
+// is gone: the struts a thin bottom row of cells kept, cut at the bed, hold what floated there.)
+class AppMade {
+ public:
+  AppMade(const Domain& domain, const Carved& carved) : probe_(domain.probe()), carved_(&carved) {}
+  bool any(const LayerReport& rep, const std::vector<std::int32_t>& pixels, double z) {
+    if (pixels.empty() || rep.grid_w <= 0) return true;   // nothing to read it by: judged as before
+    const Grid g = grid_of(rep);
+    const Section& solid = solid_at(g, z);
+    for (const std::int32_t i : pixels) {   // material the app put in (cheap first)
+      const int c = i % g.W, r = i / g.W;
+      if (!any_in(solid, g, r - 2, r + 2, c - 2, c + 2)) return true;
+    }
+    for (const std::int32_t i : pixels) {   // then a finish the layout added
+      const int c = i % g.W, r = i / g.W;
+      if (!all_in(solid, g, r - kEdge, r + kEdge, c - kEdge, c + kEdge)) continue;
+      const Why w = probe_.where({g.x0 + (c + 0.5) * g.px, g.y0 + (r + 0.5) * g.px, z}).why;
+      if (w == Why::Rim || w == Why::Cover || w == Why::BedFloor) return true;
+    }
+    return false;
+  }
+
+ private:
+  static constexpr int kEdge = 6;   // pixels: 0.3 mm at 0.05 mm, past the open space's 0.25 mm reading at its edge
+  static Grid grid_of(const LayerReport& rep) {
+    Grid g;
+    g.W = rep.grid_w; g.H = rep.grid_h; g.x0 = rep.grid_x0; g.y0 = rep.grid_y0; g.px = rep.grid_px;
+    return g;
+  }
+  // Is every pixel of rows r0..r1, columns c0..c1 inside? (Off the grid is not inside.)
+  static bool all_in(const Section& s, const Grid& g, int r0, int r1, int c0, int c1) {
+    if (s.start.empty() || r0 < 0 || c0 < 0 || r1 >= g.H || c1 >= g.W) return false;
+    for (int r = r0; r <= r1; ++r) {
+      bool covered = false;
+      for (int i = s.start[static_cast<std::size_t>(r)]; i < s.start[static_cast<std::size_t>(r) + 1] && !covered; i += 2) {
+        const int a = s.cols[static_cast<std::size_t>(i)];
+        const int b = i + 1 < s.start[static_cast<std::size_t>(r) + 1] ? s.cols[static_cast<std::size_t>(i) + 1] : g.W;
+        covered = a <= c0 && b > c1;
+      }
+      if (!covered) return false;
+    }
+    return true;
+  }
+  const Section& solid_at(const Grid& g, double z) {
+    if (!(g.W == grid_.W && g.H == grid_.H && g.x0 == grid_.x0 && g.y0 == grid_.y0 && g.px == grid_.px)) {
+      grid_ = g;
+      sections_.clear();
+    }
+    const auto it = sections_.find(z);
+    if (it != sections_.end()) return it->second;
+    if (!made_) {
+      made_ = true;
+      solid_ = carved_solid_mesh(*carved_);
+      zlo_.resize(solid_.triangles.size());
+      zhi_.resize(solid_.triangles.size());
+      for (std::size_t t = 0; t < solid_.triangles.size(); ++t) {
+        const auto& tri = solid_.triangles[t];
+        const double a = solid_.vertices[static_cast<std::size_t>(tri[0])].z, b = solid_.vertices[static_cast<std::size_t>(tri[1])].z,
+                     c = solid_.vertices[static_cast<std::size_t>(tri[2])].z;
+        zlo_[t] = std::min(a, std::min(b, c));
+        zhi_[t] = std::max(a, std::max(b, c));
+      }
+    }
+    std::vector<std::uint32_t> through;
+    for (std::size_t t = 0; t < zlo_.size(); ++t)
+      if (zlo_[t] < z && zhi_[t] > z) through.push_back(static_cast<std::uint32_t>(t));
+    std::vector<std::vector<int>> rows(static_cast<std::size_t>(g.H));
+    return sections_.emplace(z, cut(solid_, through, z, g, rows)).first->second;
+  }
+  Domain::Probe probe_;
+  const Carved* carved_;
+  bool made_ = false;
+  TriangleMesh solid_;
+  std::vector<double> zlo_, zhi_;
+  Grid grid_;
+  std::map<double, Section> sections_;
+};
+
 bool has_any_relief(const Bars& bars) {   // OG2c: any bar with a proud end or a bulge along a face
   for (const Bar& b : bars.bars)
     if (b.along_proud > 0.0 || b.proud_a > 0.0 || b.proud_b > 0.0) return true;
@@ -570,9 +733,19 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
   if (rep.tubes)
     for (const Bar& x : bars.bars)
       if (std::find(weave_regions.begin(), weave_regions.end(), x.region) == weave_regions.end()) cube_bars.bars.push_back(x);
+  LayerCache layer_cache;   // SPEED 11-22: each pass judges only the layers its changes touched
+  AppMade app_made(domain, carved);   // K1: what the app made, read once per layer asked
   for (int pass = 1; pass <= most; ++pass) {
     rep.passes = pass;
+    rep.part_overhang_at.clear();   // P3: this pass's (the last pass's are the file's)
+    if (spec.said) {   // ★ 362 11-23
+      char line[96];
+      std::snprintf(line, sizeof line, "checking it prints: try %d of at most %d", pass, most);
+      spec.said(line);
+    }
     LayerSpec layers = spec.layers;
+    layers.cache = &layer_cache;
+    layers.keep_pixels = spec.only_app_made;   // K1
     WeaveHolds holds;
     std::vector<char> present;
     std::vector<WeaveStand> stands;
@@ -647,11 +820,46 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
     if (rep.tubes) rep.pass_ms.back().layers_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tl).count();
     const std::vector<LayerReport::Below> below = std::move(rep.layers.below);
     rep.layers.below.clear();
+    // The part's own findings out of the check (counted in part_overhangs, their places in part_overhang_at for P3).
+    // K1 (his rule, 2026-11-24): with only_app_made, a finding is the part's own when its island holds no pixel the app
+    // made (AppMade); `far_own` (F1 / OS17, read at the far point) then only counts how the two readings differ.
+    // Without, `far_own` decides, as before.
+    const auto take_own = [&](const auto& far_own) {
+      const std::size_t before = rep.layers.mid_air.size() + rep.layers.one_ended.size() + rep.layers.long_bridges.size();
+      const auto own = [&](double x, double y, double z, const std::vector<std::int32_t>& pixels) {
+        const bool far = far_own(x, y, z);
+        if (!spec.only_app_made || far) return far;   // what F1 / OS17 left to the slicer stays the slicer's
+        const bool mine = !app_made.any(rep.layers, pixels, z);
+        rep.own_by_k1 += mine && !far;
+        return mine;
+      };
+      // P3: each finding taken as the part's own keeps its place (the predicate runs once per finding)
+      rep.layers.mid_air.erase(std::remove_if(rep.layers.mid_air.begin(), rep.layers.mid_air.end(),
+                                              [&](const LayerReport::MidAir& m) {
+                                                const bool w = own(m.x, m.y, m.z, m.pixels);
+                                                if (w) rep.part_overhang_at.push_back({m.x, m.y, m.z});
+                                                return w;
+                                              }),
+                               rep.layers.mid_air.end());
+      for (std::vector<LayerReport::OneEnded>* v : {&rep.layers.one_ended, &rep.layers.long_bridges})
+        v->erase(std::remove_if(v->begin(), v->end(), [&](const LayerReport::OneEnded& o) {
+                   const bool w = own(o.x, o.y, o.z, o.pixels);
+                   if (w) rep.part_overhang_at.push_back({o.x, o.y, o.z});
+                   return w;
+                 }), v->end());
+      rep.part_overhangs += before - (rep.layers.mid_air.size() + rep.layers.one_ended.size() + rep.layers.long_bridges.size());
+    };
     if (!weave_regions.empty()) {
       // O7: a shallow weave bar the rules keep is kept at any length: what the check finds ON it held at one end, or
       // reaching past the limit, is not a finding (read on the bar as `drop_at` is: within its half width + 0.35 mm).
+      // SPEED 11-22: only the kept shallow bars filed on a grid, each finding read against those in its cell
+      std::vector<char> kept_shallow(bars.bars.size(), 0);
+      for (std::size_t i = 0; i < bars.bars.size(); ++i)
+        kept_shallow[i] = i < holds.shallow.size() && i < holds.kept.size() && holds.shallow[i] && holds.kept[i];
+      const BarGrid shallow_grid(bars, kept_shallow);
       auto on_kept_shallow = [&](const LayerReport::OneEnded& o) {
-        for (std::size_t i = 0; i < bars.bars.size(); ++i) {
+        for (const std::uint32_t u : shallow_grid.near({o.x, o.y, o.z})) {
+          const std::size_t i = u;
           if (!holds.shallow[i] || !holds.kept[i]) continue;
           const Bar& x = bars.bars[i];
           const Vec3 d{x.b.x - x.a.x, x.b.y - x.a.y, x.b.z - x.a.z};
@@ -671,7 +879,10 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
       // Read where `drop_at` would put the place (the bottom of its layer), against the bars the writer kept.
       std::vector<Vec3> places;
       for (const LayerReport::MidAir& m : rep.layers.mid_air) places.push_back({m.x, m.y, m.z - half_layer});
-      const std::vector<WeaveFinding> wf = weave_findings(bars, weave_regions, holds.kept, places, ms.layer_mm);
+      // SPEED 11-22: the joints and the grid made ONCE for this pass (they were made again for every place below)
+      const WeaveFindingsIndex findings(bars, weave_regions, holds.kept, ms.layer_mm);
+      std::vector<WeaveFinding> wf(places.size());
+      for (std::size_t q = 0; q < places.size(); ++q) wf[q] = findings.at(places[q]);
       const double speck = 0.5 * layout.bead_mm;
       std::vector<LayerReport::MidAir> still, specks;
       for (std::size_t q = 0; q < rep.layers.mid_air.size(); ++q) {
@@ -686,22 +897,17 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
         still.push_back(m);
       }
       rep.layers.mid_air.swap(still);
-      // The part's own overhangs (the lead's ruling, 2026-11-19): reaching no bar, on no weave bar, and outside the part
-      // right under it. Counted, never answered.
+      // The part's own overhangs (the lead's ruling, 2026-11-19, OS17): reaching no bar, on no weave bar, and outside
+      // the part right under it. Counted, never answered. K1 (his rule, 2026-11-24): with only_app_made, OS17 is his
+      // rule, read on the finding's whole island (take_own); the far-point reading is kept for the record.
       {
         const Domain::Probe probe = domain.probe();
         const double layer = 2.0 * half_layer;
-        const auto own = [&](double x, double y, double z) {
-          const WeaveFinding f = weave_findings(bars, weave_regions, holds.kept, {{x, y, z - half_layer}}, ms.layer_mm).front();
+        const auto far_own = [&](double x, double y, double z) {
+          const WeaveFinding f = findings.at({x, y, z - half_layer});
           return f.reached == 0 && !f.on_weave && probe.where({x, y, z - layer}).why == Why::Outside;
         };
-        const std::size_t before = rep.layers.mid_air.size() + rep.layers.one_ended.size() + rep.layers.long_bridges.size();
-        rep.layers.mid_air.erase(std::remove_if(rep.layers.mid_air.begin(), rep.layers.mid_air.end(),
-                                                [&](const LayerReport::MidAir& m) { return own(m.x, m.y, m.z); }),
-                                 rep.layers.mid_air.end());
-        for (std::vector<LayerReport::OneEnded>* v : {&rep.layers.one_ended, &rep.layers.long_bridges})
-          v->erase(std::remove_if(v->begin(), v->end(), [&](const LayerReport::OneEnded& o) { return own(o.x, o.y, o.z); }), v->end());
-        rep.part_overhangs += before - (rep.layers.mid_air.size() + rep.layers.one_ended.size() + rep.layers.long_bridges.size());
+        take_own(far_own);
       }
       // A speck held by nothing below is also seen as an overhang held at one place: the same island, in the same
       // layer within half a line width of the speck's middle, is not a finding either.
@@ -712,6 +918,65 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
       };
       rep.layers.one_ended.erase(std::remove_if(rep.layers.one_ended.begin(), rep.layers.one_ended.end(), at_speck),
                                  rep.layers.one_ended.end());
+    }
+    if (weave_regions.empty()) {
+      // ★ 362 11-23, F1 (his regular lattice refused every time on his stand: the stand's OWN top tab, a flat bar bridged
+      // about 13.5 mm behind a slot, was judged as the lattice's and "answered" with a post from the bed that the cut to
+      // the part deletes, ten times): the lead's ruling of 2026-11-19 (OS17) for every lattice, as for a weave. A finding
+      // that reaches no bar the writer keeps (within its half width + 0.35 mm, read at the bottom of its layer as
+      // `drop_at` is) and has the outside of the part right under it, a layer down, is the PART'S OWN overhang: the
+      // slicer's business, counted, never left out, never propped, never a reason the file is not clean.
+      const std::vector<char> kept = bars_present(bars, ms.drop_at);
+      const BarGrid grid(bars, kept);
+      const PartMeasure::Probe exact = part.probe();   // the part's own surface, exact (the domain's map is coarse at a face)
+      const double layer = 2.0 * half_layer;
+      const auto reaches_bar = [&](double x, double y, double z) {
+        const Vec3 p{x, y, z - half_layer};
+        for (const std::uint32_t u : grid.near(p)) {
+          const Bar& b = bars.bars[u];
+          const Vec3 d{b.b.x - b.a.x, b.b.y - b.a.y, b.b.z - b.a.z};
+          const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
+          const double t = l2 > 0 ? std::clamp(((p.x - b.a.x) * d.x + (p.y - b.a.y) * d.y + (p.z - b.a.z) * d.z) / l2, 0.0, 1.0) : 0.0;
+          const double ex = b.a.x + t * d.x - p.x, ey = b.a.y + t * d.y - p.y, ez = b.a.z + t * d.z - p.z;
+          if (std::sqrt(ex * ex + ey * ey + ez * ez) < 0.5 * b.width + 0.35) return true;
+        }
+        return false;
+      };
+      const auto far_own = [&](double x, double y, double z) {
+        return exact.depth({x, y, z - layer}) < 0.0 && !reaches_bar(x, y, z);
+      };
+      take_own(far_own);   // K1: his rule on the finding's island with only_app_made (F1 at its far point without)
+    }
+    // OS1 B (his ruling R2): a finding on a shallow run's rounded end (within its half width + 0.35 mm of its place in
+    // plan, from a layer under its underside to its top) is not answered by leaving bars out: that end is made flat
+    // again (MeshSpec::flat_domes_at) and the pass made again; counted.
+    if (rep.tubes && !rep.shells.dome_ends.empty()) {
+      std::size_t flattened = 0;
+      auto on_dome = [&](double x, double y, double z) {
+        for (const auto& d : rep.shells.dome_ends) {
+          const double r = d[3];
+          if (std::hypot(x - d[0], y - d[1]) > r + 0.35 || z < d[2] - r - 2.0 * half_layer || z > d[2] + r + 2.0 * half_layer) continue;
+          const Vec3 at{d[0], d[1], d[2]};
+          bool listed = false;
+          for (const Vec3& f : ms.flat_domes_at) listed = listed || (f.x == at.x && f.y == at.y && f.z == at.z);
+          if (!listed) { ms.flat_domes_at.push_back(at); ++flattened; }
+          return true;
+        }
+        return false;
+      };
+      const std::size_t before = flattened;
+      for (const LayerReport::MidAir& m : rep.layers.mid_air) on_dome(m.x, m.y, m.z);
+      for (std::vector<LayerReport::OneEnded>* v : {&rep.layers.one_ended, &rep.layers.long_bridges})
+        for (const LayerReport::OneEnded& o : *v) on_dome(o.x, o.y, o.z);
+      // Leg T (OS1 R2 completed, the lead's ruling 2026-11-21): a round that flattens domes is not one of the check's
+      // passes: the passes left to leave out and post are as many as with no domes (it converges where it converged
+      // without them, release 12); at most `most` such rounds.
+      if (flattened > before && rep.dome_rounds < most) {
+        rep.domes_flattened += flattened - before;
+        ++rep.dome_rounds;
+        --pass;
+        continue;
+      }
     }
     // O8: a post at the middle of each long stretch that has material straight below it, from that material up into
     // the bar. With nothing below, the run stands as it is.
@@ -728,24 +993,60 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
     for (const MeshSpec::Post& p : stand_posts) ms.posts.push_back(p);
     rep.stands_added += stand_posts.size();
     if (n == 0) { last = n; continue; }   // only the stands to add: made again with them
+    // ★ 362 11-23, F2 and F3: what this try adds. A post whose column leaves the part is never added (the cut to the
+    // part deletes what of it is outside, so it could hold nothing: F2); a post or a place to leave out that is already
+    // there is not added again (F3). When a try adds nothing at all, the next try would make the same file again: the
+    // loop stops there (F3), instead of making it again up to the last try (his stand: the same post, nine times).
+    // Cell lattices only: a weave's loop (Organic) is left exactly as released (its own rules, OS17, already keep the
+    // part's own overhangs out of it).
+    const bool cells_only = weave_regions.empty();
+    std::size_t added = stand_posts.size();
+    const PartMeasure::Probe column_probe = part.probe();
+    const auto add_post = [&](const MeshSpec::Post& p) {
+      if (cells_only) {
+        for (const MeshSpec::Post& q : ms.posts)
+          if (q.x == p.x && q.y == p.y && q.z_top == p.z_top && q.z_bottom == p.z_bottom) return;
+        // read against the part's own surface (exact): most of the column outside it = a post the cut deletes
+        int samples = 0, outside = 0;
+        for (double z = p.z_bottom + 0.25; z < p.z_top - 0.5; z += 0.5, ++samples)
+          outside += column_probe.depth({p.x, p.y, z}) < 0.0;
+        if (samples > 0 && 2 * outside > samples) { ++rep.posts_outside; return; }
+      }
+      ms.posts.push_back(p);
+      ++added;
+    };
+    const auto add_drop = [&](const Vec3& v) {
+      if (cells_only)
+        for (const Vec3& q : ms.drop_at)
+          if (q.x == v.x && q.y == v.y && q.z == v.z) return;
+      ms.drop_at.push_back(v);
+      ++added;
+    };
     auto post_all = [&] {
       for (const LayerReport::MidAir& m : rep.layers.mid_air)
-        ms.posts.push_back({m.x, m.y, m.z, m.anything_below ? std::max(m.below_z, rep.layers.z_bed) : rep.layers.z_bed});
+        add_post({m.x, m.y, m.z, m.anything_below ? std::max(m.below_z, rep.layers.z_bed) : rep.layers.z_bed});
       for (const LayerReport::OneEnded& o : rep.layers.one_ended)
-        ms.posts.push_back({o.x, o.y, o.z, o.anything_below ? std::max(o.below_z, rep.layers.z_bed) : rep.layers.z_bed});
+        add_post({o.x, o.y, o.z, o.anything_below ? std::max(o.below_z, rep.layers.z_bed) : rep.layers.z_bed});
     };
     // A bridge that reaches too far is never cured by leaving a strut out: it gets a post under its far point.
-    for (const LayerReport::OneEnded& o : rep.layers.long_bridges)
-      ms.posts.push_back({o.x, o.y, o.z, o.anything_below ? std::max(o.below_z, rep.layers.z_bed) : rep.layers.z_bed});
+    // K1 (cell lattices): and under every other place of it that would still reach too far, from the bed (a post whose
+    // column leaves the part is not added, F2), so one try holds the whole bridge.
+    for (const LayerReport::OneEnded& o : rep.layers.long_bridges) {
+      add_post({o.x, o.y, o.z, o.anything_below ? std::max(o.below_z, rep.layers.z_bed) : rep.layers.z_bed});
+      if (cells_only)
+        for (const auto& m : o.more) add_post({m[0], m[1], o.z, rep.layers.z_bed});
+    }
     if (!posting) {
       // First answer: leave out what starts there (the bottom of that layer).
-      for (const LayerReport::MidAir& m : rep.layers.mid_air) ms.drop_at.push_back({m.x, m.y, m.z - half_layer});
-      for (const LayerReport::OneEnded& o : rep.layers.one_ended) ms.drop_at.push_back({o.x, o.y, o.z - half_layer});
+      for (const LayerReport::MidAir& m : rep.layers.mid_air) add_drop({m.x, m.y, m.z - half_layer});
+      for (const LayerReport::OneEnded& o : rep.layers.one_ended) add_drop({o.x, o.y, o.z - half_layer});
       // When leaving out no longer helps, tie down what is left with posts.
       if (n == last) { posting = true; post_all(); }
     } else {
       post_all();
     }
+    if (cells_only && added == 0 && !posting) { posting = true; post_all(); }   // leaving out no longer helps: posts
+    if (cells_only && added == 0) { rep.stopped_repeating = true; rep.clean = false; break; }
     last = n;
   }
   rep.drop_at = ms.drop_at;
@@ -810,6 +1111,7 @@ TriangleMesh build_printable_mesh(const PartMeasure& part, const Domain& domain,
       return m2;
     }
   }
+  rep.flat_domes_at = ms.flat_domes_at;   // OS1 B, leg U: the held-flat ends, for the Exact preview
   rep.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
   if (report) *report = rep;
   return mesh;

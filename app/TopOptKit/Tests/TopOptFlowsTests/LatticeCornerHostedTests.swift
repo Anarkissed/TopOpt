@@ -47,10 +47,8 @@ final class LatticeCornerHostedTests: XCTestCase {
             XCTAssertEqual(m.maxY, l.maxY, accuracy: 1, "\(size): one bottom line")
             XCTAssertEqual(l.height, 64, accuracy: 1, "\(size): §4.6 — the 64 pt run button")
             XCTAssertNil(h.frames.all["latticeFixLine"], "\(size): a lattice set: no fix line")
-            _ = try h.onScreen("stageHint", "\(size): ★ the hint is back")
+            XCTAssertNil(h.frames.all["stageHint"], "\(size): ★ his 11-22: no \"Tap a face to lattice it\" hint")
         }
-        // the hint's words (design-system §5's short form, mockup #lat-setup)
-        XCTAssertEqual(LatticeSetupCopy.hint, "Tap a face to lattice it \u{00B7} drag to turn")
     }
 
     /// ★ No lattice settings yet: Lattice is grey ("Save a lattice first") and the fix line above the corner opens the Lattice page.
@@ -69,19 +67,28 @@ final class LatticeCornerHostedTests: XCTestCase {
 
     /// ★ ⌃ holds the five run choices, in the design's order; each greys with nothing to run on.
     func testTheArrowHoldsTheFiveRunChoices() throws {
-        let (h, _, _) = try stage(AppBuildHost.landscape13, prism: true)
+        let (h, p, _) = try stage(AppBuildHost.landscape13, prism: true)
+        // ★ notes28 (his 11-24: the lattice view "should default to 'on' in the Lattice stage"): the lattice is laid on screen
+        let laid = Date().addingTimeInterval(120)
+        while h.frames.all["new-engine-timing"] == nil, Date() < laid { h.pump(0.5) }
         // (the divider before Preview only reads as an untitled item: dropped)
         let offered = try h.pickFromMenu("latticeSplitMore", "no such item", what: "⌃")
             .filter { !$0.replacingOccurrences(of: " [off]", with: "").isEmpty }
         // ★ note 21's five, then his 11-16 pair: how the lattice view keeps up (Live preview / Click to refresh preview)
-        let five = ["Lattice the original part", "Optimize, then lattice", "Lattice an optimized result", "Preview only", "Export\u{2026}",
-                    LatticePreviewMode.live, LatticePreviewMode.refresh]
-        XCTAssertEqual(offered.count, five.count, "★ note 21's five + his 11-16 pair: \(offered)")
+        // ★ his 11-20 ask (acca75e3): "Run the stress check" leads the ⌃ when the lattice follows the stresses
+        let stress = LatticeLayoutPreview.needsStress(p.lattice) ? [StressCheckCopy.menuTitle] : []
+        let five = stress + ["Lattice the original part", "Optimize, then lattice", "Lattice an optimized result", "Preview only", "Export\u{2026}",
+                    LatticePreviewMode.live, LatticePreviewMode.refresh,
+                    LatticePreviewMode.printAccurate]   // ★ his ask 11-21: the quick Draft or the print file's own lattice
+        XCTAssertEqual(offered.count, five.count, "★ note 21's five + his 11-16 pair + his 11-21 switch: \(offered)")
         for (o, t) in zip(offered, five) { XCTAssertTrue(o.hasPrefix(t), "★ in the design's order: \(t) — \(offered)") }
         func item(_ t: String) -> String? { offered.first { $0.hasPrefix(t) } }
         XCTAssertFalse(item("Lattice the original part")?.hasSuffix("[off]") ?? true, "★ a lattice set: it runs (\(offered))")
         XCTAssertTrue(item("Lattice an optimized result")?.hasSuffix("[off]") ?? false, "★ no results yet: nothing to pick (\(offered))")
-        XCTAssertTrue(item("Export")?.hasSuffix("[off]") ?? false, "no results: nothing to export (\(offered))")
+        // ★ RE-PINNED notes28: no results, but the lattice view opens on and its lattice is on screen — Export… makes its print
+        // file (notes25: "live with a lattice preview on screen"); it greys only with neither
+        XCTAssertNotNil(h.frames.all["new-engine-timing"], "premise: the lattice laid on screen, the view on by itself")
+        XCTAssertFalse(item("Export")?.hasSuffix("[off]") ?? true, "★ a lattice on screen: Export… makes its file (\(offered))")
 
         // with results: "Lattice an optimized result ›" opens them, and Export is live
         let (h2, p2, _) = try stage(AppBuildHost.landscape13, prism: true)

@@ -84,8 +84,9 @@ final class LatticeRolePickerHostedTests: XCTestCase {
         XCTAssertEqual(p.lattice.groupRoles[g], .exclude, "★ the run keeps it solid (No lattice) until E2.4")
         p.latticeList.setActive(g)
         h.pump(1)
-        _ = try h.onScreen("latticeSkinWaits-\(g.uuidString)", "★ the plain line on its Role row")
-        XCTAssertEqual(LatticeSetupCopy.skinWaits, "Runs as No lattice until the engine update")
+        // ★ his 11-22: the engine lays Protect skin; no engine-update line cuts into the modal
+        XCTAssertNil(h.frames.all["latticeSkinWaits-\(g.uuidString)"], "★ his 11-22: no wait line on its Role row")
+        XCTAssertFalse(try FlexibleSource.code("LatticeStage.swift").contains("until the engine update"), "★ no wait copy left")
     }
 
     /// ★ 23c: with the Topology panel open, a tap goes to Topology's groups and Topology's own picker shows; closed, it does

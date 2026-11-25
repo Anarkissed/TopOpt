@@ -28,6 +28,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
+#include <unordered_map>
 #include <cmath>
 #include <cstddef>
 #include <memory>
@@ -145,6 +147,23 @@ struct MeshSpec {
   // OV1: a round weave tube's centre line swept as a curve through its points (sweep_centre_line). Off here (the
   // writer's own default: every caller that does not ask is unchanged); the file job turns it on (organic_sweep).
   SweepAsk sweep{};
+  // OS1, the file's vine shape (the owner, 2026-11-20: "the rounded ends aren't attached at the right places, there are
+  // places without rounded ends at ALL, and there are just straight cuts to turn instead of angles"; "Build the better
+  // vine shape"). Each is off here (the writer's own default: every caller that does not ask is unchanged, to the
+  // bit); the file job turns them on (file_mesh_defaults).
+  // OS1 B: a shallow run's end (its D or square section) is DOMED wherever a round tube's end gets a half-sphere (a
+  // joint, a free end, a split, a proud end): the section's own half-dome, round in plan and on top, its underside the
+  // bar's own flat plane; flat only in solid or at a flush face, as a round tube's. false: every such end flat.
+  bool weave_bridge_domes = false;
+  // OS1 A (his ruling R1): a round tube's sides per piece, from its widest ring: the fewest (even) sides whose flat
+  // facet lies no more than this from the true circle (r (1 - cos(pi / n)) <= tube_facet_mm), from `tube_sides` (the
+  // floor) up to 24. 0: `tube_sides` always.
+  double tube_facet_mm = 0.0;
+  // OS1 D: a piece is ended (a round end, or a dome) at a point whose mitred ring would cross the next ring (the
+  // segment between them shorter than their two mitre offsets: the fold that drew thin fins). false: as before.
+  bool weave_fold_split = false;
+  // OS1 B (his ruling R2): the domes the print check made flat again (a finding on them); each listed end is flat.
+  std::vector<Vec3> flat_domes_at;
   // OF4: every piece of the solid is kept (the tubes route: pieces the unmerged tubes tie together are not loose).
   // false: the mesh as before.
   bool keep_pieces = false;
@@ -245,6 +264,42 @@ struct WeaveFinding { std::size_t reached = 0, cube = 0, held = 0, level = 0; bo
 std::vector<WeaveFinding> weave_findings(const Bars& bars, const std::vector<int>& weave_regions,
                                          const std::vector<char>& present, const std::vector<Vec3>& places,
                                          double layer_mm = 0.2);
+// SPEED (his 11-22: "We need to speed everything up EXPONENTIALLY"): the bars that can reach a place, found on a grid
+// instead of by reading every bar. A bar is filed under every cell of its box grown by half its width + 0.35 mm (the
+// farthest a place can lie from it and still read it: weave_findings' reach and "on the weave", the O7 shallow read), so
+// a place's cell holds every bar that can reach it (and some that cannot: each is still judged exactly as before).
+// `use` (empty: every bar): only the bars marked 1 are filed.
+class BarGrid {
+ public:
+  explicit BarGrid(const Bars& bars, const std::vector<char>& use = {});
+  // The bars filed in `p`'s cell, in increasing bar order (empty for a place off the grid or not finite).
+  const std::vector<std::uint32_t>& near(const Vec3& p) const;
+  static constexpr double kCell = 2.5;   // mm
+ private:
+  std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> cells_;
+  std::vector<std::uint32_t> none_;
+};
+// weave_findings for many places one by one (the print check's read of the part's own overhangs): the joints and the grid
+// made once for `bars` and `present`, which must not change while it is read. `at(p)` == weave_findings(.., {p}, ..)[0].
+class WeaveFindingsIndex {
+ public:
+  WeaveFindingsIndex(const Bars& bars, const std::vector<int>& weave_regions, const std::vector<char>& present,
+                     double layer_mm = 0.2);
+  WeaveFinding at(const Vec3& place) const;
+ private:
+  const Bars& bars_;
+  std::vector<int> regions_;
+  std::vector<char> here_;
+  double layer_;
+  std::vector<std::size_t> joints_;
+  std::vector<std::vector<std::size_t>> at_;
+  BarGrid grid_;
+};
+// The reference form of weave_findings (every bar read for every place, the joints made per call), kept for the tests
+// that hold the grid to it.
+std::vector<WeaveFinding> weave_findings_every_bar(const Bars& bars, const std::vector<int>& weave_regions,
+                                                   const std::vector<char>& present, const std::vector<Vec3>& places,
+                                                   double layer_mm = 0.2);
 // ── WHAT HAPPENS TO A SAG (O17, O18; the owner's OR29) ─────────────────────────
 // Only the bars of a weave region are read and moved; every other bar is never moved.
 // HELD FROM BELOW (a node, a joint of end_joints): in the solid (a Solid end), or an end of a bar that is not a weave's,
@@ -383,12 +438,30 @@ struct WeaveShells {
   // OV1: every swept piece's centre line as swept (its solid ends after the run-on), for the preview's test.
   std::vector<std::vector<Vec3>> swept_lines;
   double sweep_largest_offset_mm = 0.0;
+  // OS1: the shallow runs' domed ends, and those held flat for the print check (MeshSpec::flat_domes_at); each dome's
+  // end point (before any run-on) and its half width, for the print check; the pieces ended at a fold (OS1 D); the
+  // round tubes' sides, fewest and most (OS1 A; 0 with no round tube).
+  std::size_t bridge_domes = 0, domes_held_flat = 0, fold_splits = 0;
+  std::vector<std::array<double, 4>> dome_ends;
+  int tube_sides_least = 0, tube_sides_most = 0;
+  // OS1 (his rule of 11-12: "Please ensure bridges are flat and not curved"): the shallow runs' downward-facing area as
+  // written (bars and rounded ends): level, a rising bar's own flat bottom, and the rest (curved or sloped), mm2.
+  double bridge_under_level_mm2 = 0.0, bridge_under_own_mm2 = 0.0, bridge_under_other_mm2 = 0.0;
   double mm3 = 0.0;                      // the shells' own volumes, summed (overlaps counted twice)
   double ms = 0.0;
   std::size_t shells() const { return first_tri.empty() ? 0 : first_tri.size() - 1; }
 };
 WeaveShells weave_shells(const PartMeasure& part, const Domain& domain, const Layout& layout, const Bars& bars,
                          const std::vector<char>& kept, const Carved& carved, const MeshSpec& spec, bool trim = true);
+// OS1 A: a round tube's sides for a piece whose widest bar is `width_mm` wide (MeshSpec::tube_facet_mm, tube_sides).
+int tube_sides_for(double width_mm, const MeshSpec& spec);
+// The equal-area factor of a `sides`-gon: its circumradius over the round's radius of the same area.
+double tube_round_factor(int sides);
+// OS1 D: the inner points of a swept piece's centre line `p` where it is ended so that no mitred ring crosses the next:
+// ring j lies off its point along the bar by up to corner[j] x tan(turn_j / 2) (corner: the ring's farthest point from
+// the line: a round tube's radius, a section's corner); a segment shorter than its two ends' offsets folds. Ended
+// points have no offset; the larger of a folding segment's two offsets is ended first, until none folds. Sorted.
+std::vector<std::size_t> mitre_fold_splits(const std::vector<Vec3>& p, const std::vector<double>& corner);
 // Used by weave_shells (build_mesh's own shape code, solid_mesh.cpp): per bar of `bars`, with `strut[i]` its strut and
 // with `feet[i]` its feet (O11) as build_mesh makes them; then every post of `spec.posts`. Each shape is appended to `out`
 // as a closed shell on its own vertices, its first triangle to `first_tri`. Counts go to `rep` (bridges, feet, posts).
@@ -399,6 +472,10 @@ void weave_bar_shells(const Domain& domain, const Layout& layout, const Bars& ba
 double strut_run_on_mm(const Carved& carved, const MeshSpec& spec);
 // Per piece of the carved solid: 1 when build_mesh leaves it out for `drop_at` (a small piece starting at one of them).
 std::vector<char> solid_slivers_left_out(const Carved& carved, const std::vector<Vec3>& drop_at);
+// K1 (his rule, 2026-11-24): the carved solid itself (the part less the open space, every piece), as a mesh, so the
+// print check can tell the material the carving left (the part's) from the material put into the open space (the
+// lattice's). Empty without the mesh library or a carving.
+TriangleMesh carved_solid_mesh(const Carved& carved);
 // OF3 (the lead's ruling, 2026-11-18: the owner's rule is a flat bottom): a closed shell reaching under `bed` cut there,
 // with a flat face on the bed plane (Manifold). False (the shell untouched) when it cannot be.
 bool cut_shell_at_bed(TriangleMesh& shell, double bed);
@@ -414,6 +491,9 @@ bool cut_shell_at_bed(TriangleMesh& shell, double bed);
 //   - the longest reach of any bridge, for the report.
 // Judged on the finished mesh, never strut by strut: a strut-by-strut rule threw out
 // 3,033 good struts on his stand (2026-11-12) and made a 3.3 mm overhang.
+// SPEED 11-22: the last pass's sections and judgements, so the next pass judges only the layers that changed
+// (print_check.cpp; the passes own it). Opaque here.
+struct LayerCache;
 struct LayerSpec {
   double layer_mm = 0.2;
   double pixel_mm = 0.05;
@@ -442,6 +522,12 @@ struct LayerSpec {
   bool layer_areas = false;
   int threads = 0;
   const std::atomic<bool>* stop = nullptr;
+  // SPEED 11-22: null = judge every layer (as before). With one, a layer whose section and the one below are the same
+  // as at the last check given the same cache (same grid, layers and thresholds) keeps its judgement: the same report.
+  LayerCache* cache = nullptr;
+  // K1 (his rule, 2026-11-24): set, each finding keeps its island's pixels (MidAir / OneEnded::pixels: a mid-air start's
+  // whole island, an overhang's or a bridge's overhanging patch), so the printable loop can ask what they are made of.
+  bool keep_pixels = false;
 };
 struct LayerReport {
   double z_bed = 0.0;
@@ -449,8 +535,17 @@ struct LayerReport {
   double sloped_mm2 = 0.0;       // footprint of downward faces within the first layer that are NOT flat on the bed
   double first_layer_mm2 = 0.0;  // the first layer's cross-section
   int layers = 0;
-  struct MidAir { double z = 0, mm2 = 0, x = 0, y = 0, size_x = 0, size_y = 0, below_z = 0; bool anything_below = false; };
-  struct OneEnded { double reach_mm = 0, z = 0, x = 0, y = 0, below_z = 0; bool anything_below = false; };
+  // K1: the check's pixel grid (pixel (c, r) has its middle at x0 + (c + 0.5) px, y0 + (r + 0.5) px; index r * w + c).
+  int grid_w = 0, grid_h = 0;
+  double grid_x0 = 0.0, grid_y0 = 0.0, grid_px = 0.0;
+  // `pixels` (LayerSpec::keep_pixels only, else empty): the finding's island, as grid indices.
+  struct MidAir { double z = 0, mm2 = 0, x = 0, y = 0, size_x = 0, size_y = 0, below_z = 0; bool anything_below = false;
+                  std::vector<std::int32_t> pixels; };
+  // `more` (a long bridge, LayerSpec::keep_pixels only): the other places of its patch, x y, that reach past
+  // `reach_limit_mm` from what holds it and from the far point and each other (a post at each of them and at the far
+  // point leaves no place of the patch reaching that far).
+  struct OneEnded { double reach_mm = 0, z = 0, x = 0, y = 0, below_z = 0; bool anything_below = false;
+                    std::vector<std::int32_t> pixels; std::vector<std::array<double, 2>> more; };
   std::vector<MidAir> mid_air;       // in layer order
   std::vector<OneEnded> one_ended;   // in layer order
   std::vector<OneEnded> long_bridges;   // held at two places or more, but reaching past `reach_limit_mm`; in layer order
@@ -484,6 +579,29 @@ struct PrintableSpec {
   int most_passes = 10;
   // false: nothing is ever left out; what would start in mid-air is tied down with posts from the first pass.
   bool leave_out = true;
+  // ★ 362 11-23: told each try as it starts ("checking it prints: try 3 of at most 10"), so the Mac and the iPad can say
+  // what a long check is doing (his worker window sat on "starting..." for seven minutes). Null: nothing said.
+  void (*said)(const char*) = nullptr;
+  // K1 (his rule, 2026-11-24: "the checking printability should ONLY check what was created in the app, not the rest of
+  // the part. Assume the rest of the part is completely printable. That is for the user and the slicer."): a finding
+  // counts only when its island (a mid-air start's island, an overhang's or a bridge's overhanging patch) holds an
+  // overhang the app made, read pixel by pixel at the layer's middle: a pixel of
+  //   - material the app put in: material of the file at least two pixels from the carved solid's own cross-section at
+  //     that layer (a kept bar, a weave's tube, a post: what fills the open space), or
+  //   - a finish the layout added: material of the carved solid at least 0.3 mm inside its cross-section (clear of the
+  //     open space's 0.25 mm reading at its edge) where the domain says rim (S1), cover (S9) or Organic bed floor.
+  // Anything else is the part's own and is never judged: material the layout only left in place (the part's walls, a
+  // Protect skin, what no region asked for, a wall too thin, lattice space no cell holds, and the surfaces the carving
+  // bared on them). (K6 took away the allowance for the app's material at the part's own underside: the bottom row's
+  // struts, cut at the bed, hold what floated there.) Organic changes only where a finding lay on the part alone. Near
+  // a bar is not on a bar. A long bridge
+  // the app made gets a post under each of its places that reach too far, in one try (OneEnded::more), cell lattices
+  // only. What F1 / OS17 left to the slicer stays the
+  // slicer's, so his rule only ever judges fewer. The part's own is counted (`part_overhangs`, `own_by_k1`), its place
+  // kept (`part_overhang_at`), never left out, never propped, never a reason the file is not clean. For a cell lattice
+  // and a weave alike. false: F1 and OS17 as before (a finding read at its far point only: within half a bar's width +
+  // 0.35 mm of a kept bar, or with part under it, judged).
+  bool only_app_made = true;
 };
 struct PrintableReport {
   MeshReport mesh;     // of the mesh returned
@@ -496,6 +614,11 @@ struct PrintableReport {
   // empty when clean), the bars whose relief was cut back flush because a finding lay on their proud part, and how many
   // times the whole loop was run again for that.
   std::vector<Vec3> findings_at;
+  // OS1 B (his ruling R2): domed shallow ends a finding lay on, made flat again (the pass made again), and how many
+  // passes that took.
+  std::size_t domes_flattened = 0;
+  int dome_rounds = 0;
+  std::vector<Vec3> flat_domes_at;   // OS1 B, leg U: every domed shallow end held flat, at its place (the last pass's)
   std::size_t relief_flushed = 0;
   int relief_rounds = 0;
   // OJ6 (leg J item 6): the two ends of each bar made flush, as it was given (so the preview can clear its relief).
@@ -511,6 +634,20 @@ struct PrintableReport {
   // bar, and right under it, a layer down, is outside the part) is the slicer's business: counted here, all passes
   // together, never left out, never propped, never a reason the file is not clean.
   std::size_t part_overhangs = 0;
+  // ★ 362 11-23 (his regular lattice refused every time on his stand): F2, the posts not added because their column
+  // leaves the part (the cut to the part deletes what of a post is outside it, so it could never hold anything); F3, the
+  // loop stopped because a try had nothing new to try (the same findings, no new place to leave out, no new post), so
+  // the next try would have been the same file again.
+  std::size_t posts_outside = 0;
+  bool stopped_repeating = false;
+  // P3 (his print orientation): where the part's own overhangs are, of the LAST pass (the mesh returned): each finding
+  // the weave's rule or the cell lattice's (F1) took as the part's own, its place (x, y, z, the layer's middle), so the
+  // file can paint the part's triangles there as support enforcers (support_paint.hpp).
+  std::vector<Vec3> part_overhang_at;
+  // K1 (PrintableSpec::only_app_made), all passes together: of `part_overhangs`, the findings the far-point reading of
+  // F1 / OS17 judged (a kept bar within half its width + 0.35 mm of it, or the part right under it) that his rule leaves
+  // to the slicer. (What the far point left to the slicer stays the slicer's: his rule only ever judges fewer.)
+  std::size_t own_by_k1 = 0;
   // O17, O18: what the sag pass did (once, before the first pass), and, when it changed a bar, the bars every pass
   // was made of (the layout's own otherwise: null). `drop_at` and `posts` are read against those.
   SagReport sags;

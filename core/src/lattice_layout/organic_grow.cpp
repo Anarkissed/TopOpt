@@ -19,6 +19,7 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+#include <unordered_map>
 
 namespace topopt::lattice_layout {
 
@@ -204,6 +205,15 @@ struct Boxes {
         for (int i = i0; i <= i1; ++i)
           for (const Sample& s : box[(static_cast<std::size_t>(k) * n[1] + j) * n[0] + i]) f(s);
   }
+  // SPEED 11-22: the same samples in the same order, but only those inside the cube of half-side R round q (the boxes
+  // are 2 mm; most look-ups ask about a few tenths of a millimetre). For a test on the sample's own segment within a
+  // distance d with d + half a sample step <= R, the answer is the same as near's.
+  template <class F>
+  void near_within(const Vec3& q, double R, F&& f) const {
+    near(q, R, [&](const Sample& s) {
+      if (std::fabs(s.p.x - q.x) <= R && std::fabs(s.p.y - q.y) <= R && std::fabs(s.p.z - q.z) <= R) f(s);
+    });
+  }
   void clear() {
     for (auto& b : box) b.clear();
   }
@@ -215,6 +225,59 @@ struct Boxes {
     b.n[0] = n[0]; b.n[1] = n[1]; b.n[2] = n[2];
     b.box.resize(box.size());
     return b;
+  }
+};
+
+// SPEED 11-22: the same samples on a 0.5 mm grid, for look-ups whose answer does not depend on the order samples are
+// visited. near_within hands on exactly the samples inside the cube of half-side R round q (the set Boxes::near_within
+// hands on), in another order.
+struct FineBoxes {
+  static constexpr double kCell = 0.5;
+  std::unordered_map<std::uint64_t, std::vector<Sample>> cells;
+  static bool cell_of(double v, long long& c) {
+    if (!std::isfinite(v)) return false;
+    const double q = std::floor(v / kCell);
+    if (std::fabs(q) > static_cast<double>((1LL << 20) - 2)) return false;
+    c = static_cast<long long>(q);
+    return true;
+  }
+  static std::uint64_t key(long long i, long long j, long long k) {
+    const auto f = [](long long v) { return static_cast<std::uint64_t>((v + (1LL << 20)) & 0x1FFFFF); };
+    return f(i) << 42 | f(j) << 21 | f(k);
+  }
+  // A sample off the grid's range (not finite, or farther than half a kilometre) is kept aside and read by every look-up.
+  std::vector<Sample> far;
+  void put(const Sample& s) {
+    long long i, j, k;
+    if (cell_of(s.p.x, i) && cell_of(s.p.y, j) && cell_of(s.p.z, k)) cells[key(i, j, k)].push_back(s);
+    else far.push_back(s);
+  }
+  static FineBoxes of(const Boxes& b) {
+    FineBoxes f;
+    std::size_t n = 0;
+    for (const auto& v : b.box) n += v.size();
+    f.cells.reserve(n / 4 + 16);
+    for (const auto& v : b.box)
+      for (const Sample& s : v) f.put(s);
+    return f;
+  }
+  template <class F>
+  void near_within(const Vec3& q, double R, F&& f) const {
+    const auto inside = [&](const Sample& s) {
+      return std::fabs(s.p.x - q.x) <= R && std::fabs(s.p.y - q.y) <= R && std::fabs(s.p.z - q.z) <= R;
+    };
+    for (const Sample& s : far) if (inside(s)) f(s);
+    long long i0, i1, j0, j1, k0, k1;
+    if (!cell_of(q.x - R, i0) || !cell_of(q.x + R, i1) || !cell_of(q.y - R, j0) || !cell_of(q.y + R, j1) ||
+        !cell_of(q.z - R, k0) || !cell_of(q.z + R, k1))
+      return;   // a look-up off the grid's range: only the far samples can be inside it
+    for (long long i = i0; i <= i1; ++i)
+      for (long long j = j0; j <= j1; ++j)
+        for (long long k = k0; k <= k1; ++k) {
+          const auto it = cells.find(key(i, j, k));
+          if (it == cells.end()) continue;
+          for (const Sample& s : it->second) if (inside(s)) f(s);
+        }
   }
 };
 
@@ -469,6 +532,7 @@ class Grower {
   // A new segment at the end of a line, to `b`; `record`: b is a recorded vertex.
   void lay(int li, const Vec3& b, bool record = false) {
     Line& L = lines_[static_cast<std::size_t>(li)];
+    if (GrowthTap* t = domain_.growth_tap()) t->piece(region_, L.pts.back(), b);   // his 11-22: watch it grow
     laid_mm_ += dist(L.pts.back(), b);
     L.pts.push_back(b);
     L.rec.push_back(record ? 1 : 0);
@@ -1223,7 +1287,7 @@ void Grower::settle() {
       const Vec3 e = L.pts.back();
       if (edge_held(e) || at[key(e)].size() > 1) return false;
       bool on_other = false;
-      boxes_.near(e, ds_, [&](const Sample& s) {
+      boxes_.near_within(e, ds_, [&](const Sample& s) {   // SPEED 11-22: own segment within 1e-6
         if (on_other || s.line == static_cast<int>(l) || !current(s)) return;
         const Line& O = lines_[static_cast<std::size_t>(s.line)];
         on_other = dist(e, closest_on(e, O.pts[static_cast<std::size_t>(s.seg)], O.pts[static_cast<std::size_t>(s.seg) + 1])) < 1e-6;
@@ -1295,12 +1359,12 @@ void Grower::settle() {
 void Grower::repeats() {
   const double near_mm = kRepeatMm + 0.5 * r_;
   std::vector<Line> out;
-  Boxes kept = boxes_.empty_like();
+  FineBoxes kept;   // SPEED 11-22: only order-free look-ups read it (dist_to: a minimum; the candidates: sorted)
   std::vector<Line> keep_lines;
   std::vector<std::array<char, 2>> split;   // per kept piece: its front, its back left by a dropped repeat
   auto dist_to = [&](const Vec3& q, std::size_t line) {
     double best = std::numeric_limits<double>::infinity();
-    kept.near(q, near_mm + ds_, [&](const Sample& s) {
+    kept.near_within(q, near_mm + ds_, [&](const Sample& s) {   // SPEED 11-22: own segment, compared with near_mm
       if (static_cast<std::size_t>(s.line) != line) return;
       const Line& L = keep_lines[line];
       if (L.dead[static_cast<std::size_t>(s.seg)]) return;
@@ -1311,12 +1375,13 @@ void Grower::repeats() {
   };
   // the ends that stand on or join into another strand now (ruling 3)
   std::vector<Vec3> joints;
+  const FineBoxes fine = FineBoxes::of(boxes_);   // SPEED 11-22: boxes_ does not change until the copies are kept
   for (std::size_t l = 0; l < lines_.size(); ++l) {
     const Line& L = lines_[l];
     if (L.pts.size() < 2) continue;
     for (const Vec3& e : {L.pts.front(), L.pts.back()}) {
       bool on = false;
-      boxes_.near(e, ds_ + 1e-6, [&](const Sample& x) {
+      fine.near_within(e, ds_ + 1e-6, [&](const Sample& x) {   // SPEED 11-22: own segment within 1e-6 (a yes/no)
         if (on || static_cast<std::size_t>(x.line) == l || !current(x)) return;
         const Line& O = lines_[static_cast<std::size_t>(x.line)];
         on = dist(e, closest_on(e, O.pts[static_cast<std::size_t>(x.seg)], O.pts[static_cast<std::size_t>(x.seg) + 1])) < 1e-6;
@@ -1331,7 +1396,7 @@ void Grower::repeats() {
       if (L.dead[s]) continue;   // the path drops it anyway
       const Vec3 a = L.pts[s], b = L.pts[s + 1];
       std::vector<std::size_t> cand;
-      kept.near(a, near_mm + ds_, [&](const Sample& x) {
+      kept.near_within(a, near_mm + ds_, [&](const Sample& x) {   // SPEED 11-22: a repeat of a lies within near_mm
         const std::size_t l = static_cast<std::size_t>(x.line);
         if (std::find(cand.begin(), cand.end(), l) == cand.end()) cand.push_back(l);
       });
@@ -1392,13 +1457,50 @@ void Grower::repeats() {
   // Moved until each such end lies on another strand (an end moved onto a strand whose own end then moves is moved
   // again), at most 8 times.
   std::vector<std::pair<std::size_t, int>> need;
+  // SPEED 11-22: "this end lay on a joint" (within 1e-9 mm) read on a 1 micron grid of the joints (27 cells round the end)
+  // instead of against every joint: the same yes/no. A point off the grid's range is read against every joint as before.
+  constexpr double kJointCell = 1e-3;
+  const auto jcell = [](double v, long long& c) {
+    if (!std::isfinite(v)) return false;
+    const double q = std::floor(v / kJointCell);
+    if (std::fabs(q) > static_cast<double>((1LL << 20) - 4)) return false;
+    c = static_cast<long long>(q);
+    return true;
+  };
+  const auto jkey = [](long long i, long long j, long long k) {
+    const auto f = [](long long v) { return static_cast<std::uint64_t>((v + (1LL << 20)) & 0x1FFFFF); };
+    return f(i) << 42 | f(j) << 21 | f(k);
+  };
+  std::unordered_map<std::uint64_t, std::vector<Vec3>> jgrid;
+  std::vector<Vec3> joints_far;
+  for (const Vec3& j : joints) {
+    long long a, b, c;
+    if (jcell(j.x, a) && jcell(j.y, b) && jcell(j.z, c)) jgrid[jkey(a, b, c)].push_back(j);
+    else joints_far.push_back(j);
+  }
+  const auto on_a_joint = [&](const Vec3& e) {
+    for (const Vec3& j : joints_far) if (dist(j, e) < 1e-9) return true;
+    long long a, b, c;
+    if (!jcell(e.x, a) || !jcell(e.y, b) || !jcell(e.z, c)) {
+      for (const Vec3& j : joints) if (dist(j, e) < 1e-9) return true;
+      return false;
+    }
+    for (long long da = -1; da <= 1; ++da)
+      for (long long db = -1; db <= 1; ++db)
+        for (long long dc = -1; dc <= 1; ++dc) {
+          const auto it = jgrid.find(jkey(a + da, b + db, c + dc));
+          if (it == jgrid.end()) continue;
+          for (const Vec3& j : it->second) if (dist(j, e) < 1e-9) return true;
+        }
+    return false;
+  };
   for (std::size_t l = 0; l < lines_.size(); ++l) {
     Line& L = lines_[l];
     if (L.pts.size() < 2) continue;
     for (int end = 0; end < 2; ++end) {
       const Vec3& e = end ? L.pts.back() : L.pts.front();
       bool was = split[l][static_cast<std::size_t>(end)] != 0;   // the piece went on along the dropped copy
-      for (const Vec3& j : joints) was = was || dist(j, e) < 1e-9;
+      was = was || on_a_joint(e);
       if (was) need.push_back({l, end});
     }
   }
@@ -1478,13 +1580,14 @@ std::vector<Strand> Grower::strands() const {
     must[l].assign(lines_[l].pts.size(), 0);
     put[l].resize(lines_[l].pts.size() > 0 ? lines_[l].pts.size() - 1 : 0);
   }
+  const FineBoxes fine = FineBoxes::of(boxes_);   // SPEED 11-22
   for (std::size_t l = 0; l < nl; ++l) {
     const Line& A = lines_[l];
     if (A.pts.size() < 2) continue;
     must[l].front() = must[l].back() = 1;
     for (std::size_t i = 0; i < A.pts.size(); ++i) {
       const Vec3 v = A.pts[i];
-      boxes_.near(v, 1e-6 + ds_, [&](const Sample& s) {
+      fine.near_within(v, 1e-6 + ds_, [&](const Sample& s) {   // SPEED 11-22: own segment within 1e-6 (sorted after)
         if (static_cast<std::size_t>(s.line) == l || !current(s)) return;
         const Line& B = lines_[static_cast<std::size_t>(s.line)];
         const Vec3 a = B.pts[static_cast<std::size_t>(s.seg)], b = B.pts[static_cast<std::size_t>(s.seg) + 1];
@@ -1560,7 +1663,7 @@ Grower::Fate Grower::pass() {
   // A segment is still there when its middle lies on a bar (within the straightening's tolerance).
   const double tol = 0.25 * r_ + 1e-6;
   auto mark = [&](const Bars& bars, char value, char only) {
-    Boxes bb = boxes_.empty_like();
+    FineBoxes bb;   // SPEED 11-22: a yes/no per segment
     for (std::size_t i = 0; i < bars.bars.size(); ++i) {
       const Vec3 a = bars.bars[i].a, b = bars.bars[i].b;
       const int n = std::max(1, static_cast<int>(std::ceil(dist(a, b) / ds_)));
@@ -1571,7 +1674,7 @@ Grower::Fate Grower::pass() {
         if (f.seg[l][k] != only) continue;
         const Vec3 m = mul(add(lines_[l].pts[k], lines_[l].pts[k + 1]), 0.5);
         bool on = false;
-        bb.near(m, tol + ds_, [&](const Sample& x) {
+        bb.near_within(m, tol + ds_, [&](const Sample& x) {   // SPEED 11-22: the bar's own samples, within tol
           const Bar& b = bars.bars[static_cast<std::size_t>(x.line)];
           on = on || dist(m, closest_on(m, b.a, b.b)) <= tol;
         });
@@ -3035,6 +3138,7 @@ std::vector<Strand> Grower::run() {
   // The owner's order (2026-11-15): grow, prune, then one round of re-seeding in the bare areas, grown and pruned
   // the same way.
   std::vector<Tip> tips;
+  if (GrowthTap* t = domain_.growth_tap()) t->phase(1);   // his 11-22: growing
   seeds(tips);
   tips_ = tips.size();
   top_open_ = ask_.top_run > 0.0;   // G: the top ends are recorded during this first growth only
@@ -3059,6 +3163,7 @@ std::vector<Strand> Grower::run() {
   top_open_ = false;
   if (ask_.ties) ties(0);
   if (ask_.top_run > 0.0 || ask_.root_run > 0.0) runs();   // G
+  if (GrowthTap* t = domain_.growth_tap()) t->phase(2);   // pruning
   prune();
   rep_.bare_before = bare();
   // E: the re-seed step reseed_rounds times (G11: once); between rounds what the last pass cut is no longer material,
@@ -3073,6 +3178,7 @@ std::vector<Strand> Grower::run() {
     const std::size_t first_new = lines_.size();
     const std::size_t voids0 = rep_.reseed_voids;
     std::vector<Tip> more;
+    if (GrowthTap* t = domain_.growth_tap()) t->phase(3);   // re-seeding the bare places
     reseed(more);
     rep_.reseed_voids_round.push_back(rep_.reseed_voids - voids0);
     grow(std::move(more));
@@ -3095,6 +3201,7 @@ std::vector<Strand> Grower::run() {
       for (std::size_t k = 0; k < f.seg[l].size(); ++k) lines_[l].dead[k] = f.seg[l][k] != 0;
     rebuild_rec();
     const std::size_t before = rep_.wall_branches;
+    if (GrowthTap* t = domain_.growth_tap()) t->phase(4);   // reaching the walls
     reach_walls(walls);
     if (rep_.wall_branches > before) {
       repeats();

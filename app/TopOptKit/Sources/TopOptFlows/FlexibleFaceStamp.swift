@@ -270,7 +270,7 @@ struct FlexibleFaceStampRows: View {
                             Button(s.name) { model.setStamp(region, source: .library(s.id), shape: s) }
                         }
                         Divider()
-                        Button { importing = true } label: { Label(FlexibleRowCopy.stampImport, systemImage: "square.and.arrow.down") }
+                        Button { importing = true } label: { Label(FlexibleRowCopy.stampImport, systemImage: "tray.and.arrow.down") }
                     } label: {
                         DSValueBox(FlexibleRowCopy.stampBox(name: p.map { model.stampName($0) }), trail: .menu)
                     }

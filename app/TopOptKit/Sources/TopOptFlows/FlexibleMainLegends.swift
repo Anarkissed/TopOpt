@@ -405,7 +405,7 @@ struct FlexibleMainLegendRow: View {
                 HStack(spacing: DS.Space.xs) {
                     if state.isRunning { ProgressView().controlSize(.mini).tint(DS.Color.textPrimary.color) }
                     if case .failed = state {
-                        Image(systemName: "exclamationmark.circle.fill").font(.system(size: 12, weight: .bold))
+                        Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 12, weight: .bold))
                             .foregroundStyle(DS.Color.warning.color)
                     }
                     Text(main.stressLine ?? FlexibleStressState.idle.line ?? "")

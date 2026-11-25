@@ -50,6 +50,9 @@
 #include "topopt/grading.hpp"
 #include "topopt/lattice.hpp"
 #include "topopt/lattice_algorithm.hpp"
+#include "topopt/print_frame.hpp"   // P2: his print orientation, the door
+#include "topopt/print_orientation.hpp"   // P4, P5: the candidates, the bed
+#include "topopt/support_paint.hpp"   // P3, P5: painted supports
 #include "topopt/lattice_boundary.hpp"
 #include "topopt/lattice_types.hpp"
 #include "topopt/lattice_gen.hpp"
@@ -13139,6 +13142,71 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     auto v3 = [](const Vec3& v) {
       return "[" + json_num(v.x) + ", " + json_num(v.y) + ", " + json_num(v.z) + "]";
     };
+    // P5, his "Check strength" (spec 2d): the part standing each way, as the benefits modal compares them (both MEASURED
+    // on the file): its height and layers, the face on the bed, the part's own overhangs painted (the 45 degree rule: a
+    // topology result has no layer check) with the support under them (an estimate), and, along the new up, the file
+    // itself turned to stand on that face (base at z = 0) and painted: "oriented.3mf" (an up along one of the part's
+    // six axes; Phase 1). Nothing here changes the solve or the verdict above.
+    const double layer_h = job.loads.layer_height_mm > 0.0 ? job.loads.layer_height_mm : 0.2;
+    std::string oriented_file;
+    const auto standing = [&](const Vec3& up_dir, bool write) {
+      PrintFrame pf;
+      std::string why;
+      if (!print_frame_for_up(up_dir, pf, &why)) return std::string(", \"standing\": null");
+      TriangleMesh tm = m;
+      print_frame_set_base(pf, tm);
+      turn_mesh(pf, tm);
+      // Phase 2 (his "edges held by supports"): standing on an edge, the stand supports cut in and painted first.
+      std::string stand_json;
+      StandPaint stand;
+      {
+        OrientationCandidates cs = print_candidates(tm);
+        if (!cs.list.empty() && cs.list.front().kind == OrientationCandidate::Kind::Edge) {
+          OrientationCandidate& c0 = cs.list.front();
+          orientation_stand(c0, mesh_centroid(tm));
+          if (c0.stands) stand = paint_stand_supports(tm, 0, c0);
+          stand_json = ", \"stand\": {\"rests_on\": \"edge\", \"stands\": " + std::string(c0.stands ? "true" : "false") +
+                       ", \"band_mm\": [" + json_num(c0.band1_mm) + ", " + json_num(c0.band2_mm) + "], \"triangles\": " +
+                       std::to_string(stand.triangles) + ", \"area_mm2\": " + json_num(stand.area_mm2) +
+                       ", \"est_volume_mm3\": " + json_num(c0.stand_support_mm3) + "}";
+        }
+      }
+      SupportPaintAsk pa;
+      pa.layer_mm = layer_h;
+      const SupportPaint sp = paint_supports(tm, pa);
+      const OrientationGeometry g = orientation_geometry(tm)[0];   // +Z of the turned mesh: the new up
+      std::string file = "null";
+      if (write) {
+        const std::string path = join_path(out_dir, "oriented.3mf");
+        try {
+          StreamingThreeMfWriter::Options o;
+          o.indexed = true;
+          o.deflate = true;
+          o.supports = sp.triangles > 0 || stand.triangles > 0;
+          StreamingThreeMfWriter w(path, o);
+          for (const Vec3& v : tm.vertices) w.add_vertex(v);
+          for (std::size_t i = 0; i < tm.triangles.size(); ++i)
+            w.add_indexed(static_cast<std::uint64_t>(tm.triangles[i][0]), static_cast<std::uint64_t>(tm.triangles[i][1]),
+                          static_cast<std::uint64_t>(tm.triangles[i][2]),
+                          o.supports && (sp.painted[i] != 0 || (i < stand.painted.size() && stand.painted[i] != 0)));
+          w.finish();
+          oriented_file = path;
+          file = json_str("oriented.3mf");
+        } catch (const std::exception& e) {
+          std::remove(path.c_str());
+          throw JobError(std::string("orientation re-check: cannot write oriented.3mf: ") + e.what());
+        }
+      }
+      return ", \"standing\": {\"height_mm\": " + json_num(g.height_mm) + ", \"layers\": " +
+             json_num(std::ceil(g.height_mm / layer_h - 1e-9)) + ", \"layer_mm\": " + json_num(layer_h) +
+             ", \"bed_contact_mm2\": " + json_num(g.contact_mm2) + ", \"painted\": {\"triangles\": " +
+             std::to_string(sp.triangles) + ", \"area_mm2\": " + json_num(sp.area_mm2) + ", \"est_volume_mm3\": " +
+             json_num(sp.est_volume_mm3) + "}" + stand_json + ", \"slicer_supports\": " +
+             json_str(sp.triangles > 0 || stand.triangles > 0 ? "painted" : "off") +
+             ", \"file\": " + file + ", \"print_frame\": " + print_frame_json(pf) + "}";
+    };
+    const std::string now_standing = standing(job.orientation_recheck_dir, true);
+    const std::string base_standing = standing(base_dir, false);
     const std::string block =
         "  \"orientation_recheck\": {\"build_dir\": " + v3(job.orientation_recheck_dir) +
         ", \"margin\": " + json_num(a.margin_effective) +
@@ -13146,9 +13214,9 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
         ", \"margin_required\": " + json_num(r.margin_required) +
         ", \"accepted\": " + (a.accepted ? "true" : "false") +
         ", \"overhang_area_mm2\": " + json_num(now.area_mm2) +
-        ", \"support_volume_mm3\": " + json_num(now.support_volume_mm3) +
+        ", \"support_volume_mm3\": " + json_num(now.support_volume_mm3) + now_standing +
         ", \"reason\": " + json_str(reason) + ", \"baseline\": {\"build_dir\": " +
-        v3(base_dir) + ", \"overhang_area_mm2\": " + json_num(base.area_mm2) + "}}\n";
+        v3(base_dir) + ", \"overhang_area_mm2\": " + json_num(base.area_mm2) + base_standing + "}}\n";
     std::ifstream in(r.provenance_path);
     std::string prov((std::istreambuf_iterator<char>(in)), {});
     const std::size_t end = prov.rfind("\n}");
@@ -13159,6 +13227,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     r.orientation_recheck_reason = reason;
     r.orientation_recheck_overhang_mm2 = now.area_mm2;
     r.orientation_recheck_baseline_overhang_mm2 = base.area_mm2;
+    r.orientation_recheck_file = oriented_file;   // P5: the file to print, standing that way
     return r;
   }
   refuse_flexible_job(job, "analyze_job");  // Flexible stage (flexible/job_block.hpp)
@@ -15465,6 +15534,8 @@ struct StrengthSetup {
   std::vector<DirichletBC> bcs;
   MinimizePlasticOptions options;
   SolvedDesignDomain domain;
+  PrintFrame frame;   // P2: the file job's print frame (off: as before); the job and its part were turned through it
+  std::vector<Vec3> ups;   // P4: the print-orientation candidates' ups (the job's frame); empty: none judged
 };
 
 ll::StrengthDone strength_setup(const ll::StrengthAsk& ask, const std::string& materials_path,
@@ -15488,6 +15559,10 @@ ll::StrengthDone strength_setup(const ll::StrengthAsk& ask, const std::string& m
   }
   if (const std::string p = strength_job_problem(job, materials); !p.empty())
     return strength_no("strength_job_unreadable", 1, kStrengthJobUnreadableWhy, p);
+  // P2: the strength job through the file job's door (its loads, boxes and service; its build direction the print up).
+  S.frame = ask.frame;
+  S.ups = ask.orientation_ups;   // P4
+  if (S.frame.on && !(g_print_frame_test_skip & kSkipStrengthJob)) turn_job_description(S.frame, job);
   // The material, with its layer factor as the settings state it (a copy: the library is not changed).
   S.material = materials.at(job.material);
   Material& material = S.material;
@@ -15514,6 +15589,8 @@ ll::StrengthDone strength_setup(const ll::StrengthAsk& ask, const std::string& m
     return strength_no("strength_failed", 1,
                        "The part's surface has gaps in it, so its strength could not be checked. No file was made.",
                        "the strength job's model tessellation is not watertight: " + job.model);
+  // P2: its part turned as the file job's was (the same turn and the same base).
+  if (S.frame.on && !(g_print_frame_test_skip & kSkipStrengthModel)) turn_step_model(S.frame, model);
   // The strength job must be of the part the file was made from: the two boxes agree.
   {
     Vec3 lo{1e300, 1e300, 1e300}, hi{-1e300, -1e300, -1e300};
@@ -15792,8 +15869,12 @@ ll::StrengthDone run_lattice_file_strength(const ll::StrengthAsk& ask,
     fv.scenario_fields = std::move(lattice_fields);
     fr.evaluated.push_back(std::move(fv));
     write_fields_file(join_path(ask.out_dir, "fields.bin"), fr, cert_grid, /*accepted_only=*/false);
+    if (std::string why; S.frame.on && !turn_fields_file_to_model(S.frame, join_path(ask.out_dir, "fields.bin"), &why))
+      return strength_no("strength_failed", 1, "The lattice's strength could not be checked, so no file was made.",
+                         "fields.bin could not be turned back to the part's frame: " + why);   // P2
     done.files.push_back("fields.bin");
-    if (write_scenario_fields_file(join_path(ask.out_dir, "scenario_fields.bin"), fr, cert_grid) > 0)
+    // P2: with a print frame the per-scenario fields are not written (their container is not turned back yet).
+    if (!S.frame.on && write_scenario_fields_file(join_path(ask.out_dir, "scenario_fields.bin"), fr, cert_grid) > 0)
       done.files.push_back("scenario_fields.bin");
   }
 
@@ -15892,8 +15973,9 @@ ll::StrengthDone run_lattice_file_strength(const ll::StrengthAsk& ask,
   s += "    \"cells_credited\": " + std::to_string(credit.cells_credited) + ",\n";
   s += "    \"cells_no_credit\": " + std::to_string(credit.cells_no_credit) + ",\n";
   s += "    \"voxel_mm\": " + json_num(cert_grid.spacing) + ",\n";
-  s += "    \"build_direction\": {\"x\": " + json_num(cx.build_dir.x) + ", \"y\": " + json_num(cx.build_dir.y) +
-       ", \"z\": " + json_num(cx.build_dir.z) + "},\n";
+  const Vec3 cx_up = S.frame.dir_to_model(cx.build_dir);   // P2: in the part's own coordinates
+  s += "    \"build_direction\": {\"x\": " + json_num(cx_up.x) + ", \"y\": " + json_num(cx_up.y) +
+       ", \"z\": " + json_num(cx_up.z) + "},\n";
   // The re-solve proof (certify_latticed_variant's step 1): the all-solid design solved again must give the margin
   // the solid solve gave, within kMarginReproductionResidualFactor x the solver tolerance. A record; not the verdict.
   s += "    \"resolve_reproduces\": " + std::string(oc.solid_reproduces_within_band ? "true" : "false") +
@@ -15962,7 +16044,7 @@ ll::StrengthDone run_lattice_file_strength(const ll::StrengthAsk& ask,
     add("safety_margin", num(options.margin_stop));
     add("material", json_str(job.material));
     add("resolution", std::to_string(job.resolution));
-    add("build_direction", "[" + num(cx.build_dir.x) + ", " + num(cx.build_dir.y) + ", " + num(cx.build_dir.z) + "]");
+    add("build_direction", "[" + num(cx_up.x) + ", " + num(cx_up.y) + ", " + num(cx_up.z) + "]");
     add("infill_percent", num(options.infill_percent));
     add("wall_loops", std::to_string(options.wall_loops));
     add("wall_line_width_mm", num(options.wall_line_width_mm));
@@ -16118,15 +16200,26 @@ struct OrganicCheckRun {
 // pieces of old bars the file kept that it now leaves out (`print_left_out`), of which those the round widened
 // (`print_left_out_widened`); pieces of old bars it moved (`print_moved`); the bars it added (`print_added`); each with
 // up to five places (a bar's middle, mm). As JSON keys, for a round's result. `moved_any`: set when it moved one.
+// P2: a strengthening made in a print frame says which (strengthened.json's "print_up"; load_file_job refuses one made
+// standing another way). Nothing with no frame (the file as before).
+std::string print_up_json(const PrintFrame& f) {
+  if (!f.on) return {};
+  return ",\n  \"print_up\": [" + json_num(f.up.x) + ", " + json_num(f.up.y) + ", " + json_num(f.up.z) + "]";
+}
+
 std::string print_check_counts(const ll::Bars& before, const std::vector<char>& before_kept, const ll::Bars& added,
-                               const ll::Bars& after, const std::vector<char>& after_kept, bool* moved_any) {
+                               const ll::Bars& after, const std::vector<char>& after_kept, bool* moved_any,
+                               const PrintFrame& frame = PrintFrame{}) {
   const std::vector<std::vector<std::size_t>> on = ll::pieces_on(added, before.bars);
   std::vector<int> old_of(added.bars.size(), -1);
   for (std::size_t k = 0; k < on.size(); ++k)
     for (std::size_t j : on[k]) old_of[j] = static_cast<int>(k);
   std::size_t left = 0, left_widened = 0, moved = 0;
   std::string left_at, widened_at, moved_at, added_at;
-  const auto mid = [](const ll::Bar& b) {
+  const auto mid = [&](const ll::Bar& b0) {
+    ll::Bar b = b0;   // P2: in the part's own coordinates
+    b.a = frame.point_to_model(b0.a);
+    b.b = frame.point_to_model(b0.b);
     return "[" + json_num(std::round(500.0 * (b.a.x + b.b.x)) / 1000.0) + ", " + json_num(std::round(500.0 * (b.a.y + b.b.y)) / 1000.0) +
            ", " + json_num(std::round(500.0 * (b.a.z + b.b.z)) / 1000.0) + "]";
   };
@@ -16168,7 +16261,7 @@ std::string print_check_counts(const ll::Bars& before, const std::vector<char>& 
 // whether bending led its stress, its widths and length, whether it is at `cap` (its widest bar at least cap; 0: not
 // told), whether it carries the load, and its two ends. The weakest first.
 std::string struts_under_json(const OrganicCheckRun& cr, double watch, double cap, const std::vector<std::string>* classes = nullptr,
-                              const ll::Bars* layout_bars = nullptr) {
+                              const ll::Bars* layout_bars = nullptr, const PrintFrame& frame = PrintFrame{}) {
   const ll::FrameCheck& c = cr.check;
   std::vector<int> order;
   for (std::size_t i = 0; i < c.struts.size(); ++i)
@@ -16177,7 +16270,10 @@ std::string struts_under_json(const OrganicCheckRun& cr, double watch, double ca
     const double ma = c.struts[static_cast<std::size_t>(a)].margin, mb = c.struts[static_cast<std::size_t>(b)].margin;
     return ma != mb ? ma < mb : a < b;
   });
-  const auto v3 = [](const Vec3& p) { return "[" + json_num(p.x) + ", " + json_num(p.y) + ", " + json_num(p.z) + "]"; };
+  const auto v3 = [&](const Vec3& q) {   // P2: in the part's own coordinates
+    const Vec3 p = frame.point_to_model(q);
+    return "[" + json_num(p.x) + ", " + json_num(p.y) + ", " + json_num(p.z) + "]";
+  };
   std::string s = "{\n  \"watch_margin\": " + json_num(watch) + ",\n  \"cap_mm\": " + json_num(cap) + ",\n  \"struts\": [";
   for (std::size_t q = 0; q < order.size(); ++q) {
     const ll::FrameStrut& sn = c.struts[static_cast<std::size_t>(order[q])];
@@ -16308,6 +16404,7 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
   fst.up = build_dir;
   fst.safety = options.margin_stop;
   fst.light_width_mm = light_width_mm;
+  fst.also_up = S.ups;   // P4: the same struts, judged against each candidate up the file job asked for
   R.check = ll::check_frame(R.frame, vs, fst, fs);
   R.ms_frame = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
   R.mb_frame = process_memory().rss_mb;
@@ -16320,6 +16417,7 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
   // wall rescue on the member width, measured as analyze_fixed_design measures it, here on the solid share).
   double solid_vm = 0.0;
   std::size_t solid_voxels = 0;
+  std::vector<double> tension_up(S.ups.size(), 0.0);   // P4: the solid's tension across the layers, per candidate up
   std::vector<double> s_vm, s_width;   // per solid voxel: von Mises, member width (width-aware only)
   std::vector<double> width;           // per voxel: the solid share's member width (width-aware, or for the spots)
   const auto measure_width = [&] {
@@ -16346,10 +16444,14 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
         for (int q = 0; q < 6; ++q) sig[e][static_cast<std::size_t>(q)] = a.stress_tensor_field[6 * e + static_cast<std::size_t>(q)];
     }
     R.solid_tension = solid_voxels ? max_interlayer_tension(cert_grid, sig, build_dir) : 0.0;
+    // P4: the same solid with its layers across each candidate up (exact: the solve does not read the up)
+    for (std::size_t k = 0; k < S.ups.size(); ++k)
+      tension_up[k] = solid_voxels ? max_interlayer_tension(cert_grid, sig, S.ups[k]) : 0.0;
   }
   R.solid_margin = compute_stress_margin(material.yield_strength_mpa, material.z_knockdown, solid_vm, R.solid_tension);
   // The effective margin at an infill percent: Install 3's gate (gate_margin_effective), the job's other print settings.
-  const auto effective_at = [&](double infill) {
+  // (P4: with the layers' tension given, the same margin for another up.)
+  const auto effective_with = [&](double infill, double tension) {
     KnockdownSpec k = knockdown;
     k.infill_percent = infill;
     k.infill_knockdown = infill_margin_knockdown(infill, k.infill_exponent, k.infill_floor);
@@ -16360,8 +16462,9 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
         vm_eff = std::max(vm_eff, s_vm[i] / width_aware_knockdown(infill, s_width[i], k.wall_thickness_mm,
                                                                    k.infill_exponent, k.infill_floor));
     }
-    return gate_margin_effective(material.yield_strength_mpa, material.z_knockdown, solid_vm, vm_eff, R.solid_tension, k);
+    return gate_margin_effective(material.yield_strength_mpa, material.z_knockdown, solid_vm, vm_eff, tension, k);
   };
+  const auto effective_at = [&](double infill) { return effective_with(infill, R.solid_tension); };
   R.solid_margin_effective = effective_at(knockdown.infill_percent);
   for (int pc = 1; pc <= 100 && R.passes_at_infill_percent < 0; ++pc)
     if (effective_at(pc) >= options.margin_stop) R.passes_at_infill_percent = pc;
@@ -16524,7 +16627,16 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
         return std::sqrt(best);
       };
       const ll::Domain::Probe probe = ldomain.probe();
-      const auto v3 = [](const Vec3& p) { return "[" + json_num(p.x) + ", " + json_num(p.y) + ", " + json_num(p.z) + "]"; };
+      // P2: every place in the part's own coordinates (the identity with no print frame)
+      const auto v3 = [&](const Vec3& q) {
+        const Vec3 p = S.frame.point_to_model(q);
+        return "[" + json_num(p.x) + ", " + json_num(p.y) + ", " + json_num(p.z) + "]";
+      };
+      const auto box3 = [&](Vec3 lo3, Vec3 hi3) {
+        S.frame.box_to_model(lo3, hi3);
+        return "{\"lo\": [" + json_num(lo3.x) + ", " + json_num(lo3.y) + ", " + json_num(lo3.z) + "], \"hi\": [" +
+               json_num(hi3.x) + ", " + json_num(hi3.y) + ", " + json_num(hi3.z) + "]}";
+      };
       const auto dist = [](double d) { return std::isfinite(d) ? json_num(d) : std::string("null"); };
       std::string list;
       for (std::size_t q = 0; q < shown; ++q) {
@@ -16576,8 +16688,8 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
                                  : "Make this part of the model thicker, or print it denser.";
         list += std::string(q ? "," : "") + "\n      {\"id\": " + std::to_string(q + 1) + ", \"issue\": " + json_str(k) +
                 ", \"worst_at\": " + v3(w) + ", \"centroid\": " +
-                v3({sum.x / nvs, sum.y / nvs, sum.z / nvs}) + ", \"box\": {\"lo\": " + v3(lo) + ", \"hi\": " + v3(hi) +
-                "}, \"voxels\": " + std::to_string(sp.v.size()) + ", \"mm3\": " + json_num(nvs * h * h * h) +
+                v3({sum.x / nvs, sum.y / nvs, sum.z / nvs}) + ", \"box\": " + box3(lo, hi) +
+                ", \"voxels\": " + std::to_string(sp.v.size()) + ", \"mm3\": " + json_num(nvs * h * h * h) +
                 ", \"raw_margin\": " + json_num(raw) + ", \"effective_margin\": " + json_num(sp.worst_eff) +
                 ", \"governs\": " + json_str(wt.in_plane <= wt.interlayer ? "in_plane" : "interlayer") +
                 ", \"passes_at_infill_percent\": " + (pass_at < 0 ? std::string("null") : std::to_string(pass_at)) +
@@ -16632,6 +16744,12 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
     write_fields_file(join_path(out_dir, "fields.bin"), fr, cert_grid, /*accepted_only=*/false);
     append_fields_block(join_path(out_dir, "fields.bin"), cert_grid, -1.0, margin_field);   // brief E4: the solid's margin
     append_fields_block(join_path(out_dir, "fields.bin"), cert_grid, -2.0, spot_id_field);  // OS15: the spots' ids
+    if (std::string why; S.frame.on && !(g_print_frame_test_skip & kSkipReportBack) &&
+                         !turn_fields_file_to_model(S.frame, join_path(out_dir, "fields.bin"), &why)) {   // P2
+      R.done = strength_no("strength_failed", 1, "The lattice's strength could not be checked, so no file was made.",
+                           "fields.bin could not be turned back to the part's frame: " + why);
+      return R;
+    }
     done.files.push_back("fields.bin");
     std::vector<float> m(layout_bars.bars.size(), std::numeric_limits<float>::quiet_NaN());
     for (std::size_t i = 0; i < R.bar_of.size() && i < c.bar_margin.size(); ++i)
@@ -16644,6 +16762,37 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
       return R;
     }
     done.files.push_back("strut_margins.bin");
+    // K4 (his Results notes, 2026-11-24: the stress colours on the WHOLE model): bars.bin, every bar of strut_margins.bin
+    // in the same order, so the app can draw each one coloured by its margin. "TOBARS1\0" (8 bytes), uint32 count N,
+    // uint32 F, then N records of 7 float32: ax ay az bx by bz width_mm, in the part's own (model) frame.
+    // notes27 (builder F's extension, the struts the strengthening changed): when the lattice was strengthened (a bar
+    // the additions widened or a brace they laid), F = 1 and N bytes follow the records, one per bar in the same order:
+    // bit 0 thickened by the strengthening, bit 1 a brace it added. Otherwise F = 0 and nothing follows (as before).
+    std::vector<float> rec;
+    rec.reserve(layout_bars.bars.size() * 7);
+    for (const ll::Bar& b : layout_bars.bars) {
+      const Vec3 a = S.frame.point_to_model(b.a), e = S.frame.point_to_model(b.b);   // P2
+      for (const double v : {a.x, a.y, a.z, e.x, e.y, e.z, b.width}) rec.push_back(static_cast<float>(v));
+    }
+    std::vector<char> flags(layout_bars.bars.size(), 0);
+    bool strengthened = false;
+    for (std::size_t i = 0; i < layout_bars.bars.size(); ++i) {
+      flags[i] = static_cast<char>(layout_bars.bars[i].strengthened & (ll::Bar::kStrengthenedThicker | ll::Bar::kStrengthenedBrace));
+      strengthened = strengthened || flags[i] != 0;
+    }
+    std::ofstream bf(join_path(out_dir, "bars.bin"), std::ios::binary);
+    const char magic[8] = {'T', 'O', 'B', 'A', 'R', 'S', '1', '\0'};
+    const std::uint32_t head[2] = {static_cast<std::uint32_t>(layout_bars.bars.size()), strengthened ? 1u : 0u};
+    bf.write(magic, 8);
+    bf.write(reinterpret_cast<const char*>(head), sizeof head);
+    bf.write(reinterpret_cast<const char*>(rec.data()), static_cast<std::streamsize>(rec.size() * sizeof(float)));
+    if (strengthened) bf.write(flags.data(), static_cast<std::streamsize>(flags.size()));
+    if (!bf) {
+      R.done = strength_no("strength_failed", 1, "The lattice's strength could not be checked, so no file was made.",
+                           "cannot write bars.bin");
+      return R;
+    }
+    done.files.push_back("bars.bin");
   }
   // ── the block: Install 3's keys, and the frame's.
   const double nan = std::numeric_limits<double>::quiet_NaN();
@@ -16678,12 +16827,17 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
   s += "    \"max_interlayer_tension_mpa\": " + num(a.max_interlayer_tension) + ",\n";
   s += "    \"cells_credited\": 0,\n    \"cells_no_credit\": 0,\n";
   s += "    \"voxel_mm\": " + num(cert_grid.spacing) + ",\n";
-  s += "    \"build_direction\": {\"x\": " + num(build_dir.x) + ", \"y\": " + num(build_dir.y) + ", \"z\": " + num(build_dir.z) + "},\n";
+  // P2: places and directions in the part's own coordinates (the identity with no print frame).
+  const auto P = [&](const Vec3& q) { return S.frame.point_to_model(q); };
+  const auto D = [&](const Vec3& q) { return S.frame.dir_to_model(q); };
+  const Vec3 build_dir_m = D(build_dir);
+  s += "    \"build_direction\": {\"x\": " + num(build_dir_m.x) + ", \"y\": " + num(build_dir_m.y) + ", \"z\": " + num(build_dir_m.z) + "},\n";
   s += "    \"resolve_reproduces\": null, \"resolve_margin_solid\": null, \"resolve_margin_again\": null,\n";
   s += "    \"strut\": {\"law\": \"frame of beams\", \"uncertified\": false, \"gated\": true, \"margin_in_plane\": null, "
        "\"margin_interlayer\": null, \"margin_worst_case\": " + num(smallest) + ", \"out_of_regime\": false, \"regime_note\": \"\"},\n";
   s += "    \"fields\": \"fields.bin\",\n";
   s += "    \"strut_margins\": \"strut_margins.bin\",\n";
+  s += "    \"bars\": \"bars.bin\",\n";   // K4: the bars of strut_margins.bin, same order, model frame
   s += "    \"struts\": {\"judged\": " + std::to_string(c.judged) + ", \"under_safety\": " + std::to_string(c.under_safety) +
        ", \"under_one\": " + std::to_string(c.under_one) + ", \"smallest_margin\": " + num(smallest) +
        ", \"buckling_failures\": " + std::to_string(c.buckling_failures) + ", \"stubs\": " + std::to_string(c.stubs) +
@@ -16691,17 +16845,19 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
   s += "    \"weakest\": [";
   for (std::size_t w = 0; w < c.weakest.size(); ++w) {
     const ll::FrameStrut& x = c.struts[static_cast<std::size_t>(c.weakest[w])];
-    s += std::string(w ? ",\n      " : "\n      ") + "{\"at\": [" + num(x.at.x) + ", " + num(x.at.y) + ", " + num(x.at.z) +
+    const Vec3 xat = P(x.at);
+    s += std::string(w ? ",\n      " : "\n      ") + "{\"at\": [" + num(xat.x) + ", " + num(xat.y) + ", " + num(xat.z) +
          "], \"width_mm\": " + num(x.width_max) + ", \"length_mm\": " + num(x.length_mm) + ", \"margin\": " + num(x.margin) +
          ", \"by\": \"" + x.by + "\", \"axial_n\": " + num(x.axial_n) + ", \"moment_nmm\": " + num(x.moment_nmm) + ", \"ends\": [";
     for (int e = 0; e < 2; ++e) {
       if (x.end_node[e] < 0) continue;
-      const Vec3& P = R.frame.nodes[static_cast<std::size_t>(x.end_node[e])];
-      s += std::string(e ? ", " : "") + "{\"at\": [" + num(P.x) + ", " + num(P.y) + ", " + num(P.z) + "], \"kind\": \"" +
+      const Vec3 Pe = P(R.frame.nodes[static_cast<std::size_t>(x.end_node[e])]);
+      const Vec3 ue = D(x.end_u[e]), re = P(x.end_read[e]);
+      s += std::string(e ? ", " : "") + "{\"at\": [" + num(Pe.x) + ", " + num(Pe.y) + ", " + num(Pe.z) + "], \"kind\": \"" +
            (x.end_kind[e] == 'd' ? "driven" : x.end_kind[e] == 'j' ? "joint" : x.end_kind[e] == 'f' ? "free" : "pass") +
-           "\", \"floor\": " + (x.end_floor[e] ? "true" : "false") + ", \"u\": [" + num(x.end_u[e].x) + ", " +
-           num(x.end_u[e].y) + ", " + num(x.end_u[e].z) + "]" +
-           (x.end_kind[e] == 'd' ? ", \"read_at\": [" + num(x.end_read[e].x) + ", " + num(x.end_read[e].y) + ", " + num(x.end_read[e].z) + "]"
+           "\", \"floor\": " + (x.end_floor[e] ? "true" : "false") + ", \"u\": [" + num(ue.x) + ", " +
+           num(ue.y) + ", " + num(ue.z) + "]" +
+           (x.end_kind[e] == 'd' ? ", \"read_at\": [" + num(re.x) + ", " + num(re.y) + ", " + num(re.z) + "]"
                                  : std::string()) + "}";
     }
     s += "]}";
@@ -16717,8 +16873,10 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
        ", \"drive_grown_reach_voxels\": " + num(c.drive_grown_reach_voxels) + ", \"drive_no_material\": " +
        std::to_string(c.drive_no_material) + ", \"drive_no_material_at\": [" + [&] {
          std::string t;
-         for (const Vec3& p : c.drive_no_material_at)
+         for (const Vec3& q : c.drive_no_material_at) {
+           const Vec3 p = P(q);
            t += std::string(t.empty() ? "" : ", ") + "[" + num(p.x) + ", " + num(p.y) + ", " + num(p.z) + "]";
+         }
          return t;
        }() + "]" +
        ", \"load_total_n\": " + num(c.load_total_n) + ", \"load_share\": " + num(c.load_share) + ", \"load_on_frame_n\": " + num(c.load_on_frame_n) +
@@ -16728,7 +16886,7 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
        ", \"adrift_parts\": [" + [&] {
          std::string t;
          for (const ll::FrameCheck::Adrift& d : c.adrift)
-           t += std::string(t.empty() ? "" : ", ") + "{\"centre\": [" + num(d.centre.x) + ", " + num(d.centre.y) + ", " + num(d.centre.z) +
+           t += std::string(t.empty() ? "" : ", ") + "{\"centre\": [" + num(P(d.centre).x) + ", " + num(P(d.centre).y) + ", " + num(P(d.centre).z) +
                 "], \"bars\": " + std::to_string(d.bars) + ", \"length_mm\": " + num(d.length_mm) + ", \"loaded_nodes\": " +
                 std::to_string(d.loaded_nodes) + ", \"load_n\": " + num(d.load_n) + "}";
          return t;
@@ -16752,7 +16910,7 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
     add("safety_margin", num(options.margin_stop));
     add("material", json_str(job.material));
     add("resolution", std::to_string(job.resolution));
-    add("build_direction", "[" + num(build_dir.x) + ", " + num(build_dir.y) + ", " + num(build_dir.z) + "]");
+    add("build_direction", "[" + num(build_dir_m.x) + ", " + num(build_dir_m.y) + ", " + num(build_dir_m.z) + "]");
     add("anchor_model", json_str(has_contact_springs(domain.bcs) ? "bearing" : "glued"));
     add("gravity_mm_s2", job.loads.present ? std::string("null") : num(job.gravity.magnitude_mm_s2));
     add("yield_strength_mpa", num(material.yield_strength_mpa));
@@ -16780,6 +16938,43 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
   done.ok = true;
   done.json = std::move(s);
   done.accepted = R.verdict != "fail";
+  // P4: per candidate up (print_orientation.hpp): the solid's margin with its layers across it (exact), the struts'
+  // smallest (the same struts and forces, the limit by their rise: an estimate), the part's own support (voxels); and
+  // the centre of mass (the solid's and the lattice's material).
+  if (!S.ups.empty()) {
+    OrientationStrengthsN& os = done.orientation;
+    os.known = true;
+    os.required_margin = options.margin_stop;
+    std::vector<char> solid_mask(nvox, 0);
+    double mass = 0.0;
+    Vec3 com{0.0, 0.0, 0.0};
+    for (int k = 0; k < cert_grid.nz; ++k)
+      for (int j = 0; j < cert_grid.ny; ++j)
+        for (int i = 0; i < cert_grid.nx; ++i) {
+          const std::size_t e = cert_grid.index(i, j, k);
+          if (!in_part[e]) continue;
+          solid_mask[e] = static_cast<double>(fm.solid[e]) >= printed_iso;
+          const double w = density[e];
+          const Vec3 vc = cert_grid.voxel_center(i, j, k);
+          mass += w;
+          com = {com.x + w * vc.x, com.y + w * vc.y, com.z + w * vc.z};
+        }
+    if (mass > 0.0) {
+      os.centre_of_mass = {com.x / mass, com.y / mass, com.z / mass};
+      os.has_centre_of_mass = true;
+    }
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    os.by_up.assign(S.ups.size(), OrientationStrength{});
+    for (std::size_t q = 0; q < S.ups.size(); ++q) {
+      OrientationStrength& t = os.by_up[q];
+      t.solid = effective_with(knockdown.infill_percent, tension_up[q]);
+      t.solid_interlayer = compute_stress_margin(material.yield_strength_mpa, material.z_knockdown, solid_vm, tension_up[q]).interlayer;
+      const bool struts_known = c.solved && c.judged > 0 && q < c.by_up.size();
+      t.struts = struts_known ? c.by_up[q].smallest_margin : nan;
+      t.struts_under = struts_known ? c.by_up[q].under_safety : 0;
+      t.support_mm3 = support_along(cert_grid, in_part, solid_mask, S.ups[q]);
+    }
+  }
   (void)in_part;
   return R;
 }
@@ -16874,6 +17069,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
     return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
   };
   std::string rounds_json;
+  std::string summary_keys;   // K4: what the strengthening did, for the app (the additive mode's last check)
   double reference = 0.0;
   int limit = 0;
   std::string mode_name = "rebuild";
@@ -16895,7 +17091,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
                       return std::string(b);
                     }() +
                     ",\n  \"strengthened\": " + (res.last_strengthened.empty() ? std::string("null") : json_str(res.last_strengthened)) +
-                    ",\n  \"rounds\": [" + rounds_json + (rounds_json.empty() ? "" : "\n  ") + "],\n  \"seconds\": " +
+                    summary_keys + ",\n  \"rounds\": [" + rounds_json + (rounds_json.empty() ? "" : "\n  ") + "],\n  \"seconds\": " +
                     json_num(std::round(secs(t_all) * 10.0) / 10.0) + "\n}\n";
     std::ofstream(join_path(out_dir, "strengthen.json")) << o;
     return res;
@@ -16934,6 +17130,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
     ask.part_lo = lo;
     ask.part_hi = hi;
     ask.threads = job.options.threads;
+    ask.frame = job.print_frame;   // P2: the strength job through the same door
     ll::StrengthDone bad = strength_setup(ask, materials_path, rules_path, S);
     if (!bad.ok) return finish(false, bad.code, bad.exit_code, bad.why, bad.detail);
   }
@@ -17041,6 +17238,11 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
     std::map<EndsKey, double> prev_margin_of;              // a bar of the check before: its strut's margin (judged)
     std::vector<std::pair<ll::Bar, double>> prev_bars;     // the same bars, for "a piece of which old bar"
     res.old_bars_kept = true;
+    // K4 (his Results notes, 2026-11-24: "What changes were made to strengthen it?"): the struts (known across rounds by
+    // their key, as OS18 knows them) widened by a widening the round kept (one taken back near a print finding is not
+    // counted), and those held by braces, over every round.
+    std::set<StrutKey> braced_ever;
+    std::map<StrutKey, int> thickened_ever;   // notes27: each strut's region (its group's count)
     for (int n = 0;; ++n) {
       if (stop && stop->load()) return finish(false, "cancelled", 1, "Stopped before the strengthening was finished.");
       const std::string rdir = join_path(out_dir, "r" + std::to_string(n));
@@ -17095,7 +17297,8 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
           new_pieces_under += under && !vine && !brace && cut && newly;
         }
       }
-      std::ofstream(join_path(rdir, "struts_under.json")) << struts_under_json(cr, ss.watch_margin, cap, &strut_class, &bars);
+      std::ofstream(join_path(rdir, "struts_under.json")) << struts_under_json(cr, ss.watch_margin, cap, &strut_class, &bars,
+                                                                                 job.print_frame);
       std::size_t at_cap_left = 0;
       for (const ll::FrameStrut& sn : c.struts) at_cap_left += sn.judged && sn.margin < S.options.margin_stop && sn.width_max >= cap_r(reg(sn)) - 1e-9;
       std::string r = std::string(rounds_json.empty() ? "\n    " : ",\n    ") + "{\"round\": " + std::to_string(n) +
@@ -17144,6 +17347,63 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
       const bool clean = c.solved && c.under_safety == 0;
       if (clean || n >= limit || !c.solved) {
         rounds_json += r + "}";
+        {   // K4: the summary, of this last check (the lattice the last round's strengthened.json gives)
+          double widest = 0.0;
+          for (std::size_t i = 0; i < bars.bars.size(); ++i)
+            if (i >= in_file.size() || in_file[i]) widest = std::max(widest, bars.bars[i].width);
+          // Per group (OJ5; one group for a job of one ask): its regions, its thickest setting (the upper width), and its
+          // struts of this check wider than it.
+          struct Group { std::vector<int> regions; double thickest = 0.0, widest = 0.0; std::size_t past = 0, thickened = 0;
+                         std::string name; };
+          std::vector<Group> gs;
+          if (groups.empty()) {
+            Group g;
+            g.regions = ctx.weave_regions;
+            g.thickest = upper;
+            gs.push_back(g);
+          } else {
+            for (const ll::OrganicGroup& og : groups) {
+              Group g;
+              g.regions = og.regions;
+              g.thickest = lim_r(og.regions.empty() ? 0 : og.regions.front());
+              g.name = og.name;
+              gs.push_back(g);
+            }
+          }
+          // notes27: per group, its struts thickened (each once) and its widest bar in the file now
+          const auto group_of = [&](int region) -> Group* {
+            if (groups.empty()) return &gs.front();
+            for (Group& g : gs)
+              if (std::find(g.regions.begin(), g.regions.end(), region) != g.regions.end()) return &g;
+            return nullptr;
+          };
+          for (const auto& [key, region] : thickened_ever)
+            if (Group* g = group_of(region)) ++g->thickened;
+          for (std::size_t i = 0; i < bars.bars.size(); ++i)
+            if (i >= in_file.size() || in_file[i])
+              if (Group* g = group_of(bars.bars[i].region)) g->widest = std::max(g->widest, bars.bars[i].width);
+          std::size_t past = 0;
+          for (const ll::FrameStrut& sn : c.struts) {
+            const int rg = reg(sn);
+            if (!(sn.width_max > lim_r(rg) + 1e-9)) continue;
+            ++past;
+            for (Group& g : gs)
+              if (groups.empty() || std::find(g.regions.begin(), g.regions.end(), rg) != g.regions.end()) { ++g.past; break; }
+          }
+          summary_keys = ",\n  \"thickened_distinct\": " + std::to_string(thickened_ever.size()) +
+                         ",\n  \"braced\": " + std::to_string(braced_ever.size()) + ",\n  \"widest_mm\": " + json_num(widest) +
+                         ",\n  \"past_thickest\": " + std::to_string(past) + ",\n  \"groups\": [";
+          for (std::size_t gi = 0; gi < gs.size(); ++gi) {
+            std::string regs;
+            for (std::size_t q = 0; q < gs[gi].regions.size(); ++q) regs += (q ? ", " : "") + std::to_string(gs[gi].regions[q]);
+            summary_keys += std::string(gi ? ", " : "") + "{\"id\": " + std::to_string(gi) +
+                            (gs[gi].name.empty() ? std::string() : ", \"name\": " + json_str(gs[gi].name)) +
+                            ", \"regions\": [" + regs + "], \"thickest_setting_mm\": " + json_num(gs[gi].thickest) +
+                            ", \"past_thickest\": " + std::to_string(gs[gi].past) + ", \"thickened_distinct\": " +
+                            std::to_string(gs[gi].thickened) + ", \"widest_mm\": " + json_num(gs[gi].widest) + "}";
+          }
+          summary_keys += "]";
+        }
         res.passing = cr.verdict == "pass";
         if (clean) return finish(true, "done", 0, "");
         if (!c.solved) return finish(true, "frame_not_solved", 0, "The frame could not be solved, so there is nothing to strengthen from.");
@@ -17261,7 +17521,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
         if (sn.by == "buckling") {
           bool all = brace_ops_of[wi].second > brace_ops_of[wi].first;
           for (std::size_t q = brace_ops_of[wi].first; q < brace_ops_of[wi].second; ++q) all = all && brep.braces_at[q] > 0;
-          if (all) { ++struts_braced; continue; }
+          if (all) { ++struts_braced; braced_ever.insert(strut_key(sn.at)); continue; }   // K4
           f = std::pow(ss.target_margin / sn.buckling_margin, 1.0 / p_buckle);
         } else {
           f = std::pow(ss.target_margin / sn.stress_margin, 1.0 / (sn.bending_led ? p_bend : p_axial));
@@ -17286,6 +17546,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
         if (any) widened_now.insert(strut_key(sn.at));   // OS18
       }
       ll::AddRound widen;
+      std::vector<std::pair<StrutKey, int>> widen_key;   // K4: per widening op, its strut's key (and region, notes27)
       double past_widest = 0.0;   // OS18 amended: the widest a bar was made past the limit this round
       {
         const std::vector<std::vector<std::size_t>> on = ll::pieces_on(bars, olds);
@@ -17298,6 +17559,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
             if (!(w > b.width)) continue;
             done.insert(j);
             widen.ops.push_back({2, {b.a.x, b.a.y, b.a.z, b.b.x, b.b.y, b.b.z, w}});
+            widen_key.push_back({strut_key(strut_of[k]->at), reg(*strut_of[k])});   // K4
             if (ceil_of[k] > lim_of[k] && w > lim_of[k] + 1e-12) past_widest = std::max(past_widest, w);
           }
       }
@@ -17344,8 +17606,10 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
           return finish(false, "print_check_failed", 1, "The lattice's file could not be put together, so its strength cannot be judged.", pc2.why);
         if (pc2.made.print_clean || pass >= 5 || pc2.made.findings_at.empty()) break;
         std::vector<ll::AddOp> keep;
+        std::vector<std::pair<StrutKey, int>> keep_key;   // K4
         std::size_t dropped = 0;
-        for (const ll::AddOp& op : widen.ops) {
+        for (std::size_t oi = 0; oi < widen.ops.size(); ++oi) {
+          const ll::AddOp& op = widen.ops[oi];
           const Vec3 a{op.v[0], op.v[1], op.v[2]}, b{op.v[3], op.v[4], op.v[5]};
           const Vec3 d{b.x - a.x, b.y - a.y, b.z - a.z};
           const double l2 = d.x * d.x + d.y * d.y + d.z * d.z;
@@ -17355,11 +17619,13 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
             const double ex = a.x + d.x * t - f.x, ey = a.y + d.y * t - f.y, ez = a.z + d.z * t - f.z;
             near = near || std::sqrt(ex * ex + ey * ey + ez * ez) <= op.v[6] + 1.0;
           }
-          if (near) ++dropped; else keep.push_back(op);
+          if (near) ++dropped;
+          else { keep.push_back(op); keep_key.push_back(widen_key[oi]); }
         }
         if (dropped == 0) break;
         widen_taken_back += dropped;
         widen.ops = keep;
+        widen_key = keep_key;
         bars = pre_widen;
         if (!widen.ops.empty() && !ll::apply_add_round(bars, domain, widen, ctx, &wrep, &why))
           return finish(false, "strengthen_failed", 1, "A round of strengthening could not be added.", why);
@@ -17367,12 +17633,14 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
         round.ops.insert(round.ops.end(), widen.ops.begin(), widen.ops.end());
         round_guard = ll::GuardReport{};
       }
+      for (const auto& [k, region] : widen_key) thickened_ever.emplace(k, region);   // K4: the widenings the round kept
       if (!pc2.made.print_clean)
         return finish(false, "would_not_print", 1,
                       "After round " + std::to_string(n + 1) + " the lattice would not print (an overhang or a start in mid-air), "
                       "and taking back that round's widenings near those places did not fix it, so the strengthening stopped. "
                       "The last round written is the last that prints.");
-      const std::string printed = print_check_counts(before_round, in_file, bars, pc2.bars, pc2.kept, &moved_by_print) +
+      const std::string printed = print_check_counts(before_round, in_file, bars, pc2.bars, pc2.kept, &moved_by_print,
+                                                     job.print_frame) +
                                   ", \"print_clean\": " + (pc2.made.print_clean ? "true" : "false") +
                                   ", \"widenings_taken_back\": " + std::to_string(widen_taken_back);
       bars = std::move(pc2.bars);
@@ -17402,7 +17670,8 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
                                ",\n  \"bars_hash\": " + json_str(hash_hex(round.hash)) + ",\n  \"struts_watched\": " +
                                std::to_string(watched.size()) + ",\n  \"struts_widened\": " + std::to_string(struts_widened) +
                                ",\n  \"struts_braced\": " + std::to_string(struts_braced) + ",\n  \"braces\": " +
-                               std::to_string(brep.braces) + ",\n  \"struts_at_cap\": " + std::to_string(struts_at_cap);
+                               std::to_string(brep.braces) + ",\n  \"struts_at_cap\": " + std::to_string(struts_at_cap) +
+                               print_up_json(job.print_frame);
       if (!ll::write_additions_file(join_path(ndir, st.additions), adds) || !ll::write_strengthened_file(sj, st, more))
         return finish(false, "cannot_write", 1, "The strengthened files could not be saved on the Mac.", ndir);
       res.last_strengthened = "r" + std::to_string(n + 1) + "/strengthened.json";
@@ -17453,7 +17722,8 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
     if (!cr.done.ok) return finish(false, cr.done.code, cr.done.exit_code, cr.done.why, cr.done.detail);
     std::ofstream(join_path(rdir, "strength.json")) << cr.done.json << "\n";
     // Brief E3a, item 1: the struts under the watch margin, as strengthening by adding reads them.
-    std::ofstream(join_path(rdir, "struts_under.json")) << struts_under_json(cr, ss.watch_margin, ask.width_heavy_mm > 0.0 ? ask.width_heavy_mm : light);
+    std::ofstream(join_path(rdir, "struts_under.json")) << struts_under_json(cr, ss.watch_margin, ask.width_heavy_mm > 0.0 ? ask.width_heavy_mm : light,
+                                                                             nullptr, nullptr, job.print_frame);
     const ll::FrameCheck& c = cr.check;
     // Whether the geometry stays put: a hash of every non-link bar's two end points (rounded to 1e-4 mm, each bar's
     // ends in order, the bars sorted); and the judged struts at the upper strut width.
@@ -17534,7 +17804,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
     const std::string more = "  \"round\": " + std::to_string(n + 1) + ",\n  \"struts_watched\": " + std::to_string(sr.struts_watched) +
                              ",\n  \"voxels_boosted\": " + std::to_string(sr.voxels_boosted) + ",\n  \"boost_largest\": " +
                              json_num(sr.boost_largest) + ",\n  \"boosted_mm3\": " + json_num(sr.boosted_mm3) +
-                             ",\n  \"floors_count\": " + std::to_string(floors.size());
+                             ",\n  \"floors_count\": " + std::to_string(floors.size()) + print_up_json(job.print_frame);
     if (!ll::write_tensor_file(join_path(ndir, st.stress_input), boosted) || !ll::write_floors_file(join_path(ndir, st.floors), floors) ||
         !ll::write_strengthened_file(sj, st, more))
       return finish(false, "cannot_write", 1, "The strengthened files could not be saved on the Mac.", ndir);

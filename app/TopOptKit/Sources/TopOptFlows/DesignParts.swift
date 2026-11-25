@@ -38,6 +38,9 @@ public enum DSParts {
     public static let rowHeight: CGFloat = 48
     public static let shortRowHeight: CGFloat = 44
     public static let faceIndent: CGFloat = 34
+    /// §4.4: a selected row's highlight — its outline's corner radius and its inset from the row's edges.
+    public static let rowHighlightRadius: CGFloat = 10
+    public static let rowHighlightInset: CGFloat = 4
     /// §4.6.
     public static let runHeight: CGFloat = 64
     public static let runMinWidth: CGFloat = 250
@@ -99,6 +102,8 @@ public struct DSPanel<Content: View, Footer: View>: View {
     var foldedPill = false
     /// The count in words, in a colour, instead of a number (Results' Checks: "2 to look at" / "All good").
     var countLabel: (text: String, tint: RGBA)? = nil
+    /// ★ notes27 F3: its corner radius while open (nil: §4.3's 22 pt) — Results' list is concentric with its rows' highlight.
+    var openRadius: CGFloat? = nil
     /// The empty state's one line ("Tap a face to start"), shown when `isEmpty`.
     let empty: String?
     let isEmpty: Bool
@@ -107,6 +112,10 @@ public struct DSPanel<Content: View, Footer: View>: View {
     let footer: Footer
 
     @State private var rows: [String: CGRect] = [:]
+    /// ★ his 11-22 (img 44): folded where Topology and Selections are minimised together — the Selections pill's size and colour.
+    @Environment(\.minimisedPillWidth) private var pairedPillWidth
+    /// ★ his 11-22 (img 45): opened from the corner (the Settings drawer) — the ⌃ menu's colour, no blur behind it.
+    @Environment(\.cornerDrawerLook) private var drawerLook
     @State private var viewport: CGFloat = 0
     @State private var contentHeight: CGFloat = 0
     @State private var footerHeight: CGFloat = 0
@@ -191,25 +200,31 @@ public struct DSPanel<Content: View, Footer: View>: View {
                 }
             }
         }
-        .frame(width: !open && foldedPill ? nil : width)
-        .fixedSize(horizontal: !open && foldedPill, vertical: true)   // the panel is as tall as what it holds (the body caps itself)
+        .frame(width: pill ?? (!open && foldedPill ? nil : width))
+        .fixedSize(horizontal: !open && foldedPill && pill == nil, vertical: true)   // the panel is as tall as what it holds (the body caps itself)
         .onPreferenceChange(DSPanelMeasureKey.self) { m in
             if let c = m["content"], abs(c - contentHeight) > 0.5 { contentHeight = c }
             if let v = m["viewport"], abs(v - viewport) > 0.5 { viewport = v }
             if let f = m["footer"], abs(f - footerHeight) > 0.5 { footerHeight = f }
         }
         .transformPreference(DSPanelMeasureKey.self) { $0 = [:] }   // (never an enclosing panel's)
-        .background(RoundedRectangle(cornerRadius: open ? DSParts.panelRadius : DSParts.headerHeight / 2, style: .continuous)
-            .fill(DS.Surface.panel.color))
+        .background(RoundedRectangle(cornerRadius: radius, style: .continuous)
+            .fill((drawerLook ? DS.Surface.menu : DS.Surface.panel).color))
         // the mockup's .panel blurs what is behind it (backdrop-filter 36 px): a chip on the model never reads through
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: open ? DSParts.panelRadius : DSParts.headerHeight / 2,
-                                                             style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: open ? DSParts.panelRadius : DSParts.headerHeight / 2, style: .continuous)
+        // ★ his 11-22 (img 44): the pill beside the Selections pill wears its colour — the glass with no blur behind it
+        .background(pill == nil && !drawerLook ? AnyShapeStyle(Material.ultraThinMaterial) : AnyShapeStyle(Color.clear),
+                    in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
             .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: open ? DSParts.panelRadius : DSParts.headerHeight / 2, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         .dsShadow(DS.Shadow.panel)
         .background(DSParts.publish(key))
     }
+
+    /// ★ his 11-22 (img 44): folded beside the minimised Selections pill — that pill's width, height and colour.
+    private var pill: CGFloat? { open ? nil : pairedPillWidth }
+    private var headerH: CGFloat { pill == nil ? DSParts.headerHeight : MinimisedPills.height }
+    private var radius: CGFloat { open ? (openRadius ?? DSParts.panelRadius) : headerH / 2 }
 
     /// Chevron + name + count, nothing else (U2). "view only" in tertiary when the panel is locked (Cut).
     private var header: some View {
@@ -234,7 +249,7 @@ public struct DSPanel<Content: View, Footer: View>: View {
                 }
             }
             .padding(.horizontal, 14)
-            .frame(height: DSParts.headerHeight)
+            .frame(height: headerH)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -345,15 +360,21 @@ public struct DSRow<Actions: View>: View {
     var tag: String?
     var line: DSRowLine?
     let tap: (() -> Void)?
+    /// ★ his 11-22: a hold on the name renames it (nil: not renamable).
+    let rename: ((String) -> Void)?
     let actions: Actions
+    /// ★ his 11-22: the value column's width under a Selections panel (its handle); nil: the value whole, as before.
+    @Environment(\.dsRowValueWidth) private var valueWidth
+    /// ★ notes25 B3: the line under the row wraps to fit its words (Results' list); false: one line, as everywhere else.
+    @Environment(\.dsRowLineWraps) private var lineWraps
 
     public init(_ kind: Kind, key: String, mark: DSRowMark? = nil, name: String, role: (glyph: String, colour: RGBA)? = nil,
                 value: String? = nil, disclosure: Bool? = nil, selected: Bool = false, hidden: Bool = false,
                 disabled: Bool = false, locked: Bool = false, tag: String? = nil, line: DSRowLine? = nil,
-                tap: (() -> Void)? = nil, @ViewBuilder actions: () -> Actions) {
+                tap: (() -> Void)? = nil, rename: ((String) -> Void)? = nil, @ViewBuilder actions: () -> Actions) {
         self.kind = kind; self.key = key; self.mark = mark; self.name = name; self.role = role; self.value = value
         self.disclosure = disclosure; self.selected = selected; self.hidden = hidden; self.disabled = disabled
-        self.locked = locked; self.tag = tag; self.line = line; self.tap = tap; self.actions = actions()
+        self.locked = locked; self.tag = tag; self.line = line; self.tap = tap; self.rename = rename; self.actions = actions()
     }
 
     public var body: some View {
@@ -379,8 +400,13 @@ public struct DSRow<Actions: View>: View {
                     if let tag { DSChip(.tag(tag), key: key + "-tag").layoutPriority(1) }   // before the name, after the value
                     Spacer(minLength: 8)
                     if let value {
-                        Text(value).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color).lineLimit(1)
-                            .fixedSize()
+                        if let w = valueWidth {   // ★ his 11-22: the column the panel's handle sets (the name takes the rest)
+                            Text(value).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color).lineLimit(1)
+                                .truncationMode(.tail).frame(width: w, alignment: .trailing)
+                        } else {
+                            Text(value).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color).lineLimit(1)
+                                .fixedSize()
+                        }
                     }
                     if locked {
                         Image(systemName: "lock.fill").font(.system(size: 12)).foregroundStyle(DS.Color.textTertiary.color)
@@ -400,8 +426,8 @@ public struct DSRow<Actions: View>: View {
             if selected {
                 ZStack(alignment: .leading) {
                     Rectangle().fill(DS.Color.fillSelected.color)
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(DS.Color.accent.color, lineWidth: 1.5).padding(4)
+                    RoundedRectangle(cornerRadius: DSParts.rowHighlightRadius, style: .continuous)
+                        .strokeBorder(DS.Color.accent.color, lineWidth: 1.5).padding(DSParts.rowHighlightInset)
                     RoundedRectangle(cornerRadius: 2).fill(DS.Color.accent.color).frame(width: 3).padding(.vertical, 6)
                 }
                 // ★ B6 N3: the highlight is drawn over the row's tap button (the next background) — a filled shape takes a
@@ -421,6 +447,7 @@ public struct DSRow<Actions: View>: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityIdentifier(key)
         .id(key)
+        .modifier(RenameOnHold(name: name, key: key, rename: rename))   // ★ his 11-22: hold the name to rename it
         .background(GeometryReader { g in
             Color.clear
                 .preference(key: ChromeKeepOutKey.self, value: [key: g.frame(in: .global)])
@@ -443,7 +470,8 @@ public struct DSRow<Actions: View>: View {
             Text(l.text).font(.system(size: 12.5))
                 .foregroundStyle((l.tone == .danger ? DS.Color.danger : l.tone == .warning ? DS.Color.warning
                                   : DS.Color.textSecondary).color)
-                .lineLimit(1)
+                .lineLimit(lineWraps ? nil : 1)
+                .fixedSize(horizontal: false, vertical: lineWraps)
             if let fix = l.fix { DSChip(.fix(fix.title), key: key + "-fix", action: fix.run) }
             Spacer(minLength: 0)
         }
@@ -456,9 +484,10 @@ extension DSRow where Actions == EmptyView {
     public init(_ kind: Kind, key: String, mark: DSRowMark? = nil, name: String, role: (glyph: String, colour: RGBA)? = nil,
                 value: String? = nil, disclosure: Bool? = nil, selected: Bool = false, hidden: Bool = false,
                 disabled: Bool = false, locked: Bool = false, tag: String? = nil, line: DSRowLine? = nil,
-                tap: (() -> Void)? = nil) {
+                tap: (() -> Void)? = nil, rename: ((String) -> Void)? = nil) {
         self.init(kind, key: key, mark: mark, name: name, role: role, value: value, disclosure: disclosure, selected: selected,
-                  hidden: hidden, disabled: disabled, locked: locked, tag: tag, line: line, tap: tap, actions: { EmptyView() })
+                  hidden: hidden, disabled: disabled, locked: locked, tag: tag, line: line, tap: tap, rename: rename,
+                  actions: { EmptyView() })
     }
 }
 
@@ -656,12 +685,39 @@ public struct DSRunButton: View {
     let subtitle: String
     let state: State
     let key: String
+    let progress: Progress?
     let action: () -> Void
     let fix: (() -> Void)?
 
-    public init(_ title: String, subtitle: String, state: State = .ready, key: String, action: @escaping () -> Void,
-                fix: (() -> Void)? = nil) {
-        self.title = title; self.subtitle = subtitle; self.state = state; self.key = key; self.action = action; self.fix = fix
+    /// ★ His pick 11-21 (the preview-speed research): something the button waits on, said ON the button (never a line at the
+    /// bottom): a ring that fills toward `expected` seconds (never quite closed before it ends; a spinner when nothing says
+    /// how long) and its words with the time left. The button's title and tap stay its own.
+    public struct Progress: Equatable {
+        public var started: Date
+        public var expected: TimeInterval?
+        public var words: String
+        public init(started: Date, expected: TimeInterval?, words: String) {
+            self.started = started; self.expected = expected; self.words = words
+        }
+        /// How full the ring is at `now` (0 to 0.95); nil: a spinner.
+        public func fraction(at now: Date) -> Double? {
+            guard let e = expected, e > 0 else { return nil }
+            return Swift.min(0.95, Swift.max(0, now.timeIntervalSince(started) / e))
+        }
+        /// The line at `now`: the words, then the time left ("12 s", "3 min", "finishing").
+        public func line(at now: Date) -> String {
+            guard let e = expected, e > 0 else { return words }
+            return words + " \u{00B7} " + Self.left(e - now.timeIntervalSince(started))
+        }
+        public static func left(_ s: Double) -> String {
+            s <= 1 ? "finishing" : s < 60 ? "\(Int(s.rounded(.up))) s" : "\(Int((s / 60).rounded(.up))) min"
+        }
+    }
+
+    public init(_ title: String, subtitle: String, state: State = .ready, key: String, progress: Progress? = nil,
+                action: @escaping () -> Void, fix: (() -> Void)? = nil) {
+        self.title = title; self.subtitle = subtitle; self.state = state; self.key = key; self.progress = progress
+        self.action = action; self.fix = fix
     }
 
     private var grey: Bool {
@@ -684,20 +740,18 @@ public struct DSRunButton: View {
                 DSChip(.fix(fixTitle), key: key + "Fix", action: fix)
             }
             Button(action: action) {
-                HStack(spacing: 10) {
-                    if busy { ProgressView().controlSize(.small).tint(.white) }
-                    VStack(spacing: 1) {
-                        Text(title).font(.system(size: 16, weight: .bold)).lineLimit(1).fixedSize()
-                        // never cut (the mockup's `.run small`: nowrap; min-width 250): the button grows to the line
-                        Text(line2).font(.system(size: 11.5)).lineLimit(1).fixedSize()
-                            .foregroundStyle(grey ? DS.Color.textTertiary.color : Color.white.opacity(0.85))
-                            .background(DSParts.publish("\(key)-line2"))
+                Group {
+                    if let progress {   // ★ his pick 11-21: the ring and the count-down, once a second (this view only)
+                        TimelineView(.periodic(from: progress.started, by: 1)) { ctx in
+                            lines(ring: progress.fraction(at: ctx.date), spinner: progress.fraction(at: ctx.date) == nil,
+                                  line: progress.line(at: ctx.date))
+                        }
+                    } else {
+                        lines(ring: nil, spinner: busy, line: line2)
                     }
                 }
                 .foregroundStyle(grey ? DS.Color.textDisabled.color : Color.white)
-                .padding(.horizontal, 22)
-                .frame(minWidth: DSParts.runMinWidth, minHeight: DSParts.runHeight)
-                .fixedSize()   // its own size, max(250, the lines + 44), whatever the parent offers
+                .fixedSize()   // its own size, max(250, the lines + 44), whatever the parent offers (DSRunLabelLayout)
                 .background(Capsule().fill((grey ? DS.Color.fillDisabled : busy ? DS.Color.accent.opacity(0.25) : DS.Color.accent).color))
                 .overlay(Capsule().strokeBorder(DS.Color.accent.opacity(busy ? 0.6 : 0).color, lineWidth: 1))
                 .partsShadow(grey || busy ? nil : DS.Shadow.accentGlow)
@@ -709,6 +763,69 @@ public struct DSRunButton: View {
             .accessibilityIdentifier(key)
         }
     }
+
+    /// ★ his iPad notes 11-22 (img 44, img 47: "Laying Draft", "Draft · checking print"): "Please ensure that the text is always
+    /// centred and the progress icon is to the left of the text, perfectly between the text and the left side of the button."
+    /// The two lines sit in the button's centre with or without the ring (DSRunLabelLayout); the ring (or the small spinner)
+    /// is centred in the gap between the capsule's left end and the wider line, and never widens the button.
+    private func lines(ring: Double?, spinner: Bool, line: String) -> some View {
+        DSRunLabelLayout(padding: Self.textInset, minWidth: DSParts.runMinWidth, minHeight: DSParts.runHeight) {
+            VStack(spacing: 1) {
+                Text(title).font(.system(size: 16, weight: .bold)).lineLimit(1).fixedSize()
+                    .background(DSParts.publish("\(key)-title"))
+                // never cut (the mockup's `.run small`: nowrap; min-width 250): the button grows to the line
+                Text(line).font(.system(size: 11.5)).lineLimit(1).fixedSize()
+                    .foregroundStyle(grey ? DS.Color.textTertiary.color : Color.white.opacity(0.85))
+                    .background(DSParts.publish("\(key)-line2"))
+            }
+            .background(DSParts.publish("\(key)-text"))
+            if let ring {
+                ZStack {
+                    Circle().stroke(Color.white.opacity(0.3), lineWidth: 2.5)
+                    Circle().trim(from: 0, to: ring).stroke(Color.white, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                }
+                .frame(width: 18, height: 18)
+                .background(DSParts.publish("\(key)-ring"))
+            } else if spinner {
+                ProgressView().controlSize(.small).tint(.white)
+                    .background(DSParts.publish("\(key)-spinner"))
+            }
+        }
+    }
+    /// The lines' clearance from each end of the capsule (the mockup's padding 0 22).
+    static let textInset: CGFloat = 22
+    /// RED CONTROL (RunButtonCentredHostedTests): the ring in a row before the lines, the pair centred (before his 11-22 note).
+    nonisolated(unsafe) public static var controlRingPushesText = false
+}
+
+/// ★ his 11-22: the run button's label — its first subview (the two lines) in the centre, sized max(`minWidth`, lines +
+/// 2 × `padding`) by `minHeight`; any other subview (the ring, the spinner) centred halfway between the left end and the lines.
+/// The ring never counts toward the size, so the button keeps its width when the ring comes or goes.
+struct DSRunLabelLayout: Layout {
+    let padding: CGFloat
+    let minWidth: CGFloat
+    let minHeight: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let text = subviews.first else { return CGSize(width: minWidth, height: minHeight) }
+        let t = text.sizeThatFits(.unspecified)
+        return CGSize(width: Swift.max(minWidth, t.width + 2 * padding), height: Swift.max(minHeight, t.height))
+    }
+
+    func placeSubviews(in b: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let text = subviews.first else { return }
+        let t = text.sizeThatFits(.unspecified)
+        let gap = (b.width - t.width) / 2   // from the capsule's left end to the lines
+        let old = DSRunButton.controlRingPushesText && subviews.count > 1
+        let ringSizes = subviews.dropFirst().map { $0.sizeThatFits(.unspecified) }
+        let shift = old ? ((ringSizes.first?.width ?? 0) + 10) / 2 : 0   // (the old HStack: ring + 10 pt + lines, centred)
+        text.place(at: CGPoint(x: b.midX + shift, y: b.midY), anchor: .center, proposal: ProposedViewSize(t))
+        for (ring, s) in zip(subviews.dropFirst(), ringSizes) {
+            let x = old ? b.midX + shift - t.width / 2 - 10 - s.width / 2 : b.minX + gap / 2
+            ring.place(at: CGPoint(x: x, y: b.midY), anchor: .center, proposal: ProposedViewSize(s))
+        }
+    }
 }
 
 /// The ⌃ beside the run button: a 64 pt square opening the other run choices — a menu, or a plain button (#362: Flexible's ⌃
@@ -717,6 +834,8 @@ public struct DSSplitButton<Items: View>: View {
     let key: String
     let items: Items
     var action: (() -> Void)?
+    /// ★ his 11-22 (img 45): the ⌃ that opens its own drawer (CornerMoreDrawer) — lit while the drawer is up.
+    var open = false
     public init(key: String, @ViewBuilder items: () -> Items) { self.key = key; self.items = items() }
     /// True when it opens a menu (its items); false for the plain button.
     public var isMenu: Bool { action == nil }
@@ -737,8 +856,10 @@ public struct DSSplitButton<Items: View>: View {
     }
     private var face: some View {
         Image(systemName: "chevron.up").font(.system(size: 18, weight: .bold)).foregroundStyle(DS.Color.textPrimary.color)
+            .rotationEffect(.degrees(open ? 180 : 0))   // ★ 11-22: up, the drawer's ⌃ points down (a tap shuts it)
             .frame(width: DSParts.runHeight, height: DSParts.runHeight)
-            .background(RoundedRectangle(cornerRadius: DSParts.runHeight / 2, style: .continuous).fill(DS.Surface.bar.color))
+            .background(RoundedRectangle(cornerRadius: DSParts.runHeight / 2, style: .continuous)
+                .fill((open ? DS.Color.fillSelected : DS.Surface.bar).color))
             .overlay(RoundedRectangle(cornerRadius: DSParts.runHeight / 2, style: .continuous)
                 .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
             .contentShape(Rectangle())
@@ -750,6 +871,11 @@ extension DSSplitButton where Items == EmptyView {
     /// items (Buttons also type-check as a `() -> Void`) stays the menu; one that cannot build Views takes this.
     @_disfavoredOverload
     public init(key: String, action: @escaping () -> Void) { self.key = key; self.items = EmptyView(); self.action = action }
+    /// ★ his iPad notes 11-22 (img 45): the ⌃ of a corner drawer — `toggle` opens or shuts it (CornerDrawers), `open` lights
+    /// it. The drawer is the page's to draw (above the buttons, where Settings opens).
+    public init(key: String, open: Bool, toggle: @escaping () -> Void) {
+        self.key = key; self.items = EmptyView(); self.action = toggle; self.open = open
+    }
 }
 
 /// The secondary button: 48 pt glass, label + optional glyph ("Settings ⌄", "Compare", "Add part"), and an optional tertiary
@@ -851,8 +977,11 @@ public struct DSFolderTabs: View {
     let key: String
     let pick: (String) -> Void
     let add: (() -> Void)?
-    public init(_ tabs: [Tab], selected: String?, key: String, pick: @escaping (String) -> Void, add: (() -> Void)? = nil) {
-        self.tabs = tabs; self.selected = selected; self.key = key; self.pick = pick; self.add = add
+    /// ★ his iPad notes 11-23: the column's width (the Lattice page widens it to its names: LatticePageColumns).
+    var width: CGFloat = DSParts.tabsWidth
+    public init(_ tabs: [Tab], selected: String?, key: String, pick: @escaping (String) -> Void, add: (() -> Void)? = nil,
+                width: CGFloat = DSParts.tabsWidth) {
+        self.tabs = tabs; self.selected = selected; self.key = key; self.pick = pick; self.add = add; self.width = width
     }
     public var body: some View {
         VStack(spacing: 6) {
@@ -900,7 +1029,8 @@ public struct DSFolderTabs: View {
             Spacer(minLength: 0)
         }
         .padding(.vertical, 10).padding(.horizontal, 6)
-        .frame(width: DSParts.tabsWidth)
+        .frame(width: width)
+        .background(DSParts.publish("\(key)-column"))   // ★ 11-23: the column (the hosted tests')
         .overlay(alignment: .trailing) { Rectangle().fill(DSParts.strokeSub.color).frame(width: 1) }
     }
 }

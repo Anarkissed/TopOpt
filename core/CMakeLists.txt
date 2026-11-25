@@ -94,6 +94,8 @@ add_library(topopt
   src/materials/materials.cpp
   src/io/stl.cpp
   src/io/threemf_stream.cpp
+  # His print orientation (P3): the part's overhangs painted as support enforcers (support_paint.hpp).
+  src/io/support_paint.cpp
   src/io/segment.cpp
   src/io/part.cpp
   src/io/face_tag.cpp
@@ -188,6 +190,10 @@ add_library(topopt
   # The lattice file job (docs/design/lattice-rebuild/04-layout-file-job.md): job.json ->
   # layout -> mesh -> STL. `topopt-cli lattice-file` is its only caller in core.
   src/lattice_layout/file_job.cpp
+  # His print orientation (P2): "rotate at the door", every input of a job turned once so up is +Z (print_frame.hpp).
+  src/lattice_layout/print_frame.cpp
+  # His print orientation (P4): the six candidates, their guessed strength, support, height and bed (print_orientation.hpp).
+  src/lattice_layout/print_orientation.cpp
   # Install 3: the lattice the strength check sees (rule V4); the check itself is run_job.cpp's.
   src/lattice_layout/strength.cpp
   # Brief E2, Part A: the Organic strength check, a frame of beams (lattice_layout_frame.hpp).
@@ -589,6 +595,23 @@ if(ZLIB_FOUND)   # OF5: the test inflates the 3MF it reads back
   target_compile_definitions(test_lattice_layout_file PRIVATE TOPOPT_HAVE_ZLIB)
 endif()
 add_test(NAME lattice_layout_file COMMAND test_lattice_layout_file)
+# SPEED 11-22: the print check's overhang read on a grid gives exactly the every-bar answers.
+add_executable(test_weave_findings_grid tests/unit/test_weave_findings_grid.cpp)
+target_link_libraries(test_weave_findings_grid PRIVATE topopt)
+add_test(NAME weave_findings_grid COMMAND test_weave_findings_grid)
+# His print orientation (P3): the part's overhangs painted as support enforcers, and the 3MF that tells the slicer.
+add_executable(test_support_paint tests/unit/test_support_paint.cpp)
+target_link_libraries(test_support_paint PRIVATE topopt)
+target_compile_definitions(test_support_paint PRIVATE SUPPORT_PAINT_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+if(ZLIB_FOUND)
+  target_link_libraries(test_support_paint PRIVATE ZLIB::ZLIB)
+  target_compile_definitions(test_support_paint PRIVATE TOPOPT_HAVE_ZLIB)
+endif()
+add_test(NAME support_paint COMMAND test_support_paint)
+# His print orientation (P4): the six candidates and the one rule (recommend_print_orientation).
+add_executable(test_print_orientation tests/unit/test_print_orientation.cpp)
+target_link_libraries(test_print_orientation PRIVATE topopt)
+add_test(NAME print_orientation COMMAND test_print_orientation)
 # Organic cut 2 (brief E1, rules OF1..): the file as the solid plus unmerged closed tubes. The test makes its reference
 # unions with Manifold, so it is registered only where the writer has it.
 if(manifold_FOUND)
@@ -2339,6 +2362,15 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
       DOCS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../docs/strength-check"
       TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME lattice_strength COMMAND test_lattice_strength)
+    # His print orientation (P2): "rotate at the door". The same job with up = +X makes the same file and report as a
+    # copy of everything turned by hand; each input left unturned is caught (print_frame.hpp).
+    add_executable(test_print_frame tests/validation/test_print_frame.cpp)
+    target_link_libraries(test_print_frame PRIVATE topopt)
+    target_compile_definitions(test_print_frame PRIVATE
+      MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+      SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+      TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME print_frame COMMAND test_print_frame)
   endif()
 
   # M6.2 integration test: the maintainer-authored demo job in

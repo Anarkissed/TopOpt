@@ -112,6 +112,8 @@ struct NumberPadField: ViewModifier {
     let config: NumberPad.Config
     let seed: Double?
     let onValue: (Double?) -> Void
+    /// ★ his iPad notes 11-22 (DSNumberPad): the typed text, for a field whose own commit reads text (nil: none).
+    var onText: ((String) -> Void)? = nil
 
     @Environment(\.numberPadNote) private var note
     @ObservedObject private var keyboard = HardwareKeyboard.shared
@@ -134,7 +136,9 @@ struct NumberPadField: ViewModifier {
             content.overlay {
                 if presented {
                     HardwareNumberEntry(config: config, seed: seed,
-                                        keep: { v in typed = .some(v); if let v { onValue(v) }; presented = false },
+                                        keep: { v, text in
+                                            typed = .some(v); onText?(text); if let v { onValue(v) }; presented = false
+                                        },
                                         cancel: { typed = nil; presented = false })
                 }
             }
@@ -152,7 +156,8 @@ struct NumberPadField: ViewModifier {
                                                                    : config,
                               seed: seed,
                               onValue: { v in typed = .some(v); onValue(v) },
-                              onDone: { presented = false })
+                              onDone: { presented = false },
+                              onText: onText)
                         .presentationCompactAdaptationPopover()
                 }
                 .onChange(of: presented) { open in
@@ -228,7 +233,8 @@ private extension View {
 private struct HardwareNumberEntry: View {
     let config: NumberPad.Config
     let seed: Double?
-    let keep: (Double?) -> Void
+    /// The parsed number and the text as typed (★ 11-22: a DSNumberPad field commits the text through its own code).
+    let keep: (Double?, String) -> Void
     let cancel: () -> Void
     @State private var text = ""
     @FocusState private var focused: Bool
@@ -244,10 +250,10 @@ private struct HardwareNumberEntry: View {
                 .overlay(RoundedRectangle(cornerRadius: DS.Radius.field, style: .continuous)
                     .strokeBorder(DS.Color.accent.color, lineWidth: 1.5)))
             .focused($focused)
-            .onSubmit { keep(Self.parse(text)) }
+            .onSubmit { keep(Self.parse(text), text) }
             .onExitCommandCompat { cancel() }
             .onAppear {
-                text = NumberPadEntry.seedString(seed, allowsDecimal: config.allowsDecimal)
+                text = config.seedText ?? NumberPadEntry.seedString(seed, allowsDecimal: config.allowsDecimal)
                 focused = true
             }
             .background(NumberPad.published("numberPad-typing"))

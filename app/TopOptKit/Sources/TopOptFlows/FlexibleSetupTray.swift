@@ -59,7 +59,7 @@ public enum FlexibleSetupRow: String, CaseIterable, Sendable {
     }
     var glyph: String {
         switch self {
-        case .quality: return "square.grid.3x3.fill"
+        case .quality: return "dial.medium"   // ★ notes25 icons: Quality (the grid is Lattice alone)
         case .plateUp: return "square.3.layers.3d.top.filled"
         case .gravity: return "arrow.down.to.line"
         case .printParameters: return "slider.horizontal.3"

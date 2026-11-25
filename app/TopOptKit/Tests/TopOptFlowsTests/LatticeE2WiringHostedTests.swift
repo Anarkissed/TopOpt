@@ -79,10 +79,9 @@ final class LatticeE2WiringHostedTests: XCTestCase {
         let block = try XCTUnwrap(doc["lattice"] as? [String: Any])
         XCTAssertEqual(block["scenarios"] as? [String], live ? ["Normal use", "Held by left plate"] : nil, "★ the switched-on two")
         XCTAssertEqual(((doc["loads"] as? [String: Any])?["scenarios"] as? [[String: Any]])?.count, 3, "★ the job keeps all three")
-        XCTAssertEqual(h.frames.all["latticeIncludeWaits"] != nil, !live, "★ the plain line goes when the key is live")
+        XCTAssertNil(h.frames.all["latticeIncludeWaits"], "★ his 11-22: no engine-update line in the modal")
         XCTAssertNil(h.frames.all["latticeResultKeepsGroups"], "a scenario is not a group: no result line")
         if live { XCTAssertNil(TopOptKit.jobSchemaError(try RemoteRun.buildJobJSON(r)), "★ core takes the job the app builds") }
-        XCTAssertEqual(LatticeSetupCopy.includeWaits, "The run still uses every scenario until the engine update")
     }
 
     /// ★ "Lattice an optimized result": the names go only where its run carried them — every one the run had but the
@@ -129,7 +128,10 @@ final class LatticeE2WiringHostedTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(app.makeRunRequest(lattice: true)).loadGroups.isEmpty, "★ Optimize, then lattice too")
         XCTAssertEqual(try XCTUnwrap(app.makeRunRequest(lattice: false)).loadGroups, before.loadGroups,
                        "★ Topology's own Optimize keeps every group")
-        _ = try h.onScreen("latticeResultKeepsGroups", "★ the result's re-lattice keeps every group, said once")
+        // ★ his iPad notes 11-22 ("NOTHING cuts into the modal"): the result's re-lattice keeping every group is the panel's (i)
+        XCTAssertNil(h.frames.all["latticeResultKeepsGroups"], "★ 11-22: no note inside the panel")
+        _ = try h.onScreen("latticeTopologyInfo", "★ the panel's (i), which says it")
+        XCTAssertTrue(TopologyViewCopy.panelInfo.contains(LatticeSetupCopy.resultKeepsGroups))
         XCTAssertNil(h.frames.all["latticeIncludeWaits"], "a group's switch is live in the app: no engine line")
 
         p.lattice.topologyExcluded.insert(hold.id)
@@ -149,7 +151,8 @@ final class LatticeE2WiringHostedTests: XCTestCase {
         _ = try h.probe("latticeInclude-\(protected.id.uuidString)", "a hold that carries a Protect has its switch")
         p.lattice.topologyExcluded.insert(protected.id)
         h.pump(0.5)
-        _ = try h.onScreen("latticeProtectStillApplies", "★ Protect still applies, said once")
+        XCTAssertNil(h.frames.all["latticeProtectStillApplies"], "★ 11-22: no note inside the panel")
+        XCTAssertTrue(TopologyViewCopy.panelInfo.contains(LatticeSetupCopy.protectStillApplies), "★ Protect still applies: the (i)")
         XCTAssertEqual(try XCTUnwrap(app.makeLatticeRunRequest()).faceProtections, protections, "★ the job keeps the Protect")
         XCTAssertEqual(LatticeSetupCopy.protectStillApplies, "Protect and Keep clear still apply to switched-off groups.")
         // a Protect-only group shows no switch, and a stored "off" for it (an older s2a project) leaves nothing out

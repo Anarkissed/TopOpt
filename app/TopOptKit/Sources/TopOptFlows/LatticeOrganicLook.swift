@@ -83,7 +83,10 @@ public struct LatticeOrganicLook: Codable, Equatable, Sendable {
     /// ★ Whether the engine takes a group's own Organic finish (OJ1/OJ2/OJ8): ON since claude/organic-engine is merged (11-20).
     nonisolated(unsafe) public static var finishWired = true
     public init() {}
-    public var lookPercentValue: Double { Swift.min(Swift.max(lookPercent ?? 50, 1), 100) }
+    public var lookPercentValue: Double { Swift.min(Swift.max(lookPercent ?? Self.lookDefault, 1), 100) }
+    /// ★ his 11-20: Look starts at 15 ("whichever looks like it is now": Look 1 is exactly the old 50 %, 15 the closer of
+    /// his 15 and 25 — on his 18 mm group cells 2 to 6.5 mm against the old 2 to 8).
+    public static let lookDefault = 15.0
 
     // MARK: the resolved values (nil = Auto, his judged stand jobs' values)
 
@@ -113,9 +116,7 @@ public struct LatticeOrganicLook: Codable, Equatable, Sendable {
     /// iPad (the Gradient line too, since the engine's organic_follow_stress, OP6, merged in 3aa1e8f1).
     public static func offered(_ o: Option) -> Bool { true }
     /// The page's (i) on Look (Organic, Auto): his 11-18 "Look should change ALL the variables by messing with the cell range".
-    public static let lookInfo = "Look moves the whole cell range: 50 % is the range measured for your part, higher is "
-        + "finer (smaller cells), lower is more open. Everything counted in cells follows it; strut thickness does not. "
-        + "Manual shows every Organic setting, starting from the range Look gives."
+    public static var lookInfo: String { OrganicSettingsHelp.entry("Look")!.info }   // ★ his 1-100 rule (11-20)
     /// ★ His 11-18 iPad notes: on the page's Auto only Look shows, and every other setting is Auto.
     public func effective(pageManual: Bool) -> LatticeOrganicLook {
         guard !pageManual else { return self }
@@ -181,12 +182,20 @@ public struct LatticeOrganicLook: Codable, Equatable, Sendable {
         /// (100 % gives 0.5) — to the nearest 0.5 mm, the lower end never under the smallest printable cell (1.535 x the
         /// thin strut) nor, cut 2's gap rule (OG1), under the thin strut plus the gap (up to 0.5 mm: the engine refuses less),
         /// the upper never under the lower. Struts are not moved. At 50 % the measured limits themselves.
+        /// ★ his rule (11-19, kept 11-20): "1 = barely any; 100 = almost solid" (LatticeReview's form, 11-19 20:48Z): S the
+        /// smallest cell the engine allows (the print floor and the gap), U the largest cell the area measures; p = (Look-1)/99;
+        /// upper = U (S/U)^p; lower = max(S, upper / (1 + 3 (1 - p))). Look 1 = U/4 to U (the measured range), Look 100 = S to S.
+        /// To the half millimetre, never under S. Struts are not moved.
         public func looked(percent p: Double) -> Limits {
             let pc = Swift.min(Swift.max(p, 1), 100)
-            let f = pc <= 50 ? pow(2, (50 - pc) / 49) : pow(2, -(pc - 50) / 50)
+            let t = (pc - 1) / 99
+            let s = Check.smallestCellMM(thinStrutMM: strutLowerMM, gapMM: gapMM)
+            let u = Swift.max(cellUpperMM, s)
+            let upper = u * pow(s / u, t)
+            let lower = Swift.max(s, upper / (1 + 3 * (1 - t)))
             var l = self
-            l.cellLowerMM = Swift.max(Check.half(cellLowerMM * f), Check.smallestCellMM(thinStrutMM: strutLowerMM, gapMM: gapMM))
-            l.cellUpperMM = Swift.max(l.cellLowerMM, Check.half(cellUpperMM * f))
+            l.cellLowerMM = Swift.max(Check.half(lower), s)
+            l.cellUpperMM = Swift.max(l.cellLowerMM, Check.half(upper))
             l.cellAutoMM = Swift.max(l.cellLowerMM, Check.half((l.cellLowerMM + l.cellUpperMM) / 2))
             return l
         }
@@ -217,6 +226,8 @@ public struct LatticeOrganicLook: Codable, Equatable, Sendable {
         /// least the cell that leaves the gap between struts (`gapMM`, 0: no gap rule); large >= small.
         public static func cell(small: Double, large: Double, thinStrutMM: Double, gapMM: Double = 0) -> String? {
             if !(small > 0) { return "Cell size: the small end must be above 0 mm" }
+            if small > cellMaxMM { return "Cell size: the small end must be above 0 and at most \(n(cellMaxMM)) mm." }
+            if large > cellMaxMM { return "Cell size: the large end must be at most \(n(cellMaxMM)) mm." }
             let printFloor = smallestCellMM(thinStrutMM: thinStrutMM), gapFloor = gapCellMM(thinStrutMM: thinStrutMM, gapMM: gapMM)
             if small < Swift.max(printFloor, gapFloor) - 1e-9 {
                 return gapFloor > printFloor
@@ -229,12 +240,17 @@ public struct LatticeOrganicLook: Codable, Equatable, Sendable {
         /// Strut thickness (rule a): the thin end at least two printed lines; the thick end at least the thin end.
         public static func strut(thin: Double, thick: Double?, thinnestMM: Double) -> String? {
             if thin < thinnestMM - 1e-9 { return "Strut thickness: at least \(n(thinnestMM)) mm, two printed lines" }
+            if thin > strutMaxMM { return "Strut thickness: the thin end must be at most \(n(strutMaxMM)) mm." }
+            if let k = thick, k > strutMaxMM { return "Strut thickness: the thick end must be at most \(n(strutMaxMM)) mm." }
             if let k = thick, k < thin - 1e-9 { return "Strut thickness: the second number must be at least the first" }
             return nil
         }
         /// A gap in local spacings (rule d): the wide end above 0; the close end 0 (off) or above 0 and up to the wide end.
-        public static func gap(_ name: String, close: Double?, wide: Double) -> String? {
+        /// `zeroOff`: 0 turns it off (Wall seed gap, the engine's "0 or less = off"); else it must be above 0.
+        public static func gap(_ name: String, close: Double?, wide: Double, zeroOff: Bool = false) -> String? {
+            if zeroOff, wide == 0, (close ?? 0) == 0 { return nil }
             if !(wide > 0) { return "\(name): must be above 0" }
+            if wide > spacingsMax || (close ?? 0) > spacingsMax { return "\(name): it must be at most \(n(spacingsMax)) spacings." }
             if let c = close, c < 0 || c > wide + 1e-9 { return "\(name): the first number is 0 (off) or up to the second" }
             return nil
         }
@@ -244,6 +260,17 @@ public struct LatticeOrganicLook: Codable, Equatable, Sendable {
         }
         public static func link(_ v: Double) -> String? { (0.5...2).contains(v) ? nil : "Link thickness: 0.5 to 2 times the strut" }
         public static func atLeastZero(_ name: String, _ v: Double) -> String? { v >= 0 ? nil : "\(name): 0 or above" }
+        /// ★ the engine's upper limits (bc34b79c, over_upper_limit), each said with the whole range.
+        public static let cellMaxMM = 200.0, strutMaxMM = 50.0, spacingsMax = 20.0, reachMax = 10.0
+        public static func seeds(_ v: Double) -> String? {
+            v <= spacingsMax ? nil : "Seeds (feet apart): it must be at most \(n(spacingsMax)) spacings (0 is off)."
+        }
+        public static func run(_ name: String, _ v: Double) -> String? {
+            (0...spacingsMax).contains(v) ? nil : "\(name): it must be from 0 (off) to \(n(spacingsMax)) spacings."
+        }
+        public static func reach(_ v: Double) -> String? {
+            (0...reachMax).contains(v) ? nil : "Grade to shape reach: it must be from 0 (off) to \(n(reachMax)) times."
+        }
         public static func runsPerEnd(_ v: Double) -> String? {
             v >= 1 && v == v.rounded() ? nil : "Runs per end: a whole number, 1 or more"
         }

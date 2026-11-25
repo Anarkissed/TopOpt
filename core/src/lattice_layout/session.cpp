@@ -7,8 +7,35 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <exception>
+#include <typeinfo>
+#if defined(__has_include)
+#if __has_include(<cxxabi.h>)
+#include <cxxabi.h>
+#define TOPOPT_SB1_CXXABI 1
+#endif
+#endif
 
 namespace topopt::lattice_layout {
+
+// SB1 (leg Q): the refusal for an exception that is not a std::exception, its type named for the log.
+OrganicRefusal core_stopped(const std::string& what) {
+  OrganicRefusal r;
+  r.code = "core_stopped";
+  r.text = what + ": the engine stopped on an internal error. Try again; if it happens again, the log says what it was.";
+  std::string type = "an exception of a type that cannot be named";
+#ifdef TOPOPT_SB1_CXXABI
+  if (const std::type_info* t = abi::__cxa_current_exception_type()) {
+    int st = 0;
+    char* d = abi::__cxa_demangle(t->name(), nullptr, nullptr, &st);
+    type = std::string("a ") + (d ? d : t->name());
+    std::free(d);
+  }
+#endif
+  r.detail = type + " was thrown and is not a std::exception";
+  return r;
+}
 namespace {
 double ms_since(std::chrono::steady_clock::time_point t0) {
   return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
@@ -76,7 +103,19 @@ Session::Session(StepModel model) : model_(std::move(model)) {
 }
 
 Outcome Session::lay(const Settings& settings, int threads, const std::atomic<bool>* stop) {
+  try {   // SB1: nothing but a std::exception or a refusal leaves this call
   return lay_with(settings, nullptr, threads, stop);
+  } catch (const LayCancelled&) {
+    Outcome none;
+    none.cancelled = true;
+    return none;
+  } catch (const std::exception&) {
+    throw;
+  } catch (...) {
+    Outcome none;
+    none.refused.push_back(core_stopped("The lattice could not be laid out"));
+    return none;
+  }
 }
 
 Outcome Session::lay_weave(const Settings& settings, const std::vector<Strand>& strands, int threads,
@@ -110,6 +149,7 @@ void Session::ready_domain(const Settings& settings) {
       region.cover_mm = r.cover_mm;
       region.weave = r.weave;
       region.cover_open_face = r.weave && !zone;   // OJ2: an Organic area's Solid closes its open face only
+      region.from_zone = zone && r.faces.empty() && !cut;   // OG2f
       spec.regions.push_back(std::move(region));
     }
     for (const Settings::ProtectAsk& p : settings.protect)
@@ -129,6 +169,7 @@ void Session::ready_domain(const Settings& settings) {
     }
     domain_ = std::make_unique<Domain>(*measure_, std::move(spec));
     where_ = where;
+    ++domain_epoch_;   // his 11-22 item 2: strands kept for the old domain are never read for this one
     unread_ = true;
     ref_kept_ = false;   // the reference is the new domain's to read again
     ref_field_.reset();
@@ -199,6 +240,65 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
     out.stress_reference_mpa = reference;
     out.step_held_at = step_held(cells);   // C24
     out.layout = lay_cells(*domain_, cells, threads, own_or_none);
+    // K3 (his 11-23 notes: quilting "should ALWAYS be off by default unless it is literally impossible to lattice without
+    // it"): with the quilt off, a Lattice region that lays NO cell at all (every place of it solid: its walls too thin
+    // for the smallest cell the thinnest strut leaves open) is laid again with the quilt's smallest cell, that region
+    // only, and named (Outcome::quilt_regions). Every other region keeps the layout it had, byte for byte. The struts are
+    // still set without the quilt (a small cell carries the thinnest strut), as with Small cells in thin walls.
+    // Only where the cell is Auto (cell_mm 0, the part's or the region's own, C23): a typed cell is his choice, and one
+    // that fits nowhere stays solid (his D4: "Cannot Lattice"; 362, 2026-11-24: quilt cells instead of his typed size
+    // ignore it).
+    if (!cells.allow_quilt) {
+      std::vector<int> bare;   // frames of regions with no cell and something solid, whose cell is Auto
+      for (const RegionCells& r : out.layout.regions) {
+        if (!(r.cells == 0 && r.solid > 0)) continue;
+        const auto o = own.find(r.region);
+        const double typed = o != own.end() ? region_cells(cells, o->second).cell_mm : cells.cell_mm;
+        if (!(typed > 0.0)) bare.push_back(r.frame);
+      }
+      if (!bare.empty()) {
+        CellSpec quilt = cells;
+        quilt.allow_quilt = true;
+        Layout again = lay_cells(*domain_, quilt, threads, own_or_none);
+        Layout& a = out.layout;
+        // The two lays open the same frames in the same order (one per region, region by region): a region's frame,
+        // walls, cells and solid places are taken from the second where it lays cells there.
+        if (again.frames.size() == a.frames.size() && again.regions.size() == a.regions.size()) {
+          std::vector<char> take(a.frames.size(), 0);
+          for (const int f : bare)
+            for (const RegionCells& r : again.regions)
+              if (r.frame == f && r.cells > 0 && static_cast<std::size_t>(f) < take.size()) take[static_cast<std::size_t>(f)] = 1;
+          bool any = false;
+          for (const char t : take) any = any || t;
+          if (any) {
+            std::vector<Cell> cells_now, solid_now;
+            std::vector<SolidWhy> why_now;
+            for (const Cell& c : a.cells)
+              if (!take[static_cast<std::size_t>(c.frame)]) cells_now.push_back(c);
+            for (std::size_t i = 0; i < a.solid.size(); ++i)
+              if (!take[static_cast<std::size_t>(a.solid[i].frame)]) { solid_now.push_back(a.solid[i]); why_now.push_back(a.solid_why[i]); }
+            for (const Cell& c : again.cells)
+              if (take[static_cast<std::size_t>(c.frame)]) cells_now.push_back(c);
+            for (std::size_t i = 0; i < again.solid.size(); ++i)
+              if (take[static_cast<std::size_t>(again.solid[i].frame)]) {
+                solid_now.push_back(again.solid[i]);
+                why_now.push_back(again.solid_why[i]);
+              }
+            for (std::size_t f = 0; f < take.size(); ++f)
+              if (take[f]) a.walls[f] = again.walls[f];
+            for (std::size_t i = 0; i < a.regions.size(); ++i)
+              if (take[static_cast<std::size_t>(a.regions[i].frame)]) {
+                a.regions[i] = again.regions[i];
+                out.quilt_regions.push_back(a.regions[i].region);
+              }
+            a.cells.swap(cells_now);
+            a.solid.swap(solid_now);
+            a.solid_why.swap(why_now);
+            if (a.absorb) a.index = index_cells(a);
+          }
+        }
+      }
+    }
     unread_ = false;
     if (strands)   // O2: each weave region carries the smallest spacing of its strands
       for (Layout::Weave& w : out.layout.weave)
@@ -369,6 +469,52 @@ std::vector<Place> Session::places(const Settings& settings) const {
   const CellSpec& c = settings.cells;
   return find_places(model_, *domain_, domain_no_chips_.get(), chip_ids_, settings.regions, last_cells_,
                      c.cell_max_mm > 0.0 ? c.cell_max_mm : c.cell_mm);
+}
+
+// ── his 11-22: watch it grow ────────────────────────────────────────────────────
+void GrowthTap::start() {
+  std::lock_guard<std::mutex> lock(m_);
+  ++lay_;
+  phase_ = 1;
+  xyz_.clear();
+  region_.clear();
+  batch_xyz_.clear();
+  batch_region_.clear();
+}
+
+void GrowthTap::flush() {
+  if (batch_region_.empty()) return;
+  std::lock_guard<std::mutex> lock(m_);
+  xyz_.insert(xyz_.end(), batch_xyz_.begin(), batch_xyz_.end());
+  region_.insert(region_.end(), batch_region_.begin(), batch_region_.end());
+  batch_xyz_.clear();
+  batch_region_.clear();
+}
+
+void GrowthTap::phase(int p) {
+  flush();
+  std::lock_guard<std::mutex> lock(m_);
+  phase_ = p;
+}
+
+void GrowthTap::piece(int region, const Vec3& a, const Vec3& b) {
+  for (const double v : {a.x, a.y, a.z, b.x, b.y, b.z}) batch_xyz_.push_back(static_cast<float>(v));
+  batch_region_.push_back(region);
+  if (batch_region_.size() >= 256) flush();
+}
+
+GrowthTap::Read GrowthTap::read(std::size_t from, std::size_t most) const {
+  std::lock_guard<std::mutex> lock(m_);
+  Read r;
+  r.lay = lay_;
+  r.phase = phase_;
+  const std::size_t n = region_.size();
+  const std::size_t a = std::min(from, n);
+  const std::size_t b = most > 0 ? std::min(n, a + most) : n;
+  r.xyz.assign(xyz_.begin() + static_cast<long>(6 * a), xyz_.begin() + static_cast<long>(6 * b));
+  r.region.assign(region_.begin() + static_cast<long>(a), region_.begin() + static_cast<long>(b));
+  r.next = b;
+  return r;
 }
 
 }  // namespace topopt::lattice_layout

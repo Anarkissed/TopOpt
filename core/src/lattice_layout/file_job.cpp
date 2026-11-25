@@ -196,7 +196,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "protect_face_counts", "protect_faces", "protect_pieces", "protect_chip", "topology", "algorithm", "cell_mm", "cell_max_mm",
        "cell_min_mm", "min_cells_across", "grade_to_shape", "band_mm", "band_cell_mm",
        "per_region", "dial", "dial_region", "dial_value", "strut_width_mm", "allow_quilt",
-       "strength", "small_cells_in_thin_walls", "one_grid", "cells_by_stress", "bars", "join_loose", "skin", "skin_density", "skin_sink",
+       "strength", "small_cells_in_thin_walls", "one_grid", "cell_search", "stretch_edges", "cells_by_stress", "bars", "join_loose", "skin", "skin_density", "skin_sink",
        "skin_width_mm", "skin_reach_cells", "drop_loose", "by_stress", "dial_light", "dial_heavy", "width_light_mm",
        "width_heavy_mm", "reference_mpa", "percentile", "response", "region_own", "max_step", "region_weave", "organic_spacing_mm",
        "organic_width_mm", "organic_spacing_min_mm", "organic_spacing_max_mm", "organic_spacing_exponent",
@@ -366,6 +366,8 @@ Settings settings_from(const json::Value& in, const std::string& w) {
   s.cells.band_cell_mm = num(in, "band_cell_mm", s.cells.band_cell_mm, w);
   s.cells.by_stress = flag(in, "cells_by_stress", s.cells.by_stress, w);   // C22
   s.cells.max_step = num(in, "max_step", s.cells.max_step, w);            // C24
+  s.cells.cell_search = flag(in, "cell_search", s.cells.cell_search, w);          // K7
+  s.cells.stretch_edges = flag(in, "stretch_edges", s.cells.stretch_edges, w);    // K8
 
   const bool per_region = flag(in, "per_region", false, w), by_stress = flag(in, "by_stress", false, w);
   if (per_region && by_stress) json::fail(w, "by_stress and per_region cannot both be on: pick one density");
@@ -532,7 +534,8 @@ FileOptions options_from(const json::Value& in, const std::string& w) {
                        {"pitch_mm", "bar_sides", "block_mm", "grow_mm", "clean_mm", "part_mm",
                         "fill_under_mm3", "bridge_rise", "post_mm", "layer_mm", "pixel_mm", "most_passes",
                         "leave_out", "keep_if_not_clean", "weave_stand_every_mm", "weave_foot_mm", "weave_round_top",
-                        "weave_sag_lift_mm", "weave_sag_legs", "weave_mesh", "tube_sides"},
+                        "weave_sag_lift_mm", "weave_sag_legs", "weave_mesh", "tube_sides", "tube_facet_mm",
+                        "weave_bridge_domes", "weave_fold_split"},
                        w);
   FileOptions o;
   o.pitch_mm = num(in, "pitch_mm", o.pitch_mm, w);
@@ -560,6 +563,12 @@ FileOptions options_from(const json::Value& in, const std::string& w) {
   }
   o.mesh.tube_sides = whole(in, "tube_sides", o.mesh.tube_sides, w);   // OF2
   if (o.mesh.tube_sides < 3) json::fail(w + ".tube_sides", "must be 3 or more");
+  // OS1: the vine shape (the file's defaults on; false / 0 the file as before).
+  o.mesh.tube_facet_mm = num(in, "tube_facet_mm", o.mesh.tube_facet_mm, w);   // A (ruling R1)
+  if (!(o.mesh.tube_facet_mm == 0.0 || (o.mesh.tube_facet_mm >= 0.005 && o.mesh.tube_facet_mm <= 0.5)))
+    json::fail(w + ".tube_facet_mm", "must be 0 (every tube tube_sides sides) or 0.005 to 0.5 mm");
+  o.mesh.weave_bridge_domes = flag(in, "weave_bridge_domes", o.mesh.weave_bridge_domes, w);   // B
+  o.mesh.weave_fold_split = flag(in, "weave_fold_split", o.mesh.weave_fold_split, w);         // D
   o.layers.layer_mm = num(in, "layer_mm", o.layers.layer_mm, w);
   o.layers.pixel_mm = num(in, "pixel_mm", o.layers.pixel_mm, w);
   o.most_passes = whole(in, "most_passes", o.most_passes, w);
@@ -706,6 +715,7 @@ TriangleMesh make_file_mesh(const Session& session, const Layout& layout, const 
   spec.layers.stop = stop;
   spec.most_passes = options.most_passes;
   spec.leave_out = options.leave_out;
+  spec.said = options.said;
   PrintableReport made;
   TriangleMesh mesh = build_printable_mesh(session.measure(), *domain, layout, bars, open, spec, &made);
   report.mesh = made.mesh;
@@ -721,9 +731,16 @@ TriangleMesh make_file_mesh(const Session& session, const Layout& layout, const 
   report.relief_flushed = made.relief_flushed;
   report.relief_flushed_at = made.relief_flushed_at;   // OJ6
   report.relief_rounds = made.relief_rounds;
+  report.domes_flattened = made.domes_flattened;   // OS1 B
+  report.flat_domes_at = made.flat_domes_at;       // leg U
+  report.dome_rounds = made.dome_rounds;
   report.weave_specks_ignored = made.weave_specks_ignored;
   report.weave_held_ignored = made.weave_held_ignored;
   report.part_overhangs = made.part_overhangs;
+  report.part_overhang_at = made.part_overhang_at;   // P3
+  report.own_by_k1 = made.own_by_k1;                 // K1
+  report.posts_outside = made.posts_outside;           // ★ 362 11-23 (F2)
+  report.stopped_repeating = made.stopped_repeating;   // ★ 362 11-23 (F3)
   report.sags = made.sags;
   report.sagged = made.sagged;
   report.tubes = made.tubes;
@@ -1042,7 +1059,7 @@ FileJob parse_file_job(const std::string& json_text) {
     const std::string w = "job.json";
     json::as_object(doc, w);
     json::reject_unknown(doc, {"mode", "model", "output", "linear_deflection", "threads", "layout", "mesh", "demand",
-                               "strength_job", "tensor", "file_format", "strengthened"},
+                               "strength_job", "tensor", "file_format", "strengthened", "print_frame"},
                          w);
     const std::string mode = json::as_string(json::require(doc, "mode", w), w + ".mode");
     if (mode != "lattice_file") json::fail(w + ".mode", "must be \"lattice_file\", not \"" + mode + "\"");
@@ -1083,6 +1100,14 @@ FileJob parse_file_job(const std::string& json_text) {
       job.strengthened = text(doc, "strengthened", "", w);
       if (job.strengthened.empty()) throw FileJobError("\"strengthened\" must name a strengthened.json");
     }
+    // P2, his print orientation: {"up": [x, y, z]} (print_frame.hpp). Phase 1: one of the part's six axes.
+    if (const json::Value* pf = json::find(doc, "print_frame")) {
+      const std::string at = w + ".print_frame";
+      json::as_object(*pf, at);
+      json::reject_unknown(*pf, {"up"}, at);
+      std::string why;
+      if (!print_frame_for_up(vec3(*pf, "up", at), job.print_frame, &why)) json::fail(at + ".up", why);
+    }
     if (json::find(doc, "tensor")) {
       job.tensor = text(doc, "tensor", "", w);
       if (job.tensor.empty() || job.tensor == "." || job.tensor == ".." ||
@@ -1101,7 +1126,7 @@ FileJob parse_file_job(const std::string& json_text) {
           const json::Value& go = json::as_object(list[g], ga);
           json::Value merged = *v;
           for (const auto& [k, val] : go.obj) {
-            if (k == "regions") continue;
+            if (k == "regions" || k == "name") continue;   // notes27: the group's name, said back, never laid
             if (k.rfind("organic_", 0) != 0 || k == "organic_groups")
               json::fail(ga + "." + k, "is not an Organic setting a group can hold (a group holds \"regions\" and organic_* keys)");
             bool found = false;
@@ -1111,6 +1136,7 @@ FileJob parse_file_job(const std::string& json_text) {
           }
           OrganicGroup og;
           og.regions = wholes(go, "regions", ga);
+          if (json::find(go, "name")) og.name = text(go, "name", "", ga);
           if (og.regions.empty()) json::fail(ga + ".regions", "must name the group's Organic areas");
           og.ask = organic_from(merged, job.settings, ga);
           job.organic_groups.push_back(std::move(og));
@@ -1170,8 +1196,10 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
                              const StrengthCheck* strength) {
   FileResult r;
   const auto t_all = std::chrono::steady_clock::now();
+  r.print_frame = job.print_frame;   // P2: off for every job without "print_frame"
   const auto done = [&]() -> FileResult& {
     r.ms_total += ms_since(t_all);
+    turn_result_to_model(r.print_frame, r);   // P2: the positions in the model frame (nothing when off)
     return r;
   };
   try {
@@ -1296,7 +1324,8 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     say(said, "laying the lattice");
     // OS16 (brief E4, leg 2): strengthening's additions are replayed with the file's print check before the first
     // round and after each, as the strengthen job made them.
-    const FileOptions options = file_options_for(job.options, any_weave);
+    FileOptions options = file_options_for(job.options, any_weave);
+    options.said = said;   // ★ 362 11-23: a line per try of the print check
     OrganicAsk organic = job.organic;
     if (any_weave && !organic.additions.empty()) organic.print_check = print_check_hook(session, options, stop);
     std::vector<OrganicGroup> groups = job.organic_groups;   // OJ3
@@ -1329,6 +1358,9 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     r.adrift = out.pieces.adrift;
     r.stepped_edges = out.stepped_edges.size();
     r.thin_solid = out.thin_solid;
+    r.small_patch_cells = out.layout.small_patch_cells;   // K5
+    r.quilt_regions = out.quilt_regions;                  // K3
+    r.cell_search = out.layout.cell_search;               // K7, K8
     r.cells_by_stress = out.cells_by_stress;
     r.step_held_at = out.step_held_at;   // C24
     r.floor_cell_mm = out.layout.floor_cell_mm;
@@ -1383,7 +1415,7 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
 
     say(said, "making the file");
     // OF4: a job with a weave region takes the tubes route unless it asked for one (file_options_for, above).
-    const TriangleMesh mesh = make_file_mesh(session, out, options, r.made, stop);
+    TriangleMesh mesh = make_file_mesh(session, out, options, r.made, stop);   // (Phase 2: stand supports may cut it)
     if (!r.made.mesh.ok || mesh.empty()) {
       refuse(r, kMeshFailed,
              r.made.mesh.why.empty() ? "The lattice file could not be put together. Nothing was made."
@@ -1398,21 +1430,51 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     if (!r.made.print_clean && !job.options.keep_if_not_clean) {
       const std::size_t mid = r.made.layers.mid_air.size(), one = r.made.layers.one_ended.size(),
                         far = r.made.layers.long_bridges.size();
-      char line[320];
+      // ★ 362 11-23: only what was found is named (his refusal said "0 places ... 0 overhangs ... and 1 bridge").
+      std::vector<std::string> found;
+      char part[160];
+      if (mid) { std::snprintf(part, sizeof part, "%zu place%s that would start printing in mid-air", mid, mid == 1 ? "" : "s"); found.push_back(part); }
+      if (one) { std::snprintf(part, sizeof part, "%zu overhang%s held at one end only", one, one == 1 ? "" : "s"); found.push_back(part); }
+      if (far) { std::snprintf(part, sizeof part, "%zu bridge%s longer than a printer can span", far, far == 1 ? "" : "s"); found.push_back(part); }
+      std::string what;
+      for (std::size_t k = 0; k < found.size(); ++k)
+        what += (k == 0 ? "" : k + 1 == found.size() ? " and " : ", ") + found[k];
+      if (what.empty()) what = "a place that would not print";
+      char line[480];
       std::snprintf(line, sizeof line,
-                    "After %d tries the lattice still has %zu place%s that would start printing in mid-air, %zu overhang%s "
-                    "held at one end only and %zu bridge%s longer than a printer can span. No file was made. A larger cell "
-                    "or a Protect skin near those places usually fixes it.",
-                    r.made.builds, mid, mid == 1 ? "" : "s", one, one == 1 ? "" : "s", far, far == 1 ? "" : "s");
+                    "After %d tries the lattice still has %s. No file was made. A larger cell or a Protect skin near "
+                    "those places usually fixes it.",
+                    r.made.builds, what.c_str());
       // OG2c (brief E6, leg C): a refusal says where (x, y, z mm, each finding).
       std::string where = "at";
-      for (const Vec3& p : r.made.findings_at) {
+      for (const Vec3& q : r.made.findings_at) {
+        const Vec3 p = job.print_frame.point_to_model(q);   // P2: where, in the part's own coordinates
         char b[96];
         std::snprintf(b, sizeof b, " (%.2f, %.2f, %.2f)", p.x, p.y, p.z);
         where += b;
       }
       refuse(r, kWouldNotPrint, line, r.made.findings_at.empty() ? std::string() : where);
       return done();
+    }
+
+    // P4 (Phase 2): the candidates the part can rest on (its hull's faces and edges), for the strength check to judge
+    // and, when the job itself stands the part on an EDGE (his "edges held by supports"), for its stand supports: bands
+    // on the edge's two faces, as wide as the centre of mass needs (orientation_stand), cut into the mesh and painted.
+    OrientationCandidates cands;
+    if (!job.strength_job.empty() || job.print_frame.on)
+      cands = print_candidates(mesh, r.made.tubes ? r.made.base_triangles : 0);
+    StandPaint stand;
+    if (!cands.list.empty() && cands.list.front().kind == OrientationCandidate::Kind::Edge) {
+      OrientationCandidate& c0 = cands.list.front();
+      orientation_stand(c0, mesh_centroid(mesh, r.made.tubes ? r.made.base_triangles : 0));
+      r.stand_edge = true;
+      r.stand = c0;
+      if (c0.stands && (!job.file_format.empty() ? job.file_format : r.made.tubes ? "3mf" : "stl") == "3mf") {
+        stand = paint_stand_supports(mesh, r.made.tubes ? r.made.base_triangles : 0, c0);
+        if (r.made.tubes) r.made.base_triangles += stand.added;
+        r.stand_triangles = stand.triangles;
+        r.stand_area_mm2 = stand.area_mm2;
+      }
     }
 
     say(said, "saving the file");
@@ -1432,15 +1494,38 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     std::size_t want = 84 + 50 * mesh.triangles.size();
     bool written = false;
     std::string write_detail;
+    // P3 (his print orientation, decision D6): the part's own overhangs stay the slicer's business, and the file now
+    // tells the slicer where: the part's triangles under them (never the lattice's: on the tubes route only the solid's
+    // first base_triangles) painted as support enforcers, and support turned on with only those places supported
+    // (support_paint.hpp; decision D4, Tree (manual)). A 3MF only: an STL cannot carry it.
+    r.part_overhang_places = r.made.part_overhang_at.size();
+    if (r.file_format == "3mf" && !r.made.part_overhang_at.empty()) {
+      SupportPaintAsk pa;
+      pa.layer_mm = options.layers.layer_mm;
+      pa.line_mm = session.domain()->spec().bead_mm;
+      pa.part_triangles = r.made.tubes ? r.made.base_triangles : 0;
+      pa.places = &r.made.part_overhang_at;
+      // air below = outside the part's own surface, read exactly (as F1 reads it; the domain's map is coarse at a face).
+      // Inside the part (its solid, or a lattice region) is never air: nothing is painted over the lattice.
+      const PartMeasure::Probe exact = session.measure().probe();
+      pa.outside = [&exact](const Vec3& p) { return exact.depth(p) < 0.0; };
+      r.painted = paint_supports(mesh, pa);
+    }
     try {
       if (r.file_format == "3mf") {
         StreamingThreeMfWriter::Options o;
         o.indexed = true;
         o.deflate = true;
+        o.supports = r.painted.triangles > 0 || stand.triangles > 0;   // P3: off (the file as before) when nothing is painted
+        o.object_name = base_name(file_path);
         StreamingThreeMfWriter w(part, o);
         for (const Vec3& v : mesh.vertices) w.add_vertex(v);
-        for (const auto& t : mesh.triangles)
-          w.add_indexed(static_cast<std::uint64_t>(t[0]), static_cast<std::uint64_t>(t[1]), static_cast<std::uint64_t>(t[2]));
+        for (std::size_t i = 0; i < mesh.triangles.size(); ++i) {
+          const auto& t = mesh.triangles[i];
+          const bool paint = (i < r.painted.painted.size() && r.painted.painted[i]) || (i < stand.painted.size() && stand.painted[i]);
+          w.add_indexed(static_cast<std::uint64_t>(t[0]), static_cast<std::uint64_t>(t[1]), static_cast<std::uint64_t>(t[2]),
+                        o.supports && paint);
+        }
         w.finish();
         r.compressed = w.compressed();
         want = size_of_file(part);
@@ -1453,6 +1538,16 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
       }
     } catch (const std::exception& e) {
       write_detail = e.what();
+    }
+    // His 11-22 (the print-accurate lattice made on the Mac, drawn on the iPad as soon as it is saved, before the strength
+    // check): beside a 3MF, "<file>.parts.json" says how many of its first triangles are the solid; written BEFORE the file
+    // is moved in, so whoever sees the file sees this too. The report says the same at the end ("base_triangles").
+    if (written && r.file_format == "3mf") {
+      if (std::FILE* f = std::fopen((file_path + ".parts.json").c_str(), "w")) {
+        std::fprintf(f, "{\"base_triangles\": %llu, \"triangles\": %llu}\n", static_cast<unsigned long long>(r.made.base_triangles),
+                     static_cast<unsigned long long>(mesh.triangles.size()));
+        std::fclose(f);
+      }
     }
     if (written && std::rename(part.c_str(), file_path.c_str()) != 0) {
       written = false;
@@ -1480,6 +1575,9 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
       ask.part_lo = part_lo;
       ask.part_hi = part_hi;
       ask.threads = job.options.threads;
+      ask.frame = job.print_frame;   // P2
+      // P4 (Phase 2): the candidates the part can rest on (hull faces, edges), their ups for the check to judge.
+      for (const OrientationCandidate& c : cands.list) ask.orientation_ups.push_back(c.up);
       // Brief E2, item 7: Organic is checked on the FINAL bars, as the file holds them.
       std::vector<char> kept;
       if (any_weave) {
@@ -1514,6 +1612,9 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
       r.strength_ran = true;
       r.strength_accepted = sd.accepted;
       r.strength_json = sd.json;
+      // P4: the print orientation ranking: the check's strength and support per candidate, the file's bed and height.
+      if (sd.orientation.known)
+        r.orientation_json = print_orientation_json(sd.orientation, cands, job.print_frame, options.layers.layer_mm);
     }
     r.file = file_path;
     r.file_bytes = want;
@@ -1524,8 +1625,8 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     refuse(r, kCancelled, "Stopped before the lattice file was finished. Nothing was made.");
   } catch (const std::exception& e) {
     refuse(r, kError, "Something went wrong while making the lattice file, and nothing was made.", e.what());
-  } catch (...) {
-    refuse(r, kError, "Something went wrong while making the lattice file, and nothing was made.");
+  } catch (...) {   // SB1: the type named for the log
+    refuse(r, kError, "Something went wrong while making the lattice file, and nothing was made.", core_stopped("").detail);
   }
   return done();
 }
@@ -1574,9 +1675,66 @@ bool load_file_job(const std::string& job_path, int threads, FileJob& job, StepM
       }
       job.tensor_field = std::move(field);
     }
+    // P2: with a print frame the part is opened first, so the door knows where its base is; then every input is turned
+    // (turn_file_job_inputs), and only then is a strengthening applied: it was made in the print frame.
+    const auto open_part = [&]() -> bool {
+      const std::string model_path =
+          !job.model.empty() && job.model[0] == '/' ? job.model : folder_of(job_path) + "/" + job.model;
+      say(said, "opening the part");
+      const auto t0 = std::chrono::steady_clock::now();
+      try {
+        StepTessellation tess;
+        if (job.linear_deflection > 0.0) tess.linear_deflection = job.linear_deflection;
+        model = import_part_file_resolved(model_path, tess);
+      } catch (const std::exception& e) {
+        refuse(r, kModelUnreadable,
+               "The part's file could not be opened on the Mac, so no lattice file was made.", e.what());
+        return false;
+      } catch (...) {
+        refuse(r, kModelUnreadable,
+               "The part's file could not be opened on the Mac, so no lattice file was made.");
+        return false;
+      }
+      r.ms_import = ms_since(t0);
+      return true;
+    };
+    if (job.print_frame.on) {
+      if (!open_part()) return false;
+      print_frame_set_base(job.print_frame, model.mesh);
+      if (!(g_print_frame_test_skip & kSkipModel)) turn_step_model(job.print_frame, model);
+      turn_file_job_inputs(job.print_frame, job);
+    }
     // Brief E2, item 11: a strengthen round's stress input, reference and floors in place of the job's own.
     if (!job.strengthened.empty()) {
       const std::string sp = job.strengthened[0] == '/' ? job.strengthened : folder_of(job_path) + "/" + job.strengthened;
+      // P2: a strengthening is made in its job's print frame; one made standing another way is refused, never applied.
+      {
+        std::ifstream sf(sp);
+        std::ostringstream st;
+        st << sf.rdbuf();
+        Vec3 made_up{0.0, 0.0, 1.0};
+        bool stated = false;
+        try {
+          const json::Value sd = json::parse(st.str(), "strengthened.json");
+          if (sd.is_object())
+            if (const json::Value* pu = json::find(sd, "print_up")) {
+              made_up = vec3(sd, "print_up", "strengthened.json");
+              stated = true;
+              (void)pu;
+            }
+        } catch (const std::exception&) {
+          // read again (and refused, with its own words) by apply_strengthened below
+        }
+        const Vec3 want = job.print_frame.on ? job.print_frame.up : Vec3{0.0, 0.0, 1.0};
+        const bool same = stated ? (made_up.x == want.x && made_up.y == want.y && made_up.z == want.z)
+                                 : !job.print_frame.on;
+        if (!same) {
+          refuse(r, kStrengthenedMismatch,
+                 "The strengthening sent with the lattice job was made with the part standing another way, so nothing "
+                 "was made. Strengthen it again.");
+          return false;
+        }
+      }
       // (version 2, brief E3a: the job's own stress stays; version 1 replaces it)
       auto field = job.tensor_field ? std::make_shared<TensorField>(*job.tensor_field) : std::make_shared<TensorField>();
       std::string why;
@@ -1597,24 +1755,7 @@ bool load_file_job(const std::string& job_path, int threads, FileJob& job, StepM
           }
       job.tensor_field = std::move(field);
     }
-    const std::string model_path =
-        !job.model.empty() && job.model[0] == '/' ? job.model : folder_of(job_path) + "/" + job.model;
-    say(said, "opening the part");
-    const auto t0 = std::chrono::steady_clock::now();
-    try {
-      StepTessellation tess;
-      if (job.linear_deflection > 0.0) tess.linear_deflection = job.linear_deflection;
-      model = import_part_file_resolved(model_path, tess);
-    } catch (const std::exception& e) {
-      refuse(r, kModelUnreadable,
-             "The part's file could not be opened on the Mac, so no lattice file was made.", e.what());
-      return false;
-    } catch (...) {
-      refuse(r, kModelUnreadable,
-             "The part's file could not be opened on the Mac, so no lattice file was made.");
-      return false;
-    }
-    r.ms_import = ms_since(t0);
+    if (!job.print_frame.on && !open_part()) return false;
     return true;
   };
   return run();
@@ -1662,12 +1803,23 @@ std::string file_result_json(const FileResult& r) {
   o += "  \"file\": \"" + escaped(base_name(r.file)) + "\",\n";
   std::snprintf(b, sizeof b, "  \"file_bytes\": %llu,\n", count(r.file_bytes));
   o += b;
+  // P2: the file stands on the chosen face (print frame); every position below is in the part's own coordinates.
+  if (r.print_frame.on) o += "  \"print_frame\": " + print_frame_json(r.print_frame) + ",\n";
   if (r.weave_regions > 0 && !r.file_format.empty()) {   // OF5: only for a job with a weave region that made its file
+    // P3: what the slicer is told about supports: "painted" (the part's own overhangs painted, support on for them
+    // only), "needed" (found, none could be painted), "off" (none).
+    const char* supports = r.painted.triangles > 0 || r.stand_triangles > 0 ? "painted"
+                           : r.part_overhang_places > 0 || r.stand_edge ? "needed" : "off";
     std::snprintf(b, sizeof b,
                   "  \"file_format\": \"%s\", \"weave_mesh\": \"%s\", \"shells\": %llu, \"shells_left_out\": %llu, "
-                  "\"compressed\": %s, \"slicer_supports\": \"off\",\n",
+                  "\"compressed\": %s, \"slicer_supports\": \"%s\",\n",
                   r.file_format.c_str(), r.weave_mesh.c_str(), count(r.made.shells.shells()), count(r.made.shells.left_out),
-                  r.compressed ? "true" : "false");
+                  r.compressed ? "true" : "false", supports);
+    o += b;
+    // His 11-22 (the print-accurate lattice made on the Mac, drawn on the iPad): the file's first `base_triangles` are the
+    // solid (the part, its skins, any cube lattice joined to it); every triangle after is a weave shell, so the app colours
+    // the lattice apart from the part exactly.
+    std::snprintf(b, sizeof b, "  \"base_triangles\": %llu,\n", count(r.made.base_triangles));
     o += b;
     // OV1: the swept vines (all 0 with organic_sweep off).
     const WeaveShells& ws = r.made.shells;
@@ -1685,6 +1837,43 @@ std::string file_result_json(const FileResult& r) {
       o += b;
     }
     o += "]},\n";
+    // OS1: the vine shape (all 0 with its settings off).
+    std::snprintf(b, sizeof b,
+                  "  \"shape\": {\"bridge_domes\": %llu, \"domes_flattened\": %llu, \"dome_rounds\": %d, "
+                  "\"fold_splits\": %llu, \"tube_sides\": [%d, %d], \"tubes\": %llu, \"bridges\": %llu, "
+                  "\"sharp_splits\": %llu, \"bridge_underside_mm2\": {\"level\": %.6g, \"own_bottom\": %.6g, "
+                  "\"curved_or_sloped\": %.6g}},\n",
+                  count(ws.bridge_domes), count(r.made.domes_flattened), r.made.dome_rounds, count(ws.fold_splits),
+                  ws.tube_sides_least, ws.tube_sides_most, count(ws.tubes), count(ws.bridges), count(ws.sharp_splits),
+                  ws.bridge_under_level_mm2, ws.bridge_under_own_mm2, ws.bridge_under_other_mm2);
+    o += b;
+  }
+  // P3: the part's own overhangs and what the file paints for them (written only when the print check found any).
+  if (r.part_overhang_places > 0 || r.stand_edge) {
+    const SupportPaint& p = r.painted;
+    std::snprintf(b, sizeof b,
+                  "  \"painted\": {\"places\": %llu, \"places_painted\": %llu, \"places_unpainted\": %llu, \"triangles\": %llu, "
+                  "\"area_mm2\": %.9g, \"est_volume_mm3\": %.9g, \"support_type\": \"%s\", \"at\": [",
+                  count(r.part_overhang_places), count(p.places), count(r.part_overhang_places - p.places),
+                  count(p.triangles), p.area_mm2, p.est_volume_mm3,
+                  p.triangles > 0 || r.stand_triangles > 0 ? "tree(manual)" : "");
+    o += b;
+    for (std::size_t i = 0; i < p.at.size(); ++i) {
+      std::snprintf(b, sizeof b, "%s[%.4f, %.4f, %.4f]", i ? ", " : "", p.at[i].x, p.at[i].y, p.at[i].z);
+      o += b;
+    }
+    o += "]";
+    // Phase 2: the part stands on an edge, held by its stand supports (bands on the edge's two faces).
+    if (r.stand_edge) {
+      const OrientationCandidate& c = r.stand;
+      std::snprintf(b, sizeof b,
+                    ", \"stand\": {\"rests_on\": \"edge\", \"stands\": %s, \"band_mm\": [%.9g, %.9g], \"triangles\": %llu, "
+                    "\"area_mm2\": %.9g, \"est_volume_mm3\": %.9g, \"edge_mm\": %.9g}",
+                    c.stands ? "true" : "false", c.band1_mm, c.band2_mm, count(r.stand_triangles), r.stand_area_mm2,
+                    c.stand_support_mm3, c.plate_mm2);
+      o += b;
+    }
+    o += "},\n";
   }
   std::snprintf(b, sizeof b, "  \"part\": {\"faces\": %d, \"triangles\": %llu, \"open_edges\": %llu},\n",
                 r.faces, count(r.part_triangles), count(r.open_edges));
@@ -1699,6 +1888,43 @@ std::string file_result_json(const FileResult& r) {
                 count(r.adrift), count(r.stepped_edges), count(r.thin_solid),
                 r.cells_by_stress ? "true" : "false", r.step_held_at);
   o += b;
+  if (r.small_patch_cells > 0) {   // K5: written only when the rule made a cell solid (else the report is as it was)
+    std::snprintf(b, sizeof b, "    \"small_patch_cells\": %llu,\n", count(r.small_patch_cells));
+    o += b;
+  }
+  if (!r.quilt_regions.empty()) {   // K3: written only when a region needed the quilt (else the report is as it was)
+    o += "    \"quilt_regions\": [";
+    for (std::size_t i = 0; i < r.quilt_regions.size(); ++i) o += (i ? ", " : "") + std::to_string(r.quilt_regions[i]);
+    o += "],\n";
+  }
+  if (!r.cell_search.empty()) {   // K7, K8: written only when asked (else the report is as it was)
+    o += "    \"cell_search\": [";
+    for (std::size_t i = 0; i < r.cell_search.size(); ++i) {
+      const Layout::CellSearch& c = r.cell_search[i];
+      o += (i ? ", " : "") + std::string("{\"region\": ") + std::to_string(c.region);
+      if (c.not_searched) {
+        o += ", \"not_searched\": \"" + escaped(c.why) + "\"}";
+        continue;
+      }
+      std::snprintf(b, sizeof b, ", \"chosen_mm\": %.6g, \"square_mm2\": %.6g, \"ms\": %.4g, \"tried\": [", c.chosen_mm,
+                    c.square_mm2, c.ms);
+      o += b;
+      for (std::size_t t = 0; t < c.tried.size(); ++t) {
+        const Layout::CellSearch::Tried& x = c.tried[t];
+        std::snprintf(b, sizeof b,
+                      "%s{\"base_mm\": %.6g, \"finest_mm\": %.6g, \"grades\": %s, \"slivers\": %llu, "
+                      "\"sliver_mm2\": %.6g, \"thinnest\": %.4g, \"at_bed\": %llu, \"bed_mm2\": %.6g}",
+                      t ? ", " : "", x.base_mm, x.finest_mm, x.grades ? "true" : "false", count(x.slivers), x.sliver_mm2,
+                      x.thinnest, count(x.at_bed), x.bed_mm2);
+        o += b;
+      }
+      std::snprintf(b, sizeof b, "], \"stretched\": %llu, \"taken_in\": %llu, \"slivers_left\": %llu, ",
+                    count(c.stretched), count(c.taken_in), count(c.slivers_left));
+      o += b;
+      o += "\"why\": \"" + escaped(c.why) + "\"}";
+    }
+    o += "],\n";
+  }
   if (r.weave_regions > 0) {   // Organic: written only for a job with a weave region (a cube-lattice result is the
                                // released engine's, byte for byte)
     std::snprintf(b, sizeof b, "    \"weave_regions\": %llu, \"strands\": %llu, \"weave_bars\": %llu,\n",
@@ -1759,8 +1985,14 @@ std::string file_result_json(const FileResult& r) {
       std::snprintf(b, sizeof b, "%s%d", i ? ", " : "", r.made.found_per_pass[i]);
       o += b;
     }
-    {   // OG2c (brief E6, leg C)
-      std::snprintf(b, sizeof b, "],\n    \"relief_flushed\": %llu, \"relief_rounds\": %d, \"findings_at\": [",
+    {   // OG2c (brief E6, leg C); ★ 362 11-23: the part's own overhangs (every lattice), F2's posts, F3's stop
+      std::snprintf(b, sizeof b, "],\n    \"own_overhangs\": %llu, \"posts_outside\": %llu, \"stopped_repeating\": %s",
+                    count(r.made.part_overhangs), count(r.made.posts_outside), r.made.stopped_repeating ? "true" : "false");
+      o += b;
+      // K1 (his rule, 2026-11-24: only what the app made is judged): how it differs from the far-point reading
+      std::snprintf(b, sizeof b, ", \"own_by_k1\": %llu", count(r.made.own_by_k1));
+      o += b;
+      std::snprintf(b, sizeof b, ",\n    \"relief_flushed\": %llu, \"relief_rounds\": %d, \"findings_at\": [",
                     count(r.made.relief_flushed), r.made.relief_rounds);
       o += b;
       for (std::size_t i = 0; i < r.made.findings_at.size(); ++i) {
@@ -1778,13 +2010,20 @@ std::string file_result_json(const FileResult& r) {
     o += "],\n    \"posts\": [";
     for (std::size_t i = 0; i < r.made.posts.size(); ++i) {
       const MeshSpec::Post& p = r.made.posts[i];
-      std::snprintf(b, sizeof b, "%s[%.4f, %.4f, %.4f, %.4f]", i ? ", " : "", p.x, p.y, p.z_bottom, p.z_top);
+      if (r.print_frame.on) {   // P2: a post stands along the print frame's up: its bottom and top, in the model frame
+        const Vec3 lo = r.print_frame.point_to_model({p.x, p.y, p.z_bottom}), hi = r.print_frame.point_to_model({p.x, p.y, p.z_top});
+        std::snprintf(b, sizeof b, "%s[%.4f, %.4f, %.4f, %.4f, %.4f, %.4f]", i ? ", " : "", lo.x, lo.y, lo.z, hi.x, hi.y, hi.z);
+      } else {
+        std::snprintf(b, sizeof b, "%s[%.4f, %.4f, %.4f, %.4f]", i ? ", " : "", p.x, p.y, p.z_bottom, p.z_top);
+      }
       o += b;
     }
     o += "]},\n";
   }
   // V4: written only when the check ran (V2); the block is the check's own.
   if (r.strength_ran) o += "  \"strength\": " + r.strength_json + ",\n";
+  // P4: written only when the check gave the six candidates' numbers.
+  if (!r.orientation_json.empty()) o += "  \"print_orientation\": " + r.orientation_json + ",\n";
   if (r.weave_regions > 0) {
     // Organic, Traced: the trace's time and the shallow-bar table (ShallowTable). Only for a job with a weave region.
     const ShallowTable& t = r.shallow;
@@ -1859,20 +2098,41 @@ std::string file_result_json(const FileResult& r) {
       const Outcome::Relief& rl = r.relief;
       std::snprintf(b, sizeof b,
                     ",\n    \"relief\": {\"surface_ends\": %llu, \"proud\": %llu, \"largest_mm\": %.9g, \"flush\": "
-                    "{\"excluded_face\": %llu, \"down_facing\": %llu, \"near_bed\": %llu, \"along_surface\": %llu}, "
+                    "{\"excluded_face\": %llu, \"down_facing\": %llu, \"near_bed\": %llu, \"along_surface\": %llu, "
+                    "\"no_lattice_zone\": {\"bars\": %llu, \"ends\": %llu}}, "
                     "\"faces_known\": %s, \"box_grew_mm\": {\"-x\": %.9g, \"+x\": %.9g, \"-y\": %.9g, \"+y\": %.9g, "
                     "\"-z\": %.9g, \"+z\": %.9g},\n      \"tube_proud_ends\": %llu, \"tube_proud_vertices\": %llu, "
                     "\"tube_proud_outside_mm\": %.9g,\n      \"along\": %llu, \"along_largest_mm\": %.9g, \"tube_along_bars\": %llu, "
                     "\"tube_along_vertices\": %llu, \"tube_along_outside_mm\": %.9g, \"file_box_grew_mm\": {\"-x\": %.9g, "
                     "\"+x\": %.9g, \"-y\": %.9g, \"+y\": %.9g, \"-z\": %.9g, \"+z\": %.9g}}",
                     count(rl.surface_ends), count(rl.proud), rl.largest_mm, count(rl.flush_excluded), count(rl.flush_down),
-                    count(rl.flush_bed), count(rl.flush_along), rl.faces_known ? "true" : "false", rl.grew_mm[0],
+                    count(rl.flush_bed), count(rl.flush_along), count(rl.flush_zone_bars), count(rl.flush_zone_ends),
+                    rl.faces_known ? "true" : "false", rl.grew_mm[0],
                     rl.grew_mm[1], rl.grew_mm[2], rl.grew_mm[3], rl.grew_mm[4], rl.grew_mm[5],
                     count(r.made.shells.proud_ends), count(r.made.shells.proud_vertices), r.made.shells.proud_outside_mm,
                     count(rl.along), rl.along_largest_mm, count(r.made.shells.along_bars), count(r.made.shells.along_vertices),
                     r.made.shells.along_outside_mm, r.made.shells.grew_mm[0], r.made.shells.grew_mm[1], r.made.shells.grew_mm[2],
                     r.made.shells.grew_mm[3], r.made.shells.grew_mm[4], r.made.shells.grew_mm[5]);
       o += b;
+      if (!rl.zone_footprints.empty()) {   // OG2e: the no-lattice zones' footprints made flat (inside the relief block)
+        o.pop_back();
+        o += ",\n      \"zone_footprints\": [";
+        for (std::size_t i = 0; i < rl.zone_footprints.size(); ++i) {
+          std::snprintf(b, sizeof b, "%s{\"zone\": %d, \"face\": %d, \"area_mm2\": %.9g}", i ? ", " : "",
+                        rl.zone_footprints[i].zone, rl.zone_footprints[i].face, rl.zone_footprints[i].area_mm2);
+          o += b;
+        }
+        o += "]";
+        // OG2f: where a zone would have left under two printed lines of solid under the face, none was made
+        std::snprintf(b, sizeof b, ",\n      \"thin_zone_solid_dropped\": {\"area_mm2\": %.9g, \"at\": [", rl.thin_zone_solid_dropped_mm2);
+        o += b;
+        for (std::size_t i = 0; i < rl.thin_zone_solid_dropped_at.size(); ++i) {
+          const Vec3& q = rl.thin_zone_solid_dropped_at[i];
+          std::snprintf(b, sizeof b, "%s[%.9g, %.9g, %.9g]", i ? ", " : "", q.x, q.y, q.z);
+          o += b;
+        }
+        o += "]}}";
+      }
     }
     o += "},\n";
   }

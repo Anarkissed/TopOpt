@@ -211,6 +211,9 @@ public enum DS {
     public enum Surface {
         /// Floating panel `rgba(24,24,30,0.62)`.
         public static let panel = RGBA(24, 24, 30, 0.62)
+        /// ★ his iPad notes 11-22 (img 45): the corner's drawers (Settings, the ⌃'s) — the system ⌃ menu's colour as he saw it,
+        /// sampled from his screenshot (≈ rgb 19, 20, 24 over the dark grid), all but opaque so the part never shows through.
+        public static let menu = RGBA(19, 20, 25, 0.97)
         /// Modal sheet `rgba(30,30,36,0.80)` (30/78 … 32/82 in the design; 0.80 mid).
         public static let sheet = RGBA(30, 30, 36, 0.80)
         /// Small dialog `rgba(32,32,38,0.82)`.

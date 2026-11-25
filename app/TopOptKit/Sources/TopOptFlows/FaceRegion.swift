@@ -296,6 +296,9 @@ public let kRegionSliverFloorVoxels = 16
 public struct FaceRegionModel: Equatable, Sendable, Codable {
     public private(set) var regions: [FaceRegion] = []
     private var nextID: RegionID = 100
+    /// ★ his 11-22 ("hold onto a name ... to rename the group/face/zone"): a face's own name, where he gave one.
+    public private(set) var faceNames: [Int32: String] = [:]
+    public mutating func setFaceName(_ f: Int32, _ name: String?) { faceNames[f] = name }
 
     public init() {}
 
@@ -796,19 +799,21 @@ public struct FaceRegionModel: Equatable, Sendable, Codable {
 
     // MARK: - Codable (forward-compatible)
 
-    private enum CodingKeys: String, CodingKey { case regions, nextID }
+    private enum CodingKeys: String, CodingKey { case regions, nextID, faceNames }
 
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         regions = try c.decodeIfPresent([FaceRegion].self, forKey: .regions) ?? []
         nextID = try c.decodeIfPresent(RegionID.self, forKey: .nextID)
             ?? ((regions.map(\.id).max() ?? 99) + 1)
+        faceNames = try c.decodeIfPresent([Int32: String].self, forKey: .faceNames) ?? [:]   // ★ 11-22 (absent ⇒ none)
     }
 
     public func encode(to e: Encoder) throws {
         var c = e.container(keyedBy: CodingKeys.self)
         try c.encode(regions, forKey: .regions)
         try c.encode(nextID, forKey: .nextID)
+        if !faceNames.isEmpty { try c.encode(faceNames, forKey: .faceNames) }   // older bytes unchanged
     }
 }
 

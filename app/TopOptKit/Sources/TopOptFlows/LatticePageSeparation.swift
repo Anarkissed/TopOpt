@@ -127,6 +127,9 @@ public struct WorkspaceStageVisibility: Equatable, Sendable {
     /// ★ §6 — the face-editing affordances: the hover preview, the cut's rotate
     /// control, the similar-faces double tap.
     public let surfaceEditing: Bool
+    /// ★ his iPad notes 11-22 (img 6): Lattice Setup with its Topology panel open edits Topology's groups — a group's row
+    /// there is Topology's (its keep-clear editor), while the stage keeps the lattice's own controls and watchers.
+    public let topologyRows: Bool
 
     /// ★ WHETHER THE BOTTOM BAR CARRIES THE SELECTION HINT (maintainer,
     /// 2026-08-17: "remove the 'tap more faces to grow the selection...' chip
@@ -141,7 +144,7 @@ public struct WorkspaceStageVisibility: Equatable, Sendable {
 
     public init(designBox: Bool, groupPrimitives: Bool, keepOuts: Bool,
                 latticeDepthPlanes: Bool, latticeControls: Bool,
-                wireframe: Bool = false, surfaceEditing: Bool = false) {
+                wireframe: Bool = false, surfaceEditing: Bool = false, topologyRows: Bool = false) {
         self.designBox = designBox
         self.groupPrimitives = groupPrimitives
         self.keepOuts = keepOuts
@@ -149,6 +152,7 @@ public struct WorkspaceStageVisibility: Equatable, Sendable {
         self.latticeControls = latticeControls
         self.wireframe = wireframe
         self.surfaceEditing = surfaceEditing
+        self.topologyRows = topologyRows
     }
 
     /// ★ WHAT A GROUP ROW IN THE SELECTIONS LIBRARY CONTAINS, on this stage.
@@ -176,7 +180,7 @@ public struct WorkspaceStageVisibility: Equatable, Sendable {
     /// over, and whether that face certifies, is stated on that face's own row,
     /// where there is a primitive to drag and a depth that means something.
     public var rowSections: [LatticeGroupRowSection] {
-        latticeControls
+        latticeControls && !topologyRows
             ? [.latticeSummary, .latticePrimitiveRows]
             : [.clearanceEditor]
     }

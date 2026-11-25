@@ -34,6 +34,7 @@
 
 #include <manifold/manifold.h>
 
+#include <algorithm>
 #include <cmath>
 #include <fcntl.h>
 #include <unistd.h>
@@ -288,6 +289,10 @@ int main() {
     const int anchor = face_facing(L, -1, 0, 0), top = face_facing(L, 0, 0, 1, 40.0, 2);
     CHECK(anchor >= 0 && top >= 0, "precondition: the L's end and the post's top");
     double margin[2] = {NAN, NAN}, il[2] = {NAN, NAN}, over[2] = {NAN, NAN};
+    // P5 (his "Check strength"): standing each way, measured on the file, and the file itself turned and painted.
+    double painted_mm2[2] = {NAN, NAN}, contact[2] = {NAN, NAN}, height[2] = {NAN, NAN}, layers[2] = {NAN, NAN};
+    double base_contact[2] = {NAN, NAN};
+    bool file_ok[2] = {false, false}, file_painted[2] = {false, false};
     const Vec3 dirs[2] = {{0.0, 0.0, 1.0}, {1.0, 0.0, 0.0}};
     for (int q = 0; q < 2 && anchor >= 0 && top >= 0; ++q) {
       JobDescription j;
@@ -316,6 +321,34 @@ int main() {
         margin[q] = num_after(js, "margin", b);
         il[q] = num_after(js, "interlayer_margin", b);
         over[q] = num_after(js, "overhang_area_mm2", b);
+        {
+          const std::size_t st = js.find("\"standing\": ", b);
+          height[q] = num_after(js, "height_mm", st);
+          layers[q] = num_after(js, "layers", st);
+          contact[q] = num_after(js, "bed_contact_mm2", st);
+          painted_mm2[q] = num_after(js, "area_mm2", js.find("\"painted\": ", st));
+          base_contact[q] = num_after(js, "bed_contact_mm2", js.find("\"standing\": ", js.find("\"baseline\": ", b)));
+          file_ok[q] = !a.orientation_recheck_file.empty() && std::filesystem::exists(a.orientation_recheck_file);
+          if (file_ok[q]) {
+#ifdef TOPOPT_HAVE_3MF
+            try {   // read back through core's own importer: standing on z = 0, as tall as said
+              const StepModel f3 = import_part_file_resolved(a.orientation_recheck_file);
+              double lo = 1e300, hi = -1e300;
+              for (const Vec3& v : f3.mesh.vertices) { lo = std::min(lo, v.z); hi = std::max(hi, v.z); }
+              file_ok[q] = std::fabs(lo) < 1e-6 && std::fabs(hi - height[q]) < 1e-3;
+            } catch (const std::exception& e) {
+              std::printf("[finish-run] (f) P5 the file could not be read back: %s\n", e.what());
+              file_ok[q] = false;
+            }
+#endif
+            std::ifstream zf(a.orientation_recheck_file, std::ios::binary);
+            const std::string zip((std::istreambuf_iterator<char>(zf)), std::istreambuf_iterator<char>());
+            file_painted[q] = zip.find("Metadata/model_settings.config") != std::string::npos;
+          }
+          std::printf("[finish-run] (f) P5 standing: height %.4g, layers %.4g, bed %.4g mm^2 (as placed %.4g), painted "
+                      "%.4g mm^2, file %s%s\n", height[q], layers[q], contact[q], base_contact[q], painted_mm2[q],
+                      file_ok[q] ? "on z = 0" : "MISSING", file_painted[q] ? ", painted" : "");
+        }
         std::printf("[finish-run] (f) build %s: margin %.4g, interlayer %.4g, overhang %.1f "
                     "mm^2; \"%s\"\n", q == 0 ? "+Z (upright)" : "+X (on its end)", margin[q],
                     il[q], over[q], a.orientation_recheck_reason.c_str());
@@ -331,6 +364,15 @@ int main() {
           "(f) upright and on its end give different interlayer margins");
     CHECK(std::isfinite(over[0]) && std::isfinite(over[1]) && over[1] > over[0] + 100.0,
           "(f) lying on its end, the post's back hangs over the bed (more overhang)");
+    // P5: upright, the L stands on its 40 x 10 base, 40 mm tall (200 layers of 0.2), nothing to paint, the file plain;
+    // on its end (up +X) on the 10 x 10 end, 40 mm tall, the post's 10 x 30 back painted, the file painted.
+    CHECK(std::fabs(height[0] - 40.0) < 1e-6 && layers[0] == 200.0 && std::fabs(contact[0] - 400.0) < 1e-6,
+          "(f) P5 upright: height, layers, bed");
+    CHECK(painted_mm2[0] == 0.0 && file_ok[0] && !file_painted[0], "(f) P5 upright: nothing painted, plain file on z = 0");
+    CHECK(std::fabs(height[1] - 40.0) < 1e-6 && std::fabs(contact[1] - 100.0) < 1e-6 && std::fabs(base_contact[1] - 400.0) < 1e-6,
+          "(f) P5 on its end: height and bed, and the baseline's bed");
+    CHECK(std::fabs(painted_mm2[1] - 300.0) < 1e-6 && file_ok[1] && file_painted[1],
+          "(f) P5 on its end: the post's back painted, the file turned and painted");
 
     // The mesh path is relative to the job folder, and the job folder may be relative:
     // the same re-check from a relative folder, with the version's file in it.

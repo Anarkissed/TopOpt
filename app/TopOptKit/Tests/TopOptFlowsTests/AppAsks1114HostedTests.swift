@@ -59,10 +59,10 @@ final class NewEngineStackPlacementHostedTests: XCTestCase {
             h.pump(1)
             let stack = try h.onScreen("lane-new-engine", "★ \(name): the new engine's stack")
             let lines = try h.onScreen("new-engine-lines", "\(name): its lines")
-            let hint = try h.onScreen("stageHint", "\(name): premise: the hint")
+            XCTAssertNil(h.frames.all["stageHint"], "\(name): ★ his 11-22: Lattice Setup has no hint")
             let set = try h.onScreen("setupChip", "\(name): premise: Settings")
             let lat = try h.onScreen("latticeSplit", "\(name): premise: Lattice")
-            print("STACK \(name) \(Int(size.width))x\(Int(size.height)): stack \(stack), Settings \(set), Lattice \(lat), hint \(hint)")
+            print("STACK \(name) \(Int(size.width))x\(Int(size.height)): stack \(stack), Settings \(set), Lattice \(lat)")
             XCTAssertTrue(stack.insetBy(dx: -0.5, dy: -0.5).contains(lines), "\(name): the lines are in the stack")
             if size.width > size.height {
                 XCTAssertEqual(stack.maxY, size.height, accuracy: 1, "★ \(name): landscape, at the very bottom of the screen")
@@ -71,11 +71,10 @@ final class NewEngineStackPlacementHostedTests: XCTestCase {
                 XCTAssertLessThanOrEqual(stack.maxY, set.minY + 0.5, "★ \(name): portrait, above Settings")
                 XCTAssertGreaterThanOrEqual(stack.maxY, corner - NotificationLane.stepGap - 1, "★ \(name): portrait, just above the corner")
             }
-            for (f, what) in [(hint, "the hint"), (set, "Settings"), (lat, "Lattice")] {
+            for (f, what) in [(set, "Settings"), (lat, "Lattice")] {
                 XCTAssertFalse(stack.intersects(f), "★ \(name): the stack \(stack) is clear of \(what) \(f)")
             }
-            let export = try h.probe("new-engine-export", "★ \(name): Export, a 44 x 44 target")
-            XCTAssertTrue(stack.insetBy(dx: -0.5, dy: -0.5).contains(export), "\(name): Export is in the stack")
+            XCTAssertNil(h.frames.all["new-engine-export"], "★ \(name): his 11-20: the temporary Export bar is gone (Lattice exports)")
             if name == "13L" {   // RED CONTROL: the old place
                 // the control is a static, not a state: a 1 pt nudge of the window makes the page place the stack again (it
                 // used to ride on the nozzle check's redraw after every layout, which runs only when asked since 11-16)

@@ -91,6 +91,8 @@ struct LatticeLayoutSettings {
   std::vector<double> dial_value;
   double strut_width_mm = 0.0;               // > 0: this width everywhere (R11)
   bool allow_quilt = false;                  // R2, G11: the one switch
+  bool cell_search = false;                  // K7: Auto's base cell searched for the fewest slivers at square faces
+  bool stretch_edges = false;                // K8: a sliver left at a square face taken in by the row beside it
   double strength = 0.0;                     // G4, -1 .. 1
   // ── finish ──
   bool bars = true;                          // false: cells and strut widths only
@@ -220,6 +222,17 @@ struct LatticeLayoutGrid {
 };
 LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float origin_y, float origin_z, float voxel_mm,
                                       int32_t nx, int32_t ny, int32_t nz, BridgeError& err);
+// ★ his 11-23 (the walls taken away FIRST, then the vines grow): the same map for these settings BEFORE the lay, when every
+// lattice region is Organic (a woven region's lattice is open whatever is laid in it: SolidAt O1). The session's domain for
+// these settings is made now (the lay then keeps it: the same "where"). `supported` false (and `grid.rg` empty) when a voxel
+// would need the laid cells (a cube lattice region): then the map comes after the lay, as before.
+struct LatticeLayoutGridAhead {
+  LatticeLayoutGrid grid;
+  bool supported = false;
+};
+LatticeLayoutGridAhead lattice_layout_grid_ahead(int64_t session, const LatticeLayoutSettings& settings, float origin_x,
+                                                 float origin_y, float origin_z, float voxel_mm, int32_t nx, int32_t ny,
+                                                 int32_t nz, BridgeError& err);
 // THE STRESS RESULT the session grades by (Install 2): von Mises, MPa, x fastest then y then z, on a grid whose low corner
 // is `origin` and whose voxel edge is `spacing` (core's DemandField). Kept by the session (one pointer between lays: core
 // keeps the part's own reference by it) until set again; an empty `mpa` clears it (no stress yet).
@@ -323,6 +336,7 @@ struct LatticeLayoutOrganicResult {
   std::vector<std::string> notes;              // ★ E2: plain sentences (equal cell ends)
   int64_t cross_group_touches = 0;             // ★ E7: struts of different groups that touch (not joined)
   int64_t relief_flushed = 0;                  // ★ cut 2, OJ6: bulges the print check made flush (say it when above 0)
+  std::vector<double> flat_ends;               // ★ OS1 B (leg U): x, y, z per rounded end the print check held flat (Exact)
 };
 LatticeLayoutOrganicResult lattice_layout_organic_groups(int64_t session, const LatticeLayoutSettings& settings,
                                                          const LatticeLayoutOrganicGroups& groups, BridgeError& err);
@@ -377,6 +391,21 @@ struct LatticeLayoutSynthetic {
 LatticeLayoutSynthetic lattice_layout_synthetic(int64_t session, const LatticeLayoutSettings& settings,
                                                 const LatticeLayoutOrganicGroups& groups, const LatticeLayoutIds& walls,
                                                 bool from_empty, BridgeError& err);
+// ★ WATCH IT GROW (his 11-22: "Could the user literally *watch* the lattice grow from nothing?"): what the session's Organic
+// lay has laid so far (core's GrowthTap; the session owns one, every Organic lay hands it its vines): the pieces from `from`
+// on (at most `most`; 0 = all), the index to read from next time, the phase (0 none yet, 1 growing, 2 pruning, 3 re-seeding
+// the bare places, 4 reaching the walls, 5 finishing) and the lay's number (a new lay starts again at 0). It NEVER waits on
+// the lay (the lay holds the session's own lock for its whole length): call it from any thread while the lay runs. After a
+// lay, its pieces stay until the next one starts. Traced hands each region's strands whole.
+struct LatticeLayoutGrowth {
+  uint64_t lay = 0;
+  int32_t phase = 0;
+  int64_t next = 0;
+  std::vector<float> xyz;        // 6 per piece: a xyz, b xyz (the part's own coordinates)
+  std::vector<int32_t> region;   // 1 per piece
+};
+LatticeLayoutGrowth lattice_layout_growth_read(int64_t session, int64_t from, int64_t most, BridgeError& err);
+
 // Every layout of `session` running now or waiting comes back cancelled. Safe from any thread.
 void lattice_layout_cancel(int64_t session);
 void lattice_layout_close(int64_t session);

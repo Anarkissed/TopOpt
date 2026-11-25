@@ -651,6 +651,13 @@ final class MaterialDensityTable: @unchecked Sendable {
 /// `acceptedCount >= 1`, so `tabs` is never empty).
 @MainActor
 public final class ResultsModel: ObservableObject {
+    /// ★ his iPad notes 11-22 (img 45): the ⌃'s drawer above the corner — here, never a byte on ResultsScreen
+    /// (WorkspaceBodySizeTests' ceiling).
+    public private(set) lazy var cornerDrawers: CornerDrawers = {
+        let d = CornerDrawers()
+        d.relay = d.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+        return d
+    }()
     /// Project name for the top chrome.
     public let projectName: String
     /// The run's material name (from materials.json), shown in the stress legend.
@@ -732,6 +739,10 @@ public final class ResultsModel: ObservableObject {
     @Published public private(set) var selectedIndex: Int = 0
     /// Stress overlay toggle (colors the variant mesh by von Mises — Metal follow-up).
     @Published public var stressOn: Bool = false
+    /// ★ notes27 (his print orientation, SPEC 2b): how the shown result prints (the screen sets it); Details says it.
+    public var printing: ResultsPrinting?
+    /// ★ notes27: what the result's report says about printing (read with the report).
+    public private(set) var printFacts = PrintReportFacts.none
     /// Flex animation toggle (M7.viz.3): displace the mesh by the FEA displacement
     /// field, looping rest→full→rest (or a static full-deflection frame under
     /// reduced-motion). Only meaningful when the selected variant `hasFlex`.
@@ -844,6 +855,19 @@ public final class ResultsModel: ObservableObject {
     public var ladderModeLine: String { ladderMode.resultsLine }
     /// ★ LOAD SCENARIOS: each scenario's result (report.json `scenarios`); empty for a one-scenario run.
     public private(set) var scenarioResults: [ScenarioResult] = []
+    /// ★ notes25 C3: a print file's ONE strength answer (core's governing margin and where it gives first), nil on any other run.
+    /// Its presence is what makes this a LATTICED result: never knocked down for infill, no mesh-vs-grid, no voxel-peak marker.
+    public private(set) var latticeAnswer: LatticeStrengthAnswer?
+    /// ★ notes25 C3: the solid's own margin per voxel (fields.bin block 2), carried in a print file's saved report.
+    public private(set) var solidMargins: SolidMarginVoxels?
+    /// ★ notes27 F1: a print file's every bar (bars.bin) with its margin, and how many of its first triangles are the solid.
+    public private(set) var printFileParts: PrintFileParts?
+    /// ★ notes25 (C1, C2): Bend and Break run the load; their per-selection data and clock live here, never on ResultsScreen.
+    public private(set) lazy var loadMotion: ResultsLoadMotion = {
+        let m = ResultsLoadMotion()
+        m.relay = m.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+        return m
+    }()
     public private(set) var reportBlocks: RunReportBlocks?   // Flexible (PR #362) H56f: redesign to strengthen (overnight plan 2026-10-25) — the strengthen cards + bodies (RedesignToStrengthen.swift)
 
     /// THE HEADLINE OF A GROWTH RUN: how much plastic the SELECTED variant adds and
@@ -1155,6 +1179,12 @@ public final class ResultsModel: ObservableObject {
     /// True once the user has manually picked a tab; until then the selection
     /// follows the recommendation as lighter variants stream in.
     private var userSelected = false
+    /// ★ R-07: what each version was called while it was on screen ("b"), by the volume fraction core asked for, kept
+    /// from the FIRST outcome that showed it (a later one re-letters the versions that are left).
+    private var shownLetters: [Double: String] = [:]
+    /// ★ R-07 (reviewer ruling 11-22): one line per version the final check on its print file refused, named as it was
+    /// on screen ("Version b removed"); empty when nothing was refused.
+    public var droppedChecks: [ResultsCheck] { FinalCheckWords.checks(reportBlocks, letters: shownLetters) }
 
     public init(projectName: String, outcome: OptimizeOutcome,
                 materialName: String = "", yieldStrengthMPa: Double = 0,
@@ -1217,6 +1247,10 @@ public final class ResultsModel: ObservableObject {
         // ★ LOAD SCENARIOS: report.json `scenarios` (a streamed partial carries no report and never erases it)
         if let d = outcome.reportJSON, let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
             scenarioResults = ScenarioResult.parse(o)
+            latticeAnswer = LatticeStrengthAnswer.decode(report: o)   // ★ notes25 C3
+            solidMargins = SolidMarginVoxels.decode(report: o)
+            printFacts = PrintReportFacts.decode(o)   // ★ notes27: its print frame, supports word, ranking, re-check
+            printFileParts = latticeAnswer == nil ? nil : PrintFileParts.decode(report: o)   // ★ notes27 F1
         }
         clearanceNotes = ResultsModel.clearanceNotes(outcome.appliedClearances)
         faceProtectionNotes = ResultsModel.faceProtectionNotes(outcome.appliedFaceProtections)
@@ -1227,9 +1261,14 @@ public final class ResultsModel: ObservableObject {
         gridDim = (outcome.gridNx, outcome.gridNy, outcome.gridNz)
         gridOrigin = SIMD3<Float>(outcome.gridOrigin)
         spacing = Float(outcome.spacing)
+        // ★ notes25 C3: a print file's result is a LATTICED result — never knocked down for infill (its struts are not infill, and
+        // core's solid margin is already at his infill), and its one "how strong" number is core's governing margin
         tabs = ResultsModel.buildTabs(acc, voxelVolumeMM3: outcome.voxelVolumeMM3,
-                                      knockdown: infillKnockdown,
+                                      knockdown: latticeAnswer == nil ? infillKnockdown : 1,
                                       remote: outcome.computedRemotely)
+        if let g = latticeAnswer?.governing { tabs = tabs.map { $0.withWorstCaseMargin(g) } }
+        shownLetters.merge(FinalCheckWords.letters(tabs: tabs, blocks: reportBlocks,
+                                                   vf: { self.requestedVolumeFraction(of: $0) })) { first, _ in first }
         // M7.viz.1 "honest heatmap": key the shared stress scale to the MATERIAL
         // LIMIT (yield) so a color means the same physical safety everywhere — not
         // to the per-run data range. M7.params infill-aware: the limit is the
@@ -1250,6 +1289,7 @@ public final class ResultsModel: ObservableObject {
         anchorVoxelCache = nil // …and the voxelised anchor target set (grid changed)
         failureCache = nil    // …and the failure-load prediction
         peakToRedCache = nil  // …and the flex peak-to-red color multiple
+        loadMotion.invalidate()   // ★ notes25: …and Bend / Break's per-vertex data
     }
 
     /// The currently selected variant (nil only for an empty outcome).
@@ -1280,7 +1320,7 @@ public final class ResultsModel: ObservableObject {
         didSet { if oldValue != scenarioLoads { dropFieldCaches() } }
     }
     /// The load the shown field was solved under: the picked scenario's, else the worst case's, else the run's.
-    private var shownLoadKg: Double {
+    var shownLoadKg: Double {   // ★ notes25: internal — Break's loads (ResultsLoadMotion.swift)
         let name = viewScenario ?? scenarios(for: selected).first(where: \.governs)?.name
         return name.flatMap { scenarioLoads.kg[$0] } ?? appliedLoadKg
     }
@@ -1299,6 +1339,7 @@ public final class ResultsModel: ObservableObject {
         flexCache = nil; loadPathCache = nil; loadPathSegmentCache = nil
         flowCurveCache = nil; flowSeedCache = nil; failureCache = nil; peakToRedCache = nil
         flowIsolate = nil
+        loadMotion.invalidate()   // ★ notes25: the scenario's own fields
     }
 
     /// The latticed alternative the user currently has selected, or nil when the
@@ -1747,6 +1788,7 @@ public final class ResultsModel: ObservableObject {
         // is nothing honest to cross-check it against, which
         // `latticeMassProvenanceLine` says on screen rather than leaving unsaid.
         guard selectedLattice == nil else { return nil }
+        guard reportBlocks?.printFile == nil else { return nil }   // ★ notes25 C3: a print file's lattice is a soup too (156 g vs 67 g)
         guard canExport else { return nil }
         let voxelG = selectedVariant?.massGrams ?? 0
         // With no material density we can't compute a mesh mass — nothing to compare.
@@ -2366,7 +2408,9 @@ public final class ResultsModel: ObservableObject {
         // Measure against the EFFECTIVE yield of the printed part at this project's
         // fixed infill (M7.params infill-aware): one honest failure load, not a
         // solid-vs-infill pair. Solid (knockdown 1) reduces to the plain yield/peak.
-        guard shownLoadKg > 0,
+        // ★ notes25 C3: never for a print file's result — its strength is core's governing margin (`latticeAnswer`); this voxel
+        // estimate knocked the struts down for infill at a one-voxel spike ("1.0x / 40 kg")
+        guard latticeAnswer == nil, shownLoadKg > 0,
               let field = selectedStressField, let peak = field.peak(),
               let mult = FailureLoad.multiplier(peakMPa: Double(peak.valueMPa),
                                                 yieldMPa: effectiveYieldStrengthMPa)
@@ -2667,7 +2711,8 @@ public final class ResultsModel: ObservableObject {
     /// no stress field or carries no stress (nothing to call out). Uses the SAME
     /// yield the M7.viz.1 scale is keyed to.
     public var hotSpot: HotSpot? {
-        guard let field = selectedStressField, let peak = field.peak() else { return nil }
+        // ★ notes25 C3: a print file's worst place is core's (`latticeAnswer.place`), never the voxel field's spike
+        guard latticeAnswer == nil, let field = selectedStressField, let peak = field.peak() else { return nil }
         let value = Double(peak.valueMPa)
         // M7.params infill-aware: the "% of yield" is measured against the printed
         // part's EFFECTIVE yield (yield × knockdown), so it agrees with the failure
@@ -2827,7 +2872,9 @@ public final class ResultsModel: ObservableObject {
         guard let choice = ResultsModel.recommendation(accepted),
               let tab = tabs.first(where: { $0.isRecommended }) else { return nil }
         let noun = choice.isLatticed ? "latticed" : "solid"
-        var line = "Recommended: the \(noun) object of result \(tab.rungLabel), "
+        // ★ notes25 C3: a print file's result IS the latticed part ("the solid object" said the opposite)
+        var line = (reportBlocks?.printFile != nil ? "Recommended: the latticed part of result \(tab.rungLabel), "
+                                         : "Recommended: the \(noun) object of result \(tab.rungLabel), ")
             + "\(ResultsModel.massLabel(choice.massGrams))"
         // The rung's OTHER object, when there is one, so the number on the screen
         // is never mistaken for the one it is not.
@@ -2985,9 +3032,8 @@ public final class ResultsModel: ObservableObject {
     /// (DECISIONS 2026-07-11 chose (b) omit).
     static func orientationSummary(tiltDegrees tilt: Int, supportCm3 cm3: Double,
                                    supportLabel: String, remote: Bool = false) -> String {
-        let base = tilt <= 6
-            ? "Print upright — load paths align with the layer direction."
-            : "Tilt \(tilt)° from vertical — load paths align with the layer direction."
+        // ★ notes27 (his print orientation, SPEC 2b): no "load paths align with the layer direction" — nothing computes it
+        let base = tilt <= 6 ? "Print upright." : "Tilt \(tilt)° from vertical."
         // The orientation itself is in the report (valid for a remote run); only the
         // support estimate is unavailable, so omit that clause rather than claim a
         // support figure the worker didn't compute (097).

@@ -59,7 +59,7 @@ final class ViewCornerParityHostedTests: XCTestCase {
     /// without stress or motion (Results shows what the run can show), no lattice stress yet (Lattice Setup's Stress shows
     /// once its sim lands).
     static let expected: [(String, [String])] = [
-        ("Topology Setup", ["Outlines", "X-ray", "Forces"]),
+        ("Topology Setup", ["Outlines", "X-ray", "Forces", "Hide keep clears"]),   // ★ his iPad notes 11-22: beside Forces
         ("Results", ["X-ray", "Full screen"]),                 // ★ B4 (note 13): Solid is gone; Outlines comes in B4 slice 2
         ("Lattice Setup", ["Outlines", "X-ray", "Lattice preview"]),
         ("Lattice page", []),                                   // no part is drawn (R3.2)

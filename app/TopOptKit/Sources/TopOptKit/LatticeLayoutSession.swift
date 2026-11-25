@@ -191,6 +191,9 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         public var percentile = 0.95
         public var response = 1.0
         public var maxStep = 0.0                  // his switch "Never skip a cell size": 2 on Default Grade
+        /// ★ K7, K8 (Auto only): the cells fitted to the faces the grid is square to — the base cell searched for the fewest
+        /// slivers there, and a sliver left taken in by the row beside it (core's cell_search and stretch_edges, both)
+        public var cellSearch = false
         public var bedFloorMM = 0.0               // ★ Organic: K1's flat floor under the weave (sheet H1); 0 none
         public init() {}
         public static func == (a: Settings, b: Settings) -> Bool {
@@ -207,7 +210,7 @@ public final class LatticeLayoutSession: @unchecked Sendable {
                 && a.byStress == b.byStress && a.dialLight == b.dialLight && a.dialHeavy == b.dialHeavy
                 && a.widthLightMM == b.widthLightMM && a.widthHeavyMM == b.widthHeavyMM && a.cellsByStress == b.cellsByStress
                 && a.referenceMPa == b.referenceMPa && a.percentile == b.percentile && a.response == b.response
-                && a.maxStep == b.maxStep && a.bedFloorMM == b.bedFloorMM
+                && a.maxStep == b.maxStep && a.bedFloorMM == b.bedFloorMM && a.cellSearch == b.cellSearch
         }
     }
 
@@ -407,6 +410,23 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         }
     }
 
+    /// ★ his 11-23 ("start an animation by removing the walls ... and THEN starting the growing animation"): the same map for
+    /// `s` BEFORE its lay, when every lattice region is Organic (a woven region is open whatever is laid in it); the session's
+    /// domain for `s` is made now and the lay keeps it. nil when a region needs the laid cells (a cube lattice): the map then
+    /// comes after the lay, as before. LatticeLayoutBridge.hpp, lattice_layout_grid_ahead.
+    public func gridAhead(_ s: Settings, origin: SIMD3<Float>, voxel: Float, dims: SIMD3<Int32>) async throws
+        -> (rg: [Int8], ms: Double)? {
+        let sid = id
+        let input = convert(s)
+        return try await worker.run {
+            var err = topoptbridge.BridgeError()
+            let r = topoptbridge.lattice_layout_grid_ahead(sid, input, origin.x, origin.y, origin.z, voxel, dims.x, dims.y,
+                                                           dims.z, &err)
+            if !err.ok { throw TopOptError(message: String(err.message)) }
+            return r.supported ? (Array(r.grid.rg), r.grid.ms) : nil
+        }
+    }
+
     /// The stress result a layout grades by (core's DemandField): von Mises MPa, x fastest, on a grid whose LOW CORNER is
     /// `origin`. Kept by the session until set again (one pointer between lays: core keeps the part's own reference by
     /// it), so set it once per field, never per lay. nil clears it (no stress yet).
@@ -424,6 +444,45 @@ public final class LatticeLayoutSession: @unchecked Sendable {
             topoptbridge.lattice_layout_set_demand(sid, d, &err)
             if !err.ok { throw TopOptError(message: String(err.message)) }
         }
+    }
+
+    /// ★ WATCH IT GROW (his 11-22: "Could the user literally *watch* the lattice grow from nothing?"): what the session's
+    /// Organic lay has laid so far (core's GrowthTap, LatticeLayoutBridge.hpp's lattice_layout_growth_read).
+    public struct Growth: Sendable, Equatable {
+        /// Which lay (core counts them; a new lay starts again at 0). 0: none yet.
+        public var lay: UInt64
+        /// 0 none yet, 1 growing, 2 pruning, 3 re-seeding the bare places, 4 reaching the walls, 5 finishing.
+        public var phase: Int
+        /// The index to read from next time.
+        public var next: Int
+        /// 6 per piece: a xyz, b xyz (the part's own coordinates).
+        public var xyz: [Float]
+        public var region: [Int32]
+        public var count: Int { region.count }
+        public init(lay: UInt64, phase: Int, next: Int, xyz: [Float], region: [Int32]) {
+            self.lay = lay; self.phase = phase; self.next = next; self.xyz = xyz; self.region = region
+        }
+    }
+
+    /// The pieces laid from `from` on (at most `most`; 0 all), the phase and the lay's number. SYNCHRONOUS and callable from
+    /// ANY thread while a lay runs: it never goes through the session's worker (the lay occupies it) and never waits on the lay.
+    public func growthRead(from: Int, most: Int = 0) throws -> Growth {
+        var err = topoptbridge.BridgeError()
+        let r = topoptbridge.lattice_layout_growth_read(id, Int64(Swift.max(0, from)), Int64(Swift.max(0, most)), &err)
+        if !err.ok { throw TopOptError(message: String(err.message)) }
+        // one copy each, straight from the vectors' storage (a poll can carry tens of thousands of pieces)
+        let xyzVec = r.xyz, regionVec = r.region
+        let xyz: [Float] = withExtendedLifetime(xyzVec) {
+            let n = Int(xyzVec.size())
+            guard n > 0, let p = xyzVec.__dataUnsafe() else { return [] }
+            return Array(UnsafeBufferPointer(start: p, count: n))
+        }
+        let region: [Int32] = withExtendedLifetime(regionVec) {
+            let n = Int(regionVec.size())
+            guard n > 0, let p = regionVec.__dataUnsafe() else { return [] }
+            return Array(UnsafeBufferPointer(start: p, count: n))
+        }
+        return Growth(lay: r.lay, phase: Int(r.phase), next: Int(r.next), xyz: xyz, region: region)
     }
 
     /// Every layout running or waiting comes back cancelled.
@@ -502,6 +561,8 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         o.percentile = s.percentile
         o.response = s.response
         o.max_step = s.maxStep
+        o.cell_search = s.cellSearch      // K7
+        o.stretch_edges = s.cellSearch    // K8
         o.topology = std.string(s.topology)
         o.algorithm = std.string(s.algorithm)
         o.cell_mm = s.cellMM

@@ -24,7 +24,10 @@ public struct RootView: View {
             case .workspace:
                 if let project = model.project {
                     WorkspacePlaceholder(model: model, project: project)
-                        .id(project.id)   // Flexible (PR #362) H53: a project switch (Save as new project) builds a fresh workspace — its state and onAppear belong to the copy
+                        // Flexible (PR #362) H53: a project switch (Save as new project) builds a fresh workspace — its state and
+                        // onAppear belong to the copy. ★ his iPad notes 11-23: keyed by the live project itself, so the version
+                        // moving to its next number (VersionMoves.swift) keeps the page exactly as it is
+                        .id(ObjectIdentifier(project))   // Flexible (PR #362) H53
                 } else {
                     HomeView(model: model)   // no active project — shouldn't happen
                 }
@@ -72,8 +75,17 @@ public struct RootView: View {
                 PrintParamsOverlay(model: model, project: project)
                     .transition(.opacity)
             }
+
+            // ★ his notes 11-23 ("Tapping the notification should bring you RIGHT to the result screen. Nothing else."):
+            // while a tapped notification's result is read, nothing else shows — no Library, no Topology on the way
+            if model.openingResult != nil {
+                ResultOpeningCover().zIndex(3)
+            }
         }
         .laneToast($model.toast)   // ★ B2 (U16, §4.34): centred, clear of every control, two lines at most — above every sheet (U17)
+        .overlay { LatticeMacMakeModal() }   // ★ his 11-22: the Mac makes the print-accurate lattice (LatticeMacMake.swift)
+        .overlay { AppPopupLayer() }   // ★ his 11-20: every error a centred pop-up in plain English (AppPopup.swift)
+        .overlay { VersionDescriptionLayer() }   // ★ notes28: his words for a version, a centred editor (VersionDescriptions.swift)
         .numberPadNote { model.toast = $0 }   // ★ B2 (U15, U17): a pad in a sheet says what it kept, above the sheet
         .task {
             model.loadMaterials()
@@ -82,10 +94,15 @@ public struct RootView: View {
             // foreground — or landing via re-attach — can post a local completion
             // banner (handoff 121, requirement 5).
             LocalRunNotifier.requestAuthorization()
+            model.resumeLatticeJobs()   // ★ his notes 11-23: a Lattice job the app did not live to save, followed and saved
         }
         .onChange(of: scenePhase) { newPhase in
             if newPhase != .active { model.persistCurrentProject() }
+            model.sceneChanged(active: newPhase == .active)   // ★ his notes 11-23: Results never mount behind the app
         }
+        // ★ his notes 11-23: a run's notification tapped (RunNotificationRouter, set up as the app starts) opens its result —
+        // in THIS screen's app (the one that attached last)
+        .onAppear { RunNotificationRouter.shared.attach(model) }
         // The design is a dark-glass system: pin the scheme so default-coloured text
         // stays light and `Material` backings render dark, regardless of the device's
         // light/dark setting (otherwise labels + glass go unreadable in light mode).
@@ -98,7 +115,7 @@ public struct RootView: View {
         VStack {
             VStack(spacing: DS.Space.sm) {
                 HStack(spacing: DS.Space.xs) {
-                    Image(systemName: "antenna.radiowaves.left.and.right")
+                    Image(systemName: "desktopcomputer")
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(DS.Color.accent.color)
                     Text("Run still on your Mac").dsStyle(DS.TypeScale.headline)
@@ -148,7 +165,7 @@ public struct RootView: View {
         VStack {
             VStack(spacing: DS.Space.sm) {
                 HStack(spacing: DS.Space.xs) {
-                    Image(systemName: "antenna.radiowaves.left.and.right")
+                    Image(systemName: "desktopcomputer")
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(DS.Color.accent.color)
                     Text("\(jobs.count) runs still on your Mac").dsStyle(DS.TypeScale.headline)

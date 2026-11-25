@@ -46,6 +46,9 @@ double ms_since(std::chrono::steady_clock::time_point t0) {
 
 struct LayoutSession {
   std::mutex mu;                                  // one layout (or one "where") at a time
+  // ★ his 11-22 (watch it grow): the tap every Organic lay of `session` hands its vines to; read WITHOUT `mu` (the lay holds
+  // it for its whole length). Declared before `session`, so it outlives the session that points at it.
+  ll::GrowthTap tap;
   std::unique_ptr<ll::Session> session;
   int faces = 0;
   // The last layout's outcome: "where" reads the session's domain and this layout's cells, never across the next lay().
@@ -247,6 +250,10 @@ ll::Settings settings_from(const LatticeLayoutSettings& in) {
   s.struts.width_heavy_mm = in.width_heavy_mm;
   s.cells.by_stress = in.cells_by_stress;
   s.cells.max_step = in.max_step;
+#ifdef TOPOPT_CELL_SEARCH   // K7, K8 (a vendored core before notes27 has neither: the preview lays without them)
+  s.cells.cell_search = in.cell_search;
+  s.cells.stretch_edges = in.stretch_edges;
+#endif
   s.stress.reference_mpa = in.reference_mpa;
   s.stress.percentile = in.percentile;
   s.stress.response = in.response;
@@ -366,6 +373,7 @@ LatticeLayoutOpenInfo lattice_layout_open(const std::string& path, double linear
     auto s = std::make_shared<LayoutSession>();
     s->faces = model.face_count;
     s->session = std::make_unique<ll::Session>(std::move(model));
+    s->session->growth_tap(&s->tap);   // ★ his 11-22: every Organic lay of this session hands its vines to the tap
     info.faces = s->faces;
     info.open_edges = static_cast<int32_t>(s->session->open_edges());
     std::lock_guard<std::mutex> lock(g_layout_mu);
@@ -549,6 +557,7 @@ LatticeLayoutOrganicResult lattice_layout_organic(int64_t session, const Lattice
     s->solid_at.reset();
     o.runs = ll::pack_weave_runs(pv.runs, 2);   // ★ cut 2: version 2 (sections, swept, proud, the file's ring)
     o.relief_flushed = static_cast<int64_t>(pv.relief_flushed);
+    for (const auto& p : pv.flat_ends) { o.flat_ends.push_back(p.x); o.flat_ends.push_back(p.y); o.flat_ends.push_back(p.z); }
     o.quality = pv.quality == ll::PreviewQuality::Draft ? 1 : 0;
     o.strands = static_cast<int64_t>(pv.outcome.strands);
     o.net_struts = static_cast<int64_t>(pv.outcome.net_struts);
@@ -615,6 +624,7 @@ LatticeLayoutOrganicResult lattice_layout_organic_groups(int64_t session, const 
     s->solid_at.reset();
     o.runs = ll::pack_weave_runs(pv.runs, 2);   // ★ cut 2: version 2 (sections, swept, proud, the file's ring)
     o.relief_flushed = static_cast<int64_t>(pv.relief_flushed);
+    for (const auto& p : pv.flat_ends) { o.flat_ends.push_back(p.x); o.flat_ends.push_back(p.y); o.flat_ends.push_back(p.z); }
     o.quality = pv.quality == ll::PreviewQuality::Draft ? 1 : 0;
     o.strands = static_cast<int64_t>(pv.outcome.strands);
     o.net_struts = static_cast<int64_t>(pv.outcome.net_struts);
@@ -877,6 +887,103 @@ LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float ori
   });
   if (!why.empty()) {
     o = LatticeLayoutGrid{};
+    failed(err, why);
+  }
+  return o;
+}
+
+LatticeLayoutGridAhead lattice_layout_grid_ahead(int64_t session, const LatticeLayoutSettings& settings, float origin_x,
+                                                 float origin_y, float origin_z, float voxel_mm, int32_t nx, int32_t ny,
+                                                 int32_t nz, BridgeError& err) {
+  LatticeLayoutGridAhead o;
+  const std::string why = bridge_guard_run("lattice_layout_grid_ahead", [&] {
+    if (nx <= 0 || ny <= 0 || nz <= 0 || !(voxel_mm > 0.0f)) throw std::invalid_argument("lattice layout grid: an empty box");
+    if (static_cast<int64_t>(nx) * ny * nz > 8'000'000) throw std::invalid_argument("lattice layout grid: too many voxels");
+    const auto t0 = std::chrono::steady_clock::now();
+    auto s = layout_at(session);
+    ll::Settings ask = settings_from(settings);
+    std::lock_guard<std::mutex> lock(s->mu);
+    ask.stress.demand = s->demand;   // as the lay asks it (the "where" never reads it)
+    s->session->prepare_domain(ask);
+    const ll::Domain* domain = s->session->domain();
+    if (!domain) return;
+    const std::size_t n = static_cast<std::size_t>(nx) * ny * nz;
+    std::vector<uint8_t> cls(n, 0);   // 0 outside, 1 solid, 2 open
+    std::atomic<int32_t> next{0};
+    std::atomic<bool> needs_cells{false};
+    auto work = [&] {
+      const ll::Domain::Probe probe = domain->probe();   // one per thread
+      for (int32_t z = next++; z < nz; z = next++) {
+        if (needs_cells.load(std::memory_order_relaxed)) return;
+        for (int32_t y = 0; y < ny; ++y)
+          for (int32_t x = 0; x < nx; ++x) {
+            const topopt::Vec3 p{origin_x + voxel_mm * x, origin_y + voxel_mm * y, origin_z + voxel_mm * z};
+            const ll::Where w = probe.where(p);
+            uint8_t c = 1;
+            if (w.why == ll::Why::Outside) {
+              c = 0;
+            } else if (w.why == ll::Why::Lattice) {
+              // SolidAt (bars.cpp, O1): a woven region's lattice is open; any other needs the cells laid
+              const ll::Region* r = nullptr;
+              for (const ll::Region& g : domain->spec().regions)
+                if (g.id == w.id) { r = &g; break; }
+              if (!r || !r->weave) { needs_cells.store(true); return; }
+              c = 2;
+            }
+            cls[(static_cast<std::size_t>(z) * ny + y) * nx + x] = c;
+          }
+      }
+    };
+    const unsigned threads = std::max(1u, std::thread::hardware_concurrency());
+    std::vector<std::thread> pool;
+    for (unsigned i = 1; i < threads; ++i) pool.emplace_back(work);
+    work();
+    for (auto& t : pool) t.join();
+    if (needs_cells.load()) return;
+    LatticeLayoutGrid& g = o.grid;
+    g.rg.assign(2 * n, static_cast<int8_t>(-127));
+    auto at = [&](int32_t x, int32_t y, int32_t z) -> uint8_t {
+      if (x < 0 || y < 0 || z < 0 || x >= nx || y >= ny || z >= nz) return 0;
+      return cls[(static_cast<std::size_t>(z) * ny + y) * nx + x];
+    };
+    for (int32_t z = 0; z < nz; ++z)   // (lattice_layout_grid's own encoding)
+      for (int32_t y = 0; y < ny; ++y)
+        for (int32_t x = 0; x < nx; ++x) {
+          const std::size_t i = (static_cast<std::size_t>(z) * ny + y) * nx + x;
+          const uint8_t c = cls[i];
+          if (c >= 2) ++g.asked;
+          bool open = c == 2;
+          if (c == 0)
+            open = at(x - 1, y, z) == 2 || at(x + 1, y, z) == 2 || at(x, y - 1, z) == 2 || at(x, y + 1, z) == 2 ||
+                   at(x, y, z - 1) == 2 || at(x, y, z + 1) == 2;
+          g.rg[2 * i] = open ? 127 : -127;
+          g.rg[2 * i + 1] = c != 0 ? 127 : -127;
+        }
+    g.nocell.assign(5, 0);
+    g.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    o.supported = true;
+  });
+  if (!why.empty()) {
+    o = LatticeLayoutGridAhead{};
+    failed(err, why);
+  }
+  return o;
+}
+
+LatticeLayoutGrowth lattice_layout_growth_read(int64_t session, int64_t from, int64_t most, BridgeError& err) {
+  LatticeLayoutGrowth o;
+  const std::string why = bridge_guard_run("lattice_layout_growth_read", [&] {
+    auto s = layout_at(session);   // never s->mu: the lay holds it while it runs (the tap has its own lock)
+    ll::GrowthTap::Read r = s->tap.read(static_cast<std::size_t>(std::max<int64_t>(0, from)),
+                                        static_cast<std::size_t>(std::max<int64_t>(0, most)));
+    o.lay = r.lay;
+    o.phase = static_cast<int32_t>(r.phase);
+    o.next = static_cast<int64_t>(r.next);
+    o.xyz = std::move(r.xyz);
+    o.region.assign(r.region.begin(), r.region.end());
+  });
+  if (!why.empty()) {
+    o = LatticeLayoutGrowth{};
     failed(err, why);
   }
   return o;

@@ -515,6 +515,11 @@ public enum RunFailure: Equatable, Sendable {
     case allRejectedOnMargin(worstMargin: Double, effectiveMargin: Double,
                              minFeatureViolations: Int,
                              diagnosis: GateDiagnosis?)
+    /// ★ R-07 (reviewer ruling 11-22): no version is left because the final check on each strong-enough version's PRINT FILE
+    /// refused it (`FinalCheckWords`). `lines` name each one and why ("Version a: it prints in 2 pieces"); `lastTried` is the
+    /// last design's own margin sentence when IT failed on strength (nil when it too was a refused file). Never the generic
+    /// "not strong enough": the margins of a refused file passed.
+    case allRefusedAtFinalCheck(lines: [String], lastTried: String?)
 
     /// The strength-margin minimum every accepted variant must clear (core
     /// `MinimizePlasticOptions.margin_stop` default / ROADMAP M5.3).
@@ -566,6 +571,7 @@ public enum RunFailure: Equatable, Sendable {
         switch self {
         case .solver: return "Optimization couldn’t finish"
         case .allRejectedOnMargin: return "Not strong enough to print"
+        case .allRefusedAtFinalCheck: return "No print file passed the final check"
         }
     }
 
@@ -580,6 +586,13 @@ public enum RunFailure: Equatable, Sendable {
                                       effectiveMargin: effectiveMargin,
                                       violations: violations,
                                       diagnosis: diagnosis)
+        case .allRefusedAtFinalCheck(let lines, let lastTried):
+            var body = "The final check on the print file refused every version strong enough:"
+            for l in lines { body += "\n• " + l }
+            if let t = lastTried, !t.isEmpty {
+                body += "\n\nThe last design the run tried: " + t.prefix(1).lowercased() + t.dropFirst()
+            }
+            return body
         }
     }
 
@@ -804,6 +817,13 @@ public protocol RunNotifier {
     func willRunInBackground()
     /// The (backgrounded) run finished — post the completion notification.
     func runDidComplete(summary: String)
+    /// ★ his notes 11-23 ("Tapping the notification should bring you RIGHT to the result screen"): the same, carrying where
+    /// its result is (the version, and whether it opens in the Lattice stage). A notifier that only knows the summary posts it.
+    func runDidComplete(summary: String, route: RunResultRoute?)
+}
+
+public extension RunNotifier {
+    func runDidComplete(summary: String, route: RunResultRoute?) { runDidComplete(summary: summary) }
 }
 
 /// A notifier that does nothing (the default, and what headless tests use through
@@ -866,13 +886,17 @@ public final class LocalRunNotifier: RunNotifier {
         #endif
     }
 
-    public func runDidComplete(summary: String) {
+    public func runDidComplete(summary: String) { runDidComplete(summary: summary, route: nil) }
+
+    public func runDidComplete(summary: String, route: RunResultRoute?) {
         #if canImport(UserNotifications)
         if Self.hasAppBundle {
         let content = UNMutableNotificationContent()
         content.title = "TopOpt"
         content.body = summary
         content.sound = .default
+        // ★ his notes 11-23: where the result is, so a tap opens it (RunNotificationRouter)
+        if let route { content.userInfo = route.userInfo }
         UNUserNotificationCenter.current().add(
             UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
         }
@@ -917,7 +941,51 @@ public final class RunModel: ObservableObject {
     /// The outcome the results screen consumes. Updated INCREMENTALLY as variants
     /// stream in (progressive results), then replaced by the authoritative final
     /// outcome when the run resolves. `@Published` so the results screen grows live.
-    @Published public private(set) var outcome: OptimizeOutcome?
+    @Published public private(set) var outcome: OptimizeOutcome? {
+        didSet { outcomeIsPrintFile = LatticeSavedResult.isPrintFile(outcome) }   // ★ notes25: read once, not on every look
+    }
+
+    /// ★ notes25 (his iPad notes 11-23, Img 4/5: "The results tab should ONLY be in the Lattice stage so that I can ALSO run TO
+    /// results and have *them* be in the Topology stage - keeping both in the same version if I wanted to"): the version's
+    /// result of the OTHER stage — a print file's (the Lattice stage's) while `outcome` is a Topology run's, or a Topology
+    /// run's while `outcome` is a print file's. A run of one stage never retires the other's: as it starts, the result of its
+    /// own stage comes forward into `outcome` (AJ1 holds it as before) and the other stage's waits here, with its retention
+    /// pair; a run that produced nothing puts them back exactly as they were. `outcome` stays the LAST run's (results.plist);
+    /// this one is saved beside it (ProjectStore.otherResultsURL).
+    @Published public private(set) var otherOutcome: OptimizeOutcome? {
+        didSet { otherIsPrintFile = LatticeSavedResult.isPrintFile(otherOutcome) }
+    }
+    /// `outcome` is a print file's (the Lattice stage's), read once as it is set.
+    public private(set) var outcomeIsPrintFile = false
+    private var otherIsPrintFile = false
+    /// The other stage's result's retention pair (a Topology run's; a print file reports none).
+    @Published public private(set) var otherArtifacts: RelatticeArtifacts?
+    /// The run in flight moved the two at its start (undone when it produced nothing of its own).
+    private var movedAsideAtStart = false
+
+    /// ★ notes25: the result a stage shows — the Lattice stage a print file's (`LatticeSavedResult.isPrintFile`), Topology
+    /// every other (a Topology run's), whichever of the two places holds it.
+    public func outcome(lattice: Bool) -> OptimizeOutcome? {
+        if let o = outcome, outcomeIsPrintFile == lattice { return o }
+        if let o = otherOutcome, otherIsPrintFile == lattice { return o }
+        return nil
+    }
+
+    /// ★ notes27 (his print orientation, "Keep orientation"): a stage's result replaced by the check's (its own place —
+    /// `outcome` or `otherOutcome`), outside any run; the other stage's result is left as it is.
+    public func replaceOutcome(_ o: OptimizeOutcome, lattice: Bool) {
+        guard phase != .running else { return }
+        if outcome != nil, outcomeIsPrintFile == lattice { outcome = o; return }
+        if otherOutcome != nil, otherIsPrintFile == lattice { otherOutcome = o; return }
+        if outcome == nil { outcome = o } else { otherOutcome = o }
+    }
+
+    /// ★ notes25: the other stage's result read back from its version's folder beside `outcome` (persist-c), with its pair.
+    public func restoreOtherOutcome(_ restored: OptimizeOutcome) {
+        guard phase == .idle, otherOutcome == nil else { return }
+        otherOutcome = restored
+    }
+
     /// True while more variants may still arrive (the optimize is running behind an
     /// already-visible results screen). Drives an "optimizing more…" indicator.
     @Published public private(set) var isStreaming = false
@@ -1007,6 +1075,8 @@ public final class RunModel: ObservableObject {
     /// Reinstate a pair loaded from disk beside restored results (persist-c).
     public func restoreArtifacts(_ artifacts: RelatticeArtifacts?) {
         guard phase == .idle else { return }
+        // ★ notes25: the pair is a Topology run's — beside the other stage's result when that one is the Topology run's
+        if outcome != nil, outcomeIsPrintFile, otherOutcome != nil { otherArtifacts = artifacts; return }
         retainedArtifacts = artifacts
     }
 
@@ -1088,6 +1158,8 @@ public final class RunModel: ObservableObject {
     @Published public private(set) var failureShowsOnButton = false
     /// The engine's own words for the last such failure (for B2's (i); never drawn in a card).
     @Published public private(set) var lastEngineFailureText: String?
+    /// ★ notes25: the error itself (a print file's refusal carries the engine's own reason and where: the pop-up's Show me).
+    public private(set) var lastEngineError: Error?
 
     private let scheduler: RunScheduler
     private let notifier: RunNotifier
@@ -1099,10 +1171,16 @@ public final class RunModel: ObservableObject {
     /// the design box, the confirmed on-device stall trigger). Cleared when the run
     /// resolves.
     private var runningRequest: RunRequest?
+    /// ★ his 11-21 ("Change the words"): the running request's mode, so the run card names what runs (`RunCardWords`).
+    public var runningJobMode: String? { runningRequest?.jobMode }
     /// Whether the in-flight run is REMOTE (set per run in `start`). A remote run does
     /// NOT arm the local setup-stall watchdog: its liveness — queue-awareness and the
     /// heartbeat/probe loop — is owned by `RemoteRun` (handoff 129).
     private var isRemoteRun = false
+    /// ★ his notes 11-23: the run (in flight, or the last one) is on a Mac — the app holds background time for the whole of it.
+    public var isRemote: Bool { isRemoteRun }
+    /// ★ his notes 11-23: the last run's mode ("lattice_file": the Lattice button's print file), kept after it resolves.
+    public private(set) var lastJobMode: String?
 
     #if canImport(os)
     private static let log = Logger(subsystem: "app.topopt", category: "run")
@@ -1294,6 +1372,8 @@ public final class RunModel: ObservableObject {
         failure = nil
         failureShowsOnButton = false   // ★ B1 (O1)
         canKeepWaiting = false
+        // ★ notes25: the other stage's result steps aside (never retired by this run); this run's own stage's comes forward
+        moveAsideTheOtherStage(lattice: request.jobMode == LatticeFileButton.jobMode)
         // AJ1: HOLD the finished run's variants rather than dropping them. `outcome`
         // still has to be cleared (streamed variants append to it), but a run that
         // ends up producing nothing puts these back — see `preservedOutcome`.
@@ -1319,6 +1399,7 @@ public final class RunModel: ObservableObject {
         let token = CancelToken()
         self.token = token
         runningRequest = request
+        lastJobMode = request.jobMode
         let runner = Self.hostedTestRunner ?? self.runner
         let scheduler = self.scheduler
 
@@ -1506,6 +1587,7 @@ public final class RunModel: ObservableObject {
     /// did. No-op when this run produced its own outcome: THAT replacement is the
     /// user's own Optimize, and it is the only thing allowed to retire a finished run.
     private func restorePreservedOutcome() {
+        defer { putBackTheOtherStageIfNothingOwn() }   // ★ notes25
         let kept = preservedOutcome, keptArtifacts = preservedArtifacts
         preservedOutcome = nil
         preservedArtifacts = nil
@@ -1514,6 +1596,26 @@ public final class RunModel: ObservableObject {
         retainedArtifacts = keptArtifacts
         restoredPreviousResults = true
         diag("a run produced no variants — the previous run's \(kept.variants.count) variant(s) are kept")
+    }
+
+    /// ★ notes25: as a run starts, the result of ITS stage is the one in `outcome` (held by AJ1 as before) and the other
+    /// stage's waits in `otherOutcome`: a Lattice button's print file run (`lattice`) leaves a Topology result standing, and an
+    /// Optimize leaves a print file's.
+    private func moveAsideTheOtherStage(lattice: Bool) {
+        let here = outcome.map { _ in outcomeIsPrintFile }, there = otherOutcome.map { _ in otherIsPrintFile }
+        movedAsideAtStart = here == !lattice || there == lattice
+        guard movedAsideAtStart else { return }
+        swap(&outcome, &otherOutcome)
+        swap(&retainedArtifacts, &otherArtifacts)
+    }
+
+    /// ★ notes25: a run that produced nothing of its own leaves both results exactly as they were before it started.
+    private func putBackTheOtherStageIfNothingOwn() {
+        guard movedAsideAtStart else { return }
+        movedAsideAtStart = false
+        guard outcome == nil || restoredPreviousResults else { return }
+        swap(&outcome, &otherOutcome)
+        swap(&retainedArtifacts, &otherArtifacts)
     }
 
     /// A run has just resolved WITH results of its own: its retention pair (if the
@@ -1536,6 +1638,9 @@ public final class RunModel: ObservableObject {
         failure = nil
         canKeepWaiting = false
         outcome = nil
+        otherOutcome = nil   // ★ notes25
+        otherArtifacts = nil
+        movedAsideAtStart = false
         preservedOutcome = nil
         preservedArtifacts = nil
         pendingArtifacts = nil
@@ -1621,17 +1726,30 @@ public final class RunModel: ObservableObject {
                 // "0.00×" the motivating run showed: the reader used to look only at
                 // report.json's accepted array, so an all-rejected run left this
                 // `last` nil and the sheet reported a max over nothing.
+                let shown = outcome.map(FinalCheckWords.letters(of:)) ?? [:]   // ★ R-07: the versions' names while on screen
                 outcome = stamp(o)
                 let terminal = o.variants.last
                 // BOTH margins. `marginEffective` is what the gate compared; the
                 // diagnosis is the only source that has it, and on a solid print (or
                 // a run with no diagnosis) it is the worst case itself.
                 let worst = terminal?.worstCaseMargin ?? 0
+                // ★ R-07: when the final check on the print files refused the versions that were strong enough, say THAT,
+                // naming each as it was on screen (`shown`, from the streamed outcome this final one replaced).
+                if let b = o.reportJSON.flatMap(RunReportBlocks.decode(reportJSON:)), !FinalCheckWords.refused(b).isEmpty {
+                    let refused = FinalCheckWords.refused(b)
+                    let lastRefused = terminal.map { t in refused.contains { abs($0.volumeFraction - t.requestedVolumeFraction) < 1e-6 } } ?? true
+                    failure = .allRefusedAtFinalCheck(
+                        lines: FinalCheckWords.lines(b, letters: shown),
+                        lastTried: lastRefused ? nil : RunFailure.rejectionBody(
+                            worstMargin: worst, effectiveMargin: terminal?.diagnosis?.marginEffective ?? worst,
+                            violations: terminal?.minFeatureViolations ?? 0, diagnosis: terminal?.diagnosis))
+                } else {
                 failure = .allRejectedOnMargin(
                     worstMargin: worst,
                     effectiveMargin: terminal?.diagnosis?.marginEffective ?? worst,
                     minFeatureViolations: terminal?.minFeatureViolations ?? 0,
                     diagnosis: terminal?.diagnosis)
+                }
                 phase = .failed
             } else {
                 outcome = stamp(o)                         // authoritative final
@@ -1657,6 +1775,7 @@ public final class RunModel: ObservableObject {
                 failure = .solver(message)
                 failureShowsOnButton = true      // ★ B1 (O1): engine text, never a card
                 lastEngineFailureText = message
+                lastEngineError = error   // ★ notes25
                 phase = .failed
             }
         }
@@ -1681,7 +1800,8 @@ public final class RunModel: ObservableObject {
         // just cancelled it themselves — a "cancelled" banner would be noise); a
         // backgrounded local run keeps its prior behaviour unchanged.
         if runningInBackground || observedRemoteFinish {
-            notifier.runDidComplete(summary: completionSummary(request))
+            // ★ his notes 11-23: the notification names where its result is (nil when the run has no version)
+            notifier.runDidComplete(summary: completionSummary(request), route: RunResultRoute(request))
         }
     }
 

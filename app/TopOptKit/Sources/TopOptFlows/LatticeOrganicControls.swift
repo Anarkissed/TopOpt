@@ -65,23 +65,23 @@ struct LatticeOrganicControls: View {
                     warning: limits != nil)
             }
             if grown {
-                if on(.seeds) { number("Seeds (feet apart)", "spacings", \.seeds, auto: 2.5, check: { _ in nil }) }
+                if on(.seeds) { number("Seeds (feet apart) (0 = off)", "spacings", \.seeds, auto: 2.5, check: { LatticeOrganicLook.Check.seeds($0) }) }
                 if on(.wallSeedsOff) {
                     toggle("Wall seeds", \.wallSeeds) { on in if !on, look.crossingVines ?? true { look.crossingVines = false } }
                 }
                 if look.wallSeeds ?? true {
-                    gap("Wall seed gap", \.wallGap, LatticeOrganicLook.wallGapAuto)
+                    gap("Wall seed gap (0 = off)", \.wallGap, LatticeOrganicLook.wallGapAuto, zeroOff: true)
                     if on(.crossingVinesOff) { toggle("Crossing vines", \.crossingVines) }
                     if look.crossingVines ?? true { gap("Crossing gap", \.crossGap, LatticeOrganicLook.crossGapAuto) }
                 } else if on(.crossingVinesOff) {
                     say("Crossing vines are off: they grow from wall seeds")   // ★ rule g
                 }
                 if on(.roots) {
-                    number("Roots (0 = off)", "spacings", \.roots, auto: 0) { LatticeOrganicLook.Check.atLeastZero("Roots", $0) }
+                    number("Roots (0 = off)", "spacings", \.roots, auto: 0) { LatticeOrganicLook.Check.run("Roots", $0) }
                 }
                 if on(.topBranches) {
                     number("Top branches (0 = off)", "spacings", \.topBranches, auto: 0) {
-                        LatticeOrganicLook.Check.atLeastZero("Top branches", $0)
+                        LatticeOrganicLook.Check.run("Top branches", $0)
                     }
                 }
                 if on(.stressFollowOff) { toggle("Stress follow", \.stressFollow) }
@@ -89,7 +89,7 @@ struct LatticeOrganicControls: View {
             if on(.flatTiesOff) { toggle("Flat ties", \.flatTies) }
             if look.flatTies ?? true { gap("Flat tie gap", \.tieGap, LatticeOrganicLook.tieGapAuto) }
             if on(.shapeReach) {   // always on (his ruling)
-                number("Grade to shape reach", "×", \.shapeReach, auto: 1) { LatticeOrganicLook.Check.atLeastZero("Grade to shape reach", $0) }
+                number("Grade to shape reach (0 = off)", "×", \.shapeReach, auto: 1) { LatticeOrganicLook.Check.reach($0) }
             }
             if on(.detectFloatingOff) { toggle("Detect floating parts", \.detectFloating) }
             if aesthetic {   // ★ his 11-18: Organic and Aesthetic only
@@ -106,23 +106,26 @@ struct LatticeOrganicControls: View {
                         .labelsHidden().toggleStyle(.switch)
                 }
                 .accessibilityIdentifier("organic-Depth variation")
-                say(look.depthVariationValue ? "Up to 1 mm out at open faces" : "Cut flush at every face")
+                // ★ notes26 (his yes, 11-23): "Up to 1 mm out." showed twice with it on — its grey caption (OrganicSettingsHelp)
+                // and this line ("… at open faces"). ONE line now, as Extra spacing's: the caption, five words (his rule); the
+                // open faces are in its (i).
                 row("Extra spacing between vines") {
                     Toggle("", isOn: Binding(get: { look.extraSpacingValue(aesthetic: aesthetic) }, set: { look.extraSpacing = $0 }))
                         .labelsHidden().toggleStyle(.switch)
                 }
                 .accessibilityIdentifier("organic-Extra spacing between vines")
-                if look.extraSpacingValue(aesthetic: aesthetic) { say("Will likely lose strength") }
+                // ★ his iPad notes 11-23 (img 9): "Will likely lose strength" showed twice with it on — its grey caption
+                // (OrganicSettingsHelp) and this line. The caption says it; this line is gone.
             }
             if on(.linkWidth) { number("Link thickness", "× strut", \.linkWidth, auto: 1) { LatticeOrganicLook.Check.link($0) } }
             if on(.unbracedOther) {
-                number("Longest strut without a joint", "widths", \.unbracedMax, auto: 10) { LatticeOrganicLook.Check.unbraced($0) }
+                number("Longest strut without a joint (0 = off)", "widths", \.unbracedMax, auto: 10) { LatticeOrganicLook.Check.unbraced($0) }
             } else {
-                row("Longest strut without a joint") {
+                row("Longest strut without a joint (0 = off)") {
                     Toggle("", isOn: Binding(get: { (look.unbracedMax ?? 10) > 0 }, set: { look.unbracedMax = $0 ? nil : 0 }))
                         .labelsHidden().toggleStyle(.switch)
                 }
-                .accessibilityIdentifier("organic-Longest strut without a joint")
+                .accessibilityIdentifier("organic-Longest strut without a joint (0 = off)")
             }
         }
         .accessibilityIdentifier("organic-controls")
@@ -130,9 +133,24 @@ struct LatticeOrganicControls: View {
 
     // MARK: rows
 
+    /// A setting's name without its " (0 = off)" (★ 11-22: the number pad's header).
+    static func bare(_ label: String) -> String {
+        label.hasSuffix(" (0 = off)") ? String(label.dropLast(" (0 = off)".count)) : label
+    }
+
     private func name(_ label: String) -> some View {
-        Text(label).dsStyle(DS.TypeScale.caption).fontWeight(.semibold).lineLimit(1).minimumScaleFactor(0.85)
-            .layoutPriority(1)
+        let off = " (0 = off)"
+        let base = label.hasSuffix(off) ? String(label.dropLast(off.count)) : label
+        return HStack(spacing: 0) {
+            Text(base).dsStyle(DS.TypeScale.caption).fontWeight(.semibold).lineLimit(1).minimumScaleFactor(0.85)
+            // ★ his 11-20: "Add the 0=off beside the name but in italics and the same grey as the details"
+            if base != label {
+                Text(off).font(.system(size: 11.5)).italic().foregroundStyle(DS.Color.textTertiary.color).lineLimit(1)
+                    .fixedSize()
+            }
+            OrganicInfoButton(label: label)   // ★ his 11-20: an (i) beside every setting
+        }
+        .layoutPriority(1)
     }
 
     private func say(_ text: String, warning: Bool = false) -> some View {
@@ -148,21 +166,26 @@ struct LatticeOrganicControls: View {
         }
     }
 
-    /// One row: the name, then its control at the right. 44 pt.
-    private func row<C: View>(_ label: String, @ViewBuilder _ control: () -> C) -> some View {
-        HStack(spacing: DS.Space.s) {
-            name(label)
-            Spacer(minLength: DS.Space.s)
-            control()
+    /// One row: the name, then its control at the right. 44 pt; ★ his 11-20: its grey line under it (`grey` false: the
+    /// setting puts it under its fields instead).
+    private func row<C: View>(_ label: String, grey: Bool = true, @ViewBuilder _ control: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: DS.Space.s) {
+                name(label)
+                Spacer(minLength: DS.Space.s)
+                control()
+            }
+            .frame(height: 44)
+            if grey { OrganicGreyLine(label: label) }
         }
-        .frame(height: 44)
     }
 
-    /// Two rows: the name, then its control across the row under it.
+    /// Two rows: the name, then its control across the row under it, then its grey line.
     private func stacked<C: View>(_ label: String, @ViewBuilder _ control: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            name(label).frame(height: 24, alignment: .bottom)
+            name(label).frame(height: 44, alignment: .bottom)
             control().frame(maxWidth: .infinity, minHeight: 44, maxHeight: 44, alignment: .leading)
+            OrganicGreyLine(label: label)
         }
     }
 
@@ -181,8 +204,8 @@ struct LatticeOrganicControls: View {
                         check: @escaping (Double) -> String?) -> some View {
         VStack(alignment: .trailing, spacing: 0) {
             row(label) {
-                OrganicNumberField(value: look[keyPath: kp], auto: auto, unit: unit) { v in
-                    if let v, let why = check(v) { refusal = (label, why); return }
+                OrganicNumberField(value: look[keyPath: kp], auto: auto, unit: unit, title: Self.bare(label), key: label) { v in
+                    if let v, let why = check(v) { refusal = (label, why); AppPopups.shared.wrongNumber(label, why); return }
                     refusal = nil
                     look[keyPath: kp] = v
                 }
@@ -195,10 +218,11 @@ struct LatticeOrganicControls: View {
     /// A gap (in local spacings): Auto Sweep's close and wide ends, a typed pair, or one number; the close end is the
     /// heavy one (denser where the stress is), 0 = off.
     private func gap(_ label: String, _ kp: WritableKeyPath<LatticeOrganicLook, LatticeOrganicLook.Swept?>,
-                     _ a: LatticeOrganicLook.GapAuto) -> some View {
-        swept(label, "spacings", kp, auto: (a.single, a.heavy, a.light), lightIsSmall: false, step: 0.1,
-              pair: { c, w in LatticeOrganicLook.Check.gap(label, close: c, wide: w) },
-              one: { v in LatticeOrganicLook.Check.gap(label, close: nil, wide: v) })
+                     _ a: LatticeOrganicLook.GapAuto, zeroOff: Bool = false) -> some View {
+        let name = label.replacingOccurrences(of: " (0 = off)", with: "")
+        return swept(label, "spacings", kp, auto: (a.single, a.heavy, a.light), lightIsSmall: false, step: 0.1,
+              pair: { c, w in LatticeOrganicLook.Check.gap(name, close: c, wide: w, zeroOff: zeroOff) },
+              one: { v in LatticeOrganicLook.Check.gap(name, close: nil, wide: v, zeroOff: zeroOff) })
     }
 
     /// His modes on one setting (the ones `offered`): the name and the mode menu on the first row; the fields its mode shows
@@ -216,14 +240,14 @@ struct LatticeOrganicControls: View {
         func snap(_ v: Double) -> Double { step > 0 ? ((v / step).rounded() * step * 1000).rounded() / 1000 : v }
         func setPair(small a: Double?, large b: Double?) {
             let a2 = a.map(snap), b2 = b.map(snap)
-            if let x = a2 ?? auto?.1, let y = b2 ?? auto?.2, let why = pair(x, y) { refusal = (label, why); return }
+            if let x = a2 ?? auto?.1, let y = b2 ?? auto?.2, let why = pair(x, y) { refusal = (label, why); AppPopups.shared.wrongNumber(label, why); return }
             refusal = nil
             var v = s
             if lightIsSmall { v.light = a2; v.heavy = b2 } else { v.heavy = a2; v.light = b2 }
             look[keyPath: kp] = v
         }
         return VStack(alignment: .trailing, spacing: 0) {
-            row(label) {
+            row(label, grey: false) {
                 Menu {
                     ForEach(offered, id: \.self) { m in
                         Button(m.title) { var v = s; v.mode = m; look[keyPath: kp] = v; refusal = nil }
@@ -243,31 +267,39 @@ struct LatticeOrganicControls: View {
             HStack(spacing: DS.Space.xs) {
                 Spacer(minLength: 0)
                 if mode.isSweep {
-                    OrganicNumberField(value: mode.isAuto ? nil : small, auto: auto?.1, unit: "", locked: mode.isAuto) { v in
+                    OrganicNumberField(value: mode.isAuto ? nil : small, auto: auto?.1, unit: "", locked: mode.isAuto,
+                                       title: Self.bare(label), key: label + "-small") { v in
                         setPair(small: v, large: large)
                     }
                     Text("to").font(.system(size: 12)).foregroundStyle(DS.Color.textTertiary.color)
-                    OrganicNumberField(value: mode.isAuto ? nil : large, auto: auto?.2, unit: unit, locked: mode.isAuto) { v in
+                    OrganicNumberField(value: mode.isAuto ? nil : large, auto: auto?.2, unit: unit, locked: mode.isAuto,
+                                       title: Self.bare(label), key: label + "-large") { v in
                         setPair(small: small, large: v)
                     }
                 } else {
-                    OrganicNumberField(value: mode.isAuto ? nil : s.single, auto: auto?.0, unit: unit, locked: mode.isAuto) { v in
+                    OrganicNumberField(value: mode.isAuto ? nil : s.single, auto: auto?.0, unit: unit, locked: mode.isAuto,
+                                       title: Self.bare(label), key: label) { v in
                         let v2 = v.map(snap)
-                        if let x = v2, let why = one(x) { refusal = (label, why); return }
+                        if let x = v2, let why = one(x) { refusal = (label, why); AppPopups.shared.wrongNumber(label, why); return }
                         refusal = nil
                         var n = s; n.single = v2; look[keyPath: kp] = n
                     }
                 }
             }
             .frame(height: 44)
+            OrganicGreyLine(label: label)
             refused(label)
         }
         .accessibilityIdentifier("organic-" + label)
+        .settingToChange(label, also: label == "Cell size" ? [LatticeWizardSetting.cellSize.rawValue] : [])   // ★ notes25 B6: Solve and "Change settings" light it and bring it to the middle (SettingToChange)
     }
 }
 
-/// A number field: nil shows Auto's value greyed ("–" until measured); Return applies what he typed (nil when cleared);
-/// `locked` (an Auto mode) shows Auto's value and takes no typing.
+/// A number field: nil shows Auto's value greyed ("–" until measured); what he types applies as the pad closes (nil when
+/// cleared); `locked` (an Auto mode) shows Auto's value and takes no typing.
+/// ★ His iPad notes 11-22 (img 5): "Why is the full alpha-numeric keyboard being used? It should just be the numeric." The box
+/// opens the app's number pad beside it (PadNumberBox), never the system keyboard; Done or a tap elsewhere applies what he
+/// typed through the same rule its Return used (`parse`).
 struct OrganicNumberField: View {
     let value: Double?
     let auto: Double?
@@ -275,28 +307,31 @@ struct OrganicNumberField: View {
     var locked = false
     /// What the empty field shows in place of `auto`'s number (e.g. "Auto" where the engine works the number out).
     var placeholder: String? = nil
+    /// ★ 11-22: the setting's name (the pad's header) and the box's id ("organic-field-<key>").
+    var title: String = ""
+    var key: String = ""
     let apply: (Double?) -> Void
-    @State private var text = ""
-    @State private var editing = false
 
     var body: some View {
         HStack(spacing: 4) {
-            TextField(placeholder ?? auto.map(StrengthCheckDocs.number) ?? "–",
-                      text: Binding(get: { editing ? text : value.map(StrengthCheckDocs.number) ?? "" },
-                                    set: { text = $0; editing = true }))
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 64)
-                .disabled(locked)
-                .opacity(locked ? 0.55 : 1)
-                .onSubmit {
-                    editing = false
-                    let t = text.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")
-                    if t.isEmpty { apply(nil); return }
-                    guard let d = Double(t), d.isFinite else { return }
-                    apply(d)
-                }
+            PadNumberBox(key: "organic-field-" + (key.isEmpty ? title : key), title: title,
+                         shown: value.map(StrengthCheckDocs.number),
+                         placeholder: placeholder ?? auto.map(StrengthCheckDocs.number) ?? "–",
+                         unit: unit.isEmpty ? nil : unit, width: 64, locked: locked) { text in
+                guard let v = Self.parse(text) else { return }
+                apply(v)
+            }
             if !unit.isEmpty { Text(unit).font(.system(size: 12)).foregroundStyle(DS.Color.textTertiary.color).lineLimit(1).fixedSize() }
         }
         .frame(minHeight: 44)
+    }
+
+    /// What a typed text applies (its Return's rule before 11-22, unchanged): cleared = .some(nil), back to Auto; a number;
+    /// anything else (nil) applies nothing.
+    static func parse(_ text: String) -> Double?? {
+        let t = text.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")
+        if t.isEmpty { return .some(nil) }
+        guard let d = Double(t), d.isFinite else { return nil }
+        return .some(d)
     }
 }

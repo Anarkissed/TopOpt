@@ -155,7 +155,6 @@ public enum LatticeStageCopy {
 /// words — the corner is Topology's, [Settings ⌄] [Lattice] [⌃].
 public enum LatticeSetupCopy {
     /// design-system §5's short form, while taps make lattice groups (mockup #lat-setup).
-    public static let hint = "Tap a face to lattice it \u{00B7} drag to turn"
     /// Lattice, grey: nothing saved on the Lattice page yet (§4.6, ≤ 5 words).
     public static let saveFirst = "Save a lattice first"
     /// The fix line just above the corner (§4.18, N4) and its one tap.
@@ -198,7 +197,6 @@ public enum LatticeSetupCopy {
     }
     public static let switchMode = "Switch"
     /// While − is set: the job stays as today until the engine takes `lattice.whole_part` (his 11-03 rule).
-    public static let wholePartWaits = "\u{2212} Lattice faces waits on the engine update"
 
     // ★ B6 s1b — the Selections rows (§4.3 / §4.4, mockup #lat-setup)
     public static let faces = "Faces"
@@ -220,10 +218,10 @@ public enum LatticeSetupCopy {
     public static func alsoIn(_ group: String) -> String { "also in \(group)" }
     // ★ B6 s2a — the Topology panel (notes 23a, 23b)
     public static let topology = "Topology"
-    public static let includeLine = "Switched-off groups are left out of this lattice."
-    /// While a scenario's switch is off and the linked core can't take `lattice.scenarios` yet (his 11-03 rule). Group
-    /// switches act in the app (release (2)), so they never show it.
-    public static let includeWaits = "The run still uses every scenario until the engine update"
+    /// ★ his 11-20 rule (a caption is five words at most) and 11-22 ("NOTHING cuts into the modal"): the full sentence is the
+    /// (i)'s first line (`includeInfo`)
+    public static let includeLine = "Switch off to leave out"
+    public static let includeInfo = "Switched-off groups are left out of this lattice."
     /// ★ Release (2): while a group's switch is off — the one run that can't leave it out (pick (a), asked 11-06 09:49Z).
     public static let resultKeepsGroups =
         "Lattice an optimized result keeps every group: it is checked under the loads it was optimized with."
@@ -234,18 +232,18 @@ public enum LatticeSetupCopy {
     public static let protectSkin = "Protect skin"
     /// A lattice group with no role yet (§4.4's pending state).
     public static let pending = "Pending\u{2026}"
-    /// Protect skin, until the engine has a per-region skin (E2.4): the run keeps the face solid.
-    public static let skinWaits = "Runs as No lattice until the engine update"
     public static let topologyHint = "Taps go to Topology groups"
     /// ★ B6 N2: a picked face row's line, under its depth (mockup #lat-face-prism, "or drag its handle").
-    public static let dragItsHandle = "Or drag its handle on the part"
+    public static let dragItsHandle = "Or drag its handle"
     /// ★ his iPad 11-09 (2.1, the reviewer's ruling (a) 19:21Z): what a face row says. A face of a Protect skin group says
     /// so ("Protect skin · 4 mm") — it runs as No lattice until the engine has a per-region skin, and said "No lattice ·
     /// 4 mm" beside a depth with no handle (his rule: Protect skin = colour, no prism). A face with no role says "—"
     /// (its group has none yet) or "Off" (declared out); a latticed face its depth.
-    public static func faceValue(role: LatticeGroupRole?, groupHasRole: Bool, skin: Bool, mm: String) -> String {
+    /// ★ his 11-22: "get rid of the words '4mm' and '4mm deep' ... It takes up way too much space": a face row says its role
+    /// only ("Protect skin", "No lattice"); a latticed face says nothing (its depth is its handle and its open row's number).
+    public static func faceValue(role: LatticeGroupRole?, groupHasRole: Bool, skin: Bool, mm: String = "") -> String {
         guard let role else { return groupHasRole ? off : "\u{2014}" }
-        return role == .exclude ? "\(notLatticed(skin: skin)) \u{00B7} \(mm)" : mm
+        return role == .exclude ? notLatticed(skin: skin) : ""
     }
 
     /// A face kept out of the lattice: "Protect skin" in a Protect skin group, else "No lattice" (its row's word and its
@@ -261,7 +259,7 @@ public enum LatticeSetupCopy {
         return (r > 0 ? "+" : "\u{2212}") + SelectionsSummary.format(abs(r), decimals: 1) + " mm"
     }
     /// ★ B6 N3: a picked zone's line, under its size (mockup #lat-zone-sel).
-    public static let zoneHandlesLine = "Drag its handles on the part to size it."
+    public static let zoneHandlesLine = "Drag its handles to size"
     /// The join's second line (the face takes the group it joins).
     public static let joinNote = "with its role and depth"
 

@@ -813,6 +813,10 @@ public struct FlexibleStagePage: View {
             if let appModel {
                 TopLeftBlock(model: appModel, projectID: project.id, name: project.name, material: project.material,
                              process: project.process, back: { leave(then: onBack) },
+                             // ★ notes27 (G3): "Part" — the same leave check, then Back landing on the part's versions
+                             part: onBack.map { back -> () -> Void in
+                                 { leave(then: { back(); appModel.library.comeBackToPart(from: project.id) }) }
+                             },
                              canUndo: project.canUndoNow, canRedo: project.canRedoNow,
                              undo: { Self.history(undo: true, project: project, model: model) },
                              redo: { Self.history(undo: false, project: project, model: model) })
@@ -1077,7 +1081,7 @@ public struct FlexibleStagePage: View {
                 // ★ ROUND 5 (S9): it names the button — "Save & Exit builds…" only once something changed
                 noticePill(FlexibleSettingsExit.topLine(r, modified: FlexibleSettingsExit.modified(model.settings, since: opened),
                                                         empty: model.isEmptySetup),
-                           icon: empty ? "info.circle.fill" : (good ? "checkmark.circle.fill" : "exclamationmark.circle.fill"),
+                           icon: empty ? "info.circle.fill" : (good ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"),
                            colour: (empty ? DS.Color.textSecondary : (good ? FlexibleStageStyle.accentToken : DS.Color.warning)).color,
                            fix: Self.noticeFix(r, model: model))   // ★ M1 VERIFY: no [Fix] with no face-prism
             }

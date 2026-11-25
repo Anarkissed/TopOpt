@@ -34,8 +34,8 @@ final class LatticeLayoutAreasPageTests: XCTestCase {
         XCTAssertTrue(own.allSatisfy { $0.own.bandMM == 3 && $0.own.strength == 0.5 }, "★ its band and Strength")
         XCTAssertTrue(own.allSatisfy { $0.finish.rimMM == -1 && $0.finish.skin == false }, "★ its Finish: Rim")
         XCTAssertTrue(s.regions.filter { !$0.own.any }.allSatisfy { !$0.finish.any }, "control: the other areas state nothing")
-        XCTAssertNil(LatticeLayoutPreview.notes(p.lattice).first { $0 == LatticeLayoutPreview.perAreaLine },
-                     "★ per area is done: the line saying it is not is gone")
+        XCTAssertNil(LatticeLayoutPreview.notes(p.lattice).first { $0.contains("not per area yet") },
+                     "★ per area is done: the line saying it is not is gone (his 11-22: and its words)")
         // Covered
         p.lattice.areaGrading[g.id] = LatticeAreaGrading(outerFinish: "shell", skin: "none")
         XCTAssertTrue(LatticeLayoutPreview.settings(p).regions.contains { $0.finish.coverMM == (p.printParams.wallRingMM > 0 ? p.printParams.wallRingMM : -1) }, "★ Covered, at the printer's wall")

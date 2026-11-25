@@ -21,6 +21,11 @@ public enum LatticeStructuralThinWalls {
         public let minWallMM: Double
         /// The share (0…1) of the voxels set to lattice whose wall is thinner — left solid at every cell.
         public let share: Double
+        /// ★ notes25 (D8): the cells across a wall the engine was asked for (`LatticeLayoutPreview.minCellsAcross`); nil where
+        /// the old bake found the walls (its own N*).
+        public var cellsAcross: Int? = nil
+        /// The thinnest wall, as every line says it ("6.0 mm") — the one place it is written.
+        public var minWallText: String { Self.mm(minWallMM) }
         public var caption: String { "Structural: walls under \(Self.mm(minWallMM)) stay solid" }
         public var sentence: String {
             "Structural certifies a lattice only where a wall is at least \(Self.mm(minWallMM)) thick — "
@@ -28,7 +33,8 @@ public enum LatticeStructuralThinWalls {
             + "lattice is thinner, so the run leaves it solid, and so does this preview. Aesthetic lattices thin walls."
         }
         static func mm(_ v: Double) -> String {
-            v >= 10 ? "\(Int(v.rounded())) mm" : String(format: "%.1f mm", v)
+            // ★ notes25 (D10): a whole number of 10 mm or more as it is ("20 mm"); else one decimal ("12.7 mm", "6.0 mm")
+            v >= 10 && v == v.rounded() ? "\(Int(v)) mm" : String(format: "%.1f mm", v)
         }
     }
 

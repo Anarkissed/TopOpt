@@ -23,6 +23,9 @@ public struct RunScreen: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulse = false
+    /// ★ notes25 (his Img 1: "two pop-ups, one behind the other. There should only be one"): the Mac's print-accurate card
+    /// carries this run from his press to its end — no progress card and no top-lane pill of its own then.
+    @ObservedObject private var mac = LatticeMacMake.shared
 
     public init(model: RunModel, materialName: String, resolution: Int,
                 onRetry: @escaping () -> Void = {}, version: String? = nil) {
@@ -39,7 +42,7 @@ public struct RunScreen: View {
             case .running:
                 // Once the first variant streams in, the results screen takes over
                 // (progressive results); the progress card yields to it.
-                if !(model.outcome?.variants.isEmpty ?? true) {
+                if !(model.outcome?.variants.isEmpty ?? true) || mac.covers(model) {   // ★ notes25: the Mac's one card instead
                     EmptyView()
                 } else if model.isMinimized {
                     minimizedChip
@@ -100,7 +103,7 @@ public struct RunScreen: View {
 
     private var runningCardBody: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Optimizing" + (version.map { " \($0)" } ?? ""))
+            Text(RunCardWords.title(model.runningJobMode) + (version.map { " \($0)" } ?? ""))   // ★ his 11-21
                 .font(.system(size: 11, weight: .bold)).tracking(0.8).textCase(.uppercase)
                 .foregroundStyle(DS.Color.accent.color)
                 .opacity(pulse ? 1 : 0.65)
@@ -143,7 +146,7 @@ public struct RunScreen: View {
 
                 GlassSheet {
                     VStack(spacing: DS.Space.m) {
-                        Image(systemName: "exclamationmark.triangle")
+                        Image(systemName: "exclamationmark.triangle.fill")
                             .font(.system(size: 30, weight: .semibold))
                             .foregroundStyle(DS.Color.danger.color)
                             .padding(.bottom, DS.Space.xs)

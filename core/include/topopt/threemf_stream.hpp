@@ -52,6 +52,15 @@ class StreamingThreeMfWriter : public TriangleSink {
   struct Options {
     bool indexed = false;
     bool deflate = false;
+    // P3 (his print orientation, support_paint.hpp): painted supports. On: <model> declares the PrusaSlicer namespace, a
+    // triangle added with paint = true carries both slicers' enforcer mark (paint_supports="4" for Bambu Studio and
+    // OrcaSlicer, slic3rpe:custom_supports="4" for PrusaSlicer), and two more entries set support ON for the object
+    // with only the painted places supported: Metadata/model_settings.config (Bambu, Orca: enable_support 1,
+    // support_type `support_type`) and Metadata/Slic3r_PE_model.config (PrusaSlicer: support_material 1,
+    // support_material_auto 0, "For support enforcers only"). Off (the default): the file as it always was.
+    bool supports = false;
+    std::string support_type = "tree(manual)";   // decision D4 (his Bambu check, 11-23): Tree (manual)
+    std::string object_name = "part";
   };
   // Open `path` (the .3mf) and begin the model part in a sibling temp file
   // (`path` + ".model.tmp"). Throws ThreeMfStreamError if either cannot be opened.
@@ -63,6 +72,9 @@ class StreamingThreeMfWriter : public TriangleSink {
   // Indexed only: one vertex, its index (from 0, in order); a triangle of three indices already added.
   std::uint64_t add_vertex(const Vec3& v);
   void add_indexed(std::uint64_t a, std::uint64_t b, std::uint64_t c);
+  // P3: the same, marked as a support enforcer when `paint` (Options::supports must be on).
+  void add_indexed(std::uint64_t a, std::uint64_t b, std::uint64_t c, bool paint);
+  std::uint64_t painted_count() const { return painted_; }
   std::uint64_t vertex_count() const { return vert_count_; }
   // After finish(): whether the model part was deflated.
   bool compressed() const { return compressed_; }
@@ -93,6 +105,7 @@ class StreamingThreeMfWriter : public TriangleSink {
   std::uint64_t vert_count_ = 0;
   bool compressed_ = false;
   std::uint64_t tri_count_ = 0;
+  std::uint64_t painted_ = 0;
   std::uint64_t model_len_ = 0;
   std::uint32_t model_crc_ = 0xFFFFFFFFu;  // in-progress CRC-32 (pre-final XOR)
   bool finished_ = false;

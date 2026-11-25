@@ -223,8 +223,10 @@ final class LatticeOrganicFileTests: XCTestCase {
         print(String(format: "ORGANIC-FILE cube Grown: %@ %d bytes, %d bars (preview %d), made in %.1f s", file.report.fileName,
                      file.stl.count, file.report.bars, previewBars, Date().timeIntervalSince(t0)))
         XCTAssertTrue(file.report.isThreeMF, "★ the file is a 3MF: \(file.report.fileName)")
-        XCTAssertEqual(file.report.slicerSupports, "off", "★ separate tubes: slice with supports off")
-        XCTAssertTrue(file.report.line.contains("supports off"), "and the bar says so: \(file.report.line)")
+        // ★ RE-PINNED (notes27: core's P3, merged in 850c8a6f, computes `slicer_supports` from the part's own overhangs —
+        // "painted", "needed" or "off" — where it was "off" for every weave file; the app says each in his words)
+        XCTAssertNotNil(PrintOrientationWords.supports(file.report.slicerSupports), "★ core's own word: \(file.report.slicerSupports ?? "none")")
+        XCTAssertEqual(file.report.line.contains("supports off"), file.report.slicerSupports == "off", "the bar says it only for off")
         XCTAssertEqual(file.report.bars, previewBars, "★ the file is the lattice the preview laid, bar for bar")
         let o = try LatticeFileButton.outcome(file, densityGCm3: 1.24)
         XCTAssertGreaterThan(o.variants.first?.meshIndices.count ?? 0, 1000, "★ the 3MF read back as the Results screen's mesh")

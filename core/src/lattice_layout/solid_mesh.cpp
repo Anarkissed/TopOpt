@@ -528,7 +528,17 @@ std::vector<std::size_t> end_joints(const Bars& bars) {
   // Ends within a hundredth of a micron of a point already seen are that point (as drop_loose_bars reads a joint).
   constexpr double kSame = 1e-5;
   using Cell = std::array<long long, 3>;
-  std::map<Cell, std::vector<std::pair<Vec3, std::size_t>>> seen;
+  // SPEED 11-22: hashed, not ordered (the 27 neighbours are read by key, so the joints are the same numbers)
+  struct CellHash {
+    std::size_t operator()(const Cell& c) const noexcept {
+      std::uint64_t h = static_cast<std::uint64_t>(c[0]) * 0x9E3779B97F4A7C15ull;
+      h ^= static_cast<std::uint64_t>(c[1]) + 0x7F4A7C159E3779B9ull + (h << 6) + (h >> 2);
+      h ^= static_cast<std::uint64_t>(c[2]) + 0x94D049BB133111EBull + (h << 6) + (h >> 2);
+      return static_cast<std::size_t>(h);
+    }
+  };
+  std::unordered_map<Cell, std::vector<std::pair<Vec3, std::size_t>>, CellHash> seen;
+  seen.reserve(2 * bars.bars.size());
   std::size_t points = 0;
   auto joint_of = [&](const Vec3& p) {
     const Cell k{std::llround(p.x / kSame), std::llround(p.y / kSame), std::llround(p.z / kSame)};
@@ -650,8 +660,10 @@ std::vector<char> bars_present(const Bars& bars, const std::vector<Vec3>& drop_a
   return out;
 }
 
-std::vector<WeaveFinding> weave_findings(const Bars& bars, const std::vector<int>& weave_regions, const std::vector<char>& present,
-                                         const std::vector<Vec3>& places, double layer_mm) {
+// The reference form: every bar read for every place, the joints made per call (as before 11-22).
+std::vector<WeaveFinding> weave_findings_every_bar(const Bars& bars, const std::vector<int>& weave_regions,
+                                                   const std::vector<char>& present, const std::vector<Vec3>& places,
+                                                   double layer_mm) {
   std::vector<WeaveFinding> out(places.size());
   if (places.empty()) return out;
   const double layer = layer_mm > 0.0 ? layer_mm : 0.2;
@@ -675,6 +687,85 @@ std::vector<WeaveFinding> weave_findings(const Bars& bars, const std::vector<int
       if (std::fabs(x.b.z - x.a.z) < layer && held_from_below(bars, joints, at, here, i, 1 - lo, layer)) ++f.level;
     }
   }
+  return out;
+}
+
+// SPEED 11-22: a cell's key from its three numbers (21 bits each, offset so a negative number keeps its place).
+namespace {
+std::uint64_t grid_key(long long i, long long j, long long k) {
+  constexpr long long kOff = 1LL << 20;
+  const auto f = [](long long v) { return static_cast<std::uint64_t>((v + kOff) & 0x1FFFFF); };
+  return f(i) << 42 | f(j) << 21 | f(k);
+}
+bool grid_cell(double v, long long& c) {
+  if (!std::isfinite(v)) return false;
+  const double q = std::floor(v / BarGrid::kCell);
+  if (std::fabs(q) > static_cast<double>((1LL << 20) - 2)) return false;
+  c = static_cast<long long>(q);
+  return true;
+}
+}  // namespace
+
+BarGrid::BarGrid(const Bars& bars, const std::vector<char>& use) {
+  for (std::size_t i = 0; i < bars.bars.size(); ++i) {
+    if (!use.empty() && i < use.size() && !use[i]) continue;
+    const Bar& x = bars.bars[i];
+    // the farthest a place can lie from the bar's line and read it, and a hair more for the rounding of the box
+    const double r = std::max(0.0, 0.5 * x.width + 0.35) + 1e-6;
+    long long lo[3], hi[3];
+    if (!grid_cell(std::min(x.a.x, x.b.x) - r, lo[0]) || !grid_cell(std::max(x.a.x, x.b.x) + r, hi[0]) ||
+        !grid_cell(std::min(x.a.y, x.b.y) - r, lo[1]) || !grid_cell(std::max(x.a.y, x.b.y) + r, hi[1]) ||
+        !grid_cell(std::min(x.a.z, x.b.z) - r, lo[2]) || !grid_cell(std::max(x.a.z, x.b.z) + r, hi[2]))
+      continue;   // not finite: no place reads it (every comparison with it is false)
+    for (long long a = lo[0]; a <= hi[0]; ++a)
+      for (long long b = lo[1]; b <= hi[1]; ++b)
+        for (long long c = lo[2]; c <= hi[2]; ++c) cells_[grid_key(a, b, c)].push_back(static_cast<std::uint32_t>(i));
+  }
+}
+
+const std::vector<std::uint32_t>& BarGrid::near(const Vec3& p) const {
+  long long a, b, c;
+  if (!grid_cell(p.x, a) || !grid_cell(p.y, b) || !grid_cell(p.z, c)) return none_;
+  const auto it = cells_.find(grid_key(a, b, c));
+  return it == cells_.end() ? none_ : it->second;
+}
+
+WeaveFindingsIndex::WeaveFindingsIndex(const Bars& bars, const std::vector<int>& weave_regions,
+                                       const std::vector<char>& present, double layer_mm)
+    : bars_(bars),
+      regions_(weave_regions),
+      here_(present.empty() ? std::vector<char>(bars.bars.size(), 1) : present),
+      layer_(layer_mm > 0.0 ? layer_mm : 0.2),
+      joints_(end_joints(bars)),
+      at_(bars_at_joints(joints_, bars.bars.size())),
+      grid_(bars, here_) {}
+
+WeaveFinding WeaveFindingsIndex::at(const Vec3& place) const {
+  // As weave_findings_every_bar reads one place, over the bars filed in its cell (every other bar can neither reach it
+  // nor have it on its line, so it counted nothing there).
+  WeaveFinding f;
+  for (const std::uint32_t u : grid_.near(place)) {
+    const std::size_t i = u;
+    if (i >= here_.size() || !here_[i]) continue;
+    const Bar& x = bars_.bars[i];
+    const bool weave = in_regions(regions_, x.region);
+    if (weave && to_bar(place, x) < 0.5 * x.width + 0.35) f.on_weave = true;
+    if (!place_reaches(place, x)) continue;
+    ++f.reached;
+    if (!weave) { ++f.cube; continue; }
+    const int lo = low_end(x);
+    if (held_from_below(bars_, joints_, at_, here_, i, lo, layer_)) { ++f.held; continue; }
+    if (std::fabs(x.b.z - x.a.z) < layer_ && held_from_below(bars_, joints_, at_, here_, i, 1 - lo, layer_)) ++f.level;
+  }
+  return f;
+}
+
+std::vector<WeaveFinding> weave_findings(const Bars& bars, const std::vector<int>& weave_regions, const std::vector<char>& present,
+                                         const std::vector<Vec3>& places, double layer_mm) {
+  std::vector<WeaveFinding> out(places.size());
+  if (places.empty()) return out;
+  const WeaveFindingsIndex index(bars, weave_regions, present, layer_mm);
+  for (std::size_t k = 0; k < places.size(); ++k) out[k] = index.at(places[k]);
   return out;
 }
 
@@ -909,6 +1000,7 @@ double strut_run_on_mm(const Carved&, const MeshSpec& spec) {
 void weave_bar_shells(const Domain&, const Layout&, const Bars&, const std::vector<char>&, const std::vector<char>&,
                       const Carved&, const MeshSpec&, TriangleMesh&, std::vector<std::size_t>&, MeshReport&) {}
 std::vector<char> solid_slivers_left_out(const Carved&, const std::vector<Vec3>&) { return {}; }
+TriangleMesh carved_solid_mesh(const Carved&) { return {}; }
 bool cut_shell_at_bed(TriangleMesh&, double) { return false; }
 
 #else
@@ -984,6 +1076,19 @@ std::vector<char> solid_slivers_left_out(const Carved& carved, const std::vector
   if (!carved.kept) return out;
   for (const Manifold& piece : static_cast<const CarvedSolids*>(carved.kept.get())->pieces)
     out.push_back(drop_at.empty() ? 0 : sliver_dropped(piece.BoundingBox(), piece.Volume(), drop_at) ? 1 : 0);
+  return out;
+}
+
+TriangleMesh carved_solid_mesh(const Carved& carved) {
+  TriangleMesh out;
+  if (!carved.ok || !carved.kept) return out;
+  const manifold::MeshGL64 g = static_cast<const CarvedSolids*>(carved.kept.get())->solid.GetMeshGL64();
+  out.vertices.reserve(g.NumVert());
+  for (std::size_t v = 0; v < g.NumVert(); ++v)
+    out.vertices.push_back({g.vertProperties[v * g.numProp], g.vertProperties[v * g.numProp + 1], g.vertProperties[v * g.numProp + 2]});
+  out.triangles.reserve(g.NumTri());
+  for (std::size_t t = 0; t < g.NumTri(); ++t)
+    out.triangles.push_back({static_cast<int>(g.triVerts[3 * t]), static_cast<int>(g.triVerts[3 * t + 1]), static_cast<int>(g.triVerts[3 * t + 2])});
   return out;
 }
 

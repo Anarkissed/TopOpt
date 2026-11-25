@@ -43,7 +43,7 @@ public enum SeveralRoles {
         /// Today's glyph for the role (the face chip's).
         public var symbol: String {
             switch self {
-            case .anchor: return "lock.fill"
+            case .anchor: return "pin.fill"   // ★ notes25 icons: Anchor is the pin
             case .load: return "arrow.down"
             case .keepClear: return "nosign"
             case .protect: return "shield.lefthalf.filled"

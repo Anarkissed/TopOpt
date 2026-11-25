@@ -153,7 +153,19 @@ private struct StageUniforms {
     var shadowRect: SIMD4<Float> = .zero
     /// §3c: shadow strength; 0 = off.
     var shadowStrength: Float = 0
-    var _pad: SIMD3<Float> = .zero   // 16-byte tail alignment
+    /// ★ notes24 item 1 (img 49): how much of the floor is seen as a plane (StageFloor.planeWeight): 1 = as before; 0 = a
+    /// level view, the floor's edge-on line and no horizon haze.
+    var plane: Float = 1
+    /// The horizon glow's half width in the ray's |y| (StageFloor.glowBand).
+    var glowBand: Float = 0.14
+    /// ★ notes28 (his iPad notes on release 18, img 77 against Bambu Studio's img 78: "Looking from below the model makes the
+    /// grid look very confusing. It doesn't seem like we are actually looking through a wall"): how far the look has gone over to
+    /// the bed SEEN FROM UNDER IT (StageFloor.underWeight) — 0 from above (as before), 1 a little under the bed: the bed a
+    /// see-through tinted plate with its grid, drawn in front of the part (`stage_under_fragment`), the backdrop's own grid gone.
+    var under: Float = 0
+    /// ★ notes26 (C4): 1 when the eye is UNDER the floor (the floor is then between the eye and the part, and its grid is drawn
+    /// again over the part by `stage_under_fragment`); 0 from above. Also the 16-byte tail (the MSL twin is 144 bytes).
+    var below: Float = 0
 }
 
 // The depth-prepass uniforms — must match `DUniforms` in `depthPrepassShaderSource`.
@@ -407,6 +419,28 @@ inline bool shell_is_latticed(float3 mpos, float3 mnormal, constant ShellClip& c
     }
     return false;
 }
+// ★ notes24 (his "start an animation by removing the walls"): the latticed surface DISSOLVING away as a lay begins. `eye.w` is
+// the share of it still standing (0 — every clip until now — gone, as before; 1 all of it); a fragment stands while its
+// noise is under that. Patches of about six of the clip's voxels, in the part's own space (they stay put as he turns it).
+inline float shell_dissolve_noise(float3 p, constant ShellClip& c) {
+    float cell = 6.0 * max(min(c.spacing.x, min(c.spacing.y, c.spacing.z)), 0.05);
+    float n = 0.0, amp = 0.62, tot = 0.0;
+    for (int o = 0; o < 2; ++o) {
+        float3 q = p / cell, i = floor(q), f = q - i;
+        f = f * f * (3.0 - 2.0 * f);
+        float h[8];
+        for (int k = 0; k < 8; ++k) {
+            float3 cc = i + float3(k & 1, (k >> 1) & 1, (k >> 2) & 1);
+            h[k] = fract(sin(dot(cc, float3(127.1, 311.7, 74.7))) * 43758.5453);
+        }
+        float v = mix(mix(mix(h[0], h[1], f.x), mix(h[2], h[3], f.x), f.y), mix(mix(h[4], h[5], f.x), mix(h[6], h[7], f.x), f.y), f.z);
+        n += amp * v; tot += amp; amp *= 0.6; cell *= 0.45;
+    }
+    return clamp((n / tot - 0.5) * 1.6 + 0.5, 0.0, 0.999);
+}
+inline bool shell_standing(float3 mpos, constant ShellClip& c) {
+    return c.eye.w > 0.0 && shell_dissolve_noise(mpos, c) < c.eye.w;
+}
 """
 
 private let viewerShaderSource = """
@@ -423,6 +457,7 @@ using namespace metal;
 struct VIn  { float3 position [[attribute(0)]]; float3 normal [[attribute(1)]];
               float4 tint [[attribute(2)]]; float4 flags [[attribute(3)]]; };
 struct VOut { float4 position [[position]]; float3 vnormal; float4 tint; float mheight;
+              float2 light;  // ★ notes26 (C5): x = the load light's strength here, y = how much load flows (2 + it over stress)
               // §6 — the cut's half-space test, per fragment.
               float3 mpos; float member;
               float solid;   // Flexible: 1 = stays opaque under a translucent body (tint flags.y)
@@ -477,20 +512,100 @@ struct Uniforms { float4x4 mvp; float4x4 normalMatrix; float4 flex;
 // (exaggeration·amplitude). At scale 0 the buffer contributes nothing, so the
 // static workspace draw is byte-identical — this is the M7.viz.3 flex animation,
 // a pure vertex displacement of the already-solved solution (no re-simulation).
+// ★ notes25 (Bend / Break): the Results colour ramp (ResultsModel.stressColor's five stops, the same interpolation), red at 1.
+static float3 load_ramp(float f) {
+    const float3 s0 = float3(28.0, 60.0, 170.0) / 255.0;
+    const float3 s1 = float3(0.0, 170.0, 220.0) / 255.0;
+    const float3 s2 = float3(60.0, 190.0, 110.0) / 255.0;
+    const float3 s3 = float3(250.0, 220.0, 60.0) / 255.0;
+    const float3 s4 = float3(255.0, 70.0, 50.0) / 255.0;
+    float x = clamp(f, 0.0, 1.0) * 4.0;
+    int i = min(3, int(x));
+    float t = x - float(i);
+    float3 a = i == 0 ? s0 : (i == 1 ? s1 : (i == 2 ? s2 : s3));
+    float3 b = i == 0 ? s1 : (i == 1 ? s2 : (i == 2 ? s3 : s4));
+    return mix(a, b, t);
+}
+
+// ★ notes26 (C5, his 11-23: "making the Load path animation a bit more clear. I think it needs more colour and light coming out
+// of it"): the load light's colour by how much load flows where it passes (`s` = √(σ/σmax), LoadLightFlow.strength) — a cool
+// blue where little does, a gold through the middle, a hot orange where the most does. From the data, never decoration.
+static float3 load_light_colour(float s) {
+    const float3 cool = float3(0.20, 0.62, 1.00);
+    const float3 gold = float3(1.00, 0.80, 0.28);
+    const float3 hot = float3(1.00, 0.40, 0.12);
+    float x = clamp(s, 0.0, 1.0);
+    return x < 0.5 ? mix(cool, gold, x * 2.0) : mix(gold, hot, (x - 0.5) * 2.0);
+}
+
+// ★ notes27 (his 11-24: "COMPLETELY blown out ... bright enough to be seen - but not blown out"): the band over the stress map is
+// the place's own stress colour lifted a little toward white and capped under it (LoadLightFlow.bandColour, the same numbers).
+static float3 load_band(float3 sc) {
+    return min(mix(clamp(sc, 0.0, 1.0), float3(1.0), 0.2) * 1.08, float3(0.92));
+}
+
+// ★ notes26 (C5): a LOAD LIGHT vertex's light (tint alpha −2 − s over the dark body, −3 − s over its stress colour; the light in
+// flags.w): (strength, s) or (strength, 2 + s); (0, 0) for any other vertex.
+static float2 load_light_of(float4 tint, float4 flags) {
+    if (tint.a >= -1.5) { return float2(0.0); }
+    bool overStress = tint.a < -2.999;
+    float s = clamp(overStress ? -tint.a - 3.0 : -tint.a - 2.0, 0.0, 1.0);
+    return float2(clamp(flags.w, 0.0, 1.0), overStress ? 2.0 + s : s);
+}
+
+// ★ notes26 (C5): the load light's HALO — the lit band drawn again on a shell pushed out along its normals by `u.flex.z` mm times
+// its light, and ADDED (MeshRenderer.blendLoadLightHalo; depth-tested, never written): light spilling past the wall and round its
+// silhouette, strongest where the wall turns away from the eye.
+struct HOut { float4 position [[position]]; float2 light; float3 tint; float3 wnormal; float3 wpos; float3 eyeWS [[flat]]; };
+vertex HOut halo_vertex(VIn in [[stage_in]], constant Uniforms& u [[buffer(1)]],
+                        constant packed_float3* disp [[buffer(3)]], uint vid [[vertex_id]]) {
+    HOut o;
+    float2 lt = load_light_of(in.tint, in.flags);
+    float3 n = in.normal;
+    float nl = length(n);
+    float3 p = in.position + u.flex.x * float3(disp[vid]) + (nl > 1e-6 ? n / nl : float3(0.0)) * (u.flex.z * lt.x);
+    o.position = u.mvp * float4(p, 1.0);
+    o.light = lt;
+    o.tint = in.tint.rgb;
+    o.wnormal = (u.worldNormalMatrix * float4(in.normal, 0.0)).xyz;
+    o.wpos = (u.model * float4(p, 1.0)).xyz;
+    o.eyeWS = u.eye.xyz;
+    return o;
+}
+fragment float4 halo_fragment(HOut in [[stage_in]]) {
+    if (in.light.x < 0.002) { discard_fragment(); }
+    bool overStress = in.light.y > 1.5;
+    // ★ notes27: the band's own colour (capped), softly, and MAXED with what is there (blendLoadLightHalo): never summed to white
+    float3 lc = overStress ? load_band(in.tint) : min(load_light_colour(in.light.y), float3(0.92));
+    float3 N = normalize(in.wnormal);
+    float3 V = normalize(in.eyeWS - in.wpos);
+    float fr = pow(1.0 - clamp(abs(dot(N, V)), 0.0, 1.0), 1.5);
+    float g = clamp(in.light.x, 0.0, 1.0) * (0.25 + 0.75 * fr) * 0.35;
+    return float4(lc * g, 0.0);   // the larger of it and what is there (alpha untouched)
+}
+
 vertex VOut viewer_vertex(VIn in [[stage_in]], constant Uniforms& u [[buffer(1)]],
                           constant packed_float3* disp [[buffer(3)]], uint vid [[vertex_id]]) {
     VOut o;
     float3 p = in.position + u.flex.x * float3(disp[vid]);
     o.position = u.mvp * float4(p, 1.0);
     o.vnormal  = (u.normalMatrix * float4(in.normal, 0.0)).xyz;
-    o.tint = in.tint;
+    // ★ notes25: a LOAD RAMP vertex (alpha < 0): r = its share of its limit at your load, g = 1 where that is known. Its colour is
+    // made HERE at this frame's load (flex.y), so Bend / Break recolour without a re-upload; unknown = no tint (the clay).
+    float4 tn = in.tint;
+    // ★ notes26 (C5): a LOAD LIGHT vertex: its albedo the dark body, or its stress colour dimmed (the part stays readable); its
+    // light emitted by viewer_fragment and haloed by halo_vertex
+    o.light = load_light_of(in.tint, in.flags);
+    if (tn.a < -1.5) { tn = tn.a < -2.999 ? float4(tn.rgb * 0.6, 1.0) : float4(0.17, 0.19, 0.23, 1.0); }
+    else if (tn.a < -0.5) { tn = tn.g > 0.5 ? float4(load_ramp(tn.r * u.flex.y), 1.0) : float4(0.0); }
+    o.tint = tn;
     o.mheight = in.position.y;   // model-space height (rest), for the M7.8 reveal scrub
     o.mpos = in.position;        // §6: rest model position, for the cut's half-space test
     o.mnormal = in.normal;       // the shell's declared-face test (model space, rest)
     o.member = in.flags.x;       // §6: 1 on faces of the selected region
     o.solid = in.flags.y;        // Flexible: the dented face stays opaque (FlexibleOverlay)
     o.ghost = in.flags.z;        // Flexible X-ray: the body as a ghost (FlexibleStagePage)
-    o.glow = in.flags.w;         // ★ his 11-09: where Structural can't lattice, glowing (LatticeThinWallGlow)
+    o.glow = in.tint.a < -1.5 ? 0.0 : in.flags.w;   // ★ his 11-09: where Structural can't lattice, glowing (LatticeThinWallGlow) · ★ notes26: not the load light's
     // §2 / §3d: the WORLD normal + WORLD position (so the light can stay put while the
     // camera orbits) and the EYE depth (so the far side of a dense lattice can recede).
     o.wnormal = (u.worldNormalMatrix * float4(in.normal, 0.0)).xyz;
@@ -526,7 +641,17 @@ vertex VOut viewer_vertex(VIn in [[stage_in]], constant Uniforms& u [[buffer(1)]
 // be free to drift by a voxel and impossible to notice.
 \(shellClipMSL)
 
-fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[buffer(0)]],
+// ★ notes28 (his iPad notes on release 18, img 77: "is there a way to implement anti-aliasing to make the stair-stepping less
+// pronounced?"): the body's colour and WHICH of the pixel's MSAA samples it covers. Where the engine's map cuts the surface
+// (ShellClip mode 2 with `gate.z` = the frame's sample count, set by MeshRenderer), the cut is asked at each of the 4 samples'
+// own places (the standard 4x positions), so the cut edge is anti-aliased by the same resolve as every other edge; elsewhere
+// every sample, as before.
+struct ViewerFragOut {
+    float4 color [[color(0)]];
+    uint   mask  [[sample_mask]];
+};
+
+fragment ViewerFragOut viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[buffer(0)]],
                                 constant float& bodyAlpha [[buffer(1)]],
                                 constant ShadeParams& sp [[buffer(2)]],
                                 // ★ MOVED TO 3 BY THE MERGE. `render-quality` took
@@ -539,7 +664,21 @@ fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[
                                 constant ShellClip& shellClip [[buffer(4)]],
                                 constant float4* shellDecls [[buffer(5)]],
                                 texture3d<float, access::sample> clipRegionTex [[texture(4)]]) {
-    if (shell_is_latticed(in.mpos, in.mnormal, shellClip, shellDecls, clipRegionTex)) {
+    // ★ notes24: a latticed fragment still standing while the walls dissolve is drawn (its edge glowing, below)
+    bool latticed = shell_is_latticed(in.mpos, in.mnormal, shellClip, shellDecls, clipRegionTex);
+    uint coverage = 0xFFFFFFFFu;
+    float3 mdx = dfdx(in.mpos), mdy = dfdy(in.mpos);   // (out of any branch: derivatives in uniform flow)
+    if (shellClip.origin.w > 0.5 && shellClip.gate.y > 1.5 && shellClip.gate.z > 3.5) {   // ★ notes28: the cut, per sample
+        const float2 at4[4] = { float2(0.375, 0.125), float2(0.875, 0.375), float2(0.125, 0.625), float2(0.625, 0.875) };
+        coverage = 0u;
+        for (uint k = 0; k < 4; ++k) {
+            float3 q = in.mpos + mdx * (at4[k].x - 0.5) + mdy * (at4[k].y - 0.5);
+            if (!shell_is_latticed(q, in.mnormal, shellClip, shellDecls, clipRegionTex)) { coverage |= (1u << k); }
+        }
+        latticed = coverage == 0u;   // open at every sample: none of the body here
+    }
+    float standing = latticed && shellClip.eye.w > 0.0 ? shellClip.eye.w - shell_dissolve_noise(in.mpos, shellClip) : -1.0;
+    if (latticed && standing <= 0.0) {
         discard_fragment();
     }
     if (reveal.w > 0.5) {
@@ -680,6 +819,19 @@ fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[
         const float3 ELECTRIC = float3(0.16, 0.60, 1.0);
         color = mix(color, color * 0.6, g) + ELECTRIC * g * (0.55 + 1.3 * fr);
     }
+    // ★ notes26 (C5): the load light is EMITTED — added over the surface's shading, strongest at the rim where the wall turns
+    // away (what reads as light coming out of it), its colour by how much load flows there (over the stress colours: that colour,
+    // lifted toward white)
+    // ★ notes27 (his 11-24: "The colours are there to show the actual stress amount on each area"): MIXED in, never added — the
+    // band shows the place's stress colour (lifted, capped under white) as strongly as the band has brought its load there
+    if (in.light.x > 0.001) {
+        bool overStress = in.light.y > 1.5;
+        float3 band = overStress ? load_band(in.tint.rgb / 0.6) : min(load_light_colour(in.light.y), float3(0.92));
+        float3 Nl = normalize(in.wnormal);
+        float3 Vl = normalize(in.eyeWS - in.wpos);
+        float frl = pow(1.0 - clamp(abs(dot(Nl, Vl)), 0.0, 1.0), 2.0);
+        color = mix(color, band, clamp(in.light.x, 0.0, 1.0) * (0.8 + 0.2 * frl));
+    }
     // Handoff 124 — Face protection crosshatch. A protected face carries the UNIQUE
     // mint-teal PROTECT_RGB (WorkspacePlaceholder.protectFaceRGB); recognise it by
     // colour and lay a screen-space DIAGONAL CROSSHATCH over it — a "preserved" mark,
@@ -706,7 +858,16 @@ fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[
         rgb = clamp(in.tint.rgb * (0.35 + 0.9 * gr), 0.0, 1.0);
         a = clamp(bodyAlpha + 0.5 * gr, 0.0, 1.0);
     }
-    return float4(rgb * a, a);   // premultiplied (a==1 → unchanged)
+    // ★ notes24 (his walls-first): where the wall is dissolving, its edge glows in the lattice's light purple
+    if (latticed && standing > 0.0) {   // (none before it starts: eye.w 1)
+        float going = clamp((1.0 - shellClip.eye.w) * 12.0, 0.0, 1.0);
+        rgb = mix(rgb, float3(0.78, 0.70, 1.0), 0.9 * going * (1.0 - smoothstep(0.0, 0.12, standing)));
+    }
+    a = max(a, clamp(in.light.x * 0.95, 0.0, 1.0));   // ★ notes26 (C5): the light shows through the X-ray body
+    ViewerFragOut out;
+    out.color = float4(rgb * a, a);   // premultiplied (a==1 → unchanged)
+    out.mask = coverage;              // ★ notes28: every sample, except along the map's cut
+    return out;
 }
 """
 
@@ -869,8 +1030,8 @@ fragment GBuf depth_fragment(DOut in [[stage_in]],
                              constant ShellClip& shellClip [[buffer(4)]],
                              constant float4* shellDecls [[buffer(5)]],
                              texture3d<float, access::sample> clipRegionTex [[texture(4)]]) {
-    if (shell_is_latticed(in.mpos, in.mnormal, shellClip, shellDecls, clipRegionTex)) {
-        discard_fragment();
+    if (shell_is_latticed(in.mpos, in.mnormal, shellClip, shellDecls, clipRegionTex) && !shell_standing(in.mpos, shellClip)) {
+        discard_fragment();   // (★ notes24: a wall still standing while it dissolves stays, as the visible pass draws it)
     }
     GBuf o;
     o.eyeZ = in.eyeZ;
@@ -1258,10 +1419,14 @@ struct StageUniforms {
     float3   eye;       // camera world position
     float    floorY;    // world y of the stage floor plane
     float2   centerXZ;  // floor plane centre (x,z) — the fade origin
-    float    spacing;   // minor grid spacing (world units)
+    float    spacing;   // ★ notes24: the unit the squares count from (StageFloor.unit, 1 mm): level n's squares are spacing × 10ⁿ
     float    fadeRadius;// world distance at which the grid fully fades out
     float4   shadowRect;     // §3c — (originX, originZ, sizeX, sizeZ) in world XZ
     float    shadowStrength; // §3c — 0 = off
+    float    plane;          // ★ notes24 item 1: 1 = the floor seen as a plane; 0 = a level view (its edge-on line, no haze)
+    float    glowBand;       // the horizon glow's half width in |rd.y| (StageFloor.glowBand)
+    float    under;          // ★ notes28: 0 from above … 1 under the bed: the bed a tinted see-through plate in front of the part
+    float    below;          // ★ notes26 (C4): 1 = the eye is under the floor (stage_under_fragment draws its grid over the part)
 };
 
 struct SOut { float4 pos [[position]]; float2 uv; };
@@ -1274,10 +1439,17 @@ vertex SOut stage_vertex(uint vid [[vertex_id]]) {
     return o;
 }
 
-static float gridMask(float2 coord) {
-    float2 d = fwidth(coord);
-    float2 g = abs(fract(coord - 0.5) - 0.5) / max(d, float2(1e-5));
+// `d`: how many cells one pixel spans (the floor's own screen derivative over the level's side — ★ notes24: never the
+// derivative of `coord` itself, which jumps where neighbouring pixels pick different levels)
+static float gridMask(float2 coord, float2 d) {
+    float2 g = abs(fract(coord - 0.5) - 0.5) / max(d, float2(1e-7));
     return 1.0 - min(min(g.x, g.y), 1.0);
+}
+
+// ★ notes24 item 4: a level's line strength by its rank — how many decades its squares are above the finest that can show
+// (StageFloor.strength: the minor strength by 0.6, a major line from 1 to 2; continuous, so the zoom never pops a line)
+static float levelStrength(float rank) {
+    return 0.16 * smoothstep(0.0, 0.6, rank) + 0.34 * smoothstep(1.0, 2.0, rank);
 }
 
 fragment float4 stage_fragment(SOut in [[stage_in]], constant StageUniforms& U [[buffer(0)]],
@@ -1293,33 +1465,51 @@ fragment float4 stage_fragment(SOut in [[stage_in]], constant StageUniforms& U [
     float vign   = 1.0 - 0.35 * dot(ndc, ndc);
     col *= clamp(vign, 0.6, 1.0);
 
-    // View ray for this pixel (world space).
+    // View ray for this pixel (world space): from the eye through the pixel's point on the NEAR plane. ★ his 11-22 notes
+    // (img 45, "it's worse from this angle"): the far plane's point (ndc z = 1) is where the projection's depth cancels
+    // (its w is 1/far, a difference of two numbers near 1/near), so the ray's direction wobbled with the angle and the floor
+    // lines slid against the part; the near plane's point has no such cancellation.
     float4 nh = U.invVP * float4(ndc, 0.0, 1.0);
-    float4 fh = U.invVP * float4(ndc, 1.0, 1.0);
     float3 np = nh.xyz / nh.w;
-    float3 fp = fh.xyz / fh.w;
-    float3 rd = normalize(fp - np);
     float3 ro = U.eye;
+    float3 rd = normalize(np - ro);
 
-    // Soft horizon glow: rays grazing the floor plane (|rd.y| small) get a faint blue lift.
-    float horizon = 1.0 - smoothstep(0.0, 0.14, abs(rd.y));
-    col += float3(0.10, 0.16, 0.28) * horizon * 0.5;
+    // Soft horizon glow: rays grazing the floor plane (|rd.y| small) get a faint blue lift. ★ notes24 item 1 (img 49: "At
+    // perfectly straight on, the background becomes this blue haze"): only while the floor is seen as a plane (`plane`, from
+    // the view's elevation), and as wide as the lens's share of the picture (`glowBand`): the orthographic view's rays all lie
+    // within half a degree of level, so a fixed band covered the whole screen
+    float horizon = 1.0 - smoothstep(0.0, max(U.glowBand, 1e-5), abs(rd.y));
+    col += float3(0.10, 0.16, 0.28) * horizon * 0.5 * U.plane;
+    float3 gridCol = float3(0.34, 0.52, 0.80);
 
-    // Infinite floor grid: intersect the ray with y = floorY.
+    // Infinite floor grid: intersect the ray with y = floorY. The hit (and how much floor a pixel covers there) is worked out
+    // for every pixel, so its screen derivatives are whole wherever the floor shows.
+    float rdy = abs(rd.y) > 1e-5 ? rd.y : -1e-5;
+    float t = (U.floorY - ro.y) / rdy;
+    float2 xz = (ro + rd * t).xz;
+    float2 xdx = dfdx(xz), xdy = dfdy(xz);
+    float pixelMM = max(max(length(float2(xdx.x, xdy.x)), length(float2(xdx.y, xdy.y))), 1e-9);
     if (abs(rd.y) > 1e-5) {
-        float t = (U.floorY - ro.y) / rd.y;
         if (t > 0.0) {
-            float3 hit = ro + rd * t;
-            float2 xz = hit.xz;
-            float minor = gridMask(xz / U.spacing);
-            float major = gridMask(xz / (U.spacing * 5.0));
+            // ★ his 11-22 notes: ONE grid of perfect squares from the world's origin, on the one floor. ★ notes24 item 4 ("an
+            // infinitely shrinking view of squares"): squares of spacing × 10ⁿ mm, each split into 10 × 10 of the next finer;
+            // which show is read from how much floor this pixel covers (the zoom, and the distance along the floor): the
+            // finest that can show (`n0`, its squares at least 8 px across) fades in, the next two grow into major lines
+            // (StageFloor.levels). Lines one pixel wide at every level.
+            float l = log10(pixelMM * 8.0 / U.spacing);   // StageFloor.firstShowsPx
+            float n0 = ceil(l);
+            float r0 = n0 - l;
+            float s0 = U.spacing * pow(10.0, n0);
+            float2 fw = abs(xdx) + abs(xdy);
+            float lines = max(levelStrength(r0) * gridMask(xz / s0, fw / s0),
+                              max(levelStrength(r0 + 1.0) * gridMask(xz / (s0 * 10.0), fw / (s0 * 10.0)),
+                                  levelStrength(r0 + 2.0) * gridMask(xz / (s0 * 100.0), fw / (s0 * 100.0))));
             // Fade with distance from the floor centre, and with grazing angle (kills moiré
             // near the horizon), so far lines dissolve into the gradient.
             float dist  = length(xz - U.centerXZ);
             float fade  = 1.0 - smoothstep(U.fadeRadius * 0.35, U.fadeRadius, dist);
             float graze = smoothstep(0.02, 0.22, abs(rd.y));
-            float3 gridCol = float3(0.34, 0.52, 0.80);
-            float a = (minor * 0.16 + major * 0.34) * fade * graze;
+            float a = lines * fade * graze * (1.0 - U.under);   // ★ notes28: under the bed the plate draws its grid
             col = mix(col, gridCol, clamp(a, 0.0, 1.0));
 
             // ★ §3c CONTACT SHADOW. Right now the part FLOATS. `shadowTex` is the
@@ -1335,7 +1525,7 @@ fragment float4 stage_fragment(SOut in [[stage_in]], constant StageUniforms& U [
             // with height above the floor — a part held 100 mm up casts the same edge as
             // one resting on it. For grounding the part, which is what §3c asks for, that
             // is the whole of what is needed; for a light-accurate shadow it is not.
-            if (U.shadowStrength > 0.001 && U.shadowRect.z > 0.0 && U.shadowRect.w > 0.0) {
+            if (U.below < 0.5 && U.shadowStrength > 0.001 && U.shadowRect.z > 0.0 && U.shadowRect.w > 0.0) {   // ★ notes26: a top-side shadow
                 float2 suv = (xz - U.shadowRect.xy) / U.shadowRect.zw;
                 if (all(suv > 0.0) && all(suv < 1.0)) {
                     constexpr sampler shSmp(filter::linear, address::clamp_to_edge);
@@ -1357,7 +1547,87 @@ fragment float4 stage_fragment(SOut in [[stage_in]], constant StageUniforms& U [
         }
     }
 
+    // ★ notes24 item 1 (img 49: "showing a flat floor line and keeping the same black background"): a level view sees the
+    // floor edge-on — one thin line at the floor's height, where the ray passes nearest the part's centre (seen from above),
+    // fading out to the sides as the grid does; drawn as the plane gives way to it (`plane` → 0), where the ray really grazes
+    // the floor (the orthographic view's; the lens sees its floor as a plane below the part, its grid drawn).
+    float dd = max(dot(rd.xz, rd.xz), 1e-12);
+    float tc = dot(U.centerXZ - ro.xz, rd.xz) / dd;
+    float h = ro.y + rd.y * tc - U.floorY;
+    float hw = max(fwidth(h), 1e-9);
+    if (U.plane < 0.999 && dd > 1e-8) {
+        float side = length(ro.xz + rd.xz * tc - U.centerXZ);
+        float lineA = 1.0 - min(abs(h) / hw, 1.0);
+        float sideFade = 1.0 - smoothstep(U.fadeRadius * 0.35, U.fadeRadius, side);
+        float edgeOn = (1.0 - U.plane) * (1.0 - smoothstep(0.0, 0.05, abs(rd.y)));
+        col = mix(col, gridCol, clamp(lineA * 0.5 * sideFade * edgeOn, 0.0, 1.0));
+    }
+
     return float4(col, 1.0);   // opaque backdrop (replaces the flat clear)
+}
+
+// ★ notes26 (C4, his iPad 11-23 from underneath: "It should feel like we're looking UP through the grid from this angle, instead
+// it changed its projection entirely"): from under the floor its grid was drawn again over the part, faintly.
+// ★ notes28 (his iPad notes on release 18, img 77 against Bambu Studio from under its bed, img 78: "Looking from below the model
+// makes the grid look very confusing. It doesn't seem like we are actually looking through a wall ... Please implement it
+// similarly."). Under the bed, the bed is a PLATE between the eye and the part: a see-through tinted plane with its grid lines
+// on it, at the bed's own height and depth, so the part's underside is seen THROUGH it. The same plane at the same height, the
+// same ray through the near plane, the same perspective, levels, distance fade and grazing fade as stage_fragment; the plate's
+// tint fades with the distance as its grid does. Its depth is the bed point's own, a hair nearer the eye (the part stands ON the
+// bed: its bottom face is the bed's plane), tested LESS and never written: in front of everything above the bed, behind
+// anything below it. `under` (StageFloor.underWeight) fades it in as the eye crosses the bed's plane; the backdrop's own grid
+// fades out by the same weight, so its lines are never drawn twice.
+struct StageUnderOut {
+    float4 color [[color(0)]];
+    float  depth [[depth(any)]];
+};
+
+fragment StageUnderOut stage_under_fragment(SOut in [[stage_in]], constant StageUniforms& U [[buffer(0)]]) {
+    const float PLATE_ALPHA = 0.42;   // the plate's tint at its strongest
+    const float LINE_ALPHA = 0.75;    // its grid lines over the tint
+    if (U.under <= 0.001) { discard_fragment(); }
+    float2 ndc = in.uv;
+    float4 nh = U.invVP * float4(ndc, 0.0, 1.0);
+    float3 np = nh.xyz / nh.w;
+    float3 ro = U.eye;
+    float3 rd = normalize(np - ro);
+    float rdy = abs(rd.y) > 1e-5 ? rd.y : -1e-5;
+    float t = (U.floorY - ro.y) / rdy;
+    float2 xz = (ro + rd * t).xz;
+    float2 xdx = dfdx(xz), xdy = dfdy(xz);
+    float pixelMM = max(max(length(float2(xdx.x, xdy.x)), length(float2(xdx.y, xdy.y))), 1e-9);
+    if (abs(rd.y) <= 1e-5 || t <= 0.0) { discard_fragment(); }
+    float l = log10(pixelMM * 8.0 / U.spacing);
+    float n0 = ceil(l);
+    float r0 = n0 - l;
+    float s0 = U.spacing * pow(10.0, n0);
+    float2 fw = abs(xdx) + abs(xdy);
+    float lines = max(levelStrength(r0) * gridMask(xz / s0, fw / s0),
+                      max(levelStrength(r0 + 1.0) * gridMask(xz / (s0 * 10.0), fw / (s0 * 10.0)),
+                          levelStrength(r0 + 2.0) * gridMask(xz / (s0 * 100.0), fw / (s0 * 100.0))));
+    float dist  = length(xz - U.centerXZ);
+    float fade  = 1.0 - smoothstep(U.fadeRadius * 0.35, U.fadeRadius, dist);
+    float graze = smoothstep(0.02, 0.22, abs(rd.y));
+    float plate = PLATE_ALPHA * fade * graze * U.under;
+    float lineA = clamp(lines * 2.0, 0.0, 1.0) * LINE_ALPHA * fade * graze * U.under;
+    float3 tint = float3(0.30, 0.33, 0.38);       // a cool grey plate (Bambu's, on our charcoal-blue stage)
+    float3 gridCol = float3(0.62, 0.74, 0.92);    // its lines, lighter than the plate
+    // premultiplied: the lines OVER the plate, the two OVER what is behind
+    float3 rgb = gridCol * lineA + tint * plate * (1.0 - lineA);
+    float a = lineA + plate * (1.0 - lineA);
+    // the bed point's depth, a hair nearer the eye. Clip space is linear along the pixel's ray, so from the near plane's point
+    // (depth 0) and the point at depth ½ (never the far plane's: its w cancels, StageFloorGridTests) the depth at s along that
+    // segment (s past 1 too) is ½·s·w½ / ((1−s)·w_near + s·w½)
+    float4 mh = U.invVP * float4(ndc, 0.5, 1.0);
+    float3 mp = mh.xyz / mh.w;
+    float3 hit = ro + rd * (t * (1.0 - 1e-3));
+    float3 seg = mp - np;
+    float sAlong = max(dot(hit - np, seg) / max(dot(seg, seg), 1e-20), 0.0);
+    float wn = 1.0 / nh.w, wm = 1.0 / mh.w;
+    StageUnderOut o;
+    o.color = float4(rgb, a);
+    o.depth = clamp(0.5 * sAlong * wm / max((1.0 - sAlong) * wn + sAlong * wm, 1e-20), 0.0, 1.0);
+    return o;
 }
 """
 
@@ -1486,6 +1756,30 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// "over" blending) for the semi-transparent x-ray/stress body. Optional — a nil
     /// falls back to the opaque draw (no see-through, but everything still renders).
     private let translucentBodyPipeline: MTLRenderPipelineState?
+    /// ★ notes26 (C5): the load light's halo (`halo_vertex` / `halo_fragment`) and its depth test.
+    private let loadLightHaloPipeline: MTLRenderPipelineState?
+    private let loadLightHaloDepthState: MTLDepthStencilState
+    var loadLightHaloPipelineDidBuild: Bool { loadLightHaloPipeline != nil }
+    /// ★ notes26 (C5): the halo is hidden by what stands in front of it (depth LESS-EQUAL) and hides nothing (never written).
+    static func loadLightHaloDepth() -> MTLDepthStencilDescriptor {
+        let d = MTLDepthStencilDescriptor()
+        d.depthCompareFunction = .lessEqual
+        d.isDepthWriteEnabled = false
+        return d
+    }
+    /// ★ notes26 (C5): the halo's colour over what is there, the alpha left as it was. ★ notes27 (his 11-24, img 75: "COMPLETELY
+    /// blown out"): the LARGER of the two, never their sum — a dense lattice's many halo shells summed to white.
+    static func blendLoadLightHalo(_ c: MTLRenderPipelineColorAttachmentDescriptor) {
+        c.isBlendingEnabled = true
+        c.rgbBlendOperation = .max
+        c.alphaBlendOperation = .add
+        c.sourceRGBBlendFactor = .one
+        c.destinationRGBBlendFactor = .one
+        c.sourceAlphaBlendFactor = .zero
+        c.destinationAlphaBlendFactor = .one
+    }
+    /// ★ notes26 (C5): the halo's reach — this share of the part's largest side (at least 0.4 mm).
+    static let loadLightHaloShare: Float = 0.01   // ★ notes27: half the reach it had
     /// Depth state for the translucent body: test `.less` but DO NOT write depth, so
     /// back walls show through the front (the x-ray read).
     private let translucentBodyDepthState: MTLDepthStencilState
@@ -1493,6 +1787,32 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// drawn FIRST with `lineOverlayDepthState` (depth-always, no write) so everything occludes
     /// it. Optional — a nil just falls back to the flat clear colour.
     private let stagePipeline: MTLRenderPipelineState?
+    /// ★ notes26 (C4): the floor's grid seen from under it, drawn over the part (`stage_under_fragment`), and its depth test.
+    private let stageUnderPipeline: MTLRenderPipelineState?
+    private let stageUnderDepthState: MTLDepthStencilState
+    var stageUnderPipelineDidBuild: Bool { stageUnderPipeline != nil }
+    /// RED CONTROL (tests): the map's cut on the body decided once per pixel (before notes28: no anti-aliasing of the cut).
+    nonisolated(unsafe) static var controlAliasedCut = false
+    /// RED CONTROL (tests): the floor from underneath as before notes26 — no grid over the part.
+    nonisolated(unsafe) static var controlNoUnderGrid = false
+    /// ★ notes26 (C4) → ★ notes28: from under the bed, the plate is drawn at the bed's OWN depth (the fragment writes it), where
+    /// it is nearer than what is there — in front of the part above it and of the backdrop — and never written.
+    static func stageUnderDepth() -> MTLDepthStencilDescriptor {
+        let d = MTLDepthStencilDescriptor()
+        d.depthCompareFunction = .less
+        d.isDepthWriteEnabled = false
+        return d
+    }
+    /// ★ notes26 (C4): a translucent floor over the part — premultiplied "over".
+    static func blendStageUnder(_ c: MTLRenderPipelineColorAttachmentDescriptor) {
+        c.isBlendingEnabled = true
+        c.rgbBlendOperation = .add
+        c.alphaBlendOperation = .add
+        c.sourceRGBBlendFactor = .one
+        c.sourceAlphaBlendFactor = .one
+        c.destinationRGBBlendFactor = .oneMinusSourceAlpha
+        c.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+    }
     /// Whether the CAD-stage backdrop pipeline built (its MSL compiled). A test asserts this is
     /// true on a real GPU so a shader typo fails loudly instead of silently disabling the stage.
     var stagePipelineDidBuild: Bool { stagePipeline != nil }
@@ -1588,6 +1908,13 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     private var latticeLayer: LatticeSDFRenderer?
     var flexibleLattice: FlexibleLatticePass?   // Flexible (PR #362): a third G-buffer writer (FlexibleLatticePass.swift); nil = #354's frame
     var layoutBars: LatticeLayoutBarsPass?   // the new engine's bars (#362, LatticeLayoutBarsPass.swift); nil = today's frame
+    var growth: LatticeGrowth?               // ★ his 11-22 (watch it grow): an Organic lay's vines so far (LatticeGrowthPass.swift)
+    var growthPass: LatticeGrowthPass?
+    /// ★ notes24: what the growth does this frame (drawn, its replay, how the part opens), decided once a frame
+    /// (`prepareGrowth`, LatticeGrowthPass.swift).
+    var growthFrame = LatticeGrowthFrame()
+    /// ★ notes24 (b), "looking INTO A PART": the inside's light (LatticeInsideShade.swift), built on first use.
+    var insideShade: LatticeInsideShade?
     /// The scene token last uploaded, so a bake happens once per scene change and never
     /// per frame (the preview's bar P2, carried over unchanged).
     private var latticeSceneToken: Int = -1
@@ -1855,12 +2182,16 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         Float(0.7 + 0.3 * (0.5 + 0.5 * sin(2 * Double.pi * t / 2.6)))
     }
 
-    /// Whether to draw the ground grid + contact shadow (set once gravity is set).
+    /// Whether to draw the ground's contact shadow (set once gravity is set). ★ his 11-22 notes: its own line grid is gone —
+    /// the stage's floor grid is the one grid, at the same height (`stageFloor`).
     var showGround = false
-    private var groundLineBuffer: MTLBuffer?
-    private var groundLineCount = 0
     private var groundShadowBuffer: MTLBuffer?
     private var groundShadowCount = 0
+    /// ★ his 11-22 notes (img 44, 45): THE floor — the stage's grid and the ground's shadow both lie on it. Made once per mesh
+    /// and settled pose (`buildGround`), never per frame or per camera move. nil: no mesh.
+    private(set) var stageFloor: StageFloor?
+    /// The ground shadow's world height (tests: it lies on the floor the grid is drawn on). nil: none built.
+    private(set) var groundShadowYForTesting: Float?
 
     // M7.dom-app design-box gizmo: translucent box faces + bright edges for the
     // design box (grow room) and any keep-out boxes, in MODEL space so they settle
@@ -2082,6 +2413,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // buffer (the gl_VertexID full-screen triangle); opaque (it REPLACES the clear), no
         // depth involvement (drawn first, `lineOverlayDepthState`).
         var stagePipe: MTLRenderPipelineState? = nil
+        var stageUnderPipe: MTLRenderPipelineState? = nil
         if let sLib = try? device.makeLibrary(source: stageShaderSource, options: nil),
            let svf = sLib.makeFunction(name: "stage_vertex"),
            let sff = sLib.makeFunction(name: "stage_fragment") {
@@ -2092,6 +2424,17 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             spd.depthAttachmentPixelFormat = Self.depthFormat
             spd.rasterSampleCount = raster       // §3b MSAA
             stagePipe = try? device.makeRenderPipelineState(descriptor: spd)
+            // ★ notes26 (C4): the floor's grid seen from UNDER it, over the part (premultiplied over; see stage_under_fragment)
+            if let uff = sLib.makeFunction(name: "stage_under_fragment") {
+                let upd = MTLRenderPipelineDescriptor()
+                upd.vertexFunction = svf
+                upd.fragmentFunction = uff
+                upd.colorAttachments[0].pixelFormat = Self.colorFormat
+                Self.blendStageUnder(upd.colorAttachments[0])
+                upd.depthAttachmentPixelFormat = Self.depthFormat
+                upd.rasterSampleCount = raster
+                stageUnderPipe = try? device.makeRenderPipelineState(descriptor: upd)
+            }
         }
         // Depth-prepass pipeline (items 7+8, parts b+c): the opaque part → eye-space depth in an
         // R32Float target, so the contact pass can read the part's depth per pixel. Vertex layout:
@@ -2329,6 +2672,19 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             tpd.rasterSampleCount = raster       // §3b MSAA
             translucentPipe = try? device.makeRenderPipelineState(descriptor: tpd)
         }
+        // ★ notes26 (C5): the load light's halo — the viewer's vertex layout, its own shell, ADDED
+        var haloPipe: MTLRenderPipelineState? = nil
+        if let hv = library.makeFunction(name: "halo_vertex"), let hf = library.makeFunction(name: "halo_fragment") {
+            let hpd = MTLRenderPipelineDescriptor()
+            hpd.vertexFunction = hv
+            hpd.fragmentFunction = hf
+            hpd.vertexDescriptor = vd
+            hpd.colorAttachments[0].pixelFormat = Self.colorFormat
+            Self.blendLoadLightHalo(hpd.colorAttachments[0])
+            hpd.depthAttachmentPixelFormat = Self.depthFormat
+            hpd.rasterSampleCount = raster
+            haloPipe = try? device.makeRenderPipelineState(descriptor: hpd)
+        }
 
         // ★ THE UNIFIED LATTICE PIPELINES (task 2026-08-18-unified-shading). Two
         // fragment functions over ONE library, both from `unifiedLatticeShaderSource`:
@@ -2409,6 +2765,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         self.idPipeline = idPipe
         self.groundPipeline = groundPipe
         self.stagePipeline = stagePipe
+        self.stageUnderPipeline = stageUnderPipe
+        self.stageUnderDepthState = device.makeDepthStencilState(descriptor: Self.stageUnderDepth()) ?? depth
         self.depthPrepassPipeline = depthPrepassPipe
         self.outlineRibbonPipeline = outlineRibbonPipe
         self.regionCapPipeline = regionCapPipe
@@ -2418,6 +2776,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         self.loadPathPipeline = lpPipe
         self.cometPipeline = cometPipe
         self.translucentBodyPipeline = translucentPipe
+        self.loadLightHaloPipeline = haloPipe
+        self.loadLightHaloDepthState = device.makeDepthStencilState(descriptor: Self.loadLightHaloDepth()) ?? depth
         self.translucentBodyDepthState = device.makeDepthStencilState(descriptor: tdsd) ?? depth
         self.aoPipeline = aoPipe
         self.aoBlurPipeline = aoBlurPipe
@@ -2607,11 +2967,11 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         return m
     }
 
-    /// Rebuild the ground grid + contact shadow for the settled bounding box (the
-    /// mesh bbox transformed by `settleTo`), on the world floor plane at its min-Y.
+    /// Rebuild THE floor (★ his 11-22 notes: one grid, one height) and the ground's contact shadow for the settled pose (the
+    /// mesh under `settleTo`): its footprint box gives the centre and size, its lowest vertex the height.
     private func buildGround() {
-        groundLineBuffer = nil; groundLineCount = 0
-        groundShadowBuffer = nil; groundShadowCount = 0
+        groundShadowBuffer = nil; groundShadowCount = 0; groundShadowYForTesting = nil
+        stageFloor = nil
         guard let mesh, !mesh.isEmpty else { return }
         // Settled AABB from the 8 bbox corners under the target rotation.
         let mn = mesh.bounds.min, mx = mesh.bounds.max
@@ -2624,33 +2984,13 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             let p = SIMD3<Float>(w.x, w.y, w.z)
             lo = simd_min(lo, p); hi = simd_max(hi, p)
         }}}
-        let fy = lo.y - 0.001
-        let cx = (lo.x + hi.x) * 0.5, cz = (lo.z + hi.z) * 0.5
+        let floor = StageFloor.under(lo: lo, hi: hi,
+                                     lowest: StageFloor.lowest(positions: mesh.positions, model: model) ?? lo.y)
+        stageFloor = floor
+        let fy = floor.y
+        let cx = floor.centre.x, cz = floor.centre.y
         let extent = Swift.max(hi.x - lo.x, hi.z - lo.z)
         guard extent > 1e-5 else { return }
-        let radius = extent * 1.6
-        let step = extent / 6
-
-        // Grid lines (each: 2 vertices of pos+rgba, stride 7). Fade with distance.
-        var lines: [Float] = []
-        let base = SIMD3<Float>(0.63, 0.71, 0.86)
-        func push(_ p: SIMD3<Float>, _ a: Float) {
-            lines.append(p.x); lines.append(p.y); lines.append(p.z)
-            lines.append(base.x); lines.append(base.y); lines.append(base.z); lines.append(a)
-        }
-        var k = -radius
-        while k <= radius + 1e-4 {
-            let a = (1 - abs(k) / radius) * 0.12
-            push(SIMD3<Float>(cx + k, fy, cz - radius), a); push(SIMD3<Float>(cx + k, fy, cz + radius), a)
-            push(SIMD3<Float>(cx - radius, fy, cz + k), a); push(SIMD3<Float>(cx + radius, fy, cz + k), a)
-            k += step
-        }
-        groundLineCount = lines.count / 7
-        if groundLineCount > 0 {
-            groundLineBuffer = lines.withUnsafeBytes {
-                device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
-            }
-        }
 
         // Contact shadow: a triangle fan (expanded to a triangle list) on the floor,
         // dark at the centre fading to transparent at the rim.
@@ -2670,6 +3010,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             vtx(cx + cos(a1) * sRadius, cz + sin(a1) * sRadius, 0)
         }
         groundShadowCount = shadow.count / 7
+        groundShadowYForTesting = fy
         if groundShadowCount > 0 {
             groundShadowBuffer = shadow.withUnsafeBytes {
                 device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
@@ -3161,6 +3502,67 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// M7.viz.3 flex: the current displacement scale (exaggeration·amplitude); 0 rests.
     func setFlexScale(_ s: Float) { flexScale = s }
 
+    /// ★ notes25 (Bend / Break): the load the LOAD RAMP's colours are made at this frame (the viewer shader's `flex.y`).
+    var rampLoad: Float = 0
+
+    /// ★ notes25: upload the load ramp — one value per flat vertex (its share of its limit at your load; NaN = not known) as
+    /// sentinel tints (alpha −1) the viewer shader colours at `rampLoad`. Once per selection; each frame is the uniform alone.
+    func setLoadRamp(_ values: [Float]) {
+        guard vertexDrawCount > 0, values.count == vertexDrawCount else { return }
+        tintsAreState = false         // §4: a DATA ramp — its hue is the datum, hands off
+        var tints = [Float](repeating: 0, count: vertexDrawCount * 8)
+        for v in 0..<vertexDrawCount {
+            let x = values[v]
+            tints[v * 8] = x.isFinite ? x : 0
+            tints[v * 8 + 1] = x.isFinite ? 1 : 0
+            tints[v * 8 + 3] = -1
+        }
+        tintBuffer = tints.withUnsafeBytes {
+            device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
+        }
+    }
+
+    /// ★ notes26 (C5): whether Load paths' light is uploaded (its halo draws then).
+    private(set) var loadLightOn = false
+
+    /// ★ notes26 (C5): upload Load paths' light — per flat vertex the sentinel tint (`LoadLightFlow.lightFrame`) and its light in
+    /// flags.w (the viewer emits it and the halo spills it).
+    func setLoadLight(tints: [SIMD4<Float>], light: [Float]) {
+        guard vertexDrawCount > 0, tints.count == vertexDrawCount, light.count == vertexDrawCount else { return }
+        tintsAreState = false
+        var buf = [Float](repeating: 0, count: vertexDrawCount * 8)
+        for v in 0..<vertexDrawCount {
+            let c = tints[v]
+            buf[v * 8] = c.x; buf[v * 8 + 1] = c.y; buf[v * 8 + 2] = c.z; buf[v * 8 + 3] = c.w
+            buf[v * 8 + 7] = light[v]
+        }
+        tintBuffer = buf.withUnsafeBytes {
+            device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
+        }
+        loadLightOn = true
+    }
+    func clearLoadLight() { loadLightOn = false }
+
+    /// ★ notes25 (Break gives way): rewrite a few flat vertices' displacements in place (xyz per index), so the part gives way
+    /// where it gives first without re-uploading the whole buffer.
+    func patchFlex(indices: [Int32], values: [Float]) {
+        guard let buf = flexBuffer, values.count == indices.count * 3 else { return }
+        let n = buf.length / (MemoryLayout<Float>.stride * 3)
+        let dst = buf.contents().bindMemory(to: Float.self, capacity: n * 3)
+        var lo = Int.max, hi = -1
+        for (k, i32) in indices.enumerated() {
+            let i = Int(i32)
+            guard i >= 0, i < n else { continue }
+            dst[i * 3] = values[k * 3]; dst[i * 3 + 1] = values[k * 3 + 1]; dst[i * 3 + 2] = values[k * 3 + 2]
+            lo = Swift.min(lo, i); hi = Swift.max(hi, i)
+        }
+        #if os(macOS)
+        if hi >= lo, buf.storageMode == .managed {
+            buf.didModifyRange(lo * 12 ..< (hi + 1) * 12)
+        }
+        #endif
+    }
+
     /// M7.viz.4 load-path: upload the line segments (flattened `[x,y,z,r,g,b,a]` per
     /// vertex, two vertices per glyph) to draw over the variant. A malformed buffer
     /// (not a multiple of the stride-7 layout) is ignored. Empty clears the overlay.
@@ -3501,6 +3903,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         guard vertexDrawCount > 0, let vbuf = vertexBuffer, let tbuf = tintBuffer,
               let fbuf = flexBuffer else { return }
         var uniforms = makeUniforms(aspect: aspect)
+        prepareGrowth(cmd.device)   // ★ notes24: whether the growing vines draw this frame (LatticeGrowthPass.swift)
 
         // DEPTH PREPASS (items 7+8, parts b+c): when a translucent volume is present, capture the
         // opaque part's eye-space depth into a texture FIRST (its own render pass — you cannot read
@@ -3522,8 +3925,10 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // ★ AND WHENEVER A LATTICE IS IN THE FRAME (unified shading). The lattice's
         // pixels are PRODUCED by the prepass now — it is not an optional quality
         // treatment for them, it is where they come from.
-        let wantsLattice = (latticeInFrame || flexibleLatticeInFrame || layoutBarsInFrame) && latticeGBufferPipeline != nil
-            && latticeShadePipeline != nil
+        // ★ notes24 (img 49): and the growing vines, real tubes lit by the same shade
+        let wantsLattice = (latticeInFrame || flexibleLatticeInFrame || layoutBarsInFrame || growthInFrame
+                            || growthFrame.ownMap)   // (★ notes24: the walls the growth's own map opens, lit as the lattice)
+            && latticeGBufferPipeline != nil && latticeShadePipeline != nil
         let wantsAO = !quality.isDisjoint(with: [.ambientOcclusion, .edges]) && aoPipeline != nil
             && LatticePreviewMode.aoDrawn(turning: turning, latticeShown: wantsLattice)   // ★ his pick 11-16 (D)
         // The G-buffer is single-sampled, so it is sized from the RESOLVE target when
@@ -3590,7 +3995,10 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // Load-flow body modes (handoff 070): a body alpha < 1 draws the mesh through
         // the translucent pipeline (premultiplied "over", no depth write) so the comet
         // arrows show through the walls; alpha 1 is the unchanged opaque draw.
-        let drawAlpha = Self.bodyDrawAlpha(bodyAlpha, xray: xrayBody)   // ★ B2: the X-ray look
+        var drawAlpha = Self.bodyDrawAlpha(bodyAlpha, xray: xrayBody)   // ★ B2: the X-ray look
+        // ★ notes24: no map yet to open the part while the vines grow: the Lattice page's own X-ray (MeshRenderer.growthXraysBody)
+        // (faded to it over the lay's first seconds: his walls-first, `growthXrayAlpha`)
+        if growthXraysBody { drawAlpha = Swift.min(drawAlpha, growthXrayAlpha) }
         let translucent = drawAlpha < 0.999
         let ghostAfterLattice = flexibleGhostAfterLattice(translucent: translucent, latticeShaded: wantsLattice && gbuffer != nil)
         var bodyAlphaVal = drawAlpha
@@ -3672,6 +4080,12 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             enc.setFragmentTexture(gb.normal, index: 2)
             enc.setFragmentTexture(gb.albedo, index: 3)
             countedDraw(enc, .triangle, 3)
+            // ★ notes24 (b), "looking INTO A PART": what is inside the opened part (vines, growth, cut walls) darker the deeper
+            // he looks and in the shadow of the walls around it (LatticeInsideShade.swift); the solid view's map only
+            if encodeInsideShade(enc, gbuffer: gb, target: mainSize, modelView: uniforms.modelView, projection: proj,
+                                 model: uniforms.model, far: Self.sceneDepthFar) {
+                frameDrawCalls += 1; frameVertices += 3
+            }
         }
         // Flexible X-ray (#362): the see-through body AFTER the opaque lattice shade; lsdf_shade rebound only fragment 0/2 + textures 0-3 (UnifiedShading.swift:1705-1711)
         if ghostAfterLattice {
@@ -3680,23 +4094,42 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             enc.setFragmentBytes(&shade, length: MemoryLayout<ShadeParams>.stride, index: 2)
             enc.setFragmentTexture(flexibleGhostKeepsAO ? (aoTex ?? neutralAOTexture()) : neutralAOTexture(), index: 0)
             countedDraw(enc, .triangle, vertexDrawCount) }
-        if wantsLattice, flexibleWallsGhosted, let gb = gbuffer { encodeFlexibleGhostWalls(enc, gbuffer: gb, mainSize: mainSize) }   // Flexible (#362) batch M (M6) + verification: the walls as a ghost, no depth, AFTER the see-through body (MeshRenderer+FlexibleLattice.swift)
+        if wantsLattice, flexibleWallsGhosted, let gb = gbuffer { encodeFlexibleGhostWalls(enc, gbuffer: gb, mainSize: mainSize) }
+        // ★ notes26 (C5): Load paths' halo — the lit band again on a shell pushed out along its normals, ADDED
+        if loadLightOn, let hpipe = loadLightHaloPipeline {
+            var hu = uniforms
+            let ext = mesh.map { Swift.max($0.bounds.max.x - $0.bounds.min.x, $0.bounds.max.y - $0.bounds.min.y,
+                                           $0.bounds.max.z - $0.bounds.min.z) } ?? 0
+            hu.flex.z = Swift.max(0.5, Self.loadLightHaloShare * ext)
+            enc.setRenderPipelineState(hpipe)
+            enc.setDepthStencilState(loadLightHaloDepthState)
+            enc.setCullMode(.none)
+            enc.setVertexBuffer(vbuf, offset: 0, index: 0)
+            enc.setVertexBuffer(tbuf, offset: 0, index: 2)
+            enc.setVertexBuffer(fbuf, offset: 0, index: 3)
+            enc.setVertexBytes(&hu, length: MemoryLayout<ViewerUniforms>.stride, index: 1)
+            countedDraw(enc, .triangle, vertexDrawCount)
+        }   // Flexible (#362) batch M (M6) + verification: the walls as a ghost, no depth, AFTER the see-through body (MeshRenderer+FlexibleLattice.swift)
 
-        // Ground grid + contact shadow (M7.6 D2), drawn after the opaque mesh so it
-        // blends, depth-tested so the part occludes it, depth-write off.
-        if showGround, let gpipe = groundPipeline {
+        // Ground contact shadow (M7.6 D2), drawn after the opaque mesh so it blends, depth-tested so the part occludes it,
+        // depth-write off. ★ his 11-22 notes: no line grid of its own any more (the stage's floor grid is the one grid).
+        if showGround, stageUniforms.below < 0.5, let gpipe = groundPipeline, let sbuf = groundShadowBuffer, groundShadowCount > 0 {
             var gmvp = groundMVP(aspect: aspect)
             enc.setRenderPipelineState(gpipe)
             enc.setDepthStencilState(groundDepthState)
             enc.setVertexBytes(&gmvp, length: MemoryLayout<simd_float4x4>.stride, index: 1)
-            if let sbuf = groundShadowBuffer, groundShadowCount > 0 {
-                enc.setVertexBuffer(sbuf, offset: 0, index: 0)
-                countedDraw(enc, .triangle, groundShadowCount)
-            }
-            if let lbuf = groundLineBuffer, groundLineCount > 0 {
-                enc.setVertexBuffer(lbuf, offset: 0, index: 0)
-                countedDraw(enc, .line, groundLineCount)
-            }
+            enc.setVertexBuffer(sbuf, offset: 0, index: 0)
+            countedDraw(enc, .triangle, groundShadowCount)
+        }
+        // ★ notes26 (C4): from UNDER the floor, the floor lies between the eye and the part — its grid again, over the part,
+        // faint, so the part is seen THROUGH it (stage_under_fragment); never from above (`below` 0)
+        if drawStage, stageUniforms.under > 0.001, !Self.controlNoUnderGrid, let upipe = stageUnderPipeline {   // ★ notes28: as it fades in
+            var su = stageUniforms
+            enc.setRenderPipelineState(upipe)
+            enc.setDepthStencilState(stageUnderDepthState)
+            enc.setVertexBytes(&su, length: MemoryLayout<StageUniforms>.stride, index: 0)
+            enc.setFragmentBytes(&su, length: MemoryLayout<StageUniforms>.stride, index: 0)
+            countedDraw(enc, .triangle, 3)
         }
 
         // M7.dom-app design-box gizmo: translucent box faces + bright edges, drawn under the
@@ -3863,6 +4296,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                 countedDraw(enc, .triangle, loadFlowVertexCount)
             }
         }
+        // ★ his 11-22 (watch it grow): the Organic lay's vines are no longer drawn over the frame here — ★ notes24 (img 49:
+        // "It needs to be in 3D") they are tubes in the prepass's G-buffer, lit by the lattice shade above (encodeDepthPrepass)
         enc.endEncoding()
     }
 
@@ -3889,7 +4324,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             SIMD4<Float>(0, 0, 0, 1)))
         let e = camera.eye
         return ViewerUniforms(mvp: mvp, normalMatrix: normal4,
-                              flex: SIMD4<Float>(flexScale, 0, 0, 0),
+                              flex: SIMD4<Float>(flexScale, rampLoad, 0, 0),   // ★ notes25: .y = the load ramp's load
                               worldNormalMatrix: worldNormal4,
                               model: model,
                               modelView: vm,
@@ -3961,7 +4396,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     }
     /// ★ his pick 11-16 (6): a lattice is drawn (the old preview's march, the Flexible pass or the new engine's bars) — the
     /// view then draws at half resolution while he turns it (`LatticePreviewMode.drawScale`).
-    var latticeDrawnForScale: Bool { latticeInFrame || flexibleLatticeInFrame || layoutBarsInFrame }
+    var latticeDrawnForScale: Bool { latticeInFrame || flexibleLatticeInFrame || layoutBarsInFrame || growthInFrame }
     /// ★ his picks 11-16 (C, D): a camera gesture is down with a lattice drawn (the coordinator sets it). While it is, the
     /// lattice's layer is drawn smaller and the soft shading in the gaps and the edge lines are left out.
     var turning = false
@@ -4211,7 +4646,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // the Flexible march inherits latticeGBufferMaxPixels = 1152; ★ his pick 11-16 (C): while turning, every lattice (the
         // new engine's bars too) is drawn at `LatticePreviewMode.turningGBufferMaxPixels`
         guard let cap = LatticePreviewMode.gbufferCap(turning: turning, marched: latticeInFrame || flexibleLatticeInFrame,
-                                                      bars: layoutBarsInFrame, restCap: Self.latticeGBufferMaxPixels)
+                                                      bars: layoutBarsInFrame || growthInFrame,
+                                                      restCap: Self.latticeGBufferMaxPixels)
         else { return (width, height) }
         let long = Swift.max(width, height)
         guard long > cap else { return (width, height) }
@@ -4416,7 +4852,12 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         let openEverywhere: [SIMD4<Float>] = [SIMD4(0, 0, 1, 0), .zero, .zero]
 
         // ★ THE NEW ENGINE's SOLID VIEW (his ask 11-13): its own map cuts the body open where the lattice is (mode 2)
-        if layoutBarsInFrame, let solid = layoutBars?.shellClip { return (solid, openEverywhere) }
+        // (★ notes24: not while the growing vines stand in the part's X-ray: that map is not this lay's — growthXraysBody)
+        if let own = growthShellClip { return (own.clip, openEverywhere) }   // ★ notes24: the walls dissolving (LatticeGrowthPass)
+        if layoutBarsInFrame, !growthXraysBody, var solid = layoutBars?.shellClip {
+            if sampleCount == 4, !Self.controlAliasedCut { solid.gate.z = 4 }   // ★ notes28: the cut asked per MSAA sample
+            return (solid, openEverywhere)
+        }
         guard latticeInFrame, let layer = latticeLayer else { return (u, openEverywhere) }
         let declared = (layer.scene?.regions ?? []).filter { $0.role == .include }
         guard !declared.isEmpty, let g = layer.regionGrid, layer.regionTexture != nil else {
@@ -4607,6 +5048,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// The texture `shellClipAndDecls` describes: the baked region field when there are
     /// declarations, the neutral "inside everywhere" volume otherwise.
     private var shellClipTexture: MTLTexture? {
+        if let own = growthShellClip { return own.texture }   // ★ notes24: the growth's own map, its walls dissolving
         if layoutBarsInFrame, layoutBars?.shellClip != nil, let t = layoutBars?.gridTexture { return t }   // the new engine's map
         guard latticeInFrame, let layer = latticeLayer else { return neutralShellClipTexture() }
         // Declared ⇒ the region field. Undeclared (the sample block) ⇒ the CELL field,
@@ -4734,7 +5176,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         let lattice = latticeInFrame ? latticeLayer : nil
         guard let dpipe = depthPrepassPipeline, vertexDrawCount > 0,
               let vbuf = vertexBuffer, let fbuf = flexBuffer,
-              shellVisible || lattice != nil || flexibleLatticeInFrame || layoutBarsInFrame,
+              shellVisible || lattice != nil || flexibleLatticeInFrame || layoutBarsInFrame || growthInFrame
+                || growthFrame.ownMap,
               let tex = sceneDepthTextures(width: width, height: height) else { return nil }
         let pd = MTLRenderPassDescriptor()
         pd.colorAttachments[0].texture = tex.color
@@ -4896,15 +5339,26 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                             clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView, eyeNormalBasis: uniforms.normalMatrix, squish: flexScale) {
             frameDrawCalls += 1; frameVertices += 3 }
         // the new engine's bars (#362): the fourth writer — same encoder, attachments and .less + write depth state
-        if layoutBarsInFrame, let bars = layoutBars,
+        // (★ notes24: the landed lattice waits, at most a second, while the replay shows what was left of its growth)
+        if layoutBarsInFrame, !growthFrame.holdsLanded, let bars = layoutBars,
            bars.encodeGBuffer(penc, depthState: depthState, clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView,
                               eyeNormalBasis: uniforms.normalMatrix, turning: turning) {
             frameDrawCalls += 1; frameVertices += 36 * bars.count }
-        // ★ the solid view's cut walls (his ask 11-13): after the bars, the same encoder and depth state
-        if layoutBarsInFrame, let bars = layoutBars,
+        // ★ the solid view's cut walls (his ask 11-13): after the bars, the same encoder and depth state (★ notes24: none while
+        // the growing vines stand in the part's X-ray; the growth's own map's while its walls dissolve)
+        if encodeGrowthWalls(penc, depthState: depthState, clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView,
+                             eyeNormalBasis: uniforms.normalMatrix) {
+            frameDrawCalls += 1; frameVertices += 36
+        } else if layoutBarsInFrame, !growthXraysBody, let bars = layoutBars,
            bars.encodeWalls(penc, depthState: depthState, clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView,
                             eyeNormalBasis: uniforms.normalMatrix) {
             frameDrawCalls += 1; frameVertices += 36 }
+        // ★ notes24 (img 49: "It needs to be in 3D … only the ones that are visible to me"): the growing vines, real tubes, the
+        // fifth writer — the same encoder, attachments and .less + write depth state: depth-tested against the part and lattice
+        if growthInFrame, encodeGrowthGBuffer(penc, depthState: depthState, clipFromModel: uniforms.mvp,
+                                              eyeFromModel: uniforms.modelView, eyeNormalBasis: uniforms.normalMatrix,
+                                              model: uniforms.model) > 0 {
+            frameDrawCalls += 1; frameVertices += 18 * (growthPass?.lastDrawn ?? 0) }
         penc.endEncoding()
         return (tex.color, tex.normal, tex.albedo)
     }
@@ -5027,14 +5481,37 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         let rect = SIMD4<Float>(lo.x - mx, lo.z - mx,
                                 Swift.max(hi.x - lo.x + 2 * mx, 1e-3),
                                 Swift.max(hi.z - lo.z + 2 * mx, 1e-3))
+        // ★ his 11-22 notes: THE floor (`buildGround`: the settled part's lowest point, round squares from its size) — the
+        // same one the ground shadow lies on, and still while the part settles or the camera moves
+        let floor = (mesh?.isEmpty == false ? stageFloor : nil) ?? StageFloor.under(lo: lo, hi: hi, lowest: lo.y)
+        // ★ notes24 item 1: a level view sees the floor edge-on (its line, no haze); the glow as wide as the lens's share
+        let haze = StageFloor.controlHazeAtLevel
         return StageUniforms(invVP: inv,
                              eye: camera.eye,
-                             floorY: lo.y - extent * 0.02,
-                             centerXZ: SIMD2<Float>((lo.x + hi.x) * 0.5, (lo.z + hi.z) * 0.5),
-                             spacing: extent / 6,
-                             fadeRadius: extent * 6,
+                             floorY: floor.y,
+                             centerXZ: floor.centre,
+                             spacing: StageFloor.unit,   // ★ notes24 item 4: the squares are 10ⁿ of it, by the zoom
+                             fadeRadius: floor.fadeRadius,
                              shadowRect: rect,
-                             shadowStrength: 0)   // filled in by `encode` once the footprint exists
+                             shadowStrength: 0,   // filled in by `encode` once the footprint exists
+                             plane: haze ? 1 : StageFloor.planeWeight(elevationSine: camera.direction.y),
+                             glowBand: haze ? 0.14 : StageFloor.glowBand(drawFovY: camera.drawFovY, fovY: camera.fovY),
+                             under: Self.controlNoUnderGrid ? 0 : StageFloor.underWeight(eyeY: camera.eye.y, floorY: floor.y,
+                                                                                          eyeDistance: camera.eyeDistance),
+                             below: camera.eye.y < floor.y ? 1 : 0)   // ★ notes26 (C4): looking UP through the floor
+    }
+
+    /// ★ notes26 (C4, tests): whether the stage sees the floor from under it now.
+    func stageEyeBelowFloorForTesting(aspect: Float) -> Bool { makeStageUniforms(aspect: aspect).below > 0.5 }
+    /// ★ notes28 (tests): how far the look has gone over to the bed seen from under it (0 above … 1).
+    func stageUnderWeightForTesting(aspect: Float) -> Float { makeStageUniforms(aspect: aspect).under }
+
+    /// The stage's floor grid as this frame would draw it (tests): its height, the unit its squares count from, centre and
+    /// the eye; and how much of the floor is seen as a plane and the glow's width (notes24 item 1).
+    func stageGridForTesting(aspect: Float) -> (floorY: Float, spacing: Float, centre: SIMD2<Float>, eye: SIMD3<Float>,
+                                                plane: Float, glowBand: Float) {
+        let u = makeStageUniforms(aspect: aspect)
+        return (u.floorY, u.spacing, u.centerXZ, u.eye, u.plane, u.glowBand)
     }
 
     /// Render the current mesh + camera to an offscreen BGRA texture and return the
@@ -5976,6 +6453,8 @@ struct MeshViewInputs {
     var flexibleLattice: FlexibleLatticeLayerInputs? = nil
     /// The new engine's bars (#362, LatticeLayoutBarsPass; behind "New engine (test)"). nil = today's frame.
     var layoutBars: LatticeLayoutBarsInputs? = nil
+    /// ★ his 11-22 (watch it grow): the Organic lay's vines so far; the view redraws itself on each of its changes. nil = none.
+    var growth: LatticeGrowth? = nil
     /// ★ his 11-16/17 (Install 3): the Outlines view's whole line set, the faces as the app sends them (`PieceOutline`);
     /// drawn in place of the part's edges + `extraLines` when it was made on this mesh. nil = the part's own edges.
     var pieceOutline: PieceOutline.Drawing? = nil
@@ -5984,6 +6463,12 @@ struct MeshViewInputs {
     /// them. nil = none.
     var spotFaces: [Float]? = nil
     var spotKey: Int = 0
+    /// ★ notes25 (Bend / Break): the colours made on the GPU from each vertex's share of its limit, at `load` (nil: `stressTints`).
+    var loadRamp: LoadRamp? = nil
+    /// ★ notes25 (Break gives way): the few vertices around where it gives first, rewritten in place each frame.
+    var flexPatch: FlexPatch? = nil
+    /// ★ notes26 (C5): Load paths' light this frame (emitted and haloed on the GPU); nil: none.
+    var loadLight: LoadLightFrame? = nil
 }
 
 /// ★ THE LATTICE AS A LAYER OF THE MESH VIEW, NOT A VIEW BESIDE IT.
@@ -6452,6 +6937,7 @@ extension MetalMeshView {
         /// renderer's own `camera` becomes a mirror kept in sync from this via `sink`.
         private(set) var cameraModel: OrbitCameraModel?
         private var cameraCancellable: AnyCancellable?
+        private var growthCancellable: AnyCancellable?   // ★ his 11-22: the growing vines redraw the view (no page pass)
         private weak var boundView: MTKView?
         private var appliedSignature: ViewerMeshSignature?
         private var appliedTint: TintKey?
@@ -6472,6 +6958,16 @@ extension MetalMeshView {
         private var appliedReveal: Float = 1
         /// M7.viz.3: whether flex displacements are uploaded, and the last scale.
         private var appliedFlex = false
+        /// ★ notes25: the base displacements of the patched vertices (what a patch puts back when it goes).
+        static func patchBase(_ indices: [Int32], _ base: [Float]) -> [Float] {
+            var out = [Float](); out.reserveCapacity(indices.count * 3)
+            for i32 in indices {
+                let i = Int(i32)
+                if i >= 0, i * 3 + 2 < base.count { out += [base[i * 3], base[i * 3 + 1], base[i * 3 + 2]] } else { out += [0, 0, 0] }
+            }
+            return out
+        }
+
         /// ★ The nearest triangle of the BENT surface (rest + scale·disp per flat vertex) the ray hits, mapped back to the
         /// same barycentric point on the rest surface — or nil on a miss.
         static func restPointOnBentSurface(_ flat: FlatMesh, disp: [Float], scale: Float,
@@ -6498,6 +6994,11 @@ extension MetalMeshView {
             return r0 * (1 - b.u - b.v) + r1 * b.u + r2 * b.v
         }
 
+        /// ★ notes25: the load ramp uploaded (its key), and the patched vertices (restored from the base when the patch goes).
+        private var appliedRampKey: Int?
+        private var appliedLightKey: Int?   // ★ notes26 (C5)
+        private var appliedPatchKey: Int?
+        private var appliedPatchIndices: [Int32] = []
         private var appliedFlexArray: [Float]?   // Flexible (PR #362): the dent uploaded — a new dent on the same mesh re-uploads (Array == is O(1) on the same storage)
         private var appliedFlexScale: Float = 0
         /// M7.viz.4: whether load-path segments are uploaded, and the last flow phase.
@@ -6647,7 +7148,7 @@ extension MetalMeshView {
                         // AFTER this render pass; the renderer already holds the framed
                         // camera for the current draw.
                         let framed = renderer.camera
-                        DispatchQueue.main.async { [weak model] in model?.adopt(framed) }
+                        DispatchQueue.main.async { [weak model] in model?.adoptFramed(framed) }   // ★ notes28: a version's camera as he left it, once
                     }
                     // ONLY A REFRAME INVALIDATES THESE. `setMesh` zeroes the tint
                     // buffer and resets the settle to identity, so both have to be
@@ -6707,7 +7208,38 @@ extension MetalMeshView {
                 dirty = true
             }
 
-            if let stress = inputs.stressTints {
+            // ★ notes25: the load ramp owns the tint buffer while it is on (one upload, then the load uniform each frame); when it
+            // ends, the other tints upload afresh
+            if let ramp = inputs.loadRamp {
+                if dirty || ramp.key != appliedRampKey {
+                    appliedRampKey = ramp.key
+                    appliedStress = false; appliedStressTints = nil; appliedTint = nil; appliedVertexTint = nil
+                    renderer.setLoadRamp(ramp.values)
+                    dirty = true
+                }
+                if ramp.load != renderer.rampLoad { renderer.rampLoad = ramp.load; dirty = true }
+            } else if appliedRampKey != nil {
+                appliedRampKey = nil
+                renderer.rampLoad = 0
+                appliedStress = false; appliedStressTints = nil; appliedTint = nil; appliedVertexTint = nil
+                dirty = true
+            }
+            // ★ notes26 (C5): Load paths' light owns the tint buffer while it is on (a frame's upload when its key moves)
+            if inputs.loadRamp == nil, let ll = inputs.loadLight {
+                if dirty || ll.key != appliedLightKey {
+                    appliedLightKey = ll.key
+                    appliedStress = false; appliedStressTints = nil; appliedTint = nil; appliedVertexTint = nil
+                    renderer.setLoadLight(tints: ll.tints, light: ll.light)
+                    dirty = true
+                }
+            } else if appliedLightKey != nil {
+                appliedLightKey = nil
+                renderer.clearLoadLight()
+                appliedStress = false; appliedStressTints = nil; appliedTint = nil; appliedVertexTint = nil
+                dirty = true
+            }
+            if inputs.loadRamp != nil || inputs.loadLight != nil {
+            } else if let stress = inputs.stressTints {
                 // THE TINTS THEMSELVES ARE A TRIGGER (task 2026-08-05, bar D4).
                 //
                 // The conditions below could all be false while the tint array
@@ -6808,11 +7340,13 @@ extension MetalMeshView {
             // M7.viz.3 flex: upload the per-vertex displacement vectors on mesh change
             // / when they first arrive (they only depend on the mesh + field, not the
             // phase); the scale is a cheap per-frame uniform that drives the loop.
+            var flexUploaded = false
             if let flex = inputs.flexDisplacements {
                 if dirty || !appliedFlex || flex != appliedFlexArray {
                     appliedFlex = true
                     appliedFlexArray = flex
                     renderer.setFlexDisplacements(flex)
+                    flexUploaded = true
                     dirty = true
                 }
             } else if appliedFlex {
@@ -6824,6 +7358,24 @@ extension MetalMeshView {
             if inputs.flexScale != appliedFlexScale {
                 appliedFlexScale = inputs.flexScale
                 renderer.setFlexScale(inputs.flexScale)
+                dirty = true
+            }
+            // ★ notes25 (Break gives way): a few vertices rewritten in place; restored from the base when the patch goes
+            if let patch = inputs.flexPatch, appliedFlex {
+                if flexUploaded || patch.key != appliedPatchKey {
+                    if !flexUploaded, let base = appliedFlexArray, !appliedPatchIndices.isEmpty,
+                       appliedPatchIndices != patch.indices {
+                        renderer.patchFlex(indices: appliedPatchIndices, values: Self.patchBase(appliedPatchIndices, base))
+                    }
+                    renderer.patchFlex(indices: patch.indices, values: patch.values)
+                    appliedPatchKey = patch.key; appliedPatchIndices = patch.indices
+                    dirty = true
+                }
+            } else if appliedPatchKey != nil {
+                if appliedFlex, !flexUploaded, let base = appliedFlexArray {
+                    renderer.patchFlex(indices: appliedPatchIndices, values: Self.patchBase(appliedPatchIndices, base))
+                }
+                appliedPatchKey = nil; appliedPatchIndices = []
                 dirty = true
             }
 
@@ -7100,6 +7652,7 @@ extension MetalMeshView {
 
             if renderer.applyFlexibleLattice(inputs.flexibleLattice, device: view.device, baseScale: appliedFlexScale) { dirty = true }   // token-keyed upload in FlexibleLatticePass.swift; squish frames already dirty via flexScale; baseScale: the view's own squish, back when a loop lets go
             if renderer.applyLayoutBars(inputs.layoutBars, device: view.device) { dirty = true }   // the new engine's bars (#362): token-keyed upload
+            if attachGrowth(inputs.growth, to: view, renderer: renderer) { dirty = true }   // ★ his 11-22: watch it grow
             if dirty { redraw(view) }
             // Publish the camera projection (deduped) on the NEXT runloop, never inline:
             // `onProjection` writes the host view's `@State projection`, and `apply` runs
@@ -7118,6 +7671,19 @@ extension MetalMeshView {
                 for f in g.faces { tint[f] = v }
             }
             return tint
+        }
+
+        /// ★ his 11-22 (watch it grow): the growth this view draws; each of its changes (a poll's pieces, the fade) redraws
+        /// the view directly, as the camera model does, never through the page. True when it changed.
+        private func attachGrowth(_ g: LatticeGrowth?, to view: MTKView, renderer: MeshRenderer) -> Bool {
+            guard renderer.applyGrowth(g) else { return false }
+            growthCancellable = g?.changed.sink { [weak self, weak view] in
+                MainActor.assumeIsolated {
+                    guard let self, let view else { return }
+                    self.redraw(view)
+                }
+            }
+            return true
         }
 
         /// Subscribe to the shared camera model (STEP 1): mirror every published camera
@@ -7749,6 +8315,19 @@ extension MetalMeshView {
 #if canImport(MetalKit)
         var copy = self
         copy.inputs.pieceOutline = drawing
+        return copy
+#else
+        self
+#endif
+    }
+
+    /// ★ his 11-22 ("Could the user literally *watch* the lattice grow from nothing?"): the Organic lay's vines as they are
+    /// laid, drawn while it lays (LatticeGrowthPass: ★ notes24, real tubes lit and depth-tested as the landed lattice); the view
+    /// redraws itself on each change. nil = none.
+    public func latticeGrowth(_ growth: LatticeGrowth?) -> MetalMeshView {
+#if canImport(MetalKit)
+        var copy = self
+        copy.inputs.growth = growth
         return copy
 #else
         self

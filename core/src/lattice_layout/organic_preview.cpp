@@ -85,11 +85,24 @@ void thin(WeaveRun& r, double tol) {
 Bars flushed_as_the_file(Session& session, OrganicPreview& out, const std::atomic<bool>* stop) {
   Bars shown = out.outcome.bars;
   if (out.quality == PreviewQuality::Draft) return shown;
-  bool any = false;
-  for (const Bar& b : shown.bars) any = any || b.along_proud > 0.0 || b.proud_a > 0.0 || b.proud_b > 0.0;
-  if (!any) return shown;
-  const PrintChecked pc = print_check_bars(session, out.outcome.layout, shown, file_options_for(FileOptions{}, true), stop);
-  if (pc.ok) out.relief_flushed = clear_flushed_relief(shown, pc.made.relief_flushed_at);
+  const FileOptions fo = file_options_for(FileOptions{}, true);
+  bool any = false, domes = false;
+  for (const Bar& b : shown.bars) {
+    any = any || b.along_proud > 0.0 || b.proud_a > 0.0 || b.proud_b > 0.0;
+    // leg U: a shallow run (a bridge) has domed ends in the file, which the print check may hold flat
+    domes = domes || (fo.mesh.weave_bridge_domes && !b.net && bar_is_bridge(b, fo.mesh.bridge_rise));
+  }
+  if (!any && !domes) return shown;
+  const PrintChecked pc = print_check_bars(session, out.outcome.layout, shown, fo, stop);
+  if (pc.ok) {
+    if (any) out.relief_flushed = clear_flushed_relief(shown, pc.made.relief_flushed_at);
+    // Leg V (the drawing follows the print file): when the check's sag pass lifted joints or laid legs (O17, O18), the
+    // runs are drawn from the bars the file is made of (lifted, legs after, the relief already made flush as the file
+    // makes it), so a bar the lift made shallow is drawn as the file's bridge. The file's held-flat ends are then points
+    // of those runs as they stand.
+    if (pc.made.sagged) shown = *pc.made.sagged;
+    out.flat_ends = pc.made.flat_domes_at;
+  }
   return shown;
 }
 }  // namespace
@@ -171,9 +184,7 @@ std::vector<WeaveRun> swept_runs(const Bars& bars, const std::vector<int>& regio
   std::vector<std::vector<std::size_t>> bar_of;
   const std::vector<WeaveRun> file_runs = weave_runs(bars, regions, 0.0, &bar_of, false);
   const MeshSpec spec = file_mesh_defaults();
-  const int sides = std::max(3, spec.tube_sides);
   const double kPi = 3.14159265358979323846;
-  const double k_round = std::sqrt(2.0 * kPi / (sides * std::sin(2.0 * kPi / sides)));
   const double sharp = std::cos(60.0 * kPi / 180.0);
   auto unit = [](const Vec3& v) {
     const double l = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
@@ -210,6 +221,9 @@ std::vector<WeaveRun> swept_runs(const Bars& bars, const std::vector<int>& regio
       std::vector<double> ring;
       for (std::size_t j = start; j <= k; ++j) ring.push_back(j == start ? w[start] : j == k ? w[k - 1] : std::max(w[j - 1], w[j]));
       const bool swept = kind[start] == 0 && sweep.on;
+      double widest = 0.0;   // OS1 A: the piece's own sides, as the file's
+      for (std::size_t j = start; j < k; ++j) widest = std::max(widest, w[j]);
+      const double k_round = tube_round_factor(tube_sides_for(widest, spec));
       std::vector<Vec3> line = pp;
       std::vector<double> line_ring = ring;
       std::vector<std::size_t> at(pp.size());   // each piece point's place in `line`
@@ -228,7 +242,16 @@ std::vector<WeaveRun> swept_runs(const Bars& bars, const std::vector<int>& regio
         for (std::size_t m = 0; m < sl.span.size(); ++m)
           if (sl.span[m] < 0) at[i++] = m;
       }
-      // Split where the preview's relief marks split a run (the along-face mark and the face, per bar).
+      // OS1 D: the file ends the piece where a mitred ring would fold (a real end: a ball, or a rounded end).
+      std::vector<char> fold(line.size(), 0);
+      if (spec.weave_fold_split && line.size() >= 3) {
+        std::vector<double> corner(line.size());
+        for (std::size_t m = 0; m < line.size(); ++m)
+          corner[m] = 0.5 * line_ring[m] * (kind[start] == 0 ? k_round : 1.41421356237);
+        for (std::size_t m : mitre_fold_splits(line, corner)) fold[m] = 1;
+      }
+      // Split where the preview's relief marks split a run (the along-face mark and the face, per bar): there the file's
+      // tube goes on, so the run's end there is packed "continues" (kEndContinues), never a ball.
       std::size_t a = 0;
       for (std::size_t b = 1; b < pp.size(); ++b) {
         const Bar& here = bars.bars[seg_bar[start + b - 1]];
@@ -249,6 +272,8 @@ std::vector<WeaveRun> swept_runs(const Bars& bars, const std::vector<int>& regio
         r.proud_b_mm = run_end && eb == Bar::End::Surface ? here.proud_b : 0.0;
         r.along_face = first.along_face;
         for (std::size_t j = a; j < b; ++j) r.proud_mm = std::max(r.proud_mm, bars.bars[seg_bar[start + j]].along_proud);
+        r.continues_a = !run_start && a > 0 && !fold[at[a]];
+        r.continues_b = !run_end && !end && !fold[at[b]];
         for (std::size_t m = at[a]; m <= at[b]; ++m) {
           r.points.push_back(line[m]);
           r.ring_mm.push_back(line_ring[m]);
@@ -257,7 +282,23 @@ std::vector<WeaveRun> swept_runs(const Bars& bars, const std::vector<int>& regio
           std::size_t j = a;
           while (j + 1 < b && at[j + 1] <= m) ++j;
           r.spacing_mm.push_back(bars.bars[seg_bar[start + j]].cell);
+          if (m > at[a] && m < at[b] && fold[m]) {   // OS1 D: ended here (both runs' ends real, Node)
+            WeaveRun rest = r;
+            rest.points = {line[m]};
+            rest.ring_mm = {line_ring[m]};
+            rest.width_mm = {line_ring[m]};
+            rest.spacing_mm = {r.spacing_mm.back()};
+            rest.end_a = Bar::End::Node;
+            rest.continues_a = false;
+            rest.proud_a_mm = 0.0;
+            r.end_b = Bar::End::Node;
+            r.continues_b = false;
+            r.proud_b_mm = 0.0;
+            out.push_back(std::move(r));
+            r = std::move(rest);
+          }
         }
+        if (fold[at[b]] && !end) { r.continues_b = false; }
         out.push_back(std::move(r));
         a = b;
       }
@@ -270,6 +311,7 @@ std::vector<WeaveRun> swept_runs(const Bars& bars, const std::vector<int>& regio
 OrganicPreview lay_organic_preview(Session& session, const Settings& settings, const TensorField& field,
                                    const OrganicAsk& ask, const OrganicPreviewAsk& preview, int threads,
                                    const std::atomic<bool>* stop) {
+  try {   // SB1: a stop during the print check answers "cancelled"; nothing non-std leaves
   OrganicPreview out;
   out.quality = preview.quality;
   // OS16 (brief E4, leg 2): Exact replays additions with the file's print check between rounds, as the file job does
@@ -286,11 +328,25 @@ OrganicPreview lay_organic_preview(Session& session, const Settings& settings, c
   out.runs = ask.sweep.on ? swept_runs(shown, regions, ask.sweep)   // OV1: the file's swept centre lines
                           : weave_runs(shown, regions, preview.tolerance_mm, nullptr, true);   // leg H: the relief marks
   return out;
+  } catch (const LayCancelled&) {
+    OrganicPreview none;
+    none.quality = preview.quality;
+    none.outcome.cancelled = true;
+    return none;
+  } catch (const std::exception&) {
+    throw;
+  } catch (...) {
+    OrganicPreview none;
+    none.quality = preview.quality;
+    none.outcome.refused.push_back(core_stopped("The Organic preview could not be made"));
+    return none;
+  }
 }
 
 OrganicPreview lay_organic_preview(Session& session, const Settings& settings, const TensorField& field,
                                    const std::vector<OrganicGroup>& groups, const OrganicPreviewAsk& preview,
                                    int threads, const std::atomic<bool>* stop) {
+  try {   // SB1: a stop during the print check answers "cancelled"; nothing non-std leaves
   OrganicPreview out;
   out.quality = preview.quality;
   // OJ6: Exact replays a group list's additions with the file's print check between rounds, as the one-ask form does.
@@ -310,6 +366,19 @@ OrganicPreview lay_organic_preview(Session& session, const Settings& settings, c
   out.runs = sweep.on ? swept_runs(shown, regions, sweep)
                       : weave_runs(shown, regions, preview.tolerance_mm, nullptr, true);   // leg H: the relief marks
   return out;
+  } catch (const LayCancelled&) {
+    OrganicPreview none;
+    none.quality = preview.quality;
+    none.outcome.cancelled = true;
+    return none;
+  } catch (const std::exception&) {
+    throw;
+  } catch (...) {
+    OrganicPreview none;
+    none.quality = preview.quality;
+    none.outcome.refused.push_back(core_stopped("The Organic preview could not be made"));
+    return none;
+  }
 }
 
 std::vector<std::uint8_t> pack_weave_runs(const std::vector<WeaveRun>& runs, int version) {
@@ -327,7 +396,10 @@ std::vector<std::uint8_t> pack_weave_runs(const std::vector<WeaveRun>& runs, int
   for (const WeaveRun& r : runs) {
     const std::uint32_t n = static_cast<std::uint32_t>(r.points.size());
     const std::int32_t region = r.region;
-    const std::uint8_t head[4] = {r.marks, static_cast<std::uint8_t>(r.end_a), static_cast<std::uint8_t>(r.end_b),
+    // OS1 F: version 2 packs a run end that continues the next (or previous) run's tube as kEndContinues.
+    const std::uint8_t ea = v2 && r.continues_a ? kEndContinues : static_cast<std::uint8_t>(r.end_a);
+    const std::uint8_t eb = v2 && r.continues_b ? kEndContinues : static_cast<std::uint8_t>(r.end_b);
+    const std::uint8_t head[4] = {r.marks, ea, eb,
                                   static_cast<std::uint8_t>(v2 ? r.section : 0)};   // leg M: the section (version 2)
     put(&n, 4); put(&region, 4); put(head, 4);
     if (v2) {   // leg H
@@ -442,13 +514,20 @@ std::vector<SweepLimits> organic_sweep_limits(const Domain& domain, double line_
 
 // OP5 (brief C1): the same limits before any lay, on the domain lay() would lay in.
 std::vector<SweepLimits> Session::sweep_limits(const Settings& settings, double line_mm, double gap_lines) {
+  try {   // SB1: nothing but a std::exception or a refusal leaves this call
   ready_domain(settings);
   return organic_sweep_limits(*domain_, line_mm, gap_lines);
+  } catch (const std::exception&) {
+    throw;
+  } catch (...) {   // LayCancelled too: no stop is watched here, so it cannot be one asked for
+    throw SessionRefused(core_stopped("The Organic size limits could not be measured"));
+  }
 }
 
 // OP10 (brief C2, E4; E7: per group): the union of the measured regions' limits among `regions`.
 SweepLimitsUnion Session::sweep_limits_for(const Settings& settings, const std::vector<int>& regions, double line_mm,
                                            double gap_lines) {
+  try {   // SB1: nothing but a std::exception or a refusal leaves this call
   const std::vector<SweepLimits> all = sweep_limits(settings, line_mm, gap_lines);
   const SweepRounding rd(*domain_, line_mm);
   SweepLimitsUnion u;
@@ -480,6 +559,11 @@ SweepLimitsUnion Session::sweep_limits_for(const Settings& settings, const std::
     u.cell_auto_mm = rd.half(0.5 * (u.cell_lower_mm + u.cell_upper_mm));
   }
   return u;
+  } catch (const std::exception&) {
+    throw;
+  } catch (...) {   // LayCancelled too: no stop is watched here, so it cannot be one asked for
+    throw SessionRefused(core_stopped("The Organic size limits could not be measured"));
+  }
 }
 
 }  // namespace topopt::lattice_layout

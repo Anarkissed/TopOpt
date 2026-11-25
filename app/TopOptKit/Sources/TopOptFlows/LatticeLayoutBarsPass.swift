@@ -7,8 +7,13 @@
 // ★ P7 (the rebuild's rule from his 11-11 crash): the bars, a list that grows with the part, are ONE MTLBuffer bound with
 // setVertexBuffer / setFragmentBuffer — never setFragmentBytes (his v2 stand is 37,233 bars, ~1.2 MB). The per-frame uniform
 // is a fixed 256-byte struct.
-// ★ NO CLIP: core's bars are already cut to the part (the old impostors clip against the old engine's part and region
-// fields; these have none). The ray comes from the inverse clip matrix, so Orthographic and Perspective are both right.
+// ★ THE CLIP (notes26 C6, his 11-23: the regular lattice "looks like it's ON TOP of the face of the part, not *in* it"). Core's
+// bars END on the part's surface (lattice_layout.hpp) and its skin bars lie ON it (bars.cpp), but a bar was drawn with round caps
+// half a strut past each end (and a square bar R past both), so every cut strut bulged half a strut out of the face — while the
+// print file cuts them flush (solid_mesh.cpp). With the engine's map of the part on the GPU (the solid view's), each bar is now
+// clipped to the part: nothing of it draws outside; where it meets the face it ends in a flat cap flush with the surface (the
+// face's own normal); a skin bar keeps its inner half. "The drawing follows the print file." The X-ray view has no map: as
+// before. The ray comes from the inverse clip matrix, so Orthographic and Perspective are both right.
 // ★ THE GHOST: the bars are inside the part, so the page draws the body see-through while this pass is on, and the body
 // follows the Flexible pass's two rules (MeshRenderer+FlexibleLattice): out of the G-buffer, drawn after the shade.
 // ★ PREVIEW IS THE SPEC, not yet: the print file squares the undersides of flat bridges and adds posts; this first cut draws
@@ -17,6 +22,7 @@
 #if canImport(MetalKit)
 import MetalKit
 import simd
+import Accelerate
 
 /// What the page hands the renderer: the bars, keyed by a token (a new token uploads; the same token never re-uploads).
 public struct LatticeLayoutBarsInputs: Equatable {
@@ -38,6 +44,12 @@ public struct LatticeLayoutBarsInputs: Equatable {
     /// round tubes, round ends, blended joints). When set, the pass draws these instead of the bars (the bars stay for the
     /// key, the card and picking).
     public var vines: OrganicVineShape?
+    /// ★ His pick 11-21 (the preview-speed research, "Let's do this one. Absolutely."): the lattice on screen is the LAST one,
+    /// dimmed while the new one lays (its Draft, then the exact lattice, replaces it).
+    public var dimmed = false
+    /// ★ his 11-22 (the print-accurate lattice made on the Mac): the print file's own lattice; when set it draws instead of the
+    /// vines and the bars (they stay for the key, the card and picking), in the same colour and light.
+    public var fileMesh: LatticeFileMesh?
     public init(token: Int, bars: [Float], hidden: Bool = false, solid: LatticeLayoutSolidGrid? = nil, flags: [UInt8] = [],
                 colours: [SIMD4<Float>] = [], colourKey: Int = 0) {
         self.token = token; self.bars = bars; self.hidden = hidden; self.solid = solid; self.flags = flags
@@ -45,6 +57,7 @@ public struct LatticeLayoutBarsInputs: Equatable {
     }
     public static func == (a: Self, b: Self) -> Bool {
         a.token == b.token && a.hidden == b.hidden && a.solid?.token == b.solid?.token && a.colourKey == b.colourKey
+            && a.dimmed == b.dimmed && a.solid?.smooth == b.solid?.smooth   // ★ notes28: the same map drawn the other way
     }
 }
 
@@ -89,6 +102,97 @@ public struct LatticeLayoutSolidGrid: Equatable {
         }
         return a.map { Int8(Swift.max(-127, Swift.min(127, $0.rounded()))) }
     }
+
+    /// ★ notes28 (his iPad notes on release 18, img 77: "there is still stair stepping on the cut lines of the original part's
+    /// wall ... It's on every wall"). The regular lattice's cut, with Print-accurate preview OFF: the OPEN channel read as a
+    /// signed field whose zero is the cut, smoothed so a cut along a slope reads as one straight line (a curve as a curve), not
+    /// the map's voxel steps. Each voxel's yes/no is averaged over its neighbours by the binomial [1 6 15 20 15 6 1] / 64 along
+    /// each axis (about 1.2 voxels), counting ONLY the voxels where the map knows the answer — inside the part, and the layer of
+    /// air right beside it (the engine marks that layer open beside open lattice, so the surface's cut is read there); the air
+    /// past it says nothing about the cut, so it never pulls the line inward (`smoothed` above, Organic's, does: about 0.2 mm on
+    /// a 0.7 mm map). Measured on a 30° cut across a face (Notes28LatticeViewTests): the line's wobble from 0.23 mm (the steps)
+    /// to under 0.1 mm, its place on the true line kept. The inside channel is the engine's own.
+    /// ★ HIS RULE ("The drawing follows the print file. Always."; amended 11-21: with Print-accurate preview ON). The print file
+    /// cuts the wall along a slope in 0.25 mm steps itself (read_open_space's columns): ON, the drawing keeps the map's own steps
+    /// (`LatticeLayoutPreview.cutSmoothWanted`); a straight cut in the file is an engine change.
+    public static let cutTaps: [Float] = [1, 6, 15, 20, 15, 6, 1]
+    public static func cutSmoothed(_ rg: [Int8], dims: SIMD3<Int32>) -> [Int8] {
+        let nx = Int(dims.x), ny = Int(dims.y), nz = Int(dims.z), n = nx * ny * nz
+        guard n > 0, rg.count == 2 * n else { return rg }
+        // Accelerate throughout (vDSP): a 1M-voxel map in a fraction of a second, debug builds too.
+        let N = vDSP_Length(n)
+        let open = UnsafeMutablePointer<Float>.allocate(capacity: n), inside = UnsafeMutablePointer<Float>.allocate(capacity: n)
+        let known = UnsafeMutablePointer<Float>.allocate(capacity: n), num = UnsafeMutablePointer<Float>.allocate(capacity: n)
+        defer { open.deallocate(); inside.deallocate(); known.deallocate(); num.deallocate() }
+        rg.withUnsafeBufferPointer { m in
+            m.baseAddress!.withMemoryRebound(to: Int8.self, capacity: 2 * n) { b in
+                vDSP_vflt8(b, 2, open, 1, N)
+                vDSP_vflt8(b + 1, 2, inside, 1, N)
+            }
+        }
+        var zero: Float = 0, one: Float = 1, scale: Float = 1 / 127
+        vDSP_vthrsc(inside, 1, &zero, &one, inside, 1, N)   // ±1 (≥ 0 → +1)
+        vDSP_vthr(inside, 1, &zero, inside, 1, N)            // 1 inside the part, 0 outside
+        // the voxels where the map knows the answer: inside, or air beside the part (its six neighbours; the map has a voxel of
+        // air all round, so a shift that wraps a row or a plane only ever meets air)
+        known.update(from: inside, count: n)
+        for shift in [1, nx, nx * ny] where shift < n {
+            let m = vDSP_Length(n - shift)
+            vDSP_vmax(known, 1, inside + shift, 1, known, 1, m)          // the neighbour after
+            vDSP_vmax(known + shift, 1, inside, 1, known + shift, 1, m)  // and the one before
+        }
+        vDSP_vsmul(open, 1, &scale, open, 1, N)    // −1 … 1
+        vDSP_vmul(open, 1, known, 1, num, 1, N)    // the known answers; `known` is how much of them
+        // blurred alike along each axis: their ratio is the field
+        for (axis, len, st) in [(0, nx, 1), (1, ny, nx), (2, nz, nx * ny)] {
+            Self.blurAxis(num, nx: nx, ny: ny, nz: nz, axis: axis, len: len, stride: st)
+            Self.blurAxis(known, nx: nx, ny: ny, nz: nz, axis: axis, len: len, stride: st)
+        }
+        // (num − ε) / (known + ε): where nothing is known (far air) −1, as the engine's own map says there
+        var eps: Float = 1e-6, negEps: Float = -1e-6, lo: Float = -1, hi: Float = 1, s127: Float = 127
+        vDSP_vsadd(num, 1, &negEps, num, 1, N)
+        vDSP_vsadd(known, 1, &eps, known, 1, N)
+        vDSP_vdiv(known, 1, num, 1, open, 1, N)    // open = num / known
+        vDSP_vclip(open, 1, &lo, &hi, open, 1, N)
+        vDSP_vsmul(open, 1, &s127, open, 1, N)
+        var out = rg
+        out.withUnsafeMutableBufferPointer { o in
+            o.baseAddress!.withMemoryRebound(to: Int8.self, capacity: 2 * n) { b in
+                vDSP_vfixr8(open, 1, b, 2, N)   // the open channel; the inside channel stays the engine's
+            }
+        }
+        return out
+    }
+
+    /// The binomial along one axis of `a` (x fastest, then y, then z), line by line, the ends held (the voxel at the edge
+    /// repeats). A line that is one value throughout is left as it is (the blur of a constant is that constant): most lines
+    /// of a map are all air or all solid.
+    private static func blurAxis(_ a: UnsafeMutablePointer<Float>, nx: Int, ny: Int, nz: Int, axis: Int, len: Int, stride st: Int) {
+        let h = cutTaps.count / 2
+        let sum = cutTaps.reduce(0, +)
+        let w = cutTaps.map { $0 / sum }
+        let pad = UnsafeMutablePointer<Float>.allocate(capacity: len + 2 * h), line = UnsafeMutablePointer<Float>.allocate(capacity: len)
+        defer { pad.deallocate(); line.deallocate() }
+        let lines = axis == 0 ? ny * nz : (axis == 1 ? nx * nz : nx * ny)
+        var zero: Float = 0
+        for l in 0..<lines {
+            let base: Int
+            switch axis {
+            case 0: base = l * nx                          // (y, z)
+            case 1: base = (l / nx) * nx * ny + l % nx     // (x, z)
+            default: base = l                              // (x, y)
+            }
+            let src = a + base
+            var mn: Float = 0, mx: Float = 0
+            vDSP_minv(src, st, &mn, vDSP_Length(len))
+            vDSP_maxv(src, st, &mx, vDSP_Length(len))
+            if mn == mx { continue }
+            vDSP_vsadd(src, st, &zero, pad + h, 1, vDSP_Length(len))   // the line, gathered (a strided copy)
+            for j in 0..<h { pad[j] = pad[h]; pad[h + len + j] = pad[h + len - 1] }
+            vDSP_conv(pad, 1, w, 1, line, 1, vDSP_Length(len), vDSP_Length(2 * h + 1))
+            vDSP_vsadd(line, 1, &zero, src, st, vDSP_Length(len))   // and put back
+        }
+    }
     public static func == (a: Self, b: Self) -> Bool { a.token == b.token }
     public var isWhole: Bool { dims.x > 0 && dims.y > 0 && dims.z > 0 && rg.count == 2 * Int(dims.x) * Int(dims.y) * Int(dims.z) }
 }
@@ -103,7 +207,22 @@ struct BarFrame {
     float4x4 eyeFromModel;
     float4x4 eyeNormalBasis;
     float4   albedo;
+    float4   mapOrigin;    // ★ notes26 C6: the engine's map — voxel (0,0,0)'s centre
+    float4   mapSpacing;   //   its voxel size
+    float4   mapDims;      //   its voxel counts; w = 1: clip the bars to the part
 };
+
+// ★ notes26 C6: is `p` inside the part (the map's inside channel, read linear — the way Organic's softened map is), never
+// outside the map's own box (beyond it nothing is the part)
+static float3 bar_map_uvw(float3 p, constant BarFrame& F) {
+    return ((p - F.mapOrigin.xyz) / F.mapSpacing.xyz + 0.5) / F.mapDims.xyz;
+}
+static float bar_map_inside(float3 p, constant BarFrame& F, texture3d<float, access::sample> map) {
+    constexpr sampler sl(coord::normalized, filter::linear, address::clamp_to_edge);
+    float3 uvw = bar_map_uvw(p, F);
+    if (any(uvw < 0.0) || any(uvw > 1.0)) { return -1.0; }
+    return map.sample(sl, uvw).g;
+}
 
 struct BarVOut {
     float4 pos [[position]];
@@ -194,7 +313,8 @@ struct BarGBuf {
 fragment BarGBuf bar_gbuffer(BarVOut in [[stage_in]],
                              const device float4* bars [[buffer(0)]],
                              constant BarFrame& F [[buffer(1)]],
-                             const device float4* colours [[buffer(2)]]) {
+                             const device float4* colours [[buffer(2)]],
+                             texture3d<float, access::sample> map [[texture(0)]]) {
     float4 A = bars[2 * in.iid], B = bars[2 * in.iid + 1];
     float R = max(A.w, 1e-4);
     // this fragment's ray, from the inverse clip matrix: right for Orthographic and Perspective alike
@@ -204,6 +324,7 @@ fragment BarGBuf bar_gbuffer(BarVOut in [[stage_in]],
     float3 ro = n0.xyz / n0.w;
     float3 rd = normalize(n1.xyz / n1.w - ro);
     float t;
+    float tExit;   // ★ notes26 C6: where the ray leaves the bar
     float3 n;
     if (bar_square(B)) {
         float3 ax = B.xyz - A.xyz;
@@ -220,12 +341,41 @@ fragment BarGBuf bar_gbuffer(BarVOut in [[stage_in]],
         float tN = max(max(tn.x, tn.y), tn.z), tF = min(min(tf.x, tf.y), tf.z);
         if (tF < max(tN, 0.0)) { discard_fragment(); }
         t = tN >= 0.0 ? tN : tF;
+        tExit = tF;
         float3 ln = (tN == tn.x) ? float3(-sign(ld.x), 0.0, 0.0) : ((tN == tn.y) ? float3(0.0, -sign(ld.y), 0.0) : float3(0.0, 0.0, -sign(ld.z)));
         n = normalize(ln.x * u + ln.y * v + ln.z * w);
     } else {
         t = bar_intersect(ro, rd, A.xyz, B.xyz, R);
         if (t < 0.0) { discard_fragment(); }
         n = bar_normal(ro + rd * t, A.xyz, B.xyz);
+        // the far side: the same test from a point past the bar, looking back
+        float far = t + 2.0 * (length(B.xyz - A.xyz) + 2.0 * R);
+        float back = bar_intersect(ro + rd * far, -rd, A.xyz, B.xyz, R);
+        tExit = back >= 0.0 ? far - back : t;
+    }
+    // ★ notes26 C6: clipped to the part. A hit outside it: walk the bar's chord to where the ray enters the part — there the bar
+    // ends FLAT, flush with the face (the face's own normal); none: nothing of this bar is here.
+    if (F.mapDims.w > 0.5 && bar_map_inside(ro + rd * t, F, map) <= 0.0) {
+        const int STEPS = 40;
+        float dt = max(tExit - t, 0.0) / float(STEPS);
+        float hit = -1.0;
+        for (int i = 1; i <= STEPS; ++i) {
+            float sx = t + dt * float(i);
+            if (bar_map_inside(ro + rd * sx, F, map) > 0.0) { hit = sx; break; }
+        }
+        if (hit < 0.0) { discard_fragment(); }
+        float a = hit - dt, b = hit;
+        for (int k = 0; k < 8; ++k) {
+            float m = 0.5 * (a + b);
+            if (bar_map_inside(ro + rd * m, F, map) > 0.0) { b = m; } else { a = m; }
+        }
+        t = b;
+        float3 q = ro + rd * t;
+        float e = 0.5 * min(F.mapSpacing.x, min(F.mapSpacing.y, F.mapSpacing.z));
+        float3 g = float3(bar_map_inside(q + float3(e, 0, 0), F, map) - bar_map_inside(q - float3(e, 0, 0), F, map),
+                          bar_map_inside(q + float3(0, e, 0), F, map) - bar_map_inside(q - float3(0, e, 0), F, map),
+                          bar_map_inside(q + float3(0, 0, e), F, map) - bar_map_inside(q - float3(0, 0, e), F, map));
+        n = length(g) > 1e-5 ? -normalize(g) : -rd;   // out of the part: the face's own normal
     }
     float3 p = ro + rd * t;
     float4 clip = F.clipFromModel * float4(p, 1.0);
@@ -410,7 +560,11 @@ final class LatticeLayoutBarsPass {
     private(set) var grid: (origin: SIMD3<Float>, voxel: Float, dims: SIMD3<Int32>)?
     private(set) var gridToken = -1
     /// The cut walls' colour: the body's own grey, so a cut reads as the same material.
-    static let wallColour = SIMD4<Float>(0.80, 0.81, 0.83, 1)
+    /// ★ notes24 (b, "as if you're looking INTO A PART"): exactly the body's clay (viewer_fragment's `clay`), no cooler grey.
+    static let wallColour = SIMD4<Float>(0.78, 0.77, 0.75, 1)
+    /// ★ notes26 C6: the bars clipped to the part where its map is on the GPU (the solid view). RED CONTROL (tests): off — the round
+    /// caps bulge half a strut out of the face, as before.
+    static var clipToPart = true
     /// The cut walls, on (11-13: they draw — the hollow core's solid core behind its lattice; his v4 stand at 2048 × 1536 on
     /// the Mac: 21 ms a frame without, 25–29 ms with). The tests' red control turns them off.
     static var drawWalls = true
@@ -424,8 +578,19 @@ final class LatticeLayoutBarsPass {
     private(set) var lightFrom = Int.max
     /// ★ His 11-19: Organic's vines (nil: the bars draw).
     private(set) var vinePass: OrganicVinePass?
+    /// ★ his 11-22: the print file's lattice from the Mac (nil: the vines or the bars draw).
+    private(set) var filePass: LatticeFileMeshPass?
     var hidden = false
+    /// ★ his pick 11-21: the last lattice, dimmed while the new one lays (`dimmedRGB`).
+    var dimmed = false
     var isDrawable: Bool { !hidden && count > 0 && buffer != nil }
+
+    /// ★ his pick 11-21: a lattice that is about to be replaced: its colour drained toward grey and darkened, so it reads as
+    /// the old one at a glance (never hidden: he keeps his bearings while the new one lays).
+    static func dimmedRGB(_ c: SIMD3<Float>) -> SIMD3<Float> {
+        let grey = SIMD3<Float>(repeating: simd_dot(c, SIMD3(0.299, 0.587, 0.114)))
+        return simd_mix(c, grey, SIMD3(repeating: 0.7)) * 0.6 + 0.12
+    }
 
     init(device: MTLDevice) throws {
         self.device = device
@@ -532,6 +697,17 @@ final class LatticeLayoutBarsPass {
         } else {
             vinePass = nil
         }
+        if let m = inputs.fileMesh {   // ★ his 11-22
+            if filePass == nil {
+                do { filePass = try LatticeFileMeshPass(device: device); LatticeFileMeshPass.lastInitError = nil } catch {
+                    LatticeFileMeshPass.lastInitError = "\(error)"
+                    NSLog("DIAG print file lattice: %@", "\(error)")
+                }
+            }
+            if filePass?.token != m.token { filePass?.upload(m) }
+        } else {
+            filePass = nil
+        }
         let packed = Self.pack(inputs.bars, flags: inputs.flags)
         count = packed.count / 2
         buffer = packed.isEmpty ? nil : device.makeBuffer(bytes: packed, length: MemoryLayout<SIMD4<Float>>.stride * packed.count,
@@ -567,20 +743,49 @@ final class LatticeLayoutBarsPass {
         var eyeFromModel: simd_float4x4
         var eyeNormalBasis: simd_float4x4
         var albedo: SIMD4<Float>
+        /// ★ notes26 C6: the engine's map (BarFrame's twin); `mapDims.w` 1 = clip the bars to the part.
+        var mapOrigin = SIMD4<Float>(0, 0, 0, 0)
+        var mapSpacing = SIMD4<Float>(1, 1, 1, 0)
+        var mapDims = SIMD4<Float>(1, 1, 1, 0)
     }
+
+    /// ★ notes26 C6: a 1×1×1 map bound when there is none (the shader declares it, so it is bound on every path).
+    private lazy var neutralMap: MTLTexture? = {
+        let d = MTLTextureDescriptor()
+        d.textureType = .type3D
+        d.pixelFormat = .rg8Snorm
+        d.width = 1; d.height = 1; d.depth = 1
+        d.usage = [.shaderRead]
+        d.storageMode = .shared
+        let t = device.makeTexture(descriptor: d)
+        var z: [Int8] = [0, 0]
+        t?.replace(region: MTLRegionMake3D(0, 0, 0, 1, 1, 1), mipmapLevel: 0, slice: 0, withBytes: &z, bytesPerRow: 2, bytesPerImage: 2)
+        return t
+    }()
 
     /// Bars into the prepass's G-buffer (its encoder, attachments and .less + write depth state).
     func encodeGBuffer(_ enc: MTLRenderCommandEncoder, depthState: MTLDepthStencilState,
                        clipFromModel: simd_float4x4, eyeFromModel: simd_float4x4, eyeNormalBasis: simd_float4x4,
                        turning: Bool = false) -> Bool {
         guard isDrawable, let buffer, enc.device === device else { return false }
-        let c = Self.colour
+        let c0 = Self.colour
+        let c = dimmed ? Self.dimmedRGB(SIMD3(Float(c0.r), Float(c0.g), Float(c0.b))) : SIMD3(Float(c0.r), Float(c0.g), Float(c0.b))
+        if let fp = filePass, fp.isDrawable {   // ★ his 11-22: the print file's own lattice, the vines' colour and light
+            return fp.encode(enc, depthState: depthState, clipFromModel: clipFromModel, eyeFromModel: eyeFromModel,
+                             eyeNormalBasis: eyeNormalBasis, albedo: SIMD4(c, 1))
+        }
         if let vp = vinePass, vp.isDrawable {   // ★ his 11-19: Organic's vines, one colour
             return vp.encode(enc, depthState: depthState, clipFromModel: clipFromModel, eyeFromModel: eyeFromModel,
-                             eyeNormalBasis: eyeNormalBasis, albedo: SIMD4(Float(c.r), Float(c.g), Float(c.b), 1), turning: turning)
+                             eyeNormalBasis: eyeNormalBasis, albedo: SIMD4(c, 1), turning: turning)
         }
+        // dimmed: every bar the one drained colour (the key's colours come back with the new lattice)
         var f = Frame(clipFromModel: clipFromModel, modelFromClip: clipFromModel.inverse, eyeFromModel: eyeFromModel,
-                      eyeNormalBasis: eyeNormalBasis, albedo: SIMD4(Float(c.r), Float(c.g), Float(c.b), colourBuffer == nil ? 1 : -1))
+                      eyeNormalBasis: eyeNormalBasis, albedo: SIMD4(c, colourBuffer == nil || dimmed ? 1 : -1))
+        if Self.clipToPart, let g = grid, gridTexture != nil {   // ★ notes26 C6: the solid view's map clips the bars to the part
+            f.mapOrigin = SIMD4(g.origin, 0)
+            f.mapSpacing = SIMD4(g.voxel, g.voxel, g.voxel, 0)
+            f.mapDims = SIMD4(Float(g.dims.x), Float(g.dims.y), Float(g.dims.z), 1)
+        }
         enc.setRenderPipelineState(pipeline)
         enc.setDepthStencilState(depthState)
         enc.setCullMode(.none)
@@ -589,6 +794,7 @@ final class LatticeLayoutBarsPass {
         enc.setFragmentBuffer(buffer, offset: 0, index: 0)
         enc.setFragmentBytes(&f, length: MemoryLayout<Frame>.stride, index: 1)
         enc.setFragmentBuffer(colourBuffer ?? buffer, offset: 0, index: 2)   // bound either way (read only when albedo.w < 0)
+        enc.setFragmentTexture(gridTexture ?? neutralMap, index: 0)   // ★ notes26 C6: bound either way (read only when clipping)
         let cast = Swift.min(Swift.max(lightFrom, 0), count)
         if cast > 0 { enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 36, instanceCount: cast) }
         if cast < count {   // ★ Organic cut 1: the light pass, the same buffers from bar `cast` on
@@ -628,7 +834,10 @@ extension MeshRenderer {
         if pass.token != inputs.token { pass.upload(inputs); changed = true }
         else if pass.colourKey != inputs.colourKey { pass.uploadColours(inputs); changed = true }   // ★ Install 3
         if pass.hidden != inputs.hidden { pass.hidden = inputs.hidden; changed = true }
-        if pass.gridToken != (inputs.solid?.token ?? -1) { pass.uploadGrid(inputs.solid); changed = true }
+        if pass.dimmed != inputs.dimmed { pass.dimmed = inputs.dimmed; changed = true }   // ★ his pick 11-21
+        if pass.gridToken != (inputs.solid?.token ?? -1) || (inputs.solid.map { $0.smooth != pass.gridSmooth } ?? false) {
+            pass.uploadGrid(inputs.solid); changed = true   // ★ notes28: or the same lay's map smoothed / stepped (Print-accurate)
+        }
         return changed
     }
 }

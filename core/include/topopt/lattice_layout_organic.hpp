@@ -281,6 +281,14 @@ struct OrganicAsk {
 inline constexpr double kOrganicStrandKeepDefault = 0.9;   // OG3
 inline constexpr double kOrganicGapLinesDefault = 1.5;   // OG1
 inline constexpr double kOrganicGapLinesMax = 4.0;
+// UL1 (leg R, 2026-11-20; the owner: "Can I put 789293?"): the upper limits of the numbers the app shows, each the largest
+// that still means something on a part a printer can make (a 400 mm bed): the cell size 200 mm (Auto's upper end is 4/9
+// of the area's narrowest width, 178 mm at 400), the strut 50 mm (Auto's thick end is a tenth of it, 40 mm at 400), and
+// the counts in spacings (seeds, gaps, roots, top branches) 20, Grade to shape reach 10.
+inline constexpr double kOrganicCellMaxMm = 200.0;
+inline constexpr double kOrganicStrutMaxMm = 50.0;
+inline constexpr double kOrganicSpacingsMax = 20.0;
+inline constexpr double kOrganicShapeReachMax = 10.0;
 inline constexpr double kOrganicReliefMaxMm = 1.0;       // OG2 (the owner, 2026-11-19: on/off, "limits to 1mm")
 
 // OG1: the strand points' local spacing and its reason, and (gap above 0) the cap: for each strand of `strands` from
@@ -388,6 +396,7 @@ std::string old_bars_kept(const Bars& before, const Bars& after, double tol_mm =
 struct OrganicGroup {
   std::vector<int> regions;   // weave region ids
   OrganicAsk ask;
+  std::string name;           // notes27: the app's name for the group (the job's "name"), said back in strengthen.json
 };
 // OP11: validate_organic for a group list: every refusal of each group's ask (validate_organic, field not checked there,
 // OrganicRefusal::group its index), then the list's own (group -1 unless said): a weave region of the settings in no
@@ -849,8 +858,14 @@ struct WeaveRun {
   // bridge, bar_is_bridge at the file's defaults). Filled always; a run is split at a change of section and the thinning
   // keeps every point where the ring width changes or the run turns sharper than 60 degrees only with `relief_marks`.
   std::vector<double> ring_mm;
+  bool continues_a = false, continues_b = false;   // OS1 F: packed as kEndContinues (version 2)
   std::uint8_t section = 0;   // bits 0-1 the section kind; bit 2 (kSectionSwept, OV1): the points are the swept centre line
 };
+// OS1 F (packed version 2 only): a run end that is not an end of the file's tube: the run was split there for the
+// preview's relief marks and the next run (at end_b) or the previous run (at end_a) continues the same tube. A reader
+// draws no ball and no flat end there; the shipped reader reads it as an end that is not solid or surface (a ball, as
+// before).
+inline constexpr std::uint8_t kEndContinues = 5;
 inline constexpr std::uint8_t kSectionSwept = 4;   // OV1 (ruling R9): bit 2 of WeaveRun::section and the packed section byte
 // OV1 (ruling R9): the runs as the print file sweeps them (the tubes route's pieces, each round one swept by
 // sweep_centre_line, split again where the preview's relief marks split a run); the preview's runs when the ask's sweep
@@ -890,6 +905,10 @@ struct OrganicPreview {
   // drawn flush: their runs carry no along-face mark and no proud length. How many; the runs are read from those bars
   // (`outcome.bars` stays the lay's). Draft: not run (0).
   std::size_t relief_flushed = 0;
+  // Leg U (the lead's ruling, 2026-11-21; OS1 B's drawing): Exact only: the places of the shallow runs' domed ends the
+  // file's print check held FLAT (its flat_domes_at): run end points and inner split points, exactly as the runs carry
+  // them. The app draws a dome at every shallow end the file domes except these. Draft: empty (no check is run).
+  std::vector<Vec3> flat_ends;
 };
 // OJ6: in `bars`, each bar whose two ends are one of `flushed` (either order) is made flush: its end relief carried
 // back (without_relief), along_proud 0, along_face -1. Returns how many.

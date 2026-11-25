@@ -147,6 +147,9 @@ struct LaneNotice: View {
 @MainActor
 final class LaneControls: ObservableObject {
     @Published private(set) var frames: [CGRect] = []
+    /// ★ notes25 (his 11-23, LaneCentreFoot): each lane's own frame, by its key ("lane-new-engine"), so one notice can sit
+    /// clear of another.
+    @Published private(set) var lanes: [String: CGRect] = [:]
 
     func update(_ all: [String: CGRect]) {
         // a notification's own buttons (Open, ×) are inside its lane frame: they are not in its way
@@ -154,12 +157,21 @@ final class LaneControls: ObservableObject {
         let f = all.filter { k, r in !Self.ignored(k) && !lanes.contains { $0.contains(r) } }.map(\.value)
             .sorted { ($0.minY, $0.minX) < ($1.minY, $1.minX) }
         if f != frames { frames = f }
+        let byKey = all.filter { $0.key.hasPrefix("lane-") }
+        if byKey != self.lanes { self.lanes = byKey }
     }
 
     /// Frames that are not controls a notification must keep clear of.
+    /// ★ notes25 (his 11-23, img 4: "What is going on in the bottom left corner???"): the thin-wall pop-up's holder frame
+    /// ("lattice-thin-walls-card") is the whole screen, not a control — counted as one, it left the new engine's stack no
+    /// room on any row, so the stack was drawn 0 pt wide at the screen's left edge, cut off ("Ae s…"). The pop-up itself
+    /// ("lattice-thin-walls-panel") is still kept clear of.
     static func ignored(_ key: String) -> Bool {
-        key.hasPrefix("lane-") || key.hasPrefix("numberPad")
+        key.hasPrefix("lane-") || key.hasPrefix("numberPad") || notControls.contains(key)
     }
+    /// Published frames that hold a pop-up in the screen's middle (the whole screen): never controls. ★ notes28: nor the
+    /// solid places' glow marker (a test's frame on the new engine's own lines, not a control).
+    static let notControls: Set<String> = ["lattice-thin-walls-card", "lattice-walls-glow"]
 }
 
 /// The app's toast (design-system §4.12, §4.34): bottom centre, 96 pt off the bottom edge or above the first free row, never

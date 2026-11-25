@@ -22,6 +22,25 @@ public enum LatticePreviewMode {
     public static let refreshLine = "Settings changed: tap to update the preview"
     public static let nozzleCheck = "Check a 0.2 mm nozzle"
 
+    // MARK: his picks 11-21 (the preview-speed research): the Organic lay said on the Lattice button, five words at most
+    // with the time: the Draft first (the last lattice dimmed), then "Draft · checking print" while the exact lattice is
+    // made with the Draft on screen.
+    /// ★ his ask 11-21: the ⌃ menu's switch between the quick stand-in (off) and the print file's own lattice (on).
+    public static let printAccurate = "Print-accurate preview"
+    public static let layingDraft = "Laying Draft"
+    public static let draftChecking = "Draft \u{00B7} checking print"
+    public static let layingExact = "Laying the lattice"
+    /// ★ his 11-22 ("watch the lattice grow"): what the engine's lay is doing, by its phase (core's GrowthTap: 1 growing,
+    /// 2 pruning, 3 re-seeding the bare places, 4 reaching the walls, 5 finishing), five words at most each.
+    public static let phaseWords: [Int: String] = [1: "Growing the vines", 2: "Pruning", 3: "Filling the gaps",
+                                                   4: "Reaching the walls", 5: "Finishing"]
+    /// The button's ring and words for an Organic lay under way: the engine's phase once it says one, else what is laying.
+    public static func buttonProgress(_ p: LatticeLayoutPreview.LayProgress) -> DSRunButton.Progress {
+        DSRunButton.Progress(started: p.started, expected: p.expectedS,
+                             words: phaseWords[p.phase]
+                                ?? (p.quality == .draft ? layingDraft : p.draftShown ? draftChecking : layingExact))
+    }
+
     /// (4) Live preview: the rebuild waits this long after the last change.
     public static let liveDelay: Duration = .milliseconds(500)
     /// RED CONTROL (tests only): Live preview without the wait — every change lays at once.

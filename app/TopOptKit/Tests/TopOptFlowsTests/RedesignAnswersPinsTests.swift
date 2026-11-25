@@ -90,10 +90,11 @@ final class RedesignAnswersPinsTests: XCTestCase {
         // ★ RE-PINNED (UI-Notes B3, #362's note 1 from his iPad 11-03): Topology's Optimize is topology only, so the gate, its line and its button take the run's flavour (`lattice`); the lattice's refusals apply only to a run that carries it
         // ★ RE-PINNED (UI-Notes B6 s1, his note 21): the item is ⌃'s "Optimize, then lattice" — Topology's same item, its gate
         // (`optimizeThenLatticeOK`: the lattice set, and canOptimize(lattice: true))
-        XCTAssertTrue(body.contains("Text(TopologyRunCopy.optimizeThenLattice)"))
+        // ★ RE-PINNED (notes23 chrome, his 11-22 img 45): the ⌃ opens a drawer of rows (latticeMoreItems, right after it)
+        XCTAssertTrue(body.contains(".action(TopologyRunCopy.optimizeThenLattice"))
         XCTAssertTrue(body.contains("requestRun(lattice: true)"))
-        XCTAssertTrue(body.contains(".accessibilityIdentifier(\"lattice-split-optimize\")"))
-        XCTAssertTrue(body.contains("let thenLattice = optimizeThenLatticeOK") && body.contains(".disabled(!thenLattice)"))
+        XCTAssertTrue(body.contains("id: \"lattice-split-optimize\")"))
+        XCTAssertTrue(body.contains("let thenLattice = optimizeThenLatticeOK") && body.contains("enabled: thenLattice"))
     }
 
     // MARK: 8 — Paint on any non-STEP mesh

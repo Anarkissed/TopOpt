@@ -5,14 +5,18 @@
 #include <algorithm>
 #include <array>
 #include <map>
+#include <set>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <limits>
 #include <memory>
 #include <stdexcept>
 #include <tuple>
+#include <unordered_map>
+#include <cstdint>
 
 #include "topopt/grading.hpp"
 #include "topopt/lattice.hpp"
@@ -914,8 +918,43 @@ double relief_share(int strand, int region) {   // u in (0, 1], fixed by the str
   return static_cast<double>((x >> 11) + 1) * (1.0 / 9007199254740992.0);
 }
 
+// OG2e (leg S; the owner, 2026-11-21: "can you ensure that adding a no-lattice zone at the face of a "depth variation"
+// latticed wall, flattens it"): is the surface point `on` (outward normal `n`) in a no-lattice zone's footprint: inside
+// the zone (a box or a cylinder, its Expand added in its own plane as the domain adds it), or within 0.05 mm of it, the
+// footprint grown in the face's plane by one line width `lw`. The zone's region id, or 0.
+int zone_footprint_at(const Vec3& on, const Vec3& n, const std::vector<Settings::RegionAsk>& regions, double lw) {
+  // (`lw` here is the growth in the face's plane: one line width, plus the tube's radius where a tube is asked about,
+  // so no part of its round side reaches over the footprint.)
+  auto dot = [](const Vec3& a, const Vec3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; };
+  for (const Settings::RegionAsk& r : regions) {
+    if (r.role != Role::NoLattice || r.zone.kind == Zone::Kind::None) continue;
+    const Zone& z = r.zone;
+    const Vec3 d{on.x - z.centre.x, on.y - z.centre.y, on.z - z.centre.z};
+    const double grow = std::isfinite(r.expand_mm) ? r.expand_mm : 0.0;
+    if (z.kind == Zone::Kind::Box) {
+      bool in = true;
+      for (int k = 0; k < 3 && in; ++k) {
+        const double half = z.half[k] + (k < 2 ? grow : 0.0);
+        const double tol = 0.05 + lw * (1.0 - std::fabs(dot(z.axis[k], n)));
+        in = std::fabs(dot(d, z.axis[k])) <= half + tol;
+      }
+      if (in) return r.id;
+    } else {
+      const Vec3& ax = z.axis[2];
+      const double along = dot(d, ax);
+      const Vec3 rad{d.x - ax.x * along, d.y - ax.y * along, d.z - ax.z * along};
+      const double rl = std::sqrt(dot(rad, rad));
+      const Vec3 ru = rl > 1e-12 ? Vec3{rad.x / rl, rad.y / rl, rad.z / rl} : n;
+      const double tol_ax = 0.05 + lw * (1.0 - std::fabs(dot(ax, n))), tol_rad = 0.05 + lw * (1.0 - std::fabs(dot(ru, n)));
+      if (std::fabs(along) <= z.half[2] + tol_ax && rl <= z.half[0] + grow + tol_rad) return r.id;
+    }
+  }
+  return 0;
+}
+
 void lay_relief(Bars& bars, const StepModel& model, const PartMeasure& part, const std::vector<OrganicGroup>& groups,
-                const std::vector<std::size_t>& first_strand, Outcome::Relief& rep, const std::vector<int>& covered = {}) {
+                const std::vector<std::size_t>& first_strand, Outcome::Relief& rep, const std::vector<int>& covered = {},
+                const std::vector<Settings::RegionAsk>& zones = {}, double line_mm = 0.0, const Domain* domain = nullptr) {
   rep = Outcome::Relief{};
   const OrganicGroup* of_region_cache = nullptr;
   auto group_of = [&](int region) -> const OrganicGroup* {
@@ -930,8 +969,40 @@ void lay_relief(Bars& bars, const StepModel& model, const PartMeasure& part, con
   if (!any) return;
   rep.faces_known = model.triangle_face.size() == model.mesh.triangles.size() && !model.mesh.triangles.empty();
   std::unique_ptr<TriFinder> finder;
-  std::map<const OrganicGroup*, double> beds;   // the bed along each group's build direction
+  // OG2e: the no-lattice zones (none: every lay as before, nothing below reads them).
   const PartMeasure::Probe probe = part.probe();
+  std::vector<Settings::RegionAsk> nl_zones;
+  for (const Settings::RegionAsk& r : zones)
+    if (r.role == Role::NoLattice && r.zone.kind != Zone::Kind::None) nl_zones.push_back(r);
+  std::set<std::pair<int, int>> zone_faces;   // (zone, face) where something was made flush
+  auto face_at = [&](const Vec3& p) {
+    if (!rep.faces_known) return -1;
+    if (!finder) finder = std::make_unique<TriFinder>(model.mesh);
+    const long t = finder->nearest(p);
+    return t >= 0 ? model.triangle_face[static_cast<std::size_t>(t)] : -1;
+  };
+  // OG2e: the zone whose footprint any part of the bar's tube reaches (read every 0.25 mm along it: each point within
+  // its tube (the file's polygon, 1.16 r at most) and a line of the surface, at the face nearest it, along that face's own
+  // normal); 0 for none.
+  auto bar_zone = [&](const Bar& b) {
+    const double r = 0.5 * b.width, L = dist(b.a, b.b), hh = 0.05;
+    const int k = std::max(1, static_cast<int>(std::ceil(L / 0.25)));
+    for (int q = 0; q <= k; ++q) {
+      const double t = static_cast<double>(q) / k;
+      const Vec3 p{b.a.x + (b.b.x - b.a.x) * t, b.a.y + (b.b.y - b.a.y) * t, b.a.z + (b.b.z - b.a.z) * t};
+      const double d = probe.depth(p);
+      if (!(d < 1.16 * r + line_mm)) continue;
+      Vec3 np{probe.depth(Vec3{p.x - hh, p.y, p.z}) - probe.depth(Vec3{p.x + hh, p.y, p.z}),
+              probe.depth(Vec3{p.x, p.y - hh, p.z}) - probe.depth(Vec3{p.x, p.y + hh, p.z}),
+              probe.depth(Vec3{p.x, p.y, p.z - hh}) - probe.depth(Vec3{p.x, p.y, p.z + hh})};
+      const double npl = std::sqrt(np.x * np.x + np.y * np.y + np.z * np.z);
+      if (!(npl > 0.0)) continue;
+      np = {np.x / npl, np.y / npl, np.z / npl};
+      if (const int z = zone_footprint_at(Vec3{p.x + np.x * d, p.y + np.y * d, p.z + np.z * d}, np, nl_zones, line_mm + r)) return z;
+    }
+    return 0;
+  };
+  std::map<const OrganicGroup*, double> beds;   // the bed along each group's build direction
   const Vec3 plo = part.lo(), phi = part.hi();
   const double kDown = std::cos(45.0 * 3.14159265358979323846 / 180.0), kAlong = std::sin(20.0 * 3.14159265358979323846 / 180.0);
   // OG2b (brief E6, leg B; the owner: "Depth variation means to not cut entirely along the plane!"): a weave bar (strands,
@@ -985,6 +1056,15 @@ void lay_relief(Bars& bars, const StepModel& model, const PartMeasure& part, con
       if (std::find(ask.relief_exclude_faces.begin(), ask.relief_exclude_faces.end(), face) != ask.relief_exclude_faces.end())
         continue;
     }
+    if (!nl_zones.empty()) {   // OG2e: any part of the bar at a no-lattice zone's footprint: its bulge is not kept
+      int zone = zone_footprint_at(on, nrm, nl_zones, line_mm + r);
+      if (!zone) zone = bar_zone(b);
+      if (zone) {
+        ++rep.flush_zone_bars;
+        if (const int f = face >= 0 ? face : face_at(on); f >= 0) zone_faces.insert({zone, f});
+        continue;
+      }
+    }
     b.along_proud = ask.face_relief_mm;
     b.along_face = face;
     ++rep.along;
@@ -1020,6 +1100,25 @@ void lay_relief(Bars& bars, const StepModel& model, const PartMeasure& part, con
       nrm = {nrm.x / nl, nrm.y / nl, nrm.z / nl};
       const Vec3 up{ask.build_dir.x / ul, ask.build_dir.y / ul, ask.build_dir.z / ul};
       if (nrm.x * up.x + nrm.y * up.y + nrm.z * up.z < -kDown) { ++rep.flush_down; continue; }
+      if (!nl_zones.empty()) {   // OG2e: an end at a no-lattice zone's footprint stays flush (its proud tip would lean out
+        // along its bar by up to the relief / the sine of its angle: that reach, with its round cap, is asked about too)
+        const double rr = 0.5 * b.width;
+        const double Lb = dist(end, other);
+        double lean = 0.0;
+        if (Lb > 0.0) {
+          const double c = std::fabs(((end.x - other.x) * nrm.x + (end.y - other.y) * nrm.y + (end.z - other.z) * nrm.z) / Lb);
+          lean = c > kAlong ? ask.face_relief_mm * std::sqrt(std::max(0.0, 1.0 - c * c)) / c : 0.0;
+        }
+        const double de = std::max(0.0, probe.depth(end));   // the face's point under the end (an end may sit below it)
+        const Vec3 on_end{end.x + nrm.x * de, end.y + nrm.y * de, end.z + nrm.z * de};
+        int zone = zone_footprint_at(on_end, nrm, nl_zones, line_mm + rr + lean);
+        if (!zone) zone = bar_zone(b);   // the file keeps a proud bar's whole tube: none of it may reach the footprint
+        if (zone) {
+          ++rep.flush_zone_ends;
+          if (const int f = face_at(end); f >= 0) zone_faces.insert({zone, f});
+          continue;
+        }
+      }
       auto found = beds.find(g);
       if (found == beds.end()) {
         double lowest = std::numeric_limits<double>::infinity();
@@ -1055,6 +1154,56 @@ void lay_relief(Bars& bars, const StepModel& model, const PartMeasure& part, con
       rep.grew_mm[5] = std::max(rep.grew_mm[5], tip.z + r - phi.z);
     }
   }
+  std::unique_ptr<Domain::Probe> dprobe;   // OG2f: read only when a footprint was found
+  if (domain && !zone_faces.empty()) dprobe = std::make_unique<Domain::Probe>(domain->probe());
+  // OG2e: the footprints found, each face's area inside it (its triangles sampled at about 0.25 mm).
+  for (const auto& [zone, face] : zone_faces) {
+    Outcome::Relief::ZoneFootprint fp;
+    fp.zone = zone;
+    fp.face = face;
+    std::vector<Settings::RegionAsk> one;
+    for (const Settings::RegionAsk& r : nl_zones)
+      if (r.id == zone) one.push_back(r);
+    for (std::size_t t = 0; t < model.mesh.triangles.size() && face >= 0 && rep.faces_known; ++t) {
+      if (model.triangle_face[t] != face) continue;
+      const auto& tri = model.mesh.triangles[t];
+      const Vec3 A = model.mesh.vertices[static_cast<std::size_t>(tri[0])], B = model.mesh.vertices[static_cast<std::size_t>(tri[1])],
+                 C = model.mesh.vertices[static_cast<std::size_t>(tri[2])];
+      const Vec3 u{B.x - A.x, B.y - A.y, B.z - A.z}, v{C.x - A.x, C.y - A.y, C.z - A.z};
+      Vec3 nn{u.y * v.z - u.z * v.y, u.z * v.x - u.x * v.z, u.x * v.y - u.y * v.x};
+      const double area = 0.5 * std::sqrt(nn.x * nn.x + nn.y * nn.y + nn.z * nn.z);
+      if (!(area > 0.0)) continue;
+      nn = {nn.x / (2 * area), nn.y / (2 * area), nn.z / (2 * area)};
+      const int m = std::max(1, static_cast<int>(std::ceil(std::max({dist(A, B), dist(B, C), dist(C, A)}) / 0.25)));
+      std::size_t inside = 0, thin = 0;
+      const double two = 2.0 * line_mm, st = 0.05;
+      for (int i = 0; i < m; ++i)
+        for (int j = 0; j < m - i; ++j) {   // the centroids of the m^2 small triangles (the "up" ones are enough here)
+          const double s1 = (i + 1.0 / 3.0) / m, s2 = (j + 1.0 / 3.0) / m;
+          const Vec3 q{A.x + u.x * s1 + v.x * s2, A.y + u.y * s1 + v.y * s2, A.z + u.z * s1 + v.z * s2};
+          inside += zone_footprint_at(q, nn, one, line_mm) != 0;
+          // OG2f: the zone's solid under this place, along the face's normal, inside the part: under two lines, none
+          // was made (Domain::Probe::where)
+          if (!(two > 0.0)) continue;
+          double held = 0.0;
+          bool deep = false;
+          for (double t = 0.5 * st; t < two + st && !deep; t += st) {
+            const Vec3 w{q.x - nn.x * t, q.y - nn.y * t, q.z - nn.z * t};
+            if (!zone_footprint_at(w, nn, one, -0.05) || !(probe.depth(w) > 0.0)) continue;
+            if (t > two) deep = true; else held += st;
+          }
+          if (!deep && held > 0.0 && held < two && dprobe) {   // where it was a weave region's: lattice there now
+            const Where wh = dprobe->where(Vec3{q.x - nn.x * 0.5 * held, q.y - nn.y * 0.5 * held, q.z - nn.z * 0.5 * held});
+            if (!wh.lattice()) continue;
+            ++thin;
+            if (rep.thin_zone_solid_dropped_at.size() < 20 && (thin % 97) == 1) rep.thin_zone_solid_dropped_at.push_back(q);
+          }
+        }
+      fp.area_mm2 += area * static_cast<double>(inside) / (0.5 * m * (m + 1));
+      rep.thin_zone_solid_dropped_mm2 += area * static_cast<double>(thin) / (0.5 * m * (m + 1));
+    }
+    rep.zone_footprints.push_back(fp);
+  }
 }
 
 // OG1's diagnosis (Outcome::Tight) over the weave bars of `weave` (net struts left out).
@@ -1084,6 +1233,92 @@ Outcome::Tight tight_of(const Bars& bars, const std::vector<int>& weave, double 
 }
 }  // namespace
 
+// ── his 11-22 item 2: the strands kept per weave region ─────────────────────────────────────────────────────────────
+namespace {
+struct KeyBytes {
+  std::string b;
+  template <class T> void pod(const T& v) { b.append(reinterpret_cast<const char*>(&v), sizeof v); }
+  void d(double v) { v = v + 0.0; pod(v); }   // -0 is 0
+  void v3(const Vec3& p) { d(p.x); d(p.y); d(p.z); }
+};
+std::uint64_t field_hash(const TensorField& f) {
+  std::uint64_t h = 1469598103934665603ull;
+  const auto mix = [&](const void* p, std::size_t n) {
+    const unsigned char* c = static_cast<const unsigned char*>(p);
+    for (std::size_t i = 0; i < n; ++i) h = (h ^ c[i]) * 1099511628211ull;
+  };
+  mix(&f.origin.x, sizeof(double)); mix(&f.origin.y, sizeof(double)); mix(&f.origin.z, sizeof(double));
+  mix(&f.spacing, sizeof f.spacing); mix(&f.nx, sizeof f.nx); mix(&f.ny, sizeof f.ny); mix(&f.nz, sizeof f.nz);
+  if (!f.voigt.empty()) mix(f.voigt.data(), f.voigt.size() * sizeof(double));
+  return h;
+}
+// EVERY field of the ask that is data (print_check, a hook the finish runs, is not: the strands never read it).
+// ★ A field added to OrganicAsk must be added here, or a change to it would read stale strands.
+std::string strand_key(std::uint64_t epoch, std::uint64_t field, int region, const std::vector<int>& pool,
+                       const OrganicAsk& a) {
+  KeyBytes k;
+  k.pod(epoch); k.pod(field); k.pod(region);
+  k.pod(pool.size()); for (int r : pool) k.pod(r);
+  k.v3(a.build_dir);
+  for (double v : {a.spacing_mm, a.width_mm, a.spacing_min_mm, a.spacing_max_mm, a.spacing_exponent, a.reference_mpa,
+                   a.percentile, a.layer_mm, a.tie_swirl, a.seed_stride, a.foot_gap, a.void_ratio, a.wall_bare_mm,
+                   a.wall_reach, a.wall_gap, a.top_run, a.root_run, a.run_gap, a.run_follow, a.run_pull, a.run_seek,
+                   a.run_min, a.root_gap, a.width_heavy_mm, a.bed_floor_mm, a.shape_reach, a.part_reach_mm,
+                   a.part_support_mm, a.wall_gap_heavy, a.cross_gap, a.cross_gap_heavy, a.cross_climb_max_deg,
+                   a.link_width, a.unbraced_max, a.tie_gap, a.tie_gap_heavy, a.gap_lines, a.face_relief_mm,
+                   a.strand_keep})
+    k.d(v);
+  for (bool v : {a.shape_fit, a.walls_out, a.ties, a.stress_goal, a.wall_connect, a.auto_by_stress, a.member_cap,
+                 a.prune, a.hold_parts, a.part_to_floor, a.tie_level, a.follow_stress})
+    k.pod(static_cast<char>(v));
+  k.pod(static_cast<int>(a.mode)); k.pod(a.seed);
+  k.pod(a.reseed_rounds); k.pod(a.wall_cross); k.pod(a.run_max);
+  k.pod(a.floors.size());
+  for (const WidthFloor& f : a.floors) { k.v3(f.centre); k.d(f.radius_mm); k.d(f.width_mm); }
+  k.pod(a.additions.rounds.size());
+  for (const AddRound& r : a.additions.rounds) {
+    k.pod(r.hash); k.pod(r.ops.size());
+    for (const AddOp& o : r.ops) { k.pod(o.kind); k.pod(o.v.size()); for (double v : o.v) k.d(v); }
+  }
+  k.pod(a.relief_exclude_faces.size()); for (int f : a.relief_exclude_faces) k.pod(f);
+  k.pod(static_cast<char>(a.sweep.on));
+  for (double v : {a.sweep.max_offset_mm, a.sweep.max_turn_deg, a.sweep.max_piece_mm, a.sweep.min_turn_deg,
+                   a.sweep.min_radius})
+    k.d(v);
+  return k.b;
+}
+}  // namespace
+
+// One region's step: its strands and everything the lay reads from making them.
+struct Session::StrandCache {
+  struct Entry {
+    std::vector<Strand> strands;
+    OrganicTraceStats st;
+    OrganicSpacing sp;
+    double median = 0.0;
+    GrowReport one;
+    bool grown = false;
+    std::size_t gap_capped = 0;
+  };
+  static constexpr std::size_t kMax = 12;
+  std::vector<std::pair<std::string, std::shared_ptr<const Entry>>> kept;   // newest last
+  std::shared_ptr<const Entry> find(const std::string& key) {
+    for (std::size_t i = 0; i < kept.size(); ++i)
+      if (kept[i].first == key) {
+        auto e = kept[i].second;
+        auto moved = std::move(kept[i]);
+        kept.erase(kept.begin() + static_cast<long>(i));
+        kept.push_back(std::move(moved));
+        return e;
+      }
+    return nullptr;
+  }
+  void keep(std::string key, std::shared_ptr<const Entry> e) {
+    kept.emplace_back(std::move(key), std::move(e));
+    if (kept.size() > kMax) kept.erase(kept.begin());
+  }
+};
+
 Outcome Session::lay_organic(const Settings& settings, const TensorField& field, const OrganicAsk& ask, int threads,
                              const std::atomic<bool>* stop) {
   return lay_organic_with(settings, field, one_group(settings, ask), threads, stop, false);
@@ -1106,6 +1341,7 @@ Outcome Session::lay_organic_draft(const Settings& settings, const TensorField& 
 
 Outcome Session::lay_organic_with(const Settings& asked, const TensorField& field, const std::vector<OrganicGroup>& groups,
                                   int threads, const std::atomic<bool>* stop, bool draft) {
+  try {   // SB1: nothing but a std::exception or a refusal leaves this call
   if (stop && stop->load(std::memory_order_relaxed)) {
     Outcome none;
     none.cancelled = true;
@@ -1135,10 +1371,19 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
   // OR30: the Finish is the regular lattices' own. Rim and Covered are "where" settings of the domain the weave is
   // traced and laid in (their solid cuts the strands as any solid does); Skin lays the net skin (O16).
   ready_domain(settings);
+  // His 11-22 (watch it grow): the session's tap for the length of this lay
+  // (the domain is read again at the end: a later step may have made it again)
+  struct TapFor {
+    std::unique_ptr<Domain>& d;
+    GrowthTap* t;
+    TapFor(std::unique_ptr<Domain>& domain, GrowthTap* tap) : d(domain), t(tap) { if (d) d->tap(t); if (t) t->start(); }
+    ~TapFor() { if (t) t->flush(); if (d) d->tap(nullptr); }
+  } tap_for(domain_, tap_);
   WeaveFinish finish;
   finish.draft = draft;                 // brief L2, item 3
   const auto t0 = std::chrono::steady_clock::now();
   std::vector<Strand> strands;
+  const std::uint64_t field_key = field_hash(field);   // his 11-22 item 2
   double smallest = 0.0, largest = 0.0, sum = 0.0;
   std::size_t candidates = 0;
   std::shared_ptr<GrowReport> grown;
@@ -1160,15 +1405,21 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
     for (const Region& r : domain_->spec().regions) {
       if (r.role != Role::Lattice || !r.weave) continue;
       if (std::find(group.regions.begin(), group.regions.end(), r.id) == group.regions.end()) continue;
-      OrganicTraceStats st;
-      std::vector<Strand> traced;
+      // his 11-22 item 2: the step's strands kept under a key of everything it reads; kept ones are handed on as they were
+      if (!strand_cache_) strand_cache_ = std::make_shared<StrandCache>();
+      const std::string key = strand_key(domain_epoch_, field_key, r.id, *pool, ask);
+      std::shared_ptr<const StrandCache::Entry> kept = strand_cache_->find(key);
+      if (!kept) {
+        auto made = std::make_shared<StrandCache::Entry>();
+        StrandCache::Entry& e = *made;
+        OrganicTraceStats& st = e.st;
       // O16, the net skin's reach: Traced, the trace's own median spacing (as the old run); Grown, which has no trace,
       // the median of the spacing field over the region's candidates (the field it is laid with). LatticeReview's
       // ruling 2 (2026-11-15) asked the field's median for both; on the made-up cube it changed Traced's net from 5,145
       // struts (12,626 mm) to 5,932 (24,424 mm), so Traced keeps its own until that is ruled on.
-      const OrganicSpacing sp =
-          ask.mode == OrganicMode::Grown ? organic_spacing(*domain_, r.id, field, ask, pool) : OrganicSpacing{};
-      double median = 0.0;
+      e.sp = ask.mode == OrganicMode::Grown ? organic_spacing(*domain_, r.id, field, ask, pool) : OrganicSpacing{};
+      const OrganicSpacing& sp = e.sp;
+      double& median = e.median;
       {
         std::vector<double> all;
         for (std::size_t e = 0; e < sp.candidate.size(); ++e)
@@ -1179,11 +1430,10 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
         }
       }
       if (ask.mode == OrganicMode::Grown) {
-        GrowReport one;
-        traced = grow_strands(*domain_, r.id, field, ask, &one, &sp);   // T fix: the spacing computed once, above
-        gap_capped += one.gap_capped;   // OG1
-        if (!grown) grown = std::make_shared<GrowReport>();
-        grown->add(one);
+        GrowReport& one = e.one;
+        e.grown = true;
+        e.strands = grow_strands(*domain_, r.id, field, ask, &one, &sp);   // T fix: the spacing computed once, above
+        e.gap_capped = one.gap_capped;   // OG1
         for (std::size_t e = 0; e < sp.candidate.size(); ++e) {
           if (!sp.candidate[e]) continue;
           const double v = sp.spacing_mm[e];
@@ -1194,8 +1444,26 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
         }
         if (st.candidates) st.spacing_mean_mm /= static_cast<double>(st.candidates);
       } else {
-        traced = trace_strands(*domain_, r.id, field, ask, &st, pool);
-        gap_capped += st.gap_capped;   // OG1
+        e.strands = trace_strands(*domain_, r.id, field, ask, &st, pool);
+        if (GrowthTap* t = domain_->growth_tap())   // his 11-22 (watch it grow): Traced's region appears whole, as traced
+          for (const Strand& st2 : e.strands)
+            for (std::size_t k = 0; k + 1 < st2.points.size(); ++k) t->piece(r.id, st2.points[k], st2.points[k + 1]);
+        e.gap_capped = st.gap_capped;   // OG1
+      }
+        strand_cache_->keep(key, made);
+        kept = made;
+      } else if (GrowthTap* t = domain_->growth_tap()) {   // watch it grow: kept strands appear at once
+        for (const Strand& st2 : kept->strands)
+          for (std::size_t k = 0; k + 1 < st2.points.size(); ++k) t->piece(r.id, st2.points[k], st2.points[k + 1]);
+      }
+      OrganicTraceStats st = kept->st;
+      const OrganicSpacing& sp = kept->sp;
+      const double median = kept->median;
+      std::vector<Strand> traced = kept->strands;
+      gap_capped += kept->gap_capped;   // OG1
+      if (kept->grown) {
+        if (!grown) grown = std::make_shared<GrowReport>();
+        grown->add(kept->one);
       }
       const double reach = ask.mode == OrganicMode::Grown ? median : st.spacing_median_mm;
       // O16, per region (leg J item 1): the region's own Skin and width, else the part's.
@@ -1251,6 +1519,7 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
       notes.push_back(kNoteEqualEnds);
   }
   const double ms_trace = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+  if (GrowthTap* t = domain_->growth_tap()) t->phase(5);   // his 11-22 (watch it grow): finishing
   Outcome out = lay_with(settings, &strands, threads, stop, &finish);
   if (!out.cancelled) {
     // OG2 (brief E6): the ends carried proud of the open faces, on the bars as laid (before the floors and additions,
@@ -1261,7 +1530,8 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
     for (const Region& rg : domain_->spec().regions)
       if (rg.weave && domain_->cover_depth_mm(&rg) > 0.0) covered.push_back(rg.id);
     for (const auto& nr : finish.net_reach) covered.push_back(nr.first);   // OJ8: depth variation off on a Skin face
-    lay_relief(out.bars, model_, *measure_, groups, firsts, out.relief, covered);
+    lay_relief(out.bars, model_, *measure_, groups, firsts, out.relief, covered, settings.regions, settings.bead_mm,
+               domain_.get());   // OG2e, OG2f
     out.organic_references = all_references;   // brief E2
     // Brief E2 and E3a (the strength check's floors and additions) are made for ONE ask (the file job's, and a preview
     // of it): they are read from a lay of one group (OP11); a lay of several groups does not apply them.
@@ -1334,6 +1604,17 @@ Outcome Session::lay_organic_with(const Settings& asked, const TensorField& fiel
     out.tight = tight_of(out.bars, weave, domain_->spec().bead_mm);
   }
   return out;
+  } catch (const LayCancelled&) {
+    Outcome none;
+    none.cancelled = true;
+    return none;
+  } catch (const std::exception&) {
+    throw;
+  } catch (...) {
+    Outcome none;
+    none.refused.push_back(core_stopped("The Organic lattice could not be laid"));
+    return none;
+  }
 }
 
 
@@ -1508,7 +1789,26 @@ std::vector<HoldPatchCount> hold_up_weave(Bars& bars, const Domain& domain, cons
       }
     };
     read_ends();
+    // SPEED 11-22: the ends on a 2 mm grid (the area's ends do not change while its points are read; supports are laid
+    // after), so each point reads only the ends in the box its cone can reach.
+    constexpr double kEndCell = 2.0;
+    const auto end_cell = [](double v, long long& c) {
+      if (!std::isfinite(v) || std::fabs(v) > 1e12) return false;
+      c = static_cast<long long>(std::floor(v / kEndCell));
+      return true;
+    };
+    const auto end_key = [](long long i, long long j, long long k) {
+      const auto f = [](long long v) { return static_cast<std::uint64_t>((v + (1LL << 20)) & 0x1FFFFF); };
+      return f(i) << 42 | f(j) << 21 | f(k);
+    };
+    std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> end_grid;
+    for (std::size_t i = 0; i < verts.size(); ++i) {
+      long long a, b, c;
+      if (end_cell(verts[i].x, a) && end_cell(verts[i].y, b) && end_cell(verts[i].z, c))
+        end_grid[end_key(a, b, c)].push_back(static_cast<std::uint32_t>(i));
+    }
     const double g = A.grid_mm > 0.0 ? A.grid_mm : 1.0;
+    std::vector<char> in_near(verts.size(), 0);   // SPEED 11-22: the walk's ends (this point's `near`)
     auto ends_under = [&](const WeaveHold::Patch& P) {
       std::size_t n = 0;
       for (const Vec3& e : solid_ends)
@@ -1541,10 +1841,30 @@ std::vector<HoldPatchCount> hold_up_weave(Bars& bars, const Domain& domain, cons
         if (held) { ++c.held; continue; }
         // The bar ends that can matter: inside the 45 degree cone under p (and a little round it, for the joint test).
         std::vector<std::size_t> near;
-        for (std::size_t i = 0; i < verts.size(); ++i) {
-          const double dz = p.z - verts[i].z, hd = std::hypot(verts[i].x - p.x, verts[i].y - p.y);
+        {   // SPEED 11-22: the candidates from the grid, judged as before, in increasing index order
           const double reach = A.to_floor ? 2.0 * A.depth_mm : A.depth_mm, slack = A.to_floor ? 4.0 : 2.0;
-          if (dz > -2.0 && dz <= reach + 2.0 && hd <= std::max(0.0, dz) + slack) near.push_back(i);
+          const double side = std::max(0.0, reach + 2.0) + slack + 1e-6;
+          long long x0, x1, y0, y1, z0, z1;
+          if (end_cell(p.x - side, x0) && end_cell(p.x + side, x1) && end_cell(p.y - side, y0) && end_cell(p.y + side, y1) &&
+              end_cell(p.z - reach - 2.0 - 1e-6, z0) && end_cell(p.z + 2.0 + 1e-6, z1)) {
+            for (long long a = x0; a <= x1; ++a)
+              for (long long b = y0; b <= y1; ++b)
+                for (long long c = z0; c <= z1; ++c) {
+                  const auto it = end_grid.find(end_key(a, b, c));
+                  if (it == end_grid.end()) continue;
+                  for (const std::uint32_t u : it->second) {
+                    const std::size_t i = u;
+                    const double dz = p.z - verts[i].z, hd = std::hypot(verts[i].x - p.x, verts[i].y - p.y);
+                    if (dz > -2.0 && dz <= reach + 2.0 && hd <= std::max(0.0, dz) + slack) near.push_back(i);
+                  }
+                }
+            std::sort(near.begin(), near.end());
+          } else {   // a point off the grid's range: every end, as before
+            for (std::size_t i = 0; i < verts.size(); ++i) {
+              const double dz = p.z - verts[i].z, hd = std::hypot(verts[i].x - p.x, verts[i].y - p.y);
+              if (dz > -2.0 && dz <= reach + 2.0 && hd <= std::max(0.0, dz) + slack) near.push_back(i);
+            }
+          }
         }
         std::vector<Vec3> path{p};
         Vec3 cur = p;
@@ -1560,17 +1880,84 @@ std::vector<HoldPatchCount> hold_up_weave(Bars& bars, const Domain& domain, cons
           return false;
         };
         const double most = A.to_floor ? 2.0 * A.depth_mm : A.depth_mm;
+        // SPEED 11-22: `near` flagged, its cells' range, its widest end: the walk's searches read the end grid round
+        // the walk, `near`'s ends only, and keep the least (distance, index) — the end the in-order scan kept.
+        long long nlo[3] = {0, 0, 0}, nhi[3] = {-1, -1, -1};
+        double vw_max = 0.0;
+        bool near_on_grid = true;
+        for (std::size_t q = 0; q < near.size(); ++q) {
+          const std::size_t i = near[q];
+          in_near[i] = 1;
+          vw_max = std::max(vw_max, vw[i]);
+          long long c[3];
+          if (!end_cell(verts[i].x, c[0]) || !end_cell(verts[i].y, c[1]) || !end_cell(verts[i].z, c[2])) { near_on_grid = false; continue; }
+          for (int a = 0; a < 3; ++a) {
+            if (q == 0 || nhi[a] < nlo[a]) { nlo[a] = c[a]; nhi[a] = c[a]; }
+            nlo[a] = std::min(nlo[a], c[a]);
+            nhi[a] = std::max(nhi[a], c[a]);
+          }
+        }
+        // (a grid-less `near`, or a walk off the grid's range, reads `near` in order as before)
+        const auto in_cone_best = [&](const Vec3& at, std::size_t& best, double& bd) {
+          const auto take = [&](std::size_t i) {
+            const double dz = at.z - verts[i].z;
+            if (!(dz > 0.0)) return;
+            const double hd = std::hypot(verts[i].x - at.x, verts[i].y - at.y);
+            if (hd > dz) return;
+            const double dd = std::hypot(hd, dz);
+            if (dd < bd || (dd == bd && i < best)) { bd = dd; best = i; }
+          };
+          long long c[3];
+          if (!near_on_grid || near.empty() || !end_cell(at.x, c[0]) || !end_cell(at.y, c[1]) || !end_cell(at.z, c[2])) {
+            for (std::size_t i : near) take(i);
+            return;
+          }
+          // rings of cells round `at` (Chebyshev radius r), until no unread cell can hold an end nearer than the best
+          long long rmax = 0;
+          for (int a = 0; a < 3; ++a) rmax = std::max({rmax, std::llabs(c[a] - nlo[a]), std::llabs(nhi[a] - c[a])});
+          for (long long r = 0; r <= rmax; ++r) {
+            if (r >= 2 && static_cast<double>(r - 1) * kEndCell > bd + 1e-9) break;
+            for (long long a = c[0] - r; a <= c[0] + r; ++a)
+              for (long long b = c[1] - r; b <= c[1] + r; ++b)
+                for (long long d = c[2] - r; d <= c[2] + r; ++d) {
+                  if (std::max({std::llabs(a - c[0]), std::llabs(b - c[1]), std::llabs(d - c[2])}) != r) continue;
+                  if (a < nlo[0] || a > nhi[0] || b < nlo[1] || b > nhi[1] || d < nlo[2] || d > nhi[2]) continue;
+                  const auto it = end_grid.find(end_key(a, b, d));
+                  if (it == end_grid.end()) continue;
+                  for (const std::uint32_t u : it->second) if (in_near[u]) take(u);
+                }
+          }
+        };
+        const auto hit_at = [&](const Vec3& at, std::size_t& hit, double& hb) {
+          const auto take = [&](std::size_t i) {
+            if (A.to_floor && joined_at(verts[i])) return;
+            const double dd = d3(at, verts[i]);
+            if (dd <= vw[i] && (dd < hb || (dd == hb && i < hit))) { hb = dd; hit = i; }
+          };
+          long long lo[3], hi[3];
+          const double R = vw_max + 1e-6;
+          if (!near_on_grid || !end_cell(at.x - R, lo[0]) || !end_cell(at.x + R, hi[0]) || !end_cell(at.y - R, lo[1]) ||
+              !end_cell(at.y + R, hi[1]) || !end_cell(at.z - R, lo[2]) || !end_cell(at.z + R, hi[2])) {
+            for (std::size_t i : near) take(i);
+            return;
+          }
+          for (long long a = lo[0]; a <= hi[0]; ++a)
+            for (long long b = lo[1]; b <= hi[1]; ++b)
+              for (long long d = lo[2]; d <= hi[2]; ++d) {
+                const auto it = end_grid.find(end_key(a, b, d));
+                if (it == end_grid.end()) continue;
+                for (const std::uint32_t u : it->second) if (in_near[u]) take(u);
+              }
+        };
+        struct ClearNear {   // the flags go down when the point is done, however its walk ends
+          std::vector<char>& f;
+          const std::vector<std::size_t>& n;
+          ~ClearNear() { for (std::size_t i : n) f[i] = 0; }
+        } clear_near{in_near, near};
         for (;;) {
           std::size_t best = verts.size();
           double bd = std::numeric_limits<double>::infinity();
-          for (std::size_t i : near) {
-            const double dz = cur.z - verts[i].z;
-            if (!(dz > 0.0)) continue;
-            const double hd = std::hypot(verts[i].x - cur.x, verts[i].y - cur.y);
-            if (hd > dz) continue;
-            const double dd = std::hypot(hd, dz);
-            if (dd < bd) { bd = dd; best = i; }
-          }
+          in_cone_best(cur, best, bd);
           Vec3 next{cur.x, cur.y, cur.z - Lh};
           if (best < verts.size()) {
             const double hx = verts[best].x - cur.x, hy = verts[best].y - cur.y, hd = std::hypot(hx, hy);
@@ -1584,11 +1971,7 @@ std::vector<HoldPatchCount> hold_up_weave(Bars& bars, const Domain& domain, cons
           if (entered) {
             std::size_t hit = verts.size();
             double hb = std::numeric_limits<double>::infinity();
-            for (std::size_t i : near) {
-              if (A.to_floor && joined_at(verts[i])) continue;
-              const double dd = d3(next, verts[i]);
-              if (dd <= vw[i] && dd < hb) { hb = dd; hit = i; }
-            }
+            hit_at(next, hit, hb);
             if (hit < verts.size()) {
               path.push_back(verts[hit]);
               if (!A.to_floor) { ending = 1; break; }
@@ -1731,6 +2114,7 @@ double organic_smallest_cell_mm(const Settings& settings, const OrganicAsk& ask)
 }
 
 std::vector<OrganicRefusal> validate_organic(const Settings& settings, const OrganicAsk& a, const TensorField* field) {
+  try {   // SB1: nothing but a std::exception or a refusal leaves this call
   std::vector<OrganicRefusal> out;
   auto refuse = [&](const char* setting, const char* code, const std::string& text, double given) -> OrganicRefusal& {
     OrganicRefusal r;
@@ -1741,8 +2125,8 @@ std::vector<OrganicRefusal> validate_organic(const Settings& settings, const Org
     out.push_back(r);
     return out.back();
   };
-  auto at_least = [](OrganicRefusal& r, double v) { r.has_min = true; r.allowed_min = v; };
-  auto at_most = [](OrganicRefusal& r, double v) { r.has_max = true; r.allowed_max = v; };
+  auto at_least = [](OrganicRefusal& r, double v) -> OrganicRefusal& { r.has_min = true; r.allowed_min = v; return r; };
+  auto at_most = [](OrganicRefusal& r, double v) -> OrganicRefusal& { r.has_max = true; r.allowed_max = v; return r; };
   auto fin = [](double v) { return std::isfinite(v); };
   const bool grown = a.mode == OrganicMode::Grown;
   const double thinnest = settings.bead_mm * settings.min_strut_lines;
@@ -1919,10 +2303,10 @@ std::vector<OrganicRefusal> validate_organic(const Settings& settings, const Org
       refuse("wall_gap_heavy", "needs_light_end", "Wall seed gap: the heavy end needs the light end above 0 spacings.",
              a.wall_gap_heavy);
     else if (a.wall_gap_heavy > a.wall_gap)
-      at_most(refuse("wall_gap_heavy", "over_light_end",
+      at_least(at_most(refuse("wall_gap_heavy", "over_light_end",
                      "Wall seed gap: the heavy end must be at most the light end (" + spacings(a.wall_gap) + ").",
                      a.wall_gap_heavy),
-              a.wall_gap);
+              a.wall_gap), 0.0);
     if (!range) refuse("wall_gap_heavy", "needs_range", "Wall seed gap: the heavy end " + ranged, a.wall_gap_heavy);
   }
   // Crossing vines (F, N, O).
@@ -1948,10 +2332,10 @@ std::vector<OrganicRefusal> validate_organic(const Settings& settings, const Org
       refuse("cross_gap_heavy", "needs_crossing_vines", "Crossing gap: the heavy end needs Crossing vines switched on.",
              a.cross_gap_heavy);
     if (fin(a.cross_gap) && a.cross_gap > 0.0 && a.cross_gap_heavy > a.cross_gap)
-      at_most(refuse("cross_gap_heavy", "over_light_end",
+      at_least(at_most(refuse("cross_gap_heavy", "over_light_end",
                      "Crossing gap: the heavy end must be at most the light end (" + spacings(a.cross_gap) + ").",
                      a.cross_gap_heavy),
-              a.cross_gap);
+              a.cross_gap), 0.0);
     if (!range) refuse("cross_gap_heavy", "needs_range", "Crossing gap: the heavy end " + ranged, a.cross_gap_heavy);
   }
   if (!(fin(a.cross_climb_max_deg) && a.cross_climb_max_deg >= 30.0 && a.cross_climb_max_deg <= 45.0)) {
@@ -1975,10 +2359,10 @@ std::vector<OrganicRefusal> validate_organic(const Settings& settings, const Org
     if (grown && !a.ties)
       refuse("tie_gap_heavy", "needs_ties", "Flat tie gap: the heavy end needs Ties switched on.", a.tie_gap_heavy);
     if (fin(a.tie_gap) && a.tie_gap > 0.0 && a.tie_gap_heavy > a.tie_gap)
-      at_most(refuse("tie_gap_heavy", "over_light_end",
+      at_least(at_most(refuse("tie_gap_heavy", "over_light_end",
                      "Flat tie gap: the heavy end must be at most the light end (" + spacings(a.tie_gap) + ").",
                      a.tie_gap_heavy),
-              a.tie_gap);
+              a.tie_gap), 0.0);
     if (!range) refuse("tie_gap_heavy", "needs_range", "Flat tie gap: the heavy end " + ranged, a.tie_gap_heavy);
   }
   // Roots and top branches (G, H).
@@ -2002,14 +2386,72 @@ std::vector<OrganicRefusal> validate_organic(const Settings& settings, const Org
   }
   above_zero(a.layer_mm, "layer_mm", "Layer height: it must be above 0 mm.");
   above_zero(a.seed_stride, "seed_stride", "Seeds: the seed spacing must be above 0.");
+  // UL1 (leg R): the upper limits (the lower ones above are unchanged); a refusal names the whole allowed range.
+  {
+    auto upper = [&](double v, double lo, double hi, const char* setting, const std::string& text) {
+      if (fin(v) && v > hi + 1e-9) {
+        OrganicRefusal& r = refuse(setting, "over_upper_limit", text, v);
+        at_least(r, lo);
+        at_most(r, hi);
+      }
+    };
+    const std::string cell_max = plain_number(kOrganicCellMaxMm), strut_max = plain_number(kOrganicStrutMaxMm);
+    if (one) upper(a.spacing_mm, 0.0, kOrganicCellMaxMm, "spacing_mm", "Cell size: the size must be above 0 and at most " + cell_max + " mm.");
+    if (a.spacing_mm == 0.0) {
+      upper(a.spacing_min_mm, 0.0, kOrganicCellMaxMm, "spacing_min_mm",
+            "Cell size: the small end must be above 0 and at most " + cell_max + " mm.");
+      upper(a.spacing_max_mm, 0.0, kOrganicCellMaxMm, "spacing_max_mm",
+            "Cell size: the large end must be at most " + cell_max + " mm.");
+    }
+    upper(a.width_mm, thinnest, kOrganicStrutMaxMm, "width_mm",
+          "Strut thickness: the thin end must be at most " + strut_max + " mm.");
+    upper(a.width_heavy_mm, light, kOrganicStrutMaxMm, "width_heavy_mm",
+          "Strut thickness: the thick end must be at most " + strut_max + " mm.");
+    const std::string sp = plain_number(kOrganicSpacingsMax);
+    upper(a.foot_gap, 0.0, kOrganicSpacingsMax, "foot_gap", "Seeds (feet apart): it must be at most " + sp + " spacings (0 is off).");
+    upper(a.wall_gap, 0.0, kOrganicSpacingsMax, "wall_gap", "Wall seed gap: it must be at most " + sp + " spacings.");
+    upper(a.wall_gap_heavy, 0.0, kOrganicSpacingsMax, "wall_gap_heavy", "Wall seed gap: it must be at most " + sp + " spacings.");
+    upper(a.cross_gap, 0.0, kOrganicSpacingsMax, "cross_gap", "Crossing gap: it must be above 0 and at most " + sp + " spacings.");
+    upper(a.cross_gap_heavy, 0.0, kOrganicSpacingsMax, "cross_gap_heavy", "Crossing gap: it must be at most " + sp + " spacings.");
+    upper(a.tie_gap, 0.0, kOrganicSpacingsMax, "tie_gap", "Flat tie gap: it must be above 0 and at most " + sp + " spacings.");
+    upper(a.tie_gap_heavy, 0.0, kOrganicSpacingsMax, "tie_gap_heavy", "Flat tie gap: it must be at most " + sp + " spacings.");
+    upper(a.root_run, 0.0, kOrganicSpacingsMax, "root_run", "Roots: it must be from 0 (off) to " + sp + " spacings.");
+    upper(a.top_run, 0.0, kOrganicSpacingsMax, "top_run", "Top branches: it must be from 0 (off) to " + sp + " spacings.");
+    upper(a.shape_reach, 0.0, kOrganicShapeReachMax, "shape_reach",
+          "Grade to shape reach: it must be from 0 (off) to " + plain_number(kOrganicShapeReachMax) + " times.");
+  }
+  // UL1 (leg R): every refusal that binds one of the app's numbers carries its whole allowed range (the app clamps the
+  // field to it and shows it): the end a refusal did not state is filled from the setting's own limits.
+  {
+    struct Span { const char* setting; double lo, hi; };
+    const Span spans[] = {{"spacing_mm", 0.0, kOrganicCellMaxMm}, {"spacing_min_mm", 0.0, kOrganicCellMaxMm},
+                          {"spacing_max_mm", 0.0, kOrganicCellMaxMm}, {"width_mm", thinnest, kOrganicStrutMaxMm},
+                          {"width_heavy_mm", light, kOrganicStrutMaxMm}, {"wall_gap_heavy", 0.0, kOrganicSpacingsMax},
+                          {"cross_gap", 0.0, kOrganicSpacingsMax}, {"cross_gap_heavy", 0.0, kOrganicSpacingsMax},
+                          {"tie_gap", 0.0, kOrganicSpacingsMax}, {"tie_gap_heavy", 0.0, kOrganicSpacingsMax},
+                          {"root_run", 0.0, kOrganicSpacingsMax}, {"top_run", 0.0, kOrganicSpacingsMax},
+                          {"shape_reach", 0.0, kOrganicShapeReachMax}};
+    for (OrganicRefusal& r : out)
+      for (const Span& sp : spans)
+        if (r.setting == sp.setting && (r.has_min || r.has_max)) {
+          if (!r.has_min) at_least(r, sp.lo);
+          if (!r.has_max) at_most(r, sp.hi);
+        }
+  }
   if (field && field->empty() && any_weave(settings))
     refuse("stress", "no_stress_result",
            "Organic follows the part's stress, and there is no stress result yet. Run the stress check first.", 0.0);
   return out;
+  } catch (const std::exception&) {
+    throw;
+  } catch (...) {
+    return {core_stopped("The Organic settings could not be checked")};
+  }
 }
 
 std::vector<OrganicRefusal> validate_organic_groups(const Settings& settings, const std::vector<OrganicGroup>& groups,
                                                     const TensorField* field) {
+  try {   // SB1: nothing but a std::exception or a refusal leaves this call
   std::vector<OrganicRefusal> out;
   for (std::size_t g = 0; g < groups.size(); ++g)
     for (OrganicRefusal r : validate_organic(settings, groups[g].ask, nullptr)) {
@@ -2038,12 +2480,18 @@ std::vector<OrganicRefusal> validate_organic_groups(const Settings& settings, co
     const int dn = r.skin_density ? *r.skin_density : settings.skin_density;
     const double sk = r.skin_sink ? *r.skin_sink : settings.skin_sink;
     const std::string area = "Organic area " + std::to_string(r.id);
-    if (!(w >= 0.0 && w <= 3.0))
+    if (!(w >= 0.0 && w <= 3.0)) {
       refuse(-1, "skin_width_range", area + "'s skin thickness is " + std::to_string(w) + " mm; it must be 0 (as thick as the vines) to 3 mm.", w, "skin_width_mm");
-    if (dn < 1 || dn > 6)
+      out.back().has_min = out.back().has_max = true, out.back().allowed_min = 0.0, out.back().allowed_max = 3.0;
+    }
+    if (dn < 1 || dn > 6) {
       refuse(-1, "skin_density_range", area + "'s skin density is " + std::to_string(dn) + "; it must be 1 to 6 joins per landing.", dn, "skin_density");
-    if (!(sk >= 0.0 && sk <= 1.0))
+      out.back().has_min = out.back().has_max = true, out.back().allowed_min = 1.0, out.back().allowed_max = 6.0;
+    }
+    if (!(sk >= 0.0 && sk <= 1.0)) {
       refuse(-1, "skin_sink_range", area + "'s skin sink is " + std::to_string(sk) + "; it must be 0 (on the face, cut flat) to 1 (one radius in).", sk, "skin_sink");
+      out.back().has_min = out.back().has_max = true, out.back().allowed_min = 0.0, out.back().allowed_max = 1.0;
+    }
   }
   // Leg J item 1 (the owner: "Rim should be hidden"): an Organic area's own Finish is None, Skin or Solid, never Rim.
   for (const Settings::RegionAsk& r : settings.regions)
@@ -2080,6 +2528,11 @@ std::vector<OrganicRefusal> validate_organic_groups(const Settings& settings, co
            "Organic follows the part's stress, and there is no stress result yet. Run the stress check first.", 0.0,
            "stress");
   return out;
+  } catch (const std::exception&) {
+    throw;
+  } catch (...) {
+    return {core_stopped("The Organic settings could not be checked")};
+  }
 }
 
 }  // namespace topopt::lattice_layout

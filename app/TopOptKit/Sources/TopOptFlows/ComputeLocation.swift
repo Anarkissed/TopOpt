@@ -43,7 +43,14 @@ public final class ComputeLocationModel: ObservableObject {
     @Published public private(set) var choice: ComputeChoice = .local
     /// The resolved config for a remote choice, or nil for local / not-yet-resolved.
     /// The run flow reads THIS: nil → on-device bridge runner (byte-identical).
-    @Published public private(set) var activeRemote: RemoteRunnerConfig?
+    /// ★ notes25 (D9): once a Mac is resolved, its live `/health` is asked (WorkerHealth.swift).
+    @Published public private(set) var activeRemote: RemoteRunnerConfig? {
+        didSet { if activeRemote != nil { checkHealth() } }
+    }
+    /// ★ notes25 (D9, the "Runs on ⚠" his Mac never deserved): each Mac's engine fingerprint as its live `/health` last said
+    /// it, by name. The Bonjour advertisement is written once, when the worker app starts, so after a release swaps only the
+    /// Mac's engine it goes stale; this wins over it whenever it is known (`isSkewed`).
+    @Published public private(set) var liveFingerprints: [String: String] = [:]
     /// True while a selected worker's endpoint is still resolving.
     @Published public private(set) var resolving = false
 
@@ -54,6 +61,7 @@ public final class ComputeLocationModel: ObservableObject {
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         restore()
+        watchHealth()   // ★ notes25 (D9): coming back to the app, and every run's own /health, ask again
     }
 
     // MARK: - Discovery
@@ -107,15 +115,59 @@ public final class ComputeLocationModel: ObservableObject {
     }
 
     /// True when a worker's core differs from this app's — a run would be refused.
+    /// ★ notes25 (D9): the Mac's live `/health` decides once it has answered; the Bonjour value is only a first hint.
     public func isSkewed(_ w: DiscoveredWorker) -> Bool {
-        guard let fp = w.fingerprint else { return false }   // unknown → don't cry wolf
+        guard let fp = liveFingerprints[w.id] ?? w.fingerprint else { return false }   // unknown → don't cry wolf
         return fp != CoreFingerprint.value
     }
 
     /// The plain-English skew message shown in the picker + a pointer to the fix.
+    /// ★ notes25 (D9): it named "Update core…", which the worker app does not have. What is wrong and how to fix it, true.
     public func skewMessage(_ w: DiscoveredWorker) -> String {
-        "\(w.name)'s core is a different build than this app. Open TopOpt Worker on "
-        + "the Mac and choose “Update core…”, then try again."
+        Self.skewMessage(name: w.name)
+    }
+    static func skewMessage(name: String) -> String {
+        "\(name) runs a different version of the engine than this app. Install the matching TopOpt release on the Mac, "
+        + "then try again."
+    }
+
+    /// Tests only: the Macs Bonjour would list (with their advertised fingerprints).
+    func listForTests(_ found: [DiscoveredWorker]) { workers = found }
+
+    // MARK: - ★ notes25 (D9): the Mac's live engine fingerprint
+
+    private let healthObservers = WorkerHealth.Observers()
+
+    /// Ask the chosen Mac's `/health` for its engine fingerprint now (it was resolved, the app came back to the front, or
+    /// a run is about to go). Quiet when nothing is chosen or resolved; an unreachable Mac keeps what was known.
+    public func checkHealth() {
+        guard let cfg = activeRemote, let name = rememberedName else { return }
+        Task { @MainActor [weak self] in
+            guard let fp = await WorkerHealth.fingerprint(cfg) else { return }
+            self?.heard(fp, host: cfg.host, port: cfg.port, name: name)
+        }
+    }
+
+    /// A `/health` answered `fingerprint` for the Mac at host:port — recorded for the remembered Mac when that is where the
+    /// chosen one lives (a run's own pre-job check says it too, WorkerHealth.heard).
+    func heard(_ fingerprint: String, host: String, port: Int, name: String? = nil) {
+        guard let n = name ?? rememberedName else { return }
+        if let cfg = activeRemote, cfg.host != host || cfg.port != port { return }   // another Mac's answer
+        if liveFingerprints[n] != fingerprint { liveFingerprints[n] = fingerprint }
+    }
+
+    private func watchHealth() {
+        let c = NotificationCenter.default
+        healthObservers.add(c.addObserver(forName: WorkerHealth.answered, object: nil, queue: .main) { [weak self] n in
+            guard let i = n.userInfo, let fp = i["fingerprint"] as? String, let host = i["host"] as? String,
+                  let port = i["port"] as? Int else { return }
+            MainActor.assumeIsolated { self?.heard(fp, host: host, port: port) }
+        })
+        if let front = WorkerHealth.cameToFront {
+            healthObservers.add(c.addObserver(forName: front, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.checkHealth() }
+            })
+        }
     }
 
     // MARK: - Selection

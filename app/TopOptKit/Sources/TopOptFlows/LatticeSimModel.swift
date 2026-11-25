@@ -130,6 +130,8 @@ public final class LatticeSimModel: ObservableObject {
         /// so a load painted as a region reaches the stage's solve too.
         public let faceRegions: [TopOptKit.FaceRegionSpec]
         public let anchorRegionIDs: [Int]
+        /// ★ 11-21: the load scenario this solve is (its name, said if it cannot be solved); nil: the part has one.
+        public var scenarioName: String? = nil
 
         public init(modelPath: String, material: String, materialsPath: String,
                     rulesPath: String, resolution: Int, anchorFaceIDs: [Int],
@@ -176,7 +178,37 @@ public final class LatticeSimModel: ObservableObject {
         case failed(String)
     }
 
-    @Published public private(set) var phase: Phase = .idle
+    @Published public private(set) var phase: Phase = .idle {
+        didSet { stressTiming(from: oldValue) }   // ★ his 11-22: the stress check's time, logged (GenerationTimingLog)
+    }
+    private var timingRecord: GenerationTimingLog.Pending?
+    private var timingInputs = GenerationTimingLog.Inputs()
+    private func stressTiming(from old: Phase) {
+        if phase == .running, old != .running {
+            timingRecord = GenerationTimingLog.shared.begin(.stressCheck, inputs: timingInputs)
+        } else if old == .running, phase != .running, let r = timingRecord {
+            timingRecord = nil
+            switch phase {
+            case .complete(let s):
+                GenerationTimingLog.shared.end(r, .done, extra: ["maxStressMPa": .number(s.maxStressMPa), "safety": .number(s.safety),
+                                                                 "unsolved": .number(Double(unsolved.count))])
+            case .failed(let why): GenerationTimingLog.shared.end(r, .failed, reason: why)
+            default: GenerationTimingLog.shared.end(r, .cancelled, reason: "cancelled or replaced")
+            }
+        }
+    }
+    private func noteTimingInputs(_ ctxs: [Context]) {
+        var i = GenerationTimingLog.Inputs()
+        if let c = ctxs.first {
+            i.part = .init(file: (c.modelPath as NSString).lastPathComponent)
+            i.values = ["resolution": .number(Double(c.resolution)), "scenarios": .number(Double(ctxs.count)),
+                        "material": .text(c.material)]
+        }
+        timingInputs = i
+    }
+    /// ★ 11-21 (his 2040 stand: one scenario could not be solved and sank them all): the scenarios the last check could not
+    /// solve, by name. The field is the worst of the others.
+    public private(set) var unsolved: [String] = []
     /// The completed sim's field (nil unless `phase == .complete`).
     @Published public private(set) var field: LatticeDemandField?
     /// The fingerprint the field was computed under.
@@ -189,16 +221,19 @@ public final class LatticeSimModel: ObservableObject {
     private let runner: Runner
     private var generation = 0
 
-    public init(runner: @escaping Runner = { ctx in
-        try TopOptKit.analyzeSolidLoadCase(
-            modelPath: ctx.modelPath, material: ctx.material,
-            materialsPath: ctx.materialsPath, rulesPath: ctx.rulesPath,
-            resolution: ctx.resolution, anchorFaceIDs: ctx.anchorFaceIDs,
-            loadGroups: ctx.loadGroups, buildDirection: ctx.buildDirection,
-            faceRegions: ctx.faceRegions, anchorRegionIDs: ctx.anchorRegionIDs)
-    }) {
-        self.runner = runner
+    public init(runner: Runner? = nil) {
+        self.runner = runner ?? Self.testRunner ?? { ctx in
+            try TopOptKit.analyzeSolidLoadCase(
+                modelPath: ctx.modelPath, material: ctx.material,
+                materialsPath: ctx.materialsPath, rulesPath: ctx.rulesPath,
+                resolution: ctx.resolution, anchorFaceIDs: ctx.anchorFaceIDs,
+                loadGroups: ctx.loadGroups, buildDirection: ctx.buildDirection,
+                faceRegions: ctx.faceRegions, anchorRegionIDs: ctx.anchorRegionIDs)
+        }
     }
+
+    /// Test seam (hosted tests): the solver a page's own model is made with while set — nil (always, in the app) is core's.
+    public static var testRunner: Runner?
 
     /// Whether a completed field is STALE against the current inputs — any change
     /// to model / material / resolution / load case invalidates it.
@@ -210,6 +245,7 @@ public final class LatticeSimModel: ObservableObject {
     /// Kick off ONE sim. No-op while one is already running (B5's "one sim").
     public func run(_ ctx: Context, now: Date = Date()) {
         guard phase != .running else { return }
+        if timingRecord == nil { noteTimingInputs([ctx]) }   // (a run of several scenarios noted them already)
         phase = .running
         generation += 1
         let gen = generation
@@ -237,6 +273,7 @@ public final class LatticeSimModel: ObservableObject {
                         provenance: .solidSim(date: now, resolution: ctx.resolution))
                     self.fingerprint = ctx.fingerprint
                     self.phase = .complete(summary)
+                    self.keep()   // ★ his iPad notes 11-23: kept in the version's folder
                 }
             }
         }
@@ -249,21 +286,28 @@ public final class LatticeSimModel: ObservableObject {
         guard let first = ctxs.first else { return }
         guard ctxs.count > 1 else { run(first, now: now); return }
         guard phase != .running else { return }
+        noteTimingInputs(ctxs)
         phase = .running
         generation += 1
         let gen = generation
         let runner = self.runner
         let fp = Self.fingerprint(of: ctxs)
         Task.detached(priority: .userInitiated) { [weak self] in
-            let outcome: Result<[TopOptKit.SimAnalysisResult], Error> =
-                Result { try ctxs.map { c in try FlexibleCoreGate.whileInCore { try runner(c) } } }
+            // ★ 11-21: each scenario on its own — one that cannot be solved no longer sinks the others
+            let each: [Result<TopOptKit.SimAnalysisResult, Error>] = ctxs.map { c in
+                Result { try FlexibleCoreGate.whileInCore { try runner(c) } }
+            }
+            let (solved, unsolved) = Self.split(each, names: ctxs.map { $0.scenarioName ?? "a load scenario" })
+            let outcome: Result<[TopOptKit.SimAnalysisResult], Error> = solved.isEmpty
+                ? .failure(each.compactMap { if case .failure(let e) = $0 { return e } else { return nil } }.first
+                           ?? TopOptError(message: "The sim could not converge at this resolution — no field was produced."))
+                : .success(solved)
             await MainActor.run { [weak self] in
                 guard let self, self.generation == gen else { return }  // cancelled/superseded
+                self.unsolved = solved.isEmpty ? [] : unsolved
                 switch outcome {
                 case .failure(let e):
                     self.phase = .failed(String(describing: e))
-                case .success(let rs) where rs.contains(where: \.nonConvergent):
-                    self.phase = .failed("The sim could not converge at this resolution — no field was produced.")
                 case .success(let rs):
                     let r = Self.worstOf(rs)
                     let summary = Summary(maxDisplacementMM: r.maxDisplacementMM,
@@ -277,9 +321,20 @@ public final class LatticeSimModel: ObservableObject {
                         provenance: .solidSim(date: now, resolution: first.resolution))
                     self.fingerprint = fp
                     self.phase = .complete(summary)
+                    self.keep()   // ★ his iPad notes 11-23: kept in the version's folder
                 }
             }
         }
+    }
+
+    /// The solves that gave a field (converged), and the names of those that did not.
+    nonisolated static func split(_ each: [Result<TopOptKit.SimAnalysisResult, Error>], names: [String])
+        -> (solved: [TopOptKit.SimAnalysisResult], unsolved: [String]) {
+        var solved: [TopOptKit.SimAnalysisResult] = [], unsolved: [String] = []
+        for (i, r) in each.enumerated() {
+            if case .success(let s) = r, !s.nonConvergent { solved.append(s) } else { unsolved.append(names[i]) }
+        }
+        return (solved, unsolved)
     }
 
     /// The worst of several solves on one grid: at each voxel the highest von Mises and that solve's own six stresses; the
@@ -338,6 +393,28 @@ public final class LatticeSimModel: ObservableObject {
         guard phase == .running else { return }
         generation += 1
         phase = .idle
+    }
+
+    // MARK: ★ his iPad notes 11-23: the check kept in the version's folder, and read back (LatticePreviewStore)
+
+    /// The check just made, kept beside the version's model.
+    private func keep() {
+        guard let field, let fingerprint, case let .complete(summary) = phase else { return }
+        LatticePreviewStore.saveStress(.init(field: field, summary: summary, unsolved: unsolved), fingerprint: fingerprint)
+    }
+
+    /// The check this version's folder keeps for exactly these inputs, taken as this page's (no solve). False: none, other
+    /// inputs, or a check is running or done already.
+    @discardableResult
+    public func adoptSaved(for ctxs: [Context]) -> Bool {
+        guard phase != .running, field == nil, let fp = Self.fingerprint(of: ctxs),
+              let saved = LatticePreviewStore.loadStress(fp) else { return false }
+        generation += 1
+        unsolved = saved.unsolved
+        field = saved.field
+        fingerprint = fp
+        phase = .complete(saved.summary)
+        return true
     }
 
     /// Drop a completed/failed sim (e.g. when the part itself is replaced).

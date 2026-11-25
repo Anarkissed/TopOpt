@@ -30,6 +30,8 @@ public struct LatticeSetupWizard: View {
     let onExit: () -> Void
 
     @State private var model: LatticeWizardModel
+    /// ★ notes25 B6: the setting "Change settings" or the fix wizard's Solve asked for (lit and scrolled to the middle).
+    @ObservedObject private var settingAsk = SettingToChange.shared
     /// ★ §5 — which numeric field has the keypad open. One at a time, keyed by the
     /// field's id, so every number on this page types as well as drags.
     @State private var numberPadField: String?
@@ -58,6 +60,15 @@ public struct LatticeSetupWizard: View {
 
     /// ★ Organic cut 1: the Auto numbers the new engine is using (shown in the Organic controls' fields).
     var organicLimits: LatticeOrganicLook.Limits?
+    /// ★ his 11-22: the part's Auto numbers are being measured (the sample waits), and the call that measures them.
+    var organicMeasuring = false
+    var measureOrganic: (() -> Void)?
+    func organicMeasuring(_ on: Bool, measure: @escaping () -> Void) -> LatticeSetupWizard {
+        var copy = self
+        copy.organicMeasuring = on
+        copy.measureOrganic = measure
+        return copy
+    }
     /// ★ Organic per group: each group's measured limits (before Look).
     var organicGroupLimits: [UUID: LatticeOrganicLook.Limits] = [:]
     func organicGroupLimits(_ g: [UUID: LatticeOrganicLook.Limits]) -> LatticeSetupWizard {
@@ -366,6 +377,7 @@ public struct LatticeSetupWizard: View {
                             .padding(.vertical, 7).padding(.horizontal, DS.Space.s)
                             .frame(maxWidth: .infinity)
                             .background(Capsule().fill(model.gradingMode == m ? DS.Color.fillSelected.color : Color.clear))
+                            .contentShape(Capsule())   // ★ his 11-22 (img 46): the whole segment takes the tap, not only its glyph
                             .foregroundStyle((model.gradingMode == m ? DS.Color.textPrimary : DS.Color.textTertiary).color)
                     }
                     .buttonStyle(.plain)
@@ -405,6 +417,7 @@ public struct LatticeSetupWizard: View {
                         // folded into this panel.
                         .background(Capsule().fill(on ? DS.Color.accent.color
                                                       : Color.clear))
+                        .contentShape(Capsule())   // ★ his 11-22 (img 46): the whole segment takes the tap, not only its glyph
                 }
                 .buttonStyle(.plain)
                 .latticeID("wizard-stage-\(s.rawValue)")
@@ -816,8 +829,11 @@ public struct LatticeSetupWizard: View {
         let partSkin = model.boundary == .fullSkin
         let shown = look.finish ?? (partSkin ? .skin : (model.boundary.zoneFinishWord == "shell" ? .solid : LatticeOrganicLook.Finish.none))
         return AnyView(VStack(alignment: .leading, spacing: 5) {
-            Text("Finish").font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)
-                .foregroundStyle(DS.Color.textTertiary.color)
+            HStack(spacing: 0) {
+                Text("Finish").font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)
+                    .foregroundStyle(DS.Color.textTertiary.color)
+                OrganicInfoButton(label: "Finish")
+            }
             HStack(spacing: 4) {
                 ForEach(LatticeOrganicLook.Finish.allCases, id: \.self) { f in
                     segmentButton(f.title, on: shown == f, greyed: false) {
@@ -830,6 +846,7 @@ public struct LatticeSetupWizard: View {
                 }
             }
             .modifier(LatticeSegmentTrack())
+            OrganicGreyLine(label: "Finish")
             if shown == .skin, latticeManual { organicSkinRows(group: group, look: look) }
         })
     }
@@ -840,10 +857,11 @@ public struct LatticeSetupWizard: View {
     private func organicSkinRows(group: UUID, look: LatticeOrganicLook) -> some View {
         HStack(spacing: DS.Space.s) {
             Text("Skin thickness").dsStyle(DS.TypeScale.caption).fontWeight(.semibold).lineLimit(1)
+            OrganicInfoButton(label: "Skin thickness")
             Spacer(minLength: DS.Space.xs)
             OrganicNumberField(value: (look.skinWidthMM ?? 0) > 0 ? look.skinWidthMM : nil, auto: nil, unit: "mm",
-                               placeholder: "Auto") { v in
-                if let v, let why = LatticeOrganicLook.Check.skinWidth(v) { organicSkinRefusal = why; return }
+                               placeholder: "Auto", title: "Skin thickness") { v in
+                if let v, let why = LatticeOrganicLook.Check.skinWidth(v) { organicSkinRefusal = why; AppPopups.shared.wrongNumber("Skin thickness", why); return }
                 organicSkinRefusal = nil
                 var l = project.lattice.organicLook(group: group)
                 l.skinWidthMM = v.flatMap { $0 > 0 ? $0 : nil }
@@ -853,11 +871,15 @@ public struct LatticeSetupWizard: View {
         }
         .frame(minHeight: 44)
         .latticeID("lattice-organic-skin-thickness")
+        OrganicGreyLine(label: "Skin thickness")
         if let why = organicSkinRefusal {
             Text(why).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.warning.color).lineLimit(2)
         }
-        Text("Skin density").font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)
-            .foregroundStyle(DS.Color.textTertiary.color)
+        HStack(spacing: 0) {
+            Text("Skin density").font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)
+                .foregroundStyle(DS.Color.textTertiary.color)
+            OrganicInfoButton(label: "Skin density")
+        }
         HStack(spacing: 4) {
             ForEach(Array(LatticeOrganicLook.skinDensityRange), id: \.self) { k in
                 segmentButton("\(k)", on: look.skinDensityValue == k, greyed: false) {
@@ -870,6 +892,7 @@ public struct LatticeSetupWizard: View {
             }
         }
         .modifier(LatticeSegmentTrack())
+        OrganicGreyLine(label: "Skin density")
     }
 
     /// ★ His 11-19 note: Traced or Grown in Auto, on the Part tab, for the whole part (every group).
@@ -877,6 +900,7 @@ public struct LatticeSetupWizard: View {
         let groups = project.latticeAreaGroups.map(\.id)
         return HStack(spacing: DS.Space.s) {
             Text("Organic").dsStyle(DS.TypeScale.caption2).foregroundStyle(DS.Color.textTertiary.color)
+            OrganicInfoButton(label: "Organic")
             Spacer(minLength: DS.Space.xs)
             SegmentedGlass(LatticeOrganicLook.Mode.allCases.map { .init($0, $0.title) },
                            selection: Binding(get: { project.lattice.organicModeForThePart(groups: groups) },
@@ -890,7 +914,7 @@ public struct LatticeSetupWizard: View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: DS.Space.xs) {
                 Text("Look").dsStyle(DS.TypeScale.caption2).foregroundStyle(DS.Color.textTertiary.color)
-                infoButton("organic-look", LatticeOrganicLook.lookInfo)
+                OrganicInfoButton(label: "Look")
             }
             HStack(spacing: DS.Space.s) {
                 Text("1%").dsStyle(DS.TypeScale.caption2).foregroundStyle(DS.Color.textQuaternary.color)
@@ -907,6 +931,7 @@ public struct LatticeSetupWizard: View {
                     .frame(minWidth: 38, alignment: .trailing)
             }
             .frame(minHeight: 44)
+            OrganicGreyLine(label: "Look")   // ★ his 11-20: a couple of words under each setting
             // ★ his 11-19 note: "The look shouldn't show the range of mm because it should be based on the actual model itself"
         }
         .onAppear {
@@ -2140,6 +2165,7 @@ public struct LatticeSetupWizard: View {
                 }
             }
         }
+        .settingToChange(s.rawValue)   // ★ notes25: "Change settings" marks the field it asks for (SettingToChange)
     }
 
     /// ★ §11(b) — EVERY LATTICE TYPE MUST BE REACHABLE. His screenshot shows the
@@ -2326,6 +2352,7 @@ public struct LatticeSetupWizard: View {
             .padding(.horizontal, DS.Space.sm)
             .background(Capsule().fill(on ? DS.Color.fillSelected.color : Color.clear))
             .overlay(Capsule().strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1))
+            .contentShape(Capsule())   // ★ his 11-22 (img 46): the whole segment takes the tap, not only its glyph
     }
     /// The lattice types a user may pick today — core's (`LatticeTypeCatalog`). The rest stay
     /// visible and greyed, with core's reason.
@@ -2610,6 +2637,11 @@ public struct LatticeSetupWizard: View {
         rebuild()
     }
 
+    /// ★ his iPad notes 11-23 ("allow the left column to expand automatically a little bit"): the column fits its names.
+    private func latticeTabsWidth(_ c: CellsPageContext) -> CGFloat { LatticePageColumns.tabsWidth(latticeTabs(c).map(\.title)) }
+    /// The panel, wider by what its column took (the settings keep their room).
+    private func latticePanelWidth(_ c: CellsPageContext) -> CGFloat { LatticePageColumns.panelWidth(tabs: latticeTabsWidth(c)) }
+
     private func latticeTabs(_ c: CellsPageContext) -> [DSFolderTabs.Tab] {
         [DSFolderTabs.Tab(id: "part", title: "Part")]
             + c.regions.enumerated().map { DSFolderTabs.Tab(id: "area-\($0.offset)", title: $0.element, colour: DS.Color.Role.lattice) }
@@ -2632,10 +2664,17 @@ public struct LatticeSetupWizard: View {
         return AnyView(ZStack {
             // ★ B7 (his iPad notes 11-08, design note 30), ★ his 11-10 (later): Cells is core's chunk of cells; In a part is
             // core's sample part with the settings on it — never his own part (the workspace covers it on this page)
-            AnyView(LatticeSampleView(inputs: latticeSampleInputs, notInSample: latticeNotInSample)
+            // ★ his iPad notes 11-23 (img 3): the sample's background fills the whole page behind the panel and the top rows (no
+            // black bars); its picture is drawn in the part the panel leaves free, framed as it was
+            // ★ notes26 (his 11-23): live from the open tab's settings, the finish and the band in it — no "Not in the sample" line
+            AnyView(LatticeSampleView(inputs: latticeSampleInputs)
+                .kept(.init(project: project.id, group: latticeTab))   // ★ his 11-23: each group's sample kept (LatticeSampleKeep)
+                .visible(EdgeInsets(top: portrait ? PageChrome.panelTop + latticePanelHeight : PageChrome.panelTop,
+                                    leading: portrait ? 0 : PageChrome.edge + latticePanelWidth(c), bottom: 0, trailing: 0))
                 .id(model.stage)   // each view its own camera: the chunk and the part frame differently
-                .padding(.leading, portrait ? 0 : PageChrome.edge + PageChrome.widePanelWidth)
-                .padding(.top, portrait ? PageChrome.panelTop + latticePanelHeight : PageChrome.panelTop)
+                // ★ his 11-22: this part's Auto numbers, measured as the page opens (and when it turns Organic)
+                .task(id: model.cellTransition == .organicGrade) { if model.cellTransition == .organicGrade { measureOrganic?() } }
+                .ignoresSafeArea()
                 .latticeID(model.stage == .cell ? "lattice-sample-cells" : "lattice-sample-part"))
             latticePanel(c, hug: portrait)
                 .frame(height: portrait ? nil : band)
@@ -2644,7 +2683,7 @@ public struct LatticeSetupWizard: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             latticeViewSwitch
                 .frame(maxWidth: .infinity)
-                .padding(.leading, portrait ? PageChrome.edge : PageChrome.edge + PageChrome.widePanelWidth + DS.Space.l)
+                .padding(.leading, portrait ? PageChrome.edge : PageChrome.edge + latticePanelWidth(c) + DS.Space.l)
                 .padding(.trailing, PageChrome.edge)
                 .padding(.top, portrait ? PageChrome.panelTop + latticePanelHeight + DS.Space.l + 14 : PageChrome.panelTop + 14)
                 .frame(maxHeight: .infinity, alignment: .top)
@@ -2658,12 +2697,24 @@ public struct LatticeSetupWizard: View {
     /// graded (the chunk of cells shows "from").
     private var latticeSampleInputs: LatticeSampleView.Inputs {
         var i = Self.sampleInputs(model, beadMM: project.printParams.strutLineWidthMM)
-        // ★ his 11-18: Organic's samples, from the open tab's Organic settings (a group's own, or the whole part's)
-        if model.cellTransition == .organicGrade, project.importedFile != nil {
-            let group = latticeTab.hasPrefix("area-") ? project.latticeAreaGroups.indices.contains(Int(latticeTab.dropFirst(5)) ?? -1)
-                ? project.latticeAreaGroups[Int(latticeTab.dropFirst(5))!].id : nil : nil
+        let group = latticeTab.hasPrefix("area-") ? project.latticeAreaGroups.indices.contains(Int(latticeTab.dropFirst(5)) ?? -1)
+            ? project.latticeAreaGroups[Int(latticeTab.dropFirst(5))!].id : nil : nil
+        // ★ notes26 (his 11-23, "Yes to the live sample"): a strut type's sample is laid from the open tab's settings — the
+        // page's (the open area's grade on them) and the area's own Finish and Manual controls
+        if model.cellTransition != .organicGrade {
+            i.lay = LatticeSampleLay.page(model.applied(to: project.lattice), area: group,
+                                          own: group.map { (latticeAreaEdits ?? project.lattice.areaGrading)[$0] ?? LatticeAreaGrading() },
+                                          lineWidthMM: project.printParams.strutLineWidthMM, wallRingMM: project.printParams.wallRingMM)
+        }
+        // ★ his 11-18: Organic's samples, from the open tab's Organic settings (a group's own, or the whole part's); ★ notes26:
+        // with or without the part's model file (the sample is its own body), so nothing is left out of it
+        if model.cellTransition == .organicGrade {
             i.organic = project.lattice.organicLook(group: group).effective(pageManual: latticeManual)
             i.layerMM = project.printParams.layerHeightMM > 0 ? project.printParams.layerHeightMM : 0.2
+            i.coverMM = project.printParams.wallRingMM > 0 ? project.printParams.wallRingMM : -1
+            i.aesthetic = (project.lattice.stageMode ?? .structural) == .aesthetic
+            if let l = organicLimits(group: group), l.measured { i.partStruts = [l.strutLowerMM, l.strutUpperMM, l.strutAutoMM] }
+            else { i.partStrutsPending = organicMeasuring }   // ★ his 11-22: wait for the part's numbers, never build twice
         }
         return i
     }
@@ -2679,14 +2730,6 @@ public struct LatticeSetupWizard: View {
                                         rhoHi: model.relativeDensity)
     }
 
-    /// ★ his iPad notes 11-10 (img 6): what he has on that the engine's sample block can't show yet.
-    private var latticeNotInSample: [String] {
-        LatticeSampleView.notInSample(organic: model.cellTransition == .organicGrade, finish: model.boundary,
-                                      shapeBand: model.gradingMode.fitsShape,
-                                      singleCell: model.singleCellMembers && (project.lattice.stageMode ?? .structural) == .aesthetic,
-                                      organicBuilt: project.importedFile != nil)
-    }
-
     private func latticePanel(_ c: CellsPageContext, hug: Bool) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             latticePanelHeader
@@ -2698,7 +2741,7 @@ public struct LatticeSetupWizard: View {
                     .overlay(alignment: .top) { Rectangle().fill(DS.Color.strokeSubtle.color).frame(height: 1) }
             }
         }
-        .frame(width: PageChrome.widePanelWidth, alignment: .leading)
+        .frame(width: latticePanelWidth(c), alignment: .leading)   // ★ his iPad notes 11-23: wider with its names' column
         .frame(maxHeight: latticePanelOpen && !hug ? .infinity : nil, alignment: .top)
         .background(CornerPairStyle.publish("latticeSettingsPanel"))
         .background(latticePanelShape.fill(DS.Surface.panel.color))
@@ -2723,16 +2766,45 @@ public struct LatticeSetupWizard: View {
     private func latticeTabsAndRows(_ c: CellsPageContext) -> some View {
         HStack(alignment: .top, spacing: 0) {
             DSFolderTabs(latticeTabs(c), selected: latticeArea(c) == nil ? "part" : latticeTab, key: Self.latticeTabsKey,
-                         pick: { id in withAnimation(.easeInOut(duration: 0.15)) { openLatticeTab(id, c) } })
+                         pick: { id in withAnimation(.easeInOut(duration: 0.15)) { openLatticeTab(id, c) } },
+                         width: latticeTabsWidth(c))   // ★ his iPad notes 11-23: as wide as its names, a little air
                 .frame(maxHeight: .infinity, alignment: .top)
+            ScrollViewReader { reader in
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: DS.Space.m) {
+                    SettingToChangeNote(page: .lattice) { LatticeWizardSetting(rawValue: $0)?.title ?? $0 }   // ★ notes25
                     latticeTopRow
                     latticeTabBody(c)
                 }
                 .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 12)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .latticeID("lattice-page-rows-content")
             }
+            .latticeID("lattice-page-rows")
+            // ★ notes25 B6: the setting asked for ("Change settings", the fix wizard's Solve) — on its tab, in the middle, lit
+            .onAppear { bringSettingToChange(reader, c) }
+            .onChange(of: settingAsk.serial) { _ in bringSettingToChange(reader, c) }
+            }
+        }
+    }
+
+    /// ★ notes25 B6 (his 11-23: "send the user exactly to the right page to fix it, and highlight the field to fix, making
+    /// sure to scroll to a position so that the field is close to the middle"): Manual when the field lives only there, the
+    /// field's group tab, then the field scrolled to the middle of the rows (as far as they scroll); SettingToChangeMark lights it.
+    private func bringSettingToChange(_ reader: ScrollViewProxy, _ c: CellsPageContext) {
+        guard let a = settingAsk.ask, a.page == .lattice else { return }
+        if SettingToChange.needsManual(a.field), !latticeManual { latticeManual = true }
+        if let g = a.group, let i = project.latticeAreaGroups.firstIndex(where: { $0.id == g }),
+           (latticeArea(c) == nil ? "part" : latticeTab) != "area-\(i)" {
+            openLatticeTab("area-\(i)", c)
+        }
+        // the Organic page's Cell size row answers the lattice's cellSize (its own name is its key)
+        let field = model.cellTransition == .organicGrade && a.field == LatticeWizardSetting.cellSize.rawValue ? "Cell size" : a.field
+        let serial = settingAsk.serial
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            guard settingAsk.serial == serial else { return }
+            withAnimation(DS.Motion.sheetIn) { reader.scrollTo(SettingToChange.rowID(field), anchor: .center) }
+            settingAsk.shown(serial)
         }
     }
 
@@ -2769,6 +2841,7 @@ public struct LatticeSetupWizard: View {
 
     /// [Auto │ Manual] and Reset all, at the top of every tab (as the Squish panel's). Reset all asks once, in place.
     private var latticeTopRow: some View {
+        VStack(alignment: .leading, spacing: 0) {
         HStack(spacing: DS.Space.s) {
             HStack(spacing: 4) {
                 ForEach([(false, "Auto"), (true, "Manual")], id: \.0) { manual, word in
@@ -2779,6 +2852,7 @@ public struct LatticeSetupWizard: View {
                             .lineLimit(1)
                             .padding(.horizontal, 10).padding(.vertical, 7)
                             .background(Capsule().fill(on ? DS.Color.fillSelected.color : Color.clear))
+                            .contentShape(Capsule())   // ★ his 11-22 (img 46): the whole segment takes the tap, not only its glyph
                     }
                     .buttonStyle(.plain)
                     .latticeID("lattice-page-mode-\(manual ? "manual" : "auto")")
@@ -2789,6 +2863,7 @@ public struct LatticeSetupWizard: View {
                 .overlay(Capsule().strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)))
             .fixedSize()
             .opacity(latticeResetAsk ? 0 : 1).allowsHitTesting(!latticeResetAsk)
+            if model.cellTransition == .organicGrade, !latticeResetAsk { OrganicInfoButton(label: "Auto / Manual") }   // ★ his 11-20
             Spacer(minLength: 0)
             Button { latticeResetAsk = true } label: {
                 Text(FlexibleSettingsExit.resetButton)
@@ -2805,6 +2880,9 @@ public struct LatticeSetupWizard: View {
                                              confirm: { latticeResetAsk = false; resetLatticeSettings() },
                                              cancel: { latticeResetAsk = false }))
             .latticeID("lattice-page-reset-all")
+        }
+        // ★ his 11-20: the words the Organic settings use, behind one short link (never shown open)
+        if model.cellTransition == .organicGrade { OrganicGlossaryLink() }
         }
     }
 
@@ -3031,8 +3109,19 @@ public struct LatticeSetupWizard: View {
         onExit()
     }
 
-    /// One cell │ In the part, over the canvas: what the canvas shows (its settings are on the panel's tabs).
+    /// The switch, and (★ notes26, his rule: never a note at the bottom-centre) what the see-through sample truly can't draw —
+    /// Rim's and Covered's solid — in an (i) beside it; a 44 pt space on its other side keeps the switch where it was.
     private var latticeViewSwitch: some View {
+        let why = LatticeSampleLay.notDrawn(latticeSampleInputs.lay)
+        return HStack(spacing: DS.Space.s) {
+            if why != nil { Color.clear.frame(width: 44, height: 44) }
+            latticeStageSwitch
+            if let why { InfoTip(key: "lattice-sample-not-drawn", text: why, label: "What the sample can't show") }
+        }
+    }
+
+    /// One cell │ In the part, over the canvas: what the canvas shows (its settings are on the panel's tabs).
+    private var latticeStageSwitch: some View {
         HStack(spacing: 2) {
             ForEach(LatticeWizardStage.allCases, id: \.rawValue) { s in
                 let on = model.stage == s
@@ -3224,6 +3313,7 @@ public struct LatticeSetupWizard: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 7)
                 .background(Capsule().fill(fill))
+                .contentShape(Capsule())   // ★ his 11-22 (img 46): the whole segment takes the tap, not only its glyph
         }
         .buttonStyle(.plain)
         .disabled(greyed)

@@ -42,6 +42,9 @@ public struct LibraryResult: Identifiable {
     public let accepted: Bool
     /// ★ His Q1: its word as Results says it ("Just safe", "+10 %"); nil when its run's results don't say.
     public var word: String? = nil
+    /// ★ notes27 (his print orientation, SPEC 2a): the way up it prints (its file's print frame, else its version's face or
+    /// gravity), so a compared result stands on the bed as it prints; nil: drawn in the file's own frame.
+    public var printUp: SIMD3<Float>? = nil
     public var id: Int { index }
 }
 
@@ -114,6 +117,11 @@ public final class LibraryModel: ObservableObject {
     /// The version each new folder was made FROM (a draft, "New draft from vN"), until it is filed — so it
     /// is numbered from that version (his decision 11: v4 → v4.1).
     private var pendingParents: [UUID: UUID] = [:]
+    /// ★ His iPad notes 11-22 (decision 2): the versions running now (AppModel's `runningIDs`). A running version's results
+    /// never clear a Compare pick until its run is done.
+    var runningFolders: Set<UUID> = [] {
+        didSet { if oldValue != runningFolders, mode == .library { settleComparePicks() } }
+    }
 
     private static let queue = DispatchQueue(label: "topopt.library.results", qos: .utility)
 
@@ -159,6 +167,7 @@ public final class LibraryModel: ObservableObject {
             if r != existing { try? store.saveLibrary(r) }
             index = r
             mode = .library
+            settleComparePicks()   // ★ his iPad notes 11-22: a new version's results clear a Compare pick
             loadThumbnailsFromCache()
         case let .unreadable(why):
             mode = .unreadable(why)
@@ -249,7 +258,58 @@ public final class LibraryModel: ObservableObject {
     public func title(of v: LibraryVersion, in part: LibraryPart) -> String {
         if let name = v.name { return "\(part.name) · v\(v.number) · \(name)" }
         let res = (snapshots[v.folderID]?.quality ?? .fast).resolution
-        return VersionChanges.autoName(part: part.name, number: v.number, changes: v.changes, resolution: res)
+        return VersionChanges.autoName(part: part.name, number: v.number, changes: changes(of: v, in: part), resolution: res)
+    }
+
+    // MARK: ★ notes28 — what changed, worked out now; his own description
+
+    /// ★ notes28 (his iPad notes on release 18, img 83: "very little difference between them... a guessing game"; "Is there
+    /// any way to go back and update all the descriptions"): what changed from the version it came from, worked out NOW
+    /// from both folders' saved settings — so every version and draft on disk says it the moment the update installs, and a
+    /// draft says what he changed since it was made. Nothing is rewritten. The list stored when it was filed stands in only
+    /// when either folder can't be read (or it came from nothing).
+    public func changes(of v: LibraryVersion, in part: LibraryPart) -> [VersionChange] {
+        guard let s = snapshots[v.folderID], let p = v.parentNumber.flatMap(part.version(number:)),
+              let from = snapshots[p.folderID] else { return v.changes }
+        return VersionChanges.between(from, s)
+    }
+
+    /// The card's line of differences: the biggest three, then "+n more" ("Cell size Auto → 6 mm · Finish None → Skin ·
+    /// +2 more"); "same settings" only when nothing differs; a first version is its first run. A main-line draft says
+    /// where it came from first ("from v7 · …").
+    public func differencesLine(of v: LibraryVersion, in part: LibraryPart) -> String {
+        let c = changes(of: v, in: part)
+        var bits: [String]
+        if c.isEmpty {
+            bits = v.parentNumber == nil ? ["first run", "res \((snapshots[v.folderID]?.quality ?? .fast).resolution)"]
+                : ["same settings"]
+        } else {
+            bits = c.prefix(Self.differencesShown).map(\.text)
+            if c.count > Self.differencesShown { bits.append("+\(c.count - Self.differencesShown) more") }
+        }
+        if isDraft(v), v.number.isMainLine, let p = v.parentNumber { bits.insert("from v\(p)", at: 0) }
+        return bits.joined(separator: " · ")
+    }
+    /// His "the biggest 2-3 differences".
+    public static let differencesShown = 3
+
+    /// His own words for a version (nil: none typed).
+    public func description(of folder: UUID) -> String? {
+        version(folder)?.versionDescription.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+    }
+
+    /// Keep his words for a version; empty clears them. Only library.json is written.
+    public func setDescription(_ text: String?, folder: UUID) {
+        let t = text?.trimmingCharacters(in: .whitespacesAndNewlines)
+        edit(folder) { $0.versionDescription = (t?.isEmpty ?? true) ? nil : t }
+    }
+
+    /// What the description editor starts with: his words, else the differences (his "prefilled with the automatic
+    /// differences"), without "same settings" / "first run".
+    public func descriptionDraft(of folder: UUID) -> String {
+        if let d = description(of: folder) { return d }
+        guard let part = index.part(containing: folder), let v = part.version(folderID: folder) else { return "" }
+        return changes(of: v, in: part).map(\.text).joined(separator: ", ")
     }
 
     /// The short title a card in its own part shows: "v6 · Keep Clear on 2 faces · res 128".
@@ -341,9 +401,14 @@ public final class LibraryModel: ObservableObject {
     /// Compare ended. The last one left becomes the part's chosen (as Pick this); a second Tie leaves the undecided ones In
     /// consideration. Returns the toast: "v1a chosen · 4 rejected", or "3 in consideration · 2 rejected".
     public func finishCompare(_ end: CompareSession.End, rejected: Int) -> String {
+        // ★ his iPad notes 11-22 (decision 2): every result the part has now has been through a Compare
+        switch end {
+        case let .chosen(item): markCompared(partContaining: item.folder)
+        case let .undecided(items): if let f = items.first?.folder { markCompared(partContaining: f) }
+        }
         switch end {
         case let .chosen(item):
-            pick(folder: item.folder, result: item.result)
+            pick(folder: item.folder, result: item.result, inCompare: true)
             let name = version(item.folder).map { "v\($0.number)" } ?? ""
             return "\(name)\(ResultMark.letter(item.result)) chosen · \(rejected) rejected"
         case let .undecided(items):
@@ -360,11 +425,76 @@ public final class LibraryModel: ObservableObject {
     // replaces the last. It drives the card's ring, its "v7b" tag, "PA12 · picked v7b", the picture and the strip's accent
     // (note 11). Print this stays its own mark. Old per-version picks are not migrated: no part has one until he picks.
 
-    /// Pick this: `result` of version `folder` becomes its part's chosen result.
-    public func pick(folder: UUID, result: Int) {
+    /// Pick this: `result` of version `folder` becomes its part's chosen result. ★ 11-22: `inCompare` when Compare's last one
+    /// left made it (only such a pick is cleared by a new version's results); a pick by hand ends any "Compare new".
+    public func pick(folder: UUID, result: Int, inCompare: Bool = false) {
         guard let p = index.parts.firstIndex(where: { $0.version(folderID: folder) != nil }) else { return }
         index.parts[p].chosen = LibraryChosen(folder: folder, result: result)
+        index.parts[p].chosenInCompare = inCompare ? true : nil
+        index.parts[p].formerPick = nil
         try? store.saveLibrary(index)
+    }
+
+    /// ★ His iPad notes 11-22 (decision 3): "Picked ×" — the part has no chosen result any more.
+    public func unpick(part: UUID) {
+        guard let p = index.parts.firstIndex(where: { $0.id == part }), index.parts[p].chosen != nil
+                || index.parts[p].formerPick != nil else { return }
+        index.parts[p].chosen = nil
+        index.parts[p].chosenInCompare = nil
+        index.parts[p].formerPick = nil
+        try? store.saveLibrary(index)
+    }
+
+    /// ★ 11-22: the Compare pick a new version's results cleared, while its version is listed and nothing is chosen since.
+    public func formerPick(of part: LibraryPart) -> LibraryChosen? {
+        guard part.chosen == nil, let f = part.formerPick, part.version(folderID: f.folder) != nil else { return nil }
+        return f
+    }
+
+    /// ★ 11-22: the results Compare new offers against the former pick (never through a Compare; none of a running version).
+    public func newResults(of part: LibraryPart) -> [CompareItem] {
+        CompareSession.newResults(part, running: runningFolders)
+    }
+
+    // MARK: ★ his iPad notes 11-22 (decision 2): "If a version was picked through the comparison and a new version is
+    // created/uploaded/modified, then it can no longer be 'picked' and needs to be compared to the versions that were not
+    // compared to yet."
+
+    /// Every result the part has now has been through a Compare; Compare new is answered.
+    private func markCompared(partContaining folder: UUID) {
+        guard let p = index.parts.firstIndex(where: { $0.version(folderID: folder) != nil }) else { return }
+        for i in index.parts[p].versions.indices {
+            let n = index.parts[p].versions[i].summary?.count ?? 0
+            if n > 0 { index.parts[p].versions[i].compared = Array(0..<n) }
+        }
+        index.parts[p].formerPick = nil
+        try? store.saveLibrary(index)
+    }
+
+    /// A Compare pick is cleared once the part has a result never compared (a new version's, once its results are known and
+    /// its run is done): its line offers "Compare new" instead. A pick by hand is never cleared here (his words: "picked
+    /// through the comparison"). With nothing new left (its version deleted), the former pick is the chosen one again.
+    func settleComparePicks() {
+        var changed = false
+        for p in index.parts.indices {
+            let part = index.parts[p]
+            if part.chosenInCompare == true, let c = part.chosen, part.version(folderID: c.folder) != nil,
+               !newResults(of: part).isEmpty {
+                index.parts[p].formerPick = c
+                index.parts[p].chosen = nil
+                index.parts[p].chosenInCompare = nil
+                changed = true
+            } else if part.chosen == nil, let f = part.formerPick, newResults(of: part).isEmpty
+                        || part.version(folderID: f.folder) == nil {
+                if part.version(folderID: f.folder) != nil {
+                    index.parts[p].chosen = f
+                    index.parts[p].chosenInCompare = true
+                }
+                index.parts[p].formerPick = nil
+                changed = true
+            }
+        }
+        if changed { try? store.saveLibrary(index) }
     }
 
     /// The part's chosen result, while its version is listed (nil = none chosen).
@@ -458,6 +588,7 @@ public final class LibraryModel: ObservableObject {
                                               accepted: $0.accepted, achievedVolumeFraction: $0.fraction, word: $0.word)
                             }
                         }
+                        self.settleComparePicks()   // ★ 11-22: its results are known now
                     }
                     for r in results where !self.hasClearPicture(CompareItem(folder: folder, result: r.index)) {
                         self.storeThumbnail(for: CompareItem(folder: folder, result: r.index), mesh: r.mesh)
@@ -467,6 +598,28 @@ public final class LibraryModel: ObservableObject {
             }
         }
         step(todo[...])
+    }
+
+    /// ★ his notes 11-23 ("The result should NOT be greyed out on the version screen"): a run's result was just saved in
+    /// `folder` — its card is a version with results now (never a draft), and its numbers and pictures are read again from
+    /// that result (the next `loadSummaries`), never an older run's.
+    func resultsSaved(folder: UUID, snapshot: ProjectSnapshot) {
+        snapshots[folder] = snapshot
+        edit(folder) { $0.summary = nil; $0.trimmed = nil }
+        resultsCache[folder] = nil
+        resultsOrder.removeAll { $0 == folder }
+        let fm = FileManager.default
+        for k in thumbnails.keys where k.folder == folder && k.result != Self.originalResult {
+            thumbnails[k] = nil
+            try? fm.removeItem(at: thumbnailURL(k))
+            try? fm.removeItem(at: opaqueThumbnailURL(k))
+        }
+        for r in 0..<64 {   // pictures of results not loaded this launch
+            let k = CompareItem(folder: folder, result: r)
+            guard fm.fileExists(atPath: thumbnailURL(k).path) || fm.fileExists(atPath: opaqueThumbnailURL(k).path) else { break }
+            try? fm.removeItem(at: thumbnailURL(k))
+            try? fm.removeItem(at: opaqueThumbnailURL(k))
+        }
     }
 
     /// Every result of a version, with its mesh (decoded off the main thread; the last few are kept).
@@ -490,12 +643,16 @@ public final class LibraryModel: ObservableObject {
                 guard let data = store.loadResultsData(id: folder),
                       let o = try? OutcomeCodec.decode(data) else { return nil }
                 let words = ResultsVersions.words(o)   // ★ Q1: each result's word, as Results says it
+                // ★ notes27: the way it prints — its print file's frame, else its version's own face or gravity
+                let snap = store.snapshot(id: folder)
+                let up = PrintDraw.up(frame: PrintFrameTurn.of(report: o.reportJSON),
+                                      orientation: BuildOrientation(plateUp: snap?.plateUp), gravity: snap?.force.gravity)
                 return o.variants.enumerated().map { i, v in
                     LibraryResult(index: i,
                                   mesh: ViewerMesh(vertices: v.meshVertices, indices: v.meshIndices, faceIDs: [],
                                                    smoothShaded: true),
                                   massGrams: v.massGrams, margin: v.worstCaseMargin,
-                                  fraction: v.achievedVolumeFraction, accepted: v.accepted, word: words[i])
+                                  fraction: v.achievedVolumeFraction, accepted: v.accepted, word: words[i], printUp: up)
                 }
             }()
             DispatchQueue.main.async { done(results) }
@@ -701,6 +858,12 @@ public final class LibraryModel: ObservableObject {
             v.pickedResult = 0
             v.summary = keptSummary
             v.trimmed = true
+            v.compared = (v.compared ?? []).contains(picked) ? [0] : nil   // ★ 11-22: the kept one is result 0 now
+        }
+        // ★ 11-22: a former Compare pick on the kept result follows it; on a result that went, it goes too
+        if let p = index.parts.firstIndex(where: { $0.formerPick?.folder == folder }) {
+            index.parts[p].formerPick = index.parts[p].formerPick?.result == picked ? LibraryChosen(folder: folder, result: 0) : nil
+            try? store.saveLibrary(index)
         }
         // ★ the part's chosen result was the one kept (shownResult reads it first): it is result 0 now
         if let p = index.parts.firstIndex(where: { $0.chosen?.folder == folder }) {

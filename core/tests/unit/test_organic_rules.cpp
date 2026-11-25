@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <thread>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <functional>
@@ -22,6 +24,7 @@
 #include "topopt/lattice_layout_mesh.hpp"
 #include "topopt/lattice_layout_organic.hpp"
 #include "topopt/lattice_sample.hpp"
+#include "topopt/stl.hpp"
 
 using namespace topopt;
 using namespace topopt::lattice_layout;
@@ -3311,6 +3314,335 @@ static void test_net_outline() {
     CHECK(n_bars > 0 && least >= line - 2e-3);
   }
 }
+// SB1 (leg Q, 2026-11-20; the owner's iPad, the Organic sample: "core stopped with an exception that is not a
+// std::exception"): a stop asked while the Exact preview runs the file's print check (OJ6, depth variation on) used to
+// throw LayCancelled out of lay_organic_preview. Now: whatever moment the stop comes, the call returns (cancelled or
+// whole), never throws. And anything thrown that is not a std::exception comes back as a refusal `core_stopped` in
+// plain words, its type in `detail`; a LayCancelled from inside the lay answers "cancelled".
+static void test_session_boundary() {
+  const StepModel model = box_model(30, 30, 20);
+  const TensorField f = traced_field();
+  Settings st;
+  st.regions = {{1, Role::Lattice, {1}, 12.0, 0.0, true}};
+  st.drop_loose = true;
+  OrganicAsk a = traced_ask();   // depth variation on (face_relief_mm 1, the default)
+  OrganicPreviewAsk pa;
+  pa.quality = PreviewQuality::Exact;
+  double whole_ms = 0.0;
+  std::size_t flushed_check_bars = 0;
+  {
+    Session s(model);
+    const auto t0 = std::chrono::steady_clock::now();
+    const OrganicPreview pv = lay_organic_preview(s, st, f, a, pa);
+    whole_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    for (const Bar& b : pv.outcome.bars.bars) flushed_check_bars += b.along_proud > 0.0 || b.proud_a > 0.0 || b.proud_b > 0.0;
+    CHECK(!pv.outcome.cancelled && pv.outcome.refused.empty() && flushed_check_bars > 0);   // the print check does run
+  }
+  std::size_t threw = 0, cancelled = 0, whole = 0;
+  for (const double share : {0.2, 0.4, 0.6, 0.75, 0.85, 0.92, 0.97}) {
+    Session s(model);
+    std::atomic<bool> stop{false};
+    std::thread canceller([&] {
+      std::this_thread::sleep_for(std::chrono::microseconds(static_cast<long long>(share * whole_ms * 1000.0)));
+      stop = true;   // as the app's cancel does
+    });
+    try {
+      const OrganicPreview pv = lay_organic_preview(s, st, f, a, pa, 0, &stop);
+      ++(pv.outcome.cancelled ? cancelled : whole);
+    } catch (...) {
+      ++threw;
+    }
+    canceller.join();
+  }
+  std::printf("SB1 Exact preview (%zu bars with depth variation, %.0f ms whole) stopped at 7 moments: threw %zu, cancelled %zu, "
+              "whole %zu\n", flushed_check_bars, whole_ms, threw, cancelled, whole);
+  CHECK(threw == 0 && cancelled > 0);
+  // Thrown from inside the lay (the print check hook runs there when a strengthening is replayed): a stop answers
+  // "cancelled"; an int is refused in plain words, its type in the detail.
+  for (int kind = 0; kind < 2; ++kind) {
+    Session s(model);
+    OrganicAsk b = a;
+    b.additions.rounds.push_back(AddRound{});
+    b.print_check = [kind](const Layout&, Bars&) -> std::string {
+      if (kind == 0) throw LayCancelled{};
+      throw 42;
+    };
+    bool out = false;
+    Outcome o;
+    try {
+      o = s.lay_organic(st, f, b);
+    } catch (...) {
+      out = true;
+    }
+    const std::string text = o.refused.empty() ? "" : o.refused.front().text, detail = o.refused.empty() ? "" : o.refused.front().detail;
+    std::printf("SB1 %s thrown in the lay: threw out %d, cancelled %d, refused %s: \"%s\" (detail: %s)\n", kind ? "an int" : "LayCancelled",
+                out ? 1 : 0, o.cancelled ? 1 : 0, o.refused.empty() ? "-" : o.refused.front().code.c_str(), text.c_str(), detail.c_str());
+    if (kind == 0) CHECK(!out && o.cancelled && o.refused.empty());
+    else
+      CHECK(!out && !o.cancelled && o.refused.size() == 1 && o.refused.front().code == "core_stopped" &&
+            text.find("could not be laid") != std::string::npos && text.find("std::") == std::string::npos &&
+            text.find("lay_organic") == std::string::npos && detail.find("int") != std::string::npos);
+  }
+}
+static std::string plain_number_for_test(double v) {   // as the refusals print a whole number
+  char b[32];
+  std::snprintf(b, sizeof b, "%g", v);
+  return b;
+}
+// UL1 (leg R, 2026-11-20; the owner: "Can I put 789293?"): every number the app shows has an upper limit. Per limit: at
+// the limit valid, just over it refused `over_upper_limit` with the allowed range filled (the app clamps its field to it),
+// a huge number refused the same; the judged Auto asks (Traced and Grown) and the app's Auto values stay valid.
+static void test_upper_limits() {
+  Settings st;
+  st.regions = {{1, Role::Lattice, {1}, 12.0, 0.0, true}};
+  struct Lim { const char* setting; double limit; std::function<void(OrganicAsk&, double)> set; bool grown; };
+  const auto range = [](OrganicAsk& a) { a.spacing_mm = 0.0; a.spacing_min_mm = 3.0; a.spacing_max_mm = 6.0; };
+  const std::vector<Lim> lims = {
+      {"spacing_mm", kOrganicCellMaxMm, [](OrganicAsk& a, double v) { a.spacing_mm = v; }, false},
+      {"spacing_min_mm", kOrganicCellMaxMm, [](OrganicAsk& a, double v) { a.spacing_mm = 0; a.spacing_min_mm = v; a.spacing_max_mm = v; }, false},
+      {"spacing_max_mm", kOrganicCellMaxMm, [&](OrganicAsk& a, double v) { range(a); a.spacing_max_mm = v; }, false},
+      {"width_mm", kOrganicStrutMaxMm, [&](OrganicAsk& a, double v) { range(a); a.spacing_min_mm = 200; a.spacing_max_mm = 200; a.width_mm = v; }, false},
+      {"width_heavy_mm", kOrganicStrutMaxMm, [&](OrganicAsk& a, double v) { range(a); a.width_heavy_mm = v; }, false},
+      {"foot_gap", kOrganicSpacingsMax, [](OrganicAsk& a, double v) { a.foot_gap = v; }, true},
+      {"wall_gap", kOrganicSpacingsMax, [](OrganicAsk& a, double v) { a.walls_out = true; a.wall_gap = v; }, true},
+      {"wall_gap_heavy", kOrganicSpacingsMax, [&](OrganicAsk& a, double v) { range(a); a.walls_out = true; a.wall_gap = v; a.wall_gap_heavy = v; }, true},
+      {"cross_gap", kOrganicSpacingsMax, [](OrganicAsk& a, double v) { a.walls_out = true; a.wall_cross = 1; a.cross_gap = v; }, true},
+      {"cross_gap_heavy", kOrganicSpacingsMax, [&](OrganicAsk& a, double v) { range(a); a.walls_out = true; a.wall_cross = 1; a.cross_gap = v; a.cross_gap_heavy = v; }, true},
+      {"tie_gap", kOrganicSpacingsMax, [](OrganicAsk& a, double v) { a.tie_level = true; a.tie_gap = v; }, false},
+      {"tie_gap_heavy", kOrganicSpacingsMax, [&](OrganicAsk& a, double v) { range(a); a.tie_level = true; a.tie_gap = v; a.tie_gap_heavy = v; }, false},
+      {"root_run", kOrganicSpacingsMax, [](OrganicAsk& a, double v) { a.root_run = v; }, true},
+      {"top_run", kOrganicSpacingsMax, [](OrganicAsk& a, double v) { a.top_run = v; }, true},
+      {"shape_reach", kOrganicShapeReachMax, [](OrganicAsk& a, double v) { a.shape_fit = true; a.shape_reach = v; }, false},
+  };
+  std::size_t ok = 0;
+  for (const Lim& l : lims) {
+    std::string said;
+    bool good = true;
+    for (const double v : {l.limit, l.limit + 0.01, 789293.0}) {
+      OrganicAsk a = traced_ask();
+      if (l.grown) { a.mode = OrganicMode::Grown; a.ties = true; }
+      l.set(a, v);
+      const std::vector<OrganicRefusal> r = validate_organic(st, a, nullptr);
+      const OrganicRefusal* mine = nullptr;
+      for (const OrganicRefusal& x : r)
+        if (x.code == "over_upper_limit" && x.setting == l.setting) mine = &x;
+      if (v == l.limit) {
+        bool any_upper = false;
+        for (const OrganicRefusal& x : r) any_upper = any_upper || x.code == "over_upper_limit";
+        good = good && !any_upper;
+      } else {
+        good = good && mine && mine->has_max && mine->allowed_max == l.limit && mine->has_min && !mine->text.empty() &&
+               mine->text.find(plain_number_for_test(l.limit)) != std::string::npos;
+        if (mine) said = mine->text;
+      }
+    }
+    std::printf("UL1 %s: at %g valid, over it refused: \"%s\"%s\n", l.setting, l.limit, said.c_str(), good ? "" : "  <-- WRONG");
+    ok += good;
+    CHECK(good);
+  }
+  // The judged Auto asks and the app's Auto numbers stay valid.
+  for (const bool grown : {false, true}) {
+    OrganicAsk a = gap_judged(grown);
+    std::size_t upper = 0;
+    for (const OrganicRefusal& x : validate_organic(st, a, nullptr)) upper += x.code == "over_upper_limit";
+    CHECK(upper == 0);
+  }
+  // Below the lower end too: every refusal that binds one of these numbers carries both ends of its range.
+  {
+    std::size_t both = 0, n = 0;
+    auto look = [&](const std::vector<OrganicRefusal>& r, const char* setting) {
+      for (const OrganicRefusal& x : r)
+        if (x.setting == setting) { ++n; both += x.has_min && x.has_max && x.allowed_max > x.allowed_min; }
+    };
+    OrganicAsk a = traced_ask(); range(a); a.spacing_max_mm = 2.0; look(validate_organic(st, a, nullptr), "spacing_max_mm");
+    a = traced_ask(); range(a); a.width_heavy_mm = 0.5; look(validate_organic(st, a, nullptr), "width_heavy_mm");
+    a = traced_ask(); a.width_mm = 0.3; look(validate_organic(st, a, nullptr), "width_mm");
+    a = traced_ask(); a.tie_gap = 0.0; look(validate_organic(st, a, nullptr), "tie_gap");
+    a = traced_ask(); a.mode = OrganicMode::Grown; a.root_run = -1; look(validate_organic(st, a, nullptr), "root_run");
+    a = traced_ask(); a.shape_reach = -1; look(validate_organic(st, a, nullptr), "shape_reach");
+    a = traced_ask(); range(a); a.tie_level = true; a.tie_gap = 1.0; a.tie_gap_heavy = 2.0; look(validate_organic(st, a, nullptr), "tie_gap_heavy");
+    Settings sk = st;
+    sk.regions[0].skin = true;
+    sk.regions[0].skin_density = 9;
+    look(validate_organic_groups(sk, {{{1}, traced_ask()}}, nullptr), "skin_density");
+    std::printf("UL1: refusals below the lower end carry both ends of the range: %zu of %zu\n", both, n);
+    CHECK(n == 8 && both == n);
+  }
+  std::printf("UL1: %zu of %zu limits as asked; the judged Auto asks (Traced, Grown) valid\n", ok, lims.size());
+}
+// OG2e (leg S; the owner, 2026-11-21: "can you ensure that adding a no-lattice zone at the face of a "depth variation"
+// latticed wall, flattens it in the engine and app?"). A 40 x 30 x 20 block, its top a woven area pulled in 2 mm, relief
+// 1 mm, a no-lattice box zone over a third of the top (x up to 13.3), placed thin under the face, straddling it, deep;
+// and a block with a 12 x 12 mm pocket through it, its walls open lattice faces, the zone filling the pocket and touching
+// its walls (the owner's own try). Traced and Grown: in the file no tube vertex stands more than the trim's 0.02 mm out
+// of the face inside the footprint (the zone's part of the face grown by a line), the bulge is still there elsewhere,
+// the print check is clean, nothing outside the part (OG5), the preview's runs carry no along-face mark or proud end at
+// the footprint; the file job's own form of the zone (region_zones, region_no_lattice) does the same and its result
+// counts it; and a lay without a zone is the lay of before, bar for bar.
+static StepModel og2e_pocket() {
+  StepModel m;
+  auto face = [&](Vec3 n, Vec3 o) { StepFaceInfo f; f.kind = StepSurfaceKind::Plane; f.plane_normal = n; f.plane_origin = o; m.faces.push_back(f); };
+  auto quad = [&](Vec3 a, Vec3 b, Vec3 c, Vec3 d, int f) {
+    for (int k = 0; k < 2; ++k) {
+      const int n = static_cast<int>(m.mesh.vertices.size());
+      if (k == 0) m.mesh.vertices.insert(m.mesh.vertices.end(), {a, b, c}); else m.mesh.vertices.insert(m.mesh.vertices.end(), {a, c, d});
+      m.mesh.triangles.push_back({n, n + 1, n + 2});
+      m.triangle_face.push_back(f);
+    }
+  };
+  const double X = 40, Y = 30, Z = 20, x0 = 14, x1 = 26, y0 = 9, y1 = 21;
+  face({0, 0, -1}, {0, 0, 0}); face({0, 0, 1}, {0, 0, Z});
+  face({0, -1, 0}, {0, 0, 0}); face({1, 0, 0}, {X, 0, 0}); face({0, 1, 0}, {0, Y, 0}); face({-1, 0, 0}, {0, 0, 0});
+  face({1, 0, 0}, {x0, 0, 0}); face({-1, 0, 0}, {x1, 0, 0}); face({0, 1, 0}, {0, y0, 0}); face({0, -1, 0}, {0, y1, 0});
+  for (int top = 0; top < 2; ++top) {
+    const double z = top ? Z : 0;
+    const Vec3 A{0, 0, z}, B{X, 0, z}, C{X, Y, z}, D{0, Y, z}, a{x0, y0, z}, b{x1, y0, z}, c{x1, y1, z}, d{x0, y1, z};
+    if (top) { quad(A, B, b, a, 1); quad(B, C, c, b, 1); quad(C, D, d, c, 1); quad(D, A, a, d, 1); }
+    else { quad(A, a, b, B, 0); quad(B, b, c, C, 0); quad(C, c, d, D, 0); quad(D, d, a, A, 0); }
+  }
+  auto side = [&](Vec3 p, Vec3 q, int f) { quad(p, q, Vec3{q.x, q.y, Z}, Vec3{p.x, p.y, Z}, f); };
+  side({0, 0, 0}, {X, 0, 0}, 2); side({X, 0, 0}, {X, Y, 0}, 3); side({X, Y, 0}, {0, Y, 0}, 4); side({0, Y, 0}, {0, 0, 0}, 5);
+  side({x0, y0, 0}, {x0, y1, 0}, 6); side({x1, y1, 0}, {x1, y0, 0}, 7); side({x1, y0, 0}, {x0, y0, 0}, 8); side({x0, y1, 0}, {x1, y1, 0}, 9);
+  m.face_count = 10;
+  m.solid_count = 1;
+  m.brep_volume = X * Y * Z - (x1 - x0) * (y1 - y0) * Z;
+  return m;
+}
+static void test_og2e_zone_flat() {
+  if (!mesh_available()) return;
+  const double X1 = 40.0 / 3.0, lw = 0.45, trim = 0.021;
+  struct Case { const char* name; bool pocket, grown; double z0, z1; };
+  const Case cases[] = {{"thin", false, false, 19.6, 19.97}, {"straddle", false, false, 19.7, 23.0}, {"deep", false, false, 8.0, 20.5},
+                        {"pocket", true, false, 0, 0}, {"straddle", false, true, 19.7, 23.0}, {"pocket", true, true, 0, 0},
+                        {"pocket grazed 0.3", true, false, 0.3, 0}, {"pocket grazed 0.3", true, true, 0.3, 0},
+                        {"pocket 1 mm over", true, false, 1.0, 0}};
+  for (const Case& c : cases) {
+    const StepModel model = c.pocket ? og2e_pocket() : box_model(40, 30, 20);
+    Settings s;
+    s.bead_mm = lw; s.min_strut_lines = 2;
+    Settings::RegionAsk r;
+    r.id = 1; r.role = Role::Lattice; r.weave = true; r.faces = {1}; r.depth_mm = c.pocket ? 16 : 12; r.expand_mm = c.pocket ? 0 : -2;
+    Settings::RegionAsk z;
+    z.id = 2; z.role = Role::NoLattice; z.depth_mm = 0;
+    z.zone.kind = Zone::Kind::Box;
+    z.zone.axis[0] = {1, 0, 0}; z.zone.axis[1] = {0, 1, 0}; z.zone.axis[2] = {0, 0, 1};
+    if (c.pocket) { z.zone.centre = {20, 15, 10}; z.zone.half[0] = 6 + c.z0; z.zone.half[1] = 6 + c.z0; z.zone.half[2] = 11; }
+    else {
+      z.zone.centre = {X1 / 2 - 0.5, 15, 0.5 * (c.z0 + c.z1)};
+      z.zone.half[0] = X1 / 2 + 0.5; z.zone.half[1] = 16; z.zone.half[2] = 0.5 * (c.z1 - c.z0);
+    }
+    s.regions = {r, z};
+    OrganicAsk a;
+    a.mode = c.grown ? OrganicMode::Grown : OrganicMode::Traced;
+    a.spacing_min_mm = 3; a.spacing_max_mm = 6; a.width_mm = 0.9; a.width_heavy_mm = 1.8; a.tie_level = true; a.ties = true;
+    a.shape_fit = true; a.member_cap = false; a.hold_parts = true; a.part_to_floor = true; a.part_reach_mm = 9;
+    a.part_support_mm = 2.25; a.unbraced_max = 10; a.layer_mm = 0.2; a.face_relief_mm = 1.0;
+    if (c.grown) { a.walls_out = true; a.prune = true; }
+    const std::vector<OrganicGroup> groups = {{{1}, a}};
+    Session session(model);
+    const SyntheticStress syn = organic_synthetic_stress(session, s, TensorField{}, {{1, 1}}, groups);
+    CHECK(syn.refused.empty());
+    if (!syn.refused.empty()) continue;
+    // In the footprint: the zone's part of the face grown by a line (block: x up to X1 + a line on the top; pocket: the
+    // pocket's walls, a point standing into the pocket).
+    auto into_footprint = [&](const Vec3& v) {
+      if (c.pocket) {
+        const double into = std::min({v.x - 14.0, 26.0 - v.x, v.y - 9.0, 21.0 - v.y});
+        return v.z > 1e-3 && v.z < 20.0 - 1e-3 && into > trim ? into : 0.0;
+      }
+      return v.x < X1 + lw && v.z > 20.0 + trim ? v.z - 20.0 : 0.0;
+    };
+    auto outside_footprint = [&](const Vec3& v) {
+      if (c.pocket) return v.z > 20.0 + trim && !(v.x > 14 - lw && v.x < 26 + lw && v.y > 9 - lw && v.y < 21 + lw);
+      return v.x > X1 + lw && v.z > 20.0 + trim;
+    };
+    FileJob job;
+    job.settings = s;
+    job.organic = a;
+    job.organic.layer_mm = job.options.layers.layer_mm;
+    job.tensor_field = std::make_shared<TensorField>(syn.field);
+    job.file_format = "stl";
+    const std::string path = std::string(ORGANIC_RULES_TMP_DIR) + "/og2e.stl";
+    const FileResult fr = make_lattice_file(model, job, path);
+    std::size_t in = 0, out = 0;
+    double most = 0.0;
+    if (fr.ok)
+      for (const Vec3& v : read_stl_file(path).mesh.vertices) {
+        const double d = into_footprint(v);
+        if (d > 0.0) { ++in; most = std::max(most, d); }
+        out += outside_footprint(v);
+      }
+    // The preview's runs: no along-face mark and no proud end at the footprint.
+    Session ps(model);
+    OrganicPreviewAsk pa;
+    pa.quality = PreviewQuality::Exact;
+    const OrganicPreview pv = lay_organic_preview(ps, s, syn.field, groups, pa);
+    std::size_t marked = 0;
+    for (const WeaveRun& w : pv.runs) {
+      bool at = false;
+      for (std::size_t k = 0; k < w.points.size() && !at; ++k) {
+        const Vec3& q = w.points[k];
+        const double rr = 0.5 * (k < w.ring_mm.size() ? w.ring_mm[k] : 0.9);
+        at = c.pocket ? std::min({q.x - 14.0, 26.0 - q.x, q.y - 9.0, 21.0 - q.y}) > -rr - 0.05 && q.z < 20.0 - rr
+                      : q.x < X1 + lw && q.z + rr > 20.0 - 0.05;
+      }
+      const bool proud_at = (w.proud_a_mm > 0.0 && into_footprint(Vec3{w.points.front().x, w.points.front().y, c.pocket ? 10.0 : 21.0}) > 0.0) ||
+                            (w.proud_b_mm > 0.0 && into_footprint(Vec3{w.points.back().x, w.points.back().y, c.pocket ? 10.0 : 21.0}) > 0.0);
+      marked += at && ((w.marks & kRunAlong) || proud_at);
+    }
+    // OG2f: no-lattice solid within two printed lines under the woven face, where a weave region would own it (block:
+    // the zone's third of the top, inside the area; pocket: behind one wall, inside the area's depth).
+    const Domain::Probe dp = ps.domain()->probe();
+    std::size_t solid_thin = 0;
+    for (double t = 0.05; t < 2 * lw; t += 0.1)
+      for (double w = 0.5; w < 11.5; w += 0.5) {
+        const Vec3 q = c.pocket ? Vec3{14.0 - t, 9.0 + w, 6.0 + w} : Vec3{2.0 + w, 15.0, 20.0 - t};
+        solid_thin += dp.where(q).why == Why::NoLattice;
+      }
+    // two lines or more of the zone's solid under the face (the deep box, the 1 mm overlap): solid as before
+    const bool skin = (c.pocket && c.z0 >= 2 * lw) || std::string(c.name) == "deep";
+    const bool drop = !skin && (!c.pocket || c.z0 > 0.0);   // under two lines: none made
+    std::printf("OL-OG2E %s %s: flush at the zone %zu bars %zu ends; footprints %zu; thin zone solid dropped %.1f mm2; no-lattice "
+                "solid within two lines under the face %zu; file ok %d, print clean %d, guard outside %zu; tube vertices out of "
+                "the face in the footprint %zu (most %.3f), elsewhere %zu; preview runs marked at it %zu\n",
+                c.name, c.grown ? "Grown" : "Traced", fr.relief.flush_zone_bars, fr.relief.flush_zone_ends,
+                fr.relief.zone_footprints.size(), fr.relief.thin_zone_solid_dropped_mm2, solid_thin, fr.ok ? 1 : 0,
+                fr.made.print_clean ? 1 : 0, pv.outcome.guard.outside_cut, in, most, out, marked);
+    CHECK(fr.ok && fr.made.print_clean && pv.outcome.guard.outside_cut == 0 && in == 0 && out > 0 && marked == 0);
+    if (skin) {
+      CHECK(solid_thin > 0 && fr.relief.thin_zone_solid_dropped_mm2 == 0.0);   // the 1 mm skin stays
+    } else {
+      CHECK(fr.relief.flush_zone_bars + fr.relief.flush_zone_ends > 0 && !fr.relief.zone_footprints.empty());
+      CHECK(solid_thin == 0 && (!drop || fr.relief.thin_zone_solid_dropped_mm2 > 0.0));
+    }
+  }
+  // The file job's own form: region_zones and region_no_lattice, the result names the flush.
+  {
+    const std::string text = R"({"mode": "lattice_file", "model": "block.step", "layout": {
+      "min_strut_lines": 2, "bead_mm": 0.45, "region_ids": [1, 2], "region_no_lattice": [0, 1], "region_depth_mm": [12, 0],
+      "region_expand_mm": [-2, 0], "region_face_counts": [1, 0], "region_faces": [1], "region_weave": [true, false],
+      "region_zones": [null, {"kind": "box", "centre": [6.17, 15, 21.35], "axes": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+                              "half_mm": [7.17, 16, 1.65]}],
+      "organic_spacing_min_mm": 3, "organic_spacing_max_mm": 6, "organic_width_mm": 0.9, "organic_width_heavy_mm": 1.8,
+      "organic_tie_level": true, "organic_face_relief_mm": 1}})";
+    FileJob job = parse_file_job(text);
+    CHECK(job.settings.regions.size() == 2 && job.settings.regions[1].role == Role::NoLattice &&
+          job.settings.regions[1].zone.kind == Zone::Kind::Box);
+    const StepModel model = box_model(40, 30, 20);
+    Session session(model);
+    const SyntheticStress syn = organic_synthetic_stress(session, job.settings, TensorField{}, {{1, 1}}, {{{1}, job.organic}});
+    job.tensor_field = std::make_shared<TensorField>(syn.field);
+    job.file_format = "stl";
+    const FileResult fr = make_lattice_file(model, job, std::string(ORGANIC_RULES_TMP_DIR) + "/og2e_job.stl");
+    const std::string js = file_result_json(fr);
+    std::printf("OL-OG2E the file job's form: ok %d, flush at the zone %zu bars %zu ends; the result names it %d\n", fr.ok ? 1 : 0,
+                fr.relief.flush_zone_bars, fr.relief.flush_zone_ends,
+                js.find("\"no_lattice_zone\": {\"bars\": ") != std::string::npos && js.find("\"zone_footprints\"") != std::string::npos ? 1 : 0);
+    CHECK(fr.ok && fr.relief.flush_zone_bars > 0 && js.find("\"no_lattice_zone\": {\"bars\": ") != std::string::npos &&
+          js.find("\"zone_footprints\": [{\"zone\": 2, \"face\": 1") != std::string::npos &&
+          js.find("\"thin_zone_solid_dropped\": {\"area_mm2\": ") != std::string::npos);   // OG2f
+  }
+}
 static void test_net_kept_apart() {   // OJ8 (leg M): the net ON the open face, crossings made joints
   const StepModel model = box_model(30, 30, 20);
   const TensorField f = gap_field();
@@ -3389,6 +3721,9 @@ static void test_net_kept_apart() {   // OJ8 (leg M): the net ON the open face, 
 }
 
 int main() {
+  test_session_boundary();
+  test_upper_limits();
+  test_og2e_zone_flat();
   test_net_kept_apart();
   test_net_outline();
   test_groups_floors_additions();

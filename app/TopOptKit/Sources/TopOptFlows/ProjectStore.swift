@@ -90,6 +90,10 @@ public struct ProjectSnapshot: Codable, Equatable, Sendable {
     /// ★ Upload new version (his ask 2026-11-11, DATA-MODEL.md decision 12): the model this version brought and the groups
     /// it could not carry yet (`NewModelNote`). nil — never written — on every version that came another way.
     public var newModel: NewModelNote?
+    /// ★ notes27 (his print orientation, SPEC 2a): the face he chose for the bed (`BuildOrientation.plateUp`, the part's own
+    /// coordinates). nil — never written — when he never chose one (as placed), so older files decode and save as before. A
+    /// setting: a new face on a version with a result makes the next version (his 11-23 rule).
+    public var plateUp: SIMD3<Float>?
 
     public init(schemaVersion: Int = ProjectSnapshot.currentSchema, id: UUID, name: String,
                 material: String, process: ProcessKind, modelFileName: String,
@@ -99,7 +103,7 @@ public struct ProjectSnapshot: Codable, Equatable, Sendable {
                 optimized: Bool? = nil, printParams: PrintParams? = nil,
                 designBox: DesignBoxModel? = nil, lattice: LatticeSettings? = nil,
                 projectCADFaces: Bool? = nil, faceRegions: FaceRegionModel? = nil,
-                latticePageManual: Bool? = nil, newModel: NewModelNote? = nil) {
+                latticePageManual: Bool? = nil, newModel: NewModelNote? = nil, plateUp: SIMD3<Float>? = nil) {
         self.schemaVersion = schemaVersion
         self.id = id
         self.name = name
@@ -120,6 +124,7 @@ public struct ProjectSnapshot: Codable, Equatable, Sendable {
         self.faceRegions = faceRegions
         self.latticePageManual = latticePageManual
         self.newModel = newModel
+        self.plateUp = plateUp
     }
 }
 
@@ -215,6 +220,19 @@ public struct ProjectStore {
     /// Read the raw results blob, or nil if none was persisted / it's unreadable.
     public func loadResultsData(id: UUID) -> Data? {
         try? Data(contentsOf: resultsURL(id: id))
+    }
+
+    /// ★ notes25 (his iPad notes 11-23: Topology's results and the Lattice stage's "in the same version"): the version's
+    /// result of the OTHER stage, beside results.plist (which stays the last run's, as the Library reads it) — written and
+    /// removed with it (`RunModel.otherOutcome`).
+    public func otherResultsURL(id: UUID) -> URL {
+        projectDir(id).appendingPathComponent("results_other_stage.plist")
+    }
+
+    /// ★ notes28 (his "Check strength" on Results): the Organic inputs that made the version's print file, beside its results
+    /// (`OrganicResultInputs`; they name the result they made).
+    public func organicInputsDir(id: UUID) -> URL {
+        projectDir(id).appendingPathComponent(OrganicResultInputs.folderName, isDirectory: true)
     }
 
     /// Whether a results blob EXISTS for this project — asked without reading it

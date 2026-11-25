@@ -15,6 +15,7 @@
 // - Nothing opens a project here: everything is read from each version's saved results.
 
 import SwiftUI
+import simd
 import TopOptDesign
 import TopOptKit
 
@@ -25,11 +26,15 @@ struct LibraryResultView: View {
     let mesh: ViewerMesh?
     let picture: CGImage?
     let camera: OrbitCameraModel
+    /// ★ notes27 (his print orientation, SPEC 2a): standing the way it prints, on the bed.
+    var printUp: SIMD3<Float>? = nil
     var body: some View {
         ZStack {
             LibraryPicture(image: mesh == nil ? picture : nil)
             if let mesh {
-                MetalMeshView(mesh: mesh, camera: camera)
+                MetalMeshView(mesh: mesh, camera: camera,
+                              settleRotation: printUp.map(PrintDraw.settle(up:)) ?? simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0)),
+                              showGround: printUp != nil)
             } else if picture == nil {
                 ProgressView().controlSize(.regular)
             }
@@ -46,6 +51,8 @@ final class LibraryResultsLoader: ObservableObject {
         library.results(for: folder) { [weak self] r in if let r { self?.byFolder[folder] = r } }
     }
     func mesh(_ item: CompareItem) -> ViewerMesh? { byFolder[item.folder]?[safe: item.result]?.mesh }
+    /// ★ notes27: the way it prints.
+    func printUp(_ item: CompareItem) -> SIMD3<Float>? { byFolder[item.folder]?[safe: item.result]?.printUp }
 }
 
 // MARK: - 5 · Quick look
@@ -75,7 +82,8 @@ struct LibraryQuickLookView: View {
                 let i = steps.firstIndex { $0.folderID == folder }
                 HStack(alignment: .top, spacing: DS.Space.xl3) {
                     ZStack(alignment: .topLeading) {
-                        LibraryResultView(mesh: loader.mesh(item), picture: library.thumbnails[item], camera: camera)
+                        LibraryResultView(mesh: loader.mesh(item), picture: library.thumbnails[item], camera: camera,
+                                          printUp: loader.printUp(item))
                             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                         LibraryStageChip(snapshot: library.snapshots[folder]).padding(DS.Space.m)
                         if let n = v.summary?.count, n > 1 {
@@ -297,6 +305,10 @@ struct LibraryCompareView: View {
         switch request.scope {
         case .all:
             session = CompareSession(part: part, skipRejected: skipRejected); three = nil
+        case .new:   // ★ his iPad notes 11-22: the former pick against only the results never compared yet
+            session = CompareSession(part: part, newAgainst: library.formerPick(of: part).map { CompareItem(folder: $0.folder, result: $0.result) },
+                                     skipRejected: skipRejected, running: library.runningFolders)
+            three = nil
         case let .version(folder):
             three = library.version(folder).map(CompareSession.threeUp); session = nil
         }
@@ -416,7 +428,8 @@ struct LibraryCompareView: View {
         let v = library.version(item.folder)
         let mark = v?.mark(for: item.result) ?? ResultMark(result: item.result)
         return ZStack {
-            LibraryResultView(mesh: loader.mesh(item), picture: library.thumbnails[item], camera: camera(slot))
+            LibraryResultView(mesh: loader.mesh(item), picture: library.thumbnails[item], camera: camera(slot),
+                              printUp: loader.printUp(item))
             VStack {
                 HStack(spacing: DS.Space.s) {
                     if let side, let s = session {
@@ -531,6 +544,7 @@ struct LibraryCompareView: View {
     private func scopeTitle(_ part: LibraryPart) -> String {
         switch request.scope {
         case .all: return "All results (\(session?.queue.count ?? 0))"
+        case .new: return "New results (\(session?.queue.count ?? 0))"   // ★ 11-22: Compare new
         case let .version(f): return "v\(library.version(f)?.number ?? 0)’s results"
         }
     }

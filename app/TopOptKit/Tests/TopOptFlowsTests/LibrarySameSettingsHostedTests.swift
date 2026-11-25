@@ -81,11 +81,15 @@ final class LibrarySameSettingsHostedTests: XCTestCase {
         try clickOptimize(h, "Optimize with nothing changed")
         XCTAssertNil(h.frames.all["nextVersionOptimize"], "★ no Optimize as v2 card: it would only make v1 again")
         XCTAssertEqual(runs.count, 1, "nothing ran")
+        // ★ his iPad notes 11-23: the change makes v2 at once (the page moves there); Optimize runs it, no card
+        let v1 = p.id
         p.force.safetyMargin = 2.0
-        h.pump(0.6)
+        h.pump(0.8)
+        XCTAssertNotEqual(p.id, v1, "★ the change made the next version")
         XCTAssertNil(h.frames.all["optimizeSameSettings"], "a change: Optimize is live again")
         try clickOptimize(h, "Optimize after a change")
-        _ = try h.onScreen("nextVersionOptimize", "★ the Optimize as v2 card")
+        XCTAssertNil(h.frames.all["nextVersionOptimize"], "★ no Optimize as v2 card")
+        waitUntil(h, 15, "v2 runs") { runs.count == 2 }
     }
 
     /// Reopened later (the reviewer's (a)): its saved job matches the job this setup would send → "Same settings as v1".

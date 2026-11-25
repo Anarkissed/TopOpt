@@ -48,7 +48,8 @@ final class LatticeSampleViewTests: XCTestCase {
         let r = try XCTUnwrap(src.range(of: "private func latticePage(_ c: CellsPageContext, size: CGSize) -> AnyView {"))
         let page = String(src[r.upperBound...].prefix(1400))
         XCTAssertFalse(page.contains("if model.stage == .cell {"), "★ no longer only under the first view")
-        XCTAssertTrue(page.contains("LatticeSampleView(inputs: latticeSampleInputs, notInSample: latticeNotInSample)"))
+        // ★ RE-PINNED (notes26, his 11-23 "Yes to the live sample"): the finish and band are in the sample, no line says what isn't
+        XCTAssertTrue(page.contains("LatticeSampleView(inputs: latticeSampleInputs)"))
         XCTAssertTrue(src.contains("Text(s.title)"), "the switch says the views' own titles")
         XCTAssertEqual(LatticeWizardStage.cell.title, "Cells")
         XCTAssertEqual(LatticeWizardStage.lattice.title, "In a part")
@@ -102,13 +103,14 @@ final class LatticeSampleViewTests: XCTestCase {
         XCTAssertNotEqual(a, b, "★ the sample rebuilds when the grade changes")
     }
 
-    /// ★ What the engine's block can't show is said, in one line, only for what he has on.
-    func testTheSampleSaysWhatItCantShow() {
-        XCTAssertNil(LatticeSampleView.notInSampleLine(
-            LatticeSampleView.notInSample(organic: false, finish: .none, shapeBand: false, singleCell: false)), "nothing on, no line")
-        let all = LatticeSampleView.notInSample(organic: true, finish: .fullSkin, shapeBand: true, singleCell: true)
-        XCTAssertEqual(LatticeSampleView.notInSampleLine(all),
-                       "Not in the sample yet: Organic, Skin, the shape band, single-cell members")
+    /// ★ RE-PINNED (notes26, his 11-23 "Yes to the live sample" and his rule "never a note at the bottom-centre"): what the
+    /// engine's block couldn't show was said in an orange line at the sample's foot ("Not in the sample yet: Skin, the shape
+    /// band"). The sample is laid from his settings now (Notes26SampleTests), so nothing is left out and the line is gone.
+    func testTheSampleLeavesNothingOutSoNoLineSaysSo() throws {
+        let src = try FlexibleSource.code("LatticeSampleView.swift")
+        XCTAssertFalse(src.contains("Not in the sample yet"), "★ the line is gone")
+        XCTAssertFalse(src.contains("lattice-sample-not-shown"))
+        XCTAssertFalse(try FlexibleSource.code("LatticeSetupWizard.swift").contains("notInSample"), "★ nothing feeds it")
     }
 }
 
@@ -274,6 +276,44 @@ final class LatticeSampleCoverHostedTests: XCTestCase {
         XCTAssertLessThanOrEqual(asks.count, 1, "★ no loop: \(asks.count) asks, \(LatticeSampleView.recordedAppears) appears, "
                                  + "\(distinct.count) distinct inputs: \(distinct.prefix(3))")
         XCTAssertLessThanOrEqual(LatticeSampleBuilder.shared.builds - built, 1, "★ no build while nothing changes")
+    }
+
+    /// ★ 11-20 (his iPad, img1 to img3: "The engine can't build the Organic sample" every try): LatticeReview found the engine's
+    /// own cancel escaping — the sample's lay was cancelled mid-check on every try, so the page re-asked it while it built. With
+    /// nothing changing, the Organic sample is asked for once, its view comes up once, and it is built to the end.
+    func testTheOrganicSampleIsAskedOnceAndBuiltToTheEnd() throws {
+        let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
+        let p = r.project
+        p.lattice.flexible = nil
+        p.lattice.clearLatticeType()
+        p.lattice.chooseLatticeType(.aesthetic)
+        p.lattice.algorithm = "organic"
+        let f = try XCTUnwrap(p.selection.groups.first?.faces.first, "premise: a face")
+        _ = p.latticeStageTap(face: f, loop: [f])
+        let g = try XCTUnwrap(p.latticeList.activeGroupID)
+        p.lattice.groupRoles[g] = .include
+        p.latticeList.clearActive()
+        let pr = Probe()
+        let h = AppBuildHost(WorkspacePlaceholder(model: r.app, project: p).onPreferenceChange(LatticeProbeKey.self) { pr.all = $0 },
+                             size: AppBuildHost.landscape13, test: self)
+        h.pump(3)
+        func seen(_ id: String) -> CGRect? { (pr.all[id] ?? h.frames.all[id]).flatMap { $0.width > 1 ? $0 : nil } }
+        try h.pickFromMenu("capsuleMenu", "Aesthetic", what: "Topology's ● menu")
+        LatticeSampleView.recordedAsks = []; LatticeSampleView.recordedAppears = 0; LatticeSampleView.recordedCaptions = []
+        try h.tap("capsuleLattice", "the Lattice page", settle: 1.5)
+        let cells = try XCTUnwrap(seen("wizard-stage-\(LatticeWizardStage.cell.rawValue)"), "Cells is on the page")
+        h.click(CGPoint(x: cells.midX, y: cells.midY), settle: 1)
+        let start = LatticeSampleView.recordedAsks.count
+        let end = Date().addingTimeInterval(120)
+        while Date() < end, !LatticeSampleView.recordedCaptions.contains(where: { $0.hasSuffix("built by the engine") || $0.hasPrefix("The engine can") }) {
+            h.pump(1)
+        }
+        let asks = LatticeSampleView.recordedAsks.dropFirst(start)
+        print("ORGANIC SAMPLE: \(asks.count) asks, \(LatticeSampleView.recordedAppears) appears, captions \(LatticeSampleView.recordedCaptions)")
+        XCTAssertTrue(LatticeSampleView.recordedCaptions.contains { $0.hasSuffix("built by the engine") },
+                      "★ the Organic sample is built to the end: \(LatticeSampleView.recordedCaptions)")
+        XCTAssertLessThanOrEqual(asks.count, 1, "★ asked once, never re-asked while it builds: \(asks.count) asks")
+        XCTAssertFalse(LatticeSampleView.recordedCaptions.contains { $0.hasPrefix("The engine can") }, "★ never the engine's error")
     }
 
     /// The stalled run's own steps (LatticeCornerHostedTests): no lattice saved yet, Structural, the page opened by the

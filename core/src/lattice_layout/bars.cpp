@@ -8,6 +8,8 @@
 #include <cmath>
 #include <limits>
 #include <map>
+#include <cstdint>
+#include <unordered_map>
 #include <memory>
 #include <thread>
 #include <tuple>
@@ -117,6 +119,7 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
       threads > 0 ? threads : std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
 
   const SolidAt solid_at(layout);
+  const double bed_z = domain.measure().lo().z;   // K6: the bed, the part's lowest plane (the print frame's, when turned)
   struct Found { std::vector<Bar> bars; std::size_t stubs = 0; };
   std::vector<Found> per_cell(layout.cells.size());
   std::atomic<std::size_t> next{0};
@@ -124,9 +127,16 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
     const Domain::Probe probe = domain.probe();
     for (std::size_t ci = next.fetch_add(1); ci < layout.cells.size() && !domain.stop_asked(); ci = next.fetch_add(1)) {
       const Cell& c = layout.cells[ci];
+      if (c.absorbed) continue;   // K8: a sliver the next cell's struts reach across lays none of its own
       const Frame& f = layout.frames[static_cast<std::size_t>(c.frame)];
-      const double unit = c.size / type.S;
-      const double mid[3] = {c.lo[0] + 0.5 * c.size, c.lo[1] + 0.5 * c.size, c.lo[2] + 0.5 * c.size};
+      // K8: the struts span the cube and what it reaches past it on to a square face (Cell::reach_lo, reach_hi).
+      const double glo[3] = {c.lo[0] - c.reach_lo[0], c.lo[1] - c.reach_lo[1], c.lo[2] - c.reach_lo[2]};
+      const double unit[3] = {(c.size + c.reach_lo[0] + c.reach_hi[0]) / type.S,
+                              (c.size + c.reach_lo[1] + c.reach_hi[1]) / type.S,
+                              (c.size + c.reach_lo[2] + c.reach_hi[2]) / type.S};
+      const double mid[3] = {glo[0] + 0.5 * (c.size + c.reach_lo[0] + c.reach_hi[0]),
+                             glo[1] + 0.5 * (c.size + c.reach_lo[1] + c.reach_hi[1]),
+                             glo[2] + 0.5 * (c.size + c.reach_lo[2] + c.reach_hi[2])};
       Found& out = per_cell[ci];
       // Each node of the cell, read once (a hair toward the cell's middle): -1 not yet.
       std::map<std::array<int, 3>, bool> node_read;
@@ -134,7 +144,7 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
         const std::array<int, 3> k{n.x, n.y, n.z};
         auto it = node_read.find(k);
         if (it != node_read.end()) return it->second;
-        double q[3] = {c.lo[0] + n.x * unit, c.lo[1] + n.y * unit, c.lo[2] + n.z * unit};
+        double q[3] = {glo[0] + n.x * unit[0], glo[1] + n.y * unit[1], glo[2] + n.z * unit[2]};
         double off[3], len = 0.0;
         for (int a = 0; a < 3; ++a) { off[a] = mid[a] - q[a]; len += off[a] * off[a]; }
         len = std::sqrt(len);
@@ -145,8 +155,8 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
         return yes;
       };
       for (const StrutCellStrut& s : struts) {
-        const double qa[3] = {c.lo[0] + s.a.x * unit, c.lo[1] + s.a.y * unit, c.lo[2] + s.a.z * unit};
-        const double qb[3] = {c.lo[0] + s.b.x * unit, c.lo[1] + s.b.y * unit, c.lo[2] + s.b.z * unit};
+        const double qa[3] = {glo[0] + s.a.x * unit[0], glo[1] + s.a.y * unit[1], glo[2] + s.a.z * unit[2]};
+        const double qb[3] = {glo[0] + s.b.x * unit[0], glo[1] + s.b.y * unit[1], glo[2] + s.b.z * unit[2]};
         const detail::BarLine line(f.at(qa[0], qa[1], qa[2]), f.at(qb[0], qb[1], qb[2]));
         const Vec3 &a = line.a, &b = line.b;
         const double length = line.length;
@@ -226,7 +236,7 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
           // Its cut ends finished (S4, S11): found between the last point held and the next not, then tagged.
           const bool kept = detail::finish_bar_ends(piece, line, static_cast<double>(i) / n, static_cast<double>(j) / n,
                                                     i > 0, static_cast<double>(i - 1) / n, j < n,
-                                                    static_cast<double>(j + 1) / n, probe, solid_at, mine, at);
+                                                    static_cast<double>(j + 1) / n, probe, solid_at, mine, at, bed_z);
           i = j;
           if (!kept) { ++out.stubs; continue; }
           out.bars.push_back(piece);
@@ -789,36 +799,76 @@ void drop_loose_bars(Bars& bars, const std::vector<int>* arrived) {
   std::vector<char> keep(bars.bars.size(), 1);
   for (std::size_t i = 0; i < bars.bars.size(); ++i) {
     const Bar& b = bars.bars[i];
-    const bool in_a = arrived_at(b, false), in_b = arrived_at(b, true);
+    // K6: a Surface end on the bed has landed (the bed holds it).
+    const bool in_a = arrived_at(b, false) || (b.end_a == Bar::End::Surface && (b.on_bed & Bar::kOnBedA));
+    const bool in_b = arrived_at(b, true) || (b.end_b == Bar::End::Surface && (b.on_bed & Bar::kOnBedB));
     if (!(lands(b.end_a) || in_a) || !(lands(b.end_b) || in_b)) keep[i] = 0;
     if (b.end_a == Bar::End::Surface && !in_a) bars.cut_in_air.push_back({b.a, b.region, b.cell});
     if (b.end_b == Bar::End::Surface && !in_b) bars.cut_in_air.push_back({b.b, b.region, b.cell});
   }
   // A node end lands on another bar only while another bar is still there: take away
   // bars that hold a node alone, until none does. (A Solid end has landed already.)
-  for (bool again = true; again;) {
-    again = false;
-    std::map<PointKey, int> at;
-    for (std::size_t i = 0; i < bars.bars.size(); ++i) {
-      if (!keep[i]) continue;
-      ++at[key_of(bars.bars[i].a)];
-      ++at[key_of(bars.bars[i].b)];
+  // SPEED 11-22: by a work list, not in rounds. Taking a bar away only ever makes another more alone (or its joined end's
+  // bar gone), so every order reaches the one largest set in which no bar holds a node alone or ends in a bar taken away:
+  // the set the rounds reached. Points by key_of, as the ordered map keyed them.
+  const std::size_t n = bars.bars.size();
+  struct PointHash {
+    std::size_t operator()(const PointKey& k) const noexcept {
+      std::uint64_t h = 1469598103934665603ull;
+      for (long long v : {k.x, k.y, k.z}) h = (h ^ static_cast<std::uint64_t>(v)) * 1099511628211ull;
+      return static_cast<std::size_t>(h);
     }
-    for (std::size_t i = 0; i < bars.bars.size(); ++i) {
-      if (!keep[i]) continue;
-      const Bar& b = bars.bars[i];
-      const bool alone_a = b.end_a == Bar::End::Node && at[key_of(b.a)] < 2;
-      const bool alone_b = b.end_b == Bar::End::Node && at[key_of(b.b)] < 2;
-      // A joined end lands on the bar it ends in only while that bar is still there.
-      auto gone = [&](Bar::End e, int into) {
-        return e == Bar::End::Joined && into >= 0 && into < static_cast<int>(keep.size()) &&
-               !keep[static_cast<std::size_t>(into)];
-      };
-      if (alone_a || alone_b || gone(b.end_a, b.into_a) || gone(b.end_b, b.into_b)) {
-        keep[i] = 0;
-        again = true;
-      }
+  };
+  struct PointEq {
+    bool operator()(const PointKey& x, const PointKey& y) const noexcept { return x == y; }
+  };
+  std::unordered_map<PointKey, std::size_t, PointHash, PointEq> point_id;
+  point_id.reserve(2 * n);
+  std::vector<std::size_t> pa(n), pb(n);
+  std::vector<int> count;
+  std::vector<std::vector<std::size_t>> bars_at;
+  auto id_of = [&](const Vec3& p) {
+    const auto [it, fresh] = point_id.emplace(key_of(p), count.size());
+    if (fresh) { count.push_back(0); bars_at.emplace_back(); }
+    return it->second;
+  };
+  std::vector<std::vector<std::size_t>> joined_into(n);   // per bar: the bars with a Joined end in it
+  for (std::size_t i = 0; i < n; ++i) {
+    const Bar& b = bars.bars[i];
+    pa[i] = id_of(b.a);
+    pb[i] = id_of(b.b);
+    if (keep[i]) { ++count[pa[i]]; ++count[pb[i]]; }
+    bars_at[pa[i]].push_back(i);
+    if (pb[i] != pa[i]) bars_at[pb[i]].push_back(i);
+    for (int e = 0; e < 2; ++e) {
+      const Bar::End end = e ? b.end_b : b.end_a;
+      const int into = e ? b.into_b : b.into_a;
+      if (end == Bar::End::Joined && into >= 0 && into < static_cast<int>(n)) joined_into[static_cast<std::size_t>(into)].push_back(i);
     }
+  }
+  auto loose = [&](std::size_t i) {
+    const Bar& b = bars.bars[i];
+    const bool alone_a = b.end_a == Bar::End::Node && count[pa[i]] < 2;
+    const bool alone_b = b.end_b == Bar::End::Node && count[pb[i]] < 2;
+    // A joined end lands on the bar it ends in only while that bar is still there.
+    auto gone = [&](Bar::End e, int into) {
+      return e == Bar::End::Joined && into >= 0 && into < static_cast<int>(keep.size()) &&
+             !keep[static_cast<std::size_t>(into)];
+    };
+    return alone_a || alone_b || gone(b.end_a, b.into_a) || gone(b.end_b, b.into_b);
+  };
+  std::vector<std::size_t> work;
+  for (std::size_t i = 0; i < n; ++i) if (keep[i]) work.push_back(i);
+  while (!work.empty()) {
+    const std::size_t i = work.back();
+    work.pop_back();
+    if (!keep[i] || !loose(i)) continue;
+    keep[i] = 0;
+    --count[pa[i]];
+    --count[pb[i]];
+    for (const std::size_t p : {pa[i], pb[i]})
+      for (const std::size_t j : bars_at[p]) if (keep[j]) work.push_back(j);
+    for (const std::size_t j : joined_into[i]) if (keep[j]) work.push_back(j);
   }
   keep_only(bars, keep);
 }

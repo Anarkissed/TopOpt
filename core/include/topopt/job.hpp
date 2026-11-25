@@ -1575,6 +1575,9 @@ struct AnalyzeJobResult {
   std::string orientation_recheck_reason;
   double orientation_recheck_overhang_mm2 = 0.0;
   double orientation_recheck_baseline_overhang_mm2 = 0.0;
+  // P5 (his "Check strength"): the file turned to stand on the new up and painted (<out_dir>/oriented.3mf); "" when the
+  // up is not one of the part's six axes (Phase 1).
+  std::string orientation_recheck_file;
 
   // Constrained smoothing (handoff 2026-07-26-constrained-smooth-ui). Populated
   // only when the request enabled smoothing; the re-analysed numbers above then

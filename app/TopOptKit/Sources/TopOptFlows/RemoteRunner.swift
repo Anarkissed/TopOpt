@@ -145,8 +145,17 @@ public struct PersistedRemoteJob: Codable, Equatable, Sendable {
     public let projectID: UUID?
     /// The project's display name, for the banner copy. Optional (pre-119 / unknown).
     public let projectName: String?
+    /// ★ his notes 11-23 (his v7 lost): the Lattice button's jobs are recorded too — "lattice_file" (the print file) or
+    /// "lattice_strengthen" (Organic's strengthening, before the file). nil: an Optimize run (the Home banner's). Optional,
+    /// so every older record still decodes as the Optimize run it was.
+    public let kind: String?
+    /// A lattice job's part is Organic (its result is read as one).
+    public let organic: Bool?
+    /// A print file made from a strengthening: that job, whose summary rides the result.
+    public let strengthenJobID: String?
     public init(host: String, port: Int, fingerprint: String, jobID: String,
-                submittedAt: Date? = nil, projectID: UUID? = nil, projectName: String? = nil) {
+                submittedAt: Date? = nil, projectID: UUID? = nil, projectName: String? = nil,
+                kind: String? = nil, organic: Bool? = nil, strengthenJobID: String? = nil) {
         self.host = host
         self.port = port
         self.fingerprint = fingerprint
@@ -154,7 +163,13 @@ public struct PersistedRemoteJob: Codable, Equatable, Sendable {
         self.submittedAt = submittedAt
         self.projectID = projectID
         self.projectName = projectName
+        self.kind = kind
+        self.organic = organic
+        self.strengthenJobID = strengthenJobID
     }
+
+    /// A Lattice button job (followed and saved by itself, never offered on the Home banner).
+    public var isLatticeJob: Bool { kind != nil }
 }
 
 /// MULTI-SLOT store for outstanding remote jobs (UserDefaults). Handoff 121 made
@@ -471,6 +486,8 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             //    the fast-fail negative control, not a hang.
             let health = try getJSON(config.baseURL.appendingPathComponent("health"))
             let fp = (health["fingerprint"] as? String) ?? "unknown"
+            // ★ notes25 (D9): the Runs on ⚠ follows what this live check says (WorkerHealth.swift)
+            if let live = health["fingerprint"] as? String { WorkerHealth.heard(host: config.host, port: config.port, fingerprint: live) }
             guard fp == config.expectedFingerprint else {
                 throw RemoteRunError(
                     "worker core mismatch: worker \(fp), app \(config.expectedFingerprint). " +

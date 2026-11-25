@@ -4,10 +4,12 @@
 // (one line per result under the picture: "v2b · +10 % · 117 g · 8.7× ★★★ ⋯"), and "Make the cards as tall as required to
 // ensure the card doesn't look too crowded". This replaces B5's one full-width row per version (mockup #lib-part).
 //
-// Each version is one card, newest first, 3 across (2 in portrait, as the project page): a draft first marked "Draft" with its
-// Open, a branch right after the version it came from with "from v1" (no indent). A version with results shows them small,
-// side by side, and one line each: name, weight · strength, stars, its ⋯, its flags. A small result's tap is Quick look of THAT
-// result; a line's ⋯ holds Pick this · Print this · Reject · Export…; the version's ⋯ is app-map's list.
+// Each version is one card, 3 across (2 in portrait, as the project page): a draft marked "Draft" with its Open, a branch with
+// "from v1" (no indent). A version with results shows them small, side by side, and one line each: name, weight · strength,
+// stars, its ⋯, its flags. A line's ⋯ holds Pick this · Print this · Reject · Export…; the version's ⋯ is app-map's list.
+// ★ His iPad notes 11-22 (his decisions 1 and 4) changed two things here: the cards are newest first by when each last
+// changed (a draft and a branch mixed in by that date, no longer pinned), and a small result's tap OPENS the version on that
+// result (it was Quick look). LibraryNotes1122Tests holds the rest of those notes.
 #if canImport(AppKit) && canImport(MetalKit)
 import XCTest
 import SwiftUI
@@ -86,18 +88,19 @@ final class LibraryPartRowsHostedTests: XCTestCase {
                 XCTAssertLessThan(c.width, page / (portrait ? 1.9 : 2.9), "\(name): ★ a third of the width (half in portrait), not a full row")
             }
             if portrait {
-                XCTAssertEqual(v3.minY, v2.minY, accuracy: 0.5, "\(name): ★ two across in portrait, as the project page")
-                XCTAssertEqual(v1.minY, b.minY, accuracy: 0.5, "\(name): the next row")
-                XCTAssertGreaterThan(v1.minY, v3.maxY, "\(name): the next row under the first")
-                XCTAssertEqual(v1.minX, v3.minX, accuracy: 0.5, "\(name): the rows share one left edge")
+                XCTAssertEqual(b.minY, v3.minY, accuracy: 0.5, "\(name): ★ two across in portrait, as the project page")
+                XCTAssertEqual(v2.minY, v1.minY, accuracy: 0.5, "\(name): the next row")
+                XCTAssertGreaterThan(v2.minY, v3.maxY, "\(name): the next row under the first")
+                XCTAssertEqual(v2.minX, b.minX, accuracy: 0.5, "\(name): the rows share one left edge")
             } else {
-                for c in [v2, v1] { XCTAssertEqual(c.minY, v3.minY, accuracy: 0.5, "\(name): ★ three across, like the project page") }
-                XCTAssertGreaterThan(b.minY, v3.maxY, "\(name): the fourth on the next row")
-                XCTAssertEqual(b.minX, v3.minX, accuracy: 0.5, "\(name): ★ the branch has no indent: it follows its parent")
+                for c in [v3, v2] { XCTAssertEqual(c.minY, b.minY, accuracy: 0.5, "\(name): ★ three across, like the project page") }
+                XCTAssertGreaterThan(v1.minY, b.maxY, "\(name): the fourth on the next row")
+                XCTAssertEqual(v1.minX, b.minX, accuracy: 0.5, "\(name): ★ no indent")
             }
-            XCTAssertTrue(Self.before(v3, v2), "\(name): ★ a draft comes first")
+            // ★ his iPad notes 11-22: newest first by when each last changed — v1.1 (saved last), the draft v3, v2, v1
+            XCTAssertTrue(Self.before(b, v3), "\(name): ★ the newest (the branch, saved last) first: no longer under its parent")
+            XCTAssertTrue(Self.before(v3, v2), "\(name): ★ the draft by its date, not pinned first")
             XCTAssertTrue(Self.before(v2, v1), "\(name): ★ newest first")
-            XCTAssertTrue(Self.before(v1, b), "\(name): ★ a branch right after the version it came from")
             _ = try h.onScreen("library-version-v3-draft", "\(name): ★ the draft is marked Draft")
             _ = try h.onScreen("library-version-v3-open", "\(name): ★ a draft's card opens it")
             XCTAssertNotNil(h.frames.all["library-version-v1.1-from"], "\(name): ★ the branch says where it came from")
@@ -140,11 +143,16 @@ final class LibraryPartRowsHostedTests: XCTestCase {
         }
     }
 
-    func testASmallResultsTapIsQuickLookOfThatResult() throws {
-        let (h, _, _) = try host(AppBuildHost.landscape13)
+    /// ★ His iPad notes 11-22 (decision 4): "If I tap on an image it should automatically open up" — a small result's tap opens
+    /// the version on THAT result (it was Quick look of it; Quick look stays in the version's ⋯).
+    func testASmallResultsTapOpensTheVersionOnThatResult() throws {
+        let (h, app, f) = try host(AppBuildHost.landscape13)
         let c = try h.onScreen("library-mini-v2c", "v2c, small")
-        h.click(CGPoint(x: c.midX, y: c.midY), settle: 1.5)
-        _ = try h.onScreen("libraryQuickLook-v2c", "★ a tap on v2c is Quick look of v2c — not the version's shown result (b)")
+        h.click(CGPoint(x: c.midX, y: c.midY), settle: 2)
+        XCTAssertNil(h.frames.all["libraryQuickLook-v2c"], "★ no Quick look any more")
+        XCTAssertEqual(app.project?.id, f["2"], "★ the tap opens v2")
+        XCTAssertEqual(LibraryCardOpen.lastAsked?.folder, f["2"])
+        XCTAssertEqual(LibraryCardOpen.lastAsked?.result, 2, "★ on v2c — not the version's shown result (b)")
     }
 
     func testTheLineMenuPicksAndTheVersionMenuIsAppMapsList() throws {
@@ -158,8 +166,9 @@ final class LibraryPartRowsHostedTests: XCTestCase {
         _ = try h.onScreen("library-result-v1c-picked", "v1c now wears Picked")
         XCTAssertNil(h.frames.all["library-result-v2b-picked"], "★ one chosen per part: v2b is no longer picked")
         let version = try h.pickFromMenu("library-version-v1-menu", "Quick look", what: "v1's ⋯")
-        XCTAssertEqual(version, ["Quick look", "Compare its results", "Export…", "Open v1", "New draft from v1", "Rename…", "Delete v1…"],
-                       "★ app-map's version ⋯")
+        // ★ RE-PINNED (notes28, his notes on release 18): "Edit description" after Rename…
+        XCTAssertEqual(version, ["Details", "Quick look", "Compare its results", "Export…", "Open v1", "New draft from v1", "Rename…",
+                                 VersionDescriptionCopy.edit, "Delete v1…"], "★ app-map's version ⋯, with Details first (his iPad notes 11-22)")
         _ = try h.onScreen("libraryQuickLook-v1c", "Quick look from the version's ⋯ shows its chosen result")
     }
 

@@ -178,6 +178,8 @@ public enum OrganicSpotPaint {
 /// Holds the last paint so a SwiftUI body pass does not repaint (one paint per issue and mesh).
 @MainActor public final class OrganicSpotPaintMemo: ObservableObject {
     private var last: (key: String, result: OrganicSpotPaint.Result)?
+    /// The pop-up's frame (global), where its line starts (here rather than as the screen's @State: the view struct stays small).
+    @Published public var cardFrame: CGRect = .zero
     public init() {}
     public func paint(issue: String, ids: [Int], grid: OrganicSpotGrid, mesh: ViewerMesh) -> OrganicSpotPaint.Result {
         let key = issue + "·" + ids.map(String.init).joined(separator: ",") + "·\(mesh.flat.vertexCount)·\(mesh.signature.contentHash)"

@@ -62,7 +62,9 @@ final class ResultsRedesignTests: XCTestCase {
         XCTAssertEqual(c.first?.title, "Strong enough")
         XCTAssertEqual(c.first?.detail, "5.1× your load · built for 300%")
         XCTAssertTrue(c.contains { $0.title == "Every scenario holds" && $0.detail.hasSuffix(m.scenarios(for: m.selected).first { $0.governs }!.name) })
-        XCTAssertTrue(c.contains { $0.title.hasPrefix("Print it") })
+        // ★ RE-PINNED (notes27, his print orientation: the row says how it prints in his words — "Prints as you placed it" —
+        // never "Print it upright" against the file's axis)
+        XCTAssertTrue(c.contains { $0.title == "Prints as you placed it" })
         XCTAssertFalse(c.contains { $0.title.lowercased().contains("smooth") })
         XCTAssertEqual(ResultsChecks.checks(tab: m.selected, margin: 2.2, required: 3, safetyMargin: 3, scenarios: [],
                                             thinJoints: 2, bridged: true).map(\.title).first, "Not strong enough")

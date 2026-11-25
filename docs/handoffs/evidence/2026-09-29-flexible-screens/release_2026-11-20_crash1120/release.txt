@@ -1,0 +1,17 @@
+# Release 92a7fe55 — 2026-11-20 crash1120 (the crash opening older versions, 43c55544), app only
+# Core and worker unchanged: fingerprint 34c39df96ffd; "fingerprint": "34c39df96ffd"
+# Merged onto 30292f31; the merged app tree equals crash1120's, so its gate applies unchanged.
+# Commits (first parent of crash1120 since the release tip):
+#   146f6af9 Fix the crash opening older versions (his iPad, 11-20): the certify wizard's walk out of the workspace view
+#   43c55544 The Organic sample's hosted test: asked once and built to the end (his img1 to img3, 11-20)
+# Gates:
+#   Targeted gate in b9-screens-362 (c15, 11-20 18:47): WorkspaceBodySizeTests (sizes pinned: 21,968 / 1,632 bytes), LatticeSampleCoverHostedTests (the Organic sample asked once, built to the end), OrganicSpotPaintTests, OrganicCertifyTests, LatticeFileButtonTests, LatticeStageTests, ResultsDrawerLiftTests, LatticeSampleBuilderTests: 53 of 53.
+#   Fast track (his pick 11-20): the full app suite runs after the push.
+#   01:49 evidence 4fa848d1 pushed; release 98d90450 DONE
+#   18:49 checks ok: crash1120 43c55544, 2 commit(s), app-only, onto 30292f31, fingerprint 34c39df96ffd
+#   18:49 merged 92a7fe55; app tree == crash1120's, fingerprint 34c39df96ffd
+#   18:49 waiting for HEAVY.lock (TOReview 11-20 18:49 margin-vs-resolution analyze sweep (about 10 min, limit 40))
+#   18:58 lock taken (17 GB free)
+#   19:05 iPad device build green; lock released
+#   19:05 pushed 92a7fe55
+#   19:05 worker /health "fingerprint": "34c39df96ffd" (unchanged, no swap)
