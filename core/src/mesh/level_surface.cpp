@@ -395,43 +395,58 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
         }
     st_solid.swap(grow);
   }
-  std::vector<double> sdS, sdV;
-  auto build_sd = [&](const std::vector<char>& m, std::vector<double>& sd) {
-    sd.assign(n, 0.0);
-    long long cnt = 0;
-    for (std::size_t c = 0; c < n; ++c) {
-      sd[c] = m[c] ? -0.5 * h : 0.5 * h;
-      cnt += m[c];
-    }
-    if (cnt > 0) plsm_reinitialise(nx, ny, nz, sd, h, 2, false);
-    return cnt;
+  // The stamped sets as smooth fields: each set's 0/1 indicator interpolated by
+  // the Catmull-Rom tricubic today's export uses on the fill (mesh.cpp), level
+  // 0.5, scaled by h so its slope is about one, like a distance. Only what a run
+  // declares as geometry (frozen_sets) is exact; a stamp is a voxel decision and
+  // comes out as smooth as today's export, never rougher.
+  auto count = [](const std::vector<char>& m) {
+    long long c = 0;
+    for (char x : m) c += x;
+    return c;
   };
-  R.stamped_solid = build_sd(st_solid, sdS);
-  R.stamped_void = build_sd(st_void, sdV);
-  auto trilinear = [&](const std::vector<double>& f, double x, double y, double z) {
-    // x, y, z in voxel coordinates (centres at integers); clamped at the border.
-    auto cl = [](double u, int m) { return std::min(std::max(u, 0.0), static_cast<double>(m - 1)); };
-    x = cl(x, nx); y = cl(y, ny); z = cl(z, nz);
-    const int i0 = std::min(static_cast<int>(x), nx - 2 < 0 ? 0 : nx - 2);
-    const int j0 = std::min(static_cast<int>(y), ny - 2 < 0 ? 0 : ny - 2);
-    const int k0 = std::min(static_cast<int>(z), nz - 2 < 0 ? 0 : nz - 2);
-    const int i1 = std::min(i0 + 1, nx - 1), j1 = std::min(j0 + 1, ny - 1), k1 = std::min(k0 + 1, nz - 1);
-    const double fx = x - i0, fy = y - j0, fz = z - k0;
-    auto F = [&](int a, int b, int c) { return f[(static_cast<std::size_t>(c) * ny + b) * nx + a]; };
-    const double c00 = F(i0, j0, k0) * (1 - fx) + F(i1, j0, k0) * fx;
-    const double c10 = F(i0, j1, k0) * (1 - fx) + F(i1, j1, k0) * fx;
-    const double c01 = F(i0, j0, k1) * (1 - fx) + F(i1, j0, k1) * fx;
-    const double c11 = F(i0, j1, k1) * (1 - fx) + F(i1, j1, k1) * fx;
-    return (c00 * (1 - fy) + c10 * fy) * (1 - fz) + (c01 * (1 - fy) + c11 * fy) * fz;
+  R.stamped_solid = count(st_solid);
+  R.stamped_void = count(st_void);
+  auto cr = [](double t, double* w) {  // Catmull-Rom weights (Keys a = -1/2)
+    const double t2 = t * t, t3 = t2 * t;
+    w[0] = -0.5 * t3 + t2 - 0.5 * t;
+    w[1] = 1.5 * t3 - 2.5 * t2 + 1.0;
+    w[2] = -1.5 * t3 + 2.0 * t2 + 0.5 * t;
+    w[3] = 0.5 * t3 - 0.5 * t2;
+  };
+  auto smooth_set = [&](const std::vector<char>& m, double x, double y, double z) {
+    // x, y, z in voxel coordinates (centres at integers); outside the grid is 0.
+    const int i0 = static_cast<int>(std::floor(x)), j0 = static_cast<int>(std::floor(y)),
+              k0 = static_cast<int>(std::floor(z));
+    double wx[4], wy[4], wz[4];
+    cr(x - i0, wx);
+    cr(y - j0, wy);
+    cr(z - k0, wz);
+    double f = 0.0;
+    for (int c = 0; c < 4; ++c) {
+      const int kk = k0 - 1 + c;
+      if (kk < 0 || kk >= nz) continue;
+      for (int b = 0; b < 4; ++b) {
+        const int jj = j0 - 1 + b;
+        if (jj < 0 || jj >= ny) continue;
+        for (int a = 0; a < 4; ++a) {
+          const int ii = i0 - 1 + a;
+          if (ii < 0 || ii >= nx) continue;
+          if (m[(static_cast<std::size_t>(kk) * ny + jj) * nx + ii])
+            f += wx[a] * wy[b] * wz[c];
+        }
+      }
+    }
+    return (0.5 - f) * h;  // < 0 inside the set
   };
   auto field = [&](const Vec3& p) {
     const double x = (p.x - o.x) / h - 0.5, y = (p.y - o.y) / h - 0.5, z = (p.z - o.z) / h - 0.5;
     double f = phi_vox(x, y, z);
-    if (R.stamped_solid > 0) f = std::min(f, trilinear(sdS, x, y, z));
+    if (R.stamped_solid > 0) f = std::min(f, smooth_set(st_solid, x, y, z));
     // Far from zero the exact value never decides the surface: skip the distance
     // queries there.
     if (any_solid_body && f > -cap) f = std::min(f, frozen_solid(p));
-    if (R.stamped_void > 0) f = std::max(f, -trilinear(sdV, x, y, z));
+    if (R.stamped_void > 0) f = std::max(f, -smooth_set(st_void, x, y, z));
     if (any_void_body && f < cap) f = std::max(f, -frozen_void(p));
     return f;
   };
@@ -454,8 +469,9 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
     for (std::size_t q = 0; q < S.vertices.size(); q += 7) {
       const Vec3& p = S.vertices[q];
       double g[3];
-      (void)plsm_value_grad(L, B, alpha, (p.x - o.x) / h - 0.5, (p.y - o.y) / h - 0.5,
-                            (p.z - o.z) / h - 0.5, g);
+      const double ph = plsm_value_grad(L, B, alpha, (p.x - o.x) / h - 0.5,
+                                        (p.y - o.y) / h - 0.5, (p.z - o.z) / h - 0.5, g);
+      if (std::fabs(ph) > 0.01) continue;  // a vertex of a frozen set, not of phi
       sl.push_back(std::sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]) / h);
     }
     if (!sl.empty()) {
