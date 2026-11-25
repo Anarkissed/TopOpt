@@ -543,6 +543,23 @@ public struct LatticeWizardModel: Equatable, Sendable {
         stage = .cell            // §5c: the type's visual output is the lone cell
     }
 
+    /// ★ notes28 (all nine strut types): a type picked on the page carries the page's two densities to it at the same place
+    /// on the strut-width dial (`LatticeTypeChange`), so the old type's numbers never ride under the new type's name.
+    /// `organic`: Organic is on — the type is set and nothing else moves (Organic grows its own struts).
+    public mutating func setTopology(_ id: String, lineWidthMM: Double, organic: Bool = false) {
+        guard id != topologyID else { return }
+        let from = topologyID
+        if organic { topologyID = id } else { setTopology(id) }
+        var probe = LatticeSettings()
+        probe.cellSizeMode = cellSizeMode; probe.cellMM = cellMM; probe.cellMaxMM = cellMaxMM
+        let cell = LatticeTypeChange.referenceCellMM(probe)
+        func carry(_ rho: Double) -> Double {
+            LatticeTypeChange.carried(rho, from: from, to: id, cellMM: cell, lineWidthMM: lineWidthMM) ?? rho
+        }
+        relativeDensity = carry(relativeDensity)
+        minRelativeDensity = Swift.min(carry(minRelativeDensity), relativeDensity)
+    }
+
     /// ★ THE STAGE-A → STAGE-B TRANSITION. Once type, size and thickness are set,
     /// the cell moves into the sample and expands to tile it. Animated (§2 B).
     public mutating func enterLattice() {

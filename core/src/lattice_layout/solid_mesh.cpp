@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <thread>
 #include <unordered_map>
 
@@ -1161,6 +1162,8 @@ namespace {
 // The shapes build_mesh writes for one bar: its strut (round, a square bridge, or a weave's D section, O14) carried
 // `reach` past its ends, and a weave bar's blended feet (O11). build_mesh joins them; the tubes route (OF2) writes a
 // weave's shallow struts and its feet as closed shells of their own from the same shapes, never joined.
+// The sides of a round strut, and of the ball, at a joint where a level bar meets a vertical one (StrutMaker::add).
+constexpr int kFineSides = 16;
 struct StrutMaker {
   const MeshSpec& spec;
   int SEG = 12, HALF = 6;
@@ -1202,8 +1205,12 @@ struct StrutMaker {
   double d_area(double r, double half) const { return 2.0 * half * r + 0.5 * HALF * half * half * std::sin(kPi / HALF); }
   // `want_bar`: the strut itself (counted in rep.bars, its middle in `centres`); `want_feet`: its feet. False for a bar
   // of no length (nothing is written).
+  // `fine` (2026-11-24, every strut type): a round strut at a joint where a level bar (a bridge's square bar) meets a
+  // VERTICAL one, written with kFineSides sides: with the usual twelve, Manifold's union of the square bar, the 12-sided
+  // leg beside it and the column left a thin web hanging into the cell (fccz's coupon: three mid-air starts the print
+  // loop could not clear). No octet strut is vertical, so no octet joint is one of these: its file is as it was.
   bool add(const Bar& x, bool want_bar, bool want_feet, std::vector<Manifold>& solids, std::vector<Vec3>& centres,
-           MeshReport& rep) {
+           MeshReport& rep, bool fine = false) {
     const double r = 0.5 * x.width;
     Vec3 d{x.b.x - x.a.x, x.b.y - x.a.y, x.b.z - x.a.z};
     const double len = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
@@ -1249,7 +1256,9 @@ struct StrutMaker {
         const double l1 = std::sqrt(e1.x * e1.x + e1.y * e1.y + e1.z * e1.z);
         e1 = {e1.x / l1, e1.y / l1, e1.z / l1};
         const Vec3 e2{d.y * e1.z - d.z * e1.y, d.z * e1.x - d.x * e1.z, d.x * e1.y - d.y * e1.x};
-        solids.push_back(Manifold::Cylinder(len + pa + pb, r * kRound, r * kRound, SEG)
+        const int sides = fine ? std::max(SEG, kFineSides) : SEG;
+        const double round = fine ? std::sqrt(2.0 * kPi / (sides * std::sin(2.0 * kPi / sides))) : kRound;
+        solids.push_back(Manifold::Cylinder(len + pa + pb, r * round, r * round, sides)
                              .Transform(manifold::mat3x4(mv(e1), mv(e2), mv(d), mv(a))));
       }
       ++rep.bars;
@@ -1472,8 +1481,29 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
     std::vector<Vec3> centres;   // where each one is, to join them block by block
     struct Ball { Vec3 at; double r = 0.0; };
     std::map<std::uint64_t, Ball> balls;   // ordered: the same mesh on every run
+    // The joints where a level strut (a bridge) and a vertical strut both end (struts of the cells: skin bars, which may
+    // stand upright on a wall, and weave bars are not read): their round struts and their ball are written
+    // finer (StrutMaker::add, `fine`). A lattice with no vertical strut (the octet) has none, and its mesh is as before.
+    std::set<std::uint64_t> fine_joints;
+    {
+      std::set<std::uint64_t> level, upright;
+      for (const Bar& x : bars) {
+        const double dx = x.b.x - x.a.x, dy = x.b.y - x.a.y, dz = x.b.z - x.a.z;
+        const double len = std::sqrt(dx * dx + dy * dy + dz * dz);
+        if (!(len > 0.0) || x.skin || x.net || x.strand >= 0) continue;
+        std::set<std::uint64_t>* into = bar_is_bridge(x, spec.bridge_rise) ? &level
+                                        : std::fabs(dz) > 0.999 * len         ? &upright
+                                                                              : nullptr;
+        if (!into) continue;
+        into->insert(place_key(x.a));
+        into->insert(place_key(x.b));
+      }
+      for (const std::uint64_t k : level)
+        if (upright.count(k)) fine_joints.insert(k);
+    }
     for (const Bar& x : bars) {
-      if (!maker.add(x, true, true, solids, centres, rep)) continue;
+      const bool fine = !fine_joints.empty() && (fine_joints.count(place_key(x.a)) || fine_joints.count(place_key(x.b)));
+      if (!maker.add(x, true, true, solids, centres, rep, fine)) continue;
       const double r = 0.5 * x.width;
       for (int e = 0; e < 2; ++e) {
         if ((e == 0 ? x.end_a : x.end_b) == Bar::End::Surface) continue;
@@ -1494,7 +1524,13 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
       rep.posts_mm += p.z_top - p.z_bottom;
     }
     for (const auto& kv : balls) {
-      solids.push_back(Manifold::Sphere(kv.second.r * kRound, SEG).Translate(mv(kv.second.at)));
+      if (fine_joints.count(kv.first)) {
+        const int sides = std::max(SEG, kFineSides);
+        const double round = std::sqrt(2.0 * kPi / (sides * std::sin(2.0 * kPi / sides)));
+        solids.push_back(Manifold::Sphere(kv.second.r * round, sides).Translate(mv(kv.second.at)));
+      } else {
+        solids.push_back(Manifold::Sphere(kv.second.r * kRound, SEG).Translate(mv(kv.second.at)));
+      }
       centres.push_back(kv.second.at);
     }
     rep.balls = balls.size();

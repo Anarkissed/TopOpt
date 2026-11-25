@@ -3867,6 +3867,8 @@ public struct WorkspacePlaceholder: View {
             if ph == .failed { lastRunRequest = nil }
             // ★ his 11-22 · ★ notes25 (A5): the print file's chain ends with its run — a stop ends in the centred pop-up
             let saidInAPopUp = latticeChainEnded(ph)
+            // ★ notes28 (builder D's "cannot_lattice"): a print file whose check emptied a region says so in the centred pop-up
+            if ph == .succeeded, run.outcomeIsPrintFile { LatticeCannotLattice.sayEmptied(report: run.outcome?.reportJSON, in: project) }
             GenerationTimingLog.shared.printFileRunMoved(ph, outcome: run.outcome, failure: run.failure.map { "\($0)" })   // ★ 11-22
             // ★ Organic cut 2 (his certify wizard): an Organic part that does not certify opens on Results, where it is walked through
             // ★ his 11-21 ("have it spit out an actual result in the app - because NOTHING happens in app"): every Lattice run
@@ -14419,6 +14421,9 @@ public struct WorkspacePlaceholder: View {
         LatticeJobIncludeGate.optimizeRefusal(latticeEnabled: project.lattice.enabled,
                                               regions: project.latticeJobRegions().regions, wholePart: project.latticeStartsWhole)
             ?? latticeSettingsRefusal
+            // ★ notes28: Optimize carries the lattice in the OLD run's job (`latticeRunSpec`), so a type only the new engine
+            // lays is said here rather than run with no lattice
+            ?? (project.lattice.enabled ? LatticeTypeCatalog.selectionRefusal(project.lattice.topologyID) : nil)
     }
 
     /// ★ REVIEW 2026-10-01: a saved type core can't run (written by the variant page's old,
@@ -14428,7 +14433,12 @@ public struct WorkspacePlaceholder: View {
     /// where the offered chip is the fix. A different condition from "nothing set to lattice",
     /// so its own words. Lattice off asks nothing.
     private var latticeTypeRefusal: String? {
-        project.lattice.enabled ? LatticeTypeCatalog.selectionRefusal(project.lattice.topologyID) : nil
+        // ★ notes28 (all nine strut types): the Lattice stage's own catalog — the new engine's on a STEP part (an
+        // Aesthetic-only type on Structural is refused in its words), the old run's too where it still makes the lattice
+        guard project.lattice.enabled else { return nil }
+        return LatticeTypeCatalog.stageRefusal(project.lattice.topologyID,
+                                               structural: (project.lattice.stageMode ?? .structural) == .structural,
+                                               newEngine: latticeButtonOnNewEngine)
     }
     /// ★★ A SETTING CORE CAN'T RUN: the saved type (above), then Structural Stepped (reviewer,
     /// 2026-10-08: "BLOCK the run (no fallback), saying it waits on core's strength check for mixed

@@ -196,6 +196,10 @@ add_library(topopt
   src/lattice_layout/print_orientation.cpp
   # Install 3: the lattice the strength check sees (rule V4); the check itself is run_job.cpp's.
   src/lattice_layout/strength.cpp
+  # 2026-11-24: what differs by strut type (lattice_layout.hpp, PER TYPE; cell_struts).
+  src/lattice_layout/types.cpp
+  # 2026-11-24: a print coupon per strut type, made by this engine (lattice_layout_file.hpp, make_type_coupon).
+  src/lattice_layout/coupon.cpp
   # Brief E2, Part A: the Organic strength check, a frame of beams (lattice_layout_frame.hpp).
   src/lattice_layout/frame_check.cpp
   # Brief E2, Part B: the width floors, their file and strengthened.json (the job key "strengthened").
@@ -2362,6 +2366,17 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
       DOCS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../docs/strength-check"
       TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME lattice_strength COMMAND test_lattice_strength)
+    # The type matrix (2026-11-24): every strut type through the layout and the file job on core's fixtures (the cube,
+    # the filleted bore plate, the L-bracket stood on end), Structural (with the strength check) and Aesthetic, Auto
+    # and a typed cell, a face region and the whole part; each check with its RED control; the octet's bytes pinned.
+    add_executable(test_lattice_types_matrix tests/validation/test_lattice_types_matrix.cpp)
+    target_link_libraries(test_lattice_types_matrix PRIVATE topopt)
+    target_compile_definitions(test_lattice_types_matrix PRIVATE
+      MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+      SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+      FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
+      TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME lattice_types_matrix COMMAND test_lattice_types_matrix)
     # His print orientation (P2): "rotate at the door". The same job with up = +X makes the same file and report as a
     # copy of everything turned by hand; each input left unturned is caught (print_frame.hpp).
     add_executable(test_print_frame tests/validation/test_print_frame.cpp)
@@ -2635,7 +2650,8 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
     TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
-    LAW_EVIDENCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../evidence/2026-11-09-lattice-type-strut-laws")
+    LAW_EVIDENCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../evidence/2026-11-09-lattice-type-strut-laws"
+    LOW_LAW_EVIDENCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../evidence/2026-11-25-strut-laws-low-density")
   add_test(NAME lattice_type_strut_law COMMAND test_lattice_type_strut_law)
   # E2.4 (ruling 11-06 (1)): outer_finish "none", the open lattice, its cut cells uncredited.
   add_executable(test_lattice_open_finish tests/validation/test_lattice_open_finish.cpp)
@@ -3084,3 +3100,6 @@ foreach(_t topopt_cli test_lattice_clip_shell test_recycle test_cli test_organic
   endif()
 endforeach()
 add_custom_target(cli_suite DEPENDS ${_cli_suite_programs})
+
+# TO rebuild repo tests (docs/design/to-rebuild/04-tests.md).
+include(tests/to_rebuild_tests.cmake)

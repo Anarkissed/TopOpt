@@ -46,11 +46,17 @@ final class LatticeTypeCatalogTests: XCTestCase {
     /// runs the six struts now, so they are greyed by the TYPE GATE (their app batch, B7.n, has not shipped); core
     /// builds and certifies the two sheets but its job parser refuses their ids (core's fact, said first); the
     /// tetragonal three are neither. When a batch ships its id joins `appBatches` and this test fails by name.
-    func testTheLinkedCoreOffersTheOctetAlone() {
+    /// ★ RE-PINNED (notes28, the maintainer's decision 2026-11-24: all the strut types): the type gate is open for every
+    /// strut type, so the old run's catalog offers the seven core builds, certifies and runs; the sheets and the tetragonal
+    /// three are still greyed by core's own facts. (The Lattice stage's picker reads the new engine's catalog,
+    /// `layoutEntries` — LatticeCellTypesNotes28Tests.)
+    /// ★ RE-PINNED (362, his 11-25 "Sure"): this catalog is the OLD run's (variant page, Optimize's lattice, STL parts),
+    /// which keeps the octet only until it moves to the new engine; the six struts core runs read `oldRunPending` here.
+    func testTheLinkedCoreOffersEveryStrutTypeItRuns() {
         let e = LatticeTypeCatalog.entriesFromCore()
-        XCTAssertEqual(e.filter(\.offered).map(\.id), ["octet"], "★ a newly offered type: light it up (A2)")
+        XCTAssertEqual(e.filter(\.offered).map(\.id), ["octet"], "★ the old run: the octet only")
         for id in ["sc", "bcc", "fcc", "diamond", "kelvin", "rhombic"] {
-            XCTAssertEqual(e.first { $0.id == id }?.reason, LatticeTypeCatalog.appBatchPending, id)
+            XCTAssertEqual(e.first { $0.id == id }?.reason, LatticeTypeCatalog.oldRunPending, id)
             XCTAssertTrue(TopOptKit.jobSchemaAcceptsTopology(id), "★ core runs \(id)")
         }
         for id in ["gyroid", "schwarz_d"] {
@@ -60,22 +66,35 @@ final class LatticeTypeCatalogTests: XCTestCase {
             XCTAssertEqual(e.first { $0.id == id }?.reason, "Not buildable or strength-checked yet", id)
         }
         XCTAssertTrue(TopOptKit.jobSchemaAcceptsTopology("octet"), "the control")
-        XCTAssertEqual(LatticeTypeCatalog.appBatches, ["octet"])
+        XCTAssertEqual(LatticeTypeCatalog.appBatches, ["octet", "sc", "bcc", "fcc", "diamond", "kelvin", "rhombic",
+                                                       "bccz", "fccz", "reentrant"])
         XCTAssertEqual(LatticeSetupWizard.offeredTypeIDs, ["octet"])
+        // RED CONTROL: the stand-in opening every gate offers the seven core builds, certifies and runs
+        LatticeTypeCatalog.appBatchesForTests = LatticeTypeCatalog.appBatches
+        defer { LatticeTypeCatalog.appBatchesForTests = nil }
+        XCTAssertEqual(LatticeTypeCatalog.entriesFromCore().filter(\.offered).map(\.id),
+                       ["octet", "sc", "bcc", "fcc", "diamond", "kelvin", "rhombic"])
     }
 
     /// ★ Both pickers read the one catalog, and neither can write a type it does not offer.
     func testBothPickersReadTheCatalogAndNeverPickAGreyedType() throws {
         let wiz = try src("LatticeSetupWizard.swift"), page = try src("LatticePage.swift")
         // ★ RE-PINNED (B7 slice 2): the Lattice page draws the OFFERED types only (a label card, or big cards)
-        XCTAssertTrue(wiz.contains("let entries = LatticeTypeCatalog.entriesFromCore()")
-                      && wiz.contains("let offered = entries.filter(\\.offered)")
-                      && wiz.contains("ForEach(offered) { e in typeCard(e, fixesStale: stale != nil) }"),
+        // ★ RE-PINNED (notes28): the Lattice stage reads its own catalog (the new engine's, `stageEntries`), and draws the
+        // offered types plus the Aesthetic-only three greyed with their caption — a greyed card's tap says why, never picks
+        XCTAssertTrue(wiz.contains("LatticeTypeCatalog.stageEntries(structural:")
+                      && wiz.contains("let entries = typeEntries")
+                      && wiz.contains("let shown = entries.filter { $0.offered || Self.typeShownGreyed($0) }")
+                      && wiz.contains("ForEach(shown) { e in typeCard(e, fixesStale: stale != nil) }"),
                       "the Lattice page's cards")
-        XCTAssertTrue(page.contains("private var topologyEntries: [LatticeTypeEntry] { LatticeTypeCatalog.entriesFromCore() }"), "the page's pane")
-        XCTAssertTrue(page.contains("guard e.offered else { return }\n            project.lattice.topologyID = e.id"),
+        XCTAssertTrue(wiz.contains("guard e.offered else { typeReason = LatticeTypeCatalog.line(e); return }"),
+                      "★ a greyed card says why and is never picked")
+        XCTAssertTrue(page.contains("private var topologyEntries: [LatticeTypeEntry] {\n        LatticeTypeCatalog.stageEntries(structural: (project.lattice.stageMode ?? .structural) == .structural, newEngine: false)"),
+                      "the page's pane (★ notes28: the old run's facts with the stage's Structural rules)")
+        XCTAssertTrue(page.contains("guard e.offered else { return }\n            // ★ notes28")
+                      && page.contains("project.lattice = LatticeTypeChange.applied(project.lattice, to: e.id,"),
                       "★ the page never writes a greyed type")
-        XCTAssertFalse(wiz.contains("ForEach(entries) {"), "★ a greyed type is never drawn, so never picked")
+        XCTAssertFalse(wiz.contains("ForEach(entries) {"), "★ a type the stage can't use is drawn only greyed, so never picked")
         XCTAssertFalse(try src("LatticeTypeCatalog.swift").contains("topologyID ="), "the catalog writes nothing")
     }
 }

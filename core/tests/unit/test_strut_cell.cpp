@@ -54,6 +54,13 @@ int main() {
       {"diamond", topopt::LatticeTopology::Diamond, 16, 8},
       {"kelvin", topopt::LatticeTopology::Kelvin, 24, 12},
       {"rhombic", topopt::LatticeTopology::Rhombic, 32, 12},
+      // 2026-11-24 (the owner: all nine strut types on the new lattice engine, these three Aesthetic only): the
+      // tetragonal three, the family study's cells as the probe builds them. bcc's 8 or fcc's 12 and the one z column
+      // a cell owns; reentrant's 16 waist struts (4 waists x the 4 corners of their own face) and its column; its
+      // nodes the corner and the 4 waists.
+      {"bccz", topopt::LatticeTopology::Bccz, 9, 2},
+      {"fccz", topopt::LatticeTopology::Fccz, 13, 4},
+      {"reentrant", topopt::LatticeTopology::Reentrant, 17, 5},
   };
 
   // 1. The production table == the probe's, element for element.
@@ -119,17 +126,17 @@ int main() {
     }
   }
 
-  // 4. The tetragonal three refuse by name: no cell, no fallback.
-  for (topopt::LatticeTopology t : {topopt::LatticeTopology::Bccz, topopt::LatticeTopology::Fccz,
-                                    topopt::LatticeTopology::Reentrant}) {
-    CHECK(!topopt::lattice_has_strut_cell(t), "tetragonal: no strut cell");
+  // 4. Every strut type has its cell; a sheet has none and refuses by name, with no fallback.
+  for (const Case& c : cases) CHECK(topopt::lattice_has_strut_cell(c.topo), (std::string(c.id) + ": a strut cell").c_str());
+  for (topopt::LatticeTopology t : {topopt::LatticeTopology::Gyroid, topopt::LatticeTopology::SchwarzD}) {
+    CHECK(!topopt::lattice_has_strut_cell(t), "sheet: no strut cell");
     bool threw = false;
     try {
       (void)topopt::lattice_strut_cell(t);
     } catch (const std::invalid_argument& e) {
       threw = std::string(e.what()).find(topopt::lattice_topology_name(t)) != std::string::npos;
     }
-    CHECK(threw, "tetragonal: refuses, naming the type");
+    CHECK(threw, "sheet: refuses, naming the type");
   }
 
   std::printf("\n%s: %d checks, %d failures\n", g_failures == 0 ? "PASS" : "FAIL", g_checks,

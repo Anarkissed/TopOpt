@@ -636,6 +636,60 @@ public final class LatticeLayoutSession: @unchecked Sendable {
     }
 }
 
+extension LatticeLayoutSession {
+
+    /// ★ notes28 (his 11-24: all nine strut types on the new engine): what the engine knows of a strut type, asked without a
+    /// part (LatticeLayoutBridge.hpp, `lattice_layout_type_facts`). `lays`: the engine lays it; else `why` is core's own
+    /// words. `openLook` and `touch`: the type's two widths over its cell (core's lattice_width_bounds). The canonical cell
+    /// exactly as the engine lays it: node coordinates are integers in units of cell / `s`.
+    public struct TypeFacts: Sendable, Equatable {
+        public var lays: Bool
+        public var why: String
+        public var openLook: Double, touch: Double
+        public var s: Int
+        /// (a, b) per strut, in units of cell / s.
+        public var struts: [(SIMD3<Int32>, SIMD3<Int32>)]
+        public var nodes: [SIMD3<Int32>]
+        /// Core's two Structural verdicts (builder D's types.cpp), each nil or ONE plain line: Structural can never take
+        /// the type (the tetragonal three); its measured strength law credits none of the engine's struts yet.
+        public var structuralRefusal: String?
+        public var structuralNote: String?
+        public static func == (a: TypeFacts, b: TypeFacts) -> Bool {
+            a.lays == b.lays && a.why == b.why && a.openLook == b.openLook && a.touch == b.touch && a.s == b.s
+                && a.structuralRefusal == b.structuralRefusal && a.structuralNote == b.structuralNote
+                && a.struts.map { [$0.0, $0.1] } == b.struts.map { [$0.0, $0.1] } && a.nodes == b.nodes
+        }
+    }
+
+    private final class FactsCache: @unchecked Sendable {
+        let lock = NSLock()
+        var facts: [String: TypeFacts] = [:]
+    }
+    private static let factsCache = FactsCache()
+
+    /// The engine's facts for `topology` (cached: core's table never changes while the app runs). Never throws.
+    public static func typeFacts(_ topology: String) -> TypeFacts {
+        if let hit = factsCache.lock.withLock({ factsCache.facts[topology] }) { return hit }
+        let r = topoptbridge.lattice_layout_type_facts(std.string(topology))
+        let st = Array(r.struts), nd = Array(r.nodes)
+        var struts: [(SIMD3<Int32>, SIMD3<Int32>)] = []
+        for i in stride(from: 0, to: st.count - 5, by: 6) {
+            struts.append((SIMD3(st[i], st[i + 1], st[i + 2]), SIMD3(st[i + 3], st[i + 4], st[i + 5])))
+        }
+        var nodes: [SIMD3<Int32>] = []
+        for i in stride(from: 0, to: nd.count - 2, by: 3) { nodes.append(SIMD3(nd[i], nd[i + 1], nd[i + 2])) }
+        let refusal = String(r.structural_refusal), note = String(r.structural_note)
+        let f = TypeFacts(lays: r.lays, why: String(r.why), openLook: r.open_look, touch: r.touch, s: Int(r.s),
+                          struts: struts, nodes: nodes, structuralRefusal: refusal.isEmpty ? nil : refusal,
+                          structuralNote: note.isEmpty ? nil : note)
+        factsCache.lock.withLock { factsCache.facts[topology] = f }
+        return f
+    }
+
+    /// The engine lays `topology` (a strut type with its canonical cell and its two width limits in core).
+    public static func lays(_ topology: String) -> Bool { typeFacts(topology).lays }
+}
+
 /// One thread with its own stack, running jobs in order. Never main.
 final class LatticeLayoutWorker: @unchecked Sendable {
     private let cond = NSCondition()

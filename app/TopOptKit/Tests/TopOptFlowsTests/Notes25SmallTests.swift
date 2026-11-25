@@ -406,7 +406,11 @@ final class Notes25LatticeSetupHostedTests: XCTestCase {
             let end = Date().addingTimeInterval(240)
             while h.frames.all["latticeCannot"] != nil, Date() < end { h.pump(1) }
             XCTAssertNil(h.frames.all["latticeCannot"], "★ \(name): a setting that lays brings Lattice back")
-            h.pump(1)
+            // ★ 362 (release (20)): the title's frame is reported a moment after "latticeCannot" goes; on a busy Mac one pump
+            // read the old width (113.5 = "Cannot Lattice") while the screen already said "Lattice" (54) — wait for it, ≤ 10 s
+            let settle = Date().addingTimeInterval(10)
+            repeat { h.pump(1) } while (h.frames.all["latticeButton-title"].map {
+                abs($0.width - width(LatticeCannotLattice.title)) <= 1.5 } ?? false) && Date() < settle
             if let t = h.frames.all["latticeButton-title"] {
                 XCTAssertNotEqual(t.width, width(LatticeCannotLattice.title), accuracy: 1.5, "★ \(name): no longer Cannot Lattice")
             }
