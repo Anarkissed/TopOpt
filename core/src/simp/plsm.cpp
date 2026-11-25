@@ -987,7 +987,17 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
     // design variable stays the coefficients. PR 324's ablation measured this as
     // what holds |grad phi| near 1 — which keeps the band the width eta claims,
     // which keeps the volume measure from drifting.
-    if (plsm.refit_every > 0 && it % plsm.refit_every == 0) {
+    // ★ STAGE 3: THE SLOPE HELD AT EVERY CERTIFIED DESIGN. The re-fit re-normalises
+    // phi (slope one in the surface band); between re-fits the MMA steps steepen it
+    // (his stand and Top Motor Mount: median slope 2.5-6 at the shipped design,
+    // peaks in the hundreds). With the switch on the re-fit runs one iteration
+    // EARLIER, at the end of iteration 4, 9, 14 ..., so the design every margin
+    // probe certifies (iteration 10, 20 ...) -- the one that ships -- is a freshly
+    // re-normalised function (Wei 2018; research 3a candidate 3).
+    const bool refit_now =
+        plsm.refit_every > 0 &&
+        (surf.on ? (it + 1) % plsm.refit_every == 0 : it % plsm.refit_every == 0);
+    if (refit_now) {
       std::vector<double> ext = phi;  // phi carried across the drawn faces
       if (extend_layers > 0) extend_into_empty(grid, ext, extend_layers);
       std::vector<double> pr = ext;
