@@ -27,6 +27,20 @@ if(Eigen3_FOUND)
   add_test(NAME to_true_loads COMMAND test_to_true_loads)
 endif()
 
+# Test K: the same job twice in one process, an unrelated solve between, same
+# bytes. Runs the demo fixture through run_job, so it needs what test_cli needs.
+# Measures only until its first result is on record; then --gate.
+if(TARGET test_cli)
+  add_executable(test_to_same_job_twice tests/validation/test_to_same_job_twice.cpp)
+  target_link_libraries(test_to_same_job_twice PRIVATE topopt)
+  target_compile_definitions(test_to_same_job_twice PRIVATE
+    DEMO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo"
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME to_same_job_twice COMMAND test_to_same_job_twice)
+endif()
+
 # Tests B, F and J (stage 3): drawn faces exact after export, ripple at 1 to 10 mm,
 # and one clean solid, on the export meshed from the optimiser's function. The
 # drawn parts are built with Manifold and the export cuts with it.

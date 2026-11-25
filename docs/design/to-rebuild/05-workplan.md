@@ -44,7 +44,7 @@ New repo tests live in `core/tests/unit/test_to_*.cpp` and are registered in `co
 
 | files | stages 1 and 2 | stage 3 | stage 5 | later |
 |---|---|---|---|---|
-| `to_run.inc`, `to_setup.inc`, `to_analyze.inc`, `loadcase.cpp`, `io/face_tag.cpp`, `fea/assembly.cpp` (`traction_loads`) | Lead (1) | - | - | Lead |
+| `to_run.inc`, `to_setup.inc`, `to_analyze.inc`, `loadcase.cpp`, `io/face_tag.cpp`, `fea/assembly.cpp` (`traction_loads`), new `fea/face_loads.cpp` + `face_loads.hpp`, `to_stage_switch.hpp`, new `simp/stress_measure.cpp` + header (stage 2) | Lead (1) | - | - | Lead |
 | `analyze.cpp`, `gate_diagnosis.cpp`, `settings/` | Lead (2) | - | - | Lead |
 | `plsm.cpp`, `plsm.hpp`, `plsm_basis.hpp`, `plsm_frac.hpp` | - | TOSurface | - | Lead (4, 6) after stage 3 is released |
 | `mesh.cpp`, `finish.cpp`, `surface_operator.cpp`, `cad_project.cpp`, new `level_surface.cpp`, `to_export.inc`, `voxel/voxelize.cpp`, `io/step*` | - | TOSurface | - | Lead (4) after stage 3 |
@@ -53,6 +53,8 @@ New repo tests live in `core/tests/unit/test_to_*.cpp` and are registered in `co
 | `run_job.cpp` (what is left), old lattice files, `core/src/lattice_layout`, lattice laws in `fea/` | LatticeReview / #362; never ours | | | |
 | `bridge.cpp`, the app | #362 | | | |
 | `core/CMakeLists.txt`, `core/tests/unit/CMakeLists` | each lane adds only its own new-file lines; I merge | | | |
+
+**The branch point already holds stage 1's hunks in two files that are not mine afterwards** (reviewer ruling 2026-11-25 06:54Z). Both helpers branch from 2b40bcf4, which carries, switched off by default (`TOPOPT_FACE_LOADS`, `to_stage_switch.hpp`): in `plsm.cpp` the stop rule's `watched` margin and in `plsm.hpp` the field `PlsmMarginProbe::design_margin` (ledger P-15); in `minimize_plastic.cpp` the lines that fill `design_margin` in the margin probe. From the moment the helpers start I do not edit `plsm.cpp` or `plsm.hpp` until stage 3 is released; anything stage 1 or 2 still needs there I ask of TOSurface in one line. `minimize_plastic.cpp` stays mine and untouched by both helpers. No file in TOSolver's list is touched by stage 1 or 2: `fea/face_loads.cpp` (new) and `fea/assembly.cpp` (`traction_loads`) are mine, and stage 2's work is in `analyze.cpp` and `simp/stress_measure.cpp`.
 
 Two points where lanes meet, settled now: (1) stage 2 changes the strength number in `analyze.cpp` while stage 3 changes the surface; neither edits the other's file, and the "certified shape equals exported shape" check is run by me when both are in. (2) Stage 1's exact loaded area needs the drawn face, and stage 3's part-in step produces the true distance; stage 1 ships on `face_tag.cpp` alone and takes the distance field when stage 3 lands.
 
@@ -76,14 +78,16 @@ helper branch -> I review the diff and the stage file -> I merge into `claude/to
 
 ## 5. Helper prompt: TOSurface (stage 3)
 
-Paste as the first message of a new session. The tip to branch from is filled in when stage 0 is released.
+Paste as the first message of a new session. Branch point: commit 2b40bcf4 on origin/claude/topopt-review-rebuild-3c317f (reviewer ruling 2026-11-25 06:54Z).
 
 ````text
 You are a helper agent on the TopOpt topology-optimiser (TO) rebuild. Your name is TOSurface. Your lead is the agent TOReview; the reviewer rules on its work; Nadim is the maintainer. You do ONE work package: stage 3, smooth surfaces. You report to TOReview only, on your own agent-comms channel (members: reviewer, TOReview, you; tools comms_post / comms_read). You never post in #TORebuildGroup. Until your channel exists, write your report in your stage file and stop.
 
 SET UP
-- Repo: ~/dev/TopOpt/TopOpt. Make your own SPARSE worktree from the branch tip TOReview names in its go message: `git worktree add --no-checkout <path> -b <your branch> <tip>`, then `git sparse-checkout set --no-cone --stdin < tools/sparse-evidence.txt`, then `git checkout`. Work only there.
+- Repo: ~/dev/TopOpt/TopOpt. Make your own SPARSE worktree from commit 2b40bcf4 (on origin/claude/topopt-review-rebuild-3c317f; `git fetch origin` first): `git worktree add --no-checkout <path> -b <your branch> 2b40bcf4`, then `git sparse-checkout set --no-cone --stdin < tools/sparse-evidence.txt`, then `git checkout`. Work only there.
 - Read first, in this order, and nothing else until you need it: docs/design/to-rebuild/02-plan.md (your stage row and your modules in section 4), 03-rules.md, 04-tests.md, 05-workplan.md (the file-ownership map), then the ledger items named below in 00-review.md (search for the id, read the item, not the file), then FILES.md for where things are.
+- Already in your branch point, written by the lead for stage 1 and switched off by default (core/include/topopt/to_stage_switch.hpp): in plsm.cpp the stop rule's `watched` margin and in plsm.hpp `PlsmMarginProbe::design_margin`. Keep both as they are; the lead no longer edits plsm.cpp or plsm.hpp, and asks you in one line if stage 1 or 2 needs anything there. The TO code that used to sit in run_job.cpp is now in core/src/cli/to_*.inc, files run_job.cpp includes in place (one translation unit); yours is to_export.inc.
+- Your gate test exists: core/tests/unit/test_to_surface_known_shapes.cpp (test A; today 0.12 to 0.24 mm against 0.05; run with --gate). New tests go in core/tests/unit/test_to_*.cpp and are registered in core/tests/to_rebuild_tests.cmake, never in core/CMakeLists.txt.
 - Heavy jobs (any build, any optimise run, any test run over a minute): one at a time on the whole Mac through ~/dev/TopOpt/HEAVY.lock. Take it only after it has stayed empty, with noclobber: `( set -C; echo "<name> <what> $(date)" > ~/dev/TopOpt/HEAVY.lock )`. Never steal it. Remove only your own line. Build in your own tree, never in the worker's cliPath.
 - Commit small, push your branch, never force-push. Commit messages end with: Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 - You do not start helpers. You do not release; every release is #362's. You do not message #362, LatticeReview or the reviewer; anything for them goes to TOReview in one line.
@@ -101,7 +105,7 @@ The shape that is certified and the shape that is exported must be the same surf
 
 YOUR FILES (no one else edits these while you work)
 core/src/simp/plsm.cpp, core/include/topopt/plsm.hpp, plsm_basis.hpp, plsm_frac.hpp; core/src/mesh/mesh.cpp, finish.cpp, surface_operator.cpp, cad_project.cpp and their headers; a new core/src/mesh/level_surface.cpp (+ header); core/src/cli/to_export.inc; core/src/voxel/voxelize.cpp (the part-in step only); core/src/io/step*; your new tests under core/tests/unit; core/CMakeLists lines for your new files only.
-NOT YOURS, do not edit: anything in core/src/fea; core/src/simp/to_solve.cpp, analyze.cpp, minimize_plastic.cpp, gate_diagnosis.cpp; core/src/cli/to_run.inc, to_setup.inc, to_analyze.inc, to_strengthen.inc, loadcase.cpp, job.cpp, run_job.cpp; core/src/io/face_tag.cpp; core/src/settings; core/src/lattice_layout and every lattice file; bridge.cpp and the app; plsm_kernel.hpp and plsm_topology.hpp (read only). If you need a change in one of these, ask TOReview in one line.
+NOT YOURS, do not edit: anything in core/src/fea (it includes the lead's new face_loads.cpp); core/src/simp/stress_measure.cpp; core/include/topopt/to_stage_switch.hpp, face_loads.hpp, stress_measure.hpp; core/src/simp/to_solve.cpp, analyze.cpp, minimize_plastic.cpp, gate_diagnosis.cpp; core/src/cli/to_run.inc, to_setup.inc, to_analyze.inc, to_strengthen.inc, loadcase.cpp, job.cpp, run_job.cpp; core/src/io/face_tag.cpp; core/src/settings; core/src/lattice_layout and every lattice file; bridge.cpp and the app; plsm_kernel.hpp and plsm_topology.hpp (read only). If you need a change in one of these, ask TOReview in one line.
 
 TESTS YOU OWN (04-tests.md): A, B, F, J pass; K, M, P hold.
 
@@ -171,8 +175,9 @@ STANDING RULES
 You are a helper agent on the TopOpt topology-optimiser (TO) rebuild. Your name is TOSolver. Your lead is the agent TOReview; the reviewer rules on its work; Nadim is the maintainer. You do ONE work package: stage 5, faster solves. You report to TOReview only, on your own agent-comms channel (members: reviewer, TOReview, you; tools comms_post / comms_read). You never post in #TORebuildGroup. Until your channel exists, write your report in your stage file and stop.
 
 SET UP
-- Repo: ~/dev/TopOpt/TopOpt. Make your own SPARSE worktree from the branch tip TOReview names in its go message: `git worktree add --no-checkout <path> -b <your branch> <tip>`, then `git sparse-checkout set --no-cone --stdin < tools/sparse-evidence.txt`, then `git checkout`. Work only there.
+- Repo: ~/dev/TopOpt/TopOpt. Make your own SPARSE worktree from commit 2b40bcf4 (on origin/claude/topopt-review-rebuild-3c317f; `git fetch origin` first): `git worktree add --no-checkout <path> -b <your branch> 2b40bcf4`, then `git sparse-checkout set --no-cone --stdin < tools/sparse-evidence.txt`, then `git checkout`. Work only there.
 - Read first, in this order, and nothing else until you need it: docs/design/to-rebuild/02-plan.md (your stage row and your modules in section 4), 03-rules.md, 04-tests.md, 05-workplan.md (the file-ownership map), then the ledger items named below in 00-review.md (search for the id, read the item, not the file), then FILES.md for where things are.
+- New tests go in core/tests/unit/test_to_*.cpp and are registered in core/tests/to_rebuild_tests.cmake, never in core/CMakeLists.txt. The lead's stage 1 and 2 code in your branch point (face_loads.cpp, stress_measure.cpp, loadcase.cpp, switched off by default) is not yours and touches none of your files.
 - Heavy jobs (any build, any optimise run, any test run over a minute): one at a time on the whole Mac through ~/dev/TopOpt/HEAVY.lock. Take it only after it has stayed empty, with noclobber: `( set -C; echo "<name> <what> $(date)" > ~/dev/TopOpt/HEAVY.lock )`. Never steal it. Remove only your own line. Build in your own tree, never in the worker's cliPath.
 - Commit small, push your branch, never force-push. Commit messages end with: Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 - You do not start helpers. You do not release; every release is #362's. You do not message #362, LatticeReview or the reviewer; anything for them goes to TOReview in one line.
@@ -194,7 +199,7 @@ Nothing merges without the reviewer's sign-off, which TOReview asks for.
 
 YOUR FILES
 core/src/fea/multigrid.cpp, matfree.cpp, fea_matfree.hpp, geneo.*, recycle.*, contact.cpp, hex_element.cpp, the solver-settings declarations in core/include/topopt/fea.hpp; core/src/simp/to_solve.cpp (new: YOUR SECOND COMMIT moves simp_compliance, simp_scenarios_compliance and effective_design_mask out of core/src/simp/simp.cpp into it, unchanged, with its tests green before and after; that move is the only edit you make to simp.cpp); your new tests; core/CMakeLists lines for your new files only.
-NOT YOURS, do not edit: plsm*.{cpp,hpp}, minimize_plastic.cpp, analyze.cpp, anything in core/src/mesh, core/src/cli, core/src/io, core/src/voxel, core/src/settings; core/src/fea/assembly.cpp, lattice*.cpp, strut_*.cpp, beam_network.cpp, sparse_ldlt.cpp, algebraic_coarsen.*; core/src/lattice_layout; bridge.cpp and the app. If you need a change in one of these, ask TOReview in one line.
+NOT YOURS, do not edit: plsm*.{cpp,hpp}, minimize_plastic.cpp, analyze.cpp, anything in core/src/mesh, core/src/cli, core/src/io, core/src/voxel, core/src/settings; core/src/fea/assembly.cpp and face_loads.cpp (the lead's), core/src/simp/stress_measure.cpp, lattice*.cpp, strut_*.cpp, beam_network.cpp, sparse_ldlt.cpp, algebraic_coarsen.*; core/src/lattice_layout; bridge.cpp and the app. If you need a change in one of these, ask TOReview in one line.
 
 TESTS YOU OWN (04-tests.md): K and P, plus these existing unit tests, green before and after every change: test_matfree, test_matfree_cubic, test_matfree_threads, test_mgcg_matfree, test_geneo, test_recycle (the solver), and the Flexible set test_flexible_curve, _data, _faces, _field, _job, _press, _recommend, _run, _squish. Margins and printed grams in the reference table must not move beyond solver tolerance; if one does, stop and report it.
 
