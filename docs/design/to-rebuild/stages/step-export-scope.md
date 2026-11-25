@@ -13,6 +13,8 @@ A STEP solid is a B-rep: smooth patches (planes, cylinders, NURBS) bounded by ed
 | CGM | CATIA |
 | OCCT | FreeCAD (and our own core) |
 
+HIS CAD program is **Shapr3D** (Parasolid; no scripting), so Shapr3D is the first program every prototype file must open and edit in.
+
 "Editable" means direct edits on a solid; no feature history can be made for an optimised shape.
 
 ## Solid parts (the optimised shape)
@@ -36,7 +38,7 @@ Options to discuss:
 2. **Solid as B-rep, lattice as a mesh body** in the same STEP (AP242 tessellated) or beside it (3MF / STL in the same coordinates). Reference only in most programs.
 3. **Lattice as full B-rep** for small strut lattices only (each strut a cylinder, each node a blend), with a size gate and a plain line when refused.
 
-4. **One cell, instanced** (his idea, 2026-11-25). STEP cannot carry a pattern FEATURE: the standards for feature history exist on paper (ISO 10303-108 and its relatives, NIST test translators) but mainstream CAD does not import them. STEP CAN carry an ASSEMBLY: the cell as one part, placed once per cell by a transform. Every major CAD program keeps those placements pointing at the one part, so editing the cell updates every copy: the CAD program's instancing does the work, not its pattern tool. Small file (one cell plus a list of placements). Limits: only the full, identical interior cells can be copies; graded cells, cells cut by a wall, skins and rims are each unique and come as their own bodies (or as the zone of option 1); the copies are separate bodies, so printing an edited lattice means a union in CAD (slow at thousands) or printing from our app; an edited cell must still meet its neighbours at the same faces. A truly parametric pattern (edit a dimension, the pattern regenerates, walls re-cut) needs a script per CAD program (Onshape FeatureScript, a SolidWorks or Fusion API script, FreeCAD Python), each with its own limits at thousands of cells.
+4. **One cell, instanced** (his idea, 2026-11-25). STEP cannot carry a pattern FEATURE: the standards for feature history exist on paper (ISO 10303-108 and its relatives, NIST test translators) but mainstream CAD does not import them. STEP CAN carry an ASSEMBLY: the cell as one part, placed once per cell by a transform. Every major CAD program keeps those placements pointing at the one part, so editing the cell updates every copy: the CAD program's instancing does the work, not its pattern tool. Small file (one cell plus a list of placements). Limits: only the full, identical interior cells can be copies; graded cells, cells cut by a wall, skins and rims are each unique and come as their own bodies (or as the zone of option 1); the copies are separate bodies, so printing an edited lattice means a union in CAD (slow at thousands) or printing from our app; an edited cell must still meet its neighbours at the same faces. ~~A per-CAD-program script for a truly parametric pattern~~: SCRATCHED by him 2026-11-25 ("an extra script is completely impossible" in Shapr3D, and most users could not run one). The instancing itself needs no script; whether Shapr3D keeps STEP instances linked is to test.
 
 Lattice export is LatticeReview's area: any build is joint.
 
