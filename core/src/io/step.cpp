@@ -273,8 +273,10 @@ StepModel import_step_file(const std::string& path,
     BRepTools::Clean(shape);
     Tessellated tf = tessellate(shape, 0.01, std::min(0.1, tess.angular_deflection));
     (void)drop_repeated_index_triangles(tf);
-    if (!tf.mesh.empty() && check_watertight(tf.mesh).watertight)
+    if (!tf.mesh.empty() && check_watertight(tf.mesh).watertight) {
       model.export_mesh = std::move(tf.mesh);
+      model.export_triangle_face = std::move(tf.triangle_face);
+    }
     else
       std::fprintf(stderr, "[step] the 0.01 mm copy is not watertight; the export cuts "
                            "with the 0.1 mm mesh (%s)\n", path.c_str());

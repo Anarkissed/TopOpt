@@ -2,13 +2,21 @@
 #include "topopt/level_surface.hpp"
 
 #include <algorithm>
+#include <array>
+#include <map>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <sstream>
 
+#include <memory>
+#include <set>
+
+#include "topopt/frozen_sets.hpp"
+#include "topopt/mesh_distance.hpp"
 #include "topopt/pipeline.hpp"
 #include "topopt/plsm_kernel.hpp"
+#include "topopt/step.hpp"
 
 #ifdef TOPOPT_HAVE_MANIFOLD
 #include "manifold/manifold.h"
@@ -176,10 +184,99 @@ TriangleMesh mesh_intersection(const TriangleMesh& a, const TriangleMesh& b, std
 #endif
 }
 
+namespace {
+// One frozen body by true distance: within `depth` of its own drawn triangles and
+// inside its cuts. Value < 0 inside, clamped at `cap` far from it (far values
+// never decide a surface).
+struct FrozenBody {
+  TriangleMesh tri;  // its own triangles (an open surface; unsigned distance only)
+  std::unique_ptr<MeshDistance> dist;
+  std::vector<RegionCut> cuts;
+  double depth = 0.0;
+  bool solid = true;
+  Vec3 lo, hi;  // the triangles' box grown by depth + cap
+  double value(const Vec3& p, double cap) const {
+    if (p.x < lo.x || p.y < lo.y || p.z < lo.z || p.x > hi.x || p.y > hi.y || p.z > hi.z)
+      return cap;
+    double v = dist->unsigned_distance(p) - depth;
+    for (const RegionCut& c : cuts) {
+      const double nn = std::sqrt(c.normal.x * c.normal.x + c.normal.y * c.normal.y +
+                                  c.normal.z * c.normal.z);
+      if (!(nn > 0.0)) continue;
+      v = std::max(v, -((p.x - c.point.x) * c.normal.x + (p.y - c.point.y) * c.normal.y +
+                        (p.z - c.point.z) * c.normal.z) / nn);
+    }
+    return std::min(v, cap);
+  }
+};
+
+// The bodies of `sets`, each from the 0.01 mm copy of its faces when it holds
+// whole faces and the copy exists (ledger I-02), else from the coarse triangles.
+std::vector<FrozenBody> make_frozen_bodies(const std::vector<FrozenFaceSet>& sets,
+                                           const StepModel& model, double cap) {
+  std::vector<FrozenBody> out;
+  // Coarse triangle count per face, to tell whole faces from parts of faces.
+  std::vector<int> per_face;
+  for (int f : model.triangle_face) {
+    if (f >= static_cast<int>(per_face.size())) per_face.resize(static_cast<std::size_t>(f) + 1, 0);
+    if (f >= 0) ++per_face[static_cast<std::size_t>(f)];
+  }
+  const bool fine = !model.export_mesh.empty() &&
+                    model.export_triangle_face.size() == model.export_mesh.triangles.size();
+  for (const FrozenFaceSet& fs : sets) {
+    if (fs.triangles.empty() || !(fs.depth_mm > 0.0)) continue;
+    FrozenBody b;
+    b.cuts = fs.cuts;
+    b.depth = fs.depth_mm;
+    b.solid = fs.solid;
+    std::map<int, int> count;  // face -> triangles of it in the set
+    for (int t : fs.triangles)
+      if (t >= 0 && t < static_cast<int>(model.triangle_face.size()))
+        ++count[model.triangle_face[static_cast<std::size_t>(t)]];
+    bool whole = fine;
+    for (const auto& kv : count)
+      if (kv.first < 0 || kv.second != per_face[static_cast<std::size_t>(kv.first)]) whole = false;
+    const TriangleMesh& src = whole ? model.export_mesh : model.mesh;
+    std::vector<int> pick;
+    if (whole) {
+      for (std::size_t t = 0; t < model.export_triangle_face.size(); ++t)
+        if (count.count(model.export_triangle_face[t])) pick.push_back(static_cast<int>(t));
+    } else {
+      pick = fs.triangles;
+    }
+    std::map<int, int> remap;
+    for (int t : pick) {
+      if (t < 0 || t >= static_cast<int>(src.triangles.size())) continue;
+      std::array<int, 3> tri{};
+      for (int c = 0; c < 3; ++c) {
+        const int vi = src.triangles[static_cast<std::size_t>(t)][c];
+        auto it = remap.find(vi);
+        if (it == remap.end()) {
+          it = remap.emplace(vi, static_cast<int>(b.tri.vertices.size())).first;
+          b.tri.vertices.push_back(src.vertices[static_cast<std::size_t>(vi)]);
+        }
+        tri[c] = it->second;
+      }
+      b.tri.triangles.push_back(tri);
+    }
+    if (b.tri.triangles.empty()) continue;
+    bounding_box(b.tri, b.lo, b.hi);
+    const double g = b.depth + cap;
+    b.lo = Vec3{b.lo.x - g, b.lo.y - g, b.lo.z - g};
+    b.hi = Vec3{b.hi.x + g, b.hi.y + g, b.hi.z + g};
+    out.push_back(std::move(b));
+    out.back().dist = std::make_unique<MeshDistance>(out.back().tri);
+  }
+  return out;
+}
+}  // namespace
+
 TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelGrid& sg,
                                    const TriangleMesh& part, int smooth_factor,
                                    double printed_iso, std::string* why,
-                                   FunctionSurfaceReport* rep) {
+                                   FunctionSurfaceReport* rep,
+                                   const std::vector<FrozenFaceSet>* frozen,
+                                   const StepModel* model) {
   FunctionSurfaceReport local;
   FunctionSurfaceReport& R = rep ? *rep : local;
   R = FunctionSurfaceReport{};
@@ -210,6 +307,27 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
     return plsm_value_grad(L, B, alpha, x, y, z, nullptr);
   };
 
+  // 0) The frozen bodies the run declared as drawn-face geometry, by true distance.
+  const double cap = 2.0 * h;
+  std::vector<FrozenBody> bodies;
+  if (frozen != nullptr && model != nullptr && !frozen->empty())
+    bodies = make_frozen_bodies(*frozen, *model, cap);
+  R.frozen_sets = static_cast<int>(bodies.size());
+  auto frozen_solid = [&](const Vec3& p) {
+    double f = cap;
+    for (const FrozenBody& b : bodies)
+      if (b.solid) f = std::min(f, b.value(p, cap));
+    return f;
+  };
+  auto frozen_void = [&](const Vec3& p) {
+    double f = cap;
+    for (const FrozenBody& b : bodies)
+      if (!b.solid) f = std::min(f, b.value(p, cap));
+    return f;
+  };
+  bool any_solid_body = false, any_void_body = false;
+  for (const FrozenBody& b : bodies) (b.solid ? any_solid_body : any_void_body) = true;
+
   // 1) The stamped voxels the function does not explain, sample for sample on the
   //    optimiser's own sub-cell lattice (plsm_frac.hpp: x = i + (p + 0.5)/k - 0.5).
   //    A cell is stamped solid when its density is 1 and some sample of phi is not
@@ -227,6 +345,10 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
         const bool full = rho[c] >= 1.0 - 1e-9;
         const bool none = rho[c] <= rho_lo + 1e-12 && rho_lo < 0.5;
         if (!full && !none) continue;
+        // A voxel a declared frozen body holds (its centre inside the body, the
+        // rule the mask was made by) is that body's, by true distance, not a stamp.
+        if (any_solid_body && full && frozen_solid(sg.voxel_center(i, j, kz)) <= 0.0) continue;
+        if (any_void_body && none && frozen_void(sg.voxel_center(i, j, kz)) <= 0.0) continue;
         // The first sample that contradicts the stamp decides; most cells read all.
         bool stamped = false;
         for (int r = 0; r < k && !stamped; ++r)
@@ -289,7 +411,11 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
     const double x = (p.x - o.x) / h - 0.5, y = (p.y - o.y) / h - 0.5, z = (p.z - o.z) / h - 0.5;
     double f = phi_vox(x, y, z);
     if (R.stamped_solid > 0) f = std::min(f, trilinear(sdS, x, y, z));
+    // Far from zero the exact value never decides the surface: skip the distance
+    // queries there.
+    if (any_solid_body && f > -cap) f = std::min(f, frozen_solid(p));
     if (R.stamped_void > 0) f = std::max(f, -trilinear(sdV, x, y, z));
+    if (any_void_body && f < cap) f = std::max(f, -frozen_void(p));
     return f;
   };
 

@@ -74,6 +74,7 @@ struct StepModel {
   // faces (ledger I-02). Empty unless the stage 3 switch is on; then the export cuts
   // with it and everything else keeps `mesh`.
   TriangleMesh export_mesh;
+  std::vector<int> export_triangle_face;  // parallel to export_mesh.triangles
   const TriangleMesh& drawn_mesh() const { return export_mesh.empty() ? mesh : export_mesh; }
   // Per-triangle B-rep face id, parallel to `mesh.triangles`
   // (triangle_face[t] is the face triangle t was tessellated from). Face ids

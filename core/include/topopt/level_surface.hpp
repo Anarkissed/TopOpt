@@ -95,11 +95,20 @@ TriangleMesh mesh_intersection(const TriangleMesh& a, const TriangleMesh& b,
 // the shape that ships holds exactly what was certified. Bodies that carry no
 // load or anchor are dropped exactly as the voxel export drops them.
 //
+// With `frozen` (and the `model` whose mesh its triangle indices point into), each
+// frozen body is held by TRUE distance: everything within its depth in mm of its
+// own drawn triangles, inside its cuts (frozen_sets.hpp; ledger P-04). The
+// stamped-voxel recovery then covers only what those do not explain (keep
+// regions, clearances, bridges).
+//
 // Empty with `why` set when it cannot be made (no analytic design, no drawn part,
 // a design-box run, no Manifold): the caller keeps today's export and says so.
 struct MinimizePlasticVariant;
+struct FrozenFaceSet;
+struct StepModel;
 struct FunctionSurfaceReport {
   long long stamped_solid = 0, stamped_void = 0;
+  int frozen_sets = 0;  // frozen bodies held by true distance (frozen_sets.hpp)
   long long evaluations = 0, triangles = 0;
   double mesh_s = 0.0, cut_s = 0.0;
   double slope_min = 0.0, slope_median = 0.0, slope_max = 0.0;  // |grad phi| at vertices
@@ -107,6 +116,8 @@ struct FunctionSurfaceReport {
 TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelGrid& sg,
                                    const TriangleMesh& part, int smooth_factor,
                                    double printed_iso, std::string* why,
-                                   FunctionSurfaceReport* rep = nullptr);
+                                   FunctionSurfaceReport* rep = nullptr,
+                                   const std::vector<FrozenFaceSet>* frozen = nullptr,
+                                   const StepModel* model = nullptr);
 
 }  // namespace topopt

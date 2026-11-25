@@ -30,6 +30,8 @@
 
 #include "manifold/manifold.h"
 #include "topopt/finish.hpp"
+#include "topopt/frozen_sets.hpp"
+#include "topopt/step.hpp"
 #include "topopt/level_surface.hpp"
 #include "topopt/mesh.hpp"
 #include "topopt/pipeline.hpp"
@@ -101,8 +103,9 @@ manifold::Manifold place(const manifold::Manifold& m, const Frame& f) {
 // true signed distance at every voxel centre (clamped at 6 voxels, ridge 1e-6:
 // the optimiser's own re-fit), the density the fill count of that function on the
 // optimiser's 4 x 4 x 4 sub-cell lattice.
-topopt::MinimizePlasticVariant make_version(const topopt::VoxelGrid& g,
-                                            const std::function<double(const Vec3&)>& design) {
+topopt::MinimizePlasticVariant make_version(
+    const topopt::VoxelGrid& g, const std::function<double(const Vec3&)>& design,
+    const std::function<bool(const Vec3&)>& frozen = nullptr) {
   using namespace topopt;
   MinimizePlasticVariant v;
   const int nx = g.nx, ny = g.ny, nz = g.nz;
@@ -133,6 +136,7 @@ topopt::MinimizePlasticVariant make_version(const topopt::VoxelGrid& g,
                                 j + (q + 0.5) / 4 - 0.5, k + (r + 0.5) / 4 - 0.5,
                                 nullptr) < 0.0;
     v.optimization.physical_density[c] = 1e-3 + (1.0 - 1e-3) * in / 64.0;
+    if (frozen && frozen(g.voxel_center(i, j, k))) v.optimization.physical_density[c] = 1.0;
   }
   return v;
 }
@@ -166,17 +170,43 @@ int main(int argc, char** argv) {
   const TriangleMesh part = from_manifold(place(block, F));
   const Vec3 pocket_local{8.0, -4.0, H.z + 3.0};  // centre above the top face
   const Vec3 pocket = F.to_world(pocket_local);
-  auto design = [&](const Vec3& p) {  // phi: negative solid; the pocket is void
-    return Rp - std::sqrt(dot(sub(p, pocket), sub(p, pocket)));
+  // A cavity inside the block, cut 1.5 mm into the protected bottom layer (local
+  // z < -8: the bottom face frozen 4 mm deep). The layer must win, with its inner
+  // face flat at z = -8 by true distance.
+  const double kDepth = 4.0;
+  auto cavity = [&](const Vec3& p) {  // signed distance to the cavity box, < 0 inside
+    const Vec3 q = F.to_local(p);
+    const double dx = std::fabs(q.x) - 15.0, dy = std::fabs(q.y) - 10.0,
+                 dz = std::fabs(q.z + 5.75) - 3.75;  // z from -9.5 to -2
+    const double ox = std::max(dx, 0.0), oy = std::max(dy, 0.0), oz = std::max(dz, 0.0);
+    return std::sqrt(ox * ox + oy * oy + oz * oz) + std::min(std::max({dx, dy, dz}), 0.0);
   };
+  auto design = [&](const Vec3& p) {  // phi: negative solid; pocket and cavity are void
+    return std::max(Rp - std::sqrt(dot(sub(p, pocket), sub(p, pocket))), -cavity(p));
+  };
+  auto in_layer = [&](const Vec3& p) { return F.to_local(p).z + H.z <= kDepth; };
   Vec3 lo, hi;
   bounding_box(part, lo, hi);
   const double longest = std::max({hi.x - lo.x, hi.y - lo.y, hi.z - lo.z});
   const VoxelGrid g = voxelize(part, static_cast<int>(std::lround(longest / kVoxel)));
-  const MinimizePlasticVariant ver = make_version(g, design);
+  const MinimizePlasticVariant ver = make_version(g, design, in_layer);
+  // The protected bottom face as the run declares it (frozen_sets.hpp).
+  StepModel model;
+  model.mesh = part;
+  model.triangle_face.assign(part.triangles.size(), -1);
+  FrozenFaceSet bottom;
+  bottom.depth_mm = kDepth;
+  for (std::size_t t = 0; t < part.triangles.size(); ++t) {
+    bool on = true;
+    for (int c = 0; c < 3; ++c)
+      on = on && std::fabs(F.to_local(part.vertices[part.triangles[t][c]]).z + H.z) < 1e-6;
+    if (on) bottom.triangles.push_back(static_cast<int>(t));
+  }
+  const std::vector<FrozenFaceSet> sets{bottom};
   std::string why;
   FunctionSurfaceReport rep;
-  const TriangleMesh file = function_surface_mesh(ver, g, part, 2, 0.5, &why, &rep);
+  const TriangleMesh file =
+      function_surface_mesh(ver, g, part, 2, 0.5, &why, &rep, &sets, &model);
   std::printf("[test B/J] voxel %.3f mm, grid %d x %d x %d, file %zu triangles%s%s\n",
               g.spacing, g.nx, g.ny, g.nz, file.triangles.size(), why.empty() ? "" : ": ",
               why.c_str());
@@ -187,10 +217,20 @@ int main(int argc, char** argv) {
   // B: each point near a drawn surface, attributed to the nearest one.
   double flat_worst = 0.0, bore_worst = 0.0, bore_sum = 0.0;
   long long flat_n = 0, bore_n = 0;
+  double layer_worst = 0.0;
+  long long layer_n = 0;
   for (const Vec3& w : sample_points(file)) {
     const double dp = std::sqrt(dot(sub(w, pocket), sub(w, pocket))) - Rp;
     if (std::fabs(dp) < 0.3) continue;  // on the cut wall (or its seam): not drawn
     const Vec3 q = F.to_local(w);
+    // The frozen layer's inner face, inside the cavity's footprint, 3 mm from its
+    // walls (the walls are the design's, rounded by the basis).
+    if (std::fabs(q.x) < 12.0 && std::fabs(q.y) < 7.0 && q.z > -9.0 && q.z < -7.0) {
+      layer_worst = std::max(layer_worst, std::fabs(q.z + H.z - kDepth));
+      ++layer_n;
+      continue;
+    }
+    if (cavity(w) > -0.3 && cavity(w) < 3.0 && q.z > -9.0) continue;  // cavity walls
     const double planes[6] = {std::fabs(q.x - H.x), std::fabs(q.x + H.x), std::fabs(q.y - H.y),
                               std::fabs(q.y + H.y), std::fabs(q.z - H.z), std::fabs(q.z + H.z)};
     double dmin = *std::min_element(planes, planes + 6);
@@ -206,7 +246,12 @@ int main(int argc, char** argv) {
     }
   }
   const double bore_mean = bore_n > 0 ? bore_sum / bore_n : 0.0;
-  const bool b_ok = flat_worst <= 0.02 && bore_worst <= 0.02 && std::fabs(bore_mean - Rb) <= 0.02;
+  const bool b_ok = flat_worst <= 0.02 && bore_worst <= 0.02 &&
+                    std::fabs(bore_mean - Rb) <= 0.02 && layer_worst <= 0.02;
+  std::printf("[test B] protected layer's inner face (true depth %.1f mm, %d body): worst %.4f mm "
+              "over %lld points; stamped voxels left %lld\n",
+              kDepth, rep.frozen_sets, layer_worst, layer_n, rep.stamped_solid);
+  if (layer_n < 50) ++failures;
   std::printf("[test B] flats: worst %.4f mm over %lld points; bore: worst %.4f mm, mean "
               "radius %.4f (drawn %.1f) over %lld points: %s\n",
               flat_worst, flat_n, bore_worst, bore_mean, Rb, bore_n, b_ok ? "ok" : "MISSED");

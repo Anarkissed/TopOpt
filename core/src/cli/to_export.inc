@@ -27,6 +27,9 @@ struct RunFinish {
   std::vector<ClearanceGeometry> keep_clears;  // the job's declared Keep clears, resolved
   const TriangleMesh* part = nullptr;          // the part's own solid (wins over a Keep clear)
   std::shared_ptr<const KeepClearCut> keep_clear_cut;  // made once (null: nothing to cut)
+  // Stage 3: the frozen bodies as drawn-face geometry (frozen_sets.hpp), for the
+  // surface from the function. Empty unless stage 1 filled them.
+  std::vector<FrozenFaceSet> frozen;
 };
 
 RunFinish make_run_finish(const JobDescription& job, const MinimizePlasticOptions& o,
@@ -77,6 +80,7 @@ RunFinish make_run_finish(const JobDescription& job, const MinimizePlasticOption
   f.ctx.slim_line_mm = 2.0 * f.ctx.min_thickness_mm;  // his ruling 2026-11-03: slim
   // A latticed job's versions carry a lattice companion built from the unfinished shape.
   f.ctx.outward_only = job.lattice.present || job.grading.present;
+  f.frozen = o.frozen_sets;
   return f;
 }
 
@@ -125,9 +129,11 @@ TriangleMesh variant_export_model_mesh(const MinimizePlasticVariant& variant,
                                        const std::vector<KeepRegion>& keeps = {},
                                        const RunFinish* fin = nullptr,
                                        FinishBlock* fb = nullptr,
-                                       TriangleMesh* unfinished = nullptr) {
+                                       TriangleMesh* unfinished = nullptr,
+                                       const std::vector<FrozenFaceSet>* frozen = nullptr) {
   if (fin != nullptr) {  // E1: the finished shape, after CAD projection and exact Protect
-    const TriangleMesh raw = variant_export_model_mesh(variant, out, sg, printed_iso, cad, keeps);
+    const TriangleMesh raw = variant_export_model_mesh(variant, out, sg, printed_iso, cad, keeps,
+                                                       nullptr, nullptr, nullptr, &fin->frozen);
     FinishContext c = fin->ctx;
     // Stage 3: a surface meshed from the function needs no curvature flow.
     if (to_surface_on()) c.flow = false;
@@ -150,7 +156,9 @@ TriangleMesh variant_export_model_mesh(const MinimizePlasticVariant& variant,
   }
   if (!keeps.empty() && cad != nullptr)  // item KEEP: exact inside each keep region
     return keep_regions_exact(
-        variant_export_model_mesh(variant, out, sg, printed_iso, cad, {}), cad->drawn_mesh(),
+        variant_export_model_mesh(variant, out, sg, printed_iso, cad, {}, nullptr, nullptr,
+                                  nullptr, frozen),
+        cad->drawn_mesh(),
         keeps, sg.spacing * sg.spacing * sg.spacing);
   const int sf = out.smooth_factor;
   // Stage 3 (switch on): the zero surface of the optimiser's own function, cut by
@@ -160,14 +168,14 @@ TriangleMesh variant_export_model_mesh(const MinimizePlasticVariant& variant,
     std::string why;
     FunctionSurfaceReport fr;
     TriangleMesh m = function_surface_mesh(variant, sg, cad->drawn_mesh(), std::max(1, sf),
-                                           printed_iso, &why, &fr);
+                                           printed_iso, &why, &fr, frozen, cad);
     if (!m.triangles.empty()) {
       std::fprintf(stderr,
                    "[surface] vf %.2f: from the function: %lld triangles, mesh %.2f s, "
-                   "cut %.2f s, stamped %lld solid / %lld void voxels, slope at the "
-                   "surface %.2f / %.2f / %.2f (min / median / max)\n",
+                   "cut %.2f s, %d frozen bodies by distance, stamped %lld solid / %lld "
+                   "void voxels, slope at the surface %.2f / %.2f / %.2f (min / median / max)\n",
                    variant.requested_volume_fraction, fr.triangles, fr.mesh_s, fr.cut_s,
-                   fr.stamped_solid, fr.stamped_void, fr.slope_min, fr.slope_median,
+                   fr.frozen_sets, fr.stamped_solid, fr.stamped_void, fr.slope_min, fr.slope_median,
                    fr.slope_max);
       return m;
     }
