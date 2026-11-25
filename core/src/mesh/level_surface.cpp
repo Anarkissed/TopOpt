@@ -308,6 +308,56 @@ std::vector<FrozenBody> make_frozen_bodies(const std::vector<FrozenFaceSet>& set
 }
 }  // namespace
 
+namespace {
+// ★ PINCHES. Where the surface pinches to zero thickness (a saddle of the field
+// that the mesher snapped onto a grid point), Manifold keeps one point per sheet:
+// valid in double, but the copies share one float position, and a file read by
+// position has four triangles on an edge there. Each copy moves 1 um INTO its own
+// solid (against its normal): the zero-thickness joint, which no print holds,
+// becomes a 2 um gap. Returns how many copies moved.
+int unpinch_as_written(TriangleMesh& m) {
+  struct Key {
+    float x, y, z;
+    bool operator<(const Key& o) const {
+      return x != o.x ? x < o.x : (y != o.y ? y < o.y : z < o.z);
+    }
+  };
+  std::map<Key, std::vector<int>> at;
+  for (std::size_t v = 0; v < m.vertices.size(); ++v) {
+    const Vec3& p = m.vertices[v];
+    at[Key{static_cast<float>(p.x), static_cast<float>(p.y), static_cast<float>(p.z)}]
+        .push_back(static_cast<int>(v));
+  }
+  std::vector<Vec3> nrm(m.vertices.size(), Vec3{0, 0, 0});
+  bool need = false;
+  for (const auto& kv : at) need = need || kv.second.size() > 1;
+  if (!need) return 0;
+  for (const auto& t : m.triangles) {
+    const Vec3 &a = m.vertices[t[0]], &b = m.vertices[t[1]], &c = m.vertices[t[2]];
+    const Vec3 u{b.x - a.x, b.y - a.y, b.z - a.z}, w{c.x - a.x, c.y - a.y, c.z - a.z};
+    const Vec3 n{u.y * w.z - u.z * w.y, u.z * w.x - u.x * w.z, u.x * w.y - u.y * w.x};
+    for (int k = 0; k < 3; ++k) {
+      Vec3& q = nrm[static_cast<std::size_t>(t[k])];
+      q = Vec3{q.x + n.x, q.y + n.y, q.z + n.z};
+    }
+  }
+  constexpr double kStep = 1e-3;  // mm
+  int moved = 0;
+  for (const auto& kv : at) {
+    if (kv.second.size() < 2) continue;
+    for (int v : kv.second) {
+      const Vec3& n = nrm[static_cast<std::size_t>(v)];
+      const double len = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+      if (!(len > 0.0)) continue;
+      Vec3& p = m.vertices[static_cast<std::size_t>(v)];
+      p = Vec3{p.x - kStep * n.x / len, p.y - kStep * n.y / len, p.z - kStep * n.z / len};
+      ++moved;
+    }
+  }
+  return moved;
+}
+}  // namespace
+
 TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelGrid& sg,
                                    const TriangleMesh& part, int smooth_factor,
                                    double printed_iso, std::string* why,
@@ -566,7 +616,14 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
   }
   // 5) As written: the file stores float corners, and an exact cut can leave a
   //    sliver whose corners meet in float. Welded the way the finished file is.
+  R.unpinched = unpinch_as_written(shells.mesh);
   TriangleMesh out = weld_as_written(shells.mesh);
+  if (std::getenv("TOPOPT_SURFACE_DEBUG") != nullptr) {
+    const WrittenAudit a = audit_as_written(out);
+    std::fprintf(stderr, "[surface debug] final (%d unpinched): as written: open %d, 3+ %d, "
+                 "point %d, bodies %d\n", R.unpinched, a.boundary_edges, a.non_manifold_edges,
+                 a.non_manifold_vertices, a.bodies);
+  }
   R.triangles = static_cast<long long>(out.triangles.size());
   return out;
 }

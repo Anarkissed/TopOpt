@@ -120,6 +120,7 @@ struct StepModel;
 struct FunctionSurfaceReport {
   long long stamped_solid = 0, stamped_void = 0;
   int frozen_sets = 0;  // frozen bodies held by true distance (frozen_sets.hpp)
+  int unpinched = 0;    // pinch-point copies moved 1 um apart (level_surface.cpp)
   long long evaluations = 0, triangles = 0;
   double mesh_s = 0.0, cut_s = 0.0;
   double slope_min = 0.0, slope_median = 0.0, slope_max = 0.0;  // |grad phi| at vertices
