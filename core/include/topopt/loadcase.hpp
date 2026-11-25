@@ -551,5 +551,12 @@ std::size_t tag_face_by_stage(VoxelGrid& grid, const StepModel& model, int face_
 std::size_t mask_face_by_stage(const VoxelGrid& grid, const StepModel& model, int face_id,
                                MaskValue value, int depth_voxels, double depth_mm,
                                DesignMask& mask);
+// The same for a region. This is THE function a protection on a region is
+// frozen with (build_production_setup), and the one the lattice's region mask is
+// built with (region_lattice_mask), so with either switch value the lattice
+// region's voxels ARE the protection's voxels (bar R5) by construction.
+std::size_t mask_region_by_stage(const VoxelGrid& grid, const StepModel& model,
+                                 const ResolvedFaceRegion& region, MaskValue value,
+                                 int depth_voxels, double depth_mm, DesignMask& mask);
 
 }  // namespace topopt

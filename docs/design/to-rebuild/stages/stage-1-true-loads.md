@@ -35,8 +35,8 @@ Effective margin; same binary, same job, only the switch changed.
 | Pressing | 48 / 64 / 96 / 128 | 0.75 / 0.51 / 0.35 / 0.35 | 0.75 / 0.51 / 0.35 / 0.35 | 0.75 / 0.51 / 0.36 / 0.35 |
 | PillowBlock (left) | 48 / 64 / 96 / 128 | 1.85 / 1.48 / 1.07 / 0.78 | 1.80 / 1.39 / 1.11 / 0.91 | 1.85 / 1.47 / 1.18 / 0.92 |
 | Original stand | 96 / 128 | 4.47 / 2.93 | 4.59 / 3.15 | 4.71 / 3.15 |
-| Top Motor Mount | 96 / 128 | 1.64 / 1.33 | 1.65 / 1.33 | 1.65 / (running) |
-| Stand v4 | 96 / 128 | 1.94 / 2.12 | 2.46 / 2.02 | (running) |
+| Top Motor Mount | 96 / 128 | 1.64 / 1.33 | 1.65 / 1.33 | 1.65 / 1.33 |
+| Stand v4 | 96 / 128 | 1.94 / 2.12 | 2.46 / 2.02 | 2.18 / 2.11 |
 
 Reading: Base is the part V-01 hurts. Today its margin jumps up and down by a factor of four with the resolution (0.67, 0.18, 0.40, 0.17, 0.30, 0.08), because where the grid falls decides how much of the loaded face is loaded. From the drawn face it falls steadily as the grid resolves the stress (0.97 to 0.33). Parts whose loaded faces happen to sit well in the grid (Pressing, Top Motor Mount) do not change, which is the control: the new loader changes the answer only where the old one was wrong. The remaining fall with resolution is the stress reading itself (stage 2), not the loads.
 
@@ -52,7 +52,13 @@ The refused 0.30 version: at solve 19 the design is in 17 separate pieces; the m
 ## Still owed before the stage report
 
 - The original stand optimised both ways (queued), then Top Motor Mount; three settings; pad 2 / 3 / 4.5 mm.
-- The lattice strength check before and after on his parts (reviewer), planned with LatticeReview in TORebuildGroup. `region_lattice_mask` still turns a depth into voxel layers (`region_depth_layers`); joint with LatticeReview.
+- The lattice strength check before and after (reviewer), on the set LatticeReview named (TORebuildGroup, 2026-11-25), three MADE jobs, none of his files:
+  - A. All-lattice box, axis-aligned, loads and anchors on whole flat faces, a depth that is a whole number of voxels. The control: no change beyond rounding.
+  - B. A block whose loaded face is not on the grid (tilted or cylindrical, part of a face), protected skin 1.3 mm, regular cells.
+  - C. Job B with Organic (Traced), so the frame-of-beams check runs.
+  - Per job, switch off against `face`: per load group the applied force summed over nodes and the reaction (both must equal the job's force), loaded and anchored area; the verdict and its reason; load connected; load landing on lattice; the solid's margin and where its worst cube is; the worst strut's margin and place and how many struts are under the margin; cubes protected / lattice / solid; infill to certify; the bar count and the lay hash, which must be IDENTICAL off and on (the switch must not move the laid lattice).
+  - His stand, run in place on his real project, is a welcome fourth, not a substitute.
+- `region_lattice_mask` now follows the mm depth with the switch on, through the SAME function the protection is frozen with (`mask_region_by_stage`), so bar R5 stays structural (LatticeReview's position; for the reviewer to rule; LatticeReview reviews the diff). Proof owed on job B: no cube both protected and lattice, none that is neither along the inner boundary; job A unchanged. Not mine: `flexible/job_block.cpp:374` also calls `region_depth_layers` (#362's).
 - Test K again with the switch on once stage 5 removes the solver luck.
 
 ## For #362 (handed over with the switch flip; not edited by me)

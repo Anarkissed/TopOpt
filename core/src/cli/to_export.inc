@@ -792,6 +792,17 @@ std::shared_ptr<const ClearanceVoxelMask> region_lattice_mask(
   m->origin = grid.origin;
   m->inside.assign(grid.voxel_count(), 0);
   const int layers = region_depth_layers(depth_mm, grid.spacing);
+  if (to_stage1_on()) {
+    // TO rebuild stage 1: the protection is frozen by true distance in mm, so the
+    // lattice region is too, through the SAME function (mask_region_by_stage), and
+    // bar R5 stays structural. The voxel path below is untouched.
+    DesignMask frozen = make_active_mask(grid);
+    mask_region_by_stage(grid, model, region, MaskValue::FrozenSolid, layers, depth_mm,
+                         frozen);
+    for (std::size_t idx = 0; idx < frozen.size() && idx < m->inside.size(); ++idx)
+      if (frozen[idx] == MaskValue::FrozenSolid) m->inside[idx] = 1;
+    return m;
+  }
   const std::vector<int> members =
       region_member_voxels(grid, model, region, layers);
   for (int idx : cut_voxels(grid, members, region.cuts))

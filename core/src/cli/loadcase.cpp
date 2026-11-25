@@ -1624,4 +1624,10 @@ std::size_t mask_face_by_stage(const VoxelGrid& grid, const StepModel& model, in
   return mask_face_m(grid, model, face_id, value, depth_voxels, depth_mm, mask);
 }
 
+std::size_t mask_region_by_stage(const VoxelGrid& grid, const StepModel& model,
+                                 const ResolvedFaceRegion& region, MaskValue value,
+                                 int depth_voxels, double depth_mm, DesignMask& mask) {
+  return mask_region_m(grid, model, region, value, depth_voxels, depth_mm, mask);
+}
+
 }  // namespace topopt
