@@ -107,6 +107,11 @@ TriangleMesh mesh_intersection(const TriangleMesh& a, const TriangleMesh& b,
 // stamped-voxel recovery then covers only what those do not explain (keep
 // regions, clearances, bridges).
 //
+// With `keeps` and `keep_solid` (the keep regions as one closed solid), the part
+// inside each keep region is kept exactly: the keep solid joins the function's
+// solid BEFORE the one cut by the drawn part, so there is a single exact boolean
+// and no second union along the drawn faces.
+//
 // Empty with `why` set when it cannot be made (no analytic design, no drawn part,
 // a design-box run, no Manifold): the caller keeps today's export and says so.
 struct MinimizePlasticVariant;
@@ -124,6 +129,8 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
                                    double printed_iso, std::string* why,
                                    FunctionSurfaceReport* rep = nullptr,
                                    const std::vector<FrozenFaceSet>* frozen = nullptr,
-                                   const StepModel* model = nullptr);
+                                   const StepModel* model = nullptr,
+                                   const std::vector<KeepRegion>* keeps = nullptr,
+                                   const TriangleMesh* keep_solid = nullptr);
 
 }  // namespace topopt

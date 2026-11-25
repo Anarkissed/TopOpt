@@ -235,8 +235,23 @@ std::vector<FrozenBody> make_frozen_bodies(const std::vector<FrozenFaceSet>& set
   }
   const bool fine = !model.export_mesh.empty() &&
                     model.export_triangle_face.size() == model.export_mesh.triangles.size();
+  // Sets without cuts that share a depth and a kind are one body: one distance
+  // query instead of one per face (his stand: 91 sets, 47 s of queries).
+  std::vector<FrozenFaceSet> merged;
   for (const FrozenFaceSet& fs : sets) {
     if (fs.triangles.empty() || !(fs.depth_mm > 0.0)) continue;
+    bool joined = false;
+    if (fs.cuts.empty())
+      for (FrozenFaceSet& m : merged)
+        if (m.cuts.empty() && m.solid == fs.solid && std::fabs(m.depth_mm - fs.depth_mm) < 1e-9) {
+          m.triangles.insert(m.triangles.end(), fs.triangles.begin(), fs.triangles.end());
+          joined = true;
+          break;
+        }
+    if (!joined) merged.push_back(fs);
+  }
+  out.reserve(merged.size());
+  for (const FrozenFaceSet& fs : merged) {
     FrozenBody b;
     b.cuts = fs.cuts;
     b.depth = fs.depth_mm;
@@ -288,7 +303,9 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
                                    double printed_iso, std::string* why,
                                    FunctionSurfaceReport* rep,
                                    const std::vector<FrozenFaceSet>* frozen,
-                                   const StepModel* model) {
+                                   const StepModel* model,
+                                   const std::vector<KeepRegion>* keeps,
+                                   const TriangleMesh* keep_solid) {
   FunctionSurfaceReport local;
   FunctionSurfaceReport& R = rep ? *rep : local;
   R = FunctionSurfaceReport{};
@@ -369,6 +386,12 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
         // rule the mask was made by) is that body's, by true distance, not a stamp.
         if (any_solid_body && full && frozen_solid(sg.voxel_center(i, j, kz)) <= 0.0) continue;
         if (any_void_body && none && frozen_void(sg.voxel_center(i, j, kz)) <= 0.0) continue;
+        if (full && keeps != nullptr && keep_solid != nullptr) {  // the keep solid's own
+          bool in_keep = false;
+          const Vec3 c = sg.voxel_center(i, j, kz);
+          for (const KeepRegion& kr : *keeps) in_keep = in_keep || kr.contains(c);
+          if (in_keep) continue;
+        }
         // The first sample that contradicts the stamp decides; most cells read all.
         bool stamped = false;
         for (int r = 0; r < k && !stamped; ++r)
@@ -487,7 +510,21 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
   // 3) Cut by the drawn part: the drawn faces come from the part itself.
   const auto t1 = std::chrono::steady_clock::now();
   std::string w;
-  TriangleMesh cut = mesh_intersection(S, part, &w);
+  TriangleMesh cut;
+  if (keep_solid != nullptr && !keep_solid->triangles.empty()) {
+#ifdef TOPOPT_HAVE_MANIFOLD
+    const manifold::Manifold A = to_manifold64(S), K = to_manifold64(*keep_solid),
+                             P = to_manifold64(part);
+    if (A.Status() == manifold::Manifold::Error::NoError &&
+        K.Status() == manifold::Manifold::Error::NoError &&
+        P.Status() == manifold::Manifold::Error::NoError)
+      cut = from_manifold64((A + K) ^ P);
+    else
+      w = "the surface, keep regions or drawn part is not a closed manifold";
+#endif
+  } else {
+    cut = mesh_intersection(S, part, &w);
+  }
   R.cut_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t1).count();
   if (cut.triangles.empty()) {
     if (why) *why = w.empty() ? "nothing of the design lies inside the drawn part" : w;

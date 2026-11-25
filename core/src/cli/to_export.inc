@@ -154,6 +154,47 @@ TriangleMesh variant_export_model_mesh(const MinimizePlasticVariant& variant,
     if (unfinished) *unfinished = raw;
     return m;
   }
+  // Stage 3 (switch on): the surface from the function, with the keep regions
+  // joined before its one cut by the drawn part (no second union, no nudge).
+  if (to_surface_on() && cad != nullptr && !cad->mesh.empty()) {
+    TriangleMesh keep_solid;
+#ifdef TOPOPT_HAVE_MANIFOLD
+    if (!keeps.empty()) {
+      manifold::Manifold K;
+      for (const KeepRegion& k : keeps) K = K + keep_region_solid(k, 0.0);
+      const manifold::MeshGL64 g = K.GetMeshGL64();
+      for (std::size_t v = 0; v < g.NumVert(); ++v)
+        keep_solid.vertices.push_back({g.vertProperties[v * g.numProp],
+                                       g.vertProperties[v * g.numProp + 1],
+                                       g.vertProperties[v * g.numProp + 2]});
+      for (std::size_t t = 0; t < g.NumTri(); ++t)
+        keep_solid.triangles.push_back({static_cast<int>(g.triVerts[3 * t]),
+                                        static_cast<int>(g.triVerts[3 * t + 1]),
+                                        static_cast<int>(g.triVerts[3 * t + 2])});
+    }
+#endif
+    if (keeps.empty() || !keep_solid.triangles.empty()) {
+      std::string why;
+      FunctionSurfaceReport fr;
+      TriangleMesh m = function_surface_mesh(
+          variant, sg, cad->drawn_mesh(), std::max(1, out.smooth_factor), printed_iso, &why,
+          &fr, frozen, cad, keeps.empty() ? nullptr : &keeps,
+          keep_solid.triangles.empty() ? nullptr : &keep_solid);
+      if (!m.triangles.empty()) {
+        std::fprintf(stderr,
+                     "[surface] vf %.2f: from the function: %lld triangles, mesh %.2f s, "
+                     "cut %.2f s, %d frozen bodies by distance, %zu keep regions, stamped "
+                     "%lld solid / %lld void voxels, slope at the surface %.2f / %.2f / %.2f "
+                     "(min / median / max)\n",
+                     variant.requested_volume_fraction, fr.triangles, fr.mesh_s, fr.cut_s,
+                     fr.frozen_sets, keeps.size(), fr.stamped_solid, fr.stamped_void,
+                     fr.slope_min, fr.slope_median, fr.slope_max);
+        return m;
+      }
+      std::fprintf(stderr, "[surface] vf %.2f: kept the voxel export: %s\n",
+                   variant.requested_volume_fraction, why.c_str());
+    }
+  }
   if (!keeps.empty() && cad != nullptr)  // item KEEP: exact inside each keep region
     return keep_regions_exact(
         variant_export_model_mesh(variant, out, sg, printed_iso, cad, {}, nullptr, nullptr,
@@ -161,27 +202,6 @@ TriangleMesh variant_export_model_mesh(const MinimizePlasticVariant& variant,
         cad->drawn_mesh(),
         keeps, sg.spacing * sg.spacing * sg.spacing);
   const int sf = out.smooth_factor;
-  // Stage 3 (switch on): the zero surface of the optimiser's own function, cut by
-  // the drawn part -- no fill resample, no CAD snap. Where it cannot be made the
-  // run keeps today's export and says so in one line.
-  if (to_surface_on() && cad != nullptr && !cad->mesh.empty()) {
-    std::string why;
-    FunctionSurfaceReport fr;
-    TriangleMesh m = function_surface_mesh(variant, sg, cad->drawn_mesh(), std::max(1, sf),
-                                           printed_iso, &why, &fr, frozen, cad);
-    if (!m.triangles.empty()) {
-      std::fprintf(stderr,
-                   "[surface] vf %.2f: from the function: %lld triangles, mesh %.2f s, "
-                   "cut %.2f s, %d frozen bodies by distance, stamped %lld solid / %lld "
-                   "void voxels, slope at the surface %.2f / %.2f / %.2f (min / median / max)\n",
-                   variant.requested_volume_fraction, fr.triangles, fr.mesh_s, fr.cut_s,
-                   fr.frozen_sets, fr.stamped_solid, fr.stamped_void, fr.slope_min, fr.slope_median,
-                   fr.slope_max);
-      return m;
-    }
-    std::fprintf(stderr, "[surface] vf %.2f: kept the voxel export: %s\n",
-                 variant.requested_volume_fraction, why.c_str());
-  }
   TriangleMesh smooth;  // only populated when sf > 1
   if (sf > 1) {
     const TriangleMesh raw = marching_cubes_resampled(
