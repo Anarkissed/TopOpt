@@ -6,6 +6,7 @@
 // simp_optimize / simp_compliance (Eigen), so it is gated on Eigen in CMake
 // alongside simp.cpp.
 
+#include "topopt/to_stage_switch.hpp"  // TO rebuild stage 1
 #include "topopt/pipeline.hpp"
 #include "topopt/plsm.hpp"
 
@@ -2228,6 +2229,18 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
               /*build_direction_inferred=*/false,
               /*auto_apply_build_orientation=*/false, kIso);
           mp.margin = a.margin.worst_case;
+          if (to_stage1_on() && a.max_von_mises > 0.0 &&
+              a.von_mises_field.size() == G.tags.size()) {
+            // Stage 1 (ledger P-15): the margin without the load and anchor voxels,
+            // by the ratio of the two stress peaks over the printed voxels.
+            double own = 0.0;
+            for (std::size_t v = 0; v < G.tags.size(); ++v) {
+              if (G.tags[v] == VoxelTag::Load || G.tags[v] == VoxelTag::Fixture) continue;
+              if (density[v] < kIso) continue;
+              own = std::max(own, a.von_mises_field[v]);
+            }
+            if (own > 0.0) mp.design_margin = a.margin.worst_case * a.max_von_mises / own;
+          }
           mp.non_convergent = a.non_convergent;
           mp.wall_s = std::chrono::duration<double>(
                           std::chrono::steady_clock::now() - t0)

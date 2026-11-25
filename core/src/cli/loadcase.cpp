@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "topopt/face_loads.hpp"     // TO rebuild stage 1: loads from the drawn face
+#include "topopt/to_stage_switch.hpp"
 #include "topopt/observability.hpp"  // steady_clock_ms (the counterfactual cost)
 #include "topopt/production.hpp"  // configure_production_options, production_reduction_ladder
 #include "topopt/simp.hpp"        // effective_design_mask (the pre-flight allowed set)
@@ -22,27 +23,7 @@ namespace topopt {
 
 namespace {
 
-// ---------------------------------------------------------------------------
-// TO rebuild stage 1 -- THE ONE TEMPORARY SWITCH (02-plan.md section 3).
-// TOPOPT_FACE_LOADS picks where loads, anchors, pads and protection depths come
-// from:
-//   unset / "voxel" : today's path (voxel centres within half a voxel of the face;
-//                     depths in whole voxels). The default until stage 1's gate.
-//   "face"          : the drawn face's own area (face_loads.hpp); pads and
-//                     protections in mm; anchors clamp the voxels the face lies on.
-//   "face_spring"   : as "face", and each anchor node is held by a spring in
-//                     proportion to the drawn area it stands for.
-// The switch and the "voxel" path are deleted in stage 1's close-out.
-enum class FaceLoadMode { Voxel, Face, FaceSpring };
-
-FaceLoadMode face_load_mode() {
-  const char* v = std::getenv("TOPOPT_FACE_LOADS");
-  if (v == nullptr) return FaceLoadMode::Voxel;
-  const std::string m(v);
-  if (m == "face") return FaceLoadMode::Face;
-  if (m == "face_spring") return FaceLoadMode::FaceSpring;
-  return FaceLoadMode::Voxel;
-}
+// TO rebuild stage 1: the one temporary switch is in to_stage_switch.hpp.
 
 // The anchor / load pad in mm on the face path (TOPOPT_PAD_MM, default 3.0: an
 // open choice stage 1 settles by measurement). The voxel path keeps its 3 voxels.
