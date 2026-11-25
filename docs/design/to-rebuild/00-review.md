@@ -399,4 +399,4 @@ Base, Pressing Plate Mount and PillowBlock (Left) give no print file today (sect
 
 Stand v2, Stand v3 and WallMount are left out of the "today" table by the maintainer ("Skip those parts", 2026-11-23); they are measured after the rebuild stages only.
 
-Still owed for the "today" table: slicer pictures.
+Slicer pictures of today's parts: skipped (maintainer, 2026-11-25: he would have to run the parts through himself and has no capacity now; reviewer ruling 06:54Z allows it). The numbers carry the "today" column; pictures start with the first stage that changes the surface.
