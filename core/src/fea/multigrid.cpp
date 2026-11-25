@@ -111,11 +111,16 @@ constexpr int kMinLevels = kMgMinLevels;            // < 2 usable levels -> not 
 // wall-clock guard below (a coarse safety net, not a convergence signal).
 constexpr int kMgIterBudget = 300;
 // TO stage 5: the stall rule for its stable smoothers, which run to the caller's
-// cap instead of the budget above. Every kStage5Window cycles the window's best
-// relative residual must be at most kStage5Gain x the previous checkpoint's.
-// A converging solve on his parts gains about 10x per 250 cycles even on the
-// geometric hierarchy (Top Motor Mount: 4 decades in 727 to 1,227 cycles).
-constexpr int kStage5Window = 250;
+// cap instead of the budget above. The window's best relative residual must be
+// at most kStage5Gain x the previous checkpoint's: first after kStage5FirstWindow
+// cycles, then every kStage5Window. The long first window is measured, not
+// guessed: on Top Motor Mount (geometric hierarchy, stable Jacobi) CG's residual
+// RISES to about 10x its start over the first ~400 cycles before it falls (CG
+// minimises the energy error, not the residual), and reaches 1e-4 at 1,227; a
+// 250-cycle window abandoned that solve to the l1 retry. A true stall (a loaded
+// piece cut off from every support) still stops by cycle 1,500.
+constexpr int kStage5FirstWindow = 1000;
+constexpr int kStage5Window = 500;
 constexpr double kStage5Gain = 0.5;
 
 // Per-attempt wall-clock guard. DEFAULT 0 = DISABLED: the deterministic
@@ -3129,7 +3134,8 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       // The 300-cycle budget exists to abandon a DIVERGING shipped cycle. Stage
       // 5's smoothers are stable, so a slow-but-converging solve (his parts on
       // the geometric hierarchy: 700-1,200 cycles) must not be cut there; a
-      // stall is caught instead by the progress window (kStage5Window).
+      // stall is caught instead by the progress window (kStage5FirstWindow,
+      // then kStage5Window).
       const bool stage5 = stage_opts.lambda_smoother();
       const int mg_cap = stage5 ? cap : std::min(cap, kMgIterBudget);
       Vec xg;
@@ -3158,11 +3164,12 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       const Vec* x0p = warm ? &x0 : nullptr;
       const int win = stage5 ? kStage5Window : 0;
       const double gain = stage5 ? kStage5Gain : 0.0;
+      const int first = stage5 ? kStage5FirstWindow : 0;
       bool ok = mf_mgpcg(H, scratch, rgv, tolerance, mg_cap, xg, it, res, mixed,
-                         &rec, x0p, nullptr, win, gain);
+                         &rec, x0p, nullptr, win, gain, first);
       if (!ok && mixed)
         ok = mf_mgpcg(H, scratch, rgv, tolerance, mg_cap, xg, it, res,
-                      /*mixed=*/false, &rec, x0p, nullptr, win, gain);
+                      /*mixed=*/false, &rec, x0p, nullptr, win, gain, first);
       // Cycles this solve burned on MG-CG (the last attempt's count when a mixed
       // attempt was retried in FP64): honest whether it converged or stagnated.
       diag.mg_cycles_attempted = it;
