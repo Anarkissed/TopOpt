@@ -519,6 +519,17 @@ struct JobReport {
   // can hold more than one entry.
   std::vector<VariantReport> rejected;
   // CORE LIST item 40 — emitted as report.json "frozen_share" only when evaluated.
+  // TO rebuild stage 1 (ledger A-05): when a reduction run accepts no version,
+  // the part AS DRAWN, certified, so the app can say plainly that the drawing is
+  // too weak for the load (and offer Strengthen) instead of "margin below
+  // required". Written as the top-level key "as_drawn": {"margin", "required",
+  // "passes"}; absent unless `evaluated`.
+  struct AsDrawn {
+    bool evaluated = false;
+    double margin = 0.0;
+    double required = 0.0;
+  };
+  AsDrawn as_drawn;
   FrozenShareReport frozen_share;
   // CORE LIST item 50 — emitted as report.json "strengthen" only when evaluated.
   StrengthenReport strengthen;

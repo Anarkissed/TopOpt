@@ -2735,6 +2735,34 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     }
   }
 
+  // TO rebuild stage 1 (ledger A-05): a reduction run that accepted nothing says
+  // how the part AS DRAWN stands against the load, so "nothing passed" is not read
+  // as "nothing to optimise". One analysis solve, on this path only; the same
+  // call Strengthen makes for its reference. Never takes the run down.
+  if (to_stage1_on() && job.loads.present && job.loads.redesign != "strengthen" &&
+      !result.pipeline.growth_ladder) {
+    bool any_accepted = false;
+    for (const MinimizePlasticVariant& v : result.pipeline.evaluated)
+      any_accepted = any_accepted || v.accepted;
+    if (!any_accepted) {
+      try {
+        const std::string drawn_dir = join_path(out_dir, "as_drawn_check");
+        const AnalyzeJobResult drawn =
+            analyze_job(job, job_dir, drawn_dir, materials, rules, "", {});
+        result.pipeline.report.as_drawn.evaluated = true;
+        result.pipeline.report.as_drawn.margin = drawn.analysis.margin_effective;
+        result.pipeline.report.as_drawn.required = drawn.margin_required;
+        std::error_code rm;
+        std::filesystem::remove_all(drawn_dir, rm);
+        std::fprintf(stderr, "[as drawn] no version passed; the part as drawn stands at "
+                     "%.3g against %.3g\n",
+                     drawn.analysis.margin_effective, drawn.margin_required);
+      } catch (const std::exception& e) {
+        std::fprintf(stderr, "[as drawn] could not be checked: %s\n", e.what());
+      }
+    }
+  }
+
   // ──▶ report (both paths).
   result.report_json = job_report_json(result.pipeline.report);
   result.report_path = join_path(out_dir, job.output.report);

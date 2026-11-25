@@ -782,6 +782,12 @@ std::string job_report_json(const JobReport& report) {
     out.insert(out.size() - 1, ",");
     out += "  \"scenarios\": " + scenarios_json(*top) + "\n";
   }
+  if (report.as_drawn.evaluated) {  // TO rebuild stage 1 (A-05), additive
+    out.insert(out.size() - 1, ",");
+    out += "  \"as_drawn\": {\"margin\": " + num_json(report.as_drawn.margin) +
+           ", \"required\": " + num_json(report.as_drawn.required) + ", \"passes\": " +
+           (report.as_drawn.margin >= report.as_drawn.required ? "true" : "false") + "}\n";
+  }
   out += "}\n";
   return out;
 }
