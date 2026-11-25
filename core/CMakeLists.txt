@@ -2381,6 +2381,15 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
       FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
       TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME lattice_types_matrix COMMAND test_lattice_types_matrix)
+    # notes28 sheets, builder B: the strength check and the data out for gyroid and Schwarz-D (credit by place, the
+    # floor, the band, the blend band, the margins per voxel, sheet_cells.bin, the CLI's check, the file job's key).
+    add_executable(test_lattice_sheets_strength tests/validation/test_lattice_sheets_strength.cpp)
+    target_link_libraries(test_lattice_sheets_strength PRIVATE topopt)
+    target_compile_definitions(test_lattice_sheets_strength PRIVATE
+      MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+      SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+      TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME lattice_sheets_strength COMMAND test_lattice_sheets_strength)
     # His print orientation (P2): "rotate at the door". The same job with up = +X makes the same file and report as a
     # copy of everything turned by hand; each input left unturned is caught (print_frame.hpp).
     add_executable(test_print_frame tests/validation/test_print_frame.cpp)
