@@ -12,6 +12,7 @@
 #include <memory>
 #include <set>
 
+#include "topopt/finish.hpp"
 #include "topopt/frozen_sets.hpp"
 #include "topopt/mesh_distance.hpp"
 #include "topopt/pipeline.hpp"
@@ -460,6 +461,19 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
   }
   // 4) Only the bodies that carry a load or an anchor, as the voxel export keeps.
   BodyShells shells = carrying_body_shells(cut, sg, printed_bodies(sg, rho, printed_iso));
+  if (std::getenv("TOPOPT_SURFACE_DEBUG") != nullptr) {
+    auto say = [](const char* what, const TriangleMesh& m) {
+      const WrittenAudit a = audit_as_written(m);
+      const WatertightReport w = check_watertight(m);
+      std::fprintf(stderr, "[surface debug] %s: %zu tris; as written: open %d, 3+ %d, point %d, "
+                   "bodies %d; in double: open %zu, 3+ %zu\n", what, m.triangles.size(),
+                   a.boundary_edges, a.non_manifold_edges, a.non_manifold_vertices, a.bodies,
+                   static_cast<std::size_t>(w.boundary_edges), static_cast<std::size_t>(w.non_manifold_edges));
+    };
+    say("level set", S);
+    say("cut by part", cut);
+    say("carrying shells", shells.mesh);
+  }
   R.triangles = static_cast<long long>(shells.mesh.triangles.size());
   return std::move(shells.mesh);
 }
