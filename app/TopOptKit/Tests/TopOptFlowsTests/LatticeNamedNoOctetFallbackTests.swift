@@ -49,6 +49,10 @@ final class LatticeNamedNoOctetFallbackTests: XCTestCase {
         // WRITES (`densityCapWritten`: 0 = none) is what is pinned. Kelvin's batch shipped too: the app runs Kelvin's own spec.
         XCTAssertEqual(k.densityCapWritten, 0, "★ no octet cap rides a Kelvin job")
         XCTAssertEqual(k.densityCapRho, 1, "Kelvin's own law: no cap")
+        // ★ 362 (his 11-25 "Sure"): the old run's own gate keeps the octet only; opened by the stand-in, Kelvin's run carries
+        // no octet cap (the question this test asks)
+        LatticeTypeCatalog.appBatchesForTests = ["octet", "kelvin"]
+        defer { LatticeTypeCatalog.appBatchesForTests = nil }
         XCTAssertEqual(try XCTUnwrap(lat.runSpec(lineWidthMM: 0.45)).densityCapWritten, 0, "★ Kelvin's own run: no octet cap")
         // control: octet still carries its cap
         var oct = lat; oct.topologyID = "octet"

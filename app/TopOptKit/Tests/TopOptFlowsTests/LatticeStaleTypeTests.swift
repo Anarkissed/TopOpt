@@ -36,9 +36,14 @@ final class LatticeStaleTypeTests: XCTestCase {
             XCTAssertNil(LatticeTypeCatalog.selectionRefusal(p.lattice.topologyID))
             // ★ RE-PINNED (notes28, 2026-11-24): SC's batch shipped with all the strut types, so SC runs with its OWN spec;
             // the stale type is now one the old run can't build at all (BCC + Z: core neither builds nor certifies it)
+            // ★ RE-PINNED (362, his 11-25 "Sure"): this is the OLD run's spec, which keeps the octet only; SC is the new
+            // engine's, so here it carries no lattice and the old catalog says why in its own line
             p.lattice.topologyID = "sc"
-            XCTAssertEqual(p.latticeRunSpec(emission: p.latticeJobRegions())?.topologyID, "sc", "SC runs now (organic \(organic))")
-            XCTAssertNil(LatticeTypeCatalog.selectionRefusal("sc"))
+            XCTAssertNil(p.latticeRunSpec(emission: p.latticeJobRegions()), "★ SC is not the old run's (organic \(organic))")
+            XCTAssertEqual(LatticeTypeCatalog.selectionRefusal("sc"), "Simple cubic: " + LatticeTypeCatalog.oldRunPending)
+            LatticeTypeCatalog.appBatchesForTests = LatticeTypeCatalog.appBatches   // RED CONTROL: opened, SC runs
+            XCTAssertEqual(p.latticeRunSpec(emission: p.latticeJobRegions())?.topologyID, "sc", "RED CONTROL (organic \(organic))")
+            LatticeTypeCatalog.appBatchesForTests = nil
             p.lattice.topologyID = "bccz"
             XCTAssertNil(p.latticeRunSpec(emission: p.latticeJobRegions()),
                          "★ the mechanism: a type core can't build drops the lattice block (organic \(organic))")

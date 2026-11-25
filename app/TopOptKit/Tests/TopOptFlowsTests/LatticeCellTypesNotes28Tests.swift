@@ -12,8 +12,10 @@ final class LatticeCellTypesNotes28Tests: XCTestCase {
     /// ★ TRIPWIRE (core's own `structural_note`, builder D's types.cpp, through the bridge): on the linked core (D's,
     /// merged f82ac0b8) the measured strength laws of these credit the engine's struts; SC's and BCC's start past the open
     /// look (builder F re-measures them). When F's laws land the live check fails BY NAME: move them across.
-    static let structuralChecked = ["octet", "fcc", "diamond", "kelvin", "rhombic"]
-    static let strengthNotCoveredToday = ["sc", "bcc"]
+    /// ★ RE-PINNED (362, release (20), 2026-11-25): builder F's laws landed (932b0310: BCC, Diamond and SC measured down
+    /// to two-line struts), so the tripwire fired by name as planned: SC and BCC are strength-checked now.
+    static let structuralChecked = ["octet", "sc", "bcc", "fcc", "diamond", "kelvin", "rhombic"]
+    static let strengthNotCoveredToday: [String] = []
     static var all: [String] { structuralAndAesthetic + aestheticOnly }
     /// ★ TRIPWIRE: the strut types the linked engine does not lay. Empty since builder D's core (f82ac0b8): the tetragonal
     /// three have their cells and width limits. A type listed here is checked to be refused, by name.
@@ -446,8 +448,13 @@ import SwiftUI
 /// cards too, greyed with their caption and (i), and a tap on one says why and picks nothing.
 @MainActor
 final class LatticeCellTypesNotes28HostedTests: XCTestCase {
+
     override nonisolated func setUp() { super.setUp(); FlexibleSaid.recording = true }
-    override nonisolated func tearDown() { FlexibleSaid.recording = false; super.tearDown() }
+    override nonisolated func tearDown() {
+        FlexibleSaid.recording = false
+        LatticeTypeCatalog.appBatchesForTests = nil   // ★ 362: the stand-in newLattice opens (his A1 pad is an old-run part)
+        super.tearDown()
+    }
 
     final class Probe { var all: [String: CGRect] = [:] }
     private var probe = Probe()
@@ -458,6 +465,10 @@ final class LatticeCellTypesNotes28HostedTests: XCTestCase {
     }
 
     private func newLattice(_ mode: LatticeStageMode) throws -> AppBuildHost {
+        // ★ 362 (his 11-25 "Sure": the old run keeps the octet only): this fixture is his A1 pad, a part the OLD run makes
+        // (no STEP), where only the octet is offered now (Notes28OldRunTypesTests pins that). The cards' behaviour per type
+        // is what this class checks, so the test stand-in opens every gate as on a STEP part.
+        if LatticeTypeCatalog.appBatchesForTests == nil { LatticeTypeCatalog.appBatchesForTests = LatticeTypeCatalog.appBatches }
         let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
         let p = r.project
         p.lattice.flexible = nil

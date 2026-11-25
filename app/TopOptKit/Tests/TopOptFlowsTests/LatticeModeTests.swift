@@ -169,11 +169,13 @@ final class LatticeModeTests: XCTestCase {
         // Enabled but a topology the app can't run → nil. ★ RE-PINNED (release (2), E2): core builds BCC now; the
         // run waits for its app batch (`LatticeTypeCatalog.appBatches`, the type gate).
         // ★ RE-PINNED (notes28, 2026-11-24): BCC's batch shipped with all the strut types — it runs with its OWN strut law
+        // ★ RE-PINNED (362, his 11-25 "Sure"): this spec is the OLD run's (variant page, Optimize's lattice, STL parts), which
+        // keeps the octet only until it moves to the new engine; BCC runs on the new engine (Notes28OldRunTypesTests).
         s.topologyID = "bcc"
-        let bcc = try XCTUnwrap(s.runSpec(), "BCC runs now")
+        XCTAssertNil(s.runSpec(), "★ the old run keeps the octet only: no BCC run here")
+        LatticeTypeCatalog.appBatchesForTests = ["octet", "bcc"]   // RED CONTROL: opened, BCC runs with its OWN strut law
+        let bcc = try XCTUnwrap(s.runSpec(), "BCC runs behind an open gate")
         XCTAssertNotEqual(bcc.strutRadiusMM, spec.strutRadiusMM, accuracy: 1e-9, "★ BCC's strut, never the octet's")
-        LatticeTypeCatalog.appBatchesForTests = ["octet"]   // RED CONTROL: behind the old gate it waited for its batch
-        XCTAssertNil(s.runSpec(), "★ the gate closed again: no BCC run")
         LatticeTypeCatalog.appBatchesForTests = nil
         // And a topology that certifies nothing at all → nil too.
         s.topologyID = "bccz"

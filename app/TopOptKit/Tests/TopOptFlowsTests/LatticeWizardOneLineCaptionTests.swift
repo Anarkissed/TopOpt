@@ -44,7 +44,9 @@ final class LatticeWizardOneLineCaptionTests: XCTestCase {
     /// Structural rules — LatticeCellTypesNotes28Tests). Still pinned: a type the stage can't use is drawn only greyed with
     /// its sentence, never picked, and a saved one says why under the row.
     func testEveryStrutTypeTheRunBuildsIsOffered() {
-        XCTAssertEqual(LatticeSetupWizard.offeredTypeIDs, ["octet", "sc", "bcc", "fcc", "diamond", "kelvin", "rhombic"])
+        // ★ RE-PINNED (362, his 11-25 "Sure"): `offeredTypeIDs` is the OLD run's catalog (octet only until it moves to the new
+        // engine); the Lattice stage on a STEP part reads the new engine's (LatticeCellTypesNotes28Tests)
+        XCTAssertEqual(LatticeSetupWizard.offeredTypeIDs, ["octet"])
         let s = src
         // ★ RE-PINNED (B7 slice 2, plan.md §B7 Type, LS-1 / LS-19): a type not offered is not on the page at all, so it
         // can't be selected; a SAVED type core can't run still says why under the row.
