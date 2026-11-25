@@ -1,0 +1,27 @@
+LATTICE DE-HOMOGENIZATION PROBE — schwarz_d band [0.20038, 0.60012] (read from core)
+
+===== WIDTHS — the law per member width (sheets 3.2) =====
+  solver: fea_solve_cg_matfree; widths: 8; cuts: 0.25
+  cut      rho 0.200 N8 (lx 8) vpc16 cut 0.25: K_dev free=0.00 cut=14.99 wall 2 vox (true 0.8) dropped=491040 (4s, cg<=95)
+    rho_meas 0.0073 is -96.3% off rho_lib 0.2004 (aliased): re-measuring at vpc24
+  cut      rho 0.200 N8 (lx 8) vpc24 cut 0.25: K_dev free=24.04 cut=52.67 wall 2 vox (true 1.3) dropped=0 (5807s, cg<=2480)
+
+DONE (rc=0).
+     5816.10 real      5070.60 user       338.28 sys
+          1718599680  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+            51969815  page reclaims
+                  11  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                  14  voluntary context switches
+             2735877  involuntary context switches
+      22571853140373  instructions retired
+      16144504267378  cycles elapsed
+          2877819448  peak memory footprint

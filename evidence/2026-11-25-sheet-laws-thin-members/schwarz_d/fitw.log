@@ -1,0 +1,10 @@
+LATTICE DE-HOMOGENIZATION PROBE — schwarz_d band [0.20038, 0.60012] (read from core)
+
+===== FITW — the law per member width =====
+  rho 0.20038  wide 36.70 | law: N2 76.35 N3 76.35 N4 76.35 N5 76.35 N6 76.35 N8 76.35 | off the grips: N2 24.66 N3 24.66 N4 24.66 N5 24.66 N6 24.66 N8 24.66
+  rho 0.31300  wide 21.72 | law: N2 32.58 N3 32.58 N4 32.58 N5 32.58 N6 32.58 N8 32.58 | off the grips: N2 13.18 N3 13.18 N4 13.18 N5 13.18 N6 13.18 N8 13.18
+  rho 0.45000  wide 14.87 | law: N2 19.67 N3 19.67 N4 19.67 N5 19.67 N6 19.67 N8 19.67 | off the grips: N2 9.78 N3 9.78 N4 9.78 N5 9.78 N6 9.78 N8 9.78
+  rho 0.60012  wide 9.24 | law: N2 12.41 N3 12.41 N4 12.41 N5 12.41 N6 12.41 N8 12.41 | off the grips: N2 5.87 N3 5.87 N4 5.87 N5 5.87 N6 5.87 N8 5.87
+  kfit_widths.csv and kcheck_widths.csv written
+
+DONE (rc=0).

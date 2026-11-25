@@ -1,0 +1,39 @@
+LATTICE DE-HOMOGENIZATION PROBE — schwarz_d band [0.20038, 0.60012] (read from core)
+
+===== WIDTHS — the law per member width (sheets 3.2) =====
+  solver: fea_solve_cg_matfree; widths: 3; cuts: 0.00 0.25 0.50 0.60 0.75
+  sandwich rho 0.200 N3 (lx 3) vpc16 cut 0.00: K_dev free=0.00 cut=0.00 wall 2 vox (true 0.8) dropped=23760 (0s, cg<=98)
+    rho_meas 0.0195 is -90.3% off rho_lib 0.2004 (aliased): re-measuring at vpc24
+  cut      rho 0.200 N3 (lx 3) vpc16 cut 0.25: K_dev free=0.00 cut=14.99 wall 2 vox (true 0.8) dropped=25740 (0s, cg<=98)
+    rho_meas 0.0195 is -90.3% off rho_lib 0.2004 (aliased): re-measuring at vpc24
+  cut      rho 0.200 N3 (lx 3) vpc16 cut 0.50: K_dev free=0.00 cut=15.33 wall 2 vox (true 0.8) dropped=27720 (0s, cg<=98)
+    rho_meas 0.0195 is -90.3% off rho_lib 0.2004 (aliased): re-measuring at vpc24
+  cut      rho 0.200 N3 (lx 3) vpc16 cut 0.60: K_dev free=0.00 cut=15.47 wall 2 vox (true 0.8) dropped=28710 (0s, cg<=113)
+    rho_meas 0.0195 is -90.3% off rho_lib 0.2004 (aliased): re-measuring at vpc24
+  cut      rho 0.200 N3 (lx 3) vpc16 cut 0.75: K_dev free=0.00 cut=15.35 wall 2 vox (true 0.8) dropped=29700 (0s, cg<=97)
+    rho_meas 0.0195 is -90.3% off rho_lib 0.2004 (aliased): re-measuring at vpc24
+  sandwich rho 0.200 N3 (lx 3) vpc24 cut 0.00: K_dev free=18.31 cut=0.00 wall 2 vox (true 1.3) dropped=0 (110s, cg<=1038)
+  cut      rho 0.200 N3 (lx 3) vpc24 cut 0.25: K_dev free=18.56 cut=33.61 wall 2 vox (true 1.3) dropped=0 (119s, cg<=1063)
+  cut      rho 0.200 N3 (lx 3) vpc24 cut 0.50: K_dev free=18.66 cut=52.45 wall 2 vox (true 1.3) dropped=0 (120s, cg<=1074)
+  cut      rho 0.200 N3 (lx 3) vpc24 cut 0.60: K_dev free=18.63 cut=36.70 wall 2 vox (true 1.3) dropped=0 (121s, cg<=1216)
+  cut      rho 0.200 N3 (lx 3) vpc24 cut 0.75: K_dev free=18.71 cut=34.71 wall 2 vox (true 1.3) dropped=0 (102s, cg<=1077)
+
+DONE (rc=0).
+      576.82 real       548.57 user         3.29 sys
+           268124160  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+              194598  page reclaims
+                   7  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   7  voluntary context switches
+              203133  involuntary context switches
+       2838389257820  instructions retired
+       1669858399231  cycles elapsed
+           403063600  peak memory footprint

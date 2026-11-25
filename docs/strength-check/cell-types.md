@@ -75,3 +75,77 @@ as a bridge, which must stay within 5 mm.
 - Not yet printed (his rule, "Not print-tested"): every type but the octet (8 mm, 2026-11-11) and bccz (8 mm,
   2026-07-29). Each type's print coupon: `topopt-cli lattice-coupon --topology <type> --out <folder>`
   (make_type_coupon: the 8 mm rim coupon's outline, two-line struts, a flat 2 mm plate fused in, print-checked).
+
+## Sheets (gyroid, Schwarz-D): the law per member width
+
+Builder D of the sheets design, section 3.2. Today a Structural sheet is credited only from 10 cells across
+(gyroid) or 9 (Schwarz-D), by the law of `evidence/2026-11-09-lattice-type-strut-laws`. The same
+measurement, made per member width N, is in `evidence/2026-11-25-sheet-laws-thin-members` (README).
+Core carries it in `core/include/topopt/sheet_width_law.hpp` (tables generated from that folder's CSVs;
+`test_sheet_width_law` pins every row). It is not wired into the check yet: builder B joins it once the lead
+and TOReview set the floor.
+
+**Strength, Kd per density.** Every coefficient (Kd, Kv, Kild, Kilv) is in
+`<type>/kfit_widths.csv` and in core.
+
+- **Today** is the law from 10 / 9 cells.
+- **Measured at N** is 11-09's envelope for a member N cells across: the bulk, plus the free-surface and
+  cut-layer blocks cut at 0.25, 0.5, 0.6 and 0.75, at 11-09's pitch.
+- **Law for N = 2..8** is the max over the widths >= N and today's row.
+- **Off the grips** is the same envelope with the cut layer's cells next to the gripped faces left out.
+  It is for TOReview, not the law.
+
+| gyroid rho | today | measured at N = 2 / 3 / 4 / 5 / 6 / 8 | law for N = 2..8 | off the grips |
+|---|---|---|---|---|
+| 0.150 (vpc 24) | 59.60 | 95.1 / 105.5 / 120.6 / 133.8 / 145.5 / 166.0 | 166.0 | 39.0 |
+| 0.200 | 34.04 | 43.7 / 48.8 / 55.6 / 61.6 / 66.9 / 76.2 | 76.2 | 38.1 |
+| 0.313 | 23.87 | 24.6 / 27.4 / 31.1 / 34.3 / 37.1 / 42.1 | 42.1 | 17.0 |
+| 0.450 | 14.28 | 14.4 / 15.9 / 18.1 / 19.9 / 21.6 / 24.5 | 24.5 | 9.84 |
+| 0.601 | 9.45 | 11.1 / 12.4 / 13.9 / 15.3 / 16.5 / 18.5 | 18.5 | 7.27 |
+
+| Schwarz-D rho | today | measured at N = 2 / 3 / 4 / 5 / 6 / 8 | law for N = 2..8 | off the grips |
+|---|---|---|---|---|
+| 0.200 (vpc 24) | 36.70 | 47.0 / 52.5 / 58.6 / 63.8 / 68.4 / 76.4 | 76.4 | 24.7 |
+| 0.313 | 21.72 | 20.6 / 22.9 / 25.4 / 27.5 / 29.4 / 32.6 | 32.6 | 13.2 |
+| 0.450 | 14.87 | 11.7 / 13.2 / 14.9 / 16.3 / 17.5 / 19.7 | 19.7 | 9.78 |
+| 0.600 | 9.24 | 7.6 / 8.2 / 9.3 / 10.2 / 11.0 / 12.4 | 12.4 | 5.87 |
+
+- **Measured, and opposite to the expected direction:** Kd rises as the member WIDENS, at every density.
+  - So the narrow rows do not come from the narrow blocks. Every row is the 8-cell block's value, 1.3 to
+    2.8 x today's.
+  - The cut layer sets every row. Its peak sits in the cut cells next to the gripped faces, a corner of
+    the test block that rises with pitch. 11-09's population includes those cells; the grip population
+    itself is left out of the law.
+  - Off the grips every row is below today's.
+  - So by its own method with the added cuts, today's row reads low. Whether the grip-adjacent cut cells
+    belong in the law is TOReview's call (README, findings 1-3).
+- **Pitch:** the rows are read at 11-09's pitch. The median wall run is 2-5 voxels, the true wall 1.0-3.3
+  voxels: lower bounds, as 11-09's boundary rows were. The 6-voxel checks are in the README.
+
+**Stiffness:** the C2b guided cantilever, resolved against the averaged material (vpc 24). A positive
+error means the averaged member is too stiff; core scales the tensor by 1 / (1 + error) there.
+
+| | rho | N = 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|---|
+| gyroid | 0.146 | +55.4 % | +26.2 | +15.5 | +10.3 | +7.5 | +5.7 | +4.5 |
+| gyroid | 0.405 | +43.6 % | +20.8 | +12.4 | +8.2 | +5.9 | +4.4 | +3.5 |
+| gyroid | 0.600 | +39.8 % | +19.4 | +11.7 | +7.9 | +5.7 | +4.3 | +3.4 |
+| Schwarz-D | 0.208 | +20.1 % | +11.6 | +7.8 | +5.6 | +4.2 | +3.3 | +2.6 |
+| Schwarz-D | 0.407 | +20.5 % | +11.5 | +7.7 | +5.6 | +4.2 | +3.3 | +2.6 |
+| Schwarz-D | 0.588 | +20.7 % | +11.4 | +7.6 | +5.5 | +4.1 | +3.2 | +2.6 |
+
+- **Gyroid:** the error grows as the density falls.
+- **Schwarz-D:** the error does not depend on the density.
+- The 0.40 rows reproduce the 11-01 record (`lattice.cpp`'s curves): every error to the printed digit;
+  the resolved stiffness within one unit of its last digit (the record solved 2-6 cells assembled, these
+  matrix-free).
+
+**Floor: the 2-cell rows came out steady for both sheets** (README, `steady.csv`; criteria fixed before
+the long runs), so the measurement supports a Structural floor of 2 cells. That is 8.7 mm (gyroid) and
+10.8 mm (Schwarz-D) at the smallest cells. The lead and TOReview set the number.
+`sheet_width_floor_measured` returns 2 for both.
+
+**Caveats, carried:**
+- The rows are still rising with pitch, so they are lower bounds.
+- The interlayer factor 0.55 is unsourced (above). The interlayer law was measured with the build
+  direction on a cube axis.

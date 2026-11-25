@@ -1,0 +1,4 @@
+fixture,rho_target,rho_lib,rho_meas,N,vpc,population,n_vox,wall_vox,K_dev_max,K_vol,K_il_dev,K_il_vol,samp_min,samp_med,samp_p95,samp_max,n_samp,cg_iters_max,cg_resid_max,dropped_floaters,lx,cut_frac,wall_true_vox,solve_s,solver
+sandwich,0.15010,0.15010,0.15972,6,24,interior,141312,2.0,29.8849,12.3356,13.5330,4.9535,19.298,23.679,27.510,29.272,64,1924,9.99e-08,0,6,0.00,1.17,1466.5,matfree
+sandwich,0.15010,0.15010,0.15972,6,24,grip,158976,2.0,144.5455,79.0402,43.8331,28.3073,31.636,59.763,106.532,114.091,64,1924,9.99e-08,0,6,0.00,1.17,1466.5,matfree
+sandwich,0.15010,0.15010,0.15972,6,24,free_surface,176640,2.0,33.4963,13.5274,14.9665,4.3896,18.622,24.847,30.032,32.614,64,1924,9.99e-08,0,6,0.00,1.17,1466.5,matfree

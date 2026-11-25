@@ -1,0 +1,29 @@
+LATTICE DE-HOMOGENIZATION PROBE — gyroid band [0.15010, 0.60069] (read from core)
+
+===== WIDTHS — the law per member width (sheets 3.2) =====
+  solver: fea_solve_cg_matfree; widths: 5; cuts: 0.00 0.25 0.50 0.60 0.75
+  sandwich rho 0.200 N5 (lx 5) vpc16 cut 0.00: K_dev free=21.84 cut=0.00 wall 2 vox (true 1.0) dropped=0 (152s, cg<=1098)
+  cut      rho 0.200 N5 (lx 5) vpc16 cut 0.25: K_dev free=21.76 cut=39.66 wall 2 vox (true 1.0) dropped=0 (163s, cg<=1128)
+  cut      rho 0.200 N5 (lx 5) vpc16 cut 0.50: K_dev free=21.75 cut=61.58 wall 2 vox (true 1.0) dropped=0 (172s, cg<=1142)
+  cut      rho 0.200 N5 (lx 5) vpc16 cut 0.60: K_dev free=21.72 cut=37.71 wall 2 vox (true 1.0) dropped=0 (180s, cg<=1166)
+  cut      rho 0.200 N5 (lx 5) vpc16 cut 0.75: K_dev free=21.69 cut=39.75 wall 2 vox (true 1.0) dropped=0 (187s, cg<=1159)
+
+DONE (rc=0).
+      856.80 real       811.67 user         5.84 sys
+           300105728  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+              353151  page reclaims
+                   4  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   8  voluntary context switches
+              317681  involuntary context switches
+       4567203946198  instructions retired
+       2438239528156  cycles elapsed
+           468616008  peak memory footprint

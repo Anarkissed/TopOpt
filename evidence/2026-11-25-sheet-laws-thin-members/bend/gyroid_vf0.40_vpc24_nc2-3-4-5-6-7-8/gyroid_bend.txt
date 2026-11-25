@@ -1,0 +1,27 @@
+BEND gyroid: S=5.0 mm, vpc=24, 6 cells long, target rho 0.40 -> cell rho 0.4051 (wall 3.23 voxels), C11=823.22 C12=365.97 C44=262.81 Zener=1.150
+  [writing /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a39f55a061db7194a/evidence/2026-11-25-sheet-laws-thin-members/bend/gyroid_vf0.40_vpc24_nc2-3-4-5-6-7-8/gyroid_bend.csv]
+    nc=2  block rho 0.4051  K_res 147.6881  K_hom 212.0218  err +43.56 %  dof 1044435  36730 ms  NO-GO
+    nc=3  block rho 0.4051  K_res 643.4300  K_hom 777.5464  err +20.84 %  dof 2318115  80323 ms  NO-GO
+    nc=4  block rho 0.4051  K_res 1616.1757  K_hom 1816.4774  err +12.39 %  dof 4092915  103663 ms  NO-GO
+    nc=5  block rho 0.4051  K_res 3085.0152  K_hom 3339.5126  err +8.25 %  dof 6368835  181723 ms  NO-GO
+    nc=6  block rho 0.4051  K_res 5033.5226  K_hom 5330.4789  err +5.90 %  dof 9145875  314542 ms  NO-GO
+    nc=7  block rho 0.4051  K_res 7443.5621  K_hom 7773.4755  err +4.43 %  dof 12424035  1055545 ms  NO-GO
+    nc=8  block rho 0.4051  K_res 10303.4960  K_hom 10658.9720  err +3.45 %  dof 16203315  1420869 ms  NO-GO
+     3198.69 real      1798.53 user       746.79 sys
+          1145176064  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+           106735245  page reclaims
+                  39  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+             1003141  voluntary context switches
+            14408345  involuntary context switches
+      14418849879314  instructions retired
+       7311822953033  cycles elapsed
+          2234468512  peak memory footprint

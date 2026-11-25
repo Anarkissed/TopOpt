@@ -1,0 +1,27 @@
+BEND schwarz_d: S=5.0 mm, vpc=24, 6 cells long, target rho 0.20 -> cell rho 0.2083 (wall 1.33 voxels), C11=375.14 C12=136.07 C44=80.37 Zener=0.672
+  [writing /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a39f55a061db7194a/evidence/2026-11-25-sheet-laws-thin-members/bend/schwarz_d_vf0.20038_vpc24_nc2-3-4-5-6-7-8/schwarz_d_bend.csv]
+    nc=2  block rho 0.2083  K_res 73.3730  K_hom 88.1345  err +20.12 %  dof 1044435  37343 ms  NO-GO
+    nc=3  block rho 0.2083  K_res 269.1867  K_hom 300.4700  err +11.62 %  dof 2318115  81202 ms  NO-GO
+    nc=4  block rho 0.2083  K_res 612.0540  K_hom 659.6421  err +7.78 %  dof 4092915  135437 ms  NO-GO
+    nc=5  block rho 0.2083  K_res 1099.7452  K_hom 1161.2145  err +5.59 %  dof 6368835  222399 ms  NO-GO
+    nc=6  block rho 0.2083  K_res 1727.7074  K_hom 1800.4068  err +4.21 %  dof 9145875  455094 ms  NO-GO
+    nc=7  block rho 0.2083  K_res 2493.1131  K_hom 2574.6405  err +3.27 %  dof 12424035  932244 ms  NO-GO
+    nc=8  block rho 0.2083  K_res 3394.6370  K_hom 3482.8671  err +2.60 %  dof 16203315  1041149 ms  NO-GO
+     2910.21 real      2082.91 user       518.51 sys
+           926121984  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+            71217055  page reclaims
+                  61  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+              308309  voluntary context switches
+            14489815  involuntary context switches
+      10195729570737  instructions retired
+       7458106575874  cycles elapsed
+          2172471408  peak memory footprint

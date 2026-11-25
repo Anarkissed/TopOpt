@@ -1,0 +1,11 @@
+LATTICE DE-HOMOGENIZATION PROBE — gyroid band [0.15010, 0.60069] (read from core)
+
+===== FITW — the law per member width =====
+  rho 0.15010  wide 59.60 | law: N2 166.00 N3 166.00 N4 166.00 N5 166.00 N6 166.00 N8 166.00 | off the grips: N2 38.98 N3 38.98 N4 38.98 N5 38.98 N6 38.98 N8 38.98
+  rho 0.20000  wide 34.04 | law: N2 76.19 N3 76.19 N4 76.19 N5 76.19 N6 76.19 N8 76.19 | off the grips: N2 38.08 N3 38.08 N4 38.08 N5 38.08 N6 38.08 N8 38.08
+  rho 0.31300  wide 23.87 | law: N2 42.11 N3 42.11 N4 42.11 N5 42.11 N6 42.11 N8 42.11 | off the grips: N2 17.03 N3 17.03 N4 17.03 N5 17.03 N6 17.03 N8 17.03
+  rho 0.45000  wide 14.28 | law: N2 24.55 N3 24.55 N4 24.55 N5 24.55 N6 24.55 N8 24.55 | off the grips: N2 9.84 N3 9.84 N4 9.84 N5 9.84 N6 9.84 N8 9.84
+  rho 0.60069  wide 9.45 | law: N2 18.55 N3 18.55 N4 18.55 N5 18.55 N6 18.55 N8 18.55 | off the grips: N2 7.27 N3 7.27 N4 7.27 N5 7.27 N6 7.27 N8 7.27
+  kfit_widths.csv and kcheck_widths.csv written
+
+DONE (rc=0).

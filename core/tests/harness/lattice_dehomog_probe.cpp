@@ -71,6 +71,7 @@
 #include <cstring>
 #include <map>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "topopt/analyze.hpp"
@@ -1709,16 +1710,23 @@ void phase_widths(const std::string& ev) {
 }
 
 // ---------------------------------------------------------------------------
-// PHASE: fitw — the law tables per member width, from the bulk CSV and every
-// k_exact_w_*.csv in the folder (listed in TOPOPT_DEHOMOG_W_FILES, comma separated).
-//   K_N(rho)   = the envelope (max) of the bulk row (finest vpc) and the free-surface and
-//                cut-layer populations of every block N across, at every pitch measured
-//                that the aliasing guard keeps (11-09's fit, per width);
-//   K_law(N)   = the max of K_N' over N' >= N and of the wide row (11-09's kfit.csv, read
-//                from TOPOPT_DEHOMOG_WIDE_KFIT; the law today, valid from 10 / 9 cells):
-//                a narrower member is never credited more than a wider one.
-// Writes kfit_widths.csv (one row per rho and N, each column enveloped on its own as 11-09
-// does) and prints the Kd table.
+// PHASE: fitw — the law tables per member width, from the bulk CSV and the k_exact_w_*.csv files
+// listed in TOPOPT_DEHOMOG_W_FILES (comma separated, in the evidence folder).
+//
+// THE LAW PITCH. 11-09 read each boundary fixture at ONE pitch: its own, or the next finer one when
+// the aliasing guard dropped it. Here too: per fixture (rho, N, sandwich or cut fraction) the law
+// reads the COARSEST pitch the guard keeps; finer pitches of the same fixture are checks (kcheck),
+// never law. So every width of a density row is read at the same pitch, and a width measured finer
+// is not penalised for the extra resolution (the cut layer's grip corner rises with pitch).
+//   K_N     = the envelope of the bulk (finest vpc, phase_fit's rule) and the free-surface and
+//             cut-layer populations of every block N across at its law pitch (11-09's fit, per width);
+//   K_law   = the max of K_N' over N' >= N and of the wide row (TOPOPT_DEHOMOG_WIDE_KFIT: 11-09's
+//             kfit.csv, the law today, from 10 / 9 cells): a narrower member is never credited more
+//             than a wider one. Each coefficient is enveloped on its own, as 11-09 does.
+//   K_og    = THE SAME WITH THE CUT LAYER OFF THE GRIP COLUMNS (cut_off_grip): a comparison for the
+//             reviewer, not the law; made to rise as N falls among the measured widths only.
+// Writes kfit_widths.csv (one row per rho and N) and kcheck_widths.csv (one row per rho, N and
+// pitch: the populations' maxima, the spread over the placements, the wall in voxels).
 // ---------------------------------------------------------------------------
 void phase_fitw(const std::string& ev) {
   std::printf("\n===== FITW — the law per member width =====\n");
@@ -1741,7 +1749,6 @@ void phase_fitw(const std::string& ev) {
       L.Kild_bulk = num(r, "K_il_dev"); L.Kilv_bulk = num(r, "K_il_vol");
     }
   }
-  // the wide row (11-09's law)
   std::map<double, std::array<double, 4>> wide;
   if (const char* wk = std::getenv("TOPOPT_DEHOMOG_WIDE_KFIT"))
     for (const auto& r : read_csv(wk))
@@ -1754,10 +1761,14 @@ void phase_fitw(const std::string& ev) {
       if (std::fabs(it->first - rho) < d) { d = std::fabs(it->first - rho); best = it; }
     return d < 1e-4 ? best : m.end();
   };
-  // boundary per (rho, N): max over pops/fixtures/pitches; plus the provenance
-  struct Bnd { double k[4] = {0, 0, 0, 0}; int vpc_min = 999, vpc_max = 0; double wall_min = 1e9,
-               wall_true_min = 1e9; int fixtures = 0; std::string argmax; };
-  std::map<std::pair<double, int>, Bnd> W;
+  // Every exact row, keyed by its fixture and pitch.
+  struct Fx {
+    bool kept = false;             // the guard keeps it (11-09's test: density, a free population)
+    double wall = 0, wall_true = 0;
+    std::map<std::string, std::array<double, 4>> pop;  // population -> K_dev, K_vol, K_il_dev, K_il_vol
+  };
+  using FxKey = std::tuple<double, int, double, int>;  // rho (bulk key), N, cut (0 = sandwich), vpc
+  std::map<FxKey, Fx> F;
   std::vector<std::string> files;
   if (const char* fl = std::getenv("TOPOPT_DEHOMOG_W_FILES")) {
     std::string cur;
@@ -1768,73 +1779,145 @@ void phase_fitw(const std::string& ev) {
   }
   for (const std::string& fn : files)
     for (const auto& r : read_csv(ev + "/" + fn)) {
-      const std::string pop = r.at("population");
-      if (pop != "free_surface" && pop != "cut_layer") continue;
-      if (num(r, "n_vox") <= 0 || num(r, "K_dev_max") <= 0) continue;
-      if (aliased(r)) continue;
       auto it = nearest(B, num(r, "rho_lib"));
       if (it == B.end()) continue;
-      Bnd& b = W[{it->first, (int)num(r, "N")}];
-      const double k[4] = {num(r, "K_dev_max"), num(r, "K_vol"), num(r, "K_il_dev"),
-                           num(r, "K_il_vol")};
-      if (k[0] > b.k[0]) {
+      const FxKey key{it->first, (int)num(r, "N"), num(r, "cut_frac"), (int)num(r, "vpc")};
+      Fx& f = F[key];
+      const std::string pop = r.at("population");
+      if (num(r, "n_vox") > 0)
+        f.pop[pop] = {num(r, "K_dev_max"), num(r, "K_vol"), num(r, "K_il_dev"), num(r, "K_il_vol")};
+      f.wall = num(r, "wall_vox");
+      f.wall_true = num(r, "wall_true_vox");
+      if (pop == "free_surface") f.kept = !aliased(r) && num(r, "K_dev_max") > 0;
+    }
+  // The law pitch of each fixture: its coarsest kept pitch.
+  std::map<std::tuple<double, int, double>, int> law_vpc;
+  for (auto& kv : F) {
+    if (!kv.second.kept) continue;
+    const auto fk = std::make_tuple(std::get<0>(kv.first), std::get<1>(kv.first), std::get<2>(kv.first));
+    auto it = law_vpc.find(fk);
+    if (it == law_vpc.end() || std::get<3>(kv.first) < it->second) law_vpc[fk] = std::get<3>(kv.first);
+  }
+  // CHECKS: per (rho, N, vpc), every kept fixture at that pitch.
+  FILE* chk = open_csv(ev, "kcheck_widths.csv",
+                       "rho_lib,N,vpc,law_pitch,fixtures,aliased_fixtures,wall_vox_min,wall_true_vox,"
+                       "Kd_free_max,Kd_cut_layer_max,Kd_cut_off_grip_max,Kd_og_place_min,Kd_og_place_max,"
+                       "Kd_og_spread");
+  {
+    std::map<std::tuple<double, int, int>, std::vector<const std::pair<const FxKey, Fx>*>> byp;
+    for (auto& kv : F)
+      byp[std::make_tuple(std::get<0>(kv.first), std::get<1>(kv.first), std::get<3>(kv.first))]
+          .push_back(&kv);
+    for (auto& g : byp) {
+      int kept = 0, off = 0, lawp = 0;
+      double wmin = 1e9, wt = 0, kf = 0, kc = 0, ko = 0, pmin = 1e9, pmax = 0;
+      for (auto* kv : g.second) {
+        const Fx& f = kv->second;
+        if (!f.kept) { ++off; continue; }
+        ++kept;
+        const auto fk = std::make_tuple(std::get<0>(kv->first), std::get<1>(kv->first), std::get<2>(kv->first));
+        if (law_vpc[fk] == std::get<3>(kv->first)) lawp = 1;
+        wmin = std::min(wmin, f.wall);
+        wt = f.wall_true;
+        auto get = [&](const char* p) { auto it = f.pop.find(p); return it == f.pop.end() ? 0.0 : it->second[0]; };
+        kf = std::max(kf, get("free_surface"));
+        kc = std::max(kc, get("cut_layer"));
+        ko = std::max(ko, get("cut_off_grip"));
+        const double place = std::max(get("free_surface"), get("cut_off_grip"));
+        pmin = std::min(pmin, place);
+        pmax = std::max(pmax, place);
+      }
+      if (kept == 0) { wmin = 0; pmin = 0; }
+      std::fprintf(chk, "%.5f,%d,%d,%d,%d,%d,%.1f,%.2f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f\n",
+                   std::get<0>(g.first), std::get<1>(g.first), std::get<2>(g.first), lawp, kept, off,
+                   wmin, wt, kf, kc, ko, pmin, pmax, pmin > 0 ? pmax / pmin : 0.0);
+    }
+  }
+  std::fclose(chk);
+  // THE LAW per (rho, N): every fixture at its law pitch.
+  struct Bnd {
+    double k[4] = {0, 0, 0, 0}, og[4] = {0, 0, 0, 0};
+    int vpc_min = 999, vpc_max = 0, fixtures = 0;
+    double wall_min = 1e9, wall_true_min = 1e9;
+    std::string argmax;
+  };
+  std::map<std::pair<double, int>, Bnd> W;
+  for (auto& kv : F) {
+    const Fx& f = kv.second;
+    if (!f.kept) continue;
+    const auto fk = std::make_tuple(std::get<0>(kv.first), std::get<1>(kv.first), std::get<2>(kv.first));
+    const int vpc = std::get<3>(kv.first);
+    if (law_vpc[fk] != vpc) continue;
+    Bnd& b = W[{std::get<0>(kv.first), std::get<1>(kv.first)}];
+    for (const auto& pp : f.pop) {
+      const bool law = pp.first == "free_surface" || pp.first == "cut_layer";
+      const bool og = pp.first == "free_surface" || pp.first == "cut_off_grip";
+      if (law && pp.second[0] > b.k[0]) {
         char buf[96];
-        std::snprintf(buf, sizeof buf, "%s cut %.2f vpc%d %s", r.at("fixture").c_str(),
-                      num(r, "cut_frac"), (int)num(r, "vpc"), pop.c_str());
+        std::snprintf(buf, sizeof buf, "%s %.2f vpc%d %s", std::get<2>(kv.first) > 0 ? "cut" : "sandwich",
+                      std::get<2>(kv.first), vpc, pp.first.c_str());
         b.argmax = buf;
       }
-      for (int q = 0; q < 4; ++q) b.k[q] = std::max(b.k[q], k[q]);
-      const int vpc = (int)num(r, "vpc");
-      b.vpc_min = std::min(b.vpc_min, vpc);
-      b.vpc_max = std::max(b.vpc_max, vpc);
-      b.wall_min = std::min(b.wall_min, num(r, "wall_vox"));
-      b.wall_true_min = std::min(b.wall_true_min, num(r, "wall_true_vox"));
-      ++b.fixtures;
+      for (int q = 0; q < 4; ++q) {
+        if (law) b.k[q] = std::max(b.k[q], pp.second[q]);
+        if (og) b.og[q] = std::max(b.og[q], pp.second[q]);
+      }
     }
+    b.vpc_min = std::min(b.vpc_min, vpc);
+    b.vpc_max = std::max(b.vpc_max, vpc);
+    b.wall_min = std::min(b.wall_min, f.wall);
+    b.wall_true_min = std::min(b.wall_true_min, f.wall_true);
+    ++b.fixtures;
+  }
   FILE* out = open_csv(ev, "kfit_widths.csv",
-                       "rho_lib,N,Kd_bulk,Kv_bulk,Kild_bulk,Kilv_bulk,Kd_bnd,Kv_bnd,Kild_bnd,"
-                       "Kilv_bnd,Kd_N,Kv_N,Kild_N,Kilv_N,Kd_law,Kv_law,Kild_law,Kilv_law,"
-                       "Kd_wide,Kd_law_over_wide,raised_by,vpc_min,vpc_max,wall_vox_min,"
-                       "wall_true_vox_min,fixtures,argmax");
+                       "rho_lib,N,vpc_min,vpc_max,wall_vox_min,wall_true_vox_min,fixtures,"
+                       "Kd_bulk,Kv_bulk,Kild_bulk,Kilv_bulk,Kd_bnd,Kv_bnd,Kild_bnd,Kilv_bnd,"
+                       "Kd_N,Kv_N,Kild_N,Kilv_N,Kd_law,Kv_law,Kild_law,Kilv_law,"
+                       "Kd_wide,Kv_wide,Kild_wide,Kilv_wide,Kd_law_over_wide,"
+                       "Kd_og,Kv_og,Kild_og,Kilv_og,argmax");
   for (auto& kv : B) {
     const double rho = kv.first;
     const LawRow& L = kv.second;
     const double bulkk[4] = {L.Kd_bulk, L.Kv_bulk, L.Kild_bulk, L.Kilv_bulk};
     std::array<double, 4> w = {0, 0, 0, 0};
     { auto it = nearest(wide, rho); if (it != wide.end()) w = it->second; }
-    // widths measured at this rho, widest first
-    std::vector<int> Ns;
+    std::vector<int> Ns;  // widest first
     for (auto& e : W) if (e.first.first == rho) Ns.push_back(e.first.second);
     std::sort(Ns.rbegin(), Ns.rend());
-    double run[4] = {w[0], w[1], w[2], w[3]};  // the running envelope, from the wide row down
-    std::printf("  rho %.5f (wide Kd %.3f):", rho, w[0]);
-    struct OutRow { int N; double kN[4], law[4]; const Bnd* b; std::string raised; };
+    double run[4] = {w[0], w[1], w[2], w[3]}, rog[4] = {0, 0, 0, 0};
+    struct OutRow { int N; double kN[4], law[4], og[4]; const Bnd* b; };
     std::vector<OutRow> rows;
     for (int N : Ns) {
       const Bnd& b = W[{rho, N}];
       OutRow o;
       o.N = N; o.b = &b;
-      for (int q = 0; q < 4; ++q) o.kN[q] = std::max(bulkk[q], b.k[q]);
-      const double before = run[0];
-      for (int q = 0; q < 4; ++q) { run[q] = std::max(run[q], o.kN[q]); o.law[q] = run[q]; }
-      o.raised = o.kN[0] >= before ? "this width" : (before == w[0] ? "wide row" : "a wider width");
+      for (int q = 0; q < 4; ++q) {
+        o.kN[q] = std::max(bulkk[q], b.k[q]);
+        run[q] = std::max(run[q], o.kN[q]);
+        o.law[q] = run[q];
+        rog[q] = std::max(rog[q], std::max(bulkk[q], b.og[q]));
+        o.og[q] = rog[q];
+      }
       rows.push_back(o);
     }
     std::sort(rows.begin(), rows.end(), [](const OutRow& a, const OutRow& b) { return a.N < b.N; });
-    for (const OutRow& o : rows) {
-      std::fprintf(out, "%.5f,%d,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,"
-                        "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%s,%d,%d,%.1f,%.2f,%d,%s\n",
-                   rho, o.N, bulkk[0], bulkk[1], bulkk[2], bulkk[3], o.b->k[0], o.b->k[1],
-                   o.b->k[2], o.b->k[3], o.kN[0], o.kN[1], o.kN[2], o.kN[3], o.law[0],
-                   o.law[1], o.law[2], o.law[3], w[0], w[0] > 0 ? o.law[0] / w[0] : 0.0,
-                   o.raised.c_str(), o.b->vpc_min, o.b->vpc_max, o.b->wall_min,
-                   o.b->wall_true_min, o.b->fixtures, o.b->argmax.c_str());
-      std::printf("  N%d %.2f", o.N, o.law[0]);
-    }
+    std::printf("  rho %.5f  wide %.2f | law:", rho, w[0]);
+    for (const OutRow& o : rows) std::printf(" N%d %.2f", o.N, o.law[0]);
+    std::printf(" | off the grips:");
+    for (const OutRow& o : rows) std::printf(" N%d %.2f", o.N, o.og[0]);
     std::printf("\n");
+    for (const OutRow& o : rows)
+      std::fprintf(out, "%.5f,%d,%d,%d,%.1f,%.2f,%d,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,"
+                        "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,"
+                        "%.4f,%.4f,%.4f,%.4f,%s\n",
+                   rho, o.N, o.b->vpc_min, o.b->vpc_max, o.b->wall_min, o.b->wall_true_min,
+                   o.b->fixtures, bulkk[0], bulkk[1], bulkk[2], bulkk[3], o.b->k[0], o.b->k[1],
+                   o.b->k[2], o.b->k[3], o.kN[0], o.kN[1], o.kN[2], o.kN[3], o.law[0], o.law[1],
+                   o.law[2], o.law[3], w[0], w[1], w[2], w[3], w[0] > 0 ? o.law[0] / w[0] : 0.0,
+                   o.og[0], o.og[1], o.og[2], o.og[3], o.b->argmax.c_str());
   }
   std::fclose(out);
-  std::printf("  kfit_widths.csv written\n");
+  std::printf("  kfit_widths.csv and kcheck_widths.csv written\n");
 }
 
 // ---------------------------------------------------------------------------

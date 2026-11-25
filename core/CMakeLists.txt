@@ -164,6 +164,9 @@ add_library(topopt
   src/fea/lattice_types.cpp
   src/fea/lattice_material.cpp
   src/fea/strut_strength.cpp
+  # The sheets' laws per member width (sheets 3.2, builder D): tables generated from
+  # evidence/2026-11-25-sheet-laws-thin-members (sheet_width_law_tables.inc).
+  src/fea/sheet_width_law.cpp
   # The lattice rebuild's layout engine (docs/design/lattice-rebuild): one layout
   # object from the part's own surface, read by straight lines. No Eigen, no OCCT.
   src/lattice_layout/measure.cpp
@@ -2652,6 +2655,12 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
     LAW_EVIDENCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../evidence/2026-11-09-lattice-type-strut-laws")
   add_test(NAME lattice_type_strut_law COMMAND test_lattice_type_strut_law)
+  # Sheets 3.2: the gyroid's and Schwarz-D's laws per member width are their evidence, transcribed.
+  add_executable(test_sheet_width_law tests/validation/test_sheet_width_law.cpp)
+  target_link_libraries(test_sheet_width_law PRIVATE topopt)
+  target_compile_definitions(test_sheet_width_law PRIVATE
+    EVIDENCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../evidence/2026-11-25-sheet-laws-thin-members")
+  add_test(NAME sheet_width_law COMMAND test_sheet_width_law)
   # E2.4 (ruling 11-06 (1)): outer_finish "none", the open lattice, its cut cells uncredited.
   add_executable(test_lattice_open_finish tests/validation/test_lattice_open_finish.cpp)
   target_link_libraries(test_lattice_open_finish PRIVATE topopt)

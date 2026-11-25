@@ -1,0 +1,39 @@
+type,rho,criterion,detail,pass
+gyroid,0.15010,a_connected,law pitch vpc24; 5 of 5 placements kept,1
+gyroid,0.15010,b_width,K2/K3 = 0.902 (11-09 populations); 1.000 (off the grips),1
+gyroid,0.15010,c_pitch,free K2/K3: vpc24 0.981,1
+gyroid,0.15010,d_placement,spread 1.057 (2 cells) vs 1.010 (3 cells),1
+gyroid,0.20000,a_connected,law pitch vpc16; 5 of 5 placements kept,1
+gyroid,0.20000,b_width,K2/K3 = 0.897 (11-09 populations); 0.970 (off the grips),1
+gyroid,0.20000,c_pitch,free K2/K3: vpc16 0.978,1
+gyroid,0.20000,d_placement,spread 1.502 (2 cells) vs 1.516 (3 cells),1
+gyroid,0.31300,a_connected,law pitch vpc16; 5 of 5 placements kept,1
+gyroid,0.31300,b_width,K2/K3 = 0.900 (11-09 populations); 1.000 (off the grips),1
+gyroid,0.31300,c_pitch,free K2/K3: vpc16 0.984; vpc32 0.988,1
+gyroid,0.31300,d_placement,spread 1.335 (2 cells) vs 1.375 (3 cells),1
+gyroid,0.45000,a_connected,law pitch vpc16; 5 of 5 placements kept,1
+gyroid,0.45000,b_width,K2/K3 = 0.909 (11-09 populations); 1.000 (off the grips),1
+gyroid,0.45000,c_pitch,free K2/K3: vpc16 0.990,1
+gyroid,0.45000,d_placement,spread 1.210 (2 cells) vs 1.242 (3 cells),1
+gyroid,0.60069,a_connected,law pitch vpc16; 5 of 5 placements kept,1
+gyroid,0.60069,b_width,K2/K3 = 0.901 (11-09 populations); 1.000 (off the grips),1
+gyroid,0.60069,c_pitch,free K2/K3: vpc16 0.981,1
+gyroid,0.60069,d_placement,spread 1.009 (2 cells) vs 1.005 (3 cells),1
+gyroid,,e_bending,2-cell error rho 0.146: +55.40 %; rho 0.405: +43.56 %; rho 0.600: +39.82 %; mean +46.26 %; band +-9.25,1
+schwarz_d,0.20038,a_connected,law pitch vpc24; 5 of 5 placements kept,1
+schwarz_d,0.20038,b_width,K2/K3 = 0.897 (11-09 populations); 0.955 (off the grips),1
+schwarz_d,0.20038,c_pitch,free K2/K3: vpc24 0.955,1
+schwarz_d,0.20038,d_placement,spread 1.098 (2 cells) vs 1.022 (3 cells),1
+schwarz_d,0.31300,a_connected,law pitch vpc16; 5 of 5 placements kept,1
+schwarz_d,0.31300,b_width,K2/K3 = 0.902 (11-09 populations); 1.000 (off the grips),1
+schwarz_d,0.31300,c_pitch,free K2/K3: vpc16 0.986,1
+schwarz_d,0.31300,d_placement,spread 1.020 (2 cells) vs 1.022 (3 cells),1
+schwarz_d,0.45000,a_connected,law pitch vpc16; 5 of 5 placements kept,1
+schwarz_d,0.45000,b_width,K2/K3 = 0.887 (11-09 populations); 0.994 (off the grips),1
+schwarz_d,0.45000,c_pitch,free K2/K3: vpc16 0.971,1
+schwarz_d,0.45000,d_placement,spread 1.214 (2 cells) vs 1.183 (3 cells),1
+schwarz_d,0.60012,a_connected,law pitch vpc16; 5 of 5 placements kept,1
+schwarz_d,0.60012,b_width,K2/K3 = 0.928 (11-09 populations); 1.000 (off the grips),1
+schwarz_d,0.60012,c_pitch,free K2/K3: vpc16 0.970,1
+schwarz_d,0.60012,d_placement,spread 1.171 (2 cells) vs 1.187 (3 cells),1
+schwarz_d,,e_bending,2-cell error rho 0.208: +20.12 %; rho 0.407: +20.48 %; rho 0.588: +20.67 %; mean +20.42 %; band +-5.00,1

@@ -48,16 +48,22 @@ for f in $EV/jobs_*.txt; do
   grep -v '^#' $f | grep -v '^ *$' | while read -r line; do job ${=line}; done
 done
 
-# Gather each type's parts and fit the law per width (kfit_widths.csv). The wide row is 11-09's
-# law (valid from 10 / 9 cells across): no narrower row may credit more than it.
+# Gather each type's parts (the per-cell records compressed, the rest as CSV) and fit the law per
+# width: kfit_widths.csv (the law rows) and kcheck_widths.csv (every pitch). The wide row is
+# 11-09's law (valid from 10 / 9 cells across): no narrower row may credit more than it.
 for t in gyroid schwarz_d; do
   for k in states exact cells; do
     first=1
-    for p in $EV/$t/parts/k_${k}_w_*.csv; do
+    for p in $EV/$t/parts/k_${k}_w_*.csv(N); do
+      [[ -s $p ]] || continue
       if (( first )); then cat $p; first=0; else tail -n +2 $p; fi
     done > $EV/$t/k_${k}_w_all.csv
   done
+  gzip -nf $EV/$t/k_cells_w_all.csv && rm -f $EV/$t/parts/k_cells_w_*.csv
   TOPOPT_DEHOMOG_TYPE=$t TOPOPT_DEHOMOG_W_FILES=k_exact_w_all.csv \
   TOPOPT_DEHOMOG_WIDE_KFIT=evidence/2026-11-09-lattice-type-strut-laws/$t/kfit.csv \
     ./core/build/lattice_dehomog_probe fitw $EV/$t > $EV/$t/fitw.log 2>&1
 done
+# The five steady criteria (fixed in the timing commit c78d7c6d) -> steady.csv; then core's tables.
+python3 -I $EV/steady.py $EV > $EV/steady.txt
+python3 -I $EV/gen_tables.py $EV core/src/fea/sheet_width_law_tables.inc
