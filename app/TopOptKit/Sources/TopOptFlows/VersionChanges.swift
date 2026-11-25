@@ -14,10 +14,29 @@ import Foundation
 
 public struct VersionChange: Codable, Equatable, Sendable {
     public enum Kind: String, Codable, Sendable { case added, changed, removed }
-    /// The naming rule's order: a lower rank is a bigger change.
+    /// The naming rule's order: a lower rank is a bigger change. ★ notes28: the lattice, its groups and the print orientation
+    /// are appended (their raw values come after `other`, so a library.json written before still decodes each rank it holds as
+    /// it was); `order` places them between material and the print settings.
     public enum Rank: Int, Codable, Sendable, Comparable {
         case goal, load, anchor, keepProtect, designBox, material, plastic, resolution, other
-        public static func < (a: Rank, b: Rank) -> Bool { a.rawValue < b.rawValue }
+        case lattice, latticeArea, orientation
+        var order: Int {
+            switch self {
+            case .goal: return 0
+            case .load: return 1
+            case .anchor: return 2
+            case .keepProtect: return 3
+            case .designBox: return 4
+            case .material: return 5
+            case .lattice: return 6
+            case .latticeArea: return 7
+            case .orientation: return 8
+            case .plastic: return 9
+            case .resolution: return 10
+            case .other: return 11
+            }
+        }
+        public static func < (a: Rank, b: Rank) -> Bool { a.order < b.order }
     }
     public var kind: Kind
     public var rank: Rank
@@ -36,8 +55,11 @@ public struct VersionChange: Codable, Equatable, Sendable {
 
 public enum VersionChanges {
 
-    /// Every difference from `a` (the parent) to `b`, biggest first.
-    public static func between(_ a: ProjectSnapshot, _ b: ProjectSnapshot) -> [VersionChange] {
+    /// Every difference from `a` (the parent) to `b`, biggest first. ★ notes28: every saved setting that changes the result
+    /// (VersionChangesLattice.swift), and never empty while anything that reaches the run differs — "same settings" only when
+    /// truly nothing does. A pick (the active group, a folded region, the scenario shown) is not a setting.
+    public static func between(_ a0: ProjectSnapshot, _ b0: ProjectSnapshot) -> [VersionChange] {
+        let a = VersionSettings.picksLeftOut(a0), b = VersionSettings.picksLeftOut(b0)
         var out: [VersionChange] = []
 
         // ★ Upload new version (his ask 2026-11-11, decision 12): a new model is the biggest change of all — said once, on
@@ -55,8 +77,13 @@ public enum VersionChanges {
         if stageA != stageB {
             out.append(stageB.map { .init(.added, .goal, "Lattice: \($0)", phrase: "\($0) lattice") }
                        ?? .init(.removed, .goal, "No lattice"))
-        } else if a.lattice != b.lattice, stageB != nil, newModel?.latticeReset != true {
-            out.append(.init(.changed, .goal, "\(stageB!) lattice settings"))
+        }
+        // ★ notes28: what changed in the lattice, by name (it was one "Structural lattice settings" line)
+        if stageA != nil, stageB != nil, newModel?.latticeReset != true,
+           latticeSettingsOnly(a.lattice) != latticeSettingsOnly(b.lattice) {
+            let lines = latticeLines(latticeSettingsOnly(a.lattice), latticeSettingsOnly(b.lattice),
+                                     groupsA: a.selection.groups, groupsB: b.selection.groups)
+            out += lines.isEmpty ? [.init(.changed, .lattice, "Other lattice settings")] : lines
         }
         // his third answer: the per-face lattice choices went back to Auto — one line says so
         if newModel?.latticeReset == true { out.append(.init(.changed, .goal, NewModelVersion.latticeLine)) }
@@ -84,15 +111,38 @@ public enum VersionChanges {
         if a.process != b.process {
             out.append(.init(.changed, .material, "Process \(a.process.rawValue.uppercased()) → \(b.process.rawValue.uppercased())"))
         }
-        if (a.printParams ?? .fdmDefault) != (b.printParams ?? .fdmDefault) {
-            out.append(.init(.changed, .plastic, "Print settings"))
-        }
+        // ★ notes28: each print setting by name (it was one "Print settings" line), and the print orientation
+        out += printLines(a.printParams ?? .fdmDefault, b.printParams ?? .fdmDefault)
+        out += orientationLines(a, b)
 
         // resolution, then the rest
         let resA = (a.quality ?? .fast).resolution, resB = (b.quality ?? .fast).resolution
         if resA != resB { out.append(.init(.changed, .resolution, "Resolution \(resA) → \(resB)", phrase: "res \(resB)")) }
         if (a.projectCADFaces ?? true) != (b.projectCADFaces ?? true) {
             out.append(.init(.changed, .other, (b.projectCADFaces ?? true) ? "CAD faces on" : "CAD faces off"))
+        }
+
+        // ★ notes28: the safety margin and the load scenarios (the same groups only: a scenario names its groups by id)
+        let sameGroups = Set(a.selection.groups.map(\.id)) == Set(b.selection.groups.map(\.id))
+        if (a.force.safetyMargin ?? 1.5) != (b.force.safetyMargin ?? 1.5) {
+            let pa = Int(((a.force.safetyMargin ?? 1.5) * 100).rounded()), pb = Int(((b.force.safetyMargin ?? 1.5) * 100).rounded())
+            out.append(.init(.changed, .goal, "Safety margin \(pa) → \(pb) %"))
+        }
+        if sameGroups, a.force.scenarios != b.force.scenarios { out.append(.init(.changed, .load, "Load scenarios changed")) }
+
+        // ★ notes28: never "same settings" while a setting differs that no line above names
+        if out.isEmpty, settingsOnly(a) != settingsOnly(b) {
+            var x = settingsOnly(a), y = settingsOnly(b)
+            x.id = y.id; x.name = y.name; x.savedAt = y.savedAt; x.optimized = y.optimized
+            x.latticePageManual = y.latticePageManual; x.schemaVersion = y.schemaVersion
+            x.modelFileName = y.modelFileName; x.originalFileName = y.originalFileName
+            // two copies set up apart (other group ids) are compared group to group by the lines above (by id, by name, by
+            // the same faces), never by their ids
+            if !sameGroups { x.selection = y.selection; x.force = y.force }
+            if !LibrarySettings.same(x, y) {
+                let lattice = latticeSettingsOnly(a.lattice) != latticeSettingsOnly(b.lattice)
+                out.append(.init(.changed, lattice ? .lattice : .other, lattice ? "Lattice settings (lattice off)" : "Other settings"))
+            }
         }
 
         // stable: the rank first, then the order found
@@ -127,7 +177,7 @@ public enum VersionChanges {
     }
 
     /// His name for a group, or how many faces it has. Auto names ("Group A") are not his.
-    private static func label(_ g: SelectionGroup) -> String {
+    static func label(_ g: SelectionGroup) -> String {
         if g.name.range(of: #"^Group [A-Z]+$"#, options: .regularExpression) == nil,
            !g.name.trimmingCharacters(in: .whitespaces).isEmpty { return g.name }
         let n = g.faces.count + g.regionIDs.count
@@ -139,7 +189,7 @@ public enum VersionChanges {
     }
 
     /// Pair the parent's groups with the child's: by id, then by name, then by the same faces.
-    private static func pair(_ a: [SelectionGroup], _ b: [SelectionGroup]) -> (pairs: [(SelectionGroup, SelectionGroup)], gone: [SelectionGroup], new: [SelectionGroup]) {
+    static func pair(_ a: [SelectionGroup], _ b: [SelectionGroup]) -> (pairs: [(SelectionGroup, SelectionGroup)], gone: [SelectionGroup], new: [SelectionGroup]) {
         var left = a, right = b, pairs: [(SelectionGroup, SelectionGroup)] = []
         for match in [{ (x: SelectionGroup, y: SelectionGroup) in x.id == y.id },
                       { (x: SelectionGroup, y: SelectionGroup) in x.name == y.name },
@@ -226,7 +276,7 @@ public enum VersionChanges {
     }
 
     /// 51 → "51", 3.5 → "3.5", 112.43 → "112.4".
-    private static func num(_ v: Double) -> String {
+    static func num(_ v: Double) -> String {
         let r = (v * 10).rounded() / 10
         return r == r.rounded() ? String(Int(r)) : String(format: "%.1f", r)
     }

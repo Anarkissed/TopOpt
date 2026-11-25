@@ -134,6 +134,7 @@ extension AppModel {
         guard let draft = writeLibraryDraft(of: project, live: live) else { return nil }
         library.fileDraft(draft.id, name: name, auto: auto)
         forgetLiveVersion(id)
+        VersionDescriptionEdit.askAfterNewVersion(library: library, made: draft.id, from: id)   // ★ notes28 (d): a run makes it
         return draft
     }
 }

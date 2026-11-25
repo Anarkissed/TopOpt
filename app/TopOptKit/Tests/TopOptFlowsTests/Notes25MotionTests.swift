@@ -215,13 +215,17 @@ final class Notes25MotionTests: XCTestCase {
             XCTAssertEqual(LoadMotion.share(time: tl.up, tl), 1, accuracy: 1e-12)
             XCTAssertEqual(LoadMotion.share(time: tl.up + tl.hold / 2, tl), 1, "★ a short hold at the top")
             XCTAssertEqual(LoadMotion.share(time: tl.up + tl.hold + tl.down, tl), 0, accuracy: 1e-12, "eased back")
-            var last = LoadMotion.share(time: 0, tl), biggest = 0.0, moved = false
+            var last = LoadMotion.share(time: 0, tl), biggest = 0.0, moved = false, jumps = 0
             for n in 1...Int(2 * tl.cycle * 30) {
                 let s = LoadMotion.share(time: Double(n) / 30, tl)
+                // ★ notes28 (his notes on release 18, img 79): Break ends AT the break and starts again from the start — the
+                // one jump, down to where it starts, is its reset; Bend never jumps
+                if k == .breakIt, last == 1, s == 0 { jumps += 1; last = s; continue }
                 biggest = max(biggest, abs(s - last)); if s != last { moved = true }
                 last = s
             }
             XCTAssertLessThan(biggest, 0.05, "★ \(k): no frame moves more than a twentieth of the climb (the seam included)")
+            XCTAssertEqual(jumps, k == .breakIt ? 2 : 0, "★ \(k): Break resets once a loop (two loops here); Bend never jumps")
             XCTAssertTrue(moved, "never frozen")
             XCTAssertLessThan(LoadMotion.share(time: 1.0 / 30, tl), 0.005, "it starts gently")
         }

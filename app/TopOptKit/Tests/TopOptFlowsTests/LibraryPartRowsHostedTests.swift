@@ -166,8 +166,9 @@ final class LibraryPartRowsHostedTests: XCTestCase {
         _ = try h.onScreen("library-result-v1c-picked", "v1c now wears Picked")
         XCTAssertNil(h.frames.all["library-result-v2b-picked"], "★ one chosen per part: v2b is no longer picked")
         let version = try h.pickFromMenu("library-version-v1-menu", "Quick look", what: "v1's ⋯")
+        // ★ RE-PINNED (notes28, his notes on release 18): "Edit description" after Rename…
         XCTAssertEqual(version, ["Details", "Quick look", "Compare its results", "Export…", "Open v1", "New draft from v1", "Rename…",
-                                 "Delete v1…"], "★ app-map's version ⋯, with Details first (his iPad notes 11-22)")
+                                 VersionDescriptionCopy.edit, "Delete v1…"], "★ app-map's version ⋯, with Details first (his iPad notes 11-22)")
         _ = try h.onScreen("libraryQuickLook-v1c", "Quick look from the version's ⋯ shows its chosen result")
     }
 

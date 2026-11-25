@@ -970,6 +970,7 @@ public final class AppModel: ObservableObject {
     /// restored intact; otherwise it is rebuilt from disk (re-importing the copied
     /// model); a recent with neither opens an empty workspace for its material.
     public func open(_ recent: RecentProject) {
+        VersionViewOpen.shared.opened(recent.id)   // ★ notes28 (3): its page opens as he left it, once (VersionViewState.swift)
         projectName = recent.name
         process = recent.process
         // A preset selection belongs to the sheet session of the project it was chosen
@@ -1277,6 +1278,8 @@ public final class AppModel: ObservableObject {
             guard resultsStore.holdsProject(id: resultsID),
                   let data = try? OutcomeCodec.encode(dto) else { return }
             try? data.write(to: url, options: .atomic)
+            // ★ notes28 (4c): the print file this result was made as, kept beside it (Results' Export hands it out)
+            PrintFileKeep.keep(projectID: resultsID, outcomes: [outcome, other], store: resultsStore)
             if let otherDTO {
                 if let more = try? OutcomeCodec.encode(otherDTO) { try? more.write(to: otherURL, options: .atomic) }
             } else {

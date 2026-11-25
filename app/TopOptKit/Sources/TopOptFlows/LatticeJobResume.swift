@@ -57,7 +57,12 @@ public struct LatticeJobRecorder {
 
     /// What the Mac made, read as the result; a file that cannot be read ends its job's record (it never will be).
     func reading<T>(_ made: LatticeFileRun.Made, _ body: () throws -> T) rethrows -> T {
-        do { return try body() } catch {
+        do {
+            let out = try body()
+            // ★ notes28 (4c): the file itself (its painted supports and print settings), aside until its version keeps it
+            if let projectID { PrintFileKeep.stash(made.stl, name: made.report.fileName, projectID: projectID) }
+            return out
+        } catch {
             if let id = made.jobID { ended(id) }
             throw error
         }

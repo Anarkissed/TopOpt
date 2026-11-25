@@ -275,7 +275,7 @@ final class B10SweepHostedTests: XCTestCase {
     /// Results' corner (at most 12 words; the corner sits at the page's foot, so its line is the one just above it — §4.18's
     /// fix-line place), with ONE "Try again" chip that tries again — never a system alert (OneWayToSayNoTests: they are gone).
     func testAFailedExportIsTheCornersDangerLine() throws {
-        for f in [ResultsExportFailure.stl("x"), .stlAll("x"), .video("x")] {
+        for f in [ResultsExportFailure.stl("x"), .stlAll("x"), .video("x"), .file("x")] {
             XCTAssertLessThanOrEqual(f.words.split(separator: " ").count, 12, "★ §4.12: a line is at most 12 words: \(f.words)")
         }
         var attempts: [String] = []
@@ -288,14 +288,14 @@ final class B10SweepHostedTests: XCTestCase {
             try h.tap("capsuleResults", "\(size): Results", settle: 2)
             XCTAssertNil(h.frames.all["resultsExportFailure"], "\(size): premise: no line before an export")
             try h.tap("resultsExport", "\(size): Export", settle: 1)
-            XCTAssertEqual(attempts, ["stl"], "\(size): premise: Export ran")
+            XCTAssertEqual(attempts, ["3mf"], "\(size): premise: Export ran (★ notes28: the 3MF by default)")
             let line = try h.onScreen("resultsExportFailure", "\(size): ★ the failure is a line over the corner")
             let export = try h.onScreen("resultsExport", "\(size): Export")
             XCTAssertLessThanOrEqual(line.maxY, export.minY + 0.5, "\(size): ★ over the corner, never on Export")
             let retry = try h.probe("resultsExportRetry", "\(size): ★ its one Try again chip")
             XCTAssertTrue(line.insetBy(dx: -0.5, dy: -0.5).contains(retry), "\(size): the chip is the line's")
             try h.tap("resultsExportRetry", "\(size): Try again", settle: 1)
-            XCTAssertEqual(attempts, ["stl", "stl"], "\(size): ★ Try again exports again")
+            XCTAssertEqual(attempts, ["3mf", "3mf"], "\(size): ★ Try again exports again")
         }
     }
 

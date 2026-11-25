@@ -1463,8 +1463,9 @@ public struct ResultsScreen: View {
         } run: {
             DSRunButton(exportTitle, subtitle: exportLine,
                         state: model.canExport ? .ready : .disabled(model.exportDisabledReason ?? "Nothing to export"),
-                        key: "resultsExport") { exportSTL() }
-                .accessibilityLabel(model.canExport ? "Export STL" : (model.exportDisabledReason ?? "Export unavailable"))
+                        key: "resultsExport") { exportFile() }   // ★ notes28 (4c): the 3MF by default (STL in the ⌃)
+                .accessibilityLabel(model.canExport ? (model.exportIsStreamed ? "Export STL" : "Export 3MF")
+                                    : (model.exportDisabledReason ?? "Export unavailable"))
         } split: {
             // ★ his 11-22 (img 45): the ⌃ opens its own drawer, above the buttons (never over them)
             DSSplitButton(key: "resultsSplitMore", open: model.cornerDrawers.isOpen("resultsSplitMore")) {
@@ -1485,6 +1486,11 @@ public struct ResultsScreen: View {
     /// ★ his 11-22 (img 45): the ⌃'s rows — the menu's two (Export all N results · Open in Library).
     private func resultsMoreItems(_ exportable: Int) -> [CornerMoreItem] {
         var items: [CornerMoreItem] = []
+        // ★ notes28 (4c, his "an *option* for an stl (via the '^' menu)"): Export is the 3MF; the shape alone as an STL here
+        if !model.exportIsStreamed {
+            items.append(.action(ResultsExportCopy.stlItem, line: ResultsExportCopy.stlLine, enabled: model.canExport,
+                                 id: "results-split-export-stl", info: ResultsExportCopy.stlInfo) { exportSTL() })
+        }
         if exportable >= 2 { items.append(.action("Export all \(exportable) results", id: "results-split-export-all") { exportAll() }) }
         // ★ notes27 P6 (his print orientation, SPEC 2d): "Print orientation", the recommendation and Check strength
         if orientation != nil {
@@ -1517,6 +1523,7 @@ public struct ResultsScreen: View {
 
     private func retryExport(_ f: ResultsExportFailure) {
         switch f {
+        case .file: exportFile()   // ★ notes28 (4c)
         case .stl: exportSTL()
         case .stlAll: exportAll()
         case .video:
@@ -1525,15 +1532,39 @@ public struct ResultsScreen: View {
         }
     }
 
-    /// "Export v7b (.stl)": the version and the result's letter.
+    /// "Export v7b (.3mf)": the version and the result's letter. ★ notes28 (4c): a 3MF by default; a worker-streamed latticed
+    /// variant is the worker's STL.
     private var exportTitle: String {
         let letter = selectedRow.map { $0.title.components(separatedBy: " · ").first ?? $0.title } ?? ""
-        return "Export " + (version ?? "") + letter + " (.stl)"
+        return "Export " + (version ?? "") + letter + (model.exportIsStreamed ? " (.stl)" : " (.3mf)")
     }
 
-    /// What the file is: the latticed part, or one finished shape (smoothed when E1 finished it).
+    /// What the file is: the print file itself, the latticed part, or one finished shape (smoothed when E1 finished it).
     private var exportLine: String {
-        model.exportIsStreamed ? "The latticed part" : selectedFinish != nil ? "One finished shape \u{00B7} smoothed" : "One finished shape"
+        if !model.exportIsStreamed, PrintFileKeep.openFile(exists: model.printFileIdentity) { return ResultsExportCopy.printFileLine }
+        return model.exportIsStreamed ? "The latticed part" : selectedFinish != nil ? "One finished shape \u{00B7} smoothed" : "One finished shape"
+    }
+
+    /// ★ notes28 (4c): Export's default — a print file's result hands out the print file itself (kept with its version: its
+    /// painted supports and print settings); any other result its shape as a 3MF; a worker-streamed latticed variant the
+    /// worker's STL, as before.
+    private func exportFile() {
+        if model.exportIsStreamed { exportSTL(); return }
+        exportFailure = nil
+        Self.exportAttemptProbe?("3mf")
+        if Self.exportWriteFailsForTests { exportFailure = .file(CocoaError(.fileWriteNoPermission).localizedDescription); return }
+        if let kept = PrintFileKeep.openFile(model.printFileIdentity, named: model.exportStem(for: model.selected)) {
+            stlExportURLs = [kept]
+            return
+        }
+        guard let data = model.exportThreeMFData() else { return }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(model.exportThreeMFFilename)
+        do {
+            try data.write(to: url, options: .atomic)
+            stlExportURLs = [url]
+        } catch {
+            exportFailure = .file(error.localizedDescription)
+        }
     }
 
     /// ★ The model rises above the Details drawer while it is open (mockup #topo-results-details: "the drawer never covers
@@ -2404,15 +2435,18 @@ struct ShareSheet: View {
 /// at most 12 words) with one "Try again" chip; the system's own words go in its (i).
 public enum ResultsExportFailure: Equatable, Sendable {
     case stl(String), stlAll(String), video(String)
+    /// ★ notes28 (4c): the default Export's file (the 3MF).
+    case file(String)
     public static let retry = "Try again"
     public var words: String {
         switch self {
         case .stl: return "Couldn\u{2019}t export the STL"
         case .stlAll: return "Couldn\u{2019}t export the STL files"
         case .video: return "Couldn\u{2019}t save the video"
+        case .file: return ResultsExportCopy.fileFailed
         }
     }
     public var detail: String {
-        switch self { case let .stl(d), let .stlAll(d), let .video(d): return d }
+        switch self { case let .stl(d), let .stlAll(d), let .video(d), let .file(d): return d }
     }
 }
