@@ -538,4 +538,11 @@ DesignMask build_clearance_overlay(
     std::vector<ProductionRunSetup::ClearanceReport>* reports,
     const std::vector<KeepRegion>& keeps = {}, long long* keep_air_voxels = nullptr);
 
+// TO rebuild stage 1: tag one face's voxels the way the stage switch says
+// (to_stage_switch.hpp): today's centre-within-half-a-voxel rule, or the voxels
+// the drawn face lies on. For the simple-job path (job.fixture_faces), which does
+// not go through build_production_setup. Works for a mesh pseudo-face too.
+std::size_t tag_face_by_stage(VoxelGrid& grid, const StepModel& model, int face_id,
+                              VoxelTag tag);
+
 }  // namespace topopt

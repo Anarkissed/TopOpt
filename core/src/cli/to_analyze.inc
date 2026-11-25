@@ -250,9 +250,11 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
         resolve_selectors(result.model, job.fixture_faces, "fixture_faces");
     std::size_t tagged = 0;
     for (const int f : result.fixture_face_ids)
-      tagged += model_is_mesh
-                    ? tag_mesh_face(model_grid, result.model, f, VoxelTag::Fixture)
-                    : tag_step_face(model_grid, result.model, f, VoxelTag::Fixture);
+      tagged += to_stage1_on()
+                    ? tag_face_by_stage(model_grid, result.model, f, VoxelTag::Fixture)
+                    : model_is_mesh
+                        ? tag_mesh_face(model_grid, result.model, f, VoxelTag::Fixture)
+                        : tag_step_face(model_grid, result.model, f, VoxelTag::Fixture);
     if (tagged == 0)
       throw JobError(
           "analyze: fixture faces tagged no voxels (resolution too coarse "

@@ -1613,4 +1613,9 @@ std::string no_external_load_message(const ProductionRunSetup& setup,
   return msg;
 }
 
+std::size_t tag_face_by_stage(VoxelGrid& grid, const StepModel& model, int face_id,
+                              VoxelTag tag) {
+  return tag_face_m(grid, model, face_id, tag);
+}
+
 }  // namespace topopt
