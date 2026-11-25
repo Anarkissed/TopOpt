@@ -8,7 +8,8 @@
 //   "add a couple more seconds to the organic animations — the end always feels too rushed."
 // ★ and his review of the first clips (img 98): "None of the parts' walls open up, I can't see through the part to the other
 //   side and no shading exists. Try again. I think the perfect amount is about 6-8 seconds for the build, total … As for
-//   organic … let's do 8 seconds for the entire animation."
+//   organic … let's do 8 seconds for the entire animation." — and, the clips seen, HIS PICK: "Let's go with 7 seconds for ALL
+//   animations. It looks great!"
 // Each with its RED CONTROL (the picture before): `LatticeBuildShow.controlOff` (no timelapse: the last lattice and its map
 // stay mid-lay and the struts can land before their own map), `AppSettings.skipAllAnimations` off,
 // `LatticeGrowthReplay.endAsRelease20`.
@@ -43,7 +44,7 @@ final class Notes29AnimationTests: XCTestCase {
     /// frame; the frame rises in HARD snaps (each one more, all at once, with stillness between floors) and ends on the whole.
     func testTheTimelapseLastsHisTotalAndEndsOnTheFinishedLay() {
         typealias T = LatticeBuildTimelapse
-        defer { T.totalS = 7 }
+        defer { T.totalS = T.hisTotalS }
         for total in T.totalChoicesS { T.totalS = total
         for layS in [0.2, 1.0, 1.2, 3.0, 4.5, 9.0] {
             for floors in [T.floorsLeast, 5, T.floorsMost] {
@@ -439,12 +440,13 @@ final class Notes29AnimationTests: XCTestCase {
         return (gone - t0, gone - land, first, lastStep)
     }
 
-    /// ★ His first word ("add a couple more seconds … the end always feels too rushed"), then his review of the clips ("let's do
-    /// 8 seconds for the entire animation"): from the lay's start to the growth gone, at least 8 s — a quick lay exactly 8 s,
+    /// ★ His first word ("add a couple more seconds … the end always feels too rushed"), his review of the clips ("let's do
+    /// 8 seconds for the entire animation") and his pick ("7 seconds for ALL animations"): from the lay's start to the growth
+    /// gone, at least 7 s — a quick lay exactly 7 s,
     /// its end stretched to fill it (the catch-up easing out: it slows into the lattice) — and however long the lay, its end never
     /// shorter than the lengthened one (2 to 3 s longer than release 20's). RED CONTROL: release 20 — a quick lay all over in
     /// under 5 s, its end about a second (a third of one once caught up).
-    func testTheOrganicAnimationLastsEightSecondsAndItsEndIsNeverRushed() {
+    func testTheOrganicAnimationLastsHisSevenSecondsAndItsEndIsNeverRushed() {
         LatticeGrowthReplay.endAsRelease20(true)
         let oldQuick = organic(layS: 3.5, somethingLeft: true), oldSlow = organic(layS: 9, somethingLeft: true)
         let oldCaught = organic(layS: 9, somethingLeft: false)
@@ -457,16 +459,18 @@ final class Notes29AnimationTests: XCTestCase {
         XCTAssertLessThan(oldQuick.entire, 5, "RED CONTROL: release 20 — a quick lay over in under 5 s")
         XCTAssertLessThanOrEqual(oldSlow.end, 1.1, "RED CONTROL: release 20's end about a second")
         XCTAssertLessThanOrEqual(oldCaught.end, 0.4, "RED CONTROL: caught up, the sink alone")
-        XCTAssertEqual(LatticeGrowthReplay.minTotalS, 8, "his 8 s")
-        XCTAssertGreaterThanOrEqual(quick.entire, 8 - 1e-9, "★ the entire animation 8 s")
-        XCTAssertLessThan(quick.entire, 8 + 1 / LatticeGrowthReplay.stepsPerS + 1e-6, "★ … a quick lay exactly (to a step)")
-        XCTAssertEqual(quickCaught.entire, 8, accuracy: 1e-6, "★ caught up: the rest fills it")
+        let his = 7.0   // ★ his pick: "7 seconds for ALL animations"
+        XCTAssertEqual(LatticeGrowthReplay.minTotalS, his, "his 7 s")
+        XCTAssertEqual(LatticeBuildTimelapse.totalS, his, "★ the build's too: ALL animations")
+        XCTAssertGreaterThanOrEqual(quick.entire, his - 1e-9, "★ the entire animation 7 s")
+        XCTAssertLessThan(quick.entire, his + 1 / LatticeGrowthReplay.stepsPerS + 1e-6, "★ … a quick lay exactly (to a step)")
+        XCTAssertEqual(quickCaught.entire, his, accuracy: 1e-6, "★ caught up: the rest fills it")
         XCTAssertGreaterThanOrEqual(slow.end - oldSlow.end, 2, "★ a slow lay's end: a couple more seconds")
         XCTAssertLessThanOrEqual(slow.end - oldSlow.end, 3)
         XCTAssertGreaterThanOrEqual(slowCaught.end - oldCaught.end, 2)
         XCTAssertLessThanOrEqual(slowCaught.end - oldCaught.end, 3)
         XCTAssertGreaterThan(quick.firstStep, 3 * quick.lastStep, "★ it slows into the end (eased out)")
-        XCTAssertGreaterThanOrEqual(LatticeGrowth.landingS, 8 - 1e-9, "the most a landing takes covers the 8 s")
+        XCTAssertGreaterThanOrEqual(LatticeGrowth.landingS, his - 1e-9, "the most a landing takes covers the 7 s")
     }
 }
 #endif

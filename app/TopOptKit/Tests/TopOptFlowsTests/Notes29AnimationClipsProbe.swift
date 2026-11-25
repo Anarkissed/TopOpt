@@ -13,7 +13,8 @@
 //                                     1.2 s"), the walls off in snaps, the frame rising inside, the far side seen through, the
 //                                     inside shaded
 //   build-7s-settings-sample-cube     the Settings sample (drawn see-through, as it is), Octet to BCC + Z
-//   organic-8s                        the Organic growth (a 3 s lay), the walls first to the growth gone
+//   organic-8s                        the Organic growth (a 3 s lay), the walls first to the growth gone (8 s in v2; his pick
+//                                     after: "7 seconds for ALL animations", the clip now organic-7s)
 // ANIM_STILL_DIR=<folder>: a few frames as PNGs, to look at before sending.
 #if canImport(AppKit) && canImport(MetalKit)
 import XCTest
@@ -36,7 +37,7 @@ final class Notes29AnimationClipsProbe: XCTestCase {
         LatticeBuildShow.clockForTesting = nil
         MeshRenderer.growthClockForTesting = nil
         LatticeGrowthReplay.endAsRelease20(false)
-        LatticeBuildTimelapse.totalS = 7
+        LatticeBuildTimelapse.totalS = LatticeBuildTimelapse.hisTotalS
         super.tearDown()
     }
 
@@ -256,7 +257,7 @@ final class Notes29AnimationClipsProbe: XCTestCase {
                                   stills: total == 7 ? [0.6, 1.3, 1.6, 1.9, 2.4, 3.5, 5.0, 6.9] : [])
             lines.append(String(format: "%@.mp4 — build, %.1f s total", name, s))
         }
-        LatticeBuildTimelapse.totalS = 7
+        LatticeBuildTimelapse.totalS = LatticeBuildTimelapse.hisTotalS
         if only == "stand" { return }
         // the Settings sample cube (drawn see-through, as the sample is): Octet → BCC + Z, at 7 s
         let octet = try await LatticeSampleLay.lay(.plain(topology: "octet", cellMM: 8, lineWidthMM: 0.45, rho: 0.25), cube: true)
@@ -270,11 +271,12 @@ final class Notes29AnimationClipsProbe: XCTestCase {
                                what: "sample build", stills: [3.5])
         lines.append(String(format: "build-7s-settings-sample-cube.mp4 — sample build, %.1f s total", sb))
 
-        // Organic: the entire animation, 8 s
+        // Organic: the entire animation (his pick: 7 s; the v2 clips showed 8)
         let sc = try await Notes24IntoThePartTests.scene(self)
         LatticeGrowthReplay.endAsRelease20(false)
-        let os = try organicClip("organic-8s", sc: sc, dir: dir)
-        lines.append(String(format: "organic-8s.mp4 — organic, %.1f s total", os))
+        let oname = String(format: "organic-%.0fs", LatticeGrowthReplay.minTotalS)
+        let os = try organicClip(oname, sc: sc, dir: dir)
+        lines.append(String(format: "%@.mp4 — organic, %.1f s total", oname, os))
         try (lines.joined(separator: "\n") + "\n").write(toFile: (dir as NSString).appendingPathComponent("timings.txt"),
                                                          atomically: true, encoding: .utf8)
         print(lines.joined(separator: "\n"))

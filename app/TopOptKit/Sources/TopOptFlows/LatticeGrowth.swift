@@ -46,7 +46,7 @@ public final class LatticeGrowth {
     /// From the landing to the growth gone, at most: the catch-up (or, nothing left, the rest), then the sink.
     public static var landingS: CFTimeInterval {
         Swift.max(Swift.max(LatticeGrowthReplay.catchUpEndS, LatticeGrowthReplay.restS) + fadeS,
-                  LatticeGrowthReplay.minTotalS)   // ★ his review: a quick lay's end fills the 8 s
+                  LatticeGrowthReplay.minTotalS)   // ★ his pick: a quick lay's end fills the 7 s
     }
     /// Fires on every visible change: the 3D view redraws itself (no page pass, never the workspace's body).
     public let changed = PassthroughSubject<Void, Never>()

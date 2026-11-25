@@ -18,7 +18,8 @@
 //     first, the last few small: it slows into the finished lattice); a lay whose replay had already caught up holds the grown
 //     vines `restS` before they sink (was none); the sink itself `LatticeGrowth.fadeS` 1.0 s, eased (was 0.35, straight).
 //   * ★ his review of the clips (the same evening): "As for organic, it's currently at about 6 seconds, let's do 8 seconds for
-//     the entire animation": from the lay's start (the walls) to the growth gone, at least `minTotalS` 8 s — a quick lay's
+//     the entire animation" — then, the clips seen, HIS PICK: "Let's go with 7 seconds for ALL animations. It looks great!":
+//     from the lay's start (the walls) to the growth gone, at least `minTotalS` 7 s — a quick lay's
 //     landing stretches its catch-up (or its rest) to fill it; a slow lay takes as long as it lays, its end never shorter
 //     than the catch-up and the sink above.
 // Pure: wall seconds in, the playhead out (in birth units: one poll of the recording, LatticeGrowth.append's clock).
@@ -48,7 +49,9 @@ struct LatticeGrowthReplay: Equatable {
     /// How long the catch-up lasts (its last step).
     static var catchUpEndS: Double { Double(catchSteps) / stepsPerS }
     /// ★ his review (notes29): the entire animation, from the lay's start to the growth gone, at least this long (s).
-    nonisolated(unsafe) static var minTotalS: Double = 8.0
+    /// ★ his pick after the clips: "7 seconds for ALL animations" (the clips showed 8).
+    nonisolated(unsafe) static var minTotalS: Double = hisTotalS
+    static let hisTotalS: Double = 7.0
     /// ★ notes29: the end as release 20 had it (the clips' "before"; tests' red control).
     static let release20CatchUpS: Double = 0.8
     static let release20RestS: Double = 0
@@ -56,7 +59,7 @@ struct LatticeGrowthReplay: Equatable {
     static func endAsRelease20(_ on: Bool) {
         catchUpS = on ? release20CatchUpS : 2.4
         restS = on ? release20RestS : 1.4
-        minTotalS = on ? 0 : 8.0
+        minTotalS = on ? 0 : hisTotalS
         catchUpEases = !on
         LatticeGrowth.fadeS = on ? LatticeGrowth.release20FadeS : 1.0
         LatticeGrowth.fadeEases = !on

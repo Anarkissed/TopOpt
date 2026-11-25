@@ -20,7 +20,8 @@
 //     upright), then its bays left to right — and then a beat of stillness before the next floor. No fading, no growth: each
 //     snap is all at once, as a timelapse frame.
 //   * TOPPED OUT — the whole lattice held still for a beat; the timelapse is over.
-// `totalS` from the ask to the end when the lay is quick (his "6-8 seconds … total": the clips at 6, 7 and 8 s for his pick);
+// `totalS` from the ask to the end when the lay is quick (his "6-8 seconds … total": the clips at 6, 7 and 8 s; HIS PICK: "Let's
+// go with 7 seconds for ALL animations. It looks great!");
 // a lay that takes longer is covered by the closed site, and its walls and frame still come in full (at least `buildLeastS`)
 // after it lands. In X-ray (and the Settings sample, drawn see-through) there are no walls to take off: the same clock, the
 // frame rising inside the see-through part.
@@ -38,9 +39,11 @@ import simd
 struct LatticeBuildTimelapse: Equatable {
     // MARK: the timings (his to tune)
 
-    /// From the ask to the finished lattice, at least: his "about 6-8 seconds for the build, total" (the clips at 6, 7 and 8;
-    /// 7 until he picks). Release 21's first cut: 5 (his "at least 5 seconds").
-    nonisolated(unsafe) static var totalS: Double = 7.0
+    /// From the ask to the finished lattice, at least: his "about 6-8 seconds for the build, total" (the clips at 6, 7 and 8),
+    /// HIS PICK "7 seconds for ALL animations" (the Lattice page and the Settings sample; Organic's `LatticeGrowthReplay.minTotalS`
+    /// too). Release 21's first cut: 5 (his "at least 5 seconds").
+    nonisolated(unsafe) static var totalS: Double = hisTotalS
+    static let hisTotalS: Double = 7.0
     static let totalChoicesS: [Double] = [6, 7, 8]
     /// The closed site: the walls start coming off no sooner than this after the ask (a lay that lands at once still shows it).
     static let siteLeastS: Double = 0.5
