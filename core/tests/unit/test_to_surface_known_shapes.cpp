@@ -158,8 +158,9 @@ Measured measure_new(const Shape& s, const Arm& arm, double cell_mm) {
   using namespace topopt;
   const double sup = plsm_effective_support(arm.basis, arm.reach);
   const PlsmKnotLattice L = plsm_make_lattice(kN, kN, kN, arm.knot, arm.knot, arm.knot, sup);
-  const PlsmCsr A = plsm_build_A(kN, kN, kN, L, arm.basis, 1);
-  const PlsmCsr At = plsm_transpose(A, 1);
+  const int th = plsm_hw_threads(0);
+  const PlsmCsr A = plsm_build_A(kN, kN, kN, L, arm.basis, th);
+  const PlsmCsr At = plsm_transpose(A, th);
   const std::size_t n = static_cast<std::size_t>(kN) * kN * kN;
   std::vector<double> tgt(n), w(n, 1.0);
   for (int k = 0; k < kN; ++k)
@@ -169,7 +170,7 @@ Measured measure_new(const Shape& s, const Arm& arm, double cell_mm) {
         tgt[(static_cast<std::size_t>(k) * kN + j) * kN + i] =
             std::max(-6.0 * kVoxel, std::min(6.0 * kVoxel, s.sd(c)));
       }
-  const PlsmFitResult fr = plsm_solve_normal(A, At, tgt, w, 1e-6, 4000, 1e-10, 1);
+  const PlsmFitResult fr = plsm_solve_normal(A, At, tgt, w, 1e-6, 4000, 1e-10, th);
   PlsmFieldView fv;
   fv.lattice = &L;
   fv.basis = arm.basis;
