@@ -1,0 +1,52 @@
+app sample, cube Grown, depth variation off: ok 1 (ok), print clean 1, rounded ends kept 561, held flat 24, dome rounds 5, passes found [6]
+  the Exact preview's flat ends 24 (the file's 24: the same 24, elsewhere 0; on a run point 24, of a shallow run 24); the Draft's 0
+  stopped at 200, 400, 600 ms: threw 0, cancelled 3
+app sample, cube Traced, depth variation on: ok 1 (ok), print clean 1, rounded ends kept 1580, held flat 58, dome rounds 5, passes found [7]
+  the Exact preview's flat ends 58 (the file's 58: the same 58, elsewhere 0; on a run point 58, of a shallow run 58); the Draft's 0
+floors (Sweep): file 1680 bars, preview 1680; widened 73 (links 44), at the floor 73
+strengthened: file 3435 bars, preview 3435; widened 0
+cells and weave in one job: ok 1, cells 72, weave regions 1, strands 501, bars 2475 (weave 1095)
+strength job with an Organic region and a cell region: strength_mixed: The strength check judges an Organic lattice and a cell lattice in different ways and cannot check a part that has both, so no file was made. Use one kind in every region, or turn the strength check off.
+block, max_step 1.5: held at 2, 16 cells (16 with none)
+pieces file: 0 empty points under the skinned half of the top, 2353 under the other half
+region own: 225 cells with region 1's own settings, 50 without
+area finish file: A covered 0 empty points under its face (3408 with the part's Finish); B 1274 empty points under its face (1355)
+shallow table, joint 4e-06 mm apart: 2 bars, 1 runs, longest 31.80 mm, kept any length 2, unheld 0
+shallow table, joint 2e-05 mm apart: 2 bars, 2 runs, longest 15.90 mm, kept any length 0, unheld 2
+organic job: 134 strands, 347 weave bars (lay_organic directly: 347); file 32150 triangles, 1 shells, 0 open edges; 2872 points of the region away from the struts, 0 filled; trace 108 ms, total 1187 ms
+organic job shallow bars (under 30 degrees): 277; held at both ends 277, one 0, none 0; 205 whole runs, longest 5.600 mm
+  to 5 mm  200 runs: kept 200, left out 0, post 0
+  5 to 10    5 runs: kept 5, left out 0, post 0
+  10 to 20   0 runs: kept 0, left out 0, post 0
+  over 20    0 runs: kept 0, left out 0, post 0
+organic job bridge rules: kept at any length 277, left out leading to nothing 0, stands added 0; the file's posts 0, left out at 0 places, builds 1
+organic 3mf: 190853 bytes (deflated), 10613 vertices, 20562 triangles, 165 shells (0 left out), 0 edges not once each way; the solid made 1 times over 1 passes
+organic 3mf parts: the solid's 4372 of 20562 triangles; {"base_triangles": 4372, "triangles": 20562}
+no weave region: the file 666384 bytes, the same with the organic keys 1
+block, cells by stress: 72 cells (16 with it off); print clean 1
+by stress, the made file: 116 cold struts 0.8896 mm across the flats (0.8896 .. 0.9112), 116 hot struts 1.2850 mm (1.2850 .. 1.3215): wider by 0.3954, the layout's widths by 0.4
+no slit under the solid: 76160 of 140000 points between z 28.80 and 28.98 empty with the step off, 0 with it on
+strut reach on: 440 of 440 struts ending on the solid fused 0.03 mm short of it; print check clean in 1 passes, first found 0, 0 posts (0 under the solid), 0 left out, longest reach 3.13 mm
+strut reach off: 440 of 440 struts ending on the solid fused 0.03 mm short of it; print check clean in 1 passes, first found 0, 0 posts (0 under the solid), 0 left out, longest reach 3.13 mm
+P8 (f) file: 0 of 560 points empty at z 27.38 under the solid; print check clean, 0 long bridges, longest reach 3.13 mm, 0 one-ended, 0 mid-air, first pass found 0, 0 posts, 0 left out
+block: 16 cells, 412 bars, 16 open boxes; mesh 13326 triangles, 6707.0 of 10800.0 mm3; 883 ms
+cube from a job file: 8 cells, 81 bars; mesh 2744 triangles; 380 ms
+block, one grid: 16 cells, 412 bars; mesh 13326 triangles; print clean 1
+organic foot f = 0  : 32282 triangles, 1 shells, 0 open edges, 8331.981 mm3; layer check clean 1, builds 1, found per pass 0; left out at 0 places (0 bars), weave left unheld 0, posts 0 (stands 0); feet 0 (held 0), feet add 0.0000 mm3; struts 194.051 mm3; mesh (last build) 621 ms, the whole job 1509 ms
+organic foot default: 32150 triangles, 1 shells, 0 open edges, 8335.335 mm3; layer check clean 1, builds 1, found per pass 0; left out at 0 places (0 bars), weave left unheld 0, posts 0 (stands 0); feet 22 (held 0), feet add 8.1179 mm3; struts 216.074 mm3; mesh (last build) 453 ms, the whole job 1282 ms
+organic foot: the feet add 8.1179 mm3, 4.18 % of the struts' material at f = 0 (194.051 mm3); bars left out with the foot that were kept without 0, posts not at f = 0 0; mesh time with / without 0.73
+cube part 30 x 30 x 12: the file 666384 bytes, the same at every foot 1, feet 0
+cube part 40 x 24 x 14: the file 629184 bytes, the same at every foot 1, feet 0
+cube part 24 x 36 x 10: the file 523984 bytes, the same at every foot 1, feet 0
+organic range file: ok 1, spacing used 3.0000 to 6.0000, mean 3.3491
+cube part 30 x 30 x 12: the file 666384 bytes, the same with the round top on and off 1
+cube part 40 x 24 x 14: the file 629184 bytes, the same with the round top on and off 1
+cube part 24 x 36 x 10: the file 523984 bytes, the same with the round top on and off 1
+organic round top off: 22326 triangles, 8350.799 mm3, 277 bridges; layer check clean 1, builds 1, found per pass 0; left out at 0 places, kept any length 277, weave left unheld 0, posts 0 (stands 0); feet 22; 1 shells, 0 open edges
+organic round top on : 32150 triangles, 8335.335 mm3, 277 bridges; layer check clean 1, builds 1, found per pass 0; left out at 0 places, kept any length 277, weave left unheld 0, posts 0 (stands 0); feet 22; 1 shells, 0 open edges
+weave Finish by the regular keys: None 0 net struts, file ok 1; Skin 432 net struts (788.6 mm), file ok 1 clean 1; Rim (edges facing air) the same file as None 1
+cube part 30 x 30 x 12: the same file with the sag keys any way 1, nothing said of sags 1
+cube part 40 x 24 x 14: the same file with the sag keys any way 1, nothing said of sags 1
+cube part 24 x 36 x 10: the same file with the sag keys any way 1, nothing said of sags 1
+organic job sags: "sags_lifted": 0, "sag_lift_largest_mm": 0, "sag_legs": 0, "sag_legs_mm": 0, "sags_unsupported": 0 (low nodes 0, not covered 0, open arm 0)
+3897 checks, 0 failed
