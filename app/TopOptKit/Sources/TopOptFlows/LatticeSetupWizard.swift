@@ -764,11 +764,14 @@ public struct LatticeSetupWizard: View {
     }
 
     /// The (i): a popover with the explanation, one open at a time.
-    private func infoButton(_ id: String, _ text: String) -> some View {
+    /// `target`: the tap area's side (his 44 pt rule) where the (i) stands on its own, e.g. in a type card's corner.
+    private func infoButton(_ id: String, _ text: String, target: CGFloat? = nil) -> some View {
         Button { infoShown = id } label: {
             Image(systemName: "info.circle")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(DS.Color.textTertiary.color)
+                .frame(minWidth: target, minHeight: target)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .popover(isPresented: Binding(get: { infoShown == id },
@@ -1952,7 +1955,7 @@ public struct LatticeSetupWizard: View {
                     simDerivedNote("Derived from the simulated density. "
                                    + "To pin it, pin Density and Cell size.")
                         .latticeID("wizard-thickness-derived")
-                } else if let why = LatticeTypeCatalog.selectionRefusal(model.topologyID) {
+                } else if let why = typeStaleLine(typeEntries) {   // ★ notes28: the stage's own catalog
                     // ★ Q2 (2026-10-05): a saved type core does not call live has no band, so
                     // no printable range to scrub — core's readiness words where it was.
                     shortNote(why, warning: true)
@@ -2073,7 +2076,9 @@ public struct LatticeSetupWizard: View {
                 // ★★★ ALLOW QUILT (his ruling, 2026-09-12) — octet only. Off, every
                 // density is held under the aesthetic ceiling (strut a fifth of the
                 // cell). On, the manual methods may go past it; simulated ones never.
-                if LatticeType.named(model.topologyID)?.hasAestheticCeiling == true {
+                // ★ notes28: the new engine's one switch for EVERY strut type it lays (core's struts: the widest strut is the
+                // type's open look, its quilt only with Allow quilt) — no longer the octet's alone; its (i) is the type's own
+                if LatticeType.named(model.topologyID)?.hasAestheticCeiling == true || LatticeLayoutSession.lays(model.topologyID) {
                     HStack(spacing: DS.Space.s) {
                         Text("Allow quilt").dsStyle(DS.TypeScale.caption)
                             .foregroundStyle(DS.Color.textPrimary.color)
@@ -2086,10 +2091,7 @@ public struct LatticeSetupWizard: View {
                     }
                     captionLine(project.lattice.allowQuilt ? "Manual densities may fuse the struts."
                                                            : "Densities stay under the fusing point.",
-                                info: "quilt",
-                                "Octet struts fuse into a quilt once a strut is about a fifth of "
-                                + "the cell. Off, every density stays under that point. On, the "
-                                + "manual density methods may pass it; simulated ones never do.")
+                                info: "quilt", Self.quiltInfo(model.topologyID))
                 }
             case .finish:
                 // ★ FOUR NOW — "Covered" is the solid outer shell.
@@ -2199,18 +2201,25 @@ public struct LatticeSetupWizard: View {
         // one is a LABEL card with its (i), two or more are big cards with nothing pre-picked on a new lattice (Save waits
         // for a pick). Unready types are hidden. Under Organic the cards hide (the switch below is the way back) — but a
         // saved type core can't run still shows its fix, as before.
-        let entries = LatticeTypeCatalog.entriesFromCore()
+        // ★★ notes28 (all nine strut types on the new engine): the stage's own catalog (`LatticeTypeCatalog.stageEntries`:
+        // what the engine lays, for Structural or Aesthetic); each card wears the engine's own sample of its type
+        // (`LatticeTypePictureView`). The Aesthetic-only three stay on the page when they can't be picked, greyed with their
+        // caption (at most five words) and an (i) saying why — never hidden, so he can see what Aesthetic would add.
+        let entries = typeEntries
         let offered = entries.filter(\.offered)
-        let stale = LatticeTypeCatalog.selectionRefusal(model.topologyID, in: entries)
+        let shown = entries.filter { $0.offered || Self.typeShownGreyed($0) }
+        let stale = typeStaleLine(entries)
         let organicOn = model.cellTransition == .organicGrade
+        let change = typeChangeLines
         return VStack(alignment: .leading, spacing: DS.Space.xs) {
             if !organicOn || stale != nil {
-                if offered.count <= 1 {
+                if shown.count <= 1 {
                     if let one = offered.first { typeLabelCard(one, fixesStale: stale != nil) }
                 } else {
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: DS.Space.xs), GridItem(.flexible())],
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: DS.Space.xs), GridItem(.flexible(), spacing: DS.Space.xs),
+                                        GridItem(.flexible())],
                               spacing: DS.Space.xs) {
-                        ForEach(offered) { e in typeCard(e, fixesStale: stale != nil) }
+                        ForEach(shown) { e in typeCard(e, fixesStale: stale != nil) }
                     }
                     if typePickNeeded { shortNote(Self.typePickLine).latticeID("wizard-type-pick-note") }
                 }
@@ -2218,10 +2227,66 @@ public struct LatticeSetupWizard: View {
             if let why = typeReason ?? stale {
                 shortNote(why).latticeID("wizard-type-reason")
             }
+            // ★ notes28: a new type on a part that already has a lattice says what changes before Save (five words; the rest
+            // behind its (i))
+            if !change.isEmpty, !organicOn {
+                captionLine(LatticeTypeChange.caption, info: "type-change", change.joined(separator: " "),
+                            probe: "wizard-type-change-note")
+            }
         }
     }
 
+    /// ★ notes28: the Lattice stage's catalog for this part — the new engine's (a STEP part's lattice is laid and made by it),
+    /// or, where the old run still makes it (an STL part), what both can do.
+    private var typeEntries: [LatticeTypeEntry] {
+        LatticeTypeCatalog.stageEntries(structural: (project.lattice.stageMode ?? .structural) == .structural,
+                                        newEngine: LatticeFileButton.takes(project.lattice, modelPath: project.importedFile?.path))
+    }
+
+    /// ★ notes28: a card shown though it can't be picked: a strut type whose batch has shipped (the Aesthetic-only three on
+    /// Structural, a type whose measured strength law does not cover the engine's struts yet, a type the engine can't lay
+    /// yet) — greyed with its caption and (i). Only a type whose batch has not shipped is hidden (the sheets).
+    static func typeShownGreyed(_ e: LatticeTypeEntry) -> Bool {
+        !e.offered && e.reason != LatticeTypeCatalog.appBatchPending && LatticeTypeCatalog.batchShipped(e.id)
+    }
+
+    /// The saved type's refusal on this stage, in the picker's own sentence (nil: it can run).
+    private func typeStaleLine(_ entries: [LatticeTypeEntry]) -> String? {
+        guard let e = entries.first(where: { $0.id == model.topologyID }) else {
+            return LatticeTypeCatalog.selectionRefusal(model.topologyID, in: entries)
+        }
+        return LatticeTypeCatalog.line(e)
+    }
+
+    /// ★ notes28: what changes when the picked type differs from the saved one (a part that already has a lattice).
+    private var typeChangeLines: [String] {
+        guard project.lattice.enabled, model.topologyID != project.lattice.topologyID else { return [] }
+        return LatticeTypeChange.lines(project.lattice, to: model.topologyID,
+                                       lineWidthMM: project.printParams.strutLineWidthMM)
+    }
+
+    /// ★ notes28: a picked type carries the page's densities to it (`LatticeWizardModel.setTopology(_:lineWidthMM:)`).
+    private func pickType(_ id: String) {
+        model.setTopology(id, lineWidthMM: project.printParams.strutLineWidthMM,
+                          organic: model.cellTransition == .organicGrade)
+    }
+
     static let typePickLine = "Pick a lattice type to save."
+
+    /// ★ notes28: Allow quilt's (i), the type's own numbers (core's lattice_width_bounds through the engine): where its struts
+    /// touch, and the open look they stay under with the switch off. Never the octet's numbers under another name.
+    static func quiltInfo(_ id: String) -> String {
+        let f = LatticeLayoutSession.typeFacts(id)
+        let name = LatticeType.displayName(forID: id)
+        guard f.lays, f.touch > 0, f.openLook > 0 else {
+            return "\(name) struts fuse into a quilt once they are wide enough to touch. Off, every density stays under "
+                + "that point. On, the manual density methods may pass it; simulated ones never do."
+        }
+        func pct(_ v: Double) -> String { "\(Int((v * 100).rounded())) %" }
+        return "\(name) struts touch and fuse into a quilt once a strut is \(pct(f.touch)) of the cell. Off, every strut "
+            + "stays under \(pct(f.openLook)) of the cell, where the windows stay open. On, the manual density methods may "
+            + "pass it; simulated ones never do."
+    }
     static func typeInfo(_ name: String) -> String {
         "The lattice's cell shape. \(name) is the type the app offers today; more types arrive one update at a time, "
             + "each once its settings and pictures are in."
@@ -2229,7 +2294,7 @@ public struct LatticeSetupWizard: View {
 
     /// Two or more types offered, and none picked yet on a new lattice: Save waits.
     var typePickNeeded: Bool {
-        LatticeTypeCatalog.entriesFromCore().filter(\.offered).count >= 2
+        typeEntries.filter(\.offered).count >= 2
             && model.cellTransition != .organicGrade && !(typePicked ?? project.lattice.enabled)
     }
 
@@ -2239,7 +2304,7 @@ public struct LatticeSetupWizard: View {
             Button {
                 guard fixesStale else { return }
                 typeReason = nil
-                if model.cellTransition == .organicGrade { model.topologyID = e.id } else { model.setTopology(e.id) }
+                pickType(e.id)
             } label: {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(e.displayName).font(.system(size: 15, weight: .semibold))
@@ -2260,24 +2325,51 @@ public struct LatticeSetupWizard: View {
     }
 
     /// ★ Two or more types: a big card each; lit only once picked (a saved lattice's type counts as picked).
+    /// ★ notes28: the engine's own picture of the type above its name; a card that can't be picked is greyed, its caption
+    /// under the name (at most five words) and its (i) in the corner, and a tap on it says why instead of picking.
     private func typeCard(_ e: LatticeTypeEntry, fixesStale: Bool) -> some View {
-        let on = model.topologyID == e.id && (typePicked ?? project.lattice.enabled)
-        return Button {
-            typeReason = nil
-            typePicked = true
-            if model.cellTransition == .organicGrade { model.topologyID = e.id } else { model.setTopology(e.id) }
-        } label: {
-            Text(e.displayName).font(.system(size: 14, weight: .semibold)).multilineTextAlignment(.center)
-                .foregroundStyle((on ? DS.Color.textPrimary : DS.Color.textSecondary).color)
-                .frame(maxWidth: .infinity, minHeight: 64)
+        let on = e.offered && model.topologyID == e.id && (typePicked ?? project.lattice.enabled)
+        // ★ 362's ruling 11-24 (his rule "NOT PRINT-TESTED"): the tag under the card until he marks the type tested
+        return VStack(spacing: 0) {
+            typeCardBody(e, on: on)
+            LatticePrintTestedTag(id: e.id, name: e.displayName)
+        }
+    }
+
+    private func typeCardBody(_ e: LatticeTypeEntry, on: Bool) -> some View {
+        ZStack(alignment: .topTrailing) {
+            Button {
+                guard e.offered else { typeReason = LatticeTypeCatalog.line(e); return }
+                typeReason = nil
+                typePicked = true
+                pickType(e.id)
+            } label: {
+                VStack(spacing: 2) {
+                    LatticeTypePictureView(id: e.id, greyed: !e.offered)
+                        .frame(height: 52)
+                    Text(e.displayName).font(.system(size: 12, weight: .semibold)).multilineTextAlignment(.center)
+                        .lineLimit(2).minimumScaleFactor(0.85)
+                        .foregroundStyle((!e.offered ? DS.Color.textQuaternary
+                                          : on ? DS.Color.textPrimary : DS.Color.textSecondary).color)
+                    if let c = LatticeTypeCatalog.caption(e) {
+                        Text(c).font(.system(size: 10, weight: .medium)).lineLimit(2).multilineTextAlignment(.center)
+                            .foregroundStyle(DS.Color.textTertiary.color)
+                            .latticeID("wizard-type-caption-\(e.id)")
+                    }
+                }
+                .padding(.vertical, DS.Space.xs).padding(.horizontal, 4)
+                .frame(maxWidth: .infinity, minHeight: 92)
                 .background(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
                     .fill((on ? DS.Color.fillSelected : DS.Color.fillSubtle).color))
                 .overlay(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
                     .strokeBorder(on ? DS.Color.accent.color : Color.clear, lineWidth: 2))
+                .opacity(e.offered ? 1 : 0.7)
                 .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .latticeID("wizard-type-\(e.id)")
+            if !e.offered, let why = e.reason { infoButton("type-\(e.id)", why, target: 44) }
         }
-        .buttonStyle(.plain)
-        .latticeID("wizard-type-\(e.id)")
     }
 
     /// ★★★ ORGANIC, ITS OWN ROW BELOW THE LATTICE TYPES (his ruling, 2026-09-02: "add an
@@ -2518,7 +2610,13 @@ public struct LatticeSetupWizard: View {
         leaveLatticeArea()   // ★ B7 (E3): an open area's grade goes to its own store; the model is the Part tab's again
         // ★ B4: Along's display pick is not a bake input, so it is saved on its own test
         if settingsChangedSinceOpen || model.gradeAlong != project.lattice.gradeAlong {
-            project.lattice = model.applied(to: project.lattice)
+            // ★ notes28: a new type on a part that already has a lattice carries every density stored per group and per face
+            // to it at the same place on the dial (`LatticeTypeChange`; the page's own two came through the model already)
+            let base = project.lattice.enabled && model.topologyID != project.lattice.topologyID
+                ? LatticeTypeChange.applied(project.lattice, to: model.topologyID,
+                                            lineWidthMM: project.printParams.strutLineWidthMM)
+                : project.lattice
+            project.lattice = model.applied(to: base)
         }
         if let edits = latticeAreaEdits {
             var s = project.lattice

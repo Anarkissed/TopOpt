@@ -1265,8 +1265,15 @@ public final class ProjectModel: ObservableObject {
     /// number he types is the strut he gets.
     /// nil when the type has no strut law (item a): nothing to store from a percent.
     public func latticeDensityForPercent(_ pct: Double, cellMM: Double) -> Double? {
-        guard let lat = LatticeType.named(lattice.topologyID),
-              let b = latticeDensityBandDiametersMM(cellMM: cellMM) else { return nil }
+        Self.latticeDensityForPercent(pct, cellMM: cellMM, topology: lattice.topologyID,
+                                      lineWidthMM: printParams.strutLineWidthMM)
+    }
+    /// ★ notes28: the same inverse for a named type and print line (a type change carries each density through it).
+    nonisolated public static func latticeDensityForPercent(_ pct: Double, cellMM: Double, topology: String,
+                                                            lineWidthMM: Double) -> Double? {
+        guard let lat = LatticeType.named(topology),
+              let b = latticeDensityBandDiametersMM(topology: topology, lineWidthMM: lineWidthMM, cellMM: cellMM)
+        else { return nil }
         guard cellMM > 0 else { return 0 }
         let t = Swift.max(0, Swift.min(1, (pct - 1) / 99))
         let d = b.lo + t * (b.hi - b.lo)
@@ -3029,7 +3036,7 @@ public final class ProjectModel: ObservableObject {
         // ★ RELEASE (2), E2: core runs nine types; a type whose app batch has not shipped (B7.n) is stale here too
         // (`LatticeTypeCatalog.appBatches`), asked first, so its path still asks core nothing.
         guard lattice.enabled,
-              LatticeTypeCatalog.appBatches.contains(lattice.topologyID),
+              LatticeTypeCatalog.batchShipped(lattice.topologyID),   // ★ notes28: the one gate question
               TopOptKit.latticeTypeReadiness(lattice.topologyID,
                                              generatable: TopOptKit.latticeGeneratableTopologies,
                                              certifiable: TopOptKit.latticeCertifiableTopologies) == .live

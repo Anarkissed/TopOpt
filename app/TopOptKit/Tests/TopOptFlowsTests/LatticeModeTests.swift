@@ -168,8 +168,13 @@ final class LatticeModeTests: XCTestCase {
         XCTAssertEqual(spec.strutRadiusMM, expected, accuracy: 1e-9)
         // Enabled but a topology the app can't run → nil. ★ RE-PINNED (release (2), E2): core builds BCC now; the
         // run waits for its app batch (`LatticeTypeCatalog.appBatches`, the type gate).
+        // ★ RE-PINNED (notes28, 2026-11-24): BCC's batch shipped with all the strut types — it runs with its OWN strut law
         s.topologyID = "bcc"
-        XCTAssertNil(s.runSpec())
+        let bcc = try XCTUnwrap(s.runSpec(), "BCC runs now")
+        XCTAssertNotEqual(bcc.strutRadiusMM, spec.strutRadiusMM, accuracy: 1e-9, "★ BCC's strut, never the octet's")
+        LatticeTypeCatalog.appBatchesForTests = ["octet"]   // RED CONTROL: behind the old gate it waited for its batch
+        XCTAssertNil(s.runSpec(), "★ the gate closed again: no BCC run")
+        LatticeTypeCatalog.appBatchesForTests = nil
         // And a topology that certifies nothing at all → nil too.
         s.topologyID = "bccz"
         XCTAssertNil(s.runSpec())

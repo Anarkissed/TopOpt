@@ -1583,7 +1583,15 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// pop-up says these numbers (LatticeThinWallReasons).
     nonisolated public static func minCellsAcross(_ l: LatticeSettings) -> Int32 {
         if let n = l.cellsAcrossMin, n >= 1 { return Int32(n) }   // ★ control 2: his minimum
-        return (l.stageMode ?? .structural) == .aesthetic ? (l.singleCellMembers ? 1 : 2) : 5
+        return (l.stageMode ?? .structural) == .aesthetic ? (l.singleCellMembers ? 1 : 2) : structuralCellsAcross(l.topologyID)
+    }
+
+    /// ★ notes28 (all the strut types): Structural's cells across a wall is the TYPE's own certification floor — core's
+    /// measured cells per member (`lattice_cells_per_member_min`: octet 5, sc 4, fcc 5, kelvin 8, bcc / diamond / rhombic
+    /// 10) — never the octet's five under another type's name. Five where core gives none (a type it does not certify).
+    nonisolated public static func structuralCellsAcross(_ topology: String) -> Int32 {
+        let n = TopOptKit.latticeLimits(topology: topology.isEmpty ? "octet" : topology).minCellsPerMember
+        return n.isFinite && n >= 1 ? Int32(n.rounded(.up)) : 5
     }
 
     /// Lattice Setup's settings for core's lattice_layout (read where its rows read them).

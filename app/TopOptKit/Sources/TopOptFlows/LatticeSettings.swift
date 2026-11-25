@@ -3458,7 +3458,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         let id = topology ?? topologyID
         let limits = TopOptKit.latticeLimits(topology: id)
         // ★ RELEASE (2), E2: a type core builds runs only once its app batch has shipped (the type gate)
-        let generatable = LatticeTypeCatalog.appBatches.contains(id)
+        let generatable = LatticeTypeCatalog.batchShipped(id)   // ★ notes28: the one gate question
             && TopOptKit.latticeGeneratableTopologies.contains(id)
         return runSpec(limits: limits, generatable: generatable, memberMM: memberMM,
                        lineWidthMM: lineWidthMM, emitSTL: emitSTL, emit3MF: emit3MF,

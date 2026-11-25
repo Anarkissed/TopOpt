@@ -406,6 +406,28 @@ struct LatticeLayoutGrowth {
 };
 LatticeLayoutGrowth lattice_layout_growth_read(int64_t session, int64_t from, int64_t most, BridgeError& err);
 
+// ★ notes28 (his 11-24: all nine strut types on the new engine): what the engine knows of a strut type, asked without a
+// part. `lays`: the engine lays it — core has the type's canonical cell (lattice_has_strut_cell) and its two width limits
+// (lattice_width_bounds); else false, with core's own words in `why`. `open_look`, `touch`: those two limits, strut width
+// over cell size. The canonical cell exactly as the engine lays it (core's lattice_strut_cell; R12 "the app draws every
+// type from core"): `s` (node coordinates are integers in units of cell / s), its struts, 6 per strut (a xyz, b xyz), and
+// its nodes, 3 per node. A sheet type, or an id core does not know, never lays. Never throws (the one guard).
+// Core's two Structural verdicts for the type (lattice_layout.hpp, PER TYPE; builder D 2026-11-24), each "" or ONE plain
+// line: `structural_refusal` — Structural can never take it (the tetragonal three; the file job refuses such a job,
+// type_not_supported); `structural_note` — its measured strength law credits none of the struts the engine lays (today
+// bcc and sc; it clears by itself when the law is measured down to them).
+struct LatticeLayoutTypeFacts {
+  bool lays = false;
+  std::string why;
+  double open_look = 0.0, touch = 0.0;
+  int32_t s = 0;
+  std::vector<int32_t> struts;
+  std::vector<int32_t> nodes;
+  std::string structural_refusal;
+  std::string structural_note;
+};
+LatticeLayoutTypeFacts lattice_layout_type_facts(const std::string& topology);
+
 // Every layout of `session` running now or waiting comes back cancelled. Safe from any thread.
 void lattice_layout_cancel(int64_t session);
 void lattice_layout_close(int64_t session);

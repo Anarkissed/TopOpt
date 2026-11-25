@@ -34,12 +34,16 @@ final class LatticeStaleTypeTests: XCTestCase {
             let (p, _, _) = VariantFacePrismFixture.project(organic: organic)
             XCTAssertNotNil(p.latticeRunSpec(emission: p.latticeJobRegions()), "control: octet runs (organic \(organic))")
             XCTAssertNil(LatticeTypeCatalog.selectionRefusal(p.lattice.topologyID))
+            // ★ RE-PINNED (notes28, 2026-11-24): SC's batch shipped with all the strut types, so SC runs with its OWN spec;
+            // the stale type is now one the old run can't build at all (BCC + Z: core neither builds nor certifies it)
             p.lattice.topologyID = "sc"
+            XCTAssertEqual(p.latticeRunSpec(emission: p.latticeJobRegions())?.topologyID, "sc", "SC runs now (organic \(organic))")
+            XCTAssertNil(LatticeTypeCatalog.selectionRefusal("sc"))
+            p.lattice.topologyID = "bccz"
             XCTAssertNil(p.latticeRunSpec(emission: p.latticeJobRegions()),
                          "★ the mechanism: a type core can't build drops the lattice block (organic \(organic))")
-            // ★ RE-PINNED (release (2), E2): core now builds SC, so the sentence is the type gate's (its app batch, B7.n)
             XCTAssertEqual(LatticeTypeCatalog.selectionRefusal(p.lattice.topologyID),
-                           "Simple cubic: \(LatticeTypeCatalog.appBatchPending)", "★ the picker's own sentence")
+                           "BCC + Z: Not buildable or strength-checked yet", "★ the picker's own sentence")
         }
     }
 
@@ -67,7 +71,8 @@ final class LatticeStaleTypeTests: XCTestCase {
         for organic in [false, true] {
             let (p, _, _) = VariantFacePrismFixture.project(organic: organic)
             XCTAssertTrue(WorkspacePlaceholder(model: m, project: p).canLatticeThis, "control: octet (organic \(organic))")
-            p.lattice.topologyID = "rhombic"
+            // ★ RE-PINNED (notes28): Rhombic runs now (all the strut types); a sheet (Gyroid) is still not offered here
+            p.lattice.topologyID = "gyroid"
             XCTAssertFalse(WorkspacePlaceholder(model: m, project: p).canLatticeThis,
                            "★ a type core can't build is refused on the button (organic \(organic))")
             p.lattice.enabled = false
@@ -80,8 +85,14 @@ final class LatticeStaleTypeTests: XCTestCase {
     /// row, where the offered chip is the fix. Navigation only: no type is picked for him.
     func testBothButtonsRefuseAndTheTapOpensSettings() throws {
         let ws = try src("WorkspacePlaceholder.swift")
-        XCTAssertTrue(try member(ws, "private var latticeTypeRefusal")
-            .contains("project.lattice.enabled ? LatticeTypeCatalog.selectionRefusal(project.lattice.topologyID) : nil"))
+        // ★ RE-PINNED (notes28): the stage's own catalog — the new engine's on a STEP part, Structural or Aesthetic
+        let typeRefusal = try member(ws, "private var latticeTypeRefusal")
+        XCTAssertTrue(typeRefusal.contains("guard project.lattice.enabled else { return nil }")
+                      && typeRefusal.contains("LatticeTypeCatalog.stageRefusal(project.lattice.topologyID,")
+                      && typeRefusal.contains("newEngine: latticeButtonOnNewEngine)"))
+        XCTAssertTrue(try member(ws, "private var latticeOptimizeRefusal")
+            .contains("?? (project.lattice.enabled ? LatticeTypeCatalog.selectionRefusal(project.lattice.topologyID) : nil)"),
+                      "★ Optimize carries the lattice in the old run's job: the old run's words too")
         // ★ (2026-10-08) both read the SETTINGS refusal — the saved type first, then Structural Stepped
         XCTAssertTrue(try member(ws, "private var latticeSettingsRefusal").contains("latticeTypeRefusal ?? "), "the type comes first")
         XCTAssertTrue(try member(ws, "private var latticeOptimizeRefusal").contains("?? latticeSettingsRefusal"), "★ Optimize")
@@ -127,7 +138,10 @@ final class LatticeStaleTypeTests: XCTestCase {
     func testTheTypeRowSaysItAtOnceAndTheOfferedChipFixesIt() throws {
         let wiz = try src("LatticeSetupWizard.swift")
         let row = try member(wiz, "private var typeRow: some View")
-        XCTAssertTrue(row.contains("let stale = LatticeTypeCatalog.selectionRefusal(model.topologyID, in: entries)"))
+        // ★ RE-PINNED (notes28): the stage's own catalog's sentence (`typeStaleLine`, the picker's line for the saved type)
+        XCTAssertTrue(row.contains("let stale = typeStaleLine(entries)"))
+        XCTAssertTrue(try member(wiz, "private func typeStaleLine(_ entries: [LatticeTypeEntry]) -> String?")
+            .contains("return LatticeTypeCatalog.selectionRefusal(model.topologyID, in: entries)"))
         XCTAssertTrue(row.contains("if let why = typeReason ?? stale {"), "★ at once, not only on a tap")
         // ★ RE-PINNED (B7 slice 2, plan.md §B7 Type): the chips became a label card (one type) or big cards (two or
         // more), OFFERED types only — a greyed type is not drawn, so it can't be picked; the offered card is still the
@@ -138,7 +152,11 @@ final class LatticeStaleTypeTests: XCTestCase {
         XCTAssertTrue(row.contains("typeCard(e, fixesStale: stale != nil)"))
         let label = try member(wiz, "private func typeLabelCard(_ e: LatticeTypeEntry, fixesStale: Bool)")
         XCTAssertTrue(label.contains("guard fixesStale else { return }"), "the label picks nothing but the fix")
-        XCTAssertTrue(label.contains("if model.cellTransition == .organicGrade { model.topologyID = e.id } else { model.setTopology(e.id) }"))
+        // ★ RE-PINNED (notes28): one pick for every card (`pickType`), carrying the densities; under Organic the type alone
+        XCTAssertTrue(label.contains("pickType(e.id)"))
+        XCTAssertTrue(try member(wiz, "private func pickType(_ id: String)")
+            .contains("organic: model.cellTransition == .organicGrade)"))
+        XCTAssertTrue(try src("LatticeWizardModel.swift").contains("if organic { topologyID = id } else { setTopology(id) }"))
         // the model's topology is the project's after Save & Exit — never migrated on open
         XCTAssertFalse(try src("LatticeWizardModel.swift").contains("selectionRefusal"), "★ never migrated")
         XCTAssertFalse(try src("LatticeSettings.swift").contains("selectionRefusal"), "★ never migrated on decode")

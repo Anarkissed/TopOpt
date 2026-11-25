@@ -98,7 +98,8 @@ final class LatticeTypeNoBandTests: XCTestCase {
         let ws = try src("WorkspacePlaceholder.swift")
         XCTAssertTrue(ws.contains("typeRefusal: latticeTypeRefusal)"), "the stage drawer")
         let wiz = try src("LatticeSetupWizard.swift")
-        XCTAssertTrue(wiz.contains("} else if let why = LatticeTypeCatalog.selectionRefusal(model.topologyID) {"),
+        // ★ RE-PINNED (notes28): the stage's own catalog's sentence (`typeStaleLine`: the new engine's, Structural or Aesthetic)
+        XCTAssertTrue(wiz.contains("} else if let why = typeStaleLine(typeEntries) {"),
                       "the wizard's thickness range hangs on the band")
     }
 }

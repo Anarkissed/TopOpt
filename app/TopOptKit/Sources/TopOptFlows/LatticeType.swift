@@ -371,8 +371,44 @@ public extension LatticeType {
     /// core for the RESOLVED type's limits and face card). Each caller now says what it does
     /// without a law: refuse, skip, or ask core by the raw id. "" is nil too (the bake's "no strut
     /// law" sentinel). Octet still resolves to itself, so no octet result moves.
+    /// ★★ notes28 (his 11-24, all nine strut types on the new engine): a type the Swift table does not carry (Kelvin,
+    /// Rhombic dodecahedron; Re-entrant once core has its cell) is built from the ENGINE'S OWN canonical cell
+    /// (`fromEngine`) — its own struts and its own law (core's measured table first, its own K below) — never octet's.
+    /// A type core has no cell for (Re-entrant today, the sheets, an unknown id, "") is still nil.
     static func named(_ id: String) -> LatticeType? {
-        family.first { $0.id == id }
+        family.first { $0.id == id } ?? fromEngine(id)
+    }
+
+    private final class EngineTypes: @unchecked Sendable {
+        let lock = NSLock()
+        var built: [String: LatticeType?] = [:]
+    }
+    private static let engineTypes = EngineTypes()
+
+    /// ★ notes28: the type from the engine's canonical cell (`LatticeLayoutSession.typeFacts`, core's lattice_strut_cell —
+    /// R12 "the app draws every type from core"): the same struts and nodes the engine lays, and K from those struts by the
+    /// same rule every row of the Swift table obeys (K = 2√2 · canonical strut length per cell / L: octet 48.0, sc 8.4853,
+    /// bcc 19.5959 …, the square-strut low-density limit `densityCoefficient` documents). K is only the fallback: the law
+    /// asks core's measured table first (`strutRadiusMM`). nil when the engine has no cell for the id. Cached.
+    static func fromEngine(_ id: String) -> LatticeType? {
+        guard !id.isEmpty else { return nil }
+        if let hit = engineTypes.lock.withLock({ engineTypes.built[id] }) { return hit }
+        let f = LatticeLayoutSession.typeFacts(id)
+        var made: LatticeType?
+        if f.lays, f.s > 0, !f.struts.isEmpty {
+            func node(_ p: SIMD3<Int32>) -> Node { Node(Int(p.x), Int(p.y), Int(p.z)) }
+            let struts = f.struts.map { Strut(node($0.0), node($0.1)) }
+            var length = 0.0
+            for s in struts {
+                let dx = Double(s.a.x - s.b.x), dy = Double(s.a.y - s.b.y), dz = Double(s.a.z - s.b.z)
+                length += (dx * dx + dy * dy + dz * dz).squareRoot()
+            }
+            let k = 2 * 2.0.squareRoot() * length / Double(f.s)
+            made = LatticeType(id: id, displayName: displayName(forID: id), blurb: "the engine's own cell",
+                               denominator: f.s, struts: struts, nodes: f.nodes.map(node), densityCoefficient: k)
+        }
+        engineTypes.lock.withLock { engineTypes.built[id] = made }
+        return made
     }
 
     /// A display name for ANY core topology id — including the ones this family
