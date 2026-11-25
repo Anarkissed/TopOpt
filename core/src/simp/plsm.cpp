@@ -982,10 +982,15 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
       if (extend_layers > 0) extend_into_empty(grid, pr, extend_layers);
       plsm_reinitialise(nx, ny, nz, pr, h, plsm.reinit_sweeps, false);
       std::vector<double> tgt(n, 0.0);
-      const std::vector<double> w(n, 1.0);
+      std::vector<double> w(n, 1.0);
       for (std::size_t v = 0; v < n; ++v)
         tgt[v] = std::max(-plsm.clamp_voxels * h,
                           std::min(plsm.clamp_voxels * h, pr[v]));
+      // Stage 3: only the band near the surface carries geometry, so the fit may
+      // spend its accuracy there (plsm_solve_normal's W).
+      if (surf.fit_band_voxels > 0.0)
+        for (std::size_t v = 0; v < n; ++v)
+          if (std::fabs(pr[v]) > surf.fit_band_voxels * h) w[v] = 0.01;
       const PlsmFitResult rf =
           plsm_solve_normal(Psi, PsiT, tgt, w, plsm.ridge,
                             plsm.fit_cg_iterations, 1e-10, threads);

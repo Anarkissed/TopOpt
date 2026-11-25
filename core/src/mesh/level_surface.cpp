@@ -46,6 +46,7 @@ SurfaceSwitch to_surface_switch() {
   if (parts.size() >= 2 && plsm_parse_basis(parts[1], s.basis)) s.basis_set = true;
   if (parts.size() >= 3) s.reach = std::atof(parts[2].c_str());
   if (parts.size() >= 4) s.knot_line_widths = std::atof(parts[3].c_str());
+  if (parts.size() >= 5) s.fit_band_voxels = std::atof(parts[4].c_str());
   if (!(s.reach >= 1.0)) s.reach = 2.0;
   if (!(s.knot_line_widths >= 0.0)) s.knot_line_widths = 0.0;
   return s;

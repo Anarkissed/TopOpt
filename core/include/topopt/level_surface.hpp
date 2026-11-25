@@ -25,13 +25,16 @@ namespace topopt {
 //   "on:<basis>:<reach>:<knot>"  a measurement arm: basis gaussian | wendland |
 //                  wendland_c4 | bspline; reach in knot spacings (ignored for
 //                  bspline, whose reach is 2); knot spacing in print LINE WIDTHS
-//                  (0 = today's 3.41 mm rule). Example "on:wendland_c4:3:3".
+//                  (0 = today's 3.41 mm rule); optional 5th field: the re-fit
+//                  weights the band |phi| <= that many voxels 1 and the rest
+//                  0.01 (0 = uniform, today). Example "on:bspline:2:0:1.5".
 struct SurfaceSwitch {
   bool on = false;
   bool basis_set = false;
   PlsmBasisKind basis = PlsmBasisKind::BSpline3;
   double reach = 2.0;
   double knot_line_widths = 0.0;
+  double fit_band_voxels = 0.0;
   std::string raw;
 };
 SurfaceSwitch to_surface_switch();
