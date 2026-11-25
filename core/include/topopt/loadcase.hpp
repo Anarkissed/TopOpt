@@ -544,5 +544,12 @@ DesignMask build_clearance_overlay(
 // not go through build_production_setup. Works for a mesh pseudo-face too.
 std::size_t tag_face_by_stage(VoxelGrid& grid, const StepModel& model, int face_id,
                               VoxelTag tag);
+// The same for a protection depth: `depth_voxels` layers on today's path,
+// `depth_mm` of true distance from the drawn face with stage 1 on. For callers
+// outside build_production_setup that preview what a run will freeze (the app
+// bridge's face_slab_preview), so the previewed count is the run's own.
+std::size_t mask_face_by_stage(const VoxelGrid& grid, const StepModel& model, int face_id,
+                               MaskValue value, int depth_voxels, double depth_mm,
+                               DesignMask& mask);
 
 }  // namespace topopt

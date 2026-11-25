@@ -225,3 +225,19 @@ Listed now so the bar is applied when it happens: candidate 1 of 3a (certified s
 - **Aage 2017, a billion voxels.** Detail such as curved spars and thin walls appears only at very high resolution (1.1 billion voxels, 1 to 5 days on 8,000 processors). Bearing on 3e: resolution is a design choice with a cost, not something a phone or a Mac buys; this supports deriving the part resolution from the smallest feature asked for.
 - **Groen 2021, coarse answer drawn as a fine lattice.** A coarse run with oriented cells, then the real geometry drawn by an implicit modeller; within about 5 % of the fine-run stiffness at about a thousandth of the cost, on a workstation. It confirms the "priced by a law" route in 3c for stiffness; it has no strength limit, so on its own it does not meet his margin rule.
 
+## Added 2026-11-25: the material length for the strength reading (stage 2), from published values
+
+The maintainer's word (2026-11-25): use published values; his own rig is not ready.
+
+Read (free copies, saved text searched for the numbers): Ahmed and Susmel, "A material length scale-based methodology to assess static strength of notched additively manufactured polylactide (PLA)", Fatigue Fract Eng Mater Struct 41 (2018) 2071-2098, `10.1111/ffe.12746` (eprints.whiterose.ac.uk/123322); Susmel, review chapter on notched additively manufactured ABS and PLA (2022; eprints.whiterose.ac.uk/194145).
+
+- The length: L = (1/pi) (K_Ic / strength)^2, with strength = the plain material's tensile strength for these (brittle-acting) printed polymers. The stress is read at L/2 from the surface (point method), averaged over a line 2L long (line method), or over a half-disc of radius L (area method).
+- Printed PLA (100 % infill, any raster angle): tensile strength 42.9 MPa, E 3,479 MPa, K_Ic 3.7 MPa m^0.5 (thick specimens; thinner ones gave 3.5). The formula gives 2.4 mm; the authors could not trust the toughness test and calibrated L = 4.6 mm from sharp-notch tests. Point and area methods then predicted every notched test (tension and bending, blunt to sharp, three raster angles) within about 20 %.
+- Printed ABS: tensile strength 23 MPa, K_Ic 2.6 MPa m^0.5, L = 4.1 mm.
+- PETG: filament as received 2.11 to 2.54 MPa m^0.5 (Guessasma et al., Polymers 11 (2019) 1220); no printed value found. With 45 MPa: about 0.8 mm. PC, PA12, PP, HIPS, the filled grades, resins: no printed value found yet.
+
+What it means here:
+1. The length is millimetres, not tenths: 2 to 5 mm for PLA and ABS. That is the size of the walls this optimiser makes. A peak read on one voxel (0.5 to 2 mm) is not what breaks a printed part; the stress over a few millimetres is. This is why the per-voxel peak is both too harsh and unsteady.
+2. Tests E agree in kind: read over a fixed 1.8 to 3.6 mm, the plate's number moves 6 to 8 % across resolutions and the ring's 2 to 8 %, against 12 to 24 % for the per-voxel peak.
+3. Open, for discussion with the maintainer before any of it is built: the published method predicts BREAKING against tensile strength; this app certifies against YIELD with a safety factor. And the layer direction has its own, lower strength and toughness (no published L across layers found). A cautious first form: read over a size tied to the line width and never larger than the published L for the material, with the knockdowns as today.
+

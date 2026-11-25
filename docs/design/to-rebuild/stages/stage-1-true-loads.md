@@ -1,0 +1,81 @@
+# Stage 1: true loads, anchors and protection depth (TOReview)
+
+Branch `claude/topopt-review-rebuild-3c317f`. Status: IN PROGRESS. Nothing here is released; everything is behind ONE switch, `TOPOPT_FACE_LOADS` (`to_stage_switch.hpp`): unset or `voxel` = today, unchanged; `face` = loads, anchors and depths from the drawn face; `face_spring` = the same with anchors held by springs in proportion to area. `TOPOPT_PAD_MM` sets the pad depth (default 3 mm).
+
+## What is built
+
+| item | what | where |
+|---|---|---|
+| V-01 | A face hands its own area to the voxels it lies on; a load is force x each node's share of that area. Total force and its centre are the drawn face's, whatever the grid alignment. A face that touches the part never comes back with nothing loaded. | `face_loads.hpp/.cpp`, `loadcase.cpp` |
+| L-03 | Protection and pad depth by true distance in mm from the drawn face, not whole voxel layers. | `mask_face_depth_mm`, `mask_region_depth_mm` |
+| P-04 (for stage 3) | The same freezes handed on as geometry: triangles, cuts, depth in mm. | `frozen_sets.hpp`, `MinimizePlasticOptions::frozen_sets` |
+| P-15 | The stop rule watches the margin of the DESIGN, without the Load and Fixture voxels. | `plsm.cpp`, `minimize_plastic.cpp` |
+| R-07 | A version's file is checked BEFORE the app is told about it; a refused file is never announced. | `to_run.inc` |
+| A-05 | When no version passes, the report says how the part as drawn stands: `"as_drawn": {margin, required, passes}`. | `to_run.inc`, `report.cpp` |
+| simple jobs | The self-weight path (`job.fixture_faces`) goes through the same switch. | `tag_face_by_stage`, `to_setup.inc`, `to_analyze.inc` |
+
+Moved to stage 2: R-08 (one accept rule for loop, certificate and file check).
+
+## Tests
+
+| test | rule | today | with the switch on | ctest |
+|---|---|---|---|---|
+| C loaded area and centre, 18 alignments | exact | up to 13 % off; nothing loaded in 6 of 18 | exact in 18 of 18 | measures (gate for the new path inside) |
+| D protection depth | 0.05 voxel | up to 1 voxel off | within 0.05 voxel (per-voxel share) | same |
+| K same job twice, demo part | same bytes | 14 files, 0 differ | 11 files, 0 differ (the 0.30 version is refused, see below) | `ctest -C Long`, gate |
+| E ring under pressure (needs this loader) | 5 % of textbook, 10 % across resolutions | cannot be loaded | loaded area exact (0.00 % off); stress 6 to 7 % under the textbook, 4 to 7 % across resolutions; today's cut-voxel rule reads 76 % high (stage 2) | measures |
+
+## Measured: the part as drawn (strength check only, no optimisation)
+
+Effective margin; same binary, same job, only the switch changed.
+
+| part | res | today | drawn face | drawn face + springs |
+|---|---|---|---|---|
+| Base | 48 / 64 / 96 / 128 / 160 / 192 | 0.67 / 0.18 / 0.40 / 0.17 / 0.30 / 0.08 | 0.97 / 0.81 / 0.51 / 0.39 / 0.38 / 0.33 | 1.07 / 0.87 / 0.56 / 0.41 / 0.40 / 0.35 |
+| Pressing | 48 / 64 / 96 / 128 | 0.75 / 0.51 / 0.35 / 0.35 | 0.75 / 0.51 / 0.35 / 0.35 | 0.75 / 0.51 / 0.36 / 0.35 |
+| PillowBlock (left) | 48 / 64 / 96 / 128 | 1.85 / 1.48 / 1.07 / 0.78 | 1.80 / 1.39 / 1.11 / 0.91 | 1.85 / 1.47 / 1.18 / 0.92 |
+| Original stand | 96 / 128 | 4.47 / 2.93 | 4.59 / 3.15 | 4.71 / 3.15 |
+| Top Motor Mount | 96 / 128 | 1.64 / 1.33 | 1.65 / 1.33 | 1.65 / (running) |
+| Stand v4 | 96 / 128 | 1.94 / 2.12 | 2.46 / 2.02 | (running) |
+
+Reading: Base is the part V-01 hurts. Today its margin jumps up and down by a factor of four with the resolution (0.67, 0.18, 0.40, 0.17, 0.30, 0.08), because where the grid falls decides how much of the loaded face is loaded. From the drawn face it falls steadily as the grid resolves the stress (0.97 to 0.33). Parts whose loaded faces happen to sit well in the grid (Pressing, Top Motor Mount) do not change, which is the control: the new loader changes the answer only where the old one was wrong. The remaining fall with resolution is the stress reading itself (stage 2), not the loads.
+
+## Measured: optimised
+
+| run | today | drawn face |
+|---|---|---|
+| Demo part (self-weight), version 0.70 / 0.50 / 0.30 margin | 965 / 301 / 70 | 1,176 / 437 / refused |
+| Original stand, res 128 | (queued behind the lock) | (queued) |
+
+The refused 0.30 version: at solve 19 the design is in 17 separate pieces; the multigrid solve grows its error and the Jacobi-CG fallback hits its cap at residual 0.092. Today's path goes through 8 to 11 pieces and lands inside the cap. Not the loader: the optimiser breaks the part up (stage 3/4 boundary) and the solver cannot settle a broken part quickly (stage 5). Which side of the cap a run lands on is luck until those land.
+
+## Still owed before the stage report
+
+- The original stand optimised both ways (queued), then Top Motor Mount; three settings; pad 2 / 3 / 4.5 mm.
+- The lattice strength check before and after on his parts (reviewer), planned with LatticeReview in TORebuildGroup. `region_lattice_mask` still turns a depth into voxel layers (`region_depth_layers`); joint with LatticeReview.
+- Test K again with the switch on once stage 5 removes the solver luck.
+
+## For #362 (handed over with the switch flip; not edited by me)
+
+Until these land, with the switch on, the app's previews count voxels the old way while the run freezes by true distance.
+
+1. `app/TopOptKit/Sources/TopOptBridge/bridge.cpp`, `tag_step_face` (about line 1013). Replace
+
+        return static_cast<int64_t>(topopt::tag_step_face(g, model, face_id, tag));
+
+   with
+
+        return static_cast<int64_t>(topopt::tag_face_by_stage(g, model, face_id, tag));
+
+2. Same file, `mask_step_face` (about line 1029) and `face_slab_preview` (about line 1057). The bridge passes voxel layers only; the run now needs the depth in mm. In `face_slab_preview` replace the `mask_step_face(g, model, fid, FrozenSolid, depth_vox, one)` call with
+
+        topopt::mask_face_by_stage(g, model, fid, topopt::MaskValue::FrozenSolid,
+                                   depth_vox, depths_mm[i], one)
+
+   and in `mask_step_face` pass `depth_voxels * g.spacing` as the mm depth the same way. (`#include "topopt/loadcase.hpp"`.)
+
+3. `core/src/cli/run_job.cpp`, the two fixture-face tagging sites in the lattice strength-check code (about lines 11337 and 12647): replace the `model_is_mesh ? tag_mesh_face(...) : tag_step_face(...)` expression with `tag_face_by_stage(<same grid>, <same model>, f, VoxelTag::Fixture)`.
+
+4. The report key `"as_drawn"` (top level, present only when no version passed on a reduction run): the app shows its centred pop-up offering Strengthen (agreed 2026-11-25).
+
+When the switch flips and the old path is deleted, `tag_face_by_stage` / `mask_face_by_stage` keep their names and lose the old branch, so these lines do not change again.
