@@ -37,7 +37,7 @@ final class HoldRingHostedTests: XCTestCase {
         // ★ RED CONTROL: today's hold — no ring
         HoldRing.controlOff = true
         let hc = try lattice(AppBuildHost.landscape13)
-        let bc = try hc.onScreen("view-Lattice preview", "the control: Lattice preview")
+        let bc = try hc.onScreen("viewToggle-Lattice preview", "the control: Lattice preview")   // ★ notes28: on or off (it opens on)
         press(hc, bc, .leftMouseDown); hc.pump(1)
         XCTAssertNil(hc.frames.all["holdRing"], "the control: no ring")
         press(hc, bc, .leftMouseUp); hc.pump(0.5)
@@ -45,7 +45,7 @@ final class HoldRingHostedTests: XCTestCase {
 
         for size in [AppBuildHost.landscape13, AppBuildHost.portrait13] {
             let h = try lattice(size)
-            let b = try h.onScreen("view-Lattice preview", "\(size): Lattice preview")
+            let b = try h.onScreen("viewToggle-Lattice preview", "\(size): Lattice preview")   // ★ notes28: on or off
             press(h, b, .leftMouseDown); h.pump(1)
             let ring = try h.onScreen("holdRing", "\(size): ★ the ring, while it is held")
             XCTAssertEqual(ring.midX, b.midX, accuracy: 1, "\(size): round the button")

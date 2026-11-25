@@ -73,7 +73,11 @@ public enum LatticeThinWallGlow {
     /// The part's per-vertex tints (8 floats per draw vertex, the mesh's index order): glowing where the field is, the
     /// dim elsewhere. Each vertex samples the voxel half a voxel either side of its triangle's plane and keeps the larger
     /// (the mesh's winding is mixed; air carries 0, so the material side answers).
-    public static func vertexTints(mesh: ViewerMesh, grid: LatticeVoxelGrid, field: [Float]) -> [Float] {
+    /// ★ notes28 (his 11-24, "Glow them too"): `triangleLit` — one per triangle (the mesh's index order / 3): the place just
+    /// under that triangle's middle is one he asked to lattice that stayed solid (the engine's own answer there), so the whole
+    /// triangle glows. A coarse grid misses a region thinner than its voxel (his 1 mm face prism), and a big flat face of two
+    /// triangles has only its corners to sample; the middle's own answer lights it. nil: the field alone, as before.
+    public static func vertexTints(mesh: ViewerMesh, grid: LatticeVoxelGrid, field: [Float], triangleLit: [Bool]? = nil) -> [Float] {
         let n = grid.nx * grid.ny * grid.nz
         guard field.count == n, mesh.indices.count >= 3 else { return [] }
         let h = Swift.min(grid.spacing.x, Swift.min(grid.spacing.y, grid.spacing.z))
@@ -93,8 +97,9 @@ public enum LatticeThinWallGlow {
             let a = pos(mesh.indices[t]), b = pos(mesh.indices[t + 1]), c = pos(mesh.indices[t + 2])
             let cr = simd_cross(b - a, c - a)
             let nrm = simd_length(cr) > 1e-12 ? simd_normalize(cr) : SIMD3<Float>(0, 0, 1)
+            let lit = (triangleLit.map { t / 3 < $0.count && $0[t / 3] } ?? false) ? Float(1) : 0
             for (k, p) in [a, b, c].enumerated() {
-                let g = Swift.max(sample(p - nrm * (0.6 * h)), sample(p + nrm * (0.6 * h)))
+                let g = Swift.max(lit, Swift.max(sample(p - nrm * (0.6 * h)), sample(p + nrm * (0.6 * h))))
                 let o = (t + k) * 8
                 if g > 0.03 {
                     out[o] = blueRGBA.x; out[o + 1] = blueRGBA.y; out[o + 2] = blueRGBA.z; out[o + 3] = 0.45 * g

@@ -22,6 +22,7 @@
 #if canImport(MetalKit)
 import MetalKit
 import simd
+import Accelerate
 
 /// What the page hands the renderer: the bars, keyed by a token (a new token uploads; the same token never re-uploads).
 public struct LatticeLayoutBarsInputs: Equatable {
@@ -56,7 +57,7 @@ public struct LatticeLayoutBarsInputs: Equatable {
     }
     public static func == (a: Self, b: Self) -> Bool {
         a.token == b.token && a.hidden == b.hidden && a.solid?.token == b.solid?.token && a.colourKey == b.colourKey
-            && a.dimmed == b.dimmed
+            && a.dimmed == b.dimmed && a.solid?.smooth == b.solid?.smooth   // ★ notes28: the same map drawn the other way
     }
 }
 
@@ -100,6 +101,97 @@ public struct LatticeLayoutSolidGrid: Equatable {
             swap(&a, &b)
         }
         return a.map { Int8(Swift.max(-127, Swift.min(127, $0.rounded()))) }
+    }
+
+    /// ★ notes28 (his iPad notes on release 18, img 77: "there is still stair stepping on the cut lines of the original part's
+    /// wall ... It's on every wall"). The regular lattice's cut, with Print-accurate preview OFF: the OPEN channel read as a
+    /// signed field whose zero is the cut, smoothed so a cut along a slope reads as one straight line (a curve as a curve), not
+    /// the map's voxel steps. Each voxel's yes/no is averaged over its neighbours by the binomial [1 6 15 20 15 6 1] / 64 along
+    /// each axis (about 1.2 voxels), counting ONLY the voxels where the map knows the answer — inside the part, and the layer of
+    /// air right beside it (the engine marks that layer open beside open lattice, so the surface's cut is read there); the air
+    /// past it says nothing about the cut, so it never pulls the line inward (`smoothed` above, Organic's, does: about 0.2 mm on
+    /// a 0.7 mm map). Measured on a 30° cut across a face (Notes28LatticeViewTests): the line's wobble from 0.23 mm (the steps)
+    /// to under 0.1 mm, its place on the true line kept. The inside channel is the engine's own.
+    /// ★ HIS RULE ("The drawing follows the print file. Always."; amended 11-21: with Print-accurate preview ON). The print file
+    /// cuts the wall along a slope in 0.25 mm steps itself (read_open_space's columns): ON, the drawing keeps the map's own steps
+    /// (`LatticeLayoutPreview.cutSmoothWanted`); a straight cut in the file is an engine change.
+    public static let cutTaps: [Float] = [1, 6, 15, 20, 15, 6, 1]
+    public static func cutSmoothed(_ rg: [Int8], dims: SIMD3<Int32>) -> [Int8] {
+        let nx = Int(dims.x), ny = Int(dims.y), nz = Int(dims.z), n = nx * ny * nz
+        guard n > 0, rg.count == 2 * n else { return rg }
+        // Accelerate throughout (vDSP): a 1M-voxel map in a fraction of a second, debug builds too.
+        let N = vDSP_Length(n)
+        let open = UnsafeMutablePointer<Float>.allocate(capacity: n), inside = UnsafeMutablePointer<Float>.allocate(capacity: n)
+        let known = UnsafeMutablePointer<Float>.allocate(capacity: n), num = UnsafeMutablePointer<Float>.allocate(capacity: n)
+        defer { open.deallocate(); inside.deallocate(); known.deallocate(); num.deallocate() }
+        rg.withUnsafeBufferPointer { m in
+            m.baseAddress!.withMemoryRebound(to: Int8.self, capacity: 2 * n) { b in
+                vDSP_vflt8(b, 2, open, 1, N)
+                vDSP_vflt8(b + 1, 2, inside, 1, N)
+            }
+        }
+        var zero: Float = 0, one: Float = 1, scale: Float = 1 / 127
+        vDSP_vthrsc(inside, 1, &zero, &one, inside, 1, N)   // ±1 (≥ 0 → +1)
+        vDSP_vthr(inside, 1, &zero, inside, 1, N)            // 1 inside the part, 0 outside
+        // the voxels where the map knows the answer: inside, or air beside the part (its six neighbours; the map has a voxel of
+        // air all round, so a shift that wraps a row or a plane only ever meets air)
+        known.update(from: inside, count: n)
+        for shift in [1, nx, nx * ny] where shift < n {
+            let m = vDSP_Length(n - shift)
+            vDSP_vmax(known, 1, inside + shift, 1, known, 1, m)          // the neighbour after
+            vDSP_vmax(known + shift, 1, inside, 1, known + shift, 1, m)  // and the one before
+        }
+        vDSP_vsmul(open, 1, &scale, open, 1, N)    // −1 … 1
+        vDSP_vmul(open, 1, known, 1, num, 1, N)    // the known answers; `known` is how much of them
+        // blurred alike along each axis: their ratio is the field
+        for (axis, len, st) in [(0, nx, 1), (1, ny, nx), (2, nz, nx * ny)] {
+            Self.blurAxis(num, nx: nx, ny: ny, nz: nz, axis: axis, len: len, stride: st)
+            Self.blurAxis(known, nx: nx, ny: ny, nz: nz, axis: axis, len: len, stride: st)
+        }
+        // (num − ε) / (known + ε): where nothing is known (far air) −1, as the engine's own map says there
+        var eps: Float = 1e-6, negEps: Float = -1e-6, lo: Float = -1, hi: Float = 1, s127: Float = 127
+        vDSP_vsadd(num, 1, &negEps, num, 1, N)
+        vDSP_vsadd(known, 1, &eps, known, 1, N)
+        vDSP_vdiv(known, 1, num, 1, open, 1, N)    // open = num / known
+        vDSP_vclip(open, 1, &lo, &hi, open, 1, N)
+        vDSP_vsmul(open, 1, &s127, open, 1, N)
+        var out = rg
+        out.withUnsafeMutableBufferPointer { o in
+            o.baseAddress!.withMemoryRebound(to: Int8.self, capacity: 2 * n) { b in
+                vDSP_vfixr8(open, 1, b, 2, N)   // the open channel; the inside channel stays the engine's
+            }
+        }
+        return out
+    }
+
+    /// The binomial along one axis of `a` (x fastest, then y, then z), line by line, the ends held (the voxel at the edge
+    /// repeats). A line that is one value throughout is left as it is (the blur of a constant is that constant): most lines
+    /// of a map are all air or all solid.
+    private static func blurAxis(_ a: UnsafeMutablePointer<Float>, nx: Int, ny: Int, nz: Int, axis: Int, len: Int, stride st: Int) {
+        let h = cutTaps.count / 2
+        let sum = cutTaps.reduce(0, +)
+        let w = cutTaps.map { $0 / sum }
+        let pad = UnsafeMutablePointer<Float>.allocate(capacity: len + 2 * h), line = UnsafeMutablePointer<Float>.allocate(capacity: len)
+        defer { pad.deallocate(); line.deallocate() }
+        let lines = axis == 0 ? ny * nz : (axis == 1 ? nx * nz : nx * ny)
+        var zero: Float = 0
+        for l in 0..<lines {
+            let base: Int
+            switch axis {
+            case 0: base = l * nx                          // (y, z)
+            case 1: base = (l / nx) * nx * ny + l % nx     // (x, z)
+            default: base = l                              // (x, y)
+            }
+            let src = a + base
+            var mn: Float = 0, mx: Float = 0
+            vDSP_minv(src, st, &mn, vDSP_Length(len))
+            vDSP_maxv(src, st, &mx, vDSP_Length(len))
+            if mn == mx { continue }
+            vDSP_vsadd(src, st, &zero, pad + h, 1, vDSP_Length(len))   // the line, gathered (a strided copy)
+            for j in 0..<h { pad[j] = pad[h]; pad[h + len + j] = pad[h + len - 1] }
+            vDSP_conv(pad, 1, w, 1, line, 1, vDSP_Length(len), vDSP_Length(2 * h + 1))
+            vDSP_vsadd(line, 1, &zero, src, st, vDSP_Length(len))   // and put back
+        }
     }
     public static func == (a: Self, b: Self) -> Bool { a.token == b.token }
     public var isWhole: Bool { dims.x > 0 && dims.y > 0 && dims.z > 0 && rg.count == 2 * Int(dims.x) * Int(dims.y) * Int(dims.z) }
@@ -743,7 +835,9 @@ extension MeshRenderer {
         else if pass.colourKey != inputs.colourKey { pass.uploadColours(inputs); changed = true }   // ★ Install 3
         if pass.hidden != inputs.hidden { pass.hidden = inputs.hidden; changed = true }
         if pass.dimmed != inputs.dimmed { pass.dimmed = inputs.dimmed; changed = true }   // ★ his pick 11-21
-        if pass.gridToken != (inputs.solid?.token ?? -1) { pass.uploadGrid(inputs.solid); changed = true }
+        if pass.gridToken != (inputs.solid?.token ?? -1) || (inputs.solid.map { $0.smooth != pass.gridSmooth } ?? false) {
+            pass.uploadGrid(inputs.solid); changed = true   // ★ notes28: or the same lay's map smoothed / stepped (Print-accurate)
+        }
         return changed
     }
 }

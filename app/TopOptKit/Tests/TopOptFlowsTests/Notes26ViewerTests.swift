@@ -37,7 +37,9 @@ final class Notes26ViewerTests: XCTestCase {
     /// only from under the floor; the top-side shadows are not drawn from there.
     func testTheGridSeenFromUnderTheFloorIsPinned() throws {
         let d = MeshRenderer.stageUnderDepth()
-        XCTAssertEqual(d.depthCompareFunction, .greater, "★ only where something nearer than the far plane was drawn")
+        // ★ RE-PINNED notes28 (his iPad notes on release 18, img 77 against Bambu's img 78): the bed seen from under it is a
+        // see-through plate at its OWN depth (the fragment writes it), in front of what is above it — LESS, never written
+        XCTAssertEqual(d.depthCompareFunction, .less, "★ at the bed's own depth: in front of the part above it")
         XCTAssertFalse(d.isDepthWriteEnabled, "it hides nothing")
         let c = MTLRenderPipelineColorAttachmentDescriptor()
         MeshRenderer.blendStageUnder(c)
@@ -46,7 +48,7 @@ final class Notes26ViewerTests: XCTestCase {
                                                                       "★ a translucent floor OVER the part (premultiplied)")
         XCTAssertTrue(try renderer().stageUnderPipelineDidBuild, "its pipeline builds on a real GPU")
         let shader = MeshRenderer.stageShaderSourceForTesting
-        XCTAssertTrue(shader.contains("fragment float4 stage_under_fragment"))
+        XCTAssertTrue(shader.contains("fragment StageUnderOut stage_under_fragment"), "★ notes28: its colour and its depth")
         XCTAssertEqual(shader.components(separatedBy: "float t = (U.floorY - ro.y) / rdy;").count - 1, 2,
                        "★ the same plane, by the same ray, from above and from below")
         XCTAssertEqual(shader.components(separatedBy: "float3 rd = normalize(np - ro);").count - 1, 2, "the same perspective")
@@ -56,7 +58,7 @@ final class Notes26ViewerTests: XCTestCase {
         let src = try FlexibleSource.code("MetalMeshView.swift")
         XCTAssertTrue(src.contains("below: camera.eye.y < floor.y ? 1 : 0)"), "★ the plane's side: the eye under the floor")
         let body = try XCTUnwrap(src.range(of: "if !ghostAfterLattice { countedDraw(enc, .triangle, vertexDrawCount) }"))
-        let under = try XCTUnwrap(src.range(of: "if drawStage, stageUniforms.below > 0.5, !Self.controlNoUnderGrid, let upipe = stageUnderPipeline {"))
+        let under = try XCTUnwrap(src.range(of: "if drawStage, stageUniforms.under > 0.001, !Self.controlNoUnderGrid, let upipe = stageUnderPipeline {"))   // ★ notes28
         XCTAssertLessThan(body.lowerBound, under.lowerBound, "★ drawn AFTER the part, so the part is seen THROUGH it")
         XCTAssertTrue(src.contains("if showGround, stageUniforms.below < 0.5, let gpipe = groundPipeline"))
     }
