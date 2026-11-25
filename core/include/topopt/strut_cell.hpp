@@ -51,7 +51,9 @@ struct StrutCell {
 };
 
 // True for the topologies that have a canonical cell here: octet, sc, bcc, fcc,
-// diamond, kelvin, rhombic. False for the tetragonal three (not in round 1).
+// diamond, kelvin, rhombic, and (2026-11-24, for the new lattice engine, Aesthetic only:
+// they are not certified) the tetragonal bccz, fccz and reentrant, as the family study and
+// the tensor probe build them; their z is the cell's special axis. False for the sheets.
 bool lattice_has_strut_cell(LatticeTopology topo);
 
 // The canonical cell. Throws std::invalid_argument, naming the type, for a topology

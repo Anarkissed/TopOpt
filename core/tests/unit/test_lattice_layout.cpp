@@ -1166,14 +1166,16 @@ static void test_struts() {
     for (const Cell& c : l.cells) NEAR(c.strut, bead, 1e-12);
     CHECK(r.at_bead == l.cells.size());
   }
-  {  // A type with no cell of its own is refused by name, never given another type's widths.
+  {  // A layout that never read its type's limits reads its OWN type's (2026-11-24: the tetragonal three have theirs),
+     // never another type's widths: bccz closes where bcc does, at 1/sqrt 2 of the cell, not at octet's quilt.
     Layout l = base;
     l.topology = LatticeTopology::Bccz;
-    l.open_look = l.touch = 0.0;   // as a layout that never read its type's limits
-    bool refused = false;
-    try { set_struts(l, StrutSpec{}); } catch (const std::invalid_argument&) { refused = true; }
-    CHECK(refused);
-    for (const Cell& c : l.cells) CHECK(c.strut == 0.0);
+    l.open_look = l.touch = 0.0;
+    StrutSpec sp;
+    sp.allow_quilt = true;
+    sp.dial = 1.0;
+    set_struts(l, sp);
+    for (const Cell& c : l.cells) NEAR(c.strut, std::max(bead, 0.70710678118654752 * c.size), 1e-9);
   }
 }
 
@@ -1229,13 +1231,18 @@ static void test_each_type_has_its_own_limits() {
   };
   CHECK(bars_of(LatticeTopology::SimpleCubic) != bars_of(LatticeTopology::Octet));
   CHECK(bars_of(LatticeTopology::Bcc) != bars_of(LatticeTopology::Octet));
-  // A type with no cell is refused by name where its limits are first asked for.
+  // The tetragonal three lay their own cells (2026-11-24), each its own bars; a type with no strut cell (a sheet) is
+  // refused by name where its struts are first asked for.
+  CHECK(bars_of(LatticeTopology::Reentrant) != bars_of(LatticeTopology::Bccz));
+  CHECK(bars_of(LatticeTopology::Fccz) != bars_of(LatticeTopology::Fcc));
   bool refused = false;
   try {
     CellSpec cs;
-    cs.topology = LatticeTopology::Reentrant;
-    lay_cells(d, cs);
-  } catch (const std::invalid_argument&) { refused = true; }
+    cs.topology = LatticeTopology::Gyroid;
+    Layout l = lay_cells(d, cs);
+    set_struts(l, StrutSpec{});
+    lay_bars(l, d);
+  } catch (const std::invalid_argument& e) { refused = std::string(e.what()).find("gyroid") != std::string::npos; }
   CHECK(refused);
 }
 

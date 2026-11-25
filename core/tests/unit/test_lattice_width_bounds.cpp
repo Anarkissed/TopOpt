@@ -165,9 +165,11 @@ double distance_to_surface(TpmsKind kind, const V3& p, int n) {
 
 int main() {
   // §1 every strut type's touch is the smaller of its two gaps, recomputed from its cell.
+  // (The tetragonal three since 2026-11-24: their cells are the family study's, laid by the new engine in Aesthetic.)
   for (LatticeTopology t : {LatticeTopology::Octet, LatticeTopology::SimpleCubic, LatticeTopology::Bcc,
                             LatticeTopology::Fcc, LatticeTopology::Diamond, LatticeTopology::Kelvin,
-                            LatticeTopology::Rhombic}) {
+                            LatticeTopology::Rhombic, LatticeTopology::Bccz, LatticeTopology::Fccz,
+                            LatticeTopology::Reentrant}) {
     const StrutCell& c = lattice_strut_cell(t);
     const double f = gap_face_view(c), q = gap_3d(c);
     const LatticeWidthBounds b = lattice_width_bounds(t);
@@ -212,14 +214,16 @@ int main() {
   check(dt <= 2.0 * saddle && dt > 2.0 * saddle - 0.002,
         "§4 schwarz_d: touch is at most twice the edge midpoint's clearance, and within 0.002 of it");
 
-  // §5 the tetragonal three have no cell: refused, by name.
-  for (LatticeTopology t : {LatticeTopology::Bccz, LatticeTopology::Fccz, LatticeTopology::Reentrant}) {
-    bool threw = false;
-    try { (void)lattice_width_bounds(t); } catch (const std::invalid_argument& e) {
-      threw = std::string(e.what()).find(lattice_topology_name(t)) != std::string::npos;
-    }
-    check(threw, std::string("§5 ") + lattice_topology_name(t) + " is refused by name");
-  }
+  // §5 the tetragonal three: their numbers as lattice.hpp states them (bccz bcc's own 1/sqrt 2; fccz 1/2 in 3D,
+  // under fcc's 1/sqrt 3: a column passes nearer a leg than two legs pass; reentrant 1/3 in 3D, its face view 1/sqrt 5).
+  check(lattice_width_bounds(LatticeTopology::Bccz).touch == lattice_width_bounds(LatticeTopology::Bcc).touch,
+        "§5 bccz touches where bcc does");
+  check(std::fabs(gap_3d(lattice_strut_cell(LatticeTopology::Fccz)) - 0.5) < 1e-12 &&
+            std::fabs(gap_face_view(lattice_strut_cell(LatticeTopology::Fccz)) - 1.0 / std::sqrt(2.0)) < 1e-12,
+        "§5 fccz: 3D gap 1/2, face view 1/sqrt 2");
+  check(std::fabs(gap_3d(lattice_strut_cell(LatticeTopology::Reentrant)) - 1.0 / 3.0) < 1e-12 &&
+            std::fabs(gap_face_view(lattice_strut_cell(LatticeTopology::Reentrant)) - 1.0 / std::sqrt(5.0)) < 1e-12,
+        "§5 reentrant: 3D gap 1/3, face view 1/sqrt 5");
   std::printf("%s: %d checks, %d failures\n", g_fail ? "FAIL" : "PASS", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }

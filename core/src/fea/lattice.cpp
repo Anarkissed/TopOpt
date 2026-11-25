@@ -1200,14 +1200,17 @@ LatticeWidthBounds lattice_width_bounds(LatticeTopology topo) {
       b.touch = topo == LatticeTopology::Gyroid ? 0.43301270189221932   // sqrt 3 / 4
                                                 : 0.3507;
       return b;
-    case LatticeTopology::Bccz:
-    case LatticeTopology::Fccz:
-    case LatticeTopology::Reentrant:
-      break;
+    // The tetragonal three (2026-11-24: on the new engine, Aesthetic only), from their own canonical cells
+    // (strut_cell.hpp), recomputed there by test_lattice_width_bounds: the open look is the one strut geometry; touch
+    // the smaller of the two gaps (lattice.hpp's table): bccz 1/sqrt 2 both ways (as bcc); fccz 1/2 in 3D (its face
+    // view stays fcc's 1/sqrt 2); reentrant 1/3 in 3D (its face view 1/sqrt 5).
+    case LatticeTopology::Bccz:        b.touch = 0.70710678118654752; return b;  // 1/sqrt 2
+    case LatticeTopology::Fccz:        b.touch = 0.5; return b;
+    case LatticeTopology::Reentrant:   b.touch = 1.0 / 3.0; return b;
   }
   throw std::invalid_argument(
       std::string("lattice_width_bounds: \"") + lattice_topology_name(topo) +
-      "\" has no canonical cell (it is tetragonal), so neither its open look nor where its "
+      "\" is not a lattice type core knows, so neither its open look nor where its "
       "struts touch is stated; no other type's bound is used for it (R1).");
 }
 
