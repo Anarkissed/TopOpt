@@ -70,6 +70,40 @@ Reading:
 | Behrou et al. 2021 (CMAME 113799, arXiv 2012.02860) | elements with density at or below 0.001 to 0.1 removed from the solve, returned by projection; 3D iteration 91 s to 10.5 s | the "Active Domain" lever; also removes the 1e-9 contrast the coarse grid struggles with |
 | Khodak et al. 2026 (PCGBandit, arXiv 2509.08765) | online bandit picks the preconditioner per solve from measured wall; up to 1.5x; break-even about 1,000 solves | a run here has about 200 solves; low priority against fixing the smoother |
 
-## 3. Plan (after the discussion with the maintainer)
+## 3. Plan (agreed with the maintainer 2026-11-25)
 
-To write after step 1's numbers and his discussion.
+### In plain English (for Nadim)
+
+The computer spends about three quarters of every run doing one kind of sum, over and over. That is the "solve". The brief asks me to make that sum faster without changing any answer. Six jobs, in this order:
+
+1. **Fix the step that has been overcorrecting.** Today it makes the error bigger, so the solver gives up and uses a slow backup. I'll try two fixes, a simple one and a modern one, at three settings each, on every reference part, and keep whichever is fastest.
+2. **One settings card instead of eleven hidden switches.** Today the solver's settings are scattered, and one solve can quietly affect the next. They become one card handed to each solve, so the same job always gives the same answer.
+3. **Use every core of the Mac** for the step after each solve, which today runs on one core.
+4. **Single precision: keep or delete.** This is a faster, less exact way of doing part of the sum. It never actually ran (it was always switched back off). Once step 1 is fixed it can run, so I measure it once. If it isn't clearly faster, it is deleted.
+5. **Two ways of feeding the part to the sum:** read it from a stored list (today), or work it out on the fly. Measure both and keep the faster.
+6. **Before-and-after table** on all your reference parts: run time (and how much of it is the solve), the design, the margin, the mass. Same answers, less time, or it doesn't ship.
+
+What you will notice: shorter runs. Nothing on screen changes. Until the table passes, the new behaviour sits behind one switch and today's behaviour stays the default. Once it passes, the switch and the old path are deleted (the rebuild's rule: keep only what works).
+
+When I stop: a change that makes any reference part slower, changes a pass/fail, or changes the design beyond rounding is not adopted. It is reported with its numbers, not forced through.
+
+The side hustle (a better rough map) is separate and comes to you as its own write-up (section 4).
+
+### Technical plan
+
+Switch: `TOPOPT_SOLVER` (read once per solve in multigrid.cpp; unset = today's solver, byte-identical). Values select the settings measured below; the winner becomes the default and the switch and the old path are deleted at close-out.
+
+1. **Smoother (B-05).** New `MgSmoother::Chebyshev4` (4th kind, Lottes 2023 / Phillips & Fischer 2022, degree k, upper bound rho = s x lambda_max(D^-1 A) per level), and damped Jacobi with a per-level weight f / lambda_max. lambda_max is computed per solve by the existing deterministic power iteration (`power_lambda_dinv_a`), so no state crosses solves. Settings: Jacobi 0.6 (today), f = 1.0 / 1.333 / 1.6; Chebyshev k = 2 / 3 / 4. Both smoothers are polynomials in D^-1 A, so pre = post keeps the V-cycle SPD. Measured by replaying dumped solves (first, middle and last solve of rung 0) of every reference part through the production solve (`fea_solve_mgcg_matfree`, production posture, cold and warm): iterations, solve wall (Release, production threads), and whether the latch or the l1 retry engaged. Then a full Release run per reference part, today against the winner.
+2. **E-01: one settings value.** A `SolverSettings` value (smoother, weights, sweeps, mixed, threads, recycling, GenEO, parity pad, safe retry, re-arm period, cubic) in fea.hpp, passed to new overloads of the solve entry points. Per-run state (latches, recycle basis, GenEO basis) moves into an explicit run-state object the caller owns, so a solve's result depends only on its inputs, its settings and the state it is handed (test K). The bridge's four entry points keep their signatures as wrappers. Caller edits outside my files (production.cpp, to_run.inc, run_job.cpp, bridge) go to TOReview as exact lines.
+3. **S-05: the sensitivity loop on all cores** (to_solve.cpp). Fixed z-slab chunks with partial sums added in slab order, so the bytes do not depend on the thread count. Test: identical bytes at 1 and 6 threads.
+4. **Single precision (section K).** With a stable smoother the shipped attempt carries, so the FP32 V-cycle becomes reachable. Give it the same smoother, measure on the reference dumps; keep only if the solve wall drops by 15 % or more with no change in the gate; otherwise delete it (the cycle, the FP32 copies, the setter).
+5. **Element product (B-06).** Stored per-element dof numbers (today: 104-byte records, 8-colour scatter, full-vector copies) against a grid stencil that derives the dofs from the voxel index. Settings: 1, 3 and 6 threads each. Measured as fine-apply time and memory on every reference part's fine operator; the faster goes in, the other is deleted.
+6. **Reference table and report.** Before and after on all reference parts (04-tests.md): Release run time split into solve and the rest, iterations per solve, margins, mass, test K. Every paper and lever in the brief answered by name: coarse warm start, resolution continuation, GenEO sweep, Active Domain, MG hierarchy dropping per solve. The app-side FlexibleBatchM* tests are named for #362's gate.
+
+Gate for every item: the bridge-way core test and the 17 solver, flexible and simp unit tests green before and after; no verdict changes; designs equal to the solve tolerance; no reference part slower.
+
+Cases the fix is held to, besides test P's two jobs: demo solve 10 (8 loaded pieces cut off from every support, above); the demo job with `TOPOPT_FACE_LOADS=face` on TOReview's branch (7f6c9aaa or later), whose solve 19 has the design in 17 pieces. There, multigrid reaches rel res 136 after 2,500 cycles and the Jacobi-CG fallback stops at its cap of 122,682 iterations at rel res 0.092, so the 0.30 version is refused (TOReview, 11-25). The solver must converge or say plainly why not, never grow the error silently.
+
+## 4. Side hustle: a coarse space that follows the part (outside the brief)
+
+The maintainer's process (2026-11-25), in waiting time only, never slowing sections 3.1 to 3.6: (1) read all the code of the existing algebraic level 1 (algebraic_coarsen.*, its use in multigrid.cpp, PRs 230/280/283 and the 08-03 handoff); (2) research other ways to do the same or better, beyond the usual; (3) a plan: does it follow the latest research, is it worth it, what is kept / rewritten / thrown out, what result makes it ship, at what point it is called a failure; (4) implement, then test, and stop at the agreed criteria. Steps 1 to 3 go to him as one write-up before any code. Memory at res 128 and 192 (TOReview) is queued.
