@@ -18,6 +18,7 @@
 #include "topopt/pipeline.hpp"
 #include "topopt/plsm_kernel.hpp"
 #include "topopt/step.hpp"
+#include "topopt/stl.hpp"
 
 #ifdef TOPOPT_HAVE_MANIFOLD
 #include "manifold/manifold.h"
@@ -473,9 +474,17 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
     say("level set", S);
     say("cut by part", cut);
     say("carrying shells", shells.mesh);
+    const std::string dir = std::getenv("TOPOPT_SURFACE_DEBUG");
+    if (dir.size() > 1) {
+      static int seq = 0;
+      write_stl_file(dir + "/cut_" + std::to_string(seq++) + ".stl", cut);
+    }
   }
-  R.triangles = static_cast<long long>(shells.mesh.triangles.size());
-  return std::move(shells.mesh);
+  // 5) As written: the file stores float corners, and an exact cut can leave a
+  //    sliver whose corners meet in float. Welded the way the finished file is.
+  TriangleMesh out = weld_as_written(shells.mesh);
+  R.triangles = static_cast<long long>(out.triangles.size());
+  return out;
 }
 
 }  // namespace topopt
