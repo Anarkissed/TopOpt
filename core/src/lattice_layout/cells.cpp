@@ -153,6 +153,10 @@ bool takes_in(const Layout& layout, const Domain::Probe& probe, std::size_t cell
 
 bool cell_holds_at(const Layout& layout, const Domain::Probe& probe, std::size_t cell, double a, double b, double c) {
   const Cell& x = layout.cells[cell];
+  // SHEETS (SPEC 1.5): the solid wall between two sheet regions is no cell's (an empty list for every strut layout).
+  if (!layout.membrane.empty() &&
+      sheet_membrane_at(layout, probe, -1, layout.frames[static_cast<std::size_t>(x.frame)].at(a, b, c)))
+    return false;
   const double q[3] = {a, b, c};
   bool other = false;
   if (own(layout, probe, x, q, &other)) return true;
@@ -163,6 +167,7 @@ bool cell_holds_at(const Layout& layout, const Domain::Probe& probe, std::size_t
 bool cell_holds(const Layout& layout, const Domain::Probe& probe, const Cell& cell, const Vec3& p) {
   double q[3];
   if (!in_cube(layout, cell, p, q)) return false;
+  if (!layout.membrane.empty() && sheet_membrane_at(layout, probe, -1, p)) return false;   // SHEETS: the solid wall
   bool other = false;
   if (own(layout, probe, cell, q, &other)) return true;
   if (!other || !layout.absorb || layout.cells.empty()) return false;

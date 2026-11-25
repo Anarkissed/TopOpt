@@ -51,7 +51,9 @@ std::string type_coupon_job(const CouponAsk& ask, const std::string& model, int 
          lattice_topology_name(ask.topology) + "_coupon_lattice.stl\", \"layout\": {\"all_lattice\": true, " +
          "\"bead_mm\": " + number(ask.bead_mm) + ", \"min_strut_lines\": 2, \"topology\": \"" +
          lattice_topology_name(ask.topology) + "\", \"algorithm\": \"default_grade\", \"cell_mm\": " +
-         number(ask.cell_mm) + ", \"cell_max_mm\": " + number(ask.cell_mm) + ", \"min_cells_across\": 1, \"skin\": true, " +
+         number(ask.cell_mm) + ", \"cell_max_mm\": " + number(ask.cell_mm) + ", \"min_cells_across\": 1, " +
+         // SHEETS (SPEC 2): no Finish Skin (a sheet has no strut ends to join), and the two-line wall (Auto's rule)
+         (sheet_kind_of(ask.topology) ? "\"skin\": false, \"auto_by_cell\": true, " : "\"skin\": true, ") +
          "\"protect_ids\": [1], \"protect_depth_mm\": [" + number(ask.plate_mm) + "], \"protect_face_counts\": [1], " +
          "\"protect_faces\": [" + std::to_string(underside_face) + "]}" +
          (ask.threads > 0 ? ", \"threads\": " + std::to_string(ask.threads) : std::string()) + "}";

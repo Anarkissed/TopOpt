@@ -176,7 +176,7 @@ struct MeshSpec {
   // (mesh_sheet_seam_band, E's); a seam whose band cannot be made falls back to the solid wall.
   const std::vector<SheetField>* sheets = nullptr;
   const std::vector<SheetSeamBand>* sheet_seams = nullptr;
-  double sheet_deviation_mm = 0.02;   // kSheetMaxDeviationMm (tpms_gen.hpp), the old run's bound
+  double sheet_deviation_mm = 0.02;   // kSheetMaxDeviationMm (tpms_gen.hpp), the old run's bound; 0: as contoured
   // Set, the work is given up between its steps and LayCancelled is thrown.
   const std::atomic<bool>* stop = nullptr;
 };
@@ -231,6 +231,7 @@ struct MeshReport {
   // material they add once joined, the deviation the simplifier measured, the time; the seams made as a blend band and
   // those that fell back to the solid wall (their places: SheetSeamBand::fell_back in the file's result).
   std::size_t sheet_blocks = 0, sheet_triangles = 0;
+  std::size_t sheet_places = 0;    // the cell places the blocks contoured (each block's laid cells' box; not its ring)
   double sheet_mm3 = 0.0, sheet_deviation_mm = 0.0, ms_sheets = 0.0, ms_sheet_union = 0.0;
   std::size_t seams_blended = 0, seams_fell_back = 0;
 };

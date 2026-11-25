@@ -727,11 +727,26 @@ inline constexpr double kBridgeReachLimitMm = 5.0;
 // up), over the cell: sc 1 (its edges), octet, fcc and fccz 1/sqrt 2 (face diagonals), kelvin 1/(2 sqrt 2) (its square
 // windows); 0 for a type with none (bcc, diamond, rhombic, bccz, reentrant). Read off the canonical cell.
 double level_strut_per_cell(LatticeTopology topo);
+// SHEETS (notes28 sheets SPEC section 2): a sheet has no level strut, but near-level PATCHES of its wall. Both sheets are
+// minimal surfaces (every point a saddle), so a patch is held from two sides and reaches half its width as a bridge.
+// The desk estimate on tpms.hpp's field (overhang_probe.py beside the SPEC, four orientations), over the cell:
+//                 within 10 degrees of level          within 30 degrees of level
+//   gyroid        1 to 6 % of the area, patch 0.09    9 to 17 % of the area, patch 0.32
+//   Schwarz-D     1 to 6 % of the area, patch 0.09    9 to 17 % of the area, patch 0.24
+// test_lattice_sheets_matrix measures them on the field in three orientations and holds them (its "overhang" row).
+struct SheetOverhang {
+  double share10_lo = 0.0, share10_hi = 0.0, patch10 = 0.0;   // area share within 10 degrees; widest patch / cell
+  double share30_lo = 0.0, share30_hi = 0.0, patch30 = 0.0;   // within 30 degrees
+};
+// The type's numbers above; all 0 for a strut type.
+SheetOverhang sheet_overhang(LatticeTopology topo);
 // Auto's largest cell for the type: a level strut spans its share of the cell and, held at both ends, reaches half of
 // that as a bridge, so the cell at which it would reach kBridgeReachLimitMm: 2 x 5 mm / share (sc 10 mm, fcc and fccz
 // 14.1 mm, kelvin 28.3 mm). Infinity for a type with no level strut, and for the octet (its 14.1 mm is not applied: its
 // layouts stay what they were, R9). lay_cells holds Max cell (CellSpec::cell_max_mm, the part's and each region's own)
 // under it when the cell is Auto; a typed cell is laid as typed (the print check props a bridge that reaches too far).
+// A SHEET: the same rule on its widest near-level patch (within 30 degrees, SheetOverhang::patch30): gyroid 31.3 mm,
+// Schwarz-D 41.7 mm (provisional, SPEC 1.3: it does not bind at any Max cell he uses).
 double auto_cell_cap_mm(LatticeTopology topo);
 // Structural (a strength check asked for) with the type: "" when its strength can be checked; else ONE plain line why
 // not, for the maker. The file job refuses a job with a strength job and such a type (type_not_supported) in that line;
@@ -1647,6 +1662,15 @@ double sheet_distance_at_local(const SheetField& s, const Vec3& q);
 double sheet_mid_distance_at(const SheetField& s, const Vec3& p);
 // The field parameter at a point (lattice_sheet_wall_param_mm of the wall there): what the blend thickens.
 double sheet_param_at(const SheetField& s, const Vec3& p);
+// THE WALL THE FILE IS CONTOURED AT, for a true wall `wall_mm` (sheet_wall_at) over the floor `floor_mm` (two lines),
+// the mesh simplified to `deviation_mm` (0: as contoured, and the wall is returned as it is). The file never prints a
+// wall under the floor: the field's own wall is uniform only to 1 to 3 % (core's wall law, kSheetWallUnevenness) and
+// the simplified mesh may sit up to the bound inside it, so near the floor the wall is contoured thicker: by 0.052 mm at
+// a two-line wall (0.952 for 0.9), tapering to nothing at (floor + 2 x bound) / (1 - 3 %) (0.969 for 0.9) and above
+// (measured on a graded plate before this: a sample 0.882 mm thick under a 0.9 mm wall). The preview may draw it to
+// follow the file exactly there; the strength check credits the true wall (the lighter one).
+inline constexpr double kSheetWallUnevenness = 0.03;
+double sheet_print_wall_mm(double wall_mm, double floor_mm, double deviation_mm);
 
 // SPEC 1.5, "Where regions meet: Blend / Solid wall" (Settings::sheet_seam). Default here: SolidWall (the app sends
 // Blend in Aesthetic and Solid wall in Structural; core does not know the stage).

@@ -297,12 +297,18 @@ static void test_refusals() {
     check_refused(r, "protect_faces_missing", 3, path);
     CHECK(has(r.why, "Protect skins 3 and 5 "));
   }
-  {  // a sheet type has no struts to make a file from
+  if (!mesh_available()) return;   // from here on the job needs the mesh library to get that far
+  {  // a sheet type (notes28 sheets): no struts, and no longer refused; its file is made from its field
     FileJob j = job;
     j.settings.cells.topology = LatticeTopology::Gyroid;
-    check_refused(make_lattice_file(box_model(30, 30, 12), j, path), "type_not_supported", 3, path);
+    const FileResult s = make_lattice_file(box_model(30, 30, 12), j, path);
+    CHECK(s.ok && s.bars == 0 && s.cells > 0 && s.sheets.size() == 1 && s.made.mesh.sheet_mm3 > 0.0);
+    CHECK(has(file_result_json(s), "\"sheets\": [{\"region\": "));
+    if (!s.ok) std::printf("  (sheet: %s: %s %s)\n", s.code.c_str(), s.why.c_str(), s.detail.c_str());
+    std::printf("sheet block: %zu cells, %zu sheet triangles, %.1f mm3 of sheet, clean %d, %.0f ms\n", s.cells,
+                s.made.mesh.sheet_triangles, s.made.mesh.sheet_mm3, s.made.print_clean ? 1 : 0, s.ms_total);
+    std::remove(path.c_str());
   }
-  if (!mesh_available()) return;   // from here on the job needs the mesh library to get that far
   {  // a part with a hole in its surface
     StepModel open = box_model(30, 30, 12);
     open.mesh.triangles.pop_back();
