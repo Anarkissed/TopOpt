@@ -1,0 +1,22 @@
+# 1. THE TIMING ROW (2026-11-25 03:00-04:16, 6 processes): gyroid rho 0.313, and both sheets' selfcheck
+# and bulk. The rest of the row (two 8-cell placements, 4 cells at vpc 32, 2 cells at vpc 48) was moved
+# into batches A and B to free the lock for 362's release 20.
+sb gyroid
+sb schwarz_d
+w gyroid 0.313 3 48 0.25
+w gyroid 0.313 3 48 0.5
+w gyroid 0.313 3 48 0.6
+w gyroid 0.313 3 48 0.75
+w gyroid 0.313 3 48 0
+w gyroid 0.313 8 16 0.25
+w gyroid 0.313 8 16 0.5
+w gyroid 0.313 8 16 0.6
+w gyroid 0.313 6 16 0.25,0.5
+w gyroid 0.313 6 16 0.6,0.75
+w gyroid 0.313 6 16 0
+w gyroid 0.313 3 32 0,0.25,0.5,0.6,0.75
+w gyroid 0.313 2 32 0,0.25,0.5,0.6,0.75
+w gyroid 0.313 5 16 0,0.25,0.5,0.6,0.75
+w gyroid 0.313 4 16 0,0.25,0.5,0.6,0.75
+w gyroid 0.313 3 16 0,0.25,0.5,0.6,0.75
+w gyroid 0.313 2 16 0,0.25,0.5,0.6,0.75

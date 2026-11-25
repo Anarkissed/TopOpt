@@ -1,0 +1,31 @@
+LATTICE DE-HOMOGENIZATION PROBE — schwarz_d band [0.20038, 0.60012] (read from core)
+
+===== SELFCHECK — instrument honesty =====
+  S1 solid KUBC peak==macro (K=1)            5.929e-08  (bar 1.0e-05)  PASS
+  S2 superposition == direct combined solve  1.058e-09  (bar 5.0e-04)  PASS
+  S3 |rho_lib - target| via production mapping 2.887e-15  (bar 5.0e-03)  PASS
+  S4 periodic solid tensor (4 digits)        5.437e-15  (bar 1.0e-04)  PASS
+  S6 bound holds on 64 mixed states          -1.039e-01  (bar 1.0e-09)  PASS
+  band read from core: [0.20038, 0.60012]
+  S5 band sane (0<lo<hi<1)                   0.000e+00  (bar 5.0e-01)  PASS
+  selfcheck: ALL PASS
+
+DONE (rc=0).
+        4.24 real         1.07 user         0.05 sys
+           124829696  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               11663  page reclaims
+                   7  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                3562  involuntary context switches
+         10145928168  instructions retired
+          3287239090  cycles elapsed
+           120980008  peak memory footprint

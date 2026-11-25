@@ -1,0 +1,12 @@
+# BATCH A, memory-heavy queue: the 8-cell blocks of the two thin rows (gyroid 0.150 at vpc 24;
+# Schwarz-D 0.200 starts at 16 and the ladder steps it to 24)
+w gyroid 0.15010 8 24 0.25
+w gyroid 0.15010 8 24 0.5
+w gyroid 0.15010 8 24 0.6
+w gyroid 0.15010 8 24 0.75
+w gyroid 0.15010 8 24 0
+w schwarz_d 0.20038 8 16 0.25
+w schwarz_d 0.20038 8 16 0.5
+w schwarz_d 0.20038 8 16 0.6
+w schwarz_d 0.20038 8 16 0.75
+w schwarz_d 0.20038 8 16 0

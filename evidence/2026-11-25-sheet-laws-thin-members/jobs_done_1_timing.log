@@ -1,0 +1,31 @@
+2026-11-25 03:02:16 schwarz_d selfcheck+bulk rc=0 wall=82s
+2026-11-25 03:02:57 gyroid selfcheck+bulk rc=0 wall=123s
+2026-11-25 03:24:30 gyroid rho=0.313 N=8 vpc=16 cuts=0.25 rc=0 wall=1293s
+2026-11-25 03:37:11 gyroid rho=0.313 N=3 vpc=48 cuts=0 rc=0 wall=2095s
+2026-11-25 03:39:48 gyroid rho=0.313 N=3 vpc=48 cuts=0.25 rc=0 wall=2334s
+2026-11-25 03:39:48 SKIPPED w gyroid 0.313 8 16 0.75
+2026-11-25 03:39:48 SKIPPED w gyroid 0.313 8 16 0
+2026-11-25 03:39:48 SKIPPED w gyroid 0.313 4 32 0.25
+2026-11-25 03:39:48 SKIPPED w gyroid 0.313 4 32 0.5
+2026-11-25 03:39:49 SKIPPED w gyroid 0.313 4 32 0.6
+2026-11-25 03:39:49 SKIPPED w gyroid 0.313 4 32 0.75
+2026-11-25 03:39:49 SKIPPED w gyroid 0.313 4 32 0
+2026-11-25 03:39:49 SKIPPED w gyroid 0.313 2 48 0.25
+2026-11-25 03:39:49 SKIPPED w gyroid 0.313 2 48 0.5
+2026-11-25 03:39:49 SKIPPED w gyroid 0.313 2 48 0.6
+2026-11-25 03:39:49 SKIPPED w gyroid 0.313 2 48 0.75
+2026-11-25 03:39:49 SKIPPED w gyroid 0.313 2 48 0
+2026-11-25 03:41:22 gyroid rho=0.313 N=8 vpc=16 cuts=0.5 rc=0 wall=1012s
+2026-11-25 03:41:51 gyroid rho=0.313 N=3 vpc=48 cuts=0.5 rc=0 wall=2457s
+2026-11-25 03:43:44 gyroid rho=0.313 N=3 vpc=48 cuts=0.6 rc=0 wall=2570s
+2026-11-25 03:45:09 gyroid rho=0.313 N=3 vpc=48 cuts=0.75 rc=0 wall=2655s
+2026-11-25 03:46:27 gyroid rho=0.313 N=6 vpc=16 cuts=0 rc=0 wall=276s
+2026-11-25 03:51:03 gyroid rho=0.313 N=6 vpc=16 cuts=0.25,0.5 rc=0 wall=674s
+2026-11-25 03:53:47 gyroid rho=0.313 N=6 vpc=16 cuts=0.6,0.75 rc=0 wall=745s
+2026-11-25 03:55:22 gyroid rho=0.313 N=8 vpc=16 cuts=0.6 rc=0 wall=1091s
+2026-11-25 03:56:45 gyroid rho=0.313 N=3 vpc=16 cuts=0,0.25,0.5,0.6,0.75 rc=0 wall=177s
+2026-11-25 03:56:46 gyroid rho=0.313 N=2 vpc=16 cuts=0,0.25,0.5,0.6,0.75 rc=0 wall=84s
+2026-11-25 03:58:33 gyroid rho=0.313 N=4 vpc=16 cuts=0,0.25,0.5,0.6,0.75 rc=0 wall=450s
+2026-11-25 04:03:16 gyroid rho=0.313 N=5 vpc=16 cuts=0,0.25,0.5,0.6,0.75 rc=0 wall=1009s
+2026-11-25 04:03:56 gyroid rho=0.313 N=2 vpc=32 cuts=0,0.25,0.5,0.6,0.75 rc=0 wall=1127s
+2026-11-25 04:15:59 gyroid rho=0.313 N=3 vpc=32 cuts=0,0.25,0.5,0.6,0.75 rc=0 wall=1935s

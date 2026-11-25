@@ -1,0 +1,31 @@
+LATTICE DE-HOMOGENIZATION PROBE — gyroid band [0.15010, 0.60069] (read from core)
+
+===== SELFCHECK — instrument honesty =====
+  S1 solid KUBC peak==macro (K=1)            5.929e-08  (bar 1.0e-05)  PASS
+  S2 superposition == direct combined solve  8.311e-11  (bar 5.0e-04)  PASS
+  S3 |rho_lib - target| via production mapping 2.054e-15  (bar 5.0e-03)  PASS
+  S4 periodic solid tensor (4 digits)        5.437e-15  (bar 1.0e-04)  PASS
+  S6 bound holds on 64 mixed states          -1.217e-01  (bar 1.0e-09)  PASS
+  band read from core: [0.15010, 0.60069]
+  S5 band sane (0<lo<hi<1)                   0.000e+00  (bar 5.0e-01)  PASS
+  selfcheck: ALL PASS
+
+DONE (rc=0).
+        5.39 real         1.26 user         0.08 sys
+           125616128  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               15215  page reclaims
+                   2  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                4451  involuntary context switches
+         12861764651  instructions retired
+          3857562710  cycles elapsed
+           121553448  peak memory footprint

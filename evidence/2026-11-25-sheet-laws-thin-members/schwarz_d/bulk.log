@@ -1,0 +1,44 @@
+LATTICE DE-HOMOGENIZATION PROBE — schwarz_d band [0.20038, 0.60012] (read from core)
+
+===== BULK LAW — periodic cell, band sweep (J2/J3/J5) =====
+EXPECTATION STATED BEFORE MEASURING (J2): PR 247 measured the uniaxial
+strut/macro concentration at ~25x (rho 0.31) and ~44x (rho 0.20) on
+voxelized joint peaks at vpc32. If K ~ A/rho that implies A ~ 8:
+  expected K(uni) ~ 160 at rho 0.05, ~ 8-13 at rho 0.60-0.90.
+Shear states are expected WORSE per unit macro vm for a stretch-
+dominated lattice; hydrostatic macro vm is 0, so K_vm(hydro) = inf —
+the vol term must be reported per unit pressure instead.
+  rho 0.200 vpc 16 (wall 2 vox, 0.2s): K_dev=15.4 K_vol=6.9  
+  rho 0.200 vpc 24 (wall 2 vox, 0.8s): K_dev=17.6 K_vol=8.2  
+  rho 0.200 vpc 32 (wall 2 vox, 2.2s): K_dev=18.1 K_vol=9.2  
+  rho 0.200 vpc 40 (wall 3 vox, 3.9s): K_dev=17.5 K_vol=8.4  
+  rho 0.200 vpc 48 (wall 4 vox, 8.9s): K_dev=17.5 K_vol=8.3  
+  rho 0.313 vpc 32 (wall 4 vox, 4.1s): K_dev=9.6 K_vol=5.0  
+  rho 0.313 vpc 48 (wall 6 vox, 8.3s): K_dev=10.3 K_vol=5.3  
+  rho 0.450 vpc 16 (wall 3 vox, 0.1s): K_dev=5.7 K_vol=3.1  
+  rho 0.450 vpc 24 (wall 4 vox, 0.9s): K_dev=6.1 K_vol=3.2  
+  rho 0.450 vpc 32 (wall 5 vox, 2.5s): K_dev=6.2 K_vol=3.4  
+  rho 0.450 vpc 40 (wall 7 vox, 6.0s): K_dev=6.9 K_vol=3.6  
+  rho 0.450 vpc 48 (wall 8 vox, 10.1s): K_dev=6.6 K_vol=3.8  
+  rho 0.600 vpc 32 (wall 7 vox, 3.8s): K_dev=4.4 K_vol=2.6  
+  rho 0.600 vpc 48 (wall 11 vox, 12.0s): K_dev=4.7 K_vol=2.8  
+
+DONE (rc=0).
+       78.41 real        28.94 user         1.65 sys
+           965951488  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+              473389  page reclaims
+                   1  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   4  voluntary context switches
+               33431  involuntary context switches
+        368174095371  instructions retired
+         91382636912  cycles elapsed
+          1368770024  peak memory footprint
