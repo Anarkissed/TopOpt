@@ -882,6 +882,52 @@ struct LatticeWidthBounds {
 inline constexpr double kLatticeOpenLookStrutPerCell = 0.7592 / 4.0;
 LatticeWidthBounds lattice_width_bounds(LatticeTopology topo);
 
+// ── ★ notes29: WHERE EACH STRUT TYPE BECOMES A QUILT, MEASURED ──────────────────────────────
+// (His iPad notes on release 20, 2026-11-25: "Every single lattice type was quilted ... set up tests to find the EXACT
+// density and size at which each lattice type becomes a quilt and limit both when 'Allow quilt' is turned off.") Three
+// events, each the strut DIAMETER over the cell at which it first happens on the type's own canonical cell
+// (strut_cell.hpp), round struts, the lattice repeating without end:
+//   touch        neighbouring struts fuse: two struts that share no node meet in 3D, or two neighbouring PARALLEL
+//                struts meet seen square-on to a cell face (lattice_width_bounds' touch, exact). THIS is the quilt:
+//                the top of every range with "Allow quilt" on, and 100 % of the app's Density dial.
+//   channels     the open channels close: the void stops running through the lattice along any axis (every window
+//                of the cell is shut: a window's struts fill its in-circle).
+//   see_through  seen square-on to a cell face, through any depth of whole cells, nothing is see-through any more
+//                (every window of the projected cell is shut).
+//   open_look    the widest strut "Allow quilt" off lays (kLatticeOpenLookStrutPerCell, the same for every strut type,
+//                R11): under all three of the type's own, so with Allow quilt off no type ever fuses, closes or stops
+//                being see-through.
+// Every number is exact, from the cell's own geometry (closed forms below), and test_lattice_width_bounds MEASURES
+// channels and see_through again on a voxel grid of the periodic cell (128 voxels a side; a voxel grid can only shut
+// a window early, so each measured value is under its closed form by at most two voxels) and recomputes touch from
+// the segments. Channels never close before the struts touch, for any type: touch is the first of the three.
+//               touch          channels        see_through
+//   octet       1/(2 sqrt 2)   1/sqrt 6         (sqrt 2 - 1)/2   (triangular windows: in 3D its octahedra open into
+//                                                                  tetrahedra; square-on, half-cell squares crossed by both diagonals)
+//   sc          1              1                1
+//   bcc         1/sqrt 2       1/sqrt 2         1/sqrt 2
+//   fcc         1/sqrt 3       1/sqrt 3         sqrt 2 - 1        (square-on: the cell's square crossed by both diagonals)
+//   diamond     1/(2 sqrt 2)   1/sqrt 2         1/(2 sqrt 2)
+//   kelvin      1/(2 sqrt 2)   sqrt 6 / 4       1/(2 sqrt 2)      (in 3D the hexagons stay open after the squares close)
+//   rhombic     1/(2 sqrt 2)   1/sqrt 6         1/(2 sqrt 2)
+//   bccz        1/sqrt 2       1/sqrt 2         1/sqrt 2
+//   fccz        1/2            1/sqrt 3         sqrt 2 - 1
+//   reentrant   1/3            1/sqrt 2         1/sqrt 2
+// A type core does not lay as struts (a sheet), or does not know, throws std::invalid_argument naming it.
+struct LatticeQuiltLimits {
+  double touch = 0.0;
+  double channels = 0.0;
+  double see_through = 0.0;
+  double open_look = 0.0;
+};
+LatticeQuiltLimits lattice_quilt_limits(LatticeTopology topo);
+// The two cells a strut of `strut_mm` limits, mm (a strut type's): the smallest cell "Allow quilt" off lays it in
+// (strut / open_look: still open, see-through, never touching), and the cell at which it fuses into the quilt
+// (strut / touch: the smallest with "Allow quilt" on). At two 0.45 mm lines (0.90 mm) the first is 4.74 mm for every
+// type; the second is the type's own (octet 2.55 mm, sc 0.90, bcc 1.27, fcc 1.56, ...).
+double lattice_open_cell_mm(LatticeTopology topo, double strut_mm);
+double lattice_quilt_cell_mm(LatticeTopology topo, double strut_mm);
+
 // The resolution (voxels per cell edge) the octet tensor library was measured at,
 // and the basis octet_relative_density voxelizes on so a printed radius maps onto
 // the same rho scale the library rows carry (PR 198, vpc48).

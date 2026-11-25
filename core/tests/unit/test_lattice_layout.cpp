@@ -3296,26 +3296,23 @@ static void test_session() {
   const Outcome quilted = session.lay(band);
   NEAR(least(quilted), 10.0 / 3.0, 1e-6);
   CHECK(!quilted.read_again);             // the switch re-lays; it does not read the part again
-  // His per-part choice (2026-11-12), Allow quilt OFF: the cells are the ones Allow quilt lays (3.333 mm, so the
-  // band is latticed), but no strut is thicker for it. A cell too small for the open look carries the thinnest
-  // strut exactly (two lines, 0.9 mm: past the open look, under touching); every other cell keeps the open look.
+  // His per-part choice (2026-11-12) "Small cells in thin walls", Allow quilt OFF. ★ notes29 (his notes on release 20,
+  // 2026-11-25: "No matter what I did, the quilting kept on happening -- even with quilting off"): it laid the quilt's
+  // 3.333 mm cells over the whole band, each carrying the thinnest strut, past the open look. Now, with Allow quilt off,
+  // it is not read: the layout is the one laid without it, byte for byte, no cell under 4.742 mm and no strut past the
+  // open look. (The quilted layout above, Allow quilt on, is the RED control: it does lay cells under the floor.)
   band.struts.allow_quilt = false;
+  const Outcome plain = session.lay(band);
   band.small_cells_in_thin_walls = true;
   const Outcome small = session.lay(band);
   CHECK(!small.read_again);
-  CHECK(small.layout.cells.size() == quilted.layout.cells.size());
-  bool same_cubes = true, never_thicker = true, small_at_thinnest = true, none_touch = true;
-  int past_open_look = 0;
-  for (std::size_t i = 0; i < small.layout.cells.size(); ++i) {
-    const Cell &a = small.layout.cells[i], &b = quilted.layout.cells[i];
-    same_cubes = same_cubes && a.size == b.size && a.lo[0] == b.lo[0] && a.lo[1] == b.lo[1] && a.lo[2] == b.lo[2];
-    never_thicker = never_thicker && a.strut <= b.strut + 1e-12;
-    const double open_look = small.layout.open_look * a.size;
-    if (open_look < 0.9) { small_at_thinnest = small_at_thinnest && std::fabs(a.strut - 0.9) < 1e-12; ++past_open_look; }
-    else never_thicker = never_thicker && a.strut <= open_look + 1e-12;
-    none_touch = none_touch && a.strut < small.layout.touch * a.size;
-  }
-  CHECK(same_cubes && never_thicker && small_at_thinnest && none_touch && past_open_look > 0);
+  CHECK(small.layout.cells == plain.layout.cells);
+  bool past_open_look = false;
+  for (const Cell& a : small.layout.cells)
+    past_open_look = past_open_look || a.strut > small.layout.open_look * a.size + 1e-12 ||
+                     a.size < 0.9 / small.layout.open_look - 1e-9;
+  CHECK(!past_open_look);
+  CHECK(least(quilted) < 0.9 / quilted.layout.open_look - 1e-6);   // the control: Allow quilt on goes under it
   band.small_cells_in_thin_walls = false;   // and off again: 5 mm cells, as before
   NEAR(least(session.lay(band)), 5.0, 1e-6);
 }
@@ -4033,30 +4030,41 @@ static void test_cut_cells_follow_a_slope() {
   }
 }
 
-// K3 (his 11-23 notes: quilting "should ALWAYS be off by default unless it is literally impossible to lattice without
-// it"). The 20 x 20 x 12 block, two lines of 0.45 mm (a 0.9 mm strut: the open look's smallest cell is 4.74 mm, the
-// quilt's 2.55 mm): a region 3 mm deep under the top face (no cell that prints open fits it) and one 6 mm deep under the
-// bottom face. With the quilt off the thin region is laid again with the quilt's smallest cell, that region only, and
-// named; the thick one keeps exactly the cells it lays alone. With the quilt on there is nothing to fall back to.
+// K3 (his 11-23 notes) laid a region that held no open cell again with the quilt. ★ notes29 (his notes on release 20,
+// 2026-11-25: "No matter what I did, the quilting kept on happening -- even with quilting off", "limit both when 'Allow
+// quilt' is turned off"): withdrawn. The 20 x 20 x 12 block, two lines of 0.45 mm (a 0.9 mm strut: the open look's
+// smallest cell is 4.74 mm, the quilt's 2.55 mm): a region 3 mm deep under the top face (no cell that prints open fits
+// it) and one 6 mm deep under the bottom face. With the quilt off the thin region lays NO cell: it stays solid and says
+// why (the region too shallow); quilt_regions is empty; the thick one keeps exactly the cells it lays alone. With the
+// quilt on, the thin region is laid with the quilt's cells (the RED control: the same check fails there).
 static void test_quilt_only_where_nothing_else_lays() {
   const StepModel model = finish_block();
   Settings st;
   st.regions = {{1, Role::Lattice, {1}, 3.0, 0.0}, {2, Role::Lattice, {0}, 6.0, 0.0}};
   st.cells.cell_max_mm = 6;
-  const Outcome both = Session(model).lay(st);
   const double open_floor = 0.9 / (0.7592 / 4.0), quilt_floor = 0.9 / kQuiltStrutPerCell;
-  std::size_t thin = 0, thick = 0, thin_small = 0, thick_small = 0;
-  for (const Cell& c : both.layout.cells) {
-    const bool top = c.region == 1;
-    (top ? thin : thick) += 1;
-    if (c.size < open_floor - 1e-9) (top ? thin_small : thick_small) += 1;
-    CHECK(c.size >= quilt_floor - 1e-9);
-  }
-  std::printf("[K3] quilt off: regions laid with the quilt %zu (first %d); thin region %zu cells (%zu under the open look), "
-              "thick region %zu cells (%zu under it)\n", both.quilt_regions.size(), both.quilt_regions.empty() ? -1 : both.quilt_regions.front(),
-              thin, thin_small, thick, thick_small);
-  CHECK(both.quilt_regions == std::vector<int>{1} && thin > 0 && thin_small == thin && thick > 0 && thick_small == 0);
-  // The thick region alone: the same cells (the fallback touched the thin region only).
+  const auto count = [&](const Outcome& o, std::size_t* thin, std::size_t* thin_small, std::size_t* thick,
+                         std::size_t* thick_small, bool* past) {
+    *thin = *thin_small = *thick = *thick_small = 0;
+    *past = false;
+    for (const Cell& c : o.layout.cells) {
+      const bool top = c.region == 1;
+      (top ? *thin : *thick) += 1;
+      if (c.size < open_floor - 1e-9) (top ? *thin_small : *thick_small) += 1;
+      *past = *past || c.strut > o.layout.open_look * c.size + 1e-12;
+    }
+  };
+  const Outcome both = Session(model).lay(st);
+  std::size_t thin = 0, thin_small = 0, thick = 0, thick_small = 0;
+  bool past = false;
+  count(both, &thin, &thin_small, &thick, &thick_small, &past);
+  std::size_t shallow = 0;
+  for (std::size_t i = 0; i < both.layout.solid.size(); ++i)
+    if (both.layout.solid[i].region == 1 && both.layout.solid_why[i].why == NoCell::RegionShallow) ++shallow;
+  std::printf("[notes29] quilt off: thin region %zu cells (%zu solid places, too shallow), thick region %zu cells (%zu under "
+              "the open look's floor), quilt_regions %zu\n", thin, shallow, thick, thick_small, both.quilt_regions.size());
+  CHECK(both.quilt_regions.empty() && thin == 0 && shallow > 0 && thick > 0 && thick_small == 0 && !past);
+  // The thick region alone: the same cells.
   Settings alone = st;
   alone.regions = {st.regions[1]};
   const Outcome one = Session(model).lay(alone);
@@ -4065,24 +4073,21 @@ static void test_quilt_only_where_nothing_else_lays() {
     if (c.region == 2) a.push_back({c.lo[0], c.lo[1], c.lo[2], c.size, c.strut});
   for (const Cell& c : one.layout.cells) b.push_back({c.lo[0], c.lo[1], c.lo[2], c.size, c.strut});
   CHECK(a == b && one.quilt_regions.empty());
-  // Allow quilt on: no fallback (the quilt is on everywhere already).
+  // Small cells in thin walls does not bring the quilt back with Allow quilt off.
+  Settings small = st;
+  small.small_cells_in_thin_walls = true;
+  const Outcome s2 = Session(model).lay(small);
+  count(s2, &thin, &thin_small, &thick, &thick_small, &past);
+  CHECK(s2.quilt_regions.empty() && thin == 0 && thick_small == 0 && !past);
+  // RED CONTROL, Allow quilt on: the thin region is laid, with cells under the open look's floor (never under the
+  // quilt's), and no region is named (the quilt is the switch's, not a fallback).
   Settings on = st;
   on.struts.allow_quilt = true;
-  CHECK(Session(model).lay(on).quilt_regions.empty());
-  // Only where the cell is Auto (362, 2026-11-24, his D4: a typed cell is his; one that fits nowhere stays solid, the
-  // file job's no_cells, the app's "Cannot Lattice"). The thin region alone: Auto falls back to the quilt; a typed 6 mm
-  // cell lays nothing, and is not quilted.
-  Settings thin_only = st;
-  thin_only.regions = {st.regions[0]};
-  const Outcome auto_cell = Session(model).lay(thin_only);
-  Settings typed = thin_only;
-  typed.cells.cell_mm = 6;
-  const Outcome typed_cell = Session(model).lay(typed);
-  std::printf("[K3] the thin region alone: Auto cell %zu cells (quilted %zu), typed 6 mm cell %zu cells (quilted %zu)\n",
-              auto_cell.layout.cells.size(), auto_cell.quilt_regions.size(), typed_cell.layout.cells.size(),
-              typed_cell.quilt_regions.size());
-  CHECK(auto_cell.quilt_regions == std::vector<int>{1} && !auto_cell.layout.cells.empty());   // as before
-  CHECK(typed_cell.quilt_regions.empty() && typed_cell.layout.cells.empty());   // no fallback: nothing to lay (no_cells)
+  const Outcome quilted = Session(model).lay(on);
+  count(quilted, &thin, &thin_small, &thick, &thick_small, &past);
+  bool under_quilt = false;
+  for (const Cell& c : quilted.layout.cells) under_quilt = under_quilt || c.size < quilt_floor - 1e-9;
+  CHECK(quilted.quilt_regions.empty() && thin > 0 && thin_small == thin && !under_quilt);
 }
 
 static void test_cells_curved_region() {

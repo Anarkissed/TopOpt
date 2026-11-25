@@ -1603,13 +1603,15 @@ public final class LatticeLayoutPreview: ObservableObject {
         // ★ K3 (his 11-23 notes on release 17: "When I set auto regular lattices, it automatically set quilting=on. That should
         // ALWAYS be off by default unless it is literally impossible to lattice without it. If users want it on, they need to go
         // into manual." "Auto should try to give as thin struts as possible, regardless of the cell size."): the page on Auto
-        // asks for no quilt and no Small cells in thin walls (the engine lays a region with the quilt's cells only where no
-        // other cell can be laid, and names it: quilt_regions), and for the thinnest strut the printer lays (its lines x its
+        // asks for no quilt and no Small cells in thin walls (★ notes29: the engine no longer falls back to the quilt where no
+        // other cell can be laid; with Allow quilt off such a place stays solid and the pop-up says why), and for the thinnest strut the printer lays (its lines x its
         // line width) in every cell, the cells still grading. Manual sends his own choices, as before. (362 at the merge with
         // notes26: applied here, after partWide, where the page's Manual is known.)
         if !p.latticePageManual, !l.isOrganic {
             s.allowQuilt = false
             s.smallCellsInThinWalls = false
+            // ★ notes29: Structural Auto's By stress ends, read again as core's dials without the quilt
+            if s.byStress { Self.gradeDials(l, &s, percent: { p.latticeDensityPercent(rho: $0, cellMM: $1) }) }
             // ★ his 11-24 answer: the thinnest struts on Auto are for AESTHETIC only. Structural Auto keeps its strength-led
             // struts (his aim, to come: work back from his margin, 150/175/200 %, to the least plastic that meets it).
             if (l.stageMode ?? .structural) == .aesthetic {
@@ -1661,10 +1663,13 @@ public final class LatticeLayoutPreview: ObservableObject {
                     if role != .exclude { Self.areaOwn(l, group: g.id, into: &r, coverMM: cover) }   // ★ Install 2: the area's own tab
                     s.regions.append(r)
                     if role != .exclude, l.densityMode != .sim, let rho = p.latticeSelectableDensity(ref, in: g.id),
-                       let pct = [l.cellSizeMode == .fixed && l.cellMM > 0 ? l.cellMM : (p.latticeSelectableCellMM(ref) ?? s.cellMaxMM),
-                                  s.cellMaxMM, 8].lazy.compactMap({ p.latticeDensityPercent(rho: rho, cellMM: $0) }).first {
+                       let (cell, pct) = [l.cellSizeMode == .fixed && l.cellMM > 0 ? l.cellMM : (p.latticeSelectableCellMM(ref) ?? s.cellMaxMM),
+                                          s.cellMaxMM, 8].lazy.compactMap({ c in p.latticeDensityPercent(rho: rho, cellMM: c).map { (c, $0) } }).first {
                         // (the row's cell, else the largest cell: the page's percent is read on a cell its band exists for)
-                        let dial = Swift.min(1, Swift.max(0.01, pct / 100))
+                        // ★ notes29: the page's percent (100 % = the type's own quilt) as core's dial (1 = the widest the
+                        // switch allows: the open look with Allow quilt off), so the strut laid is the strut the percent names
+                        let dial = LatticeDensityDial.coreDial(percent: pct, cellMM: cell, topology: s.topology, lineWidthMM: s.beadMM,
+                                                               minStrutLines: s.minStrutLines, allowQuilt: s.allowQuilt)
                         if rowDensity { s.regionDials.append((region: id, dial: dial)) } else if !uniformSet { s.dial = dial; uniformSet = true }
                     }
                 }
@@ -1672,6 +1677,22 @@ public final class LatticeLayoutPreview: ObservableObject {
             }
         }
         return Self.partRest(s, p, nextID: id)
+    }
+
+    /// Grade to (light) and Grade from (heavy) as core's dials (R10, read on the largest cell). ★ notes29: the page's percent
+    /// (100 % = the type's own quilt) through `LatticeDensityDial.coreDial`, with the settings' own Allow quilt, so the struts
+    /// laid are the ones the percents name; a density the type has no band for is read as its percent.
+    static func gradeDials(_ l: LatticeSettings, _ s: inout LatticeLayoutSession.Settings,
+                           percent: (_ rho: Double, _ cellMM: Double) -> Double?) {
+        let cell = s.cellMaxMM, cur = s
+        func dial(_ rho: Double, _ fallback: Double) -> Double {
+            guard rho > 0 else { return fallback }
+            let pct = percent(rho, cell) ?? rho * 100
+            return LatticeDensityDial.coreDial(percent: pct, cellMM: cell, topology: cur.topology, lineWidthMM: cur.beadMM,
+                                               minStrutLines: cur.minStrutLines, allowQuilt: cur.allowQuilt)
+        }
+        s.dialLight = dial(l.minRelativeDensity, 0.01)
+        s.dialHeavy = dial(l.maxRelativeDensity, 1)
     }
 
     /// ★ notes26 (his 11-23, "Yes to the live sample"): the part-wide half of `settings(_:)` — everything read off the lattice
@@ -1730,21 +1751,15 @@ public final class LatticeLayoutPreview: ObservableObject {
             s.referenceMPa = (l.stageMode ?? .structural) == .structural ? Swift.max(0, referenceMPa) : 0
             if let t = l.stressTargetMPa, t > 0 { s.referenceMPa = t }   // ★ control 5: his target stress
         }
+        s.allowQuilt = l.allowQuilt
         if s.byStress {
             // Grade to (light) and Grade from (heavy), on the dial the page's densities use (R10, the largest cell)
-            func dial(_ rho: Double, _ fallback: Double) -> Double {
-                guard rho > 0 else { return fallback }
-                let pct = percent(rho, s.cellMaxMM) ?? rho * 100
-                return Swift.min(1, Swift.max(0.01, pct / 100))
-            }
-            s.dialLight = dial(l.minRelativeDensity, 0.01)
-            s.dialHeavy = dial(l.maxRelativeDensity, 1)
+            Self.gradeDials(l, &s, percent: percent)
             // ★ control 1: the two ends typed in mm
             if let a = l.strutFromMM, let b = l.strutToMM, a > 0, b >= a { s.widthLightMM = a; s.widthHeavyMM = b }
         }
         // ★ a typed Thickness only with the simulation off (his 08-19), and never under By stress
         if !l.simulateStresses, !s.byStress, let t = l.manualStrutThicknessMM, t > 0 { s.strutWidthMM = t }
-        s.allowQuilt = l.allowQuilt
         s.smallCellsInThinWalls = l.smallCellsInThinWalls   // ★ his per-part choice (11-13)
         // ★ cells across a wall (C3-C5): Structural five; Aesthetic one with "Allow single-cell members", else two
         let aesthetic = (l.stageMode ?? .structural) == .aesthetic

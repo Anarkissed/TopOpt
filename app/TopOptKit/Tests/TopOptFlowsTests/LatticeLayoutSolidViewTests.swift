@@ -93,12 +93,14 @@ final class LatticeLayoutSolidViewTests: XCTestCase {
         let wall = SolidReason.of(share: 0.12, nocell: [3, 997, 0, 0, 0], lattice: l)
         XCTAssertEqual(wall?.cause, .wallNarrow, "★ the main reason by volume")
         XCTAssertEqual(wall?.line, "12% of the lattice you asked for is solid: the walls there are too thin for a whole cell")
-        XCTAssertEqual(wall?.fixes, [.letWallsCutCells, .smallCells], "★ the fixes that open a thin wall")
+        // ★ notes29: "Small cells in thin walls" is no longer offered (with Allow quilt off its cells were the quilt; the engine
+        // now lays none under the open cell, so it would change nothing)
+        XCTAssertEqual(wall?.fixes, [.letWallsCutCells], "★ the fixes that open a thin wall")
         l.letWallsCutCells = true
-        XCTAssertEqual(SolidReason.of(share: 0.12, nocell: [3, 997, 0, 0, 0], lattice: l)?.fixes, [.smallCells], "a fix already on is not offered")
+        XCTAssertEqual(SolidReason.of(share: 0.12, nocell: [3, 997, 0, 0, 0], lattice: l)?.fixes, [], "a fix already on is not offered")
         l.stageMode = .structural
         l.letWallsCutCells = false
-        XCTAssertEqual(SolidReason.of(share: 0.12, nocell: [0, 10, 0, 0, 0], lattice: l)?.fixes, [.aestheticCutCells, .smallCells],
+        XCTAssertEqual(SolidReason.of(share: 0.12, nocell: [0, 10, 0, 0, 0], lattice: l)?.fixes, [.aestheticCutCells],
                        "★ Structural: his own example, change to Aesthetic and let walls cut cells")
         l.stageMode = .aesthetic
         XCTAssertEqual(SolidReason.of(share: 0.3, nocell: [0, 0, 10, 0, 0], lattice: l)?.fixes, [.letWallsCutCells, .oneCellAcross])
