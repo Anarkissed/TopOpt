@@ -219,13 +219,19 @@ int main(int argc, char** argv) {
   long long flat_n = 0, bore_n = 0;
   double layer_worst = 0.0;
   long long layer_n = 0;
+  Vec3 layer_at{0, 0, 0};
   for (const Vec3& w : sample_points(file)) {
     const double dp = std::sqrt(dot(sub(w, pocket), sub(w, pocket))) - Rp;
     if (std::fabs(dp) < 0.3) continue;  // on the cut wall (or its seam): not drawn
     const Vec3 q = F.to_local(w);
     // The frozen layer's inner face, inside the cavity's footprint, 3 mm from its
     // walls (the walls are the design's, rounded by the basis).
+    // The rim where the bore meets that face is a sharp edge between a drawn surface
+    // and a meshed one (chord up to a fraction of a cell): left out of the flatness.
     if (std::fabs(q.x) < 12.0 && std::fabs(q.y) < 7.0 && q.z > -9.0 && q.z < -7.0) {
+      if (std::fabs(std::hypot(q.x, q.y) - Rb) < 0.5 && std::fabs(q.z + H.z - kDepth) < 0.5)
+        continue;  // on the rim itself: an edge, in neither the face nor the bore
+      if (std::fabs(q.z + H.z - kDepth) > layer_worst) layer_at = q;
       layer_worst = std::max(layer_worst, std::fabs(q.z + H.z - kDepth));
       ++layer_n;
       continue;
@@ -249,8 +255,9 @@ int main(int argc, char** argv) {
   const bool b_ok = flat_worst <= 0.02 && bore_worst <= 0.02 &&
                     std::fabs(bore_mean - Rb) <= 0.02 && layer_worst <= 0.02;
   std::printf("[test B] protected layer's inner face (true depth %.1f mm, %d body): worst %.4f mm "
-              "over %lld points; stamped voxels left %lld\n",
-              kDepth, rep.frozen_sets, layer_worst, layer_n, rep.stamped_solid);
+              "over %lld points (at local %.2f, %.2f, %.2f); stamped voxels left %lld\n",
+              kDepth, rep.frozen_sets, layer_worst, layer_n, layer_at.x, layer_at.y, layer_at.z,
+              rep.stamped_solid);
   if (layer_n < 50) ++failures;
   std::printf("[test B] flats: worst %.4f mm over %lld points; bore: worst %.4f mm, mean "
               "radius %.4f (drawn %.1f) over %lld points: %s\n",
