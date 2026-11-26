@@ -132,6 +132,9 @@ public final class AppSettings: ObservableObject {
     /// The app's own choice (the shared settings'), readable anywhere (the renderer, the camera's clock, the growth) without
     /// the main actor. Set by the shared settings' `skipAnimations` (tests set it directly).
     nonisolated(unsafe) public internal(set) static var skipAllAnimations = false
+    /// ★ notes29: the clock a decorative animation draws by (its TimelineView still ticks: "never frozen" while they play) —
+    /// held at one instant with Skip all animations, so nothing moves.
+    nonisolated static func animationClock(_ d: Date) -> TimeInterval { skipAllAnimations ? 0 : d.timeIntervalSinceReferenceDate }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
