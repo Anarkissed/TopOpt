@@ -192,7 +192,9 @@ final class LatticePreviewStoreTests: XCTestCase {
         XCTAssertEqual(n(OrganicVineShape.Params()), 6, "the vines' parameters")
         XCTAssertEqual(n(OrganicVineShape.Cut(planes: [], union: false)), 2)
         // (11: + fileMesh, 362's Mac print-accurate file — NOT kept here: the version's result holds that file)
-        XCTAssertEqual(n(LatticeLayoutBarsInputs(token: 0, bars: [])), 11, "what is drawn")
+        // ★ RE-PINNED (notes29 H3: 12, + printUp, the up a CELL lay stood along — its bridges and timelapse floors; NOT kept
+        // here: this store keeps Organic lattices only, whose drawn bars never carry it, as a fresh Organic lay's do not)
+        XCTAssertEqual(n(LatticeLayoutBarsInputs(token: 0, bars: [])), 12, "what is drawn")
         XCTAssertEqual(n(LatticeLayoutSolidGrid(token: 0, origin: .zero, voxel: 1, dims: .zero, rg: [])), 6)
         // ★ RE-PINNED (362 11-24: notes25 D10 added floorCellMM; the store now keeps it, format 2, and still reads 1)
         XCTAssertEqual(n(LatticeLayoutColours.Laid()), 13)

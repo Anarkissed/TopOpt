@@ -176,7 +176,8 @@ final class PrintFrameOrganicTurnTests: XCTestCase {
         let inputs = LatticeLayoutPreview.layInputs(p, path: b.path, LatticeLayoutPreview.settings(p), stress: .init())
         XCTAssertEqual(inputs.printUp, SIMD3(-1, 0, 0), "★ remembered lattices know the face they stood on")
         p.lattice.algorithm = "uniform"
-        XCTAssertNil(LatticeLayoutPreview.printUp(p), "a cell lattice's preview is as before (Organic only)")
+        // ★ notes29 H3 (his "Yes, definitely go for the cell lattices now too"): re-pinned — a cell lattice stands on it too
+        XCTAssertEqual(LatticeLayoutPreview.printUp(p), SIMD3(-1, 0, 0), "★ a cell lattice's preview stands on the kept face too")
         p.lattice.algorithm = "organic"
         LatticeLayoutPreview.controlNoPrintFrame = true
         XCTAssertNil(LatticeLayoutPreview.printUp(p), "RED CONTROL: before notes29 the preview stood as placed")

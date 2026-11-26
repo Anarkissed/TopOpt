@@ -102,6 +102,23 @@ struct LatticeBuildTimelapse: Equatable {
     /// The timelapse's end (the last of the topped-out beat).
     var end: Double? { buildStart.flatMap { b in buildS.map { b + $0 + Self.toppedOutS } } }
 
+    /// ★ notes29 H3: the floors' up and the bays' across, in the part's own coordinates: the world's up and right (the model
+    /// matrix's rows), or — the lattice laid standing on the face he kept (`printUp`) — the print's up, the bays across it
+    /// from the world's right (its part square to that up). RED CONTROL (tests) `controlWorldUp`: the world's up always.
+    static func axes(model: simd_float4x4, printUp: SIMD3<Float>?) -> (up: SIMD3<Float>, across: SIMD3<Float>) {
+        let worldUp = SIMD3(model.columns.0.y, model.columns.1.y, model.columns.2.y)
+        let right = SIMD3(model.columns.0.x, model.columns.1.x, model.columns.2.x)
+        guard !controlWorldUp, let p = printUp, simd_length(p) > 1e-6, simd_length(p).isFinite else { return (worldUp, right) }
+        let up = simd_normalize(p)
+        var across = right - simd_dot(right, up) * up
+        if simd_length(across) < 1e-4 {   // the world's right along the print's up: the world's depth, square to it
+            let depth = SIMD3(model.columns.0.z, model.columns.1.z, model.columns.2.z)
+            across = depth - simd_dot(depth, up) * up
+        }
+        return (up, simd_length(across) > 1e-6 ? simd_normalize(across) : right)
+    }
+    nonisolated(unsafe) static var controlWorldUp = false
+
     /// When snap `k` (0-based: floor k / perFloor, its columns then its bays) shows, over `floors` floors.
     func snapAt(_ k: Int, floors: Int) -> Double? {
         guard let b = buildStart, let s = buildS, floors > 0 else { return nil }
@@ -294,7 +311,7 @@ public final class LatticeBuildShow {
 #if canImport(MetalKit)
 import MetalKit
 
-/// What the bars' shader is told of the timelapse (BarFrame's last four rows): x of `build` < 0 — no timelapse, every bar.
+/// What the bars' shader is told of the timelapse (BarFrame's four rows after the map): x of `build` < 0 — no timelapse, every bar.
 struct LatticeBuildRevealUniform: Equatable {
     /// x: the snaps shown (−1: all); y: the floors; z: the bays; w: 1 on.
     var build = SIMD4<Float>(-1, 1, 1, 0)
@@ -330,11 +347,11 @@ extension MeshRenderer {
     }
 
     /// The bars this frame: drawn or not, and how much of them (nil: all). The world's up and right in the part's own
-    /// coordinates (the model matrix's rows: the part's placement turns it, the camera never does).
+    /// coordinates (the model matrix's rows: the part's placement turns it, the camera never does) — ★ notes29 H3: or, for a
+    /// lattice laid standing on the face he kept, the print's up (the floors rise as the file prints, layer by layer).
     func buildReveal(model: simd_float4x4) -> (draw: Bool, reveal: LatticeBuildRevealUniform?) {
         guard let show = buildShow, let pass = layoutBars, let box = pass.box else { return (true, nil) }
-        let up = SIMD3(model.columns.0.y, model.columns.1.y, model.columns.2.y)
-        let across = SIMD3(model.columns.0.x, model.columns.1.x, model.columns.2.x)
+        let (up, across) = LatticeBuildTimelapse.axes(model: model, printUp: pass.printUp)
         let f = LatticeBuildTimelapse.Frame(lo: box.lo, hi: box.hi, up: up, across: across)
         show.floorsSeen = f.floors
         lastBuildFrame = f
