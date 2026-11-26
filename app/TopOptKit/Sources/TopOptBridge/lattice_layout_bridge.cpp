@@ -982,7 +982,7 @@ LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float ori
     for (unsigned i = 1; i < threads; ++i) pool.emplace_back(counted);
     counted();
     for (auto& t : pool) t.join();
-    if (s->stop.load()) return;
+    if (s->stop.load()) { o.cancelled = true; return; }   // ★ notes30 Q2: said, never an empty map
     o.rg.assign(2 * n, static_cast<int8_t>(-127));
     auto at = [&](int32_t x, int32_t y, int32_t z) -> uint8_t {
       if (x < 0 || y < 0 || z < 0 || x >= nx || y >= ny || z >= nz) return 0;

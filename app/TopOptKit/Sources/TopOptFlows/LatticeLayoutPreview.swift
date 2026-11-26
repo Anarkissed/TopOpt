@@ -833,6 +833,8 @@ public final class LatticeLayoutPreview: ObservableObject {
             laying = false; layProgress = nil
             layWallS[timeKey(path, .exact)] = (openMS + r.msRead + r.msCells + r.msBars) / 1000
             if solidWanted { await addMap() }
+            // ★ notes30 Q2: a check he asked that this lattice overtook is asked again of it (below), never answered for the last
+            if nozzleState == .checking, !Self.controlNozzleAnswersWhenInterrupted { nozzleWanted = true }
             nozzleTask?.cancel(); nozzleLine = nil; nozzleState = .notAsked
             await solidReasonCheck(lattice: latticeAtLay)   // ★ his ruling 11-14: why it is solid (one coarse map, cheap)
             // ★ notes28 (img 76): nothing laid — the solid pop-up names the real reason (raised by the check above); the general
@@ -1490,7 +1492,9 @@ public final class LatticeLayoutPreview: ObservableObject {
         guard let session, let box, !Task.isCancelled else { return }
         nozzleState = .checking
         Self.nozzleChecksRun += 1
-        defer { if !Task.isCancelled { nozzleState = .done } }
+        let shown = bars?.token   // ★ notes30 Q2: the lattice it checks
+        var interrupted = false
+        defer { if !Task.isCancelled, !interrupted { nozzleState = .done } }
         do {
             // ★ notes29: standing the way the lay on screen stands (the face he kept), so the two maps compare like with like
             if nozzleSession == nil || nozzlePath != path || nozzleSession?.printUp != session.printUp {
@@ -1501,15 +1505,37 @@ public final class LatticeLayoutPreview: ObservableObject {
             guard let fine = nozzleSession, !Task.isCancelled else { return }
             let cure = try await Self.cure(main: session, fine: fine, settings: s, box: box)
             guard !Task.isCancelled else { return }
+            // ★ notes30 Q2: a newer lay asked while it ran — what it found is of a lattice no longer the one on screen: none
+            if !Self.controlNozzleAnswersWhenInterrupted, laying || bars?.token != shown {
+                interrupted = true
+                nozzleInterrupted(since: shown)
+                return
+            }
             if let c = cure, c >= Self.worthSaying {
                 nozzleLine = String(format: "A 0.2 mm nozzle would lattice %.0f%% of what is solid now", 100 * c)
             }
             nozzleState = .done
             nozzleAnswered(cure: cure)   // ★ notes28: said in the centred pop-up (never a line at the bottom)
+        } catch is CancellationError where !Task.isCancelled && !Self.controlNozzleAnswersWhenInterrupted {
+            interrupted = true   // ★ notes30 Q2: a newer lay stopped its map (or its layout): never an answer
+            nozzleInterrupted(since: shown)
         } catch {
             // no line: the preview stands as it is
         }
     }
+
+    /// ★ notes30 Q2 (362's follow-up to Q1: a setting changed within a fraction of a second of "Check a 0.2 mm nozzle" stopped
+    /// the check's map, which read as "no lattice asked" — and the pop-up said a 0.2 mm nozzle "would not lattice much more" of a
+    /// part nothing had checked). An interrupted check is never an answer: it goes back to "not asked", and — he asked for it —
+    /// it is asked again of the newer lattice (after its lay, when one runs: `checkNozzle`'s own rule), its answer where he
+    /// asked for it (the pop-up's, when he asked there). Never again of the same lattice (`shown`): no loop.
+    private func nozzleInterrupted(since shown: Int?) {
+        nozzleLine = nil
+        nozzleState = .notAsked
+        if laying || bars?.token != shown { checkNozzle() }
+    }
+    /// RED CONTROL (tests): a check a newer lay overtook still answers (before notes30 Q2).
+    nonisolated(unsafe) public static var controlNozzleAnswersWhenInterrupted = false
 
     // MARK: the solid view's map
 

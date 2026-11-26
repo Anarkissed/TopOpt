@@ -11,7 +11,8 @@
 // Each "within 0.1 s" is the best of a few tries: on a busy Mac the threads' own scheduling adds its wait (measured with the
 // load average over 200), while a worker that is held never gets under the bar in any try.
 // RED CONTROL `LatticeLayoutSession.controlPlacesHoldTheWorker`: the search before Q1 — the lay waits for it.
-// The part: a synthetic 240 x 240 x 20 mm plate with eight blind tunnels under its top (never his files).
+// The part: a synthetic 300 x 300 x 20 mm plate with fifteen blind tunnels under its top (never his files): its places search
+// takes 2 s or more on a quiet Mac (★ notes30 Q2: the 240 mm plate's took 0.65 s there, too quick for the RED CONTROL's bar).
 #if canImport(AppKit) && canImport(MetalKit)
 import XCTest
 import simd
@@ -30,16 +31,17 @@ final class Notes30PlacesGiveWayTests: XCTestCase {
     /// The RED CONTROL's: a lay that waits for the search waits at least this (s) — five times the bar.
     static let waitedS = 0.5
 
-    /// The big flat part: a 240 x 240 x 20 mm plate, eight tunnels 5-12 mm up (open at the front, blind at the back) under its
+    /// The big flat part: a 300 x 300 x 20 mm plate, fifteen tunnels 3-15 mm up (open at the front, blind at the back) under its
     /// top — the faces a lattice laid under the top runs into, places that no rule decides (core's D23, as LatticePlaceChipsTests'
     /// tunnel, many times over).
+    static let plateBox = (lo: SIMD3<Float>(0, 0, 0), hi: SIMD3<Float>(300, 300, 20))
     static func flatPlate(_ test: XCTestCase) throws -> (path: String, top: Int32) {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("notes30-q1-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         test.addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
         let path = dir.appendingPathComponent("flat-plate.stl").path
-        let xy = stride(from: Float(0), through: 240, by: 10).map { $0 }
-        try LatticePlaceChipsTests.gridSTL(xy, xy, [0, 5, 12, 20]) { i, j, k in !(k == 1 && i % 3 == 1 && j < 23) }
+        let xy = stride(from: Float(0), through: plateBox.hi.x, by: 10).map { $0 }
+        try LatticePlaceChipsTests.gridSTL(xy, xy, [0, 3, 15, 20]) { i, j, k in !(k == 1 && i % 2 == 1 && j < 29) }
             .write(to: URL(fileURLWithPath: path))
         let mesh = try TopOptKit.importMesh(path: path)
         return (path, try XCTUnwrap(LatticePlaceChipsTests.face(mesh, axis: 2, sign: 1, at: 20), "the top"))
@@ -138,20 +140,21 @@ final class Notes30PlacesGiveWayTests: XCTestCase {
 
         // ★ the solid-reason check's map (solidReasonCheck: the first map after landing, its SolidAt made then) gives way to a
         // newer lay too, wherever it is asked (a try counts only when the map gave way: it was still running when asked)
-        let box = (lo: SIMD3<Float>(0, 0, 0), hi: SIMD3<Float>(240, 240, 20))
+        let box = Self.plateBox
         _ = try await session.lay(cur)
         let m0 = Date()
         _ = try await LatticeLayoutPreview.unheldReport(session, box)
         let mapS = Date().timeIntervalSince(m0)
         var asks = 0
-        for at in [0.02, 0.06, 0.12] {   // s into the map (asked from here: 0.4 s, its grid alone about half of it)
+        for at in [0.01, 0.03, 0.06, 0.12] {   // s into the map (asked from here: 0.2 s on a quiet Mac, 0.4 s or more busy)
             var tries: [Double] = []
             for _ in 0..<4 where tries.count < 2 {
                 _ = try await session.lay(cur)
                 let check = Task { try await LatticeLayoutPreview.unheldReport(session, box) }
                 try await Task.sleep(nanoseconds: UInt64(at * 1e9))
                 let start = try await Self.timedLay(session, nxt).startS
-                if try await check.value == nil { tries.append(start) }   // it gave way: nothing read
+                // it gave way: said stopped (★ notes30 Q2: a stopped map is never read as an empty one)
+                if case .failure(let e) = await check.result, e is CancellationError { tries.append(start) }
             }
             print(String(format: "NOTES30-Q1: the solid-reason map takes %.3f s; a lay asked %.2f s in began after ", mapS, at)
                   + (tries.isEmpty ? "(the map had ended)" : tries.map { String(format: "%.3f s", $0) }.joined(separator: ", ")))
