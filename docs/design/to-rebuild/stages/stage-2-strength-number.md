@@ -180,6 +180,8 @@ Still owed for condition (e): one sheet job and one Organic job loaded on lattic
 
 Today "saved" is 1 - printed voxels / part voxels: a share of SOLID volume. With printed grams it has to be read against what the drawn part itself would take on the printer at the same walls and infill. The run now writes that once per job, with no extra solve (the wall-and-core model on the part's own voxels): the report's top-level `"drawn_part": {"printed_grams", "solid_grams"}`, present only with the switch on. The saving the app should show is then `1 - version printed grams / drawn_part.printed_grams`.
 
+Run (build 26b8b784, 22:29), the stand at res 64, 50 % infill, six walls: the drawn part 98.71 g printed of 116.39 g solid (wall share 0.696); the one version 85.36 g printed of 90.55 g solid. So the saving he is shown today, on solid volume, is 22 %; the plastic really saved is 1 - 85.36 / 98.71 = 13.5 %. Removing material from a part that is mostly walls removes mostly infill-free wall, and what is left is nearly all wall (share 0.943), so the solid figure overstates the saving by more than half here.
+
 For #362 (to carry with the stage's flip; nothing in the app changes until then): read `drawn_part.printed_grams` and each version's finish `mass_grams` (already printed grams with the switch on) and show the saving from those two; keep `volume_saved_fraction` for nothing but the old path. One line on screen at most; the detail (walls, infill, "top and bottom layers not counted") behind the (i).
 
 ## What it does to the lattice strength check
