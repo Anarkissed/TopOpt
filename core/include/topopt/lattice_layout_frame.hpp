@@ -140,6 +140,11 @@ struct FrameCheck {
   std::size_t loaded_nodes_undriven = 0;   // nodes within the load's reach on a piece of the frame with no driven node
                                            // (Organic: the load has no path, the lead's ruling of 2026-11-18)
   bool load_on_open_lattice = false;
+  // The interim guard (2026-11-26): load_on_frame_n above load_unheld_share x load_total_n (the vines carry more than that
+  // share of the load); refused until the load transfer is checked against a reference. `load_on_lattice_at`: the
+  // force-weighted mean of the loaded grid nodes touching lattice material (the check's frame; (0,0,0) when none).
+  bool load_on_bare_lattice = false;
+  Vec3 load_on_lattice_at{};
   // OS9 amended (the lead, 2026-11-19): a part of the frame with no driven node (adrift) carries nothing and is never by
   // itself a reason to fail. `load_on_adrift_n`: the load the frame hands no one because it lands only near adrift
   // nodes: the lattice's share of the load on every loaded grid node that has an adrift frame node in its reach and no
