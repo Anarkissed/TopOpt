@@ -1294,13 +1294,13 @@ public final class LatticeLayoutPreview: ObservableObject {
 
     /// The same, with the unheld voxels by core's reason (NoCell: Other, WallNarrow, TooFewAcross, Sliver, RegionShallow).
     static func unheldReport(_ s: LatticeLayoutSession, _ box: (lo: SIMD3<Float>, hi: SIMD3<Float>)) async throws
-        -> (share: Double, nocell: [Int])? {
+        -> (share: Double, nocell: [Int], haveMM: [Double])? {
         let ext = simd_max(box.hi - box.lo, SIMD3(repeating: 0.1))
         let voxel = Swift.max(0.6, Float(cbrt(Double(ext.x * ext.y * ext.z) / 250_000)))
         let dims = SIMD3<Int32>(Int32((ext.x / voxel).rounded(.up)) + 3, Int32((ext.y / voxel).rounded(.up)) + 3,
                                 Int32((ext.z / voxel).rounded(.up)) + 3)
         let r = try await s.grid(origin: box.lo - SIMD3(repeating: voxel), voxel: voxel, dims: dims)
-        return r.asked > 0 ? (Double(r.unheld) / Double(r.asked), r.nocell) : nil
+        return r.asked > 0 ? (Double(r.unheld) / Double(r.asked), r.nocell, r.nocellHaveMM) : nil   // ★ notes30 X2: what is there
     }
 
     /// How much of what is solid now a 0.2 mm nozzle would lattice (0 … 1), laying `settings` again in `fine` with only the line
@@ -1386,10 +1386,31 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// ★ notes30 X2 (his answer, 11-26): what the deepest flat region asked to lattice needs of the cells, read off the lay's
     /// own settings and core's smallest cell for it (`floorCellMM`, the lay's floor_cell_mm); with Allow quilt on the smallest
     /// is the thinnest strut over the type's touch (core's lattice_quilt_cell_mm). nil: no flat region, or no floor read.
+    /// ★ notes30 X2 (cell advice): the smallest cell the part's settings lay now — core's floor_cell_mm by its own formula (the
+    /// thinnest strut, two lines, over the type's open look; over its touch with Allow quilt on as the engine reads it: Auto
+    /// never quilts) — with the quilt's smallest and Aesthetic's cells across, as a depth ask with no depth yet (advice that
+    /// names a cell reads it: never a cell under it). nil: a type the engine does not lay as struts.
+    static func cellFloor(_ p: ProjectModel) -> SolidReason.Depth? {
+        let l = p.lattice
+        let id = l.topologyID.isEmpty ? "octet" : l.topologyID
+        guard !LatticeSheets.isSheet(id) else { return nil }
+        let facts = LatticeLayoutSession.typeFacts(id)
+        guard facts.lays, facts.touch > 0, facts.openLook > 0 else { return nil }
+        let bead = p.printParams.strutLineWidthMM > 0 ? p.printParams.strutLineWidthMM : 0.45
+        let thinnest = 2 * bead   // partWide's minStrutLines
+        let on = l.allowQuilt && (p.latticePageManual || l.isOrganic)
+        var ae = l
+        ae.stageMode = .aesthetic
+        return SolidReason.Depth(depthMM: 0, cellsAcross: Int(Swift.max(1, minCellsAcross(l))),
+                                 floorCellMM: thinnest / (on ? facts.touch : facts.openLook), quiltFloorCellMM: thinnest / facts.touch,
+                                 aestheticCellsAcross: Int(minCellsAcross(ae)), allowQuiltOn: on)
+    }
+
     nonisolated static func depthAsk(_ s: LatticeLayoutSession.Settings, lattice l: LatticeSettings,
                                      floorCellMM: Double) -> SolidReason.Depth? {
         let depths = s.regions.filter { !$0.noLattice && !$0.faces.isEmpty && $0.zone == nil && $0.depthMM > 0 }.map(\.depthMM)
-        guard let deepest = depths.max(), floorCellMM > 0 else { return nil }
+        guard floorCellMM > 0 else { return nil }
+        let deepest = depths.max() ?? 0   // ★ notes30 X2 (cell advice): none — core's own "what is there" says (a wall's width)
         let facts = LatticeLayoutSession.typeFacts(s.topology)
         let thinnest = Swift.max(1, s.minStrutLines) * s.beadMM
         var ae = l
@@ -1404,7 +1425,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         guard let session, let box, !Task.isCancelled else { return }
         if let rep = try? await Self.unheldReport(session, box), !Task.isCancelled {
             let depth = lastSettings.flatMap { Self.depthAsk($0, lattice: lattice, floorCellMM: laid?.floorCellMM ?? 0) }
-            solidReason = SolidReason.of(share: rep.share, nocell: rep.nocell, lattice: lattice, depth: depth)
+            solidReason = SolidReason.of(share: rep.share, nocell: rep.nocell, lattice: lattice, depth: depth, haveMM: rep.haveMM)
         } else {
             solidReason = nil
         }

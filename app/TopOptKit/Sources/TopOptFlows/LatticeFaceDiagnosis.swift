@@ -58,12 +58,18 @@ public struct LatticeFaceDiagnosis: Equatable, Sendable {
         public var changes: [Change] = []
     }
 
-    /// One fix the card offers as a button: the Lattice page's field and what to try there (five words at most).
+    /// One fix the card offers as a button: the Lattice page's field and what to try there (five words at most). ★ notes30 X2
+    /// (cell advice): or, where no smaller cell lays, one of the "This needs … cells" pop-up's fixes (`offer`), taken on the
+    /// part as that pop-up takes it (SolidReason.take).
     public struct Change: Equatable, Sendable {
         public let field: LatticeWizardSetting
         public let tryText: String
+        public var offer: SolidReason.Fix? = nil
+        /// One button per setting, or per offer.
+        var key: String { offer.map { "offer-" + $0.rawValue } ?? field.rawValue }
         /// The button's words (five at most).
         public var title: String {
+            if let o = offer { return o.title }
             switch field {
             case .cellSize: return "Change the cell size"
             case .density: return "Change the density"
@@ -75,7 +81,7 @@ public struct LatticeFaceDiagnosis: Equatable, Sendable {
     /// ★ notes30 X2: the fixes the card offers as buttons, one per field, in the order the problems name them (three at most).
     public var changes: [Change] {
         var seen = Set<String>(), out: [Change] = []
-        for p in problems { for c in p.changes where !seen.contains(c.field.rawValue) { seen.insert(c.field.rawValue); out.append(c) } }
+        for p in problems { for c in p.changes where !seen.contains(c.key) { seen.insert(c.key); out.append(c) } }
         return Array(out.prefix(3))
     }
 
@@ -111,9 +117,14 @@ public struct LatticeFaceDiagnosis: Equatable, Sendable {
     ///
     ///   `cellsPerMemberFloor`  `TopOptKit.latticeLimits(topology:).minCellsPerMember`
     ///   `nozzleWidthMM`        the run's own extrusion width (`strutLineWidthMM`)
+    ///   `cells` ★ notes30 X2 (cell advice): the smallest cell the part's settings lay
+    ///           (`LatticeLayoutPreview.cellFloor`): no fix names a cell under it; where
+    ///           no smaller cell lays, the "This needs … cells" pop-up's fixes instead.
     public static func of(card: LatticeFaceCard,
                           cellsPerMemberFloor: Double,
-                          nozzleWidthMM: Double) -> LatticeFaceDiagnosis {
+                          nozzleWidthMM: Double,
+                          cells: SolidReason.Depth? = nil) -> LatticeFaceDiagnosis {
+        let floorMM = SolidReason.controlSmallerCellsAlways ? 0 : (cells?.floorCellMM ?? 0)
         var problems: [Problem] = []
 
         // ── 1. NOTHING TO LATTICE ────────────────────────────────────────────
@@ -133,16 +144,34 @@ public struct LatticeFaceDiagnosis: Equatable, Sendable {
         if card.cellsPerMember > 0, card.cellsPerMember < cellsPerMemberFloor,
            card.cellMM > 0 {
             let thicknessMM = card.cellsPerMember * card.cellMM
+            let smaller = roundedDown(thicknessMM / cellsPerMemberFloor)
+            // ★ notes30 X2 (cell advice): the depth for whole cells the lay may lay (never cells under its smallest)
+            let deeper = String(format: "Make it deeper: %.1f mm.",
+                                roundedUp(cellsPerMemberFloor * Swift.max(card.cellMM, floorMM)))
+            var fixes = [deeper], changes: [Change] = []
+            if smaller >= floorMM - 1e-9 {
+                fixes.append(String(format: "Or use a smaller cell: %.1f mm.", smaller))
+                changes.append(Change(field: .cellSize, tryText: String(format: "Try %.1f mm cells", smaller)))
+            } else if var d = cells {
+                // no smaller cell lays here: the pop-up's own fixes, where they lay
+                d.depthMM = thicknessMM
+                d.cellsAcross = Int(cellsPerMemberFloor.rounded(.up))
+                if d.quiltHelps {
+                    fixes.append("Or turn Allow quilt on: cells may then be as small as \(SolidPopUp.mm(d.quiltFloorCellMM)).")
+                    changes.append(Change(field: .cellSize, tryText: "", offer: .allowQuilt))
+                }
+                if d.aestheticHelps {
+                    fixes.append("Or switch to Aesthetic: it needs \(Swift.max(1, d.aestheticCellsAcross)) cells across.")
+                    changes.append(Change(field: .cellSize, tryText: "", offer: .switchToAesthetic))
+                }
+                fixes.append("Or leave it solid.")
+                changes.append(Change(field: .cellSize, tryText: "", offer: .leaveSolid))
+            }
             problems.append(Problem(
                 what: "Not certifiable — too few struts across this wall.",
                 measured: String(format: "%.1f struts across, needs %.0f.",
                                  card.cellsPerMember, cellsPerMemberFloor),
-                fixes: [String(format: "Make it deeper: %.1f mm.",
-                               roundedUp(cellsPerMemberFloor * card.cellMM)),
-                        String(format: "Or use a smaller cell: %.1f mm.",
-                               roundedDown(thicknessMM / cellsPerMemberFloor))],
-                changes: [Change(field: .cellSize, tryText: String(format: "Try %.1f mm cells",
-                                                                   roundedDown(thicknessMM / cellsPerMemberFloor)))]))
+                fixes: fixes, changes: changes))
         }
 
         // ── 3. THE STRUT IS THINNER THAN THE NOZZLE ──────────────────────────
@@ -160,9 +189,9 @@ public struct LatticeFaceDiagnosis: Equatable, Sendable {
                                 card.relativeDensity * 100)]
             var changes = [Change(field: .density, tryText: String(format: "Try above %.0f%%", card.relativeDensity * 100))]
             if neededCellMM > 0 {
-                fixes.append(String(format: "Or use a bigger cell: %.1f mm.",
-                                    roundedUp(neededCellMM)))
-                changes.append(Change(field: .cellSize, tryText: String(format: "Try %.1f mm cells", roundedUp(neededCellMM))))
+                let bigger = roundedUp(Swift.max(neededCellMM, floorMM))   // ★ notes30 X2: never under the smallest cell
+                fixes.append(String(format: "Or use a bigger cell: %.1f mm.", bigger))
+                changes.append(Change(field: .cellSize, tryText: String(format: "Try %.1f mm cells", bigger)))
             }
             problems.append(Problem(
                 what: "Too thin to print — the struts are finer than the nozzle.",

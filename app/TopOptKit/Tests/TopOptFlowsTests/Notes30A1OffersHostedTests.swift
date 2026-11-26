@@ -117,46 +117,68 @@ final class Notes30A1OffersHostedTests: XCTestCase {
     }
 
     /// ★ 2. The warning triangle (his pad's Top face as Lattice 8 mm deep: too few of Structural's cells across it) opens the
-    /// one centred card — "How to fix this", every failure with its fix, no OK — and a setting fix is its 44 pt button, which
-    /// goes to that setting on the Lattice page with what to try. RED CONTROL (`controlDiagnosisNoCard`): release 21's tap raised
-    /// no centred card. (At the whole 20 mm the card reads 5 cells of 4 mm across: the triangle has nothing to say.)
+    /// one centred card — "How to fix this", every failure with its fix, no OK — and its fixes are its 44 pt buttons.
+    /// ★ notes30 X2 (cell advice): 8 mm holds 5 cells of 1.6 mm, under the 4.74 mm the lay may use, so the card never names a
+    /// smaller cell: its fixes are the "This needs … cells" pop-up's that lay here — only Leave it solid at 8 mm (Allow quilt's
+    /// 2.55 mm and Aesthetic's 2 cells of 4 mm do not fit) — and the depth that lays ("Make it deeper: 23.8 mm").
+    /// RED CONTROLS: `controlDiagnosisNoCard` (release 21's tap raised no centred card) and `controlSmallerCellsAlways` (release
+    /// 21's words: "Or use a smaller cell: 1.6 mm", its button the Cell size field).
+    /// (At the whole 20 mm the card reads 5 cells of 4 mm across: the triangle has nothing to say.)
     func testTheTriangleOpensTheCentredCardWithItsFixes() throws {
-        let (h, p) = try stage(depthMM: 8)
-        AppPopups.shared.current = nil
-        let g = try XCTUnwrap(p.latticeGroups.first, "his Top's lattice group")
-        p.latticeList.setActive(g.id)
-        let key = "lattice-diagnosis-\(g.id.uuidString)"
-        let end = Date().addingTimeInterval(120)
-        while h.frames.all[key] == nil, Date() < end { AppPopups.shared.current = nil; h.pump(1) }
-        AppPopups.shared.current = nil
-        h.pump(1)
-        let glyph = try h.probe(key, "★ the warning triangle, a 44 pt target")
-        for control in [true, false] {
-            WorkspacePlaceholder.controlDiagnosisNoCard = control
+        defer { SolidReason.controlSmallerCellsAlways = false }
+        for red in [true, false] {
+            SolidReason.controlSmallerCellsAlways = red
+            let (h, p) = try stage(depthMM: 8)
             AppPopups.shared.current = nil
-            h.pump(0.5)
-            h.click(CGPoint(x: glyph.midX, y: glyph.midY), settle: 1)
-            if control {
+            SettingToChange.shared.ask = nil
+            let g = try XCTUnwrap(p.latticeGroups.first, "his Top's lattice group")
+            p.latticeList.setActive(g.id)
+            let key = "lattice-diagnosis-\(g.id.uuidString)"
+            let end = Date().addingTimeInterval(120)
+            while h.frames.all[key] == nil, Date() < end { AppPopups.shared.current = nil; h.pump(1) }
+            AppPopups.shared.current = nil
+            h.pump(1)
+            let glyph = try h.probe(key, "★ the warning triangle, a 44 pt target")
+            if !red {   // RED CONTROL: release 21's wiring
+                WorkspacePlaceholder.controlDiagnosisNoCard = true
+                h.click(CGPoint(x: glyph.midX, y: glyph.midY), settle: 1)
                 XCTAssertNil(AppPopups.shared.current, "RED CONTROL: release 21's tap raised no centred card")
-                continue
+                WorkspacePlaceholder.controlDiagnosisNoCard = false
+                h.pump(0.5)
             }
+            h.click(CGPoint(x: glyph.midX, y: glyph.midY), settle: 1)
             let pop = try XCTUnwrap(AppPopups.shared.current, "★ the triangle opens the centred card")
-            print("NOTES30-X2 TRIANGLE: \(pop.title) — \(pop.text.replacingOccurrences(of: "\n", with: " | ")) "
-                  + "[\(AppPopups.shared.infoActions.map(\.title))]")
+            let acts = AppPopups.shared.infoActions
+            print("NOTES30-X2 TRIANGLE\(red ? " RED" : ""): \(pop.title) — \(pop.text.replacingOccurrences(of: "\n", with: " | ")) "
+                  + "[\(acts.map(\.title))]")
             XCTAssertTrue(pop.info, "★ the (i)'s card, like every (i)")
             XCTAssertEqual(pop.title, LatticeDiagnosisCard.title)
             XCTAssertFalse(AppPopups.shared.dismissShown, "★ Tap anywhere to continue, no OK")
             let card = try h.onScreen("appPopup", "the card")
             XCTAssertEqual(card.midX, h.size.width / 2, accuracy: 2, "★ centred")
-            let acts = AppPopups.shared.infoActions
             XCTAssertFalse(acts.isEmpty, "★ its fixes are its buttons")
             let first = try h.probe("appPopupAction", "★ its first fix, a 44 pt button")
             XCTAssertTrue(card.contains(first))
+            if red {
+                XCTAssertTrue(pop.text.contains("Or use a smaller cell: 1.6 mm."), "RED CONTROL: release 21's cell under the smallest")
+                XCTAssertEqual(acts.first?.title, "Change the cell size", "RED CONTROL: its button, the Cell size field")
+            } else {
+                XCTAssertFalse(pop.text.contains("smaller cell"), "★ never a cell under the 4.74 mm the lay may use")
+                XCTAssertTrue(pop.text.contains("Make it deeper: 23.8 mm."), "★ the depth whose cells lay")
+                XCTAssertTrue(pop.text.contains("Or leave it solid."), "★ the pop-up's own fix")
+                XCTAssertEqual(acts.map(\.title), ["Leave it solid"], "★ only the fix that does something here")
+            }
+            let before = p.lattice
             h.click(CGPoint(x: first.midX, y: first.midY), settle: 2)
             XCTAssertNil(AppPopups.shared.current, "the card closed")
-            let ask = try XCTUnwrap(SettingToChange.shared.ask, "★ the button went to its setting")
-            XCTAssertEqual(ask.page, .lattice)
-            print("NOTES30-X2 TRIANGLE button: \(acts.first?.title ?? "") → \(ask.field): \(ask.tryText)")
+            if red {
+                let ask = try XCTUnwrap(SettingToChange.shared.ask, "RED CONTROL: the button went to the Cell size field")
+                XCTAssertEqual(ask.tryText, "Try 1.6 mm cells", "RED CONTROL: a cell the lay never lays")
+            } else {
+                XCTAssertNil(SettingToChange.shared.ask, "★ Leave it solid goes nowhere")
+                XCTAssertEqual(p.lattice, before, "★ …and changes nothing")
+            }
+            SettingToChange.shared.ask = nil
         }
     }
 }

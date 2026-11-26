@@ -73,7 +73,12 @@ public struct SolidReason: Equatable, Sendable {
 
     /// The line and its fixes, or nil when too little is solid to say. ★ notes30 X2: `depth` — what the flat regions' depth asks
     /// of the cells (`LatticeLayoutPreview.depthAsk`); where smaller cells cannot help a too shallow region, his three offers.
-    public static func of(share: Double, nocell: [Int], lattice l: LatticeSettings, depth: Depth? = nil) -> SolidReason? {
+    /// ★ notes30 X2 (cell advice): `haveMM` — core's own "what is there" per reason (the widest wall, the deepest region, at
+    /// any of its solid places: the map's SolidWhy::have_mm), which makes `depth` the reason's own: the cell that place needs is
+    /// what is there over the cells across it asks (one for a wall thinner than a cell). Advice never names a cell under the
+    /// lay's smallest: where none fits, the walls get the same fixes as the depth (Allow quilt where it lays, Leave it solid).
+    public static func of(share: Double, nocell: [Int], lattice l: LatticeSettings, depth template: Depth? = nil,
+                          haveMM: [Double] = []) -> SolidReason? {
         guard share >= worthSaying, nocell.count >= 5 else { return nil }
         // the main reason by volume (ties keep this order); Sliver is P8 (f)'s thin cut piece against solid (LatticeReview
         // c3b4f855); Other only when nothing else is
@@ -102,7 +107,8 @@ public struct SolidReason: Equatable, Sendable {
         // cannot help — offers exactly what does: Allow quilt on (where its smaller cell fits the depth), Aesthetic (where its
         // fewer cells fit), or leaving it solid. Where neither fits, the depth is the fix and the words say so.
         var line = "\(pct)% of the lattice you asked for is solid: \(why)"
-        if cause == .regionShallow, let d = depth, !Self.controlSmallerCellsAlways, !d.smallerCellsHelp {
+        let depth = Self.ask(template, cause: cause, haveMM: haveMM)
+        if cause == .regionShallow, let d = depth, d.depthMM > 0, !Self.controlSmallerCellsAlways, !d.smallerCellsHelp {
             var three: [Fix] = []
             if d.quiltHelps { three.append(.allowQuilt) }
             if !aesthetic, d.aestheticHelps { three.append(.switchToAesthetic) }
@@ -111,7 +117,34 @@ public struct SolidReason: Equatable, Sendable {
                 line = "\(pct)% of the lattice you asked for is solid: its depth needs \(SolidPopUp.mm(d.neededCellMM)) cells"
             }
         }
+        // ★ notes30 X2 (cell advice): a wall no cell laid fits — the wall's own fixes first (as before), then the depth's that
+        // lay here (Allow quilt, Aesthetic), then Leave it solid; never "use smaller cells"
+        if cause == .wallNarrow || cause == .tooFewAcross, let d = depth, d.depthMM > 0, !Self.controlSmallerCellsAlways,
+           !d.smallerCellsHelp {
+            var others = fixes
+            if d.quiltHelps, !others.contains(.allowQuilt) { others.append(.allowQuilt) }
+            if !aesthetic, d.aestheticHelps, !others.contains(.aestheticCutCells) { others.append(.switchToAesthetic) }
+            fixes = Array(others.prefix(2)) + [.leaveSolid]
+        }
         return SolidReason(cause: cause, share: share, line: line, fixes: Array(fixes.prefix(3)), depth: depth)
+    }
+
+    /// ★ notes30 X2 (cell advice): the depth ask made the reason's own — core's "what is there" for it, over the cells across
+    /// it asks (a wall thinner than one cell: one; Aesthetic likewise). The template's floors stay.
+    static func ask(_ template: Depth?, cause: Cause, haveMM: [Double]) -> Depth? {
+        guard var d = template else { return nil }
+        let have = haveMM.count == 5 ? haveMM[cause.rawValue] : 0
+        switch cause {
+        case .wallNarrow:
+            d.depthMM = have; d.cellsAcross = 1; d.aestheticCellsAcross = 1
+        case .tooFewAcross:
+            d.depthMM = have
+        case .regionShallow:
+            if have > 0 { d.depthMM = have }
+        default:
+            break
+        }
+        return d
     }
 
     /// His three offers are up (smaller cells cannot help; ★ notes30 X2).
@@ -171,11 +204,23 @@ public struct SolidReason: Equatable, Sendable {
     /// ★ notes30 X2: a too shallow region says "smaller cells" only where they help; with his three offers, the numbers.
     public static func text(_ r: SolidReason, lattice l: LatticeSettings) -> String {
         let structural = (l.stageMode ?? .structural) == .structural
-        if r.cause == .regionShallow, let d = r.depth, !SolidReason.controlSmallerCellsAlways, !d.smallerCellsHelp {
+        let start = { (d: SolidReason.Depth) in
+            (d.allowQuiltOn ? "With these settings" : "With Allow quilt off") + ", cells start at \(mm(d.floorCellMM))."
+        }
+        if r.cause == .regionShallow, let d = r.depth, d.depthMM > 0, !SolidReason.controlSmallerCellsAlways,
+           !d.smallerCellsHelp {
             guard r.offersThree else { return "\(r.line).\n\n" + deeperLine(d) }
             return "\(r.line).\n\n" + (structural ? "Structural" : "This lattice")
                 + " fits \(Swift.max(1, d.cellsAcross)) cells across \(mm(d.depthMM)), so each cell is \(mm(d.neededCellMM)). "
-                + "With Allow quilt off, cells start at \(mm(d.floorCellMM)). Pick a way below."
+                + start(d) + " Pick a way below."
+        }
+        // ★ notes30 X2 (cell advice): a wall no cell laid fits — what it holds against the smallest cell, never "smaller cells"
+        if r.cause == .wallNarrow || r.cause == .tooFewAcross, let d = r.depth, d.depthMM > 0,
+           !SolidReason.controlSmallerCellsAlways, !d.smallerCellsHelp {
+            let k = Swift.max(1, d.cellsAcross)
+            let holds = r.cause == .wallNarrow ? "A wall there is \(mm(d.depthMM)) thick."
+                : "It is \(mm(d.depthMM)) across, room for \(k) cells of \(mm(d.neededCellMM))."
+            return "\(r.line).\n\n" + holds + " " + start(d) + " Pick a way below."
         }
         return "\(r.line).\n\n" + fixLine(r.cause, structural: structural)
     }
@@ -199,13 +244,28 @@ public struct SolidReason: Equatable, Sendable {
         var parts: [String] = []
         if r.fixes.contains(.allowQuilt) {
             parts.append("Turn Allow quilt on: the Lattice page goes to Manual with Allow quilt on. Cells may then be as small as "
-                + "\(mm(d.quiltFloorCellMM)), so this depth gets the \(mm(d.neededCellMM)) cells it needs, and no smaller, with "
+                + "\(mm(d.quiltFloorCellMM)), so this place gets the \(mm(d.neededCellMM)) cells it needs, and no smaller, with "
                 + "struts as thin as before. Allow quilt is for the whole part: on a deeper face, the cells along the face may "
                 + "halve and their struts thicken until they touch.")
         }
         if r.fixes.contains(.switchToAesthetic) {
             parts.append("Switch to Aesthetic: Aesthetic needs \(Swift.max(1, d.aestheticCellsAcross)) cells across, so "
-                + "\(mm(d.aestheticCellMM)) cells fit this depth. Aesthetic is for looks and runs no strength check.")
+                + "\(mm(d.aestheticCellMM)) cells fit here. Aesthetic is for looks and runs no strength check.")
+        }
+        // ★ notes30 X2 (cell advice): a wall's own fixes, when they share the pop-up
+        if r.fixes.contains(.letWallsCutCells) {
+            parts.append("Let walls cut cells: cells run on through a thin wall and are cut where it ends.")
+        }
+        if r.fixes.contains(.aestheticCutCells) {
+            parts.append("Aesthetic, walls cut cells: Aesthetic lets cells run on through a thin wall, cut where it ends. It is "
+                + "for looks and runs no strength check.")
+        }
+        if r.fixes.contains(.oneCellAcross) {
+            parts.append("One cell across: a member one cell wide is latticed, with a skin tying its cut struts.")
+        }
+        if r.fixes.contains(.smallCells) {
+            parts.append("Small cells in thin walls: a thin wall gets its own smaller cells, down to the smallest whose struts "
+                + "stay a printed line apart.")
         }
         parts.append("Leave it solid: this region prints as solid plastic. It weighs more, and is at least as strong as any "
             + "lattice there.")
