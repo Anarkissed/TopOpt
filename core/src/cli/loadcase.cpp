@@ -50,14 +50,22 @@ bool auto_pad(double* strength_mm) {
   return true;
 }
 double pad_depth_for(const VoxelGrid& grid, const std::vector<FacePiece>& pieces,
-                     double line_width_mm) {
+                     double line_width_mm, PadReceipt* receipt = nullptr) {
   double strength = 0.0;
-  if (!auto_pad(&strength)) return face_pad_depth_mm();
+  if (!auto_pad(&strength)) {
+    if (receipt) receipt->pad_mm = face_pad_depth_mm();
+    return face_pad_depth_mm();
+  }
   const double lw = line_width_mm > 0.0 ? line_width_mm : 0.45;
   const double thickness = face_backing_thickness_mm(grid, pieces);
   const double depth = std::max(2.0 * lw, std::sqrt(strength * thickness));
   std::printf("[loadcase] automatic pad: %.2f mm of material behind the face -> pad %.2f mm\n",
               thickness, depth);
+  if (receipt) {
+    receipt->thickness_mm = thickness;
+    receipt->pad_mm = depth;
+    receipt->automatic = true;
+  }
   return depth;
 }
 
@@ -958,14 +966,22 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
       // rule (pad_depth_for). Unused on the voxel path, which pads by layers.
       const bool by_face = face_load_mode() != FaceLoadMode::Voxel;
       auto face_pad = [&](int fid) {
-        return by_face ? pad_depth_for(grid, face_pieces(model, {fid}, 0.5 * grid.spacing),
-                                       lc.wall_line_width_mm)
-                       : face_pad_depth_mm();
+        if (!by_face) return face_pad_depth_mm();
+        PadReceipt rc;
+        rc.face_id = fid;
+        const double d = pad_depth_for(grid, face_pieces(model, {fid}, 0.5 * grid.spacing),
+                                       lc.wall_line_width_mm, &rc);
+        opts.pad_receipts.push_back(rc);
+        return d;
       };
       auto region_pad = [&](const ResolvedFaceRegion& r) {
-        return by_face ? pad_depth_for(grid, region_pieces(model, r, 0.5 * grid.spacing),
-                                       lc.wall_line_width_mm)
-                       : face_pad_depth_mm();
+        if (!by_face) return face_pad_depth_mm();
+        PadReceipt rc;
+        rc.region_id = r.id;
+        const double d = pad_depth_for(grid, region_pieces(model, r, 0.5 * grid.spacing),
+                                       lc.wall_line_width_mm, &rc);
+        opts.pad_receipts.push_back(rc);
+        return d;
       };
       for (int fid : lc.anchor_face_ids) {
         const double d = face_pad(fid);

@@ -35,7 +35,7 @@ Running without the lock: `sample_pad.sh` (the sample bracket, six pad settings)
 A. Already agreed:
 - A1. Stage 1 report to the reviewer once the two lock runs are recorded (draft at the top of `stages/stage-1-true-loads.md`).
 - A2. The pad's one number: tables and PICTURES of the shapes around the fixed faces from the two sweeps; a recommended curve strength for him in the morning.
-- A3. The automatic pad as the Auto default behind the switch; a typed depth in Manual; per-face values (thickness, pad) as report values for the app.
+- A3. PARTLY DONE 05:30: the report now carries `"pads": [{face_id | region_id, thickness_mm, pad_mm, automatic}]` on the face path (syntax-checked; not yet run). NOT done, on purpose: making the automatic rule the DEFAULT. It needs the curve's strength, which waits on the sample sweeps and his word; until then the default stays a fixed 3 mm and the rule is asked for with `TOPOPT_PAD_MM=auto[:strength]`.
 - A4. WRITTEN 04:50 (`part_scale.hpp`, the report's `"too_small"`, the pop-up's wording proposed in the stage-1 file); arithmetic checked; owed: one run on a made thin part.
 - A5. RULE WRITTEN 05:15 (`auto_resolution`, table in the stage-1 file): one voxel per line width, capped at 192, floored at 32. Not wired into a job (the app sends the number).
 - A6. DONE 04:15: `tests/unit/to_reference_reading.hpp` gives the reading's own true value on the plate and the ring (the same sums as the script: 2.809 / 2.619 / 2.306 and 2.213 / 2.104 / 1.914), and both tests E print each pairing against it; unit checks for `interlayer_tension_field` and a reading over a size pass standalone. Owed: one built run of tests E for the new lines (with B1).

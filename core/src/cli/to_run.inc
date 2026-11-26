@@ -2773,6 +2773,11 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     }
   }
 
+  // TO rebuild stage 1: the pad each fixed or loaded face got, for the app.
+  for (const PadReceipt& p : options.pad_receipts)
+    result.pipeline.report.pads.push_back(
+        {p.face_id, p.region_id, p.thickness_mm, p.pad_mm, p.automatic});
+
   // TO rebuild (the maintainer, 2026-11-26): say so when the part is too small for
   // the nozzle to leave the optimiser any printable room, with the nozzle that
   // would fit, or resin. Advice only: the run is not changed. With the stage's

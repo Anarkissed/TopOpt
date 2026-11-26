@@ -30,4 +30,15 @@ struct FrozenFaceSet {
   bool solid = true;  // true: kept solid. false: kept empty.
 };
 
+// What pad one fixed or loaded face got, for the app's "Pad depth" line (the
+// maintainer, 2026-11-26: Auto by default, a typed depth in Manual, and the
+// depths Auto chose shown behind the (i)). Filled on the face path only.
+struct PadReceipt {
+  int face_id = -1;            // the face, or -1 when it is a region
+  int region_id = -1;
+  double thickness_mm = 0.0;   // material measured behind it (0 when not measured: a typed depth)
+  double pad_mm = 0.0;         // the pad it got
+  bool automatic = false;      // chosen by the rule, not typed
+};
+
 }  // namespace topopt

@@ -551,6 +551,15 @@ struct JobReport {
     double thickest_mm = 0.0, needed_mm = 0.0, line_width_mm = 0.0, nozzle_that_fits_mm = 0.0;
   };
   TooSmall too_small;
+  // TO rebuild stage 1: the pad each fixed or loaded face got, for the app's "Pad
+  // depth" line. Written as the top-level key "pads": [{"face_id" | "region_id",
+  // "thickness_mm", "pad_mm", "automatic"}]; absent when empty (the voxel path).
+  struct Pad {
+    int face_id = -1, region_id = -1;
+    double thickness_mm = 0.0, pad_mm = 0.0;
+    bool automatic = false;
+  };
+  std::vector<Pad> pads;
   FrozenShareReport frozen_share;
   // CORE LIST item 50 — emitted as report.json "strengthen" only when evaluated.
   StrengthenReport strengthen;
