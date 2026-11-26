@@ -50,6 +50,13 @@ AFTER THE CRASH (the Claude app crashed about 13:15 from Mac overload; every run
 - LOCK QUEUE: TOSurface holds it (14:06); TOSolver, then #362's S1, then mine: `b1_suite.sh` (waits for an S1 line to come and go, or `b1_go`), then `b6_autopad_checks.sh` and `b5_stage2.sh` (both wait for B1's `done`). All three re-queued 14:50 with the guard at 20 %.
 - NEXT, in this order, no CPU needed first: merge TOSolver's dcd88bb4 and write the caller change; answer the weight question; the third shape (ellipse) test; the switch point; the plate's 3.6 mm miss.
 
+16:50 STATE (after the reviewer's rulings; supersedes the lists above where they differ).
+- STAGE 1 FLIP (approved with the automatic pad): 2(b) done (LatticeReview), 2(c) done (Top Motor Mount unmoved), 2(d) done (the hook passes); 2(a) OWED: `b6_autopad_checks.sh` on the lock; 2(e) is #362's and LatticeReview's hand-over.
+- CONNECTION RULE: caller side done and run (`TOPOPT_CONNECTION=support`; the hook's broken version refused in words in 551 s). TOSolver holds the lock (16:42) for the reviewer's replay test.
+- STAGE 2: item 3 fixed (the ball may sit on the part's edge); item 2 measured (inside the bar from 1.5 voxels across; set at 1.75); item 4 in code (under 1.75 voxels, or no length: today's solve and reading whole); item 5 done (E x fill^2 misses on the ellipse; today's reading misses there too, asked of the reviewer); item 6 written (a `[strength]` line and the report's `strength_reading`), RUNNING now on the sample bracket in both forms (`s2_job.sh`). OWED on the lock: conditions (b) to (e) on his full-resolution parts with this form (`b5_stage2.sh`, to be re-pointed: it still uses the fixed 3 mm pad and a 1.8 mm size).
+- LOCK ORDER (my ruling to the helpers 16:36): a holder that has just released waits 5 minutes when anyone is queued; TOSolver's hook test, then TOSurface's next part, then #362's S1, then mine (B1 the whole suite, B6, B5).
+- OWED TO HIM: one sample part at full detail with the smooth surface on, as a picture (his question about lumps); his answer on "finish fast, then keep going finer" as its own piece of work.
+
 A. Already agreed:
 - A1. Stage 1 report to the reviewer once the two lock runs are recorded (draft at the top of `stages/stage-1-true-loads.md`).
 - A2. The pad's one number: tables and PICTURES of the shapes around the fixed faces from the two sweeps; a recommended curve strength for him in the morning.

@@ -2822,6 +2822,31 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     }
   }
 
+  // TO rebuild stage 2 (the reviewer's ruling 2026-11-26, item 6): say which form of
+  // the strength reading this job used, and why. One line and one report key.
+  if (strength_mode() == StrengthMode::Size) {
+    auto& sr = result.pipeline.report.strength_reading;
+    sr.evaluated = true;
+    sr.size_mm = options.stress_reading_mm;
+    sr.voxel_mm = grid.spacing;
+    sr.needs_voxel_mm = sr.size_mm > 0.0 ? sr.size_mm / kStressSizeSwitchVoxels : 0.0;
+    sr.over_size = stress_is_read_over_size(sr.size_mm, sr.voxel_mm);
+    if (sr.over_size)
+      std::fprintf(stderr,
+                   "[strength] the stress is read over %.2f mm (the material's length), on "
+                   "real stiffness; the check voxel is %.2f mm.\n",
+                   sr.size_mm, sr.voxel_mm);
+    else if (sr.size_mm > 0.0)
+      std::fprintf(stderr,
+                   "[strength] one-voxel reading, as today: reading over %.2f mm needs a check "
+                   "voxel of %.2f mm or finer, and this job's is %.2f mm.\n",
+                   sr.size_mm, sr.needs_voxel_mm, sr.voxel_mm);
+    else
+      std::fprintf(stderr,
+                   "[strength] one-voxel reading, as today: no published length for this "
+                   "material.\n");
+  }
+
   // TO rebuild stage 2 (ledger M-07): what the part AS DRAWN would take on the
   // printer at this job's walls and infill, beside its solid grams, so a version's
   // printed grams can be read as a saving against the real thing. No solve: the

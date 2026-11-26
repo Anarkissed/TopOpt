@@ -23,6 +23,7 @@
 #include <cstddef>
 #include <vector>
 
+#include "topopt/stress_measure.hpp"  // kStressSizeSwitchVoxels, for callers of the reading
 #include "topopt/build_orientation.hpp"  // BuildOrientationReport (post-pass)
 #include "topopt/fea.hpp"        // DirichletBC, NodalLoad
 #include "topopt/lattice.hpp"    // LatticeTopology (lattice certification)
