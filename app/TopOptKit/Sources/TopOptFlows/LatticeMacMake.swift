@@ -64,6 +64,8 @@ enum LatticeMacMakeCopy {
     static let sending = "Sending it to your iPad"
     static let drawing = "Drawing it"
     static let waiting = "Waiting for your Mac"
+    /// ★ notes29: made on this iPad, it waits for a Flexible solve to leave core first (one solve at a time in the app).
+    static let waitingForFlexible = RunCardWords.waitingForFlexible
     static func strengthening(_ round: Int) -> String { round > 0 ? "Strengthening, round \(round)" : "Strengthening it" }
 
     /// ★ notes25 (A5, his 11-23 evening: the cell lattice's print file stopped on the Mac after ~7 min): a stop never just
@@ -195,6 +197,8 @@ public final class LatticeMacMake: ObservableObject {
     /// ★ notes25: the run this card carries (its own card stays away while this one is the chain's: `covers`).
     private weak var run: RunModel?
     private var runWatch: AnyCancellable?
+    /// ★ notes29: the run waits for a Flexible solve on this iPad (the card's step says so, then its own again).
+    private var waitWatch: AnyCancellable?
     private var runSeen = false
     private var path: String?
     private var cancelAction: (() -> Void)?
@@ -232,6 +236,14 @@ public final class LatticeMacMake: ObservableObject {
             MainActor.assumeIsolated {
                 guard let self, self.going else { return }
                 if ph == .running { self.runSeen = true } else if self.runSeen { self.runOver = true }
+            }
+        }
+        let own = stage
+        waitWatch = run?.$waitingForFlexible.removeDuplicates().sink { [weak self] w in
+            MainActor.assumeIsolated {
+                guard let self, self.going else { return }
+                if w { self.stage = LatticeMacMakeCopy.waitingForFlexible }
+                else if self.stage == LatticeMacMakeCopy.waitingForFlexible { self.stage = own }
             }
         }
         going = true
@@ -288,7 +300,7 @@ public final class LatticeMacMake: ObservableObject {
     /// The run ended (landed, failed or cancelled): everything goes back.
     func ended() {
         events?.cancel(); events = nil; jobURL = nil
-        runWatch?.cancel(); runWatch = nil; run = nil
+        runWatch?.cancel(); runWatch = nil; waitWatch?.cancel(); waitWatch = nil; run = nil
         going = false; inBackground = false; runOver = false; runSeen = false
         checking = false; fileOnly = false; cancelAction = nil; projectID = nil; request = nil   // (`kind` stays: each press sets it)
     }

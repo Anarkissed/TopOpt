@@ -30,6 +30,10 @@
 // ★ EXPORTS WAIT ON CORE: core's Flexible runner writes receipts, heat maps and CSVs — no mesh
 // (its C2 / C3 exporter is not built) — so each Export card says so in ONE line.
 // ★ ON THIS DEVICE ONLY: the LAN worker runs `run` jobs (run_job), which refuse this block.
+// ★ notes29 (TOReview 11-25: the solver's switches are process-wide): ONE in-process solve at a time — core's runner is called
+// only while no topology run on this device holds core (FlexibleCoreGate.flexibleRunClaim); while one does, the step, the
+// pill and the corner say "Waiting for the run…" (plain words) and the job goes the moment the run ends. A run on a Mac never
+// holds it.
 
 import Foundation
 import TopOptKit
@@ -150,6 +154,8 @@ public final class FlexibleCoreRun: ObservableObject {
     }
 
     @Published public private(set) var phase: Phase = .idle
+    /// ★ notes29: the job waits for a topology run on this device to leave core (`phase` is `.sending`).
+    @Published public private(set) var waitingForRun = false
     /// The Export step is up.
     @Published public private(set) var shown = false
     /// ★ C2 VERIFICATION: why the job Settings describes is not sent as it stands, and what can
@@ -180,6 +186,8 @@ public final class FlexibleCoreRun: ObservableObject {
     public var isSending: Bool { phase == .sending }
 
     public static let sendingLine = "Sending to core\u{2026}"
+    /// ★ notes29: while a topology run on this iPad holds core (the job goes when it ends).
+    nonisolated public static let waitingLine = FlexibleFE.waitingForRun
     /// ★ Each Export card's ONE line while core has no Flexible exporter.
     public static let exportsWait = "Waits on core\u{2019}s Flexible exporter"
 
@@ -285,11 +293,18 @@ public final class FlexibleCoreRun: ObservableObject {
         var names: [Int: String] = [:]
         for f in m.settings.faces { names[f.faceRegionID] = m.coreRegionName(f.faceRegionID) }
         for p in m.presses { for r in p.regions { names[r] = m.coreRegionName(r) } }
-        let regionNames = names
+        callCore(job, dir: dir, out: out, materials: materials, scope: fix?.scope, regionNames: names)
+    }
+
+    /// ★ notes29: the job to core's Flexible runner, off the main thread, once it holds core (FlexibleCoreGate: no topology run
+    /// on this device holds core or waits for it); while one does, `waitingForRun` (the lines say so). `sentJob` is the job.
+    func callCore(_ job: String, dir: String, out: String, materials: String, scope: String?, regionNames: [Int: String]) {
         let runner = self.runner
-        let scope = fix?.scope
-        let t0 = Date()
+        waitingForRun = false
         Task.detached(priority: .userInitiated) { [weak self] in
+            let claim = await FlexibleCoreGate.flexibleRunClaim { [weak self] waiting in await self?.wait(waiting, for: job) }
+            defer { claim.leave() }
+            let t0 = Date()
             let result: Phase
             do {
                 let r = try runner(job, dir, out, materials)
@@ -301,10 +316,24 @@ public final class FlexibleCoreRun: ObservableObject {
         }
     }
 
+    /// Tests only (★ notes29): `job` sent as `start` sends one, to the stand-in `runner` (no part, no catalogue).
+    func startForTests(_ job: String) {
+        sentJob = job; sentFix = nil; phase = .sending; runs += 1
+        let tmp = FileManager.default.temporaryDirectory.path
+        callCore(job, dir: tmp, out: tmp, materials: "", scope: nil, regionNames: [:])
+    }
+
+    /// ★ notes29: the job waits (or no longer waits) for a topology run on this device.
+    private func wait(_ on: Bool, for job: String) {
+        guard sentJob == job, waitingForRun != on else { return }
+        waitingForRun = on
+    }
+
     /// Core's answer, on the main actor (★ C2 VERIFICATION: a method — the captured `self` was
     /// read inside MainActor.run, a Swift 6 error).
     private func land(_ result: Phase, for job: String) {
         guard sentJob == job else { return }
+        waitingForRun = false
         phase = result
     }
 
@@ -339,8 +368,8 @@ public final class FlexibleCoreRun: ObservableObject {
         }
     }
 
-    /// The Export step's one line about core.
-    public var line: String { Self.line(phase) }
+    /// The Export step's one line about core. ★ notes29: while it waits for a run on this iPad, that.
+    public var line: String { phase == .sending && waitingForRun ? Self.waitingLine : Self.line(phase) }
 
     /// Behind the (i): core's whole sentence, or where its receipt and heat maps are.
     public var info: String? {
@@ -375,9 +404,10 @@ extension FlexibleMainStatus {
         }
     }
 
-    /// While core runs the job: the pill says so; a tap shows the run (still `.send`).
-    public func whileSending(_ on: Bool) -> FlexibleMainStatus {
+    /// While core runs the job: the pill says so; a tap shows the run (still `.send`). ★ notes29: `waiting` — the job waits
+    /// for a run on this iPad (FlexibleCoreRun.waitingForRun): the pill says that.
+    public func whileSending(_ on: Bool, waiting: Bool = false) -> FlexibleMainStatus {
         guard on, tone == .ready || tone == .preview else { return self }
-        return FlexibleMainStatus(line: Self.sending, tone: tone, fix: nil)
+        return FlexibleMainStatus(line: waiting ? FlexibleCoreRun.waitingLine : Self.sending, tone: tone, fix: nil)
     }
 }
