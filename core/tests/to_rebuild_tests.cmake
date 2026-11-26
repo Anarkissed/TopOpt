@@ -21,6 +21,11 @@ if(Eigen3_FOUND)
   add_executable(test_to_strength_known_ring tests/unit/test_to_strength_known_ring.cpp)
   target_link_libraries(test_to_strength_known_ring PRIVATE topopt)
   add_test(NAME to_strength_known_ring COMMAND test_to_strength_known_ring)
+  # The third shape (the reviewer's ruling 2026-11-26): an elliptical hole, a / b = 2,
+  # Inglis peak 5 x. Judges "E x fill^2 at one voxel" on a shape it was not found on.
+  add_executable(test_to_strength_known_ellipse tests/unit/test_to_strength_known_ellipse.cpp)
+  target_link_libraries(test_to_strength_known_ellipse PRIVATE topopt)
+  add_test(NAME to_strength_known_ellipse COMMAND test_to_strength_known_ellipse)
 endif()
 
 # Stage 2: printed grams at the user's walls and infill (ledger M-07).

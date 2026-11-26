@@ -227,6 +227,17 @@ Automatic pad at 1.0 (8.9 mm behind the fixed top face, 5.9 mm under the loaded 
 
 One thread, alone, through the memory gate (free 43 %): three versions in 684 s, 0.68: 4.76, 43.6 g; 0.52: 4.57, 33.8 g; 0.38: 4.17, 25.2 g; NO fallback to Jacobi-CG, nothing refused. Pads 4.0 mm behind the fixed top face (80 mm of stem) and 2.65 mm under the loaded tip. Today's path made a fourth version (0.26: 3.75, 18.1 g) and the fixed 3 mm pad three (4.75 / 4.58 / 3.98 at 43.4 / 33.6 / 24.8 g). So the hook's death in the trial build came from the 1.0 pad and the pieces it left, not from the drawn-face loads. The reviewer's pass mark (versions made, no fallback) is met.
 
+### FLIP ITEM 2(c): Top Motor Mount at res 64, the automatic pad (0.2) against the fixed 3 mm: UNMOVED (15:27)
+
+One thread, alone, through the gate; no fallback, nothing refused, four versions each way.
+
+| pad | depths | 0.68 | 0.52 | 0.38 | 0.26 |
+|---|---|---|---|---|---|
+| fixed 3 mm | 3.0 mm | 2.338, 105.1 g | 2.342, 102.9 g | 2.333, 101.1 g | 2.345, 98.9 g |
+| automatic 0.2 | 1.5 to 1.8 mm (12 to 16 mm of material behind each face) | 2.338, 105.1 g | 2.339, 103.1 g | 2.355, 101.0 g | 2.346, 99.0 g |
+
+Margins within 1 %, grams within 0.2 g. On his part the automatic pad is half as deep as the fixed one and the result does not move. With the two made parts (A2 above) that completes 2(c).
+
 ## Still owed before the stage report
 
 - The original stand optimised both ways (queued), then Top Motor Mount; three settings; pad 2 / 3 / 4.5 mm.
