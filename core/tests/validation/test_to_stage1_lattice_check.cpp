@@ -204,6 +204,30 @@ std::vector<std::pair<std::string, std::string>> pairs(const std::string& b) {
   return out;
 }
 
+// How many values of the strength block differ between two runs (timings left out).
+int differing(const Result& a, const Result& b) {
+  const auto pa = pairs(a.strength), pb = pairs(b.strength);
+  std::map<std::string, std::string> bm(pb.begin(), pb.end());
+  int n = pa.size() == pb.size() ? 0 : 1;
+  for (const auto& kv : pa) {
+    static const char* timing[] = {"seconds", "_ms", "ms", "voxel_solve", "frame", "frame_assemble",
+                                   "frame_solve", "after_frame", "peak"};
+    bool skip = false;
+    for (const char* t : timing)
+      if (kv.first == t || kv.first.find("seconds") != std::string::npos ||
+          kv.first.find("_ms") != std::string::npos)
+        skip = true;
+    if (skip) continue;
+    const auto it = bm.find(kv.first);
+    if (it == bm.end() || it->second != kv.second) {
+      ++n;
+      std::printf("    %-40s %s | %s\n", kv.first.c_str(), kv.second.c_str(),
+                  it == bm.end() ? "(absent)" : it->second.c_str());
+    }
+  }
+  return n;
+}
+
 int compare(const std::string& tag, const Result& off, const Result& on) {
   int failures = 0;
   if (!off.ok || !on.ok) {
@@ -301,6 +325,20 @@ int main() {
     const Result off = run(j.tag, "", j.file, j.strength);
     const Result on = run(j.tag, "face", j.file, j.strength);
     failures += compare(j.tag, off, on);
+    // STAGE 2's switch (TOPOPT_STRENGTH) must not reach the lattice strength check
+    // at all (reviewer's ruling 2026-11-26, condition (b) and the table of (e)):
+    // the same job with stage 1 off and stage 2 on, a typed 1.8 mm reading.
+    setenv("TOPOPT_STRENGTH", "size", 1);
+    setenv("TOPOPT_STRESS_READING_MM", "1.8", 1);
+    const Result s2 = run((std::string(j.tag) + "_stage2").c_str(), "", j.file, j.strength);
+    unsetenv("TOPOPT_STRENGTH");
+    unsetenv("TOPOPT_STRESS_READING_MM");
+    const int moved = differing(off, s2);
+    std::printf("[%s] stage 2 switch on, stage 1 off: %d strength value(s) differ from off, bars %zu / %zu  %s\n",
+                j.tag, moved, off.bars, s2.bars,
+                moved == 0 && off.bars == s2.bars && off.file_hash == s2.file_hash ? "UNTOUCHED"
+                                                                                  : "REACHED (it must not be)");
+    if (moved != 0 || off.bars != s2.bars || off.file_hash != s2.file_hash) ++failures;
   }
   std::printf("[stage 1 lattice check] %d failure(s)\n", failures);
   return failures == 0 ? 0 : 1;
