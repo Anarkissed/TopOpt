@@ -262,3 +262,22 @@ Four articles read: comparing PLA, PETG and ASA (2020-02-03); Prusament PC Blend
 ### Decided by the maintainer, 2026-11-25
 
 "Let's go with the lowest published value for each." So: PLA 2.4 mm, ABS 0.46 mm, PETG 0.7 mm, halved by his earlier rule (1.2, 0.23, 0.35 mm). Open: the nine materials with no published value.
+
+### PA12, the material of every reference part of his (B6, 2026-11-26 04:30)
+
+Read from PubMed Central (the tables verbatim):
+
+- Zolfagharian, Khosravani and Kaynak, "Fracture resistance analysis of 3D-printed polymers", Polymers 12 (2020) 302, `10.3390/polym12020302`. Nylon 12 FILAMENT printed on a Fortus 450mc (100 % infill, raster 0 degrees) against PA12 POWDER by Multi Jet Fusion. Table 1: fracture toughness K_c 0.92 MPa m^0.5 (printed filament) and 0.58 (MJF); tensile strength 44.79 and 34.91 MPa; modulus 493 and 780 MPa. The paper puts K_c in the table "instead of" the plane-strain toughness and does not state how it was measured; its printed yield stresses (3.61 and 7.21 MPa) look wrong. Treat as indicative.
+- Stoia, Marsavina and Linul, "Mode I fracture toughness of polyamide and Alumide samples obtained by selective laser sintering", Polymers 12 (2020) 640, `10.3390/polym12030640`. Laser-sintered PA2200 (EOS), bending specimens to ASTM D5045, five per orientation: K_Ic 2.18 to 2.90 at 0 degrees (mean 2.69), 1.80 to 2.28 at 45 degrees (mean 2.03), 1.91 to 2.74 at 90 degrees (mean 2.35) MPa m^0.5. No tensile data in the paper.
+- Not opened (paywalled or embargoed): Crespo et al. 2019, "Failure of polyamide 12 notched samples manufactured by selective laser sintering" (uses the theory of critical distances directly; should hold a length for sintered PA12); Avanzini et al., Engineering Fracture Mechanics 2024 (MJF PA12, strain-energy criterion). Titles for the maintainer if he wants them.
+
+The length by the formula, L = (1/pi)(K / tensile strength)^2:
+
+| source | toughness, strength | L |
+|---|---|---|
+| printed nylon 12 filament (the only FILAMENT-printed value found) | 0.92, 44.8 MPa | 0.13 mm |
+| MJF PA12 | 0.58, 34.9 MPa | 0.09 mm |
+| laser-sintered PA2200, lowest orientation (strength 48 MPa from the maker's sheet, not from the paper) | 2.03, 48 MPa | 0.57 mm |
+| laser-sintered PA2200, highest orientation | 2.69, 48 MPa | 1.00 mm |
+
+What it means: by "the lowest published value for each" PA12's length is 0.13 mm, and half of it 0.07 mm: far under a voxel at any resolution he runs. So for his parts the reading stays one voxel whichever way the table is filled. PA12 is NOT added to `material_length.hpp` tonight, on purpose: a published length makes the code switch on real stiffness for cut voxels, and real stiffness with a one-voxel reading is the pairing the reviewer's bar found unsafe (6 to 18 % low on the plate). Whether a material whose length is under a voxel gets the middle stiffness (E x fill^2, the one pairing that passed) or keeps today's solve is part of the ruling already asked of the reviewer. Held for the maintainer in the morning.
