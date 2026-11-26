@@ -295,3 +295,14 @@ What the literature offers, in the order of how much it would change:
 A cheaper engineering route that needs no paper, to weigh beside these: have the rule that refuses the version ALSO stop the removal step that would cut the support off (the level-set update is rolled back where it would separate a fixed face's pad from the body). It keeps the versions, costs a flood fill per step, and adds no new physics; its risk is a thin thread left hanging on, which the minimum-width rule of stage 3 would then have to thicken.
 
 For the discussion with him: (1) is the general answer and fits the plan's stage on the optimiser; (2) is the only one that makes the kept support worth having; the cheap route gets most of the benefit soonest. No lean taken before he has seen the pictures.
+
+## Added 2026-11-26: PA6 (the maintainer plans to print it), for the stage 2 reading length
+
+Looked for a published toughness of FILAMENT-PRINTED nylon 6. Found little, and none I would put in the table:
+
+- Toughness: one paper on printed engineering plastics gives about 3.0 MPa m^0.5 for "pure PA" and 1.72 for glass-filled PA (Yang et al., "Study on the Fracture Toughness of 3D Printed Engineering Plastics", J. Materials Engineering and Performance; a correction was issued, and a published Comment disputes its values, Springer 10.1007/s11665-025-11260-z). The summary read does not say the PA is PA6. Not opened in full.
+- Strength, printed: Stratasys FDM Nylon 6, conditioned: 67.6 MPa flat (XZ), 36.5 MPa across the layers (ZX). Vendor PA6-CF: 115 MPa dry, 55 MPa wet in the layer plane: nylon loses about half its strength when it has taken up moisture.
+- By the formula L = (1/pi)(K / strength)^2 with 3.0 and 67.6: 0.63 mm; after his half rule 0.31 mm. Under a voxel on most of his jobs, as with PA12.
+- A lead not opened: Cicero, Ibanez-Gutierrez and others (Univ. of Cantabria) apply the theory of critical distances to MOULDED PA6 with 0 to 50 % short glass fibre, with and without moisture, 125 specimens; their papers should hold a calibrated length for plain PA6. Moulded, not printed.
+
+What it means for him: there is no good printed-PA6 number yet; the one found comes from a disputed paper. PA6 is NOT added to `material_length.hpp`; a PA6 job keeps the one-voxel reading. Two things matter more for PA6 than this length: moisture (dry or conditioned strength differ by half) and the across-layer strength (about half the in-plane value). If he prints a few PA6 test bars when the rig is ready, that beats anything published.
