@@ -16202,6 +16202,11 @@ extension WorkspacePlaceholder {
     /// Results).
     func certifySolve(_ issue: OrganicCertify.Issue) {
         guard let solve = issue.solve else { return }
+        if solve == .coverLoadedFace {   // ★ notes30: the centred pop-up offers the loaded face a Protect skin (first) or a Solid finish
+            OrganicBareVines.offer(skin: { certifyCover { _ = $0.giveLoadedFaceProtectSkin(near: issue.at) } },
+                                   solid: { certifyCover { _ = $0.giveLoadedFaceSolidFinish(near: issue.at) } })
+            return
+        }
         model.certifyWalk?.markSolved()
         if case .infill(let to) = solve {
             let from = project.printParams.infillPercent
@@ -16221,6 +16226,15 @@ extension WorkspacePlaceholder {
         }
         viewOriginal = true
         goToLatticeType()
+    }
+
+    /// ★ notes30: an offer taken — the loaded face covered (saved as infill's Solve is: a version with results writes the next
+    /// version), the pop-up solved, the walk on (after the last, the re-check question where Lattice is).
+    func certifyCover(_ change: (ProjectModel) -> Void) {
+        change(project)
+        model.persistCurrentProject()
+        model.certifyWalk?.markSolved()
+        certifyAdvance()
     }
 
     /// His re-check question in the Lattice button's place: Check again runs Lattice as the button does (a version with

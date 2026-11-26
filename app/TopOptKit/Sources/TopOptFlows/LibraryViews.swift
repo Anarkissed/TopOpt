@@ -238,6 +238,14 @@ enum LibraryStyle {
     static func percent(_ f: Double) -> String { "\(Int((f * 100).rounded())) %" }
     /// "6.5×".
     static func margin(_ m: Double) -> String { String(format: "%.1f×", m) }
+    /// ★ notes30 (362's review): a result's margin as its card says it — the words when its check refused to judge the load
+    /// (a load on bare vines: no valid margin), else "6.5×".
+    static func margin(_ s: ResultSummary) -> String { s.marginWords ?? margin(s.worstCaseMargin) }
+    /// Its verdict's mark: the words' warning (no valid margin), else a tick or a cross.
+    static func verdictSymbol(_ s: ResultSummary) -> (name: String, color: RGBA, label: String) {
+        if let w = s.marginWords { return ("exclamationmark.triangle.fill", DS.Color.warning, w) }
+        return s.accepted ? ("checkmark.circle.fill", DS.Color.okGreen, "Strong enough") : ("xmark.circle.fill", DS.Color.danger, "Not strong enough")
+    }
     /// ★ His Q1: a result tile's name, "v2b · +10 %" (the name alone when its results don't say).
     static func resultTitle(number: String, result: Int, word: String?) -> String {
         "v\(number)\(ResultMark.letter(result))" + (word.map { " · " + $0 } ?? "")
@@ -319,11 +327,14 @@ struct LibraryNumbers: View {
                 Text(LibraryStyle.percent(s.achievedVolumeFraction)).dsStyle(DS.TypeScale.caption)
                     .foregroundStyle(DS.Color.textTertiary.color)
                 Rectangle().fill(DS.Color.strokeStrong.color).frame(width: 1, height: big ? 26 : 18).padding(.horizontal, DS.Space.xxs)
-                Text(LibraryStyle.margin(s.worstCaseMargin)).font(.system(size: big ? 26 : 17, weight: .bold)).monospacedDigit()
-                Image(systemName: s.accepted ? "checkmark.circle.fill" : "xmark.circle.fill")
-                    .foregroundStyle((s.accepted ? DS.Color.okGreen : DS.Color.danger).color)
+                // ★ notes30: a load on bare vines — its words in the margin's place, a warning
+                Text(LibraryStyle.margin(s)).font(.system(size: s.marginWords == nil ? (big ? 26 : 17) : (big ? 18 : 14), weight: .bold))
+                    .monospacedDigit().lineLimit(1).minimumScaleFactor(0.7)
+                let mark = LibraryStyle.verdictSymbol(s)
+                Image(systemName: mark.name)
+                    .foregroundStyle(mark.color.color)
                     .font(.system(size: big ? 20 : 15))
-                    .accessibilityLabel(s.accepted ? "Strong enough" : "Not strong enough")
+                    .accessibilityLabel(mark.label)
             } else {
                 Text("Reading the result…").dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
             }
@@ -549,9 +560,9 @@ struct LibraryHomeView: View {
                     if let s = v.summary?[safe: r] {
                         HStack(spacing: DS.Space.xs) {
                             Text(LibraryStyle.grams(s.massGrams)).monospacedDigit()
-                            Text(LibraryStyle.margin(s.worstCaseMargin)).monospacedDigit()
-                            Image(systemName: s.accepted ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                .foregroundStyle((s.accepted ? DS.Color.okGreen : DS.Color.danger).color)
+                            Text(LibraryStyle.margin(s)).monospacedDigit().lineLimit(1)   // ★ notes30: the words on bare vines
+                            Image(systemName: LibraryStyle.verdictSymbol(s).name)
+                                .foregroundStyle(LibraryStyle.verdictSymbol(s).color.color)
                         }
                         .font(.system(size: 13.5, weight: .semibold))
                     }
@@ -908,7 +919,9 @@ struct PartFolderView: View {
         case .recent: done.sort { (library.snapshots[$0.folderID]?.savedAt ?? .distantPast) > (library.snapshots[$1.folderID]?.savedAt ?? .distantPast) }
         case .rated: done.sort { ($0.marks.map(\.stars).max() ?? 0, $0.number) > ($1.marks.map(\.stars).max() ?? 0, $1.number) }
         case .lightest: done.sort { (best($0)?.massGrams ?? .infinity) < (best($1)?.massGrams ?? .infinity) }
-        case .strongest: done.sort { (best($0)?.worstCaseMargin ?? -1) > (best($1)?.worstCaseMargin ?? -1) }
+        // ★ notes30: a result with no valid margin (a load on bare vines) sorts with the unknown
+        case .strongest: done.sort { (best($0).flatMap { $0.marginWords == nil ? $0.worstCaseMargin : nil } ?? -1)
+                                     > (best($1).flatMap { $0.marginWords == nil ? $0.worstCaseMargin : nil } ?? -1) }
         }
         return shownPending.sorted { VersionNumber.newestFirst($0.number, $1.number) } + done
     }
@@ -1387,7 +1400,7 @@ struct LibraryVersionCard: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Open v\(v.number)\(ResultMark.letter(r))")
                 .background(DSParts.publish(k + "-name"))
-                Text(s.map { "\(LibraryStyle.grams($0.massGrams)) · \(LibraryStyle.margin($0.worstCaseMargin))" } ?? "")
+                Text(s.map { "\(LibraryStyle.grams($0.massGrams)) · \(LibraryStyle.margin($0))" } ?? "")   // ★ notes30
                     .font(.system(size: 12)).monospacedDigit().foregroundStyle(DS.Color.textTertiary.color).lineLimit(1).fixedSize()
                 Spacer(minLength: 4)
                 LibraryStars(value: mark.stars, size: 14) { library.setStars($0, folder: v.folderID, result: r) }

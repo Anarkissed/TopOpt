@@ -186,9 +186,12 @@ struct AppPopupLayer: View {
                 HStack(spacing: DS.Space.s) {
                     if let a = popups.action, let b = popups.second {   // ★ his 11-22: two choices and a dismiss, stacked
                         VStack(spacing: DS.Space.s) {
+                            // ★ notes30: each choice publishes its frame (a hosted test taps it, and holds it to 44 pt)
                             PillButton(a.title) { let run = a.run; popups.current = nil; run() }
+                                .background(CornerPairStyle.publish("appPopupChoice1"))
                                 .accessibilityIdentifier("app-popup-action")
                             PillButton(b.title, style: .secondary) { let run = b.run; popups.current = nil; run() }
+                                .background(CornerPairStyle.publish("appPopupChoice2"))
                                 .accessibilityIdentifier("app-popup-second")
                             if let c = popups.third {   // ★ notes25
                                 PillButton(c.title, style: .secondary) { let run = c.run; popups.current = nil; run() }
@@ -196,6 +199,7 @@ struct AppPopupLayer: View {
                             }
                             if popups.dismissShown {
                                 PillButton(popups.dismissTitle ?? "OK", style: .secondary) { popups.current = nil }
+                                    .background(CornerPairStyle.publish("appPopupDismiss"))
                                     .accessibilityIdentifier("app-popup-ok")
                             }
                         }

@@ -1452,8 +1452,13 @@ int main() {
       std::printf("[arm strengthen] ok %d code %s rounds %d %s %s\n", as.ok, as.code.c_str(), as.rounds_fixed, as.why.c_str(), as.detail.c_str());
       for (std::size_t at = asj.find("\"print_left_out\""); at != std::string::npos; at = asj.find("\"print_left_out\"", at + 1))
         std::printf("   %s\n", asj.substr(at, asj.find(", \"hash\"", at) - at).c_str());
-      CHECK(as.ok && as.rounds_fixed >= 1 && has(asj, "\"print_left_out\": ") && has(asj, "\"print_moved\": ") &&
-            has(asj, "\"print_added\": ") && !has(asj, "print_check_after_additions"));
+      // OS19, the interim guard (2026-11-26): the arm's tip load lands on its vines (no Solid or skin under the tip),
+      // so the check refuses it (load_on_bare_lattice) and no strengthening round starts. Before the guard: rounds >= 1
+      // with the print check's keys (print_left_out, print_moved, print_added); those, and the replay below, wait for a
+      // job whose load sits on solid.
+      CHECK(as.ok && as.code == "load_on_bare_lattice" && as.rounds_fixed == 0 &&
+            as.why == "A load lands on bare vines. Give the loaded face a Solid finish or a protected skin so its strength "
+                      "can be checked.");
       if (as.ok && as.rounds_fixed >= 1) {
         const std::string last = "arm_strengthen/r" + std::to_string(as.rounds_fixed);
         const double bars_last = num_after(asj, "bars", asj.find("\"round\": " + std::to_string(as.rounds_fixed)));
@@ -1465,6 +1470,73 @@ int main() {
                     most_after(asj, "widenings_taken_back"));
         CHECK(ar.r.ok && ar.r.code == "ok" && static_cast<double>(ar.r.bars) == bars_last && !has(asj, "\"print_clean\": false"));
       }
+    }
+  }
+
+  // ── §15b (OS19's companion, 2026-11-26): the additive strengthening rounds on a job whose load sits on SOLID. The arm
+  // of §15 with its weave 5 mm deep under the arm (z 12 to 17), so a solid cap 3 mm deep (four of the check's
+  // 0.75 mm voxels) carries the load, which now presses down on the whole top face (z = 20); held on the floor. The
+  // load is scaled from a probe so the weakest strut stands at about 0.6: the rounds run, and the file job replays the
+  // last round. (The arm itself, its load on the vines, is refused by the guard above.)
+  {
+    const StepModel amodel = import_part_file_resolved(kDir + "/arm.stl");
+    const int under = face_at(amodel, 0, 0, -1, -12.0), floor = face_at(amodel, 0, 0, -1, 0.0), top = face_at(amodel, 0, 0, 1, 20.0);
+    CHECK(under >= 0 && floor >= 0 && top >= 0);
+    const auto cap_job = [&](const std::string& strengthened) {
+      return "{\"mode\": \"lattice_file\", \"model\": \"arm.stl\", \"output\": \"cap_lattice.stl\", \"tensor\": \"arm.tensor\", "
+             "\"strength_job\": \"cap_sj.json\"" + (strengthened.empty() ? std::string() : ", \"strengthened\": \"" + strengthened + "\"") +
+             ", \"layout\": {\"region_ids\": [1], \"region_no_lattice\": [0], \"region_depth_mm\": [5], \"region_expand_mm\": [0], "
+             "\"region_face_counts\": [1], \"region_faces\": [" + std::to_string(under) + "], \"region_weave\": [true], "
+             "\"organic_spacing_min_mm\": 3, \"organic_spacing_max_mm\": 5, \"organic_width_mm\": 0.9, \"organic_width_heavy_mm\": 1.8}}";
+    };
+    const auto cap_sj = [&](double newtons, const std::string& settings) {
+      return "{\"model\": \"arm.stl\", \"material\": \"PLA\", \"mode\": \"lattice_part\", \"resolution\": 40, "
+             "\"loads\": {\"minimize_plastic\": true, \"safety_margin\": 1.5, \"build_dir\": [0, 0, 1], \"anchor_face_ids\": [" +
+             std::to_string(floor) + "], \"groups\": [{\"face_ids\": [" + std::to_string(top) + "], \"force\": [0, 0, " +
+             std::to_string(-newtons) + "]}]}, \"lattice\": {\"topology\": \"octet\", \"require_lattice_void_reaches_exterior\": false}, "
+             "\"grading\": {\"topology\": \"octet\", \"cell_mm\": 8, \"min_extrudable_width_mm\": 0.45, \"intent\": \"structural\"}, "
+             "\"output\": {\"report\": \"report.json\", \"mesh_format\": \"stl\", \"mesh_prefix\": \"variant\"}, \"strength_settings\": " +
+             settings + "}";
+    };
+    write(kDir + "/cap_sj.json", cap_sj(100.0, "{}"));
+    const Run cp = run("cap_probe", cap_job(""), "");
+    const std::string pb = block(cp.json);
+    const double cm = num_after(pb, "smallest_margin");
+    const auto verdict_of = [](const std::string& j) {
+      const std::size_t at = j.find("\"verdict\"");
+      return at == std::string::npos ? std::string("(none)") : j.substr(at, 24);
+    };
+    std::printf("[cap] probe at 100 N: ok %d code %s, smallest strut margin %.6g, load_share %.6g, load_on_frame_n %.6g, %s\n",
+                cp.r.ok, cp.r.code.c_str(), cm, num_after(pb, "load_share"), num_after(pb, "load_on_frame_n"), verdict_of(pb).c_str());
+    CHECK(cp.r.ok && cm > 0.0 && !has(pb, "load_on_bare_lattice"));
+    if (cp.r.ok && cm > 0.0) {
+    write(kDir + "/cap_sj.json", cap_sj(100.0 * cm / 0.6, "{\"strengthen_rounds\": 2}"));
+    write(kDir + "/cap_strengthen_job.json", cap_job(""));
+    std::filesystem::remove_all(kDir + "/cap_strengthen");
+    std::filesystem::create_directories(kDir + "/cap_strengthen");
+    const OrganicStrengthenResult cs = run_organic_strengthen(kDir + "/cap_strengthen_job.json", kDir + "/cap_strengthen", 0,
+                                                              MATERIALS_JSON_PATH, SETTINGS_RULES_PATH);
+    const std::string csj = slurp(kDir + "/cap_strengthen/strengthen.json");
+    std::printf("[cap strengthen] ok %d code %s rounds %d passing %d %s\n", cs.ok, cs.code.c_str(), cs.rounds_fixed, cs.passing,
+                cs.why.c_str());
+    for (int n = 0; n <= cs.rounds_fixed; ++n) {
+      const std::string rj = slurp(kDir + "/cap_strengthen/r" + std::to_string(n) + "/strength.json");
+      if (!rj.empty())
+        std::printf("   round %d: smallest strut margin %.6g, load_share %.6g, verdict %s\n", n, num_after(rj, "smallest_margin"),
+                    num_after(rj, "load_share"), verdict_of(rj).c_str());
+    }
+    for (std::size_t at = csj.find("\"print_left_out\""); at != std::string::npos; at = csj.find("\"print_left_out\"", at + 1))
+      std::printf("   %s\n", csj.substr(at, csj.find(", \"hash\"", at) - at).c_str());
+    CHECK(cs.ok && cs.rounds_fixed >= 1 && has(csj, "\"print_left_out\": ") && has(csj, "\"print_moved\": ") &&
+          has(csj, "\"print_added\": ") && !has(csj, "print_check_after_additions"));
+    if (cs.ok && cs.rounds_fixed >= 1) {
+      const std::string last = "cap_strengthen/r" + std::to_string(cs.rounds_fixed);
+      const double bars_last = num_after(csj, "bars", csj.find("\"round\": " + std::to_string(cs.rounds_fixed)));
+      const Run cr = run("cap_replay", cap_job(last + "/strengthened.json"), "");
+      std::printf("[cap] replay: ok %d code %s, bars %zu (the last round's %.0f); rounds print clean: %s\n", cr.r.ok,
+                  cr.r.code.c_str(), cr.r.bars, bars_last, has(csj, "\"print_clean\": false") ? "no" : "yes");
+      CHECK(cr.r.ok && cr.r.code == "ok" && static_cast<double>(cr.r.bars) == bars_last && !has(csj, "\"print_clean\": false"));
+    }
     }
   }
 

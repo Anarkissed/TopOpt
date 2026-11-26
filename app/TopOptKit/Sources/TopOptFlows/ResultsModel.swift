@@ -439,6 +439,9 @@ public struct ResultVariantVM: Equatable, Sendable {
     /// separate verdicts: a rung whose solid passes can produce a lattice that does
     /// not, and one badge must never stand for the other.
     public let latticeAccepted: Bool?
+    /// ★ notes30 (362's review): the words in its margin's place when the check refused to judge the load (a load on bare
+    /// vines: "Load on bare vines"); nil: its margin shows.
+    public var marginWords: String? = nil
 
     /// The tab's sub-line, e.g. "199 g · selected" / "199 g · plastic" (design).
     /// A latticed tab says what it is and which rung it came off instead, since its
@@ -1267,6 +1270,14 @@ public final class ResultsModel: ObservableObject {
                                       knockdown: latticeAnswer == nil ? infillKnockdown : 1,
                                       remote: outcome.computedRemotely)
         if let g = latticeAnswer?.governing { tabs = tabs.map { $0.withWorstCaseMargin(g) } }
+        // ★ notes30 (362's review): a load on bare vines has no valid margin — its words stand in the number's place (the list
+        // row, Compare), and no scenario says a margin either
+        if let w = OrganicBareVines.marginWords(reportJSON: outcome.reportJSON) {
+            tabs = tabs.map { var t = $0; t.marginWords = w; return t }
+            scenarioResults = scenarioResults.map {
+                ScenarioResult(name: $0.name, margin: nil, governs: $0.governs, unheld: $0.unheld, peakMPa: $0.peakMPa, peakMM: $0.peakMM)
+            }
+        }
         shownLetters.merge(FinalCheckWords.letters(tabs: tabs, blocks: reportBlocks,
                                                    vf: { self.requestedVolumeFraction(of: $0) })) { first, _ in first }
         // M7.viz.1 "honest heatmap": key the shared stress scale to the MATERIAL

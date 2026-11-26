@@ -14,6 +14,7 @@
 //     the lattice that thickness is the solid kept between the lattice and the surface (a deeper Protect skin or a keep-clear).
 //   * Infill → the lowest infill the check found that passes (core's number), against the infill now.
 //   * The load on open lattice → the loaded face's Protect: off now, on to try (no number exists).
+//   * ★ notes30: a load on bare vines → the loaded face is bare vines now; a Solid finish or a Protect skin to try.
 //   * Nothing carries the load → no setting holds the answer: no line (the card's text says why).
 // The words live in `OrganicCertifyCopy`, one place (the strength numbers' wording may still change: a one-line change).
 import Foundation
@@ -154,6 +155,8 @@ extension OrganicCertifyAdvice {
             return .init(setting: "Infill", line: OrganicCertifyCopy.infill(now: c.infillNow, passes: to))
         case "load_on_open_lattice":
             return .init(setting: "Protect", line: OrganicCertifyCopy.protect)
+        case OrganicBareVines.reason:   // ★ notes30: the finish now and the two to try (Solve offers both, centred)
+            return .init(setting: nil, line: OrganicBareVines.advice)
         case "beside_the_lattice", "beside_a_fixing", "beside_the_load", "inside_the_solid":
             let w: String
             switch issue.id {
