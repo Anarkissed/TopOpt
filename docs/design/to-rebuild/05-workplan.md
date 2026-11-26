@@ -36,6 +36,8 @@ DONE 08:05 beside the lock run: the too-small notice proved in a build (two faul
 
 NOTED 08:15 (LatticeReview): the Organic strength block now repeats byte for byte on claude/organic-engine 77c32c36 (the frame solve asks for Eigen's LDLT; Accelerate's did not repeat). OPEN ITEM: once that tip is in my base, put `test_to_same_job_twice` and the stage 1 lattice check back to exact bytes for the frame block (they compare to six digits and skip `residual` today).
 
+A2, 08:55: the automatic pad at strength 1.0 freezes 9526 voxels on the sample bracket against 3702 at a fixed 3 mm (pads of 7.1 and 8.6 mm behind the two thick faces, 2.0 mm behind the thin tab), which is why the everything-on versions are 4 to 13 g heavier. Strength 1.0 looks too deep; `sample_pad_low.out` (opt13) is running the bracket at 0.2 and 0.4 (3.2 / 4.5 mm behind 50 mm). The 1.4 runs still in `sample_pad64.sh` matter less now.
+
 A. Already agreed:
 - A1. Stage 1 report to the reviewer once the two lock runs are recorded (draft at the top of `stages/stage-1-true-loads.md`).
 - A2. The pad's one number: tables and PICTURES of the shapes around the fixed faces from the two sweeps; a recommended curve strength for him in the morning.
