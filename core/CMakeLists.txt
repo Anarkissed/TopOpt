@@ -565,6 +565,12 @@ add_test(NAME lattice_width_bounds COMMAND test_lattice_width_bounds)
 add_executable(test_lattice_layout tests/unit/test_lattice_layout.cpp)
 target_link_libraries(test_lattice_layout PRIVATE topopt)
 add_test(NAME lattice_layout COMMAND test_lattice_layout)
+# notes29 (his iPad notes on release 20, 2026-11-25): with Allow quilt off no strut type is laid past its own limits
+# (no cell under the open floor, no strut past the open look), in every mode; no holes in a region (no cell laid with
+# nothing in it); an even outline (no cut cell opened at the part's edge with no strut in it).
+add_executable(test_lattice_quilt_holes tests/unit/test_lattice_quilt_holes.cpp)
+target_link_libraries(test_lattice_quilt_holes PRIVATE topopt)
+add_test(NAME lattice_quilt_holes COMMAND test_lattice_quilt_holes)
 # Stage F: the printable mesh made from the layout (one closed piece as a slicer reads it,
 # sealed lattice kept, bridges, what the layer check asks left out, posts, cancel). Without
 # the Manifold library the writer says it cannot, and the test checks that it says so.

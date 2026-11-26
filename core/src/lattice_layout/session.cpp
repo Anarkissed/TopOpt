@@ -194,9 +194,13 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
   try {
     // (The reading itself happens inside the first lay_cells of a new domain.)
     CellSpec cells = settings.cells;
-    // One switch for the quilt (R2). His per-part choice lets the CELLS go as small, and only the cells: the struts
-    // are still set without the quilt, so a small cell carries the thinnest strut (set_struts: never under it).
-    cells.allow_quilt = settings.struts.allow_quilt || settings.small_cells_in_thin_walls;
+    // One switch for the quilt (R2). ★ notes29 (his iPad notes on release 20, 2026-11-25: "No matter what I did, the
+    // quilting kept on happening -- even with quilting off"): "Small cells in thin walls" no longer lets the cells go
+    // under the open look's floor. It did so for the WHOLE layout, not the thin walls alone, and each such cell carried
+    // the thinnest strut, past the open look and up to touching: the quilt, wherever the band or the stress shrank the
+    // cells. With Allow quilt off no cell is under the smallest cell the thinnest strut leaves open, and no strut is past
+    // the open look (lattice_quilt_limits); "Small cells in thin walls" is read with Allow quilt on only, where it is moot.
+    cells.allow_quilt = settings.struts.allow_quilt;
     cells.one_grid = settings.one_grid;   // "Let walls cut cells": the per-part switch is the session's
     // The stress the lattice is graded by (R16, R17), resolved ONCE, before the cells, for the cells (C22) and the
     // struts (By stress) alike: the stated reference, else the part's own, kept while the domain, the field and the
@@ -240,65 +244,11 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
     out.stress_reference_mpa = reference;
     out.step_held_at = step_held(cells);   // C24
     out.layout = lay_cells(*domain_, cells, threads, own_or_none);
-    // K3 (his 11-23 notes: quilting "should ALWAYS be off by default unless it is literally impossible to lattice without
-    // it"): with the quilt off, a Lattice region that lays NO cell at all (every place of it solid: its walls too thin
-    // for the smallest cell the thinnest strut leaves open) is laid again with the quilt's smallest cell, that region
-    // only, and named (Outcome::quilt_regions). Every other region keeps the layout it had, byte for byte. The struts are
-    // still set without the quilt (a small cell carries the thinnest strut), as with Small cells in thin walls.
-    // Only where the cell is Auto (cell_mm 0, the part's or the region's own, C23): a typed cell is his choice, and one
-    // that fits nowhere stays solid (his D4: "Cannot Lattice"; 362, 2026-11-24: quilt cells instead of his typed size
-    // ignore it).
-    if (!cells.allow_quilt) {
-      std::vector<int> bare;   // frames of regions with no cell and something solid, whose cell is Auto
-      for (const RegionCells& r : out.layout.regions) {
-        if (!(r.cells == 0 && r.solid > 0)) continue;
-        const auto o = own.find(r.region);
-        const double typed = o != own.end() ? region_cells(cells, o->second).cell_mm : cells.cell_mm;
-        if (!(typed > 0.0)) bare.push_back(r.frame);
-      }
-      if (!bare.empty()) {
-        CellSpec quilt = cells;
-        quilt.allow_quilt = true;
-        Layout again = lay_cells(*domain_, quilt, threads, own_or_none);
-        Layout& a = out.layout;
-        // The two lays open the same frames in the same order (one per region, region by region): a region's frame,
-        // walls, cells and solid places are taken from the second where it lays cells there.
-        if (again.frames.size() == a.frames.size() && again.regions.size() == a.regions.size()) {
-          std::vector<char> take(a.frames.size(), 0);
-          for (const int f : bare)
-            for (const RegionCells& r : again.regions)
-              if (r.frame == f && r.cells > 0 && static_cast<std::size_t>(f) < take.size()) take[static_cast<std::size_t>(f)] = 1;
-          bool any = false;
-          for (const char t : take) any = any || t;
-          if (any) {
-            std::vector<Cell> cells_now, solid_now;
-            std::vector<SolidWhy> why_now;
-            for (const Cell& c : a.cells)
-              if (!take[static_cast<std::size_t>(c.frame)]) cells_now.push_back(c);
-            for (std::size_t i = 0; i < a.solid.size(); ++i)
-              if (!take[static_cast<std::size_t>(a.solid[i].frame)]) { solid_now.push_back(a.solid[i]); why_now.push_back(a.solid_why[i]); }
-            for (const Cell& c : again.cells)
-              if (take[static_cast<std::size_t>(c.frame)]) cells_now.push_back(c);
-            for (std::size_t i = 0; i < again.solid.size(); ++i)
-              if (take[static_cast<std::size_t>(again.solid[i].frame)]) {
-                solid_now.push_back(again.solid[i]);
-                why_now.push_back(again.solid_why[i]);
-              }
-            for (std::size_t f = 0; f < take.size(); ++f)
-              if (take[f]) a.walls[f] = again.walls[f];
-            for (std::size_t i = 0; i < a.regions.size(); ++i)
-              if (take[static_cast<std::size_t>(a.regions[i].frame)]) {
-                a.regions[i] = again.regions[i];
-                out.quilt_regions.push_back(a.regions[i].region);
-              }
-            a.cells.swap(cells_now);
-            a.solid.swap(solid_now);
-            a.solid_why.swap(why_now);
-            if (a.absorb) a.index = index_cells(a);
-          }
-        }
-      }
-    }
+    // K3's quilt fallback (his 11-23 notes: a Lattice region that laid no cell at all was laid again with the quilt's
+    // smallest cell) is withdrawn by his notes on release 20 (2026-11-25: "even with quilting off", "limit both when
+    // 'Allow quilt' is turned off"): with Allow quilt off such a region stays solid, and the layout says why (its solid
+    // places' NoCell: the wall too thin, the region too shallow), so the app offers the fix. Outcome::quilt_regions is
+    // kept, always empty.
     unread_ = false;
     if (strands)   // O2: each weave region carries the smallest spacing of its strands
       for (Layout::Weave& w : out.layout.weave)
@@ -402,7 +352,17 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
       if (settings.drop_loose && !draft) {
         drop_loose_bars(out.bars, finish && !finish->arrived.empty() ? &finish->arrived : nullptr);   // G11
         out.stepped_edges = stepped_edges(out.bars);
+        // ★ notes29 (his notes on release 20: "There were even *holes* in the lattice -- which should NEVER happen"): a
+        // patch of cells of one size whose nodes meet none of the next size's (kelvin, rhombic: no node at a cube's
+        // corner) was a piece adrift, and the drop below took every strut of it. Its free nodes are run on into the
+        // lattice beside it first (join_cut_off_pieces); then what is still adrift goes, as before. Cube lattices only.
+        if (!strands) out.cut_off_joined = join_cut_off_pieces(out.bars, *domain_, threads, &out.layout);
         out.pieces = drop_adrift_bars(out.bars, *domain_, &out.layout);
+        // ★ notes29 ("the solid outline isn't even, there is a chunk cut out of it on either side"): a cell left with no
+        // strut of its own (a cut cell at the part's edge whose pieces were all too short or left hanging) is opened
+        // space in the file with nothing printed in it: a hole, or a notch in the outline. It is solid (D14).
+        if (!strands) out.empty_solid = solidify_empty_cells(out.layout, out.bars);
+        if (out.empty_solid > 0) last_cells_.regions = out.layout.regions;   // D23 reads the counts as they now are
         if (finish && !finish->prune.empty()) prune_weave(out.bars, finish->prune);   // J2, where the dropping ends
       } else {
         out.pieces = count_pieces(out.bars, *domain_, nullptr, nullptr, &out.layout);

@@ -53,7 +53,9 @@ public struct SolidReason: Equatable, Sendable {
             if !aesthetic { fixes.append(.aestheticCutCells) }
         }
         if cause == .tooFewAcross, aesthetic, !l.singleCellMembers { fixes.append(.oneCellAcross) }
-        if cause == .wallNarrow, !l.allowQuilt, !l.smallCellsInThinWalls { fixes.append(.smallCells) }
+        // ★ notes29 (his notes on release 20: "No matter what I did, the quilting kept on happening -- even with quilting
+        // off"): "Small cells in thin walls" is no longer offered. Its small cells were the quilt, and with Allow quilt off
+        // the engine lays no cell smaller than the one the thinnest strut leaves open, so it would change nothing.
         return SolidReason(cause: cause, share: share, line: "\(pct)% of the lattice you asked for is solid: \(why)",
                            fixes: Array(fixes.prefix(3)))
     }
