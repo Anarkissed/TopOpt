@@ -2,6 +2,15 @@
 
 Status 2026-11-22: APPROVED by the reviewer (rulings 06:18Z and 06:48Z); both helper prompts below are approved as they stand. Helpers start after the stage 0 move is released and the maintainer has created their channels. The maintainer's OK on helpers: "Yes two helpers are good as long as they're Opus 5.5". Each helper gets its own small channel (reviewer, TOReview, the helper) and never posts in #TORebuildGroup.
 
+## PAUSED 2026-11-25 19:30 EST: weekly usage at 94 % (rule: stop at 95 %)
+
+The maintainer was messaged at 94 % (the jump from 81 % came inside five hours of three agents working). The lead's 20-minute work tick is cancelled; both helpers were told to finish their step, write where they are, and stop at 95 %. Usage resets Saturday 2026-11-28 00:00 EST. Nothing of mine is running; no build folder of mine holds the lock.
+
+To resume (next session or on his word): re-create the work tick (CronCreate, every 20 minutes, the prompt in memory `toreview-use-waiting-time-2026-11-24`), then take the queue below from the top. The first three items on resuming:
+- LatticeReview's answer on why job B earns no credited cell (0 of 64 on the turned 56 mm box); then, on job B, the frozen mask against `LatticeCredit::cell` (none both, none neither). LatticeReview is waiting on this and was told about an hour.
+- The reviewer's ruling on writing stage 2's steps 1 and 2 in `analyze.cpp` behind a switch (asked 2026-11-25, TOReview channel).
+- Top Motor Mount optimised both ways and pad 2 / 3 / 4.5 mm (about an hour per run, under the lock), then the stage 1 report.
+
 ## Work queue (the lead's own; kept stocked; top item first)
 
 The maintainer's order (2026-11-25): never sit waiting on the lock. Every wake-up records what finished, then does the next open item here.
