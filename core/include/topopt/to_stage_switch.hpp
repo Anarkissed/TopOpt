@@ -7,8 +7,8 @@
 //   unset / "voxel" : today's behaviour everywhere. The default until the gate.
 //   "face"          : loads, pads and protection depths from the drawn face
 //                     (face_loads.hpp), pads and protections in mm; a glued
-//                     anchor holds the drawn face's own nodes (scenario jobs
-//                     still clamp the voxels it lies on); the optimiser's stop rule
+//                     anchor holds the drawn face's own nodes, in a plain job
+//                     and in every load scenario; the optimiser's stop rule
 //                     watches the design's own stress, not the stress in the
 //                     voxels a load or an anchor sits on (ledger P-15).
 //   "face_spring"   : as "face", and each anchor node is held by a spring in

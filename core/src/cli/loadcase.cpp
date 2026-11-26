@@ -741,7 +741,7 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
     // (every node that stands for at least a fifth of a cell-face of it), not all
     // eight corners of every voxel the face lies on, which is a clamp one voxel
     // thick (LatticeReview's catch, 2026-11-25: the job path still did that).
-    // Scenario jobs keep the voxel clamp below.
+    // Scenario jobs build their own anchors further down, by the same rule.
     std::size_t n_held = 0;
     for (const MinimizePlasticOptions::AnchorVoxels& a : anchor_voxels) {
       const std::vector<FacePiece> pieces =
@@ -1193,6 +1193,26 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
       for (int c = 0; c < 8; ++c)
         visit(fea_node_index(grid, i + (c & 1), j + ((c >> 1) & 1), k + ((c >> 2) & 1)));
     };
+    // The nodes one anchor holds. Today: all eight corners of each of its Fixture
+    // voxels. TO rebuild stage 1 (switch on): the nodes of the drawn face itself,
+    // the same rule a single load case's glued anchor follows, so a scenario job
+    // and a plain job hold the same nodes for the same face.
+    auto anchor_nodes = [&](const MinimizePlasticOptions::AnchorVoxels& a) {
+      std::vector<int> out;
+      if (face_load_mode() != FaceLoadMode::Voxel) {
+        const std::vector<FacePiece> pieces =
+            a.face_id >= 0
+                ? face_pieces(model, {a.face_id}, 0.5 * grid.spacing)
+                : region_pieces(model, region_or_throw(a.region_id, "load scenario anchor"),
+                                0.5 * grid.spacing);
+        for (const DirichletBC& b : face_clamp_bcs(grid, face_node_areas(grid, pieces)))
+          if (b.component == 0) out.push_back(b.node);
+        return out;
+      }
+      for (const std::size_t v : a.part_voxels)
+        if (grid.tags[v] == VoxelTag::Fixture) corners(v, [&](int n) { out.push_back(n); });
+      return out;
+    };
     opts.scenarios.clear();
     {  // the lightest scenario (his decision, 2026-10-28): the same line as the job's
       std::vector<std::pair<std::string, double>> sizes;
@@ -1221,30 +1241,25 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
       };
       for (const MinimizePlasticOptions::AnchorVoxels& a : opts.anchor_voxels) {
         if (!on_here(a)) continue;
-        for (const std::size_t v : a.part_voxels)
-          if (grid.tags[v] == VoxelTag::Fixture)
-            corners(v, [&](int n) {
-              if (held.insert(n).second)
-                for (int c = 0; c < 3; ++c) s.bcs.push_back({n, c, 0.0});
-            });
+        for (const int n : anchor_nodes(a))
+          if (held.insert(n).second)
+            for (int c = 0; c < 3; ++c) s.bcs.push_back({n, c, 0.0});
       }
       if (held.empty())
         throw std::invalid_argument("Scenario \u201C" + sc.name +
                                     "\u201D has no anchor switched on");
       for (const MinimizePlasticOptions::AnchorVoxels& a : opts.anchor_voxels) {
         if (on_here(a)) continue;
-        for (const std::size_t v : a.part_voxels)
-          if (grid.tags[v] == VoxelTag::Fixture)
-            corners(v, [&](int n) {
-              if (held.count(n) || !weak.insert(n).second) return;
-              DirichletBC b;
-              b.node = n;
-              b.spring = k_weak;
-              b.spring_tangent = k_weak;
-              b.normal = Vec3{1.0, 0.0, 0.0};
-              b.contact = false;
-              s.bcs.push_back(b);
-            });
+        for (const int n : anchor_nodes(a)) {
+          if (held.count(n) || !weak.insert(n).second) continue;
+          DirichletBC b;
+          b.node = n;
+          b.spring = k_weak;
+          b.spring_tangent = k_weak;
+          b.normal = Vec3{1.0, 0.0, 0.0};
+          b.contact = false;
+          s.bcs.push_back(b);
+        }
       }
       for (const ProductionLoadCase::LoadGroup& g : sc.groups) {
         if (!(std::fabs(g.force.x) + std::fabs(g.force.y) + std::fabs(g.force.z) > 0.0))

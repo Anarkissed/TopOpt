@@ -22,7 +22,7 @@ Branch `claude/topopt-review-rebuild-3c317f`. Status: IN PROGRESS. Nothing here 
 - #362: hand-over items 1 to 3 below (the bridge's tag and depth previews; the two self-weight tagging sites of the lattice strength check in run_job.cpp).
 - `lattice_depth_tie` section 0a and `test_print_frame.cpp:721` in their `face` forms; 721 moves because of the frame's load rule, not the loader.
 - LatticeReview's interim guard (13b28529 on claude/organic-engine): a structural Organic job whose load lands on bare lattice is refused with one pop-up offering Skin or Solid.
-- Scenario jobs keep the voxel clamp for now (their anchors that are off in a scenario are weak springs on the same nodes); said here so it is not a surprise.
+- Scenario jobs: since 2026-11-25 23:50 their anchors follow the same rule (the drawn face's own nodes are held when the anchor is on in a scenario, and carry the weak springs when it is off), so the voxel path can be deleted for them too. Syntax-checked; NOT yet run on a scenario job (owed: one made two-scenario job both ways).
 - Rule P (run time within 10 %): to be re-read on a quiet machine; on a shared one the two stand runs did the same solver work and differed 40 % on the clock.
 
 **Asked of the reviewer.** Flip the default to `face` (glued anchors on the face's own nodes; bearings by drawn area) and delete the voxel path and the switch, in the release that carries the list above. `face_spring` (every anchor an area spring) is NOT proposed as the default: it changes what "fixed" means and has only the as-drawn tables behind it; keep it as a later option or drop it, his call.
