@@ -177,6 +177,29 @@ int main() {
     }
     CHECK(noreg.unheld && noreg.unheld_pieces == 1, "support-only, no registration: refused (FeaLoadUnheld, 1 piece)");
 
+    // The refusal reaches every optimiser's existing catch: it IS a
+    // SolverNonConvergence (iterations 0), and the counter grows by one per refusal.
+    const long long count0 = fea_matfree_load_unheld_count();
+    bool caught_as_nonconv = false;
+    int it_reported = -1;
+    {
+      FeaAnchorBySupportOnly rule;
+      try {
+        CgInfo info;
+        fea_matfree_reset_mg_stagnation_latch();
+        (void)fea_solve_mgcg_matfree(c.g, c.E, 0.39, c.bcs, c.loads, 1e-8, 20000, &info, nullptr, nullptr);
+      } catch (const SolverNonConvergence& e) {
+        caught_as_nonconv = dynamic_cast<const FeaLoadUnheld*>(&e) != nullptr;
+        it_reported = e.iterations;
+      }
+    }
+    int last_pieces = 0;
+    long long last_voxels = 0;
+    fea_matfree_last_load_unheld(&last_pieces, &last_voxels);
+    CHECK(caught_as_nonconv && it_reported == 0, "the refusal is caught as a SolverNonConvergence (iterations 0)");
+    CHECK(fea_matfree_load_unheld_count() == count0 + 1, "the refusal counter grows by one");
+    CHECK(last_pieces == 1 && last_voxels == c.cube_voxels, "the last refusal reports its pieces and voxels");
+
     const Run after = solve(c);
     CHECK(after.ok && same_bytes(before.sol, after.sol), "outside the scopes: today's bytes");
     std::printf("weighted cube: today %d loose, %d cycles; support-only + weight: %d loose, %d cycles, weight out %.4f N, energy diff %.1e; no registration: %s\n",

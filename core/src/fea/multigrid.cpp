@@ -2746,6 +2746,9 @@ void vcycle_quality(const MfHierarchy& H, const MgOpts& o, int iters,
 thread_local int g_anchor_support_only = 0;
 thread_local const std::vector<double>* g_body_force = nullptr;  // FeaBodyLoadScope
 thread_local Vec3 g_body_dir{0.0, 0.0, 0.0};                      // unit
+thread_local long long g_load_unheld_count = 0;  // FeaLoadUnheld throws, only grows
+thread_local int g_last_unheld_pieces = 0;
+thread_local long long g_last_unheld_voxels = 0;
 
 struct IslandScan {
   std::vector<int> drop;        // LOOSE voxels, solved at the floor, ascending
@@ -3082,6 +3085,9 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
                     "(%lld voxels) reach no support",
                     loose.loaded_loose, loose.loaded_loose_voxels);
       std::fprintf(stderr, "[loose] REFUSED: %s\n", msg);
+      ++g_load_unheld_count;
+      g_last_unheld_pieces = loose.loaded_loose;
+      g_last_unheld_voxels = loose.loaded_loose_voxels;
       throw FeaLoadUnheld(msg, loose.loaded_loose, loose.loaded_loose_voxels);
     }
     // ...and a loose piece's own registered weight leaves the solve with it.
@@ -3912,6 +3918,11 @@ const std::vector<char>* fea_matfree_set_island_keep_mask(const std::vector<char
 }
 void fea_matfree_loose_rule_off_enter() { ++g_loose_rule_off; }
 void fea_matfree_anchor_support_only_enter() { ++g_anchor_support_only; }
+long long fea_matfree_load_unheld_count() { return g_load_unheld_count; }
+void fea_matfree_last_load_unheld(int* pieces, long long* voxels) {
+  if (pieces != nullptr) *pieces = g_last_unheld_pieces;
+  if (voxels != nullptr) *voxels = g_last_unheld_voxels;
+}
 void fea_matfree_anchor_support_only_exit() {
   if (g_anchor_support_only > 0) --g_anchor_support_only;
 }

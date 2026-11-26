@@ -1576,14 +1576,21 @@ struct FeaBodyLoadScope {
 };
 
 // Thrown by a matrix-free solve under FeaAnchorBySupportOnly when a piece that
-// reaches no support carries an applied load (see above). The caller refuses the
-// version in plain words; `pieces` / `voxels` say how much of the part is cut off.
-struct FeaLoadUnheld : public std::runtime_error {
+// reaches no support carries an applied load (see above). A SolverNonConvergence
+// (iterations 0, residual 0), so every optimiser's existing catch refuses THAT
+// rung with a well-formed result and the ladder goes on (TOReview 11-26);
+// `pieces` / `voxels` say how much of the part is cut off. Every throw also bumps
+// a thread-local counter that only grows (fea_matfree_load_unheld_count), and
+// fea_matfree_last_load_unheld reports the last one's size, so a caller reading
+// the counter before and after a rung can name the reason in plain words.
+struct FeaLoadUnheld : public SolverNonConvergence {
   FeaLoadUnheld(const std::string& what_arg, int pieces_, long long voxels_)
-      : std::runtime_error(what_arg), pieces(pieces_), voxels(voxels_) {}
+      : SolverNonConvergence(what_arg, 0, 0.0), pieces(pieces_), voxels(voxels_) {}
   int pieces = 0;
   long long voxels = 0;
 };
+long long fea_matfree_load_unheld_count();
+void fea_matfree_last_load_unheld(int* pieces, long long* voxels);
 
 // THE CONNECTION RULE, on a DESIGN (not a solve): the same classifier the
 // solves use — face-connected pieces of `solid` (non-zero = material; voxels
