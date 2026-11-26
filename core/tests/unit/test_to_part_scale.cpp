@@ -24,28 +24,31 @@ topopt::VoxelGrid block(int nx, int ny, int nz, double spacing) {
 int main() {
   using namespace topopt;
 
-  // The arithmetic. A 0.45 mm line needs 6 x 0.45 = 2.7 mm.
+  // The arithmetic. A 0.45 mm line needs 3 x 0.45 = 1.35 mm (two one-line walls
+  // and a gap). Nozzles offered: 0.6, 0.4, 0.2 mm (line = 1.125 x nozzle).
   {
-    const PartScale a = part_scale(3.0, 0.45);
-    CHECK(!a.too_small && std::fabs(a.needed_mm - 2.7) < 1e-12);
-    const PartScale b = part_scale(2.0, 0.45);  // a 0.25 mm nozzle needs 1.6875 mm
-    CHECK(b.too_small && b.nozzle_that_fits_mm == 0.25);
-    const PartScale c = part_scale(1.5, 0.45);  // a 0.2 mm nozzle needs 1.35 mm
+    const PartScale a = part_scale(2.0, 0.45);
+    CHECK(!a.too_small && std::fabs(a.needed_mm - 1.35) < 1e-12);
+    const PartScale b = part_scale(1.2, 0.45);  // a 0.2 mm nozzle needs 0.675 mm
+    CHECK(b.too_small && b.nozzle_that_fits_mm == 0.2);
+    const PartScale c = part_scale(1.3, 0.675); // a 0.6 nozzle's line: 0.4 fits (1.35? no: 1.3 < 1.35), so 0.2
     CHECK(c.too_small && c.nozzle_that_fits_mm == 0.2);
-    const PartScale d = part_scale(0.8, 0.45);  // nothing fits: resin
+    const PartScale c2 = part_scale(1.5, 0.675); // needs 2.025; a 0.4 mm nozzle needs 1.35
+    CHECK(c2.too_small && c2.nozzle_that_fits_mm == 0.4);
+    const PartScale d = part_scale(0.5, 0.45);  // nothing fits: resin
     CHECK(d.too_small && d.nozzle_that_fits_mm == 0.0);
     const PartScale e = part_scale(1.0, 0.0);   // no line width given: 0.45
     CHECK(e.line_width_mm == 0.45 && e.too_small);
   }
 
-  // The measure on a part that fills its own grid. A 2 mm thick plate (the fault
+  // The measure on a part that fills its own grid. A 1 mm thick plate (the fault
   // of 2026-11-26: with the outside of the grid taken as solid it read as thick
   // and was never flagged).
   {
-    const VoxelGrid plate = block(40, 30, 8, 0.25);  // 10 x 7.5 x 2 mm
+    const VoxelGrid plate = block(40, 30, 4, 0.25);  // 10 x 7.5 x 1 mm
     const double t = thickest_section_mm(plate, 32);
-    std::printf("plate 10 x 7.5 x 2 mm: thickest section %.3f mm\n", t);
-    CHECK(std::isfinite(t) && t > 1.5 && t < 2.5);
+    std::printf("plate 10 x 7.5 x 1 mm: thickest section %.3f mm\n", t);
+    CHECK(std::isfinite(t) && t > 0.7 && t < 1.3);
     CHECK(part_scale(t, 0.45).too_small);
   }
   // A 5 mm cube: measured, and big enough.

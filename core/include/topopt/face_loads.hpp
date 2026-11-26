@@ -137,14 +137,15 @@ double face_backing_thickness_mm(const VoxelGrid& grid, const std::vector<FacePi
 
 // THE AUTOMATIC PAD's rule, pure arithmetic (the maintainer, 2026-11-26: "Can't it
 // be a ratio? So as it grows, the thickness slows down?"): the pad grows with the
-// square root of the thickness of material behind the face, never under two
-// wall-line widths (one line does not print), no ceiling.
-//   pad = max(2 x line width, sqrt(strength x thickness))
+// square root of the thickness of material behind the face, never under ONE
+// wall-line width (a solid wall one line wide prints; his word 2026-11-26: the
+// two-line rule is for lattices only), no ceiling.
+//   pad = max(line width, sqrt(strength x thickness))
 // A line width of 0 or less is read as 0.45 mm.
 inline double auto_pad_depth_mm(double thickness_mm, double strength_mm, double line_width_mm) {
   const double lw = line_width_mm > 0.0 ? line_width_mm : 0.45;
   const double root = thickness_mm > 0.0 && strength_mm > 0.0 ? std::sqrt(strength_mm * thickness_mm) : 0.0;
-  return root > 2.0 * lw ? root : 2.0 * lw;
+  return root > lw ? root : lw;
 }
 
 }  // namespace topopt
