@@ -522,6 +522,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   std::optional<BuildFrameRotation> analyze_bake;
   if (bake_plan.bake) analyze_bake = build_frame_rotation(applied_build_dir);
   result.voxel_mass_grams = a.mass_grams;
+  result.voxel_mass_solid_grams = a.mass_grams_solid;  // TO rebuild stage 2
 
   {
     std::error_code ec;
