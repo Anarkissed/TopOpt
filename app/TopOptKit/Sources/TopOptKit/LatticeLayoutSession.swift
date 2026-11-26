@@ -252,6 +252,11 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         public var stressReferenceMPa = 0.0, stepHeldAt = 0.0
         public var thinSolid = 0
         public var msRead = 0.0, msCells = 0.0, msBars = 0.0, msBridge = 0.0
+        /// ★ notes30: the strut stream — how many struts it handed over, how many of those the landed bars do not hold (core's
+        /// own check: expected 0), and the solid view's map made in the lay (empty: none asked).
+        public var streamed = 0, streamedMissing = 0
+        public var map: [Int8] = []
+        public var mapMS = 0.0
         public var barCount: Int { bars.count / 7 }
     }
 
@@ -272,6 +277,8 @@ public final class LatticeLayoutSession: @unchecked Sendable {
     private let lock = NSLock()
     private var generation: UInt64 = 0
     private var closed = false
+    /// ★ notes30: what the next `lay` is asked to stream (taken by it; nil: nothing).
+    private var nextStream: StreamAsk?
 
     /// The worker's stack: 16 MB (the iPad's main thread has 1 MB; core recurses in its measure).
     public static let workerStackSize = 16 << 20
@@ -357,7 +364,18 @@ public final class LatticeLayoutSession: @unchecked Sendable {
             return generation
         }
         topoptbridge.lattice_layout_cancel(id)          // the one running now comes back cancelled
-        let raw = convert(settings)
+        var ask = convert(settings)
+        // ★ notes30: the strut stream, when asked for this lay (changes nothing it makes)
+        if let st = lock.withLock({ () -> StreamAsk? in defer { nextStream = nil }; return nextStream }) {
+            ask.stream = true
+            ask.stream_up_x = st.up.x; ask.stream_up_y = st.up.y; ask.stream_up_z = st.up.z
+            if st.hasMap {
+                ask.map_origin_x = st.mapOrigin.x; ask.map_origin_y = st.mapOrigin.y; ask.map_origin_z = st.mapOrigin.z
+                ask.map_voxel_mm = st.mapVoxel
+                ask.map_nx = st.mapDims.x; ask.map_ny = st.mapDims.y; ask.map_nz = st.mapDims.z
+            }
+        }
+        let raw = ask
         let sid = id
         return try await withTaskCancellationHandler {
             try await worker.run { [weak self] () throws -> Result in
@@ -517,6 +535,7 @@ public final class LatticeLayoutSession: @unchecked Sendable {
     }
 
     func isCurrent(_ gen: UInt64) -> Bool { lock.withLock { gen == generation && !closed } }
+    func lockedSetStream(_ ask: StreamAsk?) { lock.withLock { nextStream = ask } }
 
     // MARK: conversion
 
@@ -635,6 +654,14 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         o.stressReferenceMPa = r.stress_reference_mpa; o.stepHeldAt = r.step_held_at
         o.thinSolid = Int(r.thin_solid)
         o.msRead = r.ms_read; o.msCells = r.ms_cells; o.msBars = r.ms_bars; o.msBridge = r.ms_bridge
+        o.streamed = Int(r.streamed); o.streamedMissing = Int(r.streamed_missing)   // ★ notes30
+        let mapVec = r.map.rg   // (one copy, straight from the vector's storage: a map is about 2 MB)
+        o.map = withExtendedLifetime(mapVec) {
+            let n = Int(mapVec.size())
+            guard n > 0, let p = mapVec.__dataUnsafe() else { return [] }
+            return Array(UnsafeBufferPointer(start: p, count: n))
+        }
+        o.mapMS = r.map.ms
         return o
     }
 
@@ -752,5 +779,90 @@ final class LatticeLayoutWorker: @unchecked Sendable {
         stopping = true
         cond.signal()
         cond.unlock()
+    }
+}
+
+// MARK: - ★ notes30 — the strut stream (his 11-26: "The strut engine hands over its struts while it works, the way Organic's
+// engine does, so the floors rise in step with the real work."). Core's StrutTap through the bridge (LatticeLayoutBridge.hpp:
+// LatticeLayoutSettings.stream / stream_up / map_*, lattice_layout_strut_read, lattice_layout_strut_map;
+// agent-scratch/organic1/notes30/strut-stream/api.md).
+
+extension LatticeLayoutSession {
+    /// The session's next `lay` streams (`ask`), or not (nil). Any thread.
+    public func streamNextLay(_ ask: StreamAsk?) { lockedSetStream(ask) }
+
+    /// What the NEXT lay is asked to hand over while it works: its floors' up (the part's own coordinates) and the solid view's
+    /// map to make in the lay behind its line (`mapDims` zero: none). Changes nothing the lay makes; that lay alone takes it.
+    public struct StreamAsk: Sendable, Equatable {
+        public var up: SIMD3<Double>
+        public var mapOrigin: SIMD3<Float>
+        public var mapVoxel: Float
+        public var mapDims: SIMD3<Int32>
+        public init(up: SIMD3<Double>, mapOrigin: SIMD3<Float> = .zero, mapVoxel: Float = 0, mapDims: SIMD3<Int32> = .zero) {
+            self.up = up; self.mapOrigin = mapOrigin; self.mapVoxel = mapVoxel; self.mapDims = mapDims
+        }
+        public var hasMap: Bool { mapVoxel > 0 && mapDims.x > 0 && mapDims.y > 0 && mapDims.z > 0 }
+    }
+
+    /// What the session's strut lay has handed over so far (LatticeLayoutStruts): the lay's number, its phase (0 none · 1
+    /// cells · 2 bars · 3 pieces · 4 landed · 5 given up), its PLAN (fixed at its start), its progress and finished line, and
+    /// the struts from `from` on — exactly as the landed result's bars.
+    public struct Struts: Sendable, Equatable {
+        public var lay: UInt64
+        public var phase: Int
+        public var next: Int
+        public var up: SIMD3<Float>
+        public var lo: SIMD3<Float>, hi: SIMD3<Float>
+        public var lowMM: Double, highMM: Double
+        public var slots: Int, slotsLaid: Int
+        public var lineMM: Double
+        public var total: Int, missing: Int
+        public var bars: [Float]
+        public var flags: [UInt8]
+        public var cell: [Float]
+        public var mapState: Int
+        public var mapSlabsDone: [UInt8]
+    }
+
+    /// The struts handed over from `from` on (at most `most`; 0 all). SYNCHRONOUS and callable from ANY thread while a lay
+    /// runs: never through the session's worker, never waits on the lay (as `growthRead`).
+    public func strutRead(from: Int, most: Int = 0) throws -> Struts {
+        var err = topoptbridge.BridgeError()
+        let r = topoptbridge.lattice_layout_strut_read(id, Int64(Swift.max(0, from)), Int64(Swift.max(0, most)), &err)
+        if !err.ok { throw TopOptError(message: String(err.message)) }
+        let barsVec = r.bars, flagsVec = r.bar_flags, cellVec = r.bar_cell, slabsVec = r.map_slabs_done
+        let bars: [Float] = withExtendedLifetime(barsVec) {
+            let n = Int(barsVec.size()); guard n > 0, let p = barsVec.__dataUnsafe() else { return [] }
+            return Array(UnsafeBufferPointer(start: p, count: n))
+        }
+        let flags: [UInt8] = withExtendedLifetime(flagsVec) {
+            let n = Int(flagsVec.size()); guard n > 0, let p = flagsVec.__dataUnsafe() else { return [] }
+            return Array(UnsafeBufferPointer(start: p, count: n))
+        }
+        let cell: [Float] = withExtendedLifetime(cellVec) {
+            let n = Int(cellVec.size()); guard n > 0, let p = cellVec.__dataUnsafe() else { return [] }
+            return Array(UnsafeBufferPointer(start: p, count: n))
+        }
+        let slabs: [UInt8] = withExtendedLifetime(slabsVec) {
+            let n = Int(slabsVec.size()); guard n > 0, let p = slabsVec.__dataUnsafe() else { return [] }
+            return Array(UnsafeBufferPointer(start: p, count: n))
+        }
+        return Struts(lay: r.lay, phase: Int(r.phase), next: Int(r.next),
+                      up: SIMD3(r.up.0, r.up.1, r.up.2), lo: SIMD3(r.lo.0, r.lo.1, r.lo.2), hi: SIMD3(r.hi.0, r.hi.1, r.hi.2),
+                      lowMM: r.low_mm, highMM: r.high_mm, slots: Int(r.slots), slotsLaid: Int(r.slots_laid),
+                      lineMM: r.line_mm, total: Int(r.total), missing: Int(r.missing),
+                      bars: bars, flags: flags, cell: cell, mapState: Int(r.map_state), mapSlabsDone: slabs)
+    }
+
+    /// The stream's map as it stands (empty before it is made): lattice_layout_grid's box and encoding. Any thread.
+    public func strutMap() throws -> [Int8] {
+        var err = topoptbridge.BridgeError()
+        let r = topoptbridge.lattice_layout_strut_map(id, &err)
+        if !err.ok { throw TopOptError(message: String(err.message)) }
+        let rgVec = r.rg
+        return withExtendedLifetime(rgVec) {
+            let n = Int(rgVec.size()); guard n > 0, let p = rgVec.__dataUnsafe() else { return [] }
+            return Array(UnsafeBufferPointer(start: p, count: n))
+        }
     }
 }

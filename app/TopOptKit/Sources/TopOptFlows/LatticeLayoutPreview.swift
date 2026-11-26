@@ -820,6 +820,7 @@ public final class LatticeLayoutPreview: ObservableObject {
             // ★ notes30 (his 11-26, option D): the struts the engine hands over while it lays, read as it lays them (about
             // every 0.15 s, on the main actor, never through the session's worker); the floors rise behind its finished line.
             // None for a Live preview lay (quiet), with Skip all animations, or when the engine streams nothing.
+            session.streamNextLay(nil)   // (a stream asked for a lay that never ran is not this lay's)
             let streaming = watchStruts(session)
             defer { streaming?.stop() }
             t0 = Date()
@@ -836,8 +837,13 @@ public final class LatticeLayoutPreview: ObservableObject {
             if solidWanted, let box, !LatticeBuildShow.controlOff {
                 refresh.reached(Self.stepMap)
                 t0 = Date()
-                map = try? await Self.map(session, box, token: token,
-                                          cutSmooth: Self.cutSmoothWanted(lattice: latticeAtLay, printAccurate: printAccurate))
+                let cut = Self.cutSmoothWanted(lattice: latticeAtLay, printAccurate: printAccurate)
+                let g = Self.mapGeometry(box)
+                if !r.map.isEmpty, r.map.count == 2 * Int(g.dims.x) * Int(g.dims.y) * Int(g.dims.z) {
+                    map = (await Self.grid(r.map, g, token: token, cutSmooth: cut), r.mapMS)   // ★ notes30: made by the lay
+                } else {
+                    map = try? await Self.map(session, box, token: token, cutSmooth: cut)
+                }
                 guard !Task.isCancelled else { return }
                 stepS[Self.stepMap] = Date().timeIntervalSince(t0)
             }
@@ -1595,6 +1601,14 @@ public final class LatticeLayoutPreview: ObservableObject {
                 r.ms)
     }
 
+    /// ★ notes30 (C4): the map the lay made itself (lattice_layout_grid's encoding), drawn as `map` draws its own.
+    static func grid(_ raw: [Int8], _ g: (origin: SIMD3<Float>, voxel: Float, dims: SIMD3<Int32>), token: Int,
+                     cutSmooth: Bool) async -> LatticeLayoutSolidGrid {
+        let dims = g.dims
+        let rg = cutSmooth ? await Task.detached(priority: .userInitiated) { LatticeLayoutSolidGrid.cutSmoothed(raw, dims: dims) }.value : raw
+        return LatticeLayoutSolidGrid(token: token, origin: g.origin, voxel: g.voxel, dims: dims, rg: rg, smooth: cutSmooth)
+    }
+
     /// ★ notes28 (his iPad notes on release 18, img 77: "Is there no way to vectorize the mechanism to cut the wall? If not, is
     /// there a way to implement anti-aliasing to make the stair-stepping less pronounced? It's on every wall."). Whether the
     /// regular lattice's cut is drawn smooth (`LatticeLayoutSolidGrid.cutSmoothed`, read linear, its edge anti-aliased in the
@@ -2170,12 +2184,14 @@ extension LatticeLayoutPreview {
 
     // MARK: ★ notes30 — the struts handed over while the engine lays (option D, his 11-26)
 
-    /// ★ notes30: the session's strut tap — the engine's (core's StrutTap, once the session carries it), or the tests' fake
-    /// engine. nil: the engine streams nothing (the lay lands whole and its floors rise after, as release 21).
+    /// ★ notes30: the session's strut tap — the engine's (core's StrutTap through the bridge: LatticeSessionStrutTap), or the
+    /// tests' fake engine. nil (the red control): the engine streams nothing — the lay lands whole and its floors rise after.
     nonisolated(unsafe) static var strutTapForTesting: ((LatticeLayoutSession) -> LatticeStrutTap?)?
+    /// RED CONTROL (tests): the engine is never asked to stream (release 21: the lay lands whole).
+    nonisolated(unsafe) public static var controlNoStream = false
     static func strutTap(_ s: LatticeLayoutSession) -> LatticeStrutTap? {
         if let f = strutTapForTesting { return f(s) }
-        return (s as AnyObject) as? LatticeStrutTap
+        return controlNoStream ? nil : LatticeSessionStrutTap(s)
     }
 
     /// A regular lay is about to run on `session`: the engine is asked to hand its struts over (its line rising along the
@@ -2231,8 +2247,10 @@ extension LatticeLayoutPreview {
         guard streamed else { return }
         let s = build.stream
         let missing = s.missing(from: r.bars)
-        layStages["streamedStruts"] = Double(s.count)
+        layStages["streamedStruts"] = Double(s.bars.count / 7)
         layStages["streamedMissing"] = Double(missing)
+        layStages["coreStreamedMissing"] = Double(r.streamedMissing)   // core's own check of the same promise
+        if r.streamedMissing > 0 { NSLog("TopOpt strut stream: core counts %d handed-over struts not in the finished lattice", r.streamedMissing) }
         if missing > 0 { NSLog("TopOpt strut stream: %d struts handed over are not in the finished lattice", missing) }
         Self.streamMissingTotal += missing
         if let start = build.timelapse?.start,

@@ -150,6 +150,7 @@ final class Notes30StrutStreamTests: XCTestCase {
         LatticeLayoutBarsPass.controlStreamReupload = false
         LatticeLayoutBarsPass.controlNoWallsMask = false
         LatticeLayoutPreview.strutTapForTesting = nil
+        LatticeLayoutPreview.controlNoStream = false
         LatticeStrutStream.smoothInline = false
         AppSettings.skipAllAnimations = false
         LatticeBuildTimelapse.totalS = LatticeBuildTimelapse.hisTotalS
@@ -711,6 +712,73 @@ final class Notes30StrutStreamTests: XCTestCase {
             XCTAssertEqual(missing, 0, "★ every strut handed over is in the finished lattice")
             XCTAssertEqual(preview.build.token, landed.token, "★ its timelapse builds it")
         }
+    }
+
+    // MARK: the real engine (D-core's StrutTap through the bridge)
+
+    /// ★ The REAL engine, end to end through the page's own tap (LatticeSessionStrutTap): a stand-like part with a lattice zone
+    /// through it (its lattice held by the solid round it), laid with the stream on and its map made in the lay — struts are
+    /// handed over before the landing, every one of them in the finished lattice bit for bit (the app's counter and core's
+    /// own), the plan's up the one asked, the map handed over, and the lay the very one laid without the stream (the print
+    /// file's). RED CONTROL `controlNoStream`: the engine never asked — nothing handed over.
+    func testTheRealEngineHandsOverStrutsThatAreAllInTheFinishedLattice() async throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("notes30-real-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let path = tmp.appendingPathComponent("stand.stl").path
+        try Notes29AnimationClipsProbe.standSTL().write(to: URL(fileURLWithPath: path))
+        let im = try TopOptKit.importMesh(path: path)
+        let session = try await LatticeLayoutSession.open(path: path)
+        defer { session.close() }
+        var s = LatticeLayoutSession.Settings()
+        s.topology = "bccz"; s.algorithm = "uniform"; s.cellMM = 10; s.cellMaxMM = 10
+        var z = LatticeLayoutSession.Region(id: 1, faces: [], depthMM: 0)
+        z.zone = .init(kind: .box, centre: SIMD3(60, 22.5, 29), axes: [SIMD3(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0, 0, 1)],
+                       half: SIMD3(32, 30, 21))
+        s.regions = [z]
+        let plain = try await session.lay(s)
+        let g = LatticeLayoutPreview.mapGeometry(try XCTUnwrap(LatticeLayoutPreview.box(im.vertices)))
+        for red in [false, true] {
+            LatticeLayoutPreview.controlNoStream = red
+            let tap = LatticeLayoutPreview.strutTap(session)
+            if red { XCTAssertNil(tap, "RED CONTROL: no tap — the lay lands whole"); continue }
+            let t = try XCTUnwrap(tap)
+            let stream = LatticeStrutStream()
+            stream.reset(map: g)
+            var cursor = LatticeTapCursor(baseline: try t.strutRead(from: Int.max, most: 1, mapFrom: Int.max).lay)
+            t.streamNextLay(up: SIMD3(0, 0, 1), map: g)
+            let lay = Task { try await session.lay(s) }
+            var mapNext = 0, beforeLanding = 0, last = false
+            while true {
+                let from = cursor.next
+                let rd = try t.strutRead(from: from, most: 0, mapFrom: mapNext)
+                let st = cursor.take(lay: rd.lay, phase: rd.phase, next: rd.next, from: from)
+                if st.take {
+                    stream.take(rd); mapNext = rd.mapNext
+                    if rd.phase < 4 { beforeLanding = stream.bars.count / 7 }
+                }
+                if last { break }
+                if st.take, rd.phase >= 4 { last = true; continue }
+                try await Task.sleep(nanoseconds: 2_000_000)
+            }
+            let r = try await lay.value
+            print("REAL: \(r.barCount) bars; \(stream.bars.count / 7) handed over (\(beforeLanding) before the landing); core streamed \(r.streamed), missing \(r.streamedMissing); map \(r.map.count) bytes")
+            XCTAssertEqual(r.bars, plain.bars, "★ the same lattice, streamed or not (the print file's)")
+            XCTAssertEqual(r.barFlags, plain.barFlags)
+            XCTAssertGreaterThan(stream.bars.count / 7, r.barCount / 2, "★ most of the struts handed over")
+            XCTAssertGreaterThan(beforeLanding, 0, "★ handed over before the landing")
+            XCTAssertEqual(stream.missing(from: r.bars), 0, "★ every strut handed over is in the finished lattice (the app's count)")
+            XCTAssertEqual(r.streamedMissing, 0, "★ … and core's own")
+            XCTAssertEqual(r.streamed, stream.bars.count / 7, "every strut core handed over was read")
+            let up = try XCTUnwrap(stream.plan?.up)
+            XCTAssertEqual(up.z, 1, accuracy: 1e-5, "the plan's up is the one asked")
+            XCTAssertTrue(stream.mapAllMade, "★ the map handed over with the stream")
+            XCTAssertEqual(r.map.count, 2 * Int(g.dims.x) * Int(g.dims.y) * Int(g.dims.z), "the map made in the lay")
+            let after = try await session.grid(origin: g.origin, voxel: g.voxel, dims: g.dims)
+            XCTAssertEqual(r.map, after.rg, "★ the lay's map is lattice_layout_grid's")
+            XCTAssertEqual(stream.map?.rg, after.rg, "★ … and the stream's")
+        }
+        LatticeLayoutPreview.controlNoStream = false
     }
 
     private func settle(_ preview: LatticeLayoutPreview) async throws {
