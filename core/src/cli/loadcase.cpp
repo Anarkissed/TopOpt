@@ -69,9 +69,8 @@ double pad_depth_for(const VoxelGrid& grid, const std::vector<FacePiece>& pieces
     if (receipt) receipt->pad_mm = face_pad_depth_mm();
     return face_pad_depth_mm();
   }
-  const double lw = line_width_mm > 0.0 ? line_width_mm : 0.45;
   const double thickness = face_backing_thickness_mm(grid, pieces);
-  const double depth = std::max(2.0 * lw, std::sqrt(strength * thickness));
+  const double depth = auto_pad_depth_mm(thickness, strength, line_width_mm);
   std::printf("[loadcase] automatic pad: %.2f mm of material behind the face -> pad %.2f mm\n",
               thickness, depth);
   if (receipt) {

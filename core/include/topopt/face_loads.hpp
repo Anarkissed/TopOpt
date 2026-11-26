@@ -20,6 +20,7 @@
 // and the grid, like face_tag.cpp.
 #pragma once
 
+#include <cmath>
 #include <cstddef>
 #include <vector>
 
@@ -133,5 +134,17 @@ std::size_t mask_region_depth_mm(const VoxelGrid& grid, const StepModel& model,
 // of the model, measured at that face, so a thin tab on a big part gets a thin
 // pad).
 double face_backing_thickness_mm(const VoxelGrid& grid, const std::vector<FacePiece>& pieces);
+
+// THE AUTOMATIC PAD's rule, pure arithmetic (the maintainer, 2026-11-26: "Can't it
+// be a ratio? So as it grows, the thickness slows down?"): the pad grows with the
+// square root of the thickness of material behind the face, never under two
+// wall-line widths (one line does not print), no ceiling.
+//   pad = max(2 x line width, sqrt(strength x thickness))
+// A line width of 0 or less is read as 0.45 mm.
+inline double auto_pad_depth_mm(double thickness_mm, double strength_mm, double line_width_mm) {
+  const double lw = line_width_mm > 0.0 ? line_width_mm : 0.45;
+  const double root = thickness_mm > 0.0 && strength_mm > 0.0 ? std::sqrt(strength_mm * thickness_mm) : 0.0;
+  return root > 2.0 * lw ? root : 2.0 * lw;
+}
 
 }  // namespace topopt
