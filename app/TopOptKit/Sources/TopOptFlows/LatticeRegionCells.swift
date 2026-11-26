@@ -73,7 +73,7 @@ public enum LatticeRegionCells {
             // floor — see `regionCellsPerMemberFloor` (his 2026-09-20, the 2.4 mm wall).
             let floor = (project.lattice.stageMode ?? .structural)
                 .regionCellsPerMemberFloor(topology: project.lattice.topologyID,
-                                           boundaryFinishWritten: project.lattice.singleCellMembers,
+                                           boundaryFinishWritten: project.lattice.singleCellMembersInEffect,   // ★ notes29
                                            algorithm: project.lattice.resolvedAlgorithm)
             // ★ at the job's cap (#358 E1/D1): the region's cell is never under the run's floor
             let d = TopOptKit.latticeRegionDerivation(topology: project.lattice.topologyID,

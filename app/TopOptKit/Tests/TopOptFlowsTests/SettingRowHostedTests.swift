@@ -28,10 +28,15 @@ final class SettingRowHostedTests: XCTestCase {
             XCTAssertEqual(offered, ["Light use · 150 %", "Everyday part · 200 %", "Repeated loads, or hard to replace · 300 %", "Custom…"],
                            "\(size): ★ the design's words")
             XCTAssertEqual(p.force.safetyMarginValue, 2.0, accuracy: 1e-9, "\(size): the pick lands")
+            // ★ RE-PINNED (notes29, his 11-25: every (i) opens the front-and-centre notification, "Tap anywhere to
+            // continue"): the (i) raises the centred notification (it opened a popover beside it)
+            AppPopups.shared.current = nil
             try h.tap("info-safetyMargin", "\(size): the (i)")
-            let pop = NSApp.windows.first { $0 !== h.window && $0.isVisible && $0.className.contains("Popover") }
-            XCTAssertNotNil(pop, "\(size): ★ the (i) opens its popover")
-            pop?.orderOut(nil)
+            XCTAssertEqual(AppPopups.shared.current?.info, true, "\(size): ★ the (i) opens the centred notification")
+            XCTAssertFalse(AppPopups.shared.current?.text.isEmpty ?? true, "\(size): its words")
+            XCTAssertNil(NSApp.windows.first { $0 !== h.window && $0.isVisible && $0.className.contains("Popover") },
+                         "\(size): RED CONTROL: no popover")
+            AppPopups.shared.current = nil
         }
     }
 }

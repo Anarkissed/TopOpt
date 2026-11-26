@@ -39,7 +39,7 @@ public struct FlexibleStagePage: View {
     /// ★ BATCH B: the SHARED model (FlexibleMainStage.model(for:)), observed — not owned. A
     /// page-owned @StateObject died with the page, and the lattice with it (item 7.1).
     @ObservedObject var model: FlexibleStageModel
-    @StateObject private var camera = OrbitCameraModel()
+    @StateObject private var camera = OrbitCameraModel(followsViewProjection: true)   // ★ notes29: the app's one projection
     @StateObject private var proj = FlexibleProjectionBox()
     let onExit: () -> Void
     /// ★ ROUND 7, R7-D1 (H36): the capsule's ways off the page — to Topology or Surface (after Save & Exit's own check),
@@ -1071,7 +1071,7 @@ public struct FlexibleStagePage: View {
         let band = noticeBand(size)
         VStack(spacing: DS.Space.xs) {
             if let text = noticeText {
-                noticePill(text, icon: "info.circle.fill", colour: DS.Color.textSecondary.color, fix: nil)
+                noticePill(text, icon: nil, colour: DS.Color.textSecondary.color, fix: nil)
             } else if model.sceneState == .ready {
                 let r = model.readiness
                 // a failed build, and ★ (D2 review) separate groups that compete, in warning colour
@@ -1081,7 +1081,7 @@ public struct FlexibleStagePage: View {
                 // ★ ROUND 5 (S9): it names the button — "Save & Exit builds…" only once something changed
                 noticePill(FlexibleSettingsExit.topLine(r, modified: FlexibleSettingsExit.modified(model.settings, since: opened),
                                                         empty: model.isEmptySetup),
-                           icon: empty ? "info.circle.fill" : (good ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"),
+                           icon: empty ? nil : (good ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"),
                            colour: (empty ? DS.Color.textSecondary : (good ? FlexibleStageStyle.accentToken : DS.Color.warning)).color,
                            fix: Self.noticeFix(r, model: model))   // ★ M1 VERIFY: no [Fix] with no face-prism
             }
@@ -1134,9 +1134,10 @@ public struct FlexibleStagePage: View {
         onExit()
     }
 
-    private func noticePill(_ text: String, icon: String, colour: Color, fix: FlexibleIssue?) -> some View {
+    /// `icon` nil: a plain notice, drawn with the one (i)'s glyph (★ notes29, his 11-25: one (i) look app-wide).
+    private func noticePill(_ text: String, icon: String?, colour: Color, fix: FlexibleIssue?) -> some View {
         HStack(spacing: DS.Space.s) {
-            Image(systemName: icon).font(.system(size: 13)).foregroundStyle(colour)
+            if let icon { Image(systemName: icon).font(.system(size: 13)).foregroundStyle(colour) } else { AppInfoGlyph() }
             Text(text)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(DS.Color.textSecondary.color)

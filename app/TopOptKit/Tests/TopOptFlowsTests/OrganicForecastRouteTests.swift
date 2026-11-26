@@ -130,6 +130,7 @@ final class OrganicForecastRouteTests: XCTestCase {
         XCTAssertTrue(wz.contains("if project.lattice.organicSizesNeedRecheck, organicProbeState != .running {"))
         // ★ ruling 4 (2026-09-30): the same line; where a missing wall is the reason it is one tap
         // from the walls
-        XCTAssertTrue(wz.contains("refusalNote(OrganicForecast.recheckLine(checkRefusal: organicProbeRefusal),"))
+        // ★ RE-PINNED (notes29, his 11-25: five words under a setting): the line in its (i), five words on the page
+        XCTAssertTrue(wz.contains("refusalNote(Self.sizesRecheckLine, OrganicForecast.recheckLine(checkRefusal: organicProbeRefusal),"))
     }
 }

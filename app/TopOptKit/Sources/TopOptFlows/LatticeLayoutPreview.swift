@@ -1711,7 +1711,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         }
         // ★ Install 2 (his 09-18: single-cell members lock the Finish to Skin; jobSkinResolved): a one-cell member's struts are
         // tied by the skin, whatever None or Rim the page holds
-        if l.singleCellMembers, l.boundary == .none || l.boundary == .rim { s.skin = true }
+        if l.singleCellMembersInEffect, l.boundary == .none || l.boundary == .rim { s.skin = true }   // ★ notes29: Aesthetic only
         // Grade to shape: the grading mode's shape fit, its band and its Strength, as the old engine's job sends them (Stepped and
         // Doubled only)
         if graded, l.gradingMode.fitsShape, ["stepped", "doubled"].contains(l.resolvedAlgorithm) {

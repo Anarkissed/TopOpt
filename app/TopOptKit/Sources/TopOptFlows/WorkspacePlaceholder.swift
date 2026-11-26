@@ -174,11 +174,8 @@ public struct WorkspacePlaceholder: View {
     /// ★ the running bake's stop sign: set when a newer bake supersedes it, read by its
     /// stage loop before core's emission starts (review 2026-09-22 #34)
     @State private var strutBakeCancel = LatticeBakeFlag()
-    /// The (i) beside the preview caption: the whole banner sentence, on demand.
-    @State private var latticeNoticeInfoShown = false
-    /// ★ his iPad notes 11-09: the last bake's Structural thin-wall finding, and its (i).
+    /// ★ his iPad notes 11-09: the last bake's Structural thin-wall finding (its (i) is the one (i), notes29: no state here).
     @State private var latticeThinWalls: LatticeStructuralThinWalls.Finding?
-    @State private var latticeThinWallsInfoShown = false
     /// ★ his 11-09: the glow + pop-up up, and the glow's per-vertex tints from the last bake ([] = no walls).
     @State private var latticeThinWallsPromptUp = false
     @State private var latticeThinWallTints: [Float] = []
@@ -260,7 +257,6 @@ public struct WorkspacePlaceholder: View {
     // ★ load scenarios: the folder being renamed, its draft, the (i), the last-anchor refusal, the Add Anchor hint
     @State private var renamingScenario: UUID? = nil
     @State private var scenarioNameDraft = ""
-    @State private var scenarioInfoOpen = false
     @State private var scenarioRefusal: String? = nil
     @State private var scenarioAnchorHint: UUID? = nil
     // ★ the safety margin (ruling 2026-10-26 13:12): Custom's draft, its refusal, the (i)
@@ -11020,25 +11016,10 @@ public struct WorkspacePlaceholder: View {
                                                          : DS.Color.textSecondary).color)
                         .fixedSize(horizontal: false, vertical: true)
                     if !banner.isEmpty {
-                        Button { latticeNoticeInfoShown = true } label: {
-                            Image(systemName: "info.circle")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(DS.Color.textTertiary.color)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("About the lattice preview")
-                        .accessibilityIdentifier("lattice-preview-notice-info")
-                        .popover(isPresented: $latticeNoticeInfoShown) {
-                            ScrollView {
-                                Text(banner.text)
-                                    .dsStyle(DS.TypeScale.footnote)
-                                    .foregroundStyle(DS.Color.textPrimary.color)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .textSelection(.enabled)
-                                    .padding(16)
-                            }
-                            .frame(maxWidth: 360, maxHeight: 420)
-                        }
+                        // ★ notes29 (his 11-25): the one (i) — the sentence (banner.text) in the centred notification
+                        AppInfoButton(title: "About the lattice preview", text: banner.text,
+                                      label: "About the lattice preview", id: "lattice-preview-notice-info")
+                            .padding(.vertical, -12)
                     }
                 }
                 .padding(.vertical, DS.Space.xs)
@@ -11063,22 +11044,10 @@ public struct WorkspacePlaceholder: View {
                     .buttonStyle(.plain)
                     .background(CornerPairStyle.publish("lattice-thin-walls-note"))
                     .accessibilityIdentifier("lattice-thin-walls-note")
-                    Button { latticeThinWallsInfoShown = true } label: {
-                        Image(systemName: "info.circle")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(DS.Color.textTertiary.color)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("About thin walls under Structural")
-                    .accessibilityIdentifier("lattice-thin-walls-info")
-                    .popover(isPresented: $latticeThinWallsInfoShown) {
-                        Text(thin.sentence)
-                            .dsStyle(DS.TypeScale.footnote)
-                            .foregroundStyle(DS.Color.textPrimary.color)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(16)
-                            .frame(maxWidth: 360)
-                    }
+                    // ★ notes29 (his 11-25): the one (i) — the sentence in the centred notification
+                    AppInfoButton(title: "Thin walls under Structural", text: thin.sentence,
+                                  label: "About thin walls under Structural", id: "lattice-thin-walls-info")
+                        .padding(.vertical, -12)
                 }
                 .padding(.vertical, DS.Space.xs)
                 .padding(.horizontal, DS.Space.s)
@@ -11713,18 +11682,10 @@ public struct WorkspacePlaceholder: View {
                     .font(.system(size: 10, weight: .bold))
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
-                Button { diagnosisPopoverGroup = g.id } label: {
-                    Image(systemName: "info.circle.fill")
-                        .font(.system(size: 11, weight: .bold))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("How to fix this")
-                .accessibilityIdentifier("lattice-diagnosis-info-\(g.id.uuidString)")
-                .popover(isPresented: Binding(
-                    get: { diagnosisPopoverGroup == g.id },
-                    set: { if !$0 { diagnosisPopoverGroup = nil } })) {
-                    latticeDiagnosisPopover(d)
-                }
+                // ★ notes29 (his 11-25): the one (i) — every failure and its fix in the centred notification
+                AppInfoButton(title: "How to fix this", text: d.popoverText, label: "How to fix this",
+                              id: "lattice-diagnosis-info-\(g.id.uuidString)")
+                    .padding(.vertical, -12)
                 Spacer(minLength: 0)
             }
             .foregroundStyle(tint.color)
@@ -13435,12 +13396,7 @@ public struct WorkspacePlaceholder: View {
                 Text(r).dsStyle(DS.TypeScale.caption).fontWeight(.semibold).foregroundStyle(DS.Color.warning.color)
                     .padding(.horizontal, DS.Space.l).padding(.top, DS.Space.xs)
             }
-            addScenarioRow
-            if scenarioInfoOpen {
-                Text(LoadScenarioRule.info).dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textSecondary.color)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, DS.Space.l).padding(.bottom, DS.Space.m)
-            }
+            addScenarioRow   // ★ notes29: its (i) opens the centred notification (it opened the words under the row)
             // the picker shows only once the core that reads it ships (its key named): a picker that changes nothing is a lie
             if SafetyMargin.jobKey != nil { safetyMarginRow }
         })
@@ -13614,9 +13570,7 @@ public struct WorkspacePlaceholder: View {
                 Color.clear.preference(key: ChromeKeepOutKey.self, value: ["addLoadScenario": geo.frame(in: .global)])
             }.allowsHitTesting(false))
             .accessibilityIdentifier("add-load-scenario")
-            Button { scenarioInfoOpen.toggle() } label: { Image(systemName: "info.circle") }
-                .buttonStyle(.plain).foregroundStyle(DS.Color.textTertiary.color)
-                .accessibilityLabel("About load scenarios")
+            AppInfoButton(title: "Load scenarios", text: LoadScenarioRule.info, label: "About load scenarios")   // ★ notes29
             Spacer()
         }
         .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.m)
@@ -16132,26 +16086,26 @@ extension WorkspacePlaceholder {
     }
 }
 
-/// A 44 pt (i) that shows one sentence (the open group's face lines).
+/// A 44 pt (i) that shows one sentence (the open group's face lines). ★ notes29 (his 11-25): the one (i) (AppInfoButton), its
+/// sentence in the centred notification; a warning glyph says why in the centred pop-up (his 11-20 rule) — no popover.
 private struct InfoPopoverButton: View {
     let text: String
     let id: String
     var label = "About this face"
     /// ★ his 11-22: a warning that used to be a line in the panel is this glyph (a tap says why)
     var warning = false
-    @State private var shown = false
     var body: some View {
-        Button { shown = true } label: {
-            Image(systemName: warning ? "exclamationmark.triangle.fill" : "info.circle").font(.system(size: 13, weight: .semibold))
-                .foregroundStyle((warning ? DS.Color.warning : DS.Color.textTertiary).color)
-                .frame(width: 44, height: 36).contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(label)
-        .accessibilityIdentifier(id)
-        .popover(isPresented: $shown) {
-            Text(text).dsStyle(DS.TypeScale.footnote).foregroundStyle(DS.Color.textPrimary.color)
-                .fixedSize(horizontal: false, vertical: true).padding(16).frame(maxWidth: 320)
+        if warning {
+            Button { AppPopups.shared.show(label, text) } label: {
+                Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(DS.Color.warning.color)
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(label)
+            .accessibilityIdentifier(id)
+        } else {
+            AppInfoButton(title: label, text: text, label: label, id: id)
         }
     }
 }
