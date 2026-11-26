@@ -36,12 +36,14 @@ inline bool to_stage1_on() { return face_load_mode() != FaceLoadMode::Voxel; }
 // STAGE 2 (a strength number that holds), written ahead of its gate.
 // TOPOPT_STRENGTH:
 //   unset   : today's strength check everywhere.
-//   "stiff" : a voxel cut by the surface is solved at its real stiffness
-//             (E x fill, not E x fill^3; ledger A-01). Nothing else changes.
-//   "size"  : as "stiff", and the stress that decides pass or fail is read over
-//             the material's length (material_length.hpp), not at one voxel
-//             (ledger A-02). Where no length is published, or it is smaller than
-//             a voxel, the reading is the single voxel, as today.
+//   "stiff" : MEASURING ARM ONLY. A voxel cut by the surface is solved at its
+//             real stiffness (E x fill, not E x fill^3; ledger A-01). Alone it
+//             reads 6 to 18 % low on the textbook cases, so it never ships alone.
+//   "size"  : the form to ship. Real stiffness AND the deciding stress read over
+//             the material's length (material_length.hpp; ledger A-02), judged
+//             together: never more than 5 % below the textbook at any
+//             resolution (reviewer, 2026-11-26). A material with no published
+//             length says so and keeps today's solve and reading whole.
 enum class StrengthMode { Today, Stiff, Size };
 
 inline StrengthMode strength_mode() {

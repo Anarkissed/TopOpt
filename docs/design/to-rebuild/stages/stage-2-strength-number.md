@@ -52,6 +52,20 @@ Not in this proposal, flagged: the smooth-surface check (certify the true surfac
 - Across layers, REVISED after CNC Kitchen's impact tests: the length across the layers is a FIFTH of the in-plane one. "Yes, a fifth". (Replaces "the same length" above; the layer knockdown on strength stays.)
 - Still open: the nine materials with no published value.
 
+## Reviewer's ruling (TORebuildGroup, 2026-11-26 01:37Z, approved by the maintainer)
+
+YES: steps 1 and 2 may be written in `analyze.cpp` behind the stage switch (default = today), on these conditions:
+
+- (a) LatticeReview reviews the diff before it merges.
+- (b) A test shows the lattice check byte-identical with the switch off.
+- (c) THE BAR, fixed before any run: on test E's references (the plate with a hole, the ring, at three resolutions) the shipped reading may never read MORE THAN 5 % BELOW the reference, at any resolution. Today's rule reads 16 to 76 % high (safe but wrong); real stiffness alone reads 6 to 18 % low on the plate and 7 % low on the ring (unsafe). So stiffness and reading size are judged TOGETHER against that bar, never one alone.
+- (d) A material with no published length gets a plain line saying so and keeps today's reading. (In code since the commit after 372d2057: real stiffness applies only together with a reading size; `stiff` alone is a measuring arm.)
+- (e) With the switch on, a before/after table of the lattice strength check (jobs A to C, plus one sheet and one Organic job) is posted in TORebuildGroup before any flip.
+
+To tell the reviewer in the next report: after its ruling was drafted the maintainer changed two of the recorded decisions: across layers the length is a FIFTH of the in-plane one (not the same), and where sources disagree the LOWEST published value is taken.
+
+What the bar means for the plan: a reading over a size reads BELOW the one-voxel peak by design. On test E the readings over 0.9 to 3.6 mm sat 5 to 30 % under the textbook peak. So with real stiffness the size must be SMALL enough to stay within 5 % of the reference, or the stiffness rule must read a little high to leave room. This is to be measured on test E before anything else: the pair (stiffness rule, size) that is steady across resolutions AND never more than 5 % low.
+
 ## Written so far (ahead of the gate; all behind `TOPOPT_STRENGTH`, default = today; reviewer's ruling on the shared certificate still asked)
 
 | step | what | where | state |

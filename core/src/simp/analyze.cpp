@@ -317,8 +317,14 @@ FixedDesignAnalysis analyze_fixed_design(
       // the stiffness of the material it holds (E x fill), not E x fill^3, which
       // makes it far too soft and its stress far too high (76 % on the textbook
       // ring). Only with the stage's switch; the lattice posture above is untouched.
+      // Reviewer's ruling 2026-11-26: real stiffness ALONE reads low (unsafe), so
+      // in the shipped form ("size") it applies only together with a reading
+      // size; a material with no published length keeps today's solve and
+      // reading whole. "stiff" stays as a measuring arm only.
       SimpParams solve_params = params;
-      if (to_stage2_on()) solve_params.penalty = 1.0;
+      if (strength_mode() == StrengthMode::Stiff ||
+          (strength_mode() == StrengthMode::Size && knockdown.stress_reading_mm > 0.0))
+        solve_params.penalty = 1.0;
       sc = simp_compliance(grid, solve_params, density, B, loads, cg_tolerance,
                            cg_max_iterations, /*initial_guess=*/nullptr,
                            /*solver=*/nullptr, solver_kind);

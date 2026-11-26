@@ -31,6 +31,7 @@
 // his rig can check it. `reading_size_mm` applies that half.
 #pragma once
 
+#include <cstdio>
 #include <cstdlib>
 #include <string>
 
@@ -76,7 +77,15 @@ inline double reading_size_for_job_mm(const std::string& material_name) {
     const double typed = std::atof(v);
     if (typed > 0.0) return typed;
   }
-  return reading_size_mm(material_length(material_name));
+  const double size = reading_size_mm(material_length(material_name));
+  // Reviewer's ruling 2026-11-26 (d): a material with no published length says
+  // so in plain words and keeps today's reading.
+  if (!(size > 0.0))
+    std::fprintf(stderr,
+                 "[strength] no published stress-reading length for %s: this material "
+                 "keeps today's strength reading (one voxel).\n",
+                 material_name.c_str());
+  return size;
 }
 
 }  // namespace topopt

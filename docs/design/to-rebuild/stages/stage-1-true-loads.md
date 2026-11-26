@@ -79,6 +79,13 @@ The stand: the same single version either way, as in the baseline (ledger D: 1 v
 
 The refused 0.30 version: at solve 19 the design is in 17 separate pieces; the multigrid solve grows its error and the Jacobi-CG fallback hits its cap at residual 0.092. Today's path goes through 8 to 11 pieces and lands inside the cap. Not the loader: the optimiser breaks the part up (stage 3/4 boundary) and the solver cannot settle a broken part quickly (stage 5). Which side of the cap a run lands on is luck until those land.
 
+## Reviewer's rulings on stage 1 (TORebuildGroup, 2026-11-26 01:37Z)
+
+- The lattice region mask follows the mm depth through the same function as the protection: APPROVED. The protected skin keeps the distance band; the old lattice mask is not reshaped (its path is retiring).
+- Cubes that are both or neither at a skin's inner boundary: recorded for stage 7, not stage 1.
+- The FLIP is ruled on the stage 1 report, which must carry: hand-over item 3 for #362 in the same release; `lattice_depth_tie` 0a and `test_print_frame.cpp:721` in their `face` forms, each with a note naming the frame's load rule as the cause of 721's move; and LatticeReview's interim guard (a structural Organic job whose load lands on bare lattice is refused with one plain pop-up offering Skin or Solid on that face, until the reference study lands).
+- The env switch never makes anything he is shown and never makes a release.
+
 ## Still owed before the stage report
 
 - The original stand optimised both ways (queued), then Top Motor Mount; three settings; pad 2 / 3 / 4.5 mm.
