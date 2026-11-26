@@ -234,17 +234,30 @@ struct LipRow {
   long long in_prism = 0, outside = 0;
   double reach = 0.0;  // mm, sideways, of the farthest outside voxel
 };
-LipRow measure_lip(int res, double typed_mm, bool by_distance) {
+// way: 0 = today, by layers (a face); 1 = by true distance; 2 = today, by layers (a region).
+LipRow measure_lip(int res, double typed_mm, int way) {
   LipRow r;
   const double x0 = 20.37, y0 = 10.71;
   const StepModel model = build_block(x0, y0);
   const VoxelGrid g = topopt::voxelize(model.mesh, res);
   r.voxel = g.spacing;
   topopt::DesignMask mask(g.voxel_count(), topopt::MaskValue::Active);
-  if (by_distance)
+  if (way == 1)
     topopt::mask_face_depth_mm(g, model, {F_PATCH}, typed_mm, topopt::MaskValue::FrozenSolid,
                                mask);
-  else
+  else if (way == 2) {
+    // The region path the old lattice mask uses: the patch as a one-face region.
+    topopt::ResolvedFaceRegion region;
+    region.id = 1;
+    region.member_faces = {F_PATCH};
+    for (std::size_t t = 0; t < model.triangle_face.size(); ++t)
+      if (model.triangle_face[t] == F_PATCH) region.member_triangles.push_back(static_cast<int>(t));
+    for (int idx : topopt::cut_voxels(
+             g, topopt::region_member_voxels(g, model, region,
+                                             topopt::region_depth_layers(typed_mm, g.spacing)),
+             region.cuts))
+      mask[static_cast<std::size_t>(idx)] = topopt::MaskValue::FrozenSolid;
+  } else
     topopt::mask_step_face(g, model, F_PATCH, topopt::MaskValue::FrozenSolid,
                            topopt::region_depth_layers(typed_mm, g.spacing), mask);
   for (int k = 0; k < g.nz; ++k)
@@ -356,9 +369,11 @@ int main(int argc, char** argv) {
               "by layers: in / outside", "by distance: in / outside / reach mm");
   for (int res : {48, 96})
     for (double typed : {2.0, 4.0, 10.0}) {
-      const LipRow a = measure_lip(res, typed, false), d = measure_lip(res, typed, true);
-      std::printf("%5d %8.3f %10.1f %12lld / %-7lld %12lld / %-7lld / %.2f\n", res, a.voxel,
-                  typed, a.in_prism, a.outside, d.in_prism, d.outside, d.reach);
+      const LipRow a = measure_lip(res, typed, 0), d = measure_lip(res, typed, 1),
+                   rg = measure_lip(res, typed, 2);
+      std::printf("%5d %8.3f %10.1f %12lld / %-7lld %12lld / %-7lld / %.2f   region path %lld / %lld\n",
+                  res, a.voxel, typed, a.in_prism, a.outside, d.in_prism, d.outside, d.reach,
+                  rg.in_prism, rg.outside);
     }
 
   std::printf("[tests C, D] %s: %d failure(s)\n", gate ? "gate" : "measure only", failures);

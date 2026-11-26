@@ -7,12 +7,12 @@ Status 2026-11-22: APPROVED by the reviewer (rulings 06:18Z and 06:48Z); both he
 The maintainer's order (2026-11-25): never sit waiting on the lock. Every wake-up records what finished, then does the next open item here.
 
 1. Record the stand128 old-loads / drawn-face-loads optimised run when it finishes (lock taken 18:39); then build `test_to_stage1_lattice_check` and `test_to_strength_known_ring` in the same build folder and run jobs A to C (no lock; check memory).
-2. Published toughness for the nine materials with no value yet (PC, PA12, PP, HIPS, ASA, the two filled grades, the two resins); options for him on what the reading does where nothing is published.
+2. DONE 2026-11-25: second search (01-research.md): printed ABS fitted at 0.46 mm against 4.1 mm; nine materials have nothing published. The choice it leaves is the maintainer's (asked).
 3. Stage 2 steps 1 and 2 written ahead behind one switch (`TOPOPT_STRENGTH`), once the reviewer rules on the shared certificate; until then the unit pieces that do not touch `analyze.cpp` (the reading over a size is in `stress_measure.cpp`; printed grams at his infill needs the wall and infill model: find where the slicer estimate lives).
 4. The optimiser leaves loaded pieces unattached (demo part, 8 to 17 pieces): find where in the step the piece is cut off, and write the smallest check that names it per iteration (measuring only).
 5. Read TOSolver's plan (stage-5 file on its branch) and TOSurface's Top Motor Mount regression; answer on their channels only if something must change.
 6. Stage 1: Top Motor Mount optimised both ways and pad 2 / 3 / 4.5 mm (lock); then the stage report to the reviewer.
-7. Lip count through the region path (`region_member_voxels` + `cut_voxels`), to confirm it matches `mask_step_face` (LatticeReview).
+7. DONE 2026-11-25: the region path (`region_member_voxels` + `cut_voxels`) gives the SAME counts as `mask_step_face`, cube for cube, at every depth and resolution tried (`test_to_true_loads`, "[lip]", third column).
 8. "Best I can do" probe build (plan), once stages 1, 3 and 5 can be combined in one sparse tree.
 
 ## 0. Where the work stands (kept current; newest first)
