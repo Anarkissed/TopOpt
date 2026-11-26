@@ -41,6 +41,10 @@ public enum LatticeFileJob {
         "bedFloorMM": "organic_bed_floor_mm",   // the flat floor (Organic only; written only when on)
         "cellSearch": "cell_search/stretch_edges",   // K7, K8 (Auto only; written only when on)
         "sheetSeam": "sheet_seam", "autoByCell": "auto_by_cell",   // ★ SHEETS (written for a sheet type only)
+        // ★ SHEETS, builder E (notes30 M1 names it here): the seams the LAST print file fell back on, for the preview's lay only
+        // (core's Session::Settings::sheet_walls) — never sent in a file job: the file decides each Blend seam itself, once
+        // (make_file_mesh), and core's file job takes no such key
+        "sheetWalls": "(preview only: the print file decides its own seams)",
     ]
 
     /// The stress result's name beside the job (core's top-level "demand"; the demand file format of 04-layout-file-job.md).
