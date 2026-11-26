@@ -30,7 +30,7 @@ THE NIGHT OF 2026-11-26 (written 03:50 EST). The maintainer is asleep. His words
 Every tick: record what finished (stage file, commit by name, push), then do the next open item. Order agreed with him: B1, B3, B2, B5, B6, B4, with section A alongside.
 
 Queued for the lock (start by themselves): `stage1_eighth.sh` (Top Motor Mount res 96 and the stand res 128 from the drawn faces; waits 12 s after the lock frees). To queue next: B1, then B5.
-Running without the lock: `sample_pad.sh` (the sample bracket, six pad settings), `stage1_padtm.sh` (Top Motor Mount res 64, four pad settings).
+Running without the lock: `sample_pad.sh` (the sample bracket, six pad settings). STOPPED 04:05: `stage1_padtm.sh` after its first run (Top Motor Mount res 64, pad 3 mm: four versions, margins 2.33 to 2.35, 105.1 / 102.9 / 101.1 / 98.9 g): the Mac was in 11.6 GB of swap with the kernel at 185 % CPU, my two low-priority runs were getting 3 to 6 % of a core each, and the made parts now carry the pad question better.
 
 A. Already agreed:
 - A1. Stage 1 report to the reviewer once the two lock runs are recorded (draft at the top of `stages/stage-1-true-loads.md`).
@@ -44,7 +44,7 @@ A. Already agreed:
 B. Approved tonight:
 - B1. The WHOLE test suite on my branch (never run; lock, 1 to 3 h). Record every failure with its cause; fix mine, name the rest.
 - B3. DONE 03:45: the slicer gives 138.3 g on the sample bracket; my first model read 12 % low and is replaced by a shell model within 3 % (stage-2 file). Owed: re-make the stand's printed-grams figures with it.
-- B2. Two more made sample parts: a plate with holes; a hook loaded off-centre.
+- B2. DONE 04:05 (parts; their runs follow): `core/tests/tools/to_sample_part.cpp` makes three. A, the L-bracket with a filled corner (as drawn 4.33 against 1.5; fixed faces with 4 mm and 10 to 70 mm behind them). B, a beam 120 x 30 x 24 mm held on both END faces (120 mm behind each) and pushed down 600 N on a mid-span boss (as drawn 5.46). C, a hook hanging from its top face (80 mm behind it), 25 N on its upturned tip, off the stem's line (as drawn 3.95; at 250 N it stood at 0.40, because printed upright the stem hangs across the layers). Not a plate with holes: the mesh maker is box-shaped only, and round holes need a different one. Pad sweeps: A running (`sample_pad.sh`), B and C queued behind it (`sample_pad_bc.sh`).
 - B5. Stage 2 on optimised designs at full resolution (the stand and the sample bracket: unset / stiff / size 1.8 mm; lock, about 1.5 h).
 - B6. Published values for PA12 (his material), deeper search.
 - B4. The "best I can do" trial build: stages 1, 3 and the solver work in one scratch tree, never merged; the sample bracket and Top Motor Mount; pictures for the morning.
