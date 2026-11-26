@@ -9,6 +9,7 @@
 #include "topopt/strut_cell.hpp"
 #include "topopt/tpms.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
@@ -1307,6 +1308,15 @@ double lattice_open_cell_mm(LatticeTopology topo, double strut_mm) {
 
 double lattice_quilt_cell_mm(LatticeTopology topo, double strut_mm) {
   return strut_mm / lattice_quilt_limits(topo).touch;
+}
+
+// notes29b: lattice.hpp states the rule (one printed line of air short of the touch).
+double lattice_quilt_off_strut_mm(LatticeTopology topo, double cell_mm, double line_mm) {
+  return lattice_quilt_limits(topo).touch * cell_mm - kQuiltOffGapLines * std::max(0.0, line_mm);
+}
+
+double lattice_quilt_off_cell_mm(LatticeTopology topo, double strut_mm, double line_mm) {
+  return (strut_mm + kQuiltOffGapLines * std::max(0.0, line_mm)) / lattice_quilt_limits(topo).touch;
 }
 
 LatticeTopologyChoice resolve_lattice_topology(const std::string& lattice_id,

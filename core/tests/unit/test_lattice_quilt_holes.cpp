@@ -5,9 +5,13 @@
 // two ends of the wings, the solid outline isn't even, there is a chunk cut out of it on either side."
 //   §1 Allow quilt OFF: for every strut type, in every way the cells and struts are asked for (Auto as the app asks it,
 //      Uniform at 100 %, Per region, By stress, Stepped and Default Grade with Grade to shape at full strength, cells by
-//      stress, a typed strut far past the open look, Small cells in thin walls), no cell is under the type's open cell
-//      (lattice_open_cell_mm of the thinnest strut) and no strut or bar is past its open look. RED control: the same
-//      asks with Allow quilt ON do go past it.
+//      stress, a typed strut far past the open look, Small cells in thin walls, the dial past 1), no strut or bar reaches
+//      its type's quilt (the touch) and none is past the limit, one printed line short of it
+//      (lattice_quilt_off_strut_mm: equally, no cell is under lattice_quilt_off_cell_mm of its own strut). ★ notes29b (his
+//      question, 2026-11-25: "Are you saying that no matter what happens, all Small cells in thin walls are going to be
+//      quilted?"): the OPEN LOOK is what the lattice lays on its own (every ask at or under it lays nothing past it and no
+//      cell under its floor), not the limit: a typed strut, ends in mm and the dial past 1 go past it, up to the limit.
+//      RED control: the same asks with Allow quilt ON do reach the limit.
 //   §2 No holes: every cell laid holds some strut of the finished lattice (a cell whose struts were all left out is open
 //      space in the file with nothing printed in it: a hole). Kelvin and rhombic grade into cells whose nodes do not meet
 //      the next size's; such a patch was a piece adrift, and dropped.
@@ -162,18 +166,25 @@ std::vector<std::size_t> empty_cells(const Layout& l, const Bars& bars) {
   return out;
 }
 
-// §1: what Allow quilt off must never lay. Counts the cells under the open cell, the cells and bars past the open look.
-struct Past { std::size_t small = 0, wide = 0, bars = 0; };
-Past past_the_open_look(const Outcome& o) {
+// §1: against the type's limits. `fused`: struts at or past the touch, the quilt itself; `past`: past the limit of Allow
+// quilt off (one printed line short of the touch, lattice_quilt_off_strut_mm) -- `small` the same read on the cell: under
+// lattice_quilt_off_cell_mm of its own strut; `open`: struts past the open look, `under`: cells under the open look's
+// smallest cell (what the lattice lays on its own).
+struct Past { std::size_t fused = 0, past = 0, bars = 0, open = 0, under = 0, small = 0; };
+Past against_the_limits(const Outcome& o) {
   Past p;
   const Layout& l = o.layout;
+  const double line = l.bead_mm;
   const double open_cell = lattice_open_cell_mm(l.topology, l.min_strut_mm);
   for (const Cell& c : l.cells) {
-    if (c.size < open_cell * (1.0 - 1e-9)) ++p.small;
-    if (c.strut > l.open_look * c.size * (1.0 + 1e-9)) ++p.wide;
+    if (c.strut >= l.touch * c.size * (1.0 - 1e-9)) ++p.fused;
+    if (c.strut > lattice_quilt_off_strut_mm(l.topology, c.size, line) + 1e-9) ++p.past;
+    if (c.size < lattice_quilt_off_cell_mm(l.topology, c.strut, line) - 1e-9) ++p.small;
+    if (c.strut > l.open_look * c.size * (1.0 + 1e-9)) ++p.open;
+    if (c.size < open_cell * (1.0 - 1e-9)) ++p.under;
   }
   for (const Bar& b : o.bars.bars)
-    if (!b.skin && b.cell > 0.0 && b.width > l.open_look * b.cell * (1.0 + 1e-9)) ++p.bars;
+    if (!b.skin && b.cell > 0.0 && b.width > lattice_quilt_off_strut_mm(l.topology, b.cell, line) + 1e-9) ++p.bars;
   return p;
 }
 
@@ -182,10 +193,10 @@ void test_no_type_quilts_without_the_switch() {
   Session session(model);
   const auto field = blobs();
   const char* names[] = {"auto", "uniform 100%", "per region", "by stress", "default grade band", "typed 5 mm",
-                         "small cells", "by stress mm"};
-  std::size_t asked = 0, control_past = 0;
+                         "small cells", "by stress mm", "dial past 1"};
+  std::size_t asked = 0, control_past = 0, went_past_open = 0;
   for (LatticeTopology t : kTypes) {
-    for (int mode = 0; mode < 8; ++mode) {
+    for (int mode = 0; mode < 9; ++mode) {
       Settings st = stand(t);
       st.stress.demand = field;
       switch (mode) {
@@ -226,27 +237,44 @@ void test_no_type_quilts_without_the_switch() {
           st.struts.width_heavy_mm = 6.0;
           st.cells.by_stress = true;
           break;
+        case 8:   // ★ notes29b: the app's Density percent past the open look (core's dial past 1), far past the limit
+          st.struts.dial = 3.0;
+          st.struts.strength = 1.0;
+          break;
       }
       st.struts.allow_quilt = false;
       const Outcome off = session.lay(st);
-      const Past p = past_the_open_look(off);
+      const Past p = against_the_limits(off);
       ++asked;
-      if (p.small || p.wide || p.bars || !off.quilt_regions.empty())
-        std::printf("  %s, %s: %zu cells under the open cell, %zu struts and %zu bars past the open look, %zu quilt "
-                    "regions\n", lattice_topology_name(t), names[mode], p.small, p.wide, p.bars, off.quilt_regions.size());
-      CHECK(p.small == 0 && p.wide == 0 && p.bars == 0 && off.quilt_regions.empty() && !off.layout.cells.empty());
-      // RED control: the same ask with Allow quilt on goes past the open look somewhere (a typed 5 mm strut, 100 %, the
-      // millimetre ends) -- the check can fail.
-      if (mode == 1 || mode == 5 || mode == 7) {
+      // Asked at or under the open look: the open look and its smallest cell, as the lattice lays them on its own (the
+      // wing has no thin wall, so Small cells in thin walls lays nothing smaller). Asked past it: past it, up to the limit.
+      const bool asks_past = mode == 5 || mode == 7 || mode == 8;
+      if (p.fused || p.past || p.small || p.bars || (!asks_past && (p.open || p.under)) || !off.quilt_regions.empty())
+        std::printf("  %s, %s: %zu struts fused, %zu past the limit (%zu bars, %zu cells under its cell); %zu past the "
+                    "open look, %zu cells under its floor; %zu quilt regions\n", lattice_topology_name(t), names[mode],
+                    p.fused, p.past, p.bars, p.small, p.open, p.under, off.quilt_regions.size());
+      CHECK(p.fused == 0 && p.past == 0 && p.small == 0 && p.bars == 0 && off.quilt_regions.empty() &&
+            !off.layout.cells.empty());
+      if (!asks_past) {
+        CHECK(p.open == 0 && p.under == 0);
+      } else {
+        CHECK(p.under == 0);
+        went_past_open += p.open > 0;   // the open look is not the limit: these asks go past it
+      }
+      // RED control: the same ask with Allow quilt on goes past the limit somewhere (100 %, a typed 5 mm strut, the
+      // millimetre ends, the dial past 1) -- the check can fail.
+      if (mode == 1 || mode == 5 || mode == 7 || mode == 8) {
         st.struts.allow_quilt = true;
-        const Past q = past_the_open_look(session.lay(st));
-        control_past += (q.small + q.wide + q.bars) > 0;
+        const Past q = against_the_limits(session.lay(st));
+        control_past += (q.past + q.bars) > 0;
       }
     }
   }
-  std::printf("[§1] Allow quilt off: %zu lays (10 strut types x 8 asks), none past its type's limits; the RED control "
-              "(Allow quilt on) went past them in %zu of 30\n", asked, control_past);
-  CHECK(control_past == 30);
+  std::printf("[§1] Allow quilt off: %zu lays (10 strut types x 9 asks), none fused, none past one printed line short of "
+              "the touch; the asks past the open look went past it (up to that limit) in %zu of 30; the RED control "
+              "(Allow quilt on) went past the limit in %zu of 40\n", asked, went_past_open, control_past);
+  CHECK(went_past_open == 30);
+  CHECK(control_past == 40);
 }
 
 void test_no_holes_in_a_region() {

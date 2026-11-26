@@ -894,9 +894,9 @@ LatticeWidthBounds lattice_width_bounds(LatticeTopology topo);
 //                of the cell is shut: a window's struts fill its in-circle).
 //   see_through  seen square-on to a cell face, through any depth of whole cells, nothing is see-through any more
 //                (every window of the projected cell is shut).
-//   open_look    the widest strut "Allow quilt" off lays (kLatticeOpenLookStrutPerCell, the same for every strut type,
-//                R11): under all three of the type's own, so with Allow quilt off no type ever fuses, closes or stops
-//                being see-through.
+//   open_look    the look the lattice lays on its own (kLatticeOpenLookStrutPerCell, the same for every strut type,
+//                R11): under all three of the type's own. ★ notes29b: not the limit of Allow quilt off; that is one
+//                printed line short of the touch (lattice_quilt_off_strut_mm below), reached only when asked for.
 // Every number is exact, from the cell's own geometry (closed forms below), and test_lattice_width_bounds MEASURES
 // channels and see_through again on a voxel grid of the periodic cell (128 voxels a side; a voxel grid can only shut
 // a window early, so each measured value is under its closed form by at most two voxels) and recomputes touch from
@@ -921,12 +921,40 @@ struct LatticeQuiltLimits {
   double open_look = 0.0;
 };
 LatticeQuiltLimits lattice_quilt_limits(LatticeTopology topo);
-// The two cells a strut of `strut_mm` limits, mm (a strut type's): the smallest cell "Allow quilt" off lays it in
-// (strut / open_look: still open, see-through, never touching), and the cell at which it fuses into the quilt
+// The two cells a strut of `strut_mm` limits, mm (a strut type's): the smallest cell the open look lays it in (strut /
+// open_look: what the lattice lays on its own; ★ notes29b: Allow quilt off goes under it only where asked, down to
+// lattice_quilt_off_cell_mm below), and the cell at which it fuses into the quilt
 // (strut / touch: the smallest with "Allow quilt" on). At two 0.45 mm lines (0.90 mm) the first is 4.74 mm for every
 // type; the second is the type's own (octet 2.55 mm, sc 0.90, bcc 1.27, fcc 1.56, ...).
 double lattice_open_cell_mm(LatticeTopology topo, double strut_mm);
 double lattice_quilt_cell_mm(LatticeTopology topo, double strut_mm);
+
+// ── ★ notes29b: WHAT "ALLOW QUILT" OFF NEVER PASSES: ONE PRINTED LINE SHORT OF THE QUILT ─────────────────────────────────
+// (His notes on release 20, 2026-11-25: "find the EXACT density and size at which each lattice type becomes a quilt and
+// limit both when 'Allow quilt' is turned off"; and, on "Small cells in thin walls": "I don't think these two things are
+// mutually tied together.") The quilt is the touch above: the strut that meets its neighbour, touch x cell. With Allow
+// quilt off no strut is laid AT it or past it: the widest is ONE PRINTED LINE thinner (the next printable step under the
+// touch), so at least one line width of air is left between the closest struts and every gap prints open; a gap
+// narrower than one line cannot be printed and closes on the bed. In the cell it is the same rule read the other way:
+// the smallest cell a strut of `strut_mm` may be laid in is (strut + line) / touch. At two 0.45 mm lines (0.90 mm):
+//               touch     smallest cell with Allow quilt off   (the quilt's own cell, strut / touch)   (the open look's)
+//   octet       0.3536    3.82 mm                              2.55                                     4.74
+//   sc          1         1.35                                 0.90                                     4.74
+//   bcc, bccz   0.7071    1.91                                 1.27                                     4.74
+//   fcc         0.5774    2.34                                 1.56                                     4.74
+//   diamond, kelvin, rhombic 0.3536  3.82                      2.55                                     4.74
+//   fccz        0.5000    2.70                                 1.80                                     4.74
+//   reentrant   0.3333    4.05                                 2.70                                     4.74
+// The OPEN LOOK (open_look above) is not this limit: it stays what the lattice lays on its own (Auto: the smallest cell
+// on any wall that is not thin, the band's aim, the dial's 1); only what is asked past it on purpose (a dial past 1, a
+// typed strut, the ends in mm, Small cells in thin walls) goes on to this limit, never past it. The open look itself always
+// stands (it is under every type's touch): with a ONE-line strut on the smallest open cells (under about 3 mm) it is wider
+// than touch x cell - line, and the layout keeps it there, as before (set_struts: the larger of the two). With two-line
+// struts the limit is past the open look on every cell the lattice lays. With Allow quilt ON the limit is the touch
+// itself, as before. `line_mm` <= 0 reads as no gap (the touch).
+inline constexpr double kQuiltOffGapLines = 1.0;   // lines of air Allow quilt off keeps between the closest struts
+double lattice_quilt_off_strut_mm(LatticeTopology topo, double cell_mm, double line_mm);
+double lattice_quilt_off_cell_mm(LatticeTopology topo, double strut_mm, double line_mm);
 
 // The resolution (voxels per cell edge) the octet tensor library was measured at,
 // and the basis octet_relative_density voxelizes on so a printed radius maps onto
