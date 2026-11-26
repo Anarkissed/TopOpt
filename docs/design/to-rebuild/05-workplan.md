@@ -2,7 +2,54 @@
 
 Status 2026-11-22: APPROVED by the reviewer (rulings 06:18Z and 06:48Z); both helper prompts below are approved as they stand. Helpers start after the stage 0 move is released and the maintainer has created their channels. The maintainer's OK on helpers: "Yes two helpers are good as long as they're Opus 5.5". Each helper gets its own small channel (reviewer, TOReview, the helper) and never posts in #TORebuildGroup.
 
+## Resumed 2026-11-25 19:35 EST
+
+Paused at 94 % weekly usage for five minutes; the maintainer: "Keep going, do not stop, I will reset at 100%". The work tick is back; helpers told. First on the queue now: job B's credited cells and the frozen-mask check for LatticeReview; the reviewer's ruling on stage 2; Top Motor Mount both ways and the pad depths (lock), then the stage 1 report.
+
+## Work queue (the lead's own; kept stocked; top item first)
+
+The maintainer's order (2026-11-25): never sit waiting on the lock. Every wake-up records what finished, then does the next open item here.
+
+1. Stand128 both ways: DONE and recorded (stage-1 file; 2.40 / 86.6 g today, 2.68 / 88.0 g drawn face; 40 % slower, cause owed). Running now (`stage1_fourth.sh`, no lock): build `test_to_stage1_lattice_check` and `test_to_strength_known_ring` in the same build folder and run jobs A to C (no lock; check memory).
+2. DONE 2026-11-25: second search (01-research.md): printed ABS fitted at 0.46 mm against 4.1 mm; nine materials have nothing published. The choice it leaves is the maintainer's (asked).
+3. Stage 2 steps 1 and 2 written ahead behind one switch (`TOPOPT_STRENGTH`), once the reviewer rules on the shared certificate; until then the unit pieces that do not touch `analyze.cpp` (the reading over a size is in `stress_measure.cpp`; printed grams at his infill needs the wall and infill model: find where the slicer estimate lives).
+4. PARTLY DONE 2026-11-25: the mechanism on the SOLVE side is found. The connection rule (multigrid.cpp, ruling 2026-10-25) calls a piece anchored if it carries a support OR any load; on a self-weight job every solid voxel carries a load, so no floating piece is ever taken out ("0 of 11 pieces loose") and the solve hangs on near-rigid modes. Sent to TOSolver with a proposed definition (anchored = reaches a support) for its stage report. STILL OPEN, mine: why the design step cuts pieces off at all, and a per-iteration count of them (measuring only), after TOSurface's branch is merged (the step is in plsm.cpp).
+5. DONE 2026-11-25: TOSolver's stage file read (7555ad8c): method and plan sound, nothing to change. TOSurface's Top Motor Mount regression: its own two suspects are being separated; re-read when its next hold reports.
+6. Stage 1: Top Motor Mount optimised both ways and pad 2 / 3 / 4.5 mm (lock); then the stage report to the reviewer.
+7. DONE 2026-11-25: the region path (`region_member_voxels` + `cut_voxels`) gives the SAME counts as `mask_step_face`, cube for cube, at every depth and resolution tried (`test_to_true_loads`, "[lip]", third column).
+8. "Best I can do" probe build (plan), once stages 1, 3 and 5 can be combined in one sparse tree.
+
 ## 0. Where the work stands (kept current; newest first)
+
+**2026-11-25, 19:10 EST.** Work done while the lock was held (release 20's suite since 14:44).
+
+- Test E, second half (thick ring, pressure on its curved inner face through the drawn-face loader; textbook 2.333; 89af53d1), first run: the loaded area is the drawn face's to 0.00 % at all four resolutions. All-or-nothing 2.19 / 2.28 / 2.34 / 2.32 (worst miss 6.3 %, spread 6.9 %); fill with E x fill^3 (today) 4.10 / 3.94 / 3.54 / 3.77 (miss 75.7 %, spread 15.8 %); fill with E x fill 2.16 / 2.24 / 2.22 / 2.23 (miss 7.2 %, spread 3.7 %). Read over 0.9 / 1.8 / 3.6 mm: spread 3.7 / 8.2 / 2.1 %. So today's rule for a cut voxel (stiffness E x fill^3) reads 76 % high on a loaded curved face, where on the plate it read 16 % high; E x fill is steady and 7 % low. A-01 is confirmed twice over and is stage 2's first change.
+- As-drawn check on the stand, Top Motor Mount and Stand v4 with the three load settings: in `stages/stage-1-true-loads.md` (new; the stage's running report, with the lines #362 changes at the flip).
+- Material length from published values (maintainer: "use published values"): `01-research.md`, last section. Printed PLA 2.4 to 4.6 mm, printed ABS 4.1 mm.
+- Read TOSurface's branch and stage file (ea406c7f): on the stand at res 128 the wall error's median goes 0.160 to 0.000 mm; Top Motor Mount got worse (0.011 to 0.083) and it is separating two causes. Nothing to correct.
+- Disk fell to 13 GB (under the 15 GB floor); #362 cleared 7 GB of finished builds; 22 GB free.
+
+**2026-11-25, 17:00 EST.** Input for stage 8 from #362 (TORebuildGroup, 21:57Z): sheet laws per member width, 2 to 8 cells, on claude/notes28-sheet-laws (e32b2c47; evidence/2026-11-25-sheet-laws-thin-members). Open decisions the report leaves to the reviewer and stage 8: the knockdown rises with block width (8-cell reads 1.6 to 1.75 times the 2-cell); every row's peak sits in the cut cells beside the gripped faces (the grip artifact already ruled on for struts); off the grips every row is below today's law; today's law reads low by its own method. Measured floor 2 cells for both sheets. Nothing is wired into a verdict. Stage 8 must not take a law from these tables before the reviewer rules on the grip question.
+
+**2026-11-25, 09:10 EST.** The refused 0.30 version on the drawn-face path is explained (full log kept: `agent-scratch/toreview/testK_face_full.log`). It is solve 19: the design at that step is in 17 separate pieces, the multigrid solve grows its error (relative residual 136 after 2,500 cycles), and the Jacobi-CG fallback runs to its cap (122,682 iterations) at residual 0.092, so the version is refused. On today's path the same part goes through 8 to 11 pieces and its fallbacks happen to finish inside the cap. So this is not a fault of the drawn-face loader: it is the two faults already on record meeting (the optimiser breaks the part into pieces; the solver cannot settle a broken part quickly), and which side of the cap a run lands on is luck. Stage 1's report says so; the fix belongs to stage 5 (solver) and the stage 3/4 boundary (no loaded piece left unattached). Also seen: the refusal's own wording is wrong ("tolerance 1e-08 ... after 4 iterations" for a solve run at 1e-04 for 122,682 iterations); handed to TOSolver.
+
+**2026-11-25, 07:55 EST.** Test K with stage 1's switch on (TOPOPT_FACE_LOADS=face), demo job.
+
+- First attempt (3,626 s): 14 files, 0 differ, but the numbers were today's to the digit: the simple-job path (job.fixture_faces, `to_setup.inc`, `to_analyze.inc`) tagged the old way and never read the switch. Fixed at 7f6c9aaa (`tag_face_by_stage`, loadcase.hpp). #362's own lattice strength-check code in run_job.cpp tags the old way in two more places (near lines 11337 and 12647); those go on the replacement list handed to #362 at the flip.
+- Second attempt, on the drawn-face path for real (2,927 s): 11 files compared, 0 differ; gate passes. Rule 21 holds with the switch on, on this job.
+- What changed on the demo part with the drawn-face path: version 0.70 margin 1,176 (today 965), version 0.50 margin 437 (today 301), and version 0.30 is REFUSED ("linear solve did not converge ... stalled at residual 0.0922 after 4 iterations"), where today it ships with margin 70. Same in both runs. Not yet explained. Likely the same family as TOSolver's finding on this part (the design step leaves loaded pieces with no path to a support, which no solve can settle); owed: find which solve stalls and why the held voxels of the drawn-face path change it, before the stage 1 report.
+- From TOSolver (stage 5 step 1, 3ed70347): the slow solves have two causes, an unstable smoother weight (0.6) and a geometric coarse grid that does not suit a part's shape; the existing disarmed algebraic level cuts Top Motor Mount from 1,584 iterations to 58-107. Its plan is with the maintainer for discussion. Mine from it: a design step must not leave a loaded piece unattached (optimiser fault, stage 3/4 boundary).
+
+**2026-11-25, 06:20 EST.** Test K answered. The rerun (5,351 s) kept both runs and showed where they differ: the 3MF library stamps random p:UUID ids on every write (three per file); the .meta carries two wall-clock times and the output folder's own path; build_orientation.json carries one wall-clock time. With exactly those blanked, 14 files compared, 0 differ: the shape, the fields and the report are the same bytes both times, with an unrelated solve in between. Control: one changed byte in a field file and one renamed key are both caught. The test now blanks those three things and nothing else, has `--compare A B` for two kept folders, and is registered as a gate under `ctest -C Long` (over an hour while the demo part's solves fall back to the slow solver, so a plain ctest skips it). Rule 21 is met on today's path; it must be run again with stage 1's switch on before the flip.
+
+**2026-11-25, 04:30 EST.** Measured beside #362's lock holder (build on three cores, no lock), from commit e704ba16. Both helpers started (channels TOSurface-Group, TOSolver-Group).
+
+- Test E, plate with a hole at 30 degrees, textbook 3.03, hole radius 3 / 4 / 5 / 6 voxels, multigrid solve, 248 s: all-or-nothing 2.20 / 2.50 / 2.65 / 2.73 (worst miss 27.5 %, spread 24.4 %); fill with E x fill^3 (today) 3.42 / 3.43 / 3.15 / 3.52 (16.2 %, 11.7 %); fill with E x fill 2.48 / 2.69 / 2.66 / 2.84 (18.3 %, 14.7 %). None meets rule 5 (5 % and 10 %). Read over a fixed size on the E x fill arm, spread only: 0.9 mm 14.7 %, 1.8 mm 6.3 %, 3.6 mm 7.8 %. So a fixed-size reading does settle across resolutions; no arm yet reads the right peak.
+- Test K, the demo job twice with an unrelated solve between, first run ever (7,596 s on a shared machine): 14 files compared, 7 differ: each version's .3mf and _alpha.meta (sizes differ by 0 to 8 bytes). The other 7 files are identical, and both runs print the same margins, masses and solver iteration counts, so the suspicion is a time or id written into those files, not the geometry. NOT YET SHOWN: the test deleted both runs. It now prints where each pair first differs and keeps both runs when any differ; it reruns with the next lock job. Stage 1's switch cannot flip until this test passes (reviewer).
+- Seen in test K, handed to TOSolver: on the demo part (48x32x48) the multigrid solve diverges from solve 9 on (relative residual grows to 38 to 326) and every such solve falls back to Jacobi-CG for 17,000 to 70,000 iterations. The same in both runs.
+- For stage 3 (TOSurface's ask): the pad and protected faces are also handed on as geometry (`frozen_sets.hpp`, `MinimizePlasticOptions::frozen_sets`, commit be77631b), filled only with the switch on.
+
+- Owed in stage 2 (from #362, 2026-11-25): the certificate's member-width guard measures width on the voxel staircase and reads about two voxels thin (52.3 mm read as 47.8), so an all-lattice part is called "not certified" for too few cells across. #362 fixed the sheet types only, outside analyze.cpp (branch claude/notes28-sheets-strength, 2f5ac5ce, "ANALYZE GUARD (sheets):"); all-lattice STRUT parts still get the thin reading. Stage 2 is held to `core/tests/validation/test_lattice_sheets_strength.cpp`, block "THE GUARD'S CASE", line "[guard member]" (gyroid box 49 x 57.6 x 62.4 mm, 4.8 mm cells: 1.3 cells across before, 10.208 after), and must give the strut case the same true-width reading.
 
 **2026-11-24, night.** Hold lifted by the maintainer ("Get started right away"; 24-hour wait waived; machine shared with #362 through HEAVY.lock and the channel #362_and_TOReview).
 
@@ -44,7 +91,7 @@ New repo tests live in `core/tests/unit/test_to_*.cpp` and are registered in `co
 
 | files | stages 1 and 2 | stage 3 | stage 5 | later |
 |---|---|---|---|---|
-| `to_run.inc`, `to_setup.inc`, `to_analyze.inc`, `loadcase.cpp`, `io/face_tag.cpp`, `fea/assembly.cpp` (`traction_loads`) | Lead (1) | - | - | Lead |
+| `to_run.inc`, `to_setup.inc`, `to_analyze.inc`, `loadcase.cpp`, `io/face_tag.cpp`, `fea/assembly.cpp` (`traction_loads`), new `fea/face_loads.cpp` + `face_loads.hpp`, `to_stage_switch.hpp`, new `simp/stress_measure.cpp` + header (stage 2) | Lead (1) | - | - | Lead |
 | `analyze.cpp`, `gate_diagnosis.cpp`, `settings/` | Lead (2) | - | - | Lead |
 | `plsm.cpp`, `plsm.hpp`, `plsm_basis.hpp`, `plsm_frac.hpp` | - | TOSurface | - | Lead (4, 6) after stage 3 is released |
 | `mesh.cpp`, `finish.cpp`, `surface_operator.cpp`, `cad_project.cpp`, new `level_surface.cpp`, `to_export.inc`, `voxel/voxelize.cpp`, `io/step*` | - | TOSurface | - | Lead (4) after stage 3 |
@@ -53,6 +100,8 @@ New repo tests live in `core/tests/unit/test_to_*.cpp` and are registered in `co
 | `run_job.cpp` (what is left), old lattice files, `core/src/lattice_layout`, lattice laws in `fea/` | LatticeReview / #362; never ours | | | |
 | `bridge.cpp`, the app | #362 | | | |
 | `core/CMakeLists.txt`, `core/tests/unit/CMakeLists` | each lane adds only its own new-file lines; I merge | | | |
+
+**The branch point already holds stage 1's hunks in two files that are not mine afterwards** (reviewer ruling 2026-11-25 06:54Z). Both helpers branch from 2b40bcf4, which carries, switched off by default (`TOPOPT_FACE_LOADS`, `to_stage_switch.hpp`): in `plsm.cpp` the stop rule's `watched` margin and in `plsm.hpp` the field `PlsmMarginProbe::design_margin` (ledger P-15); in `minimize_plastic.cpp` the lines that fill `design_margin` in the margin probe. From the moment the helpers start I do not edit `plsm.cpp` or `plsm.hpp` until stage 3 is released; anything stage 1 or 2 still needs there I ask of TOSurface in one line. `minimize_plastic.cpp` stays mine and untouched by both helpers. No file in TOSolver's list is touched by stage 1 or 2: `fea/face_loads.cpp` (new) and `fea/assembly.cpp` (`traction_loads`) are mine, and stage 2's work is in `analyze.cpp` and `simp/stress_measure.cpp`.
 
 Two points where lanes meet, settled now: (1) stage 2 changes the strength number in `analyze.cpp` while stage 3 changes the surface; neither edits the other's file, and the "certified shape equals exported shape" check is run by me when both are in. (2) Stage 1's exact loaded area needs the drawn face, and stage 3's part-in step produces the true distance; stage 1 ships on `face_tag.cpp` alone and takes the distance field when stage 3 lands.
 
@@ -76,14 +125,16 @@ helper branch -> I review the diff and the stage file -> I merge into `claude/to
 
 ## 5. Helper prompt: TOSurface (stage 3)
 
-Paste as the first message of a new session. The tip to branch from is filled in when stage 0 is released.
+Paste as the first message of a new session. Branch point: commit 2b40bcf4 on origin/claude/topopt-review-rebuild-3c317f (reviewer ruling 2026-11-25 06:54Z).
 
 ````text
 You are a helper agent on the TopOpt topology-optimiser (TO) rebuild. Your name is TOSurface. Your lead is the agent TOReview; the reviewer rules on its work; Nadim is the maintainer. You do ONE work package: stage 3, smooth surfaces. You report to TOReview only, on your own agent-comms channel (members: reviewer, TOReview, you; tools comms_post / comms_read). You never post in #TORebuildGroup. Until your channel exists, write your report in your stage file and stop.
 
 SET UP
-- Repo: ~/dev/TopOpt/TopOpt. Make your own SPARSE worktree from the branch tip TOReview names in its go message: `git worktree add --no-checkout <path> -b <your branch> <tip>`, then `git sparse-checkout set --no-cone --stdin < tools/sparse-evidence.txt`, then `git checkout`. Work only there.
+- Repo: ~/dev/TopOpt/TopOpt. Make your own SPARSE worktree from commit 2b40bcf4 (on origin/claude/topopt-review-rebuild-3c317f; `git fetch origin` first): `git worktree add --no-checkout <path> -b <your branch> 2b40bcf4`, then `git sparse-checkout set --no-cone --stdin < tools/sparse-evidence.txt`, then `git checkout`. Work only there.
 - Read first, in this order, and nothing else until you need it: docs/design/to-rebuild/02-plan.md (your stage row and your modules in section 4), 03-rules.md, 04-tests.md, 05-workplan.md (the file-ownership map), then the ledger items named below in 00-review.md (search for the id, read the item, not the file), then FILES.md for where things are.
+- Already in your branch point, written by the lead for stage 1 and switched off by default (core/include/topopt/to_stage_switch.hpp): in plsm.cpp the stop rule's `watched` margin and in plsm.hpp `PlsmMarginProbe::design_margin`. Keep both as they are; the lead no longer edits plsm.cpp or plsm.hpp, and asks you in one line if stage 1 or 2 needs anything there. The TO code that used to sit in run_job.cpp is now in core/src/cli/to_*.inc, files run_job.cpp includes in place (one translation unit); yours is to_export.inc.
+- Your gate test exists: core/tests/unit/test_to_surface_known_shapes.cpp (test A; today 0.12 to 0.24 mm against 0.05; run with --gate). New tests go in core/tests/unit/test_to_*.cpp and are registered in core/tests/to_rebuild_tests.cmake, never in core/CMakeLists.txt.
 - Heavy jobs (any build, any optimise run, any test run over a minute): one at a time on the whole Mac through ~/dev/TopOpt/HEAVY.lock. Take it only after it has stayed empty, with noclobber: `( set -C; echo "<name> <what> $(date)" > ~/dev/TopOpt/HEAVY.lock )`. Never steal it. Remove only your own line. Build in your own tree, never in the worker's cliPath.
 - Commit small, push your branch, never force-push. Commit messages end with: Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 - You do not start helpers. You do not release; every release is #362's. You do not message #362, LatticeReview or the reviewer; anything for them goes to TOReview in one line.
@@ -101,7 +152,7 @@ The shape that is certified and the shape that is exported must be the same surf
 
 YOUR FILES (no one else edits these while you work)
 core/src/simp/plsm.cpp, core/include/topopt/plsm.hpp, plsm_basis.hpp, plsm_frac.hpp; core/src/mesh/mesh.cpp, finish.cpp, surface_operator.cpp, cad_project.cpp and their headers; a new core/src/mesh/level_surface.cpp (+ header); core/src/cli/to_export.inc; core/src/voxel/voxelize.cpp (the part-in step only); core/src/io/step*; your new tests under core/tests/unit; core/CMakeLists lines for your new files only.
-NOT YOURS, do not edit: anything in core/src/fea; core/src/simp/to_solve.cpp, analyze.cpp, minimize_plastic.cpp, gate_diagnosis.cpp; core/src/cli/to_run.inc, to_setup.inc, to_analyze.inc, to_strengthen.inc, loadcase.cpp, job.cpp, run_job.cpp; core/src/io/face_tag.cpp; core/src/settings; core/src/lattice_layout and every lattice file; bridge.cpp and the app; plsm_kernel.hpp and plsm_topology.hpp (read only). If you need a change in one of these, ask TOReview in one line.
+NOT YOURS, do not edit: anything in core/src/fea (it includes the lead's new face_loads.cpp); core/src/simp/stress_measure.cpp; core/include/topopt/to_stage_switch.hpp, face_loads.hpp, stress_measure.hpp; core/src/simp/to_solve.cpp, analyze.cpp, minimize_plastic.cpp, gate_diagnosis.cpp; core/src/cli/to_run.inc, to_setup.inc, to_analyze.inc, to_strengthen.inc, loadcase.cpp, job.cpp, run_job.cpp; core/src/io/face_tag.cpp; core/src/settings; core/src/lattice_layout and every lattice file; bridge.cpp and the app; plsm_kernel.hpp and plsm_topology.hpp (read only). If you need a change in one of these, ask TOReview in one line.
 
 TESTS YOU OWN (04-tests.md): A, B, F, J pass; K, M, P hold.
 
@@ -171,8 +222,9 @@ STANDING RULES
 You are a helper agent on the TopOpt topology-optimiser (TO) rebuild. Your name is TOSolver. Your lead is the agent TOReview; the reviewer rules on its work; Nadim is the maintainer. You do ONE work package: stage 5, faster solves. You report to TOReview only, on your own agent-comms channel (members: reviewer, TOReview, you; tools comms_post / comms_read). You never post in #TORebuildGroup. Until your channel exists, write your report in your stage file and stop.
 
 SET UP
-- Repo: ~/dev/TopOpt/TopOpt. Make your own SPARSE worktree from the branch tip TOReview names in its go message: `git worktree add --no-checkout <path> -b <your branch> <tip>`, then `git sparse-checkout set --no-cone --stdin < tools/sparse-evidence.txt`, then `git checkout`. Work only there.
+- Repo: ~/dev/TopOpt/TopOpt. Make your own SPARSE worktree from commit 2b40bcf4 (on origin/claude/topopt-review-rebuild-3c317f; `git fetch origin` first): `git worktree add --no-checkout <path> -b <your branch> 2b40bcf4`, then `git sparse-checkout set --no-cone --stdin < tools/sparse-evidence.txt`, then `git checkout`. Work only there.
 - Read first, in this order, and nothing else until you need it: docs/design/to-rebuild/02-plan.md (your stage row and your modules in section 4), 03-rules.md, 04-tests.md, 05-workplan.md (the file-ownership map), then the ledger items named below in 00-review.md (search for the id, read the item, not the file), then FILES.md for where things are.
+- New tests go in core/tests/unit/test_to_*.cpp and are registered in core/tests/to_rebuild_tests.cmake, never in core/CMakeLists.txt. The lead's stage 1 and 2 code in your branch point (face_loads.cpp, stress_measure.cpp, loadcase.cpp, switched off by default) is not yours and touches none of your files.
 - Heavy jobs (any build, any optimise run, any test run over a minute): one at a time on the whole Mac through ~/dev/TopOpt/HEAVY.lock. Take it only after it has stayed empty, with noclobber: `( set -C; echo "<name> <what> $(date)" > ~/dev/TopOpt/HEAVY.lock )`. Never steal it. Remove only your own line. Build in your own tree, never in the worker's cliPath.
 - Commit small, push your branch, never force-push. Commit messages end with: Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 - You do not start helpers. You do not release; every release is #362's. You do not message #362, LatticeReview or the reviewer; anything for them goes to TOReview in one line.
@@ -194,7 +246,7 @@ Nothing merges without the reviewer's sign-off, which TOReview asks for.
 
 YOUR FILES
 core/src/fea/multigrid.cpp, matfree.cpp, fea_matfree.hpp, geneo.*, recycle.*, contact.cpp, hex_element.cpp, the solver-settings declarations in core/include/topopt/fea.hpp; core/src/simp/to_solve.cpp (new: YOUR SECOND COMMIT moves simp_compliance, simp_scenarios_compliance and effective_design_mask out of core/src/simp/simp.cpp into it, unchanged, with its tests green before and after; that move is the only edit you make to simp.cpp); your new tests; core/CMakeLists lines for your new files only.
-NOT YOURS, do not edit: plsm*.{cpp,hpp}, minimize_plastic.cpp, analyze.cpp, anything in core/src/mesh, core/src/cli, core/src/io, core/src/voxel, core/src/settings; core/src/fea/assembly.cpp, lattice*.cpp, strut_*.cpp, beam_network.cpp, sparse_ldlt.cpp, algebraic_coarsen.*; core/src/lattice_layout; bridge.cpp and the app. If you need a change in one of these, ask TOReview in one line.
+NOT YOURS, do not edit: plsm*.{cpp,hpp}, minimize_plastic.cpp, analyze.cpp, anything in core/src/mesh, core/src/cli, core/src/io, core/src/voxel, core/src/settings; core/src/fea/assembly.cpp and face_loads.cpp (the lead's), core/src/simp/stress_measure.cpp, lattice*.cpp, strut_*.cpp, beam_network.cpp, sparse_ldlt.cpp, algebraic_coarsen.*; core/src/lattice_layout; bridge.cpp and the app. If you need a change in one of these, ask TOReview in one line.
 
 TESTS YOU OWN (04-tests.md): K and P, plus these existing unit tests, green before and after every change: test_matfree, test_matfree_cubic, test_matfree_threads, test_mgcg_matfree, test_geneo, test_recycle (the solver), and the Flexible set test_flexible_curve, _data, _faces, _field, _job, _press, _recommend, _run, _squish. Margins and printed grams in the reference table must not move beyond solver tolerance; if one does, stop and report it.
 

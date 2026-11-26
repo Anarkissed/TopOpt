@@ -135,9 +135,11 @@ JobSetup build_job_setup(const JobDescription& job, const StepModel& model,
     grid = voxelize(model.mesh, job.resolution);
     std::size_t tagged = 0;
     for (const int f : S.fixture_face_ids)
-      tagged += model_is_mesh
-                    ? tag_mesh_face(grid, model, f, VoxelTag::Fixture)
-                    : tag_step_face(grid, model, f, VoxelTag::Fixture);
+      tagged += to_stage1_on()
+                    ? tag_face_by_stage(grid, model, f, VoxelTag::Fixture)
+                    : model_is_mesh
+                        ? tag_mesh_face(grid, model, f, VoxelTag::Fixture)
+                        : tag_step_face(grid, model, f, VoxelTag::Fixture);
     if (tagged == 0)
       throw JobError("fixture faces tagged no voxels (resolution too coarse "
                      "for the selected faces?)");

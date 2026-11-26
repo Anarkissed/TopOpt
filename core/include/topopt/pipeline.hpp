@@ -15,6 +15,7 @@
 #include "topopt/plsm.hpp"               // PlsmOptions / PlsmMode (default Off)
 #include "topopt/build_orientation.hpp"  // BuildOrientationReport
 #include "topopt/fea.hpp"        // DirichletBC
+#include "topopt/frozen_sets.hpp"  // FrozenFaceSet (TO rebuild stage 1)
 #include "topopt/lattice_density_field.hpp"  // LatticeRegionSpec, LatticeBetaKnots
 #include "topopt/materials.hpp"  // Material
 #include "topopt/mesh.hpp"       // Vec3
@@ -177,6 +178,9 @@ struct MinimizePlasticOptions {
   // not cover is reported there as "other". Empty (the default) attributes the
   // whole mask to "other".
   std::vector<FrozenSourceCount> frozen_mask_sources;
+  // TO rebuild stage 1: the same freezes as drawn-face geometry (frozen_sets.hpp).
+  // Empty unless stage 1 is on; the mask stays the authority for the solve.
+  std::vector<FrozenFaceSet> frozen_sets;
   // CORE LIST item 47 — WHICH ANCHOR a Fixture voxel came from: per anchor face
   // (or region), the part-grid voxels its own tagging made Fixture. Read only to
   // NAME the faces of an anchored piece a rung let go of (kAnchorDetachedReason);
@@ -1731,6 +1735,9 @@ struct MinimizePlasticResult {
   std::vector<char> rung_non_convergent;
   std::vector<int> rung_non_convergent_iteration;
   std::vector<double> rung_non_convergent_residual;
+  // The tolerance that failed solve ran at; 0 when not recorded (the strength
+  // check's own solve). Same length and order as the three above.
+  std::vector<double> rung_non_convergent_tolerance;
   // Task 2026-08-03-preflight-feasibility-and-divergence (bar P6: THE GUARDS ARE
   // OBSERVABLE) — the per-rung outcome of the two DIVERGENCE guards, filled with
   // the same finalize-only discipline and always parallel to `evaluated`. Every

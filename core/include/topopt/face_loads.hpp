@@ -93,10 +93,12 @@ std::vector<NodalLoad> face_traction_loads(const std::vector<NodeArea>& areas,
                                            Vec3 total_force);
 
 // Anchor, clamp form: every node that carries at least `min_area_fraction` of a
-// full cell-face (spacing^2) is held in all three directions.
+// full cell-face (spacing^2) is held in all three directions. A corner node of a
+// face on the grid carries exactly a quarter, so the default sits just under it:
+// a whole face is held corner to corner.
 std::vector<DirichletBC> face_clamp_bcs(const VoxelGrid& grid,
                                         const std::vector<NodeArea>& areas,
-                                        double min_area_fraction = 0.25);
+                                        double min_area_fraction = 0.2);
 
 // Anchor, spring form: each node is held by a spring of `stiffness_per_area`
 // (N/mm per mm^2) times its own area, the same in every direction. Uses the

@@ -225,3 +225,40 @@ Listed now so the bar is applied when it happens: candidate 1 of 3a (certified s
 - **Aage 2017, a billion voxels.** Detail such as curved spars and thin walls appears only at very high resolution (1.1 billion voxels, 1 to 5 days on 8,000 processors). Bearing on 3e: resolution is a design choice with a cost, not something a phone or a Mac buys; this supports deriving the part resolution from the smallest feature asked for.
 - **Groen 2021, coarse answer drawn as a fine lattice.** A coarse run with oriented cells, then the real geometry drawn by an implicit modeller; within about 5 % of the fine-run stiffness at about a thousandth of the cost, on a workstation. It confirms the "priced by a law" route in 3c for stiffness; it has no strength limit, so on its own it does not meet his margin rule.
 
+## Added 2026-11-25: the material length for the strength reading (stage 2), from published values
+
+The maintainer's word (2026-11-25): use published values; his own rig is not ready.
+
+Read (free copies, saved text searched for the numbers): Ahmed and Susmel, "A material length scale-based methodology to assess static strength of notched additively manufactured polylactide (PLA)", Fatigue Fract Eng Mater Struct 41 (2018) 2071-2098, `10.1111/ffe.12746` (eprints.whiterose.ac.uk/123322); Susmel, review chapter on notched additively manufactured ABS and PLA (2022; eprints.whiterose.ac.uk/194145).
+
+- The length: L = (1/pi) (K_Ic / strength)^2, with strength = the plain material's tensile strength for these (brittle-acting) printed polymers. The stress is read at L/2 from the surface (point method), averaged over a line 2L long (line method), or over a half-disc of radius L (area method).
+- Printed PLA (100 % infill, any raster angle): tensile strength 42.9 MPa, E 3,479 MPa, K_Ic 3.7 MPa m^0.5 (thick specimens; thinner ones gave 3.5). The formula gives 2.4 mm; the authors could not trust the toughness test and calibrated L = 4.6 mm from sharp-notch tests. Point and area methods then predicted every notched test (tension and bending, blunt to sharp, three raster angles) within about 20 %.
+- Printed ABS: tensile strength 23 MPa, K_Ic 2.6 MPa m^0.5, L = 4.1 mm.
+- PETG: filament as received 2.11 to 2.54 MPa m^0.5 (Guessasma et al., Polymers 11 (2019) 1220); no printed value found. With 45 MPa: about 0.8 mm. PC, PA12, PP, HIPS, the filled grades, resins: no printed value found yet.
+
+What it means here:
+1. The length is millimetres, not tenths: 2 to 5 mm for PLA and ABS. That is the size of the walls this optimiser makes. A peak read on one voxel (0.5 to 2 mm) is not what breaks a printed part; the stress over a few millimetres is. This is why the per-voxel peak is both too harsh and unsteady.
+2. Tests E agree in kind: read over a fixed 1.8 to 3.6 mm, the plate's number moves 6 to 8 % across resolutions and the ring's 2 to 8 %, against 12 to 24 % for the per-voxel peak.
+3. Open, for discussion with the maintainer before any of it is built: the published method predicts BREAKING against tensile strength; this app certifies against YIELD with a safety factor. And the layer direction has its own, lower strength and toughness (no published L across layers found). A cautious first form: read over a size tied to the line width and never larger than the published L for the material, with the knockdowns as today.
+
+### Second search, 2026-11-25 evening: the published lengths disagree, and most materials have none
+
+- Printed ABS again: Cicero, Martinez-Mata, Arrieta et al., "Analysis of notch effect in 3D-printed ABS fracture specimens containing U-notches", Materials 13 (2020) 4716, `10.3390/ma13214716` (read from PubMed Central, tables 1 to 3). Strong prints (tensile strength 52 to 61 MPa, toughness 3.5 to 4.1 MPa m^0.5, three raster angles, 33 notched bending tests). The formula gives 1.4 to 1.5 mm; the length that best FITS the tests is 0.46 to 0.92 mm (averaged over a line) and 0.28 to 0.44 mm (read at a point). The authors say the fitted and formula values differ "significantly" because the material is not fully brittle. Susmel's 4.1 mm was for a weak print (23 MPa).
+- So for one material the published length runs from 0.3 to 4.1 mm depending on the print and the method. The table (`material_length.hpp`) takes the lowest value that matches how we read (averaged over a size): ABS 0.46 mm, PLA 2.4 mm, PETG 0.7 mm (filament data). With his half rule: 0.23, 1.2 and 0.35 mm.
+- No printed value found for PC, PA12, PP, HIPS, ASA, the filled grades or the resins (searched: fracture toughness and critical distance, each material, printed specimens). A printed short-fibre polyamide study reports toughness "slightly higher" than neat polyamide without a number in reach.
+- What this does to the proposal: at half of 0.46 mm the reading is smaller than a voxel on every job, so for ABS the new number IS today's peak (with cut voxels at their real stiffness). The steadiness measured in tests E came from 1.8 mm and up. The honest position: the published data support a length of the order of a millimetre for printed plastics but do not pin it per material; his rig has to. Until then the choice between "cautious and unsteady" (small length) and "steady and less proven" (about 1 to 2 mm for every material) is his.
+
+
+### The maintainer's source: CNC Kitchen (Stefan Hermann), read 2026-11-25
+
+Four articles read: comparing PLA, PETG and ASA (2020-02-03); Prusament PC Blend (2021-06-12); Essentium PCTG (2021-05-29); carbon-fibre nylon PA6 against PA12 (2025-08-17). His own caveat: none of it on calibrated equipment; specimens per value mostly not stated.
+
+- No fracture toughness or critical distance anywhere, so nothing here sets the length directly.
+- Layer strength, standing against lying (his hooks and mini-specimens): PLA 55 %, PETG 46 %, ASA 29 % (34 % in a warm enclosure), PC Blend 50 to 63 %, PCTG 75 %. Our `materials.json` (the maintainer's data, not edited): PLA 0.55, PETG 0.70, ASA 0.60, PC 0.60. PETG and ASA are well above what he measured.
+- Notched impact (Izod), lying: PLA 5, PETG 8.6, ASA 18, PCTG 24, PC Blend 27 kJ/m2. STANDING: PC Blend about 2, PCTG 1.5 kJ/m2. So across the layers the notched toughness is 13 to 16 times lower than in the plane, while the strength is only 1.3 to 2 times lower. By the length's own formula that makes the length across layers roughly a fifth of the in-plane one. This bears on the decision "same length across layers".
+- Carbon-fibre nylon: PA6 loses 44 % of its strength and two thirds of its stiffness once it has taken up moisture; PA12 loses 10 to 15 %. A dry-strength number for a nylon is not the strength of the part in use.
+- A cross-check only, NOT a published value: a rough toughness from his impact energy and bending stiffness, K about sqrt(E x G), gives PLA 4.1 MPa m^0.5, beside the published 3.7. The same sum gives PETG 4.0, ASA 6.4, PC 7.7. Impact energy overstates the true fracture energy, so these are upper guides at best.
+
+### Decided by the maintainer, 2026-11-25
+
+"Let's go with the lowest published value for each." So: PLA 2.4 mm, ABS 0.46 mm, PETG 0.7 mm, halved by his earlier rule (1.2, 0.23, 0.35 mm). Open: the nine materials with no published value.

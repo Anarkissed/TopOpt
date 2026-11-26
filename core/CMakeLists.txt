@@ -2309,7 +2309,8 @@ endif()
 if(Eigen3_FOUND)
   target_sources(topopt PRIVATE src/cli/loadcase.cpp
     src/fea/face_loads.cpp      # TO rebuild stage 1: loads from the drawn face
-    src/simp/stress_measure.cpp)  # TO rebuild stage 2: stress read over a fixed size
+    src/simp/stress_measure.cpp   # TO rebuild stage 2: stress read over a fixed size
+    src/simp/printed_mass.cpp)    # TO rebuild stage 2: printed grams at walls and infill
 endif()
 
 if(OpenCASCADE_FOUND AND Eigen3_FOUND)
