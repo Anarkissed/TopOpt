@@ -72,7 +72,8 @@ extension LatticeSheets {
         return fell.map { s in
             let names = s.regions.map(name)
             let who = names.count == 2 ? "\(names[0]) and \(names[1])" : (names.first ?? "Two lattices")
-            return "\(who): the blend between them wouldn’t print, so a solid wall joins them there."
+            // ★ notes30 M1 (his rule: positive words on screen): what was made, and why
+            return "\(who): a solid wall joins them there, where a blend would print too thin."
         }.joined(separator: "\n")
     }
     /// Raises the centred pop-up for a landed print file whose blend fell back to the solid wall. True: it said something.

@@ -56,7 +56,7 @@ public enum LatticeSheets {
         let name = LatticeType.displayName(forID: id)
         let wall = autoWallMM(id, cellMM: cellMM, lineWidthMM: lineMM)
         func mm(_ v: Double) -> String { String(format: "%.2f", v) }
-        var s = "\(name) is one continuous curved wall, not struts. Its thickness is the wall's, measured straight through it. "
+        var s = "\(name) is one continuous curved wall rather than struts. Its thickness is the wall's, measured straight through it. "
             + "The thinnest wall prints as two lines side by side (\(mm(2 * lineMM)) mm)."
         if cellMM > 0, wall > 0 {
             s += " At a \(mm(cellMM)) mm cell, Auto's wall is \(mm(wall)) mm: about "
@@ -87,10 +87,12 @@ public enum LatticeSheets {
     public static func seamIndex(_ l: LatticeSettings) -> Int { seam(l) == blend ? 0 : 1 }
     /// The row shows when the part has two or more sheet regions that touch (the laid seams).
     public static func seamRowShown(_ id: String, seams: [LatticeSheetSeam]) -> Bool { sheet(id) && !seams.isEmpty }
+    /// ★ notes30 M1 (his rule: positive words on screen): what each choice does, and what the app does for him.
     public static func seamInfo(structural: Bool) -> String {
-        "Blend grades one lattice into the other over about a cell; that band gets no strength credit. Solid wall is a wall "
-            + "two lines thick between them, checked as solid. A blend that can't print becomes a solid wall, and the app "
-            + "says so. Where a sheet meets struts or Organic, it is always a solid wall."
+        "Blend grades one lattice into the other over about a cell; the strength check counts that band as open, with no "
+            + "strength credit. Solid wall is a wall two lines thick between them, checked as solid. Where a blend would "
+            + "print too thin, a solid wall takes its place and the app says so. Where a sheet meets struts or Organic, it "
+            + "is always a solid wall."
             + (structural ? " In Structural a blend reads weaker than the solid wall, so Solid wall is the default here."
                           : "")
     }
@@ -102,28 +104,34 @@ public enum LatticeSheets {
 
     public enum Greyed: String, CaseIterable, Sendable {
         case finishSkin, gradeToShape, doubledStepped, cellSizeByStress
-        /// Under the greyed control (his rule: at most five words).
+        /// ★ notes30 M1 (the merge with notes29b): Small cells in thin walls gives a thin wall its own smaller cell, a change
+        /// of period the sheet cannot follow; core lays a sheet with it off (session.cpp), and the page says so here.
+        case smallCellsInThinWalls
+        /// Under the greyed control (his rule: at most five words; ★ notes30 M1: positive words).
         public var caption: String {
             switch self {
-            case .finishSkin: return "Not for sheet types"
-            case .gradeToShape, .doubledStepped, .cellSizeByStress: return "One cell size per region"
+            case .finishSkin: return "Skin is for strut types"
+            case .gradeToShape, .doubledStepped, .cellSizeByStress, .smallCellsInThinWalls: return "One cell size per region"
             }
         }
         /// Its (i).
         public var info: String {
             switch self {
             case .finishSkin:
-                return "Skin weaves bars over the surface to join the cut ends of struts. A sheet has no strut ends: its wall "
-                    + "runs into the solid and joins it there. Rim and Covered work as they do for struts."
+                return "Skin weaves bars over the surface to join the cut ends of struts. A sheet's wall runs straight into "
+                    + "the solid and joins it there, so it needs no skin. Rim and Covered work as they do for struts."
             case .gradeToShape:
-                return "A sheet is one continuous wall, so its cells can't shrink toward an outline: a change of cell size "
-                    + "would leave the walls unjoined. Each region keeps one cell size; the walls are cut by the part's faces."
+                return "A sheet is one continuous wall, so each region keeps one cell size and its walls stay joined "
+                    + "everywhere. The part's faces cut the walls where they meet them."
             case .doubledStepped:
                 return "Doubled and Stepped change the cell size across a region. A sheet keeps one cell size per region, "
                     + "so its walls stay joined everywhere."
             case .cellSizeByStress:
                 return "A sheet keeps one cell size per region, so its walls stay joined. By stress still thickens the walls "
                     + "where the stress is high."
+            case .smallCellsInThinWalls:
+                return "A sheet keeps one cell size per region, so its walls stay joined everywhere. A thin wall keeps its "
+                    + "region's cell, and the part's faces cut the sheet where they meet it."
             }
         }
     }

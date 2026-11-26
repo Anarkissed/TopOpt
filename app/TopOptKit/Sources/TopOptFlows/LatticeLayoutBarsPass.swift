@@ -626,6 +626,14 @@ final class LatticeLayoutBarsPass {
         }
         return (lo, hi)
     }
+    /// ★ notes30 M1 (the build timelapse on a sheet): a sheet layout's box in the part's own coordinates — its laid cells'
+    /// cubes (the march's box), else its map's — so its walls rise floor by floor as the struts do. nil: neither yet.
+    static func sheetBox(_ s: LatticeSheetDrawing) -> (lo: SIMD3<Float>, hi: SIMD3<Float>)? {
+        if let lo = s.boxLo, let hi = s.boxHi, lo.x <= hi.x, lo.y <= hi.y, lo.z <= hi.z { return (lo, hi) }
+        guard let g = s.map, g.dims.x > 0, g.dims.y > 0, g.dims.z > 0 else { return nil }
+        let span = SIMD3<Float>(Float(g.dims.x - 1), Float(g.dims.y - 1), Float(g.dims.z - 1)) * g.voxel
+        return (g.origin, g.origin + span)
+    }
     /// ★ Organic cut 1: the first bar the light pass draws (.max: none).
     private(set) var lightFrom = Int.max
     /// ★ His 11-19: Organic's vines (nil: the bars draw).
@@ -773,7 +781,8 @@ final class LatticeLayoutBarsPass {
         uploadSheets(inputs)   // ★ SHEETS
         let packed = Self.pack(inputs.bars, flags: inputs.flags)
         count = packed.count / 2
-        box = Self.box(inputs.bars)   // ★ notes29: where the timelapse's floors and bays lie
+        // ★ notes29: where the timelapse's floors and bays lie (★ notes30 M1: a sheet's, from its laid cells or its map)
+        box = Self.box(inputs.bars) ?? inputs.sheets.flatMap(Self.sheetBox)
         buffer = packed.isEmpty ? nil : device.makeBuffer(bytes: packed, length: MemoryLayout<SIMD4<Float>>.stride * packed.count,
                                                           options: .storageModeShared)
         uploadColours(inputs)
@@ -791,6 +800,7 @@ final class LatticeLayoutBarsPass {
             }
         }
         sheetPass?.upload(sh)
+        if inputs.bars.isEmpty { box = Self.sheetBox(sh) }   // ★ notes30 M1: the timelapse's box when the same lay's map lands
     }
 
     /// ★ Install 3: the bars' colours (one per bar), or none (the one colour). A count that is not the bars' is none.
@@ -852,8 +862,10 @@ final class LatticeLayoutBarsPass {
         guard isDrawable, enc.device === device else { return false }
         let c0 = Self.colour
         if let sp = sheetPass, sp.isDrawable {   // ★ SHEETS: the field the print file is contoured from (no bars to draw)
+            // ★ notes30 M1: release 21's timelapse — the sheet's walls rise floor by floor, bay by bay (sheet_build_hidden)
             return sp.encode(enc, depthState: depthState, clipFromModel: clipFromModel, eyeFromModel: eyeFromModel,
-                             eyeNormalBasis: eyeNormalBasis, albedo: SIMD3(Float(c0.r), Float(c0.g), Float(c0.b)), dimmed: dimmed)
+                             eyeNormalBasis: eyeNormalBasis, albedo: SIMD3(Float(c0.r), Float(c0.g), Float(c0.b)), dimmed: dimmed,
+                             build: build)
         }
         guard let buffer else { return false }
         let c = dimmed ? Self.dimmedRGB(SIMD3(Float(c0.r), Float(c0.g), Float(c0.b))) : SIMD3(Float(c0.r), Float(c0.g), Float(c0.b))

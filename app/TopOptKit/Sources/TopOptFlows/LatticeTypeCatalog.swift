@@ -79,6 +79,18 @@ public enum LatticeTypeCatalog {
     public static func structuralNote(_ id: String) -> String? { LatticeLayoutSession.typeFacts(id).structuralNote }
     /// His rule: a caption under a setting is at most five words.
     public static let aestheticOnlyCaption = "Aesthetic only"
+    /// ★★ notes30 M1 — THE SHEETS ARE AESTHETIC ONLY FOR NOW (the reviewer's ruling 11-26, item 3(b): "NO Structural sheet
+    /// credit until (a); Aesthetic may ship" — (a) is the sheet laws' envelope, measured on claude/notes30-sheet-laws). The
+    /// sheet branches offered both sheets on Structural with their credit by place, so Structural is closed to them here, in
+    /// the picker, with its own five words and an (i) that says plainly when Structural comes. Aesthetic offers them as
+    /// before. When the measured laws and the reviewer's yes land, this one check goes and Structural opens by itself.
+    public static let sheetStructuralCaption = "Aesthetic only for now"
+    public static func sheetStructuralLater(_ name: String) -> String {
+        "\(name) is ready in Aesthetic today. It joins Structural in an update, once its strength in thin walls is "
+            + "measured and checked; that measurement is under way now."
+    }
+    /// RED CONTROL (tests): the sheets offered on Structural (as the sheet branches had it).
+    nonisolated(unsafe) public static var controlSheetsOnStructural = false
     public static let strengthUnmeasuredCaption = "Strength measured for denser struts"
 
     /// ★ notes28 (362's ruling 2026-11-24, his rule "NOT PRINT-TESTED"): every strut type he has not marked print-tested
@@ -191,6 +203,9 @@ public enum LatticeTypeCatalog {
             var reason: String?, caption: String?
             if !appReady(id) { reason = appBatchPending }
             else if !engineLays(id) { reason = engineWaitsInfo(name); caption = engineWaitsCaption }
+            else if structural, sheetIDs.contains(id), !controlSheetsOnStructural {   // ★ notes30 M1: the reviewer's 3(b)
+                reason = sheetStructuralLater(name); caption = sheetStructuralCaption
+            }
             else if structural, let r = structuralRefusal(id) { reason = r; caption = aestheticOnlyCaption }
             else if structural, !certifiable.contains(id) { reason = TopOptKit.latticeTypeReadinessPlain(.notEither) }
             else if structural, let n = structuralNote(id) { reason = n; caption = strengthUnmeasuredCaption }

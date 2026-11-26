@@ -173,6 +173,11 @@ struct SheetFrame {
     SheetFieldU fields[8];
     float4   seamInfo;     // ★ E: x = seams, y = 1: the map carries the seam channels (index, distance across)
     float4   seams[8];     // ★ E: per seam (the result's order): x = field a, y = field b (-1: a solid wall), z = band, w = raise
+    // ★ notes30 M1: release 21's build timelapse (LatticeBuildRevealUniform, the bars' BarFrame rows): which places show
+    float4   build;        // x: the snaps shown (< 0: every place); y: floors; z: bays; w: 1 on
+    float4   buildUp;      // xyz: up in the part's own coordinates; w: the lattice's lowest height along it
+    float4   buildAcross;  // xyz: across, left to right; w: the lattice's lowest along it
+    float4   buildSizes;   // x: a floor's height; y: the lattice's width across; z: (a column's |cos|: struts only)
 };
 
 // ── the field (core's sheets.cpp; LatticeSheetField is the Swift copy this is held to) ──
@@ -292,6 +297,20 @@ static float sheet_open(float3 p, constant SheetFrame& F, texture3d<float> map) 
     if (any(uvw < 0.0f) || any(uvw > 1.0f)) { return -1.0f; }
     return map.sample(sl, uvw).r;
 }
+// ★ notes30 M1 (the build timelapse on a sheet): the snap a place comes in — its floor by its height along up, then its bay
+// across (a sheet has no columns: a floor's first beat is still); LatticeBuildTimelapse.sheetStep, mirrored. A place not yet
+// built reads as no lattice, so the march passes it as it passes solid and air, and the wall ends flat at the floor's edge.
+static bool sheet_build_hidden(float3 p, constant SheetFrame& F) {
+    if (F.build.x < 0.0f) { return false; }
+    float floors = max(F.build.y, 1.0f), bays = max(F.build.z, 1.0f);
+    float fl = clamp(floor((dot(F.buildUp.xyz, p) - F.buildUp.w) / max(F.buildSizes.x, 1e-4f) + 1e-3f), 0.0f, floors - 1.0f);
+    float bay = clamp(floor((dot(F.buildAcross.xyz, p) - F.buildAcross.w) / max(F.buildSizes.y, 1e-4f) * bays), 0.0f,
+                      bays - 1.0f);
+    return fl * (1.0f + bays) + 1.0f + bay >= F.build.x;
+}
+static float sheet_open_built(float3 p, constant SheetFrame& F, texture3d<float> map) {
+    return sheet_build_hidden(p, F) ? -1.0f : sheet_open(p, F, map);
+}
 static int sheet_field_at(float3 p, constant SheetFrame& F, texture3d<uint, access::read> region) {
     if (F.mapDims.w < 0.5f) { return 0; }
     int3 i = int3(floor((p - F.mapOrigin.xyz) / F.mapSpacing.xyz + 0.5f));
@@ -385,7 +404,7 @@ fragment SheetGBuf sheet_gbuffer(SheetVOut in [[stage_in]],
     for (int i = 0; i < maxSteps; ++i) {
         float3 p = ro + rd * t;
         float step = mapStep;
-        if (sheet_open(p, F, map) > 0.0f) {
+        if (sheet_open_built(p, F, map) > 0.0f) {
             int fi = sheet_field_at(p, F, region);
             float d = sheet_here(p, fi, F, walls, law, seamIdx, seamMM);
             if (d < 0.0f) { hit = true; break; }
@@ -404,7 +423,7 @@ fragment SheetGBuf sheet_gbuffer(SheetVOut in [[stage_in]],
         for (int k = 0; k < 7; ++k) {
             float m = 0.5f * (a + b);
             float3 pm = ro + rd * m;
-            bool inside = sheet_open(pm, F, map) > 0.0f && sheet_here(pm, sheet_field_at(pm, F, region), F, walls, law, seamIdx, seamMM) < 0.0f;
+            bool inside = sheet_open_built(pm, F, map) > 0.0f && sheet_here(pm, sheet_field_at(pm, F, region), F, walls, law, seamIdx, seamMM) < 0.0f;
             if (inside) { b = m; } else { a = m; }
         }
     }
@@ -415,10 +434,11 @@ fragment SheetGBuf sheet_gbuffer(SheetVOut in [[stage_in]],
     float3 n;
     if (d < -0.01f) {
         // entered through the part's surface while inside the wall: the cut face, flush, the face's own normal (the bars' cap)
+        // (★ notes30 M1: or through the timelapse's floor edge: its own flat face)
         float e = 0.5f * vox;
-        float3 g = float3(sheet_open(p + float3(e, 0, 0), F, map) - sheet_open(p - float3(e, 0, 0), F, map),
-                          sheet_open(p + float3(0, e, 0), F, map) - sheet_open(p - float3(0, e, 0), F, map),
-                          sheet_open(p + float3(0, 0, e), F, map) - sheet_open(p - float3(0, 0, e), F, map));
+        float3 g = float3(sheet_open_built(p + float3(e, 0, 0), F, map) - sheet_open_built(p - float3(e, 0, 0), F, map),
+                          sheet_open_built(p + float3(0, e, 0), F, map) - sheet_open_built(p - float3(0, e, 0), F, map),
+                          sheet_open_built(p + float3(0, 0, e), F, map) - sheet_open_built(p - float3(0, 0, e), F, map));
         n = length(g) > 1e-5f ? -normalize(g) : -rd;
     } else {
         const float e = 0.05f;
@@ -450,6 +470,13 @@ fragment SheetGBuf sheet_gbuffer(SheetVOut in [[stage_in]],
 }
 
 // ── test kernels: the field (pts.w = the field's index) and the blend of fields 0 and 1 (pts.w = the seam distance) ──
+// ★ notes30 M1: the timelapse's test — 1 where `sheet_build_hidden` hides the place, else 0
+kernel void sheet_build_probe(const device float4* pts [[buffer(0)]], device float* out [[buffer(1)]],
+                              constant SheetFrame& F [[buffer(2)]], constant uint& count [[buffer(4)]],
+                              uint id [[thread_position_in_grid]]) {
+    if (id >= count) { return; }
+    out[id] = sheet_build_hidden(pts[id].xyz, F) ? 1.0f : 0.0f;
+}
 kernel void sheet_field_probe(const device float4* pts [[buffer(0)]], device float* out [[buffer(1)]],
                               constant SheetFrame& F [[buffer(2)]], const device float* law [[buffer(3)]],
                               constant uint& count [[buffer(4)]],
@@ -669,6 +696,15 @@ final class LatticeLayoutSheetPass {
         var seamInfo = SIMD4<Float>(0, 0, 0, 0)
         var seams: (SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>,
                     SIMD4<Float>) = (.zero, .zero, .zero, .zero, .zero, .zero, .zero, .zero)
+        /// ★ notes30 M1: the timelapse (SheetFrame's last four rows; `build.x` < 0: every place)
+        var build = SIMD4<Float>(-1, 1, 1, 0)
+        var buildUp = SIMD4<Float>(0, 1, 0, 0)
+        var buildAcross = SIMD4<Float>(1, 0, 0, 0)
+        var buildSizes = SIMD4<Float>(1, 1, 0.85, 0)
+        mutating func reveal(_ r: LatticeBuildRevealUniform?) {
+            guard let r else { return }
+            build = r.build; buildUp = r.up; buildAcross = r.across; buildSizes = r.sizes
+        }
     }
 
     /// ★ E: the seams' uniform (the result's order, at most eight): a blend's two fields, band and raise; a solid wall none.
@@ -754,12 +790,15 @@ final class LatticeLayoutSheetPass {
 
     // MARK: encoding (the bars pass's prepass: its encoder, attachments and .less + write depth state)
 
+    /// `build`: ★ notes30 M1, release 21's timelapse — the walls shown so far (nil: all of them).
     @discardableResult
     func encode(_ enc: MTLRenderCommandEncoder, depthState: MTLDepthStencilState, clipFromModel: simd_float4x4,
-                eyeFromModel: simd_float4x4, eyeNormalBasis: simd_float4x4, albedo: SIMD3<Float>, dimmed: Bool) -> Bool {
+                eyeFromModel: simd_float4x4, eyeNormalBasis: simd_float4x4, albedo: SIMD3<Float>, dimmed: Bool,
+                build: LatticeBuildRevealUniform? = nil) -> Bool {
         guard isDrawable, enc.device === device, let lawBuffer,
               var f = frame(clipFromModel: clipFromModel, eyeFromModel: eyeFromModel, eyeNormalBasis: eyeNormalBasis,
                             albedo: albedo, dimmed: dimmed) else { return false }
+        f.reveal(build)
         enc.setRenderPipelineState(pipeline)
         enc.setDepthStencilState(depthState)
         enc.setCullMode(.none)
@@ -803,6 +842,31 @@ final class LatticeLayoutSheetPass {
     }
     /// The seam channels are uploaded (a blend seam on the map).
     var drawsSeams: Bool { seamIndexTexture != nil && seamMMTexture != nil }
+
+    /// ★ notes30 M1: the shader's `sheet_build_hidden` at `points` for the timelapse `reveal` (true: hidden this frame).
+    func probeBuildHidden(_ points: [SIMD3<Float>], reveal: LatticeBuildRevealUniform) -> [Bool]? {
+        guard !points.isEmpty, let pipe = try? computePipeline("sheet_build_probe"), let queue else { return nil }
+        var f = Frame()
+        f.reveal(reveal)
+        var n = UInt32(points.count)
+        let pts = points.map { SIMD4($0, 0) }
+        guard let inBuf = device.makeBuffer(bytes: pts, length: pts.count * 16, options: .storageModeShared),
+              let outBuf = device.makeBuffer(length: pts.count * 4, options: .storageModeShared),
+              let cb = queue.makeCommandBuffer(), let enc = cb.makeComputeCommandEncoder() else { return nil }
+        enc.setComputePipelineState(pipe)
+        enc.setBuffer(inBuf, offset: 0, index: 0)
+        enc.setBuffer(outBuf, offset: 0, index: 1)
+        enc.setBytes(&f, length: MemoryLayout<Frame>.stride, index: 2)
+        enc.setBytes(&n, length: 4, index: 4)
+        enc.dispatchThreads(MTLSize(width: pts.count, height: 1, depth: 1),
+                            threadsPerThreadgroup: MTLSize(width: Swift.min(pts.count, pipe.maxTotalThreadsPerThreadgroup),
+                                                           height: 1, depth: 1))
+        enc.endEncoding()
+        cb.commit()
+        cb.waitUntilCompleted()
+        let out = outBuf.contents().bindMemory(to: Float.self, capacity: pts.count)
+        return (0..<pts.count).map { out[$0] > 0.5 }
+    }
 
     private func run(_ name: String, _ pts: [SIMD4<Float>], seam: SIMD4<Float>?, seamGrad: SIMD4<Float> = .zero,
                      withMap: Bool = false) -> [Float]? {

@@ -1959,6 +1959,7 @@ public final class LatticeLayoutPreview: ObservableObject {
             s.cellsByStress = false
             s.maxStep = 0
             s.skin = false
+            s.smallCellsInThinWalls = false   // ★ notes30 M1: one cell size per region (core lays a sheet with it off too)
             s.sheetSeam = LatticeSheets.seam(l)
         }
         return s

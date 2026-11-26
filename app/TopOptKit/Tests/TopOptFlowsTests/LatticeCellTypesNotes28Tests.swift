@@ -134,9 +134,10 @@ final class LatticeCellTypesNotes28Tests: XCTestCase {
         let liveStructural = LatticeTypeCatalog.layoutEntriesFromCore(structural: true).filter(\.offered).map(\.id)
         // ★ RE-PINNED (notes28 sheets, builder C): the two sheets too — core certifies both, with no refusal and no note
         // (their Structural floor is core's cells across a member: LatticeSheetsAppTests)
-        XCTAssertEqual(liveStructural, LatticeTypeCatalog.order.filter {
-            Self.structuralChecked.contains($0) || ["gyroid", "schwarz_d"].contains($0)
-        }, "★ Structural, strength-checked: core says no refusal and no note")
+        // ★ RE-PINNED (notes30 M1, the reviewer's ruling 11-26 item 3(b)): the sheets are Aesthetic only until their measured
+        // laws land (LatticeTypeCatalog.sheetStructuralCaption; Notes30SheetsIntegrateTests)
+        XCTAssertEqual(liveStructural, LatticeTypeCatalog.order.filter { Self.structuralChecked.contains($0) },
+                       "★ Structural, strength-checked: core says no refusal and no note")
         for id in Self.strengthNotCoveredToday {
             let e = LatticeTypeCatalog.layoutEntriesFromCore(structural: true).first { $0.id == id }!
             XCTAssertEqual(LatticeTypeCatalog.caption(e), "Strength measured for denser struts", id)

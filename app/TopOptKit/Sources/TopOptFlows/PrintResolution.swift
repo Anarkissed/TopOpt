@@ -32,22 +32,23 @@ public enum PrintResolutionCopy {
     public static let info = "Full detail is the file as the lattice was made. Medium and Coarse write the SAME lattice — "
         + "the same cells, the same strut and wall widths, the same print and strength checks — with a coarser surface: "
         + "within 0.05 mm or 0.1 mm of the true shape instead of 0.02 mm. Struts get fewer flat sides and sheets fewer "
-        + "triangles, so the file is smaller and quicker to slice; no strut or wall prints thinner than two lines at any level. "
-        + "Sizes of the levels not made yet are estimates from the lattice (usually within a fifth), and another level is made "
-        + "on your Mac."
+        + "triangles, so the file is smaller and quicker to slice; every strut and wall prints at least two lines thick at "
+        + "every level. Sizes of the levels still to make are estimates from the lattice (usually within a fifth), and another "
+        + "level is made on your Mac."
     public static let makingTitle = "Making the print file"
     public static let waiting = "Waiting for your Mac"
     public static let makingFile = "Making the file"
     public static let onThisIPad = "Making it on this iPad"
-    public static let failedTitle = "The file couldn\u{2019}t be made"
-    public static let failedText = "Your Mac couldn\u{2019}t make this resolution. Try again; if it keeps happening, export Full "
-        + "detail instead."
-    public static let noMacTitle = "Your Mac isn\u{2019}t answering"
-    public static let noMacText = "Another resolution is made on your Mac. Check that it is on and TopOpt is running there, then "
-        + "try again. Or make it here on the iPad: it takes longer."
+    // ★ notes30 M1 (his rule: positive words on screen — the fix, and what it makes possible)
+    public static let failedTitle = "Make this resolution again"
+    public static let failedText = "Your Mac stopped before this resolution was finished. Try again; if it stops again, export "
+        + "Full detail, which is ready now."
+    public static let noMacTitle = "Open TopOpt on your Mac"
+    public static let noMacText = "Another resolution is made on your Mac. Turn it on and open TopOpt there, then try again. "
+        + "Or make it here on the iPad: it takes longer."
     public static let tryAgain = "Try again"
     public static let onIPad = "Make it on the iPad"
-    public static let changedTitle = "This print file is out of date"
+    public static let changedTitle = "Make the print file again"
     public static let changedText = "The lattice settings changed since this print file was made, so another resolution would "
         + "be a different lattice. Make the print file again, then export."
 
@@ -359,17 +360,10 @@ struct PrintResolutionLayer: View {
                             .foregroundStyle(DS.Color.textPrimary.color)
                             .said(PrintResolutionCopy.title)
                         Spacer(minLength: 0)
-                        Button { AppPopups.shared.help(PrintResolutionCopy.infoTitle, PrintResolutionCopy.info) } label: {
-                            Text("i").font(.system(size: 13, weight: .bold, design: .serif))
-                                .foregroundStyle(DS.Color.textTertiary.color)
-                                .frame(width: InfoTip.circle, height: InfoTip.circle)
-                                .overlay(Circle().strokeBorder(DS.Color.textTertiary.color, lineWidth: 1.2))
-                                .frame(width: DSParts.target, height: DSParts.target)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .background(DSParts.publish("printResolutionInfo"))
-                        .accessibilityLabel("About print resolution")
+                        // ★ notes30 M1 (notes29's ONE (i) app-wide): the one component, opening the centred notification
+                        AppInfoButton(title: PrintResolutionCopy.infoTitle, text: PrintResolutionCopy.info,
+                                      label: "About print resolution")
+                            .background(DSParts.publish("printResolutionInfo"))
                     }
                     ForEach(a.facts.levels, id: \.id) { l in row(a, l) }
                     HStack {

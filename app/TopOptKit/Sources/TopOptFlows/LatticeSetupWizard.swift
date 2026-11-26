@@ -1815,11 +1815,15 @@ public struct LatticeSetupWizard: View {
             // walls only, never past the type's fusing point (builder N2b makes the engine side so: core's
             // CellSpec::small_in_thin_walls, one printed line short of touching); only when Allow quilt is on does it have
             // nothing left to add (11-13).
-            .disabled(model.allowQuilt)
+            .disabled(model.allowQuilt || LatticeSheets.greyed(model.topologyID).contains(.smallCellsInThinWalls))
             // ★ notes29 (his 11-25): five words; the rest in the (i) (★ notes29b: the engine's own rule, LatticeSetupWizard.smallCellsInfo)
-            captionLine(model.allowQuilt ? Self.smallCellsQuiltLine
-                        : model.smallCellsInThinWalls ? Self.smallCellsOnLine : Self.smallCellsOffLine,
-                        info: "small-cells", Self.smallCellsInfo)   // (its last sentence says what Allow quilt on does)
+            if LatticeSheets.greyed(model.topologyID).contains(.smallCellsInThinWalls) {   // ★ notes30 M1: a sheet, one cell
+                sheetGreyedCaption(.smallCellsInThinWalls)
+            } else {
+                captionLine(model.allowQuilt ? Self.smallCellsQuiltLine
+                            : model.smallCellsInThinWalls ? Self.smallCellsOnLine : Self.smallCellsOffLine,
+                            info: "small-cells", Self.smallCellsInfo)   // (its last sentence says what Allow quilt on does)
+            }
         }
     }
     static let smallCellsQuiltLine = "Allow quilt already does this."

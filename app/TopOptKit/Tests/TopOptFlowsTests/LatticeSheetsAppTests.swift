@@ -47,9 +47,12 @@ final class LatticeSheetsAppTests: XCTestCase {
             XCTAssertTrue(f.isSheet && LatticeSheets.isSheet(id), "\(id) is a sheet")
             XCTAssertEqual(f.s, 0, "\(id): no strut cell")
             XCTAssertNil(LatticeType.named(id), "\(id): no strut law in Swift (never octet in disguise)")
+            // ★ RE-PINNED (notes30 M1, the reviewer's ruling 11-26 item 3(b): "NO Structural sheet credit until (a); Aesthetic
+            // may ship"): Aesthetic offers both; Structural keeps them for later, with its five words and (i)
+            // (Notes30SheetsIntegrateTests; RED there: controlSheetsOnStructural offers them on Structural as builder C had it)
             for structural in [false, true] {
                 let e = LatticeTypeCatalog.layoutEntriesFromCore(structural: structural).first { $0.id == id }
-                XCTAssertEqual(e?.offered, true, "★ \(id) offered on the new engine (structural \(structural))")
+                XCTAssertEqual(e?.offered, !structural, "★ \(id) offered on the new engine in Aesthetic (structural \(structural))")
             }
             XCTAssertTrue(LatticeTypeCatalog.newEngineShipped(id))
             XCTAssertFalse(LatticeTypeCatalog.batchShipped(id), "★ \(id): never the old run's")
@@ -328,7 +331,8 @@ final class LatticeSheetsAppTests: XCTestCase {
         let seams = LatticeSheets.fileSeams(report: report)
         XCTAssertEqual(seams.count, 2)
         let text = LatticeSheets.fellBackText(seams, name: { $0 == 1 ? "Top face" : "Bracket" })
-        XCTAssertEqual(text, "Top face and Bracket: the blend between them wouldn’t print, so a solid wall joins them there.")
+        // ★ RE-PINNED (notes30 M1, his rule: positive words on screen): what was made, and why
+        XCTAssertEqual(text, "Top face and Bracket: a solid wall joins them there, where a blend would print too thin.")
         XCTAssertFalse(text?.contains("1") ?? true, "★ never a number")
         FlexibleSaid.recording = true
         AppPopups.recorded = []
@@ -345,8 +349,10 @@ final class LatticeSheetsAppTests: XCTestCase {
     func testSkinAndGradeToShapeAreGreyedForASheet() {
         XCTAssertEqual(LatticeSheets.greyed("gyroid"), LatticeSheets.Greyed.allCases)
         XCTAssertEqual(LatticeSheets.greyed("schwarz_d"), LatticeSheets.Greyed.allCases)
-        XCTAssertEqual(LatticeSheets.Greyed.finishSkin.caption, "Not for sheet types")
-        for g in [LatticeSheets.Greyed.gradeToShape, .doubledStepped, .cellSizeByStress] {
+        // ★ RE-PINNED (notes30 M1): positive words ("Not for sheet types" said what it is not); and Small cells in thin
+        // walls (notes29b) greyed too: a sheet keeps one cell size per region
+        XCTAssertEqual(LatticeSheets.Greyed.finishSkin.caption, "Skin is for strut types")
+        for g in [LatticeSheets.Greyed.gradeToShape, .doubledStepped, .cellSizeByStress, .smallCellsInThinWalls] {
             XCTAssertEqual(g.caption, "One cell size per region")
         }
         for g in LatticeSheets.Greyed.allCases { XCTAssertGreaterThan(g.info.count, 40, "\(g): its (i)") }
