@@ -157,7 +157,8 @@ REWRITE: (1) the two smoother refusals in multigrid.cpp narrowed to the point-bl
 THROW OUT: the August latch-switch idea; the stagnation latch, l1 safe retry and its logging, IF the reference runs show zero engagements with the new path (same evidence as the main work's close-out).
 SHIP when, on every reference part AND on test shapes beyond them (a plain held block, a chunky part with a hole, a thin-walled bracket, a dilute design, a design with a loaded piece cut loose): solve time below the halved grid + stage-5 smoother; verdicts identical; designs equal to the solve tolerance; test K identical bytes; memory under the cap at res 192 of the largest reference part ([..]); the bridge-way and unit tests green.
 STOP (scrap, delete the code) after up to three rounds of fixes if: two or more of those run slower than the halved grid + stage-5 smoother; or a verdict flips beyond tolerance noise; or the algebraic memory at res 192 stays over the cap after the CSR rewrite and the switch cannot be limited to sizes that fit.
-Measured next (queued): the switch prototype at K = 10 / 20 / 30 / 50 on every reference dump; memory at res 128 / 192.
+Written ahead, at his request (2026-11-25), in SCRATCH ONLY (agent-scratch/tosolver/sw/; not in the tree, deleted if the plan is not approved): the switch in solve_mgcg_matfree (+47/-7 lines), the two smoother refusals narrowed to the point-block smoother, `switch=K` under TOPOPT_SOLVER, and two report fields at the end of CgInfo. Its test (9 checks, green): a plain held block never switches and gives the same bytes as without the switch; a thin-walled bracket with K = 5 switches, converges on multigrid and matches a tight reference to 1.8e-8; repeats identical; off unless asked.
+Measured next (queued): the REAL switch replayed on every reference dump at K = 10 / 20 / 30 / 50 (cheb:2 and jacobi:1.333); memory at res 128 / 192.
 
 ## 5. Stage report (filling in as measurements land)
 
