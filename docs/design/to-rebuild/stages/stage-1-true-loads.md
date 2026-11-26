@@ -215,6 +215,10 @@ Pad behind each end face / under the boss, then margin and grams per version (dr
 
 Read plainly. Strength 0.2 is the only setting that gives all four versions; its 0.38 version is a third stronger than the fixed pad's for 2 g more, and no end comes away. At 1.0 the two 11 mm end blocks leave so little to carve that the optimiser lets go of one end. Both sample parts now say the same thing: the strength wants to be low, about 0.2 (a thick face then gets 3 to 5 mm, a thin one two wall lines). The hook at 0.2 is running; the strength 1.4 runs were stopped as pointless.
 
+### The beam's two halves differ: measured (11:50; for the optimiser's stage, goal G2, not this one)
+
+The beam and its load are mirror-symmetric along and across, on a grid that is symmetric too (64 voxels, the boss on voxels 26.7 to 37.3). Every version made tonight comes out lopsided to the eye (a broad web one side, a strut the other, an S seen from above). Measured on the files: the centre of volume sits within 1.6 mm of the middle along the beam (58.6 to 61.6 against 60) and within 0.4 mm across (14.9 to 15.4 against 15), at every pad setting and in the trial build. So the weight is balanced and the shape is not mirrored: the optimiser settles into one of two equal twisted answers. Whether a mirrored answer is as light, and whether "looks designed" should ask for the symmetry the part has, is a question for the optimiser's stage; noted here because these pictures are the first place it shows. Nothing built.
+
 ## Still owed before the stage report
 
 - The original stand optimised both ways (queued), then Top Motor Mount; three settings; pad 2 / 3 / 4.5 mm.
