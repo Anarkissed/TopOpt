@@ -163,6 +163,21 @@ And why the optimiser takes it: the base's underside already holds the part, so 
 
 So this is NOT at root a question of pad depth. It is: **must every face he fixed stay joined to the part, even when the part does not need it for strength?** A person who draws a bolt tab expects it to still be there. Today the answer is "yes, by luck of the pad's thickness, and by a straight bridge when the luck runs out". A deeper pad makes the luck more likely; it does not make it a rule. For him in the morning.
 
+### The sample beam (B) at res 64 TODAY'S way: the job is refused, with nothing loaded (found 2026-11-26 08:45)
+
+The beam carries 600 N on the top of a 20 x 20 x 3 mm boss. At res 64 (1.9 mm voxels) today's path tags NO voxels for that face and stops the job: "the declared load case produced NO external load ... each face is smaller than one voxel at this grid spacing; raise the resolution". The face is 20 x 20 mm, more than ten voxels across; it is the boss's 3 mm height that falls between voxel centres. This is test C's "nothing loaded in 6 of 18 alignments" met on a real job, with a message that sends the user the wrong way. The drawn-face path at the same resolution: running now in the pad sweep; recorded below when it ends.
+
+### The bracket at res 64 with EVERYTHING ON in the trial build (drawn-face loads, automatic pad at 1.0, TOSurface's smooth surface; scratch merge d88e3e33, never pushed)
+
+| version | today | drawn faces, pad 3 mm | everything on |
+|---|---|---|---|
+| 0.68 | 4.71, 160.6 g | 5.29, 159.0 g | 5.29, 165.1 g |
+| 0.52 | 4.72, 129.1 g | 5.29, 126.0 g | 5.10, 136.0 g |
+| 0.38 | 4.82, 101.4 g | 4.66, 97.0 g | 4.80, 110.3 g |
+| 0.26 | 3.79, 77.8 g | 3.69, 72.2 g | REFUSED (3.14, 88.7 g): "After finishing, a piece is loose" |
+
+Read plainly: with everything on each version is 4 to 13 g HEAVIER than the drawn-face path alone at about the same margin, and the lightest version is refused for a loose piece. Not yet known which of the two additions does it (the automatic pad at 1.0, deeper than 3 mm behind the thick faces, or the smooth surface); the pad sweep's `auto:1.0` run on the lead's own build separates them. The run took 7313 s against 1492 s today, but it was paused for the lock run for part of that, so the time says nothing.
+
 ## Still owed before the stage report
 
 - The original stand optimised both ways (queued), then Top Motor Mount; three settings; pad 2 / 3 / 4.5 mm.
