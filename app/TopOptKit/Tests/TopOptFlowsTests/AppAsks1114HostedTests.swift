@@ -99,8 +99,9 @@ final class NewEngineStackPlacementHostedTests: XCTestCase {
 
 final class AppAsksThinWallPopUpHostedTests: XCTestCase {
 
-    /// ★ notes30: this part's lay raises the new engine's solid pop-up ("Some of the lattice stays solid") on the app's SHARED
-    /// AppPopups; closed here, so it never covers the next class's page (release 21's shard 2: AppSettingsHostedTests' clicks).
+    /// ★ notes30 (builders L1 and R1 found it both): this part's lay (its Switch to Aesthetic lays again) raises the new
+    /// engine's solid pop-up ("Some of the lattice stays solid") on the app's SHARED AppPopups; closed here, so it never covers
+    /// the next class's page (release 21's shard 2: AppSettingsHostedTests' clicks).
     override func tearDown() {
         MainActor.assumeIsolated { AppPopups.shared.current = nil }
         super.tearDown()

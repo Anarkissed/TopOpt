@@ -131,19 +131,21 @@ final class Notes25FlowHostedTests: XCTestCase {
     // MARK: A5 · the cell lattice's print file: the same one card; a stop ends in the centred pop-up
 
     /// His A1 pad, Structural with cells (never Organic), on the Lattice stage, the card and the pop-ups mounted as RootView
-    /// mounts them.
-    private func cellStage(_ size: CGSize, organic: Bool = false, lattice: Bool = true) throws -> (AppBuildHost, ProjectModel) {
+    /// mounts them. `aesthetic`: the Aesthetic lattice (walls cut cells) in place of Structural.
+    private func cellStage(_ size: CGSize, organic: Bool = false, lattice: Bool = true,
+                           aesthetic: Bool = false) throws -> (AppBuildHost, ProjectModel) {
         let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: true)
         let p = r.project
         p.lattice.flexible = nil
-        p.lattice.chooseLatticeType(.structural)
+        p.lattice.chooseLatticeType(aesthetic ? .aesthetic : .structural)
+        if aesthetic { p.lattice.letWallsCutCells = true }
         if organic { p.lattice.algorithm = "organic" }
         if let c = p.selection.groups.first(where: { $0.name == "Group C" }) { p.force.makeAnchor(c.id) }
         let h = AppBuildHost(WorkspacePlaceholder(model: r.app, project: p).overlay { LatticeMacMakeModal() }.overlay { AppPopupLayer() },
                              size: size, test: self)
         h.pump(3)
         if lattice {
-            try h.pickFromMenu("capsuleMenu", "Structural", what: "\(size): the stage menu")
+            try h.pickFromMenu("capsuleMenu", aesthetic ? "Aesthetic" : "Structural", what: "\(size): the stage menu")
             h.pump(1)
         }
         return (h, p)
@@ -168,8 +170,12 @@ final class Notes25FlowHostedTests: XCTestCase {
     func testACellLatticesPrintFileWearsTheSameCardAndARefusalEndsInThePopUp() throws {
         for (name, size) in Self.sizes {
             AppPopups.shared.current = nil
-            let (h, p) = try cellStage(size)
+            // ★ RE-PINNED (notes30, R1): builder N2's notes29 cell floor with Allow quilt off (his 11-25 "limit both when 'Allow
+            // quilt' is turned off"): Structural's 5 cells across his 20 mm pad would be 4 mm, under the 4.74 mm two-line floor,
+            // so it lays nothing ("This lattice can't be laid" up, the button Cannot Lattice). Aesthetic's cells lay there.
+            let (h, p) = try cellStage(size, aesthetic: true)
             XCTAssertFalse(LatticeLayoutPreview.organic(p.lattice), "premise: a cell lattice")
+            XCTAssertNil(AppPopups.shared.current, "\(name): premise: the lattice lays (no pop-up says it can't)")
             let mac = LatticeMacMake.shared
             LatticePrintFlow.shared.begin(project: p.id, key: nil)
             let run = p.run
@@ -231,6 +237,61 @@ final class Notes25FlowHostedTests: XCTestCase {
             XCTAssertEqual(AppPopups.shared.second?.title, LatticeFileRefusal.changeSettings)
             XCTAssertEqual(AppPopups.shared.third?.title, LatticeFileRefusal.showMe)
             XCTAssertFalse(AppPopups.shared.dismissShown, "\(name): the three buttons, no fourth")
+            AppPopups.shared.current = nil
+        }
+    }
+
+    /// ★ notes30 (builder R1; his notes25 rule A1: one pop-up for the whole chain): a lay that lands while this part's print file
+    /// is being made raises no pop-up of its own — its error card's backdrop sat over the chain's card and took "Run in the
+    /// Background". (Structural on his 20 mm pad lays nothing since notes29's cell floor, so its "This lattice can't be laid"
+    /// lands a moment after the stage opens.) The chain goes to the background, the stage opens, the lay lands: nothing pops
+    /// up, and the Lattice button brings the card back alone. RED CONTROL (`controlLayPopUpOverTheChain`): the lay's pop-up.
+    func testALayLandingWhileThePrintFileIsMadeRaisesNoPopUpOfItsOwn() throws {
+        defer { LatticeLayoutPreview.controlLayPopUpOverTheChain = false }
+        for control in [false, true] {
+            let name = control ? "RED CONTROL" : "13″ landscape"
+            AppPopups.shared.current = nil
+            LatticeLayoutPreview.controlLayPopUpOverTheChain = control
+            let (h, p) = try cellStage(AppBuildHost.landscape13, lattice: false)
+            let mac = LatticeMacMake.shared
+            LatticePrintFlow.shared.begin(project: p.id, key: nil)
+            let run = p.run
+            mac.begin(project: p.id, path: p.importedFile?.path, run: run, fileOnly: true, cancel: { run.cancel() })
+            run.runner = { _, progress, _ in
+                while progress(0, 1, 0) { usleep(50_000) }   // in flight until Cancel
+                throw CancellationError()
+            }
+            run.start(RunRequest(modelPath: p.importedFile?.path ?? "", material: "PLA", materialsPath: "", rulesPath: "",
+                                 resolution: 64, projectName: p.name, projectID: p.id).withJobMode(LatticeFileButton.jobMode),
+                      remote: true, workerName: "Mac")
+            h.pump(1)
+            XCTAssertEqual(upNow(h), ["macMakeModal"], "\(name): premise: the chain's card")
+            try h.tap("macMakeBackground", "\(name): Run in the Background", settle: 0.6)
+            XCTAssertEqual(upNow(h), [], "\(name): premise: in the background")
+            let held = LatticeLayoutPreview.solidPopUpsHeld, raised = LatticeLayoutPreview.solidPopUpsRaised
+            try h.pickFromMenu("capsuleMenu", "Structural", what: "\(name): the stage menu")
+            var waited = 0.0
+            while LatticeLayoutPreview.solidPopUpsHeld == held, LatticeLayoutPreview.solidPopUpsRaised == raised, waited < 60 {
+                h.pump(0.25); waited += 0.25
+            }
+            h.pump(0.5)
+            XCTAssertEqual(run.phase, .running, "\(name): premise: the file is still being made")
+            if control {
+                XCTAssertGreaterThan(LatticeLayoutPreview.solidPopUpsRaised, raised, "RED CONTROL: the lay raised its pop-up")
+                XCTAssertEqual(upNow(h), ["appPopup"], "RED CONTROL: the lay's pop-up over the chain")
+            } else {
+                XCTAssertGreaterThan(LatticeLayoutPreview.solidPopUpsHeld, held, "\(name): premise: the lay landed all solid")
+                XCTAssertEqual(LatticeLayoutPreview.solidPopUpsRaised, raised, "\(name): ★ it raised nothing")
+                XCTAssertEqual(upNow(h), [], "\(name): ★ in the background: still nothing up")
+                try h.tap("latticeButton", "\(name): the Lattice button", settle: 0.6)
+                XCTAssertEqual(upNow(h), ["macMakeModal"], "\(name): ★ the card comes back alone")
+            }
+            AppPopups.shared.current = nil
+            run.cancel()
+            waited = 0
+            while run.phase == .running, waited < 10 { h.pump(0.25); waited += 0.25 }
+            mac.reset()
+            LatticePrintFlow.shared.reset()
             AppPopups.shared.current = nil
         }
     }
