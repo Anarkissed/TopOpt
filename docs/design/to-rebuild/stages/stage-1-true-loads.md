@@ -135,6 +135,19 @@ Base, Pressing and PillowBlock cannot inform it either (02:45): as drawn they st
 
 So of his six reference parts only Top Motor Mount is carved by a reduction run (four versions today). The pad is being measured there, at res 64 to keep each run short: fixed 2 / 3 / 4.5 mm and the automatic rule at the medium strength.
 
+## The made sample bracket, optimised (first results, 2026-11-26 06:50)
+
+Sample bracket A (226 g solid; as drawn 4.33 against 1.5). Picture: `stage-1-pics/sample_a_res96_pad3.png`.
+
+| run | versions (margin after the file check, grams solid) |
+|---|---|
+| res 96, drawn-face loads, pad fixed 3 mm (build 6bfb8151) | 0.68: 4.33, 161.6 g; 0.52: 4.29, 128.1 g; 0.38: 3.81, 98.9 g; 0.26 rejected by the loop (margin under the stop) |
+| res 64, TODAY's path, nothing switched on (the trial build) | 0.68: 4.71, 160.6 g; 0.52: 4.72, 129.1 g; 0.38: 4.82, 101.4 g; 0.26: 3.79, 77.8 g |
+
+- This part does what his own parts could not: the optimiser carves it into a real shape (a sloped web from the loaded boss down to the base, with a window through it), from 226 g down to 99 g and below.
+- A pad finding, seen in the run's own words and in the picture: on both the 0.52 and 0.38 versions the export "BRIDGED back into one piece (1 bridge, 749 voxels) ... bridge 13.5 mm". The thin fixed TAB (4 mm thick, pad 3 mm) was left cut off from the body by the optimiser, and the export's straight-bridge fallback joined it again; the boxy block beside the tab in the picture is that bridge. So at 3 mm the tab's pad does not keep the tab attached. This is exactly the case the automatic pad has to get right, and the res-64 sweep (pad 3 mm against the automatic rule) will show whether the rule cures it.
+- The two rows are not a before/after pair (different resolutions); the res-64 runs with the switch on are in progress.
+
 ## Still owed before the stage report
 
 - The original stand optimised both ways (queued), then Top Motor Mount; three settings; pad 2 / 3 / 4.5 mm.
