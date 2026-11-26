@@ -91,6 +91,18 @@ Pictures (depth-tested, same camera: as drawn | today | stage 3): `stage-3-pics/
 | Top Motor Mount 0.26, today | 25, 0.062 / 0.139 / 0.175, 56 % | 55, 0.228 / 0.625, 67 % | 0.39, 4 % |
 | Top Motor Mount 0.26, stage 3 | 45, **0.000 / 0.053 / 0.129, 11 %** | 13, 0.149 / **0.277**, 100 % | 0.44, 8 % |
 
+Sampling, fixed so the numbers repeat: the drawn part at one point per 0.05 mm x 0.05 mm (400 per mm2), each file at one per 0.25 mm x 0.25 mm (16 per mm2), 4,000 patch centres, 3 mm patches of 30 points or more, random seed 1. The BEFORE files are ledger D's own STLs (agent-scratch/toreview/baseline), read in place.
+
+Old ruler against new, one row per part (wall patches, the old tool's single class; the new tool's cut surface):
+
+| part | old tool, today -> stage 3: median / worst, share > 0.05 | new tool (cut surface), today -> stage 3: median / worst, share > 0.05 |
+|---|---|---|
+| Stand 128 | 0.160 / 0.40, 98 % -> 0.000 / 0.25, 38 % | 0.010 / 0.23, 41 % -> 0.006 / 0.009, 0 % |
+| Top Motor Mount 0.68 | 0.011 / 0.57, 35 % -> 0.083 / 0.78, 64 % | 0.022 / 0.14, 25 % -> 0.112 / 0.30, 56 % |
+| Top Motor Mount 0.26 | (not run on the old tool) | 0.062 / 0.18, 56 % -> 0.000 / 0.13, 11 % |
+
+Why they differ: the old tool centres its patches on mesh corners, so it samples each file by its tessellation (today's voxel files have corners everywhere, stage 3's exact faces have few) and mixes drawn faces, cut walls and seams in one class; the new one samples by area and keeps them apart.
+
 The "drawn" worst (0.4-0.5 in every file) is his own countersinks and small fillets, which no quadric fits at 3 mm. Reading: cut walls and seams are clearly better except the cut surface of Top Motor Mount's 0.68 version, where the rough chunk beside the box sits; at res 32 that roughness is already in the unfinished function surface, where this run has stamped voxels, so the stage 1 + stage 3 run decides whether the exact protection depths remove it.
 
  Two causes are being separated (runs at res 64, stage 1 on and off): (1) without stage 1 its protected faces come as stamped voxels (2,000-6,600 per version), now without the curvature flow that used to sand them; (2) between re-fits the optimiser's steps leave bumps at the knot spacing (about 3 mm) in the function itself, which the old export's fill, resample and flow low-passed and the exact surface shows. The re-fit now runs just before each margin probe so every certified design is re-normalised (the slope band), and its move is measured only where phi has a slope.
