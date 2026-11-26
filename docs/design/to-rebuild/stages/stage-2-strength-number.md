@@ -174,7 +174,19 @@ Each of jobs A to C run with stage 1 off and `TOPOPT_STRENGTH=size` with a typed
 - B (regular cells, chamfered loaded face): 0 differ; identical. UNTOUCHED.
 - C (weave, frame of beams): bars and bar list identical; 13 values differ, all in the TENTH significant digit (twelve tiny bar forces, about 0.001 N, and the frame solve's residual, 7.94e-11 against 8.05e-11). That is the frame solve not repeating to the last bit between two identical runs, not the switch; the test now compares numbers to six digits. Named to LatticeReview as a rule 21 matter of its own (the same job twice does not give the same bytes in the Organic strength block).
 
-Still owed for condition (e): one sheet job and one Organic job loaded on lattice, in the before/after table.
+Condition (e), the table, as far as this base can make it (build 26b8b784 plus the test, 2026-11-25 22:55). Stage 2 switch on (`size`, typed 1.8 mm), stage 1 off, against the plain run; numbers compared to six digits, timings and the frame solve's residual left out:
+
+| job | laid lattice | strength values that differ |
+|---|---|---|
+| A, regular cells, on the grid | 480 bars, bytes identical | 0 |
+| B, regular cells, chamfered loaded face | 2,978 bars, bytes identical | 0 |
+| C, weave, load on solid | 7,692 bars, bar list identical | 0 |
+| D, weave, loaded ON the lattice (box turned 17 / 9 degrees) | 3,053 bars, bar list identical | 0 |
+| S, gyroid sheet on the control box | NOT MADE on this base: "This lattice type is made of sheets, and a lattice file can only be made from the types made of struts so far." | - |
+
+So the stage 2 switch reaches no number of the lattice strength check on any strut job. The sheet row can only be filled once #362's sheet types on the new engine (claude/notes28-sheets-strength) are in this base; said to the reviewer.
+
+For the record, stage 1's effect on job D (off -> `face`), the case LatticeReview's interim guard will refuse: margin 901 -> 1,444, weakest strut 11.0 -> 22.6, frame nodes loaded 306 -> 631.
 
 ## "Saved" against the real thing (written 2026-11-25 22:35; behind the switch; not yet run)
 

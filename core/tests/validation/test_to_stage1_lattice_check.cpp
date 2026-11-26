@@ -212,8 +212,10 @@ int differing(const Result& a, const Result& b) {
   std::map<std::string, std::string> bm(pb.begin(), pb.end());
   int n = pa.size() == pb.size() ? 0 : 1;
   for (const auto& kv : pa) {
+    // Timings, and the frame solve's own residual (about 1e-10, solver noise that
+    // moves by several per cent between two identical runs).
     static const char* timing[] = {"seconds", "_ms", "ms", "voxel_solve", "frame", "frame_assemble",
-                                   "frame_solve", "after_frame", "peak"};
+                                   "frame_solve", "after_frame", "peak", "residual"};
     bool skip = false;
     for (const char* t : timing)
       if (kv.first == t || kv.first.find("seconds") != std::string::npos ||
