@@ -40,6 +40,16 @@ Tools for that route (checked 2026-11-25): QuadriFlow (quad remeshing; BSD-style
 
 The cheapest end-to-end check: the same split (step 2 below), but the cut surface goes in as flat triangles (the stage 3 file simplified to about 10,000-20,000 faces; it is smooth, so it simplifies well), sewn to his trimmed drawn faces with OCCT into one solid and written as STEP. Pass: valid in OCCT, one solid in FreeCAD, and in Shapr3D a hole, a cut and a fillet on a drawn face all work. It proves the seams, the sewing and what Shapr3D accepts before any patch work; it may even serve an engineer who only needs to add holes. Fails if Shapr3D refuses or crawls on that many faces: then fewer, larger faces; if still no, stop and report.
 
+### Step 0 result, the stand (2026-11-26, his yes ~14:10)
+
+Prototype tool `agent-scratch/tosurface/tools/step0c.cpp` (not in the repo; OCCT 7.9.3): the print file's triangles as planar faces sharing their edges exactly, ShapeFix_Shell / ShapeFix_Solid, coplanar faces merged (ShapeUpgrade_UnifySameDomain), BRepCheck, STEP AP214 in mm, read back.
+- The stand at res 64 (stage 3 build d0c5b557) as it is: ONE valid solid, volume 88,294.2 mm3 = the file's, read back valid; but 54,111 faces, 144 MB, 84 s, 2.4 GB peak. Too heavy to hand over.
+- Simplified first (quadric edge collapse to 12,000 triangles, cap 0.05 mm): ONE valid solid, 10,046 faces, 25 MB, volume 88,387.9 mm3 (+0.1 %), read back valid; 10 s, 0.8 GB. Pictures front and back match the print file (facets visible on the round parts, as expected). `stage-3-pics/stand_step0_front_back.png`, `stand_step0_back.png`. Sent to him for Shapr3D.
+- Tried and dropped: giving the triangles on his curved faces his exact surfaces (so bores come back as true cylinders): the solid came out invalid, more faces, volume +2.5 %. True faces belong to the prototype (trimmed B-rep faces), not to step 0.
+- HIS RESULT (2026-11-26 ~14:35, screenshots): it opens in Shapr3D and edits work, but "the sheer number of faces makes it very difficult to edit this object well" (Shapr3D offsets, extrudes and shells BY FACE); his example: each countersink is one face in his file, dozens here. Step 0 proved the export path; the face count is the problem.
+- Tried: letting near-identical flats merge (0.002-0.005 mm, 0.0005-0.001 rad): 10,046 -> 9,649 / 9,518 faces and the solid invalid before the write. Dropped: the faces are on the round surfaces.
+- Next, proposed to him (needs his yes): step A, his faces back exactly (his solid cut by the design's surface in OCCT, so every drawn face, countersinks included, is ONE face as he drew it; only the new surfaces stay faceted); then step B, smooth patches for the new surfaces (the prototype above).
+
 ### Prototype plan (one part, for his approval before any build)
 
 1. Input: one finished stage 3 version of Top Motor Mount (drawn faces exact, cut walls from the function).

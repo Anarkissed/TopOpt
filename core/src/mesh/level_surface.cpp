@@ -458,8 +458,25 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
     }
     return acc;
   };
-  auto frozen_solid = [&](const Vec3& p) { return lattice_set(p, true); };
-  auto frozen_void = [&](const Vec3& p) { return lattice_set(p, false); };
+  // A frozen body is "everything OF THE PART within this true distance of the
+  // triangles" (frozen_sets.hpp), as the mask freezes only part voxels. The band
+  // alone is two-sided: on a design-box run, whose domain reaches past the part, its
+  // air-side half printed (his stand, stage 1 + 3: rounded caps over the bolts' keep
+  // layers, proud of his slanted face). So the band is held to the part by the part's
+  // own signed distance (closed, wound outward; MeshDistance measures that, > 0
+  // inside), max(band, -sd): the exact intersection, taken at each point (the side of
+  // the body's own faces alone cannot tell where its patch ends: a countersink's rim)
+  // and only where the band is solid (elsewhere the max cannot change the answer).
+  // ONLY on a design-box run: without a box the one cut by the drawn part trims the
+  // band exactly, and a band ending ON the part's other faces would leave its corner
+  // there to the mesher, which rounds it by about a cell (test B: 1 mm at the bore).
+  std::unique_ptr<MeshDistance> part_sd;
+  if (!bodies.empty() && box != nullptr) part_sd = std::make_unique<MeshDistance>(part);
+  auto of_the_part = [&](double v, const Vec3& p) {
+    return v < 0.0 && part_sd ? std::max(v, -part_sd->signed_distance(p)) : v;
+  };
+  auto frozen_solid = [&](const Vec3& p) { return of_the_part(lattice_set(p, true), p); };
+  auto frozen_void = [&](const Vec3& p) { return of_the_part(lattice_set(p, false), p); };
   bool any_solid_body = false, any_void_body = false;
   for (const FrozenBody& b : bodies) (b.solid ? any_solid_body : any_void_body) = true;
 

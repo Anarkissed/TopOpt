@@ -455,6 +455,69 @@ int main(int argc, char** argv) {
                 after.why.empty() ? "" : ", ", after.why.c_str(), ok ? "ok" : "MISSED");
     if (gate && !ok) ++failures;
   }
+  // ── B, a keep layer on a design-box run (his stand, stage 1 + 3): the frozen body
+  // is everything OF THE PART within its depth (frozen_sets.hpp). By distance alone it
+  // was two-sided, and the box kept its outside half (caps over his bolts' keep layers).
+  // The design is solid only far from the protected face; the layer must fill 4 mm
+  // inside the part and nothing past the face. ──────────────────────────────────────
+  {
+    const manifold::Manifold cube = manifold::Manifold::Cube(manifold::vec3(30, 30, 30), true)
+                                        .Translate(manifold::vec3(20, 20, 20));  // 5..35
+    const TriangleMesh drawn = from_manifold(cube);
+    const VoxelGrid pg = voxelize(drawn, static_cast<int>(std::lround(30.0 / kVoxel)));
+    const DesignBox box{Vec3{5, 5, 5}, Vec3{55, 35, 35}};
+    const DesignDomain dom = expand_design_domain(pg, box, {}, false);
+    const double depth = 4.0;
+    auto in_layer = [&](const Vec3& p) { return p.x >= 35.0 - depth && p.x <= 35.0; };
+    MinimizePlasticVariant vk = make_version(dom.grid, [](const Vec3& p) { return p.x - 15.0; }, in_layer);
+    StepModel mk;
+    mk.mesh = drawn;
+    mk.triangle_face.assign(drawn.triangles.size(), -1);
+    FrozenFaceSet face;  // the +x face, kept 4 mm deep
+    face.depth_mm = depth;
+    for (std::size_t t = 0; t < drawn.triangles.size(); ++t) {
+      bool on = true;
+      for (int c = 0; c < 3; ++c) on = on && std::fabs(drawn.vertices[drawn.triangles[t][c]].x - 35.0) < 1e-9;
+      if (on) face.triangles.push_back(static_cast<int>(t));
+    }
+    const std::vector<FrozenFaceSet> ks{face};
+    std::string wk;
+    FunctionSurfaceReport rk;
+    const TriangleMesh fk = function_surface_mesh(vk, dom.grid, drawn, 2, 0.5, &wk, &rk, &ks, &mk,
+                                                  nullptr, nullptr, &box, nullptr);
+    double v_out = -1, v_layer = -1, proud = 0.0;
+    for (const Vec3& q : fk.vertices) proud = std::max(proud, q.x - 35.0);  // past the face
+    if (!fk.triangles.empty()) {
+      manifold::MeshGL64 g;
+      g.numProp = 3;
+      for (const Vec3& q : fk.vertices) {
+        g.vertProperties.push_back(q.x);
+        g.vertProperties.push_back(q.y);
+        g.vertProperties.push_back(q.z);
+      }
+      for (const auto& t : fk.triangles)
+        for (int c = 0; c < 3; ++c) g.triVerts.push_back(static_cast<std::uint64_t>(t[c]));
+      g.Merge();
+      const manifold::Manifold Fk(g);
+      auto region = [](double x0, double x1) {
+        return manifold::Manifold::Cube(manifold::vec3(x1 - x0, 40, 40)).Translate(manifold::vec3(x0, 0, 0));
+      };
+      v_out = (Fk ^ region(35.0, 60.0)).Volume();      // past the protected face
+      v_layer = (Fk ^ region(35.0 - depth, 35.0)).Volume();  // the layer: 4 x 30 x 30 = 3600
+    }
+    const WrittenAudit ak = audit_as_written(fk);
+    // Past the face: nothing but the surface's rounding along the face's edges, where
+    // the box (not the drawn part) bounds the domain and so no exact cut makes them
+    // (measured 0.027 mm at the corners, the face's middle exact); before, the 4 mm band
+    // stood there (3600 mm3).
+    const bool ok = !fk.triangles.empty() && proud <= 0.05 && v_out < 0.5 && std::fabs(v_layer - 3600.0) < 10.0 &&
+                    ak.boundary_edges == 0 && ak.non_manifold_edges == 0 && ak.non_manifold_vertices == 0;
+    std::printf("[test B] keep layer on a design-box run: past the face %.4f mm3, at most %.4f mm (0.05), "
+                "the layer %.1f mm3 (3600), %d frozen body; open %d, 3+ %d, point %d, bodies %d%s%s: %s\n",
+                v_out, proud, v_layer, rk.frozen_sets, ak.boundary_edges, ak.non_manifold_edges,
+                ak.non_manifold_vertices, ak.bodies, wk.empty() ? "" : ", ", wk.c_str(), ok ? "ok" : "MISSED");
+    if (gate && !ok) ++failures;
+  }
   std::printf("[test B/F/J] %s: %d failure(s)\n", gate ? "gate" : "measure only", failures);
   return failures == 0 ? 0 : 1;
 }
