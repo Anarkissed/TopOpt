@@ -203,6 +203,18 @@ Four versions: 0.68: 4.77, 43.7 g; 0.52: 4.60, 34.0 g; 0.38: 4.32, 25.4 g; 0.26:
 
 Two versions (0.68: 6.60, 81.6 g; 0.52: 3.15, 67.5 g) and two REFUSED: "rung 2 (vf 0.38) was REJECTED, anchored piece detached. 1 anchored piece(s) (1248 voxels; anchor face(s): 10) hold no load in this design", the same for 0.26. The beam is held at BOTH ends; one end is enough to carry the load as a cantilever, so at the lighter versions the optimiser cuts the other end's block off, and the existing rule (CORE LIST item 47, made for his Carriage Arms' bolt holes) refuses the version. With the fixed 3 mm pad the 0.38 version kept both ends (2.73, 45.9 g). In the trial build the same two versions were ACCEPTED with the smooth surface on (2.33 and 2.25): the picture's thin strut on the right is that end only just hanging on. So the fixed-face question is now seen on two made parts, and the code already has an answer for one form of it: a fixed face that comes away refuses the version. What is missing is that the optimiser is never told, so it spends its lightest versions finding out.
 
+### A2: the beam at res 64, the pad three ways (11:05; picture `stage-1-pics/sample_b_res64_pad_three_ways.png`)
+
+Pad behind each end face / under the boss, then margin and grams per version (drawn-face loads, the lead's build; today's path refuses this job):
+
+| pad | depths (mm) | frozen voxels | 0.68 | 0.52 | 0.38 | 0.26 |
+|---|---|---|---|---|---|---|
+| fixed 3 mm | 3.0 / 3.0 | 1248 at the ends | 6.13, 76.6 g | 5.13, 60.2 g | 2.73, 45.9 g | stopped on margin |
+| automatic, strength 0.2 | 4.9 / 2.3 | 1348 | 6.32, 77.7 g | 5.06, 61.8 g | 3.68, 48.0 g | 1.87, 36.1 g |
+| automatic, strength 1.0 | 11.0 / 5.2 | (not read) | 6.60, 81.6 g | 3.15, 67.5 g | REFUSED: one end came away | REFUSED: one end came away |
+
+Read plainly. Strength 0.2 is the only setting that gives all four versions; its 0.38 version is a third stronger than the fixed pad's for 2 g more, and no end comes away. At 1.0 the two 11 mm end blocks leave so little to carve that the optimiser lets go of one end. Both sample parts now say the same thing: the strength wants to be low, about 0.2 (a thick face then gets 3 to 5 mm, a thin one two wall lines). The hook at 0.2 is running; the strength 1.4 runs were stopped as pointless.
+
 ## Still owed before the stage report
 
 - The original stand optimised both ways (queued), then Top Motor Mount; three settings; pad 2 / 3 / 4.5 mm.
