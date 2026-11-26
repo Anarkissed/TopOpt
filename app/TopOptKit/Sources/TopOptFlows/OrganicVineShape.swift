@@ -62,6 +62,18 @@ public struct OrganicVineShape: Equatable, Sendable {
     public var capDomes: [Bool] = []
     /// `tubes(runs:)` (OS1 B): how many of `pieces`, at its end, are the pucks' vertical pieces.
     public var pucks = 0
+    /// ★ notes29 (his print orientation): the up the print file stands along, in the part's own coordinates (+Z: as placed).
+    /// A bridge's level side and flat underside, and its pucks, stand along it, as the file's do; `OrganicVinePass` draws by
+    /// it. Exactly +Z: every number as before.
+    public var up = SIMD3<Float>(0, 0, 1)
+    static let zUp = SIMD3<Float>(0, 0, 1)
+    /// The print's up for the drawing (nil: +Z).
+    public static func drawnUp(_ up: SIMD3<Double>?) -> SIMD3<Float> {
+        guard let u = up else { return zUp }
+        return SIMD3<Float>(Float(u.x), Float(u.y), Float(u.z))
+    }
+    /// The up as the shape keeps it (`tubes(up:)`): +Z exactly as given, any other made unit.
+    public static func keptUp(_ up: SIMD3<Float>) -> SIMD3<Float> { up == zUp ? zUp : simd_normalize(up) }
     /// `cut(runs:surface:)`: each cap's cut (as Piece.cut), or empty (none cut).
     public var capCuts: [Cut?] = []
     /// ★ The part's surface near a piece, as the drawing cuts it: EVERY facet plane of the part's mesh within the piece's
@@ -118,10 +130,13 @@ public struct OrganicVineShape: Equatable, Sendable {
     /// Ring side vectors are carried round each bend by the rotation that turns one bar onto the next, so the two rings
     /// at a mitre are the same ring point for point (no crack), across a continuing run too. Drawn by `OrganicVinePass`
     /// (its tube shader puts each ring on its end's plane: `tubeRingPoint` is the same arithmetic).
+    /// ★ notes29: `up`, the print's up (a lattice laid standing on the face he kept): "vertical" and "level" above are along it.
     public static func tubes(runs: [LatticeLayoutSession.Run], mitreLimitDeg: Float = 60,
-                             heldFlat: [SIMD3<Float>] = []) -> OrganicVineShape {
+                             heldFlat: [SIMD3<Float>] = [], up: SIMD3<Float> = SIMD3(0, 0, 1)) -> OrganicVineShape {
         var s = OrganicVineShape()
         s.params.blendMM = 0
+        let up = keptUp(up)
+        s.up = up
         let cosLimit = cos(mitreLimitDeg * .pi / 180)
         func perp(_ t: SIMD3<Float>) -> SIMD3<Float> {
             simd_normalize(simd_cross(t, abs(t.x) < 0.9 ? SIMD3<Float>(1, 0, 0) : SIMD3<Float>(0, 1, 0)))
@@ -138,7 +153,8 @@ public struct OrganicVineShape: Equatable, Sendable {
         func puck(_ c: SIMD3<Float>, _ rad: Float, along t: SIMD3<Float>, section: UInt8, vine: Int32) {
             guard bridgeDomes, !held(c) else { return }   // flat there: the bar's own flat end, no puck
             let key = SIMD3<Int64>(Int64((c.x * 1e5).rounded()), Int64((c.y * 1e5).rounded()), Int64((c.z * 1e5).rounded()))
-            let p = Puck(c: c, r: rad, upZ: (t.x * t.x + t.y * t.y).squareRoot(), section: section, vine: vine)
+            let level = up == zUp ? (t.x * t.x + t.y * t.y).squareRoot() : simd_length(t - simd_dot(t, up) * up)   // ★ notes29
+            let p = Puck(c: c, r: rad, upZ: level, section: section, vine: vine)
             if let i = puckAt[key] { if pucks[i].r < rad { pucks[i] = p } } else { puckAt[key] = pucks.count; pucks.append(p) }
         }
         // where the previous run's tube goes on into this one (OS1 F): its last side vector and direction
@@ -222,14 +238,22 @@ public struct OrganicVineShape: Equatable, Sendable {
             carry = nextU != nil ? (s.pieces[last].vb, u[u.count - 1], r.points[n - 1]) : nil   // the last piece's own side
         }
         // OS1 B: each puck, a vertical piece from its underside (its bottom flat) and, for the D, the upper half of a ball
-        let up = SIMD3<Float>(0, 0, 1)
         for p in pucks where p.r > 0 {
-            let zb = p.c.z - p.r * p.upZ
-            let top = p.section == 1 ? p.c.z : zb + 2 * p.r * p.upZ
-            var q = Piece(a: SIMD3(p.c.x, p.c.y, zb), ra: p.r, b: SIMD3(p.c.x, p.c.y, top), rb: p.r, vine: p.vine)
+            var q: Piece, tall: Float
+            if up == zUp {
+                let zb = p.c.z - p.r * p.upZ
+                let top = p.section == 1 ? p.c.z : zb + 2 * p.r * p.upZ
+                q = Piece(a: SIMD3(p.c.x, p.c.y, zb), ra: p.r, b: SIMD3(p.c.x, p.c.y, top), rb: p.r, vine: p.vine)
+                tall = top - zb
+            } else {   // ★ notes29: the puck stands along the print's up
+                let a = p.c - p.r * p.upZ * up
+                let b = p.section == 1 ? p.c : a + 2 * p.r * p.upZ * up
+                q = Piece(a: a, ra: p.r, b: b, rb: p.r, vine: p.vine)
+                tall = simd_dot(b - a, up)
+            }
             q.ta = up; q.tb = up
             q.flatA = true; q.flatB = p.section != 1
-            if top - zb > 1e-6 { s.pieces.append(q); s.pucks += 1 }
+            if tall > 1e-6 { s.pieces.append(q); s.pucks += 1 }
             if p.section == 1 { s.caps.append(SIMD4(p.c, p.r)); s.capVines.append(p.vine); s.capDomes.append(true) }
         }
         return s
@@ -270,7 +294,17 @@ public struct OrganicVineShape: Equatable, Sendable {
     // ── the bridges' sections (core weave_tubes.cpp sweep_section, kinds 1 and 2), as the tube shader draws them ──
 
     /// A bridge's frame on a bar of direction `t` (the file's): its side level, square to the bar; up = t x side, upward.
-    public static func sectionFrame(_ t: SIMD3<Float>, fallback v: SIMD3<Float>) -> (side: SIMD3<Float>, up: SIMD3<Float>) {
+    /// ★ notes29: level and upward along `printUp` (the print's up; +Z as placed, every number as before).
+    public static func sectionFrame(_ t: SIMD3<Float>, fallback v: SIMD3<Float>, printUp: SIMD3<Float> = SIMD3(0, 0, 1))
+        -> (side: SIMD3<Float>, up: SIMD3<Float>) {
+        if printUp != zUp {
+            var sd = simd_cross(printUp, t)
+            if simd_length(sd) < 1e-6 { sd = v }
+            sd = simd_normalize(sd)
+            var up = simd_cross(t, sd)
+            if simd_dot(up, printUp) < 0 { up = -up; sd = -sd }
+            return (sd, up)
+        }
         var sd = SIMD3<Float>(-t.y, t.x, 0)
         if simd_length(sd) < 1e-6 { sd = v }
         sd = simd_normalize(sd)
@@ -302,14 +336,14 @@ public struct OrganicVineShape: Equatable, Sendable {
     /// A bridge's ring point exactly as the tube shader places it: outline point `j` at end `atB` of piece `q`, on that end's
     /// plane; at a mitre the mean of this bar's section and the neighbouring bar's, each pushed along its own bar onto the
     /// plane (the file's rule). The neighbour's direction is the plane's mirror of this one (the plane bisects the two).
-    public static func sectionRingPoint(_ q: Piece, atB: Bool, _ j: Int) -> SIMD3<Float> {
+    public static func sectionRingPoint(_ q: Piece, atB: Bool, _ j: Int, printUp: SIMD3<Float> = SIMD3(0, 0, 1)) -> SIMD3<Float> {
         let d = q.b - q.a
         let t = simd_length(d) > 1e-9 ? simd_normalize(d) : SIMD3<Float>(0, 0, 1)
         let c = atB ? q.b : q.a, rad = atB ? q.rb : q.ra
         let n = atB ? q.tb : q.ta
         let xy = sectionPoint(q.section, j, rad)
         func pushed(_ t: SIMD3<Float>) -> SIMD3<Float> {
-            let f = sectionFrame(t, fallback: q.va)
+            let f = sectionFrame(t, fallback: q.va, printUp: printUp)
             let off = f.side * xy.x + f.up * xy.y
             let dn = simd_dot(t, n)
             return c + off + t * (abs(dn) > 1e-3 ? -simd_dot(off, n) / dn : 0)

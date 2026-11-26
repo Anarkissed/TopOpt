@@ -423,11 +423,13 @@ public final class LatticeLayoutPreview: ObservableObject {
         var groups: [Int32: UUID]
         var groupOrder: [UUID]
         var stress: Stress
+        /// ★ notes29: the up the lattice was laid standing along (the face he kept); nil: as placed.
+        var printUp: SIMD3<Double>? = nil
     }
     static func layInputs(_ p: ProjectModel, path: String, _ s: LatticeLayoutSession.Settings, stress: Stress) -> LayInputs {
         LayInputs(path: path, settings: s, lattice: p.lattice, pageManual: p.latticePageManual, flush: flushFaces(p),
                   layer: p.printParams.layerHeightMM > 0 ? p.printParams.layerHeightMM : 0.2, keys: regionKeys(p),
-                  groups: regionGroups(p), groupOrder: p.latticeAreaGroups.map(\.id), stress: stress)
+                  groups: regionGroups(p), groupOrder: p.latticeAreaGroups.map(\.id), stress: stress, printUp: printUp(p))
     }
     /// One finished exact Organic preview: what the page showed, and what the print file is made from.
     struct Remembered {
@@ -464,6 +466,8 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// ★ his pick 11-21: how long each kind of Organic lay took on this part (s), keyed "path|type|quality".
     private var layWallS: [String: Double] = [:]
     private var typeAtLay = ""
+    /// ★ notes29: the up the lay under way (or the last) stands along: the face he kept, for Organic; nil: as placed.
+    private var upAtLay: SIMD3<Double>?
 
     private func timeKey(_ path: String, _ q: LatticeLayoutSession.Organic.Quality) -> String {
         "\(path)|\(typeAtLay)|\(q == .draft ? "draft" : "exact")"
@@ -493,7 +497,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         // ★ his iPad notes 11-23: read back from the version's folder, it is shown before the part's session is open (it opens
         // behind it, and the solid view's map follows) — no lay
         let fromDisk = adoptedToken != nil && remembered[i].bars.token == adoptedToken
-        guard fromDisk || (session != nil && sessionPath == path) else { return false }
+        guard fromDisk || (session != nil && sessionPath == path && session?.printUp == key.printUp) else { return false }
         if fromDisk, bars?.token == remembered[i].bars.token, openingAfterRestore != nil { return true }   // on screen already
         if solidWanted, remembered[i].bars.solid == nil, !fromDisk { return false }
         let r = remembered.remove(at: i)
@@ -518,7 +522,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         laying = false; layProgress = nil
         Self.remembersShown += 1
         layTimingRestored(r)
-        if fromDisk { openBehindRestored(path: path) }   // ★ his iPad notes 11-23
+        if fromDisk { openBehindRestored(path: path, up: r.inputs.printUp) }   // ★ his iPad notes 11-23
         return true
     }
 
@@ -547,6 +551,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         groupOrderAtLay = p.latticeAreaGroups.map(\.id)
         groupNamesAtLay = Dictionary(p.latticeAreaGroups.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
         typeAtLay = Self.organic(p.lattice) ? Self.organicButtonType(p) : ""
+        upAtLay = Self.printUp(p)   // ★ notes29: the face he kept (Organic): the lay stands the way the print file does
         inputsAtLay = p.importedFile.map { Self.layInputs(p, path: $0.path, s, stress: stress) }
         timingInputsAtLay = GenerationTimingLog.Inputs.of(p)   // ★ his 11-22: what went in (values only; encoded off the main thread)
     }
@@ -662,10 +667,11 @@ public final class LatticeLayoutPreview: ObservableObject {
     public static private(set) var laysStarted = 0
 
     /// The part's session, opened once per part: the lay's, and the Lattice page's Auto numbers (his 11-22).
-    private func openSession(path: String) async throws -> LatticeLayoutSession? {
-        if session == nil || sessionPath != path {
+    /// ★ notes29: opened again when the up it stands along changes (`printUp`: the face he kept, for Organic).
+    private func openSession(path: String, up: SIMD3<Double>?) async throws -> LatticeLayoutSession? {
+        if session == nil || sessionPath != path || session?.printUp != up {
             session?.close()
-            let opened = try await LatticeLayoutSession.open(path: path)
+            let opened = try await LatticeLayoutSession.open(path: path, printUp: up)
             guard !Task.isCancelled else { opened.close(); return nil }
             session = opened; sessionPath = path; openMS = opened.info.msOpen; sessionStressKey = nil; sessionTensorKey = nil; organicLimits = nil
             syntheticOn = false   // a new session holds the stress as given
@@ -680,15 +686,17 @@ public final class LatticeLayoutPreview: ObservableObject {
         guard Self.organic(p.lattice), let path = p.importedFile?.path, !laying, limitsTask == nil else { return }
         let s = Self.settings(p, referenceMPa: stress.referenceMPa)
         let line = s.beadMM > 0 ? s.beadMM : 0.45
-        if let o = organicLimits, path == sessionPath, Self.sameWhere(o.key, s), o.line == line {
+        if let o = organicLimits, path == sessionPath, session?.printUp == Self.printUp(p), Self.sameWhere(o.key, s),
+           o.line == line {
             organicAutoLimits = o.limits; organicGroupLimits = o.groups; return
         }
         let groups = Self.regionGroups(p)
+        let up = Self.printUp(p)   // ★ notes29: measured on the session the lay will use
         measuringLimits = true
         limitsTask = Task { [weak self] in
             defer { self?.measuringLimits = false; self?.limitsTask = nil }
             do {
-                guard let self, let session = try await self.openSession(path: path) else { return }
+                guard let self, let session = try await self.openSession(path: path, up: up) else { return }
                 _ = try await self.measure(session, s, groups: groups)
             } catch {
                 NSLog("TopOpt Auto numbers failed: %@", (error as? TopOptError)?.message ?? "\(error)")   // the log only
@@ -727,7 +735,7 @@ public final class LatticeLayoutPreview: ObservableObject {
             var t0 = Date()
             if let t = limitsTask { await t.value }   // ★ his 11-22: the page's Auto numbers first (one session, never two)
             layStages["limitsWaitMS"] = Self.ms(since: t0)
-            guard !Task.isCancelled, let session = try await openSession(path: path) else { return }
+            guard !Task.isCancelled, let session = try await openSession(path: path, up: upAtLay) else { return }
             t0 = Date()
             sessionStressKey = try await Self.give(stress, to: session, holding: sessionStressKey)
             layStages["stressGiveMS"] = Self.ms(since: t0)
@@ -871,6 +879,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         // by the map made before the lay (his walls-first; `mapAhead`, 362's gridAhead), else in X-ray (LatticeGrowth)
         let fits = Self.mapFor(token: token, at: here, shown: bars, shownWhere: shownWhere) != nil
         let ahead = solidWanted && !fits ? await Self.mapAhead(session, s, box, token: token &+ 1, smooth: true) : nil
+        growth.printUp = upAtLay.map { OrganicVineShape.drawnUp($0) }   // ★ notes29: the band rises along the print's up
         growth.layBegins(groups, lineMM: s.beadMM, opening: .init(solid: solidWanted, mapFits: fits, ahead: ahead),
                          expectedLeftS: layProgress?.expectedLeftS)
         t0 = Date()
@@ -892,11 +901,12 @@ public final class LatticeLayoutPreview: ObservableObject {
         // print file's tubes make them (built off the main thread), cut flat where they reach the part's surface (his 11-20
         // skin note: the file trims every tube to the part)
         let runs = r.runs, held = r.flatEnds   // ★ OS1 B: the rounded ends the print check held flat (Exact)
+        let up = OrganicVineShape.drawnUp(upAtLay)   // ★ notes29: the bridges stand on the print's up, as the file's do
         let known = cutSurface?.path == path ? cutSurface?.surface : nil
         let mesh = known == nil ? cutMesh.map { ($0.vertices, $0.indices, $0.faceIDs) } : nil
         t0 = Date()
         let (vines, surface) = await Task.detached(priority: .userInitiated) { () -> (OrganicVineShape, OrganicVineShape.CutSurface?) in
-            var v = OrganicVineShape.tubes(runs: runs, heldFlat: held)
+            var v = OrganicVineShape.tubes(runs: runs, heldFlat: held, up: up)
             let surface = known ?? mesh.map { OrganicVineShape.CutSurface(vertices: $0.0, indices: $0.1, faceIDs: $0.2) }
             if let surface { v.cut(runs: runs, surface: surface) }
             return (v, surface)
@@ -1074,9 +1084,24 @@ public final class LatticeLayoutPreview: ObservableObject {
         let enc = JSONEncoder(); enc.outputFormatting = [.sortedKeys]
         let data = (try? enc.encode(look)) ?? Data()
         let groups = (try? enc.encode(p.lattice.organicLooks ?? [:])) ?? Data()
-        return "\(p.latticePageManual) \(p.lattice.wholePart) " + String(decoding: data, as: UTF8.self)
+        let key = "\(p.latticePageManual) \(p.lattice.wholePart) " + String(decoding: data, as: UTF8.self)
             + String(decoding: groups, as: UTF8.self)
+        // ★ notes29: the face he kept stands the lattice another way, so it is another lattice (none kept: the key as before)
+        return printUp(p).map { key + " up \($0.x) \($0.y) \($0.z)" } ?? key
     }
+
+    /// ★ notes29 (P8, his print orientation on the iPad: after Keep, the Organic preview still grew along the part's +Z): the up
+    /// the Organic preview is laid standing along — the print file's own (`LatticeFileJob.printFrameUp`: the face he kept, the
+    /// same function the print file's job reads), so the vines grow as they will print; drawn in the part's own coordinates.
+    /// nil (no face kept, or not Organic): as placed, as before.
+    static func printUp(_ p: ProjectModel) -> SIMD3<Double>? {
+        guard organic(p.lattice), !controlNoPrintFrame else { return nil }
+        return LatticeFileJob.printFrameUp(p)
+    }
+    /// RED CONTROL (tests): the Organic preview laid as placed whatever face he kept (before notes29).
+    nonisolated(unsafe) public static var controlNoPrintFrame = false
+    /// The up the part's open session stands along (tests): nil, as placed, or none open.
+    var sessionPrintUp: SIMD3<Double>? { session?.printUp }
 
     /// The same regions and depths (the "where" Auto's numbers are measured on).
     static func sameWhere(_ a: LatticeLayoutSession.Settings, _ b: LatticeLayoutSession.Settings) -> Bool {
@@ -2030,12 +2055,12 @@ extension LatticeLayoutPreview {
 
     /// The part's session, opened behind a lattice read back from the folder (the print file, the nozzle check and Auto's
     /// numbers use it; `matchSessionTensor` gives it the stress the lattice was laid with), then the solid view's map.
-    fileprivate func openBehindRestored(path: String) {
-        guard session == nil || sessionPath != path else { return }
+    fileprivate func openBehindRestored(path: String, up: SIMD3<Double>?) {
+        guard session == nil || sessionPath != path || session?.printUp != up else { return }
         openingAfterRestore?.cancel()
         openingAfterRestore = Task { [weak self] in
             defer { self?.openingAfterRestore = nil }
-            guard let self, (try? await self.openSession(path: path)) != nil, !Task.isCancelled else { return }
+            guard let self, (try? await self.openSession(path: path, up: up)) != nil, !Task.isCancelled else { return }
             if self.solidWanted, self.bars?.solid == nil { await self.addMap() }
         }
     }

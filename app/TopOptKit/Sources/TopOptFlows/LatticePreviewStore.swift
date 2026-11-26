@@ -155,7 +155,9 @@ enum LatticePreviewStore {
     }
 
     static func key(_ i: LatticeLayoutPreview.LayInputs) -> Key {
-        Key(settings: String(reflecting: i.settings), lattice: i.lattice, pageManual: i.pageManual, flush: i.flush,
+        // ★ notes29: a lattice laid standing on the face he kept is another lattice (none kept: the text as before, byte for byte)
+        let up = i.printUp.map { " printUp \($0.x) \($0.y) \($0.z)" } ?? ""
+        return Key(settings: String(reflecting: i.settings) + up, lattice: i.lattice, pageManual: i.pageManual, flush: i.flush,
             layer: i.layer, keys: i.keys, groups: i.groups, groupOrder: i.groupOrder, referenceMPa: i.stress.referenceMPa,
             field: fieldSignature(i.stress.field))
     }
@@ -290,7 +292,10 @@ enum LatticePreviewStore {
                 bars.solid = LatticeLayoutSolidGrid(token: token, origin: origin, voxel: voxel, dims: dims, rg: try r.pod(Int8.self),
                                                     smooth: try r.bool())
             }
-            if try r.bool() { bars.vines = try getVines(&r) }
+            if try r.bool() {
+                bars.vines = try getVines(&r)
+                bars.vines?.up = OrganicVineShape.keptUp(OrganicVineShape.drawnUp(current.printUp))   // ★ notes29: its key's face
+            }
             var laid: LatticeLayoutColours.Laid?
             if try r.bool() {
                 var l = LatticeLayoutColours.Laid()
