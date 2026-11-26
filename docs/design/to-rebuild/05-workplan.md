@@ -62,9 +62,10 @@ DECIDED by the maintainer, 2026-11-26 01:15 (on the pad, from the list above): "
   - "Definitely a pop-up for when a part is too small for the nozzle with a recommendation for either a different nozzle size or to switch to resin printing."
   - "The automatic resolution from part size is also great."
   - "I would also like to note that this is all during the 'Auto' settings. And that these settings (resolution/pad thickness) should be manually adjustable if in 'Manual' mode."
-  - The test that runs one part at two sizes: "I don't think we need [it]? What purpose would that hold?" Purpose explained to him; NOT adopted unless he says so.
+  - The test that runs one part at two sizes: "Not necessary. Place it in the v2 google spreadsheet". PARKED: row added to "TopOpt: ideas for v2" 2026-11-26.
   - The rule that every length is physical or relative: not answered; not adopted.
-  - The area-spring anchor (`face_spring`): he asked what it is for; explained; his call still open.
+  - The area-spring anchor (`face_spring`): "Put in the v2 Spreadsheet". PARKED: row added 2026-11-26. It is not the default and is removed from v1 with the stage's switch at the flip.
+  - He cleared LatticeReview's leftover local branch himself (2026-11-26), so no local ref still holds the removed PDFs' commit except TOSolver's untracked files on disk.
 
 ## 0. Where the work stands (kept current; newest first)
 
