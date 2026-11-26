@@ -14,6 +14,7 @@
 
 #include "topopt/lattice_layout.hpp"
 #include "topopt/stepped_plan.hpp"
+#include "lattice_outcome_print.hpp"   // S-1 (notes30): a lay as one number
 
 using namespace topopt;
 using namespace topopt::lattice_layout;
@@ -8523,7 +8524,144 @@ static void test_weave_repeats() {
   CHECK(repeats_left(a.bars) == 0);
 }
 
+// ── S-1 (notes30): THE PIECES COUNTED ONCE ────────────────────────────────────
+// The maintainer's yes 2026-11-26: join_cut_off_pieces and drop_adrift_bars each counted the pieces; when
+// the join joined no end the bars are as they were and the drop now takes the join's count. Over this suite's own parts
+// (the tunnel block of D23 under its top face, with Skin, with Let walls cut cells, the whole part, By stress on a
+// Stepped grade; a box zone, D21; the curved pocket's shell and the flat slab under it), every strut type, on 1, 3 and
+// every thread: the lay with the count used again is the lay that counts twice, byte for byte (outcome_print), the
+// same on any number of threads (D18), and the count WAS used again (Session::counted_once moved once per such lay).
+// RED controls: the print sees one bar a hair wider, one adrift flag, and one cell; and a session with the switch off
+// never takes the join's count.
+static void test_pieces_counted_once() {
+  using lattice_outcome_print::outcome_print;
+  const LatticeTopology types[] = {LatticeTopology::Octet,   LatticeTopology::SimpleCubic, LatticeTopology::Bcc,
+                                   LatticeTopology::Fcc,     LatticeTopology::Diamond,     LatticeTopology::Kelvin,
+                                   LatticeTopology::Rhombic, LatticeTopology::Bccz,        LatticeTopology::Fccz,
+                                   LatticeTopology::Reentrant};
+  const GridModel tunnel = grid_model({0, 20, 40, 60}, {0, 30, 60}, {0, 5, 12, 20},
+                                      [](int i, int j, int k) { return !(i == 1 && j == 0 && k == 1); });
+  const int top = tunnel.face(2, 1, 20);
+  CHECK(top >= 0);
+  const StepModel zones = zone_block(40, 40, 20);
+  const StepModel pocket = weave_block();
+  struct Fixture { const char* name; const StepModel* model; Settings st; };
+  std::vector<Fixture> fixtures;
+  Settings base;
+  base.min_strut_lines = kMinStrutLines;
+  base.cells.algorithm = Algorithm::DefaultGrade;
+  base.cells.cell_max_mm = 6;
+  base.cells.min_cells_across = 2;
+  base.regions = {{1, Role::Lattice, {top}, 18.0, 0.0}};
+  fixtures.push_back({"tunnel, top face 18 mm", &tunnel.model, base});
+  {
+    Settings st = base;
+    st.skin = true;
+    fixtures.push_back({"tunnel, Skin", &tunnel.model, st});
+  }
+  {
+    Settings st = base;
+    st.one_grid = true;
+    st.cells.cell_search = true;
+    st.cells.stretch_edges = true;
+    fixtures.push_back({"tunnel, walls cut cells", &tunnel.model, st});
+  }
+  {
+    Settings st = base;
+    st.regions.clear();
+    st.start = Start::AllLattice;
+    fixtures.push_back({"tunnel, whole part", &tunnel.model, st});
+  }
+  {
+    Settings st = base;
+    st.cells.algorithm = Algorithm::Stepped;
+    st.cells.cell_max_mm = 8;
+    st.cells.by_stress = true;
+    st.struts.mode = Density::ByStress;
+    st.stress.demand = field_of(60, 60, 20, [](int i, int j, int k) { return 2.0 + 0.3 * (i + j) + 0.5 * k; });
+    fixtures.push_back({"tunnel, by stress, Stepped", &tunnel.model, st});
+  }
+  {
+    Settings st = base;
+    Settings::RegionAsk zone;
+    zone.id = 3;
+    zone.role = Role::Lattice;
+    zone.zone = box_zone({20, 20, 10}, {1, 0, 0}, {0, 1, 0}, {0, 0, 1}, 12, 10, 6);
+    st.regions = {zone};
+    st.cells.cell_max_mm = 4;
+    fixtures.push_back({"block, box zone", &zones, st});
+  }
+  {
+    Settings st = base;
+    st.regions = {{1, Role::Lattice, {1}, 4.0, 0.0}, {2, Role::Lattice, {0}, 3.0, 0.0}};
+    st.cells.cell_max_mm = 4;
+    st.cells.min_cells_across = 1;
+    fixtures.push_back({"pocket, curved shell + slab", &pocket, st});
+  }
+  std::size_t lays = 0, differ = 0, threads_differ = 0, once = 0, once_adrift = 0, joined = 0, once_wrong = 0, cancelled = 0;
+  const auto t0 = std::chrono::steady_clock::now();
+  for (const Fixture& f : fixtures) {
+    Session on(*f.model), off(*f.model);
+    off.count_pieces_once(false);
+    for (LatticeTopology t : types) {
+      Settings st = f.st;
+      st.cells.topology = t;
+      unsigned long long first = 0;
+      for (int threads : {1, 3, 0}) {
+        const std::size_t before = on.counted_once();
+        const Outcome a = on.lay(st, threads), b = off.lay(st, threads);
+        ++lays;
+        cancelled += a.cancelled || b.cancelled || !a.refused.empty() || !b.refused.empty();
+        const unsigned long long pa = outcome_print(a), pb = outcome_print(b);
+        if (pa != pb) {
+          ++differ;
+          std::printf("  FAIL %s, %s, %d threads: the lay with the count used again differs (%zu bars vs %zu)\n", f.name,
+                      lattice_topology_name(t), threads, a.bars.bars.size(), b.bars.bars.size());
+        }
+        if (threads == 1) first = pa;
+        else if (pa != first) ++threads_differ;
+        // The count was used again exactly when the join joined nothing.
+        const std::size_t used = on.counted_once() - before;
+        once_wrong += used != (a.cut_off_joined == 0 ? 1u : 0u);
+        once += used;
+        once_adrift += used && a.pieces.adrift > 0;
+        joined += a.cut_off_joined > 0;
+      }
+    }
+    once_wrong += off.counted_once() != 0;   // the switch off never takes the join's count
+  }
+  const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+  std::printf("[S-1] pieces counted once: %zu lays (7 parts x 10 types x 1/3/all threads) with and without; %zu differ, "
+              "%zu differ by threads; the join's count used again in %zu (%zu of them with pieces adrift, dropped by "
+              "it), an end joined (counted again) in %zu; %.0f ms\n",
+              lays, differ, threads_differ, once, once_adrift, joined, ms);
+  CHECK(lays == 7 * 10 * 3 && cancelled == 0);
+  CHECK(differ == 0 && threads_differ == 0);
+  CHECK(once_wrong == 0 && once > 0);
+  // RED controls: one bar a hair wider, one adrift flag and one cell are each seen by the print; the switch off is seen
+  // by counted_once (above: `off` never moved it, and `on` moved it).
+  {
+    Session s(tunnel.model);
+    const Outcome o = s.lay(base);
+    CHECK(!o.bars.bars.empty() && !o.layout.cells.empty());
+    if (!o.bars.bars.empty() && !o.layout.cells.empty()) {
+      Outcome wider = o;
+      wider.bars.bars[wider.bars.bars.size() / 2].width =
+          std::nextafter(wider.bars.bars[wider.bars.bars.size() / 2].width, 1e9);
+      Outcome flag = o;
+      flag.pieces.adrift += 1;
+      Outcome cell = o;
+      cell.layout.cells.back().strut = std::nextafter(cell.layout.cells.back().strut, 1e9);
+      CHECK(outcome_print(wider) != outcome_print(o));
+      CHECK(outcome_print(flag) != outcome_print(o));
+      CHECK(outcome_print(cell) != outcome_print(o));
+      CHECK(outcome_print(o) == outcome_print(s.lay(base)));   // and the same lay twice is the same print
+    }
+  }
+}
+
 int main() {
+  test_pieces_counted_once();
   test_places();
   test_size_step();
   test_face_pieces();

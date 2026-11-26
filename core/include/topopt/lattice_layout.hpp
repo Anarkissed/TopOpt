@@ -1563,9 +1563,21 @@ struct Pieces {
 // `layout`, when given: a bar standing on lattice space that no cell holds stands on solid (D14).
 Pieces count_pieces(const Bars& bars, const Domain& domain, std::vector<char>* adrift_bar = nullptr,
                     std::vector<int>* piece_of = nullptr, const Layout* layout = nullptr);
+// S-1 (notes30, the maintainer's yes 2026-11-26: "count pieces once"): what count_pieces found on a set of bars and
+// each bar's adrift flag, handed from join_cut_off_pieces to the drop that follows it. count_pieces reads the bars, the
+// domain and the layout and nothing else (its probe and its SolidAt are its own, made fresh, and it never reads the
+// stop flag), so on the same three it gives the same answer, flag for flag.
+struct PiecesCount {
+  Pieces found;
+  std::vector<char> adrift;   // count_pieces' `adrift_bar`: one flag per bar
+};
 // Finish None, completed: a piece that is not joined to the part cannot be printed and is
 // removed. Counted in `dropped`. Returns what count_pieces found before removing.
-Pieces drop_adrift_bars(Bars& bars, const Domain& domain, const Layout* layout = nullptr);
+// `counted`, when given: count_pieces' answer on exactly these bars, with this domain and this layout (S-1: the
+// `unchanged` of the join_cut_off_pieces just before, which changed no bar); it is used as it is, not counted again.
+// One whose flags are not one per bar is not of these bars: they are counted again.
+Pieces drop_adrift_bars(Bars& bars, const Domain& domain, const Layout* layout = nullptr,
+                        const PiecesCount* counted = nullptr);
 // ★ notes29 (his notes on release 20, 2026-11-25: "There were even *holes* in the lattice -- which should NEVER
 // happen"). Where the cells grade from one size to the next, a type whose nodes lie on its cube's faces but not at its
 // corners (kelvin, rhombic) meets none of the next size's nodes: a patch of one size is then a piece of its own, held
@@ -1577,7 +1589,11 @@ Pieces drop_adrift_bars(Bars& bars, const Domain& domain, const Layout* layout =
 // Into a bar of its own piece, out of the part, or nothing within the cell: it is the node it was, where it was.
 // Returns the ends joined. Nothing adrift: the bars are left exactly as they were. Session::lay runs it for cube
 // lattices, after drop_loose_bars.
-std::size_t join_cut_off_pieces(Bars& bars, const Domain& domain, int threads = 0, const Layout* layout = nullptr);
+// `unchanged`, when given (S-1): when no end was joined (nothing adrift, or no end of a piece adrift reached anything)
+// the bars are exactly as they were, and it receives the count this call made of them, for drop_adrift_bars; when an
+// end was joined (the bars changed) it is left empty, and the drop must count again.
+std::size_t join_cut_off_pieces(Bars& bars, const Domain& domain, int threads = 0, const Layout* layout = nullptr,
+                                std::optional<PiecesCount>* unchanged = nullptr);
 // ★ notes29 (his notes on release 20: "the solid outline isn't even, there is a chunk cut out of it on either side").
 // A cell of a Lattice region (not a K8 sliver) left with no strut of its own (no bar laid for a cell of its size whose
 // middle lies in its cube) holds no lattice: the file would open its space and print nothing there, a hole inside the
@@ -1928,6 +1944,12 @@ class Session {
   // next lay() would make it (and keeps it: the same "where"), so its map can be read before that lay. Changes nothing the
   // lay then does.
   void prepare_domain(const Settings& settings) { ready_domain(settings); }
+  // S-1 (notes30), for tests and A/B timing only: on (the default), a cube lay's adrift drop uses the cut-off join's own
+  // count of the pieces when that join changed no bar (join_cut_off_pieces' `unchanged`); off, it counts them again,
+  // as before. The lay is the same either way, byte for byte. counted_once(): how many of this session's lays used the
+  // join's count (an end joined, or off: the lay counted twice, and this does not move).
+  void count_pieces_once(bool on) { pieces_once_ = on; }
+  std::size_t counted_once() const { return counted_once_; }
 
  private:
   // O16: what lay_organic adds with Finish Skin on: per weave region, the net skin's reach.
@@ -1987,6 +2009,8 @@ class Session {
   std::shared_ptr<const DemandField> ref_field_;
   double ref_percentile_ = 0.0;
   double ref_mpa_ = 0.0;
+  bool pieces_once_ = true;          // S-1: count_pieces_once
+  std::size_t counted_once_ = 0;     // S-1: counted_once
 };
 
 // In the plane of a flat region's face: how far `p` is inside the region's edge (its

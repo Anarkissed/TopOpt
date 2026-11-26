@@ -785,9 +785,13 @@ Pieces count_pieces(const Bars& bars, const Domain& domain, std::vector<char>* a
   return out;
 }
 
-Pieces drop_adrift_bars(Bars& bars, const Domain& domain, const Layout* layout) {
-  std::vector<char> adrift;
-  const Pieces found = count_pieces(bars, domain, &adrift, nullptr, layout);
+Pieces drop_adrift_bars(Bars& bars, const Domain& domain, const Layout* layout, const PiecesCount* counted) {
+  // S-1: the join's own count of these very bars, when it changed none of them (count_pieces is a function of the bars,
+  // the domain and the layout alone: counting again gives this, flag for flag).
+  if (counted && counted->adrift.size() != bars.bars.size()) counted = nullptr;   // not of these bars: count
+  std::vector<char> own;
+  const Pieces found = counted ? counted->found : count_pieces(bars, domain, &own, nullptr, layout);
+  const std::vector<char>& adrift = counted ? counted->adrift : own;
   if (found.adrift == 0) return found;
   std::vector<char> keep(adrift.size());
   for (std::size_t i = 0; i < adrift.size(); ++i) keep[i] = !adrift[i];
@@ -795,11 +799,17 @@ Pieces drop_adrift_bars(Bars& bars, const Domain& domain, const Layout* layout) 
   return found;
 }
 
-std::size_t join_cut_off_pieces(Bars& bars, const Domain& domain, int threads, const Layout* layout) {
+std::size_t join_cut_off_pieces(Bars& bars, const Domain& domain, int threads, const Layout* layout,
+                                std::optional<PiecesCount>* unchanged) {
   (void)threads;   // one pass over the few ends of the pieces adrift
+  if (unchanged) unchanged->reset();
   std::vector<char> adrift;
   std::vector<int> piece;
-  if (count_pieces(bars, domain, &adrift, &piece, layout).adrift == 0) return 0;   // nothing cut off: as it was
+  const Pieces found = count_pieces(bars, domain, &adrift, &piece, layout);
+  if (found.adrift == 0) {   // nothing cut off: as it was
+    if (unchanged) *unchanged = PiecesCount{found, std::move(adrift)};
+    return 0;
+  }
   const std::unique_ptr<const SolidAt> solid_at = layout ? std::make_unique<const SolidAt>(*layout) : nullptr;
   const std::vector<Bar> before = bars.bars;   // every end is run on against the bars as they are now
   // The bars sorted into a grid, to find those near a line (as join_loose_bars does).
@@ -886,6 +896,10 @@ std::size_t join_cut_off_pieces(Bars& bars, const Domain& domain, int threads, c
       joins.push_back({i, end, Vec3{p.x + d.x * stop, p.y + d.y * stop, p.z + d.z * stop}, kind,
                        kind == Bar::End::Joined ? into : -1});
     }
+  }
+  if (joins.empty()) {   // no end reached anything: every bar is as it was, and so is the count
+    if (unchanged) *unchanged = PiecesCount{found, std::move(adrift)};
+    return 0;
   }
   for (const Join& j : joins) {
     Bar& b = bars.bars[j.bar];

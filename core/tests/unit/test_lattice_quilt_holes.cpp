@@ -21,16 +21,20 @@
 //      look's 4.74 mm cell at two 0.45 mm lines). Off, that half is solid; on, it is laid with its own small cells, never
 //      under the limit's cell and never touching, no hole in it, and every other cell is the one laid without it, byte
 //      for byte. RED control: Allow quilt ON (cells as small as the quilt's anywhere) lays small cells off the thin wall.
+//   §5 S-1 (notes30): where an end IS joined the pieces are counted again; RED control: the join's count forced there
+//      changes the bars.
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "topopt/lattice.hpp"
 #include "topopt/lattice_layout.hpp"
+#include "lattice_outcome_print.hpp"   // S-1 (notes30): a lay as one number
 
 using namespace topopt;
 using namespace topopt::lattice_layout;
@@ -469,6 +473,89 @@ void test_small_cells_only_in_thin_walls() {
   CHECK(types_laid == 10 && control_outside == 10);
 }
 
+// §5 S-1 (notes30, the maintainer's yes 2026-11-26: "count pieces once"). The adrift drop takes the cut-off join's own
+// count of the pieces only when the join changed no bar. On §2's Kelvin wing an end IS joined (its patches of another
+// size run on into the lattice beside them), so the drop counts again: the session's counted_once does not move, and
+// the lay is the lay that always counts twice, byte for byte, on 1, 3 and every thread. Step by step on the session's
+// own domain (the lay without the drop, then drop_loose_bars, the join, the drop): join_cut_off_pieces hands over no
+// count, and the drop's bars and pieces are the session's. RED control: the count forced on the drop there (the one
+// taken before the join, of the bars as they were) changes the bars: the patches the join held would go again, the
+// holes of notes29.
+void test_a_joined_end_counts_again() {
+  using lattice_outcome_print::bars_print;
+  using lattice_outcome_print::outcome_print;
+  using lattice_outcome_print::pieces_print;
+  const StepModel model = wing();
+  Settings st = stand(LatticeTopology::Kelvin);
+  st.regions = {{1, Role::Lattice, {0}, 20.0, -3.0}};   // as §2, auto
+  st.cells.cell_max_mm = 12;
+  st.cells.min_cells_across = 2;
+  st.stress.demand = blobs();
+  st.cells.by_stress = true;
+  st.struts.width_mm = 0.9;
+  st.cells.cell_search = true;
+  st.cells.stretch_edges = true;
+  Session on(model), off(model);
+  off.count_pieces_once(false);
+  for (int threads : {1, 3, 0}) {
+    const std::size_t before = on.counted_once();
+    const Outcome a = on.lay(st, threads), b = off.lay(st, threads);
+    std::printf("[§5] %d thread(s): %zu ends joined, %zu bars; counted once %zu time(s); the same as counted twice: %s\n",
+                threads, a.cut_off_joined, a.bars.bars.size(), on.counted_once() - before,
+                outcome_print(a) == outcome_print(b) ? "yes" : "NO");
+    CHECK(a.cut_off_joined > 0);                    // the case: an end is joined
+    CHECK(on.counted_once() == before);             // so the pieces were counted again
+    CHECK(outcome_print(a) == outcome_print(b));    // and the lay is the one that always counts twice
+  }
+  // Step by step on the session's domain.
+  Session s(model);
+  Settings no_drop = st;
+  no_drop.drop_loose = false;   // the bars as they stand before the drop (nothing before it reads drop_loose)
+  const Outcome pre = s.lay(no_drop);
+  const Outcome full = s.lay(st);   // the same "where": the same domain
+  const Domain& d = *s.domain();
+  Bars bars = pre.bars;
+  drop_loose_bars(bars);
+  std::vector<char> was_adrift;
+  const Pieces was = count_pieces(bars, d, &was_adrift, nullptr, &pre.layout);
+  const PiecesCount stale{was, was_adrift};   // of the bars as they were before the join
+  std::optional<PiecesCount> unchanged = PiecesCount{};   // set, so the join must reset it
+  const std::size_t joined = join_cut_off_pieces(bars, d, 0, &pre.layout, &unchanged);
+  CHECK(joined > 0 && joined == full.cut_off_joined);
+  CHECK(!unchanged.has_value());   // the bars changed: no count handed over
+  Bars counted = bars, forced = bars;
+  const Pieces again = drop_adrift_bars(counted, d, &pre.layout, unchanged ? &*unchanged : nullptr);
+  CHECK(bars_print(counted) == bars_print(full.bars));
+  CHECK(pieces_print(again) == pieces_print(full.pieces));
+  // RED control: the join's count forced on the drop.
+  const Pieces stale_found = drop_adrift_bars(forced, d, &pre.layout, &stale);
+  std::printf("[§5] step by step: %zu pieces adrift before the join (%zu bars), %zu ends joined, %zu adrift after; the "
+              "count forced: %zu bars kept, counted again: %zu (the session's %zu)\n",
+              was.adrift, was.adrift_bars, joined, again.adrift, forced.bars.size(), counted.bars.size(),
+              full.bars.bars.size());
+  CHECK(was.adrift > 0);
+  CHECK(bars_print(forced) != bars_print(full.bars) && forced.bars.size() < full.bars.bars.size());
+  CHECK(pieces_print(stale_found) != pieces_print(full.pieces));
+  // And where the join joined nothing, the count it hands over is the one the drop would make: the finished bars of the
+  // wing again (nothing adrift is left in them: the join returns at once), and the same bars with a piece adrift that no
+  // end can join (one strut 40 mm behind the wing, out of the part: its ends run on into nothing; the join reads every
+  // end and joins none).
+  for (int k = 0; k < 2; ++k) {
+    Bars x = full.bars;
+    if (k == 1) x.bars.push_back(Bar{Vec3{60, 60, 30}, Vec3{60.5, 60, 30.5}, 0.9, 6.0, 1});
+    Bars y = x;
+    std::optional<PiecesCount> kept;
+    const std::size_t j = join_cut_off_pieces(x, d, 0, &full.layout, &kept);
+    CHECK(j == 0 && kept.has_value());
+    CHECK(bars_print(x) == bars_print(y));   // the join changed nothing
+    Bars by_kept = x, by_count = y;
+    const Pieces pk = drop_adrift_bars(by_kept, d, &full.layout, kept ? &*kept : nullptr);
+    const Pieces pc = drop_adrift_bars(by_count, d, &full.layout);
+    CHECK(bars_print(by_kept) == bars_print(by_count) && pieces_print(pk) == pieces_print(pc));
+    CHECK(k == 0 ? pc.adrift == 0 : (pc.adrift == 1 && by_count.bars.size() == full.bars.bars.size()));
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -476,6 +563,7 @@ int main() {
   test_no_holes_in_a_region();
   test_an_even_outline();
   test_small_cells_only_in_thin_walls();
+  test_a_joined_end_counts_again();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }
