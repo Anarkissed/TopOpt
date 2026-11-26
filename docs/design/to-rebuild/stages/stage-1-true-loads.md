@@ -176,7 +176,7 @@ The beam carries 600 N on the top of a 20 x 20 x 3 mm boss. At res 64 (1.9 mm vo
 | 0.38 | 4.82, 101.4 g | 4.66, 97.0 g | 4.80, 110.3 g |
 | 0.26 | 3.79, 77.8 g | 3.69, 72.2 g | REFUSED (3.14, 88.7 g): "After finishing, a piece is loose" |
 
-Read plainly: with everything on each version is 4 to 13 g HEAVIER than the drawn-face path alone at about the same margin, and the lightest version is refused for a loose piece. Not yet known which of the two additions does it (the automatic pad at 1.0, deeper than 3 mm behind the thick faces, or the smooth surface); the pad sweep's `auto:1.0` run on the lead's own build separates them. The run took 7313 s against 1492 s today, but it was paused for the lock run for part of that, so the time says nothing.
+Read plainly: with everything on each version is 4 to 13 g HEAVIER than the drawn-face path alone at about the same margin, and the lightest version is refused for a loose piece. SEPARATED 09:25: it is the pad. The same job on the lead's own build (no smooth surface), automatic pad at 1.0: 0.68: 5.29, 166.5 g; 0.52: 5.29, 137.8 g; 0.38: 5.01, 112.8 g; no 0.26 version at all. That is as heavy as the everything-on column or heavier, so the smooth surface adds no weight; the pad at 1.0 (8.6 and 7.1 mm behind the thick faces, 9526 frozen voxels against 3702 at 3 mm) costs 7 to 16 g a version and the lightest version. The loose piece in the everything-on 0.26 version is still unexplained (the lead's build never reached 0.26 to compare). The run took 7313 s against 1492 s today, but it was paused for the lock run for part of that, so the time says nothing.
 
 ### The beam at res 64 with EVERYTHING ON (09:05; picture `stage-1-pics/sample_b_res64_everything_on.png`)
 
