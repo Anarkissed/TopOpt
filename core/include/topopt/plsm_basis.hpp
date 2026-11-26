@@ -448,13 +448,20 @@ struct PlsmFitResult {
 // error where it costs least. The band residual and the whole-domain residual are
 // BOTH reported for every fit, so the trade is visible and the weight cannot hide
 // inside an average. W = 1 turns it off and is the honest default.
+//
+// `x0` (optional, TO rebuild stage 3): start the CG from these coefficients instead
+// of zero. A re-fit's target is the current design re-normalised, so the current
+// coefficients are already close: the solve then reaches its tolerance in a fraction
+// of the iterations (from zero it stopped at the 2,000 cap on his parts).
 inline PlsmFitResult plsm_solve_normal(const PlsmCsr& A, const PlsmCsr& At,
                                        const std::vector<double>& rhs_f,
                                        const std::vector<double>& w, double lambda,
-                                       int max_iters, double tol, int threads) {
+                                       int max_iters, double tol, int threads,
+                                       const std::vector<double>* x0 = nullptr) {
   const std::size_t m = A.cols;
   PlsmFitResult out;
   out.alpha.assign(m, 0.0);
+  if (x0 != nullptr && x0->size() == m) out.alpha = *x0;
 
   std::vector<double> diag(m, 0.0);
   for (std::size_t r = 0; r < At.rows; ++r) {
@@ -474,6 +481,13 @@ inline PlsmFitResult plsm_solve_normal(const PlsmCsr& A, const PlsmCsr& At,
   }
 
   r = b;
+  if (x0 != nullptr && x0->size() == m) {  // r = b - (A^T W A + lambda I) x0
+    std::vector<double> t(A.rows), q(m);
+    plsm_spmv(A, out.alpha, t, threads);
+    for (std::size_t i = 0; i < t.size(); ++i) t[i] *= w[i];
+    plsm_spmv(At, t, q, threads);
+    for (std::size_t i = 0; i < m; ++i) r[i] -= q[i] + lambda * out.alpha[i];
+  }
   for (std::size_t i = 0; i < m; ++i) z[i] = r[i] / diag[i];
   p = z;
   const double bnorm = std::sqrt(plsm_dot(b, b));

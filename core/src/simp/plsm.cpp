@@ -1029,9 +1029,10 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
               if (g > 0.1) tgt[v] = ext[v] / g;
             }
       const double t_rf0 = steady_s();
+      // Stage 3: warm-started from the current coefficients (plsm_solve_normal).
       const PlsmFitResult rf =
-          plsm_solve_normal(Psi, PsiT, tgt, w, plsm.ridge,
-                            plsm.fit_cg_iterations, 1e-10, threads);
+          plsm_solve_normal(Psi, PsiT, tgt, w, plsm.ridge, plsm.fit_cg_iterations, 1e-10,
+                            threads, surf.on ? &alpha : nullptr);
       refit_wall_s += steady_s() - t_rf0;
       // ★ NOT SILENT (ledger P-11): how far the re-fit moved the surface, at the
       // centre of every ACTIVE cell the surface passes near, |dphi| / |grad phi|.
