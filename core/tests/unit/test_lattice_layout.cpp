@@ -7912,6 +7912,13 @@ static void test_places() {
     }
     // The same bytes twice (a fresh session).
     CHECK(same_places(o.places, lay_and_place(tunnel.model, st)));
+    // ★ notes30 Q1: the stop. Never set: the same bytes as none given; set: none, at once (never part of a list).
+    {
+      std::atomic<bool> stop{false};
+      CHECK(same_places(session.places(st, &stop), o.places));
+      stop = true;
+      CHECK(session.places(st, &stop).empty());
+    }
     // Finish Covered: every surface the lattice meets is solid; no places.
     Settings covered = st;
     covered.cover_mm = -1.0;

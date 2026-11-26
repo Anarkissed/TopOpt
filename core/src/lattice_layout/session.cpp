@@ -427,11 +427,11 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
   return out;
 }
 
-std::vector<Place> Session::places(const Settings& settings) const {
+std::vector<Place> Session::places(const Settings& settings, const std::atomic<bool>* stop) const {
   if (!domain_ || where_text(settings) != where_) return {};
   const CellSpec& c = settings.cells;
   return find_places(model_, *domain_, domain_no_chips_.get(), chip_ids_, settings.regions, last_cells_,
-                     c.cell_max_mm > 0.0 ? c.cell_max_mm : c.cell_mm);
+                     c.cell_max_mm > 0.0 ? c.cell_max_mm : c.cell_mm, stop);   // ★ notes30 Q1
 }
 
 // ── his 11-22: watch it grow ────────────────────────────────────────────────────

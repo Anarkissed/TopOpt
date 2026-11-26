@@ -362,6 +362,7 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         return try await withTaskCancellationHandler {
             try await worker.run { [weak self] () throws -> Result in
                 guard let self, self.isCurrent(mine) else { throw CancellationError() }   // superseded before it started
+                Self.lastLayBegan = Date()   // ★ notes30 Q1 (a test's reading)
                 var err = topoptbridge.BridgeError()
                 let r = topoptbridge.lattice_layout(sid, raw, &err)
                 if !err.ok { throw TopOptError(message: String(err.message)) }
@@ -375,28 +376,46 @@ public final class LatticeLayoutSession: @unchecked Sendable {
 
     /// ★ D23: the chips' places of the last layout, asked with the SAME settings it was laid with (other settings: none). A
     /// separate call (it costs about as much as a layout).
+    /// ★ notes30 Q1 (S-2, his yes 11-26: on a big flat part it took 3.1 s on this session's one worker, and a setting changed
+    /// right then waited behind it): it gives way at once. A newer `lay` (or Organic lay), or the asking task cancelled (the
+    /// page's next setting), makes it — running or still waiting — throw CancellationError within one triangle's work
+    /// (core's find_places reads the bridge's places stop); the page asks again for the lattice that lands next.
     public func places(_ settings: Settings) async throws -> (places: [Place], ms: Double) {
         let sid = id
         let raw = convert(settings)
-        return try await worker.run {
-            var err = topoptbridge.BridgeError()
-            let r = topoptbridge.lattice_layout_places(sid, raw, &err)
-            if !err.ok { throw TopOptError(message: String(err.message)) }
-            let counts = Array(r.face_counts), faces = Array(r.faces), pt = Array(r.point), nm = Array(r.normal)
-            let area = Array(r.area_mm2), solid = Array(r.solid_now), region = Array(r.region)
-            var out: [Place] = []
-            var k = 0
-            for i in 0..<region.count {
-                let n = Int(counts[i])
-                out.append(Place(region: region[i], faces: Array(faces[k..<k + n]),
-                                 point: SIMD3(pt[3 * i], pt[3 * i + 1], pt[3 * i + 2]),
-                                 normal: SIMD3(nm[3 * i], nm[3 * i + 1], nm[3 * i + 2]),
-                                 areaMM2: area[i], solidNow: solid[i] != 0))
-                k += n
+        let ticket = topoptbridge.lattice_layout_places_ticket(sid)   // ★ notes30 Q1: a cancel after this wins
+        let giveWay = !Self.controlPlacesHoldTheWorker
+        Self.placesAsked += 1
+        return try await withTaskCancellationHandler {
+            try await worker.run {
+                var err = topoptbridge.BridgeError()
+                let r = topoptbridge.lattice_layout_places(sid, raw, ticket, giveWay, &err)
+                if !err.ok { throw TopOptError(message: String(err.message)) }
+                if r.cancelled { throw CancellationError() }   // ★ notes30 Q1: given way (none, never part of a list)
+                let counts = Array(r.face_counts), faces = Array(r.faces), pt = Array(r.point), nm = Array(r.normal)
+                let area = Array(r.area_mm2), solid = Array(r.solid_now), region = Array(r.region)
+                var out: [Place] = []
+                var k = 0
+                for i in 0..<region.count {
+                    let n = Int(counts[i])
+                    out.append(Place(region: region[i], faces: Array(faces[k..<k + n]),
+                                     point: SIMD3(pt[3 * i], pt[3 * i + 1], pt[3 * i + 2]),
+                                     normal: SIMD3(nm[3 * i], nm[3 * i + 1], nm[3 * i + 2]),
+                                     areaMM2: area[i], solidNow: solid[i] != 0))
+                    k += n
+                }
+                return (out, r.ms)
             }
-            return (out, r.ms)
+        } onCancel: {
+            topoptbridge.lattice_layout_places_cancel(sid)   // ★ notes30 Q1: the page's next setting — never `cancel()`'s stop
         }
     }
+    /// RED CONTROL (tests): the places search no newer lay stops (before notes30 Q1: the next lay waited for it).
+    nonisolated(unsafe) public static var controlPlacesHoldTheWorker = false
+    /// Places searches asked, app-wide (a test's count: one is running).
+    nonisolated(unsafe) public static private(set) var placesAsked = 0
+    /// When the last `lay` began on its worker, app-wide (a test's reading: a lay asked during the search starts at once).
+    nonisolated(unsafe) public static private(set) var lastLayBegan = Date.distantPast
 
     /// What is at each point for the last layout (empty before the first).
     public func whereAt(_ points: [SIMD3<Float>]) async throws -> [(why: Why, region: Int32)] {
