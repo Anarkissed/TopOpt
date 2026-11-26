@@ -121,9 +121,36 @@ Cases the fix is held to, besides test P's two jobs: demo solve 10 (8 loaded pie
 
 PROPOSAL FOR THE REVIEWER (TOReview, 11-25; a change to a ruled definition, so not built until ruled): the connection rule (multigrid.cpp, THE CONNECTION RULE above scan_islands) calls a piece ANCHORED when one of its nodes carries a Dirichlet BC OR a non-zero load. Under self-weight every solid voxel carries a load, so every piece counts as anchored and no floating piece is ever taken out (demo solve 10: "loose pieces at the floor: 0 of 11"); a piece that carries only its own weight then hangs on the 1e-9 void, the near-rigid mode the rule exists to remove (ruling 2026-10-25, "It shouldn't hang at all"). Proposed: anchored = reaches a SUPPORT (an engaged Dirichlet BC or spring) through shared faces. A piece that reaches no support is loose and its own BODY load goes with it (weight with nowhere to go). A piece that carries an APPLIED (face) load and reaches no support is a broken design: solved at the floor like the rest, but counted and reported per solve so the optimiser's step can be judged (the optimiser side is TOReview's). Expectation added to the cases above: with those pieces out, demo solve 10 converges on the geometric hierarchy too.
 
-## 4. Side hustle: a coarse space that follows the part (outside the brief)
+## 4. Side hustle: a coarse space that follows the part (outside the brief): PLAN DRAFT, awaiting the maintainer's approval
 
-The maintainer's process (2026-11-25), in waiting time only, never slowing sections 3.1 to 3.6: (1) read all the code of the existing algebraic level 1 (algebraic_coarsen.*, its use in multigrid.cpp, PRs 230/280/283 and the 08-03 handoff); (2) research other ways to do the same or better, beyond the usual; (3) a plan: does it follow the latest research, is it worth it, what is kept / rewritten / thrown out, what result makes it ship, at what point it is called a failure; (4) implement, then test, and stop at the agreed criteria. Steps 1 to 3 go to him as one write-up before any code. Memory at res 128 and 192 (TOReview) is queued.
+Process (his, 2026-11-25): read all the code, research beyond the surface, a plan with keep / rewrite / throw out, ship and stop criteria, HIS APPROVAL, then implement and test. Waiting time only; never slows sections 3.1-3.6. Blanks [..] fill from the all-parts sweep and the memory check, both queued.
+
+### In plain English (for Nadim)
+Every solve works with a detailed map of the part and a rough map with half the detail. Today's rough map is made by halving a grid. That works on chunky, firmly held shapes, but on thin-walled parts it is 4 to 14 times slower, and on a broken design it never finishes. A second kind of rough map, built from the part's own material (the "algebraic" one made in August and switched off), follows thin walls and loose pieces. On a plain block it is 2 to 3 times slower than the halved one, though both are fast there.
+Because users can import any shape, we keep both. Each solve first tries the halved map for a short budget of steps (about [20-30]). Most easy shapes finish inside that. If the solve isn't done, it switches that same solve to the material-following map and carries on from where it got to. The choice depends only on that solve, so the same job always gives the same answer. Large software (hypre, from Lawrence Livermore) uses the same idea.
+What you'd notice: shorter runs on parts like yours ([..] on Top Motor Mount, [..] on Stand v4), unchanged answers and pass/fail, and no slowdown on plain shapes.
+What gets cleaned out: the August idea of switching after three stuck solves (never built, and it would never fire now), and, if the reference runs show they no longer ever help, the old give-up latch and the slow backup solver.
+When we stop and delete it: if, after up to three rounds of fixes, two or more reference parts or test shapes run slower than today's halved map with the new fine step, or any pass/fail flips, or its memory at your highest resolution won't fit.
+
+### What the research and measurements found (detail in the notes; all iteration counts, PCG to 1e-4)
+| case | halved grid (stage-5 smoother) | algebraic | algebraic, smoothed | keep coarse points next to the part |
+|---|---|---|---|---|
+| Top Motor Mount solve 40 | 727-1,227 | 58-107 | 42-77 | 337-535 |
+| Stand v4 solve 40 | 213-464 | 84-181 | 66-103 | 126 |
+| demo solve 9 | 127-211 | 36-69 | 26-35 | 161 |
+| demo solve 10 (loaded pieces cut loose) | never | 88 | 42-71 | never |
+| plain firmly held block (August's healthy case) | 6-10 | 21-25 | - | - |
+| Top Motor Mount's box made solid | 42-87 | 22-29 | - | - |
+Also measured: deflating the slow modes is not a cure (dozens of them, not a handful); padding the empty space with soft material cuts the halved grid 5x but makes the system 7.5x bigger; a looser tolerance saves 6-34 %.
+Others' work: hypre's hybrid solver (cheap first, switch to AMG when the convergence factor is poor) is the precedent; Peetz & Elbanna 2021 name the idea; learned or run-latched switches (PCGBandit, August's latch) depend on earlier solves, against test K; for one switch mid-solve, restart CG from the current iterate (Notay 2001; Knyazev & Lashuk 2007).
+
+### Technical plan
+KEEP: algebraic_coarsen.* (aggregation, rigid-body modes, coarsening control, deterministic, refusal to geometric), build_mf_hierarchy_algebraic, the element-local Galerkin product.
+REWRITE: (1) the two smoother refusals in multigrid.cpp narrowed to the point-block smoother; (2) the switch in solve_mgcg_matfree: halved grid for K cycles, then free it, build the algebraic hierarchy, restart PCG from the iterate; an algebraic refusal restarts on the halved grid; a stall reports why; switched / cycles / refusal reported per solve; (3) not my file, exact lines to TOReview: the algebraic prolongator rows as flat CSR (memory, before res 192); (4) optional: smoothed aggregation where memory allows.
+THROW OUT: the August latch-switch idea; the stagnation latch, l1 safe retry and its logging, IF the reference runs show zero engagements with the new path (same evidence as the main work's close-out).
+SHIP when, on every reference part AND on test shapes beyond them (a plain held block, a chunky part with a hole, a thin-walled bracket, a dilute design, a design with a loaded piece cut loose): solve time below the halved grid + stage-5 smoother; verdicts identical; designs equal to the solve tolerance; test K identical bytes; memory under the cap at res 192 of the largest reference part ([..]); the bridge-way and unit tests green.
+STOP (scrap, delete the code) after up to three rounds of fixes if: two or more of those run slower than the halved grid + stage-5 smoother; or a verdict flips beyond tolerance noise; or the algebraic memory at res 192 stays over the cap after the CSR rewrite and the switch cannot be limited to sizes that fit.
+Measured next (queued): the switch prototype at K = 10 / 20 / 30 / 50 on every reference dump; memory at res 128 / 192.
 
 ## 5. Stage report (filling in as measurements land)
 
