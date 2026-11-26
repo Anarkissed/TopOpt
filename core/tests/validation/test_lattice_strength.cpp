@@ -1452,8 +1452,13 @@ int main() {
       std::printf("[arm strengthen] ok %d code %s rounds %d %s %s\n", as.ok, as.code.c_str(), as.rounds_fixed, as.why.c_str(), as.detail.c_str());
       for (std::size_t at = asj.find("\"print_left_out\""); at != std::string::npos; at = asj.find("\"print_left_out\"", at + 1))
         std::printf("   %s\n", asj.substr(at, asj.find(", \"hash\"", at) - at).c_str());
-      CHECK(as.ok && as.rounds_fixed >= 1 && has(asj, "\"print_left_out\": ") && has(asj, "\"print_moved\": ") &&
-            has(asj, "\"print_added\": ") && !has(asj, "print_check_after_additions"));
+      // OS19, the interim guard (2026-11-26): the arm's tip load lands on its vines (no Solid or skin under the tip),
+      // so the check refuses it (load_on_bare_lattice) and no strengthening round starts. Before the guard: rounds >= 1
+      // with the print check's keys (print_left_out, print_moved, print_added); those, and the replay below, wait for a
+      // job whose load sits on solid.
+      CHECK(as.ok && as.code == "load_on_bare_lattice" && as.rounds_fixed == 0 &&
+            as.why == "A load lands on bare vines. Give the loaded face a Solid finish or a protected skin so its strength "
+                      "can be checked.");
       if (as.ok && as.rounds_fixed >= 1) {
         const std::string last = "arm_strengthen/r" + std::to_string(as.rounds_fixed);
         const double bars_last = num_after(asj, "bars", asj.find("\"round\": " + std::to_string(as.rounds_fixed)));

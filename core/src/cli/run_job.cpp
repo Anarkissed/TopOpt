@@ -13161,6 +13161,10 @@ ll::StrengthDone run_lattice_file_strength(const ll::StrengthAsk& ask,
   return done;
 }
 
+// The interim guard's plain sentence (the reviewer's ruling with the owner's approval, 2026-11-26).
+const char* const kLoadOnBareLatticeText =
+    "A load lands on bare vines. Give the loaded face a Solid finish or a protected skin so its strength can be checked.";
+
 // ══ BRIEF E2, PART A: THE ORGANIC CHECK, A FRAME OF BEAMS (lattice_layout_frame.hpp) ═════════════════════════════
 // On the strength job's own grid and load case (strength_setup, as Install 3's): the material per voxel is the part's
 // solid share plus the lattice's (frame_material, every bar the file holds), solved once at penalty 1; the frame of
@@ -13719,6 +13723,9 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
   } else if (c.no_load_path) {   // OS9 amended: the load handed no one (unheld, or only near adrift parts) over the share
     R.verdict = "fail";
     R.fail_reason = "no_load_path";
+  } else if (c.load_on_bare_lattice) {   // the interim guard (2026-11-26): the vines would carry the load
+    R.verdict = "fail";
+    R.fail_reason = "load_on_bare_lattice";
   } else if (R.solid_margin_effective < options.margin_stop) {
     R.verdict = "fail";
     R.fail_reason = "solid_margin";
@@ -13817,6 +13824,12 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
     if (R.fail_reason == "load_on_open_lattice")
       s += "    \"load_on_no_credit_n\": " + num(c.load_unheld_n) + ",\n    \"load_total_n\": " + num(c.load_total_n) + ",\n";
     if (R.fail_reason == "frame_not_solved") s += "    \"fail_detail\": " + json_str(c.why_not) + ",\n";
+    if (R.fail_reason == "load_on_bare_lattice") {
+      const Vec3 at = S.frame.point_to_model(c.load_on_lattice_at);   // P2: the part's own coordinates
+      s += "    \"load_on_frame_n\": " + num(c.load_on_frame_n) + ",\n    \"load_total_n\": " + num(c.load_total_n) +
+           ",\n    \"load_share\": " + num(c.load_share) + ",\n    \"load_on_lattice_at\": [" + num(at.x) + ", " +
+           num(at.y) + ", " + num(at.z) + "],\n    \"fail_text\": " + json_str(kLoadOnBareLatticeText) + ",\n";
+    }
   }
   s += "    \"solid_margin\": {\"worst_case\": " + num(R.solid_margin.worst_case) + ", \"in_plane\": " + num(R.solid_margin.in_plane) +
        ", \"interlayer\": " + num(R.solid_margin.interlayer) + ", \"effective\": " + num(R.solid_margin_effective) +
@@ -14354,7 +14367,8 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
         }
       for (const ll::Bar& b : bars.bars) if (!prev_margin_of.count(ends_key(b.a, b.b))) prev_margin_of[ends_key(b.a, b.b)] = std::numeric_limits<double>::infinity();
       const bool clean = c.solved && c.under_safety == 0;
-      if (clean || n >= limit || !c.solved) {
+      const bool bare = cr.fail_reason == "load_on_bare_lattice";   // the interim guard: adding vines cannot cure it
+      if (clean || bare || n >= limit || !c.solved) {
         rounds_json += r + "}";
         {   // K4: the summary, of this last check (the lattice the last round's strengthened.json gives)
           double widest = 0.0;
@@ -14414,6 +14428,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
           summary_keys += "]";
         }
         res.passing = cr.verdict == "pass";
+        if (bare) return finish(true, "load_on_bare_lattice", 0, kLoadOnBareLatticeText);
         if (clean) return finish(true, "done", 0, "");
         if (!c.solved) return finish(true, "frame_not_solved", 0, "The frame could not be solved, so there is nothing to strengthen from.");
         return finish(true, "limit", 0, "The rounds of strengthening allowed were all done.");
@@ -14780,9 +14795,11 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
                     ", \"peak\": " + json_num(std::round(process_memory().peak_rss_mb)) + "}, \"check\": " +
                     json_str("r" + std::to_string(n) + "/strength.json");
     const bool clean = c.solved && c.under_safety == 0;
-    if (clean || !varies || n >= limit || !c.solved) {
+    const bool bare = cr.fail_reason == "load_on_bare_lattice";   // the interim guard: strengthening cannot cure it
+    if (clean || bare || !varies || n >= limit || !c.solved) {
       rounds_json += r + "}";
       res.passing = cr.verdict == "pass";
+      if (bare) return finish(true, "load_on_bare_lattice", 0, kLoadOnBareLatticeText);
       if (clean) return finish(true, "done", 0, "");
       if (!c.solved) return finish(true, "frame_not_solved", 0, "The frame could not be solved, so there is nothing to strengthen from.");
       if (!varies)
