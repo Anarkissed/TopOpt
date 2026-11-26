@@ -95,7 +95,7 @@ void t1_identity(const Fixtures& fx) {
   std::printf("  %zu lays compared\n", lays);
   {   // RED: put in the layout in the order laid
     const std::vector<Case> all = identity_cases(fx);
-    const Case& c = all[1];   // octet whole stand
+    const Case& c = all[0];   // octet top face region: walls of their own, laid in height order across them
     Session off(*c.model), on(*c.model);
     StrutTap tap;
     on.strut_tap(&tap);
@@ -317,7 +317,8 @@ void t4_time() {
   ses.strut_tap(&tap);
   (void)ses.lay(s, 3);
   const Vec3 lo = ses.measure().lo(), hi = ses.measure().hi();
-  const float v = 0.5f;
+  // about a million voxels over the part (the solid view's map)
+  const float v = static_cast<float>(std::max(0.35, std::cbrt((hi.x - lo.x) * (hi.y - lo.y) * (hi.z - lo.z) / 1e6)));
   MapAsk ask;
   ask.nx = static_cast<int>((hi.x - lo.x) / v) + 3;
   ask.ny = static_cast<int>((hi.y - lo.y) / v) + 3;
