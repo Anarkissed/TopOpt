@@ -394,7 +394,8 @@ public final class LatticeLayoutPreview: ObservableObject {
         if quiet { build.stop(); refresh.end() }
         else {
             if !isOrganic || AppSettings.skipAllAnimations { build.layBegins() } else { build.stop() }
-            refresh.begin(refreshSteps(organic: isOrganic, path: path, up: Self.printUp(p)))
+            refresh.begin(refreshSteps(organic: isOrganic, path: path, up: Self.printUp(p),
+                                       sheet: LatticeSheets.isSheet(p.lattice.topologyID)))   // ★ notes30: a sheet's own words
         }
         nozzleWanted = checkNozzle
         // ★ his pick 11-21 ("Let's do this one. Absolutely."): every Organic lay shows its Draft first (marked, the last
@@ -803,6 +804,7 @@ public final class LatticeLayoutPreview: ObservableObject {
     private func lay(path: String, _ s: LatticeLayoutSession.Settings, draft: Bool = false) async {
         Self.laysStarted += 1
         layTimingBegins(Self.organic(latticeAtLay) && draft ? .draft : .exact)   // ★ his 11-22: the lay really begins
+        let layWords = Self.layStep(sheet: LatticeSheets.isSheet(latticeAtLay.topologyID))   // ★ notes30: a sheet's own words
         do {
             var t0 = Date()
             if let t = limitsTask { await t.value }   // ★ his 11-22: the page's Auto numbers first (one session, never two)
@@ -810,7 +812,7 @@ public final class LatticeLayoutPreview: ObservableObject {
             let opened = session != nil && sessionPath == path && session?.printUp == upAtLay
             guard !Task.isCancelled, let session = try await openSession(path: path, up: upAtLay) else { return }
             if !opened { stepS[Self.stepOpen] = Date().timeIntervalSince(t0) }   // ★ notes29
-            refresh.reached(Self.stepLay)
+            refresh.reached(layWords)
             t0 = Date()
             sessionStressKey = try await Self.give(stress, to: session, holding: sessionStressKey)
             layStages["stressGiveMS"] = Self.ms(since: t0)
@@ -826,7 +828,7 @@ public final class LatticeLayoutPreview: ObservableObject {
             t0 = Date()
             let r = try await session.lay(s)
             guard !Task.isCancelled else { return }
-            stepS[Self.stepLay] = Date().timeIntervalSince(t0)   // ★ notes29
+            stepS[layWords] = Date().timeIntervalSince(t0)   // ★ notes29
             token &+= 1
             // ★ notes29 (his img 97: the new struts drawn over the LAST lay's map, half the part closed over them): the struts land
             // only WITH their own map — the part is cut open for exactly this lattice the moment it shows, never by the last one's.
@@ -2269,6 +2271,9 @@ extension LatticeLayoutPreview {
     /// The refresh's steps in words (five at most) — the card's line — and how long each took the last time here.
     static let stepOpen = "Opening the part"
     static let stepLay = "Laying the struts"
+    /// ★ notes30 (M1's follow-up): a sheet lays walls, not struts — the card's line in its own words (five at most, positive).
+    static let stepLaySheet = "Laying the walls"
+    static func layStep(sheet: Bool) -> String { sheet ? stepLaySheet : stepLay }
     static let stepMap = "Cutting the part open"
     /// Organic: before the engine says its phase, then its phases 1-5 (core's GrowthTap).
     static let organicSteps = ["Getting ready", "Growing the vines", "Pruning the vines", "Seeding again", "Reaching the walls",
@@ -2276,15 +2281,17 @@ extension LatticeLayoutPreview {
     /// An Organic lay's time split over its steps (a rough split of the last lay's time; the bar holds in a step that runs long).
     static let organicShares: [Double] = [0.15, 0.45, 0.1, 0.1, 0.1, 0.1]
 
-    func refreshSteps(organic: Bool, path: String, up: SIMD3<Double>? = nil) -> [LatticeRefreshProgress.Stage] {
+    /// `sheet`: ★ notes30, a sheet type's lay — its walls laid, and its map always made (a sheet is drawn on it, X-ray too).
+    func refreshSteps(organic: Bool, path: String, up: SIMD3<Double>? = nil, sheet: Bool = false) -> [LatticeRefreshProgress.Stage] {
         if organic {
             let total = layWallS[timeKey(path, .draft)] ?? layWallS[timeKey(path, .exact)] ?? 6
             return zip(Self.organicSteps, Self.organicShares).map { .init(words: $0, expectedS: $1 * total) }
         }
         var out: [LatticeRefreshProgress.Stage] = []
         if session == nil || sessionPath != path || session?.printUp != up { out.append(.init(words: Self.stepOpen, expectedS: stepS[Self.stepOpen] ?? 0.8)) }
-        out.append(.init(words: Self.stepLay, expectedS: stepS[Self.stepLay] ?? layWallS[timeKey(path, .exact)] ?? 1.2))
-        if solidWanted { out.append(.init(words: Self.stepMap, expectedS: stepS[Self.stepMap] ?? 0.8)) }
+        let lay = Self.layStep(sheet: sheet)
+        out.append(.init(words: lay, expectedS: stepS[lay] ?? layWallS[timeKey(path, .exact)] ?? 1.2))
+        if solidWanted || sheet { out.append(.init(words: Self.stepMap, expectedS: stepS[Self.stepMap] ?? 0.8)) }
         return out
     }
 }

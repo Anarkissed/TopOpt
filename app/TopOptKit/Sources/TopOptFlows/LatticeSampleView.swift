@@ -307,7 +307,8 @@ struct LatticeSampleView: View {
         // ★ notes29: a strut type's sample is built on screen (Organic's has no growth: shown at once, as before); with Skip all
         // animations, any sample leaves the area blank with the card until it lands
         if i.organic == nil || AppSettings.skipAllAnimations { buildShow.layBegins() } else { buildShow.stop() }
-        refresh.begin([.init(words: i.organic == nil ? LatticeLayoutPreview.stepLay : "Growing the vines",
+        refresh.begin([.init(words: i.organic == nil ? LatticeLayoutPreview.layStep(sheet: LatticeSheets.isSheet(i.topology))
+                                                     : "Growing the vines",   // ★ notes30: a sheet's own words
                              expectedS: lastS ?? (i.organic == nil ? 1.7 : 6))])
         if let look = i.organic { return await buildOrganic(look, i) }
         if FlexibleSaid.recording { Self.recordedAsks.append(i) }

@@ -118,6 +118,31 @@ final class Notes30SheetsIntegrateTests: XCTestCase {
         XCTAssertTrue(wiz.contains("sheetGreyedCaption(.smallCellsInThinWalls)"), "★ with its five words and (i)")
     }
 
+    // MARK: 6 · the refresh card in a sheet's own words (M1's follow-up)
+
+    /// With Skip all animations on, the card says what the engine does: a sheet lays its walls (never "struts"), then its map
+    /// (a sheet is drawn on it, X-ray too). RED CONTROL: a strut type's card is as it was.
+    func testTheRefreshCardSaysASheetLaysItsWalls() throws {
+        let words = LatticeLayoutPreview.layStep(sheet: true)
+        XCTAssertEqual(words, "Laying the walls")
+        XCTAssertLessThanOrEqual(LatticeCaptions.words(words), LatticeCaptions.maxWords)
+        XCTAssertEqual(Self.negative(words), [], "★ positive words")
+        let preview = LatticeLayoutPreview()
+        let sheet = preview.refreshSteps(organic: false, path: "/nowhere.step", sheet: true).map(\.words)
+        XCTAssertTrue(sheet.contains("Laying the walls"), "★ \(sheet)")
+        XCTAssertFalse(sheet.contains { $0.contains("strut") }, "★ never struts for a sheet: \(sheet)")
+        XCTAssertTrue(sheet.contains(LatticeLayoutPreview.stepMap), "★ and its map, made in every view: \(sheet)")
+        // RED CONTROL: a strut type's lay, X-ray: as it was
+        let struts = preview.refreshSteps(organic: false, path: "/nowhere.step").map(\.words)
+        XCTAssertTrue(struts.contains(LatticeLayoutPreview.stepLay), "RED CONTROL: \(struts)")
+        XCTAssertFalse(struts.contains(LatticeLayoutPreview.stepMap), "RED CONTROL: no map step in X-ray for struts")
+        // the page and the sample ask the lay's own words
+        let page = try FlexibleSource.code("LatticeLayoutPreview.swift"), sample = try FlexibleSource.code("LatticeSampleView.swift")
+        XCTAssertTrue(page.contains("refresh.reached(layWords)"))
+        XCTAssertTrue(page.contains("sheet: LatticeSheets.isSheet(p.lattice.topologyID)"))
+        XCTAssertTrue(sample.contains("LatticeLayoutPreview.layStep(sheet: LatticeSheets.isSheet(i.topology))"))
+    }
+
     // MARK: 5 · a sheet's print file is core's 3MF
 
     func testASheetPrintFileJobAsksForA3MF() throws {
