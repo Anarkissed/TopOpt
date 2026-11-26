@@ -25,25 +25,34 @@ Paused at 94 % weekly usage for five minutes; the maintainer: "Keep going, do no
 
 ## Work queue (the lead's own; kept stocked; top item first)
 
-The maintainer's order (2026-11-25): never sit waiting on the lock. Every wake-up records what finished, then does the next open item here. Rewritten 2026-11-25 22:30.
+THE NIGHT OF 2026-11-26 (written 03:50 EST). The maintainer is asleep. His words: "I want you working throughout the night", "I especially want you building while waiting in the queue", and on the six additions "I agree, yes to all 6", and "If anything comes up, please hold off on the question until I wake up and message - and move on to the next task." So: NO question to him tonight, no phone ping. A question goes in the list "For him in the morning" below, a provisional choice is taken where it is safe and marked provisional, and the next item starts.
 
-WAITING ON OTHERS (check each tick, act the moment it arrives):
-- The reviewer: which reference a reading over a length is judged against (the textbook peak, or the reading's own true value; asked 02:10Z and 02:26Z on TOReview). Until then nothing more goes into `analyze.cpp`.
-- The lock (queued, starts by itself): `stage1_eighth.sh` Top Motor Mount from the drawn faces, then the stand at pad 3 mm on the corrected clamp (the stand at other pad depths is dropped: it is three quarters frozen and the pad changes nothing). Running without the lock: `stage1_pad96.sh`, the pad on Base, Pressing and PillowBlock. Record in `stages/stage-1-true-loads.md`.
+Every tick: record what finished (stage file, commit by name, push), then do the next open item. Order agreed with him: B1, B3, B2, B5, B6, B4, with section A alongside.
 
-OPEN, mine, no lock needed:
-1. STAGE 1 REPORT to the reviewer (the flip is ruled on it). Write it as soon as the lock runs are recorded. It must carry: hand-over item 3 for #362 in the same release; `lattice_depth_tie` 0a and `test_print_frame.cpp:721` in their `face` forms with the note on the frame's load rule; LatticeReview's interim guard (13b28529 on claude/organic-engine); rule P (time within 10 %) re-read on a quiet machine; the corrected-clamp tables; the bearing table.
-1b. DONE 2026-11-26: the two scenario tests pass with the switch off and on; the lost smallest version there is the pad depth. The bearings' "a load over it wins" test is NOT carried to the face path, on purpose: today it exists because one voxel cannot be both Load and Fixture, so where a loaded face and a bolt face meet the load takes the voxel and the bolt loses its springs there; on the face path each face owns its own nodes' areas, the two can share an edge node, and holding that node is the true thing to do. Said in the stage report.
-2. Stage 2, condition (e): one sheet job and one Organic job loaded on lattice in the before/after table (`test_to_stage1_lattice_check`'s stage 2 arm). Ask LatticeReview or #362 for the job keys of a sheet (gyroid) lattice file job; the turned-box C from the test's earlier version is the Organic one.
-3. Stage 2, "saved": today `volume_saved_fraction` = 1 - printed voxels / part voxels. With printed grams it must be 1 - printed grams of the version / printed grams of the DRAWN part at the same walls and infill. Needs the drawn part's printed grams once per job (`printed_mass` on the part grid) and a report value the app reads: write the exact proposal for #362, then the core half behind the switch.
-4. Stage 2 on optimised designs at res 128 (lock, about 20 min a run): the stand with `TOPOPT_STRENGTH` unset / `stiff` / `size` with a typed 1.8 mm, drawn-face loads. Res 64 taught nothing (voxel 3.4 mm).
-5. Stage 2, the across-layer reading over the same size (the maintainer's decision): `interlayer_tension_field` exists; wiring it into `analyze.cpp` waits on the reviewer.
-6. Printed grams against a slicer: one of his parts sliced at 50 % infill and six walls would check the 0.943 share. He said he has no capacity for slicer work now; ask again when a part is on his printer anyway.
-7. The optimiser side of the floating pieces (why a design step cuts loaded pieces off): after TOSurface's branch is merged.
-8. Merge review of TOSurface's and TOSolver's branches when they report a stage; TOSolver's one-commit solver-settings change in my files.
-9. "Best I can do" probe build, once stages 1, 3 and 5 can be combined in one sparse tree.
+Queued for the lock (start by themselves): `stage1_eighth.sh` (Top Motor Mount res 96 and the stand res 128 from the drawn faces; waits 12 s after the lock frees). To queue next: B1, then B5.
+Running without the lock: `sample_pad.sh` (the sample bracket, six pad settings), `stage1_padtm.sh` (Top Motor Mount res 64, four pad settings).
 
-DONE and recorded (kept short): stage 0 move; tests A, C/D, E (both halves), K; the stand both ways (old clamp); jobs A to C with LatticeReview's final statement; the sideways lip; bearing anchors; the as-drawn tables re-made on the corrected clamp; the reviewer's bar measured; the reading's own true value; printed grams verified on a run; the stage 2 switch shown not to reach the lattice check.
+A. Already agreed:
+- A1. Stage 1 report to the reviewer once the two lock runs are recorded (draft at the top of `stages/stage-1-true-loads.md`).
+- A2. The pad's one number: tables and PICTURES of the shapes around the fixed faces from the two sweeps; a recommended curve strength for him in the morning.
+- A3. The automatic pad as the Auto default behind the switch; a typed depth in Manual; per-face values (thickness, pad) as report values for the app.
+- A4. "Too small for the nozzle": the core side (detects it, gives the plain reason and the recommendation: a finer nozzle, or resin). The pop-up is #362's.
+- A5. Automatic resolution from the part's size and the line width, Manual override.
+- A6. Stage 2 without the reviewer: the textbook reference reading inside tests E; a unit test for `interlayer_tension_field`.
+- A7. Review and merge the helpers' work as they report.
+
+B. Approved tonight:
+- B1. The WHOLE test suite on my branch (never run; lock, 1 to 3 h). Record every failure with its cause; fix mine, name the rest.
+- B3. Printed grams against Bambu Studio (installed; command line; the sample bracket; reads and writes only my scratch).
+- B2. Two more made sample parts: a plate with holes; a hook loaded off-centre.
+- B5. Stage 2 on optimised designs at full resolution (the stand and the sample bracket: unset / stiff / size 1.8 mm; lock, about 1.5 h).
+- B6. Published values for PA12 (his material), deeper search.
+- B4. The "best I can do" trial build: stages 1, 3 and the solver work in one scratch tree, never merged; the sample bracket and Top Motor Mount; pictures for the morning.
+
+For him in the morning (questions held, with the provisional choice taken):
+- (none yet)
+
+WAITING ON OTHERS: the reviewer's ruling on which reference a reading over a length is judged against (nothing more in `analyze.cpp` until then); #362's sheet types in a base I can build (the sheet row of the stage 2 lattice table).
 
 ## Ideas beyond the plan, in discussion with the maintainer (NOT acted on)
 
