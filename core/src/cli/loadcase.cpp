@@ -32,6 +32,35 @@ double face_pad_depth_mm() {
   return d > 0.0 ? d : 3.0;
 }
 
+// THE AUTOMATIC PAD (in discussion with the maintainer, 2026-11-26; a MEASURING
+// ARM until he settles its one number). "Pad in wall-line widths with a cap sounds
+// right"; "Can't the number of lines adjust based on the size of the model?";
+// "Can't it be a ratio? So as it grows, the thickness slows down?" The rule put to
+// him: the pad grows with the square root of the thickness of material behind
+// that face, never less than two wall-line widths (one line does not print), no
+// ceiling:   pad = max(2 x line width, sqrt(strength x thickness)).
+// TOPOPT_PAD_MM=auto uses strength 0.625 mm (2.5 mm on a 10 mm block);
+// TOPOPT_PAD_MM=auto:<strength> sets it. Anything else is the fixed depth above.
+bool auto_pad(double* strength_mm) {
+  const char* v = std::getenv("TOPOPT_PAD_MM");
+  if (v == nullptr || std::string(v).rfind("auto", 0) != 0) return false;
+  const std::string s(v);
+  const double typed = s.size() > 5 && s[4] == ':' ? std::atof(s.c_str() + 5) : 0.0;
+  *strength_mm = typed > 0.0 ? typed : 0.625;
+  return true;
+}
+double pad_depth_for(const VoxelGrid& grid, const std::vector<FacePiece>& pieces,
+                     double line_width_mm) {
+  double strength = 0.0;
+  if (!auto_pad(&strength)) return face_pad_depth_mm();
+  const double lw = line_width_mm > 0.0 ? line_width_mm : 0.45;
+  const double thickness = face_backing_thickness_mm(grid, pieces);
+  const double depth = std::max(2.0 * lw, std::sqrt(strength * thickness));
+  std::printf("[loadcase] automatic pad: %.2f mm of material behind the face -> pad %.2f mm\n",
+              thickness, depth);
+  return depth;
+}
+
 std::size_t tag_face_m(VoxelGrid& grid, const StepModel& model, int fid, VoxelTag tag) {
   if (face_load_mode() == FaceLoadMode::Voxel) return tag_step_face(grid, model, fid, tag);
   return tag_face_hosts(grid, face_pieces(model, {fid}, 0.5 * grid.spacing), tag);
@@ -925,26 +954,41 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
       return grid.tags[idx] == VoxelTag::Load || grid.tags[idx] == VoxelTag::Fixture;
     };
     if (want_pad) {
+      // The pad's depth on the face path: a fixed number of mm, or the automatic
+      // rule (pad_depth_for). Unused on the voxel path, which pads by layers.
+      const bool by_face = face_load_mode() != FaceLoadMode::Voxel;
+      auto face_pad = [&](int fid) {
+        return by_face ? pad_depth_for(grid, face_pieces(model, {fid}, 0.5 * grid.spacing),
+                                       lc.wall_line_width_mm)
+                       : face_pad_depth_mm();
+      };
+      auto region_pad = [&](const ResolvedFaceRegion& r) {
+        return by_face ? pad_depth_for(grid, region_pieces(model, r, 0.5 * grid.spacing),
+                                       lc.wall_line_width_mm)
+                       : face_pad_depth_mm();
+      };
       for (int fid : lc.anchor_face_ids) {
+        const double d = face_pad(fid);
         mask_face_m(grid, model, fid, MaskValue::FrozenSolid,
-                    kProductionAnchorPadDepthVoxels, face_pad_depth_mm(), pad);
-        note_frozen_face(model, fid, face_pad_depth_mm(), opts.frozen_sets);
+                    kProductionAnchorPadDepthVoxels, d, pad);
+        note_frozen_face(model, fid, d, opts.frozen_sets);
       }
       for (int fid : retained_load_faces) {
+        const double d = face_pad(fid);
         mask_face_m(grid, model, fid, MaskValue::FrozenSolid,
-                    kProductionAnchorPadDepthVoxels, face_pad_depth_mm(), pad);
-        note_frozen_face(model, fid, face_pad_depth_mm(), opts.frozen_sets);
+                    kProductionAnchorPadDepthVoxels, d, pad);
+        note_frozen_face(model, fid, d, opts.frozen_sets);
       }
       // A retained load REGION gets the same structural pad a retained load
       // face gets. The pad is what ties a boundary condition into the body; a
       // load applied to a union or to one sector of a grid split needs it for
       // exactly the same reason (diagnosis 064).
       for (int rid : retained_load_regions) {
-        mask_region_m(grid, model, region_or_throw(rid, "retained load"),
-                      MaskValue::FrozenSolid, kProductionAnchorPadDepthVoxels,
-                      face_pad_depth_mm(), pad);
-        note_frozen_region(region_or_throw(rid, "retained load"), face_pad_depth_mm(),
-                           opts.frozen_sets);
+        const ResolvedFaceRegion& reg = region_or_throw(rid, "retained load");
+        const double d = region_pad(reg);
+        mask_region_m(grid, model, reg, MaskValue::FrozenSolid,
+                      kProductionAnchorPadDepthVoxels, d, pad);
+        note_frozen_region(reg, d, opts.frozen_sets);
       }
       // COUNT THE PAD SEPARATELY (task 2026-08-12 §1f). Everything frozen so far
       // is the pad and only the pad — the protections below run after this.
