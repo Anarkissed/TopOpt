@@ -16252,8 +16252,11 @@ extension WorkspacePlaceholder {
     func certifySolve(_ issue: OrganicCertify.Issue) {
         guard let solve = issue.solve else { return }
         if solve == .coverLoadedFace {   // ★ notes30: the centred pop-up offers the loaded face a Protect skin (first) or a Solid finish
-            OrganicBareVines.offer(skin: { certifyCover { _ = $0.giveLoadedFaceProtectSkin(near: issue.at) } },
-                                   solid: { certifyCover { _ = $0.giveLoadedFaceSolidFinish(near: issue.at) } })
+            // ★ notes30 depth (LatticeReview's rule): the Protect skin at the depth that clears it, Solid only when its wall does
+            let o = OrganicBareVines.offers(depthNeededMM: issue.depthNeededMM, wallMM: project.printParams.wallRingMM)
+            let solid: (() -> Void)? = o.solid ? { certifyCover { _ = $0.giveLoadedFaceSolidFinish(near: issue.at) } } : nil
+            OrganicBareVines.offer(skin: { certifyCover { _ = $0.giveLoadedFaceProtectSkin(near: issue.at, depthMM: o.skinDepthMM) } },
+                                   solid: solid)
             return
         }
         model.certifyWalk?.markSolved()

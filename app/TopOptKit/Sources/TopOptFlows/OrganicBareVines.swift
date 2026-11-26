@@ -60,6 +60,9 @@ public enum OrganicBareVines {
         public var at: SIMD3<Double>?
         /// Core's sentence (`fail_text`), else the app's copy of it.
         public var text: String
+        /// ★ notes30 depth (LatticeReview's key, organic-engine 9850d951): the depth of solid under the loaded face that clears
+        /// the check (`solid_depth_needed_mm`, 1.5 of its voxels, measured); nil: an older worker's core did not say.
+        public var depthNeededMM: Double? = nil
     }
 
     /// The strength block's reading, or nil when its reason is another (or under the RED control).
@@ -71,7 +74,45 @@ public enum OrganicBareVines {
         }
         let said = (s["fail_text"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? text
         return Found(onFrameN: n(s["load_on_frame_n"]), totalN: n(s["load_total_n"]), share: n(s["load_share"]), at: at,
-                     text: said)
+                     text: said, depthNeededMM: depth(s))
+    }
+
+    /// Core's `solid_depth_needed_mm` (a strength block, or strengthen.json when it carries it), nil when absent or not a depth.
+    public static func depth(_ o: [String: Any]?) -> Double? {
+        guard let d = (o?["solid_depth_needed_mm"] as? NSNumber)?.doubleValue, d.isFinite, d > 0 else { return nil }
+        return d
+    }
+
+    // MARK: LatticeReview's wizard rule (2026-11-26, with the depth key)
+
+    /// ★ RED CONTROL (OrganicBareVinesTests, OrganicBareVinesHostedTests): the depth key ignored — today's offers (both, the
+    /// page's Protect skin depth).
+    nonisolated(unsafe) public static var controlNoDepth = false
+    /// A Protect skin offered at least this deep (the page's own default), and on this step.
+    public static let skinFloorMM = 4.0, skinStepMM = 0.5
+
+    /// What the pop-up offers for a result.
+    public struct Offers: Equatable, Sendable {
+        /// Solid finish is offered (its wall, the printer's own, is at least the depth needed).
+        public var solid: Bool
+        /// The Protect skin's depth (mm); nil: the page's depth, as before the key.
+        public var skinDepthMM: Double?
+    }
+
+    /// ★ LatticeReview's rule: with core's depth `needed`, Solid finish ONLY when its wall (`wallMM`, the printer's wall ring:
+    /// the cover a Solid finish lays) is at least `needed`; Protect skin at max(4 mm, `needed` rounded UP to 0.5 mm). Without
+    /// the key (an older worker): both offered, the page's Protect skin depth — today's behaviour.
+    public static func offers(depthNeededMM needed: Double?, wallMM: Double) -> Offers {
+        guard !controlNoDepth, let d = needed, d > 0 else { return Offers(solid: true, skinDepthMM: nil) }
+        let up = ((d / skinStepMM) - 1e-9).rounded(.up) * skinStepMM
+        return Offers(solid: wallMM >= d - 1e-9, skinDepthMM: Swift.max(skinFloorMM, up))
+    }
+
+    /// The wizard card's advice line for `offers` (Protect skin first; its depth when the key gave one; Solid only when offered).
+    public static func adviceLine(_ o: Offers) -> String {
+        guard let d = o.skinDepthMM else { return advice }
+        let skin = "a Protect skin " + OrganicCertifyCopy.mm(d) + " mm deep"
+        return "The loaded face is bare vines now. Try " + skin + (o.solid ? " or a Solid finish." : ".")
     }
 
     /// ★ 362's review (11-26): a load on bare vines has no valid margin — what stands in a margin's place for its result, the
@@ -111,8 +152,13 @@ public enum OrganicBareVines {
     }
 
     /// ★ The centred pop-up (his 11-20 rule: never a line at the bottom): the sentence, then Protect skin (first, LatticeReview
-    /// 11-26), Solid finish, Not now.
-    @MainActor public static func offer(skin: @escaping () -> Void, solid: @escaping () -> Void) {
+    /// 11-26), Solid finish, Not now. `solid` nil (LatticeReview's depth rule: its wall is thinner than the depth needed): Protect
+    /// skin and Not now only.
+    @MainActor public static func offer(skin: @escaping () -> Void, solid: (() -> Void)?) {
+        guard let solid else {
+            AppPopups.shared.choose(title, text, first: (protectSkin, skin), second: nil, dismiss: notNow)
+            return
+        }
         if controlSolidFirst {   // the RED control: the order before the ruling
             AppPopups.shared.choose(title, text, first: (solidFinish, solid), second: (protectSkin, skin), dismiss: notNow)
             return
@@ -182,10 +228,11 @@ extension ProjectModel {
     }
 
     /// ★ Offer 2: the loaded face gets a Protect skin — a new lattice group holding it (taken from any lattice group that held
-    /// it), its role Protect skin at the page's depth, as the Role row sets it. Returns the group, or nil (no loaded face, or a
-    /// Flexible part, whose lattice groups are Topology's).
+    /// it), its role Protect skin at `depthMM` (★ notes30 depth: LatticeReview's max(4 mm, the depth needed rounded up to 0.5
+    /// mm)), else the page's depth, as the Role row sets it. Returns the group, or nil (no loaded face, or a Flexible part, whose
+    /// lattice groups are Topology's).
     @discardableResult
-    public func giveLoadedFaceProtectSkin(near at: SIMD3<Double>?) -> UUID? {
+    public func giveLoadedFaceProtectSkin(near at: SIMD3<Double>?, depthMM: Double? = nil) -> UUID? {
         guard usesLatticeList else { return nil }
         let loads = bareVinesLoadGroups(near: at)
         let faces = Array(Set(loads.flatMap { $0.faces.filter { $0 >= 0 } })).sorted()
@@ -203,7 +250,7 @@ extension ProjectModel {
         if let g = latticeGroups.first(where: { $0.id == id }) {
             for ref in latticeSelectableRefs(g) where lattice.selectableRoles[ref.key] != .off { lattice.selectableRoles[ref.key] = nil }
         }
-        if lattice.groupDepthMM[id] == nil { lattice.groupDepthMM[id] = LatticeSlabDepth.clamp(lattice.paintDepthMM) }
+        lattice.groupDepthMM[id] = LatticeSlabDepth.clamp(depthMM ?? lattice.paintDepthMM)
         syncForceGroups()
         return id
     }

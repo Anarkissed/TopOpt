@@ -28,25 +28,33 @@ final class OrganicBareVinesHostedTests: XCTestCase {
         MainActor.assumeIsolated {
             OrganicBareVines.controlUnread = false
             OrganicBareVines.controlSolidFirst = false
+            OrganicBareVines.controlNoDepth = false
             CertifyCardPlace.shared.reset(); AppPopups.shared.current = nil; AppPopups.recorded = []
         }
         super.tearDown()
     }
 
     /// The wizard's pop-up for the bare-vines result, its Solve raising the centred pop-up with `solid` and `skin` as the offers.
-    func card(solid: @escaping () -> Void, skin: @escaping () -> Void) throws -> OrganicCertifyCard {
-        let o = try OrganicBareVinesTests.outcome()
+    /// ★ notes30 depth: `depth` (core's `solid_depth_needed_mm`) and `wallMM` (the printer's wall ring) decide the offers as the
+    /// workspace's Solve does (LatticeReview's rule); no depth: today's two.
+    func card(depth: Double? = nil, wallMM: Double = 0.9,
+              solid: @escaping () -> Void, skin: @escaping () -> Void) throws -> OrganicCertifyCard {
+        let o = try OrganicBareVinesTests.outcome(depth: depth)
         let w = try XCTUnwrap(OrganicCertify.walk(version: UUID(), reportJSON: o.reportJSON, infillNow: 50))
         let issue = try XCTUnwrap(w.current)
         XCTAssertEqual(issue.id, OrganicBareVines.reason, "premise: the walk opens on it")
         return OrganicCertifyCard(issue: issue, step: w.step, grid: nil, solvedLines: nil,
-                                  advice: OrganicCertifyAdvice.advice(issue, .init(strut: nil, stepMM: 0.45, infillNow: 50)),
-                                  next: {}, skip: {}, solve: { OrganicBareVines.offer(skin: skin, solid: solid) })
+                                  advice: OrganicCertifyAdvice.advice(issue, .init(strut: nil, stepMM: 0.45, infillNow: 50,
+                                                                                   wallMM: wallMM)),
+                                  next: {}, skip: {}, solve: {
+                                      let offers = OrganicBareVines.offers(depthNeededMM: issue.depthNeededMM, wallMM: wallMM)
+                                      OrganicBareVines.offer(skin: skin, solid: offers.solid ? solid : nil)
+                                  })
     }
 
     /// Results as the workspace mounts it, the centred pop-ups over it as RootView mounts them.
-    func results(_ size: CGSize, _ card: OrganicCertifyCard) throws -> AppBuildHost {
-        let o = try OrganicBareVinesTests.outcome()
+    func results(_ size: CGSize, _ card: OrganicCertifyCard, depth: Double? = nil) throws -> AppBuildHost {
+        let o = try OrganicBareVinesTests.outcome(depth: depth)
         let v = ResultsScreen(projectName: "Stand", outcome: o, undo: {}, redo: {}, topLeftBlock: nil,
                               resultsModel: ResultsModel(projectName: "Stand", outcome: o), certify: card)
             .frame(width: size.width, height: size.height)
@@ -120,6 +128,42 @@ final class OrganicBareVinesHostedTests: XCTestCase {
             _ = try h.onScreen("appPopup", "\(what): the plain pop-up")
             XCTAssertNil(h.frames.all["appPopupChoice1"], "\(what): RED CONTROL: no offer")
             XCTAssertNil(h.frames.all["appPopupChoice2"], "\(what): RED CONTROL: no offer")
+            AppPopups.shared.current = nil
+            h.window.orderOut(nil); h.window.contentView = nil; h.pump(0.1)
+        }
+    }
+
+    /// ★ notes30 depth (LatticeReview's rule): core says 1.2 mm of solid clears it and the printer's wall is 0.9 mm — Solve's
+    /// centred pop-up offers Protect skin and Not now ONLY (Solid finish is not offered), Protect skin on top, 44 pt, the sentence
+    /// unchanged; the card's advice names the skin's depth. RED CONTROL (the key ignored): Solid finish is back as the second.
+    func testAThinSolidIsNotOfferedWhenTheDepthKeySaysSo() throws {
+        for size in Self.sizes {
+            let what = "\(Int(size.width))×\(Int(size.height))"
+            var solid = 0, skin = 0
+            CertifyCardPlace.shared.reset(); AppPopups.shared.current = nil; AppPopups.recorded = []
+            let thin = try self.card(depth: 1.2, wallMM: 0.9, solid: { solid += 1 }, skin: { skin += 1 })
+            XCTAssertEqual(thin.advice?.line, "The loaded face is bare vines now. Try a Protect skin 4 mm deep.", "★ no Solid named")
+            let h = try results(size, thin, depth: 1.2)
+            try h.tap("certifySolve", "\(what): Solve", settle: 0.8)
+            let pop = try h.onScreen("appPopup", "\(what): ★ the centred pop-up")
+            XCTAssertEqual(pop.midX, size.width / 2, accuracy: 2, "\(what): ★ centred")
+            XCTAssertEqual(AppPopups.recorded.last?.text, OrganicBareVinesTests.coreSentence, "\(what): ★ the sentence, unchanged")
+            XCTAssertEqual(AppPopups.shared.action?.title, OrganicBareVines.protectSkin, "\(what): ★ Protect skin")
+            XCTAssertNil(AppPopups.shared.second, "\(what): ★ Solid finish not offered")
+            XCTAssertEqual(AppPopups.shared.dismissTitle, OrganicBareVines.notNow)
+            let one = try h.probe("appPopupChoice1", "\(what): ★ Protect skin")
+            let not = try h.probe("appPopupDismiss", "\(what): ★ Not now")
+            XCTAssertNil(h.frames.all["appPopupChoice2"], "\(what): ★ no second offer on screen")
+            XCTAssertLessThan(one.midY, not.midY, "\(what): Protect skin on top, Not now under it")
+            try h.picture("bare-vines-depth-popup-\(what).png")
+            try h.tap("appPopupChoice1", "\(what): Protect skin", settle: 0.6)
+            XCTAssertEqual([solid, skin], [0, 1], "\(what): ★ Protect skin ran")
+            // RED CONTROL: the key ignored — today's two offers, Solid finish second
+            OrganicBareVines.controlNoDepth = true
+            try h.tap("certifySolve", "\(what): Solve, the key ignored", settle: 0.8)
+            XCTAssertEqual(AppPopups.shared.second?.title, OrganicBareVines.solidFinish, "\(what): RED CONTROL: Solid offered")
+            _ = try h.onScreen("appPopupChoice2", "\(what): RED CONTROL: the second offer drawn")
+            OrganicBareVines.controlNoDepth = false
             AppPopups.shared.current = nil
             h.window.orderOut(nil); h.window.contentView = nil; h.pump(0.1)
         }
