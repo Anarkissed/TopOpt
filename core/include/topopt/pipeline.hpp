@@ -1081,6 +1081,13 @@ inline constexpr const char* kRungNonConvergentReason =
 // in precedence, above the margin.
 inline constexpr const char* kAnchorDetachedReason = "anchored piece detached";
 
+// THE CONNECTION RULE (TOPOPT_CONNECTION=support; the reviewer's ruling 2026-11-26):
+// the rung's design left a piece that carries an APPLIED load and reaches no
+// support, so the solve refused it before any iteration (fea.hpp FeaLoadUnheld).
+// Reported like a rung whose solve did not converge (no analysis, no inheritance,
+// the ladder goes on), with this reason in its place.
+inline constexpr const char* kLoadUnheldReason = "the load has no path to a mount";
+
 // REAL BOLTS (bearing anchors; the reviewer's ruling of 2026-10-25 21:45): more than
 // kAnchorsSlidingShare (analyze.hpp) of the anchors' total reaction is carried by the weak sliding
 // (tangential) springs, so the anchors cannot hold the load in some direction: the

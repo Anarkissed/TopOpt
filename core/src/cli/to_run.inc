@@ -2494,6 +2494,19 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                 result.pipeline.rung_non_convergent_tolerance[i] > 0.0
             ? result.pipeline.rung_non_convergent_tolerance[i]
             : options.simp.cg_tolerance;
+    // The connection rule (TOPOPT_CONNECTION=support): the same path, a different
+    // fact. No solve stalled; the design left a loaded piece with no way to a mount.
+    if (v.report.rejection_reason == kLoadUnheldReason) {
+      std::fprintf(stderr,
+                   "WARNING: rung %zu (vf %.2f) was REJECTED — %s. This version's design "
+                   "left a piece that carries a load but is joined to no fixed face, so "
+                   "it was refused before any solving. No mesh, stress analysis or margin "
+                   "is reported for it; the run completed and every already-accepted "
+                   "variant is unaffected. See report.json rejected_variants.\n",
+                   i, v.requested_volume_fraction, kLoadUnheldReason);
+      std::fflush(stderr);
+      continue;
+    }
     std::fprintf(stderr,
                  "WARNING: rung %zu (vf %.2f) was REJECTED — %s. A linear solve did "
                  "not reach the CG tolerance %.3g: it stalled at residual %.3g after "
