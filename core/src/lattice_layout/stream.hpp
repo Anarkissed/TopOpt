@@ -17,7 +17,7 @@ namespace topopt::lattice_layout {
 
 // RED controls for core's own tests (test_lattice_layout_stream), bits of stream_control(); 0 in every other lay.
 inline constexpr int kStreamControlAsMade = 1;           // T2: hand over every bar as lay_bars made it (no certificate)
-inline constexpr int kStreamControlSlotOrder = 2;        // T3: the slots laid in plan order even when watched
+inline constexpr int kStreamControlSlotOrder = 2;        // T3: the slots laid highest first (top down)
 inline constexpr int kStreamControlSyncRounds = 4;       // T3: the stream's rounds run in the laying thread (deterministic)
 inline constexpr int kStreamControlNoRestart = 8;        // T5: StrutTap::start keeps the last lay's struts
 inline constexpr int kStreamControlMapEarly = 16;        // T7: the map made before the cells are laid

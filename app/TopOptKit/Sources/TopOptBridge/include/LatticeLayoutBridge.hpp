@@ -477,6 +477,8 @@ struct LatticeLayoutStruts {
   std::vector<uint8_t> bar_flags;   // 1 per strut: 16 a BRIDGE (judged where it is laid, the print frame when framed); never 1 or 2
   std::vector<int32_t> bar_region;  // 1 per strut
   std::vector<float> bar_cell;      // 1 per strut: the size of its cell, mm
+  std::vector<float> bar_ms;        // 1 per strut: when it was handed over, ms since the lay started (its plan)
+  std::vector<int32_t> bar_laid;    // 1 per strut: the slots laid when it was handed over (of `slots`)
   int32_t map_state = 0;
   std::vector<uint8_t> map_slabs_done;
 };

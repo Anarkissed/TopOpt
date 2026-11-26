@@ -2102,7 +2102,9 @@ Layout lay_cells(const Domain& domain, const CellSpec& asked, int threads, const
     std::unique_ptr<std::atomic<std::uint8_t>[]> done;
     CellPlan plan;   // the watch reads it until executed() returns
     if (watch) {
-      if (!(stream_control() & kStreamControlSlotOrder))   // (T3's RED: plan order)
+      if (stream_control() & kStreamControlSlotOrder)   // (T3's RED: highest first)
+        std::stable_sort(jobs.begin(), jobs.end(), [](const CellPlan::Job& x, const CellPlan::Job& y) { return x.h > y.h; });
+      else
         std::stable_sort(jobs.begin(), jobs.end(), [](const CellPlan::Job& x, const CellPlan::Job& y) { return x.h < y.h; });
       if (stream_control() & kStreamControlAssembleJobs) laid_order = jobs;   // (T1's RED)
       done.reset(new std::atomic<std::uint8_t>[jobs.size()]);
@@ -2139,6 +2141,11 @@ Layout lay_cells(const Domain& domain, const CellSpec& asked, int threads, const
       }
       watch->planned(plan);
     }
+    // The line: the lowest of the jobs not yet retired (sorted lowest first it is the next one's; the RED control's plan
+    // order keeps it low until the end).
+    std::vector<double> line_after(jobs.size() + 1, 1e300);
+    if (watch)
+      for (std::size_t i = jobs.size(); i-- > 0;) line_after[i] = std::min(line_after[i + 1], jobs[i].h);
     std::mutex retire_mu;
     std::size_t retired = 0;
     std::atomic<std::size_t> next{0};
@@ -2177,7 +2184,7 @@ Layout lay_cells(const Domain& domain, const CellSpec& asked, int threads, const
           std::lock_guard<std::mutex> g(retire_mu);
           const std::size_t was = retired;
           while (retired < jobs.size() && done[retired].load(std::memory_order_acquire)) ++retired;
-          if (retired != was) watch->retired(retired, retired < jobs.size() ? jobs[retired].h : 1e300);
+          if (retired != was) watch->retired(retired, line_after[retired]);
         }
       }
     };

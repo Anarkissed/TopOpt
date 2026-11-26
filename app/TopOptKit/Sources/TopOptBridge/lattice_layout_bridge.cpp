@@ -1187,6 +1187,8 @@ LatticeLayoutStruts lattice_layout_strut_read(int64_t session, int64_t from, int
     o.bar_flags = r.flags;
     o.bar_region.assign(r.region.begin(), r.region.end());
     o.bar_cell.reserve(n);
+    o.bar_ms = r.ms;
+    o.bar_laid.assign(r.laid_at.begin(), r.laid_at.end());
     for (std::size_t i = 0; i < n; ++i) {   // the very floats fill() gives the landed bar (turned as doubles, then cast)
       put(o.bars, f.point_to_model({r.ab[6 * i], r.ab[6 * i + 1], r.ab[6 * i + 2]}));
       put(o.bars, f.point_to_model({r.ab[6 * i + 3], r.ab[6 * i + 4], r.ab[6 * i + 5]}));

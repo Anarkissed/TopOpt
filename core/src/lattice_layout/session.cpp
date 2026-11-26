@@ -557,6 +557,8 @@ GrowthTap::Read GrowthTap::read(std::size_t from, std::size_t most) const {
 void StrutTap::start(const Vec3& up, const Vec3& lo, const Vec3& hi, std::size_t slots) {
   std::lock_guard<std::mutex> lock(m_);
   ++lay_;
+  t0_ = std::chrono::steady_clock::now();
+  laid_now_ = 0;
   if (stream_control() & kStreamControlNoRestart) {   // T5's RED: the last lay's struts kept
     phase_ = kCells;
     return;
@@ -569,16 +571,17 @@ void StrutTap::start(const Vec3& up, const Vec3& lo, const Vec3& hi, std::size_t
   laid_ = 0;
   missing_ = 0;
   line_ = -1e300;
-  ab_.clear(); width_.clear(); cell_.clear(); region_.clear(); flags_.clear();
+  ab_.clear(); width_.clear(); cell_.clear(); region_.clear(); flags_.clear(); ms_.clear(); laid_at_.clear();
   map_.reset();
   map_state_ = 0;
   slabs_done_.clear();
   landed_.clear();
-  b_ab_.clear(); b_width_.clear(); b_cell_.clear(); b_region_.clear(); b_flags_.clear();
+  b_ab_.clear(); b_width_.clear(); b_cell_.clear(); b_region_.clear(); b_flags_.clear(); b_ms_.clear(); b_laid_at_.clear();
 }
 
 void StrutTap::progress(std::size_t laid, double line) {
   flush();
+  laid_now_ = laid;
   std::lock_guard<std::mutex> lock(m_);
   laid_ = laid;
   line_ = std::max(line_, line);
@@ -596,6 +599,8 @@ void StrutTap::strut(const Bar& b) {
   b_cell_.push_back(b.cell);
   b_region_.push_back(b.region);
   b_flags_.push_back(static_cast<std::uint8_t>((b.piece ? 1 : 0) | (b.skin ? 2 : 0) | (bar_is_bridge(b) ? 16 : 0)));
+  b_ms_.push_back(std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - t0_).count());
+  b_laid_at_.push_back(static_cast<std::uint32_t>(laid_now_.load()));
   if (b_region_.size() >= 256) flush();
 }
 
@@ -607,7 +612,9 @@ void StrutTap::flush() {
   cell_.insert(cell_.end(), b_cell_.begin(), b_cell_.end());
   region_.insert(region_.end(), b_region_.begin(), b_region_.end());
   flags_.insert(flags_.end(), b_flags_.begin(), b_flags_.end());
-  b_ab_.clear(); b_width_.clear(); b_cell_.clear(); b_region_.clear(); b_flags_.clear();
+  ms_.insert(ms_.end(), b_ms_.begin(), b_ms_.end());
+  laid_at_.insert(laid_at_.end(), b_laid_at_.begin(), b_laid_at_.end());
+  b_ab_.clear(); b_width_.clear(); b_cell_.clear(); b_region_.clear(); b_flags_.clear(); b_ms_.clear(); b_laid_at_.clear();
 }
 
 void StrutTap::map(std::shared_ptr<const LayoutMap> m, int state, std::vector<std::uint8_t> slabs_done) {
@@ -686,6 +693,8 @@ StrutTap::Read StrutTap::read(std::size_t from, std::size_t most) const {
   r.cell.assign(cell_.begin() + static_cast<long>(a), cell_.begin() + static_cast<long>(b));
   r.region.assign(region_.begin() + static_cast<long>(a), region_.begin() + static_cast<long>(b));
   r.flags.assign(flags_.begin() + static_cast<long>(a), flags_.begin() + static_cast<long>(b));
+  r.ms.assign(ms_.begin() + static_cast<long>(a), ms_.begin() + static_cast<long>(b));
+  r.laid_at.assign(laid_at_.begin() + static_cast<long>(a), laid_at_.begin() + static_cast<long>(b));
   r.next = b;
   r.map_state = map_state_;
   r.slabs_done = slabs_done_;

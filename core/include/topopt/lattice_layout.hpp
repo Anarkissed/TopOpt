@@ -20,6 +20,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <functional>
@@ -481,6 +482,9 @@ class StrutTap {
     std::vector<double> width, cell;
     std::vector<std::int32_t> region;
     std::vector<std::uint8_t> flags;
+    // When each was handed over: ms since the lay started (start()), and the slots laid then.
+    std::vector<float> ms;
+    std::vector<std::uint32_t> laid_at;
     // The map: 0 none (not asked, or not made yet), 1 or 2 as map(); `slabs_done`: per z slab of the map's grid, 1 when
     // final (empty: every slab as the state says).
     int map_state = 0;
@@ -500,9 +504,13 @@ class StrutTap {
   Vec3 up_{0, 0, 1}, lo_{}, hi_{};
   std::size_t slots_ = 0, laid_ = 0, missing_ = 0;
   double line_ = -1e300;
+  std::chrono::steady_clock::time_point t0_{};
+  std::atomic<std::size_t> laid_now_{0};   // the laying side's copy of laid_, read when a strut is handed over
   std::vector<double> ab_, width_, cell_;
   std::vector<std::int32_t> region_;
   std::vector<std::uint8_t> flags_;
+  std::vector<float> ms_;
+  std::vector<std::uint32_t> laid_at_;
   std::shared_ptr<const LayoutMap> map_;
   int map_state_ = 0;
   std::vector<std::uint8_t> slabs_done_;
@@ -511,6 +519,8 @@ class StrutTap {
   std::vector<double> b_ab_, b_width_, b_cell_;
   std::vector<std::int32_t> b_region_;
   std::vector<std::uint8_t> b_flags_;
+  std::vector<float> b_ms_;
+  std::vector<std::uint32_t> b_laid_at_;
 };
 
 class Domain {

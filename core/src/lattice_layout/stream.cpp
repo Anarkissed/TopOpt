@@ -7,6 +7,8 @@
 #include <cmath>
 #include <condition_variable>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <mutex>
 #include <thread>
 #include <unordered_map>
@@ -642,6 +644,7 @@ struct StrutStream::Impl {
     }
   }
   void round(const Domain::Probe& probe, std::size_t to, double now) {
+    tap.progress(to, now);   // first: what is handed over in this round was certain with these slots laid
     add_cells(to);
     k5_settle();
     refs();
@@ -660,7 +663,18 @@ struct StrutStream::Impl {
     }
     merge();
     certify(probe, [&](const Vec3& q, const Where& w, bool* sure) { return solid_now(probe, q, w, now, sure); }, 4000);
-    tap.progress(to, now);
+    if (std::getenv("TOPOPT_STREAM_DEBUG")) {   // (diagnosis only)
+      std::size_t done = 0, nobars = 0, fixed = 0, wait = 0;
+      for (const LCell& l : cells) {
+        done += l.state == kDone;
+        nobars += l.state == kNoBars;
+        fixed += l.state == kFixed;
+        wait += l.state == kWait;
+      }
+      std::fprintf(stderr, "stream round: jobs %zu/%zu line %.2f rule %d cells %zu done %zu nobars %zu fixed %zu wait %zu "
+                   "settled-left %zu pending %zu cand %zu handed %zu\n", to, plan->jobs.size(), now, rule ? 1 : 0,
+                   cells.size(), done, nobars, fixed, wait, settled.size(), pending.size(), cand.size(), handed);
+    }
   }
   // A round is due when the line has risen a forty-eighth of the planned height, or a fortieth of the slots are laid.
   std::size_t last = 0;
