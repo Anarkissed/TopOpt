@@ -2436,13 +2436,24 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         }
         return out
     }
-    /// ★ B7 (E3): the Lattice page's area grades saved (`areas` = `ProjectModel.latticeAreaGroups`, in tab order). The
-    /// preview draws ONE grade for the part, so where every area agrees that grade is the part's and no area sends its own
-    /// — the picture is the run. Where they differ, the first area's is the part's and each other area keeps what differs
-    /// (its tab says the preview shows one grade). Under Start from − the part's grade is the rest of the part's: not moved.
-    public mutating func saveAreaGrading(_ edits: [UUID: LatticeAreaGrading], areas: [UUID]) {
+    /// ★ B7 (E3): the Lattice page's area grades saved (`areas` = `ProjectModel.latticeAreaGroups`, in tab order).
+    /// ★ notes30 (his rule, notes29: "It should always be 'Stress & Shape'"): Save never moves an area's grade onto the part.
+    /// The part's grade, band and Strength stay what the Part tab holds (Stress + shape unless he picked another there), and
+    /// each area keeps what differs from them, sent on its own regions (the preview draws each area's own too, since Install
+    /// 2's `LatticeLayoutPreview.areaOwn`). An area gone from the list drops. It was B7's rule: where the areas differed the
+    /// FIRST area's grade became the part's — so one Save turned the part (and every new group after it) to Group 1's grade.
+    /// `firstAreaLeads`: that rule, a test's RED CONTROL only.
+    public mutating func saveAreaGrading(_ edits: [UUID: LatticeAreaGrading], areas: [UUID], firstAreaLeads: Bool = false) {
         var out = edits.filter { areas.contains($0.key) && !$0.value.isEmpty }
-        if !wholePart, let first = areas.first {
+        if !firstAreaLeads {
+            for (g, a) in out {
+                var own = a   // a finish and (Install 2) the Manual controls are the area's own, as set
+                if own.gradingMode == gradingMode { own.gradingMode = nil }
+                if own.shapeFitBandMM == shapeFitBandMM { own.shapeFitBandMM = nil }
+                if own.shapeGradeStrength == shapeFitGradeStrength { own.shapeGradeStrength = nil }
+                out[g] = own.isEmpty ? nil : own
+            }
+        } else if !wholePart, let first = areas.first {
             let partMode = gradingMode, partBand = shapeFitBandMM, partStrength = shapeFitGradeStrength
             let leadMode = out[first]?.gradingMode ?? partMode, leadBand = out[first]?.shapeFitBandMM ?? partBand
             let leadStrength = out[first]?.shapeGradeStrength ?? partStrength

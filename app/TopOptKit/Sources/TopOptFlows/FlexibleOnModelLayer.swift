@@ -12,8 +12,7 @@
 //     a unit kept ≥ 24 pt from the other, each box on the side away from the other handle (FlexibleLatticeHandles.layout); a tap on a
 //     box opens the numeric keypad, a vertical drag scrubs, the disc drags along the prism;
 //   * under [Prisms], every other lattice face-prism's number, read-only — a tap on one picks that face;
-//   * the (i)'s card (his change b — FlexibleFaceStatsPopover): below the chip when the chip's (i) opened it, beside the
-//     list's (i) otherwise (★ the review of R7-D2: it sat on the chip); its numbers are the lattice drawn at that face;
+//   * (the (i)'s card went: ★ notes30, his one (i) — a face's (i) opens the centred notification, FlexibleInfoButton);
 //   * the one message (a Load's "Set its weight on the Squish page", a delete's [Undo]) — above the player when Play is on
 //     (★ the review of R7-D2: it was drawn on the player's own band).
 // ONLY the chip, the discs, the boxes, the numbers and the message take a touch — the layer itself is hit-transparent, so
@@ -104,14 +103,8 @@ public struct FlexibleOnModelLayer: View {
                         }
                 }
                 if let frame, main.prismsOn, !main.attachView, chrome.allowsFaceChip || chrome.open == nil { prismNumbers(scope, frame: frame, origin: origin, viewport: v) }
-                if let info = ui.info {
-                    let fromChip = info.key.hasPrefix("c-")
-                    statsCard(info, origin: origin, viewport: v, chip: fromChip ? chipPlaced?.rect : nil,
-                              // the (i)'s card is passing: it may sit over the face's own handles while open (11" portrait: kept
-                              // off them, it went onto the corner pair), never over the page's panels
-                              keepOut: (frame.map { keepOuts(scope, frame: $0, origin: origin, viewport: v, ownHandles: false) } ?? [])
-                                + (fromChip ? [] : chipPlaced.map { [$0.rect] } ?? []))
-                }
+                // ★ notes30 (his one (i), notes29): a face's (i) opens the centred notification (FlexibleInfoButton); the card
+                // this layer drew beside the (i) went
                 if let t = ui.toast { toast(t, viewport: v, chip: chipPlaced?.rect) }
             }
             .frame(width: v.width, height: v.height, alignment: .topLeading)
@@ -329,7 +322,7 @@ public struct FlexibleOnModelLayer: View {
             .updating($chipGesture) { _, live, _ in live = true }
             .onChanged { d in
                 guard let key = scope.chipKey else { return }
-                if dragAnchor == nil { dragAnchor = placed.origin; ui.info = nil }
+                if dragAnchor == nil { dragAnchor = placed.origin }
                 ui.spots[key] = FlexibleFaceChipLayout.dragged(anchor: dragAnchor ?? placed.origin, translation: d.translation,
                                                                size: placed.size, viewport: v).origin
             }
@@ -529,23 +522,6 @@ public struct FlexibleOnModelLayer: View {
             .position(t.1)
             .accessibilityIdentifier("flexible-prism-number-\(t.0.ref.key)")
         }
-    }
-
-    // MARK: the (i)'s card
-
-    /// ★ the review of R7-D2: the numbers are the lattice drawn at that face (`main.faceStats` — the legend's lattice; #354's
-    /// slab card, handed in as `cards` / `groupCards` by H32, is no longer read here); from the chip's (i) the card goes below
-    /// the chip (`chip`), never on it.
-    private func statsCard(_ info: FlexibleFaceChipState.Info, origin: CGPoint, viewport v: CGSize, chip: CGRect?, keepOut: [CGRect]) -> some View {
-        let rows = main.faceStats(info.ref, group: info.group, project: project)
-        let a = info.anchor.offsetBy(dx: -origin.x, dy: -origin.y)
-        let size = CGSize(width: FlexibleFaceStatsCard.width, height: FlexibleFaceStatsPlacement.estimatedHeight(rows: rows != nil))
-        let r = FlexibleFaceStatsPlacement.frame(anchor: a, chip: chip, size: size, viewport: v, keepOut: keepOut)
-        return FlexibleFaceStatsCard(title: project.flexibleName(info.ref) + " · lattice", rows: rows) { ui.info = nil }
-            .fixedSize()
-            .background(GeometryReader { g in Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["statsCard": g.frame(in: .global)]) }
-                .allowsHitTesting(false))
-            .offset(x: r.minX, y: r.minY)
     }
 
     // MARK: the message

@@ -115,7 +115,8 @@ public enum FlexibleFaceChipLayout {
 }
 
 /// ★ The face chip's live state — its OWN object, so a drag (every frame) never re-runs the workspace's body: the moved
-/// spots (per face, for the session), the keypad slot, the (i), the rename, the role line, the confirms and the toast.
+/// spots (per face, for the session), the keypad slot, the rename, the role line, the confirms and the toast. (★ notes30: the
+/// (i) holds no state here any more — it opens the centred notification, FlexibleInfoButton.)
 /// (★ P2: still Flexible's own — the shared FaceChipState is final and has no `deleted`, the Flexible trash's undo.)
 @MainActor
 public final class FlexibleFaceChipState: ObservableObject {
@@ -123,8 +124,6 @@ public final class FlexibleFaceChipState: ObservableObject {
     @Published public var spots: [String: CGPoint] = [:]
     /// The one keypad slot of the main page's boxes (the chip's, the handles' and the list's).
     @Published public var padTarget: String?
-    /// The (i) open: the ref's key and the global frame of the button it opened from.
-    @Published public var info: Info?
     @Published public var renaming: UUID?
     @Published public var renameDraft = ""
     /// The role line open on chip M.
@@ -158,13 +157,6 @@ public final class FlexibleFaceChipState: ObservableObject {
     var held: LatticeDepthDetent.Candidate?
     var seed: Double?
 
-    public struct Info: Equatable, Sendable {
-        public let key: String
-        public let group: UUID
-        public let ref: LatticeSelectableRef
-        public let anchor: CGRect
-    }
-
     public struct Toast: Equatable, Sendable {
         public let text: String
         public let undo: Bool
@@ -188,7 +180,6 @@ public final class FlexibleFaceChipState: ObservableObject {
 
     /// A new pick (or none): the transient lines close; the moved spots stay.
     func closeTransient() {
-        if info != nil { info = nil }
         if roleOpen != nil { roleOpen = nil }
         if renaming != nil { renaming = nil }
         if deleteAsk != nil { deleteAsk = nil }

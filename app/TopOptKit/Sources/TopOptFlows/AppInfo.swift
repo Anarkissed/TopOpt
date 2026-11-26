@@ -30,7 +30,8 @@ struct AppInfoGlyph: View {
 }
 
 /// The one (i) button: the glyph in a 44 pt target; its tap opens the setting's explanation in the centred notification.
-/// `tap` replaces the notification only where the (i) opens a live card of numbers (the Flexible face's numbers).
+/// `tap` replaces the notification (★ notes30: no page uses it — the Flexible face's numbers, its last user, open the
+/// notification too, FlexibleInfoButton; the unused SelectionsList `InfoButton` still names it).
 struct AppInfoButton: View {
     let title: String
     let text: String
