@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <map>
 #include <set>
+#include <thread>
 #include <tuple>
 #include <chrono>
 #include <cmath>
@@ -184,9 +185,10 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
   Outcome out;
   // notes30: the strut stream (a cube lattice's lay only; Organic hands its vines to the growth tap).
   StrutTap* const tap = settings.stream && strut_tap_ && !strands ? strut_tap_ : nullptr;
-  bool tap_started = false;
+  std::unique_ptr<StrutStream> streamer;   // made once the stress is resolved; it starts the tap when the cells are planned
+  const auto tap_started = [&] { return streamer && streamer->started(); };
   const auto given_up = [&] {
-    if (tap && tap_started) tap->cancel();
+    if (tap && tap_started()) tap->cancel();
     Outcome none;
     none.cancelled = true;
     return none;
@@ -194,11 +196,6 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
   if (stop && stop->load(std::memory_order_relaxed)) return given_up();
   auto t0 = std::chrono::steady_clock::now();
   ready_domain(settings);
-  if (tap) {   // (C1 moves this into lay_cells' plan: its slots and the boxes its passes lay in)
-    const PartMeasure& m = domain_->measure();
-    tap->start(settings.stream_up, m.lo(), m.hi(), 0);
-    tap_started = true;
-  }
   out.read_again = unread_;   // a new domain, or one whose first reading was given up part way
   out.empty_regions = empty_regions_;
   // The domain watches the flag for this lay only (the flag need not outlive the call).
@@ -262,7 +259,26 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
     out.cells_no_stress = cells_want && (!cells.demand || cells.demand->empty() || !(cells.reference_mpa > 0.0));
     out.stress_reference_mpa = reference;
     out.step_held_at = step_held(cells);   // C24
-    out.layout = lay_cells(*domain_, cells, threads, own_or_none);
+    // notes30: the struts as set_struts will read them (By stress: the field, the resolved reference, the response).
+    StrutSpec struts = settings.struts;
+    if (stress.demand) {
+      struts.demand = stress.demand;
+      struts.response = stress.response;
+      struts.reference_mpa = reference;
+    }
+    if (tap) {
+      Vec3 up = settings.stream_up;
+      const double n = std::sqrt(up.x * up.x + up.y * up.y + up.z * up.z);
+      up = n > 1e-9 && std::isfinite(n) ? Vec3{up.x / n, up.y / n, up.z / n} : Vec3{0.0, 0.0, 1.0};
+      streamer = std::make_unique<StrutStream>(*tap, *domain_, up, struts, own_or_none, threads);
+    }
+    if (settings.map.on() && (stream_control() & kStreamControlMapEarly)) {   // T7's RED: before the cells are laid
+      const Layout none;
+      out.map = make_layout_map(none, *domain_, settings.map, threads, stop);
+      if (!out.map) throw LayCancelled{};
+    }
+    // notes30 C1: with the stream on, the base cells are laid lowest first and watched (the same layout, D18).
+    out.layout = lay_cells(*domain_, cells, threads, own_or_none, streamer.get());
     // K3's quilt fallback (his 11-23 notes: a Lattice region that laid no cell at all was laid again with the quilt's
     // smallest cell) is withdrawn by his notes on release 20 (2026-11-25: "even with quilting off", "limit both when
     // 'Allow quilt' is turned off"): with Allow quilt off such a region stays solid, and the layout says why (its solid
@@ -274,15 +290,10 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
         for (const Strand& s : *strands)
           if (s.region == w.region && s.spacing_mm > 0.0)
             w.spacing_mm = w.spacing_mm > 0.0 ? std::min(w.spacing_mm, s.spacing_mm) : s.spacing_mm;
-    StrutSpec struts = settings.struts;
-    if (stress.demand) {
-      // By stress reads the field, the RESOLVED reference (the one the cells were laid with) and the response.
-      struts.demand = stress.demand;
-      struts.response = stress.response;
-      struts.reference_mpa = reference;
-    }
+    // (By stress reads the field, the RESOLVED reference -- the one the cells were laid with -- and the response: `struts`
+    // above.)
     out.struts = set_struts(out.layout, struts, own_or_none);
-    if (tap) tap->phase(StrutTap::kBars);
+    if (tap && tap_started()) tap->phase(StrutTap::kBars);
     const double laid = ms_since(t0);
     (out.read_again ? out.ms_read : out.ms_cells) = laid;
     last_cells_.regions = out.layout.regions;   // D23: what Session::places reads of this layout
@@ -290,6 +301,20 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
       t0 = std::chrono::steady_clock::now();
       domain_->check_stop();
       out.thin_solid = solidify_thin_cuts(out.layout, *domain_, threads);   // P8 (f): before any bar is laid
+      // notes30 C4: the solid view's map, made beside the bars: from here on nothing changes the layout's cells but the
+      // ones solidify_empty_cells closes at the very end (then it is made again: none on the fixtures). The bars' steps
+      // only read the layout. Joined before that step, and on the way out of any.
+      struct MapJob {
+        std::thread th;
+        std::shared_ptr<LayoutMap> map;
+        void join() { if (th.joinable()) th.join(); }
+        ~MapJob() { join(); }
+      } mapjob;
+      if (settings.map.on() && !out.map)
+        mapjob.th = std::thread([&] {
+          mapjob.map = make_layout_map(out.layout, *domain_, settings.map, threads, stop);
+          if (mapjob.map && tap && tap_started()) tap->map(mapjob.map, 1);
+        });
       out.bars = lay_bars(out.layout, *domain_, threads);
       if (strands) {   // O2: the weave's bars, cut at their crossings, after the cells'
         Bars weave = weave_bars(*domain_, *strands, threads);
@@ -369,7 +394,10 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
         }
       std::vector<std::pair<Vec3, Vec3>> held_at;   // the held ends, by place (the drop renumbers bars)
       for (const auto& [i, e] : held_surface) held_at.push_back({e ? out.bars.bars[i].b : out.bars.bars[i].a, e ? out.bars.bars[i].a : out.bars.bars[i].b});
-      if (tap) tap->phase(StrutTap::kPieces);
+      if (streamer) {   // notes30 stage 2: every whole strut the drop and the adrift test cannot take, before they run
+        streamer->bars_laid(out.bars, out.layout);
+        tap->phase(StrutTap::kPieces);
+      }
       if (settings.drop_loose && !draft) {
         drop_loose_bars(out.bars, finish && !finish->arrived.empty() ? &finish->arrived : nullptr);   // G11
         out.stepped_edges = stepped_edges(out.bars);
@@ -382,6 +410,7 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
         // ★ notes29 ("the solid outline isn't even, there is a chunk cut out of it on either side"): a cell left with no
         // strut of its own (a cut cell at the part's edge whose pieces were all too short or left hanging) is opened
         // space in the file with nothing printed in it: a hole, or a notch in the outline. It is solid (D14).
+        mapjob.join();   // notes30 C4: the map read the cells as they stood until now
         if (!strands) out.empty_solid = solidify_empty_cells(out.layout, out.bars);
         if (out.empty_solid > 0) last_cells_.regions = out.layout.regions;   // D23 reads the counts as they now are
         if (finish && !finish->prune.empty()) prune_weave(out.bars, finish->prune);   // J2, where the dropping ends
@@ -436,10 +465,14 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
           out.net_mm += std::sqrt((b.b.x - b.a.x) * (b.b.x - b.a.x) + (b.b.y - b.a.y) * (b.b.y - b.a.y) +
                                   (b.b.z - b.a.z) * (b.b.z - b.a.z));
         }
+      mapjob.join();
+      if (mapjob.map) out.map = mapjob.map;
+      if (out.map && out.empty_solid > 0 && !(stream_control() & kStreamControlMapEarly))
+        out.map.reset();   // cells closed after it was made: made again below
       out.ms_bars = ms_since(t0);
     }
     // notes30 C4: the solid view's map for this lay (Settings::map), made here so the app need not ask for it after.
-    if (settings.map.on()) {
+    if (settings.map.on() && !out.map) {
       out.map = make_layout_map(out.layout, *domain_, settings.map, threads, stop);
       if (!out.map) throw LayCancelled{};
     }
@@ -447,10 +480,10 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
   } catch (const LayCancelled&) {
     return given_up();
   } catch (...) {
-    if (tap && tap_started) tap->cancel();   // nothing more of this lay comes
+    if (tap && tap_started()) tap->cancel();   // nothing more of this lay comes
     throw;
   }
-  if (tap) {   // the lay is whole: what was handed over is checked against it, bar by bar
+  if (tap && tap_started()) {   // the lay is whole: what was handed over is checked against it, bar by bar
     if (out.map) tap->map(out.map, 2);
     tap->land(out.bars);
     const StrutTap::Read r = tap->read(0, 1);
@@ -517,6 +550,10 @@ GrowthTap::Read GrowthTap::read(std::size_t from, std::size_t most) const {
 void StrutTap::start(const Vec3& up, const Vec3& lo, const Vec3& hi, std::size_t slots) {
   std::lock_guard<std::mutex> lock(m_);
   ++lay_;
+  if (stream_control() & kStreamControlNoRestart) {   // T5's RED: the last lay's struts kept
+    phase_ = kCells;
+    return;
+  }
   phase_ = kCells;
   up_ = up;
   lo_ = lo;

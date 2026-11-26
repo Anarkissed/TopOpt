@@ -9,23 +9,31 @@
 #include <string>
 
 #include "topopt/stepped_plan.hpp"  // kSteppedPrintsOpenMaxStrutPerCell
+#include "stream.hpp"                // notes30 C2: StrutRule
 
 namespace topopt::lattice_layout {
 
-StrutReport set_struts(Layout& layout, const StrutSpec& spec, const AreaOwnMap* own) {
-  StrutReport rep;
-  const double line = layout.bead_mm;
+// notes30 C2: set_struts' rule, made once from the layout's limits, the settings and the largest cells (of the part, of
+// each region), and read cell by cell: set_struts sets every cell with it, and the strut stream asks it for a cell it
+// hands over before the layout is whole (the same rule, the same numbers, once its largest cells are known).
+StrutRule::StrutRule(const Layout& layout, const StrutSpec& spec_in, const AreaOwnMap* own, double part_ref_in,
+                     const std::map<int, double>& region_ref, StrutReport* report)
+    : spec(spec_in), part_ref(part_ref_in) {
+  StrutReport scratch;
+  StrutReport& rep = report ? *report : scratch;
+  line = layout.bead_mm;
   // R5: the thinnest strut. Two line widths (his print, 2026-11-11), never under one.
-  const double bead = std::max(line, layout.min_strut_mm);
+  bead = std::max(line, layout.min_strut_mm);
   // R2: the widest strut is the type's open look; its quilt only with Allow quilt. (A layout
   // made before the type's limits were kept reads them here.)
-  double open_look = layout.open_look, touch = layout.touch;
+  open_look = layout.open_look;
+  touch = layout.touch;
   if (!(open_look > 0.0) || !(touch > 0.0)) {
     const LatticeWidthBounds bounds = lattice_width_bounds(layout.topology);
     open_look = bounds.open_look;
     touch = bounds.touch;
   }
-  const double ceiling = spec.allow_quilt ? touch : open_look;   // Allow quilt is the part's only (R19)
+  ceiling = spec.allow_quilt ? touch : open_look;   // Allow quilt is the part's only (R19)
   // ★ notes29b (his notes on release 20, 2026-11-25: "limit both when 'Allow quilt' is turned off", at the EXACT point each
   // type becomes a quilt): `ceiling` is what the lattice lays on its own (the dial's 1, the band's aim): the open look with
   // Allow quilt off, as before. The LIMIT is the quilt's: with Allow quilt off no strut is at or past the touch, it stops
@@ -33,17 +41,7 @@ StrutReport set_struts(Layout& layout, const StrutSpec& spec, const AreaOwnMap* 
   // touch itself. Only an ask past the open look (a dial past 1, a typed strut, the ends in mm, the thinnest strut in a
   // thin wall's small cell) reaches it. The open look itself always stands (it is under every type's touch): with a
   // one-line strut on the smallest open cells it is the wider of the two, and is kept, as before.
-  const double gap = spec.allow_quilt ? 0.0 : kQuiltOffGapLines * line;
-  const auto widest = [&](double cell) { return std::max({bead, touch * cell - gap, ceiling * cell}); };
-
-  // The dial is read on the largest cell: of the part (Uniform), or of each region.
-  double part_ref = 0.0;
-  std::map<int, double> region_ref;
-  for (const Cell& c : layout.cells) {
-    part_ref = std::max(part_ref, c.size);
-    double& r = region_ref[c.region];
-    r = std::max(r, c.size);
-  }
+  gap = spec.allow_quilt ? 0.0 : kQuiltOffGapLines * line;
   // R10: 1% is one line, 100% is the widest allowed, even steps of width between. ★ notes29b: with Allow quilt off 1 is the
   // open look, as before, and a dial past 1 goes on in the same steps of width past it, up to the limit (the app's Density
   // percent past the open look); with it on, 1 is the touch and nothing is past it.
@@ -53,15 +51,6 @@ StrutReport set_struts(Layout& layout, const StrutSpec& spec, const AreaOwnMap* 
     return std::min(lo + t * (hi - lo), std::max(hi, widest(ref))) / ref;
   };
 
-  // What one region's cells are set by (R19): the part's settings, with the region's stated values over them.
-  struct Rule {
-    bool by_stress = false, in_mm = false, graded = false;
-    double ratio = 0.0;                     // not by stress: strut / cell
-    double width_mm = 0.0;                  // R11
-    double r_light = 0.0, r_heavy = 0.0, w_light = 0.0, w_heavy = 0.0;
-    double reference = 0.0, response = 1.0;
-    double amount = 1.0;                    // G4
-  };
   const auto rule_for = [&](int id, double ref_here, const AreaOwn* o) {
     Rule u;
     const auto pick = [&](const std::optional<double>& v, double part) { return o && v ? *v : part; };
@@ -111,7 +100,6 @@ StrutReport set_struts(Layout& layout, const StrutSpec& spec, const AreaOwnMap* 
     rep.no_stress = !(spec.demand && !spec.demand->empty() && spec.reference_mpa > 0.0);
     rep.reference_mpa = spec.reference_mpa > 0.0 ? spec.reference_mpa : 0.0;
   }
-  std::map<int, Rule> rules;
   for (const auto& [id, ref] : region_ref) {
     const AreaOwn* o = nullptr;
     if (own) {
@@ -121,82 +109,101 @@ StrutReport set_struts(Layout& layout, const StrutSpec& spec, const AreaOwnMap* 
     rules[id] = rule_for(id, ref, o);
   }
 
-  // A cell's place between the two ends, 0 .. 1: its stress over the reference, to the response.
-  const auto stress_t = [&](const Cell& c, const Rule& u) {
-    if (!u.graded) { ++rep.at_light; return 0.0; }
-    const Frame& fr = layout.frames.at(static_cast<std::size_t>(c.frame));
-    Vec3 lo{0, 0, 0}, hi{0, 0, 0};
-    bool first = true;
-    for (int corner = 0; corner < 8; ++corner) {
-      const Vec3 p = fr.at(c.lo[0] + ((corner & 1) ? c.size : 0.0), c.lo[1] + ((corner & 2) ? c.size : 0.0),
-                           c.lo[2] + ((corner & 4) ? c.size : 0.0));
-      if (first) { lo = hi = p; first = false; continue; }
-      lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-      hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
-    }
-    const double d = spec.demand->highest_in(lo, hi);
-    rep.highest_mpa = std::max(rep.highest_mpa, d);
-    const double f = std::clamp(d / u.reference, 0.0, 1.0);
-    if (f == 0.0) ++rep.at_light;
-    if (f == 1.0) ++rep.at_heavy;
-    return std::pow(f, u.response);
-  };
+}
 
-  constexpr double kCoarseCellBandRaise = 0.35;   // the run's own share (grading.cpp)
-  for (Cell& c : layout.cells) {
-    const Rule& u = rules[c.region];
-    // By stress: this cell's strut / cell (dials) or its width in mm, before any limit.
-    double stress_ratio = 0.0, stress_mm = 0.0;
-    if (u.by_stress) {
-      const double t = stress_t(c, u);
-      if (u.in_mm) stress_mm = u.w_light + t * (u.w_heavy - u.w_light);
-      else stress_ratio = u.r_light + t * (u.r_heavy - u.r_light);
-    }
-    if (c.band < 1.0 && (u.by_stress || u.width_mm <= 0.0)) {
-      // Inside a Grade to shape band (G8, G4; the run's band law, in width). The strut
-      // keeps the width it has on the region's own cell while the cell shrinks, then is
-      // raised toward the widest strut allowed by (1 - t) x share x amount, and to whole
-      // lines. The widest allowed is the open look; the quilt only with Allow quilt (R2,
-      // his rule of 2026-11-12: without it the band thickens but never quilts).
-      // By stress, it starts from the cell's own by-stress width (G8: the band only raises).
-      const double ratio = u.by_stress ? stress_ratio : u.ratio;
-      const double own_cell = c.own > 0.0 ? c.own : c.size;
-      const double q = std::max(bead, ceiling * c.size);
-      const bool in_mm = u.by_stress && u.in_mm;
-      const double asked = in_mm ? stress_mm : ratio * own_cell;
-      // ★ notes29b: asked past the open look on purpose (a dial past 1: its ratio is past it; the ends in mm: past it on
-      // this cell, as out of the band): the strut keeps that width while the cell shrinks, to whole lines, never past the
-      // limit, and the band does not raise it further. At or under the open look: as before (the band's own thickening of
-      // a strut kept while its cell shrinks still stops at the open look).
-      const bool past = !spec.allow_quilt && (in_mm ? stress_mm > std::max(bead, ceiling * c.size) * (1.0 + 1e-12)
-                                                    : ratio > ceiling * (1.0 + 1e-12));
-      if (past) {
-        const double most = widest(c.size);
-        double w = std::clamp(asked, bead, most);
-        w = std::min(most, std::ceil(w / line - 1e-9) * line);
-        if (asked > most * (1.0 + 1e-12)) ++rep.at_ceiling;
-        c.strut = std::max(bead, w);
-        continue;
-      }
-      double w = std::clamp(asked, bead, q);
-      const double share = c.finest ? 1.0 : kCoarseCellBandRaise;
-      w = std::max(w, std::min(q, w + (q - w) * (1.0 - c.band) * share * u.amount));
-      w = std::min(q, std::ceil(w / line - 1e-9) * line);   // to whole lines
-      c.strut = std::max(bead, w);
-      continue;
-    }
-    double want = 0.0;
-    if (u.by_stress) want = u.in_mm ? stress_mm : stress_ratio * c.size;   // R12, R16
-    else if (u.width_mm > 0.0) want = u.width_mm;                         // R11
-    else want = u.ratio * c.size;                                         // R6
-    // R2: the widest strut allowed, in a band as anywhere else. ★ notes29b: with Allow quilt off, one printed line short of
-    // the touch (it was the open look: an ask past it was held there); with it on, the touch, as before.
-    const double top = widest(c.size);
-    double w = want;
-    if (w < bead * (1.0 - 1e-12)) { w = bead; ++rep.at_bead; }           // R5
-    else if (w > top * (1.0 + 1e-12)) { w = top; ++rep.at_ceiling; }     // R2, R9
-    c.strut = std::clamp(w, bead, top);
+double StrutRule::widest(double cell) const { return std::max({bead, touch * cell - gap, ceiling * cell}); }
+
+// A cell's place between the two ends, 0 .. 1: its stress over the reference, to the response.
+double StrutRule::stress_t(const Cell& c, const Rule& u, const std::vector<Frame>& frames, StrutReport& rep) const {
+  if (!u.graded) { ++rep.at_light; return 0.0; }
+  const Frame& fr = frames.at(static_cast<std::size_t>(c.frame));
+  Vec3 lo{0, 0, 0}, hi{0, 0, 0};
+  bool first = true;
+  for (int corner = 0; corner < 8; ++corner) {
+    const Vec3 p = fr.at(c.lo[0] + ((corner & 1) ? c.size : 0.0), c.lo[1] + ((corner & 2) ? c.size : 0.0),
+                         c.lo[2] + ((corner & 4) ? c.size : 0.0));
+    if (first) { lo = hi = p; first = false; continue; }
+    lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
+    hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
   }
+  const double d = spec.demand->highest_in(lo, hi);
+  rep.highest_mpa = std::max(rep.highest_mpa, d);
+  const double f = std::clamp(d / u.reference, 0.0, 1.0);
+  if (f == 0.0) ++rep.at_light;
+  if (f == 1.0) ++rep.at_heavy;
+  return std::pow(f, u.response);
+}
+
+bool StrutRule::knows(int region) const { return rules.count(region) > 0; }
+
+double StrutRule::width(const Cell& c, const std::vector<Frame>& frames, StrutReport* report) const {
+  StrutReport scratch;
+  StrutReport& rep = report ? *report : scratch;
+  constexpr double kCoarseCellBandRaise = 0.35;   // the run's own share (grading.cpp)
+  const Rule& u = rules.at(c.region);
+  // By stress: this cell's strut / cell (dials) or its width in mm, before any limit.
+  double stress_ratio = 0.0, stress_mm = 0.0;
+  if (u.by_stress) {
+    const double t = stress_t(c, u, frames, rep);
+    if (u.in_mm) stress_mm = u.w_light + t * (u.w_heavy - u.w_light);
+    else stress_ratio = u.r_light + t * (u.r_heavy - u.r_light);
+  }
+  if (c.band < 1.0 && (u.by_stress || u.width_mm <= 0.0)) {
+    // Inside a Grade to shape band (G8, G4; the run's band law, in width). The strut
+    // keeps the width it has on the region's own cell while the cell shrinks, then is
+    // raised toward the widest strut allowed by (1 - t) x share x amount, and to whole
+    // lines. The widest allowed is the open look; the quilt only with Allow quilt (R2,
+    // his rule of 2026-11-12: without it the band thickens but never quilts).
+    // By stress, it starts from the cell's own by-stress width (G8: the band only raises).
+    const double ratio = u.by_stress ? stress_ratio : u.ratio;
+    const double own_cell = c.own > 0.0 ? c.own : c.size;
+    const double q = std::max(bead, ceiling * c.size);
+    const bool in_mm = u.by_stress && u.in_mm;
+    const double asked = in_mm ? stress_mm : ratio * own_cell;
+    // ★ notes29b: asked past the open look on purpose (a dial past 1: its ratio is past it; the ends in mm: past it on
+    // this cell, as out of the band): the strut keeps that width while the cell shrinks, to whole lines, never past the
+    // limit, and the band does not raise it further. At or under the open look: as before (the band's own thickening of
+    // a strut kept while its cell shrinks still stops at the open look).
+    const bool past = !spec.allow_quilt && (in_mm ? stress_mm > std::max(bead, ceiling * c.size) * (1.0 + 1e-12)
+                                                  : ratio > ceiling * (1.0 + 1e-12));
+    if (past) {
+      const double most = widest(c.size);
+      double w = std::clamp(asked, bead, most);
+      w = std::min(most, std::ceil(w / line - 1e-9) * line);
+      if (asked > most * (1.0 + 1e-12)) ++rep.at_ceiling;
+      return std::max(bead, w);
+    }
+    double w = std::clamp(asked, bead, q);
+    const double share = c.finest ? 1.0 : kCoarseCellBandRaise;
+    w = std::max(w, std::min(q, w + (q - w) * (1.0 - c.band) * share * u.amount));
+    w = std::min(q, std::ceil(w / line - 1e-9) * line);   // to whole lines
+    return std::max(bead, w);
+  }
+  double want = 0.0;
+  if (u.by_stress) want = u.in_mm ? stress_mm : stress_ratio * c.size;   // R12, R16
+  else if (u.width_mm > 0.0) want = u.width_mm;                         // R11
+  else want = u.ratio * c.size;                                         // R6
+  // R2: the widest strut allowed, in a band as anywhere else. ★ notes29b: with Allow quilt off, one printed line short of
+  // the touch (it was the open look: an ask past it was held there); with it on, the touch, as before.
+  const double top = widest(c.size);
+  double w = want;
+  if (w < bead * (1.0 - 1e-12)) { w = bead; ++rep.at_bead; }           // R5
+  else if (w > top * (1.0 + 1e-12)) { w = top; ++rep.at_ceiling; }     // R2, R9
+  return std::clamp(w, bead, top);
+}
+
+StrutReport set_struts(Layout& layout, const StrutSpec& spec, const AreaOwnMap* own) {
+  StrutReport rep;
+  // The dial is read on the largest cell: of the part (Uniform), or of each region.
+  double part_ref = 0.0;
+  std::map<int, double> region_ref;
+  for (const Cell& c : layout.cells) {
+    part_ref = std::max(part_ref, c.size);
+    double& r = region_ref[c.region];
+    r = std::max(r, c.size);
+  }
+  const StrutRule rule(layout, spec, own, part_ref, region_ref, &rep);
+  for (Cell& c : layout.cells) c.strut = rule.width(c, layout.frames, &rep);
   return rep;
 }
 

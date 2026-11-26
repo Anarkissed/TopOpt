@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <deque>
 #include <functional>
 #include <map>
 #include <memory>
@@ -18,6 +19,7 @@
 
 #include "topopt/stepped_plan.hpp"  // stepped_size_menu, kSteppedPrintsOpenMaxStrutPerCell
 #include "topopt/strut_cell.hpp"    // K8: the type's struts, so a stretch never lays one flatter
+#include "stream.hpp"                // notes30 C1: the plan a watch sees (CellPlan, CellWatch)
 
 namespace topopt::lattice_layout {
 
@@ -150,6 +152,10 @@ bool takes_in(const Layout& layout, const Domain::Probe& probe, std::size_t cell
   return first == static_cast<long>(cell);
 }
 }  // namespace
+
+bool cell_owns_at(const Layout& layout, const Domain::Probe& probe, const Cell& cell, const double q[3], bool* other) {
+  return own(layout, probe, cell, q, other);
+}
 
 bool cell_holds_at(const Layout& layout, const Domain::Probe& probe, std::size_t cell, double a, double b, double c) {
   const Cell& x = layout.cells[cell];
@@ -1438,6 +1444,16 @@ CellSpec held_for_type(CellSpec cs) {
 }  // namespace
 
 Layout lay_cells(const Domain& domain, const CellSpec& asked, int threads, const AreaOwnMap* own) {
+  return lay_cells(domain, asked, threads, own, nullptr);
+}
+
+// notes30 C1: PLAN (every pass in today's order: frames, walls, the faces read, the K7 search, the tallies, each lay's
+// slot grid; nothing laid), EXECUTE (one job per base slot of every lay, in one pool of threads: in plan order, or with a
+// watch lowest first along its up; each slot's cells kept with its lay) and ASSEMBLE (the lays in plan order, each one's
+// slots in slot order: what lay() put in the layout one lay after another; C24's rounds where its group stood). `place`
+// is pure per slot, so the layout is the one the lays made one after another, for any number of threads and any order
+// of the slots (D18).
+Layout lay_cells(const Domain& domain, const CellSpec& asked, int threads, const AreaOwnMap* own, CellWatch* watch) {
   const CellSpec spec = held_for_type(asked);
   Layout out;
   const int thread_count =
@@ -1487,7 +1503,9 @@ Layout lay_cells(const Domain& domain, const CellSpec& asked, int threads, const
     Pass pass;
     double base = 0.0, start[3] = {0, 0, 0};
     int count[3] = {0, 0, 0};
-    struct Piece { std::vector<Cell> cells, solid; std::vector<SolidWhy> why; };
+    std::size_t tally = 0;                // notes30 C1: its region's entry of out.regions (an index: that list grows)
+    bool steps = false;                   // C24: one of a size-step group's lays
+    using Piece = SlotCells;
     std::vector<Piece> pieces;            // per base cell, in the order one thread lays them
     std::vector<std::vector<Cap>> caps;   // per base cell
     void slot(std::size_t i, double q[3]) const {
@@ -1496,9 +1514,24 @@ Layout lay_cells(const Domain& domain, const CellSpec& asked, int threads, const
       q[0] = start[0] + a * base; q[1] = start[1] + b * base; q[2] = start[2] + c * base;
     }
   };
+  using Lays = std::vector<Laid*>;
+  // notes30 C1: the plan's lays (stable places: the jobs and the watch point at them), C24's groups, the wall maps the
+  // passes read while they are laid, and what ASSEMBLE puts in the layout, in plan order: a lay, or a size-step group.
+  std::deque<Laid> laids;
+  struct Group {
+    Lays lays;
+    double limit = 0.0;
+  };
+  std::deque<Group> groups;
+  std::deque<WallMap> wallmaps;
+  struct Item {
+    Laid* laid = nullptr;
+    Group* group = nullptr;
+  };
+  std::vector<Item> items;
   // Lay the base cells `jobs` ({lay, base cell}, sorted) of `lays` again, each with its own caps; shared between
   // threads, each base cell on its own, so the result is the same for any number of threads (D18).
-  auto lay_slots = [&](std::vector<Laid>& lays, const std::vector<std::array<std::size_t, 2>>& jobs) {
+  auto lay_slots = [&](Lays& lays, const std::vector<std::array<std::size_t, 2>>& jobs) {
     const int nt = static_cast<int>(std::min<std::size_t>(static_cast<std::size_t>(thread_count), jobs.size()));
     std::atomic<std::size_t> next{0};
     auto work = [&](int who) {
@@ -1511,7 +1544,7 @@ Layout lay_cells(const Domain& domain, const CellSpec& asked, int threads, const
       std::size_t at = static_cast<std::size_t>(-1);
       Pass p;
       for (std::size_t i = next.fetch_add(1); i < jobs.size() && !domain.stop_asked(); i = next.fetch_add(1)) {
-        Laid& L = lays[jobs[i][0]];
+        Laid& L = *lays[jobs[i][0]];
         const std::size_t k = jobs[i][1];
         if (jobs[i][0] != at) {
           at = jobs[i][0];
@@ -1547,20 +1580,20 @@ Layout lay_cells(const Domain& domain, const CellSpec& asked, int threads, const
   // Why it ends: a cap is only ever added, or lowered on its own box, never raised or removed, and a round that adds or
   // lowers none is the last. The boxes are cubes of cells laid in that base cell (places on its ladder's own grid)
   // and the caps are `limit` times a cell size: both finite sets, so only finitely many rounds can add one.
-  auto keep_steps = [&](std::vector<Laid>& lays, double limit) {
+  auto keep_steps = [&](Lays& lays, double limit) {
     const double tol = 1e-6;
     struct Ref { std::size_t lay, slot, idx; };
     for (;;) {
       std::vector<Ref> refs;
       double big_mm = 0.0;
       for (std::size_t li = 0; li < lays.size(); ++li)
-        for (std::size_t k = 0; k < lays[li].pieces.size(); ++k)
-          for (std::size_t j = 0; j < lays[li].pieces[k].cells.size(); ++j) {
+        for (std::size_t k = 0; k < lays[li]->pieces.size(); ++k)
+          for (std::size_t j = 0; j < lays[li]->pieces[k].cells.size(); ++j) {
             refs.push_back({li, k, j});
-            big_mm = std::max(big_mm, lays[li].pieces[k].cells[j].size);
+            big_mm = std::max(big_mm, lays[li]->pieces[k].cells[j].size);
           }
       if (refs.size() < 2) break;
-      const auto cell_of = [&](const Ref& r) -> const Cell& { return lays[r.lay].pieces[r.slot].cells[r.idx]; };
+      const auto cell_of = [&](const Ref& r) -> const Cell& { return lays[r.lay]->pieces[r.slot].cells[r.idx]; };
       // The cells sorted by their low corner into a grid of the largest cell's pitch: the low corners of two cells that
       // share a face are at most that far apart, so they lie in the same bucket or in neighbouring ones.
       struct Key {
@@ -1626,7 +1659,7 @@ Layout lay_cells(const Domain& domain, const CellSpec& asked, int threads, const
       };
       std::vector<std::array<std::size_t, 2>> jobs;
       for (const auto& w : want) {
-        Laid& L = lays[w.first[0]];
+        Laid& L = *lays[w.first[0]];
         if (cap(L.caps[w.first[1]], L.pieces[w.first[1]].cells[w.first[2]], w.second) &&
             (jobs.empty() || jobs.back()[0] != w.first[0] || jobs.back()[1] != w.first[1]))
           jobs.push_back({w.first[0], w.first[1]});
@@ -1634,27 +1667,27 @@ Layout lay_cells(const Domain& domain, const CellSpec& asked, int threads, const
       // Laid again, no cell of the base cell may come out larger than the cell that held its place before (a Stepped
       // base cell is packed again and could take another family): every other cell of it is capped at its own size.
       for (const auto& j : jobs) {
-        Laid& L = lays[j[0]];
+        Laid& L = *lays[j[0]];
         for (const Cell& c : L.pieces[j[1]].cells)
           cap(L.caps[j[1]], c, c.size);
       }
       if (jobs.empty()) break;
       lay_slots(lays, jobs);
     }
-    for (Laid& L : lays)
-      for (const Laid::Piece& piece : L.pieces) {
+    for (Laid* L : lays)
+      for (const Laid::Piece& piece : L->pieces) {
         out.cells.insert(out.cells.end(), piece.cells.begin(), piece.cells.end());
         out.solid.insert(out.solid.end(), piece.solid.begin(), piece.solid.end());
         out.solid_why.insert(out.solid_why.end(), piece.why.begin(), piece.why.end());
-        L.pass.tally->cells += piece.cells.size();
-        L.pass.tally->solid += piece.solid.size();
+        out.regions[L->tally].cells += piece.cells.size();
+        out.regions[L->tally].solid += piece.solid.size();
       }
   };
 
   // Lay one pass over the box [lo, hi] of its frame, in slots of `base`. With `keep` (C24) the base cells are kept
   // in it, one by one, and not put in the layout.
   auto lay = [&](Pass& pass, double base, const double lo[3], const double hi[3],
-                 bool depth_from_zero, std::vector<Laid>* keep = nullptr) {
+                 bool depth_from_zero, Lays* keep = nullptr) {
     const CellSpec& spec = *pass.spec;   // the pass's own (C23)
     // G11: a band is a size gradient down to the smallest cell allowed (the floor above).
     // A typed smallest cell for the band (Manual) is held at that floor.
@@ -1704,77 +1737,21 @@ Layout lay_cells(const Domain& domain, const CellSpec& asked, int threads, const
       start[2] = lo[2];
       count[2] = std::max(1, static_cast<int>(std::llround((hi[2] - lo[2]) / base)));
     }
-    // Each base cell is laid on its own, so they are shared between threads and put
-    // back in the order one thread would have laid them: the layout is the same for any
-    // number of threads (D18). A probe serves one thread, so each takes its own.
+    // notes30 C1: PLAN only. The lay is kept with its slot grid; its slots are laid with every other lay's (EXECUTE,
+    // below) and its cells put in the layout in this order (ASSEMBLE), each base cell on its own: the layout is the same
+    // for any number of threads and any order of the slots (D18).
     const std::size_t total = static_cast<std::size_t>(count[0]) * count[1] * count[2];
-    if (keep) {   // C24: kept base cell by base cell (keep_steps puts them in the layout)
-      keep->emplace_back();
-      Laid& L = keep->back();
-      L.pass = pass;
-      L.base = base;
-      for (int a = 0; a < 3; ++a) { L.start[a] = start[a]; L.count[a] = count[a]; }
-      L.pieces.resize(total);
-      L.caps.resize(total);
-      std::vector<std::array<std::size_t, 2>> jobs(total);
-      for (std::size_t i = 0; i < total; ++i) jobs[i] = {keep->size() - 1, i};
-      lay_slots(*keep, jobs);
-      return;
-    }
-    auto slot = [&](std::size_t i, double q[3]) {
-      const std::size_t a = i % count[0], b = (i / count[0]) % count[1], c = i / (static_cast<std::size_t>(count[0]) * count[1]);
-      q[0] = start[0] + a * base; q[1] = start[1] + b * base; q[2] = start[2] + c * base;
-    };
-    const int nt = static_cast<int>(std::min<std::size_t>(static_cast<std::size_t>(thread_count), total));
-    if (nt <= 1) {
-      for (std::size_t i = 0; i < total; ++i) {
-        domain.check_stop();
-        double q[3];
-        slot(i, q);
-        pass.columns.clear();
-        pass.place(q, base);
-      }
-      return;
-    }
-    struct Piece { std::vector<Cell> cells, solid; std::vector<SolidWhy> why; };
-    std::vector<Piece> pieces(total);
-    std::atomic<std::size_t> next{0};
-    auto work = [&](int who) {
-      if (who > 0 && !spare[static_cast<std::size_t>(who)])
-        spare[static_cast<std::size_t>(who)] = std::make_unique<Domain::Probe>(domain.probe());
-      const Domain::Probe& mine = who > 0 ? *spare[static_cast<std::size_t>(who)] : probe;
-      Layout local;
-      local.floor_cell_mm = out.floor_cell_mm;
-      RegionCells count_here;
-      Pass p = pass;
-      p.probe = &mine;
-      p.out = &local;
-      p.tally = &count_here;
-      for (std::size_t i = next.fetch_add(1); i < total && !domain.stop_asked(); i = next.fetch_add(1)) {
-        double q[3];
-        slot(i, q);
-        p.columns.clear();
-        p.place(q, base);
-        pieces[i].cells.swap(local.cells);
-        pieces[i].solid.swap(local.solid);
-        pieces[i].why.swap(local.solid_why);
-        local.cells.clear();
-        local.solid.clear();
-        local.solid_why.clear();
-      }
-    };
-    std::vector<std::thread> pool;
-    for (int t = 1; t < nt; ++t) pool.emplace_back(work, t);
-    work(0);
-    for (std::thread& t : pool) t.join();
-    domain.check_stop();   // base cells left unlaid
-    for (const Piece& piece : pieces) {
-      out.cells.insert(out.cells.end(), piece.cells.begin(), piece.cells.end());
-      out.solid.insert(out.solid.end(), piece.solid.begin(), piece.solid.end());
-      out.solid_why.insert(out.solid_why.end(), piece.why.begin(), piece.why.end());
-      pass.tally->cells += piece.cells.size();
-      pass.tally->solid += piece.solid.size();
-    }
+    laids.emplace_back();
+    Laid& L = laids.back();
+    L.pass = pass;
+    L.base = base;
+    for (int a = 0; a < 3; ++a) { L.start[a] = start[a]; L.count[a] = count[a]; }
+    L.tally = static_cast<std::size_t>(pass.tally - out.regions.data());
+    L.steps = keep != nullptr;
+    L.pieces.resize(total);
+    L.caps.resize(total);
+    if (keep) keep->push_back(&L);   // C24: keep_steps puts them in the layout
+    else items.push_back({&L, nullptr});
   };
   // C24: the size-step limit a region's cells keep; 0 = none (also on Uniform, which has nothing to divide).
   const auto step_of = [&](int region) {
@@ -1811,13 +1788,15 @@ Layout lay_cells(const Domain& domain, const CellSpec& asked, int threads, const
                  const double lo[3], const double hi[3], bool depth_from_zero) {
     Pass pass = open(region, frame, depth_cap, base);
     pass.tally = &out.regions.back();
-    const WallMap none = out.walls.back();   // not a flat region: no walls
-    pass.walls = &none;
+    wallmaps.push_back(out.walls.back());   // not a flat region: no walls (kept while its slots are laid)
+    pass.walls = &wallmaps.back();
     const double limit = step_of(region);
     if (limit > 0.0) {   // C24
-      std::vector<Laid> lays;
-      lay(pass, base, lo, hi, depth_from_zero, &lays);
-      keep_steps(lays, limit);
+      groups.emplace_back();
+      Group& g = groups.back();
+      g.limit = limit;
+      lay(pass, base, lo, hi, depth_from_zero, &g.lays);
+      items.push_back({nullptr, &g});
       return;
     }
     lay(pass, base, lo, hi, depth_from_zero);
@@ -1996,13 +1975,15 @@ Layout lay_cells(const Domain& domain, const CellSpec& asked, int threads, const
       Pass pass = open(r.id, f, g.depth, fitted);
       pass.depth_need = depth_need;
       pass.tally = &out.regions.back();
-      const WallMap none = out.walls.back();   // no walls: a cell's shape is its region's lattice in its cube
-      pass.walls = &none;
+      wallmaps.push_back(out.walls.back());   // no walls: a cell's shape is its region's lattice in its cube
+      pass.walls = &wallmaps.back();
       if (spec.grade_to_shape && spec.band_mm > 0.0) pass.band_region = &r;
       if (const double limit = step_of(r.id); limit > 0.0) {   // C24
-        std::vector<Laid> lays;
-        lay(pass, fitted, lo, hi, true, &lays);
-        keep_steps(lays, limit);
+        groups.emplace_back();
+        Group& gr = groups.back();
+        gr.limit = limit;
+        lay(pass, fitted, lo, hi, true, &gr.lays);
+        items.push_back({nullptr, &gr});
         continue;
       }
       lay(pass, fitted, lo, hi, true);
@@ -2022,7 +2003,7 @@ Layout lay_cells(const Domain& domain, const CellSpec& asked, int threads, const
     // behind the pocket are two), gathered where they start at one depth and are one width.
     const std::shared_ptr<const FaceReadings> kept = domain.kept<FaceReadings>(
         r.id, [&]() { return read_face(domain, r, f, lo, hi, thread_count); });
-    WallMap map = kept->map;
+    WallMap& map = wallmaps.emplace_back(kept->map);   // notes30 C1: kept while its slots are laid
     for (std::size_t which = 0; which < kept->stretches.size(); ++which) {
       WallMap::Wall wall;
       double area = 0.0;
@@ -2064,8 +2045,13 @@ Layout lay_cells(const Domain& domain, const CellSpec& asked, int threads, const
     // C24: with a size step asked, every lay of the region is kept and the rule is kept across all of them (its walls
     // and what no wall holds share one frame) before any goes into the layout.
     const double limit = step_of(r.id);
-    std::vector<Laid> lays;
-    std::vector<Laid>* keep = limit > 0.0 ? &lays : nullptr;
+    Group* steps = nullptr;
+    if (limit > 0.0) {
+      groups.emplace_back();
+      steps = &groups.back();
+      steps->limit = limit;
+    }
+    Lays* keep = steps ? &steps->lays : nullptr;
     for (std::size_t i = 0; i < map.walls.size(); ++i) {
       const WallMap::Wall& wall = map.walls[i];
       pass.wall = static_cast<int>(i);
@@ -2078,10 +2064,159 @@ Layout lay_cells(const Domain& domain, const CellSpec& asked, int threads, const
     pass.thin = false;
     pass.wall = -1;   // what no wall holds: cell by cell from the region's own base
     lay(pass, base, lo, hi, true, keep);
-    if (keep) keep_steps(lays, limit);
-    out.walls[static_cast<std::size_t>(pass.frame_index)] = std::move(map);
+    if (steps) items.push_back({nullptr, steps});
+    out.walls[static_cast<std::size_t>(pass.frame_index)] = map;
   }
   if (ds.start == Start::AllLattice) run(0, world, 1e300, world_fit(0, spec), wlo, whi, false);
+
+  // notes30 C1: EXECUTE. One job per base slot of every lay; with a watch, lowest first along its up (ties in plan
+  // order), else in plan order. Each slot's cells go to its own lay's place for it.
+  std::vector<CellPlan::Job> laid_order;   // T1's RED control only
+  std::vector<Laid*> all;
+  {
+    for (Laid& L : laids) all.push_back(&L);
+    std::vector<CellPlan::Job> jobs;
+    {
+      std::size_t n = 0;
+      for (const Laid* L : all) n += L->pieces.size();
+      jobs.reserve(n);
+    }
+    const Vec3 up = watch ? watch->up() : Vec3{0.0, 0.0, 1.0};
+    for (std::size_t li = 0; li < all.size(); ++li) {
+      const Laid& L = *all[li];
+      for (std::size_t k = 0; k < L.pieces.size(); ++k) {
+        double h = 0.0;
+        if (watch) {   // the lowest of the slot's cube along the up (its cells lie in it)
+          double q[3];
+          L.slot(k, q);
+          h = 1e300;
+          for (int c = 0; c < 8; ++c) {
+            const Vec3 v = L.pass.frame.at(q[0] + ((c & 1) ? L.base : 0.0), q[1] + ((c & 2) ? L.base : 0.0),
+                                           q[2] + ((c & 4) ? L.base : 0.0));
+            h = std::min(h, v.x * up.x + v.y * up.y + v.z * up.z);
+          }
+        }
+        jobs.push_back({h, static_cast<std::uint32_t>(li), static_cast<std::uint32_t>(k)});
+      }
+    }
+    std::unique_ptr<std::atomic<std::uint8_t>[]> done;
+    CellPlan plan;   // the watch reads it until executed() returns
+    if (watch) {
+      if (!(stream_control() & kStreamControlSlotOrder))   // (T3's RED: plan order)
+        std::stable_sort(jobs.begin(), jobs.end(), [](const CellPlan::Job& x, const CellPlan::Job& y) { return x.h < y.h; });
+      if (stream_control() & kStreamControlAssembleJobs) laid_order = jobs;   // (T1's RED)
+      done.reset(new std::atomic<std::uint8_t>[jobs.size()]);
+      for (std::size_t i = 0; i < jobs.size(); ++i) done[i].store(0, std::memory_order_relaxed);
+      plan.layout = &out;
+      plan.absorb = spec.absorb_slivers;
+      plan.jobs = jobs;
+      for (const Laid* L : all) {
+        CellPlan::Lay pl;
+        pl.region = L->pass.region;
+        pl.frame = L->pass.frame_index;
+        pl.wall = L->pass.wall;
+        pl.base = L->base;
+        for (int a = 0; a < 3; ++a) { pl.start[a] = L->start[a]; pl.count[a] = L->count[a]; }
+        pl.steps = L->steps;
+        pl.pieces = &L->pieces;
+        plan.lays.push_back(pl);
+      }
+      plan.k_of = [&](int region) { const CellSpec& cs = spec_of(region); return cs.one_grid ? 1 : cs.min_cells_across; };
+      for (const Fit& fit : fits) {
+        if (!fit.spec->stretch_edges || !fit.ends) continue;
+        plan.square_reach = std::max(plan.square_reach, target_of(*fit.spec));
+        for (const SquareEnds::End& e : fit.ends->ends) {
+          int o0, o1;
+          other_axes(e.axis, &o0, &o1);
+          CellPlan::SquareEnd se;
+          se.frame = fit.frame;
+          se.region = fit.region;
+          se.at[e.axis] = e.at;
+          se.at[o0] = e.p[0];
+          se.at[o1] = e.p[1];
+          plan.square_ends.push_back(se);
+        }
+      }
+      watch->planned(plan);
+    }
+    std::mutex retire_mu;
+    std::size_t retired = 0;
+    std::atomic<std::size_t> next{0};
+    auto work = [&](int who) {
+      if (who > 0 && !spare[static_cast<std::size_t>(who)])
+        spare[static_cast<std::size_t>(who)] = std::make_unique<Domain::Probe>(domain.probe());
+      const Domain::Probe& mine = who > 0 ? *spare[static_cast<std::size_t>(who)] : probe;
+      Layout local;
+      local.floor_cell_mm = out.floor_cell_mm;
+      RegionCells count_here;
+      std::vector<std::unique_ptr<Pass>> passes(all.size());   // this thread's copy of each lay's pass, once
+      for (std::size_t i = next.fetch_add(1); i < jobs.size() && !domain.stop_asked(); i = next.fetch_add(1)) {
+        const CellPlan::Job& j = jobs[i];
+        Laid& L = *all[j.lay];
+        std::unique_ptr<Pass>& pp = passes[j.lay];
+        if (!pp) {
+          pp = std::make_unique<Pass>(L.pass);
+          pp->probe = &mine;
+          pp->out = &local;
+          pp->tally = &count_here;
+          pp->caps = nullptr;   // a first lay has no caps (C24 sets them for its rounds)
+        }
+        double q[3];
+        L.slot(j.slot, q);
+        pp->columns.clear();
+        pp->place(q, L.base);
+        Laid::Piece& piece = L.pieces[j.slot];
+        piece.cells.swap(local.cells);
+        piece.solid.swap(local.solid);
+        piece.why.swap(local.solid_why);
+        local.cells.clear();
+        local.solid.clear();
+        local.solid_why.clear();
+        if (watch) {   // retired in order: the line is the lowest slot not yet laid
+          done[i].store(1, std::memory_order_release);
+          std::lock_guard<std::mutex> g(retire_mu);
+          const std::size_t was = retired;
+          while (retired < jobs.size() && done[retired].load(std::memory_order_acquire)) ++retired;
+          if (retired != was) watch->retired(retired, retired < jobs.size() ? jobs[retired].h : 1e300);
+        }
+      }
+    };
+    const int nt = static_cast<int>(std::min<std::size_t>(static_cast<std::size_t>(thread_count), jobs.size()));
+    std::vector<std::thread> pool;
+    for (int t = 1; t < nt; ++t) pool.emplace_back(work, t);
+    work(0);
+    for (std::thread& t : pool) t.join();
+    if (watch) watch->executed();
+    domain.check_stop();   // base cells left unlaid
+  }
+  // notes30 C1: ASSEMBLE, in plan order: each lay's slots in slot order; a size-step group's rounds (C24) where it stood.
+  if (!laid_order.empty()) {   // T1's RED: the slots in the order they were laid (a size-step group's lays left out)
+    for (const CellPlan::Job& j : laid_order) {
+      const Laid& L = *all[j.lay];
+      if (L.steps) continue;
+      const Laid::Piece& piece = L.pieces[j.slot];
+      out.cells.insert(out.cells.end(), piece.cells.begin(), piece.cells.end());
+      out.solid.insert(out.solid.end(), piece.solid.begin(), piece.solid.end());
+      out.solid_why.insert(out.solid_why.end(), piece.why.begin(), piece.why.end());
+      out.regions[L.tally].cells += piece.cells.size();
+      out.regions[L.tally].solid += piece.solid.size();
+    }
+    items.clear();
+  }
+  for (const Item& it : items) {
+    if (it.group) {
+      keep_steps(it.group->lays, it.group->limit);
+      continue;
+    }
+    const Laid& L = *it.laid;
+    for (const Laid::Piece& piece : L.pieces) {
+      out.cells.insert(out.cells.end(), piece.cells.begin(), piece.cells.end());
+      out.solid.insert(out.solid.end(), piece.solid.begin(), piece.solid.end());
+      out.solid_why.insert(out.solid_why.end(), piece.why.begin(), piece.why.end());
+      out.regions[L.tally].cells += piece.cells.size();
+      out.regions[L.tally].solid += piece.solid.size();
+    }
+  }
   // K5: no Structural patch of fewer cells than its count across, in any direction.
   drop_small_patches(out, [&](int region) { const CellSpec& cs = spec_of(region); return cs.one_grid ? 1 : cs.min_cells_across; });
   // K8 (CellSpec::stretch_edges): a sliver left against a square face is taken in by the cell beside it, where the
