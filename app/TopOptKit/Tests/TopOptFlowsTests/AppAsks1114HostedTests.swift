@@ -99,6 +99,13 @@ final class NewEngineStackPlacementHostedTests: XCTestCase {
 
 final class AppAsksThinWallPopUpHostedTests: XCTestCase {
 
+    /// ★ notes30: this part's lay raises the new engine's solid pop-up ("Some of the lattice stays solid") on the app's SHARED
+    /// AppPopups; closed here, so it never covers the next class's page (release 21's shard 2: AppSettingsHostedTests' clicks).
+    override func tearDown() {
+        MainActor.assumeIsolated { AppPopups.shared.current = nil }
+        super.tearDown()
+    }
+
     /// ★ (a) The pop-up's own frame is centred on the window (within 1 pt), wholly on it, at the six windows; Continue and
     /// Switch still work.
     @MainActor
