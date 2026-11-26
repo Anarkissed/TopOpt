@@ -46,8 +46,12 @@ public enum LatticeLayoutColours {
             cellFrame = r.cellFrame; cellLo = r.cellLo; cellWallMM = r.cellWallMM
             floorCellMM = r.floorCellMM
             sheets = r.sheets; sheetSeams = r.sheetSeams   // ★ SHEETS
+            touch = r.touch; quiltedWhereShort = r.quiltedWhereShort   // ★ notes30 D2
             self.token = token
         }
+        /// ★ notes30 D2: the type's touch (strut / cell) and the cells Structural Auto laid past the quilt-off limit.
+        public var touch = 0.0
+        public var quiltedWhereShort = 0
         public var barCount: Int { bars.count / 7 }
         public var cellCount: Int { cellInfo.count / 5 }
         public static func == (a: Laid, b: Laid) -> Bool { a.token == b.token && a.bars.count == b.bars.count }
@@ -55,6 +59,20 @@ public enum LatticeLayoutColours {
 
     /// What a bar is: boundary work, or fill.
     public static func isSkin(_ flags: UInt8) -> Bool { flags & 2 != 0 }
+
+    /// ★ notes30 D2 (his 11-26: "If all else fails, you can quilt, but get as thin as possible"): the bars laid past the
+    /// quilt-off limit of their own cell (one printed line short of the touch) — where Structural Auto let the quilt in. They
+    /// glow (`quiltGlow`) so he sees where, the (i) beside "Sized for" says why.
+    public static func pastQuiltLimit(_ laid: Laid, lineMM: Double) -> [Bool] {
+        guard laid.touch > 0, laid.quiltedWhereShort > 0 else { return Array(repeating: false, count: laid.barCount) }
+        return (0..<laid.barCount).map { i in
+            let w = Double(laid.bars[7 * i + 6]), c = i < laid.barCell.count ? Double(laid.barCell[i]) : 0
+            guard c > 0, !(i < laid.barFlags.count && isSkin(laid.barFlags[i])) else { return false }
+            return w > laid.touch * c - LatticeDensityDialLimits.gapLines * lineMM + 1e-6
+        }
+    }
+    /// The glow of a strut past the quilt-off limit: a warm amber, apart from every colour of the key.
+    public static let quiltGlow = SIMD4<Float>(1.0, 0.72, 0.18, 1)
 
     /// Each bar's relative density: its width against its own cell by the lattice type's law (nil law: width / cell).
     public static func densities(_ laid: Laid, type: LatticeType?) -> [Double] {

@@ -577,6 +577,11 @@ add_test(NAME lattice_layout COMMAND test_lattice_layout)
 add_executable(test_lattice_quilt_holes tests/unit/test_lattice_quilt_holes.cpp)
 target_link_libraries(test_lattice_quilt_holes PRIVATE topopt)
 add_test(NAME lattice_quilt_holes COMMAND test_lattice_quilt_holes)
+# notes30 STRUCTURAL AUTO: the strut law turned round (the lightest density that holds the target) against the law itself
+# for the 9 types with a law, its field form, and the sized lay (demand_is_ratio; D2's quilt where short).
+add_executable(test_strut_sizing tests/unit/test_strut_sizing.cpp)
+target_link_libraries(test_strut_sizing PRIVATE topopt)
+add_test(NAME strut_sizing COMMAND test_strut_sizing)
 # Stage F: the printable mesh made from the layout (one closed piece as a slicer reads it,
 # sealed lattice kept, bridges, what the layer check asks left out, posts, cancel). Without
 # the Manifold library the writer says it cannot, and the test checks that it says so.

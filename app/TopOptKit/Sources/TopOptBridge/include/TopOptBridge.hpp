@@ -1246,6 +1246,26 @@ double lattice_aesthetic_density_ceiling(const std::string& topology);
 double lattice_relative_density(const std::string& topology, double strut_radius_mm,
                                 double cell_size_mm);
 
+// ★ notes30 STRUCTURAL AUTO: the strut law TURNED ROUND, over a whole stress field (core's strut_size_field): per voxel
+// of a Voigt stress tensor field (6 per voxel, core's stress_tensor_field order, MPa) the lightest strut / cell whose law
+// margin reaches `target` (the Safety margin he set, x the sizing cushion) — the law the strength check judges a cell by —
+// written into the caller's arrays (`ratio_out`, `rho_out`, `short_out`, each tensor_count / 6 long; null skips one).
+// `ok` false with core's reason (an unknown type, a type with no law, a bad material) and nothing written.
+struct StrutSizeFieldSummary {
+  bool ok = false;
+  std::string reason;
+  std::size_t voxels = 0, loaded = 0, at_floor = 0, short_of_target = 0;
+  double rho_floor = 0.0, rho_ceiling = 0.0, ratio_floor = 0.0, ratio_ceiling = 0.0, highest_ratio = 0.0, rho_sum = 0.0;
+  double touch = 0.0, open_look = 0.0;   // the type's (lattice_width_bounds), strut / cell
+};
+StrutSizeFieldSummary lattice_strut_size_field(const std::string& topology, const double* tensor, std::size_t tensor_count,
+                                               double build_x, double build_y, double build_z, double yield_mpa,
+                                               double z_knockdown, double target, float* ratio_out, float* rho_out,
+                                               std::uint8_t* short_out);
+// The law's margin at one voxel and density (core's strut_law_margin_at, the check's formula). 0 with a refusal.
+double lattice_strut_law_margin(const std::string& topology, double rho, double vm, double pressure, double build_x,
+                                double build_y, double build_z, double yield_mpa, double z_knockdown);
+
 // ★★ CORE'S LOCAL MEMBER THICKNESS, for the preview (task 2026-08-20).
 //
 // Core refuses to lattice a member too thin to hold `lattice_cells_per_member_min`

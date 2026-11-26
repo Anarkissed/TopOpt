@@ -191,6 +191,11 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         public var percentile = 0.95
         public var response = 1.0
         public var maxStep = 0.0                  // his switch "Never skip a cell size": 2 on Default Grade
+        /// ★ notes30 STRUCTURAL AUTO: the stress result holds each place's strut / cell itself (the app's sizing from the
+        /// strut law, StructuralAutoSizing; core's StrutSpec::demand_is_ratio), and D2's quilt where short (quilt_where_short:
+        /// a cell asking past the quilt-off limit laid as wide as it asks, up to the touch). Structural Auto only.
+        public var demandIsRatio = false
+        public var quiltWhereShort = false
         /// ★ K7, K8 (Auto only): the cells fitted to the faces the grid is square to — the base cell searched for the fewest
         /// slivers there, and a sliver left taken in by the row beside it (core's cell_search and stretch_edges, both)
         public var cellSearch = false
@@ -220,6 +225,7 @@ public final class LatticeLayoutSession: @unchecked Sendable {
                 && a.referenceMPa == b.referenceMPa && a.percentile == b.percentile && a.response == b.response
                 && a.maxStep == b.maxStep && a.bedFloorMM == b.bedFloorMM && a.cellSearch == b.cellSearch
                 && a.sheetSeam == b.sheetSeam && a.autoByCell == b.autoByCell && a.sheetWalls == b.sheetWalls
+                && a.demandIsRatio == b.demandIsRatio && a.quiltWhereShort == b.quiltWhereShort
         }
     }
 
@@ -257,6 +263,8 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         public var noStress = false
         public var referenceMPa = 0.0, highestMPa = 0.0
         public var atLight = 0, atHeavy = 0
+        /// ★ notes30 D2: cells laid past the quilt-off limit because their sizing asked for it (core's quilted_where_short).
+        public var quiltedWhereShort = 0
         public var cellsByStress = false, cellsNoStress = false
         public var stressReferenceMPa = 0.0, stepHeldAt = 0.0
         public var thinSolid = 0
@@ -621,6 +629,8 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         o.percentile = s.percentile
         o.response = s.response
         o.max_step = s.maxStep
+        o.demand_is_ratio = s.demandIsRatio       // ★ notes30 STRUCTURAL AUTO
+        o.quilt_where_short = s.quiltWhereShort
         o.cell_search = s.cellSearch      // K7
         o.stretch_edges = s.cellSearch    // K8
         o.topology = std.string(s.topology)
@@ -679,6 +689,7 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         o.noStress = r.no_stress
         o.referenceMPa = r.reference_mpa; o.highestMPa = r.highest_mpa
         o.atLight = Int(r.at_light); o.atHeavy = Int(r.at_heavy)
+        o.quiltedWhereShort = Int(r.quilted_where_short)   // ★ notes30 D2
         o.cellsByStress = r.cells_by_stress; o.cellsNoStress = r.cells_no_stress
         o.stressReferenceMPa = r.stress_reference_mpa; o.stepHeldAt = r.step_held_at
         o.thinSolid = Int(r.thin_solid)

@@ -1125,6 +1125,23 @@ struct StrutSpec {
   std::shared_ptr<const DemandField> demand;
   double reference_mpa = 0.0;   // the RESOLVED reference (Session::lay fills it from Settings::stress)
   double response = 1.0;
+  // ★ notes30 STRUCTURAL AUTO (his 11-24 vision: "work backwards from the amount the user wants to beat the load capacity
+  // ... for the least possible plastic"; his 11-26 D1: the target is the part's own Safety margin). Read By stress only
+  // (the part's or a region's; a region stating its own ends, reference or response is read as before): the demand field
+  // holds each place's STRUT /
+  // CELL itself — the app's sizing from the measured strut law (strut_size_field: the lightest strut that holds the
+  // target) — not a stress over a reference. A cell's ratio is the highest in its box (R16, as a stress is read), its strut
+  // that ratio x its own cell, never under the thinnest strut (R5) nor over the widest allowed (R2: one printed line short
+  // of the touch with Allow quilt off; D2 below). Neither the dials, the response nor the widths in mm are read; a
+  // reference above 0 is still needed for the field to be read at all (R18). Off: as before, byte for byte.
+  bool demand_is_ratio = false;
+#define TOPOPT_STRUT_SIZING 1   // notes30: StrutSpec::demand_is_ratio / quilt_where_short are here (the app's bridge tests it)
+  // ★ notes30 D2 (his 11-26: "If all else fails, you can quilt, but get as thin as possible - do not go to straight full
+  // quilt"): with demand_is_ratio and Allow quilt OFF, a cell whose asked ratio is past the quilt-off limit (one printed
+  // line short of the touch) is laid as wide as it asks, up to the touch itself — the thinnest width that reaches its
+  // target, never straight to the full quilt — and counted (StrutReport::quilted_where_short). Every other cell keeps the
+  // limit, and nothing else Allow quilt decides (the cells' floor, a band's aim) changes. Off, or Allow quilt on: as before.
+  bool quilt_where_short = false;
   // SHEETS, Auto's wall (notes28 sheets SPEC 1.3, his answer 1: "If the size is smaller, then the lightest walls
   // possible, allowing the cells to be open"). Read for a SHEET type only, and only in Uniform / Per region (not By
   // stress, not with a typed width_mm, not for a region whose own dial is stated): each cell's wall is
@@ -1142,6 +1159,8 @@ struct StrutReport {
   double highest_mpa = 0.0;     // the highest stress any cell read
   std::size_t at_light = 0;     // cells at the light end (f == 0)
   std::size_t at_heavy = 0;     // cells at the heavy end (f == 1)
+  // ★ notes30 D2: cells laid past the quilt-off limit because their ratio asked for it (quilt_where_short)
+  std::size_t quilted_where_short = 0;
 };
 
 // Sets every cell's strut width. Moves no cell. The two limits are the layout's own type's

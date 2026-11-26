@@ -114,6 +114,10 @@ struct LatticeLayoutSettings {
   double reference_mpa = 0.0;                // > 0: stated; 0 = the part's own (R17: the percentile below)
   double percentile = 0.95;
   double response = 1.0;                     // the exponent on stress / reference, held to 0.25 .. 4
+  // ★ notes30 STRUCTURAL AUTO: the demand is each place's strut / cell (the app's sizing, core's StrutSpec::demand_is_ratio),
+  // and D2's quilt where short (StrutSpec::quilt_where_short)
+  bool demand_is_ratio = false;
+  bool quilt_where_short = false;
   double max_step = 0.0;                     // C24: the largest size step between neighbours; 0 = none
   // An area's own cells and struts (C23, R19): 20 numbers per region, in this order, NaN = not stated (the part's):
   //   algorithm (0 uniform, 1 default_grade, 2 stepped), cell_mm, cell_max_mm, cell_min_mm, min_cells_across,
@@ -185,6 +189,7 @@ struct LatticeLayoutResult {
   bool no_stress = false;
   double reference_mpa = 0.0, highest_mpa = 0.0;
   int32_t at_light = 0, at_heavy = 0;
+  int32_t quilted_where_short = 0;           // ★ notes30 D2: cells laid past the quilt-off limit as their sizing asked
   bool cells_by_stress = false, cells_no_stress = false;
   double stress_reference_mpa = 0.0, step_held_at = 0.0;
   int32_t thin_solid = 0;

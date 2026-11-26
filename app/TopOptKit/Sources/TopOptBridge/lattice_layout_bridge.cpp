@@ -268,6 +268,10 @@ ll::Settings settings_from(const LatticeLayoutSettings& in) {
   s.stress.reference_mpa = in.reference_mpa;
   s.stress.percentile = in.percentile;
   s.stress.response = in.response;
+#ifdef TOPOPT_STRUT_SIZING   // ★ notes30 STRUCTURAL AUTO (a vendored core before it has neither: the preview lays as before)
+  s.struts.demand_is_ratio = in.demand_is_ratio;
+  s.struts.quilt_where_short = in.quilt_where_short;
+#endif
   s.struts.dial = in.dial;
   if (in.dial_region.size() != in.dial_value.size())
     throw std::invalid_argument("lattice layout: dial_region and dial_value are not one length");
@@ -364,6 +368,9 @@ void fill(LatticeLayoutResult& o, const ll::Outcome& out) {
   o.highest_mpa = out.struts.highest_mpa;
   o.at_light = static_cast<int32_t>(out.struts.at_light);
   o.at_heavy = static_cast<int32_t>(out.struts.at_heavy);
+#ifdef TOPOPT_STRUT_SIZING
+  o.quilted_where_short = static_cast<int32_t>(out.struts.quilted_where_short);   // ★ notes30 D2
+#endif
   o.cells_by_stress = out.cells_by_stress;
   o.cells_no_stress = out.cells_no_stress;
   o.stress_reference_mpa = out.stress_reference_mpa;

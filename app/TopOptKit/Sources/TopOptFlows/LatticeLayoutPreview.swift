@@ -729,6 +729,11 @@ public final class LatticeLayoutPreview: ObservableObject {
         b.colours = LatticeLayoutColours.colours(laid, type: Self.lawType(latticeAtLay), grade: grade,
                                                  stress: field.map(LatticeLayoutColours.Stress.init(field:)),
                                                  lookup: grade ? cellLookup() : nil, oneColour: organic)
+        // ★ notes30 D2: where Structural Auto let the quilt in, those struts glow (the stress view keeps its own colours)
+        if field == nil, lastSettings?.demandIsRatio == true, laid.quiltedWhereShort > 0 {
+            let past = LatticeLayoutColours.pastQuiltLimit(laid, lineMM: lastSettings?.beadMM ?? 0.45)
+            for i in past.indices where past[i] && i < b.colours.count { b.colours[i] = LatticeLayoutColours.quiltGlow }
+        }
         var h = Hasher()
         key.forEach { h.combine($0) }
         b.colourKey = h.finalize()
@@ -868,6 +873,8 @@ public final class LatticeLayoutPreview: ObservableObject {
             }
             if r.laidAnything { problem = nil }   // ★ notes28: nothing laid is said after the reason is read (below)
             LatticeSheetsLaid.shared.set(r.sheetSeams, path: path)   // ★ SHEETS: the page's "Where regions meet" reads it
+            // ★ notes30 D2: the cells Structural Auto laid past the quilt-off limit (the Lattice page's line and (i) read it)
+            StructuralAutoLaid.shared.set(quilted: lastSettings?.demandIsRatio == true ? r.quiltedWhereShort : 0, path: path)
             layStages["readMS"] = r.msRead; layStages["cellsMS"] = r.msCells; layStages["barsMS"] = r.msBars   // ★ his 11-22
             laying = false; layProgress = nil
             layWallS[timeKey(path, .exact)] = (openMS + r.msRead + r.msCells + r.msBars) / 1000
@@ -1903,7 +1910,36 @@ public final class LatticeLayoutPreview: ObservableObject {
                 id += 1
             }
         }
-        return Self.partRest(s, p, nextID: id)
+        var out = Self.partRest(s, p, nextID: id)
+        if StructuralAuto.applies(p) { Self.structuralAuto(&out) }   // ★ notes30 STRUCTURAL AUTO
+        return out
+    }
+
+    /// ★ notes30 STRUCTURAL AUTO (his 11-24 vision, his 11-26 D1-D3; StructuralAuto.swift): the struts follow the strut law
+    /// sized for his Safety margin — the stress result the page sends holds each place's strut / cell (core's demand_is_ratio),
+    /// read with reference 1 (core reads a field only with one), and D2's quilt where short (a place the densest open lattice
+    /// leaves short grows past the limit only as far as it needs). Cell size by stress goes: a ratio is not a stress (C22 would
+    /// halve every cell, and smaller cells only lower the densest open strut and raise the thinnest). An area's own By stress
+    /// stays By stress (sized); its Manual-only ends, response and target stress are not read on Auto.
+    static func structuralAuto(_ s: inout LatticeLayoutSession.Settings) {
+        s.byStress = true
+        s.perRegion = false
+        s.demandIsRatio = true
+        s.quiltWhereShort = StructuralAuto.quiltWhereShortWired
+        s.referenceMPa = 1
+        s.response = 1
+        s.cellsByStress = false
+        s.widthLightMM = 0
+        s.widthHeavyMM = 0
+        for i in s.regions.indices where !s.regions[i].noLattice {
+            s.regions[i].own.cellsByStress = s.regions[i].own.cellsByStress.map { _ in false }
+            s.regions[i].own.widthLightMM = nil
+            s.regions[i].own.widthHeavyMM = nil
+            s.regions[i].own.dialLight = nil
+            s.regions[i].own.dialHeavy = nil
+            s.regions[i].own.response = nil
+            s.regions[i].own.referenceMPa = nil
+        }
     }
 
     /// Grade to (light) and Grade from (heavy) as core's dials (R10, read on the largest cell). ★ notes29: the page's percent
@@ -2257,6 +2293,43 @@ extension LatticeLayoutPreview {
 
     /// Tests: whether a watch is reading now.
     var growthWatching: Bool { growthWatch?.running ?? false }
+
+    // MARK: ★ notes30 STRUCTURAL AUTO
+
+    /// His 11-26 ("once it's done, give the short animation"): the finished lattice on screen built again by its timelapse —
+    /// the existing entry point (LatticeBuildShow: the site closed, the walls off, floor by floor). Live preview and Skip all
+    /// animations keep their rules: no timelapse.
+    public func replayBuild(live: Bool) {
+        guard Self.replays(live: live, skipping: AppSettings.skipAllAnimations, laying: laying, drawn: bars != nil,
+                           organic: Self.organic(latticeAtLay)), let b = bars else { return }
+        build.layBegins()
+        build.landed(token: b.token)
+    }
+    /// Whether the finished lattice is built again on screen: a cell lattice drawn and still, never with Live preview (his
+    /// 11-26: "no animations") or Skip all animations.
+    static func replays(live: Bool, skipping: Bool, laying: Bool, drawn: Bool, organic: Bool) -> Bool {
+        !live && !skipping && !laying && drawn && !organic
+    }
+
+    /// Which voxels of the check's grid are lattice in the layout on screen (core's own map, `whereAt`), for round 1's sizing —
+    /// only while that layout was laid from `stressKey` (round 0, what the first print file was made from); nil otherwise.
+    public func latticeMask(_ c: StructuralAuto.CheckField, stressKey: Int) async -> [Bool]? {
+        guard !laying, stress.key == stressKey, bars != nil, let session else { return nil }
+        let n = c.nx * c.ny * c.nz
+        guard n > 0 else { return nil }
+        var pts = [SIMD3<Float>]()
+        pts.reserveCapacity(n)
+        for k in 0..<c.nz {
+            for j in 0..<c.ny {
+                for i in 0..<c.nx {
+                    let p = c.origin + SIMD3(Double(i) + 0.5, Double(j) + 0.5, Double(k) + 0.5) * c.spacingMM
+                    pts.append(SIMD3<Float>(Float(p.x), Float(p.y), Float(p.z)))
+                }
+            }
+        }
+        guard let w = try? await session.whereAt(pts), w.count == n else { return nil }
+        return w.map { $0.why == .lattice }
+    }
 
     // MARK: ★ notes29 — the timelapse and the refresh's steps
 

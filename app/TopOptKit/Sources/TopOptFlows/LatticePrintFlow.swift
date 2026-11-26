@@ -56,6 +56,12 @@ public final class LatticePrintFlow: ObservableObject {
         if !passes { key = nil }
         return passes
     }
+    /// ★ notes30 STRUCTURAL AUTO: the file it is making now stands for these inputs (the round its chain kept: the drawing
+    /// follows the print file), so its Approved holds for the lattice on screen. Nothing for another version or when idle.
+    func rekey(project id: UUID, key: LatticeLayoutPreview.LayInputs?) {
+        guard phase != .idle, projectID == id, key != nil else { return }
+        self.key = key
+    }
     /// It stopped short (refused, failed, cancelled): the button goes back.
     func ended() {
         guard phase != .idle else { return }

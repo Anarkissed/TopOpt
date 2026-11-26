@@ -2710,6 +2710,8 @@ public struct LatticeSetupWizard: View {
     // whole part's, and the tab says so. The view switch (One cell │ In the part) moved over the canvas; it sets nothing.
 
     @State private var latticeTab = "part"
+    /// ★ notes30 D2: the last lay's quilted cells (Structural Auto), for the Part tab's line.
+    @ObservedObject private var autoLaid = StructuralAutoLaid.shared
     /// ★ His iPad note 11-10 (img08): his [Auto │ Manual] pick is the part's, kept every visit until Reset all. It was this
     /// page's own `@State` (false on every open), and Reset all never touched it.
     private var latticeManual: Bool {
@@ -3091,6 +3093,42 @@ public struct LatticeSetupWizard: View {
         rebuild()
     }
 
+    /// ★ notes30 STRUCTURAL AUTO (his D1, 11-26: "use the existing safety margin. Put the default at 150%"): "Sized for 150 %"
+    /// with its (i); the tap is the Safety margin's own menu (150 / 200 / 300, and Custom in steps of 25: 175 is there). The
+    /// one number, one place: it is the part's Safety margin, as the loads screen shows it.
+    private var structuralAutoRow: some View {
+        let m = project.force.safetyMarginValue
+        let caption = StructuralAutoCopy.sizedFor(m)
+        let _ = LatticeCaptions.record(caption)
+        return HStack(spacing: DS.Space.xs) {
+            Menu {
+                ForEach(SafetyMargin.presets, id: \.value) { p in
+                    Button(p.label) { project.force.setSafetyMargin(p.value) }
+                }
+                Menu(StructuralAutoCopy.customMenu) {
+                    ForEach(Self.structuralAutoCustomMargins, id: \.self) { v in
+                        Button(StructuralAutoCopy.percent(v)) { project.force.setSafetyMargin(v) }
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(caption).dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
+                        .foregroundStyle(DS.Color.accent.color)
+                        .saidWhole(caption)
+                    Image(systemName: "chevron.up.chevron.down").font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(DS.Color.accent.color)
+                }
+                .frame(minHeight: AppInfoButton.target)
+                .contentShape(Rectangle())
+            }
+            .accessibilityIdentifier("structural-auto-sized-for")
+            AppInfoButton(title: caption, text: StructuralAutoCopy.sizedForInfo(m), id: "structural-auto-sized-for-info")
+        }
+        .background(CornerPairStyle.publish("structuralAutoRow"))
+    }
+    /// Custom margins the row offers, in the loads screen's steps of 25 between its presets.
+    static let structuralAutoCustomMargins: [Double] = [1.75, 2.25, 2.5, 2.75]
+
     /// The open tab's rows. Part: the type (and, with no lattice group yet, the area rows). An area: its finish and grading,
     /// and in Manual the rest. Organic keeps its own pane (a traced lattice has no cell, no finish ladder).
     /// AnyView here and in each row below: the whole page in one opaque type crashed the iPad's Release compiler (SILGen, 11-05).
@@ -3101,6 +3139,17 @@ public struct LatticeSetupWizard: View {
         return AnyView(Group {
         if area == nil {
             AnyView(settingControl(.type, titled: true))
+            // ★ notes30 STRUCTURAL AUTO: what Auto sizes the struts for (his Safety margin, D1), under the type
+            if !latticeManual, StructuralAuto.applies(project.lattice, pageManual: false) {
+                AnyView(structuralAutoRow)
+                // ★ D2: where the quilt was let in, said in five words with the sentence in the (i)
+                let quilted = autoLaid.quilted(for: project.importedFile?.path)
+                if quilted > 0 {
+                    shortNote(StructuralAutoCopy.quiltedLine, info: "structural-auto-quilted",
+                              StructuralAutoCopy.quiltedInfo(project.force.safetyMarginValue, cells: quilted))
+                        .latticeID("structural-auto-quilted-note")
+                }
+            }
             if latticeManual, !Self.controlHideSimulateStresses, !(organic && project.importedFile != nil) {
                 AnyView(simulateStressesSwitch)
             }
