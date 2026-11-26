@@ -300,7 +300,9 @@ final class Notes26SampleHostedTests: XCTestCase {
             let sw = try XCTUnwrap(h.frames.all["latticeViewSwitch"], "\(name): the switch")
             XCTAssertEqual(info.midY, sw.midY, accuracy: 6, "★ \(name): beside the switch")
             XCTAssertGreaterThan(info.minX, sw.maxX - 0.5, "★ \(name): after it, never over it")
-            XCTAssertLessThan(info.maxY, size.height * 0.75, "★ \(name): up with the switch, never at the foot")
+            // (notes29: the equal type cards, his 11-25, bring the Structural panel to its portrait cap of 62 % of the height;
+            // the switch row then sits just under it, at most ~79.5 % on the 11″ — still well above the foot)
+            XCTAssertLessThan(info.maxY, size.height * 0.8, "★ \(name): up with the switch, never at the foot")
             XCTAssertLessThan(info.maxX, size.width, "\(name): on screen")
         }
     }
