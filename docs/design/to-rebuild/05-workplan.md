@@ -57,6 +57,13 @@ AFTER THE CRASH (the Claude app crashed about 13:15 from Mac overload; every run
 - LOCK ORDER (my ruling to the helpers 16:36): a holder that has just released waits 5 minutes when anyone is queued; TOSolver's hook test, then TOSurface's next part, then #362's S1, then mine (B1 the whole suite, B6, B5).
 - OWED TO HIM: one sample part at full detail with the smooth surface on, as a picture (his question about lumps); his answer on "finish fast, then keep going finer" as its own piece of work.
 
+18:10, TOSurface's branch read ahead of its report (b92e3bd0, 75 commits, 30 files; NOT merged: its batch and report come first).
+- Merges onto my tip with ONE conflict, `core/tests/to_rebuild_tests.cmake` (both sides add tests: keep both). No PDFs. It edits two files outside its own: `to_export.inc` (113 lines: the cut by the drawn part, the box and the Keep clears) and one line of `minimize_plastic.cpp`; to read line by line at the merge.
+- For the flip of BOTH stages together: with its switch on, ONE 0.01 mm mesh makes the grid, the tags, the loads and the cut, so the import tessellation changes for every part (0.4 to 1.4 s and 60 to 100 MB more per import, its test P). Stage 1's evidence was measured on today's 0.1 mm mesh; the tables that matter must be re-read on the 0.01 mm mesh before stage 3 flips.
+- Its open items, as it lists them: Top Motor Mount's cut patches with stage 3 alone read worse than today (to be read again with stage 1 on); the re-fit's solve at its cap (40 % of the loop's time); the surface's slope near 2, not 1; the neck thinner than a voxel (one line width, per his word); thin spots left by the finish (4 to 5 where stage 1 alone leaves 0).
+- For my "one judge" proposal: its file re-check against the certificate on Top Motor Mount at res 32 agrees to 0.3 to 1.3 %, the same as I see on his parts; the made parts are where the two judges part.
+- SHOWN TO HIM 18:10 (his question about lumps): TOSurface's picture of Top Motor Mount as drawn / today's file / the stage 3 file (`stage-3-pics/topmotor_drawn_today_stage3.png` on its branch).
+
 A. Already agreed:
 - A1. Stage 1 report to the reviewer once the two lock runs are recorded (draft at the top of `stages/stage-1-true-loads.md`).
 - A2. The pad's one number: tables and PICTURES of the shapes around the fixed faces from the two sweeps; a recommended curve strength for him in the morning.
