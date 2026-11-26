@@ -197,10 +197,13 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
     // One switch for the quilt (R2). ★ notes29 (his iPad notes on release 20, 2026-11-25: "No matter what I did, the
     // quilting kept on happening -- even with quilting off"): "Small cells in thin walls" no longer lets the cells go
     // under the open look's floor. It did so for the WHOLE layout, not the thin walls alone, and each such cell carried
-    // the thinnest strut, past the open look and up to touching: the quilt, wherever the band or the stress shrank the
-    // cells. With Allow quilt off no cell is under the smallest cell the thinnest strut leaves open, and no strut is past
-    // the open look (lattice_quilt_limits); "Small cells in thin walls" is read with Allow quilt on only, where it is moot.
+    // the thinnest strut up to touching: the quilt, wherever the band or the stress shrank the cells. With Allow quilt off
+    // the cells' own floor is the open look's smallest cell again (what the lattice lays on its own).
     cells.allow_quilt = settings.struts.allow_quilt;
+    // ★ notes29b (his question the same day: "Are you saying that no matter what happens, all Small cells in thin walls are
+    // going to be quilted?"): read again with Allow quilt off, for the THIN WALLS only (CellSpec::small_in_thin_walls), down
+    // to the cell the thinnest strut stays a printed line short of touching in. Nothing else is laid smaller for it.
+    cells.small_in_thin_walls = settings.small_cells_in_thin_walls && !settings.struts.allow_quilt;
     cells.one_grid = settings.one_grid;   // "Let walls cut cells": the per-part switch is the session's
     // The stress the lattice is graded by (R16, R17), resolved ONCE, before the cells, for the cells (C22) and the
     // struts (By stress) alike: the stated reference, else the part's own, kept while the domain, the field and the

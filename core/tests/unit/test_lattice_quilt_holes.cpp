@@ -17,6 +17,10 @@
 //      the next size's; such a patch was a piece adrift, and dropped.
 //   §3 An even outline: no cut cell at the part's edge is opened with nothing in it (the chunk at the wing ends).
 //   Each of §2 and §3 has its RED control: the checker finds a hole made by hand.
+//   §4 ★ notes29b, Small cells in thin walls: the wing with its right half 4.2 mm thick (a thin wall: under the open
+//      look's 4.74 mm cell at two 0.45 mm lines). Off, that half is solid; on, it is laid with its own small cells, never
+//      under the limit's cell and never touching, no hole in it, and every other cell is the one laid without it, byte
+//      for byte. RED control: Allow quilt ON (cells as small as the quilt's anywhere) lays small cells off the thin wall.
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -351,12 +355,127 @@ void test_an_even_outline() {
   std::printf("[§3] an even outline: %zu cut cells opened with nothing in them, over 10 strut types\n", total);
 }
 
+// ★ notes29b, §4: the wing with its right half (x > kStep) only kThin thick: under its front face (the region 10 mm deep)
+// the left half is a 10 mm wall, the right half a 4.2 mm wall, too thin for the open look's smallest cell (4.74 mm at two
+// 0.45 mm lines) and not too thin for any type's limit cell (reentrant's, the largest, 4.05 mm). The back is stepped at
+// x = kStep (a face facing +x between the two backs); every edge is shared whole (no T-junction).
+constexpr double kThin = 4.2, kStep = 60;
+StepModel thin_wing() {
+  ModelBuilder b;
+  // A flat polygon, fanned from its first point, wound so its normal is `out`.
+  const auto poly = [&](int f, std::vector<Vec3> p, Vec3 out) {
+    const Vec3 u{p[1].x - p[0].x, p[1].y - p[0].y, p[1].z - p[0].z}, v{p[2].x - p[0].x, p[2].y - p[0].y, p[2].z - p[0].z};
+    const Vec3 n{u.y * v.z - u.z * v.y, u.z * v.x - u.x * v.z, u.x * v.y - u.y * v.x};
+    if (n.x * out.x + n.y * out.y + n.z * out.z < 0) std::reverse(p.begin() + 1, p.end());
+    for (std::size_t i = 1; i + 1 < p.size(); ++i) b.tri(f, p[0], p[i], p[i + 1]);
+  };
+  const double T = kT, t = kThin, X = kStep, top_l = kA, top_r = kW - kA;
+  const Vec3 F{0, -1, 0}, B{0, 1, 0}, D{0, 0, -1}, U{0, 0, 1}, R{1, 0, 0};
+  const int front = b.face(F, {0, 0, 0});
+  poly(front, {{0, 0, 0}, {X, 0, 0}, {X, 0, kH}, {top_l, 0, kH}}, F);
+  poly(front, {{X, 0, 0}, {kW, 0, 0}, {top_r, 0, kH}, {X, 0, kH}}, F);
+  const int back = b.face(B, {0, T, 0});
+  poly(back, {{0, T, 0}, {X, T, 0}, {X, T, kH}, {top_l, T, kH}}, B);
+  const int back_thin = b.face(B, {X, t, 0});
+  poly(back_thin, {{X, t, 0}, {kW, t, 0}, {top_r, t, kH}, {X, t, kH}}, B);
+  const int step = b.face(R, {X, t, 0});
+  poly(step, {{X, t, 0}, {X, T, 0}, {X, T, kH}, {X, t, kH}}, R);
+  const int bottom = b.face(D, {0, 0, 0});
+  poly(bottom, {{0, 0, 0}, {X, 0, 0}, {X, t, 0}, {X, T, 0}, {0, T, 0}}, D);
+  poly(bottom, {{X, 0, 0}, {kW, 0, 0}, {kW, t, 0}, {X, t, 0}}, D);
+  const int top = b.face(U, {0, 0, kH});
+  poly(top, {{top_l, 0, kH}, {X, 0, kH}, {X, t, kH}, {X, T, kH}, {top_l, T, kH}}, U);
+  poly(top, {{X, 0, kH}, {top_r, 0, kH}, {top_r, t, kH}, {X, t, kH}}, U);
+  const Vec3 Ln = unit({-kH, 0, kA}), Rn = unit({kH, 0, kA});
+  const int left = b.face(Ln, {0, 0, 0});
+  poly(left, {{0, 0, 0}, {top_l, 0, kH}, {top_l, T, kH}, {0, T, 0}}, Ln);
+  const int right = b.face(Rn, {kW, 0, 0});
+  poly(right, {{kW, 0, 0}, {kW, t, 0}, {top_r, t, kH}, {top_r, 0, kH}}, Rn);
+  b.m.solid_count = 1;
+  return b.m;
+}
+// The world x of a cell's centre.
+double centre_x(const Layout& l, const Cell& c) {
+  const Frame& f = l.frames.at(static_cast<std::size_t>(c.frame));
+  return f.at(c.lo[0] + 0.5 * c.size, c.lo[1] + 0.5 * c.size, c.lo[2] + 0.5 * c.size).x;
+}
+
+void test_small_cells_only_in_thin_walls() {
+  const StepModel model = thin_wing();
+  Session session(model);
+  const auto field = blobs();
+  std::size_t types_laid = 0, control_outside = 0;
+  for (LatticeTopology t : kTypes) {
+    // His stand's Manual in small: Stepped, Grade to shape, cells by stress and By stress up to 100 % (where the band and
+    // the stress shrink the cells: where the old switch laid the quilt).
+    Settings st = stand(t);
+    st.stress.demand = field;
+    st.cells.by_stress = true;
+    st.struts.mode = Density::ByStress;
+    st.struts.dial_light = 0.01;
+    st.struts.dial_heavy = 1.0;
+    st.struts.allow_quilt = false;
+    const Outcome plain = session.lay(st);
+    st.small_cells_in_thin_walls = true;
+    const Outcome small = session.lay(st);
+    const Layout& L = small.layout;
+    const double open_cell = lattice_open_cell_mm(t, L.min_strut_mm);
+    const double limit_cell = lattice_quilt_off_cell_mm(t, L.min_strut_mm, L.bead_mm);
+    std::size_t thin_plain = 0, thin_small = 0, outside = 0, denser = 0;
+    double least = 1e9;
+    for (const Cell& c : plain.layout.cells) thin_plain += centre_x(plain.layout, c) > kStep;
+    for (const Cell& c : L.cells) {
+      const bool thin_side = centre_x(L, c) > kStep;
+      thin_small += thin_side;
+      if (c.size < open_cell * (1.0 - 1e-9)) {
+        if (!thin_side) ++outside;
+        least = std::min(least, c.size);
+      }
+      denser += c.strut > L.open_look * c.size * (1.0 + 1e-9);
+    }
+    // Every cell off the thin wall is the one laid without the switch, byte for byte (position, size, strut).
+    std::vector<std::array<double, 5>> a, b;
+    for (const Cell& c : plain.layout.cells)
+      if (centre_x(plain.layout, c) < kStep) a.push_back({c.lo[0], c.lo[1], c.lo[2], c.size, c.strut});
+    for (const Cell& c : L.cells)
+      if (centre_x(L, c) < kStep) b.push_back({c.lo[0], c.lo[1], c.lo[2], c.size, c.strut});
+    const Past p = against_the_limits(small);
+    std::size_t holes = 0;
+    for (std::size_t i : empty_cells(L, small.bars)) holes += centre_x(L, L.cells[i]) > kStep;
+    std::printf("  %s: thin half %zu cells without the switch, %zu with it (smallest %.2f mm; open look's %.2f, the "
+                "limit's %.2f); %zu cells denser than the open look, %zu fused, %zu past the limit; %zu small cells off "
+                "the thin wall; %zu holes in it; the rest the same: %s\n", lattice_topology_name(t), thin_plain,
+                thin_small, least < 1e9 ? least : 0.0, open_cell, limit_cell, denser, p.fused, p.past, outside, holes,
+                a == b ? "yes" : "NO");
+    CHECK(thin_plain == 0);                       // without it the thin wall is solid
+    CHECK(thin_small > 0 && least >= limit_cell * (1.0 - 1e-9) && least < open_cell);   // with it, its small cells
+    CHECK(outside == 0);                          // ONLY in the thin wall
+    CHECK(p.fused == 0 && p.past == 0 && p.small == 0 && p.bars == 0);   // never fused, never past the limit
+    CHECK(holes == 0);
+    CHECK(a == b && !a.empty());
+    types_laid += thin_small > 0;
+    // RED control: Allow quilt on (the cells may go to the quilt's anywhere) lays small cells off the thin wall too, where
+    // the band and the stress shrink them -- what the switch did with Allow quilt off until notes29.
+    st.struts.allow_quilt = true;
+    const Outcome on = session.lay(st);
+    std::size_t on_outside = 0;
+    for (const Cell& c : on.layout.cells)
+      on_outside += c.size < open_cell * (1.0 - 1e-9) && centre_x(on.layout, c) < kStep;
+    control_outside += on_outside > 0;
+  }
+  std::printf("[§4] Small cells in thin walls: the thin wall latticed for %zu of 10 types, small cells only there, none "
+              "fused; RED control (Allow quilt on) laid small cells off the thin wall for %zu of 10\n", types_laid,
+              control_outside);
+  CHECK(types_laid == 10 && control_outside == 10);
+}
+
 }  // namespace
 
 int main() {
   test_no_type_quilts_without_the_switch();
   test_no_holes_in_a_region();
   test_an_even_outline();
+  test_small_cells_only_in_thin_walls();
   std::printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }
