@@ -178,6 +178,10 @@ The beam carries 600 N on the top of a 20 x 20 x 3 mm boss. At res 64 (1.9 mm vo
 
 Read plainly: with everything on each version is 4 to 13 g HEAVIER than the drawn-face path alone at about the same margin, and the lightest version is refused for a loose piece. Not yet known which of the two additions does it (the automatic pad at 1.0, deeper than 3 mm behind the thick faces, or the smooth surface); the pad sweep's `auto:1.0` run on the lead's own build separates them. The run took 7313 s against 1492 s today, but it was paused for the lock run for part of that, so the time says nothing.
 
+### The beam at res 64 with EVERYTHING ON (09:05; picture `stage-1-pics/sample_b_res64_everything_on.png`)
+
+Where today's path refuses the job (above), the trial build makes four versions in 841 s: 0.68: 5.25, 81.8 g; 0.52: 4.22, 67.7 g; 0.38: 2.33, 55.8 g; 0.26: 2.25, 45.2 g. The automatic pad at strength 1.0 gave 10.95 mm behind each end face (120 mm of beam behind it) and 5.21 mm under the boss: in the picture they are the two solid end blocks, a tenth of the beam each. Two things to look at with him: the blocks are far deeper than a held face needs (the strength is too high, as on the bracket), and the two halves of a symmetric part under a centred load come out different (left a broad web, right a thin strut), which is the optimiser, not this stage.
+
 ## Still owed before the stage report
 
 - The original stand optimised both ways (queued), then Top Motor Mount; three settings; pad 2 / 3 / 4.5 mm.
