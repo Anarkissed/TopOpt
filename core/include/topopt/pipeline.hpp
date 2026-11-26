@@ -181,6 +181,8 @@ struct MinimizePlasticOptions {
   // TO rebuild stage 1: the same freezes as drawn-face geometry (frozen_sets.hpp).
   // Empty unless stage 1 is on; the mask stays the authority for the solve.
   std::vector<FrozenFaceSet> frozen_sets;
+  // TO rebuild stage 1: the pad each fixed or loaded face got (frozen_sets.hpp).
+  std::vector<PadReceipt> pad_receipts;
   // TO rebuild stage 2: the size in mm the deciding stress is read over; 0 = one
   // voxel, as today. Set by the job's reader from the material (material_length.hpp)
   // only when TOPOPT_STRENGTH=size.

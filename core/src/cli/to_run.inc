@@ -2773,19 +2773,18 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     }
   }
 
+  // TO rebuild stage 1: the pad each fixed or loaded face got, for the app.
+  for (const PadReceipt& p : options.pad_receipts)
+    result.pipeline.report.pads.push_back(
+        {p.face_id, p.region_id, p.thickness_mm, p.pad_mm, p.automatic});
+
   // TO rebuild (the maintainer, 2026-11-26): say so when the part is too small for
   // the nozzle to leave the optimiser any printable room, with the nozzle that
   // would fit, or resin. Advice only: the run is not changed. With the stage's
   // switch, so today's report bytes are untouched.
   if (to_stage1_on()) {
     try {
-      std::vector<double> drawn(grid.voxel_count(), 0.0);
-      for (std::size_t idx = 0; idx < drawn.size(); ++idx)
-        if (grid.tags[idx] != VoxelTag::Empty) drawn[idx] = 1.0;
-      double thickest = 0.0;
-      for (double t : local_member_thickness_mm(grid, drawn, 0.5,
-                                                AnalysisKnobs{}.thickness_cap_voxels))
-        if (std::isfinite(t) && t > thickest) thickest = t;
+      const double thickest = thickest_section_mm(grid, AnalysisKnobs{}.thickness_cap_voxels);
       const PartScale ps = part_scale(thickest, options.wall_line_width_mm);
       if (ps.too_small) {
         result.pipeline.report.too_small.evaluated = true;

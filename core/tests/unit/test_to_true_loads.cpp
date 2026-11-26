@@ -473,6 +473,27 @@ int main(int argc, char** argv) {
     }
   }
 
+  // The automatic pad's rule on the numbers the made sample parts gave (stage 1
+  // file, "A2"): at strength 0.2 a thin tab (3.91 mm behind it) gets 0.88 mm, the bracket's base (50 mm) 3.16 mm, the beam's end (120 mm)
+  // 4.90 mm; at 1.0 the same faces get 1.98 / 7.07 / 10.95 mm.
+  {
+    using topopt::auto_pad_depth_mm;
+    const auto near = [](double a, double b) { return std::fabs(a - b) < 0.006; };
+    if (!near(auto_pad_depth_mm(3.91, 0.2, 0.45), 0.884)) ++failures;
+    if (!near(auto_pad_depth_mm(50.0, 0.2, 0.45), 3.162)) ++failures;
+    if (!near(auto_pad_depth_mm(120.0, 0.2, 0.45), 4.899)) ++failures;
+    if (!near(auto_pad_depth_mm(3.91, 1.0, 0.45), 1.977)) ++failures;
+    if (!near(auto_pad_depth_mm(50.0, 1.0, 0.45), 7.071)) ++failures;
+    if (!near(auto_pad_depth_mm(120.0, 1.0, 0.45), 10.954)) ++failures;
+    if (!near(auto_pad_depth_mm(0.0, 0.2, 0.45), 0.45)) ++failures;    // nothing behind it: the floor, one line
+    if (!near(auto_pad_depth_mm(50.0, 0.2, 0.0), 3.162)) ++failures;   // no line width given: 0.45
+    // Doubling the thickness grows the pad by root two, not by two ("it slows down").
+    if (!near(auto_pad_depth_mm(200.0, 0.2, 0.45) / auto_pad_depth_mm(100.0, 0.2, 0.45), 1.41421)) ++failures;
+    std::printf("\n[pad] the automatic rule at 0.2: tab 3.91 mm -> %.2f, base 50 mm -> %.2f, beam end 120 mm -> %.2f mm\n",
+                auto_pad_depth_mm(3.91, 0.2, 0.45), auto_pad_depth_mm(50.0, 0.2, 0.45),
+                auto_pad_depth_mm(120.0, 0.2, 0.45));
+  }
+
   std::printf("[tests C, D] %s: %d failure(s)\n", gate ? "gate" : "measure only", failures);
   return failures == 0 ? 0 : 1;
 }

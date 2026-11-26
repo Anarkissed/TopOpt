@@ -788,6 +788,19 @@ std::string job_report_json(const JobReport& report) {
            ", \"required\": " + num_json(report.as_drawn.required) + ", \"passes\": " +
            (report.as_drawn.margin >= report.as_drawn.required ? "true" : "false") + "}\n";
   }
+  if (!report.pads.empty()) {  // TO rebuild stage 1: the pad each face got, additive
+    out.insert(out.size() - 1, ",");
+    out += "  \"pads\": [";
+    for (std::size_t i = 0; i < report.pads.size(); ++i) {
+      const JobReport::Pad& p = report.pads[i];
+      out += std::string(i ? ", " : "") + "{" +
+             (p.face_id >= 0 ? "\"face_id\": " + std::to_string(p.face_id)
+                             : "\"region_id\": " + std::to_string(p.region_id)) +
+             ", \"thickness_mm\": " + num_json(p.thickness_mm) + ", \"pad_mm\": " +
+             num_json(p.pad_mm) + ", \"automatic\": " + (p.automatic ? "true" : "false") + "}";
+    }
+    out += "]\n";
+  }
   if (report.too_small.evaluated) {  // TO rebuild: too small for the nozzle, additive
     out.insert(out.size() - 1, ",");
     out += "  \"too_small\": {\"thickest_mm\": " + num_json(report.too_small.thickest_mm) +

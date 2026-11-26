@@ -212,6 +212,34 @@ ASSUMED, for him in the morning: the skins are Bambu Studio's defaults (five top
 
 The earlier figures in this file from the first model (the stand at res 64: 85.4 g printed of 90.6 g; the drawn part 98.7 of 116.4 g; "13.5 % really saved") are to be re-made with the shell model.
 
+RE-MADE with the shell model 2026-11-26 08:30 (build of tip 2e9aac2e plus the part-scale test, the stand at res 64, drawn-face loads, real stiffness): the version at 0.68 prints at 80.25 g of 90.55 g solid (share 0.886); the part as drawn prints at 92.35 g of 116.39 g solid (wall share 0.587). So the version really saves 13.1 % of the printed weight (80.25 against 92.35 g), where the solid figures say 22.2 % (90.55 against 116.39 g). The first model said 13.5 %: the saving hardly moved, the grams themselves came down about 6 %.
+
 ## What it does to the lattice strength check
 
 Steps 1 and 2 change the solid part's reading only if applied in the shared code path; the lattice check reads strut stresses through its own laws. To be confirmed with LatticeReview before any edit: which branches of `analyze.cpp` the lattice posture takes, and that its numbers are byte-identical with the switch off.
+
+## THE BAR against the reading's OWN true value, measured in a build (tests E, build a4ffac42, 2026-11-26 08:00)
+
+The same matrix as above, but each reading over a size is compared with what a perfect solve would give for THAT reading (the textbook stress averaged over the same size), not with the textbook's peak. Lowest to highest over the four resolutions; "low" is the unsafe side.
+
+Plate with a hole:
+
+| stiffness of cut voxels | read over 0.9 mm | 1.8 mm | 3.6 mm |
+|---|---|---|---|
+| E x fill (real) | -11.9 to +1.1 % | -5.5 to +0.5 % | -10.5 to -1.6 % |
+| E x fill^2 | +3.8 to +12.5 % | +4.3 to +16.0 % | -0.7 to +4.4 % |
+| E x fill^3 (today) | +12.2 to +25.3 % | +12.1 to +30.7 % | +4.1 to +14.6 % |
+
+Ring:
+
+| stiffness of cut voxels | read over 0.9 mm | 1.8 mm | 3.6 mm |
+|---|---|---|---|
+| E x fill (real) | -2.2 to +1.4 % | -3.3 to +4.5 % | -5.4 to -2.3 % |
+| E x fill^2 | +23.5 to +33.4 % | +13.8 to +40.3 % | +9.0 to +20.7 % |
+| E x fill^3 (today) | +59.9 to +85.3 % | +43.0 to +94.9 % | +23.1 to +58.3 % |
+
+What it says, plainly. Judged against its own true value, real stiffness is the most accurate (within about 5 % either way at 1.8 mm) but dips more than 5 % low on the plate at every size, so it misses the reviewer's bar by a hair to a lot. E x fill^2 is never more than 5 % low on either shape at any size (it passes the bar), at the price of reading 4 to 40 % high, the safe side. Today's E x fill^3 also passes but reads up to 95 % high. Both tests pass (rc 0); these lines are printed, not asserted. Still waiting on the reviewer: which reference the bar is judged against. Nothing more goes into analyze.cpp until then.
+
+## A case for "one judge" (R-08), seen on the sample beam 2026-11-26 10:05
+
+The command-line summary of the beam's run (drawn faces, pad 3 mm, res 64) reads: "vf 0.38: margin 8.22, accepted" and "vf 0.26: margin 3.55, rejected (below margin_stop)", on a job whose required margin is 1.5. Nothing is wrong with the verdict: the line prints the raw worst-case margin (`report.margin.worst_case`, `main.cpp:927`) while the verdict is taken on the margin after the print knock-down (the 0.38 version's finished margin is 2.73, a third of 8.22; by the same ratio 0.26 stands near 1.2, under 1.5). But two numbers for one version, with the verdict beside the wrong one, is exactly what R-08 is about. When "one judge" is built, this line prints the number the verdict used. Not changed now (command-line text only; the app does not show it).
