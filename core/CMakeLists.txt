@@ -622,6 +622,12 @@ add_test(NAME support_paint COMMAND test_support_paint)
 add_executable(test_print_orientation tests/unit/test_print_orientation.cpp)
 target_link_libraries(test_print_orientation PRIVATE topopt)
 add_test(NAME print_orientation COMMAND test_print_orientation)
+# ★ notes29 (P8, his print orientation on the iPad): a lay in the print frame turned back to the model frame (exact,
+# inverted); the iPad's turned Organic lay is the print file's, bar for bar; its growth climbs the kept up.
+add_executable(test_print_frame_turn tests/unit/test_print_frame_turn.cpp)
+target_link_libraries(test_print_frame_turn PRIVATE topopt)
+target_compile_definitions(test_print_frame_turn PRIVATE TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME print_frame_turn COMMAND test_print_frame_turn)
 # Organic cut 2 (brief E1, rules OF1..): the file as the solid plus unmerged closed tubes. The test makes its reference
 # unions with Manifold, so it is registered only where the writer has it.
 if(manifold_FOUND)

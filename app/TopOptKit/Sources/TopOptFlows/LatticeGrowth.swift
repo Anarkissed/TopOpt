@@ -75,6 +75,10 @@ public final class LatticeGrowth {
     public private(set) var phase = 0
     /// ★ item 3: since when the band of light runs (the replay caught up, the engine past its growing). nil: not running.
     public private(set) var workingSince: CFTimeInterval?
+    /// ★ notes29 (his print orientation): the print's up, in the part's own coordinates, when the lattice is laid standing on
+    /// the face he kept (the vines climb it; the band of light rises along it, a print layer by layer). nil: the view's own up,
+    /// as before.
+    public var printUp: SIMD3<Float>?
     /// ★ notes24: the lay landed after growing: the part stays in X-ray (if it was) until the landed lattice's own map opens it.
     public private(set) var landedHold = false
     /// ★ the replay of this lay (nil: none asked — every recorded piece shows at once, as before).
