@@ -39,14 +39,27 @@ double face_pad_depth_mm() {
 // him: the pad grows with the square root of the thickness of material behind
 // that face, never less than two wall-line widths (one line does not print), no
 // ceiling:   pad = max(2 x line width, sqrt(strength x thickness)).
-// TOPOPT_PAD_MM=auto uses strength 0.625 mm (2.5 mm on a 10 mm block);
-// TOPOPT_PAD_MM=auto:<strength> sets it. Anything else is the fixed depth above.
+// TOPOPT_PAD_MM=auto uses kAutoPadStrengthMm; TOPOPT_PAD_MM=auto:<strength> sets
+// it; a number is the fixed depth above. UNSET follows kAutoPadIsDefault.
+//
+// THE ONE NUMBER (measured 2026-11-26 on the two made sample parts, stage 1 file,
+// "A2"): 0.2. A thick face then gets 3 to 5 mm (what the fixed pad gives), a thin
+// tab two wall lines; every version of both parts is made, as light or lighter
+// than with a fixed 3 mm. At 1.0 the versions are 7 to 16 g heavier and the
+// lightest are lost. RECOMMENDED to the maintainer, awaiting his yes: until then
+// kAutoPadIsDefault stays false and an unset TOPOPT_PAD_MM is the fixed 3 mm.
+constexpr double kAutoPadStrengthMm = 0.2;
+constexpr bool kAutoPadIsDefault = false;
 bool auto_pad(double* strength_mm) {
   const char* v = std::getenv("TOPOPT_PAD_MM");
-  if (v == nullptr || std::string(v).rfind("auto", 0) != 0) return false;
+  if (v == nullptr || *v == '\0') {
+    *strength_mm = kAutoPadStrengthMm;
+    return kAutoPadIsDefault;
+  }
+  if (std::string(v).rfind("auto", 0) != 0) return false;
   const std::string s(v);
   const double typed = s.size() > 5 && s[4] == ':' ? std::atof(s.c_str() + 5) : 0.0;
-  *strength_mm = typed > 0.0 ? typed : 0.625;
+  *strength_mm = typed > 0.0 ? typed : kAutoPadStrengthMm;
   return true;
 }
 double pad_depth_for(const VoxelGrid& grid, const std::vector<FacePiece>& pieces,
