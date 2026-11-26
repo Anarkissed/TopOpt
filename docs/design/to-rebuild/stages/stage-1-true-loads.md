@@ -40,6 +40,18 @@ Effective margin; same binary, same job, only the switch changed.
 
 Reading: Base is the part V-01 hurts. Today its margin jumps up and down by a factor of four with the resolution (0.67, 0.18, 0.40, 0.17, 0.30, 0.08), because where the grid falls decides how much of the loaded face is loaded. From the drawn face it falls steadily as the grid resolves the stress (0.97 to 0.33). Parts whose loaded faces happen to sit well in the grid (Pressing, Top Motor Mount) do not change, which is the control: the new loader changes the answer only where the old one was wrong. The remaining fall with resolution is the stress reading itself (stage 2), not the loads.
 
+### The same table RE-MADE with the corrected clamp (build 4d495dd6, 2026-11-25 19:45 to 20:25; `face`, a glued anchor holds the drawn face's own nodes)
+
+| part | res | today | drawn face, corrected |
+|---|---|---|---|
+| Base | 48 / 64 / 96 / 128 / 160 / 192 | 0.67 / 0.18 / 0.40 / 0.17 / 0.30 / 0.08 | 0.79 / 0.66 / 0.45 / 0.37 / 0.37 / 0.32 |
+| Pressing | 48 / 64 / 96 / 128 | 0.75 / 0.51 / 0.35 / 0.35 | 0.75 / 0.51 / 0.36 / 0.35 |
+| PillowBlock (left) | 48 / 64 / 96 / 128 | 1.85 / 1.48 / 1.07 / 0.78 | 1.32 / 1.10 / 0.90 / 0.74 |
+| Original stand | 96 / 128 | 4.47 / 2.93 | 4.83 / 3.15 |
+| Top Motor Mount | 96 / 128 | 1.64 / 1.33 | 1.65 / 1.33 |
+
+(Stand v4 follows when its two runs finish.) The reading stands: Base stops jumping with resolution (a factor of eight today; a steady fall here), and the parts whose faces sit well in the grid do not move. What the corrected clamp changed against the first, wrong table: the coarse-resolution margins are lower (Base 0.79 for 0.97 at res 48; PillowBlock 1.32 for 1.80), because a face held on its own nodes concentrates the reaction where a slab one voxel thick spread it; from res 128 up the two agree within 5 %. PillowBlock now reads LOWER than today at every resolution: today's one-voxel-thick clamp was flattering it.
+
 ## Measured: optimised
 
 | run | today | drawn face |
@@ -155,5 +167,7 @@ Until these land, with the switch on, the app's previews count voxels the old wa
 3. `core/src/cli/run_job.cpp`, the two fixture-face tagging sites in the lattice strength-check code (about lines 11337 and 12647): replace the `model_is_mesh ? tag_mesh_face(...) : tag_step_face(...)` expression with `tag_face_by_stage(<same grid>, <same model>, f, VoxelTag::Fixture)`.
 
 4. The report key `"as_drawn"` (top level, present only when no version passed on a reduction run): the app shows its centred pop-up offering Strengthen (agreed 2026-11-25).
+
+5. Two lattice tests go red with the switch on and need their `face` form in the same release (LatticeReview, 2026-11-25): `lattice_depth_tie` section 0a (it pins effective depth = layers x spacing; with `face` the run reports the mm asked, by design) and `test_print_frame.cpp:721` (the same job turned; the frame's load rule). The first is LatticeReview's to re-pin, the second waits on its ruling about the frame's load.
 
 When the switch flips and the old path is deleted, `tag_face_by_stage` / `mask_face_by_stage` keep their names and lose the old branch, so these lines do not change again.
