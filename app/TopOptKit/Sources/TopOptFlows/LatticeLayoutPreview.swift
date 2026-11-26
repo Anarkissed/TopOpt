@@ -840,6 +840,8 @@ public final class LatticeLayoutPreview: ObservableObject {
             if r.barCount == 0, !Task.isCancelled { problem = solidReason == nil || Self.controlNoSolidPopUp ? Self.noFitLine : nil }
             // ★ his 11-17 "add a chip to ask what it should be": the faces this layout's regions run into that no rule decides
             // (D23), asked with the SAME settings it was laid with — a second call, so a dragged slider never waits on it
+            // ★ notes30 Q1: nor a setting changed while it runs — it gives way at once (this task cancelled, or the next lay
+            // asked), and the lattice that lands next asks again here (LatticeLayoutSession.places)
             if !Task.isCancelled, let found = try? await session.places(s), !Task.isCancelled {
                 places = found.places
                 placesMS = found.ms

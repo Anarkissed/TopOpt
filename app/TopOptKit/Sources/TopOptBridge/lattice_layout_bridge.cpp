@@ -57,6 +57,10 @@ struct LayoutSession {
   std::unique_ptr<ll::SolidAt> solid_at;          // built once per layout, on the first "where"
   std::atomic<uint64_t> cancel_gen{0};
   std::atomic<bool> stop{false};                   // core's own stop (Session::lay): a running layout gives up within one cell's work
+  // ★ notes30 Q1: the places search's own stop and ticket (lattice_layout_places): bumped and set by every cancel and by
+  // lattice_layout_places_cancel; never `stop`, so a places cancel leaves nothing behind for a lay or a map.
+  std::atomic<uint64_t> places_gen{0};
+  std::atomic<bool> places_stop{false};
   std::shared_ptr<const ll::DemandField> demand;  // Install 2: the stress result, one pointer between lays (set_demand)
   std::shared_ptr<const ll::TensorField> tensor;  // ★ Organic cut 1: the stress tensor a weave follows (set_tensor)
   std::shared_ptr<const ll::TensorField> real_tensor;  // ★ E5: the stress as set (`tensor` may be its filled copy)
@@ -862,15 +866,22 @@ LatticeLayoutSweep lattice_layout_sweep_limits(int64_t session, const LatticeLay
   return o;
 }
 
-LatticeLayoutPlaces lattice_layout_places(int64_t session, const LatticeLayoutSettings& settings, BridgeError& err) {
+LatticeLayoutPlaces lattice_layout_places(int64_t session, const LatticeLayoutSettings& settings, uint64_t ticket,
+                                          bool give_way, BridgeError& err) {
   LatticeLayoutPlaces o;
   const std::string why = bridge_guard_run("lattice_layout_places", [&] {
     auto s = layout_at(session);
     const ll::Settings ask = settings_in(*s, settings);   // ★ notes29: the last lay's, as it was laid
     std::lock_guard<std::mutex> lock(s->mu);
     if (!s->last) return;   // before the first whole layout, or after a cancelled one: none
+    // ★ notes30 Q1: the stop FIRST, then the ticket (a cancel bumps the ticket first, then sets the stop): a cancel since
+    // the search was asked is seen here, or by core within one triangle
+    s->places_stop = false;
+    if (give_way && s->places_gen.load() != ticket) { o.cancelled = true; return; }
     const auto t0 = std::chrono::steady_clock::now();
-    for (const ll::Place& p : s->session->places(ask)) {
+    const std::vector<ll::Place> found = s->session->places(ask, give_way ? &s->places_stop : nullptr);
+    if (give_way && s->places_stop.load()) { o.cancelled = true; return; }   // given up: none (never part of a list)
+    for (const ll::Place& p : found) {
       o.region.push_back(static_cast<int32_t>(p.region));
       o.face_counts.push_back(static_cast<int32_t>(p.faces.size()));
       for (int f : p.faces) o.faces.push_back(static_cast<int32_t>(f));
@@ -942,8 +953,10 @@ LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float ori
       const ll::Domain::Probe probe = domain->probe();   // one per thread
       std::array<int64_t, 5> local{};
       for (int32_t z = next++; z < nz; z = next++) {
-        if (s->stop.load()) return;
         for (int32_t y = 0; y < ny; ++y) {
+          // ★ notes30 Q1: read each row, not each slab — a flat part's slab is most of the map (measured: a newer lay
+          // waited 0.5 s behind the solid-reason check's 1 s map on a 240 x 240 x 20 mm plate)
+          if (s->stop.load()) return;
           for (int32_t x = 0; x < nx; ++x) {
             const topopt::Vec3 p = s->frame.point_to_print(
                 {origin_x + voxel_mm * x, origin_y + voxel_mm * y, origin_z + voxel_mm * z});   // ★ notes29 (off: as is)
@@ -1144,6 +1157,28 @@ void lattice_layout_cancel(int64_t session) {
   }
   s->stop = true;
   s->cancel_gen.fetch_add(1);
+  s->places_gen.fetch_add(1);   // ★ notes30 Q1: a newer lay — the places search gives way at once
+  s->places_stop = true;
+}
+
+// ★ notes30 Q1: the places search asked before now, running or waiting, comes back cancelled (the ticket first, then the
+// stop: lattice_layout_places reads them the other way round).
+void lattice_layout_places_cancel(int64_t session) {
+  std::shared_ptr<LayoutSession> s;
+  {
+    std::lock_guard<std::mutex> lock(g_layout_mu);
+    auto it = g_layouts.find(session);
+    if (it == g_layouts.end()) return;
+    s = it->second;
+  }
+  s->places_gen.fetch_add(1);
+  s->places_stop = true;
+}
+
+uint64_t lattice_layout_places_ticket(int64_t session) {
+  std::lock_guard<std::mutex> lock(g_layout_mu);
+  auto it = g_layouts.find(session);
+  return it == g_layouts.end() ? 0 : it->second->places_gen.load();
 }
 
 void lattice_layout_close(int64_t session) {
@@ -1157,6 +1192,8 @@ void lattice_layout_close(int64_t session) {
   }
   s->stop = true;
   s->cancel_gen.fetch_add(1);   // anything still waiting on it comes back cancelled; it is freed when the last call returns
+  s->places_gen.fetch_add(1);   // ★ notes30 Q1: and its places search
+  s->places_stop = true;
 }
 
 LatticeFileJobResult lattice_file_job(const std::string& job_path, const std::string& out_dir,

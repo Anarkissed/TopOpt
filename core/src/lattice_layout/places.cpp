@@ -1,6 +1,7 @@
 // Lattice rebuild, Install 3: the places (rule D23). See lattice_layout.hpp, find_places.
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <map>
 #include <optional>
@@ -46,8 +47,10 @@ std::array<long long, 3> key_of(const Vec3& p) {
 
 std::vector<Place> find_places(const StepModel& model, const Domain& domain, const Domain* without_chips,
                                const std::vector<int>& chip_ids, const std::vector<Settings::RegionAsk>& asks,
-                               const Layout& layout, double fallback_cell_mm) {
+                               const Layout& layout, double fallback_cell_mm, const std::atomic<bool>* stop) {
   std::vector<Place> out;
+  // ★ notes30 Q1: the next lay was asked — none, at once (read once per triangle; never part of a list)
+  const auto stopped = [stop] { return stop && stop->load(std::memory_order_relaxed); };
   const TriangleMesh& mesh = model.mesh;
   if (mesh.triangles.empty() || model.triangle_face.size() != mesh.triangles.size()) return out;
   const Domain::Probe probe = domain.probe();
@@ -59,13 +62,15 @@ std::vector<Place> find_places(const StepModel& model, const Domain& domain, con
   std::map<int, std::vector<std::size_t>> tris_of;
   for (std::size_t t = 0; t < mesh.triangles.size(); ++t) tris_of[model.triangle_face[t]].push_back(t);
   std::map<std::pair<std::array<long long, 3>, std::array<long long, 3>>, std::set<int>> edge_faces;
-  for (std::size_t t = 0; t < mesh.triangles.size(); ++t)
+  for (std::size_t t = 0; t < mesh.triangles.size(); ++t) {
+    if (stopped()) return {};
     for (int e = 0; e < 3; ++e) {
       auto a = key_of(mesh.vertices[static_cast<std::size_t>(mesh.triangles[t][e])]);
       auto b = key_of(mesh.vertices[static_cast<std::size_t>(mesh.triangles[t][(e + 1) % 3])]);
       if (b < a) std::swap(a, b);
       edge_faces[{a, b}].insert(model.triangle_face[t]);
     }
+  }
   std::map<int, std::set<int>> next_to;
   for (const auto& [edge, faces] : edge_faces)
     for (int f : faces)
@@ -134,6 +139,7 @@ std::vector<Place> find_places(const StepModel& model, const Domain& domain, con
       FaceRead fr;
       bool near = false;
       for (std::size_t t : tris) {
+        if (stopped()) return {};
         const Vec3& a = mesh.vertices[static_cast<std::size_t>(mesh.triangles[t][0])];
         const Vec3& b = mesh.vertices[static_cast<std::size_t>(mesh.triangles[t][1])];
         const Vec3& c = mesh.vertices[static_cast<std::size_t>(mesh.triangles[t][2])];

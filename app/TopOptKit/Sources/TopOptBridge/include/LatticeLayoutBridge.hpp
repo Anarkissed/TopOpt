@@ -267,8 +267,18 @@ struct LatticeLayoutPlaces {
   std::vector<double> area_mm2;
   std::vector<uint8_t> solid_now;
   double ms = 0.0;
+  bool cancelled = false;   // ★ notes30 Q1: a cancel came after `ticket`: nothing above is filled
 };
-LatticeLayoutPlaces lattice_layout_places(int64_t session, const LatticeLayoutSettings& settings, BridgeError& err);
+// ★ notes30 Q1 (S-2, his yes 11-26: a setting changed right after a lattice landed waited ~3 s behind this search): the
+// search gives way at once. `ticket` is lattice_layout_places_ticket's, read when the search is ASKED: any
+// lattice_layout_cancel (a newer lay) or lattice_layout_places_cancel after it makes the search, running or waiting,
+// come back `cancelled` — core's find_places reads its own stop once per triangle. That stop is the search's alone: a
+// places cancel leaves nothing behind for a lay, a map or the next search. `give_way` false: the search before notes30
+// (no cancel stops it; the tests' RED CONTROL).
+LatticeLayoutPlaces lattice_layout_places(int64_t session, const LatticeLayoutSettings& settings, uint64_t ticket,
+                                          bool give_way, BridgeError& err);
+uint64_t lattice_layout_places_ticket(int64_t session);   // 0 when the session is not open
+void lattice_layout_places_cancel(int64_t session);       // safe from any thread
 // ★ ORGANIC, CUT 1 (his 11-18: "I'd like to get going to be able to VIEW things on the ipad ASAP"; "Preview PLUS settings
 // simultaneously"): the weave's preview on the iPad, from LatticeReview's engine (lattice_layout_organic.hpp, brief L2).
 // Every field of core's OrganicAsk, under its own name and default, so any of his controls can reach it.
@@ -440,7 +450,8 @@ struct LatticeLayoutTypeFacts {
 };
 LatticeLayoutTypeFacts lattice_layout_type_facts(const std::string& topology);
 
-// Every layout of `session` running now or waiting comes back cancelled. Safe from any thread.
+// Every layout of `session` running now or waiting comes back cancelled (★ notes30 Q1: and its places search). Safe from
+// any thread.
 void lattice_layout_cancel(int64_t session);
 void lattice_layout_close(int64_t session);
 

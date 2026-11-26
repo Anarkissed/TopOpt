@@ -1723,9 +1723,12 @@ inline constexpr double kPlaceMinMm2 = 100.0;
 // `without_chips`: the domain with the protect_chip entries left out (null when there are none).
 // `chip_ids`: those entries' ids. `asks`: the settings' regions (their faces / pieces / zones). Same input, same
 // bytes: ordered by region id, then by the lowest raw face id of the place.
+// ★ notes30 Q1 (S-2, his yes 11-26: a setting changed right after a lattice lands waited ~3 s behind this search):
+// `stop`, when given, is read once per triangle; once it is true the search gives up and the answer is NONE (never part
+// of a list). Not given, or never set: the same bytes as before. The flag must outlive the call; it is never written.
 std::vector<Place> find_places(const StepModel& model, const Domain& domain, const Domain* without_chips,
                                const std::vector<int>& chip_ids, const std::vector<Settings::RegionAsk>& asks,
-                               const Layout& layout, double fallback_cell_mm);
+                               const Layout& layout, double fallback_cell_mm, const std::atomic<bool>* stop = nullptr);
 
 // OP7 (brief C2, E1): one refusal of an Organic ask (validate_organic, lattice_layout_organic.hpp). `setting` is a
 // stable name the app maps to its control: the OrganicAsk field's own name (spacing_min_mm, width_heavy_mm, ...), or
@@ -1936,7 +1939,8 @@ class Session {
   // D23: the places of the last lay() (find_places on its domain, its regions' own cells). A separate call: it reads
   // every face the regions' prisms come near, which costs about as much as a layout, so a slider move need not pay
   // for it. Asked with settings that are not the last lay()'s "where" settings, or before any lay(): none.
-  std::vector<Place> places(const Settings& settings) const;
+  // ★ notes30 Q1: `stop` as find_places reads it (set: none, at once — the next lay need not wait for it).
+  std::vector<Place> places(const Settings& settings, const std::atomic<bool>* stop = nullptr) const;
   // The domain the last lay() was laid in: null before the first, REPLACED when a "where" setting changes. Read it after a
   // lay() and never hold it across the next one (362's bridge, the 4th call: a batch of points -> lattice / rim / solid).
   const Domain* domain() const { return domain_.get(); }
