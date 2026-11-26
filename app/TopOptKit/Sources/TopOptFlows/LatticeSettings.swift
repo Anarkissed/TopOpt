@@ -2370,6 +2370,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// no grade changes. Per part, Aesthetic only (Structural keeps cells fitted to walls and the app sends false). Not
     /// written while off, so older bytes are unchanged.
     public var letWallsCutCells: Bool = false
+    /// ★ SHEETS (notes28 sheets SPEC 1.5, his yes 11-25): "Where regions meet" for two sheet regions that touch — "blend" or
+    /// "solid_wall"; nil = the stage's default (Blend in Aesthetic, Solid wall in Structural: `LatticeSheets.seam`). Not
+    /// written while nil, so older bytes are unchanged.
+    public var sheetSeam: String? = nil
     /// ★ INSTALL 2, THE MANUAL CONTROLS (00-proposal.md, "Manual controls for engineers — DECIDED"; his 11-14 pick 1, 2, 4,
     /// 5, 6, 7, 8). Each nil (or off) is Auto: the engine chooses, as before. None is written while Auto, so older bytes are
     /// unchanged. Read by the new engine only. An area's own (LatticeAreaGrading) wins over these on its regions.
@@ -2727,6 +2731,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         case simulateStresses
         // sub-floor retention (task 2026-08-05-lattice-retention-app-control)
         case retainSubfloorInUnloadedRegions, subfloorStressFraction, singleCellMembers, smallCellsInThinWalls, letWallsCutCells
+        case sheetSeam   // ★ SHEETS: "Where regions meet" (absent ⇒ the stage's default)
         case allowQuilt
         // ★ Install 2: the Manual controls (none written while Auto)
         case strutFromMM, strutToMM, cellsAcrossMin, neverSkipCellSize, stressTargetMPa, skinBarWidthMM, skinReachCells
@@ -2899,6 +2904,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         if stageMode == .structural { singleCellMembers = false }
         smallCellsInThinWalls = try c.decodeIfPresent(Bool.self, forKey: .smallCellsInThinWalls) ?? false
         letWallsCutCells = try c.decodeIfPresent(Bool.self, forKey: .letWallsCutCells) ?? false
+        sheetSeam = try c.decodeIfPresent(String.self, forKey: .sheetSeam)   // ★ SHEETS
         // ★ Install 2: the Manual controls; absent ⇒ Auto
         strutFromMM = try c.decodeIfPresent(Double.self, forKey: .strutFromMM)
         strutToMM = try c.decodeIfPresent(Double.self, forKey: .strutToMM)
@@ -3018,6 +3024,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(singleCellMembers, forKey: .singleCellMembers)
         if smallCellsInThinWalls { try c.encode(true, forKey: .smallCellsInThinWalls) }   // ★ 11-13: off is not written
         if letWallsCutCells { try c.encode(true, forKey: .letWallsCutCells) }             // ★ 11-14: off is not written
+        if let v = sheetSeam { try c.encode(v, forKey: .sheetSeam) }                       // ★ SHEETS: nil is not written
         // ★ Install 2: the Manual controls, only where set
         try c.encodeIfPresent(strutFromMM, forKey: .strutFromMM)
         try c.encodeIfPresent(strutToMM, forKey: .strutToMM)

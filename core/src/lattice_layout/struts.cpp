@@ -35,6 +35,7 @@ StrutReport set_struts(Layout& layout, const StrutSpec& spec, const AreaOwnMap* 
   // one-line strut on the smallest open cells it is the wider of the two, and is kept, as before.
   const double gap = spec.allow_quilt ? 0.0 : kQuiltOffGapLines * line;
   const auto widest = [&](double cell) { return std::max({bead, touch * cell - gap, ceiling * cell}); };
+  const bool sheet = sheet_kind_of(layout.topology);
 
   // The dial is read on the largest cell: of the part (Uniform), or of each region.
   double part_ref = 0.0;
@@ -56,6 +57,7 @@ StrutReport set_struts(Layout& layout, const StrutSpec& spec, const AreaOwnMap* 
   // What one region's cells are set by (R19): the part's settings, with the region's stated values over them.
   struct Rule {
     bool by_stress = false, in_mm = false, graded = false;
+    bool auto_cell = false;                 // SHEETS, SPEC 1.3: Auto's wall by the cell (sheet_auto_wall_mm)
     double ratio = 0.0;                     // not by stress: strut / cell
     double width_mm = 0.0;                  // R11
     double r_light = 0.0, r_heavy = 0.0, w_light = 0.0, w_heavy = 0.0;
@@ -80,6 +82,9 @@ StrutReport set_struts(Layout& layout, const StrutSpec& spec, const AreaOwnMap* 
     u.width_mm = pick(o ? o->width_mm : std::nullopt, spec.width_mm);
     u.amount = std::pow(2.0, std::clamp(pick(o ? o->strength : std::nullopt, spec.strength), -1.0, 1.0));
     u.by_stress = o && o->by_stress ? *o->by_stress : spec.mode == Density::ByStress;
+    // SHEETS (SPEC 1.3): Auto's wall depends on the cell, for a sheet in Uniform with no hand-set dial or width.
+    u.auto_cell = spec.auto_by_cell && sheet && spec.mode == Density::Uniform && !u.by_stress && !(u.width_mm > 0.0) &&
+                  !(o && o->dial);
     if (u.by_stress) {
       // By stress (R7, R8, R12, R16, R18): the two ends, and whether there is a stress to grade by at all.
       const double wl = pick(o ? o->width_light_mm : std::nullopt, spec.width_light_mm);
@@ -188,6 +193,7 @@ StrutReport set_struts(Layout& layout, const StrutSpec& spec, const AreaOwnMap* 
     double want = 0.0;
     if (u.by_stress) want = u.in_mm ? stress_mm : stress_ratio * c.size;   // R12, R16
     else if (u.width_mm > 0.0) want = u.width_mm;                         // R11
+    else if (u.auto_cell) want = sheet_auto_wall_mm(layout.topology, c.size, bead);   // SHEETS, SPEC 1.3
     else want = u.ratio * c.size;                                         // R6
     // R2: the widest strut allowed, in a band as anywhere else. ★ notes29b: with Allow quilt off, one printed line short of
     // the touch (it was the open look: an ask past it was held there); with it on, the touch, as before.

@@ -303,6 +303,11 @@ int main() {
     auto strip = [](std::string s) {
       const std::string b = block(s);
       if (!b.empty()) s.erase(s.find(b), b.size());
+      // ★ notes30 M1 (the merge with the print resolutions, his 11-25): the result's "print_resolution" line carries each
+      // level's time on the Mac ("ms", from this run's own times), so it is a time too; its sizes are pinned by
+      // test_print_resolution.
+      const std::size_t pr = s.find("  \"print_resolution\": {");
+      if (pr != std::string::npos) s.erase(pr, s.find('\n', pr) + 1 - pr);
       const std::size_t m = s.find("  \"ms\": {");
       return m == std::string::npos ? s : s.substr(0, m);
     };

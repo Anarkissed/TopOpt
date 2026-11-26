@@ -12821,13 +12821,20 @@ ll::StrengthDone run_lattice_file_strength(const ll::StrengthAsk& ask,
     post.cell_size_field[e] = cell.size;
     post.cell_size_mm = std::max(post.cell_size_mm, cell.size);
     if (credit.credited[e]) {
-      post.relative_density[e] = credit.cell_rho[static_cast<std::size_t>(c)];
+      // SHEETS (notes28 sheets SPEC 1.4, builder B): a sheet is credited by PLACE, each voxel its own wall's density
+      // (LatticeCredit::voxel_rho); a strut type has none and keeps its cell's.
+      post.relative_density[e] = credit.voxel_rho.empty() ? credit.cell_rho[static_cast<std::size_t>(c)]
+                                                          : static_cast<double>(credit.voxel_rho[e]);
     } else {
       // Void in the composite solve (certify_latticed_variant's open_cut): its density is never read.
       post.relative_density[e] = rho_floor;
       no_credit[e] = 1;
     }
   }
+  // ANALYZE GUARD (sheets): the cells-per-member guard reads the member width the engine measured on the part itself
+  // (LatticePosture::member_width_mm: room_through over each cell, as the lay's floor and the credit read it), not the
+  // voxel staircase, which reads a member about two voxels thin. Empty for a strut type: the staircase, as before.
+  post.member_width_mm = ll::sheet_member_width_mm(out.layout, *ask.session->domain(), credit, g, ask.threads);
 
   // ── THE OLD CHECK, unchanged: the null-posture solve, the composite solve, the gate. Its context is the one the
   // old run builds, with the settings laid over it (each equal to what it replaces when not stated).
@@ -12890,6 +12897,20 @@ ll::StrengthDone run_lattice_file_strength(const ll::StrengthAsk& ask,
   // ── the block (the old receipt's names, renamed: lattice_accepted -> accepted, ...).
   const bool law = a.lattice_strut_report;
   const StrutStrengthReport& ss = a.lattice_strut;
+  // ── SHEETS (notes28 sheets SPEC 1.6, builder B): sheet_cells.bin beside strength.json, each laid cell's worst credited
+  // voxel's margin by the sheet's own law on this composite solve (the bound the strut result reads), and the block's
+  // sheet keys ("sheet_cells", "sheet_credit"). Nothing for a strut type.
+  std::string sheet_keys;
+  if (ll::sheet_kind_of(topo)) {
+    const std::vector<float> margins =
+        ll::lattice_voxel_margins(topo, credit, a.stress_tensor_field, cx.build_dir, material.yield_strength_mpa,
+                                  law && ss.z_knockdown_used > 0.0 ? ss.z_knockdown_used : material.z_knockdown);
+    const ll::SheetCheckFiles sw = ll::write_sheet_check_files(ask.out_dir, out.layout, credit, margins, S.frame);
+    if (!sw.ok)
+      return strength_no("strength_failed", 1, "The lattice's strength could not be checked, so no file was made.", sw.why);
+    done.files.push_back(sw.file);
+    sheet_keys = sw.keys;
+  }
   const double nan = std::numeric_limits<double>::quiet_NaN();
   // V5 (his ruling, 2026-11-17): in Structural the lattice passes only when the solid AND the struts keep the safety
   // margin. `accepted` stays the old gate exactly; a type with no strut law cannot reach a full pass. A result, never a
@@ -13000,7 +13021,9 @@ ll::StrengthDone run_lattice_file_strength(const ll::StrengthAsk& ask,
        ", \"out_of_regime\": " + std::string(out_of_regime ? "true" : "false") +
        ", \"regime_note\": " + json_str(regime_note) + "},\n";
   s += "    \"fields\": \"fields.bin\",\n";
-  if (done.files.size() > 1) s += "    \"scenario_fields\": \"scenario_fields.bin\",\n";
+  if (std::find(done.files.begin(), done.files.end(), std::string("scenario_fields.bin")) != done.files.end())
+    s += "    \"scenario_fields\": \"scenario_fields.bin\",\n";
+  s += sheet_keys;   // SHEETS: "sheet_cells", "sheet_credit" (empty for a strut type)
   // The old report's diagnosis (diagnose_gate), on the composite analysis, when it is not accepted.
   if (!a.accepted) {
     GateDiagnosisInputs gd;

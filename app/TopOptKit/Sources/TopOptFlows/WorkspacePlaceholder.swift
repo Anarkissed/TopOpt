@@ -2243,6 +2243,52 @@ public struct WorkspacePlaceholder: View {
         model.persistCurrentProject()
     }
 
+    /// ★ his 11-25 ("Offer print resolutions when exporting"): another resolution of this version's print file — its job made
+    /// again at that level and format, standing as the made file stands, with no strength check (the lattice is the same: its
+    /// check is the result's), on the Mac, or on this iPad when he chose it (PrintResolutionFlow).
+    private func printResolutionHost() -> PrintResolutionHost {
+        let comp = compute
+        return PrintResolutionHost(macReady: { comp.activeRemote != nil },
+                                   make: { level, format, up, onMac, cancelled, said in
+                                       try await makePrintResolution(level: level, format: format, up: up, onMac: onMac,
+                                                                     isCancelled: cancelled, said: said)
+                                   })
+    }
+
+    @MainActor
+    private func makePrintResolution(level: String, format: String, up: SIMD3<Double>?, onMac: Bool,
+                                     isCancelled: @escaping @Sendable () -> Bool,
+                                     said: @escaping @Sendable (String) -> Void) async throws -> (file: Data, report: [String: Any]) {
+        guard let request = model.makeLatticeRunRequest() else {
+            throw LatticeFileRun.Failure("Import a part and set a lattice region first.")
+        }
+        try await stressReadyForCheck(isCancelled: isCancelled, said: said)   // a lattice graded By stress reads its field
+        let job: LatticeFileJob.ForPart
+        switch LatticeFileJob.forPart(project, stress: newEngineStress, strengthJob: nil, printUp: up) {
+        case .success(let j): job = j
+        case .failure(let why): throw LatticeFileRun.Failure(why.line)
+        }
+        guard let json = PrintResolutionJob.retarget(job.json, level: level, format: format, up: up) else {
+            throw LatticeFileRun.Failure("The job could not be written")
+        }
+        let one = LatticeFileJob.ForPart(json: json, modelPath: job.modelPath, demand: job.demand)
+        let name = project.name
+        let config = onMac ? compute.activeRemote : nil
+        if onMac, config == nil { throw LatticeFileRun.Failure("The Mac did not answer (none chosen)", transient: true) }
+        let made: LatticeFileRun.Made = try await Task.detached {
+            if let config {
+                return try LatticeFileRun.drive(config: config, modelPath: one.modelPath, jobJSON: one.json, projectName: name,
+                                                demand: one.demand, isCancelled: isCancelled,
+                                                onState: { state, _ in
+                                                    said(state == "running" ? PrintResolutionCopy.makingFile : PrintResolutionCopy.waiting)
+                                                })
+            }
+            return try LatticeFileButton.runHere(job: one, strengthJob: nil, materialsPath: request.materialsPath,
+                                                 rulesPath: request.rulesPath)
+        }.value
+        return (made.stl, (try? JSONSerialization.jsonObject(with: made.reportJSON)) as? [String: Any] ?? [:])
+    }
+
     /// The print file's run, started: on the chosen Mac, else this iPad (a regular lattice only: Organic needs a Mac).
     /// ★ Organic cut 2: `organic` strengthens first in Structural (LatticeFileButton.organicRunner).
     private func launchFileRun(_ request: RunRequest, job: LatticeFileJob.ForPart, strengthJob: Data?, config: RemoteRunnerConfig?,
@@ -3874,7 +3920,10 @@ public struct WorkspacePlaceholder: View {
             // ★ his 11-22 · ★ notes25 (A5): the print file's chain ends with its run — a stop ends in the centred pop-up
             let saidInAPopUp = latticeChainEnded(ph)
             // ★ notes28 (builder D's "cannot_lattice"): a print file whose check emptied a region says so in the centred pop-up
-            if ph == .succeeded, run.outcomeIsPrintFile { LatticeCannotLattice.sayEmptied(report: run.outcome?.reportJSON, in: project) }
+            // ★ SHEETS (notes28 sheets SPEC 1.5): else a blend that fell back to the solid wall says which regions, in the same pop-up
+            if ph == .succeeded, run.outcomeIsPrintFile, !LatticeCannotLattice.sayEmptied(report: run.outcome?.reportJSON, in: project) {
+                LatticeSheets.sayFellBack(report: run.outcome?.reportJSON, in: project)
+            }
             GenerationTimingLog.shared.printFileRunMoved(ph, outcome: run.outcome, failure: run.failure.map { "\($0)" })   // ★ 11-22
             // ★ Organic cut 2 (his certify wizard): an Organic part that does not certify opens on Results, where it is walked through
             // ★ his 11-21 ("have it spit out an actual result in the app - because NOTHING happens in app"): every Lattice run
@@ -8341,7 +8390,7 @@ public struct WorkspacePlaceholder: View {
         if newEngineDrawn {   // ★ Install 3: the new engine's lattice is the layer, its bars what there is to draw
             return LatticePreviewBodyAlpha.latticeOnlyShowing(viewOn: latticeOnlyViewOn, layerDrawn: true,
                                                               simRunning: latticeSimIsRunning,
-                                                              nothingToDraw: (newEngine.laid?.barCount ?? 0) == 0)
+                                                              nothingToDraw: newEngine.laid.map { $0.barCount == 0 && $0.sheets.isEmpty } ?? true)   // ★ SHEETS: a sheet is drawn too
         }
         return LatticePreviewBodyAlpha.latticeOnlyShowing(viewOn: latticeOnlyViewOn,
                                                    layerDrawn: latticeLayerIsDrawn,
@@ -16684,6 +16733,7 @@ extension WorkspacePlaceholder {
             guard let project, let library else { return nil }
             return (project.id, library.store)
         }
+        PrintResolutionFlow.shared.host = printResolutionHost()   // ★ his 11-25: another resolution of this version's print file
         // once per open: the host reappears in the same visit (a full-screen page closing) and must change nothing then
         guard VersionViewOpen.shared.takeOpened(project.id) else { return }
         VersionViewOpen.shared.clear()

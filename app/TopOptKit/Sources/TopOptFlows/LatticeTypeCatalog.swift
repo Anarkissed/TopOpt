@@ -57,10 +57,15 @@ public enum LatticeTypeCatalog {
     /// id here in the batch that ships its page.
     /// ★★ notes28 (the maintainer's decision 2026-11-24): ALL the strut types, on the new engine — the seven Structural and
     /// Aesthetic ones and the three Aesthetic-only ones (core's `structuralRefusal`). Each card's picture is the engine's own sample of
-    /// the type (`LatticeTypePicture`), and each has its own strut law (`LatticeType.named`). The sheets (gyroid, schwarz_d)
-    /// stay as they were: not offered on the new engine.
+    /// the type (`LatticeTypePicture`), and each has its own strut law (`LatticeType.named`).
+    /// ★★ SHEETS (notes28 sheets SPEC 5, builder C): gyroid and Schwarz-D join, ON THE NEW ENGINE ONLY — never the old run
+    /// (`batchShipped`): a sheet is offered where the engine lays and makes the part's lattice.
     public static let appBatches: Set<String> = ["octet", "sc", "bcc", "fcc", "diamond", "kelvin", "rhombic",
-                                                 "bccz", "fccz", "reentrant"]
+                                                 "bccz", "fccz", "reentrant", "gyroid", "schwarz_d"]
+    /// ★★ SHEETS: the types the OLD run may carry (its spec, Optimize's lattice, an STL part's stage) are `oldRunBatches`
+    /// below (★ notes30 M1: his 11-25 "Sure" made it the octet only; a sheet is never one of them, `batchShipped`).
+    /// The sheet ids (core's family "sheet"; ids, so the gate needs no bridge call).
+    public static let sheetIDs: Set<String> = ["gyroid", "schwarz_d"]
 
     /// ★★ notes28 — STRUCTURAL, CORE'S OWN TWO VERDICTS (builder D's types.cpp, merged f82ac0b8; 362 11-24: "mirror both
     /// through the bridge instead of re-deriving them in Swift"), read through `LatticeLayoutSession.typeFacts`:
@@ -74,6 +79,18 @@ public enum LatticeTypeCatalog {
     public static func structuralNote(_ id: String) -> String? { LatticeLayoutSession.typeFacts(id).structuralNote }
     /// His rule: a caption under a setting is at most five words.
     public static let aestheticOnlyCaption = "Aesthetic only"
+    /// ★★ notes30 M1 — THE SHEETS ARE AESTHETIC ONLY FOR NOW (the reviewer's ruling 11-26, item 3(b): "NO Structural sheet
+    /// credit until (a); Aesthetic may ship" — (a) is the sheet laws' envelope, measured on claude/notes30-sheet-laws). The
+    /// sheet branches offered both sheets on Structural with their credit by place, so Structural is closed to them here, in
+    /// the picker, with its own five words and an (i) that says plainly when Structural comes. Aesthetic offers them as
+    /// before. When the measured laws and the reviewer's yes land, this one check goes and Structural opens by itself.
+    public static let sheetStructuralCaption = "Aesthetic only for now"
+    public static func sheetStructuralLater(_ name: String) -> String {
+        "\(name) is ready in Aesthetic today. It joins Structural in an update, once its strength in thin walls is "
+            + "measured and checked; that measurement is under way now."
+    }
+    /// RED CONTROL (tests): the sheets offered on Structural (as the sheet branches had it).
+    nonisolated(unsafe) public static var controlSheetsOnStructural = false
     public static let strengthUnmeasuredCaption = "Strength measured for denser struts"
 
     /// ★ notes28 (362's ruling 2026-11-24, his rule "NOT PRINT-TESTED"): every strut type he has not marked print-tested
@@ -84,7 +101,7 @@ public enum LatticeTypeCatalog {
         "\(name) hasn’t been print-tested yet. Print its sample coupon; when it prints well, mark it tested here and this "
             + "tag goes, on every project."
     }
-    /// The tag shows on `id`'s card (a strut type he has not marked tested).
+    /// The tag shows on `id`'s card (a type he has not marked tested; ★ SHEETS: the sheets too, neither starts tested).
     public static func showsNotPrintTested(_ id: String, tested: Set<String>) -> Bool {
         appBatches.contains(id) && !tested.contains(id)
     }
@@ -98,7 +115,14 @@ public enum LatticeTypeCatalog {
     nonisolated(unsafe) public static var appBatchesForTests: Set<String>? = nil
     /// ★ notes28: the one question every gate asks (the pickers, the old run's spec, Optimize's lattice): has `id`'s batch
     /// shipped? (The test stand-in first, so a test can close the gate again.)
-    public static func batchShipped(_ id: String) -> Bool { (appBatchesForTests ?? appBatches).contains(id) }
+    /// ★★ SHEETS: this is the OLD run's question (its spec, Optimize's lattice, an STL part's stage) — a sheet never ships there.
+    public static func batchShipped(_ id: String) -> Bool {
+        (appBatchesForTests ?? appBatches).contains(id) && (controlSheetsOnOldRun || !sheetIDs.contains(id))
+    }
+    /// ★★ SHEETS: has `id`'s batch shipped on the NEW engine (the Lattice stage on a STEP part)?
+    public static func newEngineShipped(_ id: String) -> Bool { (appBatchesForTests ?? appBatches).contains(id) }
+    /// RED CONTROL (tests): the sheets offered on the old run too (one gate for both, as before).
+    nonisolated(unsafe) public static var controlSheetsOnOldRun = false
     /// The line for a type core runs whose app batch has not shipped.
     public static let appBatchPending = "Ready in the engine; its settings come in a later update."
 
@@ -168,7 +192,7 @@ public enum LatticeTypeCatalog {
     ///     refuses for Structural (`structuralRefusal`: the tetragonal three, a fixed rule), and none whose measured strength
     ///     law credits none of the engine's struts yet (`structuralNote`) — each in core's own line, its card's caption the
     ///     catalog's five words;
-    ///   · a sheet type keeps the old line (not offered on the new engine).
+    ///   · ★★ SHEETS: a sheet type is offered as a strut type is (the engine lays it: core's family "sheet").
     /// The pure form the tests drive; `layoutEntriesFromCore(structural:)` reads core.
     public static func layoutEntries(structural: Bool, certifiable: [String], engineLays: (String) -> Bool,
                                      structuralRefusal: (String) -> String? = { _ in nil },
@@ -179,6 +203,9 @@ public enum LatticeTypeCatalog {
             var reason: String?, caption: String?
             if !appReady(id) { reason = appBatchPending }
             else if !engineLays(id) { reason = engineWaitsInfo(name); caption = engineWaitsCaption }
+            else if structural, sheetIDs.contains(id), !controlSheetsOnStructural {   // ★ notes30 M1: the reviewer's 3(b)
+                reason = sheetStructuralLater(name); caption = sheetStructuralCaption
+            }
             else if structural, let r = structuralRefusal(id) { reason = r; caption = aestheticOnlyCaption }
             else if structural, !certifiable.contains(id) { reason = TopOptKit.latticeTypeReadinessPlain(.notEither) }
             else if structural, let n = structuralNote(id) { reason = n; caption = strengthUnmeasuredCaption }
@@ -192,7 +219,7 @@ public enum LatticeTypeCatalog {
     public static func layoutEntriesFromCore(structural: Bool) -> [LatticeTypeEntry] {
         layoutEntries(structural: structural, certifiable: TopOptKit.latticeCertifiableTopologies,
                       engineLays: LatticeLayoutSession.lays, structuralRefusal: structuralRefusal,
-                      structuralNote: structuralNote, appReady: batchShipped)
+                      structuralNote: structuralNote, appReady: newEngineShipped)   // ★★ SHEETS: the new engine's gate
     }
 
     /// What a card that cannot be picked shows UNDER its name, at most five words (his rule); its (i) holds the reason.

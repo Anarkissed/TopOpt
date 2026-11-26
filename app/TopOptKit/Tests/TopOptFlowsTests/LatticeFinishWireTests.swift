@@ -87,7 +87,9 @@ final class LatticeFinishWireTests: XCTestCase {
         XCTAssertTrue(LatticeSetupWizard.rimNeedsEngineWork, "control: greyed on a core without the rim")
         LatticeBoundaryTreatment.controlRimGreyed = false
         let src = try FlexibleSource.code("LatticeSetupWizard.swift")
-        XCTAssertTrue(src.contains("selected: boundaryIndex, greyed: Self.rimNeedsEngineWork ? [1] : []"),
+        // ★ RE-PINNED (notes28 sheets, builder C; merged notes30 M1): Rim's grey kept, and Skin (index 2) greyed for a sheet
+        XCTAssertTrue(src.contains("selected: boundaryIndex, greyed: (Self.rimNeedsEngineWork ? [1] : Set<Int>())\n"
+                                   + "                            .union(LatticeSheets.greyed(model.topologyID).contains(.finishSkin) ? [2] : []))"),
                       "★ the finish row greys Rim (index 1)")
         XCTAssertTrue(src.contains(".disabled(greyed)"), "★ a greyed choice is not picked by a tap")
         XCTAssertTrue(src.contains("model.boundary == .rim ? Self.rimStoredLine : Self.rimGreyedLine"))

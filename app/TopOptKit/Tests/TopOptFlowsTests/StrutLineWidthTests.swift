@@ -368,9 +368,14 @@ final class StrutLineWidthTests: XCTestCase {
         //     strut-width dial, whose bottom is one extruded STRUT bead, never a wall loop.
         //   * `WorkspacePlaceholder`'s per-face density keypad -> `LatticeDensityDial.accept(lineWidthMM:)`: the same dial,
         //     refusing a percent past the type's open look with Allow quilt off.
-        XCTAssertEqual(strutSites, 22,
-                       "the twenty-two audited lattice sites (AppModel 0, LatticePage 3, "
-                       + "WorkspacePlaceholder 5, ProjectModel 7, LatticeSetupWizard 7). "
+        // ★ RE-PINNED 22 -> 24 (2026-11-25, notes28 sheets, builder C; merged notes30 M1): AUDITED. The Lattice page's two
+        //   sheet wall rows (`LatticeSetupWizard`: the Manual "Wall thickness" row's caption and the Auto wall row, both
+        //   `LatticeSheets.wallInfo(lineWidthMM:)`) say the thinnest wall, two lines of the STRUT bead (a sheet's wall is laid
+        //   by core's min_strut_mm, two strut lines), and Auto's wall at this cell (core's sheet_auto_wall_mm from the same
+        //   two lines). Never a wall loop.
+        XCTAssertEqual(strutSites, 24,
+                       "the twenty-four audited lattice sites (AppModel 0, LatticePage 3, "
+                       + "WorkspacePlaceholder 5, ProjectModel 7, LatticeSetupWizard 9). "
                        + "If this number moved, audit the new site and update the count.")
         XCTAssertTrue(offenders.isEmpty,
                       "lattice lineWidthMM site(s) reading a WALL bead:\n"
