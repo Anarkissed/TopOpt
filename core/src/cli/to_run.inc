@@ -2484,6 +2484,13 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
         i < result.pipeline.rung_non_convergent_residual.size()
             ? result.pipeline.rung_non_convergent_residual[i]
             : 0.0;
+    // The tolerance the failed solve really ran at (the optimiser's loose or tight
+    // one), not the configured default, which is what this line used to print.
+    const double nc_tol =
+        i < result.pipeline.rung_non_convergent_tolerance.size() &&
+                result.pipeline.rung_non_convergent_tolerance[i] > 0.0
+            ? result.pipeline.rung_non_convergent_tolerance[i]
+            : options.simp.cg_tolerance;
     std::fprintf(stderr,
                  "WARNING: rung %zu (vf %.2f) was REJECTED — %s. A linear solve did "
                  "not reach the CG tolerance %.3g: it stalled at residual %.3g after "
@@ -2492,7 +2499,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                  "already-accepted variant is unaffected. See report.json "
                  "rejected_variants and run_info.json rung_non_convergent.\n",
                  i, v.requested_volume_fraction, kRungNonConvergentReason,
-                 options.simp.cg_tolerance, nc_resid, nc_iter);
+                 nc_tol, nc_resid, nc_iter);
     std::fflush(stderr);
   }
 

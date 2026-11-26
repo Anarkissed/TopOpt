@@ -1735,6 +1735,9 @@ struct MinimizePlasticResult {
   std::vector<char> rung_non_convergent;
   std::vector<int> rung_non_convergent_iteration;
   std::vector<double> rung_non_convergent_residual;
+  // The tolerance that failed solve ran at; 0 when not recorded (the strength
+  // check's own solve). Same length and order as the three above.
+  std::vector<double> rung_non_convergent_tolerance;
   // Task 2026-08-03-preflight-feasibility-and-divergence (bar P6: THE GUARDS ARE
   // OBSERVABLE) — the per-rung outcome of the two DIVERGENCE guards, filled with
   // the same finalize-only discipline and always parallel to `evaluated`. Every
