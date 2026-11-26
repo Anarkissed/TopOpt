@@ -413,6 +413,13 @@ FixedDesignAnalysis analyze_fixed_design(
   // inflated by its small knockdown.
   std::vector<double> member_width_mm;
   double max_von_mises_eff = 0.0;
+  // TO rebuild stage 2: the wall-aware stress per voxel, kept only when it is to
+  // be read over a size (empty otherwise, so today's path allocates nothing).
+  const bool read_over_size =
+      strength_mode() == StrengthMode::Size && knockdown.stress_reading_mm > 0.0;
+  std::vector<double> von_mises_eff_field;
+  if (read_over_size && knockdown.width_aware)
+    von_mises_eff_field.assign(grid.voxel_count(), 0.0);
   if (knockdown.width_aware)
     member_width_mm = local_member_thickness_mm(grid, density, kIso,
                                                 kn.thickness_cap_voxels);
@@ -476,6 +483,7 @@ FixedDesignAnalysis analyze_fixed_design(
                 knockdown.infill_floor);
             const double vm_eff = st.von_mises / k_v;
             if (vm_eff > max_von_mises_eff) max_von_mises_eff = vm_eff;
+            if (!von_mises_eff_field.empty()) von_mises_eff_field[idx] = vm_eff;
             // Record the pair this max was taken over, so a diagnosis can reprice
             // the SAME population at a candidate infill / wall ring without a
             // re-solve (handoff 2026-08-02-gate-diagnosis-recommendations). This
@@ -493,12 +501,17 @@ FixedDesignAnalysis analyze_fixed_design(
       }
   // TO rebuild stage 2 (ledger A-02): the stress that decides is read over the
   // material's length, not at one voxel. The one-voxel peak is kept beside it.
-  // Not yet done here: the width-aware maximum (max_von_mises_eff) and the
-  // interlayer reading (its length is a fifth of this one, under a voxel so far).
+  // The wall-aware maximum (what production's gate reads) is read the same way.
+  // Not yet done here: the interlayer reading (its length is a fifth of this one,
+  // under a voxel so far).
   const double max_von_mises_one_voxel = max_von_mises;
-  if (strength_mode() == StrengthMode::Size && knockdown.stress_reading_mm > 0.0)
+  if (read_over_size) {
     max_von_mises = peak_stress_over_size(grid, out.von_mises_field, density, kIso,
                                           knockdown.stress_reading_mm);
+    if (!von_mises_eff_field.empty())
+      max_von_mises_eff = peak_stress_over_size(grid, von_mises_eff_field, density, kIso,
+                                                knockdown.stress_reading_mm);
+  }
   const double max_interlayer = max_interlayer_tension(grid, stress, build_dir);
 
   // Per-node displacement of the SAME solve — no new solve. DOF-ordered; exposed
