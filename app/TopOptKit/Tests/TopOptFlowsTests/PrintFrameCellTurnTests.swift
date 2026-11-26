@@ -477,7 +477,42 @@ final class PrintFrameCellTurnTests: XCTestCase {
         XCTAssertEqual(pass.printUp, SIMD3(1, 0, 0), "★ the pass keeps the lay's up (the bridges, and the build timelapse's floors)")
         pass.upload(LatticeLayoutBarsInputs(token: 8, bars: [0, 0, 0, 0, 5, 0.5, 0.8], flags: [16]))
         XCTAssertNil(pass.printUp, "as placed again")
-        XCTAssertEqual(MemoryLayout<LatticeLayoutBarsPass.Frame>.stride, 4 * 64 + 5 * 16, "the frame mirrors BarFrame (+ up)")
+        // BarFrame: 4 matrices, albedo, the map's 3 rows, the timelapse's 4 (builder N3), then the print's up
+        XCTAssertEqual(MemoryLayout<LatticeLayoutBarsPass.Frame>.stride, 4 * 64 + 9 * 16, "the frame mirrors BarFrame (+ up, last)")
+        XCTAssertEqual(MemoryLayout<LatticeLayoutBarsPass.Frame>.offset(of: \.up), 4 * 64 + 8 * 16)
+        let shader = latticeLayoutBarsShaderSource
+        let upRow = try XCTUnwrap(shader.range(of: "    float4   up;")), sizesRow = try XCTUnwrap(shader.range(of: "float4   buildSizes;"))
+        XCTAssertLessThan(sizesRow.lowerBound, upRow.lowerBound, "the shader's rows in the same order (the up last)")
+    }
+
+    // MARK: the build timelapse: the floors rise along the kept up
+
+    /// The regular lay's timelapse (builder N3, merged) puts the struts on floors along the world's up; for a lattice laid
+    /// standing on the face he kept, along the print's up (the floors are the print's layers). RED CONTROL `controlWorldUp`.
+    func testTheBuildTimelapseRisesAlongTheKeptUp() {
+        // the part placed Z-up on screen: the model matrix takes its +Z to the world's +Y
+        let model = simd_float4x4(columns: (SIMD4(1, 0, 0, 0), SIMD4(0, 0, -1, 0), SIMD4(0, 1, 0, 0), SIMD4(0, 0, 0, 1)))
+        let placed = LatticeBuildTimelapse.axes(model: model, printUp: nil)
+        XCTAssertEqual(placed.up, SIMD3(0, 0, 1), "as placed: the world's up, as before")
+        XCTAssertEqual(placed.across, SIMD3(1, 0, 0))
+        let kept = LatticeBuildTimelapse.axes(model: model, printUp: SIMD3(1, 0, 0))
+        XCTAssertEqual(kept.up, SIMD3(1, 0, 0), "★ kept +X: the floors rise along the print's up")
+        XCTAssertEqual(simd_dot(kept.up, kept.across), 0, accuracy: 1e-6, "the bays run square to it")
+        XCTAssertEqual(simd_length(kept.across), 1, accuracy: 1e-6)
+        // a bccz column along the kept up is a column (its floor's first snap); a strut along the part's Z is a bay
+        let box = (lo: SIMD3<Float>(0, 0, 0), hi: SIMD3<Float>(24, 20, 16))
+        let f = LatticeBuildTimelapse.Frame(lo: box.lo, hi: box.hi, up: kept.up, across: kept.across)
+        let column = LatticeBuildTimelapse.step(SIMD3(2, 5, 5), SIMD3(9, 5, 5), f)
+        let flat = LatticeBuildTimelapse.step(SIMD3(2, 5, 5), SIMD3(2, 5, 12), f)
+        XCTAssertEqual(column % LatticeBuildTimelapse.perFloor, 0, "★ the column stands along the kept up")
+        XCTAssertNotEqual(flat % LatticeBuildTimelapse.perFloor, 0, "★ … and the strut along the part's Z lies in a bay")
+        LatticeBuildTimelapse.controlWorldUp = true
+        defer { LatticeBuildTimelapse.controlWorldUp = false }
+        let red = LatticeBuildTimelapse.axes(model: model, printUp: SIMD3(1, 0, 0))
+        XCTAssertEqual(red.up, SIMD3(0, 0, 1), "RED CONTROL: the world's up, the kept face ignored")
+        let fr = LatticeBuildTimelapse.Frame(lo: box.lo, hi: box.hi, up: red.up, across: red.across)
+        XCTAssertNotEqual(LatticeBuildTimelapse.step(SIMD3(2, 5, 5), SIMD3(9, 5, 5), fr) % LatticeBuildTimelapse.perFloor, 0,
+                          "RED CONTROL: the column laid along the kept up is built as a bay")
     }
 
     // MARK: the Lattice page lays the cell lattice on the kept face
