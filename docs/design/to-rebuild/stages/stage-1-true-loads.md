@@ -49,8 +49,9 @@ Reading: Base is the part V-01 hurts. Today its margin jumps up and down by a fa
 | PillowBlock (left) | 48 / 64 / 96 / 128 | 1.85 / 1.48 / 1.07 / 0.78 | 1.32 / 1.10 / 0.90 / 0.74 |
 | Original stand | 96 / 128 | 4.47 / 2.93 | 4.83 / 3.15 |
 | Top Motor Mount | 96 / 128 | 1.64 / 1.33 | 1.65 / 1.33 |
+| Stand v4 | 96 / 128 | 1.94 / 2.12 | 2.32 / 1.96 |
 
-(Stand v4 follows when its two runs finish.) The reading stands: Base stops jumping with resolution (a factor of eight today; a steady fall here), and the parts whose faces sit well in the grid do not move. What the corrected clamp changed against the first, wrong table: the coarse-resolution margins are lower (Base 0.79 for 0.97 at res 48; PillowBlock 1.32 for 1.80), because a face held on its own nodes concentrates the reaction where a slab one voxel thick spread it; from res 128 up the two agree within 5 %. PillowBlock now reads LOWER than today at every resolution: today's one-voxel-thick clamp was flattering it.
+The reading stands: Base stops jumping with resolution (a factor of eight today; a steady fall here), and the parts whose faces sit well in the grid do not move. What the corrected clamp changed against the first, wrong table: the coarse-resolution margins are lower (Base 0.79 for 0.97 at res 48; PillowBlock 1.32 for 1.80), because a face held on its own nodes concentrates the reaction where a slab one voxel thick spread it; from res 128 up the two agree within 5 %. PillowBlock now reads LOWER than today at every resolution: today's one-voxel-thick clamp was flattering it.
 
 ## Measured: optimised
 
