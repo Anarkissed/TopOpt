@@ -148,6 +148,21 @@ Sample bracket A (226 g solid; as drawn 4.33 against 1.5). Picture: `stage-1-pic
 - A pad finding, seen in the run's own words and in the picture: on both the 0.52 and 0.38 versions the export "BRIDGED back into one piece (1 bridge, 749 voxels) ... bridge 13.5 mm". The thin fixed TAB (4 mm thick, pad 3 mm) was left cut off from the body by the optimiser, and the export's straight-bridge fallback joined it again; the boxy block beside the tab in the picture is that bridge. So at 3 mm the tab's pad does not keep the tab attached. This is exactly the case the automatic pad has to get right, and the res-64 sweep (pad 3 mm against the automatic rule) will show whether the rule cures it.
 - The two rows are not a before/after pair (different resolutions); the res-64 runs with the switch on are in progress.
 
+### The bracket at res 64, today against the drawn-face path at pad 3 mm (07:10; picture `stage-1-pics/sample_a_res64_today_vs_face.png`)
+
+| run | versions | bridges |
+|---|---|---|
+| today (nothing switched on) | 0.68: 4.71, 160.6 g; 0.52: 4.72, 129.1 g; 0.38: 4.82, 101.4 g; 0.26: 3.79, 77.8 g | none |
+| drawn-face loads, pad fixed 3 mm | 0.68: 5.29, 159.0 g; 0.52: 5.29, 126.0 g; 0.38: 4.66, 97.0 g; 0.26: 3.69, 72.2 g | ALL FOUR "BRIDGED back into one piece" (one bridge, 17.2 mm) |
+
+What the picture shows: the same carved web both ways; with the drawn-face path the thin fixed tab is joined to the base by a boxy block (the export's straight bridge), where today's path leaves it joined by the base itself.
+
+Why, worked out from the geometry (not yet confirmed by a run): the tab sits 3 to 7 mm above the bed, off the end of a 10 mm base whose underside is the other fixed face. Today's pads are three voxel LAYERS, 4.7 mm at this resolution: the base's pad reaches from the bed up to 4.7 mm and so overlaps the tab's height, and the two frozen blocks touch. At a true 3 mm the base's pad stops at 3 mm, exactly where the tab begins, the tab's own pad covers only the tab, and the material that joins them is free to go.
+
+And why the optimiser takes it: the base's underside already holds the part, so the tab's fixed face carries almost nothing. To the optimiser it is a spare support, and material joining it to the body does no work. The run's own word for this case elsewhere is "anchored piece detached: holds no load in this design".
+
+So this is NOT at root a question of pad depth. It is: **must every face he fixed stay joined to the part, even when the part does not need it for strength?** A person who draws a bolt tab expects it to still be there. Today the answer is "yes, by luck of the pad's thickness, and by a straight bridge when the luck runs out". A deeper pad makes the luck more likely; it does not make it a rule. For him in the morning.
+
 ## Still owed before the stage report
 
 - The original stand optimised both ways (queued), then Top Motor Mount; three settings; pad 2 / 3 / 4.5 mm.
