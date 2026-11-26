@@ -29,7 +29,7 @@ THE NIGHT OF 2026-11-26 (written 03:50 EST). The maintainer is asleep. His words
 
 Every tick: record what finished (stage file, commit by name, push), then do the next open item. Order agreed with him: B1, B3, B2, B5, B6, B4, with section A alongside.
 
-Queued for the lock (start by themselves): `stage1_eighth.sh` (Top Motor Mount res 96 and the stand res 128 from the drawn faces; waits 12 s after the lock frees). To queue next: B1, then B5.
+LOCK, 06:25: `stage1_eighth.sh` HAS IT since 06:24 (Top Motor Mount res 96, then the stand res 128, from the drawn faces; about 80 min). #362 stopped its sheet-law builder S1 early to let it in; S1 takes the lock back afterwards (2 to 2.5 h of sweep left). `b1_suite.sh` (the whole suite) is queued and waits until a lock line starting "S1" has come and gone, or until the file `agent-scratch/toreview/b1_go` exists. B5 after B1.
 Running without the lock: `sample_pad.sh` (the sample bracket, six pad settings). STOPPED 04:05: `stage1_padtm.sh` after its first run (Top Motor Mount res 64, pad 3 mm: four versions, margins 2.33 to 2.35, 105.1 / 102.9 / 101.1 / 98.9 g): the Mac was in 11.6 GB of swap with the kernel at 185 % CPU, my two low-priority runs were getting 3 to 6 % of a core each, and the made parts now carry the pad question better.
 
 A. Already agreed:
