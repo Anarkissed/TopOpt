@@ -1,7 +1,7 @@
 // FlexibleR7D2ReviewHostedTests — round 7, the review of R7-D2, the hosted half: the WHOLE page (WorkspacePlaceholder) on HIS
 // pad (A1_0003 + his live lattice: Group C = Face 3 + Face 5 at 25 mm), the lattice built, at img1's camera, at 13" and 11"
 // in both orientations. Written BEFORE the fixes (the red run: round7/batch_d2_review/d2r_red_run.txt).
-//   R1  the (i) opened from chip M never covers the chip
+//   R1  the (i) opened from chip M never covers the chip (★ notes30: it opens the centred notification, as the list's (i))
 //   R3  the (i)'s numbers lie inside the lattice legend's span (the Flexible lattice drawn at Face 3)
 //   R9  chip M's automatic spot keeps off Face 3's own outline
 //   R6  a renamed group's delete question never widens the 348 pt list; every trash stays inside it
@@ -155,13 +155,14 @@ final class FlexibleR7D2ReviewHostedTests: XCTestCase {
             XCTAssertFalse(chip.intersects(outline), "★ R9 \(tag): a spot off the face exists (\(clear)) — the chip keeps off the face it edits (\(chip) vs \(outline))")
         }
 
-        // R1 — the chip's (i): its card below the chip, never on it
+        // R1 — the chip's (i): ★ RE-PINNED (notes30, his one (i) of notes29; builder F1) it opens the centred notification over
+        // everything, never a card of its own on the chip (it drew "statsCard" below the chip; Notes30FollowUpsHostedTests draws
+        // the notification)
+        AppPopups.shared.current = nil
         try press(h, "info-c-" + r3.key, "Face 3's (i) on the chip")
         pump(1)
-        let card = try XCTUnwrap(h.frames.all["statsCard"], "\(tag): the (i)'s card")
-        let chipNow = try XCTUnwrap(h.frames.all["faceChip"])
-        XCTAssertFalse(card.intersects(chipNow), "★ R1 \(tag): the (i)'s card is not on the chip (\(card) vs \(chipNow))")
-        XCTAssertTrue(card.minX >= -0.5 && card.maxX <= size.width + 0.5 && card.minY >= -0.5 && card.maxY <= size.height + 0.5, "\(tag): on screen")
+        XCTAssertEqual(AppPopups.shared.current?.title, FlexibleFaceStatsRows.title(p.flexibleName(r3)), "★ R1 \(tag): the centred notification")
+        XCTAssertNil(h.frames.all["statsCard"], "★ R1 \(tag): no card of its own on the page")
 
         // R3 — the (i)'s numbers: the Flexible lattice drawn at Face 3, inside the legend's span
         let ends = try XCTUnwrap(s.latticeEnds(), "\(tag): the lattice legend")
@@ -171,23 +172,21 @@ final class FlexibleR7D2ReviewHostedTests: XCTestCase {
             let g = try XCTUnwrap(m.lattice)
             let cells = [FlexibleProbe.drawnCell(rho: ends.span.lowerBound, g.inputs).mm, FlexibleProbe.drawnCell(rho: ends.span.upperBound, g.inputs).mm]
             XCTAssertTrue(cell >= cells.min()! - 0.05 && cell <= cells.max()! + 0.05, "★ R3 \(tag): the (i)'s cell \(cell) lies inside the legend's \(cells)")
-            XCTAssertNotNil(h.frames.all["statsCard"], "the card shows them")
+            XCTAssertNotNil(AppPopups.shared.extra, "the notification shows them (★ notes30: under its words)")
             print("FLEX-R7D2R-R3 \(tag) (i) \(rows.rows.map { "\($0.label) \($0.value)" }) · legend \(ends.lo) … \(ends.hi)")
         } else {
             XCTFail("★ R3 \(tag): no numbers for Face 3 from his drawn lattice")
         }
-        s.faceUI.info = nil
+        AppPopups.shared.current = nil
         pump(0.5)
-        // the list's (i): beside the list, off it and off the chip
+        // the list's (i): ★ notes30 the same centred notification (it opened a card beside the list)
         s.pickGroup(c, project: p)
         pump(1)
         try press(h, "info-l-" + r3.key, "Face 3's (i) in the list")
         pump(1)
-        if let listCard = h.frames.all["statsCard"], let list = h.frames.all["selectionsList"] {
-            XCTAssertFalse(listCard.intersects(list), "★ R1 \(tag): the list's (i) card is off the list (\(listCard) vs \(list))")
-            if let g = h.frames.all["faceChip"] { XCTAssertFalse(listCard.intersects(g), "★ R1 \(tag): and off the chip (\(listCard) vs \(g))") }
-        } else { XCTFail("\(tag): the list's (i) card") }
-        s.faceUI.info = nil
+        XCTAssertEqual(AppPopups.shared.current?.title, FlexibleFaceStatsRows.title(p.flexibleName(r3)), "★ R1 \(tag): the list's (i) too")
+        XCTAssertNil(h.frames.all["statsCard"], "★ R1 \(tag): no card of its own beside the list")
+        AppPopups.shared.current = nil
         pump(0.5)
 
         // R6 — a renamed group's delete question never widens the list
@@ -239,7 +238,7 @@ final class FlexibleR7D2ReviewHostedTests: XCTestCase {
         try clearOfPlayer("the delete's message")
         s.undoDelete(project: p) {}
         pump(0.6)
-        print("FLEX-R7D2R \(tag) chip \(chip) · outline \(outline) · card \(card) · list \(list)")
+        print("FLEX-R7D2R \(tag) chip \(chip) · outline \(outline) · list \(list)")   // ★ notes30: the (i)'s card is the centred one
     }
 
     func testTheReviewFindingsOnHisPad13Portrait() throws { try run("13p", CGSize(width: 1032, height: 1376)) }

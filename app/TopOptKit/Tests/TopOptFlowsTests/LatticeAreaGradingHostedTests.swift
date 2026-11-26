@@ -4,8 +4,8 @@
 //
 // An area's tab on the Lattice page sets its own grade — on or off, what varies, the shape band (`LatticeSettings.areaGrading`,
 // keyed by the lattice group). Each include region the area emits sends what differs from the part as core's per-region
-// `grading` / `shape_grade_band_mm` (LatticeTypes' E3, 4ace41f5), each falling back to the job's `grading.*`. The preview draws
-// one grade, so Save keeps the part's grade where every area agrees and no region sends a key — the picture is the run.
+// `grading` / `shape_grade_band_mm` (LatticeTypes' E3, 4ace41f5), each falling back to the job's `grading.*`. ★ notes30: Save
+// keeps the Part tab's grade (Stress + shape unless he picked another there) and each area its own — never Group 1's on the part.
 #if canImport(AppKit) && canImport(MetalKit)
 import XCTest
 import SwiftUI
@@ -95,24 +95,31 @@ final class LatticeAreaGradingHostedTests: XCTestCase {
         XCTAssertNotNil(TopOptKit.jobSchemaError(try job(bad)), "★ CONTROL: core refuses a grade on an exclude region")
     }
 
-    /// ★ Save keeps ONE grade where the areas agree (the preview draws one), else the first area's is the part's.
-    func testSaveKeepsOneGradeWhereTheAreasAgree() {
+    /// ★ RE-PINNED (notes30, his rule of notes29: "It should always be 'Stress & Shape'"; builder F1): Save keeps the Part
+    /// tab's grade and each area keeps its own. Was `testSaveKeepsOneGradeWhereTheAreasAgree` — B7's "the first area's grade is
+    /// the part's", which turned the part (and every later group) to Group 1's grade; it stays below as the RED CONTROL
+    /// (`firstAreaLeads`). The page itself: Notes30FollowUpsHostedTests.
+    func testSaveKeepsThePartsGradeAndEachAreasOwn() {
         let a = UUID(), b = UUID()
         var s = LatticeSettings(enabled: true)
         s.gradingMode = .full
         let band = s.shapeFitBandMM
         s.saveAreaGrading([a: .init(gradingMode: .stressOnly), b: .init(gradingMode: .stressOnly)], areas: [a, b])
-        XCTAssertEqual(s.gradingMode, .stressOnly, "★ both areas Stress: the part's grade is Stress")
-        XCTAssertTrue(s.areaGrading.isEmpty, "★ and no area sends its own")
+        XCTAssertEqual(s.gradingMode, .full, "★ both areas Stress: the part keeps Stress + shape")
+        XCTAssertEqual(s.areaGrading, [a: .init(gradingMode: .stressOnly), b: .init(gradingMode: .stressOnly)], "★ each area its own")
 
-        s.gradingMode = .full
         s.saveAreaGrading([b: .init(gradingMode: LatticeGradingMode.none, shapeFitBandMM: band + 6)], areas: [a, b])
         XCTAssertEqual(s.gradingMode, .full, "the first area grades as the part")
         XCTAssertEqual(s.areaGrading, [b: .init(gradingMode: LatticeGradingMode.none, shapeFitBandMM: band + 6)])
 
         s.saveAreaGrading([a: .init(gradingMode: .fitShape), UUID(): .init(gradingMode: .stressOnly)], areas: [a, b])
-        XCTAssertEqual(s.gradingMode, .fitShape, "the first area's grade leads")
-        XCTAssertEqual(s.areaGrading, [b: .init(gradingMode: .full)], "★ the other keeps the part's old grade; a gone area drops")
+        XCTAssertEqual(s.gradingMode, .full, "★ the first area's grade never leads: the part keeps Stress + shape")
+        XCTAssertEqual(s.areaGrading, [a: .init(gradingMode: .fitShape)], "★ the first area keeps its own; a gone area drops")
+        // RED CONTROL: B7's rule — the first area's grade became the part's
+        var old = LatticeSettings(enabled: true)
+        old.saveAreaGrading([a: .init(gradingMode: .fitShape)], areas: [a, b], firstAreaLeads: true)
+        XCTAssertEqual(old.gradingMode, .fitShape, "RED CONTROL: the old Save turned the part to Group 1's grade")
+        XCTAssertEqual(old.areaGrading, [b: .init(gradingMode: .full)], "RED CONTROL: and pinned the other area to the part's old one")
 
         s.wholePart = true
         s.gradingMode = .full

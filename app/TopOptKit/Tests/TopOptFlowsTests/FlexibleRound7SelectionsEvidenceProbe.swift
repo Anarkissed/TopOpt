@@ -223,7 +223,7 @@ final class FlexibleRound7SelectionsEvidenceProbe: XCTestCase {
         pump(1)
         log.append("  (i) card \(h.frames.all["statsCard"].map(Self.f) ?? "none")")
         shot(h, "E05_info_four_numbers")
-        s.faceUI.info = nil
+        AppPopups.shared.current = nil   // ★ notes30: the (i) opens the centred notification
         press(h, "selTrash-\(c.uuidString)", what: "Group C's trash")
         shot(h, "E06_trash_confirm")
         press(h, "deleteConfirm", what: "[Delete]")
