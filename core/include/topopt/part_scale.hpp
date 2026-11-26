@@ -15,6 +15,9 @@
 #pragma once
 
 #include <initializer_list>
+#include <vector>
+
+#include "topopt/voxel.hpp"
 
 namespace topopt {
 
@@ -34,13 +37,28 @@ inline PartScale part_scale(double thickest_mm, double line_width_mm) {
   s.thickest_mm = thickest_mm;
   s.line_width_mm = line_width_mm > 0.0 ? line_width_mm : 0.45;
   s.needed_mm = 6.0 * s.line_width_mm;
-  s.too_small = thickest_mm < s.needed_mm;
+  s.too_small = thickest_mm < s.needed_mm;  // +infinity (beyond the measure) is never too small
   for (double nozzle : {0.6, 0.4, 0.25, 0.2})
     if (thickest_mm >= 6.0 * 1.125 * nozzle) {
       s.nozzle_that_fits_mm = nozzle;
       break;
     }
   return s;
+}
+
+// The thickest section of the part AS DRAWN (every non-empty voxel), in mm: the
+// largest local_member_thickness_mm. The grid is the part's bounding box, so the
+// outside of it is AIR (otherwise a small part lying against the box's faces
+// reads as thick as the measure reaches). +infinity = thicker than the measure's
+// reach (`cap_radius_voxels`), which is never too small.
+inline double thickest_section_mm(const VoxelGrid& grid, int cap_radius_voxels) {
+  std::vector<double> drawn(grid.voxel_count(), 0.0);
+  for (std::size_t i = 0; i < drawn.size(); ++i)
+    if (grid.tags[i] != VoxelTag::Empty) drawn[i] = 1.0;
+  double thickest = 0.0;
+  for (double t : local_member_thickness_mm(grid, drawn, 0.5, cap_radius_voxels, true))
+    if (t > thickest) thickest = t;
+  return thickest;
 }
 
 // AUTOMATIC RESOLUTION (the maintainer, 2026-11-26: "The automatic resolution

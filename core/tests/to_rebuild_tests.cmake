@@ -30,6 +30,11 @@ if(Eigen3_FOUND)
   add_test(NAME to_printed_mass COMMAND test_to_printed_mass)
 endif()
 
+# Too small for the nozzle, and the automatic resolution (part_scale.hpp).
+add_executable(test_to_part_scale tests/unit/test_to_part_scale.cpp)
+target_link_libraries(test_to_part_scale PRIVATE topopt)
+add_test(NAME to_part_scale COMMAND test_to_part_scale)
+
 # Tests C and D: the area a load really lands on, and protection depth in mm.
 # traction_loads lives in assembly.cpp (Eigen). Measures only until stage 1, which
 # adds --gate.

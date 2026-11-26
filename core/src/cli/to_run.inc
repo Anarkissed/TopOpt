@@ -2784,17 +2784,9 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   // switch, so today's report bytes are untouched.
   if (to_stage1_on()) {
     try {
-      std::vector<double> drawn(grid.voxel_count(), 0.0);
-      for (std::size_t idx = 0; idx < drawn.size(); ++idx)
-        if (grid.tags[idx] != VoxelTag::Empty) drawn[idx] = 1.0;
-      double thickest = 0.0;
-      // The grid is the part's bounding box: outside it is air, or a part lying
-      // against the box's faces would read as thick as the measure reaches.
-      for (double t : local_member_thickness_mm(grid, drawn, 0.5,
-                                                AnalysisKnobs{}.thickness_cap_voxels, true))
-        if (t > thickest) thickest = t;  // +infinity = thicker than the measure's reach
+      const double thickest = thickest_section_mm(grid, AnalysisKnobs{}.thickness_cap_voxels);
       const PartScale ps = part_scale(thickest, options.wall_line_width_mm);
-      if (std::isfinite(thickest) && ps.too_small) {
+      if (ps.too_small) {
         result.pipeline.report.too_small.evaluated = true;
         result.pipeline.report.too_small.thickest_mm = ps.thickest_mm;
         result.pipeline.report.too_small.needed_mm = ps.needed_mm;
