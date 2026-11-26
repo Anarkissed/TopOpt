@@ -282,3 +282,25 @@ Elliptical hole, a / b = 2, pull tilted 30 degrees, the same plate (b = 3 mm) at
 | E x fill^3 (today) | 5.34 | 4.31 | 4.79 | 5.43 | -13.9 to +8.6 % |
 
 By the ruling: E x fill^2 at one voxel does NOT replace today's reading for the size-under-a-voxel case; today's E x fill^3 stays there. But the table says more than that, and it is not comfortable: on this shape TODAY'S reading is itself 13.9 % under the textbook at one resolution and 4.2 % under at another, and swings 22 % between resolutions. The sharper the notch (tip radius b^2 / a = 1.5 mm here, 0.75 to 1.5 voxels), the less any one-voxel reading can hold it. The round hole (radius 3 to 6 voxels) flattered all three forms. For the reviewer: numbers sent; what the size-under-a-voxel case should do on sharp notches is open.
+
+### Item 3 with the solve, and a first look at item 2's switch point (2026-11-26 16:20, build of 0a1d4286)
+
+Two forms of "the ball may sit on the part's edge" were built and run on both shapes, real stiffness (E x fill):
+- FORM A (committed, 0a1d4286): centred on any voxel holding material; every cut voxel's material counted, with the stress the solve gives in it.
+- FORM B (tried, NOT kept): centred anywhere, but only printed voxels (at least half full) averaged.
+
+The plate, against the reading's own true value, by how many VOXELS the size spans:
+
+| size | voxel | voxels across | form A | form B | before |
+|---|---|---|---|---|---|
+| 1.8 mm | 1.5 mm | 1.2 | +15.6 % | +0.5 % | +0.5 % |
+| 1.8 mm | 1.2 mm | 1.5 | +7.1 % | -4.6 % | -4.6 % |
+| 1.8 mm | 1.0 mm | 1.8 | +2.9 % | -3.2 % | -3.2 % |
+| 3.6 mm | 2.0 mm | 1.8 | -3.1 % | -10.5 % | -10.5 % |
+| 3.6 mm | 1.5 mm | 2.4 | -2.0 % | -9.5 % | -9.5 % |
+| 3.6 mm | 1.2 mm | 3.0 | +5.2 % | +2.3 % | -7.0 % |
+| 3.6 mm | 1.0 mm | 3.6 | +5.0 % | +3.2 % | -1.6 % |
+
+Read plainly. Form B does nothing on coarse voxels (its best ball is still one centred inside the material) and keeps the 10 % miss: dropped. Form A is never more than 3.1 % low on the plate anywhere, and from 1.8 voxels across upward it sits between -3.1 and +5.2 % (a spread of 8.3, inside the 10 % bar). Under 1.8 voxels across it reads HIGH (the safe side), up to +15.6 %, because the stress the solve gives in a nearly empty cut voxel runs high and a small ball is mostly such voxels; where the ball does not reach past its own voxel at all (size under the voxel) it would read one such voxel alone, +44 %: that is the ruling's case 4 and must take the one-voxel form on PRINTED voxels, not this. The ring with form A: 3.6 mm reads +2.9 to +5.5 % at all four resolutions; its 1.8 mm rows by voxel count are owed (the test prints only the range, +1.5 to +42.7 %, the high end being the size-under-a-voxel row).
+
+FIRST READING of the switch point (item 2): about 1.8 voxels across on the plate. Owed before it is stated: the same table for the ring, and sizes chosen to land between 1.5 and 2.5 voxels across at each resolution, printed by the tests themselves.
