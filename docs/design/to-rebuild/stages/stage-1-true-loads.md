@@ -238,6 +238,26 @@ His words: "Definitely a pop-up for when a part is too small for the nozzle with
 - The pop-up, proposed wording for #362 (centred, his rule): "This part is too small for a 0.4 mm nozzle. Its thickest section is 2.0 mm; the optimiser needs 2.7 mm to make a cut it can print. Try a 0.25 mm nozzle." with buttons "Change nozzle" and "Run anyway". When no nozzle fits: "... Its thickest section is 0.8 mm. No common nozzle leaves room. Resin printing would."
 - Open, for him: the six-line-widths threshold is my reading of "room to cut"; and the advice is on the thickest section only, so a part with one thick lump and thin arms everywhere else is not flagged.
 
+## Automatic resolution (the rule written 2026-11-26 05:15; his decision; not wired into any job yet)
+
+His words: "The automatic resolution from part size is also great", and "these settings (resolution/pad thickness) should be manually adjustable if in 'Manual' mode."
+
+- The rule (`auto_resolution` in `part_scale.hpp`): one voxel per wall-line width along the part's longest side, so the smallest printable wall (two lines) is two voxels across at any part size; capped at 192 and floored at 32.
+
+| longest side | resolution | voxel |
+|---|---|---|
+| 8 mm | 32 (floored) | 0.25 mm |
+| 20 mm | 45 | 0.44 mm |
+| 40 mm | 89 | 0.45 mm |
+| 73 mm | 163 | 0.45 mm |
+| 100 mm | 192 (capped) | 0.52 mm |
+| 160 mm | 192 (capped) | 0.83 mm |
+| 250 mm | 192 (capped) | 1.30 mm |
+
+- What it would change for him: his jobs run at 96 or 128 today. Under this rule every part over 86 mm runs at 192, which is 8 times the voxels of 96 and far more time and memory; a 40 mm part runs at 89. So "voxel = line width" is the honest target and the CAP is what decides most of his parts. The cap is the real decision: 192 is the finest his reference runs have used, not a measured limit of the Mac or the iPad.
+- Not wired: the job's `resolution` is a number the app sends. For #362 with the flip: Auto sends the number this function gives (or the job carries "auto" and the core resolves it; a schema change, his and #362's call); Manual sends the typed number as today.
+- For him in the morning: what the cap should be on the iPad and on the Mac worker (time and memory against detail), and whether Auto should pick a COARSER voxel than one line width (two line widths would halve the resolution and cut the voxels by eight).
+
 ## For #362 (handed over with the switch flip; not edited by me)
 
 Until these land, with the switch on, the app's previews count voxels the old way while the run freezes by true distance.

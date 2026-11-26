@@ -43,4 +43,38 @@ inline PartScale part_scale(double thickest_mm, double line_width_mm) {
   return s;
 }
 
+// AUTOMATIC RESOLUTION (the maintainer, 2026-11-26: "The automatic resolution
+// from part size is also great", and in Manual mode it stays adjustable).
+//
+// The resolution is the number of voxels along the part's longest side. Today it
+// is a number picked by hand, so a small part gets tiny voxels it does not need
+// and a large one gets voxels far wider than anything the printer makes. Auto
+// picks the voxel from the PRINTER: one voxel per wall-line width, so the
+// smallest printable wall (two lines) is two voxels across at any part size.
+// That is capped (memory and time grow with the cube of the resolution) and
+// floored (a very small part still needs enough voxels to have a shape).
+//   resolution = clamp(ceil(longest side / line width), floor, cap)
+// `capped` says the part is too large for a voxel per line at the cap; then
+// `voxel_mm` is what it gets, and features under two of those do not resolve.
+struct AutoResolution {
+  int resolution = 0;
+  double voxel_mm = 0.0;
+  bool capped = false;
+  bool floored = false;
+};
+
+inline AutoResolution auto_resolution(double longest_side_mm, double line_width_mm,
+                                      int cap = 192, int floor = 32) {
+  AutoResolution r;
+  const double lw = line_width_mm > 0.0 ? line_width_mm : 0.45;
+  if (!(longest_side_mm > 0.0)) return r;
+  int n = static_cast<int>(longest_side_mm / lw);
+  if (n * lw < longest_side_mm) ++n;
+  r.capped = n > cap;
+  r.floored = n < floor;
+  r.resolution = n > cap ? cap : (n < floor ? floor : n);
+  r.voxel_mm = longest_side_mm / r.resolution;
+  return r;
+}
+
 }  // namespace topopt
