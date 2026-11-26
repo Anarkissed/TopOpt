@@ -13162,6 +13162,7 @@ ll::StrengthDone run_lattice_file_strength(const ll::StrengthAsk& ask,
 }
 
 // The interim guard's plain sentence (the reviewer's ruling with the owner's approval, 2026-11-26).
+constexpr double kSolidDepthNeededVoxels = 1.5;   // measured, see solid_depth_needed_mm
 const char* const kLoadOnBareLatticeText =
     "A load lands on bare vines. Give the loaded face a Solid finish or a protected skin so its strength can be checked.";
 
@@ -13829,6 +13830,10 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
       s += "    \"load_on_frame_n\": " + num(c.load_on_frame_n) + ",\n    \"load_total_n\": " + num(c.load_total_n) +
            ",\n    \"load_share\": " + num(c.load_share) + ",\n    \"load_on_lattice_at\": [" + num(at.x) + ", " +
            num(at.y) + ", " + num(at.z) + "],\n    \"fail_text\": " + json_str(kLoadOnBareLatticeText) + ",\n";
+      // The depth of solid (a Solid finish or a protected skin) under the loaded face that clears the guard and the open
+      // lattice test together: 1.5 of the check's voxels, measured (organic_bare_lattice_depth, 2026-11-26: on a 24 mm
+      // coupon at resolution 40 the guard cleared at 1 voxel, the open-lattice test at 1.5, with the switch off and on).
+      s += "    \"solid_depth_needed_mm\": " + num(kSolidDepthNeededVoxels * cert_grid.spacing) + ",\n";
     }
   }
   s += "    \"solid_margin\": {\"worst_case\": " + num(R.solid_margin.worst_case) + ", \"in_plane\": " + num(R.solid_margin.in_plane) +
