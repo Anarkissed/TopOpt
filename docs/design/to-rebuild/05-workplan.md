@@ -52,6 +52,12 @@ Raised 2026-11-26 after his question "why can't the app just scale everything up
 - Why scaling up and back changes nothing and breaks things: the grid is a count of voxels across the part, so it scales with the part and every grid artefact stays; the lengths that do NOT scale are the printer's and the material's (line width, smallest wall, layer height, lattice cell, the stress-reading length) and the depths he types in mm.
 - What small parts really show: a fixed physical length that is large against the part (a 3 mm pad on a 10 mm block). Proposed, awaiting his word: (1) a rule that every length in the core is either physical (mm, never scaled) or relative to the part, no bare numbers; (2) the pad defined from the printer and the part (a few wall-line widths, capped at a share of the local thickness) and not a bare 3 mm; (3) resolution chosen from the part's size and the line width (Auto), with an engineer's override; (4) a test that runs one part at two sizes with loads scaled to the same stress: the same shape, and walls still at least two real line widths at both sizes; (5) a plain pop-up when a part is too small for the nozzle to leave the optimiser any printable room.
 
+DECIDED by the maintainer, 2026-11-26 01:15 (on the pad, from the list above): "Pad in wall-line widths with a cap sounds right." and "I definitely think it should be automatic first, with a warning/notice explaining what happens when if you manually do it and get it wrong." So:
+- Auto (the default, nothing on screen): the pad is a number of wall-line widths, capped at a share of the material it sits in.
+- Engineers may type a pad depth; when they do, a notice says in plain words what goes wrong if it is too small (the anchor or load can tear away from the body: a version may be refused) or too large (it freezes material the optimiser could have removed, and on a small part can block the design altogether). Five words on screen at most, the rest behind the (i) (his help-text rule).
+- STILL TO SETTLE WITH HIM, with numbers: how many line widths, and what share for the cap. The stand at 2 / 3 / 4.5 mm (queued for the lock) and the small scenario part (3.0 refused the smallest version, 3.75 shipped all, 4.5 lost two) are the evidence to bring.
+- The other four ideas in the list (the rule on lengths, Auto resolution, the two-size test, the too-small pop-up) are NOT decided.
+
 ## 0. Where the work stands (kept current; newest first)
 
 **2026-11-25, 19:10 EST.** Work done while the lock was held (release 20's suite since 14:44).
