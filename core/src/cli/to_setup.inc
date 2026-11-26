@@ -32,10 +32,6 @@ JobSetup build_job_setup(const JobDescription& job, const StepModel& model,
   VoxelGrid& grid = S.grid;
   std::vector<DirichletBC>& bcs = S.bcs;
   MinimizePlasticOptions& options = S.options;
-  // TO rebuild stage 2: the size the deciding stress is read over, from the job's
-  // material (half the lowest published length; 0 where nothing is published).
-  if (strength_mode() == StrengthMode::Size)
-    options.stress_reading_mm = reading_size_for_job_mm(job.material);
   ProductionLoadCase& lc = S.lc;
   std::string& loadcase_receipt = S.loadcase_receipt;
   // Two modes, both driving the SAME production optimizer configuration as the
@@ -268,5 +264,10 @@ JobSetup build_job_setup(const JobDescription& job, const StepModel& model,
     // hardware's full count (which is what "he needs his machine" means).
     options.plsm.threads = production_matfree_thread_count();
   }
+  // TO rebuild stage 2: the size the deciding stress is read over, from the job's
+  // material (half the lowest published length; 0 where nothing is published).
+  // Set LAST: the production load case replaces the whole options value above.
+  if (strength_mode() == StrengthMode::Size)
+    options.stress_reading_mm = reading_size_for_job_mm(job.material);
   return S;
 }

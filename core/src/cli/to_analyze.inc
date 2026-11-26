@@ -177,9 +177,6 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   VoxelGrid model_grid;
   std::vector<DirichletBC> bcs;
   MinimizePlasticOptions options;
-  // TO rebuild stage 2 (see to_setup.inc).
-  if (strength_mode() == StrengthMode::Size)
-    options.stress_reading_mm = reading_size_for_job_mm(job.material);
   const bool loadcase = job.loads.present;
   // loadcase only: the distributed tractions from the declared force groups are
   // computed on the model faces up front (INDEPENDENT of the fixed design's
@@ -474,6 +471,10 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   // on the identical rule. THE ONE builder (knockdown_spec_for) — shared with the
   // optimizer's per-rung gate and the on-device bridge so all three agree by
   // construction. width_aware defaults false → the scalar f^1.5 gate.
+  // TO rebuild stage 2 (see to_setup.inc); set here, after the load case has
+  // replaced the options.
+  if (strength_mode() == StrengthMode::Size)
+    options.stress_reading_mm = reading_size_for_job_mm(job.material);
   const KnockdownSpec knockdown = knockdown_spec_for(options);
 
   // ── THE single analysis solve — no optimization ─────────────────────────────
