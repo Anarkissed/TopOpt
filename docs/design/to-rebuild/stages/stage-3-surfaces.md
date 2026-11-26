@@ -11,7 +11,16 @@ Branch `claude/topopt-stage-3-surfaces-7f58fd`, from 2b40bcf4. Status: IN PROGRE
   3. Base, Pressing Plate Mount, PillowBlock stands: the drawn part itself fails stage 1's face loads (as-drawn margin 0.35 / 0.35-1.1 against 1.5 required): not stage 3. Their surfaces are compared with stage 3 alone (same loads as the before files).
   Also my script: a part that hit its time limit ended hold A (Top Motor Mount and Stand v4 at 96 never ran); fixed.
 - Running: `agent-scratch/tosurface/launch_ref3.sh` on frozen build 733d46c6, four holds (stand + Top Motor Mount at 64; Top Motor Mount + Stand v4 at 96; base / pressing / pillows, stage 3 alone; Top Motor Mount at 64, knots 1.5). Announced to TOReview.
-- Re-fit, measured: the narrow-band re-fit (warm-started; only the knots whose reach touches the surface band are solved for) leaves the re-fits at about 40 % of the loop's time; the CG "cap" is a tolerance artefact (1e-10 asked, about 1e-6 reached in 2,000 iterations). Slope of phi at the surface: median 1.2 on the stand (held), about 3 on Top Motor Mount (NOT held), both read on the whole zero set before the cut; from 733d46c6 it is read on the printed file's own corners.
+- Re-fit, measured: the narrow-band re-fit (warm-started; only the knots whose reach touches the surface band are solved for) leaves the re-fits at about 40 % of the loop's time; the CG "cap" is a tolerance artefact (1e-10 asked, about 1e-6 reached in 2,000 iterations). Slope of phi at the surface: the "median 3-5" on Top Motor Mount was mostly my measure: it read phi's whole zero set, including the part the cut by the drawn part throws away (outside the part phi is only carried across the faces). On the printed file's own corners (`stages/slope_at_file.py`, phi rebuilt from the saved coefficients):
+
+  | file | corners on phi = 0 | slope p5 / p25 / median / p75 / p95 |
+  |---|---|---|
+  | Top Motor Mount res 32, narrow-band build, vf 0.68 | 1,427 | 0.80 / 1.17 / 1.63 / 2.15 / 5.45 |
+  | Top Motor Mount res 96 (hold 1 build), vf 0.68 / 0.52 / 0.38 / 0.26 | 10,860 / 13,039 / 11,390 / 8,973 | medians 2.37 / 1.97 / 2.50 / 2.62; p95 3.8 / 3.6 / 10.1 / 11.8 |
+  | Stand 128, vf 0.68 | 626 | 0.84 / 1.37 / 1.74 / 2.47 / 3.54 |
+  | Stand v4, vf 0.68 | 802 | 1.35 / 1.72 / 2.10 / 2.49 / 3.20 |
+
+  So the slope sits near 2, not 1, with a tail. What the band rule protects ("the mesher and the fill count see the same wall") is met where it is measured: the file's own re-check against the certified design, Top Motor Mount res 32: margin 15.29 -> 15.34, 15.05 -> 15.16, 14.73 -> 14.92, 14.40 -> 14.45 (0.3-1.3 %, limit 2 %). From 733d46c6 the run's own `[surface]` line reads the slope on the printed corners.
 - Then: fill the before/after table with `measure_area.py` (before = ledger D's STLs, same ruler); decide the knot spacing from hold C; test P; pictures; report.
 - Not started: close-out (delete the switch and the old path) waits for the gate and his OK.
 
