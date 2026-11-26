@@ -609,6 +609,30 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
         if (std::find(faces.begin(), faces.end(), model.triangle_face[t]) != faces.end())
           tris.push_back(t);
       if (tris.empty()) continue;
+      if (face_load_mode() != FaceLoadMode::Voxel) {
+        // TO rebuild stage 1: the bolt's springs take their area from the DRAWN
+        // face (each node's own share of it, and its normal), not from the voxel
+        // faces of whatever was tagged. No staircase factor is needed: the area is
+        // the true one already, so the anchor's total stiffness is the same at
+        // any grid alignment and resolution.
+        const std::vector<FacePiece> pieces =
+            a.face_id >= 0 ? face_pieces(model, {a.face_id}, 0.5 * h)
+                           : region_pieces(model, region_or_throw(a.region_id, "load case anchor"),
+                                           0.5 * h);
+        for (const NodeArea& na : face_node_areas(grid, pieces)) {
+          if (!(na.area > 0.0)) continue;
+          any_fixture = true;
+          const double k_node = kBearingSteelMpa / kBearingLengthMm * na.area;
+          DirichletBC b;
+          b.node = na.node;
+          b.spring = k_node;
+          b.spring_tangent = kBearingTangentFraction * k_node;
+          b.normal = na.normal;
+          bcs.push_back(b);
+          ++n_springs;
+        }
+        continue;
+      }
       // Each EXPOSED voxel face of the anchor's own Fixture voxels that lies on the
       // anchor (its centre within 0.75 h of the CAD triangles, facing along their
       // normal) gives h^2 / 4 to each of its four corners. A node's spring is that area

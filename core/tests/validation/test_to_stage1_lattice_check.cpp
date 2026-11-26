@@ -5,11 +5,12 @@
 //   A  a box on the grid, lattice from its whole top face to a depth that is a
 //      whole number of voxels, held on the whole bottom, loaded on the whole
 //      top. THE CONTROL: the switch should change nothing beyond rounding.
-//   B  a 56 x 56 x 24 mm box turned 17 degrees about z and 9 about x, so no face
-//      lies on the grid (seven 8 mm cells across, so whole cells exist inside:
-//      LatticeReview, 2026-11-25; the cell grid follows the model's axes and a
-//      cell that meets a wall earns no credit); loaded on a (tilted) side face that carries a protected skin
-//      1.3 mm deep, which is not a whole number of voxels. Regular cells.
+//   B  a 56 x 56 x 32 mm box ON the grid with one top edge chamfered (about 31
+//      degrees): the chamfer is the loaded face, with a protected skin 1.3 mm
+//      deep (not a whole number of voxels). The lattice region is the top face,
+//      three 8 mm cells deep, so whole cells exist and earn credit
+//      (LatticeReview, 2026-11-25: a cell is whole only when all 27 of its
+//      sample points are lattice, and the cells follow the model's axes).
 //   C  job B with Organic (traced), so the frame-of-beams check runs.
 //
 // Each job runs twice in this process: switch off, then `face`. Printed per
@@ -79,6 +80,28 @@ TriangleMesh box(double L, double W, double H, const Turn& t) {
   return m;
 }
 
+// A 56 x 56 x 32 mm box on the grid with one top edge cut off by a flat chamfer
+// (10 mm in, 6 mm down, about 31 degrees): every face lies on the grid except the
+// chamfer, which is the loaded face. Outward-facing triangles.
+TriangleMesh chamfered_box() {
+  const double L = 56, W = 56, H = 32, in = 10, down = 6;
+  // The profile in x-z, counter-clockwise seen from -y.
+  const double px[5] = {0, L, L, L - in, 0}, pz[5] = {0, 0, H - down, H, H};
+  TriangleMesh m;
+  for (int y = 0; y < 2; ++y)
+    for (int i = 0; i < 5; ++i) m.vertices.push_back({px[i], y ? W : 0.0, pz[i]});
+  for (int i = 0; i < 5; ++i) {  // the five sides
+    const int a = i, b = (i + 1) % 5;
+    m.triangles.push_back({a, b, b + 5});
+    m.triangles.push_back({a, b + 5, a + 5});
+  }
+  for (int i = 1; i + 1 < 5; ++i) {  // the two ends, as fans
+    m.triangles.push_back({0, i, i + 1});          // y = 0, normal -y
+    m.triangles.push_back({5, 5 + i + 1, 5 + i});  // y = W, normal +y
+  }
+  return m;
+}
+
 int face_with_normal(const StepModel& m, const Vec3& n) {
   for (int f = 0; f < m.face_count; ++f) {
     const StepFaceInfo& fi = m.faces[static_cast<std::size_t>(f)];
@@ -91,11 +114,11 @@ int face_with_normal(const StepModel& m, const Vec3& n) {
 
 struct Faces { int top = -1, bottom = -1, side = -1; };
 
-std::string file_job(const std::string& model, const Faces& f, const std::string& extra) {
+std::string file_job(const std::string& model, const Faces& f, const std::string& extra, int depth_mm = 8) {
   return "{\"mode\": \"lattice_file\", \"model\": \"" + model + "\", \"output\": \"lattice.stl\", "
          "\"strength_job\": \"strength_job.json\", "
          "\"layout\": {\"min_strut_lines\": 2, \"region_ids\": [1], \"region_no_lattice\": [0], "
-         "\"region_depth_mm\": [8], \"region_expand_mm\": [0], \"region_face_counts\": [1], "
+         "\"region_depth_mm\": [" + std::to_string(depth_mm) + "], \"region_expand_mm\": [0], \"region_face_counts\": [1], "
          "\"region_faces\": [" + std::to_string(f.top) + "], \"topology\": \"octet\", "
          "\"algorithm\": \"uniform\", \"cell_max_mm\": 8, \"min_cells_across\": 1" + extra + "}}";
 }
@@ -214,9 +237,9 @@ int main() {
   int failures = 0;
 
   // 32 x 32 x 16 mm at resolution 40: voxel 0.8 mm, so the 8 mm lattice depth is ten voxels.
-  const Turn none = turn(0.0, 0.0), tilted = turn(17.0, 9.0);
+  const Turn none = turn(0.0, 0.0);
   write_stl_file(kDir + "/box.stl", box(32, 32, 16, none), StlFormat::Binary);
-  write_stl_file(kDir + "/tilted.stl", box(56, 56, 24, tilted), StlFormat::Binary);
+  write_stl_file(kDir + "/tilted.stl", chamfered_box(), StlFormat::Binary);
   auto faces = [&](const std::string& file, const Turn& t) {
     const StepModel m = import_part_file_resolved(kDir + "/" + file);
     Faces f;
@@ -226,7 +249,15 @@ int main() {
     std::printf("%s faces: top %d bottom %d side %d (of %d)\n", file.c_str(), f.top, f.bottom, f.side, m.face_count);
     return f;
   };
-  const Faces fa = faces("box.stl", none), fb = faces("tilted.stl", tilted);
+  const Faces fa = faces("box.stl", none);
+  Faces fb = faces("tilted.stl", none);
+  {
+    // Job B's loaded face is the chamfer (normal (6, 0, 10) / 11.66).
+    const StepModel m = import_part_file_resolved(kDir + "/tilted.stl");
+    const double n = std::sqrt(6.0 * 6.0 + 10.0 * 10.0);
+    fb.side = face_with_normal(m, {6.0 / n, 0.0, 10.0 / n});
+    std::printf("chamfer face %d\n", fb.side);
+  }
   if (fa.top < 0 || fa.bottom < 0 || fb.top < 0 || fb.bottom < 0 || fb.side < 0) {
     std::printf("a face was not found\n");
     return 1;
@@ -236,7 +267,7 @@ int main() {
   // bounding box (mostly along z, some along x), the same for both switch values.
   {
     Vec3 lo{1e300, 1e300, 1e300}, hi{-1e300, -1e300, -1e300};
-    for (const Vec3& v : box(56, 56, 24, tilted).vertices) {
+    for (const Vec3& v : chamfered_box().vertices) {
       lo = {std::min(lo.x, v.x), std::min(lo.y, v.y), std::min(lo.z, v.z)};
       hi = {std::max(hi.x, v.x), std::max(hi.y, v.y), std::max(hi.z, v.z)};
     }
@@ -258,11 +289,11 @@ int main() {
   const std::string protect =
       ", \"face_protections\": [{\"face_id\": " + std::to_string(fb.side) + ", \"depth_mm\": 1.3}]";
   const std::string weave = ", \"region_weave\": [true], \"organic_spacing_mm\": 4, \"organic_width_mm\": 0.9";
-  std::string organic_job = file_job("tilted.stl", fb, weave);
+  std::string organic_job = file_job("tilted.stl", fb, weave, 24);
   organic_job.replace(organic_job.find("\"layout\""), 8, "\"tensor\": \"stress.tensor\", \"layout\"");
   const std::vector<Job> jobs = {
       {"A_control", file_job("box.stl", fa, ""), strength_job("box.stl", fa, fa.top, "")},
-      {"B_off_grid", file_job("tilted.stl", fb, ""), strength_job("tilted.stl", fb, fb.side, protect)},
+      {"B_off_grid", file_job("tilted.stl", fb, "", 24), strength_job("tilted.stl", fb, fb.side, protect)},
       {"C_organic", organic_job, strength_job("tilted.stl", fb, fb.side, protect)},
   };
   for (const Job& j : jobs) {
