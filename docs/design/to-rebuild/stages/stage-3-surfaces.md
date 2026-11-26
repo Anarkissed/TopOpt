@@ -1,6 +1,13 @@
 # Stage 3: smooth surfaces (TOSurface)
 
-Branch `claude/topopt-stage-3-surfaces-7f58fd`, from 2b40bcf4. Status: IN PROGRESS. Nothing here is released.
+Branch `claude/topopt-stage-3-surfaces-7f58fd`, from 2b40bcf4. Status: IN PROGRESS, PAUSED 2026-11-26 00:35 EST (weekly usage at 94 %; his rule). Nothing here is released.
+
+## Where I stopped (read this first)
+
+- Code: everything below is committed and pushed. Tests A, B, F, J pass their gates (`--gate` in ctest). Off path byte-identical (M); switch-on runs repeat byte for byte (K).
+- Findings since hold 1: (1) design-box runs now use the new export (Stand v4 went through the voxel export in hold 1); (2) the re-fit runs just before each margin probe; (3) the re-fit's own CG stops at its 2,000-iteration cap with residual up to 2e-6 on real parts, and the slope at shipped designs is still median 3 (not 1): NOT RESOLVED; a gentler far weight (0.1) cost test A its gate (0.075 mm), so it stays 0.01; the move statistic was corrected (distance before against after) and not yet read on a real run; (4) at res 32, stage 1 + stage 3 together remove the ladder strips and lumps along Top Motor Mount's box (`stage-3-pics/topmotor_res32_stage3_alone_vs_stage1and3.png`): the final table must be stage 1 + 3.
+- Next, when usage allows: run `agent-scratch/tosurface/launch_ref2.sh` (stage 1 + 3 on frozen build 6f2b3dac, three lock holds: stand128 / topmotor / standv4; base / pressing / pillow L+R; topmotor@64 knots 2 against 1.5). Announced to TOReview; not started. Then: read the corrected re-fit statistics; decide the knot spacing; fill the before/after table with `measure_area.py` (before = ledger D's STLs, same ruler); report.
+- Not started: close-out (delete the switch and the old path) waits for the gate and his OK.
 
 ## What is built (all behind ONE switch, `TOPOPT_SURFACE`, default off = today)
 
