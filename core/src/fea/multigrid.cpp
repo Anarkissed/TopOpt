@@ -2734,6 +2734,19 @@ void vcycle_quality(const MfHierarchy& H, const MgOpts& o, int iters,
 // An empty loose set leaves the solve exactly as it was (same operator, same
 // iterations, same output). Deterministic: ascending seeds, fixed neighbour
 // order, no clock in any decision (the census's wall time is reported only).
+// THE CONNECTION RULE, support-only form (the reviewer's ruling 2026-11-26,
+// maintainer-approved; fea.hpp FeaAnchorBySupportOnly). Inside the scope a piece
+// is HELD only when one of its element nodes carries an engaged (not released)
+// Dirichlet BC or spring; a load no longer holds it (under self-weight every
+// solid node carries one, so the rule above took no floating piece out: demo
+// solve 10, 0 of 11). A loose piece with only its registered BODY load leaves
+// the solve with that load; a loose piece touching a node with an APPLIED load
+// (its load beyond its registered weight) makes the solve throw FeaLoadUnheld
+// before any iteration. Off (depth 0) = the rule above, byte-identical.
+thread_local int g_anchor_support_only = 0;
+thread_local const std::vector<double>* g_body_force = nullptr;  // FeaBodyLoadScope
+thread_local Vec3 g_body_dir{0.0, 0.0, 0.0};                      // unit
+
 struct IslandScan {
   std::vector<int> drop;        // LOOSE voxels, solved at the floor, ascending
   double floor_e = 0.0;         // the floor modulus they are solved at
@@ -2748,6 +2761,9 @@ struct IslandScan {
   bool majority_loose = false;  // more than half the solid voxels are loose
   double ms = 0.0;              // the census's own wall time (one flood fill)
   bool face_only = true;        // faces (search) or 26-connected (certified)
+  bool support_only = false;    // held = reaches a support (support-only rule)
+  int loaded_loose = 0;         // loose pieces touching an APPLIED load (support-only)
+  long long loaded_loose_voxels = 0;
 };
 
 // Deterministic FACE-connected (6-connected) census of the solid voxels
@@ -2804,9 +2820,42 @@ IslandScan scan_islands(const VoxelGrid& grid, const std::vector<double>& ey,
   for (const DirichletBC& b : bcs)  // a RELEASED bearing spring holds nothing (REAL BOLTS)
     if (!b.released && b.node >= 0 && b.node < nnodes)
       anchor[static_cast<std::size_t>(b.node)] = 1;
-  for (const NodalLoad& l : loads)
-    if (l.value != 0.0 && l.node >= 0 && l.node < nnodes)
-      anchor[static_cast<std::size_t>(l.node)] = 1;
+  R.support_only = g_anchor_support_only > 0;
+  std::vector<char> loaded;  // support-only: nodes with an APPLIED load (not anchors)
+  if (R.support_only) {
+    // A node's applied load = its load minus its registered body load (an eighth
+    // of each present voxel's force around it); without a registration every
+    // load counts as applied. "Non-zero" against 1e-9 of the largest component.
+    std::vector<double> net(static_cast<std::size_t>(nnodes) * 3, 0.0);
+    for (const NodalLoad& l : loads)
+      if (l.node >= 0 && l.node < nnodes && l.component >= 0 && l.component < 3)
+        net[static_cast<std::size_t>(l.node) * 3 + static_cast<std::size_t>(l.component)] += l.value;
+    double scale = 0.0;
+    for (double v : net) scale = std::max(scale, std::fabs(v));
+    if (g_body_force != nullptr && g_body_force->size() == nv) {
+      const double dir[3] = {g_body_dir.x, g_body_dir.y, g_body_dir.z};
+      for (std::size_t e = 0; e < nv; ++e) {
+        const double f = (*g_body_force)[e];
+        if (f == 0.0 || grid.tags[e] == VoxelTag::Empty) continue;
+        const int i = static_cast<int>(e % static_cast<std::size_t>(grid.nx));
+        const int j = static_cast<int>((e / static_cast<std::size_t>(grid.nx)) % static_cast<std::size_t>(grid.ny));
+        const int k = static_cast<int>(e / (static_cast<std::size_t>(grid.nx) * static_cast<std::size_t>(grid.ny)));
+        for (int nd : fea_element_nodes(grid, i, j, k))
+          for (int c = 0; c < 3; ++c)
+            net[static_cast<std::size_t>(nd) * 3 + static_cast<std::size_t>(c)] -= f / 8.0 * dir[c];
+      }
+    }
+    loaded.assign(static_cast<std::size_t>(nnodes), 0);
+    const double eps = 1e-9 * scale;
+    for (int nd = 0; nd < nnodes; ++nd)
+      for (int c = 0; c < 3; ++c)
+        if (std::fabs(net[static_cast<std::size_t>(nd) * 3 + static_cast<std::size_t>(c)]) > eps)
+          loaded[static_cast<std::size_t>(nd)] = 1;
+  } else {
+    for (const NodalLoad& l : loads)
+      if (l.value != 0.0 && l.node >= 0 && l.node < nnodes)
+        anchor[static_cast<std::size_t>(l.node)] = 1;
+  }
 
   std::vector<int> label(nv, -1);
   std::vector<int> queue;
@@ -2817,7 +2866,7 @@ IslandScan scan_islands(const VoxelGrid& grid, const std::vector<double>& ey,
     queue.clear();
     queue.push_back(static_cast<int>(seed));
     label[seed] = id;
-    bool anchored = false, frozen = false;
+    bool anchored = false, frozen = false, touches_load = false;
     for (std::size_t q = 0; q < queue.size(); ++q) {
       const int e = queue[q];
       const int i = e % nx, j = (e / nx) % ny, k = e / (nx * ny);
@@ -2826,6 +2875,9 @@ IslandScan scan_islands(const VoxelGrid& grid, const std::vector<double>& ey,
         const std::array<int, 8> en = fea_element_nodes(grid, i, j, k);
         for (int nd : en)
           if (anchor[static_cast<std::size_t>(nd)]) { anchored = true; break; }
+        if (R.support_only && !touches_load)
+          for (int nd : en)
+            if (loaded[static_cast<std::size_t>(nd)]) { touches_load = true; break; }
       }
       // The 6 FACE neighbours only (the default, every trajectory / search
       // solve): a face shares 4 nodes and transmits load; an edge (2 nodes) or
@@ -2859,6 +2911,7 @@ IslandScan scan_islands(const VoxelGrid& grid, const std::vector<double>& ey,
     R.unanchored_voxels += sz;
     R.largest_unanchored = std::max(R.largest_unanchored, sz);
     if (frozen) ++R.frozen_loose;
+    if (touches_load) { ++R.loaded_loose; R.loaded_loose_voxels += sz; }
     for (int e : queue) R.drop.push_back(e);
   }
   std::sort(R.drop.begin(), R.drop.end());
@@ -2910,6 +2963,10 @@ void loose_record(const IslandScan& s) {
   st.last_loose = s.unanchored;
   st.last_loose_voxels = s.unanchored_voxels;
   st.last_frozen_loose = s.frozen_loose;
+  st.last_body_removed = 0.0;  // set by the solve when it removes loose weight
+  st.last_loaded_loose = s.loaded_loose;
+  st.last_loaded_loose_voxels = s.loaded_loose_voxels;
+  st.loaded_loose_solves += s.loaded_loose > 0 ? 1 : 0;
   st.last_ms = s.ms;
   if (s.drop.empty()) return;
   ++st.with_loose;
@@ -2997,6 +3054,8 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
   IslandScan loose;
   std::vector<double> ey_loose;
   const std::vector<double>* ey_solve = elem_youngs;
+  std::vector<NodalLoad> loads_body;               // support-only: minus loose weight
+  const std::vector<NodalLoad>* loads_solve = &loads;
   if (g_loose_rule && g_loose_rule_off == 0 && elem_youngs != nullptr &&
       lattice == nullptr) {
     // A CERTIFIED solve (a FeaIslandDropForbid is held: certification, final
@@ -3011,9 +3070,41 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       ey_solve = &ey_loose;
     }
     loose_record(loose);
+    // SUPPORT-ONLY RULE (fea.hpp FeaAnchorBySupportOnly): an applied load on a
+    // piece that reaches no support is never dropped and never solved on void:
+    // the solve refuses at once, before any iteration.
+    if (loose.support_only && loose.loaded_loose > 0) {
+      g_mg_last_dropped.clear();
+      g_mg_last_dropped_floor = 0.0;
+      char msg[256];
+      std::snprintf(msg, sizeof msg,
+                    "the load has no path to a mount: %d piece(s) carrying an applied load "
+                    "(%lld voxels) reach no support",
+                    loose.loaded_loose, loose.loaded_loose_voxels);
+      std::fprintf(stderr, "[loose] REFUSED: %s\n", msg);
+      throw FeaLoadUnheld(msg, loose.loaded_loose, loose.loaded_loose_voxels);
+    }
+    // ...and a loose piece's own registered weight leaves the solve with it.
+    if (loose.support_only && !loose.drop.empty() && g_body_force != nullptr &&
+        g_body_force->size() == grid.voxel_count()) {
+      const double dir[3] = {g_body_dir.x, g_body_dir.y, g_body_dir.z};
+      double removed = 0.0;
+      loads_body = loads;
+      for (int e : loose.drop) {
+        const double f = (*g_body_force)[static_cast<std::size_t>(e)];
+        if (f == 0.0) continue;
+        removed += f;
+        const int i = e % grid.nx, j = (e / grid.nx) % grid.ny, k = e / (grid.nx * grid.ny);
+        for (int nd : fea_element_nodes(grid, i, j, k))
+          for (int c = 0; c < 3; ++c)
+            if (dir[c] != 0.0) loads_body.push_back({nd, c, -f / 8.0 * dir[c]});
+      }
+      g_loose_stats.last_body_removed = removed;
+      if (removed != 0.0) loads_solve = &loads_body;
+    }
   }
   MatfreeReduced m = fea_detail::mf_build_reduced(
-      grid, youngs_modulus, poisson, bcs, loads, ey_solve,
+      grid, youngs_modulus, poisson, bcs, *loads_solve, ey_solve,
       lattice != nullptr ? "fea_solve_cg_lattice_matfree"
                          : "fea_solve_mgcg_matfree",
       info, active_mask, lattice);
@@ -3698,6 +3789,8 @@ MgIslandCensus mg_island_census(const VoxelGrid& grid,
   C.majority_loose = S.majority_loose;
   C.floor_e = S.floor_e;
   C.ms = S.ms;
+  C.loaded_loose = S.loaded_loose;
+  C.loaded_loose_voxels = S.loaded_loose_voxels;
   C.drop = S.drop;
   return C;
 }
@@ -3818,6 +3911,20 @@ const std::vector<char>* fea_matfree_set_island_keep_mask(const std::vector<char
   return prev;
 }
 void fea_matfree_loose_rule_off_enter() { ++g_loose_rule_off; }
+void fea_matfree_anchor_support_only_enter() { ++g_anchor_support_only; }
+void fea_matfree_anchor_support_only_exit() {
+  if (g_anchor_support_only > 0) --g_anchor_support_only;
+}
+void fea_matfree_set_body_load(const std::vector<double>* voxel_force, Vec3 direction,
+                               const std::vector<double>** prev_force, Vec3* prev_direction) {
+  if (prev_force != nullptr) *prev_force = g_body_force;
+  if (prev_direction != nullptr) *prev_direction = g_body_dir;
+  const double len = std::sqrt(direction.x * direction.x + direction.y * direction.y +
+                               direction.z * direction.z);
+  g_body_force = voxel_force;
+  g_body_dir = len > 0.0 ? Vec3{direction.x / len, direction.y / len, direction.z / len}
+                         : Vec3{0.0, 0.0, 0.0};
+}
 void fea_matfree_loose_rule_off_exit() {
   if (g_loose_rule_off > 0) --g_loose_rule_off;
 }

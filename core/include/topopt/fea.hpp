@@ -1531,6 +1531,60 @@ struct FeaLoosePieceRuleOff {
   FeaLoosePieceRuleOff& operator=(const FeaLoosePieceRuleOff&) = delete;
 };
 
+// THE CONNECTION RULE, support-only form (the reviewer's ruling 2026-11-26,
+// maintainer-approved; TO rebuild stage 5). Inside an FeaAnchorBySupportOnly a
+// piece is HELD only when it reaches a support (an engaged Dirichlet BC or
+// spring) through shared faces; a load no longer holds a piece (under
+// self-weight every node carries one, so the ruled rule took no floating piece
+// out). A loose piece that carries only its BODY load (registered with an
+// FeaBodyLoadScope) leaves the solve with that load. A loose piece that carries
+// ANY applied load never leaves the solve and its load is never dropped: the
+// solve throws FeaLoadUnheld at once, before any iteration ("the load has no
+// path to a mount", the rule of the lattice's load_unheld_share), and the
+// caller refuses the version. Without an FeaBodyLoadScope every load counts as
+// applied. Outside the scope every byte is as before. RAII, thread-local,
+// nestable; held by the run together with its body loads.
+void fea_matfree_anchor_support_only_enter();
+void fea_matfree_anchor_support_only_exit();
+struct FeaAnchorBySupportOnly {
+  FeaAnchorBySupportOnly() { fea_matfree_anchor_support_only_enter(); }
+  ~FeaAnchorBySupportOnly() { fea_matfree_anchor_support_only_exit(); }
+  FeaAnchorBySupportOnly(const FeaAnchorBySupportOnly&) = delete;
+  FeaAnchorBySupportOnly& operator=(const FeaAnchorBySupportOnly&) = delete;
+};
+
+// The solve's BODY load described per voxel: voxel_force[e] (N, length
+// voxel_count, 0 where nothing is weighed) is the force voxel e puts on its 8
+// nodes, an eighth each, along `direction` (normalized here). It describes loads
+// the caller ALSO put in the solve's `loads`: the solver only ever subtracts it
+// (a loose piece's own weight, under FeaAnchorBySupportOnly), never adds it, and
+// a node's load beyond its registered weight is an APPLIED load. Thread-local
+// and depth-counted like FeaIslandKeepMask (the previous registration comes back
+// at exit); the vector must outlive the scope.
+void fea_matfree_set_body_load(const std::vector<double>* voxel_force, Vec3 direction,
+                               const std::vector<double>** prev_force, Vec3* prev_direction);
+struct FeaBodyLoadScope {
+  FeaBodyLoadScope(const std::vector<double>& voxel_force, Vec3 direction) {
+    fea_matfree_set_body_load(&voxel_force, direction, &prev_force_, &prev_dir_);
+  }
+  ~FeaBodyLoadScope() { fea_matfree_set_body_load(prev_force_, prev_dir_, nullptr, nullptr); }
+  FeaBodyLoadScope(const FeaBodyLoadScope&) = delete;
+  FeaBodyLoadScope& operator=(const FeaBodyLoadScope&) = delete;
+ private:
+  const std::vector<double>* prev_force_ = nullptr;
+  Vec3 prev_dir_{0.0, 0.0, 0.0};
+};
+
+// Thrown by a matrix-free solve under FeaAnchorBySupportOnly when a piece that
+// reaches no support carries an applied load (see above). The caller refuses the
+// version in plain words; `pieces` / `voxels` say how much of the part is cut off.
+struct FeaLoadUnheld : public std::runtime_error {
+  FeaLoadUnheld(const std::string& what_arg, int pieces_, long long voxels_)
+      : std::runtime_error(what_arg), pieces(pieces_), voxels(voxels_) {}
+  int pieces = 0;
+  long long voxels = 0;
+};
+
 // THE CONNECTION RULE, on a DESIGN (not a solve): the same classifier the
 // solves use — face-connected pieces of `solid` (non-zero = material; voxels
 // tagged Empty never count), LOOSE iff no element node of the piece carries a
