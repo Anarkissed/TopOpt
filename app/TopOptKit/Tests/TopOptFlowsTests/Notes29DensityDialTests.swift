@@ -56,6 +56,7 @@ final class Notes29DensityDialTests: XCTestCase {
             let limit = try XCTUnwrap(LatticeDensityDial.offMostPercent(cellMM: 8, topology: id, lineWidthMM: Self.line), id)
             XCTAssertEqual(try XCTUnwrap(LatticeDensityDial.offMostMM(cellMM: 8, topology: id, lineWidthMM: Self.line)),
                            f.touch * 8 - Self.line, accuracy: 1e-12, "★ \(id): one line short of the touch (core's rule)")
+            print("NOTES29B dial on an 8 mm cell: \(id) open look \(Int(open.rounded(.down))) %, stop (limit) \(Int(limit.rounded(.down))) %")
             XCTAssertLessThan(limit, 100, "\(id): the limit is under the quilt")
             XCTAssertGreaterThan(limit, open + 1, "★ \(id): the limit is past the open look")
             AppPopups.recorded = []
@@ -87,18 +88,24 @@ final class Notes29DensityDialTests: XCTestCase {
         }
     }
 
-    /// ★ The page's boxes (Grade from, Grade to): a stored density shows the dial percent (never over 100 %); a typed percent
-    /// past the limit stores nothing with Allow quilt off; within it (past the open look too), it stores the density that
-    /// shows that percent back.
+    /// ★ The page's boxes (Grade from, Grade to): a stored density shows the dial percent (never over 100 %: BCC + Z's
+    /// "density 107 %"); a typed percent past the limit stores nothing with Allow quilt off; within it (past the open look
+    /// too), it stores the density that shows that percent back. (The octet: its strength law reaches past its limit. BCC +
+    /// Z's law tops out at a density of 1 well under its own limit, so its box never gets that far through a density.)
     func testTheGradeBoxesSpeakTheDial() throws {
+        var z = LatticeSettings()
+        z.topologyID = "bccz"
+        z.stageMode = .aesthetic
+        XCTAssertLessThanOrEqual(LatticeDensityDial.Page(z, lineWidthMM: Self.line, allowQuilt: false).shown(1.0), 1.0,
+                                 "★ a density of 1 shows at most 100 %")
         var l = LatticeSettings()
-        l.topologyID = "bccz"
+        l.topologyID = "octet"
         l.stageMode = .aesthetic
         let off = LatticeDensityDial.Page(l, lineWidthMM: Self.line, allowQuilt: false)
         let on = LatticeDensityDial.Page(l, lineWidthMM: Self.line, allowQuilt: true)
-        XCTAssertLessThanOrEqual(off.shown(1.0), 1.0, "★ a density of 1 shows at most 100 %")
         XCTAssertLessThan(off.most, 100)
-        let open = try XCTUnwrap(LatticeDensityDial.openLookPercent(cellMM: off.cellMM, topology: "bccz", lineWidthMM: Self.line))
+        XCTAssertGreaterThan(off.shown(1.0) * 100, off.most, "the octet's law reaches past its limit")
+        let open = try XCTUnwrap(LatticeDensityDial.openLookPercent(cellMM: off.cellMM, topology: "octet", lineWidthMM: Self.line))
         XCTAssertGreaterThan(off.most, open, "★ notes29b: the box stops at the limit, past the open look")
         AppPopups.recorded = []
         XCTAssertNil(off.typed(100), "★ Allow quilt off: 100 % stores nothing")

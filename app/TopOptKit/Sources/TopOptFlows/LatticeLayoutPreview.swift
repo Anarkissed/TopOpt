@@ -1666,8 +1666,9 @@ public final class LatticeLayoutPreview: ObservableObject {
                        let (cell, pct) = [l.cellSizeMode == .fixed && l.cellMM > 0 ? l.cellMM : (p.latticeSelectableCellMM(ref) ?? s.cellMaxMM),
                                           s.cellMaxMM, 8].lazy.compactMap({ c in p.latticeDensityPercent(rho: rho, cellMM: c).map { (c, $0) } }).first {
                         // (the row's cell, else the largest cell: the page's percent is read on a cell its band exists for)
-                        // ★ notes29: the page's percent (100 % = the type's own quilt) as core's dial (1 = the widest the
-                        // switch allows: the open look with Allow quilt off), so the strut laid is the strut the percent names
+                        // ★ notes29: the page's percent (100 % = the type's own quilt) as core's dial (1 = the open look with
+                        // Allow quilt off; ★ notes29b: past 1 up to the limit, one printed line short of the quilt), so the
+                        // strut laid is the strut the percent names
                         let dial = LatticeDensityDial.coreDial(percent: pct, cellMM: cell, topology: s.topology, lineWidthMM: s.beadMM,
                                                                minStrutLines: s.minStrutLines, allowQuilt: s.allowQuilt)
                         if rowDensity { s.regionDials.append((region: id, dial: dial)) } else if !uniformSet { s.dial = dial; uniformSet = true }
