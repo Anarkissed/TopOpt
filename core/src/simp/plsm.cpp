@@ -1029,10 +1029,22 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
               if (g > 0.1) tgt[v] = ext[v] / g;
             }
       const double t_rf0 = steady_s();
-      // Stage 3: warm-started from the current coefficients (plsm_solve_normal).
+      // Stage 3: a NARROW-BAND re-fit: warm-started from the current coefficients,
+      // solving only for the knots whose reach touches the surface band (any voxel
+      // of weight 1); the rest keep their values (plsm_solve_normal).
+      std::vector<char> free_knots;
+      if (surf.on && surf.fit_band_voxels > 0.0) {
+        free_knots.assign(L.count(), 0);
+        for (std::size_t v = 0; v < n; ++v) {
+          if (!(w[v] > 0.5)) continue;
+          for (std::size_t q = Psi.row[v]; q < Psi.row[v + 1]; ++q)
+            free_knots[static_cast<std::size_t>(Psi.col[q])] = 1;
+        }
+      }
       const PlsmFitResult rf =
           plsm_solve_normal(Psi, PsiT, tgt, w, plsm.ridge, plsm.fit_cg_iterations, 1e-10,
-                            threads, surf.on ? &alpha : nullptr);
+                            threads, surf.on ? &alpha : nullptr,
+                            free_knots.empty() ? nullptr : &free_knots);
       refit_wall_s += steady_s() - t_rf0;
       // ★ NOT SILENT (ledger P-11): how far the re-fit moved the surface, at the
       // centre of every ACTIVE cell the surface passes near, |dphi| / |grad phi|.

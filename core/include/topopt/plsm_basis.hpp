@@ -457,7 +457,17 @@ inline PlsmFitResult plsm_solve_normal(const PlsmCsr& A, const PlsmCsr& At,
                                        const std::vector<double>& rhs_f,
                                        const std::vector<double>& w, double lambda,
                                        int max_iters, double tol, int threads,
-                                       const std::vector<double>* x0 = nullptr) {
+                                       const std::vector<double>* x0 = nullptr,
+                                       const std::vector<char>* free_knots = nullptr) {
+  // `free_knots` (optional, stage 3, with `x0`): solve only for these coefficients;
+  // the others keep their `x0` values. A narrow-band re-fit frees only the knots
+  // whose reach touches the surface band: the far knots see nothing but the
+  // low-weight voxels, and they are what made the full system stall at its cap.
+  auto keep = [&](std::vector<double>& v) {
+    if (free_knots == nullptr) return;
+    for (std::size_t i = 0; i < v.size(); ++i)
+      if (!(*free_knots)[i]) v[i] = 0.0;
+  };
   const std::size_t m = A.cols;
   PlsmFitResult out;
   out.alpha.assign(m, 0.0);
@@ -488,6 +498,7 @@ inline PlsmFitResult plsm_solve_normal(const PlsmCsr& A, const PlsmCsr& At,
     plsm_spmv(At, t, q, threads);
     for (std::size_t i = 0; i < m; ++i) r[i] -= q[i] + lambda * out.alpha[i];
   }
+  keep(r);
   for (std::size_t i = 0; i < m; ++i) z[i] = r[i] / diag[i];
   p = z;
   const double bnorm = std::sqrt(plsm_dot(b, b));
@@ -502,6 +513,7 @@ inline PlsmFitResult plsm_solve_normal(const PlsmCsr& A, const PlsmCsr& At,
     for (std::size_t i = 0; i < tmp.size(); ++i) tmp[i] *= w[i];
     plsm_spmv(At, tmp, Ap, threads);
     for (std::size_t i = 0; i < m; ++i) Ap[i] += lambda * p[i];
+    keep(Ap);
     const double pAp = plsm_dot(p, Ap);
     if (!(pAp > 0.0)) { out.cg_iters = it; return out; }
     const double a = rz / pAp;
