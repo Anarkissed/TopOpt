@@ -86,6 +86,8 @@ The refused 0.30 version: at solve 19 the design is in 17 separate pieces; the m
 - The FLIP is ruled on the stage 1 report, which must carry: hand-over item 3 for #362 in the same release; `lattice_depth_tie` 0a and `test_print_frame.cpp:721` in their `face` forms, each with a note naming the frame's load rule as the cause of 721's move; and LatticeReview's interim guard (a structural Organic job whose load lands on bare lattice is refused with one plain pop-up offering Skin or Solid on that face, until the reference study lands).
 - The env switch never makes anything he is shown and never makes a release.
 
+For the stage report (ruling 2d), from LatticeReview 2026-11-26 02:27Z: the interim guard is on `claude/organic-engine` at 13b28529 (one commit on the released b393d12b; #362 takes it into organic-1). An Organic strength check fails with the reason "load_on_bare_lattice" when the vines would get more than 1 % of the load, and no strengthening round follows. Expected on the jobs here: the turned-box C and the bare-top job refused; the chamfered C unchanged (its share is 0.001 to 0.006).
+
 ## Still owed before the stage report
 
 - The original stand optimised both ways (queued), then Top Motor Mount; three settings; pad 2 / 3 / 4.5 mm.
