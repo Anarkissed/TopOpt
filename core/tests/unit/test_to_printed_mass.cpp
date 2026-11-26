@@ -3,7 +3,10 @@
 #include <cstdio>
 #include <vector>
 
+#include <array>
+
 #include "topopt/printed_mass.hpp"
+#include "topopt/stress_measure.hpp"
 
 static int g_fail = 0;
 #define CHECK(c) do { if (!(c)) { ++g_fail; std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c); } } while (0)
@@ -67,6 +70,30 @@ int main() {
     CHECK(std::fabs(half.grams / solid - (0.488 + 0.512 * 0.5)) < 1e-9);
     std::printf("[printed mass, shell] cube: walls only %.3f, walls and skins %.3f of solid\n",
                 walls.grams / solid, skins.grams / solid);
+  }
+
+  // The across-layer tension per voxel (stress_measure.hpp): n . sigma . n, tension
+  // only, zero outside the part; and read over a size it averages like any field.
+  {
+    std::vector<std::array<double, 6>> stress(1000, std::array<double, 6>{0, 0, 5.0, 0, 0, 0});
+    stress[0] = {0, 0, -7.0, 0, 0, 0};  // compression across the layers does not count
+    VoxelGrid gp = g;
+    gp.tags[1] = VoxelTag::Empty;
+    const std::vector<double> tz = interlayer_tension_field(gp, stress, Vec3{0, 0, 2.0});
+    CHECK(tz[0] == 0.0 && tz[1] == 0.0 && std::fabs(tz[2] - 5.0) < 1e-12);
+    const std::vector<double> tx = interlayer_tension_field(gp, stress, Vec3{1.0, 0, 0});
+    CHECK(tx[2] == 0.0);
+    // 45 degrees between z and x: n . sigma . n = 0.5 * szz.
+    const std::vector<double> td = interlayer_tension_field(gp, stress, Vec3{1.0, 0, 1.0});
+    CHECK(std::fabs(td[2] - 2.5) < 1e-12);
+    // One hot voxel in a field of 5: its reading over 6 mm (three voxels) falls
+    // toward the 5 around it; over nothing it is itself.
+    std::vector<double> f(1000, 5.0);
+    f[555] = 50.0;
+    CHECK(peak_stress_over_size(g, f, full, 0.5, 0.0) == 50.0);
+    const double over = peak_stress_over_size(g, f, full, 0.5, 6.0);
+    CHECK(over > 5.0 && over < 15.0);
+    std::printf("[across layers] one 50 in a field of 5 reads %.2f over 6 mm\n", over);
   }
 
   std::printf("[printed mass] solid %.3f g; 6 mm members at 20 %% infill %.3f g; wide body at 20 %% %.3f g; %d failure(s)\n",

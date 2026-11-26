@@ -22,6 +22,7 @@
 #include <cstring>
 #include <vector>
 
+#include "to_reference_reading.hpp"
 #include "topopt/analyze.hpp"
 #include "topopt/face_loads.hpp"
 #include "topopt/fea.hpp"
@@ -239,6 +240,9 @@ int main(int argc, char** argv) {
               "highest %", "spread %", "never more than 5 % low?");
   for (double pen : {1.0, 2.0, 3.0}) {
     double lo[4] = {1e300, 1e300, 1e300, 1e300}, hi[4] = {0.0, 0.0, 0.0, 0.0};
+    // Against the reading's OWN true value (the same average on the exact
+    // solution): the lowest and highest miss over the resolutions.
+    double own_lo[4] = {1e300, 1e300, 1e300, 1e300}, own_hi[4] = {-1e300, -1e300, -1e300, -1e300};
     for (int r : {3, 4, 5, 6}) {
       bool ok = false;
       double ae = 0.0;
@@ -249,6 +253,9 @@ int main(int argc, char** argv) {
       for (int q = 0; q < 4; ++q) {
         lo[q] = std::min(lo[q], v[q]);
         hi[q] = std::max(hi[q], v[q]);
+        const double truth = q == 0 ? kTextbook : to_reference::ring_reading(kInnerMm, kOuterMm, kSizesMm[q - 1], kThickness * kInnerMm / r);
+        own_lo[q] = std::min(own_lo[q], v[q] / truth - 1.0);
+        own_hi[q] = std::max(own_hi[q], v[q] / truth - 1.0);
       }
     }
     const char* names[4] = {"one voxel", "0.9 mm", "1.8 mm", "3.6 mm"};
@@ -256,6 +263,10 @@ int main(int argc, char** argv) {
       std::printf("E x fill^%-12.0f %-10s %+10.1f %+10.1f %10.1f  %s\n", pen, names[q],
                   100.0 * (lo[q] / kTextbook - 1.0), 100.0 * (hi[q] / kTextbook - 1.0),
                   100.0 * (hi[q] / lo[q] - 1.0), lo[q] >= 0.95 * kTextbook ? "yes" : "NO");
+    for (int q = 1; q < 4; ++q)
+      std::printf("E x fill^%-12.0f %-10s against the reading's own true value: %+6.1f to %+6.1f %%  %s\n",
+                  pen, names[q], 100.0 * own_lo[q], 100.0 * own_hi[q],
+                  own_lo[q] >= -0.05 ? "never more than 5 % low" : "more than 5 % low somewhere");
   }
 
   std::printf("[test E, ring] %s: %d failure(s)\n", gate ? "gate" : "measure only", failures);
