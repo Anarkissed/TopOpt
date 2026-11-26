@@ -295,7 +295,7 @@ private func latticeSetup(_ size: CGSize, _ name: String, _ test: XCTestCase, th
     try h.pickFromMenu("capsuleMenu", "Structural", what: "\(name): the stage menu")
     h.pump(1.5)
     if h.frames.all["view-Lattice preview-on"] == nil { try h.tap("view-Lattice preview", "\(name): the lattice preview", settle: 1.5) }
-    if h.frames.all["latticeSettingsPanel"] != nil { try h.tap("capsuleSetup", "\(name): the page's Save", settle: 1.5) }
+    if h.frames.all["latticeSettingsPanel"] != nil { try h.tap("capsuleLattice", "\(name): the page's Save", settle: 1.5) }
     XCTAssertNil(h.frames.all["latticeSettingsPanel"], "\(name): premise: on Lattice Setup")
     return (h, p)
 }

@@ -15935,17 +15935,16 @@ extension WorkspacePlaceholder {
         }
         // ★ his notes 11-23: over its Results too, Setup and Lattice each close Results — the way back to editing
         // ★ notes25 (his 11-23, Img 4): Results is the third tab, lit while it is up (hidden with no lattice result yet)
-        let page: StageCapsule.Page = latticeResultsPageUp ? .tertiary
-            : LatticeStagePage.current(cellsUp: showLatticeWizard) == .cells ? .secondary : .primary
+        let page: StageCapsule.Page = latticeResultsPageUp ? .tertiary : latticeCapsuleLit
         HStack(spacing: DS.Space.s) {
             StageCapsule(project: project, title: LatticeStageMenu.title(typeInUse: mode),
                          accent: mode.map { LatticeStageModeStyle.accent($0) } ?? DS.Color.textSecondary.color,
-                         primaryTitle: LatticeStagePage.regions.title, secondaryTitle: LatticeStagePage.cells.title,
+                         primaryTitle: latticeOrder.primary.capsuleTitle, secondaryTitle: latticeOrder.secondary.capsuleTitle,
                          idPrefix: "lattice",
                          page: page,
                          go: { dest in leaveLatticeCells(); goToStage(dest) },
-                         primary: { leaveLatticeCells(); viewOriginal = true },
-                         secondary: { viewOriginal = true; showLatticeWizard = true },
+                         primary: { showLatticeStagePage(latticeOrder.primary) },
+                         secondary: { showLatticeStagePage(latticeOrder.secondary) },
                          about: { showLatticeModeSheet = true },
                          tertiaryTitle: LatticeResultsTab.title, tertiary: { leaveLatticeCells(); viewOriginal = false },
                          greyed: mode == nil ? [.primary, .secondary] : [],
@@ -15966,6 +15965,22 @@ extension WorkspacePlaceholder {
     /// Leave the Cells page through its own Save (the page commits; today's onExit bakes and persists).
     private func leaveLatticeCells() {
         if showLatticeWizard { cellsCloseToken += 1 }
+    }
+
+    /// ★ notes30 (his 11-26: "'Lattice' and 'Settings' have switched places"): the capsule's Setup opens the settings, its
+    /// Lattice the laid lattice (LatticeStagePage.capsuleOrder), and the lit segment is the page up.
+    private var latticeOrder: (primary: LatticeStagePage, secondary: LatticeStagePage) { LatticeStagePage.capsuleOrder }
+    private var latticeCapsuleLit: StageCapsule.Page {
+        LatticeStagePage.current(cellsUp: showLatticeWizard) == latticeOrder.primary ? .primary : .secondary
+    }
+
+    /// ★ notes30: a capsule segment's page — the settings (Cells), or the laid lattice (Regions: the settings left through
+    /// their own Save). Either closes the stage's Results.
+    private func showLatticeStagePage(_ p: LatticeStagePage) {
+        switch p {
+        case .cells: viewOriginal = true; showLatticeWizard = true
+        case .regions: leaveLatticeCells(); viewOriginal = true
+        }
     }
 
     /// ★ B3 (his answer 11-03, via #362 20:22Z): "Change lattice type…" with NOTHING latticed just switches — the type clears and the
@@ -16759,10 +16774,29 @@ extension WorkspacePlaceholder {
             VersionViewOpen.shared.waitForResult(project.id, saved: saved)
             settleResultStage()
         } else if let v = saved, let st = v.stage.flatMap(WorkspaceStage.init(rawValue:)) {
+            if st == .lattice { reopenOnTheLattice(savedPage: v.page) }   // ★ notes30: before the stage moves (its entry reads it)
             if st != stage { goToStage(st) }
-            if st == .lattice, v.page == VersionViewState.pageCells, project.lattice.stageMode != nil { showLatticeWizard = true }
+            if VersionViewOpen.controlReopensSettings, st == .lattice, v.page == VersionViewState.pageCells,
+               project.lattice.stageMode != nil { showLatticeWizard = true }
             VersionViewOpen.settled[project.id] = st.rawValue
         }
+    }
+
+    /// ★★ notes30 (his 11-26, release 21: opening his part from Home's most recent brought him to the settings — "Even if my
+    /// last view was in the settings, I should always go back to the 'Lattice' view with the last lattice generated already
+    /// visible"). Every reopen that lands on the lattice stage (Home's most recent, Library, Continue, a version's Open — all go
+    /// through AppModel.open) lands on its Lattice view: never the settings, whatever page was kept; a lattice already set up
+    /// counts as saved for this visit, so entering the stage opens no settings first (openLatticeSettingsIfUnconfigured), and
+    /// the lattice view comes on as the stage opens (latticeViewOnEntering) and draws the version's lattice from its own saved
+    /// settings (Organic's read back from the version's folder, LatticePreviewStore). The stage itself is still the one he left
+    /// (his release 19 rule); only the page within it is the Lattice view. A lattice with no type yet opens its settings.
+    func reopenOnTheLattice(savedPage: String?) {
+        guard !VersionViewOpen.controlReopensSettings else { return }
+        showLatticeWizard = false
+        if project.lattice.enabled, project.lattice.stageMode != nil, project.lattice.flexible == nil {
+            latticeSettingsSavedThisSession = true
+        }
+        VersionViewOpen.reopenedOnLattice[project.id] = savedPage ?? VersionViewState.pageSetup
     }
 
     /// A version with a result, its result now in: the stage that result belongs to (the Lattice stage for a print file's),
@@ -16772,9 +16806,10 @@ extension WorkspacePlaceholder {
         let (_, saved) = VersionViewOpen.shared.take(project.id)
         guard libraryExportVariant == nil else { return }
         let home: WorkspaceStage = LatticeSavedResult.opensInLattice(run.outcome) ? .lattice : .topology
+        if home == .lattice { reopenOnTheLattice(savedPage: saved?.page) }   // ★ notes30: the Lattice view, never the settings
         if stage != home { goToStage(home) }
-        if home == .lattice, saved?.stage == WorkspaceStage.lattice.rawValue, saved?.page == VersionViewState.pageCells,
-           project.lattice.stageMode != nil { showLatticeWizard = true }
+        if VersionViewOpen.controlReopensSettings, home == .lattice, saved?.stage == WorkspaceStage.lattice.rawValue,
+           saved?.page == VersionViewState.pageCells, project.lattice.stageMode != nil { showLatticeWizard = true }
         VersionViewOpen.settled[project.id] = home.rawValue
     }
 }
