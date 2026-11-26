@@ -10,6 +10,11 @@ Paused at 94 % weekly usage for five minutes; the maintainer: "Keep going, do no
 
 The maintainer's order (2026-11-25): never sit waiting on the lock. Every wake-up records what finished, then does the next open item here.
 
+0. NOW (2026-11-25 19:45): the `face` clamp was wrong in jobs (fixed 33451f43); every `face` number is being re-made. Running without the lock: `stage2_first.sh` (rebuild, jobs A to C, the as-drawn check on six parts with today's reading / real stiffness / read over 1.2 and 2.4 mm). Queued for the lock: `stage1_sixth.sh` (Top Motor Mount from the drawn faces; the stand at pad 2 and 4.5 mm). STILL TO QUEUE after that: the stand at pad 3 again (its 2.68 / 88.0 g was made with the old clamp). Record each in `stages/stage-1-true-loads.md` and `stages/stage-2-strength-number.md`.
+0b. His parts are all PA12, which has NO published length: with his "lowest published" rule the new reading is the single voxel for every job he has. Put this to him with the measured table from 0 (what 1.2 and 2.4 mm would do).
+0c. Bearing-anchor branch (bf4aa356) has never run: make one small bearing job and run it both ways.
+0d. Stage 2 not yet done in code: the width-aware maximum and the interlayer reading still use the single voxel; printed grams (`printed_mass`) is not wired to the report; R-08 (one accept rule).
+
 1. Stand128 both ways: DONE and recorded (stage-1 file; 2.40 / 86.6 g today, 2.68 / 88.0 g drawn face; 40 % slower, cause owed). Running now (`stage1_fourth.sh`, no lock): build `test_to_stage1_lattice_check` and `test_to_strength_known_ring` in the same build folder and run jobs A to C (no lock; check memory).
 2. DONE 2026-11-25: second search (01-research.md): printed ABS fitted at 0.46 mm against 4.1 mm; nine materials have nothing published. The choice it leaves is the maintainer's (asked).
 3. Stage 2 steps 1 and 2 written ahead behind one switch (`TOPOPT_STRENGTH`), once the reviewer rules on the shared certificate; until then the unit pieces that do not touch `analyze.cpp` (the reading over a size is in `stress_measure.cpp`; printed grams at his infill needs the wall and infill model: find where the slicer estimate lives).
