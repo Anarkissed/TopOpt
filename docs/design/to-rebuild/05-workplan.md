@@ -34,6 +34,8 @@ Running without the lock: `sample_pad.sh` (the sample bracket, six pad settings)
 
 DONE 08:05 beside the lock run: the too-small notice proved in a build (two faults found and fixed; stage 1 file); the stage 2 bar against the reading's own true value measured in a build (stage 2 file: real stiffness misses by a hair, E x fill^2 passes, reading high). A tip build with the cli is at `agent-scratch/toreview/build_s6` (2e9aac2e). In a report's `pads`, `thickness_mm` 0 means not measured (a fixed pad does not measure it): to tell #362 at hand-over.
 
+NOTED 08:15 (LatticeReview): the Organic strength block now repeats byte for byte on claude/organic-engine 77c32c36 (the frame solve asks for Eigen's LDLT; Accelerate's did not repeat). OPEN ITEM: once that tip is in my base, put `test_to_same_job_twice` and the stage 1 lattice check back to exact bytes for the frame block (they compare to six digits and skip `residual` today).
+
 A. Already agreed:
 - A1. Stage 1 report to the reviewer once the two lock runs are recorded (draft at the top of `stages/stage-1-true-loads.md`).
 - A2. The pad's one number: tables and PICTURES of the shapes around the fixed faces from the two sweeps; a recommended curve strength for him in the morning.
