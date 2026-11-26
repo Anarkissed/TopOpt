@@ -190,9 +190,10 @@ Pad behind the thin tab / the base / the upright's face, then margin and grams p
 |---|---|---|---|---|---|---|
 | fixed 3 mm | 3.0 / 3.0 / 3.0 | 3702 | 5.29, 159.0 g | 5.29, 126.0 g | 4.66, 97.0 g | 3.69, 72.2 g |
 | automatic, strength 0.2 | 0.9 / 3.2 / 3.8 | 3808 | 5.29, 158.6 g | 5.30, 125.7 g | 4.85, 96.7 g | 3.82, 72.0 g |
+| automatic, strength 0.4 | 1.25 / 4.5 / 5.4 | 5674 | 5.28, 160.5 g | 5.29, 129.0 g | 4.91, 101.3 g | 3.76, 77.6 g |
 | automatic, strength 1.0 | 2.0 / 7.1 / 8.6 | 9526 | 5.29, 166.5 g | 5.29, 137.8 g | 5.01, 112.8 g | none |
 
-Read plainly. At 0.2 the automatic pad is the fixed 3 mm pad on the thick faces and a thin one (two wall lines, the floor) behind the thin tab: every version is as light or lighter and as strong or stronger than at a fixed 3 mm. At 1.0 the base and the upright's foot stay as thick slabs (the picture's right column) and each version carries 7 to 16 g more. In the picture the thin tab hangs on by a small block in the first two columns and by the thick base slab in the third: the "must every fixed face stay joined" question is the same at every pad. Strength 0.4 is still running; the beam and the hook follow.
+Read plainly. At 0.2 the automatic pad is the fixed 3 mm pad on the thick faces and a thin one (two wall lines, the floor) behind the thin tab: every version is as light or lighter and as strong or stronger than at a fixed 3 mm. At 1.0 the base and the upright's foot stay as thick slabs (the picture's right column) and each version carries 7 to 16 g more. In the picture the thin tab hangs on by a small block in the first two columns and by the thick base slab in the third: the "must every fixed face stay joined" question is the same at every pad. Strength 0.4 (10:34) sits between: 2 to 6 g heavier a version than 0.2 for no gain in margin worth the name. On this part the lower the strength the better, down to where the thick faces get about 3 mm. The beam and the hook at 0.2 follow.
 
 ### The hook (C) at res 64 today's way (10:05, for the trial build's comparison)
 
