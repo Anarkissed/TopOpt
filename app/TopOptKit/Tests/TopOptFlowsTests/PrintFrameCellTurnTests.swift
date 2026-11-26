@@ -133,6 +133,16 @@ final class PrintFrameCellTurnTests: XCTestCase {
                                  SIMD3(f(o + 24), f(o + 28), f(o + 32))))
                 }
             }
+            bin()
+        }
+        /// ★ notes29 (H2): core's 3MF's triangles (a cell lattice's print file is a 3MF now).
+        init?(threeMF d: Data) {
+            guard let m = try? CoreThreeMF.mesh(d) else { return nil }
+            func v(_ i: Int32) -> SIMD3<Float> { let k = Int(i) * 3; return SIMD3(m.vertices[k], m.vertices[k + 1], m.vertices[k + 2]) }
+            for t in 0..<(m.indices.count / 3) { tris.append((v(m.indices[3 * t]), v(m.indices[3 * t + 1]), v(m.indices[3 * t + 2]))) }
+            bin()
+        }
+        private mutating func bin() {
             for (t, tri) in tris.enumerated() {
                 let lo = simd_min(simd_min(tri.0, tri.1), tri.2), hi = simd_max(simd_max(tri.0, tri.1), tri.2)
                 let a = SIMD3<Int32>(Int32(lo.x.rounded(.down)), Int32(lo.y.rounded(.down)), Int32(lo.z.rounded(.down)))
@@ -210,7 +220,10 @@ final class PrintFrameCellTurnTests: XCTestCase {
                           "RED CONTROL: the preview as placed is not the print file's lattice")
 
         // 2. every strut of the preview is a strut of the file: its middle, stood the way the file stands, inside the file's tube
-        let surface = try XCTUnwrap(Surface(stl: file.stl), "the file's STL")
+        // ★ RE-PINNED (notes29 H2, his rule 11-24: print files default to 3MF): the cell lattice's file is core's 3MF now (it
+        // was its STL); its triangles read either way
+        XCTAssertTrue(file.report.isThreeMF, "★ notes29: the cell lattice's print file is a 3MF")
+        let surface = try XCTUnwrap(file.report.isThreeMF ? Surface(threeMF: file.stl) : Surface(stl: file.stl), "the file's mesh")
         func inFile(_ bars: [Float]) -> Double {
             var k = 0
             let ms = Self.mids(bars)
