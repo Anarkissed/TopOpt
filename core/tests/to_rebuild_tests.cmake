@@ -87,3 +87,22 @@ if(TARGET test_lattice_strength)
   add_test(NAME to_stage1_lattice_check CONFIGURATIONS Long COMMAND test_to_stage1_lattice_check)
   set_tests_properties(to_stage1_lattice_check PROPERTIES TIMEOUT 7200)
 endif()
+
+# Stage 5, E-01: one SolverSettings value and a SolverRunState passed into a solve; the
+# old entry points byte-identical; runs isolated (test K).
+add_executable(test_to_solver_settings tests/unit/test_to_solver_settings.cpp)
+target_link_libraries(test_to_solver_settings PRIVATE topopt)
+add_test(NAME to_solver_settings COMMAND test_to_solver_settings)
+add_executable(test_to_solver_run_state tests/unit/test_to_solver_run_state.cpp)
+target_link_libraries(test_to_solver_run_state PRIVATE topopt)
+add_test(NAME to_solver_run_state COMMAND test_to_solver_run_state)
+# Stage 5, S-05: the sensitivity loop on all cores; identical bytes at 1/3/6 threads.
+add_executable(test_to_solve_threads tests/unit/test_to_solve_threads.cpp)
+target_link_libraries(test_to_solve_threads PRIVATE topopt)
+add_test(NAME to_solve_threads COMMAND test_to_solve_threads)
+# Stage 5, B-06: the element product in the reduced system; identical bytes to the
+# full-length product at 1/3/6 threads.
+add_executable(test_to_solver_reduced_apply tests/unit/test_to_solver_reduced_apply.cpp)
+target_link_libraries(test_to_solver_reduced_apply PRIVATE topopt)
+target_include_directories(test_to_solver_reduced_apply PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME to_solver_reduced_apply COMMAND test_to_solver_reduced_apply)

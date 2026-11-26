@@ -153,6 +153,49 @@ int mf_thread_count();  // effective count actually used (>= 1)
 void mf_parallel_ranges(int begin, int end, int min_per_thread,
                         const std::function<void(int, int)>& body);
 
+// E-01: the SolverSettings a solve was handed (fea.hpp), installed for exactly
+// that solve on its thread; nullptr = none (the globals, as before). Every switch
+// accessor (mf_thread_count, rc_enabled, geneo_enabled, ...) reads it first.
+const SolverSettings* mf_settings_override();
+int mf_thread_count_setting();  // the stored setting (0 = all hardware threads)
+
+// E-01: a run's state (fea.hpp SolverRunState), one part per module, installed for
+// exactly one solve by RunStateScope; nullptr = this thread's default state.
+struct MgRunState;
+struct RcRunState;
+struct GeneoRunState;
+MgRunState* mg_new_run_state();
+void mg_delete_run_state(MgRunState* r);
+MgRunState* mg_set_run_override(MgRunState* r);
+RcRunState* rc_new_run_state();
+void rc_delete_run_state(RcRunState* r);
+RcRunState* rc_set_run_override(RcRunState* r);
+GeneoRunState* geneo_new_run_state();
+void geneo_delete_run_state(GeneoRunState* r);
+GeneoRunState* geneo_set_run_override(GeneoRunState* r);
+class RunStateScope {
+ public:
+  explicit RunStateScope(SolverRunState* run);  // run == nullptr: no change
+  ~RunStateScope();
+  RunStateScope(const RunStateScope&) = delete;
+  RunStateScope& operator=(const RunStateScope&) = delete;
+
+ private:
+  bool on_ = false;
+  MgRunState* mg_ = nullptr;
+  RcRunState* rc_ = nullptr;
+  GeneoRunState* geneo_ = nullptr;
+};
+class SolverSettingsScope {
+ public:
+  explicit SolverSettingsScope(const SolverSettings& s);
+  ~SolverSettingsScope();
+  SolverSettingsScope(const SolverSettingsScope&) = delete;
+  SolverSettingsScope& operator=(const SolverSettingsScope&) = delete;
+ private:
+  const SolverSettings* prev_;
+};
+
 // Galerkin block cache toggle (handoff 090; public face:
 // fea_set_matfree_galerkin_block_cache). Opt-in, default OFF. Read by the
 // matrix-free multigrid's coarse-operator build in multigrid.cpp; it changes only
@@ -272,7 +315,17 @@ struct MatfreeReduced {
   std::vector<double> up;           // full field seeded with prescribed values
   std::vector<double> rg;           // ng reduced RHS
   std::vector<double> invdiag;      // ng Jacobi inverse diagonal (matrix-free)
-  // Reused full-length scratch for the matvec.
+  // B-06 (TO rebuild stage 5): the element product works in the REDUCED system.
+  // g2r maps every global DOF to its kept id, and every fixed or void DOF to the
+  // spare slot ng; xr / yr are ng+1 long (xr[ng] = 0, yr[ng] is scratch). The
+  // apply then gathers and scatters straight through the map: no full-length
+  // copies, no branch, and the same per-DOF summation order, so y is bit-identical
+  // to the full-length path. Built when the system has no cubic elements and no
+  // springs (both still apply on full-length vectors); empty otherwise.
+  std::vector<int> g2r;
+  mutable std::vector<double> xr, yr;
+  // Reused full-length scratch for the matvec: only for systems with cubic
+  // elements or springs (g2r empty).
   mutable std::vector<double> xfull, yfull;
   // Reused full-length FP32 scratch for the mixed-precision matvec, sized lazily
   // on first use so the FP64-only path never allocates it (handoff 092).

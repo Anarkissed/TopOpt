@@ -162,8 +162,26 @@ constexpr int kMgLatchThreshold = 3;  // consecutive stagnations -> latch MG off
 
 // Thread-local because the driver issues a run's solves sequentially on one
 // thread (the matvec worker threads never touch this); reset per run.
-thread_local int g_mg_consecutive_stagnations = 0;
-thread_local bool g_mg_latched = false;
+// E-01: the multigrid DECISION state of a run (what makes one solve depend on the
+// ones before it: the stagnation latch, the safe retry's latch, the re-arm count).
+// A solve handed a SolverRunState uses that run's copy; every other solve uses
+// this thread's default, exactly as before. Logging and observability counters
+// stay thread-local (they change no number).
+}  // namespace
+namespace fea_detail {
+struct MgRunState {
+  int consecutive_stagnations = 0;
+  bool latched = false;
+  int safe_consecutive_failures = 0;
+  bool safe_latched = false;
+  int latched_solves = 0;
+};
+}  // namespace fea_detail
+using fea_detail::MgRunState;
+namespace {
+thread_local MgRunState g_mg_run_default;
+thread_local MgRunState* g_mg_run = nullptr;
+inline MgRunState& mgs() { return g_mg_run != nullptr ? *g_mg_run : g_mg_run_default; }
 
 // --- SAFE-SMOOTHER RETRY (thin-wall cure S3 + S5 gate, arm G) ----------------
 // The shipped damped-Jacobi weight omega = 0.6 is only safe while
@@ -196,8 +214,6 @@ thread_local bool g_mg_latched = false;
 // path OFF too, which restores exactly today's latched behaviour (Jacobi-CG,
 // no build).
 thread_local bool g_mg_safe_retry = true;          // public switch (tests)
-thread_local int g_mg_safe_consecutive_failures = 0;
-thread_local bool g_mg_safe_latched = false;
 thread_local bool g_mg_safe_lambda_logged = false;  // S7: once per run
 thread_local bool g_mg_lambda_logged = false;       // S7 (shipped): once per run
 thread_local long long g_mg_safe_engagements = 0;
@@ -322,7 +338,7 @@ constexpr double kIslandSolidThreshold = 1e-3;     // solid = E >= 1e-3 * Emax
 // "latch-disabled" build §7 asks for: every solve attempts MG.
 //
 // A re-armed attempt that stagnates re-latches IMMEDIATELY rather than paying
-// kMgLatchThreshold stagnations again: g_mg_consecutive_stagnations is left at
+// kMgLatchThreshold stagnations again: mgs().consecutive_stagnations is left at
 // kMgLatchThreshold - 1, so the single stagnation the retry produces trips the
 // latch on its own. That bounds the probe's tax at one wasted build + one
 // wasted cycle budget per period instead of three, which is what makes a
@@ -330,7 +346,7 @@ constexpr double kIslandSolidThreshold = 1e-3;     // solid = E >= 1e-3 * Emax
 // clears the counter through the existing `solved` branch and multigrid simply
 // carries from there — which is the outcome the measurement exists to detect.
 thread_local int g_mg_rearm_period = 0;
-thread_local int g_mg_latched_solves = 0;
+
 // Cumulative-since-reset re-arm accounting, so the probe can price its own tax
 // rather than have it inferred: how many retries were granted and how many of
 // those retries CARRIED. Both are 0 in production by construction.
@@ -631,7 +647,8 @@ bool mg_effective_extents(int fex, int fey, int fez, int& pex, int& pey,
   pex = fex;
   pey = fey;
   pez = fez;
-  const int mode = g_mg_parity_pad_mode;
+  const SolverSettings* so = fea_detail::mf_settings_override();  // E-01
+  const int mode = so != nullptr ? so->mg_parity_pad_mode : g_mg_parity_pad_mode;
   if (mode == kMgPadOff) return false;
   // Engage only when the UNPADDED grid would be rejected: an odd fine axis
   // (structural — no halving is ever possible), or an all-even deep block
@@ -1650,7 +1667,9 @@ bool build_mf_hierarchy(const MatfreeReduced& m, int nnx, int nny, int nnz,
   // builder below, which is untouched. With the flag off — the library default,
   // and what every reference run sees — this `if` is the only added instruction
   // and the rest of this function is byte-for-byte the shipped path.
-  if (g_mg_alg_level1 && build_mf_hierarchy_algebraic(m, nnx, nny, nnz, out))
+  const SolverSettings* so = fea_detail::mf_settings_override();  // E-01
+  const bool alg_level1 = so != nullptr ? so->mg_algebraic_level1 : g_mg_alg_level1;
+  if (alg_level1 && build_mf_hierarchy_algebraic(m, nnx, nny, nnz, out))
     return true;
 
   const fea_detail::MgTuning& tune = g_mg_tuning;
@@ -3026,14 +3045,17 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
     MfHierarchy H;
     // MEASUREMENT-ONLY re-arm (see g_mg_rearm_period). Unreachable when the
     // period is 0, which is the production default, so the shipped path below
-    // reads exactly as it did: try_mg = !g_mg_latched.
+    // reads exactly as it did: try_mg = !mgs().latched.
     bool rearmed_this_solve = false;
-    if (g_mg_latched && g_mg_rearm_period > 0 &&
-        ++g_mg_latched_solves >= g_mg_rearm_period) {
-      g_mg_latched = false;
-      g_mg_latched_solves = 0;
+    const SolverSettings* so = fea_detail::mf_settings_override();  // E-01
+    const int rearm_period = so != nullptr ? so->mg_rearm_period : g_mg_rearm_period;
+    const bool safe_retry = so != nullptr ? so->mg_safe_retry : g_mg_safe_retry;
+    if (mgs().latched && rearm_period > 0 &&
+        ++mgs().latched_solves >= rearm_period) {
+      mgs().latched = false;
+      mgs().latched_solves = 0;
       // One stagnation re-latches; see the comment at the declaration.
-      g_mg_consecutive_stagnations = kMgLatchThreshold - 1;
+      mgs().consecutive_stagnations = kMgLatchThreshold - 1;
       rearmed_this_solve = true;
       ++g_mg_rearm_attempts;
     }
@@ -3041,10 +3063,10 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
     // this solve; `safe_direct` = the shipped attempt is already latched off for
     // the run, so build the hierarchy for the safe path alone. With the retry
     // disabled or latched, both are false and the line below reads exactly as
-    // the shipped `try_mg = !g_mg_latched`.
-    const bool safe_ok = g_mg_safe_retry && !g_mg_safe_latched;
-    const bool safe_direct = g_mg_latched && safe_ok;
-    const bool try_mg = !g_mg_latched || safe_direct;
+    // the shipped `try_mg = !mgs().latched`.
+    const bool safe_ok = safe_retry && !mgs().safe_latched;
+    const bool safe_direct = mgs().latched && safe_ok;
+    const bool try_mg = !mgs().latched || safe_direct;
     const double t_h0 = fea_detail::mf_steady_ms();
     const bool have_h = try_mg && build_mf_hierarchy(m, nnx, nny, nnz, H);
     // 0 when the latch short-circuited the build — which is exactly the reading
@@ -3197,12 +3219,12 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
     // up. A build-FAILURE (never coarsenable) is neither — leave the counter alone.
     if (have_h && !safe_direct) {
       if (solved) {
-        g_mg_consecutive_stagnations = 0;
+        mgs().consecutive_stagnations = 0;
         // Measurement accounting only (0 in production): a re-armed retry that
         // CARRIED is the single observation the re-arm question turns on.
         if (rearmed_this_solve) ++g_mg_rearm_carries;
-      } else if (++g_mg_consecutive_stagnations >= kMgLatchThreshold) {
-        g_mg_latched = true;
+      } else if (++mgs().consecutive_stagnations >= kMgLatchThreshold) {
+        mgs().latched = true;
       }
     }
 
@@ -3376,9 +3398,9 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
           ok || (resx >= 0.0 && resx < r0x && resx <= 0.1 * r0x);
       if (ok) ++g_mg_safe_carries;
       if (productive) {
-        g_mg_safe_consecutive_failures = 0;
-      } else if (++g_mg_safe_consecutive_failures >= kMgLatchThreshold) {
-        g_mg_safe_latched = true;
+        mgs().safe_consecutive_failures = 0;
+      } else if (++mgs().safe_consecutive_failures >= kMgLatchThreshold) {
+        mgs().safe_latched = true;
       }
       {  // observation only (fea_detail::mg_last_safe_attempt)
         fea_detail::MgSafeAttemptReport& rep = g_mg_last_safe;
@@ -3394,7 +3416,7 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
         rep.r0 = r0;
         rep.res_exact = resx;
         rep.r0_exact = r0x;
-        rep.consecutive_failures = g_mg_safe_consecutive_failures;
+        rep.consecutive_failures = mgs().safe_consecutive_failures;
       }
       // The seeding decision, stated on the system it was judged on.
       char exact_note[192] = "";
@@ -3422,8 +3444,8 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       // An attempt that did NOT converge always prints its full line (it seeds
       // or precedes a Jacobi-CG fallback, the case a run needs explained),
       // with the solve's tolerance and how the retry started.
-      if (seq <= g_mg_safe_log_first || g_mg_safe_latched || !ok) {
-        if (g_mg_safe_latched || (!ok && seq > g_mg_safe_log_first))
+      if (seq <= g_mg_safe_log_first || mgs().safe_latched || !ok) {
+        if (mgs().safe_latched || (!ok && seq > g_mg_safe_log_first))
           mg_safe_log_flush_window();
         std::fprintf(stderr,
                      "[mg-safe] solve %lld: shipped %s (%d cycles, rel res %.3e) -> "
@@ -3438,9 +3460,9 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
                            : (cold_start ? "warm guess dropped (cold)" : "warm start"),
                      loose.unanchored, loose.pieces, loose.unanchored_voxels,
                      loose.largest_unanchored, loose.frozen_loose, loose.elements,
-                     g_mg_safe_latched ? " ; safe path LATCHED OFF for the run" : "",
+                     mgs().safe_latched ? " ; safe path LATCHED OFF for the run" : "",
                      start_note, exact_note,
-                     (seq == g_mg_safe_log_first && !g_mg_safe_latched)
+                     (seq == g_mg_safe_log_first && !mgs().safe_latched)
                          ? " ; further [mg-safe] solves are summarised" : "");
         ++g_mg_safe_log_lines;
       } else {
@@ -3710,15 +3732,25 @@ void mg_safe_test_max_cycles(int cycles) {
 // starts fresh; the getter is for tests/diagnostics. Thread-local: valid on the
 // thread that issues the run's solves. Off the matrix-free multigrid path these
 // are inert (nothing reads the latch).
-void fea_matfree_reset_mg_safe_failures() { g_mg_safe_consecutive_failures = 0; }
+void fea_matfree_reset_mg_safe_failures() { mgs().safe_consecutive_failures = 0; }
+
+namespace fea_detail {
+MgRunState* mg_new_run_state() { return new MgRunState(); }
+void mg_delete_run_state(MgRunState* r) { delete r; }
+MgRunState* mg_set_run_override(MgRunState* r) {
+  MgRunState* prev = g_mg_run;
+  g_mg_run = r;
+  return prev;
+}
+}  // namespace fea_detail
 
 void fea_matfree_reset_mg_stagnation_latch() {
-  g_mg_consecutive_stagnations = 0;
-  g_mg_latched = false;
+  mgs().consecutive_stagnations = 0;
+  mgs().latched = false;
   // The safe retry's per-run state resets with the latch it extends (the
   // enable switch and the island-drop permit are not per-run state).
-  g_mg_safe_consecutive_failures = 0;
-  g_mg_safe_latched = false;
+  mgs().safe_consecutive_failures = 0;
+  mgs().safe_latched = false;
   g_mg_safe_lambda_logged = false;
   g_mg_lambda_logged = false;
   g_mg_safe_engagements = 0;
@@ -3736,12 +3768,12 @@ void fea_matfree_reset_mg_stagnation_latch() {
   g_loose_majority_warned = false;
   g_mg_safe_log_lines = 0;
   g_mg_safe_log_summaries = 0;
-  g_mg_latched_solves = 0;
+  mgs().latched_solves = 0;
   g_mg_rearm_attempts = 0;
   g_mg_rearm_carries = 0;
 }
 
-bool fea_matfree_mg_stagnation_latched() { return g_mg_latched; }
+bool fea_matfree_mg_stagnation_latched() { return mgs().latched; }
 
 // THE CONNECTION RULE on a design: the solve's own classifier (scan_islands),
 // fed a two-phase modulus field — 1 on the design's material, 1e-9 elsewhere in
@@ -3775,7 +3807,7 @@ void fea_matfree_set_mg_safe_retry(bool enable) { g_mg_safe_retry = enable; }
 bool fea_matfree_mg_safe_retry_enabled() { return g_mg_safe_retry; }
 long long fea_matfree_mg_safe_engagements() { return g_mg_safe_engagements; }
 long long fea_matfree_mg_safe_carries() { return g_mg_safe_carries; }
-bool fea_matfree_mg_safe_latched() { return g_mg_safe_latched; }
+bool fea_matfree_mg_safe_latched() { return mgs().safe_latched; }
 const std::vector<int>& fea_matfree_last_dropped_islands() {
   return g_mg_last_dropped;
 }
@@ -3811,7 +3843,7 @@ void fea_matfree_island_drop_scope_exit(bool permit) {
 // of a re-armed attempt.
 void fea_matfree_set_mg_rearm_period(int period) {
   g_mg_rearm_period = period > 0 ? period : 0;
-  g_mg_latched_solves = 0;
+  mgs().latched_solves = 0;
 }
 
 int fea_matfree_mg_rearm_period() { return g_mg_rearm_period; }
@@ -3839,7 +3871,10 @@ bool fea_set_mg_algebraic_level1(bool enable) {
   g_mg_alg_level1 = enable;
   return prev;
 }
-bool fea_mg_algebraic_level1_enabled() { return g_mg_alg_level1; }
+bool fea_mg_algebraic_level1_enabled() {
+  if (const SolverSettings* o = fea_detail::mf_settings_override()) return o->mg_algebraic_level1;
+  return g_mg_alg_level1;
+}
 
 MgAlgebraicLevel1Info fea_mg_algebraic_level1_info() {
   const fea_detail::AlgCoarsenStats& s = g_mg_alg_stats;
@@ -3853,7 +3888,7 @@ MgAlgebraicLevel1Info fea_mg_algebraic_level1_info() {
   out.bytes = static_cast<unsigned long long>(s.bytes);
   out.setup_ms = s.t_incidence_ms + s.t_strength_ms + s.t_aggregate_ms +
                  s.t_tentative_ms + s.t_coarse_ms;
-  out.armed = g_mg_alg_level1;
+  out.armed = fea_mg_algebraic_level1_enabled();
   out.refused = s.refused;
   // Copied as a VALUE (the header's contract) — the caller may outlive the next
   // build, which would overwrite the solver's own string.
@@ -3921,6 +3956,28 @@ FeaSolution fea_solve_mgcg_matfree(const VoxelGrid& grid,
                                    CgInfo* info,
                                    const std::vector<char>* active_mask,
                                    const FeaSolution* initial_guess) {
+  return solve_mgcg_matfree(grid, 1.0, poisson, bcs, loads, tolerance,
+                            max_iterations, info, &youngs_per_voxel, active_mask,
+                            nullptr, initial_guess);
+}
+
+// E-01: the same solve with its settings passed in (fea.hpp SolverSettings). The
+// settings are installed for this solve on this thread only and every global is
+// left as it was, so nothing another caller set can reach in, and nothing this
+// solve was told leaks out.
+FeaSolution fea_solve_mgcg_matfree(const VoxelGrid& grid,
+                                   const std::vector<double>& youngs_per_voxel,
+                                   double poisson,
+                                   const std::vector<DirichletBC>& bcs,
+                                   const std::vector<NodalLoad>& loads,
+                                   double tolerance, int max_iterations,
+                                   CgInfo* info,
+                                   const std::vector<char>* active_mask,
+                                   const FeaSolution* initial_guess,
+                                   const SolverSettings& settings,
+                                   SolverRunState* run) {
+  const fea_detail::SolverSettingsScope scope(settings);
+  const fea_detail::RunStateScope run_scope(run);
   return solve_mgcg_matfree(grid, 1.0, poisson, bcs, loads, tolerance,
                             max_iterations, info, &youngs_per_voxel, active_mask,
                             nullptr, initial_guess);
