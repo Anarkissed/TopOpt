@@ -190,7 +190,7 @@ for t in TYPES:
         table.append("")
     # the sweep is complete: every job of this folder's lists (screen, wide) is kept at its law pitch
     ok_sweep, listed = True, 0
-    for jl in ("jobs_1_screen.txt", "jobs_2_wide.txt"):
+    for jl in ("jobs_1_screen.txt", "jobs_2_wide_thin.txt", "jobs_2_wide.txt"):
         p = os.path.join(ev, jl)
         if not os.path.exists(p):
             ok_sweep = False

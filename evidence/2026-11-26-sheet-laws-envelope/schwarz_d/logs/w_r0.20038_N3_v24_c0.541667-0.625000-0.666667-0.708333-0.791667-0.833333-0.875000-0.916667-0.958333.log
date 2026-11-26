@@ -1,0 +1,33 @@
+LATTICE DE-HOMOGENIZATION PROBE — schwarz_d band [0.20038, 0.60012] (read from core)
+
+===== WIDTHS — the law per member width (sheets 3.2) =====
+  solver: fea_solve_cg_matfree; widths: 3; cuts: 0.54 0.62 0.67 0.71 0.79 0.83 0.88 0.92 0.96
+  cut      rho 0.200 N3 (lx 3) vpc24 cut 0.54: K_dev free=18.63 cut=36.57 wall 2 vox (true 1.3) dropped=0 (381s, cg<=1185)
+  cut      rho 0.200 N3 (lx 3) vpc24 cut 0.62: K_dev free=18.63 cut=37.88 wall 2 vox (true 1.3) dropped=0 (472s, cg<=1075)
+  cut      rho 0.200 N3 (lx 3) vpc24 cut 0.67: K_dev free=18.58 cut=35.33 wall 2 vox (true 1.3) dropped=0 (442s, cg<=1147)
+  cut      rho 0.200 N3 (lx 3) vpc24 cut 0.71: K_dev free=18.63 cut=34.96 wall 2 vox (true 1.3) dropped=0 (461s, cg<=1197)
+  cut      rho 0.200 N3 (lx 3) vpc24 cut 0.79: K_dev free=18.80 cut=34.70 wall 2 vox (true 1.3) dropped=0 (424s, cg<=1122)
+  cut      rho 0.200 N3 (lx 3) vpc24 cut 0.83: K_dev free=18.83 cut=34.77 wall 2 vox (true 1.3) dropped=0 (329s, cg<=1141)
+  cut      rho 0.200 N3 (lx 3) vpc24 cut 0.88: K_dev free=18.84 cut=33.96 wall 2 vox (true 1.3) dropped=0 (364s, cg<=1116)
+  cut      rho 0.200 N3 (lx 3) vpc24 cut 0.92: K_dev free=18.77 cut=37.28 wall 2 vox (true 1.3) dropped=0 (387s, cg<=1226)
+  cut      rho 0.200 N3 (lx 3) vpc24 cut 0.96: K_dev free=18.74 cut=34.61 wall 2 vox (true 1.3) dropped=0 (368s, cg<=1226)
+
+DONE (rc=0).
+     3643.32 real       971.13 user        23.82 sys
+           257703936  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+             1764283  page reclaims
+                  75  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                 952  voluntary context switches
+             1651435  involuntary context switches
+       5942451265047  instructions retired
+       3018655655826  cycles elapsed
+           279511736  peak memory footprint

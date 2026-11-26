@@ -2205,6 +2205,12 @@ int main(int argc, char** argv) {
       argc > 3 ? argv[3] : "evidence/2026-07-31-multiscale-lattice-feasibility";
   const bool fast = std::getenv("TOPOPT_DEHOMOG_FAST") != nullptr;
   fea_set_matfree_threads(1);  // determinism (bar J8)
+  // TOPOPT_DEHOMOG_THREADS=n: the matrix-free apply's thread count (2026-11-26, the long 8-cell blocks of
+  // the cut sweep). A speed control only: the apply's 8-colour partition fixes the accumulation order, so
+  // the field is bit-identical at any count (fea.hpp, fea_set_matfree_threads); the assembled path and
+  // Eigen's CG stay single-threaded. Unset: 1, as before.
+  if (const char* th = std::getenv("TOPOPT_DEHOMOG_THREADS"))
+    if (std::atoi(th) > 1) fea_set_matfree_threads(std::atoi(th));
   if (const char* t = std::getenv("TOPOPT_DEHOMOG_TYPE")) g_topo = lattice_topology_from_id(t);
   init_type_geometry();
 

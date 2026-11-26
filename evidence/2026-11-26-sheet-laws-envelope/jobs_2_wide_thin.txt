@@ -1,0 +1,10 @@
+# 11-26 SWEEP, WIDE (vpc 24 rows): N = 8, 6, 5 at the screen's worst new layer, and the second
+# worst when within 10 % of it at N = 4 (make_jobs.py); longest first.
+w gyroid 0.15010 8 24 0.625000
+w schwarz_d 0.20038 8 24 0.916667
+w schwarz_d 0.20038 8 24 0.666667
+w gyroid 0.15010 6 24 0.625000
+w schwarz_d 0.20038 6 24 0.916667
+w schwarz_d 0.20038 6 24 0.666667
+w gyroid 0.15010 5 24 0.625000
+w schwarz_d 0.20038 5 24 0.916667,0.666667

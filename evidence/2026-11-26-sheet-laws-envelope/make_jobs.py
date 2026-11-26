@@ -2,7 +2,9 @@
 """The 11-26 cut sweep's job lists (the reviewer's ruling, item 3 (a)). usage:
 
   python3 -I make_jobs.py screen <this folder>        -> jobs_1_screen.txt
-  python3 -I make_jobs.py wide <this folder>          -> jobs_2_wide.txt (reads the screen's parts)
+  python3 -I make_jobs.py wide_thin <this folder>     -> jobs_2_wide_thin.txt (the vpc 24 rows)
+  python3 -I make_jobs.py wide <this folder>          -> jobs_2_wide.txt (the vpc 16 rows)
+  (both read the screen's parts; each writes its wide_selection*.txt)
 
 THE SWEEP. Every voxel layer of the law pitch from half a cell up: k / vpc for k = vpc/2 .. vpc-1
 (vpc 16: 8..15 layers, 0.5000 .. 0.9375; vpc 24: 12..23, 0.5000 .. 0.9583). The notes28 record
@@ -11,10 +13,17 @@ and row (0.6 is 10 / 16 layers at vpc 16 and 14 / 24 at vpc 24); this folder mea
 does not have.
 
   SCREEN  every new layer at N = 2, 3, 4 (every row, both sheets).
-  WIDE    N = 5, 6, 8 at the screen's worst new layers per row: the TWO with the highest off-grip
-          Kd at N = 4 (ties: N = 3) at the vpc 16 rows, the ONE at the two vpc 24 rows (their 8-cell
-          blocks are 1.6-1.9 h each). The old layers (0.5, 0.6, 0.75) are already measured at
-          every width.
+  WIDE    N = 5, 6, 8 at the screen's worst new layer per row (the highest off-grip Kd at N = 4;
+          ties: N = 3), and at the second worst too when it is within 10 % of the worst at N = 4
+          (then either could be the worst at 8 cells). The old layers (0.5, 0.6, 0.75) are already
+          measured at every width.
+          CHANGED AT 05:25 ON 11-26, BEFORE ANY VPC 16 SCREEN RESULT WAS READ (only gyroid 0.150's was
+          in): the plan written before the runs took the two worst at every vpc 16 row. Every job ran
+          4-5 x slower than notes28's logs (other sessions' builds and runs: load average 150-290 on
+          10 cores), so the second layer runs only where the screen cannot tell the two apart. The
+          vpc 24 rows' wide jobs run as soon as their own screen is in (wide_thin), their 8-cell
+          blocks with 3 matrix-free threads (bit-identical at any count: fea_set_matfree_threads;
+          checked on a smoke block, every CSV byte-identical).
 
 Job line: w <type> <rho> <N> <vpc> <cuts, comma separated, six decimals>.
 """
@@ -70,12 +79,17 @@ def read_parts(ev, t):
     return out
 
 
-def wide(ev):
-    L = ["# 11-26 SWEEP, WIDE: N = 8, 6, 5 at the screen's worst new layers (make_jobs.py wide);",
-         "# longest first (the vpc 24 8-cell blocks, ~2.2-2.8 GB each)."]
+def wide_rows(ev, which):
+    """which = 16 (wide: the vpc 16 rows) or 24 (wide_thin: the two vpc 24 rows)."""
+    name = "jobs_2_wide.txt" if which == 16 else "jobs_2_wide_thin.txt"
+    sel = "wide_selection.txt" if which == 16 else "wide_selection_thin.txt"
+    L = [f"# 11-26 SWEEP, WIDE (vpc {which} rows): N = 8, 6, 5 at the screen's worst new layer, and the second",
+         "# worst when within 10 % of it at N = 4 (make_jobs.py); longest first."]
     sel_lines = []
     jobs8, jobs6, jobs5 = [], [], []
     for t, rho, vpc in ROWS:
+        if vpc != which:
+            continue
         rows = [r for r in read_parts(ev, t) if abs(float(r["rho_target"]) - float(rho)) < 1e-4
                 and int(r["vpc"]) == vpc and r["population"] == "cut_off_grip"
                 and abs(float(r["rho_meas"]) - float(r["rho_lib"])) <= 0.15 * float(r["rho_lib"])]
@@ -89,26 +103,36 @@ def wide(ev):
         missing = [k for k in ks if score[k][0] < 0]
         if missing:
             sys.exit(f"{t} {rho}: the screen has no N=4 off-grip row at layers {missing}: not selecting")
-        top = sorted(ks, key=lambda k: score[k], reverse=True)[: (2 if vpc == 16 else 1)]
+        order = sorted(ks, key=lambda k: score[k], reverse=True)
+        top = order[:1] + [k for k in order[1:2] if score[k][0] >= 0.9 * score[order[0]][0]]
         sel_lines.append(f"{t} {rho} vpc{vpc}: " + ", ".join(
             f"{k}/{vpc} ({score[k][0]:.3f} at N4, {score[k][1]:.3f} at N3)" for k in top)
-            + " | others: " + ", ".join(f"{k}/{vpc} {score[k][0]:.3f}" for k in ks if k not in top))
+            + " | others: " + ", ".join(f"{k}/{vpc} {score[k][0]:.3f}" for k in order if k not in top))
         cuts = ",".join(frac(k, vpc) for k in top)
         for k in top:
-            jobs8.append((vpc, f"w {t} {rho} 8 {vpc} {frac(k, vpc)}"))
-            jobs6.append((vpc, f"w {t} {rho} 6 {vpc} {frac(k, vpc)}"))
-        jobs5.append((vpc, f"w {t} {rho} 5 {vpc} {cuts}"))
-    for group in (jobs8, jobs6, jobs5):
-        group.sort(key=lambda x: -x[0])
-        L += [j for _, j in group]
-    with open(os.path.join(ev, "jobs_2_wide.txt"), "w") as f:
+            jobs8.append(f"w {t} {rho} 8 {vpc} {frac(k, vpc)}")
+            jobs6.append(f"w {t} {rho} 6 {vpc} {frac(k, vpc)}")
+        jobs5.append(f"w {t} {rho} 5 {vpc} {cuts}")
+    L += jobs8 + jobs6 + jobs5
+    with open(os.path.join(ev, name), "w") as f:
         f.write("\n".join(L) + "\n")
-    with open(os.path.join(ev, "wide_selection.txt"), "w") as f:
-        f.write("The screen's worst new layers per row (off-grip Kd at N = 4, then N = 3):\n")
+    with open(os.path.join(ev, sel), "w") as f:
+        f.write(f"The screen's worst new layers per vpc {which} row (off-grip Kd at N = 4, then N = 3):\n")
         f.write("\n".join(sel_lines) + "\n")
     print("\n".join(sel_lines))
-    print(f"jobs_2_wide.txt: {len(L) - 2} jobs")
+    print(f"{name}: {len(L) - 2} jobs")
+
+
+def wide(ev):
+    # a pause marker (the runner yields HEAVY.lock at the screen's end; the wide stage runs after) stops it
+    if os.path.exists(os.environ.get("S1_PAUSE", "/Users/nadim/dev/TopOpt/agent-scratch/notes30-S1/PAUSE")):
+        sys.exit("paused: HEAVY.lock is yielded at the screen's end; the wide stage runs after the lock is back")
+    wide_rows(ev, 16)
+
+
+def wide_thin(ev):
+    wide_rows(ev, 24)
 
 
 if __name__ == "__main__":
-    {"screen": screen, "wide": wide}[sys.argv[1]](sys.argv[2])
+    {"screen": screen, "wide": wide, "wide_thin": wide_thin}[sys.argv[1]](sys.argv[2])

@@ -1,0 +1,33 @@
+LATTICE DE-HOMOGENIZATION PROBE — gyroid band [0.15010, 0.60069] (read from core)
+
+===== WIDTHS — the law per member width (sheets 3.2) =====
+  solver: fea_solve_cg_matfree; widths: 3; cuts: 0.54 0.62 0.67 0.71 0.79 0.83 0.88 0.92 0.96
+  cut      rho 0.150 N3 (lx 3) vpc24 cut 0.54: K_dev free=26.96 cut=59.48 wall 2 vox (true 1.2) dropped=0 (496s, cg<=1163)
+  cut      rho 0.150 N3 (lx 3) vpc24 cut 0.62: K_dev free=26.83 cut=48.89 wall 2 vox (true 1.2) dropped=0 (515s, cg<=1272)
+  cut      rho 0.150 N3 (lx 3) vpc24 cut 0.67: K_dev free=26.78 cut=50.41 wall 2 vox (true 1.2) dropped=0 (474s, cg<=1175)
+  cut      rho 0.150 N3 (lx 3) vpc24 cut 0.71: K_dev free=26.77 cut=53.47 wall 2 vox (true 1.2) dropped=0 (424s, cg<=1173)
+  cut      rho 0.150 N3 (lx 3) vpc24 cut 0.79: K_dev free=26.77 cut=53.78 wall 2 vox (true 1.2) dropped=0 (445s, cg<=1209)
+  cut      rho 0.150 N3 (lx 3) vpc24 cut 0.83: K_dev free=26.77 cut=53.89 wall 2 vox (true 1.2) dropped=0 (567s, cg<=1231)
+  cut      rho 0.150 N3 (lx 3) vpc24 cut 0.88: K_dev free=26.78 cut=66.12 wall 2 vox (true 1.2) dropped=0 (417s, cg<=1265)
+  cut      rho 0.150 N3 (lx 3) vpc24 cut 0.92: K_dev free=26.80 cut=54.73 wall 2 vox (true 1.2) dropped=0 (428s, cg<=1173)
+  cut      rho 0.150 N3 (lx 3) vpc24 cut 0.96: K_dev free=26.79 cut=49.98 wall 2 vox (true 1.2) dropped=0 (420s, cg<=1173)
+
+DONE (rc=0).
+     4198.72 real       975.83 user        22.59 sys
+           192479232  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+             1311814  page reclaims
+                 231  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                1606  voluntary context switches
+             1632614  involuntary context switches
+       5454704157405  instructions retired
+       3017280126110  cycles elapsed
+           275186360  peak memory footprint
