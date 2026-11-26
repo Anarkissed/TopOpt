@@ -281,7 +281,6 @@ final class LatticeSampleStream {
         watch?.stop(); watch = nil
         guard !AppSettings.skipAllAnimations, show.waiting, let tap = LatticeLayoutPreview.strutTap(session) else { return }
         show.stream.reset()
-        tap.streamNextLay(up: show.viewAxes.up, map: nil)
         let s = show
         watch = LatticeStrutWatch(stream: show.stream, every: LatticeLayoutPreview.growthPollS,
                                   most: LatticeLayoutPreview.strutReadMost,
@@ -290,6 +289,7 @@ final class LatticeSampleStream {
                                       return try tap.strutRead(from: from, most: most, mapFrom: mapFrom)
                                   },
                                   moved: { [weak s] in s?.streamMoved() })
+        tap.streamNextLay(up: show.viewAxes.up, map: nil)   // (after the watch's baseline: this lay is the next one it reads)
     }
 
     /// The lay ended: its last struts read, the poll stopped.

@@ -2189,7 +2189,6 @@ extension LatticeLayoutPreview {
         build.stream.reset(map: geometry, smoothCut: Self.cutSmoothWanted(lattice: latticeAtLay, printAccurate: printAccurate),
                            printUp: session.printUp.map { SIMD3<Float>($0) })
         build.stream.softened = { [weak self] in self?.build.streamMoved() }
-        tap.streamNextLay(up: up, map: geometry)
         strutCellsFrom = nil; strutCellsEnd = nil
         let key = strutPaceKey
         let w = LatticeStrutWatch(stream: build.stream, every: Self.growthPollS, most: Self.strutReadMost,
@@ -2199,6 +2198,7 @@ extension LatticeLayoutPreview {
                                   },
                                   moved: { [weak self] in self?.strutsMoved(key) })
         strutWatch = w
+        tap.streamNextLay(up: up, map: geometry)   // (after the watch's baseline: this lay is the next one it reads)
         return w
     }
 

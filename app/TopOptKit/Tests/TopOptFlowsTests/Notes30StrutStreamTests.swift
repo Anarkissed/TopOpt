@@ -182,7 +182,9 @@ final class Notes30StrutStreamTests: XCTestCase {
     /// 0.15 s onto the stream, the landing at `t0 + 0.3 + layS`. Returns, per floor, when the line had passed it (all its
     /// struts out) and when it first showed; and the timelapse at its end.
     struct Run { var certified: [Double]; var shown: [Double]; var end: Double; var tl: LatticeBuildTimelapse
-        var floorsBeforeLanding: Int; var snapTimes: [Double]; var frame: LatticeBuildTimelapse.Frame }
+        var floorsBeforeLanding: Int; var snapTimes: [Double]; var frame: LatticeBuildTimelapse.Frame
+        /// When the poll saw the cells all laid (s from the ask), and the landing.
+        var cellsEnd: Double?; var landAt: Double }
     func run(cellsS: Double, layS: Double, lastLayS: Double? = nil, afterShare: Double? = nil, walls: Bool = false,
              map: LatticeLayoutSolidGrid? = nil, plan: (lo: SIMD3<Float>, hi: SIMD3<Float>)? = nil) throws -> Run {
         let (bars, flags) = Self.lattice()
@@ -240,7 +242,8 @@ final class Notes30StrutStreamTests: XCTestCase {
         let tl = try XCTUnwrap(show.timelapse, "the timelapse is still held at its end")
         let f = try XCTUnwrap(show.frame)
         return Run(certified: certified.map { $0 ?? .infinity }, shown: shown.map { $0 ?? .infinity },
-                   end: try XCTUnwrap(tl.end) - t0, tl: tl, floorsBeforeLanding: tl.floorsBeforeLanding, snapTimes: tl.snapTimes, frame: f)
+                   end: try XCTUnwrap(tl.end) - t0, tl: tl, floorsBeforeLanding: tl.floorsBeforeLanding, snapTimes: tl.snapTimes, frame: f,
+                   cellsEnd: cellsEnd.map { $0 - t0 }, landAt: landAt - t0)
     }
 
     // MARK: S1 the pacing
@@ -274,19 +277,25 @@ final class Notes30StrutStreamTests: XCTestCase {
     /// left as the catch-up: each floor WHOLE in one snap, `catchUpFloorS` apart, then topped out.
     func testS1ThePaceAimsAtTheLandingAndALateLandingCatchesUp() throws {
         typealias T = LatticeBuildTimelapse
-        // a quick line in a long lay, the share after the cells learned (the landing foretold from the progress)
-        let slow = try run(cellsS: 2, layS: 9, lastLayS: 9.3, afterShare: 7.0 / 9.3)
+        // a quick line in a long lay: the share after the cells learned on the lay before (as the page learns it), then the
+        // landing foretold from the line's progress
+        let first = try run(cellsS: 2, layS: 9)
+        let share = try XCTUnwrap(LatticeStrutPace.afterShare(start: 0, cellsEnd: first.cellsEnd, landed: first.landAt))
+        let slow = try run(cellsS: 2, layS: 9, lastLayS: 9.3, afterShare: share)
         let lastEnd = (slow.tl.shownFloors.last.map { $0.at + $0.dur } ?? 0) - 1000
-        print(String(format: "S1 pace: floors end at %.2f s; the landing at 9.3 s; end %.2f s", lastEnd, slow.end))
-        XCTAssertEqual(lastEnd, 9.3 - T.marginS, accuracy: 0.35, "★ the floors end about a second before the landing")
+        let foretold = try XCTUnwrap(slow.tl.expectedLanding) - 1000
+        print(String(format: "S1 pace: floors end at %.2f s; the landing foretold at %.2f s, at 9.3 s; end %.2f s", lastEnd, foretold, slow.end))
+        XCTAssertEqual(foretold, 9.3, accuracy: 0.1, "★ the landing foretold from the line's progress and the share learned")
+        XCTAssertEqual(lastEnd, foretold - T.marginS, accuracy: 0.1, "★ the floors end a second before the foretold landing")
+        XCTAssertLessThan(lastEnd, 9.3, "★ … before the engine lands")
         XCTAssertEqual(slow.floorsBeforeLanding, slow.frame.floors, "every floor before the landing")
         XCTAssertEqual(slow.end, 9.3 + T.toppedOutS, accuracy: 1e-6, "★ the cladding at the landing, then topped out")
         // a quick lay: exactly his total
         let quick = try run(cellsS: 0.5, layS: 1.2)
         XCTAssertEqual(quick.end, T.totalS, accuracy: 1e-6, "★ a quick lay: exactly his 7 s")
         XCTAssertGreaterThan(quick.floorsBeforeLanding, 0, "the first floors rose while it laid")
-        // a late landing: the line reaches the top only as it lands
-        let late = try run(cellsS: 12, layS: 12)
+        // a late landing: the line has not passed the top floor when the engine lands
+        let late = try run(cellsS: 14, layS: 12)
         let landing = 1000 + 12.3
         let after = late.tl.shownFloors.filter { $0.at >= landing - 1e-9 }
         print(String(format: "S1 late: %d floors before the landing, %d after (whole: %@); end %.2f s", late.floorsBeforeLanding,
@@ -295,7 +304,8 @@ final class Notes30StrutStreamTests: XCTestCase {
         XCTAssertFalse(after.isEmpty, "premise: floors left at the landing")
         XCTAssertTrue(after.allSatisfy(\.whole), "★ the catch-up: each floor whole, in one snap")
         for (a, b) in zip(after.dropFirst(), after) { XCTAssertEqual(a.at - b.at, T.catchUpFloorS, accuracy: 1e-6) }
-        XCTAssertEqual(late.end, 12.3 + Double(after.count) * T.catchUpFloorS + T.toppedOutS, accuracy: 0.05)
+        XCTAssertEqual(late.end, (after.first?.at ?? 0) - 1000 + Double(after.count) * T.catchUpFloorS + T.toppedOutS, accuracy: 1e-6)
+        XCTAssertLessThan((after.first?.at ?? 0) - 1000, 12.3 + 1.0, "the catch-up right after the landing")
     }
 
     /// ★ Walls: in the solid view a floor waits for its map too (made behind the same line): it shows only once the map is
@@ -653,8 +663,9 @@ final class Notes30StrutStreamTests: XCTestCase {
         for red in [false, true] {
             let fake = FakeStrutEngine(bars: bars, flags: flags, cellsS: 0.01, layS: 0.02)
             fake.handOneThatMoves = red
-            fake.clock = { 5 }
+            fake.clock = { 0 }
             fake.streamNextLay(up: SIMD3(0, 0, 1), map: nil)
+            fake.clock = { 5 }
             let s = LatticeStrutStream()
             s.reset()
             s.take(try fake.strutRead(from: 0, most: 0, mapFrom: 0))

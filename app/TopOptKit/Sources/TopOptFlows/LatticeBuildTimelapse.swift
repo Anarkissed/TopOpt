@@ -164,8 +164,9 @@ struct LatticeBuildTimelapse: Equatable {
         let least = start + Self.totalS - Self.toppedOutS   // the frame topped out by his total
         if let l = landedAt, l <= t {
             let stoodBefore = shownFloors.contains { $0.at < l }
-            if !stoodBefore {   // nothing stood when it landed (no stream): the whole build, at least `buildLeastS`
-                return FloorShown(at: t, dur: Swift.max(least - t, Self.buildLeastS) / left, whole: false)
+            if !stoodBefore {   // nothing stood when it landed (no stream): the whole build, at least `buildLeastS` from its first floor
+                let target = Swift.max(least, Swift.max(l, start + Self.siteLeastS) + Self.buildLeastS)
+                return FloorShown(at: t, dur: Swift.max(Self.catchUpFloorS, (target - t) / left), whole: false)
             }
             let room = least - t
             if room >= left * Self.floorLeastS { return FloorShown(at: t, dur: room / left, whole: false) }
@@ -581,6 +582,11 @@ extension MeshRenderer {
         // the next lay's line rises and its floors stand
         let drawnUp = drawnLayoutBars.map { $0 === streamBars ? show.stream.printUp : $0.printUp } ?? show.stream.printUp
         show.viewAxes = LatticeBuildTimelapse.axes(model: model, printUp: drawnUp)
+        // the landed bars with no frame fixed yet (no stream, no box given): the frame from their box now, before any mask
+        if let p = layoutBars, let box = p.box {
+            let (up, across) = LatticeBuildTimelapse.axes(model: model, printUp: p.printUp)
+            show.fixFrame(lo: box.lo, hi: box.hi, up: up, across: across, token: p.token)
+        }
         if show.drawsStream(landedToken: layoutBars?.token) {
             if streamBars == nil, LatticeLayoutBarsPass.lastInitError == nil {
                 do { streamBars = try LatticeLayoutBarsPass(device: device) } catch {
