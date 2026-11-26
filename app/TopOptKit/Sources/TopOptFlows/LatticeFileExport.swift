@@ -883,6 +883,9 @@ public enum LatticeFileRun {
         /// ★ 362 11-23 (his run stalled 10 minutes while he was in another app): the print-file job the MAC made itself when
         /// the strengthening ended (the worker's `next`, asked by "then" = file); nil from a worker that does not chain.
         public var nextJobID: String? = nil
+        /// ★ notes30 depth: a load on bare vines stopped it — the depth of solid that clears it, when strengthen.json says
+        /// (`solid_depth_needed_mm`); nil otherwise (the print file's strength block carries it too).
+        public var depthNeededMM: Double? = nil
 
         /// strengthen.json read (the files fetched apart). nil: not core's strengthen.json.
         public static func parse(_ d: Data) -> (summary: Strengthened, lastRound: String?)? {
@@ -895,9 +898,10 @@ public enum LatticeFileRun {
                 past = Swift.max(past, (lim?["struts"] as? NSNumber)?.intValue ?? 0)
                 widest = Swift.max(widest, (lim?["widest_mm"] as? NSNumber)?.doubleValue ?? 0)
             }
-            let s = Strengthened(code: o["code"] as? String ?? "", why: o["why"] as? String ?? "",
+            var s = Strengthened(code: o["code"] as? String ?? "", why: o["why"] as? String ?? "",
                                  passing: o["passing"] as? Bool ?? false, rounds: rounds.count, pastLimitStruts: past,
                                  pastLimitWidestMM: widest, files: nil, summaryJSON: d)
+            if s.code == OrganicBareVines.reason { s.depthNeededMM = OrganicBareVines.depth(o) }   // ★ notes30 depth
             return (s, o["strengthened"] as? String)
         }
 

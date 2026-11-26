@@ -55,6 +55,8 @@ public enum OrganicCertify {
         public var needs: Double = 1.5
         /// ★ notes25 B4: the weakest strut's width (mm), when the struts govern (whose group's struts they are).
         public var strutWidthMM: Double? = nil
+        /// ★ notes30 depth: a load on bare vines — the depth of solid that clears it (core's `solid_depth_needed_mm`); nil: not said.
+        public var depthNeededMM: Double? = nil
     }
 
     /// One weak spot of the solid, as the check lists it.
@@ -106,8 +108,12 @@ public enum OrganicCertify {
         // (thicker struts never cure it: core says so)
         let bare = OrganicBareVines.found(strength: s)
         if let b = bare {
-            out.append(Issue(id: OrganicBareVines.reason, stage: .lattice, title: OrganicBareVines.title, text: b.text,
-                             spotIDs: [], at: b.at, solve: .coverLoadedFace, worst: 0, needs: safety))
+            var issue = Issue(id: OrganicBareVines.reason, stage: .lattice, title: OrganicBareVines.title, text: b.text,
+                              spotIDs: [], at: b.at, solve: .coverLoadedFace, worst: 0, needs: safety)
+            // ★ notes30 depth: the depth that clears it — the check's own, else the strengthening's (strengthen.json, when it
+            // carries the key); nil: an older worker (today's offers)
+            issue.depthNeededMM = b.depthNeededMM ?? OrganicBareVines.depth(report[LatticeFileButton.strengthenKey] as? [String: Any])
+            out.append(issue)
         }
         let struts = s["struts"] as? [String: Any] ?? [:]
         let under = (struts["under_safety"] as? NSNumber)?.intValue ?? 0

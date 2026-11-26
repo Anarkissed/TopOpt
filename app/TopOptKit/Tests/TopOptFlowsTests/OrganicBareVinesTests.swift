@@ -18,14 +18,16 @@ final class OrganicBareVinesTests: XCTestCase {
     override nonisolated func tearDown() {
         OrganicBareVines.controlUnread = false
         OrganicBareVines.controlSolidFirst = false
+        OrganicBareVines.controlNoDepth = false
         super.tearDown()
     }
 
     // MARK: fixtures (core's own §7c numbers: 0.55 of 0.55 N on the frame, the place (6, 2.5, 0); made-up margins)
 
     /// A print file's report as core writes it for a load on bare vines (`fail_text` its sentence), the struts' numbers there
-    /// (3 short) and margins that, read without the reason, would say "Strong enough".
-    static func report(bare: Bool = true, failText: Bool = true) -> [String: Any] {
+    /// (3 short) and margins that, read without the reason, would say "Strong enough". `depth`: core's `solid_depth_needed_mm`
+    /// (nil: an older worker's core, no key).
+    static func report(bare: Bool = true, failText: Bool = true, depth: Double? = nil) -> [String: Any] {
         var s: [String: Any] = [
             "accepted": false, "verdict": "fail", "safety_margin": 1.5, "voxel_mm": 0.75,
             "struts": ["judged": 400, "under_safety": 3, "smallest_margin": 2.0] as [String: Any],
@@ -38,6 +40,7 @@ final class OrganicBareVinesTests: XCTestCase {
             s["load_on_frame_n"] = 0.55; s["load_total_n"] = 0.55; s["load_share"] = 1.0
             s["load_on_lattice_at"] = [6.0, 2.5, 0.0]
             if failText { s["fail_text"] = coreSentence }
+            if let depth { s["solid_depth_needed_mm"] = depth }
         } else {
             s["fail_reason"] = "strut_margin"
         }
@@ -111,13 +114,13 @@ final class OrganicBareVinesTests: XCTestCase {
     }
 
     /// The print file's result as Results holds it (one variant, the report riding with it).
-    static func outcome() throws -> OptimizeOutcome {
+    static func outcome(depth: Double? = nil) throws -> OptimizeOutcome {
         let v = OptimizeVariant(requestedVolumeFraction: 0.6, achievedVolumeFraction: 0.6, massGrams: 20, supportVolumeVoxels: 0,
                                 meshTriangleCount: 1, worstCaseMargin: 2.0, accepted: true, v3Passes: false,
                                 meshVertices: [0, 0, 0, 1, 0, 0, 0, 1, 0], meshIndices: [0, 1, 2])
         return OptimizeOutcome(variants: [v], stoppedOnMargin: false, cancelled: false, acceptedCount: 1,
                                gridNx: 2, gridNy: 2, gridNz: 2, gridOrigin: .zero, spacing: 1, computedRemotely: true,
-                               reportJSON: try JSONSerialization.data(withJSONObject: report()))
+                               reportJSON: try JSONSerialization.data(withJSONObject: report(depth: depth)))
     }
 
     static func tab() throws -> ResultVariantVM? { ResultsModel(projectName: "Stand", outcome: try outcome()).selected }
@@ -220,10 +223,15 @@ final class OrganicBareVinesTests: XCTestCase {
     func testSolveIsWiredToTheCentredPopUp() throws {
         let ws = try FlexibleSource.code("WorkspacePlaceholder.swift")
         let start = try XCTUnwrap(ws.range(of: "func certifySolve(_ issue: OrganicCertify.Issue) {"))
-        let body = String(ws[start.upperBound...].prefix(600))
+        let body = String(ws[start.upperBound...].prefix(900))
         XCTAssertTrue(body.contains("if solve == .coverLoadedFace {"), body)
-        XCTAssertTrue(body.contains("OrganicBareVines.offer(skin: { certifyCover { _ = $0.giveLoadedFaceProtectSkin(near: issue.at) } },"))
-        XCTAssertTrue(body.contains("solid: { certifyCover { _ = $0.giveLoadedFaceSolidFinish(near: issue.at) } })"))
+        // ★ notes30 depth: LatticeReview's rule decides the offers (the skin's depth; Solid only when its wall clears it)
+        XCTAssertTrue(body.contains("let o = OrganicBareVines.offers(depthNeededMM: issue.depthNeededMM, wallMM: project.printParams.wallRingMM)"),
+                      body)
+        XCTAssertTrue(body.contains("let solid: (() -> Void)? = o.solid ? { certifyCover { _ = $0.giveLoadedFaceSolidFinish(near: issue.at) } } : nil"))
+        XCTAssertTrue(body.contains(
+            "OrganicBareVines.offer(skin: { certifyCover { _ = $0.giveLoadedFaceProtectSkin(near: issue.at, depthMM: o.skinDepthMM) } },"))
+        XCTAssertTrue(body.contains("solid: solid)"))
         let cover = try XCTUnwrap(ws.range(of: "func certifyCover(_ change: (ProjectModel) -> Void) {"))
         let cb = String(ws[cover.upperBound...].prefix(200))
         XCTAssertTrue(cb.contains("model.persistCurrentProject()") && cb.contains("certifyAdvance()"), cb)
@@ -334,6 +342,75 @@ final class OrganicBareVinesTests: XCTestCase {
         let after = LatticeLayoutPreview.settings(p)
         let skin = try XCTUnwrap(after.protect.first { Set($0.faces).isSuperset(of: faces) }, "★ the job's skin over the loaded face")
         XCTAssertGreaterThanOrEqual(skin.depthMM, 1.0, "★ a real depth (the page's), never a two-line skin")
+    }
+
+    // MARK: the depth key (LatticeReview, organic-engine 9850d951)
+
+    /// ★ LatticeReview's wizard rule with core's `solid_depth_needed_mm`: Solid finish offered ONLY when its wall (the printer's
+    /// wall ring) is at least the depth needed; Protect skin at max(4 mm, the depth rounded UP to 0.5 mm), still first; no key
+    /// (an older worker): today's two offers at the page's depth. Read from the strength block, else strengthen.json. RED
+    /// CONTROL (controlNoDepth: the key ignored): today's offers even with the key.
+    func testTheDepthKeyDecidesTheOffers() throws {
+        // read: the strength block, the wizard's issue, strengthen.json
+        let block = try XCTUnwrap(Self.report(depth: 1.2)["strength"] as? [String: Any])
+        XCTAssertEqual(OrganicBareVines.found(strength: block)?.depthNeededMM, 1.2)
+        XCTAssertEqual(LatticeFileStrength(block: block).bareVines?.depthNeededMM, 1.2, "the print file's strength")
+        let issue = try XCTUnwrap(OrganicCertify.issues(report: Self.report(depth: 1.2), infillNow: 50).first)
+        XCTAssertEqual(issue.depthNeededMM, 1.2, "★ the wizard's issue carries it")
+        var viaStrengthen = Self.report()
+        viaStrengthen[LatticeFileButton.strengthenKey] = ["code": "load_on_bare_lattice", "solid_depth_needed_mm": 2.0] as [String: Any]
+        XCTAssertEqual(OrganicCertify.issues(report: viaStrengthen, infillNow: 50).first?.depthNeededMM, 2.0,
+                       "★ else strengthen.json's, when it carries the key")
+        let sj = try JSONSerialization.data(withJSONObject: ["ok": true, "code": "load_on_bare_lattice", "rounds_fixed": 0,
+                                                             "solid_depth_needed_mm": 1.35, "rounds": [] as [Any]])
+        XCTAssertEqual(LatticeFileRun.Strengthened.parse(sj)?.summary.depthNeededMM, 1.35)
+        XCTAssertNil(OrganicCertify.issues(report: Self.report(), infillNow: 50).first?.depthNeededMM, "no key: nil")
+
+        // key present + a thin Solid (a 0.9 mm wall under 1.2 mm needed): Solid NOT offered; the skin at the 4 mm floor
+        let thin = OrganicBareVines.offers(depthNeededMM: 1.2, wallMM: 0.9)
+        XCTAssertEqual(thin, .init(solid: false, skinDepthMM: 4.0), "★ Solid not offered")
+        XCTAssertEqual(OrganicBareVines.adviceLine(thin), "The loaded face is bare vines now. Try a Protect skin 4 mm deep.",
+                       "★ the card names the skin's depth and no Solid")
+        // a wall deep enough: both, Protect skin first
+        let deep = OrganicBareVines.offers(depthNeededMM: 1.2, wallMM: 1.32)
+        XCTAssertTrue(deep.solid, "★ the wall clears it: Solid offered")
+        XCTAssertEqual(OrganicBareVines.adviceLine(deep), "The loaded face is bare vines now. Try a Protect skin 4 mm deep or a Solid finish.")
+        XCTAssertTrue(OrganicBareVines.offers(depthNeededMM: 1.2, wallMM: 1.2).solid, "a wall exactly the depth needed clears it")
+        // key present + 6 mm needed: Protect skin at 6.0 mm; 4.2 → 4.5; 6.01 → 6.5
+        XCTAssertEqual(OrganicBareVines.offers(depthNeededMM: 6.0, wallMM: 1.32).skinDepthMM, 6.0, "★ 6 mm needed: 6.0 mm")
+        XCTAssertEqual(OrganicBareVines.offers(depthNeededMM: 6.0, wallMM: 1.32).solid, false)
+        XCTAssertEqual(OrganicBareVines.offers(depthNeededMM: 4.2, wallMM: 1.32).skinDepthMM, 4.5, "★ 4.2 → 4.5 (up to 0.5 mm)")
+        XCTAssertEqual(OrganicBareVines.offers(depthNeededMM: 6.01, wallMM: 1.32).skinDepthMM, 6.5, "up, never down")
+        XCTAssertEqual(OrganicBareVines.offers(depthNeededMM: 0.9, wallMM: 1.32).skinDepthMM, 4.0, "never under the 4 mm floor")
+        // key absent (an older worker): today's two offers at the page's depth, today's advice
+        let older = OrganicBareVines.offers(depthNeededMM: nil, wallMM: 0.9)
+        XCTAssertEqual(older, .init(solid: true, skinDepthMM: nil), "★ no key: today's two offers")
+        XCTAssertEqual(OrganicBareVines.adviceLine(older), OrganicBareVines.advice)
+        // the card's advice through the wizard's context (the printer's wall)
+        let c = OrganicCertifyAdvice.Context(strut: nil, stepMM: 0.45, infillNow: 50, wallMM: 0.9)
+        XCTAssertEqual(OrganicCertifyAdvice.advice(issue, c)?.line, OrganicBareVines.adviceLine(thin))
+
+        // RED CONTROL: the key ignored — Solid offered again under a thin wall, the page's depth
+        OrganicBareVines.controlNoDepth = true
+        XCTAssertEqual(OrganicBareVines.offers(depthNeededMM: 1.2, wallMM: 0.9), .init(solid: true, skinDepthMM: nil),
+                       "RED CONTROL: today's offers")
+        XCTAssertEqual(OrganicBareVines.offers(depthNeededMM: 6.0, wallMM: 1.32).skinDepthMM, nil, "RED CONTROL: no 6 mm skin")
+    }
+
+    /// ★ The Protect skin offer lays its skin at the depth the rule names (6 mm here), never the page's 4 mm. RED CONTROL: with
+    /// no depth (no key), the page's 4 mm.
+    func testTheProtectSkinIsLaidAtTheDepthNeeded() throws {
+        let p = try pad()
+        let id = try XCTUnwrap(p.giveLoadedFaceProtectSkin(near: nil, depthMM: 6.0))
+        XCTAssertEqual(p.lattice.groupDepthMM[id], 6.0, "★ the group's depth")
+        let faces = Set(try XCTUnwrap(p.latticeGroups.first { $0.id == id }).faces.map { Int32($0) })
+        let skin = try XCTUnwrap(LatticeLayoutPreview.settings(p).protect.first { Set($0.faces).isSuperset(of: faces) })
+        XCTAssertEqual(skin.depthMM, 6.0, accuracy: 1e-9, "★ the job's skin, 6 mm deep")
+        // RED CONTROL: no depth named — the page's own
+        let q = try pad()
+        let old = try XCTUnwrap(q.giveLoadedFaceProtectSkin(near: nil))
+        XCTAssertEqual(q.lattice.groupDepthMM[old], LatticeSlabDepth.clamp(q.lattice.paintDepthMM), "RED CONTROL: the page's depth")
+        XCTAssertNotEqual(q.lattice.groupDepthMM[old], 6.0)
     }
 
     /// The nearest point of a triangle (the load nearest the place): over its face, beyond a corner, beyond an edge.

@@ -21,8 +21,13 @@ public struct AppPopup: Equatable, Identifiable, Sendable {
 @MainActor public final class AppPopups: ObservableObject {
     public static let shared = AppPopups()
     @Published public var current: AppPopup? {
-        didSet { if current == nil { action = nil; second = nil; third = nil; dismissTitle = nil; dismissShown = true; extra = nil } }
+        didSet {
+            if current == nil { action = nil; second = nil; third = nil; dismissTitle = nil; dismissShown = true; extra = nil; stacked = false }
+        }
     }
+    /// ★ notes30 depth: a choice pop-up (`choose`) — its actions stacked, the first on top, its dismiss word last — even with
+    /// one action (LatticeReview's depth rule: Protect skin and Not now only).
+    public private(set) var stacked = false
     /// ★ notes29 (his 11-25, the one (i)): content an (i) shows under its words (a Flexible row's core detail); cleared with it.
     public private(set) var extra: AnyView?
     /// ★ notes25: a third action (the print file's refusal, Auto adjusted: "Lattice again", "Change settings", "Show me").
@@ -46,14 +51,17 @@ public struct AppPopup: Equatable, Identifiable, Sendable {
         self.action = action
         second = nil; third = nil; dismissTitle = nil; dismissShown = true   // ★ notes25: never another pop-up's buttons
         extra = nil
+        stacked = false
     }
 
     /// ★ his 11-22: a pop-up with two actions and a dismiss word ("Try again", "Make it on the iPad", "Cancel").
     /// ★ notes25: `third` — a third action below the second; `dismiss` nil — no dismiss button among them.
+    /// ★ notes30 depth: `second` nil — one action and the dismiss word, stacked the same way.
     public func choose(_ title: String, _ text: String, log: String? = nil, first: (title: String, run: () -> Void),
-                       second: (title: String, run: () -> Void), third: (title: String, run: () -> Void)? = nil,
+                       second: (title: String, run: () -> Void)?, third: (title: String, run: () -> Void)? = nil,
                        dismiss: String?) {
         show(title, text, log: log, action: first)
+        stacked = true
         self.second = second
         self.third = third
         dismissTitle = dismiss
@@ -68,7 +76,7 @@ public struct AppPopup: Equatable, Identifiable, Sendable {
         if FlexibleSaid.recording { Self.recorded.append(p) }
         current = p
         self.action = action
-        second = nil; third = nil; dismissTitle = nil; dismissShown = false
+        second = nil; third = nil; dismissTitle = nil; dismissShown = false; stacked = false
         self.extra = extra
     }
 
@@ -184,15 +192,17 @@ struct AppPopupLayer: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                     .accessibilityIdentifier("app-popup-text")
                 HStack(spacing: DS.Space.s) {
-                    if let a = popups.action, let b = popups.second {   // ★ his 11-22: two choices and a dismiss, stacked
+                    if popups.stacked, let a = popups.action {   // ★ his 11-22: the choices and a dismiss, stacked
                         VStack(spacing: DS.Space.s) {
                             // ★ notes30: each choice publishes its frame (a hosted test taps it, and holds it to 44 pt)
                             PillButton(a.title) { let run = a.run; popups.current = nil; run() }
                                 .background(CornerPairStyle.publish("appPopupChoice1"))
                                 .accessibilityIdentifier("app-popup-action")
-                            PillButton(b.title, style: .secondary) { let run = b.run; popups.current = nil; run() }
-                                .background(CornerPairStyle.publish("appPopupChoice2"))
-                                .accessibilityIdentifier("app-popup-second")
+                            if let b = popups.second {   // ★ notes30 depth: a choice pop-up may offer one action only
+                                PillButton(b.title, style: .secondary) { let run = b.run; popups.current = nil; run() }
+                                    .background(CornerPairStyle.publish("appPopupChoice2"))
+                                    .accessibilityIdentifier("app-popup-second")
+                            }
                             if let c = popups.third {   // ★ notes25
                                 PillButton(c.title, style: .secondary) { let run = c.run; popups.current = nil; run() }
                                     .accessibilityIdentifier("app-popup-third")

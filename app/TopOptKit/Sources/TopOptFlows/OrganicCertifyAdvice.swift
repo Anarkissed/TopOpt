@@ -104,8 +104,13 @@ extension OrganicCertifyAdvice {
         /// The strut field's step (one printed line).
         public var stepMM: Double
         public var infillNow: Int
-        public init(strut: StrutNow?, group: String? = nil, groupID: UUID? = nil, stepMM: Double, infillNow: Int) {
+        /// ★ notes30 depth: the printer's wall ring (mm) — the cover a Solid finish lays (LatticeReview's rule offers it only when
+        /// at least the depth a load on bare vines needs).
+        public var wallMM: Double
+        public init(strut: StrutNow?, group: String? = nil, groupID: UUID? = nil, stepMM: Double, infillNow: Int,
+                    wallMM: Double = 0) {
             self.strut = strut; self.group = group; self.groupID = groupID; self.stepMM = stepMM; self.infillNow = infillNow
+            self.wallMM = wallMM
         }
     }
 
@@ -155,8 +160,10 @@ extension OrganicCertifyAdvice {
             return .init(setting: "Infill", line: OrganicCertifyCopy.infill(now: c.infillNow, passes: to))
         case "load_on_open_lattice":
             return .init(setting: "Protect", line: OrganicCertifyCopy.protect)
-        case OrganicBareVines.reason:   // ★ notes30: the finish now and the two to try (Solve offers both, centred)
-            return .init(setting: nil, line: OrganicBareVines.advice)
+        case OrganicBareVines.reason:   // ★ notes30: the finish now and what to try (Solve offers them, centred)
+            // ★ notes30 depth: LatticeReview's rule — the Protect skin's depth, Solid only when its wall is deep enough
+            return .init(setting: nil, line: OrganicBareVines.adviceLine(OrganicBareVines.offers(depthNeededMM: issue.depthNeededMM,
+                                                                                            wallMM: c.wallMM)))
         case "beside_the_lattice", "beside_a_fixing", "beside_the_load", "inside_the_solid":
             let w: String
             switch issue.id {
@@ -212,12 +219,15 @@ extension OrganicCertifyAdvice {
         }
         let step = p.printParams.strutLineWidthMM > 0 ? p.printParams.strutLineWidthMM : 0.45
         let infill = p.printParams.infillPercent
-        guard !groups.isEmpty else { return Context(strut: now(nil), stepMM: step, infillNow: infill) }
-        guard groups.count > 1 else { return Context(strut: now(groups[0].id), groupID: groups[0].id, stepMM: step, infillNow: infill) }
+        let wall = p.printParams.wallRingMM   // ★ notes30 depth: the cover a Solid finish lays
+        guard !groups.isEmpty else { return Context(strut: now(nil), stepMM: step, infillNow: infill, wallMM: wall) }
+        guard groups.count > 1 else {
+            return Context(strut: now(groups[0].id), groupID: groups[0].id, stepMM: step, infillNow: infill, wallMM: wall)
+        }
         let pick = groups.min { a, b in
             let w = weakestWidthMM ?? 0
             return abs((now(a.id)?.heavy ?? .infinity) - w) < abs((now(b.id)?.heavy ?? .infinity) - w)
         } ?? groups[0]
-        return Context(strut: now(pick.id), group: pick.name, groupID: pick.id, stepMM: step, infillNow: infill)
+        return Context(strut: now(pick.id), group: pick.name, groupID: pick.id, stepMM: step, infillNow: infill, wallMM: wall)
     }
 }
