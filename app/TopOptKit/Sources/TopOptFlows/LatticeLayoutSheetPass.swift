@@ -171,6 +171,8 @@ struct SheetFrame {
     float4   march;        // x = step factor, y = step cap in cells, z = min step (mm), w = max steps
     float4   counts;       // x = fields, y = the law's steps, z = the law's max share (wall / cell), w = 1: dimmed
     SheetFieldU fields[8];
+    float4   seamInfo;     // ★ E: x = seams, y = 1: the map carries the seam channels (index, distance across)
+    float4   seams[8];     // ★ E: per seam (the result's order): x = field a, y = field b (-1: a solid wall), z = band, w = raise
 };
 
 // ── the field (core's sheets.cpp; LatticeSheetField is the Swift copy this is held to) ──
@@ -243,20 +245,41 @@ static float sheet_mid(constant SheetFieldU& S, float3 p) {
     return f / gl;
 }
 
-// THE BLENDED FIELD across a seam (core's sheet_blend_distance_at; the contract's form, E refines core's): smoothstep across
-// the band, the two mid-surface distances mixed, the wall half the mixed parameter (+ the band's raise).
+// The field's own function in mm (f × L / 2π) and its gradient in the part's axes (core's raw_at; the blend mixes these).
+static float sheet_raw(constant SheetFieldU& S, float3 p, thread float3& grad) {
+    float L = S.anchor.w;
+    float3 g;
+    float f = sheet_eval(int(S.origin.w + 0.5f), sheet_local(S, p) - S.anchor.xyz, L, g);
+    float k = L / 6.28318530717958647692f;
+    grad = k * (g.x * S.ax0.xyz + g.y * S.ax1.xyz + g.z * S.ax2.xyz);
+    return f * k;
+}
+
+// THE BLENDED FIELD across a seam (core's sheet_blend_distance_at, builder E's form): smoothstep across the band; the two
+// fields' own functions mixed, over the length of the mix's own gradient (the weight's slope along `seamGrad` included:
+// at either edge, that field's own f / |∇f|); the wall half the mixed parameter plus the band's raise in its middle
+// ((4 x (1 - x))²).
 static float sheet_blend(constant SheetFieldU& A, constant SheetFieldU& B, texture3d<float> WA, texture3d<float> WB,
-                         const device float* law, constant SheetFrame& F, float seamMM, float bandMM, float raiseMM,
-                         float3 p) {
-    float s;
-    if (!(bandMM > 0.0f)) { s = seamMM >= 0.0f ? 1.0f : 0.0f; }
-    else { float x = clamp((seamMM + 0.5f * bandMM) / bandMM, 0.0f, 1.0f); s = x * x * (3.0f - 2.0f * x); }
-    float fa = s < 1.0f ? sheet_mid(A, p) : 0.0f;
-    float fb = s > 0.0f ? sheet_mid(B, p) : 0.0f;
+                         const device float* law, constant SheetFrame& F, float seamMM, float3 seamGrad, float bandMM,
+                         float raiseMM, float3 p) {
+    float s, bump, ds;
+    if (!(bandMM > 0.0f)) { s = seamMM >= 0.0f ? 1.0f : 0.0f; bump = 0.0f; ds = 0.0f; }
+    else {
+        float xr = (seamMM + 0.5f * bandMM) / bandMM;
+        float x = clamp(xr, 0.0f, 1.0f);
+        s = x * x * (3.0f - 2.0f * x);
+        float q = 4.0f * x * (1.0f - x);
+        bump = q * q;
+        ds = (xr > 0.0f && xr < 1.0f) ? 6.0f * x * (1.0f - x) / bandMM : 0.0f;
+    }
+    float3 ga = float3(0.0f), gb = float3(0.0f);
+    float fa = s < 1.0f ? sheet_raw(A, p, ga) : 0.0f;
+    float fb = s > 0.0f ? sheet_raw(B, p, gb) : 0.0f;
+    float gl = length((1.0f - s) * ga + s * gb + (fb - fa) * ds * seamGrad);
+    float Fm = ((1.0f - s) * fa + s * fb) / max(gl, 0.5f);   // core's kBlendGradFloor
     float ta = s < 1.0f ? sheet_param(sheet_wall(A, sheet_local(A, p), WA), A.anchor.w, int(A.origin.w + 0.5f), law, F) : 0.0f;
     float tb = s > 0.0f ? sheet_param(sheet_wall(B, sheet_local(B, p), WB), B.anchor.w, int(B.origin.w + 0.5f), law, F) : 0.0f;
-    float Fm = (1.0f - s) * fa + s * fb;
-    return abs(Fm) - 0.5f * ((1.0f - s) * ta + s * tb + raiseMM);
+    return abs(Fm) - 0.5f * ((1.0f - s) * ta + s * tb + raiseMM * bump);
 }
 
 // ── the map: the lattice space, and which field holds each voxel ──
@@ -278,9 +301,37 @@ static int sheet_field_at(float3 p, constant SheetFrame& F, texture3d<uint, acce
     return v >= uint(F.counts.x) ? -1 : int(v);
 }
 
-// The field at p where p is open lattice of a field (`fi` its index), else +big (nothing of a sheet here).
-static float sheet_here(float3 p, int fi, constant SheetFrame& F, array<texture3d<float>, 8> walls, const device float* law) {
+// The field at p where p is open lattice of a field (`fi` its index), else +big (nothing of a sheet here). ★ E: where the
+// map names a BLEND seam of that field (the seam channel, read at the nearest voxel), the two fields' blend there, with the
+// map's distance across (read linear): the drawing of the file's band. A solid wall (or a blend the file made one) is the
+// map's own membrane, never blended.
+static float sheet_here(float3 p, int fi, constant SheetFrame& F, array<texture3d<float>, 8> walls, const device float* law,
+                        texture3d<uint, access::read> seamIdx, texture3d<float> seamMM) {
     if (fi < 0) { return 1e9f; }
+    if (F.seamInfo.y > 0.5f) {
+        int3 i = int3(floor((p - F.mapOrigin.xyz) / F.mapSpacing.xyz + 0.5f));
+        int3 d = int3(F.mapDims.xyz);
+        if (all(i >= 0) && all(i < d)) {
+            uint k = seamIdx.read(uint3(i)).r;
+            if (k < uint(F.seamInfo.x) && k < 8u) {
+                float4 S = F.seams[k];
+                int a = int(S.x), b = int(S.y);
+                if (a >= 0 && b >= 0 && a < 8 && b < 8 && (fi == a || fi == b)) {
+                    constexpr sampler sl(coord::normalized, filter::linear, address::clamp_to_edge);
+                    float m = seamMM.sample(sl, sheet_map_uvw(p, F)).r;
+                    // its gradient: central differences half a voxel each way
+                    float e = 0.5f * F.mapSpacing.x;
+                    float3 g = float3(seamMM.sample(sl, sheet_map_uvw(p + float3(e, 0, 0), F)).r -
+                                      seamMM.sample(sl, sheet_map_uvw(p - float3(e, 0, 0), F)).r,
+                                      seamMM.sample(sl, sheet_map_uvw(p + float3(0, e, 0), F)).r -
+                                      seamMM.sample(sl, sheet_map_uvw(p - float3(0, e, 0), F)).r,
+                                      seamMM.sample(sl, sheet_map_uvw(p + float3(0, 0, e), F)).r -
+                                      seamMM.sample(sl, sheet_map_uvw(p - float3(0, 0, e), F)).r) / (2.0f * e);
+                    return sheet_blend(F.fields[a], F.fields[b], walls[a], walls[b], law, F, m, g, S.z, S.w, p);
+                }
+            }
+        }
+    }
     return sheet_distance(F.fields[fi], p, walls[fi], law, F);
 }
 
@@ -311,7 +362,9 @@ fragment SheetGBuf sheet_gbuffer(SheetVOut in [[stage_in]],
                                  texture3d<float, access::sample> map [[texture(0)]],
                                  texture3d<uint, access::read> region [[texture(1)]],
                                  array<texture3d<float>, 8> walls [[texture(2)]],
-                                 array<texture3d<float>, 8> cols [[texture(10)]]) {
+                                 array<texture3d<float>, 8> cols [[texture(10)]],
+                                 texture3d<uint, access::read> seamIdx [[texture(18)]],
+                                 texture3d<float, access::sample> seamMM [[texture(19)]]) {
     // this fragment's ray, from the inverse clip matrix (Orthographic and Perspective alike, the bars' way)
     float4 n0 = F.modelFromClip * float4(in.ndc, 0.0f, 1.0f);
     float4 n1 = F.modelFromClip * float4(in.ndc, 1.0f, 1.0f);
@@ -334,7 +387,7 @@ fragment SheetGBuf sheet_gbuffer(SheetVOut in [[stage_in]],
         float step = mapStep;
         if (sheet_open(p, F, map) > 0.0f) {
             int fi = sheet_field_at(p, F, region);
-            float d = sheet_here(p, fi, F, walls, law);
+            float d = sheet_here(p, fi, F, walls, law, seamIdx, seamMM);
             if (d < 0.0f) { hit = true; break; }
             if (fi >= 0) {
                 step = clamp(F.march.x * d, F.march.z, min(F.march.y * F.fields[fi].anchor.w, vox));
@@ -351,14 +404,14 @@ fragment SheetGBuf sheet_gbuffer(SheetVOut in [[stage_in]],
         for (int k = 0; k < 7; ++k) {
             float m = 0.5f * (a + b);
             float3 pm = ro + rd * m;
-            bool inside = sheet_open(pm, F, map) > 0.0f && sheet_here(pm, sheet_field_at(pm, F, region), F, walls, law) < 0.0f;
+            bool inside = sheet_open(pm, F, map) > 0.0f && sheet_here(pm, sheet_field_at(pm, F, region), F, walls, law, seamIdx, seamMM) < 0.0f;
             if (inside) { b = m; } else { a = m; }
         }
     }
     float3 p = ro + rd * b;
     int fi = max(sheet_field_at(p, F, region), 0);
     constant SheetFieldU& S = F.fields[fi];
-    float d = sheet_here(p, fi, F, walls, law);
+    float d = sheet_here(p, fi, F, walls, law, seamIdx, seamMM);
     float3 n;
     if (d < -0.01f) {
         // entered through the part's surface while inside the wall: the cut face, flush, the face's own normal (the bars' cap)
@@ -369,9 +422,9 @@ fragment SheetGBuf sheet_gbuffer(SheetVOut in [[stage_in]],
         n = length(g) > 1e-5f ? -normalize(g) : -rd;
     } else {
         const float e = 0.05f;
-        float3 g = float3(sheet_here(p + float3(e, 0, 0), fi, F, walls, law) - sheet_here(p - float3(e, 0, 0), fi, F, walls, law),
-                          sheet_here(p + float3(0, e, 0), fi, F, walls, law) - sheet_here(p - float3(0, e, 0), fi, F, walls, law),
-                          sheet_here(p + float3(0, 0, e), fi, F, walls, law) - sheet_here(p - float3(0, 0, e), fi, F, walls, law));
+        float3 g = float3(sheet_here(p + float3(e, 0, 0), fi, F, walls, law, seamIdx, seamMM) - sheet_here(p - float3(e, 0, 0), fi, F, walls, law, seamIdx, seamMM),
+                          sheet_here(p + float3(0, e, 0), fi, F, walls, law, seamIdx, seamMM) - sheet_here(p - float3(0, e, 0), fi, F, walls, law, seamIdx, seamMM),
+                          sheet_here(p + float3(0, 0, e), fi, F, walls, law, seamIdx, seamMM) - sheet_here(p - float3(0, 0, e), fi, F, walls, law, seamIdx, seamMM));
         n = length_squared(g) > 1e-20f ? normalize(g) : -rd;
     }
     float3 eyeN = normalize((F.eyeNormalBasis * float4(n, 0.0f)).xyz);
@@ -408,9 +461,21 @@ kernel void sheet_field_probe(const device float4* pts [[buffer(0)]], device flo
 kernel void sheet_blend_probe(const device float4* pts [[buffer(0)]], device float* out [[buffer(1)]],
                               constant SheetFrame& F [[buffer(2)]], const device float* law [[buffer(3)]],
                               constant uint& count [[buffer(4)]], constant float4& seam [[buffer(5)]],
+                              constant float4& seamGrad [[buffer(6)]],
                               array<texture3d<float>, 8> walls [[texture(2)]], uint id [[thread_position_in_grid]]) {
     if (id >= count) { return; }
-    out[id] = sheet_blend(F.fields[0], F.fields[1], walls[0], walls[1], law, F, pts[id].w, seam.x, seam.y, pts[id].xyz);
+    out[id] = sheet_blend(F.fields[0], F.fields[1], walls[0], walls[1], law, F, pts[id].w, seamGrad.xyz, seam.x, seam.y,
+                          pts[id].xyz);
+}
+// ★ E: what the march reads at a point (pts.w = the field the region texture would name): sheet_here, with the map's seams
+kernel void sheet_here_probe(const device float4* pts [[buffer(0)]], device float* out [[buffer(1)]],
+                             constant SheetFrame& F [[buffer(2)]], const device float* law [[buffer(3)]],
+                             constant uint& count [[buffer(4)]],
+                             array<texture3d<float>, 8> walls [[texture(2)]],
+                             texture3d<uint, access::read> seamIdx [[texture(18)]],
+                             texture3d<float, access::sample> seamMM [[texture(19)]], uint id [[thread_position_in_grid]]) {
+    if (id >= count) { return; }
+    out[id] = sheet_here(pts[id].xyz, int(pts[id].w + 0.5f), F, walls, law, seamIdx, seamMM);
 }
 """
 
@@ -439,6 +504,9 @@ final class LatticeLayoutSheetPass {
     private(set) var drawing: LatticeSheetDrawing?
     private var mapTexture: MTLTexture?
     private var regionTexture: MTLTexture?
+    /// ★ E: the map's seam channels (the blend seam nearest across, read nearest; its distance across, read linear).
+    private var seamIndexTexture: MTLTexture?
+    private var seamMMTexture: MTLTexture?
     private var wallTextures: [MTLTexture] = []
     private var colourTextures: [MTLTexture?] = []
     private var lawBuffer: MTLBuffer?
@@ -490,7 +558,10 @@ final class LatticeLayoutSheetPass {
 
     private func uploadMap(_ s: LatticeSheetDrawing) {
         mapKey = s.mapKey
-        guard let g = s.map, g.isWhole else { mapTexture = nil; map = nil; regionTexture = nil; return }
+        guard let g = s.map, g.isWhole else {
+            mapTexture = nil; map = nil; regionTexture = nil; seamIndexTexture = nil; seamMMTexture = nil
+            return
+        }
         mapTexture = Self.texture3D(device, .rg8Snorm, dims: g.dims, bytes: g.rg)
         map = (g.origin, g.voxel, g.dims)
         let n = Int(g.dims.x) * Int(g.dims.y) * Int(g.dims.z)
@@ -499,8 +570,40 @@ final class LatticeLayoutSheetPass {
         } else {
             regionTexture = nil
         }
+        // ★ E: a blend seam's band, drawn from the map's seam channels
+        if s.seams.contains(where: { !$0.solidWall }), g.sheetSeam.count == n, g.sheetSeamMM.count == n {
+            let mm = Self.seamDistances(index: g.sheetSeam, mm: g.sheetSeamMM, dims: g.dims)
+            seamIndexTexture = Self.texture3D(device, .r8Uint, dims: g.dims, bytes: g.sheetSeam)
+            seamMMTexture = Self.texture3D(device, .r16Float, dims: g.dims, bytes: mm.map { FlexibleLatticePass.halfBits($0) })
+        } else {
+            seamIndexTexture = nil
+            seamMMTexture = nil
+        }
         let lo = g.origin - 0.5 * g.voxel, hi = lo + SIMD3<Float>(g.dims) * g.voxel
         if let bl = s.boxLo, let bh = s.boxHi { box = (simd_max(bl, lo), simd_min(bh, hi)) } else { box = (lo, hi) }
+    }
+
+    /// ★ E: the distance across the seam as the shader reads it (linear between voxels): a voxel no seam names takes the value
+    /// of a neighbour that has one (twice over), so a read beside the edge of the engine's seam grid never mixes in its 0 and
+    /// lands inside the band; clamped to ±64 mm (half precision keeps a hundredth of a millimetre there).
+    static func seamDistances(index: [UInt8], mm: [Float], dims: SIMD3<Int32>) -> [Float] {
+        let nx = Int(dims.x), ny = Int(dims.y), nz = Int(dims.z), n = nx * ny * nz
+        guard n > 0, index.count == n, mm.count == n else { return mm }
+        var v = mm.map { Swift.max(-64, Swift.min(64, $0)) }
+        var has = index.map { $0 != 255 }
+        for _ in 0..<2 {
+            let before = has, vb = v
+            for i in 0..<n where !before[i] {
+                let x = i % nx, y = (i / nx) % ny, z = i / (nx * ny)
+                for (dx, dy, dz) in [(-1, 0, 0), (1, 0, 0), (0, -1, 0), (0, 1, 0), (0, 0, -1), (0, 0, 1)] {
+                    let a = x + dx, b = y + dy, c = z + dz
+                    guard a >= 0, b >= 0, c >= 0, a < nx, b < ny, c < nz else { continue }
+                    let j = (c * ny + b) * nx + a
+                    if before[j] { v[i] = vb[j]; has[i] = true; break }
+                }
+            }
+        }
+        return v
     }
 
     private func uploadColours(_ s: LatticeSheetDrawing) {
@@ -562,6 +665,20 @@ final class LatticeLayoutSheetPass {
         var counts = SIMD4<Float>(0, 0, 0, 0)
         var fields: (FieldU, FieldU, FieldU, FieldU, FieldU, FieldU, FieldU, FieldU) =
             (FieldU(), FieldU(), FieldU(), FieldU(), FieldU(), FieldU(), FieldU(), FieldU())
+        /// ★ E: x = seams, y = 1: the seam channels are bound; per seam (a, b, band, raise), a solid wall (-1, -1, 0, 0)
+        var seamInfo = SIMD4<Float>(0, 0, 0, 0)
+        var seams: (SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>,
+                    SIMD4<Float>) = (.zero, .zero, .zero, .zero, .zero, .zero, .zero, .zero)
+    }
+
+    /// ★ E: the seams' uniform (the result's order, at most eight): a blend's two fields, band and raise; a solid wall none.
+    static func seamUniforms(_ seams: [LatticeSheetSeam], fields: Int) -> [SIMD4<Float>] {
+        (0..<LatticeSheetDrawing.maxFields).map { k in
+            guard k < seams.count else { return SIMD4(-1, -1, 0, 0) }
+            let s = seams[k]
+            guard !s.solidWall, s.a >= 0, s.b >= 0, s.a < fields, s.b < fields else { return SIMD4(-1, -1, 0, 0) }
+            return SIMD4(Float(s.a), Float(s.b), Float(s.bandMM), Float(s.raiseMM))
+        }
     }
 
     static func fieldU(_ f: LatticeSheetField, colour: SIMD3<Float>, perCell: Bool,
@@ -607,7 +724,14 @@ final class LatticeLayoutSheetPass {
                                 grid: i < s.colourGrids.count ? s.colourGrids[i] : nil)
         }
         f.fields = (us[0], us[1], us[2], us[3], us[4], us[5], us[6], us[7])
+        Self.setSeams(&f, s.seams, fields: count, bound: seamIndexTexture != nil && seamMMTexture != nil)
         return f
+    }
+
+    static func setSeams(_ f: inout Frame, _ seams: [LatticeSheetSeam], fields: Int, bound: Bool) {
+        let u = seamUniforms(seams, fields: fields)
+        f.seamInfo = SIMD4(Float(Swift.min(seams.count, LatticeSheetDrawing.maxFields)), bound ? 1 : 0, 0, 0)
+        f.seams = (u[0], u[1], u[2], u[3], u[4], u[5], u[6], u[7])
     }
 
     /// A 1×1×1 texture of each kind, bound where there is none (the shader declares every slot).
@@ -624,6 +748,8 @@ final class LatticeLayoutSheetPass {
             set(i < wallTextures.count ? wallTextures[i] : neutral.wall, 2 + i)
             set((i < colourTextures.count ? colourTextures[i] : nil) ?? neutral.colour, 10 + i)
         }
+        set(seamIndexTexture ?? neutral.region, 18)   // ★ E: the seam channels
+        set(seamMMTexture ?? neutral.wall, 19)
     }
 
     // MARK: encoding (the bars pass's prepass: its encoder, attachments and .less + write depth state)
@@ -663,20 +789,37 @@ final class LatticeLayoutSheetPass {
     }
 
     /// The shader's `sheet_blend` of fields 0 and 1 at `points` with the seam distances `seamMM`, the band and the raise.
-    func probeBlend(_ points: [SIMD3<Float>], seamMM: [Float], bandMM: Float, raiseMM: Float) -> [Float]? {
+    func probeBlend(_ points: [SIMD3<Float>], seamMM: [Float], bandMM: Float, raiseMM: Float,
+                    seamGrad: SIMD3<Float> = .zero) -> [Float]? {
         run("sheet_blend_probe", points.enumerated().map { SIMD4($0.element, $0.offset < seamMM.count ? seamMM[$0.offset] : 0) },
-            seam: SIMD4(bandMM, raiseMM, 0, 0))
+            seam: SIMD4(bandMM, raiseMM, 0, 0), seamGrad: SIMD4(seamGrad, 0))
     }
 
-    private func run(_ name: String, _ pts: [SIMD4<Float>], seam: SIMD4<Float>?) -> [Float]? {
+    /// ★ E: what the march reads at `points` (`field[i]`: the field the region texture names there) — the field, or a blend
+    /// seam's band where the uploaded map's seam channels name one (the drawing the file's band is held to).
+    func probeHere(_ points: [SIMD3<Float>], field: [Int]) -> [Float]? {
+        run("sheet_here_probe", points.enumerated().map { SIMD4($0.element, Float($0.offset < field.count ? field[$0.offset] : 0)) },
+            seam: nil, withMap: true)
+    }
+    /// The seam channels are uploaded (a blend seam on the map).
+    var drawsSeams: Bool { seamIndexTexture != nil && seamMMTexture != nil }
+
+    private func run(_ name: String, _ pts: [SIMD4<Float>], seam: SIMD4<Float>?, seamGrad: SIMD4<Float> = .zero,
+                     withMap: Bool = false) -> [Float]? {
         guard !pts.isEmpty, let pipe = try? computePipeline(name), let queue, let lawBuffer, !wallTextures.isEmpty else { return nil }
-        // a frame for the fields alone (no map, no camera)
+        // a frame for the fields alone (no camera; the map's place and the seams for sheet_here)
         var f = Frame()
         let count = Swift.min(drawing?.fields.count ?? 0, wallTextures.count, LatticeSheetDrawing.maxFields)
         f.counts = SIMD4(Float(count), Float(Self.lawSteps), Float(Self.lawMaxShare), 0)
         var us = [FieldU](repeating: FieldU(), count: LatticeSheetDrawing.maxFields)
         for i in 0..<count { us[i] = Self.fieldU(drawing!.fields[i], colour: .one, perCell: false) }
         f.fields = (us[0], us[1], us[2], us[3], us[4], us[5], us[6], us[7])
+        if withMap, let g = map {
+            f.mapOrigin = SIMD4(g.origin, 0)
+            f.mapSpacing = SIMD4(g.voxel, g.voxel, g.voxel, 0)
+            f.mapDims = SIMD4(Float(g.dims.x), Float(g.dims.y), Float(g.dims.z), 0)
+            Self.setSeams(&f, drawing?.seams ?? [], fields: count, bound: drawsSeams)
+        }
         var n = UInt32(pts.count)
         var sm = seam ?? .zero
         guard let inBuf = device.makeBuffer(bytes: pts, length: pts.count * 16, options: .storageModeShared),
@@ -689,7 +832,11 @@ final class LatticeLayoutSheetPass {
         enc.setBuffer(lawBuffer, offset: 0, index: 3)
         enc.setBytes(&n, length: 4, index: 4)
         enc.setBytes(&sm, length: 16, index: 5)
+        var sg = seamGrad
+        enc.setBytes(&sg, length: 16, index: 6)
         for i in 0..<LatticeSheetDrawing.maxFields { enc.setTexture(i < wallTextures.count ? wallTextures[i] : neutral.wall, index: 2 + i) }
+        enc.setTexture(seamIndexTexture ?? neutral.region, index: 18)
+        enc.setTexture(seamMMTexture ?? neutral.wall, index: 19)
         let w = pipe.threadExecutionWidth
         enc.dispatchThreads(MTLSize(width: pts.count, height: 1, depth: 1), threadsPerThreadgroup: MTLSize(width: w, height: 1, depth: 1))
         enc.endEncoding()

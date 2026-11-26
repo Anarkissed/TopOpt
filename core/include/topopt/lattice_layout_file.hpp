@@ -110,6 +110,12 @@ struct FileReport {
   int base_builds = 0;
   double ms_shells = 0.0;
   std::vector<PrintableReport::PassTime> pass_ms;   // OF4: per pass of the tubes route
+  // SHEETS, E (SHEETS CONTRACT CHANGE (E)): the outcome's seams as the file made them (make_file_mesh of an Outcome):
+  // a blend's raise, and each that fell back to the solid wall with its one line why (fell_back, solid_wall, why);
+  // per seam the band's thinnest wall as measured (0: none made) and the remakes the print check's fallback took.
+  std::vector<SheetSeamBand> sheet_seams;
+  std::vector<double> seam_thinnest_mm;
+  int seam_remakes = 0;
 };
 
 // THE ONE PLACE THE MESH IS MADE for a file: the open space of the layout's cells, then
@@ -117,6 +123,11 @@ struct FileReport {
 // laid by, and has not been laid again since (its domain is the outcome's).
 // A stop flag (`stop`, when given) gives the work up by throwing LayCancelled.
 // The mesh is empty and `report.mesh.why` says why when it cannot be made.
+// SHEETS (SPEC 1.5, E): for an outcome with Blend seams it decides each seam ONCE here: the band is made
+// (mesh_sheet_seam_band, one call a seam) and handed to the mesh (MeshSpec::sheet_bands); a band that cannot be made
+// two lines thick falls back to the solid wall (the membrane is laid into a copy of the layout before its open space is
+// read); when the print check's loop ends with findings still inside a blended band, that seam falls back too and the
+// file is made again. FileReport::sheet_seams says what was done; sheet_fallback_layout gives the layout it was made of.
 TriangleMesh make_file_mesh(const Session& session, const Outcome& outcome,
                             const FileOptions& options, FileReport& report,
                             const std::atomic<bool>* stop = nullptr);
@@ -124,6 +135,10 @@ TriangleMesh make_file_mesh(const Session& session, const Outcome& outcome,
 TriangleMesh make_file_mesh(const Session& session, const Layout& layout, const Bars& bars,
                             const FileOptions& options, FileReport& report,
                             const std::atomic<bool>* stop = nullptr);
+// SHEETS, E: `outcome` with `seams` (FileReport::sheet_seams): the seams that are solid walls get the membrane (and any
+// Organic region beside a sheet its own, as the lay gives it), into a copy of its layout. What the file was made of and
+// what the strength check credits.
+Outcome sheet_fallback_outcome(const Domain& domain, const Outcome& outcome, const std::vector<SheetSeamBand>& seams);
 
 // Brief E4, leg 2 (rule OS16): THE PRINT CHECK of the file, as the file job runs it (make_file_mesh: the solid carved,
 // the sags lifted or given legs, made, checked layer by layer and made again), its mesh dropped. `bars` the bars the

@@ -134,43 +134,8 @@ double sheet_mid_distance_at(const SheetField& s, const Vec3& p) {
 }
 
 // ── seams ───────────────────────────────────────────────────────────────────────────────────────────────────────
-double sheet_seam_weight(double seam_mm, double band_mm) {
-  if (!(band_mm > 0.0)) return seam_mm >= 0.0 ? 1.0 : 0.0;
-  const double t = std::clamp((seam_mm + 0.5 * band_mm) / band_mm, 0.0, 1.0);
-  return t * t * (3.0 - 2.0 * t);
-}
-
-double sheet_blend_distance_at(const SheetField& a, const SheetField& b, const SheetSeamBand& seam, double seam_mm,
-                               const Vec3& p) {
-  const double s = sheet_seam_weight(seam_mm, seam.band_mm);
-  const double fa = s < 1.0 ? sheet_mid_distance_at(a, p) : 0.0;
-  const double fb = s > 0.0 ? sheet_mid_distance_at(b, p) : 0.0;
-  const double ta = s < 1.0 ? sheet_param_at(a, p) : 0.0;
-  const double tb = s > 0.0 ? sheet_param_at(b, p) : 0.0;
-  const double F = (1.0 - s) * fa + s * fb;
-  const double t = (1.0 - s) * ta + s * tb + seam.raise_mm;
-  return std::fabs(F) - 0.5 * t;
-}
-
-namespace {
-const Region* region_by_id(const Domain& d, int id) {
-  for (const Region& r : d.spec().regions)
-    if (r.id == id) return &r;
-  return nullptr;
-}
-}  // namespace
-
-double sheet_seam_mm(const Domain& domain, const SheetSeamBand& seam, const Vec3& p) {
-  const double inf = std::numeric_limits<double>::infinity();
-  const Region* ra = seam.region_a > 0 ? region_by_id(domain, seam.region_a) : nullptr;
-  const Region* rb = seam.region_b > 0 ? region_by_id(domain, seam.region_b) : nullptr;
-  double ea = ra ? region_edge_distance(*ra, p) : std::numeric_limits<double>::quiet_NaN();
-  double eb = rb ? region_edge_distance(*rb, p) : std::numeric_limits<double>::quiet_NaN();
-  if (!ra && rb) ea = -eb;   // the whole part's lattice is everywhere its partner's is not
-  if (!rb && ra) eb = -ea;
-  if (!std::isfinite(ea) || !std::isfinite(eb)) return inf;
-  return 0.5 * (eb - ea);
-}
+// (sheet_seam_weight, sheet_seam_bump, sheet_blend_distance_at, sheet_seam_mm and sheet_seams_across: builder E's,
+// sheet_blend.cpp.)
 
 // ── the membrane (the Solid wall seam) ──────────────────────────────────────────────────────────────────────────
 namespace {
@@ -229,12 +194,16 @@ bool sheet_membrane_at(const Layout& layout, const Domain::Probe& probe, int reg
   if (mine.empty()) return false;
   const Vec3* d = membrane_dirs();
   const double r = layout.membrane_mm;
-  for (int k = 0; k < 26; ++k) {
-    const Where w = probe.where({p.x + r * d[k].x, p.y + r * d[k].y, p.z + r * d[k].z});
-    if (!w.lattice()) continue;
-    for (int o : mine)
-      if (w.id == o) return true;
-  }
+  bool weave = false;   // E: a weave partner's side gives no half, so the sheet's is read at two membranes too
+  for (int o : mine) weave = weave || layout.is_weave(o);
+  for (int ring = 1; ring <= (weave ? 2 : 1); ++ring)
+    for (int k = 0; k < 26; ++k) {
+      const double rr = ring * r;
+      const Where w = probe.where({p.x + rr * d[k].x, p.y + rr * d[k].y, p.z + rr * d[k].z});
+      if (!w.lattice()) continue;
+      for (int o : mine)
+        if (w.id == o && (ring == 1 || layout.is_weave(o))) return true;
+    }
   return false;
 }
 
@@ -247,6 +216,18 @@ void cube_box(const Layout& layout, const Cell& c, double grow, double lo[3], do
                         c.lo[2] + ((k & 4) ? c.size : 0.0));
     const double xyz[3] = {v.x, v.y, v.z};
     for (int a = 0; a < 3; ++a) { lo[a] = std::min(lo[a], xyz[a] - grow); hi[a] = std::max(hi[a], xyz[a] + grow); }
+  }
+}
+// Files the index's boxes on its coarse grid.
+void file_membrane_boxes(MembraneNear& near) {
+  near.grid.clear();
+  const auto slot = [&](double x) { return static_cast<long long>(std::floor(x / near.pitch)); };
+  for (std::size_t i = 0; i < near.boxes.size(); ++i) {
+    const MembraneNear::Box& b = near.boxes[i];
+    for (long long x = slot(b.lo[0]); x <= slot(b.hi[0]); ++x)
+      for (long long y = slot(b.lo[1]); y <= slot(b.hi[1]); ++y)
+        for (long long z = slot(b.lo[2]); z <= slot(b.hi[2]); ++z)
+          near.grid[{x, y, z}].push_back(static_cast<std::uint32_t>(i));
   }
 }
 }  // namespace
@@ -280,14 +261,88 @@ void set_sheet_membrane(Layout& layout, const std::vector<SheetSeamBand>& seams,
         near->boxes.push_back(b);
       }
     }
-  const auto slot = [&](double x) { return static_cast<long long>(std::floor(x / near->pitch)); };
-  for (std::size_t i = 0; i < near->boxes.size(); ++i) {
-    const MembraneNear::Box& b = near->boxes[i];
-    for (long long x = slot(b.lo[0]); x <= slot(b.hi[0]); ++x)
-      for (long long y = slot(b.lo[1]); y <= slot(b.hi[1]); ++y)
-        for (long long z = slot(b.lo[2]); z <= slot(b.hi[2]); ++z)
-          near->grid[{x, y, z}].push_back(static_cast<std::uint32_t>(i));
+  file_membrane_boxes(*near);
+  layout.membrane_near = near;
+}
+
+void set_sheet_weave_membrane(Layout& layout, const Domain& domain, const std::vector<SheetField>& sheets,
+                              double half_mm) {
+  if (sheets.empty() || layout.weave.empty() || !(half_mm > 0.0)) return;
+  if (layout.membrane_mm > 0.0) half_mm = layout.membrane_mm;   // one membrane_mm for every pair
+  auto near = std::make_shared<MembraneNear>();
+  if (layout.membrane_near) {
+    *near = *static_cast<const MembraneNear*>(layout.membrane_near.get());
+  } else {   // pairs set with no index (none today): their cells, as set_sheet_membrane files them
+    const double grow = 2.0 * half_mm + 1e-6;
+    for (const auto& pr : layout.membrane)
+      for (int side = 0; side < 2; ++side)
+        for (const Cell& c : layout.cells) {
+          if (c.region != pr[side]) continue;
+          MembraneNear::Box b;
+          b.region = pr[1 - side];
+          b.partner = pr[side];
+          cube_box(layout, c, grow, b.lo, b.hi);
+          near->boxes.push_back(b);
+        }
   }
+  // The sheet's side is two lines: a point of the sheet within two membranes of the weave's box (read at up to
+  // 2 x half, in 26 directions) may be in the wall.
+  const double grow = 2.1 * half_mm + 1e-6;
+  bool any = false;
+  for (const Layout::Weave& wv : layout.weave) {
+    const Region* reg = nullptr;
+    for (const Region& r : domain.spec().regions)
+      if (r.id == wv.region) reg = &r;
+    if (!reg) continue;
+    double lo[3] = {1e300, 1e300, 1e300}, hi[3] = {-1e300, -1e300, -1e300};
+    const ClearanceGeometry& g = reg->prism;
+    const bool flat = !reg->is_shell() && g.valid && !g.mask && g.kind == ClearanceKind::Face;
+    if (flat) {
+      double u0 = g.u_lo, u1 = g.u_hi, w0 = g.w_lo, w1 = g.w_hi;
+      for (const auto& loop : g.outline_uv)   // the outline in (u, w), whichever way round the app's pair was written
+        for (const auto& q : loop)
+          for (double v : {q[0], q[1], -q[0], -q[1]}) {
+            u0 = std::min(u0, v); u1 = std::max(u1, v); w0 = std::min(w0, v); w1 = std::max(w1, v);
+          }
+      const double e = std::max(0.0, reg->expand_mm);
+      u0 -= e; u1 += e; w0 -= e; w1 += e;
+      for (int k = 0; k < 8; ++k) {
+        const double uu = (k & 1) ? u1 : u0, ww = (k & 2) ? w1 : w0, ss = (k & 4) ? g.depth : 0.0;
+        const Vec3 v{g.origin.x + g.u.x * uu + g.w.x * ww + g.normal.x * ss,
+                     g.origin.y + g.u.y * uu + g.w.y * ww + g.normal.y * ss,
+                     g.origin.z + g.u.z * uu + g.w.z * ww + g.normal.z * ss};
+        const double xyz[3] = {v.x, v.y, v.z};
+        for (int a = 0; a < 3; ++a) { lo[a] = std::min(lo[a], xyz[a] - grow); hi[a] = std::max(hi[a], xyz[a] + grow); }
+      }
+    }
+    for (const SheetField& f : sheets) {
+      if (f.region == wv.region) continue;
+      bool listed = false;
+      for (const auto& pr : layout.membrane)
+        listed = listed || (pr[0] == f.region && pr[1] == wv.region) || (pr[1] == f.region && pr[0] == wv.region);
+      if (!listed) layout.membrane.push_back({f.region, wv.region});
+      any = true;
+      if (flat) {
+        MembraneNear::Box b;
+        b.region = f.region;   // a point of the sheet's region inside this box may be near the weave's space
+        b.partner = wv.region;
+        for (int a = 0; a < 3; ++a) { b.lo[a] = lo[a]; b.hi[a] = hi[a]; }
+        near->boxes.push_back(b);
+      } else {                 // a curved weave region: every cell of the sheet may be near it
+        for (const Cell& c : layout.cells) {
+          if (c.region != f.region || c.frame != f.frame) continue;
+          MembraneNear::Box b;
+          b.region = f.region;
+          b.partner = wv.region;
+          cube_box(layout, c, 1e-6, b.lo, b.hi);
+          near->boxes.push_back(b);
+        }
+      }
+    }
+  }
+  if (!any) return;
+  layout.membrane_mm = half_mm;
+  file_membrane_boxes(*near);
   layout.membrane_near = near;
 }
 

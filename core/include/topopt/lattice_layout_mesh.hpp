@@ -69,6 +69,7 @@ OpenSpace read_open_space(const Domain& domain, const Layout& layout, double pit
                           int threads = 0, const std::atomic<bool>* stop = nullptr, bool merge = true,
                           bool keep_edge = true);
 
+struct SeamBand;   // SHEETS, the blend band (below)
 struct MeshSpec {
   int bar_sides = 12;         // a round strut is a bar of this many flat sides, of the same area
   double block_mm = 12.0;     // struts are joined block by block (memory stays flat), then the blocks
@@ -179,6 +180,16 @@ struct MeshSpec {
   const std::vector<SheetField>* sheets = nullptr;
   const std::vector<SheetSeamBand>* sheet_seams = nullptr;
   double sheet_deviation_mm = 0.02;   // kSheetMaxDeviationMm (tpms_gen.hpp), the old run's bound; 0: as contoured
+  // E (SHEETS CONTRACT CHANGE (E)): the blend bands, ONE per seam of `sheet_seams` in its order, made once by the file's
+  // make_file_mesh (mesh_sheet_seam_band) and read here, never made again: one call, one decision, the same in the
+  // file, the result and the credit. Null (a direct caller): build_mesh makes each Blend seam's band itself, once.
+  // Each region's own sheet stops a sheet block's overlap inside its side of a band that was made (the band runs as far
+  // past its edges), so the two join with no seam and no double wall.
+  const std::vector<SeamBand>* sheet_bands = nullptr;
+  // E, the band's raise (mesh_sheet_seam_band): false, the band is made as blended, never raised and never refused (the
+  // tests' RED, "the blend with no thickening"); the most it may be raised, mm (< 0: up to the touch).
+  bool sheet_seam_raise = true;
+  double sheet_seam_raise_cap_mm = -1.0;
   // Set, the work is given up between its steps and LayCancelled is thrown.
   const std::atomic<bool>* stop = nullptr;
 };
@@ -492,20 +503,32 @@ void weave_bar_shells(const Domain& domain, const Layout& layout, const Bars& ba
 double strut_run_on_mm(const Carved& carved, const MeshSpec& spec);
 
 // ── SHEETS: THE BLEND BAND'S HOOK (builder E; SPEC 1.5) ────────────────────────────────────────────────────────
-// build_mesh asks this for every seam of MeshSpec::sheet_seams that is not a solid wall, before it meshes the sheets.
-// E's: the band (one cell wide, centred on the seam) meshed with lattice_dc.hpp on sheet_blend_distance_at, simplified
-// to the same bound; its TRUE wall measured (the tpms_probe march) and the band raised (`raise_mm`) until it is two
-// lines everywhere, up to the touch; the band clipped to the two regions' open space. ok false (with `why`, ONE plain
-// line): the seam falls back to the solid wall (build_mesh then leaves the membrane, and the file's result says so).
-// The two regions' own sheets stop where their side of the band begins (`keep_a`, `keep_b`: a point of the region is
-// meshed by its own sheet only where it says true; null: everywhere).
+// The file's make_file_mesh asks this ONCE for every seam of the outcome that is not a solid wall, before anything is
+// carved (its answer decides whether the seam needs the membrane), and hands the bands to build_mesh
+// (MeshSpec::sheet_bands); build_mesh asks it itself only when it was given none (a direct caller), once per make.
+// E's: the band (one cell wide, centred on the seam: SheetSeamBand::across) meshed with lattice_dc.hpp on the blended
+// field (sheet_blend_distance_at's form, each side at its print wall as make_sheets contours each region's sheet),
+// simplified to the same bound (out by it, in by half of it); its TRUE wall measured first (the tpms_probe march: points
+// of the blended mid-surface in either region's lattice within the band, the wall along the field's normal both ways)
+// and the band raised in its middle (`raise_mm`, sheet_seam_bump) until it is two lines everywhere with the
+// simplifier's inward bound to spare, up to the touch. ok false (with `why`, ONE plain line): the seam falls back to
+// the solid wall (the membrane, and the file's result says so). build_mesh cuts the band to the two regions' open space
+// (each box grown by the run-on) and the part; the two regions' own sheets stop where their side of the band begins
+// (`keep_a`, `keep_b`: a point of the region is meshed by its own sheet only where it says true; null: everywhere).
 struct SeamBand {
   bool ok = false;
   std::string why;
-  TriangleMesh mesh;                // closed, in the part's coordinates (empty when not ok)
+  TriangleMesh mesh;                // closed, in the part's coordinates (empty when not ok; E's band is in `blocks`)
+  // E: the band in blocks (30 mm a side at most, each contoured and simplified on its own thread, each closed, each
+  // running a little past its own box into its neighbours: build_mesh joins them by their union). Empty: see `mesh`.
+  std::vector<TriangleMesh> blocks;
+  std::size_t triangles = 0;        // over `blocks` and `mesh`
   double raise_mm = 0.0;            // what the band's loop raised the wall by
   double thinnest_mm = 0.0;         // the band's true wall as measured, its thinnest
   std::function<bool(const Vec3&)> keep_a, keep_b;
+  std::size_t samples = 0;          // the mid-surface points its wall was measured at
+  std::size_t retries = 0;          // blocks contoured again on a moved grid (a pinch left them not closed)
+  double ms = 0.0;
 };
 SeamBand mesh_sheet_seam_band(const Domain& domain, const Layout& layout, const std::vector<SheetField>& sheets,
                               const SheetSeamBand& seam, const MeshSpec& spec);

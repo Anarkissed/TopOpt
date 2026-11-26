@@ -1712,6 +1712,25 @@ double sheet_print_wall_mm(double wall_mm, double floor_mm, double deviation_mm)
 // SPEC 1.5, "Where regions meet: Blend / Solid wall" (Settings::sheet_seam). Default here: SolidWall (the app sends
 // Blend in Aesthetic and Solid wall in Structural; core does not know the stage).
 enum class SheetSeam : std::uint8_t { SolidWall = 0, Blend = 1 };
+// E (SHEETS CONTRACT CHANGE (E)): WHERE TWO SHEET REGIONS MEET, as a grid: the signed distance across their meeting,
+// mm, + toward b, at nodes `h` apart from `origin` (n[0] x n[1] x n[2], x fastest), read as their cubic B-spline
+// (sheet_seam_mm). Made from the DOMAIN's own answer (whose lattice each node is: Domain::Probe::where), so the band
+// sits where the two regions' spaces actually meet, whatever their shape (a face region's floor over the whole part's
+// lattice, two faces side by side, two faces at an angle), and never along an outline that meets only the part's
+// surface: at a node of a, -(distance to b's space - h/2); at one of b, distance to a's space - h/2; at a node of
+// neither, the difference of the two (exact Euclidean distance transforms, then one [1 2 1] smoothing per axis, which
+// leaves a flat meeting exactly as it is). Only the nodes near both regions' cells are read (the cells of each within
+// half a band and two nodes of a cell of the other). `label` per node: 1 a, 2 b, 0 neither, 255 not read.
+struct SheetSeamAcross {
+  Vec3 origin{0.0, 0.0, 0.0};
+  double h = 0.0;
+  int n[3] = {0, 0, 0};
+  std::vector<float> mm;
+  std::vector<std::uint8_t> label;
+  std::size_t nodes_read = 0;
+  double ms = 0.0;
+  bool ok = false;               // false: the two never meet on the grid (no node of a beside one of b): no blend
+};
 // One per pair of laid sheet regions that touch (a cell of one within one line width of a cell of the other), in
 // order of (a, b); a < b, both indices into Outcome::sheets.
 struct SheetSeamBand {
@@ -1725,31 +1744,60 @@ struct SheetSeamBand {
   bool solid_wall = true;
   bool fell_back = false;        // Blend was asked and the solid wall was used (the band could not be made printable)
   std::string why;               // fell_back: ONE plain line for the pop-up (which regions, and that a wall was used)
+  // E: where the two meet (sheet_seams_across fills it for a seam that is not a solid wall; shared by every copy of
+  // the seam, never changed once made). Null: sheet_seam_mm reads +infinity (no blend anywhere).
+  std::shared_ptr<const SheetSeamAcross> across;
 };
 // The blend's weight across a seam: smoothstep from 0 at seam_mm = -band/2 (a's side) to 1 at +band/2 (b's side);
 // 0 / 1 beyond. band <= 0: a step at 0.
 double sheet_seam_weight(double seam_mm, double band_mm);
-// THE BLENDED FIELD (SPEC 1.5; E's to refine, its signature is the contract): F = (1 - s) F_a + s F_b, F_i =
-// sheet_mid_distance_at(i, p), s = sheet_seam_weight(seam_mm, band); the wall is where |F| is under half the blended
-// field parameter, (1 - s) t_a + s t_b + raise_mm: returns |F| - that half (mm, negative inside the wall). `seam_mm` is
-// the signed distance across the seam at p, + toward b (sheet_seam_mm; the preview's map channel).
+// E: how much of the band's raise a point gets: (4 x (1 - x))^2, x = (seam_mm + band/2) / band clamped to [0, 1]: 1 in
+// the middle of the band, 0 with no slope at both its edges (where the blend is each region's own sheet, so the band
+// meets them with no step and no crease).
+double sheet_seam_bump(double seam_mm, double band_mm);
+// THE BLENDED FIELD (SPEC 1.5; E's form, SHEETS CONTRACT CHANGE (E)): the two fields' own functions mixed by the
+// weight, phi = (1 - s) g_a + s g_b (g_i = f_i x L_i / 2 pi: tpms_eval's f in mm; the hybrid-TPMS literature's sigmoid
+// transition mixes the level-set functions), and F = phi / |grad phi|, grad phi = (1 - s) grad g_a + s grad g_b +
+// (g_b - g_a) s'(seam_mm) `seam_grad` (a distance to first order: the band's wall is its parameter thick, as each
+// region's is; at s = 0 F is sheet_mid_distance_at(a), at s = 1 b's); s = sheet_seam_weight(seam_mm, band). The wall is
+// where |F| is under half the blended field parameter, (1 - s) t_a + s t_b + raise_mm x sheet_seam_bump(seam_mm, band):
+// returns |F| - that half (mm, negative inside the wall). `seam_mm` is the signed distance across the seam at p, + toward
+// b, and `seam_grad` its gradient (sheet_seam_mm and its `grad`; the preview's map channel and its differences).
+// (t_i: sheet_param_at, the TRUE wall's parameter, as sheet_distance_at reads it; the file contours the band at the
+// print wall, sheet_print_wall_mm, as it contours each region's own sheet.)
 double sheet_blend_distance_at(const SheetField& a, const SheetField& b, const SheetSeamBand& seam, double seam_mm,
-                               const Vec3& p);
-// The signed distance across the seam at p, mm, + toward b's side: half the difference of the two regions' in-plane
-// edge distances (region_edge_distance; the whole part's lattice, region 0, is everywhere its partner is not, so its
-// own "edge distance" is minus the partner's). +infinity when neither region has a flat outline (a curved region:
-// E's to decide, today no blend there).
-double sheet_seam_mm(const Domain& domain, const SheetSeamBand& seam, const Vec3& p);
+                               const Vec3& seam_grad, const Vec3& p);
+// Its F alone: the signed distance to the band's blended mid-surface (mm; what the wall is measured across).
+double sheet_blend_mid_at(const SheetField& a, const SheetField& b, const SheetSeamBand& seam, double seam_mm,
+                          const Vec3& seam_grad, const Vec3& p);
+// The signed distance across the seam at p, mm, + toward b's side: seam.across read at p (the cubic B-spline over its
+// nodes: smooth to the second derivative, a flat meeting exact), and its gradient (`grad`, when given). +infinity (and
+// no gradient) where it was not made (a solid wall, a seam made by hand) or p is off its grid (farther from the meeting
+// than half a band and three nodes): no blend there. `domain` is not read (the grid was made from it).
+double sheet_seam_mm(const Domain& domain, const SheetSeamBand& seam, const Vec3& p, Vec3* grad = nullptr);
+// E: fills SheetSeamBand::across for every seam of `seams` that is not a solid wall (Session::lay for a Blend lay; the
+// strength check for its own blend seams). Deterministic for any `threads` (0: all of this machine's).
+void sheet_seams_across(const Domain& domain, const Layout& layout, const std::vector<SheetField>& sheets,
+                        std::vector<SheetSeamBand>& seams, int threads = 0);
 
 // The SOLID WALL between two sheet regions (Layout::membrane): is p, lattice of region `region` (< 0: the domain's
 // own answer at p), within the membrane of a region it is paired with? (Some point within Layout::membrane_mm of p,
-// read in 26 directions, is lattice of the partner by the domain.) False when the layout has no membrane. cell_holds
+// read in 26 directions, is lattice of the partner by the domain; a weave partner is read at one and two
+// membrane_mm: set_sheet_weave_membrane.) False when the layout has no membrane. cell_holds
 // and cell_holds_at read it, so everything carved, mapped or credited from the cells sees the membrane solid.
 bool sheet_membrane_at(const Layout& layout, const Domain::Probe& probe, int region, const Vec3& p);
 // Fills Layout::membrane / membrane_mm / membrane_near for the seams that are solid walls (`seams` with solid_wall),
 // with half thickness `half_mm` (one line). Call after the cells are final (after solidify_thin_cuts).
 void set_sheet_membrane(Layout& layout, const std::vector<SheetSeamBand>& seams, const std::vector<SheetField>& sheets,
                         double half_mm);
+// E (the lead's note, 2026-11-25): a sheet region beside an ORGANIC region (a weave, Layout::weave) meets it at the
+// solid wall too: there is no blend with Organic, and its tubes fuse to the wall as they fuse to any solid. Each pair
+// (sheet region, weave region) joins Layout::membrane (after set_sheet_membrane, whose pairs it keeps; membrane_mm one
+// line, `half_mm`). The weave's own space is open (it has no cells to give its half), so the sheet's side is the whole
+// two lines: sheet_membrane_at reads a weave partner at one and two membrane_mm. The index's boxes for a weave: its
+// region's prism (Domain), grown by the two lines; a curved one, the sheet's own cells. No sheets or no weave: nothing.
+void set_sheet_weave_membrane(Layout& layout, const Domain& domain, const std::vector<SheetField>& sheets,
+                              double half_mm);
 
 // The fields of a laid sheet layout: one per region with laid cells (its walls from Cell::strut). Empty for a strut
 // type. The session calls it; exposed for tests.
@@ -1783,6 +1831,7 @@ SheetsFlat flatten_sheets(const std::vector<SheetField>& sheets, const std::vect
 // The bridge's other additions (B and C; listed here so the three agree):
 //   LatticeLayoutSettings: `std::string sheet_seam = "solid_wall"` ("blend" | "solid_wall"; the job's layout key of the
 //     same name), `bool auto_by_cell = false` (StrutSpec::auto_by_cell; job key "auto_by_cell").
+//     E: `std::vector<int32_t> sheet_walls` (Settings::sheet_walls, two region ids a seam; the preview only).
 //   LatticeLayoutTypeFacts: `lays` true for a sheet; `family` (lattice_family); `open_look`, `touch` (core's bounds);
 //     `structural_floor_cells` (sheet_structural_floor_cells); `floor_cell_mm` (sheet_floor_cell_mm at two lines);
 //     `auto_cell_cap_mm` (auto_cell_cap_mm); no struts or nodes (s = 0).
@@ -1886,6 +1935,10 @@ struct Settings {
   // SHEETS (SPEC 1.5): "Where regions meet" for two sheet regions that touch. Read for a sheet type only. A seam
   // between a sheet region and a weave region is always the solid wall.
   SheetSeam sheet_seam = SheetSeam::SolidWall;
+  // E (SPEC 1.5, "a fallen-back seam draws as the solid wall"): seams made the solid wall whatever `sheet_seam` asks, as
+  // region id pairs (either order): the app's, for the seams its last print file fell back on, so its preview draws the
+  // wall the file printed. Such a seam is laid fell_back (SheetSeamBand::fell_back, its why). Empty: none.
+  std::vector<std::array<int, 2>> sheet_walls;
 };
 
 // ── PLACES (rule D23) ─────────────────────────────────────────────────────────

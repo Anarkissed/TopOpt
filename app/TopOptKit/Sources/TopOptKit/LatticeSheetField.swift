@@ -136,7 +136,7 @@ public struct LatticeSheetField: Sendable, Equatable {
     }
     public func distance(_ p: SIMD3<Double>) -> Double { distance(local: local(p)) }
 
-    /// The SIGNED distance to the mid-surface (f / |∇f|, mm): the blend's F_i (core's sheet_mid_distance_at).
+    /// The SIGNED distance to the mid-surface (f / |∇f|, mm): core's sheet_mid_distance_at.
     public func midDistance(_ p: SIMD3<Double>) -> Double {
         guard cellMM > 0 else { return .infinity }
         let q = local(p)
@@ -144,6 +144,16 @@ public struct LatticeSheetField: Sendable, Equatable {
         let g = simd_length(v.g)
         if !(g > 1e-12) { return cellMM }
         return v.f / g
+    }
+
+    /// The field's own function in mm (f × L / 2π) and its gradient in the part's axes: what the blend mixes (core's raw_at,
+    /// sheet_blend.cpp, builder E).
+    public func raw(_ p: SIMD3<Double>) -> (g: Double, grad: SIMD3<Double>) {
+        guard cellMM > 0 else { return (0, .zero) }
+        let q = local(p)
+        let v = Self.eval(kind, q.x - anchor.x, q.y - anchor.y, q.z - anchor.z, cellMM)
+        let k = cellMM / (2 * Double.pi)
+        return (v.f * k, k * (v.g.x * ax[0] + v.g.y * ax[1] + v.g.z * ax[2]))
     }
 
     // MARK: the bridge's flat form
@@ -206,16 +216,46 @@ public struct LatticeSheetSeam: Sendable, Equatable {
         return t * t * (3 - 2 * t)
     }
 
-    /// THE BLENDED FIELD (core's sheet_blend_distance_at, the contract's form; E refines core's): F = (1 − s) F_a + s F_b on
-    /// the two mid-surface distances, the wall where |F| is under half the blended parameter (+ the band's raise). mm,
-    /// negative inside the wall. `seamMM`: the signed distance across the seam at p, + toward b.
+    /// The weight's slope across the seam, per mm (core's seam_weight_slope).
+    public static func slope(seamMM: Double, bandMM: Double) -> Double {
+        guard bandMM > 0 else { return 0 }
+        let x = (seamMM + 0.5 * bandMM) / bandMM
+        guard x > 0, x < 1 else { return 0 }
+        return 6 * x * (1 - x) / bandMM
+    }
+
+    /// How much of the band's raise a point gets (core's sheet_seam_bump, builder E): (4 x (1 − x))², x the place across the
+    /// band from 0 (a's edge) to 1 (b's edge): 1 in its middle, 0 with no slope at both edges.
+    public static func bump(seamMM: Double, bandMM: Double) -> Double {
+        if !(bandMM > 0) { return 0 }
+        let x = Swift.min(Swift.max((seamMM + 0.5 * bandMM) / bandMM, 0), 1)
+        let q = 4 * x * (1 - x)
+        return q * q
+    }
+
+    /// The blended mid-surface distance (core's blend_mid): the two fields' own functions mixed, φ = (1 − s) g_a + s g_b, over
+    /// the length of φ's own gradient, (1 − s) ∇g_a + s ∇g_b + (g_b − g_a) ∇s; at s = 0 it is a's midDistance, at s = 1 b's.
+    public static func blendMid(_ a: LatticeSheetField, _ b: LatticeSheetField, s: Double, gradS: SIMD3<Double>,
+                                _ p: SIMD3<Double>) -> Double {
+        let ra = s < 1 ? a.raw(p) : (0, .zero), rb = s > 0 ? b.raw(p) : (0, .zero)
+        let phi = (1 - s) * ra.g + s * rb.g
+        let G = (1 - s) * ra.grad + s * rb.grad + (rb.g - ra.g) * gradS
+        return phi / Swift.max(simd_length(G), gradFloor)
+    }
+    /// core's kBlendGradFloor: the mix's gradient is read no shorter (at a neck the wall is only thicker; a region's own sheet,
+    /// whose gradient there is never under √2, is unchanged).
+    public static let gradFloor = 0.5
+
+    /// THE BLENDED FIELD (core's sheet_blend_distance_at, builder E's form): F = blendMid (the two fields' own functions mixed
+    /// by the smoothstep, over the mix's own gradient), the wall where |F| is under half the blended parameter, (1 − s) t_a +
+    /// s t_b + the band's raise × its bump. mm, negative inside the wall. `seamMM`: the signed distance across the seam at p,
+    /// + toward b (the map's channel); `seamGrad` its gradient.
     public static func blendDistance(_ a: LatticeSheetField, _ b: LatticeSheetField, seam: LatticeSheetSeam, seamMM: Double,
-                                     _ p: SIMD3<Double>) -> Double {
+                                     seamGrad: SIMD3<Double> = .zero, _ p: SIMD3<Double>) -> Double {
         let s = weight(seamMM: seamMM, bandMM: seam.bandMM)
-        let fa = s < 1 ? a.midDistance(p) : 0, fb = s > 0 ? b.midDistance(p) : 0
+        let F = blendMid(a, b, s: s, gradS: slope(seamMM: seamMM, bandMM: seam.bandMM) * seamGrad, p)
         let ta = s < 1 ? a.paramAt(p) : 0, tb = s > 0 ? b.paramAt(p) : 0
-        let F = (1 - s) * fa + s * fb
-        let t = (1 - s) * ta + s * tb + seam.raiseMM
+        let t = (1 - s) * ta + s * tb + seam.raiseMM * bump(seamMM: seamMM, bandMM: seam.bandMM)
         return abs(F) - 0.5 * t
     }
 }

@@ -1618,8 +1618,13 @@ public final class LatticeLayoutPreview: ObservableObject {
             let raw = r.rg
             rg = await Task.detached(priority: .userInitiated) { LatticeLayoutSolidGrid.cutSmoothed(raw, dims: dims) }.value
         }
-        return (LatticeLayoutSolidGrid(token: token, origin: origin, voxel: voxel, dims: dims, rg: rg, smooth: smooth || cutSmooth),
-                r.ms)
+        var grid = LatticeLayoutSolidGrid(token: token, origin: origin, voxel: voxel, dims: dims, rg: rg, smooth: smooth || cutSmooth)
+        // ★ SHEETS (builder E): the seam channels, so the sheet pass draws a blend band as the file prints it
+        if r.sheetSeam.contains(where: { $0 != 255 }) {
+            grid.sheetSeam = r.sheetSeam
+            grid.sheetSeamMM = r.sheetSeamMM
+        }
+        return (grid, r.ms)
     }
 
     /// ★ notes28 (his iPad notes on release 18, img 77: "Is there no way to vectorize the mechanism to cut the wall? If not, is
@@ -2002,6 +2007,10 @@ public final class LatticeLayoutPreview: ObservableObject {
         // Whole part ("In a part"), or no face asked for lattice: the whole part is lattice, less No lattice and Protect skins
         s.allLattice = l.wholePart || !s.regions.contains { !$0.noLattice }
         if Self.organic(l), s.regions.contains(where: \.weave) { s.allLattice = false }   // the weave's regions say where
+        // ★ SHEETS, builder E (SPEC 1.5): a blend the last print file fell back on is laid as the solid wall it printed
+        if LatticeSheets.isSheet(s.topology), s.sheetSeam == LatticeSheets.blend {
+            s.sheetWalls = LatticeSheetsFellBack.shared.walls(for: p.id)
+        }
         return s
     }
 

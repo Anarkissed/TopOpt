@@ -25,8 +25,15 @@
 //   pockets    no sealed space at the open look (the coupon's outline, whole)      RED: the lattice sealed by a cover
 //              (the SPEC's RED, the wall at the touch, seals nothing with this field: see the check)
 //   seam_wall  two regions with different cells, Solid wall: a two-line membrane    RED: the membrane off
-//   seam_fallback  a Blend that cannot be made becomes the solid wall and the result says so
-//                                                                                   RED: the fallback off
+//   seam_blend (builder E) the same two regions, Blend: the band sits across the region's floor where the sheets meet
+//              (not along its outline); the file made with its band (one call, one decision), print-clean, one piece,
+//              the band's true wall at least two lines on the file (along its blended mid-surface's normal); its voxels
+//              counted and none credited                    RED: the first reading's place (the outline); the blend
+//              the contract first wrote (each f / |grad f| mixed) far under two lines; the band credited (solid wall)
+//   seam_fallback  a Blend that cannot be made two lines thick (cells of 5 and 16 mm) becomes the solid wall and the
+//              result says so                                                       RED: the fallback off
+//   seam_organic (builder E) a sheet beside an Organic region: the solid wall, two lines on the sheet's side
+//                                                                                   RED: the membrane off
 //   floor      a Structural member under the floor is solid (WallTooThin)          RED: the floor read as 1
 //   strength   a Structural job runs the check to its verdict and sheet credit      RED: no strength job
 //              (the number itself: builder B's test_lattice_sheets_strength, on a part as thick as the floor)
@@ -34,7 +41,7 @@
 //   size       sheet triangles within 20 % of k x cell per contoured cell (k: 475 gyroid, 763 Schwarz-D)
 //                                                                                   RED: the unsimplified mesh
 //   pinned     the octet's bars, cells and file are the bytes test_lattice_types_matrix pins
-// (Builder E adds seam_blend; builder B the credit rows; D's tables lower the floor.)
+// (Builder B the credit rows; D's tables lower the floor.)
 //
 // A check a type is known to fail today is listed in kExpected with its reason (XFAIL); one that then passes is an
 // XPASS and fails the suite, so the list is kept true.
@@ -46,6 +53,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <map>
 #include <set>
@@ -520,6 +528,134 @@ std::string check_membrane(const TriangleMesh& file, double seam_z, double half,
   return s;
 }
 
+// ── THE BLEND SEAM (builder E, SPEC 1.5) ───────────────────────────────────────
+// Points of a blend band's mid-surface: starts at the seam grid's nodes of either region within the band (|m| under half
+// the band less `inset`), taken onto F = 0 by Newton on `F` (a field of p, with the seam's own distance and gradient),
+// each with its unit normal. At most about `most` of them.
+struct MidPoint { Vec3 p, n; double m = 0.0; };
+std::vector<MidPoint> band_mid_points(const SheetSeamBand& seam, const Domain& domain,
+                                      const std::function<double(const Vec3&, double, const Vec3&)>& F, double inset,
+                                      std::size_t most) {
+  std::vector<MidPoint> out;
+  if (!seam.across || !seam.across->ok) return out;
+  const SheetSeamAcross& X = *seam.across;
+  std::size_t cand = 0;
+  for (std::size_t e = 0; e < X.label.size(); ++e)
+    cand += (X.label[e] == 1 || X.label[e] == 2) && std::fabs(X.mm[e]) < 0.5 * seam.band_mm - inset;
+  const int stride = std::max(1, static_cast<int>(std::ceil(std::cbrt(static_cast<double>(cand) / static_cast<double>(most)))));
+  const auto at = [&](const Vec3& q) {
+    Vec3 g;
+    const double m = sheet_seam_mm(domain, seam, q, &g);
+    return std::isfinite(m) ? F(q, m, g) : std::numeric_limits<double>::quiet_NaN();
+  };
+  const auto grad = [&](const Vec3& q) {
+    const double e = 1e-3;
+    return Vec3{(at({q.x + e, q.y, q.z}) - at({q.x - e, q.y, q.z})) / (2 * e),
+                (at({q.x, q.y + e, q.z}) - at({q.x, q.y - e, q.z})) / (2 * e),
+                (at({q.x, q.y, q.z + e}) - at({q.x, q.y, q.z - e})) / (2 * e)};
+  };
+  for (int k = 0; k < X.n[2]; k += stride)
+    for (int j = 0; j < X.n[1]; j += stride)
+      for (int i = 0; i < X.n[0]; i += stride) {
+        const std::size_t e = (static_cast<std::size_t>(k) * X.n[1] + j) * X.n[0] + i;
+        if (!(X.label[e] == 1 || X.label[e] == 2) || !(std::fabs(X.mm[e]) < 0.5 * seam.band_mm - inset)) continue;
+        Vec3 q{X.origin.x + i * X.h, X.origin.y + j * X.h, X.origin.z + k * X.h};
+        const Vec3 q0 = q;
+        bool on = false;
+        for (int it = 0; it < 16; ++it) {
+          const double f = at(q);
+          const Vec3 g = grad(q);
+          const double g2 = g.x * g.x + g.y * g.y + g.z * g.z;
+          if (!std::isfinite(f) || !(g2 > 1e-8)) break;
+          if (std::fabs(f) / std::sqrt(g2) < 1e-6) { on = true; break; }
+          q = {q.x - f * g.x / g2, q.y - f * g.y / g2, q.z - f * g.z / g2};
+        }
+        const double dx = q.x - q0.x, dy = q.y - q0.y, dz = q.z - q0.z;
+        if (!on || dx * dx + dy * dy + dz * dz > 4.0 * X.h * X.h) continue;
+        const double m = sheet_seam_mm(domain, seam, q);
+        if (!(std::fabs(m) < 0.5 * seam.band_mm - inset)) continue;
+        const Vec3 g = grad(q);
+        const double gl = std::sqrt(g.x * g.x + g.y * g.y + g.z * g.z);
+        out.push_back({q, {g.x / gl, g.y / gl, g.z / gl}, m});
+      }
+  return out;
+}
+// seam_blend's two_lines: the band's TRUE wall on the file, along its blended mid-surface's normal (as measure_walls
+// does for a region's own sheet), where the regions' lattice holds 1.2 mm of the normal both ways and the point is
+// `clear_mm` inside the part.
+std::vector<WallSample> measure_band_walls(const TriangleMesh& file, const Outcome& o, const Domain& domain,
+                                           const SheetSeamBand& seam, double clear_mm) {
+  std::vector<WallSample> out;
+  std::size_t open_edges = 0;
+  const TriangleMesh welded = weld_mesh(file, 1e-6, &open_edges);
+  PartMeasure pm(welded);
+  const PartMeasure::Probe mp = pm.probe();
+  const Domain::Probe dp = domain.probe();
+  const PartMeasure::Probe part = domain.measure().probe();
+  const SheetField& A = o.sheets[static_cast<std::size_t>(seam.a)];
+  const SheetField& B = o.sheets[static_cast<std::size_t>(seam.b)];
+  const auto F = [&](const Vec3& q, double m, const Vec3& g) { return sheet_blend_mid_at(A, B, seam, m, g, q); };
+  const auto held = [&](const Vec3& a) {
+    for (const Cell& d : o.layout.cells)
+      if ((d.region == seam.region_a || d.region == seam.region_b) && cell_holds(o.layout, dp, d, a)) return true;
+    return false;
+  };
+  for (const MidPoint& mpnt : band_mid_points(seam, domain, F, 0.5, 600)) {
+    const Vec3& p = mpnt.p;
+    const Vec3& n = mpnt.n;
+    if (part.depth(p) < clear_mm || !held(p)) continue;
+    bool clear = true;
+    for (double t : {-1.2, -0.6, 0.6, 1.2}) {
+      const Vec3 a{p.x + t * n.x, p.y + t * n.y, p.z + t * n.z};
+      clear = clear && held(a) && part.depth(a) > 0.3;
+    }
+    if (!clear) continue;
+    WallSample w;
+    w.at = p;
+    w.expected = o.layout.min_strut_mm;
+    if (!(mp.depth(p) > 0.0)) w.hole = true;
+    else w.measured = mp.reach(p, n) + mp.reach(p, Vec3{-n.x, -n.y, -n.z});
+    out.push_back(w);
+  }
+  return out;
+}
+// seam_blend's RED: the blend as the contract first wrote it (the two regions' f / |grad f| mixed, not their own
+// functions over the mix's gradient), its wall measured on the field along its own normal: the thinnest, mm.
+double first_form_thinnest(const Outcome& o, const Domain& domain, const SheetSeamBand& seam, std::size_t* thin = nullptr) {
+  const SheetField& A = o.sheets[static_cast<std::size_t>(seam.a)];
+  const SheetField& B = o.sheets[static_cast<std::size_t>(seam.b)];
+  const auto F = [&](const Vec3& q, double m, const Vec3&) {
+    const double s = sheet_seam_weight(m, seam.band_mm);
+    return (1.0 - s) * sheet_mid_distance_at(A, q) + s * sheet_mid_distance_at(B, q);
+  };
+  const auto d = [&](const Vec3& q) {
+    const double m = sheet_seam_mm(domain, seam, q);
+    if (!std::isfinite(m)) return 1.0;
+    const double s = sheet_seam_weight(m, seam.band_mm);
+    return std::fabs(F(q, m, {})) - 0.5 * ((1.0 - s) * sheet_param_at(A, q) + s * sheet_param_at(B, q));
+  };
+  double thinnest = std::numeric_limits<double>::infinity();
+  std::size_t under = 0;
+  for (const MidPoint& mpnt : band_mid_points(seam, domain, F, 0.5, 600)) {
+    double w = 0.0;
+    bool ends = true;
+    for (int side = -1; side <= 1 && ends; side += 2) {
+      double a = 0.0, b = -1.0;
+      for (double t = 0.01; t <= 3.0; t += 0.01) {
+        if (d({mpnt.p.x + side * t * mpnt.n.x, mpnt.p.y + side * t * mpnt.n.y, mpnt.p.z + side * t * mpnt.n.z}) > 0.0) { b = t; break; }
+        a = t;
+      }
+      if (b < 0.0) ends = false;
+      w += 0.5 * (a + b);
+    }
+    if (!ends) continue;
+    thinnest = std::min(thinnest, w);
+    under += w < kTwoLines;
+  }
+  if (thin) *thin = under;
+  return thinnest;
+}
+
 // ── KNOWN FAILURES TODAY ──────────────────────────────────────────────────────
 struct Expected { const char* type; const char* check; const char* reason; };
 const std::vector<Expected> kExpected = {
@@ -810,12 +946,111 @@ int main() {
       const TriangleMesh open_mesh = make_file_mesh(session, bare, fo, bm);
       std::printf("  RED seam_wall with no membrane: %s\n", check_membrane(open_mesh, z, 0.44, x0, x1, y0, y1).c_str());
       CHECK(!check_membrane(open_mesh, z, 0.44, x0, x1, y0, y1).empty());
-      // seam_fallback: Blend asked; the band cannot be made (today: never), so the file falls back to the solid wall and
-      // says which regions.
+      // ── seam_blend (builder E, SPEC 1.5): the same two regions, Blend, both walls Auto's two lines (the thinnest a
+      // blend starts from: mixed unraised its wall reads 0.898 mm on the gyroid, so the band is raised) ──
       const std::string blend = layout_json(
-          id, "\"cell_mm\": 8, \"all_lattice\": true, " + face_region(cube, 6.0) +
+          id, "\"cell_mm\": 8, \"auto_by_cell\": true, \"all_lattice\": true, " + face_region(cube, 6.0) +
                   ", \"region_own\": [{\"cell_mm\": 6}], \"sheet_seam\": \"blend\"");
-      const Ran f = run_job(id + "-seam-blend-cube", file_job_json(cube, blend), "", nullptr);
+      Session bs(models.at("cube"));
+      const Outcome ob = bs.lay(parsed_settings(blend));
+      std::string sb;
+      const SheetSeamBand* seam = ob.sheet_seams.size() == 1 && !ob.sheet_seams[0].solid_wall ? &ob.sheet_seams[0] : nullptr;
+      const double cx = 0.5 * (lo.x + hi.x), cy = 0.5 * (lo.y + hi.y);
+      if (!seam || !seam->across || !seam->across->ok) sb = "no blend seam laid";
+      // (1) the band sits where the two regions' sheets meet: across the region's floor (z), not along its outline
+      double at_floor = 0.0, above = 0.0, below = 0.0;
+      if (sb.empty()) {
+        at_floor = sheet_seam_mm(*bs.domain(), *seam, {cx, cy, z});
+        above = sheet_seam_mm(*bs.domain(), *seam, {cx, cy, z + 2.0});
+        below = sheet_seam_mm(*bs.domain(), *seam, {cx, cy, z - 2.0});
+        const double toward_b = seam->region_b == 1 ? 1.0 : -1.0;   // b's side is up when b is the top region
+        std::printf("  [seam-blend-cube] across the seam at the floor %.3f mm, 2 mm up %.3f, 2 mm down %.3f "
+                    "(grid %d x %d x %d at %.2f mm, %zu nodes read, %.0f ms)\n",
+                    at_floor, above, below, seam->across->n[0], seam->across->n[1], seam->across->n[2], seam->across->h,
+                    seam->across->nodes_read, seam->across->ms);
+        if (!(std::fabs(at_floor) < 0.35 && std::fabs(above - 2.0 * toward_b) < 0.35 && std::fabs(below + 2.0 * toward_b) < 0.35))
+          sb = "the band does not sit across the region's floor";
+        // RED (builder B's find): the first reading, half the difference of the in-plane edge distances, puts the meeting
+        // on the region's outline: at the floor's middle it reads the distance to the cube's sides.
+        const Region* r1 = nullptr;
+        for (const Region& r : bs.domain()->spec().regions)
+          if (r.id == 1) r1 = &r;
+        const double first = r1 ? region_edge_distance(*r1, {cx, cy, z}) : 0.0;
+        std::printf("  RED seam_blend's place by the first reading (the outline): %.3f mm at the floor's middle\n", first);
+        CHECK(std::fabs(first) > 1.0);
+      }
+      // (2) the file: the band made once, raised if it must be, joined, print-clean, its true wall two lines everywhere
+      const Ran fbl = run_job(id + "-seam-blend-cube", file_job_json(cube, blend), "", nullptr);
+      if (sb.empty()) {
+        if (!fbl.r.ok) sb = "no file: " + fbl.r.code + ": " + fbl.r.why;
+        else if (fbl.r.sheet_seams.size() != 1 || fbl.r.sheet_seams[0].fell_back)
+          sb = "the blend fell back: " + (fbl.r.sheet_seams.empty() ? std::string() : fbl.r.sheet_seams[0].why);
+        else if (fbl.r.made.mesh.seams_blended != 1) sb = "no band in the file";
+      }
+      if (fbl.r.ok)
+        std::printf("  [seam-blend-cube] file: %zu triangles, blended %zu, fell back %zu, raise %.3f mm, band's thinnest as "
+                    "measured %.3f mm, remakes %d, posts %zu, %.0f ms\n",
+                    fbl.r.made.mesh.triangles, fbl.r.made.mesh.seams_blended, fbl.r.made.mesh.seams_fell_back,
+                    fbl.r.sheet_seams.empty() ? 0.0 : fbl.r.sheet_seams[0].raise_mm,
+                    fbl.r.made.seam_thinnest_mm.empty() ? 0.0 : fbl.r.made.seam_thinnest_mm[0], fbl.r.made.seam_remakes,
+                    fbl.r.made.posts.size(), fbl.r.ms_total);
+      if (sb.empty()) sb = check_print(fbl.r);
+      if (sb.empty()) sb = check_joined(fbl.r.made.mesh);
+      if (sb.empty()) {
+        StepModel out = import_part_file_resolved(fbl.r.file);
+        const std::vector<WallSample> w = measure_band_walls(out.mesh, ob, *bs.domain(), *seam, 0.8);
+        sb = check_two_lines(w);
+      }
+      // (2b) the band's true wall as its own loop measured it (on the field it is contoured from): two lines, raised
+      if (sb.empty() && (fbl.r.made.seam_thinnest_mm.empty() || !(fbl.r.made.seam_thinnest_mm[0] >= kTwoLines)))
+        sb = "the band's measured wall is under two lines";
+      // (3) no credit in the band (builder B's credit by place). Every cell of the cube is cut, so none is credited and
+      // no voxel is read for credit (kSheetCutCellsCredited): the cells' own judgement is read, as sheet_cells.bin carries
+      // it. Some cells lie in the band, and none of them is credited.
+      if (sb.empty()) {
+        const LatticeCredit c = lattice_credit_cells(ob.layout, *bs.domain());
+        std::size_t band_cells = 0, band_credited = 0;
+        for (std::size_t ci = 0; ci < c.cell_flags.size(); ++ci) {
+          if (!(c.cell_flags[ci] & SheetCellRecord::kBlendBand)) continue;
+          ++band_cells;
+          band_credited += ci < c.cell_credit.size() && c.cell_credit[ci];
+        }
+        std::printf("  [seam-blend-cube] credit: %zu of %zu cells in the band (%zu of them credited)\n", band_cells,
+                    c.cell_flags.size(), band_credited);
+        if (band_cells == 0 || band_credited) sb = "the band is not kept from credit";
+        // RED: the band credited as the solid wall's lattice is (the same two regions as a solid wall: no cell in a band)
+        const LatticeCredit cw = lattice_credit_cells(o.layout, *session.domain());
+        std::size_t wall_band = 0;
+        for (std::uint32_t fl : cw.cell_flags) wall_band += (fl & SheetCellRecord::kBlendBand) ? 1 : 0;
+        std::printf("  RED seam_blend credited as a solid wall: %zu cells kept from credit as a band\n", wall_band);
+        CHECK(wall_band == 0);
+      }
+      record(id, "seam_blend", "seam-blend-cube", sb);
+      // seam_blend RED: the blend the contract first wrote (each region's f / |grad f| mixed) has walls far under two lines
+      if (seam) {
+        std::size_t thin = 0;
+        const double t1 = first_form_thinnest(ob, *bs.domain(), *seam, &thin);
+        std::printf("  RED seam_blend mixed the first way: thinnest wall %.3f mm, %zu places under two lines\n", t1, thin);
+        CHECK(t1 < kTwoLines && thin > 0);
+        // seam_blend RED: the blend with no thickening (its band made as blended, never raised): its loop's own measure
+        // finds the wall short of two lines with the simplifier's inward bound to spare (0.6 of 0.02 mm a face), which
+        // the file's band is raised to
+        MeshSpec flat;
+        flat.sheet_seam_raise = false;
+        const SeamBand raw = mesh_sheet_seam_band(*bs.domain(), ob.layout, ob.sheets, *seam, flat);
+        const double need = kTwoLines + 1.2 * kSheetMaxDeviationMm + 0.005;
+        std::printf("  RED seam_blend with no thickening: thinnest wall %.3f mm (the file's band needs %.3f)\n",
+                    raw.thinnest_mm, need);
+        CHECK(raw.thinnest_mm < need);
+      }
+
+      // ── seam_fallback: a blend that cannot be made two lines thick everywhere falls back to the solid wall, and the
+      // result says which regions. On core's fixtures no blend fails on its own (the 6 / 8 mm cube, and 6 / 16 mm, are
+      // made two lines thick by a raise of 0.05 mm at most, well under the touch), so its raise is capped at nothing
+      // (the job's mesh option sheet_seam_raise_cap_mm 0): the same seam_blend lay, whose band needs one. ──
+      const std::string apart = blend;
+      const Ran f = run_job(id + "-seam-fallback-cube",
+                            file_job_json(cube, apart, ", \"mesh\": {\"sheet_seam_raise_cap_mm\": 0}"), "", nullptr);
       std::string fb;
       if (!f.r.ok) fb = "no file: " + f.r.code + ": " + f.r.why;
       else if (f.r.sheet_seams.size() != 1 || !f.r.sheet_seams[0].fell_back || f.r.sheet_seams[0].why.empty() ||
@@ -825,15 +1060,74 @@ int main() {
         StepModel out = import_part_file_resolved(f.r.file);
         fb = check_membrane(out.mesh, z, 0.44, x0, x1, y0, y1);
       }
-      if (f.r.ok && !f.r.sheet_seams.empty()) std::printf("  [seam-blend-cube] %s\n", f.r.sheet_seams[0].why.c_str());
-      record(id, "seam_fallback", "seam-blend-cube", fb);
-      // seam_fallback RED: the same Blend outcome made with no fallback (no band, no membrane) is open at the seam
-      Session bs(models.at("cube"));
-      const Outcome ob = bs.lay(parsed_settings(blend));
+      if (f.r.ok && !f.r.sheet_seams.empty())
+        std::printf("  [seam-fallback-cube] %s (fell back %d)\n", f.r.sheet_seams[0].why.c_str(), f.r.sheet_seams[0].fell_back ? 1 : 0);
+      record(id, "seam_fallback", "seam-fallback-cube", fb);
+      // seam_fallback RED: the same outcome made with the fallback off (its band refused, no membrane) is open at the seam
+      Session fs(models.at("cube"));
+      const Outcome of = fs.lay(parsed_settings(apart));
+      FileOptions off = fo;
+      off.mesh.sheet_seam_raise_cap_mm = 0.0;
+      off.mesh.sheets = &of.sheets;
+      off.mesh.sheet_seams = &of.sheet_seams;
+      const std::vector<SeamBand> refused(of.sheet_seams.size());
+      off.mesh.sheet_bands = &refused;
+      off.leave_out = false;
       FileReport nm;
-      const TriangleMesh no_fallback = make_file_mesh(bs, ob, fo, nm);
+      const TriangleMesh no_fallback = make_file_mesh(fs, of.layout, of.bars, off, nm);
       std::printf("  RED seam_fallback off: %s\n", check_membrane(no_fallback, z, 0.44, x0, x1, y0, y1).c_str());
       CHECK(!check_membrane(no_fallback, z, 0.44, x0, x1, y0, y1).empty());
+    }
+
+    // ── seam_organic (the lead's note): a sheet beside an Organic region meets it at the solid wall, two lines on the
+    // sheet's side (no blend with Organic). The whole cube's sheet (8 mm) under its top 6 mm woven. ──
+    {
+      const std::string woven = layout_json(
+          id, "\"cell_mm\": 8, \"all_lattice\": true, " + face_region(cube, 6.0) +
+                  ", \"region_weave\": [true], \"organic_spacing_mm\": 3");
+      Session session(models.at("cube"));
+      const Outcome o = session.lay(parsed_settings(woven));
+      Vec3 lo{1e300, 1e300, 1e300}, hi{-1e300, -1e300, -1e300};
+      for (const Vec3& v : models.at("cube").mesh.vertices) {
+        lo = {std::min(lo.x, v.x), std::min(lo.y, v.y), std::min(lo.z, v.z)};
+        hi = {std::max(hi.x, v.x), std::max(hi.y, v.y), std::max(hi.z, v.z)};
+      }
+      const double z = hi.z - 6.0;
+      // Points of the sheet's region on a grid under the meeting: within the two lines none is held by a cell, three
+      // lines down some are.
+      const auto held_share = [&](const Layout& lay, double dz) {
+        const Domain::Probe dp = session.domain()->probe();
+        std::size_t asked = 0, held = 0;
+        for (double x = lo.x + 1.5; x <= hi.x - 1.5 + 1e-9; x += 0.5)
+          for (double y = lo.y + 1.5; y <= hi.y - 1.5 + 1e-9; y += 0.5) {
+            const Vec3 p{x, y, z - dz};
+            const Where w = dp.where(p);
+            if (!w.lattice() || w.id != 0) continue;
+            ++asked;
+            for (const Cell& c : lay.cells)
+              if (c.region == 0 && cell_holds(lay, dp, c, p)) { ++held; break; }
+          }
+        return asked ? static_cast<double>(held) / static_cast<double>(asked) : -1.0;
+      };
+      std::string so;
+      bool paired = false;
+      for (const auto& pr : o.layout.membrane) paired = paired || (pr[0] == 0 && pr[1] == 1) || (pr[0] == 1 && pr[1] == 0);
+      const double in1 = held_share(o.layout, 0.3), in2 = held_share(o.layout, 0.75), out3 = held_share(o.layout, 1.6);
+      std::printf("  [seam-organic-cube] fields %zu, weave regions %zu, membrane pairs %zu; held 0.3 mm under the meeting "
+                  "%.2f, 0.75 mm %.2f, 1.6 mm %.2f\n",
+                  o.sheets.size(), o.layout.weave.size(), o.layout.membrane.size(), in1, in2, out3);
+      if (o.sheets.size() != 1 || o.layout.weave.size() != 1) so = "not a sheet beside a weave";
+      else if (!paired) so = "no solid wall between the sheet and the weave";
+      else if (!(in1 == 0.0 && in2 == 0.0)) so = "the sheet runs into the two lines beside the weave";
+      else if (!(out3 > 0.0)) so = "the sheet does not start past the wall";
+      record(id, "seam_organic", "seam-organic-cube", so);
+      // seam_organic RED: the membrane off, the sheet runs up to the weave
+      Layout bare = o.layout;
+      bare.membrane.clear();
+      bare.membrane_near.reset();
+      const double red = held_share(bare, 0.3);
+      std::printf("  RED seam_organic with no membrane: %.2f held 0.3 mm under the meeting\n", red);
+      CHECK(red > 0.0);
     }
 
     // ── Structural: the member floor (SPEC 1.2 item 3) and the strength check ──
@@ -969,7 +1263,7 @@ int main() {
   // ── the matrix ───────────────────────────────────────────────────────────────
   std::printf("\n== the matrix ==\n");
   const char* checks[] = {"lays", "auto", "two_lines", "by_stress", "joined", "bed", "print", "overhang", "pockets",
-                          "seam_wall", "seam_fallback", "floor", "strength", "coupon", "size", "pinned"};
+                          "seam_wall", "seam_blend", "seam_fallback", "seam_organic", "floor", "strength", "coupon", "size", "pinned"};
   for (const char* tid : {"gyroid", "schwarz_d", "octet"}) {
     const auto t = g_matrix.find(tid);
     if (t == g_matrix.end()) continue;
