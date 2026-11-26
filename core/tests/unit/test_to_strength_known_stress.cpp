@@ -214,6 +214,35 @@ int main(int argc, char** argv) {
     std::printf("read over %.1f mm   spread across resolutions %5.1f %%\n", kSizesMm[q],
                 lo > 0.0 ? 100.0 * (hi / lo - 1.0) : 0.0);
   }
+  // THE BAR (reviewer, 2026-11-26): the shipped reading may never read more than
+  // 5 % BELOW the textbook at any resolution; stiffness and reading size are
+  // judged together. Every pair of (how a cut voxel's stiffness goes with its
+  // fill, the size the stress is read over), over the four resolutions.
+  std::printf("\n[bar] lowest and highest reading against the textbook over the four resolutions, "
+              "and their spread\n");
+  std::printf("%-22s %-10s %10s %10s %10s  %s\n", "cut voxel stiffness", "read over", "lowest %",
+              "highest %", "spread %", "never more than 5 % low?");
+  for (double pen : {1.0, 2.0, 3.0}) {
+    double lo[4] = {1e300, 1e300, 1e300, 1e300}, hi[4] = {0.0, 0.0, 0.0, 0.0};
+    for (int r : {3, 4, 5, 6}) {
+      bool ok = false;
+      double ae = 0.0;
+      (void)ae;
+      double os[3] = {0.0, 0.0, 0.0};
+      const double peak = peak_ratio(r, true, pen, &ok, os);
+      const double v[4] = {peak, os[0], os[1], os[2]};
+      for (int q = 0; q < 4; ++q) {
+        lo[q] = std::min(lo[q], v[q]);
+        hi[q] = std::max(hi[q], v[q]);
+      }
+    }
+    const char* names[4] = {"one voxel", "0.9 mm", "1.8 mm", "3.6 mm"};
+    for (int q = 0; q < 4; ++q)
+      std::printf("E x fill^%-12.0f %-10s %+10.1f %+10.1f %10.1f  %s\n", pen, names[q],
+                  100.0 * (lo[q] / kTextbook - 1.0), 100.0 * (hi[q] / kTextbook - 1.0),
+                  100.0 * (hi[q] / lo[q] - 1.0), lo[q] >= 0.95 * kTextbook ? "yes" : "NO");
+  }
+
   std::printf("[test E] %s: %d failure(s)\n", gate ? "gate" : "measure only", failures);
   return failures == 0 ? 0 : 1;
 }
