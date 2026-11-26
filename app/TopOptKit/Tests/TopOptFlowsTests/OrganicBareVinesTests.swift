@@ -17,6 +17,7 @@ final class OrganicBareVinesTests: XCTestCase {
 
     override nonisolated func tearDown() {
         OrganicBareVines.controlUnread = false
+        OrganicBareVines.controlSolidFirst = false
         super.tearDown()
     }
 
@@ -141,6 +142,11 @@ final class OrganicBareVinesTests: XCTestCase {
         XCTAssertEqual(card.buttons, [OrganicCertifyCard.skipTitle, OrganicCertifyCard.solveTitle], "★ Skip and Solve")
         let advice = try XCTUnwrap(OrganicCertifyAdvice.advice(first, .init(strut: nil, stepMM: 0.45, infillNow: 50)))
         XCTAssertEqual(advice.line, OrganicBareVines.advice, "★ the face now, and the two to try")
+        // ★ LatticeReview 11-26: Protect skin first, wherever the app names the two (the RED control is the pop-up's, hosted)
+        for words in [advice.line, OrganicBareVines.line, OrganicBareVines.checkDetail] {
+            let skin = try XCTUnwrap(words.range(of: "Protect skin"), words), solid = try XCTUnwrap(words.range(of: "Solid"), words)
+            XCTAssertLessThan(skin.lowerBound, solid.lowerBound, "★ Protect skin first: \(words)")
+        }
         XCTAssertNil(advice.settingToChange(group: nil), "Solve offers the two itself (the centred pop-up)")
         let d = try JSONSerialization.data(withJSONObject: Self.report())
         XCTAssertTrue(OrganicCertify.opensResults(organic: true, reportJSON: d), "★ the result opens on Results, the walk there")
@@ -158,8 +164,8 @@ final class OrganicBareVinesTests: XCTestCase {
         let start = try XCTUnwrap(ws.range(of: "func certifySolve(_ issue: OrganicCertify.Issue) {"))
         let body = String(ws[start.upperBound...].prefix(600))
         XCTAssertTrue(body.contains("if solve == .coverLoadedFace {"), body)
-        XCTAssertTrue(body.contains("OrganicBareVines.offer(solid: { certifyCover { _ = $0.giveLoadedFaceSolidFinish(near: issue.at) } },"))
-        XCTAssertTrue(body.contains("skin: { certifyCover { _ = $0.giveLoadedFaceProtectSkin(near: issue.at) } })"))
+        XCTAssertTrue(body.contains("OrganicBareVines.offer(skin: { certifyCover { _ = $0.giveLoadedFaceProtectSkin(near: issue.at) } },"))
+        XCTAssertTrue(body.contains("solid: { certifyCover { _ = $0.giveLoadedFaceSolidFinish(near: issue.at) } })"))
         let cover = try XCTUnwrap(ws.range(of: "func certifyCover(_ change: (ProjectModel) -> Void) {"))
         let cb = String(ws[cover.upperBound...].prefix(200))
         XCTAssertTrue(cb.contains("model.persistCurrentProject()") && cb.contains("certifyAdvance()"), cb)

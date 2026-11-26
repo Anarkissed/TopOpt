@@ -16195,9 +16195,9 @@ extension WorkspacePlaceholder {
     /// Results).
     func certifySolve(_ issue: OrganicCertify.Issue) {
         guard let solve = issue.solve else { return }
-        if solve == .coverLoadedFace {   // ★ notes30: the centred pop-up offers the loaded face a Solid finish or a Protect skin
-            OrganicBareVines.offer(solid: { certifyCover { _ = $0.giveLoadedFaceSolidFinish(near: issue.at) } },
-                                   skin: { certifyCover { _ = $0.giveLoadedFaceProtectSkin(near: issue.at) } })
+        if solve == .coverLoadedFace {   // ★ notes30: the centred pop-up offers the loaded face a Protect skin (first) or a Solid finish
+            OrganicBareVines.offer(skin: { certifyCover { _ = $0.giveLoadedFaceProtectSkin(near: issue.at) } },
+                                   solid: { certifyCover { _ = $0.giveLoadedFaceSolidFinish(near: issue.at) } })
             return
         }
         model.certifyWalk?.markSolved()

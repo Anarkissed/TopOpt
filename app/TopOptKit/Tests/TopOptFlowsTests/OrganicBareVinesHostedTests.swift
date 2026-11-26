@@ -2,8 +2,9 @@
 // 11″ portrait):
 //   * the certify wizard's pop-up for a load on bare vines on Results: drawn, Skip and Solve each a 44 pt target;
 //   * Solve's CENTRED pop-up: front and centre, core's sentence word for word (FlexibleSaid's recording: AppPopups.recorded),
-//     its two offers — Solid finish, Protect skin — and Not now, each a 44 pt target; a tap on an offer runs that offer (and
-//     only it) and closes the pop-up; Not now runs neither. RED CONTROL: a plain error pop-up has no offers to tap.
+//     its two offers — Protect skin FIRST (the top button, LatticeReview 11-26), then Solid finish — and Not now, each a 44 pt
+//     target; a tap on an offer runs that offer (and only it) and closes the pop-up; Not now runs neither. RED CONTROLS: the
+//     old order puts Solid finish on top; a plain error pop-up has no offers to tap.
 #if canImport(AppKit) && canImport(MetalKit)
 import XCTest
 import SwiftUI
@@ -26,6 +27,7 @@ final class OrganicBareVinesHostedTests: XCTestCase {
         FlexibleSaid.recording = false
         MainActor.assumeIsolated {
             OrganicBareVines.controlUnread = false
+            OrganicBareVines.controlSolidFirst = false
             CertifyCardPlace.shared.reset(); AppPopups.shared.current = nil; AppPopups.recorded = []
         }
         super.tearDown()
@@ -39,7 +41,7 @@ final class OrganicBareVinesHostedTests: XCTestCase {
         XCTAssertEqual(issue.id, OrganicBareVines.reason, "premise: the walk opens on it")
         return OrganicCertifyCard(issue: issue, step: w.step, grid: nil, solvedLines: nil,
                                   advice: OrganicCertifyAdvice.advice(issue, .init(strut: nil, stepMM: 0.45, infillNow: 50)),
-                                  next: {}, skip: {}, solve: { OrganicBareVines.offer(solid: solid, skin: skin) })
+                                  next: {}, skip: {}, solve: { OrganicBareVines.offer(skin: skin, solid: solid) })
     }
 
     /// Results as the workspace mounts it, the centred pop-ups over it as RootView mounts them.
@@ -55,8 +57,9 @@ final class OrganicBareVinesHostedTests: XCTestCase {
     }
 
     /// ★ The wizard's pop-up is drawn on Results (Skip and Solve, 44 pt); Solve opens the centred pop-up — core's sentence word
-    /// for word, Solid finish, Protect skin and Not now (44 pt each); Protect skin runs Protect skin only and closes it; again,
-    /// Solid finish runs Solid finish only; again, Not now runs neither and the wizard's pop-up stays.
+    /// for word, Protect skin (top), Solid finish and Not now (44 pt each); Protect skin runs Protect skin only and closes it;
+    /// again, Solid finish runs Solid finish only; the old order (RED CONTROL) puts Solid on top; Not now runs neither and the
+    /// wizard's pop-up stays.
     func testSolveOffersBothCoversInTheCentredPopUp() throws {
         for size in Self.sizes {
             let what = "\(Int(size.width))×\(Int(size.height))"
@@ -78,25 +81,36 @@ final class OrganicBareVinesHostedTests: XCTestCase {
             let said = try XCTUnwrap(AppPopups.recorded.last, "\(what): ★ what it said (recorded)")
             XCTAssertEqual(said.title, OrganicBareVines.title)
             XCTAssertEqual(said.text, OrganicBareVinesTests.coreSentence, "\(what): ★ word for word")
-            XCTAssertEqual(AppPopups.shared.action?.title, OrganicBareVines.solidFinish, "\(what): ★ offer 1")
-            XCTAssertEqual(AppPopups.shared.second?.title, OrganicBareVines.protectSkin, "\(what): ★ offer 2")
+            // ★ LatticeReview 11-26: Protect skin FIRST — the first button, the top one
+            XCTAssertEqual(AppPopups.shared.action?.title, OrganicBareVines.protectSkin, "\(what): ★ offer 1: Protect skin")
+            XCTAssertEqual(AppPopups.shared.second?.title, OrganicBareVines.solidFinish, "\(what): ★ offer 2: Solid finish")
             XCTAssertEqual(AppPopups.shared.dismissTitle, OrganicBareVines.notNow)
-            let one = try h.probe("appPopupChoice1", "\(what): ★ Solid finish")
-            let two = try h.probe("appPopupChoice2", "\(what): ★ Protect skin")
+            let one = try h.probe("appPopupChoice1", "\(what): ★ Protect skin")
+            let two = try h.probe("appPopupChoice2", "\(what): ★ Solid finish")
             let not = try h.probe("appPopupDismiss", "\(what): ★ Not now")
             for b in [one, two, not] { XCTAssertTrue(pop.insetBy(dx: -0.5, dy: -0.5).contains(b), "\(what): inside the card") }
+            XCTAssertLessThan(one.midY, two.midY, "\(what): ★ Protect skin above Solid finish")
+            XCTAssertLessThan(two.midY, not.midY, "\(what): Not now last")
             try h.picture("bare-vines-popup-\(what).png")
-            try h.tap("appPopupChoice2", "\(what): Protect skin", settle: 0.6)
+            try h.tap("appPopupChoice1", "\(what): Protect skin (the top button)", settle: 0.6)
             XCTAssertEqual([solid, skin], [0, 1], "\(what): ★ Protect skin, and only it")
             XCTAssertNil(AppPopups.shared.current, "\(what): ★ it closes")
 
             try h.tap("certifySolve", "\(what): Solve again", settle: 0.8)
-            try h.tap("appPopupChoice1", "\(what): Solid finish", settle: 0.6)
+            try h.tap("appPopupChoice2", "\(what): Solid finish (the second button)", settle: 0.6)
             XCTAssertEqual([solid, skin], [1, 1], "\(what): ★ Solid finish, and only it")
+
+            // RED CONTROL: the order before the ruling — the top button is Solid finish, and a tap there runs Solid
+            OrganicBareVines.controlSolidFirst = true
+            try h.tap("certifySolve", "\(what): Solve, the old order", settle: 0.8)
+            XCTAssertEqual(AppPopups.shared.action?.title, OrganicBareVines.solidFinish, "\(what): RED CONTROL: Solid first")
+            try h.tap("appPopupChoice1", "\(what): the old top button", settle: 0.6)
+            XCTAssertEqual([solid, skin], [2, 1], "\(what): RED CONTROL: the top button ran Solid finish")
+            OrganicBareVines.controlSolidFirst = false
 
             try h.tap("certifySolve", "\(what): Solve again", settle: 0.8)
             try h.tap("appPopupDismiss", "\(what): Not now", settle: 0.6)
-            XCTAssertEqual([solid, skin], [1, 1], "\(what): ★ Not now changes nothing")
+            XCTAssertEqual([solid, skin], [2, 1], "\(what): ★ Not now changes nothing")
             XCTAssertNil(AppPopups.shared.current)
             _ = try h.onScreen("certifyCard", "\(what): ★ the wizard's pop-up stays (Skip is his)")
 

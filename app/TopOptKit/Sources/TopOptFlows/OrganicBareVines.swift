@@ -7,8 +7,11 @@
 //
 // What the app does with it, every place that reads the Organic strength result:
 //   * the certify wizard: ONE pinned pop-up (Next/Skip/Solve, his design 11-19), its line to where the load lands; Solve opens
-//     the CENTRED pop-up below, its two offers the loaded face's Solid finish and its Protect skin (the app's own names: the
-//     Organic Finish row's "Solid", the Role row's "Protect skin");
+//     the CENTRED pop-up below, its two offers the loaded face's Protect skin and its Solid finish (the app's own names: the
+//     Role row's "Protect skin", the Organic Finish row's "Solid");
+//   * ★ LatticeReview's ruling (2026-11-26): PROTECT SKIN FIRST — the first button, and first in every line that names the
+//     two (a Solid finish is as thick as the printer's walls, about 1 mm, and may be under two of the check's voxels; it stays
+//     offered and is not thickened);
 //   * Results: the Checks line and Details › Strength say what lands where, never a margin (the place lit, core's sentence
 //     behind the (i));
 //   * the print file's line and the strengthening's line: the same words.
@@ -23,17 +26,18 @@ public enum OrganicBareVines {
     public static let text = "A load lands on bare vines. Give the loaded face a Solid finish or a protected skin so its strength can be checked."
     /// The pop-up's and the wizard card's title, and the Checks line's (five words at most).
     public static let title = "Load on bare vines"
-    /// The two offers: the Organic Finish row's "Solid", and the Role row's "Protect skin" (never the plain "Skin").
-    public static let solidFinish = "Solid finish"
+    /// The two offers, Protect skin first (LatticeReview 11-26): the Role row's "Protect skin", and the Organic Finish row's
+    /// "Solid" (never the plain "Skin").
     public static let protectSkin = LatticeSetupCopy.protectSkin
+    public static let solidFinish = "Solid finish"
     /// The pop-up's dismiss (the wizard card stays, its Skip with it).
     public static let notNow = "Not now"
-    /// The wizard card's advice line (the setting now, and what to try).
-    public static let advice = "The loaded face is bare vines now. Try a Solid finish or a Protect skin."
+    /// The wizard card's advice line (the setting now, and what to try: Protect skin first).
+    public static let advice = "The loaded face is bare vines now. Try a Protect skin or a Solid finish."
     /// The print file's one line (LatticeFileStrength.line) and the strengthening's.
-    public static let line = "A load lands on bare vines · a Solid finish or a Protect skin on its face fixes it"
+    public static let line = "A load lands on bare vines · a Protect skin or a Solid finish on its face fixes it"
     /// Results' Checks line: its detail (five words) and its open row's line.
-    public static let checkDetail = "Fix: Solid or Protect skin"
+    public static let checkDetail = "Fix: Protect skin or Solid"
     public static let checkMore = "Where it lands is lit on the part"
     /// Details › Strength: the row in the "Holds" row's place.
     public static let rowLabel = "Load lands on"
@@ -42,6 +46,8 @@ public enum OrganicBareVines {
     /// ★ RED CONTROL (OrganicBareVinesTests, OrganicBareVinesHostedTests): the app reads the strength block as before notes30 —
     /// the reason unknown, no issue, no pop-up.
     nonisolated(unsafe) public static var controlUnread = false
+    /// ★ RED CONTROL (OrganicBareVinesHostedTests): the pop-up's offers in the order before LatticeReview's ruling (Solid first).
+    nonisolated(unsafe) public static var controlSolidFirst = false
 
     /// What core said with the reason.
     public struct Found: Equatable, Sendable {
@@ -91,9 +97,14 @@ public enum OrganicBareVines {
         return a + ab * (vb / sum) + ac * (vc / sum)
     }
 
-    /// ★ The centred pop-up (his 11-20 rule: never a line at the bottom): the sentence, Solid finish, Protect skin, Not now.
-    @MainActor public static func offer(solid: @escaping () -> Void, skin: @escaping () -> Void) {
-        AppPopups.shared.choose(title, text, first: (solidFinish, solid), second: (protectSkin, skin), dismiss: notNow)
+    /// ★ The centred pop-up (his 11-20 rule: never a line at the bottom): the sentence, then Protect skin (first, LatticeReview
+    /// 11-26), Solid finish, Not now.
+    @MainActor public static func offer(skin: @escaping () -> Void, solid: @escaping () -> Void) {
+        if controlSolidFirst {   // the RED control: the order before the ruling
+            AppPopups.shared.choose(title, text, first: (solidFinish, solid), second: (protectSkin, skin), dismiss: notNow)
+            return
+        }
+        AppPopups.shared.choose(title, text, first: (protectSkin, skin), second: (solidFinish, solid), dismiss: notNow)
     }
 }
 
