@@ -99,6 +99,14 @@ final class NewEngineStackPlacementHostedTests: XCTestCase {
 
 final class AppAsksThinWallPopUpHostedTests: XCTestCase {
 
+    // ★ notes30 (builder R1): the page this test leaves (its Switch to Aesthetic lays again) raises the new engine's centred
+    // pop-up ("Some of the lattice stays solid"); left up, its backdrop sat over the next test's page (AppSettingsHostedTests'
+    // rows, release 21's suite).
+    override func tearDown() async throws {
+        await MainActor.run { AppPopups.shared.current = nil }
+        try await super.tearDown()
+    }
+
     /// ★ (a) The pop-up's own frame is centred on the window (within 1 pt), wholly on it, at the six windows; Continue and
     /// Switch still work.
     @MainActor
