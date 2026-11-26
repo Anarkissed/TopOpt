@@ -28,7 +28,7 @@ Branch `claude/topopt-stage-3-surfaces-7f58fd`, from 2b40bcf4. Status: IN PROGRE
 
 **Open, first (TOReview 11-26):**
 1. Top Motor Mount 0.68: with stage 3 ALONE its cut surface read worse than today (area measure, cut patches: median 0.112 against 0.022 mm, 56 % against 25 % over 0.05). Stage 1 + 3: [from the batch]. If it is not cured, it stays open here; no further tuning before the reviewer reads it.
-2. The re-fit's CG at its 2,000-iteration cap: a tolerance artefact (it asks 1e-10 and reaches about 1e-6 on every part, switch on or off); the warm start and the narrow band did not change it. The re-fits take about 40 % of the optimiser loop. Not changed.
+2. The re-fit's CG at its 2,000-iteration cap: a tolerance artefact (it asks 1e-10 and reaches about 1e-6 on every part measured with the switch on; the switch-off path makes the same call, not measured); the warm start and the narrow band did not change it. The re-fits take about 40 % of the optimiser loop. Not changed.
 3. The slope of phi "median about 3" at shipped designs: mostly my measure (it read the zero set the cut throws away). On the printed corners: median 1.6-2.6, not 1; the file's margin against the certified one is within 2 % (Top Motor Mount res 32: 0.3-1.3 %). Stage 1 + 3: [from the batch].
 
 - **Repo tests, failing -> passing:** A (known shapes: 0.12-0.24 mm -> worst 0.049, the 5 mm hole; walls 0.002) now `--gate`; B (drawn faces: flats 0.0000, bores 0.0007, a protected layer's face 0.003), F (ripple 0.015), J (one clean solid; also the edge-touching cases the stand forced) new and `--gate`. Held: M (switch off byte-identical to the tip build), K (switch on, same job twice, identical bytes). P (run time): from the final batch, below.
