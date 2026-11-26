@@ -92,6 +92,18 @@ So the control moves for a real reason: today's path clamps a slab one voxel thi
 
 Jobs B and C remade on a 56 x 56 x 24 mm box (seven cells across) at LatticeReview's word. Laid lattice identical again (B 1,240 bars; C 3,053 bars, compared on the bar list: a weave writes a 3MF with random ids, so the first run's "bytes identical" for C compared nothing). B: margin 379.1 -> 537.5, interlayer margin 1,254 -> 5,577, still no credited cell (0 of 64), asked. C: margin 474.4 -> 503.1, but the weakest strut 84.5 -> 47.5: LOWER on the face path, the opposite of the small box. The direction is not the same everywhere.
 
+### Jobs B and C as LatticeReview asked for them (2026-11-25, 19:45; side build of bf4aa356 plus the test's own fixes)
+
+A 56 x 56 x 32 mm box ON the grid with one top edge chamfered (9 in, 7 down, about 38 degrees; the mesh importer joins faces under 35 degrees, so a shallower chamfer merges into the top). The chamfer is loaded (20 N) and carries a 1.3 mm protected skin; the lattice region is the top face, three 8 mm cells deep.
+
+| job | laid lattice | verdict | worst-case margin | what else moved |
+|---|---|---|---|---|
+| A (unchanged) | 480 / 480, identical | accepted / accepted | 790.5 -> 891.6 | as before |
+| B, regular cells: 126 cells credited, none without credit | 2,978 / 2,978 bars, bytes identical | pass / pass | 709.6 -> 933.6 | peak stress 0.0484 -> 0.0148 MPa; interlayer margin 24,573 -> 24,056; re-solve solid margin 735 -> 1,319. 7 of 20 values. |
+| C, the same with a weave | 7,692 / 7,692 bars, bar list identical | accepted / accepted | 618.2 -> 948.9 | weakest strut 888.7 -> 886.9 (the load is on the solid chamfer, not on the weave, so the frame's load rule hardly acts here). 87 of 477 values. |
+
+Reading: with the loaded face a real off-grid face, the peak stress beside it falls to a third (0.048 to 0.015 MPa) and the margin rises 32 to 54 %. Today's path, on a 38-degree face, tags a staircase of voxels and loads their exposed faces, sides included; the drawn-face path loads the chamfer's own area along its own outline. The earlier turned-box versions of B and C (above) stay on record: they are where the frame's load rule was seen to move the weakest strut both ways.
+
 ## Measured: the sideways lip (LatticeReview's question)
 
 A face that is PART of a flat side (a 20 x 20 mm patch in a 60 x 40 mm top; `test_to_true_loads`, table "[lip]"). Frozen voxels with their centre outside the prism under the patch:

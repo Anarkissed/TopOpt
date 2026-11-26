@@ -5,7 +5,7 @@
 //   A  a box on the grid, lattice from its whole top face to a depth that is a
 //      whole number of voxels, held on the whole bottom, loaded on the whole
 //      top. THE CONTROL: the switch should change nothing beyond rounding.
-//   B  a 56 x 56 x 32 mm box ON the grid with one top edge chamfered (about 31
+//   B  a 56 x 56 x 32 mm box ON the grid with one top edge chamfered (about 38
 //      degrees): the chamfer is the loaded face, with a protected skin 1.3 mm
 //      deep (not a whole number of voxels). The lattice region is the top face,
 //      three 8 mm cells deep, so whole cells exist and earn credit
@@ -81,10 +81,11 @@ TriangleMesh box(double L, double W, double H, const Turn& t) {
 }
 
 // A 56 x 56 x 32 mm box on the grid with one top edge cut off by a flat chamfer
-// (10 mm in, 6 mm down, about 31 degrees): every face lies on the grid except the
+// (9 mm in, 7 mm down, about 38 degrees: more than the 35 degrees at which the
+// mesh importer splits two faces, or the chamfer would join the top): every face lies on the grid except the
 // chamfer, which is the loaded face. Outward-facing triangles.
 TriangleMesh chamfered_box() {
-  const double L = 56, W = 56, H = 32, in = 10, down = 6;
+  const double L = 56, W = 56, H = 32, in = 9, down = 7;
   // The profile in x-z, counter-clockwise seen from -y.
   const double px[5] = {0, L, L, L - in, 0}, pz[5] = {0, 0, H - down, H, H};
   TriangleMesh m;
@@ -92,8 +93,8 @@ TriangleMesh chamfered_box() {
     for (int i = 0; i < 5; ++i) m.vertices.push_back({px[i], y ? W : 0.0, pz[i]});
   for (int i = 0; i < 5; ++i) {  // the five sides
     const int a = i, b = (i + 1) % 5;
-    m.triangles.push_back({a, b, b + 5});
-    m.triangles.push_back({a, b + 5, a + 5});
+    m.triangles.push_back({a, b + 5, b});
+    m.triangles.push_back({a, a + 5, b + 5});
   }
   for (int i = 1; i + 1 < 5; ++i) {  // the two ends, as fans
     m.triangles.push_back({0, i, i + 1});          // y = 0, normal -y
@@ -252,10 +253,10 @@ int main() {
   const Faces fa = faces("box.stl", none);
   Faces fb = faces("tilted.stl", none);
   {
-    // Job B's loaded face is the chamfer (normal (6, 0, 10) / 11.66).
+    // Job B's loaded face is the chamfer (normal (7, 0, 9) / 11.4).
     const StepModel m = import_part_file_resolved(kDir + "/tilted.stl");
-    const double n = std::sqrt(6.0 * 6.0 + 10.0 * 10.0);
-    fb.side = face_with_normal(m, {6.0 / n, 0.0, 10.0 / n});
+    const double n = std::sqrt(7.0 * 7.0 + 9.0 * 9.0);
+    fb.side = face_with_normal(m, {7.0 / n, 0.0, 9.0 / n});
     std::printf("chamfer face %d\n", fb.side);
   }
   if (fa.top < 0 || fa.bottom < 0 || fb.top < 0 || fb.bottom < 0 || fb.side < 0) {
