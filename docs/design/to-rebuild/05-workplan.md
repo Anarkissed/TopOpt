@@ -40,6 +40,8 @@ A2, 08:55: the automatic pad at strength 1.0 freezes 9526 voxels on the sample b
 
 09:30: #362's S1 has the lock since 08:46. Pad at 1.0 confirmed as the cause of the extra weight (stage 1 file); I stopped my own bracket run at 1.4 (pointless now); the sweep goes on with the beam and the hook at 3.0 / 1.0 / 1.4, and `sample_pad_low.out` with the bracket at 0.2 / 0.4. TOSurface told of the loose piece in the everything-on 0.26 version. Swap is near full (9.6 of 10 GB) from other jobs; my runs are under 100 MB each.
 
+13:10: QUEUED `b6_autopad_checks.sh` (waits for B1's `done`, or the file `b6_go`; lock): the stage 1 lattice check (jobs A to D) and the same-job-twice gate, each at the automatic pad and at a fixed 3 mm, on B1's build of the tip. Its table goes to LatticeReview and the reviewer; it is owed before the stage 1 flip. LatticeReview is re-running its own depth-key sweep on my tip (result about 15:15). #362's S1 still holds the lock (since 08:46). Owed to the maintainer when the Mac is free: one sample part at full detail with the smooth surface on, as a picture, for his question about lumps.
+
 A. Already agreed:
 - A1. Stage 1 report to the reviewer once the two lock runs are recorded (draft at the top of `stages/stage-1-true-loads.md`).
 - A2. The pad's one number: tables and PICTURES of the shapes around the fixed faces from the two sweeps; a recommended curve strength for him in the morning.
