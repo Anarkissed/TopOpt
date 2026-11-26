@@ -1187,6 +1187,25 @@ namespace {
 // weave's shallow struts and its feet as closed shells of their own from the same shapes, never joined.
 // The sides of a round strut, and of the ball, at a joint where a level bar meets a vertical one (StrutMaker::add).
 constexpr int kFineSides = 16;
+// PRINT RESOLUTION (MeshSpec::strut_facet_mm > 0): a round strut of radius r, and the ball at its joints: 8 sides when its
+// corners then lie no more than `facet_mm` outside the true round, its flat sides as near the centre as Full's (the
+// `full`-sided bar of the round's area), and its corners' radius over r. Else (or the bound 0): `full` sides of the
+// round's area, as at Full. Measured on core's fixtures and never used: 6 sides (the print check then found places that
+// start in mid-air at the joints: the fcc plate's 88, 160 struts left out), 10 (Manifold cuts a ten-segment ball as
+// finely as a twelve's: the octet plate came out at 97.6k triangles against Full's 88.0k).
+struct RoundSides { int sides; double corner; };
+RoundSides round_sides(double r, int full, double facet_mm) {
+  const double kPi = 3.14159265358979323846;
+  const double full_corner = std::sqrt(2.0 * kPi / (full * std::sin(2.0 * kPi / full)));
+  if (!(facet_mm > 0.0) || !(r > 0.0)) return {full, full_corner};
+  const double flat = full_corner * std::cos(kPi / full);   // Full's flat sides from the centre, over r
+  constexpr int n = 8;
+  if (n < full) {
+    const double corner = flat / std::cos(kPi / n);
+    if ((corner - 1.0) * r <= facet_mm) return {n, corner};
+  }
+  return {full, full_corner};
+}
 struct StrutMaker {
   const MeshSpec& spec;
   int SEG = 12, HALF = 6;
@@ -1279,8 +1298,13 @@ struct StrutMaker {
         const double l1 = std::sqrt(e1.x * e1.x + e1.y * e1.y + e1.z * e1.z);
         e1 = {e1.x / l1, e1.y / l1, e1.z / l1};
         const Vec3 e2{d.y * e1.z - d.z * e1.y, d.z * e1.x - d.x * e1.z, d.x * e1.y - d.y * e1.x};
-        const int sides = fine ? std::max(SEG, kFineSides) : SEG;
-        const double round = fine ? std::sqrt(2.0 * kPi / (sides * std::sin(2.0 * kPi / sides))) : kRound;
+        int sides = fine ? std::max(SEG, kFineSides) : SEG;
+        double round = fine ? std::sqrt(2.0 * kPi / (sides * std::sin(2.0 * kPi / sides))) : kRound;
+        if (!fine && spec.strut_facet_mm > 0.0) {   // PRINT RESOLUTION (Full: 0, nothing here)
+          const RoundSides rs = round_sides(r, SEG, spec.strut_facet_mm);
+          sides = rs.sides;
+          round = rs.corner;
+        }
         solids.push_back(Manifold::Cylinder(len + pa + pb, r * round, r * round, sides)
                              .Transform(manifold::mat3x4(mv(e1), mv(e2), mv(d), mv(a))));
       }
@@ -1580,7 +1604,8 @@ std::shared_ptr<CarvedSolids::SheetsMade> make_sheets(const Domain& domain, cons
       // contouring misses the sheet's own curve and the bounded simplifier refines what it left without end, and not
       // the same way twice (measured, gyroid in an 8 mm cell: at the open look's 1.65 mm wall a third of it is 0.55 mm,
       // 4k triangles contoured and 2k to 107k out for walls 0.003 mm apart; at 0.33 mm 12.7k in and 2.6k out, steady).
-      const double h = std::max(1e-3, std::min(f.wall_min_mm / 3.0, L / 24.0));
+      // (PRINT RESOLUTION: the two shares are MeshSpec's, 3 and 24 at Full.)
+      const double h = std::max(1e-3, std::min(f.wall_min_mm / spec.sheet_dc_wall_share, L / spec.sheet_dc_cell_share));
       // The block's own sheet runs this far past its box. The simplifier treats a sheet within three DC cells of the
       // block's cut as a crease and may move it there by up to half a DC cell (TpmsGenOptions, at_cut), so each block runs
       // far enough into its neighbour that what it keeps there is clear of its own crease, and the neighbour's crease
@@ -1918,6 +1943,9 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
         const int sides = std::max(SEG, kFineSides);
         const double round = std::sqrt(2.0 * kPi / (sides * std::sin(2.0 * kPi / sides)));
         solids.push_back(Manifold::Sphere(kv.second.r * round, sides).Translate(mv(kv.second.at)));
+      } else if (spec.strut_facet_mm > 0.0) {   // PRINT RESOLUTION (Full: 0, the ball as before)
+        const RoundSides rs = round_sides(kv.second.r, SEG, spec.strut_facet_mm);
+        solids.push_back(Manifold::Sphere(kv.second.r * rs.corner, rs.sides).Translate(mv(kv.second.at)));
       } else {
         solids.push_back(Manifold::Sphere(kv.second.r * kRound, SEG).Translate(mv(kv.second.at)));
       }

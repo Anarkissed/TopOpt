@@ -190,6 +190,18 @@ struct MeshSpec {
   // tests' RED, "the blend with no thickening"); the most it may be raised, mm (< 0: up to the touch).
   bool sheet_seam_raise = true;
   double sheet_seam_raise_cap_mm = -1.0;
+  // PRINT RESOLUTION (2026-11-25, lattice_layout_file.hpp PrintResolution): the sheets' contouring cell, the thinnest
+  // wall over `sheet_dc_wall_share` and never coarser than the cell over `sheet_dc_cell_share` (3 and 24: the file as
+  // before, byte for byte).
+  double sheet_dc_wall_share = 3.0;
+  double sheet_dc_cell_share = 24.0;
+  // PRINT RESOLUTION: 0 (the writer's own default, and Full's): every round strut and its joint balls `bar_sides` sides,
+  // the mesh as before. Above 0: a round strut of radius r (and the ball at its joints) gets 8 sides when its corners
+  // then lie no more than this outside the true round, its flat sides never nearer the centre than Full's (the
+  // `bar_sides` bar of the same area: so no strut prints thinner than at Full, two lines stay two lines); else
+  // `bar_sides`, as at Full. A bridge's square bar, a joint written fine (kFineSides), a weave's tubes and a post are
+  // never changed.
+  double strut_facet_mm = 0.0;
   // Set, the work is given up between its steps and LayCancelled is thrown.
   const std::atomic<bool>* stop = nullptr;
 };

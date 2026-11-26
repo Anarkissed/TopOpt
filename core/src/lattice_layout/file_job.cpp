@@ -1150,7 +1150,7 @@ FileJob parse_file_job(const std::string& json_text) {
     const std::string w = "job.json";
     json::as_object(doc, w);
     json::reject_unknown(doc, {"mode", "model", "output", "linear_deflection", "threads", "layout", "mesh", "demand",
-                               "strength_job", "tensor", "file_format", "strengthened", "print_frame"},
+                               "strength_job", "tensor", "file_format", "strengthened", "print_frame", "print_resolution"},
                          w);
     const std::string mode = json::as_string(json::require(doc, "mode", w), w + ".mode");
     if (mode != "lattice_file") json::fail(w + ".mode", "must be \"lattice_file\", not \"" + mode + "\"");
@@ -1274,6 +1274,18 @@ FileJob parse_file_job(const std::string& json_text) {
     }
     job.options.threads = whole(doc, "threads", 0, w);
     if (job.options.threads < 0) json::fail(w + ".threads", "must be 0 (every core) or more");
+    // PRINT RESOLUTION (his 11-25): "full" | "medium" | "coarse"; not given: full, the job as before. An Organic (weave)
+    // job is made at full only.
+    if (json::find(doc, "print_resolution")) {
+      const std::string id = text(doc, "print_resolution", "", w);
+      if (!print_resolution_from_id(id, job.resolution))
+        json::fail(w + ".print_resolution", "must be \"full\", \"medium\" or \"coarse\", not \"" + id + "\"");
+      bool weave = false;
+      for (const Settings::RegionAsk& r : job.settings.regions) weave = weave || r.weave;
+      if (weave && job.resolution != PrintResolution::Full)
+        json::fail(w + ".print_resolution", "an Organic lattice is made at full detail only");
+      apply_print_resolution(job.resolution, job.options);
+    }
     return job;
   } catch (const FileJobError&) {
     throw;
@@ -1523,6 +1535,16 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
       }
       r.sheets = made_from->sheets;
       r.sheet_seams = r.made.sheet_seams.size() == out.sheet_seams.size() ? r.made.sheet_seams : out.sheet_seams;
+    }
+    // PRINT RESOLUTION (his 11-25): the three levels' sizes, from the layout alone (a cell lattice's; an Organic job is made
+    // at full only). ★ notes30 M1 (the merge with E's Blend): read on the layout the file was made of, once make_file_mesh
+    // has decided each Blend seam (the membrane where one fell back), so the estimate and the file are the same lattice.
+    r.resolution = job.resolution;
+    if (weave_regions.empty()) {
+      const PrintSizeInputs in = print_size_inputs(made_from->layout, made_from->bars, made_from->sheets, r.part_triangles,
+                                                   options);
+      for (int k = 0; k < 3; ++k) r.estimates[k] = estimate_print_size(in, kPrintResolutions[k]);
+      r.sized = true;
     }
     if (!r.made.mesh.ok || mesh.empty()) {
       refuse(r, kMeshFailed,
@@ -2061,6 +2083,25 @@ std::string file_result_json(const FileResult& r) {
                   count(sm.sheet_blocks), count(sm.sheet_triangles), sm.sheet_mm3, sm.sheet_deviation_mm, sm.ms_sheets,
                   sm.ms_sheet_union, count(sm.seams_blended), count(sm.seams_fell_back));
     o += b;
+  }
+  // PRINT RESOLUTION (his 11-25): the level made, and each level's resolution and size estimate (written for a cell
+  // lattice that was laid; else the report is as it was).
+  if (r.sized) {
+    o += std::string("  \"print_resolution\": {\"level\": \"") + print_resolution_id(r.resolution) + "\", \"levels\": [";
+    for (int k = 0; k < 3; ++k) {
+      const PrintResolutionLevel p = print_resolution_level(kPrintResolutions[k]);
+      const PrintSizeEstimate& e = r.estimates[k];
+      const double ms = print_size_ms(r, kPrintResolutions[k]);
+      char t[64] = "null";
+      if (ms >= 0.0) std::snprintf(t, sizeof t, "%.0f", ms);
+      std::snprintf(b, sizeof b,
+                    "%s{\"level\": \"%s\", \"name\": \"%s\", \"words\": \"%s\", \"surface_mm\": %.6g, \"triangles\": %llu, "
+                    "\"stl_bytes\": %llu, \"threemf_bytes\": %llu, \"ms\": %s}",
+                    k ? ", " : "", print_resolution_id(p.level), p.name, p.words, p.surface_mm, count(e.triangles),
+                    static_cast<unsigned long long>(e.stl_bytes), static_cast<unsigned long long>(e.threemf_bytes), t);
+      o += b;
+    }
+    o += "]},\n";
   }
   std::snprintf(b, sizeof b, "  \"part\": {\"faces\": %d, \"triangles\": %llu, \"open_edges\": %llu},\n",
                 r.faces, count(r.part_triangles), count(r.open_edges));

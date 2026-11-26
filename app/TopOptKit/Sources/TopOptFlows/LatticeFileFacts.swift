@@ -147,6 +147,9 @@ public struct LatticeFileFacts: Equatable, Sendable {
     public var strengthening: Strengthening?
     /// ★ notes25 C3: the struts the final check found short of the margin (`struts.under_safety`).
     public var strutsShort: Int? = nil
+    /// ★ his 11-25 (print resolutions when exporting): the report's three levels, each with its resolution line and size; nil
+    /// for a report that has none (an Organic file, or one made before them).
+    public var resolutions: PrintResolutionFacts? = nil
 
     /// A Lattice run's report (it has `layout` and `mesh`), else nil.
     public static func decode(_ r: [String: Any]) -> LatticeFileFacts? {
@@ -178,7 +181,8 @@ public struct LatticeFileFacts: Equatable, Sendable {
             passesAtInfill: (solid["passes_at_infill_percent"] as? NSNumber)?.intValue,
             loadOnStruts: (frame["load_share"] as? NSNumber)?.doubleValue,
             strengthening: strengthening(r[LatticeFileButton.strengthenKey] as? [String: Any]),
-            strutsShort: (struts["under_safety"] as? NSNumber)?.intValue)
+            strutsShort: (struts["under_safety"] as? NSNumber)?.intValue,
+            resolutions: PrintResolutionFacts.decode(r))
     }
 
     static func strengthening(_ o: [String: Any]?) -> Strengthening? {

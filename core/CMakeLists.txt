@@ -190,6 +190,8 @@ add_library(topopt
   # The lattice file job (docs/design/lattice-rebuild/04-layout-file-job.md): job.json ->
   # layout -> mesh -> STL. `topopt-cli lattice-file` is its only caller in core.
   src/lattice_layout/file_job.cpp
+  # His 11-25: print resolutions when exporting (Full / Medium / Coarse) and each one's size estimate, from the layout.
+  src/lattice_layout/print_resolution.cpp
   # His print orientation (P2): "rotate at the door", every input of a job turned once so up is +Z (print_frame.hpp).
   src/lattice_layout/print_frame.cpp
   # His print orientation (P4): the six candidates, their guessed strength, support, height and bed (print_orientation.hpp).
@@ -2412,6 +2414,15 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
       SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
       TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME lattice_sheets_strength COMMAND test_lattice_sheets_strength)
+    # His 11-25: print resolutions when exporting (Full / Medium / Coarse). Full is today's file byte for byte (every strut
+    # type and both sheets, pinned); Medium and Coarse print-clean, no strut or wall thinner; the layout's size estimate
+    # within its stated error; each with its RED control.
+    add_executable(test_print_resolution tests/validation/test_print_resolution.cpp)
+    target_link_libraries(test_print_resolution PRIVATE topopt)
+    target_compile_definitions(test_print_resolution PRIVATE
+      FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
+      TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME print_resolution COMMAND test_print_resolution)
     # His print orientation (P2): "rotate at the door". The same job with up = +X makes the same file and report as a
     # copy of everything turned by hand; each input left unturned is caught (print_frame.hpp).
     add_executable(test_print_frame tests/validation/test_print_frame.cpp)
