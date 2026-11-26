@@ -266,20 +266,28 @@ StepModel import_step_file(const std::string& path,
   if (model.mesh.empty())
     throw StepError("STEP tessellation produced no triangles: " + path);
   // TO rebuild stage 3 (ledger I-02): the drawn part's own triangles become the
-  // print file's drawn faces, so with the switch on a second copy is made to the
-  // 0.02 mm target (0.01 mm chord, 0.1 rad) for the export's cut only; the grid,
-  // the tags and the loads keep `mesh`. Kept only when it is watertight.
+  // print file's drawn faces, so with the switch on the part is meshed to the
+  // 0.02 mm target (0.01 mm chord, 0.1 rad) -- and that ONE mesh makes the grid, the
+  // tags, the loads and the export's cut. Two meshes disagreed where it shows: a
+  // 0.1 mm chord lies up to 0.1 mm inside a bolt hole, so a loaded voxel whose
+  // centre sat in that sliver was solid in the solve and empty in the finished
+  // file's re-check, and the load landed on nothing (his Top Motor Mount at 64,
+  // stage 1 + 3: every version refused, "the file could not be re-checked").
+  // Kept only when it is watertight.
   if (to_surface_on() && tess.linear_deflection > 0.01) {
     BRepTools::Clean(shape);
     Tessellated tf = tessellate(shape, 0.01, std::min(0.1, tess.angular_deflection));
     (void)drop_repeated_index_triangles(tf);
-    if (!tf.mesh.empty() && check_watertight(tf.mesh).watertight) {
-      model.export_mesh = std::move(tf.mesh);
-      model.export_triangle_face = std::move(tf.triangle_face);
+    // The import's own rule for a mesh that replaces the first one: closed, oriented,
+    // positive volume, every face that had a triangle keeps one (its tags ride on it).
+    const std::set<int> wanted(model.triangle_face.begin(), model.triangle_face.end());
+    if (repair_accepted(tf, wanted)) {
+      model.mesh = std::move(tf.mesh);
+      model.triangle_face = std::move(tf.triangle_face);
     }
     else
-      std::fprintf(stderr, "[step] the 0.01 mm copy is not watertight; the export cuts "
-                           "with the 0.1 mm mesh (%s)\n", path.c_str());
+      std::fprintf(stderr, "[step] the 0.01 mm copy is not closed or lost a face; the part keeps "
+                           "the 0.1 mm mesh (%s)\n", path.c_str());
   }
   return model;
 }

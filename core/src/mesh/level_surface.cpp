@@ -500,24 +500,32 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
             }
         if (stamped) (full ? st_solid : st_void)[c] = 1;
       }
-  // A stamped-solid region on the drawn surface reaches two voxels past it, so the
-  // cut by the drawn part, not the voxel, makes that face.
-  for (int pass = 0; pass < 2; ++pass) {
-    std::vector<char> grow = st_solid;
-    for (int kz = 0; kz < nz; ++kz)
-      for (int j = 0; j < ny; ++j)
-        for (int i = 0; i < nx; ++i) {
-          const std::size_t c = (static_cast<std::size_t>(kz) * ny + j) * nx + i;
-          if (st_solid[c] || sg.tags[c] != VoxelTag::Empty) continue;
-          const int d[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
-          for (const auto& e : d) {
-            const int a = i + e[0], b = j + e[1], cc = kz + e[2];
-            if (a < 0 || b < 0 || cc < 0 || a >= nx || b >= ny || cc >= nz) continue;
-            if (st_solid[(static_cast<std::size_t>(cc) * ny + b) * nx + a]) { grow[c] = 1; break; }
+  // A stamped region on the drawn surface reaches two voxels past it, so the cut by
+  // the drawn part, not the voxel, makes that face. Both kinds: a stamped VOID that
+  // stopped at its own 0.5 level would leave a skin of the function between it and
+  // the drawn face -- where a bolt's Keep clear meets the drawn bolt hole, that skin
+  // closes the clearance off (his stand, stage 1 + 3: "A Keep clear is sealed inside
+  // the part"); carried past the face, the clearance opens where the voxels open it.
+  auto grow_past_drawn_faces = [&](std::vector<char>& set) {
+    for (int pass = 0; pass < 2; ++pass) {
+      std::vector<char> grow = set;
+      for (int kz = 0; kz < nz; ++kz)
+        for (int j = 0; j < ny; ++j)
+          for (int i = 0; i < nx; ++i) {
+            const std::size_t c = (static_cast<std::size_t>(kz) * ny + j) * nx + i;
+            if (set[c] || sg.tags[c] != VoxelTag::Empty) continue;
+            const int d[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+            for (const auto& e : d) {
+              const int a = i + e[0], b = j + e[1], cc = kz + e[2];
+              if (a < 0 || b < 0 || cc < 0 || a >= nx || b >= ny || cc >= nz) continue;
+              if (set[(static_cast<std::size_t>(cc) * ny + b) * nx + a]) { grow[c] = 1; break; }
+            }
           }
-        }
-    st_solid.swap(grow);
-  }
+      set.swap(grow);
+    }
+  };
+  grow_past_drawn_faces(st_solid);
+  grow_past_drawn_faces(st_void);
   // The stamped sets as smooth fields: each set's 0/1 indicator interpolated by
   // the Catmull-Rom tricubic today's export uses on the fill (mesh.cpp), level
   // 0.5, scaled by h so its slope is about one, like a distance. Only what a run
@@ -611,25 +619,6 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
   R.mesh_s = ls.seconds;
   if (S.triangles.empty()) return fail(ls.used_manifold ? "the function has no solid"
                                                         : "this build has no Manifold");
-  // The slope of phi at the surface (the band rule 4 of the stage asks for).
-  {
-    std::vector<double> sl;
-    sl.reserve(S.vertices.size());
-    for (std::size_t q = 0; q < S.vertices.size(); q += 7) {
-      const Vec3& p = S.vertices[q];
-      double g[3];
-      const double ph = plsm_value_grad(L, B, alpha, (p.x - o.x) / h - 0.5,
-                                        (p.y - o.y) / h - 0.5, (p.z - o.z) / h - 0.5, g);
-      if (std::fabs(ph) > 0.01) continue;  // a vertex of a frozen set, not of phi
-      sl.push_back(std::sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]) / h);
-    }
-    if (!sl.empty()) {
-      std::sort(sl.begin(), sl.end());
-      R.slope_min = sl.front();
-      R.slope_median = sl[sl.size() / 2];
-      R.slope_max = sl.back();
-    }
-  }
   // 3) Cut by the drawn part: the drawn faces come from the part itself.
   const auto t1 = std::chrono::steady_clock::now();
   std::string w;
@@ -691,6 +680,28 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
     std::fprintf(stderr, "[surface debug] final (%d unpinched): as written: open %d, 3+ %d, "
                  "point %d, bodies %d\n", R.unpinched, a.boundary_edges, a.non_manifold_edges,
                  a.non_manifold_vertices, a.bodies);
+  }
+  // The slope of phi at the surface (the band rule 4 of the stage asks for), where it
+  // is PRINTED: on the file's own corners, so the part of phi's zero set that the cut
+  // by the drawn part throws away (outside the part, where phi is only carried across
+  // the faces) does not count.
+  {
+    std::vector<double> sl;
+    sl.reserve(out.vertices.size());
+    for (std::size_t q = 0; q < out.vertices.size(); q += 7) {
+      const Vec3& p = out.vertices[q];
+      double g[3];
+      const double ph = plsm_value_grad(L, B, alpha, (p.x - o.x) / h - 0.5,
+                                        (p.y - o.y) / h - 0.5, (p.z - o.z) / h - 0.5, g);
+      if (std::fabs(ph) > 0.01) continue;  // a vertex of a frozen set, not of phi
+      sl.push_back(std::sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]) / h);
+    }
+    if (!sl.empty()) {
+      std::sort(sl.begin(), sl.end());
+      R.slope_min = sl.front();
+      R.slope_median = sl[sl.size() / 2];
+      R.slope_max = sl.back();
+    }
   }
   R.triangles = static_cast<long long>(out.triangles.size());
   return out;
