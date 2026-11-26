@@ -3,7 +3,7 @@
 Branch `claude/topopt-stage-5-faster-solves-8df866`, from 2b40bcf4. CURRENT STATE (2026-11-26 ~04:00 EST, overnight; the maintainer approved tonight's list A-D directly, ~03:45 EST, "All are approved"; the list and its results: agent-scratch/tosolver/OVERNIGHT.md):
 - History rewritten 2026-11-25 (the maintainer's direct OK to force-push): TOReview's commit 0ee02fda had put 29 copyrighted PDFs under docs/design/to-rebuild/papers/; the branch was rebuilt on e93dc741 with TOReview's cleaned 05f33677 (merge 78084190), cddaad04 -> 74e90f30, force-pushed with a lease on cddaad04. The PDFs stay on this worktree's disk, untracked: add files by name only, never a directory under docs/design/to-rebuild.
 - Committed b9f53d5b (pushed): E-01 phase 1 + S-05 + B-06 B3 with their four new tests; build + 24 tests green under the lock (measureE, 11-26 03:31).
-- Merged TOReview's tip ae438e73 (3eecfe9d). E-01 phase 2 applied on top (25 added lines, settings only), built and tested OUTSIDE the lock (his yes, item A: builds and tests under ~15 min, -j2, memory check); committed once green, then the same-bytes check on the stand at res 64 against a build of ae438e73 (agent-scratch/tosolver/samebytes.sh).
+- Merged TOReview's tip ae438e73 (3eecfe9d). E-01 phase 2 committed 6dd4d9ab (25 added lines, settings only; built and tested OUTSIDE the lock, his yes, item A: 24 tests green). SAME-BYTES CHECK PASSED (11-26 04:55): the stand at res 64 (job 6d9b535f, read in place) with 6dd4d9ab against a build of ae438e73: variant_068.stl and variant_068_alpha.f64 identical, iterations.csv identical outside its timing columns (compliance, volume, CG iterations, multigrid flags). Script: agent-scratch/tosolver/samebytes.sh.
 - Queues: requeue.sh (measureB replays, mem.sh, measureC timings, measureD switch sweep), then queue2.sh (the five test shapes, the reference table today and with the chosen smoother, the coarse warm-start levers). The lock is left empty 4 minutes after each of my holds (TOReview, 11-26).
 - Side hustle: plan in section 4; the switch (fixed K and `switch=auto`) and the five test shapes are written in scratch and green; numbers from the sweep and the memory check fill it. His yes (B): into this branch, off by default, only if it passes the ship bar.
 - Written ahead for the reviewer (his yes, D; scratch only until ruled): the connection rule "anchored = reaches a support" and E-01 phase 2b, each with a green test (below).
@@ -171,13 +171,13 @@ Measured next (queued): the REAL switch replayed on every reference dump at K = 
 | (filled from run_ref.sh: today and the chosen TOPOPT_SOLVER setting) | | | | | | |
 
 ### Tests moved from failing to passing
-- New: to_solver_bridge_way (12), to_solver_smoother (74, three settings each of per-level Jacobi and Chebyshev, converge on multigrid without the l1 retry); to come with their patches: to_solve_threads (S-05), to_solver_reduced_apply (B-06), to_solver_settings and to_solver_run_state (E-01).
+- New: to_solver_bridge_way (12), to_solver_smoother (74, three settings each of per-level Jacobi and Chebyshev, converge on multigrid without the l1 retry); with b9f53d5b: to_solve_threads (6, S-05: identical bytes at 1/3/6 threads), to_solver_reduced_apply (6, B-06: the reduced product equals the full-length one byte for byte), to_solver_settings (5) and to_solver_run_state (4) (E-01: a passed setting reaches the solve and leaks nowhere; two runs' states stay apart). E-01 phase 2 (6dd4d9ab): the same 24 tests green, test_simp's 198 checks included.
 - Today's solver on his parts: the shipped V-cycle diverges on solves 1-3 and latches; with the stage-5 smoother it carries every solve measured (replays, all reference dumps: to fill).
 
 ### The open choices, settled with their settings
 - Smoother (B-05): damped Jacobi F/lambda at F = 1.0 / 1.333 / 1.6 against 4th-kind Chebyshev K = 2 / 3 / 4, on every reference dump (to fill from measureB). The stall rule: 1,000 cycles, then 2x per 500 (measured on Top Motor Mount, commit 49f28890).
 - Element product (B-06): stored dofs (today, full-length copies) / reduced numbering with a spare slot (B2, B3) / grid stencil (C), at 1 / 3 / 6 threads (to fill from measureC).
-- Single precision (section K): FP32 against FP64 cycle, same iterations; keep only at >= 15 % solve wall (to fill from measureC).
+- Single precision (section K): FP32 against FP64 cycle, same iterations; keep only at >= 15 % solve wall (to fill from measureC). The FP32 cycle had no Chebyshev (mixed was refused whenever Chebyshev was selected), so it is measured with the same smoother: an FP32 Chebyshev written in scratch (agent-scratch/tosolver/fp32/, a 75-line diff to multigrid.cpp; test test_to_solver_fp32_cheb, 10 checks green: cheb:2 13 cycles in both precisions, energy diff 6.6e-12) and timed on every reference dump (fp32time.sh). It goes into the tree only if FP32 is kept.
 
 ### Refused, and the rule
 - (none so far)
