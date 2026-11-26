@@ -89,6 +89,26 @@ Reading:
 3. Every reading over 1.8 mm or more, with real or middle stiffness, reads 10 to 32 % under the textbook PEAK on the plate. That is what an average over a length does by design: the critical-distance method says the average, not the peak, is what breaks the part, so against the peak it must read low. The bar (measured against the peak) and the reading over a material length (the maintainer's decision, from the research) therefore cannot both hold on these cases. This is a conflict between a ruling and a decision, not a tuning problem, and it goes back to the reviewer and the maintainer before more is built.
 4. The longer the reading, the steadier it is across resolutions (2 to 8 % at 3.6 mm) and the lower it reads. Steadiness and "never low against the peak" pull opposite ways.
 
+## The reading's own true value (for the reviewer's choice between the two references)
+
+`stages/reference_reading.py` takes the same ball average on the EXACT textbook solutions. What a reading over a size should give, against the peak:
+
+| case | peak | over 0.9 mm | over 1.8 mm | over 3.6 mm |
+|---|---|---|---|---|
+| plate with a hole | 3.03 | 2.81 | 2.62 | 2.26 to 2.31 |
+| ring under pressure | 2.333 | 2.21 | 2.10 | 1.89 to 1.91 |
+
+Measured with real stiffness (E x fill), at hole radius 3 / 4 / 5 / 6 voxels (voxel 2.0 / 1.5 / 1.2 / 1.0 mm), against THAT value:
+
+| case, size | measured | miss from the reading's true value |
+|---|---|---|
+| plate, 1.8 mm | 2.476 / 2.631 / 2.498 / 2.534 | -5.5 / +0.4 / -4.7 / -3.3 % |
+| plate, 3.6 mm | 2.063 / 2.075 / 2.115 / 2.224 | -10.5 / -9.5 / -7.0 / -1.6 % |
+| ring, 1.8 mm | 2.164 / 2.199 / 2.097 / 2.033 | +2.9 / +4.5 / -0.3 / -3.4 % |
+| ring, 3.6 mm | 1.811 / 1.810 / 1.848 / 1.843 | -5.0 / -4.9 / -2.4 / -2.3 % |
+
+So judged against what the reading is meant to measure, real stiffness with a 1.8 mm reading is within 5.5 % on the plate and 4.5 % on the ring at every resolution, including two where the voxel is larger than or close to the size; the 3.6 mm reading is up to 10 % low on the plate at the coarse end and within 2 % at the fine end. Against the PEAK the same numbers read 10 to 32 % low, which is the average doing its job. This is the case for reference (ii).
+
 ## Written so far (ahead of the gate; all behind `TOPOPT_STRENGTH`, default = today; reviewer's ruling on the shared certificate still asked)
 
 | step | what | where | state |
