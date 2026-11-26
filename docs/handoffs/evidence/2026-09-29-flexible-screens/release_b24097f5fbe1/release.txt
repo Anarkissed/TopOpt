@@ -1,0 +1,54 @@
+# Release b24097f5fbe1 - 2026-11-25: release (21) - claude/organic-1 f1233f34, one worker swap (674a527b22a4 -> b24097f5fbe1)
+# Commits:
+#   5f5a93c0 Lattice per-type quilt limits (notes29): where each strut type becomes a quilt, measured; Allow quilt off never past it
+#   febff2dc Lattice: no holes in a region, an even outline (notes29)
+#   df8c110f App (notes29): the Density dial's 100 % is the type's own quilt; past the open look with Allow quilt off is refused
+#   25c190d2 Merge claude/notes29-quilt (builder N2): Allow quilt off truly off, per-type quilt limits measured, no holes, an even outline, the Density dial per type
+#   13007220 Notes29 (his notes on release 20 + his review of the first clips): the regular lattice built on screen; Organic 8 s; Skip all animations
+#   64764d26 Notes29: his pick after the clips — "Let's go with 7 seconds for ALL animations. It looks great!"
+#   1aa587a2 notes29 P8 core: a lay made in the print frame comes back in the model frame (turn_outcome_to_model, turn_preview_to_model)
+#   a02260e8 notes29 P8 app: the Organic preview stands on the face he kept, as the print file does, and is drawn in the part's own coordinates
+#   2f4c4078 Merge claude/organic-1 25c190d2 into claude/notes29-organic-turn (builder N2's quilt work); no conflicts
+#   40600338 notes29 N1 (his iPad notes on release 20): one (i) in a centred notification, five words under every Lattice setting, equal type cards, Skin off on Structural, Allow quilt off, the projection on the sample and the cube
+#   0051c1bd Merge claude/notes29-ui 40600338 (builder N1): one (i) app-wide opening the centred notification, captions of five words, equal type cards, Skin off on Structural, Allow quilt off by default, projection everywhere
+#   7ec320e9 Lattice per-type quilt limit (notes29b): Allow quilt off stops one printed line short of each type's quilt, not at the open look
+#   0e0a4196 Lattice (notes29b): Small cells in thin walls is its own thing again, thin walls only, never past the quilt limit
+#   fc137ae6 App (notes29b): the Density dial stops just under each type's quilt with Allow quilt off; Small cells in thin walls on offer again
+#   ca4e04dc Merge origin/claude/organic-1 0051c1bd (builder N1, notes29 UI) into claude/notes29-quilt-fuse
+#   3c22d748 Merge claude/notes29-organic-turn (builder H1): the Organic preview grows along the kept print up (P8)
+#   f203dea6 notes29 (H2): cell-lattice print files as 3MF; one in-process solve at a time
+#   b5b1d9a6 App tests (notes29b): the Grade box's stop is read on the octet, whose strength law reaches past its limit
+#   62053519 Merge origin/claude/organic-1 3c22d748 (builder H1, P8: the Organic preview grows along the kept print up) into claude/notes29-quilt-fuse
+#   28fffa15 Merge claude/notes29-quilt-fuse 62053519 (builder N2b): with Allow quilt off the limit is each type's fusing point (one printed line of air), Small cells in thin walls is its own switch
+#   a89e1859 Notes29: decorative TimelineViews keep ticking; their clock is held still with Skip all animations
+#   d21c57b1 Merge claude/notes29-anim a89e1859 (builder N3): the lattice build timelapse, 7 s for all animations, Skip all animations
+#   c8bfa22a Merge remote-tracking branch 'origin/claude/organic-1' into claude/notes29-3mf-gate
+#   25196bec notes29 H3 core test: a cell lattice laid through the print file's door and turned back is the file's own lay, end for end
+#   78b39753 notes29 H3 app: the cell lattices' preview stands on the face he kept, as their print file does, drawn in the part's own coordinates
+#   d8b8cf3e Merge origin/claude/organic-1 d21c57b1 (N2b quilt limit, N3 animations) into claude/notes29-cells-turn (builder H3)
+#   3163bb97 notes29 H3 app: the build timelapse (N3, now merged) rises along the kept face's up for a cell lattice laid standing on it
+#   5dabe60b Merge claude/notes29-cells-turn 3163bb97 (builder H3): the cell-lattice preview stands on the kept print up, as its print file does
+#   14c22fe5 Merge remote-tracking branch 'origin/claude/organic-1' into claude/notes29-3mf-gate
+#   2d992a91 notes29 (H2): re-pin H3's cell-turn test to the 3MF print file
+#   c71e7358 Merge claude/notes29-3mf-gate 2d992a91 (builder H2): cell-lattice print files are 3MF with painted supports; one in-process solve at a time
+#   f1233f34 Notes26SampleHostedTests: the sample's (i) stays up with the switch under notes29's taller Structural panel
+#   c2f0611f Release (21): his iPad notes on release 20 (notes29): one (i) and five-word captions, the quilt limit per type, the build timelapse at 7 s, Skip all animations, the lattice preview on the kept print up
+# Gates (this tree):
+#   21:56 his uncommitted files (left alone): app/TopOpt-Info.plist app/TopOpt.xcodeproj/project.pbxproj app/TopOpt.xcodeproj/xcshareddata/xcschemes/TopOpt.xcscheme 
+#   21:56 preflight job: /Users/nadim/.topopt-worker/d5af229ca8ee4a8f (his newest optimisation job the installed worker passes; read only)
+#   21:56 merged organic-1 as c2f0611f (local, not pushed); app + core + tools == its; fingerprint b24097f5fbe1
+#   ==> Manifold: /Users/nadim/dev/TopOpt/TopOpt/.vcpkg/installed-manifold (KEEP regions exported exactly)
+#   ==> building macOS slice (Eigen + OCCT, arm64)
+#   ==> building iOS simulator slice (Eigen + OCCT + lib3mf, arm64)
+#   ==> building iOS device slice (Eigen + OCCT + lib3mf, arm64)
+#   21:58 build_core green: topopt_vendored_core_b24097f5fbe1 + the Install 3 entry points + lay_organic_preview and Session::sweep_limits in every slice and arch
+#   21:59 worker CLI built: topopt-cli: core b24097f5fbe1 (dirty=false), built Nov 25 2026 21:59:29; 3 data paths, all under the release worktree
+#   22:19 core suites passed: 100% tests passed out of 31 Total Test time (real) = 1134.90 sec 
+#   22:26 iPad device build green (unsigned gate build; he installs with play)
+#   22:26 preflight on his job: preflight: load path CONNECTED
+#   22:27 pushed c2f0611f
+#   22:27 worker script unchanged (release 11's)
+#   22:27 restarting the worker server (PID 4221; /health said "fingerprint": "b24097f5fbe1") while idle, so it runs the new script
+#   22:27 worker swapped: /health "fingerprint": "b24097f5fbe1"; data paths under the release worktree; preflight again OK; old CLI kept as build-fix/topopt-cli.674a527b22a4-replaced-20261125
+#   22:27 route, demand, strength_job, organic cut 2 and chain tests vs the INSTALLED script, job_stage and orientation_recheck: ALL PASS
+#   22:27 the app_release scripts now expect b24097f5fbe1
