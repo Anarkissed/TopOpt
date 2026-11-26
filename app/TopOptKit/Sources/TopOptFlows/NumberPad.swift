@@ -211,7 +211,9 @@ struct NumberPad: View {
     static var height: CGFloat { inset * 2 + headerHeight + gap + displayHeight + gap + keyHeight * 4 + gap * 3 }
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    /// ★ notes29: Reduce Motion, or Settings › Skip all animations.
+    private var reduceMotion: Bool { systemReduceMotion || AppSettings.skipAllAnimations }
     @State private var entry: NumberPadEntry
     @State private var caretOn = true
     @ScaledMetric(relativeTo: .title2) private var numberSize: CGFloat = 24

@@ -49,7 +49,9 @@ struct PlayTimeline: View {
     var enabled = true
     var clock = PlayTimelineClock()
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    /// ★ notes29: Reduce Motion, or Settings › Skip all animations.
+    private var reduceMotion: Bool { systemReduceMotion || AppSettings.skipAllAnimations }
     @State private var playing = false
     @State private var trackWidth: CGFloat = 1
 

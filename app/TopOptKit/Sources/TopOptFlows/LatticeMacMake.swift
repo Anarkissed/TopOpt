@@ -368,7 +368,7 @@ struct LatticeMacMakeBar: View {
     var body: some View {
         TimelineView(.animation) { ctx in
             Canvas { g, size in
-                let t = ctx.date.timeIntervalSinceReferenceDate
+                let t = AppSettings.animationClock(ctx.date)   // ★ notes29: held still with Skip all animations
                 let track = Path(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: size.height / 2)
                 g.fill(track, with: .color(DS.Color.textPrimary.opacity(0.12).color))
                 let w = size.width * 0.3
@@ -413,7 +413,7 @@ struct LatticeMacMakeCells: View {
 
     var body: some View {
         TimelineView(.animation) { ctx in
-            Canvas { g, size in Self.draw(g, size: size, t: ctx.date.timeIntervalSinceReferenceDate) }
+            Canvas { g, size in Self.draw(g, size: size, t: AppSettings.animationClock(ctx.date)) }   // ★ notes29
         }
     }
 
@@ -520,7 +520,7 @@ struct LatticeMacMakeVines: View {
     var body: some View {
         TimelineView(.animation) { ctx in
             Canvas { g, size in
-                let t = ctx.date.timeIntervalSinceReferenceDate
+                let t = AppSettings.animationClock(ctx.date)   // ★ notes29: held still with Skip all animations
                 let cycle = 6.0
                 let phase = (t.truncatingRemainder(dividingBy: cycle)) / cycle          // 0 → 1, then again
                 let grow = min(1, phase / 0.8)                                            // grows for 80 %, then fades
