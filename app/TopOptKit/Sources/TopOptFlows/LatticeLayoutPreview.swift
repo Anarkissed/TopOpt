@@ -393,7 +393,15 @@ public final class LatticeLayoutPreview: ObservableObject {
         // ★ notes30: a Live preview lay does none of it: the last lattice stays exactly as it is, no card, until this one lands
         if quiet { build.stop(); refresh.end() }
         else {
-            if !isOrganic || AppSettings.skipAllAnimations { build.layBegins() } else { build.stop() }
+            // ★ notes30 (his 11-26): "on fast parts, it runs as it is now - and on slow parts it runs with the scaffolding" —
+            // decided here from this part's last lay (or, a first lay, its size and cells); the solid view's walls come off floor
+            // by floor (X-ray: none); the switch armed for a strut lay (a lay still working a second after the ask: the scaffold)
+            if !isOrganic || AppSettings.skipAllAnimations {
+                let arms = Self.armsScaffold(organic: isOrganic, quiet: quiet, skip: AppSettings.skipAllAnimations)
+                let plan = arms ? buildPlan(path: path, s, sheet: LatticeSheets.isSheet(p.lattice.topologyID))
+                                : LatticeBuildTimelapse.Plan(scaffold: false, expectedS: nil)
+                build.layBegins(walls: solid && !isOrganic, scaffold: plan.scaffold, mayScaffold: arms, expectedS: plan.expectedS)
+            } else { build.stop() }
             refresh.begin(refreshSteps(organic: isOrganic, path: path, up: Self.printUp(p),
                                        sheet: LatticeSheets.isSheet(p.lattice.topologyID)))   // ★ notes30: a sheet's own words
         }
@@ -825,6 +833,11 @@ public final class LatticeLayoutPreview: ObservableObject {
                 return
             }
             organicQuality = nil; organicNumbers = nil
+            // ★ notes30 (his 11-26, "open up the walls first"): the rough cut-open of the lattice's area and the scaffold on it,
+            // made before the lay (a coarse map of the domain's "where", on the domain the lay then keeps) — for a slow lay now,
+            // for a quick one in case it is still working a second after the ask
+            if build.wantsRough { await roughCut(session, s) }
+            guard !Task.isCancelled else { return }
             t0 = Date()
             let r = try await session.lay(s)
             guard !Task.isCancelled else { return }
@@ -2265,7 +2278,70 @@ extension LatticeLayoutPreview {
     func buildMeets(_ now: LatticeLayoutBarsInputs?, after old: LatticeLayoutBarsInputs?) {
         guard now?.token != old?.token else { return }
         guard let n = now else { build.stop(); return }
-        build.landed(token: n.token)
+        // ★ notes30: the frame from the landed lattice's box when none is fixed yet (the fast path), along the face he kept
+        let box = build.frame == nil ? LatticeLayoutBarsPass.box(n.bars) ?? n.sheets.flatMap(LatticeLayoutBarsPass.sheetBox) : nil
+        build.landed(token: n.token, box: box, printUp: n.printUp)
+    }
+
+    // MARK: ★ notes30 — fast parts as stand-solid-7s, slow parts with the scaffold (his 11-26)
+
+    /// ★ notes30: whether a lay may get the scaffold: a strut (or sheet) lay on screen with its animations — never Organic (its
+    /// own growth: his "I would much rather two different animations"), never a Live preview lay (quiet: no animation at all),
+    /// never with Skip all animations (the card). RED CONTROL `controlScaffoldAnyLay`: every lay armed.
+    static func armsScaffold(organic: Bool, quiet: Bool, skip: Bool) -> Bool {
+        controlScaffoldAnyLay || (!organic && !quiet && !skip)
+    }
+    nonisolated(unsafe) static var controlScaffoldAnyLay = false
+
+    /// ★ notes30: fast or slow, at the ask — this part's last lay time (its type's), else a first lay's estimate from the part's
+    /// box and its cells; plus the map the solid view (or a sheet) waits for.
+    func buildPlan(path: String, _ s: LatticeLayoutSession.Settings, sheet: Bool) -> LatticeBuildTimelapse.Plan {
+        let last = layWallS[timeKey(path, .exact)]   // (its session's opening counted in)
+        let lo = s.cellMM > 0 ? s.cellMM : s.cellMinMM, hi = s.cellMM > 0 ? s.cellMM : s.cellMaxMM
+        let opens = session == nil || sessionPath != path || session?.printUp != upAtLay
+        let estimate = last == nil ? LatticeBuildTimelapse.estimateS(box: box, cellLoMM: lo, cellHiMM: hi)
+            .map { $0 + (opens ? stepS[Self.stepOpen] ?? 0.8 : 0) } : nil
+        let mapS = solidWanted || sheet ? stepS[Self.stepMap] : nil
+        return LatticeBuildTimelapse.plan(lastLayS: last, mapS: mapS, estimateS: estimate)
+    }
+
+    /// ★ notes30: the rough cut-open's geometry over the part's box — the exact map's (`mapGeometry`) with a voxel
+    /// `LatticeBuildScaffold.roughVoxelScale` times larger (an eighth of its voxels: a few tens of milliseconds).
+    nonisolated static func roughGeometry(_ box: (lo: SIMD3<Float>, hi: SIMD3<Float>)) -> (origin: SIMD3<Float>, voxel: Float, dims: SIMD3<Int32>) {
+        let ext = simd_max(box.hi - box.lo, SIMD3(repeating: 0.1))
+        let fine = Swift.max(0.35, Float(cbrt(Double(ext.x * ext.y * ext.z) / 1_000_000)))
+        let voxel = fine * LatticeBuildScaffold.roughVoxelScale
+        let dims = SIMD3<Int32>(Int32((ext.x / voxel).rounded(.up)) + 3, Int32((ext.y / voxel).rounded(.up)) + 3,
+                                Int32((ext.z / voxel).rounded(.up)) + 3)
+        return (box.lo - SIMD3(repeating: voxel), voxel, dims)
+    }
+
+    /// Tests: a rough cut-open handed out as if the engine had made it (nil: none).
+    nonisolated(unsafe) static var roughForTesting: ((LatticeLayoutSession.Settings) -> LatticeBuildScaffold.Rough?)?
+    /// Rough cut-opens asked of the engine (tests: none for a Live preview lay, Skip all animations or Organic).
+    nonisolated(unsafe) static var roughCutsAsked = 0
+
+    /// ★ notes30: the rough cut-open for `s` on the lay's session, before the lay, and the scaffold on it (made off the main
+    /// thread) handed to the timelapse. None made (no domain, a newer lay): the lay goes on as before.
+    private func roughCut(_ session: LatticeLayoutSession, _ s: LatticeLayoutSession.Settings) async {
+        guard let box else { return }
+        Self.roughCutsAsked += 1
+        let t0 = Date()
+        let rough: LatticeBuildScaffold.Rough?
+        if let f = Self.roughForTesting { rough = f(s) } else {
+            let g = Self.roughGeometry(box)
+            let made: (rg: [Int8], ms: Double)? = (try? await session.gridRough(s, origin: g.origin, voxel: g.voxel, dims: g.dims)) ?? nil
+            rough = made.map { LatticeBuildScaffold.Rough(origin: g.origin, voxel: g.voxel, dims: g.dims, rg: $0.rg) }
+        }
+        guard !Task.isCancelled, let rough, rough.isWhole, build.wantsRough else { return }
+        let axes = build.axes(printUp: session.printUp.map { SIMD3<Float>($0) })
+        let walls = solidWanted
+        let made = await Task.detached(priority: .userInitiated) {
+            LatticeBuildScaffold.make(rough, up: axes.up, across: axes.across, walls: walls)
+        }.value
+        layStages["roughMS"] = Self.ms(since: t0)
+        guard !Task.isCancelled, let made, build.wantsRough else { return }
+        build.scaffoldArrived(LatticeBuildScaffold.drawing(made, token: build.scaffoldToken))
     }
 
     /// The refresh's steps in words (five at most) — the card's line — and how long each took the last time here.

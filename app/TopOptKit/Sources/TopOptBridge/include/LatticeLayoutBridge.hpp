@@ -286,6 +286,13 @@ struct LatticeLayoutGridAhead {
 LatticeLayoutGridAhead lattice_layout_grid_ahead(int64_t session, const LatticeLayoutSettings& settings, float origin_x,
                                                  float origin_y, float origin_z, float voxel_mm, int32_t nx, int32_t ny,
                                                  int32_t nz, BridgeError& err);
+// ★ notes30 (the strut lattice's scaffold, his 11-26: "open up the walls first"): the ROUGH cut-open for these settings BEFORE
+// the lay, for every lattice type — lattice_layout_grid_ahead's map with every lattice region's "where" open (its cells are
+// not laid yet, so the exact map's edge, made at the landing, can shift slightly where a cell is not laid). Made on the domain
+// the lay then keeps (the same "where"), so the lay itself is unchanged. `supported` false only when no domain is made.
+LatticeLayoutGridAhead lattice_layout_grid_rough(int64_t session, const LatticeLayoutSettings& settings, float origin_x,
+                                                 float origin_y, float origin_z, float voxel_mm, int32_t nx, int32_t ny,
+                                                 int32_t nz, BridgeError& err);
 // THE STRESS RESULT the session grades by (Install 2): von Mises, MPa, x fastest then y then z, on a grid whose low corner
 // is `origin` and whose voxel edge is `spacing` (core's DemandField). Kept by the session (one pointer between lays: core
 // keeps the part's own reference by it) until set again; an empty `mpa` clears it (no stress yet).

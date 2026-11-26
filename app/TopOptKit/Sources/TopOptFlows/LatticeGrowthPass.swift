@@ -355,7 +355,7 @@ extension MeshRenderer {
         guard let g = growth, bodyAlpha >= 0.999, !LatticeGrowthPass.controlNoXrayStandIn else { return false }
         guard growthFrame.active || growthFrame.drawn || g.landedHold else { return false }
         if growthFrame.ownMap { return false }
-        let mapShown = layoutBarsInFrame && layoutBars?.shellClip != nil
+        let mapShown = layoutBarsInFrame && drawnLayoutBars?.shellClip != nil
         return !(mapShown && (g.sealed || g.mapOpensFaces))
     }
 

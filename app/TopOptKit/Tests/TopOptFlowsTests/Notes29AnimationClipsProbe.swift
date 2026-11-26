@@ -192,7 +192,7 @@ final class Notes29AnimationClipsProbe: XCTestCase {
             var px = try frame(r)
             let phase: String
             if !landed { phase = "the engine lays: the part closed" }
-            else if let tl = show.timelapse, let b = tl.buildStart, now < b { phase = "the walls come off" }
+            else if let tl = show.timelapse, (tl.shown(at: now)?.snaps ?? 0) == 0 { phase = "the walls come off" }
             else if show.timelapse != nil, let s = r.lastBuildSnaps, s > 0 { phase = "the frame rises" }
             else { phase = "finished" }
             if stills.contains(where: { abs($0 - t) < 0.5 / Double(Self.fps) }), let sd = ProcessInfo.processInfo.environment["ANIM_STILL_DIR"] {

@@ -345,7 +345,9 @@ struct LatticeSampleView: View {
                 sh.token = token
                 laidBars?.sheets = sh
             }
-            buildShow.landed(token: token)   // ★ notes29: the frame rises (★ notes30 M1: a sheet's walls rise floor by floor)
+            // ★ notes29: the frame rises (★ notes30 M1: a sheet's walls rise floor by floor; ★ notes30: the fast path always —
+            // the sample's show is never armed for the scaffold)
+            buildShow.landed(token: token, box: LatticeLayoutBarsPass.box(made.bars))
             refresh.end()
             mesh = m
             Self.say(tag, "laid (\(made.struts) struts)")

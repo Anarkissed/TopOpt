@@ -487,6 +487,24 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         }
     }
 
+    /// ★ notes30 (the strut lattice's scaffold, his 11-26: "open up the walls first"): the ROUGH cut-open for `s` BEFORE its
+    /// lay, for every lattice type — `gridAhead`'s map with every lattice region's "where" open, its cells not laid yet (the
+    /// exact map, made at the landing, replaces it; its edge can shift slightly where a cell is not laid). The session's domain
+    /// for `s` is made now and the lay keeps it, so the lay is the same. nil: no domain. LatticeLayoutBridge.hpp,
+    /// lattice_layout_grid_rough.
+    public func gridRough(_ s: Settings, origin: SIMD3<Float>, voxel: Float, dims: SIMD3<Int32>) async throws
+        -> (rg: [Int8], ms: Double)? {
+        let sid = id
+        let input = convert(s)
+        return try await worker.run {
+            var err = topoptbridge.BridgeError()
+            let r = topoptbridge.lattice_layout_grid_rough(sid, input, origin.x, origin.y, origin.z, voxel, dims.x, dims.y,
+                                                           dims.z, &err)
+            if !err.ok { throw TopOptError(message: String(err.message)) }
+            return r.supported ? (Array(r.grid.rg), r.grid.ms) : nil
+        }
+    }
+
     /// The stress result a layout grades by (core's DemandField): von Mises MPa, x fastest, on a grid whose LOW CORNER is
     /// `origin`. Kept by the session until set again (one pointer between lays: core keeps the part's own reference by
     /// it), so set it once per field, never per lay. nil clears it (no stress yet).
