@@ -87,6 +87,10 @@ struct SimpParams {
   // not enter the tensor. A frozen voxel's design density never moves, so no
   // updater reads it; a Mode 2 beta step reads exactly this.
   const std::vector<double>* lattice_relative_density = nullptr;
+  // E-01 (TO rebuild stage 5): the solver settings the run was configured with
+  // (SimpOptions::solver_settings), handed to every solve made with these params;
+  // nullptr = the global switches, as before.
+  const SolverSettings* solver_settings = nullptr;
 
 
 };
@@ -1133,6 +1137,11 @@ struct SimpOptions {
   // the identical system to the same tolerance. OPT-IN: leaving this at the
   // default keeps Gate-V2 and every existing caller unchanged. See SolverKind.
   SolverKind solver = SolverKind::JacobiCG;
+  // E-01 (TO rebuild stage 5): the run's solver settings as ONE value. Filled by
+  // configure_production_options (and the CLI's overrides after it); the run's
+  // SimpParams point at it. use_solver_settings == false = the global switches.
+  SolverSettings solver_settings;
+  bool use_solver_settings = false;
   // Iteration cap. For the OC / projected paths this is the convergence
   // criterion paired with `change_tol` (unchanged). For MMA it is the raised
   // SAFETY CAP behind objective-plateau termination (handoff 086-mma-plateau):

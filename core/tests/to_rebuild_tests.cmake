@@ -39,6 +39,20 @@ if(Eigen3_FOUND)
   add_test(NAME to_true_loads COMMAND test_to_true_loads)
 endif()
 
+# Stage 5 (faster solves): the solver driven the way the Flexible bridge drives it
+# (one thread, latch reset, multigrid then Jacobi-only, warm next step) on a soft
+# graded field like the M2 stand's. Green before and after every solver change.
+add_executable(test_to_solver_bridge_way tests/unit/test_to_solver_bridge_way.cpp)
+target_link_libraries(test_to_solver_bridge_way PRIVATE topopt)
+add_test(NAME to_solver_bridge_way COMMAND test_to_solver_bridge_way)
+
+# Stage 5, B-05: the stable smoothers behind TOPOPT_SOLVER (per-level Jacobi and
+# 4th-kind Chebyshev, three settings each): converge on multigrid without the l1
+# retry, match a tight reference, identical bytes on a repeat, switch inert unset.
+add_executable(test_to_solver_smoother tests/unit/test_to_solver_smoother.cpp)
+target_link_libraries(test_to_solver_smoother PRIVATE topopt)
+target_include_directories(test_to_solver_smoother PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME to_solver_smoother COMMAND test_to_solver_smoother)
 # Test K: the same job twice in one process, an unrelated solve between, same
 # bytes. Runs the demo fixture through run_job, so it needs what test_cli needs.
 # First result on record 2026-11-25 (same shape both times; only 3MF ids and
@@ -73,6 +87,25 @@ if(TARGET test_lattice_strength)
   add_test(NAME to_stage1_lattice_check CONFIGURATIONS Long COMMAND test_to_stage1_lattice_check)
   set_tests_properties(to_stage1_lattice_check PROPERTIES TIMEOUT 7200)
 endif()
+
+# Stage 5, E-01: one SolverSettings value and a SolverRunState passed into a solve; the
+# old entry points byte-identical; runs isolated (test K).
+add_executable(test_to_solver_settings tests/unit/test_to_solver_settings.cpp)
+target_link_libraries(test_to_solver_settings PRIVATE topopt)
+add_test(NAME to_solver_settings COMMAND test_to_solver_settings)
+add_executable(test_to_solver_run_state tests/unit/test_to_solver_run_state.cpp)
+target_link_libraries(test_to_solver_run_state PRIVATE topopt)
+add_test(NAME to_solver_run_state COMMAND test_to_solver_run_state)
+# Stage 5, S-05: the sensitivity loop on all cores; identical bytes at 1/3/6 threads.
+add_executable(test_to_solve_threads tests/unit/test_to_solve_threads.cpp)
+target_link_libraries(test_to_solve_threads PRIVATE topopt)
+add_test(NAME to_solve_threads COMMAND test_to_solve_threads)
+# Stage 5, B-06: the element product in the reduced system; identical bytes to the
+# full-length product at 1/3/6 threads.
+add_executable(test_to_solver_reduced_apply tests/unit/test_to_solver_reduced_apply.cpp)
+target_link_libraries(test_to_solver_reduced_apply PRIVATE topopt)
+target_include_directories(test_to_solver_reduced_apply PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME to_solver_reduced_apply COMMAND test_to_solver_reduced_apply)
 
 # Stage 1, M6 (LatticeReview for TOReview): on the strength grid, the protected skin against the lattice cubes, the
 # switch off and `face` (jobs A and B as test_to_stage1_lattice_check makes them). Prints the counts, pins nothing.

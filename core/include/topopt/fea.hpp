@@ -976,6 +976,19 @@ FeaSolution fea_solve_mgcg_matfree(const VoxelGrid& grid,
                                    int max_iterations = 0, CgInfo* info = nullptr,
                                    const std::vector<char>* active_mask = nullptr,
                                    const FeaSolution* initial_guess = nullptr);
+// E-01: the same solve with its settings passed in (see SolverSettings).
+struct SolverSettings;
+class SolverRunState;
+FeaSolution fea_solve_mgcg_matfree(const VoxelGrid& grid,
+                                   const std::vector<double>& youngs_per_voxel,
+                                   double poisson,
+                                   const std::vector<DirichletBC>& bcs,
+                                   const std::vector<NodalLoad>& loads,
+                                   double tolerance, int max_iterations, CgInfo* info,
+                                   const std::vector<char>* active_mask,
+                                   const FeaSolution* initial_guess,
+                                   const SolverSettings& settings,
+                                   SolverRunState* run = nullptr);
 
 // Memory evidence (diagnostic): total nonzeros stored across the ASSEMBLED
 // operators of the multigrid hierarchy each solver builds for (grid, E, nu, bcs,
@@ -1090,6 +1103,17 @@ FeaSolution fea_solve_cg_matfree(const VoxelGrid& grid,
                                  CgInfo* info = nullptr,
                                  const FeaSolution* initial_guess = nullptr,
                                  const std::vector<char>* active_mask = nullptr);
+// E-01: the same solve with its settings passed in (see SolverSettings).
+FeaSolution fea_solve_cg_matfree(const VoxelGrid& grid,
+                                 const std::vector<double>& youngs_per_voxel,
+                                 double poisson,
+                                 const std::vector<DirichletBC>& bcs,
+                                 const std::vector<NodalLoad>& loads,
+                                 double tolerance, int max_iterations, CgInfo* info,
+                                 const FeaSolution* initial_guess,
+                                 const std::vector<char>* active_mask,
+                                 const SolverSettings& settings,
+                                 SolverRunState* run = nullptr);
 
 // Number of scalar (double) values the matrix-free operator stores to represent
 // the global stiffness K: exactly the single 24x24 reference element stiffness
@@ -1108,6 +1132,62 @@ std::size_t fea_matfree_operator_storage_doubles();
 // therefore a pure performance control, safe to change between solves; it never
 // affects the computed field. Thread-global (not per-call).
 int fea_set_matfree_threads(int n);
+
+// ---------------------------------------------------------------------------
+// E-01 (TO rebuild stage 5): ONE SOLVER SETTINGS VALUE, passed in.
+//
+// Every process- or thread-wide solver switch below (fea_set_matfree_threads,
+// the Galerkin block cache, mixed precision, the cubic lattice path, GenEO, the
+// Krylov recycling dials, the multigrid safe retry, re-arm period, parity pad and
+// algebraic level 1) is also a field here. The entry points that take a
+// SolverSettings run that ONE solve with exactly these values and leave every
+// global untouched, so two jobs in one process (the app running Flexible and a
+// topology run, say) cannot flip each other's solver mid-solve, and a solve's
+// result does not depend on what another caller set before it (test K).
+// The entry points without it read the globals, byte for byte as before; callers
+// move over one by one and the setters go when the last one has moved.
+// Defaults = the library defaults the setters start from.
+struct SolverSettings {
+  int matfree_threads = 0;                     // 0 = all hardware threads
+  bool galerkin_block_cache = false;
+  bool mixed_precision = false;
+  bool cubic_lattice = false;
+  bool geneo_twolevel = false;
+  bool krylov_recycling = false;
+  int krylov_recycle_dim = 16;                 // == kRecycleDefaultDim
+  int krylov_recycle_cycle = 1;
+  bool krylov_recycle_wrap_multigrid = false;
+  bool mg_safe_retry = true;
+  int mg_rearm_period = 0;
+  int mg_parity_pad_mode = 1;                  // 0 off, 1 auto, 2 force
+  bool mg_algebraic_level1 = false;
+};
+// The values the setters have made this thread's defaults (what an entry point
+// without a SolverSettings would use now): the starting point for a caller that
+// moves over and wants today's posture.
+SolverSettings fea_current_solver_settings();
+
+// E-01: a RUN's solver state, owned by the caller and handed to each solve of
+// that run: the multigrid stagnation latch and safe-retry latch, the Krylov
+// recycle basis and the GenEO basis, i.e. everything that makes one solve depend
+// on the ones before it. Two runs with their own SolverRunState share nothing; a
+// solve handed a FRESH one (a certification or a re-check, say) cannot depend on
+// which solves ran before it (test K). A solve handed none uses this thread's
+// default state, as the entry points without it always have (and the run-start
+// resets fea_matfree_reset_mg_stagnation_latch, fea_reset_krylov_recycle_space
+// and fea_reset_geneo_basis clear that default only).
+class SolverRunState {
+ public:
+  SolverRunState();
+  ~SolverRunState();
+  SolverRunState(const SolverRunState&) = delete;
+  SolverRunState& operator=(const SolverRunState&) = delete;
+  struct Impl;
+  Impl* impl() const { return impl_.get(); }
+
+ private:
+  std::unique_ptr<Impl> impl_;
+};
 
 // Enable the GALERKIN BLOCK CACHE in the matrix-free multigrid's coarse-operator
 // build (handoff 090). OPT-IN, DEFAULT OFF; returns the previous setting.

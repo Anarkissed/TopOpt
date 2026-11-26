@@ -2092,6 +2092,9 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   // than relying on a caller having set it at the right moment.
   if (obs.mg_rearm_period > 0)
     fea_matfree_set_mg_rearm_period(obs.mg_rearm_period);
+  // E-01 (TO rebuild stage 5): the run's solver-settings value follows the
+  // overrides above, so the value and the switches agree.
+  if (options.simp.use_solver_settings) options.simp.solver_settings = fea_current_solver_settings();
   // The run_info written up front recorded the PRE-override posture; re-read it
   // now so the artifact says what the run actually did. Without this an armed
   // arm reports `mg_algebraic_level1: false` and reads as a null result.

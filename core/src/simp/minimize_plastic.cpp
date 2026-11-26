@@ -1013,6 +1013,8 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
 
   // Material -> SIMP params (penalty p = 3 per ARCHITECTURE §4).
   SimpParams params;
+  // E-01 (TO rebuild stage 5): every solve of the run gets the run's settings.
+  if (options.simp.use_solver_settings) params.solver_settings = &options.simp.solver_settings;
   params.youngs_modulus = material.youngs_modulus_mpa;
   params.poisson = material.poisson;
   params.penalty = 3.0;

@@ -342,6 +342,9 @@ if(Eigen3_FOUND)
   # drives the graded fea_solve_cg overload in assembly.cpp, so it is gated on
   # Eigen the same way. CI has Eigen (DEPS=ON), so it always builds in CI.
   target_sources(topopt PRIVATE src/simp/simp.cpp)
+  # The shared solve pieces moved out of simp.cpp (TO rebuild stage 5): Eigen-gated
+  # with it.
+  target_sources(topopt PRIVATE src/simp/to_solve.cpp)
   # minimize_plastic end-to-end driver (M5.3): self-weight + volume-fraction
   # ladder stopping at margin < 1.5. Drives simp_optimize / simp_compliance, so
   # it is gated on Eigen like simp.cpp. CI has Eigen (DEPS=ON), so it always
