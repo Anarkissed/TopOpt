@@ -54,7 +54,7 @@ The refused 0.30 version: at solve 19 the design is in 17 separate pieces; the m
 ## Still owed before the stage report
 
 - The original stand optimised both ways (queued), then Top Motor Mount; three settings; pad 2 / 3 / 4.5 mm.
-- The lattice strength check before and after (reviewer), on the set LatticeReview named (TORebuildGroup, 2026-11-25), three MADE jobs, none of his files:
+- DONE (see "LatticeReview's FINAL statement" below). Kept for the record: the lattice strength check before and after (reviewer), on the set LatticeReview named (TORebuildGroup, 2026-11-25), three MADE jobs, none of his files:
   - A. All-lattice box, axis-aligned, loads and anchors on whole flat faces, a depth that is a whole number of voxels. The control: no change beyond rounding.
   - B. A block whose loaded face is not on the grid (tilted or cylindrical, part of a face), protected skin 1.3 mm, regular cells.
   - C. Job B with Organic (Traced), so the frame-of-beams check runs.
@@ -111,6 +111,16 @@ The "[control]" table above counts the TEST's own call to `face_clamp_bcs`. No j
 ### Jobs A to C re-made with the corrected clamp (build 4d495dd6, 2026-11-25 19:43)
 
 Laid lattice identical in all three (480, 2,978 and 7,692 bars). Worst-case margin, off -> `face`: A 790.5 -> 895.1 (was 891.6 with the old clamp); B 709.6 -> 941.2 (was 933.6); C 618.2 -> 971.9 (was 948.9), weakest strut 888.7 -> 870.0. So on these jobs the clamp's own share of the change is small (under 3 %) and the loads carry the rest. On a part held on a small face it is not small: Base as drawn at res 48 reads 0.79 with the face's own nodes held, against 0.97 with the old clamp and the new loads (table being re-made).
+
+### LatticeReview's FINAL statement on stage 1 and the lattice strength check (TORebuildGroup, 2026-11-25 20:14; measured on tip 4d495dd6, strength grid 40, made jobs)
+
+1. The laid lattice never moves: bars identical in every run, switch off or on, at five grid resolutions.
+2. Solid and regular lattice: sound. The check reads the held nodes and the loads only, never the frozen mask.
+3. Organic (frame of beams): the frame's number is ALREADY unsteady today, before stage 1. Weakest strut at grid 36 / 38 / 40 / 42 / 44, switch off: turned-box C 45.4 / 95.5 / 84.5 / 63.2 / 78.7 (a factor 2.10); a job loaded on a bare lattice top 1.88 / 1.80 / 3.43 / 1.10 (fail) / refused. With `face`: turned C 54.0 / 52.8 / 47.5 / 41.2 / 53.7 (factor 1.31, at or below today's reading at four of five); the bare-top job 1.88 / 1.80 / 3.43 / 1.18 (fail) / 1.48 (fail), no refusal. So the switch makes the Organic number steadier or no worse on these, and stricter or equal. LatticeReview withdrew its own by-force rule (it failed its own pass marks) and WITHDREW ITS HOLD: stage 1 need not wait on it. How load gets from the grid onto the vines has no checked basis; that is a separate, older fault in the lattice check, for the reviewer (a reference solve of printed struts on one coupon, about 2 days).
+4. Two lattice tests go red with the switch on and need their `face` form at the flip: `lattice_depth_tie` section 0a (it pins effective depth = layers x spacing; with `face` the run reports the mm asked, by design) and `test_print_frame.cpp:721` (the same job turned: weakest strut 5.904 against 3.283, outside its 25 %; the frame's load rule again).
+5. Protected against lattice cubes on chamfered job B (`test_to_stage1_lattice_masks.cpp`, LatticeReview's test, cherry-picked): cubes that are BOTH protected and lattice 40 with the switch off and the same 40 on; NEITHER along the inner boundary 400 off, 240 on. So "none both, none neither" holds on neither path and the switch did not cause it; no strength number reads it; it is stage 7's. Job A: no change.
+
+LatticeReview's position: stage 1 may flip for Organic as for the rest, with the two tests in 4 and hand-over item 3 for #362 landing in the same release.
 
 ## Measured: the sideways lip (LatticeReview's question)
 
