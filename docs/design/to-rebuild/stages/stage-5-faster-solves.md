@@ -185,5 +185,41 @@ Measured next (queued): the switch prototype at K = 10 / 20 / 30 / 50 on every r
 - Active Domain (band 0, disarmed after PR 209 measured it net-negative in the stagnation regime): the stagnation cause is now known and fixed under the switch, so the old verdict no longer stands. NOT DONE YET: the band is a production.cpp constant with no per-job switch, so measuring it needs a job or observability override (not my file; to TOReview) or a harness run; three bands (0 / auto / auto+2).
 - Multigrid hierarchy dropped part-way through a run (the stagnation latch, "0 levels"): measured per solve on the replays (used_multigrid, levels, l1 retries) and on the reference runs' logs. Today: latched on solve 3 on both test-P parts; with the stage-5 smoother: to fill.
 
+### For #362 (exact replacement lines, carried by TOReview; not edited by TOSolver)
+After E-01 phase 1 is merged (the new entry points taking `const SolverSettings&` and `SolverRunState*`):
+
+app/TopOptKit/Sources/TopOptBridge/flexible_squish_fe.cpp, `struct Posture` (about 515-550): the five global flips and the two run-state resets go; the posture becomes a value plus the sim's own run state. Only the deadline stays global (it is an absolute time per call, not a setting):
+```cpp
+struct Posture {
+  topopt::SolverSettings settings;   // the sim's solver posture, handed to every solve
+  topopt::SolverRunState run;        // the sim's own latch / recycle / GenEO state
+  double prev_deadline = 0.0;
+  explicit Posture(double deadline_abs_ms, bool keep = false)
+      : settings(topopt::fea_current_solver_settings()) {
+    settings.matfree_threads = 1;
+    settings.mg_parity_pad_mode = 1;
+    settings.mg_algebraic_level1 = false;
+    if (!keep) {
+      settings.geneo_twolevel = false;
+      settings.krylov_recycling = false;
+    }
+    prev_deadline = topopt::fea_set_solve_deadline_ms(deadline_abs_ms);
+  }
+  ~Posture() { topopt::fea_set_solve_deadline_ms(prev_deadline); }
+  Posture(const Posture&) = delete;
+  Posture& operator=(const Posture&) = delete;
+};
+```
+and in core_solve (about 1223-1226), with `posture` the sim's Posture in scope:
+```cpp
+    sol = jacobi_only ? topopt::fea_solve_cg_matfree(P.fe.g, P.fe.E, P.nu, P.bcs, loads, P.tolerance, max_iterations,
+                                                     &info, guess, nullptr, posture.settings, &posture.run)
+                      : topopt::fea_solve_mgcg_matfree(P.fe.g, P.fe.E, P.nu, P.bcs, loads, P.tolerance, max_iterations,
+                                                       &info, nullptr, guess, posture.settings, &posture.run);
+```
+Effect: a topology run's carried recycle / GenEO state and its switches are never touched by a squish solve (the race named 11-25 is gone), and the squish sim no longer resets the process's default state. core/tests/unit/test_to_solver_bridge_way.cpp (TOSolver's) follows the bridge in the same change.
+
+core/src/cli/run_job.cpp, `ScopedLadderSolverIsolation` (about 4516-4534): NO change in phase 2 (its lattice post-process solves build their own SimpParams, so they keep reading the switches it flips). When the run's SolverRunState is wired through minimize_plastic (phase 2b, needs a ruling because certification solves then stop inheriting the trajectory's latch, which changes bytes where the latch fired), those solves get a fresh state and the class and its two uses are deleted.
+
 ### For #362's gate
 - The app-side FlexibleBatchM* tests run in #362's gate on any change to the solver the bridge calls (app/TopOptKit/Tests/TopOptFlowsTests): FlexibleBatchM2Tests, FlexibleBatchM2VerifyTests, FlexibleBatchMDentTests, FlexibleBatchMGroupTests, FlexibleBatchMLegendTests, FlexibleBatchMStressTests, FlexibleBatchMVerifyTests, FlexibleBatchMXrayTests (the two *Probe files are harnesses). E-01 phase 2 changes the bridge's Posture (through TOReview).
