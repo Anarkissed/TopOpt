@@ -367,6 +367,42 @@ int main() {
     try { (void)lattice_quilt_limits(LatticeTopology::Gyroid); } catch (const std::invalid_argument&) { sheet_refused = true; }
     check(sheet_refused, "§6 a sheet type has no strut quilt: refused, never another type's");
   }
+  // §7 (★ notes29b, his question on 2026-11-25: "Are you saying that no matter what happens, all Small cells in thin walls
+  // are going to be quilted?"): what Allow quilt off never passes is the QUILT, one printed line short of it: the widest
+  // strut is touch x cell - one line (lattice_quilt_off_strut_mm), the smallest cell for a strut (strut + line) / touch
+  // (lattice_quilt_off_cell_mm). Read on each type's own touch, recomputed from its segments: at the limit the closest
+  // struts (that share no node, or parallel ones seen square-on) are exactly one line width apart, never touching; the
+  // limit's cell lies between the quilt's cell and the open look's. RED CONTROL: a limit stated at the quilt's own cell
+  // (no line short of it) leaves no air between the struts, and is caught.
+  {
+    const double line = 0.45, strut = 0.90;
+    std::printf("§7 Allow quilt off's limit, one printed line (%.2f mm) short of the quilt, at a %.2f mm strut:\n", line,
+                strut);
+    std::printf("  %-9s %8s %10s %10s %10s %12s\n", "type", "touch", "quilt cell", "limit cell", "open cell",
+                "air at limit");
+    for (LatticeTopology t : {LatticeTopology::Octet, LatticeTopology::SimpleCubic, LatticeTopology::Bcc,
+                              LatticeTopology::Fcc, LatticeTopology::Diamond, LatticeTopology::Kelvin,
+                              LatticeTopology::Rhombic, LatticeTopology::Bccz, LatticeTopology::Fccz,
+                              LatticeTopology::Reentrant}) {
+      const std::string name = lattice_topology_name(t);
+      const StrutCell& c = lattice_strut_cell(t);
+      const double touch = std::min(gap_face_view(c), gap_3d(c));   // recomputed from the type's own segments
+      const double cell = lattice_quilt_off_cell_mm(t, strut, line);
+      const double air = touch * cell - strut;                       // between the closest struts, mm
+      std::printf("  %-9s %8.5f %7.2f mm %7.2f mm %7.2f mm %9.3f mm\n", name.c_str(), touch,
+                  lattice_quilt_cell_mm(t, strut), cell, lattice_open_cell_mm(t, strut), air);
+      check(std::fabs(air - line) < 1e-9, "§7 " + name + ": one line of air between the closest struts at the limit");
+      check(std::fabs(lattice_quilt_off_strut_mm(t, cell, line) - strut) < 1e-9,
+            "§7 " + name + ": the strut limit and the cell limit are one rule");
+      check(lattice_quilt_cell_mm(t, strut) < cell && cell < lattice_open_cell_mm(t, strut),
+            "§7 " + name + ": the limit's cell is under the open look's and over the quilt's");
+      check(std::fabs(lattice_quilt_off_strut_mm(t, 10.0, 0.0) - touch * 10.0) < 1e-9,
+            "§7 " + name + ": no line, no gap: the touch itself");
+      // RED CONTROL: the quilt's own cell as the limit leaves no air (the check above would fail on it).
+      check(!(std::fabs((touch * lattice_quilt_cell_mm(t, strut) - strut) - line) < 1e-9),
+            "§7 control: the quilt's cell as the limit is caught");
+    }
+  }
   std::printf("%s: %d checks, %d failures\n", g_fail ? "FAIL" : "PASS", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }

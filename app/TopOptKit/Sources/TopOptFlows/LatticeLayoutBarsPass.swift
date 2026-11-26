@@ -215,8 +215,31 @@ struct BarFrame {
     float4   mapOrigin;    // ★ notes26 C6: the engine's map — voxel (0,0,0)'s centre
     float4   mapSpacing;   //   its voxel size
     float4   mapDims;      //   its voxel counts; w = 1: clip the bars to the part
-    float4   up;           // ★ notes29: the print's up in the part's own coordinates (a bridge's level underside); +z as placed
+    // ★ notes29 (his "timelapse of a building being made"): LatticeBuildTimelapse — which of the bars show this frame
+    float4   build;        // x: the snaps shown (< 0: every bar); y: floors; z: bays; w: 1 on
+    float4   buildUp;      // xyz: up in the part's own coordinates; w: the lattice's lowest height along it
+    float4   buildAcross;  // xyz: across, left to right; w: the lattice's lowest along it
+    float4   buildSizes;   // x: a floor's height; y: the lattice's width across; z: a column's |cos| to up
+    float4   up;           // ★ notes29 H3: the print's up in the part's own coordinates (a bridge's level underside); +z as placed
 };
+
+// ★ notes29: the snap a bar comes in (LatticeBuildTimelapse.step, mirrored): its floor by its lower end, then 0 for a column,
+// 1 + its bay (by its middle) else
+static bool bar_build_hidden(float3 a, float3 b, constant BarFrame& F) {
+    if (F.build.x < 0.0) { return false; }
+    float3 up = F.buildUp.xyz;
+    float ha = dot(up, a), hb = dot(up, b);
+    float floors = max(F.build.y, 1.0), bays = max(F.build.z, 1.0);
+    float fl = clamp(floor((min(ha, hb) - F.buildUp.w) / max(F.buildSizes.x, 1e-4) + 1e-3), 0.0, floors - 1.0);
+    float3 d = b - a;
+    float len = length(d);
+    float kind = 0.0;
+    if (len >= 1e-6 && abs(dot(d, up)) / len < F.buildSizes.z) {
+        float mid = dot(F.buildAcross.xyz, 0.5 * (a + b));
+        kind = 1.0 + clamp(floor((mid - F.buildAcross.w) / max(F.buildSizes.y, 1e-4) * bays), 0.0, bays - 1.0);
+    }
+    return fl * (1.0 + bays) + kind >= F.build.x;
+}
 
 // ★ notes26 C6: is `p` inside the part (the map's inside channel, read linear — the way Organic's softened map is), never
 // outside the map's own box (beyond it nothing is the part)
@@ -266,6 +289,7 @@ vertex BarVOut bar_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
     float3 p = e + ((c & 2) ? v * R : -v * R) + ((c & 4) ? w * R : -w * R);
     BarVOut o;
     o.pos = F.clipFromModel * float4(p, 1.0);
+    if (bar_build_hidden(A.xyz, B.xyz, F)) { o.pos = float4(0.0, 0.0, 2.0, 1.0); }   // ★ notes29: not built yet — no triangle
     o.cpos = o.pos;
     o.iid = iid;
     return o;
@@ -527,6 +551,7 @@ vertex LightVOut light_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
     float3 p = ((c & 1) ? (B.xyz + u * 0.5 * R) : (A.xyz - u * 0.5 * R)) + radial * R;
     LightVOut o;
     o.pos = F.clipFromModel * float4(p, 1.0);
+    if (bar_build_hidden(A.xyz, B.xyz, F)) { o.pos = float4(0.0, 0.0, 2.0, 1.0); }   // ★ notes29
     o.ez = -(F.eyeFromModel * float4(p, 1.0)).z;
     o.en = (F.eyeNormalBasis * float4(radial, 0.0)).xyz;
     o.iid = iid;
@@ -581,6 +606,17 @@ final class LatticeLayoutBarsPass {
     private(set) var colourKey = -1
     private(set) var count = 0
     private(set) var token = -1
+    /// ★ notes29: the bars' box in the part's own coordinates (the timelapse's floors and bays); nil: no bars.
+    private(set) var box: (lo: SIMD3<Float>, hi: SIMD3<Float>)?
+    static func box(_ bars: [Float]) -> (lo: SIMD3<Float>, hi: SIMD3<Float>)? {
+        guard bars.count >= 7 else { return nil }
+        var lo = SIMD3<Float>(repeating: .greatestFiniteMagnitude), hi = -lo
+        for i in stride(from: 0, to: bars.count - 6, by: 7) {
+            let a = SIMD3(bars[i], bars[i + 1], bars[i + 2]), b = SIMD3(bars[i + 3], bars[i + 4], bars[i + 5])
+            lo = simd_min(lo, simd_min(a, b)); hi = simd_max(hi, simd_max(a, b))
+        }
+        return (lo, hi)
+    }
     /// ★ Organic cut 1: the first bar the light pass draws (.max: none).
     private(set) var lightFrom = Int.max
     /// ★ His 11-19: Organic's vines (nil: the bars draw).
@@ -725,6 +761,7 @@ final class LatticeLayoutBarsPass {
         }
         let packed = Self.pack(inputs.bars, flags: inputs.flags)
         count = packed.count / 2
+        box = Self.box(inputs.bars)   // ★ notes29: where the timelapse's floors and bays lie
         buffer = packed.isEmpty ? nil : device.makeBuffer(bytes: packed, length: MemoryLayout<SIMD4<Float>>.stride * packed.count,
                                                           options: .storageModeShared)
         uploadColours(inputs)
@@ -762,7 +799,9 @@ final class LatticeLayoutBarsPass {
         var mapOrigin = SIMD4<Float>(0, 0, 0, 0)
         var mapSpacing = SIMD4<Float>(1, 1, 1, 0)
         var mapDims = SIMD4<Float>(1, 1, 1, 0)
-        /// ★ notes29: the print's up (BarFrame's twin): a bridge's level underside; +Z as placed.
+        /// ★ notes29: the timelapse (BarFrame's four rows after the map; `build.x` < 0: every bar).
+        var build = LatticeBuildRevealUniform()
+        /// ★ notes29 H3: the print's up (BarFrame's twin, its last row): a bridge's level underside; +Z as placed.
         var up = SIMD4<Float>(0, 0, 1, 0)
     }
 
@@ -783,7 +822,7 @@ final class LatticeLayoutBarsPass {
     /// Bars into the prepass's G-buffer (its encoder, attachments and .less + write depth state).
     func encodeGBuffer(_ enc: MTLRenderCommandEncoder, depthState: MTLDepthStencilState,
                        clipFromModel: simd_float4x4, eyeFromModel: simd_float4x4, eyeNormalBasis: simd_float4x4,
-                       turning: Bool = false) -> Bool {
+                       turning: Bool = false, build: LatticeBuildRevealUniform? = nil) -> Bool {
         guard isDrawable, let buffer, enc.device === device else { return false }
         let c0 = Self.colour
         let c = dimmed ? Self.dimmedRGB(SIMD3(Float(c0.r), Float(c0.g), Float(c0.b))) : SIMD3(Float(c0.r), Float(c0.g), Float(c0.b))
@@ -804,6 +843,7 @@ final class LatticeLayoutBarsPass {
             f.mapSpacing = SIMD4(g.voxel, g.voxel, g.voxel, 0)
             f.mapDims = SIMD4(Float(g.dims.x), Float(g.dims.y), Float(g.dims.z), 1)
         }
+        if let build { f.build = build }   // ★ notes29: the timelapse's snaps so far
         enc.setRenderPipelineState(pipeline)
         enc.setDepthStencilState(depthState)
         enc.setCullMode(.none)

@@ -24,7 +24,10 @@ public final class LatticeLayoutPreview: ObservableObject {
 
     /// What the 3D view draws (nil: nothing yet).
     @Published public private(set) var bars: LatticeLayoutBarsInputs? {
-        didSet { growthMeets(bars, after: oldValue) }   // ★ his 11-22: the finished lattice replaces the growth
+        didSet {
+            growthMeets(bars, after: oldValue)   // ★ his 11-22: the finished lattice replaces the growth
+            buildMeets(bars, after: oldValue)    // ★ notes29: the landed lay is built on screen (its timelapse)
+        }
     }
     /// ★ Install 3: what the layout on screen laid (bars and cells), for the colour key, the tap-to-read card and the drawer.
     @Published public private(set) var laid: LatticeLayoutColours.Laid?
@@ -40,7 +43,19 @@ public final class LatticeLayoutPreview: ObservableObject {
 
     /// Core's numbers for the debug overlay (stage E's iPad timing): open, read, cells, bars, ms.
     @Published public private(set) var timing: Timing?
-    @Published public private(set) var laying = false
+    @Published public private(set) var laying = false {
+        didSet { if !laying { refresh.end() } }   // ★ notes29: the "Refreshing Lattice" card goes with the lay
+    }
+    /// ★ notes29 (his notes on release 20, img 97: "We need to think of an animation to implement so we never have to deal with
+    /// images like this … make it feel like it is being *built*"): a regular lay's timelapse, which the 3D view draws the bars
+    /// by (LatticeBuildTimelapse) — the last lattice gone the moment a lay is asked for, the new one only once it has landed
+    /// with its own map, then floor by floor. With Skip all animations, every lay leaves the lattice area blank until it lands.
+    /// Not published: each snap redraws the 3D view alone.
+    public let build = LatticeBuildShow()
+    /// ★ notes29: the refresh under way, as the centred "Refreshing Lattice" card reads it (Skip all animations).
+    public let refresh = LatticeRefreshProgress()
+    /// ★ notes29: how long each step of a refresh took the last time on this part (s), for the card's bar.
+    private var stepS: [String: Double] = [:]
     /// ★ His picks 11-21 (the preview-speed research: "Let's do this one. Absolutely."): the Organic lay under way, for the
     /// Lattice button's ring and count-down. The Draft first (the last lattice dimmed meanwhile), then the exact lattice with
     /// the Draft on screen, marked. nil: no Organic lay going.
@@ -347,6 +362,11 @@ public final class LatticeLayoutPreview: ObservableObject {
         task?.cancel()
         stopGrowth()   // ★ his 11-22: a new lay grows from nothing again
         laying = true
+        // ★ notes29: a regular lay is built on screen — the last lattice gone at once, the site cleared until this one lands;
+        // Organic grows instead (its own replay). Skip all animations: every lay leaves the lattice area blank, and the card
+        // shows the refresh's progress.
+        if !isOrganic || AppSettings.skipAllAnimations { build.layBegins() } else { build.stop() }
+        refresh.begin(refreshSteps(organic: isOrganic, path: path, up: Self.printUp(p)))
         nozzleWanted = checkNozzle
         // ★ his pick 11-21 ("Let's do this one. Absolutely."): every Organic lay shows its Draft first (marked, the last
         // lattice dimmed until it lands), then the exact lattice replaces it (before: only Live preview's dragged slider)
@@ -378,6 +398,7 @@ public final class LatticeLayoutPreview: ObservableObject {
     public func clear() {
         task?.cancel(); task = nil
         stopGrowth()   // ★ his 11-22
+        build.stop()   // ★ notes29
         mapTask?.cancel(); mapTask = nil
         nozzleTask?.cancel(); nozzleTask = nil; nozzleWanted = false; nozzleState = .notAsked
         nozzleSession?.close(); nozzleSession = nil; nozzlePath = nil; nozzleLine = nil; solidReason = nil
@@ -505,6 +526,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         remembered.insert(r, at: 0)
         task?.cancel(); task = nil
         stopGrowth()   // ★ his 11-22: a remembered lattice shows no growth
+        build.stop()   // ★ notes29: nor any timelapse — it shows at once
         mapTask?.cancel(); mapTask = nil
         take(p, s, ok)
         accurateAtLay = r.quality == .exact
@@ -736,7 +758,10 @@ public final class LatticeLayoutPreview: ObservableObject {
             var t0 = Date()
             if let t = limitsTask { await t.value }   // ★ his 11-22: the page's Auto numbers first (one session, never two)
             layStages["limitsWaitMS"] = Self.ms(since: t0)
+            let opened = session != nil && sessionPath == path && session?.printUp == upAtLay
             guard !Task.isCancelled, let session = try await openSession(path: path, up: upAtLay) else { return }
+            if !opened { stepS[Self.stepOpen] = Date().timeIntervalSince(t0) }   // ★ notes29
+            refresh.reached(Self.stepLay)
             t0 = Date()
             sessionStressKey = try await Self.give(stress, to: session, holding: sessionStressKey)
             layStages["stressGiveMS"] = Self.ms(since: t0)
@@ -748,15 +773,30 @@ public final class LatticeLayoutPreview: ObservableObject {
                 return
             }
             organicQuality = nil; organicNumbers = nil
+            t0 = Date()
             let r = try await session.lay(s)
             guard !Task.isCancelled else { return }
+            stepS[Self.stepLay] = Date().timeIntervalSince(t0)   // ★ notes29
             token &+= 1
-            // the last map stays until this layout's own lands (no flash of a closed part on every change)
-            var drawn = LatticeLayoutBarsInputs(token: token, bars: r.bars, solid: solidWanted ? bars?.solid : nil, flags: r.barFlags)
-            drawn.printUp = session.printUp.map { SIMD3<Float>($0) }   // ★ notes29: its bridges level on the print's up
+            // ★ notes29 (his img 97: the new struts drawn over the LAST lay's map, half the part closed over them): the struts land
+            // only WITH their own map — the part is cut open for exactly this lattice the moment it shows, never by the last one's.
+            // (RED CONTROL `LatticeBuildShow.controlOff`: the last map stays until this layout's own lands, as before.)
+            var map: (grid: LatticeLayoutSolidGrid, ms: Double)?
+            if solidWanted, let box, !LatticeBuildShow.controlOff {
+                refresh.reached(Self.stepMap)
+                t0 = Date()
+                map = try? await Self.map(session, box, token: token,
+                                          cutSmooth: Self.cutSmoothWanted(lattice: latticeAtLay, printAccurate: printAccurate))
+                guard !Task.isCancelled else { return }
+                stepS[Self.stepMap] = Date().timeIntervalSince(t0)
+            }
+            let solid = LatticeBuildShow.controlOff ? (solidWanted ? bars?.solid : nil) : map?.grid
+            var drawn = LatticeLayoutBarsInputs(token: token, bars: r.bars, solid: solid, flags: r.barFlags)
+            drawn.printUp = session.printUp.map { SIMD3<Float>($0) }   // ★ notes29 H3: its bridges and floors on the print's up
             bars = drawn
             laid = LatticeLayoutColours.Laid(r, token: token)   // ★ Install 3
             timing = Timing(openMS: openMS, readMS: r.msRead, cellsMS: r.msCells, barsMS: r.msBars, bars: r.barCount)
+            if let m = map { timing?.mapMS = m.ms }   // ★ notes29: the map came with the struts
             if r.barCount > 0 { problem = nil }   // ★ notes28: nothing laid is said after the reason is read (below)
             layStages["readMS"] = r.msRead; layStages["cellsMS"] = r.msCells; layStages["barsMS"] = r.msBars   // ★ his 11-22
             laying = false; layProgress = nil
@@ -1699,8 +1739,9 @@ public final class LatticeLayoutPreview: ObservableObject {
                        let (cell, pct) = [l.cellSizeMode == .fixed && l.cellMM > 0 ? l.cellMM : (p.latticeSelectableCellMM(ref) ?? s.cellMaxMM),
                                           s.cellMaxMM, 8].lazy.compactMap({ c in p.latticeDensityPercent(rho: rho, cellMM: c).map { (c, $0) } }).first {
                         // (the row's cell, else the largest cell: the page's percent is read on a cell its band exists for)
-                        // ★ notes29: the page's percent (100 % = the type's own quilt) as core's dial (1 = the widest the
-                        // switch allows: the open look with Allow quilt off), so the strut laid is the strut the percent names
+                        // ★ notes29: the page's percent (100 % = the type's own quilt) as core's dial (1 = the open look with
+                        // Allow quilt off; ★ notes29b: past 1 up to the limit, one printed line short of the quilt), so the
+                        // strut laid is the strut the percent names
                         let dial = LatticeDensityDial.coreDial(percent: pct, cellMM: cell, topology: s.topology, lineWidthMM: s.beadMM,
                                                                minStrutLines: s.minStrutLines, allowQuilt: s.allowQuilt)
                         if rowDensity { s.regionDials.append((region: id, dial: dial)) } else if !uniformSet { s.dial = dial; uniformSet = true }
@@ -2039,6 +2080,7 @@ extension LatticeLayoutPreview {
 
     /// The engine's phase of the lay under way, onto the Lattice button's line.
     func growthPhase(_ p: Int) {
+        if Self.organicSteps.indices.contains(p) { refresh.reached(Self.organicSteps[p]) }   // ★ notes29: the card's bar
         guard var lp = layProgress, lp.phase != p else { return }
         lp.phase = p
         layProgress = lp
@@ -2046,6 +2088,38 @@ extension LatticeLayoutPreview {
 
     /// Tests: whether a watch is reading now.
     var growthWatching: Bool { growthWatch?.running ?? false }
+
+    // MARK: ★ notes29 — the timelapse and the refresh's steps
+
+    /// The bars on screen changed: a new lay's struts landed (its timelapse builds them), or nothing is on screen (an error, a
+    /// refusal: no timelapse). The same lattice (its map came, its colours) changes nothing.
+    func buildMeets(_ now: LatticeLayoutBarsInputs?, after old: LatticeLayoutBarsInputs?) {
+        guard now?.token != old?.token else { return }
+        guard let n = now else { build.stop(); return }
+        build.landed(token: n.token)
+    }
+
+    /// The refresh's steps in words (five at most) — the card's line — and how long each took the last time here.
+    static let stepOpen = "Opening the part"
+    static let stepLay = "Laying the struts"
+    static let stepMap = "Cutting the part open"
+    /// Organic: before the engine says its phase, then its phases 1-5 (core's GrowthTap).
+    static let organicSteps = ["Getting ready", "Growing the vines", "Pruning the vines", "Seeding again", "Reaching the walls",
+                               "Finishing the vines"]
+    /// An Organic lay's time split over its steps (a rough split of the last lay's time; the bar holds in a step that runs long).
+    static let organicShares: [Double] = [0.15, 0.45, 0.1, 0.1, 0.1, 0.1]
+
+    func refreshSteps(organic: Bool, path: String, up: SIMD3<Double>? = nil) -> [LatticeRefreshProgress.Stage] {
+        if organic {
+            let total = layWallS[timeKey(path, .draft)] ?? layWallS[timeKey(path, .exact)] ?? 6
+            return zip(Self.organicSteps, Self.organicShares).map { .init(words: $0, expectedS: $1 * total) }
+        }
+        var out: [LatticeRefreshProgress.Stage] = []
+        if session == nil || sessionPath != path || session?.printUp != up { out.append(.init(words: Self.stepOpen, expectedS: stepS[Self.stepOpen] ?? 0.8)) }
+        out.append(.init(words: Self.stepLay, expectedS: stepS[Self.stepLay] ?? layWallS[timeKey(path, .exact)] ?? 1.2))
+        if solidWanted { out.append(.init(words: Self.stepMap, expectedS: stepS[Self.stepMap] ?? 0.8)) }
+        return out
+    }
 }
 
 /// One plain line where the new engine's lines go, when it does not draw (Organic).

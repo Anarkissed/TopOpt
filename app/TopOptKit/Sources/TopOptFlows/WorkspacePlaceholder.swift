@@ -206,7 +206,9 @@ public struct WorkspacePlaceholder: View {
     /// Measured inner edges of the two top clusters — see `TopClusterEdgeKey`.
     @State private var topEdges = TopClusterEdges()
     /// Snap the settle instead of animating it, for reduced-motion users (D2).
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    /// ★ notes29: Reduce Motion, or Settings › Skip all animations.
+    private var reduceMotion: Bool { systemReduceMotion || AppSettings.skipAllAnimations }
     /// Whether the Results page is SHUT (the editable workspace shows; the variants stay).
     /// ★ B3 (T2, his pick 2026-10-24): "Results never opens by itself". It starts shut — the
     /// stage opens on Setup — and no run opens it: a run that lands puts a dot on the capsule's
@@ -1349,6 +1351,7 @@ public struct WorkspacePlaceholder: View {
                           flexibleLattice: flexibleMain.layer(project, stage: stage, pageUp: fullScreenPageUp))   // Flexible (PR #362) H3: the main page's lattice + its squish loop (FlexibleMainStage.swift)
                 .onEmptyTap { emptyTapClears() }   // ★ his iPad 10-26 (5): a tap on empty space clears the selection
                 .latticeGrowth(newEngineDrawn ? newEngine.growth : nil)   // ★ his 11-22: watch the Organic lattice grow
+                .latticeBuild(newEngineDrawn ? newEngine.build : nil)   // ★ notes29: a regular lattice built on screen, floor by floor
                 .onLatticeTurning { latticeTurningChanged($0) }   // ★ his pick 11-16 (A): chips and legends hide while he turns a lattice
                 .onTapRay(primitiveTapRay)   // ★ his iPad 10-28: a tap on a keep-clear volume picks it
                 .cutSibling(SurfaceTint.siblingShows(tool: surfaceTool))   // ★ his 11-14: the other half is tinted under Union only
@@ -1363,6 +1366,7 @@ public struct WorkspacePlaceholder: View {
                             // words, fixes and nozzle check are the centred pop-up's (LatticeLayoutPreview.raiseSolidPopUp)
                     }
                 }   // ★ the new engine (test): its lines
+                .overlay { if newEngineDrawn { LatticeRefreshingCard(progress: newEngine.refresh) } }   // ★ notes29: Skip all animations — the centred card
                 .onChange(of: newEngineOn) { on in
                     if on, latticeSim.field == nil, LatticeLayoutPreview.needsStress(project.lattice) { latticeSim.adoptSaved(for: model.makeLatticeSimContexts()) }   // ★ his 11-23
                     newEngine.update(project: project, on: on, solid: !surfaceXrayOn, stress: newEngineStress)

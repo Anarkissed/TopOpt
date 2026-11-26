@@ -628,6 +628,16 @@ struct CellSpec {
   //                floor above. Held at that floor when it asks for less.
   bool allow_quilt = false;
   double band_cell_mm = 0.0;
+  // ★ notes29b "SMALL CELLS IN THIN WALLS" (his per-part choice of 2026-11-12, Settings::small_cells_in_thin_walls; his
+  // notes on release 20, 2026-11-25: "I don't think these two things are mutually tied together"), read with allow_quilt
+  // OFF only (on, every cell may already go that small). A wall of a flat region too thin for the cells it must hold at
+  // the smallest cell the open look lays (floor_cell_mm) is laid with its OWN one cell (the cell that divides it, C15)
+  // when that cell is at least Layout::thin_floor_cell_mm, the smallest in which the thinnest strut stays a printed line
+  // short of touching (lattice_quilt_off_cell_mm): small, denser cells, never fused. ONLY there: no other wall, no band, no
+  // stress and no size step takes a cell under floor_cell_mm for it, and a thin wall is not graded inside. A wall too thin
+  // even for that stays solid (WallNarrow, TooFewAcross, RegionShallow), as before. Off: the layout is the one laid
+  // without it, byte for byte. (With Let walls cut cells, one_grid, there are no walls: it does nothing.)
+  bool small_in_thin_walls = false;
   // "LET WALLS CUT CELLS" (his name for the option, 2026-11-14), off by default. On: walls and pockets may cut the
   // cells. Off: today's whole cells fitted to walls. Aesthetic only; Structural never shows it.
   // (His words, 2026-11-12: "Why can't the pocket just cut the lattices wherever they are positioned and then a
@@ -847,6 +857,9 @@ struct WallMap {
     double start = 0, width = 0, cell = 0;
     int layers = 0;
     double lo[2] = {0, 0}, hi[2] = {0, 0};   // its extent on the face
+    // ★ notes29b: a THIN wall (CellSpec::small_in_thin_walls): too thin for the cells it must hold at the smallest cell
+    // the open look lays, so laid with its own one cell, under that floor, never under Layout::thin_floor_cell_mm.
+    bool thin = false;
   };
   std::vector<Wall> walls;
 
@@ -889,6 +902,10 @@ struct Layout {
   bool absorb = false;
   std::shared_ptr<const CellIndex> index;
   double floor_cell_mm = 0.0;        // the smallest cell allowed (C14; the quilt's with Allow quilt)
+  // ★ notes29b: the smallest cell a THIN wall is laid with under Small cells in thin walls (CellSpec::small_in_thin_walls):
+  // the one the thinnest strut stays a printed line short of touching in, lattice_quilt_off_cell_mm (octet 3.82 mm at two
+  // 0.45 mm lines). Without it, or with Allow quilt on: floor_cell_mm. No cell is ever under it.
+  double thin_floor_cell_mm = 0.0;
   double bead_mm = 0.0;              // the line width it was laid for
   double min_strut_mm = 0.0;         // the thinnest strut allowed (R5): lines x line width
   // The type's own two limits, as strut width over cell size (core's lattice_width_bounds):
@@ -1641,10 +1658,13 @@ struct Settings {
   // cell keeps the open look. Denser than the open look in those small cells, never touching. (His v2 stand, printed
   // with two-line struts: its wing edges, socket walls and spotface walls.) Allow quilt on makes this moot.
   // ★ notes29 (his notes on release 20, 2026-11-25: "No matter what I did, the quilting kept on happening -- even with
-  // quilting off", "limit both when 'Allow quilt' is turned off"): NOT READ while Allow quilt is off. It lowered the
-  // smallest cell of the whole layout, not of the thin walls alone, so every place the band or the stress shrank the
-  // cells got the thinnest strut past the open look, up to touching: the quilt. With Allow quilt off no cell is under
-  // lattice_open_cell_mm (the thinnest strut's) and no strut past the open look, anywhere; with it on it is moot.
+  // quilting off"): it lowered the smallest cell of the WHOLE layout to the quilt's, not of the thin walls alone, so
+  // every place the band or the stress shrank the cells got the thinnest strut up to touching: the quilt.
+  // ★ notes29b (his question the same day: "Are you saying that no matter what happens, all Small cells in thin walls are
+  // going to be quilted?" -- no): it is read again with Allow quilt off, and acts in THIN WALLS ONLY
+  // (CellSpec::small_in_thin_walls): a wall too thin for the open look's smallest cell takes its own small cell, down to
+  // the one the thinnest strut stays a printed line short of touching in (lattice_quilt_off_cell_mm), never fused. Every
+  // other place keeps the layout laid without it, byte for byte. With Allow quilt on it is moot.
   bool small_cells_in_thin_walls = false;
   // "Let walls cut cells" (his ruling 2026-11-14): per part, OFF unless the user turns it on. The session
   // hands it to the cells as CellSpec::one_grid (see there): on, every wall, pocket, hole, Protect skin and the
