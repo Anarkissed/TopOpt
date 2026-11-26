@@ -29,6 +29,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <unordered_map>
 #include <cmath>
 #include <cstddef>
@@ -167,6 +168,15 @@ struct MeshSpec {
   // OF4: every piece of the solid is kept (the tubes route: pieces the unmerged tubes tie together are not loose).
   // false: the mesh as before.
   bool keep_pieces = false;
+  // SHEETS (SPEC section 4): the sheet fields to mesh in place of bars, and their seams (Outcome::sheets,
+  // sheet_seams). Null or empty: no sheet (every strut mesh as before, byte for byte). Per field, block by block
+  // (`block_mm`): generate_tpms over the block's cells in the region's frame, wall sheet_wall_at, simplified to
+  // `sheet_deviation_mm` with the bead guard; turned into the part's coordinates; intersected with that region's open
+  // boxes grown by the run-on (strut_run_on_mm); unioned with the carved solid. A Blend seam's band is its own block
+  // (mesh_sheet_seam_band, E's); a seam whose band cannot be made falls back to the solid wall.
+  const std::vector<SheetField>* sheets = nullptr;
+  const std::vector<SheetSeamBand>* sheet_seams = nullptr;
+  double sheet_deviation_mm = 0.02;   // kSheetMaxDeviationMm (tpms_gen.hpp), the old run's bound
   // Set, the work is given up between its steps and LayCancelled is thrown.
   const std::atomic<bool>* stop = nullptr;
 };
@@ -217,6 +227,12 @@ struct MeshReport {
   std::size_t triangles = 0;       // of the mesh returned
   double mm3 = 0.0;                // of the mesh returned
   double ms_struts = 0.0, ms_solid = 0.0, ms_finish = 0.0;
+  // SHEETS: the sheet blocks meshed, their triangles as contoured and simplified (before the cut and the union), the
+  // material they add once joined, the deviation the simplifier measured, the time; the seams made as a blend band and
+  // those that fell back to the solid wall (their places: SheetSeamBand::fell_back in the file's result).
+  std::size_t sheet_blocks = 0, sheet_triangles = 0;
+  double sheet_mm3 = 0.0, sheet_deviation_mm = 0.0, ms_sheets = 0.0, ms_sheet_union = 0.0;
+  std::size_t seams_blended = 0, seams_fell_back = 0;
 };
 
 bool mesh_available();
@@ -470,6 +486,25 @@ void weave_bar_shells(const Domain& domain, const Layout& layout, const Bars& ba
                       std::vector<std::size_t>& first_tri, MeshReport& rep);
 // build_mesh's run-on past a strut's end (MeshSpec::strut_reach_mm, its default read from the carving).
 double strut_run_on_mm(const Carved& carved, const MeshSpec& spec);
+
+// ── SHEETS: THE BLEND BAND'S HOOK (builder E; SPEC 1.5) ────────────────────────────────────────────────────────
+// build_mesh asks this for every seam of MeshSpec::sheet_seams that is not a solid wall, before it meshes the sheets.
+// E's: the band (one cell wide, centred on the seam) meshed with lattice_dc.hpp on sheet_blend_distance_at, simplified
+// to the same bound; its TRUE wall measured (the tpms_probe march) and the band raised (`raise_mm`) until it is two
+// lines everywhere, up to the touch; the band clipped to the two regions' open space. ok false (with `why`, ONE plain
+// line): the seam falls back to the solid wall (build_mesh then leaves the membrane, and the file's result says so).
+// The two regions' own sheets stop where their side of the band begins (`keep_a`, `keep_b`: a point of the region is
+// meshed by its own sheet only where it says true; null: everywhere).
+struct SeamBand {
+  bool ok = false;
+  std::string why;
+  TriangleMesh mesh;                // closed, in the part's coordinates (empty when not ok)
+  double raise_mm = 0.0;            // what the band's loop raised the wall by
+  double thinnest_mm = 0.0;         // the band's true wall as measured, its thinnest
+  std::function<bool(const Vec3&)> keep_a, keep_b;
+};
+SeamBand mesh_sheet_seam_band(const Domain& domain, const Layout& layout, const std::vector<SheetField>& sheets,
+                              const SheetSeamBand& seam, const MeshSpec& spec);
 // Per piece of the carved solid: 1 when build_mesh leaves it out for `drop_at` (a small piece starting at one of them).
 std::vector<char> solid_slivers_left_out(const Carved& carved, const std::vector<Vec3>& drop_at);
 // K1 (his rule, 2026-11-24): the carved solid itself (the part less the open space, every piece), as a mesh, so the

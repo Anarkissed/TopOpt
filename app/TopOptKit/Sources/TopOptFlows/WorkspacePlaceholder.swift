@@ -3871,7 +3871,10 @@ public struct WorkspacePlaceholder: View {
             // ★ his 11-22 · ★ notes25 (A5): the print file's chain ends with its run — a stop ends in the centred pop-up
             let saidInAPopUp = latticeChainEnded(ph)
             // ★ notes28 (builder D's "cannot_lattice"): a print file whose check emptied a region says so in the centred pop-up
-            if ph == .succeeded, run.outcomeIsPrintFile { LatticeCannotLattice.sayEmptied(report: run.outcome?.reportJSON, in: project) }
+            // ★ SHEETS (notes28 sheets SPEC 1.5): else a blend that fell back to the solid wall says which regions, in the same pop-up
+            if ph == .succeeded, run.outcomeIsPrintFile, !LatticeCannotLattice.sayEmptied(report: run.outcome?.reportJSON, in: project) {
+                LatticeSheets.sayFellBack(report: run.outcome?.reportJSON, in: project)
+            }
             GenerationTimingLog.shared.printFileRunMoved(ph, outcome: run.outcome, failure: run.failure.map { "\($0)" })   // ★ 11-22
             // ★ Organic cut 2 (his certify wizard): an Organic part that does not certify opens on Results, where it is walked through
             // ★ his 11-21 ("have it spit out an actual result in the app - because NOTHING happens in app"): every Lattice run
@@ -8336,7 +8339,7 @@ public struct WorkspacePlaceholder: View {
         if newEngineDrawn {   // ★ Install 3: the new engine's lattice is the layer, its bars what there is to draw
             return LatticePreviewBodyAlpha.latticeOnlyShowing(viewOn: latticeOnlyViewOn, layerDrawn: true,
                                                               simRunning: latticeSimIsRunning,
-                                                              nothingToDraw: (newEngine.laid?.barCount ?? 0) == 0)
+                                                              nothingToDraw: newEngine.laid.map { $0.barCount == 0 && $0.sheets.isEmpty } ?? true)   // ★ SHEETS: a sheet is drawn too
         }
         return LatticePreviewBodyAlpha.latticeOnlyShowing(viewOn: latticeOnlyViewOn,
                                                    layerDrawn: latticeLayerIsDrawn,

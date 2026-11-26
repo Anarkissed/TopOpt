@@ -191,6 +191,10 @@ struct LatticeSampleLay: Equatable, Sendable {
         /// Cells inside the shape band (core's band < 1: graded toward the outline).
         var bandCells: Int
         var stages: [String: Double]
+        /// ★ SHEETS: a sheet sample's fields on the sample body's own map (the sheet pass draws them); nil for struts.
+        var sheets: LatticeSheetDrawing? = nil
+        /// Something was laid (struts, or a sheet).
+        var laidAnything: Bool { struts > 0 || sheets != nil }
     }
 
     /// Lays `plan` in the cube (`cube`) or the sample part, on a session of its own (closed when it ends; leaving the page
@@ -232,9 +236,29 @@ struct LatticeSampleLay: Equatable, Sendable {
         let cells = stride(from: 0, to: laid.cellInfo.count, by: 5).map { Double(laid.cellInfo[$0]) }.filter { $0 > 0 }
         let inBand = stride(from: 2, to: laid.cellInfo.count, by: 5).filter { laid.cellInfo[$0] < 0.999 }.count
         step("coloursMS")
-        return Made(body: body, bars: r.bars, flags: r.barFlags, colours: colours, struts: r.barCount,
-                    cellLo: cells.min() ?? 0, cellHi: cells.max() ?? 0, rhoLo: rho.min() ?? 0, rhoHi: rho.max() ?? 0,
-                    pctLo: pcts.min() ?? 0, pctHi: pcts.max() ?? 0, bandCells: inBand, stages: stages)
+        var made = Made(body: body, bars: r.bars, flags: r.barFlags, colours: colours, struts: r.barCount,
+                        cellLo: cells.min() ?? 0, cellHi: cells.max() ?? 0, rhoLo: rho.min() ?? 0, rhoHi: rho.max() ?? 0,
+                        pctLo: pcts.min() ?? 0, pctHi: pcts.max() ?? 0, bandCells: inBand, stages: stages)
+        if !r.sheets.isEmpty {   // ★ SHEETS: the sample body's map (the sheet is drawn clipped to it), its regions, its colours
+            let g = LatticeLayoutPreview.mapGeometry((body.lo, body.hi))
+            let m = try await session.grid(origin: g.origin, voxel: g.voxel, dims: g.dims)
+            try Task.checkCancellation()
+            var d = LatticeSheetDrawing(token: 1, fields: r.sheets, seams: r.sheetSeams,
+                                        map: LatticeLayoutSolidGrid(token: 1, origin: g.origin, voxel: g.voxel, dims: g.dims, rg: m.rg))
+            if r.sheets.count > 1, let map = d.map {
+                d.regions = LatticeSheetDrawing.regionIndex(fields: r.sheets, map: map, frames: r.frames, cellRegion: r.cellRegion,
+                                                            cellFrame: r.cellFrame, cellLo: r.cellLo,
+                                                            cellSize: stride(from: 0, to: r.cellInfo.count, by: 5).map { r.cellInfo[$0] })
+            }
+            d.colours = LatticeLayoutColours.sheetColours(r.sheets)
+            d.colourKey = 1
+            made.sheets = d
+            let walls = LatticeLayoutColours.sheetDensities(r.sheets).flatMap { $0 }.filter { $0 > 0 }
+            made.rhoLo = walls.min() ?? 0; made.rhoHi = walls.max() ?? 0
+            stages["mapMS"] = m.ms
+            made.stages = stages
+        }
+        return made
     }
 
     // MARK: the caption

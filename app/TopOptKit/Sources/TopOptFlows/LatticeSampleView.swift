@@ -333,14 +333,18 @@ struct LatticeSampleView: View {
         guard let r = built, !Task.isCancelled else { return }
         switch r {
         case .success(let made):
-            guard made.struts > 0 else { return laidFailed(log, rec, Self.sampleNoFitText, stages: made.stages) }
+            guard made.laidAnything else { return laidFailed(log, rec, Self.sampleNoFitText, stages: made.stages) }   // ★ SHEETS
             log.end(rec, .done, struts: made.struts, stages: made.stages)
             let m = ViewerMesh(vertices: made.body.vertices, indices: made.body.indices,
                                faceIDs: [Int32](repeating: 1, count: made.body.indices.count / 3))
             let token = Int.random(in: 1...Int.max)
             laidBars = LatticeLayoutBarsInputs(token: token, bars: made.bars, flags: made.flags, colours: made.colours,
                                                colourKey: token)
-            buildShow.landed(token: token)   // ★ notes29: the frame rises
+            if var sh = made.sheets {   // ★ SHEETS: the live sample's sheet, through the sheet pass
+                sh.token = token
+                laidBars?.sheets = sh
+            }
+            buildShow.landed(token: token)   // ★ notes29: the frame rises (★ notes30 M1: a sheet's walls rise floor by floor)
             refresh.end()
             mesh = m
             Self.say(tag, "laid (\(made.struts) struts)")

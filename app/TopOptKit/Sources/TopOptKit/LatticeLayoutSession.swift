@@ -195,6 +195,11 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         /// slivers there, and a sliver left taken in by the row beside it (core's cell_search and stretch_edges, both)
         public var cellSearch = false
         public var bedFloorMM = 0.0               // ★ Organic: K1's flat floor under the weave (sheet H1); 0 none
+        /// ★ SHEETS (notes28 sheets SPEC 1.5): "Where regions meet" for two sheet regions that touch: "blend" | "solid_wall"
+        /// (the page sends Blend in Aesthetic, Solid wall in Structural; read for a sheet type only).
+        public var sheetSeam = "solid_wall"
+        /// ★ SHEETS (SPEC 1.3): Auto's wall by the cell (core's StrutSpec::auto_by_cell; the page's Auto for a sheet).
+        public var autoByCell = false
         public init() {}
         public static func == (a: Settings, b: Settings) -> Bool {
             a.allLattice == b.allLattice && a.beadMM == b.beadMM && a.minStrutLines == b.minStrutLines && a.minWallMM == b.minWallMM
@@ -211,6 +216,7 @@ public final class LatticeLayoutSession: @unchecked Sendable {
                 && a.widthLightMM == b.widthLightMM && a.widthHeavyMM == b.widthHeavyMM && a.cellsByStress == b.cellsByStress
                 && a.referenceMPa == b.referenceMPa && a.percentile == b.percentile && a.response == b.response
                 && a.maxStep == b.maxStep && a.bedFloorMM == b.bedFloorMM && a.cellSearch == b.cellSearch
+                && a.sheetSeam == b.sheetSeam && a.autoByCell == b.autoByCell
         }
     }
 
@@ -252,7 +258,13 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         public var stressReferenceMPa = 0.0, stepHeldAt = 0.0
         public var thinSolid = 0
         public var msRead = 0.0, msCells = 0.0, msBars = 0.0, msBridge = 0.0
+        /// ★ SHEETS (the contract's Outcome::sheets, sheet_seams): one field per laid sheet region and the pairs that touch;
+        /// empty for a strut type (then `bars` is the lattice), and `bars` is empty for a sheet.
+        public var sheets: [LatticeSheetField] = []
+        public var sheetSeams: [LatticeSheetSeam] = []
         public var barCount: Int { bars.count / 7 }
+        /// Something was laid: bars, or a sheet.
+        public var laidAnything: Bool { barCount > 0 || !sheets.isEmpty }
     }
 
     public struct OpenInfo: Sendable {
@@ -601,6 +613,8 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         o.drop_loose = s.dropLoose
         o.small_cells_in_thin_walls = s.smallCellsInThinWalls
         o.one_grid = s.oneGrid
+        o.sheet_seam = std.string(s.sheetSeam)   // ★ SHEETS
+        o.auto_by_cell = s.autoByCell
         return o
     }
 
@@ -635,6 +649,16 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         o.stressReferenceMPa = r.stress_reference_mpa; o.stepHeldAt = r.step_held_at
         o.thinSolid = Int(r.thin_solid)
         o.msRead = r.ms_read; o.msCells = r.ms_cells; o.msBars = r.ms_bars; o.msBridge = r.ms_bridge
+        // ★ SHEETS: the contract's flat form, one field after another
+        let (fields, seams) = LatticeSheetField.unflatten(
+            region: Array(r.sheet_region), frame: Array(r.sheet_frame), kind: Array(r.sheet_kind), axes: Array(r.sheet_axes),
+            anchor: Array(r.sheet_anchor), cellMM: Array(r.sheet_cell_mm), n: Array(r.sheet_n), lo: Array(r.sheet_lo),
+            wallCount: Array(r.sheet_wall_count), wallMM: Array(r.sheet_wall_mm), wallRange: Array(r.sheet_wall_range),
+            seamAB: Array(r.sheet_seam_ab), seamBandMM: Array(r.sheet_seam_band_mm), seamRaiseMM: Array(r.sheet_seam_raise_mm),
+            seamSolid: Array(r.sheet_seam_solid), seamFellBack: Array(r.sheet_seam_fell_back),
+            seamWhy: Array(r.sheet_seam_why).map { String($0) })
+        o.sheets = fields
+        o.sheetSeams = seams
         return o
     }
 
@@ -669,10 +693,21 @@ extension LatticeLayoutSession {
         /// the type (the tetragonal three); its measured strength law credits none of the engine's struts yet.
         public var structuralRefusal: String?
         public var structuralNote: String?
+        /// ★ SHEETS (notes28 sheets SPEC 5): "strut" or "sheet" (core's lattice_family); a sheet's Structural floor in cells
+        /// across a member (10 gyroid, 9 Schwarz-D until builder D's tables), its floor cell at two lines (mm), and Auto's
+        /// largest cell (core's auto_cell_cap_mm; +infinity when none). 0 for a type the engine does not lay.
+        public var family = "strut"
+        public var structuralFloorCells = 0.0
+        public var floorCellMM = 0.0
+        public var autoCellCapMM = 0.0
+        /// A sheet type the engine lays (gyroid, Schwarz-D).
+        public var isSheet: Bool { lays && family == "sheet" }
         public static func == (a: TypeFacts, b: TypeFacts) -> Bool {
             a.lays == b.lays && a.why == b.why && a.openLook == b.openLook && a.touch == b.touch && a.s == b.s
                 && a.structuralRefusal == b.structuralRefusal && a.structuralNote == b.structuralNote
                 && a.struts.map { [$0.0, $0.1] } == b.struts.map { [$0.0, $0.1] } && a.nodes == b.nodes
+                && a.family == b.family && a.structuralFloorCells == b.structuralFloorCells && a.floorCellMM == b.floorCellMM
+                && a.autoCellCapMM == b.autoCellCapMM
         }
     }
 
@@ -694,15 +729,49 @@ extension LatticeLayoutSession {
         var nodes: [SIMD3<Int32>] = []
         for i in stride(from: 0, to: nd.count - 2, by: 3) { nodes.append(SIMD3(nd[i], nd[i + 1], nd[i + 2])) }
         let refusal = String(r.structural_refusal), note = String(r.structural_note)
-        let f = TypeFacts(lays: r.lays, why: String(r.why), openLook: r.open_look, touch: r.touch, s: Int(r.s),
+        var f = TypeFacts(lays: r.lays, why: String(r.why), openLook: r.open_look, touch: r.touch, s: Int(r.s),
                           struts: struts, nodes: nodes, structuralRefusal: refusal.isEmpty ? nil : refusal,
                           structuralNote: note.isEmpty ? nil : note)
+        f.family = String(r.family)   // ★ SHEETS
+        f.structuralFloorCells = r.structural_floor_cells
+        f.floorCellMM = r.floor_cell_mm
+        f.autoCellCapMM = r.auto_cell_cap_mm
         factsCache.lock.withLock { factsCache.facts[topology] = f }
         return f
     }
 
-    /// The engine lays `topology` (a strut type with its canonical cell and its two width limits in core).
+    /// The engine lays `topology` (a strut type with its canonical cell and its two width limits in core, or a sheet).
     public static func lays(_ topology: String) -> Bool { typeFacts(topology).lays }
+    /// ★ SHEETS: `topology` is a sheet type the engine lays (gyroid, Schwarz-D).
+    public static func isSheet(_ topology: String) -> Bool { typeFacts(topology).isSheet }
+
+    /// ★ SHEETS: sheet_cells.bin as core reads it (read_sheet_cells_file, its refusals): per cell its region, frame, cube,
+    /// wall, cells across, margin (NaN: not judged) and flags. nil, with core's line in `why`, when refused.
+    public static func sheetCells(path: String, why: inout String) -> LatticeSheetCells? {
+        let r = topoptbridge.lattice_sheet_cells_read(std.string(path))
+        guard r.ok else { why = String(r.why); return nil }
+        return LatticeSheetCells(frames: Array(r.frames), region: Array(r.region), frame: Array(r.frame), lo: Array(r.lo),
+                                 sizeMM: Array(r.size_mm), wallMM: Array(r.wall_mm), cellsAcross: Array(r.cells_across),
+                                 margin: Array(r.margin), flags: Array(r.flags))
+    }
+
+    /// ★ SHEETS (tests): core's own field at points (sheet_distance_at, or sheet_wall_at with `wall`), for one field.
+    public static func sheetProbe(_ f: LatticeSheetField, points: [SIMD3<Float>], wall: Bool = false) throws -> [Double] {
+        var p = topoptbridge.LatticeLayoutSheetProbe()
+        p.kind = f.kind.rawValue
+        for v in f.axesFlat { p.axes.push_back(v) }
+        for v in [f.anchor.x, f.anchor.y, f.anchor.z] { p.anchor.push_back(Float(v)) }
+        p.cell_mm = Float(f.cellMM)
+        for v in [f.n.x, f.n.y, f.n.z] { p.n.push_back(v) }
+        for v in [f.lo.x, f.lo.y, f.lo.z] { p.lo.push_back(Float(v)) }
+        for v in f.wallMM { p.wall_mm.push_back(v) }
+        for q in points { p.xyz.push_back(q.x); p.xyz.push_back(q.y); p.xyz.push_back(q.z) }
+        p.wall = wall
+        var err = topoptbridge.BridgeError()
+        let r = topoptbridge.lattice_layout_sheet_probe(p, &err)
+        if !err.ok { throw TopOptError(message: String(err.message)) }
+        return Array(r)
+    }
 }
 
 /// One thread with its own stack, running jobs in order. Never main.

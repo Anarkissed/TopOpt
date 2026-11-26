@@ -61,22 +61,23 @@ final class LatticeCellTypesNotes28Tests: XCTestCase {
         for (i, a) in ids.enumerated() { for b in ids[(i + 1)...] {
             XCTAssertNotEqual(laid[a], laid[b], "★ \(a) and \(b) lay different struts")
         } }
-        // RED CONTROL: a sheet type is never laid by the strut engine
-        XCTAssertFalse(LatticeLayoutSession.lays("gyroid"))
+        // RED CONTROL: a sheet type is never laid by the strut engine — ★ RE-PINNED (notes28 sheets, builder C): the engine
+        // lays a sheet now, as a sheet (core's family "sheet", no strut cell: LatticeSheetsAppTests)
+        XCTAssertTrue(LatticeLayoutSession.typeFacts("gyroid").isSheet)
+        XCTAssertEqual(LatticeLayoutSession.typeFacts("gyroid").s, 0, "no strut cell")
         XCTAssertFalse(LatticeLayoutSession.lays("lattice9"))
     }
 
     // MARK: 2 · the gate, Structural and Aesthetic
 
     func testTheGateIsOpenForEveryStrutTypeAndNotTheSheets() {
-        XCTAssertEqual(LatticeTypeCatalog.appBatches, Set(Self.all))
+        // ★ RE-PINNED (notes28 sheets, builder C): the sheets joined the gate on the new engine (LatticeSheetsAppTests)
+        XCTAssertEqual(LatticeTypeCatalog.appBatches, Set(Self.all + ["gyroid", "schwarz_d"]))
         let aesthetic = LatticeTypeCatalog.layoutEntriesFromCore(structural: false)
-        let laidToday = LatticeTypeCatalog.order.filter { Self.all.contains($0) && !Self.engineWaits.contains($0) }
-        XCTAssertEqual(aesthetic.filter(\.offered).map(\.id), laidToday, "★ Aesthetic: every strut type the engine lays")
-        for id in ["gyroid", "schwarz_d"] {
-            XCTAssertEqual(aesthetic.first { $0.id == id }?.reason, LatticeTypeCatalog.appBatchPending,
-                           "\(id): the sheets stay as they are")
+        let laidToday = LatticeTypeCatalog.order.filter {
+            (Self.all + ["gyroid", "schwarz_d"]).contains($0) && !Self.engineWaits.contains($0)
         }
+        XCTAssertEqual(aesthetic.filter(\.offered).map(\.id), laidToday, "★ Aesthetic: every type the engine lays")
         // RED CONTROL: behind a closed gate nothing new is offered
         LatticeTypeCatalog.appBatchesForTests = ["octet"]
         defer { LatticeTypeCatalog.appBatchesForTests = nil }
@@ -131,8 +132,11 @@ final class LatticeCellTypesNotes28Tests: XCTestCase {
                            "★ TRIPWIRE \(id): core's note moved — update structuralChecked / strengthNotCoveredToday")
         }
         let liveStructural = LatticeTypeCatalog.layoutEntriesFromCore(structural: true).filter(\.offered).map(\.id)
-        XCTAssertEqual(liveStructural, LatticeTypeCatalog.order.filter { Self.structuralChecked.contains($0) },
-                       "★ Structural, strength-checked: core says no refusal and no note")
+        // ★ RE-PINNED (notes28 sheets, builder C): the two sheets too — core certifies both, with no refusal and no note
+        // (their Structural floor is core's cells across a member: LatticeSheetsAppTests)
+        XCTAssertEqual(liveStructural, LatticeTypeCatalog.order.filter {
+            Self.structuralChecked.contains($0) || ["gyroid", "schwarz_d"].contains($0)
+        }, "★ Structural, strength-checked: core says no refusal and no note")
         for id in Self.strengthNotCoveredToday {
             let e = LatticeTypeCatalog.layoutEntriesFromCore(structural: true).first { $0.id == id }!
             XCTAssertEqual(LatticeTypeCatalog.caption(e), "Strength measured for denser struts", id)
@@ -379,7 +383,8 @@ final class LatticeCellTypesNotes28Tests: XCTestCase {
             XCTAssertEqual(LatticeTypeCatalog.showsNotPrintTested(id, tested: a.latticePrintTested), !["octet", "bccz"].contains(id),
                            "★ \(id): the tag until he marks it")
         }
-        XCTAssertFalse(LatticeTypeCatalog.showsNotPrintTested("gyroid", tested: []), "the sheets are not on the new engine's page")
+        // ★ RE-PINNED (notes28 sheets, builder C): the sheets are on the new engine's page, untested until he marks them
+        XCTAssertTrue(LatticeTypeCatalog.showsNotPrintTested("gyroid", tested: []))
         XCTAssertEqual(LatticeTypeCatalog.notPrintTestedCaption.split(separator: " ").count, 2, "★ at most five words")
         XCTAssertTrue(LatticeTypeCatalog.notPrintTestedInfo("Kelvin").contains("sample coupon"), "★ the (i) says how it goes")
         // he marks Kelvin: it is the app's, so a fresh read of the same device has it (every project)
@@ -421,7 +426,9 @@ final class LatticeCellTypesNotes28Tests: XCTestCase {
         XCTAssertEqual(LatticeCannotLattice.regionName(7, in: p), "A lattice area")
         // it is said in the centred pop-up when a print file lands
         let ws = try src("WorkspacePlaceholder.swift")
-        XCTAssertTrue(ws.contains("if ph == .succeeded, run.outcomeIsPrintFile { LatticeCannotLattice.sayEmptied(report: run.outcome?.reportJSON, in: project) }"))
+        // ★ RE-PINNED (notes28 sheets, builder C): else a blend that fell back to the solid wall is said in the same pop-up
+        XCTAssertTrue(ws.contains("if ph == .succeeded, run.outcomeIsPrintFile, !LatticeCannotLattice.sayEmptied(report: run.outcome?.reportJSON, in: project) {"))
+        XCTAssertTrue(ws.contains("LatticeSheets.sayFellBack(report: run.outcome?.reportJSON, in: project)"))
         XCTAssertTrue(try src("LatticeCannotLattice.swift").contains("AppPopups.shared.show(title, text)"))
     }
 

@@ -278,6 +278,11 @@ ll::Settings settings_from(const LatticeLayoutSettings& in) {
   s.drop_loose = in.drop_loose;
   s.small_cells_in_thin_walls = in.small_cells_in_thin_walls;
   s.one_grid = in.one_grid;
+  // ★ SHEETS (the contract's bridge additions): "Where regions meet" and Auto's wall by the cell (read for a sheet only)
+  if (in.sheet_seam == "blend") s.sheet_seam = ll::SheetSeam::Blend;
+  else if (in.sheet_seam == "solid_wall" || in.sheet_seam.empty()) s.sheet_seam = ll::SheetSeam::SolidWall;
+  else throw std::invalid_argument("lattice layout: sheet_seam \"" + in.sheet_seam + "\" is not blend or solid_wall");
+  s.struts.auto_by_cell = in.auto_by_cell;
   return s;
 }
 
@@ -361,6 +366,15 @@ void fill(LatticeLayoutResult& o, const ll::Outcome& out) {
   o.ms_read = out.ms_read;
   o.ms_cells = out.ms_cells;
   o.ms_bars = out.ms_bars;
+  // ★ SHEETS: the laid fields and their seams, in the contract's flat form (empty for a strut type)
+  if (!out.sheets.empty()) {
+    const ll::SheetsFlat f = ll::flatten_sheets(out.sheets, out.sheet_seams);
+    o.sheet_region = f.region; o.sheet_frame = f.frame; o.sheet_kind = f.kind; o.sheet_axes = f.axes;
+    o.sheet_anchor = f.anchor; o.sheet_cell_mm = f.cell_mm; o.sheet_n = f.n; o.sheet_lo = f.lo;
+    o.sheet_wall_count = f.wall_count; o.sheet_wall_mm = f.wall_mm; o.sheet_wall_range = f.wall_range;
+    o.sheet_seam_ab = f.seam_ab; o.sheet_seam_band_mm = f.seam_band_mm; o.sheet_seam_raise_mm = f.seam_raise_mm;
+    o.sheet_seam_solid = f.seam_solid; o.sheet_seam_fell_back = f.seam_fell_back; o.sheet_seam_why = f.seam_why;
+  }
 }
 
 void failed(BridgeError& err, const std::string& why) {
@@ -1102,8 +1116,18 @@ LatticeLayoutTypeFacts lattice_layout_type_facts(const std::string& topology) {
   LatticeLayoutTypeFacts f;
   const std::string why = bridge_guard_run("lattice_layout_type_facts", [&] {
     const topopt::LatticeTopology topo = topopt::lattice_topology_from_id(topology);
-    if (topopt::lattice_topology_is_sheet(topo))
-      throw std::invalid_argument("\"" + topology + "\" is a sheet type: the engine lays strut types only");
+    if (ll::sheet_kind_of(topo)) {
+      // ★ SHEETS (notes28 sheets SPEC 5): the engine lays a sheet on its cells, with one field per region (no struts)
+      const topopt::LatticeWidthBounds b = topopt::lattice_width_bounds(topo);
+      f.open_look = b.open_look;
+      f.touch = b.touch;
+      f.family = ll::lattice_family(topo);
+      f.structural_floor_cells = ll::sheet_structural_floor_cells(topo);
+      f.floor_cell_mm = ll::sheet_floor_cell_mm(topo, 2.0 * 0.45);   // two lines of a 0.45 mm line (the contract)
+      f.auto_cell_cap_mm = ll::auto_cell_cap_mm(topo);
+      f.lays = true;
+      return;
+    }
     // The engine's own two questions, in the order a lay asks them (cells.cpp: the width bounds; bars.cpp: the cell).
     const topopt::LatticeWidthBounds b = topopt::lattice_width_bounds(topo);
     if (!topopt::lattice_has_strut_cell(topo))
@@ -1118,6 +1142,8 @@ LatticeLayoutTypeFacts lattice_layout_type_facts(const std::string& topology) {
     f.nodes.reserve(3 * cell.nodes.size());
     for (const topopt::StrutCellPoint& n : cell.nodes)
       for (int v : {n.x, n.y, n.z}) f.nodes.push_back(v);
+    f.family = ll::lattice_family(topo);
+    f.auto_cell_cap_mm = ll::auto_cell_cap_mm(topo);
     f.lays = true;
   });
   if (!why.empty()) {
@@ -1132,6 +1158,97 @@ LatticeLayoutTypeFacts lattice_layout_type_facts(const std::string& topology) {
     f.structural_note = ll::structural_note(topo);
   });
   return f;
+}
+
+// ★ SHEETS: the wall law sampled for the GPU and the Swift field (LatticeLayoutBridge.hpp)
+std::vector<double> lattice_layout_sheet_param_table(const std::string& topology, int32_t n, double max_share) {
+  std::vector<double> out;
+  const std::string why = bridge_guard_run("lattice_layout_sheet_param_table", [&] {
+    const topopt::LatticeTopology topo = topopt::lattice_topology_from_id(topology);
+    if (!ll::sheet_kind_of(topo) || n < 1 || !(max_share > 0.0)) return;
+    out.reserve(static_cast<size_t>(n) + 1);
+    out.push_back(0.0);   // no wall, no parameter (the law runs through the origin below its first row)
+    for (int32_t i = 1; i <= n; ++i) {
+      const double share = max_share * static_cast<double>(i) / static_cast<double>(n);
+      out.push_back(topopt::lattice_sheet_wall_param_mm(topo, share, 1.0));   // over a 1 mm cell: the parameter's share
+    }
+  });
+  if (!why.empty()) out.clear();
+  return out;
+}
+
+namespace {
+ll::SheetField sheet_from_probe(const LatticeLayoutSheetProbe& p) {
+  if (p.axes.size() != 12 || p.anchor.size() != 3 || p.n.size() != 3 || p.lo.size() != 3)
+    throw std::invalid_argument("sheet probe: a field needs 12 axes, 3 anchor, 3 n and 3 lo numbers");
+  ll::SheetField s;
+  s.kind = p.kind == 1 ? topopt::TpmsKind::SchwarzD : topopt::TpmsKind::Gyroid;
+  s.axes.origin = {p.axes[0], p.axes[1], p.axes[2]};
+  for (int k = 0; k < 3; ++k) s.axes.ax[k] = {p.axes[3 + 3 * k], p.axes[4 + 3 * k], p.axes[5 + 3 * k]};
+  for (int k = 0; k < 3; ++k) {
+    s.anchor[k] = p.anchor[k];
+    s.n[k] = p.n[k];
+    s.lo[k] = p.lo[k];
+  }
+  s.cell_mm = p.cell_mm;
+  const size_t want = static_cast<size_t>(std::max(1, s.n[0])) * static_cast<size_t>(std::max(1, s.n[1])) *
+                      static_cast<size_t>(std::max(1, s.n[2]));
+  if (p.wall_mm.size() != want) throw std::invalid_argument("sheet probe: wall_mm is not n0 * n1 * n2 values");
+  s.wall_mm.assign(p.wall_mm.begin(), p.wall_mm.end());
+  return s;
+}
+}  // namespace
+
+std::vector<double> lattice_layout_sheet_probe(const LatticeLayoutSheetProbe& probe, BridgeError& err) {
+  std::vector<double> out;
+  const std::string why = bridge_guard_run("lattice_layout_sheet_probe", [&] {
+    const ll::SheetField s = sheet_from_probe(probe);
+    out.reserve(probe.xyz.size() / 3);
+    for (size_t i = 0; i + 2 < probe.xyz.size(); i += 3) {
+      const topopt::Vec3 p{probe.xyz[i], probe.xyz[i + 1], probe.xyz[i + 2]};
+      out.push_back(probe.wall ? ll::sheet_wall_at(s, p) : ll::sheet_distance_at(s, p));
+    }
+  });
+  if (!why.empty()) {
+    out.clear();
+    failed(err, why);
+  }
+  return out;
+}
+
+LatticeSheetCells lattice_sheet_cells_read(const std::string& path) {
+  LatticeSheetCells o;
+  const std::string why = bridge_guard_run("lattice_sheet_cells_read", [&] {
+    ll::SheetCellsFile f;
+    std::string refused;
+    if (!ll::read_sheet_cells_file(path, f, &refused)) {
+      o.why = refused.empty() ? std::string("not a sheet_cells.bin") : refused;
+      return;
+    }
+    for (const ll::Frame& fr : f.frames) {
+      put(o.frames, fr.origin);
+      for (const topopt::Vec3& a : fr.ax) put(o.frames, a);
+    }
+    const size_t n = f.cells.size();
+    o.region.reserve(n); o.frame.reserve(n); o.lo.reserve(3 * n); o.size_mm.reserve(n); o.wall_mm.reserve(n);
+    o.cells_across.reserve(n); o.margin.reserve(n); o.flags.reserve(n);
+    for (const ll::SheetCellRecord& c : f.cells) {
+      o.region.push_back(c.region);
+      o.frame.push_back(c.frame);
+      for (float v : c.lo) o.lo.push_back(v);
+      o.size_mm.push_back(c.size_mm);
+      o.wall_mm.push_back(c.wall_mm);
+      o.cells_across.push_back(c.cells_across);
+      o.margin.push_back(c.margin);
+      o.flags.push_back(c.flags);
+    }
+    o.ok = true;
+  });
+  if (!why.empty()) {
+    o = LatticeSheetCells{};
+    o.why = why;
+  }
+  return o;
 }
 
 void lattice_layout_cancel(int64_t session) {
