@@ -246,7 +246,7 @@ final class Notes26SampleHostedTests: XCTestCase {
             h.pump(3)
             func seen(_ id: String) -> CGRect? { (pr.all[id] ?? h.frames.all[id]).flatMap { $0.width > 1 ? $0 : nil } }
             try h.pickFromMenu("capsuleMenu", "Structural", what: "\(name): the stage menu")
-            try h.tap("capsuleLattice", "\(name): the Lattice page", settle: 1.5)
+            try h.tap("capsuleSetup", "\(name): Setup, the settings", settle: 1.5)
             if seen("lattice-sample-cells") == nil, let cells = seen("wizard-stage-\(LatticeWizardStage.cell.rawValue)") {
                 h.click(CGPoint(x: cells.midX, y: cells.midY), settle: 1)
             }
@@ -295,7 +295,7 @@ final class Notes26SampleHostedTests: XCTestCase {
             let h = AppBuildHost(WorkspacePlaceholder(model: r.app, project: p), size: size, test: self)
             h.pump(3)
             try h.pickFromMenu("capsuleMenu", "Structural", what: "\(name): the stage menu")
-            try h.tap("capsuleLattice", "\(name): the Lattice page", settle: 1.5)
+            try h.tap("capsuleSetup", "\(name): Setup, the settings", settle: 1.5)
             let info = try h.probe("info-lattice-sample-not-drawn", "★ \(name): the sample's (i)")
             let sw = try XCTUnwrap(h.frames.all["latticeViewSwitch"], "\(name): the switch")
             XCTAssertEqual(info.midY, sw.midY, accuracy: 6, "★ \(name): beside the switch")

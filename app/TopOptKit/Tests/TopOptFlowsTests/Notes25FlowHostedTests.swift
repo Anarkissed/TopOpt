@@ -392,7 +392,7 @@ final class Notes25FlowHostedTests: XCTestCase {
             try openVersion(h, "v2a", name)
             XCTAssertEqual(app.project?.id, f["2"])
             try assertLatticeResultsTab(h, "\(name): the Versions tap")
-            try h.tap("capsuleSetup", "\(name): Setup", settle: 1.5)
+            try h.tap("capsuleLattice", "\(name): Lattice", settle: 1.5)
             XCTAssertNil(h.frames.all["resultsExport"], "\(name): back to editing")
             XCTAssertNotNil(h.frames.all["capsuleResults"], "\(name): ★ the tab stays while the version has its result")
             let offered = try h.pickFromMenu("latticeSplitMore", "no such item", what: "\(name): ⌃")
@@ -402,7 +402,7 @@ final class Notes25FlowHostedTests: XCTestCase {
             try assertLatticeResultsTab(h, "\(name): the tab")
             XCTAssertEqual(app.project?.run.phase, .idle, "\(name): never a new run")
             // Approved's tap lands on the tab too
-            try h.tap("capsuleSetup", "\(name): Setup", settle: 1.5)
+            try h.tap("capsuleLattice", "\(name): Lattice", settle: 1.5)
             XCTAssertNotNil(waitFor(h, "latticeApproved", seconds: 3), "\(name): Approved from the saved file")
             try h.tap("latticeButton", "\(name): Approved", settle: 1.5)
             try assertLatticeResultsTab(h, "\(name): Approved's tap")

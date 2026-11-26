@@ -195,7 +195,7 @@ final class LatticeThinWallGlowHostedTests: XCTestCase {
         // ★ the session's first preview opens the Lattice page first (settings before any bake — armLatticePreview); its
         // Save (the capsule's Setup, as he leaves it) bakes, and the pop-up shows on Lattice Setup only
         if h.frames.all["view-Lattice preview-on"] == nil { try h.tap("view-Lattice preview", "the lattice preview", settle: 1.5) }
-        if h.frames.all["latticeSettingsPanel"] != nil { try h.tap("capsuleSetup", "the page's Save: the capsule's Setup", settle: 1.5) }
+        if h.frames.all["latticeSettingsPanel"] != nil { try h.tap("capsuleLattice", "the page's Save: the capsule's Lattice", settle: 1.5) }
         XCTAssertNil(h.frames.all["latticeSettingsPanel"], "premise: on Lattice Setup, the page saved and closed")
         // his stand bakes for a while in a debug build
         let end = Date().addingTimeInterval(420)
