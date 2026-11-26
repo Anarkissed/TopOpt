@@ -219,6 +219,18 @@ int differing(const Result& a, const Result& b) {
         skip = true;
     if (skip) continue;
     const auto it = bm.find(kv.first);
+    // The Organic frame solve is not bit-repeatable (its tiny bar forces move in
+    // the tenth digit between two identical runs: seen 2026-11-25, and named to
+    // LatticeReview), so numbers are compared to six digits here. A real reach of
+    // the switch moves margins by per cent, not by 1e-9.
+    if (it != bm.end() && it->second != kv.second) {
+      char* ea = nullptr;
+      char* eb = nullptr;
+      const double x = std::strtod(kv.second.c_str(), &ea), y = std::strtod(it->second.c_str(), &eb);
+      if (ea != kv.second.c_str() && eb != it->second.c_str() &&
+          std::fabs(x - y) <= 1e-6 * std::max(std::fabs(x), std::fabs(y)))
+        continue;
+    }
     if (it == bm.end() || it->second != kv.second) {
       ++n;
       std::printf("    %-40s %s | %s\n", kv.first.c_str(), kv.second.c_str(),
