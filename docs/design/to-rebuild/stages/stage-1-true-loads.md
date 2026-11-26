@@ -63,6 +63,22 @@ The refused 0.30 version: at solve 19 the design is in 17 separate pieces; the m
 - `region_lattice_mask` now follows the mm depth with the switch on, through the SAME function the protection is frozen with (`mask_region_by_stage`), so bar R5 stays structural (LatticeReview's position; for the reviewer to rule; LatticeReview reviews the diff). Proof owed on job B: no cube both protected and lattice, none that is neither along the inner boundary; job A unchanged. Not mine: `flexible/job_block.cpp:374` also calls `region_depth_layers` (#362's).
 - Test K again with the switch on once stage 5 removes the solver luck.
 
+## Measured: the lattice strength check, switch off against `face` (LatticeReview's jobs A to C)
+
+`core/tests/validation/test_to_stage1_lattice_check.cpp` (`ctest -C Long -R to_stage1_lattice_check`), run 2026-11-25 on a side build of the tip, 37 s. 20 N on each job.
+
+| job | laid lattice (bars; file bytes) | verdict | worst-case margin | what else moved |
+|---|---|---|---|---|
+| A, box on the grid, whole faces (the control) | 480 / 480; IDENTICAL | accepted / accepted | 790.5 -> 891.6 | peak stress 0.0439 -> 0.0330 MPa; the re-solve's solid margin 1,223 -> 1,519. 5 of 20 values. |
+| B, box turned 17 / 9 degrees, loaded side face with a 1.3 mm protected skin | 356 / 356; IDENTICAL | not accepted / not accepted (same reason both ways) | 134.1 -> 166.5 | interlayer margin 551 -> 628; load landing on cells with no credit 9.63 -> 9.32 N; re-solve solid margin 212 -> 386. 12 of 246 values. |
+| C, job B with a weave (frame-of-beams check), a made uniform stress result | 902 / 902; IDENTICAL | accepted / accepted | 51.9 -> 58.1 | weakest strut 44.6 -> 67.8; frame nodes loaded 15 -> 31; load on the frame 1.19 -> 1.41 N of 20; the list of weakest struts reorders. 123 of 477 values. |
+
+Reading:
+- The rule held: the switch does not move the laid lattice. Bars and file bytes are identical in all three.
+- The control is NOT unchanged: 13 % on the margin with everything on the grid. So the difference is not grid alignment. Likely cause, not yet shown: today's path holds every node of the bottom layer of VOXELS (two node planes, a one-voxel-thick clamp) and spreads the load over every exposed face of the tagged voxels, sides included; the drawn-face path holds and loads the nodes of the face itself. To be confirmed by printing the held and loaded node counts both ways before the stage report.
+- Every margin rises, by 9 to 24 % (52 % for the weakest strut in C). These jobs carry tiny loads, so the margins are in the hundreds; the direction and size are what matter.
+- Not yet counted, from LatticeReview's list: applied force and reaction summed per load group, loaded and anchored area, cubes protected / lattice / solid, and on job B "no cube both protected and lattice, none that is neither along the inner boundary". The test prints the strength block only; these need the masks, which the block does not carry.
+
 ## Measured: the sideways lip (LatticeReview's question)
 
 A face that is PART of a flat side (a 20 x 20 mm patch in a 60 x 40 mm top; `test_to_true_loads`, table "[lip]"). Frozen voxels with their centre outside the prism under the patch:

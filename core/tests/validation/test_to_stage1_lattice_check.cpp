@@ -18,6 +18,7 @@
 // must NOT move the laid lattice, so the bar count and the file's bytes must be
 // IDENTICAL off and on. That fails the test in either form. Everything else is
 // measured and printed for the stage report.
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -32,6 +33,7 @@
 #include "topopt/face_overrides.hpp"
 #include "topopt/lattice_file_strength.hpp"
 #include "topopt/lattice_layout_file.hpp"
+#include "topopt/lattice_layout_organic.hpp"
 #include "topopt/step.hpp"
 #include "topopt/stl.hpp"
 
@@ -223,14 +225,38 @@ int main() {
     return 1;
   }
 
+  // Organic follows a stress result: a made, uniform one over the tilted box's
+  // bounding box (mostly along z, some along x), the same for both switch values.
+  {
+    Vec3 lo{1e300, 1e300, 1e300}, hi{-1e300, -1e300, -1e300};
+    for (const Vec3& v : box(32, 32, 16, tilted).vertices) {
+      lo = {std::min(lo.x, v.x), std::min(lo.y, v.y), std::min(lo.z, v.z)};
+      hi = {std::max(hi.x, v.x), std::max(hi.y, v.y), std::max(hi.z, v.z)};
+    }
+    TensorField tf;
+    tf.spacing = 1.0;
+    tf.origin = {lo.x - 1.0, lo.y - 1.0, lo.z - 1.0};
+    tf.nx = static_cast<int>(std::ceil(hi.x - lo.x)) + 2;
+    tf.ny = static_cast<int>(std::ceil(hi.y - lo.y)) + 2;
+    tf.nz = static_cast<int>(std::ceil(hi.z - lo.z)) + 2;
+    const std::size_t n = static_cast<std::size_t>(tf.nx) * tf.ny * tf.nz;
+    tf.voigt.assign(6 * n, 0.0);
+    for (std::size_t e = 0; e < n; ++e) { tf.voigt[6 * e + 2] = 3.0; tf.voigt[6 * e] = 1.0; }
+    if (!write_tensor_file(kDir + "/stress.tensor", tf)) {
+      std::printf("the made stress result was not written\n");
+      return 1;
+    }
+  }
   struct Job { const char* tag; std::string file, strength; };
   const std::string protect =
       ", \"face_protections\": [{\"face_id\": " + std::to_string(fb.side) + ", \"depth_mm\": 1.3}]";
   const std::string weave = ", \"region_weave\": [true], \"organic_spacing_mm\": 4, \"organic_width_mm\": 0.9";
+  std::string organic_job = file_job("tilted.stl", fb, weave);
+  organic_job.replace(organic_job.find("\"layout\""), 8, "\"tensor\": \"stress.tensor\", \"layout\"");
   const std::vector<Job> jobs = {
       {"A_control", file_job("box.stl", fa, ""), strength_job("box.stl", fa, fa.top, "")},
       {"B_off_grid", file_job("tilted.stl", fb, ""), strength_job("tilted.stl", fb, fb.side, protect)},
-      {"C_organic", file_job("tilted.stl", fb, weave), strength_job("tilted.stl", fb, fb.side, protect)},
+      {"C_organic", organic_job, strength_job("tilted.stl", fb, fb.side, protect)},
   };
   for (const Job& j : jobs) {
     const Result off = run(j.tag, "", j.file, j.strength);
