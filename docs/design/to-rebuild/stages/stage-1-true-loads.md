@@ -45,7 +45,9 @@ Reading: Base is the part V-01 hurts. Today its margin jumps up and down by a fa
 | run | today | drawn face |
 |---|---|---|
 | Demo part (self-weight), version 0.70 / 0.50 / 0.30 margin | 965 / 301 / 70 | 1,176 / 437 / refused |
-| Original stand, res 128 | (queued behind the lock) | (queued) |
+| Original stand, res 128 (one lock hold, same binary 956766db) | 1 version at 74.3 % material: margin 2.40 (file re-check 2.41), 86.6 g, peak 5.61 MPa, 885 s | 1 version at 75.6 %: margin 2.68 (file 2.68), 88.0 g, peak 5.02 MPa, 1,238 s |
+
+The stand: the same single version either way, as in the baseline (ledger D: 1 version, 2.40, 86.6 g, so today's path is unchanged to the digit). With the drawn-face path the margin is 12 % higher and the part 1.4 g heavier: the loaded and held faces now carry their true area, so the peak beside them is lower (5.02 against 5.61 MPa), and the pad is 3 mm of true distance where it was three voxel layers. The run took 40 % longer (1,238 s against 885 s); not yet split between the solves and stage 1's earlier file check (R-07), and owed before the stage report. No solve fell back to the slow solver in either run.
 
 The refused 0.30 version: at solve 19 the design is in 17 separate pieces; the multigrid solve grows its error and the Jacobi-CG fallback hits its cap at residual 0.092. Today's path goes through 8 to 11 pieces and lands inside the cap. Not the loader: the optimiser breaks the part up (stage 3/4 boundary) and the solver cannot settle a broken part quickly (stage 5). Which side of the cap a run lands on is luck until those land.
 
