@@ -9,6 +9,7 @@
 #include "topopt/strut_cell.hpp"
 #include "topopt/tpms.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
@@ -1268,6 +1269,54 @@ LatticeWidthBounds lattice_width_bounds(LatticeTopology topo) {
       std::string("lattice_width_bounds: \"") + lattice_topology_name(topo) +
       "\" is not a lattice type core knows, so neither its open look nor where its "
       "struts touch is stated; no other type's bound is used for it (R1).");
+}
+
+// notes29: lattice.hpp states the three events and their closed forms; test_lattice_width_bounds measures channels and
+// see_through again on the periodic cell's voxels and recomputes touch from the segments.
+LatticeQuiltLimits lattice_quilt_limits(LatticeTopology topo) {
+  const double r2 = std::sqrt(2.0), r3 = std::sqrt(3.0), r6 = std::sqrt(6.0);
+  LatticeQuiltLimits q;
+  switch (topo) {
+    case LatticeTopology::Octet:       q.channels = 1.0 / r6;   q.see_through = (r2 - 1.0) / 2.0; break;
+    case LatticeTopology::SimpleCubic: q.channels = 1.0;        q.see_through = 1.0; break;
+    case LatticeTopology::Bcc:         q.channels = 1.0 / r2;   q.see_through = 1.0 / r2; break;
+    case LatticeTopology::Fcc:         q.channels = 1.0 / r3;   q.see_through = r2 - 1.0; break;
+    case LatticeTopology::Diamond:     q.channels = 1.0 / r2;   q.see_through = 1.0 / (2.0 * r2); break;
+    case LatticeTopology::Kelvin:      q.channels = r6 / 4.0;   q.see_through = 1.0 / (2.0 * r2); break;
+    case LatticeTopology::Rhombic:     q.channels = 1.0 / r6;   q.see_through = 1.0 / (2.0 * r2); break;
+    case LatticeTopology::Bccz:        q.channels = 1.0 / r2;   q.see_through = 1.0 / r2; break;
+    case LatticeTopology::Fccz:        q.channels = 1.0 / r3;   q.see_through = r2 - 1.0; break;
+    case LatticeTopology::Reentrant:   q.channels = 1.0 / r2;   q.see_through = 1.0 / r2; break;
+    case LatticeTopology::Gyroid:
+    case LatticeTopology::SchwarzD:
+      throw std::invalid_argument(std::string("lattice_quilt_limits: \"") + lattice_topology_name(topo) +
+                                  "\" is a sheet type: its walls have no struts to fuse (lattice_width_bounds states "
+                                  "where its channels close)");
+    default:
+      throw std::invalid_argument(std::string("lattice_quilt_limits: \"") + lattice_topology_name(topo) +
+                                  "\" is not a strut type core knows; no other type's quilt is used for it (R1)");
+  }
+  const LatticeWidthBounds b = lattice_width_bounds(topo);
+  q.touch = b.touch;
+  q.open_look = b.open_look;
+  return q;
+}
+
+double lattice_open_cell_mm(LatticeTopology topo, double strut_mm) {
+  return strut_mm / lattice_quilt_limits(topo).open_look;
+}
+
+double lattice_quilt_cell_mm(LatticeTopology topo, double strut_mm) {
+  return strut_mm / lattice_quilt_limits(topo).touch;
+}
+
+// notes29b: lattice.hpp states the rule (one printed line of air short of the touch).
+double lattice_quilt_off_strut_mm(LatticeTopology topo, double cell_mm, double line_mm) {
+  return lattice_quilt_limits(topo).touch * cell_mm - kQuiltOffGapLines * std::max(0.0, line_mm);
+}
+
+double lattice_quilt_off_cell_mm(LatticeTopology topo, double strut_mm, double line_mm) {
+  return (strut_mm + kQuiltOffGapLines * std::max(0.0, line_mm)) / lattice_quilt_limits(topo).touch;
 }
 
 LatticeTopologyChoice resolve_lattice_topology(const std::string& lattice_id,

@@ -212,7 +212,7 @@ public enum LatticeAutoPosture {
                                             // member needs (`jobSkinResolved`); the
                                             // finish setting keeps his choice
                                             boundaryFinishWritten:
-                                                s.singleCellMembers),
+                                                s.singleCellMembersInEffect),   // ★ notes29: Aesthetic only
                                     maxRelativeDensity: LatticeSettings.jobDensityCap(
                                         topologyID: s.topologyID, allowQuilt: s.allowQuilt,
                                         algorithm: s.algorithm)) {

@@ -420,15 +420,11 @@ struct FlexibleInfoButton: View {
     @State private var frame: CGRect = .zero
     var body: some View {
         let on = ui.info?.key == key
-        Button {
+        // ★ notes29 (his 11-25): the one (i)'s glyph (AppInfoButton); its tap still opens the face's live numbers card beside it
+        AppInfoButton(title: "Its lattice numbers", text: "", lit: on) {
             ui.roleOpen = nil
             ui.info = on ? nil : FlexibleFaceChipState.Info(key: key, group: group, ref: ref, anchor: frame)
-        } label: {
-            Image(systemName: on ? "info.circle.fill" : "info.circle").font(.system(size: 17, weight: .regular))
-                .foregroundStyle((on ? DS.Color.accent : DS.Color.textSecondary).color)
-                .frame(width: 44, height: 44).contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
         .background(GeometryReader { g in
             Color.clear
                 .preference(key: FlexibleKeepOutKey.self, value: ["info-\(key)": g.frame(in: .global)])

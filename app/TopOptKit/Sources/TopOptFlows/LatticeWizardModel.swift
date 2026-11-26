@@ -272,6 +272,22 @@ public struct LatticeWizardModel: Equatable, Sendable {
     /// skin core needs to re-tie a one-cell member travels with the JOB
     /// (`LatticeSettings.jobSkinResolved`); the setting keeps his choice.
     public var singleCellMembers: Bool = false
+    /// ★ notes29 (his 11-25: "I couldn't turn the Skin off. Even though this was 'Structural' and there is NO single-cell
+    /// available in structural"): single-cell members exist on Aesthetic only. On Structural the switch is hidden, so a
+    /// saved "on" (carried over from Aesthetic by a mode switch, which keeps every setting) locked the Finish to Skin with no way
+    /// to turn it off. The page's stage now gates it: off the Aesthetic stage it is never on, never locks the finish, and is
+    /// saved off. A model made with no settings (the tests' wizard) allows it, as before.
+    public private(set) var stageAesthetic: Bool = true
+    /// ★ notes29: the page's stage changed while it is open (the capsule's Structural ⇄ Aesthetic).
+    public mutating func setStage(aesthetic: Bool) {
+        stageAesthetic = aesthetic
+        if !aesthetic { singleCellMembers = false }
+    }
+    /// ★ notes29 (his 11-25: "For some reason the 'Allow quilt' was defaulted 'on'. It should *always* be off. Especially in
+    /// 'Auto'."): Allow quilt is the page's own setting now, like every other row — off on a new lattice, undone by Cancel and
+    /// Reset all, saved off from the page's Auto (LatticeSetupWizard.saveAndClose). It was written to the part's settings at the
+    /// tap, so a tap kept it on past Cancel and Reset all, on every later visit and every group and zone.
+    public var allowQuilt: Bool = false
     /// ★ "Small cells in thin walls" — see `LatticeSettings.smallCellsInThinWalls` (his ask 11-13).
     public var smallCellsInThinWalls: Bool = false
     /// ★ "Let walls cut cells" — see `LatticeSettings.letWallsCutCells` (his 11-14).
@@ -362,7 +378,10 @@ public struct LatticeWizardModel: Equatable, Sendable {
         self.cellTransition = s.cellTransition
         self.minRelativeDensity = s.minRelativeDensity
         self.gradeAlong = s.gradeAlong
-        self.singleCellMembers = s.singleCellMembers
+        // ★ notes29: single-cell members only on the Aesthetic stage (a saved "on" on Structural is read as off)
+        self.stageAesthetic = (s.stageMode ?? .structural) == .aesthetic
+        self.singleCellMembers = s.singleCellMembers && stageAesthetic
+        self.allowQuilt = s.allowQuilt   // ★ notes29: the page's own setting now
         self.smallCellsInThinWalls = s.smallCellsInThinWalls
         self.letWallsCutCells = s.letWallsCutCells
         self.strutFromMM = s.strutFromMM; self.strutToMM = s.strutToMM
@@ -374,7 +393,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
         self.rimWidthMM = s.rimWidthMM
         self.shapeFitGradeStrength = s.shapeFitGradeStrength
         // ★ the rule holds on load too: a saved single-cell project opens with Skin
-        if s.singleCellMembers, self.boundary != .fullSkin { self.boundary = .fullSkin }
+        if self.singleCellMembers, self.boundary != .fullSkin { self.boundary = .fullSkin }   // ★ notes29: Aesthetic only
         self.gradingMode = s.gradingMode
         self.gradeStepStyle = s.gradeStepStyle
         self.organicGrowth = s.organicGrowth
@@ -429,7 +448,9 @@ public struct LatticeWizardModel: Equatable, Sendable {
             ? cellTransition : .defaultGrade
         // ★ THE FINISH IT REQUIRES IS RESOLVED FOR THE JOB (`jobSkinResolved`), not
         // written into the setting — his choice stays his.
-        out.singleCellMembers = singleCellMembers
+        // ★ notes29: never saved on onto a Structural lattice (Structural has no single-cell members)
+        out.singleCellMembers = singleCellMembers && (out.stageMode ?? .structural) == .aesthetic
+        out.allowQuilt = allowQuilt   // ★ notes29
         out.smallCellsInThinWalls = smallCellsInThinWalls
         out.letWallsCutCells = letWallsCutCells
         out.strutFromMM = strutFromMM; out.strutToMM = strutToMM
@@ -623,10 +644,11 @@ public struct LatticeWizardModel: Equatable, Sendable {
     /// one cell wide has its struts severed at the face caps; the skin re-ties them.
     /// While the switch is on, the finish is Skin and `setBoundary` refuses anything else
     /// (returns false so the wizard can say why). Turning the switch on SETS Skin.
-    public var finishLockedBySingleCell: Bool { singleCellMembers }
+    /// ★ notes29: never on a Structural page (`stageAesthetic`), whatever was saved.
+    public var finishLockedBySingleCell: Bool { singleCellMembers && stageAesthetic }
     public mutating func setSingleCellMembers(_ on: Bool) {
-        singleCellMembers = on
-        if on, boundary != .fullSkin { boundary = .fullSkin }
+        singleCellMembers = on && stageAesthetic
+        if singleCellMembers, boundary != .fullSkin { boundary = .fullSkin }
     }
     @discardableResult
     public mutating func setBoundary(_ b: LatticeBoundaryTreatment) -> Bool {

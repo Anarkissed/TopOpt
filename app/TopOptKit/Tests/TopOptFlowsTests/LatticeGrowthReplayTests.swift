@@ -8,6 +8,10 @@
 //   * it NEVER makes the finished lattice wait: what is left is shown within a second of the landing (the landed lattice held
 //     no longer than that), then the tubes sink into it. RED CONTROL `controlNoCatchUp`: at its own pace the lattice would
 //     wait many seconds;
+//     ★ RE-PINNED to his notes on release 20 (2026-11-25): "add a couple more seconds to the organic animations — the end
+//     always feels too rushed" — what is left now shows within the catch-up (`catchUpEndS`, 2.4 s, eased out; was a second),
+//     still never at the replay's own pace; and (his review of the clips: "8 seconds for the entire animation") a quick lay's
+//     catch-up stretches so the whole lasts `minTotalS` (`endBy`);
 //   * the band of light only once the replay has shown everything recorded, the engine still past its growing;
 //   * a lay that begins while the last one is still landing waits for that landing (its pieces kept).
 import XCTest
@@ -96,7 +100,8 @@ final class LatticeGrowthReplayTests: XCTestCase {
             let ownPace = left * LatticeGrowthReplay.pollS / LatticeGrowthReplay.slowDefault
             r.land(at: landAt, recorded: e.recorded(at: landAt))
             let done = try? XCTUnwrap(r.caughtUpAt)
-            XCTAssertLessThanOrEqual((done ?? .infinity) - landAt, 1.0, "★ within a second of the landing")
+            XCTAssertLessThanOrEqual((done ?? .infinity) - landAt, Self.endBy(start: 0, land: landAt) + 1e-9,
+                                     "★ within the catch-up of the landing (notes29: 2.4 s, or what fills the 8 s; was a second)")
             XCTAssertGreaterThan(ownPace, 2, "RED CONTROL: at its own pace the lattice would wait \(ownPace) s")
             var steps = Set<Double>()
             for k in 0...120 {
@@ -109,6 +114,13 @@ final class LatticeGrowthReplayTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(steps.count, 4, "★ still a replay (in steps), only quicker")
             print("LANDING at \(landAt) s: \(left) polls left, shown by +\((done ?? 0) - landAt) s; at its own pace \(ownPace) s")
         }
+    }
+
+    /// ★ notes29: the longest a landing at `land` catches up for, a lay begun at `start`: the lengthened catch-up, or what fills
+    /// his 8 s (less the sink), to a step.
+    static func endBy(start: Double, land: Double) -> Double {
+        Swift.max(LatticeGrowthReplay.catchUpEndS, start + LatticeGrowthReplay.minTotalS - LatticeGrowth.fadeS - land)
+            + 1 / LatticeGrowthReplay.stepsPerS
     }
 
     // MARK: on LatticeGrowth
@@ -144,11 +156,13 @@ final class LatticeGrowthReplayTests: XCTestCase {
                 XCTAssertGreaterThan((g.fadeStarted ?? 0) - land, 2)
                 continue
             }
-            XCTAssertFalse(g.holdsLanded(at: land + 1.0), "★ never more than a second")
-            XCTAssertEqual(g.shownCount(at: land + 1.0), g.count, "★ every piece shown by then")
-            XCTAssertLessThanOrEqual((g.fadeStarted ?? .infinity) - land, 1.0)
+            let catchUp = Self.endBy(start: t0, land: land)   // ★ notes29: the lengthened end, or what fills the 8 s (was a second)
+            XCTAssertFalse(g.holdsLanded(at: land + catchUp + 0.01), "★ never more than the catch-up")
+            XCTAssertEqual(g.shownCount(at: land + catchUp + 0.01), g.count, "★ every piece shown by then")
+            XCTAssertLessThanOrEqual((g.fadeStarted ?? .infinity) - land, catchUp + 1e-9)
             XCTAssertEqual(g.alpha(at: (g.fadeStarted ?? 0) + LatticeGrowth.fadeS + 0.01), 0, "then it sinks into it")
-            XCTAssertLessThanOrEqual(LatticeGrowth.landingS, 1.1 + 1e-9, "the landing in all")
+            XCTAssertLessThanOrEqual(LatticeGrowth.landingS, Swift.max(3.5, LatticeGrowthReplay.minTotalS) + 1e-9,
+                                     "the landing in all (notes29: about 3.4 s, or the 8 s; was 1.1)")
         }
     }
 
@@ -184,7 +198,8 @@ final class LatticeGrowthReplayTests: XCTestCase {
         g.seal(landed: true, now: land + 0.4)                             // ...and lands while the Draft is still landing
         let end = (g.fadeStarted ?? 0) + LatticeGrowth.fadeS
         XCTAssertLessThanOrEqual(end - land, LatticeGrowth.landingS + 1e-9)
-        XCTAssertFalse(g.holdsLanded(at: land + 1.0), "★ the finished lattice shows within a second")
+        XCTAssertFalse(g.holdsLanded(at: land + Self.endBy(start: t0, land: land) + 0.01),
+                       "★ the finished lattice shows within the catch-up (notes29: 2.4 s, or what fills the 8 s; was a second)")
         XCTAssertEqual(g.shownCount(at: end + 0.01), 0, "the growth gone")
         XCTAssertFalse(g.layOnScreen, "★ the quick lay's growth dropped: nothing replays over its finished lattice")
     }

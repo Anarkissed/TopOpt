@@ -38,7 +38,11 @@ public enum AccentChoice: String, CaseIterable, Sendable {
 @MainActor
 public final class AppSettings: ObservableObject {
     /// The app's one, which also puts his accent on from the first draw (AppModel touches it at launch).
-    public static let shared: AppSettings = { let s = AppSettings(); s.applyAccent(); return s }()
+    public static let shared: AppSettings = {
+        let s = AppSettings(); s.applyAccent()
+        skipAllAnimations = s.skipAnimations   // ★ notes29
+        return s
+    }()
     static let marginKey = "topopt.settings.safetyMargin.v1"
     nonisolated static let unitsKey = "topopt.settings.units.v1"
     static let accentKey = "topopt.settings.accent.v1"
@@ -113,8 +117,28 @@ public final class AppSettings: ObservableObject {
         printTestedAtStart.union(defaults.stringArray(forKey: printTestedKey) ?? [])
     }
 
+    /// ★ notes29 (his notes on release 20, 2026-11-25): "Add a setting in the main menu settings to 'Skip all animations' which
+    /// will turn off ALL animations and allow for a blank screen with a 'Refreshing Lattice' notification and progress bar. Let it
+    /// run at the real speed of the refresh." Off (DEFAULT): the animations play (the lattice's timelapse and growth, the view's
+    /// turns, the results' moving views, the pop-ups' motion). On: none of them — a lay shows a blank lattice area and the
+    /// centred "Refreshing Lattice" card with its progress bar, and the finished lattice the moment it lands.
+    nonisolated static let skipAnimationsKey = "topopt.settings.skipAllAnimations.v1"
+    @Published public var skipAnimations: Bool {
+        didSet {
+            defaults.set(skipAnimations, forKey: Self.skipAnimationsKey)
+            if self === Self.shared { Self.skipAllAnimations = skipAnimations }
+        }
+    }
+    /// The app's own choice (the shared settings'), readable anywhere (the renderer, the camera's clock, the growth) without
+    /// the main actor. Set by the shared settings' `skipAnimations` (tests set it directly).
+    nonisolated(unsafe) public internal(set) static var skipAllAnimations = false
+    /// ★ notes29: the clock a decorative animation draws by (its TimelineView still ticks: "never frozen" while they play) —
+    /// held at one instant with Skip all animations, so nothing moves.
+    nonisolated static func animationClock(_ d: Date) -> TimeInterval { skipAllAnimations ? 0 : d.timeIntervalSinceReferenceDate }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        self.skipAnimations = defaults.bool(forKey: Self.skipAnimationsKey)   // absent ⇒ false: the animations play
         self.latticePrintTested = Self.storedPrintTested(defaults)
         self.latticeLivePreview = defaults.bool(forKey: Self.livePreviewKey)   // absent ⇒ false: Click to refresh (his pick)
         self.latticePrintAccurate = defaults.bool(forKey: Self.printAccurateKey)   // absent ⇒ false: the quick Draft (11-21)
@@ -155,10 +179,37 @@ public final class AppSettings: ObservableObject {
     }
 }
 
+/// ★ notes29 (his "turn off ALL animations"): with Skip all animations on, the whole app below the root takes no SwiftUI
+/// animation (every `withAnimation`, `.animation` and transition lands at once: the pop-ups, the drawers, the sheets' motion);
+/// every view that reads Reduce Motion reads it as on too (`reduceMotion` there: the results' moving views — Bend, Break, the
+/// load paths — hold still; Play steps between its ends; the view cube jumps). The 3D view's own clocks read `AppSettings.skipAllAnimations` (the lattice's timelapse and
+/// growth, the view's turns and settles).
+struct SkipAllAnimationsModifier: ViewModifier {
+    @ObservedObject var settings: AppSettings = .shared
+
+    func body(content: Content) -> some View {
+        content
+            .transaction { t in
+                guard settings.skipAnimations else { return }
+                t.animation = nil
+                t.disablesAnimations = true
+            }
+    }
+}
+
+extension View {
+    /// ★ notes29: the app's Skip all animations, on everything below.
+    func skipsAllAnimations() -> some View { modifier(SkipAllAnimationsModifier()) }
+}
+
 enum AppSettingsCopy {
     static let title = "Settings"
     static let subtitle = "For every new part"
     static let marginInfo = "150 % (the default and minimum) means a part holds 1.5\u{00D7} your load."
+    /// ★ notes29: his words for the setting; its caption (five words at most); its (i).
+    static let skipTitle = "Skip all animations"
+    static let skipCaption = "No motion, just progress"
+    static let skipInfo = "On, nothing moves: a lattice shows the moment it is ready, with a centred \u{201C}Refreshing Lattice\u{201D} bar while it is made. View turns and the results\u{2019} moving views stand still."
     static func marginLabel(_ v: Double) -> String {
         SafetyMargin.presets.first { abs($0.value - v) < 1e-9 }?.label ?? "\(Int((v * 100).rounded())) %"
     }
@@ -176,6 +227,8 @@ struct AppSettingsView: View {
 
     var body: some View {
         content
+            // ★ notes29 (his 11-25): this page is a sheet, over the root's layer — its (i)s' centred notification is drawn here
+            .overlay { AppPopupLayer() }
             .sheet(isPresented: $strengthOpen) {
                 StrengthCheckPage(settings: strength) { strengthOpen = false }
                     .frame(minWidth: 700, minHeight: 640)
@@ -208,6 +261,7 @@ struct AppSettingsView: View {
                         .frame(width: 280)
                 }
                 row("Accent") { accentDots }
+                skipAnimationsRow   // ★ notes29
                 // ★ Install 3: "New engine (test)" retired — the new engine is the preview (no row)
                 // ★ Install 3 (his 11-17): the strength check, all of it, Simple and Full maths, and the values we chose
                 row("Strength check") {
@@ -271,6 +325,29 @@ struct AppSettingsView: View {
                 .background(publish("appSettingsAccent-" + a.rawValue))
             }
         }
+    }
+
+    /// ★ notes29 (his notes on release 20): "Skip all animations" — its caption (five words at most) under it, the detail in
+    /// its (i), the switch at the trailing end (a 44 pt target).
+    private var skipAnimationsRow: some View {
+        HStack(spacing: DS.Space.s) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(AppSettingsCopy.skipTitle).dsStyle(DS.TypeScale.caption).fontWeight(.bold)
+                    .foregroundStyle(DS.Color.textPrimary.color).lineLimit(1)
+                Text(AppSettingsCopy.skipCaption).dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
+                    .lineLimit(1).said(AppSettingsCopy.skipCaption)
+            }
+            InfoTip(key: "appSettingsSkipAnimations", text: AppSettingsCopy.skipInfo, label: "About skipping animations")
+            Spacer(minLength: DS.Space.m)
+            Toggle(AppSettingsCopy.skipTitle, isOn: $settings.skipAnimations)
+                .labelsHidden()
+                .tint(DS.Color.accent.color)
+                .frame(minWidth: 44, minHeight: 44)
+                .accessibilityIdentifier("app-settings-skip-animations")
+                .background(publish("appSettingsSkipAnimations"))
+        }
+        .frame(minHeight: 44)
+        .background(publish("appSettingsRow-" + AppSettingsCopy.skipTitle))
     }
 
     /// One row: its bold label, its control at the trailing end, 44 pt tall at least.

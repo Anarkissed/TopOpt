@@ -471,12 +471,13 @@ public final class FlexibleMainStage: ObservableObject {
     func forceOverlayRebuildForTests() { overlayKey = nil }
     /// Reduced motion (tests pin it).
     var reduceMotion: () -> Bool = {
+        if AppSettings.skipAllAnimations { return true }   // ★ notes29: Skip all animations holds the squish still
         #if canImport(UIKit)
-        UIAccessibility.isReduceMotionEnabled
+        return UIAccessibility.isReduceMotionEnabled
         #elseif canImport(AppKit)
-        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        return NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         #else
-        false
+        return false
         #endif
     }
 

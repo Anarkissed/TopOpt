@@ -201,6 +201,9 @@ struct Pass {
   double base_mm = 0.0;             // this lay's own cell (S_base)
   double finest_mm = 0.0;           // the smallest cell its ladder allows (f)
   double floor_mm = 0.0;            // the smallest cell that may stand in this pass at all
+  // ★ notes29b: this pass lays a THIN wall (CellSpec::small_in_thin_walls): its one cell, under the open look's floor,
+  // never under Layout::thin_floor_cell_mm (floor_mm says so), and nothing else.
+  bool thin = false;
   double skin_most = 0.0;           // the deepest Protect skin or cover of the domain
   // D14c: the region's depth (a wall is never read deeper; 1e300 for the whole part), and, under a flat face, the
   // depth whose own cell prints (0 elsewhere: the cell there does not come from the depth).
@@ -352,6 +355,7 @@ struct Pass {
   }
   bool fine_allowed(const double lo[3], double s) const {
     if (s >= out->floor_cell_mm * (1.0 - 1e-9)) return true;
+    if (thin) return true;   // ★ notes29b: a thin wall's own cell (floor_mm holds it at the thin floor)
     if (!band_region) return false;
     return edge_distance(lo[0] + 0.5 * s, lo[1] + 0.5 * s, lo[2] + 0.5 * s) - 0.5 * s < spec->band_mm;
   }
@@ -1449,6 +1453,11 @@ Layout lay_cells(const Domain& domain, const CellSpec& asked, int threads, const
   // C14, R2: the smallest cell is the one the thinnest strut leaves open; with Allow quilt
   // on, the one it draws without closing (the quilt's cell), on any wall that needs it.
   out.floor_cell_mm = min_strut / (spec.allow_quilt ? bounds.touch : bounds.open_look);
+  // ★ notes29b: Small cells in thin walls (Allow quilt off only): a thin wall's own cell may go down to the cell in which the
+  // thinnest strut stays a printed line short of touching (lattice_quilt_off_cell_mm), never under it.
+  out.thin_floor_cell_mm = spec.small_in_thin_walls && !spec.allow_quilt
+      ? std::min(out.floor_cell_mm, lattice_quilt_off_cell_mm(spec.topology, min_strut, ds.bead_mm))
+      : out.floor_cell_mm;
   out.bead_mm = ds.bead_mm;
   out.min_strut_mm = min_strut;
   out.topology = spec.topology;
@@ -1668,6 +1677,13 @@ Layout lay_cells(const Domain& domain, const CellSpec& asked, int threads, const
     pass.base_mm = base;
     pass.skin_most = domain.skin_most_mm();
     pass.floor_mm = std::max(spec.cell_min_mm, out.floor_cell_mm);
+    if (pass.thin) {
+      // ★ notes29b: a thin wall is laid with its own one cell and nothing smaller (no halves, no units): the cell that
+      // divides it, held at the thin floor.
+      pass.sizes = {base};
+      pass.divisors.clear();
+      pass.floor_mm = std::max(spec.cell_min_mm, out.thin_floor_cell_mm);
+    }
     pass.finest_mm = base;
     for (double a : pass.sizes) pass.finest_mm = std::min(pass.finest_mm, a);
     for (int n : pass.divisors)
@@ -2018,9 +2034,14 @@ Layout lay_cells(const Domain& domain, const CellSpec& asked, int threads, const
         area = st.entries.size() * WallMap::kPitch * WallMap::kPitch;
       }
       wall.cell = divide(spec, wall.width, &wall.layers);
+      // ★ notes29b, Small cells in thin walls (CellSpec::small_in_thin_walls): a wall the open look's cells cannot divide
+      // (its own cell under the smallest one, while the cell asked for is not) is a THIN wall, laid with its own one cell
+      // when that is at least the thin floor (the thinnest strut a printed line short of touching). Only such a wall.
+      wall.thin = spec.small_in_thin_walls && wall.cell < smallest && target >= smallest &&
+                  wall.cell >= std::max(out.thin_floor_cell_mm * (1.0 + 1e-9), spec.cell_min_mm);
       // A wall is a stretch wide enough for its own cells (two by two of them) whose
       // cell prints. Anything else is left to the pass below, cell by cell.
-      if (wall.cell < smallest || area < 4.0 * wall.cell * wall.cell) continue;
+      if ((wall.cell < smallest && !wall.thin) || area < 4.0 * wall.cell * wall.cell) continue;
       find_edges(*kept, which, domain, probe, spare, r, f);
       const FaceReadings::Stretch& st = kept->stretches[which];   // edged: no longer written
       wall.lo[0] = st.lo[0]; wall.lo[1] = st.lo[1];
@@ -2051,8 +2072,10 @@ Layout lay_cells(const Domain& domain, const CellSpec& asked, int threads, const
       // Centred on the wall's own stretch (C9, per wall).
       const double wlo3[3] = {wall.lo[0], wall.lo[1], wall.start};
       const double whi3[3] = {wall.hi[0], wall.hi[1], wall.start + wall.width};
+      pass.thin = wall.thin;   // ★ notes29b
       lay(pass, wall.cell, wlo3, whi3, true, keep);
     }
+    pass.thin = false;
     pass.wall = -1;   // what no wall holds: cell by cell from the region's own base
     lay(pass, base, lo, hi, true, keep);
     if (keep) keep_steps(lays, limit);

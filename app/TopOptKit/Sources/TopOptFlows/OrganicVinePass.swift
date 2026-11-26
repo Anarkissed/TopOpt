@@ -26,6 +26,7 @@ struct VineFrame {
     float4x4 eyeNormalBasis;
     float4   albedo;
     float4   blend;        // x = the joints' smooth-min k (mm); y = 1: the flat cut's face drawn (0: the tests' red control)
+    float4   up;           // ★ notes29: xyz the print's up in the part's own coordinates; w = 1 when it is not +Z (0: +Z, as before)
 };
 struct VineGBuf {
     float  eyeZ    [[color(0)]];
@@ -51,7 +52,17 @@ struct TubeVOut {
 };
 // ── a bridge's section (core weave_tubes.cpp sweep_section; OrganicVineShape.sectionPoint / sectionFrame are the same) ──
 constant float kPi = 3.14159265358979;
-static void sec_frame(float3 t, float3 fallback, thread float3& side, thread float3& up) {
+static void sec_frame(float3 t, float3 fallback, float4 up4, thread float3& side, thread float3& up) {
+    if (up4.w > 0.5) {   // ★ notes29: level and upward along the print's up (OrganicVineShape.sectionFrame's printUp)
+        float3 sd = cross(up4.xyz, t);
+        if (length(sd) < 1e-6) { sd = fallback; }
+        sd = normalize(sd);
+        float3 u = cross(t, sd);
+        if (dot(u, up4.xyz) < 0.0) { u = -u; sd = -sd; }
+        side = sd;
+        up = u;
+        return;
+    }
     float3 sd = float3(-t.y, t.x, 0.0);
     if (length(sd) < 1e-6) { sd = fallback; }
     sd = normalize(sd);
@@ -59,6 +70,10 @@ static void sec_frame(float3 t, float3 fallback, thread float3& side, thread flo
     if (u.z < 0.0) { u = -u; sd = -sd; }
     side = sd;
     up = u;
+}
+// ★ notes29: below a puck's dome (its upper half only): along the print's up (+Z as before)
+static bool below_dome(float3 p, float4 S, float4 up4) {
+    return up4.w > 0.5 ? dot(p - S.xyz, up4.xyz) < 0.0 : p.z < S.z;
 }
 // outline point j at half width r: the D (1) two bottom corners then its round top in kSides - 3 facets; the square (2)
 static float2 sec_point(int sec, int j, float r) {
@@ -93,7 +108,7 @@ struct TubePt { float3 p; float3 n; };   // a vertex in the model's space: where
 // One piece (q: (a, ra) (b, rb) (ta, flat a) (tb, flat b) (va, section) (vb, -)): the side, 6 x kSides vertices; then a
 // flat end disc at a (3 x kSides) and at b (3 x kSides), drawn only where the file closes the tube flat (q[2].w / q[3].w
 // = 1: into the solid, cut by the part's surface, or any end of a bridge).
-static TubePt tube_point(uint vid, const device float4* q) {
+static TubePt tube_point(uint vid, const device float4* q, float4 up4) {
     const int ring[6] = { 0, 1, 0, 0, 1, 1 };
     const int step[6] = { 0, 0, 1, 1, 0, 1 };
     int side = 6 * kSides;
@@ -138,7 +153,7 @@ static TubePt tube_point(uint vid, const device float4* q) {
     // ★ a bridge (packed version 2's section): the file's D or square bar, its side level, its flat side down; at a mitre
     // the mean of this bar's section and the neighbour's (the neighbour's direction: the plane's mirror of this one)
     float3 sd, up;
-    sec_frame(t, v, sd, up);
+    sec_frame(t, v, up4, sd, up);
     float2 xy = sec_point(sec, j, rad) * float(k);
     float3 off = sd * xy.x + up * xy.y;
     o.p = c + off + t * (abs(dn) > 1e-3 ? -dot(off, n) / dn : 0.0);
@@ -146,7 +161,7 @@ static TubePt tube_point(uint vid, const device float4* q) {
     if (dot(t2, t) < 0.99999 && length(t2) > 0.5) {
         t2 = normalize(t2);
         float3 sd2, up2;
-        sec_frame(t2, v, sd2, up2);
+        sec_frame(t2, v, up4, sd2, up2);
         float3 off2 = sd2 * xy.x + up2 * xy.y;
         float dn2 = dot(t2, n);
         o.p = 0.5 * (o.p + c + off2 + t2 * (abs(dn2) > 1e-3 ? -dot(off2, n) / dn2 : 0.0));
@@ -157,7 +172,7 @@ static TubePt tube_point(uint vid, const device float4* q) {
 }
 vertex TubeVOut tube_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
                             const device float4* P [[buffer(0)]], constant VineFrame& F [[buffer(1)]]) {
-    TubePt t = tube_point(vid, P + 6 * iid);
+    TubePt t = tube_point(vid, P + 6 * iid, F.up);
     TubeVOut o;
     o.pos = F.clipFromModel * float4(t.p, 1.0);
     o.ez = -(F.eyeFromModel * float4(t.p, 1.0)).z;
@@ -261,7 +276,7 @@ static float cut_entry(float3 ro, float3 rd, const device float4* pl, int n, boo
 // x inside piece q's own shape: within its section, between its end planes where the tube is closed flat; past an open
 // end (a round end, or a joint with the next piece of the run) up to one radius on (what lies there is the next piece or
 // the ball: a ray seen through one piece's cut may leave by its neighbour's far side)
-static bool vine_in_piece(float3 x, const device float4* q) {
+static bool vine_in_piece(float3 x, const device float4* q, float4 up4) {
     float3 a = q[0].xyz, ab = q[1].xyz - a;
     float L = length(ab);
     if (L < 1e-6) { return false; }
@@ -274,7 +289,7 @@ static bool vine_in_piece(float3 x, const device float4* q) {
     int sec = int(q[4].w + 0.5);
     if (sec == 0) { return length(d) <= r * kRingScale; }
     float3 sd, up;
-    sec_frame(t, normalize(q[4].xyz), sd, up);
+    sec_frame(t, normalize(q[4].xyz), up4, sd, up);
     float X = dot(d, sd), Y = dot(d, up);
     if (sec == 1) { return Y <= 0.0 ? (abs(X) <= r && Y >= -r) : (X * X + Y * Y <= r * r); }
     return abs(X) <= r && abs(Y) <= r;
@@ -292,7 +307,7 @@ static VineGBufCut vine_cut_out(float3 p, float3 n, float depth, constant VineFr
 }
 vertex TubeCutVOut tube_cut_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
                                    const device float4* P [[buffer(0)]], constant VineFrame& F [[buffer(1)]]) {
-    TubePt t = tube_point(vid, P + 7 * iid);
+    TubePt t = tube_point(vid, P + 7 * iid, F.up);
     TubeCutVOut o;
     o.pos = F.clipFromModel * float4(t.p, 1.0);
     o.cpos = o.pos;
@@ -318,7 +333,7 @@ fragment VineGBufCut tube_cut_gbuffer(TubeCutVOut in [[stage_in]], const device 
     float tf = cut_entry(ro, rd, pl, n, un, bn);
     if (tf > tp + 1e-4) { discard_fragment(); }
     float3 f = ro + rd * tf;
-    if (!vine_in_piece(f, q)) { discard_fragment(); }
+    if (!vine_in_piece(f, q, F.up)) { discard_fragment(); }
     float4 clip = F.clipFromModel * float4(f, 1.0);
     return vine_cut_out(f, bn, min(clip.z / clip.w, in.pos.z), F);
 }
@@ -345,7 +360,7 @@ fragment VineGBufDepth cap_gbuffer(BoxVOut in [[stage_in]], const device float4*
     float t = -b - sqrt(h);
     if (t < 0.0) { discard_fragment(); }
     float3 p = ro + rd * t;
-    if (dome && p.z < S.z) { discard_fragment(); }
+    if (dome && below_dome(p, S, F.up)) { discard_fragment(); }
     return vine_out(p, normalize(p - S.xyz), F);
 }
 // ★ the flat cut on a round end (2 float4 per end: (xyz, r), then (first, count, union) into the plane list): the sphere
@@ -375,13 +390,13 @@ fragment VineGBufDepth cap_cut_gbuffer(BoxVOut in [[stage_in]], const device flo
     if (t1 < 0.0) { discard_fragment(); }
     float3 p = ro + rd * t0;
     if (t0 >= 0.0 && !cut_outside(p, pl, n, un)) {
-        if (dome && p.z < S.z) { discard_fragment(); }
+        if (dome && below_dome(p, S, F.up)) { discard_fragment(); }
         return vine_out(p, normalize(p - S.xyz), F);
     }
     if (F.blend.y < 0.5) { discard_fragment(); }
     float3 bn = float3(0.0);
     float tf = cut_entry(ro, rd, pl, n, un, bn);
-    if (tf < max(t0, 0.0) || tf > t1 || (dome && (ro + rd * tf).z < S.z)) { discard_fragment(); }
+    if (tf < max(t0, 0.0) || tf > t1 || (dome && below_dome(ro + rd * tf, S, F.up))) { discard_fragment(); }
     return vine_out(ro + rd * tf, bn, F);
 }
 
@@ -564,7 +579,10 @@ final class OrganicVinePass {
         var eyeNormalBasis: simd_float4x4
         var albedo: SIMD4<Float>
         var blend: SIMD4<Float>
+        var up: SIMD4<Float>   // ★ notes29 (VineFrame.up)
     }
+    /// ★ notes29: the uploaded shape's print up as the shader reads it (w 0: +Z, as before).
+    private(set) var upUniform = SIMD4<Float>(0, 0, 1, 0)
 
     init(device: MTLDevice) throws {
         self.device = device
@@ -653,6 +671,7 @@ final class OrganicVinePass {
         cutCapCount = cutCapBuffer == nil || cutPlaneBuffer == nil ? 0 : cutCaps.count / 2
         jointCount = pieceBuffer == nil ? 0 : joints.count
         blendMM = s.params.blendMM
+        upUniform = s.up == SIMD3(0, 0, 1) ? SIMD4(0, 0, 1, 0) : SIMD4(simd_normalize(s.up), 1)   // ★ notes29
     }
 
     var isDrawable: Bool { pieceCount + cutPieceCount > 0 }
@@ -662,7 +681,8 @@ final class OrganicVinePass {
                 eyeFromModel: simd_float4x4, eyeNormalBasis: simd_float4x4, albedo: SIMD4<Float>, turning: Bool = false) -> Bool {
         guard isDrawable, enc.device === device else { return false }
         var f = Frame(clipFromModel: clipFromModel, modelFromClip: clipFromModel.inverse, eyeFromModel: eyeFromModel,
-                      eyeNormalBasis: eyeNormalBasis, albedo: albedo, blend: SIMD4(blendMM, Self.drawCutFace ? 1 : 0, 0, 0))
+                      eyeNormalBasis: eyeNormalBasis, albedo: albedo, blend: SIMD4(blendMM, Self.drawCutFace ? 1 : 0, 0, 0),
+                      up: upUniform)
         enc.setDepthStencilState(depthState)
         enc.setCullMode(.none)
         enc.setVertexBytes(&f, length: MemoryLayout<Frame>.stride, index: 1)

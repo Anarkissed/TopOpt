@@ -109,7 +109,14 @@ struct LatticeSampleView: View {
     /// Test hook (FlexibleSaid.recording): how many times a kept sample was shown instead of a build.
     nonisolated(unsafe) static var recordedKept = 0
 
-    @StateObject private var camera = OrbitCameraModel()
+    @StateObject private var camera = LatticeSampleView.makeCamera()
+    /// ★ notes29 (his 11-25: "Choosing perspective/orthogonal view does nothing to the sample in the Settings tab. It should work
+    /// everywhere, including the sample part and the cube."): the sample's camera follows the app's one [Orthographic │
+    /// Perspective] choice (ViewProjection), Cells and In a part alike. It was a camera of its own, always perspective.
+    static func makeCamera() -> OrbitCameraModel { OrbitCameraModel(followsViewProjection: true) }
+    /// Test hook (FlexibleSaid.recording): the projection the sample last drew with.
+    nonisolated(unsafe) static var recordedOrthographic: Bool?
+    static func noteProjection(_ o: Bool) { if FlexibleSaid.recording { recordedOrthographic = o } }
     @State private var mesh: ViewerMesh?
     @State private var caption = LatticeSampleView.building
     @State private var failed = false
@@ -120,6 +127,11 @@ struct LatticeSampleView: View {
     @State private var buildStarted: Date?
     @State private var heldForPart = false
     @State private var builtSeconds: Double?
+    /// ★ notes29 (his "timelapse of a building being made"): a strut type's sample is built on screen as his part's lattice is
+    /// (LatticeBuildTimelapse) — the last sample's struts gone the moment a new one is asked for, the new ones floor by floor
+    /// once laid; with Skip all animations, the sample blank and the "Refreshing Lattice" card until it lands.
+    @State private var buildShow = LatticeBuildShow()
+    @StateObject private var refresh = LatticeRefreshProgress()
 
     static let building = "Building the sample\u{2026}"
 
@@ -160,6 +172,7 @@ struct LatticeSampleView: View {
 
     var body: some View {
         GeometryReader { g in
+            let _ = Self.noteProjection(camera.camera.orthographic)   // ★ notes29: the test hook (recording only)
             sample
                 .onAppear { frameRegion(g.size, visible) }
                 .onChange(of: g.size) { frameRegion($0, visible) }
@@ -190,6 +203,7 @@ struct LatticeSampleView: View {
                 if let laidBars {   // ★ the engine's struts in the bare body, seen through it (Organic; ★ notes26 every type)
                     MetalMeshView(mesh: mesh, camera: camera, settleRotation: Self.settleZUp,
                                   bodyAlpha: LatticeLayoutPreview.ghostAlpha, layoutBars: laidBars)
+                        .latticeBuild(buildShow)   // ★ notes29: built on screen, floor by floor
                 } else {
                     MetalMeshView(mesh: mesh, camera: camera, settleRotation: Self.settleZUp)
                 }
@@ -206,6 +220,11 @@ struct LatticeSampleView: View {
             }
             .padding(.bottom, DS.Space.l)
             .padding(.leading, visible.leading).padding(.trailing, visible.trailing).padding(.bottom, visible.bottom)   // ★ 11-23
+            // ★ notes29: Skip all animations — the centred "Refreshing Lattice" card while the sample is laid
+            LatticeRefreshingCard(progress: refresh)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.leading, visible.leading).padding(.trailing, visible.trailing)
+                .padding(.top, visible.top).padding(.bottom, visible.bottom)
         }
         .task(id: inputs) { await build() }
         .onChange(of: caption) { c in if FlexibleSaid.recording { Self.recordedCaptions.append(c) } }
@@ -233,6 +252,7 @@ struct LatticeSampleView: View {
 
     /// ★ his 11-23: a group's kept sample, shown as it was built (its caption and its build time), with no build.
     private func showKept(_ s: LatticeSampleKeep.Sample) {
+        buildShow.stop(); refresh.end()   // ★ notes29: a kept sample shows at once
         failed = false
         laidBars = s.bars
         mesh = s.mesh
@@ -281,8 +301,14 @@ struct LatticeSampleView: View {
         // ★ his 11-23: back on a group whose settings are as its sample was built — that sample, at once, no build
         if let k = keep, let s = LatticeSampleKeep.shared.sample(k, for: inputs) { return showKept(s) }
         caption = Self.building; failed = false
+        let lastS = builtSeconds
         buildBegins()   // ★ his 11-22: the time it takes, said
         let i = inputs
+        // ★ notes29: a strut type's sample is built on screen (Organic's has no growth: shown at once, as before); with Skip all
+        // animations, any sample leaves the area blank with the card until it lands
+        if i.organic == nil || AppSettings.skipAllAnimations { buildShow.layBegins() } else { buildShow.stop() }
+        refresh.begin([.init(words: i.organic == nil ? LatticeLayoutPreview.stepLay : "Growing the vines",
+                             expectedS: lastS ?? (i.organic == nil ? 1.7 : 6))])
         if let look = i.organic { return await buildOrganic(look, i) }
         if FlexibleSaid.recording { Self.recordedAsks.append(i) }
         Self.say(tag, "ask \(i.shape) \(i.topology) cell \(i.cellMM) rho \(i.rhoLo)-\(i.rhoHi) bead \(i.beadMM)")
@@ -314,6 +340,8 @@ struct LatticeSampleView: View {
             let token = Int.random(in: 1...Int.max)
             laidBars = LatticeLayoutBarsInputs(token: token, bars: made.bars, flags: made.flags, colours: made.colours,
                                                colourKey: token)
+            buildShow.landed(token: token)   // ★ notes29: the frame rises
+            refresh.end()
             mesh = m
             Self.say(tag, "laid (\(made.struts) struts)")
             camera.reframe(m.bounds)
@@ -332,6 +360,7 @@ struct LatticeSampleView: View {
     private func laidFailed(_ log: GenerationTimingLog, _ rec: GenerationTimingLog.Pending, _ why: String,
                             stages: [String: Double], popUp: String? = nil) {
         log.end(rec, .failed, reason: why, stages: stages)
+        buildShow.stop(); refresh.end()   // ★ notes29
         mesh = nil; laidBars = nil; failed = true
         caption = Self.organicFailedCaption
         AppPopups.shared.show(Self.organicFailedTitle, popUp ?? why, log: why)
@@ -418,6 +447,8 @@ struct LatticeSampleView: View {
             let m = ViewerMesh(vertices: body.vertices, indices: body.indices,
                                faceIDs: [Int32](repeating: 1, count: body.indices.count / 3))
             laidBars = bars
+            buildShow.landed(token: bars.token)   // ★ notes29 (shown at once: Organic grows no frame)
+            refresh.end()
             mesh = m
             camera.reframe(m.bounds)
             buildShown()
@@ -434,6 +465,7 @@ struct LatticeSampleView: View {
         } catch {
             guard !Task.isCancelled else { return }   // the page moved on: nothing to say
             log.end(rec, .failed, reason: (error as? TopOptError)?.message ?? "\(error)", stages: stages)
+            buildShow.stop(); refresh.end()   // ★ notes29
             mesh = nil; laidBars = nil; failed = true
             // his 11-20: a centred pop-up in plain English; ★ his 11-22: "An error should always tell what's wrong and how
             // to fix it. Always." — a refusal says which setting, what it allows and the way out

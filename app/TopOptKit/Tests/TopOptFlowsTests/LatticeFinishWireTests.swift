@@ -92,7 +92,10 @@ final class LatticeFinishWireTests: XCTestCase {
         XCTAssertTrue(src.contains(".disabled(greyed)"), "★ a greyed choice is not picked by a tap")
         XCTAssertTrue(src.contains("model.boundary == .rim ? Self.rimStoredLine : Self.rimGreyedLine"))
         XCTAssertEqual(LatticeSetupWizard.rimGreyedLine, "Rim needs engine work: the engine builds no rim on a real part yet.")
-        XCTAssertTrue(src.contains("captionLine(Self.skinNotCertifiedLine"))
+        // ★ RE-PINNED (notes29, his 11-25: five words under a setting): the five words on the page, the line in the (i)
+        XCTAssertTrue(src.contains("captionLine(Self.skinNotCertifiedBrief, info: \"skin-cert\",\n"
+                                   + "                                Self.skinNotCertifiedLine + "))
+        XCTAssertTrue(src.contains("captionLine(model.boundary == .rim ? Self.rimStoredBrief : Self.rimGreyedBrief"))
         XCTAssertTrue(src.contains("segmentButton(f.title, on: shown == f, greyed: greyed(f))"),
                       "★ release (4): a zone's four finishes, each greyed where core refuses it")
     }

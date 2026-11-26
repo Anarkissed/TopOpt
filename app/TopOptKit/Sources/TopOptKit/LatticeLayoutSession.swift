@@ -259,10 +259,15 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         public let faces: Int
         public let openEdges: Int
         public let msOpen: Double
+        /// ★ notes29: opened standing the way it prints (`open(path:printUp:)`).
+        public var framed = false
     }
 
     public let id: Int64
     public let info: OpenInfo
+    /// ★ notes29 (P8, his print orientation): the up the part was opened standing along (the print file's `print_frame`), in
+    /// the part's own coordinates; nil: as placed. Every call still takes and gives the part's own coordinates.
+    public let printUp: SIMD3<Double>?
     let worker: LatticeLayoutWorker
     private let lock = NSLock()
     private var generation: UInt64 = 0
@@ -271,8 +276,8 @@ public final class LatticeLayoutSession: @unchecked Sendable {
     /// The worker's stack: 16 MB (the iPad's main thread has 1 MB; core recurses in its measure).
     public static let workerStackSize = 16 << 20
 
-    private init(id: Int64, info: OpenInfo, worker: LatticeLayoutWorker) {
-        self.id = id; self.info = info; self.worker = worker
+    private init(id: Int64, info: OpenInfo, printUp: SIMD3<Double>? = nil, worker: LatticeLayoutWorker) {
+        self.id = id; self.info = info; self.printUp = printUp; self.worker = worker
     }
 
     deinit { close() }
@@ -312,17 +317,27 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         return try outcome.get()
     }
 
-    public static func open(path: String, linearDeflection: Double = 0) async throws -> LatticeLayoutSession {
+    /// ★ notes29 (P8, his print orientation: after Keep, the Organic preview still grew along the part's +Z): `printUp` given,
+    /// the part is opened standing the way its print file stands (core's print frame: up IS +Z there; LatticeLayoutBridge.hpp,
+    /// lattice_layout_open_framed) — the lattice is laid as the print file lays it and every place comes back in the part's own
+    /// coordinates. nil: as before, not a byte moved.
+    public static func open(path: String, linearDeflection: Double = 0, printUp: SIMD3<Double>? = nil) async throws
+        -> LatticeLayoutSession {
         let worker = LatticeLayoutWorker(stackSize: workerStackSize)
         let raw: topoptbridge.LatticeLayoutOpenInfo = try await worker.run {
             var err = topoptbridge.BridgeError()
-            let r = topoptbridge.lattice_layout_open(std.string(path), linearDeflection, &err)
+            let r: topoptbridge.LatticeLayoutOpenInfo
+            if let up = printUp {
+                r = topoptbridge.lattice_layout_open_framed(std.string(path), linearDeflection, up.x, up.y, up.z, &err)
+            } else {
+                r = topoptbridge.lattice_layout_open(std.string(path), linearDeflection, &err)
+            }
             if !err.ok { throw TopOptError(message: String(err.message)) }
             return r
         }
-        return LatticeLayoutSession(id: raw.session,
-                                    info: OpenInfo(faces: Int(raw.faces), openEdges: Int(raw.open_edges), msOpen: raw.ms_open),
-                                    worker: worker)
+        var info = OpenInfo(faces: Int(raw.faces), openEdges: Int(raw.open_edges), msOpen: raw.ms_open)
+        info.framed = raw.framed
+        return LatticeLayoutSession(id: raw.session, info: info, printUp: printUp, worker: worker)
     }
 
     /// A new lay's generation; the one running now comes back cancelled (latest wins). (`lay`, and Organic's `layOrganic`.)

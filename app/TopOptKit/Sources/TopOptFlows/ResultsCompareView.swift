@@ -21,7 +21,7 @@ struct ResultsCompareView: View {
     var settle = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
     var onBed = false
 
-    @StateObject private var camera = OrbitCameraModel()
+    @StateObject private var camera = OrbitCameraModel(followsViewProjection: true)   // ★ notes29: the app's one projection
     /// ★ 10-28: the same layers as Results — Stress or Solid, with X-ray on top of either (no motion here).
     @State private var layers = ResultsLayers(stress: false)
     @State private var detailsOpen = false

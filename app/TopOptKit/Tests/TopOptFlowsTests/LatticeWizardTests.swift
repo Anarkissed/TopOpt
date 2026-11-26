@@ -93,9 +93,14 @@ final class LatticeWizardTests: XCTestCase {
         XCTAssertTrue(m.setBoundary(.rim), "unlocked")
         XCTAssertEqual(m.boundary, .rim)
         // and a saved single-cell project opens with Skin whatever it stored
+        // ★ RE-PINNED (notes29, his 11-25: "there is NO single-cell available in structural"): an AESTHETIC one — a lattice
+        // with no stage (or Structural) has no single-cell members, so it opens unlocked with the finish it stored
         var saved = LatticeSettings()
+        saved.stageMode = .aesthetic
         saved.singleCellMembers = true; saved.boundary = .none
         XCTAssertEqual(LatticeWizardModel(settings: saved).boundary, .fullSkin)
+        saved.stageMode = nil
+        XCTAssertEqual(LatticeWizardModel(settings: saved).boundary, .none, "★ notes29: no stage, no lock")
     }
 
     func testTheFourFinishesAreShownOnThePart() {

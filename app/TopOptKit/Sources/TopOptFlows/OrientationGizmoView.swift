@@ -78,7 +78,9 @@ public struct OrientationGizmoView: View {
     /// absolute top-right corner without reaching the other panels.
     public static let standardSize: CGFloat = 210
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    /// ★ notes29: Reduce Motion, or Settings › Skip all animations.
+    private var reduceMotion: Bool { systemReduceMotion || AppSettings.skipAllAnimations }
 
     /// The SDF cell (the shared `globalId`) currently glowing from a pointer hover, or -1.
     @State private var hoverId: Float = -1
@@ -99,6 +101,8 @@ public struct OrientationGizmoView: View {
     }
 
     private var glowId: Float { flashId >= 0 ? flashId : hoverId }
+    /// ★ notes29 (his 11-25): the cube's lens follows the camera's projection (the app's one Orthographic │ Perspective choice).
+    private var lens: GizmoConstants { .projection(orthographic: camera.camera.orthographic) }
 
     public var body: some View {
         ZStack {
@@ -123,7 +127,7 @@ public struct OrientationGizmoView: View {
             .frame(width: size, height: size)
             .contentShape(Rectangle())
             .gesture(orbitOrTap)
-            .modifier(HoverPick(size: size, rotation: camera.viewRotation, hoverId: $hoverId))
+            .modifier(HoverPick(size: size, rotation: camera.viewRotation, constants: lens, hoverId: $hoverId))
             .accessibilityLabel("Orientation cube")
             .accessibilityHint("Drag to orbit the model, or tap a face to snap to that view")
         #else
@@ -153,7 +157,7 @@ public struct OrientationGizmoView: View {
                 guard moved < 6 else { return }                         // a spin, already applied
                 switch OrientationGizmo.pick(point: g.startLocation,
                                              in: CGSize(width: size, height: size),
-                                             rotation: camera.viewRotation) {
+                                             rotation: camera.viewRotation, constants: lens) {
                 case .region(let r):
                     camera.snap(to: r, animated: true)
                     flash(OrientationGizmo.numericId(anchor: r.anchor))
@@ -245,7 +249,7 @@ public struct OrientationGizmoView: View {
     /// Project a model-space point through the gizmo's virtual camera (the SAME FOV/CAMZ the
     /// Metal shader uses), into view-space points (top-left origin, y down). Nil behind the cam.
     private func projectGizmo(_ p: SIMD3<Float>, rotation R: simd_float3x3, size: CGSize) -> CGPoint? {
-        let c = GizmoConstants.standard
+        let c = lens   // ★ notes29: the lens the shader draws with (Orthographic: the telephoto)
         let v = R * p
         let tf = tanf(c.fov * 0.5 * .pi / 180)
         let dz = c.camZ - v.z
@@ -372,6 +376,8 @@ private func smoothstep(_ a: Float, _ b: Float, _ x: Float) -> Float {
 private struct HoverPick: ViewModifier {
     let size: CGFloat
     let rotation: simd_float3x3
+    /// ★ notes29: the lens the cube is drawn with (the app's projection).
+    var constants: GizmoConstants = .standard
     @Binding var hoverId: Float
 
     func body(content: Content) -> some View {
@@ -379,7 +385,7 @@ private struct HoverPick: ViewModifier {
             switch phase {
             case .active(let p):
                 switch OrientationGizmo.pick(point: p, in: CGSize(width: size, height: size),
-                                             rotation: rotation) {
+                                             rotation: rotation, constants: constants) {
                 case .region(let r): hoverId = OrientationGizmo.numericId(anchor: r.anchor)
                 case .home:          hoverId = OrientationGizmo.homeNumericId
                 case .miss:          hoverId = -1
