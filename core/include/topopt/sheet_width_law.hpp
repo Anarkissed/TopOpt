@@ -10,24 +10,31 @@
 // thinner member can be credited by its own row:
 //
 //   STRENGTH  per (N, rho): Kd, Kv, Kild, Kilv exactly as strut_law_at's, measured by
-//             lattice_dehomog_probe `widths` (11-09's sandwich and cut-layer blocks N across,
-//             cut at 0.25 / 0.5 / 0.6 / 0.75, the aliasing guard and its finer-pitch re-measure)
-//             and `fitw`: per N the envelope of the bulk and that width's populations, then made
-//             to RISE as N falls and never under today's law (a narrower member is never credited
-//             more than a wider one).
+//             lattice_dehomog_probe `widths` (11-09's sandwich and cut-layer blocks N across, the
+//             aliasing guard and its finer-pitch re-measure). SINCE THE REVIEWER'S RULING OF
+//             2026-11-26 (item 3 (a)) the law's populations are the free surface and the OFF-GRIP
+//             CUT POPULATION (the cut layer's cells off the two grip columns; 11-09's cut layer kept
+//             the cells in the grip columns, where its peak sits) over the CUT SWEEP (0.25, and every
+//             voxel layer of the law pitch from half a cell up: 0.5, 0.6 and the rest), and the bulk.
+//             Per N the ENVELOPE (each coefficient's highest K, the weakest result, across the sweep),
+//             then the MONOTONE RULE: made to RISE as N falls and never under today's law (a narrower
+//             member is never credited more than a wider one, nor more than any sweep point at its
+//             width or wider). evidence/2026-11-26-sheet-laws-envelope (envelope.py).
 //   STIFFNESS per (N, rho): the C2b guided cantilever (tpms_probe `bend`) resolved against the
 //             averaged material, at the band floor, 0.40 and the band ceiling. Where the averaged
 //             material reads too stiff (error > 0) its tensor is scaled by 1 / (1 + error); where
 //             it reads too soft nothing changes.
 //
-// Evidence: evidence/2026-11-25-sheet-laws-thin-members (README, reproduce.sh, every CSV); the
-// tables are GENERATED from its CSVs (sheet_width_law_tables.inc), and
-// test_sheet_width_law pins every row. Carried caveats: see that README and strut_strength.hpp
+// Evidence: evidence/2026-11-26-sheet-laws-envelope (the strength rows, the floor, the envelope's
+// checks) and evidence/2026-11-25-sheet-laws-thin-members (the fixtures it builds on, and the
+// bending rows); the tables are GENERATED from their CSVs (sheet_width_law_tables.inc), and
+// test_sheet_width_law pins every row. Carried caveats: see those READMEs and strut_strength.hpp
 // (rows still rising with resolution are lower bounds; the interlayer factor is unsourced).
 //
 // Nothing here is wired into a verdict: the strength check reads these (builder B) when the
-// floor is set by the lead and TOReview.
+// floor is set by the lead and TOReview, through sheet_credit_law_at (below), never around it.
 
+#include <optional>
 #include <vector>
 
 #include "topopt/lattice.hpp"
@@ -54,6 +61,34 @@ int sheet_width_floor_measured(LatticeTopology topo);
 // or for a type with no table.
 StrutLawK sheet_strut_law_at(LatticeTopology topo, int cells_across, double rho,
                              bool* clamped = nullptr);
+
+// ── (b) OF THE RULING OF 2026-11-26, item 3: NO STRUCTURAL SHEET CREDIT UNTIL (a) ────────────────
+// "NO Structural sheet credit until (a); Aesthetic may ship." A Structural sheet is credited only
+// when BOTH keys turn:
+//   1. the envelope law is in and passes (sheet_envelope_law_passes, generated from
+//      evidence/2026-11-26-sheet-laws-envelope/kenv_checks.csv: the sweep complete, 0.5 and 0.6 in
+//      it, monotone, never above a sweep point, never under today's law);
+//   2. kSheetStructuralCreditReviewed: the reviewer has read (a)'s result and opens it (this line).
+// Until then sheet_credit_law_at gives NO law at any width, today's 10 / 9 cells included. An
+// Aesthetic sheet makes no strength claim and never asks: nothing here changes it.
+inline constexpr bool kSheetStructuralCreditReviewed = false;
+
+// The generated verdict of the envelope law's checks, per type (false for a type with no table).
+bool sheet_envelope_law_passes(LatticeTopology topo);
+
+// The gate itself: open only when the envelope law passes AND the reviewer has opened it.
+constexpr bool sheet_structural_credit_gate(bool envelope_law_passes, bool reviewed) {
+  return envelope_law_passes && reviewed;
+}
+
+// True when a Structural sheet of this type may be credited at all.
+bool sheet_structural_credit_open(LatticeTopology topo);
+
+// THE ONLY DOOR to a Structural sheet's strength law: std::nullopt while the gate is closed, and
+// under the law's floor (sheet_width_floor_measured); else sheet_strut_law_at. A type with no
+// table throws as sheet_strut_law_at does.
+std::optional<StrutLawK> sheet_credit_law_at(LatticeTopology topo, int cells_across, double rho,
+                                             bool* clamped = nullptr);
 
 // The averaged material's bending-stiffness error for a member `cells_across` wide at density
 // rho, as a fraction (+0.21 = the averaged member is 21 % too stiff): the measured row of the

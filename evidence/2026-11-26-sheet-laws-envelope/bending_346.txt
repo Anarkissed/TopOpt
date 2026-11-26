@@ -1,0 +1,7 @@
+cells across ->      2         3         4         6     (bending error, % too stiff)
+gyroid    rho 0.1458 vpc24   +55.40%   +26.20%   +15.52%    +7.45%   vpc24 (the record)
+gyroid    rho 0.4051 vpc24   +43.56%   +20.84%   +12.39%    +5.90%   vpc24 (the record)
+gyroid    rho 0.5995 vpc24   +39.82%   +19.44%   +11.73%    +5.71%   vpc24 (the record)
+schwarz_d rho 0.2083 vpc24   +20.12%   +11.62%    +7.78%    +4.21%   vpc24 (the record)
+schwarz_d rho 0.4074 vpc24   +20.48%   +11.53%    +7.71%    +4.20%   vpc24 (the record)
+schwarz_d rho 0.5880 vpc24   +20.67%   +11.43%    +7.58%    +4.12%   vpc24 (the record)

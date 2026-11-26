@@ -1,0 +1,9 @@
+# 11-26 (c): the bending error at 3, 4 and 6 cells (and 2) at a FINER pitch than the vpc 24 record, so the
+# reviewer can put floor-vs-knockdown to the maintainer: vpc 36 at the band floor (the thinnest walls:
+# 1.13 / 1.26 voxels at vpc 24), vpc 32 at 0.40 and at the band ceiling. Two threads each.
+bend gyroid 0.15010 36 2,3,4,6 2
+bend schwarz_d 0.20038 36 2,3,4,6 2
+bend gyroid 0.40 32 2,3,4,6 2
+bend schwarz_d 0.40 32 2,3,4,6 2
+bend gyroid 0.60069 32 2,3,4,6 2
+bend schwarz_d 0.60012 32 2,3,4,6 2

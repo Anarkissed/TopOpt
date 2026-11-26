@@ -28,16 +28,19 @@ struct Tables {
   const BendRow* bend = nullptr;
   int nbend = 0;
   int floor = 0;
+  bool envelope_passes = false;
 };
 
 Tables tables(LatticeTopology topo) {
   switch (topo) {
     case LatticeTopology::Gyroid:
       return {kGyroidWidthLaw, int(sizeof kGyroidWidthLaw / sizeof kGyroidWidthLaw[0]),
-              kGyroidBend, int(sizeof kGyroidBend / sizeof kGyroidBend[0]), kGyroidFloor};
+              kGyroidBend, int(sizeof kGyroidBend / sizeof kGyroidBend[0]), kGyroidFloor,
+              kGyroidEnvelopeLawPasses};
     case LatticeTopology::SchwarzD:
       return {kSchwarzDWidthLaw, int(sizeof kSchwarzDWidthLaw / sizeof kSchwarzDWidthLaw[0]),
-              kSchwarzDBend, int(sizeof kSchwarzDBend / sizeof kSchwarzDBend[0]), kSchwarzDFloor};
+              kSchwarzDBend, int(sizeof kSchwarzDBend / sizeof kSchwarzDBend[0]), kSchwarzDFloor,
+              kSchwarzDEnvelopeLawPasses};
     default:
       return {};
   }
@@ -112,6 +115,21 @@ StrutLawK sheet_strut_law_at(LatticeTopology topo, int cells_across, double rho,
   k.Kild = (1.0 - f) * r0.Kild + f * r1.Kild;
   k.Kilv = (1.0 - f) * r0.Kilv + f * r1.Kilv;
   return k;
+}
+
+bool sheet_envelope_law_passes(LatticeTopology topo) { return tables(topo).envelope_passes; }
+
+bool sheet_structural_credit_open(LatticeTopology topo) {
+  return sheet_structural_credit_gate(sheet_envelope_law_passes(topo), kSheetStructuralCreditReviewed);
+}
+
+std::optional<StrutLawK> sheet_credit_law_at(LatticeTopology topo, int cells_across, double rho,
+                                             bool* clamped) {
+  const Tables t = tables_or_throw(topo, "sheet_credit_law_at");
+  if (clamped) *clamped = false;
+  if (!sheet_structural_credit_open(topo)) return std::nullopt;
+  if (cells_across < t.floor) return std::nullopt;
+  return sheet_strut_law_at(topo, cells_across, rho, clamped);
 }
 
 double sheet_bending_error(LatticeTopology topo, int cells_across, double rho) {

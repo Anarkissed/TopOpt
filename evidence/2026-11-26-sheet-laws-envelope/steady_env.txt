@@ -1,0 +1,40 @@
+gyroid    0.15010 a_connected  PASS  5 of 5 2-cell placements kept, 4 with an off-grip cut population
+gyroid    0.15010 b_width      PASS  K2/K3 = 0.902 (11-09 populations), 1.000 (the law's)
+gyroid    0.15010 c_pitch      PASS  free K2/K3: vpc24 0.981
+gyroid    0.15010 d_placement  PASS  spread 1.057 over 5 placements (2 cells) vs 1.010 over 5 (3 cells)
+gyroid    0.20000 a_connected  PASS  5 of 5 2-cell placements kept, 4 with an off-grip cut population
+gyroid    0.20000 b_width      PASS  K2/K3 = 0.897 (11-09 populations), 0.970 (the law's)
+gyroid    0.20000 c_pitch      PASS  free K2/K3: vpc16 0.978
+gyroid    0.20000 d_placement  PASS  spread 1.502 over 5 placements (2 cells) vs 1.515 over 5 (3 cells)
+gyroid    0.31300 a_connected  PASS  5 of 5 2-cell placements kept, 4 with an off-grip cut population
+gyroid    0.31300 b_width      PASS  K2/K3 = 0.900 (11-09 populations), 1.000 (the law's)
+gyroid    0.31300 c_pitch      PASS  free K2/K3: vpc16 0.984, vpc32 0.988
+gyroid    0.31300 d_placement  PASS  spread 1.335 over 5 placements (2 cells) vs 1.375 over 5 (3 cells)
+gyroid    0.45000 a_connected  PASS  5 of 5 2-cell placements kept, 4 with an off-grip cut population
+gyroid    0.45000 b_width      PASS  K2/K3 = 0.909 (11-09 populations), 1.000 (the law's)
+gyroid    0.45000 c_pitch      PASS  free K2/K3: vpc16 0.990
+gyroid    0.45000 d_placement  PASS  spread 1.210 over 5 placements (2 cells) vs 1.242 over 5 (3 cells)
+gyroid    0.60069 a_connected  PASS  5 of 5 2-cell placements kept, 4 with an off-grip cut population
+gyroid    0.60069 b_width      PASS  K2/K3 = 0.901 (11-09 populations), 1.000 (the law's)
+gyroid    0.60069 c_pitch      PASS  free K2/K3: vpc16 0.981
+gyroid    0.60069 d_placement  PASS  spread 1.009 over 5 placements (2 cells) vs 1.005 over 5 (3 cells)
+gyroid    0.00000 e_bending    PASS  2-cell error rho 0.146: +55.40 %, rho 0.405: +43.56 %, rho 0.600: +39.82 %; mean +46.26 %, band +-9.25
+schwarz_d 0.20038 a_connected  PASS  5 of 5 2-cell placements kept, 4 with an off-grip cut population
+schwarz_d 0.20038 b_width      PASS  K2/K3 = 0.897 (11-09 populations), 0.955 (the law's)
+schwarz_d 0.20038 c_pitch      PASS  free K2/K3: vpc24 0.955
+schwarz_d 0.20038 d_placement  PASS  spread 1.098 over 5 placements (2 cells) vs 1.022 over 5 (3 cells)
+schwarz_d 0.31300 a_connected  PASS  5 of 5 2-cell placements kept, 4 with an off-grip cut population
+schwarz_d 0.31300 b_width      PASS  K2/K3 = 0.902 (11-09 populations), 1.000 (the law's)
+schwarz_d 0.31300 c_pitch      PASS  free K2/K3: vpc16 0.986
+schwarz_d 0.31300 d_placement  PASS  spread 1.021 over 5 placements (2 cells) vs 1.022 over 5 (3 cells)
+schwarz_d 0.45000 a_connected  PASS  5 of 5 2-cell placements kept, 4 with an off-grip cut population
+schwarz_d 0.45000 b_width      PASS  K2/K3 = 0.887 (11-09 populations), 0.994 (the law's)
+schwarz_d 0.45000 c_pitch      PASS  free K2/K3: vpc16 0.971
+schwarz_d 0.45000 d_placement  PASS  spread 1.214 over 5 placements (2 cells) vs 1.183 over 5 (3 cells)
+schwarz_d 0.60012 a_connected  PASS  5 of 5 2-cell placements kept, 4 with an off-grip cut population
+schwarz_d 0.60012 b_width      PASS  K2/K3 = 0.928 (11-09 populations), 1.000 (the law's)
+schwarz_d 0.60012 c_pitch      PASS  free K2/K3: vpc16 0.970
+schwarz_d 0.60012 d_placement  PASS  spread 1.172 over 5 placements (2 cells) vs 1.187 over 5 (3 cells)
+schwarz_d 0.00000 e_bending    PASS  2-cell error rho 0.208: +20.12 %, rho 0.407: +20.48 %, rho 0.588: +20.67 %; mean +20.42 %, band +-5.00
+gyroid: the 2-cell rows are STEADY -> floor 2
+schwarz_d: the 2-cell rows are STEADY -> floor 2

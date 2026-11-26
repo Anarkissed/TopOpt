@@ -1,0 +1,7 @@
+type,target_rho,cell_rho,vpc,source,err_pct_N2,err_pct_N3,err_pct_N4,err_pct_N6
+gyroid,0.15010,0.1458,24,vpc24 (the record),+55.40,+26.20,+15.52,+7.45
+gyroid,0.40,0.4051,24,vpc24 (the record),+43.56,+20.84,+12.39,+5.90
+gyroid,0.60069,0.5995,24,vpc24 (the record),+39.82,+19.44,+11.73,+5.71
+schwarz_d,0.20038,0.2083,24,vpc24 (the record),+20.12,+11.62,+7.78,+4.21
+schwarz_d,0.40,0.4074,24,vpc24 (the record),+20.48,+11.53,+7.71,+4.20
+schwarz_d,0.60012,0.5880,24,vpc24 (the record),+20.67,+11.43,+7.58,+4.12

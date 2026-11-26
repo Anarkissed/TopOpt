@@ -1574,12 +1574,15 @@ void phase_fit(const std::string& ev) {
 // Env:
 //   TOPOPT_DEHOMOG_W_RHOS  rho targets (default: the band sweep, as 11-09)
 //   TOPOPT_DEHOMOG_W_NS    widths (default 2,3,4,5,6,8)
-//   TOPOPT_DEHOMOG_W_CUTS  cut fractions, 0 = the sandwich (default 0,0.25,0.5,0.6,0.75)
+//   TOPOPT_DEHOMOG_W_CUTS  cut fractions, 0 = the sandwich (default 0,0.25,0.5,0.6,0.75); the
+//                          11-26 sweep passes every voxel layer of the law pitch from 0.5 up
+//                          (k / vpc, six decimals: lround((N + k/vpc) vpc) is exactly N vpc + k)
 //   TOPOPT_DEHOMOG_W_VPC   pitch (default 11-09's: 24 under rho 0.19, else 16)
 //   TOPOPT_DEHOMOG_W_TAG   file tag: k_{states,exact,cells}_w_<tag>.csv (default "all")
 //   TOPOPT_DEHOMOG_MATFREE 1 = fea_solve_cg_matfree (same system and criterion)
-// The exact CSV adds lx, cut_frac, the TRUE wall in voxels (2 r_unit vpc: the wall the
-// generator builds, across its normal) and the solve's wall-clock seconds.
+// The exact CSV adds lx, cut_frac (4 decimals since 11-26; 2 before), the TRUE wall in voxels
+// (2 r_unit vpc: the wall the generator builds, across its normal), the solve's wall-clock seconds,
+// and (since 11-26) cut_layers, the partial layer's voxel layers as built (0 = the sandwich).
 // ---------------------------------------------------------------------------
 std::vector<double> env_list(const char* name, const std::vector<double>& dflt) {
   const char* s = std::getenv(name);
@@ -1602,7 +1605,7 @@ const char* kExactHeaderW =
     "fixture,rho_target,rho_lib,rho_meas,N,vpc,population,n_vox,wall_vox,"
     "K_dev_max,K_vol,K_il_dev,K_il_vol,samp_min,samp_med,samp_p95,samp_max,"
     "n_samp,cg_iters_max,cg_resid_max,dropped_floaters,lx,cut_frac,wall_true_vox,solve_s,"
-    "solver";
+    "solver,cut_layers";
 
 void phase_widths(const std::string& ev) {
   std::printf("\n===== WIDTHS — the law per member width (sheets 3.2) =====\n");
@@ -1675,9 +1678,15 @@ void phase_widths(const std::string& ev) {
       rmax = std::max(rmax, f.resid[J]);
     }
     double kd_free = 0, kd_cut = 0;
-    // DIAGNOSTIC, not in the law: the cut layer's cells off the two grip columns. 11-09's
-    // cut_layer population (kept as is, it is the law's) includes the cut cells beside the
-    // gripped faces; this row says whether its peak sits there.
+    // The voxel layers of the partial top layer (0 for the sandwich): the cut as built, exactly
+    // (cut_frac is the cut asked for; the block is lround((N + cut_frac) vpc) voxels tall).
+    const int cut_layers = cs.cut > 0 ? f.grid.nz - cs.N * cs.vpc : 0;
+    // THE OFF-GRIP CUT POPULATION (cut_off_grip): the cut layer's cells off the two grip columns.
+    // 11-09's cut_layer population includes the cut cells beside the gripped faces (classify()
+    // returns Cut before it looks at the grip columns), and its peak sits there. Written as a
+    // diagnostic by notes28; since the reviewer's ruling of 2026-11-26 (item 3 (a)) it is THE
+    // LAW'S cut population: evidence/2026-11-26-sheet-laws-envelope enveloped it over the cut
+    // sweep (cut_layer stays in the CSV, out of the law).
     if (cs.cut > 0) {
       Fixture sub;
       sub.grid = f.grid;  // shape fields only; the voxel lists below are the subset
@@ -1698,11 +1707,11 @@ void phase_widths(const std::string& ev) {
         const VolRatios vr = vol_ratios(sub, Dlib, Pop::Cut, false);
         std::fprintf(exact,
                      "%s,%.5f,%.5f,%.5f,%d,%d,%s,%zu,%.1f,"
-                     "%.4f,%.4f,%.4f,%.4f,%.3f,%.3f,%.3f,%.3f,%d,%d,%.2e,%zu,%d,%.2f,%.2f,%.1f,%s\n",
+                     "%.4f,%.4f,%.4f,%.4f,%.3f,%.3f,%.3f,%.3f,%d,%d,%.2e,%zu,%d,%.4f,%.2f,%.1f,%s,%d\n",
                      fixname, c.target, c.rho_lib, f.rho_meas, cs.N, cs.vpc, "cut_off_grip",
                      sub.vox.size(), f.wall_vox, ed.K_dev, vr.K_vol, ed.K_il_dev, vr.K_il_vol,
                      0.0, 0.0, 0.0, 0.0, 0, itmax, rmax, f.dropped_floaters, lx, cs.cut,
-                     wall_true, secs, matfree ? "matfree" : "assembled");
+                     wall_true, secs, matfree ? "matfree" : "assembled", cut_layers);
       }
     }
     for (Pop p : pops) {
@@ -1715,12 +1724,12 @@ void phase_widths(const std::string& ev) {
       if (p == Pop::Cut) kd_cut = ed.K_dev;
       std::fprintf(exact,
                    "%s,%.5f,%.5f,%.5f,%d,%d,%s,%zu,%.1f,"
-                   "%.4f,%.4f,%.4f,%.4f,%.3f,%.3f,%.3f,%.3f,%d,%d,%.2e,%zu,%d,%.2f,%.2f,%.1f,%s\n",
+                   "%.4f,%.4f,%.4f,%.4f,%.3f,%.3f,%.3f,%.3f,%d,%d,%.2e,%zu,%d,%.4f,%.2f,%.1f,%s,%d\n",
                    fixname, c.target, c.rho_lib, f.rho_meas, cs.N, cs.vpc, pop_name(p),
                    pop_count(f, p, false), f.wall_vox, ed.K_dev, vr.K_vol, ed.K_il_dev,
                    vr.K_il_vol, st.kmin, st.kmed, st.kp95, st.kmax, st.n, itmax, rmax,
                    f.dropped_floaters, lx, cs.cut, wall_true, secs,
-                   matfree ? "matfree" : "assembled");
+                   matfree ? "matfree" : "assembled", cut_layers);
     }
     for (const auto& ns2 : named_states()) {
       V6 e;
