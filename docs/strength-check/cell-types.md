@@ -84,6 +84,11 @@ is, for a sheet, its true wall. The strength check credits a sheet **by place** 
 `lattice_credit`), not by cell; the rules are below the table. Builder B (claude/notes28-sheets-strength) keeps this
 section; the matrix test `lattice_sheets_strength` prints the derived numbers on every run.
 
+**In the app the sheets are Aesthetic only for now** (the reviewer's ruling 2026-11-26, item 3(b): "NO Structural sheet
+credit until (a); Aesthetic may ship"; (a) is the laws' envelope, claude/notes30-sheet-laws). The Lattice stage's picker
+greys both sheets on Structural ("Aesthetic only for now", LatticeTypeCatalog.layoutEntries; notes30 M1), so no Structural
+job with a sheet is sent. The credit below is core's, unchanged, waiting for those laws and the reviewer's yes.
+
 | | gyroid | Schwarz-D |
 |---|---|---|
 | Measured band (density) | 0.1501 - 0.6007 | 0.2004 - 0.6001 |
