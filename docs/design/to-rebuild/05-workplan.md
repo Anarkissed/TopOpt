@@ -57,7 +57,14 @@ DECIDED by the maintainer, 2026-11-26 01:15 (on the pad, from the list above): "
 - Engineers may type a pad depth; when they do, a notice says in plain words what goes wrong if it is too small (the anchor or load can tear away from the body: a version may be refused) or too large (it freezes material the optimiser could have removed, and on a small part can block the design altogether). Five words on screen at most, the rest behind the (i) (his help-text rule).
 - REFINED with him, 2026-11-26 01:25: the pad follows the size of the model. His question: "Can't the number of lines adjust based on the size of the model?"; the rule put to him and "Agreed": the pad is a SHARE of the thickness of material behind that face (measured locally, so a thin tab on a big bracket gets a thin pad), never less than two wall-line widths (his print result: one line does not print). On the ceiling: "I would even place the ceiling at something crazy like 1000mm", so there is in effect NO ceiling: the share alone sets the depth on thick parts. (Consequence told to him: on a 60 mm body a quarter share freezes 15 mm behind the face, which is material the optimiser cannot remove.)
 - STILL TO SETTLE WITH HIM, with numbers: the SHARE (a quarter was only an illustration). The stand at 2 / 3 / 4.5 mm (queued for the lock) and the small scenario part (3.0 refused the smallest version, 3.75 shipped all, 4.5 lost two) are the evidence to bring.
-- The other four ideas in the list (the rule on lengths, Auto resolution, the two-size test, the too-small pop-up) are NOT decided.
+- DECIDED 2026-11-26 03:15, his answers:
+  - The pad's shape: "Yes" to growing with the square root of the local thickness, a two-line floor, no ceiling. Its one number (the strength of the curve) is still to settle; he has no other part to test on ("Can you design a sample?"): a made sample part is owed.
+  - "Definitely a pop-up for when a part is too small for the nozzle with a recommendation for either a different nozzle size or to switch to resin printing."
+  - "The automatic resolution from part size is also great."
+  - "I would also like to note that this is all during the 'Auto' settings. And that these settings (resolution/pad thickness) should be manually adjustable if in 'Manual' mode."
+  - The test that runs one part at two sizes: "I don't think we need [it]? What purpose would that hold?" Purpose explained to him; NOT adopted unless he says so.
+  - The rule that every length is physical or relative: not answered; not adopted.
+  - The area-spring anchor (`face_spring`): he asked what it is for; explained; his call still open.
 
 ## 0. Where the work stands (kept current; newest first)
 
