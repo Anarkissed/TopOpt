@@ -1711,8 +1711,7 @@ bool load_file_job(const std::string& job_path, int threads, FileJob& job, StepM
     };
     if (job.print_frame.on) {
       if (!open_part()) return false;
-      print_frame_set_base(job.print_frame, model.mesh);
-      if (!(g_print_frame_test_skip & kSkipModel)) turn_step_model(job.print_frame, model);
+      open_in_print_frame(job.print_frame, model);   // ★ notes29: the door the iPad's session opens its part through too
       turn_file_job_inputs(job.print_frame, job);
     }
     // Brief E2, item 11: a strengthen round's stress input, reference and floors in place of the job's own.
