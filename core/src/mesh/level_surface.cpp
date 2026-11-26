@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <limits>
 #include <map>
 #include <chrono>
 #include <cmath>
@@ -415,18 +416,44 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
   if (frozen != nullptr && model != nullptr && !frozen->empty())
     bodies = make_frozen_bodies(*frozen, *model, cap);
   R.frozen_sets = static_cast<int>(bodies.size());
-  auto frozen_solid = [&](const Vec3& p) {
+  auto exact_set = [&](const Vec3& p, bool solid) {
     double f = cap;
     for (const FrozenBody& b : bodies)
-      if (b.solid) f = std::min(f, b.value(p, cap));
+      if (b.solid == solid) f = std::min(f, b.value(p, cap));
     return f;
   };
-  auto frozen_void = [&](const Vec3& p) {
-    double f = cap;
-    for (const FrozenBody& b : bodies)
-      if (!b.solid) f = std::min(f, b.value(p, cap));
-    return f;
+  // ★ SPEED (his Top Motor Mount at res 32: 56-238 s of exact distance queries). The
+  // exact distance is taken once per node of a lattice at the mesh's own cell size,
+  // only at the nodes something asks for, and blended trilinearly between them:
+  // exact on a flat protected face (a distance to a plane is linear), about 0.01 mm
+  // on a curved one at this cell.
+  const double fc = h / static_cast<double>(std::max(1, smooth_factor));
+  const Vec3 f0{o.x - 2 * h, o.y - 2 * h, o.z - 2 * h};
+  const int fx = static_cast<int>(std::ceil((top.x + 2 * h - f0.x) / fc)) + 1,
+            fy = static_cast<int>(std::ceil((top.y + 2 * h - f0.y) / fc)) + 1,
+            fz = static_cast<int>(std::ceil((top.z + 2 * h - f0.z) / fc)) + 1;
+  std::vector<float> cache_s, cache_v;
+  auto lattice_set = [&](const Vec3& p, bool solid) {
+    std::vector<float>& cache = solid ? cache_s : cache_v;
+    if (cache.empty())
+      cache.assign(static_cast<std::size_t>(fx) * fy * fz, std::numeric_limits<float>::quiet_NaN());
+    const double x = (p.x - f0.x) / fc, y = (p.y - f0.y) / fc, z = (p.z - f0.z) / fc;
+    const int i = std::min(std::max(static_cast<int>(std::floor(x)), 0), fx - 2);
+    const int j = std::min(std::max(static_cast<int>(std::floor(y)), 0), fy - 2);
+    const int k = std::min(std::max(static_cast<int>(std::floor(z)), 0), fz - 2);
+    const double tx = x - i, ty = y - j, tz = z - k;
+    double acc = 0.0;
+    for (int c = 0; c < 8; ++c) {
+      const int a = i + (c & 1), b = j + ((c >> 1) & 1), d = k + ((c >> 2) & 1);
+      float& v = cache[(static_cast<std::size_t>(d) * fy + b) * fx + a];
+      if (std::isnan(v))
+        v = static_cast<float>(exact_set(Vec3{f0.x + a * fc, f0.y + b * fc, f0.z + d * fc}, solid));
+      acc += v * ((c & 1) ? tx : 1 - tx) * (((c >> 1) & 1) ? ty : 1 - ty) * (((c >> 2) & 1) ? tz : 1 - tz);
+    }
+    return acc;
   };
+  auto frozen_solid = [&](const Vec3& p) { return lattice_set(p, true); };
+  auto frozen_void = [&](const Vec3& p) { return lattice_set(p, false); };
   bool any_solid_body = false, any_void_body = false;
   for (const FrozenBody& b : bodies) (b.solid ? any_solid_body : any_void_body) = true;
 
