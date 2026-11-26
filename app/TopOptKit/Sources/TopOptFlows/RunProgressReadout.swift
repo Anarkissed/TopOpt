@@ -27,13 +27,17 @@ public enum RunCardWords {
     public static let latticing = "Latticing"
     public static let strengthening = "Strengthening the struts"
     public static let making = "Making the print file"
+    /// ★ notes29 (one in-process solve at a time): a run on this iPad waits for a Flexible solve to leave core first.
+    public static let waitingForFlexible = "Waiting for Flexible to finish"
 
     /// A Lattice run's mode (the old engine's lattice_part / lattice_variant, the new engine's lattice_file).
     public static func isLattice(_ mode: String?) -> Bool { mode?.hasPrefix("lattice") ?? false }
     public static func title(_ mode: String?) -> String { isLattice(mode) ? latticing : optimizing }
 
     /// The print file's step ("Strengthening the struts · 1 of 2"); nil for any other run (its results and iterations).
-    public static func step(_ mode: String?, _ p: RunProgress) -> String? {
+    /// ★ notes29: `waitingForFlexible` — any run's step while it waits for a Flexible solve: that, in plain words.
+    public static func step(_ mode: String?, _ p: RunProgress, waitingForFlexible: Bool = false) -> String? {
+        if waitingForFlexible { return Self.waitingForFlexible }
         guard mode == LatticeFileButton.jobMode else { return nil }
         guard p.rungCount > 1 else { return making }
         return (p.rung == 0 ? strengthening : making) + " \u{00B7} \(p.rung + 1) of \(p.rungCount)"
@@ -97,14 +101,14 @@ public struct RunProgressReadout: View {
     /// ★ T5 (U4: "result", never "variant"): which of the results is being made.
     private var variantLine: String {
         let p = snapshot
-        if let s = RunCardWords.step(model.runningJobMode, p) { return s }   // ★ his 11-21: the print file's own steps
+        if let s = RunCardWords.step(model.runningJobMode, p, waitingForFlexible: model.waitingForFlexible) { return s }   // ★ his 11-21: the print file's own steps (★ notes29: or the wait)
         return p.rungCount > 1 ? "Result \(p.rung + 1) of \(p.rungCount)" : RunCardWords.title(model.runningJobMode)
     }
 
     /// ★ T5: the run card's Step row — the result and its iteration (the mockup's "Scenario 2 of 3 · iteration 34").
     private var stepLine: String {
         let p = snapshot
-        if let s = RunCardWords.step(model.runningJobMode, p) { return s }   // ★ his 11-21: the print file's own steps
+        if let s = RunCardWords.step(model.runningJobMode, p, waitingForFlexible: model.waitingForFlexible) { return s }   // ★ his 11-21: the print file's own steps (★ notes29: or the wait)
         return p.rungCount > 1 ? "Result \(p.rung + 1) of \(p.rungCount) \u{00B7} iteration \(p.iteration)" : "Iteration \(p.iteration)"
     }
 

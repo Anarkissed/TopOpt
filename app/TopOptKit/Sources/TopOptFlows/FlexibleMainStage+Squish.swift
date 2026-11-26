@@ -37,6 +37,8 @@ struct FlexibleFEView: Equatable {
     var token = 0
     /// A sim of the sequence still runs.
     var pending = false
+    /// ★ notes29: the sims wait for a local topology run on this device (one in-process solve at a time).
+    var heldByRun = false
     /// Nothing of the sequence has a field and a sim failed: core's words.
     var failure: String?
     /// The largest scale every field of the sequence stays injective at (s · gmax ≤ ½).
@@ -76,7 +78,7 @@ struct FlexibleFEView: Equatable {
     var active: Bool { !sequence.isEmpty }
 
     static func == (a: Self, b: Self) -> Bool {
-        a.token == b.token && a.sequence == b.sequence && a.pending == b.pending && a.failure == b.failure
+        a.token == b.token && a.sequence == b.sequence && a.pending == b.pending && a.heldByRun == b.heldByRun && a.failure == b.failure
             && a.requested == b.requested && a.skipped == b.skipped && a.retained == b.retained
             && a.refining?.id == b.refining?.id && a.refining?.step == b.refining?.step && a.refining?.total == b.refining?.total
             && a.refineKept == b.refineKept && a.shownSequence == b.shownSequence
@@ -103,6 +105,7 @@ extension FlexibleMainStage {
             && m.squishScheduled != g.generation && !groupIDs.isEmpty
         var v = FlexibleFEView()
         v.requested = seqIDs
+        v.heldByRun = m.squishHeldByRun   // ★ notes29
         guard m.squishGeneration == g.generation, groups.contains(where: { $0.state != nil }) else {
             v.pending = unscheduled
             return v
@@ -296,12 +299,13 @@ extension FlexibleMainStage {
     /// "Squish sim failed" when it fell back, "Group 2's sim failed" when
     /// Play all plays the others.
     var feNote: String? {
-        if fe.pending { return FlexibleFE.pending }
+        if fe.pending { return fe.heldByRun ? FlexibleFE.waitingForRun : FlexibleFE.pending }   // ★ notes29
         if fe.failure != nil { return FlexibleFE.failed }
         if let id = fe.skipped.first, let sim = sims.first(where: { $0.id == id }) { return FlexibleFE.skipped(sim.short) }
         // ★ BATCH N: the quick squish plays while the steps run, then the refined one swaps in at rest
         // (★ verification: the group named — "Refining Group 2… 3/8")
         if let r = fe.refining {
+            if fe.heldByRun { return FlexibleFE.waitingForRun }   // ★ notes29: yielded to a local run
             return FlexibleFERefine.refining(sims.first { $0.id == r.id }?.short ?? "the squish", r.step, of: r.total)
         }
         if let why = fe.refineKept { return FlexibleFERefine.kept(why) }
