@@ -168,6 +168,7 @@ public struct ResultsScreen: View {
                 materialName: String = "", yieldStrengthMPa: Double = 0,
                 appliedLoadKg: Double = 0, loadUnit: WeightUnit = .kg,
                 infillPercent: Int = 100, infillPattern: String = "gyroid",
+                solidWallMM: Double? = nil,   // ★ 362 (11-26): the printer's wall ring, for the bare-vines fixes offered
                 loadLocations: [SIMD3<Float>] = [],
                 loadDirections: [SIMD3<Float>] = [], anchorPoints: [SIMD3<Float>] = [],
                 streaming: Bool = false, run: RunModel? = nil,
@@ -200,7 +201,7 @@ public struct ResultsScreen: View {
             appliedLoadKg: appliedLoadKg, loadUnit: loadUnit,
             infillPercent: infillPercent, infillPattern: infillPattern,
             loadLocations: loadLocations,
-            loadDirections: loadDirections, anchorPoints: anchorPoints))
+            loadDirections: loadDirections, anchorPoints: anchorPoints, solidWallMM: solidWallMM))
         self.liveOutcome = outcome
         self.streaming = streaming
         self.run = run

@@ -115,6 +115,26 @@ public enum OrganicBareVines {
         return "The loaded face is bare vines now. Try " + skin + (o.solid ? " or a Solid finish." : ".")
     }
 
+    /// ★ 362 (11-26): the offers for what core said, with the printer's wall (the cover a Solid finish lays) when the page knows
+    /// it; an unknown wall offers no Solid when the key is there (only the fix always offered is named).
+    public static func offers(_ f: Found, wallMM: Double?) -> Offers {
+        offers(depthNeededMM: f.depthNeededMM, wallMM: wallMM ?? 0)
+    }
+
+    /// ★ 362 (11-26): Results' Checks line names only the fixes offered — Solid not offered: "Fix: Protect skin 4.5 mm" (five
+    /// words); otherwise, and with no key, today's "Fix: Protect skin or Solid".
+    public static func checkDetailLine(_ o: Offers) -> String {
+        guard !o.solid, let d = o.skinDepthMM else { return checkDetail }
+        return "Fix: Protect skin " + OrganicCertifyCopy.mm(d) + " mm"
+    }
+
+    /// ★ 362 (11-26): the print file's line names only the fixes offered — Solid not offered: the Protect skin and its depth;
+    /// otherwise, and with no key, today's line.
+    public static func printLine(_ o: Offers) -> String {
+        guard !o.solid, let d = o.skinDepthMM else { return line }
+        return "A load lands on bare vines · a Protect skin " + OrganicCertifyCopy.mm(d) + " mm deep on its face fixes it"
+    }
+
     /// ★ 362's review (11-26): a load on bare vines has no valid margin — what stands in a margin's place for its result, the
     /// words its Checks line leads with, everywhere a number like "2.00×" would show (Results' list row and Compare, Details ›
     /// Strength and Scenarios, the Library's cards, rows and Compare, the orientation check's columns). nil: the result's margin

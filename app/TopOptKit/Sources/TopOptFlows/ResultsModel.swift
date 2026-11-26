@@ -689,6 +689,9 @@ public final class ResultsModel: ObservableObject {
     /// EVERY displayed physics figure is knocked down to this infill consistently
     /// (`infillKnockdown` / `effectiveYieldStrengthMPa`). 100 means solid (knockdown 1).
     public let infillPercent: Int
+    /// ★ 362 (11-26): the printer's wall ring (mm) — the cover a Solid finish lays — so a load on bare vines names only the
+    /// fixes the wizard offers (LatticeReview's depth rule); nil: not known (a test's model).
+    public let solidWallMM: Double?
     /// The project's infill pattern (M7.params), for the infill-aware labels
     /// (e.g. "Holds ~157 lb at 20% gyroid"). Purely descriptive — the knockdown math
     /// depends only on the infill %.
@@ -1195,8 +1198,9 @@ public final class ResultsModel: ObservableObject {
                 infillPercent: Int = 100, infillPattern: String = "gyroid",
                 loadLocations: [SIMD3<Float>] = [],
                 loadDirections: [SIMD3<Float>] = [], anchorPoints: [SIMD3<Float>] = [],
-                materialDensityGCm3: Double? = nil) {
+                materialDensityGCm3: Double? = nil, solidWallMM: Double? = nil) {
         self.projectName = projectName
+        self.solidWallMM = solidWallMM   // ★ 362 (11-26): before `apply` reads it
         self.materialName = materialName
         self.yieldStrengthMPa = max(0, yieldStrengthMPa)
         self.appliedLoadKg = max(0, appliedLoadKg)
@@ -1251,6 +1255,7 @@ public final class ResultsModel: ObservableObject {
         if let d = outcome.reportJSON, let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
             scenarioResults = ScenarioResult.parse(o)
             latticeAnswer = LatticeStrengthAnswer.decode(report: o)   // ★ notes25 C3
+            latticeAnswer?.solidWallMM = solidWallMM   // ★ 362 (11-26): the Checks line names only the fixes offered
             solidMargins = SolidMarginVoxels.decode(report: o)
             printFacts = PrintReportFacts.decode(o)   // ★ notes27: its print frame, supports word, ranking, re-check
             printFileParts = latticeAnswer == nil ? nil : PrintFileParts.decode(report: o)   // ★ notes27 F1

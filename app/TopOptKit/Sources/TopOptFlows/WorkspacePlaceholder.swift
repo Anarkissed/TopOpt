@@ -1840,6 +1840,7 @@ public struct WorkspacePlaceholder: View {
                               loadUnit: force.unit,
                               infillPercent: project.printParams.infillPercent,
                               infillPattern: project.printParams.infillPattern,
+                              solidWallMM: project.printParams.wallRingMM,   // ★ 362 (11-26): the bare-vines fixes offered
                               // Handoff 070 load-path FLOW: the load-group centroids are
                               // where each comet arrow starts (app-side data, like the
                               // applied load). Empty → the results screen falls back to

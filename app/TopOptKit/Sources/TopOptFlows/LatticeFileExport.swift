@@ -432,6 +432,9 @@ public struct LatticeFileStrength: Equatable, Sendable {
     /// ★ notes30: what core said with `load_on_bare_lattice` (the load on the vines, its share, where it lands, core's
     /// sentence); nil for any other reason.
     public var bareVines: OrganicBareVines.Found?
+    /// ★ 362 (11-26): the printer's wall (the cover a Solid finish lays), when the page knows it — the line then names only the
+    /// fixes offered; nil: unknown (no Solid named when core gave the depth).
+    public var solidWallMM: Double? = nil
 
     public init(block b: [String: Any]) {
         func num(_ v: Any?) -> Double { (v as? NSNumber)?.doubleValue ?? 0 }
@@ -519,7 +522,9 @@ public struct LatticeFileStrength: Equatable, Sendable {
         case .fail:
             switch failReason {
             case .loadOnOpenLattice?: return "Not strong enough · the load lands on open lattice"
-            case .loadOnBareLattice?: return OrganicBareVines.line   // ★ notes30: what lands where, and the fix; no margin
+            // ★ notes30: what lands where, and the fix; no margin (★ 362 11-26: only the fixes offered)
+            case .loadOnBareLattice?:
+                return bareVines.map { OrganicBareVines.printLine(OrganicBareVines.offers($0, wallMM: solidWallMM)) } ?? OrganicBareVines.line
             case .noLoadPath?: return "Not strong enough · nothing carries the load"
             case .strutMargin?: return "Not strong enough · struts: " + (strutsLine ?? Self.strutsNot).lowercased()
             case .solidMargin?, .frameNotSolved?, .frameUnjudged?, nil:
