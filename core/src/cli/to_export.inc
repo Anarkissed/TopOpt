@@ -30,6 +30,9 @@ struct RunFinish {
   // Stage 3: the frozen bodies as drawn-face geometry (frozen_sets.hpp), for the
   // surface from the function. Empty unless stage 1 filled them.
   std::vector<FrozenFaceSet> frozen;
+  // Stage 3: a design-box run's keep-outs (Empty on its grid), which the surface from
+  // the function leaves out of the box.
+  std::vector<DesignBox> keep_outs;
 };
 
 RunFinish make_run_finish(const JobDescription& job, const MinimizePlasticOptions& o,
@@ -50,6 +53,7 @@ RunFinish make_run_finish(const JobDescription& job, const MinimizePlasticOption
   if (f.ctx.growth) {
     f.ctx.has_box = true;
     f.ctx.box = *o.design_box;
+    f.keep_outs = o.keep_out_boxes;
   } else {
     f.part_solid.resize(sg.voxel_count());
     for (std::size_t i = 0; i < sg.voxel_count(); ++i) f.part_solid[i] = sg.tags[i] != VoxelTag::Empty;
@@ -131,11 +135,14 @@ TriangleMesh variant_export_model_mesh(const MinimizePlasticVariant& variant,
                                        FinishBlock* fb = nullptr,
                                        TriangleMesh* unfinished = nullptr,
                                        const std::vector<FrozenFaceSet>* frozen = nullptr,
-                                       const DesignBox* box = nullptr) {
+                                       const DesignBox* box = nullptr,
+                                       const std::vector<DesignBox>* keep_outs = nullptr,
+                                       const std::vector<ClearanceGeometry>* keep_clears = nullptr) {
   if (fin != nullptr) {  // E1: the finished shape, after CAD projection and exact Protect
     const TriangleMesh raw = variant_export_model_mesh(
         variant, out, sg, printed_iso, cad, keeps, nullptr, nullptr, nullptr, &fin->frozen,
-        fin->ctx.has_box ? &fin->ctx.box : nullptr);
+        fin->ctx.has_box ? &fin->ctx.box : nullptr, fin->ctx.has_box ? &fin->keep_outs : nullptr,
+        fin->ctx.has_box ? &fin->keep_clears : nullptr);
     FinishContext c = fin->ctx;
     // Stage 3: a surface meshed from the function needs no curvature flow.
     if (to_surface_on()) c.flow = false;
@@ -159,8 +166,37 @@ TriangleMesh variant_export_model_mesh(const MinimizePlasticVariant& variant,
   // Stage 3 (switch on): the surface from the function, with the keep regions
   // joined before its one cut by the drawn part (no second union, no nudge).
   if (to_surface_on() && cad != nullptr && !cad->mesh.empty()) {
-    TriangleMesh keep_solid;
+    TriangleMesh keep_solid, box_cut;
 #ifdef TOPOPT_HAVE_MANIFOLD
+    if (box != nullptr && (!keeps.empty() || (keep_outs != nullptr && !keep_outs->empty()) ||
+                           (keep_clears != nullptr && !keep_clears->empty()))) {
+      // What the box may not hold outside the part: the keep regions grown 0.02 mm
+      // (past keep_solid's 0.01, so no face of one lies on the other), the keep-outs
+      // grown 0.01 mm (past the box's faces they share), and the declared Keep clears
+      // (a bolt's swept cylinder, a face's slab) grown 0.01 mm, the solids the finish
+      // cuts with: the surface is then exact there, not a smoothed voxel stamp the
+      // finish cuts afterwards. (A Keep clear given as voxels or an outline has no
+      // solid here; its stamp and the finish's cut still hold it.)
+      manifold::Manifold C;
+      for (const KeepRegion& k : keeps) C = C + keep_region_solid(k, 0.02);
+      if (keep_clears != nullptr)
+        for (const ClearanceGeometry& kc : *keep_clears) C = C + clearance_solid(kc, 0.01);
+      if (keep_outs != nullptr)
+        for (const DesignBox& b : *keep_outs)
+          C = C + manifold::Manifold::Cube(manifold::vec3(b.max.x - b.min.x + 0.02,
+                                                          b.max.y - b.min.y + 0.02,
+                                                          b.max.z - b.min.z + 0.02))
+                      .Translate(manifold::vec3(b.min.x - 0.01, b.min.y - 0.01, b.min.z - 0.01));
+      const manifold::MeshGL64 g = C.GetMeshGL64();
+      for (std::size_t v = 0; v < g.NumVert(); ++v)
+        box_cut.vertices.push_back({g.vertProperties[v * g.numProp],
+                                    g.vertProperties[v * g.numProp + 1],
+                                    g.vertProperties[v * g.numProp + 2]});
+      for (std::size_t t = 0; t < g.NumTri(); ++t)
+        box_cut.triangles.push_back({static_cast<int>(g.triVerts[3 * t]),
+                                     static_cast<int>(g.triVerts[3 * t + 1]),
+                                     static_cast<int>(g.triVerts[3 * t + 2])});
+    }
     if (!keeps.empty()) {
       manifold::Manifold K;
       // Grown 0.01 mm, as keep_regions_exact's kCut: two regions that meet only along
@@ -183,7 +219,8 @@ TriangleMesh variant_export_model_mesh(const MinimizePlasticVariant& variant,
       TriangleMesh m = function_surface_mesh(
           variant, sg, cad->drawn_mesh(), std::max(1, out.smooth_factor), printed_iso, &why,
           &fr, frozen, cad, keeps.empty() ? nullptr : &keeps,
-          keep_solid.triangles.empty() ? nullptr : &keep_solid, box);
+          keep_solid.triangles.empty() ? nullptr : &keep_solid, box,
+          box_cut.triangles.empty() ? nullptr : &box_cut);
       if (!m.triangles.empty()) {
         std::fprintf(stderr,
                      "[surface] vf %.2f: from the function: %lld triangles, mesh %.2f s, "

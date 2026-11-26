@@ -372,7 +372,8 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
                                    const StepModel* model,
                                    const std::vector<KeepRegion>* keeps,
                                    const TriangleMesh* keep_solid,
-                                   const DesignBox* box) {
+                                   const DesignBox* box,
+                                   const TriangleMesh* box_cut) {
   FunctionSurfaceReport local;
   FunctionSurfaceReport& R = rep ? *rep : local;
   R = FunctionSurfaceReport{};
@@ -631,11 +632,25 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
     if (A.Status() == manifold::Manifold::Error::NoError &&
         K.Status() == manifold::Manifold::Error::NoError &&
         P.Status() == manifold::Manifold::Error::NoError) {
-      if (box != nullptr)  // the design box joins the domain: its faces are exact
-        P = P + manifold::Manifold::Cube(manifold::vec3(box->max.x - box->min.x,
-                                                        box->max.y - box->min.y,
-                                                        box->max.z - box->min.z))
-                    .Translate(manifold::vec3(box->min.x, box->min.y, box->min.z));
+      if (box != nullptr) {  // the design box joins the domain: its faces are exact
+        manifold::Manifold Bx =
+            manifold::Manifold::Cube(manifold::vec3(box->max.x - box->min.x,
+                                                    box->max.y - box->min.y,
+                                                    box->max.z - box->min.z))
+                .Translate(manifold::vec3(box->min.x, box->min.y, box->min.z));
+        // Less what the box may not hold outside the part: its keep-outs and the keep
+        // regions' air. Without this the function's value there printed (his stand,
+        // stage 1 + 3: 3.7e4 mm3 in its Keep clears, two left sealed inside the part).
+        if (box_cut != nullptr && !box_cut->triangles.empty()) {
+          const manifold::Manifold C = to_manifold64(*box_cut);
+          if (C.Status() != manifold::Manifold::Error::NoError) {
+            if (why) *why = "the box's keep-outs and keep regions are not a closed manifold";
+            return {};
+          }
+          Bx = Bx - C;
+        }
+        P = P + Bx;
+      }
       if (keep) A = A + K;
       cut = from_manifold64((A ^ P).SetTolerance(kAsWrittenTol));
     } else {

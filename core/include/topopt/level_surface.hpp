@@ -118,7 +118,11 @@ TriangleMesh mesh_intersection(const TriangleMesh& a, const TriangleMesh& b,
 // and no second union along the drawn faces.
 //
 // With `box` (a design-box run, which may grow material outside the part), the
-// cut is by the drawn part AND the box, so the box's faces are exact too.
+// cut is by the drawn part AND the box, so the box's faces are exact too. `box_cut`
+// is what the box may not hold outside the part: its keep-outs (Empty on the grid,
+// where the function means nothing) and the keep regions' air (exact: the part's own
+// shape inside each keep region). The caller grows it a little past both, so no face
+// of it lies on a face of the box or of `keep_solid`.
 //
 // Empty with `why` set when it cannot be made (no analytic design, no drawn part,
 // a design-box run without its box, no Manifold): the caller keeps today's export and says so.
@@ -141,6 +145,7 @@ TriangleMesh function_surface_mesh(const MinimizePlasticVariant& v, const VoxelG
                                    const StepModel* model = nullptr,
                                    const std::vector<KeepRegion>* keeps = nullptr,
                                    const TriangleMesh* keep_solid = nullptr,
-                                   const DesignBox* box = nullptr);
+                                   const DesignBox* box = nullptr,
+                                   const TriangleMesh* box_cut = nullptr);
 
 }  // namespace topopt

@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdint>
 #include <cstring>
 #include <functional>
 #include <string>
@@ -372,6 +373,86 @@ int main(int argc, char** argv) {
                 rj.stamped_solid, aj.boundary_edges, aj.non_manifold_edges,
                 aj.non_manifold_vertices, aj.bodies, wj.empty() ? "" : ", ", wj.c_str(),
                 ok ? "ok" : "MISSED");
+    if (gate && !ok) ++failures;
+  }
+  // ── J, a design-box run (his stand, stage 1 + 3): the box's keep-out is Empty on the
+  // grid, where the function means nothing, and a keep region's air is the part's own
+  // shape; neither may hold material, whatever the function says there. The design is
+  // a slab (solid below y = 12) running through the keep-out; the keep region straddles
+  // the part's +x face and the slab's top, as his protected faces sit on material.
+  // Without the box cut both printed. ─────────────────────────────────────────────────
+  {
+    const manifold::Manifold part = manifold::Manifold::Cube(manifold::vec3(30, 30, 30), true)
+                                        .Translate(manifold::vec3(20, 20, 20));  // 5..35
+    const TriangleMesh drawn = from_manifold(part);
+    const VoxelGrid pg = voxelize(drawn, static_cast<int>(std::lround(30.0 / kVoxel)));
+    const DesignBox box{Vec3{5, 5, 5}, Vec3{55, 35, 35}};  // grows +x by 20 mm
+    // The keep-out shares the box's y faces and its top: the coplanar case.
+    const std::vector<DesignBox> outs{DesignBox{Vec3{42, 5, 20}, Vec3{48, 35, 35}}};
+    const DesignDomain dom = expand_design_domain(pg, box, outs, false);
+    MinimizePlasticVariant vb = make_version(dom.grid, [](const Vec3& p) { return p.y - 12.0; });
+    std::vector<KeepRegion> keeps(1);  // x: 31..35 part, 35..39 air; y: across the slab's top
+    keeps[0].min = Vec3{31, 8, 15};
+    keeps[0].max = Vec3{39, 16, 25};
+    auto cube = [](const Vec3& lo, const Vec3& hi, double g) {
+      return manifold::Manifold::Cube(manifold::vec3(hi.x - lo.x + 2 * g, hi.y - lo.y + 2 * g,
+                                                     hi.z - lo.z + 2 * g))
+          .Translate(manifold::vec3(lo.x - g, lo.y - g, lo.z - g));
+    };
+    // A bolt's Keep clear through the slab, in the box beyond the part: radius 2 mm about
+    // x = 51, y = 8, the box's whole height.
+    auto bolt = [](double r) {  // as clearance_solid makes it: a circumscribed 128-gon
+      return manifold::Manifold::Cylinder(30.0 + 2 * (r - 2.0), r / std::cos(kPi / 128), -1.0, 128)
+          .Translate(manifold::vec3(51, 8, 5 - (r - 2.0)));
+    };
+    // As to_export.inc builds them: keep_solid grown 0.01 mm; the box cut is the keep
+    // regions grown 0.02 mm, the keep-outs and the Keep clears grown 0.01 mm.
+    const TriangleMesh ks = from_manifold(cube(keeps[0].min, keeps[0].max, 0.01));
+    const TriangleMesh bc = from_manifold(cube(keeps[0].min, keeps[0].max, 0.02) +
+                                          cube(outs[0].min, outs[0].max, 0.01) + bolt(2.01));
+    struct Vols { double out = -1, air = -1, box = -1, bolt = -1; WrittenAudit a; std::string why; };
+    auto measure = [&](const TriangleMesh* cut) {
+      Vols r;
+      FunctionSurfaceReport rb;
+      const TriangleMesh fb = function_surface_mesh(vb, dom.grid, drawn, 2, 0.5, &r.why, &rb,
+                                                    nullptr, nullptr, &keeps, &ks, &box, cut);
+      r.a = audit_as_written(fb);
+      if (fb.triangles.empty()) return r;
+      manifold::MeshGL64 g;
+      g.numProp = 3;
+      for (const Vec3& q : fb.vertices) {
+        g.vertProperties.push_back(q.x);
+        g.vertProperties.push_back(q.y);
+        g.vertProperties.push_back(q.z);
+      }
+      for (const auto& t : fb.triangles)
+        for (int c = 0; c < 3; ++c) g.triVerts.push_back(static_cast<std::uint64_t>(t[c]));
+      g.Merge();
+      const manifold::Manifold F(g);
+      r.out = (F ^ cube(outs[0].min, outs[0].max, 0.0)).Volume();
+      r.air = (F ^ cube(Vec3{35, 8, 15}, keeps[0].max, 0.0)).Volume();
+      r.box = (F ^ cube(Vec3{35, 5, 5}, box.max, 0.0)).Volume();  // the box outside the part
+      r.bolt = (F ^ bolt(2.0)).Volume();
+      return r;
+    };
+    const Vols before = measure(nullptr), after = measure(&bc);
+    // Outside the part the slab holds 20 x 7 x 30 = 4200 mm3, less the keep-out's share
+    // 6.02 x 7 x 15.01 = 632.5 (grown 0.01 mm), the keep region's 4.02 x 4.02 x 10.04
+    // = 162.3 (grown 0.02 mm; inside a keep region only the part prints) and the bolt's
+    // 12.695 x 30 = 380.8 (its 128-gon, r 2.01 mm): 3024.4 mm3.
+    const bool ok = after.a.non_manifold_edges == 0 && after.a.boundary_edges == 0 &&
+                    after.a.non_manifold_vertices == 0 && after.a.bodies == 1 &&
+                    after.out < 1e-6 && after.air < 1e-6 && after.bolt < 1e-6 &&
+                    std::fabs(after.box - 3024.4) < 10.0;
+    std::printf("[test J] design box, without the box cut: keep-out %.1f mm3, keep region's air "
+                "%.1f mm3, bolt's Keep clear %.1f mm3, box outside the part %.1f mm3\n", before.out,
+                before.air, before.bolt, before.box);
+    std::printf("[test J] design box, with it: keep-out %.4f mm3, keep region's air %.4f mm3, "
+                "bolt's Keep clear %.4f mm3 (all 0); box outside the part %.1f mm3 (3024.4); open %d, "
+                "3+ %d, point %d, bodies %d%s%s: %s\n", after.out, after.air, after.bolt, after.box,
+                after.a.boundary_edges,
+                after.a.non_manifold_edges, after.a.non_manifold_vertices, after.a.bodies,
+                after.why.empty() ? "" : ", ", after.why.c_str(), ok ? "ok" : "MISSED");
     if (gate && !ok) ++failures;
   }
   std::printf("[test B/F/J] %s: %d failure(s)\n", gate ? "gate" : "measure only", failures);
