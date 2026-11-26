@@ -29,7 +29,7 @@ The maintainer's order (2026-11-25): never sit waiting on the lock. Every wake-u
 
 WAITING ON OTHERS (check each tick, act the moment it arrives):
 - The reviewer: which reference a reading over a length is judged against (the textbook peak, or the reading's own true value; asked 02:10Z and 02:26Z on TOReview). Until then nothing more goes into `analyze.cpp`.
-- The lock (queued, will start by themselves): `stage1_sixth.sh` Top Motor Mount from the drawn faces, then the stand at pad 2 and 4.5 mm; `stage1_seventh.sh` the stand at pad 3 mm on the corrected clamp. Record all four in `stages/stage-1-true-loads.md`.
+- The lock (queued, starts by itself): `stage1_eighth.sh` Top Motor Mount from the drawn faces, then the stand at pad 3 mm on the corrected clamp (the stand at other pad depths is dropped: it is three quarters frozen and the pad changes nothing). Running without the lock: `stage1_pad96.sh`, the pad on Base, Pressing and PillowBlock. Record in `stages/stage-1-true-loads.md`.
 
 OPEN, mine, no lock needed:
 1. STAGE 1 REPORT to the reviewer (the flip is ruled on it). Write it as soon as the lock runs are recorded. It must carry: hand-over item 3 for #362 in the same release; `lattice_depth_tie` 0a and `test_print_frame.cpp:721` in their `face` forms with the note on the frame's load rule; LatticeReview's interim guard (13b28529 on claude/organic-engine); rule P (time within 10 %) re-read on a quiet machine; the corrected-clamp tables; the bearing table.
