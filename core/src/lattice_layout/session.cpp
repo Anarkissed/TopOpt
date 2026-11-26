@@ -1,9 +1,12 @@
 // Lattice rebuild, stage E: what the app holds for one part (rule P2). See lattice_layout.hpp.
 #include "topopt/lattice_layout.hpp"
 #include "topopt/lattice_layout_organic.hpp"
+#include "stream.hpp"
 
 #include <algorithm>
+#include <map>
 #include <set>
+#include <tuple>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -179,10 +182,23 @@ void Session::ready_domain(const Settings& settings) {
 Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* strands, int threads,
                           const std::atomic<bool>* stop, const WeaveFinish* finish) {
   Outcome out;
-  const auto given_up = [] { Outcome none; none.cancelled = true; return none; };
+  // notes30: the strut stream (a cube lattice's lay only; Organic hands its vines to the growth tap).
+  StrutTap* const tap = settings.stream && strut_tap_ && !strands ? strut_tap_ : nullptr;
+  bool tap_started = false;
+  const auto given_up = [&] {
+    if (tap && tap_started) tap->cancel();
+    Outcome none;
+    none.cancelled = true;
+    return none;
+  };
   if (stop && stop->load(std::memory_order_relaxed)) return given_up();
   auto t0 = std::chrono::steady_clock::now();
   ready_domain(settings);
+  if (tap) {   // (C1 moves this into lay_cells' plan: its slots and the boxes its passes lay in)
+    const PartMeasure& m = domain_->measure();
+    tap->start(settings.stream_up, m.lo(), m.hi(), 0);
+    tap_started = true;
+  }
   out.read_again = unread_;   // a new domain, or one whose first reading was given up part way
   out.empty_regions = empty_regions_;
   // The domain watches the flag for this lay only (the flag need not outlive the call).
@@ -266,6 +282,7 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
       struts.reference_mpa = reference;
     }
     out.struts = set_struts(out.layout, struts, own_or_none);
+    if (tap) tap->phase(StrutTap::kBars);
     const double laid = ms_since(t0);
     (out.read_again ? out.ms_read : out.ms_cells) = laid;
     last_cells_.regions = out.layout.regions;   // D23: what Session::places reads of this layout
@@ -352,6 +369,7 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
         }
       std::vector<std::pair<Vec3, Vec3>> held_at;   // the held ends, by place (the drop renumbers bars)
       for (const auto& [i, e] : held_surface) held_at.push_back({e ? out.bars.bars[i].b : out.bars.bars[i].a, e ? out.bars.bars[i].a : out.bars.bars[i].b});
+      if (tap) tap->phase(StrutTap::kPieces);
       if (settings.drop_loose && !draft) {
         drop_loose_bars(out.bars, finish && !finish->arrived.empty() ? &finish->arrived : nullptr);   // G11
         out.stepped_edges = stepped_edges(out.bars);
@@ -420,9 +438,24 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
         }
       out.ms_bars = ms_since(t0);
     }
+    // notes30 C4: the solid view's map for this lay (Settings::map), made here so the app need not ask for it after.
+    if (settings.map.on()) {
+      out.map = make_layout_map(out.layout, *domain_, settings.map, threads, stop);
+      if (!out.map) throw LayCancelled{};
+    }
     domain_->check_stop();   // set during the last step: the answer is "cancelled", never a layout nobody waits for
   } catch (const LayCancelled&) {
     return given_up();
+  } catch (...) {
+    if (tap && tap_started) tap->cancel();   // nothing more of this lay comes
+    throw;
+  }
+  if (tap) {   // the lay is whole: what was handed over is checked against it, bar by bar
+    if (out.map) tap->map(out.map, 2);
+    tap->land(out.bars);
+    const StrutTap::Read r = tap->read(0, 1);
+    out.streamed = r.total;
+    out.streamed_missing = r.missing;
   }
   return out;
 }
@@ -478,6 +511,151 @@ GrowthTap::Read GrowthTap::read(std::size_t from, std::size_t most) const {
   r.region.assign(region_.begin() + static_cast<long>(a), region_.begin() + static_cast<long>(b));
   r.next = b;
   return r;
+}
+
+// ── notes30: the strut stream ───────────────────────────────────────────────────
+void StrutTap::start(const Vec3& up, const Vec3& lo, const Vec3& hi, std::size_t slots) {
+  std::lock_guard<std::mutex> lock(m_);
+  ++lay_;
+  phase_ = kCells;
+  up_ = up;
+  lo_ = lo;
+  hi_ = hi;
+  slots_ = slots;
+  laid_ = 0;
+  missing_ = 0;
+  line_ = -1e300;
+  ab_.clear(); width_.clear(); cell_.clear(); region_.clear(); flags_.clear();
+  map_.reset();
+  map_state_ = 0;
+  slabs_done_.clear();
+  landed_.clear();
+  b_ab_.clear(); b_width_.clear(); b_cell_.clear(); b_region_.clear(); b_flags_.clear();
+}
+
+void StrutTap::progress(std::size_t laid, double line) {
+  flush();
+  std::lock_guard<std::mutex> lock(m_);
+  laid_ = laid;
+  line_ = std::max(line_, line);
+}
+
+void StrutTap::phase(int p) {
+  flush();
+  std::lock_guard<std::mutex> lock(m_);
+  phase_ = p;
+}
+
+void StrutTap::strut(const Bar& b) {
+  for (const double v : {b.a.x, b.a.y, b.a.z, b.b.x, b.b.y, b.b.z}) b_ab_.push_back(v);
+  b_width_.push_back(b.width);
+  b_cell_.push_back(b.cell);
+  b_region_.push_back(b.region);
+  b_flags_.push_back(static_cast<std::uint8_t>((b.piece ? 1 : 0) | (b.skin ? 2 : 0) | (bar_is_bridge(b) ? 16 : 0)));
+  if (b_region_.size() >= 256) flush();
+}
+
+void StrutTap::flush() {
+  if (b_region_.empty()) return;
+  std::lock_guard<std::mutex> lock(m_);
+  ab_.insert(ab_.end(), b_ab_.begin(), b_ab_.end());
+  width_.insert(width_.end(), b_width_.begin(), b_width_.end());
+  cell_.insert(cell_.end(), b_cell_.begin(), b_cell_.end());
+  region_.insert(region_.end(), b_region_.begin(), b_region_.end());
+  flags_.insert(flags_.end(), b_flags_.begin(), b_flags_.end());
+  b_ab_.clear(); b_width_.clear(); b_cell_.clear(); b_region_.clear(); b_flags_.clear();
+}
+
+void StrutTap::map(std::shared_ptr<const LayoutMap> m, int state, std::vector<std::uint8_t> slabs_done) {
+  std::lock_guard<std::mutex> lock(m_);
+  map_ = std::move(m);
+  map_state_ = map_ ? state : 0;
+  slabs_done_ = std::move(slabs_done);
+}
+
+void StrutTap::land(const Bars& finished) {
+  flush();
+  // Each finished bar by its exact two ends (as laid, either way round): a strut handed over must be one of them, with
+  // the same width, cell, region and flags.
+  struct Key {
+    double v[6];
+    bool operator<(const Key& o) const {
+      for (int i = 0; i < 6; ++i)
+        if (v[i] != o.v[i]) return v[i] < o.v[i];
+      return false;
+    }
+  };
+  const auto key = [](double ax, double ay, double az, double bx, double by, double bz) {
+    const bool swap = std::tie(bx, by, bz) < std::tie(ax, ay, az);
+    return swap ? Key{{bx, by, bz, ax, ay, az}} : Key{{ax, ay, az, bx, by, bz}};
+  };
+  std::map<Key, std::size_t> at;
+  for (std::size_t i = 0; i < finished.bars.size(); ++i) {
+    const Bar& b = finished.bars[i];
+    at.emplace(key(b.a.x, b.a.y, b.a.z, b.b.x, b.b.y, b.b.z), i);
+  }
+  std::lock_guard<std::mutex> lock(m_);
+  landed_.assign(finished.bars.size(), 0);
+  missing_ = 0;
+  for (std::size_t s = 0; s < region_.size(); ++s) {
+    const double* p = &ab_[6 * s];
+    const auto it = at.find(key(p[0], p[1], p[2], p[3], p[4], p[5]));
+    bool same = it != at.end();
+    if (same) {
+      const Bar& b = finished.bars[it->second];
+      const std::uint8_t f =
+          static_cast<std::uint8_t>((b.piece ? 1 : 0) | (b.skin ? 2 : 0) | (bar_is_bridge(b) ? 16 : 0));
+      same = b.a.x == p[0] && b.a.y == p[1] && b.a.z == p[2] && b.b.x == p[3] && b.b.y == p[4] && b.b.z == p[5] &&
+             b.width == width_[s] && b.cell == cell_[s] && b.region == region_[s] && f == flags_[s] &&
+             b.end_a == Bar::End::Node && b.end_b == Bar::End::Node;
+    }
+    if (same) landed_[it->second] = 1;
+    else ++missing_;
+  }
+  phase_ = kDone;
+}
+
+void StrutTap::cancel() {
+  flush();
+  std::lock_guard<std::mutex> lock(m_);
+  phase_ = kCancelled;
+}
+
+StrutTap::Read StrutTap::read(std::size_t from, std::size_t most) const {
+  std::lock_guard<std::mutex> lock(m_);
+  Read r;
+  r.lay = lay_;
+  r.phase = phase_;
+  r.up = up_;
+  r.lo = lo_;
+  r.hi = hi_;
+  r.slots = slots_;
+  r.laid = laid_;
+  r.line = line_;
+  r.total = region_.size();
+  r.missing = missing_;
+  const std::size_t n = region_.size();
+  const std::size_t a = std::min(from, n);
+  const std::size_t b = most > 0 ? std::min(n, a + most) : n;
+  r.ab.assign(ab_.begin() + static_cast<long>(6 * a), ab_.begin() + static_cast<long>(6 * b));
+  r.width.assign(width_.begin() + static_cast<long>(a), width_.begin() + static_cast<long>(b));
+  r.cell.assign(cell_.begin() + static_cast<long>(a), cell_.begin() + static_cast<long>(b));
+  r.region.assign(region_.begin() + static_cast<long>(a), region_.begin() + static_cast<long>(b));
+  r.flags.assign(flags_.begin() + static_cast<long>(a), flags_.begin() + static_cast<long>(b));
+  r.next = b;
+  r.map_state = map_state_;
+  r.slabs_done = slabs_done_;
+  return r;
+}
+
+std::shared_ptr<const LayoutMap> StrutTap::map() const {
+  std::lock_guard<std::mutex> lock(m_);
+  return map_;
+}
+
+std::vector<std::uint8_t> StrutTap::landed_streamed() const {
+  std::lock_guard<std::mutex> lock(m_);
+  return landed_;
 }
 
 }  // namespace topopt::lattice_layout

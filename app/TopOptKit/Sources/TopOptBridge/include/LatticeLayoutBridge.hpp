@@ -128,8 +128,36 @@ struct LatticeLayoutSettings {
   // axis 1 xyz, axis 2 xyz, half xyz (core's Zone: a cylinder's axis is axis 2, its radius half x, its half length
   // half z). Empty: no zones.
   std::vector<double> region_zone;
+  // ── ★ notes30 (his 2026-11-26: "The strut engine hands over its struts while it works"): the strut stream ──
+  // On: the lay hands its CERTAIN struts to the session's strut tap while it works (lattice_layout_strut_read): each one
+  // exactly a bar of the finished lay (the print file's), never one that later vanishes. Not a "where" setting; changes
+  // nothing the lay makes. OFF for Live preview, the nozzle check, places and the sample's Skip all.
+  bool stream = false;
+  // The floors' up, in the part's own coordinates (the timelapse's `up`: the world's up in model coordinates, or the print's
+  // up of a framed session). The cells are laid lowest first along it. Not a direction: +Z.
+  double stream_up_x = 0.0, stream_up_y = 0.0, stream_up_z = 1.0;
+  // ★ notes30 C4: THE SOLID VIEW'S MAP made by the lay itself and returned with it (LatticeLayoutResult::map), the same box
+  // and encoding as lattice_layout_grid: voxel (x, y, z)'s centre at origin + voxel_mm * (x, y, z), the part's own
+  // coordinates. map_nx = 0: none (ask lattice_layout_grid after the lay, as before).
+  float map_origin_x = 0.0f, map_origin_y = 0.0f, map_origin_z = 0.0f, map_voxel_mm = 0.0f;
+  int32_t map_nx = 0, map_ny = 0, map_nz = 0;
 };
 
+// THE SOLID VIEW's map (his ask 11-13: the everyday view solid, not X-ray): what is at every voxel centre of a box, for the
+// LAST layout laid, on every core. Two bytes per voxel, x fastest then y then z, as rg8Snorm: OPEN (+127: lattice a cell
+// holds, also on an outside voxel next to one so a surface right at the opening reads it; -127 otherwise) and INSIDE the part
+// (+127 / -127). Empty before the first layout.
+struct LatticeLayoutGrid {
+  std::vector<int8_t> rg;
+  double ms = 0.0;
+  // Voxels of lattice asked for (where(p).lattice()), and of those the ones no cell holds (D14: solid). His 0.2 mm nozzle
+  // line (11-14) compares their share between two line widths.
+  int64_t asked = 0;
+  int64_t unheld = 0;
+  // The unheld voxels by core's reason (SolidAt::why, NoCell): Other, WallNarrow, TooFewAcross, Sliver, RegionShallow (his
+  // ruling 11-14: solid where lattice was asked is never silent — the line says why and offers fixes).
+  std::vector<int64_t> nocell;
+};
 struct LatticeLayoutResult {
   bool cancelled = false;                    // lattice_layout_cancel came first: nothing below is filled
   // The bars, in the part's own coordinates.
@@ -181,6 +209,14 @@ struct LatticeLayoutResult {
   double stress_reference_mpa = 0.0, step_held_at = 0.0;
   int32_t thin_solid = 0;
   double ms_read = 0.0, ms_cells = 0.0, ms_bars = 0.0, ms_bridge = 0.0;
+  // ★ notes30: the strut stream (settings.stream). Per bar, 1 when the stream handed it over mid-lay (the bar itself, byte
+  // for byte); `streamed` how many were; `streamed_missing` struts handed over that are NOT in these bars (expected 0: one
+  // is a broken promise; the app logs it).
+  std::vector<uint8_t> bar_streamed;
+  int64_t streamed = 0, streamed_missing = 0;
+  // ★ notes30 C4: the solid view's map (settings.map_nx > 0), as lattice_layout_grid would give it for this lay (its `rg`
+  // empty otherwise).
+  LatticeLayoutGrid map;
 };
 
 // What is at each of a batch of points (the drawer's "is this lattice, rim or solid"; the blue glow's reasons): one
@@ -217,21 +253,6 @@ struct LatticeLayoutPoints {
   std::vector<float> xyz;
 };
 LatticeLayoutWhere lattice_layout_where(int64_t session, const LatticeLayoutPoints& points, BridgeError& err);
-// THE SOLID VIEW's map (his ask 11-13: the everyday view solid, not X-ray): what is at every voxel centre of a box, for the
-// LAST layout laid, on every core. Two bytes per voxel, x fastest then y then z, as rg8Snorm: OPEN (+127: lattice a cell
-// holds, also on an outside voxel next to one so a surface right at the opening reads it; -127 otherwise) and INSIDE the part
-// (+127 / -127). Empty before the first layout.
-struct LatticeLayoutGrid {
-  std::vector<int8_t> rg;
-  double ms = 0.0;
-  // Voxels of lattice asked for (where(p).lattice()), and of those the ones no cell holds (D14: solid). His 0.2 mm nozzle
-  // line (11-14) compares their share between two line widths.
-  int64_t asked = 0;
-  int64_t unheld = 0;
-  // The unheld voxels by core's reason (SolidAt::why, NoCell): Other, WallNarrow, TooFewAcross, Sliver, RegionShallow (his
-  // ruling 11-14: solid where lattice was asked is never silent — the line says why and offers fixes).
-  std::vector<int64_t> nocell;
-};
 LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float origin_y, float origin_z, float voxel_mm,
                                       int32_t nx, int32_t ny, int32_t nz, BridgeError& err);
 // ★ his 11-23 (the walls taken away FIRST, then the vines grow): the same map for these settings BEFORE the lay, when every
@@ -417,6 +438,52 @@ struct LatticeLayoutGrowth {
   std::vector<int32_t> region;   // 1 per piece
 };
 LatticeLayoutGrowth lattice_layout_growth_read(int64_t session, int64_t from, int64_t most, BridgeError& err);
+
+// ★ notes30 — THE STRUT STREAM (his 2026-11-26: "The strut engine hands over its struts while it works, the way Organic's
+// engine does, so the floors rise in step with the real work."): what the session's strut lay (settings.stream on) has
+// handed over so far: each strut is CERTAIN to be a bar of the finished lay, byte for byte (the same floats as the landed
+// LatticeLayoutResult's bar: a, b, width, ends, flags, region, cell) — never one that later vanishes. The struts from `from`
+// on (at most `most`; 0 = all), the index to read from next time, and the lay's number (a new lay starts again at 0).
+// It NEVER waits on the lay (call it from any thread while the lay runs, as lattice_layout_growth_read). After a lay its
+// struts stay until the next one starts.
+//   phase: 0 no strut lay yet; 1 laying the cells; 2 the bars; 3 the pieces (the drop, the joins, the adrift test); 4 landed
+//   (lattice_layout has returned this lay's result); 5 given up (cancelled or failed): nothing more of this lay comes.
+//   The PLAN, fixed when the lay starts (the floors are set from it, never moved at landing): `up` (unit, the part's own
+//   coordinates: settings' stream_up), the planned box lo..hi (the part's own coordinates, axis-aligned: the part's box cut
+//   to where the lay's passes lay cells) and `low_mm`..`high_mm`, that box's lowest and highest along `up`; `slots` the base
+//   cells to lay.
+//   PROGRESS: `slots_laid`; `line_mm` THE FINISHED LINE, a height along `up` (the part's own coordinates, as low_mm):
+//   everything of the lay below it is laid and settled. Rises only. Before the first floor: -1e300. A strut below the line
+//   that is not handed over yet comes later (its piece found held) or lands with the lay (cut pieces, skin bars).
+//   `missing` (phase 4): struts handed over that are not in the finished lay — expected 0; anything else is a broken
+//   promise (log it: GenerationTimingLog).
+//   THE MAP (settings.map_nx > 0): `map_state` 0 not made yet, 1 made (every voxel final except those of cells the lay
+//   closes at its very end — none on the fixtures), 2 the finished lay's; read it with lattice_layout_strut_map.
+//   `map_slabs_done`: per z slab of the map's grid, 1 when that slab is final (empty: all as map_state says).
+struct LatticeLayoutStruts {
+  uint64_t lay = 0;
+  int32_t phase = 0;
+  int64_t next = 0;
+  float up[3] = {0.0f, 0.0f, 1.0f};
+  float lo[3] = {0.0f, 0.0f, 0.0f}, hi[3] = {0.0f, 0.0f, 0.0f};
+  double low_mm = 0.0, high_mm = 0.0;
+  int64_t slots = 0, slots_laid = 0;
+  double line_mm = -1e300;
+  int64_t total = 0;                // struts handed over so far (all of them, not only from `from`)
+  int64_t missing = 0;
+  // The struts, as LatticeLayoutResult gives bars (the part's own coordinates):
+  std::vector<float> bars;          // 7 per strut: ax ay az bx by bz width_mm
+  std::vector<uint8_t> bar_ends;    // 2 per strut: always 0 0 (both ends nodes)
+  std::vector<uint8_t> bar_flags;   // 1 per strut: 16 a BRIDGE (judged where it is laid, the print frame when framed); never 1 or 2
+  std::vector<int32_t> bar_region;  // 1 per strut
+  std::vector<float> bar_cell;      // 1 per strut: the size of its cell, mm
+  int32_t map_state = 0;
+  std::vector<uint8_t> map_slabs_done;
+};
+LatticeLayoutStruts lattice_layout_strut_read(int64_t session, int64_t from, int64_t most, BridgeError& err);
+// ★ notes30 C4: the stream's map as it stands (LatticeLayoutStruts::map_state >= 1), lattice_layout_grid's box and encoding
+// for the settings the lay was asked with; `rg` empty before it is made. Never waits on the lay.
+LatticeLayoutGrid lattice_layout_strut_map(int64_t session, BridgeError& err);
 
 // ★ notes28 (his 11-24: all nine strut types on the new engine): what the engine knows of a strut type, asked without a
 // part. `lays`: the engine lays it — core has the type's canonical cell (lattice_has_strut_cell) and its two width limits

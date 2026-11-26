@@ -210,6 +210,8 @@ add_library(topopt
   src/lattice_layout/organic_guard.cpp
   # Install 3, rule D23: the faces a region runs into that no rule decides (places).
   src/lattice_layout/places.cpp
+  # notes30 (option D): the strut stream, its certificate and the solid view's map made in the lay (StrutTap).
+  src/lattice_layout/stream.cpp
   src/orient/orient.cpp
   src/orient/build_orientation.cpp
   src/orient/build_frame.cpp

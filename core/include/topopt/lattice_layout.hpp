@@ -396,6 +396,123 @@ class GrowthTap {
   std::vector<std::int32_t> batch_region_;
 };
 
+struct Bar;
+struct Bars;
+// ── THE SOLID VIEW'S MAP, MADE IN THE LAY (notes30, C4) ───────────────────────────────────────────────────────────────────
+// What is at every voxel centre of a box, for the lay that makes it: the bridge's lattice_layout_grid, byte for byte, made
+// by the lay itself (Settings::map) so the app need not wait for it after the lay lands. Two bytes per voxel, x fastest
+// then y then z: OPEN (+127: lattice a cell holds, also on an outside voxel next to one; -127 otherwise) and INSIDE the
+// part (+127 / -127). `asked`: voxels of lattice asked for; `unheld`: of those, the ones no cell holds (D14: solid);
+// `nocell`: the unheld by SolidWhy (Other, WallNarrow, TooFewAcross, Sliver, RegionShallow).
+struct LayoutMap {
+  int nx = 0, ny = 0, nz = 0;
+  std::vector<std::int8_t> rg;
+  std::int64_t asked = 0, unheld = 0;
+  std::array<std::int64_t, 5> nocell{};
+  double ms = 0.0;
+};
+// The map a lay is asked to make: nx * ny * nz voxels, `at` each one's centre in the LAYOUT's coordinates (the bridge
+// turns a framed session's model-space voxel into the print frame exactly as lattice_layout_grid does). No voxels: no
+// map.
+struct MapAsk {
+  int nx = 0, ny = 0, nz = 0;
+  std::function<Vec3(int x, int y, int z)> at;
+  bool on() const { return nx > 0 && ny > 0 && nz > 0 && static_cast<bool>(at); }
+};
+
+// ── THE STRUT STREAM (notes30, option D; his decision 2026-11-26: "The strut engine hands over its struts while it works,
+// the way Organic's engine does, so the floors rise in step with the real work.") ─────────────────────────────────────────
+// A strut lay (Session::lay with Settings::stream on and a tap set, Session::strut_tap) lays its base cells in order of
+// height along Settings::stream_up (the layout is the same: D18 already makes it independent of the order the cells are
+// laid in), keeps a FINISHED LINE (every cell whose slot starts below it is laid), and hands the tap each whole strut the
+// moment it is CERTAIN to be in the finished lay exactly: the same two ends, width, cell, region and flags, byte for byte
+// (the print file's: his "the drawing follows the print file. Always."). Never a strut that later vanishes. What is not
+// certain mid-lay (the cut pieces at the part's surface, the skin's bars, struts of cells a later rule may still change)
+// lands with the lay. It only copies what is certain: nothing the lay makes depends on it, and with the stream off the
+// lay is byte for byte the one it was.
+// The certificate (stream.cpp): a whole strut (both ends Node, not a piece) is handed over when (1) every cell that could
+// lay it is laid and settled (no later rule can remove or change it: K5's patch already spans its count, no K8 square
+// end near, no C24 limit, a cut cell's thin-piece test decided, and none of its readings depended on another region's
+// cells), (2) its width is final (every cell sharing it is laid, the dedup's widest known), (3) the drop cannot peel it
+// (it is in the 2-core of the certain struts: every node of that set holds two or more of them), and (4) its piece is
+// held: the set's component holds a node touching solid by count_pieces' own test, read where the answer cannot change.
+class StrutTap {
+ public:
+  // 0: no lay yet; 1 laying the cells; 2 the bars; 3 the pieces (the drop, the joins, the adrift test); 4 landed (the lay
+  // is whole: what it laid is the finished lay); 5 given up (cancelled, or the lay failed): nothing more of it comes.
+  enum Phase : int { kNone = 0, kCells = 1, kBars = 2, kPieces = 3, kDone = 4, kCancelled = 5 };
+  // ── the lay's side ──
+  // A new lay: nothing read yet, a new lay number (a reader starts again). `up` (unit, the layout's coordinates), the
+  // planned box `lo`..`hi` (the layout's coordinates: the part's box, cut to the boxes the passes lay in) and the base
+  // slots to lay. Fixed for the lay: the app's floors are set from them at the start.
+  void start(const Vec3& up, const Vec3& lo, const Vec3& hi, std::size_t slots);
+  // Slots laid so far, and the finished line: a height along `up` (the layout's coordinates) below which every cell is
+  // laid and settled (struts of it not yet handed over are uncertain for another reason, or land with the lay).
+  void progress(std::size_t laid, double line);
+  void phase(int p);
+  // One certain strut (its bridge flag judged as the bar lies, in the layout's coordinates: the print frame's when
+  // framed). Batched: handed over every 256 and at each phase.
+  void strut(const Bar& b);
+  void flush();
+  // The map (Settings::map) as it stands: `state` 1 every voxel final but those of cells the lay closes at its very end
+  // (solidify_empty_cells, none on the fixtures), 2 the finished lay's (the Outcome's).
+  void map(std::shared_ptr<const LayoutMap> m, int state, std::vector<std::uint8_t> slabs_done = {});
+  // The lay is whole: every strut handed over is looked up in `finished` (the same a, b, width, cell, region, flags);
+  // `missing` counts those that are not (expected 0: one is a broken certificate, logged by the app), and each finished
+  // bar is marked when it was handed over (landed_streamed). Phase 4.
+  void land(const Bars& finished);
+  void cancel();   // phase 5: what was handed over is not a lay's
+
+  struct Read {
+    std::uint64_t lay = 0;          // which lay (start() counts them); 0 none yet
+    int phase = kNone;
+    std::size_t next = 0;           // the index to read from next time
+    // The plan (fixed at start).
+    Vec3 up{0, 0, 1}, lo{}, hi{};
+    std::size_t slots = 0;
+    // Progress.
+    std::size_t laid = 0;           // slots laid
+    double line = -1e300;           // the finished line along `up` (layout coordinates); -1e300 none yet
+    std::size_t total = 0;          // struts handed over so far
+    std::size_t missing = 0;        // after land(): handed over and not in the finished lay (expected 0)
+    // The struts from `from` on: 6 doubles each (a, b, the layout's coordinates), and per strut its width, cell, region
+    // and flags (Bar's: 16 a bridge; a streamed strut is never a piece or a skin bar, and both its ends are Nodes).
+    std::vector<double> ab;
+    std::vector<double> width, cell;
+    std::vector<std::int32_t> region;
+    std::vector<std::uint8_t> flags;
+    // The map: 0 none (not asked, or not made yet), 1 or 2 as map(); `slabs_done`: per z slab of the map's grid, 1 when
+    // final (empty: every slab as the state says).
+    int map_state = 0;
+    std::vector<std::uint8_t> slabs_done;
+  };
+  // Any thread: the struts from `from` on, at most `most` of them (0: all).
+  Read read(std::size_t from, std::size_t most = 0) const;
+  // Any thread: the map as it stands (null: none yet).
+  std::shared_ptr<const LayoutMap> map() const;
+  // After land(): per bar of the finished lay, 1 when it was handed over mid-lay.
+  std::vector<std::uint8_t> landed_streamed() const;
+
+ private:
+  mutable std::mutex m_;
+  std::uint64_t lay_ = 0;
+  int phase_ = kNone;
+  Vec3 up_{0, 0, 1}, lo_{}, hi_{};
+  std::size_t slots_ = 0, laid_ = 0, missing_ = 0;
+  double line_ = -1e300;
+  std::vector<double> ab_, width_, cell_;
+  std::vector<std::int32_t> region_;
+  std::vector<std::uint8_t> flags_;
+  std::shared_ptr<const LayoutMap> map_;
+  int map_state_ = 0;
+  std::vector<std::uint8_t> slabs_done_;
+  std::vector<std::uint8_t> landed_;
+  // the laying side's batch, not under the lock
+  std::vector<double> b_ab_, b_width_, b_cell_;
+  std::vector<std::int32_t> b_region_;
+  std::vector<std::uint8_t> b_flags_;
+};
+
 class Domain {
  public:
   // `measure` must outlive the domain. The spec is copied; regions are kept sorted by id
@@ -981,6 +1098,10 @@ struct Layout {
 // `own` (C23): a Lattice region listed there is laid with region_cells(spec, its entry): its own base cell, ladder,
 // floor, cells across, band and stress rule. The whole part's own lattice (region 0) is laid with `spec`.
 Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads = 0, const AreaOwnMap* own = nullptr);
+// notes30 (C1): the same lay, its base cells laid in order of height along `watch`'s up and each one reported to `watch` as
+// it is laid (stream.cpp's certificate). The layout is byte for byte lay_cells' (D18). Null: lay_cells.
+class CellWatch;
+Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads, const AreaOwnMap* own, CellWatch* watch);
 
 // What the layout reads at one point (a, b, c) of a frame: the domain's answer and, under
 // a flat region, the lattice's column there (where it starts below the face, how wide it
@@ -1682,6 +1803,14 @@ struct Settings {
   int skin_density = 3;
   double skin_sink = 0.0;
   bool drop_loose = true;        // S4, Finish None's rule; then pieces adrift go too
+  // notes30 (the strut stream, StrutTap): hand the certain struts to the session's tap while the lay works. Neither this
+  // nor stream_up is a "where" setting, and neither changes anything the lay makes. OFF for Live preview, the nozzle
+  // check, places, the sample's Skip all and the print file.
+  bool stream = false;
+  Vec3 stream_up{0.0, 0.0, 1.0};   // the floors' up, the layout's coordinates (a framed session's: the print frame's)
+  // notes30 C4: the solid view's map, made by the lay and returned with it (Outcome::map). Not a "where" setting; changes
+  // nothing else the lay makes. No voxels: none.
+  MapAsk map;
 };
 
 // ── PLACES (rule D23) ─────────────────────────────────────────────────────────
@@ -1762,6 +1891,11 @@ struct Outcome {
   std::vector<SteppedEdge> stepped_edges;   // what Finish None left ragged (S4)
   bool read_again = false;       // the part was read for this layout (a "where" setting changed)
   bool cancelled = false;        // the stop flag was set before the layout was whole: nothing else here is filled
+  // notes30 C4: the solid view's map (Settings::map), made by the lay; null when none was asked. Shared with the tap.
+  std::shared_ptr<const LayoutMap> map;
+  // notes30: struts handed to the tap mid-lay (Settings::stream), and of them those not in the finished bars (expected 0).
+  // Not read by anything the lay makes.
+  std::size_t streamed = 0, streamed_missing = 0;
   // Asked-for regions none of whose faces has triangles, zones region_from_zone refused
   // or asked for together with faces (D21), and pieces region_from_pieces refused or asked
   // for together with a zone (D22).
@@ -1873,6 +2007,9 @@ class Session {
   // His 11-22 (watch it grow): the tap every Organic lay of this session hands its vines to (null: none). It must
   // outlive the lays; the bridge owns it.
   void growth_tap(GrowthTap* t) { tap_ = t; }
+  // notes30: the tap every strut lay of this session with Settings::stream on hands its certain struts to (null: none).
+  // It must outlive the lays; the bridge owns it.
+  void strut_tap(StrutTap* t) { strut_tap_ = t; }
   // O1, O2: the same lay, with a weave. The cube regions are laid as lay() lays them; the weave regions' bars are made
   // from `strands` (weave_bars), cut at their crossings (split_at_crossings) and added after the cells' bars; then all
   // of them are joined, skinned if asked, loose bars dropped and pieces counted as lay() does. The layout's weave
@@ -1969,6 +2106,7 @@ class Session {
   std::string where_;                  // the "where" settings the kept domain was made for
   std::unique_ptr<Domain> domain_;
   GrowthTap* tap_ = nullptr;                  // his 11-22: watch it grow
+  StrutTap* strut_tap_ = nullptr;             // notes30: the strut stream
   // His 11-22 item 2 (redo only what a change affects): each weave region's grown or traced strands and what the lay
   // reads from that step, kept under a key of everything the step reads (organic.cpp, strand_key); a new domain clears
   // it. At most kStrandCacheMax entries (the oldest goes). Opaque here: defined in organic.cpp.
