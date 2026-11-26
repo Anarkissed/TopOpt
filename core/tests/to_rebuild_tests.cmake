@@ -111,6 +111,13 @@ add_executable(test_to_solver_reduced_apply tests/unit/test_to_solver_reduced_ap
 target_link_libraries(test_to_solver_reduced_apply PRIVATE topopt)
 target_include_directories(test_to_solver_reduced_apply PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 add_test(NAME to_solver_reduced_apply COMMAND test_to_solver_reduced_apply)
+# Stage 5, THE CONNECTION RULE, support-only form (the reviewer's ruling 2026-11-26): a piece is held
+# only through a support; a loose piece's registered weight leaves with it; an applied load on a
+# loose piece refuses the solve at once (FeaLoadUnheld); outside the scope, today's bytes.
+add_executable(test_to_solver_connection_rule tests/unit/test_to_solver_connection_rule.cpp)
+target_link_libraries(test_to_solver_connection_rule PRIVATE topopt)
+target_include_directories(test_to_solver_connection_rule PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME to_solver_connection_rule COMMAND test_to_solver_connection_rule)
 
 # Stage 1, M6 (LatticeReview for TOReview): on the strength grid, the protected skin against the lattice cubes, the
 # switch off and `face` (jobs A and B as test_to_stage1_lattice_check makes them). Prints the counts, pins nothing.

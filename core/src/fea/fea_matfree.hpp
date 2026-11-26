@@ -742,6 +742,8 @@ struct MgIslandCensus {
   double floor_e = 0.0;
   double ms = 0.0;                 // the flood fill's wall time
   std::vector<int> drop;
+  int loaded_loose = 0;            // support-only rule: loose pieces with an applied load
+  long long loaded_loose_voxels = 0;
 };
 MgIslandCensus mg_island_census(const VoxelGrid& grid,
                                 const std::vector<double>& elem_youngs,
@@ -762,6 +764,10 @@ struct MgLooseStats {
   int last_pieces = 0, last_loose = 0, last_frozen_loose = 0;
   long long last_loose_voxels = 0;
   int majority_warnings = 0;
+  int last_loaded_loose = 0;              // support-only rule: loose pieces with an applied load
+  long long last_loaded_loose_voxels = 0;
+  long long loaded_loose_solves = 0;
+  double last_body_removed = 0.0;         // support-only rule: loose weight taken out (N)
 };
 const MgLooseStats& mg_loose_stats();
 // TEST ONLY — never called by production code. false turns the connection rule
