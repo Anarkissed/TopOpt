@@ -67,3 +67,5 @@
 /evidence/2026-09-30-ruling4-gates/
 /evidence/2026-10-01-cant-open/
 /evidence/2026-11-09-lattice-type-strut-laws/
+/evidence/2026-11-25-strut-laws-low-density/
+/evidence/2026-11-25-sheet-laws-thin-members/
