@@ -138,8 +138,9 @@ struct LatticeLayoutResult {
   std::vector<uint8_t> bar_flags;            // 1 per bar: 1 a piece of a cut strut, 2 a skin bar,
                                              // 16 (bit 4) a BRIDGE: it lies flatter than 30 degrees, and the file writes it
                                              // as a square bar, as wide and as tall as its width, its underside level
-                                             // (core's bar_is_bridge, the writer's own test); every other bar is round
-  std::vector<int32_t> bar_region;           // 1 per bar: its region, 0 = the whole part
+                                             // (core's bar_is_bridge, the writer's own test); every other bar is round.
+                                             // ★ notes29: a framed session judges it in the print frame (up: the print's)
+  std::vector<int32_t> bar_region;          // 1 per bar: its region, 0 = the whole part
   std::vector<float> bar_cell;               // ★ Install 3: 1 per bar: the size of the cell it is a strut of, mm (core's Bar::cell)
   // The solid pieces the layout lists (D14: a cube tried and not fitted), each with its reason. Cubes sit on frames.
   std::vector<float> frames;                 // 12 per frame: origin xyz, then its three axes (unit) xyz each

@@ -1409,6 +1409,9 @@ public struct WorkspacePlaceholder: View {
                 .onChange(of: project.latticePageManual) { _ in   // ★ Organic: the page's Auto / Manual decides the ask (his 11-18)
                     if newEngineOn, LatticeLayoutPreview.organic(project.lattice) { newEngineSettingsChanged() }
                 }
+                .onChange(of: project.buildOrientation.plateUp) { _ in   // ★ notes29: another face kept stands the lattice another way
+                    if newEngineOn { newEngineSettingsChanged() }
+                }
                 .ignoresSafeArea()
                 // ★ §6(g) — THE PENCIL HOVER, ON THE MESH VIEW ITSELF.
                 //

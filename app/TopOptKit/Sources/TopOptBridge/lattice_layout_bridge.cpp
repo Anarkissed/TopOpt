@@ -381,11 +381,17 @@ ll::Settings settings_in(const LayoutSession& s, const LatticeLayoutSettings& in
 }
 // What a lay gives, for the app: in the part's own coordinates (the session keeps its own, in the print frame, for "where"
 // and the maps).
+// ★ notes29 (H3, the cell lattices): a FLAT BRIDGE (bar_flags bit 16) is judged where it is laid, in the print frame (its +Z
+// the print's up), as the file writes it (core's bar_is_bridge, the writer's own test) — never on the bars turned back,
+// whose +Z is the part's own. The cells, wall maps and frames come back with their frames (turn_outcome_to_model).
 void fill_shown(LatticeLayoutResult& o, const ll::Outcome& out, const topopt::PrintFrame& f) {
   if (!f.on) { fill(o, out); return; }
   ll::Outcome shown = out;
   ll::turn_outcome_to_model(f, shown);
   fill(o, shown);
+  const std::vector<ll::Bar>& laid = out.bars.bars;
+  for (std::size_t i = 0; i < laid.size() && i < o.bar_flags.size(); ++i)
+    o.bar_flags[i] = static_cast<uint8_t>((o.bar_flags[i] & ~16u) | (ll::bar_is_bridge(laid[i]) ? 16u : 0u));
 }
 // The preview's drawing (its runs and the flat ends) in the part's own coordinates; its outcome stays as laid.
 void turn_drawing_to_model(const topopt::PrintFrame& f, ll::OrganicPreview& pv) {
