@@ -15,7 +15,8 @@
 //   the base's underside: the other FIXED face, 10 to 70 mm behind it
 // The load is 400 N on the boss, pushing along the base and down.
 //
-// Writes sample_bracket_a.stl and job.json (PLA, res 96, 50 % infill, six
+// Two more made parts follow the same pattern (B: a beam held at both ends; C: a
+// hook); see kSamples. Writes the part's .stl and job.json (PLA, res 96, 50 % infill, six
 // walls) into the folder given. Not a test: a tool, run by hand.
 #include <cmath>
 #include <cstdio>
@@ -79,42 +80,91 @@ int face_at(const StepModel& m, double nx, double ny, double nz, double off) {
 
 }  // namespace
 
+// One made part: its mesh by a fill rule over a grid of breaks, its fixed and
+// loaded faces by their plane, and the push on the loaded face.
+struct Plane { double nx, ny, nz, off; };
+struct Sample {
+  const char* name;
+  std::vector<double> xs, ys, zs;
+  bool (*full)(double, double, double);
+  std::vector<Plane> fixed;
+  Plane loaded;
+  double force[3];
+};
+
+// A: the L-bracket with a filled corner (see the top of this file).
+bool full_a(double x, double y, double z) {
+  if (x < 80 && z < 10) return true;                                 // base
+  if (x < 20 && z > 10 && z < 70) return true;                       // upright
+  if (x > 20 && x < 60 && z > 10 && z < 50) return true;             // corner fill
+  if (x > 2 && x < 18 && y > 17 && y < 33 && z > 70) return true;    // boss
+  if (x > 80 && y > 15 && y < 35 && z > 3 && z < 7) return true;     // tab
+  return false;
+}
+// B: a beam held at both ends and pushed down in the middle. 120 x 30 x 24 mm,
+// both END faces fixed (120 mm of material behind each: the thick case for the
+// pad), a 20 x 20 x 3 mm boss on top at mid-span carrying 600 N straight down.
+bool full_b(double x, double y, double z) {
+  if (z < 24) return true;
+  return x > 50 && x < 70 && y > 5 && y < 25;                        // boss
+}
+// C: a hook. A 20 x 20 mm stem hanging from its fixed TOP face (80 mm behind it),
+// a 50 mm arm at the bottom, an upturned 10 mm tip; 25 N on the tip's top, down
+// and outward, so the load is well off the stem's line. (Printed upright the stem
+// hangs ACROSS the layers, the weak direction: at 250 N it stood at 0.40 as drawn,
+// too weak to carve; at 25 N it has room.)
+bool full_c(double x, double y, double z) {
+  (void)y;
+  if (x < 20) return true;                                           // stem, z 0..80
+  if (z < 15 && x < 70) return true;                                 // arm
+  return x > 60 && x < 70 && z < 35;                                 // tip
+}
+
+const Sample kSamples[] = {
+    {"sample_bracket_a", {0, 2, 18, 20, 60, 80, 100}, {0, 15, 17, 33, 35, 50}, {0, 3, 7, 10, 50, 70, 73},
+     full_a, {{0, 0, -1, 0.0}, {0, 0, 1, 7.0}}, {0, 0, 1, 73.0}, {300, 0, -260}},
+    {"sample_beam_b", {0, 50, 70, 120}, {0, 5, 25, 30}, {0, 24, 27},
+     full_b, {{-1, 0, 0, 0.0}, {1, 0, 0, 120.0}}, {0, 0, 1, 27.0}, {0, 0, -600}},
+    {"sample_hook_c", {0, 20, 60, 70}, {0, 20}, {0, 15, 35, 80},
+     full_c, {{0, 0, 1, 80.0}}, {0, 0, 1, 35.0}, {12, 0, -22}},
+};
+
 int main(int argc, char** argv) {
   if (argc < 2) {
-    std::printf("usage: %s <folder>\n", argv[0]);
+    std::printf("usage: %s <folder> [a|b|c]   (default a)\n", argv[0]);
     return 2;
   }
   const std::string dir = argv[1];
-  const std::vector<double> xs = {0, 2, 18, 20, 60, 80, 100};
-  const std::vector<double> ys = {0, 15, 17, 33, 35, 50};
-  const std::vector<double> zs = {0, 3, 7, 10, 50, 70, 73};
-  const TriangleMesh mesh = cells_mesh(xs, ys, zs, [&](int i, int j, int k) {
-    const double x = 0.5 * (xs[static_cast<std::size_t>(i)] + xs[static_cast<std::size_t>(i) + 1]);
-    const double y = 0.5 * (ys[static_cast<std::size_t>(j)] + ys[static_cast<std::size_t>(j) + 1]);
-    const double z = 0.5 * (zs[static_cast<std::size_t>(k)] + zs[static_cast<std::size_t>(k) + 1]);
-    if (x < 80 && z < 10) return true;                        // base
-    if (x < 20 && z > 10 && z < 70) return true;              // upright
-    if (x > 20 && x < 60 && z > 10 && z < 50) return true;    // corner fill
-    if (x > 2 && x < 18 && y > 17 && y < 33 && z > 70) return true;   // boss
-    if (x > 80 && y > 15 && y < 35 && z > 3 && z < 7) return true;    // tab
-    return false;
+  const char which = argc > 2 ? argv[2][0] : 'a';
+  const Sample& sp = kSamples[which == 'b' ? 1 : which == 'c' ? 2 : 0];
+  const TriangleMesh mesh = cells_mesh(sp.xs, sp.ys, sp.zs, [&](int i, int j, int k) {
+    return sp.full(0.5 * (sp.xs[static_cast<std::size_t>(i)] + sp.xs[static_cast<std::size_t>(i) + 1]),
+                   0.5 * (sp.ys[static_cast<std::size_t>(j)] + sp.ys[static_cast<std::size_t>(j) + 1]),
+                   0.5 * (sp.zs[static_cast<std::size_t>(k)] + sp.zs[static_cast<std::size_t>(k) + 1]));
   });
-  const std::string stl = dir + "/sample_bracket_a.stl";
+  const std::string stl = dir + "/" + sp.name + ".stl";
   write_stl_file(stl, mesh, StlFormat::Binary);
   const StepModel m = import_part_file_resolved(stl);
-  const int base_under = face_at(m, 0, 0, -1, 0.0);
-  const int tab_top = face_at(m, 0, 0, 1, 7.0);
-  const int boss_top = face_at(m, 0, 0, 1, 73.0);
-  std::printf("faces %d: base underside %d, tab top %d, boss top %d\n", m.face_count, base_under,
-              tab_top, boss_top);
-  if (base_under < 0 || tab_top < 0 || boss_top < 0) return 1;
+  std::string anchors;
+  for (const Plane& f : sp.fixed) {
+    const int id = face_at(m, f.nx, f.ny, f.nz, f.off);
+    if (id < 0) {
+      std::printf("a fixed face was not found\n");
+      return 1;
+    }
+    anchors += (anchors.empty() ? "" : ", ") + std::to_string(id);
+  }
+  const int loaded = face_at(m, sp.loaded.nx, sp.loaded.ny, sp.loaded.nz, sp.loaded.off);
+  std::printf("%s: %d faces; fixed [%s], loaded %d\n", sp.name, m.face_count, anchors.c_str(), loaded);
+  if (loaded < 0) return 1;
   std::ofstream(dir + "/job.json")
-      << "{\"model\": \"sample_bracket_a.stl\", \"material\": \"PLA\", \"mode\": \"minimize_plastic\", "
+      << "{\"model\": \"" << sp.name << ".stl\", \"material\": \"PLA\", \"mode\": \"minimize_plastic\", "
          "\"resolution\": 96, \"plsm\": {\"enabled\": true}, "
          "\"loads\": {\"minimize_plastic\": true, \"safety_margin\": 1.5, \"build_dir\": [0, 0, 1], "
          "\"infill_percent\": 50, \"wall_loops\": 6, \"wall_line_width_mm\": 0.45, \"layer_height_mm\": 0.2, "
-         "\"anchor_face_ids\": [" << base_under << ", " << tab_top << "], "
-         "\"groups\": [{\"face_ids\": [" << boss_top << "], \"force\": [300, 0, -260]}]}, "
+         "\"anchor_face_ids\": [" << anchors << "], "
+         "\"groups\": [{\"face_ids\": [" << loaded << "], \"force\": [" << sp.force[0] << ", " << sp.force[1]
+      << ", " << sp.force[2] << "]}]}, "
          "\"output\": {\"report\": \"report.json\", \"mesh_format\": \"stl\", \"mesh_prefix\": \"variant\"}}\n";
   std::printf("wrote %s and %s/job.json\n", stl.c_str(), dir.c_str());
   return 0;
