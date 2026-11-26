@@ -38,7 +38,7 @@ A. Already agreed:
 - A3. The automatic pad as the Auto default behind the switch; a typed depth in Manual; per-face values (thickness, pad) as report values for the app.
 - A4. "Too small for the nozzle": the core side (detects it, gives the plain reason and the recommendation: a finer nozzle, or resin). The pop-up is #362's.
 - A5. Automatic resolution from the part's size and the line width, Manual override.
-- A6. Stage 2 without the reviewer: the textbook reference reading inside tests E; a unit test for `interlayer_tension_field`.
+- A6. DONE 04:15: `tests/unit/to_reference_reading.hpp` gives the reading's own true value on the plate and the ring (the same sums as the script: 2.809 / 2.619 / 2.306 and 2.213 / 2.104 / 1.914), and both tests E print each pairing against it; unit checks for `interlayer_tension_field` and a reading over a size pass standalone. Owed: one built run of tests E for the new lines (with B1).
 - A7. Review and merge the helpers' work as they report.
 
 B. Approved tonight:
