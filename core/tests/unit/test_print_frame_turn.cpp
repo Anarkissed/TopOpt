@@ -535,11 +535,190 @@ void test_the_print_files_lay() {
   CHECK(inside);
 }
 
+// ── 4. ★ notes29 H3 (his "Yes, definitely go for the cell lattices now too"): A CELL LATTICE ─────────────────────────
+// The iPad's path for a cell (strut) lattice, as the bridge's framed session does it (lattice_layout_bridge.cpp): the part
+// opened through the file job's door, the settings and the stress result turned through it (turn_layout_inputs, the
+// stress once as set), Session::lay, the lay turned back (turn_outcome_to_model) — against the print file's own lay as
+// handed to its strength check (make_lattice_file): the same struts end for end, the same cells and solid pieces (every
+// cube's corners, through their frames), and the flat bridges judged in the print frame are the file's.
+// RED CONTROLS: the lay as placed; the turned lay not turned back; the bridges judged on the bars turned back.
+
+// Every corner of a list of cubes on frames (a cell's cube, a solid piece), in the frames' space.
+std::vector<Vec3> corners(const Layout& L, const std::vector<Cell>& cubes) {
+  std::vector<Vec3> out;
+  for (const Cell& c : cubes)
+    for (int k = 0; k < 8; ++k)
+      out.push_back(L.frames[static_cast<std::size_t>(c.frame)].at(c.lo[0] + (k & 1 ? c.size : 0.0),
+                                                                     c.lo[1] + (k & 2 ? c.size : 0.0),
+                                                                     c.lo[2] + (k & 4 ? c.size : 0.0)));
+  return out;
+}
+double points_gap(const std::vector<Vec3>& x, const std::vector<Vec3>& y) {
+  if (x.size() != y.size() || x.empty()) return 1e300;
+  double worst = 0.0;
+  for (std::size_t i = 0; i < x.size(); ++i) worst = std::max(worst, dist(x[i], y[i]));
+  return worst;
+}
+std::size_t bridges(const std::vector<Bar>& bars) {
+  std::size_t n = 0;
+  for (const Bar& b : bars) n += bar_is_bridge(b) ? 1 : 0;
+  return n;
+}
+
+void test_the_print_files_cell_lay() {
+  const std::string dir = std::string(TMP_DIR) + "/print_frame_turn_cells";
+  std::system(("mkdir -p " + dir).c_str());
+  const double X = 24, Y = 20, Z = 16;
+  write_stl_file(dir + "/block.stl", box_model(X, Y, Z).mesh);
+  // A made-up stress, in the part's own coordinates: rising along its own Z (0.5 to 4 MPa).
+  DemandField d;
+  d.origin = {-1, -1, -1};
+  d.spacing = 1.0;
+  d.nx = 26; d.ny = 22; d.nz = 18;
+  d.mpa.assign(static_cast<std::size_t>(d.nx * d.ny * d.nz), 0.0f);
+  for (int k = 0; k < d.nz; ++k)
+    for (int j = 0; j < d.ny; ++j)
+      for (int i = 0; i < d.nx; ++i)
+        d.mpa[d.index(i, j, k)] = static_cast<float>(0.5 + 3.5 * std::min(std::max((k - 1) / 16.0, 0.0), 1.0));
+  CHECK(write_demand_file(dir + "/stress.demand", d));
+  const auto job_text = [&](const std::string& frame) {
+    return std::string(R"({"mode": "lattice_file", "model": "block.stl", "demand": "stress.demand", "strength_job": "none.json")") +
+           frame + R"(, "mesh": {"keep_if_not_clean": true}, "layout": {"all_lattice": true, "min_strut_lines": 2,
+           "bead_mm": 0.45, "topology": "octet", "algorithm": "uniform", "cell_mm": 7, "by_stress": true,
+           "reference_mpa": 4, "dial_light": 0.15, "dial_heavy": 0.85}})";
+  };
+  std::ofstream(dir + "/job.json") << job_text(R"(, "print_frame": {"up": [1, 0, 0]})");
+  // THE PRINT FILE: the job as the Mac runs it, its own lay as handed to its strength check, in the print frame.
+  FileJob job;
+  StepModel model;
+  FileResult lr;
+  if (!load_file_job(dir + "/job.json", 0, job, model, lr)) {
+    std::printf("FAIL the cell job: %s %s %s\n", lr.code.c_str(), lr.why.c_str(), lr.detail.c_str());
+    ++g_fail;
+    return;
+  }
+  CHECK(job.print_frame.on && job.print_frame.exact && job.settings.stress.demand != nullptr);
+  Outcome file;   // the print frame's
+  {
+    StepModel lay_copy = model;
+    Session fs(std::move(lay_copy));
+    file = fs.lay(job.settings, job.options.threads);
+    if (mesh_available()) {   // and it IS the file's: the lay its strength check was handed
+      std::vector<Bar> got;
+      std::size_t cells = 0, written_bridges = 0;
+      StrengthCheck cap;
+      cap.before = [](const std::string&) { StrengthDone x; x.ok = true; return x; };
+      cap.run = [&](const StrengthAsk& ask) {
+        got = ask.outcome->bars.bars;
+        cells = ask.outcome->layout.cells.size();
+        written_bridges = ask.made ? ask.made->mesh.bridges : 0;
+        StrengthDone x;
+        x.ok = true;
+        x.json = "{}";
+        return x;
+      };
+      StepModel file_copy = model;
+      const FileResult made = make_lattice_file(std::move(file_copy), job, dir + "/out.stl", nullptr, nullptr, &cap);
+      if (!made.ok) std::printf("  (the cell file: %s %s %s)\n", made.code.c_str(), made.why.c_str(), made.detail.c_str());
+      CHECK(made.ok && made.strength_ran);
+      CHECK(bars_gap(got, file.bars.bars) == 0.0);
+      CHECK(cells == file.layout.cells.size());
+      std::printf("the cell file wrote %zu bridges (%zu bars left out); the lay's bars judged in the print frame: %zu\n",
+                  written_bridges, made.made.mesh.bars_left_out, bridges(file.bars.bars));
+      if (made.made.mesh.bars_left_out == 0) CHECK(written_bridges == bridges(file.bars.bars));
+      std::remove(made.file.c_str());
+    } else {
+      std::printf("  (no mesh library: the cell file job's lay is checked by its own call only)\n");
+    }
+  }
+  // THE iPAD: the bridge's framed session — the settings and the stress as the app sends them (the job with no frame),
+  // the part through the file job's door, the settings turned and the stress turned once (lattice_layout_set_demand),
+  // Session::lay, turned back for the drawing.
+  std::ofstream(dir + "/job_plain.json") << job_text("");
+  std::string text;
+  {
+    std::ifstream in(dir + "/job_plain.json");
+    text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+  }
+  const FileJob plain = parse_file_job(text);
+  auto demand = std::make_shared<DemandField>();
+  CHECK(read_demand_file(dir + "/stress.demand", *demand));
+  PrintFrame f;
+  CHECK(print_frame_for_up({1, 0, 0}, f));
+  StepModel opened = import_part_file_resolved(dir + "/block.stl");
+  open_in_print_frame(f, opened);
+  Session s(std::move(opened));
+  Settings st = plain.settings;
+  std::shared_ptr<const TensorField> none;
+  turn_layout_inputs(f, st, none);
+  {
+    Settings door;
+    door.stress.demand = demand;
+    turn_layout_inputs(f, door, none);
+    st.stress.demand = door.stress.demand;
+  }
+  Outcome ipad = s.lay(st, 0);
+  const Outcome not_back = ipad;
+  turn_outcome_to_model(f, ipad);
+  // The file's lay in the part's own coordinates.
+  Outcome file_model = file;
+  turn_outcome_to_model(job.print_frame, file_model);
+  bool widths = false;
+  const double match = bars_gap(ipad.bars.bars, file_model.bars.bars, &widths);
+  const double cells_match = points_gap(corners(ipad.layout, ipad.layout.cells), corners(file_model.layout, file_model.layout.cells));
+  const double solid_match = file_model.layout.solid.empty()
+                                 ? (ipad.layout.solid.empty() ? 0.0 : 1e300)
+                                 : points_gap(corners(ipad.layout, ipad.layout.solid), corners(file_model.layout, file_model.layout.solid));
+  // RED CONTROL 1: the lay as placed (before H3).
+  Session old(import_part_file_resolved(dir + "/block.stl"));
+  Settings ost = plain.settings;
+  ost.stress.demand = demand;
+  const Outcome was = old.lay(ost, 0);
+  const double red_old = bars_gap(was.bars.bars, file_model.bars.bars);
+  const double red_old_cells = points_gap(corners(was.layout, was.layout.cells), corners(file_model.layout, file_model.layout.cells));
+  // RED CONTROL 2: the turned lay, not turned back.
+  const double red_back = bars_gap(not_back.bars.bars, file_model.bars.bars);
+  // The bridges: judged where they are laid (the print frame's +Z) they are the file's; judged on the bars turned back
+  // (the part's own +Z, as the bridge's fill did before H3) they are other bars.
+  const std::size_t b_print = bridges(not_back.bars.bars), b_file = bridges(file.bars.bars), b_model = bridges(ipad.bars.bars);
+  std::printf("cells: the print file's lay %zu bars, %zu cells, %zu solid; the iPad's turned back %zu bars (worst end %.3g mm, "
+              "widths %s), %zu cells (worst corner %.3g mm), solid %.3g mm; RED as placed %zu bars (%.3g), cells %.3g; RED not "
+              "turned back %.3g; bridges in the print frame %zu, the file's %zu, RED judged turned back %zu\n",
+              file.bars.bars.size(), file.layout.cells.size(), file.layout.solid.size(), ipad.bars.bars.size(), match,
+              widths ? "the same" : "DIFFER", ipad.layout.cells.size(), cells_match, solid_match, was.bars.bars.size(), red_old,
+              red_old_cells, red_back, b_print, b_file, b_model);
+  CHECK(file.bars.bars.size() > 100 && file.layout.cells.size() > 10);
+  CHECK(match < 1e-9 && widths);   // ★ the same struts, end for end, the same widths (the dial read the same stress)
+  CHECK(cells_match < 1e-9);       // ★ the same cells, every corner
+  CHECK(solid_match < 1e-9);       // ★ the same solid pieces
+  CHECK(red_old > 1e-3);           // RED CONTROL: the lay as placed is not the file's
+  CHECK(red_back > 1e-3);          // RED CONTROL: turned, it must be turned back
+  CHECK(b_print == b_file && b_print > 0);   // ★ the bridges, judged in the print frame
+  CHECK(b_model != b_print);                 // RED CONTROL: judged on the part's own +Z, other bars
+  // The cells' index, made again in the part's own coordinates: every cell found at its own cube's middle.
+  CHECK(ipad.layout.index != nullptr);
+  bool found = ipad.layout.index != nullptr;
+  for (std::size_t c = 0; found && c < ipad.layout.cells.size(); c += 7) {
+    const Cell& cell = ipad.layout.cells[c];
+    const Vec3 mid = ipad.layout.frames[static_cast<std::size_t>(cell.frame)].at(
+        cell.lo[0] + cell.size / 2, cell.lo[1] + cell.size / 2, cell.lo[2] + cell.size / 2);
+    const double p = ipad.layout.index->pitch;
+    const std::array<long long, 3> key{static_cast<long long>(std::floor(mid.x / p)),
+                                       static_cast<long long>(std::floor(mid.y / p)),
+                                       static_cast<long long>(std::floor(mid.z / p))};
+    const auto it = ipad.layout.index->grid.find(key);
+    found = it != ipad.layout.index->grid.end() &&
+            std::find(it->second.begin(), it->second.end(), static_cast<std::uint32_t>(c)) != it->second.end();
+  }
+  CHECK(found);
+}
+
 }  // namespace
 
 int main() {
   test_turns();
   test_the_print_files_lay();
+  test_the_print_files_cell_lay();
   std::printf("%s: %d checks, %d failed\n", g_fail ? "FAIL" : "PASS", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }
