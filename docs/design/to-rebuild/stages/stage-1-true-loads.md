@@ -182,6 +182,18 @@ Read plainly: with everything on each version is 4 to 13 g HEAVIER than the draw
 
 Where today's path refuses the job (above), the trial build makes four versions in 841 s: 0.68: 5.25, 81.8 g; 0.52: 4.22, 67.7 g; 0.38: 2.33, 55.8 g; 0.26: 2.25, 45.2 g. The automatic pad at strength 1.0 gave 10.95 mm behind each end face (120 mm of beam behind it) and 5.21 mm under the boss: in the picture they are the two solid end blocks, a tenth of the beam each. Two things to look at with him: the blocks are far deeper than a held face needs (the strength is too high, as on the bracket), and the two halves of a symmetric part under a centred load come out different (left a broad web, right a thin strut), which is the optimiser, not this stage.
 
+### A2: the bracket at res 64, the pad three ways (09:50; picture `stage-1-pics/sample_a_res64_pad_three_ways.png`, the 0.38 version)
+
+Pad behind the thin tab / the base / the upright's face, then margin and grams per version (drawn-face loads, the lead's build):
+
+| pad | depths (mm) | frozen voxels | 0.68 | 0.52 | 0.38 | 0.26 |
+|---|---|---|---|---|---|---|
+| fixed 3 mm | 3.0 / 3.0 / 3.0 | 3702 | 5.29, 159.0 g | 5.29, 126.0 g | 4.66, 97.0 g | 3.69, 72.2 g |
+| automatic, strength 0.2 | 0.9 / 3.2 / 3.8 | 3808 | 5.29, 158.6 g | 5.30, 125.7 g | 4.85, 96.7 g | 3.82, 72.0 g |
+| automatic, strength 1.0 | 2.0 / 7.1 / 8.6 | 9526 | 5.29, 166.5 g | 5.29, 137.8 g | 5.01, 112.8 g | none |
+
+Read plainly. At 0.2 the automatic pad is the fixed 3 mm pad on the thick faces and a thin one (two wall lines, the floor) behind the thin tab: every version is as light or lighter and as strong or stronger than at a fixed 3 mm. At 1.0 the base and the upright's foot stay as thick slabs (the picture's right column) and each version carries 7 to 16 g more. In the picture the thin tab hangs on by a small block in the first two columns and by the thick base slab in the third: the "must every fixed face stay joined" question is the same at every pad. Strength 0.4 is still running; the beam and the hook follow.
+
 ## Still owed before the stage report
 
 - The original stand optimised both ways (queued), then Top Motor Mount; three settings; pad 2 / 3 / 4.5 mm.
