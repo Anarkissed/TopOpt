@@ -164,6 +164,8 @@ Two earlier sweeps of this table read "one voxel" in every column; both were wir
 - The 1.8 mm reading did nothing: the voxel is 3.4 mm at res 64, larger than the size. My choice of resolution was wrong for this arm; it needs res 128 or finer (under the lock).
 - The printed share came out exactly 1.000 at 50 % infill and six walls. Cause: production ships with the wall-aware posture OFF (`kProductionWidthAwareKnockdown = false`: "arming is a maintainer act with a coupon behind it"), so the member widths were never measured and my condition never held. Fixed in the next commit: the widths are measured for the grams alone when the stage's switch is on. (Also corrects an earlier line of mine: the production gate does NOT read the wall-aware maximum; it reads the plain one with the scalar infill knockdown.)
 
+Re-run after the fix (build 833697ae, 22:14): the stand at res 64 reports 85.36 g printed of 90.55 g solid, a share of 0.943 at his 50 % infill and six walls (a 2.7 mm ring, so every member under 5.4 mm wide is all wall, and most of this part is). The report's `mass_grams` and `mass_before_grams` both carry 85.36. The grams wiring works; the share is the wall-and-core model's and has not been checked against a slicer.
+
 ## Condition (b): the stage 2 switch against the lattice strength check (build 95411b2a, 2026-11-25 22:15)
 
 Each of jobs A to C run with stage 1 off and `TOPOPT_STRENGTH=size` with a typed 1.8 mm reading, against the plain run (`test_to_stage1_lattice_check`):
