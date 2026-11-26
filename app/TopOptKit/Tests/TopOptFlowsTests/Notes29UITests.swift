@@ -50,7 +50,9 @@ final class Notes29UITests: XCTestCase {
         let popoversAllowed: [String: (count: Int, why: String)] = [
             "TopOptFlows/NumberPadHost.swift": (1, "the number pad, anchored to the number it types"),
             "TopOptFlows/LatticeBandChipViews.swift": (1, "a band chip's two-answer choice card, anchored to the chip"),
-            "TopOptFlows/WorkspacePlaceholder.swift": (2, "a group's colour picker; the diagnosis warning glyph's fixes card"),
+            // ★ RE-PINNED (notes30 X2, his yes 11-26): the diagnosis warning glyph's fixes open the centred card now
+            // (LatticeDiagnosisCard); its popover is gone
+            "TopOptFlows/WorkspacePlaceholder.swift": (1, "a group's colour picker"),
         ]
         for (name, code) in all {
             let n = code.components(separatedBy: ".popover(").count - 1

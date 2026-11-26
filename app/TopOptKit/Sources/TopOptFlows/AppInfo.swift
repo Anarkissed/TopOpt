@@ -84,6 +84,9 @@ enum AppInfoCard {
     static let minWidth: CGFloat = 340
     static let maxWidth: CGFloat = 680
     static let margin: CGFloat = 24
+    /// ★ notes30 X2: the actions' slot — each a 44 pt button, stacked.
+    static let slotSpacing: CGFloat = 8
+    static func slotHeight(_ n: Int) -> CGFloat { n <= 0 ? 0 : CGFloat(n) * 44 + CGFloat(n - 1) * slotSpacing }
 
     /// The card's width for these words in a room this wide: about 70 characters a line for a long text, so it grows wider
     /// before it grows tall; a short one stays narrow.
