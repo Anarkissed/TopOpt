@@ -340,3 +340,21 @@ Reading the code behind it found something that matters more. The margin printed
 2. WITH stage 2's switch: on a file's all-or-nothing voxels there are no cut voxels for the ball to sit on, so the edge-of-part fix cannot act in the re-check, and "real stiffness" changes nothing there (every voxel is full). The form measured above therefore reaches the loop's certificate but NOT the number he is shown.
 
 What it needs (NOT built; to put to the reviewer as stage 2's remaining piece): the re-check voxelises the file with each voxel's FILL (the share of the voxel inside the file's surface, by sub-sampling as the tests do), and is then judged by the same form as the loop. Until then the stage's bar is met by the certificate and not by the shown number.
+
+### The two judges on real jobs (from today's runs; 2026-11-26 17:50)
+
+Every "[finish] ... margin a -> b" line of today's runs: a is the loop's certificate (the exact fills, E x fill^3), b is the file re-check (all-or-nothing), which is the number shown. Res 64 unless said.
+
+| job | 0.68 | 0.52 | 0.38 | 0.26 |
+|---|---|---|---|---|
+| Top Motor Mount, today, res 96 | 1.641 -> 1.641 | 1.650 -> 1.649 | 1.672 -> 1.672 | 1.690 -> 1.686 |
+| Top Motor Mount, drawn faces | 2.333 -> 2.338 | 2.334 -> 2.339 | 2.349 -> 2.355 | 2.344 -> 2.346 |
+| the stand, today, res 128 | 2.397 -> 2.410 | | | |
+| the stand, drawn faces, res 128 | 2.587 -> 2.597 | | | |
+| sample bracket, today | 4.711 -> 4.711 | 4.723 -> 4.723 | 4.008 -> 4.823 | 1.814 -> 3.793 |
+| sample bracket, drawn faces | 5.283 -> 5.285 | 5.112 -> 5.296 | 4.154 -> 4.845 | 2.048 -> 3.815 |
+| sample hook, today | 4.321 -> 4.765 | 3.576 -> 4.598 | 2.703 -> 4.317 | 1.608 -> 3.752 |
+| sample hook, drawn faces | 4.343 -> 4.755 | 3.681 -> 4.566 | 2.564 -> 4.173 | (not made) |
+| sample beam, drawn faces | 5.649 -> 6.316 | 4.563 -> 5.064 | 2.928 -> 3.678 | 1.962 -> 1.870 |
+
+Read plainly. On his two parts, where little is carved, the two judges agree to 1 %. On the carved made parts they part company as the version gets lighter: the shown number is up to 2.3 times the certificate's (the hook at 0.26: 1.61 against 3.75; the bracket: 1.81 against 3.79). By the loop's own judge the lightest versions stand just over the 1.5 pass mark; the screen says 3.7. The textbook tests say the truth lies between (the certificate reads the stress 4 to 16 % high on the plate, far more on the ring; the all-or-nothing re-check 10 to 27 % low), so neither figure is right, and the gap is widest exactly where a wrong pass would matter. This is the case for one judge on exact fills.
