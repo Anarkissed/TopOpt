@@ -66,6 +66,28 @@ To tell the reviewer in the next report: after its ruling was drafted the mainta
 
 What the bar means for the plan: a reading over a size reads BELOW the one-voxel peak by design. On test E the readings over 0.9 to 3.6 mm sat 5 to 30 % under the textbook peak. So with real stiffness the size must be SMALL enough to stay within 5 % of the reference, or the stiffness rule must read a little high to leave room. This is to be measured on test E before anything else: the pair (stiffness rule, size) that is steady across resolutions AND never more than 5 % low.
 
+## THE BAR, measured (tests E, `[bar]` table; build e74b4c08 plus the tests, 2026-11-25 21:09)
+
+Lowest / highest reading against the textbook peak over the four resolutions (hole or inner radius 3 to 6 voxels; voxel 2.0 to 1.0 mm, so "0.9 mm" is still one voxel), and the spread between resolutions. The bar: never more than 5 % low.
+
+| cut voxel stiffness | read over | plate with a hole: lowest / highest / spread | ring under pressure: lowest / highest / spread | passes the bar on both? |
+|---|---|---|---|---|
+| E x fill (real stiffness) | one voxel | -18.3 / -6.3 / 14.7 % | -7.2 / -3.8 / 3.7 % | NO |
+| E x fill | 1.8 mm | -18.3 / -13.2 / 6.3 % | -12.9 / -5.7 / 8.2 % | NO |
+| E x fill | 3.6 mm | -31.9 / -26.6 / 7.8 % | -22.4 / -20.8 / 2.1 % | NO |
+| **E x fill^2** | **one voxel** | **-3.8 / +4.3 / 8.4 %** | **+17.2 / +26.5 / 8.0 %** | **yes** |
+| E x fill^2 | 1.8 mm | -9.8 / +0.2 / 11.2 % | +2.6 / +26.5 / 23.3 % | NO (plate) |
+| E x fill^2 | 3.6 mm | -25.2 / -21.0 / 5.6 % | -11.9 / -1.0 / 12.4 % | NO |
+| E x fill^3 (today) | one voxel | +4.0 / +16.2 / 11.7 % | +51.7 / +75.7 / 15.8 % | yes (safe, wrong) |
+| E x fill^3 | 1.8 mm | -3.1 / +12.9 / 16.6 % | +28.9 / +75.7 / 36.3 % | yes |
+| E x fill^3 | 3.6 mm | -21.9 / -12.8 / 11.6 % | -0.5 / +29.9 / 30.5 % | NO (plate) |
+
+Reading:
+1. Real stiffness (E x fill) fails the bar at every reading size on both cases, as the reviewer said it would.
+2. One pair passes the bar on both cases AND holds within 10 % across resolutions on both: **stiffness E x fill^2, read at one voxel**. On the plate it is within 4.3 % of the textbook either way; on the ring it reads 17 to 27 % high (safe), against 52 to 76 % high today. It is not in the plan as written: it is a middle stiffness rule with NO reading over a size.
+3. Every reading over 1.8 mm or more, with real or middle stiffness, reads 10 to 32 % under the textbook PEAK on the plate. That is what an average over a length does by design: the critical-distance method says the average, not the peak, is what breaks the part, so against the peak it must read low. The bar (measured against the peak) and the reading over a material length (the maintainer's decision, from the research) therefore cannot both hold on these cases. This is a conflict between a ruling and a decision, not a tuning problem, and it goes back to the reviewer and the maintainer before more is built.
+4. The longer the reading, the steadier it is across resolutions (2 to 8 % at 3.6 mm) and the lower it reads. Steadiness and "never low against the peak" pull opposite ways.
+
 ## Written so far (ahead of the gate; all behind `TOPOPT_STRENGTH`, default = today; reviewer's ruling on the shared certificate still asked)
 
 | step | what | where | state |
