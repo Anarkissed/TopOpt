@@ -1145,18 +1145,24 @@ static void test_struts() {
       else NEAR(l2.cells[i].strut, open * l2.cells[i].size, 1e-9);
   }
   {  // R11: a typed width is the width in every cell that can hold it; the report counts
-     // the cells that cannot.
+     // the cells that cannot. ★ notes29b (his notes on release 20, 2026-11-25: "limit both when 'Allow quilt' is turned
+     // off", at the point each type becomes a quilt): without Allow quilt a cell holds it up to one printed line short of
+     // the quilt (touch x cell - one line; the open look where that is wider), no longer the open look alone.
     StrutSpec sp;
     sp.width_mm = 1.2;
     sp.dial = 0.9;   // not read
     Layout l = base;
     StrutReport r = set_struts(l, sp);
-    int typed = 0;
+    int typed = 0, past_open = 0;
     for (const Cell& c : l.cells) {
-      if (open * c.size >= 1.2) { NEAR(c.strut, 1.2, 1e-12); ++typed; }
-      else NEAR(c.strut, std::max(bead, open * c.size), 1e-9);
+      const double limit = std::max({bead, quilt * c.size - bead, open * c.size});
+      if (limit >= 1.2) { NEAR(c.strut, 1.2, 1e-12); ++typed; }
+      else NEAR(c.strut, limit, 1e-9);
+      CHECK(c.strut < quilt * c.size);   // never touching
+      past_open += c.strut > open * c.size + 1e-9;
     }
-    CHECK(typed == 2 && r.at_ceiling == 4 && r.at_bead == 0);   // 12 and 8 mm hold it
+    CHECK(typed == 4 && r.at_ceiling == 2 && r.at_bead == 0);   // 12, 6, 6 and 8 mm hold it (12 and 8 by the open look)
+    CHECK(past_open == 3);   // the 6, 6 and 4 mm cells: past the open look, under the limit
     sp.allow_quilt = true;
     r = set_struts(l, sp);
     for (const Cell& c : l.cells) NEAR(c.strut, std::min(1.2, quilt * c.size), 1e-9);
@@ -1691,7 +1697,9 @@ static void test_band_never_quilts_without_the_switch() {
       NEAR(smallest(l), 7.0, 1e-6);
       CHECK(most_closed(l) <= open + 1e-12);
     }
-  {  // A typed strut width (R11) obeys it too, in the band and out of it.
+  {  // A typed strut width (R11) obeys it too, in the band and out of it. ★ notes29b (his notes on release 20, 2026-11-25:
+     // "limit both when 'Allow quilt' is turned off", at the point each type becomes a quilt): a typed strut is an ask, and
+     // goes past the open look up to the limit, one printed line short of the quilt (touch x cell - one line), never to it.
     CellSpec cs;
     cs.algorithm = Algorithm::Stepped;
     cs.cell_max_mm = 14.0;
@@ -1701,10 +1709,21 @@ static void test_band_never_quilts_without_the_switch() {
     StrutSpec typed;
     typed.width_mm = 3.0;
     const StrutReport held = set_struts(l, typed);
-    CHECK(most_closed(l) <= open + 1e-12 && held.at_ceiling == l.cells.size());
+    const double quilt = kQuiltStrutPerCell, line = l.bead_mm;
+    std::size_t over = 0, short_of = 0, touching = 0;
+    for (const Cell& c : l.cells) {
+      const double limit = std::max(quilt * c.size - line, open * c.size);
+      over += c.strut > limit + 1e-9;
+      touching += c.strut >= quilt * c.size - 1e-9;
+      short_of += limit < 3.0 - 1e-9;
+    }
+    CHECK(over == 0 && touching == 0 && held.at_ceiling == short_of && short_of > 0);
+    CHECK(most_closed(l) > open + 1e-6);   // past the open look: it is not the limit
     typed.allow_quilt = true;
     set_struts(l, typed);
-    CHECK(most_closed(l) > open + 1e-6);
+    std::size_t over_on = 0;
+    for (const Cell& c : l.cells) over_on += c.strut > std::max(quilt * c.size - line, open * c.size) + 1e-9;
+    CHECK(over_on > 0);   // RED control: Allow quilt on goes past the limit, up to the quilt
   }
   NEAR(smallest(laid(false, 3.0)), 7.0, 1e-6);         // a typed 3 mm is held at the open look's
   NEAR(smallest(laid(false, 8.0)), 14.0, 1e-6);        // a typed coarser band is honoured
@@ -5452,8 +5471,12 @@ static void test_by_stress() {
     s.width_heavy_mm = 0.6;
     const StrutReport r = set_struts(mixed, s);
     int held = 0;
+    // ★ notes29b: the widest allowed without Allow quilt is one printed line short of the quilt (the open look where that
+    // is wider), no longer the open look alone.
+    const double quilt = kQuiltStrutPerCell;
+    const auto top_of = [&](double size) { return std::max({bead, quilt * size - bead, open * size}); };
     for (const Cell& c : mixed.cells) {
-      const double top = std::max(bead, open * c.size);
+      const double top = top_of(c.size);
       if (top >= 1.1) { NEAR(c.strut, 1.1, 1e-12); ++held; }
       else NEAR(c.strut, top, 1e-9);
     }
@@ -5461,10 +5484,10 @@ static void test_by_stress() {
     // The ends exact: all cold, all at the reference.
     s.demand = field_of(60, 4, 16, [](int, int, int) { return 0.0; }, {-1, -1, -1});
     set_struts(mixed, s);
-    for (const Cell& c : mixed.cells) NEAR(c.strut, std::min(0.6, std::max(bead, open * c.size)), 1e-12);
+    for (const Cell& c : mixed.cells) NEAR(c.strut, std::min(0.6, top_of(c.size)), 1e-12);
     s.demand = field_of(60, 4, 16, [](int, int, int) { return 300.0; }, {-1, -1, -1});
     set_struts(mixed, s);
-    for (const Cell& c : mixed.cells) NEAR(c.strut, std::min(1.6, std::max(bead, open * c.size)), 1e-9);
+    for (const Cell& c : mixed.cells) NEAR(c.strut, std::min(1.6, top_of(c.size)), 1e-9);
   }
   {  // 8. A band cell is never thinner than its by-stress width, and never past the open look without Allow quilt.
     const double bead = 0.45, open = 0.7592 / 4.0;
@@ -5500,12 +5523,18 @@ static void test_by_stress() {
         Vec3 lo, hi;
         cell_box(b, b.cells[i], &lo, &hi);
         const double f = std::clamp(grad->highest_in(lo, hi) / 100.0, 0.0, 1.0);
-        const double top = std::max(bead, open * b.cells[i].size);
+        // ★ notes29b: out of the band, the widest allowed is one printed line short of the quilt (the open look where that
+        // is wider); in the band (below) an ask under the open look on its own cell still never passes the open look.
+        const double top = std::max({bead, kQuiltStrutPerCell * b.cells[i].size - bead, open * b.cells[i].size});
         const double by = std::clamp(mm ? 0.5 + f * 0.5 : (lr + f * (hr - lr)) * b.cells[i].size, bead, top);
         NEAR(b.cells[i].strut, by, 1e-9);
         if (a.cells[i].band >= 1.0) { CHECK(a.cells[i].strut == b.cells[i].strut); continue; }
         if (a.cells[i].strut < b.cells[i].strut - 1e-12) ++thinner;
-        if (a.cells[i].strut > std::max(bead, open * a.cells[i].size) + 1e-9) ++quilted;
+        // ★ notes29b: never past the limit (one printed line short of the quilt); dials under 1 never past the open look
+        // (the band's own thickening stops there); the ends in mm past the open look on a cell keep their width there.
+        const double past_at = mm ? std::max({bead, kQuiltStrutPerCell * a.cells[i].size - bead, open * a.cells[i].size})
+                                  : std::max(bead, open * a.cells[i].size);
+        if (a.cells[i].strut > past_at + 1e-9) ++quilted;
         if (a.cells[i].strut > b.cells[i].strut + 1e-12) ++raised;
       }
       CHECK(thinner == 0 && quilted == 0 && raised > 0);

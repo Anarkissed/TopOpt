@@ -1801,16 +1801,14 @@ public struct LatticeSetupWizard: View {
             .toggleStyle(SwitchToggleStyle(tint: DS.Color.okGreen.color))
             .latticeID("wizard-small-cells-thin-walls")
             // ★ 362's merge (his 11-25: "It is its own thing"): Small cells in thin walls is NOT tied to Allow quilt — thin
-            // walls only, never past the type's fusing point (builder N2b makes the engine side so); only when Allow quilt is
-            // on does it have nothing left to add (11-13).
+            // walls only, never past the type's fusing point (builder N2b makes the engine side so: core's
+            // CellSpec::small_in_thin_walls, one printed line short of touching); only when Allow quilt is on does it have
+            // nothing left to add (11-13).
             .disabled(model.allowQuilt)
-            // ★ notes29 (his 11-25): five words; the rest in the (i)
+            // ★ notes29 (his 11-25): five words; the rest in the (i) (★ notes29b: the engine's own rule, LatticeSetupWizard.smallCellsInfo)
             captionLine(model.allowQuilt ? Self.smallCellsQuiltLine
                         : model.smallCellsInThinWalls ? Self.smallCellsOnLine : Self.smallCellsOffLine,
-                        info: "small-cells",
-                        (model.allowQuilt ? "Allow quilt is on: it already lets cells go this small. " : "")
-                        + "New engine only. A wall too thin for an open cell at two-line struts takes small, denser cells "
-                        + "(never touching) instead of going solid. Off: such a wall stays solid.")
+                        info: "small-cells", Self.smallCellsInfo)   // (its last sentence says what Allow quilt on does)
         }
     }
     static let smallCellsQuiltLine = "Allow quilt already does this."
@@ -2288,7 +2286,8 @@ public struct LatticeSetupWizard: View {
     static let typePickLine = "Pick a type to save."   // ★ notes29: five words (was "Pick a lattice type to save.")
 
     /// ★ notes28: Allow quilt's (i), the type's own numbers (core's lattice_width_bounds through the engine): where its struts
-    /// touch, and the open look they stay under with the switch off. Never the octet's numbers under another name.
+    /// touch, and the open look they keep on their own. Never the octet's numbers under another name. ★ notes29b: with the
+    /// switch off the limit is the quilt, one printed line short of it (core's lattice_quilt_off_strut_mm), not the open look.
     static func quiltInfo(_ id: String) -> String {
         let f = LatticeLayoutSession.typeFacts(id)
         let name = LatticeType.displayName(forID: id)
@@ -2297,10 +2296,18 @@ public struct LatticeSetupWizard: View {
                 + "that point. On, the manual density methods may pass it; simulated ones never do."
         }
         func pct(_ v: Double) -> String { "\(Int((v * 100).rounded())) %" }
-        return "\(name) struts touch and fuse into a quilt once a strut is \(pct(f.touch)) of the cell. Off, every strut "
-            + "stays under \(pct(f.openLook)) of the cell, where the windows stay open. On, the manual density methods may "
-            + "pass it; simulated ones never do."
+        return "\(name) struts touch and fuse into a quilt once a strut is \(pct(f.touch)) of the cell. Off, struts stop "
+            + "one printed line short of touching, so every gap prints open; on their own they stay near \(pct(f.openLook)) "
+            + "of the cell, and only a density you ask for goes past that. On, the manual density methods may reach the "
+            + "quilt; simulated ones never do."
     }
+
+    /// ★ notes29b: Small cells in thin walls' (i) (his question on release 20: "Are you saying that no matter what happens, all
+    /// Small cells in thin walls are going to be quilted?" -- no).
+    static let smallCellsInfo = "New engine only. A wall too thin for the normal open cell takes its own smaller, denser "
+        + "cells instead of going solid. They go down to the size where the thinnest strut stops one printed line short of "
+        + "touching its neighbour, never further, so they never fuse into a quilt. Only thin walls change: every other cell "
+        + "stays as it was. A wall too thin even for that stays solid. With Allow quilt on, cells already go this small."
     static func typeInfo(_ name: String) -> String {
         "The lattice's cell shape. \(name) is the type the app offers today; more types arrive one update at a time, "
             + "each once its settings and pictures are in."
@@ -3340,11 +3347,12 @@ public struct LatticeSetupWizard: View {
                     switch row {
                     case .grade:
                         // ★ notes29 (his notes on release 20): the Density percent is the page's dial (100 % = the type's own
-                        // quilt, LatticeDensityDial); with Allow quilt off a percent past the open look is refused with the
-                        // centred pop-up. The store stays the density the run reads.
+                        // quilt, LatticeDensityDial); with Allow quilt off (★ notes29b) a percent past the limit, one printed
+                        // line short of the quilt, is refused with the centred pop-up. The store stays the density the run
+                        // reads. (The page's own switch, N1's `model.allowQuilt`: what the page shows is what it lays.)
                         let dial = LatticeDensityDial.Page(model.applied(to: project.lattice),
                                                            lineWidthMM: project.printParams.strutLineWidthMM,
-                                                           allowQuilt: project.lattice.allowQuilt && project.latticePageManual)
+                                                           allowQuilt: model.allowQuilt && project.latticePageManual)
                         HStack(spacing: DS.Space.s) {
                             cellsPercentBox("cells-grade-from", title: "Grade from", value: Swift.min(dial.shown(model.relativeDensity), dial.most / 100)) { v in
                                 guard let rho = dial.typed(v * 100) else { return }
