@@ -25,21 +25,24 @@ Paused at 94 % weekly usage for five minutes; the maintainer: "Keep going, do no
 
 ## Work queue (the lead's own; kept stocked; top item first)
 
-The maintainer's order (2026-11-25): never sit waiting on the lock. Every wake-up records what finished, then does the next open item here.
+The maintainer's order (2026-11-25): never sit waiting on the lock. Every wake-up records what finished, then does the next open item here. Rewritten 2026-11-25 22:30.
 
-0. NOW (2026-11-25 19:45): the `face` clamp was wrong in jobs (fixed 33451f43); every `face` number is being re-made. Running without the lock: `stage2_first.sh` (rebuild, jobs A to C, the as-drawn check on six parts with today's reading / real stiffness / read over 1.2 and 2.4 mm). Queued for the lock: `stage1_sixth.sh` (Top Motor Mount from the drawn faces; the stand at pad 2 and 4.5 mm). STILL TO QUEUE after that: the stand at pad 3 again (its 2.68 / 88.0 g was made with the old clamp). Record each in `stages/stage-1-true-loads.md` and `stages/stage-2-strength-number.md`.
-0b. His parts are all PA12, which has NO published length: with his "lowest published" rule the new reading is the single voxel for every job he has. Put this to him with the measured table from 0 (what 1.2 and 2.4 mm would do).
-0c. DONE 2026-11-25: bearing anchors both ways on Base and PillowBlock (stage-1 file): today reads 0.04 on Base at res 64, the drawn face 0.50.
-0d. Stage 2 not yet done in code: the width-aware maximum and the interlayer reading still use the single voxel; printed grams (`printed_mass`) is not wired to the report; R-08 (one accept rule).
+WAITING ON OTHERS (check each tick, act the moment it arrives):
+- The reviewer: which reference a reading over a length is judged against (the textbook peak, or the reading's own true value; asked 02:10Z and 02:26Z on TOReview). Until then nothing more goes into `analyze.cpp`.
+- The lock (queued, will start by themselves): `stage1_sixth.sh` Top Motor Mount from the drawn faces, then the stand at pad 2 and 4.5 mm; `stage1_seventh.sh` the stand at pad 3 mm on the corrected clamp. Record all four in `stages/stage-1-true-loads.md`.
 
-1. Stand128 both ways: DONE and recorded (stage-1 file; 2.40 / 86.6 g today, 2.68 / 88.0 g drawn face; 40 % slower, cause owed). Running now (`stage1_fourth.sh`, no lock): build `test_to_stage1_lattice_check` and `test_to_strength_known_ring` in the same build folder and run jobs A to C (no lock; check memory).
-2. DONE 2026-11-25: second search (01-research.md): printed ABS fitted at 0.46 mm against 4.1 mm; nine materials have nothing published. The choice it leaves is the maintainer's (asked).
-3. Stage 2 steps 1 and 2 written ahead behind one switch (`TOPOPT_STRENGTH`), once the reviewer rules on the shared certificate; until then the unit pieces that do not touch `analyze.cpp` (the reading over a size is in `stress_measure.cpp`; printed grams at his infill needs the wall and infill model: find where the slicer estimate lives).
-4. PARTLY DONE 2026-11-25: the mechanism on the SOLVE side is found. The connection rule (multigrid.cpp, ruling 2026-10-25) calls a piece anchored if it carries a support OR any load; on a self-weight job every solid voxel carries a load, so no floating piece is ever taken out ("0 of 11 pieces loose") and the solve hangs on near-rigid modes. Sent to TOSolver with a proposed definition (anchored = reaches a support) for its stage report. STILL OPEN, mine: why the design step cuts pieces off at all, and a per-iteration count of them (measuring only), after TOSurface's branch is merged (the step is in plsm.cpp).
-5. DONE 2026-11-25: TOSolver's stage file read (7555ad8c): method and plan sound, nothing to change. TOSurface's Top Motor Mount regression: its own two suspects are being separated; re-read when its next hold reports.
-6. Stage 1: Top Motor Mount optimised both ways and pad 2 / 3 / 4.5 mm (lock); then the stage report to the reviewer.
-7. DONE 2026-11-25: the region path (`region_member_voxels` + `cut_voxels`) gives the SAME counts as `mask_step_face`, cube for cube, at every depth and resolution tried (`test_to_true_loads`, "[lip]", third column).
-8. "Best I can do" probe build (plan), once stages 1, 3 and 5 can be combined in one sparse tree.
+OPEN, mine, no lock needed:
+1. STAGE 1 REPORT to the reviewer (the flip is ruled on it). Write it as soon as the lock runs are recorded. It must carry: hand-over item 3 for #362 in the same release; `lattice_depth_tie` 0a and `test_print_frame.cpp:721` in their `face` forms with the note on the frame's load rule; LatticeReview's interim guard (13b28529 on claude/organic-engine); rule P (time within 10 %) re-read on a quiet machine; the corrected-clamp tables; the bearing table.
+2. Stage 2, condition (e): one sheet job and one Organic job loaded on lattice in the before/after table (`test_to_stage1_lattice_check`'s stage 2 arm). Ask LatticeReview or #362 for the job keys of a sheet (gyroid) lattice file job; the turned-box C from the test's earlier version is the Organic one.
+3. Stage 2, "saved": today `volume_saved_fraction` = 1 - printed voxels / part voxels. With printed grams it must be 1 - printed grams of the version / printed grams of the DRAWN part at the same walls and infill. Needs the drawn part's printed grams once per job (`printed_mass` on the part grid) and a report value the app reads: write the exact proposal for #362, then the core half behind the switch.
+4. Stage 2 on optimised designs at res 128 (lock, about 20 min a run): the stand with `TOPOPT_STRENGTH` unset / `stiff` / `size` with a typed 1.8 mm, drawn-face loads. Res 64 taught nothing (voxel 3.4 mm).
+5. Stage 2, the across-layer reading over the same size (the maintainer's decision): `interlayer_tension_field` exists; wiring it into `analyze.cpp` waits on the reviewer.
+6. Printed grams against a slicer: one of his parts sliced at 50 % infill and six walls would check the 0.943 share. He said he has no capacity for slicer work now; ask again when a part is on his printer anyway.
+7. The optimiser side of the floating pieces (why a design step cuts loaded pieces off): after TOSurface's branch is merged.
+8. Merge review of TOSurface's and TOSolver's branches when they report a stage; TOSolver's one-commit solver-settings change in my files.
+9. "Best I can do" probe build, once stages 1, 3 and 5 can be combined in one sparse tree.
+
+DONE and recorded (kept short): stage 0 move; tests A, C/D, E (both halves), K; the stand both ways (old clamp); jobs A to C with LatticeReview's final statement; the sideways lip; bearing anchors; the as-drawn tables re-made on the corrected clamp; the reviewer's bar measured; the reading's own true value; printed grams verified on a run; the stage 2 switch shown not to reach the lattice check.
 
 ## 0. Where the work stands (kept current; newest first)
 
