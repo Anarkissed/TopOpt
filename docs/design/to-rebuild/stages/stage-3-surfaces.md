@@ -15,7 +15,7 @@ Branch `claude/topopt-stage-3-surfaces-7f58fd`, from 2b40bcf4. Status: IN PROGRE
 - **Open choice settled:** basis = cubic B-spline (reach 2 by its degree) with a band-weighted fit; measured against Gaussian (today), Wendland C2 and C4 at reach 2/3/4, at knot spacings 1, 1.5 and 2 voxels (test A matrix, below). Knot spacing: 2 voxels (today's rule) unless hold C (1.5 against 2 on Top Motor Mount) says otherwise. The plan's 2-4 line widths are under one voxel at every resolution he runs; one voxel made the re-fit unstable (surface moved up to 10 mm).
 - **Reference table:** stage 1 + stage 3 (the configuration that ships: without stage 1 the protections are voxels), before = ledger D on the same ruler (`measure_area.py`). [to fill]
 - **Refused:** nothing.
-- **Known and handed on:** the device preview and the `.meta` basis name (#362's files, lines below); keep regions arrive as boxes, some 0.1-0.3 mm slices, so where the design is void beside them their union is a staircase by construction (a fix belongs where keep regions are made); the slope of phi at shipped designs is not yet held near one (median about 3).
+- **Known and handed on:** the device preview and the `.meta` basis name (#362's files, lines below); the slope of phi at shipped designs is not yet held near one (median about 3; a warm-started re-fit is the next measurement).
 
 ## What is built (all behind ONE switch, `TOPOPT_SURFACE`, default off = today)
 
