@@ -4,7 +4,8 @@
 #include <string>
 #include <vector>
 
-#include "topopt/to_stage_switch.hpp"  // TO rebuild: the stage in progress
+#include "topopt/to_stage_switch.hpp"
+#include "topopt/material_length.hpp"  // TO rebuild stage 2: the reading size per material  // TO rebuild: the stage in progress
 #include "topopt/clearance.hpp"    // ClearanceParams, ClearanceKind
 #include "topopt/face_region.hpp"  // FaceRegionSpec, ResolvedFaceRegion
 #include "topopt/fea.hpp"          // DirichletBC, NodalLoad

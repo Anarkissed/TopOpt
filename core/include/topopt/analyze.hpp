@@ -111,6 +111,10 @@ struct KnockdownSpec {
   // them is byte-for-byte as before.
   double infill_exponent = 1.5;
   double infill_floor = 1e-3;
+  // TO rebuild stage 2 (TOPOPT_STRENGTH=size): the size in mm the deciding stress
+  // is read over (stress_measure.hpp). 0, the default, reads the single hottest
+  // voxel, byte for byte as before.
+  double stress_reading_mm = 0.0;
 };
 
 // Install 3: numbers of the analysis that the new engine's strength check lets a job set (strength_settings).
@@ -145,6 +149,10 @@ struct FixedDesignAnalysis {
   std::size_t printed_voxels = 0;
   double printed_fraction = 0.0;  // printed_voxels / part_solid (0 if part_solid==0)
   double max_von_mises = 0.0;
+  // TO rebuild stage 2: the single hottest voxel, kept beside `max_von_mises`
+  // when that one is read over a size (the engineers' second, softer warning).
+  // Equal to max_von_mises on today's path.
+  double max_von_mises_one_voxel = 0.0;
   double max_interlayer_tension = 0.0;
   StressMargin margin;  // SOLID margin (the reported/displayed value)
   V3Report v3;          // §7 V3 suite on the fixed density (min-feature count, mesh, ...)

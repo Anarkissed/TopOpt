@@ -181,6 +181,10 @@ struct MinimizePlasticOptions {
   // TO rebuild stage 1: the same freezes as drawn-face geometry (frozen_sets.hpp).
   // Empty unless stage 1 is on; the mask stays the authority for the solve.
   std::vector<FrozenFaceSet> frozen_sets;
+  // TO rebuild stage 2: the size in mm the deciding stress is read over; 0 = one
+  // voxel, as today. Set by the job's reader from the material (material_length.hpp)
+  // only when TOPOPT_STRENGTH=size.
+  double stress_reading_mm = 0.0;
   // CORE LIST item 47 — WHICH ANCHOR a Fixture voxel came from: per anchor face
   // (or region), the part-grid voxels its own tagging made Fixture. Read only to
   // NAME the faces of an anchored piece a rung let go of (kAnchorDetachedReason);

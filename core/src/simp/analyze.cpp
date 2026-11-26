@@ -15,6 +15,8 @@
 #include "topopt/orient.hpp"
 #include "topopt/report.hpp"
 #include "topopt/simp.hpp"
+#include "topopt/stress_measure.hpp"   // TO rebuild stage 2
+#include "topopt/to_stage_switch.hpp"  // TO rebuild stage 2
 #include "topopt/voxel.hpp"
 
 namespace topopt {
@@ -310,7 +312,13 @@ FixedDesignAnalysis analyze_fixed_design(
       // (at the floor its strain is the void's, which E_solid would turn into a
       // stress the piece does not carry).
       FeaIslandDropForbid no_island_drop;
-      sc = simp_compliance(grid, params, density, B, loads, cg_tolerance,
+      // TO rebuild stage 2 (ledger A-01): a voxel cut by the surface is solved at
+      // the stiffness of the material it holds (E x fill), not E x fill^3, which
+      // makes it far too soft and its stress far too high (76 % on the textbook
+      // ring). Only with the stage's switch; the lattice posture above is untouched.
+      SimpParams solve_params = params;
+      if (to_stage2_on()) solve_params.penalty = 1.0;
+      sc = simp_compliance(grid, solve_params, density, B, loads, cg_tolerance,
                            cg_max_iterations, /*initial_guess=*/nullptr,
                            /*solver=*/nullptr, solver_kind);
       if (solver_kind == SolverKind::MultigridCG_Matfree) {
@@ -483,6 +491,14 @@ FixedDesignAnalysis analyze_fixed_design(
           effective_material += 1.0;
         }
       }
+  // TO rebuild stage 2 (ledger A-02): the stress that decides is read over the
+  // material's length, not at one voxel. The one-voxel peak is kept beside it.
+  // Not yet done here: the width-aware maximum (max_von_mises_eff) and the
+  // interlayer reading (its length is a fifth of this one, under a voxel so far).
+  const double max_von_mises_one_voxel = max_von_mises;
+  if (strength_mode() == StrengthMode::Size && knockdown.stress_reading_mm > 0.0)
+    max_von_mises = peak_stress_over_size(grid, out.von_mises_field, density, kIso,
+                                          knockdown.stress_reading_mm);
   const double max_interlayer = max_interlayer_tension(grid, stress, build_dir);
 
   // Per-node displacement of the SAME solve — no new solve. DOF-ordered; exposed
@@ -538,6 +554,7 @@ FixedDesignAnalysis analyze_fixed_design(
   out.printed_voxels = printed_voxels;
   out.printed_fraction = printed_fraction;
   out.max_von_mises = max_von_mises;
+  out.max_von_mises_one_voxel = max_von_mises_one_voxel;
   out.max_interlayer_tension = max_interlayer;
   out.margin = margin;
   out.margin_effective = margin_effective;

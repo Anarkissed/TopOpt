@@ -442,6 +442,7 @@ KnockdownSpec knockdown_spec_for(const MinimizePlasticOptions& opts) {
   knockdown.infill_knockdown = infill_margin_knockdown(opts.infill_percent);
   knockdown.width_aware = opts.width_aware_knockdown;
   knockdown.infill_percent = opts.infill_percent;
+  knockdown.stress_reading_mm = opts.stress_reading_mm;  // TO rebuild stage 2; 0 = today
   // Slicer wall-ring thickness (handoff line-width-plumbing). Bambu Studio / OrcaSlicer
   // deposit the single OUTER perimeter at its own line width and the remaining
   // (wall_loops - 1) INNER loops at wall_line_width_mm, so the faithful ring is

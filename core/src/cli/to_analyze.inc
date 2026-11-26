@@ -177,6 +177,9 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   VoxelGrid model_grid;
   std::vector<DirichletBC> bcs;
   MinimizePlasticOptions options;
+  // TO rebuild stage 2 (see to_setup.inc).
+  if (strength_mode() == StrengthMode::Size)
+    options.stress_reading_mm = reading_size_mm(material_length(job.material));
   const bool loadcase = job.loads.present;
   // loadcase only: the distributed tractions from the declared force groups are
   // computed on the model faces up front (INDEPENDENT of the fixed design's

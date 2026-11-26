@@ -32,4 +32,26 @@ inline FaceLoadMode face_load_mode() {
 
 inline bool to_stage1_on() { return face_load_mode() != FaceLoadMode::Voxel; }
 
+// STAGE 2 (a strength number that holds), written ahead of its gate.
+// TOPOPT_STRENGTH:
+//   unset   : today's strength check everywhere.
+//   "stiff" : a voxel cut by the surface is solved at its real stiffness
+//             (E x fill, not E x fill^3; ledger A-01). Nothing else changes.
+//   "size"  : as "stiff", and the stress that decides pass or fail is read over
+//             the material's length (material_length.hpp), not at one voxel
+//             (ledger A-02). Where no length is published, or it is smaller than
+//             a voxel, the reading is the single voxel, as today.
+enum class StrengthMode { Today, Stiff, Size };
+
+inline StrengthMode strength_mode() {
+  const char* v = std::getenv("TOPOPT_STRENGTH");
+  if (v == nullptr) return StrengthMode::Today;
+  const std::string m(v);
+  if (m == "stiff") return StrengthMode::Stiff;
+  if (m == "size") return StrengthMode::Size;
+  return StrengthMode::Today;
+}
+
+inline bool to_stage2_on() { return strength_mode() != StrengthMode::Today; }
+
 }  // namespace topopt
