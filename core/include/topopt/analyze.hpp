@@ -167,6 +167,10 @@ struct FixedDesignAnalysis {
   // when that one is read over a size (the engineers' second, softer warning).
   // Equal to max_von_mises on today's path.
   double max_von_mises_one_voxel = 0.0;
+  // TO rebuild stage 2 (ruling item 6): which form this analysis used. The size in
+  // mm the deciding stress was read over; 0 = one voxel (today's solve and reading),
+  // which is also what a size under kStressSizeSwitchVoxels check voxels gets.
+  double stress_read_over_mm = 0.0;
   double max_interlayer_tension = 0.0;
   StressMargin margin;  // SOLID margin (the reported/displayed value)
   V3Report v3;          // §7 V3 suite on the fixed density (min-feature count, mesh, ...)

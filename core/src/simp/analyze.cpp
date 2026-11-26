@@ -323,7 +323,8 @@ FixedDesignAnalysis analyze_fixed_design(
       // reading whole. "stiff" stays as a measuring arm only.
       SimpParams solve_params = params;
       if (strength_mode() == StrengthMode::Stiff ||
-          (strength_mode() == StrengthMode::Size && knockdown.stress_reading_mm > 0.0))
+          (strength_mode() == StrengthMode::Size &&
+           stress_is_read_over_size(knockdown.stress_reading_mm, grid.spacing)))
         solve_params.penalty = 1.0;
       sc = simp_compliance(grid, solve_params, density, B, loads, cg_tolerance,
                            cg_max_iterations, /*initial_guess=*/nullptr,
@@ -423,7 +424,8 @@ FixedDesignAnalysis analyze_fixed_design(
   // TO rebuild stage 2: the wall-aware stress per voxel, kept only when it is to
   // be read over a size (empty otherwise, so today's path allocates nothing).
   const bool read_over_size =
-      strength_mode() == StrengthMode::Size && knockdown.stress_reading_mm > 0.0;
+      strength_mode() == StrengthMode::Size &&
+      stress_is_read_over_size(knockdown.stress_reading_mm, grid.spacing);
   std::vector<double> von_mises_eff_field;
   if (read_over_size && knockdown.width_aware)
     von_mises_eff_field.assign(grid.voxel_count(), 0.0);
@@ -641,6 +643,7 @@ FixedDesignAnalysis analyze_fixed_design(
   out.printed_fraction = printed_fraction;
   out.max_von_mises = max_von_mises;
   out.max_von_mises_one_voxel = max_von_mises_one_voxel;
+  out.stress_read_over_mm = read_over_size ? knockdown.stress_reading_mm : 0.0;
   out.max_interlayer_tension = max_interlayer;
   out.margin = margin;
   out.margin_effective = margin_effective;

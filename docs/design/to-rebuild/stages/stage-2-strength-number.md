@@ -304,3 +304,22 @@ The plate, against the reading's own true value, by how many VOXELS the size spa
 Read plainly. Form B does nothing on coarse voxels (its best ball is still one centred inside the material) and keeps the 10 % miss: dropped. Form A is never more than 3.1 % low on the plate anywhere, and from 1.8 voxels across upward it sits between -3.1 and +5.2 % (a spread of 8.3, inside the 10 % bar). Under 1.8 voxels across it reads HIGH (the safe side), up to +15.6 %, because the stress the solve gives in a nearly empty cut voxel runs high and a small ball is mostly such voxels; where the ball does not reach past its own voxel at all (size under the voxel) it would read one such voxel alone, +44 %: that is the ruling's case 4 and must take the one-voxel form on PRINTED voxels, not this. The ring with form A: 3.6 mm reads +2.9 to +5.5 % at all four resolutions; its 1.8 mm rows by voxel count are owed (the test prints only the range, +1.5 to +42.7 %, the high end being the size-under-a-voxel row).
 
 FIRST READING of the switch point (item 2): about 1.8 voxels across on the plate. Owed before it is stated: the same table for the ring, and sizes chosen to land between 1.5 and 2.5 voxels across at each resolution, printed by the tests themselves.
+
+### Item 2, THE SWITCH POINT, measured on both shapes (2026-11-26 16:32, build of 5f2b2fae plus the tests' "[switch]" tables)
+
+Real stiffness (E x fill), the edge-of-part reading (form A), the size chosen to span a stated number of voxels at each resolution; percent against the reading's own true value at radius 3 / 4 / 5 / 6 voxels.
+
+| voxels across | plate with a hole | thick ring | inside the bar on both? |
+|---|---|---|---|
+| 1.00 | +46.5 / +18.3 / +18.6 / +33.4 | +44.3 / +20.0 / +17.1 / +9.7 | no (unsteady, 28 to 35 % spread) |
+| 1.25 | +30.6 / +16.2 / +15.2 / +21.4 | +30.6 / +14.7 / +8.2 / +7.9 | no (15 to 23 % spread) |
+| 1.50 | +7.3 / +7.1 / +7.1 / +7.5 | +11.3 / +5.9 / +4.1 / +4.2 | yes |
+| 1.75 | -2.9 / -0.1 / +2.6 / +2.9 | +3.0 / +2.6 / +1.3 / +1.3 | yes |
+| 2.00 | -4.9 / -2.1 / +1.7 / +2.0 | +1.5 / +3.0 / +1.5 / +1.7 | yes (the lowest figure anywhere: -4.9 %) |
+| 2.50 | -4.0 / -1.7 / +2.7 / +2.8 | +2.5 / +5.2 / +3.1 / +3.4 | yes |
+| 3.00 | -0.8 / +0.8 / +5.2 / +4.9 | +5.5 / +8.2 / +5.5 / +5.6 | yes |
+| 4.00 | +0.8 / +1.8 / +4.4 / +4.3 | +4.9 / +6.9 / +5.3 / +4.6 | yes |
+
+THE ANSWER: the form meets the bar on both shapes at all four resolutions from 1.5 voxels across. THE VALUE SET: 1.75 (`kStressSizeSwitchVoxels`), not 1.5, for one reason: at 1.5 the reading sits about 7 % high and at 2.0 up to 4.9 % low, so one physical size seen at 1.5 voxels on one grid and 2.0 on another would differ by 12 %, over the 10 % allowed across resolutions; from 1.75 up every figure on both shapes lies between -4.9 and +8.2 %. Margin to the 5 % bar is thin at 2.0 on the coarsest plate (-4.9 %): said, not hidden.
+
+In the code (`analyze.cpp`, behind `TOPOPT_STRENGTH=size`): a job whose reading size is at least 1.75 check voxels is solved with real stiffness and read over the size with the ball free to sit on the part's edge; any other job (a smaller size, or a material with no published length) keeps TODAY'S solve and one-voxel reading whole. `FixedDesignAnalysis::stress_read_over_mm` says which (0 = one voxel). What his materials get under his half-length rule: PLA 1.2 mm reads over a size when the check voxel is 0.69 mm or finer; PETG 0.35 mm and ABS 0.23 mm essentially never (voxels of 0.2 and 0.13 mm): for them, and for PA6 and PA12, stage 2 changes nothing but the printed grams.

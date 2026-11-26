@@ -47,6 +47,11 @@ using topopt::VoxelGrid;
 
 namespace {
 
+// THE SWITCH POINT (the reviewer's ruling 2026-11-26, item 2): extra sizes read on
+// the same solve, set by main() for one resolution at a time (mm in, reading out).
+std::vector<double> g_switch_sizes_mm;
+std::vector<double> g_switch_readings;
+
 constexpr double kFarStress = 10.0;   // MPa
 constexpr double kTiltDeg = 30.0;
 constexpr double kTextbook = 3.03;    // Kirsch 3.0, finite width d/W = 0.1
@@ -159,6 +164,12 @@ double peak_ratio(int radius_voxels, bool exact_fill, double penalty, bool* ok,
       topopt::SolverKind::MultigridCG_Matfree, 0.0, knockdown, true,
       static_cast<double>(g.tags.size()));
   *ok = res.max_von_mises > 0.0 && std::isfinite(res.max_von_mises);
+  g_switch_readings.clear();
+  if (res.von_mises_material_field.size() == density.size())
+    for (double mm : g_switch_sizes_mm)
+      g_switch_readings.push_back(topopt::peak_stress_over_size(g, res.von_mises_material_field, density,
+                                                                topopt::kStressMaterialFloor, mm) /
+                                  kFarStress);
   if (over_size != nullptr && res.von_mises_material_field.size() == density.size())
     for (int q = 0; q < 3; ++q)
       over_size[q] = topopt::peak_stress_over_size(g, res.von_mises_material_field, density,
@@ -256,6 +267,46 @@ int main(int argc, char** argv) {
       std::printf("E x fill^%-12.0f %-10s against the reading's own true value: %+6.1f to %+6.1f %%  %s\n",
                   pen, names[q], 100.0 * own_lo[q], 100.0 * own_hi[q],
                   own_lo[q] >= -0.05 ? "never more than 5 % low" : "more than 5 % low somewhere");
+  }
+
+  // THE SWITCH POINT: real stiffness (E x fill), the size chosen to span a stated
+  // number of voxels at each resolution, against the reading's own true value.
+  // The smallest span from which every resolution is inside the bar (never more
+  // than 5 % low, within 10 % of one another) is where the reading over a size
+  // may take over from the one-voxel form.
+  {
+    const double kSpans[8] = {1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0};
+    const int kRes[4] = {3, 4, 5, 6};
+    double off[8][4];
+    for (int ri = 0; ri < 4; ++ri) {
+      const int r = kRes[ri];
+      const double voxel = kHoleRadiusMm / r;
+      g_switch_sizes_mm.clear();
+      for (double s : kSpans) g_switch_sizes_mm.push_back(s * voxel);
+      bool ok = false;
+      double unused[3] = {0.0, 0.0, 0.0};
+      (void)peak_ratio(r, true, 1.0, &ok, unused);
+      for (int s = 0; s < 8; ++s) {
+        const double mm = kSpans[s] * voxel;
+        const double truth = to_reference::plate_reading(kHoleRadiusMm, mm, kThickness * kHoleRadiusMm / r);
+        off[s][ri] = s < static_cast<int>(g_switch_readings.size())
+                         ? 100.0 * (g_switch_readings[static_cast<std::size_t>(s)] / truth - 1.0)
+                         : -999.0;
+      }
+    }
+    g_switch_sizes_mm.clear();
+    std::printf("\n[switch] E x fill read over a size, by the voxels the size spans; percent against the "
+                "reading's own true value at radius 3 / 4 / 5 / 6 voxels\n");
+    for (int s = 0; s < 8; ++s) {
+      double lo = 1e9, hi = -1e9;
+      for (int ri = 0; ri < 4; ++ri) {
+        lo = std::min(lo, off[s][ri]);
+        hi = std::max(hi, off[s][ri]);
+      }
+      std::printf("[switch] %4.2f voxels across: %+6.1f %+6.1f %+6.1f %+6.1f   lowest %+6.1f, spread %5.1f  %s\n",
+                  kSpans[s], off[s][0], off[s][1], off[s][2], off[s][3], lo, hi - lo,
+                  lo >= -5.0 && hi - lo <= 10.0 ? "inside the bar" : "outside");
+    }
   }
 
   std::printf("[test E] %s: %d failure(s)\n", gate ? "gate" : "measure only", failures);

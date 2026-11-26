@@ -33,6 +33,23 @@ namespace topopt {
 // FixedDesignAnalysis::von_mises_material_field).
 inline constexpr double kStressMaterialFloor = 0.02;
 
+// THE SWITCH POINT (the reviewer's ruling 2026-11-26, items 2 and 4). A reading
+// over a size holds its bar (never more than 5 % under its own true value, within
+// 10 % across resolutions) only when the size spans enough voxels; under that the
+// ball is mostly voxels the surface cuts and reads high and unsteady, and under
+// one voxel it cannot be resolved at all. So a job reads over its size only when
+// size >= kStressSizeSwitchVoxels x the check voxel; otherwise it keeps TODAY'S
+// solve and one-voxel reading whole (judged against the peak). Measured on the
+// plate and the ring by tests E's "[switch]" tables (2026-11-26): both shapes are
+// inside the bar at every span from 1.5 voxels up (lowest -4.9 %); at 1.5 the
+// reading still sits about 7 % high where at 2.0 it sits up to 4.9 % low, so a
+// fixed size seen at 1.5 voxels on one grid and 2.0 on another would differ by
+// more than the 10 % allowed. From 1.75 up the whole range is -4.9 to +8.2 %.
+inline constexpr double kStressSizeSwitchVoxels = 1.75;
+inline bool stress_is_read_over_size(double reading_mm, double voxel_mm) {
+  return reading_mm > 0.0 && voxel_mm > 0.0 && reading_mm >= kStressSizeSwitchVoxels * voxel_mm;
+}
+
 // `field` and `density` are per voxel (grid.voxel_count()). A voxel is printed
 // when its density is at least `iso`; only printed voxels are averaged and only
 // printed voxels get a reading (others return 0). `diameter_mm` <= 0 returns the
