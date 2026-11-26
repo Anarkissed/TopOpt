@@ -210,16 +210,24 @@ struct LatticeSampleView: View {
             }
             // ★ notes26 (his rule: never a note at the bottom-centre): the "Not in the sample yet" line is gone — the finish and
             // the band are in the sample now; only the caption (what is drawn) stays at its foot
-            VStack(spacing: DS.Space.s) {
-                captionLine
+            // ★★ notes30 (his iPad, release 21: "Building the sample…" sat at the bottom-centre of the screen): while it builds the
+            // line is centred over the sample, in the part of the view the page leaves free (the "Refreshing Lattice" card says it
+            // instead when Skip all animations is on); once built, its caption is back at the sample's foot
+            let centred = buildingLineCentred
+            if !(centred && refreshCardUp) {
+                VStack(spacing: DS.Space.s) {
+                    captionLine
                     .font(.system(size: 12.5)).foregroundStyle((failed ? DS.Color.warning : DS.Color.textSecondary).color)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.s)
                     .background(Capsule().fill(DS.Surface.panel.color))
-                    .latticeID("lattice-sample-caption")
+                    .latticeID(centred ? Self.buildingID : "lattice-sample-caption")
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: centred ? .center : .bottom)
+                .padding(.bottom, centred ? 0 : DS.Space.l)
+                .padding(.top, centred ? visible.top : 0)
+                .padding(.leading, visible.leading).padding(.trailing, visible.trailing).padding(.bottom, visible.bottom)   // ★ 11-23
             }
-            .padding(.bottom, DS.Space.l)
-            .padding(.leading, visible.leading).padding(.trailing, visible.trailing).padding(.bottom, visible.bottom)   // ★ 11-23
             // ★ notes29: Skip all animations — the centred "Refreshing Lattice" card while the sample is laid
             LatticeRefreshingCard(progress: refresh)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -231,6 +239,15 @@ struct LatticeSampleView: View {
         .onAppear { if FlexibleSaid.recording { Self.recordedAppears += 1 }; Self.say(tag, "appear") }
         .onDisappear { Self.say(tag, "disappear") }
     }
+
+    /// ★ notes30: "Building the sample…" is up (centred over the sample, never at the screen's foot).
+    private var buildingLineCentred: Bool { caption == Self.building && !failed && !Self.controlBuildingAtFoot }
+    /// The centred "Refreshing Lattice" card is up (Skip all animations): it says the build, so the line steps aside.
+    private var refreshCardUp: Bool { AppSettings.skipAllAnimations && refresh.on }
+    /// The building line's id (its frame, while a test records).
+    static let buildingID = "lattice-sample-building"
+    /// RED CONTROL (tests, notes30): "Building the sample…" at the sample's foot, as release 21 drew it.
+    nonisolated(unsafe) static var controlBuildingAtFoot = false
 
     /// ★ his 11-22 (img 46): the caption, with the time while it builds (once a second, this line only) and, once built, how
     /// long it took beside it, quieter — on the sample's own caption, never a line of the screen.

@@ -237,7 +237,7 @@ final class LatticeSampleCoverHostedTests: XCTestCase {
             h.click(CGPoint(x: f.midX, y: f.midY), settle: 1)
         }
         try h.pickFromMenu("capsuleMenu", "Aesthetic", what: "Topology's ● menu")
-        try h.tap("capsuleLattice", "the Lattice page", settle: 1.5)
+        try h.tap("capsuleSetup", "Setup, the settings", settle: 1.5)
         try click("wizard-stage-\(LatticeWizardStage.cell.rawValue)", "Cells")
         XCTAssertNotNil(seen("lattice-sample-cells"), "★ Cells: the chunk of cells")
         let cover = try XCTUnwrap(seen("lattice-sample-cover"), "★ his part is covered")
@@ -248,8 +248,8 @@ final class LatticeSampleCoverHostedTests: XCTestCase {
         XCTAssertNil(seen("lattice-sample-cells"))
         XCTAssertNotNil(seen("lattice-sample-cover"), "★ never his own part")
         // CONTROL: off the page, his part is back
-        try h.tap("capsuleSetup", "Setup", settle: 1.5)
-        XCTAssertNil(seen("lattice-sample-cover"), "control: Setup shows his part")
+        try h.tap("capsuleLattice", "Lattice", settle: 1.5)
+        XCTAssertNil(seen("lattice-sample-cover"), "control: Lattice shows his part")
     }
 
     /// ★ 362's 11-10 set: with nothing changing, the page asks for its sample at most once — never a loop (the stalled fix1
@@ -266,7 +266,7 @@ final class LatticeSampleCoverHostedTests: XCTestCase {
                              size: AppBuildHost.landscape13, test: self)
         h.pump(3)
         try h.pickFromMenu("capsuleMenu", "Aesthetic", what: "Topology's ● menu")
-        try h.tap("capsuleLattice", "the Lattice page", settle: 1.5)
+        try h.tap("capsuleSetup", "Setup, the settings", settle: 1.5)
         h.pump(6)
         LatticeSampleView.recordedAsks = []; LatticeSampleView.recordedAppears = 0
         let built = LatticeSampleBuilder.shared.builds
@@ -300,7 +300,7 @@ final class LatticeSampleCoverHostedTests: XCTestCase {
         func seen(_ id: String) -> CGRect? { (pr.all[id] ?? h.frames.all[id]).flatMap { $0.width > 1 ? $0 : nil } }
         try h.pickFromMenu("capsuleMenu", "Aesthetic", what: "Topology's ● menu")
         LatticeSampleView.recordedAsks = []; LatticeSampleView.recordedAppears = 0; LatticeSampleView.recordedCaptions = []
-        try h.tap("capsuleLattice", "the Lattice page", settle: 1.5)
+        try h.tap("capsuleSetup", "Setup, the settings", settle: 1.5)
         let cells = try XCTUnwrap(seen("wizard-stage-\(LatticeWizardStage.cell.rawValue)"), "Cells is on the page")
         h.click(CGPoint(x: cells.midX, y: cells.midY), settle: 1)
         let start = LatticeSampleView.recordedAsks.count

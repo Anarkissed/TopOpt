@@ -23,7 +23,7 @@ final class WidePanelFitsTests: XCTestCase {
             let h = AppBuildHost(WorkspacePlaceholder(model: r.app, project: p), size: size, test: self)
             h.pump(3)
             try h.pickFromMenu("capsuleMenu", "Structural", what: "\(size): the stage menu")
-            try h.tap("capsuleLattice", "\(size): the Lattice page", settle: 1.5)
+            try h.tap("capsuleSetup", "\(size): Setup, the settings", settle: 1.5)
             let panel = try h.onScreen("latticeSettingsPanel", "\(size): ★ the Lattice settings panel")
             XCTAssertEqual(panel.width, 440, accuracy: 0.5, "\(size): ★ U14 — the wide panel")
             XCTAssertGreaterThanOrEqual(panel.minX, PageChrome.edge - 0.5, "\(size): on the left edge")

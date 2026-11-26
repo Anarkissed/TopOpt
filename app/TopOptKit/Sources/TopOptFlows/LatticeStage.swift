@@ -128,15 +128,31 @@ public enum LatticeStageMenu {
 
 // MARK: - the capsule's pages
 
-/// The lattice stage's two pages. Regions: the one list (groups and regions), depth / expand / grade. Cells: the lattice's
-/// cell settings (today's settings page, re-homed).
+/// The lattice stage's two pages. Cells: the lattice's settings (the Lattice settings panel and its sample). Regions: the part
+/// with its laid lattice (the lattice view), where faces are picked.
+///
+/// ★★ notes30 (his iPad, release 21, 11-26 12:50: "'Lattice' and 'Settings' have switched places"). The capsule has read
+/// "Setup │ Lattice" since B2 (11-02), Setup opening the part and Lattice the settings. Release 19 (notes28 C) turned the
+/// lattice view on by default, so the laid lattice came up under Setup and the settings under Lattice. His order again: Setup
+/// is the settings, Lattice is the laid lattice — the words where they stood, each over what it shows, the lit one the page up.
 public enum LatticeStagePage: String, Equatable, Sendable, CaseIterable {
-    case regions, cells
+    case cells, regions   // the capsule's order: Setup, then Lattice
 
-    public var title: String { self == .regions ? "Setup" : "Lattice" }   // ★ B2 (U4, approved design 2026-11-02): "Setup │ Lattice", never Regions / Cells
+    public var title: String { self == .cells ? "Setup" : "Lattice" }   // ★ notes30: Setup = the settings, Lattice = the lattice
 
-    /// The lit page: Cells while today's settings page is up, else Regions.
+    /// The lit page: Cells while the settings are up, else Regions (the laid lattice).
     public static func current(cellsUp: Bool) -> LatticeStagePage { cellsUp ? .cells : .regions }
+
+    /// The capsule's two segments in order: Setup (the settings), then Lattice (the laid lattice).
+    public static var capsuleOrder: (primary: LatticeStagePage, secondary: LatticeStagePage) {
+        controlSettingsUnderLattice ? (.regions, .cells) : (.cells, .regions)
+    }
+    /// The words its segment shows (the RED CONTROL: as releases 19-21 showed them).
+    public var capsuleTitle: String {
+        Self.controlSettingsUnderLattice ? (self == .regions ? "Setup" : "Lattice") : title
+    }
+    /// RED CONTROL (tests, notes30): the capsule as releases 19-21 drew it — Setup over the part, Lattice over the settings.
+    nonisolated(unsafe) public static var controlSettingsUnderLattice = false
 }
 
 public enum LatticeStageCopy {

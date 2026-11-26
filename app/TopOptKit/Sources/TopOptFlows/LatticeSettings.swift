@@ -418,7 +418,7 @@ public struct LatticeRegionSpec: Equatable, Sendable {
         if abs(e) < 1e-9, strips.isEmpty { return outlineLoops }
         guard let g = TopOptKit.outlinePolygon(raw: outlineLoops, trueSegments: abs(e) < 1e-9 ? [] : segs,
                                                strips: strips, expandMM: e) else {
-            NSLog("DIAG generatedOutlineLoops: the bridge refused (\(TopOptKit.lastCoreRefusal ?? "no reason")) — the raw outline stands")
+            OutlineRefusalLog.once(TopOptKit.lastCoreRefusal ?? "no reason")   // ★ notes30: read as views draw — once per reason
             return outlineLoops
         }
         return g
@@ -3905,4 +3905,20 @@ public struct LatticeBounds: Equatable, Sendable {
     /// conservative choice, never sparser (hence weaker) than the previewed range. When
     /// graded generation lands this becomes the range itself.
     public var generateRelativeDensity: Double { densityHi }
+}
+
+/// ★ notes30 (his crash 11-26: a log line per render stalled the app when Xcode's log pipe stopped draining): `outlinePolygon` is
+/// read as views draw and scenes bake, so the bridge's refusal is written once per reason this process, never per read.
+enum OutlineRefusalLog {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var said = Set<String>()
+    /// Lines written (tests).
+    nonisolated(unsafe) static var lines = 0
+    static func once(_ why: String) {
+        lock.lock()
+        let first = said.count < 64 && said.insert(why).inserted
+        if first { lines += 1 }
+        lock.unlock()
+        if first { NSLog("DIAG generatedOutlineLoops: the bridge refused (%@) — the raw outline stands", why) }
+    }
 }
