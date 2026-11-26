@@ -87,3 +87,8 @@ if(TARGET test_lattice_strength)
   add_test(NAME to_stage1_lattice_masks CONFIGURATIONS Long COMMAND test_to_stage1_lattice_masks)
   set_tests_properties(to_stage1_lattice_masks PROPERTIES TIMEOUT 7200)
 endif()
+
+# A tool, not a test: writes the made sample part (an L-bracket with a filled
+# corner) and its job, for the measurements his own parts cannot give.
+add_executable(to_sample_part tests/tools/to_sample_part.cpp)
+target_link_libraries(to_sample_part PRIVATE topopt)
