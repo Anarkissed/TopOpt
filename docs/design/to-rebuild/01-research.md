@@ -248,3 +248,17 @@ What it means here:
 - No printed value found for PC, PA12, PP, HIPS, ASA, the filled grades or the resins (searched: fracture toughness and critical distance, each material, printed specimens). A printed short-fibre polyamide study reports toughness "slightly higher" than neat polyamide without a number in reach.
 - What this does to the proposal: at half of 0.46 mm the reading is smaller than a voxel on every job, so for ABS the new number IS today's peak (with cut voxels at their real stiffness). The steadiness measured in tests E came from 1.8 mm and up. The honest position: the published data support a length of the order of a millimetre for printed plastics but do not pin it per material; his rig has to. Until then the choice between "cautious and unsteady" (small length) and "steady and less proven" (about 1 to 2 mm for every material) is his.
 
+
+### The maintainer's source: CNC Kitchen (Stefan Hermann), read 2026-11-25
+
+Four articles read: comparing PLA, PETG and ASA (2020-02-03); Prusament PC Blend (2021-06-12); Essentium PCTG (2021-05-29); carbon-fibre nylon PA6 against PA12 (2025-08-17). His own caveat: none of it on calibrated equipment; specimens per value mostly not stated.
+
+- No fracture toughness or critical distance anywhere, so nothing here sets the length directly.
+- Layer strength, standing against lying (his hooks and mini-specimens): PLA 55 %, PETG 46 %, ASA 29 % (34 % in a warm enclosure), PC Blend 50 to 63 %, PCTG 75 %. Our `materials.json` (the maintainer's data, not edited): PLA 0.55, PETG 0.70, ASA 0.60, PC 0.60. PETG and ASA are well above what he measured.
+- Notched impact (Izod), lying: PLA 5, PETG 8.6, ASA 18, PCTG 24, PC Blend 27 kJ/m2. STANDING: PC Blend about 2, PCTG 1.5 kJ/m2. So across the layers the notched toughness is 13 to 16 times lower than in the plane, while the strength is only 1.3 to 2 times lower. By the length's own formula that makes the length across layers roughly a fifth of the in-plane one. This bears on the decision "same length across layers".
+- Carbon-fibre nylon: PA6 loses 44 % of its strength and two thirds of its stiffness once it has taken up moisture; PA12 loses 10 to 15 %. A dry-strength number for a nylon is not the strength of the part in use.
+- A cross-check only, NOT a published value: a rough toughness from his impact energy and bending stiffness, K about sqrt(E x G), gives PLA 4.1 MPa m^0.5, beside the published 3.7. The same sum gives PETG 4.0, ASA 6.4, PC 7.7. Impact energy overstates the true fracture energy, so these are upper guides at best.
+
+### Decided by the maintainer, 2026-11-25
+
+"Let's go with the lowest published value for each." So: PLA 2.4 mm, ABS 0.46 mm, PETG 0.7 mm, halved by his earlier rule (1.2, 0.23, 0.35 mm). Open: the nine materials with no published value.
