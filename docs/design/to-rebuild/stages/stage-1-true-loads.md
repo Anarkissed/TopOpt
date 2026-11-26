@@ -217,6 +217,17 @@ A face that is PART of a flat side (a 20 x 20 mm patch in a 60 x 40 mm top; `tes
 
 Reading: the lip is NOT new. Today's layer walk already spreads sideways under the neighbouring face (at 10 mm deep, twice as many voxels outside the prism as inside). True distance adds 7 to 85 % more outside voxels and reaches exactly the depth. Whether a region should be a prism under its outline (as the new lattice engine lays it) or a distance band is a question for the reviewer, for both paths.
 
+## The pad on screen (proposal for #362 and the maintainer; his decisions of 2026-11-26; nothing built in the app)
+
+His words: "it should be automatic first, with a warning/notice explaining what happens when if you manually do it and get it wrong", and his help-text rule (a caption of at most five words; long reading behind a link or an (i); errors as centred pop-ups).
+
+- Beginner (Auto, the default): nothing on screen. The pad follows the thickness behind each fixed or loaded face.
+- Engineer: one line in the anchors' and loads' settings, "Pad depth", showing "Auto" with the depths it chose listed behind the (i) (one line per face: "12.4 mm behind this face, pad 3.5 mm"). Tapping it lets him type a depth in mm for that face.
+- Caption under a typed depth (five words): "Too thin or thick risks failure." with an (i):
+  "The pad is the solid material kept behind a fixed or loaded face so it stays joined to the part. Too thin: the face can end up attached by too little, and a version may be refused. Too thick: material the optimiser could have removed stays, and on a small part there may be no room left to make a version at all. Auto picks a depth from the thickness behind the face and your wall line width."
+- When a run refuses a version because an anchored or loaded piece came away, and the pad on that face was typed by hand: one centred pop-up, "A fixed face came loose. The pad depth you typed for it may be too thin." with two buttons, "Use Auto" and "Keep mine".
+- What the core gives the app for this: per face, the thickness measured and the pad used (today printed as "[loadcase] automatic pad: ..."; to become a report value when the rule is settled).
+
 ## For #362 (handed over with the switch flip; not edited by me)
 
 Until these land, with the switch on, the app's previews count voxels the old way while the run freezes by true distance.
