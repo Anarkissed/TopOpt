@@ -27,6 +27,17 @@ Candidate route (to be prototyped on ONE part): quad remesh of the function's su
 
 Tools for that route (checked 2026-11-25): QuadriFlow (quad remeshing; BSD-style licence; builds on Instant Meshes, BSD-style, with about four times fewer singular points), OpenSubdiv (subdivision surfaces and their patches; Apache-2.0 variant). QuadWild is out (GPL-3, needs the commercial Gurobi solver). A 2024 paper takes the same QuadriFlow route from quad mesh to splines for trimmed CAD surfaces (arXiv 2410.14318). The open step: turning the subdivision surface into NURBS patches that close at extraordinary points (where 3 or 5 patches meet) within CAD tolerance. Known answers to read before the prototype: Peters 2000, "Patching Catmull-Clark meshes" (SIGGRAPH; G1 bicubic patches, NURBS-compatible), and Loop & Schaefer 2008, "Approximating Catmull-Clark subdivision surfaces with bicubic patches" (ACM TOG 27(1)); Rhino's SubD-to-NURBS conversion is the working example. DOIs to pin down when the scope is finished.
 
+### Prototype plan (one part, for his approval before any build)
+
+1. Input: one finished stage 3 version of Top Motor Mount (drawn faces exact, cut walls from the function).
+2. Split the file into its DRAWN faces (on his STEP's own faces: reuse those B-rep faces, trimmed) and its CUT surface (the optimiser's).
+3. Quad-remesh the cut surface only (QuadriFlow), make it a subdivision surface, and turn that into bicubic NURBS patches (OpenSubdiv for the regular patches; Peters 2000 for the points where 3 or 5 patches meet).
+4. Fit each patch to the function's exact zero surface (we can evaluate it anywhere), not to the triangles.
+5. Sew drawn and cut faces into one shell with OCCT (BRepBuilderAPI_Sewing, ShapeFix_Shape), check it (BRepCheck_Analyzer: one closed, valid solid), write STEP AP214 (STEPControl_Writer). All of OCCT is already in core.
+6. Pass marks, in this order: OCCT says valid; FreeCAD opens it as one solid and can fillet an edge and cut a hole (I can do this myself); then he opens it in Shapr3D and tries the same two edits. Report: face count, file size, largest gap, time.
+
+What it will tell us: whether the patch layout holds on a real optimised shape, and what Shapr3D (Parasolid) accepts. What it will not: other CAD programs (each needs its own test), lattices (below).
+
 ## Latticed parts
 
 Findings (2026-11-25):
