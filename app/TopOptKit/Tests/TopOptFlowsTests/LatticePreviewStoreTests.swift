@@ -187,11 +187,14 @@ final class LatticePreviewStoreTests: XCTestCase {
         func n(_ x: Any) -> Int { Mirror(reflecting: x).children.count }
         XCTAssertEqual(n(LatticeLayoutSession.Organic()), LatticePreviewStore.organicFieldCount, "the Organic ask")
         XCTAssertEqual(n(OrganicVineShape.Piece(a: .zero, ra: 0, b: .zero, rb: 0, vine: 0)), 13, "a vine piece")
-        XCTAssertEqual(n(OrganicVineShape()), 8, "the vines")
+        // ★ RE-PINNED (notes29: + up, the print's up; not written, it is the key's own: decode sets it from the inputs' printUp)
+        XCTAssertEqual(n(OrganicVineShape()), 9, "the vines")
         XCTAssertEqual(n(OrganicVineShape.Params()), 6, "the vines' parameters")
         XCTAssertEqual(n(OrganicVineShape.Cut(planes: [], union: false)), 2)
         // (11: + fileMesh, 362's Mac print-accurate file — NOT kept here: the version's result holds that file)
-        XCTAssertEqual(n(LatticeLayoutBarsInputs(token: 0, bars: [])), 11, "what is drawn")
+        // ★ RE-PINNED (notes29 H3: 12, + printUp, the up a CELL lay stood along — its bridges and timelapse floors; NOT kept
+        // here: this store keeps Organic lattices only, whose drawn bars never carry it, as a fresh Organic lay's do not)
+        XCTAssertEqual(n(LatticeLayoutBarsInputs(token: 0, bars: [])), 12, "what is drawn")
         XCTAssertEqual(n(LatticeLayoutSolidGrid(token: 0, origin: .zero, voxel: 1, dims: .zero, rg: [])), 6)
         // ★ RE-PINNED (362 11-24: notes25 D10 added floorCellMM; the store now keeps it, format 2, and still reads 1)
         XCTAssertEqual(n(LatticeLayoutColours.Laid()), 13)
@@ -199,7 +202,26 @@ final class LatticePreviewStoreTests: XCTestCase {
         XCTAssertEqual(n(LatticeOrganicLook.Limits(strutLowerMM: 0, strutUpperMM: 0, strutAutoMM: 0, cellLowerMM: 0, cellUpperMM: 0,
                                                    cellAutoMM: 0)), 8)
         XCTAssertEqual(n(remembered(path: "", struts: 1)), 14, "the remembered lattice")
-        XCTAssertEqual(n(remembered(path: "", struts: 1).inputs), 10, "its inputs (the key)")
+        // ★ RE-PINNED (notes29: + printUp, the face he kept; the key writes it in its settings text, only when there is one)
+        XCTAssertEqual(n(remembered(path: "", struts: 1).inputs), 11, "its inputs (the key)")
+    }
+
+    /// ★ notes29: a lattice laid standing on the face he kept reads back with that face (its vines' up, from the key), and only
+    /// for that face: the same lattice asked as placed reads nothing back. RED CONTROL: none kept, the key's text as before.
+    func testALatticeLaidOnTheKeptFaceReadsBackForThatFaceOnly() throws {
+        var m = remembered(path: "/v/model.stl", struts: 50)
+        let placedKey = LatticePreviewStore.key(m.inputs)
+        XCTAssertEqual(placedKey.settings, String(reflecting: m.inputs.settings), "RED CONTROL: none kept, the text as before")
+        m.inputs.printUp = SIMD3(0, -1, 0)
+        m.bars.vines?.up = OrganicVineShape.keptUp(OrganicVineShape.drawnUp(m.inputs.printUp))
+        let data = try XCTUnwrap(LatticePreviewStore.encode(m))
+        XCTAssertTrue(LatticePreviewStore.readsBack(data, m), "★ read back whole, its up too")
+        let back = try XCTUnwrap(LatticePreviewStore.decode(data, for: m.inputs, token: 9))
+        XCTAssertEqual(back.bars.vines?.up, SIMD3(0, -1, 0), "★ the bridges stand on the kept face again")
+        var placed = m.inputs
+        placed.printUp = nil
+        XCTAssertNil(LatticePreviewStore.decode(data, for: placed, token: 9), "★ as placed it is another lattice")
+        XCTAssertNotEqual(LatticePreviewStore.key(m.inputs), placedKey)
     }
 
     /// ★ The stress check is kept beside the version's model and taken back for the same inputs (no solve); other inputs, or

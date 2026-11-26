@@ -21,8 +21,10 @@ public struct AppPopup: Equatable, Identifiable, Sendable {
 @MainActor public final class AppPopups: ObservableObject {
     public static let shared = AppPopups()
     @Published public var current: AppPopup? {
-        didSet { if current == nil { action = nil; second = nil; third = nil; dismissTitle = nil; dismissShown = true } }
+        didSet { if current == nil { action = nil; second = nil; third = nil; dismissTitle = nil; dismissShown = true; extra = nil } }
     }
+    /// ★ notes29 (his 11-25, the one (i)): content an (i) shows under its words (a Flexible row's core detail); cleared with it.
+    public private(set) var extra: AnyView?
     /// ★ notes25: a third action (the print file's refusal, Auto adjusted: "Lattice again", "Change settings", "Show me").
     public private(set) var third: (title: String, run: () -> Void)?
     /// ★ notes25: whether the dismiss button is drawn beside the actions (a tap outside the card still closes it).
@@ -43,6 +45,7 @@ public struct AppPopup: Equatable, Identifiable, Sendable {
         current = p
         self.action = action
         second = nil; third = nil; dismissTitle = nil; dismissShown = true   // ★ notes25: never another pop-up's buttons
+        extra = nil
     }
 
     /// ★ his 11-22: a pop-up with two actions and a dismiss word ("Try again", "Make it on the iPad", "Cancel").
@@ -57,11 +60,16 @@ public struct AppPopup: Equatable, Identifiable, Sendable {
         dismissShown = dismiss != nil
     }
 
-    /// An (i): the setting's name and its explanation, in the same centred card.
-    public func help(_ title: String, _ text: String) {
+    /// An (i): the setting's name and its explanation, in the same centred card. ★ notes29 (his 11-25): no OK — a big bold
+    /// "Tap anywhere to continue", and any tap anywhere closes it; `action` (e.g. "Mark as tested") is offered above that line,
+    /// `extra` drawn under the words.
+    public func help(_ title: String, _ text: String, action: (title: String, run: () -> Void)? = nil, extra: AnyView? = nil) {
         let p = AppPopup(title: title, text: text, info: true)
         if FlexibleSaid.recording { Self.recorded.append(p) }
         current = p
+        self.action = action
+        second = nil; third = nil; dismissTitle = nil; dismissShown = false
+        self.extra = extra
     }
 
     /// A wrong number, said front and centre: the setting, what is allowed, and what he typed.
@@ -75,74 +83,150 @@ struct AppPopupLayer: View {
 
     var body: some View {
         if let p = popups.current {
-            ZStack {
-                Rectangle().fill(Color.black.opacity(0.35)).ignoresSafeArea()
-                    .onTapGesture { popups.current = nil }
-                GlassPanel {
-                    VStack(spacing: DS.Space.m) {
-                        Image(systemName: p.info ? "info.circle.fill" : "exclamationmark.triangle.fill")
-                            .font(.system(size: 30, weight: .semibold))
-                            .foregroundStyle((p.info ? DS.Color.accent : DS.Color.warning).color)
-                        Text(p.title).dsStyle(DS.TypeScale.title).foregroundStyle(DS.Color.textPrimary.color)
-                            .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("app-popup-title")
-                        Text(p.text).dsStyle(DS.TypeScale.body).foregroundStyle(DS.Color.textSecondary.color)
-                            .multilineTextAlignment(p.info ? .leading : .center).fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: p.info ? .leading : .center)
-                            .accessibilityIdentifier("app-popup-text")
-                        HStack(spacing: DS.Space.s) {
-                            if let a = popups.action, let b = popups.second {   // ★ his 11-22: two choices and a dismiss, stacked
-                                VStack(spacing: DS.Space.s) {
-                                    PillButton(a.title) { let run = a.run; popups.current = nil; run() }
-                                        .accessibilityIdentifier("app-popup-action")
-                                    PillButton(b.title, style: .secondary) { let run = b.run; popups.current = nil; run() }
-                                        .accessibilityIdentifier("app-popup-second")
-                                    if let c = popups.third {   // ★ notes25
-                                        PillButton(c.title, style: .secondary) { let run = c.run; popups.current = nil; run() }
-                                            .accessibilityIdentifier("app-popup-third")
-                                    }
-                                    if popups.dismissShown {
-                                        PillButton(popups.dismissTitle ?? "OK", style: .secondary) { popups.current = nil }
-                                            .accessibilityIdentifier("app-popup-ok")
-                                    }
-                                }
-                            } else if let a = popups.action {
-                                PillButton("OK", style: .secondary) { popups.current = nil }
-                                    .accessibilityIdentifier("app-popup-ok")
-                                PillButton(a.title) { let run = a.run; popups.current = nil; run() }
-                                    .accessibilityIdentifier("app-popup-action")
-                            } else {
-                                PillButton("OK") { popups.current = nil }
-                                    .accessibilityIdentifier("app-popup-ok")
-                            }
-                        }
+            GeometryReader { g in
+                ZStack {
+                    // The dim backdrop: a tap on it closes the pop-up (an error's too, as before). ★ notes29: a Button, so the
+                    // tap is the same on the iPad and in the hosted tests (a test's click never reaches an onTapGesture)
+                    Button { popups.current = nil } label: {
+                        Rectangle().fill(Color.black.opacity(0.35))
+                            .frame(width: g.size.width, height: g.size.height)
+                            .contentShape(Rectangle())
                     }
-                    .padding(DS.Space.xl2)
-                    .frame(maxWidth: p.info ? 520 : 440)
+                    .buttonStyle(.plain)
+                    .ignoresSafeArea()
+                    .accessibilityLabel(p.info ? AppInfoCard.tapAnywhere : "Close")
+                    .background(CornerPairStyle.publish("appPopupBackdrop"))
+                    if p.info { infoCard(p, room: g.size) } else { errorCard(p) }
                 }
-                .padding(DS.Space.xl)
-                .background(CornerPairStyle.publish("appPopup"))
+                .frame(width: g.size.width, height: g.size.height)
             }
             .transition(.opacity)
             .zIndex(100)
         }
     }
+
+    /// ★ notes29 (his 11-25): an (i)'s explanation — his liked Organic card, front and centre, as wide as its words need (it
+    /// grows wider before it grows taller, and scrolls only if it outgrows the screen), with no OK: a big bold "Tap anywhere to
+    /// continue", and any tap anywhere (the card too: the card is one button) closes it. An action it offers (e.g. "Mark as
+    /// tested") is its own button, laid over the card in the slot the card keeps for it.
+    private func infoCard(_ p: AppPopup, room: CGSize) -> some View {
+        let width = AppInfoCard.width(for: p.text, title: p.title, room: room.width)
+        let action = popups.action
+        let content = VStack(spacing: DS.Space.m) {
+            Image(systemName: AppInfoGlyph.litSymbol)
+                .font(.system(size: 30, weight: .semibold))
+                .foregroundStyle(DS.Color.accent.color)
+            Text(p.title).dsStyle(DS.TypeScale.title).foregroundStyle(DS.Color.textPrimary.color)
+                .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("app-popup-title")
+            Text(p.text).dsStyle(DS.TypeScale.body).foregroundStyle(DS.Color.textSecondary.color)
+                .multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(CornerPairStyle.publish("appPopupText"))
+                .accessibilityIdentifier("app-popup-text")
+            if let extra = popups.extra {
+                extra.frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if action != nil {   // the action's slot (its button is laid over it, above the card's own tap)
+                Color.clear.frame(height: 44)
+                    .anchorPreference(key: AppInfoActionSlot.self, value: .bounds) { $0 }
+            }
+            Text(AppInfoCard.tapAnywhere)
+                .font(.system(size: 17, weight: .bold))
+                .foregroundStyle(DS.Color.textPrimary.color)
+                .multilineTextAlignment(.center)
+                .padding(.top, DS.Space.xs)
+                .accessibilityIdentifier("app-popup-tap-anywhere")
+        }
+        .padding(DS.Space.xl2)
+        .frame(width: width)
+        return Button { popups.current = nil } label: {
+            GlassPanel {
+                ViewThatFits(in: .vertical) {
+                    content
+                    ScrollView(.vertical, showsIndicators: true) { content }
+                        .frame(maxHeight: max(200, room.height - 2 * AppInfoCard.margin))
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint(AppInfoCard.tapAnywhere)
+        .accessibilityIdentifier("app-popup-card")
+        .overlayPreferenceValue(AppInfoActionSlot.self) { slot in
+            GeometryReader { g in
+                if let slot, let a = action {
+                    let r = g[slot]
+                    PillButton(a.title) { let run = a.run; popups.current = nil; run() }
+                        .background(CornerPairStyle.publish("appPopupAction"))
+                        .accessibilityIdentifier("app-popup-action")
+                        .frame(width: r.width)
+                        .position(x: r.midX, y: r.midY)
+                }
+            }
+        }
+        .background(CornerPairStyle.publish("appPopup"))
+    }
+
+
+    /// An error (his 11-20 rule): its title, its plain words and its own buttons (OK, Try again, …) — unchanged.
+    private func errorCard(_ p: AppPopup) -> some View {
+        GlassPanel {
+            VStack(spacing: DS.Space.m) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 30, weight: .semibold))
+                    .foregroundStyle(DS.Color.warning.color)
+                Text(p.title).dsStyle(DS.TypeScale.title).foregroundStyle(DS.Color.textPrimary.color)
+                    .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("app-popup-title")
+                Text(p.text).dsStyle(DS.TypeScale.body).foregroundStyle(DS.Color.textSecondary.color)
+                    .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .accessibilityIdentifier("app-popup-text")
+                HStack(spacing: DS.Space.s) {
+                    if let a = popups.action, let b = popups.second {   // ★ his 11-22: two choices and a dismiss, stacked
+                        VStack(spacing: DS.Space.s) {
+                            PillButton(a.title) { let run = a.run; popups.current = nil; run() }
+                                .accessibilityIdentifier("app-popup-action")
+                            PillButton(b.title, style: .secondary) { let run = b.run; popups.current = nil; run() }
+                                .accessibilityIdentifier("app-popup-second")
+                            if let c = popups.third {   // ★ notes25
+                                PillButton(c.title, style: .secondary) { let run = c.run; popups.current = nil; run() }
+                                    .accessibilityIdentifier("app-popup-third")
+                            }
+                            if popups.dismissShown {
+                                PillButton(popups.dismissTitle ?? "OK", style: .secondary) { popups.current = nil }
+                                    .accessibilityIdentifier("app-popup-ok")
+                            }
+                        }
+                    } else if let a = popups.action {
+                        PillButton("OK", style: .secondary) { popups.current = nil }
+                            .accessibilityIdentifier("app-popup-ok")
+                        PillButton(a.title) { let run = a.run; popups.current = nil; run() }
+                            .accessibilityIdentifier("app-popup-action")
+                    } else {
+                        PillButton("OK") { popups.current = nil }
+                            .accessibilityIdentifier("app-popup-ok")
+                    }
+                }
+            }
+            .padding(DS.Space.xl2)
+            .frame(maxWidth: 440)
+        }
+        .padding(DS.Space.xl)
+        .background(CornerPairStyle.publish("appPopup"))
+    }
 }
 
 
 /// ★ his 11-20: "there should always be an (i) next to settings": the setting's (i), opening its explanation in the centred card.
+/// ★ notes29 (his 11-25): the one (i), `AppInfoButton`.
 struct OrganicInfoButton: View {
     let label: String
     var body: some View {
         if let e = OrganicSettingsHelp.entry(label) {
-            Button { AppPopups.shared.help(label.replacingOccurrences(of: " (0 = off)", with: ""), e.info) } label: {
-                Image(systemName: "info.circle").font(.system(size: 13, weight: .regular))
-                    .foregroundStyle(DS.Color.textTertiary.color)
-                    .frame(width: 28, height: 44).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("About \(label)")
-            .accessibilityIdentifier("organic-info-" + label)
+            AppInfoButton(title: label.replacingOccurrences(of: " (0 = off)", with: ""), text: e.info,
+                          label: "About \(label)", id: "organic-info-" + label)
         }
     }
 }
@@ -152,6 +236,7 @@ struct OrganicGreyLine: View {
     let label: String
     var body: some View {
         if let e = OrganicSettingsHelp.entry(label) {
+            let _ = LatticeCaptions.record(e.grey)   // ★ notes29: held to five words (LatticeCaptionsNotes29Tests)
             Text(e.grey).font(.system(size: 11.5)).foregroundStyle(DS.Color.textTertiary.color)
                 .lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)

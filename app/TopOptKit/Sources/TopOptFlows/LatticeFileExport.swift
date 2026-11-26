@@ -1,7 +1,11 @@
 // LatticeFileExport — the EXPORT button (his go 2026-11-13): the print file, made on the Mac from the SAME layout the new engine's
 // preview draws (contract: docs/design/lattice-rebuild/04-layout-file-job.md). The app sends the model (with its painted-faces
 // sidecar, as every job does) and a `lattice_file` job whose `layout` is the preview's own settings under the bridge's names; the
-// worker runs `topopt-cli lattice-file`; the app fetches `lattice.stl` and `lattice_file.json` and offers the file to save or share.
+// worker runs `topopt-cli lattice-file`; the app fetches the file the report names and `lattice_file.json` and offers the file.
+// ★ notes29 (his rule 11-24: "if we are saying 3mf in two separate places, it should at least default to exporting 3mf"):
+// EVERY print file job asks for a 3MF (`file_format`), a cell lattice's as an Organic one's, made on the Mac or on this iPad —
+// so core paints the part's own overhangs as supports and the file carries them (an STL cannot). Core writes "lattice.3mf"
+// in place of the job's "lattice.stl" and names it in its report; the app reads every file by that name.
 // Shown only with "New engine (test)" on, on Lattice Setup, above the preview's lines.
 import Foundation
 import SwiftUI
@@ -12,8 +16,13 @@ import simd
 // MARK: the job
 
 public enum LatticeFileJob {
+    /// The job's `output` (core writes the 3MF as "lattice.3mf" in its place and names it in its report, `file`).
     public static let outputName = "lattice.stl"
     public static let reportName = "lattice_file.json"
+    /// ★ notes29: the format every print file job asks for (core's `file_format`; its own default for a cell lattice is STL).
+    public static let fileFormat = "3mf"
+    /// RED CONTROL (tests only): release 20's job — a 3MF for Organic alone, a cell lattice left to core's default (an STL).
+    nonisolated(unsafe) static var controlOrganicOnly3MF = false
 
     /// Every field of the preview's settings, by its Swift name → its key in the job's `layout` (the bridge's names). The test
     /// holds this table to `Settings` itself, so a setting added later can never be left out of the file silently.
@@ -291,8 +300,10 @@ public enum LatticeFileJob {
                 }
             }
             if let tensor { top["tensor"] = tensor }
-            top["file_format"] = "3mf"
+            top["file_format"] = fileFormat
         }
+        // ★ notes29: a cell lattice's file is a 3MF too (its painted supports and print settings with it)
+        if !controlOrganicOnly3MF { top["file_format"] = fileFormat }
         var job: [String: Any] = ["mode": "lattice_file", "model": modelName, "output": outputName,
                                   "linear_deflection": linearDeflection, "threads": 0, "layout": layout]
         for (k, v) in top { job[k] = v }
@@ -320,6 +331,8 @@ public struct LatticeFileReport: Equatable, Sendable {
     /// supports ("off" for separate tubes), as lattice_file.json gives them.
     public var file: String? = nil
     public var slicerSupports: String? = nil
+    /// ★ notes29: "tubes" for an Organic file (separate closed tubes, after the solid's triangles), nil for a cell lattice's.
+    public var weaveMesh: String? = nil
 
     public static func parse(_ d: Data) -> LatticeFileReport? {
         guard let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else { return nil }
@@ -330,10 +343,11 @@ public struct LatticeFileReport: Equatable, Sendable {
                                  plasticMM3: m["mm3"] as? Double ?? 0, partMM3: m["part_mm3"] as? Double ?? 0,
                                  clean: p["clean"] as? Bool ?? false, posts: (p["posts"] as? [Any])?.count ?? 0,
                                  strength: (o["strength"] as? [String: Any]).map(LatticeFileStrength.init(block:)),
-                                 file: file, slicerSupports: o["slicer_supports"] as? String)
+                                 file: file, slicerSupports: o["slicer_supports"] as? String,
+                                 weaveMesh: o["weave_mesh"] as? String)
     }
 
-    /// The file's name: the one the report gives (a 3MF for Organic), else the job's own output.
+    /// The file's name: the one the report gives (★ notes29: a 3MF for every print file), else the job's own output.
     public var fileName: String { file ?? LatticeFileJob.outputName }
     public var isThreeMF: Bool { fileName.lowercased().hasSuffix(".3mf") }
 
@@ -520,7 +534,7 @@ public enum LatticeFileRun {
     /// What the Mac made: the file, its report, the strength check's views beside it (fields.bin, scenario_fields.bin; only
     /// when the report names them) and the worker's own record of how long it took.
     public struct Made {
-        /// The file's bytes: an STL, or (Organic, `report.isThreeMF`) core's 3MF.
+        /// The file's bytes: core's 3MF (`report.isThreeMF`: every print file since notes29), or an STL (a job that asked none).
         public var stl: Data
         public var report: LatticeFileReport
         /// The report's whole JSON (the Results screen reads its `strength` block).
@@ -980,6 +994,10 @@ public enum LatticeFileButton {
         var mesh: (vertices: [Float], indices: [Int32])
         if m.report.isThreeMF {
             do { mesh = try CoreThreeMF.mesh(m.stl) } catch { throw LatticeFileRun.Failure("\(error)") }
+            // ★ notes29: a cell lattice's 3MF shares its corners; Results draws it as it drew its STL — each triangle its own
+            // corners, so its flat faces stay flat and the part's edges sharp (smooth normals over shared corners round them).
+            // Organic's tubes keep theirs (they shade round).
+            if !organic, m.report.weaveMesh != "tubes" { mesh = CoreThreeMF.unshared(mesh) }
         } else {
             let s = MeshExport.parseBinarySTL(m.stl)
             mesh = (s.vertices, s.indices)
@@ -1199,10 +1217,14 @@ public enum LatticeFileButton {
     /// `outcome`. One coarse tick, as the old on-device Lattice: no fake progress.
     public static func deviceRunner(job: LatticeFileJob.ForPart, strengthJob: Data?, materialsPath: String, rulesPath: String,
                                     densityGCm3: Double) -> RunModel.Runner {
-        { _, progress, _ in
+        { request, progress, _ in
             _ = progress(0, 1, 0)
             let made = try runHere(job: job, strengthJob: strengthJob, materialsPath: materialsPath, rulesPath: rulesPath)
-            return try outcome(made, densityGCm3: densityGCm3)
+            let o = try outcome(made, densityGCm3: densityGCm3)
+            // ★ notes29: the file made here kept as the Mac's is (LatticeJobRecorder.reading), so Results' Export hands out this
+            // 3MF itself — its painted supports and print settings with it
+            if let id = request.projectID { PrintFileKeep.stash(made.stl, name: made.report.fileName, projectID: id) }
+            return o
         }
     }
 

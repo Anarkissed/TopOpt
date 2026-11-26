@@ -58,7 +58,12 @@ static bool has(const std::string& hay, const std::string& needle) {
 
 int main() {
   const std::string repo = REPO_ROOT_DIR;
-  const std::string run_job = read_file(repo + "/core/src/cli/run_job.cpp");
+  const std::string run_job = read_file(repo + "/core/src/cli/run_job.cpp")
+        + read_file(repo + "/core/src/cli" + "/to_export.inc")
+        + read_file(repo + "/core/src/cli" + "/to_analyze.inc")
+        + read_file(repo + "/core/src/cli" + "/to_setup.inc")
+        + read_file(repo + "/core/src/cli" + "/to_strengthen.inc")
+        + read_file(repo + "/core/src/cli" + "/to_run.inc");  // + its TO parts (stage 0 move)
   const std::string gate =
       read_file(repo + "/app/TopOptKit/Sources/TopOptFlows/VariantEntry.swift");
   if (run_job.empty() || gate.empty()) {

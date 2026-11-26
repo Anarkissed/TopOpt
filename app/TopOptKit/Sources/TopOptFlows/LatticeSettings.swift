@@ -2050,9 +2050,12 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// (2026-09-16: None came back as Skin after Save & Exit).
     public var jobSkinResolved: String {
         if isOrganic { return "diagrid" }
-        if singleCellMembers, boundary == .none || boundary == .rim { return LatticeBoundaryTreatment.fullSkin.jobSkinValue }
+        if singleCellMembersInEffect, boundary == .none || boundary == .rim { return LatticeBoundaryTreatment.fullSkin.jobSkinValue }
         return boundary.jobSkinValue
     }
+    /// ★ notes29 (his 11-25: "there is NO single-cell available in structural"): single-cell members act on the Aesthetic stage
+    /// only — a saved "on" carried to Structural adds no skin, sets no one-cell floor and locks nothing.
+    public var singleCellMembersInEffect: Bool { singleCellMembers && (stageMode ?? .structural) == .aesthetic }
     public var boundary: LatticeBoundaryTreatment
     /// Density mode (uniform run fill vs field-graded preview, bar B6).
     public var densityMode: LatticeDensityMode
@@ -2880,6 +2883,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         subfloorPerRegion = try c.decodeIfPresent(Bool.self, forKey: .subfloorPerRegion) ?? false
         // Absent from every older snapshot ⇒ off ⇒ core's floor of 2, unchanged.
         singleCellMembers = try c.decodeIfPresent(Bool.self, forKey: .singleCellMembers) ?? false
+        // ★ notes29 (his 11-25: Skin stuck on Structural): a saved Structural lattice with single-cell members on (carried
+        // over from Aesthetic) opens with it off, so no saved project keeps the Finish locked to Skin
+        if stageMode == .structural { singleCellMembers = false }
         smallCellsInThinWalls = try c.decodeIfPresent(Bool.self, forKey: .smallCellsInThinWalls) ?? false
         letWallsCutCells = try c.decodeIfPresent(Bool.self, forKey: .letWallsCutCells) ?? false
         // ★ Install 2: the Manual controls; absent ⇒ Auto
@@ -3458,7 +3464,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         let id = topology ?? topologyID
         let limits = TopOptKit.latticeLimits(topology: id)
         // ★ RELEASE (2), E2: a type core builds runs only once its app batch has shipped (the type gate)
-        let generatable = LatticeTypeCatalog.batchShipped(id)   // ★ notes28: the one gate question
+        let generatable = LatticeTypeCatalog.oldRunShipped(id)   // ★ notes28 (his 11-25): the old run keeps the octet only
             && TopOptKit.latticeGeneratableTopologies.contains(id)
         return runSpec(limits: limits, generatable: generatable, memberMM: memberMM,
                        lineWidthMM: lineWidthMM, emitSTL: emitSTL, emit3MF: emit3MF,

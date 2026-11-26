@@ -60,6 +60,21 @@ public struct GizmoConstants: Equatable, Sendable {
 
     /// The canonical constants used everywhere (render + pick). Both sides read THIS.
     public static let standard = GizmoConstants()
+
+    /// ★ notes29 (his 11-25: "Choosing perspective/orthogonal view … should work everywhere, including … the cube"): the view
+    /// cube under Orthographic — the main viewer's own way (OrbitCamera.telephotoFovY): a telephoto lens from far enough back
+    /// that the cube fills the same frame, so its near and far faces draw the same size. Render, labels and pick all read it.
+    public static let orthographic: GizmoConstants = {
+        var c = GizmoConstants()
+        let s = GizmoConstants.standard
+        c.fov = orthographicFovDeg
+        c.camZ = s.camZ * tanf(s.fov * 0.5 * .pi / 180) / tanf(orthographicFovDeg * 0.5 * .pi / 180)
+        return c
+    }()
+    /// The telephoto's field of view (degrees): narrow enough that the cube's depth no longer changes its size on screen.
+    public static let orthographicFovDeg: Float = 2
+    /// The constants for the app's one projection choice (ViewProjection).
+    public static func projection(orthographic: Bool) -> GizmoConstants { orthographic ? .orthographic : .standard }
 }
 
 // MARK: - Regions (the 26 canonical views — unchanged mapping)

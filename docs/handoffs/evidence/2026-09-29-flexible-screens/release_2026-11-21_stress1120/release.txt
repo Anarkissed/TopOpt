@@ -1,0 +1,16 @@
+# Release 70142a5e — 2026-11-21 stress1120 (the Organic stress check, acca75e3), app only
+# Core and worker unchanged: fingerprint 5541d83e514a; "fingerprint": "5541d83e514a"
+# Merged onto b62879cf; the merged app tree equals stress1120's, so its gate applies unchanged.
+# Commits (first parent of stress1120 since the release tip):
+#   acca75e3 The Organic stress check is never a silent wait (his 11-20: "Why isn't a stress run already done? ... What is going on??")
+# Gates:
+#   Targeted gate in b9-screens-362 (c20, 11-21 00:02): IPadNotes1120Tests (the stress check never silent, Try again, plain words; RED CONTROL: the regular lattice keeps its line), LatticeLayoutPreviewTests, WorkspaceBodySizeTests, LatticeStageTests, LatticeOrganicPageHostedTests, LatticeFileExportTests: 51 of 51.
+#   Rushed (his 11-20 ~23:30: please rush this install ASAP): the full app suite runs after the push.
+#   19:05 evidence 522f9346 pushed; release 92a7fe55 DONE
+#   00:03 checks ok: stress1120 acca75e3, 1 commit(s), app-only, onto b62879cf, fingerprint 5541d83e514a
+#   00:03 merged 70142a5e; app tree == stress1120's, fingerprint 5541d83e514a
+#   00:03 waiting for HEAVY.lock (free)
+#   00:03 lock taken (17 GB free)
+#   00:09 iPad device build green; lock released
+#   00:09 pushed 70142a5e
+#   00:09 worker /health "fingerprint": "5541d83e514a" (unchanged, no swap)

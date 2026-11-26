@@ -1,0 +1,16 @@
+# Release bc45e5e1 — 2026-11-21 scen1121 (scenarios combined, the bottom note removed, 33fa70c5), app only
+# Core and worker unchanged: fingerprint 5541d83e514a; "fingerprint": "5541d83e514a"
+# Merged onto df107e43; the merged app tree equals scen1121's, so its gate applies unchanged.
+# Commits (first parent of scen1121 since the release tip):
+#   33fa70c5 Organic's stress check with several load scenarios (his 2040 stand), and the bottom note removed (his 11-21)
+# Gates:
+#   Targeted gate in b9-screens-362 (c21): IPadNotes1120Tests, LatticeLayoutManualTests (his stand's empty Scenario 2), FlexibleBatchCVerifyTests, LatticeLayoutPreviewTests, WorkspaceBodySizeTests, LatticeStageTests, LatticeLayoutSwitchHostedTests: 00:40 exit 0; 71 passed, 0 failed
+#   Fast track (his 11-21: Fast track the install): the full app suite runs after the push.
+#   00:09 evidence df107e43 pushed; release 70142a5e DONE
+#   00:40 checks ok: scen1121 33fa70c5, 1 commit(s), app-only, onto df107e43, fingerprint 5541d83e514a
+#   00:40 merged bc45e5e1; app tree == scen1121's, fingerprint 5541d83e514a
+#   00:40 waiting for HEAVY.lock (free)
+#   00:40 lock taken (16 GB free)
+#   00:46 iPad device build green; lock released
+#   00:46 pushed bc45e5e1
+#   00:46 worker /health "fingerprint": "5541d83e514a" (unchanged, no swap)

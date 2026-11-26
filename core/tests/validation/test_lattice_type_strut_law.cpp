@@ -290,7 +290,14 @@ int main() {
       CHECK(own.Kd != oct.Kd || own.Kv != oct.Kv,
             ("§2 " + id + ": its law is its own, not octet's").c_str());
 
-      const auto rows = kfit_cert_rows(std::string(LAW_EVIDENCE_DIR) + "/" + id + "/kfit.csv");
+      // ★ 2026-11-25: BCC, Diamond and SC were measured on down to the struts the new lattice
+      // engine lays (evidence/2026-11-25-strut-laws-low-density/<type>/kfit.csv, the rows UNDER
+      // the 11-09 band floor). Their law is those rows, then the 11-09 rows, unchanged.
+      auto rows = kfit_cert_rows(std::string(LOW_LAW_EVIDENCE_DIR) + "/" + id + "/kfit.csv");
+      for (const auto& r : kfit_cert_rows(std::string(LAW_EVIDENCE_DIR) + "/" + id + "/kfit.csv"))
+        rows.push_back(r);
+      for (std::size_t i = 1; i < rows.size(); ++i)
+        CHECK(rows[i][0] > rows[i - 1][0], ("§2 " + id + ": its evidence rows ascend in rho").c_str());
       bool exact = !rows.empty();
       for (const auto& row : rows) {
         bool cl = true;

@@ -50,12 +50,13 @@ final class LatticeTypeCatalogTests: XCTestCase {
     /// strut type, so the old run's catalog offers the seven core builds, certifies and runs; the sheets and the tetragonal
     /// three are still greyed by core's own facts. (The Lattice stage's picker reads the new engine's catalog,
     /// `layoutEntries` — LatticeCellTypesNotes28Tests.)
+    /// ★ RE-PINNED (362, his 11-25 "Sure"): this catalog is the OLD run's (variant page, Optimize's lattice, STL parts),
+    /// which keeps the octet only until it moves to the new engine; the six struts core runs read `oldRunPending` here.
     func testTheLinkedCoreOffersEveryStrutTypeItRuns() {
         let e = LatticeTypeCatalog.entriesFromCore()
-        XCTAssertEqual(e.filter(\.offered).map(\.id), ["octet", "sc", "bcc", "fcc", "diamond", "kelvin", "rhombic"],
-                       "★ a newly offered type: light it up (A2)")
+        XCTAssertEqual(e.filter(\.offered).map(\.id), ["octet"], "★ the old run: the octet only")
         for id in ["sc", "bcc", "fcc", "diamond", "kelvin", "rhombic"] {
-            XCTAssertNil(e.first { $0.id == id }?.reason, id)
+            XCTAssertEqual(e.first { $0.id == id }?.reason, LatticeTypeCatalog.oldRunPending, id)
             XCTAssertTrue(TopOptKit.jobSchemaAcceptsTopology(id), "★ core runs \(id)")
         }
         for id in ["gyroid", "schwarz_d"] {
@@ -67,11 +68,12 @@ final class LatticeTypeCatalogTests: XCTestCase {
         XCTAssertTrue(TopOptKit.jobSchemaAcceptsTopology("octet"), "the control")
         XCTAssertEqual(LatticeTypeCatalog.appBatches, ["octet", "sc", "bcc", "fcc", "diamond", "kelvin", "rhombic",
                                                        "bccz", "fccz", "reentrant"])
-        XCTAssertEqual(LatticeSetupWizard.offeredTypeIDs, ["octet", "sc", "bcc", "fcc", "diamond", "kelvin", "rhombic"])
-        // RED CONTROL: behind the old gate the octet alone was offered
-        LatticeTypeCatalog.appBatchesForTests = ["octet"]
+        XCTAssertEqual(LatticeSetupWizard.offeredTypeIDs, ["octet"])
+        // RED CONTROL: the stand-in opening every gate offers the seven core builds, certifies and runs
+        LatticeTypeCatalog.appBatchesForTests = LatticeTypeCatalog.appBatches
         defer { LatticeTypeCatalog.appBatchesForTests = nil }
-        XCTAssertEqual(LatticeTypeCatalog.entriesFromCore().filter(\.offered).map(\.id), ["octet"])
+        XCTAssertEqual(LatticeTypeCatalog.entriesFromCore().filter(\.offered).map(\.id),
+                       ["octet", "sc", "bcc", "fcc", "diamond", "kelvin", "rhombic"])
     }
 
     /// ★ Both pickers read the one catalog, and neither can write a type it does not offer.

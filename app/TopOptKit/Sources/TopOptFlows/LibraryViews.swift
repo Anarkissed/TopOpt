@@ -1456,7 +1456,8 @@ struct LibraryVersionCard: View {
     /// ★ His iPad notes 11-22 (decision 4): Details first (its full page); a long press on the card shows this same menu.
     @ViewBuilder private func versionMenu(pending: Bool) -> some View {
         let v = version
-        Button(action: details) { Label("Details", systemImage: "info.circle") }
+        // ★ notes29 (his 11-25: one (i) look app-wide): a menu item that opens Details, not an (i) — its own icon
+        Button(action: details) { Label("Details", systemImage: "list.bullet.rectangle") }
         if !pending {
             Button { quickLook(nil) } label: { Label("Quick look", systemImage: "eye") }
             if (v.summary?.count ?? 0) > 1 { Button(action: compareResults) { Label("Compare its results", systemImage: "rectangle.split.2x1") } }

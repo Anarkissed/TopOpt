@@ -930,6 +930,10 @@ public final class RunModel: ObservableObject {
     /// solve was NOT cancelled, so the sheet offers "Keep waiting" to re-arm the guard
     /// and give it more time. Cleared when the run resolves, is dismissed, or resumes.
     @Published public private(set) var canKeepWaiting = false
+    /// ★ notes29 (TOReview 11-25: the solver's switches are process-wide — one in-process solve at a time): a LOCAL run waits
+    /// for a Flexible solve on this device (a squish sim, or core's Flexible runner) to leave core before it starts; its card
+    /// says so in plain words (RunCardWords.waitingForFlexible). A run on a Mac never waits for it.
+    @Published public private(set) var waitingForFlexible = false
     /// Whether the user asked to keep the run going in the background.
     @Published public private(set) var runningInBackground = false
     /// While running, whether the progress card is dismissed ("Run in Background"):
@@ -1372,6 +1376,7 @@ public final class RunModel: ObservableObject {
         failure = nil
         failureShowsOnButton = false   // ★ B1 (O1)
         canKeepWaiting = false
+        waitingForFlexible = false   // ★ notes29
         // ★ notes25: the other stage's result steps aside (never retired by this run); this run's own stage's comes forward
         moveAsideTheOtherStage(lattice: request.jobMode == LatticeFileButton.jobMode)
         // AJ1: HOLD the finished run's variants rather than dropping them. `outcome`
@@ -1420,7 +1425,13 @@ public final class RunModel: ObservableObject {
         }
 
         scheduler.runInBackground { [weak self] in
-            let flexCore = remote ? nil : FlexibleCoreGate.claimForRun(); defer { flexCore?.leave() }   // Flexible (PR #362, batch G): a LOCAL run claims core's matrix-free pool (waits while a squish sim holds it; FlexibleCoreGate)
+            // ★ notes29: while it waits for a Flexible solve, its card says so (and stops saying so once it holds core)
+            let flexCore = remote ? nil : FlexibleCoreGate.claimForRun(waiting: {
+                scheduler.runOnMain { guard let s = self, s.token === token else { return }; s.waitingForFlexible = true }
+            }); defer { flexCore?.leave() }   // Flexible (PR #362, batch G): a LOCAL run claims core's matrix-free pool (waits while a squish sim holds it; FlexibleCoreGate)
+            if flexCore?.waited == true {
+                scheduler.runOnMain { guard let s = self, s.token === token else { return }; s.waitingForFlexible = false }
+            }
             if (flexCore?.waitedS ?? 0) > 0.05 { scheduler.runOnMain { guard let s = self, s.token === token, s.watchdogCancel != nil else { return }; s.watchdogCancel?(); s.watchdogCancel = s.watchdog.arm { [weak s] in s?.watchdogFired(token) } } }   // Flexible (batch G): the wait never eats the stall watchdog's grace — re-armed after it
             let result: Result<OptimizeOutcome, Error>
             do {
@@ -1680,6 +1691,7 @@ public final class RunModel: ObservableObject {
         guard token === self.token, phase == .running else { return }
         disarmWatchdog()
         runningRequest = nil
+        waitingForFlexible = false   // ★ notes29
         // Resolve the run's DURATION once, here, from the only two honest sources
         // (handoff 134, item 1): a remote outcome already carries the worker's own
         // record; a local run is measured by this process, which is the thing that was

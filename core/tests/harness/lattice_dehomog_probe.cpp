@@ -895,6 +895,24 @@ FILE* open_csv(const std::string& dir, const char* name, const char* header) {
 std::vector<double> rho_sweep() {
   const double lo = lattice_rho_min(g_topo);
   const double hi = lattice_rho_max(g_topo);
+  // ★ 2026-11-25 (the low-density extension, evidence/2026-11-25-strut-laws-low-density):
+  // TOPOPT_DEHOMOG_RHOS="lo,0.07,0.10" measures exactly those rows ("lo" is the band floor read
+  // from core), so a band extended downward is measured on its NEW rows alone and the rows
+  // already in the law are not re-run. Unset: the sweep below, unchanged.
+  if (const char* s = std::getenv("TOPOPT_DEHOMOG_RHOS")) {
+    std::vector<double> r;
+    std::string tok;
+    for (const char* p = s;; ++p) {
+      if (*p == ',' || *p == '\0') {
+        if (!tok.empty()) r.push_back(tok == "lo" ? lo : tok == "hi" ? hi : std::atof(tok.c_str()));
+        tok.clear();
+        if (*p == '\0') break;
+      } else if (*p != ' ') {
+        tok.push_back(*p);
+      }
+    }
+    if (!r.empty()) return r;
+  }
   if ((g_topo == LatticeTopology::Octet && kLegacyOctetCell)) return {lo, 0.10, 0.157, 0.20, 0.313, 0.45, 0.60, 0.75, hi};
   // the same interior targets, inside this type's own band, and its two ends
   std::vector<double> r{lo};
@@ -1183,6 +1201,14 @@ void phase_bulk(const std::string& ev, bool fast) {
       const std::size_t n = rhos.size();
       vpcs = (rt == rhos[0] || rt == rhos[n / 2]) ? std::vector<int>{16, 24, 32, 40, 48}
                                                   : std::vector<int>{32, 48};
+      // ★ PR 198's floor, at least TOPOPT_DEHOMOG_MIN_VOX voxels across the strut's
+      // DIAMETER at the row the law reads (the finest): a thin row adds finer pitches in
+      // steps of 16 until it has them (2026-11-25: 6). Unset: vpc 48 is the finest, as 11-09.
+      if (const char* mv = std::getenv("TOPOPT_DEHOMOG_MIN_VOX")) {
+        const double need = std::atof(mv);
+        if (!g_is_sheet())
+          while (2.0 * c.r_unit * vpcs.back() < need) vpcs.push_back(vpcs.back() + 16);
+      }
     }
     for (int vpc : vpcs) {
       const auto t0 = std::chrono::steady_clock::now();
@@ -1276,8 +1302,24 @@ void phase_boundary(const std::string& ev, bool fast) {
     // (under 0.19) at N=3 vpc24, as PR 259 re-measured its low band.
     for (double r : rho_sweep()) {
       const bool thin = r < 0.19;
-      cases.push_back({r, thin ? 3 : 4, thin ? 24 : 16, 0.0});
-      cases.push_back({r, thin ? 3 : 4, thin ? 24 : 16, 0.6});
+      int N = thin ? 3 : 4, vpc = thin ? 24 : 16;
+      // ★ 2026-11-25: TOPOPT_DEHOMOG_BND_MIN_VOX=4 starts a row's boundary fixtures on the
+      // first rung of the re-measure ladder (below) whose strut is at least that many voxels
+      // across its diameter (PR 198's wall floor), so a strut thinner than any 11-09 row is not
+      // measured at 2-3 voxels. Unset: N4 vpc16, thin rows N3 vpc24, as 11-09.
+      if (const char* bv = std::getenv("TOPOPT_DEHOMOG_BND_MIN_VOX")) {
+        const double need = std::atof(bv);
+        const double r_unit = calibrate_r_unit(r);
+        static const int rungs[][2] = {{4, 16}, {3, 24}, {3, 32}, {3, 40}, {3, 48}, {3, 56}, {3, 64}};
+        for (const auto& g : rungs) {
+          if (g[1] < vpc) continue;
+          N = g[0];
+          vpc = g[1];
+          if (2.0 * r_unit * vpc >= need) break;
+        }
+      }
+      cases.push_back({r, N, vpc, 0.0});
+      cases.push_back({r, N, vpc, 0.6});
     }
   } else {
     for (double r : rho_sweep()) cases.push_back({r, 4, 16, 0.0});
@@ -1305,9 +1347,14 @@ void phase_boundary(const std::string& ev, bool fast) {
   // vpc24 -> N3 vpc32 -> N3 vpc40, stopping at the first fixture the guard keeps. Every
   // attempt is written, so the evidence shows the aliased row and its re-measure.
   const bool escalate = !fast && !(g_topo == LatticeTopology::Octet && kLegacyOctetCell);
-  auto finer = [](const Case& cs, Case& out) {
-    static const int ladder[][2] = {{4, 16}, {3, 24}, {3, 32}, {3, 40}};
-    for (int i = 0; i + 1 < 4; ++i)
+  // ★ 2026-11-25: TOPOPT_DEHOMOG_LADDER_TOP=64 carries the same ladder on past vpc40, N3 in
+  // steps of 8 (vpc48, 56, 64), for a band extended to struts too thin for vpc40 to keep.
+  // Unset: it stops at vpc40, as 11-09.
+  const char* top_env = std::getenv("TOPOPT_DEHOMOG_LADDER_TOP");
+  const int ladder_top = top_env ? std::max(40, std::atoi(top_env)) : 40;
+  auto finer = [ladder_top](const Case& cs, Case& out) {
+    static const int ladder[][2] = {{4, 16}, {3, 24}, {3, 32}, {3, 40}, {3, 48}, {3, 56}, {3, 64}};
+    for (int i = 0; i + 1 < 7 && ladder[i + 1][1] <= ladder_top; ++i)
       if (cs.N == ladder[i][0] && cs.vpc == ladder[i][1]) {
         out = {cs.rho, ladder[i + 1][0], ladder[i + 1][1], cs.cut};
         return true;

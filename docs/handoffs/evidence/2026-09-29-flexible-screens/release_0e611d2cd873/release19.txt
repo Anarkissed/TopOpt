@@ -1,0 +1,35 @@
+# Release (19) - 2026-11-24: app-only fast track - claude/organic-1 3c2c2f90 onto bbe7acf1; engine 0e611d2cd873 unchanged, worker untouched
+# Release (19), app-only fast track: his notes on release 18 (versions and descriptions, print orientation on Results, the Lattice stage's view)
+# 
+# From claude/organic-1 (merge only):
+# - Versions (builder A, 89708112): each version's differences from the one it came from, lattice and print settings
+#   included, worked out on the fly for every existing version; his own description, editable from the card's ⋯, Details'
+#   pencil, after Save, after a new version and the version chip; a version opens on the stage, panels, view buttons and
+#   camera he left; Open on a version with a result opens that result's stage. Results' top row at the same height as
+#   every stage; Break climbs to the break, cracks, holds, resets; Export = the 3MF (STL in the ⌃).
+# - Print orientation (builder B1, 8cd6dd85): Check strength works from Results (the result's own lattice, laid first on
+#   the iPad for older results); plain error words; Cancel beside Manual orientation; Bambu-style face patches with a narrow
+#   face per edge; the supports line says what the print file carries.
+# - Lattice stage (builder C, 8c110f60): every place he asked to lattice that stayed solid glows, the centred pop-up gives
+#   the real reason and its fix (shallow regions included); no bottom-centre box; the lattice view on by default; smooth
+#   cut edges (Print-accurate preview off); the bed seen from below as a see-through plate.
+# No engine or worker change since release 18 (fingerprint 0e611d2cd873; the worker is not touched).
+# 
+# Commits:
+#   5c2f37da Release 18's whole suite: two tests re-pinned to release 18's own changes (no app or core change)
+#   8cd6dd85 notes28 (B1): Check strength stands the result's own lattice; Cancel beside Manual orientation; Bambu's patches; supports lines say what the file carries
+#   41c13a43 Merge claude/notes28-orient 8cd6dd85 (builder B1): Check strength from Results, Cancel beside Manual orientation, Bambu-style face patches, supports lines tell the truth
+#   d7b0cd8d Release (19), app-only fast track: print orientation on Results (his notes on release 18)
+#   89708112 notes28 (his iPad notes on release 18): what changed per version, his own descriptions, a version opens as he left it, Results' top row, Break ends at the break, Export a 3MF
+#   ed53a95e Merge claude/notes28-versions 89708112 (builder A): what changed per version, editable descriptions, versions open as left, Results' top row, Break ends at the break, Export 3MF
+#   8c110f60 notes28 (his iPad notes on release 18): the Lattice stage's view — solid places glow under a centred pop-up that says the real reason, no bottom-centre box, the lattice view on by default, the cut drawn as one straight line, 
+#   3c2c2f90 Merge claude/notes28-lattice-view 8c110f60 (builder C): every solid place he asked to lattice glows with the real reason, no bottom-centre box, Lattice view on by default, smooth cut edges, the bed seen from below
+#   8ba78857 Release (19), app-only fast track: his notes on release 18 (versions and descriptions, print orientation on Results, the Lattice stage's view)
+# Gates:
+#   21:21 release (19): organic-1 3c2c2f90 onto bbe7acf1; waiting for HEAVY.lock (free)
+#   21:21 HEAD d7b0cd8d is release 19's local merge (unpushed); merging on top
+#   21:21 lock taken (41 GB free); his uncommitted files (left alone): app/TopOpt-Info.plist app/TopOpt.xcodeproj/project.pbxproj app/TopOpt.xcodeproj/xcshareddata/xcschemes/TopOpt.xcscheme 
+#   21:21 merged organic-1 as 8ba78857 (local); app/core/tools == organic-1; fingerprint 0e611d2cd873; vendor already 0e611d2cd873
+#   21:28 signed iPad build green (Release, for his iPad)
+#   21:28 worker untouched: /health "fingerprint": "0e611d2cd873", script == the tree's; orientation_recheck e2e passes
+#   21:28 pushed 8ba78857

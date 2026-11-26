@@ -138,8 +138,9 @@ struct LatticeLayoutResult {
   std::vector<uint8_t> bar_flags;            // 1 per bar: 1 a piece of a cut strut, 2 a skin bar,
                                              // 16 (bit 4) a BRIDGE: it lies flatter than 30 degrees, and the file writes it
                                              // as a square bar, as wide and as tall as its width, its underside level
-                                             // (core's bar_is_bridge, the writer's own test); every other bar is round
-  std::vector<int32_t> bar_region;           // 1 per bar: its region, 0 = the whole part
+                                             // (core's bar_is_bridge, the writer's own test); every other bar is round.
+                                             // ★ notes29: a framed session judges it in the print frame (up: the print's)
+  std::vector<int32_t> bar_region;          // 1 per bar: its region, 0 = the whole part
   std::vector<float> bar_cell;               // ★ Install 3: 1 per bar: the size of the cell it is a strut of, mm (core's Bar::cell)
   // The solid pieces the layout lists (D14: a cube tried and not fitted), each with its reason. Cubes sit on frames.
   std::vector<float> frames;                 // 12 per frame: origin xyz, then its three axes (unit) xyz each
@@ -194,11 +195,22 @@ struct LatticeLayoutOpenInfo {
   int32_t faces = 0;                         // the model's face count
   int32_t open_edges = 0;                    // 0 for a part that can be measured
   double ms_open = 0.0;
+  bool framed = false;                       // ★ notes29: opened standing in a print frame (lattice_layout_open_framed)
 };
 
 // Opens the imported model at `path` — STEP, STL or 3MF, the faces the app sees (core's import_part_file_resolved: the
 // face sidecar applied) — and measures it once. `linear_deflection` <= 0: core's default (STEP only).
 LatticeLayoutOpenInfo lattice_layout_open(const std::string& path, double linear_deflection, BridgeError& err);
+// ★ notes29 (P8, his print orientation: after Keep, the Organic preview still grew along the model's +Z): the same part
+// opened STANDING THE WAY IT PRINTS, as the print file's job opens it for "print_frame": {"up": [up_x, up_y, up_z]} (the up
+// in the part's own coordinates; core's print_frame.hpp and open_in_print_frame). Every call of such a session takes and
+// gives the part's OWN coordinates, as an unframed one does: core lays in the print frame (its settings, stress and tensor
+// turned through the file job's door, every Organic ask growing along the print's up) and every place it gives back — the
+// bars, frames, runs, flat ends, growth pieces, chips' places — is turned back (turn_preview_to_model and its kin); the
+// points "where" and the maps ask about are turned in. The tensor written for the print file is the one set (the part's
+// own: the file job turns it itself). An up that is not a direction is refused (err).
+LatticeLayoutOpenInfo lattice_layout_open_framed(const std::string& path, double linear_deflection, double up_x,
+                                                 double up_y, double up_z, BridgeError& err);
 LatticeLayoutResult lattice_layout(int64_t session, const LatticeLayoutSettings& settings, BridgeError& err);
 // The points asked about: 3 per point, the part's own coordinates (a struct, so Swift fills it with push_back).
 struct LatticeLayoutPoints {

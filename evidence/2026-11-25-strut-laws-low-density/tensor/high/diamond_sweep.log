@@ -1,0 +1,24 @@
+TENSOR-LIBRARY-NINE PROBE — E_solid=3500 MPa nu=0.33, diamond, L=5 mm
+
+===== SWEEP diamond — density sweep + resolution convergence + symmetry =====
+  L=5 mm, 16 struts/cell, min strut len = 0.4330 L.
+  truth = periodic homogenization; row @ vpc64 vs reference curve @ vpc96,
+  drift = row E100 vs the vpc96 curve interpolated to the ROW's own rho
+  (band-extension clean metric — removes the density-landing artefact).
+  VALIDATED := |drift| < 2.4% AND vox/strut >= 6 AND converged.
+  CUBIC := axial |C33/C11-1| < 2.4% AND shear |Cyz/Cxy-1| < 2.4%
+  (else TETRAGONAL: a cubic (C11,C12,C44) tensor cannot represent it).
+
+  [writing evidence/2026-11-25-strut-laws-low-density/tensor/high/diamond_sweep.csv]
+  vf     rho      vox/str E100     drift%   zener    C33/C11 Cyz/xy  cubic  cg     row
+  0.092  0.0834   8.64    12.6     -25.77   2.966    1.000   1.000   yes    490    -
+  0.110  0.1072   9.93    22.1     +3.20    2.889    1.000   1.000   yes    468    -
+  0.132  0.1346   10.71   34.9     -0.40    2.819    1.000   1.000   yes    459    VALID
+  0.157  0.1523   11.78   45.6     -0.09    2.749    1.000   1.000   yes    461    VALID
+
+  VALIDATED BAND: rho [0.1346, 0.1523]  (2 of 4 rows: drift<2.4% & vox/strut>=6)
+  ZENER across sweep: [2.749, 2.966]  (octet-legs reference 1.06-1.55).
+  SYMMETRY: max |C33/C11-1| = 0.0%, max |Cyz/Cxy-1| = 0.0%  ->  CUBIC (cubic tensor is exact; certifiable)
+
+DONE.
+diamond exit 0

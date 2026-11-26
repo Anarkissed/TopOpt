@@ -65,7 +65,29 @@ constexpr std::array<LawRow, 9> kOctetStrutLaw = {{
 // with resolution (bulk rows quote vpc 48; the boundary blocks are coarser, so they read low
 // by that growth); the finite blocks are 3-4 cells across, under most types'
 // cells-per-member floors; z_knockdown is unsourced.
-constexpr std::array<LawRow, 7> kScStrutLaw = {{
+//
+// ★ LOW-DENSITY ROWS, BCC / DIAMOND / SC (2026-11-25, the maintainer's "STRENGTH: YES, MEASURE"):
+// their 11-09 bands started at strut/cell 0.219 / 0.186 / 0.204, at or past the open look 0.1898,
+// so nothing the new lattice engine lays without the quilt was credited. Each table now starts
+// with the `*_cert` columns of evidence/2026-11-25-strut-laws-low-density/<type>/kfit.csv,
+// VERBATIM: the rows UNDER the 11-09 floor, measured by the same probe and recipe on the band
+// the new low tensor rows give (lattice.cpp), down to strut/cell 0.080 / 0.088 / 0.085 (two
+// 0.45 mm lines on a 10-11 mm cell; the engine's default largest cell is 8 mm, 0.1125). Two
+// resolution rules added for struts this thin (the probe's options, off by default): the law
+// row (bulk, the finest) has >= 6 voxels across the strut (vpc 48-80, PR 198), and the boundary
+// fixtures start on the first ladder rung with >= 4 voxels across (N3 vpc24-56), the ladder
+// carrying on to vpc64 (diamond's floor re-measured at vpc56). The 11-09 rows are unchanged.
+// Carried caveats: lower bounds still rising with vpc (the floor rows' last 16-voxel step moved
+// bulk Kd -11 % to +54 %), each type's cells-per-member floor, the unsourced z_knockdown. And
+// one the receipt names: as in every 11-09 row, the cut-layer population that sets Kd_cert
+// includes the cut cells against the fixture's gripped faces, and reads as the grip population
+// (within 11 %); at these densities that is 1.7-5.5x the free surface (gripcheck.py).
+constexpr std::array<LawRow, 12> kScStrutLaw = {{
+    {0.01606, 23636.0223, 241.7194, 4755.0295, 277.5097},  // vpc 80, wall 3.0 vox (2026-11-25)
+    {0.02500, 8637.7485, 152.3915, 3273.9888, 181.3821},   // vpc 64, wall 3.0 vox (2026-11-25)
+    {0.03500, 4397.5416, 107.0221, 1335.2352, 119.6958},   // vpc 48, wall 3.0 vox (2026-11-25)
+    {0.05000, 2067.5213, 84.1543, 939.2906, 87.7251},      // vpc 48, wall 3.0 vox (2026-11-25)
+    {0.06500, 1077.4870, 57.1409, 456.9389, 59.6244},      // vpc 48, wall 3.0 vox (2026-11-25)
     {0.08659, 593.3318, 47.4848, 333.0303, 46.7385},  // vpc 48, wall 4.0 vox
     {0.10000, 428.9544, 47.2712, 292.3672, 41.3218},  // vpc 48, wall 5.0 vox
     {0.15700, 149.1965, 25.5308, 138.0702, 24.6725},  // vpc 48, wall 6.0 vox
@@ -74,7 +96,12 @@ constexpr std::array<LawRow, 7> kScStrutLaw = {{
     {0.45000, 22.9183, 9.3766, 21.6776, 9.1313},  // vpc 48, wall 11.0 vox
     {0.49638, 20.9140, 9.1517, 19.4363, 8.7827},  // vpc 48, wall 11.0 vox
 }};
-constexpr std::array<LawRow, 4> kBccStrutLaw = {{
+constexpr std::array<LawRow, 9> kBccStrutLaw = {{
+    {0.03194, 9894.2094, 141.4194, 5657.5734, 119.9384},   // vpc 80, wall 7.0 vox (2026-11-25)
+    {0.05000, 2965.8564, 73.9698, 1867.3840, 73.2825},     // vpc 64, wall 7.0 vox (2026-11-25)
+    {0.07000, 1711.5503, 61.3427, 936.3994, 59.3984},      // vpc 64, wall 8.0 vox (2026-11-25)
+    {0.10000, 784.5027, 42.2487, 413.5456, 41.0418},       // vpc 48, wall 7.0 vox (2026-11-25)
+    {0.15700, 276.1852, 28.1203, 153.0371, 25.3242},       // vpc 48, wall 9.0 vox (2026-11-25)
     {0.21050, 124.9008, 21.2407, 91.8965, 20.0861},  // vpc 48, wall 11.0 vox
     {0.31300, 50.9631, 16.5243, 54.8097, 15.7056},  // vpc 48, wall 13.0 vox
     {0.45000, 20.6504, 10.5115, 25.4605, 10.5675},  // vpc 48, wall 16.0 vox
@@ -88,7 +115,12 @@ constexpr std::array<LawRow, 6> kFccStrutLaw = {{
     {0.45000, 13.8613, 8.9162, 14.3575, 10.5389},  // vpc 48, wall 8.0 vox
     {0.59093, 9.6701, 6.6837, 8.6745, 7.7568},  // vpc 48, wall 9.0 vox
 }};
-constexpr std::array<LawRow, 5> kDiamondStrutLaw = {{
+constexpr std::array<LawRow, 10> kDiamondStrutLaw = {{
+    {0.03874, 2201.7873, 159.8467, 1444.3150, 104.3430},   // vpc 80, wall 7.0 vox (2026-11-25)
+    {0.05000, 1014.8546, 96.6463, 586.0303, 66.5721},      // vpc 64, wall 7.0 vox (2026-11-25)
+    {0.07000, 569.4935, 76.7328, 356.8425, 59.2921},       // vpc 64, wall 8.0 vox (2026-11-25)
+    {0.10000, 280.3965, 50.8865, 170.5318, 40.8014},       // vpc 48, wall 7.0 vox (2026-11-25)
+    {0.12500, 197.0456, 48.7400, 122.2613, 29.8714},       // vpc 48, wall 8.0 vox (2026-11-25)
     {0.15712, 108.3321, 32.6702, 64.2847, 23.7821},  // vpc 48, wall 9.0 vox
     {0.20000, 73.7044, 28.0786, 44.1802, 16.4015},  // vpc 48, wall 11.0 vox
     {0.31300, 29.2723, 14.5723, 19.4339, 9.5788},  // vpc 48, wall 13.0 vox
@@ -268,11 +300,17 @@ std::string strut_law_source(LatticeTopology topo) {
            "Kv(rho)*|p(Sigma)|, interlayer analogue Kild/Kilv; the 0.04959 row is bulk only (a lower "
            "bound)";
   const std::string id = lattice_topology_name(topo);
+  // bcc, diamond and sc: measured on down to the struts the new lattice engine lays (2026-11-25).
+  const bool low = topo == LatticeTopology::Bcc || topo == LatticeTopology::Diamond ||
+                   topo == LatticeTopology::SimpleCubic;
   return id + "'s own law, measured the PR 259 way: kfit *_cert envelope "
-              "(bulk/free-surface/cut populations), "
-              "evidence/2026-11-09-lattice-type-strut-laws/" +
-         id + "/kfit.csv; strut_vm <= Kd(rho)*vm(Sigma) + Kv(rho)*|p(Sigma)|, "
-              "interlayer analogue Kild/Kilv";
+              "(bulk/free-surface/cut populations), " +
+         (low ? "evidence/2026-11-25-strut-laws-low-density/" + id +
+                    "/kfit.csv (the rows under the 11-09 floor) and "
+              : std::string()) +
+         "evidence/2026-11-09-lattice-type-strut-laws/" + id +
+         "/kfit.csv; strut_vm <= Kd(rho)*vm(Sigma) + Kv(rho)*|p(Sigma)|, "
+         "interlayer analogue Kild/Kilv";
 }
 
 std::string strut_law_resolution_note(LatticeTopology topo) {
@@ -281,10 +319,11 @@ std::string strut_law_resolution_note(LatticeTopology topo) {
   const char* drift = nullptr;
   switch (topo) {
     case LatticeTopology::Octet:       drift = "+6% to +29%"; break;   // 2026-11-17, full octet
-    case LatticeTopology::SimpleCubic: drift = "-11% to +50%"; break;
-    case LatticeTopology::Bcc:         drift = "+5% to +47%"; break;
+    // bcc, diamond, sc: the 11-09 rows' 32 -> 48 step, then the low rows' last 16-voxel step (2026-11-25).
+    case LatticeTopology::SimpleCubic: drift = "-11% to +50% (the low rows -25% to +49%)"; break;
+    case LatticeTopology::Bcc:         drift = "+5% to +47% (the low rows -11% to +51%)"; break;
     case LatticeTopology::Fcc:         drift = "+8% to +20%"; break;
-    case LatticeTopology::Diamond:     drift = "+8% to +34%"; break;
+    case LatticeTopology::Diamond:     drift = "+8% to +34% (the low rows -5% to +54%)"; break;
     case LatticeTopology::Kelvin:      drift = "+11% to +39%"; break;
     case LatticeTopology::Rhombic:     drift = "+23% to +48%"; break;
     case LatticeTopology::Gyroid:      drift = "-1% to +11%"; break;

@@ -74,6 +74,8 @@ public enum FlexibleFE {
 
     /// The player's note while the shown group's sim runs.
     public static let pending = "Simulating the squish…"
+    /// ★ notes29: the player's note while the sims wait for a run on this iPad (one solve at a time in the app).
+    public static let waitingForRun = "Waiting for the run\u{2026}"
     /// The player's note when the shown group's sim failed (core's words behind the (i)).
     /// ★ BATCH N VERIFICATION: "Simple squish · the sim failed" was cut beside the live Play-all picker
     /// at 11" portrait (152 of 183 pt — FlexibleBatchNVerifyTests pins every player line whole).

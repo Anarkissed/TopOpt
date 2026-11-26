@@ -92,7 +92,10 @@ final class Notes26SampleLayTests: XCTestCase {
         let graded = try await LatticeSampleLay.lay(plan, cube: true)
         XCTAssertGreaterThan(graded.rhoHi, graded.rhoLo + 0.01, "★ graded: \(graded.rhoLo) → \(graded.rhoHi)")
         let caption = LatticeSampleLay.caption(graded, typeName: "Octet truss", cube: true, finish: plan.finishWord, band: plan.band)
-        XCTAssertTrue(caption.contains("density \(Int((graded.rhoHi * 100).rounded())) → \(Int((graded.rhoLo * 100).rounded())) %"),
+        // ★ notes29: the Density percent the page speaks (100 % = the type's own quilt), never over 100 (it said the law's
+        // density, "density 107 → 10 %" on his BCC + Z)
+        XCTAssertGreaterThan(graded.pctHi, graded.pctLo, "★ graded: \(graded.pctLo) → \(graded.pctHi) %")
+        XCTAssertTrue(caption.contains("density \(Int(graded.pctHi.rounded())) → \(Int(graded.pctLo.rounded())) %"),
                       "★ from → to, as the page says it: \(caption)")
         l.gradingMode = LatticeGradingMode.none
         let flatPlan = LatticeSampleLay.page(l, lineWidthMM: 0.45, wallRingMM: 0.9)
@@ -297,7 +300,9 @@ final class Notes26SampleHostedTests: XCTestCase {
             let sw = try XCTUnwrap(h.frames.all["latticeViewSwitch"], "\(name): the switch")
             XCTAssertEqual(info.midY, sw.midY, accuracy: 6, "★ \(name): beside the switch")
             XCTAssertGreaterThan(info.minX, sw.maxX - 0.5, "★ \(name): after it, never over it")
-            XCTAssertLessThan(info.maxY, size.height * 0.75, "★ \(name): up with the switch, never at the foot")
+            // (notes29: the equal type cards, his 11-25, bring the Structural panel to its portrait cap of 62 % of the height;
+            // the switch row then sits just under it, at most ~79.5 % on the 11″ — still well above the foot)
+            XCTAssertLessThan(info.maxY, size.height * 0.8, "★ \(name): up with the switch, never at the foot")
             XCTAssertLessThan(info.maxX, size.width, "\(name): on screen")
         }
     }

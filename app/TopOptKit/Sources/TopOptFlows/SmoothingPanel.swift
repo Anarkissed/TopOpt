@@ -11,8 +11,6 @@ struct SmoothingPanel: View {
     var onExport: (String) -> Void = { _ in }
     var onClose: () -> Void = {}
 
-    @State private var showInfo = false
-
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
@@ -84,12 +82,7 @@ struct SmoothingPanel: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 pill
-                Button { showInfo = true } label: { Image(systemName: "info.circle") }
-                    .buttonStyle(.plain).foregroundStyle(.secondary)
-                    .popover(isPresented: $showInfo) {
-                        Text(model.quantizationInfo)
-                            .font(.footnote).padding(16).frame(maxWidth: 320)
-                    }
+                AppInfoButton(title: "About these numbers", text: model.quantizationInfo)   // ★ notes29: the one (i)
                 Spacer()
             }
             // The verdict — the honest re-analysed gate result.

@@ -1,0 +1,37 @@
+# Release 12a357ed65ce - 2026-11-19: release (10), Organic 1b - claude/organic-1 02d86bea, one worker swap (e2f4e088a245 -> 12a357ed65ce)
+# His iPad notes 11-18 on release 9 (only Organic's settings, Auto = Look alone, ranges and rules, per group, the walls
+# cut open, the samples, Simulate stresses on unstressed walls with each wall's foci, default 3).
+# Core: LatticeReview's E1-E8 (claude/organic-cut1-engine 75da09f0): validation, equal ends, the floor from the ask, limits
+# per group, the group list, the synthetic stress call, the bare sample bodies. LatticeTypes' 181deb12 is NOT in this release.
+# Gates in the gate tree (b9-screens-362, its own vendor): the whole app suite in three runs; targeted classes after each fix.
+# Commits:
+#   5ed571d0 Organic (362): his 11-18 iPad notes, app side before the engine's E1-E7 - only Organic's settings, per group, Look, the rules
+#   d8b9a5e6 Organic app install, brief C2 item E1 (OP7): validate_organic, one validation call for an Organic ask (every range and rule of the sheet's sections A to D, the smallest printable cell 0.5 x light width x sqrt(3 pi) refused in b
+#   b5d65330 Organic app install, brief C2 item E2 (OP8): a cell range with equal ends is accepted with the heavy ends set (thickness and the three gaps); they do not act (O12's measure is 0 with one spacing) and Outcome::notes says so; the
+#   2c27a0b6 Organic app install, brief C2 item E3 (OP9): Session::lay_organic (and lay_organic_draft, lay_organic_preview) honours OrganicAsk::bed_floor_mm, copied into the settings' floor and bed direction exactly as the file job copies i
+#   6f7907d2 Organic app install, brief C2 item E4 (OP10, per group as E7 asks): Session::sweep_limits_for(settings, region ids, line_mm) -> SweepLimitsUnion, the union over the measured regions among those given (cell and strut lower = the
+#   e29bb37a Organic app install, brief C2 item E7 (OP11): Organic settings per group of weave regions. OrganicGroup {regions, ask}; Session::lay_organic / lay_organic_draft / lay_organic_preview take a group list (the one-ask calls are one
+#   a7ded1da Organic app install, brief C2 item E5 (OP12): organic_synthetic_stress (new file organic_synthetic.cpp; a domain call and one bound to the session): fills each flagged weave region without stress (the old rule: p99 at or under 
+#   ac2b85eb Organic app install, brief C2 item E6: rules OP7 to OP12 (section 11 of 01-rules.md) and their tests (02-tests.md); OP11 says the file job is still one ask, groups owed before the export install
+#   75da09f0 Organic app install, brief C2 item E8 (OP13): lattice_sample_body(spec), the bare cube and coupon sample bodies (closed, welded, outward, no lattice) to open a session on; a whole body laid as weave by one box-zone Lattice regi
+#   b1b9ed03 Merge LatticeReview's Organic engine additions E1-E8 (claude/organic-cut1-engine @ 75da09f0): validation with plain refusals, equal cell ends, the flat floor from the ask, limits per group, the group list, the synthetic stress 
+#   c7c9ef8b Organic (362): wired to the engine's E1-E8 - each group lays by its own settings, plain refusals, the made-up stress, the samples
+#   02d86bea Organic (362): the gate's pins brought to his 11-18 notes - foci default 3, the new Organic settings in place of the old row, the flat floor in the file job
+#   6517d9d5 Release (10) Organic 1b 2026-11-19: merge claude/organic-1 02d86bea - his 11-18 iPad notes: only Organic's settings when Organic is on (Auto: Look alone; Manual: the Organic settings), per group (the whole part's only when the 
+# Gates (this tree):
+#   03:15 his uncommitted files (left alone): app/TopOpt-Info.plist app/TopOpt.xcodeproj/project.pbxproj app/TopOpt.xcodeproj/xcshareddata/xcschemes/TopOpt.xcscheme 
+#   03:16 preflight job: /Users/nadim/.topopt-worker/f9c8124fd2df48b3 (his newest optimisation job the installed worker passes; read only)
+#   03:16 merged organic-1 as 6517d9d5 (local); app + core + tools == its; fingerprint 12a357ed65ce
+#   ==> Manifold: /Users/nadim/dev/TopOpt/TopOpt/.vcpkg/installed-manifold (KEEP regions exported exactly)
+#   ==> building macOS slice (Eigen + OCCT, arm64)
+#   ==> building iOS simulator slice (Eigen + OCCT + lib3mf, arm64)
+#   ==> building iOS device slice (Eigen + OCCT + lib3mf, arm64)
+#   03:18 build_core green: topopt_vendored_core_12a357ed65ce + the Install 3 entry points + lay_organic_preview and Session::sweep_limits in every slice and arch
+#   03:19 worker CLI built: topopt-cli: core 12a357ed65ce (dirty=false), built Nov 19 2026 03:19:29; 3 data paths, all under the release worktree
+#   03:23 core suites passed: 100% tests passed out of 6 Total Test time (real) = 243.15 sec 
+#   03:31 iPad device build green (this tree's own pair)
+#   03:32 preflight on his job: preflight: load path CONNECTED
+#   03:32 pushed 6517d9d5
+#   03:32 worker swapped: /health "fingerprint": "12a357ed65ce"; data paths under the release worktree; preflight again OK; old CLI kept as build-fix/topopt-cli.e2f4e088a245-replaced-20261118
+#   03:32 route, demand and strength_job tests vs the INSTALLED script: ALL PASS
+#   03:32 the app_release scripts now expect 12a357ed65ce

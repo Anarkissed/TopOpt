@@ -451,7 +451,12 @@ int main() {
   std::printf("\nSW2 -- the ONE definition, asserted against the sources\n");
   {
     const std::string mp = read_file(src_dir + "/src/simp/minimize_plastic.cpp");
-    const std::string rj = read_file(src_dir + "/src/cli/run_job.cpp");
+    const std::string rj = read_file(src_dir + "/src/cli/run_job.cpp")
+        + read_file(src_dir + "/src/cli" + "/to_export.inc")
+        + read_file(src_dir + "/src/cli" + "/to_analyze.inc")
+        + read_file(src_dir + "/src/cli" + "/to_setup.inc")
+        + read_file(src_dir + "/src/cli" + "/to_strengthen.inc")
+        + read_file(src_dir + "/src/cli" + "/to_run.inc");  // + its TO parts (stage 0 move)
     CHECK(!mp.empty() && !rj.empty(), "SW2: both production sources are readable");
 
     // Exactly ONE raw self_weight_loads call survives in the optimizer, and it
