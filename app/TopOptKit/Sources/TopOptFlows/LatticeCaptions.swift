@@ -107,7 +107,7 @@ extension LatticeSetupWizard {
     static let organicAreaBrief = "This group sets its finish."
     static let organicGroupBrief = "This group's own Organic settings."
     static let latticeAreaOwnBrief = "Grade and finish set here."
-    static let latticeAreaPreviewBrief = "Preview shows the part's grade."
+    static let latticeAreaPreviewBrief = "Preview shows this group's grade."   // ★ notes30 (F1): it drew the part's once
     static func zoneRimSkinBrief(_ part: String) -> String { "Part's \(part) covers every zone." }
     static let zoneCoveredUnderSkinBrief = "Part's Skin rules out Covered."
     static let zoneRimSkinNeedEngineBrief = "Zones take None or Covered."
