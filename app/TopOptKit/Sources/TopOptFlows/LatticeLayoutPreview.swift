@@ -33,7 +33,9 @@ public final class LatticeLayoutPreview: ObservableObject {
     @Published public private(set) var laid: LatticeLayoutColours.Laid?
     /// One plain line under the preview: what is wrong, or nil. ★ his 11-20: a new one is also raised as a centred pop-up.
     @Published public private(set) var problem: String? {
-        didSet { if let p = problem, p != oldValue, Self.popsUp(p) { AppPopups.shared.show(Self.problemTitle, p) } }
+        didSet {
+            if let p = problem, p != oldValue, Self.popsUp(p), !chainHoldsTheScreen { AppPopups.shared.show(Self.problemTitle, p) }
+        }
     }
     static let problemTitle = "The lattice preview couldn’t be made"
     /// A problem that is the page's state rather than an error (no part yet) stays a line.
@@ -1336,12 +1338,27 @@ public final class LatticeLayoutPreview: ObservableObject {
     nonisolated(unsafe) public static var controlGlowThinWallsOnly = false
     /// Tests: how many solid pop-ups were raised.
     public static private(set) var solidPopUpsRaised = 0
+    /// Tests: how many solid pop-ups a lay held back while this part's print file was being made (`chainHoldsTheScreen`).
+    public static private(set) var solidPopUpsHeld = 0
+
+    /// ★ notes30 (builder R1; his notes25 rule A1, 11-23: "There should only be a single pop-up that contains everything"): while
+    /// THIS part's print file is being made — the Mac's card up or sent to the background, until the chain ends — that card is
+    /// the one pop-up. A lay landing meanwhile (one he started just before his press) raises no pop-up of its own: its error
+    /// card's backdrop sat over the card and took his "Run in the Background". Its reason is not kept as said, so the next lay
+    /// after the chain says it. RED CONTROL `controlLayPopUpOverTheChain`: the lay's pop-up over the card (release 21).
+    var chainHoldsTheScreen: Bool {
+        let mac = LatticeMacMake.shared
+        guard !Self.controlLayPopUpOverTheChain, mac.going, let id = mac.projectID else { return false }
+        return id == fixProject?.id
+    }
+    nonisolated(unsafe) public static var controlLayPopUpOverTheChain = false
 
     /// After a lay's reason is read: its pop-up, when the reason is new for this part — unless the Structural thin-wall pop-up
     /// owns this case (walls too thin for Structural's cells: LatticeThinWallPrompt, the workspace's own card).
     private func raiseSolidPopUpIfNew() {
         guard let r = solidReason else { solidPopUpKey = nil; return }
         guard !Self.controlNoSolidPopUp, let p = fixProject else { return }
+        if chainHoldsTheScreen { Self.solidPopUpsHeld += 1; return }   // ★ notes30: the card stays the one pop-up (the key unkept)
         if WorkspacePlaceholder.thinWalls(r, project: p, floorCellMM: laid?.floorCellMM ?? 0) != nil {
             if solidPopUpUp { AppPopups.shared.current = nil }   // an earlier reason's pop-up: the thin-wall one says this
             solidPopUpKey = nil
