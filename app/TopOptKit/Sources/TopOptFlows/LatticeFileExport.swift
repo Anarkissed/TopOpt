@@ -407,11 +407,17 @@ public struct LatticeFileStrength: Equatable, Sendable {
                                                     // ★ Organic cut 2 (handover b): the struts short (fail); the frame of beams
                                                     // not solved, or too little of it judged (solid only)
                                                     strutMargin = "strut_margin", frameNotSolved = "frame_not_solved",
-                                                    frameUnjudged = "frame_unjudged" }
+                                                    frameUnjudged = "frame_unjudged",
+                                                    // ★ notes30 (core OS19, the interim guard, 2026-11-26): a load on bare
+                                                    // vines (an Organic weave right under a loaded face)
+                                                    loadOnBareLattice = "load_on_bare_lattice" }
     public var failReason: FailReason?
     /// The load landing on cells that get no credit, and the whole load (N), where countable.
     public var loadOnNoCreditN: Double?
     public var loadTotalN: Double?
+    /// ★ notes30: what core said with `load_on_bare_lattice` (the load on the vines, its share, where it lands, core's
+    /// sentence); nil for any other reason.
+    public var bareVines: OrganicBareVines.Found?
 
     public init(block b: [String: Any]) {
         func num(_ v: Any?) -> Double { (v as? NSNumber)?.doubleValue ?? 0 }
@@ -443,6 +449,8 @@ public struct LatticeFileStrength: Equatable, Sendable {
         failReason = (b["fail_reason"] as? String).flatMap(FailReason.init(rawValue:))
         loadOnNoCreditN = (b["load_on_no_credit_n"] as? NSNumber)?.doubleValue
         loadTotalN = (b["load_total_n"] as? NSNumber)?.doubleValue
+        bareVines = OrganicBareVines.found(strength: b)
+        if bareVines == nil, failReason == .loadOnBareLattice { failReason = nil }   // only under the RED control (the old read)
     }
 
     /// The one-tap fix for a load on open lattice (his words to come; the tap keeps the loaded face solid).
@@ -458,7 +466,8 @@ public struct LatticeFileStrength: Equatable, Sendable {
             }
             return "The load lands on open lattice\(share), so nothing carries it to the anchors. " + Self.protectLoadedFace + "."
         case .noLoadPath?: return "Nothing carries the load to the anchors."
-        case .solidMargin?, .strutMargin?, .frameNotSolved?, .frameUnjudged?, nil: return nil
+        // ★ notes30: a setting fixes a load on bare vines (a Solid finish or a Protect skin on the loaded face): its own words
+        case .solidMargin?, .strutMargin?, .frameNotSolved?, .frameUnjudged?, .loadOnBareLattice?, nil: return nil
         }
     }
 
@@ -495,6 +504,7 @@ public struct LatticeFileStrength: Equatable, Sendable {
         case .fail:
             switch failReason {
             case .loadOnOpenLattice?: return "Not strong enough · the load lands on open lattice"
+            case .loadOnBareLattice?: return OrganicBareVines.line   // ★ notes30: what lands where, and the fix; no margin
             case .noLoadPath?: return "Not strong enough · nothing carries the load"
             case .strutMargin?: return "Not strong enough · struts: " + (strutsLine ?? Self.strutsNot).lowercased()
             case .solidMargin?, .frameNotSolved?, .frameUnjudged?, nil:
@@ -839,7 +849,8 @@ public enum LatticeFileRun {
             public var additionsName: String
             public var additions: Data
         }
-        /// done (passes), limit (rounds used up), nothing_to_vary, frame_not_solved: core's word.
+        /// done (passes), limit (rounds used up), nothing_to_vary, frame_not_solved, load_on_bare_lattice (★ notes30: a load
+        /// on bare vines, stopped before any round): core's word.
         public var code: String
         public var why: String
         public var passing: Bool
@@ -874,6 +885,8 @@ public enum LatticeFileRun {
 
         /// One plain line: what the strengthening did.
         public var line: String {
+            // ★ notes30 (core OS19): a load on bare vines stops it before any round (rounds_fixed 0); the fix, in core's words
+            if code == OrganicBareVines.reason { return why.isEmpty ? OrganicBareVines.text : why }
             let r = rounds == 1 ? "1 round" : "\(rounds) rounds"
             var out = passing ? "Strengthened in \(r): the struts keep the margin" : "Strengthened \(r): some struts still short"
             if pastLimitStruts > 0 {

@@ -27,6 +27,9 @@ public enum OrganicCertify {
     public enum Solve: Equatable, Sendable {
         /// Protect the loaded face (a load on open lattice).
         case protectLoadedFace
+        /// ★ notes30 (core OS19): cover the loaded face — a Solid finish or a Protect skin, offered in a centred pop-up (a load
+        /// on bare vines).
+        case coverLoadedFace
         /// The Organic strut thickness (the struts still short after strengthening).
         case strutThickness
         /// A deeper protected skin or a keep-clear area here (a weak spot beside the lattice).
@@ -97,9 +100,18 @@ public enum OrganicCertify {
                              text: "Nothing carries it to the fixings. Protect the loaded face to keep it solid, then check again.",
                              spotIDs: [], at: nil, solve: .protectLoadedFace, worst: 0, needs: safety))
         }
+        // ★ notes30 (core OS19, the interim guard): a load on bare vines — ONE pop-up, its line to where the load lands; Solve
+        // offers the loaded face a Solid finish or a Protect skin (OrganicBareVines.offer). The struts' numbers rest on a load
+        // the check refused to hand the vines, and strengthening stopped before any round, so no "struts still short" card
+        // (thicker struts never cure it: core says so)
+        let bare = OrganicBareVines.found(strength: s)
+        if let b = bare {
+            out.append(Issue(id: OrganicBareVines.reason, stage: .lattice, title: OrganicBareVines.title, text: b.text,
+                             spotIDs: [], at: b.at, solve: .coverLoadedFace, worst: 0, needs: safety))
+        }
         let struts = s["struts"] as? [String: Any] ?? [:]
         let under = (struts["under_safety"] as? NSNumber)?.intValue ?? 0
-        if under > 0 {
+        if under > 0, bare == nil {
             let weakest = (s["weakest"] as? [[String: Any]] ?? []).compactMap { w -> (SIMD3<Double>, Double, Double?)? in
                 guard let at = v3(w["at"]) else { return nil }
                 return (at, num(w["margin"]) ?? 0, num(w["width_mm"]))

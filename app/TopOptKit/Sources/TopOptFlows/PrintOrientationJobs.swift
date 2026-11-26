@@ -85,7 +85,8 @@ public struct PrintBenefitRow: Equatable, Sendable, Identifiable {
     /// ranking's own first candidate), the time its jobs took.
     public static func measured(latticeReport o: [String: Any]) -> PrintMeasured {
         var m = PrintMeasured()
-        m.strength = LatticeStrengthAnswer.decode(report: o)?.governing
+        // ★ notes30: a load on bare vines is no verdict — no number (the row's dash) until the loaded face is covered
+        m.strength = LatticeStrengthAnswer.decode(report: o).flatMap { $0.bareVines == nil ? $0.governing : nil }
         let facts = LatticeFileFacts.decode(o)
         m.layerStrength = facts?.solidLayers
         if let p = o["painted"] as? [String: Any] {
