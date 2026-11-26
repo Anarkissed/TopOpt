@@ -9,6 +9,14 @@ Branch `claude/topopt-stage-3-surfaces-7f58fd`, from 2b40bcf4. Status: IN PROGRE
 - Next, when usage allows: run `agent-scratch/tosurface/launch_ref2.sh` (stage 1 + 3 on frozen build 6f2b3dac, three lock holds: stand128 / topmotor / standv4; base / pressing / pillow L+R; topmotor@64 knots 2 against 1.5). Announced to TOReview; not started. Then: read the corrected re-fit statistics; decide the knot spacing; fill the before/after table with `measure_area.py` (before = ledger D's STLs, same ruler); report.
 - Not started: close-out (delete the switch and the old path) waits for the gate and his OK.
 
+## Report (04-tests.md "What a stage report contains"; numbers filled from the final batch)
+
+- **Repo tests, failing -> passing:** A (known shapes: 0.12-0.24 mm -> worst 0.049, the 5 mm hole; walls 0.002) now `--gate`; B (drawn faces: flats 0.0000, bores 0.0007, a protected layer's face 0.003), F (ripple 0.015), J (one clean solid; also the edge-touching cases the stand forced) new and `--gate`. Held: M (switch off byte-identical to the tip build), K (switch on, same job twice, identical bytes). P (run time): from the final batch, below.
+- **Open choice settled:** basis = cubic B-spline (reach 2 by its degree) with a band-weighted fit; measured against Gaussian (today), Wendland C2 and C4 at reach 2/3/4, at knot spacings 1, 1.5 and 2 voxels (test A matrix, below). Knot spacing: 2 voxels (today's rule) unless hold C (1.5 against 2 on Top Motor Mount) says otherwise. The plan's 2-4 line widths are under one voxel at every resolution he runs; one voxel made the re-fit unstable (surface moved up to 10 mm).
+- **Reference table:** stage 1 + stage 3 (the configuration that ships: without stage 1 the protections are voxels), before = ledger D on the same ruler (`measure_area.py`). [to fill]
+- **Refused:** nothing.
+- **Known and handed on:** the device preview and the `.meta` basis name (#362's files, lines below); keep regions arrive as boxes, some 0.1-0.3 mm slices, so where the design is void beside them their union is a staircase by construction (a fix belongs where keep regions are made); the slope of phi at shipped designs is not yet held near one (median about 3).
+
 ## What is built (all behind ONE switch, `TOPOPT_SURFACE`, default off = today)
 
 | item | what | where |
