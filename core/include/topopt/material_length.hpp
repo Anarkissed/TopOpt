@@ -31,6 +31,7 @@
 // his rig can check it. `reading_size_mm` applies that half.
 #pragma once
 
+#include <cstdlib>
 #include <string>
 
 namespace topopt {
@@ -65,6 +66,17 @@ inline constexpr double kAcrossLayerLengthFactor = 0.2;
 // The reading size for stress acting ACROSS the layers.
 inline double reading_size_across_layers_mm(const MaterialLength& m) {
   return kAcrossLayerLengthFactor * reading_size_mm(m);
+}
+
+// The engineers' control, "Stress reading size (mm)" (the maintainer's decision,
+// 2026-11-25): a typed size replaces the material's own. Until the app carries
+// it, the measuring runs set it through TOPOPT_STRESS_READING_MM.
+inline double reading_size_for_job_mm(const std::string& material_name) {
+  if (const char* v = std::getenv("TOPOPT_STRESS_READING_MM")) {
+    const double typed = std::atof(v);
+    if (typed > 0.0) return typed;
+  }
+  return reading_size_mm(material_length(material_name));
 }
 
 }  // namespace topopt
