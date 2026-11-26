@@ -105,4 +105,38 @@ final class Notes30FollowUpsTests: XCTestCase {
         XCTAssertEqual(old.shapeFitBandMM, band + 4, "RED CONTROL: and its band")
         XCTAssertEqual(old.shapeFitGradeStrength, strength + 0.5, "RED CONTROL: and its Strength")
     }
+
+    // MARK: (3) the group tab's note (notes30, follow-ups 2)
+
+    /// ★ (3) 362's words: on a group's tab, "Preview shows this group's grade." (five words, it said "the part's"), shown only
+    /// where it is so: the group's grade lays apart from the Part tab's. RED CONTROL: release 21's rule (the grade differs)
+    /// showed it where the two lay alike, and its words were untrue.
+    @MainActor func testTheGroupGradeNoteOnlyWhereThePreviewDrawsTheGroupsGrade() {
+        XCTAssertEqual(LatticeSetupWizard.latticeAreaPreviewBrief, "Preview shows this group's grade.")
+        XCTAssertLessThanOrEqual(LatticeCaptions.words(LatticeSetupWizard.latticeAreaPreviewBrief), LatticeCaptions.maxWords)
+        XCTAssertFalse(LatticeSetupWizard.latticeAreaPreviewLine.contains("one grade for the whole part"), "★ its (i) says so too")
+        var byStress = LatticeSettings(enabled: true)
+        byStress.setSimulateStresses(true)
+        byStress.densityMode = .sim
+        let part = LatticeAreaGrading(gradingMode: .full, shapeFitBandMM: byStress.shapeFitBandMM,
+                                      shapeGradeStrength: byStress.shapeFitGradeStrength)
+        func shows(_ group: LatticeGradingMode, _ l: LatticeSettings) -> Bool {
+            var page = l
+            page.gradingMode = group
+            return LatticeSetupWizard.groupGradeShows(page, partGrade: part, lineWidthMM: 0.45, wallRingMM: 0.9)
+        }
+        XCTAssertTrue(LatticeLayoutPreview.settings(byStress).byStress, "premise: the part grades by stress")
+        XCTAssertTrue(shows(.fitShape, byStress), "★ by stress: the group's Shape lays without the Part tab's stress grade")
+        XCTAssertTrue(shows(LatticeGradingMode.none, byStress), "★ the group's No grade lays one cell, one density")
+        XCTAssertFalse(shows(.full, byStress), "★ the Part tab's own grade: nothing to say")
+        var still = byStress
+        still.setSimulateStresses(false)
+        XCTAssertFalse(LatticeLayoutPreview.settings(still).byStress, "premise: no stress to follow")
+        XCTAssertFalse(shows(.fitShape, still), "★ no stress to follow: Shape and Stress + shape lay alike here")
+        // RED CONTROL: release 21's rule said it there anyway
+        func old(_ group: LatticeGradingMode, _ l: LatticeSettings) -> Bool {
+            part.gradingMode != group || (group.fitsShape && part.shapeFitBandMM != l.shapeFitBandMM)
+        }
+        XCTAssertTrue(old(.fitShape, still), "RED CONTROL: the old rule showed it where nothing drawn differs")
+    }
 }

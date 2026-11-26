@@ -373,9 +373,12 @@ final class StrutLineWidthTests: XCTestCase {
         //   `LatticeSheets.wallInfo(lineWidthMM:)`) say the thinnest wall, two lines of the STRUT bead (a sheet's wall is laid
         //   by core's min_strut_mm, two strut lines), and Auto's wall at this cell (core's sheet_auto_wall_mm from the same
         //   two lines). Never a wall loop.
-        XCTAssertEqual(strutSites, 24,
-                       "the twenty-four audited lattice sites (AppModel 0, LatticePage 3, "
-                       + "WorkspacePlaceholder 5, ProjectModel 7, LatticeSetupWizard 9). "
+        // ★ RE-PINNED 24 -> 25 (2026-11-26, notes30 F1 follow-ups 2: "Preview shows this group's grade." only where it is so):
+        //   AUDITED. `LatticeSetupWizard`'s group tab -> `groupGradeShows(lineWidthMM:)` lays the sample twice (this tab's grade
+        //   and the Part tab's) through `LatticeSampleLay.page`, as `latticeSampleInputs` lays it: the STRUT bead, never a wall.
+        XCTAssertEqual(strutSites, 25,
+                       "the twenty-five audited lattice sites (AppModel 0, LatticePage 3, "
+                       + "WorkspacePlaceholder 5, ProjectModel 7, LatticeSetupWizard 10). "
                        + "If this number moved, audit the new site and update the count.")
         XCTAssertTrue(offenders.isEmpty,
                       "lattice lineWidthMM site(s) reading a WALL bead:\n"
