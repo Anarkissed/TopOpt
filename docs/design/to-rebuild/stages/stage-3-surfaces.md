@@ -124,6 +124,9 @@ The "drawn" worst (0.4-0.5 in every file) is his own countersinks and small fill
 
 ## Not done yet
 
+- V-02's part-in step (`voxel/voxelize.cpp`): the analysis grid is still yes/no voxels by centre. What stage 3 does instead: the print file is cut by the EXACT drawn part, and the optimiser's function is carried across the drawn faces (so the design's decision reaches the face). Giving boundary voxels their true part fraction would change every margin at the part's skin, lattice certificate included (rule 26), and interacts with stage 2's stiffness law (A-01, E x fill against E x fill^3); it belongs with stage 2's certificate, through TOReview.
+- The function's slope is not yet held near one at shipped designs (median about 3 on Top Motor Mount); the re-fit's CG stopped at its 2,000 cap from a cold start. A warm-started re-fit is built; its measurement is next.
+
 - B-02, B-03, P-10 (single-pass basis build, a thread pool, per-iteration allocations): priced, not done. About 50 thread start-ups and six vector allocations per iteration cost milliseconds against a 1-28 s solve per iteration; the basis is built once per run. Worth doing only in the stage 10 clean-out.
 - X-03 (the file re-check writes an STL and re-runs the whole analysis): the re-check is stage 1's R-07 (TOReview's to_run.inc); unchanged here.
 
