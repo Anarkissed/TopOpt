@@ -64,6 +64,9 @@ public struct LatticeStrengthAnswer: Equatable, Sendable {
     /// ★ notes30 (core OS19, the interim guard): a load lands on bare vines, so the check refused to judge it (its margins are
     /// not a verdict until the loaded face is covered); nil: it did not.
     public var bareVines: OrganicBareVines.Found? = nil
+    /// ★ 362 (11-26): the printer's wall (the cover a Solid finish lays), when the page knows it — the Checks line then names
+    /// only the fixes the wizard offers (LatticeReview's depth rule); nil: unknown (no Solid named when core gave the depth).
+    public var solidWallMM: Double? = nil
 
     /// ★ THE "how strong" number: the smaller of the two.
     public var governing: Double? {
@@ -132,7 +135,9 @@ public struct LatticeStrengthAnswer: Equatable, Sendable {
         // ★ notes30: a load on bare vines — what lands where and the fix (no margin: the check refused to judge it), the place
         // lit on the part, core's sentence behind the (i)
         if let b = bareVines {
-            return ResultsCheck(kind: .warn, title: OrganicBareVines.title, detail: OrganicBareVines.checkDetail,
+            // ★ 362 (11-26): only the fixes offered ("Fix: Protect skin 4.5 mm" when Solid is not)
+            let detail = OrganicBareVines.checkDetailLine(OrganicBareVines.offers(b, wallMM: solidWallMM))
+            return ResultsCheck(kind: .warn, title: OrganicBareVines.title, detail: detail,
                                 places: b.at.map { [$0] } ?? [], more: b.at == nil ? nil : OrganicBareVines.checkMore,
                                 tab: .strength, info: b.text)
         }

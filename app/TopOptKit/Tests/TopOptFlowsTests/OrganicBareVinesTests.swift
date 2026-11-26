@@ -397,6 +397,46 @@ final class OrganicBareVinesTests: XCTestCase {
         XCTAssertEqual(OrganicBareVines.offers(depthNeededMM: 6.0, wallMM: 1.32).skinDepthMM, nil, "RED CONTROL: no 6 mm skin")
     }
 
+    /// ★ 362 (11-26): Results' Checks line and the print file's line name only the fixes the wizard offers — Solid not offered
+    /// (4.2 mm needed, a 0.9 mm wall): "Fix: Protect skin 4.5 mm", no "or Solid"; a wall that clears it, or no key: today's
+    /// words; a wall the page does not know: no Solid named. RED CONTROL (the key ignored): "or Solid" is back.
+    func testTheLinesNameOnlyTheFixesOffered() throws {
+        // Results, as the workspace opens it (the printer's wall passed in)
+        let m = ResultsModel(projectName: "Stand", outcome: try Self.outcome(depth: 4.2), solidWallMM: 0.9)
+        let a = try XCTUnwrap(m.latticeAnswer)
+        XCTAssertEqual(a.check().detail, "Fix: Protect skin 4.5 mm", "★ the Checks line: only Protect skin, its depth")
+        XCTAssertLessThanOrEqual(LatticeCaptions.words(a.check().detail), LatticeCaptions.maxWords)
+        let first = try XCTUnwrap(ResultsChecks.checks(tab: try XCTUnwrap(m.selected), margin: nil, required: 1.5, safetyMargin: 1.5,
+                                                       scenarios: [], thinJoints: 0, bridged: false, answer: a).first)
+        XCTAssertEqual(first.detail, "Fix: Protect skin 4.5 mm", "★ as the Checks panel draws it")
+        XCTAssertFalse(first.detail.contains("Solid"))
+        // the print file's line
+        var st = LatticeFileStrength(block: try XCTUnwrap(Self.report(depth: 4.2)["strength"] as? [String: Any]))
+        st.solidWallMM = 0.9
+        XCTAssertEqual(st.line, "A load lands on bare vines · a Protect skin 4.5 mm deep on its face fixes it")
+        XCTAssertFalse(st.line.contains("Solid"), "★ no Solid named")
+        // a wall that clears it, or no key: today's words, both named
+        XCTAssertEqual(ResultsModel(projectName: "Stand", outcome: try Self.outcome(depth: 1.2), solidWallMM: 1.32)
+                        .latticeAnswer?.check().detail, OrganicBareVines.checkDetail)
+        XCTAssertEqual(ResultsModel(projectName: "Stand", outcome: try Self.outcome(), solidWallMM: 0.9).latticeAnswer?.check().detail,
+                       OrganicBareVines.checkDetail, "no key: today's words")
+        var older = LatticeFileStrength(block: try XCTUnwrap(Self.report()["strength"] as? [String: Any]))
+        older.solidWallMM = 0.9
+        XCTAssertEqual(older.line, OrganicBareVines.line, "no key: today's line")
+        // the wall unknown (no page): no Solid named while the key says a depth
+        XCTAssertEqual(ResultsModel(projectName: "Stand", outcome: try Self.outcome(depth: 1.2)).latticeAnswer?.check().detail,
+                       "Fix: Protect skin 4 mm")
+        // the workspace passes the printer's wall to Results (SOURCE PIN)
+        let ws = try FlexibleSource.code("WorkspacePlaceholder.swift")
+        XCTAssertTrue(ws.contains("solidWallMM: project.printParams.wallRingMM,"), "★ Results gets the printer's wall")
+
+        // RED CONTROL: the key ignored — "or Solid" named again under the same thin wall
+        OrganicBareVines.controlNoDepth = true
+        XCTAssertEqual(ResultsModel(projectName: "Stand", outcome: try Self.outcome(depth: 4.2), solidWallMM: 0.9)
+                        .latticeAnswer?.check().detail, OrganicBareVines.checkDetail, "RED CONTROL: Solid named")
+        XCTAssertEqual(st.line, OrganicBareVines.line, "RED CONTROL: the line names Solid")
+    }
+
     /// ★ The Protect skin offer lays its skin at the depth the rule names (6 mm here), never the page's 4 mm. RED CONTROL: with
     /// no depth (no key), the page's 4 mm.
     func testTheProtectSkinIsLaidAtTheDepthNeeded() throws {
