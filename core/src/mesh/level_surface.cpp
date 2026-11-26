@@ -69,6 +69,11 @@ SurfaceSwitch to_surface_switch() {
 
 bool to_surface_on() { return to_surface_switch().on; }
 
+double plsm_band_far_weight() {
+  const char* v = std::getenv("TOPOPT_SURFACE_FAR_WEIGHT");
+  return v != nullptr ? std::atof(v) : 0.01;
+}
+
 double PlsmFieldView::value(const Vec3& p, Vec3* grad) const {
   const double x = (p.x - origin.x) / h - 0.5;
   const double y = (p.y - origin.y) / h - 0.5;

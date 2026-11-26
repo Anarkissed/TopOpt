@@ -504,7 +504,7 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
                            std::min(plsm.clamp_voxels * h, phi[v]));
     if (surf.fit_band_voxels > 0.0)  // stage 3: as the re-fit below
       for (std::size_t v = 0; v < n; ++v)
-        if (std::fabs(phi[v]) > surf.fit_band_voxels * h) w[v] = 0.01;
+        if (std::fabs(phi[v]) > surf.fit_band_voxels * h) w[v] = plsm_band_far_weight();
     const PlsmFitResult fr =
         plsm_solve_normal(Psi, PsiT, target, w, plsm.ridge,
                           plsm.fit_cg_iterations, 1e-10, threads);
@@ -704,6 +704,7 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
       static_cast<bool>(plsm.margin_probe) && plsm.margin_probe_every > 0;
   int refit_cg_iters_max = 0;  // stage 3: the re-fit's own convergence, reported
   double refit_rel_resid_max = 0.0;
+  double refit_wall_s = 0.0;
   FeaSolution warm;
   bool have_warm = false;
   bool non_convergent = false;
@@ -1021,15 +1022,17 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
             for (int i = 0; i < nx; ++i) {
               const std::size_t v = plsm_at(nx, ny, i, j, kz);
               if (std::fabs(pr[v]) > surf.fit_band_voxels * h) {
-                w[v] = 0.01;
+                w[v] = plsm_band_far_weight();
                 continue;
               }
               const double g = plsm_grad_mag(nx, ny, nz, ext, i, j, kz, h);
               if (g > 0.1) tgt[v] = ext[v] / g;
             }
+      const double t_rf0 = steady_s();
       const PlsmFitResult rf =
           plsm_solve_normal(Psi, PsiT, tgt, w, plsm.ridge,
                             plsm.fit_cg_iterations, 1e-10, threads);
+      refit_wall_s += steady_s() - t_rf0;
       // ★ NOT SILENT (ledger P-11): how far the re-fit moved the surface, at the
       // centre of every ACTIVE cell the surface passes near, |dphi| / |grad phi|.
       {
@@ -1046,9 +1049,13 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
               if (std::fabs(phi[v]) > h) continue;
               // Only where phi has a slope worth the name: on a nearly flat phi the
               // quotient below reads any small change as a huge move.
+              // The surface's own move: the distance to it before (phi / |grad phi|)
+              // against after. The fit re-normalises phi on purpose, so comparing the
+              // values themselves would read that rescaling as a move.
               const double g = plsm_grad_mag(nx, ny, nz, phi, i, j, kz, h);
-              if (!(g > 0.5)) continue;
-              const double d = std::fabs(after[v] - phi[v]) / g;
+              const double ga = plsm_grad_mag(nx, ny, nz, after, i, j, kz, h);
+              if (!(g > 0.5) || !(ga > 0.5)) continue;
+              const double d = std::fabs(after[v] / ga - phi[v] / g);
               moves.push_back(d);
               mx = std::max(mx, d);
               s2 += d * d;
@@ -1240,10 +1247,12 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
     std::fprintf(stderr,
                  "[plsm] basis %s reach %.1f knots %.2f vox: %d iterations, %d re-fits, "
                  "re-fit moved the surface (worst re-fit, where |grad phi| > 0.5): rms %.3f, "
-                 "90th pct %.3f, max %.3f mm; fit CG up to %d iterations, residual up to %.1e\n",
+                 "90th pct %.3f, max %.3f mm; fit CG up to %d iterations, residual up to %.1e, "
+                 "re-fits took %.1f s of %.1f s\n",
                  plsm_basis_name(basis), support, knots.dx, done_iters, out.refits,
                  out.refit_move_rms_mm, out.refit_move_p90_mm, out.refit_move_max_mm,
-                 refit_cg_iters_max, refit_rel_resid_max);
+                 refit_cg_iters_max, refit_rel_resid_max, refit_wall_s,
+                 steady_s() - t_run0);
   out.best_iteration = best_iter;
   out.margin_peak_iteration = peak_iter > 0 ? peak_iter : 0;
   out.margin_peak = peak_iter > 0 ? peak_margin : 0.0;

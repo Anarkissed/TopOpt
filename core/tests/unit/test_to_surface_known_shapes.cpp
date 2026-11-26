@@ -172,7 +172,7 @@ Measured measure_new(const Shape& s, const Arm& arm, double cell_mm) {
         const std::size_t q = (static_cast<std::size_t>(k) * kN + j) * kN + i;
         const double d = s.sd(c);
         tgt[q] = std::max(-6.0 * kVoxel, std::min(6.0 * kVoxel, d));
-        if (arm.band > 0.0 && std::fabs(d) > arm.band * kVoxel) w[q] = 0.01;
+        if (arm.band > 0.0 && std::fabs(d) > arm.band * kVoxel) w[q] = topopt::plsm_band_far_weight();
       }
   const PlsmFitResult fr = plsm_solve_normal(A, At, tgt, w, 1e-6, 4000, 1e-10, th);
   PlsmFieldView fv;

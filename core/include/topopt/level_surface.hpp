@@ -43,6 +43,11 @@ struct SurfaceSwitch {
 SurfaceSwitch to_surface_switch();
 bool to_surface_on();
 
+// The weight a band-weighted fit gives voxels AWAY from the surface band (weight 1
+// in the band). Shared by the optimiser's fits and test A; TOPOPT_SURFACE_FAR_WEIGHT
+// sets it for a measurement arm.
+double plsm_band_far_weight();
+
 // Parse a basis name; false when unknown.
 bool plsm_parse_basis(const std::string& s, PlsmBasisKind& out);
 
