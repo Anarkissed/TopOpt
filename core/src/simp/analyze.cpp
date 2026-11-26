@@ -13,8 +13,11 @@
 #include "topopt/build_orientation.hpp"
 #include "topopt/fea.hpp"
 #include "topopt/orient.hpp"
+#include "topopt/printed_mass.hpp"      // TO rebuild stage 2
 #include "topopt/report.hpp"
 #include "topopt/simp.hpp"
+#include "topopt/stress_measure.hpp"   // TO rebuild stage 2
+#include "topopt/to_stage_switch.hpp"  // TO rebuild stage 2
 #include "topopt/voxel.hpp"
 
 namespace topopt {
@@ -310,7 +313,19 @@ FixedDesignAnalysis analyze_fixed_design(
       // (at the floor its strain is the void's, which E_solid would turn into a
       // stress the piece does not carry).
       FeaIslandDropForbid no_island_drop;
-      sc = simp_compliance(grid, params, density, B, loads, cg_tolerance,
+      // TO rebuild stage 2 (ledger A-01): a voxel cut by the surface is solved at
+      // the stiffness of the material it holds (E x fill), not E x fill^3, which
+      // makes it far too soft and its stress far too high (76 % on the textbook
+      // ring). Only with the stage's switch; the lattice posture above is untouched.
+      // Reviewer's ruling 2026-11-26: real stiffness ALONE reads low (unsafe), so
+      // in the shipped form ("size") it applies only together with a reading
+      // size; a material with no published length keeps today's solve and
+      // reading whole. "stiff" stays as a measuring arm only.
+      SimpParams solve_params = params;
+      if (strength_mode() == StrengthMode::Stiff ||
+          (strength_mode() == StrengthMode::Size && knockdown.stress_reading_mm > 0.0))
+        solve_params.penalty = 1.0;
+      sc = simp_compliance(grid, solve_params, density, B, loads, cg_tolerance,
                            cg_max_iterations, /*initial_guess=*/nullptr,
                            /*solver=*/nullptr, solver_kind);
       if (solver_kind == SolverKind::MultigridCG_Matfree) {
@@ -405,6 +420,13 @@ FixedDesignAnalysis analyze_fixed_design(
   // inflated by its small knockdown.
   std::vector<double> member_width_mm;
   double max_von_mises_eff = 0.0;
+  // TO rebuild stage 2: the wall-aware stress per voxel, kept only when it is to
+  // be read over a size (empty otherwise, so today's path allocates nothing).
+  const bool read_over_size =
+      strength_mode() == StrengthMode::Size && knockdown.stress_reading_mm > 0.0;
+  std::vector<double> von_mises_eff_field;
+  if (read_over_size && knockdown.width_aware)
+    von_mises_eff_field.assign(grid.voxel_count(), 0.0);
   if (knockdown.width_aware)
     member_width_mm = local_member_thickness_mm(grid, density, kIso,
                                                 kn.thickness_cap_voxels);
@@ -468,6 +490,7 @@ FixedDesignAnalysis analyze_fixed_design(
                 knockdown.infill_floor);
             const double vm_eff = st.von_mises / k_v;
             if (vm_eff > max_von_mises_eff) max_von_mises_eff = vm_eff;
+            if (!von_mises_eff_field.empty()) von_mises_eff_field[idx] = vm_eff;
             // Record the pair this max was taken over, so a diagnosis can reprice
             // the SAME population at a candidate infill / wall ring without a
             // re-solve (handoff 2026-08-02-gate-diagnosis-recommendations). This
@@ -483,6 +506,19 @@ FixedDesignAnalysis analyze_fixed_design(
           effective_material += 1.0;
         }
       }
+  // TO rebuild stage 2 (ledger A-02): the stress that decides is read over the
+  // material's length, not at one voxel. The one-voxel peak is kept beside it.
+  // The wall-aware maximum (what production's gate reads) is read the same way.
+  // Not yet done here: the interlayer reading (its length is a fifth of this one,
+  // under a voxel so far).
+  const double max_von_mises_one_voxel = max_von_mises;
+  if (read_over_size) {
+    max_von_mises = peak_stress_over_size(grid, out.von_mises_field, density, kIso,
+                                          knockdown.stress_reading_mm);
+    if (!von_mises_eff_field.empty())
+      max_von_mises_eff = peak_stress_over_size(grid, von_mises_eff_field, density, kIso,
+                                                knockdown.stress_reading_mm);
+  }
   const double max_interlayer = max_interlayer_tension(grid, stress, build_dir);
 
   // Per-node displacement of the SAME solve — no new solve. DOF-ordered; exposed
@@ -504,6 +540,31 @@ FixedDesignAnalysis analyze_fixed_design(
   // mass is byte-identical to the pre-lattice path.
   out.mass_grams = material.density_g_cm3 *
                    (effective_material * grid.voxel_volume()) / 1000.0;
+  // TO rebuild stage 2 (ledger M-07; the maintainer, 2026-11-25: "Never the solid
+  // unless the user set infill to 100%"): the grams really printed at the job's
+  // walls and infill, by the same wall-and-core model the margin uses. Only with
+  // the stage's switch, only where the member widths were measured (the
+  // wall-aware posture) and no voxel is lattice (a lattice's mass is its own
+  // relative density, counted above). The solid figure is kept beside it.
+  out.mass_grams_solid = out.mass_grams;
+  if (to_stage2_on() && lattice_voxels == 0) {
+    // The member widths: the gate's own when the wall-aware posture measured them;
+    // otherwise measured here for the grams alone (production ships with that
+    // posture off, so without this the share was always 1 and the grams solid:
+    // found on the stand at res 64, 2026-11-25).
+    std::vector<double> width_for_mass;
+    if (member_width_mm.size() != density.size())
+      width_for_mass = local_member_thickness_mm(grid, density, kIso, kn.thickness_cap_voxels);
+    const std::vector<double>& member_width_mm_for_mass =
+        member_width_mm.size() == density.size() ? member_width_mm : width_for_mass;
+    std::vector<double> printed_density(density.size(), 0.0);
+    for (std::size_t idx = 0; idx < density.size(); ++idx)
+      if (grid.tags[idx] != VoxelTag::Empty && density[idx] > kIso) printed_density[idx] = 1.0;
+    out.mass_grams = printed_mass(grid, printed_density, 0.5, member_width_mm_for_mass,
+                                  knockdown.wall_thickness_mm, knockdown.infill_percent,
+                                  material.density_g_cm3)
+                         .grams;
+  }
 
   // Support-volume proxy for the analysed build direction over THIS design's
   // printed geometry: mark non-printed voxels Empty in a copy and count overhangs.
@@ -538,6 +599,7 @@ FixedDesignAnalysis analyze_fixed_design(
   out.printed_voxels = printed_voxels;
   out.printed_fraction = printed_fraction;
   out.max_von_mises = max_von_mises;
+  out.max_von_mises_one_voxel = max_von_mises_one_voxel;
   out.max_interlayer_tension = max_interlayer;
   out.margin = margin;
   out.margin_effective = margin_effective;

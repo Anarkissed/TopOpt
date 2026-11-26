@@ -44,13 +44,20 @@ std::size_t tag_region_m(VoxelGrid& grid, const StepModel& model,
   return tag_face_hosts(grid, region_pieces(model, region, 0.5 * grid.spacing), tag);
 }
 
+// A depth of zero or less means "the thinnest there is": one layer on the voxel
+// path (region_depth_layers floors at 1), one voxel of true distance here, so
+// neither path refuses what the other accepts.
+double floored_depth_mm(const VoxelGrid& grid, double depth_mm) {
+  return depth_mm > 0.0 ? depth_mm : grid.spacing;
+}
+
 // Depth: `depth_voxels` on the voxel path, `depth_mm` on the face path.
 std::size_t mask_face_m(const VoxelGrid& grid, const StepModel& model, int fid,
                         MaskValue value, int depth_voxels, double depth_mm,
                         DesignMask& mask) {
   if (face_load_mode() == FaceLoadMode::Voxel)
     return mask_step_face(grid, model, fid, value, depth_voxels, mask);
-  return mask_face_depth_mm(grid, model, {fid}, depth_mm, value, mask);
+  return mask_face_depth_mm(grid, model, {fid}, floored_depth_mm(grid, depth_mm), value, mask);
 }
 
 std::size_t mask_region_m(const VoxelGrid& grid, const StepModel& model,
@@ -58,7 +65,8 @@ std::size_t mask_region_m(const VoxelGrid& grid, const StepModel& model,
                           int depth_voxels, double depth_mm, DesignMask& mask) {
   if (face_load_mode() == FaceLoadMode::Voxel)
     return mask_step_region(grid, model, region, value, depth_voxels, mask);
-  return mask_region_depth_mm(grid, model, region, depth_mm, value, mask);
+  return mask_region_depth_mm(grid, model, region, floored_depth_mm(grid, depth_mm), value,
+                              mask);
 }
 
 // The freeze as geometry, for the stages that draw from true distance
@@ -601,6 +609,30 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
         if (std::find(faces.begin(), faces.end(), model.triangle_face[t]) != faces.end())
           tris.push_back(t);
       if (tris.empty()) continue;
+      if (face_load_mode() != FaceLoadMode::Voxel) {
+        // TO rebuild stage 1: the bolt's springs take their area from the DRAWN
+        // face (each node's own share of it, and its normal), not from the voxel
+        // faces of whatever was tagged. No staircase factor is needed: the area is
+        // the true one already, so the anchor's total stiffness is the same at
+        // any grid alignment and resolution.
+        const std::vector<FacePiece> pieces =
+            a.face_id >= 0 ? face_pieces(model, {a.face_id}, 0.5 * h)
+                           : region_pieces(model, region_or_throw(a.region_id, "load case anchor"),
+                                           0.5 * h);
+        for (const NodeArea& na : face_node_areas(grid, pieces)) {
+          if (!(na.area > 0.0)) continue;
+          any_fixture = true;
+          const double k_node = kBearingSteelMpa / kBearingLengthMm * na.area;
+          DirichletBC b;
+          b.node = na.node;
+          b.spring = k_node;
+          b.spring_tangent = kBearingTangentFraction * k_node;
+          b.normal = na.normal;
+          bcs.push_back(b);
+          ++n_springs;
+        }
+        continue;
+      }
       // Each EXPOSED voxel face of the anchor's own Fixture voxels that lies on the
       // anchor (its centre within 0.75 h of the CAD triangles, facing along their
       // normal) gives h^2 / 4 to each of its four corners. A node's spring is that area
@@ -704,6 +736,28 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
     any_fixture = n_springs > 0;
     std::printf("[loadcase] anchors: held by area springs, %zu nodes on %zu anchors\n",
                 n_springs, anchor_voxels.size());
+  } else if (face_load_mode() == FaceLoadMode::Face && !scenarios) {
+    // TO rebuild stage 1, "face": a glued anchor holds the nodes of the DRAWN face
+    // (every node that stands for at least a fifth of a cell-face of it), not all
+    // eight corners of every voxel the face lies on, which is a clamp one voxel
+    // thick (LatticeReview's catch, 2026-11-25: the job path still did that).
+    // Scenario jobs keep the voxel clamp below.
+    std::size_t n_held = 0;
+    for (const MinimizePlasticOptions::AnchorVoxels& a : anchor_voxels) {
+      const std::vector<FacePiece> pieces =
+          a.face_id >= 0
+              ? face_pieces(model, {a.face_id}, 0.5 * grid.spacing)
+              : region_pieces(model, region_or_throw(a.region_id, "load case anchor"),
+                              0.5 * grid.spacing);
+      for (const DirichletBC& b : face_clamp_bcs(grid, face_node_areas(grid, pieces)))
+        if (b.component == 0) {
+          clamp_node(b.node);
+          ++n_held;
+        }
+    }
+    any_fixture = n_held > 0;
+    std::printf("[loadcase] anchors: the drawn faces' own nodes, %zu held on %zu anchors\n",
+                n_held, anchor_voxels.size());
   } else {
     for (int k = 0; k < grid.nz; ++k)
       for (int j = 0; j < grid.ny; ++j)
@@ -1611,6 +1665,23 @@ std::string no_external_load_message(const ProductionRunSetup& setup,
   if (setup.load_group_reports.empty())
     msg += "no load groups were declared";
   return msg;
+}
+
+std::size_t tag_face_by_stage(VoxelGrid& grid, const StepModel& model, int face_id,
+                              VoxelTag tag) {
+  return tag_face_m(grid, model, face_id, tag);
+}
+
+std::size_t mask_face_by_stage(const VoxelGrid& grid, const StepModel& model, int face_id,
+                               MaskValue value, int depth_voxels, double depth_mm,
+                               DesignMask& mask) {
+  return mask_face_m(grid, model, face_id, value, depth_voxels, depth_mm, mask);
+}
+
+std::size_t mask_region_by_stage(const VoxelGrid& grid, const StepModel& model,
+                                 const ResolvedFaceRegion& region, MaskValue value,
+                                 int depth_voxels, double depth_mm, DesignMask& mask) {
+  return mask_region_m(grid, model, region, value, depth_voxels, depth_mm, mask);
 }
 
 }  // namespace topopt

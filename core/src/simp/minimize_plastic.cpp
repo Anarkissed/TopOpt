@@ -1794,7 +1794,10 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   // statement "every rung's solves converged". Called exactly once per loop iteration,
   // beside the matching result.rung_infeasible.push_back.
   auto record_rung_convergence = [&](bool non_convergent, int iteration,
-                                     double residual) {
+                                     double residual, double tolerance = 0.0) {
+    // The tolerance the failed solve ran at (0 = not recorded: the reader falls
+    // back to the configured one). Aligned with the three vectors below.
+    result.rung_non_convergent_tolerance.push_back(tolerance);
     result.rung_non_convergent.push_back(non_convergent ? 1 : 0);
     result.rung_non_convergent_iteration.push_back(iteration);
     result.rung_non_convergent_residual.push_back(residual);
@@ -2639,9 +2642,10 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
 
       const int nc_iter = variant.optimization.non_convergent_iteration;
       const double nc_resid = variant.optimization.non_convergent_residual;
+      const double nc_tol = variant.optimization.non_convergent_tolerance;
       result.evaluated.push_back(std::move(variant));
       result.rung_infeasible.push_back(0);
-      record_rung_convergence(true, nc_iter, nc_resid);
+      record_rung_convergence(true, nc_iter, nc_resid, nc_tol);
       record_draft_rung(draft_k, draft_gap, draft_escalated, draft_probe_flip, draft_probe_cg, draft_probe_tightmove);  // sentinel: non-convergent
       result.report.rejected.push_back(result.evaluated.back().report);
       assert(result.evaluated.size() <= ladder.size() &&

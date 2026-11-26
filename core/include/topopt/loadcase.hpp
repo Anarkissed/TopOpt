@@ -4,7 +4,9 @@
 #include <string>
 #include <vector>
 
-#include "topopt/to_stage_switch.hpp"  // TO rebuild: the stage in progress
+#include "topopt/to_stage_switch.hpp"
+#include "topopt/material_length.hpp"  // TO rebuild stage 2: the reading size per material
+#include "topopt/printed_mass.hpp"     // TO rebuild stage 2: printed grams of the drawn part  // TO rebuild: the stage in progress
 #include "topopt/clearance.hpp"    // ClearanceParams, ClearanceKind
 #include "topopt/face_region.hpp"  // FaceRegionSpec, ResolvedFaceRegion
 #include "topopt/fea.hpp"          // DirichletBC, NodalLoad
@@ -537,5 +539,26 @@ DesignMask build_clearance_overlay(
     int skip_index,
     std::vector<ProductionRunSetup::ClearanceReport>* reports,
     const std::vector<KeepRegion>& keeps = {}, long long* keep_air_voxels = nullptr);
+
+// TO rebuild stage 1: tag one face's voxels the way the stage switch says
+// (to_stage_switch.hpp): today's centre-within-half-a-voxel rule, or the voxels
+// the drawn face lies on. For the simple-job path (job.fixture_faces), which does
+// not go through build_production_setup. Works for a mesh pseudo-face too.
+std::size_t tag_face_by_stage(VoxelGrid& grid, const StepModel& model, int face_id,
+                              VoxelTag tag);
+// The same for a protection depth: `depth_voxels` layers on today's path,
+// `depth_mm` of true distance from the drawn face with stage 1 on. For callers
+// outside build_production_setup that preview what a run will freeze (the app
+// bridge's face_slab_preview), so the previewed count is the run's own.
+std::size_t mask_face_by_stage(const VoxelGrid& grid, const StepModel& model, int face_id,
+                               MaskValue value, int depth_voxels, double depth_mm,
+                               DesignMask& mask);
+// The same for a region. This is THE function a protection on a region is
+// frozen with (build_production_setup), and the one the lattice's region mask is
+// built with (region_lattice_mask), so with either switch value the lattice
+// region's voxels ARE the protection's voxels (bar R5) by construction.
+std::size_t mask_region_by_stage(const VoxelGrid& grid, const StepModel& model,
+                                 const ResolvedFaceRegion& region, MaskValue value,
+                                 int depth_voxels, double depth_mm, DesignMask& mask);
 
 }  // namespace topopt

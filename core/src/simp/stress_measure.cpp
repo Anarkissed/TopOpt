@@ -87,4 +87,29 @@ double peak_stress_over_size(const VoxelGrid& grid, const std::vector<double>& f
   return peak;
 }
 
+std::vector<double> interlayer_tension_field(
+    const VoxelGrid& grid, const std::vector<std::array<double, 6>>& stress,
+    const Vec3& build_dir) {
+  const double len = std::sqrt(build_dir.x * build_dir.x + build_dir.y * build_dir.y +
+                               build_dir.z * build_dir.z);
+  if (len < 1e-12)
+    throw std::invalid_argument("interlayer_tension_field: build_dir is zero length");
+  if (stress.size() != grid.voxel_count())
+    throw std::invalid_argument("interlayer_tension_field: stress size != voxel_count");
+  const Vec3 n{build_dir.x / len, build_dir.y / len, build_dir.z / len};
+  std::vector<double> out(grid.voxel_count(), 0.0);
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        if (!grid.solid(i, j, k)) continue;
+        const std::size_t idx = grid.index(i, j, k);
+        const std::array<double, 6>& s = stress[idx];
+        const double t = n.x * n.x * s[0] + n.y * n.y * s[1] + n.z * n.z * s[2] +
+                         2.0 * n.x * n.y * s[3] + 2.0 * n.y * n.z * s[4] +
+                         2.0 * n.z * n.x * s[5];
+        if (t > 0.0) out[idx] = t;
+      }
+  return out;
+}
+
 }  // namespace topopt

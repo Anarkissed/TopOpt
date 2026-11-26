@@ -135,9 +135,11 @@ JobSetup build_job_setup(const JobDescription& job, const StepModel& model,
     grid = voxelize(model.mesh, job.resolution);
     std::size_t tagged = 0;
     for (const int f : S.fixture_face_ids)
-      tagged += model_is_mesh
-                    ? tag_mesh_face(grid, model, f, VoxelTag::Fixture)
-                    : tag_step_face(grid, model, f, VoxelTag::Fixture);
+      tagged += to_stage1_on()
+                    ? tag_face_by_stage(grid, model, f, VoxelTag::Fixture)
+                    : model_is_mesh
+                        ? tag_mesh_face(grid, model, f, VoxelTag::Fixture)
+                        : tag_step_face(grid, model, f, VoxelTag::Fixture);
     if (tagged == 0)
       throw JobError("fixture faces tagged no voxels (resolution too coarse "
                      "for the selected faces?)");
@@ -262,5 +264,10 @@ JobSetup build_job_setup(const JobDescription& job, const StepModel& model,
     // hardware's full count (which is what "he needs his machine" means).
     options.plsm.threads = production_matfree_thread_count();
   }
+  // TO rebuild stage 2: the size the deciding stress is read over, from the job's
+  // material (half the lowest published length; 0 where nothing is published).
+  // Set LAST: the production load case replaces the whole options value above.
+  if (strength_mode() == StrengthMode::Size)
+    options.stress_reading_mm = reading_size_for_job_mm(job.material);
   return S;
 }

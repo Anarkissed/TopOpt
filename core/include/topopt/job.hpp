@@ -1557,6 +1557,9 @@ struct AnalyzeJobResult {
   bool analyzed_mesh = false;          // true iff a substitute mesh was re-voxelized
   std::string analyzed_mesh_path;      // that mesh's path ("" when analyzing the solid)
   double voxel_mass_grams = 0.0;       // analysis.mass_grams (the re-analyzed voxel mass)
+  // TO rebuild stage 2: the same voxels printed solid (analysis.mass_grams_solid);
+  // equal to voxel_mass_grams on today's path.
+  double voxel_mass_solid_grams = 0.0;
   double mesh_mass_grams = 0.0;        // enclosed-volume mass of the analysed mesh (0 if solid)
   double margin_required = 0.0;        // the margin_stop the gate USED (job.margin_stop in
                                        // self-weight mode; the production default in loadcase

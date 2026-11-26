@@ -2,7 +2,79 @@
 
 Status 2026-11-22: APPROVED by the reviewer (rulings 06:18Z and 06:48Z); both helper prompts below are approved as they stand. Helpers start after the stage 0 move is released and the maintainer has created their channels. The maintainer's OK on helpers: "Yes two helpers are good as long as they're Opus 5.5". Each helper gets its own small channel (reviewer, TOReview, the helper) and never posts in #TORebuildGroup.
 
+## History rewritten 2026-11-25 20:50 EST (the maintainer: "Yes. Rewrite the history")
+
+The lead's mistake: commit 0ee02fda added `docs/design/to-rebuild/papers/` (29 copyrighted PDFs) with a whole-folder `git add`, and it was pushed to the public repository. The branch was rewritten from that commit on, without the folder, and force-pushed; the files it ends in are identical. Commit ids written in these documents before this note are the OLD ones where they fall in that range:
+
+| old | new |
+|---|---|
+| 0ee02fda | d6047d2b |
+| 15ebb451 | 7173c540 |
+| ca157cb7 | 6ee89639 |
+| bf4aa356 | 05f33677 |
+| 6c5ff9eb | ecc3ebbb |
+| 33451f43 | a49fd8da |
+| 4d495dd6 | 52c4d894 |
+| 8b3656ba | e74b4c08 |
+
+Rule from now on: files are added to a commit BY NAME, never by folder, and `git show --stat HEAD` is read before every push.
+
+## Resumed 2026-11-25 19:35 EST
+
+Paused at 94 % weekly usage for five minutes; the maintainer: "Keep going, do not stop, I will reset at 100%". The work tick is back; helpers told. First on the queue now: job B's credited cells and the frozen-mask check for LatticeReview; the reviewer's ruling on stage 2; Top Motor Mount both ways and the pad depths (lock), then the stage 1 report.
+
+## Work queue (the lead's own; kept stocked; top item first)
+
+The maintainer's order (2026-11-25): never sit waiting on the lock. Every wake-up records what finished, then does the next open item here. Rewritten 2026-11-25 22:30.
+
+WAITING ON OTHERS (check each tick, act the moment it arrives):
+- The reviewer: which reference a reading over a length is judged against (the textbook peak, or the reading's own true value; asked 02:10Z and 02:26Z on TOReview). Until then nothing more goes into `analyze.cpp`.
+- The lock (queued, will start by themselves): `stage1_sixth.sh` Top Motor Mount from the drawn faces, then the stand at pad 2 and 4.5 mm; `stage1_seventh.sh` the stand at pad 3 mm on the corrected clamp. Record all four in `stages/stage-1-true-loads.md`.
+
+OPEN, mine, no lock needed:
+1. STAGE 1 REPORT to the reviewer (the flip is ruled on it). Write it as soon as the lock runs are recorded. It must carry: hand-over item 3 for #362 in the same release; `lattice_depth_tie` 0a and `test_print_frame.cpp:721` in their `face` forms with the note on the frame's load rule; LatticeReview's interim guard (13b28529 on claude/organic-engine); rule P (time within 10 %) re-read on a quiet machine; the corrected-clamp tables; the bearing table.
+2. Stage 2, condition (e): one sheet job and one Organic job loaded on lattice in the before/after table (`test_to_stage1_lattice_check`'s stage 2 arm). Ask LatticeReview or #362 for the job keys of a sheet (gyroid) lattice file job; the turned-box C from the test's earlier version is the Organic one.
+3. Stage 2, "saved": today `volume_saved_fraction` = 1 - printed voxels / part voxels. With printed grams it must be 1 - printed grams of the version / printed grams of the DRAWN part at the same walls and infill. Needs the drawn part's printed grams once per job (`printed_mass` on the part grid) and a report value the app reads: write the exact proposal for #362, then the core half behind the switch.
+4. Stage 2 on optimised designs at res 128 (lock, about 20 min a run): the stand with `TOPOPT_STRENGTH` unset / `stiff` / `size` with a typed 1.8 mm, drawn-face loads. Res 64 taught nothing (voxel 3.4 mm).
+5. Stage 2, the across-layer reading over the same size (the maintainer's decision): `interlayer_tension_field` exists; wiring it into `analyze.cpp` waits on the reviewer.
+6. Printed grams against a slicer: one of his parts sliced at 50 % infill and six walls would check the 0.943 share. He said he has no capacity for slicer work now; ask again when a part is on his printer anyway.
+7. The optimiser side of the floating pieces (why a design step cuts loaded pieces off): after TOSurface's branch is merged.
+8. Merge review of TOSurface's and TOSolver's branches when they report a stage; TOSolver's one-commit solver-settings change in my files.
+9. "Best I can do" probe build, once stages 1, 3 and 5 can be combined in one sparse tree.
+
+DONE and recorded (kept short): stage 0 move; tests A, C/D, E (both halves), K; the stand both ways (old clamp); jobs A to C with LatticeReview's final statement; the sideways lip; bearing anchors; the as-drawn tables re-made on the corrected clamp; the reviewer's bar measured; the reading's own true value; printed grams verified on a run; the stage 2 switch shown not to reach the lattice check.
+
 ## 0. Where the work stands (kept current; newest first)
+
+**2026-11-25, 19:10 EST.** Work done while the lock was held (release 20's suite since 14:44).
+
+- Test E, second half (thick ring, pressure on its curved inner face through the drawn-face loader; textbook 2.333; 89af53d1), first run: the loaded area is the drawn face's to 0.00 % at all four resolutions. All-or-nothing 2.19 / 2.28 / 2.34 / 2.32 (worst miss 6.3 %, spread 6.9 %); fill with E x fill^3 (today) 4.10 / 3.94 / 3.54 / 3.77 (miss 75.7 %, spread 15.8 %); fill with E x fill 2.16 / 2.24 / 2.22 / 2.23 (miss 7.2 %, spread 3.7 %). Read over 0.9 / 1.8 / 3.6 mm: spread 3.7 / 8.2 / 2.1 %. So today's rule for a cut voxel (stiffness E x fill^3) reads 76 % high on a loaded curved face, where on the plate it read 16 % high; E x fill is steady and 7 % low. A-01 is confirmed twice over and is stage 2's first change.
+- As-drawn check on the stand, Top Motor Mount and Stand v4 with the three load settings: in `stages/stage-1-true-loads.md` (new; the stage's running report, with the lines #362 changes at the flip).
+- Material length from published values (maintainer: "use published values"): `01-research.md`, last section. Printed PLA 2.4 to 4.6 mm, printed ABS 4.1 mm.
+- Read TOSurface's branch and stage file (ea406c7f): on the stand at res 128 the wall error's median goes 0.160 to 0.000 mm; Top Motor Mount got worse (0.011 to 0.083) and it is separating two causes. Nothing to correct.
+- Disk fell to 13 GB (under the 15 GB floor); #362 cleared 7 GB of finished builds; 22 GB free.
+
+**2026-11-25, 17:00 EST.** Input for stage 8 from #362 (TORebuildGroup, 21:57Z): sheet laws per member width, 2 to 8 cells, on claude/notes28-sheet-laws (e32b2c47; evidence/2026-11-25-sheet-laws-thin-members). Open decisions the report leaves to the reviewer and stage 8: the knockdown rises with block width (8-cell reads 1.6 to 1.75 times the 2-cell); every row's peak sits in the cut cells beside the gripped faces (the grip artifact already ruled on for struts); off the grips every row is below today's law; today's law reads low by its own method. Measured floor 2 cells for both sheets. Nothing is wired into a verdict. Stage 8 must not take a law from these tables before the reviewer rules on the grip question.
+
+**2026-11-25, 09:10 EST.** The refused 0.30 version on the drawn-face path is explained (full log kept: `agent-scratch/toreview/testK_face_full.log`). It is solve 19: the design at that step is in 17 separate pieces, the multigrid solve grows its error (relative residual 136 after 2,500 cycles), and the Jacobi-CG fallback runs to its cap (122,682 iterations) at residual 0.092, so the version is refused. On today's path the same part goes through 8 to 11 pieces and its fallbacks happen to finish inside the cap. So this is not a fault of the drawn-face loader: it is the two faults already on record meeting (the optimiser breaks the part into pieces; the solver cannot settle a broken part quickly), and which side of the cap a run lands on is luck. Stage 1's report says so; the fix belongs to stage 5 (solver) and the stage 3/4 boundary (no loaded piece left unattached). Also seen: the refusal's own wording is wrong ("tolerance 1e-08 ... after 4 iterations" for a solve run at 1e-04 for 122,682 iterations); handed to TOSolver.
+
+**2026-11-25, 07:55 EST.** Test K with stage 1's switch on (TOPOPT_FACE_LOADS=face), demo job.
+
+- First attempt (3,626 s): 14 files, 0 differ, but the numbers were today's to the digit: the simple-job path (job.fixture_faces, `to_setup.inc`, `to_analyze.inc`) tagged the old way and never read the switch. Fixed at 7f6c9aaa (`tag_face_by_stage`, loadcase.hpp). #362's own lattice strength-check code in run_job.cpp tags the old way in two more places (near lines 11337 and 12647); those go on the replacement list handed to #362 at the flip.
+- Second attempt, on the drawn-face path for real (2,927 s): 11 files compared, 0 differ; gate passes. Rule 21 holds with the switch on, on this job.
+- What changed on the demo part with the drawn-face path: version 0.70 margin 1,176 (today 965), version 0.50 margin 437 (today 301), and version 0.30 is REFUSED ("linear solve did not converge ... stalled at residual 0.0922 after 4 iterations"), where today it ships with margin 70. Same in both runs. Not yet explained. Likely the same family as TOSolver's finding on this part (the design step leaves loaded pieces with no path to a support, which no solve can settle); owed: find which solve stalls and why the held voxels of the drawn-face path change it, before the stage 1 report.
+- From TOSolver (stage 5 step 1, 3ed70347): the slow solves have two causes, an unstable smoother weight (0.6) and a geometric coarse grid that does not suit a part's shape; the existing disarmed algebraic level cuts Top Motor Mount from 1,584 iterations to 58-107. Its plan is with the maintainer for discussion. Mine from it: a design step must not leave a loaded piece unattached (optimiser fault, stage 3/4 boundary).
+
+**2026-11-25, 06:20 EST.** Test K answered. The rerun (5,351 s) kept both runs and showed where they differ: the 3MF library stamps random p:UUID ids on every write (three per file); the .meta carries two wall-clock times and the output folder's own path; build_orientation.json carries one wall-clock time. With exactly those blanked, 14 files compared, 0 differ: the shape, the fields and the report are the same bytes both times, with an unrelated solve in between. Control: one changed byte in a field file and one renamed key are both caught. The test now blanks those three things and nothing else, has `--compare A B` for two kept folders, and is registered as a gate under `ctest -C Long` (over an hour while the demo part's solves fall back to the slow solver, so a plain ctest skips it). Rule 21 is met on today's path; it must be run again with stage 1's switch on before the flip.
+
+**2026-11-25, 04:30 EST.** Measured beside #362's lock holder (build on three cores, no lock), from commit e704ba16. Both helpers started (channels TOSurface-Group, TOSolver-Group).
+
+- Test E, plate with a hole at 30 degrees, textbook 3.03, hole radius 3 / 4 / 5 / 6 voxels, multigrid solve, 248 s: all-or-nothing 2.20 / 2.50 / 2.65 / 2.73 (worst miss 27.5 %, spread 24.4 %); fill with E x fill^3 (today) 3.42 / 3.43 / 3.15 / 3.52 (16.2 %, 11.7 %); fill with E x fill 2.48 / 2.69 / 2.66 / 2.84 (18.3 %, 14.7 %). None meets rule 5 (5 % and 10 %). Read over a fixed size on the E x fill arm, spread only: 0.9 mm 14.7 %, 1.8 mm 6.3 %, 3.6 mm 7.8 %. So a fixed-size reading does settle across resolutions; no arm yet reads the right peak.
+- Test K, the demo job twice with an unrelated solve between, first run ever (7,596 s on a shared machine): 14 files compared, 7 differ: each version's .3mf and _alpha.meta (sizes differ by 0 to 8 bytes). The other 7 files are identical, and both runs print the same margins, masses and solver iteration counts, so the suspicion is a time or id written into those files, not the geometry. NOT YET SHOWN: the test deleted both runs. It now prints where each pair first differs and keeps both runs when any differ; it reruns with the next lock job. Stage 1's switch cannot flip until this test passes (reviewer).
+- Seen in test K, handed to TOSolver: on the demo part (48x32x48) the multigrid solve diverges from solve 9 on (relative residual grows to 38 to 326) and every such solve falls back to Jacobi-CG for 17,000 to 70,000 iterations. The same in both runs.
+- For stage 3 (TOSurface's ask): the pad and protected faces are also handed on as geometry (`frozen_sets.hpp`, `MinimizePlasticOptions::frozen_sets`, commit be77631b), filled only with the switch on.
+
+- Owed in stage 2 (from #362, 2026-11-25): the certificate's member-width guard measures width on the voxel staircase and reads about two voxels thin (52.3 mm read as 47.8), so an all-lattice part is called "not certified" for too few cells across. #362 fixed the sheet types only, outside analyze.cpp (branch claude/notes28-sheets-strength, 2f5ac5ce, "ANALYZE GUARD (sheets):"); all-lattice STRUT parts still get the thin reading. Stage 2 is held to `core/tests/validation/test_lattice_sheets_strength.cpp`, block "THE GUARD'S CASE", line "[guard member]" (gyroid box 49 x 57.6 x 62.4 mm, 4.8 mm cells: 1.3 cells across before, 10.208 after), and must give the strut case the same true-width reading.
 
 **2026-11-24, night.** Hold lifted by the maintainer ("Get started right away"; 24-hour wait waived; machine shared with #362 through HEAVY.lock and the channel #362_and_TOReview).
 

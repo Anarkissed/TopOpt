@@ -16,6 +16,18 @@ if(Eigen3_FOUND)
   add_executable(test_to_strength_known_stress tests/unit/test_to_strength_known_stress.cpp)
   target_link_libraries(test_to_strength_known_stress PRIVATE topopt)
   add_test(NAME to_strength_known_stress COMMAND test_to_strength_known_stress)
+  # Second half: a thick ring with pressure on its curved inner face, put on by
+  # stage 1's drawn-face loader. Measures only until stage 2.
+  add_executable(test_to_strength_known_ring tests/unit/test_to_strength_known_ring.cpp)
+  target_link_libraries(test_to_strength_known_ring PRIVATE topopt)
+  add_test(NAME to_strength_known_ring COMMAND test_to_strength_known_ring)
+endif()
+
+# Stage 2: printed grams at the user's walls and infill (ledger M-07).
+if(Eigen3_FOUND)
+  add_executable(test_to_printed_mass tests/unit/test_to_printed_mass.cpp)
+  target_link_libraries(test_to_printed_mass PRIVATE topopt)
+  add_test(NAME to_printed_mass COMMAND test_to_printed_mass)
 endif()
 
 # Tests C and D: the area a load really lands on, and protection depth in mm.
@@ -29,7 +41,11 @@ endif()
 
 # Test K: the same job twice in one process, an unrelated solve between, same
 # bytes. Runs the demo fixture through run_job, so it needs what test_cli needs.
-# Measures only until its first result is on record; then --gate.
+# First result on record 2026-11-25 (same shape both times; only 3MF ids and
+# wall-clock times differed, which the test blanks), so it runs as a gate.
+# It takes over an hour while the demo part's solves fall back to the slow
+# solver (handed to stage 5), so a plain ctest skips it. Run it with:
+#   ctest -C Long -R to_same_job_twice
 if(TARGET test_cli)
   add_executable(test_to_same_job_twice tests/validation/test_to_same_job_twice.cpp)
   target_link_libraries(test_to_same_job_twice PRIVATE topopt)
@@ -38,7 +54,38 @@ if(TARGET test_cli)
     MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
     CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
-  add_test(NAME to_same_job_twice COMMAND test_to_same_job_twice)
+  add_test(NAME to_same_job_twice CONFIGURATIONS Long
+           COMMAND test_to_same_job_twice --gate)
+  set_tests_properties(to_same_job_twice PROPERTIES TIMEOUT 14400)
+endif()
+
+# Stage 1 against the LATTICE strength check (reviewer's ruling; LatticeReview's
+# three made jobs): the stage switch off and on. Holds one rule, that the switch
+# does not move the laid lattice; prints the rest for the stage report. Slow, so
+# a plain ctest skips it:  ctest -C Long -R to_stage1_lattice_check
+if(TARGET test_lattice_strength)
+  add_executable(test_to_stage1_lattice_check tests/validation/test_to_stage1_lattice_check.cpp)
+  target_link_libraries(test_to_stage1_lattice_check PRIVATE topopt)
+  target_compile_definitions(test_to_stage1_lattice_check PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME to_stage1_lattice_check CONFIGURATIONS Long COMMAND test_to_stage1_lattice_check)
+  set_tests_properties(to_stage1_lattice_check PROPERTIES TIMEOUT 7200)
+endif()
+
+# Stage 1, M6 (LatticeReview for TOReview): on the strength grid, the protected skin against the lattice cubes, the
+# switch off and `face` (jobs A and B as test_to_stage1_lattice_check makes them). Prints the counts, pins nothing.
+#   ctest -C Long -R to_stage1_lattice_masks
+if(TARGET test_lattice_strength)
+  add_executable(test_to_stage1_lattice_masks tests/validation/test_to_stage1_lattice_masks.cpp)
+  target_link_libraries(test_to_stage1_lattice_masks PRIVATE topopt)
+  target_compile_definitions(test_to_stage1_lattice_masks PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME to_stage1_lattice_masks CONFIGURATIONS Long COMMAND test_to_stage1_lattice_masks)
+  set_tests_properties(to_stage1_lattice_masks PROPERTIES TIMEOUT 7200)
 endif()
 
 # Tests B, F and J (stage 3): drawn faces exact after export, ripple at 1 to 10 mm,

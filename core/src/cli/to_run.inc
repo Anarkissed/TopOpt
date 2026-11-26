@@ -2484,6 +2484,13 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
         i < result.pipeline.rung_non_convergent_residual.size()
             ? result.pipeline.rung_non_convergent_residual[i]
             : 0.0;
+    // The tolerance the failed solve really ran at (the optimiser's loose or tight
+    // one), not the configured default, which is what this line used to print.
+    const double nc_tol =
+        i < result.pipeline.rung_non_convergent_tolerance.size() &&
+                result.pipeline.rung_non_convergent_tolerance[i] > 0.0
+            ? result.pipeline.rung_non_convergent_tolerance[i]
+            : options.simp.cg_tolerance;
     std::fprintf(stderr,
                  "WARNING: rung %zu (vf %.2f) was REJECTED — %s. A linear solve did "
                  "not reach the CG tolerance %.3g: it stalled at residual %.3g after "
@@ -2492,7 +2499,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                  "already-accepted variant is unaffected. See report.json "
                  "rejected_variants and run_info.json rung_non_convergent.\n",
                  i, v.requested_volume_fraction, kRungNonConvergentReason,
-                 options.simp.cg_tolerance, nc_resid, nc_iter);
+                 nc_tol, nc_resid, nc_iter);
     std::fflush(stderr);
   }
 
@@ -2760,6 +2767,30 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       } catch (const std::exception& e) {
         std::fprintf(stderr, "[as drawn] could not be checked: %s\n", e.what());
       }
+    }
+  }
+
+  // TO rebuild stage 2 (ledger M-07): what the part AS DRAWN would take on the
+  // printer at this job's walls and infill, beside its solid grams, so a version's
+  // printed grams can be read as a saving against the real thing. No solve: the
+  // wall-and-core model on the part's own voxels.
+  if (to_stage2_on()) {
+    try {
+      std::vector<double> drawn(grid.voxel_count(), 0.0);
+      for (std::size_t idx = 0; idx < drawn.size(); ++idx)
+        if (grid.tags[idx] != VoxelTag::Empty) drawn[idx] = 1.0;
+      const KnockdownSpec kd = knockdown_spec_for(options);
+      const PrintedMass pm = printed_mass(
+          grid, drawn, 0.5,
+          local_member_thickness_mm(grid, drawn, 0.5, AnalysisKnobs{}.thickness_cap_voxels),
+          kd.wall_thickness_mm, kd.infill_percent, materials.at(job.material).density_g_cm3);
+      result.pipeline.report.drawn_part.evaluated = true;
+      result.pipeline.report.drawn_part.printed_grams = pm.grams;
+      result.pipeline.report.drawn_part.solid_grams = pm.solid_grams;
+      std::fprintf(stderr, "[drawn part] %.2f g printed of %.2f g solid (wall share %.3f)\n",
+                   pm.grams, pm.solid_grams, pm.wall_share);
+    } catch (const std::exception& e) {
+      std::fprintf(stderr, "[drawn part] printed grams could not be worked out: %s\n", e.what());
     }
   }
 

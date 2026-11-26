@@ -250,9 +250,11 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
         resolve_selectors(result.model, job.fixture_faces, "fixture_faces");
     std::size_t tagged = 0;
     for (const int f : result.fixture_face_ids)
-      tagged += model_is_mesh
-                    ? tag_mesh_face(model_grid, result.model, f, VoxelTag::Fixture)
-                    : tag_step_face(model_grid, result.model, f, VoxelTag::Fixture);
+      tagged += to_stage1_on()
+                    ? tag_face_by_stage(model_grid, result.model, f, VoxelTag::Fixture)
+                    : model_is_mesh
+                        ? tag_mesh_face(model_grid, result.model, f, VoxelTag::Fixture)
+                        : tag_step_face(model_grid, result.model, f, VoxelTag::Fixture);
     if (tagged == 0)
       throw JobError(
           "analyze: fixture faces tagged no voxels (resolution too coarse "
@@ -469,6 +471,10 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   // on the identical rule. THE ONE builder (knockdown_spec_for) — shared with the
   // optimizer's per-rung gate and the on-device bridge so all three agree by
   // construction. width_aware defaults false → the scalar f^1.5 gate.
+  // TO rebuild stage 2 (see to_setup.inc); set here, after the load case has
+  // replaced the options.
+  if (strength_mode() == StrengthMode::Size)
+    options.stress_reading_mm = reading_size_for_job_mm(job.material);
   const KnockdownSpec knockdown = knockdown_spec_for(options);
 
   // ── THE single analysis solve — no optimization ─────────────────────────────
@@ -516,6 +522,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   std::optional<BuildFrameRotation> analyze_bake;
   if (bake_plan.bake) analyze_bake = build_frame_rotation(applied_build_dir);
   result.voxel_mass_grams = a.mass_grams;
+  result.voxel_mass_solid_grams = a.mass_grams_solid;  // TO rebuild stage 2
 
   {
     std::error_code ec;

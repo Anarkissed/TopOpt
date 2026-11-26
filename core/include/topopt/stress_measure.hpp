@@ -14,8 +14,10 @@
 // Pure C++/std.
 #pragma once
 
+#include <array>
 #include <vector>
 
+#include "topopt/mesh.hpp"   // Vec3
 #include "topopt/voxel.hpp"
 
 namespace topopt {
@@ -34,5 +36,16 @@ std::vector<double> stress_over_size(const VoxelGrid& grid,
 double peak_stress_over_size(const VoxelGrid& grid, const std::vector<double>& field,
                              const std::vector<double>& density, double iso,
                              double diameter_mm);
+
+// The tension ACROSS the layers in each voxel, max(0, n . sigma . n) for the
+// unit build direction n: the same quantity max_interlayer_tension (orient.hpp)
+// takes the maximum of, kept per voxel so it can be read over a size like the
+// in-plane stress (the maintainer's decision, 2026-11-25: the same size across
+// the layers as in the plane). `stress` is per voxel, Voigt [xx, yy, zz, xy, yz,
+// zx] with true shear stresses; voxels that are not solid read 0. Throws
+// std::invalid_argument on a size mismatch or a zero build direction.
+std::vector<double> interlayer_tension_field(
+    const VoxelGrid& grid, const std::vector<std::array<double, 6>>& stress,
+    const Vec3& build_dir);
 
 }  // namespace topopt
