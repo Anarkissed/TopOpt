@@ -104,6 +104,10 @@ A 56 x 56 x 32 mm box ON the grid with one top edge chamfered (9 in, 7 down, abo
 
 Reading: with the loaded face a real off-grid face, the peak stress beside it falls to a third (0.048 to 0.015 MPa) and the margin rises 32 to 54 %. Today's path, on a 38-degree face, tags a staircase of voxels and loads their exposed faces, sides included; the drawn-face path loads the chamfer's own area along its own outline. The earlier turned-box versions of B and C (above) stay on record: they are where the frame's load rule was seen to move the weakest strut both ways.
 
+### CORRECTION (LatticeReview, 2026-11-25 19:40): what a job held on the `face` path
+
+The "[control]" table above counts the TEST's own call to `face_clamp_bcs`. No job called it: on `face`, a glued anchor still clamped all eight corners of every voxel the face lies on (two node planes on job A). So every `face` number above (the as-drawn tables, the stand, jobs A to C) was made with today's one-voxel-thick clamp and the new LOADS only, and the 13 % on job A is the loads alone (the 4.5 % of the force that today lands on the side faces), not the thinner clamp. Fixed in the commit after 3d13ced9: with `face`, a glued anchor holds the drawn face's own nodes (scenario jobs keep the voxel clamp). EVERY `face` measurement in this file is to be re-made on that build before the stage report; until then read them as "new loads, old clamp". `face_spring` rows were already held by the face's own nodes.
+
 ## Measured: the sideways lip (LatticeReview's question)
 
 A face that is PART of a flat side (a 20 x 20 mm patch in a 60 x 40 mm top; `test_to_true_loads`, table "[lip]"). Frozen voxels with their centre outside the prism under the patch:

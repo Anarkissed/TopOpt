@@ -736,6 +736,28 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
     any_fixture = n_springs > 0;
     std::printf("[loadcase] anchors: held by area springs, %zu nodes on %zu anchors\n",
                 n_springs, anchor_voxels.size());
+  } else if (face_load_mode() == FaceLoadMode::Face && !scenarios) {
+    // TO rebuild stage 1, "face": a glued anchor holds the nodes of the DRAWN face
+    // (every node that stands for at least a fifth of a cell-face of it), not all
+    // eight corners of every voxel the face lies on, which is a clamp one voxel
+    // thick (LatticeReview's catch, 2026-11-25: the job path still did that).
+    // Scenario jobs keep the voxel clamp below.
+    std::size_t n_held = 0;
+    for (const MinimizePlasticOptions::AnchorVoxels& a : anchor_voxels) {
+      const std::vector<FacePiece> pieces =
+          a.face_id >= 0
+              ? face_pieces(model, {a.face_id}, 0.5 * grid.spacing)
+              : region_pieces(model, region_or_throw(a.region_id, "load case anchor"),
+                              0.5 * grid.spacing);
+      for (const DirichletBC& b : face_clamp_bcs(grid, face_node_areas(grid, pieces)))
+        if (b.component == 0) {
+          clamp_node(b.node);
+          ++n_held;
+        }
+    }
+    any_fixture = n_held > 0;
+    std::printf("[loadcase] anchors: the drawn faces' own nodes, %zu held on %zu anchors\n",
+                n_held, anchor_voxels.size());
   } else {
     for (int k = 0; k < grid.nz; ++k)
       for (int j = 0; j < grid.ny; ++j)

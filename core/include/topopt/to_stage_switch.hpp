@@ -6,8 +6,9 @@
 // STAGE 1 (true loads and honest results). TOPOPT_FACE_LOADS:
 //   unset / "voxel" : today's behaviour everywhere. The default until the gate.
 //   "face"          : loads, pads and protection depths from the drawn face
-//                     (face_loads.hpp), pads and protections in mm; anchors clamp
-//                     the voxels the face lies on; and the optimiser's stop rule
+//                     (face_loads.hpp), pads and protections in mm; a glued
+//                     anchor holds the drawn face's own nodes (scenario jobs
+//                     still clamp the voxels it lies on); the optimiser's stop rule
 //                     watches the design's own stress, not the stress in the
 //                     voxels a load or an anchor sits on (ledger P-15).
 //   "face_spring"   : as "face", and each anchor node is held by a spring in
