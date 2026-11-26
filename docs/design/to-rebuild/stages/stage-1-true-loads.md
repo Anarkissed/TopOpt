@@ -53,6 +53,21 @@ Reading: Base is the part V-01 hurts. Today its margin jumps up and down by a fa
 
 The reading stands: Base stops jumping with resolution (a factor of eight today; a steady fall here), and the parts whose faces sit well in the grid do not move. What the corrected clamp changed against the first, wrong table: the coarse-resolution margins are lower (Base 0.79 for 0.97 at res 48; PillowBlock 1.32 for 1.80), because a face held on its own nodes concentrates the reaction where a slab one voxel thick spread it; from res 128 up the two agree within 5 %. PillowBlock now reads LOWER than today at every resolution: today's one-voxel-thick clamp was flattering it.
 
+### Bolt-bearing anchors (`loads.anchor_model` = "bearing"), the part as drawn (build 5e671a24, 2026-11-25 20:40)
+
+The first run of the bearing branch (bf4aa356). Springs / effective margin / peak MPa.
+
+| part | res | today | drawn face |
+|---|---|---|---|
+| Base | 48 | 24 springs / 0.56 / 23.9 | 90 / 0.64 / 20.9 |
+| Base | 64 | 64 / **0.04 / 309** | 156 / 0.50 / 26.8 |
+| Base | 96 | 100 / 0.27 / 49.4 | 290 / 0.33 / 40.6 |
+| PillowBlock | 48 | 488 / 1.39 / 9.7 | 950 / 1.62 / 8.3 |
+| PillowBlock | 64 | 803 / 1.09 / 12.3 | 1,501 / 1.30 / 10.4 |
+| PillowBlock | 96 | 1,669 / 0.90 / 14.9 | 2,955 / 1.02 / 13.2 |
+
+Reading: V-01 in its bearing form. On Base at res 64 today's path reads a margin of 0.04 (a 309 MPa peak) between 0.56 at res 48 and 0.27 at res 96: the bolt's springs land on the few voxel faces the alignment happens to tag. From the drawn face the same part reads 0.64 / 0.50 / 0.33, a steady fall. The drawn-face path carries two to four times as many springs (every node the face has a share of, where today takes only the exposed voxel faces within reach) and reads 12 to 22 % higher on these parts. One difference from today is left and stated: a node under a Load voxel is not skipped.
+
 ## Measured: optimised
 
 | run | today | drawn face |
