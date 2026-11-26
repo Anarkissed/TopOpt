@@ -2432,6 +2432,15 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
       SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
       TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME print_frame COMMAND test_print_frame)
+    # OS19's companion (2026-11-26): how deep a Solid finish under the loaded face clears the interim guard, swept on the
+    # check's own grid with the stage switch off and `face`; the result's solid_depth_needed_mm is held to the sweep.
+    add_executable(test_organic_bare_lattice_depth tests/validation/test_organic_bare_lattice_depth.cpp)
+    target_link_libraries(test_organic_bare_lattice_depth PRIVATE topopt)
+    target_compile_definitions(test_organic_bare_lattice_depth PRIVATE
+      MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+      SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+      TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME organic_bare_lattice_depth COMMAND test_organic_bare_lattice_depth)
   endif()
 
   # M6.2 integration test: the maintainer-authored demo job in
