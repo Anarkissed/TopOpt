@@ -788,6 +788,11 @@ std::string job_report_json(const JobReport& report) {
            ", \"required\": " + num_json(report.as_drawn.required) + ", \"passes\": " +
            (report.as_drawn.margin >= report.as_drawn.required ? "true" : "false") + "}\n";
   }
+  if (report.drawn_part.evaluated) {  // TO rebuild stage 2 (M-07), additive
+    out.insert(out.size() - 1, ",");
+    out += "  \"drawn_part\": {\"printed_grams\": " + num_json(report.drawn_part.printed_grams) +
+           ", \"solid_grams\": " + num_json(report.drawn_part.solid_grams) + "}\n";
+  }
   out += "}\n";
   return out;
 }
