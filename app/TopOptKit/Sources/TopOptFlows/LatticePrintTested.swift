@@ -19,15 +19,16 @@ struct LatticePrintTestedTag: View {
         if LatticeTypeCatalog.showsNotPrintTested(id, tested: settings.latticePrintTested) {
             Button {
                 let id = self.id
-                AppPopups.shared.show(LatticeTypeCatalog.notPrintTestedCaption, LatticeTypeCatalog.notPrintTestedInfo(name),
+                // ★ notes29 (his 11-25): an (i)'s centred notification ("Tap anywhere to continue"), its action kept
+                AppPopups.shared.help(LatticeTypeCatalog.notPrintTestedCaption, LatticeTypeCatalog.notPrintTestedInfo(name),
                                       action: (title: Self.markTitle, run: { AppSettings.shared.markPrintTested(id) }))
             } label: {
                 HStack(spacing: 3) {
                     Text(LatticeTypeCatalog.notPrintTestedCaption).font(.system(size: 10, weight: .medium)).lineLimit(1)
                         .minimumScaleFactor(0.85)
-                    Image(systemName: "info.circle").font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(DS.Color.warning.color)
+                    AppInfoGlyph()   // ★ notes29: the one (i)'s glyph
                 }
-                .foregroundStyle(DS.Color.warning.color)
                 .frame(maxWidth: .infinity, minHeight: 44)   // his 44 pt target
                 .contentShape(Rectangle())
             }

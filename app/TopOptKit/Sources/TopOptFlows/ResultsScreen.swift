@@ -580,7 +580,7 @@ public struct ResultsScreen: View {
     @ViewBuilder private var resolutionNote: some View {
         if let note = model.surfaceResolutionNote {
             HStack(alignment: .top, spacing: DS.Space.s) {
-                Image(systemName: "info.circle").font(.system(size: 12, weight: .semibold))
+                AppInfoGlyph()   // ★ notes29 (his 11-25): the one (i)'s glyph, on a note
                 Text(note).dsStyle(DS.TypeScale.caption)
                     .fixedSize(horizontal: false, vertical: true)
             }

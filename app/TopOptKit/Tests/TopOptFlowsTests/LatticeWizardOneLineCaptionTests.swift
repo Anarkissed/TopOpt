@@ -29,10 +29,15 @@ final class LatticeWizardOneLineCaptionTests: XCTestCase {
                            "★ still a paragraph on the page: \(gone)")
         }
         // ★ re-pinned 11-10 (his iPad note img04/05): the band's line is shorter, under Band (IPadNotes1110Tests)
-        for brief in ["An FEA decides the Sim settings.", "The lattice varies across the part.",
-                      "How far in the cells grade down.", "cell sizes available.",
-                      "The solve picks the cell everywhere.", "Each region graded from its own stress."] {
-            XCTAssertTrue(s.contains(brief), "★ the one-line brief is missing: \(brief)")
+        // ★ RE-PINNED (notes29, his 11-25: "about 5 words below ANY setting, with an (i)"): the briefs are five words, named
+        // in LatticeCaptions.swift (Notes29UITests holds every one to five)
+        for brief in [LatticeSetupWizard.simOnLine, LatticeSetupWizard.gradeOnLine, LatticeSetupWizard.shapeBand.brief,
+                      LatticeSetupWizard.autoCellLine, LatticeSetupWizard.densityByStressLine] {
+            XCTAssertLessThanOrEqual(LatticeCaptions.words(brief), 5, "★ \(brief)")
+        }
+        XCTAssertTrue(s.contains("cell sizes available."), "★ the band's steps line")
+        for named in ["Self.simOnLine", "Self.gradeOnLine", "Self.autoCellLine", "Self.densityByStressLine"] {
+            XCTAssertTrue(s.contains(named), "★ the one-line brief is missing: \(named)")
         }
     }
 

@@ -769,15 +769,9 @@ struct ResultsDetailInfo: View {
     let label: String
     let text: String
     var body: some View {
-        Button { AppPopups.shared.help(label, text) } label: {
-            Image(systemName: "info.circle").font(.system(size: 15, weight: .regular))
-                .foregroundStyle(DS.Color.textTertiary.color)
-                .frame(width: DSParts.target, height: DSParts.target).contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("About \(label)")
-        .accessibilityIdentifier("results-detail-info-" + label)
-        .background(ResultsChrome.publish("resultsDetailInfo-" + label))
+        // ★ notes29 (his 11-25): the one (i)
+        AppInfoButton(title: label, text: text, label: "About \(label)", id: "results-detail-info-" + label)
+            .background(ResultsChrome.publish("resultsDetailInfo-" + label))
     }
 }
 

@@ -109,7 +109,14 @@ struct LatticeSampleView: View {
     /// Test hook (FlexibleSaid.recording): how many times a kept sample was shown instead of a build.
     nonisolated(unsafe) static var recordedKept = 0
 
-    @StateObject private var camera = OrbitCameraModel()
+    @StateObject private var camera = LatticeSampleView.makeCamera()
+    /// ★ notes29 (his 11-25: "Choosing perspective/orthogonal view does nothing to the sample in the Settings tab. It should work
+    /// everywhere, including the sample part and the cube."): the sample's camera follows the app's one [Orthographic │
+    /// Perspective] choice (ViewProjection), Cells and In a part alike. It was a camera of its own, always perspective.
+    static func makeCamera() -> OrbitCameraModel { OrbitCameraModel(followsViewProjection: true) }
+    /// Test hook (FlexibleSaid.recording): the projection the sample last drew with.
+    nonisolated(unsafe) static var recordedOrthographic: Bool?
+    static func noteProjection(_ o: Bool) { if FlexibleSaid.recording { recordedOrthographic = o } }
     @State private var mesh: ViewerMesh?
     @State private var caption = LatticeSampleView.building
     @State private var failed = false
@@ -160,6 +167,7 @@ struct LatticeSampleView: View {
 
     var body: some View {
         GeometryReader { g in
+            let _ = Self.noteProjection(camera.camera.orthographic)   // ★ notes29: the test hook (recording only)
             sample
                 .onAppear { frameRegion(g.size, visible) }
                 .onChange(of: g.size) { frameRegion($0, visible) }

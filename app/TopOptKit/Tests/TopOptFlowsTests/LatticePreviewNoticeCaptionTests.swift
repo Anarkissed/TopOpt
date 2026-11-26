@@ -47,8 +47,11 @@ final class LatticePreviewNoticeCaptionTests: XCTestCase {
         }
         let body = String(ws[r.lowerBound...].prefix(3000))
         XCTAssertTrue(body.contains("Text(banner.caption)"), "the caption is what is drawn")
-        XCTAssertTrue(body.contains("Text(banner.text)"), "the sentence is behind the (i)")
-        XCTAssertTrue(body.contains(".popover(isPresented: $latticeNoticeInfoShown)"))
+        // ★ RE-PINNED (notes29, his 11-25: every (i) opens the front-and-centre notification): the sentence is behind the one
+        // (i), in the centred notification (it was a popover)
+        XCTAssertTrue(body.contains("AppInfoButton(title: \"About the lattice preview\", text: banner.text,"),
+                      "the sentence is behind the (i)")
+        XCTAssertFalse(body.contains(".popover("), "★ no popover")
         XCTAssertTrue(body.contains(".frame(maxWidth: CGFloat(LatticePreviewBanner.noticeMaxWidthPT), alignment: .leading)"))
         XCTAssertLessThanOrEqual(LatticePreviewBanner.noticeMaxWidthPT, 300,
                                  "the iPad chip starts ~310 pt in on the 13-inch iPad")

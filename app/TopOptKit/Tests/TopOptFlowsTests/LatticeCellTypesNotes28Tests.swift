@@ -324,7 +324,8 @@ final class LatticeCellTypesNotes28Tests: XCTestCase {
         // the cards draw it (never hand art) and the greyed ones say why
         let wiz = try src("LatticeSetupWizard.swift")
         XCTAssertTrue(wiz.contains("LatticeTypePictureView(id: e.id, greyed: !e.offered)"))
-        XCTAssertTrue(wiz.contains("if !e.offered, let why = e.reason { infoButton(\"type-\\(e.id)\", why, target: 44) }"))
+        // ★ RE-PINNED (notes29, his 11-25: the one (i) app-wide, always a 44 pt target — AppInfoButton): titled by the type
+        XCTAssertTrue(wiz.contains("if !e.offered, let why = e.reason { infoButton(\"type-\\(e.id)\", why, title: e.displayName) }"))
     }
 
     // MARK: 6b · the live sample lays and names each type by its own law
@@ -393,7 +394,9 @@ final class LatticeCellTypesNotes28Tests: XCTestCase {
         // the tag is under every card, its tap the centred pop-up with the one action
         let tag = try src("LatticePrintTested.swift"), wiz = try src("LatticeSetupWizard.swift")
         XCTAssertTrue(wiz.contains("LatticePrintTestedTag(id: e.id, name: e.displayName)"))
-        XCTAssertTrue(tag.contains("AppPopups.shared.show(LatticeTypeCatalog.notPrintTestedCaption")
+        // ★ RE-PINNED (notes29, his 11-25: an (i)'s notification says "Tap anywhere to continue", not OK): `help`, its one
+        // action kept
+        XCTAssertTrue(tag.contains("AppPopups.shared.help(LatticeTypeCatalog.notPrintTestedCaption")
                       && tag.contains("AppSettings.shared.markPrintTested(id)"))
     }
 

@@ -280,12 +280,15 @@ final class AppAsksToolRailHostedTests: XCTestCase {
                 XCTAssertFalse(rail.insetBy(dx: 0.5, dy: 0.5).intersects(f), "★ \(name): the open rail covers \(k) \(f)")
             }
             // each (i) holds exactly its text, and opens its popover
+            // ★ RE-PINNED (notes29, his 11-25: every (i) opens the front-and-centre notification): each (i) raises the centred
+            // notification with exactly its words (a popover's words could not be read back; the notification's can)
             for n in names {
                 XCTAssertEqual(CutRailInfo.text(n), owners[n], "★ \(n)'s (i) says exactly the owner's words")
+                AppPopups.shared.current = nil
                 try h.tap("info-cutRail-\(n)", "\(name): \(n)'s (i)", settle: 0.6)
-                XCTAssertNotNil(NSApp.windows.first { $0 !== h.window && $0.isVisible && $0.className.contains("Popover") },
-                                "★ \(name): \(n)'s (i) opens its popover")
-                NSApp.windows.filter { $0 !== h.window && $0.className.contains("Popover") }.forEach { $0.orderOut(nil) }
+                XCTAssertEqual(AppPopups.shared.current?.info, true, "★ \(name): \(n)'s (i) opens the centred notification")
+                XCTAssertEqual(AppPopups.shared.current?.text, owners[n], "★ \(name): \(n)'s words")
+                AppPopups.shared.current = nil
                 h.pump(0.4)
             }
             // a tap on a name picks the tool, open
