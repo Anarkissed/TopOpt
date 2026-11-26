@@ -23,6 +23,13 @@ if(Eigen3_FOUND)
   add_test(NAME to_strength_known_ring COMMAND test_to_strength_known_ring)
 endif()
 
+# Stage 2: printed grams at the user's walls and infill (ledger M-07).
+if(Eigen3_FOUND)
+  add_executable(test_to_printed_mass tests/unit/test_to_printed_mass.cpp)
+  target_link_libraries(test_to_printed_mass PRIVATE topopt)
+  add_test(NAME to_printed_mass COMMAND test_to_printed_mass)
+endif()
+
 # Tests C and D: the area a load really lands on, and protection depth in mm.
 # traction_loads lives in assembly.cpp (Eigen). Measures only until stage 1, which
 # adds --gate.
