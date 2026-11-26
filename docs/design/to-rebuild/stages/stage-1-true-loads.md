@@ -2,6 +2,31 @@
 
 Branch `claude/topopt-review-rebuild-3c317f`. Status: IN PROGRESS. Nothing here is released; everything is behind ONE switch, `TOPOPT_FACE_LOADS` (`to_stage_switch.hpp`): unset or `voxel` = today, unchanged; `face` = loads, anchors and depths from the drawn face; `face_spring` = the same with anchors held by springs in proportion to area. `TOPOPT_PAD_MM` sets the pad depth (default 3 mm).
 
+## THE STAGE REPORT (draft, 2026-11-25 23:10; sent to the reviewer when the three lock runs marked OWED are in)
+
+**What changes for him.** A force lands on the face he picked, over that face's real area, wherever the grid falls; a face he fixed is held on that face; a protected skin is as deep as the millimetres he typed. Today all three depend on where the voxel grid happens to sit.
+
+**The evidence, one line each (tables below).**
+1. Loaded area and centre, 18 grid alignments: today up to 13 % off and nothing loaded at all in 6 of 18; new, exact in 18 of 18. Protection depth: today up to a whole voxel off; new within 0.05 voxel.
+2. Base as drawn, res 48 to 192: today 0.67 / 0.18 / 0.40 / 0.17 / 0.30 / 0.08 (a factor of eight, up and down); new 0.79 / 0.66 / 0.45 / 0.37 / 0.37 / 0.32. Pressing and Top Motor Mount, whose faces sit well in the grid, do not move (the control). PillowBlock reads LOWER than today at every resolution: today's one-voxel-thick clamp flattered it.
+3. Bolt bearings on Base: today 0.56 / 0.04 / 0.27 at res 48 / 64 / 96; new 0.64 / 0.50 / 0.33.
+4. The stand optimised: OWED on the corrected clamp (with the old clamp: 2.40 / 86.6 g today, 2.68 / 88.0 g new, the same work to 2 % in solver cycles). Top Motor Mount optimised: OWED. Pad 2 / 3 / 4.5 mm: OWED.
+5. The same job twice gives the same bytes, switch off and on (test K).
+6. The lattice strength check (LatticeReview's final statement): the laid lattice never moves; solid and regular lattice sound; Organic steadier or no worse and stricter or equal on its jobs; stage 1 may flip for Organic as for the rest.
+
+**What it does NOT fix, said plainly.** The margin still falls as the grid gets finer (Base 0.79 to 0.32): that is the stress READING, stage 2. A design in many pieces can still stall the solver and lose a version (demo part, 17 pieces): stage 5 and the optimiser.
+
+**Mistakes of mine on the way, all corrected and re-measured.** The `face` path in a job still clamped whole voxels until LatticeReview caught it (every `face` number before 2026-11-25 19:45 was "new loads, old clamp"); the simple-job path ignored the switch at first; a first control table described my test, not a job.
+
+**What must land in the same release as the flip (ruling 2d).**
+- #362: hand-over items 1 to 3 below (the bridge's tag and depth previews; the two self-weight tagging sites of the lattice strength check in run_job.cpp).
+- `lattice_depth_tie` section 0a and `test_print_frame.cpp:721` in their `face` forms; 721 moves because of the frame's load rule, not the loader.
+- LatticeReview's interim guard (13b28529 on claude/organic-engine): a structural Organic job whose load lands on bare lattice is refused with one pop-up offering Skin or Solid.
+- Scenario jobs keep the voxel clamp for now (their anchors that are off in a scenario are weak springs on the same nodes); said here so it is not a surprise.
+- Rule P (run time within 10 %): to be re-read on a quiet machine; on a shared one the two stand runs did the same solver work and differed 40 % on the clock.
+
+**Asked of the reviewer.** Flip the default to `face` (glued anchors on the face's own nodes; bearings by drawn area) and delete the voxel path and the switch, in the release that carries the list above. `face_spring` (every anchor an area spring) is NOT proposed as the default: it changes what "fixed" means and has only the as-drawn tables behind it; keep it as a later option or drop it, his call.
+
 ## What is built
 
 | item | what | where |
