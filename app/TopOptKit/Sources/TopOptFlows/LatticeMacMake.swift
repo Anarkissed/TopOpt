@@ -225,7 +225,7 @@ public final class LatticeMacMake: ObservableObject {
     /// for your Mac".
     /// ★ notes27 (G1): `kind` — the job's lattice kind (the card's animation).
     func begin(project id: UUID, path: String?, run: RunModel? = nil, fileOnly: Bool = false, kind: Kind = .organic,
-               onMac: Bool = true, autoSteps: StructuralAutoSteps? = nil, cancel: @escaping () -> Void, now: Date = Date()) {
+               autoSteps: StructuralAutoSteps? = nil, onMac: Bool = true, cancel: @escaping () -> Void, now: Date = Date()) {
         events?.cancel(); events = nil
         self.autoSteps = autoSteps   // ★ notes30 STRUCTURAL AUTO
         projectID = id; self.path = path; cancelAction = cancel

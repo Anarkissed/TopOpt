@@ -44,7 +44,7 @@ final class StructuralAutoHostedTests: XCTestCase {
             h.pump(0.3)
             let mac = LatticeMacMake.shared
             let steps = StructuralAutoSteps(margin: 1.5)
-            mac.begin(project: UUID(), path: nil, fileOnly: true, kind: .cells, onMac: true, autoSteps: steps, cancel: {})
+            mac.begin(project: UUID(), path: nil, fileOnly: true, kind: .cells, autoSteps: steps, onMac: true, cancel: {})
             let card = try XCTUnwrap(waitFor(h, "structuralAutoCard"), "\(name): ★ the steps card")
             h.pump(0.5)
             XCTAssertNil(h.frames.all["macMakeCells"], "\(name): ★ no hexagons (his: no animation)")
@@ -73,7 +73,7 @@ final class StructuralAutoHostedTests: XCTestCase {
 
             // RED CONTROL: the old animated card draws the hexagons — the check above can fail
             StructuralAutoCard.controlAnimated = true
-            mac.begin(project: UUID(), path: nil, fileOnly: true, kind: .cells, onMac: true, autoSteps: steps, cancel: {})
+            mac.begin(project: UUID(), path: nil, fileOnly: true, kind: .cells, autoSteps: steps, onMac: true, cancel: {})
             XCTAssertNotNil(waitFor(h, "macMakeCells", seconds: 3), "\(name): RED CONTROL: the animation shows")
             mac.ended()
             StructuralAutoCard.controlAnimated = false

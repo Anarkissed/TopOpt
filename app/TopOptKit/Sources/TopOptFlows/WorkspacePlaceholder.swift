@@ -2140,8 +2140,8 @@ public struct WorkspacePlaceholder: View {
         let r = run
         LatticeMacMake.shared.begin(project: project.id, path: project.importedFile?.path, run: r, fileOnly: true,
                                     kind: .cells,   // ★ notes27 (G1): its animation shows hexagonal cells, never the vines
-                                    onMac: compute.activeRemote != nil,
-                                    autoSteps: auto.map { StructuralAutoSteps(margin: $0.inputs.margin) }, cancel: { r.cancel() })
+                                    autoSteps: auto.map { StructuralAutoSteps(margin: $0.inputs.margin) },   // ★ notes30
+                                    onMac: compute.activeRemote != nil, cancel: { r.cancel() })
         LatticeMacMake.shared.request = request
         launchFileRun(request, job: job, strengthJob: strengthJob, config: compute.activeRemote, auto: auto)
     }
