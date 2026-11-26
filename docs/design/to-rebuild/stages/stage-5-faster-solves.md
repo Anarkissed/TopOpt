@@ -144,9 +144,13 @@ The maintainer's process (2026-11-25), in waiting time only, never slowing secti
 ### Refused, and the rule
 - (none so far)
 
-### Levers named in the brief, answered
-- Coarse warm start: [to fill: warm vs cold iterations from the replays].
-- Resolution continuation; GenEO sweep; Active Domain; MG hierarchy dropping per solve: [to fill].
+### Levers named in the brief, answered (none is called "not possible"; each is measured or reported "not done yet" with what is missing)
+- Trajectory warm start (warm_start.matfree; each solve starts from the previous design step's field): already on in his runs (the dumps carry a guess). Measured on the replays: today's solver gains little from it (Top Motor Mount 1,584 -> 1,495 cycles) because the slow modes dominate; with a coarse space that works it pays (algebraic + Chebyshev 2: 75 -> 51; Stand v4 139 -> 110). It stays on; its value rises with the coarse-grid work.
+- Coarse warm start (warm_start.coarse, the res/2 pre-solve of the design, job.cpp 1291-1305): off, and the app never sends it. NOT DONE YET: to measure as a full-run setting on the reference parts (off / coarse / coarse + matfree) once the solver changes are in, because a cheaper solve changes its trade.
+- Resolution continuation (solve coarse, carry the design up, finish fine): not in the code, and the optimiser loop is not my file. NOT DONE YET: its smallest form needs minimize_plastic / plsm changes; named to TOReview as an optimiser-side item.
+- GenEO settings sweep (block 20, cut 0.05, 8^3 cores, overlap 1): GenEO acts only inside the Jacobi-CG FALLBACK. With the stage-5 smoother the fallback should rarely run (the replays count it). If it never engages on the reference table, GenEO is unused machinery, and the rebuild's rule is to delete it, not tune it; if it engages, sweep cut and block size at three settings each on those solves. To decide from the replay and reference-run counts.
+- Active Domain (band 0, disarmed after PR 209 measured it net-negative in the stagnation regime): the stagnation cause is now known and fixed under the switch, so the old verdict no longer stands. NOT DONE YET: the band is a production.cpp constant with no per-job switch, so measuring it needs a job or observability override (not my file; to TOReview) or a harness run; three bands (0 / auto / auto+2).
+- Multigrid hierarchy dropped part-way through a run (the stagnation latch, "0 levels"): measured per solve on the replays (used_multigrid, levels, l1 retries) and on the reference runs' logs. Today: latched on solve 3 on both test-P parts; with the stage-5 smoother: to fill.
 
 ### For #362's gate
 - The app-side FlexibleBatchM* tests run in #362's gate on any change to the solver the bridge calls (app/TopOptKit/Tests/TopOptFlowsTests): FlexibleBatchM2Tests, FlexibleBatchM2VerifyTests, FlexibleBatchMDentTests, FlexibleBatchMGroupTests, FlexibleBatchMLegendTests, FlexibleBatchMStressTests, FlexibleBatchMVerifyTests, FlexibleBatchMXrayTests (the two *Probe files are harnesses). E-01 phase 2 changes the bridge's Posture (through TOReview).
