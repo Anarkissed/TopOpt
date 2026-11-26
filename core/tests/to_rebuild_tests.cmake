@@ -73,3 +73,17 @@ if(TARGET test_lattice_strength)
   add_test(NAME to_stage1_lattice_check CONFIGURATIONS Long COMMAND test_to_stage1_lattice_check)
   set_tests_properties(to_stage1_lattice_check PROPERTIES TIMEOUT 7200)
 endif()
+
+# Stage 1, M6 (LatticeReview for TOReview): on the strength grid, the protected skin against the lattice cubes, the
+# switch off and `face` (jobs A and B as test_to_stage1_lattice_check makes them). Prints the counts, pins nothing.
+#   ctest -C Long -R to_stage1_lattice_masks
+if(TARGET test_lattice_strength)
+  add_executable(test_to_stage1_lattice_masks tests/validation/test_to_stage1_lattice_masks.cpp)
+  target_link_libraries(test_to_stage1_lattice_masks PRIVATE topopt)
+  target_compile_definitions(test_to_stage1_lattice_masks PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME to_stage1_lattice_masks CONFIGURATIONS Long COMMAND test_to_stage1_lattice_masks)
+  set_tests_properties(to_stage1_lattice_masks PROPERTIES TIMEOUT 7200)
+endif()
