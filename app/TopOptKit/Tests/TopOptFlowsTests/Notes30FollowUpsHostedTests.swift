@@ -226,6 +226,27 @@ final class Notes30FollowUpsHostedTests: XCTestCase {
         XCTAssertEqual(version.lattice?.areaGrading[g1]?.gradingMode, .fitShape, "★ a version: Group 1's own Shape")
     }
 
+    /// ★ (3) notes30 follow-ups 2 (362): on the page, his part graded by stress — Group 1's tab grading as the part says nothing;
+    /// with Shape picked there it says "Preview shows this group's grade." (never the old "Preview shows the part's grade.");
+    /// Zone 1's tab, grading as the part, says nothing. RED CONTROL: the note is read off the page — its id is there on Group 1's
+    /// Shape and gone on Zone 1's tab, so a missing note fails.
+    func testTheGroupGradeNoteOnlyWhereItIsSo() throws {
+        let (p, _, _) = try twoGroups()
+        XCTAssertTrue(LatticeLayoutPreview.settings(p.lattice).byStress, "premise: his part graded by stress")
+        let page = visit(p)
+        XCTAssertTrue(page.click("lattice-page-tab-area-0"), "premise: Group 1's tab: \(gradeIDs(page))")
+        XCTAssertNil(page.ids["lattice-page-area-preview-note"], "★ Group 1 grading as the part: nothing to say")
+        LatticeCaptions.recorded = []
+        XCTAssertTrue(page.click("wizard-grade-type-fitShape"), "premise: Shape on Group 1's tab: \(gradeIDs(page))")
+        page.h.pump(0.6)
+        XCTAssertNotNil(page.ids["lattice-page-area-preview-note"], "★ Group 1 on Shape: the note")
+        XCTAssertTrue(LatticeCaptions.recorded.contains("Preview shows this group's grade."), "★ his words: \(Set(LatticeCaptions.recorded))")
+        XCTAssertFalse(LatticeCaptions.recorded.contains("Preview shows the part's grade."), "★ never the old words")
+        XCTAssertTrue(page.click("lattice-page-tab-area-1"), "premise: Zone 1's tab: \(gradeIDs(page))")
+        page.h.pump(0.6)
+        XCTAssertNil(page.ids["lattice-page-area-preview-note"], "RED CONTROL: Zone 1 grades as the part: no note")
+    }
+
     /// ★ (2) "unless he picked another grade there himself": with no group yet the Part tab carries the Grade row, and his pick
     /// there is what Save keeps. (The control of the test above: the part's grade does change when he sets it himself.)
     func testHisOwnPickOnThePartTabIsSaved() throws {

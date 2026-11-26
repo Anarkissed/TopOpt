@@ -2728,8 +2728,24 @@ public struct LatticeSetupWizard: View {
     static let manualAreaHeader = "This area's own"
     /// ★ The reviewer's words (ruling (2), 2026-11-06), under the shape grade until core's band is real.
     static let shapeGradeRunLine = "The run's shape grade is a solid outline; the band and Strength are preview only."
-    /// Where an area's grade differs from the part's: the preview draws one grade, the run grades this area its own way.
-    static let latticeAreaPreviewLine = "The preview draws one grade for the whole part; the run grades this area as set here."
+    /// ★ notes30 (F1, 362): where the open group's grade changes what the preview lays (`groupGradeShows`), its (i). It said
+    /// "The preview draws one grade for the whole part; …" — untrue since Install 2's `areaOwn` and the sample laid per tab.
+    static let latticeAreaPreviewLine = "The preview draws this group's own grade, set on this tab. The Part tab's grade is for the groups with none of their own."
+
+    /// ★ notes30 (F1, 362: "show it only where it is true"): the open group's grade is what the preview draws, apart from the
+    /// Part tab's — this tab's settings (`page`, the group's grade on them) lay differently from the same settings with the Part
+    /// tab's grade, band and Strength. The page's sample lays exactly this (`LatticeSampleLay.page`), and his part's preview the
+    /// group's own the same way (`LatticeLayoutPreview.areaOwn`). False where the two grades lay alike (no stress to follow, no
+    /// shape grade on this algorithm, or the same grade). It was shown wherever the grade or band differed, two groups or more.
+    @MainActor static func groupGradeShows(_ page: LatticeSettings, partGrade part: LatticeAreaGrading, lineWidthMM: Double,
+                                           wallRingMM: Double) -> Bool {
+        var asPart = page
+        if let m = part.gradingMode { asPart.gradingMode = m }
+        if let b = part.shapeFitBandMM { asPart.shapeFitBandMM = b }
+        if let st = part.shapeGradeStrength { asPart.shapeFitGradeStrength = st }
+        return LatticeSampleLay.page(page, lineWidthMM: lineWidthMM, wallRingMM: wallRingMM).settings
+            != LatticeSampleLay.page(asPart, lineWidthMM: lineWidthMM, wallRingMM: wallRingMM).settings
+    }
 
     /// The open area's lattice group, nil on Part (the tabs are `ProjectModel.latticeAreaGroups`, in order).
     private func latticeAreaGroupID(_ c: CellsPageContext) -> UUID? {
@@ -3079,9 +3095,11 @@ public struct LatticeSetupWizard: View {
                       organic && project.importedFile != nil
                       ? (project.lattice.wholePart ? Self.organicAreaLine : Self.organicGroupLine) : Self.latticeAreaOwnLine)
                 .latticeID("lattice-page-area-own-note")
-            if let part = latticePartGrade, c.regions.count > 1,
-               part.gradingMode != model.gradingMode
-                || (model.gradingMode.fitsShape && part.shapeFitBandMM != model.shapeFitBandMM) {
+            // ★ notes30 (F1, 362): "Preview shows this group's grade." only where it is so — the group's grade lays apart from
+            // the Part tab's (`groupGradeShows`); never on Organic, which has no grade here
+            if !organic, let part = latticePartGrade,
+               Self.groupGradeShows(model.applied(to: project.lattice), partGrade: part,
+                                    lineWidthMM: project.printParams.strutLineWidthMM, wallRingMM: project.printParams.wallRingMM) {
                 shortNote(Self.latticeAreaPreviewBrief, info: "area-preview", Self.latticeAreaPreviewLine)   // ★ notes29
                     .latticeID("lattice-page-area-preview-note")
             }

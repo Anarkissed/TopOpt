@@ -368,9 +368,12 @@ final class StrutLineWidthTests: XCTestCase {
         //     strut-width dial, whose bottom is one extruded STRUT bead, never a wall loop.
         //   * `WorkspacePlaceholder`'s per-face density keypad -> `LatticeDensityDial.accept(lineWidthMM:)`: the same dial,
         //     refusing a percent past the type's open look with Allow quilt off.
-        XCTAssertEqual(strutSites, 22,
-                       "the twenty-two audited lattice sites (AppModel 0, LatticePage 3, "
-                       + "WorkspacePlaceholder 5, ProjectModel 7, LatticeSetupWizard 7). "
+        // ★ RE-PINNED 22 -> 23 (2026-11-26, notes30 F1 follow-ups 2: "Preview shows this group's grade." only where it is so):
+        //   AUDITED. `LatticeSetupWizard`'s group tab -> `groupGradeShows(lineWidthMM:)` lays the sample twice (this tab's grade
+        //   and the Part tab's) through `LatticeSampleLay.page`, as `latticeSampleInputs` lays it: the STRUT bead, never a wall.
+        XCTAssertEqual(strutSites, 23,
+                       "the twenty-three audited lattice sites (AppModel 0, LatticePage 3, "
+                       + "WorkspacePlaceholder 5, ProjectModel 7, LatticeSetupWizard 8). "
                        + "If this number moved, audit the new site and update the count.")
         XCTAssertTrue(offenders.isEmpty,
                       "lattice lineWidthMM site(s) reading a WALL bead:\n"
