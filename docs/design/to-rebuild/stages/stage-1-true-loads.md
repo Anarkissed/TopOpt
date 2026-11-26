@@ -113,6 +113,22 @@ The refused 0.30 version: at solve 19 the design is in 17 separate pieces; the m
 
 For the stage report (ruling 2d), from LatticeReview 2026-11-26 02:27Z: the interim guard is on `claude/organic-engine` at 13b28529 (one commit on the released b393d12b; #362 takes it into organic-1). An Organic strength check fails with the reason "load_on_bare_lattice" when the vines would get more than 1 % of the load, and no strengthening round follows. Expected on the jobs here: the turned-box C and the bare-top job refused; the chamfered C unchanged (its share is 0.001 to 0.006).
 
+## The automatic pad, first numbers (a measuring arm; 2026-11-26 02:10; the default is still a fixed 3 mm)
+
+Rule under discussion with the maintainer: pad = max(two wall-line widths, sqrt(strength x thickness of material behind the face)). `face_backing_thickness_mm` gives the thickness (16.00 / 32.00 / 12.0 mm read to a quarter of a millimetre on known shapes at three resolutions). `TOPOPT_PAD_MM=auto[:strength]`.
+
+The small scenario part (two 10 mm blocks, `test_scenario_fields` with `face`; the backing thickness reads 10.00 mm):
+
+| pad | how it was set | result |
+|---|---|---|
+| 2.50 mm | auto, strength 0.625 | 40 of 54 checks: a version lost |
+| 3.00 mm | fixed (the present default) | 40: the smallest version refused, an anchored block left detached |
+| 3.16 mm | auto, strength 1.0 | all 54: every version ships |
+| 3.74 / 3.75 mm | auto, strength 1.4 / fixed (today's three voxel layers here) | all 54 |
+| 4.47 / 4.5 mm | auto, strength 2.0 / fixed | 40: versions lost |
+
+So on a 10 mm block there is a window, about 3.2 to 3.8 mm (a third of the thickness), in which every version forms; under it the bridge does not reach the anchored block, over it the pad leaves the design too little room. One made part; the stand at 2 / 3 / 4.5 mm (lock) is the second.
+
 ## Still owed before the stage report
 
 - The original stand optimised both ways (queued), then Top Motor Mount; three settings; pad 2 / 3 / 4.5 mm.
