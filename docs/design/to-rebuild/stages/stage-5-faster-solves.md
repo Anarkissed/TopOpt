@@ -149,4 +149,4 @@ The maintainer's process (2026-11-25), in waiting time only, never slowing secti
 - Resolution continuation; GenEO sweep; Active Domain; MG hierarchy dropping per solve: [to fill].
 
 ### For #362's gate
-- The app-side FlexibleBatchM* tests (app/TopOptKit/Tests) run in #362's gate on any change to the solver the bridge calls; E-01 phase 2 changes the bridge's Posture (through TOReview).
+- The app-side FlexibleBatchM* tests run in #362's gate on any change to the solver the bridge calls (app/TopOptKit/Tests/TopOptFlowsTests): FlexibleBatchM2Tests, FlexibleBatchM2VerifyTests, FlexibleBatchMDentTests, FlexibleBatchMGroupTests, FlexibleBatchMLegendTests, FlexibleBatchMStressTests, FlexibleBatchMVerifyTests, FlexibleBatchMXrayTests (the two *Probe files are harnesses). E-01 phase 2 changes the bridge's Posture (through TOReview).
