@@ -59,8 +59,18 @@ final class AppBuildHost {
         w.orderFrontRegardless()
         w.makeKey()
         hv.layoutSubtreeIfNeeded()
-        test.addTeardownBlock { @MainActor in w.orderOut(nil); w.contentView = nil }
+        test.addTeardownBlock { @MainActor in w.orderOut(nil); w.contentView = nil; AppBuildHost.drainResultsQueue() }
         self.window = w; self.view = hv; self.size = size; self.frames = frames
+    }
+
+    /// ★ notes30 (builder R1): the app's ONE results queue (`AppModel.resultsQueue`: every version's result written as it is
+    /// saved, read as it is opened, process-wide, utility QoS) emptied — at the end of every hosted test, so no test leaves its
+    /// result work ahead of the next one's (release 21's suite: Notes24ResultsHostedTests' v2 opened past its 10 s wait).
+    /// Bounded: never a hang.
+    nonisolated static func drainResultsQueue(seconds: Double = 120) {
+        let done = DispatchSemaphore(value: 0)
+        AppModel.resultsQueue.async { done.signal() }
+        _ = done.wait(timeout: .now() + seconds)
     }
 
     func pump(_ s: Double) {

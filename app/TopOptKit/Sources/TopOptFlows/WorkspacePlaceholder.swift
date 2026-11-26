@@ -1534,6 +1534,9 @@ public struct WorkspacePlaceholder: View {
             })   // Flexible (PR #362) H58
             AnyView(Group {   // Flexible (PR #362) H58: the body in heap-boxed chunks; the 47 KB body value was copied on the iPad main thread's stack until it overflowed (crash 2026-10-25)
             if force.phase == .setup, !fullScreenPageUp {
+                // ★ notes30 (builder R1): the run cards and run watchers here too — while "Which way is down?" shows, a result
+                // read after the page opened (a Library tap on it), or a run landing, was never heard and Results never opened
+                if !Self.controlNoCardsHostInGravitySetup { workspaceCardsHost }
                 gravityBanner
                 // Point which way is down — the reliable route that doesn't depend on a
                 // clean single face. The tip SNAPS to the part's own face normals (item 1);
@@ -6339,6 +6342,8 @@ public struct WorkspacePlaceholder: View {
     }
     /// RED CONTROL (tests): the lattice view starts off on the Lattice stage (before notes28).
     nonisolated(unsafe) static var controlLatticeViewStartsOff = false
+    /// RED CONTROL (tests, notes30): no run cards or run watchers while the gravity step shows (before notes30).
+    nonisolated(unsafe) static var controlNoCardsHostInGravitySetup = false
 
     /// The lattice view on, when it is wanted and the lattice is set up (a type chosen, lattice on). The new engine lays it from
     /// the part's own settings at once; the old engine's bake (a variant's page) still waits for the session's Save, as the
