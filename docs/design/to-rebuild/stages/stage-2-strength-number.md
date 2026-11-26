@@ -164,6 +164,16 @@ Two earlier sweeps of this table read "one voxel" in every column; both were wir
 - The 1.8 mm reading did nothing: the voxel is 3.4 mm at res 64, larger than the size. My choice of resolution was wrong for this arm; it needs res 128 or finer (under the lock).
 - The printed share came out exactly 1.000 at 50 % infill and six walls. Cause: production ships with the wall-aware posture OFF (`kProductionWidthAwareKnockdown = false`: "arming is a maintainer act with a coupon behind it"), so the member widths were never measured and my condition never held. Fixed in the next commit: the widths are measured for the grams alone when the stage's switch is on. (Also corrects an earlier line of mine: the production gate does NOT read the wall-aware maximum; it reads the plain one with the scalar infill knockdown.)
 
+## Condition (b): the stage 2 switch against the lattice strength check (build 95411b2a, 2026-11-25 22:15)
+
+Each of jobs A to C run with stage 1 off and `TOPOPT_STRENGTH=size` with a typed 1.8 mm reading, against the plain run (`test_to_stage1_lattice_check`):
+
+- A (regular cells, on the grid): 0 strength values differ; bars and file bytes identical. UNTOUCHED.
+- B (regular cells, chamfered loaded face): 0 differ; identical. UNTOUCHED.
+- C (weave, frame of beams): bars and bar list identical; 13 values differ, all in the TENTH significant digit (twelve tiny bar forces, about 0.001 N, and the frame solve's residual, 7.94e-11 against 8.05e-11). That is the frame solve not repeating to the last bit between two identical runs, not the switch; the test now compares numbers to six digits. Named to LatticeReview as a rule 21 matter of its own (the same job twice does not give the same bytes in the Organic strength block).
+
+Still owed for condition (e): one sheet job and one Organic job loaded on lattice, in the before/after table.
+
 ## What it does to the lattice strength check
 
 Steps 1 and 2 change the solid part's reading only if applied in the shared code path; the lattice check reads strut stresses through its own laws. To be confirmed with LatticeReview before any edit: which branches of `analyze.cpp` the lattice posture takes, and that its numbers are byte-identical with the switch off.
