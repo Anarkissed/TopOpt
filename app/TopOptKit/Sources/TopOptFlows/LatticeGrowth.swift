@@ -360,14 +360,17 @@ extension LatticeLayoutPreview.LayProgress {
 }
 
 /// What one read of the engine's tap means for the growth on screen. Pure: the tests feed it a fake reader.
+/// ★ notes30: its lay numbers, read-again and phase are the cursor the strut stream shares (LatticeTapCursor).
 struct LatticeGrowthPoller {
+    /// Where the poll stands (lay numbers, the next read, the phase): shared with the strut stream's watch.
+    private var cursor: LatticeTapCursor
     /// Lays up to this one are not grown: the tap's lay when the watch began (an earlier one), then each lay that landed
     /// (its finished lattice is on screen). The tap counts its lays up.
-    private(set) var floor: UInt64
-    private(set) var lay: UInt64?
+    var floor: UInt64 { cursor.floor }
+    var lay: UInt64? { cursor.lay }
     /// Where the next read starts.
-    private(set) var next = 0
-    private(set) var phase = 0
+    var next: Int { cursor.next }
+    var phase: Int { cursor.phase }
 
     struct Step: Equatable {
         /// A new lay: the growth starts again.
@@ -380,24 +383,16 @@ struct LatticeGrowthPoller {
         var readAgain = false
     }
 
-    init(baseline: UInt64) { floor = baseline }
+    init(baseline: UInt64) { cursor = LatticeTapCursor(baseline: baseline) }
 
     /// The lay `lay` (the tap's newest) landed: it and every earlier one are done.
-    mutating func landed(_ lay: UInt64) { floor = Swift.max(floor, lay) }
+    mutating func landed(_ lay: UInt64) { cursor.landed(lay) }
 
     /// `r` was read from `from` (this poller's `next` when it was asked).
     mutating func take(_ r: LatticeLayoutSession.Growth, from: Int) -> Step {
-        var s = Step()
-        guard r.lay > floor else { return s }   // no lay yet, the one before this watch began, or one already landed
-        if r.lay != lay {
-            lay = r.lay; next = 0; phase = 0
-            s.restart = true
-            if from != 0 { s.readAgain = true; return s }
-        }
-        s.xyz = r.xyz
-        s.region = r.region
-        next = r.next
-        if r.phase != phase { phase = r.phase; s.phase = r.phase }
+        let c = cursor.take(lay: r.lay, phase: r.phase, next: r.next, from: from)
+        var s = Step(restart: c.restart, phase: c.phase, readAgain: c.readAgain)
+        if c.take { s.xyz = r.xyz; s.region = r.region }
         return s
     }
 }

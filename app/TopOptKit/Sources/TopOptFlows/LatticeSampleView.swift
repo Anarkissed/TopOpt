@@ -132,6 +132,8 @@ struct LatticeSampleView: View {
     /// once laid; with Skip all animations, the sample blank and the "Refreshing Lattice" card until it lands.
     @State private var buildShow = LatticeBuildShow()
     @StateObject private var refresh = LatticeRefreshProgress()
+    /// ★ notes30: the struts its engine hands over while it lays, onto `buildShow`'s stream (the same rising floors).
+    @State private var stream: LatticeSampleStream?
 
     static let building = "Building the sample\u{2026}"
 
@@ -264,6 +266,22 @@ struct LatticeSampleView: View {
         Self.say(tag, "kept sample shown")
     }
 
+    /// ★ notes30: the sample's bare body on screen before its engine lays (its first build too: the stream's floors rise in
+    /// it), see-through, with nothing of a lattice in it yet. A body that cannot be read: as before (shown when it lands).
+    private func siteBeforeLay(cube: Bool) {
+        guard !AppSettings.skipAllAnimations, buildShow.waiting else { return }
+        if let b = try? LatticeSampleLay.body(cube: cube) {
+            let m = ViewerMesh(vertices: b.vertices, indices: b.indices, faceIDs: [Int32](repeating: 1, count: b.indices.count / 3))
+            if mesh?.signature != m.signature {   // (none yet, or the other shape)
+                mesh = m
+                camera.reframe(m.bounds)
+            }
+        }
+        if laidBars == nil, mesh != nil { laidBars = LatticeLayoutBarsInputs(token: Self.siteToken, bars: []) }
+    }
+    /// The bare site's token (no struts: nothing of it draws).
+    static let siteToken = -3
+
     /// The build began (a new one; the wait for his part's numbers goes on as the same one).
     private func buildBegins() {
         builtSeconds = nil
@@ -322,11 +340,16 @@ struct LatticeSampleView: View {
         let log = GenerationTimingLog.shared, rec = log.begin(.sample, inputs: Self.timingInputs(i))   // ★ his 11-22
         defer { log.end(rec, .cancelled, reason: "the page moved on") }   // (a build that ended said so first)
         let t = builder.ticket()
+        // ★ notes30: the site stands before the engine lays (the bare body, see-through), so the floors can rise in it as the
+        // engine hands its struts over — the first sample too
+        siteBeforeLay(cube: cube)
+        if stream?.show !== buildShow { stream = LatticeSampleStream(show: buildShow) }
+        let streaming = stream
         // off the main thread (the session's own worker, the colours in this task), never detached: leaving the page or a
         // newer setting cancels it with the rest
         let built: Result<LatticeSampleLay.Made, Error>? = await withTaskCancellationHandler {
             guard builder.begin(t) else { return nil }
-            do { return .success(try await LatticeSampleLay.lay(plan, cube: cube)) } catch { return .failure(error) }
+            do { return .success(try await LatticeSampleLay.lay(plan, cube: cube, stream: streaming)) } catch { return .failure(error) }
         } onCancel: { builder.retire(t) }
         Self.say(tag, "ticket \(t): \(built == nil ? "skipped" : "built")\(Task.isCancelled ? ", cancelled" : "")")
         if built == nil { log.discard(rec) }   // skipped before it began: no line
@@ -340,7 +363,7 @@ struct LatticeSampleView: View {
             let token = Int.random(in: 1...Int.max)
             laidBars = LatticeLayoutBarsInputs(token: token, bars: made.bars, flags: made.flags, colours: made.colours,
                                                colourKey: token)
-            buildShow.landed(token: token)   // ★ notes29: the frame rises
+            buildShow.landed(token: token, box: LatticeLayoutBarsPass.box(made.bars))   // ★ notes29: the frame rises (★ notes30: the cladding on)
             refresh.end()
             mesh = m
             Self.say(tag, "laid (\(made.struts) struts)")

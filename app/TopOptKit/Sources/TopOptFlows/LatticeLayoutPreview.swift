@@ -93,6 +93,17 @@ public final class LatticeLayoutPreview: ObservableObject {
     static let growthReadMost = 12_000
     /// RED CONTROL (tests): no growth is watched (as before 11-22).
     nonisolated(unsafe) public static var controlNoGrowth = false
+    /// ★ notes30 (his 11-26, option D): the poll of the struts the engine hands over while a regular lay runs, and what paces
+    /// the floors: when this lay's cells began and ended (the timelapse's clock), and the share of a lay after its cells, learned
+    /// on each part and type ("path|type").
+    var strutWatch: LatticeStrutWatch?
+    var strutCellsFrom: CFTimeInterval?
+    var strutCellsEnd: CFTimeInterval?
+    var strutAfterShare: [String: Double] = [:]
+    /// The landed bars' box, for the frame when the stream fixed none (`buildMeets`).
+    var landingBox: (lo: SIMD3<Float>, hi: SIMD3<Float>)?
+    /// How many struts a poll reads at most (a 300,000-strut lay hands over about 8,000 every 0.15 s).
+    static let strutReadMost = 40_000
     /// ★ his ask 11-21: Print-accurate preview (the ⌃ menu): on, every Organic lay ends with the exact print-file lattice;
     /// off, the Draft alone stands in (the exact lattice is made with the print file).
     var printAccurate: Bool { AppSettings.shared.latticePrintAccurate }
@@ -383,6 +394,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         quietAtLay = quiet
         task?.cancel()
         stopGrowth()   // ★ his 11-22: a new lay grows from nothing again
+        stopStruts()   // ★ notes30: and its struts stream from nothing again
         laying = true
         // ★ notes29: a regular lay is built on screen — the last lattice gone at once, the site cleared until this one lands;
         // Organic grows instead (its own replay). Skip all animations: every lay leaves the lattice area blank, and the card
@@ -390,7 +402,8 @@ public final class LatticeLayoutPreview: ObservableObject {
         // ★ notes30: a Live preview lay does none of it: the last lattice stays exactly as it is, no card, until this one lands
         if quiet { build.stop(); refresh.end() }
         else {
-            if !isOrganic || AppSettings.skipAllAnimations { build.layBegins() } else { build.stop() }
+            // ★ notes30: the solid view's walls come off floor by floor (X-ray: none)
+            if !isOrganic || AppSettings.skipAllAnimations { build.layBegins(walls: solid && !isOrganic) } else { build.stop() }
             refresh.begin(refreshSteps(organic: isOrganic, path: path, up: Self.printUp(p)))
         }
         nozzleWanted = checkNozzle
@@ -425,6 +438,7 @@ public final class LatticeLayoutPreview: ObservableObject {
     public func clear() {
         task?.cancel(); task = nil
         stopGrowth()   // ★ his 11-22
+        stopStruts()   // ★ notes30
         build.stop()   // ★ notes29
         mapTask?.cancel(); mapTask = nil
         nozzleTask?.cancel(); nozzleTask = nil; nozzleWanted = false; nozzleState = .notAsked
@@ -553,6 +567,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         remembered.insert(r, at: 0)
         task?.cancel(); task = nil
         stopGrowth()   // ★ his 11-22: a remembered lattice shows no growth
+        stopStruts()   // ★ notes30
         build.stop()   // ★ notes29: nor any timelapse — it shows at once
         mapTask?.cancel(); mapTask = nil
         take(p, s, ok)
@@ -802,9 +817,16 @@ public final class LatticeLayoutPreview: ObservableObject {
                 return
             }
             organicQuality = nil; organicNumbers = nil
+            // ★ notes30 (his 11-26, option D): the struts the engine hands over while it lays, read as it lays them (about
+            // every 0.15 s, on the main actor, never through the session's worker); the floors rise behind its finished line.
+            // None for a Live preview lay (quiet), with Skip all animations, or when the engine streams nothing.
+            let streaming = watchStruts(session)
+            defer { streaming?.stop() }
             t0 = Date()
             let r = try await session.lay(s)
             guard !Task.isCancelled else { return }
+            streaming?.tick(force: true)   // its last struts, before the landing
+            streaming?.stop()
             stepS[Self.stepLay] = Date().timeIntervalSince(t0)   // ★ notes29
             token &+= 1
             // ★ notes29 (his img 97: the new struts drawn over the LAST lay's map, half the part closed over them): the struts land
@@ -822,6 +844,8 @@ public final class LatticeLayoutPreview: ObservableObject {
             let solid = LatticeBuildShow.controlOff ? (solidWanted ? bars?.solid : nil) : map?.grid
             var drawn = LatticeLayoutBarsInputs(token: token, bars: r.bars, solid: solid, flags: r.barFlags)
             drawn.printUp = session.printUp.map { SIMD3<Float>($0) }   // ★ notes29 H3: its bridges and floors on the print's up
+            strutsLand(r, streamed: streaming != nil)   // ★ notes30: the promise checked, the pace learned
+            landingBox = LatticeLayoutBarsPass.box(r.bars)   // ★ notes30: the frame, when the stream fixed none
             bars = drawn
             laid = LatticeLayoutColours.Laid(r, token: token)   // ★ Install 3
             timing = Timing(openMS: openMS, readMS: r.msRead, cellsMS: r.msCells, barsMS: r.msBars, bars: r.barCount)
@@ -2140,8 +2164,84 @@ extension LatticeLayoutPreview {
     func buildMeets(_ now: LatticeLayoutBarsInputs?, after old: LatticeLayoutBarsInputs?) {
         guard now?.token != old?.token else { return }
         guard let n = now else { build.stop(); return }
-        build.landed(token: n.token)
+        build.landed(token: n.token, box: landingBox, printUp: n.printUp)   // ★ notes30: the cladding on, the floors still to come follow
+        landingBox = nil
     }
+
+    // MARK: ★ notes30 — the struts handed over while the engine lays (option D, his 11-26)
+
+    /// ★ notes30: the session's strut tap — the engine's (core's StrutTap, once the session carries it), or the tests' fake
+    /// engine. nil: the engine streams nothing (the lay lands whole and its floors rise after, as release 21).
+    nonisolated(unsafe) static var strutTapForTesting: ((LatticeLayoutSession) -> LatticeStrutTap?)?
+    static func strutTap(_ s: LatticeLayoutSession) -> LatticeStrutTap? {
+        if let f = strutTapForTesting { return f(s) }
+        return (s as AnyObject) as? LatticeStrutTap
+    }
+
+    /// A regular lay is about to run on `session`: the engine is asked to hand its struts over (its line rising along the
+    /// view's up, or the print's; its map made behind the line in the solid view) and they are read as it lays them onto the
+    /// timelapse's stream. nil: none — a Live preview lay, Skip all animations, no timelapse, or no tap.
+    func watchStruts(_ session: LatticeLayoutSession) -> LatticeStrutWatch? {
+        stopStruts()
+        guard !quietAtLay, !AppSettings.skipAllAnimations, build.waiting, let tap = Self.strutTap(session) else { return nil }
+        let up = upAtLay.map { SIMD3<Float>(simd_normalize($0)) } ?? build.viewAxes.up
+        let geometry = solidWanted ? box.map { Self.mapGeometry($0) } : nil
+        build.stream.reset(map: geometry, smoothCut: Self.cutSmoothWanted(lattice: latticeAtLay, printAccurate: printAccurate),
+                           printUp: session.printUp.map { SIMD3<Float>($0) })
+        build.stream.softened = { [weak self] in self?.build.streamMoved() }
+        tap.streamNextLay(up: up, map: geometry)
+        strutCellsFrom = nil; strutCellsEnd = nil
+        let key = strutPaceKey
+        let w = LatticeStrutWatch(stream: build.stream, every: Self.growthPollS, most: Self.strutReadMost,
+                                  read: { [weak tap] from, most, mapFrom in
+                                      guard let tap else { throw CancellationError() }
+                                      return try tap.strutRead(from: from, most: most, mapFrom: mapFrom)
+                                  },
+                                  moved: { [weak self] in self?.strutsMoved(key) })
+        strutWatch = w
+        return w
+    }
+
+    /// The struts' poll stopped (a new lay, the preview closed, a remembered lattice).
+    func stopStruts() {
+        strutWatch?.stop()
+        strutWatch = nil
+    }
+
+    private var strutPaceKey: String { "\(sessionPath ?? "")|\(latticeAtLay.topologyID)" }
+
+    /// A poll brought something: the floors the line has passed are ready, and the landing expected from its progress.
+    private func strutsMoved(_ key: String) {
+        let now = LatticeBuildShow.now, s = build.stream
+        if s.plan != nil, strutCellsFrom == nil { strutCellsFrom = now }
+        if strutCellsEnd == nil, s.progress >= 1 || s.phase >= 2 { strutCellsEnd = now }
+        build.streamMoved(now: now)
+        if let start = build.timelapse?.start {
+            let last = sessionPath.flatMap { layWallS[timeKey($0, .exact)] }
+            build.expect(landingAt: LatticeStrutPace.expectedLanding(start: start, cellsFrom: strutCellsFrom,
+                                                                      cellsEnd: strutCellsEnd, now: now,
+                                                                      progress: s.progress, afterShare: strutAfterShare[key],
+                                                                      lastLayS: last))
+        }
+    }
+
+    /// The lay landed: ★ the promise checked (every strut handed over is in the finished lattice, bit for bit — the count of
+    /// any that are not goes to the log; expected 0) and the share after the cells learned for the next lay's pace.
+    private func strutsLand(_ r: LatticeLayoutSession.Result, streamed: Bool) {
+        guard streamed else { return }
+        let s = build.stream
+        let missing = s.missing(from: r.bars)
+        layStages["streamedStruts"] = Double(s.count)
+        layStages["streamedMissing"] = Double(missing)
+        if missing > 0 { NSLog("TopOpt strut stream: %d struts handed over are not in the finished lattice", missing) }
+        Self.streamMissingTotal += missing
+        if let start = build.timelapse?.start,
+           let share = LatticeStrutPace.afterShare(start: start, cellsEnd: strutCellsEnd, landed: LatticeBuildShow.now) {
+            strutAfterShare[strutPaceKey] = share
+        }
+    }
+    /// ★ notes30: struts handed over that the finished lattice did not hold, app-wide (tests; expected 0).
+    nonisolated(unsafe) static var streamMissingTotal = 0
 
     /// The refresh's steps in words (five at most) — the card's line — and how long each took the last time here.
     static let stepOpen = "Opening the part"

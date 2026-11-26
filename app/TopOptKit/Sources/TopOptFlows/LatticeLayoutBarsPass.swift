@@ -671,23 +671,165 @@ final class LatticeLayoutBarsPass {
     }
 
     /// The solid view's map into ONE 3D texture (P7: never inline). nil or a broken map: X-ray (no cut, no walls).
+    /// ★ notes30: sent through the walls' mask (`openWalls`): shut above the floors the timelapse has opened.
     func uploadGrid(_ g: LatticeLayoutSolidGrid?) {
         gridToken = g?.token ?? -1
-        guard let g, g.isWhole else { gridTexture = nil; grid = nil; return }
+        guard let g, g.isWhole else { gridTexture = nil; grid = nil; gridSource = []; return }
         let d = MTLTextureDescriptor()
         d.textureType = .type3D
         d.pixelFormat = .rg8Snorm
         d.width = Int(g.dims.x); d.height = Int(g.dims.y); d.depth = Int(g.dims.z)
         d.usage = [.shaderRead]
         d.storageMode = .shared
-        guard let t = device.makeTexture(descriptor: d) else { gridTexture = nil; grid = nil; return }
-        g.rg.withUnsafeBytes { raw in
-            t.replace(region: MTLRegionMake3D(0, 0, 0, d.width, d.height, d.depth), mipmapLevel: 0, slice: 0,
-                      withBytes: raw.baseAddress!, bytesPerRow: 2 * d.width, bytesPerImage: 2 * d.width * d.height)
-        }
+        guard let t = device.makeTexture(descriptor: d) else { gridTexture = nil; grid = nil; gridSource = []; return }
         gridTexture = t
         grid = (g.origin, g.voxel, g.dims)
         gridSmooth = g.smooth
+        gridSource = g.rg
+        sendRows(0..<d.depth)
+    }
+
+    // MARK: ★ notes30 — the walls come off floor by floor
+
+    /// The map as given (the mask is applied to it on its way to the GPU).
+    private var gridSource: [Int8] = []
+    /// ★ notes30 (the timelapse's walls, his img 98 and the option D scope): the map's OPEN channel held shut (−127) for every
+    /// voxel on a floor the timelapse has not opened yet — the part stands closed above the opened floors (the body drawn, the
+    /// cut wall a ceiling at the floor's top), open below; its inside channel is the engine's. nil: the map as it is.
+    private(set) var wallsMask: (opened: Int, frame: LatticeBuildTimelapse.Frame)?
+    /// Rows of the map sent to the GPU (tests: a floor's walls re-send only the rows they touch).
+    private(set) var rowsSent = 0
+    /// RED CONTROL (tests): no mask — the whole part opened by its map at once (release 21's walls without their snaps).
+    nonisolated(unsafe) static var controlNoWallsMask = false
+    /// RED CONTROL (tests, S5): the stream's whole set sent again every poll.
+    nonisolated(unsafe) static var controlStreamReupload = false
+
+    /// The floors whose walls are off (nil: no timelapse — the map as it is) over `frame`. Re-sends only the rows that change.
+    func openWalls(_ opened: Int?, frame: LatticeBuildTimelapse.Frame?) {
+        let want: (opened: Int, frame: LatticeBuildTimelapse.Frame)? = Self.controlNoWallsMask ? nil : opened.flatMap { o in frame.map { (o, $0) } }
+        if want?.opened == wallsMask?.opened, want?.frame == wallsMask?.frame { return }
+        let old = wallsMask
+        wallsMask = want
+        guard let g = grid, gridTexture != nil else { return }
+        let nz = Int(g.dims.z)
+        if let o = old, let w = want, o.frame == w.frame {   // the same frame: the rows holding the floors between the two
+            let lo = Swift.min(o.opened, w.opened), hi = Swift.max(o.opened, w.opened)
+            var zLo = Int.max, zHi = Int.min
+            for z in 0..<nz {
+                let (fLo, fHi) = Self.floorsOf(slice: z, grid: g, frame: w.frame)
+                if fHi >= lo && fLo < hi { zLo = Swift.min(zLo, z); zHi = Swift.max(zHi, z + 1) }
+            }
+            if zLo < zHi { sendRows(zLo..<zHi) }
+        } else {
+            sendRows(0..<nz)
+        }
+    }
+
+    /// The lowest and highest floor any voxel of map slice `z` lies on.
+    static func floorsOf(slice z: Int, grid g: (origin: SIMD3<Float>, voxel: Float, dims: SIMD3<Int32>),
+                         frame f: LatticeBuildTimelapse.Frame) -> (Int, Int) {
+        let base = simd_dot(f.up, g.origin) + g.voxel * f.up.z * Float(z)
+        let sx = g.voxel * f.up.x * Float(Int(g.dims.x) - 1), sy = g.voxel * f.up.y * Float(Int(g.dims.y) - 1)
+        let hLo = base + Swift.min(0, sx) + Swift.min(0, sy), hHi = base + Swift.max(0, sx) + Swift.max(0, sy)
+        return (f.floor(ofHeight: hLo), f.floor(ofHeight: hHi))
+    }
+
+    /// Map rows `rows` (z slices) to the GPU, through the walls' mask.
+    func sendRows(_ rows: Range<Int>) {
+        guard let g = grid, let t = gridTexture else { return }
+        let nx = Int(g.dims.x), ny = Int(g.dims.y), nz = Int(g.dims.z), slab = 2 * nx * ny
+        let z0 = Swift.max(0, rows.lowerBound), z1 = Swift.min(nz, rows.upperBound)
+        guard z1 > z0, gridSource.count == slab * nz else { return }
+        var out = Array(gridSource[(z0 * slab)..<(z1 * slab)])
+        if let m = wallsMask {
+            let f = m.frame
+            for z in z0..<z1 {
+                let (fLo, fHi) = Self.floorsOf(slice: z, grid: g, frame: f)
+                if fHi < m.opened { continue }   // every voxel of it on an opened floor: as the map says
+                let at = (z - z0) * slab
+                if fLo >= m.opened {   // none: shut
+                    var k = at
+                    while k < at + slab { out[k] = -127; k += 2 }
+                    continue
+                }
+                let hz = simd_dot(f.up, g.origin) + g.voxel * f.up.z * Float(z)
+                for j in 0..<ny {
+                    let hy = hz + g.voxel * f.up.y * Float(j)
+                    for i in 0..<nx where f.floor(ofHeight: hy + g.voxel * f.up.x * Float(i)) >= m.opened {
+                        out[at + 2 * (j * nx + i)] = -127
+                    }
+                }
+            }
+        }
+        out.withUnsafeBytes { raw in
+            t.replace(region: MTLRegionMake3D(0, 0, z0, nx, ny, z1 - z0), mipmapLevel: 0, slice: 0,
+                      withBytes: raw.baseAddress!, bytesPerRow: 2 * nx, bytesPerImage: slab)
+        }
+        rowsSent += z1 - z0
+    }
+
+    // MARK: ★ notes30 — the stream: the struts the engine hands over while it lays, appended
+
+    /// The stream's epoch this pass holds (−1: not a stream's pass), and its map's version on the GPU.
+    private(set) var streamEpoch = -1
+    private var streamMapVersion = -1
+    /// Buffers the stream's appends made (one per doubling, never one per poll) and whole uploads (`upload`: one a lay) — tests.
+    private(set) var buffersMade = 0
+    private(set) var wholeUploads = 0
+    /// The token a stream's pass wears (never a landed lay's).
+    static let streamToken = -2
+
+    /// The stream's new struts into the buffer after the ones already there (grown by doubling, the old part copied once per
+    /// doubling: never the whole set again), and its map's new rows; a new epoch starts it again.
+    func syncStream(_ s: LatticeStrutStream) {
+        if Self.controlStreamReupload, streamEpoch == s.epoch { buffer = nil; count = 0 }   // RED CONTROL
+        if s.epoch != streamEpoch || s.count < count {
+            streamEpoch = s.epoch
+            token = Self.streamToken
+            buffer = nil; count = 0
+            colourBuffer = nil; colourKey = -1   // (the stream is drawn in the lattice's one colour; the key comes with the cladding)
+            lightFrom = .max; vinePass = nil; filePass = nil
+            hidden = false; dimmed = false
+            box = s.plan.map { ($0.lo, $0.hi) }
+            streamMapVersion = -1
+            uploadGrid(nil)
+        }
+        printUp = s.printUp
+        if box == nil, let p = s.plan { box = (p.lo, p.hi) }
+        let n = s.count
+        if n > count {
+            let s4 = MemoryLayout<SIMD4<Float>>.stride
+            let need = 2 * n * s4
+            if buffer.map({ $0.length < need }) ?? true {
+                let cap = Swift.max(need, 2 * (buffer?.length ?? 0), 2 * 4096 * s4)
+                guard let nb = device.makeBuffer(length: cap, options: .storageModeShared) else { return }
+                if let old = buffer, count > 0 { memcpy(nb.contents(), old.contents(), 2 * count * s4) }
+                buffer = nb
+                buffersMade += 1
+            }
+            if let buffer {
+                s.packed.withUnsafeBytes { raw in
+                    guard let base = raw.baseAddress else { return }
+                    memcpy(buffer.contents() + 2 * count * s4, base + 2 * count * s4, 2 * (n - count) * s4)
+                }
+                count = n
+            }
+        }
+        if let m = s.map {
+            if gridToken != m.token || grid.map({ $0.dims != m.dims }) ?? true {
+                uploadGrid(m)
+                streamMapVersion = s.mapVersion
+            } else if s.mapVersion != streamMapVersion {
+                if let rows = s.mapRowsChanged(since: streamMapVersion) {
+                    gridSource = m.rg
+                    gridSmooth = m.smooth
+                    sendRows(rows)
+                }
+                streamMapVersion = s.mapVersion
+            }
+        } else if gridToken != -1 {
+            uploadGrid(nil)
+        }
     }
 
     /// The shell clip that cuts the body's surface open where the map says open lattice (ShellClip mode 2: the cell field,
@@ -733,6 +875,7 @@ final class LatticeLayoutBarsPass {
 
     /// The bars into ONE buffer (P7), packed (a.xyz, r)(b.xyz, 0).
     func upload(_ inputs: LatticeLayoutBarsInputs) {
+        wholeUploads += 1   // ★ notes30 (tests: one a lay, never one a poll)
         token = inputs.token
         hidden = inputs.hidden
         lightFrom = inputs.lightFrom
@@ -868,7 +1011,8 @@ final class LatticeLayoutBarsPass {
 
 extension MeshRenderer {
     /// The new engine's bars draw this frame: present, uploaded, not hidden — and #354's lattice shade built (it lights them).
-    var layoutBarsInFrame: Bool { layoutBars?.isDrawable == true && latticePipelinesDidBuild }
+    /// ★ notes30: the pass drawn this frame (the stream's while the lay streams: `drawnLayoutBars`) is drawable.
+    var layoutBarsInFrame: Bool { drawnLayoutBars?.isDrawable == true && latticePipelinesDidBuild }
 
     /// THE ONE ENTRY POINT for the new engine's bars (called from the view's apply). Uploads once per token; nil tears the
     /// pass down. Returns true when the frame must be redrawn.

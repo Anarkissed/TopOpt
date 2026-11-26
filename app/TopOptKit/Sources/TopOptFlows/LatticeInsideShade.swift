@@ -187,7 +187,7 @@ extension MeshRenderer {
         if growthFrame.ownMap, let p = growthFrame.mapPass, let g = p.grid, let t = p.gridTexture {
             return (t, g.origin, g.voxel, g.dims)
         }
-        guard layoutBarsInFrame, let b = layoutBars, b.shellClip != nil, let g = b.grid, let t = b.gridTexture else { return nil }
+        guard layoutBarsInFrame, let b = drawnLayoutBars, b.shellClip != nil, let g = b.grid, let t = b.gridTexture else { return nil }
         return (t, g.origin, g.voxel, g.dims)
     }
 

@@ -195,7 +195,8 @@ struct LatticeSampleLay: Equatable, Sendable {
 
     /// Lays `plan` in the cube (`cube`) or the sample part, on a session of its own (closed when it ends; leaving the page
     /// cancels it with the task). Off the main thread, in the caller's task (never detached).
-    nonisolated static func lay(_ plan: LatticeSampleLay, cube: Bool) async throws -> Made {
+    /// ★ notes30: `stream` — the struts the engine hands over while it lays, onto the sample's timelapse (nil: none).
+    nonisolated static func lay(_ plan: LatticeSampleLay, cube: Bool, stream: LatticeSampleStream? = nil) async throws -> Made {
         var stages: [String: Double] = [:]
         var t0 = Date()
         func step(_ name: String) { stages[name] = Date().timeIntervalSince(t0) * 1000; t0 = Date() }
@@ -211,7 +212,10 @@ struct LatticeSampleLay: Equatable, Sendable {
             step("stressMS")
         }
         let s = plan.settings(box: (body.lo, body.hi))
-        let r = try await session.lay(s)
+        await stream?.begin(session)   // ★ notes30: the floors rise behind the engine's line, as his part's do
+        let r: LatticeLayoutSession.Result
+        do { r = try await session.lay(s) } catch { await stream?.end(); throw error }
+        await stream?.end()
         try Task.checkCancellation()
         stages["layMS"] = r.msRead + r.msCells + r.msBars
         stages["struts"] = Double(r.barCount)
@@ -261,4 +265,38 @@ struct LatticeSampleLay: Equatable, Sendable {
         parts.append("built by the engine")
         return parts.joined(separator: " \u{00B7} ")
     }
+}
+
+
+/// ★ notes30 (his 11-26, option D: "the sample gets the same rising floors"): the Settings sample's poll of the struts its
+/// engine hands over while it lays (see-through: no walls, no map), onto its timelapse's stream. Main actor.
+@MainActor
+final class LatticeSampleStream {
+    let show: LatticeBuildShow
+    private var watch: LatticeStrutWatch?
+    init(show: LatticeBuildShow) { self.show = show }
+
+    /// The sample's session is open: its next lay hands its struts over (none: Skip all animations, no timelapse, no tap).
+    func begin(_ session: LatticeLayoutSession) {
+        watch?.stop(); watch = nil
+        guard !AppSettings.skipAllAnimations, show.waiting, let tap = LatticeLayoutPreview.strutTap(session) else { return }
+        show.stream.reset()
+        tap.streamNextLay(up: show.viewAxes.up, map: nil)
+        let s = show
+        watch = LatticeStrutWatch(stream: show.stream, every: LatticeLayoutPreview.growthPollS,
+                                  most: LatticeLayoutPreview.strutReadMost,
+                                  read: { [weak tap] from, most, mapFrom in
+                                      guard let tap else { throw CancellationError() }
+                                      return try tap.strutRead(from: from, most: most, mapFrom: mapFrom)
+                                  },
+                                  moved: { [weak s] in s?.streamMoved() })
+    }
+
+    /// The lay ended: its last struts read, the poll stopped.
+    func end() {
+        watch?.tick(force: true)
+        watch?.stop(); watch = nil
+    }
+    /// Reads made by the last poll (tests).
+    var streaming: Bool { watch != nil }
 }

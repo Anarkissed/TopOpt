@@ -39,55 +39,59 @@ final class Notes29AnimationTests: XCTestCase {
     // MARK: the timelapse's clock
 
     /// ★ His total ("about 6-8 seconds for the build, total": 6, 7 and 8 rendered for his pick) from the ask to the finished
-    /// lay, whatever the lay took; a lay that takes longer is covered by the closed site and its walls and frame still come in
-    /// full after it lands; nothing of it shows before it lands; the walls come off in hard snaps after it lands, before the
-    /// frame; the frame rises in HARD snaps (each one more, all at once, with stillness between floors) and ends on the whole.
+    /// lay, whatever the lay took; a lay nothing of which streamed is covered by the closed site and its floors still come in
+    /// full (at least `buildLeastS`) after it lands; nothing of it shows before it lands; ★ notes30: floor by floor — in the solid
+    /// view each floor's walls first, then its columns and bays — in HARD snaps (each one more, all at once, a beat between
+    /// floors), ending on the whole.
     func testTheTimelapseLastsHisTotalAndEndsOnTheFinishedLay() {
         typealias T = LatticeBuildTimelapse
         defer { T.totalS = T.hisTotalS }
         for total in T.totalChoicesS { T.totalS = total
         for layS in [0.2, 1.0, 1.2, 3.0, 4.5, 9.0] {
-            for floors in [T.floorsLeast, 5, T.floorsMost] {
-                var tl = T(start: 100)
-                for k in 0..<40 { XCTAssertNil(tl.shown(at: 100 + Double(k) * layS / 40, floors: floors), "★ nothing of the lay before it lands") }
+            for floors in [T.floorsLeast, 5, T.floorsMost] { for walls in [false, true] {
+                var tl = T(start: 100, walls: walls)
+                tl.floorsUnframed = floors
+                for k in 0..<40 {
+                    let t = 100 + Double(k) * layS / 40
+                    tl.advance(to: t)
+                    XCTAssertNil(tl.shown(at: t), "★ nothing of the lay before it lands")
+                }
                 tl.land(at: 100 + layS)
-                let end = try! XCTUnwrap(tl.end), b = try! XCTUnwrap(tl.buildStart)
+                let end = try! XCTUnwrap(tl.end)
                 XCTAssertGreaterThanOrEqual(end - 100, total - 1e-9, "★ at least \(total) s (lay \(layS) s)")
-                XCTAssertGreaterThanOrEqual(b, 100 + layS + T.wallsS - 1e-9, "the frame only after the lay lands and its walls come off")
-                XCTAssertGreaterThanOrEqual(end - b, T.buildLeastS + T.toppedOutS - 1e-9, "★ a late lay still rises in full")
-                if layS + T.wallsS + T.buildLeastS + T.toppedOutS <= total {
+                tl.advance(to: end)
+                let snaps = tl.snapTimes
+                XCTAssertEqual(snaps.count, floors * tl.snapsPerFloor, "every floor's snaps")
+                XCTAssertGreaterThanOrEqual(snaps.first ?? 0, 100 + layS - 1e-9, "the first snap only after the lay lands")
+                XCTAssertGreaterThanOrEqual(end - (snaps.first ?? end), T.buildLeastS + T.toppedOutS - 1e-6, "★ a late lay still rises in full")
+                if Swift.max(layS, T.siteLeastS) + T.buildLeastS + T.toppedOutS <= total {
                     XCTAssertEqual(end - 100, total, accuracy: 1e-9, "★ a quick lay: exactly his total")
                 }
-                // the walls: closed until the lay lands, then off in hard snaps, open before the frame's first snap
-                let w = try! XCTUnwrap(tl.wallsStart)
-                XCTAssertEqual(tl.standing(at: 100 + layS * 0.5), 1, "★ the part closed while the engine lays")
-                XCTAssertEqual(tl.standing(at: w - 0.001), 1)
-                var levels: [Float] = []
-                var tw = w
-                while tw < b + 0.05 { let v = tl.standing(at: tw); if levels.last != v { levels.append(v) }; tw += 0.001 }
-                XCTAssertEqual(levels, (1...T.wallSteps).map { Float(T.wallSteps - $0) / Float(T.wallSteps) },
-                               "★ the walls off in \(T.wallSteps) hard snaps, the first at once")
-                XCTAssertEqual(tl.standing(at: b), 0, "★ open before the frame rises")
-                // sampled every millisecond: the snaps come one at a time, at once (no in-between), then stillness
-                var last: Int? = nil, changes: [Double] = []
+                // the first snap: the lowest floor's walls (the solid view), else its columns
+                let first = try! XCTUnwrap(tl.shown(at: snaps[0]))
+                XCTAssertEqual(first.opened, walls ? 1 : 0)
+                XCTAssertEqual(first.snaps, walls ? 0 : 1, walls ? "★ the walls before the columns" : "the columns first")
+                // sampled every millisecond: one step at a time, at once (no in-between), then stillness
+                var last: [Int]? = nil, changes = 0
                 var t = 100.0
                 while t <= end + 0.01 {
-                    let n = tl.shown(at: t, floors: floors)
-                    if n != last {
-                        if let l = last, let n { XCTAssertEqual(n, l + 1, "★ a hard snap: one step at a time, never a fade (t \(t))") }
-                        if last == nil, let n { XCTAssertEqual(n, 1, "the first snap: the lowest floor's columns") }
-                        changes.append(t); last = n
+                    let s = tl.shown(at: t)
+                    let now = s.map { [$0.opened, $0.snaps] }
+                    if now != last {
+                        if let l = last, let n = now {
+                            XCTAssertEqual((n[0] - l[0]) + (n[1] - l[1]), 1, "★ a hard snap: one step at a time, never a fade (t \(t))")
+                        }
+                        changes += 1; last = now
                     }
                     t += 0.001
                 }
-                let all = floors * T.perFloor
-                XCTAssertEqual(last, all, "★ it ends on the whole lattice")
-                XCTAssertEqual(changes.count, all, "every snap seen")
+                XCTAssertEqual(last, [walls ? floors : 0, floors * T.perFloor], "★ it ends on the whole lattice")
+                XCTAssertEqual(changes, snaps.count, "every snap seen")
                 XCTAssertTrue(tl.done(at: end), "over at its end")
-                let gaps = zip(changes.dropFirst(), changes).map { $0 - $1 }
+                let gaps = zip(snaps.dropFirst(), snaps).map { $0 - $1 }
                 XCTAssertGreaterThan(gaps.max() ?? 0, (gaps.min() ?? 0) * 1.5, "★ hard stops: a beat of stillness between floors")
                 XCTAssertGreaterThanOrEqual(gaps.min() ?? 0, 1.0 / 30 - 1e-6, "every snap its own frame at 30 fps")
-            }
+            }}
         }
         }
         XCTAssertEqual(T.floors(heightMM: 85), 6)
@@ -279,7 +283,7 @@ final class Notes29AnimationTests: XCTestCase {
             let lastOpen = try frame()
             let opened = differing(closed, lastOpen)
             XCTAssertGreaterThan(opened, 2_000, "premise: the last lattice's map opens the pocket")
-            show.layBegins(now: t0)
+            show.layBegins(walls: true, now: t0)
             LatticeBuildShow.clockForTesting = t0 + 0.6
             let laying = differing(closed, try frame())
             if red {
@@ -292,22 +296,24 @@ final class Notes29AnimationTests: XCTestCase {
             r.applyLayoutBars(LatticeLayoutBarsInputs(token: 2, bars: bar, solid: Notes24IntoThePartTests.pocketMap(token: 2)),
                               device: device)
             show.landed(token: 2, now: land)
-            let tl = try XCTUnwrap(show.timelapse), ws = try XCTUnwrap(tl.wallsStart), b = try XCTUnwrap(tl.buildStart)
-            let snap = LatticeBuildTimelapse.wallsS / Double(LatticeBuildTimelapse.wallSteps)
-            var steps: [Int] = []
-            for k in 0..<LatticeBuildTimelapse.wallSteps {
-                LatticeBuildShow.clockForTesting = ws + Double(k) * snap + snap / 2
-                steps.append(differing(closed, try frame()))
+            // ★ notes30: floor by floor (Notes30StrutStreamTests.testTheWallsComeOffFloorByFloor shows each floor's share)
+            var steps: [Int] = [], opens: [Int] = []
+            var t = land
+            while let tl = show.timelapse, !tl.done(at: t) {
+                LatticeBuildShow.clockForTesting = t
+                let px = try frame()
+                let o = show.wallsOpen(barsToken: 2, at: t) ?? -1
+                if opens.last != o { opens.append(o); steps.append(differing(closed, px)) }
+                t += 1.0 / 30
             }
-            LatticeBuildShow.clockForTesting = b + 0.01
+            LatticeBuildShow.clockForTesting = t + 0.05
             let open = differing(closed, try frame())
-            XCTAssertEqual(r.lastBuildStanding, 0, "open before the frame rises")
+            XCTAssertNil(r.lastBuildStanding, "open as the map says once topped out")
             XCTAssertNotNil(r.insideMap, "★ the inside shaded by this lay's map")
-            print("WALLS (\(samples)×): laying \(laying) px changed; the snaps \(steps); open \(open) (the last lattice's \(opened))")
-            XCTAssertGreaterThan(steps[0], laying + opened / 10, "★ the first snap takes some off")
-            for (a, c) in zip(steps, steps.dropFirst()) { XCTAssertGreaterThan(c, a, "★ more off at each snap") }
-            XCTAssertLessThan(steps.first ?? open, open * 2 / 3, "the first snap: some still standing")
-            XCTAssertEqual(Double(steps.last ?? 0), Double(open), accuracy: Double(open) / 50, "the last snap: off")
+            print("WALLS (\(samples)×): laying \(laying) px changed; floors opened \(opens) → \(steps); open \(open) (the last lattice's \(opened))")
+            XCTAssertGreaterThanOrEqual(opens.filter { $0 >= 1 }.count, LatticeBuildTimelapse.floorsLeast, "★ the walls off floor by floor")
+            for (a, c) in zip(steps, steps.dropFirst()) { XCTAssertGreaterThanOrEqual(c, a - open / 50, "★ more off at each floor") }
+            XCTAssertEqual(Double(steps.last ?? 0), Double(open), accuracy: Double(open) / 20, "the last floor: off")
             XCTAssertGreaterThan(open, opened * 8 / 10, "★ then open")
         }}
     }
