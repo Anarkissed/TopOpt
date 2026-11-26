@@ -702,6 +702,8 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   bool margin_stop_now = false;
   const bool margin_rule =
       static_cast<bool>(plsm.margin_probe) && plsm.margin_probe_every > 0;
+  int refit_cg_iters_max = 0;  // stage 3: the re-fit's own convergence, reported
+  double refit_rel_resid_max = 0.0;
   FeaSolution warm;
   bool have_warm = false;
   bool non_convergent = false;
@@ -1053,8 +1055,8 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
               ++cnt;
             }
         ++out.refits;
-        out.refit_cg_iters_max = std::max(out.refit_cg_iters_max, rf.cg_iters);
-        out.refit_rel_resid_max = std::max(out.refit_rel_resid_max, rf.rel_resid);
+        refit_cg_iters_max = std::max(refit_cg_iters_max, rf.cg_iters);
+        refit_rel_resid_max = std::max(refit_rel_resid_max, rf.rel_resid);
         if (!moves.empty()) {
           std::sort(moves.begin(), moves.end());
           out.refit_move_p90_mm =
@@ -1241,7 +1243,7 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
                  "90th pct %.3f, max %.3f mm; fit CG up to %d iterations, residual up to %.1e\n",
                  plsm_basis_name(basis), support, knots.dx, done_iters, out.refits,
                  out.refit_move_rms_mm, out.refit_move_p90_mm, out.refit_move_max_mm,
-                 out.refit_cg_iters_max, out.refit_rel_resid_max);
+                 refit_cg_iters_max, refit_rel_resid_max);
   out.best_iteration = best_iter;
   out.margin_peak_iteration = peak_iter > 0 ? peak_iter : 0;
   out.margin_peak = peak_iter > 0 ? peak_margin : 0.0;

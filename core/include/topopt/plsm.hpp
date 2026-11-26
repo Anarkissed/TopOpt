@@ -438,8 +438,6 @@ struct PlsmRunResult {
   double refit_move_max_mm = 0.0;
   double refit_move_rms_mm = 0.0;
   double refit_move_p90_mm = 0.0;
-  int refit_cg_iters_max = 0;        // the fit's own convergence, worst re-fit
-  double refit_rel_resid_max = 0.0;
 };
 
 // Optimise `alpha` under the volume constraint of `options.volume_fraction` over
