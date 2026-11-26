@@ -2790,9 +2790,9 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       double thickest = 0.0;
       for (double t : local_member_thickness_mm(grid, drawn, 0.5,
                                                 AnalysisKnobs{}.thickness_cap_voxels))
-        if (std::isfinite(t) && t > thickest) thickest = t;
+        if (t > thickest) thickest = t;  // +infinity = thicker than the measure's reach
       const PartScale ps = part_scale(thickest, options.wall_line_width_mm);
-      if (ps.too_small) {
+      if (std::isfinite(thickest) && ps.too_small) {
         result.pipeline.report.too_small.evaluated = true;
         result.pipeline.report.too_small.thickest_mm = ps.thickest_mm;
         result.pipeline.report.too_small.needed_mm = ps.needed_mm;
