@@ -355,8 +355,6 @@ public struct WorkspacePlaceholder: View {
     @State private var cadFacesDrawerOpen = false
     // The expand handle currently being dragged (nil = none).
     @State private var draggingExpandPlane: String?
-    /// ★ §3(b) — which group's (i) pop-up is open. One at a time, PER UNION.
-    @State private var diagnosisPopoverGroup: UUID?
     /// ★ §5 — which DEPTH field has the numeric keypad open. Keyed by the row's
     /// identifier so a group row and a selectable row cannot share one pad.
     @State private var depthPadKey: String?
@@ -11761,12 +11759,15 @@ public struct WorkspacePlaceholder: View {
     }
 
     /// ★ his 11-22 ("NOTHING cuts into the modal"): the diagnosis as one warning glyph (a 44 pt target) in the Role row; a
-    /// tap opens the same pop-up with every failure and its fix. Never in Aesthetic (his 08-25 ruling, as the badge).
+    /// tap opens every failure and its fix. Never in Aesthetic (his 08-25 ruling, as the badge).
+    /// ★ notes30 X2 (his yes, 11-26): the tap opens the app's one centred card, like every (i) ("Tap anywhere to continue"):
+    /// every failure, the fix first, then its numbers; the fixes that name a Lattice page setting are its buttons, each going
+    /// to that setting lit with what to try (the popover N1 kept is gone).
     @ViewBuilder private func latticeDiagnosisGlyph(_ g: SelectionGroup) -> some View {
         let d = (project.lattice.stageMode ?? .structural) == .aesthetic
             ? LatticeFaceDiagnosis.merged([]) : latticeDiagnosis(g)
         if let badge = d.badge {
-            Button { diagnosisPopoverGroup = g.id } label: {
+            Button { openLatticeDiagnosisCard(d) } label: {
                 Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 13, weight: .bold))
                     .foregroundStyle(latticeVerdictTint(d.severity).color)
                     .frame(width: 44, height: 44).contentShape(Rectangle())
@@ -11775,42 +11776,17 @@ public struct WorkspacePlaceholder: View {
             .accessibilityLabel(badge + ". How to fix this")
             .accessibilityIdentifier("lattice-diagnosis-info-\(g.id.uuidString)")
             .background(DSParts.publish("lattice-diagnosis-\(g.id.uuidString)"))
-            .popover(isPresented: Binding(
-                get: { diagnosisPopoverGroup == g.id },
-                set: { if !$0 { diagnosisPopoverGroup = nil } })) {
-                latticeDiagnosisPopover(d)
-            }
         }
     }
 
-    /// ★ §3(b)/§3(e) — THE POP-UP: every failure, and it LEADS WITH THE FIX.
-    private func latticeDiagnosisPopover(_ d: LatticeFaceDiagnosis) -> some View {
-        VStack(alignment: .leading, spacing: DS.Space.m) {
-            ForEach(Array(d.problems.enumerated()), id: \.offset) { _, p in
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(p.what)
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(DS.Color.textPrimary.color)
-                    ForEach(p.fixes, id: \.self) { fix in
-                        HStack(alignment: .top, spacing: DS.Space.xs) {
-                            Image(systemName: "wrench.and.screwdriver.fill")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(DS.Color.accent.color)
-                            Text(fix)
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(DS.Color.textPrimary.color)
-                        }
-                    }
-                    Text(p.measured)
-                        .font(.system(size: 11, weight: .semibold)).monospacedDigit()
-                        .foregroundStyle(DS.Color.textTertiary.color)
-                }
-            }
-        }
-        .padding(DS.Space.ml)
-        .frame(maxWidth: 320, alignment: .leading)
-        .accessibilityIdentifier("lattice-diagnosis-popover")
+    /// ★ notes30 X2: the warning glyph's card — the centred card with every failure (`LatticeDiagnosisCard`), its setting fixes
+    /// as buttons through the app's one way to a setting (`openSettingToChange`).
+    private func openLatticeDiagnosisCard(_ d: LatticeFaceDiagnosis) {
+        guard !Self.controlDiagnosisNoCard else { return }
+        LatticeDiagnosisCard.open(d) { openSettingToChange(.init(page: .lattice, field: $0.field.rawValue, tryText: $0.tryText)) }
     }
+    /// RED CONTROL (tests): release 21's wiring — the glyph's tap raised no centred card (it opened a popover beside it).
+    nonisolated(unsafe) static var controlDiagnosisNoCard = false
 
     /// The diagnosis for one group, from its card plus core's own two floors.
     /// ★ THE GROUP'S BADGE, FROM ITS FACES (maintainer, 2026-08-17). It was built

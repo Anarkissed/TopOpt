@@ -1383,11 +1383,28 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// Test hook: how many of the part's vertices the last glow lit.
     nonisolated(unsafe) static var lastGlowLit = 0
 
+    /// ★ notes30 X2 (his answer, 11-26): what the deepest flat region asked to lattice needs of the cells, read off the lay's
+    /// own settings and core's smallest cell for it (`floorCellMM`, the lay's floor_cell_mm); with Allow quilt on the smallest
+    /// is the thinnest strut over the type's touch (core's lattice_quilt_cell_mm). nil: no flat region, or no floor read.
+    nonisolated static func depthAsk(_ s: LatticeLayoutSession.Settings, lattice l: LatticeSettings,
+                                     floorCellMM: Double) -> SolidReason.Depth? {
+        let depths = s.regions.filter { !$0.noLattice && !$0.faces.isEmpty && $0.zone == nil && $0.depthMM > 0 }.map(\.depthMM)
+        guard let deepest = depths.max(), floorCellMM > 0 else { return nil }
+        let facts = LatticeLayoutSession.typeFacts(s.topology)
+        let thinnest = Swift.max(1, s.minStrutLines) * s.beadMM
+        var ae = l
+        ae.stageMode = .aesthetic
+        return SolidReason.Depth(depthMM: deepest, cellsAcross: Int(Swift.max(1, s.minCellsAcross)), floorCellMM: floorCellMM,
+                                 quiltFloorCellMM: facts.lays && facts.touch > 0 ? thinnest / facts.touch : 0,
+                                 aestheticCellsAcross: Int(minCellsAcross(ae)), allowQuiltOn: s.allowQuilt)
+    }
+
     /// ★ his ruling 11-14: why asked-for lattice is solid, and the fixes (after every layout: one coarse map).
     private func solidReasonCheck(lattice: LatticeSettings) async {
         guard let session, let box, !Task.isCancelled else { return }
         if let rep = try? await Self.unheldReport(session, box), !Task.isCancelled {
-            solidReason = SolidReason.of(share: rep.share, nocell: rep.nocell, lattice: lattice)
+            let depth = lastSettings.flatMap { Self.depthAsk($0, lattice: lattice, floorCellMM: laid?.floorCellMM ?? 0) }
+            solidReason = SolidReason.of(share: rep.share, nocell: rep.nocell, lattice: lattice, depth: depth)
         } else {
             solidReason = nil
         }
@@ -1465,11 +1482,18 @@ public final class LatticeLayoutPreview: ObservableObject {
         var acts: [(title: String, run: () -> Void)] = r.fixes.map { f in
             (f.title, { [weak self] in self?.takeFix(f) })
         }
-        if nozzleAnswer == nil, nozzleOffered { acts.append((LatticePreviewMode.nozzleCheck, { [weak self] in self?.checkNozzleFromPopUp() })) }
+        // ★ notes30 X2 (his answer, 11-26): his three offers are the whole pop-up — exactly these, no fourth (Leave it solid is
+        // its close), with an (i) that says what each does
+        if nozzleAnswer == nil, nozzleOffered, !r.offersThree {
+            acts.append((LatticePreviewMode.nozzleCheck, { [weak self] in self?.checkNozzleFromPopUp() }))
+        }
         acts = Array(acts.prefix(3))
         let popups = AppPopups.shared
         let title = SolidPopUp.title(r)
-        if acts.count >= 2 {
+        if r.offersThree, let first = acts.first {
+            popups.choose(title, text, first: first, second: acts.count > 1 ? acts[1] : nil, third: acts.count > 2 ? acts[2] : nil,
+                          dismiss: nil, why: SolidPopUp.offersWhy(r).map { (SolidPopUp.offersWhyTitle, $0) })
+        } else if acts.count >= 2 {
             popups.choose(title, text, first: acts[0], second: acts[1], third: acts.count > 2 ? acts[2] : nil, dismiss: "OK")
         } else {
             popups.show(title, text, action: acts.first)
@@ -1490,7 +1514,9 @@ public final class LatticeLayoutPreview: ObservableObject {
         solidPopUpUp = id != nil
         popUpWatch = AppPopups.shared.$current.sink { [weak self] now in
             MainActor.assumeIsolated {
-                guard let self, now?.id != self.solidPopUpID else { return }
+                // ★ notes30 X2: its (i)'s card over it is not a close: the pop-up waits under it and comes back
+                guard let self, now?.id != self.solidPopUpID,
+                      now == nil || !AppPopups.shared.holds(self.solidPopUpID) else { return }
                 self.solidPopUpUp = false
                 self.solidPopUpID = nil
                 self.popUpWatch = nil
@@ -1498,10 +1524,11 @@ public final class LatticeLayoutPreview: ObservableObject {
         }
     }
 
-    /// A fix tap: taken on the part's lattice settings (the preview lays again on the change).
+    /// A fix tap: taken on the part's lattice settings (the preview lays again on the change). ★ notes30 X2: on the part, so
+    /// Allow quilt opens Manual with it (`SolidReason.take`).
     private func takeFix(_ f: SolidReason.Fix) {
         guard let p = fixProject else { return }
-        SolidReason.apply(f, to: &p.lattice)
+        SolidReason.take(f, on: p)
     }
 
     /// The pop-up's "Check a 0.2 mm nozzle": the check runs; its answer comes back in the pop-up.

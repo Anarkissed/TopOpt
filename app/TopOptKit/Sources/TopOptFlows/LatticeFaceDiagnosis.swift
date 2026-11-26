@@ -51,6 +51,32 @@ public struct LatticeFaceDiagnosis: Equatable, Sendable {
         public let measured: String
         /// ★ THE FIX WITH ITS VALUE. One or two, each already a number.
         public let fixes: [String]
+        /// ★ notes30 X2 (his yes, 11-26: the warning glyph's fixes as the centred card's actions): the Lattice page's setting
+        /// each fix names, with what to try — the card's buttons go there (the app's one "Change settings" way, the field lit
+        /// with the value), so a fix is never applied blind. A fix the face rows hold (its depth, just above the glyph) is
+        /// said, not a button.
+        public var changes: [Change] = []
+    }
+
+    /// One fix the card offers as a button: the Lattice page's field and what to try there (five words at most).
+    public struct Change: Equatable, Sendable {
+        public let field: LatticeWizardSetting
+        public let tryText: String
+        /// The button's words (five at most).
+        public var title: String {
+            switch field {
+            case .cellSize: return "Change the cell size"
+            case .density: return "Change the density"
+            default: return "Change " + field.title.lowercased()
+            }
+        }
+    }
+
+    /// ★ notes30 X2: the fixes the card offers as buttons, one per field, in the order the problems name them (three at most).
+    public var changes: [Change] {
+        var seen = Set<String>(), out: [Change] = []
+        for p in problems { for c in p.changes where !seen.contains(c.field.rawValue) { seen.insert(c.field.rawValue); out.append(c) } }
+        return Array(out.prefix(3))
     }
 
     /// ★ §3(a) — WHAT RIDES THE COLLAPSED ROW, visible WITHOUT expanding the
@@ -114,7 +140,9 @@ public struct LatticeFaceDiagnosis: Equatable, Sendable {
                 fixes: [String(format: "Make it deeper: %.1f mm.",
                                roundedUp(cellsPerMemberFloor * card.cellMM)),
                         String(format: "Or use a smaller cell: %.1f mm.",
-                               roundedDown(thicknessMM / cellsPerMemberFloor))]))
+                               roundedDown(thicknessMM / cellsPerMemberFloor))],
+                changes: [Change(field: .cellSize, tryText: String(format: "Try %.1f mm cells",
+                                                                   roundedDown(thicknessMM / cellsPerMemberFloor)))]))
         }
 
         // ── 3. THE STRUT IS THINNER THAN THE NOZZLE ──────────────────────────
@@ -130,15 +158,17 @@ public struct LatticeFaceDiagnosis: Equatable, Sendable {
                 ? card.cellMM * (nozzleWidthMM / card.strutDiameterMM) : 0
             var fixes = [String(format: "Raise the density above %.0f%%.",
                                 card.relativeDensity * 100)]
+            var changes = [Change(field: .density, tryText: String(format: "Try above %.0f%%", card.relativeDensity * 100))]
             if neededCellMM > 0 {
                 fixes.append(String(format: "Or use a bigger cell: %.1f mm.",
                                     roundedUp(neededCellMM)))
+                changes.append(Change(field: .cellSize, tryText: String(format: "Try %.1f mm cells", roundedUp(neededCellMM))))
             }
             problems.append(Problem(
                 what: "Too thin to print — the struts are finer than the nozzle.",
                 measured: String(format: "%.2f mm strut, nozzle is %.2f mm.",
                                  card.strutDiameterMM, nozzleWidthMM),
-                fixes: fixes))
+                fixes: fixes, changes: changes))
         }
 
         guard !problems.isEmpty else {
