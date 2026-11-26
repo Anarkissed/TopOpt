@@ -124,3 +124,29 @@ PROPOSAL FOR THE REVIEWER (TOReview, 11-25; a change to a ruled definition, so n
 ## 4. Side hustle: a coarse space that follows the part (outside the brief)
 
 The maintainer's process (2026-11-25), in waiting time only, never slowing sections 3.1 to 3.6: (1) read all the code of the existing algebraic level 1 (algebraic_coarsen.*, its use in multigrid.cpp, PRs 230/280/283 and the 08-03 handoff); (2) research other ways to do the same or better, beyond the usual; (3) a plan: does it follow the latest research, is it worth it, what is kept / rewritten / thrown out, what result makes it ship, at what point it is called a failure; (4) implement, then test, and stop at the agreed criteria. Steps 1 to 3 go to him as one write-up before any code. Memory at res 128 and 192 (TOReview) is queued.
+
+## 5. Stage report (filling in as measurements land)
+
+### Reference table, before and after (Release, his jobs read in place; one part per lock hold)
+| part | today: run time (solve / rest) | iterations per solve | after: run time (solve / rest) | iterations per solve | versions, margins, mass | test K |
+|---|---|---|---|---|---|---|
+| (filled from run_ref.sh: today and the chosen TOPOPT_SOLVER setting) | | | | | | |
+
+### Tests moved from failing to passing
+- New: to_solver_bridge_way (12), to_solver_smoother (74, three settings each of per-level Jacobi and Chebyshev, converge on multigrid without the l1 retry); to come with their patches: to_solve_threads (S-05), to_solver_reduced_apply (B-06), to_solver_settings and to_solver_run_state (E-01).
+- Today's solver on his parts: the shipped V-cycle diverges on solves 1-3 and latches; with the stage-5 smoother it carries every solve measured (replays, all reference dumps: to fill).
+
+### The open choices, settled with their settings
+- Smoother (B-05): damped Jacobi F/lambda at F = 1.0 / 1.333 / 1.6 against 4th-kind Chebyshev K = 2 / 3 / 4, on every reference dump (to fill from measureB). The stall rule: 1,000 cycles, then 2x per 500 (measured on Top Motor Mount, commit 49f28890).
+- Element product (B-06): stored dofs (today, full-length copies) / reduced numbering with a spare slot (B2, B3) / grid stencil (C), at 1 / 3 / 6 threads (to fill from measureC).
+- Single precision (section K): FP32 against FP64 cycle, same iterations; keep only at >= 15 % solve wall (to fill from measureC).
+
+### Refused, and the rule
+- (none so far)
+
+### Levers named in the brief, answered
+- Coarse warm start: [to fill: warm vs cold iterations from the replays].
+- Resolution continuation; GenEO sweep; Active Domain; MG hierarchy dropping per solve: [to fill].
+
+### For #362's gate
+- The app-side FlexibleBatchM* tests (app/TopOptKit/Tests) run in #362's gate on any change to the solver the bridge calls; E-01 phase 2 changes the bridge's Posture (through TOReview).
