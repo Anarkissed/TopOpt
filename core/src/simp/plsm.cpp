@@ -1053,6 +1053,8 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
               ++cnt;
             }
         ++out.refits;
+        out.refit_cg_iters_max = std::max(out.refit_cg_iters_max, rf.cg_iters);
+        out.refit_rel_resid_max = std::max(out.refit_rel_resid_max, rf.rel_resid);
         if (!moves.empty()) {
           std::sort(moves.begin(), moves.end());
           out.refit_move_p90_mm =
@@ -1236,9 +1238,10 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
     std::fprintf(stderr,
                  "[plsm] basis %s reach %.1f knots %.2f vox: %d iterations, %d re-fits, "
                  "re-fit moved the surface (worst re-fit, where |grad phi| > 0.5): rms %.3f, "
-                 "90th pct %.3f, max %.3f mm\n",
+                 "90th pct %.3f, max %.3f mm; fit CG up to %d iterations, residual up to %.1e\n",
                  plsm_basis_name(basis), support, knots.dx, done_iters, out.refits,
-                 out.refit_move_rms_mm, out.refit_move_p90_mm, out.refit_move_max_mm);
+                 out.refit_move_rms_mm, out.refit_move_p90_mm, out.refit_move_max_mm,
+                 out.refit_cg_iters_max, out.refit_rel_resid_max);
   out.best_iteration = best_iter;
   out.margin_peak_iteration = peak_iter > 0 ? peak_iter : 0;
   out.margin_peak = peak_iter > 0 ? peak_margin : 0.0;
