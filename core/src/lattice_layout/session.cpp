@@ -359,8 +359,15 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
         // patch of cells of one size whose nodes meet none of the next size's (kelvin, rhombic: no node at a cube's
         // corner) was a piece adrift, and the drop below took every strut of it. Its free nodes are run on into the
         // lattice beside it first (join_cut_off_pieces); then what is still adrift goes, as before. Cube lattices only.
-        if (!strands) out.cut_off_joined = join_cut_off_pieces(out.bars, *domain_, threads, &out.layout);
-        out.pieces = drop_adrift_bars(out.bars, *domain_, &out.layout);
+        // S-1 (notes30, the maintainer's yes 2026-11-26): when the join changed no bar, its own count of the pieces is
+        // the drop's (the same bars, domain and layout: count_pieces gives the same answer, flag for flag), and the
+        // pieces are counted once. When an end was joined the drop counts again.
+        std::optional<PiecesCount> unchanged;
+        if (!strands)
+          out.cut_off_joined =
+              join_cut_off_pieces(out.bars, *domain_, threads, &out.layout, pieces_once_ ? &unchanged : nullptr);
+        out.pieces = drop_adrift_bars(out.bars, *domain_, &out.layout, unchanged ? &*unchanged : nullptr);
+        if (unchanged) ++counted_once_;
         // ★ notes29 ("the solid outline isn't even, there is a chunk cut out of it on either side"): a cell left with no
         // strut of its own (a cut cell at the part's edge whose pieces were all too short or left hanging) is opened
         // space in the file with nothing printed in it: a hole, or a notch in the outline. It is solid (D14).
