@@ -196,6 +196,22 @@ Run (build 26b8b784, 22:29), the stand at res 64, 50 % infill, six walls: the dr
 
 For #362 (to carry with the stage's flip; nothing in the app changes until then): read `drawn_part.printed_grams` and each version's finish `mass_grams` (already printed grams with the switch on) and show the saving from those two; keep `volume_saved_fraction` for nothing but the old path. One line on screen at most; the detail (walls, infill, "top and bottom layers not counted") behind the (i).
 
+## Printed grams checked against a real slicer (B3, 2026-11-26 03:45), and the model replaced
+
+The made sample bracket (182.4 cm3; 226.1 g solid at 1.24), sliced from the command line with the Bambu Studio installed on the Mac (bundled A1 0.4 nozzle, 0.20 mm Standard and PLA Basic presets, with 50 % sparse infill, six walls, 0.42 / 0.45 mm line widths; its own data folder in my scratch, nothing of his touched): 46.37 m of 1.75 mm filament = 111.5 cm3 = **138.3 g, a printed share of 0.612**.
+
+| model | grams | share | against the slicer |
+|---|---|---|---|
+| member-width model (the first one) | 121.8 | 0.539 | 12 % LOW |
+| shell model, walls only, 1.0 / 0.5 mm voxels | 138.5 / 134.5 | 0.612 / 0.595 | +0.1 / -2.7 % |
+| shell model, walls and skins (1.0 mm top, 0.6 mm bottom), 1.0 / 0.5 mm voxels | 142.6 / 137.7 | 0.631 / 0.609 | +3.1 / -0.4 % |
+
+Why the first model read low: it takes its wall share from a member-width measurement that calls any body wider than its reach (32 voxels) "too thick to measure" and gives it NO walls (the cautious choice for strength, the wrong one for grams), and it counts no top or bottom skins. The shell model (`printed_mass_shell`) counts a voxel as solid shell when it is within the wall thickness of the side surface in the layer plane, or within the skin thickness under an up-facing or over a down-facing surface, and the rest at the infill. Exact on a cube (walls only 0.360, walls and skins 0.488 of solid). It now gives the grams in the strength check and the drawn part's grams. One part, one slicer, one setting; within 3 %.
+
+ASSUMED, for him in the morning: the skins are Bambu Studio's defaults (five top layers and three bottom at 0.2 mm, so 1.0 and 0.6 mm), because his jobs carry wall loops, line widths and layer height but no top or bottom layer counts. Skins are counted only for a part printed along the grid's z.
+
+The earlier figures in this file from the first model (the stand at res 64: 85.4 g printed of 90.6 g; the drawn part 98.7 of 116.4 g; "13.5 % really saved") are to be re-made with the shell model.
+
 ## What it does to the lattice strength check
 
 Steps 1 and 2 change the solid part's reading only if applied in the shared code path; the lattice check reads strut stresses through its own laws. To be confirmed with LatticeReview before any edit: which branches of `analyze.cpp` the lattice posture takes, and that its numbers are byte-identical with the switch off.

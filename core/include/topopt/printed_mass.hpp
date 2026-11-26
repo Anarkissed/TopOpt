@@ -41,4 +41,28 @@ PrintedMass printed_mass(const VoxelGrid& grid, const std::vector<double>& densi
                          double wall_thickness_mm, double infill_percent,
                          double material_density_g_cm3);
 
+// THE SHELL MODEL (2026-11-26; replaces the member-width model above for the
+// grams he is shown). Checked against a real slicer on the made sample bracket
+// (Bambu Studio, 50 % infill, six walls): the member-width model read 12 % low,
+// because it gives a body wider than its measuring reach NO walls at all (the
+// conservative choice for strength, the wrong one for grams) and counts no top or
+// bottom skins.
+//
+// Here a printed voxel is SHELL, printed solid, when it lies
+//   - within `wall_mm` of the part's side surface, measured in the layer plane
+//     (the perimeters a slicer lays around every layer's outline), or
+//   - within `top_mm` below a surface that faces up the build direction, or
+//     within `bottom_mm` above one that faces down (the solid skins);
+// every other printed voxel is CORE, printed at the infill percentage. Infill
+// 100 gives the solid mass exactly. The build direction is the grid's +z (a job
+// printed in another direction is turned before it reaches here).
+// The solid skins a slicer lays by default (Bambu Studio: five top layers and
+// three bottom layers at 0.2 mm). ASSUMED until the job states its own.
+inline constexpr double kStage2TopSkinMm = 1.0;
+inline constexpr double kStage2BottomSkinMm = 0.6;
+
+PrintedMass printed_mass_shell(const VoxelGrid& grid, const std::vector<double>& density,
+                               double iso, double wall_mm, double top_mm, double bottom_mm,
+                               double infill_percent, double material_density_g_cm3);
+
 }  // namespace topopt

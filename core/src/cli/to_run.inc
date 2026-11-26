@@ -2780,10 +2780,11 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       for (std::size_t idx = 0; idx < drawn.size(); ++idx)
         if (grid.tags[idx] != VoxelTag::Empty) drawn[idx] = 1.0;
       const KnockdownSpec kd = knockdown_spec_for(options);
-      const PrintedMass pm = printed_mass(
-          grid, drawn, 0.5,
-          local_member_thickness_mm(grid, drawn, 0.5, AnalysisKnobs{}.thickness_cap_voxels),
-          kd.wall_thickness_mm, kd.infill_percent, materials.at(job.material).density_g_cm3);
+      // The same shell model the strength check uses for a version's grams
+      // (skins as for a part printed along the grid's z).
+      const PrintedMass pm = printed_mass_shell(
+          grid, drawn, 0.5, kd.wall_thickness_mm, kStage2TopSkinMm, kStage2BottomSkinMm,
+          kd.infill_percent, materials.at(job.material).density_g_cm3);
       result.pipeline.report.drawn_part.evaluated = true;
       result.pipeline.report.drawn_part.printed_grams = pm.grams;
       result.pipeline.report.drawn_part.solid_grams = pm.solid_grams;

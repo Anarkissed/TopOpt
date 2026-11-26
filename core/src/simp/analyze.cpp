@@ -548,21 +548,24 @@ FixedDesignAnalysis analyze_fixed_design(
   // relative density, counted above). The solid figure is kept beside it.
   out.mass_grams_solid = out.mass_grams;
   if (to_stage2_on() && lattice_voxels == 0) {
-    // The member widths: the gate's own when the wall-aware posture measured them;
-    // otherwise measured here for the grams alone (production ships with that
-    // posture off, so without this the share was always 1 and the grams solid:
-    // found on the stand at res 64, 2026-11-25).
-    std::vector<double> width_for_mass;
-    if (member_width_mm.size() != density.size())
-      width_for_mass = local_member_thickness_mm(grid, density, kIso, kn.thickness_cap_voxels);
-    const std::vector<double>& member_width_mm_for_mass =
-        member_width_mm.size() == density.size() ? member_width_mm : width_for_mass;
+    // The shell model (printed_mass.hpp): walls by distance from the side surface,
+    // solid skins under up-facing and over down-facing surfaces, the rest at the
+    // infill. Within 3 % of a real slicer on the made sample bracket. The skins
+    // are counted only when the part is printed along the grid's z (a tilted
+    // build direction gets walls only, which reads a little low). Skin
+    // thicknesses are the slicer's usual ones until the job carries its own.
     std::vector<double> printed_density(density.size(), 0.0);
     for (std::size_t idx = 0; idx < density.size(); ++idx)
       if (grid.tags[idx] != VoxelTag::Empty && density[idx] > kIso) printed_density[idx] = 1.0;
-    out.mass_grams = printed_mass(grid, printed_density, 0.5, member_width_mm_for_mass,
-                                  knockdown.wall_thickness_mm, knockdown.infill_percent,
-                                  material.density_g_cm3)
+    const double blen = std::sqrt(build_dir.x * build_dir.x + build_dir.y * build_dir.y +
+                                  build_dir.z * build_dir.z);
+    const bool along_z = blen > 0.0 && std::fabs(build_dir.z) > 0.99 * blen;
+    const bool up = build_dir.z >= 0.0;
+    const double top_mm = along_z ? (up ? kStage2TopSkinMm : kStage2BottomSkinMm) : 0.0;
+    const double bottom_mm = along_z ? (up ? kStage2BottomSkinMm : kStage2TopSkinMm) : 0.0;
+    out.mass_grams = printed_mass_shell(grid, printed_density, 0.5, knockdown.wall_thickness_mm,
+                                        top_mm, bottom_mm, knockdown.infill_percent,
+                                        material.density_g_cm3)
                          .grams;
   }
 

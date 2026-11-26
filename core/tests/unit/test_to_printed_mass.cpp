@@ -52,6 +52,23 @@ int main() {
     CHECK(m.grams >= last - 1e-12 && m.grams <= m.solid_grams + 1e-12);
     last = m.grams;
   }
+  // The shell model. A 20 mm cube: infill 100 gives the solid mass; with a 2 mm
+  // wall and no skins the core is a 16 x 16 mm column through the height, so the
+  // printed share at 0 % infill is 1 - 16 * 16 / 400 = 0.36; with 2 mm skins too
+  // the core is a 16 mm cube, share 1 - 16^3 / 8000 = 0.488.
+  {
+    const PrintedMass full100 = printed_mass_shell(g, full, 0.5, 2.0, 2.0, 2.0, 100.0, rho);
+    CHECK(std::fabs(full100.grams - solid) < 1e-9);
+    const PrintedMass walls = printed_mass_shell(g, full, 0.5, 2.0, 0.0, 0.0, 0.0, rho);
+    CHECK(std::fabs(walls.grams / solid - 0.36) < 1e-9);
+    const PrintedMass skins = printed_mass_shell(g, full, 0.5, 2.0, 2.0, 2.0, 0.0, rho);
+    CHECK(std::fabs(skins.grams / solid - 0.488) < 1e-9);
+    const PrintedMass half = printed_mass_shell(g, full, 0.5, 2.0, 2.0, 2.0, 50.0, rho);
+    CHECK(std::fabs(half.grams / solid - (0.488 + 0.512 * 0.5)) < 1e-9);
+    std::printf("[printed mass, shell] cube: walls only %.3f, walls and skins %.3f of solid\n",
+                walls.grams / solid, skins.grams / solid);
+  }
+
   std::printf("[printed mass] solid %.3f g; 6 mm members at 20 %% infill %.3f g; wide body at 20 %% %.3f g; %d failure(s)\n",
               solid, d.grams, b.grams, g_fail);
   return g_fail == 0 ? 0 : 1;

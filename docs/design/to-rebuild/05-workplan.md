@@ -43,14 +43,14 @@ A. Already agreed:
 
 B. Approved tonight:
 - B1. The WHOLE test suite on my branch (never run; lock, 1 to 3 h). Record every failure with its cause; fix mine, name the rest.
-- B3. Printed grams against Bambu Studio (installed; command line; the sample bracket; reads and writes only my scratch).
+- B3. DONE 03:45: the slicer gives 138.3 g on the sample bracket; my first model read 12 % low and is replaced by a shell model within 3 % (stage-2 file). Owed: re-make the stand's printed-grams figures with it.
 - B2. Two more made sample parts: a plate with holes; a hook loaded off-centre.
 - B5. Stage 2 on optimised designs at full resolution (the stand and the sample bracket: unset / stiff / size 1.8 mm; lock, about 1.5 h).
 - B6. Published values for PA12 (his material), deeper search.
 - B4. The "best I can do" trial build: stages 1, 3 and the solver work in one scratch tree, never merged; the sample bracket and Top Motor Mount; pictures for the morning.
 
 For him in the morning (questions held, with the provisional choice taken):
-- (none yet)
+- Top and bottom skin thickness for printed grams: his jobs do not carry top / bottom layer counts. PROVISIONAL: Bambu Studio's defaults (1.0 mm top, 0.6 mm bottom). Ask: should the app send his slicer's layer counts with the job?
 
 WAITING ON OTHERS: the reviewer's ruling on which reference a reading over a length is judged against (nothing more in `analyze.cpp` until then); #362's sheet types in a base I can build (the sheet row of the stage 2 lattice table).
 
