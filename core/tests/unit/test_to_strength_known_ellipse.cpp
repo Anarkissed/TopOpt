@@ -7,8 +7,9 @@
 // part in choosing it: an ELLIPTICAL hole with a / b = 2 in a wide plate under
 // tension, the long axis across the pull. The peak at the end of the long axis is
 // (1 + 2 a / b) = 5 times the far stress (Inglis 1913, exact for an infinite
-// plate; this plate is twenty long axes wide, so the finite width adds about a
-// percent, which is left on the safe side: the reference used is 5.00).
+// plate; here the hole's long axis is a fifth of the plate's width, so the finite
+// width RAISES the true peak by a few percent: judging against 5.00 is therefore
+// the lenient side, and a reading that misses 5.00 misses the true value by more).
 //
 // As in the round-hole test the pull is tilted 30 degrees to the grid and the
 // hole's centre sits off the grid lines, and the SAME physical plate (b = 3 mm,
@@ -74,7 +75,7 @@ std::vector<NodalLoad> edge_tractions(const VoxelGrid& g, double sxx, double syy
 // semi-axis `b_voxels` and stiffness E x fill^penalty in the voxels the hole cuts.
 double peak_ratio(int b_voxels, double penalty, bool* ok) {
   const int a_voxels = 2 * b_voxels;
-  const int w = 20 * a_voxels;  // plate twenty long semi-axes wide
+  const int w = 10 * a_voxels;  // the hole's long axis is a fifth of the plate's width... (2 a / W = 0.2)
   VoxelGrid g;
   g.nx = w;
   g.ny = w;
@@ -138,7 +139,9 @@ double peak_ratio(int b_voxels, double penalty, bool* ok) {
       g, params, density, bcs, loads, m, Vec3{0.0, 0.0, 1.0}, 1e-8, 20000,
       topopt::SolverKind::MultigridCG_Matfree, 0.0, knockdown, true,
       static_cast<double>(g.tags.size()));
-  *ok = res.max_von_mises > 0.0 && std::isfinite(res.max_von_mises);
+  *ok = !res.non_convergent && res.max_von_mises > 0.0 && std::isfinite(res.max_von_mises);
+  if (res.non_convergent)
+    std::printf("  (b = %d voxels, fill^%.0f: the solve did not converge)\n", b_voxels, penalty);
   return res.max_von_mises / kFarStress;
 }
 
