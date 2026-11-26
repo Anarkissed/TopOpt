@@ -108,6 +108,10 @@ Reading: with the loaded face a real off-grid face, the peak stress beside it fa
 
 The "[control]" table above counts the TEST's own call to `face_clamp_bcs`. No job called it: on `face`, a glued anchor still clamped all eight corners of every voxel the face lies on (two node planes on job A). So every `face` number above (the as-drawn tables, the stand, jobs A to C) was made with today's one-voxel-thick clamp and the new LOADS only, and the 13 % on job A is the loads alone (the 4.5 % of the force that today lands on the side faces), not the thinner clamp. Fixed in the commit after 3d13ced9: with `face`, a glued anchor holds the drawn face's own nodes (scenario jobs keep the voxel clamp). EVERY `face` measurement in this file is to be re-made on that build before the stage report; until then read them as "new loads, old clamp". `face_spring` rows were already held by the face's own nodes.
 
+### Jobs A to C re-made with the corrected clamp (build 4d495dd6, 2026-11-25 19:43)
+
+Laid lattice identical in all three (480, 2,978 and 7,692 bars). Worst-case margin, off -> `face`: A 790.5 -> 895.1 (was 891.6 with the old clamp); B 709.6 -> 941.2 (was 933.6); C 618.2 -> 971.9 (was 948.9), weakest strut 888.7 -> 870.0. So on these jobs the clamp's own share of the change is small (under 3 %) and the loads carry the rest. On a part held on a small face it is not small: Base as drawn at res 48 reads 0.79 with the face's own nodes held, against 0.97 with the old clamp and the new loads (table being re-made).
+
 ## Measured: the sideways lip (LatticeReview's question)
 
 A face that is PART of a flat side (a 20 x 20 mm patch in a 60 x 40 mm top; `test_to_true_loads`, table "[lip]"). Frozen voxels with their centre outside the prism under the patch:
