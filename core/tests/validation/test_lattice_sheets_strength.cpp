@@ -149,6 +149,29 @@ const SheetField* field_of(const Outcome& o, const Cell& c) {
   return nullptr;
 }
 
+// The check wrote sheet_cells.bin and named it; its records are the lay's cells, and the smallest margin among them is
+// the strut result's (the check's own law, density and stress: lattice_voxel_margins on its composite solve).
+void check_cells_against_block(const StrengthDone& d, const std::string& dir, const std::string& tag, double strut_margin,
+                               std::size_t cells) {
+  const bool wrote = std::find(d.files.begin(), d.files.end(), std::string(kSheetCellsName)) != d.files.end();
+  CHECK(wrote && has(d.json, "\"sheet_cells\": \"sheet_cells.bin\"") && has(d.json, "\"margins\": true"));
+  SheetCellsFile f;
+  std::string why;
+  const bool read = read_sheet_cells_file(dir + "/" + kSheetCellsName, f, &why);
+  CHECK(read && f.cells.size() == cells);
+  double least = std::numeric_limits<double>::infinity();
+  std::size_t judged = 0;
+  for (const SheetCellRecord& r : f.cells)
+    if (!std::isnan(r.margin)) {
+      ++judged;
+      least = std::min(least, static_cast<double>(r.margin));
+    }
+  std::printf("[check %s] the check wrote %s itself: %s; %zu of %zu cells judged, smallest margin %.6g against the strut "
+              "result's %.6g\n", tag.c_str(), kSheetCellsName, wrote ? "yes" : "NO", judged, f.cells.size(), least,
+              strut_margin);
+  CHECK(judged > 0 && std::isfinite(strut_margin) && std::fabs(least - strut_margin) <= 1e-5 * strut_margin);
+}
+
 }  // namespace
 
 int main() {
@@ -157,8 +180,10 @@ int main() {
   std::filesystem::create_directories(kDir);
   const StrengthCheck check = lattice_file_strength_check(MATERIALS_JSON_PATH, SETTINGS_RULES_PATH);
 
-  // 52 mm: ten 4.8 mm cells (and ten 5 mm) across every member, the floor of both sheets (10 / 9) held.
-  const Part big = make_part("big", 52, 52, 52);
+  // 11 x 12 x 13 cells of 4.8 mm: every member at least ten cells across (11, by room_through), the floor of both sheets (10 / 9)
+  // held; no face diagonal of the box passes through a voxel centre of the check's grid (a 52 mm cube's did: the old
+  // voxeliser then left three empty columns inside it, which no inscribed ball can cross).
+  const Part big = make_part("big", 52.8, 57.6, 62.4);
   const Part plate = make_part("plate", 52, 52, 12);
   const Part small = make_part("small", 12, 12, 12);
   CHECK(big.top >= 0 && big.bottom >= 0);
@@ -171,11 +196,11 @@ int main() {
     auto d = std::make_shared<DemandField>();
     d->origin = {-1, -1, -1};
     d->spacing = 1.0;
-    d->nx = d->ny = d->nz = 56;
-    d->mpa.resize(static_cast<std::size_t>(56) * 56 * 56);
-    for (int k = 0; k < 56; ++k)
-      for (int j = 0; j < 56; ++j)
-        for (int i = 0; i < 56; ++i) d->mpa[d->index(i, j, k)] = static_cast<float>(i);
+    d->nx = d->ny = d->nz = 66;
+    d->mpa.resize(static_cast<std::size_t>(66) * 66 * 66);
+    for (int k = 0; k < 66; ++k)
+      for (int j = 0; j < 66; ++j)
+        for (int i = 0; i < 66; ++i) d->mpa[d->index(i, j, k)] = static_cast<float>(i);
     st.stress.demand = d;
     const Outcome o = s.lay(st);
     CHECK(!o.sheets.empty() && o.bars.bars.empty());
@@ -466,10 +491,109 @@ int main() {
     CHECK(std::isfinite(strut_margin) && strut_margin > 0.0);
     CHECK(credited == static_cast<double>(c.cells_credited) && credited > 0);
     CHECK(has(d.json, "\"uncertified\": false"));
-    // When the check writes sheet_cells.bin itself (lattice_file_strength_check, write_sheet_check_files), it names it.
-    const bool wrote = std::find(d.files.begin(), d.files.end(), std::string(kSheetCellsName)) != d.files.end();
-    std::printf("[check %s] the check wrote %s itself: %s\n", type, kSheetCellsName, wrote ? "yes" : "no (the file job does)");
-    if (wrote) CHECK(has(d.json, "\"sheet_cells\": \"sheet_cells.bin\"") && has(d.json, "\"margins\": true"));
+    // The check writes sheet_cells.bin itself (lattice_file_strength_check, write_sheet_check_files) and names it; its
+    // cells' margins are its own: the smallest is the strut result's margin (the same law, density and stress).
+    check_cells_against_block(d, ask.out_dir, type, strut_margin, o.layout.cells.size());
+    // THE CELLS-PER-MEMBER GUARD (analyze.cpp, bar L4): every member of the box holds at least ten cells (cell_across,
+    // room_through), the floor of both sheets. A record of what the old guard says of it.
+    const std::size_t reg = d.json.find("\"out_of_regime\": "), why_at = d.json.find("\"not_certified_reason\": \"");
+    std::printf("[guard %s] not certified: %s; out of regime: %s; verdict %s; reason: %s\n", type,
+                has(d.json, "\"not_certified\": true") ? "YES" : "no",
+                reg == std::string::npos ? "?" : d.json.substr(reg + 17, 5).c_str(),
+                has(d.json, "\"verdict\": \"pass\"") ? "pass" : has(d.json, "\"verdict\": \"fail\"") ? "fail" : "solid_only",
+                why_at == std::string::npos ? "" : d.json.substr(why_at + 25, d.json.find('"', why_at + 25) - why_at - 25).c_str());
+    CHECK(!has(d.json, "\"not_certified\": true") && has(d.json, "\"out_of_regime\": false"));   // ANALYZE GUARD (sheets)
+  }
+
+  // ── check, graded: the solve sees each voxel's own density (By stress: the wall blended between cells) ──
+  {
+    Session s(import_part_file_resolved(big.path));
+    Settings st = settings_of(layout_json("gyroid", 4.8, 10, ", \"by_stress\": true, \"dial_light\": 0.01, \"dial_heavy\": 1, "
+                                                             "\"reference_mpa\": 52"));
+    auto dm = std::make_shared<DemandField>();
+    dm->origin = {-1, -1, -1};
+    dm->spacing = 1.0;
+    dm->nx = dm->ny = dm->nz = 66;
+    dm->mpa.resize(static_cast<std::size_t>(66) * 66 * 66);
+    for (int k = 0; k < 66; ++k)
+      for (int j = 0; j < 66; ++j)
+        for (int i = 0; i < 66; ++i) dm->mpa[dm->index(i, j, k)] = static_cast<float>(66 - i);   // heaviest at x = 0
+    st.stress.demand = dm;
+    const Outcome o = s.lay(st);
+    CHECK(!o.sheets.empty() && o.sheets.front().wall_max_mm > o.sheets.front().wall_min_mm + 0.05);
+    const FileReport made;
+    StrengthAsk ask;
+    ask.session = &s;
+    ask.outcome = &o;
+    ask.made = &made;
+    write(kDir + "/strength_job.json", strength_job_json(big, "gyroid", 50.0));
+    ask.job_path = kDir + "/strength_job.json";
+    ask.out_dir = kDir + "/check_graded";
+    std::filesystem::create_directories(ask.out_dir);
+    ask.part_lo = big.lo;
+    ask.part_hi = big.hi;
+    const StrengthDone d = check.run(ask);
+    CHECK(d.ok);
+    const std::size_t strut_at = d.json.find("\"strut\": {");
+    const double strut_margin = strut_at == std::string::npos ? std::numeric_limits<double>::quiet_NaN()
+                                                              : num_after(d.json.substr(strut_at), "margin_worst_case");
+    std::printf("[check graded] ok %d, walls %.3f..%.3f mm, the sheet's own margin %.6g\n", d.ok,
+                o.sheets.front().wall_min_mm, o.sheets.front().wall_max_mm, strut_margin);
+    check_cells_against_block(d, ask.out_dir, "graded", strut_margin, o.layout.cells.size());
+    // RED: the cells' own densities (what the solve read before the voxels' were sent) differ from the voxels' here.
+    const LatticeCredit c = lattice_credit(o.layout, *s.domain(), o.bars, {}, grid_over(big, 1.3));
+    std::size_t differ = 0;
+    for (std::size_t e = 0; e < c.cell.size(); ++e)
+      if (c.credited[e] && std::fabs(c.voxel_rho[e] - c.cell_rho[static_cast<std::size_t>(c.cell[e])]) > 1e-4) ++differ;
+    std::printf("RED check graded: the cells' own densities differ from the voxels' at %zu of %zu credited voxels\n", differ,
+                c.voxels_credited);
+    CHECK(differ > 0);
+  }
+
+  // ── THE GUARD'S CASE: an all-lattice gyroid box whose thinnest member holds ten 4.8 mm cells (49 mm: 10.2 across by
+  // room_through, the lay's Structural floor 48 mm held), through the CLI's own check ──
+  {
+    const Part member = make_part("member", 49.0, 57.6, 62.4);
+    Session s(import_part_file_resolved(member.path));
+    const Outcome o = s.lay(settings_of(layout_json("gyroid", 4.8, 10)));
+    const LatticeCredit c = lattice_credit_cells(o.layout, *s.domain());
+    int least = 1 << 30;
+    for (std::size_t i = 0; i < o.layout.cells.size(); ++i)
+      if (!o.layout.cells[i].cut) least = std::min(least, c.cell_across[i]);
+    const FileReport made;
+    StrengthAsk ask;
+    ask.session = &s;
+    ask.outcome = &o;
+    ask.made = &made;
+    write(kDir + "/strength_job.json", strength_job_json(member, "gyroid", 50.0));
+    ask.job_path = kDir + "/strength_job.json";
+    ask.out_dir = kDir + "/check_member";
+    std::filesystem::create_directories(ask.out_dir);
+    ask.part_lo = member.lo;
+    ask.part_hi = member.hi;
+    const StrengthDone d = check.run(ask);
+    CHECK(d.ok && !o.layout.cells.empty() && least >= 10);
+    write(ask.out_dir + "/block.json", d.json);
+    const std::size_t why_at = d.json.find("\"not_certified_reason\": \"");
+    std::printf("[guard member] %zu cells, whole ones %d+ across; not certified: %s; reason: %s\n", o.layout.cells.size(),
+                least, has(d.json, "\"not_certified\": true") ? "YES" : "no",
+                why_at == std::string::npos ? "" : d.json.substr(why_at + 25, d.json.find('"', why_at + 25) - why_at - 25).c_str());
+    // ANALYZE GUARD (sheets): the guard reads the engine's own member width (sheet_member_width_mm), so a box ten cells
+    // across is in regime. RED CONTROL: c347c70a, the same case with the guard on the voxel staircase: "Not certified:
+    // ... its thinnest latticed member is 1.3 cells across, below the 10".
+    CHECK(!has(d.json, "\"not_certified\": true") && has(d.json, "\"out_of_regime\": false"));
+    const CreditGrid g = grid_over(member, 1.56);
+    const LatticeCredit cg = lattice_credit(o.layout, *s.domain(), o.bars, {}, g);
+    const std::vector<double> w = sheet_member_width_mm(o.layout, *s.domain(), cg, g);
+    double thinnest = std::numeric_limits<double>::infinity();
+    std::size_t read = 0;
+    for (std::size_t e = 0; e < w.size(); ++e)
+      if (cg.cell[e] >= 0) {
+        ++read;
+        thinnest = std::min(thinnest, w[e] / o.layout.cells[static_cast<std::size_t>(cg.cell[e])].size);
+      }
+    std::printf("[guard member] the width the guard reads: %zu lattice voxels, thinnest %.3f cells across\n", read, thinnest);
+    CHECK(w.size() == cg.cell.size() && read > 0 && thinnest >= 10.0);
   }
 
   // ── file: the file job with the check, as the CLI runs it (a 12 mm box: every member under the floor) ──
@@ -497,6 +621,7 @@ int main() {
       std::printf("[file] sheet_cells.bin: %zu cells (the lay's %zu), %zu under the floor; margins %s\n", f.cells.size(),
                   r.cells, under, has(r.strength_json, "\"margins\": true") ? "the check's" : "not judged (NaN)");
       CHECK(f.cells.size() == r.cells && under > 0);
+      CHECK(has(r.strength_json, "\"margins\": true"));   // the check's own file (its cells judged; none credited here)
     } else {
       std::printf("RED file: no strength job: %s %s, a strength block %s\n", kSheetCellsName, there ? "written" : "not written",
                   has(res, "\"strength\": {") ? "written" : "not written");
@@ -512,6 +637,7 @@ int main() {
     CHECK(!o.bars.bars.empty() && c.voxel_rho.empty() && c.cell_flags.empty() && c.cell_across.empty() &&
           c.voxels_credited == 0 && c.floor_cells == 0.0);
     CHECK(lattice_credit_cells(o.layout, *s.domain()).cell_flags.empty());
+    CHECK(c.cell_room_mm.empty() && sheet_member_width_mm(o.layout, *s.domain(), c, grid_over(small, 1.0)).empty());   // the guard's staircase, as before
     const SheetCheckFiles w = write_sheet_check_files(kDir + "/octet_none", o.layout, c, {});
     CHECK(w.ok && w.file.empty() && w.keys.empty());
   }

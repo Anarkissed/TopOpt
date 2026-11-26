@@ -183,6 +183,9 @@ struct LatticeCredit {
   std::vector<std::uint32_t> cell_flags;
   double floor_cells = 0.0;
   std::size_t under_floor = 0, voxels_credited = 0;
+  // ANALYZE GUARD (sheets): per layout cell, the member's width there (mm): the narrowest Domain::Probe::room_through
+  // over the cell's held points, of which cell_across is the count; NaN where not read. Empty for a strut type.
+  std::vector<float> cell_room_mm;
 };
 // `solid`, when given, names the voxels to read (the part's); the rest are left -1. `left_out_at` is the file's
 // FileReport::left_out_at (the places the mesh writer left bars out for). Same answer for any number of threads.
@@ -207,6 +210,17 @@ inline constexpr bool kSheetCutCellsCredited = false;
 // cell_flags and the cell counts (the per-voxel vectors stay empty). The file job reads it for sheet_cells.bin when the
 // check did not write one. For a strut layout: empty.
 LatticeCredit lattice_credit_cells(const Layout& layout, const Domain& domain, int threads = 0);
+
+// ANALYZE GUARD (sheets): THE MEMBER WIDTH the old check's cells-per-member guard reads for a sheet
+// (LatticePosture::member_width_mm, "the width measured on the part's own surface"; analyze.cpp, bar L4), per voxel of
+// the credit's grid: its cell's room (LatticeCredit::cell_room_mm: room_through over the cell's lattice, the measure the
+// lay's Structural floor and the credit's cell_across are read by), else, where that was not read, room_through at the
+// voxel centre; 0 where no cell holds the voxel. Without it the guard measures the voxel staircase, which reads a member
+// about two voxels thinner than it is: a member near the floor then holds no voxel at the floor, no convex corner is
+// joined to its member, and the corners read about one cell across (an all-lattice box ten cells across, refused).
+// Empty for a strut layout (the guard reads the staircase for it, as before).
+std::vector<double> sheet_member_width_mm(const Layout& layout, const Domain& domain, const LatticeCredit& credit,
+                                          const CreditGrid& grid, int threads = 0);
 
 // THE CHECK'S MARGIN PER VOXEL by the type's strut law (strut_strength.hpp: the bound the check's strut result reads,
 // Kd vm + Kv |p| in the plane and Kild vm + Kilv |p| + the off-axis term across the layers, at the density each

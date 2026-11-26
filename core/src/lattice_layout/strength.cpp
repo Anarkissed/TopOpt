@@ -211,6 +211,7 @@ void judge_sheet_cells(const Layout& layout, const Domain& domain, const SheetSe
   out.cell_credit.assign(nc, 0);
   out.cell_rho.assign(nc, 0.0);
   out.cell_across.assign(nc, 0);
+  out.cell_room_mm.assign(nc, std::numeric_limits<float>::quiet_NaN());
   out.cell_flags.assign(nc, 0u);
   out.floor_cells = s.floor_cells;
   may.assign(nc, 0);
@@ -235,6 +236,7 @@ void judge_sheet_cells(const Layout& layout, const Domain& domain, const SheetSe
                              ? static_cast<int>(std::floor(room / c.size + 1e-9))
                              : 0;
       out.cell_across[ci] = across;
+      if (std::isfinite(room)) out.cell_room_mm[ci] = static_cast<float>(room);
       // Read (some point of the cell's lattice measured): a member thinner than one cell is under the floor too (0 across).
       const bool under = s.floor_cells > 0.0 && std::isfinite(room) && across < s.floor_cells;
       const int fi = s.field_of_cell[ci];
@@ -380,6 +382,40 @@ LatticeCredit lattice_credit(const Layout& layout, const Domain& domain, const B
       out.blend_band += c[1];
       out.membrane += c[2];
     }
+  return out;
+}
+
+std::vector<double> sheet_member_width_mm(const Layout& layout, const Domain& domain, const LatticeCredit& credit,
+                                          const CreditGrid& grid, int threads) {
+  std::vector<double> out;
+  if (!sheet_kind_of(layout.topology) || credit.cell_room_mm.size() != layout.cells.size()) return out;
+  const std::size_t n = credit.cell.size();
+  out.assign(n, 0.0);
+  if (n == 0 || grid.nx <= 0 || grid.ny <= 0) return out;
+  const int nt = thread_count(threads, static_cast<std::size_t>(std::max(1, grid.nz)));
+  auto slab = [&](int k0, int k1) {
+    const Domain::Probe probe = domain.probe();
+    for (int k = k0; k < k1; ++k)
+      for (int j = 0; j < grid.ny; ++j)
+        for (int i = 0; i < grid.nx; ++i) {
+          const std::size_t e = (static_cast<std::size_t>(k) * grid.ny + j) * grid.nx + i;
+          if (e >= n || credit.cell[e] < 0) continue;
+          const float room = credit.cell_room_mm[static_cast<std::size_t>(credit.cell[e])];
+          if (std::isfinite(room)) {
+            out[e] = room;
+          } else {   // the cell's own points were none of them held: read the member at this voxel
+            out[e] = probe.room_through({grid.origin.x + (i + 0.5) * grid.spacing, grid.origin.y + (j + 0.5) * grid.spacing,
+                                         grid.origin.z + (k + 0.5) * grid.spacing});
+          }
+        }
+  };
+  if (nt == 1) {
+    slab(0, grid.nz);
+  } else {
+    std::vector<std::thread> pool;
+    for (int t = 0; t < nt; ++t) pool.emplace_back(slab, grid.nz * t / nt, grid.nz * (t + 1) / nt);
+    for (std::thread& t : pool) t.join();
+  }
   return out;
 }
 
