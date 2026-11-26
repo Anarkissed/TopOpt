@@ -12,8 +12,14 @@
 //       so L = 2.4 mm by the formula; the authors calibrated 4.6 mm from sharp
 //       notches. The LOWER one is taken. Ahmed and Susmel, Fatigue Fract Eng
 //       Mater Struct 41 (2018) 2071, doi 10.1111/ffe.12746.
-//   ABS, printed: K_Ic 2.6 MPa m^0.5, tensile strength 23 MPa, L = 4.1 mm.
-//       Susmel, review of notched additively manufactured polymers (2022).
+//   ABS, printed: two sources that disagree widely, and the LOWEST is taken.
+//       Susmel's review (2022): K_Ic 2.6 MPa m^0.5 with a weak print (tensile
+//       strength 23 MPa) gives 4.1 mm. Cicero et al., Materials 13 (2020) 4716,
+//       doi 10.3390/ma13214716, on a strong print (52 to 61 MPa, toughness 3.5
+//       to 4.1): the formula gives 1.4 to 1.5 mm, but the length that best
+//       fitted their 33 notched tests was 0.46 to 0.92 mm averaged over a line
+//       and 0.28 to 0.44 mm read at a point, by raster angle. Our reading
+//       averages over a size, so the line value's lowest, 0.46 mm, is taken.
 //   PETG: K_Ic 2.11 to 2.54 MPa m^0.5 for the filament as received (Guessasma
 //       et al., Polymers 11 (2019) 1220); no printed value found. With the
 //       lower toughness and 45 MPa: 0.7 mm. Marked NOT printed-part data.
@@ -37,7 +43,7 @@ struct MaterialLength {
 
 inline MaterialLength material_length(const std::string& material_name) {
   if (material_name == "PLA") return {true, true, 2.4};
-  if (material_name == "ABS") return {true, true, 4.1};
+  if (material_name == "ABS") return {true, true, 0.46};
   if (material_name == "PETG") return {true, false, 0.7};
   return {};
 }
