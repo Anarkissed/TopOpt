@@ -2,6 +2,23 @@
 
 Status 2026-11-22: APPROVED by the reviewer (rulings 06:18Z and 06:48Z); both helper prompts below are approved as they stand. Helpers start after the stage 0 move is released and the maintainer has created their channels. The maintainer's OK on helpers: "Yes two helpers are good as long as they're Opus 5.5". Each helper gets its own small channel (reviewer, TOReview, the helper) and never posts in #TORebuildGroup.
 
+## History rewritten 2026-11-25 20:50 EST (the maintainer: "Yes. Rewrite the history")
+
+The lead's mistake: commit 0ee02fda added `docs/design/to-rebuild/papers/` (29 copyrighted PDFs) with a whole-folder `git add`, and it was pushed to the public repository. The branch was rewritten from that commit on, without the folder, and force-pushed; the files it ends in are identical. Commit ids written in these documents before this note are the OLD ones where they fall in that range:
+
+| old | new |
+|---|---|
+| 0ee02fda | d6047d2b |
+| 15ebb451 | 7173c540 |
+| ca157cb7 | 6ee89639 |
+| bf4aa356 | 05f33677 |
+| 6c5ff9eb | ecc3ebbb |
+| 33451f43 | a49fd8da |
+| 4d495dd6 | 52c4d894 |
+| 8b3656ba | e74b4c08 |
+
+Rule from now on: files are added to a commit BY NAME, never by folder, and `git show --stat HEAD` is read before every push.
+
 ## Resumed 2026-11-25 19:35 EST
 
 Paused at 94 % weekly usage for five minutes; the maintainer: "Keep going, do not stop, I will reset at 100%". The work tick is back; helpers told. First on the queue now: job B's credited cells and the frozen-mask check for LatticeReview; the reviewer's ruling on stage 2; Top Motor Mount both ways and the pad depths (lock), then the stage 1 report.
