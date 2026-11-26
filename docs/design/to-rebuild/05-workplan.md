@@ -38,6 +38,8 @@ NOTED 08:15 (LatticeReview): the Organic strength block now repeats byte for byt
 
 A2, 08:55: the automatic pad at strength 1.0 freezes 9526 voxels on the sample bracket against 3702 at a fixed 3 mm (pads of 7.1 and 8.6 mm behind the two thick faces, 2.0 mm behind the thin tab), which is why the everything-on versions are 4 to 13 g heavier. Strength 1.0 looks too deep; `sample_pad_low.out` (opt13) is running the bracket at 0.2 and 0.4 (3.2 / 4.5 mm behind 50 mm). The 1.4 runs still in `sample_pad64.sh` matter less now.
 
+09:30: #362's S1 has the lock since 08:46. Pad at 1.0 confirmed as the cause of the extra weight (stage 1 file); I stopped my own bracket run at 1.4 (pointless now); the sweep goes on with the beam and the hook at 3.0 / 1.0 / 1.4, and `sample_pad_low.out` with the bracket at 0.2 / 0.4. TOSurface told of the loose piece in the everything-on 0.26 version. Swap is near full (9.6 of 10 GB) from other jobs; my runs are under 100 MB each.
+
 A. Already agreed:
 - A1. Stage 1 report to the reviewer once the two lock runs are recorded (draft at the top of `stages/stage-1-true-loads.md`).
 - A2. The pad's one number: tables and PICTURES of the shapes around the fixed faces from the two sweeps; a recommended curve strength for him in the morning.
