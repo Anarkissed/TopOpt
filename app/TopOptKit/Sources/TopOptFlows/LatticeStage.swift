@@ -357,7 +357,8 @@ extension LatticeSettings {
         clearLatticeType()
         stageMode = mode
         // ★ his 11-09: choosing Structural (again) is deliberate — the thin-wall glow and pop-up show once more
-        if mode == .structural { thinWallsNoticeSeen = false }
+        // ★ notes29 (his 11-25): Structural has no single-cell members — an Aesthetic "on" never rides over (it locked Skin)
+        if mode == .structural { thinWallsNoticeSeen = false; singleCellMembers = false }
     }
 }
 
@@ -368,7 +369,8 @@ extension ProjectModel {
         guard lattice.stageMode != mode else { return }
         sealUndoStep()
         lattice.stageMode = mode
-        if mode == .structural { lattice.thinWallsNoticeSeen = false }
+        // ★ notes29 (his 11-25): Structural has no single-cell members — an Aesthetic "on" never rides over (it locked Skin)
+        if mode == .structural { lattice.thinWallsNoticeSeen = false; lattice.singleCellMembers = false }
         sealUndoStep()
     }
 }

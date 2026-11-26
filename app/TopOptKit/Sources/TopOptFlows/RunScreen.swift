@@ -21,7 +21,9 @@ public struct RunScreen: View {
     /// ★ T5: the version this run makes ("v8"), for the card's overline "OPTIMIZING V8"; nil off the Library.
     var version: String? = nil
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    /// ★ notes29: Reduce Motion, or Settings › Skip all animations.
+    private var reduceMotion: Bool { systemReduceMotion || AppSettings.skipAllAnimations }
     @State private var pulse = false
     /// ★ notes25 (his Img 1: "two pop-ups, one behind the other. There should only be one"): the Mac's print-accurate card
     /// carries this run from his press to its end — no progress card and no top-lane pill of its own then.

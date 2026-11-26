@@ -565,6 +565,12 @@ add_test(NAME lattice_width_bounds COMMAND test_lattice_width_bounds)
 add_executable(test_lattice_layout tests/unit/test_lattice_layout.cpp)
 target_link_libraries(test_lattice_layout PRIVATE topopt)
 add_test(NAME lattice_layout COMMAND test_lattice_layout)
+# notes29 (his iPad notes on release 20, 2026-11-25): with Allow quilt off no strut type is laid past its own limits
+# (no cell under the open floor, no strut past the open look), in every mode; no holes in a region (no cell laid with
+# nothing in it); an even outline (no cut cell opened at the part's edge with no strut in it).
+add_executable(test_lattice_quilt_holes tests/unit/test_lattice_quilt_holes.cpp)
+target_link_libraries(test_lattice_quilt_holes PRIVATE topopt)
+add_test(NAME lattice_quilt_holes COMMAND test_lattice_quilt_holes)
 # Stage F: the printable mesh made from the layout (one closed piece as a slicer reads it,
 # sealed lattice kept, bridges, what the layer check asks left out, posts, cancel). Without
 # the Manifold library the writer says it cannot, and the test checks that it says so.
@@ -616,6 +622,12 @@ add_test(NAME support_paint COMMAND test_support_paint)
 add_executable(test_print_orientation tests/unit/test_print_orientation.cpp)
 target_link_libraries(test_print_orientation PRIVATE topopt)
 add_test(NAME print_orientation COMMAND test_print_orientation)
+# ★ notes29 (P8, his print orientation on the iPad): a lay in the print frame turned back to the model frame (exact,
+# inverted); the iPad's turned Organic lay is the print file's, bar for bar; its growth climbs the kept up.
+add_executable(test_print_frame_turn tests/unit/test_print_frame_turn.cpp)
+target_link_libraries(test_print_frame_turn PRIVATE topopt)
+target_compile_definitions(test_print_frame_turn PRIVATE TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME print_frame_turn COMMAND test_print_frame_turn)
 # Organic cut 2 (brief E1, rules OF1..): the file as the solid plus unmerged closed tubes. The test makes its reference
 # unions with Manifold, so it is registered only where the writer has it.
 if(manifold_FOUND)

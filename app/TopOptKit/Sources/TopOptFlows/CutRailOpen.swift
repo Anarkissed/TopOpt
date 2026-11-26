@@ -75,7 +75,7 @@ struct CutRailInfoTip: ViewModifier {
     func body(content: Content) -> some View {
         if open, let text = CutRailInfo.text(name) {
             HStack(spacing: 0) {
-                InfoTip(key: "cutRail-\(name)", text: text)
+                InfoTip(key: "cutRail-\(name)", text: text, title: name)
                 content
             }
         } else {

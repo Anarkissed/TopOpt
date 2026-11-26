@@ -53,6 +53,8 @@ public struct SolidReason: Equatable, Sendable {
             if !aesthetic { fixes.append(.aestheticCutCells) }
         }
         if cause == .tooFewAcross, aesthetic, !l.singleCellMembers { fixes.append(.oneCellAcross) }
+        // ★ notes29b (his question on release 20: "Are you saying that no matter what happens, all Small cells in thin walls are
+        // going to be quilted?" -- no): offered again. With Allow quilt off it lays a thin wall's own small cells, never fused.
         if cause == .wallNarrow, !l.allowQuilt, !l.smallCellsInThinWalls { fixes.append(.smallCells) }
         return SolidReason(cause: cause, share: share, line: "\(pct)% of the lattice you asked for is solid: \(why)",
                            fixes: Array(fixes.prefix(3)))

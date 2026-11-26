@@ -336,6 +336,9 @@ public final class FlexibleStageModel: ObservableObject {
     var pressSimInFlight: Set<String> = []
     /// One solve at a time, off the main thread (FlexibleSquishSolver).
     let squishSolver = FlexibleSquishSolver()
+    /// ★ notes29: a sim of this model waits for a LOCAL topology run on this device (one in-process solve at a time) — the
+    /// main page's note says "Waiting for the run…" (FlexibleFE.waitingForRun).
+    @Published public internal(set) var squishHeldByRun = false
     /// Test only: keep the last FE request (the solver releases it after its last sim).
     var keepFERequest = false
     private(set) var lastFERequest: FlexibleFERequest?
@@ -476,6 +479,10 @@ public final class FlexibleStageModel: ObservableObject {
         self.library = stampsPath.flatMap { try? FlexibleStampLibrary.load(path: $0) }
         self.persist = persist
         loadCatalogue()
+        squishSolver.onHeld = { [weak self] held in
+            guard let self, self.squishHeldByRun != held else { return }
+            self.squishHeldByRun = held
+        }
     }
 
     // MARK: settings (in the project)

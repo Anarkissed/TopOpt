@@ -211,12 +211,22 @@ public struct PrintParamsSheet: View {
 
     /// Disambiguates the two line-width fields: they are extrusion BEAD widths (a slicer
     /// setting), never the nozzle diameter — the distinction the whole feature turns on.
+    /// ★ notes29 (his 11-25): five words under the fields, the sentence in the one (i).
     private var lineWidthFootnote: some View {
-        Text("Line width is the width of one deposited wall bead (≈1.0–1.2× nozzle), not the nozzle diameter.")
-            .dsStyle(DS.TypeScale.caption2)
-            .foregroundStyle(DS.Color.textTertiary.color)
-            .fixedSize(horizontal: false, vertical: true)
+        HStack(spacing: DS.Space.xs) {
+            Text(Self.lineWidthCaption)
+                .dsStyle(DS.TypeScale.caption2)
+                .foregroundStyle(DS.Color.textTertiary.color)
+                .fixedSize(horizontal: false, vertical: true)
+            AppInfoButton(title: "Line width", text: Self.lineWidthInfo)
+        }
     }
+    static let lineWidthCaption = "Width of one wall bead."
+    static let lineWidthInfo = "Line width is the width of one deposited wall bead (about 1.0 to 1.2 times the nozzle), "
+        + "not the nozzle diameter."
+    static let lockedCaption = "Locked when the project began."
+    static let lockedInfo = "These parameters were locked when the project was created and can't be changed. Create a new "
+        + "project to print at different settings."
 
     // MARK: locked body (read-only, post-creation)
 
@@ -242,11 +252,12 @@ public struct PrintParamsSheet: View {
 
             lineWidthFootnote.padding(.top, DS.Space.s)
 
-            HStack(spacing: DS.Space.s) {
-                Image(systemName: "info.circle").font(.system(size: 12, weight: .semibold))
-                Text("These parameters were locked when the project was created and can't be changed. Create a new project to print at different settings.")
+            // ★ notes29 (his 11-25): five words, the rest in the one (i)
+            HStack(spacing: DS.Space.xs) {
+                Text(Self.lockedCaption)
                     .dsStyle(DS.TypeScale.caption)
                     .fixedSize(horizontal: false, vertical: true)
+                AppInfoButton(title: "Locked settings", text: Self.lockedInfo)
             }
             .foregroundStyle(DS.Color.textTertiary.color)
             .padding(.top, DS.Space.xl)

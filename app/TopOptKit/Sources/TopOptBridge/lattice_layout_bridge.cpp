@@ -60,6 +60,11 @@ struct LayoutSession {
   std::shared_ptr<const ll::DemandField> demand;  // Install 2: the stress result, one pointer between lays (set_demand)
   std::shared_ptr<const ll::TensorField> tensor;  // ★ Organic cut 1: the stress tensor a weave follows (set_tensor)
   std::shared_ptr<const ll::TensorField> real_tensor;  // ★ E5: the stress as set (`tensor` may be its filled copy)
+  // ★ notes29 (lattice_layout_open_framed): the print frame the part was opened standing in (off: none, and nothing below
+  // is read). Set once at open, never after: read without `mu`. On, `demand`, `tensor` and `real_tensor` are in the print
+  // frame (turned once, as set), and `model_tensor` is the tensor as set, in the part's own coordinates (the print file's).
+  topopt::PrintFrame frame;
+  std::shared_ptr<const ll::TensorField> model_tensor;
 };
 
 std::mutex& g_layout_mu = *new std::mutex;        // never destroyed (the scenes' rule, T1)
@@ -362,16 +367,62 @@ void failed(BridgeError& err, const std::string& why) {
   err.ok = false;
   err.message = why;
 }
+
+// ★ notes29 (P8): a framed session (lattice_layout_open_framed) lays in the print frame. Its settings come in the part's
+// own coordinates and go through the print file's door (core's turn_layout_inputs: the zones, the cut pieces, the bed's
+// up); its stress is turned once, as set (set_demand, set_tensor). Unframed: settings_from as before, not a byte moved.
+ll::Settings settings_in(const LayoutSession& s, const LatticeLayoutSettings& in) {
+  ll::Settings ask = settings_from(in);
+  if (s.frame.on) {
+    std::shared_ptr<const ll::TensorField> none;
+    ll::turn_layout_inputs(s.frame, ask, none);
+  }
+  return ask;
+}
+// What a lay gives, for the app: in the part's own coordinates (the session keeps its own, in the print frame, for "where"
+// and the maps).
+// ★ notes29 (H3, the cell lattices): a FLAT BRIDGE (bar_flags bit 16) is judged where it is laid, in the print frame (its +Z
+// the print's up), as the file writes it (core's bar_is_bridge, the writer's own test) — never on the bars turned back,
+// whose +Z is the part's own. The cells, wall maps and frames come back with their frames (turn_outcome_to_model).
+void fill_shown(LatticeLayoutResult& o, const ll::Outcome& out, const topopt::PrintFrame& f) {
+  if (!f.on) { fill(o, out); return; }
+  ll::Outcome shown = out;
+  ll::turn_outcome_to_model(f, shown);
+  fill(o, shown);
+  const std::vector<ll::Bar>& laid = out.bars.bars;
+  for (std::size_t i = 0; i < laid.size() && i < o.bar_flags.size(); ++i)
+    o.bar_flags[i] = static_cast<uint8_t>((o.bar_flags[i] & ~16u) | (ll::bar_is_bridge(laid[i]) ? 16u : 0u));
+}
+// The preview's drawing (its runs and the flat ends) in the part's own coordinates; its outcome stays as laid.
+void turn_drawing_to_model(const topopt::PrintFrame& f, ll::OrganicPreview& pv) {
+  if (!f.on) return;
+  ll::OrganicPreview d;
+  d.runs = std::move(pv.runs);
+  d.flat_ends = std::move(pv.flat_ends);
+  ll::turn_preview_to_model(f, d);
+  pv.runs = std::move(d.runs);
+  pv.flat_ends = std::move(d.flat_ends);
+}
 }  // namespace
 
-LatticeLayoutOpenInfo lattice_layout_open(const std::string& path, double linear_deflection, BridgeError& err) {
+namespace {
+LatticeLayoutOpenInfo open_session(const std::string& path, double linear_deflection, const topopt::Vec3* up,
+                                   BridgeError& err) {
   LatticeLayoutOpenInfo info;
   const std::string why = bridge_guard_run("lattice_layout_open", [&] {
     const auto t0 = std::chrono::steady_clock::now();
+    topopt::PrintFrame frame;   // ★ notes29: off unless framed
+    if (up) {
+      std::string bad;
+      if (!topopt::print_frame_for_up(*up, frame, &bad)) throw std::invalid_argument("lattice layout: " + bad);
+    }
     topopt::StepTessellation tess;
     if (linear_deflection > 0.0) tess.linear_deflection = linear_deflection;
     topopt::StepModel model = topopt::import_part_file_resolved(path, tess);
+    ll::open_in_print_frame(frame, model);   // ★ notes29: standing the way it prints, as the print file's job opens it
     auto s = std::make_shared<LayoutSession>();
+    s->frame = frame;
+    info.framed = frame.on;
     s->faces = model.face_count;
     s->session = std::make_unique<ll::Session>(std::move(model));
     s->session->growth_tap(&s->tap);   // ★ his 11-22: every Organic lay of this session hands its vines to the tap
@@ -388,13 +439,24 @@ LatticeLayoutOpenInfo lattice_layout_open(const std::string& path, double linear
   }
   return info;
 }
+}  // namespace
+
+LatticeLayoutOpenInfo lattice_layout_open(const std::string& path, double linear_deflection, BridgeError& err) {
+  return open_session(path, linear_deflection, nullptr, err);
+}
+
+LatticeLayoutOpenInfo lattice_layout_open_framed(const std::string& path, double linear_deflection, double up_x,
+                                                 double up_y, double up_z, BridgeError& err) {
+  const topopt::Vec3 up{up_x, up_y, up_z};
+  return open_session(path, linear_deflection, &up, err);
+}
 
 LatticeLayoutResult lattice_layout(int64_t session, const LatticeLayoutSettings& settings, BridgeError& err) {
   LatticeLayoutResult o;
   const std::string why = bridge_guard_run("lattice_layout", [&] {
     auto s = layout_at(session);
     const uint64_t gen = s->cancel_gen.load();       // a cancel after this point, or one that came while it waited, wins
-    ll::Settings ask = settings_from(settings);   // a bad setting fails before the wait
+    ll::Settings ask = settings_in(*s, settings);   // a bad setting fails before the wait (★ notes29: framed, turned)
     std::lock_guard<std::mutex> lock(s->mu);
     ask.stress.demand = s->demand;                    // Install 2: the session's stress result, the same pointer every lay
     s->stop = false;                                  // FIRST (LatticeReview's recipe), then the gen test: a cancel after this point stops it
@@ -411,7 +473,7 @@ LatticeLayoutResult lattice_layout(int64_t session, const LatticeLayoutSettings&
     s->solid_at.reset();
     s->last = std::move(out);
     if (s->cancel_gen.load() != gen) { o.cancelled = true; return; }
-    fill(o, *s->last);
+    fill_shown(o, *s->last, s->frame);   // ★ notes29: framed, turned back to the part's own coordinates
     o.ms_bridge = ms_since(t0) - (o.ms_read + o.ms_cells + o.ms_bars);
   });
   if (!why.empty()) {
@@ -434,6 +496,13 @@ void lattice_layout_set_demand(int64_t session, const LatticeLayoutDemand& d, Br
       if (f->empty()) throw std::invalid_argument("lattice layout: the stress result is not nx*ny*nz values on a spacing above 0");
       field = std::move(f);
     }
+    if (field && s->frame.on) {   // ★ notes29: turned once, through the print file's door (one pointer between lays, R17)
+      ll::Settings door;
+      door.stress.demand = std::move(field);
+      std::shared_ptr<const ll::TensorField> none;
+      ll::turn_layout_inputs(s->frame, door, none);
+      field = std::move(door.stress.demand);
+    }
     std::lock_guard<std::mutex> lock(s->mu);
     s->demand = std::move(field);
   });
@@ -455,6 +524,18 @@ void lattice_layout_set_tensor(int64_t session, const LatticeLayoutTensor& t, Br
       f->voigt.assign(t.voigt.begin(), t.voigt.end());
       field = std::move(f);
     }
+    if (s->frame.on) {   // ★ notes29: kept as set (the print file's), and turned once through its door for the lays
+      std::shared_ptr<const ll::TensorField> turned = field;
+      if (turned) {
+        ll::Settings door;
+        ll::turn_layout_inputs(s->frame, door, turned);
+      }
+      std::lock_guard<std::mutex> lock(s->mu);
+      s->model_tensor = std::move(field);
+      s->real_tensor = turned;
+      s->tensor = std::move(turned);
+      return;
+    }
     std::lock_guard<std::mutex> lock(s->mu);
     s->real_tensor = field;
     s->tensor = std::move(field);
@@ -470,6 +551,23 @@ bool lattice_layout_write_tensor(int64_t session, const std::string& path, Bridg
     {
       std::lock_guard<std::mutex> lock(s->mu);
       field = s->tensor;
+      // ★ notes29: framed, the print file is sent the part's own (its job turns it through the same door): the tensor as
+      // set; a filled one (E5, made in the print frame) turned back (along the six axes an exact permutation)
+      if (s->frame.on && field) {
+        if (field == s->real_tensor && s->model_tensor) {
+          field = s->model_tensor;
+        } else if (!field->empty()) {
+          auto back = std::make_shared<ll::TensorField>(*field);
+          const int n[3] = {field->nx, field->ny, field->nz};
+          int no[3];
+          back->voigt = topopt::turn_grid_values(s->frame, false, n, field->origin, field->spacing, field->voigt, 6, no,
+                                                 back->origin);
+          back->nx = no[0];
+          back->ny = no[1];
+          back->nz = no[2];
+          field = std::move(back);
+        }
+      }
     }
     if (!field || field->empty()) throw std::invalid_argument("the session holds no stress to write");
     if (!ll::write_tensor_file(path, *field)) throw std::runtime_error("the stress file could not be written");
@@ -535,8 +633,9 @@ LatticeLayoutOrganicResult lattice_layout_organic(int64_t session, const Lattice
   const std::string why = bridge_guard_run("lattice_layout_organic", [&] {
     auto s = layout_at(session);
     const uint64_t gen = s->cancel_gen.load();
-    ll::Settings ask = settings_from(settings);
-    const ll::OrganicAsk oa = organic_from(organic);
+    ll::Settings ask = settings_in(*s, settings);   // ★ notes29: framed, turned
+    ll::OrganicAsk oa = organic_from(organic);
+    ll::turn_organic_asks(s->frame, &oa, nullptr);   // ★ notes29: framed, it grows along the print's up (+Z there)
     ll::OrganicPreviewAsk pa;
     pa.quality = organic.quality == 1 ? ll::PreviewQuality::Draft : ll::PreviewQuality::Exact;
     pa.tolerance_mm = organic.tolerance_mm;
@@ -556,6 +655,7 @@ LatticeLayoutOrganicResult lattice_layout_organic(int64_t session, const Lattice
     }
     if (pv.outcome.cancelled) { s->solid_at.reset(); s->last.reset(); o.cancelled = true; return; }
     s->solid_at.reset();
+    turn_drawing_to_model(s->frame, pv);   // ★ notes29: the runs and flat ends in the part's own coordinates
     o.runs = ll::pack_weave_runs(pv.runs, 2);   // ★ cut 2: version 2 (sections, swept, proud, the file's ring)
     o.relief_flushed = static_cast<int64_t>(pv.relief_flushed);
     for (const auto& p : pv.flat_ends) { o.flat_ends.push_back(p.x); o.flat_ends.push_back(p.y); o.flat_ends.push_back(p.z); }
@@ -568,7 +668,7 @@ LatticeLayoutOrganicResult lattice_layout_organic(int64_t session, const Lattice
     o.ms_trace = pv.outcome.ms_trace;
     s->last = std::make_unique<ll::Outcome>(std::move(pv.outcome));
     if (s->cancel_gen.load() != gen) { o.cancelled = true; return; }
-    fill(o.layout, *s->last);
+    fill_shown(o.layout, *s->last, s->frame);   // ★ notes29
     o.ms = ms_since(t0);
   });
   if (!why.empty()) {
@@ -605,8 +705,9 @@ LatticeLayoutOrganicResult lattice_layout_organic_groups(int64_t session, const 
   const std::string why = bridge_guard_run("lattice_layout_organic_groups", [&] {
     auto s = layout_at(session);
     const uint64_t gen = s->cancel_gen.load();
-    ll::Settings ask = settings_from(settings);
-    const std::vector<ll::OrganicGroup> gs = groups_from(groups);
+    ll::Settings ask = settings_in(*s, settings);   // ★ notes29: framed, turned
+    std::vector<ll::OrganicGroup> gs = groups_from(groups);
+    ll::turn_organic_asks(s->frame, nullptr, &gs);   // ★ notes29: framed, they grow along the print's up
     ll::OrganicPreviewAsk pa;
     pa.quality = groups.asks[0].quality == 1 ? ll::PreviewQuality::Draft : ll::PreviewQuality::Exact;
     pa.tolerance_mm = groups.asks[0].tolerance_mm;
@@ -623,6 +724,7 @@ LatticeLayoutOrganicResult lattice_layout_organic_groups(int64_t session, const 
       return;
     }
     s->solid_at.reset();
+    turn_drawing_to_model(s->frame, pv);   // ★ notes29: the runs and flat ends in the part's own coordinates
     o.runs = ll::pack_weave_runs(pv.runs, 2);   // ★ cut 2: version 2 (sections, swept, proud, the file's ring)
     o.relief_flushed = static_cast<int64_t>(pv.relief_flushed);
     for (const auto& p : pv.flat_ends) { o.flat_ends.push_back(p.x); o.flat_ends.push_back(p.y); o.flat_ends.push_back(p.z); }
@@ -637,7 +739,7 @@ LatticeLayoutOrganicResult lattice_layout_organic_groups(int64_t session, const 
     o.cross_group_touches = static_cast<int64_t>(pv.outcome.cross_group_touches);
     s->last = std::make_unique<ll::Outcome>(std::move(pv.outcome));
     if (s->cancel_gen.load() != gen) { o.cancelled = true; return; }
-    fill(o.layout, *s->last);
+    fill_shown(o.layout, *s->last, s->frame);   // ★ notes29
     o.ms = ms_since(t0);
   });
   if (!why.empty()) {
@@ -652,8 +754,9 @@ std::vector<LatticeLayoutRefusal> lattice_layout_organic_validate(int64_t sessio
   std::vector<LatticeLayoutRefusal> out;
   const std::string why = bridge_guard_run("lattice_layout_organic_validate", [&] {
     auto s = layout_at(session);
-    const ll::Settings st = settings_from(settings);
-    const std::vector<ll::OrganicGroup> gs = groups_from(groups);
+    const ll::Settings st = settings_in(*s, settings);   // ★ notes29: as the lay asks it
+    std::vector<ll::OrganicGroup> gs = groups_from(groups);
+    ll::turn_organic_asks(s->frame, nullptr, &gs);
     std::lock_guard<std::mutex> lock(s->mu);
     out = refusals_out(ll::validate_organic_groups(st, gs, s->tensor ? s->tensor.get() : nullptr));
   });
@@ -669,7 +772,7 @@ LatticeLayoutSweep lattice_layout_sweep_limits_for(int64_t session, const Lattic
   LatticeLayoutSweep o;
   const std::string why = bridge_guard_run("lattice_layout_sweep_limits_for", [&] {
     auto s = layout_at(session);
-    ll::Settings ask = settings_from(settings);
+    ll::Settings ask = settings_in(*s, settings);   // ★ notes29: the domain the lay keeps
     const std::vector<int> ids(regions.ids.begin(), regions.ids.end());
     std::lock_guard<std::mutex> lock(s->mu);
     ask.stress.demand = s->demand;
@@ -700,8 +803,9 @@ LatticeLayoutSynthetic lattice_layout_synthetic(int64_t session, const LatticeLa
     const std::vector<int32_t>& wall_foci = w.foci;
     if (wall_regions.size() != wall_foci.size())
       throw std::invalid_argument("lattice layout synthetic: wall_foci is not one per wall");
-    ll::Settings ask = settings_from(settings);
-    const std::vector<ll::OrganicGroup> gs = groups_from(groups);
+    ll::Settings ask = settings_in(*s, settings);   // ★ notes29: framed, the stress is filled in the print frame
+    std::vector<ll::OrganicGroup> gs = groups_from(groups);
+    ll::turn_organic_asks(s->frame, nullptr, &gs);
     std::vector<ll::SyntheticWall> walls;
     for (std::size_t i = 0; i < wall_regions.size(); ++i) walls.push_back({wall_regions[i], wall_foci[i]});
     std::lock_guard<std::mutex> lock(s->mu);
@@ -737,7 +841,7 @@ LatticeLayoutSweep lattice_layout_sweep_limits(int64_t session, const LatticeLay
   LatticeLayoutSweep o;
   const std::string why = bridge_guard_run("lattice_layout_sweep_limits", [&] {
     auto s = layout_at(session);
-    ll::Settings ask = settings_from(settings);
+    ll::Settings ask = settings_in(*s, settings);   // ★ notes29
     std::lock_guard<std::mutex> lock(s->mu);
     ask.stress.demand = s->demand;
     for (const ll::SweepLimits& l : s->session->sweep_limits(ask, line_mm)) {
@@ -762,7 +866,7 @@ LatticeLayoutPlaces lattice_layout_places(int64_t session, const LatticeLayoutSe
   LatticeLayoutPlaces o;
   const std::string why = bridge_guard_run("lattice_layout_places", [&] {
     auto s = layout_at(session);
-    const ll::Settings ask = settings_from(settings);
+    const ll::Settings ask = settings_in(*s, settings);   // ★ notes29: the last lay's, as it was laid
     std::lock_guard<std::mutex> lock(s->mu);
     if (!s->last) return;   // before the first whole layout, or after a cancelled one: none
     const auto t0 = std::chrono::steady_clock::now();
@@ -770,8 +874,9 @@ LatticeLayoutPlaces lattice_layout_places(int64_t session, const LatticeLayoutSe
       o.region.push_back(static_cast<int32_t>(p.region));
       o.face_counts.push_back(static_cast<int32_t>(p.faces.size()));
       for (int f : p.faces) o.faces.push_back(static_cast<int32_t>(f));
-      o.point.insert(o.point.end(), {static_cast<float>(p.point.x), static_cast<float>(p.point.y), static_cast<float>(p.point.z)});
-      o.normal.insert(o.normal.end(), {static_cast<float>(p.normal.x), static_cast<float>(p.normal.y), static_cast<float>(p.normal.z)});
+      const topopt::Vec3 at = s->frame.point_to_model(p.point), n = s->frame.dir_to_model(p.normal);   // ★ notes29 (off: as is)
+      o.point.insert(o.point.end(), {static_cast<float>(at.x), static_cast<float>(at.y), static_cast<float>(at.z)});
+      o.normal.insert(o.normal.end(), {static_cast<float>(n.x), static_cast<float>(n.y), static_cast<float>(n.z)});
       o.area_mm2.push_back(p.area_mm2);
       o.solid_now.push_back(p.now == "solid" ? 1 : 0);
     }
@@ -799,7 +904,7 @@ LatticeLayoutWhere lattice_layout_where(int64_t session, const LatticeLayoutPoin
     o.why.reserve(n);
     o.id.reserve(n);
     for (std::size_t i = 0; i < n; ++i) {
-      const topopt::Vec3 p{xyz[3 * i], xyz[3 * i + 1], xyz[3 * i + 2]};
+      const topopt::Vec3 p = s->frame.point_to_print({xyz[3 * i], xyz[3 * i + 1], xyz[3 * i + 2]});   // ★ notes29 (off: as is)
       const ll::Where w = probe.where(p);
       uint8_t why_byte = static_cast<uint8_t>(w.why);
       // D14: lattice space that no cell of the last layout holds is solid
@@ -840,7 +945,8 @@ LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float ori
         if (s->stop.load()) return;
         for (int32_t y = 0; y < ny; ++y) {
           for (int32_t x = 0; x < nx; ++x) {
-            const topopt::Vec3 p{origin_x + voxel_mm * x, origin_y + voxel_mm * y, origin_z + voxel_mm * z};
+            const topopt::Vec3 p = s->frame.point_to_print(
+                {origin_x + voxel_mm * x, origin_y + voxel_mm * y, origin_z + voxel_mm * z});   // ★ notes29 (off: as is)
             const ll::Where w = probe.where(p);
             uint8_t c = 1;
             if (w.why == ll::Why::Outside) c = 0;
@@ -902,7 +1008,7 @@ LatticeLayoutGridAhead lattice_layout_grid_ahead(int64_t session, const LatticeL
     if (static_cast<int64_t>(nx) * ny * nz > 8'000'000) throw std::invalid_argument("lattice layout grid: too many voxels");
     const auto t0 = std::chrono::steady_clock::now();
     auto s = layout_at(session);
-    ll::Settings ask = settings_from(settings);
+    ll::Settings ask = settings_in(*s, settings);   // ★ notes29: the domain the lay keeps
     std::lock_guard<std::mutex> lock(s->mu);
     ask.stress.demand = s->demand;   // as the lay asks it (the "where" never reads it)
     s->session->prepare_domain(ask);
@@ -918,7 +1024,8 @@ LatticeLayoutGridAhead lattice_layout_grid_ahead(int64_t session, const LatticeL
         if (needs_cells.load(std::memory_order_relaxed)) return;
         for (int32_t y = 0; y < ny; ++y)
           for (int32_t x = 0; x < nx; ++x) {
-            const topopt::Vec3 p{origin_x + voxel_mm * x, origin_y + voxel_mm * y, origin_z + voxel_mm * z};
+            const topopt::Vec3 p = s->frame.point_to_print(
+                {origin_x + voxel_mm * x, origin_y + voxel_mm * y, origin_z + voxel_mm * z});   // ★ notes29 (off: as is)
             const ll::Where w = probe.where(p);
             uint8_t c = 1;
             if (w.why == ll::Why::Outside) {
@@ -977,6 +1084,7 @@ LatticeLayoutGrowth lattice_layout_growth_read(int64_t session, int64_t from, in
     auto s = layout_at(session);   // never s->mu: the lay holds it while it runs (the tap has its own lock)
     ll::GrowthTap::Read r = s->tap.read(static_cast<std::size_t>(std::max<int64_t>(0, from)),
                                         static_cast<std::size_t>(std::max<int64_t>(0, most)));
+    ll::turn_growth_to_model(s->frame, r);   // ★ notes29: framed, the pieces in the part's own coordinates (off: as is)
     o.lay = r.lay;
     o.phase = static_cast<int32_t>(r.phase);
     o.next = static_cast<int64_t>(r.next);

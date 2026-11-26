@@ -101,7 +101,7 @@ private struct FlexibleMainStatusPillBody: View {
 
     var body: some View {
         // ★ C2: while core runs the job, the pill says so (a tap shows the run)
-        let s = FlexibleMainStatus.of(model: model).whileSending(run.isSending)
+        let s = FlexibleMainStatus.of(model: model).whileSending(run.isSending, waiting: run.waitingForRun)   // ★ notes29
         FlexibleMainStatusPill.pill(s, disabled: FlexibleMainStatusPill.disabled(s, visible: main.visible)) {   // ★ M1 VERIFY
             main.pillTapped(s, open: open, goToLattice: goToLattice)
         }

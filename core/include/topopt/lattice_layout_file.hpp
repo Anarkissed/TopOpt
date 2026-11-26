@@ -271,8 +271,28 @@ struct FileJob {
 // floors are NOT turned: a strengthening of a job with a print frame ran in that frame and wrote them there.
 void turn_file_job_inputs(const PrintFrame& f, FileJob& job);
 // The same door for a layout's own inputs (what the iPad's bridge session holds: its settings and its tensor). An
-// Organic ask's build_dir must then be +Z (the print frame's up): the caller sets it.
+// Organic ask's build_dir must then be +Z (the print frame's up): the caller sets it (turn_organic_asks).
 void turn_layout_inputs(const PrintFrame& f, Settings& settings, std::shared_ptr<const TensorField>& tensor);
+
+// ★ notes29 (P8, his print orientation on the iPad: after Keep, the preview still grew along the model's +Z): a SESSION
+// laid in the print frame, as the file job lays its part. The part is opened through the file job's own door
+// (open_in_print_frame: the base, then turn_step_model), each lay's settings and tensor are turned (turn_layout_inputs)
+// and its Organic asks grow along the print frame's up (turn_organic_asks: build_dir +Z), and what a lay gives comes back
+// to the MODEL frame once, for the drawing: every place and direction in it — the bars (their ends and planes), the
+// frames the cells sit on, the stepped edges, the bars cut in air, the guard's, the relief's and the growth report's
+// places (and the six sides it measured), the runs and their flat ends, the growth's pieces. A cell's corner and a wall
+// map are in their frame's own coordinates: they move with the frame. Layout::index (cells by place) is made again.
+// Along one of the six axes each turn is the exact signed permutation and the base's z shift; any other up the
+// rotation, rounded as any rotation is. The _to_print turns are the inverses (the round trip). Off: not a byte moves.
+void open_in_print_frame(PrintFrame& f, StepModel& model);
+void turn_organic_asks(const PrintFrame& f, OrganicAsk* ask, std::vector<OrganicGroup>* groups);
+void turn_outcome_to_model(const PrintFrame& f, Outcome& o);
+void turn_outcome_to_print(const PrintFrame& f, Outcome& o);
+// Its outcome, its runs and its flat ends.
+void turn_preview_to_model(const PrintFrame& f, OrganicPreview& p);
+void turn_preview_to_print(const PrintFrame& f, OrganicPreview& p);
+// The growth's pieces (6 floats each: a, then b).
+void turn_growth_to_model(const PrintFrame& f, GrowthTap::Read& r);
 
 // THE DEMAND FILE (a stress result for By stress, R16 to R18), little-endian:
 //   8 bytes "TODEMAND", int32 version (1), int32 nx, ny, nz, float64 origin x, y, z, float64 spacing,

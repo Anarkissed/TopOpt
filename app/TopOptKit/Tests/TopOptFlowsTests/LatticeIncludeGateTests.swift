@@ -234,8 +234,10 @@ final class LatticeIncludeGateTests: XCTestCase {
                                    + "               project.lattice.organicSizesNeedRecheck {\n"
                                    + "                organicAutoRecheck"), "★ said under Auto")
         let auto = try member(wiz, "@ViewBuilder private var organicAutoRecheck")
-        XCTAssertTrue(auto.contains("Button { runCheckSizes() } label: { Self.tapNote(OrganicForecast.recheckTapLine) }"),
+        // ★ RE-PINNED (notes29, his 11-25: five words under a setting): the tap says five words, the whole line in its (i)
+        XCTAssertTrue(auto.contains("Button { runCheckSizes() } label: { Self.tapNote(Self.recheckTapBrief) }"),
                       "★ the line itself runs Check sizes")
+        XCTAssertTrue(auto.contains("infoButton(\"recheck-tap\", OrganicForecast.recheckTapLine"), "the line in its (i)")
         XCTAssertTrue(auto.contains("OrganicForecast.recheckLine(checkRefusal: organicProbeRefusal)"),
                       "where Check sizes cannot act it says why")
         // one submission: the button and the line share it
@@ -273,8 +275,8 @@ final class LatticeIncludeGateTests: XCTestCase {
             if !fitPossible {
                 let why = LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled, hasIncludeWall: false)
                 if let why, LatticeJobIncludeGate.opensWallMarking(why) {
-                    refusalNote(why, marksWalls: markWalls != nil)
-"""), "★ the wizard: the gate's sentence, the tap through Save & Exit")
+                    refusalNote(Self.markWallFirstLine, why, id: "fit-nothing-set", marksWalls: markWalls != nil)
+"""), "★ the wizard: the gate's sentence (★ RE-PINNED notes29: in its (i), five words on the tap), the tap through Save & Exit")
         XCTAssertEqual(wiz.components(separatedBy: "shortNote(\"Needs a lattice region\")").count - 1, 1)
         XCTAssertTrue(wiz.contains("} else {\n                    shortNote(\"Needs a lattice region\")"), "lattice off keeps its words")
         XCTAssertTrue(page.contains("""

@@ -2050,9 +2050,12 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// (2026-09-16: None came back as Skin after Save & Exit).
     public var jobSkinResolved: String {
         if isOrganic { return "diagrid" }
-        if singleCellMembers, boundary == .none || boundary == .rim { return LatticeBoundaryTreatment.fullSkin.jobSkinValue }
+        if singleCellMembersInEffect, boundary == .none || boundary == .rim { return LatticeBoundaryTreatment.fullSkin.jobSkinValue }
         return boundary.jobSkinValue
     }
+    /// ★ notes29 (his 11-25: "there is NO single-cell available in structural"): single-cell members act on the Aesthetic stage
+    /// only — a saved "on" carried to Structural adds no skin, sets no one-cell floor and locks nothing.
+    public var singleCellMembersInEffect: Bool { singleCellMembers && (stageMode ?? .structural) == .aesthetic }
     public var boundary: LatticeBoundaryTreatment
     /// Density mode (uniform run fill vs field-graded preview, bar B6).
     public var densityMode: LatticeDensityMode
@@ -2880,6 +2883,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         subfloorPerRegion = try c.decodeIfPresent(Bool.self, forKey: .subfloorPerRegion) ?? false
         // Absent from every older snapshot ⇒ off ⇒ core's floor of 2, unchanged.
         singleCellMembers = try c.decodeIfPresent(Bool.self, forKey: .singleCellMembers) ?? false
+        // ★ notes29 (his 11-25: Skin stuck on Structural): a saved Structural lattice with single-cell members on (carried
+        // over from Aesthetic) opens with it off, so no saved project keeps the Finish locked to Skin
+        if stageMode == .structural { singleCellMembers = false }
         smallCellsInThinWalls = try c.decodeIfPresent(Bool.self, forKey: .smallCellsInThinWalls) ?? false
         letWallsCutCells = try c.decodeIfPresent(Bool.self, forKey: .letWallsCutCells) ?? false
         // ★ Install 2: the Manual controls; absent ⇒ Auto

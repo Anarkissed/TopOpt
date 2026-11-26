@@ -201,16 +201,9 @@ public struct CornerMoreDrawer: View {
             .overlay(alignment: .trailing) {
                 // ★ notes28: the row's (i), its own 44 pt target over the row's end (the row's tap stays the row's)
                 if let info = item.info {
-                    Button { AppPopups.shared.help(item.title, info) } label: {
-                        Image(systemName: "info.circle").font(.system(size: 15, weight: .regular))
-                            .foregroundStyle(DS.Color.textTertiary.color)
-                            .frame(width: DSParts.target, height: DSParts.target).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
+                    AppInfoButton(title: item.title, text: info, label: "About \(item.title)", id: item.id + "-info")   // ★ notes29
                     .padding(.trailing, 4)
-                    .accessibilityLabel("About \(item.title)")
                     .background(DSParts.publish(item.id + "-info"))
-                    .accessibilityIdentifier(item.id + "-info")
                 }
             }
         }

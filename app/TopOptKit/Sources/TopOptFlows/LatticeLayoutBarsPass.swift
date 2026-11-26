@@ -50,6 +50,11 @@ public struct LatticeLayoutBarsInputs: Equatable {
     /// ★ his 11-22 (the print-accurate lattice made on the Mac): the print file's own lattice; when set it draws instead of the
     /// vines and the bars (they stay for the key, the card and picking), in the same colour and light.
     public var fileMesh: LatticeFileMesh?
+    /// ★ notes29 (the cell lattices, his "The drawing follows the print file. Always"): the up the lattice was laid standing
+    /// along — the face he kept, in the part's own coordinates (the print file's own up) — so a flat bridge is drawn square
+    /// with its underside level on it, as the file writes it; and the up the build timelapse's floors rise along. nil: as
+    /// placed (+Z), as before.
+    public var printUp: SIMD3<Float>?
     public init(token: Int, bars: [Float], hidden: Bool = false, solid: LatticeLayoutSolidGrid? = nil, flags: [UInt8] = [],
                 colours: [SIMD4<Float>] = [], colourKey: Int = 0) {
         self.token = token; self.bars = bars; self.hidden = hidden; self.solid = solid; self.flags = flags
@@ -210,7 +215,31 @@ struct BarFrame {
     float4   mapOrigin;    // ★ notes26 C6: the engine's map — voxel (0,0,0)'s centre
     float4   mapSpacing;   //   its voxel size
     float4   mapDims;      //   its voxel counts; w = 1: clip the bars to the part
+    // ★ notes29 (his "timelapse of a building being made"): LatticeBuildTimelapse — which of the bars show this frame
+    float4   build;        // x: the snaps shown (< 0: every bar); y: floors; z: bays; w: 1 on
+    float4   buildUp;      // xyz: up in the part's own coordinates; w: the lattice's lowest height along it
+    float4   buildAcross;  // xyz: across, left to right; w: the lattice's lowest along it
+    float4   buildSizes;   // x: a floor's height; y: the lattice's width across; z: a column's |cos| to up
+    float4   up;           // ★ notes29 H3: the print's up in the part's own coordinates (a bridge's level underside); +z as placed
 };
+
+// ★ notes29: the snap a bar comes in (LatticeBuildTimelapse.step, mirrored): its floor by its lower end, then 0 for a column,
+// 1 + its bay (by its middle) else
+static bool bar_build_hidden(float3 a, float3 b, constant BarFrame& F) {
+    if (F.build.x < 0.0) { return false; }
+    float3 up = F.buildUp.xyz;
+    float ha = dot(up, a), hb = dot(up, b);
+    float floors = max(F.build.y, 1.0), bays = max(F.build.z, 1.0);
+    float fl = clamp(floor((min(ha, hb) - F.buildUp.w) / max(F.buildSizes.x, 1e-4) + 1e-3), 0.0, floors - 1.0);
+    float3 d = b - a;
+    float len = length(d);
+    float kind = 0.0;
+    if (len >= 1e-6 && abs(dot(d, up)) / len < F.buildSizes.z) {
+        float mid = dot(F.buildAcross.xyz, 0.5 * (a + b));
+        kind = 1.0 + clamp(floor((mid - F.buildAcross.w) / max(F.buildSizes.y, 1e-4) * bays), 0.0, bays - 1.0);
+    }
+    return fl * (1.0 + bays) + kind >= F.build.x;
+}
 
 // ★ notes26 C6: is `p` inside the part (the map's inside channel, read linear — the way Organic's softened map is), never
 // outside the map's own box (beyond it nothing is the part)
@@ -231,10 +260,11 @@ struct BarVOut {
 };
 
 // ★ A FLAT BRIDGE (core's bar_flags bit 16, `bar_is_bridge`) is written SQUARE: its width across and tall, centred on its
-// line, its underside level (up is the print direction, +z). Its box's sides are the square's.
+// line, its underside level (up is the print direction: +z as placed; ★ notes29 the kept face's up, `F.up`, when the lattice is
+// laid standing on it, so the bridge is drawn as the file writes it). Its box's sides are the square's.
 static bool bar_square(float4 B) { return (uint(B.w + 0.5) & 16u) != 0u; }
-static void bar_axes(float3 u, bool square, thread float3& v, thread float3& w) {
-    float3 side = cross(u, float3(0.0, 0.0, 1.0));
+static void bar_axes(float3 u, bool square, float3 up, thread float3& v, thread float3& w) {
+    float3 side = cross(u, up);
     if (square && length(side) > 1e-4) { v = normalize(side); w = cross(v, u); return; }
     float3 hlp = abs(u.x) < 0.9 ? float3(1.0, 0.0, 0.0) : float3(0.0, 1.0, 0.0);
     v = normalize(cross(u, hlp));
@@ -251,7 +281,7 @@ vertex BarVOut bar_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
     float len = length(ax);
     float3 u = len > 1e-6 ? ax / len : float3(0.0, 0.0, 1.0);
     float3 v, w;
-    bar_axes(u, bar_square(B), v, w);
+    bar_axes(u, bar_square(B), F.up.xyz, v, w);
     const int idx[36] = { 0,1,2, 2,1,3, 4,6,5, 5,6,7, 0,4,1, 1,4,5,
                           2,3,6, 6,3,7, 0,2,4, 4,2,6, 1,5,3, 3,5,7 };
     int c = idx[vid % 36];
@@ -259,6 +289,7 @@ vertex BarVOut bar_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
     float3 p = e + ((c & 2) ? v * R : -v * R) + ((c & 4) ? w * R : -w * R);
     BarVOut o;
     o.pos = F.clipFromModel * float4(p, 1.0);
+    if (bar_build_hidden(A.xyz, B.xyz, F)) { o.pos = float4(0.0, 0.0, 2.0, 1.0); }   // ★ notes29: not built yet — no triangle
     o.cpos = o.pos;
     o.iid = iid;
     return o;
@@ -331,7 +362,7 @@ fragment BarGBuf bar_gbuffer(BarVOut in [[stage_in]],
         float len = length(ax);
         float3 u = len > 1e-6 ? ax / len : float3(0.0, 0.0, 1.0);
         float3 v, w;
-        bar_axes(u, true, v, w);
+        bar_axes(u, true, F.up.xyz, v, w);
         float3 o = ro - A.xyz;
         float3 lo3 = float3(dot(o, u), dot(o, v), dot(o, w));
         float3 ld = float3(dot(rd, u), dot(rd, v), dot(rd, w));
@@ -512,7 +543,7 @@ vertex LightVOut light_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
     float len = length(ax);
     float3 u = len > 1e-6 ? ax / len : float3(0.0, 0.0, 1.0);
     float3 v, w;
-    bar_axes(u, false, v, w);
+    bar_axes(u, false, F.up.xyz, v, w);
     const int corner[6] = { 0, 1, 2, 2, 1, 3 };   // one side's quad: bit 1 = end B, bit 2 = the next edge
     int c = corner[vid % 6];
     float ang = float(int(vid / 6) + ((c & 2) ? 1 : 0)) * 1.0471975512;   // six sides
@@ -520,6 +551,7 @@ vertex LightVOut light_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
     float3 p = ((c & 1) ? (B.xyz + u * 0.5 * R) : (A.xyz - u * 0.5 * R)) + radial * R;
     LightVOut o;
     o.pos = F.clipFromModel * float4(p, 1.0);
+    if (bar_build_hidden(A.xyz, B.xyz, F)) { o.pos = float4(0.0, 0.0, 2.0, 1.0); }   // ★ notes29
     o.ez = -(F.eyeFromModel * float4(p, 1.0)).z;
     o.en = (F.eyeNormalBasis * float4(radial, 0.0)).xyz;
     o.iid = iid;
@@ -574,6 +606,17 @@ final class LatticeLayoutBarsPass {
     private(set) var colourKey = -1
     private(set) var count = 0
     private(set) var token = -1
+    /// ★ notes29: the bars' box in the part's own coordinates (the timelapse's floors and bays); nil: no bars.
+    private(set) var box: (lo: SIMD3<Float>, hi: SIMD3<Float>)?
+    static func box(_ bars: [Float]) -> (lo: SIMD3<Float>, hi: SIMD3<Float>)? {
+        guard bars.count >= 7 else { return nil }
+        var lo = SIMD3<Float>(repeating: .greatestFiniteMagnitude), hi = -lo
+        for i in stride(from: 0, to: bars.count - 6, by: 7) {
+            let a = SIMD3(bars[i], bars[i + 1], bars[i + 2]), b = SIMD3(bars[i + 3], bars[i + 4], bars[i + 5])
+            lo = simd_min(lo, simd_min(a, b)); hi = simd_max(hi, simd_max(a, b))
+        }
+        return (lo, hi)
+    }
     /// ★ Organic cut 1: the first bar the light pass draws (.max: none).
     private(set) var lightFrom = Int.max
     /// ★ His 11-19: Organic's vines (nil: the bars draw).
@@ -581,6 +624,13 @@ final class LatticeLayoutBarsPass {
     /// ★ his 11-22: the print file's lattice from the Mac (nil: the vines or the bars draw).
     private(set) var filePass: LatticeFileMeshPass?
     var hidden = false
+    /// ★ notes29: the up the bars on screen were laid standing along (LatticeLayoutBarsInputs.printUp); nil: as placed (+Z).
+    private(set) var printUp: SIMD3<Float>?
+    /// The up a bridge is drawn level on: the print's, else +Z (as placed).
+    static func drawnUp(_ up: SIMD3<Float>?) -> SIMD3<Float> {
+        guard let u = up, simd_length(u) > 1e-6, simd_length(u).isFinite else { return SIMD3(0, 0, 1) }
+        return simd_normalize(u)
+    }
     /// ★ his pick 11-21: the last lattice, dimmed while the new one lays (`dimmedRGB`).
     var dimmed = false
     var isDrawable: Bool { !hidden && count > 0 && buffer != nil }
@@ -686,6 +736,7 @@ final class LatticeLayoutBarsPass {
         token = inputs.token
         hidden = inputs.hidden
         lightFrom = inputs.lightFrom
+        printUp = inputs.printUp   // ★ notes29
         if let v = inputs.vines {
             if vinePass == nil {
                 do { vinePass = try OrganicVinePass(device: device); OrganicVinePass.lastInitError = nil } catch {
@@ -710,6 +761,7 @@ final class LatticeLayoutBarsPass {
         }
         let packed = Self.pack(inputs.bars, flags: inputs.flags)
         count = packed.count / 2
+        box = Self.box(inputs.bars)   // ★ notes29: where the timelapse's floors and bays lie
         buffer = packed.isEmpty ? nil : device.makeBuffer(bytes: packed, length: MemoryLayout<SIMD4<Float>>.stride * packed.count,
                                                           options: .storageModeShared)
         uploadColours(inputs)
@@ -747,6 +799,10 @@ final class LatticeLayoutBarsPass {
         var mapOrigin = SIMD4<Float>(0, 0, 0, 0)
         var mapSpacing = SIMD4<Float>(1, 1, 1, 0)
         var mapDims = SIMD4<Float>(1, 1, 1, 0)
+        /// ★ notes29: the timelapse (BarFrame's four rows after the map; `build.x` < 0: every bar).
+        var build = LatticeBuildRevealUniform()
+        /// ★ notes29 H3: the print's up (BarFrame's twin, its last row): a bridge's level underside; +Z as placed.
+        var up = SIMD4<Float>(0, 0, 1, 0)
     }
 
     /// ★ notes26 C6: a 1×1×1 map bound when there is none (the shader declares it, so it is bound on every path).
@@ -766,7 +822,7 @@ final class LatticeLayoutBarsPass {
     /// Bars into the prepass's G-buffer (its encoder, attachments and .less + write depth state).
     func encodeGBuffer(_ enc: MTLRenderCommandEncoder, depthState: MTLDepthStencilState,
                        clipFromModel: simd_float4x4, eyeFromModel: simd_float4x4, eyeNormalBasis: simd_float4x4,
-                       turning: Bool = false) -> Bool {
+                       turning: Bool = false, build: LatticeBuildRevealUniform? = nil) -> Bool {
         guard isDrawable, let buffer, enc.device === device else { return false }
         let c0 = Self.colour
         let c = dimmed ? Self.dimmedRGB(SIMD3(Float(c0.r), Float(c0.g), Float(c0.b))) : SIMD3(Float(c0.r), Float(c0.g), Float(c0.b))
@@ -781,11 +837,13 @@ final class LatticeLayoutBarsPass {
         // dimmed: every bar the one drained colour (the key's colours come back with the new lattice)
         var f = Frame(clipFromModel: clipFromModel, modelFromClip: clipFromModel.inverse, eyeFromModel: eyeFromModel,
                       eyeNormalBasis: eyeNormalBasis, albedo: SIMD4(c, colourBuffer == nil || dimmed ? 1 : -1))
+        f.up = SIMD4(Self.drawnUp(printUp), 0)   // ★ notes29: the bridges stand on the print's up
         if Self.clipToPart, let g = grid, gridTexture != nil {   // ★ notes26 C6: the solid view's map clips the bars to the part
             f.mapOrigin = SIMD4(g.origin, 0)
             f.mapSpacing = SIMD4(g.voxel, g.voxel, g.voxel, 0)
             f.mapDims = SIMD4(Float(g.dims.x), Float(g.dims.y), Float(g.dims.z), 1)
         }
+        if let build { f.build = build }   // ★ notes29: the timelapse's snaps so far
         enc.setRenderPipelineState(pipeline)
         enc.setDepthStencilState(depthState)
         enc.setCullMode(.none)
