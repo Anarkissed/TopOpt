@@ -416,6 +416,8 @@ public final class LatticeLayoutSession: @unchecked Sendable {
     nonisolated(unsafe) public static private(set) var placesAsked = 0
     /// When the last `lay` began on its worker, app-wide (a test's reading: a lay asked during the search starts at once).
     nonisolated(unsafe) public static private(set) var lastLayBegan = Date.distantPast
+    /// RED CONTROL (tests): a map a newer lay stopped comes back empty, read as "no lattice asked" (before notes30 Q2).
+    nonisolated(unsafe) public static var controlStoppedMapReadsEmpty = false
 
     /// What is at each point for the last layout (empty before the first).
     public func whereAt(_ points: [SIMD3<Float>]) async throws -> [(why: Why, region: Int32)] {
@@ -440,6 +442,9 @@ public final class LatticeLayoutSession: @unchecked Sendable {
             var err = topoptbridge.BridgeError()
             let r = topoptbridge.lattice_layout_grid(sid, origin.x, origin.y, origin.z, voxel, dims.x, dims.y, dims.z, &err)
             if !err.ok { throw TopOptError(message: String(err.message)) }
+            // ★ notes30 Q2: a newer lay stopped it — said as such; read empty, it was "no lattice asked" (the nozzle check
+            // then answered "would not lattice much more" of a part nothing had checked)
+            if r.cancelled, !Self.controlStoppedMapReadsEmpty { throw CancellationError() }
             return (Array(r.rg), r.ms, Int(r.asked), Int(r.unheld), Array(r.nocell).map { Int($0) })
         }
     }

@@ -231,6 +231,8 @@ struct LatticeLayoutGrid {
   // The unheld voxels by core's reason (SolidAt::why, NoCell): Other, WallNarrow, TooFewAcross, Sliver, RegionShallow (his
   // ruling 11-14: solid where lattice was asked is never silent — the line says why and offers fixes).
   std::vector<int64_t> nocell;
+  // ★ notes30 Q2: a newer lay stopped it (lattice_layout_cancel): nothing above is filled — never "nothing asked for".
+  bool cancelled = false;
 };
 LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float origin_y, float origin_z, float voxel_mm,
                                       int32_t nx, int32_t ny, int32_t nz, BridgeError& err);
