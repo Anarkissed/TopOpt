@@ -450,6 +450,29 @@ int main(int argc, char** argv) {
 
   print_control();
 
+  // The thickness behind a face (what a pad follows): the plain box's bottom face
+  // has 16 mm of material behind it and its top the same; the 60 x 40 x 12 block's
+  // patch has 12 mm. Held to half a voxel at three resolutions.
+  std::printf("\n[backing] thickness of material behind a face, mm (true value, then measured at res 32 / 48 / 96)\n");
+  {
+    const StepModel box = build_plain_box(32.0, 32.0, 16.0);
+    const StepModel block = build_block(20.37, 10.71);
+    struct Case { const char* name; const StepModel* m; int face; double truth; };
+    const Case cases[3] = {{"box, bottom face", &box, 0, 16.0}, {"box, a side face", &box, 1, 32.0},
+                           {"block, the patch", &block, F_PATCH, kLz}};
+    for (const Case& c : cases) {
+      std::printf("%-18s %6.1f :", c.name, c.truth);
+      for (int res : {32, 48, 96}) {
+        const VoxelGrid g = topopt::voxelize(c.m->mesh, res);
+        const double t = topopt::face_backing_thickness_mm(
+            g, topopt::face_pieces(*c.m, {c.face}, 0.5 * g.spacing));
+        std::printf(" %7.2f", t);
+        if (std::fabs(t - c.truth) > 0.75 * g.spacing) ++failures;
+      }
+      std::printf("\n");
+    }
+  }
+
   std::printf("[tests C, D] %s: %d failure(s)\n", gate ? "gate" : "measure only", failures);
   return failures == 0 ? 0 : 1;
 }

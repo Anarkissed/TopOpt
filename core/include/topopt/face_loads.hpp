@@ -124,4 +124,14 @@ std::size_t mask_region_depth_mm(const VoxelGrid& grid, const StepModel& model,
                                  MaskValue mask_value, DesignMask& mask,
                                  std::vector<float>* fraction = nullptr);
 
+// How thick the part is BEHIND a face: for each piece, the distance from the face
+// straight into the part (against the piece's outward normal) until the material
+// ends, stepped through the voxels at a quarter of a voxel; the MEDIAN over the
+// pieces is returned (mm), so a few pieces over a hole or beside an edge do not
+// decide it. 0 when no piece lies on solid material. This is the "size of the
+// model" a pad follows (the maintainer, 2026-11-26: the pad adjusts to the size
+// of the model, measured at that face, so a thin tab on a big part gets a thin
+// pad).
+double face_backing_thickness_mm(const VoxelGrid& grid, const std::vector<FacePiece>& pieces);
+
 }  // namespace topopt
