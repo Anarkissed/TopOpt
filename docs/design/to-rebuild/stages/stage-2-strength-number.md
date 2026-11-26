@@ -152,6 +152,18 @@ On PillowBlock the in-plane stress halves when read over 2.4 mm, and the margin 
 
 Two earlier sweeps of this table read "one voxel" in every column; both were wiring faults of mine (the wall-aware maximum was not read over the size; then the size was wiped when the load case replaced the options) and are not results.
 
+## First optimised runs with the switch (the stand at res 64, drawn-face loads, build 95411b2a, 2026-11-25 22:10): little learned, two faults found
+
+| arm | in-loop margin | file margin | grams |
+|---|---|---|---|
+| today | 11.77 | 4.161 -> 4.201 | 90.55 |
+| real stiffness | 11.83 | 4.181 -> 4.201 | 90.55 (printed share reported 1.000) |
+| real stiffness, read over 1.8 mm | 11.83 | 4.181 -> 4.201 | 90.55 (share 1.000) |
+
+- The stiffness step moves the in-loop margin by 0.5 % here: at res 64 this part is 77 % frozen and has few cut voxels. Not a test of it.
+- The 1.8 mm reading did nothing: the voxel is 3.4 mm at res 64, larger than the size. My choice of resolution was wrong for this arm; it needs res 128 or finer (under the lock).
+- The printed share came out exactly 1.000 at 50 % infill and six walls. Cause: production ships with the wall-aware posture OFF (`kProductionWidthAwareKnockdown = false`: "arming is a maintainer act with a coupon behind it"), so the member widths were never measured and my condition never held. Fixed in the next commit: the widths are measured for the grams alone when the stage's switch is on. (Also corrects an earlier line of mine: the production gate does NOT read the wall-aware maximum; it reads the plain one with the scalar infill knockdown.)
+
 ## What it does to the lattice strength check
 
 Steps 1 and 2 change the solid part's reading only if applied in the shared code path; the lattice check reads strut stresses through its own laws. To be confirmed with LatticeReview before any edit: which branches of `analyze.cpp` the lattice posture takes, and that its numbers are byte-identical with the switch off.

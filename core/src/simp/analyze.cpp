@@ -547,12 +547,20 @@ FixedDesignAnalysis analyze_fixed_design(
   // wall-aware posture) and no voxel is lattice (a lattice's mass is its own
   // relative density, counted above). The solid figure is kept beside it.
   out.mass_grams_solid = out.mass_grams;
-  if (to_stage2_on() && knockdown.width_aware && lattice_voxels == 0 &&
-      member_width_mm.size() == density.size()) {
+  if (to_stage2_on() && lattice_voxels == 0) {
+    // The member widths: the gate's own when the wall-aware posture measured them;
+    // otherwise measured here for the grams alone (production ships with that
+    // posture off, so without this the share was always 1 and the grams solid:
+    // found on the stand at res 64, 2026-11-25).
+    std::vector<double> width_for_mass;
+    if (member_width_mm.size() != density.size())
+      width_for_mass = local_member_thickness_mm(grid, density, kIso, kn.thickness_cap_voxels);
+    const std::vector<double>& member_width_mm_for_mass =
+        member_width_mm.size() == density.size() ? member_width_mm : width_for_mass;
     std::vector<double> printed_density(density.size(), 0.0);
     for (std::size_t idx = 0; idx < density.size(); ++idx)
       if (grid.tags[idx] != VoxelTag::Empty && density[idx] > kIso) printed_density[idx] = 1.0;
-    out.mass_grams = printed_mass(grid, printed_density, 0.5, member_width_mm,
+    out.mass_grams = printed_mass(grid, printed_density, 0.5, member_width_mm_for_mass,
                                   knockdown.wall_thickness_mm, knockdown.infill_percent,
                                   material.density_g_cm3)
                          .grams;
