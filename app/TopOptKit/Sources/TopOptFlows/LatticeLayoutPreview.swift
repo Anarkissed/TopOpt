@@ -71,12 +71,18 @@ public final class LatticeLayoutPreview: ObservableObject {
         public var draftShown: Bool
         /// ★ his 11-22 (watch it grow): the engine's phase of this lay (LatticePreviewMode.phaseWords); 0 not said yet.
         public var phase: Int
+        /// ★ notes30 (his 11-26): a Live preview lay — nothing of it is shown (no ring, the last lattice not dimmed) until it
+        /// lands (`LatticeLayoutPreview.quietLay`).
+        public var quiet: Bool
         public init(quality: LatticeLayoutSession.Organic.Quality, started: Date, expectedS: Double?, draftShown: Bool,
-                    phase: Int = 0) {
+                    phase: Int = 0, quiet: Bool = false) {
             self.quality = quality; self.started = started; self.expectedS = expectedS; self.draftShown = draftShown
-            self.phase = phase
+            self.phase = phase; self.quiet = quiet
         }
     }
+    /// ★ notes30 (his 11-26, "live Preview should have no animations … No progress bar, no animation, nothing. Just change
+    /// it."): the lay the Lattice button wears as its ring — none for a Live preview lay (`LayProgress.quiet`).
+    public var ringProgress: LayProgress? { layProgress?.quiet == true ? nil : layProgress }
     /// ★ his 11-22 ("Could the user literally *watch* the lattice grow from nothing?"): the vines an Organic lay has laid so
     /// far, drawn by the 3D view while it lays (LatticeGrowth). Not published: each poll redraws the 3D view alone.
     public let growth = LatticeGrowth()
@@ -92,6 +98,9 @@ public final class LatticeLayoutPreview: ObservableObject {
     var printAccurate: Bool { AppSettings.shared.latticePrintAccurate }
     /// The lay going (or last made) ends with the exact lattice.
     private var accurateAtLay = true
+    /// ★ notes30: the lay going (or last made) is a Live preview lay: no timelapse, no growth, no card, no ring; the lattice on
+    /// screen stays exactly as it is until this one is whole, then it is replaced in one step (`quietLay`).
+    private(set) var quietAtLay = false
     /// An exact lattice is being made (the print file waits for it rather than asking again).
     public var layingExact: Bool { laying && accurateAtLay }
     /// ★ notes28: the part's session still opening behind a lattice read back from the version's folder (its inputs wait).
@@ -316,11 +325,22 @@ public final class LatticeLayoutPreview: ObservableObject {
         return modes.count == 1 ? "Organic " + modes.first!.title : "Organic"
     }
 
+    /// ★ notes30 (his 11-26, on N3's "With Live preview on, every settled change replays the full 7 s": "No, live Preview
+    /// should have no animations. It should automatically change as fast as possible. No progress bar, no animation, nothing.
+    /// Just change it."): whether a lay asked with `live` (the page's Live preview in force: its `latticeLiveHere`, so Organic
+    /// Grown stays Click to refresh — a Grown lay takes minutes) is quiet. A quiet lay shows nothing while it runs: no
+    /// timelapse, no growth, no "Refreshing Lattice" card, no ring, the last lattice neither dimmed nor cleared (Skip all
+    /// animations or not); the new lattice replaces the last in one step, whole, with its map. Click to refresh: release 21's.
+    static func quietLay(live: Bool) -> Bool { live && !controlLiveAnimates }
+    /// RED CONTROL (tests): Live preview's lays build, grow and show their progress as Click to refresh's do (release 21).
+    nonisolated(unsafe) public static var controlLiveAnimates = false
+
     /// The page's one call, on every change of the part or its lattice settings (cheap when nothing changed).
     /// ★ his picks 11-16: `delay` — Live preview lays half a second after the last change (a newer change cancels the wait);
     /// `checkNozzle` — Refresh also runs the 0.2 mm nozzle check after the layout.
+    /// ★ notes30: `live` — the page's Live preview is in force: the lay is quiet (`quietLay`).
     public func update(project p: ProjectModel, on: Bool, solid: Bool = false, stress: Stress = Stress(),
-                       delay: Duration = .zero, checkNozzle: Bool = false, exact: Bool = false) {
+                       delay: Duration = .zero, live: Bool = false, checkNozzle: Bool = false, exact: Bool = false) {
         guard on else { clear(); return }
         fixProject = p   // ★ notes28: the solid pop-up's fixes are taken on this part
         guard let path = p.importedFile?.path else { problem = Self.noPartLine; bars = nil; return }
@@ -359,14 +379,20 @@ public final class LatticeLayoutPreview: ObservableObject {
         // the Draft of exactly these inputs is on screen: the exact lattice alone follows it
         let draftOnScreen = isOrganic && accurate && !wasLaying && organicQuality == .draft && before != nil && before == inputsAtLay
         accurateAtLay = accurate
+        let quiet = Self.quietLay(live: live)   // ★ notes30: Live preview — nothing shown until it lands
+        quietAtLay = quiet
         task?.cancel()
         stopGrowth()   // ★ his 11-22: a new lay grows from nothing again
         laying = true
         // ★ notes29: a regular lay is built on screen — the last lattice gone at once, the site cleared until this one lands;
         // Organic grows instead (its own replay). Skip all animations: every lay leaves the lattice area blank, and the card
         // shows the refresh's progress.
-        if !isOrganic || AppSettings.skipAllAnimations { build.layBegins() } else { build.stop() }
-        refresh.begin(refreshSteps(organic: isOrganic, path: path, up: Self.printUp(p)))
+        // ★ notes30: a Live preview lay does none of it: the last lattice stays exactly as it is, no card, until this one lands
+        if quiet { build.stop(); refresh.end() }
+        else {
+            if !isOrganic || AppSettings.skipAllAnimations { build.layBegins() } else { build.stop() }
+            refresh.begin(refreshSteps(organic: isOrganic, path: path, up: Self.printUp(p)))
+        }
         nozzleWanted = checkNozzle
         // ★ his pick 11-21 ("Let's do this one. Absolutely."): every Organic lay shows its Draft first (marked, the last
         // lattice dimmed until it lands), then the exact lattice replaces it (before: only Live preview's dragged slider)
@@ -374,7 +400,8 @@ public final class LatticeLayoutPreview: ObservableObject {
         let draftFirst = isOrganic && !Self.controlNoDraftFirst && !draftOnScreen
         let q: LatticeLayoutSession.Organic.Quality = draftFirst ? .draft : .exact
         // ★ his 11-22: the ring on the Lattice button is the processing graphic, for every type
-        layProgress = LayProgress(quality: q, started: Date(), expectedS: layWallS[timeKey(path, q)], draftShown: draftOnScreen)
+        layProgress = LayProgress(quality: q, started: Date(), expectedS: layWallS[timeKey(path, q)], draftShown: draftOnScreen,
+                                  quiet: quiet)   // ★ notes30: a Live preview lay wears no ring
         task = Task { [weak self] in
             if delay > .zero {   // ★ Live preview: wait for him to stop changing it
                 try? await Task.sleep(for: delay)
@@ -664,7 +691,8 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// holds, or by the stress (`stress`, the stress view with the lattice; `stressKey` names it). Worked out once per layout
     /// and colouring.
     /// ★ his pick 11-21: the lattice on screen is dimmed while an Organic lay goes, until this lay's own Draft lands.
-    public static func dims(_ p: LayProgress?) -> Bool { p.map { !$0.draftShown } ?? false }
+    /// ★ notes30: never for a Live preview lay — the last lattice stays exactly as it is until the new one lands.
+    public static func dims(_ p: LayProgress?) -> Bool { p.map { !$0.draftShown && !$0.quiet } ?? false }
 
     public func drawn(stressField field: LatticeDemandField?, stressKey: Int) -> LatticeLayoutBarsInputs? {
         guard var b = bars else { return nil }
@@ -767,7 +795,8 @@ public final class LatticeLayoutPreview: ObservableObject {
             layStages["stressGiveMS"] = Self.ms(since: t0)
             layStages["openMS"] = openMS
             if Self.organic(latticeAtLay) {   // ★ Organic cut 1: the weave's own lay
-                let watch = watchGrowth(session)   // ★ his 11-22: its vines drawn as they are laid, until it ends
+                // ★ his 11-22: its vines drawn as they are laid, until it ends; ★ notes30: none for a Live preview lay
+                let watch = quietAtLay ? nil : watchGrowth(session)
                 defer { watch?.stop() }
                 try await layOrganic(session, path: path, s, draft: draft)
                 return
@@ -835,7 +864,8 @@ public final class LatticeLayoutPreview: ObservableObject {
     private func layOrganic(_ session: LatticeLayoutSession, path: String, _ s: LatticeLayoutSession.Settings, draft: Bool,
                             afterDraft: Bool = false) async throws {
         if afterDraft {   // ★ his pick 11-21: the Draft is on screen, marked; the exact lattice is made
-            layProgress = LayProgress(quality: .exact, started: Date(), expectedS: layWallS[timeKey(path, .exact)], draftShown: true)
+            layProgress = LayProgress(quality: .exact, started: Date(), expectedS: layWallS[timeKey(path, .exact)], draftShown: true,
+                                      quiet: quietAtLay)   // ★ notes30
             layTimingBegins(.exact)   // ★ his 11-22: the Draft's line is written; the exact lattice's begins
         }
         // ★ his 11-22 (img 45, 47: "The draft lattice doesn't cut the faces of the solid"): the Draft on screen is cut open
@@ -922,9 +952,11 @@ public final class LatticeLayoutPreview: ObservableObject {
         // by the map made before the lay (his walls-first; `mapAhead`, 362's gridAhead), else in X-ray (LatticeGrowth)
         let fits = Self.mapFor(token: token, at: here, shown: bars, shownWhere: shownWhere) != nil
         let ahead = solidWanted && !fits ? await Self.mapAhead(session, s, box, token: token &+ 1, smooth: true) : nil
-        growth.printUp = upAtLay.map { OrganicVineShape.drawnUp($0) }   // ★ notes29: the band rises along the print's up
-        growth.layBegins(groups, lineMM: s.beadMM, opening: .init(solid: solidWanted, mapFits: fits, ahead: ahead),
-                         expectedLeftS: layProgress?.expectedLeftS)
+        if !quietAtLay {   // ★ notes30: a Live preview lay grows nothing on screen (its map made ahead is still its own)
+            growth.printUp = upAtLay.map { OrganicVineShape.drawnUp($0) }   // ★ notes29: the band rises along the print's up
+            growth.layBegins(groups, lineMM: s.beadMM, opening: .init(solid: solidWanted, mapFits: fits, ahead: ahead),
+                             expectedLeftS: layProgress?.expectedLeftS)
+        }
         t0 = Date()
         let r = try await session.layOrganic(s, groups: groups)
         layStages["layWallMS"] = Self.ms(since: t0)   // ★ his 11-22: the engine's own times, as they come
@@ -962,6 +994,17 @@ public final class LatticeLayoutPreview: ObservableObject {
         drawn.vines = vines
         // ★ his 11-22: cut open at once where the map on screen is this lattice's map too (the Draft's, for its exact lattice)
         if solidWanted { drawn.solid = Self.mapFor(token: token, at: here, shown: bars, shownWhere: shownWhere) ?? growth.landedMap(token: token) }   // ★ notes24: or the one made before it
+        // ★ notes30: a Live preview lay lands whole WITH its map, in one step — the map made before the lay, else made now,
+        // before the lattice shows (never the struts first and the part cut open after)
+        var quietMapMS: Double?
+        if quietAtLay, solidWanted, drawn.solid == nil {
+            if var m = ahead { m.token = token; drawn.solid = m }
+            else if let box, let m = try? await Self.map(session, box, token: token, smooth: true,
+                                                        cutSmooth: Self.cutSmoothWanted(lattice: latticeAtLay, printAccurate: printAccurate)) {
+                drawn.solid = m.grid; quietMapMS = m.ms
+            }
+            guard !Task.isCancelled else { return }
+        }
         bars = drawn
         shownWhere = (token, here)
         var l = LatticeLayoutColours.Laid()   // no cells: the key and card read each strut's width and its cell size
@@ -970,6 +1013,7 @@ public final class LatticeLayoutPreview: ObservableObject {
         timing = Timing(openMS: openMS, readMS: r.layout.msRead, cellsMS: r.msTrace, barsMS: r.layout.msBars, bars: seg.count)
         timing?.organicLine = Self.organicTimeLine(mode: grown ? .grown : .traced, draft: r.quality == .draft, ms: r.ms,
                                                    strands: r.strands)   // ★ notes25: strands (the print file's count too)
+        if let ms = quietMapMS { timing?.mapMS = ms }   // ★ notes30
         organicQuality = r.quality
         organicNumbers = OrganicNumbers(strands: r.strands, segments: seg.count, ms: r.ms, draft: r.quality == .draft,
                                         limitsMeasured: organicLimits?.limits?.measured == true)
