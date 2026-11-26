@@ -2171,6 +2171,11 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     }
 
     MinimizePlasticVariant variant;
+    // The connection rule: did a solve of THIS rung refuse an unheld load?
+    const long long load_unheld_before = fea_matfree_load_unheld_count();
+    const auto rung_load_unheld = [&]() {
+      return fea_matfree_load_unheld_count() > load_unheld_before;
+    };
     variant.requested_volume_fraction = vf;
     // CORE LIST item 40 — the line carries its ask and the clamp verdict; both are
     // emitted only if some rung of this run saturates (`request_reported`, set
@@ -2678,7 +2683,8 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       vr.printed_fraction = report_fraction(printed_fraction);
       vr.accepted = false;
       vr.margin_required = options.margin_stop;
-      vr.rejection_reason = kRungNonConvergentReason;
+      vr.rejection_reason =
+          rung_load_unheld() ? kLoadUnheldReason : kRungNonConvergentReason;
       measure_added_material(variant.optimization.physical_density, vr,
                              growth_target_saturated);
       // Every other field stays default-constructed — NOT measurements. The
@@ -3073,7 +3079,8 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       vr.printed_fraction = report_fraction(printed_fraction_nc);
       vr.accepted = false;
       vr.margin_required = options.margin_stop;
-      vr.rejection_reason = kRungNonConvergentReason;
+      vr.rejection_reason =
+          rung_load_unheld() ? kLoadUnheldReason : kRungNonConvergentReason;
       measure_added_material(rho, vr, growth_target_saturated);
       // No margin, stress, orientation or settings — the certification never
       // completed. The rejection_reason is the flag that says so.

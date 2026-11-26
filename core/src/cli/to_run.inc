@@ -2494,6 +2494,19 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                 result.pipeline.rung_non_convergent_tolerance[i] > 0.0
             ? result.pipeline.rung_non_convergent_tolerance[i]
             : options.simp.cg_tolerance;
+    // The connection rule (TOPOPT_CONNECTION=support): the same path, a different
+    // fact. No solve stalled; the design left a loaded piece with no way to a mount.
+    if (v.report.rejection_reason == kLoadUnheldReason) {
+      std::fprintf(stderr,
+                   "WARNING: rung %zu (vf %.2f) was REJECTED — %s. This version's design "
+                   "left a piece that carries a load but is joined to no fixed face, so "
+                   "it was refused before any solving. No mesh, stress analysis or margin "
+                   "is reported for it; the run completed and every already-accepted "
+                   "variant is unaffected. See report.json rejected_variants.\n",
+                   i, v.requested_volume_fraction, kLoadUnheldReason);
+      std::fflush(stderr);
+      continue;
+    }
     std::fprintf(stderr,
                  "WARNING: rung %zu (vf %.2f) was REJECTED — %s. A linear solve did "
                  "not reach the CG tolerance %.3g: it stalled at residual %.3g after "
@@ -2807,6 +2820,31 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     } catch (const std::exception& e) {
       std::fprintf(stderr, "[too small] could not be checked: %s\n", e.what());
     }
+  }
+
+  // TO rebuild stage 2 (the reviewer's ruling 2026-11-26, item 6): say which form of
+  // the strength reading this job used, and why. One line and one report key.
+  if (strength_mode() == StrengthMode::Size) {
+    auto& sr = result.pipeline.report.strength_reading;
+    sr.evaluated = true;
+    sr.size_mm = options.stress_reading_mm;
+    sr.voxel_mm = grid.spacing;
+    sr.needs_voxel_mm = sr.size_mm > 0.0 ? sr.size_mm / kStressSizeSwitchVoxels : 0.0;
+    sr.over_size = stress_is_read_over_size(sr.size_mm, sr.voxel_mm);
+    if (sr.over_size)
+      std::fprintf(stderr,
+                   "[strength] the stress is read over %.2f mm (the material's length), on "
+                   "real stiffness; the check voxel is %.2f mm.\n",
+                   sr.size_mm, sr.voxel_mm);
+    else if (sr.size_mm > 0.0)
+      std::fprintf(stderr,
+                   "[strength] one-voxel reading, as today: reading over %.2f mm needs a check "
+                   "voxel of %.2f mm or finer, and this job's is %.2f mm.\n",
+                   sr.size_mm, sr.needs_voxel_mm, sr.voxel_mm);
+    else
+      std::fprintf(stderr,
+                   "[strength] one-voxel reading, as today: no published length for this "
+                   "material.\n");
   }
 
   // TO rebuild stage 2 (ledger M-07): what the part AS DRAWN would take on the

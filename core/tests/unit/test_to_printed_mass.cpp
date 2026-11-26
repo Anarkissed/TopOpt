@@ -94,6 +94,38 @@ int main() {
     const double over = peak_stress_over_size(g, f, full, 0.5, 6.0);
     CHECK(over > 5.0 && over < 15.0);
     std::printf("[across layers] one 50 in a field of 5 reads %.2f over 6 mm\n", over);
+
+    // THE SWITCH POINT (stress_measure.hpp): a size is read over only from 1.75
+    // check voxels; 0 (no published length) and anything smaller keep the
+    // one-voxel form.
+    CHECK(kStressSizeSwitchVoxels == 1.75);
+    CHECK(stress_is_read_over_size(1.2, 0.68));        // PLA at a 0.68 mm voxel
+    CHECK(!stress_is_read_over_size(1.2, 0.70));       // ... and just too coarse
+    CHECK(stress_is_read_over_size(3.5, 2.0) && !stress_is_read_over_size(3.4, 2.0));
+    CHECK(!stress_is_read_over_size(0.0, 0.5) && !stress_is_read_over_size(1.2, 0.0));
+
+    // THE EDGE OF THE PART: a wall of full voxels at stress 10 with one layer of
+    // cut voxels (fill 0.3) at stress 30 on its face, air beyond. Read over three
+    // voxels with the ball kept to voxels at least half full it sees 10 and
+    // nothing else; with the material floor the ball may sit on the cut layer and
+    // counts its material, so the reading rises above 10 and stays under 30.
+    std::vector<double> fill(1000, 0.0), s(1000, 0.0);
+    for (int k = 0; k < 10; ++k)
+      for (int j = 0; j < 10; ++j)
+        for (int i = 0; i < 10; ++i) {
+          const std::size_t v = (static_cast<std::size_t>(k) * 10 + j) * 10 + i;
+          if (i < 5) { fill[v] = 1.0; s[v] = 10.0; }
+          else if (i == 5) { fill[v] = 0.3; s[v] = 30.0; }
+        }
+    const double inside = peak_stress_over_size(g, s, fill, 0.5, 6.0);
+    const double edge = peak_stress_over_size(g, s, fill, kStressMaterialFloor, 6.0);
+    std::printf("[edge] wall at 10 with a cut layer at 30: read over 6 mm, half-full voxels only %.2f; "
+                "with the edge rule %.2f\n", inside, edge);
+    CHECK(std::fabs(inside - 10.0) < 1e-9);
+    CHECK(edge > 10.5 && edge < 30.0);
+    // A voxel under the material floor is air to both.
+    fill[5] = 0.01;
+    CHECK(stress_over_size(g, s, fill, kStressMaterialFloor, 6.0)[5] == 0.0);
   }
 
   std::printf("[printed mass] solid %.3f g; 6 mm members at 20 %% infill %.3f g; wide body at 20 %% %.3f g; %d failure(s)\n",

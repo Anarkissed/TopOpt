@@ -323,7 +323,8 @@ FixedDesignAnalysis analyze_fixed_design(
       // reading whole. "stiff" stays as a measuring arm only.
       SimpParams solve_params = params;
       if (strength_mode() == StrengthMode::Stiff ||
-          (strength_mode() == StrengthMode::Size && knockdown.stress_reading_mm > 0.0))
+          (strength_mode() == StrengthMode::Size &&
+           stress_is_read_over_size(knockdown.stress_reading_mm, grid.spacing)))
         solve_params.penalty = 1.0;
       sc = simp_compliance(grid, solve_params, density, B, loads, cg_tolerance,
                            cg_max_iterations, /*initial_guess=*/nullptr,
@@ -423,7 +424,8 @@ FixedDesignAnalysis analyze_fixed_design(
   // TO rebuild stage 2: the wall-aware stress per voxel, kept only when it is to
   // be read over a size (empty otherwise, so today's path allocates nothing).
   const bool read_over_size =
-      strength_mode() == StrengthMode::Size && knockdown.stress_reading_mm > 0.0;
+      strength_mode() == StrengthMode::Size &&
+      stress_is_read_over_size(knockdown.stress_reading_mm, grid.spacing);
   std::vector<double> von_mises_eff_field;
   if (read_over_size && knockdown.width_aware)
     von_mises_eff_field.assign(grid.voxel_count(), 0.0);
@@ -512,11 +514,49 @@ FixedDesignAnalysis analyze_fixed_design(
   // Not yet done here: the interlayer reading (its length is a fifth of this one,
   // under a voxel so far).
   const double max_von_mises_one_voxel = max_von_mises;
+  // The voxels the surface cuts (stress_measure.hpp, "the edge of the part"): the
+  // stress of the material in them, from the same solve, so that a ball centred on
+  // the part's edge has something to average. Lattice and loose voxels are left as
+  // the loop above left them. The wall-aware field takes, for a cut voxel, the
+  // knockdown of its thinnest-walled printed face neighbour (the cut voxel has no
+  // member width of its own).
+  if (read_over_size || knockdown.record_material_stress) {
+    out.von_mises_material_field = out.von_mises_field;
+    for (int k = 0; k < grid.nz; ++k)
+      for (int j = 0; j < grid.ny; ++j)
+        for (int i = 0; i < grid.nx; ++i) {
+          if (!grid.solid(i, j, k)) continue;
+          const std::size_t idx = grid.index(i, j, k);
+          if (density[idx] > kIso || !(density[idx] >= kStressMaterialFloor)) continue;
+          if (has_lattice && lat_mask[idx]) continue;
+          const Hex8Stress st = hex8_stress(params.youngs_modulus, params.poisson, grid.spacing,
+                                            element_dofs(grid, sc.solution, i, j, k));
+          out.von_mises_material_field[idx] = st.von_mises;
+          if (von_mises_eff_field.empty()) continue;
+          double k_v = 1.0;
+          bool found = false;
+          const int di[6] = {1, -1, 0, 0, 0, 0}, dj[6] = {0, 0, 1, -1, 0, 0},
+                    dk[6] = {0, 0, 0, 0, 1, -1};
+          for (int q = 0; q < 6; ++q) {
+            const int a = i + di[q], b = j + dj[q], c = k + dk[q];
+            if (a < 0 || b < 0 || c < 0 || a >= grid.nx || b >= grid.ny || c >= grid.nz) continue;
+            const std::size_t u = grid.index(a, b, c);
+            if (!(density[u] > kIso)) continue;
+            const double kq = width_aware_knockdown(
+                knockdown.infill_percent, member_width_mm[u], knockdown.wall_thickness_mm,
+                knockdown.infill_exponent, knockdown.infill_floor);
+            if (!found || kq < k_v) k_v = kq;
+            found = true;
+          }
+          von_mises_eff_field[idx] = st.von_mises / k_v;
+        }
+  }
   if (read_over_size) {
-    max_von_mises = peak_stress_over_size(grid, out.von_mises_field, density, kIso,
-                                          knockdown.stress_reading_mm);
+    max_von_mises = peak_stress_over_size(grid, out.von_mises_material_field, density,
+                                          kStressMaterialFloor, knockdown.stress_reading_mm);
     if (!von_mises_eff_field.empty())
-      max_von_mises_eff = peak_stress_over_size(grid, von_mises_eff_field, density, kIso,
+      max_von_mises_eff = peak_stress_over_size(grid, von_mises_eff_field, density,
+                                                kStressMaterialFloor,
                                                 knockdown.stress_reading_mm);
   }
   const double max_interlayer = max_interlayer_tension(grid, stress, build_dir);
@@ -603,6 +643,7 @@ FixedDesignAnalysis analyze_fixed_design(
   out.printed_fraction = printed_fraction;
   out.max_von_mises = max_von_mises;
   out.max_von_mises_one_voxel = max_von_mises_one_voxel;
+  out.stress_read_over_mm = read_over_size ? knockdown.stress_reading_mm : 0.0;
   out.max_interlayer_tension = max_interlayer;
   out.margin = margin;
   out.margin_effective = margin_effective;

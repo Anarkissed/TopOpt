@@ -243,3 +243,122 @@ What it says, plainly. Judged against its own true value, real stiffness is the 
 ## A case for "one judge" (R-08), seen on the sample beam 2026-11-26 10:05
 
 The command-line summary of the beam's run (drawn faces, pad 3 mm, res 64) reads: "vf 0.38: margin 8.22, accepted" and "vf 0.26: margin 3.55, rejected (below margin_stop)", on a job whose required margin is 1.5. Nothing is wrong with the verdict: the line prints the raw worst-case margin (`report.margin.worst_case`, `main.cpp:927`) while the verdict is taken on the margin after the print knock-down (the 0.38 version's finished margin is 2.73, a third of 8.22; by the same ratio 0.26 stands near 1.2, under 1.5). But two numbers for one version, with the verdict beside the wrong one, is exactly what R-08 is about. When "one judge" is built, this line prints the number the verdict used. Not changed now (command-line text only; the app does not show it).
+
+## The reviewer's ruling of 2026-11-26 (18:37Z), and the first two answers
+
+The ruling in short: for a material with a published length the reference is the reading's OWN true value (never more than 5 % under, within 10 % across resolutions); real stiffness read over the size where the size is at least the check voxel, with the switch point MEASURED; the plate's miss at 3.6 mm to be explained and fixed or the field capped; under a voxel, or with no published length, the reference is the peak and one-voxel E x fill does not ship; E x fill^2 at one voxel must first hold on a third shape (ellipse, a / b = 2); the readout says which form a job used.
+
+### Item 3, the plate's miss at 3.6 mm: FOUND (2026-11-26 16:10). It is the ball, as the reviewer suspected, not the solve.
+
+Method (`stages/ball_on_exact.py`, no solve at all): the EXACT Kirsch field is sampled on the test's own voxels and the reading's own ball rules are applied to it. That alone reads -11.4 / -10.8 / -8.6 / -2.6 % against the reference at hole radius 3 / 4 / 5 / 6 voxels, where the test with the solve measured -10.5 / -9.5 / -7.0 / -1.6 %. So the whole miss is there before any solving.
+
+The cause: the reference's largest average is the ball centred ON the hole's edge (half the ball in air, only the material inside it averaged): that is where the theory of critical distances puts it, at the notch root. The reading can only centre its ball on the centre of a voxel that is at least half full, so its centre sits about half a voxel inside the material. Moving the reference's own centre half a voxel in costs -12.9 / -9.6 / -7.5 / -6.4 %: the same loss. The ball sitting a quarter of the plate's thickness off its mid-plane changes that by under 1 %.
+
+The fix, tried on the exact field: let the ball be centred on ANY voxel that holds material (the thin rim voxels too), and count every cut voxel's material in the average, not only voxels at least half full.
+
+| reading over | hole radius 3 voxels (2.0 mm voxel) | 4 (1.5 mm) | 5 (1.2 mm) | 6 (1.0 mm) |
+|---|---|---|---|---|
+| 3.6 mm, today's rules | -11.4 % | -10.8 % | -8.6 % | -2.6 % |
+| 3.6 mm, fixed | -4.3 % | +1.4 % | +2.4 % | +3.4 % |
+| 1.8 mm, today's rules | -14.1 % | -9.8 % | -9.4 % | -5.9 % |
+| 1.8 mm, fixed | -14.1 % (the voxel is larger than the size: one voxel alone) | +0.1 % | -0.8 % | -2.1 % |
+
+Two things this table says beyond the fix. (1) On the exact field today's rules read 1.8 mm 6 to 10 % LOW, where the test with the solve had it within 5.5 %: the solve's own error was hiding part of the ball's. The fix must therefore be measured again WITH the solve (owed). (2) The 2.0 mm voxel against a 1.8 mm size is the "size under the voxel" case of the ruling's item 4, not a miss of this form.
+
+What the fix needs in the code (NOT written yet): `analyze.cpp` records the stress of every voxel that holds material, not only of printed ones (today a voxel under half full has no stress recorded, so the ball would average zeros), and `stress_over_size` takes its centres and its material from every such voxel. Both only when a size is read (behind `TOPOPT_STRENGTH=size`).
+
+### Item 5, the third shape: first numbers, NOT yet usable (2026-11-26 15:45)
+
+The ellipse test's first run (plate twenty long semi-axes wide) gave numbers at the coarsest resolution only: E x fill 3.56, E x fill^2 4.36, E x fill^3 5.04 against 5.00; at the three finer resolutions the solve returned nothing (the larger plates did not converge inside the test's limit). So one resolution says E x fill^2 reads 12.9 % LOW on a shape it was not found on, and today's E x fill^3 reads 0.8 % high. The test now uses a plate ten long semi-axes wide and says when a solve fails; its four-resolution run is in progress. No conclusion until all four are in.
+
+### Item 5, the third shape: MEASURED at four resolutions (2026-11-26 15:51, build d5a32ae7). E x fill^2 MISSES; so does today's reading.
+
+Elliptical hole, a / b = 2, pull tilted 30 degrees, the same plate (b = 3 mm) at b = 3 / 4 / 5 / 6 voxels; the peak over voxels against Inglis's 5.00 (the plate is ten long semi-axes wide, so the true peak is a few percent above 5.00 and every figure below is flattered by that much).
+
+| stiffness of cut voxels | b = 3 | 4 | 5 | 6 | against 5.00 |
+|---|---|---|---|---|---|
+| E x fill | 3.75 | 3.59 | 4.10 | 4.23 | -28.2 to -15.4 % |
+| E x fill^2 | 4.60 | 4.03 | 4.48 | 4.92 | -19.3 to -1.7 % |
+| E x fill^3 (today) | 5.34 | 4.31 | 4.79 | 5.43 | -13.9 to +8.6 % |
+
+By the ruling: E x fill^2 at one voxel does NOT replace today's reading for the size-under-a-voxel case; today's E x fill^3 stays there. But the table says more than that, and it is not comfortable: on this shape TODAY'S reading is itself 13.9 % under the textbook at one resolution and 4.2 % under at another, and swings 22 % between resolutions. The sharper the notch (tip radius b^2 / a = 1.5 mm here, 0.75 to 1.5 voxels), the less any one-voxel reading can hold it. The round hole (radius 3 to 6 voxels) flattered all three forms. For the reviewer: numbers sent; what the size-under-a-voxel case should do on sharp notches is open.
+
+### Item 3 with the solve, and a first look at item 2's switch point (2026-11-26 16:20, build of 0a1d4286)
+
+Two forms of "the ball may sit on the part's edge" were built and run on both shapes, real stiffness (E x fill):
+- FORM A (committed, 0a1d4286): centred on any voxel holding material; every cut voxel's material counted, with the stress the solve gives in it.
+- FORM B (tried, NOT kept): centred anywhere, but only printed voxels (at least half full) averaged.
+
+The plate, against the reading's own true value, by how many VOXELS the size spans:
+
+| size | voxel | voxels across | form A | form B | before |
+|---|---|---|---|---|---|
+| 1.8 mm | 1.5 mm | 1.2 | +15.6 % | +0.5 % | +0.5 % |
+| 1.8 mm | 1.2 mm | 1.5 | +7.1 % | -4.6 % | -4.6 % |
+| 1.8 mm | 1.0 mm | 1.8 | +2.9 % | -3.2 % | -3.2 % |
+| 3.6 mm | 2.0 mm | 1.8 | -3.1 % | -10.5 % | -10.5 % |
+| 3.6 mm | 1.5 mm | 2.4 | -2.0 % | -9.5 % | -9.5 % |
+| 3.6 mm | 1.2 mm | 3.0 | +5.2 % | +2.3 % | -7.0 % |
+| 3.6 mm | 1.0 mm | 3.6 | +5.0 % | +3.2 % | -1.6 % |
+
+Read plainly. Form B does nothing on coarse voxels (its best ball is still one centred inside the material) and keeps the 10 % miss: dropped. Form A is never more than 3.1 % low on the plate anywhere, and from 1.8 voxels across upward it sits between -3.1 and +5.2 % (a spread of 8.3, inside the 10 % bar). Under 1.8 voxels across it reads HIGH (the safe side), up to +15.6 %, because the stress the solve gives in a nearly empty cut voxel runs high and a small ball is mostly such voxels; where the ball does not reach past its own voxel at all (size under the voxel) it would read one such voxel alone, +44 %: that is the ruling's case 4 and must take the one-voxel form on PRINTED voxels, not this. The ring with form A: 3.6 mm reads +2.9 to +5.5 % at all four resolutions; its 1.8 mm rows by voxel count are owed (the test prints only the range, +1.5 to +42.7 %, the high end being the size-under-a-voxel row).
+
+FIRST READING of the switch point (item 2): about 1.8 voxels across on the plate. Owed before it is stated: the same table for the ring, and sizes chosen to land between 1.5 and 2.5 voxels across at each resolution, printed by the tests themselves.
+
+### Item 2, THE SWITCH POINT, measured on both shapes (2026-11-26 16:32, build of 5f2b2fae plus the tests' "[switch]" tables)
+
+Real stiffness (E x fill), the edge-of-part reading (form A), the size chosen to span a stated number of voxels at each resolution; percent against the reading's own true value at radius 3 / 4 / 5 / 6 voxels.
+
+| voxels across | plate with a hole | thick ring | inside the bar on both? |
+|---|---|---|---|
+| 1.00 | +46.5 / +18.3 / +18.6 / +33.4 | +44.3 / +20.0 / +17.1 / +9.7 | no (unsteady, 28 to 35 % spread) |
+| 1.25 | +30.6 / +16.2 / +15.2 / +21.4 | +30.6 / +14.7 / +8.2 / +7.9 | no (15 to 23 % spread) |
+| 1.50 | +7.3 / +7.1 / +7.1 / +7.5 | +11.3 / +5.9 / +4.1 / +4.2 | yes |
+| 1.75 | -2.9 / -0.1 / +2.6 / +2.9 | +3.0 / +2.6 / +1.3 / +1.3 | yes |
+| 2.00 | -4.9 / -2.1 / +1.7 / +2.0 | +1.5 / +3.0 / +1.5 / +1.7 | yes (the lowest figure anywhere: -4.9 %) |
+| 2.50 | -4.0 / -1.7 / +2.7 / +2.8 | +2.5 / +5.2 / +3.1 / +3.4 | yes |
+| 3.00 | -0.8 / +0.8 / +5.2 / +4.9 | +5.5 / +8.2 / +5.5 / +5.6 | yes |
+| 4.00 | +0.8 / +1.8 / +4.4 / +4.3 | +4.9 / +6.9 / +5.3 / +4.6 | yes |
+
+THE ANSWER: the form meets the bar on both shapes at all four resolutions from 1.5 voxels across. THE VALUE SET: 1.75 (`kStressSizeSwitchVoxels`), not 1.5, for one reason: at 1.5 the reading sits about 7 % high and at 2.0 up to 4.9 % low, so one physical size seen at 1.5 voxels on one grid and 2.0 on another would differ by 12 %, over the 10 % allowed across resolutions; from 1.75 up every figure on both shapes lies between -4.9 and +8.2 %. Margin to the 5 % bar is thin at 2.0 on the coarsest plate (-4.9 %): said, not hidden.
+
+In the code (`analyze.cpp`, behind `TOPOPT_STRENGTH=size`): a job whose reading size is at least 1.75 check voxels is solved with real stiffness and read over the size with the ball free to sit on the part's edge; any other job (a smaller size, or a material with no published length) keeps TODAY'S solve and one-voxel reading whole. `FixedDesignAnalysis::stress_read_over_mm` says which (0 = one voxel). What his materials get under his half-length rule: PLA 1.2 mm reads over a size when the check voxel is 0.69 mm or finer; PETG 0.35 mm and ABS 0.23 mm essentially never (voxels of 0.2 and 0.13 mm): for them, and for PA6 and PA12, stage 2 changes nothing but the printed grams.
+
+### Item 6 run in a job (2026-11-26 17:05, build of 0cd653d6 plus the readout): the job says which form it used
+
+The made sample bracket, res 64 (check voxel 1.56 mm), drawn faces, the automatic pad, one thread, `TOPOPT_STRENGTH=size`, PLA (its size, half the published length, is 1.2 mm): the run prints "[strength] one-voxel reading, as today: reading over 1.20 mm needs a check voxel of 0.69 mm or finer, and this job's is 1.56 mm." and the report carries `"strength_reading": {"size_mm": 1.2, "voxel_mm": 1.5625, "needs_voxel_mm": 0.686, "over_size": false}`. Four versions, margins 5.29 / 5.29 / 4.85 / 3.66: the strength numbers of the same job without the switch (5.29 / 5.30 / 4.85 / 3.82), as they should be under today's form (the lightest differs by 4 %: to look at); the grams are now printed grams (101.1 / 84.8 / 69.5 / 53.1 g where the solid figures were 158.6 / 125.7 / 96.7 / 72.0 g). The second run (17:22; size forced to 3.6 mm, 2.3 voxels across): "[strength] the stress is read over 3.60 mm (the material's length), on real stiffness; the check voxel is 1.56 mm.", report `"over_size": true`. The same four designs to the gram (101.1 / 84.8 / 69.5 / 53.1 g: the reading does not steer the optimiser, it judges the result), margins 6.62 / 6.63 / 5.77 / 3.66 against 5.29 / 5.29 / 4.85 / 3.66 on the one-voxel form: the first three read about 25 % higher over the size, as an average must against a peak. The lightest version's 3.661 is the SAME in both forms to four figures, so something other than this reading decides it there (the across-layer check, which is not read over a size yet, is the likely one): to confirm before the stage report. The 4 % difference from the earlier run without the switch is not evidence: that run was on all threads and an older pad floor.
+
+`b5_stage2.sh` (lock, behind the suite) is re-pointed: the sample bracket at res 96 and the stand at res 128, switch off / size (the material's own) / size forced to 3.6 mm, the automatic pad.
+
+### What decides the number he is SHOWN: the file re-check, on all-or-nothing voxels (found 2026-11-26 17:35)
+
+Following the bracket's lightest version (3.661 in both forms): its report says the across-layer check governs there (5.09 against 8.88 in-plane), and that check is not read over a size, so the two forms agree. That part is as expected.
+
+Reading the code behind it found something that matters more. The margin printed after finishing ("margin a -> b"), which is the one the app shows, comes from `recheck_file` (`to_export.inc:320`): the finished FILE is voxelised again and analysed by the analyze path, and there every voxel the file touches is given density 1 (`to_analyze.inc:420`). It is an ALL-OR-NOTHING model: no partly filled voxels at all. Two consequences, both already measured by tests E's first column:
+
+1. TODAY, with no switch: the shown number is the all-or-nothing one-voxel reading. On the plate with a hole that reads 2.20 / 2.50 / 2.65 / 2.73 against the textbook 3.03, that is 27.5 to 9.9 % LOW (the unsafe side) and 24 % apart across resolutions; on the ring 6.3 % low at worst. The loop's own certificate (E x fill^3 on the exact fills) reads 4 to 16 % HIGH. So the two judges of one version disagree by up to 40 %, and the one that has the last word is the optimistic one. This is ledger R-08 ("one judge") with numbers on it.
+2. WITH stage 2's switch: on a file's all-or-nothing voxels there are no cut voxels for the ball to sit on, so the edge-of-part fix cannot act in the re-check, and "real stiffness" changes nothing there (every voxel is full). The form measured above therefore reaches the loop's certificate but NOT the number he is shown.
+
+What it needs (NOT built; to put to the reviewer as stage 2's remaining piece): the re-check voxelises the file with each voxel's FILL (the share of the voxel inside the file's surface, by sub-sampling as the tests do), and is then judged by the same form as the loop. Until then the stage's bar is met by the certificate and not by the shown number.
+
+### The two judges on real jobs (from today's runs; 2026-11-26 17:50)
+
+Every "[finish] ... margin a -> b" line of today's runs: a is the loop's certificate (the exact fills, E x fill^3), b is the file re-check (all-or-nothing), which is the number shown. Res 64 unless said.
+
+| job | 0.68 | 0.52 | 0.38 | 0.26 |
+|---|---|---|---|---|
+| Top Motor Mount, today, res 96 | 1.641 -> 1.641 | 1.650 -> 1.649 | 1.672 -> 1.672 | 1.690 -> 1.686 |
+| Top Motor Mount, drawn faces | 2.333 -> 2.338 | 2.334 -> 2.339 | 2.349 -> 2.355 | 2.344 -> 2.346 |
+| the stand, today, res 128 | 2.397 -> 2.410 | | | |
+| the stand, drawn faces, res 128 | 2.587 -> 2.597 | | | |
+| sample bracket, today | 4.711 -> 4.711 | 4.723 -> 4.723 | 4.008 -> 4.823 | 1.814 -> 3.793 |
+| sample bracket, drawn faces | 5.283 -> 5.285 | 5.112 -> 5.296 | 4.154 -> 4.845 | 2.048 -> 3.815 |
+| sample hook, today | 4.321 -> 4.765 | 3.576 -> 4.598 | 2.703 -> 4.317 | 1.608 -> 3.752 |
+| sample hook, drawn faces | 4.343 -> 4.755 | 3.681 -> 4.566 | 2.564 -> 4.173 | (not made) |
+| sample beam, drawn faces | 5.649 -> 6.316 | 4.563 -> 5.064 | 2.928 -> 3.678 | 1.962 -> 1.870 |
+
+Read plainly. On his two parts, where little is carved, the two judges agree to 1 %. On the carved made parts they part company as the version gets lighter: the shown number is up to 2.3 times the certificate's (the hook at 0.26: 1.61 against 3.75; the bracket: 1.81 against 3.79). By the loop's own judge the lightest versions stand just over the 1.5 pass mark; the screen says 3.7. The textbook tests say the truth lies between (the certificate reads the stress 4 to 16 % high on the plate, far more on the ring; the all-or-nothing re-check 10 to 27 % low), so neither figure is right, and the gap is widest exactly where a wrong pass would matter. This is the case for one judge on exact fills.
+
+### Written ahead for "one judge" (2026-11-26 18:55; NOT wired into any job, the reviewer's ruling comes first)
+
+`file_fill.hpp`, `file_fill_fractions(file, grid, sub = 4)`: each voxel's share inside the file's surface, counted on a grid `sub` times finer over the same voxels by the voxeliser's own rule (`voxelize_onto_grid`), so with sub = 1 it is exactly today's all-or-nothing occupancy. Test `to_file_fill` (passes): a box on voxel faces reads 0 or 1 and its exact volume; a box cutting voxels in half reads 0.5 in the cut layers; a box off the sub-grid holds its volume to 1.4 % at 4 per voxel (2.8 % at 8 on this box by where its faces fall; all-or-nothing 1.0 % by the same luck: the point of the fill is the SHAPE of the edge, not the total). Cost: one voxelisation at `sub` times the resolution (sub 4 at 128 x 96 x 64 voxels: 50 MB of one-byte tags while it runs). What is left once ruled: the re-check analyses the file's fills by the loop's form, and the report says so.

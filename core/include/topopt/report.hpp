@@ -551,6 +551,19 @@ struct JobReport {
     double thickest_mm = 0.0, needed_mm = 0.0, line_width_mm = 0.0, nozzle_that_fits_mm = 0.0;
   };
   TooSmall too_small;
+  // TO rebuild stage 2 (the reviewer's ruling 2026-11-26, item 6): which form of
+  // the strength reading this job used. Written as the top-level key
+  // "strength_reading": {"size_mm", "voxel_mm", "needs_voxel_mm", "over_size"};
+  // absent unless the stage's switch is on. "over_size" true = real stiffness, the
+  // stress read over "size_mm" (the material's length); false = today's solve and
+  // one-voxel reading, because the material has no published length ("size_mm" 0)
+  // or the check voxel is coarser than "needs_voxel_mm".
+  struct StrengthReading {
+    bool evaluated = false;
+    double size_mm = 0.0, voxel_mm = 0.0, needs_voxel_mm = 0.0;
+    bool over_size = false;
+  };
+  StrengthReading strength_reading;
   // TO rebuild stage 1: the pad each fixed or loaded face got, for the app's "Pad
   // depth" line. Written as the top-level key "pads": [{"face_id" | "region_id",
   // "thickness_mm", "pad_mm", "automatic"}]; absent when empty (the voxel path).

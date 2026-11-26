@@ -35,6 +35,11 @@ if(Eigen3_FOUND)
   add_test(NAME to_printed_mass COMMAND test_to_printed_mass)
 endif()
 
+# Stage 2, "one judge": how full of a file each voxel is (file_fill.hpp; not wired yet).
+add_executable(test_to_file_fill tests/unit/test_to_file_fill.cpp)
+target_link_libraries(test_to_file_fill PRIVATE topopt)
+add_test(NAME to_file_fill COMMAND test_to_file_fill)
+
 # Too small for the nozzle, and the automatic resolution (part_scale.hpp).
 add_executable(test_to_part_scale tests/unit/test_to_part_scale.cpp)
 target_link_libraries(test_to_part_scale PRIVATE topopt)
