@@ -79,6 +79,19 @@ Reading:
 - Every margin rises, by 9 to 24 % (52 % for the weakest strut in C). These jobs carry tiny loads, so the margins are in the hundreds; the direction and size are what matter.
 - Not yet counted, from LatticeReview's list: applied force and reaction summed per load group, loaded and anchored area, cubes protected / lattice / solid, and on job B "no cube both protected and lattice, none that is neither along the inner boundary". The test prints the strength block only; these need the masks, which the block does not carry.
 
+### The control explained, and the jobs remade (2026-11-25, later)
+
+Job A's box, res 40 (`test_to_true_loads`, table "[control]"):
+
+| path | nodes held | node planes | nodes loaded | of them on the sides | force on the sides | total |
+|---|---|---|---|---|---|---|
+| today | 3,362 | 2 (the whole bottom voxel layer) | 1,841 | 160 | 0.909 N of 20 | -20.000 N |
+| drawn face | 1,681 | 1 (the face's own nodes) | 1,681 | 0 | 0 | -20.000 N |
+
+So the control moves for a real reason: today's path clamps a slab one voxel thick and pushes 4.5 % of the load onto the side faces of the loaded voxels. Found on the way: the new clamp left a face's four corner nodes out (the quarter-area threshold was met exactly); the default is now 0.2 and the count is 41 x 41.
+
+Jobs B and C remade on a 56 x 56 x 24 mm box (seven cells across) at LatticeReview's word. Laid lattice identical again (B 1,240 bars; C 3,053 bars, compared on the bar list: a weave writes a 3MF with random ids, so the first run's "bytes identical" for C compared nothing). B: margin 379.1 -> 537.5, interlayer margin 1,254 -> 5,577, still no credited cell (0 of 64), asked. C: margin 474.4 -> 503.1, but the weakest strut 84.5 -> 47.5: LOWER on the face path, the opposite of the small box. The direction is not the same everywhere.
+
 ## Measured: the sideways lip (LatticeReview's question)
 
 A face that is PART of a flat side (a 20 x 20 mm patch in a 60 x 40 mm top; `test_to_true_loads`, table "[lip]"). Frozen voxels with their centre outside the prism under the patch:

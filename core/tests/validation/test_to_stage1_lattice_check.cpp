@@ -5,8 +5,10 @@
 //   A  a box on the grid, lattice from its whole top face to a depth that is a
 //      whole number of voxels, held on the whole bottom, loaded on the whole
 //      top. THE CONTROL: the switch should change nothing beyond rounding.
-//   B  the same box turned 17 degrees about z and 9 about x, so no face lies on
-//      the grid; loaded on a (tilted) side face that carries a protected skin
+//   B  a 56 x 56 x 24 mm box turned 17 degrees about z and 9 about x, so no face
+//      lies on the grid (seven 8 mm cells across, so whole cells exist inside:
+//      LatticeReview, 2026-11-25; the cell grid follows the model's axes and a
+//      cell that meets a wall earns no credit); loaded on a (tilted) side face that carries a protected skin
 //      1.3 mm deep, which is not a whole number of voxels. Regular cells.
 //   C  job B with Organic (traced), so the frame-of-beams check runs.
 //
@@ -131,7 +133,12 @@ Result run(const std::string& tag, const std::string& mode, const std::string& j
   x.bars = r.bars;
   x.code = r.code;
   x.why = r.why;
-  x.file_hash = std::hash<std::string>{}(slurp(folder + "/lattice.stl"));
+  // The laid lattice's own bytes: the STL for cells; for a weave the bar list
+  // (its file is a 3MF, which carries random ids on every write).
+  std::string laid = slurp(folder + "/lattice.stl");
+  if (laid.empty()) laid = slurp(folder + "/bars.bin");
+  if (laid.empty()) x.ok = false;  // nothing to compare is a failed run, not a pass
+  x.file_hash = std::hash<std::string>{}(laid);
   const std::string json = slurp(folder + "/" + kFileResultName);
   const std::size_t a = json.find("\n  \"strength\": {");
   if (a != std::string::npos) {
@@ -209,7 +216,7 @@ int main() {
   // 32 x 32 x 16 mm at resolution 40: voxel 0.8 mm, so the 8 mm lattice depth is ten voxels.
   const Turn none = turn(0.0, 0.0), tilted = turn(17.0, 9.0);
   write_stl_file(kDir + "/box.stl", box(32, 32, 16, none), StlFormat::Binary);
-  write_stl_file(kDir + "/tilted.stl", box(32, 32, 16, tilted), StlFormat::Binary);
+  write_stl_file(kDir + "/tilted.stl", box(56, 56, 24, tilted), StlFormat::Binary);
   auto faces = [&](const std::string& file, const Turn& t) {
     const StepModel m = import_part_file_resolved(kDir + "/" + file);
     Faces f;
@@ -229,7 +236,7 @@ int main() {
   // bounding box (mostly along z, some along x), the same for both switch values.
   {
     Vec3 lo{1e300, 1e300, 1e300}, hi{-1e300, -1e300, -1e300};
-    for (const Vec3& v : box(32, 32, 16, tilted).vertices) {
+    for (const Vec3& v : box(56, 56, 24, tilted).vertices) {
       lo = {std::min(lo.x, v.x), std::min(lo.y, v.y), std::min(lo.z, v.z)};
       hi = {std::max(hi.x, v.x), std::max(hi.y, v.y), std::max(hi.z, v.z)};
     }

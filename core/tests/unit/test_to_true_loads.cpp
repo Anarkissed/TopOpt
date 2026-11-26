@@ -278,6 +278,78 @@ LipRow measure_lip(int res, double typed_mm, int way) {
   return r;
 }
 
+// The control (stage 1 against the lattice strength check, job A): a plain box on
+// the grid, held on its whole bottom, loaded on its whole top. Nothing is
+// misaligned, yet the two paths give different margins. Counted here: which
+// nodes each path holds and loads.
+StepModel build_plain_box(double L, double W, double H) {
+  StepModel model;
+  topopt::TriangleMesh& m = model.mesh;
+  m.vertices = {{0, 0, 0}, {L, 0, 0}, {L, W, 0}, {0, W, 0}, {0, 0, H}, {L, 0, H}, {L, W, H}, {0, W, H}};
+  const int t[12][4] = {{0, 2, 1, 0}, {0, 3, 2, 0}, {4, 5, 6, 2}, {4, 6, 7, 2}, {0, 1, 5, 1}, {0, 5, 4, 1},
+                        {3, 7, 6, 1}, {3, 6, 2, 1}, {0, 4, 7, 1}, {0, 7, 3, 1}, {1, 2, 6, 1}, {1, 6, 5, 1}};
+  for (const auto& x : t) {
+    m.triangles.push_back({x[0], x[1], x[2]});
+    model.triangle_face.push_back(x[3]);
+  }
+  model.face_count = 3;  // 0 bottom, 1 sides, 2 top
+  model.solid_count = 1;
+  model.brep_volume = L * W * H;
+  model.faces.assign(3, topopt::StepFaceInfo{});
+  return model;
+}
+
+void print_control() {
+  const StepModel model = build_plain_box(32.0, 32.0, 16.0);
+  std::printf("\n[control] a 32 x 32 x 16 mm box on the grid (res 40), held on the bottom, 20 N on the top\n");
+  std::printf("%-12s %12s %14s %12s %16s %18s %12s\n", "path", "held nodes", "node planes", "loaded nodes",
+              "of them on sides", "force on sides N", "total N");
+  for (int way = 0; way < 2; ++way) {
+    VoxelGrid g = topopt::voxelize(model.mesh, 40);
+    std::vector<int> held;
+    std::vector<topopt::NodalLoad> loads;
+    if (way == 0) {
+      topopt::tag_step_face(g, model, 0, topopt::VoxelTag::Fixture);
+      held = topopt::fea_tagged_nodes(g, topopt::VoxelTag::Fixture);
+      VoxelGrid gl = topopt::voxelize(model.mesh, 40);
+      topopt::tag_step_face(gl, model, 2, topopt::VoxelTag::Load);
+      loads = topopt::traction_loads(gl, topopt::VoxelTag::Load, Vec3{0.0, 0.0, -20.0});
+    } else {
+      const double h = g.spacing;
+      const auto bottom = topopt::face_node_areas(g, topopt::face_pieces(model, {0}, 0.5 * h));
+      for (const topopt::DirichletBC& bc : topopt::face_clamp_bcs(g, bottom))
+        if (bc.component == 0) held.push_back(bc.node);
+      loads = topopt::face_traction_loads(
+          topopt::face_node_areas(g, topopt::face_pieces(model, {2}, 0.5 * h)), Vec3{0.0, 0.0, -20.0});
+    }
+    const int per_plane = (g.nx + 1) * (g.ny + 1);
+    std::vector<char> plane(static_cast<std::size_t>(g.nz + 1), 0);
+    for (int n : held) plane[static_cast<std::size_t>(n / per_plane)] = 1;
+    int planes = 0;
+    for (char c : plane) planes += c;
+    std::vector<double> fz(static_cast<std::size_t>(topopt::fea_node_count(g)), 0.0);
+    for (const topopt::NodalLoad& l : loads)
+      if (l.component == 2) fz[static_cast<std::size_t>(l.node)] += l.value;
+    // The top face's own node plane is the highest one that carries any load.
+    int top_plane = 0;
+    for (std::size_t n = 0; n < fz.size(); ++n)
+      if (fz[n] != 0.0) top_plane = std::max(top_plane, static_cast<int>(n) / per_plane);
+    int loaded = 0, below = 0;
+    double total = 0.0, below_force = 0.0;
+    for (std::size_t n = 0; n < fz.size(); ++n) {
+      if (fz[n] == 0.0) continue;
+      ++loaded;
+      total += fz[n];
+      if (static_cast<int>(n) / per_plane < top_plane) {
+        ++below;
+        below_force += fz[n];
+      }
+    }
+    std::printf("%-12s %12zu %14d %12d %16d %18.3f %12.3f\n", way == 0 ? "today" : "drawn face",
+                held.size(), planes, loaded, below, below_force, total);
+  }
+}
+
 int main(int argc, char** argv) {
   const bool gate = argc > 1 && std::strcmp(argv[1], "--gate") == 0;
   int failures = 0;
@@ -375,6 +447,8 @@ int main(int argc, char** argv) {
                   res, a.voxel, typed, a.in_prism, a.outside, d.in_prism, d.outside, d.reach,
                   rg.in_prism, rg.outside);
     }
+
+  print_control();
 
   std::printf("[tests C, D] %s: %d failure(s)\n", gate ? "gate" : "measure only", failures);
   return failures == 0 ? 0 : 1;
