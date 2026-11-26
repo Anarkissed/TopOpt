@@ -14,6 +14,8 @@ struct LatticeThinWallReasons: View {
     let lattice: LatticeSettings
     /// The old bake's own cells per member, where it found the walls (the new engine's finding carries its number).
     var oldBakeCells: Double? = nil
+    /// ★ notes30 X2 (cell advice): the smallest cell laid and what the walls hold (the solid reason's depth ask).
+    var cells: SolidReason.Depth? = nil
 
     /// The cells across a wall Structural asked for: the engine's number, else the old bake's, else core's floor.
     var cellsAcross: Int {
@@ -48,8 +50,9 @@ struct LatticeThinWallReasons: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, DS.Space.xs)
                 .background(CornerPairStyle.publish("lattice-thin-walls-aesthetic"))
-            if LatticeThinWallPrompt.cellSetByHand(lattice) {   // ★ D10: Fixed and Swept only (Fit is not by hand)
-                Text(LatticeThinWallPrompt.manualHint)
+            // ★ D10: Fixed and Swept only (Fit is not by hand); ★ notes30 X2: only where a smaller cell lays, else Allow quilt's
+            if let hint = LatticeThinWallPrompt.cellLine(lattice, cells: cells) {
+                Text(hint)
                     .dsStyle(DS.TypeScale.footnote)
                     .foregroundStyle(DS.Color.textSecondary.color)
                     .fixedSize(horizontal: false, vertical: true)

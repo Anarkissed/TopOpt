@@ -9854,7 +9854,8 @@ public struct WorkspacePlaceholder: View {
                     .foregroundStyle(DS.Color.textPrimary.color)
                     .fixedSize(horizontal: false, vertical: true)
                 // ★ notes25 (D8, his 11-23): why, in three short reasons with their (i)s, what Aesthetic does, and Learn more
-                LatticeThinWallReasons(finding: thin, lattice: project.lattice, oldBakeCells: strutScene?.minCellsPerMember)
+                LatticeThinWallReasons(finding: thin, lattice: project.lattice, oldBakeCells: strutScene?.minCellsPerMember,
+                                       cells: newEngine.solidReason?.depth ?? LatticeLayoutPreview.cellFloor(project))
                 HStack(spacing: DS.Space.s) {
                     Button {
                         project.switchLatticeStageMode(to: .aesthetic)
@@ -11783,7 +11784,11 @@ public struct WorkspacePlaceholder: View {
     /// as buttons through the app's one way to a setting (`openSettingToChange`).
     private func openLatticeDiagnosisCard(_ d: LatticeFaceDiagnosis) {
         guard !Self.controlDiagnosisNoCard else { return }
-        LatticeDiagnosisCard.open(d) { openSettingToChange(.init(page: .lattice, field: $0.field.rawValue, tryText: $0.tryText)) }
+        LatticeDiagnosisCard.open(d) { c in
+            // ★ notes30 X2 (cell advice): where no smaller cell lays, the "This needs … cells" pop-up's fixes, taken as it takes them
+            if let f = c.offer { SolidReason.take(f, on: project) }
+            else { openSettingToChange(.init(page: .lattice, field: c.field.rawValue, tryText: c.tryText)) }
+        }
     }
     /// RED CONTROL (tests): release 21's wiring — the glyph's tap raised no centred card (it opened a popover beside it).
     nonisolated(unsafe) static var controlDiagnosisNoCard = false
@@ -11811,11 +11816,12 @@ public struct WorkspacePlaceholder: View {
             .regionCellsPerMemberFloor(topology: project.lattice.topologyID,
                                        boundaryFinishWritten: project.lattice.singleCellMembers,
                                        algorithm: project.lattice.resolvedAlgorithm)
+        let cells = LatticeLayoutPreview.cellFloor(project)   // ★ notes30 X2: no fix names a cell under the smallest laid
         let each = latticedSelectableCards(g).map {
             LatticeFaceDiagnosis.of(card: $0,
                                     cellsPerMemberFloor: floor > 0
                                         ? floor : limits.minCellsPerMember,
-                                    nozzleWidthMM: nozzle)
+                                    nozzleWidthMM: nozzle, cells: cells)
         }
         return LatticeFaceDiagnosis.merged(each)
     }
