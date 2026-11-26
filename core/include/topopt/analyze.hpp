@@ -145,6 +145,9 @@ struct FixedDesignAnalysis {
   // mm; zero on nodes attached only to non-printed voxels.
   std::vector<double> displacement_field;
   double mass_grams = 0.0;
+  // TO rebuild stage 2: the same material printed solid (what mass_grams was
+  // before the stage; equal to it on today's path).
+  double mass_grams_solid = 0.0;
   int support_volume_voxels = 0;
   std::size_t printed_voxels = 0;
   double printed_fraction = 0.0;  // printed_voxels / part_solid (0 if part_solid==0)

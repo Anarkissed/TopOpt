@@ -13,6 +13,7 @@
 #include "topopt/build_orientation.hpp"
 #include "topopt/fea.hpp"
 #include "topopt/orient.hpp"
+#include "topopt/printed_mass.hpp"      // TO rebuild stage 2
 #include "topopt/report.hpp"
 #include "topopt/simp.hpp"
 #include "topopt/stress_measure.hpp"   // TO rebuild stage 2
@@ -533,6 +534,23 @@ FixedDesignAnalysis analyze_fixed_design(
   // mass is byte-identical to the pre-lattice path.
   out.mass_grams = material.density_g_cm3 *
                    (effective_material * grid.voxel_volume()) / 1000.0;
+  // TO rebuild stage 2 (ledger M-07; the maintainer, 2026-11-25: "Never the solid
+  // unless the user set infill to 100%"): the grams really printed at the job's
+  // walls and infill, by the same wall-and-core model the margin uses. Only with
+  // the stage's switch, only where the member widths were measured (the
+  // wall-aware posture) and no voxel is lattice (a lattice's mass is its own
+  // relative density, counted above). The solid figure is kept beside it.
+  out.mass_grams_solid = out.mass_grams;
+  if (to_stage2_on() && knockdown.width_aware && lattice_voxels == 0 &&
+      member_width_mm.size() == density.size()) {
+    std::vector<double> printed_density(density.size(), 0.0);
+    for (std::size_t idx = 0; idx < density.size(); ++idx)
+      if (grid.tags[idx] != VoxelTag::Empty && density[idx] > kIso) printed_density[idx] = 1.0;
+    out.mass_grams = printed_mass(grid, printed_density, 0.5, member_width_mm,
+                                  knockdown.wall_thickness_mm, knockdown.infill_percent,
+                                  material.density_g_cm3)
+                         .grams;
+  }
 
   // Support-volume proxy for the analysed build direction over THIS design's
   // printed geometry: mark non-printed voxels Empty in a copy and count overhangs.
