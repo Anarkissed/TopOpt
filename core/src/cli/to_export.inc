@@ -421,6 +421,21 @@ VersionFinish finish_and_recheck(const MinimizePlasticVariant& v, const JobDescr
     // Mass from the files themselves: the finished one, and the unfinished export.
     fb.mass_grams = density_g_cm3 * fb.volume_after_mm3 / 1000.0;
     fb.mass_before_grams = density_g_cm3 * fb.volume_before_mm3 / 1000.0;
+    // TO rebuild stage 2 (ledger M-07; the maintainer: "Never the solid unless the
+    // user set infill to 100%"): the grams he is shown are the grams printed at his
+    // walls and infill. The file's own volume gives the solid grams, as above; the
+    // share of it that is really printed comes from the re-check's wall-and-core
+    // model of this same file (printed_mass.hpp). At 100 % infill the share is 1.
+    if (to_stage2_on() && out.analysis.voxel_mass_solid_grams > 0.0 &&
+        out.analysis.voxel_mass_grams > 0.0) {
+      const double share = out.analysis.voxel_mass_grams / out.analysis.voxel_mass_solid_grams;
+      std::fprintf(stderr,
+                   "[finish] version vf %.2f: printed grams %.2f of %.2f solid (share %.3f at "
+                   "the job's walls and infill)\n",
+                   v.requested_volume_fraction, share * fb.mass_grams, fb.mass_grams, share);
+      fb.mass_grams *= share;
+      fb.mass_before_grams *= share;
+    }
     return finish_verdict_reason(
         recheck_file(m, raw, sg, clearance, nullptr, out.analysis, margin_required, fb,
                      fin.part));

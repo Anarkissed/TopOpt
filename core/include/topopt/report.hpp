@@ -530,6 +530,17 @@ struct JobReport {
     double required = 0.0;
   };
   AsDrawn as_drawn;
+  // TO rebuild stage 2 (ledger M-07): the part AS DRAWN printed at the job's walls
+  // and infill, and printed solid, so "saved" can be read against the grams the
+  // drawn part would really take (the maintainer: "Never the solid unless the
+  // user set infill to 100%"). Written as the top-level key "drawn_part":
+  // {"printed_grams", "solid_grams"}; absent unless `evaluated` (stage 2 on).
+  struct DrawnPart {
+    bool evaluated = false;
+    double printed_grams = 0.0;
+    double solid_grams = 0.0;
+  };
+  DrawnPart drawn_part;
   FrozenShareReport frozen_share;
   // CORE LIST item 50 — emitted as report.json "strengthen" only when evaluated.
   StrengthenReport strengthen;

@@ -2770,6 +2770,30 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     }
   }
 
+  // TO rebuild stage 2 (ledger M-07): what the part AS DRAWN would take on the
+  // printer at this job's walls and infill, beside its solid grams, so a version's
+  // printed grams can be read as a saving against the real thing. No solve: the
+  // wall-and-core model on the part's own voxels.
+  if (to_stage2_on()) {
+    try {
+      std::vector<double> drawn(grid.voxel_count(), 0.0);
+      for (std::size_t idx = 0; idx < drawn.size(); ++idx)
+        if (grid.tags[idx] != VoxelTag::Empty) drawn[idx] = 1.0;
+      const KnockdownSpec kd = knockdown_spec_for(options);
+      const PrintedMass pm = printed_mass(
+          grid, drawn, 0.5,
+          local_member_thickness_mm(grid, drawn, 0.5, AnalysisKnobs{}.thickness_cap_voxels),
+          kd.wall_thickness_mm, kd.infill_percent, materials.at(job.material).density_g_cm3);
+      result.pipeline.report.drawn_part.evaluated = true;
+      result.pipeline.report.drawn_part.printed_grams = pm.grams;
+      result.pipeline.report.drawn_part.solid_grams = pm.solid_grams;
+      std::fprintf(stderr, "[drawn part] %.2f g printed of %.2f g solid (wall share %.3f)\n",
+                   pm.grams, pm.solid_grams, pm.wall_share);
+    } catch (const std::exception& e) {
+      std::fprintf(stderr, "[drawn part] printed grams could not be worked out: %s\n", e.what());
+    }
+  }
+
   // ──▶ report (both paths).
   result.report_json = job_report_json(result.pipeline.report);
   result.report_path = join_path(out_dir, job.output.report);

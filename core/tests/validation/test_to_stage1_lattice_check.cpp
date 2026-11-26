@@ -5,7 +5,7 @@
 //   A  a box on the grid, lattice from its whole top face to a depth that is a
 //      whole number of voxels, held on the whole bottom, loaded on the whole
 //      top. THE CONTROL: the switch should change nothing beyond rounding.
-//   B  a 56 x 56 x 32 mm box ON the grid with one top edge chamfered (about 31
+//   B  a 56 x 56 x 32 mm box ON the grid with one top edge chamfered (about 38
 //      degrees): the chamfer is the loaded face, with a protected skin 1.3 mm
 //      deep (not a whole number of voxels). The lattice region is the top face,
 //      three 8 mm cells deep, so whole cells exist and earn credit
@@ -81,10 +81,11 @@ TriangleMesh box(double L, double W, double H, const Turn& t) {
 }
 
 // A 56 x 56 x 32 mm box on the grid with one top edge cut off by a flat chamfer
-// (10 mm in, 6 mm down, about 31 degrees): every face lies on the grid except the
+// (9 mm in, 7 mm down, about 38 degrees: more than the 35 degrees at which the
+// mesh importer splits two faces, or the chamfer would join the top): every face lies on the grid except the
 // chamfer, which is the loaded face. Outward-facing triangles.
 TriangleMesh chamfered_box() {
-  const double L = 56, W = 56, H = 32, in = 10, down = 6;
+  const double L = 56, W = 56, H = 32, in = 9, down = 7;
   // The profile in x-z, counter-clockwise seen from -y.
   const double px[5] = {0, L, L, L - in, 0}, pz[5] = {0, 0, H - down, H, H};
   TriangleMesh m;
@@ -92,8 +93,8 @@ TriangleMesh chamfered_box() {
     for (int i = 0; i < 5; ++i) m.vertices.push_back({px[i], y ? W : 0.0, pz[i]});
   for (int i = 0; i < 5; ++i) {  // the five sides
     const int a = i, b = (i + 1) % 5;
-    m.triangles.push_back({a, b, b + 5});
-    m.triangles.push_back({a, b + 5, a + 5});
+    m.triangles.push_back({a, b + 5, b});
+    m.triangles.push_back({a, a + 5, b + 5});
   }
   for (int i = 1; i + 1 < 5; ++i) {  // the two ends, as fans
     m.triangles.push_back({0, i, i + 1});          // y = 0, normal -y
@@ -114,21 +115,23 @@ int face_with_normal(const StepModel& m, const Vec3& n) {
 
 struct Faces { int top = -1, bottom = -1, side = -1; };
 
-std::string file_job(const std::string& model, const Faces& f, const std::string& extra, int depth_mm = 8) {
+std::string file_job(const std::string& model, const Faces& f, const std::string& extra, int depth_mm = 8,
+                     const std::string& topology = "octet") {
   return "{\"mode\": \"lattice_file\", \"model\": \"" + model + "\", \"output\": \"lattice.stl\", "
          "\"strength_job\": \"strength_job.json\", "
          "\"layout\": {\"min_strut_lines\": 2, \"region_ids\": [1], \"region_no_lattice\": [0], "
          "\"region_depth_mm\": [" + std::to_string(depth_mm) + "], \"region_expand_mm\": [0], \"region_face_counts\": [1], "
-         "\"region_faces\": [" + std::to_string(f.top) + "], \"topology\": \"octet\", "
+         "\"region_faces\": [" + std::to_string(f.top) + "], \"topology\": \"" + topology + "\", "
          "\"algorithm\": \"uniform\", \"cell_max_mm\": 8, \"min_cells_across\": 1" + extra + "}}";
 }
-std::string strength_job(const std::string& model, const Faces& f, int load_face, const std::string& protect) {
+std::string strength_job(const std::string& model, const Faces& f, int load_face, const std::string& protect,
+                         const std::string& topology = "octet") {
   return "{\"model\": \"" + model + "\", \"material\": \"PLA\", \"mode\": \"lattice_part\", \"resolution\": 40, "
          "\"loads\": {\"minimize_plastic\": true, \"safety_margin\": 1.5, \"build_dir\": [0, 0, 1], "
          "\"anchor_face_ids\": [" + std::to_string(f.bottom) + "], \"groups\": [{\"face_ids\": [" +
          std::to_string(load_face) + "], \"force\": [0, 0, -20]}]" + protect + "}, "
-         "\"lattice\": {\"topology\": \"octet\", \"require_lattice_void_reaches_exterior\": false}, "
-         "\"grading\": {\"topology\": \"octet\", \"cell_mm\": 8, \"min_extrudable_width_mm\": 0.45, "
+         "\"lattice\": {\"topology\": \"" + topology + "\", \"require_lattice_void_reaches_exterior\": false}, "
+         "\"grading\": {\"topology\": \"" + topology + "\", \"cell_mm\": 8, \"min_extrudable_width_mm\": 0.45, "
          "\"intent\": \"structural\"}, "
          "\"output\": {\"report\": \"report.json\", \"mesh_format\": \"stl\", \"mesh_prefix\": \"variant\"}}";
 }
@@ -203,6 +206,44 @@ std::vector<std::pair<std::string, std::string>> pairs(const std::string& b) {
   return out;
 }
 
+// How many values of the strength block differ between two runs (timings left out).
+int differing(const Result& a, const Result& b) {
+  const auto pa = pairs(a.strength), pb = pairs(b.strength);
+  std::map<std::string, std::string> bm(pb.begin(), pb.end());
+  int n = pa.size() == pb.size() ? 0 : 1;
+  for (const auto& kv : pa) {
+    // Timings, and the frame solve's own residual (about 1e-10, solver noise that
+    // moves by several per cent between two identical runs).
+    static const char* timing[] = {"seconds", "_ms", "ms", "voxel_solve", "frame", "frame_assemble",
+                                   "frame_solve", "after_frame", "peak", "residual"};
+    bool skip = false;
+    for (const char* t : timing)
+      if (kv.first == t || kv.first.find("seconds") != std::string::npos ||
+          kv.first.find("_ms") != std::string::npos)
+        skip = true;
+    if (skip) continue;
+    const auto it = bm.find(kv.first);
+    // The Organic frame solve is not bit-repeatable (its tiny bar forces move in
+    // the tenth digit between two identical runs: seen 2026-11-25, and named to
+    // LatticeReview), so numbers are compared to six digits here. A real reach of
+    // the switch moves margins by per cent, not by 1e-9.
+    if (it != bm.end() && it->second != kv.second) {
+      char* ea = nullptr;
+      char* eb = nullptr;
+      const double x = std::strtod(kv.second.c_str(), &ea), y = std::strtod(it->second.c_str(), &eb);
+      if (ea != kv.second.c_str() && eb != it->second.c_str() &&
+          std::fabs(x - y) <= 1e-6 * std::max(std::fabs(x), std::fabs(y)))
+        continue;
+    }
+    if (it == bm.end() || it->second != kv.second) {
+      ++n;
+      std::printf("    %-40s %s | %s\n", kv.first.c_str(), kv.second.c_str(),
+                  it == bm.end() ? "(absent)" : it->second.c_str());
+    }
+  }
+  return n;
+}
+
 int compare(const std::string& tag, const Result& off, const Result& on) {
   int failures = 0;
   if (!off.ok || !on.ok) {
@@ -252,10 +293,10 @@ int main() {
   const Faces fa = faces("box.stl", none);
   Faces fb = faces("tilted.stl", none);
   {
-    // Job B's loaded face is the chamfer (normal (6, 0, 10) / 11.66).
+    // Job B's loaded face is the chamfer (normal (7, 0, 9) / 11.4).
     const StepModel m = import_part_file_resolved(kDir + "/tilted.stl");
-    const double n = std::sqrt(6.0 * 6.0 + 10.0 * 10.0);
-    fb.side = face_with_normal(m, {6.0 / n, 0.0, 10.0 / n});
+    const double n = std::sqrt(7.0 * 7.0 + 9.0 * 9.0);
+    fb.side = face_with_normal(m, {7.0 / n, 0.0, 9.0 / n});
     std::printf("chamfer face %d\n", fb.side);
   }
   if (fa.top < 0 || fa.bottom < 0 || fb.top < 0 || fb.bottom < 0 || fb.side < 0) {
@@ -285,6 +326,31 @@ int main() {
       return 1;
     }
   }
+  // For the reviewer's table (ruling 2026-11-26, condition e): one more Organic
+  // job, loaded ON the weave (the box turned 17 / 9 degrees, region the top, the
+  // top loaded), and one sheet job (gyroid on the control box). Either may not
+  // exist on this base (sheets on the new engine are on #362's branch); a job
+  // whose plain run does not complete is reported and skipped, not failed.
+  const Turn turned = turn(17.0, 9.0);
+  write_stl_file(kDir + "/turned.stl", box(56, 56, 24, turned), StlFormat::Binary);
+  const Faces ft = faces("turned.stl", turned);
+  {
+    Vec3 lo{1e300, 1e300, 1e300}, hi{-1e300, -1e300, -1e300};
+    for (const Vec3& v : box(56, 56, 24, turned).vertices) {
+      lo = {std::min(lo.x, v.x), std::min(lo.y, v.y), std::min(lo.z, v.z)};
+      hi = {std::max(hi.x, v.x), std::max(hi.y, v.y), std::max(hi.z, v.z)};
+    }
+    TensorField tf;
+    tf.spacing = 1.0;
+    tf.origin = {lo.x - 1.0, lo.y - 1.0, lo.z - 1.0};
+    tf.nx = static_cast<int>(std::ceil(hi.x - lo.x)) + 2;
+    tf.ny = static_cast<int>(std::ceil(hi.y - lo.y)) + 2;
+    tf.nz = static_cast<int>(std::ceil(hi.z - lo.z)) + 2;
+    const std::size_t n = static_cast<std::size_t>(tf.nx) * tf.ny * tf.nz;
+    tf.voigt.assign(6 * n, 0.0);
+    for (std::size_t e = 0; e < n; ++e) { tf.voigt[6 * e + 2] = 3.0; tf.voigt[6 * e] = 1.0; }
+    write_tensor_file(kDir + "/stress_turned.tensor", tf);
+  }
   struct Job { const char* tag; std::string file, strength; };
   const std::string protect =
       ", \"face_protections\": [{\"face_id\": " + std::to_string(fb.side) + ", \"depth_mm\": 1.3}]";
@@ -296,10 +362,38 @@ int main() {
       {"B_off_grid", file_job("tilted.stl", fb, "", 24), strength_job("tilted.stl", fb, fb.side, protect)},
       {"C_organic", organic_job, strength_job("tilted.stl", fb, fb.side, protect)},
   };
-  for (const Job& j : jobs) {
+  std::vector<Job> all = jobs;
+  if (ft.top >= 0 && ft.bottom >= 0) {
+    std::string d = file_job("turned.stl", ft, weave);
+    d.replace(d.find("\"layout\""), 8, "\"tensor\": \"stress_turned.tensor\", \"layout\"");
+    all.push_back({"D_organic_on_lattice", d, strength_job("turned.stl", ft, ft.top, "")});
+  }
+  all.push_back({"S_sheet_gyroid", file_job("box.stl", fa, "", 8, "gyroid"),
+                 strength_job("box.stl", fa, fa.top, "", "gyroid")});
+  const std::size_t required = jobs.size();  // A to C must run; D and S may be absent here
+  for (std::size_t ji = 0; ji < all.size(); ++ji) {
+    const Job& j = all[ji];
     const Result off = run(j.tag, "", j.file, j.strength);
+    if (ji >= required && !off.ok) {
+      std::printf("[%s] not made on this base (%s %s); skipped\n", j.tag, off.code.c_str(), off.why.c_str());
+      continue;
+    }
     const Result on = run(j.tag, "face", j.file, j.strength);
     failures += compare(j.tag, off, on);
+    // STAGE 2's switch (TOPOPT_STRENGTH) must not reach the lattice strength check
+    // at all (reviewer's ruling 2026-11-26, condition (b) and the table of (e)):
+    // the same job with stage 1 off and stage 2 on, a typed 1.8 mm reading.
+    setenv("TOPOPT_STRENGTH", "size", 1);
+    setenv("TOPOPT_STRESS_READING_MM", "1.8", 1);
+    const Result s2 = run((std::string(j.tag) + "_stage2").c_str(), "", j.file, j.strength);
+    unsetenv("TOPOPT_STRENGTH");
+    unsetenv("TOPOPT_STRESS_READING_MM");
+    const int moved = differing(off, s2);
+    std::printf("[%s] stage 2 switch on, stage 1 off: %d strength value(s) differ from off, bars %zu / %zu  %s\n",
+                j.tag, moved, off.bars, s2.bars,
+                moved == 0 && off.bars == s2.bars && off.file_hash == s2.file_hash ? "UNTOUCHED"
+                                                                                  : "REACHED (it must not be)");
+    if (moved != 0 || off.bars != s2.bars || off.file_hash != s2.file_hash) ++failures;
   }
   std::printf("[stage 1 lattice check] %d failure(s)\n", failures);
   return failures == 0 ? 0 : 1;

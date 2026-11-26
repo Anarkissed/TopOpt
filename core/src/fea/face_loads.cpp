@@ -444,4 +444,42 @@ std::size_t tag_face_hosts(VoxelGrid& grid, const std::vector<FacePiece>& pieces
   return tagged;
 }
 
+double face_backing_thickness_mm(const VoxelGrid& grid, const std::vector<FacePiece>& pieces) {
+  const double h = grid.spacing;
+  if (!(h > 0.0)) return 0.0;
+  const double step = 0.25 * h;
+  const double reach = h * static_cast<double>(std::max({grid.nx, grid.ny, grid.nz})) * 1.8;
+  auto solid_at = [&](const Vec3& p) {
+    const int i = static_cast<int>(std::floor((p.x - grid.origin.x) / h));
+    const int j = static_cast<int>(std::floor((p.y - grid.origin.y) / h));
+    const int k = static_cast<int>(std::floor((p.z - grid.origin.z) / h));
+    return i >= 0 && j >= 0 && k >= 0 && i < grid.nx && j < grid.ny && k < grid.nz &&
+           grid.solid(i, j, k);
+  };
+  std::vector<double> depths;
+  depths.reserve(pieces.size());
+  for (const FacePiece& piece : pieces) {
+    int hi = 0, hj = 0, hk = 0;
+    if (!host_voxel(grid, piece, hi, hj, hk)) continue;
+    // Walk in from the face. The first half voxel is allowed to be empty (a face
+    // that falls just outside the voxelised solid); after material has been met,
+    // the first empty sample ends the walk.
+    bool met = false;
+    double depth = 0.0;
+    for (double d = 0.5 * step; d < reach; d += step) {
+      const bool in = solid_at(sub(piece.point, mul(piece.normal, d)));
+      if (in) {
+        met = true;
+        depth = d + 0.5 * step;
+      } else if (met || d > h) {
+        break;
+      }
+    }
+    if (met) depths.push_back(depth);
+  }
+  if (depths.empty()) return 0.0;
+  std::nth_element(depths.begin(), depths.begin() + depths.size() / 2, depths.end());
+  return depths[depths.size() / 2];
+}
+
 }  // namespace topopt

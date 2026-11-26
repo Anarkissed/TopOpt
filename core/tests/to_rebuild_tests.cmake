@@ -106,3 +106,22 @@ add_executable(test_to_solver_reduced_apply tests/unit/test_to_solver_reduced_ap
 target_link_libraries(test_to_solver_reduced_apply PRIVATE topopt)
 target_include_directories(test_to_solver_reduced_apply PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 add_test(NAME to_solver_reduced_apply COMMAND test_to_solver_reduced_apply)
+
+# Stage 1, M6 (LatticeReview for TOReview): on the strength grid, the protected skin against the lattice cubes, the
+# switch off and `face` (jobs A and B as test_to_stage1_lattice_check makes them). Prints the counts, pins nothing.
+#   ctest -C Long -R to_stage1_lattice_masks
+if(TARGET test_lattice_strength)
+  add_executable(test_to_stage1_lattice_masks tests/validation/test_to_stage1_lattice_masks.cpp)
+  target_link_libraries(test_to_stage1_lattice_masks PRIVATE topopt)
+  target_compile_definitions(test_to_stage1_lattice_masks PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME to_stage1_lattice_masks CONFIGURATIONS Long COMMAND test_to_stage1_lattice_masks)
+  set_tests_properties(to_stage1_lattice_masks PROPERTIES TIMEOUT 7200)
+endif()
+
+# A tool, not a test: writes the made sample part (an L-bracket with a filled
+# corner) and its job, for the measurements his own parts cannot give.
+add_executable(to_sample_part tests/tools/to_sample_part.cpp)
+target_link_libraries(to_sample_part PRIVATE topopt)

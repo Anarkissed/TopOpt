@@ -2,22 +2,69 @@
 
 Status 2026-11-22: APPROVED by the reviewer (rulings 06:18Z and 06:48Z); both helper prompts below are approved as they stand. Helpers start after the stage 0 move is released and the maintainer has created their channels. The maintainer's OK on helpers: "Yes two helpers are good as long as they're Opus 5.5". Each helper gets its own small channel (reviewer, TOReview, the helper) and never posts in #TORebuildGroup.
 
+## History rewritten 2026-11-25 20:50 EST (the maintainer: "Yes. Rewrite the history")
+
+The lead's mistake: commit 0ee02fda added `docs/design/to-rebuild/papers/` (29 copyrighted PDFs) with a whole-folder `git add`, and it was pushed to the public repository. The branch was rewritten from that commit on, without the folder, and force-pushed; the files it ends in are identical. Commit ids written in these documents before this note are the OLD ones where they fall in that range:
+
+| old | new |
+|---|---|
+| 0ee02fda | d6047d2b |
+| 15ebb451 | 7173c540 |
+| ca157cb7 | 6ee89639 |
+| bf4aa356 | 05f33677 |
+| 6c5ff9eb | ecc3ebbb |
+| 33451f43 | a49fd8da |
+| 4d495dd6 | 52c4d894 |
+| 8b3656ba | e74b4c08 |
+
+Rule from now on: files are added to a commit BY NAME, never by folder, and `git show --stat HEAD` is read before every push.
+
 ## Resumed 2026-11-25 19:35 EST
 
 Paused at 94 % weekly usage for five minutes; the maintainer: "Keep going, do not stop, I will reset at 100%". The work tick is back; helpers told. First on the queue now: job B's credited cells and the frozen-mask check for LatticeReview; the reviewer's ruling on stage 2; Top Motor Mount both ways and the pad depths (lock), then the stage 1 report.
 
 ## Work queue (the lead's own; kept stocked; top item first)
 
-The maintainer's order (2026-11-25): never sit waiting on the lock. Every wake-up records what finished, then does the next open item here.
+The maintainer's order (2026-11-25): never sit waiting on the lock. Every wake-up records what finished, then does the next open item here. Rewritten 2026-11-25 22:30.
 
-1. Stand128 both ways: DONE and recorded (stage-1 file; 2.40 / 86.6 g today, 2.68 / 88.0 g drawn face; 40 % slower, cause owed). Running now (`stage1_fourth.sh`, no lock): build `test_to_stage1_lattice_check` and `test_to_strength_known_ring` in the same build folder and run jobs A to C (no lock; check memory).
-2. DONE 2026-11-25: second search (01-research.md): printed ABS fitted at 0.46 mm against 4.1 mm; nine materials have nothing published. The choice it leaves is the maintainer's (asked).
-3. Stage 2 steps 1 and 2 written ahead behind one switch (`TOPOPT_STRENGTH`), once the reviewer rules on the shared certificate; until then the unit pieces that do not touch `analyze.cpp` (the reading over a size is in `stress_measure.cpp`; printed grams at his infill needs the wall and infill model: find where the slicer estimate lives).
-4. PARTLY DONE 2026-11-25: the mechanism on the SOLVE side is found. The connection rule (multigrid.cpp, ruling 2026-10-25) calls a piece anchored if it carries a support OR any load; on a self-weight job every solid voxel carries a load, so no floating piece is ever taken out ("0 of 11 pieces loose") and the solve hangs on near-rigid modes. Sent to TOSolver with a proposed definition (anchored = reaches a support) for its stage report. STILL OPEN, mine: why the design step cuts pieces off at all, and a per-iteration count of them (measuring only), after TOSurface's branch is merged (the step is in plsm.cpp).
-5. DONE 2026-11-25: TOSolver's stage file read (7555ad8c): method and plan sound, nothing to change. TOSurface's Top Motor Mount regression: its own two suspects are being separated; re-read when its next hold reports.
-6. Stage 1: Top Motor Mount optimised both ways and pad 2 / 3 / 4.5 mm (lock); then the stage report to the reviewer.
-7. DONE 2026-11-25: the region path (`region_member_voxels` + `cut_voxels`) gives the SAME counts as `mask_step_face`, cube for cube, at every depth and resolution tried (`test_to_true_loads`, "[lip]", third column).
-8. "Best I can do" probe build (plan), once stages 1, 3 and 5 can be combined in one sparse tree.
+WAITING ON OTHERS (check each tick, act the moment it arrives):
+- The reviewer: which reference a reading over a length is judged against (the textbook peak, or the reading's own true value; asked 02:10Z and 02:26Z on TOReview). Until then nothing more goes into `analyze.cpp`.
+- The lock (queued, starts by itself): `stage1_eighth.sh` Top Motor Mount from the drawn faces, then the stand at pad 3 mm on the corrected clamp (the stand at other pad depths is dropped: it is three quarters frozen and the pad changes nothing). Running without the lock: `stage1_pad96.sh`, the pad on Base, Pressing and PillowBlock. Record in `stages/stage-1-true-loads.md`.
+
+OPEN, mine, no lock needed:
+1. STAGE 1 REPORT to the reviewer (the flip is ruled on it). Write it as soon as the lock runs are recorded. It must carry: hand-over item 3 for #362 in the same release; `lattice_depth_tie` 0a and `test_print_frame.cpp:721` in their `face` forms with the note on the frame's load rule; LatticeReview's interim guard (13b28529 on claude/organic-engine); rule P (time within 10 %) re-read on a quiet machine; the corrected-clamp tables; the bearing table.
+1b. DONE 2026-11-26: the two scenario tests pass with the switch off and on; the lost smallest version there is the pad depth. The bearings' "a load over it wins" test is NOT carried to the face path, on purpose: today it exists because one voxel cannot be both Load and Fixture, so where a loaded face and a bolt face meet the load takes the voxel and the bolt loses its springs there; on the face path each face owns its own nodes' areas, the two can share an edge node, and holding that node is the true thing to do. Said in the stage report.
+2. Stage 2, condition (e): one sheet job and one Organic job loaded on lattice in the before/after table (`test_to_stage1_lattice_check`'s stage 2 arm). Ask LatticeReview or #362 for the job keys of a sheet (gyroid) lattice file job; the turned-box C from the test's earlier version is the Organic one.
+3. Stage 2, "saved": today `volume_saved_fraction` = 1 - printed voxels / part voxels. With printed grams it must be 1 - printed grams of the version / printed grams of the DRAWN part at the same walls and infill. Needs the drawn part's printed grams once per job (`printed_mass` on the part grid) and a report value the app reads: write the exact proposal for #362, then the core half behind the switch.
+4. Stage 2 on optimised designs at res 128 (lock, about 20 min a run): the stand with `TOPOPT_STRENGTH` unset / `stiff` / `size` with a typed 1.8 mm, drawn-face loads. Res 64 taught nothing (voxel 3.4 mm).
+5. Stage 2, the across-layer reading over the same size (the maintainer's decision): `interlayer_tension_field` exists; wiring it into `analyze.cpp` waits on the reviewer.
+6. Printed grams against a slicer: one of his parts sliced at 50 % infill and six walls would check the 0.943 share. He said he has no capacity for slicer work now; ask again when a part is on his printer anyway.
+7. The optimiser side of the floating pieces (why a design step cuts loaded pieces off): after TOSurface's branch is merged.
+8. Merge review of TOSurface's and TOSolver's branches when they report a stage; TOSolver's one-commit solver-settings change in my files.
+9. "Best I can do" probe build, once stages 1, 3 and 5 can be combined in one sparse tree.
+
+DONE and recorded (kept short): stage 0 move; tests A, C/D, E (both halves), K; the stand both ways (old clamp); jobs A to C with LatticeReview's final statement; the sideways lip; bearing anchors; the as-drawn tables re-made on the corrected clamp; the reviewer's bar measured; the reading's own true value; printed grams verified on a run; the stage 2 switch shown not to reach the lattice check.
+
+## Ideas beyond the plan, in discussion with the maintainer (NOT acted on)
+
+Raised 2026-11-26 after his question "why can't the app just scale everything up proportionately, run the TO, then scale everything back down?" (he asked to discuss first; nothing below is built):
+
+- Why scaling up and back changes nothing and breaks things: the grid is a count of voxels across the part, so it scales with the part and every grid artefact stays; the lengths that do NOT scale are the printer's and the material's (line width, smallest wall, layer height, lattice cell, the stress-reading length) and the depths he types in mm.
+- What small parts really show: a fixed physical length that is large against the part (a 3 mm pad on a 10 mm block). Proposed, awaiting his word: (1) a rule that every length in the core is either physical (mm, never scaled) or relative to the part, no bare numbers; (2) the pad defined from the printer and the part (a few wall-line widths, capped at a share of the local thickness) and not a bare 3 mm; (3) resolution chosen from the part's size and the line width (Auto), with an engineer's override; (4) a test that runs one part at two sizes with loads scaled to the same stress: the same shape, and walls still at least two real line widths at both sizes; (5) a plain pop-up when a part is too small for the nozzle to leave the optimiser any printable room.
+
+DECIDED by the maintainer, 2026-11-26 01:15 (on the pad, from the list above): "Pad in wall-line widths with a cap sounds right." and "I definitely think it should be automatic first, with a warning/notice explaining what happens when if you manually do it and get it wrong." So:
+- Auto (the default, nothing on screen): the pad is a number of wall-line widths, capped at a share of the material it sits in.
+- Engineers may type a pad depth; when they do, a notice says in plain words what goes wrong if it is too small (the anchor or load can tear away from the body: a version may be refused) or too large (it freezes material the optimiser could have removed, and on a small part can block the design altogether). Five words on screen at most, the rest behind the (i) (his help-text rule).
+- REFINED with him, 2026-11-26 01:25: the pad follows the size of the model. His question: "Can't the number of lines adjust based on the size of the model?"; the rule put to him and "Agreed": the pad is a SHARE of the thickness of material behind that face (measured locally, so a thin tab on a big bracket gets a thin pad), never less than two wall-line widths (his print result: one line does not print). On the ceiling: "I would even place the ceiling at something crazy like 1000mm", so there is in effect NO ceiling: the share alone sets the depth on thick parts. (Consequence told to him: on a 60 mm body a quarter share freezes 15 mm behind the face, which is material the optimiser cannot remove.)
+- STILL TO SETTLE WITH HIM, with numbers: the SHARE (a quarter was only an illustration). The stand at 2 / 3 / 4.5 mm (queued for the lock) and the small scenario part (3.0 refused the smallest version, 3.75 shipped all, 4.5 lost two) are the evidence to bring.
+- DECIDED 2026-11-26 03:15, his answers:
+  - The pad's shape: "Yes" to growing with the square root of the local thickness, a two-line floor, no ceiling. Its one number (the strength of the curve) is still to settle; he has no other part to test on ("Can you design a sample?"): a made sample part is owed.
+  - "Definitely a pop-up for when a part is too small for the nozzle with a recommendation for either a different nozzle size or to switch to resin printing."
+  - "The automatic resolution from part size is also great."
+  - "I would also like to note that this is all during the 'Auto' settings. And that these settings (resolution/pad thickness) should be manually adjustable if in 'Manual' mode."
+  - The test that runs one part at two sizes: "I don't think we need [it]? What purpose would that hold?" Purpose explained to him; NOT adopted unless he says so.
+  - The rule that every length is physical or relative: not answered; not adopted.
+  - The area-spring anchor (`face_spring`): he asked what it is for; explained; his call still open.
 
 ## 0. Where the work stands (kept current; newest first)
 

@@ -50,7 +50,151 @@ Not in this proposal, flagged: the smooth-surface check (certify the true surfac
 
 - Which length where the papers disagree: "Let's go with the lowest published value for each." (PLA 2.4, ABS 0.46, PETG 0.7 mm; then his half rule: 1.2, 0.23, 0.35 mm.) Consequence, stated to him: 0.23 and 0.35 mm are smaller than a voxel on every job, so for ABS and PETG the new number is today's peak with cut voxels at their real stiffness; only PLA gets a reading over a size.
 - Across layers, REVISED after CNC Kitchen's impact tests: the length across the layers is a FIFTH of the in-plane one. "Yes, a fifth". (Replaces "the same length" above; the layer knockdown on strength stays.)
+- Across layers, REVISED AGAIN (2026-11-25 21:15) after the measurement that the across-layer term, read at one voxel, is what still climbs with resolution and decides most of his parts: the SAME size as in the plane. "Let's do same size, then." The fifth is withdrawn; the layer knockdown on strength stays.
 - Still open: the nine materials with no published value.
+
+## Reviewer's ruling (TORebuildGroup, 2026-11-26 01:37Z, approved by the maintainer)
+
+YES: steps 1 and 2 may be written in `analyze.cpp` behind the stage switch (default = today), on these conditions:
+
+- (a) LatticeReview reviews the diff before it merges.
+- (b) A test shows the lattice check byte-identical with the switch off.
+- (c) THE BAR, fixed before any run: on test E's references (the plate with a hole, the ring, at three resolutions) the shipped reading may never read MORE THAN 5 % BELOW the reference, at any resolution. Today's rule reads 16 to 76 % high (safe but wrong); real stiffness alone reads 6 to 18 % low on the plate and 7 % low on the ring (unsafe). So stiffness and reading size are judged TOGETHER against that bar, never one alone.
+- (d) A material with no published length gets a plain line saying so and keeps today's reading. (In code since the commit after 372d2057: real stiffness applies only together with a reading size; `stiff` alone is a measuring arm.)
+- (e) With the switch on, a before/after table of the lattice strength check (jobs A to C, plus one sheet and one Organic job) is posted in TORebuildGroup before any flip.
+
+To tell the reviewer in the next report: after its ruling was drafted the maintainer changed two of the recorded decisions: across layers the length is a FIFTH of the in-plane one (not the same), and where sources disagree the LOWEST published value is taken.
+
+What the bar means for the plan: a reading over a size reads BELOW the one-voxel peak by design. On test E the readings over 0.9 to 3.6 mm sat 5 to 30 % under the textbook peak. So with real stiffness the size must be SMALL enough to stay within 5 % of the reference, or the stiffness rule must read a little high to leave room. This is to be measured on test E before anything else: the pair (stiffness rule, size) that is steady across resolutions AND never more than 5 % low.
+
+## THE BAR, measured (tests E, `[bar]` table; build e74b4c08 plus the tests, 2026-11-25 21:09)
+
+Lowest / highest reading against the textbook peak over the four resolutions (hole or inner radius 3 to 6 voxels; voxel 2.0 to 1.0 mm, so "0.9 mm" is still one voxel), and the spread between resolutions. The bar: never more than 5 % low.
+
+| cut voxel stiffness | read over | plate with a hole: lowest / highest / spread | ring under pressure: lowest / highest / spread | passes the bar on both? |
+|---|---|---|---|---|
+| E x fill (real stiffness) | one voxel | -18.3 / -6.3 / 14.7 % | -7.2 / -3.8 / 3.7 % | NO |
+| E x fill | 1.8 mm | -18.3 / -13.2 / 6.3 % | -12.9 / -5.7 / 8.2 % | NO |
+| E x fill | 3.6 mm | -31.9 / -26.6 / 7.8 % | -22.4 / -20.8 / 2.1 % | NO |
+| **E x fill^2** | **one voxel** | **-3.8 / +4.3 / 8.4 %** | **+17.2 / +26.5 / 8.0 %** | **yes** |
+| E x fill^2 | 1.8 mm | -9.8 / +0.2 / 11.2 % | +2.6 / +26.5 / 23.3 % | NO (plate) |
+| E x fill^2 | 3.6 mm | -25.2 / -21.0 / 5.6 % | -11.9 / -1.0 / 12.4 % | NO |
+| E x fill^3 (today) | one voxel | +4.0 / +16.2 / 11.7 % | +51.7 / +75.7 / 15.8 % | yes (safe, wrong) |
+| E x fill^3 | 1.8 mm | -3.1 / +12.9 / 16.6 % | +28.9 / +75.7 / 36.3 % | yes |
+| E x fill^3 | 3.6 mm | -21.9 / -12.8 / 11.6 % | -0.5 / +29.9 / 30.5 % | NO (plate) |
+
+Reading:
+1. Real stiffness (E x fill) fails the bar at every reading size on both cases, as the reviewer said it would.
+2. One pair passes the bar on both cases AND holds within 10 % across resolutions on both: **stiffness E x fill^2, read at one voxel**. On the plate it is within 4.3 % of the textbook either way; on the ring it reads 17 to 27 % high (safe), against 52 to 76 % high today. It is not in the plan as written: it is a middle stiffness rule with NO reading over a size.
+3. Every reading over 1.8 mm or more, with real or middle stiffness, reads 10 to 32 % under the textbook PEAK on the plate. That is what an average over a length does by design: the critical-distance method says the average, not the peak, is what breaks the part, so against the peak it must read low. The bar (measured against the peak) and the reading over a material length (the maintainer's decision, from the research) therefore cannot both hold on these cases. This is a conflict between a ruling and a decision, not a tuning problem, and it goes back to the reviewer and the maintainer before more is built.
+4. The longer the reading, the steadier it is across resolutions (2 to 8 % at 3.6 mm) and the lower it reads. Steadiness and "never low against the peak" pull opposite ways.
+
+## The reading's own true value (for the reviewer's choice between the two references)
+
+`stages/reference_reading.py` takes the same ball average on the EXACT textbook solutions. What a reading over a size should give, against the peak:
+
+| case | peak | over 0.9 mm | over 1.8 mm | over 3.6 mm |
+|---|---|---|---|---|
+| plate with a hole | 3.03 | 2.81 | 2.62 | 2.26 to 2.31 |
+| ring under pressure | 2.333 | 2.21 | 2.10 | 1.89 to 1.91 |
+
+Measured with real stiffness (E x fill), at hole radius 3 / 4 / 5 / 6 voxels (voxel 2.0 / 1.5 / 1.2 / 1.0 mm), against THAT value:
+
+| case, size | measured | miss from the reading's true value |
+|---|---|---|
+| plate, 1.8 mm | 2.476 / 2.631 / 2.498 / 2.534 | -5.5 / +0.4 / -4.7 / -3.3 % |
+| plate, 3.6 mm | 2.063 / 2.075 / 2.115 / 2.224 | -10.5 / -9.5 / -7.0 / -1.6 % |
+| ring, 1.8 mm | 2.164 / 2.199 / 2.097 / 2.033 | +2.9 / +4.5 / -0.3 / -3.4 % |
+| ring, 3.6 mm | 1.811 / 1.810 / 1.848 / 1.843 | -5.0 / -4.9 / -2.4 / -2.3 % |
+
+So judged against what the reading is meant to measure, real stiffness with a 1.8 mm reading is within 5.5 % on the plate and 4.5 % on the ring at every resolution, including two where the voxel is larger than or close to the size; the 3.6 mm reading is up to 10 % low on the plate at the coarse end and within 2 % at the fine end. Against the PEAK the same numbers read 10 to 32 % low, which is the average doing its job. This is the case for reference (ii).
+
+## Written so far (ahead of the gate; all behind `TOPOPT_STRENGTH`, default = today; reviewer's ruling on the shared certificate still asked)
+
+| step | what | where | state |
+|---|---|---|---|
+| 1 | Cut voxels solved at their real stiffness (`stiff`, `size`) | `analyze.cpp`, the solid branch's solve only; the lattice posture's solve is untouched | syntax-checked; no effect on a part as drawn (every voxel full or empty), so it must be measured on optimised designs |
+| 2 | The deciding stress read over a size (`size`): the plain maximum and the wall-aware maximum the production gate reads; the one-voxel peak kept beside it (`max_von_mises_one_voxel`) | `analyze.cpp`, `stress_measure.cpp`; the size from `material_length.hpp` or the engineers' typed size (`TOPOPT_STRESS_READING_MM` until the app carries it) | first sweep running. NOT done: the interlayer reading (a fifth of the length, under a voxel so far) |
+| weight | Printed grams at the job's walls and infill (`mass_grams`; the solid figure kept as `mass_grams_solid`) | `printed_mass.cpp`, `analyze.cpp` | unit test passes. Found 2026-11-25 21:50: the grams he is shown do not come from the strength check at all but from the finished FILE's own volume (`to_export.inc`, `fb.mass_grams` = density x mesh volume), so the first wiring changed nothing he sees. Now: the file's solid grams times the printed share that the re-check's wall-and-core model gives for that same file (`voxel_mass_grams` / `voxel_mass_solid_grams`). Syntax-checked; not yet run on a job. NOT done: "saved" (needs the drawn part's printed grams at the same infill), and solid top and bottom layers |
+| 3 | One judge (R-08) | `to_strengthen.inc:745`: Strengthen rewrites a version the loop rejected as accepted on its file-check margin and clears the rejection | NOT started. Proposal: the file check's margin is THE margin everywhere; the loop's own estimate is kept and shown as an estimate (a new report value), never as a second verdict. Changes what the app reads, so it goes to #362 and the reviewer first |
+
+Found while wiring it: every reference job of his is PA12, which has no published length, so under "the lowest published value for each" the reading is the single voxel on all his parts. The sweep reads his parts over 1.2 and 2.4 mm as well, to show him what a size would do.
+
+## Measured on his parts as drawn (build e74b4c08, 2026-11-25 20:47 to 21:05; drawn-face loads, corrected clamp)
+
+Effective margin. "One voxel" is today's reading. The other rows are the engineers' typed size (his parts are PA12, which has no published length, so by the rule they keep today's reading; these rows show what a size WOULD do). A part as drawn has no cut voxels, so the stiffness step does not act here: this table is the reading size alone.
+
+| part | res | one voxel | over 1.2 mm | over 2.4 mm |
+|---|---|---|---|---|
+| Base | 48 / 64 / 96 / 128 / 160 / 192 | 0.79 / 0.66 / 0.45 / 0.37 / 0.37 / 0.32 | 0.79 / 0.66 / 0.45 / 0.37 / 0.38 / 0.35 | 0.79 / 0.66 / 0.50 / 0.44 / 0.46 / 0.41 |
+| PillowBlock | 48 / 64 / 96 / 128 | 1.32 / 1.10 / 0.90 / 0.74 | 1.32 / 1.20 / 1.03 / 0.82 | 1.35 / 1.40 / 1.03 / 0.82 |
+| Pressing | 48 / 64 / 96 / 128 | 0.75 / 0.51 / 0.36 / 0.35 | 0.75 / 0.51 / 0.39 / 0.48 | 0.83 / 0.73 / 0.45 / 0.62 |
+| Original stand | 96 / 128 | 4.83 / 3.15 | 4.83 / 3.19 | 5.40 / 3.77 |
+| Top Motor Mount | 96 / 128 | 1.65 / 1.33 | 1.65 / 1.33 | 2.06 / 1.83 |
+| Stand v4 | 96 / 128 | 2.32 / 1.96 | 2.32 / 2.03 | 2.65 / 2.66 |
+
+Reading, honestly:
+- A size smaller than the voxel reads that voxel alone, so the size only begins to act once the grid is finer than it (1.2 mm from about res 128 on these parts; 2.4 mm from about res 96).
+- Where it acts it raises the margin by 10 to 40 %, as expected of an average against a peak.
+- It does NOT yet make the number steady on real parts. Base from res 96 up: one voxel 0.45 to 0.32 (a 40 % fall); over 2.4 mm 0.50 to 0.41 (22 %). Better, not settled. Pressing gets LESS steady (0.45 then 0.62). Stand v4 is the one that settles (2.65 / 2.66).
+- PillowBlock reads the same over 1.2 and 2.4 mm at res 96 and 128 (1.03, 0.82): another term is deciding there (likely the interlayer one, which this stage has not touched). To be confirmed.
+- So the textbook result (2 to 8 % spread) does not carry over to his parts by the reading size alone. What is left varying with resolution is to be found before more is built: the interlayer term, the loads' own discretisation at a corner, or the support reaction at the held face's edge.
+
+CONFIRMED (the reports' own numbers, same runs): what still moves with resolution is the ACROSS-LAYER term, which this stage has not touched.
+
+| part, res | in-plane stress, one voxel -> over 2.4 mm (MPa) | across-layer tension (MPa), unchanged by the size |
+|---|---|---|
+| PillowBlock 96 / 128 | 14.9 -> 7.6 / 18.2 -> 8.1 | 9.8 / 12.3 |
+| Base 96 / 192 | 29.9 -> 27.0 / 41.8 -> 33.1 | 9.7 / 21.1 |
+| Pressing 96 / 128 | 37.7 -> 29.7 / 38.0 -> 21.6 | 10.3 / 12.5 |
+
+On PillowBlock the in-plane stress halves when read over 2.4 mm, and the margin hardly moves, because the across-layer tension decides it; that tension is still one voxel's and climbs with the grid (Base: 9.7 at res 96, 21.1 at res 192). His decision puts the across-layer length at a fifth of the in-plane one, which is under a voxel on every job, so by that rule this term stays a one-voxel reading and stays unsteady. To put to him with these numbers: the strength number cannot settle across resolutions while the across-layer term is read at one voxel.
+
+Two earlier sweeps of this table read "one voxel" in every column; both were wiring faults of mine (the wall-aware maximum was not read over the size; then the size was wiped when the load case replaced the options) and are not results.
+
+## First optimised runs with the switch (the stand at res 64, drawn-face loads, build 95411b2a, 2026-11-25 22:10): little learned, two faults found
+
+| arm | in-loop margin | file margin | grams |
+|---|---|---|---|
+| today | 11.77 | 4.161 -> 4.201 | 90.55 |
+| real stiffness | 11.83 | 4.181 -> 4.201 | 90.55 (printed share reported 1.000) |
+| real stiffness, read over 1.8 mm | 11.83 | 4.181 -> 4.201 | 90.55 (share 1.000) |
+
+- The stiffness step moves the in-loop margin by 0.5 % here: at res 64 this part is 77 % frozen and has few cut voxels. Not a test of it.
+- The 1.8 mm reading did nothing: the voxel is 3.4 mm at res 64, larger than the size. My choice of resolution was wrong for this arm; it needs res 128 or finer (under the lock).
+- The printed share came out exactly 1.000 at 50 % infill and six walls. Cause: production ships with the wall-aware posture OFF (`kProductionWidthAwareKnockdown = false`: "arming is a maintainer act with a coupon behind it"), so the member widths were never measured and my condition never held. Fixed in the next commit: the widths are measured for the grams alone when the stage's switch is on. (Also corrects an earlier line of mine: the production gate does NOT read the wall-aware maximum; it reads the plain one with the scalar infill knockdown.)
+
+Re-run after the fix (build 833697ae, 22:14): the stand at res 64 reports 85.36 g printed of 90.55 g solid, a share of 0.943 at his 50 % infill and six walls (a 2.7 mm ring, so every member under 5.4 mm wide is all wall, and most of this part is). The report's `mass_grams` and `mass_before_grams` both carry 85.36. The grams wiring works; the share is the wall-and-core model's and has not been checked against a slicer.
+
+## Condition (b): the stage 2 switch against the lattice strength check (build 95411b2a, 2026-11-25 22:15)
+
+Each of jobs A to C run with stage 1 off and `TOPOPT_STRENGTH=size` with a typed 1.8 mm reading, against the plain run (`test_to_stage1_lattice_check`):
+
+- A (regular cells, on the grid): 0 strength values differ; bars and file bytes identical. UNTOUCHED.
+- B (regular cells, chamfered loaded face): 0 differ; identical. UNTOUCHED.
+- C (weave, frame of beams): bars and bar list identical; 13 values differ, all in the TENTH significant digit (twelve tiny bar forces, about 0.001 N, and the frame solve's residual, 7.94e-11 against 8.05e-11). That is the frame solve not repeating to the last bit between two identical runs, not the switch; the test now compares numbers to six digits. Named to LatticeReview as a rule 21 matter of its own (the same job twice does not give the same bytes in the Organic strength block).
+
+Condition (e), the table, as far as this base can make it (build 26b8b784 plus the test, 2026-11-25 22:55). Stage 2 switch on (`size`, typed 1.8 mm), stage 1 off, against the plain run; numbers compared to six digits, timings and the frame solve's residual left out:
+
+| job | laid lattice | strength values that differ |
+|---|---|---|
+| A, regular cells, on the grid | 480 bars, bytes identical | 0 |
+| B, regular cells, chamfered loaded face | 2,978 bars, bytes identical | 0 |
+| C, weave, load on solid | 7,692 bars, bar list identical | 0 |
+| D, weave, loaded ON the lattice (box turned 17 / 9 degrees) | 3,053 bars, bar list identical | 0 |
+| S, gyroid sheet on the control box | NOT MADE on this base: "This lattice type is made of sheets, and a lattice file can only be made from the types made of struts so far." | - |
+
+So the stage 2 switch reaches no number of the lattice strength check on any strut job. The sheet row can only be filled once #362's sheet types on the new engine (claude/notes28-sheets-strength) are in this base; said to the reviewer.
+
+For the record, stage 1's effect on job D (off -> `face`), the case LatticeReview's interim guard will refuse: margin 901 -> 1,444, weakest strut 11.0 -> 22.6, frame nodes loaded 306 -> 631.
+
+## "Saved" against the real thing (written 2026-11-25 22:35; behind the switch; not yet run)
+
+Today "saved" is 1 - printed voxels / part voxels: a share of SOLID volume. With printed grams it has to be read against what the drawn part itself would take on the printer at the same walls and infill. The run now writes that once per job, with no extra solve (the wall-and-core model on the part's own voxels): the report's top-level `"drawn_part": {"printed_grams", "solid_grams"}`, present only with the switch on. The saving the app should show is then `1 - version printed grams / drawn_part.printed_grams`.
+
+Run (build 26b8b784, 22:29), the stand at res 64, 50 % infill, six walls: the drawn part 98.71 g printed of 116.39 g solid (wall share 0.696); the one version 85.36 g printed of 90.55 g solid. So the saving he is shown today, on solid volume, is 22 %; the plastic really saved is 1 - 85.36 / 98.71 = 13.5 %. Removing material from a part that is mostly walls removes mostly infill-free wall, and what is left is nearly all wall (share 0.943), so the solid figure overstates the saving by more than half here.
+
+For #362 (to carry with the stage's flip; nothing in the app changes until then): read `drawn_part.printed_grams` and each version's finish `mass_grams` (already printed grams with the switch on) and show the saving from those two; keep `volume_saved_fraction` for nothing but the old path. One line on screen at most; the detail (walls, infill, "top and bottom layers not counted") behind the (i).
 
 ## What it does to the lattice strength check
 

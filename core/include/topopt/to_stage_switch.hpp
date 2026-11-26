@@ -6,8 +6,9 @@
 // STAGE 1 (true loads and honest results). TOPOPT_FACE_LOADS:
 //   unset / "voxel" : today's behaviour everywhere. The default until the gate.
 //   "face"          : loads, pads and protection depths from the drawn face
-//                     (face_loads.hpp), pads and protections in mm; anchors clamp
-//                     the voxels the face lies on; and the optimiser's stop rule
+//                     (face_loads.hpp), pads and protections in mm; a glued
+//                     anchor holds the drawn face's own nodes, in a plain job
+//                     and in every load scenario; the optimiser's stop rule
 //                     watches the design's own stress, not the stress in the
 //                     voxels a load or an anchor sits on (ledger P-15).
 //   "face_spring"   : as "face", and each anchor node is held by a spring in
@@ -31,5 +32,29 @@ inline FaceLoadMode face_load_mode() {
 }
 
 inline bool to_stage1_on() { return face_load_mode() != FaceLoadMode::Voxel; }
+
+// STAGE 2 (a strength number that holds), written ahead of its gate.
+// TOPOPT_STRENGTH:
+//   unset   : today's strength check everywhere.
+//   "stiff" : MEASURING ARM ONLY. A voxel cut by the surface is solved at its
+//             real stiffness (E x fill, not E x fill^3; ledger A-01). Alone it
+//             reads 6 to 18 % low on the textbook cases, so it never ships alone.
+//   "size"  : the form to ship. Real stiffness AND the deciding stress read over
+//             the material's length (material_length.hpp; ledger A-02), judged
+//             together: never more than 5 % below the textbook at any
+//             resolution (reviewer, 2026-11-26). A material with no published
+//             length says so and keeps today's solve and reading whole.
+enum class StrengthMode { Today, Stiff, Size };
+
+inline StrengthMode strength_mode() {
+  const char* v = std::getenv("TOPOPT_STRENGTH");
+  if (v == nullptr) return StrengthMode::Today;
+  const std::string m(v);
+  if (m == "stiff") return StrengthMode::Stiff;
+  if (m == "size") return StrengthMode::Size;
+  return StrengthMode::Today;
+}
+
+inline bool to_stage2_on() { return strength_mode() != StrengthMode::Today; }
 
 }  // namespace topopt
