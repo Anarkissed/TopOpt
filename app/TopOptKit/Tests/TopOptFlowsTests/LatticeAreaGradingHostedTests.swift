@@ -139,8 +139,10 @@ final class LatticeAreaGradingHostedTests: XCTestCase {
                       "★ a tab opens through the swap that keeps each area's grade")
         XCTAssertEqual(LatticeSetupWizard.shapeGradeRunLine,
                        "The run's shape grade is a solid outline; the band and Strength are preview only.")
+        // ★ RE-PINNED (notes29, his 11-25: five words under a setting): its five words on the page, the reviewer's line in
+        // its (i)
         XCTAssertTrue(src.contains("if !TopOptKit.gradingSchemaAccepts(key: \"shape_grade_strength\") {\n"
-                                   + "                shortNote(Self.shapeGradeRunLine)"),
+                                   + "                shortNote(Self.shapeGradeRunBrief, info: \"shape-grade-run\", Self.shapeGradeRunLine)"),
                       "★ under the shape grade, until the linked core takes the band's strength")
         // ★ RE-PINNED (release (3), core e26b8038, ruling 2): the linked core builds the band and takes its strength, so
         // the line goes by itself (it showed on release (2)'s 565cc17c).

@@ -176,6 +176,8 @@ struct AppSettingsView: View {
 
     var body: some View {
         content
+            // ★ notes29 (his 11-25): this page is a sheet, over the root's layer — its (i)s' centred notification is drawn here
+            .overlay { AppPopupLayer() }
             .sheet(isPresented: $strengthOpen) {
                 StrengthCheckPage(settings: strength) { strengthOpen = false }
                     .frame(minWidth: 700, minHeight: 640)

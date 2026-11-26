@@ -146,11 +146,14 @@ final class Notes29DensityDialTests: XCTestCase {
         let wizard = try String(contentsOf: u.appendingPathComponent("Sources/TopOptFlows/LatticeSetupWizard.swift"), encoding: .utf8)
         let block = try XCTUnwrap(wizard.components(separatedBy: "private var smallCellsSwitch").dropFirst().first?
             .components(separatedBy: "private var singleCellSwitch").first)
-        XCTAssertTrue(block.contains(".disabled(project.lattice.allowQuilt)"), "★ greyed only with Allow quilt on")
+        // (362's merge of N1: the page's own switch, model.allowQuilt, and N1's captions)
+        XCTAssertTrue(block.contains(".disabled(model.allowQuilt)"), "★ greyed only with Allow quilt on")
         XCTAssertFalse(block.contains(".disabled(true)"), "★ never greyed for good")
-        for caption in ["Allow quilt already does this", "Thin walls get small cells", "Thin walls stay solid"] {
-            XCTAssertTrue(block.contains("\"\(caption)\""), caption)
+        XCTAssertTrue(block.contains("Self.smallCellsInfo"), "★ its (i) is the engine's own rule")
+        for caption in [LatticeSetupWizard.smallCellsQuiltLine, LatticeSetupWizard.smallCellsOnLine,
+                        LatticeSetupWizard.smallCellsOffLine] {
             XCTAssertLessThanOrEqual(caption.split(separator: " ").count, 5, "★ five words at most: \(caption)")
+            XCTAssertFalse(caption.contains("Needs Allow quilt"), "★ not tied to Allow quilt: \(caption)")
         }
         XCTAssertTrue(LatticeSetupWizard.smallCellsInfo.contains("never fuse"), LatticeSetupWizard.smallCellsInfo)
         XCTAssertTrue(LatticeSetupWizard.smallCellsInfo.contains("one printed line"), LatticeSetupWizard.smallCellsInfo)

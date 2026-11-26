@@ -10,48 +10,26 @@ import SwiftUI
 import TopOptDesign
 import TopOptKit
 
-/// The (i): a 15 pt glyph in a 44 pt target (it was 32 × 32) that opens a popover with the long text.
+/// The (i) of a Flexible row: ★ notes29 (his 11-25) the one (i), `AppInfoButton` — its words and core's detail (`extra`) in the
+/// centred notification ("Tap anywhere to continue"). It opened a popover beside it.
 struct FlexInfoButton<Extra: View>: View {
     let title: String
     let text: String
     let extra: Extra
     var id: String = "flexible-info"
-    @State private var shown = false
 
     init(title: String, text: String, id: String = "flexible-info", @ViewBuilder extra: () -> Extra) {
         self.title = title; self.text = text; self.id = id; self.extra = extra()
     }
 
     /// The hit target (pt): the HIG's 44.
-    static var target: CGFloat { 44 }
+    static var target: CGFloat { AppInfoButton.target }
 
     var body: some View {
-        Button { shown = true } label: {
-            // ★ B9 LOOK (design-system §4.21): the one (i) — InfoTip's 22 pt circle and serif "i"
-            Text("i")
-                .font(.system(size: 13, weight: .bold, design: .serif))
-                .foregroundStyle(DS.Color.textTertiary.color)
-                .frame(width: InfoTip.circle, height: InfoTip.circle)
-                .overlay(Circle().strokeBorder(DS.Color.textTertiary.color, lineWidth: 1.2))
-                .frame(width: FlexInfoButton.target, height: FlexInfoButton.target)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier(id)
-        .flexibleProbe(id)
-        .popover(isPresented: $shown) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: DS.Space.m) {
-                    Text(title).font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
-                    FlexCaption(text: text, colour: DS.Color.textSecondary.color)
-                    extra
-                }
-                .padding(DS.Space.l)
-                .frame(width: 380, alignment: .leading)
-            }
-            .frame(maxHeight: 520)
-            .background(DS.Surface.sheet.color)
-        }
+        let more = extra
+        AppInfoButton(title: title, text: text, label: "About \(title)", id: id,
+                      extra: Extra.self == EmptyView.self ? nil : { AnyView(more) })
+            .flexibleProbe(id)
     }
 }
 
