@@ -33,17 +33,26 @@ final class Notes30StrutStreamClipsProbe: XCTestCase {
         var v: [Float] = [], idx: [Int32] = []
         let m = n / 2
         func sp(_ x: Float, _ p: Float) -> Float { (x < 0 ? -1 : 1) * pow(abs(x), p) }
-        for j in 0...m {
+        // the rings between the poles (each pole one vertex: a closed, watertight surface)
+        for j in 1..<m {
             let phi = -Float.pi / 2 + Float.pi * Float(j) / Float(m)
             for i in 0..<n {
                 let th = 2 * Float.pi * Float(i) / Float(n)
                 v += [r.x * sp(cos(phi), e) * sp(cos(th), e) + r.x, r.y * sp(cos(phi), e) * sp(sin(th), e) + r.y, r.z * sp(sin(phi), e) + r.z]
             }
         }
-        for j in 0..<m { for i in 0..<n {
+        let rings = m - 1
+        let bottom = Int32(v.count / 3); v += [r.x, r.y, 0]
+        let top = Int32(v.count / 3); v += [r.x, r.y, 2 * r.z]
+        for j in 0..<(rings - 1) { for i in 0..<n {
             let a = Int32(j * n + i), b = Int32(j * n + (i + 1) % n), c = Int32((j + 1) * n + i), d = Int32((j + 1) * n + (i + 1) % n)
             idx += [a, b, d, a, d, c]
         }}
+        for i in 0..<n {
+            idx += [bottom, Int32((i + 1) % n), Int32(i)]
+            let k = (rings - 1) * n
+            idx += [top, Int32(k + i), Int32(k + (i + 1) % n)]
+        }
         return MeshExport.binarySTL(vertices: v, indices: idx, header: Data())
     }
 
