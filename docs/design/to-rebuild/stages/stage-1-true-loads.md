@@ -91,7 +91,7 @@ The first run of the bearing branch (bf4aa356). Springs / effective margin / pea
 | PillowBlock | 64 | 803 / 1.09 / 12.3 | 1,501 / 1.30 / 10.4 |
 | PillowBlock | 96 | 1,669 / 0.90 / 14.9 | 2,955 / 1.02 / 13.2 |
 
-Reading: V-01 in its bearing form. On Base at res 64 today's path reads a margin of 0.04 (a 309 MPa peak) between 0.56 at res 48 and 0.27 at res 96: the bolt's springs land on the few voxel faces the alignment happens to tag. From the drawn face the same part reads 0.64 / 0.50 / 0.33, a steady fall. The drawn-face path carries two to four times as many springs (every node the face has a share of, where today takes only the exposed voxel faces within reach) and reads 12 to 22 % higher on these parts. One difference from today is left and stated: a node under a Load voxel is not skipped.
+Reading: V-01 in its bearing form. On Base at res 64 today's path reads a margin of 0.04 (a 309 MPa peak) between 0.56 at res 48 and 0.27 at res 96: the bolt's springs land on the few voxel faces the alignment happens to tag. From the drawn face the same part reads 0.64 / 0.50 / 0.33, a steady fall. The drawn-face path carries two to four times as many springs (every node the face has a share of, where today takes only the exposed voxel faces within reach) and reads 12 to 22 % higher on these parts. One difference from today is left on purpose: today a bolt loses its springs wherever a loaded face takes the same voxel ("a load over it wins"), because a voxel can carry only one tag; on the face path each face keeps its own nodes' areas, so a node on the shared edge of a bolt face and a loaded face is both held and loaded, which is what the drawing says.
 
 ## Measured: optimised
 
