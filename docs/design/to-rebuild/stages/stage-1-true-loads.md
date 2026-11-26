@@ -165,7 +165,7 @@ So this is NOT at root a question of pad depth. It is: **must every face he fixe
 
 ### The sample beam (B) at res 64 TODAY'S way: the job is refused, with nothing loaded (found 2026-11-26 08:45)
 
-The beam carries 600 N on the top of a 20 x 20 x 3 mm boss. At res 64 (1.9 mm voxels) today's path tags NO voxels for that face and stops the job: "the declared load case produced NO external load ... each face is smaller than one voxel at this grid spacing; raise the resolution". The face is 20 x 20 mm, more than ten voxels across; it is the boss's 3 mm height that falls between voxel centres. This is test C's "nothing loaded in 6 of 18 alignments" met on a real job, with a message that sends the user the wrong way. The drawn-face path at the same resolution: running now in the pad sweep; recorded below when it ends.
+The beam carries 600 N on the top of a 20 x 20 x 3 mm boss. At res 64 (1.9 mm voxels) today's path tags NO voxels for that face and stops the job: "the declared load case produced NO external load ... each face is smaller than one voxel at this grid spacing; raise the resolution". The face is 20 x 20 mm, more than ten voxels across; it is the boss's 3 mm height that falls between voxel centres. This is test C's "nothing loaded in 6 of 18 alignments" met on a real job, with a message that sends the user the wrong way. The drawn-face path at the same resolution and a fixed 3 mm pad (10:05, the lead's build): the job RUNS and gives three versions, 0.68: 6.13, 76.6 g; 0.52: 5.13, 60.2 g; 0.38: 2.73, 45.9 g (the 0.26 version stopped on the in-loop margin rule). Against the everything-on run below (pads of 11 and 5.2 mm): 5 to 10 g lighter a version and stronger at each.
 
 ### The bracket at res 64 with EVERYTHING ON in the trial build (drawn-face loads, automatic pad at 1.0, TOSurface's smooth surface; scratch merge d88e3e33, never pushed)
 
@@ -193,6 +193,10 @@ Pad behind the thin tab / the base / the upright's face, then margin and grams p
 | automatic, strength 1.0 | 2.0 / 7.1 / 8.6 | 9526 | 5.29, 166.5 g | 5.29, 137.8 g | 5.01, 112.8 g | none |
 
 Read plainly. At 0.2 the automatic pad is the fixed 3 mm pad on the thick faces and a thin one (two wall lines, the floor) behind the thin tab: every version is as light or lighter and as strong or stronger than at a fixed 3 mm. At 1.0 the base and the upright's foot stay as thick slabs (the picture's right column) and each version carries 7 to 16 g more. In the picture the thin tab hangs on by a small block in the first two columns and by the thick base slab in the third: the "must every fixed face stay joined" question is the same at every pad. Strength 0.4 is still running; the beam and the hook follow.
+
+### The hook (C) at res 64 today's way (10:05, for the trial build's comparison)
+
+Four versions: 0.68: 4.77, 43.7 g; 0.52: 4.60, 34.0 g; 0.38: 4.32, 25.4 g; 0.26: 3.75, 18.1 g. Its everything-on run and the pad sweep's hook runs follow.
 
 ## Still owed before the stage report
 
