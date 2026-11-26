@@ -126,7 +126,7 @@ final class Notes24ResultsHostedTests: XCTestCase {
                 let mini = try h.probe("library-mini-v2a", "\(name): v2's picture")
                 h.click(CGPoint(x: mini.midX, y: mini.midY), settle: 2)
                 assertResultsInTheLatticeStage(h, "\(name)")
-                try h.tap("capsuleSetup", "\(name): ★ the Lattice stage's Setup, over Results", settle: 1.5)
+                try h.tap("capsuleLattice", "\(name): ★ the Lattice stage's Lattice view, over Results", settle: 1.5)
                 XCTAssertNil(h.frames.all["resultsExport"], "\(name): ★ back to editing in the Lattice stage")
                 _ = try h.onScreen("latticeSplit", "\(name): the Lattice stage's corner")
                 if passes {

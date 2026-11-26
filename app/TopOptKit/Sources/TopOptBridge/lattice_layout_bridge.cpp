@@ -1009,10 +1009,12 @@ LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float ori
     };
     std::atomic<int32_t> next{0};
     std::array<int64_t, 5> nocell_total{};
+    std::array<double, 5> have_total{};   // ★ notes30 X2
     std::mutex nocell_mu;
     auto work = [&] {
       const ll::Domain::Probe probe = domain->probe();   // one per thread
       std::array<int64_t, 5> local{};
+      std::array<double, 5> have{};
       for (int32_t z = next++; z < nz; z = next++) {
         for (int32_t y = 0; y < ny; ++y) {
           // ★ notes30 Q1: read each row, not each slab — a flat part's slab is most of the map (measured: a newer lay
@@ -1034,14 +1036,22 @@ LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float ori
               } else {
                 c = solid_at(probe, p, w) ? 3 : 2;   // 3: asked for, no cell holds it (D14: solid)
               }
-              if (c == 3) ++local[std::min<std::size_t>(4, static_cast<std::size_t>(solid_at.why(probe, p).why))];
+              if (c == 3) {
+                const ll::SolidWhy sw = solid_at.why(probe, p);
+                const std::size_t k = std::min<std::size_t>(4, static_cast<std::size_t>(sw.why));
+                ++local[k];
+                have[k] = std::max(have[k], static_cast<double>(sw.have_mm));   // ★ notes30 X2
+              }
             }
             cls[i] = c;
           }
         }
       }
       std::lock_guard<std::mutex> g(nocell_mu);
-      for (std::size_t k = 0; k < 5; ++k) nocell_total[k] += local[k];
+      for (std::size_t k = 0; k < 5; ++k) {
+        nocell_total[k] += local[k];
+        have_total[k] = std::max(have_total[k], have[k]);
+      }
     };
     const unsigned threads = std::max(1u, std::thread::hardware_concurrency());
     std::vector<std::thread> pool;
@@ -1122,6 +1132,7 @@ LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float ori
       o.sheet_seam_mm = std::move(seam_mm);
     }
     o.nocell.assign(nocell_total.begin(), nocell_total.end());
+    o.nocell_have_mm.assign(have_total.begin(), have_total.end());
     o.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
   });
   if (!why.empty()) {
@@ -1208,6 +1219,7 @@ LatticeLayoutGridAhead grid_before_lay(const char* name, int64_t session, const 
           g.rg[2 * i + 1] = c != 0 ? 127 : -127;
         }
     g.nocell.assign(5, 0);
+    g.nocell_have_mm.assign(5, 0.0);
     g.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     o.supported = true;
   });

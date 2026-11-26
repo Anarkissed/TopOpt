@@ -355,8 +355,6 @@ public struct WorkspacePlaceholder: View {
     @State private var cadFacesDrawerOpen = false
     // The expand handle currently being dragged (nil = none).
     @State private var draggingExpandPlane: String?
-    /// ★ §3(b) — which group's (i) pop-up is open. One at a time, PER UNION.
-    @State private var diagnosisPopoverGroup: UUID?
     /// ★ §5 — which DEPTH field has the numeric keypad open. Keyed by the row's
     /// identifier so a group row and a selectable row cannot share one pad.
     @State private var depthPadKey: String?
@@ -9856,7 +9854,8 @@ public struct WorkspacePlaceholder: View {
                     .foregroundStyle(DS.Color.textPrimary.color)
                     .fixedSize(horizontal: false, vertical: true)
                 // ★ notes25 (D8, his 11-23): why, in three short reasons with their (i)s, what Aesthetic does, and Learn more
-                LatticeThinWallReasons(finding: thin, lattice: project.lattice, oldBakeCells: strutScene?.minCellsPerMember)
+                LatticeThinWallReasons(finding: thin, lattice: project.lattice, oldBakeCells: strutScene?.minCellsPerMember,
+                                       cells: newEngine.solidReason?.depth ?? LatticeLayoutPreview.cellFloor(project))
                 HStack(spacing: DS.Space.s) {
                     Button {
                         project.switchLatticeStageMode(to: .aesthetic)
@@ -11761,12 +11760,15 @@ public struct WorkspacePlaceholder: View {
     }
 
     /// ★ his 11-22 ("NOTHING cuts into the modal"): the diagnosis as one warning glyph (a 44 pt target) in the Role row; a
-    /// tap opens the same pop-up with every failure and its fix. Never in Aesthetic (his 08-25 ruling, as the badge).
+    /// tap opens every failure and its fix. Never in Aesthetic (his 08-25 ruling, as the badge).
+    /// ★ notes30 X2 (his yes, 11-26): the tap opens the app's one centred card, like every (i) ("Tap anywhere to continue"):
+    /// every failure, the fix first, then its numbers; the fixes that name a Lattice page setting are its buttons, each going
+    /// to that setting lit with what to try (the popover N1 kept is gone).
     @ViewBuilder private func latticeDiagnosisGlyph(_ g: SelectionGroup) -> some View {
         let d = (project.lattice.stageMode ?? .structural) == .aesthetic
             ? LatticeFaceDiagnosis.merged([]) : latticeDiagnosis(g)
         if let badge = d.badge {
-            Button { diagnosisPopoverGroup = g.id } label: {
+            Button { openLatticeDiagnosisCard(d) } label: {
                 Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 13, weight: .bold))
                     .foregroundStyle(latticeVerdictTint(d.severity).color)
                     .frame(width: 44, height: 44).contentShape(Rectangle())
@@ -11775,42 +11777,21 @@ public struct WorkspacePlaceholder: View {
             .accessibilityLabel(badge + ". How to fix this")
             .accessibilityIdentifier("lattice-diagnosis-info-\(g.id.uuidString)")
             .background(DSParts.publish("lattice-diagnosis-\(g.id.uuidString)"))
-            .popover(isPresented: Binding(
-                get: { diagnosisPopoverGroup == g.id },
-                set: { if !$0 { diagnosisPopoverGroup = nil } })) {
-                latticeDiagnosisPopover(d)
-            }
         }
     }
 
-    /// ★ §3(b)/§3(e) — THE POP-UP: every failure, and it LEADS WITH THE FIX.
-    private func latticeDiagnosisPopover(_ d: LatticeFaceDiagnosis) -> some View {
-        VStack(alignment: .leading, spacing: DS.Space.m) {
-            ForEach(Array(d.problems.enumerated()), id: \.offset) { _, p in
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(p.what)
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(DS.Color.textPrimary.color)
-                    ForEach(p.fixes, id: \.self) { fix in
-                        HStack(alignment: .top, spacing: DS.Space.xs) {
-                            Image(systemName: "wrench.and.screwdriver.fill")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(DS.Color.accent.color)
-                            Text(fix)
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(DS.Color.textPrimary.color)
-                        }
-                    }
-                    Text(p.measured)
-                        .font(.system(size: 11, weight: .semibold)).monospacedDigit()
-                        .foregroundStyle(DS.Color.textTertiary.color)
-                }
-            }
+    /// ★ notes30 X2: the warning glyph's card — the centred card with every failure (`LatticeDiagnosisCard`), its setting fixes
+    /// as buttons through the app's one way to a setting (`openSettingToChange`).
+    private func openLatticeDiagnosisCard(_ d: LatticeFaceDiagnosis) {
+        guard !Self.controlDiagnosisNoCard else { return }
+        LatticeDiagnosisCard.open(d) { c in
+            // ★ notes30 X2 (cell advice): where no smaller cell lays, the "This needs … cells" pop-up's fixes, taken as it takes them
+            if let f = c.offer { SolidReason.take(f, on: project) }
+            else { openSettingToChange(.init(page: .lattice, field: c.field.rawValue, tryText: c.tryText)) }
         }
-        .padding(DS.Space.ml)
-        .frame(maxWidth: 320, alignment: .leading)
-        .accessibilityIdentifier("lattice-diagnosis-popover")
     }
+    /// RED CONTROL (tests): release 21's wiring — the glyph's tap raised no centred card (it opened a popover beside it).
+    nonisolated(unsafe) static var controlDiagnosisNoCard = false
 
     /// The diagnosis for one group, from its card plus core's own two floors.
     /// ★ THE GROUP'S BADGE, FROM ITS FACES (maintainer, 2026-08-17). It was built
@@ -11835,11 +11816,12 @@ public struct WorkspacePlaceholder: View {
             .regionCellsPerMemberFloor(topology: project.lattice.topologyID,
                                        boundaryFinishWritten: project.lattice.singleCellMembers,
                                        algorithm: project.lattice.resolvedAlgorithm)
+        let cells = LatticeLayoutPreview.cellFloor(project)   // ★ notes30 X2: no fix names a cell under the smallest laid
         let each = latticedSelectableCards(g).map {
             LatticeFaceDiagnosis.of(card: $0,
                                     cellsPerMemberFloor: floor > 0
                                         ? floor : limits.minCellsPerMember,
-                                    nozzleWidthMM: nozzle)
+                                    nozzleWidthMM: nozzle, cells: cells)
         }
         return LatticeFaceDiagnosis.merged(each)
     }
@@ -15935,17 +15917,16 @@ extension WorkspacePlaceholder {
         }
         // ★ his notes 11-23: over its Results too, Setup and Lattice each close Results — the way back to editing
         // ★ notes25 (his 11-23, Img 4): Results is the third tab, lit while it is up (hidden with no lattice result yet)
-        let page: StageCapsule.Page = latticeResultsPageUp ? .tertiary
-            : LatticeStagePage.current(cellsUp: showLatticeWizard) == .cells ? .secondary : .primary
+        let page: StageCapsule.Page = latticeResultsPageUp ? .tertiary : latticeCapsuleLit
         HStack(spacing: DS.Space.s) {
             StageCapsule(project: project, title: LatticeStageMenu.title(typeInUse: mode),
                          accent: mode.map { LatticeStageModeStyle.accent($0) } ?? DS.Color.textSecondary.color,
-                         primaryTitle: LatticeStagePage.regions.title, secondaryTitle: LatticeStagePage.cells.title,
+                         primaryTitle: latticeOrder.primary.capsuleTitle, secondaryTitle: latticeOrder.secondary.capsuleTitle,
                          idPrefix: "lattice",
                          page: page,
                          go: { dest in leaveLatticeCells(); goToStage(dest) },
-                         primary: { leaveLatticeCells(); viewOriginal = true },
-                         secondary: { viewOriginal = true; showLatticeWizard = true },
+                         primary: { showLatticeStagePage(latticeOrder.primary) },
+                         secondary: { showLatticeStagePage(latticeOrder.secondary) },
                          about: { showLatticeModeSheet = true },
                          tertiaryTitle: LatticeResultsTab.title, tertiary: { leaveLatticeCells(); viewOriginal = false },
                          greyed: mode == nil ? [.primary, .secondary] : [],
@@ -15966,6 +15947,22 @@ extension WorkspacePlaceholder {
     /// Leave the Cells page through its own Save (the page commits; today's onExit bakes and persists).
     private func leaveLatticeCells() {
         if showLatticeWizard { cellsCloseToken += 1 }
+    }
+
+    /// ★ notes30 (his 11-26: "'Lattice' and 'Settings' have switched places"): the capsule's Setup opens the settings, its
+    /// Lattice the laid lattice (LatticeStagePage.capsuleOrder), and the lit segment is the page up.
+    private var latticeOrder: (primary: LatticeStagePage, secondary: LatticeStagePage) { LatticeStagePage.capsuleOrder }
+    private var latticeCapsuleLit: StageCapsule.Page {
+        LatticeStagePage.current(cellsUp: showLatticeWizard) == latticeOrder.primary ? .primary : .secondary
+    }
+
+    /// ★ notes30: a capsule segment's page — the settings (Cells), or the laid lattice (Regions: the settings left through
+    /// their own Save). Either closes the stage's Results.
+    private func showLatticeStagePage(_ p: LatticeStagePage) {
+        switch p {
+        case .cells: viewOriginal = true; showLatticeWizard = true
+        case .regions: leaveLatticeCells(); viewOriginal = true
+        }
     }
 
     /// ★ B3 (his answer 11-03, via #362 20:22Z): "Change lattice type…" with NOTHING latticed just switches — the type clears and the
@@ -16759,10 +16756,29 @@ extension WorkspacePlaceholder {
             VersionViewOpen.shared.waitForResult(project.id, saved: saved)
             settleResultStage()
         } else if let v = saved, let st = v.stage.flatMap(WorkspaceStage.init(rawValue:)) {
+            if st == .lattice { reopenOnTheLattice(savedPage: v.page) }   // ★ notes30: before the stage moves (its entry reads it)
             if st != stage { goToStage(st) }
-            if st == .lattice, v.page == VersionViewState.pageCells, project.lattice.stageMode != nil { showLatticeWizard = true }
+            if VersionViewOpen.controlReopensSettings, st == .lattice, v.page == VersionViewState.pageCells,
+               project.lattice.stageMode != nil { showLatticeWizard = true }
             VersionViewOpen.settled[project.id] = st.rawValue
         }
+    }
+
+    /// ★★ notes30 (his 11-26, release 21: opening his part from Home's most recent brought him to the settings — "Even if my
+    /// last view was in the settings, I should always go back to the 'Lattice' view with the last lattice generated already
+    /// visible"). Every reopen that lands on the lattice stage (Home's most recent, Library, Continue, a version's Open — all go
+    /// through AppModel.open) lands on its Lattice view: never the settings, whatever page was kept; a lattice already set up
+    /// counts as saved for this visit, so entering the stage opens no settings first (openLatticeSettingsIfUnconfigured), and
+    /// the lattice view comes on as the stage opens (latticeViewOnEntering) and draws the version's lattice from its own saved
+    /// settings (Organic's read back from the version's folder, LatticePreviewStore). The stage itself is still the one he left
+    /// (his release 19 rule); only the page within it is the Lattice view. A lattice with no type yet opens its settings.
+    func reopenOnTheLattice(savedPage: String?) {
+        guard !VersionViewOpen.controlReopensSettings else { return }
+        showLatticeWizard = false
+        if project.lattice.enabled, project.lattice.stageMode != nil, project.lattice.flexible == nil {
+            latticeSettingsSavedThisSession = true
+        }
+        VersionViewOpen.reopenedOnLattice[project.id] = savedPage ?? VersionViewState.pageSetup
     }
 
     /// A version with a result, its result now in: the stage that result belongs to (the Lattice stage for a print file's),
@@ -16772,9 +16788,10 @@ extension WorkspacePlaceholder {
         let (_, saved) = VersionViewOpen.shared.take(project.id)
         guard libraryExportVariant == nil else { return }
         let home: WorkspaceStage = LatticeSavedResult.opensInLattice(run.outcome) ? .lattice : .topology
+        if home == .lattice { reopenOnTheLattice(savedPage: saved?.page) }   // ★ notes30: the Lattice view, never the settings
         if stage != home { goToStage(home) }
-        if home == .lattice, saved?.stage == WorkspaceStage.lattice.rawValue, saved?.page == VersionViewState.pageCells,
-           project.lattice.stageMode != nil { showLatticeWizard = true }
+        if VersionViewOpen.controlReopensSettings, home == .lattice, saved?.stage == WorkspaceStage.lattice.rawValue,
+           saved?.page == VersionViewState.pageCells, project.lattice.stageMode != nil { showLatticeWizard = true }
         VersionViewOpen.settled[project.id] = home.rawValue
     }
 }

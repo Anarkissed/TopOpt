@@ -172,6 +172,9 @@ public struct LatticeSetupWizard: View {
         // ★ notes29 (his 11-25): the page follows a Structural ⇄ Aesthetic switch made while it is open (single-cell members
         // are Aesthetic's alone: on Structural they never lock the Finish)
         .onChange(of: project.lattice.stageMode) { m in model.setStage(aesthetic: (m ?? .structural) == .aesthetic) }
+        // ★ notes30 X2 (his answer, 11-26): the pop-up's "Turn Allow quilt on" made while it is open — the page's own switch
+        // follows, so its Save keeps it on
+        .onChange(of: project.lattice.allowQuilt) { on in if model.allowQuilt != on { model.allowQuilt = on; rebuild() } }
         .onAppear { if openedLattice == nil { openedLattice = project.lattice } }
     }
     /// the settings as they were when the page opened — "Exit" until they differ

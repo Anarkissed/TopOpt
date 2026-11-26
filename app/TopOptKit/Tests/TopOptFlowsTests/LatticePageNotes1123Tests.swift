@@ -47,7 +47,7 @@ final class LatticePageNotes1123Tests: XCTestCase {
         }
         p.lattice.enabled = true
         h.pump(1)
-        try h.tap("capsuleLattice", "\(size): the Lattice page", settle: 1.5)
+        try h.tap("capsuleSetup", "\(size): Setup, the settings", settle: 1.5)
         if let c = pr.all["wizard-stage-\(LatticeWizardStage.cell.rawValue)"] ?? h.frames.all["wizard-stage-\(LatticeWizardStage.cell.rawValue)"] {
             h.click(CGPoint(x: c.midX, y: c.midY), settle: 1)
         }

@@ -33,7 +33,7 @@ final class LatticeLayoutSwitchHostedTests: XCTestCase {
             try h.pickFromMenu("capsuleMenu", "Structural", what: "\(name): the stage menu")
             h.pump(1.5)
             if h.frames.all["view-Lattice preview-on"] == nil { try h.tap("view-Lattice preview", "\(name): the lattice preview", settle: 1.5) }
-            if h.frames.all["latticeSettingsPanel"] != nil { try h.tap("capsuleSetup", "\(name): the page's Save", settle: 1.5) }
+            if h.frames.all["latticeSettingsPanel"] != nil { try h.tap("capsuleLattice", "\(name): the page's Save", settle: 1.5) }
             XCTAssertNil(h.frames.all["latticeSettingsPanel"], "\(name): premise: on Lattice Setup")
             _ = try h.onScreen("view-Lattice preview-on", "\(name): premise: the lattice preview is on")
 
@@ -81,7 +81,7 @@ final class LatticeOldBakeRetiredHostedTests: XCTestCase {
             try h.pickFromMenu("capsuleMenu", "Structural", what: "the stage menu")
             h.pump(1.5)
             if h.frames.all["view-Lattice preview-on"] == nil { try h.tap("view-Lattice preview", "the lattice preview", settle: 1.5) }
-            if h.frames.all["latticeSettingsPanel"] != nil { try h.tap("capsuleSetup", "the page's Save", settle: 1.5) }
+            if h.frames.all["latticeSettingsPanel"] != nil { try h.tap("capsuleLattice", "the page's Save", settle: 1.5) }
             let end = Date().addingTimeInterval(120)
             while h.frames.all["new-engine-timing"] == nil, Date() < end { h.pump(0.5) }
             h.pump(2)
