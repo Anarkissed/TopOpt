@@ -1,12 +1,18 @@
 # Stage 3: smooth surfaces (TOSurface)
 
-Branch `claude/topopt-stage-3-surfaces-7f58fd`, from 2b40bcf4. Status: IN PROGRESS, PAUSED 2026-11-26 00:35 EST (weekly usage at 94 %; his rule). Nothing here is released.
+Branch `claude/topopt-stage-3-surfaces-7f58fd`, from 2b40bcf4. Status: IN PROGRESS (2026-11-25 22:30 EST). Nothing here is released.
 
 ## Where I stopped (read this first)
 
-- Code: everything below is committed and pushed. Tests A, B, F, J pass their gates (`--gate` in ctest). Off path byte-identical (M); switch-on runs repeat byte for byte (K).
-- Findings since hold 1: (1) design-box runs now use the new export (Stand v4 went through the voxel export in hold 1); (2) the re-fit runs just before each margin probe; (3) the re-fit's own CG stops at its 2,000-iteration cap with residual up to 2e-6 on real parts, and the slope at shipped designs is still median 3 (not 1): NOT RESOLVED; a gentler far weight (0.1) cost test A its gate (0.075 mm), so it stays 0.01; the move statistic was corrected (distance before against after) and not yet read on a real run; (4) at res 32, stage 1 + stage 3 together remove the ladder strips and lumps along Top Motor Mount's box (`stage-3-pics/topmotor_res32_stage3_alone_vs_stage1and3.png`): the final table must be stage 1 + 3.
-- Next, when usage allows: run `agent-scratch/tosurface/launch_ref2.sh` (stage 1 + 3 on frozen build 6f2b3dac, three lock holds: stand128 / topmotor / standv4; base / pressing / pillow L+R; topmotor@64 knots 2 against 1.5). Announced to TOReview; not started. Then: read the corrected re-fit statistics; decide the knot spacing; fill the before/after table with `measure_area.py` (before = ledger D's STLs, same ruler); report.
+- Code: committed; pushed up to 7316214a, later commits local until the report. Tests A, B, F, J pass their gates (`--gate` in ctest) on 733d46c6. Off path byte-identical (M); switch-on runs repeat byte for byte (K).
+- The stage 1 + 3 batch (frozen build 6f2b3dac, 2026-11-25 19:55-21:39) wrote NO files. Three causes, read from each report's `rejection_reason`:
+  1. Stand (128): "A Keep clear is sealed inside the part". Mine: a stamped VOID (a bolt's Keep clear) stopped at its own smoothed edge, so a skin of the function closed it off where it met the drawn bolt hole. Solid stamps were already carried two voxels past the drawn faces; void stamps now are too (733d46c6).
+  2. Top Motor Mount at 64: every version "could not be re-checked" (`fea_solve_mgcg_matfree: under-constrained system`, a load on a void DOF). Mine: the grid, tags and loads came from the part meshed at 0.1 mm, the file was cut by the 0.01 mm copy; a 0.1 mm chord lies up to 0.1 mm inside a bolt hole, so a loaded voxel whose centre sat in that sliver was solid in the solve and empty in the re-check. With the switch on, ONE 0.01 mm mesh now makes the grid, the tags, the loads and the cut (733d46c6). Consequence for the flip: the import tessellation changes for every part.
+  3. Base, Pressing Plate Mount, PillowBlock stands: the drawn part itself fails stage 1's face loads (as-drawn margin 0.35 / 0.35-1.1 against 1.5 required): not stage 3. Their surfaces are compared with stage 3 alone (same loads as the before files).
+  Also my script: a part that hit its time limit ended hold A (Top Motor Mount and Stand v4 at 96 never ran); fixed.
+- Running: `agent-scratch/tosurface/launch_ref3.sh` on frozen build 733d46c6, four holds (stand + Top Motor Mount at 64; Top Motor Mount + Stand v4 at 96; base / pressing / pillows, stage 3 alone; Top Motor Mount at 64, knots 1.5). Announced to TOReview.
+- Re-fit, measured: the narrow-band re-fit (warm-started; only the knots whose reach touches the surface band are solved for) leaves the re-fits at about 40 % of the loop's time; the CG "cap" is a tolerance artefact (1e-10 asked, about 1e-6 reached in 2,000 iterations). Slope of phi at the surface: median 1.2 on the stand (held), about 3 on Top Motor Mount (NOT held), both read on the whole zero set before the cut; from 733d46c6 it is read on the printed file's own corners.
+- Then: fill the before/after table with `measure_area.py` (before = ledger D's STLs, same ruler); decide the knot spacing from hold C; test P; pictures; report.
 - Not started: close-out (delete the switch and the old path) waits for the gate and his OK.
 
 ## Report (04-tests.md "What a stage report contains"; numbers filled from the final batch)
@@ -23,7 +29,7 @@ Branch `claude/topopt-stage-3-surfaces-7f58fd`, from 2b40bcf4. Status: IN PROGRE
 |---|---|---|
 | X-01, X-04 | The print surface is the zero surface of the optimiser's own function, meshed directly (marching tetrahedra on a body-centred grid, every vertex root-found to 1 um on the true zero set; Manifold::LevelSet). No fill fractions, no resample. | `mesh/level_surface.cpp` `mesh_level_surface`, `function_surface_mesh` |
 | C-01, C-02, C-03, B (rule 9) | Drawn faces exact: the function's surface is CUT BY THE DRAWN PART (exact boolean), so every drawn face the design keeps is the drawn face itself, any surface type (fillets, cones, splines too). The CAD snap is not called. | `function_surface_mesh`, `to_export.inc` |
-| I-02 | The STEP part is tessellated at 0.01 mm / 0.1 rad (was 0.1 mm / 0.5 rad) so its triangles meet the 0.02 mm target. | `io/step.cpp` |
+| I-02 | The STEP part is tessellated at 0.01 mm / 0.1 rad (was 0.1 mm / 0.5 rad) so its triangles meet the 0.02 mm target; that one mesh makes the grid, the tags, the loads and the cut, so the file's re-check sees the voxels the solve saw. | `io/step.cpp` |
 | F-01 | The curvature flow does not run (`FinishContext::flow`). The thin-spot cleanup still runs (stage 4). | `finish.cpp` |
 | B-01 | Crease-free bases: Wendland C4 and the cubic B-spline (tensor product; reproduces any flat wall exactly) beside today's Gaussian and Wendland C2. | `plsm_basis.hpp` |
 | V-02 (optimiser side) | Outside the part nothing acted on the function, so its zero set floated between the last part voxel and the drawn face (a smoothed staircase). Each Empty voxel within the basis reach now takes its nearest part voxel's value before every re-distance and fit, so the design's own decision reaches the drawn face. | `plsm.cpp` `extend_into_empty` |
