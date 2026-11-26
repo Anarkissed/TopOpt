@@ -4,9 +4,11 @@
 // sample's footer read "density 107 → 10 %".
 //   · 100 % is each type's OWN quilt (core's touch through the engine), never "half the cell" (the octet-style rule every
 //     type was read by); the percent is never over 100.
-//   · With Allow quilt off a percent past the type's open look is refused, and the centred pop-up says Allow quilt must be
-//     on (FlexibleSaid's recording: AppPopups.recorded). RED control: with Allow quilt on the same percent is taken.
-//   · The page's percent reaches core as the dial that lays that strut (with Allow quilt off, the open look is core's 1).
+//   · ★ notes29b: with Allow quilt off a percent past the type's LIMIT (one printed line short of its quilt, just under
+//     100 %) is refused, and the centred pop-up says Allow quilt must be on, with an (i) for why (FlexibleSaid's recording:
+//     AppPopups.recorded); past the open look and up to the limit is taken. RED control: with Allow quilt on, 100 % is taken.
+//   · The page's percent reaches core as the dial that lays that strut (with Allow quilt off, the open look is core's 1 and
+//     the limit is past 1).
 //   · The sample's footer says the Density percent, never over 100.
 import XCTest
 import TopOptKit
@@ -43,24 +45,41 @@ final class Notes29DensityDialTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(differs, 9, "RED CONTROL: half the cell is no type's quilt but fccz's")
     }
 
-    /// ★ Allow quilt off: past the open look is refused, and the pop-up says so in plain words (title of five words at most).
-    /// RED CONTROL: Allow quilt on takes it, and nothing pops up.
-    func testPastTheOpenLookIsRefusedWithAPopUp() throws {
+    /// ★ notes29b: Allow quilt off stops one printed line short of the quilt (core's lattice_quilt_off_strut_mm: touch x cell
+    /// - one line), just under 100 %; the open look is no longer the stop (a percent past it is taken). Past the limit is
+    /// refused, and the pop-up says so in plain words (title of five words at most), with an (i) for the reason.
+    /// RED CONTROL: Allow quilt on takes 100 %, and nothing pops up.
+    func testPastTheQuiltLimitIsRefusedWithAPopUp() throws {
         for id in Self.types {
+            let f = LatticeLayoutSession.typeFacts(id)
             let open = try XCTUnwrap(LatticeDensityDial.openLookPercent(cellMM: 8, topology: id, lineWidthMM: Self.line), id)
-            XCTAssertLessThan(open, 100, "\(id): the open look is under the quilt")
+            let limit = try XCTUnwrap(LatticeDensityDial.offMostPercent(cellMM: 8, topology: id, lineWidthMM: Self.line), id)
+            XCTAssertEqual(try XCTUnwrap(LatticeDensityDial.offMostMM(cellMM: 8, topology: id, lineWidthMM: Self.line)),
+                           f.touch * 8 - Self.line, accuracy: 1e-12, "★ \(id): one line short of the touch (core's rule)")
+            XCTAssertLessThan(limit, 100, "\(id): the limit is under the quilt")
+            XCTAssertGreaterThan(limit, open + 1, "★ \(id): the limit is past the open look")
             AppPopups.recorded = []
-            XCTAssertTrue(LatticeDensityDial.accept(open.rounded(.down), allowQuilt: false, cellMM: 8, topology: id, lineWidthMM: Self.line),
-                          "\(id): up to the open look is taken")
+            XCTAssertTrue(LatticeDensityDial.accept((open + 1).rounded(.up), allowQuilt: false, cellMM: 8, topology: id,
+                                                    lineWidthMM: Self.line), "★ \(id): past the open look is taken now")
+            XCTAssertTrue(LatticeDensityDial.accept(limit.rounded(.down), allowQuilt: false, cellMM: 8, topology: id,
+                                                    lineWidthMM: Self.line), "\(id): up to the limit is taken")
             XCTAssertTrue(AppPopups.recorded.isEmpty)
+            XCTAssertFalse(LatticeDensityDial.accept(limit.rounded(.down) + 1, allowQuilt: false, cellMM: 8, topology: id,
+                                                     lineWidthMM: Self.line), "★ \(id): one past the limit is refused")
             XCTAssertFalse(LatticeDensityDial.accept(100, allowQuilt: false, cellMM: 8, topology: id, lineWidthMM: Self.line),
                            "★ \(id): 100 % with Allow quilt off is refused")
             let p = try XCTUnwrap(AppPopups.recorded.last, id)
             XCTAssertEqual(p.title, LatticeDensityDial.refusedTitle)
+            XCTAssertFalse(p.info, "a refusal, not an (i)")
             XCTAssertLessThanOrEqual(p.title.split(separator: " ").count, 5, "the title: five words at most")
             XCTAssertTrue(p.text.contains("Allow quilt"), "★ it says Allow quilt must be on: \(p.text)")
-            XCTAssertTrue(p.text.contains("\(Int(open.rounded(.down))) %"), "it says how far it may go: \(p.text)")
+            XCTAssertTrue(p.text.contains("\(Int(limit.rounded(.down))) %"), "it says how far it may go: \(p.text)")
             for bad in ["std::", "open look", "open_look", "_"] { XCTAssertFalse(p.text.contains(bad), "plain words: \(p.text)") }
+            // its (i): the reason, in the centred card
+            XCTAssertEqual(AppPopups.shared.action?.title, LatticeDensityDial.refusedInfoButton)
+            AppPopups.shared.action?.run()
+            let info = try XCTUnwrap(AppPopups.recorded.last, id)
+            XCTAssertTrue(info.info && info.text.contains("one printed line"), "★ the (i) says why: \(info.text)")
             AppPopups.recorded = []
             XCTAssertTrue(LatticeDensityDial.accept(100, allowQuilt: true, cellMM: 8, topology: id, lineWidthMM: Self.line),
                           "RED CONTROL: \(id) with Allow quilt on goes to 100 %")
@@ -69,7 +88,8 @@ final class Notes29DensityDialTests: XCTestCase {
     }
 
     /// ★ The page's boxes (Grade from, Grade to): a stored density shows the dial percent (never over 100 %); a typed percent
-    /// past the open look stores nothing with Allow quilt off; within it, it stores the density that shows that percent back.
+    /// past the limit stores nothing with Allow quilt off; within it (past the open look too), it stores the density that
+    /// shows that percent back.
     func testTheGradeBoxesSpeakTheDial() throws {
         var l = LatticeSettings()
         l.topologyID = "bccz"
@@ -78,29 +98,70 @@ final class Notes29DensityDialTests: XCTestCase {
         let on = LatticeDensityDial.Page(l, lineWidthMM: Self.line, allowQuilt: true)
         XCTAssertLessThanOrEqual(off.shown(1.0), 1.0, "★ a density of 1 shows at most 100 %")
         XCTAssertLessThan(off.most, 100)
+        let open = try XCTUnwrap(LatticeDensityDial.openLookPercent(cellMM: off.cellMM, topology: "bccz", lineWidthMM: Self.line))
+        XCTAssertGreaterThan(off.most, open, "★ notes29b: the box stops at the limit, past the open look")
         AppPopups.recorded = []
         XCTAssertNil(off.typed(100), "★ Allow quilt off: 100 % stores nothing")
         XCTAssertEqual(AppPopups.recorded.last?.title, LatticeDensityDial.refusedTitle)
-        let rho = try XCTUnwrap(off.typed(off.most), "within the open look it stores")
+        let rho = try XCTUnwrap(off.typed(off.most), "within the limit it stores")
         XCTAssertEqual(off.shown(rho) * 100, off.most, accuracy: 1.0, "and shows back what was typed")
         XCTAssertNotNil(on.typed(100), "RED CONTROL: Allow quilt on stores 100 %")
     }
 
-    /// ★ The percent reaches core as the dial that lays that strut: with Allow quilt off the open look's percent is core's 1
-    /// (its widest), the thinnest its 0.01; with it on, 100 % is core's 1 and the open look's percent is under it.
+    /// ★ The percent reaches core as the dial that lays that strut: with Allow quilt off the open look's percent is core's 1,
+    /// the thinnest its 0.01, and (★ notes29b) the limit's percent is past 1, the dial on which core's own rule (R10, the
+    /// same steps of width past 1) lays the limit's strut, one line short of the touch; with it on, 100 % is core's 1.
     func testThePercentIsCoresDial() throws {
         for id in Self.types {
+            let q = try XCTUnwrap(LatticeDensityDial.limits(topology: id))
             let open = try XCTUnwrap(LatticeDensityDial.openLookPercent(cellMM: 8, topology: id, lineWidthMM: Self.line))
             let offTop = LatticeDensityDial.coreDial(percent: open, cellMM: 8, topology: id, lineWidthMM: Self.line,
                                                      minStrutLines: 2, allowQuilt: false)
-            XCTAssertEqual(offTop, 1, accuracy: 1e-6, "★ \(id): the open look is core's widest with Allow quilt off")
+            XCTAssertEqual(offTop, 1, accuracy: 1e-6, "★ \(id): the open look is core's 1 with Allow quilt off")
             XCTAssertEqual(LatticeDensityDial.coreDial(percent: 1, cellMM: 8, topology: id, lineWidthMM: Self.line,
                                                        minStrutLines: 2, allowQuilt: false), 0.01, accuracy: 1e-6)
+            let limit = try XCTUnwrap(LatticeDensityDial.offMostPercent(cellMM: 8, topology: id, lineWidthMM: Self.line))
+            let past = LatticeDensityDial.coreDial(percent: limit, cellMM: 8, topology: id, lineWidthMM: Self.line,
+                                                   minStrutLines: 2, allowQuilt: false)
+            XCTAssertGreaterThan(past, 1, "★ \(id): past the open look is core's dial past 1")
+            // core's R10 on the 8 mm cell: thinnest + (dial - 0.01) / 0.99 x (open look x cell - thinnest)
+            let thinnest = 2 * Self.line
+            let strut = thinnest + (past - 0.01) / 0.99 * (q.openLook * 8 - thinnest)
+            XCTAssertEqual(strut, q.quilt * 8 - Self.line, accuracy: 1e-6, "★ \(id): core lays the limit's strut")
+            XCTAssertEqual(LatticeDensityDial.coreDial(percent: 100, cellMM: 8, topology: id, lineWidthMM: Self.line,
+                                                       minStrutLines: 2, allowQuilt: false), past, accuracy: 1e-9,
+                           "★ \(id): never past the limit with Allow quilt off")
             XCTAssertEqual(LatticeDensityDial.coreDial(percent: 100, cellMM: 8, topology: id, lineWidthMM: Self.line,
                                                        minStrutLines: 2, allowQuilt: true), 1, accuracy: 1e-6)
-            XCTAssertLessThan(LatticeDensityDial.coreDial(percent: open, cellMM: 8, topology: id, lineWidthMM: Self.line,
+            XCTAssertLessThan(LatticeDensityDial.coreDial(percent: limit, cellMM: 8, topology: id, lineWidthMM: Self.line,
                                                           minStrutLines: 2, allowQuilt: true), 1, "RED CONTROL: \(id), on")
         }
+    }
+    /// ★ notes29b (his question on release 20: "Are you saying that no matter what happens, all Small cells in thin walls are
+    /// going to be quilted?" -- no): the switch is on offer again with Allow quilt off (not greyed; greyed only with Allow
+    /// quilt on, where it is moot), its captions are five words at most, its (i) says it never fuses, and a thin wall's
+    /// pop-up offers it again. RED CONTROL: with Allow quilt on it is not offered.
+    func testSmallCellsInThinWallsIsOnOfferAgain() throws {
+        var u = URL(fileURLWithPath: #filePath); for _ in 0..<3 { u.deleteLastPathComponent() }
+        let wizard = try String(contentsOf: u.appendingPathComponent("Sources/TopOptFlows/LatticeSetupWizard.swift"), encoding: .utf8)
+        let block = try XCTUnwrap(wizard.components(separatedBy: "private var smallCellsSwitch").dropFirst().first?
+            .components(separatedBy: "private var singleCellSwitch").first)
+        XCTAssertTrue(block.contains(".disabled(project.lattice.allowQuilt)"), "★ greyed only with Allow quilt on")
+        XCTAssertFalse(block.contains(".disabled(true)"), "★ never greyed for good")
+        for caption in ["Allow quilt already does this", "Thin walls get small cells", "Thin walls stay solid"] {
+            XCTAssertTrue(block.contains("\"\(caption)\""), caption)
+            XCTAssertLessThanOrEqual(caption.split(separator: " ").count, 5, "★ five words at most: \(caption)")
+        }
+        XCTAssertTrue(LatticeSetupWizard.smallCellsInfo.contains("never fuse"), LatticeSetupWizard.smallCellsInfo)
+        XCTAssertTrue(LatticeSetupWizard.smallCellsInfo.contains("one printed line"), LatticeSetupWizard.smallCellsInfo)
+        var l = LatticeSettings()
+        l.stageMode = .aesthetic
+        l.allowQuilt = false
+        XCTAssertTrue(SolidReason.of(share: 0.2, nocell: [0, 10, 0, 0, 0], lattice: l)?.fixes.contains(.smallCells) == true,
+                      "★ a thin wall's pop-up offers it")
+        l.allowQuilt = true
+        XCTAssertFalse(SolidReason.of(share: 0.2, nocell: [0, 10, 0, 0, 0], lattice: l)?.fixes.contains(.smallCells) == true,
+                       "RED CONTROL: with Allow quilt on it is moot, not offered")
     }
 
     /// ★ The sample's footer says the Density percent, never over 100 ("density 107 → 10 %" on BCC + Z). The sample is laid
@@ -112,11 +173,12 @@ final class Notes29DensityDialTests: XCTestCase {
         l.algorithm = "stepped"
         l.boundary = .rim
         l.allowQuilt = false
-        l.smallCellsInThinWalls = true   // his per-part choice: no longer brings the quilt back
+        l.smallCellsInThinWalls = true   // his per-part choice: thin walls only, never fused (★ notes29b)
         let plan = LatticeSampleLay.page(l, lineWidthMM: Self.line, wallRingMM: 0.9)
         let made = try await LatticeSampleLay.lay(plan, cube: false)
         XCTAssertGreaterThan(made.pctHi, 0)
         XCTAssertLessThanOrEqual(made.pctHi, 100, "★ never over 100 %")
+        XCTAssertLessThan(made.pctHi, 100, "★ notes29b: Allow quilt off lays no strut at its quilt (100 %)")
         let caption = LatticeSampleLay.caption(made, typeName: "BCC + Z", cube: false, finish: plan.finishWord, band: plan.band)
         let numbers = caption.components(separatedBy: "density ").dropFirst().first?
             .components(separatedBy: " %").first?.components(separatedBy: " → ").compactMap { Int($0) } ?? []

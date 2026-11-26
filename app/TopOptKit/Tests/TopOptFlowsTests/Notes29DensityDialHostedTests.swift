@@ -45,9 +45,10 @@ final class Notes29DensityDialHostedTests: XCTestCase {
         return (number("Grade from"), number("Grade to"))
     }
 
-    /// ★ Allow quilt off, Manual, BCC + Z, Grade from stored at a density of 1 (the "100 %" of before): the box draws the
-    /// type's open look at most, never 100 %. RED CONTROL: Allow quilt on, the same stored density draws past it.
-    func testTheGradeBoxStopsAtTheOpenLookWithAllowQuiltOff() throws {
+    /// ★ Allow quilt off, Manual, BCC + Z, Grade from stored at a density of 1 (the "100 %" of before): the box draws at most
+    /// the type's limit (★ notes29b: one printed line short of its quilt, just under 100 %), never 100 %, and past the open
+    /// look (no longer the stop). RED CONTROL: Allow quilt on, the same stored density draws past the limit.
+    func testTheGradeBoxStopsJustUnderTheQuiltWithAllowQuiltOff() throws {
         func make(_ quilt: Bool) throws -> ProjectModel {
             try project { p in
                 p.lattice.topologyID = "bccz"
@@ -62,12 +63,15 @@ final class Notes29DensityDialHostedTests: XCTestCase {
         let page = LatticeDensityDial.Page(off.lattice, lineWidthMM: off.printParams.strutLineWidthMM, allowQuilt: false)
         let a = drawn(off)
         let from = try XCTUnwrap(a.from, "the Grade from box is drawn")
-        XCTAssertLessThanOrEqual(Double(from), page.most, "★ Allow quilt off: at most the open look (\(page.most) %)")
+        XCTAssertLessThanOrEqual(Double(from), page.most, "★ Allow quilt off: at most the limit (\(page.most) %)")
         XCTAssertLessThan(from, 100)
+        let open = try XCTUnwrap(LatticeDensityDial.openLookPercent(cellMM: page.cellMM, topology: "bccz",
+                                                                    lineWidthMM: off.printParams.strutLineWidthMM))
+        XCTAssertGreaterThan(Double(from), open, "★ notes29b: past the open look (\(open) %): it is not the stop")
         let on = try make(true)
         let b = drawn(on)
         let fromOn = try XCTUnwrap(b.from)
-        XCTAssertGreaterThan(Double(fromOn), page.most, "RED CONTROL: Allow quilt on draws past the open look (\(fromOn) %)")
+        XCTAssertGreaterThan(Double(fromOn), page.most, "RED CONTROL: Allow quilt on draws past the limit (\(fromOn) %)")
         XCTAssertLessThanOrEqual(fromOn, 100, "never over 100 %")
     }
 }

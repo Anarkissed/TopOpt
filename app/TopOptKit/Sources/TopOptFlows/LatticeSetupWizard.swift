@@ -1791,15 +1791,13 @@ public struct LatticeSetupWizard: View {
             }
             .toggleStyle(SwitchToggleStyle(tint: DS.Color.okGreen.color))
             .latticeID("wizard-small-cells-thin-walls")
-            // ★ 11-13: Allow quilt already lets cells go this small. ★ notes29 (his notes on release 20): with it off the
-            // engine lays no cell under the open one (its small cells were the quilt), so the switch does nothing either way
-            .disabled(true)
-            captionLine(project.lattice.allowQuilt ? "Allow quilt does this now."
-                                                   : "Needs Allow quilt on.",
-                        info: "small-cells",
-                        "Small cells in a thin wall carry the thinnest strut, past the open look: that is the quilt. With "
-                        + "Allow quilt off no cell is smaller than the one that stays open, so a wall too thin for it stays "
-                        + "solid. With Allow quilt on, cells already go this small.")
+            // ★ 11-13: Allow quilt already lets cells go this small. ★ notes29b (his question on release 20: "Are you saying
+            // that no matter what happens, all Small cells in thin walls are going to be quilted?" -- no): on again with
+            // Allow quilt off, for thin walls only, never past the quilt (core's CellSpec::small_in_thin_walls)
+            .disabled(project.lattice.allowQuilt)
+            captionLine(project.lattice.allowQuilt ? "Allow quilt already does this"
+                        : model.smallCellsInThinWalls ? "Thin walls get small cells" : "Thin walls stay solid",
+                        info: "small-cells", Self.smallCellsInfo)
         }
     }
 
@@ -2276,7 +2274,8 @@ public struct LatticeSetupWizard: View {
     static let typePickLine = "Pick a lattice type to save."
 
     /// ★ notes28: Allow quilt's (i), the type's own numbers (core's lattice_width_bounds through the engine): where its struts
-    /// touch, and the open look they stay under with the switch off. Never the octet's numbers under another name.
+    /// touch, and the open look they keep on their own. Never the octet's numbers under another name. ★ notes29b: with the
+    /// switch off the limit is the quilt, one printed line short of it (core's lattice_quilt_off_strut_mm), not the open look.
     static func quiltInfo(_ id: String) -> String {
         let f = LatticeLayoutSession.typeFacts(id)
         let name = LatticeType.displayName(forID: id)
@@ -2285,10 +2284,18 @@ public struct LatticeSetupWizard: View {
                 + "that point. On, the manual density methods may pass it; simulated ones never do."
         }
         func pct(_ v: Double) -> String { "\(Int((v * 100).rounded())) %" }
-        return "\(name) struts touch and fuse into a quilt once a strut is \(pct(f.touch)) of the cell. Off, every strut "
-            + "stays under \(pct(f.openLook)) of the cell, where the windows stay open. On, the manual density methods may "
-            + "pass it; simulated ones never do."
+        return "\(name) struts touch and fuse into a quilt once a strut is \(pct(f.touch)) of the cell. Off, struts stop "
+            + "one printed line short of touching, so every gap prints open; on their own they stay near \(pct(f.openLook)) "
+            + "of the cell, and only a density you ask for goes past that. On, the manual density methods may reach the "
+            + "quilt; simulated ones never do."
     }
+
+    /// ★ notes29b: Small cells in thin walls' (i) (his question on release 20: "Are you saying that no matter what happens, all
+    /// Small cells in thin walls are going to be quilted?" -- no).
+    static let smallCellsInfo = "New engine only. A wall too thin for the normal open cell takes its own smaller, denser "
+        + "cells instead of going solid. They go down to the size where the thinnest strut stops one printed line short of "
+        + "touching its neighbour, never further, so they never fuse into a quilt. Only thin walls change: every other cell "
+        + "stays as it was. A wall too thin even for that stays solid. With Allow quilt on, cells already go this small."
     static func typeInfo(_ name: String) -> String {
         "The lattice's cell shape. \(name) is the type the app offers today; more types arrive one update at a time, "
             + "each once its settings and pictures are in."
