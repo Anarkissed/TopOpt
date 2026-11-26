@@ -10,6 +10,7 @@
 #include "topopt/pipeline.hpp"
 #include "topopt/plsm.hpp"
 
+#include <optional>
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
@@ -145,6 +146,29 @@ std::vector<NodalLoad> masked_self_weight_loads(const VoxelGrid& grid,
   for (std::size_t idx = 0; idx < mask.size(); ++idx)
     if (mask[idx] == MaskValue::FrozenVoid) weighed.tags[idx] = VoxelTag::Empty;
   return self_weight_loads(weighed, density, gravity, direction);
+}
+
+// The SAME weight as masked_self_weight_loads, said per voxel (the connection
+// rule's caller change, TO rebuild stage 5): force[e] = gravity x density x voxel
+// volume on every voxel that function weighs (solid by tag, not FrozenVoid), else
+// 0. The solve is handed this (FeaBodyLoadScope) so that a loose piece's own
+// weight can leave the solve with it; it only ever subtracts it. THE ONE RULE:
+// the two functions weigh exactly the same voxels.
+std::vector<double> masked_self_weight_voxel_force(const VoxelGrid& grid,
+                                                   const DesignMask& mask,
+                                                   double density, double gravity) {
+  if (mask.size() != grid.voxel_count())
+    throw std::invalid_argument(
+        "masked_self_weight_voxel_force: mask size != grid.voxel_count()");
+  const double per_voxel = gravity * density * grid.voxel_volume();
+  std::vector<double> force(grid.voxel_count(), 0.0);
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        const std::size_t idx = grid.index(i, j, k);
+        if (grid.solid(i, j, k) && mask[idx] != MaskValue::FrozenVoid) force[idx] = per_voxel;
+      }
+  return force;
 }
 
 // CORE LIST item 42 B — THE BRIDGE HOLDS ITSELF (the reviewer's values of 2026-10-25
@@ -979,6 +1003,25 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   // load this run certified under" is reconstructed, never re-derived.
   const std::vector<NodalLoad> loads =
       design_domain_loads(domain, options, material.density_g_cm3);
+
+  // THE CONNECTION RULE (to_stage_switch.hpp, TOPOPT_CONNECTION=support; unset =
+  // today's bytes). Held for the whole run: every solve below counts a piece as
+  // held only when it reaches a support. In the self-weight mode the solve is
+  // also told each voxel's weight, so a loose piece leaves with its own weight;
+  // with an external load case nothing is registered, so every load is an applied
+  // load and a loose piece that carries one refuses the version (FeaLoadUnheld).
+  std::vector<double> body_voxel_force;
+  std::optional<FeaAnchorBySupportOnly> held_by_support_only;
+  std::optional<FeaBodyLoadScope> body_load_scope;
+  if (to_connection_rule_on()) {
+    held_by_support_only.emplace();
+    if (options.external_loads.empty()) {
+      body_voxel_force = masked_self_weight_voxel_force(
+          domain.grid, design_domain_mask(domain, options), material.density_g_cm3,
+          options.gravity);
+      body_load_scope.emplace(body_voxel_force, normalized(options.gravity_direction));
+    }
+  }
 
   // The reported / analysed build direction is the build-plate normal — "which
   // way is up on the plate", a DIFFERENT question from "which way is down in

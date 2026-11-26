@@ -223,6 +223,10 @@ The beam and its load are mirror-symmetric along and across, on a grid that is s
 
 Automatic pad at 1.0 (8.9 mm behind the fixed top face, 5.9 mm under the loaded tip), drawn-face loads, the smooth surface. Three versions were made (in-loop margins 12.3 / 10.7 / 7.5 at 0.68 / 0.52 / 0.38); on the 0.26 version the run ended with an error: "stopped: the solver did not converge ... Jacobi-CG ran 106592 iterations in 2700 s ... past its 2700 s time limit". The log says why: at that solve the design was in pieces, "3 of 5 pieces (7285 vox, largest 7279)" loose at the floor, more than a quarter of the part: the hook had come apart, and instead of refusing the version the job spent 45 minutes and died. Twice earlier in the run multigrid diverged and the slow fallback took 20 and 33 minutes. Today's path on the same part made four versions with no fallback. Read plainly: this is not the loads or the surface; it is what the stage report said stage 1 does NOT fix (a design in pieces stalls the solver and loses the job), now seen at its worst, with a pad deep enough (1.0) to leave little to carve. Sent to TOSolver as a replay case. The hook at 0.2 and at 1.0 on the lead's own build are still running.
 
+### FLIP ITEM 2(d): the hook at res 64, drawn-face loads, the automatic pad (0.2), nothing else on: PASSES (15:00)
+
+One thread, alone, through the memory gate (free 43 %): three versions in 684 s, 0.68: 4.76, 43.6 g; 0.52: 4.57, 33.8 g; 0.38: 4.17, 25.2 g; NO fallback to Jacobi-CG, nothing refused. Pads 4.0 mm behind the fixed top face (80 mm of stem) and 2.65 mm under the loaded tip. Today's path made a fourth version (0.26: 3.75, 18.1 g) and the fixed 3 mm pad three (4.75 / 4.58 / 3.98 at 43.4 / 33.6 / 24.8 g). So the hook's death in the trial build came from the 1.0 pad and the pieces it left, not from the drawn-face loads. The reviewer's pass mark (versions made, no fallback) is met.
+
 ## Still owed before the stage report
 
 - The original stand optimised both ways (queued), then Top Motor Mount; three settings; pad 2 / 3 / 4.5 mm.

@@ -57,4 +57,16 @@ inline StrengthMode strength_mode() {
 
 inline bool to_stage2_on() { return strength_mode() != StrengthMode::Today; }
 
+// THE CONNECTION RULE (stage 5; the reviewer's ruling of 2026-11-26, maintainer-
+// approved): TOPOPT_CONNECTION=support makes a piece of the design count as held
+// only when it reaches a SUPPORT (a fixed face). A loose piece that carries only
+// its own weight leaves the solve with that weight; a loose piece that carries an
+// applied load refuses the version in plain words ("the load has no path to a
+// mount"). Unset = today: a piece is held by a support OR by any load, so under
+// self-weight nothing loose is ever taken out. Temporary, like the others.
+inline bool to_connection_rule_on() {
+  const char* v = std::getenv("TOPOPT_CONNECTION");
+  return v != nullptr && std::string(v) == "support";
+}
+
 }  // namespace topopt
