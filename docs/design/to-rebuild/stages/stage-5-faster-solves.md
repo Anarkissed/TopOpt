@@ -208,6 +208,18 @@ Still to come: the rest of the dumps (demo, Pressing, Pillow Blocks, stand at 12
 ### The open choices, settled with their settings
 - Smoother (B-05): damped Jacobi F/lambda at F = 1.0 / 1.333 / 1.6 against 4th-kind Chebyshev K = 2 / 3 / 4, on every reference dump (to fill from measureB). The stall rule: 1,000 cycles, then 2x per 500 (measured on Top Motor Mount, commit 49f28890).
   DECISION RULE, written 11-26 05:15 before the data: among the settings with NO solve off multigrid, failed or sent to the l1 retry on any dump, the lowest total wall (cold + warm, all dumps) wins; settings within 5 % of it are a tie, broken by fewer total fine operator applies (matvecs, the machine-independent cost), then by the simpler smoother (Jacobi before Chebyshev, lower degree first). If no setting is clean on every dump, the one with the fewest such solves, then the same order.
+  RESULT (measureB, under the lock 11-26 17:42-18:42, Release, production threads; 44 solves = 9 parts x solves 1 / 5 / 20, cold and warm; table agent-scratch/tosolver/diag/replay/table.md):
+  | setting | total cycles | total wall | fine applies (matvecs) | solves off multigrid / l1 |
+  |---|---|---|---|---|
+  | today | 37,212 | 745 s | 215,560 | 43 of 44 |
+  | jacobi:1.0 | 25,953 | 563 s | 170,907 | 3 (demo solve 10 cold + warm, Stand v4 solve 1 cold) |
+  | jacobi:1.333 | 23,310 | 467 s | 160,335 | 2 (demo solve 10 cold + warm) |
+  | jacobi:1.6 | 22,092 | 435 s | 155,463 | 2 (the same) |
+  | cheb:2 | 18,953 | 428 s | 156,860 | 2 (the same) |
+  | cheb:3 | 16,654 | 454 s | 168,673 | 2 (the same) |
+  | cheb:4 | 15,863 | 500 s | 184,862 | 2 (the same) |
+  No setting is clean: demo solve 10 (8 LOADED pieces cut off from every support) leaves multigrid under every smoother; that solve is the connection rule's case (refused at once under the ruled form) and the switch's (the algebraic level converges it). Fewest such solves: 2, five settings. Lowest wall among them: cheb:2 428 s; within 5 %: jacobi:1.6 (435 s, +1.6 %). Tie broken by fewer fine applies: jacobi:1.6 (155,463 against 156,860). CHOSEN: jacobi:1.6 (damped Jacobi at weight 1.6 / lambda per level). Today's smoother: 43 of 44 solves off the shipped cycle; the chosen one halves the total wall (745 -> 435 s) and fine applies (-28 %).
+  Flagged, not overridden: the tie-break margin is under 1 % (noise), and weight 1.6 sits nearer the stability edge than Chebyshev (stable while 1.6 x lambda_true / (1.1 x lambda_estimate) < 2, i.e. while the 12-step power estimate is within 27 % of the true lambda; power iteration estimates from below). Jacobi at 1.0 already failed one solve (too weak). The five test shapes beyond his parts and the timed switch sweep now run jacobi:1.6 and cheb:2 side by side (the before-and-after table runs today and jacobi:1.6); if jacobi:1.6 leaves multigrid on any shape or dump where cheb:2 does not, cheb:2 replaces it (stated here before those runs).
 - Element product (B-06): stored dofs (today, full-length copies) / reduced numbering with a spare slot (B2, B3) / grid stencil (C), at 1 / 3 / 6 threads (to fill from measureC).
 - Single precision (section K): FP32 against FP64 cycle, same iterations; keep only at >= 15 % solve wall (to fill from measureC). The FP32 cycle had no Chebyshev (mixed was refused whenever Chebyshev was selected), so it is measured with the same smoother: an FP32 Chebyshev written in scratch (agent-scratch/tosolver/fp32/, a 75-line diff to multigrid.cpp; test test_to_solver_fp32_cheb, 10 checks green: cheb:2 13 cycles in both precisions, energy diff 6.6e-12) and timed on every reference dump (fp32time.sh). It goes into the tree only if FP32 is kept.
 
