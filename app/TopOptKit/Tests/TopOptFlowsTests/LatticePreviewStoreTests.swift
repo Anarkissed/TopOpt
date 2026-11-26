@@ -197,7 +197,9 @@ final class LatticePreviewStoreTests: XCTestCase {
         // ★ RE-PINNED 12 -> 13 (notes28 sheets, builder C; merged notes30 M1): + sheets, a sheet layout's fields — NOT kept
         // here: the store keeps finished Organic lattices only, and a sheet is never Organic
         XCTAssertEqual(n(LatticeLayoutBarsInputs(token: 0, bars: [])), 13, "what is drawn")
-        XCTAssertEqual(n(LatticeLayoutSolidGrid(token: 0, origin: .zero, voxel: 1, dims: .zero, rg: [])), 6)
+        // ★ RE-PINNED 6 -> 8 (notes28 sheets, builder E; merged notes30 M1): + sheetSeam, sheetSeamMM, the Blend band's seam
+        // channels — filled for a sheet's map only, so an Organic lattice's kept map never carries them: NOT kept here
+        XCTAssertEqual(n(LatticeLayoutSolidGrid(token: 0, origin: .zero, voxel: 1, dims: .zero, rg: [])), 8)
         // ★ RE-PINNED (362 11-24: notes25 D10 added floorCellMM; the store now keeps it, format 2, and still reads 1)
         // ★ RE-PINNED 13 -> 15 (notes28 sheets, builder C): + sheets, sheetSeams — never an Organic lattice's, so not kept
         XCTAssertEqual(n(LatticeLayoutColours.Laid()), 15)

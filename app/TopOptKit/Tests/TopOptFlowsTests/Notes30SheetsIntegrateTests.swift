@@ -143,9 +143,13 @@ final class Notes30SheetsIntegrateTests: XCTestCase {
         let pass = try LatticeLayoutSheetPass(device: device)
         let f = LatticeBuildTimelapse.Frame(lo: SIMD3(-2, -3, 0), hi: SIMD3(38, 27, 40), up: SIMD3(0, 0, 1), across: SIMD3(1, 0, 0))
         XCTAssertEqual(f.floors, 4)
-        var g = SeededGenerator(11)
-        let pts = (0..<500).map { _ in SIMD3(Float.random(in: -2...38, using: &g), Float.random(in: -3...27, using: &g),
-                                             Float.random(in: 0...40, using: &g)) }
+        // deterministic points over the box (a fixed lattice of irrational steps, wrapped)
+        let pts = (0..<500).map { i -> SIMD3<Float> in
+            let k = Float(i)
+            return SIMD3(-2 + 40 * (k * 0.618034).truncatingRemainder(dividingBy: 1),
+                         -3 + 30 * (k * 0.754878).truncatingRemainder(dividingBy: 1),
+                         40 * (k * 0.569840).truncatingRemainder(dividingBy: 1))
+        }
         let all = f.floors * LatticeBuildTimelapse.perFloor
         var shownBefore = -1
         for n in 0...all {
