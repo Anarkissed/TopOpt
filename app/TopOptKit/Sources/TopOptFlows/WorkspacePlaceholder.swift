@@ -1369,7 +1369,7 @@ public struct WorkspacePlaceholder: View {
                 .overlay { if newEngineDrawn { LatticeRefreshingCard(progress: newEngine.refresh) } }   // ★ notes29: Skip all animations — the centred card
                 .onChange(of: newEngineOn) { on in
                     if on, latticeSim.field == nil, LatticeLayoutPreview.needsStress(project.lattice) { latticeSim.adoptSaved(for: model.makeLatticeSimContexts()) }   // ★ his 11-23
-                    newEngine.update(project: project, on: on, solid: !surfaceXrayOn, stress: newEngineStress)
+                    newEngine.update(project: project, on: on, solid: !surfaceXrayOn, stress: newEngineStress, live: latticeLiveHere)   // ★ notes30
                     // ★ Install 3: under the new engine the old picture goes (memory, and no stale key or card); leaving it (the
                     // lattice page, a variant, Organic) bakes it again
                 }
@@ -1405,7 +1405,7 @@ public struct WorkspacePlaceholder: View {
                     // ★ Install 3: the drawer's walls and cells are the new engine's — re-derive the cards when its layout lands
                     if newEngineDrawn, Self.perRegionCellAlgorithms.contains(project.lattice.algorithm) { refreshLatticeFaceCards() }
                 }
-                .onChange(of: surfaceXrayOn) { x in if newEngineOn { newEngine.update(project: project, on: true, solid: !x, stress: newEngineStress) } }
+                .onChange(of: surfaceXrayOn) { x in if newEngineOn { newEngine.update(project: project, on: true, solid: !x, stress: newEngineStress, live: latticeLiveHere) } }
                 .onChange(of: project.lattice, perform: { _ in if newEngineOn { newEngineSettingsChanged(); fileExport.settingsChanged() } })   // ★ 11-16: Live waits, Click to refresh holds   // (the rebake's lattice trigger stays the page's first: OrganicPreviewBakeInputsTests)
                 .onChange(of: newEngine.organicWallVerdicts) { v in   // ★ E5: core's word on each wall (Selections' foci row)
                     if !v.isEmpty { project.recordLatticeWallVerdicts(v) }
@@ -2202,7 +2202,7 @@ public struct WorkspacePlaceholder: View {
         return PrintCheckLay.Preview(
             inputs: { try await preview.organicMacInputs(project: p, stress: newEngineStress) },
             stressReady: { try await stressReadyForCheck(isCancelled: isCancelled, said: said) },
-            lay: { preview.update(project: p, on: true, solid: false, stress: newEngineStress, checkNozzle: false, exact: true) },
+            lay: { preview.update(project: p, on: true, solid: false, stress: newEngineStress, live: latticeLiveHere, checkNozzle: false, exact: true) },
             busy: { preview.laying || preview.opening },
             problem: { preview.problem },
             stop: { if !newEngineOn { preview.clear() } })
@@ -3757,7 +3757,7 @@ public struct WorkspacePlaceholder: View {
         .onChange(of: latticeStressFieldKey) { _ in
             refreshLatticeStressPeak()
             if showStrutPreview, project.lattice.enabled { buildStrutScene() }
-            if newEngineOn { newEngine.update(project: project, on: true, solid: !surfaceXrayOn, stress: newEngineStress) }   // ★ Install 2: the field landed
+            if newEngineOn { newEngine.update(project: project, on: true, solid: !surfaceXrayOn, stress: newEngineStress, live: latticeLiveHere) }   // ★ Install 2: the field landed
         }
         .onChange(of: latticeSim.phase) { phase in   // ★ Install 3: a Lattice press that started the stress check goes on
             guard let waiting = latticeAfterStress else { return }
@@ -5224,7 +5224,8 @@ public struct WorkspacePlaceholder: View {
     /// change; Click to refresh marks the preview out of date (the Lattice button reads Refresh Lattice).
     private func newEngineSettingsChanged() {
         if latticeLiveHere {
-            newEngine.update(project: project, on: true, solid: !surfaceXrayOn, stress: newEngineStress, delay: LatticePreviewMode.liveWait)
+            newEngine.update(project: project, on: true, solid: !surfaceXrayOn, stress: newEngineStress, delay: LatticePreviewMode.liveWait,
+                             live: true)   // ★ notes30 (his 11-26): Live preview — no animation, no progress; it just changes
         } else if newEngine.isCurrent(project: project, stress: newEngineStress) {
             latticePreviewStale = false   // ★ 11-21: back to the settings on screen (his undo of a zone delete): nothing to lay
         } else {
@@ -5255,7 +5256,7 @@ public struct WorkspacePlaceholder: View {
         }
         if newEngineOn {
             if LatticeLayoutPreview.needsStress(project.lattice) { runNewEngineStressCheck() }   // only what these settings read
-            newEngine.update(project: project, on: true, solid: !surfaceXrayOn, stress: newEngineStress, checkNozzle: checkNozzle,
+            newEngine.update(project: project, on: true, solid: !surfaceXrayOn, stress: newEngineStress, live: latticeLiveHere, checkNozzle: checkNozzle,
                              exact: exact)   // ★ 11-21: the print file asks the exact lattice whatever the preview shows
         }
     }
@@ -15001,7 +15002,8 @@ extension WorkspacePlaceholder {
         let refresh = LatticePreviewMode.showsRefresh(live: latticeLiveHere, previewUp: showStrutPreview,
                                                       stale: latticePreviewStale, running: runs)
         // ★ his pick 11-21: an Organic preview laying wears its ring and count-down on the button (never a bottom line)
-        let laying = refresh || runs ? nil : newEngine.layProgress.map(LatticePreviewMode.buttonProgress)
+        // ★ notes30 (his 11-26): a Live preview lay wears none (`ringProgress`)
+        let laying = refresh || runs ? nil : newEngine.ringProgress.map(LatticePreviewMode.buttonProgress)
         // ★ his 11-22 (img 47): his press for the print file reads "Making the print file", then "Approved" · "Tap to export"
         // (LatticePrintFlow; only that button follows it)
         // ★ his 11-22 ("Lattice print accurate ... to indicate that there would be another step in between"): with an Organic
