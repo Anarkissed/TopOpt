@@ -40,6 +40,35 @@ namespace {
 double ms_since(std::chrono::steady_clock::time_point t0) {
   return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
 }
+// SHEETS (SPEC 1.2 item 3): Structural's member floor for a sheet, in cells (0: none). Structural is the count of cells
+// across a wall it sends (three or more: the type's own, lattice_cells_per_member_min); never under the sheet's own
+// floor (sheet_structural_floor_cells). A strut type, and Aesthetic (one or two across), have none.
+double sheet_floor_cells(const Settings& s, const CellSpec& rc) {
+  if (!sheet_kind_of(s.cells.topology) || rc.min_cells_across < 3) return 0.0;
+  return std::max(static_cast<double>(rc.min_cells_across), sheet_structural_floor_cells(s.cells.topology));
+}
+// The cell a sheet region asks for before its depth divides it: typed, else Max cell held under the type's cap.
+double sheet_target_mm(const CellSpec& rc) {
+  return rc.cell_mm > 0.0 ? rc.cell_mm : std::min(rc.cell_max_mm, auto_cell_cap_mm(rc.topology));
+}
+const AreaOwn* own_of(const Settings& s, int id) {
+  for (const Settings::RegionAsk& r : s.regions)
+    if (r.id == id && r.role == Role::Lattice && r.own.any()) return &r.own;
+  return nullptr;
+}
+CellSpec cells_of(const Settings& s, int id) {
+  const AreaOwn* o = id > 0 ? own_of(s, id) : nullptr;
+  return o ? region_cells(s.cells, *o) : s.cells;
+}
+// Does any sheet floor apply (the part's, or any Lattice region's own)?
+bool sheet_floors(const Settings& s) {
+  if (!sheet_kind_of(s.cells.topology)) return false;
+  if (sheet_floor_cells(s, s.cells) > 0.0) return true;
+  for (const Settings::RegionAsk& r : s.regions)
+    if (r.role == Role::Lattice && sheet_floor_cells(s, cells_of(s, r.id)) > 0.0) return true;
+  return false;
+}
+
 // Every setting that decides WHERE lattice goes, written out exactly: two settings with
 // the same text read the part the same way.
 std::string where_text(const Settings& s) {
@@ -93,6 +122,17 @@ std::string where_text(const Settings& s) {
     for (int f : p.faces) whole(f);
     pieces(p.pieces);
     out += ";";
+  }
+  // SHEETS: a sheet's Structural floor is a "where" setting (Region::min_wall_mm): its cells and floor per region.
+  // Written only when one applies (every other text is as it was).
+  if (sheet_floors(s)) {
+    out += "S";
+    whole(static_cast<long>(s.cells.topology));
+    num(sheet_floor_cells(s, s.cells)); num(sheet_target_mm(s.cells));
+    for (const Settings::RegionAsk& r : s.regions) {
+      const CellSpec rc = cells_of(s, r.id);
+      whole(r.id); num(sheet_floor_cells(s, rc)); num(sheet_target_mm(rc));
+    }
   }
   return out;
 }
@@ -150,8 +190,21 @@ void Session::ready_domain(const Settings& settings) {
       region.weave = r.weave;
       region.cover_open_face = r.weave && !zone;   // OJ2: an Organic area's Solid closes its open face only
       region.from_zone = zone && r.faces.empty() && !cut;   // OG2f
+      if (r.role == Role::Lattice && sheet_floors(settings)) {
+        // SHEETS (SPEC 1.2 item 3): Structural's floor, floor cells x the region's cell (a flat region's cell divides
+        // its depth, one grid: C15); a region with no floor of its own keeps the part's D8, not the part's floor.
+        const CellSpec rc = cells_of(settings, r.id);
+        const double floor_cells = sheet_floor_cells(settings, rc);
+        double cell = sheet_target_mm(rc);
+        if (!region.is_shell() && region.prism.valid && region.prism.depth > 0.0 && cell > 0.0)
+          cell = region.prism.depth / std::max(1.0, std::ceil(region.prism.depth / cell - 1e-9));
+        region.min_wall_mm = floor_cells > 0.0 ? std::max(settings.min_wall_mm, floor_cells * cell) : settings.min_wall_mm;
+      }
       spec.regions.push_back(std::move(region));
     }
+    if (settings.start == Start::AllLattice && sheet_floor_cells(settings, settings.cells) > 0.0)   // SHEETS: the whole part's
+      spec.min_wall_mm = std::max(settings.min_wall_mm,
+                                  sheet_floor_cells(settings, settings.cells) * sheet_target_mm(settings.cells));
     for (const Settings::ProtectAsk& p : settings.protect)
       spec.protect.push_back({p.id, p.pieces.empty() ? faces_mesh(model_, p.faces) : pieces_mesh(model_, p.pieces),
                               p.depth_mm, p.pieces});
@@ -205,6 +258,23 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
     // to the cell the thinnest strut stays a printed line short of touching in. Nothing else is laid smaller for it.
     cells.small_in_thin_walls = settings.small_cells_in_thin_walls && !settings.struts.allow_quilt;
     cells.one_grid = settings.one_grid;   // "Let walls cut cells": the per-part switch is the session's
+    // SHEETS (SPEC 1.2 items 1, 2): one cell size per region (a period change leaves sheets unjoined) on ONE grid per
+    // region cut by everything, in Aesthetic and Structural alike; nothing that grades or fits cells applies.
+    const bool sheet = sheet_kind_of(cells.topology);
+    if (sheet) {
+      cells.algorithm = Algorithm::Uniform;
+      cells.one_grid = true;
+      cells.grade_to_shape = false;
+      cells.band_mm = 0.0;
+      cells.by_stress = false;
+      cells.max_step = 0.0;
+      cells.cell_search = false;
+      cells.stretch_edges = false;
+      // ★ notes30 M1 (the merge with notes29b): Small cells in thin walls gives a thin wall its own smaller cell, a period
+      // change the sheet cannot follow (SPEC 1.2 item 1: one cell size per region), and its limit is a strut type's
+      // (lattice_quilt_off_cell_mm throws for a sheet). A thin wall is cut by the region's one grid, as every wall is.
+      cells.small_in_thin_walls = false;
+    }
     // The stress the lattice is graded by (R16, R17), resolved ONCE, before the cells, for the cells (C22) and the
     // struts (By stress) alike: the stated reference, else the part's own, kept while the domain, the field and the
     // percentile are the same (a slider move never reads the field again). Resolved only when it is asked for: the
@@ -219,7 +289,15 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
     for (const Settings::RegionAsk& r : settings.regions) {
       if (r.role != Role::Lattice || !r.own.any()) continue;
       own[r.id] = r.own;
-      const CellSpec rc = region_cells(cells, r.own);
+      if (sheet) {   // SHEETS: a region's own cells cannot grade either (SPEC 1.2 item 1)
+        AreaOwn& o = own[r.id];
+        if (o.algorithm) o.algorithm = Algorithm::Uniform;
+        if (o.grade_to_shape) o.grade_to_shape = false;
+        if (o.band_mm) o.band_mm = 0.0;
+        if (o.cells_by_stress) o.cells_by_stress = false;
+        if (o.max_step) o.max_step = 0.0;
+      }
+      const CellSpec rc = region_cells(cells, own[r.id]);
       const bool wants = (r.own.by_stress ? *r.own.by_stress : settings.struts.mode == Density::ByStress) ||
                          (rc.by_stress && !(rc.cell_mm > 0.0) && rc.algorithm != Algorithm::Uniform);
       if (wants && !(r.own.reference_mpa && *r.own.reference_mpa > 0.0)) asked = true;
@@ -269,11 +347,29 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
     const double laid = ms_since(t0);
     (out.read_again ? out.ms_read : out.ms_cells) = laid;
     last_cells_.regions = out.layout.regions;   // D23: what Session::places reads of this layout
+    if (sheet) {
+      // SHEETS (SPEC 1.2 item 5, 1.4, 1.5): no bars. P8 (f) as for struts (a cut piece thinner than its wall against
+      // solid is solid); then one field per laid region, the pairs that touch, and the solid wall's membrane.
+      if (settings.bars) {
+        t0 = std::chrono::steady_clock::now();
+        domain_->check_stop();
+        out.thin_solid = solidify_thin_cuts(out.layout, *domain_, threads);
+      }
+      out.sheets = sheet_fields(out.layout);
+      const double line = domain_->spec().bead_mm;
+      out.sheet_seams = sheet_seams(out.layout, out.sheets, settings.sheet_seam, line);
+      set_sheet_membrane(out.layout, out.sheet_seams, out.sheets, line);
+      if (settings.bars) out.ms_bars = ms_since(t0);
+      domain_->check_stop();
+      if (!strands) return out;
+      // With an Organic region beside the sheets (O1), its weave is laid below as for any lay; the cells lay no bars.
+      // (Their seam is the weave's own edge and the sheet's cut: the solid wall's membrane is between sheets only.)
+    }
     if (settings.bars) {
       t0 = std::chrono::steady_clock::now();
       domain_->check_stop();
-      out.thin_solid = solidify_thin_cuts(out.layout, *domain_, threads);   // P8 (f): before any bar is laid
-      out.bars = lay_bars(out.layout, *domain_, threads);
+      if (!sheet) out.thin_solid = solidify_thin_cuts(out.layout, *domain_, threads);   // P8 (f): before any bar is laid
+      out.bars = sheet ? Bars{} : lay_bars(out.layout, *domain_, threads);
       if (strands) {   // O2: the weave's bars, cut at their crossings, after the cells'
         Bars weave = weave_bars(*domain_, *strands, threads);
         const bool cut = !(finish && finish->draft);   // brief L2, item 3: the draft has no cut at crossings (no links)

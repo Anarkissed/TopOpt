@@ -252,6 +252,21 @@ struct LatticeLayoutGrid {
   // The unheld voxels by core's reason (SolidAt::why, NoCell): Other, WallNarrow, TooFewAcross, Sliver, RegionShallow (his
   // ruling 11-14: solid where lattice was asked is never silent — the line says why and offers fixes).
   std::vector<int64_t> nocell;
+  // ★ SHEETS (notes28 sheets SPEC 1.5, 5; builder B: the contract's "the map's region and seam channels"). Filled for a
+  // sheet layout only (all three empty for every other type), one entry per voxel in `rg`'s order:
+  //   sheet_field    THE REGION CHANNEL: the index into the last lay's sheet fields (LatticeLayoutResult.sheet_region's
+  //                  order) of the field whose cell holds the voxel centre: the first cell in layout order whose lattice
+  //                  holds it (the strength check's and the file's rule; a solid wall's membrane is no cell's). An outside
+  //                  voxel next to open lattice takes the field of its first open neighbour (-x, +x, -y, +y, -z, +z), as
+  //                  `rg`'s open channel opens it. 255: none (solid, outside, an Organic weave's lattice).
+  //   sheet_seam     THE SEAM CHANNEL: the blend seam (index into sheet_seam_ab / 2) of the voxel's field nearest across
+  //                  (the smallest |sheet_seam_mm| of the field's seams asked as a blend, not solid walls); 255: none
+  //                  (no blend seam of its field, or no field, or a seam with no flat outline: core's +infinity).
+  //   sheet_seam_mm  THE SEAM DISTANCE: that seam's signed distance across at the voxel centre, mm, + toward the seam's
+  //                  b side (core's sheet_seam_mm, the s of the blend's smoothstep); 0 where sheet_seam is 255.
+  std::vector<uint8_t> sheet_field;
+  std::vector<uint8_t> sheet_seam;
+  std::vector<float> sheet_seam_mm;
 };
 LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float origin_y, float origin_z, float voxel_mm,
                                       int32_t nx, int32_t ny, int32_t nz, BridgeError& err);

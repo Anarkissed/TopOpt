@@ -394,7 +394,9 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
   if (!owner && spec.start != Start::AllLattice) return inside_or({Why::NotAsked, 0});   // D12
   const int id = owner ? owner->id : 0;                                       // D4
   const bool flat = owner && !owner->is_shell();
-  const bool wall_wanted = spec.min_wall_mm > 0.0 || wall_mm || room;
+  // SHEETS (SPEC 1.2 item 3): a region's own D8 floor (Region::min_wall_mm, Structural's for a sheet), else the part's.
+  const double min_wall = owner && owner->min_wall_mm ? *owner->min_wall_mm : spec.min_wall_mm;
+  const bool wall_wanted = min_wall > 0.0 || wall_mm || room;
   double on_m = 0.0, back_m = 0.0;
   if (flat && wall_wanted) {
     const Vec3& n = owner->prism.normal;
@@ -454,7 +456,7 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
     } else {
       // A caller that wants the width gets it; one that only needs "can this wall hold
       // lattice?" (D8) lets the measure stop as soon as no line through here is shorter.
-      wall = room_through(p, wall_mm ? 0.0 : spec.min_wall_mm, cover);
+      wall = room_through(p, wall_mm ? 0.0 : min_wall, cover);
     }
     if (wall_mm) *wall_mm = wall;
     double holds_mm = wall;   // the width lattice can use: the wall less its Protect skins
@@ -474,7 +476,7 @@ Where Domain::Probe::where(const Vec3& p, double* wall_mm, Room* room) const {
       room->part_back = back_m;
       room->part_on = on_m;
     }
-    if (spec.min_wall_mm > 0.0 && holds_mm < spec.min_wall_mm) return {Why::WallTooThin, id};
+    if (min_wall > 0.0 && holds_mm < min_wall) return {Why::WallTooThin, id};
   }
   return {Why::Lattice, id};
 }

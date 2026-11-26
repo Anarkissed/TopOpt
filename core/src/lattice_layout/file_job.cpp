@@ -214,7 +214,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "organic_gap_lines", "organic_face_relief_mm", "organic_relief_exclude_faces", "organic_strand_keep",
        "organic_sweep", "organic_sweep_max_offset_mm", "organic_sweep_max_turn_deg", "organic_sweep_max_piece_mm",
        "organic_sweep_min_turn_deg", "organic_sweep_min_radius",
-       "organic_groups"},
+       "organic_groups", "sheet_seam", "auto_by_cell"},
       w);
   Settings s;
   s.start = flag(in, "all_lattice", false, w) ? Start::AllLattice : Start::AllSolid;
@@ -391,6 +391,15 @@ Settings settings_from(const json::Value& in, const std::string& w) {
   s.struts.strength = num(in, "strength", s.struts.strength, w);
   s.small_cells_in_thin_walls = flag(in, "small_cells_in_thin_walls", s.small_cells_in_thin_walls, w);
   s.one_grid = flag(in, "one_grid", s.one_grid, w);
+
+  // SHEETS (SPEC 1.3, 1.5): Auto's wall by the cell; "Where regions meet".
+  s.struts.auto_by_cell = flag(in, "auto_by_cell", s.struts.auto_by_cell, w);
+  {
+    const std::string seam = text(in, "sheet_seam", "solid_wall", w);
+    if (seam == "blend") s.sheet_seam = SheetSeam::Blend;
+    else if (seam == "solid_wall") s.sheet_seam = SheetSeam::SolidWall;
+    else json::fail(w + ".sheet_seam", "unknown \"" + seam + "\" (blend | solid_wall)");
+  }
 
   s.bars = flag(in, "bars", s.bars, w);
   s.join_loose = flag(in, "join_loose", s.join_loose, w);
@@ -691,6 +700,15 @@ void say(void (*said)(const char*), const char* line) {
 // (LatticeReview's build-and-check-the-layers loop replaces this body.)
 TriangleMesh make_file_mesh(const Session& session, const Outcome& outcome, const FileOptions& options,
                             FileReport& report, const std::atomic<bool>* stop) {
+  if (!outcome.sheets.empty()) {
+    // SHEETS (SPEC section 4, 1.6): the sheets in place of bars; nothing is ever left out (a finding is answered by a
+    // post), so the print check's leave-outs never empty a region.
+    FileOptions sheet = options;
+    sheet.mesh.sheets = &outcome.sheets;
+    sheet.mesh.sheet_seams = &outcome.sheet_seams;
+    sheet.leave_out = false;
+    return make_file_mesh(session, outcome.layout, outcome.bars, sheet, report, stop);
+  }
   return make_file_mesh(session, outcome.layout, outcome.bars, options, report, stop);
 }
 
@@ -1259,12 +1277,6 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
              "stress check first.");
       return done();
     }
-    if (lattice_topology_is_sheet(job.settings.cells.topology)) {
-      refuse(r, kTypeNotSupported,
-             "This lattice type is made of sheets, and a lattice file can only be made from the "
-             "types made of struts so far. Pick a strut type.");
-      return done();
-    }
     // 2026-11-24 (every strut type on this engine): a Structural job (one with a strength job) of a type whose strength
     // cannot be checked (the tetragonal three, Aesthetic only) is refused before the long work, in one plain line.
     if (!job.strength_job.empty()) {
@@ -1415,16 +1427,41 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     }
     // A field with no stress in the lattice's space gives no reference: no stress result to grade by either (R18).
     if (by_stress && out.struts.no_stress) return no_stress();
-    if (out.bars.bars.empty()) {
+    if (out.bars.bars.empty() && out.sheets.empty()) {   // (SHEETS: a sheet has no struts, SPEC 1.2 item 5)
       refuse(r, kNoStruts,
              "The lattice here has no struts left to print, so no file was made. Try a smaller cell "
              "or a deeper region.");
       return done();
     }
+    // SHEETS (SPEC 1.5): a seam asked as a blend whose band cannot be made printable falls back to the solid wall (the
+    // membrane, laid into a copy of the layout before its open space is read), and the result says so.
+    Outcome sheeted;
+    const Outcome* made_from = &out;
+    if (!out.sheets.empty()) {
+      std::vector<SheetSeamBand> seams = out.sheet_seams;
+      bool fell = false;
+      for (SheetSeamBand& seam : seams) {
+        if (seam.solid_wall) continue;
+        const SeamBand band = mesh_sheet_seam_band(*session.domain(), out.layout, out.sheets, seam, options.mesh);
+        if (band.ok) { seam.raise_mm = band.raise_mm; continue; }
+        seam.solid_wall = true;
+        seam.fell_back = true;
+        seam.why = band.why;
+        fell = true;
+      }
+      if (fell) {
+        sheeted = out;
+        sheeted.sheet_seams = seams;
+        set_sheet_membrane(sheeted.layout, seams, sheeted.sheets, out.layout.bead_mm);
+        made_from = &sheeted;
+      }
+      r.sheets = made_from->sheets;
+      r.sheet_seams = made_from->sheet_seams;
+    }
 
     say(said, "making the file");
     // OF4: a job with a weave region takes the tubes route unless it asked for one (file_options_for, above).
-    TriangleMesh mesh = make_file_mesh(session, out, options, r.made, stop);   // (Phase 2: stand supports may cut it)
+    TriangleMesh mesh = make_file_mesh(session, *made_from, options, r.made, stop);   // (Phase 2: stand supports may cut it)
     if (!r.made.mesh.ok || mesh.empty()) {
       refuse(r, kMeshFailed,
              r.made.mesh.why.empty() ? "The lattice file could not be put together. Nothing was made."
@@ -1579,7 +1616,7 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
       t0 = std::chrono::steady_clock::now();
       StrengthAsk ask;
       ask.session = &session;
-      ask.outcome = &out;
+      ask.outcome = made_from;   // SHEETS: with any seam that fell back to the solid wall
       ask.made = &r.made;
       ask.job_path = job.strength_job;
       ask.out_dir = folder_of(stl_path);
@@ -1619,6 +1656,26 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
         r.why = sd.why;
         r.detail = sd.detail;
         return done();
+      }
+      // SHEETS (SPEC 1.6; builder B): sheet_cells.bin beside strength.json, its key "sheet_cells" in the block. The check
+      // writes it with its margins (write_sheet_check_files); when it did not, the cells are judged here (cells across,
+      // flags) and their margins left NaN (not judged), so the app always finds the file a sheet's block names.
+      if (!made_from->sheets.empty() &&
+          std::find(sd.files.begin(), sd.files.end(), std::string(kSheetCellsName)) == sd.files.end()) {
+        const LatticeCredit cells = lattice_credit_cells(made_from->layout, *session.domain(), job.options.threads);
+        const SheetCheckFiles sw = write_sheet_check_files(ask.out_dir, made_from->layout, cells, {}, job.print_frame);
+        if (!sw.ok) {
+          std::remove(file_path.c_str());
+          for (const std::string& f : sd.files) std::remove((ask.out_dir + "/" + f).c_str());
+          r.ok = false;
+          r.code = "strength_failed";
+          r.exit_code = 1;
+          r.why = "The lattice's strength could not be checked, so no file was made.";
+          r.detail = sw.why;
+          return done();
+        }
+        sd.files.push_back(sw.file);
+        sd.json = strength_block_with(sd.json, sw.keys);
       }
       r.strength_ran = true;
       r.strength_accepted = sd.accepted;
@@ -1912,6 +1969,33 @@ std::string file_result_json(const FileResult& r) {
       o += b;
     }
     o += "},\n";
+  }
+  // SHEETS (lattice_layout_file.hpp, FileResult::sheets): written only for a sheet job (else the report is as it was).
+  if (!r.sheets.empty()) {
+    o += "  \"sheets\": [";
+    for (std::size_t i = 0; i < r.sheets.size(); ++i) {
+      const SheetField& f = r.sheets[i];
+      std::snprintf(b, sizeof b,
+                    "%s{\"region\": %d, \"kind\": \"%s\", \"cell_mm\": %.9g, \"wall_min_mm\": %.9g, \"wall_max_mm\": %.9g, "
+                    "\"cells\": %llu}",
+                    i ? ", " : "", f.region, tpms_id(f.kind), f.cell_mm, f.wall_min_mm, f.wall_max_mm, count(f.cells));
+      o += b;
+    }
+    o += "],\n  \"sheet_seams\": [";
+    for (std::size_t i = 0; i < r.sheet_seams.size(); ++i) {
+      const SheetSeamBand& sb = r.sheet_seams[i];
+      std::snprintf(b, sizeof b, "%s{\"regions\": [%d, %d], \"seam\": \"%s\", \"fell_back\": %s, \"why\": \"", i ? ", " : "",
+                    sb.region_a, sb.region_b, sb.solid_wall ? "solid_wall" : "blend", sb.fell_back ? "true" : "false");
+      o += b + escaped(sb.why) + "\"}";
+    }
+    o += "],\n";
+    const MeshReport& sm = r.made.mesh;
+    std::snprintf(b, sizeof b,
+                  "  \"sheet_mesh\": {\"blocks\": %llu, \"triangles\": %llu, \"mm3\": %.9g, \"deviation_mm\": %.6g, "
+                  "\"ms\": %.1f, \"ms_union\": %.1f, \"seams_blended\": %llu, \"seams_fell_back\": %llu},\n",
+                  count(sm.sheet_blocks), count(sm.sheet_triangles), sm.sheet_mm3, sm.sheet_deviation_mm, sm.ms_sheets,
+                  sm.ms_sheet_union, count(sm.seams_blended), count(sm.seams_fell_back));
+    o += b;
   }
   std::snprintf(b, sizeof b, "  \"part\": {\"faces\": %d, \"triangles\": %llu, \"open_edges\": %llu},\n",
                 r.faces, count(r.part_triangles), count(r.open_edges));
