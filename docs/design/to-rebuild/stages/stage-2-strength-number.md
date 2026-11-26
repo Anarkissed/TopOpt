@@ -50,6 +50,7 @@ Not in this proposal, flagged: the smooth-surface check (certify the true surfac
 
 - Which length where the papers disagree: "Let's go with the lowest published value for each." (PLA 2.4, ABS 0.46, PETG 0.7 mm; then his half rule: 1.2, 0.23, 0.35 mm.) Consequence, stated to him: 0.23 and 0.35 mm are smaller than a voxel on every job, so for ABS and PETG the new number is today's peak with cut voxels at their real stiffness; only PLA gets a reading over a size.
 - Across layers, REVISED after CNC Kitchen's impact tests: the length across the layers is a FIFTH of the in-plane one. "Yes, a fifth". (Replaces "the same length" above; the layer knockdown on strength stays.)
+- Across layers, REVISED AGAIN (2026-11-25 21:15) after the measurement that the across-layer term, read at one voxel, is what still climbs with resolution and decides most of his parts: the SAME size as in the plane. "Let's do same size, then." The fifth is withdrawn; the layer knockdown on strength stays.
 - Still open: the nine materials with no published value.
 
 ## Reviewer's ruling (TORebuildGroup, 2026-11-26 01:37Z, approved by the maintainer)
