@@ -115,6 +115,11 @@ struct KnockdownSpec {
   // is read over (stress_measure.hpp). 0, the default, reads the single hottest
   // voxel, byte for byte as before.
   double stress_reading_mm = 0.0;
+  // TO rebuild stage 2: also record the stress of the voxels the surface CUTS
+  // (fill between kStressMaterialFloor and iso) in von_mises_material_field, which
+  // a reading over a size needs (stress_measure.hpp). Set by tests; a job reading
+  // over a size (TOPOPT_STRENGTH=size) records it whatever this says.
+  bool record_material_stress = false;
 };
 
 // Install 3: numbers of the analysis that the new engine's strength check lets a job set (strength_settings).
@@ -138,6 +143,12 @@ struct FixedDesignAnalysis {
   // Per-voxel von Mises stress over the PRINTED material (density > iso),
   // grid-indexed (grid.voxel_count()), MPa; zero off the printed set.
   std::vector<double> von_mises_field;
+  // TO rebuild stage 2: von_mises_field PLUS the stress of the material in the
+  // voxels the surface cuts (fill above kStressMaterialFloor, under iso), which a
+  // reading over a size averages too. Empty unless a size is read or
+  // KnockdownSpec::record_material_stress is set. MPa; lattice and loose voxels
+  // as in von_mises_field.
+  std::vector<double> von_mises_material_field;
   // Per-voxel Cauchy stress tensor, flattened grid-indexed (6*voxel_count),
   // Voigt [xx,yy,zz,xy,yz,zx], TRUE shear, MPa; zero off the printed set.
   std::vector<double> stress_tensor_field;

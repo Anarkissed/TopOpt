@@ -22,6 +22,17 @@
 
 namespace topopt {
 
+// THE EDGE OF THE PART (found 2026-11-26 on the plate with a hole; the reviewer's
+// ruling, item 3). The largest average sits with the ball centred ON the part's
+// edge, at the notch's root, half of it in air. A ball that may only be centred
+// on a voxel at least half full sits half a voxel inside the material and reads
+// 7 to 11 % low on a 3.6 mm size. So a size is read with `iso` set to this small
+// floor: the ball is centred on ANY voxel that holds material, and every cut
+// voxel's material is counted (weight = its fill). The field handed in must then
+// carry the stress of those cut voxels too (analyze.hpp
+// FixedDesignAnalysis::von_mises_material_field).
+inline constexpr double kStressMaterialFloor = 0.02;
+
 // `field` and `density` are per voxel (grid.voxel_count()). A voxel is printed
 // when its density is at least `iso`; only printed voxels are averaged and only
 // printed voxels get a reading (others return 0). `diameter_mm` <= 0 returns the

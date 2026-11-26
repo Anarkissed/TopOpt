@@ -157,14 +157,18 @@ double peak_ratio(int rv, bool exact_fill, double penalty, bool* ok, double* are
   params.penalty = penalty;
 
   topopt::KnockdownSpec knockdown;
+  // The cut voxels' stress too: a size is read with the ball free to sit on the
+  // part's edge (stress_measure.hpp, "the edge of the part").
+  knockdown.record_material_stress = true;
   const topopt::FixedDesignAnalysis res = topopt::analyze_fixed_design(
       g, params, density, bcs, loads, m, Vec3{0.0, 0.0, 1.0}, 1e-8, 20000,
       topopt::SolverKind::MultigridCG_Matfree, 0.0, knockdown, true,
       static_cast<double>(g.tags.size()));
   *ok = res.max_von_mises > 0.0 && std::isfinite(res.max_von_mises);
-  if (over_size != nullptr && res.von_mises_field.size() == density.size())
+  if (over_size != nullptr && res.von_mises_material_field.size() == density.size())
     for (int q = 0; q < 3; ++q)
-      over_size[q] = topopt::peak_stress_over_size(g, res.von_mises_field, density, 0.5,
+      over_size[q] = topopt::peak_stress_over_size(g, res.von_mises_material_field, density,
+                                                   topopt::kStressMaterialFloor,
                                                    kSizesMm[q]) /
                      kPressure;
   return res.max_von_mises / kPressure;
