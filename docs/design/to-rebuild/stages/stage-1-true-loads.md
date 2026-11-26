@@ -131,7 +131,9 @@ So on a 10 mm block there is a window, about 3.2 to 3.8 mm (a third of the thick
 
 The stand CANNOT inform the pad (2026-11-26 02:35, res 64, six pad settings from 2 to 4.5 mm and three automatic strengths): every run gives the same single version to the last digit (margin 4.161 -> 4.201, 90.55 g). The run says why itself: "SATURATED: it asked for 0.68 of the part, but the frozen material alone is 0.773 of it". His 211 keep regions freeze three quarters of the stand, so the optimiser has almost nothing to decide and the pad is lost in what is already frozen. The stand runs at pad 2 and 4.5 mm at res 128 are therefore dropped from the lock queue (forty minutes of lock for nothing). What the stand does show: the automatic rule's reading of a real part. Behind its anchored and loaded faces it measures 3.5 mm (a thin tab) and 10.9 to 12.9 mm, and at the medium strength gives pads of 1.9 mm and 3.3 to 3.6 mm.
 
-The pad is now being measured on the three parts the optimiser really carves (Base, Pressing, PillowBlock at res 96, 1 to 6 minutes a run): fixed 2 / 3 / 4.5 mm and the automatic rule at two strengths.
+Base, Pressing and PillowBlock cannot inform it either (02:45): as drawn they stand at 0.45, 0.36 and 0.90 against a required 1.5, so a reduction run makes NO version of them at any pad (Base at res 96, pad 2 and 3 mm: 0 versions; the sweep was stopped). They are Strengthen parts, not carving parts. A useful side result: this is the first real run of A-05. The run printed "[as drawn] no version passed; the part as drawn stands at 0.45 against 1.5" and the report carries `"as_drawn": {"margin": 0.4498, "required": 1.5, "passes": false}`.
+
+So of his six reference parts only Top Motor Mount is carved by a reduction run (four versions today). The pad is being measured there, at res 64 to keep each run short: fixed 2 / 3 / 4.5 mm and the automatic rule at the medium strength.
 
 ## Still owed before the stage report
 
