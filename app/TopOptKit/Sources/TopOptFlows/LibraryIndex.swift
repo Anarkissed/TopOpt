@@ -231,14 +231,18 @@ public struct ResultSummary: Codable, Equatable, Sendable {
     public var achievedVolumeFraction: Double
     /// ★ His Q1: the result's word as Results says it ("Just safe", "+10 %", "−30%"); nil when its run's results don't say.
     public var word: String?
+    /// ★ notes30 (362's review): the words in the margin's place when its check refused to judge the load (a load on bare
+    /// vines); nil: the margin shows. Not written while nil, so older files are the bytes they were.
+    public var marginWords: String?
 
     public init(massGrams: Double, worstCaseMargin: Double, accepted: Bool, achievedVolumeFraction: Double,
-                word: String? = nil) {
+                word: String? = nil, marginWords: String? = nil) {
         self.massGrams = massGrams
         self.worstCaseMargin = worstCaseMargin
         self.accepted = accepted
         self.achievedVolumeFraction = achievedVolumeFraction
         self.word = word
+        self.marginWords = marginWords
     }
 }
 

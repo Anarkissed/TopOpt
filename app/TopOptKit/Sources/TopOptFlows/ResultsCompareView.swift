@@ -179,9 +179,17 @@ struct ResultsCompareView: View {
             Rectangle().fill(DS.Color.strokePanel.color).frame(width: 1, height: 34)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
-                    Text(r?.margin.map { ResultsVersions.x($0) } ?? "—").font(.system(size: 21, weight: .bold))
-                        .foregroundStyle(DS.Color.textPrimary.color)
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(DS.Color.okGreen.color)
+                    // ★ notes30 (362's review): a load on bare vines — its words in the margin's place, a warning, no tick
+                    if let words = r?.marginWords {
+                        Text(words).font(.system(size: 17, weight: .bold)).foregroundStyle(DS.Color.textPrimary.color)
+                            .lineLimit(1).minimumScaleFactor(0.7)
+                            .accessibilityIdentifier("compare-margin-words-\(tab)")
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(DS.Color.warning.color)
+                    } else {
+                        Text(r?.margin.map { ResultsVersions.x($0) } ?? "—").font(.system(size: 21, weight: .bold))
+                            .foregroundStyle(DS.Color.textPrimary.color)
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(DS.Color.okGreen.color)
+                    }
                 }
                 Text(worst(tab)).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color).lineLimit(1)
                 // ★ his ruling 2026-10-28: a version in pieces carries its flag here too

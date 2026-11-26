@@ -122,6 +122,64 @@ final class OrganicBareVinesTests: XCTestCase {
 
     static func tab() throws -> ResultVariantVM? { ResultsModel(projectName: "Stand", outcome: try outcome()).selected }
 
+    // MARK: no margin anywhere (362's review, 11-26)
+
+    /// ★ A bare-vines result has no valid margin: everywhere a number like "2.00×" would show, its words do — Results' list row
+    /// (and Compare, which reads the row), Details › Strength (no weakest spot, struts short or solid margin), the Library's
+    /// card, row and Compare (the summary), the orientation check's columns. RED CONTROL: read as before, the number is back.
+    func testNoMarginShowsForABareVinesResult() throws {
+        let w = OrganicBareVines.title
+        let o = try Self.outcome()
+        func assertWords(_ s: String, _ what: String, file: StaticString = #filePath, line: UInt = #line) {
+            XCTAssertTrue(s.contains(w), "★ \(what) says the words: \(s)", file: file, line: line)
+            XCTAssertFalse(s.contains("\u{00D7}"), "★ \(what) shows no margin: \(s)", file: file, line: line)
+            XCTAssertFalse(s.contains("\u{2713}"), "★ \(what) shows no tick: \(s)", file: file, line: line)
+        }
+        XCTAssertEqual(OrganicBareVines.marginWords(reportJSON: o.reportJSON), w)
+        XCTAssertNil(OrganicBareVines.marginWords(report: Self.report(bare: false)), "another reason: its margin shows")
+        // Results: the list row (its line, its sub-line) and what Compare reads from it
+        let m = ResultsModel(projectName: "Stand", outcome: o)
+        let tab = try XCTUnwrap(m.selected)
+        XCTAssertEqual(tab.marginWords, w)
+        let row = try XCTUnwrap(ResultsVersions.rows(tabs: m.tabs, blocks: m.reportBlocks,
+                                                     requestedVF: { m.requestedVolumeFraction(of: $0) }).first)
+        assertWords(row.value, "the list row")
+        assertWords(row.subtitle, "the row's sub-line")
+        XCTAssertNil(row.margin, "★ Compare's number: none")
+        XCTAssertEqual(row.marginWords, w, "★ Compare's words")
+        // Details › Strength: no number but what it needs
+        let details = m.detailRows(.strength, version: row)
+        for label in ["Holds", "Weakest spot", "Struts short", "Solid part", "Verified margin"] {
+            XCTAssertFalse(details.contains { $0.label == label }, "★ no \(label): \(details.map(\.label))")
+        }
+        // the Library: its summary, card and row words, the verdict's mark, Compare's rows
+        let s = ResultSummary(massGrams: 20, worstCaseMargin: 2.0, accepted: true, achievedVolumeFraction: 0.6, marginWords: w)
+        XCTAssertEqual(LibraryStyle.margin(s), w, "★ the card's and the row's words")
+        XCTAssertEqual(LibraryStyle.verdictSymbol(s).name, "exclamationmark.triangle.fill", "★ a warning, never a tick")
+        let saved = try JSONEncoder().encode(s)
+        XCTAssertEqual(try JSONDecoder().decode(ResultSummary.self, from: saved).marginWords, w, "kept in library.json")
+        var plain = s; plain.marginWords = nil
+        XCTAssertFalse(String(decoding: try JSONEncoder().encode(plain), as: UTF8.self).contains("marginWords"),
+                       "older summaries are the bytes they were")
+        // the orientation check's columns
+        let before = PrintBenefitRow.measured(latticeReport: Self.report())
+        XCTAssertEqual(before.strengthWords, w)
+        XCTAssertNil(before.strength)
+        let rows = PrintBenefitRow.rows(before: before, after: PrintMeasured(strength: 2.4, layerStrength: 3.0), required: 1.5)
+        XCTAssertEqual(rows.first { $0.label == "Strength" }?.old, w, "★ the strength column's words")
+        XCTAssertEqual(rows.first { $0.label == "Layer strength" }?.old, w)
+
+        // RED CONTROL: the read before notes30 brings the numbers back
+        OrganicBareVines.controlUnread = true
+        XCTAssertNil(OrganicBareVines.marginWords(reportJSON: o.reportJSON))
+        let old = ResultsModel(projectName: "Stand", outcome: o)
+        let oldRow = try XCTUnwrap(ResultsVersions.rows(tabs: old.tabs, blocks: old.reportBlocks,
+                                                        requestedVF: { old.requestedVolumeFraction(of: $0) }).first)
+        XCTAssertTrue(oldRow.value.contains("2.00\u{00D7}"), "RED CONTROL: the number is back: \(oldRow.value)")
+        XCTAssertEqual(oldRow.margin, 2.0)
+        XCTAssertEqual(PrintBenefitRow.measured(latticeReport: Self.report()).strength, 2.0, "RED CONTROL")
+    }
+
     // MARK: the certify wizard
 
     /// ★ ONE pinned pop-up (his design: Next/Skip/Solve, one per issue), first, in the lattice settings' stage: its title, core's

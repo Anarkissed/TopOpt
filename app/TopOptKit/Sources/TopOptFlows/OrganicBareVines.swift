@@ -74,6 +74,19 @@ public enum OrganicBareVines {
                      text: said)
     }
 
+    /// ★ 362's review (11-26): a load on bare vines has no valid margin — what stands in a margin's place for its result, the
+    /// words its Checks line leads with, everywhere a number like "2.00×" would show (Results' list row and Compare, Details ›
+    /// Strength and Scenarios, the Library's cards, rows and Compare, the orientation check's columns). nil: the result's margin
+    /// shows as before (another reason, no strength block, or the RED control).
+    public static func marginWords(report r: [String: Any]?) -> String? {
+        guard let s = r?["strength"] as? [String: Any], found(strength: s) != nil else { return nil }
+        return title
+    }
+    public static func marginWords(reportJSON d: Data?) -> String? {
+        guard let d, let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else { return nil }
+        return marginWords(report: o)
+    }
+
     /// The point of triangle (a, b, c) nearest `p` (Ericson, Real-Time Collision Detection §5.1.5: by the Voronoi regions of
     /// its corners, edges and face).
     static func closest(_ p: SIMD3<Double>, _ a: SIMD3<Double>, _ b: SIMD3<Double>, _ c: SIMD3<Double>) -> SIMD3<Double> {

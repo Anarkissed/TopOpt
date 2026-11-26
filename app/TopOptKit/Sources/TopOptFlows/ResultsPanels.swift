@@ -32,6 +32,8 @@ public struct ResultsVersionRow: Equatable, Identifiable, Sendable {
     public let headline: String
     /// ★ R-b: what its one line says after the name — "87 g · 1.5×" (with "· in 2 pieces" when it prints in pieces).
     public var value: String = ""
+    /// ★ notes30 (362's review): the words in the margin's place (a load on bare vines: no valid margin; `margin` is nil).
+    public var marginWords: String? = nil
 }
 
 public enum ResultsVersions {
@@ -110,13 +112,17 @@ public enum ResultsVersions {
     static func row(_ tab: ResultVariantVM, title: String, margin: Double, headline: String? = nil,
                     pieces: Int? = nil, twoDecimals: Bool = false) -> ResultsVersionRow {
         let x = twoDecimals ? StrengthWords.x : Self.x   // ★ notes25 C3: a print file's margin always with two decimals
-        let verdict = tab.latticeAccepted == false ? "not certified" : x(margin) + " ✓"
+        // ★ notes30 (362's review): a load on bare vines has no valid margin — its words in the number's place, no tick
+        let words = tab.marginWords
+        let verdict = words ?? (tab.latticeAccepted == false ? "not certified" : x(margin) + " ✓")
         let piecesLine = pieces.map { " · in \($0) pieces" } ?? ""
         return ResultsVersionRow(id: "t\(tab.index)", title: title,
                                  subtitle: (tab.isRecommended ? "Recommended · " : "") + tab.massLabel + " · " + verdict + piecesLine,
-                                 recommended: tab.isRecommended, tabIndex: tab.index, margin: margin,
+                                 recommended: tab.isRecommended, tabIndex: tab.index, margin: words == nil ? margin : nil,
                                  massLabel: tab.massLabel, headline: headline ?? tab.headlineLabel,
-                                 value: tab.massLabel + " · " + (tab.latticeAccepted == false ? "not certified" : x(margin)) + piecesLine)
+                                 value: tab.massLabel + " · " + (words ?? (tab.latticeAccepted == false ? "not certified" : x(margin)))
+                                     + piecesLine,
+                                 marginWords: words)
     }
 }
 
@@ -323,7 +329,8 @@ extension ResultsModel {
             let sc = scenarios(for: tab)
             if sc.count < 2 { add("Scenarios", "One load scenario") }
             for x in sc {
-                var v = x.margin.map { ResultsVersions.x($0) } ?? "—"
+                // ★ notes30 (362's review): a load on bare vines — the words, never a margin
+                var v = tab?.marginWords ?? x.margin.map { ResultsVersions.x($0) } ?? "—"
                 if x.governs { v += " · worst case" }
                 if x.unheld { v = "no path to its anchors" }
                 if let p = x.peakMPa { v += String(format: " · peak %.1f MPa", p) }
@@ -548,9 +555,13 @@ struct ResultsVersionsPanel: View {
 
     @ViewBuilder private func line(_ r: ResultsVersionRow) -> some View {
         let on = r.tabIndex == selectedTab
-        DSRow(.group, key: "resultsVersion-\(r.id)", name: r.title, value: r.tabIndex == nil ? nil : r.value,
+        // ★ notes30 (362's review): a load on bare vines — no margin; its words on the row's own warning line and its weight
+        // alone as the value, so the result's name stays whole
+        let words = r.tabIndex == nil ? nil : r.marginWords
+        DSRow(.group, key: "resultsVersion-\(r.id)", name: r.title,
+              value: r.tabIndex == nil ? nil : (words == nil ? r.value : r.massLabel),
               selected: on, disabled: r.tabIndex == nil, tag: r.recommended ? "Recommended" : nil,
-              line: r.tabIndex == nil ? DSRowLine(r.subtitle) : nil,
+              line: r.tabIndex == nil ? DSRowLine(r.subtitle) : words.map { DSRowLine($0, tone: .warning) },
               tap: r.tabIndex.map { t in { pick(t) } }) {
             pickChip(r, on: on)
         }

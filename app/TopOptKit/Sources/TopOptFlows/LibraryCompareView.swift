@@ -199,8 +199,9 @@ struct LibraryDetailsTable: View {
     var body: some View {
         let rows: [(String, (CompareItem) -> String)] = [
             ("Plastic", { i in summary(i).map { String(format: "%.1f g · %@ of the part as drawn", $0.massGrams, LibraryStyle.percent($0.achievedVolumeFraction)) } ?? "—" }),
-            ("Strength margin", { i in summary(i).map { String(format: "%.2f (needs more than 1)", $0.worstCaseMargin) } ?? "—" }),
-            ("Verdict", { i in summary(i).map { $0.accepted ? "Strong enough" : "Not strong enough" } ?? "—" }),
+            // ★ notes30 (362's review): a load on bare vines has no valid margin — its words in both rows
+            ("Strength margin", { i in summary(i).map { $0.marginWords ?? String(format: "%.2f (needs more than 1)", $0.worstCaseMargin) } ?? "—" }),
+            ("Verdict", { i in summary(i).map { $0.marginWords ?? ($0.accepted ? "Strong enough" : "Not strong enough") } ?? "—" }),
             ("Goal", { i in (library.snapshots[i.folder]?.minimizePlastic ?? true) ? "Minimize plastic" : "Strengthen" }),
             ("Resolution", { i in "\((library.snapshots[i.folder]?.quality ?? .fast).resolution)" }),
             ("Material", { i in library.snapshots[i.folder]?.material ?? "—" }),

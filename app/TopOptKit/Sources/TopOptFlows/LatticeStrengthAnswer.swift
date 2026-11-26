@@ -157,11 +157,13 @@ public struct LatticeStrengthAnswer: Equatable, Sendable {
         }
         add("Needs", StrengthWords.need(required) + " your load"
             + (loadKg > 0 ? " (" + StrengthWords.load(required * loadKg, unit) + ")" : ""))
-        add("Weakest spot", weakestSpot, info: weakestSpotInfo)   // ★ notes27 F2: was "Gives first at: A strut · bends · …"
-        if let short = strutsShort, let judged = strutsJudged, judged > 0 {
+        // ★ notes30 (362's review): a load on bare vines has no valid margin — no weakest spot, struts short or solid margin
+        let checked = bareVines == nil
+        if checked { add("Weakest spot", weakestSpot, info: weakestSpotInfo) }   // ★ notes27 F2: was "Gives first at: A strut · …"
+        if checked, let short = strutsShort, let judged = strutsJudged, judged > 0 {
             add("Struts short", "\(LatticeFileFacts.number(short)) of \(LatticeFileFacts.number(judged)) checked")
         }
-        if let d = solidMargin {
+        if checked, let d = solidMargin {
             add("Solid part", StrengthWords.x(d) + (infillPercent < 100 ? " at \(infillPercent)% infill" : "")
                 + (solidPassesAtInfill.map { " \u{00B7} OK at \($0)%" } ?? ""))
         }

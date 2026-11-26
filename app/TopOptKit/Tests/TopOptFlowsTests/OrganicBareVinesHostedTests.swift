@@ -125,6 +125,36 @@ final class OrganicBareVinesHostedTests: XCTestCase {
         }
     }
 
+    /// ★ 362's review: the Results list row of a bare-vines result shows no margin — its words on the row's own warning line
+    /// (its value the weight alone, so the result's name stays whole). RED CONTROL: read as before, no such line (the number).
+    func testTheListRowSaysTheWordsNeverAMargin() throws {
+        for size in Self.sizes {
+            let what = "\(Int(size.width))×\(Int(size.height))"
+            let o = try OrganicBareVinesTests.outcome()
+            func host() -> AppBuildHost {
+                let v = ResultsScreen(projectName: "Stand", outcome: o, undo: {}, redo: {}, topLeftBlock: nil,
+                                      resultsModel: ResultsModel(projectName: "Stand", outcome: o))
+                    .frame(width: size.width, height: size.height)
+                let h = AppBuildHost(v, size: size, test: self)
+                h.pump(2)
+                return h
+            }
+            let h = host()
+            let row = try h.onScreen("resultsVersion-t0", "\(what): the result's row")
+            let line = try h.onScreen("resultsVersion-t0-line", "\(what): ★ its words, on its own line")
+            XCTAssertTrue(row.insetBy(dx: -1, dy: -1).intersects(line), "\(what): the line is the row's")
+            try h.picture("bare-vines-row-\(what).png")
+            h.window.orderOut(nil); h.window.contentView = nil; h.pump(0.1)
+            // RED CONTROL: read as before notes30 — the number on the row, no words line
+            OrganicBareVines.controlUnread = true
+            let old = host()
+            _ = try old.onScreen("resultsVersion-t0", "\(what): RED CONTROL: the row")
+            XCTAssertNil(old.frames.all["resultsVersion-t0-line"], "\(what): RED CONTROL: no words line")
+            OrganicBareVines.controlUnread = false
+            old.window.orderOut(nil); old.window.contentView = nil; old.pump(0.1)
+        }
+    }
+
     /// ★ RED CONTROL for the whole path: read as before notes30, the walk never opens on a load on bare vines (it opened on the
     /// struts card, whose Solve sends him to Strut thickness), so no centred pop-up offers to cover the face.
     func testTheOldReadOffersNothing() throws {
