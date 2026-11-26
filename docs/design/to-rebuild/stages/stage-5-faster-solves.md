@@ -181,6 +181,19 @@ Added 2026-11-26 (his yes, C): `switch=auto`, no fixed K. The halved grid keeps 
 Measured next (queued): the REAL switch replayed on every reference dump at K = 10 / 20 / 30 / 50 and auto (cheb:2 and jacobi:1.333); the five test shapes; memory at res 128 / 192. The flat-CSR rewrite (memory) is written only if res 192 is over the cap.
 CHOICE RULE for the switch point, written 11-26 05:15 before the data (with the smoother B-05 picks): among K = 10 / 20 / 30 / 50 / auto, only settings where NO dump and NO test shape runs more than 5 % slower (wall) than no switch, and none leaves multigrid; of those the lowest total wall; within 5 % of it, `auto` first (no tuning constant, and it adapts to shapes no one has measured: his rule that users import any model), then the larger K (switches less).
 
+MEASURED 2026-11-26 (the REAL switch code, replayed on the reference dumps; CYCLES are the evidence: 1 thread at nice 10 OUTSIDE the lock, TOReview's yes, with the Mac shared, so the wall times are indicative only; timings stay for the lock):
+| dump (cold) | stage-5 smoother, halved grid (cheb:2) | switch, auto | switch, K = 10 | jacobi:1.333 halved / auto |
+|---|---|---|---|---|
+| Top Motor Mount solves 1 / 2 / 5 / 20 / 40 | 994 / 1,070 / 982 / 981 / 984 | 81 / 92 / 82 / 79 / 84 | the same | 1,227 / 1,375 / ... -> 109 / 117 / ... |
+| Stand v4 solve 1 | 1,474 | 256 | 256 | |
+| Stand v4 solve 20 | 337 | | 144 | |
+| Base solves 1 / 5 / 20 | 200 / 199 / 203 | 48 / 47 / 45 | the same | 277 / 269 / 273 -> 59 / 63* / 57 |
+| stand at res 64, solves 1 / 5 / 20 | 93 / 77 / 76 | 52 / 48 / 48 | the same | 139 / 112 / 112 -> 71 / 65 / 68 |
+| Stand v4 solve 2 | 216 | 258, NOT switched (refused) | 258 | round 1 below |
+Every switched solve stayed on multigrid (no l1 retry, no fallback). `auto` switched at its first checkpoint (cycle 10) on every part above and matched K = 10; it never switches on the plain held block or the test bracket. (*K = 10.)
+ROUND 1 OF 3 (fix written and tested 11-26, scratch sw/): on Stand v4 solve 2 the algebraic level was REFUSED; round 0 then rebuilt the halved grid and RESTARTED PCG, 258 cycles against 216 (+19 %), so "a refusal is never worse than today" was false as built. Now the algebraic hierarchy is built BESIDE the halved one at the checkpoint (a SwitchProbe in mf_mgpcg); built: the halved one is freed and PCG restarts on the algebraic one; refused: the SAME PCG carries on untouched. Test test_to_solver_switch now 17 checks, green: refused at K = 5 gives identical bytes and cycles to no switch (13 = 13). Cost: peak memory during the attempt is both hierarchies. Still to find: why that solve's algebraic level was refused (its stderr was discarded; replayed again with round 1).
+Still to come: the rest of the dumps (demo, Pressing, Pillow Blocks, stand at 128), the five test shapes, memory at res 128 / 192, the timed replays under the lock. Also on the list (TOReview 11-26): the made sample hook at res 64 (26k elements, loaded pieces at the floor), where today's shipped and l1 multigrid diverge (rel res 2.1e3 / 3.9e2) and the Jacobi-CG fallback runs 30k-106k iterations: its solves 1 / 309 / 316 are to be dumped from TOReview's local build source and replayed with cheb:2, the switch and the support-only rule.
+
 ## 5. Stage report (filling in as measurements land)
 
 ### Reference table, before and after (Release, his jobs read in place; one part per lock hold)
