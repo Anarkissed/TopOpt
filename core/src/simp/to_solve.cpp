@@ -10,6 +10,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -64,6 +65,10 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
                                SolverKind solver_kind,
                                const std::vector<char>* active_mask) {
   ++g_simp_compliance_calls;
+  // E-01 (TO rebuild stage 5): the run's solver settings, if the params carry
+  // them, for exactly this solve; none = the global switches, as before.
+  std::optional<fea_detail::SolverSettingsScope> solver_settings_scope;
+  if (params.solver_settings != nullptr) solver_settings_scope.emplace(*params.solver_settings);
   validate_params(params);
   if (density.size() != grid.voxel_count())
     throw std::invalid_argument(

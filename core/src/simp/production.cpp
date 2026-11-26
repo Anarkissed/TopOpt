@@ -810,6 +810,12 @@ void configure_production_options(MinimizePlasticOptions& opts) {
   // precision flip so "production run configured" implies one known thread count,
   // which run_info.json echoes as matfree_threads. A caller may override afterwards.
   fea_set_matfree_threads(production_matfree_thread_count());
+  // E-01 (TO rebuild stage 5): the same posture as ONE value the run carries to
+  // every solve (SimpOptions::solver_settings). Read back from the switches just
+  // set, so it is identical to them; the setters above stay until every caller
+  // passes the value.
+  opts.simp.solver_settings = fea_current_solver_settings();
+  opts.simp.use_solver_settings = true;
 }
 
 std::vector<double> production_reduction_ladder() {
