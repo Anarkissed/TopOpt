@@ -2770,6 +2770,43 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     }
   }
 
+  // TO rebuild (the maintainer, 2026-11-26): say so when the part is too small for
+  // the nozzle to leave the optimiser any printable room, with the nozzle that
+  // would fit, or resin. Advice only: the run is not changed. With the stage's
+  // switch, so today's report bytes are untouched.
+  if (to_stage1_on()) {
+    try {
+      std::vector<double> drawn(grid.voxel_count(), 0.0);
+      for (std::size_t idx = 0; idx < drawn.size(); ++idx)
+        if (grid.tags[idx] != VoxelTag::Empty) drawn[idx] = 1.0;
+      double thickest = 0.0;
+      for (double t : local_member_thickness_mm(grid, drawn, 0.5,
+                                                AnalysisKnobs{}.thickness_cap_voxels))
+        if (std::isfinite(t) && t > thickest) thickest = t;
+      const PartScale ps = part_scale(thickest, options.wall_line_width_mm);
+      if (ps.too_small) {
+        result.pipeline.report.too_small.evaluated = true;
+        result.pipeline.report.too_small.thickest_mm = ps.thickest_mm;
+        result.pipeline.report.too_small.needed_mm = ps.needed_mm;
+        result.pipeline.report.too_small.line_width_mm = ps.line_width_mm;
+        result.pipeline.report.too_small.nozzle_that_fits_mm = ps.nozzle_that_fits_mm;
+        if (ps.nozzle_that_fits_mm > 0.0)
+          std::fprintf(stderr,
+                       "[too small] the part's thickest section is %.2f mm; a %.2f mm line needs "
+                       "%.2f mm to leave room for a cut. A %.2g mm nozzle would fit.\n",
+                       ps.thickest_mm, ps.line_width_mm, ps.needed_mm, ps.nozzle_that_fits_mm);
+        else
+          std::fprintf(stderr,
+                       "[too small] the part's thickest section is %.2f mm; a %.2f mm line needs "
+                       "%.2f mm to leave room for a cut, and no common nozzle fits. Resin "
+                       "printing would.\n",
+                       ps.thickest_mm, ps.line_width_mm, ps.needed_mm);
+      }
+    } catch (const std::exception& e) {
+      std::fprintf(stderr, "[too small] could not be checked: %s\n", e.what());
+    }
+  }
+
   // TO rebuild stage 2 (ledger M-07): what the part AS DRAWN would take on the
   // printer at this job's walls and infill, beside its solid grams, so a version's
   // printed grams can be read as a saving against the real thing. No solve: the

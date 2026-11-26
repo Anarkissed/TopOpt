@@ -36,7 +36,7 @@ A. Already agreed:
 - A1. Stage 1 report to the reviewer once the two lock runs are recorded (draft at the top of `stages/stage-1-true-loads.md`).
 - A2. The pad's one number: tables and PICTURES of the shapes around the fixed faces from the two sweeps; a recommended curve strength for him in the morning.
 - A3. The automatic pad as the Auto default behind the switch; a typed depth in Manual; per-face values (thickness, pad) as report values for the app.
-- A4. "Too small for the nozzle": the core side (detects it, gives the plain reason and the recommendation: a finer nozzle, or resin). The pop-up is #362's.
+- A4. WRITTEN 04:50 (`part_scale.hpp`, the report's `"too_small"`, the pop-up's wording proposed in the stage-1 file); arithmetic checked; owed: one run on a made thin part.
 - A5. Automatic resolution from the part's size and the line width, Manual override.
 - A6. DONE 04:15: `tests/unit/to_reference_reading.hpp` gives the reading's own true value on the plate and the ring (the same sums as the script: 2.809 / 2.619 / 2.306 and 2.213 / 2.104 / 1.914), and both tests E print each pairing against it; unit checks for `interlayer_tension_field` and a reading over a size pass standalone. Owed: one built run of tests E for the new lines (with B1).
 - A7. Review and merge the helpers' work as they report.
@@ -51,6 +51,7 @@ B. Approved tonight:
 
 For him in the morning (questions held, with the provisional choice taken):
 - PA12's stress-reading length: the only filament-printed value found gives 0.13 mm (0.07 after his half rule), under a voxel on every job, so stage 2's reading over a size will do nothing for his PA12 parts whatever is decided. PROVISIONAL: PA12 left out of the table (it keeps today's solve and reading). Two papers that may hold a better value are behind paywalls; titles in 01-research.md if he wants to fetch them.
+- "Too small for the nozzle": PROVISIONAL rule = the part's thickest section under six line widths (two walls and a gap). Is that the right threshold, and should thin ARMS on a thick part be flagged too?
 - Top and bottom skin thickness for printed grams: his jobs do not carry top / bottom layer counts. PROVISIONAL: Bambu Studio's defaults (1.0 mm top, 0.6 mm bottom). Ask: should the app send his slicer's layer counts with the job?
 
 WAITING ON OTHERS: the reviewer's ruling on which reference a reading over a length is judged against (nothing more in `analyze.cpp` until then); #362's sheet types in a base I can build (the sheet row of the stage 2 lattice table).

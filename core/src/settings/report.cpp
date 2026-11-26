@@ -788,6 +788,13 @@ std::string job_report_json(const JobReport& report) {
            ", \"required\": " + num_json(report.as_drawn.required) + ", \"passes\": " +
            (report.as_drawn.margin >= report.as_drawn.required ? "true" : "false") + "}\n";
   }
+  if (report.too_small.evaluated) {  // TO rebuild: too small for the nozzle, additive
+    out.insert(out.size() - 1, ",");
+    out += "  \"too_small\": {\"thickest_mm\": " + num_json(report.too_small.thickest_mm) +
+           ", \"needed_mm\": " + num_json(report.too_small.needed_mm) + ", \"line_width_mm\": " +
+           num_json(report.too_small.line_width_mm) + ", \"nozzle_that_fits_mm\": " +
+           num_json(report.too_small.nozzle_that_fits_mm) + "}\n";
+  }
   if (report.drawn_part.evaluated) {  // TO rebuild stage 2 (M-07), additive
     out.insert(out.size() - 1, ",");
     out += "  \"drawn_part\": {\"printed_grams\": " + num_json(report.drawn_part.printed_grams) +

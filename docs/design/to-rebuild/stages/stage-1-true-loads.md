@@ -228,6 +228,16 @@ His words: "it should be automatic first, with a warning/notice explaining what 
 - When a run refuses a version because an anchored or loaded piece came away, and the pad on that face was typed by hand: one centred pop-up, "A fixed face came loose. The pad depth you typed for it may be too thin." with two buttons, "Use Auto" and "Keep mine".
 - What the core gives the app for this: per face, the thickness measured and the pad used (today printed as "[loadcase] automatic pad: ..."; to become a report value when the rule is settled).
 
+## Too small for the nozzle (core side written 2026-11-26 04:50; his decision; the pop-up is #362's)
+
+His words: "Definitely a pop-up for when a part is too small for the nozzle with a recommendation for either a different nozzle size or to switch to resin printing."
+
+- The rule (`part_scale.hpp`): the smallest printable thing is a wall two lines wide; to cut anything out of a section and leave something printable needs two such walls and a gap as wide, six line widths in all (2.7 mm at 0.45 mm). A part whose THICKEST section is under that is too small.
+- What the run gives the app, only when it is too small (with the stage's switch on): the report's top-level `"too_small": {"thickest_mm", "needed_mm", "line_width_mm", "nozzle_that_fits_mm"}`. `nozzle_that_fits_mm` is the largest of 0.6 / 0.4 / 0.25 / 0.2 mm on which the part would have room, or 0 when none does.
+- Checked on its arithmetic: thickest 0.8 mm: too small, no nozzle (resin); 1.5 mm: a 0.2 mm nozzle; 2.0 mm: 0.25 mm; 2.71 mm and up: fine at 0.4 mm. NOT yet run on a job (owed: one made thin part).
+- The pop-up, proposed wording for #362 (centred, his rule): "This part is too small for a 0.4 mm nozzle. Its thickest section is 2.0 mm; the optimiser needs 2.7 mm to make a cut it can print. Try a 0.25 mm nozzle." with buttons "Change nozzle" and "Run anyway". When no nozzle fits: "... Its thickest section is 0.8 mm. No common nozzle leaves room. Resin printing would."
+- Open, for him: the six-line-widths threshold is my reading of "room to cut"; and the advice is on the thickest section only, so a part with one thick lump and thin arms everywhere else is not flagged.
+
 ## For #362 (handed over with the switch flip; not edited by me)
 
 Until these land, with the switch on, the app's previews count voxels the old way while the run freezes by true distance.

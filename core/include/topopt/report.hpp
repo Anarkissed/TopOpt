@@ -541,6 +541,16 @@ struct JobReport {
     double solid_grams = 0.0;
   };
   DrawnPart drawn_part;
+  // TO rebuild: the part is too small for the nozzle to leave the optimiser any
+  // printable room (part_scale.hpp). Written as the top-level key "too_small":
+  // {"thickest_mm", "needed_mm", "line_width_mm", "nozzle_that_fits_mm"} ONLY when
+  // it is too small; the app shows one pop-up recommending that nozzle, or resin
+  // when "nozzle_that_fits_mm" is 0.
+  struct TooSmall {
+    bool evaluated = false;
+    double thickest_mm = 0.0, needed_mm = 0.0, line_width_mm = 0.0, nozzle_that_fits_mm = 0.0;
+  };
+  TooSmall too_small;
   FrozenShareReport frozen_share;
   // CORE LIST item 50 — emitted as report.json "strengthen" only when evaluated.
   StrengthenReport strengthen;
