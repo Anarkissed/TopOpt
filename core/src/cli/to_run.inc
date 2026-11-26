@@ -2788,8 +2788,10 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       for (std::size_t idx = 0; idx < drawn.size(); ++idx)
         if (grid.tags[idx] != VoxelTag::Empty) drawn[idx] = 1.0;
       double thickest = 0.0;
+      // The grid is the part's bounding box: outside it is air, or a part lying
+      // against the box's faces would read as thick as the measure reaches.
       for (double t : local_member_thickness_mm(grid, drawn, 0.5,
-                                                AnalysisKnobs{}.thickness_cap_voxels))
+                                                AnalysisKnobs{}.thickness_cap_voxels, true))
         if (t > thickest) thickest = t;  // +infinity = thicker than the measure's reach
       const PartScale ps = part_scale(thickest, options.wall_line_width_mm);
       if (std::isfinite(thickest) && ps.too_small) {
