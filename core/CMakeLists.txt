@@ -2395,6 +2395,14 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
       SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
       TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME organic_bare_lattice_depth COMMAND test_organic_bare_lattice_depth)
+    # The Organic strength check repeats bit for bit: the same made job twice in one process, the same strength bytes.
+    add_executable(test_organic_frame_repeat tests/validation/test_organic_frame_repeat.cpp)
+    target_link_libraries(test_organic_frame_repeat PRIVATE topopt)
+    target_compile_definitions(test_organic_frame_repeat PRIVATE
+      MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+      SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+      TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME organic_frame_repeat COMMAND test_organic_frame_repeat)
   endif()
 
   # M6.2 integration test: the maintainer-authored demo job in
