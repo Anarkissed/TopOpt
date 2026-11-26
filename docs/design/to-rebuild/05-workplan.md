@@ -45,6 +45,13 @@ OPEN, mine, no lock needed:
 
 DONE and recorded (kept short): stage 0 move; tests A, C/D, E (both halves), K; the stand both ways (old clamp); jobs A to C with LatticeReview's final statement; the sideways lip; bearing anchors; the as-drawn tables re-made on the corrected clamp; the reviewer's bar measured; the reading's own true value; printed grams verified on a run; the stage 2 switch shown not to reach the lattice check.
 
+## Ideas beyond the plan, in discussion with the maintainer (NOT acted on)
+
+Raised 2026-11-26 after his question "why can't the app just scale everything up proportionately, run the TO, then scale everything back down?" (he asked to discuss first; nothing below is built):
+
+- Why scaling up and back changes nothing and breaks things: the grid is a count of voxels across the part, so it scales with the part and every grid artefact stays; the lengths that do NOT scale are the printer's and the material's (line width, smallest wall, layer height, lattice cell, the stress-reading length) and the depths he types in mm.
+- What small parts really show: a fixed physical length that is large against the part (a 3 mm pad on a 10 mm block). Proposed, awaiting his word: (1) a rule that every length in the core is either physical (mm, never scaled) or relative to the part, no bare numbers; (2) the pad defined from the printer and the part (a few wall-line widths, capped at a share of the local thickness) and not a bare 3 mm; (3) resolution chosen from the part's size and the line width (Auto), with an engineer's override; (4) a test that runs one part at two sizes with loads scaled to the same stress: the same shape, and walls still at least two real line widths at both sizes; (5) a plain pop-up when a part is too small for the nozzle to leave the optimiser any printable room.
+
 ## 0. Where the work stands (kept current; newest first)
 
 **2026-11-25, 19:10 EST.** Work done while the lock was held (release 20's suite since 14:44).
