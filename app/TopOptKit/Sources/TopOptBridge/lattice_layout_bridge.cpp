@@ -50,6 +50,9 @@ struct LayoutSession {
   // ★ his 11-22 (watch it grow): the tap every Organic lay of `session` hands its vines to; read WITHOUT `mu` (the lay holds
   // it for its whole length). Declared before `session`, so it outlives the session that points at it.
   ll::GrowthTap tap;
+  // ★ notes30: the tap every strut lay with settings.stream on hands its certain struts to; read WITHOUT `mu`, as `tap`.
+  // Declared before `session`, so it outlives the session that points at it.
+  ll::StrutTap strut_tap;
   std::unique_ptr<ll::Session> session;
   int faces = 0;
   // The last layout's outcome: "where" reads the session's domain and this layout's cells, never across the next lay().
@@ -377,7 +380,40 @@ ll::Settings settings_in(const LayoutSession& s, const LatticeLayoutSettings& in
     std::shared_ptr<const ll::TensorField> none;
     ll::turn_layout_inputs(s.frame, ask, none);
   }
+  // ★ notes30: the stream's up, turned into the frame the lay is laid in (a framed session's print frame); not a
+  // direction: +Z. Neither it nor the map is a "where" setting: nothing the lay makes moves.
+  ask.stream = in.stream;
+  {
+    topopt::Vec3 up{in.stream_up_x, in.stream_up_y, in.stream_up_z};
+    const double n = std::sqrt(up.x * up.x + up.y * up.y + up.z * up.z);
+    up = n > 1e-9 && std::isfinite(n) ? topopt::Vec3{up.x / n, up.y / n, up.z / n} : topopt::Vec3{0.0, 0.0, 1.0};
+    up = s.frame.dir_to_print(up);   // (off: as is)
+    const double m = std::sqrt(up.x * up.x + up.y * up.y + up.z * up.z);
+    ask.stream_up = m > 1e-9 ? topopt::Vec3{up.x / m, up.y / m, up.z / m} : topopt::Vec3{0.0, 0.0, 1.0};
+  }
+  // ★ notes30 C4: the solid view's map, made in the lay: each voxel's centre exactly as lattice_layout_grid makes it.
+  if (in.map_nx > 0 && in.map_ny > 0 && in.map_nz > 0 && in.map_voxel_mm > 0.0f) {
+    if (static_cast<int64_t>(in.map_nx) * in.map_ny * in.map_nz > 8'000'000)
+      throw std::invalid_argument("lattice layout map: too many voxels");
+    ask.map.nx = in.map_nx;
+    ask.map.ny = in.map_ny;
+    ask.map.nz = in.map_nz;
+    const topopt::PrintFrame frame = s.frame;
+    const float origin_x = in.map_origin_x, origin_y = in.map_origin_y, origin_z = in.map_origin_z;
+    const float voxel_mm = in.map_voxel_mm;
+    ask.map.at = [frame, origin_x, origin_y, origin_z, voxel_mm](int32_t x, int32_t y, int32_t z) {
+      return frame.point_to_print({origin_x + voxel_mm * x, origin_y + voxel_mm * y, origin_z + voxel_mm * z});
+    };
+  }
   return ask;
+}
+// ★ notes30: core's map as the bridge gives a map (lattice_layout_grid's fields).
+void fill_map(LatticeLayoutGrid& g, const ll::LayoutMap& m) {
+  g.rg = m.rg;
+  g.ms = m.ms;
+  g.asked = m.asked;
+  g.unheld = m.unheld;
+  g.nocell.assign(m.nocell.begin(), m.nocell.end());
 }
 // What a lay gives, for the app: in the part's own coordinates (the session keeps its own, in the print frame, for "where"
 // and the maps).
@@ -426,6 +462,7 @@ LatticeLayoutOpenInfo open_session(const std::string& path, double linear_deflec
     s->faces = model.face_count;
     s->session = std::make_unique<ll::Session>(std::move(model));
     s->session->growth_tap(&s->tap);   // ★ his 11-22: every Organic lay of this session hands its vines to the tap
+    s->session->strut_tap(&s->strut_tap);   // ★ notes30: every strut lay asked with `stream` hands its certain struts over
     info.faces = s->faces;
     info.open_edges = static_cast<int32_t>(s->session->open_edges());
     std::lock_guard<std::mutex> lock(g_layout_mu);
@@ -462,7 +499,13 @@ LatticeLayoutResult lattice_layout(int64_t session, const LatticeLayoutSettings&
     s->stop = false;                                  // FIRST (LatticeReview's recipe), then the gen test: a cancel after this point stops it
     if (s->cancel_gen.load() != gen) { o.cancelled = true; return; }
     const auto t0 = std::chrono::steady_clock::now();
-    auto out = std::make_unique<ll::Outcome>(s->session->lay(ask, 0, &s->stop));
+    std::unique_ptr<ll::Outcome> out;
+    try {
+      out = std::make_unique<ll::Outcome>(s->session->lay(ask, 0, &s->stop));
+    } catch (...) {
+      if (ask.stream) s->strut_tap.cancel();   // ★ notes30: nothing more of this lay comes
+      throw;
+    }
     if (out->cancelled) {   // core gave up mid-way; what the session keeps is whole, but its domain may be the new one —
       s->solid_at.reset();  // so "where" says nothing until the next whole layout (never the old cells on a new domain)
       s->last.reset();
@@ -474,6 +517,13 @@ LatticeLayoutResult lattice_layout(int64_t session, const LatticeLayoutSettings&
     s->last = std::move(out);
     if (s->cancel_gen.load() != gen) { o.cancelled = true; return; }
     fill_shown(o, *s->last, s->frame);   // ★ notes29: framed, turned back to the part's own coordinates
+    if (ask.stream) {   // ★ notes30: which bars the stream handed over (core's own check, tap.land)
+      o.bar_streamed = s->strut_tap.landed_streamed();
+      if (o.bar_streamed.size() != s->last->bars.bars.size()) o.bar_streamed.assign(s->last->bars.bars.size(), 0);
+      o.streamed = static_cast<int64_t>(s->last->streamed);
+      o.streamed_missing = static_cast<int64_t>(s->last->streamed_missing);
+    }
+    if (s->last->map) fill_map(o.map, *s->last->map);   // ★ notes30 C4
     o.ms_bridge = ms_since(t0) - (o.ms_read + o.ms_cells + o.ms_bars);
   });
   if (!why.empty()) {
@@ -1093,6 +1143,74 @@ LatticeLayoutGrowth lattice_layout_growth_read(int64_t session, int64_t from, in
   });
   if (!why.empty()) {
     o = LatticeLayoutGrowth{};
+    failed(err, why);
+  }
+  return o;
+}
+
+LatticeLayoutStruts lattice_layout_strut_read(int64_t session, int64_t from, int64_t most, BridgeError& err) {
+  LatticeLayoutStruts o;
+  const std::string why = bridge_guard_run("lattice_layout_strut_read", [&] {
+    auto s = layout_at(session);   // never s->mu: the lay holds it while it runs (the tap has its own lock)
+    const ll::StrutTap::Read r = s->strut_tap.read(static_cast<std::size_t>(std::max<int64_t>(0, from)),
+                                                   static_cast<std::size_t>(std::max<int64_t>(0, most)));
+    const topopt::PrintFrame& f = s->frame;   // ★ notes29: framed, every place in the part's own coordinates (off: as is)
+    o.lay = r.lay;
+    o.phase = static_cast<int32_t>(r.phase);
+    o.next = static_cast<int64_t>(r.next);
+    const topopt::Vec3 up = f.dir_to_model(r.up);
+    o.up[0] = static_cast<float>(up.x); o.up[1] = static_cast<float>(up.y); o.up[2] = static_cast<float>(up.z);
+    // Heights along the up: the turn is rigid, so a height in the lay's frame is the model's less one offset.
+    const topopt::Vec3 zero = f.point_to_model({0.0, 0.0, 0.0});
+    const double offset = zero.x * up.x + zero.y * up.y + zero.z * up.z;
+    double low = 1e300, high = -1e300;
+    for (int c = 0; c < 8; ++c) {
+      const double h = (c & 1 ? r.hi.x : r.lo.x) * r.up.x + (c & 2 ? r.hi.y : r.lo.y) * r.up.y +
+                       (c & 4 ? r.hi.z : r.lo.z) * r.up.z;
+      low = std::min(low, h);
+      high = std::max(high, h);
+    }
+    o.low_mm = r.lay > 0 ? low + offset : 0.0;
+    o.high_mm = r.lay > 0 ? high + offset : 0.0;
+    topopt::Vec3 lo = r.lo, hi = r.hi;
+    f.box_to_model(lo, hi);
+    o.lo[0] = static_cast<float>(lo.x); o.lo[1] = static_cast<float>(lo.y); o.lo[2] = static_cast<float>(lo.z);
+    o.hi[0] = static_cast<float>(hi.x); o.hi[1] = static_cast<float>(hi.y); o.hi[2] = static_cast<float>(hi.z);
+    o.slots = static_cast<int64_t>(r.slots);
+    o.slots_laid = static_cast<int64_t>(r.laid);
+    o.line_mm = r.line > -1e299 ? r.line + offset : -1e300;
+    o.total = static_cast<int64_t>(r.total);
+    o.missing = static_cast<int64_t>(r.missing);
+    const std::size_t n = r.region.size();
+    o.bars.reserve(7 * n);
+    o.bar_ends.assign(2 * n, 0);
+    o.bar_flags = r.flags;
+    o.bar_region.assign(r.region.begin(), r.region.end());
+    o.bar_cell.reserve(n);
+    for (std::size_t i = 0; i < n; ++i) {   // the very floats fill() gives the landed bar (turned as doubles, then cast)
+      put(o.bars, f.point_to_model({r.ab[6 * i], r.ab[6 * i + 1], r.ab[6 * i + 2]}));
+      put(o.bars, f.point_to_model({r.ab[6 * i + 3], r.ab[6 * i + 4], r.ab[6 * i + 5]}));
+      o.bars.push_back(static_cast<float>(r.width[i]));
+      o.bar_cell.push_back(static_cast<float>(r.cell[i]));
+    }
+    o.map_state = static_cast<int32_t>(r.map_state);
+    o.map_slabs_done = r.slabs_done;
+  });
+  if (!why.empty()) {
+    o = LatticeLayoutStruts{};
+    failed(err, why);
+  }
+  return o;
+}
+
+LatticeLayoutGrid lattice_layout_strut_map(int64_t session, BridgeError& err) {
+  LatticeLayoutGrid o;
+  const std::string why = bridge_guard_run("lattice_layout_strut_map", [&] {
+    auto s = layout_at(session);   // never s->mu
+    if (const std::shared_ptr<const ll::LayoutMap> m = s->strut_tap.map()) fill_map(o, *m);
+  });
+  if (!why.empty()) {
+    o = LatticeLayoutGrid{};
     failed(err, why);
   }
   return o;

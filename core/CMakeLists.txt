@@ -210,6 +210,8 @@ add_library(topopt
   src/lattice_layout/organic_guard.cpp
   # Install 3, rule D23: the faces a region runs into that no rule decides (places).
   src/lattice_layout/places.cpp
+  # notes30 (option D): the strut stream, its certificate and the solid view's map made in the lay (StrutTap).
+  src/lattice_layout/stream.cpp
   src/orient/orient.cpp
   src/orient/build_orientation.cpp
   src/orient/build_frame.cpp
@@ -565,6 +567,12 @@ add_test(NAME lattice_width_bounds COMMAND test_lattice_width_bounds)
 add_executable(test_lattice_layout tests/unit/test_lattice_layout.cpp)
 target_link_libraries(test_lattice_layout PRIVATE topopt)
 add_test(NAME lattice_layout COMMAND test_lattice_layout)
+# notes30 (option D): the strut stream: the lay the same with it on, every strut handed over a bar of the finished lay,
+# the floors in step, cancel, the print frame, the map made in the lay (T1-T7, each with its RED control).
+add_executable(test_lattice_layout_stream tests/unit/test_lattice_layout_stream.cpp)
+target_include_directories(test_lattice_layout_stream PRIVATE src/lattice_layout)
+target_link_libraries(test_lattice_layout_stream PRIVATE topopt)
+add_test(NAME lattice_layout_stream COMMAND test_lattice_layout_stream)
 # notes29 (his iPad notes on release 20, 2026-11-25): with Allow quilt off no strut type is laid past its own limits
 # (no cell under the open floor, no strut past the open look), in every mode; no holes in a region (no cell laid with
 # nothing in it); an even outline (no cut cell opened at the part's edge with no strut in it).
