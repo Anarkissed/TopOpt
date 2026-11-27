@@ -1,6 +1,27 @@
 # Stage 2: a strength number that holds (TOReview)
 
-Status: PROPOSAL for discussion with the maintainer. Nothing built except a measuring tool (`stress_measure.hpp`) and two textbook tests. The certificate is shared with the lattice strength check, so whatever is agreed goes to the reviewer and LatticeReview before any change to `analyze.cpp`.
+Status 2026-11-26 19:30: IN PROGRESS. Everything is behind ONE switch, `TOPOPT_STRENGTH` (unset = today, unchanged; `size` = the form below; `stiff` = a measuring arm). The certificate is shared with the lattice strength check: every change here is told to the reviewer and LatticeReview. The history below is in the order it happened; this block is where it stands.
+
+## WHERE IT STANDS (read this first)
+
+**In plain words, for the maintainer.** The app decides pass or fail from the stress in the single hottest little cube of the part. That number jumps when the detail level changes and is wrong at the part's edge. Stage 2 replaces it, where the detail is fine enough, with the stress averaged over a small region whose size belongs to the plastic (PLA: 1.2 mm), which is what the research says a printed part really fails by. It also shows the weight as it is printed (walls and infill), not as a solid block.
+
+**Done and measured (all behind the switch):**
+- Printed grams, checked against Bambu Studio to within 3 %; the "saved" figure against the part as drawn at the same walls and infill.
+- The averaged reading, on real stiffness, with the averaging region free to sit on the part's edge. Against the textbook on two shapes at four detail levels it is never more than 4.9 % low and within 10 % across detail levels, from 1.75 voxels across upward (set as the switch point). The across-layer check is read the same way (inside the bar at 19 of 20 points; 5.4 % low at one).
+- Under 1.75 voxels across, or for a material with no published length, the job keeps TODAY'S solve and reading whole, and says so (`[strength]` line, the report's `strength_reading`).
+- The reviewer's rulings of 18:37Z, items 2 to 6: answered (tables below).
+
+**Found, and not comfortable:**
+- On his materials and usual detail levels the averaged reading rarely switches on (PLA needs a voxel of 0.69 mm or finer; PETG and ABS essentially never; PA6 and PA12 have no length), so for most jobs stage 2 changes the grams and not the strength number.
+- Today's one-voxel reading is itself 13.9 % low on a sharp notch (the ellipse) at one detail level.
+- The number he is SHOWN comes from a second judge, the re-check of the finished file on all-or-nothing voxels: 10 to 27 % optimistic on the textbook plate, and up to 2.3 times the loop's own number on the lightest carved versions. The averaged reading does not reach it.
+
+**Owed:**
+- The reviewer's rulings on: "one judge" (the file re-check on each voxel's fill, by the same form; `file_fill.hpp` is written ahead, not wired); the sharp-notch question; the across-layer miss.
+- Conditions (b) to (e) again on his full-resolution parts with this form (`b5_stage2.sh`, lock, queued behind the suite).
+- LatticeReview told what moves in the shared certificate once "one judge" is ruled.
+- The app's side (#362): show the form and the printed grams.
 
 ## The problem, in plain words
 
