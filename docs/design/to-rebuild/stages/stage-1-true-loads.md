@@ -251,6 +251,10 @@ Worst-case margin, switch off -> `face`, at the automatic pad (1.79 mm on these 
 THE SAME to the digits recorded: the pad does not reach the lattice strength check on these jobs, which is what LatticeReview's own sweep found (item 2(b)). The same-job-twice gate at the automatic pad PASSED too (1 of 1, 1938 s). Owed to finish 2(a): the 3 mm pair run by the same script (in progress), then the table to LatticeReview and the reviewer.
 A slip of mine on the way: I ran this test by hand from the folder my queued lock job was using at that moment; my hand run at 3 mm collided with it ("the lattice file could not be saved") and is discarded. The automatic-pad run above finished before the collision (rc 0, 0 failures) and the queued job's own results are the ones that count. Not again: nothing runs from a build folder a lock job is using.
 
+### FLIP ITEM 2(a) COMPLETE (2026-11-27 01:04, tip f11b95d7)
+
+The lattice check re-run ALONE at the fixed 3 mm pad (after my collision spoiled the queued run): 0 failures. `face` worst-case margins, 3 mm against the automatic pad: A 895.0555646 / 895.0555646; B 941.187225 / 941.187225; C 971.9236292 / 971.9236292, weakest strut 870.0431599 / 870.0431599; D (Organic with the load on the lattice) 1443.955099 / 1443.955099, weakest strut 22.55735191 / 22.55735191. IDENTICAL to every digit printed, and the laid lattice identical in every job. The same-job-twice gate passes at both pads (1938 s automatic, 2100 s at 3 mm). So on the lattice jobs the automatic pad changes nothing, and the flip's evidence at 3 mm stands for it.
+
 ## Still owed before the stage report
 
 - The original stand optimised both ways (queued), then Top Motor Mount; three settings; pad 2 / 3 / 4.5 mm.
