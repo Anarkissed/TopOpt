@@ -984,3 +984,17 @@ NOT DONE YET: (1) the CLI sets the stress-reading size only when the mode is `Si
 
 The three CLI conditions that set the stress-reading size (`to_setup.inc`, `to_analyze.inc`, `to_run.inc`) accept `Surface` as they accept `Size`. Checked on the 15 mm bracket as drawn (`analyze`, res 48, PLA): switch unset: margin 6.530, the same `analysis.json` bytes as before the change; `size`: 8.190 (stress 2.374 MPa, 0.7467 g printed); `surface`: 8.190, identical to `size`, as it should be here: PLA's ball (1.2 mm) spans 3.8 voxels at this resolution and no member is thin by the rule, so nothing falls back to the surface reading. A case that does fall back (a material with no published length, or a coarser grid) is the next check, with the reviewer's five measurements.
 
+### B MEASURED: section-force stress on thin members (the reviewer's ruling (b)); 2026-11-27 16:45; a measuring arm in `to_strength_cut_skin`, nothing in the engine
+
+The member cut at mid-span; the nodal forces the material on one side puts across the cut, from the solve itself (`fea_matfree_apply` on the half model); N and M from them; membrane N / A and bending M c / I on the TRUE section (the skin's fill). Against the true surface stress:
+
+| member | section-force stress | the per-voxel peak, for comparison | the surface carry |
+|---|---|---|---|
+| bending, 2, 3, 4, 6, 8, 16 voxels of core, skin fills 0.25 / 0.5 / 0.75, every skin model (60 rows) | 1.000 in every row | 0.41 to 0.96 at 3 and 6 | 0.63 to 1.28 at 3 and 6 |
+| tension, core 2 and 4, all-or-nothing | 1.000 | 0.750 and 0.834 | |
+| tension, core 2 and 4, E x fill | 1.000 | 1.000 | |
+
+The moment and the force measured across the cut equal the applied ones to four digits in every row. The rows at ONE voxel of core did not solve (not looked into; printed, not counted).
+
+WHAT IT PROVES AND WHAT IT DOES NOT. It holds the bar exactly here, at 2 voxels through as at 16, because the forces across a cut are right by equilibrium whatever the element does. But this beam is STATICALLY DETERMINATE: the moment at mid-span is fixed by the load, and the true section was GIVEN. So 1.000 confirms the reading; it does not test the two things a real part adds: (1) HOW MUCH LOAD a thin member takes when stiffer paths share it, which depends on the solve's stiffness (the extrusion stand at 64 voxels is 35 % too stiff as a whole; a fine-box side measurement the same day); (2) FINDING the member, its cut plane and its true section on a general shape. Next before it can become the reading under 8 through: a statically INDETERMINATE case (two members of different thickness sharing a load, against the fine solve), and the section taken from the voxel model's own fills, not handed in.
+

@@ -52,19 +52,24 @@ struct Out {
   // The patch recovery of the tensor (stress_recovered_at_surface), mid-span only, at
   // patch radius 2.5 and 3.5 voxels, / true surface stress.
   double patch25 = 0.0, patch35 = 0.0;
-  double quad35 = 0.0, quad45 = 0.0;
+  double quad35 = 0.0, quad45 = 0.0;  // the quadratic patch (order 2) at radius 3.5 and 4.5
   double carry2 = 0.0;  // the curvature-shaped carry (shape 1)
   // The one judge under TOPOPT_STRENGTH=surface (E x fill rows only): its max_von_mises
   // / true surface stress (the loaded ends included: the judge cannot mask them), its
   // tight and unresolved counts, and the same solve's material field read at the
   // surface (shape 1) at mid-span only, as the engine-carry row is.
   double judge = 0.0, judge_mid = 0.0;
-  std::size_t judge_tight = 0, judge_unresolved = 0;  // the quadratic patch (order 2) at radius 3.5 and 4.5
+  std::size_t judge_tight = 0, judge_unresolved = 0;
+  // SECTION FORCES (task B, measuring arm): the stress from the mid-span section's own
+  // forces (membrane N / A plus bending M c / I on the TRUE section) / true surface
+  // stress (bending) or / N_applied / A_true (tension); the measured M (bending) or N
+  // (tension) / the one applied, from the nodal loads as applied.
+  double section = 0.0, section_ratio = 0.0;
   bool ok = false;
 };
 
 // skin_density < 0: the skin voxels are absent (Empty).
-Out bend(int core, double fill, double skin_density, double penalty) {
+Out bend(int core, double fill, double skin_density, double penalty, bool tension = false) {
   VoxelGrid g;
   g.nx = kLength;
   g.ny = core + 2;
@@ -90,16 +95,20 @@ Out bend(int core, double fill, double skin_density, double penalty) {
   const double mid = 0.5 * g.ny * kH;
   const double q = 0.25 * kH * kH;
   double moment = 0.0;  // per unit width
+  double applied_moment = 0.0, applied_force = 0.0;  // at the +x end, from the nodal loads as applied
   std::vector<NodalLoad> loads;
   for (int j = 1; j <= core; ++j) {
     const double arm = (j + 0.5) * kH - mid;
-    const double s = arm;  // traction, MPa per mm of arm (any scale: everything is linear)
+    // traction, MPa per mm of arm (any scale: everything is linear); uniform in tension
+    const double s = tension ? 1.0 : arm;
     moment += s * kH * arm;
     for (int k = 0; k < g.nz; ++k)
       for (int dk = 0; dk < 2; ++dk)
         for (int dj = 0; dj < 2; ++dj) {
           loads.push_back({topopt::fea_node_index(g, g.nx, j + dj, k + dk), 0, q * s});
           loads.push_back({topopt::fea_node_index(g, 0, j + dj, k + dk), 0, -q * s});
+          applied_force += q * s;
+          applied_moment += q * s * ((j + dj) * kH - mid);
         }
   }
   std::vector<DirichletBC> bcs;
@@ -136,6 +145,48 @@ Out bend(int core, double fill, double skin_density, double penalty) {
   const double thick = (core + 2.0 * fill) * kH;
   const double surface = 6.0 * moment / (thick * thick);
   const double exact_curvature = 12.0 * moment / (kE * thick * thick * thick);
+  {
+    // SECTION FORCES: the model's own displacement (its own solve: the analysis zeroes
+    // the nodes of voxels it does not print, which a thin skin's outer nodes are), the
+    // unconstrained operator applied over the elements on the low-x side of the cut at
+    // mid-span only, read at the nodes on the cut plane: the section's nodal forces.
+    const topopt::SimpCompliance own = topopt::simp_compliance(
+        g, params, density, bcs, loads, 1e-9, 60000, nullptr, nullptr,
+        topopt::SolverKind::MultigridCG_Matfree);
+    std::vector<double> youngs(n, 0.0);
+    for (std::size_t v = 0; v < n; ++v)
+      if (g.tags[v] != topopt::VoxelTag::Empty) youngs[v] = topopt::simp_youngs(params, density[v]);
+    const int i_cut = g.nx / 2;
+    VoxelGrid left = g;
+    for (int k = 0; k < g.nz; ++k)
+      for (int j = 0; j < g.ny; ++j)
+        for (int i = i_cut; i < g.nx; ++i) left.tags[g.index(i, j, k)] = topopt::VoxelTag::Empty;
+    const std::vector<double> Ku = topopt::fea_matfree_apply(left, youngs, params.poisson, own.solution.u);
+    double N = 0.0, M = 0.0;
+    for (int k = 0; k <= g.nz; ++k)
+      for (int j = 0; j <= g.ny; ++j) {
+        const double F = Ku[3 * static_cast<std::size_t>(topopt::fea_node_index(g, i_cut, j, k))];
+        N += F;
+        M += F * (j * kH - mid);
+      }
+    // The TRUE section: (core + 2 fill) voxels through about the mid-plane, the beam's width.
+    const double width = g.nz * kH;
+    const double A = thick * width, I = width * thick * thick * thick / 12.0, c = 0.5 * thick;
+    const double sigma = std::fabs(N) / A + std::fabs(M) * c / I;
+    if (tension) {
+      const double exact = applied_force / A;
+      o.section = sigma / exact;
+      o.section_ratio = applied_force != 0.0 ? std::fabs(N) / std::fabs(applied_force) : 0.0;
+      // the plain per-voxel peak at mid-span over the same
+      for (int k = 0; k < g.nz; ++k)
+        for (int j = 0; j < g.ny; ++j)
+          for (int i = g.nx / 4; i < 3 * g.nx / 4; ++i)
+            o.peak = std::max(o.peak, res.von_mises_field[g.index(i, j, k)] / exact);
+      return o;
+    }
+    o.section = sigma / surface;
+    o.section_ratio = applied_moment != 0.0 ? std::fabs(M) / std::fabs(applied_moment) : 0.0;
+  }
   // Curvature from the rotation of two cross-sections (the core's top and bottom
   // node planes), a quarter and three quarters along, mid-width.
   const int kz = g.nz / 2;
@@ -240,10 +291,48 @@ int main() {
         if (md.penalty == 1.0 && md.skin >= 0.0)
           std::printf("   JUDGE(surface) %.3f, tight %zu, unresolved %zu (its field at mid-span only, at the surface: %.3f)",
                       o.judge, o.judge_tight, o.judge_unresolved, o.judge_mid);
+        std::printf("   SECTION %.3f (M measured / applied %.4f)", o.section, o.section_ratio);
         std::printf("\n");
         std::fflush(stdout);
       }
     }
+  // SECTION FORCES, 2 to 6 voxels through densely (task B): cores 1, 3 and 6, the two
+  // models that matter.
+  std::printf("[section] extra cores: stress from the mid-span section's own forces / true surface stress, and M measured / M applied\n");
+  for (int core : {1, 3, 6})
+    for (double fill : {0.25, 0.5, 0.75}) {
+      const struct { const char* name; double skin; double penalty; } extra[2] = {
+          {"all-or-nothing", fill >= 0.5 ? 1.0 : -1.0, 3.0}, {"E x fill      ", fill, 1.0}};
+      for (const auto& md : extra) {
+        const Out o = bend(core, fill, md.skin, md.penalty);
+        if (!o.ok) {
+          // measuring rows: a row that does not solve is printed, not counted
+          std::printf("[section] core %d, fill %.2f, %s  DID NOT SOLVE\n", core, fill, md.name);
+          continue;
+        }
+        std::printf("[section] core %d, fill %.2f (true thickness %.2f voxels), %s   peak %.3f   carry2 %.3f   SECTION %.3f (M measured / applied %.4f)\n",
+                    core, fill, core + 2.0 * fill, md.name, o.peak, o.carry2, o.section, o.section_ratio);
+        std::fflush(stdout);
+      }
+    }
+  // A MEMBER IN TENSION: the same beam pulled by a uniform end traction on the core.
+  std::printf("[section] tension: section-force stress / (N applied / A true), per-voxel peak at mid-span / the same, N measured / N applied\n");
+  for (int core : {2, 4}) {
+    const double fill = 0.5;
+    const struct { const char* name; double skin; double penalty; } tm[2] = {
+        {"all-or-nothing", 1.0, 3.0}, {"E x fill      ", fill, 1.0}};
+    for (const auto& md : tm) {
+      const Out o = bend(core, fill, md.skin, md.penalty, true);
+      if (!o.ok) {
+        // measuring rows: a row that does not solve is printed, not counted
+        std::printf("[section] tension core %d, %s  DID NOT SOLVE\n", core, md.name);
+        continue;
+      }
+      std::printf("[section] tension core %d, fill %.2f, %s   SECTION %.3f   per-voxel peak %.3f   (N measured / applied %.4f)\n",
+                  core, fill, md.name, o.section, o.peak, o.section_ratio);
+      std::fflush(stdout);
+    }
+  }
   std::printf("[cut skin] measure only: %d failure(s)\n", failures);
   return failures == 0 ? 0 : 1;
 }
