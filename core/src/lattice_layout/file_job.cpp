@@ -14,6 +14,7 @@
 #include <cstring>
 #include <memory>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <sstream>
@@ -1653,6 +1654,9 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
       r.strength_ran = true;
       r.strength_accepted = sd.accepted;
       r.strength_json = sd.json;
+      r.break_verdict = sd.break_verdict;   // C3
+      r.break_pass_line = sd.break_pass_line;
+      r.break_posts = sd.break_posts;
       // P4: the print orientation ranking: the check's strength and support per candidate, the file's bed and height.
       if (sd.orientation.known)
         r.orientation_json = print_orientation_json(sd.orientation, cands, job.print_frame, options.layers.layer_mm);
@@ -1831,6 +1835,184 @@ std::vector<FileResult::Emptied> emptied_regions(const Bars& bars, const std::ve
   return out;
 }
 
+namespace {
+// ── C3, CUT 1b: the posts step (strength-build-plan.md, "OWNER ADDITION"). After an Organic file's break check, when
+// its answer is fail or not proven and a POST is the cause, ONLY those posts are widened by the strengthen job's own law
+// (width x (pass line / multiple)^(1/2), run_job.cpp:14757-14758; the post's file-section multiple when its own weakest
+// point is too thin to judge), never under two lines (post_mm), grown inward where the part's outer face would trim it;
+// the file is made again (its print check as for any file) and checked again. Two rounds at most.
+
+// How far the part's surface is from (x, y, z) along a level direction (dx, dy): the nearest crossing of the part's
+// mesh, or 1e300 for none.
+double reach_to_surface(const TriangleMesh& m, const Vec3& o, double dx, double dy) {
+  const Vec3 d{dx, dy, 0.0};
+  double best = 1e300;
+  for (const auto& t : m.triangles) {
+    const Vec3& a = m.vertices[static_cast<std::size_t>(t[0])];
+    const Vec3& b = m.vertices[static_cast<std::size_t>(t[1])];
+    const Vec3& c = m.vertices[static_cast<std::size_t>(t[2])];
+    const Vec3 e1{b.x - a.x, b.y - a.y, b.z - a.z}, e2{c.x - a.x, c.y - a.y, c.z - a.z};
+    const Vec3 pv{d.y * e2.z - d.z * e2.y, d.z * e2.x - d.x * e2.z, d.x * e2.y - d.y * e2.x};
+    const double det = e1.x * pv.x + e1.y * pv.y + e1.z * pv.z;
+    if (std::fabs(det) < 1e-14) continue;
+    const Vec3 tv{o.x - a.x, o.y - a.y, o.z - a.z};
+    const double u = (tv.x * pv.x + tv.y * pv.y + tv.z * pv.z) / det;
+    if (u < 0.0 || u > 1.0) continue;
+    const Vec3 qv{tv.y * e1.z - tv.z * e1.y, tv.z * e1.x - tv.x * e1.z, tv.x * e1.y - tv.y * e1.x};
+    const double v = (d.x * qv.x + d.y * qv.y + d.z * qv.z) / det;
+    if (v < 0.0 || u + v > 1.0) continue;
+    const double s = (e2.x * qv.x + e2.y * qv.y + e2.z * qv.z) / det;
+    if (s > 0.0) best = std::min(best, s);
+  }
+  return best;
+}
+
+double file_volume_mm3(const std::string& path) {
+  try {
+    const StlMesh f = read_stl_file(path);
+    double v = 0.0;
+    for (const auto& t : f.mesh.triangles) {
+      const Vec3& a = f.mesh.vertices[static_cast<std::size_t>(t[0])];
+      const Vec3& b = f.mesh.vertices[static_cast<std::size_t>(t[1])];
+      const Vec3& c = f.mesh.vertices[static_cast<std::size_t>(t[2])];
+      v += a.x * (b.y * c.z - b.z * c.y) - a.y * (b.x * c.z - b.z * c.x) + a.z * (b.x * c.y - b.y * c.x);
+    }
+    return v / 6.0;
+  } catch (const std::exception&) {
+    return 0.0;
+  }
+}
+
+std::string pnum(double v) {
+  char b[40];
+  std::snprintf(b, sizeof b, "%.6g", v);
+  return b;
+}
+
+// Is post q a cause of the answer? (its first break, or under the pass line by its own reading or its section's)
+bool post_is_cause(const BreakPostReading& pr, double pass) {
+  return pr.first_break || (pr.all > 0.0 && pr.all < pass) || (pr.section > 0.0 && pr.section < pass);
+}
+
+void posts_step(FileResult& r, const FileJob& job0, const StepModel& model, const std::string& stl_path, void (*said)(const char*),
+                const StrengthCheck* strength) {
+  if (!r.ok || !r.strength_ran || r.break_posts.empty() || r.made.posts.size() != r.break_posts.size()) return;
+  if (r.break_verdict != "fail" && r.break_verdict != "not_proven") return;
+  const double pass = r.break_pass_line;
+  bool any = false;
+  for (const BreakPostReading& pr : r.break_posts) any = any || post_is_cause(pr, pass);
+  if (!any) return;
+  FileJob job = job0;
+  const double floor_w = job.options.mesh.post_mm;   // two lines across (MeshSpec: "A vertical post, two lines across")
+  std::vector<MeshSpec::PostWide> wide;
+  std::vector<std::string> cannot;   // the posts the step could not widen, with why (never tried again)
+  std::string rounds_json;
+  int rounds = 0;
+  const auto same = [](const MeshSpec::Post& a, const MeshSpec::PostWide& b) {
+    return a.x == b.x && a.y == b.y && a.z_top == b.z_top && a.z_bottom == b.z_bottom;
+  };
+  for (int round = 1; round <= 2; ++round) {
+    if (r.break_verdict != "fail" && r.break_verdict != "not_proven") break;
+    std::string posts_json;
+    bool changed = false;
+    for (std::size_t q = 0; q < r.made.posts.size(); ++q) {
+      const BreakPostReading& pr = r.break_posts[q];
+      if (!post_is_cause(pr, pass)) continue;
+      const MeshSpec::Post& p = r.made.posts[q];
+      bool skip = false;
+      for (const std::string& c : cannot) skip = skip || c.rfind(std::to_string(q) + ":", 0) == 0;
+      if (skip) continue;
+      double w0 = floor_w, ox0 = 0.0, oy0 = 0.0;
+      for (const MeshSpec::PostWide& e : wide)
+        if (same(p, e)) { w0 = e.width; ox0 = e.ox; oy0 = e.oy; }
+      const double m = pr.all_resolved ? pr.all : (pr.section > 0.0 ? pr.section : pr.all);
+      const double law = m > 0.0 ? w0 * std::sqrt(pass / m) : w0;
+      const double w1 = std::max({law, w0, floor_w});
+      // the room the part gives around the post's axis, the least over its height
+      double px = 1e300, nx = 1e300, py = 1e300, ny = 1e300;
+      for (int s = 0; s < 3; ++s) {
+        const double z = s == 0 ? p.z_bottom + 0.3 : s == 1 ? 0.5 * (p.z_bottom + p.z_top) : p.z_top - 0.3;
+        const Vec3 o{p.x, p.y, z};
+        px = std::min(px, reach_to_surface(model.mesh, o, 1, 0));
+        nx = std::min(nx, reach_to_surface(model.mesh, o, -1, 0));
+        py = std::min(py, reach_to_surface(model.mesh, o, 0, 1));
+        ny = std::min(ny, reach_to_surface(model.mesh, o, 0, -1));
+      }
+      const double h = 0.5 * w1;
+      char why[200] = "";
+      if (px + nx < w1 || py + ny < w1)
+        std::snprintf(why, sizeof why, "the part is only %.2f x %.2f mm across at this post, under the %.2f mm it needs", px + nx, py + ny, w1);
+      const double ox = px < h ? -(h - px) : nx < h ? (h - nx) : 0.0;
+      const double oy = py < h ? -(h - py) : ny < h ? (h - ny) : 0.0;
+      if (!why[0] && w1 == w0 && ox == ox0 && oy == oy0)
+        std::snprintf(why, sizeof why, "the law asks no wider (multiple %.3f) and the post is already whole inside the part", m);
+      posts_json += std::string(posts_json.empty() ? "" : ", ") + "{\"post\": " + std::to_string(q) + ", \"at\": [" + pnum(p.x) + ", " +
+                    pnum(p.y) + ", " + pnum(p.z_bottom) + ", " + pnum(p.z_top) + "], \"width_before_mm\": " + pnum(w0) +
+                    ", \"section_before_mm2\": " + pnum(pr.section_mm2) + ", \"multiple_before\": " + pnum(pr.all) +
+                    ", \"judged_before\": " + pnum(pr.all_resolved) + ", \"section_multiple_before\": " + pnum(pr.section) +
+                    ", \"law_multiple\": " + pnum(m);
+      if (why[0]) {
+        cannot.push_back(std::to_string(q) + ": " + why);
+        posts_json += ", \"widened\": false, \"why\": \"" + std::string(why) + "\"}";
+        continue;
+      }
+      bool found = false;
+      for (MeshSpec::PostWide& e : wide)
+        if (same(p, e)) { e.width = w1; e.ox = ox; e.oy = oy; found = true; }
+      if (!found) wide.push_back({p.x, p.y, p.z_top, p.z_bottom, w1, ox, oy});
+      changed = true;
+      posts_json += ", \"widened\": true, \"width_after_mm\": " + pnum(w1) + ", \"moved_in_mm\": [" + pnum(ox) + ", " + pnum(oy) + "]}";
+    }
+    if (!changed) {
+      if (!posts_json.empty())
+        rounds_json += std::string(rounds_json.empty() ? "" : ", ") + "{\"round\": " + std::to_string(round) + ", \"posts\": [" + posts_json +
+                       "], \"made_again\": false}";
+      break;
+    }
+    // made again with the wider posts; the last file that passed is kept if this one does not
+    ++rounds;
+    if (said) said("checking its strength: widening the weak posts");
+    const double vol0 = file_volume_mm3(stl_path);
+    const std::string keep = stl_path + ".posts_step_keep";
+    std::error_code ec;
+    std::filesystem::copy_file(stl_path, keep, std::filesystem::copy_options::overwrite_existing, ec);
+    job.options.mesh.post_wide = wide;
+    FileResult r2 = make_lattice_file(model, job, stl_path, nullptr, said, strength);
+    std::string after;
+    if (!r2.ok) {
+      if (!std::filesystem::exists(stl_path)) std::filesystem::copy_file(keep, stl_path, ec);
+      std::filesystem::remove(keep, ec);
+      rounds_json += std::string(rounds_json.empty() ? "" : ", ") + "{\"round\": " + std::to_string(round) + ", \"posts\": [" + posts_json +
+                     "], \"made_again\": false, \"refused\": \"" + r2.code + "\", \"why\": " + "\"" + [&] {
+                       std::string w;
+                       for (char c : r2.why) w += (c == '"' || c == '\\') ? '\'' : c;
+                       return w;
+                     }() + "\", \"kept\": \"the last file that passed the print check\"}";
+      break;
+    }
+    std::filesystem::remove(keep, ec);
+    const double vol1 = file_volume_mm3(stl_path);
+    for (std::size_t q = 0; q < r2.made.posts.size() && q < r2.break_posts.size(); ++q) {
+      bool touched = false;
+      for (const MeshSpec::PostWide& e : wide) touched = touched || same(r2.made.posts[q], e);
+      if (!touched) continue;
+      const BreakPostReading& a = r2.break_posts[q];
+      after += std::string(after.empty() ? "" : ", ") + "{\"post\": " + std::to_string(q) + ", \"multiple_after\": " + pnum(a.all) +
+               ", \"judged_after\": " + pnum(a.all_resolved) + ", \"section_multiple_after\": " + pnum(a.section) + ", \"section_after_mm2\": " +
+               pnum(a.section_mm2) + "}";
+    }
+    rounds_json += std::string(rounds_json.empty() ? "" : ", ") + "{\"round\": " + std::to_string(round) + ", \"posts\": [" + posts_json +
+                   "], \"made_again\": true, \"verdict_after\": \"" + r2.break_verdict + "\", \"after\": [" + after +
+                   "], \"volume_added_mm3\": " + pnum(vol1 - vol0) + "}";
+    r = std::move(r2);
+  }
+  std::string c;
+  for (const std::string& x : cannot) c += std::string(c.empty() ? "" : ", ") + "\"" + x + "\"";
+  r.posts_step_json = "{\"rounds\": " + std::to_string(rounds) + ", \"verdict\": \"" + r.break_verdict + "\", \"pass_line\": " + pnum(pass) +
+                      ", \"by_round\": [" + rounds_json + "], \"not_widened\": [" + c + "]}";
+}
+}  // namespace
+
 FileResult run_file_job(const std::string& job_path, const std::string& out_dir, int threads,
                         void (*said)(const char*), const StrengthCheck* strength) {
   FileResult r;
@@ -1840,7 +2022,11 @@ FileResult run_file_job(const std::string& job_path, const std::string& out_dir,
     StepModel model;
     if (!load_file_job(job_path, threads, job, model, r, said)) return;
     const double ms_import = r.ms_import;
+    // C3: the part, kept for the posts step (an Organic job with a strength check only)
+    std::unique_ptr<StepModel> kept;
+    if (!job.strength_job.empty()) kept = std::make_unique<StepModel>(model);
     r = make_lattice_file(std::move(model), job, out_dir + "/" + job.output, nullptr, said, strength);
+    if (kept) posts_step(r, job, *kept, out_dir + "/" + job.output, said, strength);
     r.ms_import = ms_import;
   };
   run();
@@ -2102,6 +2288,7 @@ std::string file_result_json(const FileResult& r) {
   }
   // V4: written only when the check ran (V2); the block is the check's own.
   if (r.strength_ran) o += "  \"strength\": " + r.strength_json + ",\n";
+  if (!r.posts_step_json.empty()) o += "  \"posts_step\": " + r.posts_step_json + ",\n";   // C3
   // P4: written only when the check gave the six candidates' numbers.
   if (!r.orientation_json.empty()) o += "  \"print_orientation\": " + r.orientation_json + ",\n";
   if (r.weave_regions > 0) {

@@ -102,6 +102,23 @@ struct MeshSpec {
   struct Post { double x = 0.0, y = 0.0, z_top = 0.0, z_bottom = 0.0; };
   std::vector<Post> posts;
   double post_mm = 0.9;
+  // CUT 1b, the posts step (C3): a post the break check found weak, drawn wider. Matched to a decided post by its
+  // place (x, y, z_top, z_bottom exactly); drawn `width` across, its box moved by (ox, oy) so it grows inward where the
+  // part's outer face would trim it. Empty (every job but a posts step's re-make): every post as before.
+  struct PostWide { double x = 0.0, y = 0.0, z_top = 0.0, z_bottom = 0.0, width = 0.0, ox = 0.0, oy = 0.0; };
+  std::vector<PostWide> post_wide;
+  // The box a post is drawn as: its width and centre (post_mm at its own axis, or its posts-step entry).
+  void post_box(const Post& p, double& w, double& cx, double& cy) const {
+    w = post_mm;
+    cx = p.x;
+    cy = p.y;
+    for (const PostWide& q : post_wide)
+      if (q.x == p.x && q.y == p.y && q.z_top == p.z_top && q.z_bottom == p.z_bottom) {
+        w = q.width;
+        cx = p.x + q.ox;
+        cy = p.y + q.oy;
+      }
+  }
   // O8, stands along the way (the owner's OR10: "a preference for stands along the way to keep it up"). A whole
   // shallow run of a weave (stage 1c's run, of the bars the bridge rules keep) that goes farther than this between two
   // stands gets one post at the middle of that stretch, when there is material straight below it (the post starts on

@@ -14111,7 +14111,7 @@ ll::StrengthDone with_break_check(const ll::StrengthAsk& ask, StrengthSetup& S, 
       for (const ll::BreakBar& x : b.bars) hb = fnv(fnv(fnv(hb, &x.a, sizeof x.a), &x.b, sizeof x.b), &x.width, sizeof x.width);
       for (const ll::BreakPost& x : b.posts) hb = fnv(hb, &x, sizeof x);
       char h[200];
-      std::snprintf(h, sizeof h, "break-check 2\nfile %016llx %zu\npart %016llx\nbars %016llx\n", static_cast<unsigned long long>(hf), nbytes,
+      std::snprintf(h, sizeof h, "break-check 3\nfile %016llx %zu\npart %016llx\nbars %016llx\n", static_cast<unsigned long long>(hf), nbytes,
                     static_cast<unsigned long long>(hp), static_cast<unsigned long long>(hb));
       key = h;
       key += "fixed";
@@ -14149,7 +14149,25 @@ ll::StrengthDone with_break_check(const ll::StrengthAsk& ask, StrengthSetup& S, 
         const std::size_t nl = t.find('\n', key.size());
         if (nl != std::string::npos) {
           const std::string verdict = t.substr(key.size(), nl - key.size());
-          std::string block = t.substr(nl + 1);
+          const std::size_t nl2 = t.find('\n', nl + 1);
+          if (nl2 == std::string::npos) return done;   // unreachable for an entry this code wrote
+          {   // C3: the post readings line: "posts N" then six numbers per post
+            std::istringstream in(t.substr(nl + 1, nl2 - nl - 1));
+            std::string word;
+            std::size_t n = 0;
+            in >> word >> n;
+            for (std::size_t q = 0; q < n; ++q) {
+              ll::BreakPostReading pr;
+              int res = 0, fb = 0;
+              in >> pr.all >> res >> pr.judged >> pr.section >> pr.section_mm2 >> fb;
+              pr.all_resolved = res != 0;
+              pr.first_break = fb != 0;
+              done.break_posts.push_back(pr);
+            }
+          }
+          done.break_verdict = verdict;
+          done.break_pass_line = pass_line;
+          std::string block = t.substr(nl2 + 1);
           if (ask.said) ask.said("checking its strength: the same file was checked before");
           block.insert(1, "\"cache\": \"reused\", ");
           add_break(done, block);
@@ -14159,7 +14177,31 @@ ll::StrengthDone with_break_check(const ll::StrengthAsk& ask, StrengthSetup& S, 
       }
     }
   }
-  const ll::BreakResult r = ll::organic_break_check(b);
+  // C3 (a): the solver's thread count is a process-wide setting (fea_set_matfree_threads), which
+  // configure_production_options sets to the machine's count; the break check honours the job's --threads while it
+  // runs and puts the setting back after (the answer is bit-identical for any count, fea.hpp).
+  struct ThreadsFor {
+    int prev = -1;
+    explicit ThreadsFor(int n) { if (n > 0) prev = fea_set_matfree_threads(n); }
+    ~ThreadsFor() { if (prev >= 0) fea_set_matfree_threads(prev); }
+  };
+  const ll::BreakResult r = [&] {
+    const ThreadsFor threads_for(ask.threads);
+    return ll::organic_break_check(b);
+  }();
+  // C3: the posts' readings for the posts step (class "post", in the order of the file's posts)
+  done.break_verdict = r.verdict;
+  done.break_pass_line = pass_line;
+  done.break_posts.assign(b.posts.size(), ll::BreakPostReading{});
+  for (const ll::BreakClass& c : r.classes) {
+    if (c.cls != "post" || c.post < 0 || static_cast<std::size_t>(c.post) >= b.posts.size()) continue;
+    ll::BreakPostReading& pr = done.break_posts[static_cast<std::size_t>(c.post)];
+    if (c.all.found) { pr.all = c.all.multiple; pr.all_resolved = c.all.resolved; }
+    if (c.resolved.found) pr.judged = c.resolved.multiple;
+    pr.section = c.section_multiple;
+    pr.section_mm2 = c.section_mm2;
+    pr.first_break = r.first_resolved.found && r.first_resolved.cls == "post" && r.first_resolved.post == c.post;
+  }
   std::string block = r.json;
   block.insert(1, "\"cache\": \"made\", ");
   add_break(done, block);
@@ -14170,7 +14212,11 @@ ll::StrengthDone with_break_check(const ll::StrengthAsk& ask, StrengthSetup& S, 
     const std::string tmp = entry + ".part";
     {
       std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
-      f << key << r.verdict << "\n" << r.json;
+      f << key << r.verdict << "\nposts " << done.break_posts.size();
+      for (const ll::BreakPostReading& pr : done.break_posts)
+        f << " " << g17(pr.all) << " " << (pr.all_resolved ? 1 : 0) << " " << g17(pr.judged) << " " << g17(pr.section) << " " << g17(pr.section_mm2)
+          << " " << (pr.first_break ? 1 : 0);
+      f << "\n" << r.json;
     }
     std::filesystem::rename(tmp, entry, ec);
     if (ec) std::filesystem::remove(tmp, ec);

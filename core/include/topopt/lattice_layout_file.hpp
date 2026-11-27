@@ -176,6 +176,17 @@ LatticeCredit lattice_credit(const Layout& layout, const Domain& domain, const B
                              const std::vector<Vec3>& left_out_at, const CreditGrid& grid,
                              const std::vector<char>* solid = nullptr, int threads = 0);
 
+// C3: the break check's reading of one post (lattice_layout_break.hpp, class "post").
+struct BreakPostReading {
+  double all = 0.0;          // its weakest point's multiple (0: none found)
+  bool all_resolved = false;  // that point is judged (3 voxels across or more)
+  double judged = 0.0;        // its weakest judged point's multiple (0: none)
+  double section = 0.0;       // its file section's multiple (0: not read)
+  double section_mm2 = 0.0;
+  bool first_break = false;   // the check's first judged break is in this post
+};
+using BreakPostReadings = std::vector<BreakPostReading>;
+
 // What the file job hands the check, once its file is made.
 struct StrengthAsk {
   const Session* session = nullptr;   // the one the outcome was laid by: its domain is the outcome's
@@ -223,6 +234,11 @@ struct StrengthDone {
   // (print_orientation.hpp); the file job adds the bed and writes "print_orientation". Not known: the check made none
   // (the cube check, so far).
   OrientationStrengthsN orientation;
+  // C3 (CUT 1b, the posts step): the break check's verdict and its reading of each post (index = the file's post), for
+  // the file job to widen weak posts. Empty verdict: no break check was made.
+  std::string break_verdict;
+  double break_pass_line = 0.0;
+  BreakPostReadings break_posts;
 };
 // The check is the CLI's (run_job.cpp: lattice_file_strength_check): core's lattice layout is always built, and the
 // old check needs the solver and the importer. `before` reads the strength job (cheap; no solve) and may refuse it;
@@ -417,6 +433,11 @@ struct FileResult {
   bool strength_ran = false;
   bool strength_accepted = false;
   std::string strength_json;
+  // C3: the break check's verdict and post readings (StrengthDone), and the posts step's block (empty: it did not run).
+  std::string break_verdict;
+  double break_pass_line = 0.0;
+  BreakPostReadings break_posts;
+  std::string posts_step_json;
   // P4: the print orientation ranking and recommendation ("print_orientation"), when the check gave its numbers.
   std::string orientation_json;
   // P3: the part's own overhang places the print check found (its last pass), and what was painted for them in the

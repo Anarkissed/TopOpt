@@ -307,6 +307,45 @@ void oversize(const std::string& dir) {
         "mark 5 (2): the file is kept, the block says not checked: too big, with the numbers");
 }
 
+// C3 helpers on made files (no solve): "size PRINT PART VOXEL_MM" = organic_break_size at that grid (M1's 0.1 mm need);
+// "postwidth PRINT X Y Z" = the material across a post at height Z, along x and along y through (X, Y), read on a 0.02 mm
+// grid (P2: no touched post under two lines).
+void size_of(const std::string& print_path, const std::string& part_path, double voxel) {
+  const StlMesh print = read_stl_file(print_path);
+  const StepModel m = import_part_file_resolved(part_path);
+  BreakAsk ask;
+  ask.print = &print.mesh;
+  ask.part = &m;
+  ask.voxel_mm = voxel;
+  ask.memory_limit_bytes = 1e15;   // read the size only
+  const BreakSize sz = organic_break_size(ask);
+  std::printf("size at %.3f mm: grid %d x %d x %d, material voxels %zu, bytes %.0f (%.2f GB); 40 %% of this machine %.2f GB\n", voxel, sz.nx,
+              sz.ny, sz.nz, sz.material_voxels, sz.bytes, sz.bytes / 1e9, break_memory_limit_bytes() / 1e9);
+}
+void post_width(const std::string& print_path, double x, double y, double z) {
+  const StlMesh print = read_stl_file(print_path);
+  const double h = 0.02;
+  const int n = 200;   // 4 mm each way
+  VoxelGrid ref;
+  ref.nx = n;
+  ref.ny = n;
+  ref.nz = 1;
+  ref.spacing = h;
+  ref.origin = {x - 0.5 * n * h + 1.2345e-7, y - 0.5 * n * h + 2.3456e-7, z - 0.5 * h};
+  const VoxelGrid vg = voxelize_onto_grid(print.mesh, ref);
+  const auto in = [&](int i, int j) { return vg.tags[static_cast<std::size_t>(j) * n + i] != VoxelTag::Empty; };
+  const int c = n / 2;
+  int x0 = c, x1 = c, y0 = c, y1 = c;
+  if (in(c, c)) {
+    while (x0 > 0 && in(x0 - 1, c)) --x0;
+    while (x1 < n - 1 && in(x1 + 1, c)) ++x1;
+    while (y0 > 0 && in(c, y0 - 1)) --y0;
+    while (y1 < n - 1 && in(c, y1 + 1)) ++y1;
+  }
+  std::printf("postwidth at (%.3f, %.3f, %.3f): material %s; across x %.3f mm, across y %.3f mm\n", x, y, z, in(c, c) ? "yes" : "NO",
+              in(c, c) ? (x1 - x0 + 1) * h : 0.0, in(c, c) ? (y1 - y0 + 1) * h : 0.0);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -314,6 +353,11 @@ int main(int argc, char** argv) {
   law();
   bar();
   if (argc >= 3 && std::string(argv[1]) == "oversize") oversize(argv[2]);
+  if (argc >= 5 && std::string(argv[1]) == "size") { size_of(argv[2], argv[3], std::atof(argv[4])); return failures == 0 ? 0 : 1; }
+  if (argc >= 6 && std::string(argv[1]) == "postwidth") {
+    post_width(argv[2], std::atof(argv[3]), std::atof(argv[4]), std::atof(argv[5]));
+    return 0;
+  }
   if (argc >= 3 && std::string(argv[1]) == "marks") {
     const std::string dir = argv[2];
     const MaterialLibrary lib = load_materials_file(MATERIALS_JSON_PATH);

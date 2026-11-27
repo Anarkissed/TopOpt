@@ -1409,8 +1409,9 @@ void weave_bar_shells(const Domain& domain, const Layout& lay, const Bars& bars,
   // The posts, as build_mesh writes them.
   for (const MeshSpec::Post& p : spec.posts) {
     if (!(p.z_top > p.z_bottom)) continue;
-    const double w = spec.post_mm;
-    put(Manifold::Cube({w, w, p.z_top - p.z_bottom + 0.5}).Translate({p.x - 0.5 * w, p.y - 0.5 * w, p.z_bottom - 0.25}));
+    double w, cx, cy;
+    spec.post_box(p, w, cx, cy);   // C3: post_mm at its axis unless the posts step widened it
+    put(Manifold::Cube({w, w, p.z_top - p.z_bottom + 0.5}).Translate({cx - 0.5 * w, cy - 0.5 * w, p.z_bottom - 0.25}));
     ++rep.posts;
     rep.posts_mm += p.z_top - p.z_bottom;
   }
@@ -1517,8 +1518,9 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
     // mid-air or reaching out held at one end only. It ties it down.
     for (const MeshSpec::Post& p : spec.posts) {
       if (!(p.z_top > p.z_bottom)) continue;
-      const double w = spec.post_mm;
-      solids.push_back(Manifold::Cube({w, w, p.z_top - p.z_bottom + 0.5}).Translate({p.x - 0.5 * w, p.y - 0.5 * w, p.z_bottom - 0.25}));
+      double w, cx, cy;
+      spec.post_box(p, w, cx, cy);   // C3: post_mm at its axis unless the posts step widened it
+      solids.push_back(Manifold::Cube({w, w, p.z_top - p.z_bottom + 0.5}).Translate({cx - 0.5 * w, cy - 0.5 * w, p.z_bottom - 0.25}));
       centres.push_back({p.x, p.y, 0.5 * (p.z_top + p.z_bottom)});
       ++rep.posts;
       rep.posts_mm += p.z_top - p.z_bottom;
