@@ -14,9 +14,10 @@
 // voxeliser uses, so a voxel wholly inside reads 1 and one wholly outside 0, and
 // with sub = 1 the result is exactly today's all-or-nothing occupancy.
 //
-// Cost: one voxelisation at `sub` times the resolution: sub^3 one-byte tags per
-// voxel while it runs (sub 4 at 128 x 96 x 64 voxels is 50 MB).
-// NOT WIRED INTO ANY JOB YET: the reviewer's ruling on "one judge" comes first.
+// Cost: the fine grid is never held whole. It is voxelised one layer of voxels at
+// a time (a slab nx*sub by ny*sub by sub), so the memory is nx * ny * sub^3 bytes
+// whatever the part's height (192 x 192 voxels at sub 8: 19 MB), and the time is
+// one voxelisation of the file per layer.
 #pragma once
 
 #include <stdexcept>
@@ -30,21 +31,23 @@ namespace topopt {
 inline std::vector<double> file_fill_fractions(const TriangleMesh& file, const VoxelGrid& grid,
                                                int sub = 4) {
   if (sub < 1) throw std::invalid_argument("file_fill_fractions: sub must be >= 1");
-  VoxelGrid fine;
-  fine.nx = grid.nx * sub;
-  fine.ny = grid.ny * sub;
-  fine.nz = grid.nz * sub;
-  fine.spacing = grid.spacing / sub;
-  fine.origin = grid.origin;
-  fine.tags.assign(static_cast<std::size_t>(fine.nx) * fine.ny * fine.nz, VoxelTag::Empty);
-  const VoxelGrid occ = voxelize_onto_grid(file, fine);
   std::vector<double> fill(grid.voxel_count(), 0.0);
   const double each = 1.0 / (static_cast<double>(sub) * sub * sub);
-  for (int k = 0; k < fine.nz; ++k)
-    for (int j = 0; j < fine.ny; ++j)
-      for (int i = 0; i < fine.nx; ++i)
-        if (occ.tags[occ.index(i, j, k)] != VoxelTag::Empty)
-          fill[grid.index(i / sub, j / sub, k / sub)] += each;
+  VoxelGrid slab;
+  slab.nx = grid.nx * sub;
+  slab.ny = grid.ny * sub;
+  slab.nz = sub;
+  slab.spacing = grid.spacing / sub;
+  for (int kz = 0; kz < grid.nz; ++kz) {
+    slab.origin = Vec3{grid.origin.x, grid.origin.y, grid.origin.z + kz * grid.spacing};
+    slab.tags.assign(static_cast<std::size_t>(slab.nx) * slab.ny * slab.nz, VoxelTag::Empty);
+    const VoxelGrid occ = voxelize_onto_grid(file, slab);
+    for (int k = 0; k < slab.nz; ++k)
+      for (int j = 0; j < slab.ny; ++j)
+        for (int i = 0; i < slab.nx; ++i)
+          if (occ.tags[occ.index(i, j, k)] != VoxelTag::Empty)
+            fill[grid.index(i / sub, j / sub, kz)] += each;
+  }
   return fill;
 }
 
