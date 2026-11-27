@@ -48,6 +48,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -57,6 +58,7 @@
 #include "topopt/plsm_kernel.hpp"
 #include "topopt/plsm_mma.hpp"
 #include "topopt/plsm_topology.hpp"
+#include "topopt/to_stage_switch.hpp"
 
 namespace topopt {
 namespace {
@@ -714,6 +716,31 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   bool cancelled = false;
   int done_iters = 0;
 
+  // ── ★ THE STEP-BACK (connection rule only; TOReview 2026-11-27 01:26Z, from the
+  //    reviewer's ruling 00:22Z). Under TOPOPT_CONNECTION=support a state solve
+  //    REFUSES a design whose applied load reaches no support (FeaLoadUnheld, a
+  //    SolverNonConvergence), and today that ends the rung. Here the rung keeps the
+  //    design of its last state solve that succeeded (alpha as solved, and the MMA
+  //    state that goes with it; the sub-cell cache is rebuilt from alpha at the top
+  //    of every iteration, so alpha carries it), and on an unheld load it goes back
+  //    to that design with the move limit halved, up to kStepBacksPerRung times. The
+  //    fourth unheld load, and any real non-convergence, end the rung as today.
+  //    Switch off = today's bytes: nothing is kept, and move_scale stays 1.0 (an
+  //    exact multiply). TOPOPT_STEP_BACK=off turns it off under the rule too, for
+  //    the off/on measurement.
+  const bool step_back_on = to_connection_rule_on() && [] {
+    const char* v = std::getenv("TOPOPT_STEP_BACK");
+    return v == nullptr || std::string(v) != "off";
+  }();
+  constexpr int kStepBacksPerRung = 3;
+  int step_backs = 0;
+  double move_scale = 1.0;
+  int kept_iter = 0;  // 0 = no state solve of this rung has succeeded yet
+  std::vector<double> kept_alpha;
+  PlsmMmaState kept_mma;
+  int kept_mma_iter = 0;
+  ScenarioSolveState kept_scenarios;
+
   // Bound BEFORE the loop, because the per-iteration record is part of
   // `SimpOptimizeResult`'s contract and is filled as the loop runs.
   SimpOptimizeResult& r = out.optimization;
@@ -776,6 +803,7 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
     // significant figures. The FINAL compliance solve below and every
     // certification solve stay TIGHT and COLD.
     SimpCompliance sc;
+    const long long unheld0 = step_back_on ? fea_matfree_load_unheld_count() : 0;
     try {
       // LOAD SCENARIOS: every scenario, each warm-started, the smooth max governs.
       sc = !options.scenarios.empty()
@@ -787,6 +815,29 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
                            (plsm.warm_start && have_warm) ? &warm : nullptr,
                            nullptr, options.solver);
     } catch (const SolverNonConvergence& e) {
+      if (step_back_on && kept_iter > 0 && step_backs < kStepBacksPerRung &&
+          fea_matfree_load_unheld_count() > unheld0) {
+        // An unheld load, not a solver that failed: back to the kept design. `warm`
+        // was not touched by the refused solve (it throws before the assignment
+        // below), so it is still the kept design's solution.
+        ++step_backs;
+        move_scale *= 0.5;
+        alpha = kept_alpha;
+        mma_state = kept_mma;
+        mma_iter = kept_mma_iter;
+        if (!options.scenarios.empty()) scenario_state = kept_scenarios;
+        sync();  // phi follows alpha before the next offset bisection reads it
+        int pieces = 0;
+        long long voxels = 0;
+        fea_matfree_last_load_unheld(&pieces, &voxels);
+        std::fprintf(stderr,
+                     "[step-back] rung vf %.4g: the load lost its path at iteration %d "
+                     "(%d piece(s), %lld voxels cut off); back to iteration %d, move limit "
+                     "halved (%d of %d)\n",
+                     options.volume_fraction, it, pieces, voxels, kept_iter, step_backs,
+                     kStepBacksPerRung);
+        continue;
+      }
       non_convergent = true;
       // The CG iteration count the failing solve reached (simp.hpp's contract), not
       // the design step; and the tolerance it ran at.
@@ -796,6 +847,13 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
       break;
     }
     if (plsm.warm_start) { warm = sc.solution; have_warm = true; }
+    if (step_back_on) {  // the design this solve succeeded on, before MMA moves it
+      kept_iter = it;
+      kept_alpha = alpha;
+      kept_mma = mma_state;
+      kept_mma_iter = mma_iter;
+      if (!options.scenarios.empty()) kept_scenarios = scenario_state;
+    }
     if (bearing && it % kPlsmContactEvery == 0)
       (void)contact_update(contact_bcs, sc.solution.u);
     out.total_solve_wall_s += sc.t_solve_ms / 1000.0;
@@ -977,7 +1035,7 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
       const int steps = plsm.step_substeps > 0 ? plsm.step_substeps : 1;
       const double want_dphi = plsm.gamma * steps * h;
       const double xrange = 2.0 * alpha_bound;
-      const double mv = plsm.move * want_dphi / (xrange * psi_max);
+      const double mv = plsm.move * want_dphi / (xrange * psi_max) * move_scale;
       beta = plsm_mma_update(mma_state, ++mma_iter, beta, dc, dv, g0,
                              -alpha_bound, alpha_bound, mv);
       for (std::size_t i2 = 0; i2 < L.count(); ++i2) alpha[i2] = -beta[i2];
