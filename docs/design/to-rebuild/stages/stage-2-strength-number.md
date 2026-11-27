@@ -754,3 +754,13 @@ The stress of the first FULL voxels behind the inner face carried to the TRUE in
 
 SO, on both shapes (free cut faces in bending; a curved face under load): real stiffness on the cut voxels + the full voxels' stress carried in a straight line to the true surface is within 9 % at 3 to 4 voxels of wall or 8 through a beam, and within 3 to 4 % from 5 of wall / 8 through. Always slightly LOW. Still not measured: a notch or sharp inside corner (where Top Motor Mount's peak sits), a general surface (this arm walks rays it is given; the engine would need the surface's normal at each cut voxel), and the across-layer reading.
 
+### One judge, evidence (b) continued: the made sample hook, res 64, re-check OFF (2026-11-27 07:25, B7; 7131 s, peak 309 MB)
+
+| version | certificate (the loop's) | shown (the re-check today) | shown / certificate |
+|---|---|---|---|
+| 0.68 | 4.341 | 4.759 | 1.10 |
+| 0.52 | 3.713 | 4.556 | 1.23 |
+| 0.38 | 2.664 | 3.891 | 1.46 |
+
+Three versions made (the fourth was not). On a part the optimiser has CARVED, the two judges already disagree today with no switch: the shown margin is 10 to 46 % ABOVE what the loop certified, and the gap widens as the part gets lighter and thinner. Same direction and size as Top Motor Mount's (1.54) and the cut-skin beam's (0.96 to 1.67): today's shown number is the optimistic one on thin carved members. The switch-on half of this run will be cut by B7's 07:52 limit; it is owed, and can run outside the lock (309 MB, one thread).
+
