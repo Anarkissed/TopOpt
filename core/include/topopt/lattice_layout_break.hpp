@@ -18,12 +18,14 @@
 
 #include <atomic>
 #include <cstddef>
+#include <functional>
 #include <string>
 #include <vector>
 
 #include "topopt/mesh.hpp"
 #include "topopt/print_frame.hpp"
 #include "topopt/step.hpp"
+#include "topopt/voxel.hpp"
 
 namespace topopt::lattice_layout {
 
@@ -74,6 +76,9 @@ struct BreakAsk {
   // A reading for the record only (the review's question 1.6), never in the verdict or the block: also smooth over the
   // material CONNECTED to the voxel inside its ball, and give that first break in BreakResult::connected_*.
   bool also_connected_ball = false;
+  // A TEST-ONLY input (C3 item b, the study's voxels at matched faces): the material voxels on the check's own grid,
+  // given the grid (origin, spacing, size); null = the product voxeliser. The file job never sets it.
+  std::function<std::vector<char>(const VoxelGrid&)> material_override;
   // C2: progress lines ("checking its strength: ...") and the job's stop flag, read between the steps (the solver
   // itself takes no stop).
   void (*said)(const char*) = nullptr;

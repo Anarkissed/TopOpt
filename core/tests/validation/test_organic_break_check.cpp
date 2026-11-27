@@ -5,6 +5,9 @@
 // by the file job from the made inputs in DIR (the study's made jobs: BR.stl, BR.tensor, BRT_d_job.json,
 // BRG_d_job.json, SP.stl, SP.tensor, SP_job.json), each through organic_break_check at 0.2 mm and tolerance 1e-2.
 #include <cmath>
+#include <array>
+#include <functional>
+#include <map>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -165,6 +168,44 @@ int face_where(const StepModel& m, const Vec3& n, int axis, bool want_max) {
   return best;
 }
 
+std::string g_print;       // argv "print:PATH": read this print file instead of the lay's (C3 item b: the study's own print)
+bool g_matched = false;   // argv "matched": the study's voxels (C3 item b), see study_voxels
+// The study's voxel rule (S5: each closed shell of the print filled by its own inside test, the shells' union), written
+// here from the product voxeliser: the print split into its closed shells (triangles joined by shared corners, the
+// corners welded by their exact coordinates), each shell voxelised on its own (one closed shell: winding = inside), OR-ed.
+std::vector<char> study_voxels(const TriangleMesh& mesh, const VoxelGrid& ref) {
+  std::map<std::array<double, 3>, int> weld;
+  std::vector<int> id(mesh.vertices.size());
+  for (std::size_t v = 0; v < mesh.vertices.size(); ++v) {
+    const std::array<double, 3> k{mesh.vertices[v].x, mesh.vertices[v].y, mesh.vertices[v].z};
+    id[v] = weld.emplace(k, static_cast<int>(weld.size())).first->second;
+  }
+  std::vector<int> up(weld.size());
+  for (std::size_t i = 0; i < up.size(); ++i) up[i] = static_cast<int>(i);
+  std::function<int(int)> find = [&](int x) { return up[static_cast<std::size_t>(x)] == x ? x : up[static_cast<std::size_t>(x)] = find(up[static_cast<std::size_t>(x)]); };
+  for (const auto& t : mesh.triangles) {
+    const int a = find(id[static_cast<std::size_t>(t[0])]), b = find(id[static_cast<std::size_t>(t[1])]), c = find(id[static_cast<std::size_t>(t[2])]);
+    up[static_cast<std::size_t>(b)] = a;
+    up[static_cast<std::size_t>(find(c))] = find(a);
+  }
+  std::map<int, TriangleMesh> shells;
+  for (const auto& t : mesh.triangles) {
+    TriangleMesh& m = shells[find(id[static_cast<std::size_t>(t[0])])];
+    const int base = static_cast<int>(m.vertices.size());
+    for (int q = 0; q < 3; ++q) m.vertices.push_back(mesh.vertices[static_cast<std::size_t>(t[q])]);
+    m.triangles.push_back({base, base + 1, base + 2});
+  }
+  std::vector<char> out(static_cast<std::size_t>(ref.nx) * ref.ny * ref.nz, 0);
+  for (const auto& [k, m] : shells) {
+    const VoxelGrid v = voxelize_onto_grid(m, ref);
+    for (std::size_t e = 0; e < out.size(); ++e) out[e] = out[e] || v.tags[e] != VoxelTag::Empty;
+  }
+  std::size_t n = 0;
+  for (char c : out) n += c != 0;
+  std::printf("study voxels: %zu closed shells, %zu material voxels\n", shells.size(), n);
+  return out;
+}
+
 double g_tol = 1e-2;   // the marks' solve tolerance (argv "tol:1e-8": the SPARSE split, C1 Piece 1)
 
 struct Piece {
@@ -224,7 +265,8 @@ void mark(const std::string& dir, const Piece& p, const Material& pla) {
   std::printf("[%s] lay ok %d code %s, bars %zu kept, posts %zu; faces fixed %d loaded %d\n", p.name.c_str(), fr.ok, fr.code.c_str(), bars.size(),
               posts.size(), fixed, loaded);
   if (!fr.ok) { check(false, (p.name + ": the lay").c_str()); return; }
-  const StlMesh print = read_stl_file(w + "/out/lattice.stl");
+  const StlMesh print = read_stl_file(g_print.empty() ? w + "/out/lattice.stl" : g_print);
+  if (!g_print.empty()) std::printf("[%s] the print read from %s\n", p.name.c_str(), g_print.c_str());
   BreakAsk ask;
   ask.print = &print.mesh;
   ask.part = &m;
@@ -238,6 +280,7 @@ void mark(const std::string& dir, const Piece& p, const Material& pla) {
   ask.z_knockdown = pla.z_knockdown;
   ask.grid_shift = p.shift;
   ask.tolerance = g_tol;
+  if (g_matched) ask.material_override = [&](const VoxelGrid& ref) { return study_voxels(print.mesh, ref); };
   const BreakSize sz = organic_break_size(ask);
   ask.also_connected_ball = true;   // the review's question 1.6, for the record
   std::printf("[%s] before the solve: grid %d x %d x %d, material voxels %zu, bytes estimate %.0f\n", p.name.c_str(), sz.nx, sz.ny, sz.nz,
@@ -392,6 +435,9 @@ int main(int argc, char** argv) {
         {"SPARSE", "SP_job.json", "SP.stl", "SP.tensor", 55.0, {-0.5 + ox, -0.5 + oy, 0}, 0.0, 3.3743, {6.8, 1.6, 4.5}, "vine", 0}};
     for (int i = 3; i < argc; ++i)
       if (std::string(argv[i]).rfind("tol:", 0) == 0) g_tol = std::atof(argv[i] + 4);
+    for (int i = 3; i < argc; ++i) g_matched = g_matched || std::string(argv[i]) == "matched";
+    for (int i = 3; i < argc; ++i)
+      if (std::string(argv[i]).rfind("print:", 0) == 0) g_print = argv[i] + 6;
     {   // the pieces named on the command line (none named: all)
       std::vector<Piece> keep;
       for (const Piece& p : pieces)

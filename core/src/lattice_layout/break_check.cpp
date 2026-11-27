@@ -143,6 +143,11 @@ std::vector<char> material_of(const BreakAsk& ask, const Grid& g) {
   ref.nz = g.nz;
   ref.spacing = g.h;
   ref.origin = g.lo;
+  if (ask.material_override) {   // a test's own voxels (never the file job)
+    std::vector<char> m = ask.material_override(ref);
+    if (m.size() != static_cast<std::size_t>(ref.nx) * ref.ny * ref.nz) throw std::invalid_argument("material_override: wrong size");
+    return m;
+  }
   const VoxelGrid v = voxelize_onto_grid(*ask.print, ref);
   std::vector<char> mat(v.tags.size(), 0);
   for (std::size_t e = 0; e < v.tags.size(); ++e) mat[e] = v.tags[e] != VoxelTag::Empty;
