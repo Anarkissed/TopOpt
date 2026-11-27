@@ -436,6 +436,20 @@ void steady(char** a) {
       ask.posts.push_back(q);
     }
   }
+  // C5: optional a[8] = the voxel size in mm; a[9] = "binary": whole voxels by their centre (the product voxeliser through
+  // the test-only material_override, which also keeps the whole-voxel gate and equal weights): the rule before C4
+  if (a[8]) ask.voxel_mm = std::atof(a[8]);
+  if (a[8] && a[9] && std::string(a[9]) == "binary")
+    ask.material_override = [&](const VoxelGrid& ref) {
+      const VoxelGrid v = voxelize_onto_grid(print.mesh, ref);
+      std::vector<char> m(v.tags.size(), 0);
+      for (std::size_t e = 0; e < m.size(); ++e) m[e] = v.tags[e] != VoxelTag::Empty;
+      return m;
+    };
+  ask.grid_shift = {std::atof(a[6]) / ask.voxel_mm, std::atof(a[6]) / ask.voxel_mm, std::atof(a[6]) / ask.voxel_mm};
+  const BreakSize sz0 = organic_break_size(ask);
+  std::printf("STEADY size at %.3f mm: %zu material voxels (centre count), %.2f GB estimate\n", ask.voxel_mm, sz0.material_voxels, sz0.bytes / 1e9);
+  if (sz0.bytes > 3e9) { std::printf("STEADY skipped: over 3 GB\n"); return; }
   fea_set_matfree_threads(1);
   const BreakResult r = organic_break_check(ask);
   double pf = 0.0;
@@ -454,6 +468,8 @@ void steady(char** a) {
               std::atof(a[6]), r.ok, r.why.c_str(), r.verdict.c_str(), r.first_resolved.multiple, r.first_resolved.at.x, r.first_resolved.at.y,
               r.first_resolved.at.z, r.first_resolved.cls.c_str(), r.first_all.multiple, F > 0 ? 100.0 * pf / F : 0.0, per.c_str(),
               r.size.material_voxels, r.rounds, r.seconds, r.peak_mb);
+  std::printf("STEADY all points %.4f at (%.2f, %.2f, %.2f) %s %s; voxel %.3f mm%s\n", r.first_all.multiple, r.first_all.at.x, r.first_all.at.y,
+              r.first_all.at.z, r.first_all.cls.c_str(), r.first_all.resolved ? "judged" : "not judged", ask.voxel_mm, ask.material_override ? ", binary" : "");
   std::printf("STEADY places under the pass line:");
   for (const BreakPoint& q : r.not_judged_under) std::printf(" %.3f@(%.1f,%.1f,%.1f)%s", q.multiple, q.at.x, q.at.y, q.at.z, q.cls.c_str());
   std::printf("\n");
@@ -465,7 +481,7 @@ int main(int argc, char** argv) {
   gate();
   law();
   bar();
-  if (argc >= 10 && std::string(argv[1]) == "steady") { steady(argv + 2); return 0; }
+  if (argc >= 10 && std::string(argv[1]) == "steady") { steady(argv + 2); return 0; }   // argv[10], [11] optional (C5)
   if (argc >= 3 && std::string(argv[1]) == "oversize") oversize(argv[2]);
   if (argc >= 5 && std::string(argv[1]) == "size") { size_of(argv[2], argv[3], std::atof(argv[4])); return failures == 0 ? 0 : 1; }
   if (argc >= 6 && std::string(argv[1]) == "postwidth") {
