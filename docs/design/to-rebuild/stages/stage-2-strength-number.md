@@ -764,3 +764,13 @@ SO, on both shapes (free cut faces in bending; a curved face under load): real s
 
 Three versions made (the fourth was not). On a part the optimiser has CARVED, the two judges already disagree today with no switch: the shown margin is 10 to 46 % ABOVE what the loop certified, and the gap widens as the part gets lighter and thinner. Same direction and size as Top Motor Mount's (1.54) and the cut-skin beam's (0.96 to 1.67): today's shown number is the optimistic one on thin carved members. The switch-on half of this run will be cut by B7's 07:52 limit; it is owed, and can run outside the lock (309 MB, one thread).
 
+### The hook's three finished files re-checked with one judge ON (2026-11-27 07:40; `analyze --mesh` on each file with `TOPOPT_RECHECK=fill:8`, outside the lock)
+
+| version | certificate (the loop's) | shown today (off) | one judge on | on against the certificate |
+|---|---|---|---|---|
+| 0.68 | 4.341 | 4.759 (+9.6 %) | 4.361 | +0.5 % |
+| 0.52 | 3.713 | 4.556 (+22.7 %) | 3.754 | +1.1 % |
+| 0.38 | 2.664 | 3.891 (+46.1 %) | 2.673 | +0.3 % |
+
+On a part the optimiser carved, one judge does what it was built for: the number shown after finishing is the loop's certificate to about 1 % (the reviewer's "within 1 %" holds HERE), where today's re-check shows 10 to 46 % more. So the picture is whole: one judge makes the two numbers ONE number everywhere; whether that one number is RIGHT is the cut-voxel law's question (E x fill^3: near on free faces in bending, 52 to 76 % high on a loaded curved face), and it is the certificate's question just as much as the re-check's. Top Motor Mount differs from the hook only in that its certificate was all-or-nothing on its drawn faces (the loop never had fills there), so one judge moved it; on the hook the loop had the fills already.
+
