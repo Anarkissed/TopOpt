@@ -4,6 +4,15 @@ Branch `claude/topopt-stage-3-surfaces-7f58fd`, from 2b40bcf4. Status: IN PROGRE
 
 ## Where I stopped (read this first)
 
+- **11-27 ~14:20, REPORT SENT as it stands (TOReview's call 19:19Z).** The stage does NOT close and the switch does NOT flip until test P passes. NEXT, in order:
+  1. queue2.sh's runs (Stand v4 re-run, then C's four parts);
+  2. an ALL-THREADS profile of the stand at 64, switch on, in a lock hold;
+  3. fixes for the serial code under the switch, under TOReview's two rules: (a) anything made parallel gives the same bytes at 1 and 6 threads AND the same bytes as the serial code it replaces (test K at both thread counts; no parallel floating-point sums, S-05); (b) the re-fit move measure runs only with the switch on or when read (done, 84dbef66);
+  4. re-time P, re-check M on that tip;
+  5. the reference table (measure_area per part, lock hold);
+  6. the step-back's three-way runs (demo fixture and hook);
+  7. the neck floor (item 4).
+
 - **11-27 ~11:25:** TOReview (16:18Z) clarified the lock rule: the 5-min empty wait is only for the agent that JUST released the lock. A queued script takes an empty lock after about 1 min. My batch had waited 19 h behind B8, SA1 and B9 under the old reading. I replaced launch_ref6, measure_hold and c_after (all still waiting, none holding) with ONE chain, `agent-scratch/tosurface/queue2.sh`:
   - test P's remaining pairs (pOn1, pOff2, pOn2), on the same frozen bin/topopt-cli-night as pOff1;
   - then the knot measure;
