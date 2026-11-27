@@ -95,10 +95,7 @@ final class TapOverselectCaptureTests: XCTestCase {
 
     private func writeCapture(_ bgra: [UInt8], _ name: String) {
         let size = Self.captureSize
-        var url = URL(fileURLWithPath: #filePath)
-        for _ in 0..<5 { url.deleteLastPathComponent() }
-        let dir = url.appendingPathComponent("docs/handoffs/assets", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dir = EvidenceOut.dir("docs/handoffs/assets")   // never the tracked copy unless asked (11-06)
         let out = dir.appendingPathComponent(name)
         var pixels = bgra
         let cs = CGColorSpaceCreateDeviceRGB()

@@ -1,0 +1,13 @@
+ 34/165 Test  #34: app_core_capability_mirror .......***Failed    0.10 sec
+ 48/165 Test  #48: smooth_brush .....................Subprocess aborted***Exception:   0.25 sec
+122/165 Test #122: cli_demo .........................   Passed  1965.12 sec
+99% tests passed, 2 tests failed out of 165
+Total Test time (real) = 4314.18 sec
+The following tests FAILED:
+--- re-run of the two with app/, docs/, evidence/ linked beside the archived core:
+    Start 48: smooth_brush
+2/2 Test #48: smooth_brush .....................   Passed    0.15 sec
+
+100% tests passed out of 2
+
+Total Test time (real) =   0.16 sec

@@ -1,0 +1,47 @@
+# Release 14bbf088cccb - 2026-11-23: release (16) - claude/organic-1 5b1c0f87, one worker swap (56c33beb457d -> 14bbf088cccb)
+# Release (16): his release-15 iPad notes (the lost result never again, the 3D growth with the walls first, versions, panels), the print-accurate lattice made on the Mac, and the iPad preview's Finishing cut down (exact: the same print-file bytes old vs new on his v7 job; the same Draft lattice, hashes and counts, on his 2-group job).
+# Gates in the gate tree (b9-screens-362, its own vendor built from organic-1's core): the new classes (release 15's set + the notes24 builders' and 362's classes) first, 438/0; then the WHOLE app suite (5,112 tests; releases 14 and 15 had run a third of it) in three shards side by side, any failure once more alone: 4,880 passed, 222 opt-in skipped, 7 failed, 4 of them again alone, all from this release's own lines; fixed in organic-1 5b1c0f87 (the core's identity first in start-up again; three pins follow this release's lines) and those four classes alone 34/0; the iPad device build again on the second merge. Nothing pushed before green. Core suites (speed tree, claude/speed-2): lattice_layout, lattice_layout_mesh, lattice_layout_file 3/3.
+# Commits:
+#   79b5198a Speed: the Skin's clearance walk measures the protected faces only where it must; the file names its solid's triangles
+#   4594da4d Made print-accurate on the Mac (his 11-22): the button names the step, a card with growing vines while the Mac makes it, the file drawn as soon as it is saved
+#   c5076f09 Merge claude/speed-2: the Skin's clearance walk measures the protected faces only where it must (his 11-23 Finishing wait; same file bytes, bars 162 s -> 27 s on his job); the file names its solid's triangles
+#   3dfc3438 Stage floor (his 11-23 notes, items 1 and 4): a level view keeps the black background with one floor line; the grid shrinks into finer squares as he zooms
+#   956892b3 notes24 versions (5): Print-accurate preview defaults off — its key is v2, the old ON is never read
+#   e9067543 Growth in 3D (his 11-23 notes, items 2 and 3): the vines grow as real lit tubes inside the part, and keep moving while the lay finishes
+#   a584fed4 Merge claude/notes24-viewer: the floor at a level view, the grid that splits as he zooms, the growth drawn in 3D inside the opened part, a band of light while it finishes (his 11-23 iPad notes, img 1)
+#   f41ee48a notes24 versions (7): the Lattice page's sample fills the page behind everything; the names' column widens to its names
+#   a6a806c1 notes24 results: a finished run's result is never lost; Lattice jobs re-attached; the notification opens its result
+#   9157b857 notes24 results: the version's result from the Versions page and in the Lattice stage; Approved from the saved file
+#   45ffc50c Merge claude/notes24-results: a finished run's result is never lost; lattice jobs re-attached; the notification opens the result; no card greyed; Results from the Versions page and in the Lattice stage (his 11-23 iPad notes, im
+#   715fbea8 notes24 versions (1, 2): Selections — the grip under the list gone, the corner's double tap fits the panel; a renamed row is kept in view
+#   20947a95 notes24 versions (6b): the last laid lattice and its stress check kept in the version's folder, shown at once on open
+#   993f803e notes24 versions (3, 4, 6a): the first change on a version with a result makes the next version; the version chip's Save / Save and start a new version
+#   1364f21a Merge claude/notes24-versions: Selections grip gone and double tap fits; the renamed row in view; the version chip's Save and Save and start a new version; a new version on the first change of a version with results; Print-accu
+#   05b12173 Speed: the net skin and the inside check on every core; the map before the lay (his 11-23: the walls taken away first)
+#   1c3b05e0 Merge claude/speed-2: the net skin and the inside check on every core (his 11-23: the iPad preview's Finishing; the same lattice); the map before the lay for the walls taken away first
+#   97df43e8 Walls first, then the recording replayed behind the engine, never making the lattice wait; looking INTO the part shaded (his words after release 16, (a) and (b))
+#   fcf0d89e A remembered lattice keeps its wall verdicts again (362's 4594da4d had put the line in a comment; found by builder A); the map before the lay is the map after it (MapAhead1123Tests)
+#   0302c18e Merge claude/notes24-viewer2: the walls dissolve first, then the growth replayed behind the engine and caught up at landing (his 11-23 idea); looking into the part shaded as a cavity (his 11-23)
+#   e6e56082 The walls dissolve on the first lay too: the hook asks the engine's map before the lay (gridAhead, claude/speed-2)
+#   69e959b0 Release 16's merge reds fixed: a tap goes to the one screen that attached; frozen inputs never written; H53 re-pinned
+#   f4be5fa2 Release (16) 2026-11-23: his release-15 notes (the lost result, the 3D growth, versions, panels), the Mac's print-accurate lattice, and the iPad preview's Finishing cut down, one worker swap
+#   5b1c0f87 Release 16's whole-suite reds fixed: the core's identity first in the app's start-up again; three pins follow this release's lines
+#   190832e7 Release (16): the whole app suite's four reds fixed (organic-1 5b1c0f87)
+# Gates (this tree):
+#   06:48 his uncommitted files (left alone): app/TopOpt-Info.plist app/TopOpt.xcodeproj/project.pbxproj app/TopOpt.xcodeproj/xcshareddata/xcschemes/TopOpt.xcscheme 
+#   06:48 preflight job: /Users/nadim/.topopt-worker/d5af229ca8ee4a8f (his newest optimisation job the installed worker passes; read only)
+#   06:48 merged organic-1 as f4be5fa2 (local, not pushed); app + core + tools == its; fingerprint 14bbf088cccb
+#   ==> Manifold: /Users/nadim/dev/TopOpt/TopOpt/.vcpkg/installed-manifold (KEEP regions exported exactly)
+#   ==> building macOS slice (Eigen + OCCT, arm64)
+#   ==> building iOS simulator slice (Eigen + OCCT + lib3mf, arm64)
+#   ==> building iOS device slice (Eigen + OCCT + lib3mf, arm64)
+#   06:50 build_core green: topopt_vendored_core_14bbf088cccb + the Install 3 entry points + lay_organic_preview and Session::sweep_limits in every slice and arch
+#   06:51 worker CLI built: topopt-cli: core 14bbf088cccb (dirty=false), built Nov 23 2026 06:51:08; 3 data paths, all under the release worktree
+#   07:04 core suites passed: 100% tests passed out of 19 Total Test time (real) = 760.60 sec 
+#   07:10 iPad device build green (this tree's own pair)
+#   07:10 preflight on his job: preflight: load path CONNECTED
+#   10:24 pushed 190832e7
+#   10:24 worker script unchanged (release 11's)
+#   10:24 worker swapped: /health "fingerprint": "14bbf088cccb"; data paths under the release worktree; preflight again OK; old CLI kept as build-fix/topopt-cli.56c33beb457d-replaced-20261123
+#   10:24 route, demand, strength_job and organic cut 2 tests vs the INSTALLED script: ALL PASS
+#   10:24 the app_release scripts now expect 14bbf088cccb

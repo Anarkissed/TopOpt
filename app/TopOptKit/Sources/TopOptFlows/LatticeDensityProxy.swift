@@ -45,6 +45,12 @@ public struct LatticeProxyParams: Equatable, Sendable, Codable {
     /// Cell size (mm) — the sample patch and the "cells across the member" readout;
     /// does NOT change the surface shading (ρ is dimensionless relative density).
     public var cellMM: Double
+    /// ★ How far in from a face's outline the shape-fit grade keeps stepping down, in
+    /// cells (`LatticeSettings.shapeFitBandMM`). 0 ⇒ the strict geometric answer:
+    /// subdivide only where a cell will not fit.
+    public var shapeFitBandMM: Double = LatticeSettings.defaultShapeFitBandCells
+    /// The grade's strength across the band (−1…+1, 0 linear) — `LatticeSettings.shapeFitGradeStrength`.
+    public var shapeFitGradeStrength: Double = 0
     /// Relative density where demand is lowest (the sparsest the lattice grades to).
     public var minRelativeDensity: Double
     /// Relative density where demand is highest (the densest it grades to).
@@ -57,18 +63,20 @@ public struct LatticeProxyParams: Equatable, Sendable, Codable {
     public var uniformRelativeDensity: Double
 
     public init(latticeID: String = LatticeType.octet.id, cellMM: Double = 8,
+                shapeFitBandMM: Double = LatticeSettings.defaultShapeFitBandCells,
                 minRelativeDensity: Double = 0.08, maxRelativeDensity: Double = 0.55,
                 gamma: Double = 1, uniformRelativeDensity: Double = 0.2) {
         self.latticeID = latticeID
         self.cellMM = cellMM
+        self.shapeFitBandMM = shapeFitBandMM
         self.minRelativeDensity = minRelativeDensity
         self.maxRelativeDensity = maxRelativeDensity
         self.gamma = gamma
         self.uniformRelativeDensity = uniformRelativeDensity
     }
 
-    /// The resolved lattice (never nil — unknown ids fall back to octet).
-    public var lattice: LatticeType { LatticeType.named(latticeID) }
+    /// The resolved lattice — nil for an id the Swift table lacks (item a, 2026-10-02).
+    public var lattice: LatticeType? { LatticeType.named(latticeID) }
 
     /// ρmax clamped to be ≥ ρmin, so the legend range is always non-degenerate.
     public var densitySpan: (lo: Double, hi: Double) {
@@ -231,7 +239,9 @@ public enum LatticeDensityProxy {
     /// (the finite-block boundary correction is a few percent and shrinks with more
     /// cells — stated in the handoff, not hidden).
     public static func realTriangles(latticeID: String, cellMM: Double, volumeMM3: Double) -> Int {
-        guard let ref = realReferences[latticeID] ?? realReferences["octet"], cellMM > 0 else { return 0 }
+        // ★ notes28: a type with no measured reference (Kelvin, Rhombic, Re-entrant) has no count — never the octet's under
+        // its name (0: the legend says nothing)
+        guard let ref = realReferences[latticeID], cellMM > 0 else { return 0 }
         let cellRatioCubed = pow(ref.referenceCellMM / cellMM, 3)
         let volumeRatio = volumeMM3 / ref.referenceVolumeMM3
         return Int((Double(ref.referenceTriangles) * volumeRatio * cellRatioCubed).rounded())

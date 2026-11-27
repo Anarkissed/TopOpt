@@ -1,0 +1,20 @@
+# Release 7b07fa26 — 2026-11-13 page-lines (the page lines, 079b3298), app only
+# Core and worker unchanged: fingerprint 6da1b6c3bb0a; "fingerprint": "6da1b6c3bb0a"
+# Merged onto 6ee7da16; the merged app tree equals page-lines's, so its gate applies unchanged.
+# Commits (first parent of page-lines since the release tip):
+#   da6a815f Page lines (362): the new engine gets the page's own cell window; plain lines for what it leaves out; quilt; queue
+#   079b3298 Page lines (362): merge the release tip (evidence only)
+# Gates:
+#   16:41 RED (old file): 1 of 1 failed
+#   -[TopOptFlowsTests.LatticeLayoutPreviewTests testTheCellWindowIsThePagesResolvedOne] : XCTAssertNotEqual failed: ("99.0") is equal to ("99.0") - ★ Auto never sends the stored max it does not show
+#   -[TopOptFlowsTests.LatticeLayoutPreviewTests testTheCellWindowIsThePagesResolvedOne] : XCTAssertEqualWithAccuracy failed: ("99.0") is not equal to ("8.935591585681042") +/- ("1e-09") - ★ Auto sends 
+#   -[TopOptFlowsTests.LatticeLayoutPreviewTests testTheCellWindowIsThePagesResolvedOne] : XCTAssertEqualWithAccuracy failed: ("0.5") is not equal to ("1.1169489482101302") +/- ("1e-09") - ★ and its flo
+#   17:20 GREEN: exit 0; 33 passed, 0 failed
+#   17:21 checks ok: page-lines 079b3298, 2 commit(s), app-only, onto 6ee7da16, fingerprint 6da1b6c3bb0a
+#   17:21 checks ok: page-lines 079b3298, 2 commit(s), app-only, onto 6ee7da16, fingerprint 6da1b6c3bb0a
+#   17:21 merged 7b07fa26; app tree == page-lines's, fingerprint 6da1b6c3bb0a
+#   17:21 waiting for HEAVY.lock (free)
+#   17:21 lock taken (27 GB free)
+#   17:26 iPad device build green; lock released
+#   17:26 pushed 7b07fa26
+#   17:26 worker /health "fingerprint": "6da1b6c3bb0a" (unchanged, no swap)

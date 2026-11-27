@@ -216,9 +216,11 @@ extension WorkerSupervisor.Liveness {
 /// A thin, HONEST progress bar (item 8): a real fraction when the ladder gives one,
 /// an empty track otherwise — no animated indeterminate shimmer (static, item 6).
 struct HonestBar: View {
-    let fraction: Double?   // nil → indeterminate, drawn as an empty track
+    let fraction: Double?   // nil → indeterminate: an empty track, or a moving glint when `moving`
     var tint: Color = WD.Palette.accent
     var height: CGFloat = 5
+    /// ★ 362 11-23: a job that is working but has no honest fraction shows motion, not an empty bar.
+    var moving: Bool = false
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
@@ -226,6 +228,15 @@ struct HonestBar: View {
                 if let f = fraction {
                     Capsule().fill(tint)
                         .frame(width: max(height, geo.size.width * CGFloat(min(1, max(0, f)))))
+                } else if moving {
+                    TimelineView(.animation) { tl in
+                        let t = tl.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.6) / 1.6
+                        let w = geo.size.width * 0.28
+                        Capsule().fill(tint.opacity(0.85))
+                            .frame(width: w)
+                            .offset(x: (geo.size.width + w) * CGFloat(t) - w)
+                    }
+                    .clipShape(Capsule())
                 }
             }
         }

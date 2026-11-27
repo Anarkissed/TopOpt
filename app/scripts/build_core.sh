@@ -69,6 +69,24 @@ else
   echo "==> lib3mf: (none) — macOS slice is 3MF-free; run app/scripts/build_lib3mf_macos.sh to enable"
 fi
 
+# Manifold (mesh booleans for KEEP regions' exact export; TO-core CORE LIST item KEEP,
+# merged from 3fd9f17e). Static, serial (no TBB), provisioned per triplet by vcpkg
+# through core/vcpkg-ports/manifold + core/vcpkg-triplets (minos macOS 13 / iOS 16).
+# DETECTED like lib3mf: a slice whose triplet is provisioned is configured with
+# manifold_DIR (TOPOPT_HAVE_MANIFOLD) and libmanifold.a is merged INTO its
+# libtopopt.a, so the xcframework needs no extra link; otherwise find_package is
+# disabled and KEEP still freezes the kept material but says the export is not exact.
+# MANIFOLD_ROOT (env) overrides the default: a worktree's REPO_ROOT has no .vcpkg, so
+# point it at the main checkout's .vcpkg/installed-manifold there.
+MANIFOLD_ROOT="${MANIFOLD_ROOT:-$REPO_ROOT/.vcpkg/installed-manifold}"
+manifold_args() { if [[ -f "$MANIFOLD_ROOT/$1/share/manifold/manifoldConfig.cmake" ]]; then echo "-Dmanifold_DIR=$MANIFOLD_ROOT/$1/share/manifold"; else echo "-DCMAKE_DISABLE_FIND_PACKAGE_manifold=ON"; fi; }
+merge_manifold() { local m="$MANIFOLD_ROOT/$2/lib/libmanifold.a"; [[ -f "$m" ]] || return 0; libtool -static -o "$1.merged" "$1" "$m" 2>/dev/null && mv "$1.merged" "$1"; }
+if [[ -f "$MANIFOLD_ROOT/arm64-osx/share/manifold/manifoldConfig.cmake" ]]; then
+  echo "==> Manifold: $MANIFOLD_ROOT (KEEP regions exported exactly)"
+else
+  echo "==> Manifold: (none at $MANIFOLD_ROOT) — KEEP export not exact; set MANIFOLD_ROOT"
+fi
+
 # build_slice <name> <archs> <extra-cmake-args...> -> echoes the produced libtopopt.a
 build_slice() {
   local name="$1"; local archs="$2"; shift 2
@@ -77,11 +95,21 @@ build_slice() {
   cmake -S "$CORE_DIR" -B "$dir" \
     -DCMAKE_BUILD_TYPE=Release -DTOPOPT_REQUIRE_DEPS=OFF \
     -DCMAKE_OSX_ARCHITECTURES="$archs" "$@" >/dev/null
-  cmake --build "$dir" --target topopt --config Release >/dev/null
+  # topopt_fingerprint: the core build fingerprint, stamped at BUILD time by the
+  # SAME CMake target topopt-cli uses (core/cmake/TopoptFingerprintTarget.cmake).
+  cmake --build "$dir" --target topopt topopt_fingerprint --config Release >/dev/null
   if [[ ! -f "$dir/libtopopt.a" ]]; then
     echo "error: slice '$name' did not produce libtopopt.a" >&2; exit 1
   fi
+  if [[ ! -s "$dir/generated/fingerprint/topopt_build_fingerprint.txt" ]]; then
+    echo "error: slice '$name' did not stamp a core build fingerprint" >&2; exit 1
+  fi
   echo "$dir/libtopopt.a"
+}
+
+# The fingerprint a slice's build stamped (see build_slice).
+slice_fingerprint() {
+  head -n 1 "$BUILD_ROOT/$1/generated/fingerprint/topopt_build_fingerprint.txt"
 }
 
 # macOS is arm64 only: Homebrew OpenCASCADE ships arm64 dylibs on Apple Silicon,
@@ -93,7 +121,8 @@ MACOS_PREFIX="$OCCT_PREFIX;$EIGEN_PREFIX"
 MACOS_KIND="Eigen + OCCT"
 if [[ -n "$LIB3MF_PREFIX" ]]; then MACOS_PREFIX="$MACOS_PREFIX;$LIB3MF_PREFIX"; MACOS_KIND="$MACOS_KIND + lib3mf"; fi
 echo "==> building macOS slice ($MACOS_KIND, arm64)"
-LIB_MACOS=$(build_slice macos arm64 -DCMAKE_PREFIX_PATH="$MACOS_PREFIX")
+LIB_MACOS=$(build_slice macos arm64 -DCMAKE_PREFIX_PATH="$MACOS_PREFIX" "$(manifold_args arm64-osx)")
+merge_manifold "$LIB_MACOS" arm64-osx
 
 # --- iOS slices --------------------------------------------------------------
 IOS_DEPLOYMENT_TARGET="${IOS_DEPLOYMENT_TARGET:-16.0}"   # match Package.swift .iOS(.v16)
@@ -107,12 +136,12 @@ OCCT_IOS_DEV="$APP_DIR/.build-occt-ios/install/occt-iphoneos"
 LIB3MF_IOS_SIM="$APP_DIR/.build-occt-ios/install/lib3mf-iphonesimulator"
 LIB3MF_IOS_DEV="$APP_DIR/.build-occt-ios/install/lib3mf-iphoneos"
 
-# build_ios_slice <name> <sdk> <archs> <occt-install> <lib3mf-install>
+# build_ios_slice <name> <sdk> <archs> <occt-install> <lib3mf-install> <manifold-triplet>
 #   -> echoes the produced libtopopt.a (like build_slice). Composes the CMAKE_
 #      PREFIX_PATH / find-root and the per-dependency disable flags based on what
 #      is actually cross-built. (Written for bash 3.2 — no mapfile/readarray.)
 build_ios_slice() {
-  local name="$1" sdk="$2" archs="$3" occt="$4" l3mf="$5"
+  local name="$1" sdk="$2" archs="$3" occt="$4" l3mf="$5" mtrip="$6"
   local prefix="$EIGEN_PREFIX"
   local extra
   extra=( -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT="$sdk"
@@ -124,6 +153,7 @@ build_ios_slice() {
   if [[ -d "$l3mf" ]]; then prefix="$l3mf;$prefix"
   else extra+=( -DCMAKE_DISABLE_FIND_PACKAGE_lib3mf=ON ); fi
   extra+=( -DCMAKE_PREFIX_PATH="$prefix" -DCMAKE_FIND_ROOT_PATH="$prefix" )
+  extra+=( "$(manifold_args "$mtrip")" )
   build_slice "$name" "$archs" "${extra[@]}"
 }
 
@@ -142,52 +172,130 @@ if [[ -d "$OCCT_IOS_SIM" || -d "$LIB3MF_IOS_SIM" ]]; then SIM_ARCHS="arm64"; els
 [[ -d "$LIB3MF_IOS_SIM" ]] && SIM_KIND="$SIM_KIND + lib3mf"
 [[ -d "$LIB3MF_IOS_DEV" ]] && DEV_KIND="$DEV_KIND + lib3mf"
 echo "==> building iOS simulator slice ($SIM_KIND, $SIM_ARCHS)"
-LIB_IOSSIM=$(build_ios_slice iossimulator iphonesimulator "$SIM_ARCHS" "$OCCT_IOS_SIM" "$LIB3MF_IOS_SIM")
+# Manifold is provisioned arm64 only, so a universal (arm64+x86_64) sim slice goes
+# without it ("none" is no triplet: find_package disabled, nothing merged).
+[[ "$SIM_ARCHS" == arm64 ]] && SIM_MANIFOLD=arm64-ios-simulator || SIM_MANIFOLD=none
+LIB_IOSSIM=$(build_ios_slice iossimulator iphonesimulator "$SIM_ARCHS" "$OCCT_IOS_SIM" "$LIB3MF_IOS_SIM" "$SIM_MANIFOLD")
+merge_manifold "$LIB_IOSSIM" "$SIM_MANIFOLD"
 
 echo "==> building iOS device slice ($DEV_KIND, arm64)"
-LIB_IOSDEV=$(build_ios_slice iphoneos iphoneos arm64 "$OCCT_IOS_DEV" "$LIB3MF_IOS_DEV")
+LIB_IOSDEV=$(build_ios_slice iphoneos iphoneos arm64 "$OCCT_IOS_DEV" "$LIB3MF_IOS_DEV" arm64-ios)
+merge_manifold "$LIB_IOSDEV" arm64-ios
 
-# --- assemble the xcframework ------------------------------------------------
+# The linked core's BUILD TIME, taken the moment its libraries are assembled, in the
+# CLI's own format (`__DATE__ " " __TIME__`, e.g. "Oct  2 2026 19:01:09" -- %e pads
+# the day with a space as __DATE__ does). The bridge states it to core with the
+# fingerprint below (`topopt::set_build_identity`), so an in-app run's receipt
+# names the core that wrote it instead of "unknown" (#358, 349053df).
+BUILD_TIME="$(LC_ALL=C date '+%b %e %Y %H:%M:%S')"
+
+# --- core build fingerprint (LAN offload, handoff 097; item 44) --------------
+# Write the fingerprint of the core we just built into a generated Swift file the
+# app reads. It is the value each slice's build STAMPED (the topopt_fingerprint
+# target, core/cmake/TopoptFingerprint.cmake) — the SAME target and script that
+# bake `topopt-cli --version` — taken at build time: "<tree12>", a hash of HEAD's
+# core/ tree and THIS script (everything that changes the built core; a docs-only
+# commit leaves it unchanged), "<tree12>-dirty-<diff8>" when tracked files under
+# core/ or this script differ from HEAD, "dev" without git (never equals a real
+# worker fingerprint, so skew fails safe).
+# All three slices must agree; if the core tree changed while they built, the
+# xcframework mixes sources and is refused. RemoteRunner compares this to a
+# worker's /health + Bonjour-TXT fingerprint so a version-skewed worker is
+# refused BEFORE a run — the user never sees or types a fingerprint.
+FINGERPRINT="$(slice_fingerprint macos)"
+for s in iossimulator iphoneos; do
+  if [[ "$(slice_fingerprint "$s")" != "$FINGERPRINT" ]]; then
+    echo "error: core fingerprint differs between slices (macos=$FINGERPRINT," \
+         "$s=$(slice_fingerprint "$s")): the core tree changed during the build;" \
+         "re-run this script" >&2
+    exit 1
+  fi
+done
+[[ -z "$FINGERPRINT" ]] && FINGERPRINT="dev"
+
+# --- ★★ THE HEADERS AND THE LIBRARY ARE ONE BUILD (reviewer's ruling, 2026-11-06) ----------------------------------
+# His iPad crashed on 2026-11-06 05:31: vendor/include was a SYMLINK to the tree's own core/include, so a core merged into
+# the tree changed the headers the bridge compiles against at once, while libtopopt.a stayed the old build — the bridge
+# built E2/E3's JobDescription and the 11-04 library destroyed it ("pointer being freed was not allocated"). Now:
+#   (1) vendor/include is a PINNED COPY of core/include, made here beside the libraries, and the two are moved into
+#       vendor/ back to back — a core change in the tree no longer touches what the app compiles against;
+#   (2) one name taken from the fingerprint goes into BOTH: every slice's libtopopt.a defines the symbol, and the copied
+#       headers' topopt_vendored_core.h names it. The bridge references it (bridge.cpp), so headers and a library from
+#       two builds are an UNDEFINED SYMBOL at link time — the build stops on the Mac, never crashes on the iPad.
+VC_SYMBOL="topopt_vendored_core_$(printf '%s' "$FINGERPRINT" | tr -c 'A-Za-z0-9_' '_')"
+VC_DIR="$BUILD_ROOT/vendored-core"
+rm -rf "$VC_DIR"; mkdir -p "$VC_DIR"
+printf '/* GENERATED by app/scripts/build_core.sh: this library is core %s. */\nconst char %s[] = "%s";\n' \
+  "$FINGERPRINT" "$VC_SYMBOL" "$FINGERPRINT" > "$VC_DIR/vendored_core.c"
+# stamp_vendored_core <libtopopt.a> <sdk> <min-version flag> <archs, ';'-separated>
+stamp_vendored_core() {
+  local lib="$1" sdk="$2" minflag="$3" archs="$4" o="$VC_DIR/$2.o" a
+  local args=()
+  for a in ${archs//;/ }; do args+=(-arch "$a"); done
+  xcrun --sdk "$sdk" clang -c -O2 "${args[@]}" "$minflag" "$VC_DIR/vendored_core.c" -o "$o"
+  libtool -static -o "$lib.vc" "$lib" "$o" 2>/dev/null && mv "$lib.vc" "$lib"
+  nm "$lib" > "$VC_DIR/$2.nm" 2>/dev/null || true
+  if ! grep -q " _$VC_SYMBOL\$" "$VC_DIR/$2.nm"; then
+    echo "error: $lib does not define $VC_SYMBOL after stamping" >&2; exit 1
+  fi
+}
+stamp_vendored_core "$LIB_MACOS" macosx -mmacosx-version-min=13.0 arm64
+stamp_vendored_core "$LIB_IOSSIM" iphonesimulator "-mios-simulator-version-min=$IOS_DEPLOYMENT_TARGET" "$SIM_ARCHS"
+stamp_vendored_core "$LIB_IOSDEV" iphoneos "-mios-version-min=$IOS_DEPLOYMENT_TARGET" arm64
+echo "==> stamped every slice with $VC_SYMBOL"
+
+# --- assemble the xcframework and the pinned headers, then move both into vendor/ ---------------------------------
 mkdir -p "$VENDOR"
 XCF="$VENDOR/TopOptCore.xcframework"
-rm -rf "$XCF"
+STAGE="$VENDOR/.staging"
+rm -rf "$STAGE"; mkdir -p "$STAGE/include"
 xcodebuild -create-xcframework \
   -library "$LIB_MACOS" \
   -library "$LIB_IOSSIM" \
   -library "$LIB_IOSDEV" \
-  -output "$XCF" >/dev/null
-echo "==> created $XCF"
-
-# --- core build fingerprint (LAN offload, handoff 097) -----------------------
-# Write the git SHA of the core we just built into a generated Swift file the
-# app reads, using the SAME derivation the CLI's CMake bakes into
-# `topopt-cli --version` (core/CMakeLists.txt: git -C core rev-parse --short=12
-# HEAD). RemoteRunner compares this to a worker's /health + Bonjour-TXT
-# fingerprint so a version-skewed worker is refused BEFORE a run — the user never
-# sees or types a fingerprint. Absent git => "dev" (mirrors the CMake fallback),
-# which will never equal a real worker fingerprint, so skew fails safe (refuse).
-FINGERPRINT="$(git -C "$CORE_DIR" rev-parse --short=12 HEAD 2>/dev/null || true)"
-[[ -z "$FINGERPRINT" ]] && FINGERPRINT="dev"
+  -output "$STAGE/TopOptCore.xcframework" >/dev/null
+cp -R "$CORE_DIR/include/." "$STAGE/include/"
+cat > "$STAGE/include/topopt_vendored_core.h" <<EOF
+// topopt_vendored_core.h — GENERATED by app/scripts/build_core.sh with the libraries beside it. DO NOT EDIT.
+// These headers are a pinned copy of core/include for core $FINGERPRINT, and every slice of
+// TopOptCore.xcframework defines the symbol named here. The bridge references it, so a vendor whose headers and
+// library came from two builds stops at link time (the reviewer's ruling of 2026-11-06, after his iPad crash).
+#pragma once
+#define TOPOPT_VENDORED_CORE_SYMBOL $VC_SYMBOL
+#define TOPOPT_VENDORED_CORE_FINGERPRINT "$FINGERPRINT"
+EOF
+# the move: the old pair aside, the new pair in, back to back (a symlinked include is moved as a link, never followed)
+rm -rf "$VENDOR/.replaced"; mkdir -p "$VENDOR/.replaced"
+if [[ -e "$XCF" ]]; then mv "$XCF" "$VENDOR/.replaced/"; fi
+if [[ -e "$VENDOR/include" || -L "$VENDOR/include" ]]; then mv "$VENDOR/include" "$VENDOR/.replaced/"; fi
+mv "$STAGE/TopOptCore.xcframework" "$XCF"
+mv "$STAGE/include" "$VENDOR/include"
+rm -rf "$VENDOR/.replaced" "$STAGE"
+echo "==> created $XCF and the pinned $VENDOR/include (core $FINGERPRINT)"
 FP_FILE="$PKG_DIR/Sources/TopOptFlows/CoreFingerprint.generated.swift"
 cat > "$FP_FILE" <<EOF
 // CoreFingerprint.generated.swift — GENERATED by app/scripts/build_core.sh.
 // DO NOT EDIT. Gitignored (see app/.gitignore); regenerated on every core build.
 //
-// The git commit the vendored core was built from, derived with the SAME command
-// the CLI's CMake uses for \`topopt-cli --version\` (core/CMakeLists.txt):
-//     git -C core rev-parse --short=12 HEAD
+// The core the vendored libraries were built from, stamped AT BUILD TIME by the
+// SAME CMake target that bakes \`topopt-cli --version\` (topopt_fingerprint,
+// core/cmake/TopoptFingerprint.cmake): "<tree12>" (a hash of core/ and
+// app/scripts/build_core.sh at HEAD), or "<tree12>-dirty-<diff8>" when either
+// had uncommitted changes.
 // RemoteRunner reads this and refuses a LAN worker whose core fingerprint differs
 // (worker /health + Bonjour TXT), so a silent core mismatch — which would produce
 // a different part — can never run. The user never sees or types a fingerprint.
 enum CoreFingerprint {
-    /// The core git SHA this app was built against ("dev" when git is unavailable).
+    /// The core fingerprint this app was built against ("dev" when git is unavailable).
     static let value = "$FINGERPRINT"
+    /// When the linked core's libraries were assembled, in the CLI's \`__DATE__ __TIME__\`
+    /// format. Stated to core once, with \`value\`, before the first bridge run.
+    static let buildTime = "$BUILD_TIME"
 }
 EOF
-echo "==> wrote $FP_FILE (fingerprint=$FINGERPRINT)"
+echo "==> wrote $FP_FILE (fingerprint=$FINGERPRINT, built $BUILD_TIME)"
 
-# --- vendor headers + OCCT libs (package-relative paths only) -----------------
-ln -sfn "$CORE_DIR/include" "$VENDOR/include"
+# --- vendor OCCT libs (package-relative paths only; the headers are vendored above, with the libraries) ------------
 ln -sfn "$OCCT_PREFIX/lib" "$VENDOR/occt-lib"
 # lib3mf dylib for the macOS link (mirrors occt-lib). The symlink's PRESENCE is the
 # switch Package.swift reads: it adds the macOS -llib3mf/-rpath flags only when this
@@ -203,7 +311,7 @@ rm -rf "$VENDOR/lib" "$VENDOR/occt-include"
 
 echo "==> vendored:"
 echo "    $XCF (macos-arm64, ios-arm64-simulator, ios-arm64)"
-echo "    $VENDOR/include   -> $CORE_DIR/include"
+echo "    $VENDOR/include   (a pinned copy of $CORE_DIR/include, core $FINGERPRINT)"
 echo "    $VENDOR/occt-lib  -> $OCCT_PREFIX/lib   (macOS link only)"
 if [[ -n "$LIB3MF_PREFIX" ]]; then
   echo "    $VENDOR/lib3mf-lib -> $LIB3MF_PREFIX/lib   (macOS 3MF import link)"

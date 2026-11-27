@@ -37,13 +37,9 @@ final class LatticeStageRepairHisPart: XCTestCase {
     }
 
     private func writeEvidence(_ name: String, _ text: String) {
-        let dir = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("evidence/2026-08-17-lattice-stage-repair")
-        try? FileManager.default.createDirectory(at: dir,
-                                                 withIntermediateDirectories: true)
+        // The reviewer, 11-06 09:41Z: tests must not dirty tracked files. Into the repo only with TOPOPT_EVIDENCE_TO_REPO=1
+        // (EvidenceOut); this file is regenerated from live core, so on 7d6c5dbc it rewrote 2026-08-17's numbers with K1's.
+        let dir = EvidenceOut.dir("evidence/2026-08-17-lattice-stage-repair")
         try? text.write(to: dir.appendingPathComponent(name), atomically: true,
                         encoding: .utf8)
     }
@@ -105,13 +101,15 @@ final class LatticeStageRepairHisPart: XCTestCase {
         let base = try XCTUnwrap(cards[4.0])
         // ★ HIS 4 mm DEPTH, RE-DERIVED FROM CORE. Every number has moved off the
         // figures on his screenshot, and each moved toward core's own answer.
-        XCTAssertEqual(base.cellText, "1.17 mm", "was 4.93 mm — the LIGHT-end floor")
-        XCTAssertEqual(base.densityText, "60%", "was 5% — the band floor")
-        XCTAssertEqual(base.cellsText, "3.4", "was 0.8")
+        // ★ RE-PINNED (release (2), K1 item 5), as LatticeStageRepairEvidence's card: the dense-end floor is 1.117 mm (3.6
+        // across) and the lightest density that prints there is the band's top, 0.9003 (1.17 mm, 60 %, 3.4 on the legs-only law)
+        XCTAssertEqual(base.cellText, "1.12 mm", "was 4.93 mm — the LIGHT-end floor")
+        XCTAssertEqual(base.densityText, "90%", "was 5% — the band floor")
+        XCTAssertEqual(base.cellsText, "3.6", "was 0.8")
         XCTAssertEqual(base.strutDiameterMM, Self.strutLineWidthMM, accuracy: 1e-3,
                        "was 0.32 mm on the app's own law; core's is one bead")
         XCTAssertEqual(base.verdict, .outOfRegime,
-                       "★ 3.4 < 5: STILL out of regime at 4 mm, and honestly so — "
+                       "★ 3.6 < 5: STILL out of regime at 4 mm, and honestly so — "
                        + "but for ONE reason now, not two. The strut prints.")
 
         // ★★ AND THE DEPTH THAT CERTIFIES IS REACHABLE. Core's requirement is

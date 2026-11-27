@@ -390,12 +390,13 @@ final class FaceRegionTests: XCTestCase {
         var model = FaceRegionModel()
         let id = model.union(faces: [], named: "blends",
                              filter: .blend(maxAreaMM2: 42), matchedAtAuthor: 24)
-        model.splitManual(id, point: SIMD3(1, 2, 3), normal: SIMD3(0, 1, 0))
+        let halves = model.splitManual(id, point: SIMD3(1, 2, 3), normal: SIMD3(0, 1, 0))
+        // ★ his 11-16: a job sends the pieces it uses and what they were cut from — the group uses one half
         let loads = try XCTUnwrap(
-            try jobDict(request(regions: model.regions, groupRegions: [id]))["loads"]
+            try jobDict(request(regions: model.regions, groupRegions: [halves[0]]))["loads"]
                 as? [String: Any])
         let regions = try XCTUnwrap(loads["face_regions"] as? [[String: Any]])
-        XCTAssertEqual(regions.count, 3, "the union and its two halves")
+        XCTAssertEqual(regions.count, 2, "the half the group uses and the union it was cut from (not the unused half)")
         let root = try XCTUnwrap(regions.first { ($0["id"] as? Int) == id })
         XCTAssertEqual(root["filter_matched_at_author"] as? Int, 24)
         let f = try XCTUnwrap(root["filter"] as? [String: Any])
@@ -408,7 +409,7 @@ final class FaceRegionTests: XCTestCase {
         XCTAssertEqual(cuts[0]["normal"] as? [Double], [0, 1, 0],
                        "a split is stored as GEOMETRY, not as 'region N, half A'")
         let g = try XCTUnwrap((loads["groups"] as? [[String: Any]])?.first)
-        XCTAssertEqual(g["region_ids"] as? [Int], [id])
+        XCTAssertEqual(g["region_ids"] as? [Int], [halves[0]])
         XCTAssertNil(g["face_ids"], "a region-only group ships no empty face array")
     }
 

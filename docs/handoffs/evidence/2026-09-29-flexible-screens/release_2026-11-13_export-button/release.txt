@@ -1,0 +1,19 @@
+# Release a8895265 — 2026-11-13 export-button (the Export button, d0b41f65), app only
+# Core and worker unchanged: fingerprint 6da1b6c3bb0a; "fingerprint": "6da1b6c3bb0a"
+# Merged onto 48333c5d; the merged app tree equals export-button's, so its gate applies unchanged.
+# Commits (first parent of export-button since the release tip):
+#   f35eb17c Export (362): the print file from the new engine's preview, made on the Mac (his go 11-13)
+#   d0b41f65 Export (362): merge the release tip (release (5) b2ebb1b3 + its evidence) so the app-only release builds on it
+# Gates:
+#   12:35 built
+#   12:47 tests: exit 0; 38 passed, 0 failed, 0 skipped
+#   LATTICE-FILE cube via the CLI: Print file ready · 240 bars · 35% of the solid part · layer check clean
+#   LATTICE-FILE cube via the worker: Print file ready · 240 bars · 35% of the solid part · layer check clean, 365484 bytes
+#   02:55 evidence 05c5178b pushed; release 05d3b671 DONE
+#   12:48 checks ok: export-button d0b41f65, 2 commit(s), app-only, onto 48333c5d, fingerprint 6da1b6c3bb0a
+#   12:48 merged a8895265; app tree == export-button's, fingerprint 6da1b6c3bb0a
+#   12:48 waiting for HEAVY.lock (free)
+#   12:48 lock taken (28 GB free)
+#   12:53 iPad device build green; lock released
+#   12:53 pushed a8895265
+#   12:53 worker /health "fingerprint": "6da1b6c3bb0a" (unchanged, no swap)

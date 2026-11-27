@@ -93,6 +93,19 @@ struct ManualClearanceGeometry {
   // ★ OUTLINE (the app's `outline_uv`): closed loops in the face's in-plane (u, w)
   // basis, origin at `origin`. Empty = the rectangle. See ClearanceGeometry.
   std::vector<std::vector<std::array<double, 2>>> outline_uv;
+  // ── ★ THE FRAME THE OUTLINE IS ACTUALLY IN, when the job states it ───────────
+  // Unit world vectors of the axes `outline_uv` is expressed in. Sent by the app
+  // from 2026-09-22; ZERO means "not stated", and then the basis is derived from
+  // the normal and read through the FITTED frame convention as before.
+  //
+  // Why they exist: core and the app derive the same pair by coincidence of
+  // construction, not by contract, and the agreement between them was never
+  // derived -- it was fitted once, on one part, by scoring all eight frames by
+  // include-region void fraction. The margin was enormous (11.9 % against
+  // 64-426 %), so the choice is not in doubt; but one part, one heuristic, and
+  // the winner's 11.9 % was never explained. Stated axes end it.
+  Vec3 frame_u{0.0, 0.0, 0.0};
+  Vec3 frame_w{0.0, 0.0, 0.0};
 };
 
 // ── Suggested default distances (design 095 STEP 1/2). ────────────────────
@@ -274,8 +287,32 @@ struct ClearanceVoxelMask {
   }
 };
 
+// ── ★ E4 (j): A KEEP CLEAR ON A CUT PIECE (ruling 2026-11-07 19:55) ──────────
+// A cut piece is a face region: its parent faces plus half-space cuts (face_region.hpp's
+// RegionCut). Its Keep clear is each member face's own one, CLIPPED by those cuts, so a
+// piece clears in front of itself and nowhere else. One clip, with RegionCut's meaning:
+// a point p is kept iff dot(p - point, normal) >= 0 (> 0 when `strict`); `normal` need
+// not be unit and must be non-zero.
+struct ClearanceClip {
+  Vec3 point{0.0, 0.0, 0.0};
+  Vec3 normal{0.0, 0.0, 0.0};
+  bool strict = false;
+};
+
 struct ClearanceGeometry {
   ClearanceKind kind = ClearanceKind::Bolt;
+  // ★ Set when the job STATED frame axes that disagree with plane_basis(). The
+  // geometry is left invalid so the caller refuses rather than silently choosing
+  // one of two frames. Distinct from a merely degenerate region, which is a no-op.
+  bool frame_conflict = false;
+  // ★ K6 (reviewer, 2026-10-08): WHICH DECLARED REGION THIS IS, 1-based among the job's
+  // INCLUDE regions, counting every declared include whether or not it resolved. The
+  // include builder SKIPS an invalid include (run_job.cpp `if (!g.valid) continue;`), so
+  // a position in the built vector is NOT the declared id once anything is degenerate --
+  // and the app numbers includes without that skip. `stepped_region_owner` returns this,
+  // so the two cannot disagree silently across the bridge. 0 = the caller did not number
+  // them, and the positional answer stands (every pure-header test).
+  int declared_region_id = 0;
   bool valid = false;
 
   // ★ NON-NULL => THIS GEOMETRY IS A VOXEL SET (see the note above). Every
@@ -312,6 +349,9 @@ struct ClearanceGeometry {
   // second -- measured, not assumed (TOPOPT_OUTLINE_UV_FRAME during calibration).
   std::vector<std::vector<std::array<double, 2>>> outline_uv;
   int outline_frame = 0;
+  // ★ E4 (j): the cut piece's clips (see ClearanceClip). Empty -- every face, manual
+  // and include region -- is the unclipped region, byte-identical to before E4.
+  std::vector<ClearanceClip> clips;
 };
 
 // Resolve the predicate from B-rep face `face_id` of `model` (the AUTO path): the
@@ -323,6 +363,18 @@ struct ClearanceGeometry {
 // is not parallel to the mesh.
 ClearanceGeometry resolve_clearance_from_face(const StepModel& model, int face_id,
                                               const ClearanceParams& params);
+
+// ★ E4 (j): the Keep clear of a CUT PIECE -- each of `faces`' own Keep clear
+// (resolve_clearance_from_face), clipped by `clips`. A face whose surface is not of the
+// clearance's kind gives nothing, as it does on the face path; the caller refuses a
+// piece that gives nothing at all. Out-of-range faces throw as on the face path.
+std::vector<ClearanceGeometry> resolve_clearance_from_faces(
+    const StepModel& model, const std::vector<int>& faces,
+    const std::vector<ClearanceClip>& clips, const ClearanceParams& params);
+
+// The bore radius a bolt Keep clear's defaults are read from on a cut piece: the
+// largest round face among `faces` (0 when none is round).
+double largest_bore_radius_mm(const StepModel& model, const std::vector<int>& faces);
 
 // Resolve the predicate from user-supplied MANUAL geometry (no B-rep): `geom`
 // carries the base axis/radius/half-length or origin/normal/half-extents, and
@@ -347,6 +399,30 @@ ClearanceGeometry resolve_clearance_manual(const ManualClearanceGeometry& geom,
 // identical to rasterize_clearance's per-voxel inside test, just point-vs-region
 // with an outward `tol`, so a frozen vertex and a FrozenVoid voxel agree on the
 // same geometry.
+// ── ★ K3: THE OUTLINE AS A DISTANCE, NOT ONLY A YES/NO ────────────────────────
+// `point_in_clearance_region` below answers "is this point in the region", outline
+// included. The STRUT CLIP needs the same answer as a DISTANCE, because
+// clip_segment's certificate is a Lipschitz argument over a signed distance and not
+// over a predicate. This returns the exact signed distance to the region's in-plane
+// outline, in the face's own (u, w) plane -- positive inside, negative outside -- for
+// the loops exactly as the app sent them and in the SAME frame the predicate reads
+// them in. The frame swap/negate therefore lives in ONE place and nothing re-derives
+// it.
+//
+// `du`, `dw` are the point's in-plane coordinates relative to the region origin:
+// dot(p - origin, geom.u) and dot(p - origin, geom.w). A region with no outline
+// returns +infinity -- the caller's own rectangle terms are then the whole in-plane
+// answer, which is what every job before the app sent an outline gets.
+double clearance_outline_signed_distance(const ClearanceGeometry& geom, double du,
+                                         double dw);
+
+// The two halves of that answer, exported so a caller with its own edge index (the
+// lattice boundary's outline clip) can take the DISTANCE from its index and still read
+// the FRAME and the inside/outside test from here. There is no second copy of either.
+void clearance_outline_frame_uv(const ClearanceGeometry& geom, double du, double dw,
+                                double* a, double* b);
+bool point_in_clearance_outline(const ClearanceGeometry& geom, double du, double dw);
+
 bool point_in_clearance_region(const ClearanceGeometry& geom, const Vec3& p,
                                double tol);
 

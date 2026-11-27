@@ -691,6 +691,42 @@ TriangleMesh keep_largest_component(const TriangleMesh& mesh) {
   return out;
 }
 
+TriangleMesh clean_degenerate_triangles(const TriangleMesh& mesh) {
+  TriangleMesh clean;
+  clean.vertices = mesh.vertices;
+  for (const auto& t : mesh.triangles)
+    if (t[0] != t[1] && t[1] != t[2] && t[0] != t[2])
+      clean.triangles.push_back(t);
+  return clean;
+}
+
+std::vector<int> triangle_component_roots(const TriangleMesh& clean,
+                                          int& out_components) {
+  return triangle_components(clean, out_components);
+}
+
+TriangleMesh rebuild_from_components(const TriangleMesh& clean,
+                                     const std::vector<int>& root,
+                                     const std::vector<char>& keep_root) {
+  // The same walk as keep_largest_component's rebuild.
+  TriangleMesh out;
+  std::vector<int> remap(clean.vertices.size(), -1);
+  for (int t = 0; t < static_cast<int>(clean.triangles.size()); ++t) {
+    if (!keep_root[static_cast<std::size_t>(root[t])]) continue;
+    std::array<int, 3> nt{};
+    for (int w = 0; w < 3; ++w) {
+      int v = clean.triangles[t][w];
+      if (remap[v] == -1) {
+        remap[v] = static_cast<int>(out.vertices.size());
+        out.vertices.push_back(clean.vertices[v]);
+      }
+      nt[w] = remap[v];
+    }
+    out.triangles.push_back(nt);
+  }
+  return out;
+}
+
 TriangleMesh keep_largest_and_marked_components(
     const TriangleMesh& mesh, const std::vector<char>& keep_vertex,
     int& out_extra_kept) {

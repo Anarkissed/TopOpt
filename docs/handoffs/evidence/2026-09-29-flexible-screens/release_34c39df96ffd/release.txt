@@ -1,0 +1,106 @@
+# Release 34c39df96ffd - 2026-11-20: release (11), Organic cut 2 - claude/organic-1 2d6ce117, one worker swap (12a357ed65ce -> 34c39df96ffd) and its script
+# The Organic print file on the Mac (3MF), the strength check and strengthening rounds, his certify wizard on Results;
+# his iPad notes 11-19 (the vines redrawn, the depth variation and vine spacing switches, None/Skin/Solid, the gap rule).
+# Core: LatticeReview's FINAL cut 2 engine (claude/organic-engine 73363bf9). LatticeTypes' 181deb12 is NOT in this release.
+# Gates in the gate tree (b9-screens-362, its own vendor): the whole app suite in three runs; targeted classes after each fix.
+# Commits:
+#   c39e4d65 Organic file (brief E1), item 1: the layer check learns the slicer's NonZero fill (OF1)
+#   b9cd6ee7 Organic file (brief E1), item 2: tubes from the final bars (OF2)
+#   121d50ab Organic file (brief E1), item 3: the shells trimmed to the part (OF3)
+#   3d535d3a Organic file (brief E1), item 4: the file route tubes (OF4)
+#   9f54f966 Organic file (brief E1), item 5: the file itself, a deflated indexed 3MF (OF5)
+#   ccbef512 Organic file (brief E1), item 6: rules OF1 to OF5 and their tests
+#   c0fd6d87 Organic file (brief E1), item 3 fix: nothing below the bed
+#   052a5e09 Organic file (E1, second leg): shallow runs as one tube, a flat bottom, times per pass
+#   58591e13 Organic strength (brief E2), item 1: the sparse symmetric solve as one call
+#   39e99f56 Organic strength (brief E2), items 2 to 6: the frame of beams, in the library
+#   45bc7702 Organic strength (brief E2), items 3, 7, 8: the check in the file job, its result and settings
+#   e3b0f229 Organic strength (brief E2), items 9 to 12: the strengthen rounds
+#   8011ed2f Organic strength (brief E2), item 13: rules OS1 to OS8, their tests, the refusals
+#   14a218c9 organic_grown green again; Organic strength with load scenarios recorded as owed
+#   fc966eb1 Merge claude/organic-cut1-engine (brief C1: Session::sweep_limits, organic_follow_stress) into claude/organic-engine
+#   c82293a7 Organic strength (E2, the lead's rulings of 2026-11-18): the load on the frame per load case; the round's reach
+#   7e1c42b4 Organic strength: the Organic verdict (the lead's ruling of 2026-11-18), the bed-floor drive settings, the weakest struts' ends
+#   8d604ef8 Organic strength: the solid verdict honours width_aware_knockdown; passes_at_infill_percent; per-round bars geometry hash
+#   a15fe0f5 Organic strength, brief E3a item 1: per strut n_min, bending_led, loaded; struts_under.json per strengthen round
+#   e3b02fe4 Organic strength, brief E3a items 2 and 5: the additions list (brace points, widenings), its file, strengthened.json version 2, replay after the lay with each round's hash checked (strengthened_mismatch), the old-bar invariant;
+#   c84b5651 Organic strength, brief E3a items 3, 4, 7: organic-strengthen's additive mode (the default; strengthen_mode, rebuild kept): lay once, then per round braces at buckling struts (frame strut, Euler free length) and widening in pla
+#   386f173a Organic strength, brief E3a item 8: the Draft preview lays without the additions (not the lattice they were made on); rules OS10 to OS14 and their tests
+#   94af5d51 Merge claude/organic-cut1-engine (brief C2: validation, equal ends, floor from the ask, group limits, groups, synthetic stress, bare sample bodies) into claude/organic-engine; both sides kept: the floors and additions of the st
+#   99e48b24 Organic strength, brief E3a: every round's additions stay in force (OS12 checked against round 0 and the round before, three rounds tested); the invariant finds bars shorter than its tolerance
+#   c9a36723 Organic strength, brief E3a: the old-bar invariant counts only pieces at least as wide (a thinner bar of the strand lying along it does not hide it)
+#   918b0851 Organic strength, brief E4 item 1: strengthen_rounds 0 is six rounds in the additive mode (it stops as soon as nothing is under the safety margin); the rebuild mode keeps 2 Traced, 3 Grown; docs and a test pinning both defaults
+#   bae76985 Organic strength, brief E4 item 2: the solid's weak spots. Every judged solid voxel's effective margin as the verdict computes it; the voxels under the safety margin joined by touching are the spots (solid_margin.spots, at most
+#   4d168962 Strength check, brief E4 item 5 (the owner, 2026-11-18): width_aware_knockdown is ON by default, for the Organic verdict and Install 3's cube verdict alike (the solid within the printed wall thickness of a surface counts at ful
+#   c0191edf Organic strength, brief E4 item 3: rule OS15 (the solid's weak spots, walls credited by default, six additive rounds; cube spots owed) and its tests row
+#   844157dd Organic strength, brief E4 leg 2 (rule OS16, the lead's ruling): the strengthen job judges the bars the file writes. organic-strengthen runs the file's print check (print_check_bars: the tubes route's make-check-make loop, no f
+#   2ab53c8c Organic brief E6, rules OG1 and OG2 (the owner, 2026-11-19): a printable gap between struts, and strut ends that stand proud of an open face.
+#   9ee3284b Organic brief E6 leg B, rule OG2b (the owner, 2026-11-19: "Depth variation means to not cut entirely along the plane!"): tubes along an open face keep their own bulge.
+#   d795e637 Organic strength, the lead's rulings of 2026-11-19. OS16 amended: the print check after a strengthening round leaves out, moves and props as after a lay and the job goes on (the refusal print_check_after_additions is gone); eac
+#   19442a26 Organic strength, OS4 amended (the lead's ruling, 2026-11-19): a driven node never takes a displacement from grid nodes that are not in the voxel solve. With no material voxel in its ball: trilinear over the corners of its cell
+#   e3640d24 Organic brief E6 legs C and D: OG2c (a bulge the print check flags is made flush, not refused; findings' places in the result and the refusal) and OG3 (Traced strands keep their distance).
+#   93695f73 Organic brief E6 leg E (the owner, 2026-11-19: "I think actually a 5mm ceiling is best"): organic_face_relief_mm allowed 0 to 5 mm (was 1); default stays 1 ("Default is not flush"), 0 still cuts every vine flush at the plane.
+#   bba631f7 Organic strength, OS9 amended (the lead's ruling, 2026-11-19): a part of the frame with no driven node (adrift) carries nothing and is never by itself a reason to fail. The load landing only near adrift nodes (load_on_adrift_n)
+#   981e49ad Organic brief E6 leg F (the owner, 2026-11-19: "OK, please stop the work on the 5mm outside the face. Let's just make it a single "on/off" that limits to 1mm. It's useless work"): organic_face_relief_mm back to 0 to 1 mm.
+#   6ce7fc48 Organic strength, brief E8, rule OS18 (the owner, 2026-11-19: "Yes! Build it! ... it should be part of the algorithm nonetheless!"): relief vines, new load paths where widening is not enough.
+#   02b245cc Organic strength, OS18 tests: vine spacing off (organic_strand_keep 0.5) is the main case (the owner: "No more vine spacing=on work"); a single strut handed to C gets a vine and is stronger next round; the many-strut run counts
+#   2847ca91 Organic strength, OS18 owed tests (brief E8, leg G): a strut braced at mid-span gets no vine in that round; the relief vine maker on a Grown lay; strengthen_paths 0 against the additive job while C hands nothing (round 0's hash
+#   2d07ced5 Organic Grown, G11 amended (the lead, 2026-11-19, Job 2's proposal): the re-seed's bare places and first steps are hashed. Each stride cell takes the candidate voxel nearest a point placed in the cell by a hash of the seed, the
+#   e59ee334 Organic strength, OS18 AMENDED (the owner, 2026-11-19: "So thicken to the limit, add vines, and only at the end if it is impossible, thicken passed the limit"): per judged strut under the safety factor, every additive round fro
+#   1586e7f9 Organic preview, leg H (OG2d): the runs carry depth variation for the app's drawing. weave_runs(..., relief_marks) (the previews pass it): mark bit 16 kRunAlong where a run's bars lie along an allowed open face (Bar::along_prou
+#   2c75ac2a Organic strength, leg I (OS18b): why the OS18-amended order left more struts under 1.5, and a relief vine landing at a joint. Diagnosis (per round classes untouched / cut / brace / vine, under only because of new pieces, and th
+#   7666ff07 Organic brief E9, rule OG5 (the owner, 2026-11-19, on vine bits showing through his bottom protected face: "That CAN'T happen"): no Organic bar outside the part or through protected solid. At source: O4's run-on, join_loose's r
+#   51cae1f4 Organic strength, OS18 the TWIN (the owner, 2026-11-19: "Yes, build it that way"): the relief step is a twin vine beside the weak stretch (consecutive struts of one strand that each need more than the limit, joint J0 to joint J
+#   ce8991ff Organic, leg J item 1 (OJ1; the owner: the Finish per group "should just be None/Skin/Solid. Rim should be hidden."): each weave region's net skin follows its own Skin (region_finish skin, else the part's) and its own width (sk
+#   6e95719b Organic, leg J item 2 (OJ2; the owner, 2026-11-19: "yes, a solid finish can sit on a loaded face if chosen by the user in the settings"): an Organic area's Solid (its cover) closes only its open face (depth below its own faces 
+#   5d3ebb96 Organic, leg J item 3 (OJ3): the file job's organic_groups, each group {regions, organic_* keys} over the layout's; validated as a group list (a group's refusal named by its index); laid with Session::lay_organic(groups). Test 
+#   5f8d1196 Organic, leg J item 4 (OJ4): floors and additions on a lay of several groups: floors group by group with each group's own upper and light widths; additions once with each region's group's widths (braces region by region, links,
+#   c3d99047 Organic strength, leg J item 5 (OJ5): the strength loop with groups: laid with the job's organic_groups; per strut its region's group's light, upper (OS18 limit), cap, gap, layer and link width; the check reads the thinnest lig
+#   20605ced Organic preview, leg J item 6 (OJ6): the Exact preview with relief runs the file's print check once and draws the bars it made flush (OG2c) flush (no along-face mark, no proud length; relief_flushed counts them); the print chec
+#   f18a291a Organic, leg J (OJ7; the lead's ruling 6): the net skin kept apart: joins shortest first; a join within its group's gap of a net strut already laid (not sharing a landing) is not laid; Outcome::net_kept_apart. Made box: Traced 
+#   c278fecf Docs, leg J item 7: maths.md and simple.md say that with several Organic groups each strut's limit, cap, gap and light width are its own group's (OJ5), and the rebuild mode takes one group.
+#   bcbe920e Organic (362): his 11-19 iPad notes - the vines redrawn (smooth, round, blended), Traced/Grown on the Part tab, no mm under Look, one colour, Rim hidden, smooth cut edges; cut 2 switches built ahead of the engine
+#   73d6368a Organic OG5 close-out (the lead's leg): after a strengthening round's additions the guard drops what its own cut leaves with a free end (cut_dropped; the lay's drop and Grown's arrived regions are not at hand there), applied al
+#   0ed96521 Organic, fix for leg J item 2 (OJ2): a covered area (its Solid, or the part's Covered) carries no net skin, whatever Skin says. OJ2's open-face cover left the side walls open and the net landed on them (test_organic_traced, the
+#   f6f3475d Organic strength, leg K: the new-vine step removed (the owner, 2026-11-19: "Yes, remove it."). Gone: the twin maker and strengthen_paths, strengthen_paths_max, strengthen_paths_per_strut, strengthen_path_max_spacings (refused a
+#   b9775b78 Organic (362): his 11-19 pick - release (10)'s round struts for every vine (Grown and the net skin too); the smooth blended look parked for v2
+#   58ff91a4 Organic strength, OS11 fix (the lead, 2026-11-19): no lost round. A strut goes past its limit once a check has judged it AT the limit and found it under the safety factor, and that check may be the one that first finds it; one 
+#   5366bb75 Organic strength, OS16 fix (the lead, 2026-11-19: a strengthened lattice the loop accepted must not be refused by the file job): one rule for both. The arm job's last round ended with its own print check not clean (one overhang
+#   a491071a Organic (362): his 11-19 rule - the drawing follows the print file; the vines drawn by the file's own tube rule
+#   dbeb4bdf Organic OG6 (brief E10; the owner: "The vines should be RIGHT UP NEXT TO the edge of the solid outline"): Grown reaches its walls. After the pruning, each wall place (one per 1.5 mm) with no kept vine within wall_bare_mm (1.5) 
+#   470bbcc1 Organic OV1, a vine is a swept curve (the owner, 2026-11-19: "The drawing follows the print file. Always. However, I am asking for bends in the actual lines." and "Definitely curved"; the lead's rulings R1 to R8, item 4 the pre
+#   3b4ca918 Organic packed runs version 2 (the owner, 2026-11-19: "The drawing follows the print file. Always."): each point carries the FILE's ring width (the tube's own rule, the wider of its two bars at an inner point), runs split where
+#   8cb80c1c Organic OJ8, leg M, the Organic skin on the face (the owner, 2026-11-19: "I like the current one as it is. I think skin thickness and density of skin tendrils should be added as manual variables. What is important, however, is 
+#   5fa87c27 Organic OV1 item 4 (ruling R9): the preview draws the file's swept vines
+#   5b81365b Organic OJ8, the skin stays within its face (the lead, 2026-11-19: a net strut and a stem stay within the region's own open face and a line width off every protected face). Every point of a stem's or join's centre line (each 0.
+#   fd44843f Organic (362): his 11-20 skin note - the skin cut flat at the face as the print file makes it; packed runs version 2; the skin's two manual variables
+#   684f782d Organic (362): the flat cut's surface search rejects far triangles cheaply; the samples probe times each step
+#   21c61b3c Merge LatticeReview's cut 2 engine for wiring (claude/organic-engine @ 5b81365b, not final): the tubes file, the strength check and loop, Finish per Organic group, depth variation and vine spacing, OG6 walls, the skin on the fa
+#   22c70f38 Organic cut 2 (362): wired to the cut 2 engine - his depth variation and vine spacing switches, the Finish per Organic group with the skin's two numbers, packed runs version 2, the gap rule's cell floor; the worker takes the te
+#   0e869a90 Build: a cli_suite target for `ctest -R cli` (leg P item 1). `ctest -R cli` runs 13 tests (the cli_* tests and lattice_clip_shell, krylov_recycling, owner_clip, whose names hold "cli"); a build of topopt_cli alone left 10 of th
+#   73363bf9 Organic strength, OS15 spot ids (leg P item 3; the app's certify wizard, agreed with 362, built on the owner's "finish up the engine work for Organic Cut 2"). Each listed weak spot of the solid gains `id` (1.. in the listed ord
+#   8e97ea06 Organic cut 2 (362): the Organic print file - the Lattice button and Export make it on a Mac from the preview's own lay, as a 3MF the app reads back; the strength check on Organic
+#   bad443b2 Merge LatticeReview's FINAL Organic cut 2 engine (claude/organic-engine @ 73363bf9, closed out 11-20): the weak spots' ids and issues and the spot-id block for the certify wizard, the cli_suite target, the build fixes
+#   810b8c7c Organic cut 2 (362): the export's strengthening chain on the Mac and the certify wizard's model
+#   6541de5e Organic cut 2 (362): his certify wizard on Results - one pop-up per issue pinned to the part, the area coloured and outlined
+#   2d6ce117 Organic cut 2 (362): the Lattice page's Organic sample builds its vines inside its own task, never detached
+#   5863549f Release (11) Organic cut 2 2026-11-20: merge claude/organic-1 2d6ce117 - the Organic print file made on the Mac from the preview's own lay (a 3MF the app reads back), checked for strength and strengthened in rounds first, and h
+# Gates (this tree):
+#   09:52 his uncommitted files (left alone): app/TopOpt-Info.plist app/TopOpt.xcodeproj/project.pbxproj app/TopOpt.xcodeproj/xcshareddata/xcschemes/TopOpt.xcscheme 
+#   09:53 preflight job: /Users/nadim/.topopt-worker/f9c8124fd2df48b3 (his newest optimisation job the installed worker passes; read only)
+#   09:53 merged organic-1 as 5863549f (local); app + core + tools == its; fingerprint 34c39df96ffd
+#   ==> Manifold: /Users/nadim/dev/TopOpt/TopOpt/.vcpkg/installed-manifold (KEEP regions exported exactly)
+#   ==> building macOS slice (Eigen + OCCT, arm64)
+#   ==> building iOS simulator slice (Eigen + OCCT + lib3mf, arm64)
+#   ==> building iOS device slice (Eigen + OCCT + lib3mf, arm64)
+#   09:55 build_core green: topopt_vendored_core_34c39df96ffd + the Install 3 entry points + lay_organic_preview and Session::sweep_limits in every slice and arch
+#   09:56 worker CLI built: topopt-cli: core 34c39df96ffd (dirty=false), built Nov 20 2026 09:56:10; 3 data paths, all under the release worktree
+#   10:01 core suites passed: 100% tests passed out of 9 Total Test time (real) = 322.64 sec 
+#   10:07 iPad device build green (this tree's own pair)
+#   10:08 preflight on his job: preflight: load path CONNECTED
+#   10:08 pushed 5863549f
+#   10:08 worker script installed (cut 2: tensor, organic-strengthen, the strengthened lattice); the old one kept as /Users/nadim/dev/TopOpt/agent-scratch/organic1/r11/topopt_worker.py.installed-before-release11
+#   10:08 restarting the worker server (PID 82537; /health said "fingerprint": "34c39df96ffd") while idle, so it runs the new script
+#   10:09 worker swapped: /health "fingerprint": "34c39df96ffd"; data paths under the release worktree; preflight again OK; old CLI kept as build-fix/topopt-cli.12a357ed65ce-replaced-20261120
+#   10:09 route, demand, strength_job and organic cut 2 tests vs the INSTALLED script: ALL PASS
+#   10:09 the app_release scripts now expect 34c39df96ffd

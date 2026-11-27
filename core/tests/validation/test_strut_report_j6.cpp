@@ -13,8 +13,19 @@
 //
 // This test drives the SAME three designs through the production report path —
 // analyze_fixed_design's built-in strut-strength report (the law now embedded in
-// core, the same solve, build direction z) — and requires agreement with the
+// core, the same solve, build direction z) — and required agreement with the
 // probe's table. A production path that cannot reproduce the probe is wrong.
+//
+// SINCE RULING 2026-11-02 (c) the pins below are the PRODUCTION path's numbers, not
+// the probe's. The probe solved on octet's legs-only tensor (its bulk_tensor.csv
+// C*_lib columns are those rows, and its measured C44 tracks them, not the full
+// cell's 5-12 % stiffer shear), and octet's tensor and band are now the full cell's.
+// The same designs then carry a different macro stress, and the band's new top
+// (0.90027) keeps s3's 0.9002 voxel latticed (3,751 voxels, not 3,750). The probe's
+// table stays in the comment above as the provenance. Since 2026-11-17 the strut law (the K
+// table) is the full octet's own too (evidence/2026-11-17-octet-full-strut-law), so the strut
+// columns below are this test's own pins, not the probe's: the designs' strut margins fell
+// (0.59-0.63 -> 0.39-0.43) and their layer margins rose (0.37-0.40 -> 0.42-0.47).
 //
 // Tolerances are the CSV's own print precision (margins/rho %.4f -> 5e-5;
 // bounds %.3f -> 5e-4); voxel counts must be exact. Two designs peak at rho
@@ -150,7 +161,7 @@ bool read_field(const std::string& path, const VoxelGrid& g,
   return true;
 }
 
-// The probe's J6 table (j6_margins.csv), at its own print precision.
+// The J6 table at the probe's print precision (j6_margins.csv's columns).
 struct Expected {
   const char* name;
   double margin_strut, margin_il;       // %.4f
@@ -160,10 +171,15 @@ struct Expected {
   std::size_t lattice_voxels;           // exact
   bool clamps_above_span;               // argmax rho above the 0.89598 ceiling
 };
+// On octet's full-cell tensor (ruling 2026-11-02 (c)); the probe's own rows are the
+// table in the header comment.
 constexpr Expected kExpected[] = {
-    {"s0_plain", 0.6164, 0.3936, 89.234, 76.858, 16.1124, 0.6307, 3648, false},
-    {"s2_gappen", 0.6320, 0.3799, 87.025, 79.627, 16.5314, 0.8980, 3833, true},
-    {"s3_contin", 0.6266, 0.3769, 87.772, 80.264, 17.7691, 0.8999, 3750, true},
+    // The strut columns re-pinned 2026-11-17 on the full octet's own strut law (strut_strength.cpp):
+    // before it, on PR 259's legs-only law, they were s0 0.5875 / 0.3991 / 93.618 / 75.791 (argmax 0.6307),
+    // s2 0.6265 / 0.3760 / 87.782 / 80.446, s3 0.6212 / 0.3730 / 88.543 / 81.089.
+    {"s0_plain", 0.4265, 0.4173, 128.953, 72.486, 16.2330, 0.8788, 3648, false},
+    {"s2_gappen", 0.3907, 0.4696, 140.768, 64.419, 16.3941, 0.8980, 3833, true},
+    {"s3_contin", 0.3891, 0.4541, 141.361, 66.622, 17.5923, 0.9002, 3751, true},
 };
 
 }  // namespace
@@ -234,7 +250,7 @@ int main() {
     CHECK(a.lattice_voxels == ex.lattice_voxels, msg);
 
     std::snprintf(msg, sizeof msg,
-                  "%s: strut vm margin %.4f == probe %.4f (tol 5e-5)", ex.name,
+                  "%s: strut vm margin %.4f == pin %.4f (tol 5e-5)", ex.name,
                   ss.margin_in_plane, ex.margin_strut);
     CHECK(std::fabs(ss.margin_in_plane - ex.margin_strut) < 5e-5, msg);
     std::snprintf(msg, sizeof msg,
@@ -257,14 +273,14 @@ int main() {
                   ex.name, ss.vm_argmax_rho, ex.argmax_rho);
     CHECK(std::fabs(ss.vm_argmax_rho - ex.argmax_rho) < 5e-5, msg);
 
-    // Bar L5 made visible on real designs: the probe clamped rho above the law
-    // ceiling silently; the production path counts it.
-    if (ex.clamps_above_span) {
-      std::snprintf(msg, sizeof msg,
-                    "%s: above-span rho voxels are COUNTED (%zu > 0)", ex.name,
-                    ss.rho_clamped_voxels);
-      CHECK(ss.rho_clamped_voxels > 0, msg);
-    }
+    // Bar L5 on real designs: the probe clamped rho above PR 259's ceiling (0.89598)
+    // silently. The octet's law is now the full octet's (2026-11-17), whose span IS the
+    // octet band (0.04959 .. 0.90027): the same designs' densities (up to 0.9002) are
+    // all inside it, and nothing is clamped any more.
+    std::snprintf(msg, sizeof msg, "%s: no voxel clamped (%zu; argmax rho %.4f %s)", ex.name,
+                  ss.rho_clamped_voxels, ex.argmax_rho,
+                  ex.clamps_above_span ? "was above PR 259's ceiling" : "in span");
+    CHECK(ss.rho_clamped_voxels == 0, msg);
 
     // Bar L4: these designs run ~1.5 cells through the 6 mm thickness — the
     // report must carry the out-of-regime flag the probe called out.

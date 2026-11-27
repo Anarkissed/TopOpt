@@ -1,0 +1,6 @@
+# X1 evidence — the Squish page (FlexibleR7X1EvidenceProbe.testTheSquishPageXrayOnHisPad)
+R7X1_S_13p_default_xray_off.png: views 0 · X-ray false · body alpha 1.0 · bend prism - (k 1.0, fe true) · scale 0.0
+R7X1_S_13p_xray_on_bend_prism.png: views 64 · X-ray true · body alpha 0.04 · bend prism 11.7 mm (k 1.0, fe true) · scale 0.0
+R7X1_S_13p_xray_on_bend_prism_with_bend.png: views 96 · X-ray true · body alpha 0.04 · bend prism 11.7 mm (k 1.0, fe true) · scale 1.0
+R7X1_S_13p_prisms_xray_off.png: views 1 · X-ray false · body alpha 0.3 · bend prism - (k 1.0, fe true) · scale 0.0
+R7X1_S_13p_bend_alone_xray_off.png: views 40 · X-ray false · body alpha 1.0 · bend prism - (k 1.0, fe true) · scale 1.0

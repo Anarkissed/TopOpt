@@ -1,0 +1,19 @@
+# test_loose_review RED on 4d67e43d + the behaviour-neutral TEST-ONLY hooks (mf_test_geneo_setup_sleep_ms, mf_test_pause_*, mf_pause_gap_ms unused by the net)
+      R1 fallback, 400 ms GenEO setup vs a 150 ms limit: converged=0 (its 0) stopped=1 nonconvergence=0 stopped: the solver did not converge (the matrix-free Jacobi-CG ran 512 iterations in 0 s, past its 0 s time limit, at rel res 6.336e-05)
+      R1 GenEO builds: 0
+FAIL: R1: a GenEO setup longer than the limit does not stop the fallback; plain CG continues and converges
+      R2 fallback, a 400 ms pause vs a 150 ms limit: converged=0 (its 0) stopped=1 nonconvergence=0 stopped: the solver did not converge (the matrix-free Jacobi-CG ran 112 iterations in 0 s, past its 0 s time limit, at rel res 1.914e+02)
+FAIL: R2: a pause does not count against the limit (the deadline moves forward)
+      R2 control, the same stretch counted as work: converged=0 (its 0) stopped=1 nonconvergence=0 stopped: the solver did not converge (the matrix-free Jacobi-CG ran 112 iterations in 0 s, past its 0 s time limit, at rel res 1.914e+02)
+ok:   R2 POSITIVE CONTROL: counted as work, the limit fires (SolverStopped)
+      R3 MG fallback at its own cap: converged=0 (its 0) stopped=1 nonconvergence=0 stopped: the solver did not converge (fea_solve_mgcg_matfree: the Jacobi-CG fallback reached its iteration cap (3888) without converging)
+      R3 plain Jacobi-CG at its own cap: converged=0 (its 0) stopped=1 nonconvergence=0 stopped: the solver did not converge (fea_solve_cg_matfree: the Jacobi-CG reached its iteration cap (3888) without converging)
+FAIL: R3: reaching the iteration cap throws SolverNonConvergence (MG fallback and plain CG), not SolverStopped
+      R4 certified: max vm 20.3257 (stairs 0), 16 voxels at the floor, worst margin 2.70593 ; no drop: max vm 21.5112 (stairs 15.5683), worst margin 2.55681
+ok:   R4 setup: both certifications solve; the stairs carry stress with no drop
+FAIL: R4: the staircase neck is certified at true stiffness — the same stress field as with no drop (nothing at the floor)
+      R5 dropped: rule on 8, FeaLoosePieceRuleOff 8, pre-rule 0
+FAIL: R5: under FeaLoosePieceRuleOff the solve is the pre-rule system, bit-for-bit
+ok:   R5: the scope restores the rule when it ends
+loose_review: 5 check(s) FAILED
+rc=0

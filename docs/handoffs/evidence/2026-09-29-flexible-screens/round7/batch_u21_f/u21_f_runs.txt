@@ -1,0 +1,65 @@
+# U21 batch F (One depth number: DEPTH-LABEL, SQUISH-CHIP-COVER, HANDLE-PAIRS-AUDIT reduced, AUTO-CURVE) runs — app/TopOptKit, --scratch-path /tmp/r7x20b-build, on ac56f208 + batch F working tree
+### run 0: the batch's own class (red-first; each red control asserted inside) + the page pictures
+Test Case '-[TopOptFlowsTests.FlexibleU21OneDepthNumberTests testAnUnreachedFaceSaysTheSameReachedDepthInEveryPlace]' passed (1.169 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21OneDepthNumberTests testAReachedFaceKeepsItsPlainLabels]' passed (1.120 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21OneDepthNumberTests testAutoNamesTheBlockingPress]' passed (2.691 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21OneDepthNumberTests testAutoNamesTheSoftFace]' passed (2.378 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21OneDepthNumberTests testAutoSaysWhatItTakes]' passed (1.099 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21OneDepthNumberTests testCopyFits]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21OneDepthNumberTests testShortOfDrawnReadsTrueDepth]' passed (1.382 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21OneDepthNumberTests testStampHandleKeepsTwentyFourPointsOffTheChip]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21OneDepthNumberTests testTheBendLabelReadsTrueMillimetres]' passed (1.330 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21OneDepthNumberTests testTheColumnPreviewLegendSaysDrawing]' passed (1.337 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21OneDepthNumberTests testTheDefaultDomeCanPass]' passed (1.108 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21OneDepthNumberTests testTheWorkingFaceHasOneNumber]' passed (1.377 seconds).
+FLEX-U21-F3 7 mm: core reaches 0.636 mm · short 4549 · RED card 'Can't reach your curve on 4549 columns' chip '7.0 mm'
+FLEX-U21-F4 dome 0.5 mm 20 lb: ok 4560 firm 0 soft 0 beyond 0 · reached nil · card '-'
+FLEX-U21-F10 pad dome 2 mm: 'Auto: Edge 12 is past the tested squish' · failures ["Edge 12: firm 0 soft 0 beyond 11", "Edge 9: firm 0 soft 2 beyond 1"]
+FLEX-U21-F9 pad 0.1 mm: 'Auto: Face 3 needs less weight or more depth' · worst Face 3 firm 0 soft 1824 beyond 0 · red 'Auto: can't meet your curve'
+FLEX-U21-F8 l-bracket 7 mm his curve: RED (today) 'Auto: can't meet your curve' · now 'Auto: Face 6 needs more weight or less depth' · failures ["2000008: firm 4549 soft 0 beyond 0"]
+FLEX-U21-F5 RED (today) 7.2 mm short false · now 0.6 mm short true
+FLEX-U21-F7 RED (today) handle 456,300 gap -12.5 pt
+FLEX-U21-F7 now: the smallest gap over 24 directions × 5 distances 24.4 pt
+FLEX-U21-F1 7 mm, k 2.0: RED (today) '14.0 mm' · now '7.0 mm'
+FLEX-U21-F6 RED (today) 'Prism = bend at full load' · now 'Prism = your drawing ×2'
+FLEX-U21-F11 l-bracket dome 0.5 mm 20 lb: reachable true · 'Auto: Gyroid at 190 °C'
+FLEX-U21-F2 RED (today) bend tag '7.0 mm' 0.10 mm from the chip's anchor
+pictures (FlexibleU2Tests.testU21OneDepthNumberOnThePage, FLEX_U2_DIR=look/): passed on the 3rd run (run 1: the chip's mark not collected — the default camera put the chip under the panel; run 2: the edit's re-settle turned the camera back; the test now sets his LEFT view after each edit)
+Test Case '-[TopOptFlowsTests.FlexibleU2Tests testU21OneDepthNumberOnThePage]' passed (34.779 seconds).
+### run 1: 48 classes (the batch's class, every class that touches or pins the changed files, FlexibleSquishCopyTests, LatticeStaleTypeTests), chunks of 10, then goldens + hashes
+start 04:33:44 ac56f208 + working tree (batch F)
+build exit 0 04:33:46
+chunk_aa exit 1 04:42:16
+chunk_ab exit 1 04:52:57
+chunk_ac exit 1 05:13:50
+chunk_ad exit 1 05:21:35
+chunk_ae exit 0 05:28:17
+golden det exit 0 05:28:33
+golden unseeded exit 0 05:28:48
+hashes exit 0 05:29:47
+hashes cmp vs round7/batch_u21_e/stage_job_hashes_u21e.txt (whole file): identical
+hashes cmp vs round7/batch_x20b/stage_job_hashes_x20b.txt (whole file): identical
+ALLDONE 05:29:47
+### classes
+FlexibleBatchBReviewUXTests FlexibleBatchCHookTests FlexibleBatchCVerifyTests FlexibleBatchVHostedTests FlexibleDepthPrismTests FlexibleFlatPrismHostedTests FlexibleGroupPaletteHostedTests FlexibleLatticeSectionsHostedTests FlexibleLegendPlacementTests FlexibleMainPageHookTests FlexibleR7E1ReviewHostedTests FlexibleR7E2HostedTests FlexibleR7E2Tests FlexibleR7E5Tests FlexibleR7FTests FlexibleR7M1VerifyTests FlexibleR7MergeTests FlexibleR7RHostedTests FlexibleR7RTests FlexibleR7SettingsEvidence FlexibleR7SettingsHostedTests FlexibleR7SettingsTests FlexibleR7X1Tests FlexibleR7X1VerifyTests FlexibleRound5SettingsHostedTests FlexibleRound6HostedTests FlexibleRound6Tests FlexibleRound7ScreenHookTests FlexibleRound7ScreenHostedTests FlexibleRound7ViewsHostedTests FlexibleRowCopyTests FlexibleS1bMainTagsTests FlexibleSettingsPageHostedTests FlexibleSettingsRound4Tests FlexibleSettingsVerifyD1Tests FlexibleShownValuesTests FlexibleSqueezeGroupsReviewTests FlexibleSqueezeGroupsReviewUITests FlexibleSqueezeGroupsReviewUXTests FlexibleSqueezeGroupsUITests FlexibleSquishCopyTests FlexibleSquishTests FlexibleU1Tests FlexibleU21DeleteUndoTests FlexibleU21OneDepthNumberTests FlexibleU2Tests FlexibleX20bTests LatticeStaleTypeTests 
+### chunks
+chunk_aa.log: passed 64 · failed 1 · skipped 0
+chunk_ab.log: passed 51 · failed 1 · skipped 1
+chunk_ac.log: passed 70 · failed 2 · skipped 0
+chunk_ad.log: passed 58 · failed 1 · skipped 1
+chunk_ae.log: passed 62 · failed 0 · skipped 1
+TOTAL: 305 passed, 5 failed, 3 skipped (picture probes), signal lines 0
+Test Case '-[TopOptFlowsTests.FlexibleR7M1VerifyTests testNoFacePrismShowsNothingOfCoresDesignsAndTheSquishPageSaysTheOneLine]' failed (3.871 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleSqueezeGroupsReviewTests testAPinchedFacesWarningCountsItsHalvesNotTheWholeColumn]' failed (0.645 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleBatchCHookTests testTheSettingsPageLegendDrillsInAndTapsDoNotSelect]' failed (2.383 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testThePrismsViewDrawsEveryPressedFacesPrismWithItsNumber]' failed (2.550 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsHostedTests testThePlayIconsRingAndDotAreSeenWithPlayOff]' failed (2.815 seconds).
+  - FlexibleRound7ViewsHostedTests ring: the known Play ring failure (not this batch)
+  - the other four: re-pins (attributed to his Img9) — BatchCHook's 1,400-char window (already short at HEAD: 1,790), M1Verify's red-control line, Round6Hosted's Prisms tag text, SqueezeGroupsReview's pinch warning
+### run 2 (after the re-pins): the four re-pinned classes
+passed 37
+failed 0
+### goldens
+golden_det: identical 38 · DIFFERS 0 · PART-SKIP 0 · Executed 13 tests, 0 failures
+golden_unseeded: identical 32 · DIFFERS 0 · PART-SKIP 1 · Executed 13 tests, 0 failures
+### the 16 stage-job hashes: stage_job_hashes_u21f.txt — cmp identical (whole file) to u21e and x20b (run.log above)

@@ -1,0 +1,32 @@
+[13p] settled true · status 'Preview · core runs one group at a time' · list (24,672 348x189)
+wrote D2_13p_E01_rest.png
+  E02: chip (612,927 404x132) · handles handle-depth-f:2AC5732E-4A99-4195-A0A3-5BBE73DD4D18:3 (694,757 88x32), handle-expand-f:2AC5732E-4A99-4195-A0A3-5BBE73DD4D18:3 (690,829 88x32) · nothing touches
+wrote D2_13p_E02_face3_chipM_handles_list.png
+  E03: chip (383,605 404x229) · handles none · nothing touches
+  join (395,665 380x48) · held line: Lattice on a new face waits for a review
+wrote D2_13p_E03_face2_chipN_join.png
+  tap Add to Group C as lattice [chipJoin (395,665 380x48)]
+  joined: Face 2 role Optional(TopOptFlows.LatticeGroupRole.include) depth 25.0 · pick face(group: 2AC5732E-4A99-4195-A0A3-5BBE73DD4D18, ref: TopOptFlows.LatticeSelectableRef.face(group: 2AC5732E-4A99-4195-A0A3-5BBE73DD4D18, face: 2))
+  E04: chip (382,608 404x132) · handles none · nothing touches
+wrote D2_13p_E04_joined_chip_stays.png
+  tap Face 3's (i) in the list [info-l-f:2AC5732E-4A99-4195-A0A3-5BBE73DD4D18:3 (316,822 44x44)]
+  (i) card (368,738 280x160)
+wrote D2_13p_E05_info_four_numbers.png
+  tap Group C's trash [selTrash-2AC5732E-4A99-4195-A0A3-5BBE73DD4D18 (322,714 44x44)]
+wrote D2_13p_E06_trash_confirm.png
+  tap [Delete] [deleteConfirm (286,744 66x44)]
+  deleted: Group C present false · message Optional("Group C deleted here and in Topology") · undo frame (803,1232 52x44)
+wrote D2_13p_E07_deleted_undo_message.png
+  tap [Undo] [toastUndo (803,1232 52x44)]
+  undone: Group C present true · Face 3 25.0 mm
+wrote D2_13p_E08_undone_group_back.png
+  E09: chip (612,907 404x229) · handles none · nothing touches
+wrote D2_13p_E09_moved_chip_leader.png
+  X-ray, nothing picked: prisms ["3", "5", "2"]
+wrote D2_13p_E10_xray_every_prism_faint.png
+  E11: chip (612,927 404x132) · handles handle-depth-f:2AC5732E-4A99-4195-A0A3-5BBE73DD4D18:3 (739,783 88x32), handle-expand-f:2AC5732E-4A99-4195-A0A3-5BBE73DD4D18:3 (733,855 88x32) · nothing touches
+wrote D2_13p_E11_depth_handle_mid_drag_xray.png
+  img2 front, the Top picked: prisms 0 · handles 0
+  E12: chip (572,551 404x132) · handles none · nothing touches
+wrote D2_13p_E12_img2_front_top_picked_no_12mm.png
+touches: 0

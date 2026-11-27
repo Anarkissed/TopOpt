@@ -316,6 +316,81 @@ int main() {
     CHECK(r.voxels_frozen == 0, "an invalid predicate freezes nothing");
   }
 
+  // ── ★ THE STATED OUTLINE FRAME (app, 2026-09-22) ─────────────────────────────
+  // The app now sends frame_u / frame_w: the world axes its outline_uv is expressed
+  // in. Until now the two sides agreed by COINCIDENCE OF CONSTRUCTION -- the app's
+  // basis(n) happens to be the same formula as plane_basis() -- and the agreement
+  // was fitted once, on one part, by scoring all eight frames by void fraction.
+  //
+  // Because the app's axes match what core derives, the ACCEPTING path is
+  // byte-identical to omitting them; there is no behaviour to assert there beyond
+  // that sameness. The REFUSAL is the whole of the new behaviour, so it is what is
+  // tested hardest.
+  {
+    ClearanceParams p;
+    p.kind = ClearanceKind::Face;
+    p.slab_depth_mm = 6.0;
+
+    ManualClearanceGeometry base;
+    base.kind = ClearanceKind::Face;
+    base.origin = Vec3{0.0, 0.0, 0.0};
+    base.normal = Vec3{0.0, 0.0, 1.0};      // +z: core derives u = -world y
+    base.half_u_mm = 5.0;
+    base.half_w_mm = 5.0;
+    const ClearanceGeometry derived = resolve_clearance_manual(base, p);
+    CHECK(derived.valid, "frame: the fixture resolves without stated axes");
+
+    // the app's PINNED +z fixture: frame_u = (0,-1,0), frame_w = (1,0,0)
+    ManualClearanceGeometry stated = base;
+    stated.frame_u = Vec3{0.0, -1.0, 0.0};
+    stated.frame_w = Vec3{1.0, 0.0, 0.0};
+    const ClearanceGeometry g = resolve_clearance_manual(stated, p);
+    std::printf("  frame: derived u=(%.0f,%.0f,%.0f) w=(%.0f,%.0f,%.0f) | app's "
+                "pinned +z fixture u=(0,-1,0) w=(1,0,0)\n",
+                derived.u.x, derived.u.y, derived.u.z,
+                derived.w.x, derived.w.y, derived.w.z);
+    CHECK(g.valid && !g.frame_conflict,
+          "frame: the app's pinned +z axes are ACCEPTED -- they are what core derives");
+    CHECK(std::fabs(g.u.x - derived.u.x) < 1e-12 &&
+              std::fabs(g.u.y - derived.u.y) < 1e-12 &&
+              std::fabs(g.u.z - derived.u.z) < 1e-12,
+          "frame: and the resulting basis is identical to the derived one");
+
+    // ★ THE REFUSALS. Each is a frame a mirror or a swap would produce, and each
+    // would leave an outline with the SAME AREA as the correct one -- which is how
+    // the last frame bug survived a handoff that declared it fixed.
+    struct Bad { const char* what; Vec3 u, w; };
+    const Bad bad[] = {
+        {"u negated (a MIRROR)",      Vec3{0.0, 1.0, 0.0},  Vec3{1.0, 0.0, 0.0}},
+        {"u and w swapped",           Vec3{1.0, 0.0, 0.0},  Vec3{0.0, -1.0, 0.0}},
+        {"w negated",                 Vec3{0.0, -1.0, 0.0}, Vec3{-1.0, 0.0, 0.0}},
+        {"rotated 90 deg in plane",   Vec3{1.0, 0.0, 0.0},  Vec3{0.0, 1.0, 0.0}},
+    };
+    for (const Bad& b : bad) {
+      ManualClearanceGeometry m = base;
+      m.frame_u = b.u;
+      m.frame_w = b.w;
+      const ClearanceGeometry r = resolve_clearance_manual(m, p);
+      std::printf("  frame: %-24s -> conflict=%d valid=%d\n", b.what,
+                  r.frame_conflict ? 1 : 0, r.valid ? 1 : 0);
+      CHECK(r.frame_conflict, "frame: a frame core does not derive is a CONFLICT");
+      CHECK(!r.valid,
+            "frame: and the geometry is left INVALID, so the caller must refuse "
+            "rather than pick one of two frames");
+    }
+
+    // ★ AND A NEAR MISS IS NOT A CONFLICT. The tolerance exists to catch swaps and
+    // negations -- right angles and half turns -- not floating-point dust. A frame
+    // that disagrees by a microradian is the same frame.
+    ManualClearanceGeometry tiny = base;
+    tiny.frame_u = Vec3{1e-9, -1.0, 0.0};
+    tiny.frame_w = Vec3{1.0, 1e-9, 0.0};
+    const ClearanceGeometry t = resolve_clearance_manual(tiny, p);
+    CHECK(t.valid && !t.frame_conflict,
+          "frame: a microradian of dust is NOT a conflict -- the check catches "
+          "swaps and mirrors, not rounding");
+  }
+
   if (g_failures == 0) {
     std::printf("clearance: all %d checks passed\n", g_checks);
     return 0;

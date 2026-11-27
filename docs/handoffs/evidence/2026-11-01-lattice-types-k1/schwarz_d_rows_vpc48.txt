@@ -1,0 +1,14 @@
+ROWS schwarz_d on the production wall: rows @ vpc48, reference curve @ vpc64, L=5 mm; VALID := |drift| < 2.4% AND wall >= 4.0 voxels AND converged
+  ref vpc64 target 0.250: rho 0.25073 E100 373.125 (wall 4.32 vox, 4033 ms)
+  ref vpc64 target 0.300: rho 0.29907 E100 471.737 (wall 5.24 vox, 4327 ms)
+  ref vpc64 target 0.350: rho 0.35059 E100 570.676 (wall 6.26 vox, 4617 ms)
+  ref vpc64 target 0.400: rho 0.39966 E100 664.045 (wall 7.34 vox, 5214 ms)
+  ref vpc64 target 0.500: rho 0.49927 E100 908.700 (wall 9.62 vox, 6150 ms)
+  ref vpc64 target 0.600: rho 0.60059 E100 1232.591 (wall 12.54 vox, 7525 ms)
+  [writing /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-comms-lattice-types-818eda/core/../docs/handoffs/evidence/2026-11-01-lattice-types-k1/schwarz_d_rows_vpc48.csv]
+  row vpc48 target 0.250: rho 0.24711 C11 472.686 C12 196.117 C44 120.394 E100 357.669 drift -4.14% zener 0.871 wall 3.12 vox -
+  row vpc48 target 0.300: rho 0.29919 C11 605.477 C12 242.823 C44 157.170 E100 466.462 drift -1.17% zener 0.867 wall 4.04 vox VALID
+  row vpc48 target 0.350: rho 0.35127 C11 730.747 C12 296.477 C44 206.059 E100 559.608 drift -2.16% zener 0.949 wall 4.59 vox VALID
+  row vpc48 target 0.400: rho 0.40336 C11 887.908 C12 350.866 C44 254.665 E100 689.151 drift +2.38% zener 0.948 wall 5.51 vox VALID
+  row vpc48 target 0.500: rho 0.49769 C11 1168.972 C12 472.479 C44 366.481 E100 896.974 drift -0.87% zener 1.052 wall 7.09 vox VALID
+  row vpc48 target 0.600: rho 0.60012 C11 1587.806 C12 641.363 C44 506.571 E100 1218.748 drift -1.00% zener 1.070 wall 9.54 vox VALID

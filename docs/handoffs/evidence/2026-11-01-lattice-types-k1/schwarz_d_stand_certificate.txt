@@ -1,0 +1,25 @@
+M2 stand, Schwarz-D (jobs from make_stand_jobs.py schwarz_d <dir> --fixed 4: one fixed 4 mm cell, since a sheet refuses the committed jobs' swept ladder (R5); binary: the frozen archive build of ccf0e03b from Gyroid's gate, which carries both sheets).
+
+analyze struct {"topology": "schwarz_d", "intent": "structural", "band_rho_min": 0.20038, "band_rho_max": 0.60012, "cells_per_member_floor": 9, "cell_size_mm": 4, "rho_min_used": 0.3931169757, "rho_max_used": 0.3931169757, "latticed_voxels": 48196, "recertified_margin": 467.1254364, "recertified_accepted": true}
+analyze aes    {"topology": "schwarz_d", "intent": "aesthetic", "band_rho_min": 0.20038, "band_rho_max": 0.60012, "cells_per_member_floor": 9, "cell_size_mm": 4, "rho_min_used": 0.3931169757, "rho_max_used": 0.6, "latticed_voxels": 48196, "recertified_margin": null, "recertified_accepted": null}
+run struct    [lattice] vf=0.68 NO LATTICE EMITTED: the void space inside this lattice does not reach the exterior (one sealed cavity, 595.070 mm^3)
+run struct    LATTICE vf=0.520000 topology=schwarz_d cell_mm=4 graded=1 rho_min=0.393117 rho_max=0.540613 cells=33 tris=634768 lattice_margin=1765.46 lattice_accepted=1
+run struct    LATTICE vf=0.380000 topology=schwarz_d cell_mm=4 graded=1 rho_min=0.393117 rho_max=0.514431 cells=4 tris=79400 lattice_margin=1686.08 lattice_accepted=1
+run struct    [lattice] vf=0.26 NO LATTICE EMITTED: no member wide enough (the widest is 20.46335163 mm; 9 cells of 4 mm need 36 mm)
+run aes    [lattice] vf=0.68 NO LATTICE EMITTED: the void space inside this lattice does not reach the exterior (one sealed cavity, 595.070 mm^3)
+run aes    LATTICE vf=0.520000 topology=schwarz_d cell_mm=4 graded=1 rho_min=0.393117 rho_max=0.6 cells=33 tris=632672 lattice_margin=1765.46 lattice_accepted=1
+run aes    LATTICE vf=0.380000 topology=schwarz_d cell_mm=4 graded=1 rho_min=0.6 rho_max=0.6 cells=4 tris=30148 lattice_margin=1686.08 lattice_accepted=1
+run aes    [lattice] vf=0.26 NO LATTICE EMITTED: no member wide enough (the widest is 20.46335163 mm; 9 cells of 4 mm need 36 mm)
+
+lattice-variant (rung 0.38 of the Structural run, out_lv_schwarz_d):
+  reproduction: recorded margin 1686.08 == reproduced 1686.08 (enforced)
+  lattice: graded cell 4 mm, rho 0.3931..0.5144 over 5 voxels
+  solid margin 1686 -> latticed margin 1686 (effective 349.1)
+  verdict: ACCEPTED
+lattice-variant (rung 0.52 of the Structural run, out_lv1_schwarz_d):
+  reproduction: recorded margin 1765.24 == reproduced 1765.24 (enforced)
+  lattice: graded cell 4 mm, rho 0.3931..0.5406 over 44 voxels
+  solid margin 1765 -> latticed margin 1765 (effective 365.6)
+  verdict: ACCEPTED
+
+Receipts name the type: every run report says "topology": "schwarz_d"; a sheet carries no directional_note (not directional).

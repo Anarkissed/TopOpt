@@ -166,6 +166,14 @@ std::vector<DirichletBC> coarsen_bcs(const VoxelGrid& fine,
     int a, b, c;
     node_coords(fine, bc.node, a, b, c);
     const int cn = fea_node_index(coarse, a / 2, b / 2, c / 2);
+    // REAL BOLTS: a bearing spring is not a fixed DOF; it moves to the coarse node
+    // as it is (so the coarse support keeps the fine one's total stiffness).
+    if (bc.spring > 0.0) {
+      DirichletBC sp = bc;
+      sp.node = cn;
+      out.push_back(sp);
+      continue;
+    }
     // Dedup on (coarse node, component). Value is carried from the first
     // occurrence; all these BCs are homogeneous faces, so values agree.
     const long long key = static_cast<long long>(cn) * 4 + bc.component;

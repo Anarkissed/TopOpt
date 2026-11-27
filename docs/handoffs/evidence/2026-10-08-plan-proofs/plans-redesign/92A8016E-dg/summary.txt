@@ -1,0 +1,7 @@
+DG-PROJECT l bracket 3 (converted: Default Grade) algorithm doubled stage nil step-halves true density sim cells auto
+DG-PLAN doubled: 1275 cell(s) over 1 region(s) | 2.52=1275
+DG-PLAN per region: r1=1275
+DG-OVERLAPS 0 same-region pair(s)
+DG-REGIONS voxel=0.472 mm | r1 cells=1275 [2.52=1275] prism=18213 mm3 uncovered=0 mm3 (0.00%)
+DG-SLOT-ORIGINS 1 region(s) carry slot_origin_mm
+DG-PLAN-BASES 1 region(s) carry plan_base_cell_mm | job region 1: 2.5197 mm

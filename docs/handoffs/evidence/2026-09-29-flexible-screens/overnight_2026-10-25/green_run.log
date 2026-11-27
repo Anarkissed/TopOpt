@@ -1,0 +1,88 @@
+Test Suite 'Selected tests' started at 2026-10-25 05:14:30.681.
+Test Suite 'TopOptKitTests.xctest' started at 2026-10-25 05:14:30.683.
+Test Suite 'TopOptKitTests.xctest' passed at 2026-10-25 05:14:30.683.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-25 05:14:30.683.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.002) seconds
+Test Suite 'Selected tests' started at 2026-10-25 05:14:30.856.
+Test Suite 'TopOptFlowsTests.xctest' started at 2026-10-25 05:14:30.857.
+Test Suite 'LatticeStaleTypeTests' started at 2026-10-25 05:14:30.857.
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testAStaleTypeLosesTheLatticeAndTheGateNamesIt]' started.
+2026-10-25 05:14:31.146 xctest[99863:74799473] DIAG seam occupancy: 128x128x128 in 0.28 s (once per mesh)
+2026-10-25 05:14:31.438 xctest[99863:74799473] DIAG seam occupancy: 128x128x128 in 0.28 s (once per mesh)
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testAStaleTypeLosesTheLatticeAndTheGateNamesIt]' passed (0.583 seconds).
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testBothButtonsRefuseAndTheTapOpensSettings]' started.
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testBothButtonsRefuseAndTheTapOpensSettings]' passed (0.217 seconds).
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testTheRefusalIsTheCatalogsReason]' started.
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testTheRefusalIsTheCatalogsReason]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testTheStageRefusesAStaleType]' started.
+2026-10-25 05:14:32.185 xctest[99863:74799473] DIAG seam occupancy: 128x128x128 in 0.28 s (once per mesh)
+2026-10-25 05:14:32.466 xctest[99863:74799473] DIAG seam occupancy: 128x128x128 in 0.28 s (once per mesh)
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testTheStageRefusesAStaleType]' passed (0.809 seconds).
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testTheStaleTypePathAsksCoreNothing]' started.
+2026-10-25 05:14:32.747 xctest[99863:74799473] DIAG seam occupancy: 128x128x128 in 0.28 s (once per mesh)
+2026-10-25 05:14:33.030 xctest[99863:74799473] DIAG seam occupancy: 128x128x128 in 0.28 s (once per mesh)
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testTheStaleTypePathAsksCoreNothing]' passed (0.566 seconds).
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testTheTypeRowSaysItAtOnceAndTheOfferedChipFixesIt]' started.
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testTheTypeRowSaysItAtOnceAndTheOfferedChipFixesIt]' passed (0.012 seconds).
+Test Suite 'LatticeStaleTypeTests' passed at 2026-10-25 05:14:33.046.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 2.189 (2.190) seconds
+Test Suite 'RedesignToStrengthenTests' started at 2026-10-25 05:14:33.046.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testAGateRemovedCopyGoesRed]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testAGateRemovedCopyGoesRed]' passed (8.238 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testAnAnchoredPieceDetachedReadsInPlainWordsWithNoFaceNumber]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testAnAnchoredPieceDetachedReadsInPlainWordsWithNoFaceNumber]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testBridgedHeldVariantsReadBridged]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testBridgedHeldVariantsReadBridged]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testEveryH56HookIsPinnedOnceWithItsGate]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testEveryH56HookIsPinnedOnceWithItsGate]' passed (0.299 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testEveryOtherRequestShipsNoRedesignKeyAndTheSameBytes]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testEveryOtherRequestShipsNoRedesignKeyAndTheSameBytes]' passed (0.004 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testNoFaceNumberReachesALine]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testNoFaceNumberReachesALine]' passed (0.003 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testOnDeviceTheStrengthenChoiceIsDisabledWithTheOneLine]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testOnDeviceTheStrengthenChoiceIsDisabledWithTheOneLine]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testRejectedOnMarginWithAHeldBridgeIsNotItem47]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testRejectedOnMarginWithAHeldBridgeIsNotItem47]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testStrengthenFailCards]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testStrengthenFailCards]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testStrengthenPassCards]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testStrengthenPassCards]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testTheOutcomeCarriesTheReportToTheResultsModel]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testTheOutcomeCarriesTheReportToTheResultsModel]' passed (0.002 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testTheWorkerSendCarriesRedesignStrengthenAndTheDesignBox]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testTheWorkerSendCarriesRedesignStrengthenAndTheDesignBox]' passed (0.000 seconds).
+Test Suite 'RedesignToStrengthenTests' passed at 2026-10-25 05:14:41.595.
+	 Executed 12 tests, with 0 failures (0 unexpected) in 8.548 (8.549) seconds
+Test Suite 'SeveralRolesOnOneFaceTests' started at 2026-10-25 05:14:41.595.
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testAFaceInProtectAndKeepClearGoesOutInBothJobLists]' started.
+2026-10-25 05:14:41.681 xctest[99863:74799473] DIAG shellClip mode=OFF inFrame=false algo=- capsules=-1 capVerts=0 capPipeline=true capsulePipeline=true capsulesReplaceField=false bodyAlpha=1.0 initError=nil regionTex=false skinMM=-1.0 dims=SIMD4<Float>(1.0, 1.0, 1.0, 0.0) regions=[] open=[no census]
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testAFaceInProtectAndKeepClearGoesOutInBothJobLists]' passed (0.095 seconds).
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testAFaceInTheActiveGroupStillDeselectsOnlyThere]' started.
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testAFaceInTheActiveGroupStillDeselectsOnlyThere]' passed (0.012 seconds).
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testAGateRemovedCopyGoesRed]' started.
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testAGateRemovedCopyGoesRed]' passed (12.155 seconds).
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testCoreAcceptsAFaceInProtectAndClearances]' started.
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testCoreAcceptsAFaceInProtectAndClearances]' passed (0.369 seconds).
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testEveryH55HookIsPinnedOnceWithItsGate]' started.
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testEveryH55HookIsPinnedOnceWithItsGate]' passed (0.411 seconds).
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testHidingAGroupDoesNotBlockAddingItsFaceToAnotherGroup]' started.
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testHidingAGroupDoesNotBlockAddingItsFaceToAnotherGroup]' passed (0.015 seconds).
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testKeepClearOnAnAnchorOrLoadFaceAndProtectOnALoadFace]' started.
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testKeepClearOnAnAnchorOrLoadFaceAndProtectOnALoadFace]' passed (0.013 seconds).
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testLoadPlusAnchorOnOneFaceIsRefusedWithThePlainLine]' started.
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testLoadPlusAnchorOnOneFaceIsRefusedWithThePlainLine]' passed (0.014 seconds).
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testTheBadgeShowsEveryRoleAFaceHas]' started.
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testTheBadgeShowsEveryRoleAFaceHas]' passed (0.023 seconds).
+Test Suite 'SeveralRolesOnOneFaceTests' passed at 2026-10-25 05:14:54.704.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 13.107 (13.108) seconds
+Test Suite 'TopOptFlowsTests.xctest' passed at 2026-10-25 05:14:54.704.
+	 Executed 27 tests, with 0 failures (0 unexpected) in 23.844 (23.847) seconds
+Test Suite 'Selected tests' passed at 2026-10-25 05:14:54.704.
+	 Executed 27 tests, with 0 failures (0 unexpected) in 23.844 (23.848) seconds
+Test Suite 'Selected tests' started at 2026-10-25 05:14:54.841.
+Test Suite 'TopOptDesignTests.xctest' started at 2026-10-25 05:14:54.842.
+Test Suite 'TopOptDesignTests.xctest' passed at 2026-10-25 05:14:54.843.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-25 05:14:54.843.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds

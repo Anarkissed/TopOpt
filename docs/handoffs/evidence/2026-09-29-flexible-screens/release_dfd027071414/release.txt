@@ -1,0 +1,43 @@
+# Release dfd027071414 - 2026-11-27: release (23) - claude/organic-1 12d92c8a, one worker swap (73886b47539b -> dfd027071414)
+# Commits:
+#   437054f4 notes30 SC1: the strut lattice's build — fast parts as stand-solid-7s, slow parts with the scaffold
+#   f4716f26 Merge origin/claude/organic-1 4c352eb5 into claude/notes30-scaffold (X1 Setup/Lattice meaning, bridge logging and reopen; X2 advice pop-ups)
+#   df636467 notes30 SC1 tests: no async call inside XCTUnwrap; the rough cut-open test on a zone through the block (a face region laid none)
+#   d881e208 notes30 SC1 clips probe: the show ticks each frame as the app's 30 fps task does (the switch seen live)
+#   5c7d5c53 notes30 X2 (his yes, 11-26): "Small cells in thin walls" offered first where it lays, ahead of Allow quilt, Aesthetic, Leave it solid
+#   6e76154e Merge claude/notes30-small-cells-offer 5c7d5c53 (builder X2): "Small cells in thin walls" is the first offer where smaller cells cannot help
+#   b7d2925c notes30 SC1: the scaffold stands — closed floors, through the whole hole, floor then walls then stairs; Organic untouched
+#   dff1d655 Merge origin/claude/organic-1 6e76154e into claude/notes30-scaffold (X2's small-cells offer)
+#   508b138c notes30 SC1 tests: the snaps check where the pocket is lit; the rim-only RED read on the window (the cone's inside is the stair's own bay)
+#   bb5e7a09 notes30 SC1: a piece at a time — the scaffold piece by piece, the real build its own 5 s
+#   d85f230c notes30 SC1 v3: the scaffold stands until the lattice is laid, then struck top first in a second; nothing in mid-air; the cut-out held at the landing; one even beat
+#   0c183694 Merge claude/notes30-scaffold d85f230c (builder SC1): the scaffold build animation — HIS APPROVAL 11-27 ("IT'S PERFECT! THE ANIMATION IS APPROVED!")
+#   ec8dc57a notes30 print settings (PS1): WIP, not built yet
+#   1d660cc6 notes30 FF1: the Flexible page's picture made off the main thread (the freeze after a "This face" change)
+#   c9df2280 notes30 FF1: the round-6 frames pin follows the moved refresh (one pin, run once)
+#   67b32615 Merge claude/notes30-flex-freeze c9df2280 (builder FF1): the Flexible page's repaint off the main thread (his yes 11-27)
+#   9e0e0028 Merge remote-tracking branch 'origin/claude/organic-1' into claude/notes30-print-settings
+#   6f934ef1 notes30 print settings (PS1): built and tested
+#   4bd118e8 Merge claude/notes30-print-settings 6f934ef1 (builder PS1): his print settings travel into the 3MF and the TO job
+#   ceaec88e lattice_region_grading §7: the whole-part load search at 40 N (was 35 N), out of date since the full octet's strut law
+#   12d92c8a Merge claude/notes30-region-grading-s7 ceaec88e (builder T7): lattice_region_grading §7 is green again (an out-of-date test)
+#   494c02b5 Release (23): the scaffold build animation, the Flexible page stays responsive, print settings in the 3MF, and "Small cells in thin walls" offered first
+# Gates (this tree):
+#   08:01 his uncommitted files (left alone): app/TopOpt-Info.plist app/TopOpt.xcodeproj/project.pbxproj app/TopOpt.xcodeproj/xcshareddata/xcschemes/TopOpt.xcscheme 
+#   08:01 preflight job: /Users/nadim/.topopt-worker/d5af229ca8ee4a8f (his newest optimisation job the installed worker passes; read only)
+#   08:01 merged organic-1 as 494c02b5 (local, not pushed); app + core + tools == its; fingerprint dfd027071414
+#   ==> Manifold: /Users/nadim/dev/TopOpt/TopOpt/.vcpkg/installed-manifold (KEEP regions exported exactly)
+#   ==> building macOS slice (Eigen + OCCT, arm64)
+#   ==> building iOS simulator slice (Eigen + OCCT + lib3mf, arm64)
+#   ==> building iOS device slice (Eigen + OCCT + lib3mf, arm64)
+#   08:04 build_core green: topopt_vendored_core_dfd027071414 + the Install 3 entry points + lay_organic_preview and Session::sweep_limits in every slice and arch
+#   08:05 worker CLI built: topopt-cli: core dfd027071414 (dirty=false), built Nov 27 2026 08:05:20; 3 data paths, all under the release worktree
+#   08:55 core suites passed: 100% tests passed out of 38 Total Test time (real) = 2950.74 sec 
+#   08:58 iPad device build green (unsigned gate build; he installs with play)
+#   08:58 preflight on his job: preflight: load path CONNECTED
+#   08:59 pushed 494c02b5
+#   08:59 worker script unchanged (release 11's)
+#   08:59 restarting the worker server (PID 41076; /health said "fingerprint": "dfd027071414") while idle, so it runs the new script
+#   08:59 worker swapped: /health "fingerprint": "dfd027071414"; data paths under the release worktree; preflight again OK; old CLI kept as build-fix/topopt-cli.73886b47539b-replaced-20261127
+#   08:59 route, demand, strength_job, organic cut 2 and chain tests vs the INSTALLED script, job_stage and orientation_recheck: ALL PASS
+#   08:59 the app_release scripts now expect dfd027071414

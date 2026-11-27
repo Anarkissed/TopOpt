@@ -1,0 +1,16 @@
+# Release 05d3b671 — 2026-11-11 Upload-toast-2 (Upload toast, ab8b894a), app only
+# Core and worker unchanged: fingerprint 54d2ce825a74; "fingerprint": "54d2ce825a74"
+# Merged onto ed08201c; the merged app tree equals Upload-toast-2's, so its gate applies unchanged.
+# Commits (first parent of Upload-toast-2 since the release tip):
+#   1e48fd4b Upload on Flexible (#362): merge the release tip ed08201c (4fb36817 + evidence)
+#   ab8b894a Upload on Flexible (#362): the toast names a lost Topology group too when a pressed face is lost (UI-Notes' edge)
+# Gates:
+#   Upload toast, both named (362, ab8b894a on ed08201c): UploadNewVersionTests 13 passed, 0 failed (the case with a lost pressed face and a lost Topology group).
+#   02:46 evidence ed08201c pushed; release 4fb36817 DONE
+#   02:50 checks ok: Upload-toast-2 ab8b894a, 2 commit(s), app-only, onto ed08201c, fingerprint 54d2ce825a74
+#   02:50 merged 05d3b671; app tree == Upload-toast-2's, fingerprint 54d2ce825a74
+#   02:50 waiting for HEAVY.lock (free)
+#   02:50 lock taken (26 GB free)
+#   02:54 iPad device build green; lock released
+#   02:55 pushed 05d3b671
+#   02:55 worker /health "fingerprint": "54d2ce825a74" (unchanged, no swap)

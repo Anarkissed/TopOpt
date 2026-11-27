@@ -1,0 +1,3 @@
+[Done] Edge 16 [2, 3]: stored · toast Face 3 keeps the rest · Edge 16
+release at 20 → stored · depth 18.456253111953288 · card Stops at 18.5 mm · the lattice ends there · toast Held at 18.5 mm · the lattice ends there · drag cap 18.456253111953288
+B01_13p_released_at_20_landed.png: cam az 0.785 el 0.524 dist 214.9 · probe (6, 6, 8, 255) · marks ["flatArrow-Edge 16 (516.0, 945.0, 2.0, 465.0)", "flatDepthChip-Edge 16 (516.0, 923.0, 96.0, 45.0)", "flatKnob-Edge 16 (518.0, 1306.0, 45.0, 45.0)", "flatPrism-Edge 16 (516.0, 945.0, 2.0, 465.0)", "flatTiltBox-Edge 16 (597.0, 1259.0, 89.0, 45.0)", "flatTwistBox-Edge 16 (591.0, 1307.0, 102.0, 45.0)"] · toast Held at 18.5 mm · the lattice ends there

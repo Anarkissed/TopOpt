@@ -1,0 +1,91 @@
+# Round 7 batch F — the runs (tests first 104ecaef; code + re-pins c5dc8231; three more re-pins in the handoff commit). swift build --build-tests --scratch-path /tmp/r7lean-build, every run --skip-build.
+
+## RED run (104ecaef, stubs): r7f_red_run.txt — 8 tests, 8 red, 48 failures
+
+## FlexibleR7FTests on the code: 8/8 passed
+Test Case '-[TopOptFlowsTests.FlexibleR7FTests testAnEmptySetupMayExitAndATapOnTheTopStartsGroupOneAtItsShare]' passed (2.342 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7FTests testBendAndPlayNeverShowTogether]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7FTests testNoViewOnIsTheCurveOnly]' passed (3.937 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7FTests testOnHisPadTheFaceUnderTheBendMovesWithIt]' passed (3.405 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7FTests testTheBendPoseMovesWhatIsDrawnOnThePart]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7FTests testTheFaceCardsGroupChipsShowTheNames]' passed (2.037 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7FTests testTheGroupTrashAsksFirstAndTheFaceRowLooksDifferent]' passed (4.099 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7FTests testTheMainPagesHeatFollowsTheLastTappedFacesGroup]' passed (7.359 seconds).
+FLEX-R7F-RESET Top 10.0 kg · section 2000004 at 5.0 kg (from Optional(A1000001-BBBB-4000-8000-000000000002))
+FLEX-R7F-BEND face 4: k 1.00 · its centres move up to 22.474 mm
+
+## The touched classes (t1: 20 classes, t2: the 14 that failed or were re-pinned, after the re-pins)
+Test Suite 'FlexibleMainPageHookTests' passed
+Test Suite 'FlexibleR7FTests' passed
+Test Suite 'FlexibleR7SettingsHostedTests' passed
+Test Suite 'FlexibleR7SettingsTests' passed
+Test Suite 'FlexibleRound6HostedTests' passed
+Test Suite 'FlexibleRound6Tests' passed
+Test Suite 'FlexibleRound7ViewsHostedTests' failed
+Test Suite 'FlexibleSettingsRound4Tests' passed
+Test Suite 'FlexibleSqueezeGroupsModelTests' passed
+Test Suite 'FlexibleSqueezeGroupsReviewUITests' passed
+Test Suite 'FlexibleSqueezeGroupsUITests' passed
+Test Suite 'FlexibleSquishSolverTests' passed
+Test Suite 'FlexibleSquishTests' passed
+Test Suite 'FlexibleSquishVerifyGTests' passed
+t2: the one failure is the known FlexibleRound7ViewsHostedTests.testThePlayIconsRingAndDotAreSeenWithPlayOff (display asleep: 20 px).
+FLEX-R7V-H5 overlay px: editing 5569 · Bend alone 5569 · Bend + Heat 5569 · control (R7-V) 0
+H5 after its posed-vs-rest check was added (run alone):
+FLEX-R7V-H5 overlay px: editing 5569 · Bend alone 7221 · Bend + Heat 7221 · control (R7-V) 0 · bent vs rest pose 12752 px
+
+## Goldens (FlexibleAngledGoldenTests, 13 tests)
+SWIFT_DETERMINISTIC_HASHING=1: 38 identical, 0 DIFFERS
+unseeded: 32 identical, 0 DIFFERS
+
+## The 16 stage-job hashes: stage_job_hashes_r7f.txt — cmp against round7/merge/stage_job_hashes_r7merge.txt: byte-identical (16 rows exit 0, plus the controls)
+
+## The targeted suite, ONCE (189 classes = M2's 188 + FlexibleR7FTests; chunks of 12)
+run start 05:22:42
+run chunk 1 05:22:42: BottomBarMeasurementTests,FlexibleAngledGoldenRecorder,FlexibleAngledGoldenTests,FlexibleBatchBReviewTests,FlexibleBatchBReviewUXTests,Fle
+run chunk 1 exit 0 05:27:06
+run chunk 2 05:27:06: FlexibleBatchMLegendTests,FlexibleBatchMProbe,FlexibleBatchMStressTests,FlexibleBatchMVerifyTests,FlexibleBatchMXrayTests,FlexibleBatchNEv
+run chunk 2 exit 1 05:51:06
+run chunk 3 05:51:06: FlexibleCurveEditTests,FlexibleDepthPrismTests,FlexibleEdgeGroupsHostedTests,FlexibleEdgeGroupsTests,FlexibleFEFieldTests,FlexibleFEPassPe
+run chunk 3 exit 0 05:55:33
+run chunk 4 05:55:33: FlexibleGroupPaletteTests,FlexibleInPassCompositeTests,FlexibleLatticeEvidenceProbe,FlexibleLatticeFieldTests,FlexibleLatticeGradingTests,
+run chunk 4 exit 0 05:57:10
+run chunk 5 05:57:10: FlexibleMainPageHookTests,FlexibleMainPageLoadsTests,FlexibleMainPageRound4HostedTests,FlexibleMainPageRound4Tests,FlexibleMainPageRound4V
+run chunk 5 exit 0 05:59:42
+run chunk 6 05:59:42: FlexiblePinchTests,FlexiblePressAimReviewTests,FlexiblePressAimTests,FlexiblePressFixturesTests,FlexiblePressProbeTripwireTests,FlexiblePr
+run chunk 6 exit 0 06:00:54
+run chunk 7 06:00:54: FlexibleR7M1VerifyTests,FlexibleR7M2EvidenceProbe,FlexibleR7MergeTests,FlexibleR7SettingsEvidence,FlexibleR7SettingsHostedTests,FlexibleR7
+run chunk 7 exit 0 06:06:47
+run chunk 8 06:06:47: FlexibleRound5SquishExitTests,FlexibleRound6EvidenceProbe,FlexibleRound6HostedTests,FlexibleRound6Tests,FlexibleRound7ViewsEvidenceProbe,F
+run chunk 8 exit 1 06:25:57
+run chunk 9 06:25:57: FlexibleSettingsMigrationTests,FlexibleSettingsPageHostedTests,FlexibleSettingsRound4Tests,FlexibleSettingsVerifyD1Tests,FlexibleShownValu
+run chunk 9 exit 1 06:29:51
+run chunk 10 06:29:51: FlexibleSquishCoarsenTests,FlexibleSquishEvidenceProbe,FlexibleSquishPerfProbe,FlexibleSquishPlayAllTests,FlexibleSquishPlayerTests,Flexi
+run chunk 10 exit 0 06:37:42
+run chunk 11 06:37:42: GroupViewStateTests,LatticeAutoDensityIsDerivedTests,LatticeBandChipsTests,LatticeBeamNetworkFactTests,LatticeDefaultGradePlanSwitchTests
+run chunk 11 exit 0 06:37:48
+run chunk 12 06:37:48: LatticeLegendColourTests,LatticeNamedNoOctetFallbackTests,LatticeOldRetainedRunTests,LatticePageRound2Tests,LatticePlanNotSentLineTests,L
+run chunk 12 exit 1 06:38:37
+run chunk 13 06:38:37: LatticeStageRepairEvidence,LatticeStaleTypeTests,LatticeStressTintTests,LatticeStructuralPrismProbe,LatticeStructuralSteppedGateTests,Lat
+run chunk 13 exit 0 06:38:46
+run chunk 14 06:38:46: OrganicLookAndVisibilityTests,OrganicPreviewBakeInputsTests,OrganicPreviewMatchesTheJobTests,OrganicPreviewParameterParityTests,OrganicPr
+run chunk 14 exit 0 06:43:09
+run chunk 15 06:43:09: SmoothingPreviewGateTests,SmoothingRound3Tests,SmoothingRound4Tests,SurfaceCutDetentTests,SurfaceInputDisciplineTests,SurfacePencilToggle
+run chunk 15 exit 0 06:43:12
+run chunk 16 06:43:12: VariantEntryGatingTests,VariantRetentionTests,ViewerTests,FlexibleBridgeTests,FlexibleSliceProbe,FlexibleSquishFETests,FlexibleSquishModu
+run chunk 16 exit 0 06:44:45
+run DONE 06:44:45
+TOTAL: 1273 test cases started (counted by Test Case lines), 58 skipped. Failures:
+   8 FlexibleBatchNVerifyTests.testEveryRefineLineIsWholeBesideTheLivePlayAllPicker (known)
+   1 FlexibleRound7ViewsHostedTests.testThePlayIconsRingAndDotAreSeenWithPlayOff (known)
+   1 LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds (known)
+   3 FlexibleBatchMVerifyTests.testStressNeverAsks… — its fixture assumed Play all as the default (answer 13): re-pinned (the fixture picks Play all)
+   1 FlexibleS1bMainTagsTests.testEveryMainPageTagIsJoinedToItsFace — views == [] → openingViews (answer 12): re-pinned
+   1 FlexibleSettingsPageHostedTests.testTheLegendFoldsToASmallerBarAndTheBarBringsItBack — the legend needs heat shown (answer 12): re-pinned
+No exit signal 11 this run. LatticeStaleTypeTests: passed (chunk 13).
+
+## Re-run of the three re-pinned classes
+Test Suite 'FlexibleBatchMVerifyTests' passed
+Test Suite 'FlexibleS1bMainTagsTests' passed
+Test Suite 'FlexibleSettingsPageHostedTests' passed
+13 passed, 0 failed.

@@ -1,0 +1,19 @@
+# Release 522140a0 — 2026-11-14 square-bridges (square bridges, 44bd1616), app only
+# Core and worker unchanged: fingerprint 6da1b6c3bb0a; "fingerprint": "6da1b6c3bb0a"
+# Merged onto 560f29ad; the merged app tree equals square-bridges's, so its gate applies unchanged.
+# Commits (first parent of square-bridges since the release tip):
+#   6a0d1868 Square bridges (362): merge LatticeReview's claude/lattice-bridge-flags 78b6fca8 (bar_flags bit 16 = core's bar_is_bridge)
+#   daec532d Square bridges (362): the new engine's preview draws flat bridges square, as the print writes them
+#   44bd1616 Square bridges (362): merge the release tip (evidence only)
+# Gates:
+#   01:27 merged the bridge flags: 6a0d1868
+#   01:31 tests: exit 0; 29 passed, 0 failed
+#   NEW-ENGINE square bridge: 2546 pixels differ from the round bar
+#   21:26 evidence 560f29ad pushed; release 940fc5ab DONE
+#   01:32 checks ok: square-bridges 44bd1616, 4 commit(s), app-only, onto 560f29ad, fingerprint 6da1b6c3bb0a
+#   01:32 merged 522140a0; app tree == square-bridges's, fingerprint 6da1b6c3bb0a
+#   01:32 waiting for HEAVY.lock (free)
+#   01:32 lock taken (52 GB free)
+#   01:37 iPad device build green; lock released
+#   01:37 pushed 522140a0
+#   01:37 worker /health "fingerprint": "6da1b6c3bb0a" (unchanged, no swap)

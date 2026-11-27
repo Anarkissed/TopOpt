@@ -1,0 +1,53 @@
+MANUAL follow-up + links-and-Rests run, 2026-10-22, at 81fbeb30 + working tree, scratch-path /tmp/r7x20b-build
+Classes (16, the ones that touch or pin the changed files; the 3 probes skip without their env):
+FlexibleManualFollowUpTests FlexibleI3LinkSimTests FlexibleI1HoldTests FlexibleM1ManualTests FlexibleM2PredictTests FlexibleMainPrismEqualityTests FlexibleR7M1Tests FlexibleS1bMainTagsTests FlexibleRound7ViewsReviewTests FlexibleBatchVHostedTests FlexibleRound6HostedTests FlexibleSquishCopyTests FlexibleSettingsPageHostedTests FlexibleM1ManualFramesProbe FlexibleI1R2FramesProbe FlexibleR7M1EvidenceProbe
+
+runner.log:
+start 20:11:04 81fbeb30 + working tree
+build exit 0 20:11:05
+chunk_aa exit 1 20:12:59
+chunk_ab exit 0 20:16:01
+chunk_ac exit 0 20:26:47
+chunk_ad exit 1 20:30:03
+golden det exit 0 20:30:19
+golden unseeded exit 0 20:30:36
+hashes exit 0 20:31:37
+hashes cmp vs manual_install (whole file): identical
+ALLDONE 20:31:37
+
+Per chunk (passed failed skipped):
+chunk_aa.log 16 1 0
+chunk_ab.log 21 0 1
+chunk_ac.log 29 0 0
+chunk_ad.log 2 1 7
+
+Failures:
+Test Case '-[TopOptFlowsTests.FlexibleI3LinkSimTests testOnHisPadALinkInARestGroupKeepsTheFarWallHeldBesideTheRests]' failed (10.986 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleSettingsPageHostedTests testTheSelectedFacesRowsAreOnThePanelOnHisProject]' failed (148.168 seconds).
+  - FlexibleI3LinkSimTests 4 (new): premise failed on its first version (his pad's group 1 has no far anvil with both Rests or either alone: every exit rests). Test reworked (Face 5 pressed alone), re-run below.
+  - FlexibleSettingsPageHostedTests 11l 'as opened': the known batch I failure (card 566-812, same numbers).
+
+Goldens: deterministic 38 identical / 0 DIFFERS; unseeded 32 identical / 0 DIFFERS / 1 PART-SKIP
+
+Re-run 1 (run2.log):
+start2 20:32:09
+build exit 0 20:32:21
+i3 exit 1 20:33:15
+renders exit 0 20:34:20
+ALLDONE
+FLEX-LR group-1 today: pressed [5, 3] rests [2000021, 2000020]: bc rest · far anvils 0 · exits held true | pressed [5, 3] rests [2000020]: bc rest · far anvils 0 · exits held true | pressed [5, 3] rests [2000021]: bc rest · far anvils 0 · exits held true | pressed [5] rests [2000021, 2000020]: bc rest · far anvils 1 · exits held true
+FLEX-LR group-1 pressed [5] rests [2000021, 2000020] + 1 link: bc rest · wall nodes [1078] · far anvils 1 (today 1) · exits held true · pinned 5390 (today 2206, kept 2205) · max|u| 4.4075 (today 7.1766)
+FLEX-LR RED (links replace the far anvil): far anvils 0 · exits held false · today's pins kept 1666/2206
+  (failed on 'every pinned DOF kept': 2205 of 2206 — today's chain leaves 1 rigid mode and the bridge adds one anchor pin; with the bonded link no mode is left. Assertion moved to held nodes.)
+
+Re-run 2 (the one test):
+Test Case '-[TopOptFlowsTests.FlexibleI3LinkSimTests testOnHisPadALinkInARestGroupKeepsTheFarWallHeldBesideTheRests]' passed (11.789 seconds).
+FLEX-LR group-1 today: pressed [5, 3] rests [2000021, 2000020]: bc rest · far anvils 0 · exits held true | pressed [5, 3] rests [2000020]: bc rest · far anvils 0 · exits held true | pressed [5, 3] rests [2000021]: bc rest · far anvils 0 · exits held true | pressed [5] rests [2000021, 2000020]: bc rest · far anvils 1 · exits held true
+FLEX-LR group-1 pressed [5] rests [2000021, 2000020] + 1 link: bc rest · wall nodes [1078] · far anvils 1 (today 1) · exits held true · pinned 5390 (today 2206, kept 2205) · max|u| 4.4075 (today 7.1766)
+FLEX-LR held nodes: 3185 (today 2156, kept 2156) · free modes 0 (today 1)
+FLEX-LR RED (links replace the far anvil): far anvils 0 · exits held false · today's held nodes kept 1666/2156
+
+Main page in Manual (FlexibleManualFollowUpTests A):
+FLEX-MF main page face 5: estimate 2.768 mm · stored Deepest squish 5.500 mm
+FLEX-MF prism reach: drawn 5.537 · estimate's 5.537 · stored's 11.000 (k 2.00)
+FLEX-MF heat top: Manual 2.7684 mm (the estimate 2.7684) · the calibrated route's 2.1332 (control)

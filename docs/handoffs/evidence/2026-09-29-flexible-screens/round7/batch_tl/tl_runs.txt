@@ -1,0 +1,49 @@
+# Round 7 · his report of 2026-10-18 (the Top solid over the pockets at Balanced, Finish None) — the runs, raw counts.
+# swift build --build-tests --scratch-path /tmp/r7tl-build; swift test --skip-build --scratch-path /tmp/r7tl-build; counts from the Test Case end lines.
+
+## 1. RED (tests first, against the stub at 14e256bb) — tl_red_run.txt: 5 tests, 8 failures, all the fix's own assertions; no RED CONTROL failed.
+
+## 2. THE FIRST BUILD OF THE FIX (the plan's rule: 'outside' = the app's SDF > 0) — T2 RED at Fine:
+   FlexibleTopLayerTests.testFastAndFineAreUnchanged: XCTAssertEqual(fix, control) failed at Fine. The SDF version added 4 voxels at k = 25:
+   (32, 0, 25) centre (25.39, 0.39, 19.92) density -1 sdf +0.033 · (95, 0, 25) (74.61, 0.39, 19.92) sdf +0.033 · (32, 127, 25) (25.39, 99.61, 19.92) sdf +0.677 · (95, 127, 25) (74.61, 99.61, 19.92) sdf +0.677
+   — centres INSIDE the part (0.08 mm under the Top, 0.39 mm in from the side) that core had kept (solid, outside the region); the voxel-made SDF reads its outermost texel near an edge as outside
+   (at (99.75, 50, 19.9) it reads +0.85). Fast: 0 added. → 'outside' became core's own rule (coreEncloses, voxelize.cpp's +Z winding): Fine 0 added, Balanced the same 4604.
+
+## 3. THE TARGETED RUN at 62e654d6 (16:15–17:00): 35 classes (tl_suite_classes.txt: every class whose source names FlexibleLatticeField / FlexibleProbe / FlexibleFaceStats(Popover) /
+   FlexibleLatticeBuilder / FlexibleMainTints / FlexGrid / FlexibleLatticeInputs / overLattice / latticeSpan / FlexibleLatticePass / printedSolid, the new two, + the printed-view and views classes
+   on his pad (FlexibleR7X1Tests, FlexibleR7X1VerifyTests, FlexibleR7X1VerifyHostedTests, FlexibleRound7ViewsTests, FlexibleRound7ViewsHostedTests, FlexibleR7M1Tests) + LatticeStaleTypeTests), 3 chunks of 12
+   === chunk 1 rc 0 passed 65 failed 0 skipped 2 signal-lines 0 start 16:15:52 end 16:31:05 classes FlexibleBatchBReviewTests FlexibleBatchCHookTests FlexibleBatchCVerifyTests FlexibleBatchMDentTests FlexibleBatchMLegendTests FlexibleBatchMStressTests FlexibleBatchMVerifyTests FlexibleBatchMXrayTests FlexibleFEPassTests FlexibleFaceChipTests FlexibleInPassCompositeTests FlexibleLatticeEvidenceProbe
+   === chunk 2 rc 0 passed 72 failed 0 skipped 1 signal-lines 0 start 16:31:05 end 16:40:50 classes FlexibleLatticeFieldTests FlexibleLatticeGradingTests FlexibleLatticePassPerfTests FlexibleLatticePassTests FlexibleMainViewsTests FlexibleOverlayClipTests FlexibleR7D2ReviewHostedTests FlexibleR7D2ReviewTests FlexibleR7EveningAnswersTests FlexibleR7M1Tests FlexibleR7X1HostedTests FlexibleR7X1Tests
+   === chunk 3 rc 0 passed 80 failed 0 skipped 0 signal-lines 0 start 16:40:50 end 17:00:51 classes FlexibleR7X1VerifyHostedTests FlexibleR7X1VerifyTests FlexibleRound7SelectionsHookTests FlexibleRound7ViewsHostedTests FlexibleRound7ViewsTests FlexibleSettingsRound4Tests FlexibleSquishSolverTests FlexibleSquishTests FlexibleTopLayerHostedTests FlexibleTopLayerTests LatticeStaleTypeTests
+   TOTAL 220 cases: 217 passed, 3 skipped (FlexibleBatchMVerifyTests.testHisImg6RowsAtTheDevicesPixelCount, FlexibleLatticeEvidenceProbe.testDrawThePagesXrayFrameInPass, FlexibleLatticePassPerfTests.testFrameBudgetAt1152 — env-gated), 0 failed; no signal in any chunk.
+   LatticeStaleTypeTests 6/6. FlexibleLatticePassTests (the MSL/Swift parity, 5e-3 mm) green. FlexibleRound7ViewsHostedTests 12/12 (its known display failure did not show in this run). No tracked file was rewritten.
+
+   The new tests' lines (printed in chunk 3):
+   FLEX-TL-T5 his Balanced pad, Finish None, Heat off, X-ray off (before = the mask as core gives it):
+     img_top_3 n 900: the Top over the pockets 100.0 % of 4260 px changed (the sheet → the walls and the voids) · the middle 0.00 % of 4508 px changed
+     img_top_3 n 1600: the Top over the pockets 100.0 % of 4260 px changed (the sheet → the walls and the voids) · the middle 0.00 % of 4508 px changed
+     X-ray n 1600: 63935 px changed (2.50 % of the frame)
+   FLEX-TL-T3 his Balanced pad, the Top over the pockets (0.15 … 0.05 mm under it):
+     covered: the finish keeps 52308 points solid (fix 52308, control 52308) and leaves 0 open (fix open 0, control open 0)
+     covered over the whole Top band (240000 points, edges included): 0 change side
+     rim: the finish keeps 3339 points solid (fix 3339, control 3339) and leaves 48969 open (fix open 48969, control open 0)
+     skin: the finish keeps 34464 points solid (fix 34464, control 34464) and leaves 15586 open (fix open 15586, control open 0)
+   FLEX-TL-T2 fast: grid 64 × 64 × 13 at 1.5625 mm, last centre z 19.53125 · inputs identical to the control · S(95, 50, 19.9) 1.5625 mm
+   FLEX-TL-T2 fine: grid 128 × 128 × 26 at 0.78125 mm, last centre z 19.921875 · inputs identical to the control · S(95, 50, 19.9) 0.78125 mm
+   FLEX-TL-T1 his Balanced pad: S(95, 50, 19.9) fix 1.0416666 mm, control -0.09999938 mm · the Top over the pockets (17436 points × 4 heights): printed solid at 0 (control: 69744) · walls at z 19.9: 2625 (15.1 %; control 0) · the middle (18424): open at 0
+   FLEX-TL-T1 added 4604 voxels (the last solid layer's lattice voxels: 4604) · overLattice: 12 vertices gained, 0 lost of 36 · the (i) and the span unchanged
+   FLEX-TL-T4 his Balanced pad, 4001 points (3000 in the top band):
+     fix: max |gpu − swift| near a surface 0.0032561123 mm (3639 samples, printed + X-ray), anywhere 0.008112431 mm; the printed field at (95, 50, 19.9): gpu 0.8252466 swift 0.8252349
+     control (today): max |gpu − swift| near a surface 0.0032561123 mm (3939 samples, printed + X-ray), anywhere 0.008112431 mm; the printed field at (95, 50, 19.9): gpu -0.09967041 swift -0.09999333
+
+## 4. GOLDENS (FlexibleAngledGoldenTests) at 62e654d6
+golden_det rc 0 identical 38 · DIFFERS 0 · PART-SKIP 0 · Executed 13 tests, with 0 failures (0 unexpected) in 13.458 (13.460) seconds
+golden_unseeded rc 0 identical 32 · DIFFERS 0 · PART-SKIP 1 · Executed 13 tests, with 0 failures (0 unexpected) in 13.452 (13.454) seconds
+(golden_det = SWIFT_DETERMINISTIC_HASHING=1; the same counts as every round-7 step: 38 / 32 + 1 PART-SKIP)
+
+## 5. THE 16 STAGE-JOB HASHES (angled_presses/stage_job_hashes.sh, SWIFT_TEST_ARGS='--scratch-path /tmp/r7tl-build') → stage_job_hashes_tl.txt: byte-identical (cmp, whole file) to round7/batch_lp/stage_job_hashes_lp.txt (and so to every round-7 hash file). Nothing here reaches a job.
+
+## 6. iOS
+xcodebuild -project app/TopOpt.xcodeproj -scheme TopOpt -configuration Debug -destination id=147E56A1-C8CA-4B9D-BE6C-CF230589A83A -derivedDataPath ~/Library/Developer/Xcode/DerivedData/flexA1 build: BUILD SUCCEEDED (17:03:46)
+install rule: the simulator Booted; launchctl showed UIKitApplication:com.nadim.topopt (PID 67701) — the app WAS running, so it was terminated (simctl terminate rc 0, 17:03:57; not running after); simctl install rc 0 at 17:04:06–17:04:12; NOT launched; launchctl after: not running.
+installed TopOpt.debug.dylib: 87 565 600 bytes, built 17:03, sha256 5b9860c453895048… == the built one (cmp). nm: coreEncloses 5 symbols, countOutside 11, FlexibleLatticeBuilder.inputs(…maskToSurface:).

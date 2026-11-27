@@ -176,6 +176,13 @@ struct SurfaceConstraints {
   // C2 — the per-vertex sign. Empty ⇒ TrustSign::Both everywhere (C2 inert).
   // Size must equal the vertex count when non-empty.
   std::vector<TrustSign> sign;
+  // C2 HOLDS instead of sliding (E1, 2026-11-03). Projecting out only the component
+  // against the sign leaves the move's tangential part, so a one-sided vertex the flow
+  // pushes the wrong way SLIDES along the surface, and the slides fold triangles (a
+  // 3.6 mm shell held outward-only: 123 turned over). When true such a vertex keeps
+  // only the part of its move along its normal on the allowed side (none when the
+  // flow pushes it the wrong way). false = PR 306's projection.
+  bool c2_hold = false;
 
   // C3 — VOLUME PRESERVATION. Curvature flow shrinks; neither operator ships
   // without a compensator. This is the uniform-shift of the level set: after the

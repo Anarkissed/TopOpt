@@ -49,8 +49,13 @@ Endpoints:
                                done/error/cancelled. Replays from the start on
                                (re)connect, so a dropped connection never loses a
                                finished run.
-  GET    /jobs/{id}/result     application/zip of the job's output directory.
+  GET    /jobs/{id}/result     application/zip of the job's output directory (its round
+                               folders too, at their own paths).
   GET    /jobs/{id}/files/{n}  a single output artifact (progressive mesh fetch).
+  GET    /jobs/{id}/files/rN/{n}  a file of the strengthening's round N (Organic cut 2).
+  POST multipart extras (Organic cut 2): `tensor` (tensor.bin, the job's `tensor`), `strengthened` +
+                               `strengthened_additions` (the job's `strengthened`), `run` = organic-strengthen
+                               (the same lattice_file job through `topopt-cli organic-strengthen`).
   POST   /jobs/{id}/front      move a QUEUED job to the front of the queue.
   POST   /jobs/{id}/pause      pause a RUNNING solve (SIGSTOP the child).
   POST   /jobs/{id}/resume     resume a paused solve (SIGCONT the child).
@@ -66,6 +71,7 @@ import errno
 import io
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -97,6 +103,8 @@ WORKER_LOG_BACKUPS = int(os.environ.get("TOPOPT_WORKER_LOG_BACKUPS", "1"))
 # Overridable via env for the E2E harness (which drives a fast heartbeat so the
 # slow-sparse liveness path is provable in seconds, not minutes).
 HEARTBEAT_SECONDS = float(os.environ.get("TOPOPT_HEARTBEAT_SECONDS", "20"))
+# ★ Organic cut 2: the strengthening's round folders (r1, r2, ...), the only sub-folders a file may be fetched from.
+_ROUND_DIR = re.compile(r"^r[0-9]{1,3}$")
 
 # ---------------------------------------------------------------------------
 # Configuration, resolved once at startup.
@@ -155,6 +163,21 @@ class Job:
         # Count of ACCEPTED variant meshes so far (handoff 124): the History pane on the
         # Mac shows a real outcome summary ("3 variants · 12m") rather than a placeholder.
         self.variants = 0
+        # ★ 362 11-23 (his notes: the window sat on "starting..." for a whole lattice-file job): the job's
+        # command (`mode`: run / lattice-file / organic-strengthen / ...) and its latest stage line from the
+        # CLI ("lattice-file: making the file" -> stage "making the file") with its time, so GET /jobs can
+        # say what a non-optimizer job is doing. And on a failure the engine's plain reason (`message`) and
+        # its `code` from the job's own report, so the iPad can show WHY in a pop-up.
+        self.mode = cmd[1] if isinstance(cmd, (list, tuple)) and len(cmd) > 1 else None
+        self.stage = None
+        self.stage_at = None
+        self.message = None
+        self.code = None
+        # ★ 362 11-23 (his Organic run: the iPad switched apps between the strengthening and the file, so the Mac sat idle
+        # for 10 minutes): a strengthening asked with `then` = file makes its print file ITSELF, on the Mac, from its last
+        # round, as its own job; `next` is that job's id (on this job's record before its `done`), so the iPad follows it.
+        self.then_file = False
+        self.next = None
         # Timestamps (epoch seconds). created = submit; started = promoted to
         # running; finished = terminal.
         self.created_at = time.time()
@@ -172,7 +195,13 @@ class Job:
                 self.iter = event.get("iter")
             elif t == "variant" and event.get("accepted"):
                 self.variants += 1
+            elif t == "log" and self.mode and (event.get("line") or "").startswith(self.mode + ": "):
+                self.stage = event["line"][len(self.mode) + 2:].strip()
+                self.stage_at = time.time()
             elif t in ("done", "error", "cancelled"):
+                if t == "error":
+                    self.message = event.get("message")
+                    self.code = event.get("code")
                 self.done = True
                 self.state = t
                 if self.finished_at is None:
@@ -221,6 +250,12 @@ class Job:
             "rungs": self.rungs,
             "iter": self.iter,
             "variants": self.variants,
+            "mode": self.mode,
+            "stage": self.stage,
+            "stage_at": self.stage_at,
+            "message": self.message,
+            "code": self.code,
+            "next": self.next,
             "position": position,
             "created_at": self.created_at,
             "started_at": self.started_at,
@@ -590,14 +625,95 @@ def run_job_thread(job):
         if job.state == "cancelled":
             return  # a DELETE already posted the terminal event
         if rc == 0:
+            nxt = None
+            if job.then_file:
+                try:
+                    nxt = _chained_file_job(job)
+                except (OSError, ValueError) as e:
+                    print("CHAIN job=%s could not make its file job: %s" % (job.id, e), flush=True)
+                if nxt is not None:
+                    with job.cond:
+                        job.next = nxt.id
+                    SCHED.submit(nxt)
+                    print("CHAIN job=%s next=%s" % (job.id, nxt.id), flush=True)
             meshes = sorted(os.listdir(job.out_dir)) if os.path.isdir(job.out_dir) else []
-            job.emit({"type": "done", "returncode": 0, "artifacts": meshes})
+            done = {"type": "done", "returncode": 0, "artifacts": meshes}
+            if job.next:
+                done["next"] = job.next
+            job.emit(done)
         else:
             msg = "".join(stderr_buf).strip() or f"topopt-cli exited with code {rc}"
-            job.emit({"type": "error", "returncode": rc, "message": msg})
+            ev = {"type": "error", "returncode": rc, "message": msg}
+            # ★ 362 11-23: a refused lattice file says WHY in its own report (ok:false, code, why); carry that
+            # plain reason on the error (and so on the job record) instead of the raw stderr tail.
+            why, code = _report_reason(job.out_dir)
+            if why:
+                ev["message"] = why
+            if code:
+                ev["code"] = code
+            job.emit(ev)
     finally:
         if SCHED is not None:
             SCHED.on_finished(job)
+
+
+def _chained_file_job(job):
+    """The print-file job a finished strengthening makes itself (its `then` = file): the SAME inputs (the model and every
+    file beside its job), its job.json with `strengthened` naming the last round's strengthened.json, that round's
+    strengthened.json and the additions it names copied beside it, run through `lattice-file`. Exactly what the iPad
+    would have sent. None when the strengthening's report is not ok (no file is made from a failed strengthening)."""
+    with open(os.path.join(job.out_dir, "strengthen.json")) as f:
+        rep_doc = json.load(f)
+    if not (isinstance(rep_doc, dict) and rep_doc.get("ok")):
+        return None
+    with open(os.path.join(job.tmpdir, "job.json")) as f:
+        doc = json.load(f)
+    new_id = uuid.uuid4().hex[:16]
+    tmp2 = os.path.join(CFG.workdir, new_id)
+    out2 = os.path.join(tmp2, "out")
+    os.makedirs(out2, exist_ok=True)
+    try:
+        for name in os.listdir(job.tmpdir):
+            src = os.path.join(job.tmpdir, name)
+            if os.path.isfile(src) and name not in ("job.json", "worker.log"):
+                shutil.copy2(src, os.path.join(tmp2, name))
+        last = rep_doc.get("strengthened")
+        if isinstance(last, str) and last and ".." not in last and not last.startswith("/"):
+            spath = os.path.join(job.out_dir, last)
+            with open(spath) as f:
+                sdoc = json.load(f)
+            adds = sdoc.get("additions") if isinstance(sdoc, dict) else None
+            if not isinstance(adds, str) or adds in ("", ".", "..", "strengthened.json") or os.path.basename(adds) != adds:
+                raise ValueError("the last round's strengthened.json names no bare additions file")
+            shutil.copy2(os.path.join(os.path.dirname(spath), adds), os.path.join(tmp2, adds))
+            shutil.copy2(spath, os.path.join(tmp2, "strengthened.json"))
+            doc["strengthened"] = "strengthened.json"
+        job_path = os.path.join(tmp2, "job.json")
+        with open(job_path, "w") as f:
+            json.dump(doc, f)
+    except (OSError, ValueError):
+        shutil.rmtree(tmp2, ignore_errors=True)
+        raise
+    cmd = [CFG.cli, "lattice-file", job_path, "--out", out2]
+    if CFG.materials:
+        cmd += ["--materials", CFG.materials]
+    if CFG.rules:
+        cmd += ["--rules", CFG.rules]
+    return Job(new_id, tmp2, out2, cmd, project_name=job.project_name)
+
+
+def _report_reason(out_dir):
+    """(why, code) from a failed job's own report, e.g. lattice_file.json {"ok": false, "code": ..., "why": ...};
+    (None, None) when there is none. Best-effort: a missing or unreadable report changes nothing."""
+    for name in ("lattice_file.json",):
+        try:
+            with open(os.path.join(out_dir, name)) as f:
+                doc = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if isinstance(doc, dict) and doc.get("ok") is False:
+            return doc.get("why"), doc.get("code")
+    return None, None
 
 
 def _signal_child(job, sig):
@@ -614,8 +730,9 @@ def _signal_child(job, sig):
 # ---------------------------------------------------------------------------
 # Minimal multipart/form-data parser (stdlib `cgi` was removed in 3.13). Handles
 # the fields this API needs: `step` (a file), `job` (the job.json text), the
-# optional `project` label, and the optional `design` blob (a previous run's
-# design.bin, for a lattice_variant job).
+# optional `project` label, the optional `design` blob (a previous run's
+# design.bin, for a lattice_variant job), and the optional `demand` blob (a stress
+# result, saved as demand.bin).
 
 
 def parse_multipart(body, content_type):
@@ -626,7 +743,13 @@ def parse_multipart(body, content_type):
     delim = b"--" + boundary.encode()
     fields = {}
     for part in body.split(delim):
-        part = part.strip(b"\r\n")
+        # Drop exactly the one framing CRLF at each end (after the boundary line,
+        # before the next boundary) and nothing more: a file whose own bytes begin
+        # or end with CR or LF must reach disk whole.
+        if part.startswith(b"\r\n"):
+            part = part[2:]
+        if part.endswith(b"\r\n"):
+            part = part[:-2]
         if not part or part == b"--":
             continue
         head, _, data = part.partition(b"\r\n\r\n")
@@ -702,6 +825,8 @@ class Handler(BaseHTTPRequestHandler):
                 # would be a guess. Those still 404, honestly.
                 if len(parts) == 4 and parts[2] == "files":
                     return self._file_from_disk(parts[1], parts[3])
+                if len(parts) == 5 and parts[2] == "files" and _ROUND_DIR.match(parts[3]):   # ★ cut 2: a round's file
+                    return self._file_from_disk(parts[1], parts[4], sub=parts[3])
                 return self._not_found("no such job")
             if len(parts) == 3 and parts[2] == "events":
                 return self._events(job)
@@ -709,6 +834,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._result_zip(job)
             if len(parts) == 4 and parts[2] == "files":
                 return self._file(job, parts[3])
+            if len(parts) == 5 and parts[2] == "files" and _ROUND_DIR.match(parts[3]):   # ★ cut 2: a round's file (r3/x)
+                return self._file(job, parts[4], sub=parts[3])
+            if len(parts) > 2 and parts[2] == "files":   # any other files path: nothing to serve
+                return self._not_found("no such artifact")
             return self._json(200, self._single_job(job))
         return self._not_found()
 
@@ -804,6 +933,11 @@ class Handler(BaseHTTPRequestHandler):
         step_name = os.path.basename(step_name)
         with open(os.path.join(tmpdir, step_name), "wb") as f:
             f.write(fields["step"]["data"])
+        # The face-overrides sidecar (B5): the painted faces the job's groups reference. Core's import reads
+        # `<model>.faces` beside the model, so it is saved under the model's own name whatever the client called it.
+        if "faces" in fields:
+            with open(os.path.join(tmpdir, step_name + ".faces"), "wb") as f:
+                f.write(fields["faces"]["data"])
         try:
             job_doc = json.loads(fields["job"]["data"].decode("utf-8"))
         except (ValueError, UnicodeDecodeError) as e:
@@ -827,6 +961,79 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(400, {
                 "error": "a lattice_variant job must upload the originating "
                          "run's design.bin as the multipart 'design' field"})
+        # The STRESS RESULT for density by stress (Install 2): uploaded as its own
+        # multipart field "demand", saved beside the model as demand.bin and named in
+        # the job the same way the design is. The worker does not judge it: a job that
+        # asks for stress grading without one is refused by core (no_stress_result),
+        # and that refusal comes back like any other core refusal. No field, no key.
+        if "demand" in fields:
+            with open(os.path.join(tmpdir, "demand.bin"), "wb") as f:
+                f.write(fields["demand"]["data"])
+            job_doc["demand"] = "demand.bin"
+        # The STRENGTH CHECK for a print file (Install 3, LatticeReview's shape of 2026-11-17): the run job a Lattice run
+        # writes (loads, supports, material, safety margin, build direction, voxel size), uploaded as the multipart field
+        # "strength_job", saved beside the model as strength_job.json with its own `model` pointed at the same saved model
+        # (the job.json's rule above), and named by the lattice-file job's `strength_job`. No field, no key: no check.
+        if "strength_job" in fields:
+            try:
+                strength_doc = json.loads(fields["strength_job"]["data"].decode("utf-8"))
+            except (ValueError, UnicodeDecodeError) as e:
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                return self._json(400, {"error": f"strength_job is not valid JSON: {e}"})
+            if not isinstance(strength_doc, dict):
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                return self._json(400, {"error": "strength_job must be a JSON object"})
+            strength_doc["model"] = step_name
+            strength_doc.pop("project", None)
+            strength_doc.pop("project_name", None)
+            with open(os.path.join(tmpdir, "strength_job.json"), "w") as f:
+                json.dump(strength_doc, f)
+            job_doc["strength_job"] = "strength_job.json"
+        # ★ ORGANIC CUT 2 (organic-cut2-handover.md): the STRESS TENSOR an Organic weave follows (core's TOTENSOR file),
+        # uploaded as the multipart field "tensor", saved beside the model as tensor.bin and named by the job's `tensor`.
+        # No field, no key (core refuses a weave with no stress: no_stress_result).
+        if "tensor" in fields:
+            with open(os.path.join(tmpdir, "tensor.bin"), "wb") as f:
+                f.write(fields["tensor"]["data"])
+            job_doc["tensor"] = "tensor.bin"
+        # ★ ORGANIC CUT 2 (handover f4): a STRENGTHENED lattice to make: the strengthening's last round's strengthened.json
+        # (multipart "strengthened", the additive mode: version 2) and the file it names (multipart "strengthened_additions",
+        # saved under the bare name the json gives), beside the model; named by the job's `strengthened`.
+        if "strengthened" in fields:
+            try:
+                sdoc = json.loads(fields["strengthened"]["data"].decode("utf-8"))
+            except (ValueError, UnicodeDecodeError) as e:
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                return self._json(400, {"error": f"strengthened is not valid JSON: {e}"})
+            adds = sdoc.get("additions") if isinstance(sdoc, dict) else None
+            if not isinstance(adds, str) or adds in ("", ".", "..", "strengthened.json") or os.path.basename(adds) != adds:
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                return self._json(400, {"error": "strengthened must be the additive strengthening's file, naming its "
+                                                 "additions by a bare name"})
+            if "strengthened_additions" not in fields:
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                return self._json(400, {"error": f"strengthened names {adds} but no 'strengthened_additions' was sent"})
+            with open(os.path.join(tmpdir, adds), "wb") as f:
+                f.write(fields["strengthened_additions"]["data"])
+            with open(os.path.join(tmpdir, "strengthened.json"), "wb") as f:
+                f.write(fields["strengthened"]["data"])
+            job_doc["strengthened"] = "strengthened.json"
+        # ★ notes27 (his print orientation, "Check strength" for a topology result): the mesh core's orientation re-check
+        # reads (an analyze job's `orientation_recheck`: {"mesh", "build_dir"}), uploaded as the multipart "recheck_mesh",
+        # saved beside the job under its bare name (.stl or .3mf) and named by the job. Only with that block, only on an
+        # analyze job; anything else is refused here. (Every other job key, e.g. a lattice file's "print_frame", passes
+        # through to the CLI untouched, and a chained print file keeps it: _chained_file_job copies job.json's keys.)
+        if "recheck_mesh" in fields:
+            orc = job_doc.get("orientation_recheck")
+            rname = os.path.basename(fields["recheck_mesh"]["filename"] or "recheck.stl")
+            if (not isinstance(orc, dict) or job_doc.get("mode") != "analyze"
+                    or not rname.lower().endswith((".stl", ".3mf")) or rname == step_name):
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                return self._json(400, {"error": "recheck_mesh goes with an analyze job's orientation_recheck "
+                                                 "(an .stl or .3mf, not the model)"})
+            with open(os.path.join(tmpdir, rname), "wb") as f:
+                f.write(fields["recheck_mesh"]["data"])
+            orc["mesh"] = rname
         job_path = os.path.join(tmpdir, "job.json")
         with open(job_path, "w") as f:
             json.dump(job_doc, f)
@@ -864,8 +1071,39 @@ class Handler(BaseHTTPRequestHandler):
         # The CLI stays the validator: `run` REFUSES anything but a
         # minimize_plastic job and the parser refuses any unknown mode, so this
         # routing can never widen what actually executes.
-        _MODE_SUBCMD = {"analyze": "analyze", "lattice_variant": "lattice-variant"}
+        # "lattice_file" (lattice rebuild, docs/design/lattice-rebuild/04-layout-file-job.md):
+        # the printable lattice file from the new layout engine (`topopt-cli lattice-file`).
+        # "lattice_part" (the Lattice button: lattice the imported part, no optimization) goes
+        # through the SAME entry point as lattice_variant (core/src/cli/main.cpp: two modes, one
+        # entry). It was missing here, so it fell to `run`, which refuses it: his 11-16 job
+        # 7f99b667 "unsupported mode: lattice_part".
+        _MODE_SUBCMD = {"analyze": "analyze", "lattice_variant": "lattice-variant",
+                        "lattice_part": "lattice-variant", "lattice_file": "lattice-file"}
         subcmd = _MODE_SUBCMD.get(job_doc.get("mode"), "run")
+        # ★ ORGANIC CUT 2 (handover f3): the STRENGTHENING runs on the SAME lattice_file job (`topopt-cli organic-strengthen
+        # <job.json> --out DIR`), asked for by the worker-level multipart field "run" (never a job key: the CLI's job schema
+        # is strict). Only that one command, only on a lattice_file job; anything else is refused here.
+        if "run" in fields:
+            try:
+                run = fields["run"]["data"].decode("utf-8").strip()
+            except UnicodeDecodeError:
+                run = None
+            if run != "organic-strengthen" or job_doc.get("mode") != "lattice_file":
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                return self._json(400, {"error": "run must be organic-strengthen, on a lattice_file job"})
+            subcmd = "organic-strengthen"
+        # ★ 362 11-23: "then" = file (only with run = organic-strengthen): the Mac makes the print file from the last round
+        # when the strengthening ends, without waiting for the iPad (see Job.then_file).
+        then_file = False
+        if "then" in fields:
+            try:
+                then = fields["then"]["data"].decode("utf-8").strip()
+            except UnicodeDecodeError:
+                then = None
+            if then != "file" or subcmd != "organic-strengthen":
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                return self._json(400, {"error": "then must be file, on an organic-strengthen run"})
+            then_file = True
         cmd = [CFG.cli, subcmd, job_path, "--out", out_dir]
         if CFG.materials:
             cmd += ["--materials", CFG.materials]
@@ -873,6 +1111,7 @@ class Handler(BaseHTTPRequestHandler):
             cmd += ["--rules", CFG.rules]
 
         job = Job(job_id, tmpdir, out_dir, cmd, project_name=project_name)
+        job.then_file = then_file
         SCHED.submit(job)
         self._json(202, {"job_id": job_id})
 
@@ -924,8 +1163,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._not_found("no output yet")
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-            for name in sorted(os.listdir(job.out_dir)):
-                z.write(os.path.join(job.out_dir, name), name)
+            # ★ Organic cut 2: the strengthening writes a folder per round (r1/, r2/, ...): every file, at its own path
+            for root, dirs, files in os.walk(job.out_dir):
+                dirs.sort()
+                for name in sorted(files):
+                    full = os.path.join(root, name)
+                    z.write(full, os.path.relpath(full, job.out_dir))
         data = buf.getvalue()
         self.send_response(200)
         self.send_header("Content-Type", "application/zip")
@@ -935,7 +1178,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _file_from_disk(self, job_id, name):
+    def _file_from_disk(self, job_id, name, sub=None):
         """Serve an artifact of a job THIS process never ran, from its workdir.
 
         The id is used only as a directory name and is confined to the workdir:
@@ -945,16 +1188,17 @@ class Handler(BaseHTTPRequestHandler):
         job_id = os.path.basename(job_id)
         name = os.path.basename(name)
         root = os.path.realpath(CFG.workdir)
-        path = os.path.realpath(os.path.join(root, job_id, "out", name))
+        path = os.path.realpath(os.path.join(root, job_id, "out", name) if sub is None
+                                else os.path.join(root, job_id, "out", os.path.basename(sub), name))
         if not (path == root or path.startswith(root + os.sep)):
             return self._not_found("no such job")
         if not os.path.isfile(path):
             return self._not_found("no such job")
         self._send_file(path)
 
-    def _file(self, job, name):
+    def _file(self, job, name, sub=None):
         name = os.path.basename(name)
-        path = os.path.join(job.out_dir, name)
+        path = os.path.join(job.out_dir, name) if sub is None else os.path.join(job.out_dir, os.path.basename(sub), name)
         if not os.path.isfile(path):
             return self._not_found("no such artifact")
         self._send_file(path)

@@ -336,8 +336,9 @@ final class SurfacePencilToggleExemptionTests: XCTestCase {
         // A runaway-slice guard, generously above the panel's real size (126 lines,
         // ~6.7 k chars — it is five tool buttons and three switches with their
         // styling). The next property is 27 k further on, so this only ever fires if
-        // the end marker stops matching.
-        XCTAssertLessThan(tray.count, 12_000,
+        // the end marker stops matching. (362, 11-16: his 11-14 asks grew the real panel to
+        // 215 lines, 12.6 k chars, still ending at `surfaceActionCluster`: the guard moved up.)
+        XCTAssertLessThan(tray.count, 16_000,
                           "★ the slice must be the PANEL, not half the file")
 
         XCTAssertTrue(tray.contains("surfacePencilOnly.toggle()"),
@@ -540,7 +541,7 @@ final class ThreeStageVisibilityTests: XCTestCase {
     /// and its faces. He confirms it is already right ("No primitives or other
     /// objects visible in the stage"); this is the assertion that keeps it so.
     func testSurfaceShowsNoPrimitivesAtAllAndOnlyTheFaceTools() {
-        let v = WorkspaceStageVisibility.of(.surface)
+        let v = WorkspaceStageVisibility.editingFaces   // B5: the Surface stage's column is Edit faces'
         XCTAssertFalse(v.designBox, "★ MUST NOT: the design box")
         XCTAssertFalse(v.groupPrimitives, "★ MUST NOT: the group primitives")
         XCTAssertFalse(v.keepOuts, "★ MUST NOT: the keep-clear volumes")
@@ -555,9 +556,9 @@ final class ThreeStageVisibilityTests: XCTestCase {
     /// not touch them. He is happy with both; the assertion is that they still
     /// reach every stage.
     func testTheWireframeAndItsXrayReachAllThreeStages() {
-        for stage in [WorkspaceStage.topology, .lattice, .surface] {
-            XCTAssertTrue(WorkspaceStageVisibility.of(stage).wireframe,
-                          "★ \(stage): the wireframe control must be offered — "
+        for v in [WorkspaceStageVisibility.of(.topology), .of(.lattice), .editingFaces] {
+            XCTAssertTrue(v.wireframe,
+                          "★ \(v): the wireframe control must be offered — "
                           + "'keep wireframe and xray view throughout the entire "
                           + "app'")
         }
@@ -566,8 +567,8 @@ final class ThreeStageVisibilityTests: XCTestCase {
     /// ★ AND EVERY STAGE IS COVERED. A fourth stage added later fails here rather
     /// than quietly inheriting whatever the switch's last case happened to be.
     func testEveryStageHasARowInTheTable() {
-        XCTAssertEqual(WorkspaceStage.allCases.count, 3,
-                       "★ three stages — add a visibility test above for a fourth")
+        XCTAssertEqual(WorkspaceStage.allCases.count, 2,
+                       "★ two stages (B5: Surface is the Edit faces mode) — add a visibility test above for a third")
     }
 }
 
@@ -586,12 +587,12 @@ final class SurfaceStageNoRegressionTests: XCTestCase {
         }
     }
 
-    /// ★ THE TRAY STILL CARRIES ALL FIVE TOOLS in their order, each with its icon
+    /// ★ THE TRAY STILL CARRIES ALL ITS TOOLS in their order, each with its icon
     /// and its one-line hint. This task added a button below the divider; it did
-    /// not touch the tool well.
+    /// not touch the tool well. (The Region tool joined last on 2026-10-08, approved.)
     func testTheToolTrayIsUnchanged() {
         XCTAssertEqual(SurfaceTool.allCases,
-                       [.select, .similar, .cut, .union, .pattern])
+                       [.select, .similar, .cut, .union, .pattern, .region])
         for tool in SurfaceTool.allCases {
             XCTAssertFalse(tool.icon.isEmpty, "\(tool.title) has an icon")
             XCTAssertFalse(tool.hint.isEmpty, "\(tool.title) has a hint")

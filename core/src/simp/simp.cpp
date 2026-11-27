@@ -29,6 +29,11 @@
 
 namespace topopt {
 
+// REAL BOLTS: the optimizer re-reads the bearing contact set every this many
+// iterations (the reviewer's brief of 2026-10-25 20:10: "every N iterations, not every
+// step"); the certification then settles it fully (analyze.cpp).
+constexpr int kContactEvery = 10;
+
 namespace {
 
 void validate_params(const SimpParams& p) {
@@ -657,6 +662,11 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
       }
 
   SimpCompliance out;
+  // Arm G (multigrid.cpp, safe retry): the voxels the matrix-free solve below
+  // solved at the floor modulus, if any. Empty on every solve whose shipped MG
+  // converged, so the energy loop further down is then byte-for-byte unchanged.
+  std::vector<char> dropped;
+  double dropped_e = 0.0;
   if (LM != nullptr) {
     // The COMPOSITE isotropic-or-cubic system (fea.hpp): a masked voxel is
     // hex8_stiffness_cubic(C11, C12, C44), every other solid voxel is the
@@ -701,9 +711,26 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
     // the final compliance solve and every certification solve pass nullptr
     // unconditionally. So a default run reaches this line with
     // initial_guess == nullptr and is byte-for-byte what it was.
-    out.solution = fea_solve_mgcg_matfree(grid, elem_youngs, params.poisson, bcs,
-                                          loads, tolerance, max_iterations,
-                                          &out.cg, active_mask, initial_guess);
+    // The safe retry may solve tiny floating solid islands at the floor
+    // modulus (only after the shipped MG has stalled); this compliance accounts
+    // for that below, so the permit is held here — and nowhere a solution is
+    // read back at the true modulus without that accounting (analyze.cpp
+    // forbids it for certification; the final compliance solves of
+    // simp_optimize, its masked / SEMDOT overload and plsm_optimize forbid it
+    // too, being certified numbers).
+    {
+      FeaIslandDropPermit permit;
+      out.solution = fea_solve_mgcg_matfree(grid, elem_youngs, params.poisson,
+                                            bcs, loads, tolerance,
+                                            max_iterations, &out.cg,
+                                            active_mask, initial_guess);
+    }
+    const std::vector<int>& dv = fea_matfree_last_dropped_islands();
+    if (!dv.empty()) {
+      dropped.assign(grid.voxel_count(), 0);
+      for (int e : dv) dropped[static_cast<std::size_t>(e)] = 1;
+      dropped_e = fea_matfree_last_dropped_floor_youngs();
+    }
   } else if (solver_kind == SolverKind::MultigridCG) {
     // Opt-in accelerator (handoff 073): the geometric-multigrid-preconditioned
     // CG solves the identical system to the same tolerance. It is stateless, so
@@ -817,6 +844,16 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
           q += ue[static_cast<std::size_t>(r)] * kr;
         }
 
+        // Arm G: a voxel the solve held at the floor modulus contributes the
+        // energy of THAT system (so compliance stays f.u of what was solved)
+        // and no sensitivity — the solved system does not depend on its
+        // density, exactly as an out-of-domain voxel above (an unanchored
+        // speck carries no load either way).
+        if (!dropped.empty() && dropped[e]) {
+          compliance += dropped_e * q;
+          out.dcompliance[e] = 0.0;
+          continue;
+        }
         compliance += std::pow(rho, params.penalty) * params.youngs_modulus * q;
         out.dcompliance[e] = -params.penalty *
                              std::pow(rho, params.penalty - 1.0) *
@@ -1797,6 +1834,86 @@ const FeaSolution* matfree_trajectory_guess(const SimpOptions& options,
   return warm.u.empty() ? nullptr : &warm;
 }
 
+}  // namespace
+
+SimpCompliance simp_scenarios_compliance(const VoxelGrid& grid, const SimpParams& params,
+                                         const std::vector<double>& density,
+                                         const std::vector<SimpScenario>& scenarios,
+                                         double tolerance, int max_iterations,
+                                         SolverKind solver_kind, ScenarioSolveState& state,
+                                         bool warm_start) {
+  const std::size_t ns = scenarios.size();
+  if (ns == 0)
+    throw std::invalid_argument("simp_scenarios_compliance: no scenario");
+  if (state.c0.size() != ns) {
+    state.c0.assign(ns, 0.0);
+    state.warm.assign(ns, FeaSolution{});
+    state.last.assign(ns, 0.0);
+  }
+  std::vector<SimpCompliance> cs(ns);
+  for (std::size_t s = 0; s < ns; ++s) {
+    const FeaSolution* guess =
+        warm_start && !state.warm[s].u.empty() ? &state.warm[s] : nullptr;
+    cs[s] = simp_compliance(grid, params, density, scenarios[s].bcs, scenarios[s].loads,
+                            tolerance, max_iterations, guess, /*solver=*/nullptr,
+                            solver_kind);
+    state.warm[s] = cs[s].solution;
+    state.last[s] = cs[s].compliance;
+    if (!(state.c0[s] > 0.0)) state.c0[s] = cs[s].compliance > 0.0 ? cs[s].compliance : 1.0;
+  }
+  // ONE reference for every scenario (his ask, 2026-10-28): the first compliance of the
+  // scenario with the LARGEST load (the 2-norm of its nodal load vector; a tie takes the
+  // first). Compliance scales as load^2, so measured against its OWN first compliance a
+  // scenario's load cancelled and a 0.5 kg twist pulled as hard as his 51 kg case. Now
+  // each counts in proportion to its load: a light cross scenario still forces a
+  // connection (its arm on weak springs starts orders of magnitude over the reference),
+  // a thin one. Not the LARGEST first compliance: that is the unconnected cross scenario.
+  std::size_t ref = 0;
+  double ref_load = -1.0;
+  for (std::size_t s = 0; s < ns; ++s) {
+    double f2 = 0.0;
+    for (const NodalLoad& l : scenarios[s].loads) f2 += l.value * l.value;
+    if (f2 > ref_load) {
+      ref_load = f2;
+      ref = s;
+    }
+  }
+  const double c_ref = state.c0[ref];
+  const double p = kScenarioPNorm;
+  std::size_t worst = 0;
+  std::vector<double> r(ns);
+  for (std::size_t s = 0; s < ns; ++s) {
+    r[s] = cs[s].compliance / c_ref;
+    if (r[s] > r[worst]) worst = s;
+  }
+  // J = (sum_s r_s^p)^(1/p), taken as rmax (sum_s (r_s / rmax)^p)^(1/p): an unconnected
+  // cross scenario starts at r ~ 1e6 and more, and r^p must not overflow.
+  const double rmax = r[worst];
+  double sum = 0.0;
+  for (std::size_t s = 0; s < ns; ++s) sum += rmax > 0.0 ? std::pow(r[s] / rmax, p) : 0.0;
+  const double J = rmax > 0.0 ? rmax * std::pow(sum, 1.0 / p) : 0.0;
+  SimpCompliance out;
+  out.compliance = J;
+  out.dcompliance.assign(density.size(), 0.0);
+  out.cg.converged = true;
+  for (std::size_t s = 0; s < ns; ++s) {
+    const double w = (J > 0.0 ? std::pow(r[s] / J, p - 1.0) : 0.0) / c_ref;
+    for (std::size_t e = 0; e < out.dcompliance.size() && e < cs[s].dcompliance.size(); ++e)
+      out.dcompliance[e] += w * cs[s].dcompliance[e];
+    out.cg.iterations += cs[s].cg.iterations;
+    out.cg.converged = out.cg.converged && cs[s].cg.converged;
+    out.cg.residual = std::max(out.cg.residual, cs[s].cg.residual);
+    out.t_solve_ms += cs[s].t_solve_ms;
+    out.t_sensitivity_ms += cs[s].t_sensitivity_ms;
+  }
+  out.cg.used_multigrid = cs[worst].cg.used_multigrid;
+  out.cg.mg_levels = cs[worst].cg.mg_levels;
+  out.solution = std::move(cs[worst].solution);
+  return out;
+}
+
+namespace {
+
 // One TRAJECTORY penalized solve under the active domain. Returns the solve and
 // writes the active element fraction actually assembled (1.0 whenever the full
 // domain ran, so the observability column means the same thing on every run).
@@ -1886,6 +2003,10 @@ SimpCompliance active_domain_solve(ActiveDomainRun& ad, const VoxelGrid& grid,
     // restricted solve; a throw latches below and prev_mask is never read again.
     ad.prev_mask = mask;
     return c;
+  } catch (const SolverStopped&) {
+    // The safety net fired (#362, core-loose-pieces): a stopped solve is a bug report,
+    // never something to retry on the full domain.
+    throw;
   } catch (const std::exception& ex) {
     ad.latched = true;
     ad.latch_iteration = iteration;
@@ -2122,6 +2243,14 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   // very ~2 GB / ~7 GB-transient matrix that OOMs on the design box. Constructing
   // it under MultigridCG_Matfree would reintroduce the crash the matrix-free path
   // exists to avoid, so skip it entirely for both multigrid kinds.
+  // REAL BOLTS (bearing anchors): the contact set this run solves with, updated from
+  // the field every kContactEvery iterations, not every step (the certification
+  // then settles it fully). Glued anchors: `live_bcs` IS `bcs`.
+  std::vector<DirichletBC> contact_bcs;
+  const bool bearing = has_contact_springs(bcs);
+  ScenarioSolveState scenario_state;  // LOAD SCENARIOS; untouched when there are none
+  if (bearing) contact_bcs = bcs;
+  const std::vector<DirichletBC>& live_bcs = bearing ? contact_bcs : bcs;
   std::unique_ptr<PenalizedSolver> solver;
   if (options.solver == SolverKind::JacobiCG)
     solver = std::make_unique<PenalizedSolver>(grid, params.poisson, bcs, loads);
@@ -2224,8 +2353,14 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       try {
         ScopedSolveDeadline deadline(iter_budget_ms > 0.0 ? sp.t0 + iter_budget_ms
                                                           : 0.0);
-        c = active_domain_solve(
-            active_domain, grid, traj_params, xphys, bcs, loads, traj_tol,
+        // LOAD SCENARIOS: every scenario, each warm-started, the smooth max governs
+        // (the full domain: the active domain is a single-load-case optimisation).
+        c = !options.scenarios.empty()
+                ? simp_scenarios_compliance(grid, traj_params, xphys, options.scenarios,
+                                            traj_tol, options.cg_max_iterations,
+                                            options.solver, scenario_state, true)
+                : active_domain_solve(
+            active_domain, grid, traj_params, xphys, live_bcs, loads, traj_tol,
             options.cg_max_iterations,
             // MATRIX-FREE WARM START (task 2026-08-10-plsm-production, S3):
             // OPT-IN. The guess has always been held and passed; until this task
@@ -2268,6 +2403,8 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         break;
       }
       if (!use_solver) warm = c.solution;
+      if (bearing && (result.iterations + 1) % kContactEvery == 0)
+        (void)contact_update(contact_bcs, c.solution.u);
       if (!c.cg.converged) {
         // Some solver paths REPORT non-convergence via cg.converged rather than
         // throwing; treat it identically to the throw above (same honest end).
@@ -2564,8 +2701,19 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
     // catch does not loosen the tolerance or retry — it records the failure and lets
     // the caller reject the rung.
     try {
-      const SimpCompliance fc = simp_compliance(
-          grid, params, result.physical_density, bcs, loads, options.cg_tolerance,
+      // CERTIFIED: this is the compliance the run reports for the field it
+      // ships, so the solver's floating-speck drop (multigrid safe retry, arm
+      // G) is forbidden here whatever simp_compliance permits for trajectory
+      // solves — the specks are solved at their true modulus.
+      FeaIslandDropForbid no_island_drop;
+      const SimpCompliance fc =
+          !options.scenarios.empty()
+              ? simp_scenarios_compliance(grid, params, result.physical_density,
+                                          options.scenarios, options.cg_tolerance,
+                                          options.cg_max_iterations, options.solver,
+                                          scenario_state, false)
+              : simp_compliance(
+          grid, params, result.physical_density, live_bcs, loads, options.cg_tolerance,
           options.cg_max_iterations, nullptr, use_solver ? solver.get() : nullptr,
           options.solver);
       result.compliance = fc.compliance;
@@ -3126,6 +3274,14 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   // the multigrid kinds (which bypass it) must not construct it. This is the
   // mask-aware MMA optimizer the design-box run uses, so the gate is what keeps
   // the on-device design-box path matrix-free (no assembled fine K).
+  // REAL BOLTS (bearing anchors): the contact set this run solves with, updated from
+  // the field every kContactEvery iterations, not every step (the certification
+  // then settles it fully). Glued anchors: `live_bcs` IS `bcs`.
+  std::vector<DirichletBC> contact_bcs;
+  const bool bearing = has_contact_springs(bcs);
+  ScenarioSolveState scenario_state;  // LOAD SCENARIOS; untouched when there are none
+  if (bearing) contact_bcs = bcs;
+  const std::vector<DirichletBC>& live_bcs = bearing ? contact_bcs : bcs;
   std::unique_ptr<PenalizedSolver> solver;
   if (options.solver == SolverKind::JacobiCG)
     solver =
@@ -3248,8 +3404,14 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       try {
         ScopedSolveDeadline deadline(iter_budget_ms > 0.0 ? sp.t0 + iter_budget_ms
                                                           : 0.0);
-        c = active_domain_solve(
-            active_domain, analysis, traj_params, xphys, bcs, loads, traj_tol,
+        // LOAD SCENARIOS: every scenario, each warm-started, the smooth max governs
+        // (the full domain: the active domain is a single-load-case optimisation).
+        c = !options.scenarios.empty()
+                ? simp_scenarios_compliance(analysis, traj_params, xphys, options.scenarios,
+                                            traj_tol, options.cg_max_iterations,
+                                            options.solver, scenario_state, true)
+                : active_domain_solve(
+            active_domain, analysis, traj_params, xphys, live_bcs, loads, traj_tol,
             options.cg_max_iterations,
             // MATRIX-FREE WARM START (task 2026-08-10-plsm-production, S3):
             // OPT-IN. The guess has always been held and passed; until this task
@@ -3283,6 +3445,8 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         break;
       }
       if (!use_solver) warm = c.solution;
+      if (bearing && (result.iterations + 1) % kContactEvery == 0)
+        (void)contact_update(contact_bcs, c.solution.u);
       if (!c.cg.converged) {
         result.non_convergent = true;
         result.non_convergent_iteration = c.cg.iterations;
@@ -3662,8 +3826,17 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       // SEMDOT: the SAME linear law the trajectory ran with, so the reported
       // compliance is the compliance of the design under the physics that
       // produced it (semdot_law is the identity when the mode is off).
-      const SimpCompliance fc = simp_compliance(
-          analysis, semdot_law(params, options), result.physical_density, bcs,
+      // CERTIFIED: no floating-speck drop (arm G) here; see the unconstrained
+      // overload.
+      FeaIslandDropForbid no_island_drop;
+      const SimpCompliance fc =
+          !options.scenarios.empty()
+              ? simp_scenarios_compliance(analysis, semdot_law(params, options),
+                                          result.physical_density, options.scenarios,
+                                          options.cg_tolerance, options.cg_max_iterations,
+                                          options.solver, scenario_state, false)
+              : simp_compliance(
+          analysis, semdot_law(params, options), result.physical_density, live_bcs,
           loads, options.cg_tolerance, options.cg_max_iterations, nullptr,
           use_solver ? solver.get() : nullptr, options.solver);
       result.compliance = fc.compliance;

@@ -364,7 +364,14 @@ int main() {
   const double crel = std::abs(cmf - casm) / std::abs(casm);
   std::printf("[flip] max|rho_mf - rho_asm|=%.3e compliance rel.diff=%.3e\n",
               max_mf_vs_asm, crel);
-  CHECK(max_mf_vs_asm < 1e-6,
+  // THE CONNECTION RULE (2026-10-25/26): the production matrix-free solve takes
+  // LOOSE material — face-connected pieces touching no support or load,
+  // including a voxel hanging on an edge or corner — out of its system (solved
+  // at the floor modulus); the assembled multigrid path (tests / library only)
+  // still solves it at its true modulus. On this fixture one such voxel appears
+  // at the 4th solve, so the two designs now agree to 3.8e-6 (was < 1e-6), with
+  // the compliance still matching to < 1e-6 below.
+  CHECK(max_mf_vs_asm < 1e-5,
         "flip: matrix-free design matches the assembled multigrid design");
   CHECK(crel < 1e-6,
         "flip: matrix-free compliance matches the assembled multigrid compliance");

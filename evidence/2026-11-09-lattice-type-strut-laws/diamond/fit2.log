@@ -1,0 +1,10 @@
+LATTICE DE-HOMOGENIZATION PROBE — diamond band [0.15712, 0.59201] (read from core)
+
+===== FIT — is K a function or scatter? (J3) =====
+  K_dev envelope ~ 4.19 * rho^-1.748 ; worst row deviation 10.9%
+  (the LAW HANDED TO J6 is the per-rho TABLE, interpolated —
+   the power fit is descriptive only.)
+  kfit.csv written (5 rho rows)
+
+DONE (rc=0).
+exit 0

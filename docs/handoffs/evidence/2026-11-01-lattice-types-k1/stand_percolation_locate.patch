@@ -1,0 +1,28 @@
+--- core/tests/harness/lattice_types_probe.cpp	2026-11-01 23:36:40
++++ probe_locate.cpp	2026-11-02 05:42:22
+@@ -694,6 +694,25 @@
+     unheld = 0;
+     for (const auto& kv : size)
+       if (!held[kv.first] && !cut_ends.count(kv.first)) { ++unheld; unheld_prims += kv.second; }
++    {
++      const topopt::TriangleMesh part = part_path.empty() ? topopt::TriangleMesh{} : topopt::import_stl_file(part_path);
++      for (const auto& kv : size) {
++        if (held[kv.first] || cut_ends.count(kv.first)) continue;
++        double lo[3]={1e9,1e9,1e9}, hi[3]={-1e9,-1e9,-1e9}; double gap=1e9, rmx=0; int balls=0, segs=0;
++        for (std::size_t i = 0; i < P.size(); ++i) {
++          if (dsu.f(int(i)) != kv.first) continue;
++          if (P[i].ball) ++balls; else ++segs;
++          rmx = std::max(rmx, P[i].r);
++          for (const double* p : {P[i].a, P[i].b}) {
++            for (int k=0;k<3;++k){lo[k]=std::min(lo[k],p[k]);hi[k]=std::max(hi[k],p[k]);}
++            const double sd = md.signed_distance(Vec3{p[0], p[1], p[2]});
++            gap = std::min(gap, std::fabs(sd) - P[i].r);
++          }
++        }
++        std::printf("  float comp %d prims (%d seg, %d ball) r<=%.3f bbox (%.2f %.2f %.2f)-(%.2f %.2f %.2f) ext (%.2f %.2f %.2f) gap-to-solid %.3f mm\n",
++          kv.second, segs, balls, rmx, lo[0],lo[1],lo[2],hi[0],hi[1],hi[2],hi[0]-lo[0],hi[1]-lo[1],hi[2]-lo[2], gap);
++      }
++    }
+   }
+   std::vector<int> sizes;
+   for (const auto& kv : size) sizes.push_back(kv.second);

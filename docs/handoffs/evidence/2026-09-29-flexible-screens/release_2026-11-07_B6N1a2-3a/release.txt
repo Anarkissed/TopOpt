@@ -1,0 +1,13 @@
+# Release f8c20f20 — 2026-11-07 B6N1a2-3a (UI-Notes' app batch e0fb99ce), app only
+# Core and worker unchanged: fingerprint 8902d87b88ba; "fingerprint": "8902d87b88ba"
+# Merged onto 4bab1629; the merged app tree equals B6N1a2-3a's, so the builder's tests and the reviewer's code check apply unchanged.
+# Commits:
+#   e0fb99ce B6 his iPad notes 11-07 (1a, 1b, 2, 3a + his rule): every prism shows with its end handle, a tapped face gets a ×, zone Copy is back
+# Gates:
+#   19:14 checks ok: B6N1a2-3a e0fb99ce, 1 commit(s), app-only, base 4bab1629, onto 4bab1629, fingerprint 8902d87b88ba
+#   19:14 merged f8c20f20; app tree == B6N1a2-3a's, fingerprint 8902d87b88ba
+#   19:14 waiting for HEAVY.lock (362 release (3) gates B chunk_ae: app classes in B9 (pid 7094) 19:07 EST)
+#   19:17 lock taken
+#   19:23 iPad device build green; lock released
+#   19:23 pushed f8c20f20
+#   19:23 worker /health "fingerprint": "8902d87b88ba" (unchanged, no swap)

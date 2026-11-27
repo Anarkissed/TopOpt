@@ -1,0 +1,37 @@
+# Round 7 · his report of 2026-10-18 (the Top solid over the pockets at Balanced, Finish None) — the RED run: the tests FIRST, against the stub.
+# The stub: FlexibleLatticeBuilder.inputs takes maskToSurface: (ignored) — tl_stubs.diff.txt. Tree: this commit.
+# swift build --build-tests --scratch-path /tmp/r7tl-build; swift test --skip-build --scratch-path /tmp/r7tl-build --filter 'FlexibleTopLayerTests|FlexibleTopLayerHostedTests'
+# 5 tests, 8 failures — every one the fix's own assertion; no RED CONTROL assertion failed. T2 (Fast, Fine: nothing to add) and T4 (the twins on his pad) pass at the stub by design: they guard the fix.
+
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleTopLayerTests.swift:444: error: -[TopOptFlowsTests.FlexibleTopLayerHostedTests testHisTopOverThePocketsRendersOpen] : XCTAssertGreaterThanOrEqual failed: ("0.0") is less than ("0.4") - ★ img_top_3 n 900: the Top over the pockets opens (the sheet is gone)
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleTopLayerTests.swift:444: error: -[TopOptFlowsTests.FlexibleTopLayerHostedTests testHisTopOverThePocketsRendersOpen] : XCTAssertGreaterThanOrEqual failed: ("0.0") is less than ("0.4") - ★ img_top_3 n 1600: the Top over the pockets opens (the sheet is gone)
+Test Case '-[TopOptFlowsTests.FlexibleTopLayerHostedTests testHisTopOverThePocketsRendersOpen]' failed (12.697 seconds).
+	 Executed 1 test, with 2 failures (0 unexpected) in 12.697 (12.697) seconds
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleTopLayerTests.swift:278: error: -[TopOptFlowsTests.FlexibleTopLayerTests testCoveredRimAndSkinKeepTheirKindOverThePocket] : XCTAssertEqual failed: ("0") is not equal to ("48969") - ★ rim: where the finish leaves the lattice open, open
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleTopLayerTests.swift:278: error: -[TopOptFlowsTests.FlexibleTopLayerTests testCoveredRimAndSkinKeepTheirKindOverThePocket] : XCTAssertEqual failed: ("0") is not equal to ("15586") - ★ skin: where the finish leaves the lattice open, open
+Test Case '-[TopOptFlowsTests.FlexibleTopLayerTests testCoveredRimAndSkinKeepTheirKindOverThePocket]' failed (13.586 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleTopLayerTests testFastAndFineAreUnchanged]' passed (28.176 seconds).
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleTopLayerTests.swift:158: error: -[TopOptFlowsTests.FlexibleTopLayerTests testHisBalancedPadTheTopOverEachPocketIsOpen] : XCTAssertGreaterThan failed: ("-0.09999938") is not greater than ("0.0") - ★ S at (95, 50, 19.9) is OPEN (no sheet over Face 5's pocket)
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleTopLayerTests.swift:178: error: -[TopOptFlowsTests.FlexibleTopLayerTests testHisBalancedPadTheTopOverEachPocketIsOpen] : XCTAssertEqual failed: ("69744") is not equal to ("0") - ★ the Top over each pocket is open, 0.15 … 0.01 mm under it
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleTopLayerTests.swift:180: error: -[TopOptFlowsTests.FlexibleTopLayerTests testHisBalancedPadTheTopOverEachPocketIsOpen] : XCTAssertGreaterThan failed: ("0.0") is not greater than ("0.1") - ★ X-ray: the walls reach the Top (they stopped at 19.79)
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleTopLayerTests.swift:189: error: -[TopOptFlowsTests.FlexibleTopLayerTests testHisBalancedPadTheTopOverEachPocketIsOpen] : XCTAssertEqual failed: ("0") is not equal to ("4604") - ★ one voxel above each lattice voxel of the last solid layer (4604)
+Test Case '-[TopOptFlowsTests.FlexibleTopLayerTests testHisBalancedPadTheTopOverEachPocketIsOpen]' failed (9.991 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleTopLayerTests testThePrintedTwinsAgreeOnHisPadsTopBand]' passed (8.753 seconds).
+	 Executed 4 tests, with 6 failures (0 unexpected) in 60.507 (60.507) seconds
+	 Executed 5 tests, with 8 failures (0 unexpected) in 73.204 (73.205) seconds
+	 Executed 5 tests, with 8 failures (0 unexpected) in 73.204 (73.206) seconds
+FLEX-TL-T5 his Balanced pad, Finish None, Heat off, X-ray off (before = the mask as core gives it):
+  img_top_3 n 900: the Top over the pockets 0.0 % of 4260 px changed (the sheet → the walls and the voids) · the middle 0.00 % of 4508 px changed
+  img_top_3 n 1600: the Top over the pockets 0.0 % of 4260 px changed (the sheet → the walls and the voids) · the middle 0.00 % of 4508 px changed
+FLEX-TL-T3 his Balanced pad, the Top over the pockets (0.15 … 0.05 mm under it):
+  covered: the finish keeps 52308 points solid (fix 52308, control 52308) and leaves 0 open (fix open 0, control open 0)
+  covered over the whole Top band (240000 points, edges included): 0 change side
+  rim: the finish keeps 3339 points solid (fix 3339, control 3339) and leaves 48969 open (fix open 0, control open 0)
+  skin: the finish keeps 34464 points solid (fix 34464, control 34464) and leaves 15586 open (fix open 0, control open 0)
+FLEX-TL-T2 fast: grid 64 × 64 × 13 at 1.5625 mm, last centre z 19.53125 · inputs identical to the control · S(95, 50, 19.9) 1.5625 mm
+FLEX-TL-T2 fine: grid 128 × 128 × 26 at 0.78125 mm, last centre z 19.921875 · inputs identical to the control · S(95, 50, 19.9) 0.78125 mm
+FLEX-TL-T1 his Balanced pad: S(95, 50, 19.9) fix -0.09999938 mm, control -0.09999938 mm · the Top over the pockets (17436 points × 4 heights): printed solid at 69744 (control: 69744) · walls at z 19.9: 0 (0.0 %; control 0) · the middle (18424): open at 0
+FLEX-TL-T1 added 0 voxels (the last solid layer's lattice voxels: 4604) · overLattice: 0 vertices gained, 0 lost of 36 · the (i) and the span unchanged
+FLEX-TL-T4 his Balanced pad, 4001 points (3000 in the top band):
+  fix: max |gpu − swift| near a surface 0.0032561123 mm (3939 samples, printed + X-ray), anywhere 0.008112431 mm; the printed field at (95, 50, 19.9): gpu -0.09967041 swift -0.09999333
+  control (today): max |gpu − swift| near a surface 0.0032561123 mm (3939 samples, printed + X-ray), anywhere 0.008112431 mm; the printed field at (95, 50, 19.9): gpu -0.09967041 swift -0.09999333

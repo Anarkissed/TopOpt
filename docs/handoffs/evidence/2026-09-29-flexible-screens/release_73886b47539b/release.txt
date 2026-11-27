@@ -1,0 +1,105 @@
+# Release 73886b47539b - 2026-11-26: release (22) - claude/organic-1 4c352eb5, one worker swap (b24097f5fbe1 -> 73886b47539b)
+# Commits:
+#   3b7d2e76 SHEETS CONTRACT: gyroid and Schwarz-D on the new lattice engine (notes28 sheets SPEC rev 3, builder A)
+#   4d32fb75 merge sheets contract
+#   7a8855a5 SHEETS CONTRACT CHANGE: additive only (SheetOverhang, MeshReport::sheet_places, sheet_deviation_mm 0)
+#   ee56582b notes28 sheets A: the sheet lay, Auto's wall, the wall field, the sheet mesh, the solid-wall seam, the file job
+#   db783a0d PER-TYPE LAW (sheets): Auto's largest cell from the widest near-level patch (gyroid 31.3 mm, Schwarz-D 41.7 mm)
+#   9e6d4e32 notes28 sheets, app side (builder C): gyroid and Schwarz-D on the new lattice engine
+#   4bfda2bf notes28 sheets, app side (builder C): the strength colours per cell on the sheet pass; Lattice only and the time line for a sheet
+#   183c3532 SHEETS CONTRACT CHANGE: additive only (sheet_print_wall_mm, kSheetWallUnevenness)
+#   9b077498 notes28 sheets A: no file wall under two lines (the print wall, blocks overlapping past their creases)
+#   e9d11af3 merge sheets core (A)
+#   2dce32fc merge sheets app (C)
+#   ddcbf158 merge sheets core (A) 9b077498
+#   e668865b SHEETS CONTRACT CHANGE: additive only (MeshReport::sheet_contoured_mm3)
+#   e53016e8 SHEETS CONTRACT CHANGE (builder B): additive only; sheets B: the strength check's credit by place, sheet_cells.bin and its key
+#   a24ca366 notes28 sheets A: the sheet blocks' memory (welded as they are contoured; the joined body let go)
+#   b1bb0537 sheets B: a member thinner than one cell is under the floor too (0 across, read)
+#   cd4d1eb5 sheets B: the engine map's region and seam channels; sheet_cells.bin fetched from the Mac and kept with the result
+#   dd1850b9 notes28 sheets A: test_lattice_sheets_matrix (SPEC section 6), each check with its RED control
+#   e922677a merge claude/notes28-sheets-strength cd4d1eb5 (builder B: credit by place, sheet_cells.bin, the map's channels; its additive contract change e53016e8) into sheets core
+#   31f95043 notes28 sheets A: each sheet field cut to its own region's open space (OpenSpace::Box::region)
+#   c347c70a sheets B: the check writes sheet_cells.bin with its own margins; its solve reads each voxel's density (run_job_sheets.patch)
+#   2f5ac5ce ANALYZE GUARD (sheets): the cells-per-member guard reads the engine's own member width for a sheet
+#   47c66aba notes28 sheets A: the sheet matrix's strength row on builder B's check
+#   f44c84a8 merge sheets core tip
+#   a77c80b6 merge sheets core tip
+#   ff977124 print resolution (his 11-25): Full / Medium / Coarse print files, and each level's size estimate from the layout
+#   84134fc8 app: Export on a print file offers its three print resolutions in one centred card (his 11-25)
+#   0119304f SHEETS CONTRACT CHANGE (E): the Blend seam (notes28 sheets SPEC 1.5, builder E)
+#   8d2aa763 notes28 sheets, app side (builder E): the preview draws the Blend band
+#   13b28529 Organic OS19, the interim guard (the reviewer's ruling with the owner's approval, 2026-11-26): a load on bare vines is refused
+#   852e2c0c lattice_strength §15b: the additive strengthening rounds tested again, on a job whose load sits on solid
+#   c88910d2 notes30 L1: Live preview lays with no animation and no progress; they just change
+#   97e01402 notes30 L1: the thin-wall hosted test closes the shared solid pop-up it leaves up (AppSettingsHostedTests' clicks)
+#   9d94fa02 Merge claude/notes30-live-instant 97e01402 (builder L1): Live preview just changes — no animation, no progress
+#   28c6e64e notes30 R1: the thin-wall pop-up's reason (i)s open the one centred card over it (test re-pinned to N1's notes29 one (i))
+#   67496a3a notes30 R1: LatticeTypeReadinessFromCoreTests re-pinned to the old run's octet-only catalog (362's notes28 526c4a8f)
+#   260fc268 notes30 R1: a lay landing while the print file is made raises no pop-up over the chain's card; the cell-lattice card test on a lattice that lays
+#   09ada404 notes30 R1: OrganicRenderMarchTests marches the same seeded rays every run
+#   1a8b972d notes30 R1: the run cards and run watchers are mounted during the gravity step too; hosted tests leave the results queue empty
+#   c7b77103 notes30 R1: AppAsksThinWallPopUpHostedTests clears the centred pop-up it leaves (the source of AppSettingsHostedTests' suite red)
+#   482a7ddd Merge origin/claude/organic-engine 852e2c0c into notes30-bare-vines: the Organic interim guard (OS19, load on bare vines) and its strengthening test
+#   4d2d687b Merge claude/notes28-sheets-app 4bfda2bf (builder C) into the sheets integration (notes30 M1)
+#   ba108387 Merge claude/notes28-sheets-core 47c66aba (builder A, with B's cd4d1eb5) into the sheets integration (notes30 M1)
+#   c3ec8c61 Merge claude/notes28-sheets-strength 2f5ac5ce (builder B) into the sheets integration (notes30 M1)
+#   0b93668c Merge claude/notes28-sheets-blend 8d2aa763 (builder E) into the sheets integration (notes30 M1)
+#   aeca9149 Merge claude/notes28-print-resolution 84134fc8 into the sheets integration (notes30 M1)
+#   af7964fc notes30 M1: the sheets fit release 21 — Aesthetic only for now, five-word captions and positive words, the timelapse rises a sheet, its print file a 3MF
+#   7fe162d7 docs/strength-check/cell-types.md: the sheets are Aesthetic only in the app until their laws (notes30 M1, reviewer 11-26 3(b))
+#   bd9911ff Lattice: count the pieces once (notes30 S-1)
+#   108f9225 Merge claude/notes30-pieces-once bd9911ff (builder P1): the lattice counts its pieces once (S-1, his yes 11-26)
+#   2e68f4a6 notes30 (app): a load on bare vines (core OS19, the interim guard) read wherever the app reads the Organic strength result
+#   be1aae58 notes30 (app): Protect skin first in the bare-vines offers (LatticeReview's ruling, 2026-11-26)
+#   5e060614 notes30 M1 tests: LatticePreviewStoreTests re-pinned for E's seam channels (LatticeLayoutSolidGrid 6 -> 8, a sheet's map only, never kept); the timelapse test's points made without another file's private generator
+#   e7b0503c Merge claude/notes30-suite-reds c7b77103 (builder R1): release 21's whole-suite reds — two app bugs fixed, tests re-pinned
+#   906ff704 notes30 (app): a bare-vines result shows no margin anywhere, its words in the number's place (362's review)
+#   2f23f4fd Merge claude/notes30-bare-vines 906ff704 (builder V1): the Organic strength check's "load on bare vines" guard, engine + app
+#   7d173a43 notes30 Q1: the chips' places search gives way at once to the next lay (S-2, his yes 11-26)
+#   38f47a4a Merge claude/notes30-places-yield 7d173a43 (builder Q1): the chips' places search gives way at once to the next lay (S-2, his yes 11-26)
+#   40770059 notes30 F1: the Flexible face's (i) opens the centred card; Save keeps Stress + shape on the part
+#   c5dcd56d Merge claude/notes30-followups 40770059 (builder F1): the Flexible face's (i) opens the centred card; Save keeps Stress & shape
+#   79d5a944 notes30 M1: the merge's pins — the job table names E's preview-only sheetWalls; LatticeFinishWireTests and Notes29DensityDialTests read the sheet greys; lattice_strength strips the print resolution's per-run times
+#   20c33fe4 notes30 Q2: an interrupted 0.2 mm nozzle check is never an answer (362's follow-up to Q1)
+#   018419d1 Merge claude/notes30-nozzle-interrupt 20c33fe4 (builder Q1, follow-up): an interrupted 0.2 mm nozzle check is never an answer
+#   5759ac81 Merge claude/notes30-sheets-integrate 79d5a944 (builder M1): Gyroid and Schwarz-D sheets (Aesthetic only) and print resolutions at export
+#   ac2d3472 notes30 M1 follow-up: the refresh card says a sheet lays its walls
+#   8793f40f notes30 F1 follow-ups 2: "Preview shows this group's grade." only where the preview lays the group's own grade
+#   4a571b22 Merge claude/notes30-followups-2 8793f40f (builder F1): "Preview shows this group's grade." only where it is so
+#   00e4114e Merge origin/claude/organic-1 4a571b22 (F1's group-tab note; StrutLineWidthTests 25) into the sheets verify branch
+#   9850d951 Organic OS19: the refusal names the solid depth that clears it (solid_depth_needed_mm), measured by a sweep
+#   d093ef67 OS19 docs: the refusal's solid_depth_needed_mm (1.5 of the check's voxels, measured on one coupon at one resolution)
+#   223763ad Merge claude/notes30-sheets-verify 00e4114e (builder M1): the merged organic-1 verified; a sheet's refresh card says "Laying the walls"
+#   748d5802 Merge origin/claude/organic-engine d093ef67 into notes30-bare-vines-depth: the bare-vines refusal names its solid depth (solid_depth_needed_mm)
+#   d42afe91 notes30 depth (app): the bare-vines offers follow core's solid_depth_needed_mm (LatticeReview's wizard rule)
+#   b8dcd7fc Merge claude/notes30-bare-vines-depth d42afe91 (builder V1): the bare-vines offers follow core's solid_depth_needed_mm
+#   01729e68 notes30 lines (app): Results' Checks line and the print file's line name only the bare-vines fixes offered
+#   194a9be6 Merge claude/notes30-bare-vines-lines 01729e68 (builder V1): the Checks and print-file lines name only the bare-vines fixes offered
+#   9b5455a1 notes30 X1 (his release 21, 11-26 12:50): no log line from a lookup (the crash), Setup │ Lattice over what each shows, every reopen on the Lattice view, "Building the sample…" centred over the sample
+#   ed69b2d8 Merge claude/notes30-reopen-crash 9b5455a1 (builder X1): the iPad crash, Setup │ Lattice, every reopen on the Lattice view
+#   b34de5d5 Merge origin/claude/organic-1 ed69b2d8 (builder X1: the iPad crash, Setup | Lattice, every reopen on the Lattice view) into claude/notes30-a1-offers
+#   ec7383ee notes30 X2 (his 11-26 answers): his three offers where smaller cells cannot help, the warning triangle in the centred card, Re-entrant measured
+#   5a9d3bfe Merge claude/notes30-a1-offers ec7383ee (builder X2): "This needs 4 mm cells" offers three fixes; the triangle opens the centred card
+#   d92a1421 notes30 X2 cell advice: no advice names a cell under the smallest the settings lay; where none lays, the "This needs … cells" fixes
+#   4c352eb5 Merge claude/notes30-cell-advice d92a1421 (builder X2): no advice names a cell under the smallest the settings allow
+#   744bd9ef Release (22): one combined release (his 11-26 rule) — Live preview just changes, the sheet lattices (Aesthetic), print resolutions, the bare-vines strength guard, two lay speed-ups and release 21's suite fixes
+# Gates (this tree):
+#   19:35 his uncommitted files (left alone): app/TopOpt-Info.plist app/TopOpt.xcodeproj/project.pbxproj app/TopOpt.xcodeproj/xcshareddata/xcschemes/TopOpt.xcscheme 
+#   19:35 preflight job: /Users/nadim/.topopt-worker/d5af229ca8ee4a8f (his newest optimisation job the installed worker passes; read only)
+#   19:35 merged organic-1 as 744bd9ef (local, not pushed); app + core + tools == its; fingerprint 73886b47539b
+#   ==> Manifold: /Users/nadim/dev/TopOpt/TopOpt/.vcpkg/installed-manifold (KEEP regions exported exactly)
+#   ==> building macOS slice (Eigen + OCCT, arm64)
+#   ==> building iOS simulator slice (Eigen + OCCT + lib3mf, arm64)
+#   ==> building iOS device slice (Eigen + OCCT + lib3mf, arm64)
+#   19:38 build_core green: topopt_vendored_core_73886b47539b + the Install 3 entry points + lay_organic_preview and Session::sweep_limits in every slice and arch
+#   19:38 worker CLI built: topopt-cli: core 73886b47539b (dirty=false), built Nov 26 2026 19:38:54; 3 data paths, all under the release worktree
+#   20:29 core suites passed: 100% tests passed out of 36 Total Test time (real) = 2980.99 sec 
+#   21:24 FAILED: iPad device build (see ipad_build.log)
+#   21:32 RESUME: iPad gate build in the gate tree green; preflight OK
+#   21:32 pushed 744bd9ef
+#   21:32 worker script unchanged (release 11's)
+#   21:32 restarting the worker server (PID 51573; /health said "fingerprint": "73886b47539b") while idle, so it runs the new script
+#   21:32 worker swapped: /health "fingerprint": "73886b47539b"; data paths under the release worktree; preflight again OK; old CLI kept as build-fix/topopt-cli.b24097f5fbe1-replaced-20261126
+#   21:32 route, demand, strength_job, organic cut 2 and chain tests vs the INSTALLED script, job_stage and orientation_recheck: ALL PASS
+#   21:32 the app_release scripts now expect 73886b47539b

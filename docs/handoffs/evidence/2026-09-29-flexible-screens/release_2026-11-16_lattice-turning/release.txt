@@ -1,0 +1,20 @@
+# Release e84afdff — 2026-11-16 lattice-turning (his lattice-view lag picks A-E, ccd80074), app only
+# Core and worker unchanged: fingerprint 85d25b639dee
+# Merged onto fdad50f9; the merged app tree equals lattice-turning's, so its gate applies unchanged.
+# Commits (first parent of lattice-turning since the release tip):
+#   0e92337c WIP (362): his 11-16 picks A-E for the lattice view (camera-only drags, chips and legends hidden while turning, taps read one pixel, lighter frames and 60 fps while turning) - builds; tests to come
+#   49fc8408 Merge branch 'claude/edit-faces-t' into claude/lattice-turning
+#   ccd80074 Lattice view load, round 2 (362): his 11-16 picks A-E — drags move the camera only (chips and legends hide while turning), taps read one pixel, lighter frames and 60 fps while turning
+# Gates:
+#   claude/lattice-turning ccd80074 (on edit-faces-t 1c48800d = release ef7caa10's app tree), built against core 85d25b639dee:
+#   run 1: build failed (a test needed @MainActor)
+#   run 2: 952/954 across 130 classes touching the camera, projection, legends, taps, the face-id pass and the G-buffer - the two reds were my new tests' premises (the page test took a Metal view with no lattice; the renderer test's camera was not on the part)
+#   run 3: 3/4 - LatticeTurningHostedTests green (incl. its red controls); the renderer test's taps hid behind the solid body
+#   run 4: LatticeTurningTests 3/3 (the lattice alone, as the lattice view shows it)
+#   18:49 checks ok: lattice-turning ccd80074, 3 commit(s), app-only, onto fdad50f9, fingerprint 85d25b639dee
+#   18:49 merged e84afdff; app tree == lattice-turning's, fingerprint 85d25b639dee
+#   18:49 waiting for HEAVY.lock (free)
+#   18:49 lock taken (35 GB free)
+#   18:56 iPad device build green; lock released
+#   18:56 pushed e84afdff
+#   18:56 worker /health fingerprint 85d25b639dee (unchanged, no swap)

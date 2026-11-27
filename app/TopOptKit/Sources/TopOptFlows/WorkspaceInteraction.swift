@@ -26,28 +26,32 @@ public enum WorkspaceTap {
     /// Route a tapped B-rep face (and its resolved loop) into `selection`, per the
     /// no-tap-removes rule above. `force` is read-only here (to tell a pending group
     /// from a committed one); the caller syncs `force` to the new groups afterward.
+    /// ★ // Flexible (PR #362) H55c: several roles on one face (owner 2026-10-25): while a group is being built, another group's face JOINS it too (SeveralRolesOnOneFace.swift); a hidden group never claims a tap; Load + Anchor is refused with its line.
+    @discardableResult   // Flexible (PR #362) H55c: several roles on one face (owner 2026-10-25) — the Load + Anchor line, or nil
     public static func route(faceID: FaceID, loop: [FaceID],
-                             selection: inout SelectionModel, force: ForceModel) {
+                             selection: inout SelectionModel, force: ForceModel,   // Flexible (PR #362) H55c: several roles on one face (owner 2026-10-25)
+                             hidden: Set<UUID> = []) -> String? {   // Flexible (PR #362) H55c: several roles on one face (owner 2026-10-25) — the hidden groups
         // 1. Tapping an already-grouped face:
         //    * in the ACTIVE group → DESELECT it (item 1). Remove the tapped face and any
         //      co-selected loop members that live in the active group; `pickFaces` removes
         //      when every key is already in the active group (tap-again-to-deselect). If the
         //      group is left empty, drop it (matching the model's empty-group cleanup).
         //    * in ANOTHER group → re-select that group, no steal, no toggle-off.
-        if let owner = selection.group(forFace: faceID) {
+        if let owner = SeveralRoles.owner(of: faceID, in: selection, hidden: hidden) {   // Flexible (PR #362) H55c: several roles on one face (owner 2026-10-25) — the active group first, then the first VISIBLE one
             guard owner.id == selection.activeGroupID else {
+                if let active = selection.activeGroupID { return SeveralRoles.join(faceID, loop: loop, into: active, selection: &selection, force: force) }   // Flexible (PR #362) H55c: several roles on one face (owner 2026-10-25) — a group is being built: the face joins it too
                 selection.setActive(owner.id)
-                return
+                return nil   // Flexible (PR #362) H55c: several roles on one face (owner 2026-10-25) — nothing is being built: its visible group, re-selected
             }
             let owned = loop.filter { owner.faces.contains($0) }
             selection.pickFaces(owned.isEmpty ? [faceID] : owned)
             if selection.activeGroup?.faces.isEmpty == true { selection.clearActive() }
-            return
+            return nil   // Flexible (PR #362) H55c: several roles on one face (owner 2026-10-25) — deselected, from the active group only
         }
         // 2. A new face: only faces not owned by any group are added (so a stray
         //    multi-face loop can never pull faces out of a set group).
-        let fresh = loop.filter { selection.group(forFace: $0) == nil }
-        guard !fresh.isEmpty else { return }
+        let fresh = loop.filter { SeveralRoles.owner(of: $0, in: selection, hidden: hidden) == nil }   // Flexible (PR #362) H55c: several roles on one face (owner 2026-10-25) — a face only hidden groups hold is free
+        guard !fresh.isEmpty else { return nil }   // Flexible (PR #362) H55c: several roles on one face (owner 2026-10-25)
 
         // Grow the ACTIVE group — pending or committed (round-2 T3). Committing a
         // role clears the active selection (M7.6), so a committed group is active
@@ -57,7 +61,9 @@ public enum WorkspaceTap {
         // was to delete it and rebuild it (the reported functional gap): a tap
         // silently started a FRESH group instead.
         if selection.activeGroup == nil { selection.clearActive() }
+        if fresh.contains(where: { !selection.groups(forFace: $0).isEmpty }) { return SeveralRoles.joinFree(fresh, selection: &selection, force: force) }   // Flexible (PR #362) H55c: several roles on one face (owner 2026-10-25) — a hidden group keeps its face
         selection.pickFaces(fresh)
+        return nil   // Flexible (PR #362) H55c: several roles on one face (owner 2026-10-25) — free faces, picked as before
     }
 }
 

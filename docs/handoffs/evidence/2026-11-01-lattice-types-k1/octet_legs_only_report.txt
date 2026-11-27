@@ -1,0 +1,20 @@
+Q2 (02-core-spec §7): the shipped octet tensor (LEGS-ONLY geometry, kOctet in lattice.cpp) against
+the FULL-octet rows measured 2026-07-29 (evidence/2026-07-29-tensor-library-nine/csv/octet_sweep.csv,
+validated band 0.2066-0.4800). Both are vpc48 periodic homogenisation, E_solid 3500 MPa. Linear
+interpolation in rho between each set's own rows (the full set's validated rows only). MEASURE ONLY:
+nothing in core changes; the maintainer rules.
+
+rho    | legs-only (shipped): E100 E111 C44 Zener | full octet: E100 E111 C44 Zener    | full / legs - 1
+0.25   |  217.71  268.75  107.62 1.282 |  194.58  304.32  124.13 1.690 | E100 -10.6%  E111 +13.2%  C44 +15.3%
+0.35   |  392.80  429.97  171.19 1.113 |  339.32  497.00  202.25 1.567 | E100 -13.6%  E111 +15.6%  C44 +18.1%
+0.45   |  642.93  629.35  248.82 0.975 |  526.21  729.38  296.12 1.470 | E100 -18.2%  E111 +15.9%  C44 +19.0%
+
+READING (the answer to Q2's two questions): it is MIXED, and the sign depends on the direction.
+At equal relative density the braces take material from the legs, so the full octet is SOFTER along
+the cell axes and STIFFER along the body diagonal and in shear:
+  * along a cell axis (E100) the legs-only tensor OVER-states the full octet by 11-22 % of the full
+    value (full/legs - 1 = -10.6 / -13.6 / -18.2 % at rho 0.25 / 0.35 / 0.45) -- the UNSAFE direction
+    for a member loaded along x, y or z;
+  * along the body diagonal (E111) and in shear (C44) it UNDER-states it by 13-19 % -- conservative.
+The gap widens with density. Shipped behaviour is unchanged by this report; whether octet moves to its
+own rows (band 0.207-0.480, narrower than today's 0.05-0.90) is the maintainer's ruling (Q2).

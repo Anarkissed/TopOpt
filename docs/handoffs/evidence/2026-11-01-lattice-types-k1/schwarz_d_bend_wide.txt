@@ -1,0 +1,14 @@
+Wide cells of the C2b bend (the 1-6 curve is schwarz_d_bend.txt): the same probe, conditions and cell, with the
+resolved solve MATRIX-FREE (TOPOPT_BEND_MATFREE=1, fea_solve_cg_matfree: the same reduced system and stopping
+criterion, no assembled K). The assembled K of a 9-cell block (~20M dof) peaked at a 39.5 GB footprint and was
+killed on this 16 GB machine. Validation first: the 3-cell block solved matrix-free against the assembled run
+(schwarz_d_bend.txt). Binary: tpms_probe built from 07ffbfda (frozen copy tpms_probe.v2).
+
+validation (nc=3, matrix-free):
+BEND schwarz_d: S=5.0 mm, vpc=24, 6 cells long, target rho 0.40 -> cell rho 0.4074 (wall 2.91 voxels), C11=897.32 C12=350.78 C44=260.50 Zener=0.953
+    nc=3  block rho 0.4074  K_res 745.4677  K_hom 831.4331  err +11.53 %  dof 2318115  22415 ms  NO-GO
+
+wide cells (matrix-free):
+    nc=7  block rho 0.4074  K_res 7655.1718  K_hom 7904.9140  err +3.26 %  dof 12424035  92489 ms  NO-GO
+    nc=8  block rho 0.4074  K_res 10517.1092  K_hom 10789.6188  err +2.59 %  dof 16203315  131038 ms  NO-GO
+    nc=9  block rho 0.4074  K_res 13819.1551  K_hom 14108.0595  err +2.09 %  dof 20483715  176324 ms  GO

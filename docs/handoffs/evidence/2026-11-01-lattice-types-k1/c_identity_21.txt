@@ -1,0 +1,175 @@
+The 21 identity binaries, eede708a vs 262b731f (outputs filtered as c_gate_c3.sh does). Every one exits 0 before and after.
+
+IDENTICAL test_lattice_gen
+DIFFERS   test_stepped_plan
+DIFFERS   test_lattice_boundary
+DIFFERS   test_lattice_clip_shell
+IDENTICAL test_lattice_void
+DIFFERS   test_lattice_skin_freeform
+DIFFERS   test_grading
+IDENTICAL test_lattice_refusal
+DIFFERS   test_lattice_density_field
+DIFFERS   test_lattice_certification
+IDENTICAL test_lattice_region_mask
+IDENTICAL test_analyze_fixed_design
+DIFFERS   test_lattice_hookup
+DIFFERS   test_lattice_variant
+DIFFERS   test_designbox_lattice_recert
+IDENTICAL test_loadcase_analyze
+IDENTICAL test_orient
+IDENTICAL test_lattice_depth_tie
+DIFFERS   test_lattice_void_exterior
+DIFFERS   test_bake_build_orientation
+IDENTICAL test_mesh_job
+
+Against step 1 (c009fa30, gate_A3) directly, each binary's changed output lines (paths to the gate folder written GATE/):
+
+=== test_stepped_plan
+<   ceiling: diameter preimage 0.218871 | forward law 0.211733 | that forward value builds strut/cell 0.196142
+>   ceiling: diameter preimage 0.378846 | forward law 0.378846 | that forward value builds strut/cell 0.200000
+<   parity control: right 0.4000 vs wrong-table 0.3923 mm (delta 0.0077)
+>   parity control: right 0.2879 vs wrong-table 0.2825 mm (delta 0.0054)
+
+=== test_lattice_boundary
+(no change from step 1)
+
+=== test_lattice_clip_shell
+(no change from step 1)
+
+=== test_lattice_skin_freeform
+(no change from step 1)
+
+=== test_grading
+<   cap: structural intent, cap 0.218871 -> highest emitted rho 0.218871 over 21472 latticed voxel(s); uncapped reaches 0.899880
+>   cap: structural intent, cap 0.378846 -> highest emitted rho 0.378846 over 46744 latticed voxel(s); uncapped reaches 0.900270
+< grading: 26334 checks, 0 failures
+> grading: 55089 checks, 0 failures
+
+=== test_lattice_density_field
+< beta Jacobian vs central difference: worst rel err 6.013e-10
+<   beta[172]: analytic -3.2997729542e-03  central -3.2997729534e-03  rel 2.526e-10
+<   beta[220]: analytic -3.2784010519e-03  central -3.2784010513e-03  rel 1.763e-10
+<   beta[179]: analytic -3.1544673747e-03  central -3.1544673734e-03  rel 3.915e-10
+< dC/dbeta vs central difference: worst rel err 3.915e-10
+< MODE 2 loop: c 2.504206e-02 -> 1.465390e-02 (-41.48%), mass 754.650 vs budget 756.151, max|beta| 5.4092
+<   BANKED: c 2.504206e-02 -> 1.386531e-02, lattice mass 410.069 (allowance 410.551), max|beta| 8.0000
+<   SPENT : c 2.504206e-02 -> 1.488864e-02, lattice mass 382.564 (allowance 410.551), max|beta| 7.0848
+> beta Jacobian vs central difference: worst rel err 5.192e-10
+>   beta[220]: analytic -3.4216281161e-03  central -3.4216281156e-03  rel 1.175e-10
+>   beta[172]: analytic -3.2961436166e-03  central -3.2961436163e-03  rel 8.535e-11
+>   beta[227]: analytic -3.2262792139e-03  central -3.2262792136e-03  rel 8.481e-11
+> dC/dbeta vs central difference: worst rel err 1.175e-10
+> MODE 2 loop: c 2.590617e-02 -> 1.437720e-02 (-44.50%), mass 754.945 vs budget 755.940, max|beta| 5.0139
+>   BANKED: c 2.590617e-02 -> 1.416502e-02, lattice mass 409.534 (allowance 410.340), max|beta| 8.0000
+>   SPENT : c 2.590617e-02 -> 1.445859e-02, lattice mass 362.939 (allowance 410.340), max|beta| 6.5685
+
+=== test_lattice_certification
+<   [PASS] fcc == octet-legs at the shared anchor row
+>   [PASS] fcc keeps the legs-only row at its anchor
+>   [PASS] and octet, the full cell, is its own tensor at that density (shear differs > 5 %)
+
+=== test_lattice_hookup
+< [lattice] vf=0.60 certificate from what shipped: the law counted 317.2 mm3, the file holds 361.6; certified 248.4 mm3 (786 voxel(s) lowered to the file, 101 of them held at the band floor 0.0505)
+< [lattice] vf=0.60 volume check: 1 pocket(s), exported 361.6 / certified 248.4 mm3 (+45.57 %); lightest judged pocket 1836 voxels +45.57 % (heaviest +45.57 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (470016 points, 0.00 s)
+> [lattice] vf=0.60 certificate from what shipped: the law counted 524.7 mm3, the file holds 361.6; certified 321.0 mm3 (1393 voxel(s) lowered to the file, 101 of them held at the band floor 0.0496)
+> [lattice] vf=0.60 volume check: 1 pocket(s), exported 361.6 / certified 321.0 mm3 (+12.64 %); lightest judged pocket 1836 voxels +12.64 % (heaviest +12.64 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (470016 points, 0.00 s)
+< [lattice] vf=0.60 certificate from what shipped: the law counted 317.2 mm3, the file holds 361.6; certified 248.4 mm3 (786 voxel(s) lowered to the file, 101 of them held at the band floor 0.0505)
+< [lattice] vf=0.60 volume check: 1 pocket(s), exported 361.6 / certified 248.4 mm3 (+45.57 %); lightest judged pocket 1836 voxels +45.57 % (heaviest +45.57 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (470016 points, 0.00 s)
+> [lattice] vf=0.60 certificate from what shipped: the law counted 524.7 mm3, the file holds 361.6; certified 321.0 mm3 (1393 voxel(s) lowered to the file, 101 of them held at the band floor 0.0496)
+> [lattice] vf=0.60 volume check: 1 pocket(s), exported 361.6 / certified 321.0 mm3 (+12.64 %); lightest judged pocket 1836 voxels +12.64 % (heaviest +12.64 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (470016 points, 0.00 s)
+< [lattice] vf=0.60 certificate from what shipped: the law counted 292.4 mm3, the file holds 333.4; certified 228.9 mm3 (725 voxel(s) lowered to the file, 95 of them held at the band floor 0.0505)
+< [lattice] vf=0.60 volume check: 1 pocket(s), exported 333.4 / certified 228.9 mm3 (+45.69 %); lightest judged pocket 1692 voxels +45.69 % (heaviest +45.69 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (433152 points, 0.00 s)
+> [lattice] vf=0.60 certificate from what shipped: the law counted 483.5 mm3, the file holds 333.4; certified 296.0 mm3 (1285 voxel(s) lowered to the file, 95 of them held at the band floor 0.0496)
+> [lattice] vf=0.60 volume check: 1 pocket(s), exported 333.4 / certified 296.0 mm3 (+12.66 %); lightest judged pocket 1692 voxels +12.66 % (heaviest +12.66 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (433152 points, 0.00 s)
+< [lattice] vf=0.60 certificate from what shipped: the law counted 185.6 mm3, the file holds 210.6; certified 144.9 mm3 (468 voxel(s) lowered to the file, 60 of them held at the band floor 0.0505)
+< [lattice] vf=0.60 volume check: 1 pocket(s), exported 210.6 / certified 144.9 mm3 (+45.38 %); lightest judged pocket 1074 voxels +45.38 % (heaviest +45.38 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (274944 points, 0.00 s)
+> [lattice] vf=0.60 certificate from what shipped: the law counted 306.9 mm3, the file holds 210.6; certified 187.3 mm3 (820 voxel(s) lowered to the file, 60 of them held at the band floor 0.0496)
+> [lattice] vf=0.60 volume check: 1 pocket(s), exported 210.6 / certified 187.3 mm3 (+12.43 %); lightest judged pocket 1074 voxels +12.43 % (heaviest +12.43 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (274944 points, 0.00 s)
+< [lattice] vf=0.60 certificate from what shipped: the law counted 155.5 mm3, the file holds 172.7; certified 119.3 mm3 (408 voxel(s) lowered to the file, 55 of them held at the band floor 0.0505)
+< [lattice] vf=0.60 volume check: 1 pocket(s), exported 172.7 / certified 119.3 mm3 (+44.81 %); lightest judged pocket 900 voxels +44.81 % (heaviest +44.81 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (230400 points, 0.00 s)
+> [lattice] vf=0.60 certificate from what shipped: the law counted 257.2 mm3, the file holds 172.7; certified 154.1 mm3 (693 voxel(s) lowered to the file, 55 of them held at the band floor 0.0496)
+> [lattice] vf=0.60 volume check: 1 pocket(s), exported 172.7 / certified 154.1 mm3 (+12.06 %); lightest judged pocket 900 voxels +12.06 % (heaviest +12.06 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (230400 points, 0.00 s)
+< [lattice] vf=0.60 certificate from what shipped: the law counted 155.5 mm3, the file holds 172.7; certified 119.3 mm3 (408 voxel(s) lowered to the file, 55 of them held at the band floor 0.0505)
+< [lattice] vf=0.60 volume check: 1 pocket(s), exported 172.7 / certified 119.3 mm3 (+44.81 %); lightest judged pocket 900 voxels +44.81 % (heaviest +44.81 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (230400 points, 0.00 s)
+> [lattice] vf=0.60 certificate from what shipped: the law counted 257.2 mm3, the file holds 172.7; certified 154.1 mm3 (693 voxel(s) lowered to the file, 55 of them held at the band floor 0.0496)
+> [lattice] vf=0.60 volume check: 1 pocket(s), exported 172.7 / certified 154.1 mm3 (+12.06 %); lightest judged pocket 900 voxels +12.06 % (heaviest +12.06 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (230400 points, 0.00 s)
+< [lattice] vf=1.00 certificate from what shipped: the law counted 8964.3 mm3, the file holds 12925.9; certified 8410.2 mm3 (1947 voxel(s) lowered to the file, 239 of them held at the band floor 0.0505)
+< [lattice] vf=1.00 volume check: 1 pocket(s), exported 12925.9 / certified 8410.2 mm3 (+53.69 %); lightest judged pocket 10560 voxels +53.69 % (heaviest +53.69 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (2703360 points, 0.00 s)
+> [lattice] vf=1.00 certificate from what shipped: the law counted 8966.9 mm3, the file holds 8882.0; certified 7304.6 mm3 (5609 voxel(s) lowered to the file, 773 of them held at the band floor 0.0496)
+> [lattice] vf=1.00 volume check: 1 pocket(s), exported 8882.0 / certified 7304.6 mm3 (+21.59 %); lightest judged pocket 10560 voxels +21.59 % (heaviest +21.59 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (2703360 points, 0.00 s)
+< [lattice] vf=1.00 certificate from what shipped: the law counted 8964.3 mm3, the file holds 12925.9; certified 8410.2 mm3 (1947 voxel(s) lowered to the file, 239 of them held at the band floor 0.0505)
+< [lattice] vf=1.00 volume check: 1 pocket(s), exported 12925.9 / certified 8410.2 mm3 (+53.69 %); lightest judged pocket 10560 voxels +53.69 % (heaviest +53.69 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (2703360 points, 0.00 s)
+> [lattice] vf=1.00 certificate from what shipped: the law counted 8966.9 mm3, the file holds 8882.0; certified 7304.6 mm3 (5609 voxel(s) lowered to the file, 773 of them held at the band floor 0.0496)
+> [lattice] vf=1.00 volume check: 1 pocket(s), exported 8882.0 / certified 7304.6 mm3 (+21.59 %); lightest judged pocket 10560 voxels +21.59 % (heaviest +21.59 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (2703360 points, 0.00 s)
+
+=== test_lattice_variant
+< [Z1] lattice-variant wall time: 1.01 s (3 certification solves, 0 design iterations)
+< [Z4] graded from the variant's own stored design, NO sim: rho 0.1124 .. 0.8100 over 11894 latticed voxels, cell 3.000 mm
+< [L3] zero-density lattice refused: lattice_variant: the grading law could lattice NONE of this variant's 19488 candidate voxels, so there is no lattice to emit — refusing rather than writing a file with zero struts in it and calling it a lattice. Reasons: member_too_thin_for_cell=19488, strut_unprintable_at_every_cell=0, irrecoverable_by_any_cell_size=1952. The widest member the law rejected is 25 mm; at this cell size a member must be at least 1000 mm across to hold 5 cells. A smaller cell needs a finer declared extrusion width (min_extrudable_width_mm 0.42 mm sets the printability floor at 4.602619932 mm) — run the pre-flight forecast for the evaluated remedies.
+> [Z1] lattice-variant wall time: 1.08 s (3 certification solves, 0 design iterations)
+> [Z4] graded from the variant's own stored design, NO sim: rho 0.2084 .. 0.8104 over 11894 latticed voxels, cell 3.000 mm
+> [L3] zero-density lattice refused: lattice_variant: the grading law could lattice NONE of this variant's 19488 candidate voxels, so there is no lattice to emit — refusing rather than writing a file with zero struts in it and calling it a lattice. Reasons: member_too_thin_for_cell=19488, strut_unprintable_at_every_cell=0, irrecoverable_by_any_cell_size=1952. The widest member the law rejected is 25 mm; at this cell size a member must be at least 1000 mm across to hold 5 cells. A smaller cell needs a finer declared extrusion width (min_extrudable_width_mm 0.42 mm sets the printability floor at 6.558185943 mm) — run the pre-flight forecast for the evaluated remedies.
+< [lattice] vf=0.60 certificate from what shipped: the law counted 317.2 mm3, the file holds 361.6; certified 248.4 mm3 (786 voxel(s) lowered to the file, 101 of them held at the band floor 0.0505)
+< [lattice] vf=0.60 volume check: 1 pocket(s), exported 361.6 / certified 248.4 mm3 (+45.57 %); lightest judged pocket 1836 voxels +45.57 % (heaviest +45.57 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (470016 points, 0.00 s)
+< [lattice] vf=0.60 certificate from what shipped: the law counted 317.2 mm3, the file holds 361.6; certified 248.4 mm3 (786 voxel(s) lowered to the file, 101 of them held at the band floor 0.0505)
+< [lattice] vf=0.60 volume check: 1 pocket(s), exported 361.6 / certified 248.4 mm3 (+45.57 %); lightest judged pocket 1836 voxels +45.57 % (heaviest +45.57 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (470016 points, 0.00 s)
+> [lattice] vf=0.60 certificate from what shipped: the law counted 524.7 mm3, the file holds 361.6; certified 321.0 mm3 (1393 voxel(s) lowered to the file, 101 of them held at the band floor 0.0496)
+> [lattice] vf=0.60 volume check: 1 pocket(s), exported 361.6 / certified 321.0 mm3 (+12.64 %); lightest judged pocket 1836 voxels +12.64 % (heaviest +12.64 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (470016 points, 0.00 s)
+> [lattice] vf=0.60 certificate from what shipped: the law counted 524.7 mm3, the file holds 361.6; certified 321.0 mm3 (1393 voxel(s) lowered to the file, 101 of them held at the band floor 0.0496)
+> [lattice] vf=0.60 volume check: 1 pocket(s), exported 361.6 / certified 321.0 mm3 (+12.64 %); lightest judged pocket 1836 voxels +12.64 % (heaviest +12.64 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (470016 points, 0.00 s)
+< [lattice] vf=0.70 certificate from what shipped: the law counted 95919.6 mm3, the file holds 137634.5; certified 94587.4 mm3 (566 voxel(s) lowered to the file, 0 of them held at the band floor 0.0505)
+< [lattice] vf=0.70 volume check: 1 pocket(s), exported 137634.5 / certified 94587.4 mm3 (+45.51 %); lightest judged pocket 11894 voxels +45.51 % (heaviest +45.51 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (3044864 points, 0.00 s)
+< [lattice] vf=0.70 certificate from what shipped: the law counted 95919.6 mm3, the file holds 137634.5; certified 94587.4 mm3 (566 voxel(s) lowered to the file, 0 of them held at the band floor 0.0505)
+< [lattice] vf=0.70 volume check: 1 pocket(s), exported 137634.5 / certified 94587.4 mm3 (+45.51 %); lightest judged pocket 11894 voxels +45.51 % (heaviest +45.51 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (3044864 points, 0.00 s)
+> [lattice] vf=0.70 certificate from what shipped: the law counted 97569.0 mm3, the file holds 94117.1; certified 92445.4 mm3 (6592 voxel(s) lowered to the file, 0 of them held at the band floor 0.0496)
+> [lattice] vf=0.70 volume check: 1 pocket(s), exported 94117.1 / certified 92445.4 mm3 (+1.81 %); lightest judged pocket 11894 voxels +1.81 % (heaviest +1.81 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (3044864 points, 0.00 s)
+> [lattice] vf=0.70 certificate from what shipped: the law counted 97569.0 mm3, the file holds 94117.1; certified 92445.4 mm3 (6592 voxel(s) lowered to the file, 0 of them held at the band floor 0.0496)
+> [lattice] vf=0.70 volume check: 1 pocket(s), exported 94117.1 / certified 92445.4 mm3 (+1.81 %); lightest judged pocket 11894 voxels +1.81 % (heaviest +1.81 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (3044864 points, 0.00 s)
+< [lattice] vf=0.70 certificate from what shipped: the law counted 124537.2 mm3, the file holds 187509.3; certified 122306.4 mm3 (1568 voxel(s) lowered to the file, 0 of them held at the band floor 0.0505)
+< [lattice] vf=0.70 volume check: 1 pocket(s), exported 187509.3 / certified 122306.4 mm3 (+53.31 %); lightest judged pocket 19460 voxels +53.31 % (heaviest +53.31 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (4981760 points, 0.00 s)
+< [lattice] vf=0.74 certificate from what shipped: the law counted 537.4 mm3, the file holds 686.0; certified 459.1 mm3 (1022 voxel(s) lowered to the file, 40 of them held at the band floor 0.0505)
+< [lattice] vf=0.74 volume check: 1 pocket(s), exported 686.0 / certified 459.1 mm3 (+49.42 %); lightest judged pocket 3110 voxels +49.42 % (heaviest +49.42 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (796160 points, 0.00 s)
+> [lattice] vf=0.70 certificate from what shipped: the law counted 205961.8 mm3, the file holds 187509.3; certified 185673.5 mm3 (12676 voxel(s) lowered to the file, 0 of them held at the band floor 0.0496)
+> [lattice] vf=0.70 volume check: 1 pocket(s), exported 187509.3 / certified 185673.5 mm3 (+0.99 %); lightest judged pocket 19460 voxels +0.99 % (heaviest +0.99 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (4981760 points, 0.00 s)
+> [lattice] vf=0.74 certificate from what shipped: the law counted 888.7 mm3, the file holds 686.0; certified 608.6 mm3 (2355 voxel(s) lowered to the file, 40 of them held at the band floor 0.0496)
+> [lattice] vf=0.74 volume check: 1 pocket(s), exported 686.0 / certified 608.6 mm3 (+12.71 %); lightest judged pocket 3110 voxels +12.71 % (heaviest +12.71 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (796160 points, 0.00 s)
+
+=== test_designbox_lattice_recert
+< [AI1] recorded 16013.2 == reproduced 16013.2; composite 11660.6 on both entry points
+> [AI1] recorded 16013.2 == reproduced 16013.2; composite 13380.1 on both entry points
+< [lattice] vf=0.80 certificate from what shipped: the law counted 58.1 mm3, the file holds 51.4; certified 37.6 mm3 (186 voxel(s) lowered to the file, 67 of them held at the band floor 0.0505)
+< [lattice] vf=0.80 volume check: 3 pocket(s), exported 51.4 / certified 37.6 mm3 (+36.81 %); lightest judged pocket 290 voxels +40.47 % (heaviest +40.47 %); 2 pocket(s) under one cell not judged (0.0 / 1.0 mm3) (205294 points, 0.00 s)
+> [lattice] vf=0.80 certificate from what shipped: the law counted 96.0 mm3, the file holds 51.4; certified 46.8 mm3 (273 voxel(s) lowered to the file, 67 of them held at the band floor 0.0496)
+> [lattice] vf=0.80 volume check: 3 pocket(s), exported 51.4 / certified 46.8 mm3 (+9.94 %); lightest judged pocket 290 voxels +12.25 % (heaviest +12.25 %); 2 pocket(s) under one cell not judged (0.0 / 1.0 mm3) (205294 points, 0.00 s)
+< [lattice] vf=0.80 certificate from what shipped: the law counted 58.1 mm3, the file holds 51.4; certified 37.6 mm3 (186 voxel(s) lowered to the file, 67 of them held at the band floor 0.0505)
+< [lattice] vf=0.80 volume check: 3 pocket(s), exported 51.4 / certified 37.6 mm3 (+36.81 %); lightest judged pocket 290 voxels +40.47 % (heaviest +40.47 %); 2 pocket(s) under one cell not judged (0.0 / 1.0 mm3) (205294 points, 0.00 s)
+< [lattice] vf=0.80 certificate from what shipped: the law counted 58.1 mm3, the file holds 51.4; certified 37.6 mm3 (186 voxel(s) lowered to the file, 67 of them held at the band floor 0.0505)
+< [lattice] vf=0.80 volume check: 3 pocket(s), exported 51.4 / certified 37.6 mm3 (+36.81 %); lightest judged pocket 290 voxels +40.47 % (heaviest +40.47 %); 2 pocket(s) under one cell not judged (0.0 / 1.0 mm3) (205294 points, 0.00 s)
+> [lattice] vf=0.80 certificate from what shipped: the law counted 96.0 mm3, the file holds 51.4; certified 46.8 mm3 (273 voxel(s) lowered to the file, 67 of them held at the band floor 0.0496)
+> [lattice] vf=0.80 volume check: 3 pocket(s), exported 51.4 / certified 46.8 mm3 (+9.94 %); lightest judged pocket 290 voxels +12.25 % (heaviest +12.25 %); 2 pocket(s) under one cell not judged (0.0 / 1.0 mm3) (205294 points, 0.00 s)
+> [lattice] vf=0.80 certificate from what shipped: the law counted 96.0 mm3, the file holds 51.4; certified 46.8 mm3 (273 voxel(s) lowered to the file, 67 of them held at the band floor 0.0496)
+> [lattice] vf=0.80 volume check: 3 pocket(s), exported 51.4 / certified 46.8 mm3 (+9.94 %); lightest judged pocket 290 voxels +12.25 % (heaviest +12.25 %); 2 pocket(s) under one cell not judged (0.0 / 1.0 mm3) (205294 points, 0.00 s)
+
+=== test_lattice_void_exterior
+< LATTICE vf=1.000000 topology=octet cell_mm=8 strut_r_mm=1.2 rho=0.409578 cells=9 tris=6680 lattice_margin=3383.72 lattice_accepted=1 report=GATE/src/core/build/lat_void_off/variant_100_lattice.report.json mesh=GATE/src/core/build/lat_void_off/variant_100_lattice.stl
+> LATTICE vf=1.000000 topology=octet cell_mm=8 strut_r_mm=1.2 rho=0.677367 cells=9 tris=6680 lattice_margin=3386.14 lattice_accepted=1 report=GATE/src/core/build/lat_void_off/variant_100_lattice.report.json mesh=GATE/src/core/build/lat_void_off/variant_100_lattice.stl
+< LATTICE vf=1.000000 topology=octet cell_mm=8 strut_r_mm=1.2 rho=0.409578 cells=24 tris=15848 lattice_margin=2954.28 lattice_accepted=1 report=GATE/src/core/build/lat_void_open/variant_100_lattice.report.json mesh=GATE/src/core/build/lat_void_open/variant_100_lattice.stl
+> LATTICE vf=1.000000 topology=octet cell_mm=8 strut_r_mm=1.2 rho=0.677367 cells=24 tris=15848 lattice_margin=3102.44 lattice_accepted=1 report=GATE/src/core/build/lat_void_open/variant_100_lattice.report.json mesh=GATE/src/core/build/lat_void_open/variant_100_lattice.stl
+< [lattice] vf=1.00 certificate from what shipped: the law counted 218.7 mm3, the file holds 351.3; certified 193.6 mm3 (18 voxel(s) lowered to the file, 2 of them held at the band floor 0.0505)
+< [lattice] vf=1.00 volume check: 1 pocket(s), exported 351.3 / certified 193.6 mm3 (+81.49 %); lightest judged pocket 81 voxels +81.49 % (heaviest +81.49 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (65529 points, 0.00 s)
+> [lattice] vf=1.00 certificate from what shipped: the law counted 361.7 mm3, the file holds 351.3; certified 292.5 mm3 (35 voxel(s) lowered to the file, 2 of them held at the band floor 0.0496)
+> [lattice] vf=1.00 volume check: 1 pocket(s), exported 351.3 / certified 292.5 mm3 (+20.10 %); lightest judged pocket 81 voxels +20.10 % (heaviest +20.10 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (65529 points, 0.00 s)
+< [lattice] vf=1.00 certificate from what shipped: the law counted 745.2 mm3, the file holds 1099.8; certified 632.1 mm3 (83 voxel(s) lowered to the file, 15 of them held at the band floor 0.0505)
+< [lattice] vf=1.00 volume check: 1 pocket(s), exported 1099.8 / certified 632.1 mm3 (+74.00 %); lightest judged pocket 276 voxels +74.00 % (heaviest +74.00 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (70656 points, 0.00 s)
+> [lattice] vf=1.00 certificate from what shipped: the law counted 1232.4 mm3, the file holds 1099.8; certified 932.8 mm3 (134 voxel(s) lowered to the file, 15 of them held at the band floor 0.0496)
+> [lattice] vf=1.00 volume check: 1 pocket(s), exported 1099.8 / certified 932.8 mm3 (+17.91 %); lightest judged pocket 276 voxels +17.91 % (heaviest +17.91 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (70656 points, 0.00 s)
+
+=== test_bake_build_orientation
+< [lattice] vf=0.60 certificate from what shipped: the law counted 292.4 mm3, the file holds 333.4; certified 228.9 mm3 (725 voxel(s) lowered to the file, 95 of them held at the band floor 0.0505)
+< [lattice] vf=0.60 volume check: 1 pocket(s), exported 333.4 / certified 228.9 mm3 (+45.69 %); lightest judged pocket 1692 voxels +45.69 % (heaviest +45.69 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (433152 points, 0.00 s)
+> [lattice] vf=0.60 certificate from what shipped: the law counted 483.5 mm3, the file holds 333.4; certified 296.0 mm3 (1285 voxel(s) lowered to the file, 95 of them held at the band floor 0.0496)
+> [lattice] vf=0.60 volume check: 1 pocket(s), exported 333.4 / certified 296.0 mm3 (+12.66 %); lightest judged pocket 1692 voxels +12.66 % (heaviest +12.66 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (433152 points, 0.00 s)
+< [lattice] vf=0.60 certificate from what shipped: the law counted 292.4 mm3, the file holds 333.4; certified 228.9 mm3 (725 voxel(s) lowered to the file, 95 of them held at the band floor 0.0505)
+< [lattice] vf=0.60 volume check: 1 pocket(s), exported 333.4 / certified 228.9 mm3 (+45.69 %); lightest judged pocket 1692 voxels +45.69 % (heaviest +45.69 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (433152 points, 0.00 s)
+> [lattice] vf=0.60 certificate from what shipped: the law counted 483.5 mm3, the file holds 333.4; certified 296.0 mm3 (1285 voxel(s) lowered to the file, 95 of them held at the band floor 0.0496)
+> [lattice] vf=0.60 volume check: 1 pocket(s), exported 333.4 / certified 296.0 mm3 (+12.66 %); lightest judged pocket 1692 voxels +12.66 % (heaviest +12.66 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (433152 points, 0.00 s)

@@ -1,0 +1,20 @@
+LATTICE DE-HOMOGENIZATION PROBE — diamond band [0.15712, 0.59201] (read from core)
+
+===== BOUNDARY POPULATIONS — free surfaces and cut cells (J4) =====
+  sandwich rho 0.157 N3 vpc24: K_dev free=54.3 interior=43.2 dropped=0 (83s, cg<=1341)
+  cut rho 0.157 N3 vpc24: K_dev free=56.9 interior=49.6 dropped=0 (113s, cg<=1576)
+  sandwich rho 0.200 N4 vpc16: K_dev free=41.2 interior=37.3 dropped=0 (59s, cg<=961)
+    rho_meas 0.2344 is +17.2% off rho_lib 0.2000 (aliased): re-measuring at N3 vpc24
+  cut rho 0.200 N4 vpc16: K_dev free=43.4 interior=39.1 dropped=0 (78s, cg<=1085)
+    rho_meas 0.2344 is +17.2% off rho_lib 0.2000 (aliased): re-measuring at N3 vpc24
+  sandwich rho 0.313 N4 vpc16: K_dev free=16.4 interior=13.8 dropped=0 (75s, cg<=806)
+  cut rho 0.313 N4 vpc16: K_dev free=17.1 interior=15.2 dropped=0 (102s, cg<=927)
+  sandwich rho 0.450 N4 vpc16: K_dev free=9.2 interior=8.1 dropped=0 (86s, cg<=748)
+  cut rho 0.450 N4 vpc16: K_dev free=9.6 interior=8.5 dropped=0 (112s, cg<=881)
+  sandwich rho 0.592 N4 vpc16: K_dev free=9.5 interior=4.9 dropped=0 (106s, cg<=600)
+  cut rho 0.592 N4 vpc16: K_dev free=9.6 interior=5.0 dropped=0 (126s, cg<=762)
+  sandwich rho 0.200 N3 vpc24: K_dev free=45.3 interior=38.7 dropped=0 (78s, cg<=1231)
+  cut rho 0.200 N3 vpc24: K_dev free=47.8 interior=41.2 dropped=0 (106s, cg<=1439)
+
+DONE (rc=0).
+exit 0

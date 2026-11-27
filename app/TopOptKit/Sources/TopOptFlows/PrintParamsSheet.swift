@@ -36,6 +36,18 @@ public struct PrintParamsSheet: View {
     /// The editable numeric fields, so one `editingField` drives every field's pad.
     private enum ParamField: Hashable {
         case layerHeight, wallLoops, outerLineWidth, innerLineWidth, topLayers, bottomLayers, infill
+
+        /// ★ B2 (U15): its range — the pad's header says it, and a number outside it keeps the nearest end.
+        var range: NumberRange {
+            func r(_ c: ClosedRange<Int>) -> NumberRange { NumberRange(Double(c.lowerBound), Double(c.upperBound)) }
+            switch self {
+            case .layerHeight: return NumberRange(PrintParams.layerHeightRange)
+            case .outerLineWidth, .innerLineWidth: return NumberRange(PrintParams.lineWidthRange)
+            case .wallLoops: return r(PrintParams.wallLoopsRange)
+            case .topLayers, .bottomLayers: return r(PrintParams.shellLayersRange)
+            case .infill: return r(PrintParams.infillRange)
+            }
+        }
     }
 
     private func padBinding(_ field: ParamField) -> Binding<Bool> {
@@ -50,6 +62,8 @@ public struct PrintParamsSheet: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
+            // ★ B2 (U17, §4.11; U6): what the sheet asks is a row IN it — never an alert over it
+            if savingPreset, !project.paramsLocked { presetNameRow }
 
             if project.paramsLocked {
                 lockedBody
@@ -66,17 +80,27 @@ public struct PrintParamsSheet: View {
         .padding(DS.Space.xl6)
         .frame(width: 560, alignment: .leading)
         .foregroundStyle(DS.Color.textPrimary.color)
-        // Save the current values as a named, app-wide preset (editable mode only).
-        .alert("Save preset", isPresented: $savingPreset) {
+    }
+
+    /// Save the current values as a named, app-wide preset (editable mode only): the name, Cancel, Save — in the sheet.
+    private var presetNameRow: some View {
+        HStack(spacing: DS.Space.s) {
             TextField("Preset name", text: $presetName)
-            Button("Cancel", role: .cancel) { presetName = "" }
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("preset-name")
+            Button("Cancel") { presetName = ""; savingPreset = false }
+                .buttonStyle(.plain).foregroundStyle(DS.Color.textSecondary.color)
+                .frame(minWidth: 44, minHeight: 44)
             Button("Save") {
                 model.savePreset(named: presetName, params: project.printParams)
-                presetName = ""
+                presetName = ""; savingPreset = false
             }
-        } message: {
-            Text("Save these print parameters as a reusable preset, available to every project.")
+            .buttonStyle(.plain).foregroundStyle(DS.Color.accent.color).fontWeight(.semibold)
+            .frame(minWidth: 44, minHeight: 44)
+            .disabled(presetName.trimmingCharacters(in: .whitespaces).isEmpty)
         }
+        .padding(.top, DS.Space.m)
+        .background(CornerPairStyle.publish("presetNameRow"))
     }
 
     // MARK: header
@@ -127,7 +151,7 @@ public struct PrintParamsSheet: View {
                     .overlay(Capsule().strokeBorder(DS.Color.strokeStrong.color, lineWidth: 1)))
             }
 
-            Button { savingPreset = true } label: {
+            Button { savingPreset.toggle() } label: {
                 HStack(spacing: DS.Space.xs) {
                     Image(systemName: "square.and.arrow.down")
                         .font(.system(size: 11, weight: .semibold))
@@ -139,6 +163,7 @@ public struct PrintParamsSheet: View {
                     .overlay(Capsule().strokeBorder(DS.Color.strokeStrong.color, lineWidth: 1)))
             }
             .buttonStyle(.plain)
+            .background(CornerPairStyle.publish("presetSave"))
         }
     }
 
@@ -186,12 +211,22 @@ public struct PrintParamsSheet: View {
 
     /// Disambiguates the two line-width fields: they are extrusion BEAD widths (a slicer
     /// setting), never the nozzle diameter — the distinction the whole feature turns on.
+    /// ★ notes29 (his 11-25): five words under the fields, the sentence in the one (i).
     private var lineWidthFootnote: some View {
-        Text("Line width is the width of one deposited wall bead (≈1.0–1.2× nozzle), not the nozzle diameter.")
-            .dsStyle(DS.TypeScale.caption2)
-            .foregroundStyle(DS.Color.textTertiary.color)
-            .fixedSize(horizontal: false, vertical: true)
+        HStack(spacing: DS.Space.xs) {
+            Text(Self.lineWidthCaption)
+                .dsStyle(DS.TypeScale.caption2)
+                .foregroundStyle(DS.Color.textTertiary.color)
+                .fixedSize(horizontal: false, vertical: true)
+            AppInfoButton(title: "Line width", text: Self.lineWidthInfo)
+        }
     }
+    static let lineWidthCaption = "Width of one wall bead."
+    static let lineWidthInfo = "Line width is the width of one deposited wall bead (about 1.0 to 1.2 times the nozzle), "
+        + "not the nozzle diameter."
+    static let lockedCaption = "Locked when the project began."
+    static let lockedInfo = "These parameters were locked when the project was created and can't be changed. Create a new "
+        + "project to print at different settings."
 
     // MARK: locked body (read-only, post-creation)
 
@@ -217,11 +252,12 @@ public struct PrintParamsSheet: View {
 
             lineWidthFootnote.padding(.top, DS.Space.s)
 
-            HStack(spacing: DS.Space.s) {
-                Image(systemName: "info.circle").font(.system(size: 12, weight: .semibold))
-                Text("These parameters were locked when the project was created and can't be changed. Create a new project to print at different settings.")
+            // ★ notes29 (his 11-25): five words, the rest in the one (i)
+            HStack(spacing: DS.Space.xs) {
+                Text(Self.lockedCaption)
                     .dsStyle(DS.TypeScale.caption)
                     .fixedSize(horizontal: false, vertical: true)
+                AppInfoButton(title: "Locked settings", text: Self.lockedInfo)
             }
             .foregroundStyle(DS.Color.textTertiary.color)
             .padding(.top, DS.Space.xl)
@@ -281,8 +317,9 @@ public struct PrintParamsSheet: View {
                 .background(fieldBackground)
             }
             .buttonStyle(.plain)
+            .background(CornerPairStyle.publish("printParam-infill"))
             .numberPad(padBinding(.infill),
-                       config: .init(title: "Infill density", unit: "%", allowsDecimal: false),
+                       config: .init(title: "Infill density", unit: "%", allowsDecimal: false, range: ParamField.infill.range),
                        seed: Double(project.printParams.infillPercent)) { v in
                 if let v { project.printParams.infillPercent = Int(v.rounded()) }
             }
@@ -391,7 +428,7 @@ public struct PrintParamsSheet: View {
                 }
                 .buttonStyle(.plain)
                 .numberPad(padBinding(field),
-                           config: .init(title: label, allowsDecimal: false),
+                           config: .init(title: label, allowsDecimal: false, range: field.range),
                            seed: Double(value.wrappedValue)) { v in
                     if let v { value.wrappedValue = Int(v.rounded()) }
                 }
@@ -424,7 +461,7 @@ public struct PrintParamsSheet: View {
                 }
                 .buttonStyle(.plain)
                 .numberPad(padBinding(field),
-                           config: .init(title: label, unit: suffix, allowsDecimal: true),
+                           config: .init(title: label, unit: suffix, allowsDecimal: true, range: field.range),
                            seed: value.wrappedValue) { v in
                     if let v { value.wrappedValue = v }
                 }

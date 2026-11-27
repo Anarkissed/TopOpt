@@ -1,0 +1,17 @@
+# Release 34c0d802 — 2026-11-05 LatticeCorner (UI-Notes' app batch up to 6e2596c5), app only, released before review (his 11-03 pick)
+# Core and worker unchanged: fingerprint 6c5a6fbaa842; "fingerprint": "6c5a6fbaa842"
+# Merged onto 1c6f6265; the merged app tree equals 6e2596c5's, so the builder's tests apply unchanged.
+# Commits:
+#   7e4f0b53 B6 slice 1 (notes 22, 23; plan.md §B6 risk 1): the Lattice stage's own groups — HELD, not for release until Lattice Setup is rebuilt
+#   738499a6 Merge B6 slice 1 (7e4f0b53, held since 11-03): the Lattice stage's own groups, now that Lattice Setup is being rebuilt (his go 11-05)
+#   9af3b9ee Merge remote-tracking branch 'origin/claude/flexible-screens' into claude/app-build-parts
+#   f99b7908 B6 s1a (his go 11-05; note 21, N4, Q3 (c)): the Lattice corner is Topology's — Settings ⌄ │ Lattice │ ⌃ — with the fix line, and the hint is back
+#   6e2596c5 Merge UI-Notes' B6 s1a (f99b7908, his go 11-05; note 21) into B9: the Lattice corner is Topology's — Settings ⌄ │ Lattice │ ⌃ — with the fix line; the hint is back; the Lattice stage's own group list (latticeList, optional, migrated on open)
+#   34c0d802 Release 2026-11-05: merge B9 6e2596c5 — UI-Notes' B6 s1a (f99b7908, his go 11-05; note 21): the Lattice corner is Topology's — Settings ⌄ │ Lattice │ ⌃ — with the fix line 'No lattice settings yet · Open Lattice'; chips, iPad and Print Parameters are Settings rows; the hint is back; the Lattice stage's own group list (latticeList, optional, migrated on open) (app only; core and worker unchanged at 6c5a6fbaa842)
+# Gates:
+#   16:07 checks ok: LatticeCorner, local 34c0d802 over origin 1c6f6265 (6 commits); app tree == 6e2596c5's, fingerprint 6c5a6fbaa842
+#   16:07 waiting for HEAVY.lock (free)
+#   16:07 lock taken
+#   16:13 iPad device build green; lock released
+#   16:13 pushed 34c0d802
+#   16:13 worker /health "fingerprint": "6c5a6fbaa842" (unchanged, no swap)

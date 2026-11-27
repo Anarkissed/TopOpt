@@ -781,4 +781,29 @@ double region_thinnest_extent_mm(const ClearanceVoxelMask& mask) {
   return body[mid];
 }
 
+
+std::vector<ClearanceClip> region_clearance_clips(const ResolvedFaceRegion& region) {
+  std::vector<ClearanceClip> clips;
+  clips.reserve(region.cuts.size());
+  for (const RegionCut& cut : region.cuts)
+    clips.push_back(ClearanceClip{cut.point, cut.normal, cut.strict});
+  return clips;
+}
+
+std::vector<ClearanceGeometry> resolve_clearance_from_region(
+    const StepModel& model, const ResolvedFaceRegion& region, const ClearanceParams& params) {
+  std::vector<ClearanceGeometry> out = resolve_clearance_from_faces(
+      model, region.member_faces, region_clearance_clips(region), params);
+  if (!out.empty()) return out;
+  const std::string piece =
+      region.name.empty() ? std::string("a cut piece") : "\u201C" + region.name + "\u201D";
+  throw std::invalid_argument(
+      params.kind == ClearanceKind::Bolt
+          ? "Keep clear on " + piece + ": a bolt Keep clear needs a round hole, and this "
+            "piece has no round face. Use a face Keep clear here, or put the bolt Keep "
+            "clear on the hole."
+          : "Keep clear on " + piece + ": a face Keep clear needs a flat face, and this "
+            "piece has none. Use a bolt Keep clear on a hole, or pick a flat piece.");
+}
+
 }  // namespace topopt

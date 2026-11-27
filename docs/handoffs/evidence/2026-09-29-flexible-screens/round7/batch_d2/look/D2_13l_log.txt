@@ -1,0 +1,32 @@
+[13l] settled true · status 'Preview · core runs one group at a time' · list (24,500 348x189)
+wrote D2_13l_E01_rest.png
+  E02: chip (723,709 404x132) · handles handle-depth-f:2AC5732E-4A99-4195-A0A3-5BBE73DD4D18:3 (830,564 88x32), handle-expand-f:2AC5732E-4A99-4195-A0A3-5BBE73DD4D18:3 (825,636 88x32) · nothing touches
+wrote D2_13l_E02_face3_chipM_handles_list.png
+  E03: chip (507,532 404x229) · handles none · nothing touches
+  join (519,592 380x48) · held line: Lattice on a new face waits for a review
+wrote D2_13l_E03_face2_chipN_join.png
+  tap Add to Group C as lattice [chipJoin (519,592 380x48)]
+  joined: Face 2 role Optional(TopOptFlows.LatticeGroupRole.include) depth 25.0 · pick face(group: 2AC5732E-4A99-4195-A0A3-5BBE73DD4D18, ref: TopOptFlows.LatticeSelectableRef.face(group: 2AC5732E-4A99-4195-A0A3-5BBE73DD4D18, face: 2))
+  E04: chip (383,423 404x132) · handles handle-depth-f:2AC5732E-4A99-4195-A0A3-5BBE73DD4D18:2 (610,564 88x32), handle-expand-f:2AC5732E-4A99-4195-A0A3-5BBE73DD4D18:2 (615,636 88x32) · nothing touches
+wrote D2_13l_E04_joined_chip_stays.png
+  tap Face 3's (i) in the list [info-l-f:2AC5732E-4A99-4195-A0A3-5BBE73DD4D18:3 (316,650 44x44)]
+  (i) card (368,566 280x160)
+wrote D2_13l_E05_info_four_numbers.png
+  tap Group C's trash [selTrash-2AC5732E-4A99-4195-A0A3-5BBE73DD4D18 (322,542 44x44)]
+wrote D2_13l_E06_trash_confirm.png
+  tap [Delete] [deleteConfirm (286,587 66x44)]
+  deleted: Group C present false · message Optional("Group C deleted here and in Topology") · undo frame (975,888 52x44)
+wrote D2_13l_E07_deleted_undo_message.png
+  tap [Undo] [toastUndo (975,888 52x44)]
+  undone: Group C present true · Face 3 25.0 mm
+wrote D2_13l_E08_undone_group_back.png
+  E09: chip (777,694 404x229) · handles none · nothing touches
+wrote D2_13l_E09_moved_chip_leader.png
+  X-ray, nothing picked: prisms ["3", "5", "2"]
+wrote D2_13l_E10_xray_every_prism_faint.png
+  E11: chip (723,709 404x132) · handles handle-depth-f:2AC5732E-4A99-4195-A0A3-5BBE73DD4D18:3 (863,583 88x32), handle-expand-f:2AC5732E-4A99-4195-A0A3-5BBE73DD4D18:3 (857,655 88x32) · nothing touches
+wrote D2_13l_E11_depth_handle_mid_drag_xray.png
+  img2 front, the Top picked: prisms 0 · handles 0
+  E12: chip (486,514 404x132) · handles none · nothing touches
+wrote D2_13l_E12_img2_front_top_picked_no_12mm.png
+touches: 0

@@ -255,12 +255,8 @@ final class RemoteRunnerE2ETests: XCTestCase {
                 modelPath: request.modelPath,
                 workerSelected: true, runInFlight: false,
                 requestedVolumeFraction: v.requestedVolumeFraction)
-            let smooth = VariantEntry.smoothing(facts)
-            let lattice = VariantEntry.lattice(facts)
-            print("  variant \(i) vf=\(v.requestedVolumeFraction): "
-                + "smooth=\(smooth.enabled) lattice=\(lattice.enabled)")
-            XCTAssertTrue(smooth.enabled,
-                          "P4: Smooth must be usable — blocks: \(smooth.allReasons)")
+            let lattice = VariantEntry.lattice(facts)   // ★ RE-PINNED (UI-Notes B4, plan.md §B4: "The Smooth page is deleted"; core finishes every result, E1)
+            print("  variant \(i) vf=\(v.requestedVolumeFraction): lattice=\(lattice.enabled)")
             XCTAssertTrue(lattice.enabled,
                           "R3: Lattice must be usable — blocks: \(lattice.allReasons)")
         }

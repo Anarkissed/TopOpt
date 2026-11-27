@@ -1,0 +1,88 @@
+===== 102117B9 dg
+  plan bases: 4 -> 4; moved: []
+  harness cells 12111 -> 12111
+  job_plan.json: stepped_cells 12113 -> 12113 (identical: True); regions 177 -> 177, half-extents changed on 0
+  job_noplan.json: stepped_cells 0 -> 0 (identical: True); regions 177 -> 177, half-extents changed on 0
+  DG-OVERLAPS same: DG-OVERLAPS 0 same-region pair(s)
+  DG-PLAN same: DG-PLAN doubled: 12113 cell(s) over 177 region(s) | 4.00=1 3.44=1 2.58=10860 2.40=1251
+  DG-PLAN per region same: DG-PLAN per region: r1=1251 r2=10860 r129=1 r135=1
+  DG-SLOT-ORIGINS same: DG-SLOT-ORIGINS 4 region(s) carry slot_origin_mm
+===== 3418E167 dg
+  plan bases: 2 -> 2; moved: [(1, 4.6667, 3.5)]
+  harness cells 2636 -> 3294
+   r1: (914, '4.67=914', 259279.0, 162068.0, 62.51) -> (1572, '3.50=1572', 259279.0, 194472.0, 75.0)
+  job_plan.json: stepped_cells 2636 -> 3294 (identical: False); regions 2 -> 2, half-extents changed on 0
+  job_noplan.json: stepped_cells 0 -> 0 (identical: True); regions 2 -> 2, half-extents changed on 0
+  DG-OVERLAPS same: DG-OVERLAPS 0 same-region pair(s)
+  DG-PLAN:
+    B DG-PLAN doubled: 2636 cell(s) over 2 region(s) | 12.00=5 6.00=179 4.67=914 3.00=1538
+    A DG-PLAN doubled: 3294 cell(s) over 2 region(s) | 12.00=5 6.00=179 3.50=1572 3.00=1538
+  DG-PLAN per region:
+    B DG-PLAN per region: r1=914 r2=1722
+    A DG-PLAN per region: r1=1572 r2=1722
+  DG-SLOT-ORIGINS same: DG-SLOT-ORIGINS 2 region(s) carry slot_origin_mm
+===== 3418E167 stepped
+  plan bases: 2 -> 2; moved: []
+  harness cells 2827 -> 2827
+  job_plan.json: stepped_cells 2827 -> 2827 (identical: True); regions 2 -> 2, half-extents changed on 0
+  job_noplan.json: stepped_cells 0 -> 0 (identical: True); regions 2 -> 2, half-extents changed on 0
+  DG-OVERLAPS same: DG-OVERLAPS 0 same-region pair(s)
+  DG-PLAN same: DG-PLAN stepped: 2827 cell(s) over 2 region(s) | 6.00=237 4.67=733 3.50=262 3.00=1595
+  DG-PLAN per region same: DG-PLAN per region: r1=995 r2=1832
+  DG-SLOT-ORIGINS same: DG-SLOT-ORIGINS 2 region(s) carry slot_origin_mm
+===== 570B38E2 dg
+  plan bases: 2 -> 2; moved: []
+  harness cells 4198 -> 4198
+  job_plan.json: stepped_cells 4198 -> 4198 (identical: True); regions 2 -> 2, half-extents changed on 0
+  job_noplan.json: stepped_cells 0 -> 0 (identical: True); regions 2 -> 2, half-extents changed on 0
+  DG-OVERLAPS same: DG-OVERLAPS 0 same-region pair(s)
+  DG-PLAN same: DG-PLAN doubled: 4198 cell(s) over 2 region(s) | 6.02=125 5.16=543 3.01=2479 2.58=1051
+  DG-PLAN per region same: DG-PLAN per region: r1=1594 r2=2604
+  DG-SLOT-ORIGINS same: DG-SLOT-ORIGINS 2 region(s) carry slot_origin_mm
+===== 68BF7B74 dg
+  plan bases: 5 -> 5; moved: [(4, 9.4529, 6.3019)]
+  harness cells 9915 -> 10701
+   r1: (2507, '4.01=2507', 156904.0, 8539.0, 5.44) -> (2503, '4.01=2503', 156904.0, 8550.0, 5.45)
+   r2: (4971, '5.16=768 2.58=4203', 186467.0, 7631.0, 4.09) -> (5003, '5.16=768 2.58=4235', 186467.0, 7113.0, 3.81)
+   r3: (1245, '12.08=5 6.04=121 3.02=1119', 43784.0, 3381.0, 7.72) -> (1356, '12.08=4 6.04=120 3.02=1232', 43784.0, 2960.0, 6.76)
+   r4: (342, '4.73=342', 9915.0, 2736.0, 27.6) -> (893, '6.30=9 3.15=884', 9915.0, 822.0, 8.29)
+   r5: (850, '5.16=40 2.58=810', 9458.0, 320.0, 3.38) -> (946, '5.16=40 2.58=906', 9458.0, 335.0, 3.54)
+  job_plan.json: stepped_cells 9915 -> 10701 (identical: False); regions 5 -> 5, half-extents changed on 0
+  job_noplan.json: stepped_cells 0 -> 0 (identical: True); regions 5 -> 5, half-extents changed on 0
+  DG-OVERLAPS same: DG-OVERLAPS 0 same-region pair(s)
+  DG-PLAN:
+    B DG-PLAN doubled: 9915 cell(s) over 5 region(s) | 12.07=5 6.04=121 5.16=808 4.73=342 4.01=2507 3.02=1119 2.58=5013
+    A DG-PLAN doubled: 10701 cell(s) over 5 region(s) | 12.07=4 6.30=9 6.04=120 5.16=808 4.01=2503 3.15=884 3.02=1232 2.58=5141
+  DG-PLAN per region:
+    B DG-PLAN per region: r1=2507 r2=4971 r3=1245 r4=342 r5=850
+    A DG-PLAN per region: r1=2503 r2=5003 r3=1356 r4=893 r5=946
+  DG-SLOT-ORIGINS same: DG-SLOT-ORIGINS 5 region(s) carry slot_origin_mm
+===== 68BF7B74 stepped
+  plan bases: 5 -> 5; moved: []
+  harness cells 9577 -> 9577
+  job_plan.json: stepped_cells 9577 -> 9577 (identical: True); regions 5 -> 5, half-extents changed on 0
+  job_noplan.json: stepped_cells 0 -> 0 (identical: True); regions 5 -> 5, half-extents changed on 0
+  DG-OVERLAPS same: DG-OVERLAPS 0 same-region pair(s)
+  DG-PLAN same: DG-PLAN stepped: 9577 cell(s) over 5 region(s) | 12.07=4 8.05=17 7.73=2 6.87=5 6.30=2 6.04=51 5.16=785 4.73=184 4.02=630 4.01=2511 3.44=135 3.15=532 2.58=4719
+  DG-PLAN per region same: DG-PLAN per region: r1=2511 r2=4995 r3=702 r4=718 r5=651
+  DG-SLOT-ORIGINS same: DG-SLOT-ORIGINS 5 region(s) carry slot_origin_mm
+===== 887AC498 dg
+  plan bases: 0 -> 0; moved: []
+  harness cells 0 -> 0
+===== 92A8016E dg
+  plan bases: 1 -> 1; moved: []
+  harness cells 663 -> 663
+  job_plan.json: stepped_cells 663 -> 663 (identical: True); regions 1 -> 1, half-extents changed on 0
+  job_noplan.json: stepped_cells 0 -> 0 (identical: True); regions 1 -> 1, half-extents changed on 0
+  DG-OVERLAPS same: DG-OVERLAPS 0 same-region pair(s)
+  DG-PLAN same: DG-PLAN doubled: 663 cell(s) over 1 region(s) | 2.52=663
+  DG-PLAN per region same: DG-PLAN per region: r1=663
+  DG-SLOT-ORIGINS same: DG-SLOT-ORIGINS 1 region(s) carry slot_origin_mm
+===== AA4C7953 dg
+  plan bases: 0 -> 0; moved: []
+  harness cells 0 -> 0
+  job_plan.json: stepped_cells 0 -> 0 (identical: True); regions 0 -> 0, half-extents changed on 0
+  job_noplan.json: stepped_cells 0 -> 0 (identical: True); regions 0 -> 0, half-extents changed on 0
+  DG-OVERLAPS same: DG-OVERLAPS 0 same-region pair(s)
+  DG-PLAN same: DG-PLAN doubled: 0 cell(s) over 0 region(s) |
+  DG-PLAN per region same: DG-PLAN per region:

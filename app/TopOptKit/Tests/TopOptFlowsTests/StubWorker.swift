@@ -21,6 +21,12 @@ import Foundation
 final class StubWorker {
     /// Every request the client made, in order, as "METHOD /path".
     private(set) var requestLog: [String] = []
+    /// ★ Organic cut 2: every POST's body, in order (the multipart a job was sent with).
+    private var postBodies: [Data] = []
+    func posts() -> [Data] {
+        logLock.lock(); defer { logLock.unlock() }
+        return postBodies
+    }
     private let logLock = NSLock()
 
     let port: UInt16
@@ -45,13 +51,22 @@ final class StubWorker {
     /// convenience — a fixture that reported a few kilobytes would let the budget
     /// through every time and prove nothing.
     private let sizeOverrides: [String: Int]
+    /// ★ notes 11-23: other job ids served as this one (a recorded strengthening and its file job, each its own id).
+    private let aliases: [String]
+    /// ★ notes25: the job's state as the worker says it ("done", or "error" for a job the engine refused).
+    private let jobState: String
+    /// ★ 362 11-23: the job record's `next` (a strengthening the Mac chained to its own print-file job), or none.
+    private let next: String?
 
     init(filesDir: URL, events: [String], fingerprint: String,
-         sizeOverrides: [String: Int] = [:]) throws {
+         sizeOverrides: [String: Int] = [:], aliases: [String] = [], jobState: String = "done", next: String? = nil) throws {
         self.filesDir = filesDir
         self.events = events
         self.fingerprint = fingerprint
         self.sizeOverrides = sizeOverrides
+        self.aliases = aliases
+        self.jobState = jobState
+        self.next = next
 
         let listenFD = socket(AF_INET, SOCK_STREAM, 0)
         guard listenFD >= 0 else { throw NSError(domain: "stub-worker", code: 1) }
@@ -141,16 +156,18 @@ final class StubWorker {
             .first { $0.lowercased().hasPrefix("content-length:") }
             .flatMap { Int($0.split(separator: ":")[1]
                 .trimmingCharacters(in: .whitespaces)) } ?? 0
-        var bodyRead = buffered.count - headerBytes
-        while bodyRead < contentLength {
+        var body = headerBytes <= buffered.count ? Array(buffered[headerBytes...]) : []
+        while body.count < contentLength {
             let n = read(client, &scratch, scratch.count)
             if n <= 0 { break }
-            bodyRead += n
+            body.append(contentsOf: scratch[0..<n])
         }
         let parts = requestLine.split(separator: " ")
         guard parts.count >= 2 else { return }
-        let method = String(parts[0]), path = String(parts[1])
-        logLock.lock(); requestLog.append("\(method) \(path)"); logLock.unlock()
+        let method = String(parts[0]), asked = String(parts[1])
+        logLock.lock(); requestLog.append("\(method) \(asked)"); if method == "POST" { postBodies.append(Data(body)) }; logLock.unlock()
+        // an alias is served as the stub's own job (its log keeps the id asked for)
+        let path = aliases.reduce(asked) { p, a in p.hasPrefix("/jobs/\(a)") ? "/jobs/\(jobID)" + p.dropFirst("/jobs/\(a)".count) : p }
 
         func send(_ status: String, _ body: Data,
                   contentType: String = "application/json",
@@ -195,10 +212,12 @@ final class StubWorker {
             }
 
         case path == "/jobs/\(jobID)":
-            sendJSON("200 OK", ["state": "done", "status": "done",
-                                "created_at": 1_770_000_000.0,
-                                "started_at": 1_770_000_001.0,
-                                "finished_at": 1_770_000_099.0])
+            var record: [String: Any] = ["state": jobState, "status": jobState,
+                                         "created_at": 1_770_000_000.0,
+                                         "started_at": 1_770_000_001.0,
+                                         "finished_at": 1_770_000_099.0]
+            if let next, asked == "/jobs/\(jobID)" { record["next"] = next }
+            sendJSON("200 OK", record)
 
         case path.hasPrefix("/jobs/\(jobID)/files/"):
             let name = String(path.dropFirst("/jobs/\(jobID)/files/".count))

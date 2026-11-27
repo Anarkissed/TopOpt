@@ -1,0 +1,22 @@
+{
+  "_comment": "The lattice file job on the repo's 10 mm cube (face 4 is its top): lattice under the top face, 6 mm deep, behind a rim. Run by the cli_lattice_file test. docs/design/lattice-rebuild/04-layout-file-job.md",
+  "mode": "lattice_file",
+  "model": "../step/cube.step",
+  "output": "cube_lattice.stl",
+  "layout": {
+    "all_lattice": false,
+    "bead_mm": 0.45,
+    "min_strut_lines": 1,
+    "rim_mm": -1,
+    "region_ids": [1],
+    "region_no_lattice": [0],
+    "region_depth_mm": [6],
+    "region_expand_mm": [0],
+    "region_face_counts": [1],
+    "region_faces": [4],
+    "topology": "octet",
+    "algorithm": "default_grade",
+    "cell_max_mm": 8,
+    "min_cells_across": 1
+  }
+}

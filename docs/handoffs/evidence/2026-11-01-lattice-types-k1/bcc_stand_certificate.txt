@@ -1,0 +1,23 @@
+M2 stand, BCC (jobs from make_stand_jobs.py bcc <dir>: the default swept cell ladder, which BCC allows; binary: the pipeline's frozen archive build of 58b59339).
+
+analyze struct {"topology": "bcc", "intent": "structural", "band_rho_min": 0.2105, "band_rho_max": 0.59288, "cells_per_member_floor": 10, "cell_size_mm": 2, "rho_min_used": 0.2105, "rho_max_used": 0.2105, "latticed_voxels": 95780, "recertified_margin": 79.39805137, "recertified_accepted": true}
+analyze aes    {"topology": "bcc", "intent": "aesthetic", "band_rho_min": 0.2105, "band_rho_max": 0.59288, "cells_per_member_floor": 10, "cell_size_mm": 2, "rho_min_used": 0.2105, "rho_max_used": 0.59288, "latticed_voxels": 95780, "recertified_margin": null, "recertified_accepted": null}
+run struct LATTICE vf=0.680000 topology=bcc cell_mm=2 graded=1 rho_min=0.2105 rho_max=0.591633 cells=112 tris=44372 lattice_margin=1837.76 lattice_accepted=1
+run struct LATTICE vf=0.520000 topology=bcc cell_mm=2 graded=1 rho_min=0.2105 rho_max=0.588487 cells=92 tris=36452 lattice_margin=1771.84 lattice_accepted=1
+run struct LATTICE vf=0.260000 topology=bcc cell_mm=2 graded=1 rho_min=0.2105 rho_max=0.564966 cells=18 tris=7188 lattice_margin=1652.64 lattice_accepted=1
+run aes    LATTICE vf=0.680000 topology=bcc cell_mm=2 graded=1 rho_min=0.216304 rho_max=0.59288 cells=112 tris=44372 lattice_margin=1836.35 lattice_accepted=1
+run aes    LATTICE vf=0.520000 topology=bcc cell_mm=2 graded=1 rho_min=0.215948 rho_max=0.59288 cells=92 tris=36452 lattice_margin=1770.55 lattice_accepted=1
+run aes    LATTICE vf=0.260000 topology=bcc cell_mm=2 graded=1 rho_min=0.347061 rho_max=0.59288 cells=18 tris=7168 lattice_margin=1652.14 lattice_accepted=1
+run struct vf=0.38 NO LATTICE EMITTED — the void space inside this lattice does not reach the exterior. 2 of 22 lattice cells (2 of 22 latticed voxels) sit in 1 SEALED cavity/cavities holding 79.343 mm^3 of trapped space with no path out of the part. Nothing can ever be emptied from them — powder, resin or support placed there stays there. Cavity 1: 2 latticed voxels in 2 cells, 79.343 mm^3, bounding box (19.240, -7.983, 17.053) to (22.651, -4.573, 23.874) mm, declared include region 8. NOTHING WAS AUTO-CORRECTED: opening a cavity would change geometry that was not asked to change. TO PROCEED, either (a) place the lattice so it reaches the surface or add a drain path — the cavity above tells you where — or (b) set "require_lattice_void_reaches_exterior": false in the job's "lattice" block to export anyway. THIS CHECK IS ON BY DEFAULT, so REMOVING the key does not turn it off; only an explicit false does. Exporting with it off ships a part with sealed lattice cavities: whatever ends up inside them — powder, resin or support — cannot be removed after printing, and the part's real mass will exceed the reported one by the mass of whatever stays in there.
+run aes    vf=0.38 NO LATTICE EMITTED — the void space inside this lattice does not reach the exterior. 2 of 22 lattice cells (2 of 22 latticed voxels) sit in 1 SEALED cavity/cavities holding 79.343 mm^3 of trapped space with no path out of the part. Nothing can ever be emptied from them — powder, resin or support placed there stays there. Cavity 1: 2 latticed voxels in 2 cells, 79.343 mm^3, bounding box (19.240, -7.983, 17.053) to (22.651, -4.573, 23.874) mm, declared include region 8. NOTHING WAS AUTO-CORRECTED: opening a cavity would change geometry that was not asked to change. TO PROCEED, either (a) place the lattice so it reaches the surface or add a drain path — the cavity above tells you where — or (b) set "require_lattice_void_reaches_exterior": false in the job's "lattice" block to export anyway. THIS CHECK IS ON BY DEFAULT, so REMOVING the key does not turn it off; only an explicit false does. Exporting with it off ships a part with sealed lattice cavities: whatever ends up inside them — powder, resin or support — cannot be removed after printing, and the part's real mass will exceed the reported one by the mass of whatever stays in there.
+
+lattice-variant (rung 0.52 of the Structural run; the pipeline's default rung 0.38 carries no lattice, below):
+  reproduction: recorded margin 1765.24 == reproduced 1765.24 (enforced)
+  lattice: graded cell 2 mm, rho 0.2105..0.5885 over 92 voxels
+  solid margin 1765 -> latticed margin 1772 (effective 366.9)
+  verdict: ACCEPTED
+
+Why rung 0.38 carries no lattice (core's standing refusal, not a BCC fault):
+  the void-reaches-exterior check (on by default) found one sealed cavity of 79.3 mm^3 (2 of 22 cells)
+  in BOTH modes, in declared include region 8 -- the same cavity and volume Diamond's Aesthetic run hit.
+  The pipeline's lattice-variant of that rung refused for the same reason (exit 1).

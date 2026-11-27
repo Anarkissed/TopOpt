@@ -41,12 +41,23 @@ public final class OrbitCameraModel: ObservableObject {
     /// ~0.3s eased snap/home transition (the task's target; NOT an instant teleport).
     public static let transitionDuration: CFTimeInterval = 0.3
 
-    public init(camera: OrbitCamera = OrbitCamera()) {
+    public init(camera: OrbitCamera = OrbitCamera(), followsViewProjection: Bool = false) {
         self.camera = camera
         self.defaultAzimuth = camera.azimuth
         self.defaultElevation = camera.elevation
         self.defaultRoll = 0
+        self.followsViewProjection = followsViewProjection
+        // ★ B2 (note 1): a screen's camera follows the app's ONE [Orthographic │ Perspective] choice
+        if followsViewProjection {
+            self.camera.orthographic = ViewProjection.shared.orthographic
+            projectionFollow = ViewProjection.shared.$orthographic.dropFirst().sink { [weak self] o in
+                MainActor.assumeIsolated { self?.camera.orthographic = o }
+            }
+        }
     }
+
+    private let followsViewProjection: Bool
+    private var projectionFollow: AnyCancellable?
 
     // MARK: - Live drag / zoom (STEP 2: full orbit, elevation clamped)
 
@@ -89,8 +100,42 @@ public final class OrbitCameraModel: ObservableObject {
 
     /// Replace the whole camera (used to adopt the framing a renderer computed for a
     /// fresh mesh while keeping this model the single source of truth).
+    /// ★ Results: lift the picture above a drawer (OrbitCamera.frameLift); 0 puts it back.
+    public func setFrameLift(_ f: Float) {
+        if camera.frameLift != f { camera.frameLift = f }
+    }
+    /// ★ his iPad notes 11-23: draw the picture in this part of the view (OrbitCamera.frameRegion); nil: the whole view.
+    public func setFrameRegion(_ r: SIMD4<Float>?) {
+        if camera.frameRegion != r { camera.frameRegion = r }
+    }
+
     public func adopt(_ newCamera: OrbitCamera) {
         camera = newCamera
+        if followsViewProjection { camera.orthographic = ViewProjection.shared.orthographic }   // ★ B2: the app's choice holds
+    }
+
+    // MARK: ★ notes28 — a version's camera as he left it (VersionViewState.swift)
+
+    /// The pose waiting for the viewer to frame the part (`adoptFramed`): its zoom and pan are put back then — framing a
+    /// newly shown part re-fits both.
+    public private(set) var pendingPose: VersionCameraPose?
+
+    /// Turn the camera as he left it now (framing keeps the turn) and put its zoom and pan back when the part is framed.
+    public func restore(_ pose: VersionCameraPose) {
+        pendingPose = pose
+        adopt(pose.applied(to: camera))
+        // the part may have been framed already (then the line above put it back): a pose never waits for a later part
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.poseWaitS) { [weak self] in
+            if self?.pendingPose == pose { self?.pendingPose = nil }
+        }
+    }
+    static let poseWaitS: TimeInterval = 3
+
+    /// The viewer framed a newly shown part: adopt its framing — with a waiting pose's turn, zoom and pan, once.
+    public func adoptFramed(_ framed: OrbitCamera) {
+        guard let p = pendingPose else { adopt(framed); return }
+        pendingPose = nil
+        adopt(p.applied(to: framed))
     }
 
     // MARK: - Snap / home (STEP 3 accelerators)
@@ -125,7 +170,7 @@ public final class OrbitCameraModel: ObservableObject {
 
     private func setOrientation(azimuth: Float, elevation: Float, roll: Float, animated: Bool) {
         let targetEl = OrbitCamera.clampElevation(elevation)
-        guard animated else {
+        guard animated, !AppSettings.skipAllAnimations else {   // ★ notes29: Skip all animations — the view jumps, never turns
             stopAnimation()
             camera.setOrientation(azimuth: azimuth, elevation: targetEl)
             camera.setRoll(roll)

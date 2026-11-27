@@ -1,0 +1,5 @@
+  [writing ../docs/handoffs/evidence/2026-11-01-lattice-types-k1/fcc_step.csv]
+STEP fcc at rho 0.3430 (band middle), S=8 mm, production generator
+  uniform_4x4x4              prims   1325  components   1  ends   1920  dangling    0  -> PASS
+  doubled_S|S/2              prims   1532  components   1  ends   2208  dangling    0  -> PASS
+  stepped_S|2S/3             prims    811  components   1  ends   1152  dangling    0  -> PASS

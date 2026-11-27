@@ -1,0 +1,277 @@
+{
+ "_comment": "THE RECEIPT MUST REACH A DOUBLED PLAN RUN. Every other plan fixture here is `algorithm: stepped`, and that is exactly why the defect this fixture exists for survived: run_info's plan keys sat inside observability.cpp's `if (info.stepped_present)` block, which is FALSE on a doubled run. Four of #354's six published arms are doubled, so on his own jobs the run printed every plan number on stderr and the receipt carried none of them -- no anystep_cells, no plan_solid_remainder_mm3, no plan_by_region, no plan_rho_queries_*, and not even the outline beam's four numbers. Found by reading his run_info, not the code. Two sizes on the halving ladder and two groups, so the per-group receipt is exercised rather than just present.",
+ "bake_build_orientation": "off",
+ "grading": {
+  "algorithm": "doubled",
+  "cell_max_mm": 3.0,
+  "cell_min_mm": 3.0,
+  "cell_mode": "swept",
+  "min_extrudable_width_mm": 0.45,
+  "topology": "octet"
+ },
+ "lattice": {
+  "emit_3mf": false,
+  "emit_plan_laid": true,
+  "emit_stl": true,
+  "min_extrudable_width_mm": 0.45,
+  "regions": [
+   {
+    "geometry": {
+     "depth_mm": 12.0,
+     "half_u_mm": 12.0,
+     "half_w_mm": 12.0,
+     "normal": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "origin": [
+      18.0,
+      0.0,
+      8.0
+     ],
+     "plan_base_cell_mm": 6.0
+    },
+    "kind": "face",
+    "role": "include"
+   }
+  ],
+  "skin": "none",
+  "stepped_cells": [
+   {
+    "origin_mm": [
+     18.0,
+     0.0,
+     8.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     18.0,
+     0.0,
+     14.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     24.0,
+     0.0,
+     8.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     24.0,
+     0.0,
+     14.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     18.0,
+     6.0,
+     8.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 3.0
+   },
+   {
+    "origin_mm": [
+     18.0,
+     6.0,
+     11.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 3.0
+   },
+   {
+    "origin_mm": [
+     18.0,
+     6.0,
+     14.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 3.0
+   },
+   {
+    "origin_mm": [
+     18.0,
+     6.0,
+     17.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 3.0
+   },
+   {
+    "origin_mm": [
+     21.0,
+     6.0,
+     8.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 3.0
+   },
+   {
+    "origin_mm": [
+     21.0,
+     6.0,
+     11.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 3.0
+   },
+   {
+    "origin_mm": [
+     21.0,
+     6.0,
+     14.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 3.0
+   },
+   {
+    "origin_mm": [
+     21.0,
+     6.0,
+     17.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 3.0
+   },
+   {
+    "origin_mm": [
+     24.0,
+     6.0,
+     8.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 3.0
+   },
+   {
+    "origin_mm": [
+     24.0,
+     6.0,
+     11.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 3.0
+   },
+   {
+    "origin_mm": [
+     24.0,
+     6.0,
+     14.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 3.0
+   },
+   {
+    "origin_mm": [
+     24.0,
+     6.0,
+     17.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 3.0
+   },
+   {
+    "origin_mm": [
+     27.0,
+     6.0,
+     8.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 3.0
+   },
+   {
+    "origin_mm": [
+     27.0,
+     6.0,
+     11.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 3.0
+   },
+   {
+    "origin_mm": [
+     27.0,
+     6.0,
+     14.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 3.0
+   },
+   {
+    "origin_mm": [
+     27.0,
+     6.0,
+     17.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 3.0
+   }
+  ],
+  "topology": "octet"
+ },
+ "loads": {
+  "anchor_face_ids": [
+   2
+  ],
+  "build_dir": [
+   0,
+   0,
+   1
+  ],
+  "groups": [
+   {
+    "face_ids": [
+     9
+    ],
+    "force": [
+     0.0,
+     0.0,
+     -400.0
+    ]
+   }
+  ],
+  "layer_height_mm": 0.2,
+  "minimize_plastic": true
+ },
+ "material": "PLA",
+ "mode": "lattice_part",
+ "model": "dead_parity_tab.stl",
+ "output": {
+  "mesh_format": "stl",
+  "mesh_prefix": "dbl",
+  "report": "report.json"
+ },
+ "resolution": 48
+}

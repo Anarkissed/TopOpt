@@ -13,6 +13,7 @@ import SwiftUI
 import TopOptDesign
 import TopOptKit
 import os
+import simd
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -35,7 +36,7 @@ public struct ResultsScreen: View {
     /// The live run, so the streaming pill can surface the honest progress readout
     /// (variant N of M, elapsed, ETA) and offer Cancel. Optional — nil in previews /
     /// tests that render a static results screen; when nil the pill stays a plain
-    /// "Optimizing more variants…" label. Only READ here (progress/startedAt) plus
+    /// "Optimizing more results…" label. Only READ here (progress/startedAt) plus
     /// the existing `cancel()`; this task surfaces run state, it doesn't change it.
     var run: RunModel?
     /// Voxel resolution + material name for the readout's "SIMP · NN³" footer.
@@ -57,19 +58,12 @@ public struct ResultsScreen: View {
     /// (auto density with no sim — bar B6's variants entry). Invoked with the
     /// selected variant's index. nil hides the affordance.
     var onLattice: ((Int) -> Void)?
-    /// "Smooth" on the selected variant (handoff 2026-08-02-smoothing-page): opens
-    /// the SMOOTHING page on that variant — brush locally, re-certify, keep or
-    /// discard. Invoked with the selected variant's index; nil hides the
-    /// affordance. Distinct from `smoothing` below, which is the older global
-    /// strength control on this screen.
-    var onSmooth: ((Int) -> Void)?
-    /// THE ENTRY GATES (task 2026-08-03-variant-entry-gating-and-retention, AJ2).
-    /// Given a variant index, whether "Smooth" / "Lattice" may be tapped for it and,
+    /// THE ENTRY GATE (task 2026-08-03-variant-entry-gating-and-retention, AJ2; ★ B4: Smooth's went with its page).
+    /// Given a variant index, whether "Lattice" may be tapped for it and,
     /// when it may not, the SPECIFIC reason — which the disabled control shows,
     /// exactly as the lattice page's bottom bar already does. A page that would
     /// refuse must never be reachable, so an absent closure means "enabled" only for
     /// callers that have not adopted the gate (previews, the evidence captures).
-    var smoothEntry: ((Int) -> VariantEntryVerdict)?
     var latticeEntry: ((Int) -> VariantEntryVerdict)?
     /// Constrained smoothing + re-certification (handoff 2026-07-28-constrained-
     /// smooth-ui). nil (a self-weight run, or a caller that has not wired it) hides
@@ -77,12 +71,58 @@ public struct ResultsScreen: View {
     /// chip opens SmoothingPanel, whose numbers are the RE-ANALYSED ones (the honesty
     /// rule lives in SmoothingModel, unit-tested).
     var smoothing: SmoothingModel?
+    /// ★ Results redesign (2026-10-27): the app's undo / redo at the top left, as on every page.
+    var undo: (() -> Void)?
+    /// ★ B2 (U1): the workspace's one top-left block (TopLeftBlock), drawn here in its own place. nil = the old row (tests).
+    var topLeftBlock: AnyView?
+    var redo: (() -> Void)?
+    var canUndo: () -> Bool = { false }
+    var canRedo: () -> Bool = { false }
+    /// ★ Full screen (his note 2026-10-27) — the workspace hides its own capsule over Results while it is on.
+    var onFullScreen: ((Bool) -> Void)?
+    /// ★ Each load scenario's loads (indices + total kg), so a picked scenario's views start at its own loads.
+    var scenarioLoads = ResultsScenarioLoads()
+    /// ★ Points on each load group's own faces (the light flow starts there), asked once when the screen opens.
+    var loadSurfacePoints: () -> [[SIMD3<Float>]] = { [] }
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    /// ★ notes29: Reduce Motion, or Settings › Skip all animations.
+    private var reduceMotion: Bool { systemReduceMotion || AppSettings.skipAllAnimations }
+    // ★ Results redesign state (his mockup, 2026-10-27)
+    @State private var versionsOpen = true
+    @State private var checksOpen = true
+    /// ★ B4 (note 14): the open check — its places light on the model
+    @State private var openCheck: String? = nil
+    @State private var detailsOpen = false
+    @State private var detailsTab: ResultsDetailsTab = .strength
+    /// ★ His iPad 2026-10-28: the view buttons are LAYERS (Stress or Solid, X-ray) under one MOTION (Load paths / Bend /
+    /// Break, or none) — ResultsLayers holds the rules.
+    @State private var layers = ResultsLayers()
+    /// Stress colours mean something on the part right now (the legend shows whenever they do).
+    private var legendShown: Bool { layers.stress && model.hasStress }
+    @State private var scenarioPick: String?
+    @State private var compare: ResultsCompareSession?
+    /// ★ only the model, the view cube and the view buttons (his note 2026-10-27)
+    @State private var fullScreen = false
+    /// The screen's width — folded panels become pills when the two corners would crowd each other.
+    @State private var screenWidth: CGFloat = 1376
+    /// ★ tap-to-explore (his note 2026-10-27): the tapped surface point (model frame) and whether the key is minimised
+    @State private var stressProbe: SIMD3<Float>?
+    /// ★ his note 2026-10-27: minimised to start; it and Checks/Details take turns (one open at a time). OPEN IS EXPLORING
+    /// (the Lattice key's process, his iPad 2026-10-27): a tap on the part reads it, a double tap anywhere leaves.
+    @State private var stressKeyMinimized = true
+    /// ★ His iPad 2026-10-27: the moving views (Load paths, Bend, Break) play on their own, pause, and scrub by hand.
+    @State private var motionPlaying = true
     @State private var orientOpen = false
     /// The latest camera→screen projection the viewer publishes, so the hot-spot
     /// marker (M7.viz.2) tracks the worst point as the camera orbits/zooms.
-    @State private var projection: CameraProjection?
+    @State private var rawProjection: CameraProjection?
+    /// ★ notes27 (his print orientation, SPEC 2a): the camera's projection with the part's turn in front of it, so every overlay
+    /// pinned to a point of the part (model frame) lands on the part as it is drawn, standing the way it prints.
+    private var projection: CameraProjection? {
+        guard let p = rawProjection, let c = viewerMesh?.bounds.center else { return rawProjection }
+        return PrintDraw.modelProjection(p, centre: c, rotation: printSettle)
+    }
     /// Whether the hot-spot marker's value/margin callout is expanded (tap to toggle).
     @State private var hotSpotExpanded = false
     /// Whether the streaming pill's progress drawer is open (tap the pill to toggle):
@@ -91,12 +131,23 @@ public struct ResultsScreen: View {
     @StateObject private var videoExport = VideoExportModel()
     /// The written STL file awaiting the share sheet (nil when no export is in flight).
     /// Set when the user taps Export; drives the UIActivityViewController presentation.
-    @State private var stlExportURL: URL?
+    @State private var stlExportURLs: [URL] = []   // ★ R-a: one result's file, or every result's (Export all)
+    /// ★ R-a: the corner's frame (the results panel lifts above it where they would meet).
+    @State private var cornerFrame: CGRect = .zero
+    @State private var screenHeight: CGFloat = 1032
+    /// ★ the Details drawer's height (the model rises above it while it is open).
+    @State private var drawerHeight: CGFloat = 0
+    /// Test seam: each lift the screen applies (ResultsDrawerLiftTests).
+    @MainActor static var frameLiftProbe: ((Float) -> Void)?
     /// Whether the constrained-smoothing drawer is open (only when `smoothing != nil`).
     @State private var smoothOpen = false
     /// An export failure message (rare — a temp-dir write error), surfaced as an alert
     /// rather than failing silently.
-    @State private var stlExportError: String?
+    /// ★ B10 (U6, the reviewer's ruling 11-11 08:04Z (2)(a)): what failed to export — the corner's danger line, never an alert.
+    @State private var exportFailure: ResultsExportFailure?
+    /// Hosted tests only: the STL write fails (the line and its Try again are shown), and each export attempt is reported.
+    nonisolated(unsafe) static var exportWriteFailsForTests = false
+    nonisolated(unsafe) static var exportAttemptProbe: ((String) -> Void)?
     /// Fraction of a LATTICED export transferred so far, or nil when none is in
     /// flight (task 2026-08-07-lattice-variants-on-screen). A solid export writes
     /// bytes the app already holds and is instant; a latticed one streams 740 MB to
@@ -106,7 +157,7 @@ public struct ResultsScreen: View {
     /// The ONE shared orbit camera for this results stage (STEP 1). The Metal viewer AND
     /// the orientation gizmo both drive it, so dragging the model turns the cube and
     /// tapping the cube orbits the model.
-    @StateObject private var cameraModel = OrbitCameraModel()
+    @StateObject private var cameraModel = OrbitCameraModel(followsViewProjection: true)   // ★ B2 (note 1)
     /// Drives the Play animation: a ~30 fps tick that advances the morph scrub while
     /// `model.playing`, so Play actually plays (previously it required a manual drag).
     @State private var ticker = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()
@@ -117,6 +168,7 @@ public struct ResultsScreen: View {
                 materialName: String = "", yieldStrengthMPa: Double = 0,
                 appliedLoadKg: Double = 0, loadUnit: WeightUnit = .kg,
                 infillPercent: Int = 100, infillPattern: String = "gyroid",
+                solidWallMM: Double? = nil,   // ★ 362 (11-26): the printer's wall ring, for the bare-vines fixes offered
                 loadLocations: [SIMD3<Float>] = [],
                 loadDirections: [SIMD3<Float>] = [], anchorPoints: [SIMD3<Float>] = [],
                 streaming: Bool = false, run: RunModel? = nil,
@@ -124,11 +176,21 @@ public struct ResultsScreen: View {
                 onClose: @escaping () -> Void = {}, onExport: @escaping () -> Void = {},
                 onSeeOriginal: @escaping () -> Void = {},
                 onLattice: ((Int) -> Void)? = nil,
-                onSmooth: ((Int) -> Void)? = nil,
-                smoothEntry: ((Int) -> VariantEntryVerdict)? = nil,
                 latticeEntry: ((Int) -> VariantEntryVerdict)? = nil,
                 smoothing: SmoothingModel? = nil,
-                resultsModel: ResultsModel? = nil) {
+                undo: (() -> Void)? = nil, redo: (() -> Void)? = nil,
+                canUndo: @escaping () -> Bool = { false }, canRedo: @escaping () -> Bool = { false },
+                onFullScreen: ((Bool) -> Void)? = nil,
+                loadSurfacePoints: @escaping () -> [[SIMD3<Float>]] = { [] },
+                scenarioLoads: ResultsScenarioLoads = ResultsScenarioLoads(),
+                topLeftBlock: AnyView? = nil,
+                resultsModel: ResultsModel? = nil,
+                takeOpenOn: (() -> Int?)? = nil,
+                version: String? = nil, pickedVariant: Int? = nil, onPick: ((Int) -> Void)? = nil,
+                printOrientation: ResultsPrintOrientation? = nil,
+                printUp: SIMD3<Float>? = nil, chosenFace: Bool = false,
+                orientation: PrintOrientationHost? = nil,
+                certify: OrganicCertifyCard? = nil) {
         // `resultsModel` is a TEST SEAM (the M7 /app/ house style — the run is tested
         // through an injected scheduler / runner / notifier the same way). The screen
         // owns its ResultsModel as a @StateObject, so a test hosting this view has no
@@ -139,7 +201,7 @@ public struct ResultsScreen: View {
             appliedLoadKg: appliedLoadKg, loadUnit: loadUnit,
             infillPercent: infillPercent, infillPattern: infillPattern,
             loadLocations: loadLocations,
-            loadDirections: loadDirections, anchorPoints: anchorPoints))
+            loadDirections: loadDirections, anchorPoints: anchorPoints, solidWallMM: solidWallMM))
         self.liveOutcome = outcome
         self.streaming = streaming
         self.run = run
@@ -149,11 +211,99 @@ public struct ResultsScreen: View {
         self.onExport = onExport
         self.onSeeOriginal = onSeeOriginal
         self.onLattice = onLattice
-        self.onSmooth = onSmooth
-        self.smoothEntry = smoothEntry
         self.latticeEntry = latticeEntry
         self.smoothing = smoothing
+        self.undo = undo; self.redo = redo; self.canUndo = canUndo; self.canRedo = canRedo
+        self.topLeftBlock = topLeftBlock
+        self.onFullScreen = onFullScreen
+        self.scenarioLoads = scenarioLoads
+        self.loadSurfacePoints = loadSurfacePoints
+        self.version = version; self.pickedVariant = pickedVariant; self.onPick = onPick
+        self.takeOpenOn = takeOpenOn
+        self.printOrientation = printOrientation
+        self.certify = certify
+        // ★ notes27: one reference (WorkspaceBodySizeTests: Results' own size has 16 bytes of room)
+        self.printSource = printUp == nil && orientation == nil ? nil
+            : ResultsPrintSource(up: printUp, chosenFace: chosenFace, host: orientation)
     }
+
+    /// ★ notes27 (his print orientation, SPEC 2a: "I want the part first drawn the way it prints"): the way up it prints (the
+    /// part's own coordinates); the part stands on the bed that way. nil (previews, tests): drawn in the file's own frame.
+    var printUp: SIMD3<Float>? { printSource?.up }
+    /// ★ notes27: how it prints and what "Print orientation" runs, held by reference (the screen's size must not grow).
+    let printSource: ResultsPrintSource?
+    /// ★ notes27: he chose the face it prints on (a plate), not his placement.
+    var chosenFace: Bool { printSource?.chosenFace ?? false }
+    /// ★ notes27 (SPEC 2b): how the shown result prints, in his words, and what its file tells the slicer.
+    var printing: ResultsPrinting {
+        let f = model.printFacts
+        return ResultsPrinting(way: f.onEdge ? .onEdge : chosenFace ? .chosenFace : .asPlaced,
+                               slicerSupports: f.slicerSupports, linked: orientation != nil)   // ★ P6: the row's link
+    }
+    /// The turn the part is drawn with: its print up to the screen's up (★ P6: the way the orientation flow shows, while open).
+    var printSettle: simd_quatf {
+        ((orientation != nil ? orient.shownUp() : nil) ?? printUp).map(PrintDraw.settle(up:)) ?? simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
+    }
+    /// ★ notes27 P6 (his print orientation, SPEC 2d): "Print orientation" — the workspace's check and keep; nil: not offered.
+    var orientation: PrintOrientationHost? { printSource?.host }
+    /// The flow (shared; observed by the views that draw it — PrintTurnedStage, the corner switch, the layer — so this screen's
+    /// own size never grows).
+    private var orient: PrintOrientationFlow { PrintOrientationFlow.shared }
+
+    /// "Print orientation" (the ⌃ drawer, the Checks row's link): the engine's ranking of this result, else Manual.
+    private func startOrientation() {
+        guard let h = orientation else { return }
+        model.cornerDrawers.close()
+        let m = viewerMesh
+        var tris = (m?.indices ?? []).map { Int32(bitPattern: $0) }
+        if let b = model.printFacts.baseTriangles, b > 0, b * 3 < tris.count { tris = Array(tris.prefix(b * 3)) }   // the solid
+        orient.start(kind: h.kind, ranking: model.printFacts.ranking, mesh: m.map { ($0.positions, tris) })
+    }
+
+    /// ★ B4 (note 12, Q9): the orientation line's source; nil draws no line.
+    let printOrientation: ResultsPrintOrientation?
+
+    /// ★ Organic cut 2 (his certify wizard, 11-19): the open pop-up (the workspace keeps the walk); nil: none.
+    let certify: OrganicCertifyCard?
+    @StateObject private var spotMemo = OrganicSpotPaintMemo()
+
+    /// ★ notes27 (his 11-24: "You can colour the struts without the stress map on when the "Strengthened" row is selected and
+    /// opened in the "Checks" modal"): that row open — the struts the strengthening changed, in one clear highlight.
+    private var strengthenedPaint: [SIMD4<Float>]? {
+        guard certifyPaint == nil, let id = openCheck, id.hasPrefix("Strengthened"), let mesh = viewerMesh else { return nil }
+        return model.strengthenedTints(for: mesh)
+    }
+
+    /// The open pop-up's weak areas painted on the shown part (one paint per issue and mesh); nil: none to paint.
+    private var certifyPaint: OrganicSpotPaint.Result? {
+        guard let c = certify, let g = c.grid, !c.issue.spotIDs.isEmpty, let mesh = viewerMesh else { return nil }
+        let r = spotMemo.paint(issue: c.issue.id, ids: c.issue.spotIDs, grid: g, mesh: mesh)
+        return r.painted > 0 ? r : nil
+    }
+
+    /// ★ his design: the card, and its line straight to the area, staying on it however he turns the part.
+    /// ★ his notes 11-23 (notes25 B1): at the left in the middle, clear of every control, draggable, its line attached
+    /// (CertifyCardPlace; the controls it keeps clear of are this screen's published frames, `.onPreferenceChange` below).
+    @ViewBuilder private func certifyLayer(_ c: OrganicCertifyCard) -> some View {
+        // ★ notes25 (merged with builder C): the struts card's line goes where the print file's ONE answer says it gives way
+        // (the weakest strut when the struts govern) — the place Results lights and Break marks
+        let struts = c.issue.id == "struts_short" ? model.latticeAnswer.flatMap { $0.governs == .strut ? $0.place : $0.weakest.first?.at } : nil
+        let target = (struts ?? c.issue.at).flatMap { projection?.project(SIMD3<Float>($0)) }
+        CertifyCardLayer(card: c, target: target, place: CertifyCardPlace.shared)
+            .zIndex(3)
+    }
+    @State private var orientPhase: PrintOrientationPhase = .ours
+    /// The page's controls the line keeps clear of, and its own size (it changes with its state).
+    @StateObject private var orientControls = LaneControls()
+    @State private var orientSize: CGSize = .zero
+
+    /// ★ B4: takes (once) the accepted result to open on — the Library card's Export; nil: the screen's own pick.
+    let takeOpenOn: (() -> Int?)?
+
+    /// ★ B4 (app-map §3.5): the version's name ("v7"), the accepted variant he picked, and Pick this (accepted-variant index).
+    let version: String?
+    let pickedVariant: Int?
+    let onPick: ((Int) -> Void)?
 
     /// The merge trigger, and the ONLY safe way to hand the fresh outcome to the
     /// `.onChange` action. SwiftUI runs the action closure CAPTURED BY THE PREVIOUS
@@ -167,7 +317,9 @@ public struct ResultsScreen: View {
     struct MergeTrigger: Equatable {
         let outcome: OptimizeOutcome
         static func == (a: MergeTrigger, b: MergeTrigger) -> Bool {
-            a.outcome.variants.count == b.outcome.variants.count
+            // ★ notes27 P6 ("Keep orientation"): a kept check's result replaces the one shown with as many variants — its report
+            // (its size, cheap) tells them apart
+            a.outcome.variants.count == b.outcome.variants.count && a.outcome.reportJSON?.count == b.outcome.reportJSON?.count
         }
     }
     private var mergeTrigger: MergeTrigger { MergeTrigger(outcome: liveOutcome) }
@@ -183,9 +335,12 @@ public struct ResultsScreen: View {
             // the selected variant's isosurface, optionally stress-colored, morphing
             // with the scrub. Pixels are device QA (the M7 /app/ standard).
             DS.Color.background.color.ignoresSafeArea()
+            PrintTurnedStage(flow: orient, follows: orientation != nil, up: printUp) { settle, animated in   // ★ notes27: as it prints
             MetalMeshView(mesh: viewerMesh,
                           camera: cameraModel,
-                          onProjection: { projection = $0 },
+                          settleRotation: settle, settleAnimated: animated && !reduceMotion,   // ★ notes27: drawn the way it prints
+                          showGround: printUp != nil,                                  // ... on the bed
+                          onProjection: { rawProjection = $0 },
                           stressTints: stressTints,
                           stressMultiplier: Float(stressMultiplier),
                           reveal: viewerReveal,
@@ -194,56 +349,145 @@ public struct ResultsScreen: View {
                           loadFlowVertices: loadFlowVertices,
                           loadFlowKey: loadFlowKey,
                           loadFlowGuides: loadFlowGuides,
-                          bodyAlpha: bodyAlpha)
+                          bodyAlpha: bodyAlpha,
+                          spotFaces: certifyPaint?.outline, spotKey: certifyPaint?.key ?? 0)
+                .loadMotion(ramp: loadRamp, patch: motion?.patch)   // ★ notes25: Bend / Break run the load
+                .loadLight(loadLight)   // ★ notes26 (C5): Load paths' light, emitted and haloed
+                // ★ tap-to-explore, the Lattice key's process (his iPad 2026-10-27): while the key is open a tap on the
+                // part reads the stress there (an arrow on the part, an arrow on the key); a double tap anywhere leaves
+                .onSurfacePoint { p in if exploring, let p { stressProbe = p } }
+                .onExploreExit(exploring ? { leaveExplore() } : nil)
+                .closesCornerDrawers(model.cornerDrawers)   // ★ his 11-22 (img 45): a tap on the model closes the ⌃'s drawer
+            }
                 .ignoresSafeArea()
 
+            // ★ RESULTS REDESIGN (his mockup, approved 2026-10-27): the model is the screen; the versions (bottom left),
+            // the scenario + view buttons + checks + Details (right column) and Export float and fold. The old banners
+            // (voxel size, LAN fields, keep clear), the strengthen cards and the captions live behind Details now.
+            if fullScreen {
+                // ★ FULL SCREEN: the model, the view cube and the view buttons — nothing else
+                VStack(alignment: .trailing, spacing: DS.Space.m) {
+                    ResultsViewModePicker(modes: viewModes, isOn: { layers.isOn($0) },
+                                          tap: { layers.tap($0, hasStress: model.hasStress) }, fullScreen: $fullScreen)
+                    motionBar
+                    stressKey   // ★ 10-28: the legend stays whenever the colours mean something — full screen too
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.top, PageChrome.gizmoClearance).padding(.trailing, PageChrome.edge)
+            } else {
             topBar
-            resolutionNote                            // 083: honest voxel-size note
-            remoteComputeNote                         // 097: LAN-run unavailable fields
-            clearanceNote                             // 100: "Keep clear" applied-to honesty
-            // The viz toggles (Stress / Flex / Load path / Failure) and their
-            // now-compact controls cluster at the BOTTOM-RIGHT; each chip slides its own
-            // drawer open to the LEFT rather than dropping a big panel over the model.
-            // The cluster sits just above the orientation cube (see `cubeClearance`).
-            vizRail
-            hotSpotMarker.ignoresSafeArea()           // M7.viz.2: worst-point callout
-            failureMarker.ignoresSafeArea()           // M7.viz.6: failure-point marker
-            savingsTabs
+            // M7.viz.2: worst-point callout — in the Stress view, out of the way of an explore reading. (★ his iPad
+            // 2026-10-27: the scenario dots and rings "make no sense" — gone.)
+            if legendShown, layers.motion == nil, stressProbe == nil { hotSpotMarker.ignoresSafeArea() }
+            checkMarkers.ignoresSafeArea()   // ★ B4 (note 14): the open check's places
+            if let c = certify { certifyLayer(c) }   // ★ Organic cut 2: his certify wizard's pop-up and its line
+            if layers.motion == .breakIt { failureMarker.ignoresSafeArea() }   // ★ Break: where it yields, and at what load
+            versionsColumn
+            rightColumn
+            if let po = printOrientation { printOrientationLine(po) }   // ★ B4 (note 12): bottom-centre
+            // ★ notes27 P6: in the flow, Check strength + Manual orientation stand in Export's place
+            PrintOrientationCornerSwitch(flow: orient, host: orientation,
+                                         variant: { PrintCheckVariant(index: model.selectedVariantIndex, stl: model.exportSTLData()) }) {
+            resultsCorner   // ★ LOOK PER SCREEN (R-a, §4.18): Compare · Details · Export · ⌃
+            }
+            if detailsOpen {
+                // ★ R-a (mockup #topo-results-details): the drawer from the bottom, the page's width
+                ResultsDetailsDrawer(tab: $detailsTab, versionTitle: selectedRow?.title ?? "",
+                                     rows: { model.printing = printing; return model.detailRows($0, version: selectedRow) },   // ★ notes27
+                                     close: { withAnimation(DS.Motion.sheetIn) { detailsOpen = false } })
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(4)
+            }
+            }
             // The optimization-history playbar exists ONLY when the variant carries real
             // keyframes (`hasHistory`). Without them the slider used to reveal-SLICE the
             // finished mesh bottom-to-top — a fake "layer sweep" that is NOT optimization
             // history — which is a reject-class honesty violation for a remote run (the
             // worker never serialises keyframes, 097). No keyframes → no playbar.
-            if model.hasHistory { mediaPlayer }
-            orientationCorner
+            if model.hasHistory, !fullScreen { mediaPlayer }
+            if legendShown { stressProbeCallout.ignoresSafeArea() }
             orientationGizmo
+            if let h = orientation {   // ★ notes27 P6: his print orientation flow, over Results (it draws only while open)
+                PrintOrientationLayer(flow: orient, host: h, raw: rawProjection, up: printUp,
+                                      centre: viewerMesh?.bounds.center ?? .zero, eye: cameraModel.camera.eye)
+                    .zIndex(6)
+            }
+            PrintResolutionLayer().zIndex(7)   // ★ his 11-25: Export's print resolutions, and the level being made
+            if compare != nil {
+                ResultsCompareView(model: model, rows: versionRows, session: $compare, scenarioPick: $scenarioPick,
+                                   close: { compare = nil },
+                                   use: { tab in model.select(tab); compare = nil },
+                                   settle: printSettle, onBed: printUp != nil)   // ★ notes27: as it prints
+                    .transition(.opacity)
+                    .zIndex(5)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onPreferenceChange(ChromeKeepOutKey.self) { all in   // ★ B4: what the orientation line keeps clear of
+            if printOrientation != nil { orientControls.update(all.filter { !PrintOrientationLayout.ignored($0.key) }) }
+            if let c = all["resultsCorner"], c != cornerFrame { cornerFrame = c }   // ★ R-a
+            let d = all["resultsDetailsPanel"]?.height ?? 0
+            if abs(d - drawerHeight) > 0.5 { drawerHeight = d; liftModel() }
+            if certify != nil { CertifyCardPlace.shared.noteResults(all) }   // ★ notes25 B1: what the fix pop-up keeps clear of
+        }
+        .cornerTapCloses(model.cornerDrawers)   // ★ his 11-22: a tap anywhere outside the ⌃'s drawer closes it
+        .animation(DS.Motion.sheetIn, value: detailsOpen)
+        .onChange(of: detailsOpen) { _ in liftModel() }
         .transition(.opacity)
         .animation(DS.Motion.sheetIn, value: orientOpen)
+        .animation(DS.Motion.sheetIn, value: compare != nil)
+        .onChange(of: layers.motion) { applyMotion($0) }
+        .onChange(of: layers.stress) { on in model.stressOn = on; if !on { stressProbe = nil } }
+        .onChange(of: model.selectedIndex) { _ in
+            stressProbe = nil; applyMotion(layers.motion)   // a new version's views start from rest
+            syncOrientPhase()                               // ★ B4: and its own way of printing
+            orient.reset()                                  // ★ notes27 P6: another result: the flow starts over
+        }
+        // ★ his ask 2026-10-27: the Scenario menu changes the views — the picked scenario's own fields, from rest
+        .onChange(of: scenarioPick) { p in model.viewScenario = p; stressProbe = nil; applyMotion(layers.motion) }
+        .onChange(of: model.selectedIndex) { _ in stressProbe = nil }
+        // ★ one at a time: opening the key folds Checks and closes Details; opening either minimises the key
+        .onChange(of: stressKeyMinimized) { m in
+            if !m { withAnimation(DS.Motion.sheetIn) { checksOpen = false; detailsOpen = false } }
+            else { stressProbe = nil }   // closing the key ends exploring
+        }
+        .onChange(of: checksOpen) { o in if o { stressKeyMinimized = true } }
+        .onChange(of: detailsOpen) { o in if o { stressKeyMinimized = true } }
+        // ★ his iPad 2026-10-27: Compare covers the page too, so the Topology | Setup | Results capsule hides under it
+        .onChange(of: fullScreen) { onFullScreen?($0 || compare != nil) }
+        .onChange(of: compare != nil) { onFullScreen?($0 || fullScreen) }
+        .onDisappear { if fullScreen || compare != nil { onFullScreen?(false) }; orient.reset() }   // ★ notes27 P6
+        .background(GeometryReader { g in
+            Color.clear.onAppear { screenWidth = g.size.width; screenHeight = g.size.height }
+                .onChange(of: g.size.width) { screenWidth = $0 }.onChange(of: g.size.height) { screenHeight = $0 }
+        })
         .onReceive(ticker) { _ in
             // Signpost only the ticks that DO work (advance an animation). A quiet run
             // of "playback_tick" events here while the screen looks idle means a timer
             // is driving the whole view — the maintainer reads this against the
             // GizmoFrame track to localise the frame collapse (see the handoff).
             let animating = model.playing
-                || (model.flexOn && !reduceMotion)
-                || (model.loadPathOn && !model.flowReduced(reduceMotion: reduceMotion))
+                || (motionPlaying && motionKind != nil && !reduceMotion)
+                || (motionPlaying && layers.motion == .loadPaths && model.lightFlow != nil && !reduceMotion)
             if animating {
                 os_signpost(.event, log: resultsSignpost, name: "playback_tick")
             }
             if model.playing { model.advance((1.0 / 30.0) / Self.morphDuration) }
+            // ★ His iPad 2026-10-27: the moving views MOVE again — each only while playing (Pause and the slider stop it).
             // M7.viz.3: loop the flex while it's on — UNLESS reduced-motion, which
             // holds the static full-deflection frame (no advance → phase stays put,
             // and flexScale uses amplitude 1).
-            if model.flexOn && !reduceMotion {
-                model.advanceFlex((1.0 / 30.0) / Self.flexDuration)
+            // ★ notes25: Bend and Break run the LOAD — it eases up, holds, eases back (ResultsLoadMotion.swift)
+            if motionPlaying, let k = motionKind, !reduceMotion {
+                model.loadMotion.advance(1.0 / 30.0, k)
             }
             // Handoff 070 flow: advance the comet clock while the overlay is on — UNLESS
-            // reduced-motion (system OR the drawer toggle), which freezes the arrows
-            // mid-path with clean heads (no advance → the static presentation).
-            if model.loadPathOn && !model.flowReduced(reduceMotion: reduceMotion) {
-                model.advanceFlowClock(1.0 / 30.0)
+            // reduced-motion, which freezes the arrows mid-path with clean heads. The arrows travel; they never wiggle
+            // (flowWiggle 0, his note 2026-10-27).
+            if motionPlaying, layers.motion == .loadPaths, model.lightFlow != nil, !reduceMotion {
+                model.advanceLightPhase(1.0 / 30.0)   // ★ 10-28: the light sweeps through the part
             }
         }
         .onChange(of: mergeTrigger) { trigger in
@@ -260,34 +504,34 @@ public struct ResultsScreen: View {
             // longer knows — in which case the latticed variant still shows its
             // mass and verdict and says plainly that its geometry is out of reach.
             model.latticeMeshTransfer = run?.latticeMeshSource
+            model.scenarioLoads = scenarioLoads       // ★ each scenario's own loads
+            model.loadSurfacePoints = loadSurfacePoints()   // ★ where the light starts: on the load faces themselves
+            model.viewScenario = scenarioPick
+            model.flowReducedStatic = false           // ★ the arrows MOVE (his iPad 2026-10-27) …
+            model.setFlowWiggle(0)                    // … and never wiggle
+            layers = ResultsLayers()   // ★ B4 (note 13): open plain, no view lit
+            syncOrientPhase()
+            orient.reset()   // ★ notes27 P6: the flow starts closed (it is shared: never another screen's state)
+            PrintResolutionFlow.shared.close()   // ★ his 11-25: the levels' card too (a level being made goes on)
+            if let v = takeOpenOn?(), let t = model.tabs.first(where: { $0.variantIndex == v && !$0.isLatticed }) { model.select(t.index) }
+            model.stressOn = layers.stress
+            applyMotion(nil)
         }
         .sheet(isPresented: Binding(
             get: { if case .ready = videoExport.state { return true } else { return false } },
             set: { if !$0 { videoExport.reset() } })) {
             if case let .ready(url) = videoExport.state { ShareSheet(items: [url]) }
         }
-        .alert("Couldn’t save video", isPresented: Binding(
-            get: { if case .failed = videoExport.state { return true } else { return false } },
-            set: { if !$0 { videoExport.reset() } })) {
-            Button("OK") { videoExport.reset() }
-        } message: {
-            if case let .failed(msg) = videoExport.state { Text(msg) }
-        }
+        // (★ B10: a video that couldn't be saved says so in the corner's danger line — `exportFailureLine`)
         // The real STL export share sheet (EXPORT task): AirDrop / Files / Mail via
         // UIActivityViewController. Present flows are device QA (the M7 /app/ standard);
         // the file bytes + filename + mass math are headlessly tested on the model.
         .sheet(isPresented: Binding(
-            get: { stlExportURL != nil },
-            set: { if !$0 { stlExportURL = nil } })) {
-            if let url = stlExportURL { ShareSheet(items: [url]) }
+            get: { !stlExportURLs.isEmpty },
+            set: { if !$0 { stlExportURLs = [] } })) {
+            if !stlExportURLs.isEmpty { ShareSheet(items: stlExportURLs) }
         }
-        .alert("Couldn’t export STL", isPresented: Binding(
-            get: { stlExportError != nil },
-            set: { if !$0 { stlExportError = nil } })) {
-            Button("OK") { stlExportError = nil }
-        } message: {
-            if let msg = stlExportError { Text(msg) }
-        }
+        // (★ B10: an STL that couldn't be exported says so in the corner's danger line — `exportFailureLine`)
     }
 
     /// Write the selected variant's STL to a temp file and hand it to the share sheet.
@@ -295,6 +539,15 @@ public struct ResultsScreen: View {
     /// + presentation live here. No-op when the variant has no exportable mesh (the
     /// button is disabled in that case anyway).
     private func exportSTL() {
+        // ★ his 11-25: a print file offers its three resolutions first (the one made exports at once, below)
+        if !model.exportIsStreamed, offerResolutions(format: "stl") { return }
+        exportMadeSTL()
+    }
+
+    /// The shown result's own STL (a print file's: the level it was made at).
+    private func exportMadeSTL() {
+        exportFailure = nil
+        Self.exportAttemptProbe?("stl")
         // A LATTICED SELECTION EXPORTS THE LATTICED FILE (task 2026-08-07-lattice-
         // variants-on-screen, S2d). It streams from the worker straight to disk and
         // is never decoded, so it exports on a device that cannot display it —
@@ -310,21 +563,22 @@ public struct ResultsScreen: View {
             } completion: { result in
                 latticeExportProgress = nil
                 switch result {
-                case .success(let url): stlExportURL = url
+                case .success(let url): stlExportURLs = [url]
                 case .failure(let error):
-                    stlExportError = error.localizedDescription
+                    exportFailure = .stl(error.localizedDescription)
                 }
             }
             return
         }
+        if Self.exportWriteFailsForTests { exportFailure = .stl(CocoaError(.fileWriteNoPermission).localizedDescription); return }
         guard let data = model.exportSTLData() else { return }
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(model.exportFilename)
         do {
             try data.write(to: url, options: .atomic)
-            stlExportURL = url
+            stlExportURLs = [url]
         } catch {
-            stlExportError = "Couldn’t write the STL file: \(error.localizedDescription)"
+            exportFailure = .stl(error.localizedDescription)
         }
     }
 
@@ -338,7 +592,7 @@ public struct ResultsScreen: View {
     @ViewBuilder private var resolutionNote: some View {
         if let note = model.surfaceResolutionNote {
             HStack(alignment: .top, spacing: DS.Space.s) {
-                Image(systemName: "info.circle").font(.system(size: 12, weight: .semibold))
+                AppInfoGlyph()   // ★ notes29 (his 11-25): the one (i)'s glyph, on a note
                 Text(note).dsStyle(DS.TypeScale.caption)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -426,7 +680,7 @@ public struct ResultsScreen: View {
     }
 
     /// The in-flight-progress pill above the savings tabs (bottom-left). Previously
-    /// an inert "Optimizing more variants…" label with no progress, count, or time —
+    /// an inert "Optimizing more results…" label with no progress, count, or time —
     /// on an ~80-minute run it was indistinguishable from a dead run. Now it is LIVE
     /// (variant N of M · elapsed) and TAPPABLE: tapping opens a compact drawer with
     /// the honest readout + a Cancel affordance. Falls back to the old static label
@@ -452,7 +706,7 @@ public struct ResultsScreen: View {
                 } else {
                     HStack(spacing: DS.Space.s) {
                         ProgressView().controlSize(.small).tint(DS.Color.accent.color)
-                        Text("Optimizing more variants…").dsStyle(DS.TypeScale.footnote)
+                        Text("Optimizing more results…").dsStyle(DS.TypeScale.footnote)
                             .fontWeight(.semibold).foregroundStyle(DS.Color.textSecondary.color)
                     }
                     .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.l)
@@ -496,6 +750,10 @@ public struct ResultsScreen: View {
     /// recomputed on each body eval while the overlay is on; memoize on
     /// `selectedIndex` if a scrub-with-stress hitch shows up on device.
     private var stressTints: [SIMD4<Float>]? {
+        // ★ Organic cut 2 (his certify wizard): while a pop-up is up, its weak areas are coloured on the part
+        if let p = certifyPaint { return p.tints }
+        if let s = strengthenedPaint { return s }   // ★ notes27: the Strengthened row open — the struts it changed, in gold
+        if loadRamp != nil { return nil }   // ★ notes25: Bend / Break's (and a print file's) colours are made on the GPU
         // In load-path FLOW mode the flow's Body segment owns the body appearance: the
         // "Stress" body paints the static field with the MOVING epicenters blended in
         // (a bloom following each arrow); x-ray / solid paint plain clay (nil tints).
@@ -505,6 +763,10 @@ public struct ResultsScreen: View {
             let heads = model.flowHeadPositions(reduceMotion: reduceMotion)
             return model.flowStressTints(for: mesh, field: field, heads: heads)
         }
+        // ★ his iPad 2026-10-28: Load paths is light travelling through the part, painted on its own surface — and with the
+        // Stress layer on, the light is the stress it passes through
+        // ★ notes26 (C5): now LIGHT, emitted and haloed on the GPU (`loadLight`), not paint in these tints
+        if layers.motion == .loadPaths { return nil }
         guard showStressColors, let mesh = viewerMesh,
               let field = model.selectedStressField, !field.isEmpty else { return nil }
         return model.stressTints(for: mesh, field: field, multiplier: stressMultiplier)
@@ -514,12 +776,47 @@ public struct ResultsScreen: View {
     /// when a deflection is animating (flex loop / failure push) so the part visibly
     /// flushes blue→red as it moves (M7.viz coupling). Sampled against `viewerMesh`,
     /// so during the history morph it colors whichever keyframe is on screen.
-    private var showStressColors: Bool { model.stressOn || deflectionActive }
+    private var showStressColors: Bool { legendShown }   // ★ 10-28: the Stress layer decides — moving or not (Solid: grey)
 
     /// The load multiple the stress field is colored at this frame (1× at rest, the
     /// flex amplitude while wobbling, the push scrub while driving to failure). Passed
     /// to the viewer so it re-uploads the recolored tints as the multiplier moves.
-    private var stressMultiplier: Double { model.stressColorMultiplier(reduceMotion: reduceMotion) }
+    /// ★ 10-28: the TRUE load the colours show — the bend's share of the load (0…1 through the loop), the push's multiple
+    /// in Break, 1 at rest — so the legend's numbers are the part's (the old flex colours were boosted to hit red).
+    /// ★ notes25: the load the moving view shows this frame (the colours are each place's share at your load × it).
+    private var stressMultiplier: Double { motion.map { Double($0.frame.colourLoad) } ?? 1 }
+
+    /// ★ notes26 (C5, his 11-23: "more colour and light coming out of it"): Load paths' light this frame — the same sweep, now
+    /// emitted and haloed by the viewer, coloured by how much load flows there; with the Stress layer on, over the stress colours
+    /// (the part's stress stays readable, the light is that colour lifted toward white). A new key each phase step; held paused.
+    private var loadLight: LoadLightFrame? {
+        guard layers.motion == .loadPaths, certifyPaint == nil, strengthenedPaint == nil, let lf = model.lightFlow, let mesh = viewerMesh,
+              lf.arrival.count == mesh.flat.vertexCount else { return nil }
+        // ★ notes27 (his 11-24): only over the stress map; the band carries each place's stress on the map's own scale, rising to
+        // its full colour as the band's centre reaches it (LoadLightFlow.loadFrame)
+        guard legendShown, let shares = model.mapShares(for: mesh) else { return nil }
+        let f = lf.loadFrame(phase: Float(model.lightPhase), shares: shares)
+        return LoadLightFrame(key: Int((model.lightPhase * 100_000).rounded()) * 2 + 1, tints: f.tints, light: f.light)
+    }
+
+    /// ★ notes25: the moving view that runs the load (Bend / Break), when the part can move.
+    private var motionKind: LoadMotionKind? {
+        guard model.hasFlex else { return nil }
+        switch layers.motion {
+        case .bend?: return .bend
+        case .breakIt?: return model.canBreak ? .breakIt : nil
+        default: return nil
+        }
+    }
+    /// ★ notes25: this frame of it (built once per selection, cached per frame in the model).
+    private var motion: ResultsModel.MotionState? { motionKind.flatMap { model.motionState($0, reduceMotion: reduceMotion) } }
+    /// ★ notes25: the colours made on the GPU — the moving view's at its frame's load, and a print file's still view at your load
+    /// (each place's share of its limit); nil: the CPU's stress tints as before.
+    private var loadRamp: LoadRamp? {
+        guard certifyPaint == nil, strengthenedPaint == nil, legendShown, !loadPathActive, layers.motion != .loadPaths else { return nil }
+        if let m = motion { return m.ramp }
+        return showHistory ? nil : model.stillRamp()
+    }
 
     /// The mesh the viewer shows. When the variant has an optimization history and
     /// stress is off, Play scrubs THROUGH the history keyframes (the real "watch it
@@ -539,7 +836,7 @@ public struct ResultsScreen: View {
     private var pushActive: Bool { model.pushActive }
     /// Either flex mechanism displaces the mesh via the same render path (per-vertex
     /// displacement × scale): the viz.3 wobble or the viz.6 push scrub.
-    private var deflectionActive: Bool { flexActive || pushActive }
+    private var deflectionActive: Bool { motion != nil }   // ★ notes25: Bend / Break run the load (ResultsLoadMotion.swift)
     /// Whether Play morphs THROUGH the optimization history (the "watch it carve out")
     /// rather than the reveal-slice fallback. `stressOn` is deliberately NOT a factor
     /// (see `ResultsModel.showsHistoryMorph`): the Stress chip used to fall through to
@@ -602,21 +899,18 @@ public struct ResultsScreen: View {
 
     /// The body opacity for the current flow body mode (x-ray/stress translucent,
     /// solid opaque); 1 when the overlay is off (the normal opaque draw).
-    private var bodyAlpha: Float { loadPathActive ? model.flowBodyMode.bodyAlpha : 1 }
+    private var bodyAlpha: Float { layers.xray ? XrayLook.bodyAlpha : 1 }   // ★ 10-28: X-ray is a layer, with any colouring and motion
 
     /// Per-flat-vertex flex displacement for the selected variant (nil when flex is
     /// off / the variant has no field). Cached in the model, so this is cheap.
     private var flexDisplacements: [Float]? {
-        guard deflectionActive, let mesh = model.selectedMesh,
-              let field = model.selectedDisplacementField, !field.isEmpty else { return nil }
-        return model.flexDisplacements(for: mesh, field: field)
+        motion?.prep.disp   // ★ notes25: sampled smoothly from the material's own nodes (no tearing), once per selection
     }
     /// The per-frame displacement scale. For the viz.3 wobble it is exaggeration·
     /// amplitude (reduced-motion pins amplitude at 1); for the viz.6 push scrub it is
     /// the load-proportional push exaggeration (a static scrub — no loop).
     private var flexScale: Float {
-        if pushActive { return model.pushFlexScale() }
-        return flexActive ? model.flexScale(reduceMotion: reduceMotion) : 0
+        motion?.frame.shapeScale ?? 0   // ★ notes25: the computed displacement × the load × the exaggeration
     }
 
     // MARK: - Stress legend (M7.viz.1 — scaled to material yield)
@@ -753,14 +1047,7 @@ public struct ResultsScreen: View {
                     .frame(width: 30, alignment: .trailing)
             }
 
-            drawerLabel("Wiggle")
-            HStack(spacing: DS.Space.s) {
-                Slider(value: Binding(get: { model.flowWiggle }, set: { model.setFlowWiggle($0) }),
-                       in: 0...2).tint(RGBA(255, 90, 72).color)
-                Text(String(format: "%.1f×", model.flowWiggle)).dsStyle(DS.TypeScale.caption)
-                    .monospacedDigit().foregroundStyle(DS.Color.textSecondary.color)
-                    .frame(width: 30, alignment: .trailing)
-            }
+            // ★ no Wiggle slider: the arrows never wiggle (his note 2026-10-27)
 
             Toggle(isOn: $model.flowReducedStatic) {
                 Text("Reduced motion (static)").dsStyle(DS.TypeScale.caption)
@@ -839,6 +1126,24 @@ public struct ResultsScreen: View {
     /// red zone. Shown only while the stress overlay is on and the point projects in
     /// front of the camera. The located point + value/margin are headlessly tested on
     /// ResultsModel; the marker's placement/look is device QA (the M7 /app/ standard).
+    /// ★ B4 (note 14): the open check's places on the part — a ring each, in the check's colour (never a tap target).
+    @ViewBuilder private var checkMarkers: some View {
+        if let id = openCheck, let c = checks.first(where: { $0.id == id }), !c.places.isEmpty, let proj = projection {
+            let tint = (c.kind == .warn ? DS.Color.warning : c.kind == .ok ? DS.Color.okGreen : DS.Color.accent).color
+            ZStack {
+                ForEach(Array(c.places.enumerated()), id: \.offset) { i, p in
+                    if let at = proj.project(SIMD3<Float>(p)) {
+                        Circle().strokeBorder(tint, lineWidth: 2.5).background(Circle().fill(tint.opacity(0.2)))
+                            .frame(width: 28, height: 28)
+                            .background(ResultsChrome.publish("resultsCheckMarker-\(i)"))
+                            .position(at)
+                    }
+                }
+            }
+            .allowsHitTesting(false)
+        }
+    }
+
     @ViewBuilder private var hotSpotMarker: some View {
         // When the failure surface is on, its marker sits at this same point (the
         // failure location IS the hot spot), so defer to it to avoid a double marker.
@@ -940,32 +1245,38 @@ public struct ResultsScreen: View {
     /// The failure-point marker: reuses the M7.viz.2 hot-spot marker styling at the
     /// same worst point (the failure location IS the peak-stress point). Turns red with
     /// a "Yields here" callout once the push scrub reaches the failure multiple.
+    /// ★ notes25 (C2, C3): placed from the same data that colours the part — a print file's governing place (the weakest strut,
+    /// or the solid's weakest voxel), a solid result's first place to reach the top colour — and drawn on the BENT part.
     @ViewBuilder private var failureMarker: some View {
-        if model.failureOn, let fp = model.failurePrediction, let p = projection?.project(fp.position) {
-            let tint = model.atFailure ? Self.failureRed : DS.Color.accent.color
+        if let s = motion, s.kind == .breakIt, let at = s.placeShown, let p = projection?.project(at) {
+            let tint = s.frame.atTop ? Self.failureRed : DS.Color.accent.color
             ZStack {
                 Circle()
                     .strokeBorder(tint, lineWidth: 2)
-                    .background(Circle().fill(tint.opacity(model.atFailure ? 0.30 : 0.18)))
+                    .background(Circle().fill(tint.opacity(s.frame.atTop ? 0.30 : 0.18)))
                     .frame(width: 26, height: 26)
-                failureCallout(fp, tint: tint)
+                failureCallout(s, tint: tint)
                     .fixedSize()
                     .offset(y: -48)   // float the readout above the marker
             }
+            .background(ResultsChrome.publish("resultsGivesWayMarker"))
             .position(p)
         }
     }
 
     /// The failure marker's readout: "YIELDS HERE" + the load at which it yields, or —
     /// before failure — the current push load against the failure load.
-    private func failureCallout(_ fp: FailurePrediction, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(model.atFailure ? "YIELDS HERE" : "FAILS AT")
+    private func failureCallout(_ s: ResultsModel.MotionState, tint: Color) -> some View {
+        let lines = model.breakMarkerLines(s)   // ★ notes25 C3: "GIVES WAY HERE · 55 kg · 1.34× your load"
+        return VStack(alignment: .leading, spacing: 1) {
+            Text(lines.title)
                 .font(.system(size: 9, weight: .bold)).tracking(0.6)
                 .foregroundStyle(DS.Color.textSecondary.color)
-            Text(fp.valueLabel).dsStyle(DS.TypeScale.bodyStrong)
-                .foregroundStyle(model.atFailure ? tint : DS.Color.textPrimary.color)
-            Text(String(format: "%.1f× the load", fp.multiplier))
+            if let load = lines.load {
+                Text(load).dsStyle(DS.TypeScale.bodyStrong)
+                    .foregroundStyle(s.frame.atTop ? tint : DS.Color.textPrimary.color)
+            }
+            Text(lines.multiple)
                 .dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
                 .foregroundStyle(tint)
         }
@@ -977,55 +1288,6 @@ public struct ResultsScreen: View {
 
     // MARK: - the variant entry controls (task variant-entry-gating-and-retention)
 
-    /// The Smooth entry's verdict for the SELECTED variant. A caller that has not
-    /// wired the gate (previews, evidence captures) gets the pre-gate behaviour.
-    private var smoothVerdict: VariantEntryVerdict {
-        smoothEntry?(model.selectedVariantIndex)
-            ?? VariantEntryVerdict(label: "Smooth", enabled: true, reason: nil,
-                                   allReasons: [])
-    }
-    private var latticeVerdict: VariantEntryVerdict {
-        latticeEntry?(model.selectedVariantIndex)
-            ?? VariantEntryVerdict(label: "Lattice", enabled: true, reason: nil,
-                                   allReasons: [])
-    }
-
-    /// AJ2: ONE shape for both entries — enabled it is the chip it always was;
-    /// blocked it is DISABLED and carries the specific reason underneath, which is
-    /// the shape the lattice page's bottom bar already uses. It is never a plain
-    /// greyed-out control, and it never opens a page that then apologises.
-    @ViewBuilder
-    private func entryControl(icon: String, verdict: VariantEntryVerdict,
-                              action: @escaping () -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Button(action: { if verdict.enabled { action() } }) {
-                HStack(spacing: DS.Space.s) {
-                    Image(systemName: icon)
-                        .font(.system(size: 12, weight: .semibold))
-                    Text(verdict.label).dsStyle(DS.TypeScale.callout)
-                }
-                .foregroundStyle((verdict.enabled ? DS.Color.textPrimary
-                                                  : DS.Color.textQuaternary).color)
-                .fixedSize()
-                .padding(.vertical, DS.Space.sm).padding(.horizontal, DS.Space.l)
-                .background(Capsule().fill(DS.Surface.bar.color)
-                    .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
-            }
-            .buttonStyle(.plain)
-            .disabled(!verdict.enabled)
-            if let why = verdict.reason {
-                Text(why)
-                    .dsStyle(DS.TypeScale.caption2)
-                    .foregroundStyle(DS.Color.textQuaternary.color)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: 260, alignment: .leading)
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(verdict.accessibilityLabel)
-    }
-
     // MARK: - Top bar: back · project / Optimized ✓ · See Original · Export
 
     /// One flex row across the top: navigation + project on the left, Export on the
@@ -1034,7 +1296,17 @@ public struct ResultsScreen: View {
     /// instead of letting "See Original" and Export overlap. The secondary viz chips
     /// were pulled OUT of here onto the right rail (`vizRail`), which is what freed the
     /// space. Pixels are device QA (the M7 /app/ standard).
-    private var topBar: some View {
+    @ViewBuilder private var topBar: some View {
+        // ★ B2 (U1, notes 17, 18): the workspace's ONE top-left block, in the same place as on every page ("Optimized ✓"
+        // and nothing else: no run time, no machine on the name row)
+        if let topLeftBlock {
+            topLeftBlock.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        } else {
+            legacyTopBar
+        }
+    }
+
+    private var legacyTopBar: some View {
         VStack {
             HStack(spacing: DS.Space.m) {
                 Button(action: onClose) {
@@ -1090,48 +1362,438 @@ public struct ResultsScreen: View {
                 // pressure its name truncates (lineLimit 1) while the fixed-size
                 // buttons keep their full width, so nothing overlaps.
 
-                Button(action: onSeeOriginal) {
-                    HStack(spacing: DS.Space.s) {
-                        Image(systemName: "cube.transparent").font(.system(size: 12, weight: .semibold))
-                        Text("See Original").dsStyle(DS.TypeScale.callout)
-                    }
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .fixedSize()
-                    .padding(.vertical, DS.Space.sm).padding(.horizontal, DS.Space.l)
-                    .background(Capsule().fill(DS.Surface.bar.color)
-                        .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+                // ★ Results redesign (2026-10-27): undo / redo here, as on every page. Original is the capsule's Setup;
+                // Smooth is gone; Export sits at the bottom right.
+                if let undo {
+                    topIcon("arrow.uturn.backward", label: "Undo", enabled: canUndo(), action: undo)
+                        .accessibilityIdentifier("results-undo")
                 }
-                .buttonStyle(.plain)
-
-                // Export sits NEXT TO "See Original" (design-overhaul round 2, item 4), not
-                // pushed to the far right — the absolute top-right corner now belongs to the
-                // orientation gizmo alone.
-                exportButton
-
-                // Per-variant lattice entry (handoff 2026-07-30-lattice-page): opens
-                // the lattice page with the SELECTED variant's field as the demand
-                // field. Hidden when the caller wired nothing.
-                // Per-variant SMOOTHING entry (handoff 2026-08-02-smoothing-page).
-                // Placed BEFORE Lattice because the pipeline order is
-                // smooth-then-lattice: a smoothed variant may go on to the lattice
-                // page, and smoothing a latticed export would round the struts.
-                if let onSmooth {
-                    entryControl(icon: "scribble.variable",
-                                 verdict: smoothVerdict,
-                                 action: { onSmooth(model.selectedVariantIndex) })
+                if let redo {
+                    topIcon("arrow.uturn.forward", label: "Redo", enabled: canRedo(), action: redo)
+                        .accessibilityIdentifier("results-redo")
                 }
 
-                if let onLattice {
-                    entryControl(icon: "square.grid.3x3.fill",
-                                 verdict: latticeVerdict,
-                                 action: { onLattice(model.selectedVariantIndex) })
-                }
+                // ★ his iPad 2026-10-27: the old "Lattice" button (and its refusal text) is gone from Results — the
+                // Lattice stage is reached from the capsule's stage menu.
 
                 Spacer(minLength: DS.Space.m)
             }
             Spacer()
         }
         .padding(DS.Space.xl3)
+    }
+
+    private func topIcon(_ symbol: String, label: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 14, weight: .semibold))
+                .foregroundStyle((enabled ? DS.Color.textPrimary : DS.Color.textQuaternary).color)
+                .frame(width: 42, height: 42)
+                .background(Circle().fill(DS.Surface.bar.color).overlay(Circle().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(label)
+    }
+
+    // MARK: - ★ the redesign's panels (his mockup, approved 2026-10-27)
+
+    var versionRows: [ResultsVersionRow] {
+        ResultsVersions.rows(tabs: model.tabs, blocks: model.reportBlocks, requestedVF: { model.requestedVolumeFraction(of: $0) })
+    }
+
+    private var selectedRow: ResultsVersionRow? { versionRows.first { $0.tabIndex == model.selectedIndex } }
+
+    /// ★ B4: E1's finishing of the selected version (report "finish"), nil on a result from before E1.
+    private var selectedFinish: FinishReport? {
+        guard let b = model.reportBlocks, let t = model.selected, let vf = model.requestedVolumeFraction(of: t) else { return nil }
+        return b.rows.first { $0.accepted && abs($0.volumeFraction - vf) < 1e-6 }?.finish
+    }
+
+    /// The checks for the selected version (one line + one sub-line each).
+    var checks: [ResultsCheck] {
+        let blocks = model.reportBlocks
+        let thin: Int = {
+            guard let b = blocks, let t = model.selected, let vf = model.requestedVolumeFraction(of: t) else { return 0 }
+            return b.rows.first { $0.accepted && abs($0.volumeFraction - vf) < 1e-6 }?.fragileJoints ?? 0
+        }()
+        return model.droppedChecks   // ★ R-07: a version the final check on its file refused, named as it was seen
+            + ResultsChecks.checks(tab: model.selected, margin: selectedRow?.margin,
+                                    required: blocks?.safetyMargin ?? blocks?.strengthen?.marginRequired ?? 1,
+                                    safetyMargin: blocks?.safetyMargin, scenarios: model.scenarios(for: model.selected),
+                                    thinJoints: thin, bridged: model.selected.map { model.isBridged($0) } ?? false,
+                                    pieces: model.selected.flatMap { model.piecesFlag($0) },
+                                    finish: selectedFinish,   // ★ B4: E1's finishing
+                                    weakest: model.latticeAnswer?.place ?? model.hotSpot.map { SIMD3<Double>($0.position) },
+                                    struts: blocks?.latticeFile,   // ★ his ruling 11-17: a new-engine Lattice run's struts
+                                    printFile: blocks?.printFile,   // ★ his 11-21: its file, strengthening and layers
+                                    answer: model.latticeAnswer,   // ★ notes25 C3: a print file's one strength line
+                                    printing: printing)   // ★ notes27: how it prints, in his words
+                .map { model.withStrengthenedLegend($0) }   // ★ notes27: its legend when its struts are lit
+    }
+
+    /// Bottom left: the streaming pill, a latticed version's mesh state, then the Versions panel.
+    private var versionsColumn: some View {
+        VStack(alignment: .leading, spacing: DS.Space.s) {
+            Spacer()
+            streamingChip
+            if model.selectedLattice != nil { latticeDetailCaption }
+            let rows = versionRows
+            ResultsVersionsPanel(rows: rows, selectedTab: model.selectedIndex, open: $versionsOpen, pill: crowded,
+                                 pick: { model.select($0) },   // (★ R-a: Compare is the corner's)
+                                 version: version,
+                                 pickedTab: pickedVariant.flatMap { v in model.tabs.first { $0.variantIndex == v && !$0.isLatticed }?.index },
+                                 choose: onPick.map { pick in { t in if let tab = model.tabs.first(where: { $0.index == t }) { pick(tab.variantIndex) } } })
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+        .padding([.leading, .top], PageChrome.edge)
+        .padding(.bottom, versionsLift)
+    }
+
+    /// ★ R-a: the results panel's foot — the page's edge, or 12 pt above the corner where the two would meet (U: nothing
+    /// covers a control; the mockup's 11″ portrait overlaps them).
+    private var versionsLift: CGFloat {
+        guard cornerFrame.width > 0, cornerFrame.minX < PageChrome.edge + 340 + DSParts.cornerGap else { return PageChrome.edge }
+        return screenHeight - cornerFrame.minY + DSParts.cornerGap
+    }
+
+    /// ★ LOOK PER SCREEN (R-a, mockup #topo-results, §4.18): [Compare] [Details] [Export v7b (.stl)] [⌃], 12 pt apart, 24 pt
+    /// from the edges. ⌃: Export all N results · Open in Library.
+    @ViewBuilder private var resultsCorner: some View {
+        let rows = versionRows
+        let exportable = model.tabs.filter { !$0.isLatticed && model.canExport(tab: $0) }.count
+        DSCorner(key: "resultsCorner") {
+            if rows.filter({ $0.tabIndex != nil }).count >= 2 {
+                DSGlassButton("Compare", systemImage: "rectangle.split.2x1", key: "resultsCompare") {
+                    compare = ResultsCompareSession(candidates: rows.compactMap(\.tabIndex))
+                }
+                .accessibilityIdentifier("results-compare")
+            }
+            DSGlassButton("Details", selected: detailsOpen, key: "resultsDetailsButton") {
+                withAnimation(DS.Motion.sheetIn) { detailsOpen.toggle() }
+            }
+            .accessibilityIdentifier("results-details")
+        } run: {
+            let line = exportLine
+            // ★ notes30 (his 11-27): a print file's line is "Turn on manual supports", its (i) beside the button says where
+            DSRunButton(exportTitle, subtitle: line,
+                        state: model.canExport ? .ready : .disabled(model.exportDisabledReason ?? "Nothing to export"),
+                        key: "resultsExport",
+                        info: model.canExport && line == ResultsExportCopy.printFileLine ? ResultsExportCopy.supportsInfo : nil,
+                        infoTitle: ResultsExportCopy.supportsInfoTitle) { exportFile() }   // ★ notes28 (4c): the 3MF by default (STL in the ⌃)
+                .accessibilityLabel(model.canExport ? (model.exportIsStreamed ? "Export STL" : "Export 3MF")
+                                    : (model.exportDisabledReason ?? "Export unavailable"))
+        } split: {
+            // ★ his 11-22 (img 45): the ⌃ opens its own drawer, above the buttons (never over them)
+            DSSplitButton(key: "resultsSplitMore", open: model.cornerDrawers.isOpen("resultsSplitMore")) {
+                model.cornerDrawers.toggle("resultsSplitMore")
+            }
+        } above: {
+            if model.cornerDrawers.isOpen("resultsSplitMore") {
+                VStack(alignment: .trailing, spacing: DSParts.cornerGap) {
+                    CornerMoreDrawer(drawers: model.cornerDrawers, key: "resultsSplitMore", items: resultsMoreItems(exportable))
+                    exportFailureLine
+                }
+            } else {
+                exportFailureLine
+            }
+        }
+    }
+
+    /// ★ his 11-22 (img 45): the ⌃'s rows — the menu's two (Export all N results · Open in Library).
+    private func resultsMoreItems(_ exportable: Int) -> [CornerMoreItem] {
+        var items: [CornerMoreItem] = []
+        // ★ notes28 (4c, his "an *option* for an stl (via the '^' menu)"): Export is the 3MF; the shape alone as an STL here
+        if !model.exportIsStreamed {
+            items.append(.action(ResultsExportCopy.stlItem, line: ResultsExportCopy.stlLine, enabled: model.canExport,
+                                 id: "results-split-export-stl", info: ResultsExportCopy.stlInfo) { exportSTL() })
+        }
+        if exportable >= 2 { items.append(.action("Export all \(exportable) results", id: "results-split-export-all") { exportAll() }) }
+        // ★ notes27 P6 (his print orientation, SPEC 2d): "Print orientation", the recommendation and Check strength
+        if orientation != nil {
+            items.append(.action(PrintOrientationWords.drawerItem, id: "results-split-orientation") { startOrientation() })
+        }
+        items.append(.action("Open in Library", id: "results-split-library") { onClose() })
+        return items
+    }
+
+    /// The failure the corner says: an STL export's, else the video's.
+    private var currentExportFailure: ResultsExportFailure? {
+        if let exportFailure { return exportFailure }
+        if case let .failed(msg) = videoExport.state { return .video(msg) }
+        return nil
+    }
+
+    /// ★ B10 (U6, the reviewer's ruling 11-11 08:04Z (2)(a); §4.12 Line): ONE danger line over the corner — the design's
+    /// fix-line place (§4.18; the corner sits at the page's foot, so its line is the one just above it) — at most 12 words,
+    /// with ONE "Try again" chip. The system's own words are its (i).
+    @ViewBuilder private var exportFailureLine: some View {
+        if let f = currentExportFailure {
+            HStack(spacing: DS.Space.s) {
+                Text(f.words).font(.system(size: 12)).foregroundStyle(DS.Color.danger.color).lineLimit(1).fixedSize()
+                DSChip(.fix(ResultsExportFailure.retry), key: "resultsExportRetry") { retryExport(f) }
+                if !f.detail.isEmpty { InfoTip(key: "resultsExportFailure", text: f.detail, label: "What went wrong") }
+            }
+            .background(ResultsChrome.publish("resultsExportFailure"))
+        }
+    }
+
+    private func retryExport(_ f: ResultsExportFailure) {
+        switch f {
+        case .file: exportMadeFile()   // ★ notes28 (4c); ★ his 11-25: the same file again (never the levels' card)
+        case .stl: exportMadeSTL()
+        case .stlAll: exportAll()
+        case .video:
+            videoExport.reset()
+            videoExport.export(keyframes: model.keyframes(), name: model.projectName)
+        }
+    }
+
+    /// "Export v7b (.3mf)": the version and the result's letter. ★ notes28 (4c): a 3MF by default; a worker-streamed latticed
+    /// variant is the worker's STL.
+    private var exportTitle: String {
+        let letter = selectedRow.map { $0.title.components(separatedBy: " · ").first ?? $0.title } ?? ""
+        return "Export " + (version ?? "") + letter + (model.exportIsStreamed ? " (.stl)" : " (.3mf)")
+    }
+
+    /// What the file is: the print file itself, the latticed part, or one finished shape (smoothed when E1 finished it).
+    private var exportLine: String {
+        if !model.exportIsStreamed, PrintFileKeep.openFile(exists: model.printFileIdentity) { return ResultsExportCopy.printFileLine }
+        return model.exportIsStreamed ? "The latticed part" : selectedFinish != nil ? "One finished shape \u{00B7} smoothed" : "One finished shape"
+    }
+
+    /// ★ notes28 (4c): Export's default — a print file's result hands out the print file itself (kept with its version: its
+    /// painted supports and print settings); any other result its shape as a 3MF; a worker-streamed latticed variant the
+    /// worker's STL, as before.
+    private func exportFile() {
+        if model.exportIsStreamed { exportSTL(); return }
+        // ★ his 11-25: a print file offers its three resolutions first (the one made exports at once, below)
+        if offerResolutions(format: nil) { return }
+        exportMadeFile()
+    }
+
+    /// ★ his 11-25 ("Offer print resolutions when exporting. Full detail vs medium vs coarse."): Export on a print file whose
+    /// report gives its levels and whose file is kept here opens ONE centred card (PrintResolutionFlow): the three levels, each
+    /// with its resolution line, its size and (not made yet) how long the Mac takes. `format` nil: the made file's own.
+    private func offerResolutions(format: String?) -> Bool {
+        let facts = model.printResolutions
+        guard PrintResolutionFlow.offers(facts, kept: PrintFileKeep.openFile(exists: model.printFileIdentity)), let f = facts else {
+            return false
+        }
+        model.cornerDrawers.close()
+        Self.exportAttemptProbe?("resolutions")
+        let stl = format == "stl"
+        PrintResolutionFlow.shared.open(f, format: format ?? f.madeFormat, stem: model.exportStem(for: model.selected),
+                                        exportMade: stl ? { exportMadeSTL() } : { exportMadeFile() })
+        return true
+    }
+
+    /// The shown result's own file: a print file itself (kept with its version), else its shape as a 3MF.
+    private func exportMadeFile() {
+        exportFailure = nil
+        Self.exportAttemptProbe?("3mf")
+        if Self.exportWriteFailsForTests { exportFailure = .file(CocoaError(.fileWriteNoPermission).localizedDescription); return }
+        // ★ notes30 (his word 11-26): the print settings he set go into the 3MF (ThreeMFPrintSettings)
+        let params = PrintFileKeep.openPrintParams()
+        if let kept = PrintFileKeep.openFile(model.printFileIdentity, named: model.exportStem(for: model.selected)) {
+            do { try ThreeMFPrintSettings.stamp(kept, params: params) } catch {
+                exportFailure = .file(error.localizedDescription)
+                return
+            }
+            stlExportURLs = [kept]
+            return
+        }
+        guard let data = model.exportThreeMFData() else { return }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(model.exportThreeMFFilename)
+        do {
+            try data.write(to: url, options: .atomic)
+            try ThreeMFPrintSettings.stamp(url, params: params)
+            stlExportURLs = [url]
+        } catch {
+            exportFailure = .file(error.localizedDescription)
+        }
+    }
+
+    /// ★ The model rises above the Details drawer while it is open (mockup #topo-results-details: "the drawer never covers
+    /// it"), by the drawer's share of the page; closed, it comes back down.
+    private func liftModel() {
+        let f: Float = detailsOpen && screenHeight > 0 ? Float(Swift.min(0.45, drawerHeight / screenHeight)) : 0
+        cameraModel.setFrameLift(f)
+        Self.frameLiftProbe?(f)
+    }
+
+    /// ★ R-a: every solid result's STL into one folder, handed to the share sheet together.
+    private func exportAll() {
+        exportFailure = nil
+        Self.exportAttemptProbe?("all")
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("results-" + UUID().uuidString.prefix(8), isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            stlExportURLs = try model.exportAllSTL().map { f in
+                let u = dir.appendingPathComponent(f.filename)
+                try f.data.write(to: u, options: .atomic)
+                return u
+            }
+        } catch {
+            exportFailure = .stlAll(error.localizedDescription)
+        }
+    }
+
+    /// The right column, under the view cube: "Scenario" + its menu, the view buttons, the checks and Details, Export.
+    private var rightColumn: some View {
+        VStack(alignment: .trailing, spacing: DS.Space.m) {
+            let sc = model.scenarios(for: model.selected)
+            ResultsViewModePicker(modes: viewModes, isOn: { layers.isOn($0) },
+                                  tap: { layers.tap($0, hasStress: model.hasStress) }, fullScreen: $fullScreen)
+            motionBar
+            // ★ his note 2026-10-27: the tap-to-explore key sits above Checks, minimised until he opens it — and (10-28) it is
+            // there whenever the part wears stress colours: still, bending, breaking or carrying the light
+            stressKey
+            if let note = ResultsScenarioViews.note(pick: scenarioPick, scenarios: sc,
+                                                    ownFields: model.showsOwnFields(of: scenarioPick)) {
+                Text(note).font(.system(size: 11, weight: .semibold)).foregroundStyle(DS.Color.warning.color)
+                    .multilineTextAlignment(.trailing).frame(width: ResultsChrome.columnWidth, alignment: .trailing)
+                    .accessibilityIdentifier("results-scenario-views-note")
+            }
+            // ★ LOOK PER SCREEN (R-c, mockup #topo-results): "Scenario: Worst case ⌄" beside Checks, top-aligned
+            HStack(alignment: .top, spacing: DSParts.cornerGap) {
+                if sc.count >= 2 { ResultsScenarioPicker(scenarios: sc, pick: $scenarioPick).padding(.top, 6) }
+                ResultsChecksAndDetails(checks: checks, checksOpen: $checksOpen, openCheck: $openCheck, detailsOpen: $detailsOpen,
+                                        tab: $detailsTab, versionTitle: selectedRow?.title ?? "",
+                                        rows: { model.printing = printing; return model.detailRows($0, version: selectedRow) }, pill: crowded,   // ★ notes27
+                                        link: { _ in startOrientation() })   // ★ notes27 P6: the orientation row's "Print orientation"
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+        .padding(.top, PageChrome.gizmoClearance)
+        .padding(.trailing, PageChrome.edge)
+        .padding(.bottom, cornerFrame.height > 0 ? screenHeight - cornerFrame.minY + DSParts.cornerGap   // ★ R-a: above the corner
+                          : PageChrome.edge + DSParts.runHeight + DSParts.cornerGap)
+    }
+
+    /// Both corners' full-width bars (340 + 330) and their gutters leave under 160 pt of model between them: pills.
+    private var crowded: Bool { screenWidth < 340 + ResultsChrome.columnWidth + 4 * PageChrome.edge + 160 }
+
+    /// The stress at the tapped point — the SAME field value the colour there is painted from.
+    private var stressReading: Double? {
+        guard let p = stressProbe else { return nil }
+        // ★ notes25 C3: a print file's reading is the share of its limit there, at the shown load (what the colour says)
+        if model.latticeAnswer != nil { return model.shareOfLimit(at: p, load: stressMultiplier) }
+        guard let f = model.selectedStressField else { return nil }
+        return Double(f.value(at: p)) * stressMultiplier   // ★ 10-28: the value the colour there shows, at the shown load
+    }
+    /// ★ 10-28: where the tapped spot is ON SCREEN — on the bent part while it bends ("it should show the BENT part").
+    private var stressProbeShown: SIMD3<Float>? {
+        guard let p = stressProbe else { return nil }
+        guard let s = motion, s.frame.shapeScale != 0 else { return p }
+        return p + s.prep.displacement(at: p) * s.frame.shapeScale
+    }
+    /// ★ His iPad 2026-10-28: the Exaggeration slider (Bend and Break), straight onto the model's one value.
+    /// ★ notes25 C1: the slider's 0…1 over 1× … the part's own top (8 % of its longest side), logarithmic.
+    private func exaggerationBinding(_ s: ResultsModel.MotionState) -> Binding<Double>? {
+        guard s.range.adjustable else { return nil }
+        return Binding(get: { s.range.position(of: s.exaggeration) },
+                       set: { model.loadMotion.pickExaggeration(s.range.value(at: $0), selection: model.motionSelection) })
+    }
+    /// What the colours show right now, for the key.
+    private var legendNote: String? {
+        switch layers.motion {
+        case .bend, .breakIt:
+            return motion.map { model.motionNote($0) }   // ★ notes25
+        case .loadPaths:
+            return "The light takes the colour of the stress it passes through"
+        default:
+            return nil
+        }
+    }
+    @ViewBuilder private var stressKey: some View {
+        if legendShown {
+            // ★ notes25 (C2, C3): the top colour in plain words — "Yields", or a print file's "Gives way"
+            ResultsGiveWayKey(scale: model.latticeAnswer != nil ? .share : .stress(topMPa: model.stressScaleMaxMPa),
+                              caption: model.latticeAnswer != nil ? "How close to giving way" : model.stressLegend.caption,
+                              note: legendNote, reading: stressReading, minimized: $stressKeyMinimized)
+        }
+    }
+
+    /// ★ notes27: the tapped value's words — a print file's is its share of the limit there ("62% of its limit"), never MPa.
+    nonisolated static func probeText(_ r: Double, share: Bool) -> String {
+        share ? String(format: "%.0f%% of its limit", r * 100) : String(format: "%.2f MPa", r)
+    }
+
+    /// The tapped point on the model: an arrow and its value, re-projected every frame so it rides the part through an orbit.
+    @ViewBuilder private var stressProbeCallout: some View {
+        if let p = stressProbeShown, let r = stressReading, let s = projection?.project(p) {
+            HStack(spacing: 5) {
+                Image(systemName: "arrowtriangle.left.fill").font(.system(size: 11)).foregroundStyle(DS.Color.accent.color)
+                Text(Self.probeText(r, share: model.latticeAnswer != nil)).font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                    .foregroundStyle(DS.Color.textPrimary.color)
+            }
+            .padding(.horizontal, 9).padding(.vertical, 6)
+            .background(Capsule().fill(DS.Surface.panel.color.opacity(0.95)).overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+            .fixedSize()
+            .offset(x: s.x + 8, y: s.y - 15)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .allowsHitTesting(false)
+            .accessibilityIdentifier("results-stress-probe")
+        }
+    }
+
+    private var viewModes: [ResultsViewMode] {
+        ResultsViewMode.shown(hasStress: model.hasStress, hasDisplacement: model.hasFlex,
+                              canBreak: model.canBreak)   // ★ notes25 C3: a print file's governing margin too
+    }
+
+    /// One view at a time: Stress colours; none lit is the plain part; X-ray see-through; Load paths, Bend and Break MOVE (his iPad
+    /// 2026-10-27), each starting from rest and playing.
+    private func applyMotion(_ m: ResultsViewMode?) {
+        model.flexOn = m == .bend
+        model.setFlexPhase(0)
+        // ★ 10-28: the old arrows (comets from the load groups' centres, through a direction field) are retired — the light
+        // flow below replaces them
+        if model.loadPathOn { model.toggleLoadPath() }
+        if m == .loadPaths { model.setLightPhasePosition(0); model.prepareLightFlow() }
+        model.failureOn = m == .breakIt
+        model.flowReducedStatic = false
+        model.loadMotion.restart()   // ★ notes25: Bend / Break's load from the top of its loop
+        motionPlaying = true
+    }
+
+    /// The open key is exploring (the Lattice key's process).
+    private var exploring: Bool { legendShown && !stressKeyMinimized }
+
+    /// The double tap's way out: the reading goes and the key folds back to its pill.
+    private func leaveExplore() {
+        stressProbe = nil
+        withAnimation(DS.Motion.sheetIn) { stressKeyMinimized = true }
+    }
+
+    /// ★ His iPad 2026-10-27: under the view buttons, the moving view's Play / Pause and its slider.
+    @ViewBuilder private var motionBar: some View {
+        switch layers.motion {
+        case .bend where model.flexOn:
+            // ★ notes25: the load from none to yours, eased, held and back; the slider is one loop
+            if let s = motion {
+                ResultsMotionBar(title: "Bend", readout: model.bendReadout(s),
+                                 alarm: false, playing: $motionPlaying, position: model.loadMotion.position(.bend),
+                                 scrub: { model.loadMotion.setPosition($0, .bend) }, exaggeration: exaggerationBinding(s),
+                                 exaggerationLabel: LoadMotion.label(s.exaggeration))
+            }
+        case .loadPaths:
+            ResultsMotionBar(title: "Load flow",
+                             readout: model.lightFlow != nil ? "the load travelling through the part, as light"
+                                 : model.lightFlowBuilding ? "Tracing the load through the part…" : "This run has no load points to start from",
+                             alarm: false, playing: $motionPlaying, position: model.lightPhasePosition,
+                             scrub: { model.setLightPhasePosition($0) })
+        case .breakIt:
+            // ★ notes25 C3: from your load (1.00×) to the governing margin, where it gives way at the marked place
+            if let s = motion {
+                ResultsMotionBar(title: "Break", readout: model.breakReadout(s), alarm: s.frame.atTop,
+                                 playing: $motionPlaying, position: model.loadMotion.position(.breakIt),
+                                 scrub: { model.loadMotion.setPosition($0, .breakIt) }, exaggeration: exaggerationBinding(s),
+                                 exaggerationLabel: LoadMotion.label(s.exaggeration))
+            }
+        default:
+            EmptyView()
+        }
     }
 
     // MARK: - Bottom-right rail: slide-open visualization chips
@@ -1180,7 +1842,7 @@ public struct ResultsScreen: View {
                 vizRow(open: smoothOpen,
                        drawer: {
                            SmoothingPanel(model: sm,
-                                          onExport: { path in stlExportURL = URL(fileURLWithPath: path) },
+                                          onExport: { path in stlExportURLs = [URL(fileURLWithPath: path)] },
                                           onClose: { smoothOpen = false })
                        },
                        chip: { smoothChip })
@@ -1223,18 +1885,18 @@ public struct ResultsScreen: View {
     private func vizChip<Icon: View>(
         label: String, isOn: Bool, action: @escaping () -> Void,
         @ViewBuilder icon: () -> Icon) -> some View {
+        // ★ B3 (2026-10-24, his pick): the views are ICON-ONLY, as on the Setup page; the word stays the
+        // button's accessibility label (and is what VoiceOver reads).
         Button(action: action) {
-            HStack(spacing: DS.Space.s) {
-                icon()
-                Text(label).dsStyle(DS.TypeScale.bodyStrong)
-            }
+            icon()
             .foregroundStyle(DS.Color.textPrimary.color)
-            .padding(.vertical, DS.Space.m)
-            .padding(.horizontal, DS.Space.xl4)
+            .frame(width: 44, height: 44)
             .background(Capsule().fill(isOn ? DS.Color.accent.opacity(0.28).color : DS.Surface.bar.color)
                 .overlay(Capsule().strokeBorder(isOn ? DS.Color.accent.opacity(0.7).color : DS.Color.strokeStrong.color, lineWidth: 1.5)))
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 
     private var stressChip: some View {
@@ -1278,12 +1940,11 @@ public struct ResultsScreen: View {
         return Button(action: exportSTL) {
             HStack(spacing: DS.Space.s) {
                 Image(systemName: "square.and.arrow.up").font(.system(size: 13, weight: .semibold))
-                Text("Export .stl").dsStyle(DS.TypeScale.bodyStrong)
+                Text("Export " + (selectedRow.map { $0.title.components(separatedBy: " · ").first ?? $0.title } ?? "") + " (.stl)")
+                    .dsStyle(DS.TypeScale.bodyStrong).lineLimit(1)
             }
-            .fixedSize()
             .foregroundStyle(.white)
-            .padding(.vertical, DS.Space.m)
-            .padding(.horizontal, DS.Space.xl4)
+            .frame(width: ResultsChrome.columnWidth, height: 56)
             .background(Capsule().fill(enabled ? DS.Color.accent.color : DS.Color.textTertiary.color))
             .dsShadow(enabled ? .accentGlow : .panel)
         }
@@ -1291,6 +1952,7 @@ public struct ResultsScreen: View {
         .disabled(!enabled)
         .opacity(enabled ? 1 : 0.55)
         .accessibilityLabel(enabled ? "Export STL" : (model.exportDisabledReason ?? "Export unavailable"))
+        .background(ResultsChrome.publish("resultsExport"))
     }
 
     // MARK: - Bottom-left: savings tabs
@@ -1300,7 +1962,13 @@ public struct ResultsScreen: View {
             Spacer()
             streamingChip   // "optimizing more…" sits right above the variant tabs
             ladderModeCaption   // WHICH ladder these tabs came off (growth-ladder G7)
+            if let blocks = model.reportBlocks { RunReportCardsView(blocks: blocks) }   // Flexible (PR #362) H56g: redesign to strengthen (overnight plan 2026-10-25) — the versions' cards + item 47's line
             recommendationCaption  // WHICH OBJECT is recommended, and what it weighs
+            if let m = model.reportBlocks?.safetyMargin {   // ★ the safety margin (ruling 2026-10-26 13:12)
+                Text(SafetyMargin.builtForLine(m)).dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
+                    .foregroundStyle(DS.Color.textSecondary.color).accessibilityIdentifier("built-for")
+            }
+            ScenarioResultLines(results: model.reportBlocks?.strengthen == nil ? model.scenarioResults : [])   // ★ load scenarios: the worst case named; unheld, one line
             addedMaterialCaption   // the HEADLINE of a growth run: what was added
             massDetailCaption   // honest mesh-vs-voxel mass when they diverge (Open #6)
             latticeDetailCaption   // the latticed object's own mass + where it is
@@ -1314,6 +1982,7 @@ public struct ResultsScreen: View {
                                     .font(.system(size: 9, weight: .bold)).tracking(0.6)
                                     .foregroundStyle(DS.Color.okGreen.color)
                             }
+                            if model.isBridged(tab) { Text(StrengthenText.bridgedBadge).font(.system(size: 9, weight: .bold)).tracking(0.6).foregroundStyle(DS.Color.warning.color) }   // Flexible (PR #362) H56g: redesign to strengthen (overnight plan 2026-10-25) — BRIDGED
                             // THE RUNG'S OTHER OBJECT (task 2026-08-07-lattice-
                             // variants-on-screen). Badged rather than merely
                             // differently-worded, because the two tabs for one rung
@@ -1609,6 +2278,34 @@ public struct ResultsScreen: View {
         }
     }
 
+    // MARK: - Bottom-centre: the orientation line (★ B4, note 12)
+
+    /// "Shown as we'd print it" · Show as you placed it, and the confirm it grows into. Only `yours` changes how it prints.
+    private func printOrientationLine(_ po: ResultsPrintOrientation) -> some View {
+        let v = model.selectedVariantIndex
+        return GeometryReader { g in
+            let space = g.frame(in: .global)
+            let local = orientControls.frames.map { $0.offsetBy(dx: -space.minX, dy: -space.minY) }
+            PrintOrientationLine(phase: orientPhase, changes: po.changes(v)) { t in
+                let next = orientPhase.after(t)
+                if next == .confirm { po.recheck(v) }
+                if (next == .yours) != (orientPhase == .yours) { po.choose(v, next == .yours) }
+                orientPhase = next
+            }
+            .background(GeometryReader { s in
+                Color.clear.onAppear { orientSize = s.size }.onChange(of: s.size) { orientSize = $0 }
+            })
+            .frame(width: g.size.width,
+                   height: PrintOrientationLayout.bottomY(size: orientSize, viewport: g.size, controls: local), alignment: .bottom)
+        }
+    }
+
+    /// A version opens on how it prints: his placement if he picked it, ours otherwise.
+    private func syncOrientPhase() {
+        guard let po = printOrientation else { return }
+        orientPhase = po.printsYours(model.selectedVariantIndex) ? .yours : .ours
+    }
+
     // MARK: - Top-right: orientation gizmo (ViewCube), below Export
 
     /// The liquid-glass orientation widget, pinned to the ABSOLUTE top-right corner —
@@ -1619,9 +2316,13 @@ public struct ResultsScreen: View {
     /// tabs bottom-left, the media player bottom-centre — none reach the top-right cube.
     private var orientationGizmo: some View {
         VStack {
-            HStack {
+            HStack(alignment: .top, spacing: DS.Space.s) {
                 Spacer()
+                ViewProjectionPair()   // ★ B2 (note 1): [Orthographic │ Perspective], left of the gizmo, as on every page
+                    .padding(.top, (OrientationGizmoView.standardSize - ViewProjectionPair.height) / 2)   // ★ R-a2: as the workspace
                 OrientationGizmoView(camera: cameraModel)
+                    .closesCornerDrawersOnTouch(model.cornerDrawers)   // ★ his 11-22: a touch on the view cube closes the ⌃'s drawer
+                    .background(ResultsChrome.publish("resultsGizmo"))   // ★ notes25 B1: the fix pop-up keeps clear of the cube
             }
             Spacer()
         }
@@ -1775,3 +2476,23 @@ struct ShareSheet: View {
     }
 }
 #endif
+
+/// ★ B10 (U6, the reviewer's ruling 11-11 08:04Z (2)(a)): what failed to export on Results, said in ONE danger line (§4.12:
+/// at most 12 words) with one "Try again" chip; the system's own words go in its (i).
+public enum ResultsExportFailure: Equatable, Sendable {
+    case stl(String), stlAll(String), video(String)
+    /// ★ notes28 (4c): the default Export's file (the 3MF).
+    case file(String)
+    public static let retry = "Try again"
+    public var words: String {
+        switch self {
+        case .stl: return "Couldn\u{2019}t export the STL"
+        case .stlAll: return "Couldn\u{2019}t export the STL files"
+        case .video: return "Couldn\u{2019}t save the video"
+        case .file: return ResultsExportCopy.fileFailed
+        }
+    }
+    public var detail: String {
+        switch self { case let .stl(d), let .stlAll(d), let .video(d), let .file(d): return d }
+    }
+}

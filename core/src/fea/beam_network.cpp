@@ -1,5 +1,6 @@
 #include "topopt/beam_network.hpp"
 #include "topopt/observability.hpp"   // process_memory(): what the certificate cost
+#include "topopt/sparse_ldlt.hpp"     // brief E2, item 1: the direct factorisation
 
 #include <algorithm>
 #include <cassert>
@@ -1509,15 +1510,72 @@ CoupledLatticeSolve solve_coupled_lattice(
     }
     out.dropped_length_fraction = total_len > 0.0 ? dropped_len / total_len : 0.0;
     if (out.dropped_length_fraction > kIslandRefuseFraction) {
-      out.refusal =
+      // ── ★ WHY IT FAILED, AND HOW TO FIX IT (maintainer, 2026-09-22) ──────────
+      // "I'd like for an error to call out the hole in the lattice should the
+      // lattice not certify for that reason." The WHY was already here; a user
+      // reading it learnt that their lattice is disconnected and nothing about
+      // what to do. The two halves are separated below and the HOW names the job
+      // keys, because a refusal that cannot be acted on is a dead end with a
+      // paragraph attached.
+      //
+      // The two shapes are distinguished because they need OPPOSITE fixes, and
+      // core can already tell them apart from the restraint report it has just
+      // built. A FEW BIG components adrift is a hole -- the lattice is in
+      // healthy pieces and one or more of them has been cut off from the solid.
+      // MANY SMALL ones is a fabric that never knitted: the cell is too coarse
+      // for the region, or the members never reached each other at all.
+      const std::size_t adrift = out.restraint.components_unrestrained +
+                                 out.restraint.components_underconstrained;
+      const double members_per_adrift =
+          adrift > 0 ? static_cast<double>(out.members_dropped) /
+                           static_cast<double>(adrift)
+                     : 0.0;
+      const bool a_hole = adrift > 0 && members_per_adrift >= 8.0;
+
+      std::string why =
           std::to_string(out.members_dropped) + " of " +
           std::to_string(net.member_count()) + " lattice member(s), " +
           std::to_string(100.0 * out.dropped_length_fraction) +
           "% of the lattice by length, reach no tie or are held too loosely to "
           "resist a rigid rotation. They carry no load and make the system "
           "singular. Dropping that much is not a repair -- the lattice is mostly "
-          "disconnected from the part, and certifying what is left would describe a "
-          "structure that is largely missing.";
+          "disconnected from the part, and certifying what is left would describe "
+          "a structure that is largely missing.";
+
+      std::string shape =
+          "  WHAT IT LOOKS LIKE: " + std::to_string(adrift) +
+          " piece(s) of lattice reach no tie, averaging " +
+          std::to_string(members_per_adrift) + " member(s) each -- ";
+      shape += a_hole
+                   ? "a few LARGE pieces, which is a HOLE: the lattice is sound "
+                     "but something has cut one or more whole pieces off from the "
+                     "solid it must hold on to."
+                   : "many SMALL pieces, which is a fabric that never knitted: "
+                     "the members did not reach each other or the solid in the "
+                     "first place.";
+
+      std::string how =
+          a_hole
+              ? "  HOW TO FIX A HOLE: the lattice must touch solid somewhere. "
+                "Give the cut-off piece something to land on -- extend the region "
+                "so it reaches material, or keep a solid rim at the outline for "
+                "struts to weld into (ORGANIC: raise \"organic_solid_rim_mm\"; "
+                "OCTET: turn the shape grade on, whose outline beam is the same "
+                "thing) -- or close the hole that severed it. If the region's "
+                "depth was drawn or graded per column, a column with no lattice "
+                "in it is exactly such a hole, and the piece beyond it has "
+                "nothing left to hold on to. Widening the cell will NOT help "
+                "here: the pieces are already healthy."
+              : "  HOW TO FIX A FABRIC THAT NEVER KNITTED: the members are too "
+                "sparse to find each other. Use a SMALLER cell (lower "
+                "\"cell_min_mm\" / \"cell_max_mm\") so more members meet, or "
+                "raise the density so each is thicker and reaches further -- both "
+                "apply to ORGANIC and the OCTET alike. ORGANIC only: turn on "
+                "\"organic_transfer_ties\" so the second family gives the first "
+                "something to cross. Closing a hole will NOT help here: there is "
+                "no single hole to close.";
+
+      out.refusal = why + "\n" + shape + "\n" + how;
       return out;
     }
   }
@@ -2339,19 +2397,19 @@ CoupledLatticeSolve solve_coupled_lattice(
 #if defined(TOPOPT_HAVE_ACCELERATE)
   if (pc_sel == "direct" || pc_sel == "cholesky") {
     // lower triangle in coordinate form; Accelerate sums duplicates itself
-    std::vector<int> ri, ci;
-    std::vector<double> va;
-    ri.reserve(static_cast<std::size_t>(A.nnz() / 2 + NF));
-    ci.reserve(ri.capacity());
-    va.reserve(ri.capacity());
+    SymmetricLower lower;
+    lower.n = NF;
+    lower.row.reserve(static_cast<std::size_t>(A.nnz() / 2 + NF));
+    lower.col.reserve(lower.row.capacity());
+    lower.val.reserve(lower.row.capacity());
     for (int i = 0; i < NF; ++i)
       for (int k = A.ptr[static_cast<std::size_t>(i)];
            k < A.ptr[static_cast<std::size_t>(i) + 1]; ++k) {
         const int j = A.idx[static_cast<std::size_t>(k)];
         if (j > i) continue;                       // keep the lower triangle only
-        ri.push_back(i);
-        ci.push_back(j);
-        va.push_back(A.val[static_cast<std::size_t>(k)]);
+        lower.row.push_back(i);
+        lower.col.push_back(j);
+        lower.val.push_back(A.val[static_cast<std::size_t>(k)]);
       }
     // ★ WHAT DOES THE DIAGONAL LOOK LIKE? A Cholesky that aborts with
     // SparseFactorizationFailed hit a non-positive pivot; the diagonal is the first
@@ -2374,19 +2432,6 @@ CoupledLatticeSolve solve_coupled_lattice(
       mark("diagonal max", dmax);
       mark("non-positive diagonals", static_cast<double>(nonpos));
     }
-    SparseAttributes_t attr{};
-    attr.kind = SparseSymmetric;
-    attr.triangle = SparseLowerTriangle;
-    SparseMatrix_Double Amat = SparseConvertFromCoordinate(
-        NF, NF, static_cast<long>(va.size()), 1, attr, ri.data(), ci.data(), va.data());
-    SparseSymbolicFactorOptions sopt{};
-    sopt.control = SparseDefaultControl;
-    sopt.orderMethod = SparseOrderAMD;   // fill-reducing; the RCM order above is for CG
-    sopt.order = nullptr;
-    sopt.ignoreRowsAndColumns = nullptr;
-    sopt.malloc = malloc;
-    sopt.free = free;
-    sopt.reportError = nullptr;
     // ★ LDLT BY DEFAULT, AND THAT IS A MEASUREMENT. Cholesky is the cheaper
     // factorisation and the obvious first choice for a stiffness matrix, but it
     // needs STRICT positive definiteness and it refused on every real model
@@ -2396,81 +2441,49 @@ CoupledLatticeSolve solve_coupled_lattice(
     // marginally definite, not indefinite: rounding at a pivot, not a mechanism.
     // Trying it first therefore buys nothing and costs the whole failed elimination
     // -- 0.45 s at 303k dof, 42.32 s at 1.05M. LDLT needs only symmetry, is exact,
-    // and the residual gate below is what actually decides the answer is kept.
+    // and the residual gate is what actually decides the answer is kept.
     // TOPOPT_BEAM_PRECON=cholesky to try the other one and re-measure.
-    const bool try_cholesky = (pc_env && std::string(pc_env) == "cholesky");
-    SparseFactorization_t ftype =
-        try_cholesky ? SparseFactorizationCholesky : SparseFactorizationLDLT;
-    SparseOpaqueSymbolicFactorization sym = SparseFactor(ftype, Amat.structure, sopt);
-    if (sym.status != SparseStatusOK)
-      mark("symbolic factorization FAILED", static_cast<double>(sym.status));
-    if (sym.status == SparseStatusOK) {
-      direct_factor_gb = static_cast<double>(sym.factorSize_Double) / (1024.0 * 1024.0 * 1024.0);
-      mark("symbolic factorization", direct_factor_gb);
-      constexpr double kMaxFactorGb = 24.0;
-      if (direct_factor_gb > kMaxFactorGb)
-        mark("factor too large, falling back to CG", direct_factor_gb);
-      if (direct_factor_gb <= kMaxFactorGb) {
-        SparseNumericFactorOptions nopt{};
-        nopt.control = SparseDefaultControl;
-        nopt.scalingMethod = SparseScalingDefault;
-        nopt.scaling = nullptr;
-        nopt.pivotTolerance = 0.0;
-        nopt.zeroTolerance = 0.0;
-        SparseOpaqueFactorization_Double fac = SparseFactor(sym, Amat, nopt);
-        const char* which = try_cholesky ? "Cholesky" : "LDLT";
-        // ★ LDLT WHEN CHOLESKY REFUSES. Cholesky needs strict positive
-        // definiteness; LDLT only needs symmetry, and it is just as exact and
-        // essentially as fast. On the real part Cholesky aborts with a non-positive
-        // pivot (SparseFactorizationFailed, 0.45 s in) while conjugate gradients
-        // still descends, so the matrix is at worst marginally definite -- a
-        // rounding-level pivot, not a mechanism. LDLT pivots through that instead of
-        // giving up, and the residual measured below is what decides whether the
-        // answer is kept, so nothing rests on which factorisation ran.
-        if (fac.status != SparseStatusOK && try_cholesky) {
-          mark("numeric Cholesky refused, trying LDLT", static_cast<double>(fac.status));
-          SparseCleanup(fac);
-          SparseCleanup(sym);
-          sym = SparseFactor(SparseFactorizationLDLT, Amat.structure, sopt);
-          fac = SparseFactor(sym, Amat, nopt);
-          which = "LDLT";
-          if (fac.status != SparseStatusOK)
-            mark("numeric LDLT FAILED", static_cast<double>(fac.status));
-        }
-        if (fac.status == SparseStatusOK) {
-          mark("numeric factorization", direct_factor_gb);
-          u_direct = Fp;
-          DenseVector_Double xb{NF, u_direct.data()};
-          SparseSolve(fac, xb);
-          // ★ MEASURE THE ANSWER, DO NOT TRUST IT. A direct solve reports no
-          // residual of its own, so compute ||b - Ax|| / ||b|| here; a factorisation
-          // that silently lost accuracy must not pass as an exact answer.
-          double bn = 0.0, rr = 0.0;
-          for (int i = 0; i < NF; ++i) {
-            double ax = 0.0;
-            for (int k = A.ptr[static_cast<std::size_t>(i)];
-                 k < A.ptr[static_cast<std::size_t>(i) + 1]; ++k)
-              ax += A.val[static_cast<std::size_t>(k)] *
-                    u_direct[static_cast<std::size_t>(A.idx[static_cast<std::size_t>(k)])];
-            const double b = Fp[static_cast<std::size_t>(i)];
-            bn += b * b;
-            rr += (b - ax) * (b - ax);
-          }
-          direct_rn = bn > 0.0 ? std::sqrt(rr) / std::sqrt(bn) : 0.0;
-          // ★ A DIRECT SOLVE REPORTS NO RESIDUAL OF ITS OWN, SO GATE ON THE MEASURED
-          // ONE. Accepting the answer because the factorisation returned OK is how a
-          // wrong displacement field passes as exact. If it is not small, fall
-          // through to CG rather than ship it.
-          direct_ok = direct_rn < kDirectAcceptResidual;
-          direct_which = which;
-          mark(direct_ok ? "direct solve accepted" : "direct solve REJECTED (residual)",
-               direct_rn);
-        }
-        SparseCleanup(fac);
+    // Brief E2, item 1: the factorisation itself is sparse_ldlt_solve (sparse_ldlt.hpp), the same calls it was here.
+    SparseLdltOptions lo;
+    lo.backend = SparseLdltBackend::Accelerate;
+    lo.memory_limit_gb = 24.0;   // the part whose fill-in would not fit falls back to CG
+    lo.try_cholesky = (pc_env && std::string(pc_env) == "cholesky");
+    lo.accept_residual = kDirectAcceptResidual;
+    // ★ MEASURE THE ANSWER, DO NOT TRUST IT: ||b - Ax|| / ||b|| on the full matrix, as before.
+    lo.residual = [&](const std::vector<double>& x) {
+      double bn = 0.0, rr = 0.0;
+      for (int i = 0; i < NF; ++i) {
+        double ax = 0.0;
+        for (int k = A.ptr[static_cast<std::size_t>(i)];
+             k < A.ptr[static_cast<std::size_t>(i) + 1]; ++k)
+          ax += A.val[static_cast<std::size_t>(k)] *
+                x[static_cast<std::size_t>(A.idx[static_cast<std::size_t>(k)])];
+        const double b = Fp[static_cast<std::size_t>(i)];
+        bn += b * b;
+        rr += (b - ax) * (b - ax);
       }
-      SparseCleanup(sym);
+      return bn > 0.0 ? std::sqrt(rr) / std::sqrt(bn) : 0.0;
+    };
+    SparseLdltResult sr = sparse_ldlt_solve(lower, Fp, lo);
+    if (!sr.symbolic_ok) mark("symbolic factorization FAILED", static_cast<double>(sr.status));
+    if (sr.symbolic_ok) {
+      direct_factor_gb = sr.factor_gb;
+      mark("symbolic factorization", direct_factor_gb);
+      if (sr.too_large) mark("factor too large, falling back to CG", direct_factor_gb);
+      if (sr.cholesky_refused) mark("numeric Cholesky refused, trying LDLT", static_cast<double>(sr.status));
+      if (!sr.too_large && !sr.numeric_ok && sr.cholesky_refused)
+        mark("numeric LDLT FAILED", static_cast<double>(sr.status));
+      if (sr.numeric_ok) {
+        mark("numeric factorization", direct_factor_gb);
+        u_direct = std::move(sr.x);
+        direct_rn = sr.residual;
+        // ★ A DIRECT SOLVE REPORTS NO RESIDUAL OF ITS OWN, SO GATE ON THE MEASURED
+        // ONE. If it is not small, fall through to CG rather than ship it.
+        direct_ok = sr.ok;
+        direct_which = sr.method == "Cholesky" ? "Cholesky" : "LDLT";
+        mark(direct_ok ? "direct solve accepted" : "direct solve REJECTED (residual)", direct_rn);
+      }
     }
-    SparseCleanup(Amat);
     if (direct_ok) {
       out.preconditioner = std::string("direct sparse ") + direct_which +
                            " (Accelerate, AMD, factor " +
@@ -3017,6 +3030,44 @@ OrganicCertificate certify_organic_structural(
         std::to_string(cert.max_over_allowable) + " x allowable as a point load), load case \"" +
         cert.governing_load_case + "\"; p99 passes at margin " + std::to_string(cert.margin) + ".";
   return finish();
+}
+
+
+// ── SUBDIVISION, and the seam census (see the header for why both exist) ──────
+std::vector<BeamSegment> subdivide_beam_segments(const std::vector<BeamSegment>& in,
+                                                 double max_len_mm) {
+  std::vector<BeamSegment> out;
+  if (!(max_len_mm > 0.0)) return in;
+  out.reserve(in.size());
+  for (const BeamSegment& s : in) {
+    const double dx = s.b.x - s.a.x, dy = s.b.y - s.a.y, dz = s.b.z - s.a.z;
+    const double len = std::sqrt(dx * dx + dy * dy + dz * dz);
+    if (!(len > max_len_mm)) { out.push_back(s); continue; }
+    // equal pieces, so no piece is a sliver: a short remainder would weld unreliably
+    const int n = static_cast<int>(std::ceil(len / max_len_mm));
+    for (int t = 0; t < n; ++t) {
+      BeamSegment p = s;
+      const double u0 = static_cast<double>(t) / n, u1 = static_cast<double>(t + 1) / n;
+      p.a = Vec3{s.a.x + dx * u0, s.a.y + dy * u0, s.a.z + dz * u0};
+      p.b = Vec3{s.a.x + dx * u1, s.a.y + dy * u1, s.a.z + dz * u1};
+      out.push_back(p);
+    }
+  }
+  return out;
+}
+
+BeamNetworkSeams beam_network_seams(const BeamNetwork& net) {
+  BeamNetworkSeams out;
+  std::vector<int> degree(net.nodes.size(), 0);
+  for (const BeamNetwork::Member& m : net.members) {
+    if (m.node_a >= 0 && static_cast<std::size_t>(m.node_a) < degree.size()) ++degree[m.node_a];
+    if (m.node_b >= 0 && static_cast<std::size_t>(m.node_b) < degree.size()) ++degree[m.node_b];
+  }
+  for (int d : degree) {
+    if (d == 1) ++out.floating_ends;        // a member end on nothing
+    else if (d > 2) { ++out.welded_nodes; out.t_junction_ends += static_cast<std::size_t>(d - 2); }
+  }
+  return out;
 }
 
 }  // namespace topopt

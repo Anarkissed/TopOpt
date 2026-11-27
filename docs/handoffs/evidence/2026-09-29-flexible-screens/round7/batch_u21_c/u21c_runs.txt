@@ -1,0 +1,31 @@
+# U21 batch C runs (app/TopOptKit, --scratch-path /tmp/r7u21-side-build) — a639ed42 + the working tree (= the batch C commit)
+### runner.log
+start 15:48:00 a639ed42 + working tree
+build exit 0 15:48:02
+golden det exit 0 15:48:20
+golden unseeded exit 0 15:48:37
+hashes exit 0 15:49:37
+hashes cmp vs round7/batch_e1r/stage_job_hashes_e1r.txt (whole file): identical
+hashes cmp vs round7/batch_x20b/stage_job_hashes_x20b.txt (whole file): identical
+chunk_aa exit 0 15:50:24
+chunk_ab exit 0 15:55:17
+chunk_ac exit 0 15:57:58
+chunk_ad exit 0 16:07:25
+ALLDONE 16:07:25
+### classes (19, chunks of 5)
+FlexibleR7U21CHandlesTests FlexibleR7U21CHandlesHostedTests FlexibleSquishCopyTests LatticeStaleTypeTests FlexibleFaceChipTests FlexibleFaceCommitTests FlexibleLatticeHandlesTests FlexibleLatticeIsProtectedTests FlexibleMainPrismEqualityTests FlexibleR7D2ReviewHostedTests FlexibleR7D2ReviewTests FlexibleR7E1FollowUpTests FlexibleRound7DesignIntegrationTests FlexibleRound7SelectionsHookTests FlexibleRound7SelectionsHostedTests FlexibleSelectionsListTests FlexibleRound7DesignIntegrationHostedTests FlexibleLatticeIsProtectedHostedTests FlexibleR7E1FollowUpHostedTests
+### goldens
+golden_det: identical 38 · DIFFERS 0 · PART-SKIP 0 · Executed 13 tests, with 0 failures (0 unexpected) in 14.977 (14.980) seconds
+golden_unseeded: identical 32 · DIFFERS 0 · PART-SKIP 1 · Executed 13 tests, with 0 failures (0 unexpected) in 13.876 (13.878) seconds
+### chunks
+chunk_aa.log: Executed 22 tests, with 0 failures (0 unexpected) in 44.103 (44.107) seconds
+chunk_ab.log: Executed 29 tests, with 0 failures (0 unexpected) in 290.991 (290.996) seconds
+chunk_ac.log: Executed 32 tests, with 0 failures (0 unexpected) in 159.121 (159.126) seconds
+chunk_ad.log: Executed 10 tests, with 0 failures (0 unexpected) in 564.132 (564.136) seconds
+### failures: 0 · signal lines: 0
+### batch C prints
+FLEX-U21C worst view: depth disc (445.10205078125, 973.0180053710938, 44.0, 44.0) box (497.10205078125, 979.0180053710938, 82.0, 32.0) · expand disc (374.0699784154307, 973.0420844665964, 44.0, 44.0) box (278.0699784154307, 979.0420844665964, 88.0, 32.0) · units' gap 27.032072365819317 pt
+  RED CONTROL today's layout: depth disc (450.1021728515625, 973.0159301757812, 44.0, 44.0) · expand box (427.1021760454824, 979.0373760251217, 87.99999999999994, 32.0) · units' gap -43.978554150659534 pt
+  RED CONTROL click on the depth disc → padTarget handle-expand-f:B91ED058-A180-4125-8E82-420B89D45B79:6
+FLEX-U21C-1 Img6: expand disc (396.1, 995.0) · gap 27.0 pt · depth unit (445.1, 973.0, 134.0, 44.0) · expand unit (278.1, 973.0, 140.0, 44.0)
+FLEX-U21C-2 sweep: 6720 layouts · worst gap 24.0 pt · knob flipped 0 · today's rule under 24 pt in 3600

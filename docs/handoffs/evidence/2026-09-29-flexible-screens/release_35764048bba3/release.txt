@@ -1,0 +1,25 @@
+# Release 35764048bba3 — 2026-11-03 core: E1 automatic smoothing (TO-core 18724421) + per-scenario anchor_region_ids (TO-core e37bf009), one worker swap
+# Merged onto 05fc1c77 (release core 340f1156e40f); the worker CLI was built from the merge commit itself (dirty=false).
+# Commits:
+#   d5579844 E1 (c)+(d): the finished shape: thin-spot cleanup (adds only) and the mean-curvature surface finish in the Gibson trust region
+#   169d7007 E1 (e)+(f): every check on the finished shape, report.json "finish", and the orientation re-check
+#   8b1a8cd3 E1 rulings 2026-11-03: the written file is clean; slim finish with a safe fallback; no folds
+#   4251dc00 E1 finish on his real meshes: the Protect seam is pinned, one-sided vertices hold, finer steps, the slim guard settles
+#   f5e8d9b2 E1 slim guard: only a move INWARD thins a member
+#   e9c54d49 E1 review fixes: the orientation re-check reads 3MF and relative folders; every listed re-check runs; streamed files are told how (e) decided
+#   e37bf009 Load scenarios take their own REGION anchors: "anchor_region_ids" per scenario (a cut piece as an anchor)
+#   18724421 E1 gate fixes: rerun-identical report, file re-check without grading, latticed versions finish outward-only, Keep clear and joints refuse only what finishing adds
+#   d72d3399 Release 2026-11-03: merge E1 automatic smoothing (18724421, TO-core): every exported version is finished and re-checked on the finished file
+#   537c1752 Release 2026-11-03: merge per-scenario anchor_region_ids (e37bf009, TO-core): a region anchor holds only in the scenarios that list it
+# Gates:
+#   07:51 merged in the scratch worktree: 537c1752 on 05fc1c77, fingerprint 35764048bba3
+#   07:53 worker CLI built: topopt-cli: core 35764048bba3 (dirty=false), built Nov  3 2026 07:53:32
+#   08:34 ctest rc=0: 100% tests passed out of 171
+#   08:34   116/171 Test #119: export_3mf ....................... Passed 0.16 sec
+#   08:34   159/171 Test #162: threemf_import ................... Passed 10.25 sec
+#   08:34   171/171 Test #121: cli_demo ......................... Passed 2092.91 sec
+#   08:40 17-test: 17/17 identical vs da6cbd9f
+#   08:41 build_core green (the app's xcframework, core 35764048bba3)
+#   08:45 iPad device build green
+#   08:45 pushed 537c1752
+#   08:45 worker swapped: /health "fingerprint": "35764048bba3"; old kept as build-fix/topopt-cli.340f1156e40f-replaced-20261103

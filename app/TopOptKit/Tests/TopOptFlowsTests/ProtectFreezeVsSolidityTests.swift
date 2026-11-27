@@ -82,8 +82,11 @@ final class ProtectFreezeVsSolidityTests: XCTestCase {
         let rows = FrozenRegionLatticeStatus.rows(
             protectedGroups: [g], roles: [g.id: .include], anyIncludeDeclared: true)
         XCTAssertEqual(rows[0].outcome, .latticed)
-        XCTAssertTrue(rows[0].reason.contains("the shape is frozen"),
-                      "the reason states the freeze AND the lattice, not a conflict")
+        // ★ RE-PINNED (batch E review, his item 4: "a protected face isn't frozen"): the reason
+        // states the protection AND the lattice, not a conflict — and never says "frozen"
+        XCTAssertTrue(rows[0].reason.contains("TO keeps its shape, the inside is latticed"),
+                      "the reason states the protection AND the lattice, not a conflict")
+        XCTAssertFalse(rows[0].reason.lowercased().contains("frozen"))
     }
 
     func testUnroledProtectedFollowsWhetherAnyIncludeExists() {

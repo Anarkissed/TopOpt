@@ -96,7 +96,7 @@ struct GlassValuePill: View {
             if let v { onSet(ClearanceQuantize.snap(v)) } else { onSet(nil) }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(title) clearance")
+        .accessibilityLabel("\(title) Keep clear distance")
         .accessibilityValue(isAuto ? "Auto \(Self.mm(displayedMM))" : Self.mm(valueMM))
     }
 

@@ -101,8 +101,12 @@ final class LatticePageRound2Tests: XCTestCase {
         // Structural half: LatticeSettings stores NO group or face collection —
         // only the id-keyed role attribute (a second store is the failure mode
         // this bar exists to prevent; two models that agree today diverge later).
+        // ★ RE-PINNED (UI-Notes B6 slice 1, 7e4f0b53 — his notes 22, 23 of the approved design, 11-02: "the 'Selections'
+        // should separate the groups made from Topology with the ones going to be made here"): the Lattice stage's OWN list
+        // (`latticeList`) is the one store the lattice side has; Topology's groups are never copied into it after the one-time
+        // migration. Nothing else in LatticeSettings holds groups.
         let mirror = Mirror(reflecting: p.lattice)
-        for child in mirror.children {
+        for child in mirror.children where child.label != "latticeList" {
             let typeName = String(describing: type(of: child.value))
             XCTAssertFalse(typeName.contains("SelectionGroup"),
                            "LatticeSettings must not hold its own group list (\(child.label ?? "?"): \(typeName))")
@@ -241,8 +245,20 @@ final class LatticePageRound2Tests: XCTestCase {
                 XCTAssertGreaterThan(try XCTUnwrap(geom["half_length_mm"] as? Double), 0)
             } else {
                 XCTAssertEqual(kind, "face")
+                // ★ REPLACED, NOT RELAXED (2026-08-19). `outline_uv` joined this set
+                // when the face region stopped being a BOUNDING BOX and started
+                // carrying the face's real boundary loops — on his own part the
+                // rectangle overstated the face by 59% and 70%, and the struts in
+                // the difference were the artifact. Core's strict parser accepts the
+                // key (`job.cpp`), so the assertion stays exact set-equality against
+                // what core allows; it is the allowed set that grew by one.
+                // ★ And by two more (95754820, 2026-09-28): `frame_u` / `frame_w`, the
+                // world axes the outline was drawn against, so core places it by the
+                // app's frame instead of re-deriving one that agreed only by
+                // construction. Core accepts both, and only together (`job.cpp`).
                 XCTAssertEqual(Set(geom.keys),
-                               ["origin", "normal", "half_u_mm", "half_w_mm", "depth_mm"])
+                               ["origin", "normal", "half_u_mm", "half_w_mm", "depth_mm",
+                                "outline_uv", "frame_u", "frame_w"])
                 XCTAssertGreaterThan(try XCTUnwrap(geom["depth_mm"] as? Double), 0)
             }
         }
@@ -265,8 +281,29 @@ final class LatticePageRound2Tests: XCTestCase {
     /// (core/build/topopt-cli); schema validation happens BEFORE model import,
     /// so a missing model file is the expected (non-schema) failure — exactly
     /// the real_cli_smoke.py discipline.
+    ///
+    /// ★★ macOS ONLY, AND SAID SO IN THE TYPE SYSTEM (task 2026-08-21). This test
+    /// shells out with `Process`, which does not exist on iOS — and because Swift
+    /// compiles a whole target at once, that ONE call made every test in
+    /// `TopOptFlowsTests` fail to build for an iphonesimulator destination:
+    ///
+    ///     LatticePageRound2Tests.swift:311: error: cannot find 'Process' in scope
+    ///
+    /// So `xcodebuild test -destination 'platform=iOS Simulator,…'` could not run ANY
+    /// test in this package, including the ones whose entire purpose is to answer
+    /// "does this behave the same on the device?" — `TopOptKitTests
+    /// .testStepImportProducesMeshOnThisPlatform` is exactly that test, and it was
+    /// unreachable on the only platform it was written to interrogate.
+    ///
+    /// Found while diagnosing his blank STEP viewport, where running the import on the
+    /// simulator was the next measurement to take. The guard costs this test nothing:
+    /// it needs a locally-built macOS CLI binary and already skips without one.
     @MainActor
     func testCoreCLIParsesTheEmittedRegions() throws {
+        #if !os(macOS)
+        throw XCTSkip("this test drives the locally-built topopt-cli through `Process`, "
+                      + "which is macOS-only")
+        #else
         // #filePath = <repo>/app/TopOptKit/Tests/TopOptFlowsTests/…swift → the
         // repo root is 5 components up (file, TopOptFlowsTests, Tests, TopOptKit, app).
         var repo = URL(fileURLWithPath: #filePath)
@@ -320,6 +357,7 @@ final class LatticePageRound2Tests: XCTestCase {
         }
         XCTAssertNotEqual(proc.terminationStatus, 0,
                           "the probe model does not exist — the failure must be import, not schema silence")
+        #endif
     }
 
     // MARK: - M3 guardrails: absent roles ⇒ byte-identical, clearances unchanged
@@ -500,17 +538,15 @@ final class LatticePageRound2Tests: XCTestCase {
 
     func testTopologyListShowsOneFootnoteNotPerRowBadges() throws {
         let src = try String(contentsOf: sourceURL("LatticePage.swift"), encoding: .utf8)
-        // Exactly one footnote, and no per-row badge sentence in the pane.
-        XCTAssertEqual(src.components(separatedBy: "* the geometry does not exist yet").count - 1, 1,
-                       "ONE footnote carries the explanation")
+        // ★ Re-pinned for lattice types U1 (2026-10-01): still no per-row sentence — each greyed
+        // row carries a MARK, and ONE footnote per distinct reason (core's facts) explains it.
+        XCTAssertTrue(src.contains("Text(\"\\(n.mark) \\(n.reason)\")"), "the footnotes, one per reason")
         XCTAssertTrue(src.contains("lineLimit(1)"), "topology names render on one line")
-        // The presentation still derives from CORE's split (B0 stands): the rows
-        // and their generatable flags are LatticeTopologyPicker's, and a
-        // certifiable-only topology exists today to exercise the asterisk.
-        let rows = LatticeTopologyPicker.rowsFromCore()
-        XCTAssertTrue(rows.contains { !$0.generatable },
-                      "core still has certifiable-but-ungeneratable rows (else the footnote hides)")
-        XCTAssertTrue(rows.contains { $0.generatable })
+        let entries = LatticeTypeCatalog.entriesFromCore()
+        let notes = LatticePage.footnotes(entries)
+        XCTAssertEqual(notes.count, Set(entries.compactMap(\.reason)).count, "★ one footnote per distinct reason, no more")
+        XCTAssertTrue(entries.contains { !$0.offered }, "core still has types it does not offer (else no footnote)")
+        XCTAssertTrue(entries.contains { $0.offered })
     }
 
     // MARK: - regions emission unit coverage

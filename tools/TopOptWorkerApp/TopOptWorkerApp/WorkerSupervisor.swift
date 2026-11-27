@@ -412,6 +412,21 @@ final class WorkerSupervisor: ObservableObject {
         pollTimer = nil
     }
 
+    private var healthTick = 0
+
+    private func refreshFingerprint() async {
+        guard let url = URL(string: "http://127.0.0.1:\(port)/health"),
+              let (data, resp) = try? await URLSession.shared.data(from: url),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let o = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let live = o["fingerprint"] as? String, !live.isEmpty else { return }
+        if live != fingerprint {
+            NSLog("TopOpt Worker: engine changed under the worker (%@ -> %@); Bonjour updated", fingerprint ?? "none", live)
+            fingerprint = live
+            bonjour.update(fingerprint: live)
+        }
+    }
+
     private func pollJobs() async {
         guard isRunning else { return }
         do {
@@ -421,6 +436,10 @@ final class WorkerSupervisor: ObservableObject {
             pollFailures = 0
             reachable = true
             applyJobs(decoded.jobs)
+            // ★ 362 11-23: every 15th poll (30 s) the live engine's fingerprint from /health; when it differs from what
+            // was read at start (a release swapped the CLI under a running worker), the window and Bonjour follow it.
+            healthTick += 1
+            if healthTick % 15 == 1 { await refreshFingerprint() }
         } catch {
             // Transient (worker still coming up, momentary refusal). A single miss is
             // ignored; two in a row flips `reachable` false so the window shows the

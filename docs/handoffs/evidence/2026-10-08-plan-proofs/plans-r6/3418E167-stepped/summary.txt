@@ -1,0 +1,39 @@
+# 3418E167-8524-4831-A809-827B6B0742D0 stepped — round 6 after-run, app cfca986d, core 3952c411 (frozen CLI sync-3952c411, sha 1538ab06)
+
+DG-PROJECT M2 verticalStand THICK (converted: Aesthetic Stepped) algorithm stepped stage Optional(TopOptFlows.LatticeStageMode.aesthetic) step-halves false density sim cells auto
+DG-PLAN stepped: 2827 cell(s) over 2 region(s) | 6.00=237 4.67=733 3.50=262 3.00=1595
+DG-PLAN per region: r1=995 r2=1832
+DG-PLAN-BASES 2 region(s) carry plan_base_cell_mm | job region 1: 14.0000 mm; job region 2: 6.0000 mm
+DG-OUTLINE r1 expand=0.000 seams=0 diverging=0 wireMovedOffRaw=0.0000mm | r2 expand=0.000 seams=0 diverging=0 wireMovedOffRaw=0.0000mm
+DG-OVERLAPS 0 same-region pair(s)
+DG-REGIONS voxel=1.838 mm | r1 cells=995 [4.67=733 3.50=262] prism=259279 mm3 uncovered=166014 mm3 (64.03%) | r2 cells=1832 [6.00=237 3.00=1595] prism=123482 mm3 uncovered=42103 mm3 (34.10%)
+DG-SLOT-ORIGINS 2 region(s) carry slot_origin_mm
+
+## job_plan: exit 0
+> [stepped] any-step plan: 2827 cell(s) over 2 region(s) in 4 pass(es) | 6.00=237 4.67=733 3.50=262 3.00=1595
+## job_noplan: exit 0
+## job_plan_spans: exit 0
+> [stepped] any-step plan: 2827 cell(s) over 2 region(s) in 4 pass(es) | 6.00=237 4.67=733 3.50=262 3.00=1595
+
+## cells_vs_spans.txt
+CELLS-VS-SPANS plan cells 2827 | laid 2827 | NOT laid 0 | struts 86940: in a plan cell 86940, FOREIGN 0
+per size (plan / laid): 6.00=237/237 4.67=733/733 3.50=262/262 3.00=1595/1595
+
+## unlaid.txt
+UNLAID 0 of 2827 |
+
+## dropped.txt
+dropped run_noplan/variant_028_lattice.stl 36286284 B
+dropped run_plan/variant_028_lattice.stl 139153084 B
+dropped run_plan_spans/variant_028_lattice.stl 139153084 B
+dropped run_plan_spans/variant_028_lattice_SOLID.stl 4571884 B
+dropped run_plan_spans/variant_028_lattice_WELDED.stl 57536084 B
+dropped run_noplan/fields.bin 9526008 B
+dropped run_plan/fields.bin 9526008 B
+dropped run_plan_spans/fields.bin 9526008 B
+dropped run_plan_spans/variant_028_lattice_SPANS.txt 6735999 B
+dropped model.step 278521 B
+
+## the published jobs
+job_plan.json: sha256 59458e33776d3c004e6d6a8420a4028c6e92e436238a742baa0921c743354ac7 (341204 B, compacted from the harness's pretty-printed write; same JSON value)
+job_noplan.json: sha256 9ee20b6829ce3555cc1e7de5839ac5e1423a1d6628f67a43753bd2fa75dd4e3d (7024 B, compacted from the harness's pretty-printed write; same JSON value)

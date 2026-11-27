@@ -1,0 +1,29 @@
+# Release (14) 2cbe8f65 — 2026-11-22 r14 (his iPad notes on release 13, e72a777b), app only
+# Core and worker unchanged: fingerprint 49895f5e9c5e; "fingerprint": "49895f5e9c5e"
+# Merged onto efed8559; the merged app tree equals r14's, so its gate applies unchanged.
+# Commits (first parent of r14 since the release tip):
+#   425e0a59 R-07: a version the final file check refuses is named, never dropped in silence
+#   4805910e His 11-22 notes on release 13 (img 42-43, 46): one rename box over the whole line; every segment takes the tap on its whole shape
+#   8c408f5e Merge claude/notes23-chrome: minimised Topology and Selections one size and colour, the run button's text centred, the ⌃ its own drawer above the buttons (his 11-22 img 44, 45)
+#   851bf48c Merge claude/notes23-viewer: one floor grid of round squares everywhere; the Draft opens the latticed faces (his 11-22 img 44, 45, 47)
+#   34f12170 Merge claude/notes23-timing: the sample's timer, the generation timing log, Making the print file then Approved (his 11-22 img 46, 47)
+#   e72a777b Merge claude/notes23-chrome2: a tap anywhere outside the open drawer closes it (his 11-22 ruling: "If you mean tapping on the Selections panel or opening up a new menu, then it ABSOLUTELY should")
+# Gates:
+#   Fast track (his 10-27 app-only path; his 11-22 "Fast track it through so I can get it ASAP", one install, all of it):
+#   builders' own runs: chrome1 25/25, chrome2 52/53 (a source count updated), chrome3 8/8; viewer2 30/31 (its own ray bar,
+#   rewritten in pixels), viewer3 14/14; timing3 34/34, timing4 13/13, timing5 13/13; 362's mine1 80/80 (stopped by hand to
+#   free the lock: LatticePageParityHostedTests' three 24-min walks run after the push), mine2 51/52 (the test's own comment
+#   check, fixed).
+#   Combined run c1 on the merged organic-1 34f12170 (37 classes: every new class + the classes pinning WorkspacePlaceholder,
+#   DesignParts, the corner chrome, the sample, the preview, the Selections rows): 139 passed, 0 failed.
+#   The drawer rule (his 11-22 ruling: any tap outside closes it): chrome builder's run on its branch from 34f12170 (below).
+#   The full app suite runs AFTER the push.
+#   Drawer rule: claude/notes23-chrome2 9f160058 (from 34f12170; merged e72a777b, app tree == the builder's): chrome4 70/71,
+#   chrome6 36/37, chrome7 17/18 (each red the test's own click, fixed), chrome8 10/10.
+#   18:42 checks ok: r14 e72a777b, 15 commit(s), app-only, onto efed8559, fingerprint 49895f5e9c5e
+#   18:42 merged 2cbe8f65; app tree == r14's, fingerprint 49895f5e9c5e
+#   18:42 waiting for HEAVY.lock (free)
+#   18:42 lock taken (23 GB free)
+#   18:48 iPad device build green; lock released
+#   18:48 pushed 2cbe8f65
+#   18:48 worker /health "fingerprint": "49895f5e9c5e" (unchanged, no swap)

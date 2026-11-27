@@ -1,0 +1,16 @@
+# Release 7ab6e9bf — 2026-11-21 lat1121 (the Lattice run opens its result with all its information, 4ff996d7), app only
+# Core and worker unchanged: fingerprint 5541d83e514a; "fingerprint": "5541d83e514a"
+# Merged onto cf3610c7; the merged app tree equals lat1121's, so its gate applies unchanged.
+# Commits (first parent of lat1121 since the release tip):
+#   4ff996d7 The Lattice run says what it does and opens its result on Results with all its information (his 11-21)
+# Gates:
+#   Targeted gate in b9-screens-362 (c22): IPadNotes1121Tests and the Results, run-card and Lattice-file classes (20 classes): 04:30 exit 0; 213 passed, 0 failed
+#   Fast track (his 11-21 pick: Lattice fix now, boxes after): the full app suite runs after the push.
+#   00:46 evidence cf3610c7 pushed; release bc45e5e1 DONE
+#   04:31 checks ok: lat1121 4ff996d7, 1 commit(s), app-only, onto cf3610c7, fingerprint 5541d83e514a
+#   04:31 merged 7ab6e9bf; app tree == lat1121's, fingerprint 5541d83e514a
+#   04:31 waiting for HEAVY.lock (free)
+#   04:31 lock taken (16 GB free)
+#   04:37 iPad device build green; lock released
+#   04:37 pushed 7ab6e9bf
+#   04:37 worker /health "fingerprint": "5541d83e514a" (unchanged, no swap)

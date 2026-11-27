@@ -1,0 +1,4 @@
+Group 1: estimate deepest 2.77 mm · faces ["face 5 Squishes ≈ 2.8 mm at 5 lb", "face 3 Squishes ≈ 2.8 mm at 5 lb"]
+Group 2: estimate deepest 4.26 mm · faces []
+MF_01_13p_pad_MANUAL_main_lattice_page_heat.png: prisms [] · xray false · walls hidden false · dents true · pill 'Preview · core runs one group at a time' · legend row false
+legend top 2.76 mm · legend title 'Squish · mm'

@@ -1,0 +1,32 @@
+# U21 batch I · part I2 runs — app/TopOptKit, --scratch-path /tmp/r7x20b-build, on 88567a56 (P0) + the I2 working tree
+### P0 (FlexibleI2WallsProbe): see p0_walls_run1.txt — passed (0.73 s; the walls in 125 ms)
+### run 1 (i2run, 10:11-11:54): FlexibleI2WallsProbe + FlexibleI2AttachTests + FlexibleI2AttachHostedTests + 84 classes that touch/pin the changed files (Probe/Evidence classes left out), chunks of 6
+chunk_aa.log: 57 passed · 0 failed · 0 skipped
+chunk_ab.log: 28 passed · 1 failed · 1 skipped
+chunk_ac.log: 36 passed · 0 failed · 0 skipped
+chunk_ad.log: 27 passed · 0 failed · 0 skipped
+chunk_ae.log: 31 passed · 0 failed · 0 skipped
+chunk_af.log: 52 passed · 0 failed · 0 skipped
+chunk_ag.log: 39 passed · 0 failed · 0 skipped
+chunk_ah.log: 34 passed · 0 failed · 1 skipped
+chunk_ai.log: 38 passed · 0 failed · 0 skipped
+chunk_aj.log: 41 passed · 1 failed · 0 skipped
+chunk_ak.log: 40 passed · 1 failed · 0 skipped
+chunk_al.log: 35 passed · 0 failed · 1 skipped
+chunk_am.log: 28 passed · 0 failed · 0 skipped
+chunk_an.log: 54 passed · 0 failed · 0 skipped
+chunk_ao.log: 39 passed · 0 failed · 1 skipped
+TOTAL run 1: 579 passed, 3 failed, 4 skipped (87 classes). Failed: FlexibleBatchNVerifyTests refine line x1 (known), FlexibleRound7ViewsHostedTests Play ring (known), FlexibleRound7DesignIntegrationHostedTests testMiniPortrait (MINE: the card with its Attach row, 184 pt, sat on the grown list at the mini in portrait) -> fixed: the compact card ([link] on the title line) when no steady tier is clear
+  also found by LOOKING at render I2_02: the pressed face's heat lid and the closed body stayed opaque in step 1 -> fixed: step 1's tints flag nothing solid / ghost; the lattice drawn through the X-ray path
+goldens run 1: det identical 38 DIFFERS 0 · unseeded identical 32 DIFFERS 0 PART-SKIP 1; hashes cmp-identical to round7/batch_i/stage_job_hashes_i1.txt
+### run 2 after the fixes (i2run3, 12:24-12:43): the I2 classes + FlexibleRound7DesignIntegrationHostedTests + FlexibleFaceChipTests + FlexibleRound7SelectionsHostedTests + FlexibleR7D2ReviewHostedTests + FlexibleRound7D1ReviewHostedTests
+chunk_aa.log [FlexibleI2WallsProbe FlexibleI2AttachTests FlexibleI2AttachHostedTests FlexibleRound7DesignIntegrationHostedTests]: 31 passed · 0 failed · 0 skipped
+chunk_ab.log [FlexibleFaceChipTests FlexibleRound7SelectionsHostedTests FlexibleR7D2ReviewHostedTests FlexibleRound7D1ReviewHostedTests]: 19 passed · 0 failed · 0 skipped
+goldens run 2: det identical 38 DIFFERS 0 · unseeded identical 32 DIFFERS 0 PART-SKIP 1
+hashes run 2: hashes cmp vs round7/batch_i/stage_job_hashes_i1.txt (whole file): identical
+### hosted lines
+FLEX-I2 f: trash (316.0, 821.5, 44.0, 44.0) keep (306.0, 821.5, 64.0, 44.0) remove (207.5, 821.5, 74.5, 44.0)
+FLEX-I2 b: tags ["367,912", "306,1103", "614,1077", "631,893"]
+FLEX-I2 c: 275112 of 275112 vertices dimmed
+FLEX-I2 g front: tags ["367,912", "306,1103", "614,1077", "631,893"] · outside their wall 0
+FLEX-I2 h: drawn 284.0 · estimated 296.0

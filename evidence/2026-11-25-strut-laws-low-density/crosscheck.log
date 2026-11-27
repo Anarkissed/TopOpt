@@ -1,0 +1,67 @@
+== bcc (bending)
+  stiffness rho 0.03194  E100/Es 0.0001334  GA rho^2 0.0010202  ratio 0.131
+  stiffness rho 0.04188  E100/Es 0.00024364  GA rho^2 0.0017539  ratio 0.139
+  stiffness rho 0.05172  E100/Es 0.00040908  GA rho^2 0.002675  ratio 0.153
+  stiffness rho 0.06128  E100/Es 0.00058102  GA rho^2 0.0037552  ratio 0.155
+  stiffness rho 0.07703  E100/Es 0.0009953  GA rho^2 0.0059336  ratio 0.168
+  stiffness rho 0.09241  E100/Es 0.0015173  GA rho^2 0.0085396  ratio 0.178
+  stiffness rho 0.10750  E100/Es 0.0021841  GA rho^2 0.011556  ratio 0.189
+  stiffness rho 0.13483  E100/Es 0.0038653  GA rho^2 0.018179  ratio 0.213
+  stiffness rho 0.15259  E100/Es 0.0052247  GA rho^2 0.023284  ratio 0.224
+  stiffness rho 0.19141  E100/Es 0.0092844  GA rho^2 0.036638  ratio 0.253
+  stiffness rho 0.21228  E100/Es 0.012182  GA rho^2 0.045063  ratio 0.270
+  stiffness log-log slope over the new rows: 2.381 (bending 2, stretch 1)
+  strength  rho 0.03194 (  new)  1/(Kd+Kv/3) 0.00010059  GA 0.3 rho^1.5 0.0017125  ratio 0.059
+  strength  rho 0.05000 (  new)  1/(Kd+Kv/3) 0.00033439  GA 0.3 rho^1.5 0.0033541  ratio 0.100
+  strength  rho 0.07000 (  new)  1/(Kd+Kv/3) 0.00057737  GA 0.3 rho^1.5 0.0055561  ratio 0.104
+  strength  rho 0.10000 (  new)  1/(Kd+Kv/3) 0.0012522  GA 0.3 rho^1.5 0.0094868  ratio 0.132
+  strength  rho 0.15700 (  new)  1/(Kd+Kv/3) 0.0035019  GA 0.3 rho^1.5 0.018663  ratio 0.188
+  strength  rho 0.21050 (11-09)  1/(Kd+Kv/3) 0.0075768  GA 0.3 rho^1.5 0.028973  ratio 0.262
+  strength  rho 0.31300 (11-09)  1/(Kd+Kv/3) 0.017708  GA 0.3 rho^1.5 0.052534  ratio 0.337
+  strength  rho 0.45000 (11-09)  1/(Kd+Kv/3) 0.041401  GA 0.3 rho^1.5 0.090561  ratio 0.457
+  strength  rho 0.59288 (11-09)  1/(Kd+Kv/3) 0.067345  GA 0.3 rho^1.5 0.13695  ratio 0.492
+== diamond (bending)
+  stiffness rho 0.03874  E100/Es 0.00069783  GA rho^2 0.0015008  ratio 0.465
+  stiffness rho 0.04181  E100/Es 0.00083778  GA rho^2 0.0017481  ratio 0.479
+  stiffness rho 0.06119  E100/Es 0.0018808  GA rho^2 0.0037442  ratio 0.502
+  stiffness rho 0.07694  E100/Es 0.0030196  GA rho^2 0.0059198  ratio 0.510
+  stiffness rho 0.09231  E100/Es 0.0044341  GA rho^2 0.0085211  ratio 0.520
+  stiffness rho 0.10737  E100/Es 0.0062119  GA rho^2 0.011528  ratio 0.539
+  stiffness rho 0.13464  E100/Es 0.0099828  GA rho^2 0.018128  ratio 0.551
+  stiffness rho 0.15234  E100/Es 0.01302  GA rho^2 0.023207  ratio 0.561
+  stiffness log-log slope over the new rows: 2.128 (bending 2, stretch 1)
+  strength  rho 0.03874 (  new)  1/(Kd+Kv/3) 0.00044345  GA 0.3 rho^1.5 0.0022875  ratio 0.194
+  strength  rho 0.05000 (  new)  1/(Kd+Kv/3) 0.00095505  GA 0.3 rho^1.5 0.0033541  ratio 0.285
+  strength  rho 0.07000 (  new)  1/(Kd+Kv/3) 0.0016805  GA 0.3 rho^1.5 0.0055561  ratio 0.302
+  strength  rho 0.10000 (  new)  1/(Kd+Kv/3) 0.0033629  GA 0.3 rho^1.5 0.0094868  ratio 0.354
+  strength  rho 0.12500 (  new)  1/(Kd+Kv/3) 0.0046884  GA 0.3 rho^1.5 0.013258  ratio 0.354
+  strength  rho 0.15712 (11-09)  1/(Kd+Kv/3) 0.0083877  GA 0.3 rho^1.5 0.018684  ratio 0.449
+  strength  rho 0.20000 (11-09)  1/(Kd+Kv/3) 0.012039  GA 0.3 rho^1.5 0.026833  ratio 0.449
+  strength  rho 0.31300 (11-09)  1/(Kd+Kv/3) 0.0293  GA 0.3 rho^1.5 0.052534  ratio 0.558
+  strength  rho 0.45000 (11-09)  1/(Kd+Kv/3) 0.053459  GA 0.3 rho^1.5 0.090561  ratio 0.590
+  strength  rho 0.59201 (11-09)  1/(Kd+Kv/3) 0.070916  GA 0.3 rho^1.5 0.13665  ratio 0.519
+== sc (stretch (axial))
+  stiffness rho 0.01606  E100/Es 0.005796  Ashby rho/3 0.0053533  ratio 1.083
+  stiffness rho 0.01945  E100/Es 0.0070924  Ashby rho/3 0.0064833  ratio 1.094
+  stiffness rho 0.02630  E100/Es 0.0096912  Ashby rho/3 0.0087667  ratio 1.105
+  stiffness rho 0.02962  E100/Es 0.01103  Ashby rho/3 0.0098733  ratio 1.117
+  stiffness rho 0.03295  E100/Es 0.012347  Ashby rho/3 0.010983  ratio 1.124
+  stiffness rho 0.03516  E100/Es 0.013221  Ashby rho/3 0.01172  ratio 1.128
+  stiffness rho 0.03798  E100/Es 0.014311  Ashby rho/3 0.01266  ratio 1.130
+  stiffness rho 0.04541  E100/Es 0.017401  Ashby rho/3 0.015137  ratio 1.150
+  stiffness rho 0.05045  E100/Es 0.019486  Ashby rho/3 0.016817  ratio 1.159
+  stiffness rho 0.05807  E100/Es 0.022592  Ashby rho/3 0.019357  ratio 1.167
+  stiffness rho 0.06293  E100/Es 0.024773  Ashby rho/3 0.020977  ratio 1.181
+  stiffness log-log slope over the new rows: 1.062 (bending 2, stretch 1)
+  strength  rho 0.01606 (  new)  1/(Kd+Kv/3) 4.2165e-05  Ashby 0.3 rho 0.004818  ratio 0.009
+  strength  rho 0.02500 (  new)  1/(Kd+Kv/3) 0.00011509  Ashby 0.3 rho 0.0075  ratio 0.015
+  strength  rho 0.03500 (  new)  1/(Kd+Kv/3) 0.00022557  Ashby 0.3 rho 0.0105  ratio 0.021
+  strength  rho 0.05000 (  new)  1/(Kd+Kv/3) 0.0004772  Ashby 0.3 rho 0.015  ratio 0.032
+  strength  rho 0.06500 (  new)  1/(Kd+Kv/3) 0.00091196  Ashby 0.3 rho 0.0195  ratio 0.047
+  strength  rho 0.08659 (11-09)  1/(Kd+Kv/3) 0.0016416  Ashby 0.3 rho 0.025977  ratio 0.063
+  strength  rho 0.10000 (11-09)  1/(Kd+Kv/3) 0.0022486  Ashby 0.3 rho 0.03  ratio 0.075
+  strength  rho 0.15700 (11-09)  1/(Kd+Kv/3) 0.0063409  Ashby 0.3 rho 0.0471  ratio 0.135
+  strength  rho 0.20000 (11-09)  1/(Kd+Kv/3) 0.0090124  Ashby 0.3 rho 0.06  ratio 0.150
+  strength  rho 0.31300 (11-09)  1/(Kd+Kv/3) 0.021884  Ashby 0.3 rho 0.0939  ratio 0.233
+  strength  rho 0.45000 (11-09)  1/(Kd+Kv/3) 0.038397  Ashby 0.3 rho 0.135  ratio 0.284
+  strength  rho 0.49638 (11-09)  1/(Kd+Kv/3) 0.041728  Ashby 0.3 rho 0.14891  ratio 0.280

@@ -11,8 +11,6 @@ struct SmoothingPanel: View {
     var onExport: (String) -> Void = { _ in }
     var onClose: () -> Void = {}
 
-    @State private var showInfo = false
-
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
@@ -84,12 +82,7 @@ struct SmoothingPanel: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 pill
-                Button { showInfo = true } label: { Image(systemName: "info.circle") }
-                    .buttonStyle(.plain).foregroundStyle(.secondary)
-                    .popover(isPresented: $showInfo) {
-                        Text(model.quantizationInfo)
-                            .font(.footnote).padding(16).frame(maxWidth: 320)
-                    }
+                AppInfoButton(title: "About these numbers", text: model.quantizationInfo)   // ★ notes29: the one (i)
                 Spacer()
             }
             // The verdict — the honest re-analysed gate result.
@@ -132,7 +125,7 @@ struct SmoothingPanel: View {
             ("Peak stress", String(format: "%.1f MPa", r.maxStressMPa)),
             ("Mass (voxel / mesh)",
              String(format: "%.1f / %.1f g", r.voxelMassGrams, r.meshMassGrams)),
-            ("Frozen vertices", "\(r.frozenVertices) / \(r.totalVertices)"),
+            ("Protected vertices", "\(r.frozenVertices) / \(r.totalVertices)"),
             ("Taubin pairs", "\(r.pairsApplied) / \(r.pairsRequested)"),
         ]
         VStack(spacing: 4) {

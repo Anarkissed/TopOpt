@@ -50,11 +50,15 @@ namespace topopt {
 // populates it yet, so every current run passes nullptr and is byte-identical.
 struct LatticePosture {
   LatticeTopology topology = LatticeTopology::Octet;
-  double cell_size_mm = 0.0;  // recorded in the analysis/run_info; not used in the math
+  // The cell size: recorded in the analysis and run_info, and read by the cells-per-member guard, whose member-width
+  // floor is lattice_cells_per_member_min x this (analyze.cpp). The tensor does not read it (a function of density
+  // alone). With a cell_size_field, the largest cell.
+  double cell_size_mm = 0.0;
   // grid-indexed (grid.voxel_count()); mask[e] != 0 marks voxel e as latticed.
   std::vector<char> mask;
-  // grid-indexed; the lattice's LOCAL relative density at voxel e (in the library's
-  // valid range; clamped otherwise). Meaningful only where mask[e] != 0. A uniform
+  // grid-indexed; the lattice's LOCAL relative density at voxel e, in the library's
+  // valid range: a masked voxel outside it is REFUSED (LatticeDensityOutOfBand), never
+  // clamped. Meaningful only where mask[e] != 0. A uniform
   // region fills this with one value; the grading law (separate task) fills it graded.
   std::vector<double> relative_density;
   // OPTIONAL per-voxel cell size (mm), grid-indexed, for a SWEPT posture (handoff
@@ -69,6 +73,11 @@ struct LatticePosture {
   // each voxel's OWN cell instead of one number for the whole part — the honest
   // question for a part whose cell size varies.
   std::vector<double> cell_size_field;
+  // ★ The member width (mm, per voxel) the grading law measured on the PART'S OWN
+  // SURFACE (reviewer's ruling 11-09). When sized to the grid, the cells-per-member
+  // guard reads it instead of measuring the voxel staircase, which reads the steps of a
+  // curved face as thin members. Empty (every other caller) => the staircase, as before.
+  std::vector<double> member_width_mm;
 };
 
 // How the acceptance gate knocks the worst-case stress margin down for a sparse
@@ -97,12 +106,30 @@ struct KnockdownSpec {
   bool width_aware = false;
   double infill_percent = 100.0;
   double wall_thickness_mm = 0.0;
+  // The infill curve's exponent and floor, as the width-aware per-voxel core term reads them (Install 3: the
+  // strength check's settings). The defaults ARE infill_margin_knockdown's constants, so every caller that leaves
+  // them is byte-for-byte as before.
+  double infill_exponent = 1.5;
+  double infill_floor = 1e-3;
+};
+
+// Install 3: numbers of the analysis that the new engine's strength check lets a job set (strength_settings).
+// Null (the default, every other caller): the constants below, byte-for-byte.
+struct AnalysisKnobs {
+  int contact_rounds = 6;                           // bearing anchors: most contact solves
+  double sliding_share_max = 0.05;                  // == kAnchorsSlidingShare
+  int thickness_cap_voxels = 32;                    // the member-width transform's reach (width-aware gate, regime guard)
 };
 
 // The certification outputs of one fixed-design analysis. Field-for-field the
 // subset of MinimizePlasticVariant that the recovery block fills (von_mises_field,
 // stress_tensor_field, displacement_field, mass_grams, support_volume_voxels,
 // margin, v3, accepted) plus the intermediate scalars the report line consumes.
+// REAL BOLTS: above this share of the anchors' reaction in the weak sliding springs,
+// the anchors cannot hold the load in some direction (the reviewer's ruling of
+// 2026-10-25 21:45). See FixedDesignAnalysis::contact_tangent_share.
+inline constexpr double kAnchorsSlidingShare = 0.05;
+
 struct FixedDesignAnalysis {
   // Per-voxel von Mises stress over the PRINTED material (density > iso),
   // grid-indexed (grid.voxel_count()), MPa; zero off the printed set.
@@ -136,6 +163,27 @@ struct FixedDesignAnalysis {
   // converged). The certification solve is NOT softened or retried — the tolerance
   // is unchanged; this flag only records that it missed.
   bool non_convergent = false;
+  // REAL BOLTS (bearing anchors): the certification's contact loop. 0 rounds = glued
+  // anchors. `contact_settled` false = the set still changed after the last allowed
+  // solve; `contact_kept_last` = a release would have left no spring engaged, so the
+  // last set was kept; `contact_load_share` = |the engaged springs' total force| /
+  // |the applied load| (near 1 when the supports carry the load, not the
+  // stabilisation).
+  // contact_tangent_share = |the weak tangential springs' total force| / |the anchors'
+  // total reaction|; over kAnchorsSlidingShare the anchors cannot hold the load in
+  // some direction (contact_held_by_sliding) and the design is NOT accepted. The
+  // certification's own solves: CG iterations and wall, summed over the contact solves
+  // (also filled on a glued run: one solve), for the cost against glued.
+  int contact_rounds = 0;
+  double contact_tangent_share = 0.0;
+  bool contact_held_by_sliding = false;
+  long long solve_iterations = 0;
+  double solve_ms = 0.0;
+  bool contact_settled = true;
+  bool contact_kept_last = false;
+  int contact_engaged = 0;
+  int contact_released = 0;
+  double contact_load_share = 0.0;
   int non_convergent_iteration = 0;
   double non_convergent_residual = 0.0;
 
@@ -152,9 +200,11 @@ struct FixedDesignAnalysis {
   // excluded from max_von_mises — see below). The lattice region is certified for
   // STIFFNESS but NOT for strut-level STRENGTH: the recovered lattice stress is the
   // EFFECTIVE (macro, smeared) stress, which is lower than the peak strut stress by a
-  // stress-concentration factor. Certifying strut strength needs the de-homogenization
-  // step named in handoff 2026-07-26-lattice-homog-phase0 (Phase 2). Hence
-  // `lattice_strength_uncertified` is set whenever a lattice region is present.
+  // stress-concentration factor. That step (de-homogenization) is the per-type strut
+  // law below (strut_strength.hpp): reported always, and folded into the gate only
+  // where gate_on_strut_strength is armed or no solid voxel carries load (ruling 11-06
+  // 2(a)). `lattice_strength_uncertified` is true whenever latticed voxels exist and
+  // the strut law did not decide `accepted` (strut_gated false).
   bool lattice_certified = false;    // a LatticePosture was applied to this solve
   LatticeTopology lattice_topology = LatticeTopology::Octet;  // recorded posture
   double lattice_cell_size_mm = 0.0;       // recorded posture cell size
@@ -162,7 +212,7 @@ struct FixedDesignAnalysis {
   double lattice_rho_min = 0.0;      // min relative density used over the region
   double lattice_rho_max = 0.0;      // max relative density used over the region
   double lattice_max_effective_vm = 0.0;   // worst EFFECTIVE (macro) von Mises there
-  bool lattice_strength_uncertified = false;  // strut strength not gated (Phase 2)
+  bool lattice_strength_uncertified = false;  // latticed voxels, and the strut law did not decide `accepted`
 
   // --- Strut-strength REPORT (task 2026-07-31-lattice-strut-strength-report) ----
   // REPORT ONLY UNLESS `gate_on_strut_strength` WAS ARMED (task 2026-08-13-
@@ -177,8 +227,9 @@ struct FixedDesignAnalysis {
   // two happened, so a receipt never has to infer it.
   // Present iff a lattice posture with >= 1
   // latticed voxel was applied AND the topology carries a measured strut law
-  // (octet only — strut_strength.hpp; other topologies report nothing rather than
-  // borrow octet's law).
+  // (strut_law_measured: octet, sc, bcc, fcc, diamond, kelvin, rhombic, gyroid,
+  // schwarz_d; bccz, fccz and reentrant have none and report nothing rather than
+  // borrow another type's law).
   bool lattice_strut_report = false;
   StrutStrengthReport lattice_strut;
   // Cells-per-member regime guard (bar L4): the thinnest LATTICED member's span in
@@ -197,6 +248,12 @@ struct FixedDesignAnalysis {
   // comparable on one receipt and the strut term's cost is never invisible.
   bool strut_gated = false;
   double margin_effective_solid_only = 0.0;
+  // ★ Ruling 11-06 2(a): with latticed voxels and NO solid voxel under stress (the
+  // solid margin unbounded), the strut law is folded in as above (`strut_gated`);
+  // where it cannot apply, the lattice is NOT CERTIFIED: `accepted` is false and the
+  // reason is one plain sentence. False / empty on every other analysis.
+  bool lattice_not_certified = false;
+  std::string lattice_not_certified_reason;
 
   // --- BUILD-ORIENTATION RANKING (handoff 2026-08-01-build-direction-separation)
   // A RECOMMENDATION, filled strictly AFTER `accepted` / `margin_effective` were
@@ -371,7 +428,9 @@ FixedDesignAnalysis analyze_fixed_design(
     // When armed AND a strut report was produced, `lattice_strength_uncertified`
     // becomes false — the region's strength IS gated — and it stays true in every
     // other case, including an armed gate the law could not evaluate.
-    bool gate_on_strut_strength = false);
+    bool gate_on_strut_strength = false,
+    // Install 3: the strength check's numbers (AnalysisKnobs). Null: the constants, as before.
+    const AnalysisKnobs* knobs = nullptr);
 
 // ═══ THE MARGIN-REPRODUCTION BAND ═══════════════════════════════════════════
 // (task 2026-08-08-lattice-variant-margin-tolerance, S1)
@@ -487,6 +546,8 @@ double gate_margin_effective(double yield_strength_mpa, double z_knockdown,
 // re-analysis gate share ONE definition. (The maintainer tunes this curve; do NOT
 // treat the exponent as final — see the definition.)
 double infill_margin_knockdown(double infill_percent);
+// The same curve with its exponent and floor stated (the one-argument form is this with 1.5 and 1e-3).
+double infill_margin_knockdown(double infill_percent, double exponent, double floor);
 
 // The solid-wall AREA FRACTION of a square W×W member cross-section wrapped by a
 // solid perimeter ring of thickness t: f_wall = 4·t·(W-t)/W² (191/192's φ_wall).
@@ -511,6 +572,9 @@ double wall_area_fraction(double member_width_mm, double wall_thickness_mm);
 // (bar K3) calls it directly against 191/192's member table.
 double width_aware_knockdown(double infill_percent, double member_width_mm,
                              double wall_thickness_mm);
+// The same with the core curve's exponent and floor stated.
+double width_aware_knockdown(double infill_percent, double member_width_mm,
+                             double wall_thickness_mm, double exponent, double floor);
 
 }  // namespace topopt
 

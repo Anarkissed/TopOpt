@@ -1,0 +1,72 @@
+# Angled presses (task 2026-10-07), batch AP1 "The saved press": the TESTS-FIRST red run.
+# The AP1 tests-first commit carries the 14 tests and the code with every rule as the spec's RED variant
+# (app/TopOptKit, the lines marked "AP1 TESTS FIRST — RED STUB"):
+#   1 the direction stored through Float          6 every squeeze group counts for the job / core's hold
+#   2 an empty press list written as []           7 presses are no hand of their group (force, the pill)
+#   3 presses kept in the lattice's key           8 the inputs not re-expressed between frames
+#   4 adopt: press members not skipped,           9 a tilt drops the link and its drawn-in frame
+#     linked presses not re-synced               10 Reset all keeps the selected press
+#   5 a new press at `kg ?? firstGroupForce ?? 10`
+# Command (app/TopOptKit, built with swift build --build-tests, no SWIFT_DETERMINISTIC_HASHING):
+#   swift test --skip-build --filter 'FlexiblePressSaveTests|FlexibleSqueezeGroupsPressTests|FlexiblePressReframeTests'
+# The next commit replaces every stub with the rule; the same 14 tests are then green (ap1_suite.txt).
+# Expected green here: the two GUARDS (testOldProjectsDecodeWithNoPresses, testProjectsWithoutPressesGroupIdentically)
+# — they pin what must NOT change, so no stub of a press rule can turn them red.
+
+FAILED FlexiblePressReframeTests.testMovingTopsPressToTopBKeepsTheStampOnTheSurfaceAndCurvesOnTheirAxes  (7 failure(s))
+         - XCTAssertLessThan failed: ("45.27692569068709") is not less than ("1e-09") - ★ the stamp's point on the surface is unchanged
+         - XCTAssertLessThan failed: ("1.4142135623730951") is not less than ("1e-09") - its heading on the part too
+         - XCTAssertTrue failed - ★ Top B's X runs along the world axis Top's Y ran along
+         - XCTAssertEqual failed: ("FlexCurve(x: [0.0, 0.3, 1.0], y: [0.2, 0.9, 0.5])") is not equal to ("FlexCurve(x: [0.0, 0.19999999999999996, 1.0], y: [0.35, 0.1, 0.7])") - ★ Top B's X curve is Top's Y curve, along world Y
+         - XCTAssertEqual failed: ("FlexCurve(x: [0.0, 0.8, 1.0], y: [0.7, 0.1, 0.35])") is not equal to ("FlexCurve(x: [0.0, 0.3, 1.0], y: [0.2, 0.9, 0.5])") - ★ Top B's Y curve is Top's X curve, along world X
+         - XCTAssertEqual failed: ("false") is not equal to ("true")
+         - XCTAssertEqual failed: ("nil") is not equal to ("Optional("Curves follow the face")")
+FAILED FlexiblePressReframeTests.testTheSameFrameIsUnchangedAndAPressFrameWaitsOnCore  (2 failure(s))
+         - XCTAssertThrowsError failed: did not throw an error
+         - failed - a press frame must wait on core
+FAILED FlexiblePressSaveTests.testAnAngledPressRoundTripsThroughSaveAndLoad  (2 failure(s))
+         - XCTAssertEqual failed: ("[13827916307963576320, 0, 13827916307963576320]") is not equal to ("[13827916308072577996, 0, 13827916308072577996]") - ★ edge: the direction he aimed, bit for bit
+         - XCTAssertEqual failed: ("[4593126286309720064, 13822184240315367424, 13830114895279947776]") is not equal to ("[4593126286339972558, 13822184240218121672, 13830114895475785465]") - ★ tilted: the direction he aimed, bit for bit
+FAILED FlexiblePressSaveTests.testAPendingPressNeverMakesTheLatticeStale  (3 failure(s))
+         - XCTAssertFalse failed - ★ a press core can't build never stales the lattice
+         - XCTAssertEqual failed: ("6480237368430643351") is not equal to ("6636916222413305433")
+         - XCTAssertNil failed: "[FlexiblePress(id: 4BB651BD-38DD-4865-8A56-5268E4E2B830, regions: [3, 2], direction: SIMD3<Double>(-0.7071067690849304, 0.7071067690849304, 0.0), snap: Optional("halfway"), settings: FlexibleFaceSettings(faceRegionID: 3, role: "loaded"...
+FAILED FlexiblePressSaveTests.testAPressNeverInventsAWeight  (6 failure(s))
+         - XCTAssertNil failed: "3C7C3201-7542-4506-BD09-6BFB175440E8" - ★ no weight anywhere: the pad must ask
+         - XCTAssertNil failed: "[FlexiblePress(id: 3C7C3201-7542-4506-BD09-6BFB175440E8, regions: [3, 2], direction: SIMD3<Double>(-0.7071067690849304, 0.7071067690849304, 0.0), snap: Optional("halfway"), settings: FlexibleFaceSettings(faceRegionID: 3, role: "loaded"...
+         - XCTAssertEqual failed: ("Optional(99.0)") is not equal to ("Optional(12.0)") - the group's one force, never the pad's number
+         - XCTAssertEqual failed: ("nil") is not equal to ("Optional(2F7BC5E0-EE2D-4F86-824B-5AA5853CA5D8)") - linked to the members' Load group
+         - XCTAssertEqualWithAccuracy failed: ("12.0") is not equal to ("9.0") +/- ("1e-12") - Σ share × its weight
+         - XCTAssertEqualWithAccuracy failed: ("12.0") is not equal to ("9.0") +/- ("1e-12") - both members: the group's whole weight
+PASSED FlexiblePressSaveTests.testOldProjectsDecodeWithNoPresses  (0 failure(s))
+FAILED FlexiblePressSaveTests.testRemovingTheLastPressWritesNil  (3 failure(s))
+         - XCTAssertNil failed: "[]" - the last press leaves nil
+         - XCTAssertNil failed: "[]"
+         - XCTAssertEqual failed: ("{"allowQuilt":false,"boundary":"none","cellMM":8,"cellMaxMM":8,"cellMinMM":4,"cellSizeMode":"auto","densityMode":"sim","enabled":false,"flexible":{"beadsPerWall":1,"checkStamps":[],"curveConvention":1,"faces":[],"feel":"springy","fi...
+FAILED FlexiblePressSaveTests.testResetAllClearsPresses  (1 failure(s))
+         - XCTAssertNil failed: "F6A6D513-0B07-4D77-866F-C8D1A163ED13" - ★ no press card left open on nothing
+FAILED FlexiblePressSaveTests.testTheMainPageReSyncSkipsAPressMemberAndKeepsItsWeightLinked  (7 failure(s))
+         - XCTAssertEqual failed: ("Optional(FlexibleFaceSettings(faceRegionID: 1000103, role: "loaded", rotationDeg: 0, weightKg: 5.0, deepestMM: 4.0, mode: "both", curveX: FlexCurve(x: [0.0, 0.5, 1.0], y: [0.3, 1.0, 0.3]), curveY: FlexCurve(x: [0.0, 0.5, 1.0], y: [0...
+         - XCTAssertNil failed: "FlexibleFaceSettings(faceRegionID: 1000103, role: "loaded", rotationDeg: 0, weightKg: 5.0, deepestMM: 3.0, mode: "both", curveX: FlexCurve(x: [0.0, 0.5, 1.0], y: [0.3, 1.0, 0.3]), curveY: FlexCurve(x: [0.0, 0.5, 1.0], y: [0.3, 1.0, 0.3...
+         - XCTAssertEqual failed: ("nil") is not equal to ("Optional(92E96F3A-D8F7-4FB0-AF8D-56230DFB6BC0)") - still linked
+         - XCTAssertEqual failed: ("Optional([])") is not equal to ("Optional([CBFEEC6E-BA2D-4F9D-A6B9-F55E6D859DA5])") - Top's hand presses the press
+         - XCTAssertEqualWithAccuracy failed: ("5.0") is not equal to ("6.0") +/- ("1e-12") - ★ RED 2's subject: the edit reaches the press
+         - XCTAssertEqualWithAccuracy failed: ("5.0") is not equal to ("7.0") +/- ("1e-12")
+         - XCTAssertEqualWithAccuracy failed: ("5.0") is not equal to ("7.0") +/- ("1e-12") - control: unlinked, it keeps its own weight
+FAILED FlexiblePressSaveTests.testTiltAndStraightenMoveOneStructIntact  (4 failure(s))
+         - XCTAssertEqual failed: ("FlexibleFaceSettings(faceRegionID: 1000103, role: "loaded", rotationDeg: 0, weightKg: 5.0, deepestMM: 4.0, mode: "both", curveX: FlexCurve(x: [0.0, 0.5, 1.0], y: [0.3, 1.0, 0.3]), curveY: FlexCurve(x: [0.0, 0.5, 1.0], y: [0.3, 1.0, ...
+         - XCTAssertEqual failed: ("nil") is not equal to ("Optional(1000103)") - drawn in its face's frame
+         - XCTAssertNil failed: "[]" - the last press gone: nil
+         - XCTAssertEqual failed: ("Optional(FlexibleFaceSettings(faceRegionID: 1000103, role: "loaded", rotationDeg: 0, weightKg: 5.0, deepestMM: 4.0, mode: "both", curveX: FlexCurve(x: [0.0, 0.5, 1.0], y: [0.3, 1.0, 0.3]), curveY: FlexCurve(x: [0.0, 0.5, 1.0], y: [0...
+FAILED FlexibleSqueezeGroupsPressTests.testAGroupWithOnlyPressesIsATabButNotAJobGroup  (2 failure(s))
+         - XCTAssertEqual failed: ("[1, 2]") is not equal to ("[1]") - nothing of group 2 is sent
+         - failed: caught error: "Squeeze groups are the app's preview for now: core designs one squeeze at a time."
+FAILED FlexibleSqueezeGroupsPressTests.testPressesAreRenumberedMergedAndForcedWithTheirGroup  (2 failure(s))
+         - XCTAssertEqual failed: ("[30.0]") is not equal to ("[30.0, 4.0]") - face 1's 30 kg and the press's own 4 kg
+         - XCTAssertEqual failed: ("Optional(ClosedRange(30.0...30.0))") is not equal to ("Optional(ClosedRange(4.0...30.0))") - ★ the press is in the group's force
+PASSED FlexibleSqueezeGroupsPressTests.testProjectsWithoutPressesGroupIdentically  (0 failure(s))
+FAILED FlexibleSqueezeGroupsPressTests.testTheGroupPillSetsAPressOfHisOwn  (1 failure(s))
+         - XCTAssertEqual failed: ("Optional(12.0)") is not equal to ("Optional(15.0)") - ★ the pill reached the press
+
+TOTAL Executed 14 tests, with 40 failures (1 unexpected) in 2.428 (2.430) seconds
+RED 12 of 14 (both guards green, as they must be); exit 1

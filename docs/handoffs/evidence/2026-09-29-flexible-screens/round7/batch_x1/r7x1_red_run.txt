@@ -1,0 +1,136 @@
+# X1 RED RUN (tests FIRST against stage stubs; the renderer pieces of the time-boxed spike were already in) — 2026-10-14 18:16–18:28 EDT
+# swift test --skip-build --scratch-path /tmp/r7x-build --filter 'FlexibleR7X1Tests|FlexibleR7X1HostedTests|FlexibleLatticePassTests/testThePrintedTermMatchesTheSwiftTwin'
+# RAW:
+Test Suite 'Selected tests' started at 2026-10-14 18:20:07.057.
+Test Suite 'TopOptKitTests.xctest' started at 2026-10-14 18:20:07.059.
+Test Suite 'TopOptKitTests.xctest' passed at 2026-10-14 18:20:07.059.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-14 18:20:07.059.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.002) seconds
+Test Suite 'Selected tests' started at 2026-10-14 18:20:07.221.
+Test Suite 'TopOptFlowsTests.xctest' started at 2026-10-14 18:20:07.222.
+Test Suite 'FlexibleLatticePassTests' started at 2026-10-14 18:20:07.222.
+Test Case '-[TopOptFlowsTests.FlexibleLatticePassTests testThePrintedTermMatchesTheSwiftTwin]' started.
+Test Case '-[TopOptFlowsTests.FlexibleLatticePassTests testThePrintedTermMatchesTheSwiftTwin]' passed (1.508 seconds).
+Test Suite 'FlexibleLatticePassTests' passed at 2026-10-14 18:20:08.730.
+	 Executed 1 test, with 0 failures (0 unexpected) in 1.508 (1.508) seconds
+Test Suite 'FlexibleR7X1HostedTests' started at 2026-10-14 18:20:08.730.
+Test Case '-[TopOptFlowsTests.FlexibleR7X1HostedTests testCoveredIsThePlainModelSkinAndRimSitBetween]' started.
+2026-10-14 18:20:08.751 xctest[18510:4703882] DIAG shellClip mode=OFF inFrame=false algo=- capsules=-1 capVerts=0 capPipeline=true capsulePipeline=true capsulesReplaceField=false bodyAlpha=1.0 initError=nil regionTex=false skinMM=-1.0 dims=SIMD4<Float>(1.0, 1.0, 1.0, 0.0) regions=[] open=[no census]
+2026-10-14 18:20:08.829 xctest[18510:4703882] DIAG seam occupancy: 128x128x27 in 0.07 s (once per mesh)
+Test Case '-[TopOptFlowsTests.FlexibleR7X1HostedTests testCoveredIsThePlainModelSkinAndRimSitBetween]' passed (84.268 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7X1HostedTests testFinishNoneShowsTheSolidPartAndTheLatticeWithXrayOff]' started.
+2026-10-14 18:21:33.088 xctest[18510:4703882] DIAG seam occupancy: 128x128x27 in 0.07 s (once per mesh)
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1HostedTests.swift:110: error: -[TopOptFlowsTests.FlexibleR7X1HostedTests testFinishNoneShowsTheSolidPartAndTheLatticeWithXrayOff] : XCTAssertFalse failed - premise: the default view (X-ray off)
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1HostedTests.swift:145: error: -[TopOptFlowsTests.FlexibleR7X1HostedTests testFinishNoneShowsTheSolidPartAndTheLatticeWithXrayOff] : XCTAssertLessThan failed: ("0.9468321923782806") is not less than ("0.6") - ★ RED CONTROL: R7-V's rule shows no lattice inside the strips
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1HostedTests.swift:155: error: -[TopOptFlowsTests.FlexibleR7X1HostedTests testFinishNoneShowsTheSolidPartAndTheLatticeWithXrayOff] : XCTAssertGreaterThan failed: ("0.0") is not greater than ("0.3") - X-ray sees through the solid (not the printed view)
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1HostedTests.swift:123: error: -[TopOptFlowsTests.FlexibleR7X1HostedTests testFinishNoneShowsTheSolidPartAndTheLatticeWithXrayOff] : XCTAssertGreaterThanOrEqual failed: ("0.0") is less than ("0.6") - ★ n 2064: inside the strips the lattice (the walls and the voids)
+Test Case '-[TopOptFlowsTests.FlexibleR7X1HostedTests testFinishNoneShowsTheSolidPartAndTheLatticeWithXrayOff]' failed (95.985 seconds).
+Test Suite 'FlexibleR7X1HostedTests' failed at 2026-10-14 18:23:08.983.
+	 Executed 2 tests, with 4 failures (0 unexpected) in 180.253 (180.253) seconds
+Test Suite 'FlexibleR7X1Tests' started at 2026-10-14 18:23:08.983.
+Test Case '-[TopOptFlowsTests.FlexibleR7X1Tests testTheLatticeViewAndPrismsNeverTurnXrayOn]' started.
+2026-10-14 18:23:09.064 xctest[18510:4703882] DIAG seam occupancy: 128x128x27 in 0.07 s (once per mesh)
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1Tests.swift:91: error: -[TopOptFlowsTests.FlexibleR7X1Tests testTheLatticeViewAndPrismsNeverTurnXrayOn] : XCTAssertFalse failed - premise: X-ray off
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1Tests.swift:96: error: -[TopOptFlowsTests.FlexibleR7X1Tests testTheLatticeViewAndPrismsNeverTurnXrayOn] : XCTAssertFalse failed - ★ …and X-ray stays off
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1Tests.swift:100: error: -[TopOptFlowsTests.FlexibleR7X1Tests testTheLatticeViewAndPrismsNeverTurnXrayOn] : XCTAssertFalse failed
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1Tests.swift:103: error: -[TopOptFlowsTests.FlexibleR7X1Tests testTheLatticeViewAndPrismsNeverTurnXrayOn] : XCTAssertFalse failed - ★ …X-ray stays off
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1Tests.swift:106: error: -[TopOptFlowsTests.FlexibleR7X1Tests testTheLatticeViewAndPrismsNeverTurnXrayOn] : XCTAssertFalse failed - ★ the pill's "View off · tap to build" path: X-ray stays off
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1Tests.swift:109: error: -[TopOptFlowsTests.FlexibleR7X1Tests testTheLatticeViewAndPrismsNeverTurnXrayOn] : XCTAssertFalse failed - ★ [Prisms] does not turn X-ray on
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1Tests.swift:116: error: -[TopOptFlowsTests.FlexibleR7X1Tests testTheLatticeViewAndPrismsNeverTurnXrayOn] : XCTAssertFalse failed - ★ …and leaves X-ray as he set it
+Test Case '-[TopOptFlowsTests.FlexibleR7X1Tests testTheLatticeViewAndPrismsNeverTurnXrayOn]' failed (60.205 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7X1Tests testThePrintedViewDrawsTheLatticeWithXrayOffUnlessCovered]' started.
+2026-10-14 18:24:09.302 xctest[18510:4703882] DIAG seam occupancy: 128x128x27 in 0.07 s (once per mesh)
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1Tests.swift:145: error: -[TopOptFlowsTests.FlexibleR7X1Tests testThePrintedViewDrawsTheLatticeWithXrayOffUnlessCovered] : XCTAssertFalse failed
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1Tests.swift:146: error: -[TopOptFlowsTests.FlexibleR7X1Tests testThePrintedViewDrawsTheLatticeWithXrayOffUnlessCovered] : XCTAssertTrue failed - ★ the printed view
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1Tests.swift:149: error: -[TopOptFlowsTests.FlexibleR7X1Tests testThePrintedViewDrawsTheLatticeWithXrayOffUnlessCovered] : XCTAssertTrue failed - ★ …with the printed solid (the finish's skin, the pocket's wall and floor)
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1Tests.swift:151: error: -[TopOptFlowsTests.FlexibleR7X1Tests testThePrintedViewDrawsTheLatticeWithXrayOffUnlessCovered] : XCTAssertEqual failed: ("Optional(0.04)") is not equal to ("Optional(0.0)") - ★ the body see-through: only its closed surface draws
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1Tests.swift:173: error: -[TopOptFlowsTests.FlexibleR7X1Tests testThePrintedViewDrawsTheLatticeWithXrayOffUnlessCovered] : XCTAssertEqual failed: ("40804") is not equal to ("0") - ★ away from it the body is closed (solid)
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1Tests.swift:174: error: -[TopOptFlowsTests.FlexibleR7X1Tests testThePrintedViewDrawsTheLatticeWithXrayOffUnlessCovered] : XCTAssertEqual failed: ("93696") is not equal to ("0") - ★ no ghost out of X-ray
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1Tests.swift:206: error: -[TopOptFlowsTests.FlexibleR7X1Tests testThePrintedViewDrawsTheLatticeWithXrayOffUnlessCovered] : XCTAssertTrue failed - …but the view is his: the icon stays lit (the lattice shows in X-ray)
+Test Case '-[TopOptFlowsTests.FlexibleR7X1Tests testThePrintedViewDrawsTheLatticeWithXrayOffUnlessCovered]' failed (52.364 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7X1Tests testTheSquishPagesXrayIsTheBendsPrismIntoTheModel]' started.
+2026-10-14 18:25:01.635 xctest[18510:4703882] DIAG seam occupancy: 128x128x27 in 0.07 s (once per mesh)
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1Tests.swift:238: error: -[TopOptFlowsTests.FlexibleR7X1Tests testTheSquishPagesXrayIsTheBendsPrismIntoTheModel] : XCTAssertEqual failed: ("83712") is not equal to ("0") - ★ X-ray off: the Squish page's body wears no ghost
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1Tests.swift:241: error: -[TopOptFlowsTests.FlexibleR7X1Tests testTheSquishPagesXrayIsTheBendsPrismIntoTheModel] : XCTUnwrap failed: expected non-nil value of type "ClearanceRenderItem" - ★ X-ray on: the bend's prism
+Test Case '-[TopOptFlowsTests.FlexibleR7X1Tests testTheSquishPagesXrayIsTheBendsPrismIntoTheModel]' failed (12.664 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7X1Tests testXrayIsOffByDefaultOnBothPagesWhateverTheFinish]' started.
+2026-10-14 18:25:14.299 xctest[18510:4703882] DIAG seam occupancy: 128x128x27 in 0.07 s (once per mesh)
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1Tests.swift:53: error: -[TopOptFlowsTests.FlexibleR7X1Tests testXrayIsOffByDefaultOnBothPagesWhateverTheFinish] : XCTAssertFalse failed - ★ Finish None: X-ray OFF as the page opens (his Q9 answer)
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1Tests.swift:54: error: -[TopOptFlowsTests.FlexibleR7X1Tests testXrayIsOffByDefaultOnBothPagesWhateverTheFinish] : XCTAssertNotEqual failed: ("Optional(0.04)") is equal to ("Optional(0.04)") - ★ not the ghost
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1Tests.swift:57: error: -[TopOptFlowsTests.FlexibleR7X1Tests testXrayIsOffByDefaultOnBothPagesWhateverTheFinish] : XCTAssertFalse failed - ★ Finish none: X-ray off by default
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1Tests.swift:57: error: -[TopOptFlowsTests.FlexibleR7X1Tests testXrayIsOffByDefaultOnBothPagesWhateverTheFinish] : XCTAssertFalse failed - ★ Finish rim: X-ray off by default
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1Tests.swift:57: error: -[TopOptFlowsTests.FlexibleR7X1Tests testXrayIsOffByDefaultOnBothPagesWhateverTheFinish] : XCTAssertFalse failed - ★ Finish skin: X-ray off by default
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1Tests.swift:62: error: -[TopOptFlowsTests.FlexibleR7X1Tests testXrayIsOffByDefaultOnBothPagesWhateverTheFinish] : XCTAssertTrue failed - his X-ray tap: on
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1Tests.swift:63: error: -[TopOptFlowsTests.FlexibleR7X1Tests testXrayIsOffByDefaultOnBothPagesWhateverTheFinish] : XCTAssertEqual failed: ("Optional(1.0)") is not equal to ("Optional(0.04)") - …the ghost
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1Tests.swift:65: error: -[TopOptFlowsTests.FlexibleR7X1Tests testXrayIsOffByDefaultOnBothPagesWhateverTheFinish] : XCTAssertFalse failed
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1Tests.swift:68: error: -[TopOptFlowsTests.FlexibleR7X1Tests testXrayIsOffByDefaultOnBothPagesWhateverTheFinish] : XCTAssertEqual failed: ("0.04") is not equal to ("1.0") - ★ the Squish page's part is opaque
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1Tests.swift:71: error: -[TopOptFlowsTests.FlexibleR7X1Tests testXrayIsOffByDefaultOnBothPagesWhateverTheFinish] : XCTAssertTrue failed - ★ the Squish page's X-ray icon (the main page's glyph — icons only)
+Test Case '-[TopOptFlowsTests.FlexibleR7X1Tests testXrayIsOffByDefaultOnBothPagesWhateverTheFinish]' failed (21.987 seconds).
+Test Suite 'FlexibleR7X1Tests' failed at 2026-10-14 18:25:36.204.
+	 Executed 4 tests, with 26 failures (0 unexpected) in 147.220 (147.221) seconds
+Test Suite 'TopOptFlowsTests.xctest' failed at 2026-10-14 18:25:36.204.
+	 Executed 7 tests, with 30 failures (0 unexpected) in 328.981 (328.982) seconds
+Test Suite 'Selected tests' failed at 2026-10-14 18:25:36.204.
+	 Executed 7 tests, with 30 failures (0 unexpected) in 328.981 (328.983) seconds
+FLEX-PRINTED gyroid: max |gpu − swift| 0.0015881062 mm over 3000 points; the printed solid decides at 2124 (inside it: skin 649, pocket 598), the walls at 876; unprinted parity 0.0011863708 mm; controls: gate off 32.036263 mm, unprinted reference 32.035835 mm
+FLEX-PRINTED honeycomb: max |gpu − swift| 0.0015881062 mm over 3000 points; the printed solid decides at 1966 (inside it: skin 649, pocket 598), the walls at 1034; unprinted parity 0.001116991 mm; controls: gate off 4.654723 mm, unprinted reference 4.654724 mm
+FLEX-R7X1-XH2 his strips, img5 top, Heat off:
+  none: inside the strips 94.7 % differ · printed view false
+  skin: inside the strips 91.3 % differ · printed view false
+  rim: inside the strips 92.4 % differ · printed view false
+  covered: inside the strips 0.0 % differ · printed view false
+FLEX-R7X1-XH1 his strips, Finish None, img5 top, Heat off:
+  n 900: outside the strips 95.47 % match (of 136395 px) · inside 94.7 % differ (of 143301 px)
+  controls: R7-V's rule inside 94.7 % differ · solid flags alone outside 0.63 % match
+  n 2064: outside the strips 100.00 % match (of 716804 px) · inside 0.0 % differ (of 752295 px)
+FLEX-R7X1-2 Lattice / note / pill / [Prisms] / Exit: X-ray stays off · controls: [Prisms] true, Lattice true
+FLEX-R7X1-3 None X-ray off: walls drawn, printed, body alpha 0 · open surface 50788 (flagged 0) · closed 40804 (unflagged 40804) · control hidden true alpha Optional(1.0) · Covered plain
+FLEX-R7X1-1 X-ray on open: true for every finish · Squish page opaque · controls: stopgap true, Squish ghost 0.04
+Test Suite 'Selected tests' started at 2026-10-14 18:25:36.762.
+Test Suite 'TopOptDesignTests.xctest' started at 2026-10-14 18:25:36.764.
+Test Suite 'TopOptDesignTests.xctest' passed at 2026-10-14 18:25:36.764.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-14 18:25:36.764.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.002) seconds
+Note: Some test targets reported failures:
+  - TopOptFlowsTests (XCTest)
+
+# XH2 RE-RUN after forcing X-ray off inside the test (its first run above PASSED for the wrong reason: the stub opened his None pad in X-ray)
+Test Suite 'Selected tests' started at 2026-10-14 18:26:05.942.
+Test Suite 'TopOptKitTests.xctest' started at 2026-10-14 18:26:05.943.
+Test Suite 'TopOptKitTests.xctest' passed at 2026-10-14 18:26:05.943.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-14 18:26:05.943.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Test Suite 'Selected tests' started at 2026-10-14 18:26:06.103.
+Test Suite 'TopOptFlowsTests.xctest' started at 2026-10-14 18:26:06.103.
+Test Suite 'FlexibleR7X1HostedTests' started at 2026-10-14 18:26:06.103.
+Test Case '-[TopOptFlowsTests.FlexibleR7X1HostedTests testCoveredIsThePlainModelSkinAndRimSitBetween]' started.
+2026-10-14 18:26:06.169 xctest[22010:4719925] DIAG shellClip mode=OFF inFrame=false algo=- capsules=-1 capVerts=0 capPipeline=true capsulePipeline=true capsulesReplaceField=false bodyAlpha=1.0 initError=nil regionTex=false skinMM=-1.0 dims=SIMD4<Float>(1.0, 1.0, 1.0, 0.0) regions=[] open=[no census]
+2026-10-14 18:26:06.248 xctest[22010:4719925] DIAG seam occupancy: 128x128x27 in 0.07 s (once per mesh)
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1HostedTests.swift:187: error: -[TopOptFlowsTests.FlexibleR7X1HostedTests testCoveredIsThePlainModelSkinAndRimSitBetween] : XCTAssertGreaterThanOrEqual failed: ("0.0") is less than ("0.6") - ★ None: the lattice
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1HostedTests.swift:189: error: -[TopOptFlowsTests.FlexibleR7X1HostedTests testCoveredIsThePlainModelSkinAndRimSitBetween] : XCTAssertLessThan failed: ("0.0") is not less than ("0.0") - ★ skin: part of the strips stays solid (the finish)
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1HostedTests.swift:190: error: -[TopOptFlowsTests.FlexibleR7X1HostedTests testCoveredIsThePlainModelSkinAndRimSitBetween] : XCTAssertGreaterThan failed: ("0.0") is not greater than ("0.0") - ★ skin: the lattice shows where the finish leaves it open
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1HostedTests.swift:189: error: -[TopOptFlowsTests.FlexibleR7X1HostedTests testCoveredIsThePlainModelSkinAndRimSitBetween] : XCTAssertLessThan failed: ("0.0") is not less than ("0.0") - ★ rim: part of the strips stays solid (the finish)
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1HostedTests.swift:190: error: -[TopOptFlowsTests.FlexibleR7X1HostedTests testCoveredIsThePlainModelSkinAndRimSitBetween] : XCTAssertGreaterThan failed: ("0.0") is not greater than ("0.0") - ★ rim: the lattice shows where the finish leaves it open
+Test Case '-[TopOptFlowsTests.FlexibleR7X1HostedTests testCoveredIsThePlainModelSkinAndRimSitBetween]' failed (86.960 seconds).
+Test Suite 'FlexibleR7X1HostedTests' failed at 2026-10-14 18:27:33.064.
+	 Executed 1 test, with 5 failures (0 unexpected) in 86.960 (86.961) seconds
+Test Suite 'TopOptFlowsTests.xctest' failed at 2026-10-14 18:27:33.064.
+	 Executed 1 test, with 5 failures (0 unexpected) in 86.960 (86.961) seconds
+Test Suite 'Selected tests' failed at 2026-10-14 18:27:33.064.
+	 Executed 1 test, with 5 failures (0 unexpected) in 86.960 (86.962) seconds
+FLEX-R7X1-XH2 his strips, img5 top, Heat off:
+  none: inside the strips 0.0 % differ · printed view false
+  skin: inside the strips 0.0 % differ · printed view false
+  rim: inside the strips 0.0 % differ · printed view false
+  covered: inside the strips 0.0 % differ · printed view false
+Test Suite 'Selected tests' started at 2026-10-14 18:27:33.162.
+Test Suite 'TopOptDesignTests.xctest' started at 2026-10-14 18:27:33.163.
+Test Suite 'TopOptDesignTests.xctest' passed at 2026-10-14 18:27:33.163.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-14 18:27:33.163.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Note: Some test targets reported failures:
+  - TopOptFlowsTests (XCTest)

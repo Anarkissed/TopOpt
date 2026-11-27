@@ -1,0 +1,14 @@
+# Release 03a6b63f — 2026-11-06 LatticeStartFrom (UI-Notes' app batch up to 56291e66), app only, released before review (his 11-03 pick)
+# Core and worker unchanged: fingerprint 6c5a6fbaa842; "fingerprint": "6c5a6fbaa842"
+# Merged onto c9dddeee; the merged app tree equals 56291e66's, so the builder's tests apply unchanged.
+# Commits:
+#   9122ae4e B6 s3b (his go 11-05; notes 26, R2.2, §4.21 / §4.13): Start from — Solid · + Lattice faces │ All lattice · − Lattice faces, a setting that asks first
+#   56291e66 Merge UI-Notes' B6 s3b (9122ae4e, his go 11-05; notes 26, R2.2) into B9: Start from — Solid · + Lattice faces │ All lattice · − Lattice faces in Selections' pinned foot, asking first; switching flips each face group's role and back (zones and Protect skin keep theirs); LatticeSettings.wholePart (optional, not written while +); the job unchanged until E2's lattice.whole_part, a plain line meanwhile
+#   03a6b63f Release 2026-11-06: merge B9 56291e66 — UI-Notes' B6 s3b (9122ae4e; notes 26, R2.2): Start from — Solid · + Lattice faces │ All lattice · − Lattice faces, asking first; switching flips each face group's role and back; LatticeSettings.wholePart (optional, not written while +); the job unchanged until E2's lattice.whole_part (app only; core and worker unchanged at 6c5a6fbaa842)
+# Gates:
+#   04:03 checks ok: LatticeStartFrom, local 03a6b63f over origin c9dddeee (3 commits); app tree == 56291e66's, fingerprint 6c5a6fbaa842
+#   04:03 waiting for HEAVY.lock (free)
+#   04:03 lock taken
+#   04:08 iPad device build green; lock released
+#   04:08 pushed 03a6b63f
+#   04:08 worker /health "fingerprint": "6c5a6fbaa842" (unchanged, no swap)

@@ -1,0 +1,19 @@
+# Release 586b2b78 — 2026-11-05 LatticePageLook (UI-Notes' app batch up to 397b43f7), app only, released before review (his 11-03 pick)
+# Core and worker unchanged: fingerprint 6c5a6fbaa842; "fingerprint": "6c5a6fbaa842"
+# Merged onto 47a9b47b; the merged app tree equals 397b43f7's, so the builder's tests apply unchanged.
+# Commits:
+#   406f3afe Merge the release tip (ad529734 + evidence 47a9b47b) into B7 before the Lattice page rebuild
+#   37c62093 B7 step 1: the Lattice page's control parity — every control today's page shows (90 kinds over 40 states, each view, each tab, each segment) must survive the rebuild
+#   16cdb9af B7 slice 1, the look (his picks 11-04: "ship the look first"): the Lattice page in the Squish look on today's engine
+#   c2fae7b0 Merge B7 slice 1 (16cdb9af) into B9: the Lattice page in the Squish look on today's engine (his "ship the look first")
+#   f962ee5a Release 2026-11-05: merge B9 c2fae7b0 — B7 slice 1, the Lattice page in the Squish look on today's engine (his "ship the look first"): Lattice settings panel with Part / group tabs, Auto │ Manual, Reset all, Cancel │ Save; One cell │ In the part over the canvas (app only; core and worker unchanged at 6c5a6fbaa842)
+#   ca50e292 B7 slice 1: the iPad Release build — the page's row groups are type-erased
+#   397b43f7 Merge B7 ca50e292 into B9: the Lattice page's row groups type-erased for the iPad Release build
+#   586b2b78 Release 2026-11-05: merge B9 397b43f7 — the Lattice page's row groups type-erased so the iPad Release build compiles (B7 slice 1, the Squish look; app only; core and worker unchanged at 6c5a6fbaa842)
+# Gates:
+#   14:46 checks ok: LatticePageLook, local 586b2b78 over origin 47a9b47b (8 commits); app tree == 397b43f7's, fingerprint 6c5a6fbaa842
+#   14:46 waiting for HEAVY.lock (free)
+#   14:46 lock taken
+#   14:51 iPad device build green; lock released
+#   14:51 pushed 586b2b78
+#   14:51 worker /health "fingerprint": "6c5a6fbaa842" (unchanged, no swap)

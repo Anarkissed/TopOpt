@@ -1,0 +1,1 @@
+The mockup's 'Your pick' (config pk, flexible-redesign.html of 2026-10-14) rendered headless at 13"/11" in both orientations — m_* by the R7-D1 review (rest, setup, plate, card, ready, fix, play, play_card, squish), mock_* by the R7-D2 review (rest, chipM, chipN, group, info). Unchanged since; reused here as the reference beside D3's frames (../sides).

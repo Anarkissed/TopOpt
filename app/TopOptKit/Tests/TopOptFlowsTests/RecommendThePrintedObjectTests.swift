@@ -153,7 +153,7 @@ final class RecommendThePrintedObjectTests: XCTestCase {
         // be read as the thing being recommended. This is the distinction S2(c)
         // asks for: "−47%, 360 g" and "−20%, 215 g latticed" are two different
         // recommendations, and the line has to be able to tell them apart.
-        XCTAssertTrue(line.contains("the same rung's solid is 544 g"),
+        XCTAssertTrue(line.contains("the same result's solid is 544 g"),
                       "…and it says what the rung's other object weighs: \(line)")
         XCTAssertTrue(line.range(of: "215 g")!.lowerBound
                         < line.range(of: "544 g")!.lowerBound,

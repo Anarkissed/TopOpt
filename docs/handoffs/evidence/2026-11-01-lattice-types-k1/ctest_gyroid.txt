@@ -1,0 +1,8 @@
+ 93/166 Test  #93: lattice_certification ............***Failed    0.16 sec
+        Start 123: cli_demo
+123/166 Test #123: cli_demo .........................   Passed  1849.29 sec
+99% tests passed, 1 tests failed out of 166
+Total Test time (real) = 4140.72 sec
+The one failure: lattice_certification's count of certifiable names (7; the sheets make 9). Fixed in 472b5632 (test only) and re-run in the same build:
+1/1 Test #93: lattice_certification ............   Passed    0.20 sec
+100% tests passed out of 1

@@ -72,7 +72,7 @@ public struct ImportUnitSheet: View {
             HStack(spacing: DS.Space.m) {
                 Spacer()
                 PillButton("Cancel", style: .secondary) { model.cancelUnitPrompt() }
-                PillButton("Import", style: .primary, systemImage: "arrow.down.circle") {
+                PillButton("Import", style: .primary, systemImage: "tray.and.arrow.down") {
                     model.resolveUnits(choice)
                 }
             }

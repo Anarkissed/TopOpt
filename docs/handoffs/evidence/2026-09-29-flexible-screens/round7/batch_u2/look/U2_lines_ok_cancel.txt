@@ -1,0 +1,2 @@
+before [TopOptFlows.FlexiblePressCurveBaselines.Axis.across: [1.0, 1.0], TopOptFlows.FlexiblePressCurveBaselines.Axis.along: [1.0, 1.0]] · OK [1.0, 0.4, 1.0] [1.0, 0.6, 1.0] · one undo → [TopOptFlows.FlexiblePressCurveBaselines.Axis.across: [1.0, 1.0], TopOptFlows.FlexiblePressCurveBaselines.Axis.along: [1.0, 1.0]]
+RED live edits: after Cancel across [1.0, 0.4, 1.0]; after OK + one undo [TopOptFlows.FlexiblePressCurveBaselines.Axis.along: [1.0, 1.0], TopOptFlows.FlexiblePressCurveBaselines.Axis.across: [1.0, 0.4, 1.0]]

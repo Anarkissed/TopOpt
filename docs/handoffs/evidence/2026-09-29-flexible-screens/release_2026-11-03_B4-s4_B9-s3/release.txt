@@ -1,0 +1,15 @@
+# Release a5ebbc21 — 2026-11-03 B4-s4_B9-s3 (UI-Notes' app batch 9618fa4c), app only
+# Core and worker unchanged: fingerprint 35764048bba3; "fingerprint": "35764048bba3"
+# Merged onto 69151719; the merged app tree equals B4-s4_B9-s3's, so the builder's tests and the reviewer's code check apply unchanged.
+# Commits:
+#   3c2fad48 B4 slice 4 (plan.md §B4, ledger 15 / Q2): the Smooth page is deleted — core finishes every result; Export opens Results on the chosen result
+#   8ed29bae B9 slice 3 (#362): + Cut on the Print plan — six ways, Plane first, Move / Tilt / Rotate, the camera to the plane and back
+#   9618fa4c Merge B4 slice 4 (3c2fad48) into B9, for one release
+# Gates:
+#   20:42 checks ok: B4-s4_B9-s3 9618fa4c, 3 commit(s), app-only, base d7208b18, onto 69151719, fingerprint 35764048bba3
+#   20:42 merged a5ebbc21; app tree == B4-s4_B9-s3's, fingerprint 35764048bba3
+#   20:42 waiting for HEAVY.lock (free)
+#   20:42 lock taken
+#   20:49 iPad device build green; lock released
+#   20:49 pushed a5ebbc21
+#   20:49 worker /health "fingerprint": "35764048bba3" (unchanged, no swap)

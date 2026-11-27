@@ -1,0 +1,25 @@
+{
+  "job_rim_mm" : 0.69074552786387977,
+  "preview_rim_mm" : 1.7052793502807617,
+  "shape_band_mm" : 6,
+  "size_mm" : 6,
+  "strut" : "stated",
+  "tag" : "s6-stated",
+  "traced" : {
+    "at_bead" : 0,
+    "capsules" : 194376,
+    "diameter_max" : 0.89999997615814209,
+    "diameter_min" : 0.89999997615814209,
+    "diameter_p05" : 0.89999997615814209,
+    "diameter_p50" : 0.89999997615814209,
+    "diameter_p95" : 0.89999997615814209,
+    "length_mm" : 197417.39867337979,
+    "scene_rim_mm" : 1.7052793502807617,
+    "seconds" : 464.90883100032806,
+    "summary" : "24925 curves, 136004 connectors, 1.71–6.00 mm spacing · uniform 6.00 mm · shape-fit: 40207 voxels shrunk (min ratio 0.50, depth 4, member yes) · shape band 6.0 mm: 27448 voxels graded toward the 1.71 mm floor · solid rim 1.71 mm (13248 voxels) · grown 19988 curves from 1762 seeds in 244063 steps · blocked by support 0 · clamped to the cone 839 · joins 20017 (refused 0) · branches 18616 (refused 378) · TIP BUDGET HIT · stops: left region 66859, d_test 37336, no direction 0, step budget 0, turned 70, self-revisit 1 · seeds 52133\/971444 (too close 821461) · too short 2107 · census: emission did not run · trace 18.1 s · repairs 0.0 s · bake 1.1 s · ★ REPAIRS HIDDEN: the traced curves are shown; the file has the arches, legs and merges above · seeding ×2.0"
+  },
+  "window" : [
+    6,
+    6
+  ]
+}

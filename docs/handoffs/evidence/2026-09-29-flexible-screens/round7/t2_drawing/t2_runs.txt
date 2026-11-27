@@ -1,0 +1,84 @@
+# Round 7 · T2 — raw numbers (2026-10-23). HEAD bb3d1de8 + the T2 working tree; cache /tmp/r7x20b-build.
+
+## ROOT CAUSE probe (today's code, before the fix): red.log lines
+FLEX-T2 STEPPED BAND EDGES (2 bands) over 567 lines: T2 band 217 of 812 runs over 1702.5 mm = 0.1275 /mm; control 39 of 424 over 1687.5 mm = 0.0231 /mm · RED CONTROL (sheet blend) band 217 of 812 runs over 1702.5 mm = 0.1275 /mm; control 39 of 424 over 1687.5 mm = 0.0231 /mm · the group's edge (549 lines, unchanged) band 138 of 748 runs over 1647.6 mm = 0.0838 /mm; control 111 of 483 over 1572.6 mm = 0.0706 /mm
+FLEX-T2 MANUAL honeycomb 2 beads (0.9 mm), 109189 group voxels: T2 clip band 27 thin of 1500 solid samples = 0.0180; away 0 of 0 = 0.0000 (floor 1/N 1.0000); thin by term region/part/skin 16/11/0 of 1318/182/0 · RED CONTROL (clip at the point) clip band 27 thin of 1500 solid samples = 0.0180; away 0 of 0 = 0.0000 (floor 1/N 1.0000); thin by term region/part/skin 16/11/0 of 1318/182/0
+FLEX-T2 AUTO honeycomb (wall 0.45 mm, cell 5.442588 mm): T2 clip band 10 thin of 1500 solid samples = 0.0067; away 0 of 0 = 0.0000 (floor 1/N 1.0000); thin by term region/part/skin 0/10/0 of 1282/218/0 · RED CONTROL (clip at the point) clip band 10 thin of 1500 solid samples = 0.0067; away 0 of 0 = 0.0000 (floor 1/N 1.0000); thin by term region/part/skin 0/10/0 of 1282/218/0
+FLEX-T2 GPU Manual: max |gpu − swift| at the clip 4.8205256e-06 mm over 300 points; band seams 0.00056791306 mm over 300; RED CONTROL (old clip/blend vs the GPU) 0.00056791306 mm
+FLEX-T2 GPU Auto honeycomb: max |gpu − swift| at the clip 1.4305115e-06 mm over 300 points; band seams 0.0 mm over 0; RED CONTROL (old clip/blend vs the GPU) 1.4305115e-06 mm
+
+## Development runs (kept for the record): what each attempt measured
+attempt 1 (seam wall for band|band, square clip with ∇wall on region+part, gyroid included):
+FLEX-T2 STEPPED BAND EDGES (2 bands) over 567 lines: T2 band 105 of 903 runs over 1702.5 mm = 0.0617 /mm; control 35 of 427 over 1687.5 mm = 0.0207 /mm · RED CONTROL (sheet blend) band 217 of 812 runs over 1702.5 mm = 0.1275 /mm; control 39 of 424 over 1687.5 mm = 0.0231 /mm · the group's edge (549 lines, unchanged) band 108 of 725 runs over 1647.6 mm = 0.0656 /mm; control 101 of 481 over 1572.6 mm = 0.0642 /mm
+FLEX-T2 MANUAL honeycomb 2 beads (0.9 mm), 109189 group voxels, grid 1.0416666 mm: T2 clip band 8 thin of 1500 solid samples = 0.0053; away 0 of 1500 = 0.0000 (floor 1/N 0.0007); thin by term region/part/skin 0/8/0 of 233/1267/0 · RED CONTROL (clip at the point) clip band 87 thin of 1500 solid samples = 0.0580; away 0 of 1500 = 0.0000 (floor 1/N 0.0007); thin by term region/part/skin 38/49/0 of 332/1168/0
+FLEX-T2 AUTO honeycomb (wall 0.45 mm, cell 5.442588 mm): T2 clip band 4 thin of 1500 solid samples = 0.0027; away 0 of 1500 = 0.0000 (floor 1/N 0.0007); thin by term region/part/skin 0/4/0 of 129/1371/0 · RED CONTROL (clip at the point) clip band 39 thin of 1500 solid samples = 0.0260; away 0 of 1500 = 0.0000 (floor 1/N 0.0007); thin by term region/part/skin 0/39/0 of 124/1376/0
+attempt 2 (band switch squared too; REVERTED, no gain):
+FLEX-T2 STEPPED BAND EDGES (2 bands) over 567 lines: T2 band 114 of 913 runs over 1702.5 mm = 0.0670 /mm; control 35 of 427 over 1687.5 mm = 0.0207 /mm · RED CONTROL (sheet blend) band 217 of 812 runs over 1702.5 mm = 0.1275 /mm; control 39 of 424 over 1687.5 mm = 0.0231 /mm · the group's edge (549 lines, unchanged) band 109 of 726 runs over 1647.6 mm = 0.0662 /mm; control 101 of 481 over 1572.6 mm = 0.0642 /mm
+  the 8 thin clip samples left (honeycomb junction notches, 0.40-0.44 mm vs 0.45):
+FLEX-T2 MANUAL thin at the clip: (91.12, 99.61, 9.06) term 1 wall -0.145 thick 0.400 dPart -0.391 dRegion -1.042 | (78.72, 0.21, 5.76) term 1 wall -0.328 thick 0.400 dPart -0.212 dRegion -1.042 | (78.14, 99.82, 14.82) term 1 wall -0.216 thick 0.410 dPart -0.182 dRegion -1.042 | (91.48, 0.43, 0.76) term 1 wall -0.210 thick 0.420 dPart -0.419 dRegion -1.042 | (28.57, 99.67, 1.63) term 1 wall -0.345 thick 0.410 dPart -0.330 dRegion -1.042 | (95.99, 99.53, 1.03) term 1 wall -0.141 thick 0.420 dPart -0.473 dRegion -1.042 | (21.27, 0.15, 9.34) term 1 wall -0.106 thick 0.440 dPart -0.147 dRegion -1.042 | (78.39, 99.69, 0.56) term 1 wall -0.404 thick 0.410 dPart -0.219 dRegion -1.042
+attempt 3 (junction-aware honeycomb walls; a Stepped band on EITHER side gets the seam wall):
+FLEX-T2 STEPPED BAND EDGES (2 bands) over 567 lines: T2 band 97 of 898 runs over 1702.5 mm = 0.0570 /mm; control 36 of 435 over 1687.5 mm = 0.0213 /mm · RED CONTROL (sheet blend) band 217 of 812 runs over 1702.5 mm = 0.1275 /mm; control 39 of 424 over 1687.5 mm = 0.0231 /mm · the Stepped group's own edge (549 lines, a seam wall too) band 52 of 905 runs over 1647.6 mm = 0.0316 /mm; control 92 of 495 over 1572.6 mm = 0.0585 /mm
+FLEX-T2 MANUAL honeycomb 2 beads (0.9 mm), 109189 group voxels, grid 1.0416666 mm: T2 clip band 0 thin of 1500 solid samples = 0.0000; away 0 of 1500 = 0.0000 (floor 1/N 0.0007); thin by term region/part/skin 0/0/0 of 233/1267/0 · RED CONTROL (clip at the point) clip band 87 thin of 1500 solid samples = 0.0580; away 0 of 1500 = 0.0000 (floor 1/N 0.0007); thin by term region/part/skin 38/49/0 of 332/1168/0
+FLEX-T2D band thin 97, in 3+-piece cells 92; len p50 0.00999999 codes [4.0, 12.0]
+attempt 4 (a one-density piece reads its own density where a corner carries a third piece's rho):
+FLEX-T2 STEPPED BAND EDGES (2 bands) over 567 lines: T2 band 0 of 799 runs over 1702.5 mm = 0.0000 /mm; control 26 of 424 over 1687.5 mm = 0.0154 /mm · RED CONTROL (sheet blend) band 217 of 812 runs over 1702.5 mm = 0.1275 /mm; control 39 of 424 over 1687.5 mm = 0.0231 /mm · the Stepped group's own edge (549 lines, a seam wall too) band 0 of 852 runs over 1647.6 mm = 0.0000 /mm; control 49 of 452 over 1572.6 mm = 0.0312 /mm
+FLEX-T2D band thin 0, in 3+-piece cells 0; len p50 -1.0 codes [4.0, 12.0]
+final try 1 (square clip still on gyroid too) — RED in FlexibleLatticePassTests and FlexibleTopLayerTests, so the square clip was narrowed to the uniform honeycomb:
+FlexibleLatticePassTests testCliffParityAndCoverage] : XCTAssertLessThanOrEqual failed: ("361.0") is greater than ("317.8") - generic: the march lands on the wrong wall at the seam
+FlexibleLatticePassTests testMarchDepthMatchesAFineReference] : XCTAssertLessThanOrEqual failed: ("361.0") is greater than ("317.8") - gyroid rest generic: the march lands on the wrong wall
+FlexibleLatticePassTests testMarchDepthMatchesAFineReference] : XCTAssertLessThanOrEqual failed: ("465.0") is greater than ("411.16") - gyroid checkerboard press page: the march lands on the wrong wall
+FlexibleLatticePassTests testMarchDepthMatchesAFineReference] : XCTAssertLessThanOrEqual failed: ("416.0") is greater than ("306.77") - gyroid checkerboard press generic: the march lands on the wrong wall
+FlexibleTopLayerTests testCoveredRimAndSkinKeepTheirKindOverThePocket] : XCTAssertEqual failed: ("1") is not equal to ("0") - ★ Covered keeps its look over the whole Top, edges included (and in X-ray)
+FlexibleTopLayerTests testHisBalancedPadTheTopOverEachPocketIsOpen] : XCTAssertGreaterThan failed: ("0.07261904761904762") is not greater than ("0.1") - ★ X-ray: the walls reach the Top (they stopped at 19.79)
+FlexibleTopLayerTests testThePrintedTwinsAgreeOnHisPadsTopBand] : XCTAssertLessThanOrEqual failed: ("0.0052506328") is greater than ("0.005") - ★ the twins agree on his pad wherever a surface can be drawn
+FLEX-MARCH-DEPTH gyroid rest page: 348 of 41865 px covered by both differ by > 0.05 mm (0.831 %); control (half-cell cap) 2301 (5.558 %)
+FLEX-MARCH-DEPTH gyroid rest generic: 361 of 31780 px covered by both differ by > 0.05 mm (1.136 %); control (half-cell cap) 1456 (4.606 %)
+FLEX-MARCH-DEPTH gyroid checkerboard press page: 465 of 41116 px covered by both differ by > 0.05 mm (1.131 %); control (half-cell cap) 931 (2.267 %)
+FLEX-MARCH-DEPTH gyroid checkerboard press generic: 416 of 30677 px covered by both differ by > 0.05 mm (1.356 %); control (half-cell cap) 439 (1.431 %)
+
+## FINAL run (runner.log)
+start 07:06:09 bb3d1de8 + working tree
+build exit 0 07:06:34
+chunk_aa exit 0 07:10:17
+chunk_ab exit 0 07:10:54
+chunk_ac exit 0 07:11:16
+chunk_ad exit 0 07:12:35
+chunk_ae exit 0 07:12:57
+chunk_af exit 0 07:17:52
+golden det exit 0 07:18:08
+golden unseeded exit 0 07:18:24
+hashes exit 0 07:19:23
+hashes cmp vs nozzle_grade (whole file): identical
+render exit 0 07:19:53
+ALLDONE 07:19:53
+
+classes run once: FlexibleManualT2Tests FlexibleManualP2Tests FlexibleManualP1Tests FlexibleM1ManualTests FlexibleLatticeFieldTests FlexibleLatticePassTests FlexibleLatticeGradingTests FlexibleLatticePassPerfTests FlexibleInPassCompositeTests FlexibleR7U21EdgeLookTests FlexibleR7E1FollowUpTests FlexibleTopLayerTests FlexibleSquishTests FlexibleFEPassTests FlexibleBatchCHookTests FlexibleBatchBReviewTests FlexibleBatchMXrayTests FlexibleAutoFloorShapeTests
+test cases: 97 passed, 2 skipped (opt-in: R7U21EdgeLook testEvidenceRenders, LatticePassPerf testFrameBudgetAt1152), 0 failed
+golden_det: identical 38 DIFFERS 0 PART-SKIP 0
+golden_unseeded: identical 32 DIFFERS 0 PART-SKIP 1
+stage-job hashes: cmp-identical to nozzle_grade/stage_job_hashes_ng.txt and t1_tests/stage_job_hashes_t1.txt (31 lines)
+
+FLEX-MARCH-DEPTH gyroid rest page: 66 of 43311 px covered by both differ by > 0.05 mm (0.152 %); control (half-cell cap) 1765 (4.111 %)
+FLEX-MARCH-DEPTH gyroid rest generic: 63 of 32736 px covered by both differ by > 0.05 mm (0.192 %); control (half-cell cap) 985 (3.024 %)
+FLEX-MARCH-DEPTH gyroid checkerboard press page: 276 of 42398 px covered by both differ by > 0.05 mm (0.651 %); control (half-cell cap) 801 (1.892 %)
+FLEX-MARCH-DEPTH gyroid checkerboard press generic: 158 of 31575 px covered by both differ by > 0.05 mm (0.500 %); control (half-cell cap) 165 (0.523 %)
+FLEX-MARCH-DEPTH honeycomb rest page: 35 of 42818 px covered by both differ by > 0.05 mm (0.082 %); control (half-cell cap) 35 (0.082 %)
+FLEX-MARCH-DEPTH honeycomb rest generic: 5 of 31440 px covered by both differ by > 0.05 mm (0.016 %); control (half-cell cap) 5 (0.016 %)
+FLEX-MARCH-DEPTH honeycomb checkerboard press page: 121 of 41151 px covered by both differ by > 0.05 mm (0.294 %); control (half-cell cap) 121 (0.294 %)
+FLEX-MARCH-DEPTH honeycomb checkerboard press generic: 40 of 30424 px covered by both differ by > 0.05 mm (0.131 %); control (half-cell cap) 40 (0.131 %)
+FLEX-P2 honeycomb: 300 interior points; card d 7.200 mm; walls across: 319 runs, p05 0.900 p50 1.690 mm (2 beads = 0.90 mm); prism max |Δ| 0.00e+00 over 293
+FLEX-P2 TYPE SEAM fragments over 549 lines: P2 band 0 of 703 runs over 1647.6 mm = 0.0000 /mm; control 24 of 307 over 1572.6 mm = 0.0153 /mm · RED CONTROL (P1) band 733 of 1208 runs over 1647.6 mm = 0.4449 /mm; control 121 of 435 over 1572.6 mm = 0.0769 /mm
+FLEX-P2 WALL SEAM fragments over 549 lines: P2 band 17 of 556 runs over 1647.6 mm = 0.0103 /mm; control 21 of 338 over 1572.6 mm = 0.0134 /mm · RED CONTROL (P1) band 811 of 1445 runs over 1647.6 mm = 0.4922 /mm; control 148 of 504 over 1572.6 mm = 0.0941 /mm
+FLEX-P2 GPU pieces: max |gpu − swift| = 0.0009672642 mm over 700 points (300 in seam cells, worst there 0.0009114742); RED control (pieces dropped) 19.726192 mm
+FLEX-P2 STEPPED SEAMS fragments over 557 lines: P2 band 1 of 850 runs over 1671.6 mm = 0.0006 /mm; control 56 of 462 over 1632.0 mm = 0.0343 /mm · P1 band 1754 of 2483 runs over 1671.6 mm = 1.0493 /mm; control 227 of 661 over 1632.0 mm = 0.1391 /mm
+FLEX-T2 STEPPED BAND EDGES (2 bands) over 567 lines: T2 band 0 of 799 runs over 1702.5 mm = 0.0000 /mm; control 26 of 424 over 1687.5 mm = 0.0154 /mm · RED CONTROL (sheet blend) band 217 of 812 runs over 1702.5 mm = 0.1275 /mm; control 39 of 424 over 1687.5 mm = 0.0231 /mm · the Stepped group's own edge (549 lines, a seam wall too) band 0 of 852 runs over 1647.6 mm = 0.0000 /mm; control 49 of 452 over 1572.6 mm = 0.0312 /mm
+FLEX-T2 MANUAL honeycomb 2 beads (0.9 mm), 109189 group voxels, grid 1.0416666 mm: T2 clip band 0 thin of 1500 solid samples = 0.0000; away 0 of 1500 = 0.0000 (floor 1/N 0.0007); thin by term region/part/skin 0/0/0 of 233/1267/0 · RED CONTROL (clip at the point) clip band 87 thin of 1500 solid samples = 0.0580; away 0 of 1500 = 0.0000 (floor 1/N 0.0007); thin by term region/part/skin 38/49/0 of 332/1168/0
+FLEX-T2 MANUAL thin at the clip: 
+FLEX-T2 AUTO honeycomb (wall 0.45 mm, cell 5.442588 mm): T2 clip band 0 thin of 1500 solid samples = 0.0000; away 0 of 1500 = 0.0000 (floor 1/N 0.0007); thin by term region/part/skin 0/0/0 of 129/1371/0 · RED CONTROL (clip at the point) clip band 39 thin of 1500 solid samples = 0.0260; away 0 of 1500 = 0.0000 (floor 1/N 0.0007); thin by term region/part/skin 0/39/0 of 124/1376/0
+FLEX-T2 GPU Manual: max |gpu − swift| at the clip 0.00096797943 mm over 300 points; band seams 0.0007865429 mm over 300; RED CONTROL (old clip/blend vs the GPU) 12.277339 mm
+FLEX-T2 GPU Auto honeycomb: max |gpu − swift| at the clip 0.0008699894 mm over 300 points; band seams 0.0 mm over 0; RED CONTROL (old clip/blend vs the GPU) 1.3073894 mm
+
+## Renders (T2_lines.txt)
+T2_01_13p_pad_CLIP_honeycomb_2b_AFTER_same_cam_as_P2_03.png: prisms [Face 5 34.0 mm, Face 3 34.0 mm] · xray true · walls hidden false · dents true · pill 'Preview · core runs one group at a time' · legend row false
+T2_02_13p_pad_STEPPED_band_edge_close.png: prisms [Face 5 34.0 mm, Face 3 34.0 mm] · xray true · walls hidden false · dents true · pill 'Preview · core runs one group at a time' · legend row false
+pieces true · facts ["2.3 cells across the depth · walls 0.45 mm", "Estimate past tested data (gyroid 14–36%)"]

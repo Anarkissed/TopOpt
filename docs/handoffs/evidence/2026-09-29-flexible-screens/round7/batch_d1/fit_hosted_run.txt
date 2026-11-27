@@ -1,0 +1,57 @@
+Test Suite 'Selected tests' started at 2026-10-17 12:12:39.920.
+Test Suite 'TopOptKitTests.xctest' started at 2026-10-17 12:12:39.921.
+Test Suite 'TopOptKitTests.xctest' passed at 2026-10-17 12:12:39.921.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-17 12:12:39.921.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Test Suite 'Selected tests' started at 2026-10-17 12:12:40.081.
+Test Suite 'TopOptFlowsTests.xctest' started at 2026-10-17 12:12:40.082.
+Test Suite 'FlexibleChromeLayoutTests' started at 2026-10-17 12:12:40.082.
+Test Case '-[TopOptFlowsTests.FlexibleChromeLayoutTests testPanelsAreRightAlignedAboveThePairAndNeverRiseAboveTheViewsRow]' started.
+Test Case '-[TopOptFlowsTests.FlexibleChromeLayoutTests testPanelsAreRightAlignedAboveThePairAndNeverRiseAboveTheViewsRow]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleChromeLayoutTests testTheCapsuleSitsUnderTheNameClearOfTheGizmo]' started.
+Test Case '-[TopOptFlowsTests.FlexibleChromeLayoutTests testTheCapsuleSitsUnderTheNameClearOfTheGizmo]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleChromeLayoutTests testTheCapsuleTopIsStageNavPlacementsFormula]' started.
+Test Case '-[TopOptFlowsTests.FlexibleChromeLayoutTests testTheCapsuleTopIsStageNavPlacementsFormula]' passed (0.034 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleChromeLayoutTests testTheMinimisedSelectionsPillKeepsTwelveFromTheSetupChip]' started.
+Test Case '-[TopOptFlowsTests.FlexibleChromeLayoutTests testTheMinimisedSelectionsPillKeepsTwelveFromTheSetupChip]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleChromeLayoutTests testThePairSitsOnTheCornerTwelveApart]' started.
+Test Case '-[TopOptFlowsTests.FlexibleChromeLayoutTests testThePairSitsOnTheCornerTwelveApart]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleChromeLayoutTests testTheViewsRowIsSixFortyFourPointIconsEightApart]' started.
+Test Case '-[TopOptFlowsTests.FlexibleChromeLayoutTests testTheViewsRowIsSixFortyFourPointIconsEightApart]' passed (0.000 seconds).
+Test Suite 'FlexibleChromeLayoutTests' passed at 2026-10-17 12:12:40.118.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.036 (0.036) seconds
+Test Suite 'FlexibleRound7FitHostedTests' started at 2026-10-17 12:12:40.118.
+Test Case '-[TopOptFlowsTests.FlexibleRound7FitHostedTests testTheButtonsLineReadsWholeInEveryStateOnEveryPad]' started.
+Test Case '-[TopOptFlowsTests.FlexibleRound7FitHostedTests testTheButtonsLineReadsWholeInEveryStateOnEveryPad]' passed (14.314 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7FitHostedTests testTheCardReadsWholeInEveryCoreRunScenarioOnTheMiniAndTheThirteen]' started.
+Test Case '-[TopOptFlowsTests.FlexibleRound7FitHostedTests testTheCardReadsWholeInEveryCoreRunScenarioOnTheMiniAndTheThirteen]' passed (11.186 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound7FitHostedTests testTheSetupTraysRowsReadWholeOnTheMiniAndTheThirteen]' started.
+2026-10-17 12:13:05.643 xctest[73485:8868272] DIAG shellClip mode=OFF inFrame=false algo=- capsules=-1 capVerts=0 capPipeline=true capsulePipeline=true capsulesReplaceField=false bodyAlpha=1.0 initError=nil regionTex=false skinMM=-1.0 dims=SIMD4<Float>(1.0, 1.0, 1.0, 0.0) regions=[] open=[no census]
+Test Case '-[TopOptFlowsTests.FlexibleRound7FitHostedTests testTheSetupTraysRowsReadWholeOnTheMiniAndTheThirteen]' passed (1.077 seconds).
+Test Suite 'FlexibleRound7FitHostedTests' passed at 2026-10-17 12:13:06.695.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 26.577 (26.577) seconds
+Test Suite 'TopOptFlowsTests.xctest' passed at 2026-10-17 12:13:06.695.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 26.612 (26.614) seconds
+Test Suite 'Selected tests' passed at 2026-10-17 12:13:06.695.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 26.612 (26.615) seconds
+FLEX-R7D1-LAYOUT img5 control: the iPad chip starts -8.0 pt right of the pill (≥ 12 needed)
+FLEX-R7D1-FIT button
+mini 260 pt: 14 lines whole
+11p 260 pt: 14 lines whole
+13p 260 pt: 14 lines whole
+RED (the first drawing's main zone, a 232 split): cut ["\'Preview · core runs one group at a time\' drawn 170 of 172"]
+FLEX-R7D1-FIT card
+mini 336 pt: 15 scenarios, 112 measured, none cut
+13p 420 pt: 15 scenarios, 112 measured, none cut
+RED (the body beside the titles at 336): cut ["\'Export G-code\' drawn 97 of 98", "\'Send Group 2 only, Face 2 resting\' drawn 201 of 206", "\'Send Group 3 only, Face 5 resting\' drawn 202 of 206"]
+FLEX-R7D1-FIT tray
+mini 336 pt (rows 308 wide): 19 measured, cut 0, spilling 0 · Gravity needs 192, Plate up needs 266, Print parameters needs 267, Quality needs 283
+13p 420 pt (rows 392 wide): 19 measured, cut 0, spilling 0 · Gravity needs 249, Plate up needs 317, Print parameters needs 267, Quality needs 353
+RED (the first drawing at 336): cut [] · spilling ["\'Setup row · Gravity\' drawn 353 in 308", "\'Setup row · Plate up\' drawn 353 in 308", "\'Setup row · Print parameters\' drawn 353 in 308", "\'Setup row · Quality\' drawn 353 in 308"]
+Test Suite 'Selected tests' started at 2026-10-17 12:13:06.798.
+Test Suite 'TopOptDesignTests.xctest' started at 2026-10-17 12:13:06.799.
+Test Suite 'TopOptDesignTests.xctest' passed at 2026-10-17 12:13:06.799.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-17 12:13:06.799.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds

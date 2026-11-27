@@ -1,0 +1,65 @@
+# Release 8e530b3b607e — 2026-11-15: release (6), install 1 — claude/install1-app2 3fb201ff, one worker swap (6da1b6c3bb0a -> 8e530b3b607e)
+# The reviewer's go 11-12 20:21Z (his blitz): the new engine's preview on Lattice Setup behind "New engine (test)",
+# OFF by default — off, his app and his LAN runs are as before; on, Lattice Setup draws core's lattice_layout bars
+# (round; the print file squares flat-bridge undersides and adds posts, and the preview says so in one line).
+# Structural lattice strength results aren't to be trusted for load-bearing parts until the rebuild's stage F.
+# LatticeTypes' 181deb12 is NOT in this release. Core tip: LatticeReview's claude/lattice-review f1ebf912 (his three engine fixes 11-12 evening + the file
+# writer, his print rules in core, two-line struts as core's default, the lattice-file CLI job). The worker app's own
+# topopt_worker.py (in /Applications/TopOpt Worker.app) is NOT changed here: its lattice_file route comes with the export.
+# Gates in the gate tree (b9-screens-362, its own vendor, iOS slices with OCCT):
+#   12:03 install1-app2 82e723e5 (release tip 4fa848d1 + LatticeReview's install-1 core + Let walls cut cells); core fingerprint 8e530b3b607e
+#   12:09 build_core green: topopt_vendored_core_8e530b3b607e + lattice_layout::Session::lay in the pinned include and all three slices
+#   12:15 iPad build: exit 0 ** BUILD SUCCEEDED **
+#   12:15 CLI: topopt-cli: core 8e530b3b607e (dirty=false), built Nov 14 2026 12:15:45
+#   12:15 app_core_capability_mirror passed
+#   12:17 core's lattice_layout ctests: 100% tests passed out of 6
+#   12:17 preflight on his latest job FAILED (preflight.log)
+#   12:24 17-test: 17/17 identical, 4fa848d1 vs 82e723e5
+#   12:26 STAND SHOTS: exit 0 (20 files) NEW-ENGINE his v2 stand: 92 faces, open 219 ms, read 250, cells 0, bars 123 ms, bridge 1.3 ms; 2795 bars, 161 cells, 705 solid pieces
+#   13:05 chunk_first.txt: exit 0; so far 73 passed, 0 failed
+#   13:42 chunk_aa: exit 1; so far 530 passed, 5 failed
+#   14:39 chunk_ab: exit 1; so far 838 passed, 6 failed
+#   15:27 chunk_ac: exit 0; so far 1141 passed, 6 failed
+#   16:36 chunk_ad: exit 1; so far 1456 passed, 7 failed
+#   17:23 chunk_ae: exit 0; so far 1857 passed, 7 failed
+#   18:32 chunk_af: exit 0; so far 2112 passed, 7 failed
+#   19:27 chunk_ag: exit 0; so far 2413 passed, 7 failed
+#   20:00 chunk_ah: exit 0; so far 2771 passed, 7 failed
+#   20:17 chunk_ai: exit 1; so far 3163 passed, 10 failed
+#   20:59 chunk_aj: exit 0; so far 3501 passed, 10 failed
+#   21:17 chunk_ak: exit 1; so far 3966 passed, 11 failed
+#   21:26 chunk_al: exit 0; so far 4285 passed, 11 failed
+#   21:35 chunk_am: exit 0; so far 4550 passed, 11 failed
+#   21:45 stand classes: exit 0
+#   21:45 B + stand: 4561 passed, 208 skipped, 11 failed, build failures 0
+#   FP=8e530b3b607e HEAD=82e723e5
+# Commits:
+#   a2709408 Lattice rebuild: the number of Protect skins no longer multiplies the cost of a layout
+#   e66693c6 Lattice rebuild print rule (e): no bridge reaches more than 5 mm past what holds it
+#   a33d84e4 Lattice rebuild C19: "Let walls cut cells", a per-part option, off by default
+#   382bec77 Lattice rebuild D14c: every cube left solid for want of a cell carries its reason
+#   33820a5b Lattice rebuild: the file is open wherever a cell holds its lattice, down the whole depth of a column
+#   ce6859dd Install 1 (362): merge LatticeReview's tip 33820a5b (skin-count speed, rule (e), one_grid C19, the D14c reasons, the writer fix)
+#   b320cacc Install 1 (362): "Let walls cut cells" (Aesthetic only) and the line that says why lattice came out solid, with fixes
+#   d9a0d84d Lattice rebuild: the file's open space is cut out in far fewer boxes, the same shape
+#   6da149d9 Lattice rebuild C20, C21: with Let walls cut cells on, only the smallest cell is cut, and a face shows one main size
+#   c3b4f855 Lattice rebuild P8 (f), S11a, S11b: no thin slot is left under solid, in the layout or in the file
+#   4c9912b4 Install 1 (362): merge LatticeReview's c3b4f855 (fewer boxes in the file, C20/C21, P8 (f) thin_solid, S11a/S11b)
+#   f02c2340 Install 1 (362): merge the release tree's tip 4fa848d1
+#   82e723e5 Install 1 (362): the why-line names a thin cut piece (P8 (f), NoCell::Sliver) and offers no fix for it
+#   3fb201ff Install 1 (362): the suite's 3 reds from the Topology release, and the Let walls cut cells caption, by his ruling
+#   578a3d02 Release (6) install 1 2026-11-15: merge claude/install1-app2 3fb201ff — core = LatticeReview's install-1 engine (skin-count speed, rule (e), C19 one_grid with C20/C21, the D14c reasons, P8 (f) thin_solid, the file writer fixe
+# Gates (this tree):
+#   22:47 his uncommitted files (left alone): app/TopOpt-Info.plist app/TopOpt.xcodeproj/project.pbxproj app/TopOpt.xcodeproj/xcshareddata/xcschemes/TopOpt.xcscheme 
+#   22:47 his latest OPTIMISATION job for the preflight: /Users/nadim/.topopt-worker/f9c8124fd2df48b3 (read only; his newer Export print-file jobs are not preflight's)
+#   22:47 merged install1-app2 as 578a3d02 (local); app + core == its; fingerprint 8e530b3b607e
+#   ==> building iOS simulator slice (Eigen + OCCT + lib3mf, arm64)
+#   ==> building iOS device slice (Eigen + OCCT + lib3mf, arm64)
+#   22:48 build_core green: topopt_vendored_core_8e530b3b607e + build_identity + lattice_variant_job + lattice_solid_fallback_reasons + lattice_layout::Session::lay in every slice and arch
+#   22:49 worker CLI built: topopt-cli: core 8e530b3b607e (dirty=false), built Nov 14 2026 22:49:18; 3 data paths, all under the release worktree
+#   22:49 app_core_capability_mirror passed
+#   22:54 iPad device build green (this tree's own pair)
+#   22:55 preflight on his latest job: preflight: load path CONNECTED
+#   22:55 pushed 578a3d02
+#   22:56 worker swapped: /health "fingerprint": "8e530b3b607e"; data paths under the release worktree; preflight again OK; old kept as build-fix/topopt-cli.6da1b6c3bb0a-replaced-20261115
+#   22:56 the app_release scripts now expect 8e530b3b607e

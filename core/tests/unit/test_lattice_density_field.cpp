@@ -234,8 +234,11 @@ int main() {
           "and it does at an 8 mm cell — the two floors bind opposite ways");
     CHECK(!lattice_density_printable(T, 0.20, 2.0, 0.45),
           "at HIS 2 mm cell a 20% lattice does not come out of a 0.45 mm nozzle");
-    CHECK(lattice_density_printable(T, 0.30, 2.0, 0.45),
-          "a 30% one does");
+    // 50 % since ruling 2026-11-02 (c): octet's full cell holds a 30 % lattice in a
+    // 0.347 mm strut at 2 mm (the legs-only cell needed a 0.49 mm one), so 30 % no longer
+    // prints at 0.45 mm; 50 % builds 0.480 mm.
+    CHECK(lattice_density_printable(T, 0.50, 2.0, 0.45),
+          "a 50% one does");
   }
 
   // ── the beta field: the map, and the Jacobian against a central difference ─
@@ -681,11 +684,12 @@ int main() {
   {
     // The SAME density, the SAME cell, three different profiles: the verdicts
     // must differ, which is the whole reason the number cannot be assumed.
-    CHECK(lattice_density_printable(T, 0.30, 2.0, 0.25),
-          "a 0.25 mm nozzle prints a 30% lattice at a 2 mm cell");
-    CHECK(lattice_density_printable(T, 0.30, 2.0, 0.45),
+    // (a 50 % lattice since ruling 2026-11-02 (c): see the printability block above)
+    CHECK(lattice_density_printable(T, 0.50, 2.0, 0.25),
+          "a 0.25 mm nozzle prints a 50% lattice at a 2 mm cell");
+    CHECK(lattice_density_printable(T, 0.50, 2.0, 0.45),
           "and so does a 0.45 mm one");
-    CHECK(!lattice_density_printable(T, 0.30, 2.0, 0.80),
+    CHECK(!lattice_density_printable(T, 0.50, 2.0, 0.80),
           "★ and a 0.80 mm one does NOT — same lattice, same cell, opposite "
           "verdict. That is why there is no default width.");
 

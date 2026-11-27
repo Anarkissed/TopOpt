@@ -1,0 +1,4 @@
+[Done] ["Edge 14", "Edge 16"]: stored
+sent: ["Edge 14 in the job", "Edge 16 in the job"]
+two groups: hold 'Not sent: core runs one squeeze group at a time' · sends ["Send Group 1 only", "Send Group 2 only"] · state preview
+edges group alone: summary 'Group 1 · 11 lb · 2 edges · bead 0.45 mm' · state ready · hold none

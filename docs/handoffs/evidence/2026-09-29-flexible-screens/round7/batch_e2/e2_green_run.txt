@@ -1,0 +1,70 @@
+Test Case '-[TopOptFlowsTests.FlexibleR7E2HostedTests testTheArrowIsSolidWhenSentAndDashedOtherwise]' started.
+Test Case '-[TopOptFlowsTests.FlexibleR7E2HostedTests testTheArrowIsSolidWhenSentAndDashedOtherwise]' passed (11.097 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E2HostedTests testTheRulingsSentencePopsOncePerSession]' started.
+Test Case '-[TopOptFlowsTests.FlexibleR7E2HostedTests testTheRulingsSentencePopsOncePerSession]' passed (5.402 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E2HostedTests testTheSideLabelLine]' started.
+Test Case '-[TopOptFlowsTests.FlexibleR7E2HostedTests testTheSideLabelLine]' passed (4.563 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testALatticeDesignedAtAnotherTemperatureIsStale]' started.
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testALatticeDesignedAtAnotherTemperatureIsStale]' passed (0.007 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testAPressIsADesignTarget]' started.
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testAPressIsADesignTarget]' passed (5.403 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testAPressIsSentOnlyWhenCoreTakesIt]' started.
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testAPressIsSentOnlyWhenCoreTakesIt]' passed (3.128 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testATwistSaysHowFarOff]' started.
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testATwistSaysHowFarOff]' passed (7.075 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testCubeCornerFrameColumnsAndExitLinksMatchCoreToTheBit]' started.
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testCubeCornerFrameColumnsAndExitLinksMatchCoreToTheBit]' passed (3.921 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testFacePressesUnchanged]' started.
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testFacePressesUnchanged]' passed (0.002 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testOneGroupPerExportSaid]' started.
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testOneGroupPerExportSaid]' passed (3.571 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testRimDefault]' started.
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testRimDefault]' passed (0.846 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testSharedFootprintInPlainWords]' started.
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testSharedFootprintInPlainWords]' passed (5.385 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testTheDefaultMapIsTheFlatPrismInCoresNumbers]' started.
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testTheDefaultMapIsTheFlatPrismInCoresNumbers]' passed (8.110 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testTheLatticeIsGradedAlongTheArrow]' started.
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testTheLatticeIsGradedAlongTheArrow]' passed (4.017 seconds).
+FLEX-E2-H1 sent: solid Optional(true) · marks ["flatArrow-Edge 14", "flatDepthChip-Edge 14", "flatKnob-Edge 14", "flatPrism-Edge 14", "flatTiltBox-Edge 14", "flatTwistBox-Edge 14"]
+FLEX-E2-H1 gated: solid Optional(false) · 'Set up · core support pending'
+FLEX-E2-H3 the line up at the send: 'Face 2 keeps the rest · Edge 14' · then 'Angled presses are estimates until measured'
+FLEX-E2-H3 export: 'Core designed it · Group 2 only · Gyroid · 1 edge' · note 'Angled presses are estimates until measured'
+FLEX-E2-H3 the note's words ["Angled presses are estimates until measured", "#flexible-export-press-note-info"] · in the card true · core's line 'Core designed it · Group 2 only · Gyroid · 1 edge'
+FLEX-E2-H2 the tab's press lines: ["pressLine:Edge 14:Side press · gyroid only · estimate"] · its frame (106.0, 287.0, 185.0, 14.0)
+FLEX-E2-1 Edge 16 key -1028 · columns 52 · press load SIMD3<Double>(-0.7071067811865476, 0.7071067811865476, 0.0) · first member's SIMD3<Double>(-0.0, 1.0, -0.0) (45.0°)
+FLEX-E2-4 gate schema: inJob false · 'Set up · core support pending'
+FLEX-E2-4 gate bridge: inJob false · 'Set up · core support pending'
+FLEX-E2-4 gate api 1: inJob false · 'Set up · core support pending'
+FLEX-E2-4 gate not stacked: inJob false · 'Edge 16 · arrow doesn't push into Face 3'
+FLEX-E2-4 gate two entries: inJob false · 'Not sent · Face 3 is pressed twice'
+FLEX-E2-4 gate shared: inJob false · 'Edge 16 and Face 3 share 85 mm²'
+FLEX-E2-4 gate designing: inJob false · 'Set up · core is designing it'
+FLEX-E2-4 gate refused: inJob false · 'Not sent · no squish data'
+FLEX-E2-4 gate conflict: inJob false · 'Edge 16 and Edge 18 press one stack'
+FLEX-E2-4 his pad, Edge 16 sent: entries 7 · press [2000001, 2000002] dir SIMD3<Double>(-0.7071067811865475, 0.7071067811865475, 0.0) h 3.0 mode both
+FLEX-E2-4 RED CONTROL api 1: inJob false · 'Set up · core support pending'
+FLEX-E2-4 RED CONTROL pieces as faces: ["1", "0", "4", "2000003", "2000004", "5", "2000001", "2000002"]
+FLEX-E2-3 untwisted: 'Side press · gyroid only · estimate' · off 0.45641179463584913%
+FLEX-E2-3 typed 15° → stored twist 7.031249999999999° (Twist stops at 7° · lattice ends)
+FLEX-E2-3 twisted 15°: 'Twisted · squish shape up to 16% off' · N 16.319726708638694% · map both x 18 pts y 33 pts
+FLEX-E2-5 cube corner: columns 29 / 29 · dump 4284 bytes · lines differing 0 · load -0x1.279a74590331dp-1 -0x1.279a74590331dp-1 -0x1.279a74590331dp-1 · exits [0, 2, 4]
+FLEX-E2-5 cube RED CONTROL direction x + 1 ulp: dump differs true
+FLEX-E2-5 his pad corner: columns 10 / 10 · dump 1838 bytes · lines differing 0 · load -0x1.279a74590331dp-1 0x1.279a74590331dp-1 -0x1.279a74590331dp-1 · exits [0]
+FLEX-E2-5 his pad RED CONTROL direction x + 1 ulp: dump differs true
+FLEX-E2-10 with a press: 40 line(s) inserted at line 42, 0 changed
+FLEX-E2-9 hold 'Not sent: core runs one squeeze group at a time' · why 'Squeeze groups are the app's preview for now: core designs one squeeze at a time.' · sends ["Send Group 1 only", "Send Group 2 only"]
+FLEX-E2-9 [Send Group 1 only] presses 0 · loaded faces [1]
+FLEX-E2-9 [Send Group 2 only] presses 2 · loaded faces []
+FLEX-E2-9 step ②: 'Group 1 · 11 lb · 2 edges · bead 0.45 mm'
+FLEX-E2-9 RED CONTROL hold kind: nil
+FLEX-E2-8 cube edge at 3.0 mm: columns 384 · beyond data 0 · ok 64 · no lattice 0
+FLEX-E2-8 cube corner at 3.0 mm: columns 29 · beyond data 0 · ok 0 · no lattice 0
+FLEX-E2-6 shared: 'Edge 14 and Face 3 share 85 mm²' · 84.85281374238576 mm² (Edge 16's piece on Face 3: 84.85281374238576) · fixes ["Face 3 rests", "Remove Edge 14"]
+FLEX-E2-6 core's refusal: 'presses 3 and 2000001 share surface (face region 3 and face region 2000002 overlap by 84.8528 mm2); a surface is pressed by one press: split the face so the sectors do not overlap' → 'Core refused it: Edge 14 and Face 3 share 85 mm²' · RED CONTROL 'Core refused it: presses 3 and 2000001 share surface (face region 3 and face region 2000002 overlap by 84.8528 mm2); a surface is pressed by one press: split the face so the sectors do not overlap'
+FLEX-E2-2 Edge 16 h 6.0: across Y · u 20.0 v 12.0 · columns 104 · off 1.924386576016938e-13% · rim |S − δ/h| ≤ 1.887379141862766e-15
+FLEX-E2-2 Edge 16 h 14.0: across X · u 28.000000000000007 v 20.00000000000001 · columns 234 · off 0.16370945699708223% · rim |S − δ/h| ≤ 0.001637094569970854
+FLEX-E2-2 RED CONTROL h 14, X assumed along the edge: off 94.62890625000009%
+FLEX-E2-2 cube corner h 10: columns 305 · pitch 0.9375 · off 10.107524391692824% (one pitch / h = 9.375%) · halfway SIMD3<Double>(-0.5773502691896258, -0.5773502691896258, -0.5773502691896258)
+FLEX-E2-2 cube corner h 20: columns 1169 · off 3.387556311264997% (one pitch / h = 4.6875%)
+FLEX-E2-7 his pad, Edge 16: voxels under the press 4082 · differing from E1's lattice 4082 · lattice voxels 53248

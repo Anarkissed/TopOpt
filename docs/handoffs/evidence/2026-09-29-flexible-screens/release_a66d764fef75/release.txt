@@ -1,0 +1,20 @@
+# Release a66d764fef75 — 2026-10-27 exact Protect + Results redesign (flexible-screens 8507ab8b + this evidence)
+## Contents
+#   #354 cf485bca + 4bef711c: exact Protect (keep_regions from Protect groups, oriented form on, reach past every face; (i) per
+#     the 03:57 ruling), CAD-surfaces chip hidden, his notes 1-5, the approved Results redesign (Smooth + wiggle removed).
+#     4bef711c removes his Carriage Arms job inputs + face geometry from the evidence (his answer "Go with a"; no purge).
+#   TO-core 064bd163: oriented keep regions (af6d19d9), 139a5411 + its revert, Protect keeps its reach clear (FrozenVoid
+#     in the Keep Clear overlay; plain cut), a verified strengthen version always gets its file.
+## Gates
+#   core = 064bd163 byte-identical (git diff 064bd163 HEAD -- core app/scripts/build_core.sh: empty)
+#   TO-core on 064bd163: ctest 164/164 incl. cli_demo; test_keep_strengthen 14/14 (red first); 17-test vs af6d19d9 identical
+#   #354 proof on 064bd163 (his Carriage Arms, strengthen, design box, q40): 3 versions verified; all Protected hole faces
+#     exact and open in every version; faces and rings 0.0000 mm; one body per version (V3: 4 sealed CAD air pockets, allowed by him)
+#   #362: build_core.sh rc=0 -> CoreFingerprint a66d764fef75; worker CLI rc=0, core a66d764fef75 dirty=false
+#     export_3mf + threemf_import 2/2; iPad device build (Release, generic/platform=iOS): BUILD SUCCEEDED
+#   full app suite (swift test --parallel, 4 workers) 06:52-08:42: 4,347 tests, 6 failed, all KNOWN pre-existing
+#     (3 AppModel 3MF/no macOS lib3mf; LatticeCellGrading; OrganicSampleCube; OrganicVariantCache); no flake this run.
+#   23 tracked evidence files rewritten by swift test were restored with git checkout.
+## Worker
+#   build-fix/topopt-cli swapped atomically while /health idle (08:4x); sha256 1a917bc3c47a8a6f52d785a8f38a869926965ec1f1ac2f0d17e7e764c5e9c97e
+#   old kept: build-fix/topopt-cli.bcb45454ea8d-replaced-20261027; copy: worker-bin/a66d764fef75. /health: a66d764fef75.

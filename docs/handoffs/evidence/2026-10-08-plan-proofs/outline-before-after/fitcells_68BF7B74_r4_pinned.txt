@@ -1,0 +1,9 @@
+68BF7B74, P1 tree, r4's cell pinned to 10.312240362167358 (temporary DG_PIN_CELL patch, never committed):
+== stepped
+DG-PLAN per region: r1=2508 r2=4972 r3=585 r4=1163 r5=723
+DG-REGIONS voxel=1.719 mm | r1 cells=2508 [4.01=2508] prism=156904 mm3 uncovered=8209 mm3 (5.23%) | r2 cells=4972 [5.16=768 2.58=4204] prism=186467 mm3 uncovered=7895 mm3 (4.23%) | r3 cells=585 [12.08=5 8.05=17 6.04=62 4.02=501] prism=43784 mm3 uncovered=4849 mm3 (11.07%) | r4 cells=1163 [7.73=10 6.87=5 5.16=5 3.44=182 2.58=961] prism=9915 mm3 uncovered=543 mm3 (5.48%) | r5 cells=723 [7.73=4 6.87=5 5.16=14 3.44=123 2.58=577] prism=9458 mm3 uncovered=350 mm3 (3.70%)
+DG-PLAN-BASES 5 region(s) carry plan_base_cell_mm | job region 1: 4.0103 mm; job region 2: 5.1561 mm; job region 3: 24.1500 mm; job region 4: 10.3122 mm; job region 5: 10.3122 mm
+== dg
+DG-PLAN per region: r1=2507 r2=4970 r3=1263 r4=1526 r5=859
+DG-REGIONS voxel=1.719 mm | r1 cells=2507 [4.01=2507] prism=156904 mm3 uncovered=8143 mm3 (5.19%) | r2 cells=4970 [5.16=768 2.58=4202] prism=186467 mm3 uncovered=7702 mm3 (4.13%) | r3 cells=1263 [12.08=5 6.04=121 3.02=1137] prism=43784 mm3 uncovered=3087 mm3 (7.05%) | r4 cells=1526 [5.16=43 2.58=1483] prism=9915 mm3 uncovered=624 mm3 (6.30%) | r5 cells=859 [5.16=40 2.58=819] prism=9458 mm3 uncovered=320 mm3 (3.38%)
+DG-PLAN-BASES 5 region(s) carry plan_base_cell_mm | job region 1: 4.0103 mm; job region 2: 5.1561 mm; job region 3: 24.1500 mm; job region 4: 10.3122 mm; job region 5: 10.3122 mm

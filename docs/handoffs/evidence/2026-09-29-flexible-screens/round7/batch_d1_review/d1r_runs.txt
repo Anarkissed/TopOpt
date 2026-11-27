@@ -1,0 +1,116 @@
+# The review of R7-D1 — the runs, raw counts (2026-10-17). swift test --skip-build --scratch-path /tmp/r7d-build; counts from Test Case end lines.
+# Commits: 185fcc10 (tests first) · ca2de52d (the fixes) · 7d8ab7be (chip clip, folded-card re-pin, LOOK probe)
+
+## 1. RED (185fcc10, stubs) — d1r_red_run.txt (run 1: every new/extended class; run 2: the resend test after its premise wait + the hosted test)
+run 2: FlexibleRound7D1ResendTests 1 test, 6 failures (no summary; no 'Send again'; (3) 'sent' not 'ready', runs 2 not 3 x2; (2) 'refused' not 'ready')
+       FlexibleRound7D1ReviewHostedTests 2 tests, 9 failures (13p/11p player on the cube x4; 11l tray/card on the legend x2; FX x3) — RC passed (the control replacement)
+
+## 2. GREEN (ca2de52d)
+green1: === exit 1 FlexibleRound7D1ReviewTests 16:07:47
+green1: === exit 0 FlexibleRound7CardMessagesTests 16:08:08
+green1: === exit 0 FlexibleRound7FitHostedTests 16:08:39
+green1: === exit 0 FlexibleCornerPairTests 16:08:41
+green1: === exit 0 FlexibleR7M1Tests 16:09:07
+green1: === exit 0 FlexibleRound7D1ResendTests 16:09:16
+green1: === exit 1 FlexibleRound7D1ReviewHostedTests 16:09:42
+green1: === exit 0 FlexibleChromeLayoutTests 16:09:44
+green1: === exit 0 FlexibleChromeStateTests 16:09:53
+green1: === exit 0 FlexibleRound7ScreenHostedTests 16:10:33
+green1: === exit 0 FlexibleStageCapsuleTests 16:10:35
+green1: === exit 0 FlexibleRound7ScreenHookTests 16:10:49
+green1's two reds: the plate pin's string (the view is FlexiblePlatePageView — our own test, fixed) and the hosted P1 at 11p (the panel's measure read a captured value; fixed before the commit) →
+green2: Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewTests testSecondaryButtonsInTheCardAndTheCalloutAreOutlined]' passed (0.002 seconds).
+green2: Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewTests testTheMainLegendSitsUnderTheViewsRowAndNoPanelCoversIt]' passed (0.001 seconds).
+green2: Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewTests testThePlatePageIsOneQuestionAndSixBigButtonsWithTheResolvedOneLit]' passed (0.005 seconds).
+green2: Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewTests testThePlayerNeverGoesUnderTheCubeTheViewsTheCapsuleOrAnOpenPanel]' passed (0.002 seconds).
+green2: Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewTests testThePreviewStepNamesTheFacesAndTheSquishPanelSaysSquish]' passed (0.001 seconds).
+green2: === exit 0 FlexibleRound7D1ReviewTests 16:12:07
+green2: Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewHostedTests testOnHisPadThePlayerAndTheLegendKeepClearOfAnOpenCard]' passed (26.672 seconds).
+green2: Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewHostedTests testTheChipColumnH24TakesOffIsTodaysColumnMeasuredOnHisPad]' passed (10.226 seconds).
+green2: === exit 0 FlexibleRound7D1ReviewHostedTests 16:12:46
+
+## 3. THE TARGETED SUITE (ca2de52d; 257 classes: every Flexible* class, every class naming a touched file — the D1 and review files, WorkspacePlaceholder and ProjectModel included — the goldens and the listed #354 classes; SurfaceStageGesturesTests does not exist); 22 chunks of 12
+chunk_1: 97 passed · 3 failed · 13 skipped · exit 1
+chunk_2: 32 passed · 2 failed · 13 skipped · exit 1
+chunk_3: 87 passed · 0 failed · 2 skipped · exit 0
+chunk_4: 42 passed · 0 failed · 4 skipped · exit 0
+chunk_5: 78 passed · 0 failed · 0 skipped · exit 0
+chunk_6: 71 passed · 0 failed · 0 skipped · exit 0
+chunk_7: 46 passed · 0 failed · 9 skipped · exit 0
+chunk_8: 43 passed · 0 failed · 5 skipped · exit 0
+chunk_9: 70 passed · 0 failed · 3 skipped · exit 0
+chunk_10: 50 passed · 0 failed · 17 skipped · exit 0
+chunk_11: 71 passed · 0 failed · 1 skipped · exit 0
+chunk_12: 56 passed · 0 failed · 5 skipped · exit 0
+chunk_13: 78 passed · 0 failed · 1 skipped · exit 0
+chunk_14: 40 passed · 0 failed · 0 skipped · exit 0
+chunk_15: 99 passed · 0 failed · 2 skipped · exit 0
+chunk_16: 34 passed · 0 failed · 0 skipped · exit 0
+chunk_17: 80 passed · 1 failed · 2 skipped · exit 1
+chunk_18: 86 passed · 0 failed · 1 skipped · exit 0
+chunk_19: 55 passed · 0 failed · 1 skipped · exit 0
+chunk_20: 138 passed · 0 failed · 6 skipped · exit 0
+chunk_21: 54 passed · 0 failed · 0 skipped · exit 0
+chunk_22: 89 passed · 0 failed · 0 skipped · exit 0
+TOTAL: 1587 tests · 1496 passed · 85 skipped · 6 failed · no exit signal 11
+the 6 failed:
+  AppModelTests testReopenedThreeMFProjectReimportsTheStlWorkingCopy
+  AppModelTests testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance
+  AppModelTests testThreeMFImportOptimisesOnDeviceEndToEnd
+  FlexibleBatchMVerifyTests testTheFoldedCardIsTheOctetsMinimisedKeyOnTheVeryEdge
+  FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker
+  LatticeSimSolveTriggerTests testTheTriggerRefusesOnAllThreeGrounds
+  = AppModelTests 3MF x3 (known: lib3mf), FlexibleBatchNVerifyTests refine line (known, x8 lines), LatticeSimSolveTriggerTests (known),
+    FlexibleBatchMVerifyTests folded card (OURS: its source pin read legendCard's old folded-edge argument — re-pinned at 7d8ab7be, re-run below)
+after the suite: 4 tracked evidence files rewritten by #354's probes (plane-extents x2, smoothing x2) restored with git checkout.
+
+## 4. RE-PIN + the chip clip (7d8ab7be)
+repin: Test Case '-[TopOptFlowsTests.FlexibleBatchMVerifyTests testEachGroupsStressIsOnItsOwnScaleAndThePartIsNotOneColour]' passed (31.587 seconds).
+repin: Test Case '-[TopOptFlowsTests.FlexibleBatchMVerifyTests testStressNeverAsksTheSolidSolveAcrossSaveAndExitAnEditAndARebuild]' passed (50.279 seconds).
+repin: Test Case '-[TopOptFlowsTests.FlexibleBatchMVerifyTests testTheColumnFallbackKeepsTheDentViewSolid]' passed (50.739 seconds).
+repin: Test Case '-[TopOptFlowsTests.FlexibleBatchMVerifyTests testTheDentRowsFactorIsWhatTheMapIsDrawnAt]' passed (24.984 seconds).
+repin: Test Case '-[TopOptFlowsTests.FlexibleBatchMVerifyTests testTheFoldedCardIsTheOctetsMinimisedKeyOnTheVeryEdge]' passed (0.005 seconds).
+repin: Test Case '-[TopOptFlowsTests.FlexibleBatchMVerifyTests testTheGhostWallsAreDepthOrderedAgainstTheSolidPlanes]' passed (204.999 seconds).
+repin: Test Case '-[TopOptFlowsTests.FlexibleBatchMVerifyTests testTheStressViewsOpaqueWallsNeverStripeTheSolidPlanes]' passed (125.650 seconds).
+repin: === exit 0 FlexibleBatchMVerifyTests 18:12:38
+repin: Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewTests testSecondaryButtonsInTheCardAndTheCalloutAreOutlined]' passed (0.004 seconds).
+repin: Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewTests testTheMainLegendSitsUnderTheViewsRowAndNoPanelCoversIt]' passed (0.001 seconds).
+repin: Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewTests testThePlatePageIsOneQuestionAndSixBigButtonsWithTheResolvedOneLit]' passed (0.005 seconds).
+repin: Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewTests testThePlayerNeverGoesUnderTheCubeTheViewsTheCapsuleOrAnOpenPanel]' passed (0.002 seconds).
+repin: Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewTests testThePreviewStepNamesTheFacesAndTheSquishPanelSaysSquish]' passed (0.001 seconds).
+repin: === exit 0 FlexibleRound7D1ReviewTests 18:12:40
+chip clip: === exit 0 FlexibleCornerPairTests 18:36:10
+chip clip: === exit 0 FlexibleRound7D1ReviewTests 18:36:12
+chip clip: === exit 0 FlexibleRound7FitHostedTests 18:36:43
+chip clip: === exit 0 FlexibleSquishCopyTests 18:36:45
+chip clip: === exit 0 FlexibleRound7ScreenHostedTests 18:37:24
+chip clip: === exit 0 FlexibleChromeLayoutTests 18:37:26
+chip clip: === exit 0 FlexibleRound7D1ReviewHostedTests 18:38:04
+chip clip: === exit 0 FlexibleChromeStateTests 18:38:13
+
+## 5. THE LOOK (FlexibleRound7D1ReviewEvidenceProbe, ca2de52d + the probe): 8 tests passed (7 page runs: 13p 13l 11p 11l minip + Ready at 13p and 11l; and the chip test); each page run's total of steps that touch (0 in all 7; the 7d8ab7be commit message says "9 runs" — it is 7):
+   7 touches: 0
+chip edges (before / after the clip):
+chip in a KEY window (fits 300): (19,32) 0.03 · (19,58) 0.03 · (20,32) 0.14 · (20,58) 0.03 · (21,32) 0.03 · (21,58) 0.03 · (22,32) 0.03 · (22,58) 0.03
+chip in a non-key window (fits 300): (19,32) 0.03 · (19,58) 0.03 · (20,32) 0.14 · (20,58) 0.03 · (21,32) 0.03 · (21,58) 0.03 · (22,32) 0.03 · (22,58) 0.03
+chip in a KEY window (fits 300): (19,32) 0.03 · (19,58) 0.03 · (20,32) 0.03 · (20,58) 0.03 · (21,32) 0.03 · (21,58) 0.03 · (22,32) 0.03 · (22,58) 0.03
+chip in a non-key window (fits 300): (19,32) 0.03 · (19,58) 0.03 · (20,32) 0.03 · (20,58) 0.03 · (21,32) 0.03 · (21,58) 0.03 · (22,32) 0.03 · (22,58) 0.03
+
+## 6. GOLDENS (FlexibleAngledGoldenTests)
+ca2de52d: det 38 identical / 0 DIFFERS · unseeded 32 identical / 0 DIFFERS + 1 PART-SKIP
+7d8ab7be: det 38 identical / 0 DIFFERS · unseeded 32 identical / 0 DIFFERS + 1 PART-SKIP (13 tests, 0 failures each)
+
+## 7. THE 16 STAGE-JOB HASHES: stage_job_hashes_d1r.txt (7d8ab7be) vs review_fix/stage_job_hashes_r7r.txt and batch_d1/stage_job_hashes_d1.txt
+byte-identical to r7r (cmp exit 0)
+byte-identical to d1 (cmp exit 0)
+(and at ca2de52d: byte-identical)
+
+## 8. TOPOLOGY / STRUCTURAL / AESTHETIC / SURFACE (FlexibleRound7OtherStagesProbe vs batch_d1/other_stages/before): other_stages_compare.txt
+run1 (ca2de52d+probe): 13 images, 1 differ
+run2 (ca2de52d+probe): 13 images, 0 differ
+run3 (7d8ab7be, final): 13 images, 0 differ
+(run 1's 8 px: the structural Topology load arrow's edge anti-aliasing at 11" landscape, the flicker batch D1 recorded (11–19 px, same box); runs 2 and 3: 0 px)
+
+## 9. iOS
+** BUILD SUCCEEDED **
+install: NOT done — xcrun simctl spawn 147E56A1-… launchctl list | grep -i com.nadim.topopt → 'UIKitApplication:com.nadim.topopt[6148][rb-legacy]' (PID 9200): the app is open. install pending.

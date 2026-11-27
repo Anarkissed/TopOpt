@@ -1,0 +1,24 @@
+# Release bcb45454ea8d — 2026-10-26 bundle (flexible-screens ae837010 + this evidence)
+## Contents
+#   #354 app half a97164c9 (fast-forward on 00a80f2a): the safety-margin picker on (loads.safety_margin, absent = 150 %),
+#     "Built for N% of your load", the new ladder's card wording, worst scenario on cards and best tries, pre-flight
+#     (no anchor / no load); his iPad 14:13 asks (other scenarios draw nothing, off anchors faint, indented piece cards,
+#     open buttons, list grows to the screen with a resize grip).
+#   TO-core 2eb82c8c (--no-ff): step 1 scenarios + Redesign to strengthen (plain refusals), step 3 the new ladder
+#     (V1 just safe, V2 = V1 x1.10, V3 = V2 x1.10; min 150 %), #362's solver tweaks eb470de7 (coarse seeding,
+#     cold first window, plain [mg-safe] wording). Corner fix REVERTED (reviewer 14:23): margins single-voxel, as today.
+## Gates
+#   core = 2eb82c8c byte-identical (git diff 2eb82c8c HEAD -- core app/scripts/build_core.sh: empty)
+#   TO-core on 2eb82c8c: full ctest 162/162 incl. cli_demo (2403 s); narrow 21/21; 17-test vs 5cf6773b 17/17 identical
+#   #362: export_3mf + threemf_import (absent from TO-core's lib3mf-free build) on the worker CLI build: 2/2
+#   build_core.sh rc=0 -> CoreFingerprint bcb45454ea8d; worker CLI build rc=0, --version core bcb45454ea8d dirty=false
+#   iPad device build (Release, generic/platform=iOS): BUILD SUCCEEDED
+#   full app suite (swift test --parallel, 4 workers) 15:35-17:30: 4,320 tests, 7 failed, the same 7 as release 2fe4173959ba:
+#     6 KNOWN pre-existing (3 AppModel 3MF/no macOS lib3mf; LatticeCellGrading; OrganicSampleCube; OrganicVariantCache)
+#     1 LOAD FLAKE FlexibleFlatPrismEngineTests.testHisStripsReadThroughWithTheSameReach; alone: 5/5 pass
+#   23 tracked evidence files rewritten by swift test were restored with git checkout.
+#   #354 (their run): narrow 1,087 + re-run 0 failures; hosted LoadScenarioHostedTests 7/7.
+## Worker
+#   build-fix/topopt-cli swapped atomically while /health idle (17:3x); sha256 e9e4dad5ec787ce4602c67d71f501c5d745c45226a21441e7534d2df3379ebd0
+#   old kept: build-fix/topopt-cli.2fe4173959ba-replaced-20261026; copy: worker-bin/bcb45454ea8d. /health: bcb45454ea8d.
+## Device-only checks (not hostable): switched-off anchors faint in 3D; other scenarios hidden; the list's resize grip drag.

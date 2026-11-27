@@ -1,0 +1,9 @@
+OWNER-PROJECT M2 verticalStand algorithm stepped stage Optional(TopOptFlows.LatticeStageMode.aesthetic) step-halves false density sim cells auto
+OWNER-PAIRS core: cross-region overlapping pairs 1787, core's predicate refuses 0 []
+OWNER-PAIRS swift-rule: cross-region overlapping pairs 1729, core's predicate refuses 62 [(key: "a third region", value: 17), (key: "owner 0", value: 17), (key: "the other region", value: 32)]
+OWNER-PAIRS declaration-order: cross-region overlapping pairs 1679, core's predicate refuses 833 [(key: "a third region", value: 39), (key: "owner 0", value: 8), (key: "the other region", value: 829)]
+OWNER-PARITY points 47997: agree 47593, differ 404 [(key: "both own, differ", value: 294), (key: "swift none, core r", value: 110)] ["(53.844,-46.905,58.150) swift - core r0", "(53.844,-42.894,58.150) swift - core r0", "(53.844,-38.884,58.150) swift - core r0", "(49.834,-46.905,62.160) swift - core r0", "(49.834,-42.894,62.160) swift - core r0", "(49.834,-38.884,62.160) swift - core r0", "(45.823,-46.905,66.170) swift - core r0", "(45.823,-42.894,66.170) swift - core r0", "(45.823,-38.884,66.170) swift - core r0", "(41.813,-46.905,70.181) swift - core r0", "(41.813,-42.894,70.181) swift - core r0", "(41.813,-38.884,70.181) swift - core r0"]
+OWNER-RULING-A contested 1607 (final round) | yielded: owner 0 47, a third region 5 | rounds 18 stepped down 1764 dropped at the finest 3771 | bridge calls 19 points 9355
+OWNER-RULING-B shared texels 1218: to core's owner 1215 (a third claimant 8) | emptied: owner 0 1, owner with no cell there 2
+OWNER-CELLS core 9938 swift-rule 9948 (swift-rule straddlers core refuses 62; swift-rule bake reassigned 766 texels) declaration-order 9760
+OWNER-JOB /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-stage-frontend-37bee1/scratch/evidence/owner-proof/out/job_owner_core.json plan sent (9938 cells)

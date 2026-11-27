@@ -15,6 +15,7 @@ import TopOptDesign
 public struct ImportSheet: View {
     @ObservedObject var model: AppModel
     @State private var browsing = false
+    @StateObject private var flexDraft = FlexibleImportDraft(materialsPath: FlexibleResources.materialsPath)   // Flexible (PR #362) H41: New TopOpt's Flexible tab (FlexibleImportDraft.swift); inert, its gates are H42–H44
 
     public init(model: AppModel) { self.model = model }
 
@@ -42,14 +43,18 @@ public struct ImportSheet: View {
                 .dsStyle(DS.TypeScale.overline)
                 .foregroundStyle(DS.Color.textQuaternary.color)
                 .padding(.top, DS.Space.xl2)
+            Group { if flexDraft.available { FlexibleImportProcessPicker(model: model, draft: flexDraft) } else {   // Flexible (PR #362) H42: [Flexible] beside Filament and Resin when the flexible filament list loaded; else today's two segments
             SegmentedGlass(
                 [.init(ProcessKind.fdm, ProcessKind.fdm.segmentTitle),
                  .init(ProcessKind.resin, ProcessKind.resin.segmentTitle)],
                 selection: $model.process
             )
+            } }   // Flexible (PR #362) H42 end
             .padding(.top, DS.Space.sm)
 
-            materialDropdown.padding(.top, DS.Space.l)
+            Group { if flexDraft.on { FlexibleImportFilamentMenu(draft: flexDraft) } else { materialDropdown } }.padding(.top, DS.Space.l)   // Flexible (PR #362) H43: the flexible filaments when Flexible is chosen; else today's material dropdown
+
+            LibraryImportProjectRow(model: model)   // Library: which project the new part joins (its own top padding, only when shown)
 
             minimizePlasticRow.padding(.top, DS.Space.l)
 
@@ -58,8 +63,9 @@ public struct ImportSheet: View {
             HStack(spacing: DS.Space.m) {
                 Spacer()
                 PillButton("Cancel", style: .secondary) { model.cancelImport() }
+                    .background(DSParts.publish("importCancel"))   // ★ B10: the sweep checks it at every window
                 PillButton("Continue", style: .primary, systemImage: "sparkles",
-                           isEnabled: model.canContinue) { model.continueToWorkspace() }
+                           isEnabled: model.canContinue && flexDraft.canContinue) { if flexDraft.on { flexDraft.continueFlexible(model) } else { model.continueToWorkspace() } }   // Flexible (PR #362) H44: Continue on Flexible lands on the Flexible Lattice stage; else today's Continue
             }
             .padding(.top, DS.Space.xl5)
         }
@@ -114,8 +120,10 @@ public struct ImportSheet: View {
                     .padding(.vertical, 9).padding(.horizontal, DS.Space.l)
                     .background(Capsule().fill(DS.Color.fillSubtle.color)
                         .overlay(Capsule().strokeBorder(DS.Color.strokeStrong.color, lineWidth: 1)))
+                    .frame(minHeight: 44).contentShape(Rectangle())   // ★ B10 (Touch): the same capsule, a 44 pt target
             }
             .buttonStyle(.plain)
+            .background(DSParts.publish("importBrowse"))   // ★ B10: the sweep checks it at every window
         }
         .padding(.vertical, DS.Space.ml)
         .padding(.horizontal, DS.Space.l)
@@ -202,6 +210,8 @@ public struct ImportSheet: View {
                         .overlay(RoundedRectangle(cornerRadius: DS.Radius.field, style: .continuous)
                             .strokeBorder(DS.Color.textPrimary.opacity(0.11).color, lineWidth: 1))
                 }
+                .frame(minHeight: 44).contentShape(Rectangle())   // ★ B10 (Touch): the same field, a 44 pt target
+                .background(DSParts.publish("importMaterial"))   // ★ B10: the sweep checks it at every window
             }
             .disabled(model.currentMaterials.isEmpty)
         }

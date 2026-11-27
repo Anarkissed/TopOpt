@@ -1,0 +1,17 @@
+[11l] the Squish page opened by itself: false (H37: never)
+settled true · status 'Preview · core runs one group at a time' tone preview · capsule (24,76 262x44) · setupChip (678,762 220x48) · latticeSplit (910,746 260x64) · mainViews (866,236 304x44)
+wrote D1_11l_M01_main_rest.png
+  tap the Setup chip [setupChip (678,762 220x48)]
+tray: capsule (24,76 262x44) · setupChip (678,762 220x48) · latticeSplit (910,746 260x64) · mainViews (866,236 304x44) · setupTray (750,458 420x276)
+wrote D1_11l_M02_setup_tray.png
+  tap the ⌃ [latticeMore (1126,746 44x64)]
+card: capsule (24,76 262x44) · setupChip (678,762 220x48) · latticeSplit (910,746 260x64) · mainViews (866,236 304x44) · latticeCard (750,322 420x412) · sent 0
+wrote D1_11l_M03_card_preview.png
+  tap the ⌃ again (folds) [latticeMore (1126,746 44x64)]
+Selections minimised: pill (24,760 139x50) · Setup chip (678,762 220x48) · gap 515.5 pt
+wrote D1_11l_M04_selections_minimised.png
+after Face 3's weight → 0: status 'Fix: the weight on Face 3' tone fix · chrome Optional(TopOptFlows.FlexibleChromeState.Card.callout) · capsule (24,76 262x44) · setupChip (678,762 220x48) · latticeSplit (910,746 260x64) · mainViews (866,236 304x44) · callout (750,583 420x151)
+wrote D1_11l_M05_callout.png
+  tap the capsule's Squish [capsuleSquish (212,76 70x44)]
+Squish page up true · capsule (24,76 262x44) · notice (386,26 403x40)
+wrote D1_11l_S01_squish_page.png

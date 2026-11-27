@@ -1,0 +1,18 @@
+# Release 47c878f9 — 2026-11-13 solid-view (the solid view, 2ca3fc48), app only
+# Core and worker unchanged: fingerprint 6da1b6c3bb0a; "fingerprint": "6da1b6c3bb0a"
+# Merged onto e4941e86; the merged app tree equals solid-view's, so its gate applies unchanged.
+# Commits (first parent of solid-view since the release tip):
+#   1da59a63 WIP (362): the solid view (map, surface cut, cut walls) — work in progress, not for release; debug mode still in
+#   d5c76308 Solid view (362): X-ray off draws the new engine's part solid, cut open where the lattice is (his ask 11-13)
+#   2ca3fc48 Solid view (362): merge the release tip (evidence only)
+# Gates:
+#   20:58 built
+#   21:00 tests: exit 0; 31 passed, 0 failed, 1 skipped
+#   17:44 evidence e4941e86 pushed; release f414b402 DONE
+#   21:00 checks ok: solid-view 2ca3fc48, 3 commit(s), app-only, onto e4941e86, fingerprint 6da1b6c3bb0a
+#   21:00 merged 47c878f9; app tree == solid-view's, fingerprint 6da1b6c3bb0a
+#   21:00 waiting for HEAVY.lock (free)
+#   21:00 lock taken (25 GB free)
+#   21:06 iPad device build green; lock released
+#   21:06 pushed 47c878f9
+#   21:06 worker /health "fingerprint": "6da1b6c3bb0a" (unchanged, no swap)

@@ -55,6 +55,20 @@ import TopOptKit
 // `LatticeRegionDrawer.depthDivergence` makes "they cannot diverge" a checkable
 // property instead of a convention.
 
+/// ★★ THE OLD APP LAW, WRITTEN DOWN (2026-08-20). These tests reconstructed the
+/// number his card used to show by CALLING `LatticeType.strutRadiusMM` — and that
+/// call now returns CORE's measured diameter, because closing this very
+/// divergence was the point. Reconstructing history from live code meant the
+/// evidence quietly stopped reproducing the history the moment the history was
+/// fixed, and three tests went red claiming the fix had broken them.
+///
+/// So the superseded law is pinned here as the constant it always was:
+/// `ρ = K·(r/L)²` with K = 48, i.e. `d = 2·L·√(ρ/K)`. It reproduces his 0.32 mm
+/// exactly, and it can never drift again, because nothing computes it any more.
+fileprivate func oldAppStrutDiameterMM(relativeDensity rho: Double, cellMM: Double) -> Double {
+    2 * cellMM * (rho / 48).squareRoot()
+}
+
 @MainActor
 final class LatticeDepthIsOneValueTests: XCTestCase {
 
@@ -373,11 +387,10 @@ final class LatticeAutoDensityIsDerivedTests: XCTestCase {
         }
         // The old app law, for the record: it under-reports by ~1.4x, which is
         // exactly what turned a printable strut into the badge's 2nd problem.
-        let bounds = TopOptKit.latticeCellBounds(topology: "octet",
-                                                 minExtrudableWidthMM: Self.w)
-        let appDia = 2 * LatticeType.octet.strutRadiusMM(
-            relativeDensity: TopOptKit.latticeLimits(topology: "octet").rhoMin,
-            cellMM: bounds.printabilityFloorMM)
+        // ★ RE-PINNED (release (2), K1), as LatticeStageRepairEvidence's record: at his card's literal cell and density
+        // (4.93 mm, 5.047 %). On today's core the light-end floor moved to 7.03 mm and the band floor to 4.96 %, where the
+        // old closed form happens to land on one bead (0.452 mm: it tracks the full cell's law at the light end).
+        let appDia = oldAppStrutDiameterMM(relativeDensity: 0.05047, cellMM: 4.93)
         XCTAssertEqual(appDia, 0.32, accuracy: 5e-3)
     }
 
@@ -482,9 +495,13 @@ final class LatticeAutoDensityIsDerivedTests: XCTestCase {
     func testTheDeclaredDensityIsCarriedOnTheShippingCardList() {
         let p = ProjectModel(id: UUID(), name: "D", material: "PLA",
                              process: .fdm, importedFile: nil, importedMesh: nil)
-        p.selection.addGroup()
-        p.selection.pickFaces([1])
-        let gid = p.selection.groups[0].id
+        // ★ RE-PINNED (UI-Notes B6 slice 1, 7e4f0b53 — notes 22, 23): the group is the Lattice stage's own (its list), as a tap
+        // there makes it; a Topology group with a lattice role and no Topology role is one today's run drops (the migration
+        // keeps it dropped), so it draws no card either
+        var list = p.latticeList
+        let gid = list.addGroup()
+        list.addFaces([1], to: gid)
+        p.latticeList = list
         p.lattice.enabled = true
         p.lattice.groupRoles[gid] = .include
         p.printParams.strutLineWidthMM = Self.w
@@ -519,14 +536,9 @@ final class LatticeStageRepairEvidence: XCTestCase {
     }
 
     private func writeEvidence(_ name: String, _ text: String) {
-        let dir = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()          // TopOptFlowsTests
-            .deletingLastPathComponent()          // Tests
-            .deletingLastPathComponent()          // TopOptKit
-            .deletingLastPathComponent()          // app
-            .deletingLastPathComponent()          // <repo root>
-            .appendingPathComponent("evidence/2026-08-17-lattice-stage-repair")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        // The reviewer, 11-06 09:41Z: tests must not dirty tracked files. Into the repo only with TOPOPT_EVIDENCE_TO_REPO=1
+        // (EvidenceOut); this file is regenerated from live core, so on 7d6c5dbc it rewrote 2026-08-17's numbers with K1's.
+        let dir = EvidenceOut.dir("evidence/2026-08-17-lattice-stage-repair")
         try? text.write(to: dir.appendingPathComponent(name), atomically: true,
                         encoding: .utf8)
     }
@@ -577,14 +589,17 @@ final class LatticeStageRepairEvidence: XCTestCase {
         // ── WHAT HIS SCREENSHOT SHOWED, and the arithmetic behind each ────────
         // These are the OLD values. Each is asserted to be what the old code
         // produced — by reconstructing it here — and then asserted GONE.
-        let oldCell = bounds.printabilityFloorMM          // LIGHT-end floor
+        // ★ RE-PINNED (release (2), K1): the old code read core's LIGHT-end floor and band floor, and K1 re-measured
+        // octet's law on the full cell — rebuilt on today's core they are 7.03 mm and 4.96 %, not his card's. So his
+        // card's cell and density are LITERALS now (his screenshot, 2026-08-17); the app's old closed form, which reads
+        // no core, still turns them into his 0.32 mm strut.
+        XCTAssertNotEqual(bounds.printabilityFloorMM, 4.93, accuracy: 0.5, "K1 moved the light-end floor")
+        let oldCell = 4.93                                 // his card's cell (the legs-only law's LIGHT-end floor)
         let oldCells = Self.hisDepthMM / oldCell
-        let oldDensity = limits.rhoMin                     // the band floor
-        let oldStrut = 2 * LatticeType.octet.strutRadiusMM(
-            relativeDensity: oldDensity, cellMM: oldCell)  // the APP's own law
-        XCTAssertEqual(oldCell, 4.93, accuracy: 5e-3, "his card's 4.93 mm cell")
+        let oldDensity = 0.05047                           // his 5 % (the legs-only band floor)
+        let oldStrut = oldAppStrutDiameterMM(
+            relativeDensity: oldDensity, cellMM: oldCell)  // the app's law AS IT WAS
         XCTAssertEqual(oldCells, 0.81, accuracy: 5e-3, "his 0.8 cells across")
-        XCTAssertEqual(oldDensity, 0.05047, accuracy: 1e-4, "his 5% IS band_rho_min")
         XCTAssertEqual(oldStrut, 0.32, accuracy: 5e-3, "his 0.32 mm strut")
 
         // ── AND EVERY ONE OF THEM IS GONE ────────────────────────────────────
@@ -592,9 +607,11 @@ final class LatticeStageRepairEvidence: XCTestCase {
         XCTAssertNotEqual(card.cellsPerMember, oldCells, accuracy: 0.1)
         XCTAssertNotEqual(card.relativeDensity, oldDensity, accuracy: 0.01)
         XCTAssertNotEqual(card.strutDiameterMM, oldStrut, accuracy: 0.01)
-        XCTAssertEqual(card.cellText, "1.17 mm")
-        XCTAssertEqual(card.cellsText, "3.4")
-        XCTAssertEqual(card.densityText, "60%")
+        // ★ RE-PINNED (release (2), K1 item 5): the dense-end floor is 1.117 mm (3.6 across) and the lightest density
+        // that prints there is the band's top, 0.9003 (1.17 mm, 3.4, 60 % on the legs-only law)
+        XCTAssertEqual(card.cellText, "1.12 mm")
+        XCTAssertEqual(card.cellsText, "3.6")
+        XCTAssertEqual(card.densityText, "90%")
         XCTAssertEqual(card.strutText, "0.45 mm")
         // ★ Still out of regime at 4 mm — honestly, and for ONE reason now
         // (3.4 < 5), not two. The strut prints.
@@ -603,8 +620,8 @@ final class LatticeStageRepairEvidence: XCTestCase {
 
         // ★ THE DISTANCE, PINNED. This is the claim the handoff makes and the
         // reason the brief's "needs 24.65 mm" advice was wrong by 4.2x.
-        XCTAssertEqual(oldCell / card.cellMM, 4.2, accuracy: 0.05,
-                       "the old cell was 4.2x too coarse")
+        XCTAssertEqual(oldCell / card.cellMM, 4.41, accuracy: 0.05,
+                       "the old cell was 4.4x too coarse (4.2x against the legs-only law's 1.17 mm)")
         XCTAssertEqual(w / oldStrut, 1.4, accuracy: 0.02,
                        "and the old strut law 1.4x off core's")
 
@@ -690,11 +707,12 @@ final class LatticeStageRepairEvidence: XCTestCase {
         XCTAssertTrue(at4.valid)
         XCTAssertTrue(at4.feasible, "core: a 4 mm member BUILDS (percolation)")
         XCTAssertTrue(at4.outOfRegime, "…but does not certify")
+        // ★ RE-PINNED (release (2), K1 item 5): 1.117 mm and 3.58 across on the full cell's law (1.17 / 3.41 legs-only)
         XCTAssertEqual(at4.cellMM, denseFloorFor(w), accuracy: 1e-6,
-                       "★ core picks the DENSE-end floor, 1.17 mm — the card picks "
-                       + "the LIGHT-end floor, 4.93 mm: 4.2x apart")
-        XCTAssertEqual(at4.cellsPerMember, 3.41, accuracy: 0.01,
-                       "★ core: 3.4 cells across, not the card's 0.8")
+                       "★ core picks the DENSE-end floor, 1.12 mm — the card picked "
+                       + "the LIGHT-end floor, 4.93 mm: 4.4x apart")
+        XCTAssertEqual(at4.cellsPerMember, 3.58, accuracy: 0.01,
+                       "★ core: 3.6 cells across, not the card's 0.8")
         XCTAssertGreaterThan(at4.relativeDensity, 0.55,
                              "★ core: ~60% density, not the card's 5%")
         XCTAssertTrue(at4.prints,
@@ -714,9 +732,10 @@ final class LatticeStageRepairEvidence: XCTestCase {
         XCTAssertGreaterThanOrEqual(atNeeded.cellsPerMember, 5.0 - 1e-6)
         XCTAssertTrue(atNeeded.prints)
 
-        // ★ AND THE CARD'S STRUT IS THE APP'S OWN LAW, 1.4x OFF CORE'S.
-        let appDia = 2 * LatticeType.octet.strutRadiusMM(
-            relativeDensity: limits.rhoMin, cellMM: bounds.printabilityFloorMM)
+        // ★ AND THE CARD'S STRUT WAS THE APP'S OWN LAW, 1.4x OFF CORE'S. ★ RE-PINNED (release (2), K1): at his card's
+        // literal cell and density (4.93 mm, 5.047 %) — on today's core the light-end floor moved to 7.03 mm, where the
+        // old closed form happens to land on one bead (it tracks the full cell's law at the light end).
+        let appDia = oldAppStrutDiameterMM(relativeDensity: 0.05047, cellMM: 4.93)
         let coreDerivedAtThatCell = TopOptKit.latticeRegionDerivation(
             topology: "octet",
             memberWidthMM: bounds.cellsPerMemberFloor * bounds.printabilityFloorMM,
@@ -730,6 +749,16 @@ final class LatticeStageRepairEvidence: XCTestCase {
         XCTAssertEqual(w / appDia, 1.4, accuracy: 0.02,
                        "the 1.4x that memory app-octet-strut-law-differs-from-core "
                        + "recorded, reaching a verdict the user acts on")
+        // ★★ AND IT IS CLOSED. The live app law, at the same density and cell, is
+        // now core's own number — so the gap above is history and this is the guard
+        // that keeps it history.
+        let liveDia = 2 * LatticeType.octet.strutRadiusMM(
+            relativeDensity: limits.rhoMin, cellMM: bounds.printabilityFloorMM)
+        XCTAssertEqual(liveDia, w, accuracy: 1e-3,
+                       "★ the app must now answer exactly what core answers")
+        XCTAssertNotEqual(liveDia, appDia, accuracy: 0.05,
+                          "positive control: the old law and the new one differ, so "
+                          + "this is not comparing a number with itself")
 
         let report = """
         HIS CARD vs CORE — 2026-08-17-lattice-stage-repair, before any fix

@@ -1,0 +1,19 @@
+# Release 101d28d4 — 2026-11-03 B2b-s2 (UI-Notes' app batch 7a194f05), app only
+# Core and worker unchanged: fingerprint 35764048bba3; "fingerprint": "35764048bba3"
+# Merged onto fb387caa; the merged app tree equals B2b-s2's, so the builder's tests and the reviewer's code check apply unchanged.
+# The batch was built and tested on core 340f1156e40f; this tip carries core 35764048bba3 (the iPad build is on it; the daily full suite covers the pair).
+# Commits:
+#   cc059ad8 B2 (U16): notifications never cover a control — centred, as wide as the row's controls allow, two lines at most
+#   97aa2339 B2 (round 1, R2.2 / R2.3 / R4): a selected row is outlined at a glance; Safety margin is a setting row with its (i)
+#   4e35ceac Merge branch 'claude/app-build-b2b-s1' into claude/app-build-b2
+#   69c86190 B2: re-pin three source pins B1 / B2a moved without re-pinning (failing on the released c745dce6)
+#   6c9d7092 B2 (U12–U14, U17, round 1, §2): the shared parts — corner fix line, wide panel, sheets, hold ring, handle, timeline, clear-all, role colours
+#   7a194f05 B2 (U3): a group row is 48 pt; the header and a setting row stay 44
+# Gates:
+#   15:02 checks ok: B2b-s2 7a194f05, 6 commit(s), app-only, base d7b841e1, onto fb387caa, fingerprint 35764048bba3
+#   15:02 merged 101d28d4; app tree == B2b-s2's, fingerprint 35764048bba3
+#   15:02 waiting for HEAVY.lock (UI-Notes daily full app suite (release tip fb387caa), driver suite_daily.sh pid 97001 since 2026-11-03 09:09)
+#   15:15 lock taken
+#   15:22 iPad device build green; lock released
+#   15:22 pushed 101d28d4
+#   15:22 worker /health "fingerprint": "35764048bba3" (unchanged, no swap)

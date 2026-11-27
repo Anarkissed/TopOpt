@@ -1,0 +1,14 @@
+# Release 483d9e8b — 2026-11-05 LibraryPartPage (UI-Notes' app batch up to 2ba43492), app only, released before review (his 11-03 pick)
+# Core and worker unchanged: fingerprint 6c5a6fbaa842; "fingerprint": "6c5a6fbaa842"
+# Merged onto 9ae1909d; the merged app tree equals 2ba43492's, so the builder's tests apply unchanged.
+# Commits:
+#   5c96a69c Library part page (his iPad notes 11-05, L1 + L2): versions as cards a third wide, results small with a line each; red Rejected, the Rejected chip, a tap takes a flag off with Undo
+#   2ba43492 Merge UI-Notes' Library part page (5c96a69c, his iPad notes 11-05 L1 + L2) into B9: versions as cards a third wide with results small and a line each; red Rejected, the Rejected chip, a tap takes a flag off with Undo
+#   483d9e8b Release 2026-11-05: merge B9 2ba43492 — UI-Notes' Library part page (5c96a69c, his iPad notes 11-05 L1 + L2): versions as cards a third wide with results small and a line each; red Rejected, the Rejected chip beside Newest, a tap takes a flag off with Undo (app only; core and worker unchanged at 6c5a6fbaa842)
+# Gates:
+#   10:06 checks ok: LibraryPartPage, local 483d9e8b over origin 9ae1909d (3 commits); app tree == 2ba43492's, fingerprint 6c5a6fbaa842
+#   10:06 waiting for HEAVY.lock (free)
+#   10:06 lock taken
+#   10:10 iPad device build green; lock released
+#   10:10 pushed 483d9e8b
+#   10:10 worker /health "fingerprint": "6c5a6fbaa842" (unchanged, no swap)

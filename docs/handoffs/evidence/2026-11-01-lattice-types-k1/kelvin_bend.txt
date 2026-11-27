@@ -1,0 +1,8 @@
+BEND kelvin: cell S=5.0 mm, vpc=12, cantilever 6 cells long, target rho 0.30 -> periodic cell rho 0.1944 (r/L 0.12500, 3.0 vox/strut), C11=255.18 C12=79.74 C44=43.78 Zener=0.499
+  [writing ../docs/handoffs/evidence/2026-11-01-lattice-types-k1/kelvin_bend.csv]
+    nc=1  block rho 0.1944  K_res 3.4832  K_hom 5.6530  err +62.30 %  dof 37011  273 ms  NO-GO
+    nc=2  block rho 0.1944  K_res 42.2522  K_hom 56.1538  err +32.90 %  dof 136875  969 ms  NO-GO
+    nc=3  block rho 0.1944  K_res 154.6388  K_hom 182.6938  err +18.14 %  dof 299811  2260 ms  NO-GO
+    nc=4  block rho 0.1944  K_res 349.7127  K_hom 388.1896  err +11.00 %  dof 525819  4248 ms  NO-GO
+    nc=5  block rho 0.1944  K_res 625.3710  K_hom 669.5263  err +7.06 %  dof 814899  7114 ms  NO-GO
+    nc=6  block rho 0.1944  K_res 979.3294  K_hom 1024.7941  err +4.64 %  dof 1167051  10668 ms  NO-GO

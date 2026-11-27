@@ -1,0 +1,55 @@
+# U21 batch G fix round 1 runs (app/TopOptKit, --scratch-path /tmp/r7x20b-build) — 26c82b30 + the working tree
+### FlexibleU21BendTests (16: batch G's 12 + fix 1's 4; red controls asserted inside)
+Test Case '-[TopOptFlowsTests.FlexibleU21BendTests testAnEdgesGroupBendsAfterAnEdit]' passed (22.460 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21BendTests testAnEdgesGroupBendsWithNoLattice]' passed (4.518 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21BendTests testAStampPartlyOffTheFaceHasNoStep]' passed (4.025 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21BendTests testNoCrackBetweenCoincidentEdges]' passed (4.941 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21BendTests testNoTrailingCommentSwallowsAModifier]' passed (0.402 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21BendTests testOffTheFacePointsKeepTheNearestVertexRule]' passed (5.452 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21BendTests testPosedIndentSitsOnTheBentSquares]' passed (2.342 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21BendTests testProbeTheFarEdgeGate]' passed (2.886 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21BendTests testProbeWhyFace6WentDeeperAfterTheDeleteAndUndo]' passed (1.940 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21BendTests testTheEdgeStampOutlineSitsOnTheEdgePreview]' passed (3.667 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21BendTests testTheEditedPressIsNotCalibratedToTheOldBuild]' passed (7.225 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21BendTests testTheIndentOutlineFollowsTheBendWithoutSpikes]' passed (5.345 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21BendTests testTheLegendLineKeepsItsTypeAndColour]' passed (0.032 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21BendTests testTheLegendSaysTunedOrInterim]' passed (0.004 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21BendTests testTheLiveDesignTargetIsWorkedOutOncePerDesignRun]' passed (2.375 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU21BendTests testTheSkinsMeetTheSideOnHisPad]' passed (5.066 seconds).
+	 Executed 16 tests, with 0 failures (0 unexpected) in 72.681 (72.684) seconds
+### runner.log
+start 23:23:16 26c82b30 + working tree
+build exit 0 23:23:18
+new exit 0 23:24:34
+golden det exit 0 23:24:51
+golden unseeded exit 0 23:25:07
+hashes exit 0 23:26:07
+hashes cmp vs batch_x20b (whole file): identical
+hashes cmp vs batch_u21_g (whole file): identical
+chunk_aa exit 0 23:48:43
+chunk_ab exit 0 23:52:13
+chunk_ac exit 0 00:02:28
+chunk_ad exit 0 00:18:41
+chunk_ae exit 1 00:37:00
+chunk_af exit 0 00:47:27
+ALLDONE 00:47:27
+### classes (57 = batch G's 56 minus FlexibleU21BendTests (run above) plus FlexiblePressCurveTests and FlexiblePressStampTests, which name FlexiblePressCurveLayer / FlexiblePressStamp(Handle)), chunks of 10
+FlexibleBatchCVerifyTests FlexibleBatchM2Tests FlexibleBatchMDentTests FlexibleBatchMGroupTests FlexibleBatchMVerifyTests FlexibleBatchNRefineTests FlexibleBatchVHostedTests FlexibleC1Tests FlexibleEdgeGroupsHostedTests FlexibleFEFieldTests FlexibleFEPassTests FlexibleFlatPrismHostedTests FlexibleGroupPaletteHostedTests FlexibleLatticeSectionsHostedTests FlexibleLatticeSectionsTests FlexibleMainPageHookTests FlexibleMergeR5SMTests FlexibleOverlayClipTests FlexibleOverlaySeamTests FlexiblePressCurveTests FlexiblePressStampTests FlexibleR7E1ReviewHostedTests FlexibleR7E1ReviewTests FlexibleR7E2HostedTests FlexibleR7E3Tests FlexibleR7E5Tests FlexibleR7FTests FlexibleR7MergeTests FlexibleR7RHostedTests FlexibleR7RTests FlexibleR7SettingsHostedTests FlexibleR7SettingsTests FlexibleR7X1Tests FlexibleR7X1VerifyTests FlexibleRegionsTests FlexibleRound5SettingsHostedTests FlexibleRound5SettingsVerifyTests FlexibleRound5SquishExitTests FlexibleRound6HostedTests FlexibleRound6Tests FlexibleRound7ScreenHookTests FlexibleRound7ScreenHostedTests FlexibleRound7ViewsHostedTests FlexibleRound7ViewsTests FlexibleRowCopyTests FlexibleSettingsPageHostedTests FlexibleSettingsVerifyD1Tests FlexibleSqueezeGroupsModelTests FlexibleSqueezeGroupsReviewUITests FlexibleSqueezeGroupsUITests FlexibleSquishCopyTests FlexibleSquishTests FlexibleSquishVerifyGTests FlexibleU1Tests FlexibleU2Tests FlexibleX20bTests LatticeStaleTypeTests 
+### goldens
+golden_det: identical 38 · DIFFERS 0 · PART-SKIP 0 · Executed 13 tests, with 0 failures (0 unexpected) in 14.838 (14.841) seconds
+golden_unseeded: identical 32 · DIFFERS 0 · PART-SKIP 1 · Executed 13 tests, with 0 failures (0 unexpected) in 13.878 (13.881) seconds
+### chunks
+chunk_aa.log: Executed 58 tests, with 2 tests skipped and 0 failures (0 unexpected) in 1354.223 (1354.231) seconds
+chunk_ab.log: Executed 36 tests, with 0 failures (0 unexpected) in 207.215 (207.221) seconds
+chunk_ac.log: Executed 43 tests, with 0 failures (0 unexpected) in 612.993 (612.999) seconds
+chunk_ad.log: Executed 72 tests, with 0 failures (0 unexpected) in 970.592 (970.601) seconds
+chunk_ae.log: Executed 61 tests, with 1 failure (0 unexpected) in 1097.355 (1097.364) seconds
+chunk_af.log: Executed 42 tests, with 1 test skipped and 0 failures (0 unexpected) in 624.000 (624.007) seconds
+### failures (all chunks)
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleRound7ViewsReviewHostedTests.swift:323: error: -[TopOptFlowsTests.FlexibleRound7ViewsHostedTests testThePlayIconsRingAndDotAreSeenWithPlayOff] : XCTAssertGreaterThan failed: ("21") is not greater than ("120") - ★ the sims running: an accent ring on the Play icon (21 px, idle 0)
+### skipped
+Test Case '-[TopOptFlowsTests.FlexibleBatchMVerifyTests testHisImg6RowsAtTheDevicesPixelCount]' skipped (0.002 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsHostedTests testEvidenceOnHisPad]' skipped (0.001 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleU1Tests testU21BendPictures]' skipped (0.001 seconds).
+signal lines: 0
+### pictures (FlexibleU1Tests.testU21BendPictures, FLEX_U21G_DIR set, run alone after the last source change): passed; look/U21G_01–09

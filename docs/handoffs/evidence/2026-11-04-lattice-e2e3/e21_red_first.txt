@@ -1,0 +1,29 @@
+E2.1 red first and after: a lattice on a job with load scenarios.
+Part: a 60 x 20 x 20 mm bar (e21_scen_red.py writes it), anchored at x = 0. Two scenarios:
+  "light down": 30 N down on the top face; "heavy side": 300 N in +y on the x = 60 face.
+Graded octet, 4 mm cell, 0.45 mm bead, resolution 32. Before: topopt-cli built 11-04 00:37 from the tree
+committed as 5bd610c1 (4dc2d1a1 changes docs only). After: the E2.1 tree. Same jobs, same machine.
+
+1. THE RUN PATH (run, minimize_plastic false), rung 1.55, from each variant's lattice receipt
+  before A light listed first           solid margin 8.0198 [light down 154.158, heavy side 8.020 (governs)]; lattice margin 138.3076, solid reproduced 154.1580, accepted True
+  before B heavy listed first           solid margin 8.5322 [heavy side 8.532 (governs), light down 147.801]; no lattice (refused: sealed cavity, see the run log)
+  before C heavy alone (no scenarios)   solid margin 8.7622; lattice margin 6.3781, solid reproduced 8.7622, accepted True
+  before D light alone (no scenarios)   solid margin 169.7956; lattice margin 142.0444, solid reproduced 169.7956, accepted True
+  after  A light listed first           lattice margin 7.2213, solid reproduced 8.0198, accepted True
+         scenarios block: {"graded_on": ["light down", "heavy side"], "governing": "heavy side", "per_scenario": [{"name": "light down", "lattice_margin": 138.3076087, "accepted": true, "unheld": false, "solid_margin": 154.15803}, {"name": "heavy side", "lattice_margin": 7.221334167, "accepted": true, "unheld": false, "solid_margin": 8.019763197}], "stress_share": [{"name": "light down", "share": 0}, {"name": "heavy side", "share": 1}]}
+  Before, A's lattice was certified under the LIGHT scenario (scenario 1): 138.3 against a
+  governing solid margin of 8.02. After, under both; the heavy one governs at 7.22.
+
+2. LATTICE AN OPTIMIZED RESULT (lattice-variant), on the same jobs with minimize_plastic true
+  before A: lattice_variant: the restored design does NOT reproduce the margin the run recorded for this variant (recorded 4.954566136, reproduced 77.95326113, relative difference 14.73362006 against a band of 1e-06). That means the load case, the grid or the design is no
+  after  A: the margin reproduces; the run goes on to the grading law, which at this rung
+           (0.68, thin members) lattices nothing: lattice_variant: the grading law could lattice NONE of this variant's 3141 candidate voxels, so there is no lattice to emit — refusing rather than wri
+           The same as the heavy-alone control C at its rung. test_lattice_scenarios §4 latticed
+           again a scenario design that grades: the heavy scenario governs, the solid reproduces.
+
+3. AN ANALYZE JOB WITH A GRADING BLOCK (structural intent). ("Lattice the original part" is mode
+   lattice_part, which runs the lattice-variant code of 2; test_lattice_scenarios §5 covers it.)
+  The re-certification reads the SOLID region's margin; a whole-part lattice leaves no solid, so
+  run_info says recertified_margin inf (bare inf, not JSON) and max von Mises 0, with or without
+  scenarios (before: C heavy alone too). After E2.1 it is re-certified under each scenario the
+  lattice uses (recertified_scenarios), and the inf is unchanged: a limit of that path, reported.

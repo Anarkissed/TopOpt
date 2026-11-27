@@ -1,0 +1,117 @@
+Finding 7 (a)+(b)+(3) at c009fa30: the M2 stand's Structural ladder per type, before (eede708a) and after.
+Reproduce: f7_gate_full.sh c009fa30 <dir>, then python3 f7_flip.py <dir>. gap = exported / certified - 1 over every judged pocket.
+
+STAND (M2, Structural ladder; before = eede708a, after = this gate)
+
+octet
+  rung 0.68 before: refused: sealed cavity
+            after:  refused: sealed cavity
+  rung 0.52 before: refused: sealed cavity
+            after:  refused: sealed cavity
+  rung 0.38 before: 112 cells, rho 0.239-0.900, 509.2 g, margin 1680.2, ACCEPTED
+            after:  294 cells, rho 0.289-0.889, 511.8 g, margin 1686.2, ACCEPTED, gap +27.9 % (lightest pocket +0.0 %, heaviest +63.2 %)
+  rung 0.26 before: 106 cells, rho 0.243-0.900, 481.5 g, margin 1642.1, ACCEPTED
+            after:  231 cells, rho 0.320-0.836, 484.1 g, margin 1649.2, ACCEPTED, gap +30.2 % (lightest pocket +0.0 %, heaviest +57.1 %)
+
+fcc
+  rung 0.68 before: 125 cells, rho 0.233-0.591, 576.2 g, margin 1782.2, ACCEPTED
+            after:  refused: sealed cavity   <-- FLIP: now not latticed/accepted
+  rung 0.52 before: 131 cells, rho 0.232-0.591, 539.5 g, margin 1717.0, ACCEPTED
+            after:  refused: sealed cavity   <-- FLIP: now not latticed/accepted
+  rung 0.38 before: 61 cells, rho 0.232-0.591, 510.4 g, margin 1677.7, ACCEPTED
+            after:  419 cells, rho 0.247-0.584, 512.1 g, margin 1686.3, ACCEPTED, gap +0.0 % (lightest pocket +0.0 %, heaviest +0.0 %)
+  rung 0.26 before: 67 cells, rho 0.232-0.591, 482.3 g, margin 1640.3, ACCEPTED
+            after:  493 cells, rho 0.363-0.549, 484.4 g, margin 1649.8, ACCEPTED, gap +0.0 % (lightest pocket +0.0 %, heaviest +0.0 %)
+
+kelvin
+  rung 0.68 before: 16 cells, rho 0.267-0.504, 579.9 g, margin 1835.3, ACCEPTED
+            after:  195 cells, rho 0.310-0.462, 580.3 g, margin 1831.7, ACCEPTED, gap +0.0 % (lightest pocket +0.0 %, heaviest +0.0 %)
+  rung 0.52 before: 16 cells, rho 0.240-0.501, 543.4 g, margin 1768.2, ACCEPTED
+            after:  179 cells, rho 0.307-0.455, 543.7 g, margin 1765.2, ACCEPTED, gap +0.0 % (lightest pocket +0.0 %, heaviest +0.0 %)
+  rung 0.38 before: 15 cells, rho 0.291-0.499, 511.9 g, margin 1687.3, ACCEPTED
+            after:  36 cells, rho 0.291-0.433, 512.2 g, margin 1686.1, ACCEPTED, gap +0.0 % (lightest pocket +0.0 %, heaviest +0.0 %)
+  rung 0.26 before: 12 cells, rho 0.273-0.481, 484.1 g, margin 1650.4, ACCEPTED
+            after:  12 cells, rho 0.311-0.338, 484.5 g, margin 1649.6, ACCEPTED, gap +0.0 % (lightest pocket +0.0 %, heaviest +0.0 %)
+
+rhombic
+  rung 0.68 before: refused: sealed cavity
+            after:  refused: sealed cavity
+  rung 0.52 before: 33 cells, rho 0.172-0.462, 542.1 g, margin 1765.8, ACCEPTED
+            after:  92 cells, rho 0.172-0.462, 542.1 g, margin 1765.8, ACCEPTED, gap -3.1 % (lightest pocket -3.5 %, heaviest +0.0 %)
+  rung 0.38 before: 4 cells, rho 0.296-0.440, 512.2 g, margin 1686.1, ACCEPTED
+            after:  12 cells, rho 0.296-0.440, 512.2 g, margin 1686.1, ACCEPTED, gap +0.0 % (lightest pocket +0.0 %, heaviest +0.0 %)
+  rung 0.26 before: refused: the grading law could lattice NONE of this variant's 1443 ca
+            after:  refused: the grading law could lattice NONE of this variant's 1443 ca
+
+diamond
+  rung 0.68 before: 16 cells, rho 0.313-0.591, 580.0 g, margin 1836.9, ACCEPTED
+            after:  184 cells, rho 0.363-0.541, 580.3 g, margin 1831.7, ACCEPTED, gap +0.0 % (lightest pocket +0.0 %, heaviest +0.0 %)
+  rung 0.52 before: 16 cells, rho 0.281-0.588, 543.4 g, margin 1769.8, ACCEPTED
+            after:  169 cells, rho 0.360-0.533, 543.7 g, margin 1765.2, ACCEPTED, gap +0.0 % (lightest pocket +0.0 %, heaviest +0.0 %)
+  rung 0.38 before: refused: sealed cavity
+            after:  36 cells, rho 0.341-0.507, 512.2 g, margin 1686.1, ACCEPTED, gap +0.0 % (lightest pocket +0.0 %, heaviest +0.0 %)   <-- FLIP: now accepted
+  rung 0.26 before: 17 cells, rho 0.212-0.564, 484.0 g, margin 1652.3, ACCEPTED
+            after:  12 cells, rho 0.364-0.396, 484.5 g, margin 1649.6, ACCEPTED, gap +0.0 % (lightest pocket +0.0 %, heaviest +0.0 %)
+
+bcc
+  rung 0.68 before: 112 cells, rho 0.210-0.592, 576.3 g, margin 1837.8, ACCEPTED
+            after:  refused: sealed cavity   <-- FLIP: now not latticed/accepted
+  rung 0.52 before: 92 cells, rho 0.210-0.588, 540.5 g, margin 1771.8, ACCEPTED
+            after:  513 cells, rho 0.210-0.534, 541.9 g, margin 1766.7, ACCEPTED, gap -1.1 % (lightest pocket -1.5 %, heaviest +0.0 %)
+  rung 0.38 before: refused: sealed cavity
+            after:  36 cells, rho 0.342-0.508, 512.2 g, margin 1686.1, ACCEPTED, gap +0.0 % (lightest pocket +0.0 %, heaviest +0.0 %)   <-- FLIP: now accepted
+  rung 0.26 before: 18 cells, rho 0.210-0.565, 484.0 g, margin 1652.6, ACCEPTED
+            after:  12 cells, rho 0.364-0.397, 484.5 g, margin 1649.6, ACCEPTED, gap +0.0 % (lightest pocket +0.0 %, heaviest +0.0 %)
+
+sc
+  rung 0.68 before: 672 cells, rho 0.091-0.496, 552.4 g, margin 1642.8, ACCEPTED
+            after:  refused: sealed cavity   <-- FLIP: now not latticed/accepted
+  rung 0.52 before: 464 cells, rho 0.091-0.496, 525.1 g, margin 1624.0, ACCEPTED
+            after:  3041 cells, rho 0.095-0.493, 532.5 g, margin 1677.2, ACCEPTED, gap +5.6 % (lightest pocket -0.0 %, heaviest +9.0 %)
+  rung 0.38 before: 154 cells, rho 0.091-0.496, 506.3 g, margin 1671.1, ACCEPTED
+            after:  441 cells, rho 0.119-0.490, 511.0 g, margin 1686.3, ACCEPTED, gap +8.8 % (lightest pocket +0.0 %, heaviest +17.0 %)
+  rung 0.26 before: 167 cells, rho 0.091-0.496, 477.8 g, margin 1631.7, ACCEPTED
+            after:  492 cells, rho 0.116-0.461, 482.8 g, margin 1649.7, ACCEPTED, gap +9.0 % (lightest pocket +0.0 %, heaviest +11.7 %)
+
+gyroid
+  rung 0.68 before: refused: sealed cavity
+            after:  refused: sealed cavity
+  rung 0.52 before: 33 cells, rho 0.319-0.541, 542.4 g, margin 1765.5, ACCEPTED
+            after:  92 cells, rho 0.319-0.541, 542.4 g, margin 1765.5, ACCEPTED, gap +1.1 % (lightest pocket +0.0 %, heaviest +1.2 %)
+  rung 0.38 before: 4 cells, rho 0.346-0.515, 512.2 g, margin 1686.1, ACCEPTED
+            after:  12 cells, rho 0.346-0.515, 512.2 g, margin 1686.1, ACCEPTED, gap +0.0 % (lightest pocket +0.0 %, heaviest +0.0 %)
+  rung 0.26 before: refused: the grading law could lattice NONE of this variant's 1443 ca
+            after:  refused: the grading law could lattice NONE of this variant's 1443 ca
+
+schwarz_d
+  rung 0.68 before: refused: sealed cavity
+            after:  refused: sealed cavity
+  rung 0.52 before: 33 cells, rho 0.393-0.541, 542.6 g, margin 1765.5, ACCEPTED
+            after:  92 cells, rho 0.393-0.541, 542.6 g, margin 1765.5, ACCEPTED, gap +1.4 % (lightest pocket +0.0 %, heaviest +1.5 %)
+  rung 0.38 before: 4 cells, rho 0.393-0.514, 512.2 g, margin 1686.1, ACCEPTED
+            after:  12 cells, rho 0.393-0.514, 512.2 g, margin 1686.1, ACCEPTED, gap +0.0 % (lightest pocket +0.0 %, heaviest +0.0 %)
+  rung 0.26 before: refused: the grading law could lattice NONE of this variant's 1443 ca
+            after:  refused: the grading law could lattice NONE of this variant's 1443 ca
+
+THE 21 BINARIES (base eede708a vs this gate; outputs filtered as pipe.sh does)
+  IDENTICAL test_lattice_gen                 before: exit 0; PASS: 37 checks, 0 failures | after: exit 0; PASS: 37 checks, 0 failures
+  IDENTICAL test_stepped_plan                before: exit 0; PASS: 391 checks, 0 failures | after: exit 0; PASS: 391 checks, 0 failures
+  DIFFERS   test_lattice_boundary            before: exit 0; PASS: 52 checks, 0 failures | after: exit 0; PASS: 52 checks, 0 failures
+  DIFFERS   test_lattice_clip_shell          before: exit 0; test_lattice_clip_shell: 28 checks, 0 failures | after: exit 0; test_lattice_clip_shell: 28 checks, 0 failures
+  IDENTICAL test_lattice_void                before: exit 0 | after: exit 0
+  DIFFERS   test_lattice_skin_freeform       before: exit 0; 13 checks, 0 failures | after: exit 0; 13 checks, 0 failures
+  IDENTICAL test_grading                     before: exit 0 | after: exit 0
+  IDENTICAL test_lattice_refusal             before: exit 0; lattice_refusal: 9 checks, 0 failures | after: exit 0; lattice_refusal: 9 checks, 0 failures
+  IDENTICAL test_lattice_density_field       before: exit 0 | after: exit 0
+  IDENTICAL test_lattice_certification       before: exit 0 | after: exit 0
+  IDENTICAL test_lattice_region_mask         before: exit 0; test_lattice_region_mask: 46 checks, 0 failures | after: exit 0; test_lattice_region_mask: 46 checks, 0 failures
+  IDENTICAL test_analyze_fixed_design        before: exit 0 | after: exit 0
+  DIFFERS   test_lattice_hookup              before: exit 0; PASS: 59 checks, 0 failures | after: exit 0; PASS: 59 checks, 0 failures
+  DIFFERS   test_lattice_variant             before: exit 0; test_lattice_variant: 98 checks, 0 failures | after: exit 0; test_lattice_variant: 98 checks, 0 failures
+  DIFFERS   test_designbox_lattice_recert    before: exit 0; 55 checks, 0 failures | after: exit 0; 55 checks, 0 failures
+  IDENTICAL test_loadcase_analyze            before: exit 0 | after: exit 0
+  IDENTICAL test_orient                      before: exit 0 | after: exit 0
+  IDENTICAL test_lattice_depth_tie           before: exit 0 | after: exit 0
+  DIFFERS   test_lattice_void_exterior       before: exit 0 | after: exit 0
+  DIFFERS   test_bake_build_orientation      before: exit 0; 166 checks, 0 failures | after: exit 0; 166 checks, 0 failures
+  IDENTICAL test_mesh_job                    before: exit 0 | after: exit 0

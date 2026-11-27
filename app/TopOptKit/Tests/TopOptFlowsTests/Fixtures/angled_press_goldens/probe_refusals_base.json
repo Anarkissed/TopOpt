@@ -1,0 +1,7 @@
+{
+  "base" : "01ec5e3c",
+  "control" : null,
+  "core" : "523dd2f90b04",
+  "edge" : "job.json: flexible: flexible.faces[0]: missing required key \"face_region_id\"",
+  "tilt" : "job.json: flexible: flexible.faces[0]: unknown key \"press_direction\""
+}

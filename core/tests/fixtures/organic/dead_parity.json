@@ -1,0 +1,63 @@
+{
+  "_comment": "cli_organic_dead_parity (2026-09-29, #354's audit). A tiny organic job whose ONE run produces BOTH receipts that have to agree about which walls are dead: organic_probe.json (the size probe) and run_info.json (the run). The size probe runs inside the same process, before the run, off the same base solve -- see run_job.cpp's ORGANIC CELL-SIZE PROBE -- so a single `topopt-cli lattice-variant` invocation is the whole experiment.",
+  "_geometry": "dead_parity_tab.stl is an L-shaped prism extruded 12 mm in y: a 36x36 mm main body in x-z plus a 24x12 mm tab out of its +x side at z in [12,24]. The tab is FREE -- neither anchored nor loaded -- so it carries essentially nothing, which is what makes one wall reliably dead and the other reliably alive. Measured on this fixture: region 1 p99 0.949 MPa against a 0.0193 MPa threshold (49x ABOVE, alive), region 2 p99 0.00537 (3.6x BELOW, dead). Neither verdict is near the line.",
+  "_face_ids": "anchor 2 and load 9 are PSEUDO-FACE ids from the STL's planar segmentation, which is deterministic in the mesh's bytes (test_mesh_job pins that). They are not arbitrary: face 2 tags 114 voxels and face 9 tags 114 at resolution 32, and the test asserts the split they produce (exactly one dead wall) rather than trusting them -- if segmentation ever renumbers, the test says so instead of quietly comparing two empty sets.",
+  "model": "dead_parity_tab.stl",
+  "material": "PLA",
+  "mode": "lattice_part",
+  "resolution": 48,
+  "output": {
+    "mesh_format": "stl",
+    "report": "report.json",
+    "mesh_prefix": "dp"
+  },
+  "loads": {
+    "anchor_face_ids": [2],
+    "groups": [
+      {"face_ids": [9], "force": [0.0, 0.0, -400.0]}
+    ],
+    "minimize_plastic": true,
+    "build_dir": [0, 0, 1],
+    "layer_height_mm": 0.2
+  },
+  "lattice": {
+    "emit_stl": true,
+    "emit_3mf": false,
+    "topology": "octet",
+    "min_extrudable_width_mm": 0.45,
+    "outer_finish": "skin",
+    "_probe_note": "ONE candidate, and it is the RUN'S OWN window (grading.cell_min_mm == cell_max_mm == 3.0). That is deliberate: with the same window the probe grades the same posture the run grades, so the two dead sets must be IDENTICAL and any difference is the defect this fixture exists to catch. organic_recommend is off so the band adds no further candidates -- the whole run is ~6 s.",
+    "organic_probe_cells_mm": [3.0],
+    "organic_recommend": "off",
+    "regions": [
+      {
+        "role": "include", "kind": "face", "face_id": 101,
+        "synthetic_stress": true, "synthetic_foci": 3,
+        "_note": "IN the load path, on the main body. Square in-plane (half_u == half_w) so the region does not depend on which in-plane axis core calls u.",
+        "geometry": {
+          "origin": [18.0, 0.0, 8.0], "normal": [0.0, 1.0, 0.0],
+          "half_u_mm": 6.0, "half_w_mm": 6.0, "depth_mm": 12.0
+        }
+      },
+      {
+        "role": "include", "kind": "face", "face_id": 102,
+        "synthetic_stress": true, "synthetic_foci": 3,
+        "_note": "the FREE TAB's outer half. Dead, and dead by a factor, not by a hair.",
+        "geometry": {
+          "origin": [54.0, 0.0, 18.0], "normal": [0.0, 1.0, 0.0],
+          "half_u_mm": 4.0, "half_w_mm": 4.0, "depth_mm": 12.0
+        }
+      }
+    ]
+  },
+  "grading": {
+    "cell_mode": "swept",
+    "topology": "octet",
+    "min_extrudable_width_mm": 0.45,
+    "intent": "aesthetic",
+    "algorithm": "organic",
+    "cell_min_mm": 3.0,
+    "cell_max_mm": 3.0
+  },
+  "bake_build_orientation": "off"
+}

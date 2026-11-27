@@ -50,6 +50,9 @@ public enum PrimitiveGizmo {
         case free
         /// Rotate the primitive's orientation about this axis, through the pivot (the rings).
         case rotate(SIMD3<Double>)
+
+        /// A ring (turns the primitive in place) rather than a move.
+        public var isRotate: Bool { if case .rotate = self { return true }; return false }
     }
 
     /// A drag ray in the SAME frame as the primitive (model space): a point + unit dir.

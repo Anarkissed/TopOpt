@@ -1,0 +1,594 @@
+{
+  "flexible" : {
+    "beads_per_wall" : 1,
+    "faces" : [
+      {
+        "curve_centre_edge" : [
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "deepest_squish_mm" : 1,
+        "face_region_id" : 2,
+        "mode" : "centre_edge",
+        "role" : "loaded",
+        "skin_on" : true,
+        "weight_n" : 1
+      }
+    ],
+    "feel" : "springy",
+    "material_id" : "varioshore_tpu",
+    "min_extrudable_width_mm" : 0.45000000000000001,
+    "nozzle_temp_c" : "auto",
+    "topology" : "auto"
+  },
+  "loads" : {
+    "build_dir" : [
+      0,
+      0,
+      1
+    ],
+    "face_regions" : [
+      {
+        "add" : [
+          0
+        ],
+        "id" : 0,
+        "name" : "face 0"
+      },
+      {
+        "add" : [
+          1
+        ],
+        "id" : 1,
+        "name" : "face 1"
+      },
+      {
+        "add" : [
+          2
+        ],
+        "id" : 2,
+        "name" : "face 2"
+      },
+      {
+        "add" : [
+          3
+        ],
+        "id" : 3,
+        "name" : "face 3"
+      },
+      {
+        "add" : [
+          4
+        ],
+        "id" : 4,
+        "name" : "face 4"
+      },
+      {
+        "add" : [
+          5
+        ],
+        "id" : 5,
+        "name" : "face 5"
+      },
+      {
+        "add" : [
+          6
+        ],
+        "id" : 6,
+        "name" : "face 6"
+      },
+      {
+        "add" : [
+          7
+        ],
+        "id" : 7,
+        "name" : "face 7"
+      },
+      {
+        "add" : [
+          8
+        ],
+        "id" : 8,
+        "name" : "face 8"
+      },
+      {
+        "add" : [
+          9
+        ],
+        "id" : 9,
+        "name" : "face 9"
+      },
+      {
+        "add" : [
+          10
+        ],
+        "id" : 10,
+        "name" : "face 10"
+      },
+      {
+        "add" : [
+          11
+        ],
+        "id" : 11,
+        "name" : "face 11"
+      },
+      {
+        "add" : [
+          12
+        ],
+        "id" : 12,
+        "name" : "face 12"
+      },
+      {
+        "add" : [
+          13
+        ],
+        "id" : 13,
+        "name" : "face 13"
+      },
+      {
+        "add" : [
+          14
+        ],
+        "id" : 14,
+        "name" : "face 14"
+      },
+      {
+        "add" : [
+          15
+        ],
+        "id" : 15,
+        "name" : "face 15"
+      },
+      {
+        "add" : [
+          16
+        ],
+        "id" : 16,
+        "name" : "face 16"
+      },
+      {
+        "add" : [
+          17
+        ],
+        "id" : 17,
+        "name" : "face 17"
+      },
+      {
+        "add" : [
+          18
+        ],
+        "id" : 18,
+        "name" : "face 18"
+      },
+      {
+        "add" : [
+          19
+        ],
+        "id" : 19,
+        "name" : "face 19"
+      },
+      {
+        "add" : [
+          20
+        ],
+        "id" : 20,
+        "name" : "face 20"
+      },
+      {
+        "add" : [
+          21
+        ],
+        "id" : 21,
+        "name" : "face 21"
+      },
+      {
+        "add" : [
+          22
+        ],
+        "id" : 22,
+        "name" : "face 22"
+      },
+      {
+        "add" : [
+          23
+        ],
+        "id" : 23,
+        "name" : "face 23"
+      },
+      {
+        "add" : [
+          24
+        ],
+        "id" : 24,
+        "name" : "face 24"
+      },
+      {
+        "add" : [
+          25
+        ],
+        "id" : 25,
+        "name" : "face 25"
+      },
+      {
+        "add" : [
+          26
+        ],
+        "id" : 26,
+        "name" : "face 26"
+      },
+      {
+        "add" : [
+          27
+        ],
+        "id" : 27,
+        "name" : "face 27"
+      },
+      {
+        "add" : [
+          28
+        ],
+        "id" : 28,
+        "name" : "face 28"
+      },
+      {
+        "add" : [
+          29
+        ],
+        "id" : 29,
+        "name" : "face 29"
+      },
+      {
+        "add" : [
+          30
+        ],
+        "id" : 30,
+        "name" : "face 30"
+      },
+      {
+        "add" : [
+          31
+        ],
+        "id" : 31,
+        "name" : "face 31"
+      },
+      {
+        "add" : [
+          32
+        ],
+        "id" : 32,
+        "name" : "face 32"
+      },
+      {
+        "add" : [
+          33
+        ],
+        "id" : 33,
+        "name" : "face 33"
+      },
+      {
+        "add" : [
+          34
+        ],
+        "id" : 34,
+        "name" : "face 34"
+      },
+      {
+        "add" : [
+          35
+        ],
+        "id" : 35,
+        "name" : "face 35"
+      },
+      {
+        "add" : [
+          36
+        ],
+        "id" : 36,
+        "name" : "face 36"
+      },
+      {
+        "add" : [
+          37
+        ],
+        "id" : 37,
+        "name" : "face 37"
+      },
+      {
+        "add" : [
+          38
+        ],
+        "id" : 38,
+        "name" : "face 38"
+      },
+      {
+        "add" : [
+          39
+        ],
+        "id" : 39,
+        "name" : "face 39"
+      },
+      {
+        "add" : [
+          40
+        ],
+        "id" : 40,
+        "name" : "face 40"
+      },
+      {
+        "add" : [
+          41
+        ],
+        "id" : 41,
+        "name" : "face 41"
+      },
+      {
+        "add" : [
+          42
+        ],
+        "id" : 42,
+        "name" : "face 42"
+      },
+      {
+        "add" : [
+          43
+        ],
+        "id" : 43,
+        "name" : "face 43"
+      },
+      {
+        "add" : [
+          44
+        ],
+        "id" : 44,
+        "name" : "face 44"
+      },
+      {
+        "add" : [
+          45
+        ],
+        "id" : 45,
+        "name" : "face 45"
+      },
+      {
+        "add" : [
+          46
+        ],
+        "id" : 46,
+        "name" : "face 46"
+      },
+      {
+        "add" : [
+          47
+        ],
+        "id" : 47,
+        "name" : "face 47"
+      },
+      {
+        "add" : [
+          48
+        ],
+        "id" : 48,
+        "name" : "face 48"
+      },
+      {
+        "add" : [
+          49
+        ],
+        "id" : 49,
+        "name" : "face 49"
+      },
+      {
+        "add" : [
+          50
+        ],
+        "id" : 50,
+        "name" : "face 50"
+      },
+      {
+        "add" : [
+          51
+        ],
+        "id" : 51,
+        "name" : "face 51"
+      },
+      {
+        "add" : [
+          52
+        ],
+        "id" : 52,
+        "name" : "face 52"
+      },
+      {
+        "add" : [
+          53
+        ],
+        "id" : 53,
+        "name" : "face 53"
+      },
+      {
+        "add" : [
+          54
+        ],
+        "id" : 54,
+        "name" : "face 54"
+      },
+      {
+        "add" : [
+          55
+        ],
+        "id" : 55,
+        "name" : "face 55"
+      },
+      {
+        "add" : [
+          56
+        ],
+        "id" : 56,
+        "name" : "face 56"
+      },
+      {
+        "add" : [
+          57
+        ],
+        "id" : 57,
+        "name" : "face 57"
+      },
+      {
+        "add" : [
+          58
+        ],
+        "id" : 58,
+        "name" : "face 58"
+      },
+      {
+        "add" : [
+          59
+        ],
+        "id" : 59,
+        "name" : "face 59"
+      },
+      {
+        "add" : [
+          60
+        ],
+        "id" : 60,
+        "name" : "face 60"
+      },
+      {
+        "add" : [
+          61
+        ],
+        "id" : 61,
+        "name" : "face 61"
+      },
+      {
+        "add" : [
+          62
+        ],
+        "id" : 62,
+        "name" : "face 62"
+      },
+      {
+        "add" : [
+          63
+        ],
+        "id" : 63,
+        "name" : "face 63"
+      },
+      {
+        "add" : [
+          64
+        ],
+        "id" : 64,
+        "name" : "face 64"
+      },
+      {
+        "add" : [
+          65
+        ],
+        "id" : 65,
+        "name" : "face 65"
+      },
+      {
+        "add" : [
+          66
+        ],
+        "id" : 66,
+        "name" : "face 66"
+      },
+      {
+        "add" : [
+          67
+        ],
+        "id" : 67,
+        "name" : "face 67"
+      },
+      {
+        "add" : [
+          68
+        ],
+        "id" : 68,
+        "name" : "face 68"
+      },
+      {
+        "add" : [
+          69
+        ],
+        "id" : 69,
+        "name" : "face 69"
+      },
+      {
+        "add" : [
+          70
+        ],
+        "id" : 70,
+        "name" : "face 70"
+      },
+      {
+        "add" : [
+          71
+        ],
+        "id" : 71,
+        "name" : "face 71"
+      },
+      {
+        "add" : [
+          72
+        ],
+        "id" : 72,
+        "name" : "face 72"
+      },
+      {
+        "add" : [
+          73
+        ],
+        "id" : 73,
+        "name" : "face 73"
+      },
+      {
+        "add" : [
+          74
+        ],
+        "id" : 74,
+        "name" : "face 74"
+      },
+      {
+        "add" : [
+          75
+        ],
+        "id" : 75,
+        "name" : "face 75"
+      },
+      {
+        "add" : [
+          76
+        ],
+        "id" : 76,
+        "name" : "face 76"
+      },
+      {
+        "add" : [
+          77
+        ],
+        "id" : 77,
+        "name" : "face 77"
+      }
+    ]
+  },
+  "material" : "varioshore_tpu",
+  "mode" : "analyze",
+  "model" : "$ROOT\/A1000001-0000-4000-8000-000000000002\/model.step",
+  "output" : {
+    "mesh_format" : "stl",
+    "mesh_prefix" : "unused",
+    "report" : "report.json"
+  },
+  "resolution" : 64
+}

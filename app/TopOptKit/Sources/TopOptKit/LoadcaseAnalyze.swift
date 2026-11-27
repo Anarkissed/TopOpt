@@ -30,6 +30,9 @@ extension TopOptKit {
         // The per-voxel von Mises field (MPa, 0 off the solid set) + its grid,
         // the exact metadata the SDF preview's demand field needs.
         public let vonMisesField: [Float]
+        /// ★ The per-voxel Cauchy tensor, 6 per voxel, Voigt, TRUE shear, MPa — what
+        /// the ORGANIC tracer eigen-decomposes. Empty when core produced none.
+        public let stressTensorField: [Double]
         public let gridNX: Int, gridNY: Int, gridNZ: Int
         public let gridOrigin: SIMD3<Double>
         public let spacingMM: Double
@@ -37,6 +40,7 @@ extension TopOptKit {
         public init(accepted: Bool, nonConvergent: Bool, maxStressMPa: Double,
                     marginWorstCase: Double, marginRequired: Double,
                     maxDisplacementMM: Double, vonMisesField: [Float],
+                    stressTensorField: [Double] = [],
                     gridNX: Int, gridNY: Int, gridNZ: Int,
                     gridOrigin: SIMD3<Double>, spacingMM: Double) {
             self.accepted = accepted
@@ -46,6 +50,7 @@ extension TopOptKit {
             self.marginRequired = marginRequired
             self.maxDisplacementMM = maxDisplacementMM
             self.vonMisesField = vonMisesField
+            self.stressTensorField = stressTensorField
             self.gridNX = gridNX
             self.gridNY = gridNY
             self.gridNZ = gridNZ
@@ -62,13 +67,24 @@ extension TopOptKit {
         modelPath: String, material: String, materialsPath: String,
         rulesPath: String, resolution: Int,
         anchorFaceIDs: [Int], loadGroups: [LoadGroupSpec],
-        buildDirection: SIMD3<Double> = SIMD3(0, 0, 1)
+        buildDirection: SIMD3<Double> = SIMD3(0, 0, 1),
+        // ★ THE REGION LAYER (2026-09-05): a load or anchor painted as a REGION has
+        // no native faces; without these the stage's solve threw "every declared
+        // load group contributed nothing" and the organic preview had no tensor.
+        faceRegions: [FaceRegionSpec] = [],
+        anchorRegionIDs: [Int] = []
     ) throws -> SimAnalysisResult {
         var lc = topoptbridge.BridgeLoadCase()
         for f in anchorFaceIDs { lc.anchor_face_ids.push_back(Int32(f)) }
+        Self.applyRegionLayer(&lc, faceRegions: faceRegions, anchorRegionIDs: anchorRegionIDs)
+        let anyGroupRegions = loadGroups.contains { !$0.regionIDs.isEmpty }
         for g in loadGroups {
             for f in g.faceIDs { lc.load_face_ids.push_back(Int32(f)) }
             lc.load_group_sizes.push_back(Int32(g.faceIDs.count))
+            if anyGroupRegions {
+                for r in g.regionIDs { lc.load_region_ids.push_back(Int32(r)) }
+                lc.load_group_region_sizes.push_back(Int32(g.regionIDs.count))
+            }
             lc.load_forces.push_back(g.force.x)
             lc.load_forces.push_back(g.force.y)
             lc.load_forces.push_back(g.force.z)
@@ -104,6 +120,7 @@ extension TopOptKit {
             marginRequired: raw.margin_required,
             maxDisplacementMM: maxDisp.squareRoot(),
             vonMisesField: Array(raw.von_mises_field),
+            stressTensorField: Array(raw.stress_tensor_field),
             gridNX: Int(raw.grid_nx), gridNY: Int(raw.grid_ny), gridNZ: Int(raw.grid_nz),
             gridOrigin: SIMD3(raw.grid_origin_x, raw.grid_origin_y, raw.grid_origin_z),
             spacingMM: raw.spacing)
