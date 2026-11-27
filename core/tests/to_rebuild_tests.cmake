@@ -27,6 +27,10 @@ if(Eigen3_FOUND)
   # Long (about 20 minutes): every row at k = 1 to 16, gated at k = 8.  ctest -C Long -R to_recheck_fill
   add_test(NAME to_recheck_fill CONFIGURATIONS Long COMMAND test_to_recheck_fill --gate)
   set_tests_properties(to_recheck_fill PROPERTIES TIMEOUT 7200)
+  # The thin-member rule: a beam in bending at 0.5, 1, 2 and 4 x the reading size.
+  add_executable(test_to_strength_thin_member tests/unit/test_to_strength_thin_member.cpp)
+  target_link_libraries(test_to_strength_thin_member PRIVATE topopt)
+  add_test(NAME to_strength_thin_member COMMAND test_to_strength_thin_member)
   # The across-layer reading over a size, against Kirsch's tension along the pull.
   add_executable(test_to_strength_across_layers tests/unit/test_to_strength_across_layers.cpp)
   target_link_libraries(test_to_strength_across_layers PRIVATE topopt)

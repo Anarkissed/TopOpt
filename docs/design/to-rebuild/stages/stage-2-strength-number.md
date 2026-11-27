@@ -540,3 +540,15 @@ The ellipse (22:35), the same way:
 | 6 | 2 / 3 | -2.3 / -7.8 | -6.6 / -9.6 | -0.4 / -0.3 | 0.0 / 0.0 |
 
 SIZE FORM, all 16 rows on two shapes: at k = 8 within 0.5 % of the certificate's number everywhere (worst -0.5), and 0.5 % or less from k = 8 to 16. k = 4 is NOT enough (one row at -9.6 %). So for the size form k = 8 meets both ruled tests; for the one-voxel form k = 8 is the best measured (within 2.5 %) and nothing finer is better.
+
+### B5, the bracket at FULL resolution with the switch on (2026-11-27 01:18 to 01:47, under the lock; res 96, check voxel 1.04 mm, drawn faces, automatic pad)
+
+`TOPOPT_STRENGTH=size`, PLA: "[strength] one-voxel reading, as today: reading over 1.20 mm needs a check voxel of 0.69 mm or finer, and this job's is 1.04 mm." So the strength number is today's, as ruled, and what the switch changes on this job is the grams:
+
+| version | shown margin | printed grams (solid grams) | saved against the part as drawn, printed (144.4 g) |
+|---|---|---|---|
+| 0.68 | 4.33 | 115.6 (161.3) | 20 % |
+| 0.52 | 4.30 | 97.0 (127.7) | 33 % |
+| 0.38 | 3.90 | 80.4 (98.3) | 44 % |
+
+The part as drawn prints at 144.4 g of 227.5 g solid (this bracket is thick, so a large share is infill). The same three designs by solid volume would read 29 / 44 / 57 % saved: the printed figures are the ones he would weigh. 1724 s. The switch-off run of this job was stopped by my guard under the old swapouts clause and is owed again; the forced 3.6 mm run and the stand at res 128 are still running.
