@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "topopt/face_overrides.hpp"
+#include "topopt/fea.hpp"
 #include "topopt/lattice_file_strength.hpp"
 #include "topopt/lattice_layout_break.hpp"
 #include "topopt/lattice_layout_file.hpp"
@@ -145,7 +146,7 @@ void bar() {
   ask.z_knockdown = 0.55;
   const BreakSize sz = organic_break_size(ask);
   const BreakResult r = organic_break_check(ask);
-  const double want_bytes = 11250.0 * 3200.0 + 11250.0 * 73.0;
+  const double want_bytes = 11250.0 * 3200.0 + 11250.0 * 125.0;
   std::printf("bar: size %d x %d x %d, %zu material voxels, %.0f bytes (want 11250, %.0f); ok %d %s verdict %s, first break %.4f at (%.2f, %.2f, "
               "%.2f) %s; force asked %s\n", sz.nx, sz.ny, sz.nz, sz.material_voxels, sz.bytes, want_bytes, r.ok, r.why.c_str(), r.verdict.c_str(),
               r.first_resolved.multiple, r.first_resolved.at.x, r.first_resolved.at.y, r.first_resolved.at.z, r.first_resolved.by.c_str(),
@@ -406,12 +407,65 @@ void post_width(const std::string& print_path, double x, double y, double z) {
               in(c, c) ? (x1 - x0 + 1) * h : 0.0, in(c, c) ? (y1 - y0 + 1) * h : 0.0);
 }
 
+// C4, mark 7 (grid-placement steadiness): "steady PRINT PART FIXED LOADED FZ YIELD SHIFT_MM POSTS" runs the check on a
+// made print at one grid shift (the same shift on all three axes), one solver thread, and prints the verdict, the first
+// break, the posts' share of the force and the places under the pass line. POSTS: "x,y,zb,zt;..." (the file's
+// print_check.posts), or "-" for none.
+void steady(char** a) {
+  const StlMesh print = read_stl_file(a[0]);
+  const StepModel m = import_part_file_resolved(a[1]);
+  const MaterialLibrary lib = load_materials_file(MATERIALS_JSON_PATH);
+  const Material& pla = lib.at("PLA");
+  BreakAsk ask;
+  ask.print = &print.mesh;
+  ask.part = &m;
+  ask.fixed_faces = {std::atoi(a[2])};
+  ask.loads = {{{std::atoi(a[3])}, {0, 0, std::atof(a[4])}}};
+  ask.youngs_mpa = pla.youngs_modulus_mpa;
+  ask.poisson = pla.poisson;
+  ask.yield_mpa = std::atof(a[5]);
+  ask.z_knockdown = pla.z_knockdown;
+  const double sh = std::atof(a[6]) / ask.voxel_mm;
+  ask.grid_shift = {sh, sh, sh};
+  if (std::string(a[7]) != "-") {
+    std::stringstream ss(a[7]);
+    std::string one;
+    while (std::getline(ss, one, ';')) {
+      BreakPost q;
+      std::sscanf(one.c_str(), "%lf,%lf,%lf,%lf", &q.x, &q.y, &q.z_bottom, &q.z_top);
+      ask.posts.push_back(q);
+    }
+  }
+  fea_set_matfree_threads(1);
+  const BreakResult r = organic_break_check(ask);
+  double pf = 0.0;
+  std::string per;
+  for (const BreakClass& c : r.classes)
+    if (c.cls == "post") {
+      pf += std::fabs(c.section_force_n);
+      char b[160];
+      std::snprintf(b, sizeof b, " post %d: own %.4f (%s), section %.4f, %.4f N", c.post, c.all.multiple, c.all.resolved ? "judged" : "not judged",
+                    c.section_multiple, c.section_force_n);
+      per += b;
+    }
+  const double F = std::fabs(std::atof(a[4]));
+  std::printf("STEADY shift %.2f mm: ok %d %s; verdict %s; first break %.4f at (%.2f, %.2f, %.2f) %s; all points %.4f; posts' share %.2f %%;%s; "
+              "voxels %zu; rounds %d, %.1f s, peak %.0f MB\n",
+              std::atof(a[6]), r.ok, r.why.c_str(), r.verdict.c_str(), r.first_resolved.multiple, r.first_resolved.at.x, r.first_resolved.at.y,
+              r.first_resolved.at.z, r.first_resolved.cls.c_str(), r.first_all.multiple, F > 0 ? 100.0 * pf / F : 0.0, per.c_str(),
+              r.size.material_voxels, r.rounds, r.seconds, r.peak_mb);
+  std::printf("STEADY places under the pass line:");
+  for (const BreakPoint& q : r.not_judged_under) std::printf(" %.3f@(%.1f,%.1f,%.1f)%s", q.multiple, q.at.x, q.at.y, q.at.z, q.cls.c_str());
+  std::printf("\n");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
   gate();
   law();
   bar();
+  if (argc >= 10 && std::string(argv[1]) == "steady") { steady(argv + 2); return 0; }
   if (argc >= 3 && std::string(argv[1]) == "oversize") oversize(argv[2]);
   if (argc >= 5 && std::string(argv[1]) == "size") { size_of(argv[2], argv[3], std::atof(argv[4])); return failures == 0 ? 0 : 1; }
   if (argc >= 6 && std::string(argv[1]) == "postwidth") {

@@ -23,7 +23,9 @@ namespace {
 constexpr double kBytesPerMaterialVoxel = 3200.0;   // the plan's estimate (section 4), to be measured in M1
 // Review 4: the full-box arrays (tags, E, the stresses, classes, the distance and multiple, five masks: about 49 B) and
 // the solution (3 doubles per node, about 24 B per box voxel).
-constexpr double kBytesPerBoxVoxel = 73.0;
+// + C4: the filled share (4 B) and the fine gate (8 samples per voxel: 8 B of mask, 8 B of core, 32 B of distances)
+constexpr double kBytesPerBoxVoxel = 125.0;
+constexpr float kFillFloor = 0.1f;   // C4: a voxel a tenth filled or more is material (partial volumes)
 
 struct Grid {
   Vec3 lo{};
@@ -134,6 +136,158 @@ std::size_t count_material(const BreakAsk& ask, const Grid& g) {
     }
   }
   return count;
+}
+
+// C4: the print's inside test (the product voxeliser's own rule: a +Z signed-crossing scan, boundary-inclusive
+// triangles, the winding of the crossings above the point non-zero) at m x m x m points per voxel, row by row; `on` is
+// called for every inside point (I, J, K) of the fine grid. Memory: one fine row's crossings.
+template <class F>
+void sample_inside(const BreakAsk& ask, const Grid& g, int m, F&& on) {
+  const TriangleMesh& mesh = *ask.print;
+  const Vec3 lo = g.lo;
+  const double h = g.h / m;
+  const int nx = g.nx * m, ny = g.ny * m, nz = g.nz * m;
+  std::vector<std::vector<int>> rows(static_cast<std::size_t>(ny));
+  for (std::size_t t = 0; t < mesh.triangles.size(); ++t) {
+    const auto& tri = mesh.triangles[t];
+    const Vec3& a = mesh.vertices[static_cast<std::size_t>(tri[0])];
+    const Vec3& b = mesh.vertices[static_cast<std::size_t>(tri[1])];
+    const Vec3& c = mesh.vertices[static_cast<std::size_t>(tri[2])];
+    const double area2 = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    if (std::fabs(area2) < 1e-18) continue;
+    int j0 = static_cast<int>(std::floor((std::min(a.y, std::min(b.y, c.y)) - lo.y) / h - 0.5));
+    int j1 = static_cast<int>(std::ceil((std::max(a.y, std::max(b.y, c.y)) - lo.y) / h - 0.5));
+    j0 = std::max(j0, 0);
+    j1 = std::min(j1, ny - 1);
+    for (int j = j0; j <= j1; ++j) rows[static_cast<std::size_t>(j)].push_back(static_cast<int>(t));
+  }
+  struct Crossing { double z; int sign; };
+  std::vector<std::vector<Crossing>> columns(static_cast<std::size_t>(nx));
+  for (int j = 0; j < ny; ++j) {
+    for (auto& col : columns) col.clear();
+    const double py = lo.y + (static_cast<double>(j) + 0.5) * h;
+    for (int t : rows[static_cast<std::size_t>(j)]) {
+      const auto& tri = mesh.triangles[static_cast<std::size_t>(t)];
+      const Vec3& a = mesh.vertices[static_cast<std::size_t>(tri[0])];
+      const Vec3& b = mesh.vertices[static_cast<std::size_t>(tri[1])];
+      const Vec3& c = mesh.vertices[static_cast<std::size_t>(tri[2])];
+      const double area2 = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+      const int sign = area2 > 0.0 ? 1 : -1;
+      int i0 = static_cast<int>(std::floor((std::min(a.x, std::min(b.x, c.x)) - lo.x) / h - 0.5));
+      int i1 = static_cast<int>(std::ceil((std::max(a.x, std::max(b.x, c.x)) - lo.x) / h - 0.5));
+      i0 = std::max(i0, 0);
+      i1 = std::min(i1, nx - 1);
+      for (int i = i0; i <= i1; ++i) {
+        const double px = lo.x + (static_cast<double>(i) + 0.5) * h;
+        const double e0 = (b.x - a.x) * (py - a.y) - (b.y - a.y) * (px - a.x);
+        const double e1 = (c.x - b.x) * (py - b.y) - (c.y - b.y) * (px - b.x);
+        const double e2 = (a.x - c.x) * (py - c.y) - (a.y - c.y) * (px - c.x);
+        const bool inside = (e0 >= 0.0 && e1 >= 0.0 && e2 >= 0.0) || (e0 <= 0.0 && e1 <= 0.0 && e2 <= 0.0);
+        if (!inside) continue;
+        columns[static_cast<std::size_t>(i)].push_back(Crossing{(e1 * a.z + e2 * b.z + e0 * c.z) / area2, sign});
+      }
+    }
+    for (int i = 0; i < nx; ++i) {
+      auto& cr = columns[static_cast<std::size_t>(i)];
+      if (cr.empty()) continue;
+      std::sort(cr.begin(), cr.end(), [](const Crossing& p, const Crossing& q) { return p.z < q.z; });
+      int total = 0;
+      for (const Crossing& x : cr) total += x.sign;
+      int below = 0;
+      std::size_t next = 0;
+      for (int k = 0; k < nz; ++k) {
+        const double cz = lo.z + (static_cast<double>(k) + 0.5) * h;
+        while (next < cr.size() && cr[next].z <= cz) { below += cr[next].sign; ++next; }
+        if (total - below != 0) on(i, j, k);
+      }
+    }
+  }
+}
+
+// The squared Euclidean distance transform (Felzenszwalb and Huttenlocher), in place on a 3-D array of squared
+// distances (0 at the sites, a large number elsewhere), x fastest.
+void edt_line(std::vector<float>& f, std::vector<float>& d, std::vector<int>& v, std::vector<float>& z, int n) {
+  const auto at = [&](int q) { return static_cast<double>(f[static_cast<std::size_t>(q)]) + static_cast<double>(q) * q; };
+  int k = 0;
+  v[0] = 0;
+  z[0] = -1e30f;
+  z[1] = 1e30f;
+  for (int q = 1; q < n; ++q) {
+    double sq = (at(q) - at(v[static_cast<std::size_t>(k)])) / (2.0 * (q - v[static_cast<std::size_t>(k)]));
+    while (sq <= z[static_cast<std::size_t>(k)]) {
+      --k;
+      sq = (at(q) - at(v[static_cast<std::size_t>(k)])) / (2.0 * (q - v[static_cast<std::size_t>(k)]));
+    }
+    ++k;
+    v[static_cast<std::size_t>(k)] = q;
+    z[static_cast<std::size_t>(k)] = static_cast<float>(sq);
+    z[static_cast<std::size_t>(k) + 1] = 1e30f;
+  }
+  k = 0;
+  for (int q = 0; q < n; ++q) {
+    while (z[static_cast<std::size_t>(k) + 1] < static_cast<float>(q)) ++k;
+    const int p = v[static_cast<std::size_t>(k)];
+    d[static_cast<std::size_t>(q)] = static_cast<float>(static_cast<double>(q - p) * (q - p) + f[static_cast<std::size_t>(p)]);
+  }
+}
+void edt3(std::vector<float>& a, int nx, int ny, int nz) {
+  const int n = std::max({nx, ny, nz});
+  std::vector<float> f(static_cast<std::size_t>(n)), d(static_cast<std::size_t>(n)), z(static_cast<std::size_t>(n) + 1);
+  std::vector<int> v(static_cast<std::size_t>(n));
+  const auto at = [&](int i, int j, int k) -> float& {
+    return a[(static_cast<std::size_t>(k) * static_cast<std::size_t>(ny) + static_cast<std::size_t>(j)) * static_cast<std::size_t>(nx) + static_cast<std::size_t>(i)];
+  };
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j) {
+      for (int i = 0; i < nx; ++i) f[static_cast<std::size_t>(i)] = at(i, j, k);
+      edt_line(f, d, v, z, nx);
+      for (int i = 0; i < nx; ++i) at(i, j, k) = d[static_cast<std::size_t>(i)];
+    }
+  for (int k = 0; k < nz; ++k)
+    for (int i = 0; i < nx; ++i) {
+      for (int j = 0; j < ny; ++j) f[static_cast<std::size_t>(j)] = at(i, j, k);
+      edt_line(f, d, v, z, ny);
+      for (int j = 0; j < ny; ++j) at(i, j, k) = d[static_cast<std::size_t>(j)];
+    }
+  for (int j = 0; j < ny; ++j)
+    for (int i = 0; i < nx; ++i) {
+      for (int k = 0; k < nz; ++k) f[static_cast<std::size_t>(k)] = at(i, j, k);
+      edt_line(f, d, v, z, nz);
+      for (int k = 0; k < nz; ++k) at(i, j, k) = d[static_cast<std::size_t>(k)];
+    }
+}
+
+// C4: the judged gate from the fine samples (2 per voxel edge, 0.1 mm at 0.2 mm), in mm: a point is in a member at least
+// `min_voxels_across` voxels thick where it lies in the OPENING of the material by a ball of radius (min / 2) voxels
+// (the union of every ball of that radius that fits in the material): the samples at least that far from the empty
+// (the erosion), then every material sample within that radius of the erosion. A voxel is judged when any of its
+// samples is. The box is padded by one empty sample on every side.
+std::vector<char> judged_fine(const BreakAsk& ask, const Grid& g, const std::vector<char>& mat) {
+  const int m = 2;
+  const int NX = g.nx * m + 2, NY = g.ny * m + 2, NZ = g.nz * m + 2;
+  const double hs = g.h / m;
+  const std::size_t N = static_cast<std::size_t>(NX) * NY * NZ;
+  const auto idx = [&](int i, int j, int k) { return (static_cast<std::size_t>(k) * NY + static_cast<std::size_t>(j)) * NX + static_cast<std::size_t>(i); };
+  std::vector<char> in(N, 0);
+  sample_inside(ask, g, m, [&](int i, int j, int k) { in[idx(i + 1, j + 1, k + 1)] = 1; });
+  const double r = 0.5 * static_cast<double>(ask.min_voxels_across) * g.h;
+  std::vector<float> a(N);
+  for (std::size_t e = 0; e < N; ++e) a[e] = in[e] ? 1e12f : 0.0f;   // sites: the empty samples
+  edt3(a, NX, NY, NZ);
+  std::vector<char> core(N, 0);
+  for (std::size_t e = 0; e < N; ++e) core[e] = in[e] && (std::sqrt(static_cast<double>(a[e])) - 0.5) * hs >= r - 1e-9;
+  for (std::size_t e = 0; e < N; ++e) a[e] = core[e] ? 0.0f : 1e12f;   // sites: the erosion
+  edt3(a, NX, NY, NZ);
+  std::vector<char> res(mat.size(), 0);
+  for (int k = 1; k < NZ - 1; ++k)
+    for (int j = 1; j < NY - 1; ++j)
+      for (int i = 1; i < NX - 1; ++i) {
+        const std::size_t e = idx(i, j, k);
+        if (!in[e] || std::sqrt(static_cast<double>(a[e])) * hs > r + 1e-9) continue;
+        const std::size_t v = g.index((i - 1) / m, (j - 1) / m, (k - 1) / m);
+        if (mat[v]) res[v] = 1;
+      }
+  return res;
 }
 
 std::vector<char> material_of(const BreakAsk& ask, const Grid& g) {
@@ -520,7 +674,26 @@ BreakResult organic_break_check(const BreakAsk& ask) {
   if (stopped()) return not_checked("stopped", "the job was stopped before the check");
   const Grid g = grid_of(ask);
   const double h = g.h;
-  const std::vector<char> mat = material_of(ask, g);
+  // C4, PARTIAL VOLUMES: each voxel's filled share read at 4 x 4 x 4 points (the voxeliser's own inside rule); a voxel
+  // is material from a tenth filled (kFillFloor), its stiffness E x its share, so a thin member's stiffness follows its
+  // real section wherever the grid sits. (A test's material_override still decides the material itself, whole voxels.)
+  std::vector<float> frac;
+  std::vector<char> mat;
+  if (ask.material_override) {
+    mat = material_of(ask, g);
+    frac.assign(mat.size(), 0.0f);
+    for (std::size_t e = 0; e < mat.size(); ++e) frac[e] = mat[e] ? 1.0f : 0.0f;
+  } else {
+    std::vector<unsigned char> cnt(static_cast<std::size_t>(g.nx) * g.ny * g.nz, 0);
+    sample_inside(ask, g, 4, [&](int i, int j, int k) { ++cnt[g.index(i / 4, j / 4, k / 4)]; });
+    mat.assign(cnt.size(), 0);
+    frac.assign(cnt.size(), 0.0f);
+    for (std::size_t e = 0; e < cnt.size(); ++e) {
+      frac[e] = static_cast<float>(cnt[e]) / 64.0f;
+      mat[e] = frac[e] >= kFillFloor;
+      if (!mat[e]) frac[e] = 0.0f;
+    }
+  }
   R.size.nx = g.nx;
   R.size.ny = g.ny;
   R.size.nz = g.nz;
@@ -538,7 +711,8 @@ BreakResult organic_break_check(const BreakAsk& ask) {
   vg.origin = g.lo;
   vg.tags.assign(mat.size(), VoxelTag::Empty);
   for (std::size_t e = 0; e < mat.size(); ++e) if (mat[e]) vg.tags[e] = VoxelTag::Interior;
-  const std::vector<double> E(mat.size(), ask.youngs_mpa);
+  std::vector<double> E(mat.size(), ask.youngs_mpa);
+  for (std::size_t e = 0; e < mat.size(); ++e) if (mat[e]) E[e] = ask.youngs_mpa * frac[e];   // C4: E x the filled share
   // 2. the part's fixed and loaded faces on this grid. A face with over 5 % of its area out of reach of the print's
   // material is a load or a hold on empty space: not checked, the face named (review 1.2).
   std::string faces_json;
@@ -695,7 +869,8 @@ BreakResult organic_break_check(const BreakAsk& ask) {
         }
   }
   // 6. judged (resolved): break_judged (the gate the verdict reads)
-  const std::vector<char> res = break_judged(mat, g.nx, g.ny, g.nz, ask.min_voxels_across);
+  // C4: the gate from the fine samples, in mm (judged_fine); a test's own voxels keep the whole-voxel gate
+  const std::vector<char> res = ask.material_override ? break_judged(mat, g.nx, g.ny, g.nz, ask.min_voxels_across) : judged_fine(ask, g, mat);
   // 7. the smoothed multiple per material voxel
   std::vector<std::array<int, 3>> ball;
   const int RB = static_cast<int>(std::ceil(ask.smooth_mm / h)) + 1;
@@ -711,15 +886,17 @@ BreakResult organic_break_check(const BreakAsk& ask) {
     for (int j = 0; j < g.ny; ++j)
       for (int i = 0; i < g.nx; ++i) {
         if (!M(i, j, k)) continue;
+        // the material's stress (full E x the strain) averaged over the ball, each voxel weighted by its filled share
         double s6[6] = {0, 0, 0, 0, 0, 0};
-        int n = 0;
+        double wsum = 0.0;
         for (const auto& o : ball) {
           if (!M(i + o[0], j + o[1], k + o[2])) continue;
-          const auto& v = sig[g.index(i + o[0], j + o[1], k + o[2])];
-          for (int q = 0; q < 6; ++q) s6[q] += v[static_cast<std::size_t>(q)];
-          ++n;
+          const std::size_t eo = g.index(i + o[0], j + o[1], k + o[2]);
+          const auto& v = sig[eo];
+          for (int q = 0; q < 6; ++q) s6[q] += frac[eo] * v[static_cast<std::size_t>(q)];
+          wsum += frac[eo];
         }
-        for (double& x : s6) x /= n;
+        for (double& x : s6) x /= wsum;
         const double a9[9] = {s6[0], s6[3], s6[5], s6[3], s6[1], s6[4], s6[5], s6[4], s6[2]};
         double val[3], vec[9];
         symmetric_eigen3(a9, val, vec);
@@ -828,7 +1005,7 @@ BreakResult organic_break_check(const BreakAsk& ask) {
           const double ul = std::sqrt(U.x * U.x + U.y * U.y + U.z * U.z);
           const Vec3 n{U.x / ul, U.y / ul, U.z / ul};
           const double sn = s[0] * n.x * n.x + s[1] * n.y * n.y + s[2] * n.z * n.z + 2.0 * (s[3] * n.x * n.y + s[4] * n.y * n.z + s[5] * n.z * n.x);
-          f += sn * h * h;
+          f += frac[g.index(i, j, km)] * sn * h * h;   // C4: the force the partial voxel carries
         }
       bc.section_mm2 = (pbox[c][1] - pbox[c][0]) * (pbox[c][3] - pbox[c][2]);
       bc.section_force_n = f;
