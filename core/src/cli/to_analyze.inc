@@ -315,6 +315,9 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     throw JobError("analyze: --smooth requires a --mesh input to smooth");
 
   VoxelGrid design_grid = cert_grid;
+  // ONE JUDGE (to_stage_switch.hpp, TOPOPT_RECHECK=fill): each voxel's fill of the
+  // file being re-checked; empty when the switch is off or no file is analysed.
+  std::vector<double> file_fill;
   // The smoothed mesh, held until the applied build orientation is known (see
   // below). Empty unless --smooth ran.
   TriangleMesh pending_smoothed_mesh;
@@ -398,6 +401,8 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     // preserves the part's Fixture/Load tags at the domain offset, so the tag
     // carry-over below reads the same tags it always did.
     design_grid = voxelize_onto_grid(design_mesh, cert_grid);
+    if (recheck_fill_sub() > 0)
+      file_fill = file_fill_fractions(design_mesh, cert_grid, recheck_fill_sub());
     for (std::size_t i = 0; i < design_grid.tags.size(); ++i) {
       if (cert_grid.tags[i] == VoxelTag::Load) {
         // When WE smoothed, the loaded cap is restored solid (see above). For a raw
@@ -420,6 +425,36 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   std::vector<double> density(design_grid.voxel_count(), 0.0);
   for (std::size_t i = 0; i < density.size(); ++i)
     if (design_grid.tags[i] != VoxelTag::Empty) density[i] = 1.0;
+  // ONE JUDGE: the file's own fills, analysed by the form the loop's certificate
+  // uses (the exact fills at the same stiffness law), so the number shown after
+  // finishing and the number the loop accepted are one judge's. A voxel the file
+  // cuts with its centre OUTSIDE holds material too: it gets an element (Interior).
+  // Load and Fixture voxels keep what the block above gave them (a restored loaded
+  // cap stays whole). A voxel under the material floor is air.
+  if (file_fill.size() == density.size()) {
+    std::size_t cut = 0, added = 0;
+    for (std::size_t i = 0; i < density.size(); ++i) {
+      const VoxelTag tg = design_grid.tags[i];
+      if (tg == VoxelTag::Load || tg == VoxelTag::Fixture) continue;
+      const double f = file_fill[i];
+      if (f >= kStressMaterialFloor) {
+        if (tg == VoxelTag::Empty) {
+          design_grid.tags[i] = VoxelTag::Interior;
+          ++added;
+        }
+        density[i] = f < 1.0 ? f : 1.0;
+        if (f < 1.0) ++cut;
+      } else {
+        // Under the floor: air where the centre is outside; a centre-inside voxel
+        // that is all but empty keeps its element at the floor.
+        density[i] = tg == VoxelTag::Empty ? 0.0 : kStressMaterialFloor;
+      }
+    }
+    std::fprintf(stderr,
+                 "[recheck] one judge: the file's fills at %d per voxel edge; %zu cut voxel(s), "
+                 "%zu of them with their centre outside the file\n",
+                 recheck_fill_sub(), cut, added);
+  }
 
   // ── the certification load case (production config already on `options`) ─────
   // The production solver config + margin + gravity/build orientation were set on

@@ -57,6 +57,22 @@ inline StrengthMode strength_mode() {
 
 inline bool to_stage2_on() { return strength_mode() != StrengthMode::Today; }
 
+// ONE JUDGE (stage 2, ledger R-08; the reviewer's ruling 2026-11-27, first in the
+// stage because it is the number the user is shown). TOPOPT_RECHECK=fill makes the
+// re-check of a finished FILE analyse each voxel's FILL (the share of the voxel
+// inside the file's surface, file_fill.hpp) by the same form as the loop's
+// certificate, in place of today's all-or-nothing voxels. TOPOPT_RECHECK=fill:<k>
+// sets the sub-sampling (k points along each voxel edge; 4 until the measurement
+// settles it). Unset = today's bytes. Returns 0 when off.
+inline int recheck_fill_sub() {
+  const char* v = std::getenv("TOPOPT_RECHECK");
+  if (v == nullptr) return 0;
+  const std::string s(v);
+  if (s.rfind("fill", 0) != 0) return 0;
+  const int k = s.size() > 5 && s[4] == ':' ? std::atoi(s.c_str() + 5) : 0;
+  return k >= 1 ? k : 4;
+}
+
 // THE CONNECTION RULE (stage 5; the reviewer's ruling of 2026-11-26, maintainer-
 // approved): TOPOPT_CONNECTION=support makes a piece of the design count as held
 // only when it reaches a SUPPORT (a fixed face). A loose piece that carries only
