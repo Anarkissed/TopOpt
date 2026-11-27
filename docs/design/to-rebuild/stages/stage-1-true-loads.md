@@ -387,4 +387,11 @@ Until these land, with the switch on, the app's previews count voxels the old wa
 
 5. Two lattice tests go red with the switch on and need their `face` form in the same release (LatticeReview, 2026-11-25): `lattice_depth_tie` section 0a (it pins effective depth = layers x spacing; with `face` the run reports the mm asked, by design) and `test_print_frame.cpp:721` (the same job turned; the frame's load rule). The first is LatticeReview's to re-pin, the second waits on its ruling about the frame's load.
 
+6. ADDED 2026-11-26 (all additive, each absent unless its switch is on; the wording on screen is #362's and follows his rules: centred pop-ups, positive words, five-word captions, detail behind an (i)):
+   - `"pads": [{"face_id" | "region_id", "thickness_mm", "pad_mm", "automatic"}]` (top level): the pad each fixed or loaded face got. Auto = the automatic pad (his yes, 2026-11-26); Manual = a typed depth in mm, sent as `TOPOPT_PAD_MM` today and to become a job key of #362's choosing. `thickness_mm` 0 = not measured (a typed pad).
+   - `"too_small": {"thickest_mm", "needed_mm", "line_width_mm", "nozzle_that_fits_mm"}` (top level, only when the part is too small): one pop-up recommending the nozzle that fits (0.6 / 0.4 / 0.2 mm only) or resin when it is 0. "Too small" = the thickest section under three line widths.
+   - A refused version whose `rejection_reason` is "the load has no path to a mount" (the connection rule, `TOPOPT_CONNECTION=support`): its design left a loaded piece joined to no fixed face. Plain words wanted on screen; it is not a solver failure.
+   - `"strength_reading": {"size_mm", "voxel_mm", "needs_voxel_mm", "over_size"}` and `"drawn_part"` (stage 2, `TOPOPT_STRENGTH=size`): which form of the strength reading the job used, and the printed grams of the part as drawn; each version's finish `mass_grams` is then printed grams.
+   - WANTED IN THE JOB from the app's print settings (his word: they are entered at every import and must travel with the job and into the exported file): top and bottom solid layers (count or mm). The printed-grams figure assumes 1.0 mm top and 0.6 mm bottom until the job carries them. Key names are #362's.
+
 When the switch flips and the old path is deleted, `tag_face_by_stage` / `mask_face_by_stage` keep their names and lose the old branch, so these lines do not change again.

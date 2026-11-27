@@ -16,6 +16,7 @@
 #include "topopt/printed_mass.hpp"      // TO rebuild stage 2
 #include "topopt/report.hpp"
 #include "topopt/simp.hpp"
+#include "topopt/material_length.hpp"  // kAcrossLayerLengthFactor
 #include "topopt/stress_measure.hpp"   // TO rebuild stage 2
 #include "topopt/to_stage_switch.hpp"  // TO rebuild stage 2
 #include "topopt/voxel.hpp"
@@ -520,6 +521,10 @@ FixedDesignAnalysis analyze_fixed_design(
   // the loop above left them. The wall-aware field takes, for a cut voxel, the
   // knockdown of its thinnest-walled printed face neighbour (the cut voxel has no
   // member width of its own).
+  // The stress tensors with the cut voxels' added, for the across-layer reading
+  // over a size below (only then; the one-voxel across-layer check reads `stress`).
+  std::vector<std::array<double, 6>> stress_material;
+  if (read_over_size) stress_material = stress;
   if (read_over_size || knockdown.record_material_stress) {
     out.von_mises_material_field = out.von_mises_field;
     for (int k = 0; k < grid.nz; ++k)
@@ -532,6 +537,7 @@ FixedDesignAnalysis analyze_fixed_design(
           const Hex8Stress st = hex8_stress(params.youngs_modulus, params.poisson, grid.spacing,
                                             element_dofs(grid, sc.solution, i, j, k));
           out.von_mises_material_field[idx] = st.von_mises;
+          if (!stress_material.empty()) stress_material[idx] = st.sigma;
           if (von_mises_eff_field.empty()) continue;
           double k_v = 1.0;
           bool found = false;
@@ -559,7 +565,21 @@ FixedDesignAnalysis analyze_fixed_design(
                                                 kStressMaterialFloor,
                                                 knockdown.stress_reading_mm);
   }
-  const double max_interlayer = max_interlayer_tension(grid, stress, build_dir);
+  // Across the layers: one voxel as today, or, when a size is read, the tension
+  // across the layers averaged the same way and over the same size (the
+  // maintainer, 2026-11-25: "Let's do same size, then"; kAcrossLayerLengthFactor).
+  // NOT yet measured against a textbook case of its own: the plate pulled along
+  // the build direction is owed (stage 2 file).
+  double max_interlayer = max_interlayer_tension(grid, stress, build_dir);
+  const double max_interlayer_one_voxel = max_interlayer;
+  if (read_over_size && max_interlayer > 0.0) {
+    const std::vector<double> across =
+        interlayer_tension_field(grid, stress_material, build_dir);
+    max_interlayer = peak_stress_over_size(
+        grid, across, density, kStressMaterialFloor,
+        kAcrossLayerLengthFactor * knockdown.stress_reading_mm);
+  }
+  (void)max_interlayer_one_voxel;
 
   // Per-node displacement of the SAME solve — no new solve. DOF-ordered; exposed
   // on printed nodes exactly as solved, zeroed on nodes attached only to

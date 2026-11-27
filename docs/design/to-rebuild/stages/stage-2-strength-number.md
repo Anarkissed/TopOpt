@@ -1,6 +1,27 @@
 # Stage 2: a strength number that holds (TOReview)
 
-Status: PROPOSAL for discussion with the maintainer. Nothing built except a measuring tool (`stress_measure.hpp`) and two textbook tests. The certificate is shared with the lattice strength check, so whatever is agreed goes to the reviewer and LatticeReview before any change to `analyze.cpp`.
+Status 2026-11-26 19:30: IN PROGRESS. Everything is behind ONE switch, `TOPOPT_STRENGTH` (unset = today, unchanged; `size` = the form below; `stiff` = a measuring arm). The certificate is shared with the lattice strength check: every change here is told to the reviewer and LatticeReview. The history below is in the order it happened; this block is where it stands.
+
+## WHERE IT STANDS (read this first)
+
+**In plain words, for the maintainer.** The app decides pass or fail from the stress in the single hottest little cube of the part. That number jumps when the detail level changes and is wrong at the part's edge. Stage 2 replaces it, where the detail is fine enough, with the stress averaged over a small region whose size belongs to the plastic (PLA: 1.2 mm), which is what the research says a printed part really fails by. It also shows the weight as it is printed (walls and infill), not as a solid block.
+
+**Done and measured (all behind the switch):**
+- Printed grams, checked against Bambu Studio to within 3 %; the "saved" figure against the part as drawn at the same walls and infill.
+- The averaged reading, on real stiffness, with the averaging region free to sit on the part's edge. Against the textbook on two shapes at four detail levels it is never more than 4.9 % low and within 10 % across detail levels, from 1.75 voxels across upward (set as the switch point). The across-layer check is read the same way (inside the bar at 19 of 20 points; 5.4 % low at one).
+- Under 1.75 voxels across, or for a material with no published length, the job keeps TODAY'S solve and reading whole, and says so (`[strength]` line, the report's `strength_reading`).
+- The reviewer's rulings of 18:37Z, items 2 to 6: answered (tables below).
+
+**Found, and not comfortable:**
+- On his materials and usual detail levels the averaged reading rarely switches on (PLA needs a voxel of 0.69 mm or finer; PETG and ABS essentially never; PA6 and PA12 have no length), so for most jobs stage 2 changes the grams and not the strength number.
+- Today's one-voxel reading is itself 13.9 % low on a sharp notch (the ellipse) at one detail level.
+- The number he is SHOWN comes from a second judge, the re-check of the finished file on all-or-nothing voxels: 10 to 27 % optimistic on the textbook plate, and up to 2.3 times the loop's own number on the lightest carved versions. The averaged reading does not reach it.
+
+**Owed:**
+- The reviewer's rulings on: "one judge" (the file re-check on each voxel's fill, by the same form; `file_fill.hpp` is written ahead, not wired); the sharp-notch question; the across-layer miss.
+- Conditions (b) to (e) again on his full-resolution parts with this form (`b5_stage2.sh`, lock, queued behind the suite).
+- LatticeReview told what moves in the shared certificate once "one judge" is ruled.
+- The app's side (#362): show the form and the printed grams.
 
 ## The problem, in plain words
 
@@ -362,3 +383,33 @@ Read plainly. On his two parts, where little is carved, the two judges agree to 
 ### Written ahead for "one judge" (2026-11-26 18:55; NOT wired into any job, the reviewer's ruling comes first)
 
 `file_fill.hpp`, `file_fill_fractions(file, grid, sub = 4)`: each voxel's share inside the file's surface, counted on a grid `sub` times finer over the same voxels by the voxeliser's own rule (`voxelize_onto_grid`), so with sub = 1 it is exactly today's all-or-nothing occupancy. Test `to_file_fill` (passes): a box on voxel faces reads 0 or 1 and its exact volume; a box cutting voxels in half reads 0.5 in the cut layers; a box off the sub-grid holds its volume to 1.4 % at 4 per voxel (2.8 % at 8 on this box by where its faces fall; all-or-nothing 1.0 % by the same luck: the point of the fill is the SHAPE of the edge, not the total). Cost: one voxelisation at `sub` times the resolution (sub 4 at 128 x 96 x 64 voxels: 50 MB of one-byte tags while it runs). What is left once ruled: the re-check analyses the file's fills by the loop's form, and the report says so.
+
+### The across-layer check read over a size, against a textbook case (2026-11-26 19:11; behind `TOPOPT_STRENGTH=size`)
+
+Until now only the in-plane check could be read over a size; the across-layer check read one voxel (the bracket's lightest version above was decided by it in both forms). Now, when a size is read, the tension across the layers is averaged the same way and over the same size (his word: "Let's do same size, then"), with the cut voxels' stress included as for the in-plane reading (`analyze.cpp`).
+
+Test `to_strength_across_layers`: the plate with a round hole with the layers stacked ALONG the pull, so the across-layer check reads the tension along the pull (3.03 x the far stress at the hole's edge), against the reading's own true value (the same average of Kirsch's stress along the pull, `to_reference_reading.hpp`).
+
+| | radius 3 voxels | 4 | 5 | 6 | |
+|---|---|---|---|---|---|
+| one voxel (today's form), against the peak | +14.2 % | +13.7 % | +4.7 % | +18.5 % | high (safe), 14 % apart |
+| over 1.75 voxels | -3.2 % | -0.4 % | +2.9 % | +3.3 % | inside the bar |
+| over 2.00 voxels | -5.4 % | -2.3 % | +2.0 % | +2.3 % | OUTSIDE by 0.4 (the coarsest grid) |
+| over 2.50 voxels | -4.9 % | -2.1 % | +2.7 % | +2.8 % | inside |
+| over 3.00 voxels | -2.0 % | +0.4 % | +4.9 % | +4.7 % | inside |
+| over 4.00 voxels | -0.6 % | +1.5 % | +4.0 % | +3.9 % | inside |
+
+Read plainly: the across-layer reading over a size behaves like the in-plane one (which read -4.9 % at the same point) and is inside the bar at 19 of 20 points; at 2.0 voxels across on the coarsest grid, where the hole is only 3 voxels in radius, it is 5.4 % low against a 5 % bar. Not hidden and not tuned away: for the reviewer to rule (accept at a hole of 3 voxels' radius, or ask for a margin on the across-layer reading). Committed as measured, measure-only in ctest.
+
+### The across-layer reading in a job (2026-11-26 19:43, build f7287eca): the bracket again, size forced to 3.6 mm
+
+Shown margin and printed grams per version, the same job three ways (res 64, drawn faces, automatic pad, one thread):
+
+| version | one-voxel form | over 3.6 mm, in-plane only (17:22) | over 3.6 mm, across the layers too |
+|---|---|---|---|
+| 0.68 | 5.285, 101.1 g | 6.617, 101.1 g | 6.617, 101.1 g |
+| 0.52 | 5.293, 84.8 g | 6.626, 84.8 g | 6.626, 84.8 g |
+| 0.38 | 4.851, 69.5 g | 5.773, 69.5 g | 6.362, 69.4 g |
+| 0.26 | 3.661, 53.1 g | 3.661, 53.1 g | 3.976, 53.1 g |
+
+The two heavier versions are decided in-plane and do not move. The lightest, decided across the layers, moves from 3.661 to 3.976 (+8.6 %) now that its check is averaged too; the 0.38 version, where the two checks are close (16.4 against 16.3 in the report), moves with it. The designs differ by a few hundredths of a gram at 0.38 and 0.26: the loop's own margin probes read the new number, so its path shifts very slightly. Runs rc 0, 912 s.
