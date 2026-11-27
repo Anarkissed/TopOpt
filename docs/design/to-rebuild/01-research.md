@@ -306,3 +306,37 @@ Looked for a published toughness of FILAMENT-PRINTED nylon 6. Found little, and 
 - A lead not opened: Cicero, Ibanez-Gutierrez and others (Univ. of Cantabria) apply the theory of critical distances to MOULDED PA6 with 0 to 50 % short glass fibre, with and without moisture, 125 specimens; their papers should hold a calibrated length for plain PA6. Moulded, not printed.
 
 What it means for him: there is no good printed-PA6 number yet; the one found comes from a disputed paper. PA6 is NOT added to `material_length.hpp`; a PA6 job keeps the one-voxel reading. Two things matter more for PA6 than this length: moisture (dry or conditioned strength differ by half) and the across-layer strength (about half the in-plane value). If he prints a few PA6 test bars when the rig is ready, that beats anything published.
+
+## Reading stress at the true surface on a voxel grid (desk research 2026-11-27, for stage 4 and the one-judge ruling)
+
+Asked because of the measurements of 2026-11-27 (stage 2 file, last sections; ledger A-06, A-07, A-08). Marks: [R] the full text was opened and read; [A] abstract, catalogue record or citation only; [M] from memory, NOT checked; PW = paywalled. Nothing here has been run by us; every figure is the source's.
+
+**Cut-cell and immersed methods**
+- [R] Nadal, Ródenas, Albelda, Tur, Tarancón, Fuenmayor 2013, "Efficient finite element methodology based on Cartesian grids", Abstract and Applied Analysis, doi:10.1155/2013/953786 (open). Says low accuracy along the boundary is the known drawback of such grids. Their fix: a patch fit (SPR-CD) with the boundary's tractions and internal equilibrium imposed. On a thick cylinder, four-node elements: raw stress error falls as O(h), recovered as about O(h^2); peak boundary stress from the recovered field "usually very accurate". 2D, exact integration in the cut elements (not fill x E).
+- [A] Nadal, Bordas, Ródenas, Tarancón, Tur 2010, "Accurate stress recovery for the 2D fixed-grid FEM", Civil-Comp Proceedings 93, paper 256, doi:10.4203/ccp.93.256.
+- [A, PW] Zhang, Aragón 2022, Int J Numer Meth Eng, doi:10.1002/nme.6825: cut elements with small physical parts OVER-estimate stress; patch recovery fixes it. (Our E x fill^3 over-read on the loaded ring is this family of failure.)
+- [A, PW] Parvizian, Düster, Rank 2007, "Finite cell method", Comput Mech 41:121-133, doi:10.1007/s00466-007-0173-y; Schillinger, Ruess 2015, Arch Comput Methods Eng 22:391-455, doi:10.1007/s11831-014-9115-y. O(h) stress for linear elements in the energy norm; no pointwise boundary figure found.
+- [M] Burman, Claus, Hansbo, Larson, Massing 2015, "CutFEM: discretizing geometry and partial differential equations", Int J Numer Meth Eng 104:472-501 (DOI unverified). Without a stabilising term small cut fractions make stresses unstable.
+
+**Stress in topology optimisation**
+- [R, pages 1-8] da Silva, Beck, Sigmund 2019, CMAME 354:397-421, doi:10.1016/j.cma.2019.05.046, summarising [A] their CMAME 344:512-537, doi:10.1016/j.cma.2018.10.020: stresses at jagged edges are over-estimated and oscillate or are under-estimated, by the relaxation; they keep a smooth intermediate layer at least one element thick, a relaxed stress interpolation, and CHECK on a body-fitted re-mesh.
+- [A, PW] Svärd 2015, "Interior value extrapolation", Struct Multidisc Optim 51:613-629, doi:10.1007/s00158-014-1171-2: boundary stresses extrapolated from interior values. This is the carry we measured; its accuracy figures were not reachable.
+
+**Voxel models of bone (the same problem, well documented)**
+- [A, PW] Guldberg, Hollister, Charras 1998, J Biomech Eng 120:289-295, doi:10.1115/1.2798314: bending needs at least 3 to 4 voxels through the section. (Our A-06 table says more than that for 10 %.)
+- [A, PW] Charras, Guldberg 2000, J Biomech 33:255-259 (DOI unverified): refining a voxel mesh does NOT reduce the local maximum error; boundary-specific filtering does.
+- [A, PW] Camacho, Hopper, Lin, Myers 1997, J Biomech 30:1067-1070, doi:10.1016/S0021-9290(97)00073-0: smoothing the surface lowers the surface stress error.
+
+**Small notches**
+- No published "elements per notch radius" rule found; one industry example converged at about 12 elements per radius [A]. Our 20 to 37 % low under 3 voxels of radius is consistent.
+- [A, book] Taylor 2007, The Theory of Critical Distances, Elsevier, ISBN 978-0-08-044478-9: failure at a notch is predicted from the stress a material-specific distance L / 2 IN from the notch, not at the surface. Where that distance is a voxel or more, the sub-voxel surface peak stops mattering. THIS IS STAGE 2's SIZE FORM (the stress read over the material's own length): the research already in this file, arrived at again from the notch side. It says the answer to A-08 for plastics may be the size form, not a sharper surface reading; it needs L for the material (PLA published; PA6 to find or test).
+
+**What the evidence supports for a solver that stays on its grid, in order**
+1. Never a power above 1 on the cut voxels FOR THE STRESS READING (real stiffness, or a relaxed interpolation with a layer at least a voxel thick). Free. Agrees with our measurements.
+2. Boundary-aware patch recovery (fit over full voxels with zero traction imposed on the true free surface): the only method found VALIDATED on non-fitted grids, and only in 2D with exactly integrated cut elements. A small least-squares fit per surface patch.
+3. The straight-line carry (Svärd): what we measured; within 9 % on gentle faces, fails under 3 voxels of radius.
+4. At notches: the size form (critical distance), where the material's length is a voxel or more; otherwise flag it, or re-analyse the flagged spot finer.
+Not found: any validation in 3D on voxels with fill-scaled stiffness. If we build (2) we validate it ourselves on the ring, the beam and the ellipse.
+
+Paywalled items for the maintainer to fetch if wanted (title and DOI above): Zhang and Aragón 2022; Svärd 2015; Guldberg, Hollister, Charras 1998; Charras and Guldberg 2000; da Silva, Beck, Sigmund 2019 (CMAME 344).
+
