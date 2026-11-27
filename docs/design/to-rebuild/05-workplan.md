@@ -163,6 +163,19 @@ WAITING ON OTHERS: the reviewer's ruling on which reference a reading over a len
 
 ## Ideas beyond the plan, in discussion with the maintainer (NOT acted on)
 
+**2026-11-27, 16:05 EST: GRADED VOXELS, THE TWO-WAY FINE-BOX PROTOTYPE (his "Build the prototype") BUILT AND MEASURED. A measuring test beside the solver, `core/tests/unit/test_to_zoom_two_way.cpp` (`to_zoom_two_way`, Long only, never in the suite); NOTHING under core/src or core/include changed; first build worked. Output `agent-scratch/toreview/zoom_test.log`.**
+Every hook was reachable through the public headers (`fea_solve_mgcg_matfree` with its own `SolverRunState` and an initial guess; `fea_matfree_apply` for reactions; `fea_von_mises_field`; `stress_carried_to_surface`). Emulated in the test: the trilinear weights, and the zone operator (a copy of the coarse grid with everything outside the box Empty). Refinement ratio 2; real stiffness; small grids.
+
+| case | coarse alone | one-way zoom | two-way loop | whole model fine (reference) |
+|---|---|---|---|---|
+| 0, solid bar: residual with an identical box | | | 2.6e-9 (the signs are right) | |
+| 1, plate with a hole of 3 coarse voxels: stress at the hole / far stress, carried to the surface (textbook 3.00) | 2.89 | 3.03 | 3.17, in 4 iterations | 3.17 |
+| 1: largest movement, mm | 0.14896 | 0.14896 | 0.14935 | 0.14938 |
+| 2, beam with a neck 1.5 coarse voxels thick: largest movement, mm | 0.449 (60 % too stiff) | 0.449 | 1.1116, in 11 iterations with Aitken (NOT converged in 25 without) | 1.1117 |
+| 2: stress in the neck, carried, MPa | 3.87 | 7.39 (49 % low) | 14.37 | 14.37 |
+
+READING IT: the loop reproduces the whole-fine model to 0.01 to 0.1 % in movement and stress, around the unchanged solver. Where the coarse grid has the STIFFNESS wrong (case 2) the one-way zoom is half the right stress and only the two-way loop repairs the global answer. Acceleration is needed (case 2 does not settle without it). COST on these toy grids: 5 to 12 global + as many box solves; no cheaper than solving everything fine (the grids are tiny; the saving appears only when the box is a small part of a large model: NOT yet measured). LIMITS: ratio 2 only; loads and supports outside the box; one box; boxes placed by hand; case 2's stresses sit at sharp inner corners (they agree with the fine model at the same voxel size, they are not converged values); all-or-nothing voxels, no cut-voxel fills; not run on a real part. Nothing else built; next step is his call.
+
 **2026-11-27, 15:45 EST: GRADED VOXELS, STEP 0 MEASURED (his "Yes, run it"; no new code; the 15 mm sample bracket, `analyze`, drawn-face loads, today's reading, one thread, outside the lock; `agent-scratch/toreview/opt22/step0`).**
 
 | case | res 48 (voxel 0.31 mm) | res 96 (voxel 0.16 mm) | change |

@@ -165,3 +165,11 @@ endif()
 # corner) and its job, for the measurements his own parts cannot give.
 add_executable(to_sample_part tests/tools/to_sample_part.cpp)
 target_link_libraries(to_sample_part PRIVATE topopt)
+
+# Graded voxels, side piece: the two-way global-local loop AROUND the unchanged solver (a fine box
+# re-solved inside a coarse model, Aitken-accelerated) against a whole fine solve. Measure only.
+#   ctest -C Long -R to_zoom_two_way
+add_executable(test_to_zoom_two_way tests/unit/test_to_zoom_two_way.cpp)
+target_link_libraries(test_to_zoom_two_way PRIVATE topopt)
+add_test(NAME to_zoom_two_way CONFIGURATIONS Long COMMAND test_to_zoom_two_way)
+set_tests_properties(to_zoom_two_way PROPERTIES TIMEOUT 1800)
