@@ -9,6 +9,7 @@
 #include <limits>
 #include <map>
 #include <stdexcept>
+#include <vector>
 #include <unistd.h>
 
 #include "topopt/fea.hpp"
@@ -318,23 +319,44 @@ std::string point_json(const BreakPoint& p, const PrintFrame& f) {
 
 // The limit law on a stress state's principal values (ascending) and directions (rows): the multiple, and whether
 // tension governs.
-// Review 1.1: EVERY principal stress is judged against the limit for its own direction and sign, the smallest multiple
-// kept: a tension by the released rod law's interpolation (frame_check.cpp:800, lim_t = level (1 - rise^2) + across
-// rise^2, level = the yield, across = the yield x z_knockdown, run_job.cpp:13416-13417), a compression by the yield
-// (frame_check.cpp:802).
+// The tension law, the released rod law's interpolation (frame_check.cpp:800, lim_t = level (1 - rise^2) + across
+// rise^2, level = the yield, across = the yield x z_knockdown, run_job.cpp:13416-13417), applied to the NORMAL stress
+// n.sigma.n on EVERY direction n (review C2 A5: the across-layer normal stress is judged even when the principal
+// directions sit at an angle to the layers). For a unit n the limit is a quadratic form, lim(n) = n.L.n with
+// L = Y (I - u u) + Y k (u u), u the build direction; so the least multiple over all n, min n.L.n / n.sigma.n, is exactly
+// 1 / the largest eigenvalue of L^-1/2 sigma L^-1/2 (no direction set, no sampling: the lead asked for about 60 fixed
+// directions; those read 4.6 % high on a tilted tension, this is the true least). Compression: the yield against the
+// most compressive principal stress (frame_check.cpp:802).
 double law_of(const double val[3], const double vec[9], double yield_mpa, double z_knockdown, const Vec3& up, bool* tension) {
   double m = std::numeric_limits<double>::infinity();
   bool ten = true;
   const double ul = std::sqrt(up.x * up.x + up.y * up.y + up.z * up.z);
-  for (int i = 0; i < 3; ++i) {
-    if (val[i] > 0.0) {
-      const double rise = ul > 0.0 ? std::min(1.0, std::fabs(vec[3 * i] * up.x + vec[3 * i + 1] * up.y + vec[3 * i + 2] * up.z) / ul) : 0.0;
-      const double lim = yield_mpa * (1.0 - rise * rise) + yield_mpa * z_knockdown * rise * rise;
-      if (lim / val[i] < m) { m = lim / val[i]; ten = true; }
-    } else if (val[i] < 0.0 && yield_mpa / -val[i] < m) {
-      m = yield_mpa / -val[i];
-      ten = false;
-    }
+  const double u[3] = {ul > 0.0 ? up.x / ul : 0.0, ul > 0.0 ? up.y / ul : 0.0, ul > 0.0 ? up.z / ul : 1.0};
+  // sigma, rebuilt from its principal parts
+  double S[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+  for (int i = 0; i < 3; ++i)
+    for (int a = 0; a < 3; ++a)
+      for (int b = 0; b < 3; ++b) S[3 * a + b] += val[i] * vec[3 * i + a] * vec[3 * i + b];
+  // L^-1/2 = (I - u u) / sqrt(Y) + (u u) / sqrt(Y k)
+  const double ia = 1.0 / std::sqrt(yield_mpa), ib = 1.0 / std::sqrt(yield_mpa * z_knockdown);
+  double P[9];
+  for (int a = 0; a < 3; ++a)
+    for (int b = 0; b < 3; ++b) P[3 * a + b] = ia * ((a == b ? 1.0 : 0.0) - u[a] * u[b]) + ib * u[a] * u[b];
+  double T[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0}, Mx[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+  for (int a = 0; a < 3; ++a)
+    for (int b = 0; b < 3; ++b)
+      for (int c = 0; c < 3; ++c) T[3 * a + b] += P[3 * a + c] * S[3 * c + b];
+  for (int a = 0; a < 3; ++a)
+    for (int b = 0; b < 3; ++b)
+      for (int c = 0; c < 3; ++c) Mx[3 * a + b] += T[3 * a + c] * P[3 * c + b];
+  for (int a = 0; a < 3; ++a)   // exact symmetry for the eigen solver
+    for (int b = a + 1; b < 3; ++b) Mx[3 * a + b] = Mx[3 * b + a] = 0.5 * (Mx[3 * a + b] + Mx[3 * b + a]);
+  double lv[3], lw[9];
+  symmetric_eigen3(Mx, lv, lw);   // ascending
+  if (lv[2] > 0.0) m = 1.0 / lv[2];
+  if (val[0] < 0.0 && yield_mpa / -val[0] < m) {
+    m = yield_mpa / -val[0];
+    ten = false;
   }
   if (tension) *tension = ten;
   return m;
@@ -389,7 +411,10 @@ BreakSize organic_break_size(const BreakAsk& ask) {
   s.ny = g.ny;
   s.nz = g.nz;
   s.box_voxels = static_cast<std::size_t>(g.nx) * static_cast<std::size_t>(g.ny) * static_cast<std::size_t>(g.nz);
-  s.limit_bytes = ask.memory_limit_bytes > 0.0 ? ask.memory_limit_bytes : break_memory_limit_bytes();
+  // review C2 A6: what the process already holds is taken off the 40 % (a test's limit is taken as it is)
+  s.limit_bytes = ask.memory_limit_bytes > 0.0
+                      ? ask.memory_limit_bytes
+                      : std::max(0.0, break_memory_limit_bytes() - std::max(0.0, process_memory().rss_mb) * 1048576.0);
   // review 1.9: the solver's node numbers are ints (3 per node): a grid past that range is too big, never an overflow
   const double nodes = static_cast<double>(g.nx + 1) * static_cast<double>(g.ny + 1) * static_cast<double>(g.nz + 1);
   if (nodes * 3.0 > static_cast<double>(std::numeric_limits<int>::max())) {
@@ -481,7 +506,7 @@ BreakResult organic_break_check(const BreakAsk& ask) {
   if (R.size.bytes > R.size.limit_bytes) {
     char b[200];
     if (std::isfinite(R.size.bytes))
-      std::snprintf(b, sizeof b, "the check would need about %.1f GB and may use %.1f GB (40 %% of this machine's memory)", R.size.bytes / 1e9,
+      std::snprintf(b, sizeof b, "the check would need about %.1f GB and may use %.1f GB (40 %% of this machine's memory, less what the job holds)", R.size.bytes / 1e9,
                     R.size.limit_bytes / 1e9);
     else
       std::snprintf(b, sizeof b, "the part's grid is past the solver's range (%d x %d x %d voxels)", R.size.nx, R.size.ny, R.size.nz);

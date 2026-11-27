@@ -239,6 +239,10 @@ struct StrengthDone {
   std::string break_verdict;
   double break_pass_line = 0.0;
   BreakPostReadings break_posts;
+  // Review C2 A1: the file's answer, written into lattice_file.json as "strength_answer" (Organic only): which check
+  // gave it ("break", or "rod" when no break check was made), its verdict, and the not-checked reason (empty: none).
+  std::string break_reason;
+  std::string answer_by, answer_verdict, answer_reason;
 };
 // The check is the CLI's (run_job.cpp: lattice_file_strength_check): core's lattice layout is always built, and the
 // old check needs the solver and the importer. `before` reads the strength job (cheap; no solve) and may refuse it;
@@ -265,8 +269,8 @@ struct FileJob {
   // make_lattice_file gives the path. Empty: no check, and the result names none (V2).
   std::string strength_job;
   // C2 (key "break_cache"): a folder beside the job, by its bare name, where the Organic break check keeps its answers.
-  // Not given: the user's cache folder (Apple: confstr _CS_DARWIN_USER_CACHE_DIR + "topopt-break-check"); elsewhere
-  // none. run_file_job makes it a path beside the job.
+  // Not given: no cache (review C2 A2: nothing outside the job decides an answer). run_file_job makes it a path beside
+  // the job.
   std::string break_cache;
   // Organic, Traced (layout key "region_weave"): the stress tensor's file (key "tensor"), a bare name beside the job,
   // as "demand". Empty: none sent. run_file_job reads it into `tensor_field`; a caller of make_lattice_file puts the
@@ -438,6 +442,7 @@ struct FileResult {
   double break_pass_line = 0.0;
   BreakPostReadings break_posts;
   std::string posts_step_json;
+  std::string answer_by, answer_verdict, answer_reason;   // review C2 A1 (StrengthDone): "strength_answer"
   // P4: the print orientation ranking and recommendation ("print_orientation"), when the check gave its numbers.
   std::string orientation_json;
   // P3: the part's own overhang places the print check found (its last pass), and what was painted for them in the

@@ -37,6 +37,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include <unistd.h>
 
 #include "topopt/analyze.hpp"
 #include "topopt/build_frame.hpp"
@@ -14048,6 +14049,8 @@ ll::StrengthDone with_break_check(const ll::StrengthAsk& ask, StrengthSetup& S, 
   const auto refuse = [&](const std::string& code, const std::string& why) {
     add_break(done, not_checked_block(code, why, pass_line));
     done.accepted = false;
+    done.break_verdict = "not_checked";
+    done.break_reason = code;
     return done;
   };
   // the job's hold and loads, as face ids of the strength job's part (the same frame as the file)
@@ -14111,9 +14114,10 @@ ll::StrengthDone with_break_check(const ll::StrengthAsk& ask, StrengthSetup& S, 
       for (const ll::BreakBar& x : b.bars) hb = fnv(fnv(fnv(hb, &x.a, sizeof x.a), &x.b, sizeof x.b), &x.width, sizeof x.width);
       for (const ll::BreakPost& x : b.posts) hb = fnv(hb, &x, sizeof x);
       char h[200];
-      std::snprintf(h, sizeof h, "break-check 3\nfile %016llx %zu\npart %016llx\nbars %016llx\n", static_cast<unsigned long long>(hf), nbytes,
+      std::snprintf(h, sizeof h, "file %016llx %zu\npart %016llx\nbars %016llx\n", static_cast<unsigned long long>(hf), nbytes,
                     static_cast<unsigned long long>(hp), static_cast<unsigned long long>(hb));
-      key = h;
+      // review C2 A4: the build's own fingerprint, not a hand-typed word (a changed law is a changed build)
+      key = "break-check build " + build_identity().fingerprint + " " + build_identity().build_time + " " + __DATE__ + " " + __TIME__ + "\n" + h;
       key += "fixed";
       for (const int f : b.fixed_faces) key += " " + std::to_string(f);
       key += "\nloads";
@@ -14139,9 +14143,11 @@ ll::StrengthDone with_break_check(const ll::StrengthAsk& ask, StrengthSetup& S, 
                                     std::snprintf(n, sizeof n, "%016llx.json", static_cast<unsigned long long>(fnv(1469598103934665603ull, key.data(), key.size())));
                                     return std::string(n);
                                   }();
-  if (!entry.empty()) {   // a kept answer: the key text, then the verdict line, then the block
+  if (!entry.empty()) {   // a kept answer: the key text, then the verdict line, then the block; any fault: made again
     std::ifstream f(entry, std::ios::binary);
-    if (f) {
+    ll::StrengthDone kept = done;
+    bool reused = false;
+    if (f) try {
       std::stringstream ss;
       ss << f.rdbuf();
       const std::string t = ss.str();
@@ -14150,32 +14156,47 @@ ll::StrengthDone with_break_check(const ll::StrengthAsk& ask, StrengthSetup& S, 
         if (nl != std::string::npos) {
           const std::string verdict = t.substr(key.size(), nl - key.size());
           const std::size_t nl2 = t.find('\n', nl + 1);
-          if (nl2 == std::string::npos) return done;   // unreachable for an entry this code wrote
-          {   // C3: the post readings line: "posts N" then six numbers per post
-            std::istringstream in(t.substr(nl + 1, nl2 - nl - 1));
-            std::string word;
-            std::size_t n = 0;
-            in >> word >> n;
-            for (std::size_t q = 0; q < n; ++q) {
-              ll::BreakPostReading pr;
-              int res = 0, fb = 0;
-              in >> pr.all >> res >> pr.judged >> pr.section >> pr.section_mm2 >> fb;
-              pr.all_resolved = res != 0;
-              pr.first_break = fb != 0;
-              done.break_posts.push_back(pr);
+          if (nl2 != std::string::npos) {
+            bool good = true;
+            {   // C3: the post readings line: "posts N" then six numbers per post
+              std::istringstream in(t.substr(nl + 1, nl2 - nl - 1));
+              std::string word;
+              std::size_t n = 0;
+              in >> word >> n;
+              good = in && word == "posts" && n == b.posts.size();
+              for (std::size_t q = 0; good && q < n; ++q) {
+                ll::BreakPostReading pr;
+                int res = 0, fb = 0;
+                in >> pr.all >> res >> pr.judged >> pr.section >> pr.section_mm2 >> fb;
+                good = !in.fail();
+                pr.all_resolved = res != 0;
+                pr.first_break = fb != 0;
+                kept.break_posts.push_back(pr);
+              }
+            }
+            std::string block = t.substr(nl2 + 1);
+            // review C2 A3: the stored block must parse and carry the same verdict, else it is not used
+            if (good) {
+              const sjson::Value doc = sjson::parse(block, "break cache");
+              const sjson::Value* v = sjson::find(doc, "verdict");
+              good = v && sjson::as_string(*v, "break cache.verdict") == verdict;
+            }
+            if (good) {
+              kept.break_verdict = verdict;
+              kept.break_pass_line = pass_line;
+              if (ask.said) ask.said("checking its strength: the same file was checked before");
+              block.insert(1, "\"cache\": \"reused\", ");
+              add_break(kept, block);
+              kept.accepted = verdict == "pass";
+              reused = true;
             }
           }
-          done.break_verdict = verdict;
-          done.break_pass_line = pass_line;
-          std::string block = t.substr(nl2 + 1);
-          if (ask.said) ask.said("checking its strength: the same file was checked before");
-          block.insert(1, "\"cache\": \"reused\", ");
-          add_break(done, block);
-          done.accepted = verdict == "pass";
-          return done;
         }
       }
+    } catch (const std::exception&) {
+      reused = false;   // a faulty entry: made again
     }
+    if (reused) return kept;
   }
   // C3 (a): the solver's thread count is a process-wide setting (fea_set_matfree_threads), which
   // configure_production_options sets to the machine's count; the break check honours the job's --threads while it
@@ -14189,6 +14210,7 @@ ll::StrengthDone with_break_check(const ll::StrengthAsk& ask, StrengthSetup& S, 
     const ThreadsFor threads_for(ask.threads);
     return ll::organic_break_check(b);
   }();
+  done.break_reason = r.not_checked;
   // C3: the posts' readings for the posts step (class "post", in the order of the file's posts)
   done.break_verdict = r.verdict;
   done.break_pass_line = pass_line;
@@ -14209,7 +14231,9 @@ ll::StrengthDone with_break_check(const ll::StrengthAsk& ask, StrengthSetup& S, 
   if (r.ok && !entry.empty()) {   // only a made reading is kept (never a "not checked")
     std::error_code ec;
     std::filesystem::create_directories(ask.break_cache, ec);
-    const std::string tmp = entry + ".part";
+    // review C2 A3: a temporary name of this process's own; the write checked before the rename
+    const std::string tmp = entry + "." + std::to_string(static_cast<long long>(getpid())) + ".part";
+    bool written = false;
     {
       std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
       f << key << r.verdict << "\nposts " << done.break_posts.size();
@@ -14217,9 +14241,11 @@ ll::StrengthDone with_break_check(const ll::StrengthAsk& ask, StrengthSetup& S, 
         f << " " << g17(pr.all) << " " << (pr.all_resolved ? 1 : 0) << " " << g17(pr.judged) << " " << g17(pr.section) << " " << g17(pr.section_mm2)
           << " " << (pr.first_break ? 1 : 0);
       f << "\n" << r.json;
+      f.close();
+      written = !f.fail();
     }
-    std::filesystem::rename(tmp, entry, ec);
-    if (ec) std::filesystem::remove(tmp, ec);
+    if (written) std::filesystem::rename(tmp, entry, ec);
+    if (!written || ec) std::filesystem::remove(tmp, ec);
   }
   return done;
 }
@@ -14231,16 +14257,26 @@ ll::StrengthDone run_lattice_file_strength_organic(const ll::StrengthAsk& ask, c
                        "the Organic check was asked with no bars");
   StrengthSetup S;
   if (ll::StrengthDone bad = strength_setup(ask, materials_path, rules_path, S); !bad.ok) return bad;
-  ll::StrengthDone done = organic_frame_check(S, *ask.session->domain(), *ask.bars, ask.kept, ask.light_width_mm, ask.out_dir,
-                                              ask.threads).done;
+  const OrganicCheckRun cr = organic_frame_check(S, *ask.session->domain(), *ask.bars, ask.kept, ask.light_width_mm, ask.out_dir,
+                                                 ask.threads);
+  ll::StrengthDone done = cr.done;
+  // review C2 A1: the file's answer, for lattice_file.json's "strength_answer" (the rod's when no break check is made)
+  done.answer_by = "rod";
+  done.answer_verdict = cr.verdict;
   // C2: the break check, on the file as written (a cell lattice, or a caller with no file, has none)
   if (!done.ok || !ask.print) return done;
+  done.answer_by = "break";
   try {
-    return with_break_check(ask, S, done);
+    ll::StrengthDone d = with_break_check(ask, S, done);
+    d.answer_verdict = d.break_verdict;
+    d.answer_reason = d.break_reason;
+    return d;
   } catch (const std::exception& e) {   // never a deleted file for a check that could not be made
     break_c2::add_break(done, break_c2::not_checked_block("error", std::string("the break check stopped on an error: ") + e.what(),
                                                           S.options.margin_stop));
     done.accepted = false;
+    done.answer_verdict = "not_checked";
+    done.answer_reason = "error";
     return done;
   }
 }

@@ -81,14 +81,31 @@ void law() {
   const double m4 = break_multiple(s45, Y, k, up, &by);
   std::printf("law: tension along the layers %.4f (want %.4f), across %.4f (want %.4f), compression across %.4f (want %.4f), tension at 45 deg "
               "%.4f (want %.4f)\n", m1, Y / 10, m2, Y * k / 10, m3, Y / 10, m4, (Y * 0.5 + Y * k * 0.5) / 10);
+  // the tilted tension: since review C2 A5 the normal stress on every direction n is read against the limit for n, so a
+  // direction between the tension and the build direction reads lower than the tension's own 2.4025; the least over
+  // the xz plane, scanned finely here, is what the law must give (it computes the exact least, so within 0.1 %)
+  double scan = 1e300;
+  for (int i = 0; i <= 9000; ++i) {
+    const double th = 0.5 * M_PI * i / 9000.0, c = std::cos(th - 0.25 * M_PI), rise = std::cos(th);
+    const double t = 10.0 * c * c;
+    if (t > 0.0) scan = std::min(scan, (Y * (1 - rise * rise) + Y * k * rise * rise) / t);
+  }
+  std::printf("law: tilted tension, least over the plane %.4f (the tension's own direction 2.4025)\n", scan);
   check(b1 && b3 && std::fabs(m1 - Y / 10) < 1e-9 && std::fabs(m2 - Y * k / 10) < 1e-9 && std::fabs(m3 - Y / 10) < 1e-9 &&
-            std::fabs(m4 - (Y * 0.5 + Y * k * 0.5) / 10) < 1e-6,
-        "the limit law: along, across (x z_knockdown), compression, and a tilted tension");
+            m4 <= 2.4025 + 1e-9 && m4 <= scan + 1e-9 && m4 >= 0.999 * scan,
+        "the limit law: along, across (x z_knockdown), compression, and a tilted tension (the least over every direction)");
   // the review's biaxial case: xx 10 along the layers, zz 8 across them: the across one governs, 31 x 0.55 / 8
   const double bi[6] = {10, 0, 8, 0, 0, 0};
   const double m5 = break_multiple(bi, Y, k, up, &by);
   std::printf("law: biaxial xx 10, zz 8: %.4f (want %.4f) by %s\n", m5, Y * k / 8, by.c_str());
   check(std::fabs(m5 - Y * k / 8) < 1e-9 && by == "tension", "the limit law judges every principal stress (biaxial 2.13, not 3.10)");
+  // review C2 A5: principals 10 and 8 at 45 degrees to the layers (xx = zz = 9, xz = 1): the stress ACROSS the layers,
+  // 9 MPa, gives 31 x 0.55 / 9 = 1.894 (the principal reading alone gave 2.40); a direction near the build direction
+  // reads a little lower still, so the law gives at most 1.894
+  const double ob[6] = {9, 0, 9, 0, 0, 1};
+  const double m6 = break_multiple(ob, Y, k, up, &by);
+  std::printf("law: 10 and 8 at 45 degrees: %.4f (at most %.4f; the principal reading alone 2.40) by %s\n", m6, Y * k / 9, by.c_str());
+  check(m6 <= Y * k / 9 + 1e-9 && m6 > 1.8 && by == "tension", "the limit law judges the stress across the layers at any angle (at most 1.894)");
 }
 
 int face_where(const StepModel& m, const Vec3& n, int axis, bool want_max);
@@ -375,10 +392,11 @@ int main(int argc, char** argv) {
         {"SPARSE", "SP_job.json", "SP.stl", "SP.tensor", 55.0, {-0.5 + ox, -0.5 + oy, 0}, 0.0, 3.3743, {6.8, 1.6, 4.5}, "vine", 0}};
     for (int i = 3; i < argc; ++i)
       if (std::string(argv[i]).rfind("tol:", 0) == 0) g_tol = std::atof(argv[i] + 4);
-    for (int i = 3; i < argc; ++i) {
-      if (std::string(argv[i]).rfind("tol:", 0) == 0) continue;
+    {   // the pieces named on the command line (none named: all)
       std::vector<Piece> keep;
-      for (const Piece& p : pieces) if (p.name == argv[i]) keep.push_back(p);
+      for (const Piece& p : pieces)
+        for (int i = 3; i < argc; ++i)
+          if (p.name == argv[i]) keep.push_back(p);
       if (!keep.empty()) pieces = keep;
     }
     for (const Piece& p : pieces) mark(dir, p, pla);

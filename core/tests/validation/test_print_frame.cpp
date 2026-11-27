@@ -157,7 +157,18 @@ Run run(const std::string& tag, const std::string& job_name) {
   x.out = kDir + "/" + tag;
   std::filesystem::remove_all(x.out);
   std::filesystem::create_directories(x.out);
-  const StrengthCheck check = lattice_file_strength_check(MATERIALS_JSON_PATH, SETTINGS_RULES_PATH);
+  // Review C2 A2: this test reads the rod (frame) check; the break check (C2, a 0.2 mm solve) is not asked here:
+  // StrengthAsk::print left null, as for a cell lattice (plain ctest stays as light as before C2).
+  const StrengthCheck check = [] {
+    StrengthCheck c = lattice_file_strength_check(MATERIALS_JSON_PATH, SETTINGS_RULES_PATH);
+    const auto real = c.run_organic;
+    c.run_organic = [real](const StrengthAsk& a) {
+      StrengthAsk b = a;
+      b.print = nullptr;
+      return real(b);
+    };
+    return c;
+  }();
   x.r = run_file_job(kDir + "/" + job_name, x.out, 0, nullptr, &check);
   x.json = slurp(x.out + "/" + kFileResultName);
   std::printf("[%s] ok %d code %s why %s %s\n", tag.c_str(), x.r.ok, x.r.code.c_str(), x.r.why.c_str(), x.r.detail.c_str());

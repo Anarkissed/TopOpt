@@ -114,7 +114,18 @@ int main() {
         "\"lattice\": {\"topology\": \"octet\", \"require_lattice_void_reaches_exterior\": false}, "
         "\"grading\": {\"topology\": \"octet\", \"cell_mm\": 8, \"min_extrudable_width_mm\": 0.45, \"intent\": \"structural\"}, "
         "\"output\": {\"report\": \"report.json\", \"mesh_format\": \"stl\", \"mesh_prefix\": \"variant\"}}");
-  const StrengthCheck check = lattice_file_strength_check(MATERIALS_JSON_PATH, SETTINGS_RULES_PATH);
+  // Review C2 A2: this test reads the rod (frame) check; the break check (C2, a 0.2 mm solve) is not asked here:
+  // StrengthAsk::print left null, as for a cell lattice (plain ctest stays as light as before C2).
+  const StrengthCheck check = [] {
+    StrengthCheck c = lattice_file_strength_check(MATERIALS_JSON_PATH, SETTINGS_RULES_PATH);
+    const auto real = c.run_organic;
+    c.run_organic = [real](const StrengthAsk& a) {
+      StrengthAsk b = a;
+      b.print = nullptr;
+      return real(b);
+    };
+    return c;
+  }();
   std::string blocks[2];
   for (int run = 0; run < 2; ++run) {
     const std::string out = kDir + "/run" + std::to_string(run);

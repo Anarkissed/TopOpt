@@ -685,20 +685,6 @@ std::size_t size_of_file(const std::string& path) {
   std::ifstream f(path, std::ios::binary | std::ios::ate);
   return f ? static_cast<std::size_t>(f.tellg()) : 0;
 }
-// C2: the break check's cache when the job names none: the user's cache folder (Apple), else none.
-std::string default_break_cache() {
-#ifdef __APPLE__
-  char b[1024];
-  const std::size_t n = confstr(_CS_DARWIN_USER_CACHE_DIR, b, sizeof b);
-  if (n > 0 && n <= sizeof b) {
-    std::string d(b);
-    if (!d.empty() && d.back() != '/') d += '/';
-    return d + "topopt-break-check";
-  }
-#endif
-  return std::string();
-}
-
 void say(void (*said)(const char*), const char* line) {
   if (said) said(line);
 }
@@ -1629,7 +1615,7 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
         ask.post_mm = options.mesh.post_mm;
         ask.said = said;
         ask.stop = stop;
-        ask.break_cache = !job.break_cache.empty() ? job.break_cache : default_break_cache();
+        ask.break_cache = job.break_cache;   // review C2 A2: a cache only where the job names one
       }
       StrengthDone sd;
       try {
@@ -1657,6 +1643,9 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
       r.break_verdict = sd.break_verdict;   // C3
       r.break_pass_line = sd.break_pass_line;
       r.break_posts = sd.break_posts;
+      r.answer_by = sd.answer_by;   // review C2 A1
+      r.answer_verdict = sd.answer_verdict;
+      r.answer_reason = sd.answer_reason;
       // P4: the print orientation ranking: the check's strength and support per candidate, the file's bed and height.
       if (sd.orientation.known)
         r.orientation_json = print_orientation_json(sd.orientation, cands, job.print_frame, options.layers.layer_mm);
@@ -2288,6 +2277,10 @@ std::string file_result_json(const FileResult& r) {
   }
   // V4: written only when the check ran (V2); the block is the check's own.
   if (r.strength_ran) o += "  \"strength\": " + r.strength_json + ",\n";
+  // review C2 A1: the file's answer (Organic): which check gave it, accepted, its verdict and a not-checked reason
+  if (r.strength_ran && !r.answer_by.empty())
+    o += "  \"strength_answer\": {\"by\": \"" + r.answer_by + "\", \"accepted\": " + (r.strength_accepted ? "true" : "false") +
+         ", \"verdict\": \"" + r.answer_verdict + "\", \"reason\": \"" + r.answer_reason + "\"},\n";
   if (!r.posts_step_json.empty()) o += "  \"posts_step\": " + r.posts_step_json + ",\n";   // C3
   // P4: written only when the check gave the six candidates' numbers.
   if (!r.orientation_json.empty()) o += "  \"print_orientation\": " + r.orientation_json + ",\n";
