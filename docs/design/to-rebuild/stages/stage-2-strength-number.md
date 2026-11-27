@@ -928,3 +928,24 @@ NEXT: the curved form on FREE surfaces only (a surface voxel tagged Load keeps t
 
 So: the bar is met on all four shapes for features of 4 voxels of radius or 8 voxels through and more, with no allowance set. Between 2.5 and 4 voxels of radius it reads 5 to 11 % low and is NOT flagged: the tight limit should be 4, not 2.5 (then everything unflagged is inside the bar on these shapes). Known loose ends: (a) on the loaded bore the straight line is right by cancellation (the solve behind a loaded cut face is too steep), so a loaded face is a stated limit of its own until the solve is dealt with; (b) a loaded point is counted loaded before its radius is checked, so a tight loaded radius is not counted tight; (c) at bore 3 sixteen points away from the bore take the curved form (probably outer-face points whose curvature reads with the wrong sign at that resolution); the peak is not theirs; (d) the curvature-shaped form is not in the literature read (Svärd 2015 is the straight line); it rests on these four shapes and on arithmetic on two exact fields; (e) not yet run on a real part, on a general 3D surface (a sphere-like raiser decays differently from a hole), or across layers; (f) the plate, ring and ellipse tests are two voxels thick.
 
+### The size form against the theory's own readings, by arithmetic on the exact field beside a hole (2026-11-27 14:40; no solve; PLA, L = 2.4 mm)
+
+The papers read today (Taylor 2006; Susmel and Taylor 2008) define the Point Method (the maximum principal stress at L / 2 from the hot spot) and the Line Method (its average along 2 L). Stage 2 reads von Mises averaged over the material in a BALL centred on the surface, of diameter HALF the published length (the maintainer's rule of 2026-11-25, until his rig checks it): 1.2 mm for PLA. Each as a multiple of the far stress (the elastic peak is 3.00):
+
+| hole radius, mm | Point Method | Line Method | the ball today (D = L / 2): von Mises / max principal | ball D = L | ball D = 2 L |
+|---|---|---|---|---|---|
+| 0.25 | 1.02 | 1.05 | 1.09 / 1.06 | 1.01 | 1.00 |
+| 0.5 | 1.05 | 1.10 | 1.40 / 1.45 | 1.06 | 1.01 |
+| 1 | 1.17 | 1.19 | 1.85 / 1.95 | 1.45 | 1.06 |
+| 2 | 1.42 | 1.35 | 2.28 / 2.37 | 1.95 | 1.45 |
+| 4 | 1.82 | 1.60 | 2.59 / 2.65 | 2.37 | 1.95 |
+| 8 | 2.24 | 1.94 | 2.78 / 2.82 | 2.65 | 2.37 |
+| 16 | 2.56 | 2.29 | 2.89 / 2.90 | 2.82 | 2.65 |
+
+What it says:
+1. Stage 2's ball is on the SAFE side of the theory everywhere: it reads 7 to 58 % more stress than the Point Method (most beside holes of 1 to 2 mm). That is the price of his half-length rule; it is caution, not error.
+2. Von Mises against maximum principal: 2 to 5 % apart on this field. The choice of quantity matters little HERE (a free surface in tension); it will matter where the stress is compressive or sheared, which this does not test.
+3. A ball of diameter 2 L (4.8 mm for PLA) reads what the Point Method reads, within -9 to +7 %. So "the ball" has a calibration against the validated method: diameter 2 L is the neutral setting, L / 2 the cautious one in force. His rig decides between them.
+4. A hole under about 0.5 mm in PLA reads as no notch at all by every method (1.0 to 1.1): the theory's "features much smaller than L lose their effect", and the reason ledger A-08 (raisers the grid cannot see) costs little for PLA under a single load. Under repeated load L is about 0.5 mm and that comfort is gone.
+For the reviewer with the rest; nothing changed in code.
+
