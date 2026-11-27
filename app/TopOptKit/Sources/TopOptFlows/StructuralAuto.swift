@@ -118,7 +118,7 @@ public enum StructuralAuto {
         public var rLight: Double, rHeavy: Double, reference: Double, response: Double
         /// The strut / cell the ramp lays for stress `d`.
         public func ratio(stress d: Double) -> Double {
-            let t = Swift.pow(Swift.min(1, Swift.max(0, d / reference)), response)
+            let t = Foundation.pow(Swift.min(1, Swift.max(0, d / reference)), response)
             return rLight + t * (rHeavy - rLight)
         }
         /// The least stress for which the ramp lays `ratio` (nil past its heavy end).
@@ -127,7 +127,7 @@ public enum StructuralAuto {
             let t = (r - rLight) / (rHeavy - rLight)
             if t <= 0 { return 0 }
             if t > 1 + 1e-12 { return nil }
-            return reference * Swift.pow(Swift.min(1, t), 1 / response)
+            return reference * Foundation.pow(Swift.min(1, t), 1 / response)
         }
     }
     /// The ramp of these settings on a layout whose largest cell is `partRefMM` (core's ratio_at), nil where the lay does not

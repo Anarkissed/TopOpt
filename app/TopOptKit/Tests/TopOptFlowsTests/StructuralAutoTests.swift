@@ -93,10 +93,10 @@ final class StructuralAutoTests: XCTestCase {
         let now = Double(strut) / 8
         let (ramp, base) = try Self.todaysRamp(strutMM: Double(strut))
         let (stage, n) = Self.grid(nx: 16, base: base)
-        // a right-hand stress its law answers inside the open lattice, found by the law itself
-        let right = try XCTUnwrap(stride(from: 1.0, to: 80, by: 0.5).first { v in
-            Self.margin(now, v) < Self.pa12.target && Self.margin(ramp.rHeavy * 0.95, v) >= Self.pa12.target
-        }, "premise: a stress short at the laid strut and held inside the open lattice")
+        // a right-hand stress 3 % short at the laid strut (the law is linear in the stress: margin(v) = margin(1) / v)
+        let right = Self.margin(now, 1) / (Self.pa12.target * 0.97)
+        XCTAssertLessThan(Self.margin(now, right), Self.pa12.target, "premise: short at the laid strut")
+        XCTAssertGreaterThanOrEqual(Self.margin(ramp.rHeavy * 0.95, right), Self.pa12.target, "premise: held inside the open lattice")
         let lay = Self.layout(cells: 2, strutMM: strut, voxels: n)
         let s = Self.settings()
         let t = try XCTUnwrap(StructuralAuto.thicken(check: Self.check(nx: 16, left: 0.05, right: Float(right)), stage: stage,
@@ -251,9 +251,9 @@ final class StructuralAutoTests: XCTestCase {
         let bk = try XCTUnwrap(StructuralAuto.baseKey(p, base: base, model: m))
         StructuralAutoStore.shared.keep(p.id, .init(baseKey: bk, field: stage, key: 99))
         XCTAssertEqual(StructuralAuto.stress(p, base: base, model: m).key, 99, "★ the drawing follows the file kept")
-        p.force.safetyMarginValue = 2
+        p.force.safetyMargin = 2
         XCTAssertEqual(StructuralAuto.stress(p, base: base, model: m), base, "★ a new margin: today's again until pressed")
-        p.force.safetyMarginValue = 1.5
+        p.force.safetyMargin = 1.5
         // RED CONTROL: Manual is his own — the kept round never reaches it
         p.latticePageManual = true
         XCTAssertEqual(StructuralAuto.stress(p, base: base, model: m), base, "RED CONTROL: Manual reads the base")
