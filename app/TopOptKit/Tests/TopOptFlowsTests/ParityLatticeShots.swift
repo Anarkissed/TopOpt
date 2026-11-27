@@ -35,7 +35,7 @@ final class ParityLatticeShots: XCTestCase {
         let h = AppBuildHost(ws, size: size, test: self)
         h.pump(3)
         _ = try h.pickFromMenu("capsuleMenu", mode.title, what: "\(size): the stage menu")
-        try h.tap("capsuleLattice", "\(size): the Lattice page", settle: 1.5)
+        try h.tap("capsuleSetup", "\(size): Setup, the settings", settle: 1.5)
         return (h, probe, p)
     }
 

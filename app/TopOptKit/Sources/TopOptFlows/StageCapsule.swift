@@ -169,7 +169,12 @@ public struct StageCapsule: View {
 
     private var pageFold: (() -> Void)? { page == .primary ? fold : nil }
 
+    /// Test hook (FlexibleSaid.recording, notes30): each capsule's lit segment, by its id prefix ("lattice" → "Lattice").
+    nonisolated(unsafe) static var recordedLit: [String: String] = [:]
+    static func noteLit(_ prefix: String, _ title: String) { if FlexibleSaid.recording { recordedLit[prefix] = title } }
+
     public var body: some View {
+        let _ = Self.noteLit(idPrefix, pageTitle(page))
         HStack(spacing: 2) {
             menu
             Rectangle().fill(DS.Color.strokeStrong.color).frame(width: 1, height: 22)

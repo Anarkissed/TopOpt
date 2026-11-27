@@ -464,7 +464,7 @@ public final class LatticeLayoutSession: @unchecked Sendable {
     /// across (255 none), `sheetSeamMM` its signed distance across, mm, + toward the seam's b side (core's sheet_seam_mm).
     public func grid(origin: SIMD3<Float>, voxel: Float, dims: SIMD3<Int32>) async throws
         -> (rg: [Int8], ms: Double, asked: Int, unheld: Int, nocell: [Int], sheetField: [UInt8], sheetSeam: [UInt8],
-            sheetSeamMM: [Float]) {
+            sheetSeamMM: [Float], nocellHaveMM: [Double]) {
         let sid = id
         return try await worker.run {
             var err = topoptbridge.BridgeError()
@@ -474,7 +474,8 @@ public final class LatticeLayoutSession: @unchecked Sendable {
             // then answered "would not lattice much more" of a part nothing had checked)
             if r.cancelled, !Self.controlStoppedMapReadsEmpty { throw CancellationError() }
             return (Array(r.rg), r.ms, Int(r.asked), Int(r.unheld), Array(r.nocell).map { Int($0) },
-                    Array(r.sheet_field), Array(r.sheet_seam), Array(r.sheet_seam_mm))
+                    Array(r.sheet_field), Array(r.sheet_seam), Array(r.sheet_seam_mm),
+                    Array(r.nocell_have_mm))   // ★ notes30 X2: per reason, the most there is at its solid places (mm)
         }
     }
 

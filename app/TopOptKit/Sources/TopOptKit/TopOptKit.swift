@@ -1178,6 +1178,13 @@ public enum TopOptKit {
         String(topoptbridge.bridge_guard_self_test(Int32(kind)))
     }
 
+    /// ★ notes30 (his crash 11-26 12:50): the lines the bridge has written to the log this process — the counting sink the
+    /// tests read. A lookup's refusal writes none; a press's refusal writes each different one once.
+    public static var bridgeLogLineCount: Int { Int(topoptbridge.bridge_log_line_count()) }
+
+    /// RED CONTROL (tests, notes30): every refusal written to the log, as before notes30.
+    public static func setControlLogEveryRefusal(_ on: Bool) { topoptbridge.bridge_set_control_log_every_refusal(on) }
+
     /// ★ TEST SEAM (maintainer, 2026-10-03: "the stale-type path never asks core for
     /// numbers it can't have"). Every per-type wrapper reports (function, topology) here
     /// first. nil in production; a test installs a recorder to prove a path asks core

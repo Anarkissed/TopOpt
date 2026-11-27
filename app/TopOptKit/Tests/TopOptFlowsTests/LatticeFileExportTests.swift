@@ -191,7 +191,7 @@ final class LatticeFileExportTests: XCTestCase {
             try h.pickFromMenu("capsuleMenu", "Structural", what: "the stage menu")
             h.pump(1.5)
             if h.frames.all["view-Lattice preview-on"] == nil { try h.tap("view-Lattice preview", "the lattice preview", settle: 1.5) }
-            if h.frames.all["latticeSettingsPanel"] != nil { try h.tap("capsuleSetup", "the page's Save", settle: 1.5) }
+            if h.frames.all["latticeSettingsPanel"] != nil { try h.tap("capsuleLattice", "the page's Save", settle: 1.5) }
             let end = Date().addingTimeInterval(60)
             while h.frames.all["new-engine-timing"] == nil, Date() < end { h.pump(0.5) }
             h.pump(1.5)

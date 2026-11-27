@@ -260,6 +260,9 @@ struct LatticeLayoutGrid {
   // The unheld voxels by core's reason (SolidAt::why, NoCell): Other, WallNarrow, TooFewAcross, Sliver, RegionShallow (his
   // ruling 11-14: solid where lattice was asked is never silent — the line says why and offers fixes).
   std::vector<int64_t> nocell;
+  // ★ notes30 X2 (cell advice): per reason, the most there is at any of its solid places (core's SolidWhy::have_mm: the widest
+  // wall, the deepest region), mm; 0 where none. With the lay's smallest cell it says whether any smaller cell could lay there.
+  std::vector<double> nocell_have_mm;
   // ★ notes30 Q2: a newer lay stopped it (lattice_layout_cancel): nothing above is filled — never "nothing asked for".
   bool cancelled = false;
   // ★ SHEETS (notes28 sheets SPEC 1.5, 5; builder B: the contract's "the map's region and seam channels"). Filled for a
