@@ -332,6 +332,23 @@ enum FlexibleStampSpread {
     }
 }
 
+/// ★ notes30 FF1: one Stamp face's designed squish, as ingredients (`FlexibleStageModel.stampDentJob`): `dent()` is
+/// `stampDent`'s own sum (the footprint smoothed from the cover, then spread), callable off the main thread.
+struct FlexibleStampDentJob: Equatable {
+    let raw: [Double]
+    let stack: FlexStackInfo
+    let design: FlexibleStampSpread.Design
+    let rule: FlexibleStampSpread.Rule
+    /// The batch-M spread (the red control `controlBatchMSpread`, read on the main actor when gathered).
+    let batchM: Bool
+
+    func dent() -> [Double] {
+        let foot = FlexibleStampFootprint.smoothed(raw, stack: stack)
+        if batchM { return FlexibleStampSpread.spread(foot, stack: stack, lengthMM: FlexibleStampSpread.lengthMM(stack)) }
+        return FlexibleStampSpread.dent(foot, stack: stack, design: design, rule: rule)
+    }
+}
+
 extension FlexibleStageModel {
     /// ★ BATCH M (M2) → ★ BATCH M2: a Stamp face's DESIGNED squish per column (0…1, its deepest 1) — the
     /// stamp's press spread as the 3D sim spreads it, its foci merged and showing (FlexibleStampSpread.dent) — what
@@ -349,6 +366,20 @@ extension FlexibleStageModel {
             design = .beforeDesign(stampAreaMM2: stampAreaMM2(r) ?? 0, faceAreaMM2: st.footprintAreaMM2)
         }
         return FlexibleStampSpread.dent(foot, stack: st, design: design, rule: FlexibleStampSpread.controlRule ?? .shipped)
+    }
+
+    /// ★ notes30 FF1: `stampDent`'s ingredients (its cover, stack and core's design, the rule) — the spread itself is made
+    /// on the main Flexible page's picture worker (`FlexibleStampDentJob.dent()`), never on the main thread.
+    func stampDentJob(_ r: Int) -> FlexibleStampDentJob? {
+        guard let raw = stampCoverage(r), let st = stack(r) else { return nil }
+        let design: FlexibleStampSpread.Design
+        if let d = key(r).flatMap({ designs[$0] }), d.refusal == nil {
+            design = FlexibleStampSpread.Design(d, columns: raw.count)
+        } else {
+            design = .beforeDesign(stampAreaMM2: stampAreaMM2(r) ?? 0, faceAreaMM2: st.footprintAreaMM2)
+        }
+        return FlexibleStampDentJob(raw: raw, stack: st, design: design, rule: FlexibleStampSpread.controlRule ?? .shipped,
+                                    batchM: FlexibleStampSpread.controlBatchMSpread)
     }
 
     /// The area (mm²) core reads a Stamp face's stamp over: a soft stamp's whole laid grid (its cells

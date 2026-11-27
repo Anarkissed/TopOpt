@@ -252,6 +252,13 @@ public struct FlexibleLatticeLayerInputs: Equatable {
     /// by the renderer WITH the field), and the sequence the loop plays (indices into `fe`: a pick
     /// is [g], "Play all" every landed group in turn). Empty ⇒ today's column squish.
     public var fe: [FlexibleFEField] = []
+    /// ★ notes30 FF1: each field's GPU bytes, made once per VERSION on the main page's picture worker (aligned with `fe`; a
+    /// missing entry is made by the pass itself). The pass keeps one texture per version and makes only the new ones.
+    public var feGPU: [FlexibleFEGPUField?] = []
+    /// ★ notes30 FF1: the lattice's volumes, made once per generation on the page's picture worker; `latticeGPUWaits` (the main
+    /// Flexible page, off-main): a new lattice whose volumes are not made yet waits hidden for them (never made on main).
+    public var latticeGPU: FlexibleLatticeGPU?
+    public var latticeGPUWaits = false
     public var feMesh: [[Float]] = []
     public var feSequence: [Int] = []
     /// The token the fields are uploaded by (the generation and the set of landed fields).

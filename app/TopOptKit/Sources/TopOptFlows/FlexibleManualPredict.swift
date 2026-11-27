@@ -128,13 +128,18 @@ extension FlexibleStageModel {
     func estimateColumns(_ f: FlexibleFEField, _ st: FlexStackInfo, key: String) -> [Double] {
         let k = "\(f.serial)|\(f.scale)|\(key)|\(st.columns.count)"
         if let c = Self.estimateCache[k] { return c }
-        let s = f.scale > 1e-12 ? f.scale : 1
-        let v = st.columns.indices.map { c in
-            st.columns[c].latticeMM > 0 ? Swift.max(0, f.columnCompression(stack: st, col: c, pinched: false)) / s : 0
-        }
+        let v = Self.estimateColumnValues(f, st)
         if Self.estimateCache.count > 64 { Self.estimateCache = [:] }
         Self.estimateCache[k] = v
         return v
+    }
+
+    /// ★ notes30 FF1: the estimate's own sum (no cache; any thread — the main Flexible page's picture worker).
+    nonisolated static func estimateColumnValues(_ f: FlexibleFEField, _ st: FlexStackInfo) -> [Double] {
+        let s = f.scale > 1e-12 ? f.scale : 1
+        return st.columns.indices.map { c in
+            st.columns[c].latticeMM > 0 ? Swift.max(0, f.columnCompression(stack: st, col: c, pinched: false)) / s : 0
+        }
     }
     @MainActor private static var estimateCache: [String: [Double]] = [:]
 

@@ -119,27 +119,42 @@ extension FlexibleMainStage {
     /// and `roles` (an autoclosure) not even evaluated, on every other page's body pass.
     public func tints(_ project: ProjectModel, on stage: WorkspaceStage, roles: @autoclosure () -> [FaceID: SIMD4<Float>],
                       stress field: LatticeDemandField?) -> [Float]? {
-        guard current(project, stage) != nil, let c = channels else { return nil }
-        noteStressField(field)
+        guard current(project, stage) != nil, channels != nil else { return nil }
         // ★ R7-V (his answer of 2026-10-14, the worded toggles removed — fixed): #354's Selections role colours stay in the
         // Selections list, never on this page's model (H4 still hands them over; never even evaluated). RED CONTROL only:
         // `controlRolesOnMain` composes them in.
         let roles = controlRolesOnMain ? roles() : [:]
-        var h = Hasher()
-        for k in roles.keys.sorted() { h.combine(k); h.combine(roles[k]!) }
+        // ★ notes30 FF1: one of the page's main-thread phases — a lookup of the tints the picture worker composed
+        return FlexibleMainPhases.measure("Flexible tints") { composedTints(project, field: field, roles: roles) }
+    }
+
+    private func composedTints(_ project: ProjectModel, field: LatticeDemandField?, roles: [FaceID: SIMD4<Float>]) -> [Float]? {
+        guard let c = channels else { return nil }
+        noteStressField(field)
         let showStress = stress && stressDrawable
         // ★ BATCH M (M3): on the FE route, each group's OWN stress (the sequence's first here; each Play
         // all turn its own below), on the sequence's one scale
         let feRoute = feStressRoute
-        // ★ ROUND 7, X1: the printed view's open surface (over the lattice region), per flat vertex — nil out of it
-        let open = printedOpen()
         // ★ X1 VERIFY: the lid carries no heat — the walls do (X-ray: a faint skin), or the printed view (its solid part is plain)
         let bare = lidWithoutHeat
-        let key = "\(generation)|\(h.finalize())|\(showStress ? (feRoute ? fe.token : stressKey) : 0)|\(xray)|\(heat)|\(overlay != nil)|\(bare)|"
-            + feBaseTints.keys.sorted().joined(separator: ",") + "|\(controlStressScaleIsPeak)|\(controlRound5Frames)|\(controlRolesOnMain)"
-            + "|\(openCache.map { open != nil ? $0.key : "-" } ?? "-")"
-        if key != composedKey {
+        // ★ notes30 FF1: the key the picture worker composed by — what is drawn (`channelsKey`, which bumps `generation`), then
+        // today's inputs (the printed view's open surface by its key: never made here to be compared)
+        let key = "\(channelsKey ?? "")|" + Self.composeKeyBody(
+            rolesHash: Self.rolesHash(roles), showStress: showStress, feRoute: feRoute, feToken: fe.token, stressKey: stressKey,
+            xray: xray, heat: heat, hasOverlay: overlay != nil, bare: bare, baseKeys: Array(feBaseTints.keys),
+            controlStressScaleIsPeak: controlStressScaleIsPeak, controlRound5Frames: controlRound5Frames,
+            controlRolesOnMain: controlRolesOnMain, openKey: printedOpenKey() ?? "-")
+        if key != composedKey, !pictureInline {
+            // the worker composes it (the next refresh, never inside this view update); the last picture's tints show until
+            // it lands — one swap, no animation
+            if tintsAskedFor != key {
+                tintsAskedFor = key
+                DispatchQueue.main.async { [weak self] in self?.refresh() }
+            }
+        } else if key != composedKey {
             composedKey = key
+            // ★ ROUND 7, X1: the printed view's open surface (over the lattice region), per flat vertex — nil out of it
+            let open = printedOpen()
             // ★ BATCH M VERIFICATION: each group's field on ITS OWN scale (its top — FlexibleFEStress.scaleTop);
             // RED CONTROL: one scale at the sequence's peak (Group 2's turn at 7 % of Group 1's, one blue)
             let onePeak = fe.sequence.compactMap { i in i < fe.fields.count ? feStress(fe.fields[i])?.peak : nil }.max() ?? 0
@@ -186,6 +201,12 @@ extension FlexibleMainStage {
         // …and the page hands the one the RENDERER shows now (a re-upload never shows another group's)
         if let id = feShownField?.versionKey, let t = feTintBox.tints(id) { return t }
         return composed
+    }
+
+    /// ★ notes30 FF1: the key `printedOpen()` caches by — nil where it gives nil (nothing is made).
+    func printedOpenKey() -> String? {
+        guard let m = model, printedReady(m), let o = overlay, let g = m.lattice else { return nil }
+        return "\(overlaySerial)|\(g.generation)|\(o.mesh.flat.vertexCount)"
     }
 
     /// ★ ROUND 7, X1: the printed view's open surface — per flat vertex of the overlay, over the lattice region

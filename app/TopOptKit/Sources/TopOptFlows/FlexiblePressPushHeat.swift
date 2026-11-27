@@ -137,7 +137,7 @@ public enum FlexiblePressHeat {
     }
 
     /// The column of stack `st` under model point `p` (core's frame; a surface point need not sit inside the column's run).
-    static func column(_ p: SIMD3<Double>, _ st: FlexStackInfo) -> Int? {
+    nonisolated static func column(_ p: SIMD3<Double>, _ st: FlexStackInfo) -> Int? {   // ★ notes30 FF1: any thread
         guard st.pitchMM > 0, st.nu > 0, st.nv > 0 else { return nil }
         let d = p - st.centroid
         let u = simd_dot(d, st.xAxis) - st.uMin, v = simd_dot(d, st.yAxis) - st.vMin
@@ -150,29 +150,47 @@ public enum FlexiblePressHeat {
     static func footprintTriangles(model m: FlexibleStageModel, overlay o: FlexibleOverlayMesh, regions: [Int]) -> [Int] {
         let key = "\(o.mesh.signature.contentHash)|\(o.keptFace.count)|\(regions)"
         if let c = triCache[key] { return c }
-        let mesh = m.project.viewerMesh
-        let faces = Set(regions.flatMap { m.regions.faces(of: $0, mesh: mesh) })
-        var out: [Int] = []
-        for t in 0..<o.keptFace.count where o.bandColumn[t] == nil && faces.contains(o.keptFace[t]) {
-            if regions.contains(where: { m.regions.contains($0, face: o.keptFace[t], centroid: o.keptCentroid[t], mesh: mesh) }) { out.append(t) }
-        }
+        let out = footprintTriangles(regions: m.regions, mesh: m.project.viewerMesh, overlay: o, of: regions)
         if triCache.count > 32 { triCache = [:] }
         triCache[key] = out
         return out
     }
 
+    /// ★ notes30 FF1: the same triangles from the gathered regions and part (any thread, no cache).
+    nonisolated static func footprintTriangles(regions all: FlexibleRegions, mesh: ViewerMesh?, overlay o: FlexibleOverlayMesh,
+                                               of regions: [Int]) -> [Int] {
+        let faces = Set(regions.flatMap { all.faces(of: $0, mesh: mesh) })
+        var out: [Int] = []
+        for t in 0..<o.keptFace.count where o.bandColumn[t] == nil && faces.contains(o.keptFace[t]) {
+            if regions.contains(where: { all.contains($0, face: o.keptFace[t], centroid: o.keptCentroid[t], mesh: mesh) }) { out.append(t) }
+        }
+        return out
+    }
+
     /// The heat's top end over `entries` (mm).
-    static func top(_ entries: [Entry]) -> Double { entries.flatMap(\.valuesMM).max() ?? 0 }
+    nonisolated static func top(_ entries: [Entry]) -> Double { entries.flatMap(\.valuesMM).max() ?? 0 }   // ★ notes30 FF1: any thread
 
     /// ★ Paint `entries` on the overlay's tints: every vertex of the footprint's drawn triangles by its own column, on `scale`
     /// (opaque through the X-ray, like a face's map). Returns the vertices painted.
     @discardableResult
     static func paint(_ tints: inout [Float], overlay o: FlexibleOverlayMesh, model m: FlexibleStageModel,
                       entries: [Entry], scale: Double) -> Int {
+        paint(&tints, overlay: o, entries: entries, scale: scale) { footprintTriangles(model: m, overlay: o, regions: $0) }
+    }
+
+    /// ★ notes30 FF1: the same paint from the gathered regions and part (any thread — the main Flexible page's picture worker).
+    @discardableResult
+    nonisolated static func paint(_ tints: inout [Float], overlay o: FlexibleOverlayMesh, regions all: FlexibleRegions, mesh: ViewerMesh?,
+                                  entries: [Entry], scale: Double) -> Int {
+        paint(&tints, overlay: o, entries: entries, scale: scale) { footprintTriangles(regions: all, mesh: mesh, overlay: o, of: $0) }
+    }
+
+    nonisolated private static func paint(_ tints: inout [Float], overlay o: FlexibleOverlayMesh, entries: [Entry], scale: Double,
+                                          triangles: ([Int]) -> [Int]) -> Int {
         let pos = o.mesh.flat.positions
         var painted = 0
         for e in entries {
-            for t in footprintTriangles(model: m, overlay: o, regions: e.regions) {
+            for t in triangles(e.regions) {
                 for j in 0..<3 {
                     let v = 3 * t + j
                     guard 3 * v + 2 < pos.count, 8 * v + 7 < tints.count else { continue }

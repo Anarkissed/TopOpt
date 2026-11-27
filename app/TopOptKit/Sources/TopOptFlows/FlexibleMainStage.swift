@@ -112,7 +112,7 @@ public final class FlexibleMainStage: ObservableObject {
     }
     var controlPrintedRulesApart = false
     /// Tests only: the overlay dropped (the state the one rule guards — no open surface to flag).
-    func dropOverlayForTests() { overlay = nil; overlayKey = nil }
+    func dropOverlayForTests() { overlay = nil; overlayKey = nil; overlayEra &+= 1 }
 
     /// ★ ROUND 7, X1 VERIFY — THE HEAT ON THE WALLS (FlexibleWallHeat). His Q9 answer (2026-10-14): "X-ray mode should show the
     /// inside of the SOLID showing the extent of the face prism/bend amount/heat map etc. … If the user adds x-ray, we see
@@ -348,7 +348,7 @@ public final class FlexibleMainStage: ObservableObject {
     private(set) var overlay: FlexibleOverlayMesh?
     private var overlayKey: String?
     private(set) var channels: FlexiblePageChannels.Channels?
-    private var channelsKey: String?
+    private(set) var channelsKey: String?   // ★ notes30 FF1: read by H4' (the tints' key)
     /// The lattice generation the loop last auto-played for.
     var playedGeneration: Int?
     // ★ BATCH G: the squish sims (FlexibleMainStage+Squish)
@@ -378,6 +378,33 @@ public final class FlexibleMainStage: ObservableObject {
     var controlColumnHeat = false
     /// Bumped per overlay rebuild (the mesh cache and the pass's FE token follow it).
     var overlaySerial = 0
+    // ★ notes30 FF1 — the picture made off the main thread (FlexibleMainPicture): its engine (the caches per field version),
+    // its worker (made at the first off-main refresh), the job serials, the epoch a new lattice / project / page bumps, and
+    // each field's GPU bytes (H3 hands them to the pass).
+    let pictureEngine = FlexiblePictureEngine()
+    private var pictureWorkerIfMade: FlexiblePictureWorker?
+    var pictureWorker: FlexiblePictureWorker {
+        if let w = pictureWorkerIfMade { return w }
+        let w = FlexiblePictureWorker(engine: pictureEngine)
+        w.cancel(to: pictureEpoch)
+        pictureWorkerIfMade = w
+        return w
+    }
+    private(set) var pictureSerial = 0
+    private(set) var pictureEpoch = 0
+    private var pictureCommitted = 0
+    /// Tests: pictures committed, and pictures dropped (older, or for another lattice / project).
+    private(set) var picturesCommitted = 0
+    private(set) var picturesDropped = 0
+    private var gatheredLatticeGeneration: Int?
+    /// Bumped when the overlay must be built again whatever its key (another project, the tests' hooks).
+    private var overlayEra = 0
+    var feGPU: [FlexibleFEGPUField?] = []
+    var latticeGPU: FlexibleLatticeGPU?
+    /// The H4' tints the body asked a picture for (asked once per key).
+    var tintsAskedFor: String?
+    /// Tests only: each picture handed to the commit (the parity test reads the worker's own).
+    var onPictureForTests: ((FlexiblePicture) -> Void)?
     /// ★ ROUND 6: the main page's prisms, and the state they were built for (`volumes`).
     var volumesCache: (key: String, items: [ClearanceRenderItem])?
     /// ★ ROUND 7, X1: the printed view's open surface, and the overlay / lattice it was found for (`printedOpen`).
@@ -468,7 +495,7 @@ public final class FlexibleMainStage: ObservableObject {
     var controlLegendByNewestVersion = false
     var controlNoSwapRefresh = false
     /// Tests: the next refresh rebuilds the overlay (a mesh rebuild mid Play all).
-    func forceOverlayRebuildForTests() { overlayKey = nil }
+    func forceOverlayRebuildForTests() { overlayKey = nil; overlayEra &+= 1 }
     /// Reduced motion (tests pin it).
     var reduceMotion: () -> Bool = {
         if AppSettings.skipAllAnimations { return true }   // ★ notes29: Skip all animations holds the squish still
@@ -518,6 +545,8 @@ public final class FlexibleMainStage: ObservableObject {
         model = m
         projectID = project.id
         overlay = nil; overlayKey = nil; channels = nil; channelsKey = nil; playedGeneration = nil
+        // ★ notes30 FF1: another project — a picture being made for the last one is never drawn; the overlay is built again
+        bumpPictureEpoch(); overlayEra &+= 1; feGPU = []; latticeGPU = nil; tintsAskedFor = nil
         // (called from a view's init: publish nothing unless a previous project left it playing)
         // ★ R7-V: the Play view as the model has it (OFF on open: at rest — every hold is), no pause of his carried over
         DispatchQueue.main.async { [loop, weak m] in
@@ -636,9 +665,13 @@ public final class FlexibleMainStage: ObservableObject {
                                                    latticeShows: (latticeOn || attachView) && fresh && !pageUp,   // ★ I2: Attach shows it
                                                    loop: fresh && !pageUp ? loop : nil,
                                                    printed: printedReady(m) && !pageUp && !attachView)   // ★ X1: the printed view (★ verify: its one rule; ★ I2: never during Attach)
+        // ★ notes30 FF1: the lattice's volumes made by the picture worker; off-main, a new lattice waits for them (hidden)
+        inputs?.latticeGPU = latticeGPU
+        inputs?.latticeGPUWaits = !pictureInline
         // ★ BATCH G: the squeeze groups' fields, their meshes and the sequence the loop plays
         if fe.active, fresh, !pageUp {
             inputs?.fe = fe.fields; inputs?.feMesh = fe.mesh; inputs?.feSequence = fe.sequence; inputs?.feToken = fe.token
+            inputs?.feGPU = feGPU   // ★ notes30 FF1: each version's GPU bytes, made by the picture worker
             inputs?.feTints = feTintBox   // ★ "Play all": each group's own colours, swapped in with its field
             // ★ BATCH M (M3): Stress on — the walls take each group's own stress (★ verification: each
             // field on its own scale — the pass's texture carries the fraction of its top)
@@ -1101,6 +1134,7 @@ public final class FlexibleMainStage: ObservableObject {
         if !owned || pageUp { chrome.foldAll(); endAttach() }   // ★ R7-D1: a stage change or the Squish page folds every card (★ I2: and ends Attach)
         // ★ R7-D2: leaving the stage drops the pick (its chip never waits to pop up on the way back); the join's group stays
         if !owned, !facePick.scope.isNone { var s = facePick; s.scope = .none; facePick = s; faceUI.closeTransient() }
+        if pageUp, !frozen { bumpPictureEpoch() }   // ★ notes30 FF1: a page over the stage — the picture being made is dropped
         frozen = pageUp
         visible = owned && !pageUp
         guard owned else { return }
@@ -1181,13 +1215,55 @@ public final class FlexibleMainStage: ObservableObject {
 
     /// The picture from the model: the overlay (rebuilt only when the pressed faces' stacks
     /// change — a new mesh reframes the camera), then its tints and dents.
+    /// ★ notes30 FF1 (the page froze after a "This face" change — his yes: "move that work off the main thread"): in THREE
+    /// phases. This GATHERS (the side effects it always had — the build's note, the sims scheduled — and ONE value of every
+    /// input, `FlexiblePictureJob`); the picture worker COMPUTES (FlexibleMainPicture: one thread, newest wins); `commitPicture`
+    /// swaps it in, all at once. Inline (an XCTest process, the red control `controlPictureOnMain`, the frames / roles controls):
+    /// the same job, made here and committed before this returns — today's order.
     func refresh() {
         guard let m = model else { return }
+        let job = FlexibleMainPhases.measure("Flexible gather") { gatherPicture(m) }
+        if pictureInline {
+            let p = FlexibleMainPhases.measure("Flexible picture (on main)") { pictureEngine.compute(job, cancelled: { false }) }
+            if let p { commitPicture(p) }
+            return
+        }
+        pictureWorker.submit(job) { @Sendable [weak self] p in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.commitPicture(p) } }
+        }
+    }
+
+    /// ★ notes30 FF1: the job runs inside refresh() (tests' default; the controls whose rule needs the model on main).
+    var pictureInline: Bool {
+        FlexiblePictureWorker.inline || FlexiblePictureWorker.controlPictureOnMain || controlRound5Frames || controlRolesOnMain
+    }
+
+    /// ★ notes30 FF1: a newer picture supersedes the one being made — a new lattice, another project, a page over the stage:
+    /// the worker's job stops at its next step, and an older picture is never committed.
+    func bumpPictureEpoch() {
+        pictureEpoch &+= 1
+        pictureWorkerIfMade?.cancel(to: pictureEpoch)
+    }
+
+    /// ★ notes30 FF1, PHASE A — GATHER (main, cheap): refresh's side effects, then every input of the picture as a value.
+    func gatherPicture(_ m: FlexibleStageModel) -> FlexiblePictureJob {
         // ★ C2: what the Lattice button and the X-ray read (once per refresh, never per body pass)
         latticeAvailable = FlexibleLatticeView.available(model: m)
         noteBuildLanded(m)
+        pictureSerial &+= 1
+        // a new lattice: a picture being made for the old one is never drawn
+        if m.lattice?.generation != gatheredLatticeGeneration {
+            gatheredLatticeGeneration = m.lattice?.generation
+            bumpPictureEpoch()
+        }
+        var j = FlexiblePictureJob()
+        j.serial = pictureSerial
+        j.epoch = pictureEpoch
         let keys = m.loadedKeys.filter { m.stacks[$0] != nil && m.geometry[$0] != nil }
         let oKey = keys.map { "\($0.region)/\($0.rotation)" }.joined(separator: ",") + "|" + m.regions.key
+        j.oKey = oKey
+        j.overlayCacheKey = "\(oKey)|\(overlayEra)"
+        j.overlaySerial = overlaySerial
         if overlayKey != oKey {
             // ★ BATCH C VERIFICATION: the part's triangles cut fine enough for the Stress colours
             // (his pad is 12 triangles); the dent's geometry is unchanged
@@ -1195,69 +1271,136 @@ public final class FlexibleMainStage: ObservableObject {
             // with the lattice skin inside it (known from the scene before the first overlay)
             let stressEdge = m.project.viewerMesh.map(FlexibleOverlayMesh.stressEdgeMM)
             let feEdge = m.sceneInfo.map { FlexibleFE.spacing(sceneNX: $0.nx, ny: $0.ny, nz: $0.nz, spacing: $0.spacing) }
-            overlay = FlexiblePageChannels.overlay(model: m, maxEdgeMM: [stressEdge, feEdge].compactMap { $0 }.min())
-            overlayKey = oKey
-            overlaySerial &+= 1
-            feMeshCache = [:]
+            j.rebuildOverlay = true
+            j.overlayJob = FlexiblePageChannels.overlayJob(model: m, maxEdgeMM: [stressEdge, feEdge].compactMap { $0 }.min())
+        } else {
+            j.overlay = overlay
         }
         // the map is the lattice's while one is shown (X-ray only gates the walls here)
         var drawn = FlexibleLatticePreview.drawn(m.playLattice?.showing(selectedSim), xray: true, building: m.latticeBuilding,   // ★ ROUND 7 (F)
                                                  checkStampShown: nil, stale: m.latticeIsStale)
-        // ★ BATCH G: the squeeze groups' 3D sims (started here — the shown sim first)
-        fe = feView(m, drawn: drawn)
+        // ★ BATCH G: the squeeze groups' 3D sims (started here — the shown sim first); ★ notes30 FF1: the plan only (the
+        // meshes are the worker's)
+        var plan = feView(m, drawn: drawn, meshes: false)
         // ★ BATCH G VERIFICATION: every sim of "Play all" failed — the FIRST group's column squish
         // plays, the picker showing it (the column path has one squeeze at a time; "Play all" there
         // squished every group's faces at once — the combo his round-5 (a) rejects)
-        fallbackSim = nil
-        if fe.failure != nil, fe.requested.count > 1, !controlPlayAllCombo, let first = fe.requested.first {
-            fallbackSim = first
+        var fallback: String?
+        if plan.failure != nil, plan.requested.count > 1, !controlPlayAllCombo, let first = plan.requested.first {
+            fallback = first
             drawn = FlexibleLatticePreview.drawn(m.playLattice?.showing(first), xray: true, building: m.latticeBuilding,
                                                  checkStampShown: nil, stale: m.latticeIsStale)
-            fe = feView(m, drawn: drawn)
+            plan = feView(m, drawn: drawn, meshes: false)
         }
-        self.drawn = drawn
-        // ★ BATCH C: the channels WITHOUT the ghost — Stress and the group colours are composed
-        // in first (FlexibleMainTints), then X-ray ghosts what is not opaque
-        // ★ BATCH M (M5, M2b): in FE mode the heat IS the sim's dent — at every vertex of the shown
-        // group's faces, on ONE scale over the groups of the sequence (Play all's turns compare)
-        let feNow = feHeat(m)
-        // ★ ROUND 6 (his img1): no group colour on the main page — no frame, no digit, no tinted map-less face
-        // ★ ROUND 7, M1 (1a): no face-prism — the PLAIN model (no dent heat, no dent: nothing can squish)
-        let prisms = m.facePrismsSet
-        // ★ M1 VERIFY (the verify: after a depth edit the legend read "What you drew · 0 mm … 24.5 mm" — Face 3's SQUISH
-        // depth, beside the list's 17.3 / 25.0; his answer: "the squish number: only on the Squish page"): the drawn curve is
-        // the Squish page's — the main page wears heat and a dent only from a lattice DRAWN (or core's 3D heat). While none is
-        // drawn (building, stale, deferred) it is the plain model. RED CONTROL `controlDrawnCurveOnMain`: the drawn curve's.
-        let latticeHeat = prisms && (drawn != nil || feNow != nil || Self.controlDrawnCurveOnMain)
-        // ★ R7-E5: an edges group's heat follows the selector (All / the 3-second hold: every edges group)
-        let pressHeat = heat && latticeHeat ? FlexiblePressHeat.entries(model: m, groups: mainPressHeatGroups) : []
-        var c = FlexiblePageChannels.channels(model: m, overlay: overlay, xray: false, drawnLattice: drawn, heat: heat && latticeHeat,
-                                              depthScaleMM: pressHeat.isEmpty ? feNow?.scaleMM : feNow.map { Swift.max($0.scaleMM, FlexiblePressHeat.top(pressHeat)) },
-                                              mapValues: feNow?.first,
-                                              controlColumnColours: controlColumnHeat, groupColours: false,
-                                              roleMarks: controlRolesOnMain,   // ★ R7-V: no role mark on the main page's model
-                                              pressHeat: pressHeat)
-        if !latticeHeat { c.dents = nil; c.exaggeration = 0; c.mapValues = nil }
-        if controlRound5Frames { FlexibleGroupFrames.paint(&c.tints, overlay: overlay, model: m) }   // (the red control only)
-        let shown = FlexibleShownValues(model: m, drawnLattice: drawn)
-        dentMaxMM = latticeHeat ? (pressHeat.isEmpty ? (feNow?.scaleMM ?? shown.maxDepth) : c.heatScaleMM) : 0   // ★ BATCH N VERIFICATION: the sequence AS ON SCREEN (★ M1: none without a face-prism; ★ M1 VERIFY: none without a lattice drawn)
-        heatValues = c.mapValues
-        dentMapShown = overlay?.flatStart.isEmpty == false && dentMaxMM > 0   // ★ BATCH M (M6): the dent view's X-ray
-        // ★ BATCH M VERIFICATION: …but not on the column FALLBACK (a lattice drawn, its sims failed — or none,
-        // a shape-only filament): its planes are core's per-column steps — 'no number' columns stand still
-        // among sunk ones and one face's plane crosses another's — which the solid body hid; there the
-        // dent view keeps the body solid (and the walls opaque), as before batch M
-        dentOnColumnFallback = drawn != nil && !fe.active && !fe.pending && !controlDentXrayOnFallback
-        // ★ BATCH G: the field moves the ghost, the heat plane and the walls; ×k capped so the map
-        // stays injective (the planes never cross)
-        feBaseTints = playAllBaseTints(m, scaleMM: dentMaxMM, nextScaleMM: feNow?.nextScaleMM)
-        // ★ X1 VERIFY: the walls' heat — the same numbers the map is coloured by, per column, on the legend's scale
-        wallHeatTable = makeWallHeat(m, shown: shown)
-        if fe.active {
-            c.exaggeration = FlexibleShownValues.cappedExaggeration(rule: shown.uncappedExaggeration, maxSafeScale: fe.safeScale)
-            c.dents = feShownMesh
+        j.drawn = drawn
+        j.fallbackSim = fallback
+        j.fe = plan
+        j.feShownKey = loop.shownKey
+        j.feShownIndex = loop.shownIndex
+        let play = m.playLattice
+        j.playLattice = play
+        j.lattice = m.lattice
+        j.wallLattice = play?.showing(fallback ?? selectedSim)
+        for s in play?.sims ?? [] where j.simKeys[s.id] == nil { j.simKeys[s.id] = s.keys }
+        j.manualHeat = m.isManual && !Self.controlCalibratedHeatInManual
+        j.latticeBuilding = m.latticeBuilding
+        j.latticeIsStale = m.latticeIsStale
+        j.latticeAvailable = latticeAvailable
+        // ★ BATCH C: the channels WITHOUT the ghost — Stress and the group colours are composed in first (FlexibleMainTints), then
+        // X-ray ghosts what is not opaque; ★ ROUND 6 (his img1): no group colour on the main page; ★ R7-V: no role mark on the
+        // main page's model. ★ notes30 FF1: the model's values only — a Stamp face's spread is the worker's.
+        let inputs = FlexiblePageChannels.inputs(model: m, groupColours: false, roleMarks: controlRolesOnMain, deferStamps: true)
+        j.channels = inputs
+        for (k, v) in inputs.shown.pinched { j.pinchedByRegion[k.region] = v }
+        j.stacks = inputs.stacks
+        j.partMesh = inputs.partMesh
+        j.ghostColour = FlexibleColours.ghost
+        // ★ R7-E5: an edges group's heat follows the selector (All / the 3-second hold: every edges group) — used only where the
+        // lattice's heat is drawn (the worker's `latticeHeat`)
+        j.pressHeat = heat && m.facePrismsSet ? FlexiblePressHeat.entries(model: m, groups: mainPressHeatGroups) : []
+        j.heat = heat
+        j.stress = stress
+        j.xray = xray
+        j.facePrismsSet = m.facePrismsSet
+        j.printedDrawn = printedDrawn(m)
+        j.wallsDrawnBase = latticeOn && m.lattice != nil && !m.latticeIsStale && !m.latticeBuilding && !frozen
+        j.attachView = attachView
+        j.hasModel = true
+        let route = feStressRoute
+        j.feStressRoute = route
+        j.solidStress = stressField.map { ($0, stressPeak) }
+        j.solidStressDrawable = !route && stressDrawable
+        j.stressKey = stressKey
+        j.controlColumnHeat = controlColumnHeat
+        j.controlPlayAllCombo = controlPlayAllCombo
+        j.controlDentXrayOnFallback = controlDentXrayOnFallback
+        j.controlDrawnCurveOnMain = Self.controlDrawnCurveOnMain
+        j.controlHeatOnLid = controlHeatOnLid
+        j.controlPrintedRulesApart = controlPrintedRulesApart
+        j.controlStressScaleIsPeak = controlStressScaleIsPeak
+        j.controlRound5Frames = controlRound5Frames
+        j.controlRolesOnMain = controlRolesOnMain
+        if controlRound5Frames {   // (the red control only — the job then runs on main: `pictureInline`)
+            j.paintFrames = { [weak m] t, o in
+                MainActor.assumeIsolated { if let m { FlexibleGroupFrames.paint(&t, overlay: o, model: m) } }
+            }
         }
+        return j
+    }
+
+    /// ★ notes30 FF1, PHASE C — COMMIT (main, O(1)): the picture's values assigned together, the loop's rules (unchanged), and
+    /// `generation` bumped only when what is drawn changed. A picture older than the last committed one, or made for another
+    /// lattice, project or a stage under a page, is dropped.
+    func commitPicture(_ p: FlexiblePicture) {
+        onPictureForTests?(p)
+        guard model != nil, p.epoch == pictureEpoch, p.serial > pictureCommitted else { picturesDropped += 1; return }
+        FlexibleMainPhases.measure("Flexible commit") { commitPictureNow(p) }
+    }
+
+    private func commitPictureNow(_ p: FlexiblePicture) {
+        pictureCommitted = p.serial
+        picturesCommitted += 1
+        if p.overlaySerial != overlaySerial { feMeshCache = [:] }
+        overlay = p.overlay
+        overlayKey = p.oKey
+        overlaySerial = p.overlaySerial
+        fe = p.fe
+        fallbackSim = p.fallbackSim
+        drawn = p.drawn
+        // the main thread's own readers (a tap's reading, the Stress legend, the printed view) share the worker's numbers
+        for (i, f) in fe.fields.enumerated() where i < fe.mesh.count {
+            feMeshCache[f.versionKey] = ("\(overlaySerial)|\(f.serial)|\(f.scale)", fe.mesh[i])
+        }
+        for (k, v) in p.feValues { feValueCache[k] = v }
+        for (k, v) in p.feColumns { feColumnCache[k] = v }
+        for (k, s) in p.feStress { feStressCache[k] = (s.key, s.field, s.peak, controlStressScaleIsPeak ? s.peak : s.scaleTop) }
+        if let o = p.open { openCache = o }
+        dentMaxMM = p.dentMaxMM   // ★ BATCH N VERIFICATION: the sequence AS ON SCREEN (★ M1: none without a face-prism)
+        heatValues = p.heatValues
+        dentMapShown = p.dentMapShown   // ★ BATCH M (M6): the dent view's X-ray
+        dentOnColumnFallback = p.dentOnColumnFallback   // ★ BATCH M VERIFICATION
+        feBaseTints = p.feBaseTints
+        wallHeatTable = p.wallHeat   // ★ X1 VERIFY: the walls' heat
+        feGPU = p.gpu
+        latticeGPU = p.latticeGPU
+        // nothing drawn changed: the arrays on screen stay (MetalMeshView's O(1) check sees the same storage)
+        let c = (p.key == channelsKey ? channels : nil) ?? p.channels
         loop.exaggeration = c.exaggeration
+        applyLoopRules()
+        channels = c
+        if p.composeKey != composedKey {
+            composed = p.composed
+            composedKey = p.composeKey
+            feTintBox.set(p.composedPer)
+        }
+        if channelsKey != p.key {
+            channelsKey = p.key
+            generation &+= 1
+        }
+    }
+
+    /// The loop's rules for the picture just committed (unchanged — moved out of refresh by ★ notes30 FF1).
+    private func applyLoopRules() {
         if let g = drawn {
             let asked = "\(g.generation)|" + fe.requested.joined(separator: ",")
             if controlLoopByGeneration {
@@ -1303,18 +1446,23 @@ public final class FlexibleMainStage: ObservableObject {
         } else if loop.playing || loop.held != 1 {
             loop.hold(1)   // his live drawing (no lattice) holds at the full squish
         }
-        let key = [String(describing: c.tints.map { VertexTintKey($0).hash }),
-                   String(describing: (fe.active ? nil : c.dents).map { VertexTintKey($0).hash }),   // (FE: the token below)
-                   "\(c.exaggeration)", "\(drawn?.generation ?? -1)", "\(drawn?.facesToken ?? -1)", "\(m.latticeBuilding)",
-                   "\(m.lattice?.generation ?? -1)", "\(m.latticeIsStale)", oKey, "\(latticeAvailable)",
-                   "\(fe.token)", "\(fe.sequence)", "\(fe.shownSequence)", "\(fe.pending)", fe.failure ?? "", "\(xray)", "\(stress)",
-                   "\(prisms)", "\(printedReady(m))"].joined(separator: "|")   // ★ M1 VERIFY: the views' availability redraws the row; ★ X1: the printed view
-            + "|\(wallHeatTable?.token ?? 0)|\(heatOnWalls)"   // ★ X1 VERIFY: the walls' heat
-        channels = c
-        if channelsKey != key {
-            channelsKey = key
-            generation &+= 1
-        }
+    }
+
+    /// ★ notes30 FF1: what the ONE tint array is composed from (H4' and the picture worker share it, so a picture's tints are
+    /// found again by the body).
+    nonisolated static func composeKeyBody(rolesHash: Int, showStress: Bool, feRoute: Bool, feToken: Int, stressKey: Int, xray: Bool,
+                                           heat: Bool, hasOverlay: Bool, bare: Bool, baseKeys: [String], controlStressScaleIsPeak: Bool,
+                                           controlRound5Frames: Bool, controlRolesOnMain: Bool, openKey: String) -> String {
+        "\(rolesHash)|\(showStress ? (feRoute ? feToken : stressKey) : 0)|\(xray)|\(heat)|\(hasOverlay)|\(bare)|"
+            + baseKeys.sorted().joined(separator: ",") + "|\(controlStressScaleIsPeak)|\(controlRound5Frames)|\(controlRolesOnMain)"
+            + "|\(openKey)"
+    }
+
+    /// The role colours' identity (H4' — ★ R7-V: none on the main page but under the red control).
+    nonisolated static func rolesHash(_ roles: [FaceID: SIMD4<Float>]) -> Int {
+        var h = Hasher()
+        for k in roles.keys.sorted() { h.combine(k); h.combine(roles[k]!) }
+        return h.finalize()
     }
 }
 
