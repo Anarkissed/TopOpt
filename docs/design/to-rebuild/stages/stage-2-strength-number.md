@@ -507,3 +507,16 @@ Peak through the file's fills against the certificate's, percent:
 | thick ring, 3 / 4 / 5 / 6 | -46.5 / -43.3 / -34.2 / -37.8 | -26.4 / -15.6 / -19.0 / -11.7 | -13.4 / -19.4 / -2.9 / -3.1 | +0.3 / -2.0 / -0.4 / +1.2 | -0.1 / -11.3 / -1.7 / -0.9 |
 
 CORRECTION to what I told the reviewer an hour earlier ("within about 2.5 % from k = 8, k = 16 no tighter") on 7 rows: over all 12 rows, k = 8 is within 2.5 % everywhere (worst +2.5, -2.1), but k = 16 has ONE row at -11.3 % (the ring at 4 voxels, where k = 8 reads -2.0 %). A finer k is not safer: one sliver voxel falling the other side of a half moves the peak by ten percent. That is the one-voxel form's jump, seen at its plainest, and it settles the question of k for that form by showing there is no settling: k = 8 is the best measured, not a converged value.
+
+### ONE JUDGE, evidence (a) for the SIZE form (2026-11-26 22:25; the round hole so far, the ellipse running)
+
+The same path (a closed mesh -> the file's fills -> the analysis), but judged by the stage's size form: real stiffness, the stress read over 2 and over 3 voxels with the ball free to sit on the edge. Against the same reading on the certificate's fills (32 x 32), percent:
+
+| round hole, radius in voxels | over | k = 2 | k = 4 | k = 8 | k = 16 |
+|---|---|---|---|---|---|
+| 3 | 2 voxels / 3 voxels | -5.8 / -5.3 | -2.1 / -1.0 | -0.3 / -0.1 | +0.1 / +0.1 |
+| 4 | 2 / 3 | -2.3 / -1.3 | +0.4 / 0.0 | -0.3 / -0.4 | -0.1 / -0.1 |
+| 5 | 2 / 3 | -2.1 / -3.0 | -1.1 / -0.6 | -0.1 / 0.0 | -0.1 / 0.0 |
+| 6 | 2 / 3 | -6.7 / -5.8 | -0.4 / -0.1 | -0.5 / -0.4 | +0.1 / (running) |
+
+What I claimed to the reviewer and had not measured now is: through the file's fills the size form gives the certificate's number within 0.5 % at k = 8 on every row so far, and moves by 0.5 % or less from k = 8 to 16. So for the size form the ruled tests are both met at k = 8 (within 1 %; under 0.5 % when k doubles). The contrast with the one-voxel form (2.5 % at best, 11 % on an unlucky sliver) is the two jumps that form has and this one does not.
