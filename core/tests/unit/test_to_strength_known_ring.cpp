@@ -81,6 +81,12 @@ topopt::StepModel inner_face(double cx, double cy, double height) {
   return model;
 }
 
+// MEASURING ARM (stage 4's question, measured ahead 2026-11-27; not in the engine):
+// the stress of the first FULL voxels behind the inner face carried out to the TRUE
+// inner radius, along 32 rays: by a straight line through two voxels and by a curve
+// through three. The largest over the rays, over the pressure. Filled by peak_ratio.
+double g_carry_line = 0.0, g_carry_curve = 0.0;
+
 double peak_ratio(int rv, bool exact_fill, double penalty, bool* ok, double* area_error,
                   double* over_size = nullptr) {
   const double h = kInnerMm / rv;
@@ -183,6 +189,42 @@ double peak_ratio(int rv, bool exact_fill, double penalty, bool* ok, double* are
                                                    topopt::kStressMaterialFloor,
                                                    kSizesMm[q]) /
                      kPressure;
+  g_carry_line = g_carry_curve = 0.0;
+  if (res.von_mises_material_field.size() == density.size()) {
+    const double pi = std::acos(-1.0);
+    const int k = kThickness / 2;
+    for (int s = 0; s < 32; ++s) {
+      const double ang = 2.0 * pi * (s + 0.37) / 32.0;
+      double rr[3] = {0, 0, 0}, vv[3] = {0, 0, 0};
+      int got = 0, li = -1, lj = -1;
+      for (double r = ri; r < ro && got < 3; r += 0.2) {
+        const int i = static_cast<int>(std::floor(cxv + r * std::cos(ang)));
+        const int j = static_cast<int>(std::floor(cyv + r * std::sin(ang)));
+        if (i < 0 || j < 0 || i >= w || j >= w || (i == li && j == lj)) continue;
+        const std::size_t idx = (static_cast<std::size_t>(k) * w + j) * w + i;
+        if (density[idx] < 1.0) continue;
+        li = i;
+        lj = j;
+        rr[got] = std::hypot(i + 0.5 - cxv, j + 0.5 - cyv);
+        vv[got] = res.von_mises_material_field[idx];
+        ++got;
+      }
+      if (got >= 2 && rr[1] > rr[0]) {
+        const double line = vv[0] + (vv[1] - vv[0]) * (ri - rr[0]) / (rr[1] - rr[0]);
+        g_carry_line = std::max(g_carry_line, line / kPressure);
+      }
+      if (got == 3 && rr[1] > rr[0] && rr[2] > rr[1]) {
+        double curve = 0.0;  // the curve through three points, at ri
+        for (int a2 = 0; a2 < 3; ++a2) {
+          double l = 1.0;
+          for (int b2 = 0; b2 < 3; ++b2)
+            if (b2 != a2) l *= (ri - rr[b2]) / (rr[a2] - rr[b2]);
+          curve += l * vv[a2];
+        }
+        g_carry_curve = std::max(g_carry_curve, curve / kPressure);
+      }
+    }
+  }
   return res.max_von_mises / kPressure;
 }
 
@@ -204,8 +246,15 @@ int main(int argc, char** argv) {
     bool ok1 = false, ok2 = false, ok3 = false;
     double e1 = 0.0, e2 = 0.0, e3 = 0.0;
     row.binary = peak_ratio(r, false, 3.0, &ok1, &e1);
+    const double cb_line = g_carry_line, cb_curve = g_carry_curve;
     row.fill_cubed = peak_ratio(r, true, 3.0, &ok2, &e2);
+    const double cc_line = g_carry_line, cc_curve = g_carry_curve;
     row.fill_linear = peak_ratio(r, true, 1.0, &ok3, &e3, row.over_size);
+    std::printf("[carry] inner radius %d voxels: carried to the true inner face, straight line / curve, percent against the textbook: "
+                "all-or-nothing %+.1f / %+.1f; E x fill^3 %+.1f / %+.1f; E x fill %+.1f / %+.1f\n",
+                r, 100.0 * (cb_line / kTextbook - 1.0), 100.0 * (cb_curve / kTextbook - 1.0),
+                100.0 * (cc_line / kTextbook - 1.0), 100.0 * (cc_curve / kTextbook - 1.0),
+                100.0 * (g_carry_line / kTextbook - 1.0), 100.0 * (g_carry_curve / kTextbook - 1.0));
     row.area_error = std::max({std::fabs(e1), std::fabs(e2), std::fabs(e3)});
     if (!ok1 || !ok2 || !ok3) ++failures;
     std::printf("%-12d %9.3f %14.3f %16.3f %14.3f %9.3f %9.3f %9.3f %10.2f\n", r,

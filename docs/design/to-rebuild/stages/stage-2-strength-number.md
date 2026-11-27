@@ -739,3 +739,18 @@ The stress of the two outermost FULL voxels carried in a straight line to where 
 
 Read at the true surface, the reading's error IS the model's stiffness error and nothing else (each figure equals the "soft" column of the table above). So the pair that works on a free cut face is REAL STIFFNESS for the cut voxels (E x fill) with the stress read AT THE TRUE SURFACE: within 4 % from 8 voxels through, 8 to 13 % low at 4, and steady across the skin's fill (which no one-voxel reading is). On the ring, E x fill at one voxel already reads -7 to -4 %. It is the first combination measured that is inside or near the bar on both shapes. Caveats: a straight beam and a straight-line carry; a curved or loaded face and a notch are not measured; it reads slightly LOW everywhere (the unsafe side), so it would need its own small allowance. A proposal for stage 4, for the reviewer; nothing built in the engine.
 
+### The same carry on the thick ring: a CURVED face with the LOAD on it (2026-11-27 07:05, measuring arm `[carry]` in `to_strength_known_ring`; not in the engine)
+
+The stress of the first FULL voxels behind the inner face carried to the TRUE inner radius along 32 rays (the largest of the 32), percent against the textbook 2.333. Wall = inner radius in voxels.
+
+| inner radius, voxels | all-or-nothing: line / curve | E x fill^3: line / curve | E x fill (real stiffness): line / curve |
+|---|---|---|---|
+| 3 | +150 / +302 | +18 / +44 | -8.6 / +2.7 |
+| 4 | +80 / +158 | +23 / +52 | -5.2 / +12.3 |
+| 5 | +131 / +245 | +18 / +43 | -2.9 / +14.9 |
+| 6 | +32 / +57 | +16 / +36 | -0.3 / +13.5 |
+
+"line" = a straight line through two voxels; "curve" = a curve through three. Real stiffness with the STRAIGHT-LINE carry reads -8.6 to -0.3 % and closes on the textbook as the grid refines (the order a rule 5 measure must show). The curve overshoots; all-or-nothing cannot be carried at all (its staircase face makes the first voxels' stresses jagged).
+
+SO, on both shapes (free cut faces in bending; a curved face under load): real stiffness on the cut voxels + the full voxels' stress carried in a straight line to the true surface is within 9 % at 3 to 4 voxels of wall or 8 through a beam, and within 3 to 4 % from 5 of wall / 8 through. Always slightly LOW. Still not measured: a notch or sharp inside corner (where Top Motor Mount's peak sits), a general surface (this arm walks rays it is given; the engine would need the surface's normal at each cut voxel), and the across-layer reading.
+
