@@ -980,3 +980,7 @@ Measured with the limit at 4:
 
 NOT DONE YET: (1) the CLI sets the stress-reading size only when the mode is `Size` (three CLI files), so `surface` does not reach a run from the command line until that one condition is widened: next; (2) `surface_thin_voxels` is filled only where member widths are already measured; (3) nothing reports the counts yet; (4) A2 (the drawn faces' fills in the loop) and the reviewer's five measurements.
 
+### `TOPOPT_STRENGTH=surface` now reaches a command-line run (2026-11-27 16:00)
+
+The three CLI conditions that set the stress-reading size (`to_setup.inc`, `to_analyze.inc`, `to_run.inc`) accept `Surface` as they accept `Size`. Checked on the 15 mm bracket as drawn (`analyze`, res 48, PLA): switch unset: margin 6.530, the same `analysis.json` bytes as before the change; `size`: 8.190 (stress 2.374 MPa, 0.7467 g printed); `surface`: 8.190, identical to `size`, as it should be here: PLA's ball (1.2 mm) spans 3.8 voxels at this resolution and no member is thin by the rule, so nothing falls back to the surface reading. A case that does fall back (a material with no published length, or a coarser grid) is the next check, with the reviewer's five measurements.
+

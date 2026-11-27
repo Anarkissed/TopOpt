@@ -510,7 +510,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   // construction. width_aware defaults false → the scalar f^1.5 gate.
   // TO rebuild stage 2 (see to_setup.inc); set here, after the load case has
   // replaced the options.
-  if (strength_mode() == StrengthMode::Size)
+  if (strength_mode() == StrengthMode::Size || strength_mode() == StrengthMode::Surface)
     options.stress_reading_mm = reading_size_for_job_mm(job.material);
   const KnockdownSpec knockdown = knockdown_spec_for(options);
 

@@ -2829,7 +2829,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
 
   // TO rebuild stage 2 (the reviewer's ruling 2026-11-26, item 6): say which form of
   // the strength reading this job used, and why. One line and one report key.
-  if (strength_mode() == StrengthMode::Size) {
+  if (strength_mode() == StrengthMode::Size || strength_mode() == StrengthMode::Surface) {
     auto& sr = result.pipeline.report.strength_reading;
     sr.evaluated = true;
     sr.size_mm = options.stress_reading_mm;
