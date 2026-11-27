@@ -362,3 +362,20 @@ Read plainly. On his two parts, where little is carved, the two judges agree to 
 ### Written ahead for "one judge" (2026-11-26 18:55; NOT wired into any job, the reviewer's ruling comes first)
 
 `file_fill.hpp`, `file_fill_fractions(file, grid, sub = 4)`: each voxel's share inside the file's surface, counted on a grid `sub` times finer over the same voxels by the voxeliser's own rule (`voxelize_onto_grid`), so with sub = 1 it is exactly today's all-or-nothing occupancy. Test `to_file_fill` (passes): a box on voxel faces reads 0 or 1 and its exact volume; a box cutting voxels in half reads 0.5 in the cut layers; a box off the sub-grid holds its volume to 1.4 % at 4 per voxel (2.8 % at 8 on this box by where its faces fall; all-or-nothing 1.0 % by the same luck: the point of the fill is the SHAPE of the edge, not the total). Cost: one voxelisation at `sub` times the resolution (sub 4 at 128 x 96 x 64 voxels: 50 MB of one-byte tags while it runs). What is left once ruled: the re-check analyses the file's fills by the loop's form, and the report says so.
+
+### The across-layer check read over a size, against a textbook case (2026-11-26 19:11; behind `TOPOPT_STRENGTH=size`)
+
+Until now only the in-plane check could be read over a size; the across-layer check read one voxel (the bracket's lightest version above was decided by it in both forms). Now, when a size is read, the tension across the layers is averaged the same way and over the same size (his word: "Let's do same size, then"), with the cut voxels' stress included as for the in-plane reading (`analyze.cpp`).
+
+Test `to_strength_across_layers`: the plate with a round hole with the layers stacked ALONG the pull, so the across-layer check reads the tension along the pull (3.03 x the far stress at the hole's edge), against the reading's own true value (the same average of Kirsch's stress along the pull, `to_reference_reading.hpp`).
+
+| | radius 3 voxels | 4 | 5 | 6 | |
+|---|---|---|---|---|---|
+| one voxel (today's form), against the peak | +14.2 % | +13.7 % | +4.7 % | +18.5 % | high (safe), 14 % apart |
+| over 1.75 voxels | -3.2 % | -0.4 % | +2.9 % | +3.3 % | inside the bar |
+| over 2.00 voxels | -5.4 % | -2.3 % | +2.0 % | +2.3 % | OUTSIDE by 0.4 (the coarsest grid) |
+| over 2.50 voxels | -4.9 % | -2.1 % | +2.7 % | +2.8 % | inside |
+| over 3.00 voxels | -2.0 % | +0.4 % | +4.9 % | +4.7 % | inside |
+| over 4.00 voxels | -0.6 % | +1.5 % | +4.0 % | +3.9 % | inside |
+
+Read plainly: the across-layer reading over a size behaves like the in-plane one (which read -4.9 % at the same point) and is inside the bar at 19 of 20 points; at 2.0 voxels across on the coarsest grid, where the hole is only 3 voxels in radius, it is 5.4 % low against a 5 % bar. Not hidden and not tuned away: for the reviewer to rule (accept at a hole of 3 voxels' radius, or ask for a margin on the across-layer reading). Committed as measured, measure-only in ctest.

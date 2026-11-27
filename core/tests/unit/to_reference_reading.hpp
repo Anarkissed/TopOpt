@@ -58,6 +58,25 @@ inline double plate_reading(double a, double diameter, double thickness) {
   return ball_reference(vm, inside, 0.0, a, 0.0, 1.0, diameter, thickness);
 }
 
+// The same plate, the tension ALONG THE PULL (what the across-layer check reads
+// when the layers are stacked along the pull): sigma_xx from Kirsch, tension only.
+// Hottest at (0, a), where it equals the von Mises value (the state there is
+// uniaxial).
+inline double plate_reading_along_pull(double a, double diameter, double thickness) {
+  auto sxx = [a](double x, double y) {
+    const double r = std::max(std::hypot(x, y), a), th = std::atan2(y, x), q = a * a / (r * r);
+    const double c2 = std::cos(2.0 * th), s2 = std::sin(2.0 * th);
+    const double srr = 0.5 * (1.0 - q) + 0.5 * (1.0 - 4.0 * q + 3.0 * q * q) * c2;
+    const double stt = 0.5 * (1.0 + q) - 0.5 * (1.0 + 3.0 * q * q) * c2;
+    const double srt = -0.5 * (1.0 + 2.0 * q - 3.0 * q * q) * s2;
+    const double c = std::cos(th), s = std::sin(th);
+    const double v = srr * c * c + stt * s * s - 2.0 * srt * s * c;
+    return std::max(v, 0.0) * (3.03 / 3.0);
+  };
+  auto inside = [a](double x, double y) { return std::hypot(x, y) >= a; };
+  return ball_reference(sxx, inside, 0.0, a, 0.0, 1.0, diameter, thickness);
+}
+
 // Thick ring, inner radius ri and outer ro, pressure 1 on the inner face, plane
 // stress; the reading in units of the pressure. Hottest at the inner face.
 inline double ring_reading(double ri, double ro, double diameter, double thickness) {
