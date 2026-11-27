@@ -197,10 +197,19 @@ Still to come: the rest of the dumps (demo, Pressing, Pillow Blocks, stand at 12
 
 ## 5. Stage report (filling in as measurements land)
 
+### Where the stage stands (2026-11-27 ~03:00 EST), in plain English (for Nadim)
+- WHY SOLVES WERE SLOW: the step that smooths the error each round was unstable on your parts (it made the error grow), so every run fell back to a slow backup on almost every solve (43 of 44 saved solves). Fixed: a stable smoother (Chebyshev degree 2) is the ruled new default. On the same saved solves it halves the solving time (745 -> 428 s in total) and every one of them stays on the fast method except one broken demo design.
+- WHAT IS IN THE PROJECT (merged by the lead): the solver's settings travel as one bundle (no setting can leak between jobs); a leaner core calculation (9-14 % faster at 3-6 cores, half the memory); the loose-piece rule (a piece cut off from every mount with a real load on it is refused at once, in plain words, instead of a 45-minute struggle); a test on made-up shapes beyond your parts.
+- WHAT WAS TRIED AND DROPPED: single precision (saved 12 %, the bar was 15 %; deleted at the close-out); a grid-stencil core calculation (not faster where it counts); running the design update on all cores (it changed a scenario job's result in the last digits; withdrawn the same night it was found).
+- STILL RUNNING: the before-and-after table on all your parts (today's solver, then the new default), one part per turn on the shared lock. When it passes, the new default is switched on (ready, tested, 26 solver tests green) and the old smoother is deleted.
+- THE SIDE PROJECT (the switch to a coarse map that follows the part): measured 4-12x fewer steps on your thin-walled parts; round 2 fixed its one slow case; it waits for the timed numbers and your approval.
+
 ### Reference table, before and after (Release, his jobs read in place; one part per lock hold)
-| part | today: run time (solve / rest) | iterations per solve | after: run time (solve / rest) | iterations per solve | versions, margins, mass | test K |
-|---|---|---|---|---|---|---|
-| (filled from run_ref.sh: today and the chosen TOPOPT_SOLVER setting) | | | | | | |
+| part | today: run time (solve share) | CG cycles per solve (mean, max) | l1 retries (latched) | after (cheb:2): run time | cycles per solve | versions, margins, mass | test K |
+|---|---|---|---|---|---|---|---|
+| Base | 166 s (71 %) | 275, 378 | 5 (2) | queued | | no version (too weak as drawn, as TOReview found) | |
+| Pressing | 360 s (39 %) | 245, 428 | 5 (2) | queued | | no version (the same) | |
+| Pillow Block L / R, stand at res 64 and 128, Top Motor Mount, Stand v4 | running / queued | | | | | | |
 
 ### Tests moved from failing to passing
 - New: to_solver_bridge_way (12), to_solver_smoother (74, three settings each of per-level Jacobi and Chebyshev, converge on multigrid without the l1 retry); with b9f53d5b: to_solve_threads (6, S-05: identical bytes at 1/3/6 threads), to_solver_reduced_apply (6, B-06: the reduced product equals the full-length one byte for byte), to_solver_settings (5) and to_solver_run_state (4) (E-01: a passed setting reaches the solve and leaks nowhere; two runs' states stay apart). E-01 phase 2 (6dd4d9ab): the same 24 tests green, test_simp's 198 checks included.
