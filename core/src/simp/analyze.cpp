@@ -164,16 +164,27 @@ double width_aware_knockdown(double infill_percent, double member_width_mm,
 }
 
 FixedDesignAnalysis analyze_fixed_design(
-    const VoxelGrid& grid, const SimpParams& params,
-    const std::vector<double>& density, const std::vector<DirichletBC>& bcs,
+    const VoxelGrid& grid_in, const SimpParams& params,
+    const std::vector<double>& density_in, const std::vector<DirichletBC>& bcs,
     const std::vector<NodalLoad>& loads, const Material& material,
     const Vec3& build_dir, double cg_tolerance, int cg_max_iterations,
     SolverKind solver_kind, double margin_stop, const KnockdownSpec& knockdown,
     bool load_path_ok, double part_solid, const LatticePosture* lattice,
     bool score_build_orientation, bool build_direction_inferred,
     bool auto_apply_build_orientation, double printed_iso,
-    bool gate_on_strut_strength, const AnalysisKnobs* knobs) {
+    bool gate_on_strut_strength, const AnalysisKnobs* knobs, const StressView* stress_view) {
   const AnalysisKnobs kn = knobs ? *knobs : AnalysisKnobs{};
+  // THE STRESS VIEW (TOPOPT_STRENGTH=surface; null = today, `grid` and `density` are
+  // then the arguments themselves). Everything below solves and reads stress on
+  // `grid` / `density`; the mass, printed counts, support proxy and V3 read
+  // `grid_in` / `density_in`, the design as it will be printed.
+  const bool use_view = stress_view != nullptr && lattice == nullptr;
+  if (use_view && (stress_view->grid.nx != grid_in.nx || stress_view->grid.ny != grid_in.ny ||
+                   stress_view->grid.nz != grid_in.nz ||
+                   stress_view->density.size() != density_in.size()))
+    throw std::invalid_argument("analyze_fixed_design: stress view size != the grid's");
+  const VoxelGrid& grid = use_view ? stress_view->grid : grid_in;
+  const std::vector<double>& density = use_view ? stress_view->density : density_in;
   // THE PRINTED-SET THRESHOLD for this analysis. Shadows the file-scope M3.5
   // constant so every "is there material here" test in this function asks the
   // caller's question — 0.5 for every classic run (identical to the constant it
@@ -743,6 +754,17 @@ FixedDesignAnalysis analyze_fixed_design(
           sc.solution.at(n, c);
   }
 
+  // With a stress view the printed counts come from the design itself, not the
+  // view (no lattice here: a view is ignored when one is given).
+  if (use_view) {
+    printed_voxels = 0;
+    effective_material = 0.0;
+    for (std::size_t idx = 0; idx < density_in.size(); ++idx)
+      if (grid_in.tags[idx] != VoxelTag::Empty && density_in[idx] > kIso) {
+        ++printed_voxels;
+        effective_material += 1.0;
+      }
+  }
   // Printed mass = material density (g/cm^3) * printed volume. Volumes are mm^3;
   // 1 cm^3 = 1000 mm^3, so divide by 1000 to land in grams. Spacing-aware.
   // `effective_material` is the mass-bearing volume in voxel-equivalents: a solid
@@ -765,9 +787,9 @@ FixedDesignAnalysis analyze_fixed_design(
     // are counted only when the part is printed along the grid's z (a tilted
     // build direction gets walls only, which reads a little low). Skin
     // thicknesses are the job's own when it states them, else the slicer's usual ones.
-    std::vector<double> printed_density(density.size(), 0.0);
-    for (std::size_t idx = 0; idx < density.size(); ++idx)
-      if (grid.tags[idx] != VoxelTag::Empty && density[idx] > kIso) printed_density[idx] = 1.0;
+    std::vector<double> printed_density(density_in.size(), 0.0);
+    for (std::size_t idx = 0; idx < density_in.size(); ++idx)
+      if (grid_in.tags[idx] != VoxelTag::Empty && density_in[idx] > kIso) printed_density[idx] = 1.0;
     const double blen = std::sqrt(build_dir.x * build_dir.x + build_dir.y * build_dir.y +
                                   build_dir.z * build_dir.z);
     const bool along_z = blen > 0.0 && std::fabs(build_dir.z) > 0.99 * blen;
@@ -778,7 +800,7 @@ FixedDesignAnalysis analyze_fixed_design(
         knockdown.bottom_skin_mm >= 0.0 ? knockdown.bottom_skin_mm : kStage2BottomSkinMm;
     const double top_mm = along_z ? (up ? skin_top : skin_bottom) : 0.0;
     const double bottom_mm = along_z ? (up ? skin_bottom : skin_top) : 0.0;
-    out.mass_grams = printed_mass_shell(grid, printed_density, 0.5, knockdown.wall_thickness_mm,
+    out.mass_grams = printed_mass_shell(grid_in, printed_density, 0.5, knockdown.wall_thickness_mm,
                                         top_mm, bottom_mm, knockdown.infill_percent,
                                         material.density_g_cm3)
                          .grams;
@@ -786,9 +808,9 @@ FixedDesignAnalysis analyze_fixed_design(
 
   // Support-volume proxy for the analysed build direction over THIS design's
   // printed geometry: mark non-printed voxels Empty in a copy and count overhangs.
-  VoxelGrid printed_grid = grid;
+  VoxelGrid printed_grid = grid_in;
   for (std::size_t idx = 0; idx < printed_grid.tags.size(); ++idx)
-    if (!(density[idx] > kIso)) printed_grid.tags[idx] = VoxelTag::Empty;
+    if (!(density_in[idx] > kIso)) printed_grid.tags[idx] = VoxelTag::Empty;
   out.support_volume_voxels = support_overhang_voxels(printed_grid, build_dir);
 
   // Printed / thresholded count basis (the SAME voxel count the reported mass is
@@ -802,7 +824,7 @@ FixedDesignAnalysis analyze_fixed_design(
       max_interlayer);
 
   // §7 V3 property suite on this fixed design (min-feature count, watertight mesh).
-  out.v3 = check_v3(grid, density, kIso);
+  out.v3 = check_v3(grid_in, density_in, kIso);
 
   // Gate on the INFILL-ADJUSTED worst-case margin (the stored/displayed margin
   // stays the SOLID margin; the knockdown scales ONLY what the acceptance test

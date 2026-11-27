@@ -1004,3 +1004,18 @@ What the loop does today (a builder's read-only study, file:line in its report):
 
 THE DESIGN (mine): behind `TOPOPT_STRENGTH=surface` only. (1) `to_setup.inc` computes the drawn part's fills once on the solved grid (`file_fill_fractions`, 8 per edge) and carries them on the options. (2) BOTH the probe and the certificate use them (the code's own rule, 2259 to 2261: the probe and the certificate measure the same thing), so under the switch the optimiser's PATH may change, not only its number; that is the ruling's "in the loop". (3) The combination inside the drawn part is min(drawn fill, carved fill); a voxel outside the drawn part's centres that the drawn surface cuts gets an element at its drawn fill only where it touches printed material; grown material outside the drawn faces (a design box) keeps the carved fill; Load and Fixture voxels keep what they have. (4) Only the STRESS side reads this field: the grams and the exported mesh stay on today's density, so no file changes shape and no mass moves because of it. (5) No file of another agent is touched (not `plsm.cpp`, `run_job.cpp`, `job.*`). With the switch unset: today's bytes.
 
+### A2 BUILT: the drawn faces' fills reach the loop's probe and certificate under `TOPOPT_STRENGTH=surface` (2026-11-27 17:20; a builder's code to the design above; one build; the 15 mm bracket, res 48, three runs)
+
+`MinimizePlasticOptions::drawn_fill` (filled in `to_setup.inc` under Surface only); one helper in `minimize_plastic.cpp` makes the STRESS VIEW (inside the drawn part min(design, drawn fill); a drawn sliver beside printed material gets an element; the design-box offset mapped; Load, Fixture and voxels outside the part grid untouched) for both the probe and the certificate; `analyze_fixed_design` takes it as an optional `StressView` and solves and reads stress on it, while the printed count, grams, support proxy and exported density stay on the design's own grid. On the bracket: 1442 voxels cut by the drawn faces (190 with their centre outside); 543 lowered, 166 slivers added.
+
+| version | unset: certificate -> shown | `size` | `surface` |
+|---|---|---|---|
+| 0.68 | 6.353 -> 6.499 | 7.524 -> 8.196 | 7.324 -> 8.196 |
+| 0.52 | 6.350 -> 6.513 | 8.172 -> 8.196 | 7.462 -> 8.196 |
+| 0.38 | 4.845 -> 5.249 | 6.567 -> 6.636 | 6.107 -> 6.636 |
+| 0.26 | 2.091 -> 4.241 | 4.045 -> 6.028 | 4.245 -> 5.469 |
+
+UNSET: all four files the same bytes as today, and the same numbers. Times 569 / 528 / 506 s. Under `surface` the CERTIFICATE now carries the drawn faces' fills (3 to 9 % under `size`'s at the three heavier versions); the SHOWN number is still the all-or-nothing re-check (these runs had `TOPOPT_RECHECK` and `TOPOPT_SHOWN` unset), so the two do not agree here and were not expected to: that is measurement 4 of the reviewer's five (surface + the fill re-check + his parts), which needs the lock. As designed, the optimiser's path moves a little under the switch (the lightest version prints at 0.41867 of solid against 0.41960).
+
+LOOSE ENDS: (1) with a design box, a drawn face that grown material now covers would still be lowered to its drawn fill: not exercised here (no design box in this job); to fix before the flip; (2) the stress-view count is printed for the first view only; (3) a view is ignored when a lattice posture is given (lattice jobs unchanged).
+

@@ -114,6 +114,13 @@ struct DensitySnapshotEvent {
 // Inputs that shape one minimize_plastic run (beyond the part, material, BCs
 // and rule table passed to minimize_plastic()).
 struct MinimizePlasticOptions {
+  // TO rebuild stage 2, TOPOPT_STRENGTH=surface only (empty otherwise, and empty =
+  // none): the DRAWN part's fill per voxel of the PART grid build_job_setup made
+  // (file_fill_fractions of the model's mesh, 8 per voxel edge). minimize_plastic
+  // solves and reads the margin probe's and the certificate's stress on the drawn
+  // faces at these fills (its stress view); nothing else reads it.
+  std::vector<double> drawn_fill;
+
   // The volume-fraction ladder to walk, in the order given. Must be non-empty and
   // STRICTLY DESCENDING (heaviest/strongest first), and it is one of exactly two
   // KINDS — mixing them is refused, because one run reduces plastic against the

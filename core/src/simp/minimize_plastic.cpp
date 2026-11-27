@@ -975,6 +975,66 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   const VoxelGrid& G = domain.grid;
   const std::vector<DirichletBC>& B = domain.bcs;
 
+  // TO rebuild stage 2, TOPOPT_STRENGTH=surface only: THE STRESS VIEW the margin probe
+  // and the certificate solve and read stress on (the reviewer's ruling: drawn-face
+  // fills in the loop, never fill^3). A copy of G and of the design in which
+  //  - a voxel whose centre is inside the DRAWN part (not Empty in the part grid),
+  //    not Load or Fixture, holds min(design, drawn fill);
+  //  - a voxel Empty in G that the drawn faces cut (fill >= kStressMaterialFloor)
+  //    beside printed material (a 6-neighbour >= 0.5) gets an element at its fill.
+  // The part grid sits in G at domain.offset_*; G's voxels outside the part grid's
+  // extent are left as they are. Mass, grams, V3 and the files stay on the design
+  // itself (analyze_fixed_design's stress_view). Null in every other mode.
+  const bool drawn_view_on = strength_mode() == StrengthMode::Surface &&
+                             !options.drawn_fill.empty() &&
+                             options.drawn_fill.size() == grid.voxel_count();
+  bool drawn_view_said = false;
+  auto drawn_stress_view = [&](const std::vector<double>& rho_d) -> std::unique_ptr<StressView> {
+    if (!drawn_view_on || rho_d.size() != G.voxel_count()) return nullptr;
+    auto sv = std::make_unique<StressView>();
+    sv->grid = G;
+    sv->density = rho_d;
+    std::size_t lowered = 0, added = 0;
+    for (int kp = 0; kp < grid.nz; ++kp)
+      for (int jp = 0; jp < grid.ny; ++jp)
+        for (int ip = 0; ip < grid.nx; ++ip) {
+          const int i = ip + domain.offset_i, j = jp + domain.offset_j, k = kp + domain.offset_k;
+          if (i < 0 || j < 0 || k < 0 || i >= G.nx || j >= G.ny || k >= G.nz) continue;
+          const std::size_t p = grid.index(ip, jp, kp), g = G.index(i, j, k);
+          const double f = options.drawn_fill[p];
+          const VoxelTag tg = G.tags[g];
+          if (grid.tags[p] != VoxelTag::Empty) {
+            if (tg == VoxelTag::Empty || tg == VoxelTag::Load || tg == VoxelTag::Fixture) continue;
+            if (f < rho_d[g]) {
+              sv->density[g] = f;
+              ++lowered;
+            }
+          } else if (tg == VoxelTag::Empty && f >= kStressMaterialFloor) {
+            const int di[6] = {1, -1, 0, 0, 0, 0}, dj[6] = {0, 0, 1, -1, 0, 0}, dk[6] = {0, 0, 0, 0, 1, -1};
+            bool beside = false;
+            for (int q = 0; q < 6 && !beside; ++q) {
+              const int a = i + di[q], b = j + dj[q], c = k + dk[q];
+              if (a < 0 || b < 0 || c < 0 || a >= G.nx || b >= G.ny || c >= G.nz) continue;
+              const std::size_t u = G.index(a, b, c);
+              beside = G.tags[u] != VoxelTag::Empty && rho_d[u] >= 0.5;
+            }
+            if (beside) {
+              sv->grid.tags[g] = VoxelTag::Interior;
+              sv->density[g] = f;
+              ++added;
+            }
+          }
+        }
+    if (!drawn_view_said) {
+      drawn_view_said = true;
+      std::fprintf(stderr,
+                   "[drawn fill] stress view: %zu voxel(s) lowered to their drawn fill, %zu "
+                   "sliver voxel(s) added\n",
+                   lowered, added);
+    }
+    return sv;
+  };
+
   // Handoff 127 (Amendment 2): start this run's multigrid stagnation latch fresh,
   // on the (single) thread that will issue every solve below — the warm-start
   // pre-solve, the ladder rungs, and the recovery solves. The latch is sticky
@@ -2280,13 +2340,15 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
           PlsmMarginProbe mp;
           const auto t0 = std::chrono::steady_clock::now();
           mp.load_path_ok = load_path_connected(G, density, kIso);
+          const std::unique_ptr<StressView> probe_view = drawn_stress_view(density);
           const FixedDesignAnalysis a = analyze_fixed_design(
               G, params, density, B, loads, material, build_dir, kCertTol,
               opt.cg_max_iterations, opt.solver, options.margin_stop, knockdown,
               mp.load_path_ok, part_solid, /*lattice=*/nullptr,
               /*score_build_orientation=*/false,
               /*build_direction_inferred=*/false,
-              /*auto_apply_build_orientation=*/false, kIso);
+              /*auto_apply_build_orientation=*/false, kIso,
+              /*gate_on_strut_strength=*/false, /*knobs=*/nullptr, probe_view.get());
           mp.margin = a.margin.worst_case;
           if (to_stage1_on() && a.max_von_mises > 0.0 &&
               a.von_mises_field.size() == G.tags.size()) {
@@ -2980,6 +3042,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     assert(opt.cg_tolerance == kCertTol &&
            "draft quality: recovery/certification solve must use the tight "
            "tolerance");
+    const std::unique_ptr<StressView> cert_view = drawn_stress_view(rho);
     auto certify = [&](const std::vector<DirichletBC>& cert_bcs,
                        const std::vector<NodalLoad>& cert_loads) {
       return analyze_fixed_design(
@@ -3021,7 +3084,10 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
         // ★ §1(c): gate on the measured strut bound over the latticed region, not
         // only on the solid region's margin. Armed only when this run actually
         // latticed something, so bar L1 stands everywhere else.
-        fl_latticed_voxels > 0 && options.frozen_lattice_gate_on_strut_strength);
+        fl_latticed_voxels > 0 && options.frozen_lattice_gate_on_strut_strength,
+        /*knobs=*/nullptr,
+        // TOPOPT_STRENGTH=surface: the stress on the drawn faces' fills (null otherwise).
+        cert_view.get());
     };
     // LOAD SCENARIOS (the reviewer's overnight ruling of 2026-10-26 03:45): every
     // scenario is certified on this rung's design; the WORST governs (its analysis is

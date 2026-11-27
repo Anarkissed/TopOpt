@@ -130,6 +130,12 @@ struct KnockdownSpec {
 
 // Install 3: numbers of the analysis that the new engine's strength check lets a job set (strength_settings).
 // Null (the default, every other caller): the constants below, byte-for-byte.
+// See analyze_fixed_design's `stress_view`.
+struct StressView {
+  VoxelGrid grid;
+  std::vector<double> density;
+};
+
 struct AnalysisKnobs {
   int contact_rounds = 6;                           // bearing anchors: most contact solves
   double sliding_share_max = 0.05;                  // == kAnchorsSlidingShare
@@ -476,7 +482,14 @@ FixedDesignAnalysis analyze_fixed_design(
     // other case, including an armed gate the law could not evaluate.
     bool gate_on_strut_strength = false,
     // Install 3: the strength check's numbers (AnalysisKnobs). Null: the constants, as before.
-    const AnalysisKnobs* knobs = nullptr);
+    const AnalysisKnobs* knobs = nullptr,
+    // TO rebuild stage 2, TOPOPT_STRENGTH=surface only (null everywhere else, which is
+    // byte-for-byte today): the grid and density the STRESS is solved and read on (the
+    // drawn faces at their fills; minimize_plastic's stress view). The solve, the
+    // stress fields and the margins use the view; the mass, the printed grams and
+    // counts, the support proxy and the V3 / exported density keep `grid` and
+    // `density`. Same dimensions as `grid`. Ignored when `lattice` is given.
+    const StressView* stress_view = nullptr);
 
 // ═══ THE MARGIN-REPRODUCTION BAND ═══════════════════════════════════════════
 // (task 2026-08-08-lattice-variant-margin-tolerance, S1)
