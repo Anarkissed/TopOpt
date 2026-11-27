@@ -187,8 +187,20 @@ double true_reading(double thickness, double size) {
 
 int main(int argc, char** argv) {
   const bool gate = argc > 1 && std::strcmp(argv[1], "--gate") == 0;
-  setenv("TOPOPT_STRENGTH", "size", 1);
   int failures = 0;
+  // LEDGER A-06, measured ahead for stage 4 (the reviewer's ruling 2026-11-27): TODAY'S
+  // one-voxel reading (no switch) on the bending beam against the true surface
+  // stress, by the number of voxels THROUGH the member. Printed, never judged here.
+  unsetenv("TOPOPT_STRENGTH");
+  std::printf("[A-06] today's one-voxel reading on a beam in pure bending / the true surface stress, by voxels through the member\n");
+  for (int nt : {2, 3, 4, 6, 8, 12, 16}) {
+    const Result r = bend(nt);
+    if (!r.ok) ++failures;
+    std::printf("[A-06] %2d voxels through: %.3f (%+.0f %%); the voxel-centre value of the exact field would be %.3f\n",
+                nt, r.reading, 100.0 * (r.reading - 1.0), 1.0 - 1.0 / nt);
+    std::fflush(stdout);
+  }
+  setenv("TOPOPT_STRENGTH", "size", 1);
   std::printf("[thin member] a beam in pure bending, the reading size %.1f mm (%.0f voxels); the surface stress is 1\n",
               kSizeMm, kSizeMm / kVoxel);
   const double kTimes[4] = {0.5, 1.0, 2.0, 4.0};

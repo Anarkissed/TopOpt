@@ -636,3 +636,35 @@ The sample bracket at 15 % size, res 48 (voxel 0.31 mm), PLA's own size 1.2 mm (
 So the "33 to 41 %" becomes 26 % on the three heavier versions (their thin sections now keep today's reading) and 42 % on the lightest, whose deciding spot is in a section thick enough to be read over the size. Cost with the second solve: 576 s against 631 s with the switch off (no slower on this job); peak memory 174 MB. Rests, as before, on the published length halved by his rule; his print replaces it when the rig exists (the reviewer's ruling: ship on the published value).
 
 Unit checks for the surface-node ball (`test_to_printed_mass`, 0 failures): on a full block with stress rising to 95 at a face, the voxel-centred ball over 4 voxels reads 89.76 and the ball on the face 91.90; where the face carries a cut layer no surface node counts; a ball under one voxel reads nothing on the surface.
+
+### ONE JUDGE ON HIS OWN PART: evidence (b) FAILS (2026-11-27 05:05, B7 under the lock; Top Motor Mount, res 96, drawn faces, automatic pad)
+
+| version | certificate | shown, re-check off | shown, `TOPOPT_RECHECK=fill:8` |
+|---|---|---|---|
+| 0.68 | 1.648 | 1.648 | 1.07: REFUSED ("After finishing, the margin is 1.07x (needs 1.5x)") |
+| 0.52 | 1.660 | 1.657 | 1.06: REFUSED |
+| 0.38 | 1.667 | 1.666 | 1.035: REFUSED |
+| 0.26 | 1.694 | 1.679 | 1.00: REFUSED |
+
+With one judge on, EVERY version of his part is refused. The reviewer expected "within 1 %" on his parts; it is 35 to 41 % lower. Run 3845 s against 4123 s off; peak 936 MB against 803 MB (+17 %); the finish step 39 to 44 s a version against 15 to 23 s.
+
+WHY (reasoned from what is measured; to be confirmed by reading where the peak sits): the two judges agree on this part TODAY because both see the DRAWN part's own faces as all-or-nothing voxels: the optimiser's exact fills exist only on the surface it carves, and this part is mostly as drawn. One judge gives every voxel that the drawn faces cut its fill too, bolt holes and loaded faces included, and the one-voxel form then solves those voxels at E x fill^3, which reads the stress on a curved loaded face 52 to 76 % HIGH (the thick ring, tests E: ledger A-01). 1.648 / 1.07 = 1.54: the ring's error, on his bolt holes. On the same ring all-or-nothing reads 6 % low. So on a part like this the "cruder" judge is the nearer one, and one judge as built would refuse a good part.
+
+WHAT IT MEANS: "one judge" cannot flip in the one-voxel E x fill^3 form. The fill of a file is right; the stiffness law applied to it is what is wrong at cut faces, and that law is the certificate's too wherever the optimiser has carved (which is why the lightest carved versions read near the pass mark by the loop's own judge). The reviewer's "after the flip: a fill-weighted one-voxel reading, into both judges together" has to come BEFORE the flip. The candidates already measured on the textbook shapes at one voxel: E x fill^2 (plate -3.8 to +4.3 %, ring +17 to +26 %, ellipse -19 to -2 %) and real stiffness E x fill (plate -18 to -6 %, ring -7 to -4 %): neither holds the bar on all three. PARKED for the reviewer's morning read; nothing built on it. B7 goes on with the stand, the hook and the beam, which will show how general this is.
+
+
+### Ledger A-06 measured ahead for stage 4 (2026-11-27 05:05, test `to_strength_thin_member`, no switch)
+
+TODAY'S one-voxel reading on a beam in pure bending against the true surface stress, by voxels through the member:
+
+| voxels through | reading / surface stress | the exact field at the voxel's centre |
+|---|---|---|
+| 2 | 0.33 (-67 %) | 0.50 |
+| 3 | 0.56 (-44 %) | 0.67 |
+| 4 | 0.68 (-32 %) | 0.75 |
+| 6 | 0.80 (-20 %) | 0.83 |
+| 8 | 0.85 (-15 %) | 0.88 |
+| 12 | 0.91 (-9 %) | 0.92 |
+| 16 | 0.93 (-7 %) | 0.94 |
+
+Two parts to the miss: reading at the voxel's centre instead of at the surface (the right column: half a voxel in, 1 - 1 / n), and below about 6 voxels the solve itself falling short of even that. To be within 10 % of the surface stress today's reading needs 12 voxels through a bending member; within 20 %, 6. Stage 4 sets its number from this table; surface stress recovery would remove the first part.
