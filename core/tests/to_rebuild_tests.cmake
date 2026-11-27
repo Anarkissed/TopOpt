@@ -24,7 +24,9 @@ if(Eigen3_FOUND)
   # One judge, evidence (a): textbook shapes through the file's fills against the certificate.
   add_executable(test_to_recheck_fill tests/unit/test_to_recheck_fill.cpp)
   target_link_libraries(test_to_recheck_fill PRIVATE topopt)
-  add_test(NAME to_recheck_fill COMMAND test_to_recheck_fill)
+  # Long (about 20 minutes): every row at k = 1 to 16, gated at k = 8.  ctest -C Long -R to_recheck_fill
+  add_test(NAME to_recheck_fill CONFIGURATIONS Long COMMAND test_to_recheck_fill --gate)
+  set_tests_properties(to_recheck_fill PROPERTIES TIMEOUT 7200)
   # The across-layer reading over a size, against Kirsch's tension along the pull.
   add_executable(test_to_strength_across_layers tests/unit/test_to_strength_across_layers.cpp)
   target_link_libraries(test_to_strength_across_layers PRIVATE topopt)

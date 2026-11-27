@@ -62,15 +62,18 @@ inline bool to_stage2_on() { return strength_mode() != StrengthMode::Today; }
 // re-check of a finished FILE analyse each voxel's FILL (the share of the voxel
 // inside the file's surface, file_fill.hpp) by the same form as the loop's
 // certificate, in place of today's all-or-nothing voxels. TOPOPT_RECHECK=fill:<k>
-// sets the sub-sampling (k points along each voxel edge; 4 until the measurement
-// settles it). Unset = today's bytes. Returns 0 when off.
+// sets the sub-sampling (k points along each voxel edge). The default is 8, by
+// measurement and the reviewer's ruling of 2026-11-27 06:34Z: at 8 the size form
+// gives the certificate's number within 0.5 % on 16 textbook rows and moves under
+// 0.5 % when k doubles; 4 is not enough (one row 9.6 % off). Unset = today's bytes.
+// Returns 0 when off.
 inline int recheck_fill_sub() {
   const char* v = std::getenv("TOPOPT_RECHECK");
   if (v == nullptr) return 0;
   const std::string s(v);
   if (s.rfind("fill", 0) != 0) return 0;
   const int k = s.size() > 5 && s[4] == ':' ? std::atoi(s.c_str() + 5) : 0;
-  return k >= 1 ? k : 4;
+  return k >= 1 ? k : 8;
 }
 
 // THE CONNECTION RULE (stage 5; the reviewer's ruling of 2026-11-26, maintainer-

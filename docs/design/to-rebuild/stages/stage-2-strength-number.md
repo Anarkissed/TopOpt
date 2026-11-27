@@ -29,7 +29,14 @@ Also ruled the same hour (stage 5): the connection-rule test on the hook PASSES;
 
 **THE MAINTAINER, 2026-11-27, on the printed check for small PLA parts:** "I will absolutely add the small PLA parts when the rig is ready. But it won't be for a while." So the averaged reading's 33 to 41 % higher margins on a 15 mm part rest on the published length alone for now. FOR THE REVIEWER to rule when stage 2's size form comes up for its flip: ship it for small parts on the published value, or hold the size form to parts above a stated size until his print exists. Not decided by me.
 
+**THE REVIEWER'S RULING of 2026-11-27 06:34Z (maintainer-approved):**
+1. One judge: k = 8 APPROVED (now the default of `TOPOPT_RECHECK=fill`). Evidence (a): the size form at 1 % (met); the one-voxel form stated as its own scatter (within 2.5 % on all 12 rows at k = 8; up to 11 % on an unlucky sliver at other k). The rows at k = 8 are PINNED as a test (`to_recheck_fill`, ctest -C Long, gated at 2.5 % and 1 %). AFTER one judge flips, not before: measure a fill-weighted one-voxel reading on all three shapes; if steadier it goes into BOTH judges together, never one alone.
+2. Small PLA parts: SHIP on the published length with his half rule (his choice of safety; his prints replace it when the rig exists). ONE CONDITION FIRST: no reading over a size where the ball reaches across the member (a ball wider than a thin member in bending averages across its neutral line and reads low; Taylor 2007, The Theory of Critical Distances). Where the member under the reading is thinner than TWICE the size, read one voxel (today's form). Test: a beam in bending at thicknesses of 0.5, 1, 2 and 4 times the size: at 0.5 and 1 the reading falls back; at 2 and 4 it is judged against its own true value. Then restate the 15 mm part's 33 to 41 %. OWED, next.
+3. scenario_weights: no flip on a base with an unexplained change of results. SETTLED since (TOSolver's fix on my tip, checked).
+4. The memory guard amended for everyone (the swapouts clause only when free is also under 30 %).
+
 **Owed, in order:**
+- THE THIN-MEMBER RULE (ruling item 2) and its beam test; then the 15 mm part again.
 - ONE JUDGE: k by measurement (or the finding that it has no answer for the one-voxel form), evidence (a) to (e).
 - The step-back (the optimiser's loop is in `plsm.cpp`, TOSurface's file: to agree who edits it).
 - Conditions (b) to (e) again on his full-resolution parts with the size form (`b5_stage2.sh`, lock).
