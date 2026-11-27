@@ -46,8 +46,11 @@ struct Result {
   double read_over_mm = 0.0;   // 0 = fell back to one voxel
   std::size_t thick = 0, thin = 0;
   double over_size_anyway = 0.0;  // the size reading with no thin-member rule / s0
+  double on_surface = 0.0;        // the same average with the ball centred ON the top face's nodes / s0
   bool ok = false;
 };
+
+double node_ball_peak(const VoxelGrid& g, const std::vector<double>& field, double diameter_mm);
 
 Result bend(int thickness_voxels) {
   VoxelGrid g;
@@ -110,7 +113,48 @@ Result bend(int thickness_voxels) {
     r.over_size_anyway = topopt::peak_stress_over_size(g, res.von_mises_material_field, density,
                                                        topopt::kStressMaterialFloor, kSizeMm) /
                          kSurfaceStress;
+  if (res.von_mises_material_field.size() == density.size())
+    r.on_surface = node_ball_peak(g, res.von_mises_material_field, kSizeMm) / kSurfaceStress;
   return r;
+}
+
+// A MEASURING ARM (finding 1 of 2026-11-27, not in the engine): the same ball
+// average of a per-voxel field, but with the ball centred on a NODE (a voxel
+// corner) of the beam's top face instead of on a voxel centre, so that on a face
+// lying on voxel boundaries the ball sits on the surface as the true value's does.
+// Weight = the share of each voxel inside the ball (6 x 6 x 6 sub-points).
+double node_ball_peak(const VoxelGrid& g, const std::vector<double>& field, double diameter_mm) {
+  const double rad = 0.5 * diameter_mm / g.spacing;  // in voxels
+  const int reach = static_cast<int>(std::ceil(rad)) + 1;
+  constexpr int kS = 6;
+  struct Tap { int di, dj, dk; double share; };
+  std::vector<Tap> taps;  // voxel (di, dj, dk) spans [di, di + 1) from the node
+  for (int dk = -reach; dk < reach; ++dk)
+    for (int dj = -reach; dj < reach; ++dj)
+      for (int di = -reach; di < reach; ++di) {
+        int in = 0;
+        for (int c = 0; c < kS; ++c)
+          for (int b = 0; b < kS; ++b)
+            for (int a = 0; a < kS; ++a) {
+              const double x = di + (a + 0.5) / kS, y = dj + (b + 0.5) / kS, z = dk + (c + 0.5) / kS;
+              if (x * x + y * y + z * z <= rad * rad) ++in;
+            }
+        if (in > 0) taps.push_back({di, dj, dk, static_cast<double>(in) / (kS * kS * kS)});
+      }
+  double best = 0.0;
+  const int j = g.ny;  // the top face's node plane
+  for (int k = reach; k <= g.nz - reach; ++k)      // away from the side faces and the ends
+    for (int i = g.nx / 4; i <= 3 * g.nx / 4; ++i) {
+      double sum = 0.0, weight = 0.0;
+      for (const Tap& t : taps) {
+        const int a = i + t.di, b = j + t.dj, c = k + t.dk;
+        if (a < 0 || b < 0 || c < 0 || a >= g.nx || b >= g.ny || c >= g.nz) continue;
+        sum += t.share * field[g.index(a, b, c)];
+        weight += t.share;
+      }
+      if (weight > 0.0) best = std::max(best, sum / weight);
+    }
+  return best;
 }
 
 // The reading's own true value on the exact field: the largest average of
@@ -171,6 +215,8 @@ int main(int argc, char** argv) {
       row_ok = !fell_back && r.reading >= 0.95 * truth;
     }
     std::printf("  %s\n", row_ok ? "as ruled" : "NOT as ruled");
+    std::printf("[thin member]   measuring arm, the ball centred ON the top face: %.3f (%+.1f %% against the true value)\n",
+                r.on_surface, truth > 0.0 ? 100.0 * (r.on_surface / truth - 1.0) : 0.0);
     if (gate && !row_ok) ++failures;
     std::fflush(stdout);
   }
