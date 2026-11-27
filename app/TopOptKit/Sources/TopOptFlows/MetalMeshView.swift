@@ -1911,6 +1911,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     private var latticeLayer: LatticeSDFRenderer?
     var flexibleLattice: FlexibleLatticePass?   // Flexible (PR #362): a third G-buffer writer (FlexibleLatticePass.swift); nil = #354's frame
     var layoutBars: LatticeLayoutBarsPass?   // the new engine's bars (#362, LatticeLayoutBarsPass.swift); nil = today's frame
+    var scaffoldBars: LatticeLayoutBarsPass? // ★ notes30: a slow lay's scaffold and its rough cut-open (LatticeBuildScaffold.swift)
     var growth: LatticeGrowth?               // ★ his 11-22 (watch it grow): an Organic lay's vines so far (LatticeGrowthPass.swift)
     var growthPass: LatticeGrowthPass?
     /// ★ notes29 (his "timelapse of a building being made"): the regular lay's timelapse the bars are drawn by
@@ -1922,6 +1923,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     var lastBuildFrame: LatticeBuildTimelapse.Frame?
     /// ★ notes29 (his review, img 98): how much of the walls stood in the last frame (tests); nil: open as the map says.
     var lastBuildStanding: Float?
+    /// ★ notes30: the scaffold's lifts drawn in the last frame (tests): risen and struck snaps; nil — none drawn.
+    var lastScaffold: (lifts: Int, struck: Int)?
     /// ★ notes24: what the growth does this frame (drawn, its replay, how the part opens), decided once a frame
     /// (`prepareGrowth`, LatticeGrowthPass.swift).
     var growthFrame = LatticeGrowthFrame()
@@ -3917,6 +3920,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
               let fbuf = flexBuffer else { return }
         var uniforms = makeUniforms(aspect: aspect)
         prepareGrowth(cmd.device)   // ★ notes24: whether the growing vines draw this frame (LatticeGrowthPass.swift)
+        prepareBuild(cmd.device, model: uniforms.model)   // ★ notes30: the scaffold, the walls floor by floor (LatticeBuildTimelapse.swift)
 
         // DEPTH PREPASS (items 7+8, parts b+c): when a translucent volume is present, capture the
         // opaque part's eye-space depth into a texture FIRST (its own render pass — you cannot read
@@ -4867,7 +4871,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // ★ THE NEW ENGINE's SOLID VIEW (his ask 11-13): its own map cuts the body open where the lattice is (mode 2)
         // (★ notes24: not while the growing vines stand in the part's X-ray: that map is not this lay's — growthXraysBody)
         if let own = growthShellClip { return (own.clip, openEverywhere) }   // ★ notes24: the walls dissolving (LatticeGrowthPass)
-        if layoutBarsInFrame, !growthXraysBody, var solid = layoutBars?.shellClip {
+        if layoutBarsInFrame, !growthXraysBody, var solid = drawnLayoutBars?.shellClip {   // ★ notes30: the scaffold's rough cut-open too
             if sampleCount == 4, !Self.controlAliasedCut { solid.gate.z = 4 }   // ★ notes28: the cut asked per MSAA sample
             // ★ notes29 (his review, img 98: "None of the parts' walls open up"): the timelapse's walls — closed while the
             // engine lays, then taken off in hard snaps (the map's own dissolve, held at each step), then open
@@ -5065,7 +5069,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// declarations, the neutral "inside everywhere" volume otherwise.
     private var shellClipTexture: MTLTexture? {
         if let own = growthShellClip { return own.texture }   // ★ notes24: the growth's own map, its walls dissolving
-        if layoutBarsInFrame, layoutBars?.shellClip != nil, let t = layoutBars?.gridTexture { return t }   // the new engine's map
+        if layoutBarsInFrame, drawnLayoutBars?.shellClip != nil, let t = drawnLayoutBars?.gridTexture { return t }   // the new engine's map (★ notes30: or the scaffold's rough one)
         guard latticeInFrame, let layer = latticeLayer else { return neutralShellClipTexture() }
         // Declared ⇒ the region field. Undeclared (the sample block) ⇒ the CELL field,
         // which is what `gate.y == 2` reads. Both are bound here so the uniform and the
@@ -5357,18 +5361,28 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // the new engine's bars (#362): the fourth writer — same encoder, attachments and .less + write depth state
         // (★ notes24: the landed lattice waits, at most a second, while the replay shows what was left of its growth)
         // (★ notes29: and the regular lay's timelapse — nothing while the site is cleared, then floor by floor)
+        // (★ notes30: or, while a slow lay's scaffold stands before its landing, the scaffold — its lifts so far)
         let build = buildReveal(model: uniforms.model)
-        lastBuildSnaps = !layoutBarsInFrame || !build.draw ? 0 : build.reveal.map { Int($0.build.x) }
-        if layoutBarsInFrame, !growthFrame.holdsLanded, build.draw, let bars = layoutBars,
+        let scaffoldDrawn = scaffoldBars != nil && drawnLayoutBars === scaffoldBars
+        let scaffoldRun = scaffoldDrawn ? buildShow.flatMap { scaffoldRange($0, at: LatticeBuildShow.now) } : nil   // ★ notes30
+        lastBuildSnaps = !layoutBarsInFrame || !build.draw || scaffoldDrawn ? 0 : build.reveal.map { Int($0.build.x) }
+        lastScaffold = scaffoldRun.map { (lifts: $0.upperBound, struck: $0.lowerBound) }
+        if layoutBarsInFrame, !growthFrame.holdsLanded, build.draw, let bars = drawnLayoutBars,
            bars.encodeGBuffer(penc, depthState: depthState, clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView,
-                              eyeNormalBasis: uniforms.normalMatrix, turning: turning, build: build.reveal) {
-            frameDrawCalls += 1; frameVertices += 36 * bars.count }
+                              eyeNormalBasis: uniforms.normalMatrix, turning: turning, build: build.reveal, range: scaffoldRun) {
+            frameDrawCalls += 1; frameVertices += 36 * (scaffoldRun?.count ?? bars.count) }
+        // ★ notes30: the scaffold over the landed lattice, struck piece by piece as the real floors replace it
+        if layoutBarsInFrame, let over = scaffoldOverLanded(),
+           over.pass.encodeGBuffer(penc, depthState: depthState, clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView,
+                                   eyeNormalBasis: uniforms.normalMatrix, turning: turning, range: over.range) {
+            lastScaffold = (lifts: over.range.upperBound, struck: over.range.lowerBound)
+            frameDrawCalls += 1; frameVertices += 36 * over.range.count }
         // ★ the solid view's cut walls (his ask 11-13): after the bars, the same encoder and depth state (★ notes24: none while
         // the growing vines stand in the part's X-ray; the growth's own map's while its walls dissolve)
         if encodeGrowthWalls(penc, depthState: depthState, clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView,
                              eyeNormalBasis: uniforms.normalMatrix) {
             frameDrawCalls += 1; frameVertices += 36
-        } else if layoutBarsInFrame, !growthXraysBody, let bars = layoutBars,
+        } else if layoutBarsInFrame, !growthXraysBody, let bars = drawnLayoutBars,   // ★ notes30: or the scaffold's rough cut
            bars.encodeWalls(penc, depthState: depthState, clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView,
                             eyeNormalBasis: uniforms.normalMatrix) {
             frameDrawCalls += 1; frameVertices += 36 }
