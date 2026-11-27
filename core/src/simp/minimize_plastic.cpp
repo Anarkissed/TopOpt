@@ -2173,7 +2173,13 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     MinimizePlasticVariant variant;
     // The connection rule: did a solve of THIS rung refuse an unheld load?
     const long long load_unheld_before = fea_matfree_load_unheld_count();
-    const auto rung_load_unheld = [&]() {
+    // The optimiser's own word when it gave one (it must, if it steps back: a rung
+    // that stepped back and later failed for a real non-convergence has made the
+    // counter grow without ending on it; TOSurface's catch, 2026-11-27); else the
+    // solver's counter. The certification's solve never steps back: the counter.
+    const auto rung_load_unheld = [&](bool trajectory) {
+      if (trajectory && variant.optimization.stop_cause_load_unheld >= 0)
+        return variant.optimization.stop_cause_load_unheld == 1;
       return fea_matfree_load_unheld_count() > load_unheld_before;
     };
     variant.requested_volume_fraction = vf;
@@ -2685,7 +2691,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       vr.accepted = false;
       vr.margin_required = options.margin_stop;
       vr.rejection_reason =
-          rung_load_unheld() ? kLoadUnheldReason : kRungNonConvergentReason;
+          rung_load_unheld(true) ? kLoadUnheldReason : kRungNonConvergentReason;
       measure_added_material(variant.optimization.physical_density, vr,
                              growth_target_saturated);
       // Every other field stays default-constructed — NOT measurements. The
@@ -3081,7 +3087,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       vr.accepted = false;
       vr.margin_required = options.margin_stop;
       vr.rejection_reason =
-          rung_load_unheld() ? kLoadUnheldReason : kRungNonConvergentReason;
+          rung_load_unheld(false) ? kLoadUnheldReason : kRungNonConvergentReason;
       measure_added_material(rho, vr, growth_target_saturated);
       // No margin, stress, orientation or settings — the certification never
       // completed. The rejection_reason is the flag that says so.

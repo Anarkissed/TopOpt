@@ -1782,6 +1782,13 @@ struct SimpOptimizeResult {
   // a rung rejection needs to say how far the solve missed (both 0 when not set).
   bool non_convergent = false;
   int non_convergent_iteration = 0;
+  // THE CONNECTION RULE (TOPOPT_CONNECTION=support): WHY the trajectory stopped, when
+  // the optimiser knows. -1 = not said (the caller decides from the solver's counter,
+  // fea_matfree_load_unheld_count); 0 = a real non-convergence; 1 = an unheld load
+  // (a loaded piece reaching no support), after any step-backs were used up. An
+  // optimiser that steps back MUST set it: a rung that stepped back and then failed
+  // for a real non-convergence has made the counter grow without ending on it.
+  int stop_cause_load_unheld = -1;
   double non_convergent_residual = 0.0;
   // The CG tolerance the failing solve was run at (the loose trajectory one or the
   // tight certification one), so a refusal can say which it missed (0 = not set).
