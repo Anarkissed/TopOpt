@@ -877,6 +877,11 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   VoxelGrid grid = std::move(setup.grid);
   std::vector<DirichletBC> bcs = std::move(setup.bcs);
   MinimizePlasticOptions options = std::move(setup.options);
+  // TO rebuild stage 2: the user's solid top / bottom skins travel with the job
+  // (loads.top_solid_mm / bottom_solid_mm, #362's notes30 keys; -1 = not stated) to
+  // the printed grams. No solve reads them.
+  options.top_skin_mm = job.loads.top_solid_mm;
+  options.bottom_skin_mm = job.loads.bottom_solid_mm;
   ProductionLoadCase lc = std::move(setup.lc);
   std::string loadcase_receipt = std::move(setup.loadcase_receipt);
   result.fixture_face_ids = std::move(setup.fixture_face_ids);
@@ -2860,7 +2865,9 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       // The same shell model the strength check uses for a version's grams
       // (skins as for a part printed along the grid's z).
       const PrintedMass pm = printed_mass_shell(
-          grid, drawn, 0.5, kd.wall_thickness_mm, kStage2TopSkinMm, kStage2BottomSkinMm,
+          grid, drawn, 0.5, kd.wall_thickness_mm,
+          kd.top_skin_mm >= 0.0 ? kd.top_skin_mm : kStage2TopSkinMm,
+          kd.bottom_skin_mm >= 0.0 ? kd.bottom_skin_mm : kStage2BottomSkinMm,
           kd.infill_percent, materials.at(job.material).density_g_cm3);
       result.pipeline.report.drawn_part.evaluated = true;
       result.pipeline.report.drawn_part.printed_grams = pm.grams;

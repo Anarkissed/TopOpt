@@ -511,6 +511,13 @@ struct MinimizePlasticOptions {
   // is the common 0.4 mm-nozzle default and the value 191/192 measured with. Only read
   // when width_aware_knockdown is armed AND wall_loops > 0. Must be >= 0.
   double wall_line_width_mm = 0.45;
+  // TO rebuild stage 2 (the maintainer, 2026-11-26: the print settings the user set
+  // travel with the part): the solid top and bottom skins the slicer lays, in mm, for
+  // the PRINTED GRAMS only (no solve reads them). < 0 = not stated: the usual 1.0 mm
+  // top and 0.6 mm bottom (printed_mass.hpp). Set by the CLI from the job's
+  // loads.top_solid_mm / bottom_solid_mm (#362's notes30 keys).
+  double top_skin_mm = -1.0;
+  double bottom_skin_mm = -1.0;
   // The slicer extrusion/line width (mm) of the single OUTER wall loop. Bambu Studio /
   // OrcaSlicer expose the outermost perimeter's width SEPARATELY from the inner loops
   // (users routinely run a narrower outer for surface quality, a wider inner for

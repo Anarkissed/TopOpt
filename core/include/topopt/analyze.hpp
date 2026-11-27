@@ -108,6 +108,10 @@ struct KnockdownSpec {
   bool width_aware = false;
   double infill_percent = 100.0;
   double wall_thickness_mm = 0.0;
+  // TO rebuild stage 2: the solid top / bottom skins for the printed grams, mm;
+  // < 0 = the usual ones (kStage2TopSkinMm / kStage2BottomSkinMm). No solve reads them.
+  double top_skin_mm = -1.0;
+  double bottom_skin_mm = -1.0;
   // The infill curve's exponent and floor, as the width-aware per-voxel core term reads them (Install 3: the
   // strength check's settings). The defaults ARE infill_margin_knockdown's constants, so every caller that leaves
   // them is byte-for-byte as before.

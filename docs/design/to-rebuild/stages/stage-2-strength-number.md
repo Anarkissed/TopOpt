@@ -798,3 +798,9 @@ So the honest summary of the cut-voxel question, all shapes:
 - a stress raiser whose radius is under about 3 voxels: no reading is within 10 %; the grid cannot see it. That is a RESOLUTION limit to state and to detect (the radius of the drawn face against the voxel), not a law to tune; it is ledger A-06's twin for fillets, and Top Motor Mount's inside corner (radius zero as voxelised) is its extreme case.
 For the reviewer with the rest; nothing built in the engine.
 
+### Printed grams read the user's own top and bottom skins (2026-11-27 10:40)
+
+His ruling of 2026-11-26 ("the print parameters the user set should automatically be passed"). #362's four job keys (`loads.top_solid_layers`, `bottom_solid_layers`, `top_solid_mm`, `bottom_solid_mm`; shipped by the app from release 23) taken as its core-only patch (job.hpp, job.cpp, run_job.cpp: its files, its text, unchanged). Mine: `MinimizePlasticOptions::top_skin_mm / bottom_skin_mm` and the same two on `KnockdownSpec` (-1 = not stated), set in `to_run.inc` and `to_analyze.inc` from the job, read by both printed-grams calls (a version's, and the part as drawn). Not stated = the usual 1.0 mm top and 0.6 mm bottom, as before. No solve reads them. Still behind `TOPOPT_STRENGTH=size`.
+
+Checked on the 15 mm sample bracket (`analyze`, res 48, built outside the lock): skins not stated 0.7466564941 g; stated at the usual 1.0 / 0.6 mm 0.7466564941 g (the same to every digit); stated at 2.0 / 2.0 mm 0.7581 g (more, as it must be); the stage switch off 0.7738 g (the solid figure, untouched by the keys). `to_printed_mass` passes. Not yet run: the whole suite with this change (9 files; it builds; the default path is the old one by construction).
+

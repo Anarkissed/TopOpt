@@ -238,6 +238,8 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     model_grid = std::move(setup.grid);
     bcs = std::move(setup.bcs);
     options = std::move(setup.options);
+    options.top_skin_mm = job.loads.top_solid_mm;      // stage 2: the user's skins, for printed grams
+    options.bottom_skin_mm = job.loads.bottom_solid_mm;
     for (const ProductionLoadCase::LoadGroup& g : lc.load_groups)
       for (const int fid : g.face_ids) load_freeze_face_ids.push_back(fid);
   } else {

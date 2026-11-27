@@ -710,7 +710,7 @@ FixedDesignAnalysis analyze_fixed_design(
     // infill. Within 3 % of a real slicer on the made sample bracket. The skins
     // are counted only when the part is printed along the grid's z (a tilted
     // build direction gets walls only, which reads a little low). Skin
-    // thicknesses are the slicer's usual ones until the job carries its own.
+    // thicknesses are the job's own when it states them, else the slicer's usual ones.
     std::vector<double> printed_density(density.size(), 0.0);
     for (std::size_t idx = 0; idx < density.size(); ++idx)
       if (grid.tags[idx] != VoxelTag::Empty && density[idx] > kIso) printed_density[idx] = 1.0;
@@ -718,8 +718,12 @@ FixedDesignAnalysis analyze_fixed_design(
                                   build_dir.z * build_dir.z);
     const bool along_z = blen > 0.0 && std::fabs(build_dir.z) > 0.99 * blen;
     const bool up = build_dir.z >= 0.0;
-    const double top_mm = along_z ? (up ? kStage2TopSkinMm : kStage2BottomSkinMm) : 0.0;
-    const double bottom_mm = along_z ? (up ? kStage2BottomSkinMm : kStage2TopSkinMm) : 0.0;
+    // The job's own skins when it states them (#362's notes30 keys), else the usual.
+    const double skin_top = knockdown.top_skin_mm >= 0.0 ? knockdown.top_skin_mm : kStage2TopSkinMm;
+    const double skin_bottom =
+        knockdown.bottom_skin_mm >= 0.0 ? knockdown.bottom_skin_mm : kStage2BottomSkinMm;
+    const double top_mm = along_z ? (up ? skin_top : skin_bottom) : 0.0;
+    const double bottom_mm = along_z ? (up ? skin_bottom : skin_top) : 0.0;
     out.mass_grams = printed_mass_shell(grid, printed_density, 0.5, knockdown.wall_thickness_mm,
                                         top_mm, bottom_mm, knockdown.infill_percent,
                                         material.density_g_cm3)
