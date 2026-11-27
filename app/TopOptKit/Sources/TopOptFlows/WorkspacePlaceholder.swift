@@ -1409,10 +1409,16 @@ public struct WorkspacePlaceholder: View {
                     if !v.isEmpty { project.recordLatticeWallVerdicts(v) }
                 }
                 .onChange(of: project.latticePageManual) { _ in   // ★ Organic: the page's Auto / Manual decides the ask (his 11-18)
-                    if newEngineOn, LatticeLayoutPreview.organic(project.lattice) { newEngineSettingsChanged() }
+                    // ★ notes30 SA1: and a file Structural Auto kept (Auto draws the file it kept; Manual is his own)
+                    if newEngineOn, LatticeLayoutPreview.organic(project.lattice) || StructuralAutoStore.shared.has(project.id) {
+                        newEngineSettingsChanged()
+                    }
                 }
                 .onChange(of: project.buildOrientation.plateUp) { _ in   // ★ notes29: another face kept stands the lattice another way
                     if newEngineOn { newEngineSettingsChanged() }
+                }
+                .onChange(of: project.force.safetyMarginValue) { _ in   // ★ notes30 SA1: Structural Auto's target is his Safety margin (D1)
+                    if newEngineOn, StructuralAutoStore.shared.has(project.id) { newEngineSettingsChanged() }
                 }
                 .ignoresSafeArea()
                 // ★ §6(g) — THE PENCIL HOVER, ON THE MESH VIEW ITSELF.
@@ -2108,6 +2114,9 @@ public struct WorkspacePlaceholder: View {
             }
             return
         }
+        // ★ notes30 SA1: every press starts from round 0 (the kept round of an earlier press goes; the chain keeps
+        // its own)
+        let auto = structuralAutoAsk(strengthJob: strengthJob, onMac: compute.activeRemote != nil)
         let job: LatticeFileJob.ForPart
         switch LatticeFileJob.forPart(project, stress: newEngineStress, strengthJob: strengthJob) {
         case .success(let j): job = j
@@ -2124,12 +2133,56 @@ public struct WorkspacePlaceholder: View {
         LatticePrintFlow.shared.begin(project: project.id, key: latticePrintKey)   // ★ his 11-22: the exact is on screen; the file
         // ★ notes25 (A5, his 11-23 evening: "ensure that the regular lattice gets a similar export pop-up, with an animation and
         // everything"): the cell lattice's print file wears the same one card (★ notes27: with its own hexagons)
+        // ★ notes30 SA1 (his 11-26: "no animation ... a pop-up with a progress bar"): its steps card instead
         let r = run
         LatticeMacMake.shared.begin(project: project.id, path: project.importedFile?.path, run: r, fileOnly: true,
                                     kind: .cells,   // ★ notes27 (G1): its animation shows hexagonal cells, never the vines
+                                    autoSteps: auto.map { StructuralAutoSteps(margin: $0.inputs.margin) },   // ★ notes30 SA1
                                     onMac: compute.activeRemote != nil, cancel: { r.cancel() })
         LatticeMacMake.shared.request = request
-        launchFileRun(request, job: job, strengthJob: strengthJob, config: compute.activeRemote)
+        launchFileRun(request, job: job, strengthJob: strengthJob, config: compute.activeRemote, auto: auto)
+    }
+
+    /// ★ notes30 SA1: the chain's ask for this press (nil: not Structural Auto, no check, no Mac, or no stage stress
+    /// with its tensor yet — the press then goes as before). Round 0 is the press's start: an earlier press's kept round goes.
+    private func structuralAutoAsk(strengthJob: Data?, onMac: Bool) -> LatticeFileButton.StructuralAutoAsk? {
+        let base = newEngineStressBase
+        // ★ his rework: every press starts from today's lay (his switch on or off) — a file kept by an earlier press goes, and the
+        // drawing goes back to today's lay (what check 1's file is made from; the thickening reads its cells)
+        if StructuralAutoStore.shared.has(project.id) {
+            let drawn = newEngineStress.key != base.key
+            StructuralAutoStore.shared.keep(project.id, nil)
+            if drawn, newEngineOn {
+                newEngine.update(project: project, on: true, solid: !surfaceXrayOn, stress: newEngineStress, live: latticeLiveHere)
+            }
+        }
+        guard strengthJob != nil, onMac, StructuralAuto.thickens(project), let inputs = StructuralAuto.inputs(project, model: model),
+              let stage = base.field, !stage.stressTensor.isEmpty,
+              let baseKey = StructuralAuto.baseKey(project, base: base, model: model) else { return nil }
+        return .init(stage: stage, inputs: inputs, baseKey: baseKey,
+                     settings: LatticeLayoutPreview.settings(project, referenceMPa: base.referenceMPa))
+    }
+
+    /// ★ notes30 SA1: the chain landed. The drawing follows the round its print file kept, built by the short
+    /// timelapse he asked for (his 11-26: "once it's done, give the short animation"; Live preview and Skip all animations keep
+    /// their rules); Approved stays his (the print file now stands for the kept round); a spot still short says its fix in one
+    /// centred pop-up.
+    func structuralAutoLanded(_ ph: RunPhase) {
+        guard ph == .succeeded, run.outcomeIsPrintFile, let rec = StructuralAuto.Record.of(report: run.outcome?.reportJSON) else {
+            return
+        }
+        LatticePrintFlow.shared.rekey(project: project.id, key: latticePrintKey)
+        if newEngineOn {
+            if newEngine.isCurrent(project: project, stress: newEngineStress) {
+                newEngine.replayBuild(live: latticeLiveHere)
+            } else {
+                newEngine.update(project: project, on: true, solid: !surfaceXrayOn, stress: newEngineStress, live: latticeLiveHere)
+            }
+        }
+        if let why = rec.short {
+            AppPopups.shared.show(StructuralAutoCopy.shortTitle(why, margin: rec.margin),
+                                  StructuralAutoCopy.shortText(why, margin: rec.margin))
+        }
     }
 
     /// ★ notes27 P6/P7 (his print orientation, SPEC 2d): what Results' "Print orientation" runs for this stage's result — its
@@ -2291,7 +2344,7 @@ public struct WorkspacePlaceholder: View {
     /// The print file's run, started: on the chosen Mac, else this iPad (a regular lattice only: Organic needs a Mac).
     /// ★ Organic cut 2: `organic` strengthens first in Structural (LatticeFileButton.organicRunner).
     private func launchFileRun(_ request: RunRequest, job: LatticeFileJob.ForPart, strengthJob: Data?, config: RemoteRunnerConfig?,
-                               organic: Bool = false) {
+                               organic: Bool = false, auto: LatticeFileButton.StructuralAutoAsk? = nil) {
         runCouldntFinish = false; lastRunWasLattice = true   // ★ B1 (O1)
         GenerationTimingLog.shared.printFileRunBegins(.of(project), ranOn: config != nil ? GenerationTimingLog.aMac
                                                                                          : GenerationTimingLog.thisDevice)   // ★ 11-22
@@ -2301,12 +2354,22 @@ public struct WorkspacePlaceholder: View {
         let before = run.runner
         let fileRequest = request.withJobMode(LatticeFileButton.jobMode)
         if let config {
+            if let auto, !organic {
+                // ★ notes30 SA1 (his rework 11-27): today's lay checked; only the short struts thickened and checked
+                // again — from the preview's own layout of today's lay (what the first file was made from)
+                let preview = newEngine, todayKey = newEngineStressBase.key
+                run.runner = LatticeFileButton.structuralAutoRunner(
+                    config: config, job: job, ask: auto, projectName: project.name, strengthJob: strengthJob, densityGCm3: density,
+                    layout: { c in await preview.structuralAutoLayout(c, stressKey: todayKey) },
+                    onStep: { LatticeMacMake.shared.autoStep($0) }, onJob: { LatticeMacMake.shared.job($0) })
+            } else {
             run.runner = organic
                 ? LatticeFileButton.organicRunner(config: config, job: job, projectName: project.name, strengthJob: strengthJob,
                                                   densityGCm3: density, onJob: { _, url in LatticeMacMake.shared.job(url) },
                                                   early: macEarlyFile(checkFollows: strengthJob != nil))
                 : LatticeFileButton.runner(config: config, job: job, projectName: project.name, strengthJob: strengthJob,
                                            densityGCm3: density, onJob: { LatticeMacMake.shared.job($0) })   // ★ notes25 (A5)
+            }
             run.start(fileRequest, remote: true, workerName: compute.selectedWorkerName)
         } else {
             run.runner = LatticeFileButton.deviceRunner(job: job, strengthJob: strengthJob, materialsPath: request.materialsPath,
@@ -3918,6 +3981,7 @@ public struct WorkspacePlaceholder: View {
             if ph == .failed { lastRunRequest = nil }
             // ★ his 11-22 · ★ notes25 (A5): the print file's chain ends with its run — a stop ends in the centred pop-up
             let saidInAPopUp = latticeChainEnded(ph)
+            structuralAutoLanded(ph)   // ★ notes30 SA1: the kept round drawn (its short build), Approved rekeyed
             // ★ notes28 (builder D's "cannot_lattice"): a print file whose check emptied a region says so in the centred pop-up
             // ★ SHEETS (notes28 sheets SPEC 1.5): else a blend that fell back to the solid wall says which regions, in the same pop-up
             if ph == .succeeded, run.outcomeIsPrintFile, !LatticeCannotLattice.sayEmptied(report: run.outcome?.reportJSON, in: project) {
@@ -5256,6 +5320,10 @@ public struct WorkspacePlaceholder: View {
     /// ★ Install 2: what the new engine grades by — the page's field (by its key) and the Structural reference: the printed
     /// yield over the project's Safety margin (his 11-14 carry-over from Topology; no lattice control of its own yet).
     private var newEngineStress: LatticeLayoutPreview.Stress {
+        StructuralAuto.stress(project, base: newEngineStressBase, model: model)   // ★ notes30 SA1 (else the base)
+    }
+    /// The stage's own stress and the Structural reference, before Structural Auto sizes it (StructuralAuto.stress).
+    private var newEngineStressBase: LatticeLayoutPreview.Stress {
         let margin = project.force.safetyMargin ?? SafetyMargin.defaultValue
         return .init(key: latticeStressFieldKey, field: latticeStressField,
                      referenceMPa: model.printedYieldMPa(for: project.material) / Swift.max(1, margin))

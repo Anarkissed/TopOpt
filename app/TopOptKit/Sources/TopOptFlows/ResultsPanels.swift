@@ -300,6 +300,10 @@ extension ResultsModel {
             let plastic = tab.map { $0.massLabel + ($0.savingsPercent > 0 ? " \u{00B7} \($0.savingsPercent)% less than solid" : "") }
             r += a.rows(loadKg: shownLoadKg, unit: loadUnit, infillPercent: infillPercent, plastic: plastic)
             if let f = reportBlocks?.printFile { r += f.rows(.strength) }   // "Strengthened"
+            if let auto = reportBlocks?.structuralAuto {   // ★ notes30 SA1: how Auto strengthened it, its (i) the rounds
+                r.append(ResultsDetailRow(label: StructuralAutoCopy.strengthenedByAuto, value: StructuralAutoCopy.strengthenedValue(auto),
+                                          info: StructuralAutoCopy.strengthenedInfo(auto)))
+            }
             add("Version", version?.title)
             add("Recommended", recommendationLine.map { $0.hasPrefix("Recommended: ") ? String($0.dropFirst(13)) : $0 }
                 .map { $0.prefix(1).uppercased() + $0.dropFirst() })
