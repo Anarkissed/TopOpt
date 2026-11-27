@@ -495,3 +495,15 @@ Peak through the file's fills against the certificate's, percent:
 | ellipse, 5 | -22.6 | -13.1 | +9.2 | -2.1 | -2.2 |
 
 Read plainly. From k = 8 the file's fills give the certificate's peak within about 2.5 % (worst +2.5 and -2.2), where today's all-or-nothing re-check is 14 to 44 % under it. Within 1 % in 4 of 7 rows at k = 8 and at k = 16; going from 8 to 16 does not tighten it (the scatter is the one-voxel form's own, see "WHY the one-voxel form is jumpy"; the ellipse at 5 voxels also carries the 360-sided polygon against the true ellipse). So the ruled "within 1 %" is not met by the one-voxel form at any k tried, and will not be by a finer k. The remaining rows (the ellipse at 6, the ring) re-run when the gate is green.
+
+### ONE JUDGE, evidence (a), the full table (2026-11-26 22:14; reference fills 32 x 32; the test now runs one shape at a time, `--only`)
+
+Peak through the file's fills against the certificate's, percent:
+
+| shape, b or inner radius in voxels | all-or-nothing (today) | k = 2 | k = 4 | k = 8 | k = 16 |
+|---|---|---|---|---|---|
+| round hole, 3 / 4 / 5 / 6 | -34.3 / -26.9 / -14.0 / -22.2 | -11.7 / -9.3 / -1.8 / -10.0 | -7.0 / -8.4 / +1.5 / -11.4 | +2.4 / +0.4 / +2.5 / +0.3 | -0.1 / +1.0 / -0.3 / +0.2 |
+| ellipse, 3 / 4 / 5 / 6 | -43.6 / -20.2 / -22.6 / -26.8 | -18.5 / +14.0 / -13.1 / -10.6 | -5.0 / -1.1 / +9.2 / +6.8 | +0.2 / +0.3 / -2.1 / +0.6 | +1.4 / -0.1 / -2.2 / +0.7 |
+| thick ring, 3 / 4 / 5 / 6 | -46.5 / -43.3 / -34.2 / -37.8 | -26.4 / -15.6 / -19.0 / -11.7 | -13.4 / -19.4 / -2.9 / -3.1 | +0.3 / -2.0 / -0.4 / +1.2 | -0.1 / -11.3 / -1.7 / -0.9 |
+
+CORRECTION to what I told the reviewer an hour earlier ("within about 2.5 % from k = 8, k = 16 no tighter") on 7 rows: over all 12 rows, k = 8 is within 2.5 % everywhere (worst +2.5, -2.1), but k = 16 has ONE row at -11.3 % (the ring at 4 voxels, where k = 8 reads -2.0 %). A finer k is not safer: one sliver voxel falling the other side of a half moves the peak by ten percent. That is the one-voxel form's jump, seen at its plainest, and it settles the question of k for that form by showing there is no settling: k = 8 is the best measured, not a converged value.
