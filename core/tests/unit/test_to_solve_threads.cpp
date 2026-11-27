@@ -1,7 +1,7 @@
-// Stage 5 (faster solves), S-05: the per-element energy and sensitivity loop of
-// simp_compliance (core/src/simp/to_solve.cpp) runs on every matrix-free worker.
-// Each element writes only its own term, and the compliance is summed serially
-// in ascending voxel order, so the result must not depend on the thread count.
+// Stage 5 (faster solves): the compliance and sensitivities of simp_compliance
+// (core/src/simp/to_solve.cpp) must not depend on the solver's thread count. (A
+// parallel S-05 loop was WITHDRAWN 11-27: identical across thread counts, but not
+// to the serial loop's bytes on a scenario job; this guard stays.)
 //
 // Checks, on a graded density with void, solved by the matrix-free multigrid
 // (the production solver) and by Jacobi-CG:
