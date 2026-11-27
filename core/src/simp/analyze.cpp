@@ -574,11 +574,12 @@ FixedDesignAnalysis analyze_fixed_design(
       out.von_mises_material_field = vm_real;
       // How thick the member is at each voxel (the largest ball inside the part
       // that holds it); a cut voxel takes its thickest printed face neighbour's.
-      const std::vector<double> own_width =
-          member_width_mm.empty()
-              ? local_member_thickness_mm(grid, density, kIso, kn.thickness_cap_voxels)
-              : std::vector<double>();
-      const std::vector<double>& width = member_width_mm.empty() ? own_width : member_width_mm;
+      // Measured HERE with the outside of the grid as air: the grid is the part's
+      // bounding box, and with the default (outside not air) a member lying against
+      // the box, or a part that fills it, reads as thick as the measure reaches and
+      // would never fall back (found on the beam test, 2026-11-27).
+      const std::vector<double> width = local_member_thickness_mm(
+          grid, density, kIso, kn.thickness_cap_voxels, /*grid_outside_is_void=*/true);
       auto width_at = [&](int i, int j, int k) {
         const std::size_t idx = grid.index(i, j, k);
         if (density[idx] > kIso) return width[idx];

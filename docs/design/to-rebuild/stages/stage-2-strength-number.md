@@ -552,3 +552,22 @@ SIZE FORM, all 16 rows on two shapes: at k = 8 within 0.5 % of the certificate's
 | 0.38 | 3.90 | 80.4 (98.3) | 44 % |
 
 The part as drawn prints at 144.4 g of 227.5 g solid (this bracket is thick, so a large share is infill). The same three designs by solid volume would read 29 / 44 / 57 % saved: the printed figures are the ones he would weigh. 1724 s. The switch-off run of this job was stopped by my guard under the old swapouts clause and is owed again; the forced 3.6 mm run and the stand at res 128 are still running.
+
+### THE THIN-MEMBER RULE on a beam in bending (2026-11-27 02:18, test `to_strength_thin_member`; behind `TOPOPT_STRENGTH=size`)
+
+A straight beam in pure bending (exact stress: zero at the middle, 1 at the surface), the reading size 2.0 mm = 4 voxels, thickness 0.5 / 1 / 2 / 4 times the size.
+
+| thickness | voxels through | what the job reads | reading (surface stress = 1) | the size reading alone | its own true value |
+|---|---|---|---|---|---|
+| 0.5 x the size | 2 | ONE VOXEL (fell back) | 0.33 | 0.33 | 0.97 (-66 %) |
+| 1 x | 4 | ONE VOXEL (fell back) | 0.68 | 0.47 | 0.64 (-26 %) |
+| 2 x | 8 | over the size, 360 edge voxels at one voxel | 0.85 | 0.73 | 0.82 (-11 %) |
+| 4 x | 16 | over the size, 392 edge voxels at one voxel | 0.93 | 0.87 | 0.91 (-5 %) |
+
+What works: the rule falls back at 0.5 and 1 times the size and reads over the size at 2 and 4, as ruled. (First run: it never fell back, MY fault: the thickness was measured with the outside of the part's box as solid, the same slip as in the too-small check; fixed.)
+
+FOUR THINGS IT SHOWS THAT ARE NOT COMFORTABLE, for the reviewer:
+1. The size reading on a FLAT, GRID-ALIGNED face in bending is low even where the rule allows it: 11 % under its own true value at 2 times the size, 5 % at 4 times. Cause (reasoned, not yet tested): the true value has the ball centred ON the surface; on a face that lies on voxel boundaries there are no cut voxels for the ball to sit on, so it sits half a voxel inside (an eighth of the size here), where the bending stress is already lower. The curved textbook shapes hid this. Proposed fix to measure: let the ball also be centred on the part's surface NODES, not only on voxel centres.
+2. The job's number at 2 and 4 times is HIGHER than the size reading (0.85 against 0.73) because the beam's EDGE voxels count as thin (the "largest ball that holds the voxel" does not reach into a corner) and so are read at one voxel, where the surface voxel reads 0.85. So on any part with edges the job's reading is partly today's form. The corner-aware width measure that already exists for the lattice's cells-per-member rule is the candidate; not changed yet.
+3. TODAY'S one-voxel reading on a thin bending member is itself badly low: 0.33 of the surface stress with 2 voxels through the member, 0.68 with 4. That is the grid (a few linear elements cannot carry a bending gradient), in today's shipped check, with or without this stage. It is the strongest argument yet for the wall rule of stage 4 being stated in voxels THROUGH a member, not only in mm.
+4. So "fall back to today's form" on thin members is the ruled choice and is in, but on a member 2 to 4 voxels thick neither form is within 30 % in bending.
