@@ -69,7 +69,7 @@ final class StructuralAutoTests: XCTestCase {
             // RED CONTROL: today's Structural Auto ramp (reference = printed yield / margin, the thinnest strut at no stress, the
             // open look at the reference, read on the largest 8 mm cell) as a density
             let reference = inputs.yieldMPa * inputs.zKnockdown / inputs.margin
-            let ratio = 0.9 / 8 + Swift.min(1, vm / reference) * (kOpenLook - 0.9 / 8)
+            let ratio = 0.9 / 8 + Swift.min(1, vm / reference) * (Self.kOpenLook - 0.9 / 8)
             let rho = Swift.max(0.10, TopOptKit.latticeRelativeDensity(topology: "octet", strutRadiusMM: ratio * 4, cellMM: 8))
             let mr = TopOptKit.latticeStrutLawMargin(topology: "octet", rho: rho, vonMisesMPa: vm, pressureMPa: p, buildUp: inputs.up,
                                                      yieldMPa: inputs.yieldMPa, zKnockdown: inputs.zKnockdown)

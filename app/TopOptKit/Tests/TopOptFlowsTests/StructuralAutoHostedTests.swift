@@ -24,7 +24,7 @@ final class StructuralAutoHostedTests: XCTestCase {
 
     static let sizes: [(String, CGSize)] = [("13″ landscape", AppBuildHost.landscape13), ("portrait", CGSize(width: 820, height: 1180))]
 
-    final class Box { var said: [String] = []; var fits: [String: FlexibleFit] = [:] }
+    final class Box { var said: [String] = []; var fits: [UUID: FlexibleFit] = [:] }
 
     private func waitFor(_ h: AppBuildHost, _ key: String, seconds: Double = 5) -> CGRect? {
         var waited = 0.0
@@ -49,18 +49,18 @@ final class StructuralAutoHostedTests: XCTestCase {
             h.pump(0.5)
             XCTAssertNil(h.frames.all["macMakeCells"], "\(name): ★ no hexagons (his: no animation)")
             XCTAssertNil(h.frames.all["macMakeVines"], "\(name): ★ no vines")
-            let modal = try XCTUnwrap(h.frames.all["macMakeModal"], "\(name): the card's panel")
+            let modal = try XCTUnwrap(waitFor(h, "macMakeModal", seconds: 1), "\(name): the card's panel")
             XCTAssertTrue(modal.contains(card), "\(name): the steps inside the one panel")
             XCTAssertEqual(modal.midX, size.width / 2, accuracy: 2, "\(name): ★ centred across")
             XCTAssertEqual(modal.midY, size.height / 2, accuracy: 2, "\(name): ★ centred up and down, never at the bottom")
             XCTAssertLessThan(modal.maxY, size.height - 60, "\(name): ★ nothing at the bottom-centre")
-            let bar = try XCTUnwrap(h.frames.all["structuralAutoBar"], "\(name): ★ the progress bar")
+            let bar = try XCTUnwrap(waitFor(h, "structuralAutoBar", seconds: 1), "\(name): ★ the progress bar")
             XCTAssertTrue(card.contains(bar))
             for item in steps.items {
                 XCTAssertTrue(box.said.contains(item.words), "\(name): ★ says '\(item.words)'")
                 let w = item.words.split(separator: " ").filter { $0 != "%" }.count
                 XCTAssertLessThanOrEqual(w, 5, "\(name): '\(item.words)' five words at most")
-                if let f = box.fits[item.words] { XCTAssertTrue(f.whole, "\(name): '\(item.words)' drawn whole") }
+                if let f = box.fits.values.first(where: { $0.text == item.words }) { XCTAssertTrue(f.whole, "\(name): '\(item.words)' drawn whole") }
             }
             XCTAssertTrue(box.said.contains(StructuralAutoCopy.title), "\(name): its title")
             // the steps move as the run says
