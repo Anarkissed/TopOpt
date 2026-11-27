@@ -133,34 +133,46 @@ enum LatticeBuildScaffold {
         return Made(frame: f, layout: plan, rough: r, drawn: drawn)
     }
 
-    /// The scaffold the show holds and the renderer draws with its own bars pass (each member's snap in its flags).
+    /// The scaffold the show holds and the renderer draws with its own bars pass: its pieces in the order they come (the
+    /// timelapse draws a run of them), and how many each lift has.
     struct Drawing {
         let token: Int
         let inputs: LatticeLayoutBarsInputs
         let frame: LatticeBuildTimelapse.Frame
+        let liftPieces: [Int]
         var members: Int { inputs.bars.count / 7 }
     }
     static func drawing(_ m: Made, token: Int) -> Drawing {
         let n = m.members
         let map = m.drawn.map { LatticeLayoutSolidGrid(token: token, origin: m.rough.origin, voxel: m.rough.voxel,
                                                        dims: m.rough.dims, rg: $0, smooth: true) }
-        let inputs = LatticeLayoutBarsInputs(token: token, bars: m.layout.bars, solid: map, flags: m.layout.codes,
+        let inputs = LatticeLayoutBarsInputs(token: token, bars: m.layout.bars, solid: map, flags: [],
                                              colours: [SIMD4<Float>](repeating: colour, count: n), colourKey: token)
-        return Drawing(token: token, inputs: inputs, frame: m.frame)
+        return Drawing(token: token, inputs: inputs, frame: m.frame, liftPieces: m.layout.liftPieces)
     }
 
-    // MARK: each member's snap: a lift's floor, then its walls, then its stairs (the top lift's roof last)
+    // MARK: the order: a lift's floor, then its walls, then its stairs (the top lift's roof last) — a piece at a time
 
+    /// What a piece is (tests: the order is his).
     enum Part: Int, Sendable { case floor = 0, walls = 1, stairs = 2, roof = 3 }
-    /// The snap (as the timelapse counts a lift's: lift × perFloor + its part) a member comes in, coded into its bar's flags
-    /// (the bit a square bridge wears, 16, never set) — `bar_build_hidden` decodes it for the scaffold's pass.
-    static func code(lift: Int, _ p: Part) -> UInt8 {
-        var part = p.rawValue
-        if controlWallsFirst, p == .floor || p == .walls { part = p == .floor ? Part.walls.rawValue : Part.floor.rawValue }   // RED
-        let s = Swift.max(0, lift * LatticeBuildTimelapse.perFloor + part)
-        return UInt8(truncatingIfNeeded: (s & 15) | ((s >> 4) << 5))
+
+    /// A level's ledgers in the order they come: its floor's outline walked round from its front-left node, then the rest row by
+    /// row, front to back, each row left to right.
+    static func walked(_ edges: Set<Edge>, round squares: Set<Square>) -> [Edge] {
+        let rim = outline(squares).intersection(edges)
+        func key(_ e: Edge) -> (Int, Int, Int, Int) { (Swift.min(e.a.j, e.b.j), e.a.j == e.b.j ? 0 : 1, Swift.min(e.a.i, e.b.i), e.b.j) }
+        var byNode: [Node: [Edge]] = [:]
+        for e in rim { byNode[e.a, default: []].append(e); byNode[e.b, default: []].append(e) }
+        var left = rim, out: [Edge] = []
+        while let start = left.flatMap({ [$0.a, $0.b] }).min(by: { ($0.j, $0.i) < ($1.j, $1.i) }) {
+            var at = start
+            while let e = (byNode[at] ?? []).filter({ left.contains($0) }).min(by: { key($0) < key($1) }) {
+                left.remove(e); out.append(e)
+                at = e.a == at ? e.b : e.a
+            }
+        }
+        return out + edges.subtracting(rim).sorted { key($0) < key($1) }
     }
-    static func step(code c: UInt8) -> Int { Int(c & 15) | (Int(c >> 5) << 4) }
 
     // MARK: the plan
 
@@ -220,8 +232,11 @@ enum LatticeBuildScaffold {
         var levelHeights: [Float] = []
         var stair: Square?
         var flights: Set<Int> = []
+        /// The members in the order they come (a lift's floor, walls, stairs; the top lift's roof last), what each is, and how
+        /// many each lift has.
         var bars: [Float] = []
-        var codes: [UInt8] = []
+        var parts: [Part] = []
+        var liftPieces: [Int] = []
         var low: Float = 0, liftH: Float = 1
         func height(_ l: Int) -> Float { low + Float(l) * liftH }
         var members: Int { bars.count / 7 }
@@ -336,17 +351,11 @@ enum LatticeBuildScaffold {
         L.flights = Set(flights.keys)
         let stairBay = L.stair.map { Set(edges($0)) } ?? []
 
-        // the members, each with its snap
-        let w = width(liftH: f.floorH)
-        func add(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ lift: Int, _ p: Part) {
-            L.bars += [a.x, a.y, a.z, b.x, b.y, b.z, w]
-            L.codes.append(code(lift: lift, p))
-        }
-        func sorted(_ set: Set<Edge>) -> [Edge] { set.sorted { ($0.a.i, $0.a.j, $0.b.i, $0.b.j) < ($1.a.i, $1.a.j, $1.b.i, $1.b.j) } }
         // each level's floor: the ledgers over the lifts below and above it (the step between them its landing), the stair's
-        // bay; lift l's FLOOR (its first snap), or — nothing standing above — the lift below's roof (its last)
+        // bay; lift l's FLOOR, or — nothing standing above — the lift below's roof
         L.levels = [Set<Edge>](repeating: [], count: floors + 1)
         L.levelHeights = [Float](repeating: 0, count: floors + 1)
+        var levelSquares = [Set<Square>](repeating: [], count: floors + 1)
         for l in ground...floors {
             let lower: Set<Square> = l >= 1 ? L.squares[l - 1] : [], upper: Set<Square> = l < floors ? L.squares[l] : []
             if lower.isEmpty && upper.isEmpty { continue }
@@ -356,29 +365,46 @@ enum LatticeBuildScaffold {
                 for q in lower.symmetricDifference(upper) { set.formUnion(edges(q)) }
             }
             if !controlNoLandings, L.flights.contains(l) || L.flights.contains(l - 1) { set.formUnion(stairBay) }
-            let h = l == ground ? H(l) + e : (upper.isEmpty ? H(l) - e : H(l))
             L.levels[l] = set
-            L.levelHeights[l] = h
-            let (lift, part): (Int, Part) = upper.isEmpty ? (l - 1, .roof) : (l, .floor)
-            for x in sorted(set) { add(node(x.a, h), node(x.b, h), lift, part) }
+            L.levelHeights[l] = l == ground ? H(l) + e : (upper.isEmpty ? H(l) - e : H(l))
+            levelSquares[l] = lower.union(upper)
         }
-        for k in 0..<floors where !L.squares[k].isEmpty {
-            // its WALLS: an upright at every node of its squares (and of the stair's bay), rising to the next level; braces in
-            // some bays of its outer frames, turning each lift
-            var posts = Set<Node>()
-            for x in floorEdges(L.squares[k]) { posts.insert(x.a); posts.insert(x.b) }
-            if !controlNoLandings, L.flights.contains(k) { for x in stairBay { posts.insert(x.a); posts.insert(x.b) } }
-            for n in posts.sorted(by: { ($0.i, $0.j) < ($1.i, $1.j) }) { add(node(n, H(k)), node(n, H(k + 1)), k, .walls) }
-            let turn = k % 2 == 1
-            for x in sorted(outline(L.squares[k])) where !(L.flights.contains(k) && stairBay.contains(x)) {
-                let alongAcross = x.a.j == x.b.j
-                guard alongAcross ? (x.a.i + 2 * x.a.j) % braceEvery == 0 : (2 * x.a.i + x.a.j) % braceEvery == 1 else { continue }
-                let (p, q) = turn ? (x.b, x.a) : (x.a, x.b)
-                let a = node(p, H(k)), b = node(q, top(k))
-                if fits(a, b) { add(a, b, k, .walls) }
+
+        // the members, a lift at a time in the order they come — ★ his (23:50) "a piece at a time": its FLOOR's ledgers walked
+        // round its outline then across, its WALLS' uprights one by one (front row first, left to right) then its braces, its
+        // STAIRS' stringers then treads one by one; the top lift's roof last (RED CONTROL `controlWallsFirst`: walls first)
+        let w = width(liftH: f.floorH)
+        func add(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ p: Part) {
+            L.bars += [a.x, a.y, a.z, b.x, b.y, b.z, w]
+            L.parts.append(p)
+        }
+        func deck(_ l: Int, _ p: Part) {
+            let h = L.levelHeights[l]
+            for x in walked(L.levels[l], round: levelSquares[l]) { add(node(x.a, h), node(x.b, h), p) }
+        }
+        for k in 0..<floors {
+            let before = L.parts.count
+            defer { L.liftPieces.append(L.parts.count - before) }
+            guard !L.squares[k].isEmpty else { continue }
+            func walls() {
+                var posts = Set<Node>()
+                for x in floorEdges(L.squares[k]) { posts.insert(x.a); posts.insert(x.b) }
+                if !controlNoLandings, L.flights.contains(k) { for x in stairBay { posts.insert(x.a); posts.insert(x.b) } }
+                for n in posts.sorted(by: { ($0.j, $0.i) < ($1.j, $1.i) }) { add(node(n, H(k)), node(n, H(k + 1)), .walls) }
+                let turn = k % 2 == 1   // the braces turn back each lift: a zig-zag
+                for x in walked(outline(L.squares[k]), round: L.squares[k]) where !(L.flights.contains(k) && stairBay.contains(x)) {
+                    let alongAcross = x.a.j == x.b.j
+                    guard alongAcross ? (x.a.i + 2 * x.a.j) % braceEvery == 0 : (2 * x.a.i + x.a.j) % braceEvery == 1 else { continue }
+                    let (p, q) = turn ? (x.b, x.a) : (x.a, x.b)
+                    let a = node(p, H(k)), b = node(q, top(k))
+                    if fits(a, b) { add(a, b, .walls) }
+                }
             }
-            // its STAIRS
-            for (a, b) in flights[k] ?? [] { add(a, b, k, .stairs) }
+            if controlWallsFirst { walls(); deck(k, .floor) } else { deck(k, .floor); walls() }
+            for (a, b) in flights[k] ?? [] { add(a, b, .stairs) }
+            // the roof over the last lift standing
+            let next = k + 1 < floors ? L.squares[k + 1] : []
+            if next.isEmpty { deck(k + 1, .roof) }
         }
         return L
     }

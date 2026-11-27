@@ -5364,18 +5364,19 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // (★ notes30: or, while a slow lay's scaffold stands before its landing, the scaffold — its lifts so far)
         let build = buildReveal(model: uniforms.model)
         let scaffoldDrawn = scaffoldBars != nil && drawnLayoutBars === scaffoldBars
+        let scaffoldRun = scaffoldDrawn ? buildShow.flatMap { scaffoldRange($0, at: LatticeBuildShow.now) } : nil   // ★ notes30
         lastBuildSnaps = !layoutBarsInFrame || !build.draw || scaffoldDrawn ? 0 : build.reveal.map { Int($0.build.x) }
-        lastScaffold = scaffoldDrawn && build.draw ? build.reveal.map { (lifts: Int($0.build.x), struck: Int($0.sizes.w)) } : nil
+        lastScaffold = scaffoldRun.map { (lifts: $0.upperBound, struck: $0.lowerBound) }
         if layoutBarsInFrame, !growthFrame.holdsLanded, build.draw, let bars = drawnLayoutBars,
            bars.encodeGBuffer(penc, depthState: depthState, clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView,
-                              eyeNormalBasis: uniforms.normalMatrix, turning: turning, build: build.reveal) {
-            frameDrawCalls += 1; frameVertices += 36 * bars.count }
-        // ★ notes30: the scaffold over the landed lattice, its lifts struck one by one as the real floors replace them
+                              eyeNormalBasis: uniforms.normalMatrix, turning: turning, build: build.reveal, range: scaffoldRun) {
+            frameDrawCalls += 1; frameVertices += 36 * (scaffoldRun?.count ?? bars.count) }
+        // ★ notes30: the scaffold over the landed lattice, struck piece by piece as the real floors replace it
         if layoutBarsInFrame, let over = scaffoldOverLanded(),
            over.pass.encodeGBuffer(penc, depthState: depthState, clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView,
-                                   eyeNormalBasis: uniforms.normalMatrix, turning: turning, build: over.reveal) {
-            lastScaffold = (lifts: Int(over.reveal.build.x), struck: Int(over.reveal.sizes.w))
-            frameDrawCalls += 1; frameVertices += 36 * over.pass.count }
+                                   eyeNormalBasis: uniforms.normalMatrix, turning: turning, range: over.range) {
+            lastScaffold = (lifts: over.range.upperBound, struck: over.range.lowerBound)
+            frameDrawCalls += 1; frameVertices += 36 * over.range.count }
         // ★ the solid view's cut walls (his ask 11-13): after the bars, the same encoder and depth state (★ notes24: none while
         // the growing vines stand in the part's X-ray; the growth's own map's while its walls dissolve)
         if encodeGrowthWalls(penc, depthState: depthState, clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView,

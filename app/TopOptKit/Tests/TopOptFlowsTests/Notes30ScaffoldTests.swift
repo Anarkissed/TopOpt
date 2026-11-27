@@ -41,6 +41,8 @@ final class Notes30ScaffoldTests: XCTestCase {
         S.controlRimOnly = false
         S.controlWallsFirst = false
         S.controlNoLandings = false
+        T.controlWholeLift = false
+        T.controlQuickReal = false
         super.tearDown()
     }
 
@@ -216,7 +218,7 @@ final class Notes30ScaffoldTests: XCTestCase {
                 XCTAssertNil(show.revealScaffold(at: land + 1), "RED CONTROL: no scaffold")
                 continue
             }
-            let floors = tl.floors, all = floors * T.perFloor
+            let floors = tl.floors, all = tl.piecesAll, allReal = floors * T.perFloorReal
             XCTAssertTrue(before.allSatisfy { ($0.s?.snaps ?? 0) == 0 }, "★ nothing of the real lattice before it lands")
             // the walls first: every floor's walls off before the first lift, in hard snaps
             let firstWall = try XCTUnwrap(before.first { ($0.s?.opened ?? 0) > 0 }?.t)
@@ -229,29 +231,25 @@ final class Notes30ScaffoldTests: XCTestCase {
             XCTAssertGreaterThan(topped, 0.75 * (12 - T.marginS), "★ paced to the landing, never all at once (topped at \(topped) s)")
             XCTAssertLessThan(topped, 12 - T.marginS + 1e-6, "★ topped out before the landing")
             var last: T.Shown?
-            var liftSnaps = 0, realSnaps = 0, strikes = 0
+            var realSnaps = 0, mostUp = 0, mostStruck = 0
             for e in log {
                 guard let s = e.s else { continue }
                 if let l = last {
                     XCTAssertGreaterThanOrEqual(s.lifts, l.lifts, "the scaffold only rises")
-                    XCTAssertLessThanOrEqual(s.lifts - l.lifts, 1, "★ a hard snap: one at a time")
                     XCTAssertGreaterThanOrEqual(s.snaps, l.snaps, "★ the real lattice only ever grows")
-                    XCTAssertLessThanOrEqual(s.snaps - l.snaps, 1)
-                    XCTAssertGreaterThanOrEqual(s.struck, l.struck, "a lift struck stays struck")
-                    if s.lifts > l.lifts { liftSnaps += 1 }
+                    XCTAssertLessThanOrEqual(s.snaps - l.snaps, 1, "★ the real floors in sweeping snaps, one at a time")
+                    XCTAssertGreaterThanOrEqual(s.struck, l.struck, "a piece struck stays struck")
+                    mostUp = Swift.max(mostUp, s.lifts - l.lifts)
+                    mostStruck = Swift.max(mostStruck, s.struck - l.struck)
                     if s.snaps > l.snaps { realSnaps += 1 }
-                    if s.struck > l.struck {
-                        strikes += 1
-                        XCTAssertEqual(s.struck - l.struck, T.perFloor, "★ a whole lift struck at once")
-                    }
                 }
-                XCTAssertLessThanOrEqual(s.struck, s.snaps / T.perFloor * T.perFloor, "★ a lift struck only once its real floor stands")
+                XCTAssertLessThanOrEqual(s.struck, tl.piecesBefore(s.snaps / T.perFloorReal), "★ a lift struck only once its real floor stands")
                 last = s
             }
-            XCTAssertEqual(liftSnaps, all, "★ every lift's snaps seen, one by one (its uprights, its bays)")
-            XCTAssertEqual(realSnaps, all, "★ every real floor's snaps seen, one by one")
-            XCTAssertEqual(strikes, floors, "★ the scaffold struck floor by floor")
-            XCTAssertEqual(last?.snaps, all, "★ it ends on the whole lattice")
+            XCTAssertLessThanOrEqual(mostUp, T.piecesMostPerSnap, "★ a piece at a time (a few at most a snap)")
+            XCTAssertLessThanOrEqual(mostStruck, T.piecesMostPerSnap, "★ struck a piece at a time")
+            XCTAssertEqual(realSnaps, allReal, "★ every real floor's snaps seen, one by one")
+            XCTAssertEqual(last?.snaps, allReal, "★ it ends on the whole lattice")
             XCTAssertEqual(last?.struck, all, "★ nothing of the scaffold left")
             let gone = try XCTUnwrap(log.first { $0.s?.struck == all }?.t)
             XCTAssertLessThanOrEqual(gone, end - t0 - T.toppedOutS + 1e-6, "★ struck before the topped-out beat: the finished lattice stands alone")
@@ -292,7 +290,7 @@ final class Notes30ScaffoldTests: XCTestCase {
                 if lifts == 0 { opened.append(differing(closed, px)) }
                 else if strawUp.count < lifts { strawUp.append(Self.straw(px)) }
                 // (a lift's floor up and its walls not yet, high enough in the pocket to be lit)
-                if checkpoint == nil, lifts >= 2 * T.perFloor, lifts % T.perFloor == 1 { checkpoint = (lifts, Self.straw(px)) }
+                if checkpoint == nil, lifts * 5 >= made.members * 2, (r.lastScaffold?.struck ?? 0) == 0 { checkpoint = (lifts, Self.straw(px)) }   // (two fifths of it up)
                 if r.insideMap != nil { insideShaded = true }
                 XCTAssertLessThanOrEqual(Notes29AnimationTests.purple(px), 30, "★ no real strut before the landing")
                 t += 1.0 / 30
@@ -319,7 +317,8 @@ final class Notes30ScaffoldTests: XCTestCase {
             XCTAssertTrue(insideShaded, "★ the inside shaded by the rough cut-open")
             XCTAssertGreaterThanOrEqual(strawUp.count, 4, "★ the scaffold's snaps drawn")
             XCTAssertGreaterThan(strawUp.last ?? 0, 100, "★ the scaffold on screen")
-            for (a, b) in zip(strawUp, strawUp.dropFirst()) { XCTAssertGreaterThanOrEqual(b, a - 20, "it only rises") }
+            var peakUp = 0   // (it only rises: a new piece may hide some of the others behind it, never a fifth of them)
+            for b in strawUp { XCTAssertGreaterThanOrEqual(b, peakUp - Swift.max(40, peakUp / 5), "it only rises"); peakUp = Swift.max(peakUp, b) }
             XCTAssertLessThan(strawUp.first ?? 0, strawUp.last ?? 0, "★ lift by lift")
             XCTAssertTrue(beat.allSatisfy { $0.straw < 10 }, "★ nothing of the scaffold in the topped-out beat")
             XCTAssertGreaterThan(beat.map(\.purple).min() ?? 0, 300, "★ the finished lattice")
@@ -329,7 +328,7 @@ final class Notes30ScaffoldTests: XCTestCase {
             let cp = try XCTUnwrap(checkpoint, "premise: a lift's floor seen before its walls")
             let (r2, d2) = try pocketRenderer()
             var keep: [Float] = []
-            for (m, c) in made.layout.codes.enumerated() where S.step(code: c) < cp.n { keep += Array(made.bars[(7 * m)..<(7 * m + 7)]) }
+            keep = Array(made.bars[0..<(7 * Swift.min(cp.n, made.members))])   // (its pieces in the order they come: the first n)
             let map = made.drawn.map { LatticeLayoutSolidGrid(token: 9, origin: made.rough.origin, voxel: made.rough.voxel,
                                                               dims: made.rough.dims, rg: $0, smooth: true) }
             r2.applyLayoutBars(LatticeLayoutBarsInputs(token: 9, bars: keep, solid: map, colours: [SIMD4<Float>](repeating: S.colour, count: keep.count / 7),
@@ -378,7 +377,7 @@ final class Notes30ScaffoldTests: XCTestCase {
             XCTAssertNotNil(at1, "★ switched at the second")
             XCTAssertEqual(s2?.opened, 1, "★ its walls first, at once")
             XCTAssertGreaterThan(s3?.lifts ?? 0, 0, "★ the scaffold rises while it works")
-            XCTAssertEqual(show.timelapse?.shown(at: end)?.struck, show.timelapse.map { $0.floors * T.perFloor }, "★ all struck by the end")
+            XCTAssertEqual(show.timelapse?.shown(at: end)?.struck, show.timelapse.map { $0.piecesAll }, "★ all struck by the end")
         }
         // one that lands before the second: never
         T.controlNoSwitch = false
@@ -660,8 +659,7 @@ final class Notes30ScaffoldTests: XCTestCase {
         let f = made.frame
         let fails = Self.scaffoldLike(made.bars, frame: f, bay: made.layout.bay, inArea: Self.window.inArea, colour: S.colour)
         XCTAssertEqual(fails, [], "★ a scaffold")
-        var perLift = [Int](repeating: 0, count: f.floors)
-        for c in made.layout.codes { perLift[S.step(code: c) / T.perFloor] += 1 }
+        let perLift = made.layout.liftPieces
         XCTAssertTrue(perLift.allSatisfy { $0 > 0 }, "★ every lift has its members: \(perLift)")
         XCTAssertLessThan(S.width(liftH: f.floorH), 0.81, "★ thin")
         XCTAssertLessThanOrEqual(made.members, S.membersMost, "★ the instance count bounded")
@@ -836,43 +834,130 @@ final class Notes30ScaffoldTests: XCTestCase {
                         roles.append(.walls); lifts.append(f.floor(ofHeight: lowH + 0.5 * e))
                     }
                 }
-                let steps = L.codes.map(S.step(code:))
-                var mismatched = 0
-                for (m, s) in steps.enumerated() {
+                // each piece's lift (its run among the lifts' pieces) and its part, as the plan lays them out in the order they come
+                var pieceLift: [Int] = []
+                for (k, n) in L.liftPieces.enumerated() { pieceLift += [Int](repeating: k, count: n) }
+                XCTAssertEqual(pieceLift.count, made.members, "\(name): premise: every piece in a lift")
+                var mismatched = 0, outOfOrder = 0
+                for m in 0..<Swift.min(roles.count, L.parts.count) {
                     let part: S.Part
                     switch roles[m] { case .floor: part = .floor; case .roof: part = .roof; case .walls: part = .walls; case .stairs: part = .stairs }
-                    if s != lifts[m] * T.perFloor + part.rawValue { mismatched += 1 }
+                    if L.parts[m] != part || pieceLift[m] != lifts[m] { mismatched += 1 }
+                    // in the order they come: within a lift, never a floor after its walls, nor walls after its stairs
+                    if m > 0, pieceLift[m] == pieceLift[m - 1], L.parts[m].rawValue < L.parts[m - 1].rawValue { outOfOrder += 1 }
                 }
-                // as it rises: a lay judged slow at the ask, and one switched to a second after the ask
-                var outOfOrder = 0
+                // as it rises — a lay judged slow at the ask, and one switched to a second after it — the pieces come in that order
                 for switched in [false, true] {
                     let show = LatticeBuildShow()
                     let t0 = CACurrentMediaTime() + 1000
                     show.layBegins(walls: true, scaffold: !switched, mayScaffold: true, expectedS: switched ? 0.6 : 12, now: t0)
                     show.scaffoldArrived(S.drawing(made, token: show.scaffoldToken), now: t0 + 0.2)
-                    var t = t0
+                    var t = t0, lastUp = 0
                     let landing = t0 + (switched ? 6 : 12)
                     while t < landing {
                         show.step(t)
                         if let v = show.revealScaffold(at: t) {
-                            let shown = steps.map { $0 < v.lifts }
-                            for k in 0..<f.floors {
-                                func all(_ role: Role) -> Bool { roles.indices.filter { roles[$0] == role && steps[$0] / T.perFloor == k }.allSatisfy { shown[$0] } }
-                                func any(_ role: Role) -> Bool { roles.indices.contains { roles[$0] == role && steps[$0] / T.perFloor == k && shown[$0] } }
-                                if any(.walls) && !all(.floor) { outOfOrder += 1 }
-                                if any(.stairs) && !all(.walls) { outOfOrder += 1 }
-                            }
+                            XCTAssertGreaterThanOrEqual(v.lifts, lastUp, "\(name): it only rises")
+                            lastUp = v.lifts
                         }
-                        t += 0.05
+                        t += 0.02
                     }
                     XCTAssertTrue(show.timelapse?.scaffolding ?? false, "\(name): premise: the scaffold's path (\(switched ? "switched" : "slow at the ask"))")
+                    XCTAssertGreaterThan(lastUp, 0, "\(name): premise: it rose")
                 }
                 print("NOTES30 ORDER (\(name)\(red ? " RED" : "")): \(made.members) members; roles mismatched \(mismatched), out of order \(outOfOrder)")
                 if red { XCTAssertGreaterThan(mismatched + outOfOrder, 0, "RED CONTROL: the walls before the floor"); continue }
-                XCTAssertEqual(mismatched, 0, "★ \(name): each member's snap is its role's (floor, walls, stairs)")
+                XCTAssertEqual(mismatched, 0, "★ \(name): each piece in its lift and its part (floor, walls, stairs)")
                 XCTAssertEqual(outOfOrder, 0, "★ \(name): floors, then walls, then stairs, lift by lift — slow or switched")
                 XCTAssertFalse(L.flights.isEmpty, "\(name): premise: a stair")
             }
+        }
+    }
+
+    // MARK: ★ his notes on v2 (11-26 23:50): a piece at a time; the real build slowed
+
+    /// ★ "The floor gets made at the same time. It just comes into existence ... It should be a piece at a time." — as the
+    /// scaffold rises (a slow lay on the stand's window and on the cone), each snap brings one piece, a few at most
+    /// (`piecesMostPerSnap`), never a lift's whole floor or walls at once; it is struck the same way. RED CONTROL
+    /// `controlWholeLift`: a lift's pieces all in one snap.
+    func testTheScaffoldComesAPieceAtATime() throws {
+        for red in [false, true] {
+            T.controlWholeLift = red
+            defer { T.controlWholeLift = false }
+            for (name, r) in [("window", Self.window), ("curved", Self.curved)] {
+                let made = try XCTUnwrap(S.make(r, up: SIMD3(0, 0, 1), across: SIMD3(1, 0, 0), walls: true), name)
+                let show = LatticeBuildShow()
+                let t0 = CACurrentMediaTime() + 1000
+                show.layBegins(walls: true, scaffold: true, mayScaffold: true, expectedS: 12, now: t0)
+                show.scaffoldArrived(S.drawing(made, token: show.scaffoldToken), now: t0 + 0.2)
+                // the smallest floor or walls a lift lays (the most one snap may never reach)
+                var smallest = Int.max, start = 0
+                for n in made.layout.liftPieces {
+                    let parts = made.layout.parts[start..<(start + n)]
+                    for p in [S.Part.floor, .walls] { let c = parts.filter { $0 == p }.count; if c > 0 { smallest = Swift.min(smallest, c) } }
+                    start += n
+                }
+                var lastUp = 0, lastStruck = 0, mostUp = 0, mostStruck = 0, snapsUp = 0
+                show.landed(token: 3, now: t0 + 12)   // (the clock below runs past the landing: the strike too)
+                let end = try XCTUnwrap(show.timelapse?.end)
+                var t = t0
+                while t <= end {
+                    if let v = show.revealScaffold(at: t) {
+                        if v.lifts > lastUp { mostUp = Swift.max(mostUp, v.lifts - lastUp); snapsUp += 1 }
+                        mostStruck = Swift.max(mostStruck, v.struck - lastStruck)
+                        lastUp = v.lifts; lastStruck = v.struck
+                    }
+                    t += 0.005
+                }
+                print("NOTES30 PIECES (\(name)\(red ? " RED" : "")): \(made.members) pieces in \(snapsUp) snaps; most a snap \(mostUp) up, \(mostStruck) struck; smallest floor or walls \(smallest)")
+                if red { XCTAssertGreaterThanOrEqual(mostUp, smallest, "RED CONTROL: a whole floor (or walls) in one snap"); continue }
+                XCTAssertLessThanOrEqual(mostUp, T.piecesMostPerSnap, "★ \(name): a piece at a time (\(T.piecesMostPerSnap) at most a snap)")
+                XCTAssertLessThan(mostUp, smallest, "★ \(name): never a whole floor or walls at once")
+                XCTAssertLessThanOrEqual(mostStruck, T.piecesMostPerSnap, "★ \(name): struck a piece at a time")
+                XCTAssertEqual(lastUp, made.members, "every piece came")
+            }
+        }
+    }
+
+    /// ★ "the scaffolding is super long, but the actual building of the lattice is nearly instant. Can we slow it down a little
+    /// bit and give it that time-lapse feel too?" — after the landing the real floors take their own `replaceS` (5 s): each
+    /// floor's columns in `sweeps` snaps, then its bays in `sweeps`, one at a time, and every strut in the snap its slice says
+    /// (`sweepStep`); the scaffold's pieces never stretched (at most `pieceS` apart). RED CONTROL `controlQuickReal`: v1's 2.4 s.
+    func testTheRealBuildTakesItsOwnTimeAfterTheLanding() throws {
+        let made = try XCTUnwrap(S.make(Self.curved, up: SIMD3(0, 0, 1), across: SIMD3(1, 0, 0), walls: true))
+        for red in [false, true] {
+            T.controlQuickReal = red
+            defer { T.controlQuickReal = false }
+            let show = LatticeBuildShow()
+            let t0 = CACurrentMediaTime() + 1000
+            show.layBegins(walls: true, scaffold: true, mayScaffold: true, expectedS: 12, now: t0)
+            show.scaffoldArrived(S.drawing(made, token: show.scaffoldToken), now: t0 + 0.2)
+            _ = show.revealScaffold(at: t0 + 11.9)
+            show.landed(token: 3, now: t0 + 12)
+            let tl = try XCTUnwrap(show.timelapse), end = try XCTUnwrap(tl.end)
+            var first: Double?, whole: Double?, last = 0, steps = 0
+            var t = t0 + 12
+            while t <= end {
+                let s = tl.shown(at: t)?.snaps ?? 0
+                if s > 0, first == nil { first = t }
+                if s > last { XCTAssertEqual(s - last, 1, "one sweep at a time"); steps += 1; last = s }
+                if s >= tl.floors * T.perFloorReal, whole == nil { whole = t }
+                t += 0.002
+            }
+            let real = (whole ?? end) - (first ?? end)
+            let gaps = tl.lifts.flatMap { l in zip(l.snaps.dropFirst(), l.snaps).map { $0 - $1 } }   // (within a lift)
+            print(String(format: "NOTES30 REAL BUILD%@: %d sweeps over %.2f s after the landing (the whole timelapse %.2f s); scaffold snaps at most %.3f s apart",
+                         red ? " RED" : "", steps, real, end - t0, gaps.max() ?? 0))
+            if red { XCTAssertLessThan(real, 0.7 * T.replaceS, "RED CONTROL: v1's quick real build"); continue }
+            XCTAssertEqual(steps, tl.floors * T.perFloorReal, "★ every floor's columns and bays in sweeping snaps")
+            XCTAssertGreaterThan(real, 0.7 * T.replaceS, "★ the real build takes its own time (\(real) s)")
+            XCTAssertLessThanOrEqual(gaps.max() ?? 0, T.pieceS + 1e-9, "★ the scaffold's pieces never stretched (stillness between levels instead)")
+            // every strut comes in the sweep its slice says
+            let f = try XCTUnwrap(tl.frame)
+            let a = SIMD3<Float>(f.across * (f.acrossLow + 0.05 * f.acrossW) + f.up * (f.low + 0.1)), b = a + f.up * f.floorH * 0.9
+            XCTAssertEqual(T.sweepStep(a, b, f), 0, "a column at the left of the lowest floor: its first sweep")
+            let c = SIMD3<Float>(f.across * (f.acrossLow + 0.95 * f.acrossW) + f.up * (f.low + 0.1))
+            XCTAssertEqual(T.sweepStep(c, c + f.across * 0.5, f), 2 * T.sweeps - 1, "a bay's strut at its right: the floor's last sweep")
         }
     }
 }

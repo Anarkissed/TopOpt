@@ -397,7 +397,9 @@ public final class LatticeLayoutPreview: ObservableObject {
             // decided here from this part's last lay (or, a first lay, its size and cells); the solid view's walls come off floor
             // by floor (X-ray: none); the switch armed for a strut lay (a lay still working a second after the ask: the scaffold)
             if !isOrganic || AppSettings.skipAllAnimations {
+                // (a sheet lay keeps release 21's rise: its walls are drawn on its map, not swept strut by strut)
                 let arms = Self.armsScaffold(organic: isOrganic, quiet: quiet, skip: AppSettings.skipAllAnimations)
+                    && !LatticeSheets.isSheet(p.lattice.topologyID)
                 let plan = arms ? buildPlan(path: path, s, sheet: LatticeSheets.isSheet(p.lattice.topologyID))
                                 : LatticeBuildTimelapse.Plan(scaffold: false, expectedS: nil)
                 build.layBegins(walls: solid && !isOrganic, scaffold: plan.scaffold, mayScaffold: arms, expectedS: plan.expectedS)

@@ -233,28 +233,22 @@ struct BarFrame {
 };
 
 // ★ notes29: the snap a bar comes in (LatticeBuildTimelapse.step, mirrored): its floor by its lower end, then 0 for a column,
-// 1 + its bay (by its middle) else. ★ notes30: hidden too below `buildSizes.w` — the scaffold's lifts struck as the real floors
-// replace them (0 for the real lattice: nothing of it is ever taken away). ★ notes30 (his "floors and walls, then stairs"):
-// `build.w` 2 — the scaffold, each member's own snap in its flags (LatticeBuildScaffold.code: bits 0-3 and 5-7, never 16)
-static bool bar_build_hidden(float3 a, float3 b, float flags, constant BarFrame& F) {
+// 1 + its bay (by its middle) else. Hidden too below `buildSizes.w` (0: none — nothing of the real lattice is ever taken
+// away; a RED CONTROL's only). ★ notes30 (his "a piece at a time", 11-26 23:50): `build.w` 3 — sweeping (the real floors on the
+// scaffold's path, LatticeBuildTimelapse.sweepStep): a floor's columns in `build.z` slices across, then its bays in as many
+static bool bar_build_hidden(float3 a, float3 b, constant BarFrame& F) {
     if (F.build.x < 0.0) { return false; }
-    if (F.build.w > 1.5) {
-        uint c = uint(flags + 0.5);
-        float s = float((c & 15u) | ((c >> 5u) << 4u));
-        return s >= F.build.x || s < F.buildSizes.w;
-    }
     float3 up = F.buildUp.xyz;
     float ha = dot(up, a), hb = dot(up, b);
     float floors = max(F.build.y, 1.0), bays = max(F.build.z, 1.0);
     float fl = clamp(floor((min(ha, hb) - F.buildUp.w) / max(F.buildSizes.x, 1e-4) + 1e-3), 0.0, floors - 1.0);
     float3 d = b - a;
     float len = length(d);
-    float kind = 0.0;
-    if (len >= 1e-6 && abs(dot(d, up)) / len < F.buildSizes.z) {
-        float mid = dot(F.buildAcross.xyz, 0.5 * (a + b));
-        kind = 1.0 + clamp(floor((mid - F.buildAcross.w) / max(F.buildSizes.y, 1e-4) * bays), 0.0, bays - 1.0);
-    }
-    float s = fl * (1.0 + bays) + kind;
+    bool column = len < 1e-6 || abs(dot(d, up)) / len >= F.buildSizes.z;
+    float slice = clamp(floor((dot(F.buildAcross.xyz, 0.5 * (a + b)) - F.buildAcross.w) / max(F.buildSizes.y, 1e-4) * bays), 0.0,
+                        bays - 1.0);
+    float s = F.build.w > 2.5 ? fl * 2.0 * bays + (column ? 0.0 : bays) + slice
+                              : fl * (1.0 + bays) + (column ? 0.0 : 1.0 + slice);
     return s >= F.build.x || s < F.buildSizes.w;
 }
 
@@ -306,7 +300,7 @@ vertex BarVOut bar_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
     float3 p = e + ((c & 2) ? v * R : -v * R) + ((c & 4) ? w * R : -w * R);
     BarVOut o;
     o.pos = F.clipFromModel * float4(p, 1.0);
-    if (bar_build_hidden(A.xyz, B.xyz, B.w, F)) { o.pos = float4(0.0, 0.0, 2.0, 1.0); }   // ★ notes29: not built yet — no triangle
+    if (bar_build_hidden(A.xyz, B.xyz, F)) { o.pos = float4(0.0, 0.0, 2.0, 1.0); }   // ★ notes29: not built yet — no triangle
     o.cpos = o.pos;
     o.iid = iid;
     return o;
@@ -568,7 +562,7 @@ vertex LightVOut light_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
     float3 p = ((c & 1) ? (B.xyz + u * 0.5 * R) : (A.xyz - u * 0.5 * R)) + radial * R;
     LightVOut o;
     o.pos = F.clipFromModel * float4(p, 1.0);
-    if (bar_build_hidden(A.xyz, B.xyz, B.w, F)) { o.pos = float4(0.0, 0.0, 2.0, 1.0); }   // ★ notes29
+    if (bar_build_hidden(A.xyz, B.xyz, F)) { o.pos = float4(0.0, 0.0, 2.0, 1.0); }   // ★ notes29
     o.ez = -(F.eyeFromModel * float4(p, 1.0)).z;
     o.en = (F.eyeNormalBasis * float4(radial, 0.0)).xyz;
     o.iid = iid;
@@ -942,8 +936,12 @@ final class LatticeLayoutBarsPass {
     /// Bars into the prepass's G-buffer (its encoder, attachments and .less + write depth state).
     func encodeGBuffer(_ enc: MTLRenderCommandEncoder, depthState: MTLDepthStencilState,
                        clipFromModel: simd_float4x4, eyeFromModel: simd_float4x4, eyeNormalBasis: simd_float4x4,
-                       turning: Bool = false, build: LatticeBuildRevealUniform? = nil) -> Bool {
+                       turning: Bool = false, build: LatticeBuildRevealUniform? = nil, range: Range<Int>? = nil) -> Bool {
         guard isDrawable, enc.device === device else { return false }
+        if let range {   // ★ notes30 (his "a piece at a time"): the scaffold — the run of its pieces standing, whole
+            return encodeRange(enc, depthState: depthState, clipFromModel: clipFromModel, eyeFromModel: eyeFromModel,
+                               eyeNormalBasis: eyeNormalBasis, range: range)
+        }
         let c0 = Self.colour
         if let sp = sheetPass, sp.isDrawable {   // ★ SHEETS: the field the print file is contoured from (no bars to draw)
             // ★ notes30 M1: release 21's timelapse — the sheet's walls rise floor by floor, bay by bay (sheet_build_hidden)
@@ -989,6 +987,36 @@ final class LatticeLayoutBarsPass {
             enc.setFragmentBuffer(colourBuffer ?? buffer, offset: colourBuffer == nil ? 0 : s4 * cast, index: 2)
             enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 36, instanceCount: count - cast)
         }
+        return true
+    }
+
+    /// ★ notes30: bars `range` (a run of them, in the buffer's order) whole into the prepass's G-buffer — the scaffold's pieces
+    /// standing (they lie in the order they come). The same pipeline, the buffers bound from the run's first bar (the light
+    /// pass's way).
+    private func encodeRange(_ enc: MTLRenderCommandEncoder, depthState: MTLDepthStencilState, clipFromModel: simd_float4x4,
+                             eyeFromModel: simd_float4x4, eyeNormalBasis: simd_float4x4, range: Range<Int>) -> Bool {
+        let lo = Swift.max(0, range.lowerBound), hi = Swift.min(count, range.upperBound)
+        guard hi > lo, let buffer else { return false }
+        let c0 = Self.colour
+        var f = Frame(clipFromModel: clipFromModel, modelFromClip: clipFromModel.inverse, eyeFromModel: eyeFromModel,
+                      eyeNormalBasis: eyeNormalBasis, albedo: SIMD4(Float(c0.r), Float(c0.g), Float(c0.b), colourBuffer == nil ? 1 : -1))
+        f.up = SIMD4(Self.drawnUp(printUp), 0)
+        if Self.clipToPart, let g = grid, gridTexture != nil {
+            f.mapOrigin = SIMD4(g.origin, 0)
+            f.mapSpacing = SIMD4(g.voxel, g.voxel, g.voxel, 0)
+            f.mapDims = SIMD4(Float(g.dims.x), Float(g.dims.y), Float(g.dims.z), 1)
+        }
+        let s4 = MemoryLayout<SIMD4<Float>>.stride
+        enc.setRenderPipelineState(pipeline)
+        enc.setDepthStencilState(depthState)
+        enc.setCullMode(.none)
+        enc.setVertexBuffer(buffer, offset: 2 * s4 * lo, index: 0)
+        enc.setVertexBytes(&f, length: MemoryLayout<Frame>.stride, index: 1)
+        enc.setFragmentBuffer(buffer, offset: 2 * s4 * lo, index: 0)
+        enc.setFragmentBytes(&f, length: MemoryLayout<Frame>.stride, index: 1)
+        enc.setFragmentBuffer(colourBuffer ?? buffer, offset: colourBuffer == nil ? 0 : s4 * lo, index: 2)
+        enc.setFragmentTexture(gridTexture ?? neutralMap, index: 0)
+        enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 36, instanceCount: hi - lo)
         return true
     }
 }
