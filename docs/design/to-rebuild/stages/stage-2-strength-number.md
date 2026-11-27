@@ -517,6 +517,17 @@ The same path (a closed mesh -> the file's fills -> the analysis), but judged by
 | 3 | 2 voxels / 3 voxels | -5.8 / -5.3 | -2.1 / -1.0 | -0.3 / -0.1 | +0.1 / +0.1 |
 | 4 | 2 / 3 | -2.3 / -1.3 | +0.4 / 0.0 | -0.3 / -0.4 | -0.1 / -0.1 |
 | 5 | 2 / 3 | -2.1 / -3.0 | -1.1 / -0.6 | -0.1 / 0.0 | -0.1 / 0.0 |
-| 6 | 2 / 3 | -6.7 / -5.8 | -0.4 / -0.1 | -0.5 / -0.4 | +0.1 / (running) |
+| 6 | 2 / 3 | -6.7 / -5.8 | -0.4 / -0.1 | -0.5 / -0.4 | +0.1 / +0.1 |
 
 What I claimed to the reviewer and had not measured now is: through the file's fills the size form gives the certificate's number within 0.5 % at k = 8 on every row so far, and moves by 0.5 % or less from k = 8 to 16. So for the size form the ruled tests are both met at k = 8 (within 1 %; under 0.5 % when k doubles). The contrast with the one-voxel form (2.5 % at best, 11 % on an unlucky sliver) is the two jumps that form has and this one does not.
+
+The ellipse (22:35), the same way:
+
+| ellipse a / b = 2, b in voxels | over | k = 2 | k = 4 | k = 8 | k = 16 |
+|---|---|---|---|---|---|
+| 3 | 2 voxels / 3 voxels | -11.9 / -8.7 | -1.5 / -0.4 | -0.2 / -0.2 | 0.0 / 0.0 |
+| 4 | 2 / 3 | -5.8 / -3.6 | +0.2 / +0.3 | -0.2 / +0.1 | +0.1 / -0.1 |
+| 5 | 2 / 3 | -7.1 / -4.4 | -0.8 / -0.3 | -0.2 / -0.1 | +0.1 / +0.1 |
+| 6 | 2 / 3 | -2.3 / -7.8 | -6.6 / -9.6 | -0.4 / -0.3 | 0.0 / 0.0 |
+
+SIZE FORM, all 16 rows on two shapes: at k = 8 within 0.5 % of the certificate's number everywhere (worst -0.5), and 0.5 % or less from k = 8 to 16. k = 4 is NOT enough (one row at -9.6 %). So for the size form k = 8 meets both ruled tests; for the one-voxel form k = 8 is the best measured (within 2.5 %) and nothing finer is better.
