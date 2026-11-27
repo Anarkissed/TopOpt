@@ -99,8 +99,8 @@ namespace topopt {
 // FP64 certificate holds — it is a cost failure. Cause: cg_tolerance 1e-8 is at
 // FP32's ~1e-7 precision, so the preconditioner degrades to noise near convergence.
 // The global therefore stays at its library default (false) in production too, and
-// run_info.json honestly echoes mixed_precision:false. See production.cpp for the
-// full record and what a revival would have to change.
+// run_info.json honestly echoes mixed_precision:false. TO stage 5 item 4 (11-27)
+// then deleted the capability and its setter. See production.cpp for the full record.
 //
 // What it deliberately does NOT set (per-front-end / per-job, not shared config):
 //   * keyframe_count — optimization-history PLAYBACK, a viz choice that does not

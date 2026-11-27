@@ -2085,7 +2085,10 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   if (obs.mg_algebraic_level1 >= 0)
     fea_set_mg_algebraic_level1(obs.mg_algebraic_level1 != 0);
   // matfree_mixed_precision: accepted and ignored (TO stage 5 item 4 deleted
-  // single precision: under 15 % solve wall with the stage-5 smoother).
+  // single precision: under 15 % solve wall with the stage-5 smoother). A job
+  // that still asks for it is told so once, and runs in double precision.
+  if (obs.matfree_mixed_precision == 1)
+    std::fprintf(stderr, "matfree_mixed_precision=1 ignored: single precision was removed (TO stage 5); this run solves in double precision\n");
   // The latch re-arm is NOT re-asserted by configure_production_options (it has
   // no production writer at all), but it IS zeroed by the run-start latch reset
   // in minimize_plastic, so it is applied here alongside the other two rather

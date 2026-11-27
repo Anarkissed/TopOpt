@@ -604,8 +604,9 @@ void configure_production_options(MinimizePlasticOptions& opts) {
   opts.gate_diagnosis = true;
 
   // Handoff 132 (D) — the MIXED-PRECISION production flip is DELIBERATELY NOT MADE
-  // HERE. It was implemented, gated, and BLOCKED BY ITS OWN GATE. Do not "finish"
-  // this by adding fea_set_matfree_mixed_precision(true) without re-measuring.
+  // HERE. It was implemented, gated, and BLOCKED BY ITS OWN GATE. (TO stage 5
+  // item 4, 11-27, then DELETED the capability and its setter: under 15 % of the
+  // solve wall with the stage-5 Chebyshev smoother. The record below stays as why.)
   //
   // The proposal (113 §D): the FP32 V-cycle capability shipped complete in handoff
   // 092 but nothing production-side ever called its setter, so production has always
@@ -637,9 +638,9 @@ void configure_production_options(MinimizePlasticOptions& opts) {
   // diag.iterations with the retry's count, so the burned FP32 cycles are invisible
   // to the very counter this gate reads.
   //
-  // The capability itself is untouched and still available opt-in via
-  // fea_set_matfree_mixed_precision — this is a decision about PRODUCTION, not a
-  // withdrawal of 092. Reviving it should mean changing what made it lose: a looser
+  // At the time the capability stayed opt-in (a decision about PRODUCTION, not a
+  // withdrawal of 092); TO stage 5 item 4 has since deleted it. Reviving it would
+  // mean re-adding it AND changing what made it lose: a looser
   // trajectory cg_tolerance for the FP32 preconditioner, or FP32 only on the early
   // slack iterations. run_info.json keeps honestly echoing mixed_precision:false.
 
