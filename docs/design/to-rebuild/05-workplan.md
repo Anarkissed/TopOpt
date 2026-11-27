@@ -70,6 +70,8 @@ AFTER THE CRASH (the Claude app crashed about 13:15 from Mac overload; every run
 - Lock: #362's release 22 since 18:31; then TOSurface's next part, S1, then mine. `b1_suite.sh` and `b6_autopad_checks.sh` now build in `build_s6` (no second full build; disk was at 17 GB, 34 GB now). While B1 runs, nothing of mine runs outside the lock from that folder.
 - Known limits stated in the stage 2 file (ruled): the across-layer -5.4 % at a 3-voxel hole; notches with a tip radius under 2 voxels are outside the bar.
 
+21:45: my memory guard STOPPED one of my runs as ruled (21:28: swapouts rose on two checks running while #362's release 22 built; free memory was 59 %): the bracket's re-check at k = 4 on the layer-by-layer fill, 270 s in. Nothing lost that matters (the layer-by-layer fill's test gives the same numbers as the whole-grid one); the k = 16 run started through the gate after it. Lock: TOSolver 21:44 (45 min).
+
 A. Already agreed:
 - A1. Stage 1 report to the reviewer once the two lock runs are recorded (draft at the top of `stages/stage-1-true-loads.md`).
 - A2. The pad's one number: tables and PICTURES of the shapes around the fixed faces from the two sweeps; a recommended curve strength for him in the morning.

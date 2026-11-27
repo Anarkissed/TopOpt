@@ -25,8 +25,10 @@ Status 2026-11-26 19:30: IN PROGRESS. Everything is behind ONE switch, `TOPOPT_S
 5. Today's E x fill^3 stays for the under-a-voxel case. Stage 1's flip items 2(b), 2(c), 2(d) received; the flip waits on 2(a) and the list.
 Also ruled the same hour (stage 5): the connection-rule test on the hook PASSES; before a rung is refused for an unheld load, TRY A STEP-BACK (restore the last design whose load reached a support, halve the move limit, retry, at most 3 times), measured on the hook at pad 1.0 and on demo solve 10 with and without it, kept only if it makes more versions in no more than 10 % more time. The smoother's default is cheb:2.
 
+**ONE JUDGE, where it is (2026-11-26 21:45):** the switch `TOPOPT_RECHECK=fill[:k]` is in, builds and runs in a job; the fills are counted one layer at a time. On the bracket the lightest version's shown margin comes down from 3.66 to between 2.2 and 2.5 (certificate 1.80), at no cost in time. NOT settled: the number still moves with k (the textbook test: up to 18 % between k = 4 and 8), because the one-voxel form is jumpy in the fill by its nature, in both judges ("WHY the one-voxel form is jumpy", below). Runs at k = 16 against a finer reference are in progress; the reviewer gets the table and the question it raises.
+
 **Owed, in order:**
-- ONE JUDGE: the switch, k by measurement, evidence (a) to (e).
+- ONE JUDGE: k by measurement (or the finding that it has no answer for the one-voxel form), evidence (a) to (e).
 - The step-back (the optimiser's loop is in `plsm.cpp`, TOSurface's file: to agree who edits it).
 - Conditions (b) to (e) again on his full-resolution parts with the size form (`b5_stage2.sh`, lock).
 - The app's side (#362): show the form and the printed grams.
@@ -434,3 +436,46 @@ The sample bracket at 15 % size (15 mm long, loads scaled with the area), res 48
 | 0.26 | 2.09 -> 4.24, 0.333 g | 3.68 -> 5.97, 0.329 g |
 
 Read plainly. (1) It switches on by itself and runs clean (rc 0, four versions both ways, 631 s and 495 s). (2) On a part this small the averaged reading lifts every margin by 33 to 41 % (the shown 4.24 becomes 5.97 on the lightest): a 1.2 mm region is large against features of 1 to 3 mm, which is what the critical-distance method says about small notched parts, but it is a big step and it rests on a published length halved by his rule, not on a print of his. To be said in the stage report as it is, and worth one printed check when the rig is ready. (3) The grams hardly move (a part this small is nearly all wall, so printed grams are close to solid grams). (4) The two judges still part on the lightest version in both columns (2.09 against 4.24; 3.68 against 5.97): that is "one judge", next.
+
+### ONE JUDGE in a job, first numbers (2026-11-26 20:05 to 21:13, build of 5392695a plus the switch)
+
+The made sample bracket, res 64, drawn faces, automatic pad, one thread. The loop's certificate, then the number SHOWN (the file re-check) with `TOPOPT_RECHECK` unset and at k sub-samples along each voxel edge:
+
+| version | certificate | shown today | k = 2 | k = 4 | k = 8 |
+|---|---|---|---|---|---|
+| 0.68 | 5.283 | 5.285 | 5.346 | 5.289 | 5.268 |
+| 0.52 | 5.105 | 5.293 | 5.317 | 5.191 | 5.155 |
+| 0.38 | 4.152 | 4.851 | 4.474 | 4.265 | 4.205 |
+| 0.26 | 1.799 | 3.661 | 2.511 | 2.162 | 2.293 |
+
+Same designs and grams in every column (the switch only changes how the finished file is judged). The lightest version's shown margin comes down from 3.66 to 2.16 at k = 4, against the certificate's 1.80; it is still moving with k (2.51 to 2.16 is 14 %), so k is not chosen yet. The file is the FINISHED surface (stair-steps smoothed, thin spots fixed), not the loop's design, so the two need not meet exactly: the textbook test (a) is where "within 1 %" is judged. Cost on this job: the whole run 1072 s unset, 1015 s at k = 2, 991 s at k = 4 (no slower); peak memory 375 MB unset, 369 MB, 397 MB (+6 % at k = 4). About 8,000 to 10,000 cut voxels per version, 750 to 1,300 of them with their centre outside the file (the ones all-or-nothing drops altogether).
+
+k = 8 (21:13): from k = 4 to 8 the three heavier versions move 0.4 / 0.7 / 1.4 %; the lightest moves the OTHER way, 2.162 to 2.293 (+6 %), so it is not settling smoothly: its deciding stress sits in a few nearly empty cut voxels, and E x fill^3 makes their stiffness swing with small changes of fill. Not within the ruled 0.5 % at any pair yet. Peak memory at k = 8: 450 MB (+20 % on this job), which is the whole fine grid held at once: `file_fill.hpp` is being rewritten to work one layer of voxels at a time (memory nx * ny * k^3 bytes whatever the height); its check and a run at k = 16 are queued (`slab_check.sh`). If the lightest version still wanders at 16, that goes to the reviewer as it is: the rule "k where the shown margin moves under 0.5 %" may not have an answer for a version decided by a few sliver voxels, and the honest options are a floor on the fill a voxel must have to be judged, or the reading over a size where one applies.
+
+### ONE JUDGE, evidence (a), first run (2026-11-26 21:22, build 872863aa): what it shows, and why it is not yet evidence
+
+Test `to_recheck_fill`: a closed mesh of each textbook shape taken through the file's fills, peak stress against the certificate's (exact fills, E x fill^3, one voxel), percent, at b (or inner radius) = 3 / 4 / 5 / 6 voxels.
+
+| shape | all-or-nothing (today's re-check) | k = 2 | k = 4 | k = 8 |
+|---|---|---|---|---|
+| round hole | -35.8 / -27.2 / -16.1 / -22.4 | -13.8 / -9.6 / -4.2 / -10.3 | -9.2 / -8.7 / -1.0 / -11.7 | 0.0 / 0.0 / 0.0 / 0.0 |
+| ellipse a / b = 2 | -43.7 / -20.4 / -23.2 / -27.2 | -18.7 / +13.7 / -13.8 / -11.2 | -5.2 / -1.3 / +8.3 / +6.1 | 0.0 / 0.0 / -2.8 / 0.0 |
+| thick ring | -46.7 / -42.1 / -33.9 / -38.5 | -26.6 / -13.8 / -18.7 / -12.8 | -13.6 / -17.7 / -2.5 / -4.3 | 0.0 / 0.0 / 0.0 / 0.0 |
+
+1. TODAY'S RE-CHECK against the certificate, on textbook shapes: its peak stress is 16 to 47 % lower, so the margin it shows is 19 to 88 % higher than the loop's for the same shape. The two judges, on shapes with known answers.
+2. k = 1 reproduces all-or-nothing exactly, as built.
+3. k = 8 matching to 0.0 % PROVES NOTHING: the test's "exact" fills were themselves sampled 8 x 8 per voxel, the same points. My slip in the test, corrected: the reference is now sampled 32 x 32 and k = 16 is added (re-run queued).
+4. What is real in it: from k = 4 to k = 8 the peak still moves by up to 18 %. The one-voxel peak under E x fill^3 is very sensitive to the exact fill of a few sliver voxels, which is also why the bracket's lightest version wanders (2.51 / 2.16 / 2.29). That sensitivity is in the CERTIFICATE too (its fills come from the optimiser's own sampling), not only in the re-check. If k = 16 against the finer reference does not settle, the finding for the reviewer is that "one judge" needs the judges to share not just a form but the same treatment of sliver voxels.
+
+WHY the one-voxel form is jumpy in the fill (read from `analyze.cpp`, 21:30; the k = 16 run will say how much). Two things multiply. (1) A cut voxel is solved at E x fill^3: at half full it has an eighth of the stiffness, so a 2 % error in its fill is a 6 % error in its stiffness, and its strain moves with it. (2) Only voxels MORE than half full are read (`density > 0.5`), with the full modulus on that strain. So the hottest reading is usually a voxel just over half full, the softest one that still counts, and a voxel at 0.49 or 0.51 is out or in entirely. Finer sampling of the file does not remove either: it only decides more exactly which side of a half each sliver falls. The reading over a size has neither problem (real stiffness, and an average weighted by fill), which is why it held its bar; the one-voxel form is today's, kept as ruled, and this is its nature in BOTH judges.
+
+### ONE JUDGE in a job at k = 16, on the layer-by-layer fill (2026-11-26 21:46)
+
+| version | certificate | k = 4 | k = 8 | k = 16 | k = 8 to 16 |
+|---|---|---|---|---|---|
+| 0.68 | 5.283 | 5.289 | 5.268 | 5.259 | -0.17 % |
+| 0.52 | 5.105 | 5.191 | 5.155 | 5.143 | -0.23 % |
+| 0.38 | 4.152 | 4.265 | 4.205 | 4.190 | -0.36 % |
+| 0.26 | 1.799 | 2.162 | 2.293 | 2.220 | -3.2 % |
+
+By the ruled test (the shown margin moves under 0.5 % when k doubles) the three heavier versions settle at k = 8. The lightest does not: 2.51 / 2.16 / 2.29 / 2.22 at k = 2 / 4 / 8 / 16, wandering inside about 6 %. Cost at k = 16 with the fills counted a layer at a time: peak memory 383 MB against 375 MB with the switch off (the whole-grid form took 450 MB at k = 8), the finish step 5 to 11 s a version against 2 to 5 s, the whole run 1065 s against 1072 s. So k = 8 costs nothing that matters and is where three of four versions settle; the fourth is the one-voxel form's own jumpiness.

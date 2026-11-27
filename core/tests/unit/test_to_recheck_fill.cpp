@@ -38,7 +38,11 @@ namespace {
 constexpr double kFarStress = 10.0;  // MPa
 constexpr double kTiltDeg = 30.0;
 constexpr int kThickness = 2;        // voxels
-constexpr int kSub = 8;
+// The certificate's fills are sampled far finer than any k tried below (32 x 32 per
+// voxel in the plane), so that a k is judged against the shape and not against
+// its own sampling (the first run used 8 x 8: k = 8 then matched it exactly, by
+// construction, and proved nothing).
+constexpr int kSub = 32;
 constexpr int kSides = 360;
 
 std::vector<NodalLoad> edge_tractions(const VoxelGrid& g, double sxx, double syy,
@@ -265,13 +269,13 @@ double ring_peak(int rv, int w, double cxv, double cyv, const std::vector<double
 int main(int argc, char** argv) {
   const bool gate = argc > 1 && std::strcmp(argv[1], "--gate") == 0;
   const Shape shapes[2] = {{"round hole", 1.0, 6.0, 20}, {"ellipse a/b = 2", 2.0, 3.0, 10}};
-  const int kKs[4] = {1, 2, 4, 8};
+  const int kKs[5] = {1, 2, 4, 8, 16};
   constexpr int kRecheckSub = 4;
   int failures = 0;
   const double tilt = kTiltDeg * std::acos(-1.0) / 180.0;
   std::printf("[one judge] the peak through the file's fills against the certificate's (exact fills), percent\n");
-  std::printf("%-18s %6s %12s %10s %8s %8s %8s %8s\n", "shape", "b vox", "certificate", "all-or-0", "k = 1",
-              "k = 2", "k = 4", "k = 8");
+  std::printf("%-18s %6s %12s %10s %8s %8s %8s %8s %8s\n", "shape", "b vox", "certificate", "all-or-0", "k = 1",
+              "k = 2", "k = 4", "k = 8", "k = 16");
   for (const Shape& sh : shapes)
     for (int bv : {3, 4, 5, 6}) {
       const double b = bv, a = sh.a_over_b * bv;
