@@ -882,3 +882,20 @@ NOT OBTAINED: how large a hole must be for candidate one to be within 5 %. The p
 
 DESK RESEARCH in hand for the next step (four researchers, 2026-11-27; `reports/Voxel stress on small thin parts.md`, local, not committed): (i) the straight line itself accounts for most of the miss beside a hole (the exact Kirsch field sampled at voxel centres and carried in a straight line reads 6.5 to 16.5 % low at 6 and 3 voxels of radius: the researcher's own calculation, to be checked); a carry that knows the surface's curvature is the indicated fix; (ii) a direction-aware stiffness for cut voxels ("laminate composite voxel", Kabel, Merkert, Schneider 2015; Lendvai and Schneider 2024, doi:10.1002/nme.7459) in place of E x fill; (iii) for thin members, membrane and bending stress from SECTION FORCES (exact by equilibrium; welded-joint practice), and an incompatible-modes hexahedron for bending with one or two voxels through; (iv) printed PLA is nearly notch-insensitive in static loading with a material length of 2.4 to 4.6 mm (Susmel and Ahmed 2018; Ahmed and Susmel 2019, read in full by the researcher), which supports the size form over any surface peak; no data found for filament-printed PA6.
 
+### How large must a hole be for the carry to pass? Answered by arithmetic on the exact field (2026-11-27 13:30; no solve)
+
+The exact hoop stress beside a round hole (Kirsch: 1 + a^2 / 2 r^2 + 3 a^4 / 2 r^4, peak 3), sampled at two depths behind the surface and carried to it. This is the carry's own error with a PERFECT solve; the solve adds its own. It also checks the desk researcher's figures (-16.5 % at 3 voxels, -6.5 % at 6): they are right.
+
+| hole radius, voxels | straight line, samples 0.5 and 1.5 voxels in | straight line, 1.0 and 2.0 in | A + B / r^2, 0.5 and 1.5 in | A + B / r^2, 1.0 and 2.0 in |
+|---|---|---|---|---|
+| 3 | -16.5 % | -28.8 % | -7.4 % | -14.0 % |
+| 4 | -11.5 % | -21.7 % | -4.9 % | -10.0 % |
+| 5 | -8.5 % | -16.8 % | -3.5 % | -7.5 % |
+| 6 | -6.5 % | -13.4 % | -2.7 % | -5.8 % |
+| 8 | -4.2 % | -9.0 % | -1.7 % | -3.8 % |
+| 10 | -2.9 % | -6.5 % | -1.1 % | -2.7 % |
+| 12 | -2.1 % | -4.9 % | -0.8 % | -2.0 % |
+| 16 | -1.3 % | -3.1 % | -0.5 % | -1.2 % |
+
+Reading it: the engine's measured row (-29 / -14 / -14 / -9 % at 3 to 6) lies between the two straight-line columns, so the measured miss IS the straight line's, as the research said. For the straight-line carry a hole is "resolved" (inside 5 %) from about 8 to 12 voxels of radius, depending on how deep its two full voxels sit. A carry of the shape A + B / r^2, with r measured from the surface's centre of curvature (exact for a pressurised ring, and the leading term beside any hole), halves the miss and brings the limit down to about 4 to 7 voxels. So the next form to build and measure is that one: the same function, the surface's radius of curvature from the fills, the two full voxels fitted to A + B / r^2 (falling back to the straight line where the surface is flat). The limit A-08 then reads "under about 4 voxels of radius", and what is under it goes to the size form.
+
