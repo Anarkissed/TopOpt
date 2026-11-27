@@ -5,7 +5,7 @@
 // with its strength check, exactly the Mac's): the stage solve; round 0 sized; check 1; round 1 re-sized from check 1's own
 // lattice stress; check 2; and today's Structural Auto (the ramp) as the baseline. It prints one line per part and margin
 // (the target, each check's verdict, margin and plastic, the round kept and what it saved against round 0, the baseline's)
-// and writes them to <dir>/calibration.md. Nothing is asserted: the NO-GO bars are read off the table by the reviewer.
+// and writes them to <dir>/calibration[_<parts>].md. Nothing is asserted: the NO-GO bars are read off the table by the reviewer.
 #if canImport(AppKit)
 import XCTest
 import simd
@@ -50,7 +50,7 @@ final class StructuralAutoCalibration: XCTestCase {
                      "|---|---|---|---|---|---|---|---|"]
         func write() {
             try? (["# Structural Auto calibration (SA1)", ""] + lines).joined(separator: "\n")
-                .write(toFile: dir + "/calibration.md", atomically: true, encoding: .utf8)
+                .write(toFile: dir + "/calibration\(only.isEmpty ? "" : "_" + only.sorted().joined()).md", atomically: true, encoding: .utf8)
         }
         for part in Self.parts where only.isEmpty || only.contains(String(part.name.prefix(1))) {
             let work = fm.temporaryDirectory.appendingPathComponent("sa-cal-\(UUID().uuidString)", isDirectory: true)
