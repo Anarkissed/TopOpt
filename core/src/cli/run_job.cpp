@@ -10192,7 +10192,16 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
                j_build_dir, j_infill_percent, j_layer_height_mm,
                j_minimize_plastic, j_redesign, j_anchor_model, j_scenarios,
                j_safety_margin, j_wall_loops,
-               j_wall_line_width_mm, j_wall_line_width_outer_mm] = job.loads;
+               j_wall_line_width_mm, j_wall_line_width_outer_mm,
+               j_top_solid_layers, j_bottom_solid_layers, j_top_solid_mm,
+               j_bottom_solid_mm] = job.loads;
+  // NOT CARRIED, on purpose (notes30): the solid top / bottom skins the user set are PRINTER profile values, like
+  // `layer_height_mm` below: no load case, solve or ladder reads them. The TO rebuild's printed-grams figure reads them
+  // from `job.loads` directly. Named here so the ledger stays complete.
+  (void)j_top_solid_layers;
+  (void)j_bottom_solid_layers;
+  (void)j_top_solid_mm;
+  (void)j_bottom_solid_mm;
   // NOT CARRIED, on purpose: `present` answers "was a loads block given at all",
   // which is the CALLER's question (every call site gates on job.loads.present
   // before asking for a load case). ProductionLoadCase has no counterpart and

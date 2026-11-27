@@ -292,6 +292,7 @@ public final class PrintResolutionFlow: ObservableObject {
                 let url = FileManager.default.temporaryDirectory
                     .appendingPathComponent(a.stem + "-" + level.id + "." + a.format)
                 try out.file.write(to: url, options: .atomic)
+                if a.format == "3mf" { try ThreeMFPrintSettings.stamp(url, params: PrintFileKeep.openPrintParams()) }   // ★ notes30
                 self.made[self.cacheKey(a, level.id)] = url
                 self.making = nil
                 self.share = url
