@@ -172,7 +172,7 @@ void test_field_form() {
     const Vec3 up{0.2, 0.1, 1.0};
     const StrutLawSizeSummary sum =
         strut_size_field(t, tensor.data(), tensor.size(), up, kYield, kZk, 1.75, ratio.data(), rho.data(), sh.data());
-    CHECK(sum.voxels == n && sum.loaded == n - 1);
+    CHECK(sum.voxels == n && sum.loaded == n - 2);   // the strip's first state and the last are unloaded
     const double step_rho = (sum.rho_ceiling - sum.rho_floor) / kStrutSizingTableSteps;
     std::size_t shorts = 0;
     for (std::size_t e = 0; e < n; ++e) {
@@ -280,8 +280,9 @@ void test_the_lay() {
     const LatticeWidthBounds b = lattice_width_bounds(t);
     const double line = 0.45, bead = 0.9;
     // a ratio between the thinnest on the largest cell and the open look; and one between the limit and the touch
-    const double r_in = std::max(bead / 8.0 + 0.02, 0.5 * (bead / 8.0 + b.open_look));
-    const double r_past = b.touch - 0.25 * line / 8.0;   // past the quilt-off limit (touch - line / cell) on an 8 mm cell
+    // (as the field holds them: float32, the demand file's own width)
+    const double r_in = static_cast<float>(std::max(bead / 8.0 + 0.02, 0.5 * (bead / 8.0 + b.open_look)));
+    const double r_past = static_cast<float>(b.touch - 0.25 * line / 8.0);   // past the quilt-off limit (touch - line / cell)
     // (a) one ratio everywhere: laid as asked in every cell, held only by the thinnest strut
     {
       const Outcome o = session.lay(sized(t, ratios(r_in, r_in), false));

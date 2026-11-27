@@ -1485,7 +1485,7 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     r.highest_mpa = out.struts.highest_mpa;
     r.at_light = out.struts.at_light;
     r.at_heavy = out.struts.at_heavy;
-    r.sized = by_stress && job.settings.struts.demand_is_ratio;   // ★ notes30
+    r.struts_sized = by_stress && job.settings.struts.demand_is_ratio;   // ★ notes30
     r.quilted_where_short = out.struts.quilted_where_short;
     std::vector<int> weave_regions;
     for (const Layout::Weave& w : out.layout.weave) weave_regions.push_back(w.region);
@@ -2187,8 +2187,8 @@ std::string file_result_json(const FileResult& r) {
                 "\"at_heavy\": %llu",
                 r.by_stress ? "true" : "false", r.reference_mpa, r.highest_mpa, count(r.at_light), count(r.at_heavy));
   o += b;
-  if (r.sized) {   // ★ notes30 STRUCTURAL AUTO: only a sized job says it (every other report as before)
-    std::snprintf(b, sizeof b, ", \"sized\": true, \"quilted_where_short\": %llu", count(r.quilted_where_short));
+  if (r.struts_sized) {   // ★ notes30 STRUCTURAL AUTO: only a sized job says it (every other report as before)
+    std::snprintf(b, sizeof b, ", \"struts_sized\": true, \"quilted_where_short\": %llu", count(r.quilted_where_short));
     o += b;
   }
   o += "},\n";
