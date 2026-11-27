@@ -262,3 +262,47 @@ Four articles read: comparing PLA, PETG and ASA (2020-02-03); Prusament PC Blend
 ### Decided by the maintainer, 2026-11-25
 
 "Let's go with the lowest published value for each." So: PLA 2.4 mm, ABS 0.46 mm, PETG 0.7 mm, halved by his earlier rule (1.2, 0.23, 0.35 mm). Open: the nine materials with no published value.
+
+### PA12, the material of every reference part of his (B6, 2026-11-26 04:30)
+
+Read from PubMed Central (the tables verbatim):
+
+- Zolfagharian, Khosravani and Kaynak, "Fracture resistance analysis of 3D-printed polymers", Polymers 12 (2020) 302, `10.3390/polym12020302`. Nylon 12 FILAMENT printed on a Fortus 450mc (100 % infill, raster 0 degrees) against PA12 POWDER by Multi Jet Fusion. Table 1: fracture toughness K_c 0.92 MPa m^0.5 (printed filament) and 0.58 (MJF); tensile strength 44.79 and 34.91 MPa; modulus 493 and 780 MPa. The paper puts K_c in the table "instead of" the plane-strain toughness and does not state how it was measured; its printed yield stresses (3.61 and 7.21 MPa) look wrong. Treat as indicative.
+- Stoia, Marsavina and Linul, "Mode I fracture toughness of polyamide and Alumide samples obtained by selective laser sintering", Polymers 12 (2020) 640, `10.3390/polym12030640`. Laser-sintered PA2200 (EOS), bending specimens to ASTM D5045, five per orientation: K_Ic 2.18 to 2.90 at 0 degrees (mean 2.69), 1.80 to 2.28 at 45 degrees (mean 2.03), 1.91 to 2.74 at 90 degrees (mean 2.35) MPa m^0.5. No tensile data in the paper.
+- Not opened (paywalled or embargoed): Crespo et al. 2019, "Failure of polyamide 12 notched samples manufactured by selective laser sintering" (uses the theory of critical distances directly; should hold a length for sintered PA12); Avanzini et al., Engineering Fracture Mechanics 2024 (MJF PA12, strain-energy criterion). Titles for the maintainer if he wants them.
+
+The length by the formula, L = (1/pi)(K / tensile strength)^2:
+
+| source | toughness, strength | L |
+|---|---|---|
+| printed nylon 12 filament (the only FILAMENT-printed value found) | 0.92, 44.8 MPa | 0.13 mm |
+| MJF PA12 | 0.58, 34.9 MPa | 0.09 mm |
+| laser-sintered PA2200, lowest orientation (strength 48 MPa from the maker's sheet, not from the paper) | 2.03, 48 MPa | 0.57 mm |
+| laser-sintered PA2200, highest orientation | 2.69, 48 MPa | 1.00 mm |
+
+What it means: by "the lowest published value for each" PA12's length is 0.13 mm, and half of it 0.07 mm: far under a voxel at any resolution he runs. So for his parts the reading stays one voxel whichever way the table is filled. PA12 is NOT added to `material_length.hpp` tonight, on purpose: a published length makes the code switch on real stiffness for cut voxels, and real stiffness with a one-voxel reading is the pairing the reviewer's bar found unsafe (6 to 18 % low on the plate). Whether a material whose length is under a voxel gets the middle stiffness (E x fill^2, the one pairing that passed) or keeps today's solve is part of the ruling already asked of the reviewer. Held for the maintainer in the morning.
+
+## Added 2026-11-26: keeping every fixed face joined to the part (desk research for the morning question; nothing built)
+
+The problem, seen on two made sample parts (stage 1 file): when a part is held in more places than it needs, the optimiser cuts the spare support off (the beam's second end; the bracket's thin tab), and the app either refuses the version (the Carriage Arms rule) or the export bridges it back with a bar. The optimiser is never told a fixed face has to stay joined.
+
+What the literature offers, in the order of how much it would change:
+
+1. A connectivity rule inside the optimiser. Coola, Aage and Sigmund, "A practical review on promoting connectivity in topology optimization" (arXiv 2501.09402, 2025, for Structural and Multidisciplinary Optimization) compares five such rules on one problem. The best known is the "virtual temperature" method: a second, cheap, heat-like solve in which material conducts and air does not; an island (or a cut-off support) shows up hot, and a limit on the hottest point keeps everything joined. Cost: one extra scalar solve per step (far cheaper than the strength solve) and one more limit for the optimiser to honour. Opened: the review's abstract and summary only.
+2. "Fail-safe" optimisation: the part must still carry its loads with a piece missing (Zhou and Fleury, "Fail-safe topology optimization", Struct Multidisc Optim 2016, DOI 10.1007/s00158-016-1507-1; MIT, "Volumetric topology optimization under redundancy constraints"). Turned to our case: add a load case per fixed face in which that face is left out, or in which it alone holds the part. Then every support does real work and the optimiser keeps it joined by itself, and the result means something to the user ("it still holds with one bolt out"). Cost: one more strength solve per fixed face per step, so it is only affordable for a few fixed faces, and it makes parts heavier. I did not find a paper that does exactly this for supports; the fail-safe papers remove material, not supports.
+3. What the app does today: refuse the version after the fact (cheap, loses the lightest versions), or bridge it back at export (keeps the version, with a bar the optimiser never checked).
+
+A cheaper engineering route that needs no paper, to weigh beside these: have the rule that refuses the version ALSO stop the removal step that would cut the support off (the level-set update is rolled back where it would separate a fixed face's pad from the body). It keeps the versions, costs a flood fill per step, and adds no new physics; its risk is a thin thread left hanging on, which the minimum-width rule of stage 3 would then have to thicken.
+
+For the discussion with him: (1) is the general answer and fits the plan's stage on the optimiser; (2) is the only one that makes the kept support worth having; the cheap route gets most of the benefit soonest. No lean taken before he has seen the pictures.
+
+## Added 2026-11-26: PA6 (the maintainer plans to print it), for the stage 2 reading length
+
+Looked for a published toughness of FILAMENT-PRINTED nylon 6. Found little, and none I would put in the table:
+
+- Toughness: one paper on printed engineering plastics gives about 3.0 MPa m^0.5 for "pure PA" and 1.72 for glass-filled PA (Yang et al., "Study on the Fracture Toughness of 3D Printed Engineering Plastics", J. Materials Engineering and Performance; a correction was issued, and a published Comment disputes its values, Springer 10.1007/s11665-025-11260-z). The summary read does not say the PA is PA6. Not opened in full.
+- Strength, printed: Stratasys FDM Nylon 6, conditioned: 67.6 MPa flat (XZ), 36.5 MPa across the layers (ZX). Vendor PA6-CF: 115 MPa dry, 55 MPa wet in the layer plane: nylon loses about half its strength when it has taken up moisture.
+- By the formula L = (1/pi)(K / strength)^2 with 3.0 and 67.6: 0.63 mm; after his half rule 0.31 mm. Under a voxel on most of his jobs, as with PA12.
+- A lead not opened: Cicero, Ibanez-Gutierrez and others (Univ. of Cantabria) apply the theory of critical distances to MOULDED PA6 with 0 to 50 % short glass fibre, with and without moisture, 125 specimens; their papers should hold a calibrated length for plain PA6. Moulded, not printed.
+
+What it means for him: there is no good printed-PA6 number yet; the one found comes from a disputed paper. PA6 is NOT added to `material_length.hpp`; a PA6 job keeps the one-voxel reading. Two things matter more for PA6 than this length: moisture (dry or conditioned strength differ by half) and the across-layer strength (about half the in-plane value). If he prints a few PA6 test bars when the rig is ready, that beats anything published.

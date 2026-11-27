@@ -181,6 +181,8 @@ struct MinimizePlasticOptions {
   // TO rebuild stage 1: the same freezes as drawn-face geometry (frozen_sets.hpp).
   // Empty unless stage 1 is on; the mask stays the authority for the solve.
   std::vector<FrozenFaceSet> frozen_sets;
+  // TO rebuild stage 1: the pad each fixed or loaded face got (frozen_sets.hpp).
+  std::vector<PadReceipt> pad_receipts;
   // TO rebuild stage 2: the size in mm the deciding stress is read over; 0 = one
   // voxel, as today. Set by the job's reader from the material (material_length.hpp)
   // only when TOPOPT_STRENGTH=size.
@@ -1078,6 +1080,13 @@ inline constexpr const char* kRungNonConvergentReason =
 // line's "bodies" block names the anchored faces. Below the connectivity reason
 // in precedence, above the margin.
 inline constexpr const char* kAnchorDetachedReason = "anchored piece detached";
+
+// THE CONNECTION RULE (TOPOPT_CONNECTION=support; the reviewer's ruling 2026-11-26):
+// the rung's design left a piece that carries an APPLIED load and reaches no
+// support, so the solve refused it before any iteration (fea.hpp FeaLoadUnheld).
+// Reported like a rung whose solve did not converge (no analysis, no inheritance,
+// the ladder goes on), with this reason in its place.
+inline constexpr const char* kLoadUnheldReason = "the load has no path to a mount";
 
 // REAL BOLTS (bearing anchors; the reviewer's ruling of 2026-10-25 21:45): more than
 // kAnchorsSlidingShare (analyze.hpp) of the anchors' total reaction is carried by the weak sliding

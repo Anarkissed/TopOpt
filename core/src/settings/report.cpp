@@ -788,6 +788,33 @@ std::string job_report_json(const JobReport& report) {
            ", \"required\": " + num_json(report.as_drawn.required) + ", \"passes\": " +
            (report.as_drawn.margin >= report.as_drawn.required ? "true" : "false") + "}\n";
   }
+  if (!report.pads.empty()) {  // TO rebuild stage 1: the pad each face got, additive
+    out.insert(out.size() - 1, ",");
+    out += "  \"pads\": [";
+    for (std::size_t i = 0; i < report.pads.size(); ++i) {
+      const JobReport::Pad& p = report.pads[i];
+      out += std::string(i ? ", " : "") + "{" +
+             (p.face_id >= 0 ? "\"face_id\": " + std::to_string(p.face_id)
+                             : "\"region_id\": " + std::to_string(p.region_id)) +
+             ", \"thickness_mm\": " + num_json(p.thickness_mm) + ", \"pad_mm\": " +
+             num_json(p.pad_mm) + ", \"automatic\": " + (p.automatic ? "true" : "false") + "}";
+    }
+    out += "]\n";
+  }
+  if (report.too_small.evaluated) {  // TO rebuild: too small for the nozzle, additive
+    out.insert(out.size() - 1, ",");
+    out += "  \"too_small\": {\"thickest_mm\": " + num_json(report.too_small.thickest_mm) +
+           ", \"needed_mm\": " + num_json(report.too_small.needed_mm) + ", \"line_width_mm\": " +
+           num_json(report.too_small.line_width_mm) + ", \"nozzle_that_fits_mm\": " +
+           num_json(report.too_small.nozzle_that_fits_mm) + "}\n";
+  }
+  if (report.strength_reading.evaluated) {  // TO rebuild stage 2 (ruling item 6), additive
+    out.insert(out.size() - 1, ",");
+    out += "  \"strength_reading\": {\"size_mm\": " + num_json(report.strength_reading.size_mm) +
+           ", \"voxel_mm\": " + num_json(report.strength_reading.voxel_mm) +
+           ", \"needs_voxel_mm\": " + num_json(report.strength_reading.needs_voxel_mm) +
+           ", \"over_size\": " + (report.strength_reading.over_size ? "true" : "false") + "}\n";
+  }
   if (report.drawn_part.evaluated) {  // TO rebuild stage 2 (M-07), additive
     out.insert(out.size() - 1, ",");
     out += "  \"drawn_part\": {\"printed_grams\": " + num_json(report.drawn_part.printed_grams) +

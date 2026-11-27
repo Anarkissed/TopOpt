@@ -80,8 +80,18 @@ struct RcSpace {
   // u_i^T A u_i = 1 and the columns are A-orthogonal), so commit() stores I.
   std::vector<double> echol;
 };
-thread_local RcSpace g_space;
+thread_local RcSpace g_space;              // the thread's default run state (old entry points)
 thread_local long long g_solve_counter = 0;
+}  // namespace
+// E-01: a run's own recycle state (SolverRunState), installed for a solve handed one.
+struct RcRunState {
+  RcSpace space;
+  long long solve_counter = 0;
+};
+namespace {
+thread_local RcRunState* g_rc_run = nullptr;
+inline RcSpace& rc_space() { return g_rc_run != nullptr ? g_rc_run->space : g_space; }
+inline long long& rc_counter() { return g_rc_run != nullptr ? g_rc_run->solve_counter : g_solve_counter; }
 
 // Chunk length of every inner-product accumulation. Compile-time constant, so
 // the summation order is fixed regardless of n, of the column count, and of the
@@ -251,29 +261,51 @@ void jacobi_eig(double* A, int c, double* V, double* w) {
 // --- Configuration accessors -------------------------------------------------
 
 bool rc_set_enabled(bool enable) { return g_rc_enabled.exchange(enable); }
-bool rc_enabled() { return g_rc_enabled.load(); }
+bool rc_enabled() {
+  if (const SolverSettings* o = mf_settings_override()) return o->krylov_recycling;
+  return g_rc_enabled.load();
+}
 
 int rc_set_dim(int k) {
   const int prev = g_rc_dim.load();
   g_rc_dim.store(k > 0 ? k : kRecycleDefaultDim);
   return prev;
 }
-int rc_dim() { return g_rc_dim.load(); }
+int rc_dim() {
+  if (const SolverSettings* o = mf_settings_override())
+    return o->krylov_recycle_dim > 0 ? o->krylov_recycle_dim : kRecycleDefaultDim;
+  return g_rc_dim.load();
+}
 
 int rc_set_cycle(int c) {
   const int prev = g_rc_cycle.load();
   g_rc_cycle.store(c > 0 ? c : 1);
   return prev;
 }
-int rc_cycle() { return g_rc_cycle.load(); }
+int rc_cycle() {
+  if (const SolverSettings* o = mf_settings_override())
+    return o->krylov_recycle_cycle > 0 ? o->krylov_recycle_cycle : 1;
+  return g_rc_cycle.load();
+}
 
 bool rc_set_metric_diagonal(bool use_diagonal) {
   return g_rc_metric_diag.exchange(use_diagonal);
 }
 bool rc_metric_diagonal() { return g_rc_metric_diag.load(); }
 
+RcRunState* rc_new_run_state() { return new RcRunState(); }
+void rc_delete_run_state(RcRunState* r) { delete r; }
+RcRunState* rc_set_run_override(RcRunState* r) {
+  RcRunState* prev = g_rc_run;
+  g_rc_run = r;
+  return prev;
+}
+
 bool rc_set_wrap_multigrid(bool enable) { return g_rc_wrap_mg.exchange(enable); }
-bool rc_wrap_multigrid() { return g_rc_wrap_mg.load(); }
+bool rc_wrap_multigrid() {
+  if (const SolverSettings* o = mf_settings_override()) return o->krylov_recycle_wrap_multigrid;
+  return g_rc_wrap_mg.load();
+}
 
 bool rc_set_phase_timing(bool on) { return g_rc_phase_on.exchange(on); }
 bool rc_phase_timing() { return phase_on(); }
@@ -294,20 +326,20 @@ void rc_phase_charge(RcPhaseId id, double t0) {
 }
 
 void rc_reset_space() {
-  g_space.n = 0;
-  g_space.k = 0;
-  g_space.cfg_k = 0;
-  g_space.U.clear();
-  g_space.U.shrink_to_fit();
-  g_space.echol.clear();
-  g_space.echol.shrink_to_fit();
-  g_solve_counter = 0;
+  rc_space().n = 0;
+  rc_space().k = 0;
+  rc_space().cfg_k = 0;
+  rc_space().U.clear();
+  rc_space().U.shrink_to_fit();
+  rc_space().echol.clear();
+  rc_space().echol.shrink_to_fit();
+  rc_counter() = 0;
 }
 
-bool rc_space_active() { return g_space.k > 0; }
-int rc_space_dim() { return g_space.k; }
+bool rc_space_active() { return rc_space().k > 0; }
+int rc_space_dim() { return rc_space().k; }
 std::size_t rc_space_bytes() {
-  return g_space.U.size() * sizeof(float);
+  return rc_space().U.size() * sizeof(float);
 }
 
 // --- Session -----------------------------------------------------------------
@@ -330,20 +362,20 @@ void RecycleSession::begin(int n, const double* invdiag) {
   // than k columns when the candidate set is numerically dependent, and treating
   // that as a reconfiguration would throw the basis away on every single solve
   // (it did, until this distinction was drawn).
-  if (g_space.k > 0 && (g_space.n != n || g_space.cfg_k != want_k))
+  if (rc_space().k > 0 && (rc_space().n != n || rc_space().cfg_k != want_k))
     rc_reset_space();
 
-  k_ = (g_space.k > 0) ? g_space.k : want_k;
+  k_ = (rc_space().k > 0) ? rc_space().k : want_k;
   m_ = want_k;
   invdiag_ = invdiag;
 
   // Harvest (and refresh E) on the fixed cycle, and ALWAYS when there is no space
   // yet (bootstrap).
-  const long long seq = g_solve_counter++;
-  harvesting_ = (g_space.k == 0) || (rc_cycle() <= 1) || (seq % rc_cycle() == 0);
+  const long long seq = rc_counter()++;
+  harvesting_ = (rc_space().k == 0) || (rc_cycle() <= 1) || (seq % rc_cycle() == 0);
   if (phase_on() && harvesting_) ++g_rc_phase.harvest_sessions;
 
-  if (g_space.k == 0) return;  // bootstrap: nothing to apply, only to harvest.
+  if (rc_space().k == 0) return;  // bootstrap: nothing to apply, only to harvest.
 
   if (harvesting_) {
     // A rebuild solve needs A*U anyway (for the Rayleigh-Ritz), so it also pays
@@ -352,10 +384,10 @@ void RecycleSession::begin(int n, const double* invdiag) {
     return;
   }
   // Between rebuilds: reuse the carried E. Zero matvecs, still SPD, still exact.
-  if (static_cast<int>(g_space.echol.size()) !=
-      static_cast<int>(g_space.k) * g_space.k)
+  if (static_cast<int>(rc_space().echol.size()) !=
+      static_cast<int>(rc_space().k) * rc_space().k)
     return;  // defensive: no usable factor -> run this solve without recycling
-  echol_ = g_space.echol;
+  echol_ = rc_space().echol;
   cvec_.assign(static_cast<std::size_t>(k_), 0.0);
   partials_.assign(static_cast<std::size_t>((n_ + kChunk - 1) / kChunk) *
                        static_cast<std::size_t>(k_),
@@ -386,7 +418,7 @@ bool RecycleSession::setup_finish(std::vector<double>& e) {
     want_setup_ = false;
     return false;
   }
-  g_space.echol = echol_;  // carry the fresh factor to the non-rebuild solves
+  rc_space().echol = echol_;  // carry the fresh factor to the non-rebuild solves
   cvec_.assign(static_cast<std::size_t>(k), 0.0);
   partials_.assign(static_cast<std::size_t>((n_ + kChunk - 1) / kChunk) *
                        static_cast<std::size_t>(k),
@@ -396,13 +428,13 @@ bool RecycleSession::setup_finish(std::vector<double>& e) {
 }
 
 void RecycleSession::promote_column(int j, double* out) const {
-  const float* src = g_space.U.data() + static_cast<std::size_t>(j) *
+  const float* src = rc_space().U.data() + static_cast<std::size_t>(j) *
                                             static_cast<std::size_t>(n_);
   for (int t = 0; t < n_; ++t) out[t] = static_cast<double>(src[t]);
 }
 
 double RecycleSession::column_dot(int j, const double* v) const {
-  const float* uj = g_space.U.data() + static_cast<std::size_t>(j) *
+  const float* uj = rc_space().U.data() + static_cast<std::size_t>(j) *
                                            static_cast<std::size_t>(n_);
   double total = 0.0;
   for (int t0 = 0; t0 < n_; t0 += kChunk) {
@@ -432,7 +464,7 @@ void RecycleSession::augment(const double* r, double* z) const {
   if (phase_on()) ++g_rc_phase.augment_calls;
   const int k = k_;
   const int n = n_;
-  const float* const U = g_space.U.data();
+  const float* const U = rc_space().U.data();
   double* const c = cvec_.data();
   const int nchunk = (n + kChunk - 1) / kChunk;
   double* const part = partials_.data();
@@ -521,7 +553,7 @@ void RecycleSession::commit() {
   B.reserve(static_cast<std::size_t>(c));
   AB.reserve(static_cast<std::size_t>(c));
   for (int j = 0; j < ku; ++j) {
-    B.push_back(g_space.U.data() + static_cast<std::size_t>(j) * n);
+    B.push_back(rc_space().U.data() + static_cast<std::size_t>(j) * n);
     AB.push_back(hau_.data() + static_cast<std::size_t>(j) * n);
   }
   for (int j = 0; j < filled_; ++j) {
@@ -646,15 +678,15 @@ void RecycleSession::commit() {
     }
   }
 
-  g_space.n = n;
-  g_space.k = kout;
-  g_space.cfg_k = rc_dim();
-  g_space.U = std::move(newU);
+  rc_space().n = n;
+  rc_space().k = kout;
+  rc_space().cfg_k = rc_dim();
+  rc_space().U = std::move(newU);
   // E == I exactly at extraction (u_i^T A u_j = delta_ij by construction), so the
   // carried Cholesky factor is the identity.
-  g_space.echol.assign(static_cast<std::size_t>(kout) * kout, 0.0);
+  rc_space().echol.assign(static_cast<std::size_t>(kout) * kout, 0.0);
   for (int i = 0; i < kout; ++i)
-    g_space.echol[static_cast<std::size_t>(i) * kout + i] = 1.0;
+    rc_space().echol[static_cast<std::size_t>(i) * kout + i] = 1.0;
 }
 
 }  // namespace fea_detail

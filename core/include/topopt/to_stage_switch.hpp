@@ -7,8 +7,8 @@
 //   unset / "voxel" : today's behaviour everywhere. The default until the gate.
 //   "face"          : loads, pads and protection depths from the drawn face
 //                     (face_loads.hpp), pads and protections in mm; a glued
-//                     anchor holds the drawn face's own nodes (scenario jobs
-//                     still clamp the voxels it lies on); the optimiser's stop rule
+//                     anchor holds the drawn face's own nodes, in a plain job
+//                     and in every load scenario; the optimiser's stop rule
 //                     watches the design's own stress, not the stress in the
 //                     voxels a load or an anchor sits on (ledger P-15).
 //   "face_spring"   : as "face", and each anchor node is held by a spring in
@@ -56,5 +56,36 @@ inline StrengthMode strength_mode() {
 }
 
 inline bool to_stage2_on() { return strength_mode() != StrengthMode::Today; }
+
+// ONE JUDGE (stage 2, ledger R-08; the reviewer's ruling 2026-11-27, first in the
+// stage because it is the number the user is shown). TOPOPT_RECHECK=fill makes the
+// re-check of a finished FILE analyse each voxel's FILL (the share of the voxel
+// inside the file's surface, file_fill.hpp) by the same form as the loop's
+// certificate, in place of today's all-or-nothing voxels. TOPOPT_RECHECK=fill:<k>
+// sets the sub-sampling (k points along each voxel edge). The default is 8, by
+// measurement and the reviewer's ruling of 2026-11-27 06:34Z: at 8 the size form
+// gives the certificate's number within 0.5 % on 16 textbook rows and moves under
+// 0.5 % when k doubles; 4 is not enough (one row 9.6 % off). Unset = today's bytes.
+// Returns 0 when off.
+inline int recheck_fill_sub() {
+  const char* v = std::getenv("TOPOPT_RECHECK");
+  if (v == nullptr) return 0;
+  const std::string s(v);
+  if (s.rfind("fill", 0) != 0) return 0;
+  const int k = s.size() > 5 && s[4] == ':' ? std::atoi(s.c_str() + 5) : 0;
+  return k >= 1 ? k : 8;
+}
+
+// THE CONNECTION RULE (stage 5; the reviewer's ruling of 2026-11-26, maintainer-
+// approved): TOPOPT_CONNECTION=support makes a piece of the design count as held
+// only when it reaches a SUPPORT (a fixed face). A loose piece that carries only
+// its own weight leaves the solve with that weight; a loose piece that carries an
+// applied load refuses the version in plain words ("the load has no path to a
+// mount"). Unset = today: a piece is held by a support OR by any load, so under
+// self-weight nothing loose is ever taken out. Temporary, like the others.
+inline bool to_connection_rule_on() {
+  const char* v = std::getenv("TOPOPT_CONNECTION");
+  return v != nullptr && std::string(v) == "support";
+}
 
 }  // namespace topopt

@@ -20,6 +20,7 @@
 // and the grid, like face_tag.cpp.
 #pragma once
 
+#include <cmath>
 #include <cstddef>
 #include <vector>
 
@@ -123,5 +124,28 @@ std::size_t mask_region_depth_mm(const VoxelGrid& grid, const StepModel& model,
                                  const ResolvedFaceRegion& region, double depth_mm,
                                  MaskValue mask_value, DesignMask& mask,
                                  std::vector<float>* fraction = nullptr);
+
+// How thick the part is BEHIND a face: for each piece, the distance from the face
+// straight into the part (against the piece's outward normal) until the material
+// ends, stepped through the voxels at a quarter of a voxel; the MEDIAN over the
+// pieces is returned (mm), so a few pieces over a hole or beside an edge do not
+// decide it. 0 when no piece lies on solid material. This is the "size of the
+// model" a pad follows (the maintainer, 2026-11-26: the pad adjusts to the size
+// of the model, measured at that face, so a thin tab on a big part gets a thin
+// pad).
+double face_backing_thickness_mm(const VoxelGrid& grid, const std::vector<FacePiece>& pieces);
+
+// THE AUTOMATIC PAD's rule, pure arithmetic (the maintainer, 2026-11-26: "Can't it
+// be a ratio? So as it grows, the thickness slows down?"): the pad grows with the
+// square root of the thickness of material behind the face, never under ONE
+// wall-line width (a solid wall one line wide prints; his word 2026-11-26: the
+// two-line rule is for lattices only), no ceiling.
+//   pad = max(line width, sqrt(strength x thickness))
+// A line width of 0 or less is read as 0.45 mm.
+inline double auto_pad_depth_mm(double thickness_mm, double strength_mm, double line_width_mm) {
+  const double lw = line_width_mm > 0.0 ? line_width_mm : 0.45;
+  const double root = thickness_mm > 0.0 && strength_mm > 0.0 ? std::sqrt(strength_mm * thickness_mm) : 0.0;
+  return root > lw ? root : lw;
+}
 
 }  // namespace topopt

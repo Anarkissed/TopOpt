@@ -32,6 +32,56 @@ double face_pad_depth_mm() {
   return d > 0.0 ? d : 3.0;
 }
 
+// THE AUTOMATIC PAD (in discussion with the maintainer, 2026-11-26; a MEASURING
+// ARM until he settles its one number). "Pad in wall-line widths with a cap sounds
+// right"; "Can't the number of lines adjust based on the size of the model?";
+// "Can't it be a ratio? So as it grows, the thickness slows down?" The rule put to
+// him: the pad grows with the square root of the thickness of material behind
+// that face, never less than one wall-line width, no ceiling
+// (auto_pad_depth_mm, face_loads.hpp).
+// TOPOPT_PAD_MM=auto uses kAutoPadStrengthMm; TOPOPT_PAD_MM=auto:<strength> sets
+// it; a number is the fixed depth above. UNSET follows kAutoPadIsDefault.
+//
+// THE ONE NUMBER (measured 2026-11-26 on the two made sample parts, stage 1 file,
+// "A2"): 0.2. A thick face then gets 3 to 5 mm (what the fixed pad gives), a thin
+// tab under a millimetre; every version of both parts is made, as light or lighter
+// than with a fixed 3 mm. At 1.0 the versions are 7 to 16 g heavier and the
+// lightest are lost. The maintainer, 2026-11-26: "Yes". So on the drawn-face path
+// an unset TOPOPT_PAD_MM is the automatic pad; a typed number is a fixed depth
+// (Manual mode).
+constexpr double kAutoPadStrengthMm = 0.2;
+constexpr bool kAutoPadIsDefault = true;
+bool auto_pad(double* strength_mm) {
+  const char* v = std::getenv("TOPOPT_PAD_MM");
+  if (v == nullptr || *v == '\0') {
+    *strength_mm = kAutoPadStrengthMm;
+    return kAutoPadIsDefault;
+  }
+  if (std::string(v).rfind("auto", 0) != 0) return false;
+  const std::string s(v);
+  const double typed = s.size() > 5 && s[4] == ':' ? std::atof(s.c_str() + 5) : 0.0;
+  *strength_mm = typed > 0.0 ? typed : kAutoPadStrengthMm;
+  return true;
+}
+double pad_depth_for(const VoxelGrid& grid, const std::vector<FacePiece>& pieces,
+                     double line_width_mm, PadReceipt* receipt = nullptr) {
+  double strength = 0.0;
+  if (!auto_pad(&strength)) {
+    if (receipt) receipt->pad_mm = face_pad_depth_mm();
+    return face_pad_depth_mm();
+  }
+  const double thickness = face_backing_thickness_mm(grid, pieces);
+  const double depth = auto_pad_depth_mm(thickness, strength, line_width_mm);
+  std::printf("[loadcase] automatic pad: %.2f mm of material behind the face -> pad %.2f mm\n",
+              thickness, depth);
+  if (receipt) {
+    receipt->thickness_mm = thickness;
+    receipt->pad_mm = depth;
+    receipt->automatic = true;
+  }
+  return depth;
+}
+
 std::size_t tag_face_m(VoxelGrid& grid, const StepModel& model, int fid, VoxelTag tag) {
   if (face_load_mode() == FaceLoadMode::Voxel) return tag_step_face(grid, model, fid, tag);
   return tag_face_hosts(grid, face_pieces(model, {fid}, 0.5 * grid.spacing), tag);
@@ -741,7 +791,7 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
     // (every node that stands for at least a fifth of a cell-face of it), not all
     // eight corners of every voxel the face lies on, which is a clamp one voxel
     // thick (LatticeReview's catch, 2026-11-25: the job path still did that).
-    // Scenario jobs keep the voxel clamp below.
+    // Scenario jobs build their own anchors further down, by the same rule.
     std::size_t n_held = 0;
     for (const MinimizePlasticOptions::AnchorVoxels& a : anchor_voxels) {
       const std::vector<FacePiece> pieces =
@@ -925,26 +975,49 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
       return grid.tags[idx] == VoxelTag::Load || grid.tags[idx] == VoxelTag::Fixture;
     };
     if (want_pad) {
+      // The pad's depth on the face path: a fixed number of mm, or the automatic
+      // rule (pad_depth_for). Unused on the voxel path, which pads by layers.
+      const bool by_face = face_load_mode() != FaceLoadMode::Voxel;
+      auto face_pad = [&](int fid) {
+        if (!by_face) return face_pad_depth_mm();
+        PadReceipt rc;
+        rc.face_id = fid;
+        const double d = pad_depth_for(grid, face_pieces(model, {fid}, 0.5 * grid.spacing),
+                                       lc.wall_line_width_mm, &rc);
+        opts.pad_receipts.push_back(rc);
+        return d;
+      };
+      auto region_pad = [&](const ResolvedFaceRegion& r) {
+        if (!by_face) return face_pad_depth_mm();
+        PadReceipt rc;
+        rc.region_id = r.id;
+        const double d = pad_depth_for(grid, region_pieces(model, r, 0.5 * grid.spacing),
+                                       lc.wall_line_width_mm, &rc);
+        opts.pad_receipts.push_back(rc);
+        return d;
+      };
       for (int fid : lc.anchor_face_ids) {
+        const double d = face_pad(fid);
         mask_face_m(grid, model, fid, MaskValue::FrozenSolid,
-                    kProductionAnchorPadDepthVoxels, face_pad_depth_mm(), pad);
-        note_frozen_face(model, fid, face_pad_depth_mm(), opts.frozen_sets);
+                    kProductionAnchorPadDepthVoxels, d, pad);
+        note_frozen_face(model, fid, d, opts.frozen_sets);
       }
       for (int fid : retained_load_faces) {
+        const double d = face_pad(fid);
         mask_face_m(grid, model, fid, MaskValue::FrozenSolid,
-                    kProductionAnchorPadDepthVoxels, face_pad_depth_mm(), pad);
-        note_frozen_face(model, fid, face_pad_depth_mm(), opts.frozen_sets);
+                    kProductionAnchorPadDepthVoxels, d, pad);
+        note_frozen_face(model, fid, d, opts.frozen_sets);
       }
       // A retained load REGION gets the same structural pad a retained load
       // face gets. The pad is what ties a boundary condition into the body; a
       // load applied to a union or to one sector of a grid split needs it for
       // exactly the same reason (diagnosis 064).
       for (int rid : retained_load_regions) {
-        mask_region_m(grid, model, region_or_throw(rid, "retained load"),
-                      MaskValue::FrozenSolid, kProductionAnchorPadDepthVoxels,
-                      face_pad_depth_mm(), pad);
-        note_frozen_region(region_or_throw(rid, "retained load"), face_pad_depth_mm(),
-                           opts.frozen_sets);
+        const ResolvedFaceRegion& reg = region_or_throw(rid, "retained load");
+        const double d = region_pad(reg);
+        mask_region_m(grid, model, reg, MaskValue::FrozenSolid,
+                      kProductionAnchorPadDepthVoxels, d, pad);
+        note_frozen_region(reg, d, opts.frozen_sets);
       }
       // COUNT THE PAD SEPARATELY (task 2026-08-12 §1f). Everything frozen so far
       // is the pad and only the pad — the protections below run after this.
@@ -1193,6 +1266,26 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
       for (int c = 0; c < 8; ++c)
         visit(fea_node_index(grid, i + (c & 1), j + ((c >> 1) & 1), k + ((c >> 2) & 1)));
     };
+    // The nodes one anchor holds. Today: all eight corners of each of its Fixture
+    // voxels. TO rebuild stage 1 (switch on): the nodes of the drawn face itself,
+    // the same rule a single load case's glued anchor follows, so a scenario job
+    // and a plain job hold the same nodes for the same face.
+    auto anchor_nodes = [&](const MinimizePlasticOptions::AnchorVoxels& a) {
+      std::vector<int> out;
+      if (face_load_mode() != FaceLoadMode::Voxel) {
+        const std::vector<FacePiece> pieces =
+            a.face_id >= 0
+                ? face_pieces(model, {a.face_id}, 0.5 * grid.spacing)
+                : region_pieces(model, region_or_throw(a.region_id, "load scenario anchor"),
+                                0.5 * grid.spacing);
+        for (const DirichletBC& b : face_clamp_bcs(grid, face_node_areas(grid, pieces)))
+          if (b.component == 0) out.push_back(b.node);
+        return out;
+      }
+      for (const std::size_t v : a.part_voxels)
+        if (grid.tags[v] == VoxelTag::Fixture) corners(v, [&](int n) { out.push_back(n); });
+      return out;
+    };
     opts.scenarios.clear();
     {  // the lightest scenario (his decision, 2026-10-28): the same line as the job's
       std::vector<std::pair<std::string, double>> sizes;
@@ -1221,30 +1314,25 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
       };
       for (const MinimizePlasticOptions::AnchorVoxels& a : opts.anchor_voxels) {
         if (!on_here(a)) continue;
-        for (const std::size_t v : a.part_voxels)
-          if (grid.tags[v] == VoxelTag::Fixture)
-            corners(v, [&](int n) {
-              if (held.insert(n).second)
-                for (int c = 0; c < 3; ++c) s.bcs.push_back({n, c, 0.0});
-            });
+        for (const int n : anchor_nodes(a))
+          if (held.insert(n).second)
+            for (int c = 0; c < 3; ++c) s.bcs.push_back({n, c, 0.0});
       }
       if (held.empty())
         throw std::invalid_argument("Scenario \u201C" + sc.name +
                                     "\u201D has no anchor switched on");
       for (const MinimizePlasticOptions::AnchorVoxels& a : opts.anchor_voxels) {
         if (on_here(a)) continue;
-        for (const std::size_t v : a.part_voxels)
-          if (grid.tags[v] == VoxelTag::Fixture)
-            corners(v, [&](int n) {
-              if (held.count(n) || !weak.insert(n).second) return;
-              DirichletBC b;
-              b.node = n;
-              b.spring = k_weak;
-              b.spring_tangent = k_weak;
-              b.normal = Vec3{1.0, 0.0, 0.0};
-              b.contact = false;
-              s.bcs.push_back(b);
-            });
+        for (const int n : anchor_nodes(a)) {
+          if (held.count(n) || !weak.insert(n).second) continue;
+          DirichletBC b;
+          b.node = n;
+          b.spring = k_weak;
+          b.spring_tangent = k_weak;
+          b.normal = Vec3{1.0, 0.0, 0.0};
+          b.contact = false;
+          s.bcs.push_back(b);
+        }
       }
       for (const ProductionLoadCase::LoadGroup& g : sc.groups) {
         if (!(std::fabs(g.force.x) + std::fabs(g.force.y) + std::fabs(g.force.z) > 0.0))

@@ -21,6 +21,25 @@ if(Eigen3_FOUND)
   add_executable(test_to_strength_known_ring tests/unit/test_to_strength_known_ring.cpp)
   target_link_libraries(test_to_strength_known_ring PRIVATE topopt)
   add_test(NAME to_strength_known_ring COMMAND test_to_strength_known_ring)
+  # One judge, evidence (a): textbook shapes through the file's fills against the certificate.
+  add_executable(test_to_recheck_fill tests/unit/test_to_recheck_fill.cpp)
+  target_link_libraries(test_to_recheck_fill PRIVATE topopt)
+  # Long (about 20 minutes): every row at k = 1 to 16, gated at k = 8.  ctest -C Long -R to_recheck_fill
+  add_test(NAME to_recheck_fill CONFIGURATIONS Long COMMAND test_to_recheck_fill --gate)
+  set_tests_properties(to_recheck_fill PROPERTIES TIMEOUT 7200)
+  # The thin-member rule: a beam in bending at 0.5, 1, 2 and 4 x the reading size.
+  add_executable(test_to_strength_thin_member tests/unit/test_to_strength_thin_member.cpp)
+  target_link_libraries(test_to_strength_thin_member PRIVATE topopt)
+  add_test(NAME to_strength_thin_member COMMAND test_to_strength_thin_member)
+  # The across-layer reading over a size, against Kirsch's tension along the pull.
+  add_executable(test_to_strength_across_layers tests/unit/test_to_strength_across_layers.cpp)
+  target_link_libraries(test_to_strength_across_layers PRIVATE topopt)
+  add_test(NAME to_strength_across_layers COMMAND test_to_strength_across_layers)
+  # The third shape (the reviewer's ruling 2026-11-26): an elliptical hole, a / b = 2,
+  # Inglis peak 5 x. Judges "E x fill^2 at one voxel" on a shape it was not found on.
+  add_executable(test_to_strength_known_ellipse tests/unit/test_to_strength_known_ellipse.cpp)
+  target_link_libraries(test_to_strength_known_ellipse PRIVATE topopt)
+  add_test(NAME to_strength_known_ellipse COMMAND test_to_strength_known_ellipse)
 endif()
 
 # Stage 2: printed grams at the user's walls and infill (ledger M-07).
@@ -29,6 +48,16 @@ if(Eigen3_FOUND)
   target_link_libraries(test_to_printed_mass PRIVATE topopt)
   add_test(NAME to_printed_mass COMMAND test_to_printed_mass)
 endif()
+
+# Stage 2, "one judge": how full of a file each voxel is (file_fill.hpp; not wired yet).
+add_executable(test_to_file_fill tests/unit/test_to_file_fill.cpp)
+target_link_libraries(test_to_file_fill PRIVATE topopt)
+add_test(NAME to_file_fill COMMAND test_to_file_fill)
+
+# Too small for the nozzle, and the automatic resolution (part_scale.hpp).
+add_executable(test_to_part_scale tests/unit/test_to_part_scale.cpp)
+target_link_libraries(test_to_part_scale PRIVATE topopt)
+add_test(NAME to_part_scale COMMAND test_to_part_scale)
 
 # Tests C and D: the area a load really lands on, and protection depth in mm.
 # traction_loads lives in assembly.cpp (Eigen). Measures only until stage 1, which
@@ -39,6 +68,20 @@ if(Eigen3_FOUND)
   add_test(NAME to_true_loads COMMAND test_to_true_loads)
 endif()
 
+# Stage 5 (faster solves): the solver driven the way the Flexible bridge drives it
+# (one thread, latch reset, multigrid then Jacobi-only, warm next step) on a soft
+# graded field like the M2 stand's. Green before and after every solver change.
+add_executable(test_to_solver_bridge_way tests/unit/test_to_solver_bridge_way.cpp)
+target_link_libraries(test_to_solver_bridge_way PRIVATE topopt)
+add_test(NAME to_solver_bridge_way COMMAND test_to_solver_bridge_way)
+
+# Stage 5, B-05: the stable smoothers behind TOPOPT_SOLVER (per-level Jacobi and
+# 4th-kind Chebyshev, three settings each): converge on multigrid without the l1
+# retry, match a tight reference, identical bytes on a repeat, switch inert unset.
+add_executable(test_to_solver_smoother tests/unit/test_to_solver_smoother.cpp)
+target_link_libraries(test_to_solver_smoother PRIVATE topopt)
+target_include_directories(test_to_solver_smoother PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME to_solver_smoother COMMAND test_to_solver_smoother)
 # Test K: the same job twice in one process, an unrelated solve between, same
 # bytes. Runs the demo fixture through run_job, so it needs what test_cli needs.
 # First result on record 2026-11-25 (same shape both times; only 3MF ids and
@@ -74,6 +117,32 @@ if(TARGET test_lattice_strength)
   set_tests_properties(to_stage1_lattice_check PROPERTIES TIMEOUT 7200)
 endif()
 
+# Stage 5, E-01: one SolverSettings value and a SolverRunState passed into a solve; the
+# old entry points byte-identical; runs isolated (test K).
+add_executable(test_to_solver_settings tests/unit/test_to_solver_settings.cpp)
+target_link_libraries(test_to_solver_settings PRIVATE topopt)
+add_test(NAME to_solver_settings COMMAND test_to_solver_settings)
+add_executable(test_to_solver_run_state tests/unit/test_to_solver_run_state.cpp)
+target_link_libraries(test_to_solver_run_state PRIVATE topopt)
+add_test(NAME to_solver_run_state COMMAND test_to_solver_run_state)
+# Stage 5, S-05: the sensitivity loop on all cores; identical bytes at 1/3/6 threads.
+add_executable(test_to_solve_threads tests/unit/test_to_solve_threads.cpp)
+target_link_libraries(test_to_solve_threads PRIVATE topopt)
+add_test(NAME to_solve_threads COMMAND test_to_solve_threads)
+# Stage 5, B-06: the element product in the reduced system; identical bytes to the
+# full-length product at 1/3/6 threads.
+add_executable(test_to_solver_reduced_apply tests/unit/test_to_solver_reduced_apply.cpp)
+target_link_libraries(test_to_solver_reduced_apply PRIVATE topopt)
+target_include_directories(test_to_solver_reduced_apply PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME to_solver_reduced_apply COMMAND test_to_solver_reduced_apply)
+# Stage 5, THE CONNECTION RULE, support-only form (the reviewer's ruling 2026-11-26): a piece is held
+# only through a support; a loose piece's registered weight leaves with it; an applied load on a
+# loose piece refuses the solve at once (FeaLoadUnheld); outside the scope, today's bytes.
+add_executable(test_to_solver_connection_rule tests/unit/test_to_solver_connection_rule.cpp)
+target_link_libraries(test_to_solver_connection_rule PRIVATE topopt)
+target_include_directories(test_to_solver_connection_rule PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME to_solver_connection_rule COMMAND test_to_solver_connection_rule)
+
 # Stage 1, M6 (LatticeReview for TOReview): on the strength grid, the protected skin against the lattice cubes, the
 # switch off and `face` (jobs A and B as test_to_stage1_lattice_check makes them). Prints the counts, pins nothing.
 #   ctest -C Long -R to_stage1_lattice_masks
@@ -96,3 +165,8 @@ if(manifold_FOUND)
   target_link_libraries(test_to_surface_export PRIVATE topopt manifold::manifold)
   add_test(NAME to_surface_export COMMAND test_to_surface_export --gate)
 endif()
+
+# A tool, not a test: writes the made sample part (an L-bracket with a filled
+# corner) and its job, for the measurements his own parts cannot give.
+add_executable(to_sample_part tests/tools/to_sample_part.cpp)
+target_link_libraries(to_sample_part PRIVATE topopt)

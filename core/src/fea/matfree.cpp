@@ -333,6 +333,11 @@ inline void parallel_ranges(int begin, int end, int nthreads,
 }  // namespace
 
 int mf_set_thread_count(int n) { return g_mf_threads.exchange(n); }
+// The SETTING as stored (0 = all hardware threads), for fea_current_solver_settings.
+int mf_thread_count_setting() {
+  if (const SolverSettings* o = mf_settings_override()) return o->matfree_threads;
+  return g_mf_threads.load();
+}
 
 void mf_parallel_ranges(int begin, int end, int min_per_thread,
                         const std::function<void(int, int)>& body) {
@@ -355,6 +360,7 @@ bool mf_set_galerkin_block_cache(bool enable) {
   return g_mf_galerkin_block_cache.exchange(enable);
 }
 bool mf_galerkin_block_cache_enabled() {
+  if (const SolverSettings* o = mf_settings_override()) return o->galerkin_block_cache;
   return g_mf_galerkin_block_cache.load();
 }
 
@@ -368,6 +374,7 @@ bool mf_set_mixed_precision(bool enable) {
   return g_mf_mixed_precision.exchange(enable);
 }
 bool mf_mixed_precision_enabled() {
+  if (const SolverSettings* o = mf_settings_override()) return o->mixed_precision;
   return g_mf_mixed_precision.load();
 }
 
@@ -380,7 +387,10 @@ std::atomic<bool> g_mf_cubic_lattice{false};
 bool mf_set_cubic_lattice(bool enable) {
   return g_mf_cubic_lattice.exchange(enable);
 }
-bool mf_cubic_lattice_enabled() { return g_mf_cubic_lattice.load(); }
+bool mf_cubic_lattice_enabled() {
+  if (const SolverSettings* o = mf_settings_override()) return o->cubic_lattice;
+  return g_mf_cubic_lattice.load();
+}
 
 // External additive preconditioner hook (matrix-free GenEO two-level, phase 2).
 // DEFAULT EMPTY => byte-identical: mf_cg_solve never enters the hook branch. Guarded
@@ -405,8 +415,22 @@ bool mf_precond_hook_installed() {
   return g_mf_precond_hook_installed.load();
 }
 
+// E-01: the per-solve SolverSettings, on the solving thread only (the worker
+// pool never reads a switch: every caller reads mf_thread_count() and passes
+// the count down).
+namespace {
+thread_local const SolverSettings* g_settings_override = nullptr;
+}
+const SolverSettings* mf_settings_override() { return g_settings_override; }
+SolverSettingsScope::SolverSettingsScope(const SolverSettings& s)
+    : prev_(g_settings_override) {
+  g_settings_override = &s;
+}
+SolverSettingsScope::~SolverSettingsScope() { g_settings_override = prev_; }
+
 int mf_thread_count() {
-  int n = g_mf_threads.load();
+  const SolverSettings* o = mf_settings_override();
+  int n = o != nullptr ? o->matfree_threads : g_mf_threads.load();
   if (n <= 0) {
     n = static_cast<int>(std::thread::hardware_concurrency());
     if (n <= 0) n = 1;
@@ -583,6 +607,44 @@ void mf_apply_cubic_add(const std::vector<MfCubElem>& elems,
   }
 }
 
+// B-06: y = K x in the REDUCED system through `g2r` (global DOF -> kept id, the
+// spare slot ng for a fixed or void DOF). Same element order, colours, threading
+// and per-element arithmetic as mf_apply_full, so every kept y entry receives the
+// same terms in the same order: bit-identical to the full-length path, for any
+// thread count. x and y are ng+1 long; x[ng] must be 0; y[ng] collects the
+// discarded fixed-DOF terms.
+void mf_apply_reduced(const std::vector<MfElem>& elems,
+                      const std::vector<int>& color_offsets, const Hex8Stiffness& Ke,
+                      const std::vector<int>& g2r, const std::vector<double>& x,
+                      std::vector<double>& y) {
+  std::fill(y.begin(), y.end(), 0.0);
+  alignas(16) double KeCM[static_cast<std::size_t>(kDof) * kDof];
+  build_ke_colmajor(Ke, KeCM);
+  const int nthreads = mf_thread_count();
+  const std::function<void(int, int)> body = [&](int lo, int hi) {
+    alignas(16) double ul[kDof];
+    alignas(16) double res[kDof];
+    int q[kDof];
+    for (int i = lo; i < hi; ++i) {
+      const MfElem& el = elems[static_cast<std::size_t>(i)];
+      for (int r = 0; r < kDof; ++r) {
+        q[r] = g2r[static_cast<std::size_t>(el.edof[r])];
+        ul[r] = x[static_cast<std::size_t>(q[r])];
+        res[r] = 0.0;
+      }
+      for (int c = 0; c < kDof; ++c)
+        axpy24(res, ul[c], &KeCM[static_cast<std::size_t>(c) * kDof]);
+      for (int r = 0; r < kDof; ++r)
+        y[static_cast<std::size_t>(q[r])] += el.factor * res[r];
+    }
+  };
+  for (int color = 0; color < kNumColors; ++color) {
+    const int b = color_offsets[static_cast<std::size_t>(color)];
+    const int e = color_offsets[static_cast<std::size_t>(color) + 1];
+    parallel_ranges(b, e, nthreads, body);
+  }
+}
+
 // Process-global operator-apply counter (task 2026-08-02-iteration-phase-
 // timing). Defined here, beside the ONE apply every matrix-free caller routes
 // through, so no caller can add work the counter misses. Plain long long, not
@@ -595,6 +657,13 @@ long long g_mf_matvecs = 0;
 
 void MatfreeReduced::apply_kgg_raw(const double* xg, double* yg) const {
   ++g_mf_matvecs;
+  if (!g2r.empty()) {  // B-06: the reduced-system apply (see MatfreeReduced::g2r)
+    std::copy(xg, xg + ng, xr.begin());
+    xr[static_cast<std::size_t>(ng)] = 0.0;
+    mf_apply_reduced(elems, color_offsets, Ke, g2r, xr, yr);
+    std::copy(yr.begin(), yr.begin() + ng, yg);
+    return;
+  }
   std::fill(xfull.begin(), xfull.end(), 0.0);
   for (int k = 0; k < ng; ++k)
     xfull[static_cast<std::size_t>(kept_global[static_cast<std::size_t>(k)])] =
@@ -713,9 +782,6 @@ MatfreeReduced mf_build_reduced(const VoxelGrid& grid, double youngs_modulus,
     m.elems =
         mf_build_elems(grid, elem_youngs, who, &m.color_offsets, active_mask);
   }
-  m.xfull.assign(static_cast<std::size_t>(ndof), 0.0);
-  m.yfull.assign(static_cast<std::size_t>(ndof), 0.0);
-
   // Dirichlet BCs -> fixed mask + prescribed field up (validate indices).
   std::vector<char> fixed(static_cast<std::size_t>(ndof), 0);
   m.up.assign(static_cast<std::size_t>(ndof), 0.0);
@@ -848,6 +914,18 @@ MatfreeReduced mf_build_reduced(const VoxelGrid& grid, double youngs_modulus,
     m.kept_global.push_back(d);
   }
   m.ng = static_cast<int>(m.kept_global.size());
+  // B-06: the reduced-system apply when the operator is plain isotropic; the
+  // full-length scratch only when cubic elements or springs need it.
+  if (!m.has_cubic && m.springs.empty()) {
+    m.g2r.assign(static_cast<std::size_t>(ndof), m.ng);
+    for (int k = 0; k < m.ng; ++k)
+      m.g2r[static_cast<std::size_t>(m.kept_global[static_cast<std::size_t>(k)])] = k;
+    m.xr.assign(static_cast<std::size_t>(m.ng) + 1, 0.0);
+    m.yr.assign(static_cast<std::size_t>(m.ng) + 1, 0.0);
+  } else {
+    m.xfull.assign(static_cast<std::size_t>(ndof), 0.0);
+    m.yfull.assign(static_cast<std::size_t>(ndof), 0.0);
+  }
   m.rg.assign(static_cast<std::size_t>(m.ng), 0.0);
   m.invdiag.assign(static_cast<std::size_t>(m.ng), 0.0);
   for (int k = 0; k < m.ng; ++k) {
@@ -1483,6 +1561,70 @@ FeaSolution fea_solve_cg_matfree(const VoxelGrid& grid,
   return solve_cg_matfree_impl(grid, 1.0, poisson, bcs, loads, tolerance,
                                max_iterations, info, &youngs_per_voxel,
                                initial_guess, active_mask);
+}
+
+FeaSolution fea_solve_cg_matfree(const VoxelGrid& grid,
+                                 const std::vector<double>& youngs_per_voxel,
+                                 double poisson,
+                                 const std::vector<DirichletBC>& bcs,
+                                 const std::vector<NodalLoad>& loads,
+                                 double tolerance, int max_iterations,
+                                 CgInfo* info, const FeaSolution* initial_guess,
+                                 const std::vector<char>* active_mask,
+                                 const SolverSettings& settings,
+                                 SolverRunState* run) {
+  const fea_detail::SolverSettingsScope scope(settings);
+  const fea_detail::RunStateScope run_scope(run);
+  return solve_cg_matfree_impl(grid, 1.0, poisson, bcs, loads, tolerance,
+                               max_iterations, info, &youngs_per_voxel,
+                               initial_guess, active_mask);
+}
+
+// E-01: the run state's parts, one per module.
+struct SolverRunState::Impl {
+  fea_detail::MgRunState* mg = fea_detail::mg_new_run_state();
+  fea_detail::RcRunState* rc = fea_detail::rc_new_run_state();
+  fea_detail::GeneoRunState* geneo = fea_detail::geneo_new_run_state();
+  ~Impl() {
+    fea_detail::mg_delete_run_state(mg);
+    fea_detail::rc_delete_run_state(rc);
+    fea_detail::geneo_delete_run_state(geneo);
+  }
+};
+SolverRunState::SolverRunState() : impl_(new Impl()) {}
+SolverRunState::~SolverRunState() = default;
+
+fea_detail::RunStateScope::RunStateScope(SolverRunState* run) {
+  if (run == nullptr || run->impl() == nullptr) return;
+  on_ = true;
+  SolverRunState::Impl* r = run->impl();
+  mg_ = mg_set_run_override(r->mg);
+  rc_ = rc_set_run_override(r->rc);
+  geneo_ = geneo_set_run_override(r->geneo);
+}
+fea_detail::RunStateScope::~RunStateScope() {
+  if (!on_) return;
+  mg_set_run_override(mg_);
+  rc_set_run_override(rc_);
+  geneo_set_run_override(geneo_);
+}
+
+SolverSettings fea_current_solver_settings() {
+  SolverSettings s;
+  s.matfree_threads = fea_detail::mf_thread_count_setting();
+  s.galerkin_block_cache = fea_detail::mf_galerkin_block_cache_enabled();
+  s.mixed_precision = fea_detail::mf_mixed_precision_enabled();
+  s.cubic_lattice = fea_detail::mf_cubic_lattice_enabled();
+  s.geneo_twolevel = fea_detail::geneo_enabled();
+  s.krylov_recycling = fea_detail::rc_enabled();
+  s.krylov_recycle_dim = fea_detail::rc_dim();
+  s.krylov_recycle_cycle = fea_detail::rc_cycle();
+  s.krylov_recycle_wrap_multigrid = fea_detail::rc_wrap_multigrid();
+  s.mg_safe_retry = fea_matfree_mg_safe_retry_enabled();
+  s.mg_rearm_period = fea_matfree_mg_rearm_period();
+  s.mg_parity_pad_mode = fea_mg_parity_pad_mode();
+  s.mg_algebraic_level1 = fea_mg_algebraic_level1_enabled();
+  return s;
 }
 
 }  // namespace topopt

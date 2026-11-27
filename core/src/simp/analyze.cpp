@@ -16,6 +16,7 @@
 #include "topopt/printed_mass.hpp"      // TO rebuild stage 2
 #include "topopt/report.hpp"
 #include "topopt/simp.hpp"
+#include "topopt/material_length.hpp"  // kAcrossLayerLengthFactor
 #include "topopt/stress_measure.hpp"   // TO rebuild stage 2
 #include "topopt/to_stage_switch.hpp"  // TO rebuild stage 2
 #include "topopt/voxel.hpp"
@@ -321,10 +322,11 @@ FixedDesignAnalysis analyze_fixed_design(
       // in the shipped form ("size") it applies only together with a reading
       // size; a material with no published length keeps today's solve and
       // reading whole. "stiff" stays as a measuring arm only.
+      // 2026-11-27 (the reviewer's ruling, item 2): in the size form the MAIN solve
+      // stays today's, because thin members fall back to today's one-voxel reading;
+      // the reading over a size gets its own real-stiffness solve further down.
       SimpParams solve_params = params;
-      if (strength_mode() == StrengthMode::Stiff ||
-          (strength_mode() == StrengthMode::Size && knockdown.stress_reading_mm > 0.0))
-        solve_params.penalty = 1.0;
+      if (strength_mode() == StrengthMode::Stiff) solve_params.penalty = 1.0;
       sc = simp_compliance(grid, solve_params, density, B, loads, cg_tolerance,
                            cg_max_iterations, /*initial_guess=*/nullptr,
                            /*solver=*/nullptr, solver_kind);
@@ -423,7 +425,8 @@ FixedDesignAnalysis analyze_fixed_design(
   // TO rebuild stage 2: the wall-aware stress per voxel, kept only when it is to
   // be read over a size (empty otherwise, so today's path allocates nothing).
   const bool read_over_size =
-      strength_mode() == StrengthMode::Size && knockdown.stress_reading_mm > 0.0;
+      strength_mode() == StrengthMode::Size &&
+      stress_is_read_over_size(knockdown.stress_reading_mm, grid.spacing);
   std::vector<double> von_mises_eff_field;
   if (read_over_size && knockdown.width_aware)
     von_mises_eff_field.assign(grid.voxel_count(), 0.0);
@@ -512,14 +515,168 @@ FixedDesignAnalysis analyze_fixed_design(
   // Not yet done here: the interlayer reading (its length is a fifth of this one,
   // under a voxel so far).
   const double max_von_mises_one_voxel = max_von_mises;
+  const int ndi[6] = {1, -1, 0, 0, 0, 0}, ndj[6] = {0, 0, 1, -1, 0, 0}, ndk[6] = {0, 0, 0, 0, 1, -1};
+  // The stress of the MATERIAL in every voxel that holds some (printed voxels and
+  // the voxels the surface cuts; stress_measure.hpp, "the edge of the part"), read
+  // from `sol` with the full modulus. Lattice and loose voxels are left at zero.
+  auto material_stress = [&](const decltype(sc.solution)& sol, std::vector<double>& vm,
+                             std::vector<std::array<double, 6>>* tensor) {
+    vm.assign(grid.voxel_count(), 0.0);
+    if (tensor) tensor->assign(grid.voxel_count(), std::array<double, 6>{0, 0, 0, 0, 0, 0});
+    for (int k = 0; k < grid.nz; ++k)
+      for (int j = 0; j < grid.ny; ++j)
+        for (int i = 0; i < grid.nx; ++i) {
+          if (!grid.solid(i, j, k)) continue;
+          const std::size_t idx = grid.index(i, j, k);
+          if (!(density[idx] >= kStressMaterialFloor)) continue;
+          if (has_lattice && lat_mask[idx]) continue;
+          if (!loose.empty() && loose[idx]) continue;
+          const Hex8Stress st = hex8_stress(params.youngs_modulus, params.poisson, grid.spacing,
+                                            element_dofs(grid, sol, i, j, k));
+          vm[idx] = st.von_mises;
+          if (tensor) (*tensor)[idx] = st.sigma;
+        }
+  };
+  // Tests ask for the material field of the solve they made (their own stiffness).
+  if (knockdown.record_material_stress && !read_over_size)
+    material_stress(sc.solution, out.von_mises_material_field, nullptr);
+
+  // TO rebuild stage 2 (ledger A-02), THE SIZE FORM. The stress that decides is read
+  // over the material's length where the member is thick enough for that reading to
+  // mean something, and at one voxel by today's form where it is not:
+  //   * the reading over a size comes from its OWN solve on real stiffness (E x
+  //     fill), averaged over the size with the ball free to sit on the part's edge;
+  //   * where the member under the ball is thinner than TWICE the size, the ball
+  //     would reach across it (in bending it averages across the neutral line and
+  //     reads low; the critical-distance method is not meant for sections as thin
+  //     as its own length: Taylor 2007), so that voxel keeps TODAY'S solve and
+  //     one-voxel reading (the reviewer's ruling 2026-11-27, item 2);
+  //   * the wall-aware maximum and the across-layer check are read the same way.
+  double max_interlayer = max_interlayer_tension(grid, stress, build_dir);
+  const double max_interlayer_one_voxel = max_interlayer;
+  bool size_form_used = false;
   if (read_over_size) {
-    max_von_mises = peak_stress_over_size(grid, out.von_mises_field, density, kIso,
-                                          knockdown.stress_reading_mm);
-    if (!von_mises_eff_field.empty())
-      max_von_mises_eff = peak_stress_over_size(grid, von_mises_eff_field, density, kIso,
-                                                knockdown.stress_reading_mm);
+    SimpParams real = params;
+    real.penalty = 1.0;
+    bool solved = true;
+    SimpCompliance sc_real;
+    try {
+      sc_real = simp_compliance(grid, real, density, B, loads, cg_tolerance, cg_max_iterations,
+                                /*initial_guess=*/nullptr, /*solver=*/nullptr, solver_kind);
+    } catch (const SolverNonConvergence&) {
+      solved = false;  // today's reading stands, whole
+    }
+    if (solved) {
+      const double size = knockdown.stress_reading_mm;
+      std::vector<double> vm_real;
+      std::vector<std::array<double, 6>> tensor_real;
+      material_stress(sc_real.solution, vm_real, &tensor_real);
+      out.von_mises_material_field = vm_real;
+      // How thick the member is at each voxel (the largest ball inside the part
+      // that holds it); a cut voxel takes its thickest printed face neighbour's.
+      // Measured HERE with the outside of the grid as air: the grid is the part's
+      // bounding box, and with the default (outside not air) a member lying against
+      // the box, or a part that fills it, reads as thick as the measure reaches and
+      // would never fall back (found on the beam test, 2026-11-27).
+      // CONVEX CORNERS JOIN THEIR MEMBER (lattice_member_width_mm, the rule made for
+      // the lattice's cells-per-member floor): the largest ball that holds an edge
+      // or corner voxel of a THICK member is small, so without this every edge of
+      // every part read as thin and fell back (the beam test, 2026-11-27).
+      const std::vector<double> width = lattice_member_width_mm(
+          grid, density, kIso, kn.thickness_cap_voxels, kStressThinMemberSizes * size,
+          grid.spacing);
+      auto width_at = [&](int i, int j, int k) {
+        const std::size_t idx = grid.index(i, j, k);
+        if (density[idx] > kIso) return width[idx];
+        double w = 0.0;
+        for (int q = 0; q < 6; ++q) {
+          const int a = i + ndi[q], b = j + ndj[q], c = k + ndk[q];
+          if (a < 0 || b < 0 || c < 0 || a >= grid.nx || b >= grid.ny || c >= grid.nz) continue;
+          const std::size_t u = grid.index(a, b, c);
+          if (density[u] > kIso && width[u] > w) w = width[u];
+        }
+        return w;
+      };
+      // The wall-aware stress of the real-stiffness solve (a cut voxel takes the
+      // knockdown of its thinnest-walled printed face neighbour).
+      std::vector<double> eff_real;
+      if (!von_mises_eff_field.empty()) {
+        eff_real.assign(grid.voxel_count(), 0.0);
+        for (int k = 0; k < grid.nz; ++k)
+          for (int j = 0; j < grid.ny; ++j)
+            for (int i = 0; i < grid.nx; ++i) {
+              const std::size_t idx = grid.index(i, j, k);
+              if (!(vm_real[idx] > 0.0)) continue;
+              double k_v = 1.0;
+              if (density[idx] > kIso) {
+                k_v = width_aware_knockdown(knockdown.infill_percent, member_width_mm[idx],
+                                            knockdown.wall_thickness_mm, knockdown.infill_exponent,
+                                            knockdown.infill_floor);
+              } else {
+                bool found = false;
+                for (int q = 0; q < 6; ++q) {
+                  const int a = i + ndi[q], b = j + ndj[q], c = k + ndk[q];
+                  if (a < 0 || b < 0 || c < 0 || a >= grid.nx || b >= grid.ny || c >= grid.nz)
+                    continue;
+                  const std::size_t u = grid.index(a, b, c);
+                  if (!(density[u] > kIso)) continue;
+                  const double kq = width_aware_knockdown(
+                      knockdown.infill_percent, member_width_mm[u], knockdown.wall_thickness_mm,
+                      knockdown.infill_exponent, knockdown.infill_floor);
+                  if (!found || kq < k_v) k_v = kq;
+                  found = true;
+                }
+              }
+              eff_real[idx] = vm_real[idx] / k_v;
+            }
+      }
+      // Each reading: the ball centred on voxel centres AND on the part's surface
+      // nodes (stress_measure.hpp), the larger of the two voxel by voxel.
+      auto over_size = [&](const std::vector<double>& f, double d) {
+        std::vector<double> r = stress_over_size(grid, f, density, kStressMaterialFloor, d);
+        const std::vector<double> s =
+            stress_over_size_on_surface(grid, f, density, kStressMaterialFloor, d);
+        for (std::size_t q = 0; q < r.size(); ++q)
+          if (s[q] > r[q]) r[q] = s[q];
+        return r;
+      };
+      const std::vector<double> r_vm = over_size(vm_real, size);
+      const std::vector<double> r_eff =
+          eff_real.empty() ? std::vector<double>() : over_size(eff_real, size);
+      const double across_size = kAcrossLayerLengthFactor * size;
+      const std::vector<double> r_across =
+          over_size(interlayer_tension_field(grid, tensor_real, build_dir), across_size);
+      const std::vector<double> across_today = interlayer_tension_field(grid, stress, build_dir);
+      double m_vm = 0.0, m_eff = 0.0, m_across = 0.0;
+      std::size_t thick = 0, thin = 0;
+      for (int k = 0; k < grid.nz; ++k)
+        for (int j = 0; j < grid.ny; ++j)
+          for (int i = 0; i < grid.nx; ++i) {
+            const std::size_t idx = grid.index(i, j, k);
+            if (!grid.solid(i, j, k) || !(density[idx] >= kStressMaterialFloor)) continue;
+            const double w = width_at(i, j, k);  // +infinity = thicker than the measure reaches
+            const bool printed = density[idx] > kIso;
+            if (w >= kStressThinMemberSizes * size) {
+              ++thick;
+              m_vm = std::max(m_vm, r_vm[idx]);
+              if (!r_eff.empty()) m_eff = std::max(m_eff, r_eff[idx]);
+            } else if (printed) {
+              ++thin;
+              m_vm = std::max(m_vm, out.von_mises_field[idx]);
+              if (!von_mises_eff_field.empty()) m_eff = std::max(m_eff, von_mises_eff_field[idx]);
+            }
+            if (w >= kStressThinMemberSizes * across_size) m_across = std::max(m_across, r_across[idx]);
+            else if (printed) m_across = std::max(m_across, across_today[idx]);
+          }
+      max_von_mises = m_vm;
+      if (!von_mises_eff_field.empty()) max_von_mises_eff = m_eff;
+      if (max_interlayer > 0.0) max_interlayer = m_across;
+      size_form_used = thick > 0;
+      out.stress_thin_member_voxels = thin;
+      out.stress_thick_member_voxels = thick;
+    }
   }
-  const double max_interlayer = max_interlayer_tension(grid, stress, build_dir);
+  (void)max_interlayer_one_voxel;
 
   // Per-node displacement of the SAME solve — no new solve. DOF-ordered; exposed
   // on printed nodes exactly as solved, zeroed on nodes attached only to
@@ -548,21 +705,24 @@ FixedDesignAnalysis analyze_fixed_design(
   // relative density, counted above). The solid figure is kept beside it.
   out.mass_grams_solid = out.mass_grams;
   if (to_stage2_on() && lattice_voxels == 0) {
-    // The member widths: the gate's own when the wall-aware posture measured them;
-    // otherwise measured here for the grams alone (production ships with that
-    // posture off, so without this the share was always 1 and the grams solid:
-    // found on the stand at res 64, 2026-11-25).
-    std::vector<double> width_for_mass;
-    if (member_width_mm.size() != density.size())
-      width_for_mass = local_member_thickness_mm(grid, density, kIso, kn.thickness_cap_voxels);
-    const std::vector<double>& member_width_mm_for_mass =
-        member_width_mm.size() == density.size() ? member_width_mm : width_for_mass;
+    // The shell model (printed_mass.hpp): walls by distance from the side surface,
+    // solid skins under up-facing and over down-facing surfaces, the rest at the
+    // infill. Within 3 % of a real slicer on the made sample bracket. The skins
+    // are counted only when the part is printed along the grid's z (a tilted
+    // build direction gets walls only, which reads a little low). Skin
+    // thicknesses are the slicer's usual ones until the job carries its own.
     std::vector<double> printed_density(density.size(), 0.0);
     for (std::size_t idx = 0; idx < density.size(); ++idx)
       if (grid.tags[idx] != VoxelTag::Empty && density[idx] > kIso) printed_density[idx] = 1.0;
-    out.mass_grams = printed_mass(grid, printed_density, 0.5, member_width_mm_for_mass,
-                                  knockdown.wall_thickness_mm, knockdown.infill_percent,
-                                  material.density_g_cm3)
+    const double blen = std::sqrt(build_dir.x * build_dir.x + build_dir.y * build_dir.y +
+                                  build_dir.z * build_dir.z);
+    const bool along_z = blen > 0.0 && std::fabs(build_dir.z) > 0.99 * blen;
+    const bool up = build_dir.z >= 0.0;
+    const double top_mm = along_z ? (up ? kStage2TopSkinMm : kStage2BottomSkinMm) : 0.0;
+    const double bottom_mm = along_z ? (up ? kStage2BottomSkinMm : kStage2TopSkinMm) : 0.0;
+    out.mass_grams = printed_mass_shell(grid, printed_density, 0.5, knockdown.wall_thickness_mm,
+                                        top_mm, bottom_mm, knockdown.infill_percent,
+                                        material.density_g_cm3)
                          .grams;
   }
 
@@ -600,6 +760,7 @@ FixedDesignAnalysis analyze_fixed_design(
   out.printed_fraction = printed_fraction;
   out.max_von_mises = max_von_mises;
   out.max_von_mises_one_voxel = max_von_mises_one_voxel;
+  out.stress_read_over_mm = size_form_used ? knockdown.stress_reading_mm : 0.0;
   out.max_interlayer_tension = max_interlayer;
   out.margin = margin;
   out.margin_effective = margin_effective;

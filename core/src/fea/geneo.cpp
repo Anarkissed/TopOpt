@@ -569,7 +569,15 @@ struct GeneoState {
   std::vector<double> ccoarse;
 };
 
-GeneoState g_geneo;
+GeneoState g_geneo;  // the default run state (old entry points); `enabled` is the default switch
+}  // namespace
+// E-01: a run's own GenEO state (SolverRunState), installed for a solve handed one.
+struct GeneoRunState {
+  GeneoState st;
+};
+namespace {
+thread_local GeneoRunState* g_geneo_run = nullptr;
+inline GeneoState& geneo_st() { return g_geneo_run != nullptr ? g_geneo_run->st : g_geneo; }
 
 // PROBE OVERRIDE STATE (see geneo.hpp). Default-constructed => every field IS
 // the shipped tripwire constant, so a production run reads the recipe it always
@@ -846,7 +854,18 @@ bool build_basis(GeneoState& S, const MatfreeReduced& m,
 
 }  // namespace
 
-bool geneo_enabled() { return g_geneo.enabled; }
+GeneoRunState* geneo_new_run_state() { return new GeneoRunState(); }
+void geneo_delete_run_state(GeneoRunState* r) { delete r; }
+GeneoRunState* geneo_set_run_override(GeneoRunState* r) {
+  GeneoRunState* prev = g_geneo_run;
+  g_geneo_run = r;
+  return prev;
+}
+
+bool geneo_enabled() {
+  if (const SolverSettings* o = mf_settings_override()) return o->geneo_twolevel;
+  return g_geneo.enabled;
+}
 
 bool geneo_set_enabled(bool enable) {
   const bool prev = g_geneo.enabled;
@@ -879,7 +898,7 @@ bool geneo_probe_defaults_match_tripwire() {
 }
 
 void geneo_request_rebuild() {
-  if (g_geneo.have_basis) g_geneo.rebuild_scheduled = true;
+  if (geneo_st().have_basis) geneo_st().rebuild_scheduled = true;
 }
 
 // R6 — reports what tile_cores ACTUALLY produced. Calls the shipped function so
@@ -915,11 +934,11 @@ double geneo_probe_refresh_seconds() { return g_probe_refresh_s; }
 double geneo_probe_apply_seconds() { return g_probe_apply_s; }
 
 void geneo_solve_begin(const MatfreeReduced& m, const MfSolveContext& ctx) {
-  GeneoState& S = g_geneo;
+  GeneoState& S = geneo_st();
   S.active = false;
   S.last = GeneoReport{};
   S.threshold = 0;
-  if (!S.enabled || ctx.grid == nullptr) return;
+  if (!geneo_enabled() || ctx.grid == nullptr) return;
   ++S.solve_index;
 
   const std::uint64_t sfp = structure_fingerprint(m, ctx);
@@ -982,15 +1001,15 @@ void geneo_solve_begin(const MatfreeReduced& m, const MfSolveContext& ctx) {
 }
 
 int geneo_engage_threshold() {
-  const GeneoState& S = g_geneo;
-  if (!S.enabled) return -1;
+  const GeneoState& S = geneo_st();
+  if (!geneo_enabled()) return -1;
   return S.threshold;
 }
 
 bool geneo_engage_now(const MatfreeReduced& m, const MfSolveContext& ctx,
                       int iterations_burned) {
-  GeneoState& S = g_geneo;
-  if (!S.enabled || ctx.grid == nullptr) return false;
+  GeneoState& S = geneo_st();
+  if (!geneo_enabled() || ctx.grid == nullptr) return false;
   const std::uint64_t sfp = structure_fingerprint(m, ctx);
 
   // A held basis for THIS structure: refresh-and-reuse, or pay a scheduled
@@ -1042,7 +1061,7 @@ bool geneo_engage_now(const MatfreeReduced& m, const MfSolveContext& ctx,
 }
 
 void geneo_apply(const double* r, double* z) {
-  GeneoState& S = g_geneo;
+  GeneoState& S = geneo_st();
   const int Nt = S.Nt;
   if (!S.active || Nt == 0) return;
   const double t_apply0 = now_s();
@@ -1095,8 +1114,8 @@ void log_decision(GeneoState& S, int iterations, bool converged) {
 }
 
 void geneo_solve_end(int iterations, bool converged) {
-  GeneoState& S = g_geneo;
-  if (!S.enabled) return;
+  GeneoState& S = geneo_st();
+  if (!geneo_enabled()) return;
   if (!S.active) {
     // The deflation never engaged on this solve. If a basis was HELD, that is
     // the ENGAGEMENT GATE declining — a decision, with a reason and numbers —
@@ -1143,25 +1162,25 @@ void geneo_solve_end(int iterations, bool converged) {
   S.active = false;
 }
 
-GeneoReport geneo_last_report() { return g_geneo.last; }
+GeneoReport geneo_last_report() { return geneo_st().last; }
 
-long long geneo_basis_builds() { return g_geneo.builds; }
-long long geneo_coarse_refreshes() { return g_geneo.refreshes; }
-long long geneo_armed_solves() { return g_geneo.armed_solves; }
-long long geneo_declined_solves() { return g_geneo.declined_solves; }
+long long geneo_basis_builds() { return geneo_st().builds; }
+long long geneo_coarse_refreshes() { return geneo_st().refreshes; }
+long long geneo_armed_solves() { return geneo_st().armed_solves; }
+long long geneo_declined_solves() { return geneo_st().declined_solves; }
 
 int geneo_decision_count() {
-  return static_cast<int>(g_geneo.decisions.size());
+  return static_cast<int>(geneo_st().decisions.size());
 }
 GeneoDecision geneo_decision_at(int i) {
-  if (i < 0 || i >= static_cast<int>(g_geneo.decisions.size()))
+  if (i < 0 || i >= static_cast<int>(geneo_st().decisions.size()))
     return GeneoDecision{};
-  return g_geneo.decisions[static_cast<std::size_t>(i)];
+  return geneo_st().decisions[static_cast<std::size_t>(i)];
 }
-long long geneo_decisions_dropped() { return g_geneo.decisions_dropped; }
-int geneo_basis_dim() { return g_geneo.Nt; }
+long long geneo_decisions_dropped() { return geneo_st().decisions_dropped; }
+int geneo_basis_dim() { return geneo_st().Nt; }
 std::size_t geneo_basis_bytes() {
-  return static_cast<std::size_t>(g_geneo.basis_bytes);
+  return static_cast<std::size_t>(geneo_st().basis_bytes);
 }
 
 }  // namespace fea_detail
