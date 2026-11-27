@@ -29,6 +29,7 @@
 #include "topopt/fea.hpp"
 #include "topopt/materials.hpp"
 #include "topopt/simp.hpp"
+#include "topopt/stress_measure.hpp"
 
 using topopt::DirichletBC;
 using topopt::NodalLoad;
@@ -77,6 +78,10 @@ std::vector<NodalLoad> edge_tractions(const VoxelGrid& g, double sxx, double syy
 // the TRUE tip along the long axis: a straight line through two voxels, a curve
 // through three. The larger of the two tips, over the far stress. Filled by peak_ratio.
 double g_carry_line = 0.0, g_carry_curve = 0.0;
+// The engine's carry (stress_carried_to_surface) over the far stress, the loaded
+// edges masked, and its unresolved count. Filled by peak_ratio.
+double g_engine_carry = 0.0;
+std::size_t g_engine_unresolved = 0;
 
 // The peak von Mises over voxels / the far stress, for the ellipse with short
 // semi-axis `b_voxels` and stiffness E x fill^penalty in the voxels the hole cuts.
@@ -142,6 +147,7 @@ double peak_ratio(int b_voxels, double penalty, bool* ok) {
   params.penalty = penalty;
 
   topopt::KnockdownSpec knockdown;
+  knockdown.record_material_stress = true;  // for the engine carry below
   const topopt::FixedDesignAnalysis res = topopt::analyze_fixed_design(
       g, params, density, bcs, loads, m, Vec3{0.0, 0.0, 1.0}, 1e-8, 20000,
       topopt::SolverKind::MultigridCG_Matfree, 0.0, knockdown, true,
@@ -183,6 +189,18 @@ double peak_ratio(int b_voxels, double penalty, bool* ok) {
       }
     }
   }
+  g_engine_carry = 0.0;
+  g_engine_unresolved = 0;
+  if (res.von_mises_material_field.size() == density.size()) {
+    std::vector<double> f = res.von_mises_material_field;  // the loaded edges masked
+    for (int k = 0; k < g.nz; ++k)
+      for (int j = 0; j < w; ++j)
+        for (int i = 0; i < w; ++i)
+          if (i < 3 || j < 3 || i >= w - 3 || j >= w - 3) f[g.index(i, j, k)] = 0.0;
+    const topopt::SurfaceCarry sc = topopt::stress_carried_to_surface(g, f, density);
+    g_engine_carry = sc.peak / kFarStress;
+    g_engine_unresolved = sc.unresolved;
+  }
   return res.max_von_mises / kFarStress;
 }
 
@@ -200,7 +218,8 @@ int main(int argc, char** argv) {
   std::printf("%-20s", "b in voxels");
   for (int b : kB) std::printf(" %8d", b);
   std::printf("   lowest to highest against the reference\n");
-  double carry_line[3][4] = {}, carry_curve[3][4] = {};
+  double carry_line[3][4] = {}, carry_curve[3][4] = {}, engine_carry[3][4] = {};
+  std::size_t engine_unresolved[3][4] = {};
   for (int p = 0; p < 3; ++p) {
     std::printf("%-20s", kName[p]);
     int bi = 0;
@@ -215,6 +234,8 @@ int main(int argc, char** argv) {
       std::fflush(stdout);
       carry_line[p][bi] = g_carry_line;
       carry_curve[p][bi] = g_carry_curve;
+      engine_carry[p][bi] = g_engine_carry;
+      engine_unresolved[p][bi] = g_engine_unresolved;
       ++bi;
     }
     std::printf("   %+6.1f to %+6.1f %%  %s\n", low[p], high[p],
@@ -225,6 +246,11 @@ int main(int argc, char** argv) {
     for (int q = 0; q < 4; ++q)
       std::printf("  %+.1f / %+.1f", 100.0 * (carry_line[p][q] / kReference - 1.0),
                   100.0 * (carry_curve[p][q] / kReference - 1.0));
+    std::printf("\n");
+    std::printf("[carry] %-20s ENGINE carry, percent against the reference, b = 3, 4, 5, 6:", kName[p]);
+    for (int q = 0; q < 4; ++q)
+      std::printf("  %+.1f (unresolved %zu)", 100.0 * (engine_carry[p][q] / kReference - 1.0),
+                  engine_unresolved[p][q]);
     std::printf("\n");
   }
   const bool pass = low[1] >= -5.0;

@@ -51,6 +51,10 @@ namespace {
 // the same solve, set by main() for one resolution at a time (mm in, reading out).
 std::vector<double> g_switch_sizes_mm;
 std::vector<double> g_switch_readings;
+// The engine's carry (stress_carried_to_surface) over the far stress, the loaded
+// edges masked, and its unresolved count. Filled by peak_ratio.
+double g_engine_carry = 0.0;
+std::size_t g_engine_unresolved = 0;
 
 constexpr double kFarStress = 10.0;   // MPa
 constexpr double kTiltDeg = 30.0;
@@ -177,6 +181,18 @@ double peak_ratio(int radius_voxels, bool exact_fill, double penalty, bool* ok,
                                                    topopt::kStressMaterialFloor,
                                                    kSizesMm[q]) /
                      kFarStress;
+  g_engine_carry = 0.0;
+  g_engine_unresolved = 0;
+  if (res.von_mises_material_field.size() == density.size()) {
+    std::vector<double> f = res.von_mises_material_field;  // the loaded edges masked
+    for (int k = 0; k < g.nz; ++k)
+      for (int j = 0; j < w; ++j)
+        for (int i = 0; i < w; ++i)
+          if (i < 3 || j < 3 || i >= w - 3 || j >= w - 3) f[g.index(i, j, k)] = 0.0;
+    const topopt::SurfaceCarry sc = topopt::stress_carried_to_surface(g, f, density);
+    g_engine_carry = sc.peak / kFarStress;
+    g_engine_unresolved = sc.unresolved;
+  }
   return res.max_von_mises / kFarStress;
 }
 
@@ -199,10 +215,14 @@ int main(int argc, char** argv) {
     row.ratio_binary = peak_ratio(r, false, 3.0, &ok1);
     row.ratio_fill = peak_ratio(r, true, 3.0, &ok2);
     row.ratio_fill_linear = peak_ratio(r, true, 1.0, &ok3, row.over_size);
+    const double engine_carry = g_engine_carry;
+    const std::size_t engine_unresolved = g_engine_unresolved;
     if (!ok1 || !ok2 || !ok3) ++failures;
     std::printf("%-12d %9.3f %14.3f %16.3f %14.3f %9.3f %9.3f %9.3f\n", r,
                 kHoleRadiusMm / r, row.ratio_binary, row.ratio_fill, row.ratio_fill_linear,
                 row.over_size[0], row.over_size[1], row.over_size[2]);
+    std::printf("[carry] hole radius %d voxels: ENGINE carry (E x fill), percent against the textbook %+.1f, unresolved %zu\n",
+                r, 100.0 * (engine_carry / kTextbook - 1.0), engine_unresolved);
     rows.push_back(row);
   }
   auto band = [&](double Row::*f, const char* name) {

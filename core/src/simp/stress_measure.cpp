@@ -157,6 +157,145 @@ std::vector<double> stress_over_size_on_surface(const VoxelGrid& grid,
   return out;
 }
 
+SurfaceCarry stress_carried_to_surface(const VoxelGrid& grid, const std::vector<double>& field,
+                                       const std::vector<double>& density) {
+  const std::size_t n = grid.voxel_count();
+  if (field.size() != n || density.size() != n)
+    throw std::invalid_argument("stress_carried_to_surface: field / density size != voxel_count");
+  auto inside = [&](int i, int j, int k) {
+    return i >= 0 && j >= 0 && k >= 0 && i < grid.nx && j < grid.ny && k < grid.nz;
+  };
+  // The fill the normal is taken from: 0 outside the grid and on Empty voxels.
+  auto fill = [&](int i, int j, int k) {
+    if (!inside(i, j, k)) return 0.0;
+    const std::size_t v = grid.index(i, j, k);
+    if (grid.tags[v] == VoxelTag::Empty) return 0.0;
+    return density[v];
+  };
+  auto air = [&](int i, int j, int k) {
+    if (!inside(i, j, k)) return true;
+    const std::size_t v = grid.index(i, j, k);
+    return grid.tags[v] == VoxelTag::Empty || !(density[v] >= kStressMaterialFloor);
+  };
+  auto full = [&](int i, int j, int k) {
+    return !air(i, j, k) && density[grid.index(i, j, k)] >= kFullVoxel;
+  };
+  SurfaceCarry out;
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        if (air(i, j, k)) continue;
+        const std::size_t v = grid.index(i, j, k);
+        const bool is_full = density[v] >= kFullVoxel;
+        if (is_full) {
+          out.peak = std::max(out.peak, field[v]);
+          if (!air(i - 1, j, k) && !air(i + 1, j, k) && !air(i, j - 1, k) &&
+              !air(i, j + 1, k) && !air(i, j, k - 1) && !air(i, j, k + 1))
+            continue;  // inside the material: not a surface voxel
+        }
+        // One surface voxel can lie on MORE THAN ONE face of the part (the edge where a
+        // hole's wall meets a flat top face). Each face is carried on its own normal:
+        //  - a FLAT face lying on a voxel boundary along an axis: the neighbour on one
+        //    side is air and the fill does not change towards the other side (a full
+        //    voxel, or a cut voxel whose neighbour behind is cut the same);
+        //  - the CUT face through the voxel: -grad(fill) with the flat axes left out
+        //    (a diagonal normal across an edge would put the surface in the wrong place).
+        const int ijk[3] = {i, j, k};
+        bool flat[3] = {false, false, false};
+        int flat_sign[3] = {0, 0, 0};  // the side the air is on
+        for (int ax = 0; ax < 3; ++ax) {
+          int lo[3] = {i, j, k}, hi[3] = {i, j, k};
+          --lo[ax];
+          ++hi[ax];
+          const bool air_lo = air(lo[0], lo[1], lo[2]), air_hi = air(hi[0], hi[1], hi[2]);
+          if (air_lo == air_hi) {
+            // air on both sides: a sheet one voxel thick along this axis, flat both ways
+            if (air_lo) flat[ax] = true;
+            continue;
+          }
+          const double behind = air_lo ? fill(hi[0], hi[1], hi[2]) : fill(lo[0], lo[1], lo[2]);
+          if (is_full || std::fabs(behind - density[v]) < 0.25) {
+            flat[ax] = true;
+            flat_sign[ax] = air_hi ? 1 : -1;
+          }
+        }
+        (void)ijk;
+        // carry along a unit normal nv with the surface t_surf voxels out from the centre
+        auto carry = [&](const double nv[3], double t_surf) {
+          const double c[3] = {i + 0.5, j + 0.5, k + 0.5};
+          bool have_a = false, have_b = false;
+          std::size_t va = 0, vb = 0;
+          double s_a = 0.0, s_b = 0.0;
+          for (int step = 0; step <= 25 && !have_b; ++step) {
+            const double s = -0.2 * step;
+            const int a = static_cast<int>(std::floor(c[0] + s * nv[0]));
+            const int b = static_cast<int>(std::floor(c[1] + s * nv[1]));
+            const int d = static_cast<int>(std::floor(c[2] + s * nv[2]));
+            if (!full(a, b, d)) continue;
+            const std::size_t u = grid.index(a, b, d);
+            const double su = (a + 0.5 - c[0]) * nv[0] + (b + 0.5 - c[1]) * nv[1] +
+                              (d + 0.5 - c[2]) * nv[2];
+            if (!have_a) {
+              have_a = true;
+              va = u;
+              s_a = su;
+            } else if (u != va && su < s_a - 0.5) {
+              // b at least half a voxel further in than a, measured along the normal: two
+              // voxels side by side across the ray would divide by almost nothing.
+              have_b = true;
+              vb = u;
+              s_b = su;
+            }
+          }
+          if (have_b) {
+            double carried = field[va] + (field[va] - field[vb]) * (t_surf - s_a) / (s_a - s_b);
+            if (carried < 0.0) carried = 0.0;
+            ++out.surface_points;
+            out.peak = std::max(out.peak, carried);
+          } else {
+            const double fallback = have_a ? field[va] : field[v];
+            ++out.unresolved;
+            out.peak_unresolved = std::max(out.peak_unresolved, fallback);
+            out.peak = std::max(out.peak, fallback);
+          }
+        };
+        // The flat faces of a FULL voxel (a cut voxel's flat faces have no full voxel
+        // straight behind them; its cut face carries it).
+        if (is_full)
+          for (int ax = 0; ax < 3; ++ax)
+            if (flat[ax] && flat_sign[ax] != 0) {
+              double nv[3] = {0.0, 0.0, 0.0};
+              nv[ax] = flat_sign[ax];
+              carry(nv, 0.5);
+            }
+        if (is_full) continue;
+        // The cut face: n = -grad(fill), Sobel-weighted over the 3 x 3 x 3 neighbourhood,
+        // the flat axes left out.
+        double g[3] = {0.0, 0.0, 0.0};
+        for (int p = -1; p <= 1; ++p)
+          for (int q = -1; q <= 1; ++q) {
+            const double wgt = (p == 0 ? 2.0 : 1.0) * (q == 0 ? 2.0 : 1.0);
+            g[0] += wgt * (fill(i + 1, j + p, k + q) - fill(i - 1, j + p, k + q));
+            g[1] += wgt * (fill(i + p, j + 1, k + q) - fill(i + p, j - 1, k + q));
+            g[2] += wgt * (fill(i + p, j + q, k + 1) - fill(i + p, j + q, k - 1));
+          }
+        for (int ax = 0; ax < 3; ++ax)
+          if (flat[ax]) g[ax] = 0.0;
+        const double norm = std::sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]);
+        if (norm < 1e-9) {
+          ++out.unresolved;
+          out.peak_unresolved = std::max(out.peak_unresolved, field[v]);
+          out.peak = std::max(out.peak, field[v]);
+          continue;
+        }
+        const double nv[3] = {-g[0] / norm, -g[1] / norm, -g[2] / norm};
+        const double l1 = std::fabs(nv[0]) + std::fabs(nv[1]) + std::fabs(nv[2]);
+        // The true surface along n from the centre, in voxels (material on the - side).
+        carry(nv, (density[v] - 0.5) * l1);
+      }
+  return out;
+}
+
 double peak_stress_over_size(const VoxelGrid& grid, const std::vector<double>& field,
                              const std::vector<double>& density, double iso,
                              double diameter_mm) {

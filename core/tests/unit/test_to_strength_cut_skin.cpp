@@ -46,6 +46,9 @@ struct Out {
   // of the two outermost FULL voxels carried in a straight line out to the TRUE
   // surface (half a voxel plus the skin's fill beyond the outer full voxel's centre).
   double at_surface = 0.0;
+  // The engine's carry (stress_carried_to_surface), mid-span only, / true surface stress.
+  double engine_carry = 0.0;
+  std::size_t engine_unresolved = 0;
   bool ok = false;
 };
 
@@ -149,6 +152,18 @@ Out bend(int core, double fill, double skin_density, double penalty) {
     const double reach = 0.5 + fill;  // voxels from the outer full voxel's centre to the true surface
     o.at_surface = std::max(top + (top - top_in) * reach, bot + (bot - bot_in) * reach) / surface;
   }
+  if (res.von_mises_material_field.size() == n) {
+    // Only mid-span stresses may make the peak: the loaded ends disturb the field.
+    std::vector<double> mid_field = res.von_mises_material_field;
+    for (int k = 0; k < g.nz; ++k)
+      for (int j = 0; j < g.ny; ++j)
+        for (int i = 0; i < g.nx; ++i)
+          if (i < g.nx / 4 || i >= 3 * g.nx / 4 || k < 2 || k >= g.nz - 2)
+            mid_field[g.index(i, j, k)] = 0.0;
+    const topopt::SurfaceCarry sc = topopt::stress_carried_to_surface(g, mid_field, density);
+    o.engine_carry = sc.peak / surface;
+    o.engine_unresolved = sc.unresolved;
+  }
   return o;
 }
 
@@ -175,9 +190,10 @@ int main() {
           continue;
         }
         std::printf("[cut skin]   %s  curvature %.3f (%+.0f %%)   peak %.3f (%+.0f %%)   material-stress peak %.3f   "
-                    "carried to the true surface %.3f (%+.0f %%)\n",
+                    "carried to the true surface %.3f (%+.0f %%)   engine carry %.3f (%+.0f %%), unresolved %zu\n",
                     md.name, o.curvature, 100.0 * (o.curvature - 1.0), o.peak, 100.0 * (o.peak - 1.0),
-                    o.peak_material, o.at_surface, 100.0 * (o.at_surface - 1.0));
+                    o.peak_material, o.at_surface, 100.0 * (o.at_surface - 1.0), o.engine_carry,
+                    100.0 * (o.engine_carry - 1.0), o.engine_unresolved);
         std::fflush(stdout);
       }
     }

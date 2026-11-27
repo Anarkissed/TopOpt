@@ -15,6 +15,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <vector>
 
 #include "topopt/mesh.hpp"   // Vec3
@@ -98,6 +99,27 @@ inline double peak_stress_over_size_edge_and_surface(const VoxelGrid& grid,
     if (s > peak) peak = s;
   return peak;
 }
+
+// THE STRESS AT THE TRUE SURFACE, by a straight-line carry (Svärd 2015, "interior
+// value extrapolation"; measured ahead in the tests' `[carry]` arms 2026-11-27; the
+// engine does not call it yet). At every surface voxel (one the surface cuts, or a
+// full voxel with air across a face) the outward normal is taken from the fill
+// (n = -grad fill, Sobel-weighted); the stress of the first two FULL voxels behind it
+// along -n is carried in a straight line out to where the fill puts the true surface.
+// `field` is the material's stress per voxel (FixedDesignAnalysis::
+// von_mises_material_field, from a solve at real stiffness); `density` the fill.
+// The peak is the largest carried value or full-voxel stress. THE LIMIT: where fewer
+// than two full voxels lie behind a surface point (within 5 voxels) it cannot carry;
+// it reads the nearest full voxel (or the voxel itself) there and counts it as
+// `unresolved`. Throws std::invalid_argument on a size mismatch.
+struct SurfaceCarry {
+  double peak = 0.0;                 // the largest stress read: at the true surface, or in a full voxel
+  std::size_t surface_points = 0;    // surface voxels where the carry was made
+  std::size_t unresolved = 0;        // surface voxels with fewer than two full voxels behind them along the normal
+  double peak_unresolved = 0.0;      // the largest fallback value among those
+};
+SurfaceCarry stress_carried_to_surface(const VoxelGrid& grid, const std::vector<double>& field,
+                                       const std::vector<double>& density);
 
 // The largest reading of stress_over_size (0 when nothing is printed).
 double peak_stress_over_size(const VoxelGrid& grid, const std::vector<double>& field,

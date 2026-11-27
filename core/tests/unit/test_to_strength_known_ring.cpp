@@ -86,6 +86,9 @@ topopt::StepModel inner_face(double cx, double cy, double height) {
 // inner radius, along 32 rays: by a straight line through two voxels and by a curve
 // through three. The largest over the rays, over the pressure. Filled by peak_ratio.
 double g_carry_line = 0.0, g_carry_curve = 0.0;
+// The engine's carry (stress_carried_to_surface) over the pressure, and its unresolved count.
+double g_engine_carry = 0.0;
+std::size_t g_engine_unresolved = 0;
 
 double peak_ratio(int rv, bool exact_fill, double penalty, bool* ok, double* area_error,
                   double* over_size = nullptr) {
@@ -225,6 +228,14 @@ double peak_ratio(int rv, bool exact_fill, double penalty, bool* ok, double* are
       }
     }
   }
+  g_engine_carry = 0.0;
+  g_engine_unresolved = 0;
+  if (res.von_mises_material_field.size() == density.size()) {
+    const topopt::SurfaceCarry sc =
+        topopt::stress_carried_to_surface(g, res.von_mises_material_field, density);
+    g_engine_carry = sc.peak / kPressure;
+    g_engine_unresolved = sc.unresolved;
+  }
   return res.max_von_mises / kPressure;
 }
 
@@ -251,10 +262,12 @@ int main(int argc, char** argv) {
     const double cc_line = g_carry_line, cc_curve = g_carry_curve;
     row.fill_linear = peak_ratio(r, true, 1.0, &ok3, &e3, row.over_size);
     std::printf("[carry] inner radius %d voxels: carried to the true inner face, straight line / curve, percent against the textbook: "
-                "all-or-nothing %+.1f / %+.1f; E x fill^3 %+.1f / %+.1f; E x fill %+.1f / %+.1f\n",
+                "all-or-nothing %+.1f / %+.1f; E x fill^3 %+.1f / %+.1f; E x fill %+.1f / %+.1f; "
+                "ENGINE (E x fill only): %+.1f %%, unresolved %zu\n",
                 r, 100.0 * (cb_line / kTextbook - 1.0), 100.0 * (cb_curve / kTextbook - 1.0),
                 100.0 * (cc_line / kTextbook - 1.0), 100.0 * (cc_curve / kTextbook - 1.0),
-                100.0 * (g_carry_line / kTextbook - 1.0), 100.0 * (g_carry_curve / kTextbook - 1.0));
+                100.0 * (g_carry_line / kTextbook - 1.0), 100.0 * (g_carry_curve / kTextbook - 1.0),
+                100.0 * (g_engine_carry / kTextbook - 1.0), g_engine_unresolved);
     row.area_error = std::max({std::fabs(e1), std::fabs(e2), std::fabs(e3)});
     if (!ok1 || !ok2 || !ok3) ++failures;
     std::printf("%-12d %9.3f %14.3f %16.3f %14.3f %9.3f %9.3f %9.3f %10.2f\n", r,

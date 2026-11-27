@@ -836,3 +836,18 @@ WHAT I DO WITH IT, in order:
 
 Four versions made and accepted both ways; all four files are the same bytes with the switch on as off (the switch changes the number shown and judged, never the shape). One `[shown]` line a version on stderr says which was the lower. Owed before the flip (the ruling): test K, his two parts, the hook, the bracket at full size and the beam with the switch on.
 
+### THE REAL FIX, candidate one as an engine function: `stress_carried_to_surface` (2026-11-27 12:25; stress_measure.hpp/.cpp; print-only rows in four tests; nothing in the engine calls it yet)
+
+What it does: real stiffness on the cut voxels (the caller's solve at penalty 1); for every voxel on the part's surface it finds the surface's normal itself (from the fills' gradient; a flat face lying on voxel boundaries is carried along its own axis, and at an EDGE each face is carried on its own normal), walks inward to the first two FULL voxels and carries their stress in a straight line to where the surface really is. Where there are not two full voxels behind a surface point it says so (`unresolved`) and falls back to the nearest value. Written by a builder to my design; two corrections of mine after reading and after the first run (a divisor guard; the edge rule: the first run blended a hole's wall with the plate's flat face into one diagonal normal and read the plate 38 % low).
+
+Percent against the exact value, real stiffness (E x fill):
+
+| shape | resolution | reading |
+|---|---|---|
+| cut-skin beam, bending (free cut faces) | 4 / 8 / 16 voxels through | -13 to -8 / -4 to -3 / -1 (the same as the hand arm, to the digit) |
+| thick ring, pressure on the bore | bore radius 3 / 4 / 5 / 6 voxels | -13.0 / -4.9 / -4.3 / +1.3 |
+| plate with a round hole (HELD OUT) | hole radius 3 / 4 / 5 / 6 voxels | -28.9 / -13.8 / -14.4 / -9.1 |
+| elliptical hole (HELD OUT) | tip radius 1.5 / 2 / 2.5 / 3 voxels | -37.2 / -36.7 / -34.7 / -15.3 |
+
+WHERE IT STANDS AGAINST THE BAR (never more than 5 % under where the feature is resolved): the beam from 8 voxels through and the ring from 4 voxels of bore meet it; THE PLATE DOES NOT at any resolution tried (9 % low with a hole 6 voxels in radius), and it is a held-out shape, so no allowance set on the beam and ring (about 4 to 5 %) covers it. Why: beside a hole the stress falls away from the edge on a CURVE (it loses about a third within one sixth of the radius); a straight line through the first two full voxels cuts under it. The curve through three voxels over-reads the ring instead (+3 to +15 %, the hand arm). So candidate one is right in kind and too crude at a stress raiser: it needs the fit to know the surface carries no load, which is exactly candidate two (patch recovery with zero traction on the free surface). Next: candidate two as a function beside this one, the same four tests.
+
