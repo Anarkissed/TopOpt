@@ -2,20 +2,33 @@
 
 Status 2026-11-26 19:30: IN PROGRESS. Everything is behind ONE switch, `TOPOPT_STRENGTH` (unset = today, unchanged; `size` = the form below; `stiff` = a measuring arm). The certificate is shared with the lattice strength check: every change here is told to the reviewer and LatticeReview. The history below is in the order it happened; this block is where it stands.
 
-## WHERE IT STANDS (read this first)
+## WHERE IT STANDS (read this first; rewritten 2026-11-27 04:10)
 
-**In plain words, for the maintainer.** The app decides pass or fail from the stress in the single hottest little cube of the part. That number jumps when the detail level changes and is wrong at the part's edge. Stage 2 replaces it, where the detail is fine enough, with the stress averaged over a small region whose size belongs to the plastic (PLA: 1.2 mm), which is what the research says a printed part really fails by. It also shows the weight as it is printed (walls and infill), not as a solid block.
+Everything is behind switches, unset = today: `TOPOPT_STRENGTH=size` (the strength reading and printed grams), `TOPOPT_RECHECK=fill` (one judge). Nothing here is released.
 
-**Done and measured (all behind the switch):**
-- Printed grams, checked against Bambu Studio to within 3 %; the "saved" figure against the part as drawn at the same walls and infill.
-- The averaged reading, on real stiffness, with the averaging region free to sit on the part's edge. Against the textbook on two shapes at four detail levels it is never more than 4.9 % low and within 10 % across detail levels, from 1.75 voxels across upward (set as the switch point). The across-layer check is read the same way (inside the bar at 19 of 20 points; 5.4 % low at one).
-- Under 1.75 voxels across, or for a material with no published length, the job keeps TODAY'S solve and reading whole, and says so (`[strength]` line, the report's `strength_reading`).
-- The reviewer's rulings of 18:37Z, items 2 to 6: answered (tables below).
+**In plain words, for the maintainer.** The app decides pass or fail from the stress in the single hottest little cube of the part. Stage 2 does three things about that number. (1) The weight it shows becomes the weight as printed, walls and infill, not a solid block. (2) Where the detail is fine enough for the plastic and the part is thick enough there, the stress is read as an average over a small region whose size belongs to the plastic, which is what the research says a printed part fails by; everywhere else today's reading is kept, and the job says which was used. (3) The number shown after finishing is made to come from the same kind of check as the optimiser's own ("one judge"); today a cruder second check has the last word and can be far too generous on the lightest versions.
 
-**Found, and not comfortable:**
-- On his materials and usual detail levels the averaged reading rarely switches on (PLA needs a voxel of 0.69 mm or finer; PETG and ABS essentially never; PA6 and PA12 have no length), so for most jobs stage 2 changes the grams and not the strength number.
-- Today's one-voxel reading is itself 13.9 % low on a sharp notch (the ellipse) at one detail level.
-- The number he is SHOWN comes from a second judge, the re-check of the finished file on all-or-nothing voxels: 10 to 27 % optimistic on the textbook plate, and up to 2.3 times the loop's own number on the lightest carved versions. The averaged reading does not reach it.
+**Measured and in the code:**
+- PRINTED GRAMS: within 3 % of Bambu Studio; "saved" is against the part as drawn at the same walls and infill (the stand: 15 % really saved where the solid figures say 23.5 %; the bracket 20 / 33 / 44 %).
+- THE SIZE FORM (real stiffness, its own solve; the stress averaged over the material's size with the ball free to sit on the part's edge and, where the surface lies on voxel boundaries, on its surface nodes). Against the textbook on a plate with a hole, a thick ring, the across-layer case and a beam in bending, at four detail levels: never more than 4.9 % low from 1.75 voxels across (the switch point) and from a member twice the size thick (the thin-member rule). Under either, the job keeps TODAY'S solve and reading whole and says so (`[strength]` line; report key `strength_reading`).
+- ONE JUDGE (`TOPOPT_RECHECK=fill`, 8 sub-samples per voxel edge, by measurement): the re-check of the finished file analyses each voxel's fill. On textbook shapes today's re-check reads the peak 14 to 47 % under the optimiser's check; with one judge the size form agrees within 0.5 % (16 rows) and the one-voxel form within 2.5 % (12 rows). On the sample bracket the lightest version's shown margin comes down from 3.66 to about 2.2 (the optimiser's own: 1.80). No cost in time; memory flat.
+
+**KNOWN LIMITS, stated (ruled):**
+- A-06: TODAY'S one-voxel reading on a member only 2 to 4 voxels thick in bending reads 0.33 to 0.68 of the true surface stress. Not fixed here; carried to stage 4 (the smallest member in voxels through as well as mm).
+- A notch with a tip radius under 2 check voxels is outside the bar (the ellipse: today's reading 13.9 % low at one detail level).
+- The one-voxel form is jumpy in the fill (up to 11 % on an unlucky sliver); a fill-weighted reading is to be measured AFTER one judge flips and would go into both judges together.
+- On his materials at his usual detail the size form rarely switches on (PLA needs a voxel of 0.69 mm or finer; PETG, ABS essentially never; PA6, PA12 no published length): for most of his jobs stage 2 changes the grams and the shown number's honesty (one judge), not the reading itself.
+- Small parts: the size form raises margins by a quarter to two fifths on a 15 mm PLA part, on the published length halved by his rule; shipped on that by ruling, his print replaces it when the rig exists.
+
+**Owed before the stage report goes:**
+- One judge, evidence (b) to (e): running under the lock (`b7_onejudge.sh`): his parts and the made parts before and after, time and memory, test K, lattice jobs A to D.
+- The size form's conditions (b) to (e) on his full-resolution parts on the CURRENT build (B5 ran before the thin-member rule).
+- The app's side (#362): show the form, the printed grams; the job carries his top and bottom layers (`loads.top_solid_mm`, `loads.bottom_solid_mm`: #362's keys, to be read by printed grams once its branch is merged).
+- After one judge flips: the fill-weighted one-voxel reading. For stage 4: the member rule in voxels (A-06). With TOSurface: the step-back before refusing a rung.
+
+(The dated rulings and every table follow below in the order they happened.)
+
+## The rulings and the maintainer's words, dated (kept whole)
 
 **THE REVIEWER'S RULING of 2026-11-27 00:22Z (maintainer-approved):**
 1. "One judge" APPROVED and FIRST in stage 2, because it is the number he is shown. Behind its own switch (`TOPOPT_RECHECK=fill`) so it can flip ahead of the rest. The sub-sampling k is chosen by measurement: the k at which the shown margin moves under 0.5 % when k doubles. Evidence for its flip: (a) plate, ring and ellipse through the re-check path give the certificate's numbers within 1 %; (b) his parts' shown margins before and after (expect within 1 %), and the bracket, hook and beam: shown against certificate, before and after; (c) time and peak memory of the re-check on his largest job, one thread; (d) test K; (e) lattice jobs A to D, LatticeReview told what moves first.
@@ -38,13 +51,6 @@ Also ruled the same hour (stage 5): the connection-rule test on the hook PASSES;
 **KNOWN LIMIT, STATED (the reviewer's ruling 2026-11-27 07:38Z: "the most important line in your report"):** TODAY'S SHIPPED one-voxel reading, on a member only 2 to 4 voxels thick in BENDING, reads 0.33 to 0.68 of the true surface stress (measured on a beam in pure bending: 0.33 with 2 voxels through the member, 0.68 with 4, 0.85 with 8, 0.93 with 16). It is the grid: a few linear elements cannot carry a bending gradient. It is in the shipped check with or without this stage, so a thin bending member can pass today with a margin up to three times too good. Stage 2 does not fix it (its size form falls back to that same reading on thin members, as ruled). It is carried to STAGE 4: the smallest member is stated in voxels THROUGH as well as in mm, the number set by measurement on the beam at 2, 3, 4, 6 and 8 voxels through, and the automatic resolution must honour it; a candidate to measure there is stress recovered at the surface from its neighbours (superconvergent patch recovery, Zienkiewicz and Zhu 1992, DOI 10.1002/nme.1620330702). Ledger: A-06.
 
 **THE REVIEWER'S RULING of 2026-11-27 07:38Z:** (a) YES to the surface-node ball and the corner-aware width, on the beam and the three shapes, then the switch point again, then the 15 mm part restated. (b) the limit above, in the stage file and the ledger now, and in stage 4. (c) scenario_weights check (c): give it a margin the physics supports or state what it guards; low priority.
-
-**Owed, in order:**
-- The surface-node ball and the corner-aware width in the engine (behind the switch), re-measured on the beam, the three shapes and the switch point; then the 15 mm part again.
-- ONE JUDGE: k by measurement (or the finding that it has no answer for the one-voxel form), evidence (a) to (e).
-- The step-back (the optimiser's loop is in `plsm.cpp`, TOSurface's file: to agree who edits it).
-- Conditions (b) to (e) again on his full-resolution parts with the size form (`b5_stage2.sh`, lock).
-- The app's side (#362): show the form and the printed grams.
 
 ## The problem, in plain words
 
@@ -587,3 +593,184 @@ FINDING 1 TESTED (02:30, a measuring arm inside the test, not in the engine): th
 | `size`, forced to 3.6 mm | "the stress is read over 3.60 mm ... on real stiffness" | 4.101 -> 4.093 | 84.88 g |
 
 The part as drawn prints at 100.13 g of 114.98 g solid, so the version really saves 15.2 % of printed weight (the solid figures say 23.5 %). With the switch on and his material the STRENGTH NUMBER DOES NOT MOVE (2.597 both ways): PA12 has no published length, as ruled. Forced to 3.6 mm the margin would read 58 % higher (4.09): shown only to say what an averaged reading would do on this part; it is not what ships for PA12, and that run was made on a build from BEFORE the thin-member rule. Runs 526 / 458 / 516 s: the switch costs no time on this job. The bracket's forced run: see the folder `opt11/sample_a/size36`.
+
+### The two fixes IN THE ENGINE, on the beam (2026-11-27 02:48; behind `TOPOPT_STRENGTH=size`)
+
+`stress_over_size_on_surface` (the ball also centred on the nodes where material meets air; `stress_measure.cpp`) and the corner-aware member width (`lattice_member_width_mm` with the floor at twice the size) are in `analyze.cpp`. The beam again:
+
+| thickness | what the job reads | job's reading | own true value | off |
+|---|---|---|---|---|
+| 0.5 x the size | one voxel (fell back) | 0.33 | (0.97) | the grid's limit, A-06 |
+| 1 x | one voxel (fell back) | 0.68 | (0.64) | the grid's limit, A-06 |
+| 2 x | over the size, every voxel thick, none thin | 0.778 | 0.818 | -4.9 % |
+| 4 x | over the size, every voxel thick, none thin | 0.893 | 0.909 | -1.7 % |
+
+So the engine now gives what the measuring arm gave: inside the 5 % bar from twice the size, and the edge voxels no longer fall back (0 thin where there were 360 and 392). The margin at twice the size is thin (-4.9 %). OWED NEXT: the plate, ring, ellipse and across-layer tests still read with voxel-centred balls only; they are switched to the engine's combined reading and the switch point (1.75 voxels) and the bar are measured again on all of them; then the 15 mm part.
+
+### The surface-node ball NARROWED, and everything measured again together (2026-11-27 03:39; behind `TOPOPT_STRENGTH=size`)
+
+First form (every node where material meets air), on the curved shapes: WRONG the other way. The plate and the ring read 14 to 68 % HIGH at 1.75 to 2 voxels across and 10 to 23 % high at 3 to 4 (a node on a cut surface averages mostly sliver voxels, whose stress the solve reads high). Corrected the same hour: a surface node counts only where EVERY voxel at it is full, that is, where the surface lies on voxel boundaries and a voxel-centred ball cannot reach it; where the surface cuts voxels the voxel-centred ball already sits on the edge.
+
+With that, all four tests on one build:
+
+| test | result |
+|---|---|
+| the beam in bending | falls back at 0.5 and 1 x the size; -4.9 % at 2 x, -1.7 % at 4 x; no edge voxel falls back |
+| plate with a hole, by voxels across | 1.50: +7.1 to +7.5; 1.75: -2.9 to +2.9; 2.00: -4.9 to +2.0; 2.50: -4.0 to +2.8; 3.00: -0.8 to +5.2; 4.00: +0.8 to +4.4 (the figures of 11-26, to the digit) |
+| thick ring | 1.50: +4.1 to +11.3; 1.75: +1.3 to +3.0; 2.00: +1.5 to +3.0; 2.50: +2.5 to +5.2; 3.00: +5.5 to +8.2; 4.00: +4.6 to +6.9 (the same) |
+| across the layers (plate 8 voxels thick, through analyze) | 1.75: +2.4 to +8.0; 2.00: -0.2 to +7.0; 2.50: -1.0 to +6.8; 3.00: +0.7 to +8.2; 4.00: +1.3 to +6.9 |
+
+So: the switch point of 1.75 voxels stands (every figure on the curved shapes between -4.9 and +8.2 % from there up, none more than 5 % low), the flat-face miss is cured (-11.2 % became -4.9 %), and the thin-member rule falls back where ruled. The two thin margins, said again: -4.9 % at 2.0 voxels across on the coarsest plate, and -4.9 % on the beam at twice the size. Owed: the 15 mm part restated with all of this (needs a CLI from this tip; after B7).
+
+### THE 15 mm PART RESTATED (2026-11-27 03:56, build eb126ecf: the thin-member rule, the surface-node ball, the corner-aware width)
+
+The sample bracket at 15 % size, res 48 (voxel 0.31 mm), PLA's own size 1.2 mm (3.8 voxels), drawn faces, automatic pad, one thread. Shown margin:
+
+| version | switch off | size, as first measured (11-26, no thin-member rule) | size, as ruled (now) | now against off |
+|---|---|---|---|---|
+| 0.68 | 6.50 | 8.65 | 8.20 | +26 % |
+| 0.52 | 6.51 | 8.65 | 8.20 | +26 % |
+| 0.38 | 5.25 | 7.87 | 6.64 | +26 % |
+| 0.26 | 4.24 | 5.97 | 6.03 | +42 % |
+
+So the "33 to 41 %" becomes 26 % on the three heavier versions (their thin sections now keep today's reading) and 42 % on the lightest, whose deciding spot is in a section thick enough to be read over the size. Cost with the second solve: 576 s against 631 s with the switch off (no slower on this job); peak memory 174 MB. Rests, as before, on the published length halved by his rule; his print replaces it when the rig exists (the reviewer's ruling: ship on the published value).
+
+Unit checks for the surface-node ball (`test_to_printed_mass`, 0 failures): on a full block with stress rising to 95 at a face, the voxel-centred ball over 4 voxels reads 89.76 and the ball on the face 91.90; where the face carries a cut layer no surface node counts; a ball under one voxel reads nothing on the surface.
+
+### ONE JUDGE ON HIS OWN PART: evidence (b) FAILS (2026-11-27 05:05, B7 under the lock; Top Motor Mount, res 96, drawn faces, automatic pad)
+
+| version | certificate | shown, re-check off | shown, `TOPOPT_RECHECK=fill:8` |
+|---|---|---|---|
+| 0.68 | 1.648 | 1.648 | 1.07: REFUSED ("After finishing, the margin is 1.07x (needs 1.5x)") |
+| 0.52 | 1.660 | 1.657 | 1.06: REFUSED |
+| 0.38 | 1.667 | 1.666 | 1.035: REFUSED |
+| 0.26 | 1.694 | 1.679 | 1.00: REFUSED |
+
+With one judge on, EVERY version of his part is refused. The reviewer expected "within 1 %" on his parts; it is 35 to 41 % lower. Run 3845 s against 4123 s off; peak 936 MB against 803 MB (+17 %); the finish step 39 to 44 s a version against 15 to 23 s.
+
+WHY (reasoned from what is measured; to be confirmed by reading where the peak sits): the two judges agree on this part TODAY because both see the DRAWN part's own faces as all-or-nothing voxels: the optimiser's exact fills exist only on the surface it carves, and this part is mostly as drawn. One judge gives every voxel that the drawn faces cut its fill too, bolt holes and loaded faces included, and the one-voxel form then solves those voxels at E x fill^3, which reads the stress on a curved loaded face 52 to 76 % HIGH (the thick ring, tests E: ledger A-01). 1.648 / 1.07 = 1.54: the ring's error, on his bolt holes. On the same ring all-or-nothing reads 6 % low. So on a part like this the "cruder" judge is the nearer one, and one judge as built would refuse a good part.
+
+WHAT IT MEANS: "one judge" cannot flip in the one-voxel E x fill^3 form. The fill of a file is right; the stiffness law applied to it is what is wrong at cut faces, and that law is the certificate's too wherever the optimiser has carved (which is why the lightest carved versions read near the pass mark by the loop's own judge). The reviewer's "after the flip: a fill-weighted one-voxel reading, into both judges together" has to come BEFORE the flip. The candidates already measured on the textbook shapes at one voxel: E x fill^2 (plate -3.8 to +4.3 %, ring +17 to +26 %, ellipse -19 to -2 %) and real stiffness E x fill (plate -18 to -6 %, ring -7 to -4 %): neither holds the bar on all three. PARKED for the reviewer's morning read; nothing built on it. B7 goes on with the stand, the hook and the beam, which will show how general this is.
+
+
+### Ledger A-06 measured ahead for stage 4 (2026-11-27 05:05, test `to_strength_thin_member`, no switch)
+
+TODAY'S one-voxel reading on a beam in pure bending against the true surface stress, by voxels through the member:
+
+| voxels through | reading / surface stress | the exact field at the voxel's centre |
+|---|---|---|
+| 2 | 0.33 (-67 %) | 0.50 |
+| 3 | 0.56 (-44 %) | 0.67 |
+| 4 | 0.68 (-32 %) | 0.75 |
+| 6 | 0.80 (-20 %) | 0.83 |
+| 8 | 0.85 (-15 %) | 0.88 |
+| 12 | 0.91 (-9 %) | 0.92 |
+| 16 | 0.93 (-7 %) | 0.94 |
+
+Two parts to the miss: reading at the voxel's centre instead of at the surface (the right column: half a voxel in, 1 - 1 / n), and below about 6 voxels the solve itself falling short of even that. To be within 10 % of the surface stress today's reading needs 12 voxels through a bending member; within 20 %, 6. Stage 4 sets its number from this table; surface stress recovery would remove the first part.
+
+### One judge, evidence (b) continued: the original stand (2026-11-27 05:25, B7; res 128, PA12, drawn faces, automatic pad)
+
+| version | certificate | shown, re-check off | shown, `fill:8` |
+|---|---|---|---|
+| 0.68 | 2.587 | 2.597 | 2.444 (-5.9 %; accepted, the pass mark is 1.5) |
+
+Run 620 s against 530 s; peak 1002 MB against 987 MB. So the drop is not special to Top Motor Mount's size: on the stand it is 6 %, on Top Motor Mount 35 to 41 %. Neither is "within 1 %". Top Motor Mount has about 21 000 voxels cut by the file's surface at res 96, 7 500 of them with their centre outside the file (voxels the all-or-nothing judge does not solve at all). Its re-check with the stress field kept (heaviest version, switch off and on) is running outside the lock to show WHERE the peak sits.
+
+### WHERE Top Motor Mount's peak sits with one judge on (2026-11-27 05:45; heaviest version re-checked with the stress field kept, switch off and on; picture `stage-2-pics/one-judge-top-motor-mount-peak.png`)
+
+CORRECTION to the "WHY" above: the peak is NOT on a bolt hole. It is ONE voxel at the INSIDE CORNER where each motor flange meets the cross bar (both sides, mirror images), a sharp corner where the true stress has no finite value and any reading rises as the picture sharpens.
+
+| | re-check off | one judge on |
+|---|---|---|
+| peak stress | 8.15 MPa (at the part's outer end) | 12.55 MPa (at the inside corner; off reads 7.28 there) |
+| peak ratio | | 1.54 (the margin's drop, 1.648 -> 1.07) |
+| over every voxel both solve: on / off | | median 1.24; 90th percentile 1.84; 99th 3.30 |
+
+Two things, then, not one. (1) The WHOLE part reads about 24 % higher, not only its peak: of its 38 500 solved voxels about 21 000 are cut by the file's surface (the part is a few voxels thick at res 96), and E x fill^3 makes that cut skin almost stiffness-free (a half-full voxel carries one eighth), so the inside carries the load. All-or-nothing gives the same total material (105.35 g both ways) at full stiffness. (2) On top of that the peak moves to a sharp inside corner, on a cut voxel, where the one-voxel reading is at its least steady. The 96 voxels that only one judge solves (centre outside the file) peak at 3.6 MPa: they are not the cause.
+
+So the finding stands and is stronger: on a thin part the E x fill^3 law, applied to the file's fills, under-reads the part's stiffness everywhere. The stand (thick, 6 % drop) and this part (thin, 35 to 41 %) are the same effect at two thicknesses.
+
+### The cut skin on a thin bending member: WHICH judge is nearer (2026-11-27 06:20, new measuring test `to_strength_cut_skin`, no switch)
+
+A beam in pure bending, `core` full voxels through plus one skin voxel of the given fill on each face (true thickness core + 2 fill), the same end moment on every model, read at mid-span. "soft" = the model's curvature against the exact beam's (+ = too soft). "peak" = the analysis's reading against the true surface stress (- = reads LOW, the unsafe way).
+
+| core, skin fill | all-or-nothing (re-check today): soft / peak | E x fill^3 (one judge as built): soft / peak | E x fill^2: soft / peak | E x fill: soft / peak |
+|---|---|---|---|---|
+| 4, 0.25 | +37 % / -8 % | +33 % / -11 % | +20 % / -20 % | -13 % / -42 % |
+| 4, 0.50 | -43 % / -43 % | +46 % / -12 % | +20 % / -28 % | -13 % / -47 % |
+| 4, 0.75 | -24 % / -31 % | +27 % / +16 % | +9 % / -1 % | -8 % / -16 % |
+| 8, 0.25 | +19 % / -2 % | +17 % / -3 % | +12 % / -8 % | -4 % / -21 % |
+| 8, 0.50 | -28 % / -27 % | +26 % / -2 % | +14 % / -11 % | -4 % / -25 % |
+| 8, 0.75 | -15 % / -19 % | +19 % / +12 % | +8 % / +3 % | -3 % / -8 % |
+| 16, 0.25 | +9 % / -1 % | +9 % / -1 % | +7 % / -3 % | -1 % / -10 % |
+| 16, 0.50 | -16 % / -16 % | +14 % / 0 % | +8 % / -4 % | -1 % / -13 % |
+| 16, 0.75 | -8 % / -11 % | +11 % / +8 % | +5 % / +2 % | -1 % / -4 % |
+
+(core 2 is in the test's output: every model misses by 30 to 76 % there; ledger A-06.)
+
+WHAT IT SAYS, and it CORRECTS what I wrote above ("the cruder judge is the nearer one"):
+1. On STIFFNESS, E x fill^3 is the worst of the three laws (9 to 46 % too soft), E x fill the best (1 to 13 % too stiff): the "whole part reads softer" reasoning holds.
+2. On the PEAK READING it is the other way round. One judge as built reads within -12 to +16 % of the true surface stress on every row from 4 voxels up. All-or-nothing reads up to 43 % LOW (whenever the skin is half full or more it solves a beam thicker than the file, and reads at a voxel centre besides). The on / off ratio on these rows is 0.96 to 1.67: Top Motor Mount's 1.24 (median) and 1.54 (peak) sit inside it WITH ONE JUDGE THE NEARER ONE.
+3. So for a thin part in bending the evidence is that today's shown margin (and the loop's certificate on the drawn faces, which is all-or-nothing there) is OPTIMISTIC, and the refusal may be nearer the truth than the 1.65. Against that stands the thick ring (a curved loaded face: E x fill^3 reads 52 to 76 % high, all-or-nothing 6 % low) and the fact that Top Motor Mount's peak voxel is at a sharp inside corner.
+4. Neither judge holds a +/-10 % bar on thin members. E x fill^2 is the steadiest overall here (peak -28 to +3 %, but low); none of the four is right.
+
+Honest position: I cannot say from this which number is right for Top Motor Mount; I can say the two disagree for a measured reason on BOTH sides, and that it is the stage 4 question (surface stress recovery; a member rule in voxels) arriving early. Parked for the reviewer.
+
+### All shapes side by side: the one-voxel peak reading against the true value, by what the cut voxels are given (2026-11-27 06:30)
+
+| shape | all-or-nothing | E x fill^3 (one judge as built) | E x fill^2 | E x fill |
+|---|---|---|---|---|
+| thick ring, pressure on the curved inner face (re-run today, 4 resolutions) | -6 to 0 % | +52 to +76 % | +17 to +27 % | -7 to -4 % |
+| bending beam with cut faces, 4 to 16 voxels through (today) | -43 to -1 % | -12 to +16 % | -28 to +3 % | -47 to -4 % |
+| plate with a hole, ellipse (measured earlier, above) | (see its tables) | (see its tables) | plate -3.8 to +4.3 %, ellipse -19 to -2 % | plate -18 to -6 % |
+
+No column holds +/-10 % on both the ring and the beam. All-or-nothing is right on the ring and unsafe on the beam; E x fill^3 is near on the beam and far too high on the ring; E x fill^2 misses both by less (high on the ring, low on the beam). The two shapes differ in ONE thing: on the ring the LOAD sits on the cut face (the soft skin is squeezed directly), on the beam the cut faces are free and only carry the bending. So the candidate that the measurements point at is not a different power but a different treatment of LOADED cut faces from FREE ones, or reading the stress at the true surface instead of in the cut voxel (stage 4). Not built; for the reviewer.
+
+### Measured ahead for stage 4: the stress CARRIED OUT TO THE TRUE SURFACE, on the cut-skin beam (2026-11-27 06:45, a measuring arm in `to_strength_cut_skin`; not in the engine)
+
+The stress of the two outermost FULL voxels carried in a straight line to where the file's surface really is (half a voxel plus the skin's fill beyond the outer full voxel's centre), against the true surface stress. Three skin fills per thickness; lowest to highest.
+
+| voxels through (core) | all-or-nothing | E x fill^3 | E x fill^2 | E x fill (real stiffness) |
+|---|---|---|---|---|
+| 4 | -43 to +38 % | +27 to +46 % | +9 to +20 % | -13 to -8 % |
+| 8 | -28 to +19 % | +17 to +26 % | +8 to +14 % | -4 to -3 % |
+| 16 | -16 to +9 % | +9 to +14 % | +5 to +8 % | -1 % |
+
+Read at the true surface, the reading's error IS the model's stiffness error and nothing else (each figure equals the "soft" column of the table above). So the pair that works on a free cut face is REAL STIFFNESS for the cut voxels (E x fill) with the stress read AT THE TRUE SURFACE: within 4 % from 8 voxels through, 8 to 13 % low at 4, and steady across the skin's fill (which no one-voxel reading is). On the ring, E x fill at one voxel already reads -7 to -4 %. It is the first combination measured that is inside or near the bar on both shapes. Caveats: a straight beam and a straight-line carry; a curved or loaded face and a notch are not measured; it reads slightly LOW everywhere (the unsafe side), so it would need its own small allowance. A proposal for stage 4, for the reviewer; nothing built in the engine.
+
+### The same carry on the thick ring: a CURVED face with the LOAD on it (2026-11-27 07:05, measuring arm `[carry]` in `to_strength_known_ring`; not in the engine)
+
+The stress of the first FULL voxels behind the inner face carried to the TRUE inner radius along 32 rays (the largest of the 32), percent against the textbook 2.333. Wall = inner radius in voxels.
+
+| inner radius, voxels | all-or-nothing: line / curve | E x fill^3: line / curve | E x fill (real stiffness): line / curve |
+|---|---|---|---|
+| 3 | +150 / +302 | +18 / +44 | -8.6 / +2.7 |
+| 4 | +80 / +158 | +23 / +52 | -5.2 / +12.3 |
+| 5 | +131 / +245 | +18 / +43 | -2.9 / +14.9 |
+| 6 | +32 / +57 | +16 / +36 | -0.3 / +13.5 |
+
+"line" = a straight line through two voxels; "curve" = a curve through three. Real stiffness with the STRAIGHT-LINE carry reads -8.6 to -0.3 % and closes on the textbook as the grid refines (the order a rule 5 measure must show). The curve overshoots; all-or-nothing cannot be carried at all (its staircase face makes the first voxels' stresses jagged).
+
+SO, on both shapes (free cut faces in bending; a curved face under load): real stiffness on the cut voxels + the full voxels' stress carried in a straight line to the true surface is within 9 % at 3 to 4 voxels of wall or 8 through a beam, and within 3 to 4 % from 5 of wall / 8 through. Always slightly LOW. Still not measured: a notch or sharp inside corner (where Top Motor Mount's peak sits), a general surface (this arm walks rays it is given; the engine would need the surface's normal at each cut voxel), and the across-layer reading.
+
+### One judge, evidence (b) continued: the made sample hook, res 64, re-check OFF (2026-11-27 07:25, B7; 7131 s, peak 309 MB)
+
+| version | certificate (the loop's) | shown (the re-check today) | shown / certificate |
+|---|---|---|---|
+| 0.68 | 4.341 | 4.759 | 1.10 |
+| 0.52 | 3.713 | 4.556 | 1.23 |
+| 0.38 | 2.664 | 3.891 | 1.46 |
+
+Three versions made (the fourth was not). On a part the optimiser has CARVED, the two judges already disagree today with no switch: the shown margin is 10 to 46 % ABOVE what the loop certified, and the gap widens as the part gets lighter and thinner. Same direction and size as Top Motor Mount's (1.54) and the cut-skin beam's (0.96 to 1.67): today's shown number is the optimistic one on thin carved members. The switch-on half of this run will be cut by B7's 07:52 limit; it is owed, and can run outside the lock (309 MB, one thread).
+
+### The hook's three finished files re-checked with one judge ON (2026-11-27 07:40; `analyze --mesh` on each file with `TOPOPT_RECHECK=fill:8`, outside the lock)
+
+| version | certificate (the loop's) | shown today (off) | one judge on | on against the certificate |
+|---|---|---|---|---|
+| 0.68 | 4.341 | 4.759 (+9.6 %) | 4.361 | +0.5 % |
+| 0.52 | 3.713 | 4.556 (+22.7 %) | 3.754 | +1.1 % |
+| 0.38 | 2.664 | 3.891 (+46.1 %) | 2.673 | +0.3 % |
+
+On a part the optimiser carved, one judge does what it was built for: the number shown after finishing is the loop's certificate to about 1 % (the reviewer's "within 1 %" holds HERE), where today's re-check shows 10 to 46 % more. So the picture is whole: one judge makes the two numbers ONE number everywhere; whether that one number is RIGHT is the cut-voxel law's question (E x fill^3: near on free faces in bending, 52 to 76 % high on a loaded curved face), and it is the certificate's question just as much as the re-check's. Top Motor Mount differs from the hook only in that its certificate was all-or-nothing on its drawn faces (the loop never had fills there), so one judge moved it; on the hook the loop had the fills already.
+

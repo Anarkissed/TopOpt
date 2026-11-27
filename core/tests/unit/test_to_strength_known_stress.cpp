@@ -167,8 +167,9 @@ double peak_ratio(int radius_voxels, bool exact_fill, double penalty, bool* ok,
   g_switch_readings.clear();
   if (res.von_mises_material_field.size() == density.size())
     for (double mm : g_switch_sizes_mm)
-      g_switch_readings.push_back(topopt::peak_stress_over_size(g, res.von_mises_material_field, density,
-                                                                topopt::kStressMaterialFloor, mm) /
+      g_switch_readings.push_back(topopt::peak_stress_over_size_edge_and_surface(
+                                      g, res.von_mises_material_field, density,
+                                      topopt::kStressMaterialFloor, mm) /
                                   kFarStress);
   if (over_size != nullptr && res.von_mises_material_field.size() == density.size())
     for (int q = 0; q < 3; ++q)
@@ -295,7 +296,7 @@ int main(int argc, char** argv) {
       }
     }
     g_switch_sizes_mm.clear();
-    std::printf("\n[switch] E x fill read over a size, by the voxels the size spans; percent against the "
+    std::printf("\n[switch] E x fill read over a size (voxel centres and surface nodes), by the voxels the size spans; percent against the "
                 "reading's own true value at radius 3 / 4 / 5 / 6 voxels\n");
     for (int s = 0; s < 8; ++s) {
       double lo = 1e9, hi = -1e9;

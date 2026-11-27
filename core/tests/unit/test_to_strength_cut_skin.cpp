@@ -1,0 +1,186 @@
+// TO rebuild, stage 2, ONE JUDGE: what the stiffness law on CUT voxels does to a
+// thin member (the finding of 2026-11-27 on Top Motor Mount: with the file's own
+// fills at E x fill^3 the whole part read about 24 % higher and every version was
+// refused). MEASURE ONLY: prints a table, judges nothing.
+//
+// A beam in pure bending whose two faces CUT their voxels: `core` full voxels
+// through, plus one skin voxel on each side holding a fraction `fill` of material,
+// so the true thickness is (core + 2 fill) voxels. The same end moment is put on
+// every model (on the core's end faces; read at mid-span, away from the ends).
+// Models of the skin:
+//   all-or-nothing  the skin voxel is full when fill >= 0.5, absent below (the
+//                   re-check today)
+//   E x fill^3      the file's fill at the loop's law (one judge as built)
+//   E x fill^2, E x fill   the same fill at the two other laws
+// For each: the beam's CURVATURE against the exact beam of the true thickness
+// (the stiffness the model sees: above 1 = too soft), and the PEAK the analysis
+// reads at mid-span against the true surface stress.
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <vector>
+
+#include "topopt/analyze.hpp"
+#include "topopt/fea.hpp"
+#include "topopt/materials.hpp"
+#include "topopt/simp.hpp"
+#include "topopt/stress_measure.hpp"
+
+namespace {
+
+using topopt::DirichletBC;
+using topopt::NodalLoad;
+using topopt::Vec3;
+using topopt::VoxelGrid;
+
+constexpr double kH = 0.5;                // mm, the voxel
+constexpr int kLength = 64, kWidth = 12;  // voxels along x and z
+constexpr double kE = 3500.0;
+
+struct Out {
+  double curvature = 0.0;  // model / exact
+  double peak = 0.0;       // the analysis's per-voxel reading at mid-span / true surface stress
+  double peak_material = 0.0;  // the same from the material-stress field when the analysis gives one
+  // MEASURING ARM (stage 4's question, measured ahead; not in the engine): the stress
+  // of the two outermost FULL voxels carried in a straight line out to the TRUE
+  // surface (half a voxel plus the skin's fill beyond the outer full voxel's centre).
+  double at_surface = 0.0;
+  bool ok = false;
+};
+
+// skin_density < 0: the skin voxels are absent (Empty).
+Out bend(int core, double fill, double skin_density, double penalty) {
+  VoxelGrid g;
+  g.nx = kLength;
+  g.ny = core + 2;
+  g.nz = kWidth;
+  g.spacing = kH;
+  g.origin = Vec3{0.0, 0.0, 0.0};
+  const std::size_t n = static_cast<std::size_t>(g.nx) * g.ny * g.nz;
+  g.tags.assign(n, topopt::VoxelTag::Interior);
+  std::vector<double> density(n, 1.0);
+  for (int k = 0; k < g.nz; ++k)
+    for (int i = 0; i < g.nx; ++i)
+      for (int j : {0, g.ny - 1}) {
+        const std::size_t v = g.index(i, j, k);
+        if (skin_density < 0.0) {
+          g.tags[v] = topopt::VoxelTag::Empty;
+          density[v] = 0.0;
+        } else {
+          density[v] = skin_density;
+        }
+      }
+  // The end moment, on the core's end faces only: a linear traction about the
+  // mid-plane. Its moment per unit width, from the forces as they are applied.
+  const double mid = 0.5 * g.ny * kH;
+  const double q = 0.25 * kH * kH;
+  double moment = 0.0;  // per unit width
+  std::vector<NodalLoad> loads;
+  for (int j = 1; j <= core; ++j) {
+    const double arm = (j + 0.5) * kH - mid;
+    const double s = arm;  // traction, MPa per mm of arm (any scale: everything is linear)
+    moment += s * kH * arm;
+    for (int k = 0; k < g.nz; ++k)
+      for (int dk = 0; dk < 2; ++dk)
+        for (int dj = 0; dj < 2; ++dj) {
+          loads.push_back({topopt::fea_node_index(g, g.nx, j + dj, k + dk), 0, q * s});
+          loads.push_back({topopt::fea_node_index(g, 0, j + dj, k + dk), 0, -q * s});
+        }
+  }
+  std::vector<DirichletBC> bcs;
+  const int a = topopt::fea_node_index(g, 0, 1, 0);
+  const int b = topopt::fea_node_index(g, g.nx, 1, 0);
+  const int c = topopt::fea_node_index(g, 0, 1, g.nz);
+  bcs.push_back({a, 0, 0.0});
+  bcs.push_back({a, 1, 0.0});
+  bcs.push_back({a, 2, 0.0});
+  bcs.push_back({b, 1, 0.0});
+  bcs.push_back({b, 2, 0.0});
+  bcs.push_back({c, 1, 0.0});
+
+  topopt::Material m;
+  m.youngs_modulus_mpa = kE;
+  m.yield_strength_mpa = 55.0;
+  m.density_g_cm3 = 1.24;
+  m.z_knockdown = 1.0;
+  m.poisson = 0.33;
+  m.family = "fdm";
+  topopt::SimpParams params;
+  params.youngs_modulus = kE;
+  params.poisson = m.poisson;
+  params.penalty = penalty;
+  topopt::KnockdownSpec knockdown;
+  knockdown.record_material_stress = true;
+  const topopt::FixedDesignAnalysis res = topopt::analyze_fixed_design(
+      g, params, density, bcs, loads, m, Vec3{0.0, 0.0, 1.0}, 1e-9, 60000,
+      topopt::SolverKind::MultigridCG_Matfree, 0.0, knockdown, true, static_cast<double>(n));
+  Out o;
+  o.ok = !res.non_convergent && res.max_von_mises > 0.0 && std::isfinite(res.max_von_mises);
+  if (!o.ok) return o;
+  // The exact beam of the true thickness under this moment.
+  const double thick = (core + 2.0 * fill) * kH;
+  const double surface = 6.0 * moment / (thick * thick);
+  const double exact_curvature = 12.0 * moment / (kE * thick * thick * thick);
+  // Curvature from the rotation of two cross-sections (the core's top and bottom
+  // node planes), a quarter and three quarters along, mid-width.
+  const int kz = g.nz / 2;
+  auto ux = [&](int i, int j) {
+    return res.displacement_field[3 * static_cast<std::size_t>(topopt::fea_node_index(g, i, j, kz))];
+  };
+  const int i0 = g.nx / 4, i1 = 3 * g.nx / 4;
+  const double height = core * kH;
+  const double rot0 = (ux(i0, core + 1) - ux(i0, 1)) / height;
+  const double rot1 = (ux(i1, core + 1) - ux(i1, 1)) / height;
+  o.curvature = std::fabs(rot1 - rot0) / ((i1 - i0) * kH) / exact_curvature;
+  for (int k = 2; k < g.nz - 2; ++k)
+    for (int j = 0; j < g.ny; ++j)
+      for (int i = i0; i < i1; ++i) {
+        const std::size_t v = g.index(i, j, k);
+        if (v < res.von_mises_field.size()) o.peak = std::max(o.peak, res.von_mises_field[v] / surface);
+        if (v < res.von_mises_material_field.size() && density[v] >= topopt::kStressMaterialFloor)
+          o.peak_material = std::max(o.peak_material, res.von_mises_material_field[v] / surface);
+      }
+  if (core >= 3 && res.von_mises_material_field.size() == n) {
+    const int im = g.nx / 2;
+    const std::vector<double>& f = res.von_mises_material_field;
+    const double top = f[g.index(im, core, kz)], top_in = f[g.index(im, core - 1, kz)];
+    const double bot = f[g.index(im, 1, kz)], bot_in = f[g.index(im, 2, kz)];
+    const double reach = 0.5 + fill;  // voxels from the outer full voxel's centre to the true surface
+    o.at_surface = std::max(top + (top - top_in) * reach, bot + (bot - bot_in) * reach) / surface;
+  }
+  return o;
+}
+
+}  // namespace
+
+int main() {
+  unsetenv("TOPOPT_STRENGTH");
+  int failures = 0;
+  std::printf("[cut skin] a beam in pure bending, `core` full voxels through plus a skin voxel of the given fill on each face.\n");
+  std::printf("[cut skin] curvature = model / exact (above 1: the model is too soft); peak = the reading at mid-span / the true surface stress\n");
+  for (int core : {2, 4, 8, 16})
+    for (double fill : {0.25, 0.5, 0.75}) {
+      std::printf("[cut skin] core %2d, skin fill %.2f (true thickness %.2f voxels):\n", core, fill, core + 2.0 * fill);
+      struct Model { const char* name; double skin; double penalty; };
+      const Model models[4] = {{"all-or-nothing", fill >= 0.5 ? 1.0 : -1.0, 3.0},
+                               {"E x fill^3    ", fill, 3.0},
+                               {"E x fill^2    ", fill, 2.0},
+                               {"E x fill      ", fill, 1.0}};
+      for (const Model& md : models) {
+        const Out o = bend(core, fill, md.skin, md.penalty);
+        if (!o.ok) {
+          ++failures;
+          std::printf("[cut skin]   %s  DID NOT SOLVE\n", md.name);
+          continue;
+        }
+        std::printf("[cut skin]   %s  curvature %.3f (%+.0f %%)   peak %.3f (%+.0f %%)   material-stress peak %.3f   "
+                    "carried to the true surface %.3f (%+.0f %%)\n",
+                    md.name, o.curvature, 100.0 * (o.curvature - 1.0), o.peak, 100.0 * (o.peak - 1.0),
+                    o.peak_material, o.at_surface, 100.0 * (o.at_surface - 1.0));
+        std::fflush(stdout);
+      }
+    }
+  std::printf("[cut skin] measure only: %d failure(s)\n", failures);
+  return failures == 0 ? 0 : 1;
+}
