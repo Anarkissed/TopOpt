@@ -543,12 +543,15 @@ final class Notes30ScaffoldTests: XCTestCase {
             let path = dir.appendingPathComponent("block.stl").path
             try LatticePlaceChipsTests.gridSTL([0, 40], [0, 30], [0, 24]) { _, _, _ in true }.write(to: URL(fileURLWithPath: path))
             let mesh = try TopOptKit.importMesh(path: path)
-            let top = try XCTUnwrap(LatticePlaceChipsTests.face(mesh, axis: 2, sign: 1, at: 24))
             let s = try await LatticeLayoutSession.open(path: path)
             addTeardownBlock { s.close() }
             var set = LatticeLayoutSession.Settings()
             set.topology = "bccz"; set.algorithm = "uniform"; set.cellMM = 6; set.cellMaxMM = 6
-            set.regions = [LatticeLayoutSession.Region(id: 1, faces: [top], depthMM: 14)]
+            // a lattice zone through the block front to back (the stand fixture's kind: Notes29's clips)
+            var z = LatticeLayoutSession.Region(id: 1, faces: [], depthMM: 0)
+            z.zone = .init(kind: .box, centre: SIMD3(20, 15, 12), axes: [SIMD3(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0, 0, 1)],
+                           half: SIMD3(14, 20, 8))
+            set.regions = [z]
             return (s, set, try XCTUnwrap(LatticeLayoutPreview.box(mesh.vertices)))
         }
         let (s, set, box) = try await session()
@@ -556,7 +559,8 @@ final class Notes30ScaffoldTests: XCTestCase {
         let ahead = try await s.gridAhead(set, origin: g.origin, voxel: g.voxel, dims: g.dims)
         XCTAssertNil(ahead, "RED CONTROL: Organic's map ahead cannot serve a cube lattice")
         let t0 = Date()
-        let rough = try XCTUnwrap(try await s.gridRough(set, origin: g.origin, voxel: g.voxel, dims: g.dims), "★ the rough cut-open, before the lay")
+        let asked = try await s.gridRough(set, origin: g.origin, voxel: g.voxel, dims: g.dims)
+        let rough = try XCTUnwrap(asked, "★ the rough cut-open, before the lay")
         let roughMS = Date().timeIntervalSince(t0) * 1000
         let r = S.Rough(origin: g.origin, voxel: g.voxel, dims: g.dims, rg: rough.rg)
         let laid = try await s.lay(set)
