@@ -35,7 +35,29 @@ final class StructuralAutoCalibration: XCTestCase {
              force: SIMD3(300, 0, 0)),
     ]
 
-    func testCalibrateTheSixParts() throws {
+    /// Round 1's lattice voxels, as the app reads them (the preview's own layout of round 0, core's map at the check grid's
+    /// voxel centres): a session on the part, round 0's field, the lay, `whereAt`. nil when any step fails.
+    func latticeMask(_ path: String, _ s: LatticeLayoutSession.Settings, _ r0: StructuralAuto.Sized,
+                     _ c: StructuralAuto.CheckField) async -> [Bool]? {
+        guard let session = try? await LatticeLayoutSession.open(path: path) else { return nil }
+        defer { session.close() }
+        let f = r0.field
+        guard (try? await session.setDemand(mpa: f.vonMises, nx: f.nx, ny: f.ny, nz: f.nz, origin: f.origin,
+                                            spacingMM: f.spacingMM)) != nil,
+              (try? await session.lay(s)) != nil else { return nil }
+        var pts: [SIMD3<Float>] = []
+        pts.reserveCapacity(c.nx * c.ny * c.nz)
+        for k in 0..<c.nz { for j in 0..<c.ny { for i in 0..<c.nx {
+            let p = c.origin + SIMD3(Double(i) + 0.5, Double(j) + 0.5, Double(k) + 0.5) * c.spacingMM
+            pts.append(SIMD3<Float>(Float(p.x), Float(p.y), Float(p.z)))
+        } } }
+        guard let w = try? await session.whereAt(pts), w.count == pts.count else { return nil }
+        let m = w.map { $0.why == .lattice }
+        print("SA-CAL lattice map: \(m.filter { $0 }.count) of \(m.count) check voxels are lattice")
+        return m
+    }
+
+    func testCalibrateTheSixParts() async throws {
         guard let dir = ProcessInfo.processInfo.environment["SA_CALIBRATE"] else {
             throw XCTSkip("opt-in, heavy: SA_CALIBRATE=<parts dir> under HEAVY.lock")
         }
@@ -152,7 +174,8 @@ final class StructuralAutoCalibration: XCTestCase {
                 var m1: LatticeFileRun.Made?
                 var saving: Double?
                 if let m0, let c = StructuralAuto.CheckField.of(m0.fields),
-                   let r1 = StructuralAuto.resize(check: c, stage: stage, round0: r0, inputs, largestCellMM: 12) {
+                   let r1 = StructuralAuto.resize(check: c, stage: stage, round0: r0, inputs, lattice: await latticeMask(model.path, s, r0, c),
+                                                  largestCellMM: 12) {
                     saving = r1.saving
                     if StructuralAuto.next(afterCheck: 1, passed: LatticeFileButton.round(of: m0).passed, saving: r1.saving) == .anotherCheck {
                         m1 = check(s, r1.sized.field)
