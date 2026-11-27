@@ -1,0 +1,40 @@
+# Release 069c13cbf23c - 2026-11-27: release (24) - claude/organic-1 e8ae0fe6, one worker swap (dfd027071414 -> 069c13cbf23c)
+# Commits:
+#   283501e1 notes30 STRUCTURAL AUTO (builder SA1), first cut, written before the build turn (not yet built or tested)
+#   64598151 notes30 STRUCTURAL AUTO: the press keeps its pinned line (autoSteps before onMac)
+#   65a91875 notes30 STRUCTURAL AUTO: the calibration harness (opt-in, heavy: SA_CALIBRATE; six parts made from the repo's own cube and cylinder)
+#   a38df96b Merge remote-tracking branch 'origin/claude/organic-1' into claude/notes30-structural-auto
+#   182b928d notes30 STRUCTURAL AUTO: core builds and test_strut_sizing passes (14056 checks)
+#   f4c53da0 notes30 STRUCTURAL AUTO: the app builds; StructuralAutoTests and StructuralAutoHostedTests pass (13 of 13, calibration opt-in)
+#   754a3d31 notes30 STRUCTURAL AUTO: re-pin LatticePreviewStore's Laid count (+ touch, quiltedWhereShort: a cell lay's, never kept); calibration writes one file per part
+#   3e5b9589 notes30 STRUCTURAL AUTO: calibration harness says why (solid and strut margins, the fail reason, cells credited, D2 cells), sets each load so the solid holds 6x, 100 % infill by default, keeps each report
+#   1837a5fa notes30 STRUCTURAL AUTO: the calibration reads round 1's lattice voxels as the app does (the layout of round 0, core's map)
+#   f9c93621 Merge remote-tracking branch 'origin/claude/organic-1' into claude/notes30-structural-auto
+#   f52866b1 notes30 STRUCTURAL AUTO, his rework (11-27, "go for #2"): add-only thickening from today's Auto
+#   e4ea3993 notes30 STRUCTURAL AUTO rework: built and tested
+#   f298389f notes30 SA1 Structural Auto: his switch, the cube fix, easily removable (WIP: NOT YET BUILT)
+#   1341f9b4 notes30 SA1 Structural Auto: switch + cube fix built and tested
+#   bbb61b67 notes30 SA1 Structural Auto: each cell's strut is its own fill struts' middle width
+#   b6c6dd66 Merge claude/notes30-structural-auto bbb61b67 (builder SA1): Structural Auto thickens only short struts, on a Settings switch he can turn off
+#   a6476486 notes30 BB1: a print file's Export line says "Turn on manual supports", its (i) says where
+#   e8ae0fe6 Merge claude/notes30-manual-supports a6476486 (builder BB1): a print file's Export line says "Turn on manual supports"
+#   3f6a931a Release (24): Structural Auto thickens short struts (a Settings switch), and a print file's Export says "Turn on manual supports"
+# Gates (this tree):
+#   17:37 his uncommitted files (left alone): app/TopOpt-Info.plist app/TopOpt.xcodeproj/project.pbxproj app/TopOpt.xcodeproj/xcshareddata/xcschemes/TopOpt.xcscheme 
+#   17:37 preflight job: /Users/nadim/.topopt-worker/d5af229ca8ee4a8f (his newest optimisation job the installed worker passes; read only)
+#   17:37 merged organic-1 as 3f6a931a (local, not pushed); app + core + tools == its; fingerprint 069c13cbf23c
+#   ==> Manifold: /Users/nadim/dev/TopOpt/TopOpt/.vcpkg/installed-manifold (KEEP regions exported exactly)
+#   ==> building macOS slice (Eigen + OCCT, arm64)
+#   ==> building iOS simulator slice (Eigen + OCCT + lib3mf, arm64)
+#   ==> building iOS device slice (Eigen + OCCT + lib3mf, arm64)
+#   17:41 build_core green: topopt_vendored_core_069c13cbf23c + the Install 3 entry points + lay_organic_preview and Session::sweep_limits in every slice and arch
+#   17:42 worker CLI built: topopt-cli: core 069c13cbf23c (dirty=false), built Nov 27 2026 17:42:02; 3 data paths, all under the release worktree
+#   18:36 core suites passed: 100% tests passed out of 39 Total Test time (real) = 3171.22 sec 
+#   18:39 iPad device build green (unsigned gate build; he installs with play)
+#   18:39 preflight on his job: preflight: load path CONNECTED
+#   18:39 pushed 3f6a931a
+#   18:39 worker script unchanged (release 11's)
+#   18:39 restarting the worker server (PID 44228; /health said "fingerprint": "069c13cbf23c") while idle, so it runs the new script
+#   18:39 worker swapped: /health "fingerprint": "069c13cbf23c"; data paths under the release worktree; preflight again OK; old CLI kept as build-fix/topopt-cli.dfd027071414-replaced-20261127
+#   18:39 route, demand, strength_job, organic cut 2 and chain tests vs the INSTALLED script, job_stage and orientation_recheck: ALL PASS
+#   18:39 the app_release scripts now expect 069c13cbf23c
