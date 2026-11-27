@@ -310,12 +310,20 @@ public enum StructuralAuto {
                 let tol = 1e-4
                 return q.x >= -tol && q.y >= -tol && q.z >= -tol && q.x <= size + tol && q.y <= size + tol && q.z <= size + tol
             }
-            // the strut it was laid with: its fill struts' width
-            var strut = 0.0
+            // the strut it was laid with: the middle width of its own fill struts (those of a cell its size; a bar run on into
+            // the solid or joined to a neighbour, or a wider band strut, never sets it)
+            var own: [Float] = [], any: [Float] = []
             let b0 = bucket(wlo) &- 1, b1 = bucket(whi) &+ 1
             for z in b0.z...b1.z { for y in b0.y...b1.y { for x in b0.x...b1.x {
-                for i in fill[SIMD3(x, y, z)] ?? [] where inside(middle(i)) { strut = Swift.max(strut, Double(laid.bars[7 * i + 6])) }
+                for i in fill[SIMD3(x, y, z)] ?? [] where inside(middle(i)) {
+                    let w = laid.bars[7 * i + 6]
+                    any.append(w)
+                    if i < laid.barCell.count, abs(Double(laid.barCell[i]) - size) < 1e-3 * size { own.append(w) }
+                }
             } } }
+            let widths = (own.isEmpty ? any : own).sorted()
+            guard !widths.isEmpty else { continue }
+            let strut = Double(widths[widths.count / 2])
             guard strut > 0 else { continue }
             let rho = TopOptKit.latticeRelativeDensity(topology: inputs.topology, strutRadiusMM: strut / 2, cellMM: size)
             // its lattice voxels on the check's grid

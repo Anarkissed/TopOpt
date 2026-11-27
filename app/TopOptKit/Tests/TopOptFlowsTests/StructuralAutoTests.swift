@@ -85,6 +85,7 @@ final class StructuralAutoTests: XCTestCase {
         }
         l.bars = bars(cells: cells)
         l.barFlags = Array(repeating: 0, count: cells)
+        l.barCell = Array(repeating: 8, count: cells)
         return l
     }
     static func margin(_ ratio: Double, _ vm: Double, _ i: StructuralAuto.Inputs = pa12) -> Double {
