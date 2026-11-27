@@ -156,6 +156,10 @@ public struct LatticeFaceDiagnosis: Equatable, Sendable {
                 // no smaller cell lays here: the pop-up's own fixes, where they lay
                 d.depthMM = thicknessMM
                 d.cellsAcross = Int(cellsPerMemberFloor.rounded(.up))
+                if d.smallCellsHelp, !SolidReason.controlThreeOffers {   // ★ notes30 X2 (his yes, 11-26): first, where it lays
+                    fixes.append("Or turn Small cells in thin walls on: cells may then be as small as \(SolidPopUp.mm(d.thinFloorCellMM)).")
+                    changes.append(Change(field: .cellSize, tryText: "", offer: .smallCells))
+                }
                 if d.quiltHelps {
                     fixes.append("Or turn Allow quilt on: cells may then be as small as \(SolidPopUp.mm(d.quiltFloorCellMM)).")
                     changes.append(Change(field: .cellSize, tryText: "", offer: .allowQuilt))

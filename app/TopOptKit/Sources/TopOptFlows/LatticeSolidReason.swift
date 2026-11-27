@@ -48,11 +48,23 @@ public struct SolidReason: Equatable, Sendable {
         public var aestheticCellsAcross: Int
         /// Allow quilt as the engine read it (Auto never quilts).
         public var allowQuiltOn: Bool
+        /// ★ notes30 X2 (his yes, 11-26, Small cells first): the smallest cell Small cells in thin walls lays in a wall that
+        /// needs it, with Allow quilt off (core's thin_floor_cell_mm, lattice_quilt_off_cell_mm: the thinnest strut and one
+        /// printed line of air over the type's touch; octet 3.82 mm at two 0.45 mm lines); 0: none for the type.
+        public var thinFloorCellMM: Double
+        /// Small cells in thin walls as the engine read it (Auto never lays it).
+        public var smallCellsOn: Bool
         public init(depthMM: Double, cellsAcross: Int, floorCellMM: Double, quiltFloorCellMM: Double,
-                    aestheticCellsAcross: Int, allowQuiltOn: Bool) {
+                    aestheticCellsAcross: Int, allowQuiltOn: Bool, thinFloorCellMM: Double = 0, smallCellsOn: Bool = false) {
             self.depthMM = depthMM; self.cellsAcross = cellsAcross; self.floorCellMM = floorCellMM
             self.quiltFloorCellMM = quiltFloorCellMM; self.aestheticCellsAcross = aestheticCellsAcross
             self.allowQuiltOn = allowQuiltOn
+            self.thinFloorCellMM = thinFloorCellMM; self.smallCellsOn = smallCellsOn
+        }
+        /// ★ notes30 X2: Small cells in thin walls helps — off, Allow quilt off (core lays it only then), and the cell this
+        /// place needs is at least its smallest (his pad: 4 mm against 3.82 mm; measured, it lays 4 mm cells of 0.90 mm struts).
+        public var smallCellsHelp: Bool {
+            !smallCellsOn && !allowQuiltOn && thinFloorCellMM > 0 && neededCellMM >= thinFloorCellMM * (1 - 1e-6)
         }
         /// The cell the depth needs: the depth over its cells across (his pad: 20 / 5 = 4 mm).
         public var neededCellMM: Double { depthMM / Double(Swift.max(1, cellsAcross)) }
@@ -108,8 +120,12 @@ public struct SolidReason: Equatable, Sendable {
         // fewer cells fit), or leaving it solid. Where neither fits, the depth is the fix and the words say so.
         var line = "\(pct)% of the lattice you asked for is solid: \(why)"
         let depth = Self.ask(template, cause: cause, haveMM: haveMM)
+        // ★ notes30 X2 (his yes, 11-26): Small cells in thin walls FIRST where it lays here (with Allow quilt off it lays his
+        // pad's 4 mm cells of 0.90 mm struts, never touching, only where a wall needs it)
+        let smallFirst = !Self.controlThreeOffers
         if cause == .regionShallow, let d = depth, d.depthMM > 0, !Self.controlSmallerCellsAlways, !d.smallerCellsHelp {
             var three: [Fix] = []
+            if smallFirst, d.smallCellsHelp { three.append(.smallCells) }
             if d.quiltHelps { three.append(.allowQuilt) }
             if !aesthetic, d.aestheticHelps { three.append(.switchToAesthetic) }
             if !three.isEmpty {
@@ -122,12 +138,21 @@ public struct SolidReason: Equatable, Sendable {
         if cause == .wallNarrow || cause == .tooFewAcross, let d = depth, d.depthMM > 0, !Self.controlSmallerCellsAlways,
            !d.smallerCellsHelp {
             var others = fixes
+            if smallFirst {   // ★ notes30 X2: first where it lays these walls, never where it does not
+                others.removeAll { $0 == .smallCells }
+                if d.smallCellsHelp { others.insert(.smallCells, at: 0) }
+            }
             if d.quiltHelps, !others.contains(.allowQuilt) { others.append(.allowQuilt) }
             if !aesthetic, d.aestheticHelps, !others.contains(.aestheticCutCells) { others.append(.switchToAesthetic) }
-            fixes = Array(others.prefix(2)) + [.leaveSolid]
+            fixes = Array(others.prefix(smallFirst ? 3 : 2)) + [.leaveSolid]
         }
-        return SolidReason(cause: cause, share: share, line: line, fixes: Array(fixes.prefix(3)), depth: depth)
+        // the offers: up to three and Leave it solid (the pop-up's dismiss word); else three at most, as ever
+        return SolidReason(cause: cause, share: share, line: line, fixes: Array(fixes.prefix(fixes.contains(.leaveSolid) ? 4 : 3)),
+                           depth: depth)
     }
+
+    /// RED CONTROL (tests): release 22's offers — no Small cells in thin walls among them.
+    nonisolated(unsafe) public static var controlThreeOffers = false
 
     /// ★ notes30 X2 (cell advice): the depth ask made the reason's own — core's "what is there" for it, over the cells across
     /// it asks (a wall thinner than one cell: one; Aesthetic likewise). The template's floors stay.
@@ -135,8 +160,8 @@ public struct SolidReason: Equatable, Sendable {
         guard var d = template else { return nil }
         let have = haveMM.count == 5 ? haveMM[cause.rawValue] : 0
         switch cause {
-        case .wallNarrow:
-            d.depthMM = have; d.cellsAcross = 1; d.aestheticCellsAcross = 1
+        case .wallNarrow:   // ★ notes30 X2: core divides a wall into the cells across its lattice asks (cells.cpp divide)
+            d.depthMM = have
         case .tooFewAcross:
             d.depthMM = have
         case .regionShallow:
@@ -173,6 +198,9 @@ public struct SolidReason: Equatable, Sendable {
         case .allowQuilt:
             p.latticePageManual = true   // first: the lay the change starts reads Manual
             p.lattice.allowQuilt = true
+        case .smallCells:   // ★ notes30 X2: its own switch, Manual's too (Auto lays none: LatticeLayoutPreview.settings)
+            p.latticePageManual = true
+            p.lattice.smallCellsInThinWalls = true
         case .switchToAesthetic:
             p.switchLatticeStageMode(to: .aesthetic)
         case .leaveSolid:
@@ -242,6 +270,11 @@ public struct SolidReason: Equatable, Sendable {
     public static func offersWhy(_ r: SolidReason) -> String? {
         guard r.offersThree, let d = r.depth else { return nil }
         var parts: [String] = []
+        if r.fixes.contains(.smallCells), d.thinFloorCellMM > 0 {   // ★ notes30 X2: first, as it is offered
+            parts.append("Small cells in thin walls: the Lattice page goes to Manual with it on. Only where a wall needs it, its "
+                + "cells shrink, here to the \(mm(d.neededCellMM)) cells it needs (never under \(mm(d.thinFloorCellMM))), with "
+                + "struts as thin as before and always a printed line apart, so they never touch. Allow quilt stays off.")
+        }
         if r.fixes.contains(.allowQuilt) {
             parts.append("Turn Allow quilt on: the Lattice page goes to Manual with Allow quilt on. Cells may then be as small as "
                 + "\(mm(d.quiltFloorCellMM)), so this place gets the \(mm(d.neededCellMM)) cells it needs, and no smaller, with "
@@ -263,7 +296,7 @@ public struct SolidReason: Equatable, Sendable {
         if r.fixes.contains(.oneCellAcross) {
             parts.append("One cell across: a member one cell wide is latticed, with a skin tying its cut struts.")
         }
-        if r.fixes.contains(.smallCells) {
+        if r.fixes.contains(.smallCells), !(d.thinFloorCellMM > 0) {
             parts.append("Small cells in thin walls: a thin wall gets its own smaller cells, down to the smallest whose struts "
                 + "stay a printed line apart.")
         }
