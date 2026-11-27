@@ -1340,10 +1340,9 @@ public final class FlexibleMainStage: ObservableObject {
         j.controlStressScaleIsPeak = controlStressScaleIsPeak
         j.controlRound5Frames = controlRound5Frames
         j.controlRolesOnMain = controlRolesOnMain
-        if controlRound5Frames {   // (the red control only — the job then runs on main: `pictureInline`)
-            j.paintFrames = { [weak m] t, o in
-                MainActor.assumeIsolated { if let m { FlexibleGroupFrames.paint(&t, overlay: o, model: m) } }
-            }
+        // (the red control only — the job then runs on main: `pictureInline`)
+        if controlRound5Frames {
+            j.paintFrames = { [weak m] t, o in MainActor.assumeIsolated { if let m { FlexibleGroupFrames.paint(&t, overlay: o, model: m) } } }
         }
         return j
     }
