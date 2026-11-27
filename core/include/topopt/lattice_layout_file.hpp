@@ -198,6 +198,18 @@ struct StrengthAsk {
   // P4 (Phase 2): the print-orientation candidates' ups, in the job's frame (print_candidates); the check judges
   // each (StrengthDone::orientation). Empty: none.
   std::vector<Vec3> orientation_ups;
+  // C2, Organic strength CUT 1 (lattice_layout_break.hpp): the file as written (the job's frame) and its path, the
+  // posts' laid width, the file job's progress line and stop flag, and the folder the break check keeps its answers in
+  // (empty: no cache). The file job fills these for an Organic job; `print` null: no break check (a cell lattice).
+  const TriangleMesh* print = nullptr;
+  std::string print_path;
+  double post_mm = 0.9;
+  void (*said)(const char*) = nullptr;
+  const std::atomic<bool>* stop = nullptr;
+  std::string break_cache;
+  // A TEST-ONLY argument (the oversize mark, plan section 5 mark 5): the break check's memory limit in bytes. The file
+  // job never sets it; 0 = 40 % of the machine's physical memory.
+  double break_memory_limit_bytes = 0.0;
 };
 struct StrengthDone {
   bool ok = false;
@@ -236,6 +248,10 @@ struct FileJob {
   // old Lattice run takes ("mode": "lattice_part"). run_file_job makes it a path beside the job; a caller of
   // make_lattice_file gives the path. Empty: no check, and the result names none (V2).
   std::string strength_job;
+  // C2 (key "break_cache"): a folder beside the job, by its bare name, where the Organic break check keeps its answers.
+  // Not given: the user's cache folder (Apple: confstr _CS_DARWIN_USER_CACHE_DIR + "topopt-break-check"); elsewhere
+  // none. run_file_job makes it a path beside the job.
+  std::string break_cache;
   // Organic, Traced (layout key "region_weave"): the stress tensor's file (key "tensor"), a bare name beside the job,
   // as "demand". Empty: none sent. run_file_job reads it into `tensor_field`; a caller of make_lattice_file puts the
   // field there itself. A job with a weave region and no field is refused (no_stress_result, OR14).

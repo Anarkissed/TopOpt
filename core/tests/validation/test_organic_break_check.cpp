@@ -18,6 +18,7 @@
 #include "topopt/lattice_layout_break.hpp"
 #include "topopt/lattice_layout_file.hpp"
 #include "topopt/materials.hpp"
+#include "topopt/observability.hpp"
 #include "topopt/step.hpp"
 #include "topopt/stl.hpp"
 #include "topopt/voxel.hpp"
@@ -252,12 +253,67 @@ void mark(const std::string& dir, const Piece& p, const Material& pla) {
   check(r.ok && near(r.first_resolved.multiple, p.want_resolved, 0.01) && (p.want_all <= 0 || near(r.first_all.multiple, p.want_all, 0.01)) && dist <= 0.5,
         (p.name + ": mark 1, within 1 % and 0.5 mm").c_str());
 }
+// Mark 5 (plan section 5): the size guard on a made job. (1) The guard alone on the made bracket's print, its memory read
+// around it: it must trip with no allocation over 0.5 GB. (2) The same made job through the file job with the real
+// check and a limit of 1 GB set by the test-only argument (StrengthAsk::break_memory_limit_bytes): the file is KEPT and
+// the block says not checked, too big, with the numbers.
+void oversize(const std::string& dir) {
+  const std::string w = std::string(TMP_DIR) + "/organic_break_check/OVERSIZE";
+  std::filesystem::remove_all(w);
+  std::filesystem::create_directories(w + "/out");
+  std::filesystem::copy_file(dir + "/BR.stl", w + "/BR.stl");
+  std::filesystem::copy_file(dir + "/BR.tensor", w + "/stress.tensor");
+  std::string job = slurp(dir + "/BRT_d_job.json");
+  job.insert(job.find('{') + 1, "\"break_cache\": \"cache\", ");
+  write(w + "/job.json", job);
+  const StepModel m = import_part_file_resolved(w + "/BR.stl");
+  const int fixed = face_where(m, {-1, 0, 0}, 0, false), loaded = face_where(m, {0, 0, 1}, 2, true);
+  write(w + "/strength_job.json",
+        "{\"model\": \"BR.stl\", \"material\": \"PLA\", \"mode\": \"lattice_part\", \"resolution\": 40, \"loads\": {\"minimize_plastic\": "
+        "true, \"safety_margin\": 1.5, \"build_dir\": [0, 0, 1], \"anchor_face_ids\": [" + std::to_string(fixed) + "], \"groups\": [{\"face_ids\": [" +
+        std::to_string(loaded) + "], \"force\": [0, 0, -20]}]}, \"lattice\": {\"topology\": \"octet\", \"require_lattice_void_reaches_exterior\": "
+        "false}, \"grading\": {\"topology\": \"octet\", \"cell_mm\": 8, \"min_extrudable_width_mm\": 0.45, \"intent\": \"structural\"}, "
+        "\"output\": {\"report\": \"report.json\", \"mesh_format\": \"stl\", \"mesh_prefix\": \"variant\"}}");
+  // (1) the guard alone, on the study's made print of this job
+  {
+    const StlMesh print = read_stl_file(dir + "/BRT_d_file/lattice.stl");
+    BreakAsk ask;
+    ask.print = &print.mesh;
+    ask.part = &m;
+    ask.memory_limit_bytes = 1e9;
+    const double before = process_memory().peak_rss_mb, rss0 = process_memory().rss_mb;
+    const BreakSize sz = organic_break_size(ask);
+    const double after = process_memory().peak_rss_mb;
+    std::printf("oversize (1): %zu material voxels, %.2f GB needed, %.2f GB allowed; process peak %.0f MB before (resident %.0f), %.0f MB after\n",
+                sz.material_voxels, sz.bytes / 1e9, sz.limit_bytes / 1e9, before, rss0, after);
+    check(sz.bytes > sz.limit_bytes && after - rss0 < 512.0, "mark 5 (1): the guard trips, with under 0.5 GB allocated by it");
+  }
+  // (2) through the file job, the real check, the test-only limit
+  const StrengthCheck real = lattice_file_strength_check(MATERIALS_JSON_PATH, SETTINGS_RULES_PATH);
+  StrengthCheck sc = real;
+  sc.run_organic = [&](const StrengthAsk& a) {
+    StrengthAsk b = a;
+    b.break_memory_limit_bytes = 1e9;
+    return real.run_organic(b);
+  };
+  const FileResult fr = run_file_job(w + "/job.json", w + "/out", 0, nullptr, &sc);
+  const std::string rep = slurp(w + "/out/lattice_file.json");
+  const std::size_t bp = rep.find("\"break\": {");
+  const std::string blk = bp == std::string::npos ? std::string() : rep.substr(bp, rep.find('}', rep.find("\"bytes_allowed\"", bp)) - bp + 1);
+  std::printf("oversize (2): ok %d code %s accepted %d; file kept %d; %s\n", fr.ok, fr.code.c_str(), fr.strength_accepted,
+              std::filesystem::exists(w + "/out/lattice.stl"), blk.c_str());
+  check(fr.ok && !fr.strength_accepted && std::filesystem::exists(w + "/out/lattice.stl") && blk.find("\"not_checked\"") != std::string::npos &&
+            blk.find("\"too_big\"") != std::string::npos && rep.find("\"answer\": \"break\"") != std::string::npos,
+        "mark 5 (2): the file is kept, the block says not checked: too big, with the numbers");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
   gate();
   law();
   bar();
+  if (argc >= 3 && std::string(argv[1]) == "oversize") oversize(argv[2]);
   if (argc >= 3 && std::string(argv[1]) == "marks") {
     const std::string dir = argv[2];
     const MaterialLibrary lib = load_materials_file(MATERIALS_JSON_PATH);

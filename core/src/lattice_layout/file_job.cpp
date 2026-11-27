@@ -1,6 +1,8 @@
 // Lattice rebuild: the lattice file job. See lattice_layout_file.hpp and
 // docs/design/lattice-rebuild/04-layout-file-job.md.
 #include "topopt/lattice_layout_file.hpp"
+
+#include <unistd.h>
 #include "topopt/threemf_stream.hpp"
 
 #include <algorithm>
@@ -682,6 +684,20 @@ std::size_t size_of_file(const std::string& path) {
   std::ifstream f(path, std::ios::binary | std::ios::ate);
   return f ? static_cast<std::size_t>(f.tellg()) : 0;
 }
+// C2: the break check's cache when the job names none: the user's cache folder (Apple), else none.
+std::string default_break_cache() {
+#ifdef __APPLE__
+  char b[1024];
+  const std::size_t n = confstr(_CS_DARWIN_USER_CACHE_DIR, b, sizeof b);
+  if (n > 0 && n <= sizeof b) {
+    std::string d(b);
+    if (!d.empty() && d.back() != '/') d += '/';
+    return d + "topopt-break-check";
+  }
+#endif
+  return std::string();
+}
+
 void say(void (*said)(const char*), const char* line) {
   if (said) said(line);
 }
@@ -1059,7 +1075,7 @@ FileJob parse_file_job(const std::string& json_text) {
     const std::string w = "job.json";
     json::as_object(doc, w);
     json::reject_unknown(doc, {"mode", "model", "output", "linear_deflection", "threads", "layout", "mesh", "demand",
-                               "strength_job", "tensor", "file_format", "strengthened", "print_frame"},
+                               "strength_job", "tensor", "file_format", "strengthened", "print_frame", "break_cache"},
                          w);
     const std::string mode = json::as_string(json::require(doc, "mode", w), w + ".mode");
     if (mode != "lattice_file") json::fail(w + ".mode", "must be \"lattice_file\", not \"" + mode + "\"");
@@ -1088,6 +1104,13 @@ FileJob parse_file_job(const std::string& json_text) {
         json::fail(w + ".strength_job", "must be a file name with no folder in it");
       if (job.strength_job == job.output || job.strength_job == kFileResultName)
         json::fail(w + ".strength_job", "is the name of a file the job writes");
+    }
+    // C2: the break check's cache, a folder beside the job, by its bare name.
+    if (json::find(doc, "break_cache")) {
+      job.break_cache = text(doc, "break_cache", "", w);
+      if (job.break_cache.empty() || job.break_cache == "." || job.break_cache == ".." ||
+          job.break_cache.find_first_of("/\\") != std::string::npos)
+        json::fail(w + ".break_cache", "must be a folder name with no folder in it");
     }
     // OF5: the file's format, "3mf" or "stl"; not given: 3MF for the tubes route, STL otherwise.
     if (json::find(doc, "file_format")) {
@@ -1599,6 +1622,13 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
         ask.light_width_mm = job.organic.width_mm > 0.0
                                  ? job.organic.width_mm
                                  : session.domain()->spec().bead_mm * session.domain()->spec().min_strut_lines;
+        // C2: the break check on the file as written
+        ask.print = &mesh;
+        ask.print_path = file_path;
+        ask.post_mm = options.mesh.post_mm;
+        ask.said = said;
+        ask.stop = stop;
+        ask.break_cache = !job.break_cache.empty() ? job.break_cache : default_break_cache();
       }
       StrengthDone sd;
       try {
@@ -1666,6 +1696,7 @@ bool load_file_job(const std::string& job_path, int threads, FileJob& job, StepM
     }
     if (threads > 0) job.options.threads = threads;
     if (!job.strength_job.empty()) job.strength_job = folder_of(job_path) + "/" + job.strength_job;
+    if (!job.break_cache.empty()) job.break_cache = folder_of(job_path) + "/" + job.break_cache;
     if (!job.demand.empty()) {
       auto field = std::make_shared<DemandField>();
       std::string why;
