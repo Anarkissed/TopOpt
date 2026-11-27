@@ -11,7 +11,11 @@
 //     `controlLiveAnimates`, Skip off, an armed show);
 //   * no strut of the real lattice is ever shown then taken away (RED `controlStrikeRealToo`);
 //   * the rough cut-open is made before the lay for a cube lattice and leaves the lay as it was (RED: `gridAhead`, Organic's);
-//   * the scaffold is one even grid, one lift height, braced, with a stair, thin and pale (RED: a lattice's struts fail it).
+//   * the scaffold is one even grid, one lift height, braced, with a stair, thin and pale (RED: a lattice's struts fail it);
+//   * ★ v3 (11-27): the scaffold stands through the whole real build, then is struck top to bottom in a second (RED
+//     `controlStrikeEachFloor`); nothing placed in mid-air, a floor over an overhang middle-out (RED `controlWalkOrder`); the
+//     cut-out never changes at the visible rim at the landing (RED `controlRoughCoarse`); one even beat, no pause between
+//     levels (RED `controlLevelPause`).
 #if canImport(AppKit) && canImport(MetalKit)
 import XCTest
 import AppKit
@@ -43,6 +47,10 @@ final class Notes30ScaffoldTests: XCTestCase {
         S.controlNoLandings = false
         T.controlWholeLift = false
         T.controlQuickReal = false
+        T.controlStrikeEachFloor = false
+        T.controlLevelPause = false
+        S.controlWalkOrder = false
+        S.controlRoughCoarse = false
         super.tearDown()
     }
 
@@ -182,10 +190,10 @@ final class Notes30ScaffoldTests: XCTestCase {
     // MARK: a slow lay — the walls first, the scaffold, the real floors replacing it
 
     /// ★ A slow lay (12 s): the walls come off first, floor by floor in hard snaps, the moment its rough cut-open is made; then
-    /// the scaffold rises lift by lift (each its uprights, then its bays), topping out before the landing, nothing of the real
-    /// lattice before it lands; then the real floors replace it floor by floor — each floor's columns and bays, then that lift
-    /// struck — until nothing of the scaffold is left, before the topped-out beat; at least 7 s. RED CONTROL `controlNoScaffold`:
-    /// the part stands closed until it lands (release 21's wait).
+    /// the scaffold rises lift by lift, topping out before the landing, nothing of the real lattice before it lands; then the
+    /// real floors go in floor by floor inside it — ★ v3 the whole scaffold standing until the last of them — then it is struck,
+    /// nothing of it left before the topped-out beat; at least 7 s. RED CONTROL `controlNoScaffold`: the part stands closed
+    /// until it lands (release 21's wait).
     func testASlowLayOpensTheWallsFirstThenTheScaffoldRisesAndTheRealFloorsReplaceIt() throws {
         for red in [false, true] {
             LatticeBuildShow.controlNoScaffold = red
@@ -243,11 +251,11 @@ final class Notes30ScaffoldTests: XCTestCase {
                     mostStruck = Swift.max(mostStruck, s.struck - l.struck)
                     if s.snaps > l.snaps { realSnaps += 1 }
                 }
-                XCTAssertLessThanOrEqual(s.struck, tl.piecesBefore(s.snaps / T.perFloorReal), "★ a lift struck only once its real floor stands")
+                if s.struck > 0 { XCTAssertEqual(s.snaps, allReal, "★ v3: nothing struck before the whole real lattice stands") }
                 last = s
             }
             XCTAssertLessThanOrEqual(mostUp, T.piecesMostPerSnap, "★ a piece at a time (a few at most a snap)")
-            XCTAssertLessThanOrEqual(mostStruck, T.piecesMostPerSnap, "★ struck a piece at a time")
+            XCTAssertLessThanOrEqual(mostStruck, tl.strikePlan.per, "★ struck a few pieces a frame at most")
             XCTAssertEqual(realSnaps, allReal, "★ every real floor's snaps seen, one by one")
             XCTAssertEqual(last?.snaps, allReal, "★ it ends on the whole lattice")
             XCTAssertEqual(last?.struck, all, "★ nothing of the scaffold left")
@@ -361,10 +369,11 @@ final class Notes30ScaffoldTests: XCTestCase {
             let t0 = CACurrentMediaTime() + 1000
             show.layBegins(walls: true, scaffold: false, mayScaffold: true, expectedS: 0.6, now: t0)
             show.scaffoldArrived(S.drawing(made, token: show.scaffoldToken), now: t0 + 0.15)
-            XCTAssertNil(show.revealScaffold(at: t0 + 0.99), "a quick lay, before the second: no scaffold")
-            XCTAssertNil(show.timelapse?.shown(at: t0 + 0.99), "the site")
-            let at1 = show.revealScaffold(at: t0 + 1.0)
-            let s2 = show.timelapse?.shown(at: t0 + 1.0)
+            // (★ v3: the second counts from when its lay began — after its rough cut-open, 0.15 s here)
+            XCTAssertNil(show.revealScaffold(at: t0 + 1.14), "a quick lay, before the second: no scaffold")
+            XCTAssertNil(show.timelapse?.shown(at: t0 + 1.14), "the site")
+            let at1 = show.revealScaffold(at: t0 + 1.15)
+            let s2 = show.timelapse?.shown(at: t0 + 1.15)
             let s3 = show.revealScaffold(at: t0 + 4)
             show.landed(token: 5, now: t0 + 5)
             let end = try XCTUnwrap(show.timelapse?.end)
@@ -388,6 +397,14 @@ final class Notes30ScaffoldTests: XCTestCase {
         quick.landed(token: 6, now: t1 + 0.8)
         for k in 0..<200 { XCTAssertNil(quick.revealScaffold(at: t1 + 0.8 + Double(k) * 0.05), "★ landed in time: the fast path") }
         XCTAssertFalse(quick.timelapse?.scaffolding ?? true)
+        // ★ v3: the rough cut-open's own time (on the exact map's voxels: 0.23 s for the stand on this Mac) never pushes a quick
+        // lay into the scaffold — the stand's lay, landing 1.09 s after the ask, rises as stand-solid-7s
+        let stand = LatticeBuildShow()
+        stand.layBegins(walls: true, mayScaffold: true, expectedS: 0.86, now: t1)
+        stand.scaffoldArrived(S.drawing(made, token: stand.scaffoldToken), now: t1 + 0.23)
+        for k in 0..<22 { XCTAssertNil(stand.revealScaffold(at: t1 + Double(k) * 0.05), "★ the stand's quick lay: no scaffold") }
+        stand.landed(token: 8, now: t1 + 1.09)
+        XCTAssertFalse(stand.timelapse?.scaffolding ?? true, "★ the stand's quick lay rises as stand-solid-7s")
         // no rough cut-open made: the switch shows nothing, and the landing is the fast path's
         let none = LatticeBuildShow()
         none.layBegins(walls: true, mayScaffold: true, expectedS: 0.6, now: t1)
@@ -878,8 +895,8 @@ final class Notes30ScaffoldTests: XCTestCase {
 
     /// ★ "The floor gets made at the same time. It just comes into existence ... It should be a piece at a time." — as the
     /// scaffold rises (a slow lay on the stand's window and on the cone), each snap brings one piece, a few at most
-    /// (`piecesMostPerSnap`), never a lift's whole floor or walls at once; it is struck the same way. RED CONTROL
-    /// `controlWholeLift`: a lift's pieces all in one snap.
+    /// (`piecesMostPerSnap`), never a lift's whole floor or walls at once; ★ v3 struck "a LOT faster" — a frame's share of
+    /// its pieces a frame (`strikePlan`). RED CONTROL `controlWholeLift`: a lift's pieces all in one snap.
     func testTheScaffoldComesAPieceAtATime() throws {
         for red in [false, true] {
             T.controlWholeLift = red
@@ -913,7 +930,7 @@ final class Notes30ScaffoldTests: XCTestCase {
                 if red { XCTAssertGreaterThanOrEqual(mostUp, smallest, "RED CONTROL: a whole floor (or walls) in one snap"); continue }
                 XCTAssertLessThanOrEqual(mostUp, T.piecesMostPerSnap, "★ \(name): a piece at a time (\(T.piecesMostPerSnap) at most a snap)")
                 XCTAssertLessThan(mostUp, smallest, "★ \(name): never a whole floor or walls at once")
-                XCTAssertLessThanOrEqual(mostStruck, T.piecesMostPerSnap, "★ \(name): struck a piece at a time")
+                XCTAssertLessThanOrEqual(mostStruck, show.timelapse?.strikePlan.per ?? 0, "★ \(name): struck a frame's share at a time")
                 XCTAssertEqual(lastUp, made.members, "every piece came")
             }
         }
@@ -922,7 +939,7 @@ final class Notes30ScaffoldTests: XCTestCase {
     /// ★ "the scaffolding is super long, but the actual building of the lattice is nearly instant. Can we slow it down a little
     /// bit and give it that time-lapse feel too?" — after the landing the real floors take their own `replaceS` (5 s): each
     /// floor's columns in `sweeps` snaps, then its bays in `sweeps`, one at a time, and every strut in the snap its slice says
-    /// (`sweepStep`); the scaffold's pieces never stretched (at most `pieceS` apart). RED CONTROL `controlQuickReal`: v1's 2.4 s.
+    /// (`sweepStep`). RED CONTROL `controlQuickReal`: v1's 2.4 s.
     func testTheRealBuildTakesItsOwnTimeAfterTheLanding() throws {
         let made = try XCTUnwrap(S.make(Self.curved, up: SIMD3(0, 0, 1), across: SIMD3(1, 0, 0), walls: true))
         for red in [false, true] {
@@ -945,19 +962,305 @@ final class Notes30ScaffoldTests: XCTestCase {
                 t += 0.002
             }
             let real = (whole ?? end) - (first ?? end)
-            let gaps = tl.lifts.flatMap { l in zip(l.snaps.dropFirst(), l.snaps).map { $0 - $1 } }   // (within a lift)
-            print(String(format: "NOTES30 REAL BUILD%@: %d sweeps over %.2f s after the landing (the whole timelapse %.2f s); scaffold snaps at most %.3f s apart",
-                         red ? " RED" : "", steps, real, end - t0, gaps.max() ?? 0))
+            print(String(format: "NOTES30 REAL BUILD%@: %d sweeps over %.2f s after the landing (the whole timelapse %.2f s)",
+                         red ? " RED" : "", steps, real, end - t0))
             if red { XCTAssertLessThan(real, 0.7 * T.replaceS, "RED CONTROL: v1's quick real build"); continue }
             XCTAssertEqual(steps, tl.floors * T.perFloorReal, "★ every floor's columns and bays in sweeping snaps")
             XCTAssertGreaterThan(real, 0.7 * T.replaceS, "★ the real build takes its own time (\(real) s)")
-            XCTAssertLessThanOrEqual(gaps.max() ?? 0, T.pieceS + 1e-9, "★ the scaffold's pieces never stretched (stillness between levels instead)")
             // every strut comes in the sweep its slice says
             let f = try XCTUnwrap(tl.frame)
             let a = SIMD3<Float>(f.across * (f.acrossLow + 0.05 * f.acrossW) + f.up * (f.low + 0.1)), b = a + f.up * f.floorH * 0.9
             XCTAssertEqual(T.sweepStep(a, b, f), 0, "a column at the left of the lowest floor: its first sweep")
             let c = SIMD3<Float>(f.across * (f.acrossLow + 0.95 * f.acrossW) + f.up * (f.low + 0.1))
             XCTAssertEqual(T.sweepStep(c, c + f.across * 0.5, f), 2 * T.sweeps - 1, "a bay's strut at its right: the floor's last sweep")
+        }
+    }
+
+    // MARK: ★ his notes on v3 (11-27, img 100-102)
+
+    /// A pebble-like area (never his file): in a block 90 × 60 × 42 mm, the lower half of a lying ellipsoid — its area wider at
+    /// every lift as it rises (as img 100's pebble's round zone below its middle), so each floor OVERHANGS the lift below.
+    static let pebble: S.Rough = {
+        let v: Float = 1.5, part = SIMD3<Float>(90, 60, 42)
+        let origin = SIMD3<Float>(repeating: -v)
+        let dims = SIMD3<Int32>(Int32((part.x / v).rounded(.up)) + 3, Int32((part.y / v).rounded(.up)) + 3, Int32((part.z / v).rounded(.up)) + 3)
+        var rg = [Int8]()
+        for z in 0..<Int(dims.z) { for y in 0..<Int(dims.y) { for x in 0..<Int(dims.x) {
+            let p = origin + SIMD3(Float(x), Float(y), Float(z)) * v
+            let inside = all(p .>= SIMD3(repeating: -0.01)) && all(p .<= part + 0.01)
+            let q = (p - SIMD3(45, 30, 40)) / SIMD3(40, 26, 38)
+            let open = inside && simd_dot(q, q) < 1
+            rg += [open ? 127 : -127, inside ? 127 : -127]
+        }}}
+        return S.Rough(origin: origin, voxel: v, dims: dims, rg: rg)
+    }()
+
+    /// The members that, in the order they come, touch nothing standing when they come — no end or point of them on a member
+    /// before them (within the ground and roof floors' hair), nor an end on the ground lift's foot: at most five, described.
+    static func placedInMidAir(_ m: S.Made) -> [String] {
+        let bars = m.bars, n = bars.count / 7, f = m.frame
+        guard n > 0, let g = m.layout.ground else { return ["no scaffold"] }
+        let tol = S.edgeShare * f.floorH + 1e-3, ground = m.layout.height(g)
+        let segs = (0..<n).map { i in (SIMD3(bars[7 * i], bars[7 * i + 1], bars[7 * i + 2]), SIMD3(bars[7 * i + 3], bars[7 * i + 4], bars[7 * i + 5])) }
+        func dist(_ p: SIMD3<Float>, _ a: SIMD3<Float>, _ b: SIMD3<Float>) -> Float {
+            let d = b - a, t = Swift.max(0, Swift.min(1, simd_dot(p - a, d) / Swift.max(simd_dot(d, d), 1e-12)))
+            return simd_distance(p, a + d * t)
+        }
+        var fails: [String] = [], count = 0
+        for i in 0..<n {
+            let (a, b) = segs[i]
+            var met = abs(simd_dot(f.up, a) - ground) <= tol || abs(simd_dot(f.up, b) - ground) <= tol
+            var j = 0
+            while !met, j < i {
+                let (c, d) = segs[j]
+                met = dist(a, c, d) <= tol || dist(b, c, d) <= tol || dist(c, a, b) <= tol || dist(d, a, b) <= tol
+                j += 1
+            }
+            if !met {
+                count += 1
+                if fails.count < 5 { fails.append(String(format: "piece %d (%@) in mid-air at (%.1f, %.1f, %.1f)", i, "\(m.layout.parts[i])", a.x, a.y, a.z)) }
+            }
+        }
+        if count > fails.count { fails.append("\(count) in all") }
+        return fails
+    }
+
+    /// Each level as its ledgers come (a lift's floor, the top lift's roof): it grows MIDDLE-OUT as one piece — its first ledger
+    /// within 1.5 bays of its middle, each after it meeting one already laid on it. The failures, at most five.
+    static func middleOut(_ m: S.Made) -> [String] {
+        let bars = m.bars, n = bars.count / 7, bay = m.layout.bay, f = m.frame
+        var levels: [(h: Float, segs: [(SIMD3<Float>, SIMD3<Float>)])] = []
+        for i in 0..<n where m.layout.parts[i] == .floor || m.layout.parts[i] == .roof {
+            let a = SIMD3(bars[7 * i], bars[7 * i + 1], bars[7 * i + 2]), b = SIMD3(bars[7 * i + 3], bars[7 * i + 4], bars[7 * i + 5])
+            let h = simd_dot(f.up, a)
+            if let k = levels.lastIndex(where: { abs($0.h - h) < 1e-3 }) { levels[k].segs.append((a, b)) } else { levels.append((h, [(a, b)])) }
+        }
+        var fails: [String] = []
+        for (k, l) in levels.enumerated() {
+            let mids = l.segs.map { ($0.0 + $0.1) / 2 }
+            let c = mids.reduce(SIMD3<Float>(repeating: 0), +) / Float(mids.count)
+            if let first = mids.first, simd_distance(first, c) > 1.5 * bay {
+                fails.append(String(format: "level %d (%.1f mm): its first ledger %.1f bays from its middle", k, l.h, simd_distance(first, c) / bay))
+            }
+            for j in 1..<Swift.max(1, l.segs.count) {
+                let (a, b) = l.segs[j]
+                let met = l.segs[0..<j].contains { simd_distance(a, $0.0) < 1e-3 || simd_distance(a, $0.1) < 1e-3 || simd_distance(b, $0.0) < 1e-3 || simd_distance(b, $0.1) < 1e-3 }
+                if !met { fails.append(String(format: "level %d (%.1f mm): ledger %d meets none laid before it", k, l.h, j)); break }
+            }
+        }
+        return Array(fails.prefix(5))
+    }
+
+    /// ★ v3 "nothing placed in mid-air" (img 100: on the pebble "a long ledger sticking out over nothing"): "The floor should go
+    /// *middle-out* in scenarios that have overhangs in the scaffolding." — on the pebble (its lower floors overhang the lift
+    /// below), the cone and the window, every piece, at the moment it comes, touches a piece already standing or the ground:
+    /// floor, walls, stairs, roof alike, and every level grows middle-out as one piece (never a long run along its edge first:
+    /// img 100's ledger). (The strike takes them in the reverse order, so what stands then is always a run of them as they rose:
+    /// nothing in mid-air coming down either.) RED CONTROL `controlWalkOrder` (v2's order): on the pebble a floor's ledgers come
+    /// over the overhang first; every floor starts at its front-left corner.
+    func testNothingIsPlacedInMidAirAFloorOverAnOverhangGrowsMiddleOut() throws {
+        for red in [false, true] {
+            S.controlWalkOrder = red
+            defer { S.controlWalkOrder = false }
+            for (name, r) in [("pebble", Self.pebble), ("window", Self.window), ("curved", Self.curved)] {
+                let made = try XCTUnwrap(S.make(r, up: SIMD3(0, 0, 1), across: SIMD3(1, 0, 0), walls: true), name)
+                let L = made.layout
+                let overhangs = zip(L.squares, L.squares.dropFirst()).filter { !$0.0.isEmpty && !$0.1.subtracting($0.0).isEmpty }.count
+                let fails = Self.placedInMidAir(made), spread = Self.middleOut(made)
+                print("NOTES30 MID-AIR (\(name)\(red ? " RED" : "")): \(made.members) members, squares per lift \(L.squares.map(\.count)), \(overhangs) levels overhanging the lift below; \(fails.isEmpty ? "every piece touches what stands as it comes" : fails.joined(separator: "; ")); \(spread.isEmpty ? "every level middle-out" : spread.joined(separator: "; "))")
+                if red {
+                    if name == "pebble" { XCTAssertFalse(fails.isEmpty, "RED CONTROL: v2's walk lays a ledger over the overhang first") }
+                    XCTAssertFalse(spread.isEmpty, "RED CONTROL: v2's walk starts each floor at its front-left corner (\(name))")
+                    continue
+                }
+                XCTAssertEqual(spread, [], "★ \(name): every level grows middle-out as one piece")
+                if name == "pebble" { XCTAssertGreaterThan(overhangs, 0, "premise: the pebble's floors overhang the lift below") }
+                XCTAssertEqual(fails, [], "★ \(name): every piece, as it comes, touches what already stands")
+                XCTAssertEqual(Self.stands(made), [], "★ \(name): and the whole stands as before")
+            }
+        }
+    }
+
+    /// ★ v3 "the scaffolding is clearing out from the bottom to the top. It would go from the top to the bottom and only *after*
+    /// the lattice was laid entirely. It can be put down a LOT faster though." — a slow lay (the window, the cone): every piece
+    /// of the scaffold stands until the last real snap is in; then it is struck from the top — what stands is always the run it
+    /// rose first, each snap's pieces from no higher lift than one already struck — all of it within `strikeS`. RED CONTROL
+    /// `controlStrikeEachFloor` (v2): a lift struck after each real floor, bottom up.
+    func testTheScaffoldStandsUntilTheLatticeIsLaidThenComesDownTopFirstInASecond() throws {
+        for red in [false, true] {
+            T.controlStrikeEachFloor = red
+            defer { T.controlStrikeEachFloor = false }
+            for (name, r) in [("window", Self.window), ("curved", Self.curved)] {
+                let made = try XCTUnwrap(S.make(r, up: SIMD3(0, 0, 1), across: SIMD3(1, 0, 0), walls: true), name)
+                var pieceLift: [Int] = []
+                for (k, n) in made.layout.liftPieces.enumerated() { pieceLift += [Int](repeating: k, count: n) }
+                let show = LatticeBuildShow()
+                let t0 = CACurrentMediaTime() + 1000
+                show.layBegins(walls: true, scaffold: true, mayScaffold: true, expectedS: 12, now: t0)
+                show.scaffoldArrived(S.drawing(made, token: show.scaffoldToken), now: t0 + 0.2)
+                _ = show.revealScaffold(at: t0 + 11.9)
+                show.landed(token: 3, now: t0 + 12)
+                let tl = try XCTUnwrap(show.timelapse), end = try XCTUnwrap(tl.end)
+                let all = tl.piecesAll, allReal = tl.floors * T.perFloorReal
+                var struckEarly = 0, bottomFirst = 0, upward = 0
+                var firstStrike: Double?, lastStrike: Double?, lastSnap: Double?
+                var lowestLift = Int.max, prev = T.Shown(lifts: all)
+                var t = t0 + 12
+                while t <= end + 1e-6 {
+                    if let s = tl.shown(at: t) {
+                        if s.snaps > prev.snaps { lastSnap = t }
+                        if s.snaps < allReal, s.struck > 0 { struckEarly += 1 }
+                        if s.struck > prev.struck {
+                            if firstStrike == nil { firstStrike = t }
+                            lastStrike = t
+                            let run = s.standing
+                            if run.lowerBound > 0 { bottomFirst += 1 }
+                            let gone = prev.standing.filter { !run.contains($0) }.map { pieceLift[$0] }
+                            if let lo = gone.min(), let hi = gone.max() {
+                                if hi > lowestLift { upward += 1 }
+                                lowestLift = Swift.min(lowestLift, lo)
+                            }
+                        }
+                        prev = s
+                    }
+                    t += 0.002
+                }
+                let took = (lastStrike ?? end) - (firstStrike ?? end)
+                print(String(format: "NOTES30 STRIKE (%@%@): %d pieces; last real snap %.2f s, struck %.2f–%.2f s (%.2f s, %d a snap); struck before the lattice stood %d, bottom first %d, upward %d",
+                             name, red ? " RED" : "", all, (lastSnap ?? t0) - t0, (firstStrike ?? t0) - t0, (lastStrike ?? t0) - t0, took,
+                             tl.strikePlan.per, struckEarly, bottomFirst, upward))
+                if red { XCTAssertGreaterThan(struckEarly + bottomFirst, 0, "RED CONTROL: v2 struck bottom up as the floors went in"); continue }
+                XCTAssertEqual(struckEarly, 0, "★ \(name): the whole scaffold stands until the lattice is laid entirely")
+                XCTAssertGreaterThan(try XCTUnwrap(firstStrike), try XCTUnwrap(lastSnap), "★ \(name): struck only after the last real snap")
+                XCTAssertEqual(bottomFirst, 0, "★ \(name): from the top: what stands is always the run it rose first")
+                XCTAssertEqual(upward, 0, "★ \(name): lift by lift from the top down")
+                XCTAssertLessThanOrEqual(took, T.strikeS + 1.0 / 30, "★ \(name): a LOT faster — in a second")
+                XCTAssertEqual(prev.struck, all, "★ \(name): nothing of it left")
+                XCTAssertLessThan(try XCTUnwrap(lastStrike), end - T.toppedOutS + 1e-6, "★ \(name): gone before the topped-out beat")
+            }
+        }
+    }
+
+    /// ★ v3 "there is a bit of a pause between each level of lattice laid down. Get rid of that entirely. I want the speed to
+    /// be consistent; so going up from the bottom takes the same amount of time as going from one cell to the next on the same
+    /// floor." — a slow lay (window, cone, pebble): the real build's snaps ONE even beat apart, floor to floor too; the
+    /// scaffold's next snap after a level's last comes its own beat after (never stillness), its pace a piece one even beat over
+    /// every level (never slower than `pieceMostS`); the strike a real beat after the last real snap. RED CONTROL
+    /// `controlLevelPause` (v2): stillness after each level.
+    func testOneEvenBeatWithNoPauseBetweenLevels() throws {
+        for red in [false, true] {
+            T.controlLevelPause = red
+            defer { T.controlLevelPause = false }
+            for (name, r) in [("window", Self.window), ("curved", Self.curved), ("pebble", Self.pebble)] {
+                let made = try XCTUnwrap(S.make(r, up: SIMD3(0, 0, 1), across: SIMD3(1, 0, 0), walls: true), name)
+                let show = LatticeBuildShow()
+                let t0 = CACurrentMediaTime() + 1000
+                show.layBegins(walls: true, scaffold: true, mayScaffold: true, expectedS: 12, now: t0)
+                show.scaffoldArrived(S.drawing(made, token: show.scaffoldToken), now: t0 + 0.2)
+                _ = show.revealScaffold(at: t0 + 11.9)
+                show.landed(token: 3, now: t0 + 12)
+                let tl = try XCTUnwrap(show.timelapse)
+                // the scaffold: within a lift, and from a lift's last snap to the next one's first
+                let risen = tl.lifts.filter { !$0.snaps.isEmpty }
+                var within = 0.0, pause = 0.0
+                for (k, l) in risen.enumerated() {
+                    for (a, b) in zip(l.snaps.dropFirst(), l.snaps) { within = Swift.max(within, abs((a - b) - l.gap)) }
+                    if k + 1 < risen.count, let last = l.snaps.last, let next = risen[k + 1].snaps.first {
+                        pause = Swift.max(pause, (next - last) / l.gap)
+                    }
+                }
+                let beats = risen.map(\.beat)
+                let beatSpread = (beats.max() ?? 0) / Swift.max(beats.min() ?? 1, 1e-9)
+                // the real build: its snaps, then the strike's first
+                let beatsAfter = tl.replaceBeats
+                let real = beatsAfter.filter { $0.struck == 0 }.map(\.t)
+                let gaps = zip(real.dropFirst(), real).map { $0 - $1 }
+                let realSpread = (gaps.max() ?? 0) / Swift.max(gaps.min() ?? 1, 1e-9)
+                let strikeAfter = (beatsAfter.first { $0.struck > 0 }?.t ?? 0) - (real.last ?? 0)
+                print(String(format: "NOTES30 BEAT (%@%@): scaffold %d pieces, a piece every %.3f–%.3f s (spread %.2f), level to level %.2f × its beat; real build %d snaps %.3f–%.3f s apart (spread %.2f), the strike %.3f s after",
+                             name, red ? " RED" : "", tl.piecesAll, beats.min() ?? 0, beats.max() ?? 0, beatSpread, pause, real.count,
+                             gaps.min() ?? 0, gaps.max() ?? 0, realSpread, strikeAfter))
+                if red {
+                    XCTAssertGreaterThan(realSpread, 2, "RED CONTROL: v2's pause after each real floor")
+                    XCTAssertGreaterThan(pause, 2, "RED CONTROL: v2's stillness after each level of scaffold")
+                    continue
+                }
+                XCTAssertEqual(real.count, tl.floors * T.perFloorReal, "premise: every real snap")
+                XCTAssertLessThan(realSpread, 1 + 1e-6, "★ \(name): the real build one even beat, floor to floor too")
+                XCTAssertEqual(strikeAfter, gaps.first ?? 0, accuracy: 1e-6, "★ \(name): the strike one beat after the last real snap")
+                XCTAssertLessThan(within, 1e-9, "★ \(name): a level's snaps one beat apart")
+                XCTAssertLessThan(pause, 1 + 1e-6, "★ \(name): no stillness from one level to the next")
+                XCTAssertLessThan(beatSpread, 1.15, "★ \(name): one pace a piece, level to level")
+                XCTAssertLessThanOrEqual(beats.max() ?? 0, T.pieceMostS + 1e-9, "★ \(name): never slower than \(T.pieceMostS) s a piece")
+            }
+        }
+    }
+
+    /// ★ v3 "The cut-out must not change" (img 101 at 0:11 → img 102 at 0:12, "landed: the exact cut-open"): "Is there no way
+    /// to ensure that doesn't happen?" — through the REAL engine (a block with a round lattice zone): the rough cut-open is made
+    /// on the exact map's own voxels and drawn by its own smoothing, so the two differ only where the lay alone knows (cells no
+    /// strut holds stay solid); what lands holds the visible rim exactly as the rough one drew it — nothing of the outline
+    /// changes at the part's surface (the outside and the voxel layer under it), deeper inside the exact one's. Measured: the
+    /// share of the cut-open's voxels whose cut changes at the landing. RED CONTROL `controlRoughCoarse` (v2): twice the voxel,
+    /// the rim moves.
+    func testTheCutOutDoesNotChangeAtTheLanding() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("scaffold-cut-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        let path = dir.appendingPathComponent("block.stl").path
+        try LatticePlaceChipsTests.gridSTL([0, 40], [0, 30], [0, 24]) { _, _, _ in true }.write(to: URL(fileURLWithPath: path))
+        let mesh = try TopOptKit.importMesh(path: path)
+        let session = try await LatticeLayoutSession.open(path: path)
+        addTeardownBlock { session.close() }
+        var set = LatticeLayoutSession.Settings()
+        set.topology = "bccz"; set.algorithm = "uniform"; set.cellMM = 5; set.cellMaxMM = 5
+        var z = LatticeLayoutSession.Region(id: 1, faces: [], depthMM: 0)   // a round zone through the block front to back
+        z.zone = .init(kind: .cylinder, centre: SIMD3(20, 15, 12), axes: [SIMD3(1, 0, 0), SIMD3(0, 0, 1), SIMD3(0, 1, 0)],
+                       half: SIMD3(9, 0, 20))
+        set.regions = [z]
+        let box = try XCTUnwrap(LatticeLayoutPreview.box(mesh.vertices))
+        let fine = LatticeLayoutPreview.mapGeometry(box)
+        _ = try await session.lay(set)   // (the part read once)
+        for red in [false, true] {
+            S.controlRoughCoarse = red
+            defer { S.controlRoughCoarse = false }
+            let g = LatticeLayoutPreview.roughGeometry(box)
+            let asked = try await session.gridRough(set, origin: g.origin, voxel: g.voxel, dims: g.dims)
+            let rough = S.Rough(origin: g.origin, voxel: g.voxel, dims: g.dims, rg: try XCTUnwrap(asked, "the rough cut-open").rg)
+            let made = try XCTUnwrap(S.make(rough, up: SIMD3(0, 0, 1), across: SIMD3(1, 0, 0), walls: true, cutSmooth: true))
+            let early = try XCTUnwrap(made.drawn)   // (what the scaffold's pass drew)
+            _ = try await session.lay(set)
+            let landed = try await LatticeLayoutPreview.map(session, box, token: 5, cutSmooth: true, hold: rough).grid   // (as the page lands it)
+            let exact = try await session.grid(origin: fine.origin, voxel: fine.voxel, dims: fine.dims)
+            XCTAssertEqual(landed.dims, fine.dims, "premise: the landed map on the exact map's voxels")
+            // each of the landed map's voxels: its cut as the scaffold drew it (the rough map's nearest voxel) and as it lands
+            let depth = S.rimDepth(landed.rg, dims: fine.dims, most: 2)
+            let nx = Int(fine.dims.x), ny = Int(fine.dims.y), nz = Int(fine.dims.z)
+            var open = 0, changed = 0, atSurface = 0
+            for zz in 0..<nz { for y in 0..<ny { for x in 0..<nx {
+                let i = (zz * ny + y) * nx + x
+                let p = fine.origin + SIMD3(Float(x), Float(y), Float(zz)) * fine.voxel
+                let q = (p - g.origin) / g.voxel
+                let a = Swift.min(Int(g.dims.x) - 1, Swift.max(0, Int(q.x.rounded()))), b = Swift.min(Int(g.dims.y) - 1, Swift.max(0, Int(q.y.rounded())))
+                let c = Swift.min(Int(g.dims.z) - 1, Swift.max(0, Int(q.z.rounded())))
+                let before = early[2 * ((c * Int(g.dims.y) + b) * Int(g.dims.x) + a)] > 0, after = landed.rg[2 * i] > 0
+                if after { open += 1 }
+                if before != after { changed += 1; if depth[i] <= 1 { atSurface += 1 } }
+            }}}
+            let unheld = exact.unheld
+            print(String(format: "NOTES30 CUT-OUT%@: rough on %.2f mm voxels (the exact map's %.2f); %d voxels open; at the landing %d change (%.2f %%), %d of them at the part's surface; the lay left %d lattice voxels solid (no strut holds them)",
+                         red ? " RED" : "", g.voxel, fine.voxel, open, changed, open > 0 ? 100 * Double(changed) / Double(open) : 0,
+                         atSurface, unheld))
+            if red {
+                XCTAssertNotEqual(g.voxel, fine.voxel, "RED CONTROL: v2's rough on twice the voxel")
+                XCTAssertGreaterThan(atSurface, 0, "RED CONTROL: the rim moves at the landing")
+                continue
+            }
+            XCTAssertEqual(g.voxel, fine.voxel, "★ the rough cut-open on the exact map's own voxels")
+            XCTAssertEqual(g.dims, fine.dims, "★ … and its box")
+            XCTAssertGreaterThan(open, 1000, "premise: the cut-open")
+            XCTAssertEqual(atSurface, 0, "★ the visible rim never changes at the landing")
+            XCTAssertLessThanOrEqual(changed, 3 * unheld + 50, "★ only what the lay alone knows changes, inside the part")
         }
     }
 }

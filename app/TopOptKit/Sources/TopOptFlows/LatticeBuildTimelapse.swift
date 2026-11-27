@@ -35,13 +35,18 @@
 //     height (a lift is a floor), its floors closed, with diagonal braces and a zig-zag stair tower (LatticeBuildScaffold) —
 //     lift by lift from the lowest: ★ his order (11-26 22:40) "floors and walls, then stairs for the entire level" — its FLOOR,
 //     then its WALLS, then its STAIRS (the top lift's roof last) — ★ (23:50) "It should be a piece at a time": one piece a hard
-//     snap (a few neighbouring ones only when a lift's time cannot hold them one by one), never stretched (the rest of a lift's
-//     time is stillness before the next level) — paced to top out `marginS` before the lay is expected to land.
-//   * THE LANDING: the exact map replaces the rough one (its edge may shift slightly), then the real struts replace the scaffold
-//     FLOOR BY FLOOR: each floor's columns, its bays, then that floor's lift of scaffold is struck — the scaffold comes down as
-//     the real floors go in, nothing of it left once the last floor stands. ★ (23:50) "Can we slow it down a little bit and give
-//     it that time-lapse feel too?" — the real build has its own `replaceS` (5 s) after the landing: a floor's columns in
-//     sweeping snaps left to right, then its bays the same, then its lift struck piece by piece.
+//     snap (a few neighbouring ones only when the time cannot hold them one by one) — ★ v3 (11-27): "I want the speed to be
+//     consistent": its pieces spread EVENLY over the time to the landing (`marginS` before it), the same beat from the last
+//     piece of one level to the first of the next (never slower than `pieceMostS`), each placed touching what already stands
+//     (LatticeBuildScaffold: a floor over an overhang grows middle-out).
+//   * THE LANDING: the exact map replaces the rough one — ★ v3 "The cut-out must not change": the rough one is made on the
+//     exact map's own voxel and smoothed alike, so only what the lay alone knows can differ (LatticeLayoutPreview.heldRim) —
+//     then the real struts go in FLOOR BY FLOOR inside the standing scaffold: ★ (23:50) "give it that time-lapse feel too" —
+//     their own `replaceS` (5 s): a floor's columns in sweeping snaps left to right, then its bays the same; ★ v3 "the same
+//     amount of time" from a floor's last snap to the next floor's first as between two on one floor: one even beat.
+//   * ★ v3 THE STRIKE: "It would go from the top to the bottom and only *after* the lattice was laid entirely. It can be put
+//     down a LOT faster though." — once the last real snap is in, the scaffold comes down from the top, piece by piece in the
+//     reverse of the order it rose, in `strikeS` (1 s) all told.
 //   * TOPPED OUT, as above; at least `totalS` from the ask.
 // The frame (up, across, floors, a floor's height) is FIXED once — the rough area's box (the scaffold), or the landed lattice's
 // (the fast path) — and never moved: every strut shown stays shown, the scaffold's lifts and the real floors are the same floors.
@@ -101,31 +106,44 @@ struct LatticeBuildTimelapse: Equatable {
     static let liftUnknownS: Double = 1.2
     /// The scaffold tops out this long before the lay is expected to land (Organic's `LatticeGrowthReplay.marginS`).
     static let marginS: Double = 1.0
+    /// ★ v3 "I want the speed to be consistent": a lay that lands before its scaffold is up keeps the scaffold's beat — unless
+    /// the rest of it would take longer than this at that beat (a landing far sooner than foreseen); then the one beat that
+    /// finishes it in this long.
+    static let landedRiseMostS: Double = 2.0
     /// ★ his notes on v2 (11-26 23:50): "the actual building of the lattice is nearly instant. Can we slow it down a little bit
     /// and give it that time-lapse feel too?" — after the landing the real floors replace the scaffold in this long, their own
     /// time (each floor at least `floorLeastS`). v1: 2.4 s.
     static let replaceS: Double = 5.0
     static let replaceV1S: Double = 2.4
-    /// A beat between the landing (or the scaffold topped out, whichever is later) and the first real floor.
+    /// v2's beat between the landing (or the scaffold topped out) and the first real floor (RED CONTROL `controlLevelPause`
+    /// only; ★ v3: one real beat).
     static let replaceBeatS: Double = 0.3
     /// ★ (23:50) "It should be a piece at a time": a real floor on the scaffold's path comes in sweeping snaps — its columns in
     /// `sweeps` slices left to right, then its bays in `sweeps` — then its lift of scaffold is struck piece by piece.
     static let sweeps = 6
     /// ★ (23:50) the scaffold a piece at a time: each snap one piece — a few neighbouring ones, `piecesMostPerSnap` at most, only
-    /// when a lift's time cannot hold them one by one — at most `pieceS` apart, never closer than a frame (`pieceLeastS`); a
-    /// lift's pieces within `activeShare` of its time, the rest stillness before the next level. Struck the same way, at most
-    /// `strikeSnapsWanted` snaps a lift.
-    static let pieceS: Double = 0.06
+    /// when the time cannot hold them one by one — never closer than a frame (`pieceLeastS`). ★ v3 (11-27) "I want the speed to
+    /// be consistent": one even beat over every piece, from level to level too, never slower than `pieceMostS` (his limit: the
+    /// scaffold then tops out early and stands until the landing).
     static let pieceLeastS: Double = 1.0 / 30
     static let piecesMostPerSnap = 8
+    static let pieceMostS: Double = 0.25
+    /// ★ v3 "It can be put down a LOT faster": the whole scaffold struck, top to bottom, in this long (as many pieces a frame
+    /// as that needs).
+    static let strikeS: Double = 1.0
+    /// v2's pace (RED CONTROL `controlLevelPause` only): a level's snaps at most `pieceS` apart within `activeShare` of its time,
+    /// the rest stillness; a lift struck in at most `strikeSnapsWanted` snaps; a hurried lift's beat `liftBeatS`.
+    static let pieceS: Double = 0.06
     static let activeShare: Double = 0.85
     static let strikeSnapsWanted = 12
-    /// A lift the landing hurried: its last pieces a beat apart, then this much stillness.
     static let liftBeatS: Double = 0.15
     /// RED CONTROLS (tests): a lift's pieces all in one snap (v2's floor that "just comes into existence"); the real build in
-    /// v1's `replaceV1S`.
+    /// v1's `replaceV1S`; ★ v3: v2's strike (each real floor's lift struck after it, bottom up); v2's stillness between levels
+    /// (the scaffold's and the real build's).
     nonisolated(unsafe) static var controlWholeLift = false
     nonisolated(unsafe) static var controlQuickReal = false
+    nonisolated(unsafe) static var controlStrikeEachFloor = false
+    nonisolated(unsafe) static var controlLevelPause = false
 
     /// The struts' snaps a floor makes: its columns, then each bay (the bars' shader counts these).
     static var perFloor: Int { 1 + bays }
@@ -189,8 +207,12 @@ struct LatticeBuildTimelapse: Equatable {
     /// The floors when no frame is fixed yet (tests that never draw).
     var floorsUnframed = LatticeBuildTimelapse.floorsLeast
     /// ★ notes30: the scaffold's lifts begun, bottom up: each one's snaps (a piece — or a few — each), how many pieces a snap
-    /// brings, its pieces, and its end.
-    struct Lift: Equatable { var snaps: [Double]; var perSnap: Int; var pieces: Int; var end: Double }
+    /// brings, its pieces, its end (the next lift's first snap) and the beat between its snaps.
+    struct Lift: Equatable {
+        var snaps: [Double]; var perSnap: Int; var pieces: Int; var end: Double; var gap: Double
+        /// s a piece.
+        var beat: Double { gap / Double(Swift.max(1, perSnap)) }
+    }
     private(set) var lifts: [Lift] = []
     /// ★ (23:50) the scaffold's pieces a lift (LatticeBuildScaffold.Layout.liftPieces: its floor, walls, stairs; the top lift's
     /// roof), in the order they come; none given (tests that never draw): `perFloor` a lift.
@@ -247,22 +269,31 @@ struct LatticeBuildTimelapse: Equatable {
         landedAt = l
         if scaffolding, (wallsFrom.map { $0 > l } ?? true) { scaffoldFrom = nil; lifts = [] }
         guard scaffolding else { return }
-        if var last = lifts.last, last.end > l {   // the lift under way: its pieces still to come a beat apart
-            var i = 0
-            for k in last.snaps.indices where last.snaps[k] > l { i += 1; last.snaps[k] = l + Double(i) * Self.pieceS }
-            last.end = Swift.max(l, last.snaps.last ?? l) + Self.liftBeatS
-            lifts[lifts.count - 1] = last
+        if var last = lifts.last, last.end > l {   // the lift under way: its pieces still to come at the pace the landing allows
+            let k = lifts.count - 1
+            let i0 = last.snaps.firstIndex { $0 > l } ?? last.snaps.count
+            let up = Swift.min(last.pieces, i0 * last.perSnap)
+            let remaining = Double(Swift.max(1, piecesAll - piecesBefore(k) - up))
+            let gap = Self.controlLevelPause ? Self.pieceS
+                : Swift.max(Self.pieceLeastS, Double(last.perSnap) * Swift.min(last.beat, Self.landedRiseMostS / remaining))
+            var prev = i0 > 0 ? last.snaps[i0 - 1] : l
+            for i in i0..<last.snaps.count { prev = Swift.max(l, prev + gap); last.snaps[i] = prev }
+            last.end = Swift.max(l, (last.snaps.last ?? l) + (Self.controlLevelPause ? Self.liftBeatS : gap))
+            last.gap = gap
+            lifts[k] = last
         }
         commitLifts(through: .greatestFiniteMagnitude)
     }
 
     // MARK: the clock
 
-    /// Takes the timelapse to `t`: ★ the switch (a lay still working `scaffoldAfterS` after the ask), and every lift due by then
-    /// (its pace decided by what was known when it began). Call before asking what shows.
+    /// Takes the timelapse to `t`: ★ the switch (a lay still working `scaffoldAfterS` after it began laying — ★ v3: after its
+    /// rough cut-open, made first on the exact map's voxels, whose own time never pushes a quick lay into the scaffold), and
+    /// every lift due by then (its pace decided by what was known when it began). Call before asking what shows.
     mutating func advance(to t: Double) {
-        if scaffoldFrom == nil, mayScaffold, landedAt == nil, !Self.controlNoSwitch, t >= start + Self.scaffoldAfterS {
-            scaffoldFrom = start + Self.scaffoldAfterS
+        let switchAt = (roughAt ?? start) + Self.scaffoldAfterS
+        if scaffoldFrom == nil, mayScaffold, landedAt == nil, !Self.controlNoSwitch, t >= switchAt {
+            scaffoldFrom = switchAt
             if let f = roughFrame { fix(f) }
         }
         if scaffolding { commitLifts(through: t) }
@@ -287,33 +318,51 @@ struct LatticeBuildTimelapse: Equatable {
         }
     }
 
-    /// Lift `lifts.count`, beginning at `at`: paced to top out `marginS` before the expected landing; after the landing at the
-    /// least pace; the landing past or unknown, a steady one. ★ (23:50) a piece at a time: its pieces one a snap, at most
-    /// `pieceS` apart (never stretched: the rest of its time is stillness before the next level), a few a snap
-    /// (`piecesMostPerSnap` at most) only when its time cannot hold them one by one — its time grows before that cap does.
+    /// Lift `lifts.count`, beginning at `at`. ★ v3 "I want the speed to be consistent": ONE beat a piece over every piece still
+    /// to rise — paced to top out `marginS` before the expected landing (never faster than the least pace, `liftLeastS` a lift);
+    /// after the landing the beat so far (quicker only to finish within `landedRiseMostS`); the landing past or unknown, a
+    /// steady `liftUnknownS` a lift — and never slower than `pieceMostS`. A snap one piece (a few, `piecesMostPerSnap` at most, only
+    /// when a frame cannot hold them one by one); the lift's next snap after its last is the next lift's first: no stillness.
     private func planLift(at: Double) -> Lift {
         let k = lifts.count, n = pieces(k)
         let left = Double(Swift.max(1, floors - k))
-        var dur: Double
-        if let l = landedAt, l <= at { dur = Self.liftLeastS }
-        else if let e = expectedLanding, e > at { dur = Swift.max(Self.liftLeastS, (e - Self.marginS - at) / left) }
-        else { dur = Self.liftUnknownS }
-        let most = Self.controlWholeLift ? Swift.max(1, n) : Self.piecesMostPerSnap
-        dur = Swift.max(dur, Double((n + most - 1) / most) * Self.pieceLeastS / Self.activeShare)
-        let room = Swift.max(1, Int(Self.activeShare * dur / Self.pieceLeastS))
-        let per = Self.controlWholeLift ? Swift.max(1, n) : Swift.min(most, Swift.max(1, (n + room - 1) / room))
+        let remaining = Double(Swift.max(1, piecesAll - piecesBefore(k)))
+        let least = Self.liftLeastS * left / remaining
+        var r: Double
+        if let l = landedAt, l <= at { r = Swift.min(lifts.last { $0.pieces > 0 }?.beat ?? least, Self.landedRiseMostS / remaining) }
+        else if let e = expectedLanding, e - Self.marginS > at { r = Swift.max(least, (e - Self.marginS - at) / remaining) }
+        else { r = Self.liftUnknownS * left / remaining }
+        r = Swift.min(r, Self.pieceMostS)
+        guard n > 0 else { return Lift(snaps: [], perSnap: 1, pieces: 0, end: at, gap: Swift.max(Self.pieceLeastS, r)) }
+        if Self.controlWholeLift {
+            let d = Swift.max(Self.pieceLeastS, Double(n) * r)
+            return Lift(snaps: [at], perSnap: n, pieces: n, end: at + d, gap: d)
+        }
+        let per = Swift.min(Self.piecesMostPerSnap, Swift.max(1, Int((Self.pieceLeastS / r - 1e-9).rounded(.up))))
+        let gap = Swift.max(Self.pieceLeastS, Double(per) * r)
         let count = Swift.max(1, (n + per - 1) / per)
-        let gap = Swift.min(Self.pieceS, Self.activeShare * dur / Double(count))
-        return Lift(snaps: (0..<count).map { at + Double($0) * gap }, perSnap: per, pieces: n, end: at + dur)
+        if Self.controlLevelPause {   // v2: the snaps at most `pieceS` apart, the rest of the lift's time still
+            let g = Swift.min(Self.pieceS, gap)
+            return Lift(snaps: (0..<count).map { at + Double($0) * g }, perSnap: per, pieces: n,
+                        end: at + Double(count) * gap / Self.activeShare, gap: g)
+        }
+        return Lift(snaps: (0..<count).map { at + Double($0) * gap }, perSnap: per, pieces: n, end: at + Double(count) * gap, gap: gap)
     }
 
-    /// ★ (23:50) a lift struck piece by piece: the pieces a strike snap takes, and its snaps.
+    /// v2's strike (RED CONTROL `controlStrikeEachFloor`): a lift struck piece by piece after its real floor.
     func strikePer(_ k: Int) -> Int {
         let n = pieces(k)
         return Self.controlWholeLift ? Swift.max(1, n)
             : Swift.min(Self.piecesMostPerSnap, Swift.max(1, (n + Self.strikeSnapsWanted - 1) / Self.strikeSnapsWanted))
     }
-    func strikeSnaps(_ k: Int) -> Int { Swift.max(1, (pieces(k) + strikePer(k) - 1) / strikePer(k)) }
+    /// ★ v3 the strike: the pieces a snap takes (top down) and its snaps, `strikeS` in all, a frame apart at least.
+    var strikePlan: (per: Int, count: Int, gap: Double) {
+        let all = Swift.max(1, piecesAll)
+        let room = Swift.max(1, Int(Self.strikeS / Self.pieceLeastS + 1e-9))
+        let per = Swift.max(1, (all + room - 1) / room)
+        let count = Swift.max(1, (all + per - 1) / per)
+        return (per, count, Swift.max(Self.pieceLeastS, Self.strikeS / Double(count)))
+    }
 
     /// The fast path's floors, once landed: the first's start and each one's time.
     var fastPlan: (from: Double, floorS: Double)? {
@@ -322,21 +371,50 @@ struct LatticeBuildTimelapse: Equatable {
         let target = Swift.max(start + Self.totalS - Self.toppedOutS, from + Self.buildLeastS)
         return (from, (target - from) / Double(Swift.max(1, floors)))
     }
-    /// ★ notes30: the real floors replacing the scaffold, once landed and every lift begun: the first's start and each one's
-    /// time — ★ (23:50) their own `replaceS` after the landing; a floor's snaps: its columns in `sweeps` slices, its bays in
-    /// `sweeps`, then its lift struck piece by piece (`replaceSnaps`), `pieceS` apart at most.
-    var replacePlan: (from: Double, floorS: Double)? {
-        guard scaffolding, let l = landedAt, lifts.count >= floors, let top = lifts.last?.snaps.last else { return nil }
-        let from = Swift.max(l, top) + Self.replaceBeatS
-        let n = Double(Swift.max(1, floors))
-        let need = (0..<floors).map { Double(replaceSnaps($0)) * Self.pieceLeastS / Self.activeShare }.max() ?? 0
+    /// ★ notes30: the real floors inside the standing scaffold, once landed and every lift begun: the first snap and the beat
+    /// between snaps — ★ (23:50) their own `replaceS` after the landing; ★ v3 one even beat over every floor's snaps (its
+    /// columns in `sweeps` slices, its bays in `sweeps`), the first one beat after the landing and the scaffold's last piece
+    /// (its own beat after it); stretched only to make the whole timelapse `totalS`.
+    var replacePlan: (from: Double, gap: Double)? {
+        guard scaffolding, let l = landedAt, lifts.count >= floors else { return nil }
+        let risen = lifts.last { !$0.snaps.isEmpty }
+        let top = risen?.snaps.last ?? liftsFrom ?? l
+        let n = Double(Swift.max(1, floors * Self.perFloorReal))
         let real = Self.controlQuickReal ? Self.replaceV1S : Self.replaceS
-        return (from, Swift.max(Self.floorLeastS, real / n, need, (start + Self.totalS - Self.toppedOutS - from) / n))
+        var g = Swift.max(Self.pieceLeastS, real / n)
+        let from = Self.controlLevelPause ? Swift.max(l, top) + Self.replaceBeatS : Swift.max(l + g, top + (risen?.gap ?? g))
+        g = Swift.max(g, (start + Self.totalS - Self.toppedOutS - Self.strikeS - from) / n)
+        return (from, g)
     }
-    func replaceSnaps(_ f: Int) -> Int { Self.perFloorReal + strikeSnaps(f) }
-    /// Floor `f`'s snaps, `floorS` long from `at`, this far apart.
-    func replaceGap(_ f: Int, floorS: Double) -> Double {
-        Swift.min(Self.pieceS, Self.activeShare * floorS / Double(replaceSnaps(f)))
+    /// After the landing, every beat in order: its time, the real snaps shown and the scaffold's pieces struck after it. ★ v3:
+    /// the real snaps one beat apart; one beat after the last, the strike — top down, `strikeS` all told. RED CONTROLS:
+    /// `controlStrikeEachFloor` (v2: each floor's lift struck after its real floor, bottom up), `controlLevelPause` (v2's
+    /// stillness after each floor).
+    var replaceBeats: [(t: Double, snaps: Int, struck: Int)] {
+        guard let p = replacePlan else { return [] }
+        var out: [(t: Double, snaps: Int, struck: Int)] = []
+        let nf = floors, real = Self.perFloorReal
+        var t = p.from, snaps = 0, struck = 0
+        if Self.controlStrikeEachFloor {
+            for f in 0..<nf {
+                for _ in 0..<real { snaps += 1; out.append((t, snaps, struck)); t += p.gap }
+                var left = Self.controlNeverStrike ? 0 : pieces(f)
+                while left > 0 { let c = Swift.min(strikePer(f), left); left -= c; struck += c; out.append((t, snaps, struck)); t += p.gap }
+            }
+            return out
+        }
+        for f in 0..<nf {
+            for k in 0..<real {
+                snaps += 1
+                let at = Self.controlLevelPause ? p.from + Double(f * real) * p.gap + Double(k) * Swift.min(Self.pieceS, p.gap) : t
+                out.append((at, snaps, 0))
+                t += p.gap
+            }
+        }
+        guard !Self.controlNeverStrike else { return out }
+        let s = strikePlan, from = (out.last?.t ?? p.from) + p.gap
+        for j in 0..<s.count { out.append((from + Double(j) * s.gap, snaps, Swift.min(piecesAll, (j + 1) * s.per))) }
+        return out
     }
 
     /// What shows at `t` (after `advance(to: t)`).
@@ -348,8 +426,16 @@ struct LatticeBuildTimelapse: Equatable {
         var snaps = 0
         /// ★ notes30: the scaffold's pieces risen, in the order they come (the first `lifts` of them) …
         var lifts = 0
-        /// … and those struck, from the first (the first `struck` of them).
+        /// … and those struck: ★ v3 from the last risen down (top to bottom; RED CONTROL `controlStrikeEachFloor`: v2's, from
+        /// the first up).
         var struck = 0
+        /// The pieces standing: one run of them, in the order they rose.
+        var standing: Range<Int> { LatticeBuildTimelapse.standing(lifts: lifts, struck: struck) }
+    }
+    /// The pieces standing with `lifts` risen and `struck` struck.
+    static func standing(lifts: Int, struck: Int) -> Range<Int> {
+        guard lifts > struck else { return 0..<0 }
+        return controlStrikeEachFloor ? Swift.max(0, struck)..<lifts : 0..<(lifts - Swift.max(0, struck))
     }
     /// nil: nothing yet — the site.
     func shown(at t: Double) -> Shown? {
@@ -376,30 +462,29 @@ struct LatticeBuildTimelapse: Equatable {
         var before = 0
         for lift in lifts {
             let here = lift.snaps.filter { $0 <= t + 1e-9 }.count
-            if here == 0 { break }
+            if here == 0 { if lift.pieces == 0 { continue } else { break } }
             s.lifts = before + Swift.min(lift.pieces, here * lift.perSnap)
             before += lift.pieces
             any = true
         }
-        if let p = replacePlan, t >= p.from - 1e-9 {
-            for f in 0..<n {
-                let at = p.from + Double(f) * p.floorS
-                guard at <= t + 1e-9 else { break }
-                let c = Swift.min(replaceSnaps(f), Int(((t - at) / replaceGap(f, floorS: p.floorS) + 1e-9).rounded(.down)) + 1)
-                s.snaps = f * Self.perFloorReal + Swift.min(c, Self.perFloorReal)
-                let strikes = Swift.max(0, c - Self.perFloorReal)
-                s.struck = Self.controlNeverStrike ? 0 : piecesBefore(f) + Swift.min(pieces(f), strikes * strikePer(f))
-            }
+        if let b = replaceBeats.last(where: { $0.t <= t + 1e-9 }) {
+            s.snaps = b.snaps
+            s.struck = b.struck
             any = true
         }
         return any ? s : nil
     }
 
-    /// ★ (23:50) the real floors whose lift of scaffold is struck whole at `t` (RED CONTROL `controlStrikeRealToo`'s reach).
+    /// ★ (23:50) the lifts of scaffold struck whole at `t` — ★ v3 from the top (RED CONTROL `controlStrikeRealToo`'s reach:
+    /// the real floors taken away from the top as they go).
     func floorsStruck(at t: Double) -> Int {
-        guard let s = shown(at: t) else { return 0 }
+        guard let s = shown(at: t), s.struck > 0 else { return 0 }
         var f = 0
-        while f < floors, piecesBefore(f + 1) <= s.struck, s.struck > 0 { f += 1 }
+        if Self.controlStrikeEachFloor {
+            while f < floors, piecesBefore(f + 1) <= s.struck { f += 1 }
+        } else {
+            while f < floors, piecesAll - piecesBefore(floors - 1 - f) <= s.struck { f += 1 }
+        }
         return f
     }
     /// RED CONTROL (tests): the scaffold is never struck (it stands over the finished lattice until the timelapse ends).
@@ -415,19 +500,20 @@ struct LatticeBuildTimelapse: Equatable {
         }
         if walls, let w = wallsFrom { for f in 0..<n { out.append(w + Double(f) * Self.scaffoldWallsS / Double(Swift.max(1, n))) } }
         for l in lifts { out += l.snaps }
-        if let p = replacePlan {
-            for f in 0..<n {
-                let gap = replaceGap(f, floorS: p.floorS)
-                for k in 0..<replaceSnaps(f) { out.append(p.from + Double(f) * p.floorS + Double(k) * gap) }
-            }
-        }
+        out += replaceBeats.map(\.t)
         return out.sorted()
     }
 
     /// The timelapse's end (the topped-out beat's last), once the lay has landed. nil: not landed yet.
     var end: Double? {
-        guard let p = fastPlan ?? replacePlan else { return nil }
-        return Swift.max(start + Self.totalS, p.from + Double(Swift.max(1, floors)) * p.floorS + Self.toppedOutS)
+        if let p = fastPlan {
+            return Swift.max(start + Self.totalS, p.from + Double(Swift.max(1, floors)) * p.floorS + Self.toppedOutS)
+        }
+        guard let p = replacePlan else { return nil }
+        let beats = replaceBeats
+        let struck = (beats.last?.struck ?? 0) > 0 && !Self.controlStrikeEachFloor
+        // (the strike's own last beat, then the topped-out beat)
+        return Swift.max(start + Self.totalS, (beats.last?.t ?? p.from) + (struck ? strikePlan.gap : p.gap) + Self.toppedOutS)
     }
 
     /// The timelapse is over at `t` (landed, its frame risen and topped out).
@@ -603,6 +689,12 @@ public final class LatticeBuildShow {
 
     /// ★ notes30: this lay wants its rough cut-open made before it lays (the scaffold may come: a slow lay, or the switch).
     public var wantsRough: Bool { waiting && scaffold == nil && timelapse?.mayScaffold == true }
+    /// ★ v3: this lay's scaffold is on screen by `now` (the scaffold's path taken, its rough cut-open's walls coming off): its
+    /// landing holds the visible rim as the rough cut-open drew it.
+    func scaffoldShown(now: CFTimeInterval = LatticeBuildShow.now) -> Bool {
+        guard scaffold != nil, let tl = advanced(now), tl.scaffolding, let w = tl.wallsFrom else { return false }
+        return w <= now
+    }
     /// ★ notes30: the scaffold the renderer draws — once the scaffold's path is taken (a quick lay's stays unsent).
     var scaffoldInUse: LatticeBuildScaffold.Drawing? { timelapse?.scaffolding == true ? scaffold : nil }
     /// ★ notes30: the token this lay's scaffold wears (its own pass; never a landed lay's: those count up from 1).
@@ -878,24 +970,27 @@ extension MeshRenderer {
         let r = show.reveal(barsToken: pass.token, floors: f?.floors ?? LatticeBuildTimelapse.floorsLeast, at: now)
         let sweeping = show.timelapse?.scaffolding == true
         let perFloor = sweeping ? LatticeBuildTimelapse.perFloorReal : LatticeBuildTimelapse.perFloor
-        // (RED CONTROL `controlStrikeRealToo`: the real floors whose scaffold is struck taken away too; else never)
-        let struck = LatticeBuildShow.controlStrikeRealToo ? (show.timelapse?.floorsStruck(at: now) ?? 0) * perFloor : 0
+        // (RED CONTROL `controlStrikeRealToo`: the real floors whose scaffold is struck taken away too, from the top; else never)
+        let gone = LatticeBuildShow.controlStrikeRealToo ? (show.timelapse?.floorsStruck(at: now) ?? 0) : 0
         switch r {
         case .all:
-            guard struck > 0, let f else { return (true, nil) }
-            return (true, LatticeBuildRevealUniform(snaps: f.floors * perFloor, struck: struck, frame: f, sweeping: sweeping))
+            guard gone > 0, let f else { return (true, nil) }
+            let n = Swift.max(0, f.floors - gone) * perFloor
+            return (n > 0, LatticeBuildRevealUniform(snaps: n, frame: f, sweeping: sweeping))
         case .none: return (false, nil)
-        case .snaps(let n):
+        case .snaps(let n0):
             guard let f else { return (false, nil) }
-            return (n > 0, LatticeBuildRevealUniform(snaps: n, struck: struck, frame: f, sweeping: sweeping))
+            let n = gone > 0 ? Swift.min(n0, Swift.max(0, f.floors - gone) * perFloor) : n0
+            return (n > 0, LatticeBuildRevealUniform(snaps: n, frame: f, sweeping: sweeping))
         }
     }
 
     /// ★ (23:50) the scaffold's pieces drawn this frame — its pieces lie in its pass in the order they come, so those standing
-    /// are one run of them: risen and not yet struck. nil — none.
+    /// are one run of them: risen and not yet struck (★ v3 struck from the top: the run's end comes down). nil — none.
     func scaffoldRange(_ show: LatticeBuildShow, at now: CFTimeInterval) -> Range<Int>? {
-        guard let r = show.revealScaffold(at: now), r.lifts > r.struck else { return nil }
-        return r.struck..<r.lifts
+        guard let r = show.revealScaffold(at: now) else { return nil }
+        let run = LatticeBuildTimelapse.standing(lifts: r.lifts, struck: r.struck)
+        return run.isEmpty ? nil : run
     }
 
     /// ★ notes30: the scaffold over the landed lattice (after the landing, until its last piece is struck): its pass and the

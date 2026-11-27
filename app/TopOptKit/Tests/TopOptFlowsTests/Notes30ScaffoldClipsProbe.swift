@@ -69,6 +69,8 @@ final class Notes30ScaffoldClipsProbe: XCTestCase {
         /// This Mac's own times (s): the rough cut-open, the lay, the exact map.
         var roughS: Double, layS: Double, mapS: Double
         var az: Float, el: Float, zoom: Float
+        /// ★ v3: the cut-out at the landing, measured.
+        var cutLine = ""
     }
 
     /// The fixture on its own session, as the page lays a settings change: the part read once, then the rough cut-open, the lay
@@ -86,24 +88,57 @@ final class Notes30ScaffoldClipsProbe: XCTestCase {
         warm.cellMM = s.cellMM + 2; warm.cellMaxMM = warm.cellMM
         _ = try await session.lay(warm)   // (the part read once: the lay recorded is a settings change, as on his page)
         let box = try XCTUnwrap(LatticeLayoutPreview.box(im.vertices))
+        // ★ v3 "The cut-out must not change" — BEFORE (v2): the rough cut-open on twice the voxel
+        S.controlRoughCoarse = true
+        let g2 = LatticeLayoutPreview.roughGeometry(box)
+        S.controlRoughCoarse = false
+        let coarse = try await session.gridRough(s, origin: g2.origin, voxel: g2.voxel, dims: g2.dims)
         let g = LatticeLayoutPreview.roughGeometry(box)
         var t = Date()
         let asked = try await session.gridRough(s, origin: g.origin, voxel: g.voxel, dims: g.dims)
         let rg = try XCTUnwrap(asked, "the rough cut-open")
         let roughS = Date().timeIntervalSince(t)
+        let rough = S.Rough(origin: g.origin, voxel: g.voxel, dims: g.dims, rg: rg.rg)
         t = Date()
         let r = try await session.lay(s)
         let layS = Date().timeIntervalSince(t)
         t = Date()
-        let map = try await LatticeLayoutPreview.map(session, box, token: 77, cutSmooth: true).grid
+        let map = try await LatticeLayoutPreview.map(session, box, token: 77, cutSmooth: true, hold: rough).grid   // (as the page lands it)
         let mapS = Date().timeIntervalSince(t)
         let colours = LatticeLayoutColours.colours(LatticeLayoutColours.Laid(r, token: 77), type: LatticeType.named(s.topology), grade: false)
+        // the share of the cut-open's voxels whose cut changes at the landing: v2 (twice the voxel), the same voxels alone, and
+        // the same voxels with the visible rim held (what lands)
+        let exact = try await session.grid(origin: g.origin, voxel: g.voxel, dims: g.dims)
+        let exactDrawn = LatticeLayoutSolidGrid.cutSmoothed(exact.rg, dims: g.dims)
+        let early = LatticeLayoutSolidGrid.cutSmoothed(rg.rg, dims: g.dims)
+        let open = stride(from: 0, to: exactDrawn.count, by: 2).filter { exactDrawn[$0] > 0 }.count
+        var v2 = -1
+        if let c = coarse {
+            let d2 = LatticeLayoutSolidGrid.cutSmoothed(c.rg, dims: g2.dims)
+            v2 = 0
+            let nx = Int(g.dims.x), ny = Int(g.dims.y), nz = Int(g.dims.z)
+            for z in 0..<nz { for y in 0..<ny { for x in 0..<nx {
+                let p = g.origin + SIMD3(Float(x), Float(y), Float(z)) * g.voxel
+                let q = (p - g2.origin) / g2.voxel
+                let i = Swift.min(Int(g2.dims.x) - 1, Swift.max(0, Int(q.x.rounded()))), j = Swift.min(Int(g2.dims.y) - 1, Swift.max(0, Int(q.y.rounded())))
+                let k = Swift.min(Int(g2.dims.z) - 1, Swift.max(0, Int(q.z.rounded())))
+                let before = d2[2 * ((k * Int(g2.dims.y) + j) * Int(g2.dims.x) + i)] > 0
+                if before != (exactDrawn[2 * ((z * ny + y) * nx + x)] > 0) { v2 += 1 }
+            }}}
+        }
+        let same = S.cutChanged(early, exactDrawn)
+        let held = S.heldRim(exact: exactDrawn, rough: early, dims: g.dims)
+        let landed = S.cutChanged(early, map.rg)
+        let pct = { (c: Int) in open > 0 ? 100 * Double(c) / Double(open) : 0 }
+        let cutLine = String(format: "THE CUT-OUT AT THE LANDING (%@): %d voxels open (%.2f mm voxel); their cut changes — v2 (rough on twice the voxel): %d (%.1f %%); the same voxels and smoothing: %d (%.2f %%) — the lay's own: %d voxels it left solid (no strut holds them); with the rim held (what lands): %d (%.2f %%) at the visible rim %d, all of them inside the part, deeper than %d voxels (%.1f mm) under its surface",
+                             name, open, g.voxel, v2, pct(v2), same, pct(same), exact.unheld, landed, pct(landed),
+                             S.cutChanged(early, map.rg) - held.adopted, S.rimHoldVoxels, Float(S.rimHoldVoxels) * g.voxel)
+        print("NOTES30 " + cutLine)
         print(String(format: "NOTES30 SCAFFOLD CLIPS: %@ laid %d struts; rough cut-open %.3f s (%d×%d×%d), lay %.2f s, map %.2f s",
                      name, r.barCount, roughS, g.dims.x, g.dims.y, g.dims.z, layS, mapS))
         return Fixture(name: name, mesh: ViewerMesh(vertices: im.vertices, indices: im.indices, faceIDs: im.faceIDs), bars: r.bars,
-                       flags: r.barFlags, colours: colours, map: map,
-                       rough: S.Rough(origin: g.origin, voxel: g.voxel, dims: g.dims, rg: rg.rg),
-                       roughS: roughS, layS: layS, mapS: mapS, az: az, el: el, zoom: zoom)
+                       flags: r.barFlags, colours: colours, map: map, rough: rough,
+                       roughS: roughS, layS: layS, mapS: mapS, az: az, el: el, zoom: zoom, cutLine: cutLine)
     }
 
     /// One clip from the ask (frame 0: the site) to the timelapse's last frame. `layS`: the lay as shown (its real time, or
@@ -121,6 +156,7 @@ final class Notes30ScaffoldClipsProbe: XCTestCase {
         let roughAt = fx.roughS, landAt = fx.roughS + layS + fx.mapS
         var arrived = false, landed = false
         var phases: [(String, Double)] = []
+        var lastTL: T?
         let out = try N29.Clip(URL(fileURLWithPath: (dir as NSString).appendingPathComponent(name + ".mp4")))
         var k = 0
         while true {
@@ -148,9 +184,11 @@ final class Notes30ScaffoldClipsProbe: XCTestCase {
                 else if (s?.opened ?? 0) > 0 { phase = "the walls come off (the rough cut-open)" }
                 else { phase = "the engine lays: the part closed" }
             } else if tl?.scaffolding == true {
-                phase = (s?.snaps ?? 0) == 0 ? "landed: the exact cut-open" : "the real floors replace the scaffold"
+                phase = (s?.struck ?? 0) > 0 ? "the scaffold struck, top to bottom"
+                    : (s?.snaps ?? 0) == 0 ? "landed: the exact cut-open" : "the real floors go in, the scaffold standing"
             } else { phase = "floor by floor: walls, columns, bays" }
             if phases.last?.0 != phase { phases.append((phase, t)) }
+            if let tl, landed { lastTL = tl }
             if let sd = ProcessInfo.processInfo.environment["ANIM_STILL_DIR"], stills.contains(where: { abs($0 - t) < 0.5 / Double(N29.fps) }) {
                 try FileManager.default.createDirectory(atPath: sd, withIntermediateDirectories: true)
                 try LatticeLayoutStandProbe.png(px, N29.size.w, N29.size.h, to: (sd as NSString).appendingPathComponent(String(format: "%@-%.1f.png", name, t)))
@@ -164,10 +202,19 @@ final class Notes30ScaffoldClipsProbe: XCTestCase {
         try out.finish()
         let tl = show.timelapse
         let steps = phases.map { String(format: "%@ %.2f s", $0.0, $0.1) }.joined(separator: "; ")
+        // ★ v3: the pace — the scaffold's beat a piece (his limit `pieceMostS`), the real build's beat, the strike's length
+        var pace = ""
+        if let l = lastTL, l.scaffolding {
+            let beats = l.lifts.filter { !$0.snaps.isEmpty }.map(\.beat)
+            let real = l.replacePlan?.gap ?? 0
+            pace = String(format: "; the scaffold a piece every %.3f–%.3f s (%d pieces, at most %d a snap), the real build a snap every %.3f s, struck in %.2f s (%d pieces a frame)",
+                          beats.min() ?? 0, beats.max() ?? 0, l.piecesAll, l.lifts.map(\.perSnap).max() ?? 0, real,
+                          Double(l.strikePlan.count) * l.strikePlan.gap, l.strikePlan.per)
+        }
         return String(format: "%@.mp4 — %.1f s clip; solid view; %@; rough cut-open %.2f s, lay %.2f s as shown (%.2f s on this Mac), map %.2f s, landed at %.2f s; %d floors of %.1f mm; scaffold %d members, %.2f mm wide; %@.",
                       name, out.seconds, plan.scaffold ? "the scaffold (slow, decided at the ask)" : "fast at the ask",
                       roughAt, layS, fx.layS, fx.mapS, landAt, tl?.floors ?? made.frame.floors, made.frame.floorH, made.members,
-                      S.width(liftH: made.frame.floorH), steps)
+                      S.width(liftH: made.frame.floorH), steps + pace)
     }
 
     func testRenderTheScaffoldClipsForHisApproval() async throws {
@@ -184,10 +231,10 @@ final class Notes30ScaffoldClipsProbe: XCTestCase {
                    T.scaffoldAfterS, T.scaffoldAfterS),
             String(format: "  at least %.0f s from the ask; the site %.1f s; fast: each floor its walls, columns, 3 bays, %.0f %% of the floor's time apart, at least %.1f s of floors after the landing;",
                    T.totalS, T.siteLeastS, T.snapShare * 100, T.buildLeastS),
-            String(format: "  slow: the walls off floor by floor in %.1f s, then the scaffold lift by lift — its floor, its walls, its stairs (each lift at least %.2f s; %.1f s when the landing can't be foreseen), topped out %.1f s before the expected landing;",
-                   T.scaffoldWallsS, T.liftLeastS, T.liftUnknownS, T.marginS),
-            String(format: "  after the landing: a %.1f s beat, the real floors replace the scaffold in %.1f s (each its columns, bays, then that lift struck); topped out %.1f s.",
-                   T.replaceBeatS, T.replaceS, T.toppedOutS),
+            String(format: "  slow: the walls off floor by floor in %.1f s, then the scaffold lift by lift — its floor (middle-out over an overhang: every piece touching what stands), its walls, its stairs — one even beat a piece over all of it (a lift at least %.2f s; %.1f s when the landing can't be foreseen; a piece's beat at most %.2f s), topped out %.1f s before the expected landing;",
+                   T.scaffoldWallsS, T.liftLeastS, T.liftUnknownS, T.pieceMostS, T.marginS),
+            String(format: "  after the landing: the real floors go in inside the standing scaffold in %.1f s, one even beat from snap to snap and floor to floor (each floor its columns in %d sweeps, its bays in %d); then the scaffold struck top to bottom in %.1f s; topped out %.1f s.",
+                   T.replaceS, T.sweeps, T.sweeps, T.strikeS, T.toppedOutS),
             String(format: "  the scaffold: one even grid through the whole opened area, bays %.0f %% of a lift; every level a closed floor (the steps' landings in it), nothing floating; braces every %d bays of the outer frames; a %d-tread zig-zag stair tower; %.1f %% of a lift wide (%.1f–%.1f mm); pale straw; at most %d members.",
                    S.bayShare * 100, S.braceEvery, S.stairTreads, S.widthShare * 100, S.widthLeastMM, S.widthMostMM, S.membersMost),
             ""]
@@ -200,6 +247,7 @@ final class Notes30ScaffoldClipsProbe: XCTestCase {
             s.regions = [z]
             let fx = try await lay("stand", stl: N29.standSTL(), settings: s, az: 0.5, el: 0.22, zoom: 0.85)
             let real = fx.layS + fx.mapS
+            lines.append(fx.cutLine)
             if wanted("stand-fast") {
                 let plan = T.plan(lastLayS: fx.layS, mapS: fx.mapS, estimateS: nil)
                 lines.append(try clip("stand-fast-7s", fx, layS: fx.layS, plan: plan, dir: dir, stills: [0.6, 1.5, 3.0, 5.0, 6.9]))
@@ -209,13 +257,13 @@ final class Notes30ScaffoldClipsProbe: XCTestCase {
                 let layS = 12.0 - fx.mapS
                 let plan = T.plan(lastLayS: layS, mapS: fx.mapS, estimateS: nil)
                 lines.append(try clip("stand-scaffold-slow", fx, layS: layS, plan: plan, dir: dir,
-                                      stills: [0.6, 1.2, 2.0, 4.0, 7.0, 10.0, 12.3, 13.0, 14.0, 15.0]))
+                                      stills: [0.6, 1.2, 2.0, 4.0, 7.0, 10.0, 11.9, 12.1, 12.4, 14.0, 16.0, 17.3, 17.7, 18.1]))
                 print(lines.last!)
             }
             if wanted("stand-switch") {
                 let plan = T.plan(lastLayS: nil, mapS: nil, estimateS: real)   // foreseen quick (this Mac's own time)
                 lines.append(try clip("stand-switch-5s", fx, layS: 5.0 - fx.mapS - fx.roughS, plan: plan, dir: dir,
-                                      stills: [0.9, 1.1, 2.5, 4.0, 6.0]))
+                                      stills: [0.9, 1.1, 2.5, 4.0, 5.1, 7.0, 9.0, 10.2, 10.6]))
                 print(lines.last!)
             }
         }
@@ -227,6 +275,7 @@ final class Notes30ScaffoldClipsProbe: XCTestCase {
                            half: SIMD3(24, 0, 40))
             s.regions = [z]
             let fx = try await lay("pebble", stl: Self.pebbleSTL(r: SIMD3(45, 30, 20)), settings: s, az: 0.55, el: 0.3, zoom: 0.8)
+            lines.append(fx.cutLine)
             if wanted("pebble-fast") {
                 let plan = T.plan(lastLayS: fx.layS, mapS: fx.mapS, estimateS: nil)
                 lines.append(try clip("pebble-fast-7s", fx, layS: fx.layS, plan: plan, dir: dir, stills: [1.5, 3.0, 5.0]))
@@ -236,7 +285,7 @@ final class Notes30ScaffoldClipsProbe: XCTestCase {
                 let layS = 14.0 - fx.mapS
                 let plan = T.plan(lastLayS: layS, mapS: fx.mapS, estimateS: nil)
                 lines.append(try clip("pebble-scaffold-slow", fx, layS: layS, plan: plan, dir: dir,
-                                      stills: [1.2, 4.0, 8.0, 12.0, 14.5, 15.5, 16.5]))
+                                      stills: [1.2, 3.0, 4.0, 6.0, 8.0, 12.0, 13.9, 14.1, 14.4, 16.0, 18.0, 19.3, 19.7, 20.1]))
                 print(lines.last!)
             }
         }

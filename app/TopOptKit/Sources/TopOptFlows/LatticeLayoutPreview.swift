@@ -220,6 +220,8 @@ public final class LatticeLayoutPreview: ObservableObject {
     private var shownWhere: (token: Int, at: MapWhere)?
     private var nozzleSession: LatticeLayoutSession?
     private var latticeAtLay = LatticeSettings()
+    /// ★ v3: this lay's rough cut-open, as the engine made it (its scaffold's token): the landing holds the visible rim as it drew.
+    private var roughHeld: (token: Int, rough: LatticeBuildScaffold.Rough)?
     private var nozzlePath: String?
     private var stress = Stress()
     private var sessionStressKey: Int?   // the field the session holds (setDemand), by its key
@@ -856,7 +858,8 @@ public final class LatticeLayoutPreview: ObservableObject {
                 refresh.reached(Self.stepMap)
                 t0 = Date()
                 map = try? await Self.map(session, box, token: token,
-                                          cutSmooth: Self.cutSmoothWanted(lattice: latticeAtLay, printAccurate: printAccurate))
+                                          cutSmooth: Self.cutSmoothWanted(lattice: latticeAtLay, printAccurate: printAccurate),
+                                          hold: isSheet ? nil : rimHold())   // ★ v3: the scaffold's visible rim held
                 guard !Task.isCancelled else { return }
                 stepS[Self.stepMap] = Date().timeIntervalSince(t0)
             }
@@ -1745,7 +1748,8 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// The engine's map over the part's box with a voxel of air all round: about a million voxels at most, never finer than
     /// 0.35 mm.
     static func map(_ s: LatticeLayoutSession, _ box: (lo: SIMD3<Float>, hi: SIMD3<Float>), token: Int,
-                    smooth: Bool = false, cutSmooth: Bool = false) async throws -> (grid: LatticeLayoutSolidGrid, ms: Double) {
+                    smooth: Bool = false, cutSmooth: Bool = false,
+                    hold: LatticeBuildScaffold.Rough? = nil) async throws -> (grid: LatticeLayoutSolidGrid, ms: Double) {
         let (origin, voxel, dims) = mapGeometry(box)   // ★ notes24: shared with `mapAhead`
         let r = try await s.grid(origin: origin, voxel: voxel, dims: dims)
         // ★ his 11-19 note: Organic's cut edges are smooth lines, not the voxels' stair-steps
@@ -1755,6 +1759,15 @@ public final class LatticeLayoutPreview: ObservableObject {
         if cutSmooth, !smooth {
             let raw = r.rg
             rg = await Task.detached(priority: .userInitiated) { LatticeLayoutSolidGrid.cutSmoothed(raw, dims: dims) }.value
+        }
+        // ★ v3 "The cut-out must not change": the scaffold's rough cut-open on these very voxels, drawn by the same rule, holds
+        // the visible rim exactly as it drew it
+        if let h = hold, h.dims == dims, h.voxel == voxel, h.origin == origin, h.rg.count == r.rg.count {
+            let drawn = rg, cs = cutSmooth && !smooth
+            rg = await Task.detached(priority: .userInitiated) {
+                let early = smooth ? LatticeLayoutSolidGrid.smoothed(h.rg, dims: dims) : cs ? LatticeLayoutSolidGrid.cutSmoothed(h.rg, dims: dims) : h.rg
+                return LatticeBuildScaffold.heldRim(exact: drawn, rough: early, dims: dims).rg
+            }.value
         }
         var grid = LatticeLayoutSolidGrid(token: token, origin: origin, voxel: voxel, dims: dims, rg: rg, smooth: smooth || cutSmooth)
         // ★ SHEETS (builder E): the seam channels, so the sheet pass draws a blend band as the file prints it
@@ -2384,7 +2397,7 @@ extension LatticeLayoutPreview {
     }
 
     /// ★ notes30: the rough cut-open's geometry over the part's box — the exact map's (`mapGeometry`) with a voxel
-    /// `LatticeBuildScaffold.roughVoxelScale` times larger (an eighth of its voxels: a few tens of milliseconds).
+    /// `LatticeBuildScaffold.roughVoxelScale` times larger: ★ v3 1, the exact map's very voxels (RED CONTROL: v2's 2).
     nonisolated static func roughGeometry(_ box: (lo: SIMD3<Float>, hi: SIMD3<Float>)) -> (origin: SIMD3<Float>, voxel: Float, dims: SIMD3<Int32>) {
         let ext = simd_max(box.hi - box.lo, SIMD3(repeating: 0.1))
         let fine = Swift.max(0.35, Float(cbrt(Double(ext.x * ext.y * ext.z) / 1_000_000)))
@@ -2414,12 +2427,21 @@ extension LatticeLayoutPreview {
         guard !Task.isCancelled, let rough, rough.isWhole, build.wantsRough else { return }
         let axes = build.axes(printUp: session.printUp.map { SIMD3<Float>($0) })
         let walls = solidWanted
+        let smooth = Self.cutSmoothWanted(lattice: latticeAtLay, printAccurate: printAccurate)   // ★ v3: the exact map's own rule
         let made = await Task.detached(priority: .userInitiated) {
-            LatticeBuildScaffold.make(rough, up: axes.up, across: axes.across, walls: walls)
+            LatticeBuildScaffold.make(rough, up: axes.up, across: axes.across, walls: walls, cutSmooth: smooth)
         }.value
         layStages["roughMS"] = Self.ms(since: t0)
         guard !Task.isCancelled, let made, build.wantsRough else { return }
+        roughHeld = (build.scaffoldToken, rough)
         build.scaffoldArrived(LatticeBuildScaffold.drawing(made, token: build.scaffoldToken))
+    }
+    /// ★ v3 "The cut-out must not change": the rough cut-open the landed map holds its visible rim to — this lay's, once its
+    /// scaffold's walls have come off, on the exact map's own voxels; never with Print-accurate preview on (HIS RULE: the drawing
+    /// follows the print file — there the exact map is drawn as the file has it).
+    private func rimHold() -> LatticeBuildScaffold.Rough? {
+        guard !printAccurate, let h = roughHeld, h.token == build.scaffoldToken, build.scaffoldShown() else { return nil }
+        return h.rough
     }
 
     /// The refresh's steps in words (five at most) — the card's line — and how long each took the last time here.

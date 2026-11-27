@@ -54,9 +54,16 @@ enum LatticeBuildScaffold {
     static let edgeShare: Float = 0.02
     /// The grid kept this share of a bay inside the area's box.
     static let edgeInsetShare: Float = 0.05
-    /// The rough cut-open's voxel: this many times the exact map's (`LatticeLayoutPreview.mapGeometry`): a few tens of
-    /// milliseconds before the lay, never a wait.
-    static let roughVoxelScale: Float = 2
+    /// The rough cut-open's voxel: this many times the exact map's (`LatticeLayoutPreview.mapGeometry`). ★ v3 (his notes,
+    /// 11-27, img 101/102: "the cut-out ... changes. Is there no way to ensure that doesn't happen?"): 1 — the exact map's own
+    /// voxels, smoothed by the exact map's own rule (`make`'s `cutSmooth`), so the two can differ only where the lay alone
+    /// knows (a cell no strut holds stays solid: `heldRim`). RED CONTROL `controlRoughCoarse`: v2's twice the voxel, always
+    /// smoothed.
+    static var roughVoxelScale: Float { controlRoughCoarse ? 2 : 1 }
+    nonisolated(unsafe) static var controlRoughCoarse = false
+    /// ★ v3: the visible rim the landing never changes — the part's outside and this many voxels in from it (the cut's
+    /// smoothing reaches 3 voxels each way: `LatticeLayoutSolidGrid.cutTaps`).
+    static let rimHoldVoxels = 3
     /// A member is in the area when these points along it are (open and inside the part).
     static let samples: [Float] = [0.04, 0.27, 0.5, 0.73, 0.96]
 
@@ -112,13 +119,15 @@ enum LatticeBuildScaffold {
         var layout: Layout
         var rough: Rough
         var drawn: [Int8]?
+        /// The map drawn smooth (read linear: `cutSmoothed`) or as its voxels (Print-accurate preview on) — the exact map's own.
+        var cutSmooth = true
         var bars: [Float] { layout.bars }
         var members: Int { layout.bars.count / 7 }
     }
 
     /// The scaffold on the rough cut-open `r`, its floors along `up`, its bays along `across` (the view's, or the print's):
-    /// nil — no area.
-    static func make(_ r: Rough, up: SIMD3<Float>, across: SIMD3<Float>, walls: Bool) -> Made? {
+    /// nil — no area. `cutSmooth`: ★ v3 the exact map's own rule (`LatticeLayoutPreview.cutSmoothWanted`).
+    static func make(_ r: Rough, up: SIMD3<Float>, across: SIMD3<Float>, walls: Bool, cutSmooth: Bool = true) -> Made? {
         guard let box = r.openBox else { return nil }
         let f = LatticeBuildTimelapse.Frame(lo: box.lo, hi: box.hi, up: up, across: across)
         let dp = f.depth
@@ -129,8 +138,71 @@ enum LatticeBuildScaffold {
             dLo = Swift.min(dLo, d); dHi = Swift.max(dHi, d)
         }
         let plan = layout(f, depthLow: dLo, depthW: Swift.max(dHi - dLo, 1e-3), inArea: r.inArea)
-        let drawn = walls ? LatticeLayoutSolidGrid.cutSmoothed(r.rg, dims: r.dims) : nil
-        return Made(frame: f, layout: plan, rough: r, drawn: drawn)
+        let smooth = cutSmooth || controlRoughCoarse
+        let drawn = walls ? (smooth ? LatticeLayoutSolidGrid.cutSmoothed(r.rg, dims: r.dims) : r.rg) : nil
+        return Made(frame: f, layout: plan, rough: r, drawn: drawn, cutSmooth: smooth)
+    }
+
+    /// ★ v3 "The cut-out must not change" (img 101 → 102): the landed exact map as drawn (`exact`: 2 a voxel, smoothed by its
+    /// own rule) with the VISIBLE RIM held exactly as the rough cut-open drew it (`rough`: on the same voxels, smoothed alike) —
+    /// on the part's outside and within `rimHoldVoxels` of it, the rough one's; deeper inside the part, the exact one's. They
+    /// differ only where the lay alone knows (a lattice cell no strut holds stays solid). `held`: rim voxels whose cut the
+    /// rough one kept; `adopted`: voxels inside the part whose cut changed to the exact one's.
+    static func heldRim(exact: [Int8], rough: [Int8], dims: SIMD3<Int32>) -> (rg: [Int8], held: Int, adopted: Int) {
+        let n = Int(dims.x) * Int(dims.y) * Int(dims.z)
+        guard n > 0, exact.count == 2 * n, rough.count == 2 * n, !controlRoughCoarse else { return (exact, 0, 0) }
+        let depth = rimDepth(exact, dims: dims, most: rimHoldVoxels)
+        let rim = UInt8(Swift.max(0, rimHoldVoxels))
+        var out = exact, held = 0, adopted = 0
+        for i in 0..<n {
+            let differs = (exact[2 * i] > 0) != (rough[2 * i] > 0)
+            if depth[i] <= rim { out[2 * i] = rough[2 * i]; if differs { held += 1 } } else if differs { adopted += 1 }
+        }
+        return (out, held, adopted)
+    }
+
+    /// Each voxel's steps in from the part's outside (6 neighbours; 0 outside the part), counted to `most` (255 deeper).
+    static func rimDepth(_ rg: [Int8], dims: SIMD3<Int32>, most: Int) -> [UInt8] {
+        let nx = Int(dims.x), ny = Int(dims.y), nz = Int(dims.z), n = nx * ny * nz
+        guard n > 0, rg.count == 2 * n else { return [] }
+        var depth = [UInt8](repeating: UInt8.max, count: n)
+        for i in 0..<n where rg[2 * i + 1] < 0 { depth[i] = 0 }
+        let rim = UInt8(Swift.min(254, Swift.max(0, most))), plane = nx * ny
+        // the first ring in: inside voxels beside the outside
+        var ring: [Int] = []
+        for i in 0..<n where depth[i] != 0 {
+            let x = i % nx, y = (i / nx) % ny, z = i / plane
+            if x == 0 || y == 0 || z == 0 || x == nx - 1 || y == ny - 1 || z == nz - 1 || depth[i - 1] == 0 || depth[i + 1] == 0
+                || depth[i - nx] == 0 || depth[i + nx] == 0 || depth[i - plane] == 0 || depth[i + plane] == 0 {
+                ring.append(i)
+            }
+        }
+        guard rim >= 1 else { return depth }
+        var d: UInt8 = 1
+        for i in ring { depth[i] = 1 }
+        while d < rim, !ring.isEmpty {
+            d += 1
+            var next: [Int] = []
+            for i in ring {
+                let x = i % nx, y = (i / nx) % ny, z = i / plane
+                if x > 0, depth[i - 1] == .max { depth[i - 1] = d; next.append(i - 1) }
+                if x < nx - 1, depth[i + 1] == .max { depth[i + 1] = d; next.append(i + 1) }
+                if y > 0, depth[i - nx] == .max { depth[i - nx] = d; next.append(i - nx) }
+                if y < ny - 1, depth[i + nx] == .max { depth[i + nx] = d; next.append(i + nx) }
+                if z > 0, depth[i - plane] == .max { depth[i - plane] = d; next.append(i - plane) }
+                if z < nz - 1, depth[i + plane] == .max { depth[i + plane] = d; next.append(i + plane) }
+            }
+            ring = next
+        }
+        return depth
+    }
+
+    /// Voxels whose cut differs between two maps on the same voxels (their open channel's sign: the line the viewer draws).
+    static func cutChanged(_ a: [Int8], _ b: [Int8]) -> Int {
+        guard a.count == b.count else { return -1 }
+        var c = 0
+        for i in stride(from: 0, to: a.count, by: 2) where (a[i] > 0) != (b[i] > 0) { c += 1 }
+        return c
     }
 
     /// The scaffold the show holds and the renderer draws with its own bars pass: its pieces in the order they come (the
@@ -145,7 +217,7 @@ enum LatticeBuildScaffold {
     static func drawing(_ m: Made, token: Int) -> Drawing {
         let n = m.members
         let map = m.drawn.map { LatticeLayoutSolidGrid(token: token, origin: m.rough.origin, voxel: m.rough.voxel,
-                                                       dims: m.rough.dims, rg: $0, smooth: true) }
+                                                       dims: m.rough.dims, rg: $0, smooth: m.cutSmooth) }
         let inputs = LatticeLayoutBarsInputs(token: token, bars: m.layout.bars, solid: map, flags: [],
                                              colours: [SIMD4<Float>](repeating: colour, count: n), colourKey: token)
         return Drawing(token: token, inputs: inputs, frame: m.frame, liftPieces: m.layout.liftPieces)
@@ -173,6 +245,62 @@ enum LatticeBuildScaffold {
         }
         return out + edges.subtracting(rim).sorted { key($0) < key($1) }
     }
+
+    /// ★ v3 (his notes, 11-27, img 100: on the pebble a long ledger stuck out over nothing — the ground floor's outline walked
+    /// first, its front run reaching across before anything stood behind it): "Nothing placed in mid-air ... The floor should
+    /// go *middle-out* in scenarios that have overhangs in the scaffolding." Every level grows MIDDLE-OUT as one piece: its
+    /// ledgers from `seed` (its middle — on the ground floor the node nearest its middle, above it the post of the lift below
+    /// nearest its middle), ring by ring outward, each ledger as it comes meeting one already laid — over an overhang the
+    /// ledgers out past the posts last. RED CONTROL `controlWalkOrder`: as walked (v2: the outline from its front-left node).
+    static func grown(_ edges: Set<Edge>, round squares: Set<Square>, from seed: Node?) -> [Edge] {
+        let walk = walked(edges, round: squares)
+        guard let seed, !controlWalkOrder else { return walk }
+        var placed: Set<Node> = [seed], out: [Edge] = [], laid = Set<Edge>()
+        // square by square, nearest the middle first, each touching those laid (a round patch spreading out, never an arm
+        // along a row ahead of the rest): each square's ledgers as they come, every one meeting a node already laid
+        func corners(_ q: Square) -> [Node] {
+            [Node(i: q.i, j: q.j), Node(i: q.i + 1, j: q.j), Node(i: q.i, j: q.j + 1), Node(i: q.i + 1, j: q.j + 1)]
+        }
+        let mid = squares.reduce(SIMD2<Float>(0, 0)) { $0 + SIMD2(Float($1.i) + 0.5, Float($1.j) + 0.5) } / Float(Swift.max(1, squares.count))
+        func far(_ q: Square) -> Float { simd_distance_squared(SIMD2(Float(q.i) + 0.5, Float(q.j) + 0.5), mid) }
+        func before(_ a: Square, _ b: Square) -> Bool { (far(a), a.j, a.i) < (far(b), b.j, b.i) }
+        func lay(_ q: Square) {
+            var es = Self.edges(q).filter { edges.contains($0) && !laid.contains($0) }
+            while let k = es.firstIndex(where: { placed.contains($0.a) || placed.contains($0.b) }) {
+                let e = es.remove(at: k)
+                out.append(e); laid.insert(e); placed.insert(e.a); placed.insert(e.b)
+            }
+        }
+        if let first = squares.filter({ corners($0).contains(seed) }).min(by: before) {
+            var done: Set<Square> = [first]
+            lay(first)
+            var near = Set<Square>()
+            func touch(_ q: Square) {
+                for di in -1...1 { for dj in -1...1 where di != 0 || dj != 0 {
+                    let n = Square(i: q.i + di, j: q.j + dj)
+                    if squares.contains(n), !done.contains(n) { near.insert(n) }
+                }}
+            }
+            touch(first)
+            while let q = near.min(by: before) {
+                near.remove(q); done.insert(q)
+                lay(q)
+                touch(q)
+            }
+        }
+        // the rest (ledgers on no square of it: none on a whole grid) ring by ring from what is laid
+        var left = walk.filter { !laid.contains($0) }
+        while !left.isEmpty {
+            let ring = left.filter { placed.contains($0.a) || placed.contains($0.b) }
+            if ring.isEmpty { out += left; break }   // (none meets what is laid: as walked — never on one connected level)
+            out += ring
+            for e in ring { placed.insert(e.a); placed.insert(e.b) }
+            let taken = Set(ring)
+            left.removeAll { taken.contains($0) }
+        }
+        return out
+    }
+    nonisolated(unsafe) static var controlWalkOrder = false
 
     // MARK: the plan
 
@@ -378,19 +506,36 @@ enum LatticeBuildScaffold {
             L.bars += [a.x, a.y, a.z, b.x, b.y, b.z, w]
             L.parts.append(p)
         }
+        // a lift's posts: its uprights, at every node of its floor's grid (the stair's bay too where its flight climbs)
+        func posts(_ k: Int) -> Set<Node> {
+            var out = Set<Node>()
+            guard k >= 0, k < floors, !L.squares[k].isEmpty else { return out }
+            for x in floorEdges(L.squares[k]) { out.insert(x.a); out.insert(x.b) }
+            if !controlNoLandings, L.flights.contains(k) { for x in stairBay { out.insert(x.a); out.insert(x.b) } }
+            return out
+        }
+        // ★ v3: each level middle-out from its middle — the ground floor's middle node, above it the post of the lift below
+        // nearest its middle — each ledger as it comes meeting one already laid (over an overhang, the overhang last)
+        func middle(_ l: Int) -> Node? {
+            var nodes = Set<Node>()
+            for x in L.levels[l] { nodes.insert(x.a); nodes.insert(x.b) }
+            guard !nodes.isEmpty else { return nil }
+            let c = nodes.reduce(SIMD2<Float>(0, 0)) { $0 + SIMD2(Float($1.i), Float($1.j)) } / Float(nodes.count)
+            let under = l == ground ? nodes : posts(l - 1).intersection(nodes)
+            return (under.isEmpty ? nodes : under).min { a, b in
+                (simd_distance_squared(SIMD2(Float(a.i), Float(a.j)), c), a.j, a.i) < (simd_distance_squared(SIMD2(Float(b.i), Float(b.j)), c), b.j, b.i)
+            }
+        }
         func deck(_ l: Int, _ p: Part) {
             let h = L.levelHeights[l]
-            for x in walked(L.levels[l], round: levelSquares[l]) { add(node(x.a, h), node(x.b, h), p) }
+            for x in grown(L.levels[l], round: levelSquares[l], from: middle(l)) { add(node(x.a, h), node(x.b, h), p) }
         }
         for k in 0..<floors {
             let before = L.parts.count
             defer { L.liftPieces.append(L.parts.count - before) }
             guard !L.squares[k].isEmpty else { continue }
             func walls() {
-                var posts = Set<Node>()
-                for x in floorEdges(L.squares[k]) { posts.insert(x.a); posts.insert(x.b) }
-                if !controlNoLandings, L.flights.contains(k) { for x in stairBay { posts.insert(x.a); posts.insert(x.b) } }
-                for n in posts.sorted(by: { ($0.j, $0.i) < ($1.j, $1.i) }) { add(node(n, H(k)), node(n, H(k + 1)), .walls) }
+                for n in posts(k).sorted(by: { ($0.j, $0.i) < ($1.j, $1.i) }) { add(node(n, H(k)), node(n, H(k + 1)), .walls) }
                 let turn = k % 2 == 1   // the braces turn back each lift: a zig-zag
                 for x in walked(outline(L.squares[k]), round: L.squares[k]) where !(L.flights.contains(k) && stairBay.contains(x)) {
                     let alongAcross = x.a.j == x.b.j
