@@ -71,6 +71,13 @@ std::vector<NodalLoad> edge_tractions(const VoxelGrid& g, double sxx, double syy
   return loads;
 }
 
+// MEASURING ARM (stage 4's question, measured ahead 2026-11-27; not in the engine):
+// the stress of the first FULL voxels beyond each tip of the hole (the ends of its
+// long axis, where the peak is; the tip's radius is b / 2 voxels) carried back to
+// the TRUE tip along the long axis: a straight line through two voxels, a curve
+// through three. The larger of the two tips, over the far stress. Filled by peak_ratio.
+double g_carry_line = 0.0, g_carry_curve = 0.0;
+
 // The peak von Mises over voxels / the far stress, for the ellipse with short
 // semi-axis `b_voxels` and stiffness E x fill^penalty in the voxels the hole cuts.
 double peak_ratio(int b_voxels, double penalty, bool* ok) {
@@ -142,6 +149,40 @@ double peak_ratio(int b_voxels, double penalty, bool* ok) {
   *ok = !res.non_convergent && res.max_von_mises > 0.0 && std::isfinite(res.max_von_mises);
   if (res.non_convergent)
     std::printf("  (b = %d voxels, fill^%.0f: the solve did not converge)\n", b_voxels, penalty);
+  g_carry_line = g_carry_curve = 0.0;
+  if (res.von_mises_field.size() == density.size()) {
+    for (double sign : {1.0, -1.0}) {
+      const double ex = -s * sign, ey = c * sign;  // along the long axis, outward
+      double rr[3] = {0, 0, 0}, vv[3] = {0, 0, 0};
+      int got = 0, li = -1, lj = -1;
+      for (double r = 0.0; r < 6.0 && got < 3; r += 0.1) {
+        const int i = static_cast<int>(std::floor(cx + (a_voxels + r) * ex));
+        const int j = static_cast<int>(std::floor(cy + (a_voxels + r) * ey));
+        if (i < 0 || j < 0 || i >= w || j >= w || (i == li && j == lj)) continue;
+        const std::size_t idx = static_cast<std::size_t>(j) * w + i;  // layer 0
+        if (density[idx] < 1.0) continue;
+        li = i;
+        lj = j;
+        // the voxel centre's distance beyond the tip, measured along the axis
+        rr[got] = (i + 0.5 - cx) * ex + (j + 0.5 - cy) * ey - a_voxels;
+        vv[got] = res.von_mises_field[idx];
+        ++got;
+      }
+      if (got >= 2 && rr[1] > rr[0])
+        g_carry_line = std::max(g_carry_line,
+                                (vv[0] + (vv[1] - vv[0]) * (0.0 - rr[0]) / (rr[1] - rr[0])) / kFarStress);
+      if (got == 3 && rr[1] > rr[0] && rr[2] > rr[1]) {
+        double curve = 0.0;
+        for (int a2 = 0; a2 < 3; ++a2) {
+          double l = 1.0;
+          for (int b2 = 0; b2 < 3; ++b2)
+            if (b2 != a2) l *= (0.0 - rr[b2]) / (rr[a2] - rr[b2]);
+          curve += l * vv[a2];
+        }
+        g_carry_curve = std::max(g_carry_curve, curve / kFarStress);
+      }
+    }
+  }
   return res.max_von_mises / kFarStress;
 }
 
@@ -159,8 +200,10 @@ int main(int argc, char** argv) {
   std::printf("%-20s", "b in voxels");
   for (int b : kB) std::printf(" %8d", b);
   std::printf("   lowest to highest against the reference\n");
+  double carry_line[3][4] = {}, carry_curve[3][4] = {};
   for (int p = 0; p < 3; ++p) {
     std::printf("%-20s", kName[p]);
+    int bi = 0;
     for (int b : kB) {
       bool ok = false;
       const double r = peak_ratio(b, kPenalty[p], &ok);
@@ -170,9 +213,19 @@ int main(int argc, char** argv) {
       high[p] = std::max(high[p], off);
       std::printf(" %8.3f", r);
       std::fflush(stdout);
+      carry_line[p][bi] = g_carry_line;
+      carry_curve[p][bi] = g_carry_curve;
+      ++bi;
     }
     std::printf("   %+6.1f to %+6.1f %%  %s\n", low[p], high[p],
                 low[p] >= -5.0 ? "never more than 5 % low" : "MORE THAN 5 % LOW somewhere");
+  }
+  for (int p = 0; p < 3; ++p) {
+    std::printf("[carry] %-20s carried to the true tip, straight line / curve, percent against the reference, b = 3, 4, 5, 6:", kName[p]);
+    for (int q = 0; q < 4; ++q)
+      std::printf("  %+.1f / %+.1f", 100.0 * (carry_line[p][q] / kReference - 1.0),
+                  100.0 * (carry_curve[p][q] / kReference - 1.0));
+    std::printf("\n");
   }
   const bool pass = low[1] >= -5.0;
   std::printf("[ellipse] E x fill^2 at one voxel on the third shape: %s (%s)\n",

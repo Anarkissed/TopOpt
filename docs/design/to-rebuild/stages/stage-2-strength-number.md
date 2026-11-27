@@ -781,3 +781,20 @@ Three versions made (the fourth was not). On a part the optimiser has CARVED, th
 
 On a part the optimiser carved, one judge does what it was built for: the number shown after finishing is the loop's certificate to about 1 % (the reviewer's "within 1 %" holds HERE), where today's re-check shows 10 to 46 % more. So the picture is whole: one judge makes the two numbers ONE number everywhere; whether that one number is RIGHT is the cut-voxel law's question (E x fill^3: near on free faces in bending, 52 to 76 % high on a loaded curved face), and it is the certificate's question just as much as the re-check's. Top Motor Mount differs from the hook only in that its certificate was all-or-nothing on its drawn faces (the loop never had fills there), so one judge moved it; on the hook the loop had the fills already.
 
+### The carry at a TIGHT radius: the candidate does NOT hold there (2026-11-27 09:45, measuring arm `[carry]` in `to_strength_known_ellipse`; not in the engine)
+
+The elliptical hole (a / b = 2, the exact peak 5 x the far stress at the tips of the long axis; the tip's radius is b / 2 = 1.5 to 3 voxels): the nearest textbook case to a sharp inside corner. Percent against the exact peak, b = 3 / 4 / 5 / 6 voxels.
+
+| cut voxels at | one-voxel reading (the test's own rows) | carried to the true tip, straight line | carried, curve through three |
+|---|---|---|---|
+| E x fill (real stiffness) | -25 / -28 / -18 / -15 | -33 / -37 / -32 / -19 | -27 / -24 / -26 / -8 |
+| E x fill^2 | -8 / -19 / -10 / -2 | -27 / -27 / -25 / -9 | -13 / -11 / -14 / +2 |
+| E x fill^3 (today's law) | +7 / -14 / -4 / +9 | -19 / -21 / -22 / -6 | -1 / -4 / -12 / +6 |
+
+THE CANDIDATE FAILS HERE: real stiffness with the straight-line carry reads 19 to 37 % LOW at a tip whose radius is 1.5 to 3 voxels, worse than its own one-voxel reading: the stress falls away from the tip within a voxel or two, and a straight line through voxel centres half a voxel and one and a half voxels back cannot follow it. Nothing measured holds 10 % at this radius; today's E x fill^3 at one voxel is the least bad (-14 to +9 %), by the accident that its too-soft skin raises the reading about as much as the grid lowers it.
+
+So the honest summary of the cut-voxel question, all shapes:
+- gentle faces (a flat face in bending, a ring's bore of radius 3 voxels or more): real stiffness + the straight-line carry, within 9 %, closing with refinement;
+- a stress raiser whose radius is under about 3 voxels: no reading is within 10 %; the grid cannot see it. That is a RESOLUTION limit to state and to detect (the radius of the drawn face against the voxel), not a law to tune; it is ledger A-06's twin for fillets, and Top Motor Mount's inside corner (radius zero as voxelised) is its extreme case.
+For the reviewer with the rest; nothing built in the engine.
+
