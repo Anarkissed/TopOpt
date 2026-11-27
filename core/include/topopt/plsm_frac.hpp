@@ -214,6 +214,8 @@ inline double plsm_frac_eps(double gradscale, double h, int k, double eps_mult) 
 // ALONE verifies at −1.33 / +3.18% on the compliance, and adding the L1 bandwidth
 // takes it to −2.32 / +7.61%. The theory is about the asymptotic rate of a
 // quadrature; what ships is chosen on the measurement at k = 4 on this part.
+// Reached only when a job sets plsm frac_eps_l1 (off by default) and from the
+// finite-difference probe, so the border span below (P-17) changes nothing today.
 inline double plsm_frac_grad_l1(int nx, int ny, int nz,
                                 const std::vector<double>& phi, int i, int j,
                                 int k, double h) {

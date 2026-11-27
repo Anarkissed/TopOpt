@@ -842,6 +842,9 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
                      "halved (%d of %d)\n",
                      options.volume_fraction, it, pieces, voxels, kept_iter, step_backs,
                      kStepBacksPerRung);
+        // A step-back iteration records nothing: no row in iterations.csv (its
+        // number is skipped), no keyframe or observe call, and done_iters is not
+        // set by it (stage 3 file, TOReview's pre-review 11-27).
         continue;
       }
       non_convergent = true;
@@ -1112,9 +1115,15 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
                             threads, surf.on ? &alpha : nullptr,
                             free_knots.empty() ? nullptr : &free_knots);
       refit_wall_s += steady_s() - t_rf0;
+      ++out.refits;
+      refit_cg_iters_max = std::max(refit_cg_iters_max, rf.cg_iters);
+      refit_rel_resid_max = std::max(refit_rel_resid_max, rf.rel_resid);
       // ★ NOT SILENT (ledger P-11): how far the re-fit moved the surface, at the
       // centre of every ACTIVE cell the surface passes near, |dphi| / |grad phi|.
-      {
+      // Measured only with the stage 3 switch on: its one reader is the [plsm] line
+      // printed under that switch, and off it cost a whole-grid spmv, two gradients
+      // per band voxel and a sort on every re-fit (TOReview's pre-review, 11-27).
+      if (surf.on) {
         std::vector<double> after(n, 0.0);
         plsm_spmv(Psi, rf.alpha, after, threads);
         double mx = 0.0, s2 = 0.0;
@@ -1140,9 +1149,6 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
               s2 += d * d;
               ++cnt;
             }
-        ++out.refits;
-        refit_cg_iters_max = std::max(refit_cg_iters_max, rf.cg_iters);
-        refit_rel_resid_max = std::max(refit_rel_resid_max, rf.rel_resid);
         if (!moves.empty()) {
           std::sort(moves.begin(), moves.end());
           out.refit_move_p90_mm =

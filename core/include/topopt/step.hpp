@@ -70,12 +70,11 @@ struct StepFaceInfo {
 // for check_watertight and the divergence-theorem signed_volume.
 struct StepModel {
   TriangleMesh mesh;
-  // TO rebuild stage 3: the same part at 0.01 mm chord for the print file's drawn
-  // faces (ledger I-02). Empty unless the stage 3 switch is on; then the export cuts
-  // with it and everything else keeps `mesh`.
-  TriangleMesh export_mesh;
-  std::vector<int> export_triangle_face;  // parallel to export_mesh.triangles
-  const TriangleMesh& drawn_mesh() const { return export_mesh.empty() ? mesh : export_mesh; }
+  // TO rebuild stage 3 (ledger I-02): the part whose faces the print file draws.
+  // With the stage 3 switch on, step.cpp meshes the part at 0.01 mm chord and keeps
+  // that ONE mesh as `mesh` (grid, tags, loads and the export's cut alike), so this
+  // is `mesh` itself; the name says what the export reads it for.
+  const TriangleMesh& drawn_mesh() const { return mesh; }
   // Per-triangle B-rep face id, parallel to `mesh.triangles`
   // (triangle_face[t] is the face triangle t was tessellated from). Face ids
   // are the 0-based TopExp_Explorer(TopAbs_FACE) order, so they run

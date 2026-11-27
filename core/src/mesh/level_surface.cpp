@@ -235,22 +235,14 @@ struct FrozenBody {
   }
 };
 
-// The bodies of `sets`, each from the 0.01 mm copy of its faces when it holds
-// whole faces and the copy exists (ledger I-02), else from the coarse triangles.
+// The bodies of `sets`, each from the part's own triangles in the set (with the
+// stage 3 switch on, the part's mesh is already the 0.01 mm one: step.cpp, I-02).
 std::vector<FrozenBody> make_frozen_bodies(const std::vector<FrozenFaceSet>& sets,
                                            const StepModel& model, double cap) {
   std::vector<FrozenBody> out;
   // Each body's MeshDistance points at the body's own `tri`: the vector must never
   // reallocate after a body is placed, or every earlier pointer dangles.
   out.reserve(sets.size());
-  // Coarse triangle count per face, to tell whole faces from parts of faces.
-  std::vector<int> per_face;
-  for (int f : model.triangle_face) {
-    if (f >= static_cast<int>(per_face.size())) per_face.resize(static_cast<std::size_t>(f) + 1, 0);
-    if (f >= 0) ++per_face[static_cast<std::size_t>(f)];
-  }
-  const bool fine = !model.export_mesh.empty() &&
-                    model.export_triangle_face.size() == model.export_mesh.triangles.size();
   // Sets without cuts that share a depth and a kind are one body: one distance
   // query instead of one per face (his stand: 91 sets, 47 s of queries).
   std::vector<FrozenFaceSet> merged;
@@ -272,21 +264,8 @@ std::vector<FrozenBody> make_frozen_bodies(const std::vector<FrozenFaceSet>& set
     b.cuts = fs.cuts;
     b.depth = fs.depth_mm;
     b.solid = fs.solid;
-    std::map<int, int> count;  // face -> triangles of it in the set
-    for (int t : fs.triangles)
-      if (t >= 0 && t < static_cast<int>(model.triangle_face.size()))
-        ++count[model.triangle_face[static_cast<std::size_t>(t)]];
-    bool whole = fine;
-    for (const auto& kv : count)
-      if (kv.first < 0 || kv.second != per_face[static_cast<std::size_t>(kv.first)]) whole = false;
-    const TriangleMesh& src = whole ? model.export_mesh : model.mesh;
-    std::vector<int> pick;
-    if (whole) {
-      for (std::size_t t = 0; t < model.export_triangle_face.size(); ++t)
-        if (count.count(model.export_triangle_face[t])) pick.push_back(static_cast<int>(t));
-    } else {
-      pick = fs.triangles;
-    }
+    const TriangleMesh& src = model.mesh;
+    const std::vector<int>& pick = fs.triangles;
     std::map<int, int> remap;
     for (int t : pick) {
       if (t < 0 || t >= static_cast<int>(src.triangles.size())) continue;
