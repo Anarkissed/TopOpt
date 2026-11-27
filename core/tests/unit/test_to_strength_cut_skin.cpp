@@ -42,6 +42,10 @@ struct Out {
   double curvature = 0.0;  // model / exact
   double peak = 0.0;       // the analysis's per-voxel reading at mid-span / true surface stress
   double peak_material = 0.0;  // the same from the material-stress field when the analysis gives one
+  // MEASURING ARM (stage 4's question, measured ahead; not in the engine): the stress
+  // of the two outermost FULL voxels carried in a straight line out to the TRUE
+  // surface (half a voxel plus the skin's fill beyond the outer full voxel's centre).
+  double at_surface = 0.0;
   bool ok = false;
 };
 
@@ -137,6 +141,14 @@ Out bend(int core, double fill, double skin_density, double penalty) {
         if (v < res.von_mises_material_field.size() && density[v] >= topopt::kStressMaterialFloor)
           o.peak_material = std::max(o.peak_material, res.von_mises_material_field[v] / surface);
       }
+  if (core >= 3 && res.von_mises_material_field.size() == n) {
+    const int im = g.nx / 2;
+    const std::vector<double>& f = res.von_mises_material_field;
+    const double top = f[g.index(im, core, kz)], top_in = f[g.index(im, core - 1, kz)];
+    const double bot = f[g.index(im, 1, kz)], bot_in = f[g.index(im, 2, kz)];
+    const double reach = 0.5 + fill;  // voxels from the outer full voxel's centre to the true surface
+    o.at_surface = std::max(top + (top - top_in) * reach, bot + (bot - bot_in) * reach) / surface;
+  }
   return o;
 }
 
@@ -162,9 +174,10 @@ int main() {
           std::printf("[cut skin]   %s  DID NOT SOLVE\n", md.name);
           continue;
         }
-        std::printf("[cut skin]   %s  curvature %.3f (%+.0f %%)   peak %.3f (%+.0f %%)   material-stress peak %.3f\n",
+        std::printf("[cut skin]   %s  curvature %.3f (%+.0f %%)   peak %.3f (%+.0f %%)   material-stress peak %.3f   "
+                    "carried to the true surface %.3f (%+.0f %%)\n",
                     md.name, o.curvature, 100.0 * (o.curvature - 1.0), o.peak, 100.0 * (o.peak - 1.0),
-                    o.peak_material);
+                    o.peak_material, o.at_surface, 100.0 * (o.at_surface - 1.0));
         std::fflush(stdout);
       }
     }

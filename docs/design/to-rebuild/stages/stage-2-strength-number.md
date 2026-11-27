@@ -727,3 +727,15 @@ Honest position: I cannot say from this which number is right for Top Motor Moun
 
 No column holds +/-10 % on both the ring and the beam. All-or-nothing is right on the ring and unsafe on the beam; E x fill^3 is near on the beam and far too high on the ring; E x fill^2 misses both by less (high on the ring, low on the beam). The two shapes differ in ONE thing: on the ring the LOAD sits on the cut face (the soft skin is squeezed directly), on the beam the cut faces are free and only carry the bending. So the candidate that the measurements point at is not a different power but a different treatment of LOADED cut faces from FREE ones, or reading the stress at the true surface instead of in the cut voxel (stage 4). Not built; for the reviewer.
 
+### Measured ahead for stage 4: the stress CARRIED OUT TO THE TRUE SURFACE, on the cut-skin beam (2026-11-27 06:45, a measuring arm in `to_strength_cut_skin`; not in the engine)
+
+The stress of the two outermost FULL voxels carried in a straight line to where the file's surface really is (half a voxel plus the skin's fill beyond the outer full voxel's centre), against the true surface stress. Three skin fills per thickness; lowest to highest.
+
+| voxels through (core) | all-or-nothing | E x fill^3 | E x fill^2 | E x fill (real stiffness) |
+|---|---|---|---|---|
+| 4 | -43 to +38 % | +27 to +46 % | +9 to +20 % | -13 to -8 % |
+| 8 | -28 to +19 % | +17 to +26 % | +8 to +14 % | -4 to -3 % |
+| 16 | -16 to +9 % | +9 to +14 % | +5 to +8 % | -1 % |
+
+Read at the true surface, the reading's error IS the model's stiffness error and nothing else (each figure equals the "soft" column of the table above). So the pair that works on a free cut face is REAL STIFFNESS for the cut voxels (E x fill) with the stress read AT THE TRUE SURFACE: within 4 % from 8 voxels through, 8 to 13 % low at 4, and steady across the skin's fill (which no one-voxel reading is). On the ring, E x fill at one voxel already reads -7 to -4 %. It is the first combination measured that is inside or near the bar on both shapes. Caveats: a straight beam and a straight-line carry; a curved or loaded face and a notch are not measured; it reads slightly LOW everywhere (the unsafe side), so it would need its own small allowance. A proposal for stage 4, for the reviewer; nothing built in the engine.
+
