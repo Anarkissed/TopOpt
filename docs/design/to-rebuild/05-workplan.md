@@ -64,6 +64,12 @@ AFTER THE CRASH (the Claude app crashed about 13:15 from Mac overload; every run
 - For my "one judge" proposal: its file re-check against the certificate on Top Motor Mount at res 32 agrees to 0.3 to 1.3 %, the same as I see on his parts; the made parts are where the two judges part.
 - SHOWN TO HIM 18:10 (his question about lumps): TOSurface's picture of Top Motor Mount as drawn / today's file / the stage 3 file (`stage-3-pics/topmotor_drawn_today_stage3.png` on its branch).
 
+20:30 STATE (2026-11-26; after the reviewer's ruling of 00:22Z on the 27th).
+- ONE JUDGE (first in stage 2): the switch `TOPOPT_RECHECK=fill[:k]` is in and builds (to_analyze.inc; file_fill.hpp). RUNNING: the sample bracket with it off / k 2 / 4 / 8 (`onejudge.sh`; off done: 5.283 -> 5.285, 5.105 -> 5.293, 4.152 -> 4.851, 1.799 -> 3.661); then the textbook evidence test (a) (`recheck_test.sh`, test `to_recheck_fill`). Owed after: k chosen; (b) his parts and the hook and beam before and after; (c) time and peak memory on his largest job; (d) test K; (e) lattice jobs A to D (LatticeReview told; its two lattice strength solves are not touched).
+- STEP-BACK before refusing a rung (connection rule): handed to TOSurface as a specified task in `plsm.cpp` (its file), after its batch and report; measured on the hook with and without; kept only if more versions within 10 % more time.
+- Lock: #362's release 22 since 18:31; then TOSurface's next part, S1, then mine. `b1_suite.sh` and `b6_autopad_checks.sh` now build in `build_s6` (no second full build; disk was at 17 GB, 34 GB now). While B1 runs, nothing of mine runs outside the lock from that folder.
+- Known limits stated in the stage 2 file (ruled): the across-layer -5.4 % at a 3-voxel hole; notches with a tip radius under 2 voxels are outside the bar.
+
 A. Already agreed:
 - A1. Stage 1 report to the reviewer once the two lock runs are recorded (draft at the top of `stages/stage-1-true-loads.md`).
 - A2. The pad's one number: tables and PICTURES of the shapes around the fixed faces from the two sweeps; a recommended curve strength for him in the morning.
