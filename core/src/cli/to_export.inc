@@ -321,6 +321,14 @@ FinishRecheck recheck_file(const TriangleMesh& m, const TriangleMesh& raw, const
   const std::vector<char> occ = file_occupancy(m, sg), occ0 = file_occupancy(raw, sg);
   fb.recheck_ran = true;
   fb.margin = a.analysis.margin_effective;
+  // Interim (to_stage_switch.hpp, TOPOPT_SHOWN=lower): never show, or judge on,
+  // more than the loop certified. `fb.margin_before` is the certificate where the
+  // caller has set it (the run's finish); 0 = not set, nothing changes.
+  if (shown_margin_lower_on() && fb.margin_before > 0.0 && fb.margin_before < fb.margin) {
+    std::fprintf(stderr, "[shown] the re-check reads %.4g, the loop certified %.4g: the lower one is shown\n",
+                 fb.margin, fb.margin_before);
+    fb.margin = fb.margin_before;
+  }
   // ANY material in a Keep clear refuses (ruling 2026-11-03 19:55), each voxel confirmed
   // on the file and outside the part's own solid.
   fb.keep_clear_voxels = file_keep_clear_exact(m, sg, occ, clearance, exclude, part);

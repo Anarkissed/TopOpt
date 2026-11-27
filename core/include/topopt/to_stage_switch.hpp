@@ -76,6 +76,19 @@ inline int recheck_fill_sub() {
   return k >= 1 ? k : 8;
 }
 
+// THE SHOWN MARGIN IS THE LOWER ONE (stage 2, interim; the reviewer's ruling of
+// 2026-11-27 16:34Z, maintainer-approved). TOPOPT_SHOWN=lower makes the margin shown
+// for a finished version, and the margin it is judged on, the LOWER of the loop's
+// certificate and the finished file's re-check. The two are different analyses of
+// the voxels the surface cuts (ledger A-07) and today the re-check can show more
+// than the loop certified (the sample hook: 2.66 certified, 3.89 shown). With the
+// switch the screen never shows more than was certified. Unset = today's bytes.
+// It goes when one judge flips with the real cut-voxel reading.
+inline bool shown_margin_lower_on() {
+  const char* v = std::getenv("TOPOPT_SHOWN");
+  return v != nullptr && std::string(v) == "lower";
+}
+
 // THE CONNECTION RULE (stage 5; the reviewer's ruling of 2026-11-26, maintainer-
 // approved): TOPOPT_CONNECTION=support makes a piece of the design count as held
 // only when it reaches a SUPPORT (a fixed face). A loose piece that carries only

@@ -804,3 +804,35 @@ His ruling of 2026-11-26 ("the print parameters the user set should automaticall
 
 Checked on the 15 mm sample bracket (`analyze`, res 48, built outside the lock): skins not stated 0.7466564941 g; stated at the usual 1.0 / 0.6 mm 0.7466564941 g (the same to every digit); stated at 2.0 / 2.0 mm 0.7581 g (more, as it must be); the stage switch off 0.7738 g (the solid figure, untouched by the keys). `to_printed_mass` passes. Not yet run: the whole suite with this change (9 files; it builds; the default path is the old one by construction).
 
+### THE REVIEWER'S RULING OF 2026-11-27 16:34Z (11:34 EST), maintainer-approved: one judge and the cut-voxel law (word for word)
+
+> 1. One judge as built does not flip. E x fill^3 on drawn faces refuses his good parts (Top Motor Mount, every version) and reads loaded curved faces 52 to 76 % high.
+>
+> 2. Interim, small, now: the shown margin is the LOWER of the loop's certificate and the file's re-check, and the version is judged on it. The screen then never shows more than the loop certified (the hook's 3.89 becomes 2.66), and nothing he is shown gets more optimistic. Put it behind its own switch. Flip it when test K, his two parts, and the hook, bracket and beam show no version refused that the certificate passes. It goes into the next release.
+>
+> 3. The real fix moves from stage 4 into stage 2, because it IS the strength number. Candidate one: real stiffness (E x fill) on cut voxels, with the stress carried to the true surface. Candidate two: patch recovery with zero traction on the free surface (Nadal et al. 2013, in your 01-research.md). Measure both on the plate, ring, ellipse, beam and cut-skin beam, then his two parts and the three carved samples. Drawn faces get their fills in the loop at the same time (your order (1)), never with fill^3. Bar: never more than 5 % under the true value where the feature is resolved. If a form reads low by a steady amount, one allowance may be set on the beam and the ring, and it must hold on the plate and the ellipse, which are held out. Both judges move together, and one judge flips with this.
+>
+> 4. Not resolved (stress raisers under about 3 voxels of radius; members under 6 voxels through in bending): stated limits A-06 and A-08 in the ledger, detected and named in the engineer's readout. A finer resolution is the remedy (his "keep going finer"). No pop-up now.
+>
+> 5. scenario_weights check (c): your form is accepted (c15 >= 1.10 x c10, c20 >= 0.95 x c15).
+>
+> 6. The size form is complete. Run (b) to (e) on his full-resolution parts with this build when the lock allows.
+
+WHAT I DO WITH IT, in order:
+- (2) DONE IN CODE 11:45: `TOPOPT_SHOWN=lower` (to_stage_switch.hpp); in `recheck_file` (to_export.inc) the finished file's margin becomes the certificate when the certificate is lower, and the verdict is judged on that. Unset = today's bytes. Evidence owed before the flip: test K, his two parts, the hook, bracket and beam with the switch on: no version refused that the certificate passes. (By construction the switch can only LOWER the shown number to a certificate that already passed, so it cannot add a refusal; the runs are to show it.)
+- (5) DONE IN CODE 11:45: `test_scenario_weights.cpp` check (c).
+- (3) the stage's main work now: (a) candidate one in the engine behind a switch (real stiffness on cut voxels; the surface's normal at each cut voxel from the fill's gradient; the straight-line carry); (b) candidate two as a measuring arm first (a least-squares fit of the stress over full voxels near the surface with zero traction on it); (c) both on the five textbook shapes with the plate and the ellipse HELD OUT of any allowance; (d) the drawn faces' fills into the loop; (e) his two parts and the three carved samples.
+- (4) A-06 and A-08 lose "proposed"; the readout's detection is part of (3)'s report.
+- (6) queued behind TOSurface's and TOSolver's waiting jobs.
+
+### The interim, first check: the 15 mm sample bracket, res 48, `TOPOPT_SHOWN` unset and `lower` (2026-11-27 12:10, outside the lock)
+
+| version | certificate | shown, unset (today) | shown, `lower` |
+|---|---|---|---|
+| 0.68 | 6.353 | 6.499 | 6.353 |
+| 0.52 | 6.350 | 6.513 | 6.350 |
+| 0.38 | 4.845 | 5.249 | 4.845 |
+| 0.26 | 2.091 | 4.241 (twice the certificate) | 2.091 |
+
+Four versions made and accepted both ways; all four files are the same bytes with the switch on as off (the switch changes the number shown and judged, never the shape). One `[shown]` line a version on stderr says which was the lower. Owed before the flip (the ruling): test K, his two parts, the hook, the bracket at full size and the beam with the switch on.
+
