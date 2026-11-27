@@ -78,6 +78,8 @@ AFTER THE CRASH (the Claude app crashed about 13:15 from Mac overload; every run
 - ONE JUDGE so far (stage 2 file): works in a job; k = 8 by measurement; the size form meets both ruled tests through the file's fills (16 rows within 0.5 %); the one-voxel form agrees within 2.5 % at k = 8 and does not settle (one row -11.3 % at k = 16). Reported, with the correction. Awaiting the reviewer on how (a) is judged for the one-voxel form.
 - WITH OTHERS: TOSurface: stage 3 batch and report, then the step-back in plsm.cpp. TOSolver: the single-precision deletion (e826135f, NOT to merge before the stage 5 close-out; merge its branch only up to 54fce169 until then), the before-and-after table, cheb:2 as default through #362's Flexible gate.
 
+23:15, B1 (the whole core suite) IN PROGRESS under my lock: tip f11b95d7 built in 2 minutes (incremental in `build_s6`); ctest at about 154 of 226. Two tests aborted, BOTH because my scratch source held only `core/` and they read reference files from `docs/`: `smooth_brush` (an STL under docs/handoffs/evidence/2026-07-26-constrained-smooth-ui) and `lattice_strength` (docs/strength-check/variables.json). With those two folders copied into the scratch source, each passes when run directly (smooth_brush PASS; lattice_strength 44,329 checks, 0 failed). So neither is a failure of the branch; the final count will say so. Lesson for the script: archive `core` AND the docs folders the tests read.
+
 A. Already agreed:
 - A1. Stage 1 report to the reviewer once the two lock runs are recorded (draft at the top of `stages/stage-1-true-loads.md`).
 - A2. The pad's one number: tables and PICTURES of the shapes around the fixed faces from the two sweeps; a recommended curve strength for him in the morning.
