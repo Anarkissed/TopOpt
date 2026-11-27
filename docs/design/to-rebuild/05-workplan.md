@@ -72,6 +72,12 @@ AFTER THE CRASH (the Claude app crashed about 13:15 from Mac overload; every run
 
 21:45: my memory guard STOPPED one of my runs as ruled (21:28: swapouts rose on two checks running while #362's release 22 built; free memory was 59 %): the bracket's re-check at k = 4 on the layer-by-layer fill, 270 s in. Nothing lost that matters (the layer-by-layer fill's test gives the same numbers as the whole-grid one); the k = 16 run started through the gate after it. Lock: TOSolver 21:44 (45 min).
 
+22:50 STATE.
+- LOCK: MINE since 22:46, `b1_suite.sh` (the whole core suite, never run before on this branch; builds tip f11b95d7 in `build_s6`, then ctest -j2; limit 200 min). #362: S1 is not coming back tonight. While B1 runs NOTHING of mine runs outside the lock (it rebuilds the folder my outside jobs use).
+- BEHIND IT, each waiting for the one before and for anyone queued: `b6_autopad_checks.sh` (stage 1 flip item 2(a): lattice jobs A to D and the same-job-twice gate at the automatic pad and at 3 mm); `b5_stage2.sh` (the bracket at res 96 and the stand at res 128: switch off / size / size 3.6 mm); `b7_onejudge.sh` (one judge, evidence (b) to (e): Top Motor Mount 96, the stand 128, the hook and the beam with the re-check unset and at fill:8, time and peak memory; then test K and lattice jobs A to D with the switch on).
+- ONE JUDGE so far (stage 2 file): works in a job; k = 8 by measurement; the size form meets both ruled tests through the file's fills (16 rows within 0.5 %); the one-voxel form agrees within 2.5 % at k = 8 and does not settle (one row -11.3 % at k = 16). Reported, with the correction. Awaiting the reviewer on how (a) is judged for the one-voxel form.
+- WITH OTHERS: TOSurface: stage 3 batch and report, then the step-back in plsm.cpp. TOSolver: the single-precision deletion (e826135f, NOT to merge before the stage 5 close-out; merge its branch only up to 54fce169 until then), the before-and-after table, cheb:2 as default through #362's Flexible gate.
+
 A. Already agreed:
 - A1. Stage 1 report to the reviewer once the two lock runs are recorded (draft at the top of `stages/stage-1-true-loads.md`).
 - A2. The pad's one number: tables and PICTURES of the shapes around the fixed faces from the two sweeps; a recommended curve strength for him in the morning.
