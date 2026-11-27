@@ -163,6 +163,18 @@ WAITING ON OTHERS: the reviewer's ruling on which reference a reading over a len
 
 ## Ideas beyond the plan, in discussion with the maintainer (NOT acted on)
 
+**2026-11-27, 16:30 EST: GRADED VOXELS, THE PROTOTYPE ON THE EXTRUSION STAND (his request: "Can you try the extrusion stand?"). The stand's finished file (`opt21/stand128/off/out/variant_068.stl`, read in place), 64 coarse voxels of 1.98 mm (11 445 solid), fine 128 (88 550 solid); the same stand-in load; 276 MB; log `agent-scratch/toreview/zoom_part_stand.log`. Percent against the whole part at the fine resolution:**
+
+| | largest movement | hot spot 1, stress carried to the surface | hot spot 2 | hot spot 3 |
+|---|---|---|---|---|
+| coarse alone | -34.8 % | -2.7 % | -4.2 % | -48.7 % |
+| one-way zoom | -34.8 % | -1.4 % | -2.7 % | -39.4 % |
+| two-way, one box (15 iterations) | -34.8 % | +2.7 % | not refined | not refined |
+| two-way, three boxes merged into one, 14 % of the fine model (19 iterations) | -31.7 % | +2.8 % | +3.7 % | -29.7 % |
+
+Time: coarse 3.6 s; the loops 28 s and 37 s (16 to 20 global solves at about 1.5 s; the boxes 0.8 to 9 s); THE WHOLE PART AT THE FINE RESOLUTION 38.6 s, 631 iterations, converged, no stall.
+READING IT: at 64 voxels the stand is 35 % too stiff AS A WHOLE under this bending load (its walls are about one to two voxels), and boxes at the hot spots do not repair that: the movement stays 32 to 35 % low and the third hot spot 30 % low, because the wrong stiffness is everywhere, not in the boxes. The loop here is no faster than refining the whole part (28 to 37 s against 39 s) and took 15 to 19 passes. So for a thin-walled part like this the answer is NOT a few boxes: it is the whole part finer, and that is CHEAP here (39 s, 276 MB at 128 voxels, where the shipped check already runs the stand at 128). The boxes pay where the part is mostly solid and the trouble is local (the 15 mm bracket: 2.5 to 3.5 x faster, hot spots within 1 %). Nothing else built.
+
 **2026-11-27, 16:25 EST: GRADED VOXELS, THE PROTOTYPE ON REAL PART SHAPES (his "Measure a real part"). `test_to_zoom_two_way --part <stl> --res N`; the solver untouched; the parts read in place; a STAND-IN load (one end clamped, 10 N in bending at the other: a test cannot call the CLI's job setup), so the stresses are not his load case's. Logs `agent-scratch/toreview/zoom_part_*.log`.**
 
 THE 15 mm BRACKET's lightest carved version, 48 coarse voxels (11 362 solid; 78 343 fine; boxes 3.6 to 4.5 % of the fine model each; 248 MB):
