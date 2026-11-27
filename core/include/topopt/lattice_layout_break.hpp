@@ -11,14 +11,18 @@
 //   "not_proven" it is not, but a place too thin to judge reads under the pass line (by its own reading, or, for a
 //                post, by its file section), or no point is judged at all;
 //   "pass"       otherwise.
-// Not wired into the file job here (stage C2 does that). Nothing in this file changes any existing check.
+// Stage C2 wires it into the Organic file-strength path (run_job.cpp: run_lattice_file_strength_organic), after the rod
+// check, which stays as it was. A check that cannot be made (too big for the Mac, a solve that does not settle, a load it
+// cannot read, a stop) gives verdict "not_checked" with the reason: never a number, never a pass.
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <string>
 #include <vector>
 
 #include "topopt/mesh.hpp"
+#include "topopt/print_frame.hpp"
 #include "topopt/step.hpp"
 
 namespace topopt::lattice_layout {
@@ -59,15 +63,34 @@ struct BreakAsk {
   double tolerance = 1e-2;              // the solve's relative residual
   int max_rounds = 15000;               // a solve that does not settle within it gives no number
   std::size_t places_listed = 20;       // at most this many not-judged places under the pass line
+  // C2. The print frame the print, the part and `up` are in (off: the model frame); every position and direction the
+  // block reports is written back in the model frame.
+  PrintFrame frame;
+  // C2 (P4): more ups to read the same smoothed stresses against (the print-orientation candidates), no new solve.
+  std::vector<Vec3> other_ups;
+  // C2, the size guard: the bytes the check may need at most. 0 = 40 % of the machine's physical memory, read when it
+  // runs. Set only by a test (the oversize mark); the product never sets it.
+  double memory_limit_bytes = 0.0;
+  // A reading for the record only (the review's question 1.6), never in the verdict or the block: also smooth over the
+  // material CONNECTED to the voxel inside its ball, and give that first break in BreakResult::connected_*.
+  bool also_connected_ball = false;
+  // C2: progress lines ("checking its strength: ...") and the job's stop flag, read between the steps (the solver
+  // itself takes no stop).
+  void (*said)(const char*) = nullptr;
+  const std::atomic<bool>* stop = nullptr;
 };
 
 // What the check will need before it solves: the grid, the material voxels, and the bytes at 3,200 B per material voxel
-// plus 40 B per box voxel (the plan's first estimate, to be measured).
+// plus 40 B per box voxel (the plan's first estimate, to be measured). The material is COUNTED row by row (the product
+// voxeliser's own rule), never laid out in a full box, so a part far too big is turned away before any large allocation.
 struct BreakSize {
   int nx = 0, ny = 0, nz = 0;
   std::size_t box_voxels = 0, material_voxels = 0;
   double bytes = 0.0;
+  double limit_bytes = 0.0;     // the guard (organic_break_check fills it)
 };
+// 40 % of the machine's physical memory, read now (sysconf); 0 when it cannot be read.
+double break_memory_limit_bytes();
 BreakSize organic_break_size(const BreakAsk& ask);
 
 struct BreakPoint {
@@ -98,7 +121,14 @@ struct BreakResult {
   int rounds = 0;
   bool converged = false;
   double seconds = 0.0, peak_mb = 0.0;
-  std::string json;             // the "break" block, an object
+  std::string json;             // the "break" block, an object (also when not checked: then with the reason)
+  std::string not_checked;      // not ok: "too_big", "did_not_settle", "no_load", "stopped", "error"
+  struct UpBreak { Vec3 up{}; double judged = 0.0, all = 0.0; };
+  std::vector<UpBreak> by_up;
+  // also_connected_ball: the voxels whose ball holds material not connected to them inside it, and the first breaks
+  // (judged, all points) smoothed over the connected material only.
+  std::size_t connected_split_voxels = 0;
+  BreakPoint connected_judged, connected_all;   // per BreakAsk::other_ups (the ask's frame): the first break, judged and over all points
 };
 BreakResult organic_break_check(const BreakAsk& ask);
 
@@ -109,6 +139,11 @@ double break_multiple(const double voigt[6], double yield_mpa, double z_knockdow
 // The member thickness at voxel (i, j, k) of a material mask, in voxels: the largest 2 DT(c) over material voxels c
 // whose inscribed ball holds it (DT = distance to the nearest non-material voxel centre, less half a voxel), searched
 // within `reach` voxels (exposed for its test).
+// The judged (resolved) mask the verdict reads: a material voxel is judged where some material voxel within
+// `min_voxels_across` voxels has an inscribed ball (radius = distance to the nearest empty centre less half a voxel) of
+// at least min/2 voxels that holds it.
+std::vector<char> break_judged(const std::vector<char>& mat, int nx, int ny, int nz, int min_voxels_across);
+
 double break_member_thickness(const std::vector<char>& mat, int nx, int ny, int nz, int i, int j, int k, int reach = 6);
 
 }  // namespace topopt::lattice_layout

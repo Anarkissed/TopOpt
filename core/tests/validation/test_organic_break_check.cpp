@@ -1,10 +1,12 @@
-// Organic strength CUT 1, stage C1: the break check (lattice_layout_break.hpp).
-// With no arguments: the gate on made shapes (S4's: a 1-voxel column, a 3 x 3 column at its centre and corner, a
-// 5-voxel slab) and the limit law. With "marks DIR": marks 1 and 2 of the plan (section 5) on the made pieces, laid here
+// Organic strength CUT 1, stages C1 and C2: the break check (lattice_layout_break.hpp).
+// With no arguments: the member thickness and the verdict's own gate (break_judged) on made shapes (S4's: a 1-voxel
+// column, a 3 x 3 column at its centre and corner, a 5-voxel slab), the limit law (with the review's biaxial case), and
+// one end-to-end check of a small made bar (seconds). With "marks DIR": marks 1 and 2 of the plan (section 5) on the made pieces, laid here
 // by the file job from the made inputs in DIR (the study's made jobs: BR.stl, BR.tensor, BRT_d_job.json,
 // BRG_d_job.json, SP.stl, SP.tensor, SP_job.json), each through organic_break_check at 0.2 mm and tolerance 1e-2.
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -55,6 +57,13 @@ void gate() {
   std::printf("gate: 1-voxel column %.3f; 3 x 3 column centre %.3f, corner %.3f; 5-voxel slab middle %.3f, face %.3f\n", a, b, c, d, e);
   check(std::fabs(a - 1.0) < 1e-9 && std::fabs(b - 3.0) < 1e-9 && std::fabs(c - 3.0) < 1e-9 && std::fabs(d - 5.0) < 1e-9 && std::fabs(e - 5.0) < 1e-9,
         "the member thickness reads 1, 3 (centre and corner), 5 (middle and face)");
+  // the gate the verdict reads
+  const std::vector<char> j1 = break_judged(col1, n, n, n, 3), j3 = break_judged(col3, n, n, n, 3), j5 = break_judged(slab5, n, n, n, 3);
+  const auto J = [&](const std::vector<char>& m, int i, int j, int k) { return m[(static_cast<std::size_t>(k) * n + j) * n + i] != 0; };
+  std::printf("judged: 1-voxel column %d; 3 x 3 centre %d, corner %d; 5-voxel slab middle %d, face %d\n", J(j1, 10, 10, 10), J(j3, 10, 10, 10),
+              J(j3, 11, 11, 10), J(j5, 10, 10, 10), J(j5, 10, 10, 12));
+  check(!J(j1, 10, 10, 10) && J(j3, 10, 10, 10) && J(j3, 11, 11, 10) && J(j5, 10, 10, 10) && J(j5, 10, 10, 12),
+        "the verdict's gate: a 1-voxel column is not judged; the 3 x 3 column (centre, corner) and the slab are");
 }
 
 void law() {
@@ -74,6 +83,56 @@ void law() {
   check(b1 && b3 && std::fabs(m1 - Y / 10) < 1e-9 && std::fabs(m2 - Y * k / 10) < 1e-9 && std::fabs(m3 - Y / 10) < 1e-9 &&
             std::fabs(m4 - (Y * 0.5 + Y * k * 0.5) / 10) < 1e-6,
         "the limit law: along, across (x z_knockdown), compression, and a tilted tension");
+  // the review's biaxial case: xx 10 along the layers, zz 8 across them: the across one governs, 31 x 0.55 / 8
+  const double bi[6] = {10, 0, 8, 0, 0, 0};
+  const double m5 = break_multiple(bi, Y, k, up, &by);
+  std::printf("law: biaxial xx 10, zz 8: %.4f (want %.4f) by %s\n", m5, Y * k / 8, by.c_str());
+  check(std::fabs(m5 - Y * k / 8) < 1e-9 && by == "tension", "the limit law judges every principal stress (biaxial 2.13, not 3.10)");
+}
+
+int face_where(const StepModel& m, const Vec3& n, int axis, bool want_max);
+
+// A made bar, 10 x 3 x 3 mm along x (the part and the print the same box), held at x = 0, 20 N along +x at x = 10:
+// tension 20 / 9 = 2.22 MPa along the layers, so the first break about 31 / 2.22 = 13.95 away from the ends.
+void bar() {
+  const std::string w = std::string(TMP_DIR) + "/organic_break_check/BAR";
+  std::filesystem::remove_all(w);
+  std::filesystem::create_directories(w);
+  const double L = 10, B = 3;
+  const Vec3 c[8] = {{0, 0, 0}, {L, 0, 0}, {L, B, 0}, {0, B, 0}, {0, 0, B}, {L, 0, B}, {L, B, B}, {0, B, B}};
+  const int t[12][3] = {{0, 2, 1}, {0, 3, 2}, {4, 5, 6}, {4, 6, 7}, {0, 1, 5}, {0, 5, 4}, {3, 7, 6}, {3, 6, 2}, {0, 4, 7}, {0, 7, 3}, {1, 2, 6}, {1, 6, 5}};
+  {
+    std::ofstream f(w + "/bar.stl");
+    f << "solid bar\n";
+    for (const auto& q : t) {
+      f << " facet normal 0 0 0\n  outer loop\n";
+      for (int v : q) f << "   vertex " << c[v].x << " " << c[v].y << " " << c[v].z << "\n";
+      f << "  endloop\n endfacet\n";
+    }
+    f << "endsolid bar\n";
+  }
+  const StepModel m = import_part_file_resolved(w + "/bar.stl");
+  const StlMesh print = read_stl_file(w + "/bar.stl");
+  BreakAsk ask;
+  ask.print = &print.mesh;
+  ask.part = &m;
+  ask.fixed_faces = {face_where(m, {-1, 0, 0}, 0, false)};
+  ask.loads = {{{face_where(m, {1, 0, 0}, 0, true)}, {20, 0, 0}}};
+  ask.youngs_mpa = 3500;
+  ask.poisson = 0.35;
+  ask.yield_mpa = 31;
+  ask.z_knockdown = 0.55;
+  const BreakSize sz = organic_break_size(ask);
+  const BreakResult r = organic_break_check(ask);
+  const double want_bytes = 11250.0 * 3200.0 + 11250.0 * 73.0;
+  std::printf("bar: size %d x %d x %d, %zu material voxels, %.0f bytes (want 11250, %.0f); ok %d %s verdict %s, first break %.4f at (%.2f, %.2f, "
+              "%.2f) %s; force asked %s\n", sz.nx, sz.ny, sz.nz, sz.material_voxels, sz.bytes, want_bytes, r.ok, r.why.c_str(), r.verdict.c_str(),
+              r.first_resolved.multiple, r.first_resolved.at.x, r.first_resolved.at.y, r.first_resolved.at.z, r.first_resolved.by.c_str(),
+              r.json.substr(r.json.find("\"force_asked_n\""), 90).c_str());
+  check(sz.material_voxels == 11250 && std::fabs(sz.bytes - want_bytes) < 1.0 && r.size.material_voxels == 11250,
+        "the bar's size before the solve: 11,250 material voxels and their bytes, the same count the solve uses");
+  check(r.ok && r.verdict == "pass" && r.first_resolved.found && std::fabs(r.first_resolved.multiple / (31.0 / (20.0 / 9.0)) - 1.0) < 0.10,
+        "the bar's verdict is pass and its first break is within 10 % of 31 / 2.22");
 }
 
 int face_where(const StepModel& m, const Vec3& n, int axis, bool want_max) {
@@ -87,6 +146,8 @@ int face_where(const StepModel& m, const Vec3& n, int axis, bool want_max) {
   }
   return best;
 }
+
+double g_tol = 1e-2;   // the marks' solve tolerance (argv "tol:1e-8": the SPARSE split, C1 Piece 1)
 
 struct Piece {
   std::string name, job, model, tensor;
@@ -158,7 +219,9 @@ void mark(const std::string& dir, const Piece& p, const Material& pla) {
   ask.yield_mpa = p.yield;
   ask.z_knockdown = pla.z_knockdown;
   ask.grid_shift = p.shift;
+  ask.tolerance = g_tol;
   const BreakSize sz = organic_break_size(ask);
+  ask.also_connected_ball = true;   // the review's question 1.6, for the record
   std::printf("[%s] before the solve: grid %d x %d x %d, material voxels %zu, bytes estimate %.0f\n", p.name.c_str(), sz.nx, sz.ny, sz.nz,
               sz.material_voxels, sz.bytes);
   const BreakResult r = organic_break_check(ask);
@@ -168,22 +231,18 @@ void mark(const std::string& dir, const Piece& p, const Material& pla) {
               r.first_resolved.thickness_voxels, r.first_all.multiple, r.first_all.at.x, r.first_all.at.y, r.first_all.at.z, r.first_all.cls.c_str(),
               r.first_all.thickness_voxels, r.rounds, r.seconds, r.peak_mb, p.name.c_str(), r.json.c_str());
   if (p.want_voxels > 0) {
-    // The study counted on its own grid: origin 0 (plus its offsets), the part's box only (150 x 80 x 123 at 0.2 mm). The product voxeliser
-    // on that same grid; the check's own grid (the whole print) is printed beside it.
-    VoxelGrid ref;
-    ref.nx = 150;
-    ref.ny = 80;
-    ref.nz = 123;
-    ref.spacing = 0.2;
-    ref.origin = {1.2345e-6, 2.3456e-6, 0.0};   // the study's offsets
-    const VoxelGrid vg = voxelize_onto_grid(print.mesh, ref);
-    std::size_t n = 0;
-    for (VoxelTag t : vg.tags) n += t != VoxelTag::Empty;
+    // The check's own grid (review 5: what the check solves is what is counted); the size counted before the solve beside it.
+    const std::size_t n = r.size.material_voxels;
     const double dv = std::fabs(static_cast<double>(n) - static_cast<double>(p.want_voxels)) / static_cast<double>(p.want_voxels);
-    std::printf("[%s] MARK 2: material voxels on the study's grid %zu against %lld: %.4f %% (the check's own grid, the whole print: %zu)\n",
-                p.name.c_str(), n, p.want_voxels, 100.0 * dv, r.size.material_voxels);
+    std::printf("[%s] MARK 2: material voxels on the check's grid %zu against %lld: %.4f %% (counted before the solve: %zu)\n", p.name.c_str(), n,
+                p.want_voxels, 100.0 * dv, sz.material_voxels);
     check(dv <= 0.001, (p.name + ": mark 2, the voxels within 0.1 %").c_str());
   }
+  std::printf("[%s] connected ball (the record's question): %zu voxels' balls hold material not connected to them; judged %.4f at (%.2f, %.2f, "
+              "%.2f), all points %.4f at (%.2f, %.2f, %.2f)\n", p.name.c_str(), r.connected_split_voxels, r.connected_judged.multiple,
+              r.connected_judged.at.x, r.connected_judged.at.y, r.connected_judged.at.z, r.connected_all.multiple, r.connected_all.at.x,
+              r.connected_all.at.y, r.connected_all.at.z);
+  check(r.first_resolved.cls == p.want_class, (p.name + ": mark 1, the class").c_str());
   auto near = [](double a, double b, double tol) { return std::fabs(a - b) <= tol * b; };
   const double dist = std::hypot(std::hypot(r.first_resolved.at.x - p.want_at.x, r.first_resolved.at.y - p.want_at.y), r.first_resolved.at.z - p.want_at.z);
   std::printf("[%s] MARK 1: judged %.4f against %.4f (%.2f %%)%s; place %.2f mm from the study's; class %s (study %s)\n", p.name.c_str(),
@@ -198,6 +257,7 @@ void mark(const std::string& dir, const Piece& p, const Material& pla) {
 int main(int argc, char** argv) {
   gate();
   law();
+  bar();
   if (argc >= 3 && std::string(argv[1]) == "marks") {
     const std::string dir = argv[2];
     const MaterialLibrary lib = load_materials_file(MATERIALS_JSON_PATH);
@@ -213,7 +273,10 @@ int main(int argc, char** argv) {
         {"BRACKET-GROWN", "BRG_d_job.json", "BR.stl", "BR.tensor", 31.0, {ox, oy, 0}, 9.2013, 9.2792, {8.1, 15.7, 14.3}, "solid", 0},
         // S5: the SPARSE block, judged first break 3.374 at 55 MPa, the corner foot (6.8, 1.6, 4.5), on the study's shifted grid
         {"SPARSE", "SP_job.json", "SP.stl", "SP.tensor", 55.0, {-0.5 + ox, -0.5 + oy, 0}, 0.0, 3.3743, {6.8, 1.6, 4.5}, "vine", 0}};
+    for (int i = 3; i < argc; ++i)
+      if (std::string(argv[i]).rfind("tol:", 0) == 0) g_tol = std::atof(argv[i] + 4);
     for (int i = 3; i < argc; ++i) {
+      if (std::string(argv[i]).rfind("tol:", 0) == 0) continue;
       std::vector<Piece> keep;
       for (const Piece& p : pieces) if (p.name == argv[i]) keep.push_back(p);
       if (!keep.empty()) pieces = keep;
