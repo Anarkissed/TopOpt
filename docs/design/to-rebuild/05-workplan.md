@@ -163,6 +163,24 @@ WAITING ON OTHERS: the reviewer's ruling on which reference a reading over a len
 
 ## Ideas beyond the plan, in discussion with the maintainer (NOT acted on)
 
+**2026-11-27, 16:25 EST: GRADED VOXELS, THE PROTOTYPE ON REAL PART SHAPES (his "Measure a real part"). `test_to_zoom_two_way --part <stl> --res N`; the solver untouched; the parts read in place; a STAND-IN load (one end clamped, 10 N in bending at the other: a test cannot call the CLI's job setup), so the stresses are not his load case's. Logs `agent-scratch/toreview/zoom_part_*.log`.**
+
+THE 15 mm BRACKET's lightest carved version, 48 coarse voxels (11 362 solid; 78 343 fine; boxes 3.6 to 4.5 % of the fine model each; 248 MB):
+
+| | largest movement | hot spot 1: stress carried to the surface | hot spot 3 |
+|---|---|---|---|
+| coarse alone | -6.8 % | -13 % | -24 % |
+| one-way zoom | -6.8 % | -3 % | -24 % |
+| two-way, one box (9 iterations) | -5.4 % | -0.1 % | not refined |
+| two-way, three boxes (9 iterations) | -3.6 % | +1.2 % | -20 % |
+| whole model fine (the reference) | 0 | 0 | 0 |
+
+Time: coarse 0.65 s; the loops 7 to 10 s (10 global solves 5.7 s + the box solves 1.0 to 4.4 s); the whole fine model 24.6 s. So 2.5 to 3.5 x faster than refining everything, with the refined hot spots within about 1 % of the fine model. The part as a whole stays 3.6 to 5.4 % too stiff (only the boxes are refined), and hot spot 3 stays 20 % low because the fine voxelisation holds 19 % less material in that box than the coarse one.
+
+TOP MOTOR MOUNT's finished file, 96 coarse voxels (38 884 solid; 298 512 fine; each box 1.3 to 1.8 % of the fine model; 955 MB): the TWO-WAY LOOP WAS NOT MEASURED: the fine reference alone took 257 s and the run's time budget was spent. Measured: coarse alone reads the carried stress 9 to 15 % low at the three hot spots; the ONE-WAY zoom reads them within about 1 % (+0.9 / +1.1 / -1.0 %), with the part's movement 9.5 % low. Each coarse solve takes 20 to 24 s here (the standard smoother stalls and the solver retries with its fallback on every solve: a known stage 5 matter), so a loop of about 10 global solves would cost about as much as the whole fine solve: an estimate, not a measurement.
+
+WHAT IT SHOWS: the accuracy carries over to real shapes. The COST is the repeated GLOBAL solves, not the boxes (0.1 to 0.4 s each on Top Motor Mount): the warm start saves little (about 120 iterations a solve against 136 cold on the bracket). So the lever is fewer and cheaper global solves (the papers' quasi-Newton or interface-CG acceleration: 2 to 6 solves; a looser tolerance on the inner solves), and on thin parts whose WHOLE body is a few voxels thick a few boxes cannot repair the global stiffness. Loose ends: the bracket's hot spots 1 and 2 overlap; one unexplained +27 % in a 99th-percentile figure on Top Motor Mount's third region (one-way); the textbook cases were not re-run after the change (their code path is unchanged by reading); my script's memory field was blank (taken from the logs). Nothing else built.
+
 **2026-11-27, 16:05 EST: GRADED VOXELS, THE TWO-WAY FINE-BOX PROTOTYPE (his "Build the prototype") BUILT AND MEASURED. A measuring test beside the solver, `core/tests/unit/test_to_zoom_two_way.cpp` (`to_zoom_two_way`, Long only, never in the suite); NOTHING under core/src or core/include changed; first build worked. Output `agent-scratch/toreview/zoom_test.log`.**
 Every hook was reachable through the public headers (`fea_solve_mgcg_matfree` with its own `SolverRunState` and an initial guess; `fea_matfree_apply` for reactions; `fea_von_mises_field`; `stress_carried_to_surface`). Emulated in the test: the trilinear weights, and the zone operator (a copy of the coarse grid with everything outside the box Empty). Refinement ratio 2; real stiffness; small grids.
 

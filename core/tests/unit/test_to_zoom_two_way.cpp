@@ -14,15 +14,21 @@
 // Every call is to the public solver API (fea.hpp, stress_measure.hpp): nothing in
 // the solver is changed. Long-only (never in the default suite).
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <functional>
+#include <string>
 #include <map>
 #include <stdexcept>
 #include <vector>
 
 #include "topopt/fea.hpp"
+#include "topopt/mesh.hpp"
+#include "topopt/stl.hpp"
 #include "topopt/stress_measure.hpp"
 #include "topopt/voxel.hpp"
 
@@ -114,8 +120,8 @@ void clamp_x0(const VoxelGrid& g, std::vector<DirichletBC>& bcs) {
 }
 
 FeaSolution solve(const Model& m, const std::vector<NodalLoad>& loads, const FeaSolution* guess,
-                  SolverRunState* run, CgInfo* info) {
-  return topopt::fea_solve_mgcg_matfree(m.g, m.youngs, kNu, m.bcs, loads, kTol, kMaxIt, info,
+                  SolverRunState* run, CgInfo* info, double tol = kTol) {
+  return topopt::fea_solve_mgcg_matfree(m.g, m.youngs, kNu, m.bcs, loads, tol, kMaxIt, info,
                                         nullptr, guess, settings(), run);
 }
 
@@ -466,9 +472,602 @@ int run_case(const Case& cs, bool with_identity) {
   return failures;
 }
 
+// ======================================================================
+// PART MODE (--part <stl> --res <N>): the loop on a real part's shape, with a stand-in
+// load case, one box and three boxes, against the whole part at the fine voxel.
+// ======================================================================
+constexpr double kPartTol = 1e-6;  // every part-mode solve; the loop stops at 1e-3 of |r_0|
+constexpr double kPartLoopTol = 1e-3;     // |r| / |r_0|
+constexpr std::size_t kFineSkip = 2500000;  // solid voxels: skip the whole-fine reference above this
+
+void model_from_grid(Model& m, VoxelGrid g) {
+  m.g = std::move(g);
+  const std::size_t n = m.g.voxel_count();
+  m.youngs.assign(n, 0.0);
+  m.density.assign(n, 0.0);
+  for (std::size_t v = 0; v < n; ++v)
+    if (m.g.tags[v] != VoxelTag::Empty) {
+      m.youngs[v] = kE;
+      m.density[v] = 1.0;
+    }
+  m.bcs.clear();
+  m.loads.clear();
+}
+
+struct Stat3 {
+  double peak = 0.0, p99 = 0.0, carry = 0.0;
+  bool ok = false;
+};
+
+Stat3 read_region(const Model& m, const std::vector<double>& field, const Region& reg) {
+  Stat3 s;
+  std::vector<char> only(field.size(), 0);
+  std::vector<double> vals;
+  for (int k = 0; k < m.g.nz; ++k)
+    for (int j = 0; j < m.g.ny; ++j)
+      for (int i = 0; i < m.g.nx; ++i)
+        if (reg.in(m.g.voxel_center(i, j, k))) {
+          const std::size_t v = m.g.index(i, j, k);
+          only[v] = 1;
+          if (m.density[v] > 0.0) vals.push_back(field[v]);
+        }
+  if (vals.empty()) return s;
+  std::sort(vals.begin(), vals.end());
+  s.peak = vals.back();
+  s.p99 = vals[static_cast<std::size_t>(0.99 * static_cast<double>(vals.size() - 1))];
+  s.carry = topopt::stress_carried_to_surface(m.g, field, m.density, 1, &only).peak;
+  s.ok = true;
+  return s;
+}
+
+struct IBox {
+  int b0[3], b1[3];
+};
+
+bool touch(const IBox& a, const IBox& b) {
+  for (int q = 0; q < 3; ++q)
+    if (a.b0[q] > b.b1[q] || b.b0[q] > a.b1[q]) return false;
+  return true;
+}
+
+// The reading region of a box: the box minus one coarse voxel at each face inside the grid.
+Region box_region(const VoxelGrid& g, const IBox& b) {
+  const int dims[3] = {g.nx, g.ny, g.nz};
+  const double o[3] = {g.origin.x, g.origin.y, g.origin.z};
+  Region r;
+  for (int a = 0; a < 3; ++a) {
+    r.lo[a] = o[a] + b.b0[a] * g.spacing + (b.b0[a] > 0 ? g.spacing : 0.0);
+    r.hi[a] = o[a] + b.b1[a] * g.spacing - (b.b1[a] < dims[a] ? g.spacing : 0.0);
+  }
+  return r;
+}
+
+struct PBox {
+  IBox b;
+  Model B;
+  std::vector<Setup::FineNode> fine;
+};
+
+struct Multi {
+  const Model* G = nullptr;
+  std::vector<PBox> boxes;
+  std::vector<int> gamma;
+  std::map<int, int> at;
+  VoxelGrid gA;
+  std::vector<double> yA;
+};
+
+std::vector<char> live_nodes(const VoxelGrid& g) {
+  std::vector<char> live(static_cast<std::size_t>(topopt::fea_node_count(g)), 0);
+  for (int k = 0; k < g.nz; ++k)
+    for (int j = 0; j < g.ny; ++j)
+      for (int i = 0; i < g.nx; ++i)
+        if (g.solid(i, j, k))
+          for (int n : topopt::fea_element_nodes(g, i, j, k)) live[static_cast<std::size_t>(n)] = 1;
+  return live;
+}
+
+Multi make_multi(const Model& G, const Model& F, const std::vector<char>& liveG, const std::vector<IBox>& boxes) {
+  Multi M;
+  M.G = &G;
+  const int dims[3] = {G.g.nx, G.g.ny, G.g.nz};
+  M.gA = G.g;
+  M.yA.assign(G.youngs.size(), 0.0);
+  std::fill(M.gA.tags.begin(), M.gA.tags.end(), VoxelTag::Empty);
+  for (const IBox& ib : boxes) {
+    PBox pb;
+    pb.b = ib;
+    bool lo_int[3], hi_int[3];
+    int nb[3];
+    for (int a = 0; a < 3; ++a) {
+      lo_int[a] = ib.b0[a] > 0;
+      hi_int[a] = ib.b1[a] < dims[a];
+      nb[a] = ib.b1[a] - ib.b0[a];
+    }
+    for (int k = ib.b0[2]; k < ib.b1[2]; ++k)
+      for (int j = ib.b0[1]; j < ib.b1[1]; ++j)
+        for (int i = ib.b0[0]; i < ib.b1[0]; ++i) {
+          const std::size_t v = G.g.index(i, j, k);
+          M.gA.tags[v] = G.g.tags[v];
+          M.yA[v] = G.youngs[v];
+        }
+    auto on_gamma = [&](int a, int b, int c, int scale) {
+      return (a == 0 && lo_int[0]) || (a == scale * nb[0] && hi_int[0]) || (b == 0 && lo_int[1]) ||
+             (b == scale * nb[1] && hi_int[1]) || (c == 0 && lo_int[2]) || (c == scale * nb[2] && hi_int[2]);
+    };
+    for (int c = 0; c <= nb[2]; ++c)
+      for (int b = 0; b <= nb[1]; ++b)
+        for (int a = 0; a <= nb[0]; ++a) {
+          if (!on_gamma(a, b, c, 1)) continue;
+          const int n = topopt::fea_node_index(G.g, ib.b0[0] + a, ib.b0[1] + b, ib.b0[2] + c);
+          if (!liveG[static_cast<std::size_t>(n)] || M.at.count(n)) continue;
+          M.at[n] = static_cast<int>(M.gamma.size());
+          M.gamma.push_back(n);
+        }
+    // The fine box: cut from the whole fine voxelisation (nested: 8 fine per coarse).
+    VoxelGrid bg;
+    bg.nx = 2 * nb[0];
+    bg.ny = 2 * nb[1];
+    bg.nz = 2 * nb[2];
+    bg.spacing = F.g.spacing;
+    bg.origin = Vec3{G.g.origin.x + ib.b0[0] * G.g.spacing, G.g.origin.y + ib.b0[1] * G.g.spacing,
+                     G.g.origin.z + ib.b0[2] * G.g.spacing};
+    bg.tags.assign(static_cast<std::size_t>(bg.nx) * bg.ny * bg.nz, VoxelTag::Empty);
+    for (int k = 0; k < bg.nz; ++k)
+      for (int j = 0; j < bg.ny; ++j)
+        for (int i = 0; i < bg.nx; ++i)
+          bg.tags[bg.index(i, j, k)] = F.g.tag(2 * ib.b0[0] + i, 2 * ib.b0[1] + j, 2 * ib.b0[2] + k);
+    model_from_grid(pb.B, std::move(bg));
+    const VoxelGrid& B = pb.B.g;
+    auto fine_touched = [&](int a, int b, int c) {
+      for (int dk = -1; dk <= 0; ++dk)
+        for (int dj = -1; dj <= 0; ++dj)
+          for (int di = -1; di <= 0; ++di) {
+            const int i = a + di, j = b + dj, k = c + dk;
+            if (i >= 0 && j >= 0 && k >= 0 && i < B.nx && j < B.ny && k < B.nz && B.solid(i, j, k)) return true;
+          }
+      return false;
+    };
+    for (int c = 0; c <= B.nz; ++c)
+      for (int b = 0; b <= B.ny; ++b)
+        for (int a = 0; a <= B.nx; ++a) {
+          if (!on_gamma(a, b, c, 2) || !fine_touched(a, b, c)) continue;
+          Setup::FineNode fn{};
+          fn.node = topopt::fea_node_index(B, a, b, c);
+          int ia[2], ibb[2], ic[2];
+          double wa[2], wb[2], wc[2];
+          auto axis = [](int x, int* idx, double* w) {
+            if (x % 2 == 0) {
+              idx[0] = x / 2;
+              w[0] = 1.0;
+              return 1;
+            }
+            idx[0] = x / 2;
+            idx[1] = x / 2 + 1;
+            w[0] = w[1] = 0.5;
+            return 2;
+          };
+          const int na = axis(a, ia, wa), nbn = axis(b, ibb, wb), nc = axis(c, ic, wc);
+          double sum = 0.0;
+          for (int x = 0; x < na; ++x)
+            for (int y = 0; y < nbn; ++y)
+              for (int z = 0; z < nc; ++z) {
+                const int n = topopt::fea_node_index(G.g, ib.b0[0] + ia[x], ib.b0[1] + ibb[y], ib.b0[2] + ic[z]);
+                const auto it = M.at.find(n);
+                if (it == M.at.end()) continue;  // a coarse node no coarse voxel holds: left out
+                fn.slot[fn.nw] = it->second;
+                fn.w[fn.nw] = wa[x] * wb[y] * wc[z];
+                sum += fn.w[fn.nw];
+                ++fn.nw;
+              }
+          if (sum <= 0.0) continue;  // no live coarse node: the fine node stays free
+          for (int q = 0; q < fn.nw; ++q) fn.w[q] /= sum;
+          pb.fine.push_back(fn);
+        }
+    M.boxes.push_back(std::move(pb));
+  }
+  return M;
+}
+
+struct MultiOut {
+  bool converged = false;
+  int iterations = 0, global_solves = 0, box_solves = 0;
+  long cg_global = 0, cg_box = 0;
+  double t_global = 0.0, t_box = 0.0;
+  FeaSolution uG, uG0;
+  std::vector<FeaSolution> uF, uF0;
+  bool out_of_time = false;
+};
+
+MultiOut run_multi(Multi& M, double budget_s) {
+  MultiOut o;
+  const double t_start = now_s();
+  double last_it = 0.0;
+  const Model& G = *M.G;
+  SolverRunState global_run;
+  std::vector<double> p(3 * M.gamma.size(), 0.0), r_prev;
+  double omega = 1.0, r0 = 0.0;
+  bool have = false;
+  std::printf("  %4s %12s %9s %14s\n", "it", "|r|/|r_0|", "omega", "max |u_G| mm");
+  for (int it = 0; it <= kLoopMax; ++it) {
+    const double t_it = now_s();
+    if (it > 0 && t_it - t_start + last_it > budget_s) {
+      o.out_of_time = true;
+      std::printf("  stopped by the time budget (%.0f s) before iteration %d\n", budget_s, it);
+      break;
+    }
+    std::vector<NodalLoad> loads = G.loads;
+    for (std::size_t q = 0; q < M.gamma.size(); ++q)
+      for (int comp = 0; comp < 3; ++comp)
+        if (p[3 * q + comp] != 0.0) loads.push_back({M.gamma[q], comp, p[3 * q + comp]});
+    CgInfo gi;
+    double t = now_s();
+    FeaSolution prev = o.uG;
+    o.uG = solve(G, loads, have ? &prev : nullptr, &global_run, &gi, kPartTol);
+    o.t_global += now_s() - t;
+    have = true;
+    ++o.global_solves;
+    o.cg_global += gi.iterations;
+    std::vector<double> r(p.size(), 0.0);
+    {
+      const std::vector<double> Ku = topopt::fea_matfree_apply(M.gA, M.yA, kNu, o.uG.u);
+      for (std::size_t q = 0; q < M.gamma.size(); ++q)
+        for (int comp = 0; comp < 3; ++comp) r[3 * q + comp] = Ku[3 * M.gamma[q] + comp] - p[3 * q + comp];
+    }
+    o.uF.clear();
+    t = now_s();
+    for (PBox& pb : M.boxes) {
+      pb.B.bcs.clear();
+      for (const Setup::FineNode& fn : pb.fine)
+        for (int comp = 0; comp < 3; ++comp) {
+          double v = 0.0;
+          for (int q = 0; q < fn.nw; ++q) v += fn.w[q] * o.uG.u[3 * M.gamma[fn.slot[q]] + comp];
+          pb.B.bcs.push_back({fn.node, comp, v});
+        }
+      SolverRunState fresh;
+      CgInfo bi;
+      FeaSolution uF = solve(pb.B, {}, nullptr, &fresh, &bi, kPartTol);
+      ++o.box_solves;
+      o.cg_box += bi.iterations;
+      const std::vector<double> Ku = topopt::fea_matfree_apply(pb.B.g, pb.B.youngs, kNu, uF.u);
+      for (const Setup::FineNode& fn : pb.fine)
+        for (int comp = 0; comp < 3; ++comp)
+          for (int q = 0; q < fn.nw; ++q) r[3 * fn.slot[q] + comp] -= fn.w[q] * Ku[3 * fn.node + comp];
+      o.uF.push_back(std::move(uF));
+    }
+    o.t_box += now_s() - t;
+    const double nr = std::sqrt(dot(r, r));
+    if (it == 0) {
+      r0 = nr;
+      o.uG0 = o.uG;
+      o.uF0 = o.uF;
+    }
+    const double rel = r0 > 0.0 ? nr / r0 : 0.0;
+    std::printf("  %4d %12.3e %9.4f %14.6f\n", it, rel, omega, max_disp(o.uG.u));
+    std::fflush(stdout);
+    last_it = now_s() - t_it;
+    o.iterations = it;
+    if (r0 == 0.0 || (it > 0 && rel < kPartLoopTol)) {
+      o.converged = true;
+      break;
+    }
+    if (it > 0) {
+      std::vector<double> d(r.size());
+      for (std::size_t i = 0; i < r.size(); ++i) d[i] = r[i] - r_prev[i];
+      const double dd = dot(d, d);
+      if (dd > 0.0) omega = -omega * dot(r_prev, d) / dd;
+    }
+    for (std::size_t i = 0; i < p.size(); ++i) p[i] += omega * r[i];
+    r_prev = r;
+  }
+  return o;
+}
+
+void slab_bcs(Model& m, int L, int S, double thr_lo, double thr_hi) {
+  const VoxelGrid& g = m.g;
+  std::vector<char> clamp(static_cast<std::size_t>(topopt::fea_node_count(g)), 0), load = clamp;
+  for (int k = 0; k < g.nz; ++k)
+    for (int j = 0; j < g.ny; ++j)
+      for (int i = 0; i < g.nx; ++i) {
+        if (!g.solid(i, j, k)) continue;
+        const Vec3 c = g.voxel_center(i, j, k);
+        const double x = L == 0 ? c.x : L == 1 ? c.y : c.z;
+        if (x < thr_lo)
+          for (int n : topopt::fea_element_nodes(g, i, j, k)) clamp[static_cast<std::size_t>(n)] = 1;
+        if (x > thr_hi)
+          for (int n : topopt::fea_element_nodes(g, i, j, k)) load[static_cast<std::size_t>(n)] = 1;
+      }
+  int nl = 0;
+  for (char c : load) nl += c ? 1 : 0;
+  for (std::size_t n = 0; n < clamp.size(); ++n) {
+    if (clamp[n])
+      for (int comp = 0; comp < 3; ++comp) m.bcs.push_back({static_cast<int>(n), comp, 0.0});
+    if (load[n]) m.loads.push_back({static_cast<int>(n), S, 10.0 / nl});
+  }
+  std::printf("  grid %d x %d x %d (voxel %.4f mm): %zu solid voxels, %zu clamped DOFs, %d loaded nodes\n", g.nx,
+              g.ny, g.nz, g.spacing, g.solid_count(), m.bcs.size(), nl);
+}
+
+int run_part(const char* path, int res) {
+  std::printf("[part] %s at --res %d\n", path, res);
+  std::printf("[part] STAND-IN LOAD CASE (the owner's real load case needs the CLI's job setup, which a test cannot "
+              "call): clamp the lowest 6 %% along the longest axis, 10 N along the shortest axis spread evenly over the "
+              "nodes of the highest 6 %%. E = %.0f MPa, nu = %.2f, real stiffness.\n", kE, kNu);
+  std::printf("[part] NOTE: all-or-nothing voxels by centre test: a coarse voxel and its 8 fine voxels need not hold "
+              "the same material (the shapes differ between resolutions); volumes are printed below.\n");
+  topopt::TriangleMesh mesh;
+  try {
+    mesh = topopt::read_stl_file(path).mesh;
+  } catch (const std::exception& e) {
+    std::printf("[part] FAILED to read the STL: %s\n", e.what());
+    return 1;
+  }
+  double lo[3] = {1e300, 1e300, 1e300}, hi[3] = {-1e300, -1e300, -1e300};
+  for (const Vec3& v : mesh.vertices) {
+    const double c[3] = {v.x, v.y, v.z};
+    for (int a = 0; a < 3; ++a) {
+      lo[a] = std::min(lo[a], c[a]);
+      hi[a] = std::max(hi[a], c[a]);
+    }
+  }
+  int L = 0, S = 0;
+  for (int a = 1; a < 3; ++a) {
+    if (hi[a] - lo[a] > hi[L] - lo[L]) L = a;
+    if (hi[a] - lo[a] < hi[S] - lo[S]) S = a;
+  }
+  const double ext = hi[L] - lo[L];
+  const double thr_lo = lo[L] + 0.06 * ext, thr_hi = hi[L] - 0.06 * ext;
+  std::printf("[part] %zu triangles; bounding box %.2f x %.2f x %.2f mm; longest axis %c, shortest %c\n",
+              mesh.triangle_count(), hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2], "xyz"[L], "xyz"[S]);
+  int failures = 0;
+  const double t_run = now_s();
+  std::printf("[part] every solve at relative tolerance %.0e; loops stop at |r|/|r_0| < %.0e, 25 iterations, or a time budget (about 4 minutes a run)\n", kPartTol, kPartLoopTol);
+  try {
+    Model G, F;
+    model_from_grid(G, topopt::voxelize(mesh, res));
+    VoxelGrid fref;
+    fref.nx = 2 * G.g.nx;
+    fref.ny = 2 * G.g.ny;
+    fref.nz = 2 * G.g.nz;
+    fref.spacing = 0.5 * G.g.spacing;
+    fref.origin = G.g.origin;
+    fref.tags.assign(static_cast<std::size_t>(fref.nx) * fref.ny * fref.nz, VoxelTag::Empty);
+    model_from_grid(F, topopt::voxelize_onto_grid(mesh, fref));
+    mesh = topopt::TriangleMesh{};
+    const double H = G.g.spacing, h = F.g.spacing;
+    std::printf("[part] coarse:\n");
+    slab_bcs(G, L, S, thr_lo, thr_hi);
+    std::printf("[part] fine (same origin, half the voxel):\n");
+    slab_bcs(F, L, S, thr_lo, thr_hi);
+    const double volG = G.g.solid_count() * H * H * H, volF = F.g.solid_count() * h * h * h;
+    std::printf("[part] solid volume: coarse %.1f mm3, fine %.1f mm3 (%+.2f %%)\n", volG, volF, 100.0 * (volF / volG - 1.0));
+    const bool do_ref = F.g.solid_count() <= kFineSkip;
+    if (!do_ref)
+      std::printf("[part] the whole-fine reference has %zu solid voxels (> %zu): SKIPPED for this part\n",
+                  F.g.solid_count(), kFineSkip);
+    std::fflush(stdout);
+
+    // (a) coarse alone.
+    double t = now_s();
+    SolverRunState ra;
+    CgInfo ia;
+    const FeaSolution uA = solve(G, G.loads, nullptr, &ra, &ia, kPartTol);
+    const double ta = now_s() - t;
+    const std::vector<double> fieldA = topopt::fea_von_mises_field(G.g, kE, kNu, uA);
+    std::printf("[part] (a) coarse solve: %d CG its, %.2f s, converged %s\n", ia.iterations, ta, ia.converged ? "yes" : "NO");
+
+    // The hot spots, clear of the slabs by more than 4 coarse voxels along the long axis.
+    const int dims[3] = {G.g.nx, G.g.ny, G.g.nz};
+    const double oL = L == 0 ? G.g.origin.x : L == 1 ? G.g.origin.y : G.g.origin.z;
+    int cL = -1, fL = dims[L];
+    for (int i = 0; i < dims[L]; ++i) {
+      const double c = oL + (i + 0.5) * H;
+      if (c < thr_lo) cL = i;
+      if (c > thr_hi && fL == dims[L]) fL = i;
+    }
+    std::vector<std::pair<double, std::array<int, 3>>> cand;
+    for (int k = 0; k < G.g.nz; ++k)
+      for (int j = 0; j < G.g.ny; ++j)
+        for (int i = 0; i < G.g.nx; ++i) {
+          if (!G.g.solid(i, j, k)) continue;
+          const int idx[3] = {i, j, k};
+          if (idx[L] - cL <= 4 || fL - idx[L] <= 4) continue;
+          cand.push_back({fieldA[G.g.index(i, j, k)], {i, j, k}});
+        }
+    std::sort(cand.begin(), cand.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+    std::vector<std::array<int, 3>> spots;
+    for (const auto& c : cand) {
+      bool far = true;
+      for (const auto& s : spots) {
+        const double d = std::sqrt(double((c.second[0] - s[0]) * (c.second[0] - s[0]) +
+                                          (c.second[1] - s[1]) * (c.second[1] - s[1]) +
+                                          (c.second[2] - s[2]) * (c.second[2] - s[2])));
+        if (d < 10.0) far = false;
+      }
+      if (far) {
+        spots.push_back(c.second);
+        std::printf("[part] hot spot %zu: coarse voxel (%d, %d, %d), von Mises %.3f MPa\n", spots.size(), c.second[0],
+                    c.second[1], c.second[2], c.first);
+      }
+      if (spots.size() == 3) break;
+    }
+    if (spots.empty()) throw std::runtime_error("no hot spot clear of the slabs");
+    const int ns = static_cast<int>(spots.size());
+    std::vector<IBox> hb(spots.size());
+    for (int s = 0; s < ns; ++s)
+      for (int a = 0; a < 3; ++a) {
+        int b0 = std::max(0, spots[s][a] - 6), b1 = std::min(dims[a], spots[s][a] + 7);
+        if (a == L) {
+          b0 = std::max(b0, cL + 2);
+          b1 = std::min(b1, fL - 1);
+        }
+        hb[s].b0[a] = b0;
+        hb[s].b1[a] = b1;
+      }
+    std::vector<Region> regs;
+    for (const IBox& b : hb) regs.push_back(box_region(G.g, b));
+    // Three boxes, merged where they overlap or touch.
+    std::vector<IBox> merged = hb;
+    for (bool again = true; again;) {
+      again = false;
+      for (std::size_t a = 0; a < merged.size() && !again; ++a)
+        for (std::size_t b = a + 1; b < merged.size() && !again; ++b)
+          if (touch(merged[a], merged[b])) {
+            for (int q = 0; q < 3; ++q) {
+              merged[a].b0[q] = std::min(merged[a].b0[q], merged[b].b0[q]);
+              merged[a].b1[q] = std::max(merged[a].b1[q], merged[b].b1[q]);
+            }
+            merged.erase(merged.begin() + static_cast<long>(b));
+            again = true;
+          }
+    }
+    auto count_in = [](const Model& m, const IBox& b, int s) {
+      std::size_t n = 0;
+      for (int k = s * b.b0[2]; k < s * b.b1[2]; ++k)
+        for (int j = s * b.b0[1]; j < s * b.b1[1]; ++j)
+          for (int i = s * b.b0[0]; i < s * b.b1[0]; ++i)
+            if (m.g.solid(i, j, k)) ++n;
+      return n;
+    };
+    auto print_box = [&](const char* what, int s, const IBox& b) {
+      const std::size_t nc = count_in(G, b, 1), nf = count_in(F, b, 2);
+      std::printf("[part] %s %d: coarse [%d,%d) x [%d,%d) x [%d,%d); solid coarse %zu (%.1f mm3), fine %zu (%.1f mm3, "
+                  "%.2f %% of the whole fine model)\n",
+                  what, s + 1, b.b0[0], b.b1[0], b.b0[1], b.b1[1], b.b0[2], b.b1[2], nc, nc * H * H * H, nf,
+                  nf * h * h * h, 100.0 * nf / static_cast<double>(F.g.solid_count()));
+    };
+    for (int s = 0; s < ns; ++s) print_box("box at hot spot", s, hb[s]);
+    for (std::size_t s = 0; s < merged.size(); ++s) print_box("three-box run, box", static_cast<int>(s), merged[s]);
+    std::fflush(stdout);
+
+    const std::vector<char> liveG = live_nodes(G.g);
+    struct Row {
+      std::string name;
+      double umax = 0.0;
+      Stat3 st[3];
+      bool have = false;
+    };
+    std::vector<Row> rows;
+    auto inside_box = [](const IBox& b, const std::array<int, 3>& v) {
+      for (int a = 0; a < 3; ++a)
+        if (v[a] < b.b0[a] || v[a] >= b.b1[a]) return false;
+      return true;
+    };
+    // Readings: a region inside a refined box is read from that box; otherwise from the coarse field.
+    auto read_row = [&](const char* name, const FeaSolution& uG, const Multi* M, const std::vector<FeaSolution>* uF) {
+      Row r;
+      r.name = name;
+      r.umax = max_disp(uG.u);
+      r.have = true;
+      const std::vector<double> fG = topopt::fea_von_mises_field(G.g, kE, kNu, uG);
+      for (int s = 0; s < ns; ++s) {
+        int bi = -1;
+        if (M != nullptr)
+          for (std::size_t b = 0; b < M->boxes.size(); ++b)
+            if (inside_box(M->boxes[b].b, spots[s])) bi = static_cast<int>(b);
+        if (bi < 0) {
+          r.st[s] = read_region(G, fG, regs[s]);
+        } else {
+          const Model& B = M->boxes[static_cast<std::size_t>(bi)].B;
+          const std::vector<double> fB = topopt::fea_von_mises_field(B.g, kE, kNu, (*uF)[static_cast<std::size_t>(bi)]);
+          r.st[s] = read_region(B, fB, regs[s]);
+        }
+      }
+      return r;
+    };
+    rows.push_back(read_row("(a) coarse alone", uA, nullptr, nullptr));
+
+    // (d) the whole part at the fine voxel.
+    double tf = 0.0;
+    CgInfo ifn;
+    Row rd;
+    rd.name = "(d) whole fine";
+    if (do_ref) {
+      t = now_s();
+      SolverRunState rf;
+      const FeaSolution uF = solve(F, F.loads, nullptr, &rf, &ifn, kPartTol);
+      tf = now_s() - t;
+      const std::vector<double> fF = topopt::fea_von_mises_field(F.g, kE, kNu, uF);
+      rd.umax = max_disp(uF.u);
+      for (int s = 0; s < ns; ++s) rd.st[s] = read_region(F, fF, regs[s]);
+      rd.have = true;
+    }
+    std::printf("[part] (d) whole fine solve: %s%d CG its, %.2f s, converged %s\n", do_ref ? "" : "(skipped) ", ifn.iterations, tf, ifn.converged ? "yes" : "NO");
+    std::fflush(stdout);
+    const double budget1 = std::max(30.0, (230.0 - (now_s() - t_run)) / 2.0);
+    std::printf("[part] two-way loop, ONE box (hot spot 1), Aitken:\n");
+    Multi M1 = make_multi(G, F, liveG, {hb[0]});
+    std::printf("  Gamma: %zu coarse nodes, %zu fine nodes\n", M1.gamma.size(), M1.boxes[0].fine.size());
+    const MultiOut o1 = run_multi(M1, budget1);
+    const double budget3 = std::max(30.0, 230.0 - (now_s() - t_run));
+    std::printf("[part] two-way loop, THREE boxes (%zu after merging), Aitken:\n", merged.size());
+    Multi M3 = make_multi(G, F, liveG, merged);
+    std::size_t nfine = 0;
+    for (const PBox& pb : M3.boxes) nfine += pb.fine.size();
+    std::printf("  Gamma: %zu coarse nodes, %zu fine nodes\n", M3.gamma.size(), nfine);
+    const MultiOut o3 = run_multi(M3, budget3);
+    rows.push_back(read_row("(b) one-way zoom (3 boxes, it 0)", o3.uG0, &M3, &o3.uF0));
+    rows.push_back(read_row(o1.converged ? "(c1) two-way, one box" : o1.out_of_time ? "(c1) one box, OUT OF TIME" : "(c1) one box NOT CONVERGED", o1.uG, &M1, &o1.uF));
+    rows.push_back(read_row(o3.converged ? "(c3) two-way, three boxes" : o3.out_of_time ? "(c3) three boxes, OUT OF TIME" : "(c3) three NOT CONVERGED", o3.uG, &M3, &o3.uF));
+
+
+    rows.push_back(rd);
+    std::printf("\n[part] table: largest displacement (mm); per hot-spot region: per-voxel peak / 99th percentile / "
+                "carried-to-surface peak von Mises (MPa)\n");
+    std::printf("%-34s %10s", "", "max|u|");
+    for (int s = 0; s < ns; ++s) std::printf(" | %8s %8s %8s", ("pk" + std::to_string(s + 1)).c_str(),
+                                             ("p99_" + std::to_string(s + 1)).c_str(), ("car" + std::to_string(s + 1)).c_str());
+    std::printf("\n");
+    for (const Row& r : rows) {
+      if (!r.have) {
+        std::printf("%-34s skipped\n", r.name.c_str());
+        continue;
+      }
+      std::printf("%-34s %10.5f", r.name.c_str(), r.umax);
+      for (int s = 0; s < ns; ++s) std::printf(" | %8.3f %8.3f %8.3f", r.st[s].peak, r.st[s].p99, r.st[s].carry);
+      std::printf("\n");
+    }
+    if (rd.have) {
+      std::printf("[part] gaps against (d), percent:\n");
+      auto pc = [](double a, double b) { return b != 0.0 ? 100.0 * (a / b - 1.0) : 0.0; };
+      for (std::size_t q = 0; q + 1 < rows.size(); ++q) {
+        const Row& r = rows[q];
+        std::printf("%-34s %+10.2f", r.name.c_str(), pc(r.umax, rd.umax));
+        for (int s = 0; s < ns; ++s)
+          std::printf(" | %+8.2f %+8.2f %+8.2f", pc(r.st[s].peak, rd.st[s].peak), pc(r.st[s].p99, rd.st[s].p99),
+                      pc(r.st[s].carry, rd.st[s].carry));
+        std::printf("\n");
+      }
+    }
+    std::printf("[part] (c) converges to a composite model (fine in the boxes, coarse outside), so (c) need not equal (d). "
+                "Regions not refined in a row are read from that row's coarse field.\n");
+    std::printf("[part] COST: (a) %d CG its, %.2f s | one box: %d iterations, %d global solves (%ld CG its, %.2f s) + %d "
+                "box solves (%ld CG its, %.2f s) | three boxes: %d iterations, %d global (%ld its, %.2f s) + %d box (%ld its, "
+                "%.2f s) | (d) %s %d CG its, %.2f s\n",
+                ia.iterations, ta, o1.iterations, o1.global_solves, o1.cg_global, o1.t_global, o1.box_solves, o1.cg_box,
+                o1.t_box, o3.iterations, o3.global_solves, o3.cg_global, o3.t_global, o3.box_solves, o3.cg_box, o3.t_box,
+                do_ref ? "" : "(skipped)", ifn.iterations, tf);
+  } catch (const std::exception& e) {
+    std::printf("[part] FAILED: %s\n", e.what());
+    ++failures;
+  }
+  std::printf("[part] %d failure(s)\n", failures);
+  return failures == 0 ? 0 : 1;
+}
+
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+  if (argc >= 2 && std::strcmp(argv[1], "--part") == 0) {
+    if (argc < 3) {
+      std::printf("usage: --part <stl> --res <N>\n");
+      return 2;
+    }
+    int res = 48;
+    for (int a = 3; a + 1 < argc; ++a)
+      if (std::strcmp(argv[a], "--res") == 0) res = std::atoi(argv[a + 1]);
+    return run_part(argv[2], res);
+  }
   int failures = 0;
   // CASE 0: a solid bar 24 x 6 x 6, clamped at x = 0, a transverse tip load; the box in
   // its middle across the whole section.
