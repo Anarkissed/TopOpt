@@ -644,7 +644,6 @@ int main(int argc, char** argv) {
                      const LatticePosture* posture, bool strut_gate) {
     const bool pr = fea_set_krylov_recycling(false);
     const bool pg = fea_set_geneo_twolevel(false);
-    const bool pm = fea_set_matfree_mixed_precision(false);
     const bool lp = load_path_connected(grid, rho, 0.5);
     const KnockdownSpec kd = knockdown_spec_for(options);
     FixedDesignAnalysis an;
@@ -657,7 +656,6 @@ int main(int argc, char** argv) {
     } catch (const std::exception& e) {
       std::printf("   CERTIFICATION THREW: %s\n", e.what());
     }
-    fea_set_matfree_mixed_precision(pm);
     fea_set_geneo_twolevel(pg);
     fea_set_krylov_recycling(pr);
     return an;

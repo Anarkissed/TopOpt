@@ -260,7 +260,7 @@ RunInfo build_run_info(const JobDescription& job,
   // post-run finalize must assert NOTHING rather than the optimistic `true` that
   // misdiagnosed the res-128 fallback. The finalize below records the real values.
   info.galerkin_block_cache = fea_matfree_galerkin_block_cache_enabled();
-  info.mixed_precision = fea_matfree_mixed_precision_enabled();
+  info.mixed_precision = false;  // single precision deleted (TO stage 5 item 4)
   // Task algebraic-level1-coarsening — the ACTUAL process state, read rather
   // than inferred. The per-build numbers are filled in the post-run finalize.
   info.mg_algebraic_level1 = fea_mg_algebraic_level1_enabled();

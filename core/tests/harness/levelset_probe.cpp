@@ -10,7 +10,7 @@
 //   ./build/levelset_probe <part.step> <materials.json> <ref_design.bin> <out_dir>
 //        [--rung 0.68] [--iters 300] [--eta 2.0] [--gamma 0.1] [--hj-steps 6]
 //        [--alpha-coeff 2.4] [--traj-penalty 1.0] [--threads 3]
-//        [--seed simp|holes] [--fp32] [--isolate] [--reinit-every 1]
+//        [--seed simp|holes] [--isolate] [--reinit-every 1]
 //        [--snapshot-every 10] [--simp] [--rules <rules.json>]
 //
 // ── WHY THIS EXISTS ─────────────────────────────────────────────────────────
@@ -190,10 +190,8 @@
 //
 // ── S1, MIXED PRECISION ─────────────────────────────────────────────────────
 //
-// `--fp32` calls `fea_set_matfree_mixed_precision(true)`. The capability shipped
-// complete in handoff 092 and is opt-in; nothing production-side has ever called
-// the setter, which is why `run_info` honestly echoes mixed_precision:false. It
-// is armed HERE, on the sandbox path only — no production file changes.
+// Withdrawn: TO stage 5 item 4 deleted single precision (under 15 % of solve
+// wall with the stage-5 smoother), and `--fp32` with it.
 //
 // ★ WHAT IT CAN AND CANNOT REACH, STATED UP FRONT so the number is read
 // correctly. FP32 in this codebase is the V-CYCLE PRECONDITIONER: the fine
@@ -788,7 +786,6 @@ struct Args {
   int renucleate = 0;
   double renucleate_frac = 0.02;
   int renucleate_until = 1000000;
-  bool fp32 = false;
   bool isolate = false;
   int reinit_every = 1;
   int sweeps = 8;
@@ -1315,7 +1312,7 @@ int main(int argc, char** argv) {
         "[--hj-steps N]\n"
         "       [--alpha-coeff A] [--hilb-rtol T] [--traj-penalty P] "
         "[--threads N]\n"
-        "       [--seed simp|holes] [--fp32] [--isolate] [--reinit-every N]\n"
+        "       [--seed simp|holes] [--isolate] [--reinit-every N]\n"
         "       [--sweeps N] [--snapshot-every N] [--smooth N]\n"
         "       [--gridap-auto min|max]  their max_steps/alpha rule, evaluated\n"
         "       [--damp] [--damp-factor 0.75] [--damp-window 5]  their gamma "
@@ -1408,7 +1405,6 @@ int main(int argc, char** argv) {
     else if (s == "--reinit-every") nexti(a.reinit_every);
     else if (s == "--sweeps") nexti(a.sweeps);
     else if (s == "--snapshot-every") nexti(a.snapshot_every);
-    else if (s == "--fp32") a.fp32 = true;
     else if (s == "--isolate") a.isolate = true;
     else if (s == "--simp") a.simp = true;
     else if (s == "--binarize") a.binarize = true;
@@ -1834,7 +1830,6 @@ int main(int argc, char** argv) {
                                       : fea_krylov_recycling_enabled();
   const bool prev_geneo =
       a.isolate ? fea_set_geneo_twolevel(false) : fea_geneo_twolevel_enabled();
-  const bool prev_mixed = fea_set_matfree_mixed_precision(a.fp32);
 
   // ── THE THREAD COUNT, AND WHY IT IS 3 AND NOT PRODUCTION'S 6 ──────────────
   //
@@ -1940,9 +1935,6 @@ int main(int argc, char** argv) {
               fea_matfree_galerkin_block_cache_enabled() ? "ON" : "off",
               fea_matfree_thread_count(), static_cast<int>(options.simp.solver),
               options.simp.cg_tolerance, options.simp.cg_max_iterations);
-  std::printf("mixed prec  %s  (V-cycle preconditioner only; the outer CG is FP64 "
-              "by design)\n", fea_matfree_mixed_precision_enabled() ? "ARMED (FP32)"
-                                                                   : "off (FP64)");
   std::fflush(stdout);
 
   // ── THE DESIGN MASK ITSELF, AS A FIELD ────────────────────────────────────
@@ -2104,7 +2096,6 @@ int main(int argc, char** argv) {
 
     fea_set_krylov_recycling(false);
     fea_set_geneo_twolevel(false);
-    fea_set_matfree_mixed_precision(false);
     const bool cok = load_path_connected(grid, crho, cert_iso);
     const KnockdownSpec ck = knockdown_spec_for(options);
     FixedDesignAnalysis ca;
@@ -2176,7 +2167,6 @@ int main(int argc, char** argv) {
     { std::ofstream s(a.out + "/recert.txt"); s << cs; }
   }
     fea_set_matfree_threads(prev_threads);
-    fea_set_matfree_mixed_precision(prev_mixed);
     fea_set_geneo_twolevel(prev_geneo);
     fea_set_krylov_recycling(prev_recycle);
     return 0;
@@ -2245,7 +2235,6 @@ int main(int argc, char** argv) {
     } catch (const std::exception& e) {
       std::printf("FATAL: the shipped ladder threw: %s\n", e.what());
       fea_set_matfree_threads(prev_threads);
-      fea_set_matfree_mixed_precision(prev_mixed);
       return 3;
     }
     const double call_wall = now_s() - t0;
@@ -2295,7 +2284,6 @@ int main(int argc, char** argv) {
       }
     }
     fea_set_matfree_threads(prev_threads);
-    fea_set_matfree_mixed_precision(prev_mixed);
     fea_set_geneo_twolevel(prev_geneo);
     fea_set_krylov_recycling(prev_recycle);
     std::printf("\nwrote %s/{simp_iterations.csv,simp_summary.txt,design.bin}\n",
@@ -4918,7 +4906,7 @@ int main(int argc, char** argv) {
     // ── ★ THE MARGIN-AWARE STOP, AND THE WALL CAP ──────────────────────────
     //
     // The certification is `analyze_fixed_design` at the PRODUCTION penalty on
-    // the CURRENT design, with recycling / GenEO / mixed precision disarmed —
+    // the CURRENT design, with recycling / GenEO disarmed —
     // the same isolation a re-certification uses — and RE-ARMED immediately
     // afterwards. ★ Re-arming is not tidiness: leaving the posture disarmed
     // would change every state solve after the first certification, so an arm
@@ -4930,7 +4918,6 @@ int main(int argc, char** argv) {
         crho[v] = params.density_min + (1.0 - params.density_min) * occ[v];
       fea_set_krylov_recycling(false);
       fea_set_geneo_twolevel(false);
-      fea_set_matfree_mixed_precision(false);
       // ★ THE SAME CALL, WITH THE SAME ARGUMENTS, AS THE END-OF-RUN
       // CERTIFICATION BELOW — production tolerance, production solver,
       // production penalty. A stopping rule that certified on a cheaper path
@@ -4952,7 +4939,6 @@ int main(int argc, char** argv) {
       }
       fea_set_krylov_recycling(prev_recycle);
       fea_set_geneo_twolevel(prev_geneo);
-      fea_set_matfree_mixed_precision(prev_mixed);
       cert_wall_inloop += now_s() - t_c0;
       ++cert_calls_inloop;
       std::printf("   ↳ certified at iteration %d: margin %.2f  %s  "
@@ -5018,7 +5004,6 @@ int main(int argc, char** argv) {
     fea_set_matfree_threads(prev_threads);
     fea_set_krylov_recycling(prev_recycle);
     fea_set_geneo_twolevel(prev_geneo);
-    fea_set_matfree_mixed_precision(prev_mixed);
     return 3;
   }
 
@@ -5035,13 +5020,12 @@ int main(int argc, char** argv) {
   //
   // ISOLATED exactly as production isolates every re-certification
   // (`ScopedLadderSolverIsolation`, run_job.cpp:2847): recycling and GenEO off,
-  // and FP64 regardless of `--fp32`. The trajectory may run in whatever posture
+  // in FP64. The trajectory may run in whatever posture
   // is fastest; the CERTIFICATE is produced on the same solver path, in the same
   // arithmetic, as every other certificate in this repository, so the margin row
   // below is comparable to SIMP's and not to nothing.
   const bool traj_recycle = fea_set_krylov_recycling(false);
   const bool traj_geneo = fea_set_geneo_twolevel(false);
-  const bool traj_mixed = fea_set_matfree_mixed_precision(false);
 
   const double iso = 0.5;
   const bool load_path_ok = load_path_connected(grid, rho, iso);
@@ -5062,10 +5046,8 @@ int main(int argc, char** argv) {
   }
   const double cert_wall = now_s() - t_c0;
 
-  fea_set_matfree_mixed_precision(traj_mixed);
   fea_set_geneo_twolevel(traj_geneo);
   fea_set_krylov_recycling(traj_recycle);
-  fea_set_matfree_mixed_precision(prev_mixed);
   fea_set_geneo_twolevel(prev_geneo);
   fea_set_krylov_recycling(prev_recycle);
   fea_set_matfree_threads(prev_threads);
@@ -5304,7 +5286,6 @@ int main(int argc, char** argv) {
       "★ STOPPED BECAUSE    %s\n"
       "state solves         %lld, of which the V-cycle engaged on %lld\n"
       "trajectory posture   %s\n"
-      "mixed precision      %s\n"
       "-- the five differences, as they ran --\n"
       "(1) surface delta    DH_eta(phi)*|grad phi| on the compliance AND volume "
       "terms\n"
@@ -5341,8 +5322,6 @@ int main(int argc, char** argv) {
       a.isolate ? "ISOLATED (recycling/geneo OFF) — a control"
                 : "PRODUCTION (recycling/geneo as configure_production_options "
                   "armed them)",
-      a.fp32 ? "ARMED (FP32 V-cycle) on the trajectory; the certificate is FP64"
-             : "off (FP64)",
       a.traj_penalty,
       a.traj_penalty == 1.0 ? " = their LINEAR I(phi)" : " (NOT theirs)",
       params.penalty, a.hj_steps, a.gamma, gamma_now,

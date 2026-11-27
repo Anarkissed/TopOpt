@@ -2084,8 +2084,8 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   // existing caller are byte-identical.
   if (obs.mg_algebraic_level1 >= 0)
     fea_set_mg_algebraic_level1(obs.mg_algebraic_level1 != 0);
-  if (obs.matfree_mixed_precision >= 0)
-    fea_set_matfree_mixed_precision(obs.matfree_mixed_precision != 0);
+  // matfree_mixed_precision: accepted and ignored (TO stage 5 item 4 deleted
+  // single precision: under 15 % solve wall with the stage-5 smoother).
   // The latch re-arm is NOT re-asserted by configure_production_options (it has
   // no production writer at all), but it IS zeroed by the run-start latch reset
   // in minimize_plastic, so it is applied here alongside the other two rather
@@ -2099,7 +2099,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   // now so the artifact says what the run actually did. Without this an armed
   // arm reports `mg_algebraic_level1: false` and reads as a null result.
   run_info.mg_algebraic_level1 = fea_mg_algebraic_level1_enabled();
-  run_info.mixed_precision = fea_matfree_mixed_precision_enabled();
+  run_info.mixed_precision = false;  // single precision deleted (stage 5 item 4)
   if (job.loads.present && job.loads.redesign == "strengthen") {
     // CORE LIST item 50 — the versions are searched and verified inside; only the
     // final ones are streamed, through the same callback a ladder rung uses.

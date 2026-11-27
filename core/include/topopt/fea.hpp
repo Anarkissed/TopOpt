@@ -1137,7 +1137,7 @@ int fea_set_matfree_threads(int n);
 // E-01 (TO rebuild stage 5): ONE SOLVER SETTINGS VALUE, passed in.
 //
 // Every process- or thread-wide solver switch below (fea_set_matfree_threads,
-// the Galerkin block cache, mixed precision, the cubic lattice path, GenEO, the
+// the Galerkin block cache, the cubic lattice path, GenEO, the
 // Krylov recycling dials, the multigrid safe retry, re-arm period, parity pad and
 // algebraic level 1) is also a field here. The entry points that take a
 // SolverSettings run that ONE solve with exactly these values and leave every
@@ -1150,7 +1150,6 @@ int fea_set_matfree_threads(int n);
 struct SolverSettings {
   int matfree_threads = 0;                     // 0 = all hardware threads
   bool galerkin_block_cache = false;
-  bool mixed_precision = false;
   bool cubic_lattice = false;
   bool geneo_twolevel = false;
   bool krylov_recycling = false;
@@ -1230,40 +1229,6 @@ class SolverRunState {
 // because no region is ever deactivated.
 bool fea_set_matfree_galerkin_block_cache(bool enable);
 
-// Enable the MIXED-PRECISION V-cycle in the matrix-free multigrid (handoff 092).
-// OPT-IN, DEFAULT OFF; returns the previous setting. Thread-global, safe to change
-// between solves; it never affects correctness, only iteration count.
-//
-// WHY (Kronbichler, Ljungkvist et al. 2019, "Fast matrix-free multigrid": a
-// single-precision geometric-multigrid V-cycle preconditioning a double-precision
-// Krylov solver, reported 47%-83% faster with comparable discretization error).
-// TopOpt's matrix-free matvec is BANDWIDTH-bound (the 24-DOF gather/scatter over
-// the ~2.29M-DOF field dominates; the 24x24 reference Ke stays in L1), so halving
-// the bytes moved by the V-cycle's fine apply, Jacobi smoother, restriction and
-// prolongation is close to halving their time. Of the four fine applies per CG
-// iteration, three are inside the V-cycle (both Jacobi sweeps + the residual) and
-// so become FP32; only the one CG operator apply stays FP64.
-//
-// WHY IT IS SAFE. The V-cycle is only the PRECONDITIONER. The outer CG — residual,
-// dot products, alpha/beta, x/r/p AND the convergence test ||b - A x||/||b|| <= tol
-// — is FP64 throughout, and the CG operator apply A*p is FP64. A sloppier
-// preconditioner can only cost ITERATIONS, never accuracy: "larger round-off
-// errors in the multigrid cycle can be tolerated since multigrid is only a
-// preconditioner applied to the residual of the outer Krylov solver." The coarse
-// direct solve (SimplicialLDLT, <= a few thousand DOFs) stays FP64 for robustness;
-// its time/memory saving would be negligible. The format is converted on entering
-// and exiting the V-cycle.
-//
-// NOT BIT-IDENTICAL, BY DESIGN. FP32 is genuinely different arithmetic, so the
-// preconditioner really differs and the CG iteration count moves — expected, and
-// unlike every other matrix-free lever this one is NOT held to bit-parity. The
-// guard is instead: the FP32 path converges to the SAME field as the FP64 path
-// DOF-for-DOF within max|du|/max|u| <= 1e-6 (solid AND the rho_min^p=1e-9 soft-void
-// graded grid), in a bounded number of extra iterations, and falls back to the
-// exact path if it ever fails to converge in budget. The FP64 matrix-free path and
-// the assembled path are untouched and stay byte-identical (078's parity intact).
-bool fea_set_matfree_mixed_precision(bool enable);
-
 // Handoff 114 — READ-ONLY accessors for the matrix-free thread-global state, so a
 // run's VERSION RECORD (topopt-cli run_info.json) can echo the ACTUAL solver
 // configuration it ran under instead of inferring it. Pure reads: they never
@@ -1273,7 +1238,6 @@ bool fea_set_matfree_mixed_precision(bool enable);
 // actually use), matching mf_thread_count()'s resolution.
 int fea_matfree_thread_count();
 bool fea_matfree_galerkin_block_cache_enabled();
-bool fea_matfree_mixed_precision_enabled();
 
 // ---------------------------------------------------------------------------
 // EXTERNAL ADDITIVE PRECONDITIONER — DEFAULT-OFF TRIPWIRE (matrix-free GenEO

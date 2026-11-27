@@ -1102,20 +1102,6 @@ if(Eigen3_FOUND)
   target_link_libraries(test_matfree_threads PRIVATE topopt)
   add_test(NAME fea_matfree_threads COMMAND test_matfree_threads)
 
-  # MIXED-PRECISION V-cycle guard (handoff 092). The multigrid V-cycle
-  # PRECONDITIONER runs in FP32 while the outer CG stays FP64; this proves the
-  # opt-in, default-OFF FP32 path converges to the SAME field as the FP64 path
-  # DOF-for-DOF within 1e-6 (solid AND rho_min^p=1e-9 soft-void graded), within a
-  # bounded iteration count, is deterministic across thread counts 1/2/4/8 and
-  # run-to-run, stays SPD (CG converges not stalls), keeps the exact fallback, and
-  # leaves the FP64 path's 078 parity untouched when OFF. Drives
-  # fea_solve_mgcg_matfree with fea_set_matfree_mixed_precision, so it is gated on
-  # Eigen like the other matrix-free tests. CI configures with
-  # -DTOPOPT_REQUIRE_DEPS=ON.
-  add_executable(test_mixed_precision tests/unit/test_mixed_precision.cpp)
-  target_link_libraries(test_mixed_precision PRIVATE topopt)
-  add_test(NAME fea_mixed_precision COMMAND test_mixed_precision)
-
   # Krylov subspace recycling / deflation (handoff 133): exactness against the
   # recycling-off field on BOTH matrix-free regimes, a real net-of-overhead
   # iteration cut on a void-heavy sequence, determinism, opt-in parity, the

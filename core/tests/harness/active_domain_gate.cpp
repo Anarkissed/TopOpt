@@ -339,7 +339,7 @@ RunRecord run_ladder(const char* label, const Fixture& f, int band,
                                                       : "build-rejected");
     info.mg_mode_observed = true;
     info.galerkin_block_cache = fea_matfree_galerkin_block_cache_enabled();
-    info.mixed_precision = fea_matfree_mixed_precision_enabled();
+    info.mixed_precision = false;  // single precision deleted (TO stage 5 item 4)
     info.matfree_threads = fea_matfree_thread_count();
     info.krylov_recycling = fea_krylov_recycling_enabled();
     info.krylov_recycle_dim = fea_krylov_recycle_dim();

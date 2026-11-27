@@ -19,7 +19,6 @@
 //   geneo_set_probe_config             the harness-only GenEO recipe surface
 //                                      whose DEFAULTS ARE the shipped tripwire
 //                                      constants (the §1b/§1c levers)
-//   fea_set_matfree_mixed_precision    public, production-blocked (the §4d lever)
 //
 // ★ THE FIRST AND LAST OF THOSE RIDE `RunObservability`, NOT A DIRECT SETTER.
 // `configure_production_options` re-asserts both at run start, so setting them
@@ -68,9 +67,6 @@
 //   trig=N      kGeneoTriggerIters -> N (the §1c question).
 //   thr=N       the engagement gate's threshold, forced to N plain iterations.
 //               0 engages the deflation the moment a basis is held.
-//   mixed       fea_set_matfree_mixed_precision(true), via RunObservability.
-//               §4d says do not run this before §2 resolves; the arm exists so
-//               that ordering can be honoured explicitly rather than by omission.
 //
 // Output: whatever run_job writes to <out_dir> (run_info.json + iterations.csv
 // are the load-bearing ones) plus a one-line ARM_SUMMARY on stdout carrying the
@@ -103,7 +99,6 @@ struct Arm {
   std::string name = "base";
   int rearm_period = 0;
   bool algebraic_level1 = false;
-  bool mixed_precision = false;
   int geneo_core = 0;        // 0 = shipped kGeneoCoreCells
   double geneo_cut = -1.0;   // < 0 = shipped kGeneoLambdaCut
   int geneo_trigger = -1;    // < 0 = shipped kGeneoTriggerIters
@@ -114,7 +109,6 @@ bool parse_arm(const std::string& spec, Arm& a) {
   a.name = spec;
   if (spec == "base") return true;
   if (spec == "alg1") { a.algebraic_level1 = true; return true; }
-  if (spec == "mixed") { a.mixed_precision = true; return true; }
   const std::size_t eq = spec.find('=');
   if (eq == std::string::npos) return false;
   const std::string k = spec.substr(0, eq);
@@ -191,7 +185,6 @@ int main(int argc, char** argv) {
   // production writer at all, so nothing re-asserts it.
   obs.mg_rearm_period = arm.rearm_period;
   if (arm.algebraic_level1) obs.mg_algebraic_level1 = 1;
-  if (arm.mixed_precision) obs.matfree_mixed_precision = 1;
   if (arm.geneo_core > 0 || arm.geneo_cut > 0.0 || arm.geneo_trigger >= 0 ||
       arm.geneo_threshold >= 0) {
     topopt::fea_detail::GeneoProbeConfig cfg;  // defaults ARE the tripwire

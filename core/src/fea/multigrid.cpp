@@ -1303,10 +1303,6 @@ using fea_detail::MfCubElem;
 using fea_detail::MfElem;
 using fea_detail::MfLatticeArrays;
 
-// Single-precision Eigen types for the mixed-precision V-cycle (handoff 092).
-using SpMatF = Eigen::SparseMatrix<float>;
-using VecF = Eigen::Matrix<float, Eigen::Dynamic, 1>;
-
 // A matrix-free multigrid hierarchy: level 0 is the matrix-free fine operator
 // `m`; levels 1.. are the assembled `coarse` Levels (coarse[0] == level 1).
 struct MfHierarchy {
@@ -1314,12 +1310,6 @@ struct MfHierarchy {
   Vec fine_dinv;                      // 1/diag(A0) at the fine level
   SpMat P0;                           // prolongation level1 -> fine (ng x nc1)
   std::vector<Level> coarse;          // assembled levels 1..L (coarse[0]==lvl 1)
-  // FP32 copies for the mixed-precision V-cycle (handoff 092): built only when
-  // mixed precision is enabled at build time, empty otherwise. The coarse hierarchy
-  // (coarse[]) stays FP64 — only the FINE apply / smoother / restrict / prolong go
-  // single precision, so these mirror just the fine-level operators.
-  SpMatF P0f;                         // FP32 prolongation for restrict/prolong
-  VecF fine_dinv_f;                   // FP32 fine Jacobi inverse diagonal
   // Point-block smoother data for the FINE (matrix-free) level: EMPTY on the
   // shipped scalar path. Coarse levels carry their own on Level::pbd.
   BlockDiag fine_pbd;
@@ -1346,14 +1336,9 @@ struct MfScratch {
   Vec Ap;    // MG-CG: A0 * p
   Vec zc;    // MG-CG: preconditioned residual (z / znew are ping-ponged here)
   // Coarse (nc) work vectors.
-  Vec bc;    // restricted residual P0^T r (also the FP64 coarse RHS in mixed mode)
+  Vec bc;    // restricted residual P0^T r
   Vec ec;    // coarse-grid correction (FP64, from the exact coarse solve)
 
-  // Mixed-precision (FP32) V-cycle scratch (handoff 092), sized only when the
-  // mixed path is used so the FP64 path allocates none of it. `bc`/`ec` above are
-  // reused as the FP64 hand-off buffers for the (still FP64) coarse direct solve.
-  VecF bf, xf, Axf, vrf, prolf;  // fine-level (ng) FP32 work
-  VecF bcf, ecf;                 // coarse-level (nc) FP32 work
   // Stage 5 Chebyshev fine-level work (residual, direction); sized on first
   // use, so the shipped path allocates none of it. `Ax` above is the A*d image.
   Vec chr, chd;
@@ -1361,10 +1346,6 @@ struct MfScratch {
   void resize(int ng, int nc) {
     Ax.resize(ng); vr.resize(ng); prol.resize(ng); Ap.resize(ng); zc.resize(ng);
     bc.resize(nc); ec.resize(nc);
-  }
-  void resize_f(int ng, int nc) {
-    bf.resize(ng); xf.resize(ng); Axf.resize(ng); vrf.resize(ng); prolf.resize(ng);
-    bcf.resize(nc); ecf.resize(nc);
   }
 };
 
@@ -1434,75 +1415,22 @@ void mf_v_cycle(const MfHierarchy& H, MfScratch& S, const Vec& b, Vec& x,
   for (int s = 0; s < o.post; ++s) mf_smooth(H, S, b, x, o, /*x_zero=*/false);
 }
 
-// MIXED-PRECISION V-cycle (handoff 092). Same symmetric structure as mf_v_cycle
-// (equal pre/post damped-Jacobi, R = P0^T, exact coarse solve) but the FINE level
-// — apply, Jacobi smoother, restriction and prolongation — runs in FP32; only the
-// coarse direct solve stays FP64. "The format is converted when entering and
-// exiting the V-cycle" (Kronbichler et al. 2019): the double residual `b` is cast
-// to float on entry and the float correction is cast back to double on exit, so to
-// the OUTER FP64 CG this is just a (slightly sloppier) SPD preconditioner. Larger
-// FP32 round-off costs CG iterations, never accuracy — the outer loop's true FP64
-// residual test is the correctness guarantee. Determinism is preserved: the FP32
-// apply keeps the 8-colour fixed-order accumulation (bit-identical across threads),
-// and the SpMV/coarse solve are single-threaded, so the whole cycle is
-// reproducible run-to-run.
-//
-// The component tuning reaches this path too (same sweep counts, same gamma,
-// same weight) so the two V-cycles cannot drift apart, but its FINE smoother
-// stays SCALAR: no FP32 point-block data is built, and mixed precision is
-// production-blocked anyway (handoff 132 D) and unused by the component sweep.
-void mf_v_cycle_mixed(const MfHierarchy& H, MfScratch& S, const Vec& b, Vec& x,
-                      const MgOpts& o) {
-  const int ng = H.m->ng;
-  // The fine weight: the shipped fixed omega, or stage 5's per-level weight
-  // (level_weight returns o.omega unchanged on the shipped path). The FP32
-  // cycle has no Chebyshev: the caller never selects it when o.cheb is set.
-  const float omega = static_cast<float>(level_weight(o, H.fine_lambda));
-  S.bf = b.cast<float>();                       // convert on entry
-  S.xf.setZero(ng);
-  for (int s = 0; s < o.pre; ++s) {
-    H.m->apply_kgg_raw_f32(S.xf.data(), S.Axf.data());
-    S.xf += omega * (H.fine_dinv_f.array() * (S.bf - S.Axf).array()).matrix();
-  }
-  for (int g = 0; g < o.gamma; ++g) {
-    H.m->apply_kgg_raw_f32(S.xf.data(), S.Axf.data());
-    S.vrf = S.bf - S.Axf;                          // fine residual (FP32)
-    S.bcf.noalias() = H.P0f.transpose() * S.vrf;   // restrict (R = P0^T), FP32 SpMV
-    S.bc = S.bcf.cast<double>();                   // hand off to the FP64 coarse solve
-    S.ec = v_cycle(H.coarse, 0, S.bc, o, 1);       // coarse-grid correction (FP64)
-    S.ecf = S.ec.cast<float>();
-    S.prolf.noalias() = H.P0f * S.ecf;             // prolongate (FP32 SpMV) + correct
-    S.xf += S.prolf;
-  }
-  for (int s = 0; s < o.post; ++s) {
-    H.m->apply_kgg_raw_f32(S.xf.data(), S.Axf.data());
-    S.xf += omega * (H.fine_dinv_f.array() * (S.bf - S.Axf).array()).matrix();
-  }
-  x = S.xf.cast<double>();                        // convert on exit
-}
-
 // MG-preconditioned CG with the matrix-free finest level. Identical algorithm
 // and stopping criterion to mgpcg (||b - A x|| / ||b|| <= tol), only the fine
 // matvec and preconditioner are matrix-free. Returns false (with diagnostics) on
 // non-convergence within max_it or a non-finite iterate -> caller falls back.
 // All work vectors come from `S` (sized once), so the loop heap-allocates nothing.
 bool mf_mgpcg(const MfHierarchy& H, MfScratch& S, const Vec& b, double tol,
-              int max_it, Vec& x, int& iters, double& resid, bool mixed,
+              int max_it, Vec& x, int& iters, double& resid,
               fea_detail::RecycleReport* rec = nullptr,
               const Vec* x0 = nullptr, const MgOpts* opts_in = nullptr,
               int progress_window = 0, double progress_gain = 0.0,
               int first_window = 0) {
-  // The ONLY thing `mixed` changes is which V-cycle preconditions the residual:
-  // FP32 (mf_v_cycle_mixed) vs FP64 (mf_v_cycle). Every quantity that defines
-  // convergence — r, x, p, rz, alpha, beta, the residual norm and the stopping
-  // test below — is FP64 regardless. A sloppier preconditioner costs iterations,
-  // not accuracy; this outer FP64 loop is the correctness guarantee.
   // `opts_in` is the safe retry's l1 recipe; null (every shipped call) reads the
   // tuning exactly as before.
   const MgOpts opts = opts_in != nullptr ? *opts_in : mg_opts_now();
   auto precondition = [&](const Vec& rr, Vec& zz) {
-    if (mixed) mf_v_cycle_mixed(H, S, rr, zz, opts);
-    else mf_v_cycle(H, S, rr, zz, opts);
+    mf_v_cycle(H, S, rr, zz, opts);
   };
   const int n = H.m->ng;
   const double bnorm = b.norm();
@@ -2424,15 +2352,6 @@ void mf_build_point_block_fine(const MatfreeReduced& m,
     }
   }
 
-  // FP32 copies for the mixed-precision V-cycle, built only when enabled (handoff
-  // 092). This composes cleanly with the Galerkin block cache (090): that cache
-  // lives entirely in the FP64 coarse-operator build above (A1..LDLT), which the
-  // mixed path leaves untouched — it only rounds the already-built fine P0 and
-  // fine Jacobi diagonal to float. Cache and FP32 are orthogonal; both may be on.
-  if (fea_detail::mf_mixed_precision_enabled()) {
-    out.P0f = out.P0.cast<float>();
-    out.fine_dinv_f = out.fine_dinv.cast<float>();
-  }
 }
 
 // ===========================================================================
@@ -3030,7 +2949,7 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
   // surviving system unchanged and exactly. Null = the pre-feature path.
   // `lattice` (multiscale production wiring) selects the composite
   // isotropic-or-cubic operator; every stage below is operator-agnostic and
-  // needs no per-stage lattice handling beyond the mixed-precision guard.
+  // needs no per-stage lattice handling.
   // Per-solve phase timing (task 2026-08-02-iteration-phase-timing): the reduced
   // build, the HIERARCHY build (the expensive part the 127 latch exists to skip),
   // the V-cycle loop and the Jacobi fallback are timed separately, because a
@@ -3262,21 +3181,7 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       double res = 0.0;
       MfScratch scratch;
       scratch.resize(m.ng, static_cast<int>(H.P0.cols()));
-      // Mixed-precision V-cycle (handoff 092) when enabled: try the FP32-V-cycle
-      // MG-CG first; if the sloppier preconditioner fails to reach tol within the
-      // budget, RETRY the exact FP64 MG-CG on the same hierarchy before the Jacobi
-      // fallback below — never ship an unconverged result (fallback discipline of
-      // 078/079). When mixed precision is OFF this is exactly the prior FP64 call.
-      // The FP32 V-cycle carries no cubic pass (apply_kgg_raw_f32's tripwire),
-      // so a cubic system always preconditions in FP64 — mixed precision is
-      // production-blocked anyway (handoff 132 D).
-      const bool mixed = fea_detail::mf_mixed_precision_enabled() &&
-                         H.fine_dinv_f.size() == m.ng && !m.has_cubic &&
-                         !stage_opts.cheb;  // the FP32 cycle has no Chebyshev
-      if (mixed) scratch.resize_f(m.ng, static_cast<int>(H.P0.cols()));
       // The warm guess, as an Eigen vector the MG-CG loop can start from.
-      // Held here (not inside mf_mgpcg) so the FP64 RETRY after a failed mixed
-      // attempt starts from the SAME guess rather than from the failed iterate.
       Vec x0;
       if (warm) x0 = Eigen::Map<const Vec>(xkept.data(),
                                            static_cast<Eigen::Index>(m.ng));
@@ -3284,13 +3189,9 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       const int win = stage5 ? kStage5Window : 0;
       const double gain = stage5 ? kStage5Gain : 0.0;
       const int first = stage5 ? kStage5FirstWindow : 0;
-      bool ok = mf_mgpcg(H, scratch, rgv, tolerance, mg_cap, xg, it, res, mixed,
+      bool ok = mf_mgpcg(H, scratch, rgv, tolerance, mg_cap, xg, it, res,
                          &rec, x0p, nullptr, win, gain, first);
-      if (!ok && mixed)
-        ok = mf_mgpcg(H, scratch, rgv, tolerance, mg_cap, xg, it, res,
-                      /*mixed=*/false, &rec, x0p, nullptr, win, gain, first);
-      // Cycles this solve burned on MG-CG (the last attempt's count when a mixed
-      // attempt was retried in FP64): honest whether it converged or stagnated.
+      // Cycles this solve burned on MG-CG: honest whether it converged or stagnated.
       diag.mg_cycles_attempted = it;
       shipped_it = it;
       shipped_res = res;
@@ -3432,7 +3333,7 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
         const int safe_max =
             g_mg_safe_test_max_cycles > 0 ? g_mg_safe_test_max_cycles : kSafeMaxCycles;
         ok = mf_mgpcg(HS, scratch, rgv, tolerance, std::min(cap, safe_max),
-                      xg, it, res, /*mixed=*/false, &rec,
+                      xg, it, res, &rec,
                       warm && !cold_start ? &x0 : nullptr, &o, kSafeWindow,
                       kSafeMinGain, (cold_start || !warm) ? kSafeColdFirstWindow : 0);
         diag.mg_cycles_attempted = shipped_it + it;

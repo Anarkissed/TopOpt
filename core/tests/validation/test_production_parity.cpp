@@ -169,8 +169,6 @@ int main() {
     // configure_production_options, so what it sees is exactly this state.
     CHECK(!topopt::fea_matfree_galerkin_block_cache_enabled(),
           "library default leaves the Galerkin block cache OFF");
-    CHECK(!topopt::fea_matfree_mixed_precision_enabled(),
-          "library default leaves the mixed-precision V-cycle OFF (reference FP64)");
     // Handoff 133 — Krylov recycling is a PRODUCTION setting, not a library
     // default: the reference world never calls configure_production_options, so it
     // sees recycling OFF and every solve byte-identical to the pre-133 tree.
@@ -299,20 +297,11 @@ int main() {
           "(the driver flips it per-rung when the gate fires)");
     // The three process globals, read AFTER the call — the "production arms them"
     // half. Read through the 114 accessors (pure reads, they never perturb state)
-    // because these ARE the values run_info.json echoes: galerkin_block_cache,
-    // mixed_precision and matfree_threads all come from these same functions in
+    // because these ARE the values run_info.json echoes: galerkin_block_cache
+    // and matfree_threads come from these same functions in
     // run_job.cpp's build_run_info, so asserting them here is asserting the echo.
     CHECK(topopt::fea_matfree_galerkin_block_cache_enabled(),
           "production config enabled the Galerkin block cache global");
-    // Handoff 132 (D) — mixed precision stays OFF in production, and that is a
-    // MEASURED DECISION, not an oversight. The flip was implemented and gated on a
-    // full l-bracket ladder; it regressed CG iterations 40715 -> 48717 (1.197x) in
-    // both the grayscale and fired-projection phases, so it was withdrawn. This
-    // assertion is the tripwire: anyone who arms it must re-run that gate first
-    // (core/tests/harness/mixed_precision_probe.cpp) and land new numbers.
-    CHECK(!topopt::fea_matfree_mixed_precision_enabled(),
-          "production config leaves the mixed-precision V-cycle OFF "
-          "(132 (D): gated, measured a 1.197x CG-iteration regression, blocked)");
     // Handoff 132 (C) — the performance-core pin. Asserted against the named
     // production count rather than a literal, so this stays true on Apple silicon
     // (P-core count), on Intel Macs and on Linux CI (hardware_concurrency).

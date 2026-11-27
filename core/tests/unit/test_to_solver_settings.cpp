@@ -39,7 +39,7 @@ namespace {
 
 bool same_settings(const SolverSettings& a, const SolverSettings& b) {
   return a.matfree_threads == b.matfree_threads && a.galerkin_block_cache == b.galerkin_block_cache &&
-         a.mixed_precision == b.mixed_precision && a.cubic_lattice == b.cubic_lattice &&
+         a.cubic_lattice == b.cubic_lattice &&
          a.geneo_twolevel == b.geneo_twolevel && a.krylov_recycling == b.krylov_recycling &&
          a.krylov_recycle_dim == b.krylov_recycle_dim && a.krylov_recycle_cycle == b.krylov_recycle_cycle &&
          a.krylov_recycle_wrap_multigrid == b.krylov_recycle_wrap_multigrid &&
@@ -51,7 +51,6 @@ bool same_settings(const SolverSettings& a, const SolverSettings& b) {
 void set_globals(const SolverSettings& s) {
   fea_set_matfree_threads(s.matfree_threads);
   fea_set_matfree_galerkin_block_cache(s.galerkin_block_cache);
-  fea_set_matfree_mixed_precision(s.mixed_precision);
   fea_set_matfree_cubic_lattice(s.cubic_lattice);
   fea_set_geneo_twolevel(s.geneo_twolevel);
   fea_set_krylov_recycling(s.krylov_recycling);
