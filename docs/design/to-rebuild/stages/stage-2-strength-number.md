@@ -677,3 +677,17 @@ Two parts to the miss: reading at the voxel's centre instead of at the surface (
 
 Run 620 s against 530 s; peak 1002 MB against 987 MB. So the drop is not special to Top Motor Mount's size: on the stand it is 6 %, on Top Motor Mount 35 to 41 %. Neither is "within 1 %". Top Motor Mount has about 21 000 voxels cut by the file's surface at res 96, 7 500 of them with their centre outside the file (voxels the all-or-nothing judge does not solve at all). Its re-check with the stress field kept (heaviest version, switch off and on) is running outside the lock to show WHERE the peak sits.
 
+### WHERE Top Motor Mount's peak sits with one judge on (2026-11-27 05:45; heaviest version re-checked with the stress field kept, switch off and on; picture `stage-2-pics/one-judge-top-motor-mount-peak.png`)
+
+CORRECTION to the "WHY" above: the peak is NOT on a bolt hole. It is ONE voxel at the INSIDE CORNER where each motor flange meets the cross bar (both sides, mirror images), a sharp corner where the true stress has no finite value and any reading rises as the picture sharpens.
+
+| | re-check off | one judge on |
+|---|---|---|
+| peak stress | 8.15 MPa (at the part's outer end) | 12.55 MPa (at the inside corner; off reads 7.28 there) |
+| peak ratio | | 1.54 (the margin's drop, 1.648 -> 1.07) |
+| over every voxel both solve: on / off | | median 1.24; 90th percentile 1.84; 99th 3.30 |
+
+Two things, then, not one. (1) The WHOLE part reads about 24 % higher, not only its peak: of its 38 500 solved voxels about 21 000 are cut by the file's surface (the part is a few voxels thick at res 96), and E x fill^3 makes that cut skin almost stiffness-free (a half-full voxel carries one eighth), so the inside carries the load. All-or-nothing gives the same total material (105.35 g both ways) at full stiffness. (2) On top of that the peak moves to a sharp inside corner, on a cut voxel, where the one-voxel reading is at its least steady. The 96 voxels that only one judge solves (centre outside the file) peak at 3.6 MPa: they are not the cause.
+
+So the finding stands and is stronger: on a thin part the E x fill^3 law, applied to the file's fills, under-reads the part's stiffness everywhere. The stand (thick, 6 % drop) and this part (thin, 35 to 41 %) are the same effect at two thicknesses.
+
