@@ -29,7 +29,18 @@ Also ruled the same hour (stage 5): the connection-rule test on the hook PASSES;
 
 **THE MAINTAINER, 2026-11-27, on the printed check for small PLA parts:** "I will absolutely add the small PLA parts when the rig is ready. But it won't be for a while." So the averaged reading's 33 to 41 % higher margins on a 15 mm part rest on the published length alone for now. FOR THE REVIEWER to rule when stage 2's size form comes up for its flip: ship it for small parts on the published value, or hold the size form to parts above a stated size until his print exists. Not decided by me.
 
+**THE REVIEWER'S RULING of 2026-11-27 06:34Z (maintainer-approved):**
+1. One judge: k = 8 APPROVED (now the default of `TOPOPT_RECHECK=fill`). Evidence (a): the size form at 1 % (met); the one-voxel form stated as its own scatter (within 2.5 % on all 12 rows at k = 8; up to 11 % on an unlucky sliver at other k). The rows at k = 8 are PINNED as a test (`to_recheck_fill`, ctest -C Long, gated at 2.5 % and 1 %). AFTER one judge flips, not before: measure a fill-weighted one-voxel reading on all three shapes; if steadier it goes into BOTH judges together, never one alone.
+2. Small PLA parts: SHIP on the published length with his half rule (his choice of safety; his prints replace it when the rig exists). ONE CONDITION FIRST: no reading over a size where the ball reaches across the member (a ball wider than a thin member in bending averages across its neutral line and reads low; Taylor 2007, The Theory of Critical Distances). Where the member under the reading is thinner than TWICE the size, read one voxel (today's form). Test: a beam in bending at thicknesses of 0.5, 1, 2 and 4 times the size: at 0.5 and 1 the reading falls back; at 2 and 4 it is judged against its own true value. Then restate the 15 mm part's 33 to 41 %. OWED, next.
+3. scenario_weights: no flip on a base with an unexplained change of results. SETTLED since (TOSolver's fix on my tip, checked).
+4. The memory guard amended for everyone (the swapouts clause only when free is also under 30 %).
+
+**KNOWN LIMIT, STATED (the reviewer's ruling 2026-11-27 07:38Z: "the most important line in your report"):** TODAY'S SHIPPED one-voxel reading, on a member only 2 to 4 voxels thick in BENDING, reads 0.33 to 0.68 of the true surface stress (measured on a beam in pure bending: 0.33 with 2 voxels through the member, 0.68 with 4, 0.85 with 8, 0.93 with 16). It is the grid: a few linear elements cannot carry a bending gradient. It is in the shipped check with or without this stage, so a thin bending member can pass today with a margin up to three times too good. Stage 2 does not fix it (its size form falls back to that same reading on thin members, as ruled). It is carried to STAGE 4: the smallest member is stated in voxels THROUGH as well as in mm, the number set by measurement on the beam at 2, 3, 4, 6 and 8 voxels through, and the automatic resolution must honour it; a candidate to measure there is stress recovered at the surface from its neighbours (superconvergent patch recovery, Zienkiewicz and Zhu 1992, DOI 10.1002/nme.1620330702). Ledger: A-06.
+
+**THE REVIEWER'S RULING of 2026-11-27 07:38Z:** (a) YES to the surface-node ball and the corner-aware width, on the beam and the three shapes, then the switch point again, then the 15 mm part restated. (b) the limit above, in the stage file and the ledger now, and in stage 4. (c) scenario_weights check (c): give it a margin the physics supports or state what it guards; low priority.
+
 **Owed, in order:**
+- The surface-node ball and the corner-aware width in the engine (behind the switch), re-measured on the beam, the three shapes and the switch point; then the 15 mm part again.
 - ONE JUDGE: k by measurement (or the finding that it has no answer for the one-voxel form), evidence (a) to (e).
 - The step-back (the optimiser's loop is in `plsm.cpp`, TOSurface's file: to agree who edits it).
 - Conditions (b) to (e) again on his full-resolution parts with the size form (`b5_stage2.sh`, lock).
@@ -533,3 +544,46 @@ The ellipse (22:35), the same way:
 | 6 | 2 / 3 | -2.3 / -7.8 | -6.6 / -9.6 | -0.4 / -0.3 | 0.0 / 0.0 |
 
 SIZE FORM, all 16 rows on two shapes: at k = 8 within 0.5 % of the certificate's number everywhere (worst -0.5), and 0.5 % or less from k = 8 to 16. k = 4 is NOT enough (one row at -9.6 %). So for the size form k = 8 meets both ruled tests; for the one-voxel form k = 8 is the best measured (within 2.5 %) and nothing finer is better.
+
+### B5, the bracket at FULL resolution with the switch on (2026-11-27 01:18 to 01:47, under the lock; res 96, check voxel 1.04 mm, drawn faces, automatic pad)
+
+`TOPOPT_STRENGTH=size`, PLA: "[strength] one-voxel reading, as today: reading over 1.20 mm needs a check voxel of 0.69 mm or finer, and this job's is 1.04 mm." So the strength number is today's, as ruled, and what the switch changes on this job is the grams:
+
+| version | shown margin | printed grams (solid grams) | saved against the part as drawn, printed (144.4 g) |
+|---|---|---|---|
+| 0.68 | 4.33 | 115.6 (161.3) | 20 % |
+| 0.52 | 4.30 | 97.0 (127.7) | 33 % |
+| 0.38 | 3.90 | 80.4 (98.3) | 44 % |
+
+The part as drawn prints at 144.4 g of 227.5 g solid (this bracket is thick, so a large share is infill). The same three designs by solid volume would read 29 / 44 / 57 % saved: the printed figures are the ones he would weigh. 1724 s. The switch-off run of this job was stopped by my guard under the old swapouts clause and is owed again; the forced 3.6 mm run and the stand at res 128 are still running.
+
+### THE THIN-MEMBER RULE on a beam in bending (2026-11-27 02:18, test `to_strength_thin_member`; behind `TOPOPT_STRENGTH=size`)
+
+A straight beam in pure bending (exact stress: zero at the middle, 1 at the surface), the reading size 2.0 mm = 4 voxels, thickness 0.5 / 1 / 2 / 4 times the size.
+
+| thickness | voxels through | what the job reads | reading (surface stress = 1) | the size reading alone | its own true value |
+|---|---|---|---|---|---|
+| 0.5 x the size | 2 | ONE VOXEL (fell back) | 0.33 | 0.33 | 0.97 (-66 %) |
+| 1 x | 4 | ONE VOXEL (fell back) | 0.68 | 0.47 | 0.64 (-26 %) |
+| 2 x | 8 | over the size, 360 edge voxels at one voxel | 0.85 | 0.73 | 0.82 (-11 %) |
+| 4 x | 16 | over the size, 392 edge voxels at one voxel | 0.93 | 0.87 | 0.91 (-5 %) |
+
+What works: the rule falls back at 0.5 and 1 times the size and reads over the size at 2 and 4, as ruled. (First run: it never fell back, MY fault: the thickness was measured with the outside of the part's box as solid, the same slip as in the too-small check; fixed.)
+
+FOUR THINGS IT SHOWS THAT ARE NOT COMFORTABLE, for the reviewer:
+1. The size reading on a FLAT, GRID-ALIGNED face in bending is low even where the rule allows it: 11 % under its own true value at 2 times the size, 5 % at 4 times. Cause (reasoned, not yet tested): the true value has the ball centred ON the surface; on a face that lies on voxel boundaries there are no cut voxels for the ball to sit on, so it sits half a voxel inside (an eighth of the size here), where the bending stress is already lower. The curved textbook shapes hid this. Proposed fix to measure: let the ball also be centred on the part's surface NODES, not only on voxel centres.
+2. The job's number at 2 and 4 times is HIGHER than the size reading (0.85 against 0.73) because the beam's EDGE voxels count as thin (the "largest ball that holds the voxel" does not reach into a corner) and so are read at one voxel, where the surface voxel reads 0.85. So on any part with edges the job's reading is partly today's form. The corner-aware width measure that already exists for the lattice's cells-per-member rule is the candidate; not changed yet.
+3. TODAY'S one-voxel reading on a thin bending member is itself badly low: 0.33 of the surface stress with 2 voxels through the member, 0.68 with 4. That is the grid (a few linear elements cannot carry a bending gradient), in today's shipped check, with or without this stage. It is the strongest argument yet for the wall rule of stage 4 being stated in voxels THROUGH a member, not only in mm.
+4. So "fall back to today's form" on thin members is the ruled choice and is in, but on a member 2 to 4 voxels thick neither form is within 30 % in bending.
+
+FINDING 1 TESTED (02:30, a measuring arm inside the test, not in the engine): the same ball average with the ball centred ON the top face's nodes, not on voxel centres, against the reading's own true value: 2 x the size -4.9 % (voxel-centred: -11.2 %); 4 x -1.7 % (was -4.7 %); 1 x -15.3 % (was -25.8 %; it falls back anyway). So the cause is the one reasoned: on a flat, grid-aligned face the ball could not sit on the surface. With surface-centred balls the size reading is inside the 5 % bar on this beam from 2 times the size, which is exactly where the ruled thin-member threshold hands over to it. To put into the engine (awaiting the reviewer's word): `stress_over_size` also evaluates balls centred on the nodes of the part's surface.
+
+### B5 complete (2026-11-27 02:37): the stand at FULL resolution (res 128, check voxel 0.99 mm, PA12, drawn faces, automatic pad)
+
+| run | what the job says | shown margin | printed grams |
+|---|---|---|---|
+| switch off | (today) | 2.587 -> 2.597 | 87.99 g (solid) |
+| `size` | "no published stress-reading length for PA12: this material keeps today's strength reading (one voxel)" | 2.587 -> 2.597 | 84.88 g of 87.99 solid |
+| `size`, forced to 3.6 mm | "the stress is read over 3.60 mm ... on real stiffness" | 4.101 -> 4.093 | 84.88 g |
+
+The part as drawn prints at 100.13 g of 114.98 g solid, so the version really saves 15.2 % of printed weight (the solid figures say 23.5 %). With the switch on and his material the STRENGTH NUMBER DOES NOT MOVE (2.597 both ways): PA12 has no published length, as ruled. Forced to 3.6 mm the margin would read 58 % higher (4.09): shown only to say what an averaged reading would do on this part; it is not what ships for PA12, and that run was made on a build from BEFORE the thin-member rule. Runs 526 / 458 / 516 s: the switch costs no time on this job. The bracket's forced run: see the folder `opt11/sample_a/size36`.

@@ -46,6 +46,11 @@ inline constexpr double kStressMaterialFloor = 0.02;
 // fixed size seen at 1.5 voxels on one grid and 2.0 on another would differ by
 // more than the 10 % allowed. From 1.75 up the whole range is -4.9 to +8.2 %.
 inline constexpr double kStressSizeSwitchVoxels = 1.75;
+// THE THIN-MEMBER RULE (the reviewer's ruling 2026-11-27, item 2): a ball wider than
+// the member it sits in reaches across it (in bending, across the neutral line)
+// and reads low. Where the member is thinner than this many sizes, that voxel is
+// read at one voxel by today's form instead.
+inline constexpr double kStressThinMemberSizes = 2.0;
 inline bool stress_is_read_over_size(double reading_mm, double voxel_mm) {
   return reading_mm > 0.0 && voxel_mm > 0.0 && reading_mm >= kStressSizeSwitchVoxels * voxel_mm;
 }
