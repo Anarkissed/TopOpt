@@ -137,6 +137,7 @@ final class Notes30ScaffoldClipsProbe: XCTestCase {
                                                           colours: fx.colours, colourKey: 77), device: device)
                 show.landed(token: 77, box: LatticeLayoutBarsPass.box(fx.bars), now: t0 + landAt)
             }
+            show.step(now)   // (the show's own tick, as the app's 30 fps task: the switch, the lifts due)
             var px = try XCTUnwrap(r.renderOffscreen(width: N29.size.w, height: N29.size.h, clear: N29.clear, stage: true))
             let tl = show.timelapse
             let s = tl?.shown(at: now)
