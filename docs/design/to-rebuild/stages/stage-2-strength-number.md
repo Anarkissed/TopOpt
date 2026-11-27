@@ -421,3 +421,16 @@ Shown margin and printed grams per version, the same job three ways (res 64, dra
 | 0.26 | 3.661, 53.1 g | 3.661, 53.1 g | 3.976, 53.1 g |
 
 The two heavier versions are decided in-plane and do not move. The lightest, decided across the layers, moves from 3.661 to 3.976 (+8.6 %) now that its check is averaged too; the 0.38 version, where the two checks are close (16.4 against 16.3 in the report), moves with it. The designs differ by a few hundredths of a gram at 0.38 and 0.26: the loop's own margin probes read the new number, so its path shifts very slightly. Runs rc 0, 912 s.
+
+### A small part, where PLA's own size switches the reading on by itself (2026-11-26 20:04, build f7287eca)
+
+The sample bracket at 15 % size (15 mm long, loads scaled with the area), res 48 (check voxel 0.31 mm), drawn faces, automatic pad (0.45 / 1.48 / 1.22 mm), one thread. PLA's size is 1.2 mm = 3.8 voxels, so with `TOPOPT_STRENGTH=size` the job says "[strength] the stress is read over 1.20 mm (the material's length), on real stiffness; the check voxel is 0.31 mm." Certificate -> shown margin, grams:
+
+| version | switch off | size |
+|---|---|---|
+| 0.68 | 6.35 -> 6.50, 0.583 g | 8.65 -> 8.65, 0.570 g |
+| 0.52 | 6.35 -> 6.51, 0.485 g | 8.53 -> 8.65, 0.489 g |
+| 0.38 | 4.85 -> 5.25, 0.402 g | 6.85 -> 7.87, 0.403 g |
+| 0.26 | 2.09 -> 4.24, 0.333 g | 3.68 -> 5.97, 0.329 g |
+
+Read plainly. (1) It switches on by itself and runs clean (rc 0, four versions both ways, 631 s and 495 s). (2) On a part this small the averaged reading lifts every margin by 33 to 41 % (the shown 4.24 becomes 5.97 on the lightest): a 1.2 mm region is large against features of 1 to 3 mm, which is what the critical-distance method says about small notched parts, but it is a big step and it rests on a published length halved by his rule, not on a print of his. To be said in the stage report as it is, and worth one printed check when the rig is ready. (3) The grams hardly move (a part this small is nearly all wall, so printed grams are close to solid grams). (4) The two judges still part on the lightest version in both columns (2.09 against 4.24; 3.68 against 5.97): that is "one judge", next.
