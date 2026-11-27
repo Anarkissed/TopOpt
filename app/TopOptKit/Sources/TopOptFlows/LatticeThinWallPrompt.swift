@@ -83,8 +83,13 @@ public enum LatticeThinWallPrompt {
     public static func cellLine(_ l: LatticeSettings, cells: SolidReason.Depth?) -> String? {
         guard let d = cells, !SolidReason.controlSmallerCellsAlways else { return cellSetByHand(l) ? manualHint : nil }
         if l.cellSizeMode == .swept, l.cellMinMM > d.floorCellMM * (1 + 1e-6) { return manualHint }
+        if d.depthMM > 0, d.smallCellsHelp, !SolidReason.controlThreeOffers { return smallCellsHint(d) }   // ★ his yes: first
         if d.depthMM > 0, d.quiltHelps { return quiltHint(d) }
         return nil
+    }
+    /// ★ notes30 X2 (his yes, 11-26): the pop-up's first fix, said where it lays these walls.
+    public static func smallCellsHint(_ d: SolidReason.Depth) -> String {
+        "With Small cells in thin walls on (Manual), these walls get cells down to \(SolidPopUp.mm(d.thinFloorCellMM))."
     }
     /// The pop-up's Allow quilt, said where it lays these walls.
     public static func quiltHint(_ d: SolidReason.Depth) -> String {

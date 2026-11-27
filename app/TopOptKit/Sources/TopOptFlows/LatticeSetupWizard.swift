@@ -175,6 +175,10 @@ public struct LatticeSetupWizard: View {
         // ★ notes30 X2 (his answer, 11-26): the pop-up's "Turn Allow quilt on" made while it is open — the page's own switch
         // follows, so its Save keeps it on
         .onChange(of: project.lattice.allowQuilt) { on in if model.allowQuilt != on { model.allowQuilt = on; rebuild() } }
+        // ★ notes30 X2 (his yes, 11-26): and its "Small cells in thin walls", first among them
+        .onChange(of: project.lattice.smallCellsInThinWalls) { on in
+            if model.smallCellsInThinWalls != on { model.smallCellsInThinWalls = on; rebuild() }
+        }
         .onAppear { if openedLattice == nil { openedLattice = project.lattice } }
     }
     /// the settings as they were when the page opened — "Exit" until they differ
