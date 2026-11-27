@@ -72,9 +72,17 @@ final class StructuralAutoCalibration: XCTestCase {
             let sim = try TopOptKit.analyzeSolidLoadCase(modelPath: model.path, material: "PA12", materialsPath: materials,
                                                          rulesPath: rules, resolution: 64, anchorFaceIDs: [Int(anchor)],
                                                          loadGroups: [.init(faceIDs: [Int(load)], force: part.force)])
-            let stage = LatticeDemandField(vonMises: sim.vonMisesField, stressTensor: sim.stressTensorField, nx: sim.gridNX,
+            // the load set so the SOLID part holds `solidMargin` times it (SA_SOLID_MARGIN, default 6): the lattice, not the
+            // part, decides; the solve is linear, so its stress scales with the load
+            let solidMargin = Double(ProcessInfo.processInfo.environment["SA_SOLID_MARGIN"] ?? "") ?? 6
+            let k = sim.marginWorstCase.isFinite && sim.marginWorstCase > 0 ? sim.marginWorstCase / solidMargin : 1
+            let force = part.force * k
+            let stage = LatticeDemandField(vonMises: sim.vonMisesField.map { $0 * Float(k) },
+                                           stressTensor: sim.stressTensorField.map { $0 * k }, nx: sim.gridNX,
                                            ny: sim.gridNY, nz: sim.gridNZ, origin: sim.gridOrigin, spacingMM: sim.spacingMM,
                                            provenance: .solidSim(date: Date(), resolution: 64))
+            print("SA-CAL \(part.name): the solid holds \(String(format: "%.2f", sim.marginWorstCase))x at \(part.force); the load "
+                  + "set to \(String(format: "%.0f", simd_length(force))) N (the solid at \(solidMargin)x)")
             for margin in margins {
                 let t0 = Date()
                 // the settings the page sends on Structural Auto: a face row under the top, Covered, cells as Auto lays them
@@ -97,8 +105,8 @@ final class StructuralAutoCalibration: XCTestCase {
                 let r0 = try XCTUnwrap(StructuralAuto.size(stage, inputs, largestCellMM: 12), "\(part.name): round 0")
                 let request = RunRequest(modelPath: model.path, material: "PA12", materialsPath: materials, rulesPath: rules,
                                          resolution: 64, projectName: "SA1 calibration", anchorFaceIDs: [Int(anchor)],
-                                         loadGroups: [.init(faceIDs: [Int(load)], force: part.force)], minimizePlastic: true,
-                                         buildDirection: SIMD3(0, 0, 1), infillPercent: 40, wallLoops: 3,
+                                         loadGroups: [.init(faceIDs: [Int(load)], force: force)], minimizePlastic: true,
+                                         buildDirection: SIMD3(0, 0, 1), infillPercent: Int(ProcessInfo.processInfo.environment["SA_INFILL"] ?? "") ?? 100, wallLoops: 3,
                                          wallLineWidthOuterMM: 0.45, wallLineWidthInnerMM: 0.45,
                                          lattice: LatticeSpec(topologyID: "octet", cellMM: 8, strutRadiusMM: 0.6,
                                                               generateRelativeDensity: 0.3, minRelativeDensity: 0.1,
@@ -108,17 +116,36 @@ final class StructuralAutoCalibration: XCTestCase {
                 withMargin.safetyMargin = margin
                 let strengthJob = try RemoteRun.buildJobJSON(withMargin)
                 func check(_ settings: LatticeLayoutSession.Settings, _ demand: LatticeDemandField) -> LatticeFileRun.Made? {
-                    guard let json = try? LatticeFileJob.build(settings, modelName: "part.step", demand: LatticeFileJob.demandName,
+                    guard var json = try? LatticeFileJob.build(settings, modelName: "part.step", demand: LatticeFileJob.demandName,
                                                                strengthJob: LatticeFileJob.strengthJobName) else { return nil }
+                    // SA_THREADS: the job's own thread count (outside HEAVY.lock: one)
+                    if let t = Int(ProcessInfo.processInfo.environment["SA_THREADS"] ?? ""),
+                       var o = (try? JSONSerialization.jsonObject(with: json)) as? [String: Any] {
+                        o["threads"] = t
+                        if let d = try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys]) { json = d }
+                    }
                     let job = LatticeFileJob.ForPart(json: json, modelPath: model.path, demand: LatticeFileJob.demandFile(demand))
                     do { return try LatticeFileButton.runHere(job: job, strengthJob: strengthJob, materialsPath: materials,
                                                                rulesPath: rules) }
                     catch { print("SA-CAL \(part.name) \(margin): refused: \(error)"); return nil }
                 }
+                var reportN = 0
                 func said(_ m: LatticeFileRun.Made?) -> String {
                     guard let m else { return "refused" }
                     let r = LatticeFileButton.round(of: m)
-                    return "\(r.passed ? "pass" : (m.report.strength?.verdict.rawValue ?? "?")) \(String(format: "%.2f", r.margin))x "
+                    // kept beside the table for a closer look (small JSON files)
+                    reportN += 1
+                    let rd = URL(fileURLWithPath: dir).appendingPathComponent("reports")
+                    try? FileManager.default.createDirectory(at: rd, withIntermediateDirectories: true)
+                    try? m.reportJSON.write(to: rd.appendingPathComponent("\(part.name.prefix(1))_\(Int(margin * 100))_\(reportN).json"))
+                    let s = m.report.strength
+                    let o = (try? JSONSerialization.jsonObject(with: m.reportJSON)) as? [String: Any]
+                    let st = o?["strength"] as? [String: Any]
+                    let cells = "\((st?["cells_credited"] as? NSNumber)?.intValue ?? 0)/\(((st?["cells_credited"] as? NSNumber)?.intValue ?? 0) + ((st?["cells_no_credit"] as? NSNumber)?.intValue ?? 0))"
+                    let q = LatticeFileButton.quilted(m.reportJSON)
+                    return "\(r.passed ? "pass" : (s?.verdict.rawValue ?? "?")) \(String(format: "%.2f", r.margin))x "
+                        + "(solid \(String(format: "%.2f", s?.marginWorstCase ?? 0)), struts \(s?.strutMargin.map { String(format: "%.2f", $0) } ?? "—")"
+                        + "\(s?.failReason.map { ", \($0)" } ?? ""), credit \(cells)\(q > 0 ? ", \(q) quilted" : "")) "
                         + "\(Int(m.report.plasticMM3)) mm³"
                 }
                 let m0 = check(s, r0.field)
