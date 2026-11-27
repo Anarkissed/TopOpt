@@ -21,6 +21,10 @@ if(Eigen3_FOUND)
   add_executable(test_to_strength_known_ring tests/unit/test_to_strength_known_ring.cpp)
   target_link_libraries(test_to_strength_known_ring PRIVATE topopt)
   add_test(NAME to_strength_known_ring COMMAND test_to_strength_known_ring)
+  # One judge, evidence (a): textbook shapes through the file's fills against the certificate.
+  add_executable(test_to_recheck_fill tests/unit/test_to_recheck_fill.cpp)
+  target_link_libraries(test_to_recheck_fill PRIVATE topopt)
+  add_test(NAME to_recheck_fill COMMAND test_to_recheck_fill)
   # The across-layer reading over a size, against Kirsch's tension along the pull.
   add_executable(test_to_strength_across_layers tests/unit/test_to_strength_across_layers.cpp)
   target_link_libraries(test_to_strength_across_layers PRIVATE topopt)
