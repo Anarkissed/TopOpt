@@ -202,6 +202,7 @@ add_library(topopt
   src/lattice_layout/coupon.cpp
   # Brief E2, Part A: the Organic strength check, a frame of beams (lattice_layout_frame.hpp).
   src/lattice_layout/frame_check.cpp
+  src/lattice_layout/break_check.cpp
   # Brief E2, Part B: the width floors, their file and strengthened.json (the job key "strengthened").
   src/lattice_layout/organic_floors.cpp
   # Brief E3a: strengthening by adding (the additions, their file and replay, the old-bar invariant).
@@ -2403,6 +2404,14 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
       SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
       TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME organic_frame_repeat COMMAND test_organic_frame_repeat)
+    # Organic strength CUT 1 (C1): the break check's gate and limit law on made shapes; with "marks DIR" its marks 1 and 2.
+    add_executable(test_organic_break_check tests/validation/test_organic_break_check.cpp)
+    target_link_libraries(test_organic_break_check PRIVATE topopt)
+    target_compile_definitions(test_organic_break_check PRIVATE
+      MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+      SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+      TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME organic_break_check COMMAND test_organic_break_check)
   endif()
 
   # M6.2 integration test: the maintainer-authored demo job in
