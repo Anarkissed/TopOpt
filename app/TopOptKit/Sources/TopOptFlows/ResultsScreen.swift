@@ -1473,9 +1473,13 @@ public struct ResultsScreen: View {
             }
             .accessibilityIdentifier("results-details")
         } run: {
-            DSRunButton(exportTitle, subtitle: exportLine,
+            let line = exportLine
+            // ★ notes30 (his 11-27): a print file's line is "Turn on manual supports", its (i) beside the button says where
+            DSRunButton(exportTitle, subtitle: line,
                         state: model.canExport ? .ready : .disabled(model.exportDisabledReason ?? "Nothing to export"),
-                        key: "resultsExport") { exportFile() }   // ★ notes28 (4c): the 3MF by default (STL in the ⌃)
+                        key: "resultsExport",
+                        info: model.canExport && line == ResultsExportCopy.printFileLine ? ResultsExportCopy.supportsInfo : nil,
+                        infoTitle: ResultsExportCopy.supportsInfoTitle) { exportFile() }   // ★ notes28 (4c): the 3MF by default (STL in the ⌃)
                 .accessibilityLabel(model.canExport ? (model.exportIsStreamed ? "Export STL" : "Export 3MF")
                                     : (model.exportDisabledReason ?? "Export unavailable"))
         } split: {
