@@ -949,3 +949,23 @@ What it says:
 4. A hole under about 0.5 mm in PLA reads as no notch at all by every method (1.0 to 1.1): the theory's "features much smaller than L lose their effect", and the reason ledger A-08 (raisers the grid cannot see) costs little for PLA under a single load. Under repeated load L is about 0.5 mm and that comfort is gone.
 For the reviewer with the rest; nothing changed in code.
 
+### THE REVIEWER'S RULING OF 2026-11-27 19:36Z (14:36 EST), maintainer-approved: item 3 (word for word)
+
+> (a) Yes: this is the form for both judges. Real stiffness on cut voxels; the carry curved on free concave surfaces and straight on flat, convex and loaded ones; drawn-face fills in the loop. Build it behind the switch. "Resolved" = 4 voxels of radius and 8 through; below that, A-06 / A-08 are named in the readout. Before one judge flips, measure:
+> 1. a real 3D raiser: an inside-corner fillet like Top Motor Mount's, radius 4 voxels or more, against a solve 4 times finer;
+> 2. a plate several voxels thick, not 2;
+> 3. across the layers;
+> 4. his two parts and the three carved samples: certificate against re-check, one number, refusals listed;
+> 5. test K.
+> The loaded face is right by cancellation: pin it with the ring as a test, and state it as a limit.
+>
+> (b) Thin members: yes to (iii). Measure section-force stress (membrane and bending from the section's own forces, exact by equilibrium) on the cut-skin beam at 2 to 6 voxels through, plus one member in tension. If it holds the bar, it becomes the reading under 8 through. Until then, flagged places are named and the verdict is unchanged: no worse than today, and the remedy is close.
+>
+> (c) Patch recovery stopped and the laminate dropped: agreed. The enhanced-strain hexahedron changes the solve and every number. It is TOSolver's ground and his decision, so it is parked as an idea.
+>
+> (d) The size form: leave the ball and his half-length rule as they are, and state your calibration in the stage report (safe side of the Point Method by 7 to 58 %; a 2L ball would be neutral). Our ball is a quarter of the theory's size, so the blunt-notch caution in Taylor does not bite here. Compression and shear stay untested and are stated as such.
+>
+> (e) Stage 3: your ruling stands. It does not close and the switch does not flip until test P passes, and parallel fixes give the same bytes as the serial code.
+
+HOW I READ (a), stated to the reviewer so it can correct me: the size form (the ball) stays where it applies; the surface carry on a real-stiffness solve takes the place of the ONE-VOXEL reading wherever the code falls back to it today (a material length under 1.75 voxels; thin members), in the one function both judges call (`analyze_fixed_design`). Order of work: (A1) the reading in `analyze_fixed_design` behind `TOPOPT_STRENGTH=surface`, the tight limit at 4 voxels, the counts for the readout, the ring pinned as a test; (B) section-force stress measured on the cut-skin beam and a member in tension; (A2) the drawn faces' fills in the loop; then the five measurements.
+
