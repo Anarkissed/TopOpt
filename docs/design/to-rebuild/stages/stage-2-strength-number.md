@@ -27,6 +27,8 @@ Also ruled the same hour (stage 5): the connection-rule test on the hook PASSES;
 
 **ONE JUDGE, where it is (2026-11-26 21:45):** the switch `TOPOPT_RECHECK=fill[:k]` is in, builds and runs in a job; the fills are counted one layer at a time. On the bracket the lightest version's shown margin comes down from 3.66 to between 2.2 and 2.5 (certificate 1.80), at no cost in time. NOT settled: the number still moves with k (the textbook test: up to 18 % between k = 4 and 8), because the one-voxel form is jumpy in the fill by its nature, in both judges ("WHY the one-voxel form is jumpy", below). Runs at k = 16 against a finer reference are in progress; the reviewer gets the table and the question it raises.
 
+**THE MAINTAINER, 2026-11-27, on the printed check for small PLA parts:** "I will absolutely add the small PLA parts when the rig is ready. But it won't be for a while." So the averaged reading's 33 to 41 % higher margins on a 15 mm part rest on the published length alone for now. FOR THE REVIEWER to rule when stage 2's size form comes up for its flip: ship it for small parts on the published value, or hold the size form to parts above a stated size until his print exists. Not decided by me.
+
 **Owed, in order:**
 - ONE JUDGE: k by measurement (or the finding that it has no answer for the one-voxel form), evidence (a) to (e).
 - The step-back (the optimiser's loop is in `plsm.cpp`, TOSurface's file: to agree who edits it).
@@ -495,3 +497,39 @@ Peak through the file's fills against the certificate's, percent:
 | ellipse, 5 | -22.6 | -13.1 | +9.2 | -2.1 | -2.2 |
 
 Read plainly. From k = 8 the file's fills give the certificate's peak within about 2.5 % (worst +2.5 and -2.2), where today's all-or-nothing re-check is 14 to 44 % under it. Within 1 % in 4 of 7 rows at k = 8 and at k = 16; going from 8 to 16 does not tighten it (the scatter is the one-voxel form's own, see "WHY the one-voxel form is jumpy"; the ellipse at 5 voxels also carries the 360-sided polygon against the true ellipse). So the ruled "within 1 %" is not met by the one-voxel form at any k tried, and will not be by a finer k. The remaining rows (the ellipse at 6, the ring) re-run when the gate is green.
+
+### ONE JUDGE, evidence (a), the full table (2026-11-26 22:14; reference fills 32 x 32; the test now runs one shape at a time, `--only`)
+
+Peak through the file's fills against the certificate's, percent:
+
+| shape, b or inner radius in voxels | all-or-nothing (today) | k = 2 | k = 4 | k = 8 | k = 16 |
+|---|---|---|---|---|---|
+| round hole, 3 / 4 / 5 / 6 | -34.3 / -26.9 / -14.0 / -22.2 | -11.7 / -9.3 / -1.8 / -10.0 | -7.0 / -8.4 / +1.5 / -11.4 | +2.4 / +0.4 / +2.5 / +0.3 | -0.1 / +1.0 / -0.3 / +0.2 |
+| ellipse, 3 / 4 / 5 / 6 | -43.6 / -20.2 / -22.6 / -26.8 | -18.5 / +14.0 / -13.1 / -10.6 | -5.0 / -1.1 / +9.2 / +6.8 | +0.2 / +0.3 / -2.1 / +0.6 | +1.4 / -0.1 / -2.2 / +0.7 |
+| thick ring, 3 / 4 / 5 / 6 | -46.5 / -43.3 / -34.2 / -37.8 | -26.4 / -15.6 / -19.0 / -11.7 | -13.4 / -19.4 / -2.9 / -3.1 | +0.3 / -2.0 / -0.4 / +1.2 | -0.1 / -11.3 / -1.7 / -0.9 |
+
+CORRECTION to what I told the reviewer an hour earlier ("within about 2.5 % from k = 8, k = 16 no tighter") on 7 rows: over all 12 rows, k = 8 is within 2.5 % everywhere (worst +2.5, -2.1), but k = 16 has ONE row at -11.3 % (the ring at 4 voxels, where k = 8 reads -2.0 %). A finer k is not safer: one sliver voxel falling the other side of a half moves the peak by ten percent. That is the one-voxel form's jump, seen at its plainest, and it settles the question of k for that form by showing there is no settling: k = 8 is the best measured, not a converged value.
+
+### ONE JUDGE, evidence (a) for the SIZE form (2026-11-26 22:25; the round hole so far, the ellipse running)
+
+The same path (a closed mesh -> the file's fills -> the analysis), but judged by the stage's size form: real stiffness, the stress read over 2 and over 3 voxels with the ball free to sit on the edge. Against the same reading on the certificate's fills (32 x 32), percent:
+
+| round hole, radius in voxels | over | k = 2 | k = 4 | k = 8 | k = 16 |
+|---|---|---|---|---|---|
+| 3 | 2 voxels / 3 voxels | -5.8 / -5.3 | -2.1 / -1.0 | -0.3 / -0.1 | +0.1 / +0.1 |
+| 4 | 2 / 3 | -2.3 / -1.3 | +0.4 / 0.0 | -0.3 / -0.4 | -0.1 / -0.1 |
+| 5 | 2 / 3 | -2.1 / -3.0 | -1.1 / -0.6 | -0.1 / 0.0 | -0.1 / 0.0 |
+| 6 | 2 / 3 | -6.7 / -5.8 | -0.4 / -0.1 | -0.5 / -0.4 | +0.1 / +0.1 |
+
+What I claimed to the reviewer and had not measured now is: through the file's fills the size form gives the certificate's number within 0.5 % at k = 8 on every row so far, and moves by 0.5 % or less from k = 8 to 16. So for the size form the ruled tests are both met at k = 8 (within 1 %; under 0.5 % when k doubles). The contrast with the one-voxel form (2.5 % at best, 11 % on an unlucky sliver) is the two jumps that form has and this one does not.
+
+The ellipse (22:35), the same way:
+
+| ellipse a / b = 2, b in voxels | over | k = 2 | k = 4 | k = 8 | k = 16 |
+|---|---|---|---|---|---|
+| 3 | 2 voxels / 3 voxels | -11.9 / -8.7 | -1.5 / -0.4 | -0.2 / -0.2 | 0.0 / 0.0 |
+| 4 | 2 / 3 | -5.8 / -3.6 | +0.2 / +0.3 | -0.2 / +0.1 | +0.1 / -0.1 |
+| 5 | 2 / 3 | -7.1 / -4.4 | -0.8 / -0.3 | -0.2 / -0.1 | +0.1 / +0.1 |
+| 6 | 2 / 3 | -2.3 / -7.8 | -6.6 / -9.6 | -0.4 / -0.3 | 0.0 / 0.0 |
+
+SIZE FORM, all 16 rows on two shapes: at k = 8 within 0.5 % of the certificate's number everywhere (worst -0.5), and 0.5 % or less from k = 8 to 16. k = 4 is NOT enough (one row at -9.6 %). So for the size form k = 8 meets both ruled tests; for the one-voxel form k = 8 is the best measured (within 2.5 %) and nothing finer is better.

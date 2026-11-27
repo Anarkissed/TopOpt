@@ -27,6 +27,7 @@
 #include "topopt/materials.hpp"
 #include "topopt/simp.hpp"
 #include "topopt/step.hpp"
+#include "topopt/stress_measure.hpp"
 
 using topopt::DirichletBC;
 using topopt::NodalLoad;
@@ -123,7 +124,10 @@ topopt::TriangleMesh plate_mesh(int w, double h, double cx, double cy, double a,
 
 // The peak von Mises / far stress of `density` on the plate's grid, by today's
 // certificate form (E x fill^3, one voxel).
-double peak(const VoxelGrid& g, const std::vector<double>& density, bool* ok) {
+// `size_mm` > 0: the reading over that size instead, on real stiffness (E x fill),
+// the ball free to sit on the part's edge (the stage's size form).
+double peak(const VoxelGrid& g, const std::vector<double>& density, bool* ok,
+            double size_mm = 0.0) {
   const int w = g.nx;
   const double t = kTiltDeg * std::acos(-1.0) / 180.0;
   const double c = std::cos(t), s = std::sin(t);
@@ -149,13 +153,18 @@ double peak(const VoxelGrid& g, const std::vector<double>& density, bool* ok) {
   topopt::SimpParams params;
   params.youngs_modulus = m.youngs_modulus_mpa;
   params.poisson = m.poisson;
-  params.penalty = 3.0;
+  params.penalty = size_mm > 0.0 ? 1.0 : 3.0;
   topopt::KnockdownSpec knockdown;
+  knockdown.record_material_stress = size_mm > 0.0;
   const topopt::FixedDesignAnalysis res = topopt::analyze_fixed_design(
       g, params, density, bcs, loads, m, Vec3{0.0, 0.0, 1.0}, 1e-8, 20000,
       topopt::SolverKind::MultigridCG_Matfree, 0.0, knockdown, true,
       static_cast<double>(g.tags.size()));
   *ok = !res.non_convergent && res.max_von_mises > 0.0 && std::isfinite(res.max_von_mises);
+  if (size_mm > 0.0)
+    return topopt::peak_stress_over_size(g, res.von_mises_material_field, density,
+                                         topopt::kStressMaterialFloor, size_mm) /
+           kFarStress;
   return res.max_von_mises / kFarStress;
 }
 
@@ -268,6 +277,10 @@ double ring_peak(int rv, int w, double cxv, double cyv, const std::vector<double
 
 int main(int argc, char** argv) {
   const bool gate = argc > 1 && std::strcmp(argv[1], "--gate") == 0;
+  // `--only <text>` runs the rows whose shape name contains the text (a long test
+  // on a shared machine: a stopped run is resumed by shape).
+  const char* only = argc > 2 && std::strcmp(argv[1], "--only") == 0 ? argv[2] : nullptr;
+  auto wanted = [&](const char* name) { return only == nullptr || std::strstr(name, only) != nullptr; };
   const Shape shapes[2] = {{"round hole", 1.0, 6.0, 20}, {"ellipse a/b = 2", 2.0, 3.0, 10}};
   const int kKs[5] = {1, 2, 4, 8, 16};
   constexpr int kRecheckSub = 4;
@@ -278,6 +291,7 @@ int main(int argc, char** argv) {
               "k = 2", "k = 4", "k = 8", "k = 16");
   for (const Shape& sh : shapes)
     for (int bv : {3, 4, 5, 6}) {
+      if (!wanted(sh.name) && !(only != nullptr && std::strstr(only, "size") != nullptr)) continue;
       const double b = bv, a = sh.a_over_b * bv;
       const int w = sh.width_in_long_axes * static_cast<int>(a);
       VoxelGrid g;
@@ -322,9 +336,28 @@ int main(int argc, char** argv) {
         std::fflush(stdout);
       }
       std::printf("\n");
+      // The same through the SIZE form (real stiffness, read over 2 and over 3
+      // voxels): `--only size` adds these rows. No all-or-nothing column: that
+      // form needs the fills.
+      if (only != nullptr && std::strstr(only, "size") != nullptr)
+        for (double span : {2.0, 3.0}) {
+          const double mm = span * g.spacing;
+          const double c2 = peak(g, exact, &ok, mm);
+          if (!ok) ++failures;
+          std::printf("%-18s %6d %12.3f  over %.0f vox", sh.name, bv, c2, span);
+          for (int k : kKs) {
+            if (k == 1) { std::printf(" %8s", "-"); continue; }
+            const double v = peak(g, topopt::file_fill_fractions(mesh, g, k), &ok, mm);
+            if (!ok) ++failures;
+            std::printf(" %+7.1f%%", 100.0 * (v / c2 - 1.0));
+            std::fflush(stdout);
+          }
+          std::printf("\n");
+        }
     }
   // The ring: fills of its own closed mesh against the exact fills.
   for (int rv : {3, 4, 5, 6}) {
+    if (!wanted("thick ring")) continue;
     const int w = 4 * rv + 4;
     const double cxv = 0.5 * w + 0.29, cyv = 0.5 * w - 0.41, h = kInnerMm / rv;
     const double ri = rv, ro = rv * kOuterMm / kInnerMm;
