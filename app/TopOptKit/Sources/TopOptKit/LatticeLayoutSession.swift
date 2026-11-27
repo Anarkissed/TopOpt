@@ -828,16 +828,20 @@ extension LatticeLayoutSession {
 }
 
 /// One thread with its own stack, running jobs in order. Never main.
-final class LatticeLayoutWorker: @unchecked Sendable {
+/// ★ notes30 FF1 (approved by 362 with the Flexible freeze plan): shared — the main Flexible page makes its picture on one of
+/// these too (`TopOptWorkerThread`, TopOptFlows' FlexiblePictureWorker): public, a name, and `submit` (a job with no answer).
+public typealias TopOptWorkerThread = LatticeLayoutWorker
+
+public final class LatticeLayoutWorker: @unchecked Sendable {
     private let cond = NSCondition()
     private var jobs: [() -> Void] = []
     private var stopping = false
     private(set) var thread: Thread?
 
-    init(stackSize: Int) {
+    public init(stackSize: Int, name: String = "TopOpt lattice layout") {   // ★ notes30 FF1: public, named
         let t = Thread { [self] in self.loop() }   // the thread keeps its worker until stop() lets the loop end
         t.stackSize = stackSize
-        t.name = "TopOpt lattice layout"
+        t.name = name
         t.qualityOfService = .userInitiated
         thread = t
         t.start()
@@ -868,8 +872,17 @@ final class LatticeLayoutWorker: @unchecked Sendable {
         }
     }
 
+    /// ★ notes30 FF1: a job with no answer, run after the ones already asked (dropped once stopping).
+    public func submit(_ job: @escaping () -> Void) {
+        cond.lock()
+        defer { cond.unlock() }
+        guard !stopping else { return }
+        jobs.append(job)
+        cond.signal()
+    }
+
     /// Lets the jobs already asked finish, then ends the thread.
-    func stop() {
+    public func stop() {   // ★ notes30 FF1: public
         cond.lock()
         stopping = true
         cond.signal()
