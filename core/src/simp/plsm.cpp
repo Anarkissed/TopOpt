@@ -728,7 +728,8 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   //    Switch off = today's bytes: nothing is kept, and move_scale stays 1.0 (an
   //    exact multiply). TOPOPT_STEP_BACK=off turns it off under the rule too, for
   //    the off/on measurement.
-  const bool step_back_on = to_connection_rule_on() && [] {
+  const bool connection_rule = to_connection_rule_on();
+  const bool step_back_on = connection_rule && [] {
     const char* v = std::getenv("TOPOPT_STEP_BACK");
     return v == nullptr || std::string(v) != "off";
   }();
@@ -740,6 +741,11 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   PlsmMmaState kept_mma;
   int kept_mma_iter = 0;
   ScenarioSolveState kept_scenarios;
+  // SimpOptimizeResult::stop_cause_load_unheld (TOReview c4d5e24a): under the rule,
+  // why the rung ended non-convergent (1 an unheld load, 0 a real non-convergence),
+  // because a step-back makes the solver's counter grow without ending the rung on
+  // it. -1 with the rule off.
+  int stop_cause_load_unheld = -1;
 
   // Bound BEFORE the loop, because the per-iteration record is part of
   // `SimpOptimizeResult`'s contract and is filled as the loop runs.
@@ -803,7 +809,7 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
     // significant figures. The FINAL compliance solve below and every
     // certification solve stay TIGHT and COLD.
     SimpCompliance sc;
-    const long long unheld0 = step_back_on ? fea_matfree_load_unheld_count() : 0;
+    const long long unheld0 = connection_rule ? fea_matfree_load_unheld_count() : 0;
     try {
       // LOAD SCENARIOS: every scenario, each warm-started, the smooth max governs.
       sc = !options.scenarios.empty()
@@ -839,6 +845,8 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
         continue;
       }
       non_convergent = true;
+      if (connection_rule)
+        stop_cause_load_unheld = fea_matfree_load_unheld_count() > unheld0 ? 1 : 0;
       // The CG iteration count the failing solve reached (simp.hpp's contract), not
       // the design step; and the tolerance it ran at.
       non_convergent_iteration = e.iterations;
@@ -1333,6 +1341,7 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   r.iterations = done_iters;
   r.cancelled = cancelled;
   r.non_convergent = non_convergent;
+  r.stop_cause_load_unheld = stop_cause_load_unheld;
   r.non_convergent_iteration = non_convergent_iteration;
   r.non_convergent_residual = non_convergent_residual;
   r.non_convergent_tolerance = non_convergent_tolerance;
@@ -1399,10 +1408,12 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   // the number a caller reads must belong to the field it reads beside it. It is
   // also the only compliance a loosened trajectory may be compared against, which
   // is what makes the S3 accuracy table meaningful.
+  long long final_unheld0 = 0;
   try {
     // CERTIFIED (the compliance reported beside the shipped field): the
     // solver's floating-speck drop (multigrid safe retry, arm G) is forbidden.
     FeaIslandDropForbid no_island_drop;
+    final_unheld0 = connection_rule ? fea_matfree_load_unheld_count() : 0;
     const SimpCompliance fc =
         !options.scenarios.empty()
             ? simp_scenarios_compliance(grid, params, r.physical_density, options.scenarios,
@@ -1414,6 +1425,8 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
     r.compliance = fc.compliance;
   } catch (const SolverNonConvergence& e) {
     r.non_convergent = true;
+    if (connection_rule)
+      r.stop_cause_load_unheld = fea_matfree_load_unheld_count() > final_unheld0 ? 1 : 0;
     r.non_convergent_iteration = e.iterations;
     r.non_convergent_residual = e.residual;
     r.non_convergent_tolerance = tol_tight;
