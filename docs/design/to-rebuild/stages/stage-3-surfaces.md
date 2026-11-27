@@ -4,6 +4,13 @@ Branch `claude/topopt-stage-3-surfaces-7f58fd`, from 2b40bcf4. Status: IN PROGRE
 
 ## Where I stopped (read this first)
 
+- **11-27 ~11:25:** TOReview (16:18Z) clarified the lock rule: the 5-min empty wait is only for the agent that JUST released the lock. A queued script takes an empty lock after about 1 min. My batch had waited 19 h behind B8, SA1 and B9 under the old reading. I replaced launch_ref6, measure_hold and c_after (all still waiting, none holding) with ONE chain, `agent-scratch/tosurface/queue2.sh`:
+  - test P's remaining pairs (pOn1, pOff2, pOn2), on the same frozen bin/topopt-cli-night as pOff1;
+  - then the knot measure;
+  - then a 5.5-min gap after each of my releases (TOSolver's queued job needs 4+ min empty);
+  - then the stand re-runs and C's four parts on b92e3bd0.
+  ref.sh and measure_hold.sh now wait 4 empty checks (the old ones are kept as *.5min).
+
 - **11-27 ~08:35:** TOReview's pre-review of 789135df: no conflict, no PDFs, switch-off reads byte-identical. All four small items are folded in (compile-checked only):
   - (1) the re-fit move measurement now runs only with the stage 3 switch on (its one reader is the [plsm] line);
   - (2) StepModel's never-filled export_mesh/export_triangle_face are dropped, drawn_mesh() is `mesh` (step.cpp already keeps the 0.01 mm mesh there), and make_frozen_bodies' dead whole-face branch is gone (same bodies);
