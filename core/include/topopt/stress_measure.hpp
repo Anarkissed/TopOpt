@@ -81,6 +81,21 @@ std::vector<double> stress_over_size_on_surface(const VoxelGrid& grid,
                                                 const std::vector<double>& density,
                                                 double material_floor, double diameter_mm);
 
+// THE SIZE FORM'S READING, whole: the largest average with the ball centred on a
+// voxel centre OR on a surface node (the two functions above), material of at
+// least `material_floor` fill. What analyze.cpp takes voxel by voxel.
+inline double peak_stress_over_size_edge_and_surface(const VoxelGrid& grid,
+                                                     const std::vector<double>& field,
+                                                     const std::vector<double>& density,
+                                                     double material_floor, double diameter_mm) {
+  double peak = 0.0;
+  for (double s : stress_over_size(grid, field, density, material_floor, diameter_mm))
+    if (s > peak) peak = s;
+  for (double s : stress_over_size_on_surface(grid, field, density, material_floor, diameter_mm))
+    if (s > peak) peak = s;
+  return peak;
+}
+
 // The largest reading of stress_over_size (0 when nothing is printed).
 double peak_stress_over_size(const VoxelGrid& grid, const std::vector<double>& field,
                              const std::vector<double>& density, double iso,
