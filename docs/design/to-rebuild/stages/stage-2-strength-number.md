@@ -691,3 +691,29 @@ Two things, then, not one. (1) The WHOLE part reads about 24 % higher, not only 
 
 So the finding stands and is stronger: on a thin part the E x fill^3 law, applied to the file's fills, under-reads the part's stiffness everywhere. The stand (thick, 6 % drop) and this part (thin, 35 to 41 %) are the same effect at two thicknesses.
 
+### The cut skin on a thin bending member: WHICH judge is nearer (2026-11-27 06:20, new measuring test `to_strength_cut_skin`, no switch)
+
+A beam in pure bending, `core` full voxels through plus one skin voxel of the given fill on each face (true thickness core + 2 fill), the same end moment on every model, read at mid-span. "soft" = the model's curvature against the exact beam's (+ = too soft). "peak" = the analysis's reading against the true surface stress (- = reads LOW, the unsafe way).
+
+| core, skin fill | all-or-nothing (re-check today): soft / peak | E x fill^3 (one judge as built): soft / peak | E x fill^2: soft / peak | E x fill: soft / peak |
+|---|---|---|---|---|
+| 4, 0.25 | +37 % / -8 % | +33 % / -11 % | +20 % / -20 % | -13 % / -42 % |
+| 4, 0.50 | -43 % / -43 % | +46 % / -12 % | +20 % / -28 % | -13 % / -47 % |
+| 4, 0.75 | -24 % / -31 % | +27 % / +16 % | +9 % / -1 % | -8 % / -16 % |
+| 8, 0.25 | +19 % / -2 % | +17 % / -3 % | +12 % / -8 % | -4 % / -21 % |
+| 8, 0.50 | -28 % / -27 % | +26 % / -2 % | +14 % / -11 % | -4 % / -25 % |
+| 8, 0.75 | -15 % / -19 % | +19 % / +12 % | +8 % / +3 % | -3 % / -8 % |
+| 16, 0.25 | +9 % / -1 % | +9 % / -1 % | +7 % / -3 % | -1 % / -10 % |
+| 16, 0.50 | -16 % / -16 % | +14 % / 0 % | +8 % / -4 % | -1 % / -13 % |
+| 16, 0.75 | -8 % / -11 % | +11 % / +8 % | +5 % / +2 % | -1 % / -4 % |
+
+(core 2 is in the test's output: every model misses by 30 to 76 % there; ledger A-06.)
+
+WHAT IT SAYS, and it CORRECTS what I wrote above ("the cruder judge is the nearer one"):
+1. On STIFFNESS, E x fill^3 is the worst of the three laws (9 to 46 % too soft), E x fill the best (1 to 13 % too stiff): the "whole part reads softer" reasoning holds.
+2. On the PEAK READING it is the other way round. One judge as built reads within -12 to +16 % of the true surface stress on every row from 4 voxels up. All-or-nothing reads up to 43 % LOW (whenever the skin is half full or more it solves a beam thicker than the file, and reads at a voxel centre besides). The on / off ratio on these rows is 0.96 to 1.67: Top Motor Mount's 1.24 (median) and 1.54 (peak) sit inside it WITH ONE JUDGE THE NEARER ONE.
+3. So for a thin part in bending the evidence is that today's shown margin (and the loop's certificate on the drawn faces, which is all-or-nothing there) is OPTIMISTIC, and the refusal may be nearer the truth than the 1.65. Against that stands the thick ring (a curved loaded face: E x fill^3 reads 52 to 76 % high, all-or-nothing 6 % low) and the fact that Top Motor Mount's peak voxel is at a sharp inside corner.
+4. Neither judge holds a +/-10 % bar on thin members. E x fill^2 is the steadiest overall here (peak -28 to +3 %, but low); none of the four is right.
+
+Honest position: I cannot say from this which number is right for Top Motor Mount; I can say the two disagree for a measured reason on BOTH sides, and that it is the stage 4 question (surface stress recovery; a member rule in voxels) arriving early. Parked for the reviewer.
+

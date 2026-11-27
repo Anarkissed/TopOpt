@@ -31,6 +31,10 @@ if(Eigen3_FOUND)
   add_executable(test_to_strength_thin_member tests/unit/test_to_strength_thin_member.cpp)
   target_link_libraries(test_to_strength_thin_member PRIVATE topopt)
   add_test(NAME to_strength_thin_member COMMAND test_to_strength_thin_member)
+  # One judge: the stiffness law on cut voxels, on a thin bending member (measure only).
+  add_executable(test_to_strength_cut_skin tests/unit/test_to_strength_cut_skin.cpp)
+  target_link_libraries(test_to_strength_cut_skin PRIVATE topopt)
+  add_test(NAME to_strength_cut_skin COMMAND test_to_strength_cut_skin)
   # The across-layer reading over a size, against Kirsch's tension along the pull.
   add_executable(test_to_strength_across_layers tests/unit/test_to_strength_across_layers.cpp)
   target_link_libraries(test_to_strength_across_layers PRIVATE topopt)
