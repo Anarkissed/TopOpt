@@ -468,3 +468,14 @@ Test `to_recheck_fill`: a closed mesh of each textbook shape taken through the f
 4. What is real in it: from k = 4 to k = 8 the peak still moves by up to 18 %. The one-voxel peak under E x fill^3 is very sensitive to the exact fill of a few sliver voxels, which is also why the bracket's lightest version wanders (2.51 / 2.16 / 2.29). That sensitivity is in the CERTIFICATE too (its fills come from the optimiser's own sampling), not only in the re-check. If k = 16 against the finer reference does not settle, the finding for the reviewer is that "one judge" needs the judges to share not just a form but the same treatment of sliver voxels.
 
 WHY the one-voxel form is jumpy in the fill (read from `analyze.cpp`, 21:30; the k = 16 run will say how much). Two things multiply. (1) A cut voxel is solved at E x fill^3: at half full it has an eighth of the stiffness, so a 2 % error in its fill is a 6 % error in its stiffness, and its strain moves with it. (2) Only voxels MORE than half full are read (`density > 0.5`), with the full modulus on that strain. So the hottest reading is usually a voxel just over half full, the softest one that still counts, and a voxel at 0.49 or 0.51 is out or in entirely. Finer sampling of the file does not remove either: it only decides more exactly which side of a half each sliver falls. The reading over a size has neither problem (real stiffness, and an average weighted by fill), which is why it held its bar; the one-voxel form is today's, kept as ruled, and this is its nature in BOTH judges.
+
+### ONE JUDGE in a job at k = 16, on the layer-by-layer fill (2026-11-26 21:46)
+
+| version | certificate | k = 4 | k = 8 | k = 16 | k = 8 to 16 |
+|---|---|---|---|---|---|
+| 0.68 | 5.283 | 5.289 | 5.268 | 5.259 | -0.17 % |
+| 0.52 | 5.105 | 5.191 | 5.155 | 5.143 | -0.23 % |
+| 0.38 | 4.152 | 4.265 | 4.205 | 4.190 | -0.36 % |
+| 0.26 | 1.799 | 2.162 | 2.293 | 2.220 | -3.2 % |
+
+By the ruled test (the shown margin moves under 0.5 % when k doubles) the three heavier versions settle at k = 8. The lightest does not: 2.51 / 2.16 / 2.29 / 2.22 at k = 2 / 4 / 8 / 16, wandering inside about 6 %. Cost at k = 16 with the fills counted a layer at a time: peak memory 383 MB against 375 MB with the switch off (the whole-grid form took 450 MB at k = 8), the finish step 5 to 11 s a version against 2 to 5 s, the whole run 1065 s against 1072 s. So k = 8 costs nothing that matters and is where three of four versions settle; the fourth is the one-voxel form's own jumpiness.
