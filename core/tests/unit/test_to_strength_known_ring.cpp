@@ -89,6 +89,10 @@ double g_carry_line = 0.0, g_carry_curve = 0.0;
 // The engine's carry (stress_carried_to_surface) over the pressure, and its unresolved count.
 double g_engine_carry = 0.0;
 std::size_t g_engine_unresolved = 0;
+// The patch recovery (stress_recovered_at_surface, the bore marked loaded) over the
+// pressure at patch radius 2.5 and 3.5 voxels, and its unresolved counts.
+double g_patch[2] = {0.0, 0.0};
+std::size_t g_patch_unresolved[2] = {0, 0};
 
 double peak_ratio(int rv, bool exact_fill, double penalty, bool* ok, double* area_error,
                   double* over_size = nullptr) {
@@ -236,6 +240,28 @@ double peak_ratio(int rv, bool exact_fill, double penalty, bool* ok, double* are
     g_engine_carry = sc.peak / kPressure;
     g_engine_unresolved = sc.unresolved;
   }
+  g_patch[0] = g_patch[1] = 0.0;
+  g_patch_unresolved[0] = g_patch_unresolved[1] = 0;
+  if (res.stress_tensor_field.size() == 6 * density.size()) {
+    // The bore carries the pressure: every voxel with material whose centre is within
+    // 1.5 voxels of the inner radius. The outer face is free.
+    std::vector<char> bore(density.size(), 0);
+    for (int k = 0; k < kThickness; ++k)
+      for (int j = 0; j < w; ++j)
+        for (int i = 0; i < w; ++i) {
+          const std::size_t idx = g.index(i, j, k);
+          if (density[idx] >= topopt::kStressMaterialFloor &&
+              std::fabs(std::hypot(i + 0.5 - cxv, j + 0.5 - cyv) - ri) <= 1.5)
+            bore[idx] = 1;
+        }
+    const double radii[2] = {2.5, 3.5};
+    for (int q = 0; q < 2; ++q) {
+      const topopt::SurfaceRecovery sr = topopt::stress_recovered_at_surface(
+          g, res.stress_tensor_field, density, &bore, radii[q]);
+      g_patch[q] = sr.peak / kPressure;
+      g_patch_unresolved[q] = sr.unresolved;
+    }
+  }
   return res.max_von_mises / kPressure;
 }
 
@@ -268,6 +294,10 @@ int main(int argc, char** argv) {
                 100.0 * (cc_line / kTextbook - 1.0), 100.0 * (cc_curve / kTextbook - 1.0),
                 100.0 * (g_carry_line / kTextbook - 1.0), 100.0 * (g_carry_curve / kTextbook - 1.0),
                 100.0 * (g_engine_carry / kTextbook - 1.0), g_engine_unresolved);
+    std::printf("[patch] inner radius %d voxels: tensor patch recovery (E x fill, bore loaded), percent against the textbook: "
+                "radius 2.5: %+.1f %%, unresolved %zu; radius 3.5: %+.1f %%, unresolved %zu\n",
+                r, 100.0 * (g_patch[0] / kTextbook - 1.0), g_patch_unresolved[0],
+                100.0 * (g_patch[1] / kTextbook - 1.0), g_patch_unresolved[1]);
     row.area_error = std::max({std::fabs(e1), std::fabs(e2), std::fabs(e3)});
     if (!ok1 || !ok2 || !ok3) ++failures;
     std::printf("%-12d %9.3f %14.3f %16.3f %14.3f %9.3f %9.3f %9.3f %10.2f\n", r,

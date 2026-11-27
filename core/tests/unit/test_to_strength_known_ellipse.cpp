@@ -82,6 +82,10 @@ double g_carry_line = 0.0, g_carry_curve = 0.0;
 // edges masked, and its unresolved count. Filled by peak_ratio.
 double g_engine_carry = 0.0;
 std::size_t g_engine_unresolved = 0;
+// The patch recovery (stress_recovered_at_surface) over the far stress, the loaded
+// edges masked the same way, at patch radius 2.5 and 3.5 voxels, and its unresolved counts.
+double g_patch[2] = {0.0, 0.0};
+std::size_t g_patch_unresolved[2] = {0, 0};
 
 // The peak von Mises over voxels / the far stress, for the ellipse with short
 // semi-axis `b_voxels` and stiffness E x fill^penalty in the voxels the hole cuts.
@@ -201,6 +205,23 @@ double peak_ratio(int b_voxels, double penalty, bool* ok) {
     g_engine_carry = sc.peak / kFarStress;
     g_engine_unresolved = sc.unresolved;
   }
+  g_patch[0] = g_patch[1] = 0.0;
+  g_patch_unresolved[0] = g_patch_unresolved[1] = 0;
+  if (res.stress_tensor_field.size() == 6 * density.size()) {
+    std::vector<double> tf = res.stress_tensor_field;  // the loaded edges masked
+    for (int k = 0; k < g.nz; ++k)
+      for (int j = 0; j < w; ++j)
+        for (int i = 0; i < w; ++i)
+          if (i < 3 || j < 3 || i >= w - 3 || j >= w - 3)
+            for (int c6 = 0; c6 < 6; ++c6) tf[6 * g.index(i, j, k) + c6] = 0.0;
+    const double radii[2] = {2.5, 3.5};
+    for (int q = 0; q < 2; ++q) {
+      const topopt::SurfaceRecovery sr =
+          topopt::stress_recovered_at_surface(g, tf, density, nullptr, radii[q]);
+      g_patch[q] = sr.peak / kFarStress;
+      g_patch_unresolved[q] = sr.unresolved;
+    }
+  }
   return res.max_von_mises / kFarStress;
 }
 
@@ -220,6 +241,8 @@ int main(int argc, char** argv) {
   std::printf("   lowest to highest against the reference\n");
   double carry_line[3][4] = {}, carry_curve[3][4] = {}, engine_carry[3][4] = {};
   std::size_t engine_unresolved[3][4] = {};
+  double patch[2][3][4] = {};
+  std::size_t patch_unresolved[2][3][4] = {};
   for (int p = 0; p < 3; ++p) {
     std::printf("%-20s", kName[p]);
     int bi = 0;
@@ -236,6 +259,10 @@ int main(int argc, char** argv) {
       carry_curve[p][bi] = g_carry_curve;
       engine_carry[p][bi] = g_engine_carry;
       engine_unresolved[p][bi] = g_engine_unresolved;
+      for (int q = 0; q < 2; ++q) {
+        patch[q][p][bi] = g_patch[q];
+        patch_unresolved[q][p][bi] = g_patch_unresolved[q];
+      }
       ++bi;
     }
     std::printf("   %+6.1f to %+6.1f %%  %s\n", low[p], high[p],
@@ -252,6 +279,14 @@ int main(int argc, char** argv) {
       std::printf("  %+.1f (unresolved %zu)", 100.0 * (engine_carry[p][q] / kReference - 1.0),
                   engine_unresolved[p][q]);
     std::printf("\n");
+    for (int pr = 0; pr < 2; ++pr) {
+      std::printf("[patch] %-20s tensor patch recovery, radius %.1f, percent against the reference, b = 3, 4, 5, 6:",
+                  kName[p], pr == 0 ? 2.5 : 3.5);
+      for (int q = 0; q < 4; ++q)
+        std::printf("  %+.1f (unresolved %zu)", 100.0 * (patch[pr][p][q] / kReference - 1.0),
+                    patch_unresolved[pr][p][q]);
+      std::printf("\n");
+    }
   }
   const bool pass = low[1] >= -5.0;
   std::printf("[ellipse] E x fill^2 at one voxel on the third shape: %s (%s)\n",

@@ -851,3 +851,18 @@ Percent against the exact value, real stiffness (E x fill):
 
 WHERE IT STANDS AGAINST THE BAR (never more than 5 % under where the feature is resolved): the beam from 8 voxels through and the ring from 4 voxels of bore meet it; THE PLATE DOES NOT at any resolution tried (9 % low with a hole 6 voxels in radius), and it is a held-out shape, so no allowance set on the beam and ring (about 4 to 5 %) covers it. Why: beside a hole the stress falls away from the edge on a CURVE (it loses about a third within one sixth of the radius); a straight line through the first two full voxels cuts under it. The curve through three voxels over-reads the ring instead (+3 to +15 %, the hand arm). So candidate one is right in kind and too crude at a stress raiser: it needs the fit to know the surface carries no load, which is exactly candidate two (patch recovery with zero traction on the free surface). Next: candidate two as a function beside this one, the same four tests.
 
+### THE REAL FIX, candidate two as written: `stress_recovered_at_surface` READS LOWER THAN CANDIDATE ONE (2026-11-27 12:50; print-only `[patch]` rows in the same four tests; a builder's code to my design, built and run once)
+
+A LINEAR fit of the stress tensor over the full voxels within 2.5 (or 3.5) voxels of each surface point, with equilibrium of the fitted field and zero traction on a free surface imposed exactly (the ring's bore passed as loaded). Percent against the exact value, real stiffness:
+
+| shape | patch 2.5 | patch 3.5 | candidate one (the carry) |
+|---|---|---|---|
+| ring, bore 3 / 4 / 5 / 6 voxels | -31 / -20 / -16 / -12 | -35 / -24 / -20 / -16 | -13 / -4.9 / -4.3 / +1.3 |
+| plate with a round hole, 3 / 4 / 5 / 6 | -43 / -31 / -23 / -19 | -43 / -31 / -27 / -28 | -29 / -14 / -14 / -9 |
+| ellipse, tip radius 1.5 to 3 | -47 to -33 | -48 to -35 | -37 to -15 |
+| cut-skin beam | equal to the carry to three decimals (a full voxel sets the peak) | | |
+
+It is WORSE on every stress raiser, and the bigger patch is worse still: a straight-line (linear) fit over two to three voxels averages away the steep rise into the raiser; the conditions imposed are right but cannot put back a curve the fit has no term for. Candidate one's rows are unchanged to the byte (the two functions now share one enumeration of the surface points). The tensor field needed is already filled by `analyze_fixed_design` (Voigt xx, yy, zz, xy, yz, zx; true shear; the material's own stress).
+
+NEXT, one more form before reporting the pair to the reviewer: the same patch with a QUADRATIC fit (the published method uses a full polynomial; the conditions then tie the curve down instead of the curve being absent), radius 3.5. If that does not bring the held-out plate inside 5 % from a stated radius, the honest result is that at this grid no reading does, and the bar is met only by a radius-in-voxels limit (A-08) set higher than 3.
+

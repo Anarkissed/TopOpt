@@ -49,6 +49,9 @@ struct Out {
   // The engine's carry (stress_carried_to_surface), mid-span only, / true surface stress.
   double engine_carry = 0.0;
   std::size_t engine_unresolved = 0;
+  // The patch recovery of the tensor (stress_recovered_at_surface), mid-span only, at
+  // patch radius 2.5 and 3.5 voxels, / true surface stress.
+  double patch25 = 0.0, patch35 = 0.0;
   bool ok = false;
 };
 
@@ -164,6 +167,16 @@ Out bend(int core, double fill, double skin_density, double penalty) {
     o.engine_carry = sc.peak / surface;
     o.engine_unresolved = sc.unresolved;
   }
+  if (res.stress_tensor_field.size() == 6 * n) {
+    std::vector<double> mid_tensor = res.stress_tensor_field;  // the same mask as the carry
+    for (int k = 0; k < g.nz; ++k)
+      for (int j = 0; j < g.ny; ++j)
+        for (int i = 0; i < g.nx; ++i)
+          if (i < g.nx / 4 || i >= 3 * g.nx / 4 || k < 2 || k >= g.nz - 2)
+            for (int c = 0; c < 6; ++c) mid_tensor[6 * g.index(i, j, k) + c] = 0.0;
+    o.patch25 = topopt::stress_recovered_at_surface(g, mid_tensor, density, nullptr, 2.5).peak / surface;
+    o.patch35 = topopt::stress_recovered_at_surface(g, mid_tensor, density, nullptr, 3.5).peak / surface;
+  }
   return o;
 }
 
@@ -190,10 +203,10 @@ int main() {
           continue;
         }
         std::printf("[cut skin]   %s  curvature %.3f (%+.0f %%)   peak %.3f (%+.0f %%)   material-stress peak %.3f   "
-                    "carried to the true surface %.3f (%+.0f %%)   engine carry %.3f (%+.0f %%), unresolved %zu\n",
+                    "carried to the true surface %.3f (%+.0f %%)   engine carry %.3f (%+.0f %%), unresolved %zu   patch2.5 %.3f, patch3.5 %.3f\n",
                     md.name, o.curvature, 100.0 * (o.curvature - 1.0), o.peak, 100.0 * (o.peak - 1.0),
                     o.peak_material, o.at_surface, 100.0 * (o.at_surface - 1.0), o.engine_carry,
-                    100.0 * (o.engine_carry - 1.0), o.engine_unresolved);
+                    100.0 * (o.engine_carry - 1.0), o.engine_unresolved, o.patch25, o.patch35);
         std::fflush(stdout);
       }
     }

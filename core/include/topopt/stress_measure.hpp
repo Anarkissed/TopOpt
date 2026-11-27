@@ -121,6 +121,32 @@ struct SurfaceCarry {
 SurfaceCarry stress_carried_to_surface(const VoxelGrid& grid, const std::vector<double>& field,
                                        const std::vector<double>& density);
 
+// THE STRESS AT THE TRUE SURFACE, by a patch recovery of the stress TENSOR (second
+// candidate, measured in the tests' `[patch]` rows; the engine does not call it).
+// After Nadal, Ródenas et al. 2013 ("Efficient finite element methodology based on
+// Cartesian grids", the SPR-CD idea): at each surface point of stress_carried_to_surface
+// (same points, same normals) each of the six stress components is fitted as a linear
+// function of position over the FULL voxels within `patch_radius_voxels` of the point on
+// the material side, by least squares, with the fitted field held in equilibrium
+// (div sigma = 0) and, where the surface is free (`loaded` absent or 0 at the surface
+// voxel), carrying no traction there (sigma n = 0). The von Mises of the fitted tensor
+// at the point is the reading. `stress_tensor` is 6 per voxel, Voigt [xx, yy, zz, xy,
+// yz, zx], true shear (FixedDesignAnalysis::stress_tensor_field). The peak is the
+// largest reading or full-voxel von Mises. A patch of fewer than 8 voxels, or one not
+// spread in all three directions, is `unresolved`: it reads the nearest full voxel in
+// the patch (or the surface voxel itself). Throws std::invalid_argument on a size mismatch.
+struct SurfaceRecovery {
+  double peak = 0.0;               // largest von Mises: recovered at the surface, or in a full voxel
+  std::size_t surface_points = 0;  // surface points where the fit was made
+  std::size_t unresolved = 0;      // too few full voxels in the patch (fell back to the nearest full voxel's von Mises)
+  double peak_unresolved = 0.0;
+};
+SurfaceRecovery stress_recovered_at_surface(const VoxelGrid& grid,
+                                            const std::vector<double>& stress_tensor,
+                                            const std::vector<double>& density,
+                                            const std::vector<char>* loaded = nullptr,
+                                            double patch_radius_voxels = 2.5);
+
 // The largest reading of stress_over_size (0 when nothing is printed).
 double peak_stress_over_size(const VoxelGrid& grid, const std::vector<double>& field,
                              const std::vector<double>& density, double iso,
